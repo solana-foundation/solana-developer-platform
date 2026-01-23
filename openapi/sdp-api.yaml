@@ -12,66 +12,6 @@ info:
     - **Payments** — Gasless transfers via Kora, Solana Pay integration
     - **Transactions** — Low-level signing and sending via custody providers
 
-    ---
-
-    ## Two Transaction Modes
-
-    The API supports **two modes** for transaction execution:
-
-    | Mode | Endpoint Suffix | Description |
-    |------|-----------------|-------------|
-    | **Prepare** | `/prepare` | Returns unsigned serialized transaction — client signs |
-    | **Execute** | *(default)* | Server signs via custody provider and submits |
-
-    ### Prepare Mode (Client-Side Signing)
-
-    Use `/prepare` endpoints when users sign with their own wallet:
-
-    ```
-    POST /payments/transfers/prepare       → Returns unsigned tx
-    POST /issuance/tokens/{id}/mint/prepare → Returns unsigned tx
-    POST /transactions/prepare              → Build any unsigned tx from intent
-    ```
-
-    **Example flow:**
-    ```typescript
-    // 1. Get unsigned transaction from API
-    const { transaction } = await fetch('/payments/transfers/prepare', {
-      method: 'POST',
-      body: JSON.stringify({ source, destination, amount })
-    }).then(r => r.json());
-
-    // 2. Deserialize and sign with wallet adapter
-    const tx = VersionedTransaction.deserialize(
-      Buffer.from(transaction.serialized, 'base64')
-    );
-    const signed = await wallet.signTransaction(tx);
-
-    // 3. Submit via RPC or API
-    const sig = await connection.sendRawTransaction(signed.serialize());
-    ```
-
-    ### Execute Mode (Server-Side Custody)
-
-    Use default endpoints when the server manages signing:
-
-    ```
-    POST /payments/transfers          → Signs & submits via custody
-    POST /issuance/tokens/{id}/mint   → Signs & submits via custody
-    POST /transactions/send           → Signs & submits any transaction
-    ```
-
-    ### Transaction Lifecycle
-
-    Low-level transaction endpoints for fine-grained control:
-
-    ```
-    POST /transactions/prepare   → Build unsigned tx from intent
-    POST /transactions/simulate  → Simulate any transaction
-    POST /transactions/sign      → Sign with custody (return signed tx, don't send)
-    POST /transactions/send      → Sign + send with custody
-    GET  /transactions/{sig}     → Get transaction status
-    ```
   version: 0.1.0-draft
   contact:
     name: Solana Foundation
@@ -209,7 +149,7 @@ components:
     #
     UnsignedTransactionResponse:
       type: object
-      description: Response containing an unsigned transaction for client-side signing
+      description: Response containing an unsigned transaction for user-managed signing
       properties:
         transaction:
           type: object
@@ -1655,7 +1595,7 @@ paths:
       tags: [Issuance]
       summary: Prepare Mint (Unsigned)
       description: |
-        Builds an unsigned mint transaction for client-side signing.
+        Builds an unsigned mint transaction for user-managed signing.
 
         **Use this endpoint when:**
         - Mint authority is held in a user wallet (not custody)
@@ -1712,7 +1652,7 @@ paths:
         The server signs with the mint authority using the configured
         custody provider and submits the transaction.
 
-        See also: `POST /issuance/tokens/{tokenId}/mint/prepare` for client-side signing.
+        See also: `POST /issuance/tokens/{tokenId}/mint/prepare` for user-managed signing.
       operationId: mintTokens
       parameters:
         - $ref: '#/components/parameters/environmentHeader'
@@ -1748,7 +1688,7 @@ paths:
       tags: [Issuance]
       summary: Prepare Burn (Unsigned)
       description: |
-        Builds an unsigned burn transaction for client-side signing.
+        Builds an unsigned burn transaction for user-managed signing.
 
         **Use this endpoint when:**
         - Token owner signs with their own wallet
@@ -1791,7 +1731,7 @@ paths:
       description: |
         Burns tokens using server-side custody signing.
 
-        See also: `POST /issuance/tokens/{tokenId}/burn/prepare` for client-side signing.
+        See also: `POST /issuance/tokens/{tokenId}/burn/prepare` for user-managed signing.
       operationId: burnTokens
       parameters:
         - $ref: '#/components/parameters/environmentHeader'
@@ -2234,7 +2174,7 @@ paths:
       tags: [Payments]
       summary: Prepare Transfer (Unsigned)
       description: |
-        Builds an unsigned transfer transaction for client-side signing.
+        Builds an unsigned transfer transaction for user-managed signing.
 
         **Use this endpoint when:**
         - Users sign with their own wallet (wallet adapter, hardware wallet)
@@ -2316,7 +2256,7 @@ paths:
         The server signs the transaction using the configured custody provider
         and submits it to the network.
 
-        See also: `POST /payments/transfers/prepare` for client-side signing.
+        See also: `POST /payments/transfers/prepare` for user-managed signing.
       operationId: createTransfer
       parameters:
         - $ref: '#/components/parameters/environmentHeader'
