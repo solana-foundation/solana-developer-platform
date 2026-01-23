@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SDP API Documentation [DRAFT]</title>
+  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5.11.0/swagger-ui.css">
+  <style>
+    body { margin: 0; padding: 0; }
+    .swagger-ui .topbar { display: none; }
+    .swagger-ui .info .title { color: #9945FF; }
+    .draft-banner {
+      background: linear-gradient(90deg, #f59e0b, #d97706);
+      color: white;
+      text-align: center;
+      padding: 12px 20px;
+      font-family: system-ui, -apple-system, sans-serif;
+      font-weight: 600;
+      font-size: 14px;
+      position: sticky;
+      top: 0;
+      z-index: 1000;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    .draft-banner span {
+      margin-right: 8px;
+    }
+  </style>
+</head>
+<body>
+  <div class="draft-banner">
+    <span>DRAFT SPECIFICATION</span> — This document is a work in progress and subject to change. Not for production implementation.
+  </div>
+  <div id="swagger-ui"></div>
+  <script src="https://unpkg.com/swagger-ui-dist@5.11.0/swagger-ui-bundle.js"></script>
+  <script>
+    window.onload = () => {
+      SwaggerUIBundle({
+        url: './sdp-api.yaml',
+        dom_id: '#swagger-ui',
+        deepLinking: true,
+        presets: [SwaggerUIBundle.presets.apis],
+        layout: 'BaseLayout'
+      });
+    };
+  </script>
+</body>
+</html>

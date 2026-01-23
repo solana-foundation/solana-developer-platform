@@ -1,0 +1,34 @@
+{
+  "name": "@sdp/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "dev:local": "wrangler dev --local --persist-to=.wrangler/state",
+    "build": "wrangler deploy --dry-run --outdir=dist",
+    "deploy": "wrangler deploy",
+    "deploy:staging": "wrangler deploy --env staging",
+    "deploy:production": "wrangler deploy --env production",
+    "db:migrate:local": "wrangler d1 migrations apply sdp-db --local",
+    "db:migrate:staging": "wrangler d1 migrations apply sdp-db --env staging --remote",
+    "db:migrate:production": "wrangler d1 migrations apply sdp-db --env production --remote",
+    "db:seed:local": "wrangler d1 execute sdp-db --local --file=src/db/seed.sql",
+    "typecheck": "tsc --noEmit",
+    "lint": "echo 'No linter configured yet'",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@sdp/types": "workspace:*",
+    "hono": "^4.7.0",
+    "nanoid": "^5.1.0",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250124.0",
+    "typescript": "^5.8.0",
+    "vitest": "^3.0.0",
+    "wrangler": "^4.1.0"
+  }
+}

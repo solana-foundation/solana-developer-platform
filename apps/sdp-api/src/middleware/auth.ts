@@ -1,0 +1,234 @@
+/**
+ * API Key Authentication Middleware
+ *
+ * Flow:
+ * 1. Extract API key from Authorization header
+ * 2. Hash the key
+ * 3. Look up in KV (fast path)
+ * 4. If KV miss, look up in D1 and cache to KV
+ * 5. Validate key status, expiration
+ * 6. Set auth context for downstream handlers
+ */
+
+import type { Context, Next } from "hono";
+import type { Env } from "@/types/env";
+import type { CachedApiKey, ApiKeyRole } from "@sdp/types";
+import { hashString } from "@/lib/crypto";
+import { AppError } from "@/lib/errors";
+import { getPermissionsForApiKeyRole, type Permission } from "@sdp/types";
+
+const KV_TTL_SECONDS = 3600; // 1 hour cache
+
+interface ApiKeyContext {
+  id: string;
+  organizationId: string;
+  role: ApiKeyRole;
+  permissions: Permission[];
+  environment: string;
+}
+
+/**
+ * Extract API key from Authorization header
+ */
+function extractApiKey(c: Context<{ Bindings: Env }>): string | null {
+  const authHeader = c.req.header("Authorization");
+  if (!authHeader) {
+    return null;
+  }
+
+  // Support both "Bearer sk_xxx" and just "sk_xxx"
+  if (authHeader.startsWith("Bearer ")) {
+    return authHeader.slice(7);
+  }
+
+  if (authHeader.startsWith("sk_")) {
+    return authHeader;
+  }
+
+  return null;
+}
+
+/**
+ * Look up API key in KV cache
+ */
+async function getFromKV(
+  kv: KVNamespace,
+  keyHash: string
+): Promise<CachedApiKey | null> {
+  const cached = await kv.get(`key:${keyHash}`, "json");
+  return cached as CachedApiKey | null;
+}
+
+/**
+ * Look up API key in D1 and cache to KV
+ */
+async function getFromD1AndCache(
+  db: D1Database,
+  kv: KVNamespace,
+  keyHash: string
+): Promise<CachedApiKey | null> {
+  const result = await db
+    .prepare(
+      `SELECT id, organization_id, role, permissions, environment,
+              rate_limit_tier, status, expires_at
+       FROM api_keys
+       WHERE key_hash = ?`
+    )
+    .bind(keyHash)
+    .first<{
+      id: string;
+      organization_id: string;
+      role: ApiKeyRole;
+      permissions: string | null;
+      environment: string;
+      rate_limit_tier: string;
+      status: string;
+      expires_at: string | null;
+    }>();
+
+  if (!result) {
+    return null;
+  }
+
+  const cached: CachedApiKey = {
+    id: result.id,
+    organizationId: result.organization_id,
+    role: result.role,
+    permissions: result.permissions ? JSON.parse(result.permissions) : getPermissionsForApiKeyRole(result.role),
+    environment: result.environment as "sandbox" | "production",
+    rateLimitTier: result.rate_limit_tier as "standard" | "elevated" | "unlimited",
+    status: result.status as "active" | "revoked" | "expired",
+    expiresAt: result.expires_at,
+  };
+
+  // Cache to KV
+  await kv.put(`key:${keyHash}`, JSON.stringify(cached), {
+    expirationTtl: KV_TTL_SECONDS,
+  });
+
+  return cached;
+}
+
+/**
+ * Update last_used_at timestamp (fire and forget)
+ */
+function updateLastUsed(db: D1Database, keyId: string) {
+  db.prepare(`UPDATE api_keys SET last_used_at = datetime('now') WHERE id = ?`)
+    .bind(keyId)
+    .run()
+    .catch((err) => console.error("Failed to update last_used_at:", err));
+}
+
+/**
+ * Authentication middleware
+ * Validates API key and sets auth context
+ */
+export function authMiddleware() {
+  return async (c: Context<{ Bindings: Env }>, next: Next) => {
+    const apiKey = extractApiKey(c);
+
+    if (!apiKey) {
+      throw new AppError("UNAUTHORIZED", "API key required");
+    }
+
+    // Validate key format
+    if (!apiKey.startsWith("sk_test_") && !apiKey.startsWith("sk_live_")) {
+      throw new AppError("INVALID_API_KEY", "Invalid API key format");
+    }
+
+    // Hash the key
+    const pepper = c.env.API_KEY_PEPPER;
+    const keyHash = await hashString(apiKey, pepper);
+
+    // Try KV first, then D1
+    let cachedKey = await getFromKV(c.env.SDP_API_KEYS, keyHash);
+    if (!cachedKey) {
+      cachedKey = await getFromD1AndCache(c.env.DB, c.env.SDP_API_KEYS, keyHash);
+    }
+
+    if (!cachedKey) {
+      throw new AppError("INVALID_API_KEY", "Invalid API key");
+    }
+
+    // Check status
+    if (cachedKey.status === "revoked") {
+      throw new AppError("REVOKED_API_KEY");
+    }
+
+    if (cachedKey.status === "expired") {
+      throw new AppError("EXPIRED_API_KEY");
+    }
+
+    // Check expiration
+    if (cachedKey.expiresAt && new Date(cachedKey.expiresAt) < new Date()) {
+      throw new AppError("EXPIRED_API_KEY");
+    }
+
+    // Set auth context
+    const authContext: ApiKeyContext = {
+      id: cachedKey.id,
+      organizationId: cachedKey.organizationId,
+      role: cachedKey.role,
+      permissions: cachedKey.permissions,
+      environment: cachedKey.environment,
+    };
+
+    c.set("apiKey", authContext);
+
+    // Update last used (fire and forget)
+    updateLastUsed(c.env.DB, cachedKey.id);
+
+    await next();
+  };
+}
+
+/**
+ * Require specific permissions
+ */
+export function requirePermissions(...required: Permission[]) {
+  return async (c: Context<{ Bindings: Env }>, next: Next) => {
+    const auth = c.get("apiKey");
+
+    if (!auth) {
+      throw new AppError("UNAUTHORIZED");
+    }
+
+    // Check for wildcard
+    if (auth.permissions.includes("*")) {
+      await next();
+      return;
+    }
+
+    // Check each required permission
+    const hasAll = required.every((p) => auth.permissions.includes(p));
+    if (!hasAll) {
+      throw new AppError(
+        "INSUFFICIENT_PERMISSIONS",
+        `Required permissions: ${required.join(", ")}`
+      );
+    }
+
+    await next();
+  };
+}
+
+/**
+ * Optional auth - doesn't fail if no key provided
+ */
+export function optionalAuth() {
+  return async (c: Context<{ Bindings: Env }>, next: Next) => {
+    const apiKey = extractApiKey(c);
+
+    if (apiKey) {
+      // Reuse the main auth logic but catch errors
+      try {
+        const authMw = authMiddleware();
+        await authMw(c, async () => {});
+      } catch {
+        // Ignore auth errors for optional auth
+      }
+    }
+
+    await next();
+  };
+}
