@@ -10,8 +10,8 @@ pnpm install
 
 # Development (from root)
 pnpm dev                              # Start all dev servers via Turbo
-pnpm --filter sdp-api dev             # Run API with remote D1
-pnpm --filter sdp-api dev:local       # Run API with local D1 (persisted)
+pnpm --filter @sdp/api dev             # Run API with remote D1
+pnpm --filter @sdp/api dev:local       # Run API with local D1 (persisted)
 
 # Linting & formatting (Biome)
 pnpm lint                             # Check for lint issues
@@ -25,20 +25,20 @@ pnpm typecheck                        # Type check all packages
 
 # Testing
 pnpm test                             # Run all tests via Turbo
-pnpm --filter sdp-api test            # Run API tests
-pnpm --filter sdp-api test:watch      # Watch mode
-pnpm --filter sdp-api test:coverage   # Generate coverage report
+pnpm --filter @sdp/api test            # Run API tests
+pnpm --filter @sdp/api test:watch      # Watch mode
+pnpm --filter @sdp/api test:coverage   # Generate coverage report
 
 # Database migrations
-pnpm --filter sdp-api db:migrate:local      # Apply to local D1
-pnpm --filter sdp-api db:migrate:staging    # Apply to staging
-pnpm --filter sdp-api db:migrate:production # Apply to production
-pnpm --filter sdp-api db:seed:local         # Seed local database
+pnpm --filter @sdp/api db:migrate:local      # Apply to local D1
+pnpm --filter @sdp/api db:migrate:staging    # Apply to staging
+pnpm --filter @sdp/api db:migrate:production # Apply to production
+pnpm --filter @sdp/api db:seed:local         # Seed local database
 
 # Deployment
-pnpm --filter sdp-api deploy                # Deploy to default env
-pnpm --filter sdp-api deploy:staging        # Deploy to staging
-pnpm --filter sdp-api deploy:production     # Deploy to production
+pnpm --filter @sdp/api deploy                # Deploy to default env
+pnpm --filter @sdp/api deploy:staging        # Deploy to staging
+pnpm --filter @sdp/api deploy:production     # Deploy to production
 ```
 
 ## Architecture Overview
@@ -122,7 +122,7 @@ apps/sdp-api/src/
 
 **Run single test file**:
 ```bash
-pnpm --filter sdp-api test src/lib/crypto.test.ts
+pnpm --filter @sdp/api test src/lib/crypto.test.ts
 ```
 
 ## Type Safety Rules
