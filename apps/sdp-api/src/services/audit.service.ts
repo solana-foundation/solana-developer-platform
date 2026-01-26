@@ -26,7 +26,10 @@ export type ResourceType =
   | "api_key"
   | "invitation"
   | "allowlist"
-  | "member";
+  | "member"
+  | "project"
+  | "project_member"
+  | "session";
 
 export interface AuditLogEntry {
   organizationId?: string;
