@@ -22,6 +22,7 @@ const KV_TTL_SECONDS = 3600; // 1 hour cache
 interface ApiKeyContext {
   id: string;
   organizationId: string;
+  projectId: string | null;
   role: ApiKeyRole;
   permissions: Permission[];
   environment: string;
@@ -66,8 +67,8 @@ async function getFromD1AndCache(
 ): Promise<CachedApiKey | null> {
   const result = await db
     .prepare(
-      `SELECT id, organization_id, role, permissions, environment,
-              rate_limit_tier, status, expires_at
+      `SELECT id, organization_id, project_id, role, permissions, environment,
+              rate_limit_tier, allowed_ips, status, expires_at
        FROM api_keys
        WHERE key_hash = ?`
     )
@@ -75,10 +76,12 @@ async function getFromD1AndCache(
     .first<{
       id: string;
       organization_id: string;
+      project_id: string | null;
       role: ApiKeyRole;
       permissions: string | null;
       environment: string;
       rate_limit_tier: string;
+      allowed_ips: string | null;
       status: string;
       expires_at: string | null;
     }>();
@@ -90,12 +93,14 @@ async function getFromD1AndCache(
   const cached: CachedApiKey = {
     id: result.id,
     organizationId: result.organization_id,
+    projectId: result.project_id,
     role: result.role,
     permissions: result.permissions
       ? JSON.parse(result.permissions)
       : getPermissionsForApiKeyRole(result.role),
     environment: result.environment as "sandbox" | "production",
     rateLimitTier: result.rate_limit_tier as "standard" | "elevated" | "unlimited",
+    allowedIps: result.allowed_ips ? JSON.parse(result.allowed_ips) : null,
     status: result.status as "active" | "revoked" | "expired",
     expiresAt: result.expires_at,
   };
@@ -167,6 +172,7 @@ export function authMiddleware() {
     const authContext: ApiKeyContext = {
       id: cachedKey.id,
       organizationId: cachedKey.organizationId,
+      projectId: cachedKey.projectId,
       role: cachedKey.role,
       permissions: cachedKey.permissions,
       environment: cachedKey.environment,
@@ -229,5 +235,29 @@ export function optionalAuth() {
     }
 
     await next();
+  };
+}
+
+/**
+ * Unified auth middleware that supports both API key and session auth.
+ * Useful for endpoints that can be accessed by both API clients and UI.
+ */
+export function unifiedAuthMiddleware(options: { allowSession?: boolean } = {}) {
+  return async (c: Context<{ Bindings: Env }>, next: Next) => {
+    // Try API key first
+    const apiKey = extractApiKey(c);
+    if (apiKey) {
+      const authMw = authMiddleware();
+      return authMw(c, next);
+    }
+
+    // Try session if allowed
+    if (options.allowSession) {
+      const { sessionAuthMiddleware } = await import("./session-auth");
+      const sessionMw = sessionAuthMiddleware();
+      return sessionMw(c, next);
+    }
+
+    throw new AppError("UNAUTHORIZED", "API key required");
   };
 }
