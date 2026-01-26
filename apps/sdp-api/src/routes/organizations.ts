@@ -2,24 +2,24 @@
  * Organizations Routes
  */
 
-import { Hono } from "hono";
-import { z } from "zod";
-import type { Env } from "@/types/env";
-import type { Organization, CreateOrganizationResponse } from "@sdp/types";
-import { authMiddleware, requirePermissions } from "@/middleware/auth";
-import { success, created, error, noContent } from "@/lib/response";
-import { AppError, notFound, conflict } from "@/lib/errors";
 import {
-  generateOrgId,
-  generateUserId,
-  generateMemberId,
   generateApiKey,
   generateApiKeyId,
+  generateMemberId,
+  generateOrgId,
+  generateUserId,
   hashString,
 } from "@/lib/crypto";
-import { AuditService } from "@/services/audit.service";
+import { AppError, conflict, notFound } from "@/lib/errors";
+import { created, noContent, success } from "@/lib/response";
+import { authMiddleware, requirePermissions } from "@/middleware/auth";
 import { AllowlistService } from "@/services/allowlist.service";
+import { AuditService } from "@/services/audit.service";
 import { KVService } from "@/services/kv.service";
+import type { Env } from "@/types/env";
+import type { CreateOrganizationResponse, Organization } from "@sdp/types";
+import { Hono } from "hono";
+import { z } from "zod";
 
 const organizations = new Hono<{ Bindings: Env }>();
 
@@ -245,9 +245,7 @@ organizations.patch("/:orgId", requirePermissions("org:write"), async (c) => {
   updates.push("updated_at = datetime('now')");
   params.push(orgId);
 
-  await c.env.DB.prepare(
-    `UPDATE organizations SET ${updates.join(", ")} WHERE id = ?`
-  )
+  await c.env.DB.prepare(`UPDATE organizations SET ${updates.join(", ")} WHERE id = ?`)
     .bind(...params)
     .run();
 

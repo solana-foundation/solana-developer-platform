@@ -4,9 +4,9 @@
  * Records all significant actions for compliance and debugging.
  */
 
-import type { Context } from "hono";
-import type { Env } from "@/types/env";
 import { generateAuditLogId } from "@/lib/crypto";
+import type { Env } from "@/types/env";
+import type { Context } from "hono";
 
 export type AuditAction =
   | "create"
@@ -50,10 +50,7 @@ export class AuditService {
     const requestId = c.get("requestId");
 
     const id = generateAuditLogId();
-    const ipAddress =
-      c.req.header("cf-connecting-ip") ||
-      c.req.header("x-forwarded-for") ||
-      null;
+    const ipAddress = c.req.header("cf-connecting-ip") || c.req.header("x-forwarded-for") || null;
     const userAgent = c.req.header("user-agent") || null;
 
     try {

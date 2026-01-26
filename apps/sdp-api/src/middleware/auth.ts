@@ -10,12 +10,12 @@
  * 6. Set auth context for downstream handlers
  */
 
-import type { Context, Next } from "hono";
-import type { Env } from "@/types/env";
-import type { CachedApiKey, ApiKeyRole } from "@sdp/types";
 import { hashString } from "@/lib/crypto";
 import { AppError } from "@/lib/errors";
-import { getPermissionsForApiKeyRole, type Permission } from "@sdp/types";
+import type { Env } from "@/types/env";
+import type { ApiKeyRole, CachedApiKey } from "@sdp/types";
+import { type Permission, getPermissionsForApiKeyRole } from "@sdp/types";
+import type { Context, Next } from "hono";
 
 const KV_TTL_SECONDS = 3600; // 1 hour cache
 
@@ -51,10 +51,7 @@ function extractApiKey(c: Context<{ Bindings: Env }>): string | null {
 /**
  * Look up API key in KV cache
  */
-async function getFromKV(
-  kv: KVNamespace,
-  keyHash: string
-): Promise<CachedApiKey | null> {
+async function getFromKV(kv: KVNamespace, keyHash: string): Promise<CachedApiKey | null> {
   const cached = await kv.get(`key:${keyHash}`, "json");
   return cached as CachedApiKey | null;
 }
@@ -94,7 +91,9 @@ async function getFromD1AndCache(
     id: result.id,
     organizationId: result.organization_id,
     role: result.role,
-    permissions: result.permissions ? JSON.parse(result.permissions) : getPermissionsForApiKeyRole(result.role),
+    permissions: result.permissions
+      ? JSON.parse(result.permissions)
+      : getPermissionsForApiKeyRole(result.role),
     environment: result.environment as "sandbox" | "production",
     rateLimitTier: result.rate_limit_tier as "standard" | "elevated" | "unlimited",
     status: result.status as "active" | "revoked" | "expired",

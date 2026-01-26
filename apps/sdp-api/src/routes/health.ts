@@ -2,8 +2,8 @@
  * Health Check Route
  */
 
-import { Hono } from "hono";
 import type { Env } from "@/types/env";
+import { Hono } from "hono";
 
 const health = new Hono<{ Bindings: Env }>();
 
@@ -33,7 +33,7 @@ health.get("/ready", async (c) => {
         database: "ok",
       },
     });
-  } catch (err) {
+  } catch {
     return c.json(
       {
         status: "not_ready",

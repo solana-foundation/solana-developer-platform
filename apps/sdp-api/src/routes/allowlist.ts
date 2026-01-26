@@ -5,15 +5,15 @@
  * In production, they should be protected by additional auth.
  */
 
+import { generateAllowlistId } from "@/lib/crypto";
+import { AppError, notFound } from "@/lib/errors";
+import { created, noContent, success } from "@/lib/response";
+import { AllowlistService } from "@/services/allowlist.service";
+import { AuditService } from "@/services/audit.service";
+import { KVService } from "@/services/kv.service";
+import type { Env } from "@/types/env";
 import { Hono } from "hono";
 import { z } from "zod";
-import type { Env } from "@/types/env";
-import { success, created, noContent } from "@/lib/response";
-import { AppError, notFound } from "@/lib/errors";
-import { generateAllowlistId } from "@/lib/crypto";
-import { AllowlistService } from "@/services/allowlist.service";
-import { KVService } from "@/services/kv.service";
-import { AuditService } from "@/services/audit.service";
 
 const allowlist = new Hono<{ Bindings: Env }>();
 
@@ -27,7 +27,10 @@ const addEntrySchema = z.object({
 
 // Simple admin key check middleware
 // In production, use proper admin authentication
-const adminAuth = async (c: any, next: any) => {
+const adminAuth = async (
+  c: { env: Env; req: { header: (name: string) => string | undefined } },
+  next: () => Promise<void>
+) => {
   const adminKey = c.req.header("X-Admin-Key");
 
   // In development, allow without key
@@ -100,8 +103,8 @@ allowlist.post("/", async (c) => {
     });
 
     return created(c, { entry });
-  } catch (err: any) {
-    if (err.message?.includes("UNIQUE constraint")) {
+  } catch (err) {
+    if (err instanceof Error && err.message?.includes("UNIQUE constraint")) {
       throw new AppError("CONFLICT", "Entry already exists in allowlist");
     }
     throw err;
@@ -120,9 +123,7 @@ allowlist.delete("/:id", async (c) => {
   const auditService = new AuditService(c.env.DB);
 
   // Check if exists
-  const existing = await c.env.DB.prepare("SELECT id FROM allowlist WHERE id = ?")
-    .bind(id)
-    .first();
+  const existing = await c.env.DB.prepare("SELECT id FROM allowlist WHERE id = ?").bind(id).first();
 
   if (!existing) {
     throw notFound("Allowlist entry");

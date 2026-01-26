@@ -2,16 +2,16 @@
  * API Keys Routes
  */
 
-import { Hono } from "hono";
-import { z } from "zod";
-import type { Env } from "@/types/env";
-import type { CreateApiKeyResponse, ListApiKeysResponse, ApiKeyRole } from "@sdp/types";
-import { authMiddleware, requirePermissions } from "@/middleware/auth";
-import { success, created, error } from "@/lib/response";
-import { AppError, notFound } from "@/lib/errors";
 import { generateApiKey, generateApiKeyId, hashString } from "@/lib/crypto";
+import { AppError, notFound } from "@/lib/errors";
+import { created, success } from "@/lib/response";
+import { authMiddleware, requirePermissions } from "@/middleware/auth";
 import { AuditService } from "@/services/audit.service";
 import { KVService } from "@/services/kv.service";
+import type { Env } from "@/types/env";
+import type { ApiKeyRole, CreateApiKeyResponse, ListApiKeysResponse } from "@sdp/types";
+import { Hono } from "hono";
+import { z } from "zod";
 
 const apiKeys = new Hono<{ Bindings: Env }>();
 
@@ -183,7 +183,7 @@ apiKeys.delete("/:keyId", requirePermissions("api-keys:write"), async (c) => {
 
   // Verify key belongs to this organization
   const key = await c.env.DB.prepare(
-    `SELECT id, key_hash FROM api_keys WHERE id = ? AND organization_id = ?`
+    "SELECT id, key_hash FROM api_keys WHERE id = ? AND organization_id = ?"
   )
     .bind(keyId, auth!.organizationId)
     .first<{ id: string; key_hash: string }>();

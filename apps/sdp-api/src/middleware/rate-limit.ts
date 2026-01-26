@@ -5,9 +5,9 @@
  * Different tiers have different limits.
  */
 
-import type { Context, Next } from "hono";
-import type { Env } from "@/types/env";
 import { AppError } from "@/lib/errors";
+import type { Env } from "@/types/env";
+import type { Context, Next } from "hono";
 
 interface RateLimitConfig {
   windowMs: number;
@@ -83,9 +83,7 @@ export function rateLimitMiddleware() {
 
     // Check limit
     if (count >= config.maxRequests) {
-      const retryAfter = Math.ceil(
-        (config.windowMs - (Date.now() % config.windowMs)) / 1000
-      );
+      const retryAfter = Math.ceil((config.windowMs - (Date.now() % config.windowMs)) / 1000);
       c.header("Retry-After", retryAfter.toString());
       throw new AppError("RATE_LIMITED", `Rate limit exceeded. Retry after ${retryAfter} seconds.`);
     }

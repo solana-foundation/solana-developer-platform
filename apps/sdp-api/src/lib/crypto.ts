@@ -5,6 +5,7 @@
 import { customAlphabet } from "nanoid";
 
 // Base62 alphabet for URL-safe IDs
+// biome-ignore lint/nursery/noSecrets: This is a character alphabet, not a secret
 const BASE62 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 
 // ID generators with prefixes

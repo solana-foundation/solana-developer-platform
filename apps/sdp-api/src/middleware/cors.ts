@@ -2,8 +2,8 @@
  * CORS Middleware Configuration
  */
 
-import { cors } from "hono/cors";
 import type { Env } from "@/types/env";
+import { cors } from "hono/cors";
 
 /**
  * CORS middleware with environment-aware configuration
@@ -36,7 +36,7 @@ export function corsMiddleware(env: Env["ENVIRONMENT"]) {
       // Check wildcard patterns
       for (const pattern of allowedOrigins) {
         if (pattern.includes("*")) {
-          const regex = new RegExp("^" + pattern.replace("*", ".*") + "$");
+          const regex = new RegExp(`^${pattern.replace("*", ".*")}$`);
           if (regex.test(origin)) {
             return origin;
           }

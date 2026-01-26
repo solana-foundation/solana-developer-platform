@@ -2,21 +2,21 @@
  * Organization Members Routes
  */
 
-import { Hono } from "hono";
-import { z } from "zod";
-import type { Env } from "@/types/env";
-import type { OrganizationRole } from "@sdp/types";
-import { authMiddleware, requirePermissions } from "@/middleware/auth";
-import { success, created, noContent } from "@/lib/response";
-import { AppError, notFound } from "@/lib/errors";
 import {
   generateInvitationId,
   generateInvitationToken,
-  generateUserId,
   generateMemberId,
+  generateUserId,
   hashString,
 } from "@/lib/crypto";
+import { AppError, notFound } from "@/lib/errors";
+import { created, noContent, success } from "@/lib/response";
+import { authMiddleware, requirePermissions } from "@/middleware/auth";
 import { AuditService } from "@/services/audit.service";
+import type { Env } from "@/types/env";
+import type { OrganizationRole } from "@sdp/types";
+import { Hono } from "hono";
+import { z } from "zod";
 
 const members = new Hono<{ Bindings: Env }>();
 
@@ -288,9 +288,7 @@ members.delete("/:memberId", requirePermissions("org:admin"), async (c) => {
   }
 
   // Soft delete
-  await c.env.DB.prepare(
-    `UPDATE organization_members SET status = 'removed' WHERE id = ?`
-  )
+  await c.env.DB.prepare(`UPDATE organization_members SET status = 'removed' WHERE id = ?`)
     .bind(memberId)
     .run();
 

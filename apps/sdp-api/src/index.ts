@@ -10,18 +10,18 @@ import { logger } from "hono/logger";
 import { prettyJSON } from "hono/pretty-json";
 import { secureHeaders } from "hono/secure-headers";
 
-import type { Env } from "@/types/env";
-import { corsMiddleware } from "@/middleware/cors";
-import { requestIdMiddleware } from "@/middleware/request-id";
-import { skipRateLimitPaths } from "@/middleware/rate-limit";
 import { AppError } from "@/lib/errors";
+import { corsMiddleware } from "@/middleware/cors";
+import { skipRateLimitPaths } from "@/middleware/rate-limit";
+import { requestIdMiddleware } from "@/middleware/request-id";
+import type { Env } from "@/types/env";
 
+import allowlist from "@/routes/allowlist";
+import apiKeys from "@/routes/api-keys";
 // Routes
 import health from "@/routes/health";
-import organizations from "@/routes/organizations";
-import apiKeys from "@/routes/api-keys";
 import members from "@/routes/members";
-import allowlist from "@/routes/allowlist";
+import organizations from "@/routes/organizations";
 
 // Create app
 const app = new Hono<{ Bindings: Env }>();

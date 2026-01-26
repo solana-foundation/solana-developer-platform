@@ -2,8 +2,8 @@
  * Standardized API Response Utilities
  */
 
-import type { Context } from "hono";
 import type { Env } from "@/types/env";
+import type { Context } from "hono";
 import { AppError, type ErrorResponse } from "./errors";
 
 export interface SuccessResponse<T> {
@@ -28,7 +28,7 @@ export interface PaginatedResponse<T> {
 /**
  * Send a successful JSON response
  */
-export function success<T>(c: Context<{ Bindings: Env }>, data: T, status: number = 200) {
+export function success<T>(c: Context<{ Bindings: Env }>, data: T, status = 200) {
   const response: SuccessResponse<T> = {
     data,
     meta: {

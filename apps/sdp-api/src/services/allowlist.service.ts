@@ -5,7 +5,7 @@
  */
 
 import { hashString } from "@/lib/crypto";
-import { KVService } from "./kv.service";
+import type { KVService } from "./kv.service";
 
 export interface AllowlistEntry {
   id: string;
@@ -84,13 +84,7 @@ export class AllowlistService {
         `INSERT INTO allowlist (id, type, value, tier, notes, status)
          VALUES (?, ?, ?, ?, ?, 'active')`
       )
-      .bind(
-        entry.id,
-        entry.type,
-        normalizedValue,
-        entry.tier || "standard",
-        entry.notes || null
-      )
+      .bind(entry.id, entry.type, normalizedValue, entry.tier || "standard", entry.notes || null)
       .run();
 
     return {
@@ -108,21 +102,20 @@ export class AllowlistService {
    * Remove an entry from the allowlist
    */
   async removeEntry(id: string): Promise<void> {
-    await this.db
-      .prepare(`UPDATE allowlist SET status = 'disabled' WHERE id = ?`)
-      .bind(id)
-      .run();
+    await this.db.prepare(`UPDATE allowlist SET status = 'disabled' WHERE id = ?`).bind(id).run();
   }
 
   /**
    * List all allowlist entries
    */
-  async listEntries(options: {
-    type?: "email" | "domain";
-    status?: "active" | "disabled";
-    limit?: number;
-    offset?: number;
-  } = {}): Promise<AllowlistEntry[]> {
+  async listEntries(
+    options: {
+      type?: "email" | "domain";
+      status?: "active" | "disabled";
+      limit?: number;
+      offset?: number;
+    } = {}
+  ): Promise<AllowlistEntry[]> {
     const { type, status = "active", limit = 100, offset = 0 } = options;
 
     let query = "SELECT * FROM allowlist WHERE status = ?";
