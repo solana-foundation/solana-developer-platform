@@ -39,6 +39,19 @@ export const PERMISSIONS = [
   "api-keys:read",
   "api-keys:write",
 
+  // Project management
+  "projects:read",
+  "projects:write",
+  "projects:admin",
+
+  // Project member management
+  "project-members:read",
+  "project-members:write",
+
+  // Session management
+  "sessions:read",
+  "sessions:write",
+
   // Admin wildcard (all permissions)
   "*",
 ] as const;
@@ -167,4 +180,45 @@ export function getPermissionsForOrgRole(role: OrganizationRole): Permission[] {
  */
 export function getPermissionsForApiKeyRole(role: ApiKeyRole): Permission[] {
   return [...API_KEY_ROLES[role].permissions];
+}
+
+// Project roles and their default permissions
+export const PROJECT_ROLES = {
+  admin: {
+    description: "Full project control, manage members and API keys",
+    permissions: [
+      "projects:read",
+      "projects:write",
+      "project-members:read",
+      "project-members:write",
+      "api-keys:read",
+      "api-keys:write",
+    ] as Permission[],
+  },
+  developer: {
+    description: "Use project API keys, read project info",
+    permissions: [
+      "projects:read",
+      "api-keys:read",
+      "tokens:read",
+      "tokens:write",
+      "payments:read",
+      "payments:write",
+      "wallets:read",
+      "wallets:write",
+    ] as Permission[],
+  },
+  viewer: {
+    description: "Read-only project access",
+    permissions: ["projects:read"] as Permission[],
+  },
+} as const;
+
+export type ProjectRole = keyof typeof PROJECT_ROLES;
+
+/**
+ * Get default permissions for a project role
+ */
+export function getPermissionsForProjectRole(role: ProjectRole): Permission[] {
+  return [...PROJECT_ROLES[role].permissions];
 }
