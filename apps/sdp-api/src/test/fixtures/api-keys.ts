@@ -15,10 +15,12 @@ export const TEST_API_KEY = {
 export const TEST_CACHED_API_KEY: CachedApiKey = {
   id: TEST_API_KEY.id,
   organizationId: TEST_ORG.id,
+  projectId: null,
   role: "api_admin",
   permissions: ["*"],
   environment: "sandbox",
   rateLimitTier: "standard",
+  allowedIps: null,
   status: "active",
   expiresAt: null,
 };
