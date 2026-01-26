@@ -39,6 +39,29 @@ export function generateAllowlistId(): string {
   return `al_${generateId()}`;
 }
 
+export function generateProjectId(): string {
+  return `prj_${generateId()}`;
+}
+
+export function generateProjectMemberId(): string {
+  return `pm_${generateId()}`;
+}
+
+export function generateSessionId(): string {
+  return `ses_${generateId()}`;
+}
+
+export function generateMagicLinkId(): string {
+  return `ml_${generateId()}`;
+}
+
+/**
+ * Generate a magic link token
+ */
+export function generateMagicLinkToken(): string {
+  return customAlphabet(BASE62, 48)();
+}
+
 /**
  * Generate a cryptographically secure API key
  *

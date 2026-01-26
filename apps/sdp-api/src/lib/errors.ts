@@ -16,7 +16,9 @@ export type ErrorCode =
   | "REVOKED_API_KEY"
   | "INSUFFICIENT_PERMISSIONS"
   | "INVALID_INVITATION"
-  | "EXPIRED_INVITATION";
+  | "EXPIRED_INVITATION"
+  | "INVALID_TOKEN"
+  | "EXPIRED_SESSION";
 
 export interface ApiError {
   code: ErrorCode;
@@ -43,6 +45,8 @@ const ERROR_STATUS_CODES: Record<ErrorCode, number> = {
   INSUFFICIENT_PERMISSIONS: 403,
   INVALID_INVITATION: 400,
   EXPIRED_INVITATION: 400,
+  INVALID_TOKEN: 401,
+  EXPIRED_SESSION: 401,
 };
 
 const DEFAULT_ERROR_MESSAGES: Record<ErrorCode, string> = {
@@ -60,6 +64,8 @@ const DEFAULT_ERROR_MESSAGES: Record<ErrorCode, string> = {
   INSUFFICIENT_PERMISSIONS: "Insufficient permissions for this action",
   INVALID_INVITATION: "Invalid invitation token",
   EXPIRED_INVITATION: "Invitation has expired",
+  INVALID_TOKEN: "Invalid or expired token",
+  EXPIRED_SESSION: "Session has expired",
 };
 
 export class AppError extends Error {
