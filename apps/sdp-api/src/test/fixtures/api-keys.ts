@@ -7,6 +7,7 @@ import { TEST_ORG } from "./organizations";
 
 export const TEST_API_KEY = {
   id: "key_test123456789",
+  // biome-ignore lint/nursery/noSecrets: Test fixture, not a real secret
   raw: "sk_test_testkey123456789012345678901234",
   prefix: "sk_test_tes",
 };

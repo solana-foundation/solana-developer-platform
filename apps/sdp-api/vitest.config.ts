@@ -1,5 +1,5 @@
-import { defineWorkersConfig } from "@cloudflare/vitest-pool-workers/config";
 import path from "node:path";
+import { defineWorkersConfig } from "@cloudflare/vitest-pool-workers/config";
 
 export default defineWorkersConfig({
   resolve: {
@@ -30,12 +30,7 @@ export default defineWorkersConfig({
       provider: "v8",
       reporter: ["text", "json", "html"],
       include: ["src/**/*.ts"],
-      exclude: [
-        "src/**/*.test.ts",
-        "src/**/*.spec.ts",
-        "src/types/**",
-        "src/db/migrations/**",
-      ],
+      exclude: ["src/**/*.test.ts", "src/**/*.spec.ts", "src/types/**", "src/db/migrations/**"],
       thresholds: {
         statements: 70,
         branches: 70,

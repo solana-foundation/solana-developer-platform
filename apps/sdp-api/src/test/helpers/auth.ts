@@ -2,10 +2,10 @@
  * Authentication test helpers
  */
 
-import type { Env } from "@/types/env";
 import { hashString } from "@/lib/crypto";
+import type { Env } from "@/types/env";
+import { TEST_API_KEY, TEST_CACHED_API_KEY } from "../fixtures/api-keys";
 import { seedCachedApiKey } from "../mocks/kv";
-import { TEST_CACHED_API_KEY, TEST_API_KEY } from "../fixtures/api-keys";
 
 /**
  * Sets up authentication for a test request

@@ -35,18 +35,12 @@ export async function clearKVNamespaces(env: Env): Promise<void> {
 /**
  * Seeds rate limit data
  */
-export async function seedRateLimit(
-  env: Env,
-  identifier: string,
-  count: number
-): Promise<void> {
+export async function seedRateLimit(env: Env, identifier: string, count: number): Promise<void> {
   const windowMs = 60_000;
   const windowStart = Math.floor(Date.now() / windowMs) * windowMs;
   const key = `ratelimit:${identifier}:${windowStart}`;
 
-  await env.SDP_RATE_LIMITS.put(
-    key,
-    JSON.stringify({ count, windowStart }),
-    { expirationTtl: 120 }
-  );
+  await env.SDP_RATE_LIMITS.put(key, JSON.stringify({ count, windowStart }), {
+    expirationTtl: 120,
+  });
 }

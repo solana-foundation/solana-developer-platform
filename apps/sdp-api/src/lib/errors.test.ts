@@ -2,14 +2,8 @@
  * Error handling tests
  */
 
-import { describe, it, expect } from "vitest";
-import {
-  AppError,
-  badRequest,
-  unauthorized,
-  notFound,
-  rateLimited,
-} from "./errors";
+import { describe, expect, it } from "vitest";
+import { AppError, badRequest, notFound, rateLimited, unauthorized } from "./errors";
 
 describe("AppError", () => {
   it("creates error with default message", () => {

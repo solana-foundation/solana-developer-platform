@@ -2,7 +2,7 @@
  * Global test setup - runs before all tests
  */
 
-import { beforeAll, afterAll, afterEach } from "vitest";
+import { afterAll, afterEach, beforeAll } from "vitest";
 
 beforeAll(async () => {
   // Global setup
