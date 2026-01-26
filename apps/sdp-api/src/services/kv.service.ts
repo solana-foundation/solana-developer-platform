@@ -4,7 +4,7 @@
  * Manages caching for API keys, organizations, and allowlist entries.
  */
 
-import type { CachedApiKey } from "@sdp/types";
+import type { CachedApiKey, CachedSession } from "@sdp/types";
 import type { Organization } from "@sdp/types";
 
 // TTL constants (in seconds)
@@ -12,12 +12,14 @@ const TTL = {
   API_KEY: 3600, // 1 hour
   ORGANIZATION: 300, // 5 minutes
   ALLOWLIST: 3600, // 1 hour
+  SESSION: 3600, // 1 hour
 };
 
 export class KVService {
   constructor(
     private apiKeysKV: KVNamespace,
-    private cacheKV: KVNamespace
+    private cacheKV: KVNamespace,
+    private sessionsKV?: KVNamespace
   ) {}
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -79,6 +81,33 @@ export class KVService {
     await this.cacheKV.put(`allowlist:domain:${domain}`, tier, {
       expirationTtl: TTL.ALLOWLIST,
     });
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Sessions
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  async getSession(sessionId: string): Promise<CachedSession | null> {
+    if (!this.sessionsKV) {
+      return null;
+    }
+    return this.sessionsKV.get(`session:${sessionId}`, "json");
+  }
+
+  async setSession(sessionId: string, data: CachedSession): Promise<void> {
+    if (!this.sessionsKV) {
+      return;
+    }
+    await this.sessionsKV.put(`session:${sessionId}`, JSON.stringify(data), {
+      expirationTtl: TTL.SESSION,
+    });
+  }
+
+  async deleteSession(sessionId: string): Promise<void> {
+    if (!this.sessionsKV) {
+      return;
+    }
+    await this.sessionsKV.delete(`session:${sessionId}`);
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
