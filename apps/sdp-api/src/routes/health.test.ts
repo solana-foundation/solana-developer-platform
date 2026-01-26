@@ -13,7 +13,12 @@ describe("Health routes", () => {
 
       expect(res.status).toBe(200);
 
-      const body = await res.json();
+      const body = (await res.json()) as {
+        status: string;
+        version: string;
+        environment: string;
+        timestamp: string;
+      };
       expect(body.status).toBe("ok");
       expect(body.version).toBe("v1");
       expect(body.environment).toBe("development");
@@ -27,7 +32,10 @@ describe("Health routes", () => {
 
       expect(res.status).toBe(200);
 
-      const body = await res.json();
+      const body = (await res.json()) as {
+        status: string;
+        checks: { database: string };
+      };
       expect(body.status).toBe("ready");
       expect(body.checks.database).toBe("ok");
     });
