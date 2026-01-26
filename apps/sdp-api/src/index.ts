@@ -18,10 +18,12 @@ import type { Env } from "@/types/env";
 
 import allowlist from "@/routes/allowlist";
 import apiKeys from "@/routes/api-keys";
+import auth from "@/routes/auth";
 // Routes
 import health from "@/routes/health";
 import members from "@/routes/members";
 import organizations from "@/routes/organizations";
+import projects from "@/routes/projects";
 
 // Create app
 const app = new Hono<{ Bindings: Env }>();
@@ -73,6 +75,8 @@ const v1 = new Hono<{ Bindings: Env }>();
 v1.route("/organizations", organizations);
 v1.route("/api-keys", apiKeys);
 v1.route("/members", members);
+v1.route("/auth", auth);
+v1.route("/projects", projects);
 
 app.route("/v1", v1);
 
