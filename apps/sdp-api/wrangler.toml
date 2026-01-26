@@ -23,6 +23,10 @@ id = "local-rate-limits"
 binding = "SDP_CACHE"
 id = "local-cache"
 
+[[kv_namespaces]]
+binding = "SDP_SESSIONS"
+id = "local-sessions"
+
 [vars]
 ENVIRONMENT = "development"
 API_VERSION = "v1"
@@ -49,6 +53,10 @@ id = "YOUR_STAGING_RATELIMIT_KV_ID"
 binding = "SDP_CACHE"
 id = "YOUR_STAGING_CACHE_KV_ID"
 
+[[env.staging.kv_namespaces]]
+binding = "SDP_SESSIONS"
+id = "YOUR_STAGING_SESSIONS_KV_ID"
+
 [env.staging.vars]
 ENVIRONMENT = "staging"
 API_VERSION = "v1"
@@ -74,6 +82,10 @@ id = "YOUR_PRODUCTION_RATELIMIT_KV_ID"
 [[env.production.kv_namespaces]]
 binding = "SDP_CACHE"
 id = "YOUR_PRODUCTION_CACHE_KV_ID"
+
+[[env.production.kv_namespaces]]
+binding = "SDP_SESSIONS"
+id = "YOUR_PRODUCTION_SESSIONS_KV_ID"
 
 [env.production.vars]
 ENVIRONMENT = "production"
