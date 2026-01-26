@@ -15,7 +15,8 @@
     "db:migrate:production": "wrangler d1 migrations apply sdp-db --env production --remote",
     "db:seed:local": "wrangler d1 execute sdp-db --local --file=src/db/seed.sql",
     "typecheck": "tsc --noEmit",
-    "lint": "echo 'No linter configured yet'",
+    "lint": "biome check src/",
+    "lint:fix": "biome check --write src/",
     "test": "vitest run",
     "test:watch": "vitest"
   },

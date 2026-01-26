@@ -22,7 +22,8 @@
     }
   },
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check src/"
   },
   "devDependencies": {
     "typescript": "^5.8.0"

@@ -3,17 +3,23 @@
   "version": "0.1.0",
   "private": true,
   "packageManager": "pnpm@10.15.1",
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=10.0.0"
+  },
   "scripts": {
     "dev": "turbo run dev",
     "build": "turbo run build",
     "typecheck": "turbo run typecheck",
-    "lint": "turbo run lint",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "format": "biome format --write .",
+    "format:check": "biome format .",
     "test": "turbo run test",
-    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
-    "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md}\""
+    "check": "biome check --write . && turbo run typecheck"
   },
   "devDependencies": {
-    "prettier": "^3.4.0",
+    "@biomejs/biome": "^1.9.0",
     "turbo": "^2.4.0",
     "typescript": "^5.8.0"
   }
