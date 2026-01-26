@@ -27,9 +27,11 @@
       },
       "suspicious": {
         "noExplicitAny": "error",
+        "noImplicitAnyLet": "error",
         "noDoubleEquals": "error",
         "noConfusingVoidType": "error",
-        "noAsyncPromiseExecutor": "error"
+        "noAsyncPromiseExecutor": "error",
+        "noUnsafeDeclarationMerging": "error"
       },
       "style": {
         "noNonNullAssertion": "warn",

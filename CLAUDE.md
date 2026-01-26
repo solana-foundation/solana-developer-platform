@@ -125,13 +125,70 @@ apps/sdp-api/src/
 pnpm --filter sdp-api test src/lib/crypto.test.ts
 ```
 
-## Linting Rules (Financial Security)
+## Type Safety Rules
 
-Biome enforces these rules critical for financial applications:
-- `noSecrets` - Prevents hardcoded credentials
-- `noDoubleEquals` - Enforces strict equality (===)
-- `noExplicitAny` - Requires proper typing
-- `noUnusedVariables/Imports` - Keeps code clean
+This codebase enforces strict type safety for financial applications. **Never use `any` type or unnecessary type assertions.**
+
+### Biome Lint Rules (Error Level)
+| Rule | Purpose |
+|------|---------|
+| `noExplicitAny` | Never use `any` - use `unknown` and narrow the type |
+| `noImplicitAnyLet` | Always initialize variables or add type annotations |
+| `noDoubleEquals` | Use `===` and `!==` only |
+| `noConfusingVoidType` | Use `undefined` instead of `void` for variables |
+| `noUnsafeDeclarationMerging` | Prevents unsafe interface/class merging |
+| `noSecrets` | No hardcoded API keys or credentials |
+
+### TypeScript Strict Settings
+| Setting | Purpose |
+|---------|---------|
+| `strict: true` | Enables all strict type checks |
+| `useUnknownInCatchVariables` | Catch variables are `unknown`, not `any` |
+
+### Type Assertion Guidelines
+
+**Avoid type assertions (`as`)** when possible. Prefer these patterns:
+
+```typescript
+// BAD: Asserting without validation
+const data = response as UserData;
+
+// GOOD: Type guard with runtime check
+function isUserData(obj: unknown): obj is UserData {
+  return typeof obj === "object" && obj !== null && "id" in obj;
+}
+if (isUserData(response)) {
+  // response is now UserData
+}
+
+// GOOD: Generic type parameter on fetch
+const data = await res.json<UserData>();
+
+// GOOD: Zod schema validation
+const parsed = userSchema.safeParse(response);
+if (parsed.success) {
+  // parsed.data is typed
+}
+```
+
+**Acceptable assertions** (use sparingly):
+- `as const` for literal types
+- D1 query results with explicit type parameter: `.first<{ id: string }>()`
+- Test fixtures with `as const`
+
+### D1 Query Result Typing
+
+When querying D1, always use generic type parameters:
+
+```typescript
+// GOOD: Explicit type parameter
+const result = await db.prepare("SELECT id, name FROM users WHERE id = ?")
+  .bind(userId)
+  .first<{ id: string; name: string }>();
+
+// BAD: Assertion after the fact
+const result = await db.prepare("...").first() as UserRow;
+```
 
 ## Important Notes
 
