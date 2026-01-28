@@ -1,0 +1,18 @@
+/**
+ * Allowlist Management Routes (Internal Admin)
+ */
+
+import type { Env } from "@/types/env";
+import { Hono } from "hono";
+import { addEntry, listEntries, removeEntry } from "./handlers";
+import { adminAuth } from "./middleware";
+
+const allowlist = new Hono<{ Bindings: Env }>();
+
+allowlist.use("*", adminAuth);
+
+allowlist.get("/", listEntries);
+allowlist.post("/", addEntry);
+allowlist.delete("/:id", removeEntry);
+
+export default allowlist;
