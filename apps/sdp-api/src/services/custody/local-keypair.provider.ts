@@ -9,14 +9,16 @@
  * provider like Fireblocks, Dfns, or Turnkey.
  */
 
-import { decodeBase58 } from "@/lib/solana";
 import type { Env } from "@/types/env";
+import { getBase58Codec } from "@solana/codecs";
 import {
   type Address,
   type KeyPairSigner,
   createKeyPairSignerFromBytes,
   generateKeyPairSigner,
 } from "@solana/kit";
+
+const base58 = getBase58Codec();
 import type {
   CustodyProvider,
   GeneratedKeypair,
@@ -123,7 +125,8 @@ export class LocalKeypairProvider implements CustodyProvider {
       throw new Error("CUSTODY_PRIVATE_KEY environment variable is not configured");
     }
 
-    const secretKey = decodeBase58(privateKey);
+    // codec.encode converts base58 string → bytes
+    const secretKey = new Uint8Array(base58.encode(privateKey));
 
     // Solana keypair format: 64 bytes = 32 byte private + 32 byte public
     if (secretKey.length !== 64) {

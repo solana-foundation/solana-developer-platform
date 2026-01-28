@@ -5,9 +5,11 @@
  * Uses @solana/kit's KeyPairSigner for compatibility with the SDK.
  */
 
-import { decodeBase58 } from "@/lib/solana";
 import type { Env } from "@/types/env";
+import { getBase58Codec } from "@solana/codecs";
 import { type Address, type KeyPairSigner, createKeyPairSignerFromBytes } from "@solana/kit";
+
+const base58 = getBase58Codec();
 
 // Re-export KeyPairSigner type for consumers
 export type { KeyPairSigner };
@@ -21,7 +23,8 @@ export type { KeyPairSigner };
  * The keypair should be 64 bytes: 32 byte private + 32 byte public.
  */
 export async function createSignerFromBase58(privateKeyBase58: string): Promise<KeyPairSigner> {
-  const secretKey = decodeBase58(privateKeyBase58);
+  // codec.encode converts base58 string → bytes
+  const secretKey = new Uint8Array(base58.encode(privateKeyBase58));
 
   // Solana keypair format: 64 bytes = 32 byte private + 32 byte public
   if (secretKey.length !== 64) {

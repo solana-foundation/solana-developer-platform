@@ -1,4 +1,5 @@
 import { OpenAPIRegistry, OpenApiGeneratorV3 } from "@asteasolutions/zod-to-openapi";
+import type { OpenAPIObject } from "openapi3-ts/oas30";
 
 import { registerAdminPaths } from "./paths/admin";
 import { registerApiKeyPaths } from "./paths/api-keys";
@@ -10,7 +11,7 @@ import { registerOrganizationPaths } from "./paths/organizations";
 import { registerProjectPaths } from "./paths/projects";
 import { registerTransactionPaths } from "./paths/transactions";
 
-export function createOpenApiDocument() {
+export function createOpenApiDocument(): OpenAPIObject {
   const registry = new OpenAPIRegistry();
 
   registry.registerComponent("securitySchemes", "apiKeyAuth", {

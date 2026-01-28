@@ -2,8 +2,10 @@
  * Fireblocks utility helpers
  */
 
-import { decodeBase58, encodeBase58, isValidSolanaAddress } from "@/lib/solana";
-import type { Address } from "@solana/kit";
+import { type Address, isAddress } from "@solana/addresses";
+import { getBase58Codec } from "@solana/codecs";
+
+const base58 = getBase58Codec();
 
 function isHex(value: string): boolean {
   return /^[0-9a-fA-F]+$/.test(value);
@@ -39,9 +41,21 @@ export function hexToBytes(hex: string): Uint8Array {
   return bytes;
 }
 
+/** Convert bytes to base58 string */
+function encodeBase58(bytes: Uint8Array): string {
+  // codec.decode converts bytes → string representation
+  return base58.decode(bytes) as string;
+}
+
+/** Convert base58 string to bytes */
+function decodeBase58(value: string): Uint8Array {
+  // codec.encode converts string → bytes representation
+  return new Uint8Array(base58.encode(value));
+}
+
 export function normalizePublicKey(value: string): Address {
-  if (isValidSolanaAddress(value)) {
-    return value as Address;
+  if (isAddress(value)) {
+    return value;
   }
 
   const normalized = value.startsWith("0x") ? value.slice(2) : value;

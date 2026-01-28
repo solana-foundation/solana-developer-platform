@@ -12,6 +12,12 @@ catalogs:
     '@solana-program/token-2022':
       specifier: ^0.7.0
       version: 0.7.0
+    '@solana/addresses':
+      specifier: ^5.0.0
+      version: 5.4.0
+    '@solana/codecs':
+      specifier: ^5.0.0
+      version: 5.4.0
     '@solana/kit':
       specifier: ^5.1.0
       version: 5.4.0
@@ -41,6 +47,12 @@ importers:
       '@solana-program/token-2022':
         specifier: 'catalog:'
         version: 0.7.0(@solana/kit@5.4.0(typescript@5.9.3))(@solana/sysvars@5.4.0(typescript@5.9.3))
+      '@solana/addresses':
+        specifier: 'catalog:'
+        version: 5.4.0(typescript@5.9.3)
+      '@solana/codecs':
+        specifier: 'catalog:'
+        version: 5.4.0(typescript@5.9.3)
       '@solana/kit':
         specifier: 'catalog:'
         version: 5.4.0(typescript@5.9.3)
@@ -66,6 +78,9 @@ importers:
       '@vitest/coverage-v8':
         specifier: ^3.0.0
         version: 3.2.4(vitest@3.2.4(tsx@4.21.0)(yaml@2.8.2))
+      openapi3-ts:
+        specifier: 4.5.0
+        version: 4.5.0
       tsx:
         specifier: 4.21.0
         version: 4.21.0

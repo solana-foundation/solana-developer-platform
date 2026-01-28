@@ -9,6 +9,7 @@ catalog:
   # Solana SDK packages
   "@solana/kit": "^5.1.0"
   "@solana/addresses": "^5.0.0"
+  "@solana/codecs": "^5.0.0"
   "@solana/keys": "^5.0.0"
   "@solana/signers": "^5.0.0"
   "@solana/instructions": "^5.1.0"
