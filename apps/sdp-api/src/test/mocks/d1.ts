@@ -162,6 +162,86 @@ export async function seedTestDatabase(env: Env): Promise<void> {
         FOREIGN KEY (organization_id) REFERENCES organizations(id)
       )
     `),
+    db.prepare(`
+      CREATE TABLE IF NOT EXISTS tokens (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        organization_id TEXT NOT NULL,
+        mint_address TEXT UNIQUE,
+        mint_authority TEXT,
+        freeze_authority TEXT,
+        name TEXT NOT NULL,
+        symbol TEXT NOT NULL,
+        decimals INTEGER NOT NULL DEFAULT 9,
+        description TEXT,
+        uri TEXT,
+        image_url TEXT,
+        extensions TEXT,
+        total_supply TEXT DEFAULT '0',
+        max_supply TEXT,
+        is_mintable INTEGER DEFAULT 1,
+        is_freezable INTEGER DEFAULT 1,
+        requires_allowlist INTEGER DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'pending',
+        deployed_at TEXT,
+        created_by TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+        FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE
+      )
+    `),
+    db.prepare(`
+      CREATE TABLE IF NOT EXISTS token_transactions (
+        id TEXT PRIMARY KEY,
+        token_id TEXT NOT NULL,
+        organization_id TEXT NOT NULL,
+        type TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        signature TEXT UNIQUE,
+        serialized_tx TEXT,
+        params TEXT NOT NULL,
+        slot INTEGER,
+        block_time INTEGER,
+        fee INTEGER,
+        error TEXT,
+        initiated_by_key_id TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (token_id) REFERENCES tokens(id) ON DELETE CASCADE
+      )
+    `),
+    db.prepare(`
+      CREATE TABLE IF NOT EXISTS token_allowlists (
+        id TEXT PRIMARY KEY,
+        token_id TEXT NOT NULL,
+        address TEXT NOT NULL,
+        label TEXT,
+        kyc_status TEXT DEFAULT 'none',
+        kyc_provider TEXT,
+        kyc_verified_at TEXT,
+        status TEXT NOT NULL DEFAULT 'active',
+        added_by TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        revoked_at TEXT,
+        FOREIGN KEY (token_id) REFERENCES tokens(id) ON DELETE CASCADE,
+        UNIQUE(token_id, address)
+      )
+    `),
+    db.prepare(`
+      CREATE TABLE IF NOT EXISTS frozen_accounts (
+        id TEXT PRIMARY KEY,
+        token_id TEXT NOT NULL,
+        account_address TEXT NOT NULL,
+        reason TEXT,
+        frozen_at TEXT NOT NULL DEFAULT (datetime('now')),
+        frozen_by TEXT NOT NULL,
+        unfrozen_at TEXT,
+        unfrozen_by TEXT,
+        FOREIGN KEY (token_id) REFERENCES tokens(id) ON DELETE CASCADE,
+        UNIQUE(token_id, account_address)
+      )
+    `),
   ]);
 }
 
@@ -172,8 +252,12 @@ export async function seedTestDatabase(env: Env): Promise<void> {
 export async function clearTestDatabase(env: Env): Promise<void> {
   const db = env.DB;
 
-  // Drop tables if they exist
+  // Drop tables if they exist (order matters for foreign keys)
   const tables = [
+    "frozen_accounts",
+    "token_allowlists",
+    "token_transactions",
+    "tokens",
     "magic_links",
     "sessions",
     "project_members",

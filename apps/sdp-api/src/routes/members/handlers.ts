@@ -1,46 +1,45 @@
-/**
- * Organization Members Routes
- */
-
-import {
-  generateInvitationId,
-  generateInvitationToken,
-  generateMemberId,
-  generateUserId,
-  hashString,
-} from "@/lib/crypto";
+import { getAuth } from "@/lib/auth";
 import { AppError, notFound } from "@/lib/errors";
+import { hashString } from "@/lib/hash";
 import { created, noContent, success } from "@/lib/response";
-import { authMiddleware, requirePermissions } from "@/middleware/auth";
 import { AuditService } from "@/services/audit.service";
+import { createEmailService, createInvitationEmail } from "@/services/email";
 import type { Env } from "@/types/env";
 import type { OrganizationRole } from "@sdp/types";
-import { Hono } from "hono";
-import { z } from "zod";
+import type { Context } from "hono";
+import { acceptSchema, inviteSchema } from "./schemas";
 
-const members = new Hono<{ Bindings: Env }>();
+type AppContext = Context<{ Bindings: Env }>;
 
-// All routes require authentication
-members.use("*", authMiddleware());
+function randomBase64Url(byteLength: number): string {
+  const bytes = new Uint8Array(byteLength);
+  crypto.getRandomValues(bytes);
 
-// Validation schemas
-const inviteSchema = z.object({
-  email: z.string().email(),
-  role: z.enum(["admin", "developer", "viewer"]),
-});
+  const globalWithBuffer = globalThis as {
+    Buffer?: {
+      from: (input: Uint8Array) => { toString: (encoding: "base64") => string };
+    };
+  };
 
-const acceptSchema = z.object({
-  token: z.string().min(1),
-  name: z.string().min(1).max(100).optional(),
-});
+  if (globalWithBuffer.Buffer) {
+    return globalWithBuffer.Buffer.from(bytes)
+      .toString("base64")
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=+$/g, "");
+  }
 
-/**
- * List organization members
- * GET /v1/members
- */
-members.get("/", requirePermissions("org:read"), async (c) => {
-  const auth = c.get("apiKey");
-  const orgId = auth!.organizationId;
+  let binary = "";
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
+
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+export const listMembers = async (c: AppContext) => {
+  const auth = getAuth(c);
+  const orgId = auth.organizationId;
 
   const results = await c.env.DB.prepare(
     `SELECT om.id, om.role, om.status, om.created_at,
@@ -66,15 +65,11 @@ members.get("/", requirePermissions("org:read"), async (c) => {
   }));
 
   return success(c, { members: memberList });
-});
+};
 
-/**
- * Invite a member to the organization
- * POST /v1/members/invite
- */
-members.post("/invite", requirePermissions("org:write"), async (c) => {
-  const auth = c.get("apiKey");
-  const orgId = auth!.organizationId;
+export const inviteMember = async (c: AppContext) => {
+  const auth = getAuth(c);
+  const orgId = auth.organizationId;
 
   const body = await c.req.json();
   const parsed = inviteSchema.safeParse(body);
@@ -115,12 +110,22 @@ members.post("/invite", requirePermissions("org:write"), async (c) => {
 
   // Get inviter user ID
   const inviterKey = await c.env.DB.prepare("SELECT created_by FROM api_keys WHERE id = ?")
-    .bind(auth!.id)
+    .bind(auth.id)
     .first<{ created_by: string }>();
 
+  const org = await c.env.DB.prepare("SELECT name FROM organizations WHERE id = ?")
+    .bind(orgId)
+    .first<{ name: string }>();
+
+  const inviter = inviterKey?.created_by
+    ? await c.env.DB.prepare("SELECT email FROM users WHERE id = ?")
+        .bind(inviterKey.created_by)
+        .first<{ email: string }>()
+    : null;
+
   // Create invitation
-  const invitationId = generateInvitationId();
-  const token = generateInvitationToken();
+  const invitationId = `inv_${crypto.randomUUID()}`;
+  const token = randomBase64Url(32);
   const tokenHash = await hashString(token);
   const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(); // 7 days
 
@@ -148,27 +153,63 @@ members.post("/invite", requirePermissions("org:write"), async (c) => {
     metadata: { email: normalizedEmail, role },
   });
 
-  // In production, you'd send an email here
-  // For now, return the token (only for development)
+  const inviteUrl = buildInvitationUrl(c, token);
+  const emailMessage = createInvitationEmail({
+    email: normalizedEmail,
+    inviterEmail: inviter?.email,
+    organizationName: org?.name,
+    role,
+    inviteUrl,
+    expiresAt,
+  });
+
+  try {
+    const emailService = createEmailService(c.env);
+    await emailService.sendEmail(emailMessage);
+  } catch (error) {
+    console.error("Failed to send invitation email:", error);
+  }
+
+  // In dev, return token in response for testing
   const response = {
     invitation: {
       id: invitationId,
       email: normalizedEmail,
       role,
       expiresAt,
-      // Only include token in non-production for testing
-      ...(c.env.ENVIRONMENT !== "production" && { token }),
     },
+    ...(c.env.ENVIRONMENT === "development" && { token }),
   };
 
   return created(c, response);
-});
+};
 
-/**
- * Accept an invitation
- * POST /v1/members/accept
- */
-members.post("/accept", async (c) => {
+function buildInvitationUrl(c: AppContext, token: string): string {
+  const frontendUrl = c.env.FRONTEND_URL?.replace(/\/$/, "");
+  if (frontendUrl) {
+    return `${frontendUrl}/invite?token=${encodeURIComponent(token)}`;
+  }
+
+  const originHeader = c.req.header("Origin");
+  if (originHeader) {
+    return `${originHeader.replace(/\/$/, "")}/invite?token=${encodeURIComponent(token)}`;
+  }
+
+  const referer = c.req.header("Referer");
+  if (referer) {
+    try {
+      const origin = new URL(referer).origin;
+      return `${origin}/invite?token=${encodeURIComponent(token)}`;
+    } catch {
+      // Ignore invalid referer
+    }
+  }
+
+  const origin = new URL(c.req.url).origin;
+  return `${origin}/invite?token=${encodeURIComponent(token)}`;
+}
+
+export const acceptInvitation = async (c: AppContext) => {
   const body = await c.req.json();
   const parsed = acceptSchema.safeParse(body);
 
@@ -181,11 +222,11 @@ members.post("/accept", async (c) => {
   const { token, name } = parsed.data;
   const tokenHash = await hashString(token);
 
-  // Find invitation
+  // Get invitation
   const invitation = await c.env.DB.prepare(
-    `SELECT id, organization_id, email, role, expires_at
+    `SELECT id, organization_id, email, role, expires_at, status
      FROM invitations
-     WHERE token_hash = ? AND status = 'pending'`
+     WHERE token_hash = ?`
   )
     .bind(tokenHash)
     .first<{
@@ -194,101 +235,83 @@ members.post("/accept", async (c) => {
       email: string;
       role: string;
       expires_at: string;
+      status: string;
     }>();
 
   if (!invitation) {
-    throw new AppError("INVALID_INVITATION");
+    throw new AppError("INVALID_INVITATION", "Invalid invitation token");
   }
 
-  // Check expiration
+  if (invitation.status !== "pending") {
+    throw new AppError("INVALID_INVITATION", "Invitation is no longer valid");
+  }
+
   if (new Date(invitation.expires_at) < new Date()) {
-    await c.env.DB.prepare(`UPDATE invitations SET status = 'expired' WHERE id = ?`)
-      .bind(invitation.id)
-      .run();
-    throw new AppError("EXPIRED_INVITATION");
+    throw new AppError("EXPIRED_INVITATION", "Invitation has expired");
   }
 
-  // Check if user already exists
-  let userId: string;
-  const existingUser = await c.env.DB.prepare("SELECT id FROM users WHERE email = ?")
+  // Check if user exists
+  let user = await c.env.DB.prepare("SELECT id, email FROM users WHERE email = ?")
     .bind(invitation.email)
-    .first<{ id: string }>();
+    .first<{ id: string; email: string }>();
 
-  if (existingUser) {
-    userId = existingUser.id;
-  } else {
+  if (!user) {
     // Create new user
-    userId = generateUserId();
+    const userId = `usr_${crypto.randomUUID()}`;
     await c.env.DB.prepare(
-      `INSERT INTO users (id, email, email_verified, name, status)
-       VALUES (?, ?, 1, ?, 'active')`
+      `INSERT INTO users (id, email, name, email_verified, status)
+       VALUES (?, ?, ?, 1, 'active')`
     )
-      .bind(userId, invitation.email, name || null)
+      .bind(userId, invitation.email, name ?? null)
       .run();
+
+    user = { id: userId, email: invitation.email };
   }
 
   // Create membership
-  const memberId = generateMemberId();
+  const memberId = `mem_${crypto.randomUUID()}`;
   await c.env.DB.prepare(
     `INSERT INTO organization_members (id, organization_id, user_id, role, status)
      VALUES (?, ?, ?, ?, 'active')`
   )
-    .bind(memberId, invitation.organization_id, userId, invitation.role)
+    .bind(memberId, invitation.organization_id, user.id, invitation.role)
     .run();
 
   // Mark invitation as accepted
-  await c.env.DB.prepare(`UPDATE invitations SET status = 'accepted' WHERE id = ?`)
+  await c.env.DB.prepare(
+    "UPDATE invitations SET status = 'accepted', accepted_at = datetime('now') WHERE id = ?"
+  )
     .bind(invitation.id)
     .run();
 
   // Audit log
   const auditService = new AuditService(c.env.DB);
   await auditService.log(c, {
-    organizationId: invitation.organization_id,
-    userId,
     action: "accept_invite",
     resourceType: "invitation",
     resourceId: invitation.id,
+    metadata: { email: invitation.email },
   });
 
-  return success(c, {
-    member: {
-      id: memberId,
-      organizationId: invitation.organization_id,
-      userId,
-      role: invitation.role,
-    },
-  });
-});
+  return success(c, { success: true });
+};
 
-/**
- * Remove a member from the organization
- * DELETE /v1/members/:memberId
- */
-members.delete("/:memberId", requirePermissions("org:admin"), async (c) => {
+export const removeMember = async (c: AppContext) => {
   const { memberId } = c.req.param();
-  const auth = c.get("apiKey");
-  const orgId = auth!.organizationId;
+  const auth = getAuth(c);
 
-  // Find member
+  // Ensure member belongs to same org
   const member = await c.env.DB.prepare(
-    `SELECT id, user_id, role FROM organization_members
-     WHERE id = ? AND organization_id = ?`
+    "SELECT id, user_id FROM organization_members WHERE id = ? AND organization_id = ?"
   )
-    .bind(memberId, orgId)
-    .first<{ id: string; user_id: string; role: string }>();
+    .bind(memberId, auth.organizationId)
+    .first<{ id: string; user_id: string }>();
 
   if (!member) {
     throw notFound("Member");
   }
 
-  // Cannot remove the owner
-  if (member.role === "owner") {
-    throw new AppError("BAD_REQUEST", "Cannot remove the organization owner");
-  }
-
-  // Soft delete
-  await c.env.DB.prepare(`UPDATE organization_members SET status = 'removed' WHERE id = ?`)
+  await c.env.DB.prepare("UPDATE organization_members SET status = 'removed' WHERE id = ?")
     .bind(memberId)
     .run();
 
@@ -302,6 +325,4 @@ members.delete("/:memberId", requirePermissions("org:admin"), async (c) => {
   });
 
   return noContent(c);
-});
-
-export default members;
+};

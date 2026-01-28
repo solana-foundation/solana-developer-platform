@@ -1,0 +1,112 @@
+import { getAuth } from "@/lib/auth";
+import { AppError, notFound } from "@/lib/errors";
+import { created, success } from "@/lib/response";
+import { apiKeyCreateSchema } from "@/routes/api-keys/schemas";
+import { ApiKeyService } from "@/services/api-key.service";
+import { AuditService } from "@/services/audit.service";
+import { ProjectService } from "@/services/project.service";
+import type { Env } from "@/types/env";
+import type { ApiKeyRole, CreateApiKeyResponse } from "@sdp/types";
+import type { Context } from "hono";
+
+type AppContext = Context<{ Bindings: Env }>;
+
+export const listProjectApiKeys = async (c: AppContext) => {
+  const { projectId } = c.req.param();
+  const auth = getAuth(c);
+
+  const projectService = new ProjectService(c.env.DB);
+
+  // Verify project belongs to org
+  const project = await projectService.getProject(projectId);
+  if (!project || project.organizationId !== auth.organizationId) {
+    throw notFound("Project");
+  }
+
+  const apiKeyService = new ApiKeyService(c.env.DB);
+  const apiKeys = await apiKeyService.listForProject(projectId);
+
+  return success(c, {
+    apiKeys: apiKeys.map((key) => ({
+      id: key.id,
+      name: key.name,
+      description: key.description,
+      keyPrefix: key.keyPrefix,
+      role: key.role as ApiKeyRole,
+      environment: key.environment as "sandbox" | "production",
+      status: key.status as "active" | "revoked" | "expired",
+      lastUsedAt: key.lastUsedAt,
+      expiresAt: key.expiresAt,
+      createdAt: key.createdAt,
+    })),
+  });
+};
+
+export const createProjectApiKey = async (c: AppContext) => {
+  const { projectId } = c.req.param();
+  const auth = getAuth(c);
+
+  const body = await c.req.json();
+  const parsed = apiKeyCreateSchema.safeParse(body);
+
+  if (!parsed.success) {
+    throw new AppError("BAD_REQUEST", "Invalid request body", {
+      errors: parsed.error.flatten().fieldErrors,
+    });
+  }
+
+  const projectService = new ProjectService(c.env.DB);
+
+  // Verify project belongs to org
+  const project = await projectService.getProject(projectId);
+  if (!project || project.organizationId !== auth.organizationId) {
+    throw notFound("Project");
+  }
+
+  const {
+    name,
+    description,
+    role = "api_developer",
+    environment = "sandbox",
+    allowedIps,
+    expiresAt,
+  } = parsed.data;
+
+  const apiKeyService = new ApiKeyService(c.env.DB);
+  const createdKey = await apiKeyService.createApiKey({
+    organizationId: auth.organizationId,
+    projectId,
+    createdByKeyId: auth.id,
+    name,
+    description,
+    role,
+    environment,
+    allowedIps,
+    expiresAt,
+    pepper: c.env.API_KEY_PEPPER,
+  });
+
+  // Audit log
+  const auditService = new AuditService(c.env.DB);
+  await auditService.log(c, {
+    action: "create",
+    resourceType: "api_key",
+    resourceId: createdKey.id,
+    metadata: { projectId, name, role, environment },
+  });
+
+  const response: CreateApiKeyResponse = {
+    apiKey: {
+      id: createdKey.id,
+      name: createdKey.name,
+      key: createdKey.key, // Full key - only shown once!
+      keyPrefix: createdKey.keyPrefix,
+      role: createdKey.role,
+      environment: createdKey.environment,
+      expiresAt: createdKey.expiresAt,
+      createdAt: createdKey.createdAt,
+    },
+  };
+
+  return created(c, response);
+};

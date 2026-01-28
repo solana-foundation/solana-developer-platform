@@ -5,7 +5,6 @@
  * Sessions are stored in D1 and cached in KV for fast lookups.
  */
 
-import { generateSessionId } from "@/lib/crypto";
 import type { CachedSession, OrganizationRole, Permission, Session } from "@sdp/types";
 import { getPermissionsForOrgRole } from "@sdp/types";
 
@@ -36,7 +35,7 @@ export class SessionService {
     permissions: Permission[],
     metadata: SessionMetadata
   ): Promise<Session> {
-    const id = generateSessionId();
+    const id = `ses_${crypto.randomUUID()}`;
     const now = new Date();
     const expiresAt = new Date(now.getTime() + SESSION_TTL_MS);
 

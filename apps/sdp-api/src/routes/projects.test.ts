@@ -2,12 +2,12 @@
  * Projects Routes E2E Tests
  */
 
-import { env } from "cloudflare:test";
 import app from "@/index";
-import { hashString } from "@/lib/crypto";
-import { seedTestDatabase, clearTestDatabase } from "@/test/mocks/d1";
-import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
+import { hashString } from "@/lib/hash";
 import { TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
+import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
+import { env } from "@/test/helpers/env";
+import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/d1";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 describe("Projects Routes", () => {
@@ -39,8 +39,14 @@ describe("Projects Routes", () => {
     }
 
     // Clear projects tables
-    await db.prepare("DELETE FROM project_members").run().catch(() => {});
-    await db.prepare("DELETE FROM projects").run().catch(() => {});
+    await db
+      .prepare("DELETE FROM project_members")
+      .run()
+      .catch(() => {});
+    await db
+      .prepare("DELETE FROM projects")
+      .run()
+      .catch(() => {});
 
     // Seed organization
     await db
@@ -69,10 +75,7 @@ describe("Projects Routes", () => {
       .run();
 
     // Cache API key in KV
-    await apiKeysKV.put(
-      `key:${apiKeyHash}`,
-      JSON.stringify(TEST_CACHED_API_KEY)
-    );
+    await apiKeysKV.put(`key:${apiKeyHash}`, JSON.stringify(TEST_CACHED_API_KEY));
   });
 
   describe("POST /v1/projects", () => {

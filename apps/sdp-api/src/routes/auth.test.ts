@@ -2,11 +2,11 @@
  * Auth Routes E2E Tests
  */
 
-import { env } from "cloudflare:test";
 import app from "@/index";
-import { hashString } from "@/lib/crypto";
-import { seedTestDatabase, clearTestDatabase } from "@/test/mocks/d1";
+import { hashString } from "@/lib/hash";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
+import { env } from "@/test/helpers/env";
+import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/d1";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 describe("Auth Routes", () => {
@@ -21,8 +21,14 @@ describe("Auth Routes", () => {
   beforeEach(async () => {
     // Clear magic_links and sessions tables before each test
     const db = (env as { DB: D1Database }).DB;
-    await db.prepare("DELETE FROM magic_links").run().catch(() => {});
-    await db.prepare("DELETE FROM sessions").run().catch(() => {});
+    await db
+      .prepare("DELETE FROM magic_links")
+      .run()
+      .catch(() => {});
+    await db
+      .prepare("DELETE FROM sessions")
+      .run()
+      .catch(() => {});
 
     // Clear rate limit KV to prevent 429 errors between tests
     const rateLimitKV = (env as { SDP_RATE_LIMITS: KVNamespace }).SDP_RATE_LIMITS;
@@ -122,11 +128,8 @@ describe("Auth Routes", () => {
     });
 
     it("returns 401 for invalid token", async () => {
-      const res = await app.request(
-        "/v1/auth/magic-link/verify?token=invalidtoken123",
-        {},
-        env
-      );
+      // biome-ignore lint/nursery/noSecrets: Test token in URL, not a real secret
+      const res = await app.request("/v1/auth/magic-link/verify?token=invalidtoken123", {}, env);
 
       expect(res.status).toBe(401);
       const body = await res.json();
@@ -161,22 +164,17 @@ describe("Auth Routes", () => {
         .run();
 
       // Create magic link directly
+      // biome-ignore lint/nursery/noSecrets: Test token fixture, not a real secret
       const token = "validtoken123456789012345678901234567890123456";
       const tokenHash = await hashString(token);
       const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
 
       await db
-        .prepare(
-          "INSERT INTO magic_links (id, email, token_hash, expires_at) VALUES (?, ?, ?, ?)"
-        )
+        .prepare("INSERT INTO magic_links (id, email, token_hash, expires_at) VALUES (?, ?, ?, ?)")
         .bind("ml_test123", TEST_USER.email.toLowerCase(), tokenHash, expiresAt)
         .run();
 
-      const res = await app.request(
-        `/v1/auth/magic-link/verify?token=${token}`,
-        {},
-        env
-      );
+      const res = await app.request(`/v1/auth/magic-link/verify?token=${token}`, {}, env);
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -208,22 +206,17 @@ describe("Auth Routes", () => {
         .run();
 
       // Create expired magic link
+      // biome-ignore lint/nursery/noSecrets: Test token fixture, not a real secret
       const token = "expiredtoken12345678901234567890123456789012";
       const tokenHash = await hashString(token);
       const expiresAt = new Date(Date.now() - 1000).toISOString(); // Expired
 
       await db
-        .prepare(
-          "INSERT INTO magic_links (id, email, token_hash, expires_at) VALUES (?, ?, ?, ?)"
-        )
+        .prepare("INSERT INTO magic_links (id, email, token_hash, expires_at) VALUES (?, ?, ?, ?)")
         .bind("ml_expired", TEST_USER.email.toLowerCase(), tokenHash, expiresAt)
         .run();
 
-      const res = await app.request(
-        `/v1/auth/magic-link/verify?token=${token}`,
-        {},
-        env
-      );
+      const res = await app.request(`/v1/auth/magic-link/verify?token=${token}`, {}, env);
 
       expect(res.status).toBe(401);
     });
@@ -239,11 +232,7 @@ describe("Auth Routes", () => {
 
   describe("POST /v1/auth/logout (requires session)", () => {
     it("returns 401 without session cookie", async () => {
-      const res = await app.request(
-        "/v1/auth/logout",
-        { method: "POST" },
-        env
-      );
+      const res = await app.request("/v1/auth/logout", { method: "POST" }, env);
 
       expect(res.status).toBe(401);
     });

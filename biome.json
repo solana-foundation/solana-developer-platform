@@ -50,6 +50,18 @@
       }
     }
   },
+  "overrides": [
+    {
+      "include": ["src/openapi/**/*.ts", "apps/sdp-api/src/openapi/**/*.ts"],
+      "linter": {
+        "rules": {
+          "nursery": {
+            "noSecrets": "off"
+          }
+        }
+      }
+    }
+  ],
   "files": {
     "ignore": ["node_modules", ".wrangler", "dist", "*.d.ts", "pnpm-lock.yaml"]
   },

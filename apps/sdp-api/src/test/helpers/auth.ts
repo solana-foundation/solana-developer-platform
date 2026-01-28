@@ -2,7 +2,7 @@
  * Authentication test helpers
  */
 
-import { hashString } from "@/lib/crypto";
+import { hashString } from "@/lib/hash";
 import type { Env } from "@/types/env";
 import { TEST_API_KEY, TEST_CACHED_API_KEY } from "../fixtures/api-keys";
 import { seedCachedApiKey } from "../mocks/kv";

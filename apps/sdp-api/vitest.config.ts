@@ -10,6 +10,7 @@ export default defineWorkersConfig({
   },
   test: {
     globals: true,
+    setupFiles: ["src/test/setup.ts"],
     poolOptions: {
       workers: {
         singleWorker: true,
@@ -22,6 +23,8 @@ export default defineWorkersConfig({
             ENVIRONMENT: "development",
             API_VERSION: "v1",
             API_KEY_PEPPER: "test-pepper-for-unit-tests",
+            SOLANA_MOCK: "true",
+            RUN_INTEGRATION_TESTS: "false",
           },
         },
       },

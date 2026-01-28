@@ -2,9 +2,8 @@
  * Authentication middleware tests
  */
 
-import { env } from "cloudflare:test";
 import app from "@/index";
-import { hashString } from "@/lib/crypto";
+import { hashString } from "@/lib/hash";
 import {
   TEST_API_KEY,
   TEST_CACHED_API_KEY,
@@ -12,6 +11,7 @@ import {
   TEST_REVOKED_KEY,
 } from "@/test/fixtures/api-keys";
 import { TEST_ORG } from "@/test/fixtures/organizations";
+import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/d1";
 import { clearKVNamespaces, seedCachedApiKey } from "@/test/mocks/kv";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -25,7 +25,7 @@ describe("Auth Middleware", () => {
 
     // Seed organization for tests that need it
     await env.DB.prepare(
-      "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)"
+      "INSERT OR REPLACE INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)"
     )
       .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, TEST_ORG.tier, TEST_ORG.status)
       .run();
@@ -241,7 +241,7 @@ describe("Auth Middleware", () => {
     it("rejects requests without required permissions", async () => {
       await seedCachedApiKey(env, validKeyHash, {
         ...TEST_CACHED_API_KEY,
-        permissions: ["keys:read"], // No org:read permission
+        permissions: ["tokens:read"], // No org:read permission
       });
 
       const res = await app.request(

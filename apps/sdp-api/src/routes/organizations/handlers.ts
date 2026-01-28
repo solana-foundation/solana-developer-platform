@@ -1,57 +1,54 @@
-/**
- * Organizations Routes
- */
-
-import {
-  generateApiKey,
-  generateApiKeyId,
-  generateMemberId,
-  generateOrgId,
-  generateUserId,
-  hashString,
-} from "@/lib/crypto";
 import { AppError, conflict, notFound } from "@/lib/errors";
+import { hashString } from "@/lib/hash";
 import { created, noContent, success } from "@/lib/response";
-import { authMiddleware, requirePermissions } from "@/middleware/auth";
 import { AllowlistService } from "@/services/allowlist.service";
 import { AuditService } from "@/services/audit.service";
 import { KVService } from "@/services/kv.service";
 import type { Env } from "@/types/env";
 import type { CreateOrganizationResponse, Organization } from "@sdp/types";
-import { Hono } from "hono";
-import { z } from "zod";
+import type { Context } from "hono";
+import { createOrgSchema, updateOrgSchema } from "./schemas";
 
-const organizations = new Hono<{ Bindings: Env }>();
+type AppContext = Context<{ Bindings: Env }>;
 
-// Validation schemas
-const createOrgSchema = z.object({
-  name: z.string().min(1).max(100),
-  slug: z
-    .string()
-    .min(3)
-    .max(50)
-    .regex(/^[a-z0-9-]+$/)
-    .optional(),
-  email: z.string().email(),
-});
+function randomBase64Url(byteLength: number): string {
+  const bytes = new Uint8Array(byteLength);
+  crypto.getRandomValues(bytes);
 
-const updateOrgSchema = z.object({
-  name: z.string().min(1).max(100).optional(),
-  settings: z
-    .object({
-      defaultEnvironment: z.enum(["sandbox", "production"]).optional(),
-      allowedIpAddresses: z.array(z.string()).optional(),
-    })
-    .optional(),
-});
+  const globalWithBuffer = globalThis as {
+    Buffer?: {
+      from: (input: Uint8Array) => { toString: (encoding: "base64") => string };
+    };
+  };
 
-/**
- * Create a new organization
- * POST /v1/organizations
- *
- * Requires email to be on allowlist
- */
-organizations.post("/", async (c) => {
+  if (globalWithBuffer.Buffer) {
+    return globalWithBuffer.Buffer.from(bytes)
+      .toString("base64")
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=+$/g, "");
+  }
+
+  let binary = "";
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
+
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function createApiKeyMaterial(environment: "sandbox" | "production"): {
+  key: string;
+  prefix: string;
+} {
+  const envPrefix = environment === "production" ? "live" : "test";
+  const randomPart = randomBase64Url(24);
+  const key = `sk_${envPrefix}_${randomPart}`;
+  const prefix = `sk_${envPrefix}_${randomPart.slice(0, 3)}`;
+  return { key, prefix };
+}
+
+export const createOrganization = async (c: AppContext) => {
   const body = await c.req.json();
   const parsed = createOrgSchema.safeParse(body);
 
@@ -85,13 +82,13 @@ organizations.post("/", async (c) => {
   }
 
   // Create organization
-  const orgId = generateOrgId();
-  const userId = generateUserId();
-  const memberId = generateMemberId();
-  const apiKeyId = generateApiKeyId();
+  const orgId = `org_${crypto.randomUUID()}`;
+  const userId = `usr_${crypto.randomUUID()}`;
+  const memberId = `mem_${crypto.randomUUID()}`;
+  const apiKeyId = `key_${crypto.randomUUID()}`;
 
   // Generate API key
-  const { key, prefix } = generateApiKey("sandbox");
+  const { key, prefix } = createApiKeyMaterial("sandbox");
   const keyHash = await hashString(key, c.env.API_KEY_PEPPER);
 
   // Insert all records in a batch
@@ -152,16 +149,9 @@ organizations.post("/", async (c) => {
   };
 
   return created(c, response);
-});
+};
 
-// Protected routes below require authentication
-organizations.use("/:orgId/*", authMiddleware());
-
-/**
- * Get organization details
- * GET /v1/organizations/:orgId
- */
-organizations.get("/:orgId", requirePermissions("org:read"), async (c) => {
+export const getOrganization = async (c: AppContext) => {
   const { orgId } = c.req.param();
   const auth = c.get("apiKey");
 
@@ -202,13 +192,9 @@ organizations.get("/:orgId", requirePermissions("org:read"), async (c) => {
   };
 
   return success(c, response);
-});
+};
 
-/**
- * Update organization
- * PATCH /v1/organizations/:orgId
- */
-organizations.patch("/:orgId", requirePermissions("org:write"), async (c) => {
+export const updateOrganization = async (c: AppContext) => {
   const { orgId } = c.req.param();
   const auth = c.get("apiKey");
 
@@ -271,13 +257,9 @@ organizations.patch("/:orgId", requirePermissions("org:write"), async (c) => {
   });
 
   return success(c, org);
-});
+};
 
-/**
- * Delete organization
- * DELETE /v1/organizations/:orgId
- */
-organizations.delete("/:orgId", requirePermissions("org:admin"), async (c) => {
+export const deleteOrganization = async (c: AppContext) => {
   const { orgId } = c.req.param();
   const auth = c.get("apiKey");
 
@@ -312,6 +294,4 @@ organizations.delete("/:orgId", requirePermissions("org:admin"), async (c) => {
   });
 
   return noContent(c);
-});
-
-export default organizations;
+};

@@ -2,11 +2,11 @@
  * Organizations route tests
  */
 
-import { env } from "cloudflare:test";
 import app from "@/index";
-import { hashString } from "@/lib/crypto";
+import { hashString } from "@/lib/hash";
 import { TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_MEMBER, TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
+import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/d1";
 import { clearKVNamespaces, seedCachedApiKey } from "@/test/mocks/kv";
 import type { CreateOrganizationResponse, Organization } from "@sdp/types";

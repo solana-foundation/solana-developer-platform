@@ -25,6 +25,12 @@ export interface PaginatedResponse<T> {
   };
 }
 
+function jsonSafe<T>(value: T): T {
+  return JSON.parse(
+    JSON.stringify(value, (_key, val) => (typeof val === "bigint" ? val.toString() : val))
+  ) as T;
+}
+
 /**
  * Send a successful JSON response
  */
@@ -36,7 +42,7 @@ export function success<T>(c: Context<{ Bindings: Env }>, data: T, status = 200)
       timestamp: new Date().toISOString(),
     },
   };
-  return c.json(response, status as 200);
+  return c.json(jsonSafe(response), status as 200);
 }
 
 /**
@@ -57,7 +63,7 @@ export function paginated<T>(
       requestId: c.get("requestId"),
     },
   };
-  return c.json(response, 200);
+  return c.json(jsonSafe(response), 200);
 }
 
 /**
@@ -88,6 +94,13 @@ export function created<T>(c: Context<{ Bindings: Env }>, data: T, location?: st
     c.header("Location", location);
   }
   return success(c, data, 201);
+}
+
+/**
+ * Send a 202 Accepted response (for async operations)
+ */
+export function accepted<T>(c: Context<{ Bindings: Env }>, data: T) {
+  return success(c, data, 202);
 }
 
 /**

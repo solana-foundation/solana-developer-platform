@@ -1,0 +1,80 @@
+import { OpenAPIRegistry, OpenApiGeneratorV3 } from "@asteasolutions/zod-to-openapi";
+
+import { registerAdminPaths } from "./paths/admin";
+import { registerApiKeyPaths } from "./paths/api-keys";
+import { registerAuthPaths } from "./paths/auth";
+import { registerHealthPaths } from "./paths/health";
+import { registerIssuancePaths } from "./paths/issuance";
+import { registerMemberPaths } from "./paths/members";
+import { registerOrganizationPaths } from "./paths/organizations";
+import { registerProjectPaths } from "./paths/projects";
+import { registerTransactionPaths } from "./paths/transactions";
+
+export function createOpenApiDocument() {
+  const registry = new OpenAPIRegistry();
+
+  registry.registerComponent("securitySchemes", "apiKeyAuth", {
+    type: "http",
+    scheme: "bearer",
+    bearerFormat: "API Key",
+    description:
+      "Use Authorization: Bearer sk_test_... or sk_live_... with a base64url-encoded suffix.",
+  });
+
+  registry.registerComponent("securitySchemes", "sessionCookie", {
+    type: "apiKey",
+    in: "cookie",
+    name: "sdp_session",
+    description: "Session cookie for dashboard authentication.",
+  });
+
+  registry.registerComponent("securitySchemes", "adminKey", {
+    type: "apiKey",
+    in: "header",
+    name: "X-Admin-Key",
+    description: "Admin key for internal allowlist management.",
+  });
+
+  registerHealthPaths(registry);
+  registerOrganizationPaths(registry);
+  registerApiKeyPaths(registry);
+  registerMemberPaths(registry);
+  registerAuthPaths(registry);
+  registerProjectPaths(registry);
+  registerIssuancePaths(registry);
+  registerTransactionPaths(registry);
+  registerAdminPaths(registry);
+
+  const generator = new OpenApiGeneratorV3(registry.definitions);
+
+  return generator.generateDocument({
+    openapi: "3.0.3",
+    info: {
+      title: "Solana Developer Platform API",
+      version: "0.1.0",
+      description:
+        "Production-only OpenAPI spec generated from API schemas and routes. Development-only behavior is intentionally omitted.",
+    },
+    tags: [
+      { name: "Health", description: "Service health and readiness endpoints." },
+      { name: "Organizations", description: "Organization provisioning and settings." },
+      { name: "API Keys", description: "API key management endpoints." },
+      { name: "Members", description: "Organization membership invitations and roles." },
+      { name: "Auth", description: "Session and magic link authentication." },
+      { name: "Projects", description: "Project and project member management." },
+      { name: "Issuance", description: "Token issuance, allowlists, and lifecycle operations." },
+      { name: "Transactions", description: "Raw transaction submit/sign endpoints." },
+      { name: "Admin", description: "Administrative allowlist management." },
+    ],
+    servers: [
+      {
+        url: "http://localhost:8787",
+        description: "Local development",
+      },
+      {
+        url: "https://api.solana.com",
+        description: "Production",
+      },
+    ],
+  });
+}

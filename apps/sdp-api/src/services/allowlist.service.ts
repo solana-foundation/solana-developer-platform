@@ -4,7 +4,7 @@
  * Manages email/domain allowlist for access control.
  */
 
-import { hashString } from "@/lib/crypto";
+import { hashString } from "@/lib/hash";
 import type { KVService } from "./kv.service";
 
 export interface AllowlistEntry {
@@ -103,6 +103,35 @@ export class AllowlistService {
    */
   async removeEntry(id: string): Promise<void> {
     await this.db.prepare(`UPDATE allowlist SET status = 'disabled' WHERE id = ?`).bind(id).run();
+  }
+
+  /**
+   * Get a single allowlist entry by ID
+   */
+  async getEntry(id: string): Promise<AllowlistEntry | null> {
+    const row = await this.db.prepare("SELECT * FROM allowlist WHERE id = ?").bind(id).first<{
+      id: string;
+      type: "email" | "domain";
+      value: string;
+      tier: string;
+      notes: string | null;
+      status: "active" | "disabled";
+      created_at: string;
+    }>();
+
+    if (!row) {
+      return null;
+    }
+
+    return {
+      id: row.id,
+      type: row.type,
+      value: row.value,
+      tier: row.tier,
+      notes: row.notes,
+      status: row.status,
+      createdAt: row.created_at,
+    };
   }
 
   /**

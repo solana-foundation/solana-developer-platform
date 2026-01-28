@@ -5,7 +5,6 @@
  * Projects group API keys by team or environment.
  */
 
-import { generateProjectId, generateProjectMemberId } from "@/lib/crypto";
 import type {
   Project,
   ProjectEnvironment,
@@ -31,6 +30,19 @@ export interface UpdateProjectInput {
   settings?: ProjectSettings | null;
 }
 
+export type ProjectServiceErrorCode = "DUPLICATE_SLUG" | "ALREADY_MEMBER" | "NOT_FOUND";
+
+export class ProjectServiceError extends Error {
+  constructor(
+    public readonly code: ProjectServiceErrorCode,
+    message?: string
+  ) {
+    super(message ?? code);
+    // biome-ignore lint/nursery/noSecrets: error name constant
+    this.name = "ProjectServiceError";
+  }
+}
+
 export class ProjectService {
   constructor(private db: D1Database) {}
 
@@ -42,7 +54,7 @@ export class ProjectService {
    * Create a new project
    */
   async createProject(input: CreateProjectInput): Promise<Project> {
-    const id = generateProjectId();
+    const id = `prj_${crypto.randomUUID()}`;
     const now = new Date().toISOString();
     const slug = input.slug ?? this.generateSlug(input.name);
 
@@ -53,7 +65,7 @@ export class ProjectService {
       .first();
 
     if (existing) {
-      throw new Error("DUPLICATE_SLUG");
+      throw new ProjectServiceError("DUPLICATE_SLUG");
     }
 
     const project: Project = {
@@ -70,28 +82,35 @@ export class ProjectService {
       updatedAt: now,
     };
 
-    await this.db
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, description, environment, settings, status, created_by, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        project.id,
-        project.organizationId,
-        project.name,
-        project.slug,
-        project.description,
-        project.environment,
-        project.settings ? JSON.stringify(project.settings) : null,
-        project.status,
-        project.createdBy,
-        project.createdAt,
-        project.updatedAt
-      )
-      .run();
+    const memberId = `pm_${crypto.randomUUID()}`;
+    const memberRole: ProjectRole = "admin";
 
-    // Add creator as project admin
-    await this.addMember(id, input.createdBy, "admin");
+    await this.db.batch([
+      this.db
+        .prepare(
+          `INSERT INTO projects (id, organization_id, name, slug, description, environment, settings, status, created_by, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .bind(
+          project.id,
+          project.organizationId,
+          project.name,
+          project.slug,
+          project.description,
+          project.environment,
+          project.settings ? JSON.stringify(project.settings) : null,
+          project.status,
+          project.createdBy,
+          project.createdAt,
+          project.updatedAt
+        ),
+      this.db
+        .prepare(
+          `INSERT INTO project_members (id, project_id, user_id, role, created_at)
+           VALUES (?, ?, ?, ?, ?)`
+        )
+        .bind(memberId, id, input.createdBy, memberRole, now),
+    ]);
 
     return project;
   }
@@ -230,7 +249,7 @@ export class ProjectService {
   async updateProject(projectId: string, input: UpdateProjectInput): Promise<Project> {
     const existing = await this.getProject(projectId);
     if (!existing) {
-      throw new Error("NOT_FOUND");
+      throw new ProjectServiceError("NOT_FOUND");
     }
 
     const now = new Date().toISOString();
@@ -268,7 +287,7 @@ export class ProjectService {
 
     const updated = await this.getProject(projectId);
     if (!updated) {
-      throw new Error("NOT_FOUND");
+      throw new ProjectServiceError("NOT_FOUND");
     }
 
     return updated;
@@ -296,10 +315,10 @@ export class ProjectService {
     // Check if already a member
     const existing = await this.getMembership(projectId, userId);
     if (existing) {
-      throw new Error("ALREADY_MEMBER");
+      throw new ProjectServiceError("ALREADY_MEMBER");
     }
 
-    const id = generateProjectMemberId();
+    const id = `pm_${crypto.randomUUID()}`;
     const now = new Date().toISOString();
 
     const member: ProjectMember = {

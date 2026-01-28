@@ -4,11 +4,37 @@
  * Handles passwordless authentication via email magic links.
  */
 
-import { generateMagicLinkId, generateMagicLinkToken, hashString } from "@/lib/crypto";
+import { hashString } from "@/lib/hash";
 import type { MagicLink } from "@sdp/types";
 
 // Magic link expires in 15 minutes
 const MAGIC_LINK_TTL_MS = 15 * 60 * 1000;
+
+function randomBase64Url(byteLength: number): string {
+  const bytes = new Uint8Array(byteLength);
+  crypto.getRandomValues(bytes);
+
+  const globalWithBuffer = globalThis as {
+    Buffer?: {
+      from: (input: Uint8Array) => { toString: (encoding: "base64") => string };
+    };
+  };
+
+  if (globalWithBuffer.Buffer) {
+    return globalWithBuffer.Buffer.from(bytes)
+      .toString("base64")
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=+$/g, "");
+  }
+
+  let binary = "";
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
+
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
 
 export interface MagicLinkResult {
   id: string;
@@ -29,8 +55,8 @@ export class MagicLinkService {
    * Create a new magic link for an email address
    */
   async createMagicLink(email: string, organizationId?: string): Promise<MagicLinkResult> {
-    const id = generateMagicLinkId();
-    const token = generateMagicLinkToken();
+    const id = `ml_${crypto.randomUUID()}`;
+    const token = randomBase64Url(32);
     const tokenHash = await hashString(token);
     const now = new Date();
     const expiresAt = new Date(now.getTime() + MAGIC_LINK_TTL_MS);

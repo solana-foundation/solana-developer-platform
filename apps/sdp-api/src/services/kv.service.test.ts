@@ -2,10 +2,10 @@
  * KV Service tests
  */
 
-import { env } from "cloudflare:test";
 import { KVService } from "@/services/kv.service";
 import { TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_ORG } from "@/test/fixtures/organizations";
+import { env } from "@/test/helpers/env";
 import type { Organization } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 

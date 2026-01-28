@@ -15,22 +15,29 @@
     "db:migrate:production": "wrangler d1 migrations apply sdp-db --env production --remote",
     "db:seed:local": "wrangler d1 execute sdp-db --local --file=src/db/seed.sql",
     "typecheck": "tsc --noEmit",
-    "lint": "biome check src/",
+    "lint": "biome check src/ && pnpm openapi:check",
     "lint:fix": "biome check --write src/",
+    "openapi:check": "tsx scripts/check-openapi.ts",
+    "openapi:generate": "tsx scripts/generate-openapi.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@sdp/types": "workspace:*",
+    "@solana-program/system": "catalog:",
+    "@solana-program/token-2022": "catalog:",
+    "@solana/kit": "catalog:",
     "hono": "^4.7.0",
     "nanoid": "^5.1.0",
     "zod": "^3.24.0"
   },
   "devDependencies": {
+    "@asteasolutions/zod-to-openapi": "7.2.0",
     "@cloudflare/vitest-pool-workers": "^0.12.0",
     "@cloudflare/workers-types": "^4.20250124.0",
     "@vitest/coverage-v8": "^3.0.0",
+    "tsx": "4.21.0",
     "typescript": "^5.8.0",
     "vitest": "^3.0.0",
     "wrangler": "^4.1.0"

@@ -1,45 +1,20 @@
-/**
- * Auth Routes
- *
- * Handles magic link authentication and session management.
- */
-
-import { AppError, notFound } from "@/lib/errors";
-import { noContent, success } from "@/lib/response";
-import { sessionAuthMiddleware } from "@/middleware/session-auth";
+import { AppError } from "@/lib/errors";
+import { success } from "@/lib/response";
 import { AuditService } from "@/services/audit.service";
+import { createEmailService, createMagicLinkEmail } from "@/services/email";
 import { MagicLinkService } from "@/services/magic-link.service";
 import { SessionService } from "@/services/session.service";
 import type { Env } from "@/types/env";
-import type {
-  CurrentUserResponse,
-  ListSessionsResponse,
-  OrganizationRole,
-  SendMagicLinkResponse,
-  VerifyMagicLinkResponse,
-} from "@sdp/types";
+import type { OrganizationRole, SendMagicLinkResponse, VerifyMagicLinkResponse } from "@sdp/types";
 import { getPermissionsForOrgRole } from "@sdp/types";
-import { Hono } from "hono";
-import { deleteCookie, setCookie } from "hono/cookie";
-import { z } from "zod";
+import type { Context } from "hono";
+import { setCookie } from "hono/cookie";
+import { COOKIE_MAX_AGE_SECONDS, SESSION_COOKIE_NAME } from "../constants";
+import { sendMagicLinkSchema } from "../schemas";
 
-const auth = new Hono<{ Bindings: Env }>();
+type AppContext = Context<{ Bindings: Env }>;
 
-// Validation schemas
-const sendMagicLinkSchema = z.object({
-  email: z.string().email(),
-  organizationId: z.string().optional(),
-});
-
-// Cookie settings
-const SESSION_COOKIE_NAME = "sdp_session";
-const COOKIE_MAX_AGE = 7 * 24 * 60 * 60; // 7 days in seconds
-
-/**
- * Send a magic link
- * POST /v1/auth/magic-link
- */
-auth.post("/magic-link", async (c) => {
+export const sendMagicLink = async (c: AppContext) => {
   const body = await c.req.json();
   const parsed = sendMagicLinkSchema.safeParse(body);
 
@@ -87,13 +62,18 @@ auth.post("/magic-link", async (c) => {
   const magicLinkService = new MagicLinkService(c.env.DB);
   const { token, expiresAt } = await magicLinkService.createMagicLink(email, organizationId);
 
-  // In development, log the token (in production, send email)
   if (c.env.ENVIRONMENT === "development") {
     console.log(`[DEV] Magic link token for ${email}: ${token}`);
-  } else {
-    // TODO: Send email with magic link
-    // The URL would be: ${FRONTEND_URL}/auth/verify?token=${token}
-    console.log(`Magic link created for ${email}, token not logged in production`);
+  }
+
+  const verifyUrl = buildMagicLinkUrl(c, token);
+  const emailMessage = createMagicLinkEmail({ email, verifyUrl, expiresAt });
+
+  try {
+    const emailService = createEmailService(c.env);
+    await emailService.sendEmail(emailMessage);
+  } catch (error) {
+    console.error("Failed to send magic link email:", error);
   }
 
   const response: SendMagicLinkResponse = {
@@ -103,13 +83,34 @@ auth.post("/magic-link", async (c) => {
   };
 
   return success(c, response);
-});
+};
 
-/**
- * Verify magic link and create session
- * GET /v1/auth/magic-link/verify?token=xxx
- */
-auth.get("/magic-link/verify", async (c) => {
+function buildMagicLinkUrl(c: AppContext, token: string): string {
+  const frontendUrl = c.env.FRONTEND_URL?.replace(/\/$/, "");
+  if (frontendUrl) {
+    return `${frontendUrl}/auth/verify?token=${encodeURIComponent(token)}`;
+  }
+
+  const originHeader = c.req.header("Origin");
+  if (originHeader) {
+    return `${originHeader.replace(/\/$/, "")}/auth/verify?token=${encodeURIComponent(token)}`;
+  }
+
+  const referer = c.req.header("Referer");
+  if (referer) {
+    try {
+      const origin = new URL(referer).origin;
+      return `${origin}/auth/verify?token=${encodeURIComponent(token)}`;
+    } catch {
+      // Ignore invalid referer
+    }
+  }
+
+  const origin = new URL(c.req.url).origin;
+  return `${origin}/v1/auth/magic-link/verify?token=${encodeURIComponent(token)}`;
+}
+
+export const verifyMagicLink = async (c: AppContext) => {
   const token = c.req.query("token");
 
   if (!token) {
@@ -213,7 +214,7 @@ auth.get("/magic-link/verify", async (c) => {
     httpOnly: true,
     secure: c.env.ENVIRONMENT !== "development",
     sameSite: "Lax",
-    maxAge: COOKIE_MAX_AGE,
+    maxAge: COOKIE_MAX_AGE_SECONDS,
   });
 
   const response: VerifyMagicLinkResponse = {
@@ -236,158 +237,4 @@ auth.get("/magic-link/verify", async (c) => {
   };
 
   return success(c, response);
-});
-
-/**
- * Logout (invalidate session)
- * POST /v1/auth/logout
- */
-auth.post("/logout", sessionAuthMiddleware(), async (c) => {
-  const session = c.get("session");
-
-  if (session) {
-    const sessionService = new SessionService(c.env.DB, c.env.SDP_SESSIONS);
-    await sessionService.revokeSession(session.id);
-  }
-
-  // Clear cookie
-  deleteCookie(c, SESSION_COOKIE_NAME, {
-    path: "/",
-  });
-
-  return success(c, { success: true });
-});
-
-/**
- * Get current user info
- * GET /v1/auth/me
- */
-auth.get("/me", sessionAuthMiddleware(), async (c) => {
-  const session = c.get("session");
-
-  if (!session) {
-    throw new AppError("UNAUTHORIZED");
-  }
-
-  // Get user details
-  const user = await c.env.DB.prepare(
-    "SELECT id, email, name, last_login_at, login_count FROM users WHERE id = ?"
-  )
-    .bind(session.userId)
-    .first<{
-      id: string;
-      email: string;
-      name: string | null;
-      last_login_at: string | null;
-      login_count: number | null;
-    }>();
-
-  if (!user) {
-    throw notFound("User");
-  }
-
-  // Get organization with role
-  const orgMembership = await c.env.DB.prepare(
-    `SELECT o.id, o.name, o.slug, o.tier, om.role
-     FROM organizations o
-     JOIN organization_members om ON om.organization_id = o.id
-     WHERE o.id = ? AND om.user_id = ?`
-  )
-    .bind(session.organizationId, session.userId)
-    .first<{
-      id: string;
-      name: string;
-      slug: string;
-      tier: string;
-      role: string;
-    }>();
-
-  if (!orgMembership) {
-    throw notFound("Organization membership");
-  }
-
-  const response: CurrentUserResponse = {
-    user: {
-      id: user.id,
-      email: user.email,
-      name: user.name,
-      lastLoginAt: user.last_login_at,
-      loginCount: user.login_count ?? 0,
-    },
-    organization: {
-      id: orgMembership.id,
-      name: orgMembership.name,
-      slug: orgMembership.slug,
-      tier: orgMembership.tier,
-      role: orgMembership.role,
-    },
-    permissions: session.permissions,
-  };
-
-  return success(c, response);
-});
-
-/**
- * List active sessions
- * GET /v1/auth/sessions
- */
-auth.get("/sessions", sessionAuthMiddleware(), async (c) => {
-  const session = c.get("session");
-
-  if (!session) {
-    throw new AppError("UNAUTHORIZED");
-  }
-
-  const sessionService = new SessionService(c.env.DB, c.env.SDP_SESSIONS);
-  const sessions = await sessionService.listUserSessions(session.userId);
-
-  const response: ListSessionsResponse = {
-    sessions: sessions.map((s) => ({
-      id: s.id,
-      authMethod: s.authMethod,
-      ipAddress: s.ipAddress,
-      userAgent: s.userAgent,
-      createdAt: s.createdAt,
-      lastActivityAt: s.lastActivityAt,
-      current: s.id === session.id,
-    })),
-  };
-
-  return success(c, response);
-});
-
-/**
- * Revoke a specific session
- * DELETE /v1/auth/sessions/:sessionId
- */
-auth.delete("/sessions/:sessionId", sessionAuthMiddleware(), async (c) => {
-  const { sessionId } = c.req.param();
-  const currentSession = c.get("session");
-
-  if (!currentSession) {
-    throw new AppError("UNAUTHORIZED");
-  }
-
-  const sessionService = new SessionService(c.env.DB, c.env.SDP_SESSIONS);
-
-  // Verify the session belongs to this user
-  const sessions = await sessionService.listUserSessions(currentSession.userId);
-  const targetSession = sessions.find((s) => s.id === sessionId);
-
-  if (!targetSession) {
-    throw notFound("Session");
-  }
-
-  await sessionService.revokeSession(sessionId);
-
-  // If revoking current session, clear cookie
-  if (sessionId === currentSession.id) {
-    deleteCookie(c, SESSION_COOKIE_NAME, {
-      path: "/",
-    });
-  }
-
-  return noContent(c);
-});
-
-export default auth;
+};

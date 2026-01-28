@@ -2,8 +2,8 @@
  * Health route tests
  */
 
-import { env } from "cloudflare:test";
 import app from "@/index";
+import { env } from "@/test/helpers/env";
 import { describe, expect, it } from "vitest";
 
 describe("Health routes", () => {

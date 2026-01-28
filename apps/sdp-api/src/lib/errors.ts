@@ -18,7 +18,23 @@ export type ErrorCode =
   | "INVALID_INVITATION"
   | "EXPIRED_INVITATION"
   | "INVALID_TOKEN"
-  | "EXPIRED_SESSION";
+  | "EXPIRED_SESSION"
+  // Token issuance errors
+  | "TOKEN_NOT_FOUND"
+  | "TOKEN_NOT_ACTIVE"
+  | "TOKEN_NOT_MINTABLE"
+  | "TOKEN_NOT_DEPLOYED"
+  | "TOKEN_PAUSED"
+  | "NOT_ON_TOKEN_ALLOWLIST"
+  | "ACCOUNT_FROZEN"
+  | "ACCOUNT_NOT_FROZEN"
+  | "MAX_SUPPLY_EXCEEDED"
+  | "SOLANA_RPC_ERROR"
+  | "CUSTODY_ERROR"
+  // Transaction errors
+  | "TRANSACTION_FAILED"
+  | "SIGNING_FAILED"
+  | "SIGNING_PENDING";
 
 export interface ApiError {
   code: ErrorCode;
@@ -47,6 +63,22 @@ const ERROR_STATUS_CODES: Record<ErrorCode, number> = {
   EXPIRED_INVITATION: 400,
   INVALID_TOKEN: 401,
   EXPIRED_SESSION: 401,
+  // Token issuance errors
+  TOKEN_NOT_FOUND: 404,
+  TOKEN_NOT_ACTIVE: 400,
+  TOKEN_NOT_MINTABLE: 400,
+  TOKEN_NOT_DEPLOYED: 400,
+  TOKEN_PAUSED: 400,
+  NOT_ON_TOKEN_ALLOWLIST: 403,
+  ACCOUNT_FROZEN: 400,
+  ACCOUNT_NOT_FROZEN: 400,
+  MAX_SUPPLY_EXCEEDED: 400,
+  SOLANA_RPC_ERROR: 502,
+  CUSTODY_ERROR: 502,
+  // Transaction errors
+  TRANSACTION_FAILED: 400,
+  SIGNING_FAILED: 400,
+  SIGNING_PENDING: 202,
 };
 
 const DEFAULT_ERROR_MESSAGES: Record<ErrorCode, string> = {
@@ -66,6 +98,22 @@ const DEFAULT_ERROR_MESSAGES: Record<ErrorCode, string> = {
   EXPIRED_INVITATION: "Invitation has expired",
   INVALID_TOKEN: "Invalid or expired token",
   EXPIRED_SESSION: "Session has expired",
+  // Token issuance errors
+  TOKEN_NOT_FOUND: "Token not found",
+  TOKEN_NOT_ACTIVE: "Token is not active",
+  TOKEN_NOT_MINTABLE: "Token is not mintable",
+  TOKEN_NOT_DEPLOYED: "Token has not been deployed to Solana",
+  TOKEN_PAUSED: "Token operations are paused",
+  NOT_ON_TOKEN_ALLOWLIST: "Address is not on the token allowlist",
+  ACCOUNT_FROZEN: "Account is frozen",
+  ACCOUNT_NOT_FROZEN: "Account is not frozen",
+  MAX_SUPPLY_EXCEEDED: "Operation would exceed maximum supply",
+  SOLANA_RPC_ERROR: "Error communicating with Solana RPC",
+  CUSTODY_ERROR: "Custody provider error",
+  // Transaction errors
+  TRANSACTION_FAILED: "Transaction failed",
+  SIGNING_FAILED: "Transaction signing failed",
+  SIGNING_PENDING: "Signing request pending approval",
 };
 
 export class AppError extends Error {

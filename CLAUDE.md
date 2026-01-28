@@ -62,7 +62,7 @@ packages/sdp-types/     # Shared TypeScript types
     api-keys.ts         # API key types, CachedApiKey
     transactions.ts     # Prepare/Execute transaction models
 
-openapi/                # OpenAPI spec (Swagger UI deployed to Vercel)
+apps/sdp-api-specs-draft/ # Draft OpenAPI spec (Swagger UI deployed to Vercel)
 ```
 
 ## Key Patterns

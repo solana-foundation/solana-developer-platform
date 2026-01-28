@@ -2,13 +2,14 @@
  * Magic Link Service Unit Tests
  */
 
-import { env } from "cloudflare:test";
+import { hashString } from "@/lib/hash";
 import { MagicLinkService } from "@/services/magic-link.service";
-import { hashString } from "@/lib/crypto";
-import { seedTestDatabase, clearTestDatabase } from "@/test/mocks/d1";
 import { TEST_ORG } from "@/test/fixtures/organizations";
+import { env } from "@/test/helpers/env";
+import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/d1";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
+// biome-ignore lint/nursery/noSecrets: Test suite name, not a secret
 describe("MagicLinkService", () => {
   let magicLinkService: MagicLinkService;
   let db: D1Database;
@@ -26,7 +27,10 @@ describe("MagicLinkService", () => {
     magicLinkService = new MagicLinkService(db);
 
     // Clear magic_links table
-    await db.prepare("DELETE FROM magic_links").run().catch(() => {});
+    await db
+      .prepare("DELETE FROM magic_links")
+      .run()
+      .catch(() => {});
 
     // Seed org
     await db
@@ -42,7 +46,7 @@ describe("MagicLinkService", () => {
       const result = await magicLinkService.createMagicLink("test@example.com");
 
       expect(result.id).toMatch(/^ml_/);
-      expect(result.token).toHaveLength(48);
+      expect(result.token).toHaveLength(43);
       expect(result.expiresAt).toBeDefined();
 
       // Verify stored in DB
@@ -56,10 +60,7 @@ describe("MagicLinkService", () => {
     });
 
     it("creates magic link with organization reference", async () => {
-      const result = await magicLinkService.createMagicLink(
-        "org@example.com",
-        TEST_ORG.id
-      );
+      const result = await magicLinkService.createMagicLink("org@example.com", TEST_ORG.id);
 
       const stored = await db
         .prepare("SELECT organization_id FROM magic_links WHERE id = ?")
@@ -71,9 +72,7 @@ describe("MagicLinkService", () => {
 
     it("invalidates previous unused magic links for same email", async () => {
       const first = await magicLinkService.createMagicLink("multi@example.com");
-      const second = await magicLinkService.createMagicLink(
-        "multi@example.com"
-      );
+      const second = await magicLinkService.createMagicLink("multi@example.com");
 
       // First should be marked as used
       const firstStored = await db
@@ -106,9 +105,7 @@ describe("MagicLinkService", () => {
 
   describe("verifyMagicLink", () => {
     it("verifies valid token and marks as used", async () => {
-      const { token } = await magicLinkService.createMagicLink(
-        "verify@example.com"
-      );
+      const { token } = await magicLinkService.createMagicLink("verify@example.com");
 
       const result = await magicLinkService.verifyMagicLink(token);
 
@@ -126,10 +123,7 @@ describe("MagicLinkService", () => {
     });
 
     it("returns organization ID if set", async () => {
-      const { token } = await magicLinkService.createMagicLink(
-        "org@example.com",
-        TEST_ORG.id
-      );
+      const { token } = await magicLinkService.createMagicLink("org@example.com", TEST_ORG.id);
 
       const result = await magicLinkService.verifyMagicLink(token);
 
@@ -144,6 +138,7 @@ describe("MagicLinkService", () => {
 
     it("returns null for expired token", async () => {
       // Create link directly with expired timestamp using SQLite datetime format
+      // biome-ignore lint/nursery/noSecrets: Test token fixture, not a real secret
       const token = "expiredtoken123456789012345678901234567890";
       const tokenHash = await hashString(token);
 
@@ -160,9 +155,7 @@ describe("MagicLinkService", () => {
     });
 
     it("returns null for already used token", async () => {
-      const { token } = await magicLinkService.createMagicLink(
-        "used@example.com"
-      );
+      const { token } = await magicLinkService.createMagicLink("used@example.com");
 
       // Use it once
       await magicLinkService.verifyMagicLink(token);
@@ -174,11 +167,10 @@ describe("MagicLinkService", () => {
     });
   });
 
+  // biome-ignore lint/nursery/noSecrets: Test suite name, not a secret
   describe("invalidateMagicLink", () => {
     it("marks magic link as used", async () => {
-      const { id } = await magicLinkService.createMagicLink(
-        "invalidate@example.com"
-      );
+      const { id } = await magicLinkService.createMagicLink("invalidate@example.com");
 
       await magicLinkService.invalidateMagicLink(id);
 
@@ -193,9 +185,7 @@ describe("MagicLinkService", () => {
 
   describe("getMagicLink", () => {
     it("returns magic link details", async () => {
-      const created = await magicLinkService.createMagicLink(
-        "get@example.com"
-      );
+      const created = await magicLinkService.createMagicLink("get@example.com");
 
       const result = await magicLinkService.getMagicLink(created.id);
 

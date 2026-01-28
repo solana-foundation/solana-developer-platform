@@ -1,7 +1,7 @@
 /**
  * Rate Limiting Middleware
  *
- * Uses sliding window counter stored in KV.
+ * Uses an approximate sliding window counter stored in KV.
  * Different tiers have different limits.
  */
 
@@ -41,11 +41,28 @@ interface RateLimitState {
 }
 
 /**
- * Get the current window key
+ * Get the window key
  */
-function getWindowKey(identifier: string, windowMs: number): string {
-  const windowStart = Math.floor(Date.now() / windowMs) * windowMs;
+function getWindowKey(identifier: string, windowStart: number): string {
   return `ratelimit:${identifier}:${windowStart}`;
+}
+
+function getWindowStart(now: number, windowMs: number): number {
+  return Math.floor(now / windowMs) * windowMs;
+}
+
+function getClientIdentifier(c: Context<{ Bindings: Env }>): string {
+  const cfIp = c.req.header("cf-connecting-ip");
+  if (cfIp) {
+    return cfIp;
+  }
+
+  const forwarded = c.req.header("x-forwarded-for");
+  if (forwarded) {
+    return forwarded.split(",")[0]?.trim() || "unknown";
+  }
+
+  return "unknown";
 }
 
 /**
@@ -66,38 +83,59 @@ export function rateLimitMiddleware() {
       config = RATE_LIMIT_TIERS[tier] || RATE_LIMIT_TIERS.standard;
     } else {
       // Use IP for anonymous requests
-      identifier = c.req.header("cf-connecting-ip") || c.req.header("x-forwarded-for") || "unknown";
+      identifier = getClientIdentifier(c);
       config = ANONYMOUS_LIMIT;
     }
 
-    const windowKey = getWindowKey(identifier, config.windowMs);
+    const now = Date.now();
+    const windowStart = getWindowStart(now, config.windowMs);
+    const previousWindowStart = windowStart - config.windowMs;
 
-    // Get current count
-    const current = await kv.get<RateLimitState>(windowKey, "json");
-    const count = current?.count || 0;
+    const windowKey = getWindowKey(identifier, windowStart);
+    const previousWindowKey = getWindowKey(identifier, previousWindowStart);
+
+    // Get current + previous window counts for sliding window approximation
+    const [current, previous] = await Promise.all([
+      kv.get<RateLimitState>(windowKey, "json"),
+      kv.get<RateLimitState>(previousWindowKey, "json"),
+    ]);
+
+    const currentCount = current?.count || 0;
+    const previousCount = previous?.count || 0;
+    const elapsed = now - windowStart;
+    const previousWeight = Math.max(0, 1 - elapsed / config.windowMs);
+    const estimatedCount = currentCount + previousCount * previousWeight;
 
     // Set rate limit headers
     c.header("X-RateLimit-Limit", config.maxRequests.toString());
-    c.header("X-RateLimit-Remaining", Math.max(0, config.maxRequests - count - 1).toString());
-    c.header("X-RateLimit-Reset", (Math.floor(Date.now() / config.windowMs) + 1).toString());
+    c.header(
+      "X-RateLimit-Remaining",
+      Math.max(0, Math.floor(config.maxRequests - (estimatedCount + 1))).toString()
+    );
+    const resetAtSeconds = Math.ceil((windowStart + config.windowMs) / 1000);
+    c.header("X-RateLimit-Reset", resetAtSeconds.toString());
 
     // Check limit
-    if (count >= config.maxRequests) {
-      const retryAfter = Math.ceil((config.windowMs - (Date.now() % config.windowMs)) / 1000);
+    if (estimatedCount >= config.maxRequests) {
+      const retryAfter = Math.max(1, Math.ceil((windowStart + config.windowMs - now) / 1000));
       c.header("Retry-After", retryAfter.toString());
       throw new AppError("RATE_LIMITED", `Rate limit exceeded. Retry after ${retryAfter} seconds.`);
     }
 
-    // Increment counter (fire and forget)
+    // Increment counter for the current window
     const newState: RateLimitState = {
-      count: count + 1,
-      windowStart: Math.floor(Date.now() / config.windowMs) * config.windowMs,
+      count: currentCount + 1,
+      windowStart,
     };
 
     // TTL is 2x window to ensure cleanup
-    kv.put(windowKey, JSON.stringify(newState), {
-      expirationTtl: Math.ceil((config.windowMs * 2) / 1000),
-    }).catch((err) => console.error("Failed to update rate limit:", err));
+    try {
+      await kv.put(windowKey, JSON.stringify(newState), {
+        expirationTtl: Math.ceil((config.windowMs * 2) / 1000),
+      });
+    } catch (err) {
+      console.error("Failed to update rate limit:", err);
+    }
 
     await next();
   };

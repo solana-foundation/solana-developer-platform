@@ -1,17 +1,12 @@
-/**
- * Global test setup - runs before all tests
- */
+const globalWithSecureContext = globalThis as { isSecureContext?: boolean };
 
-import { afterAll, afterEach, beforeAll } from "vitest";
-
-beforeAll(async () => {
-  // Global setup
-});
-
-afterAll(async () => {
-  // Global cleanup
-});
-
-afterEach(async () => {
-  // Reset shared state between tests
-});
+if (!globalWithSecureContext.isSecureContext) {
+  try {
+    Object.defineProperty(globalThis, "isSecureContext", {
+      value: true,
+      configurable: true,
+    });
+  } catch {
+    globalWithSecureContext.isSecureContext = true;
+  }
+}

@@ -27,6 +27,10 @@ export const PERMISSIONS = [
   "webhooks:read",
   "webhooks:write",
 
+  // Transaction permissions
+  "transactions:read",
+  "transactions:write",
+
   // Audit log permissions
   "audit:read",
 

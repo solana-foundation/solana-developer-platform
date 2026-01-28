@@ -1,4 +1,4 @@
-# OpenAPI Specification
+# Draft OpenAPI Specification
 
 The SDP API specification, deployed to Vercel with Swagger UI.
 

@@ -2,10 +2,10 @@
  * Project Service Unit Tests
  */
 
-import { env } from "cloudflare:test";
 import { ProjectService } from "@/services/project.service";
-import { seedTestDatabase, clearTestDatabase } from "@/test/mocks/d1";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
+import { env } from "@/test/helpers/env";
+import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/d1";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 describe("ProjectService", () => {
@@ -25,8 +25,14 @@ describe("ProjectService", () => {
     projectService = new ProjectService(db);
 
     // Clear projects tables
-    await db.prepare("DELETE FROM project_members").run().catch(() => {});
-    await db.prepare("DELETE FROM projects").run().catch(() => {});
+    await db
+      .prepare("DELETE FROM project_members")
+      .run()
+      .catch(() => {});
+    await db
+      .prepare("DELETE FROM projects")
+      .run()
+      .catch(() => {});
 
     // Seed org and user
     await db
@@ -82,9 +88,7 @@ describe("ProjectService", () => {
       });
 
       expect(project.settings).not.toBeNull();
-      expect(project.settings?.rpcEndpoint).toBe(
-        "https://api.mainnet-beta.solana.com"
-      );
+      expect(project.settings?.rpcEndpoint).toBe("https://api.mainnet-beta.solana.com");
     });
 
     it("adds creator as admin member", async () => {
@@ -94,10 +98,7 @@ describe("ProjectService", () => {
         name: "Creator Test",
       });
 
-      const membership = await projectService.getMembership(
-        project.id,
-        TEST_USER.id
-      );
+      const membership = await projectService.getMembership(project.id, TEST_USER.id);
 
       expect(membership).not.toBeNull();
       expect(membership?.role).toBe("admin");
@@ -144,6 +145,7 @@ describe("ProjectService", () => {
     });
   });
 
+  // biome-ignore lint/nursery/noSecrets: Test suite name, not a secret
   describe("getProjectBySlug", () => {
     it("returns project by slug within organization", async () => {
       await projectService.createProject({
@@ -153,10 +155,7 @@ describe("ProjectService", () => {
         slug: "slug-test",
       });
 
-      const project = await projectService.getProjectBySlug(
-        TEST_ORG.id,
-        "slug-test"
-      );
+      const project = await projectService.getProjectBySlug(TEST_ORG.id, "slug-test");
 
       expect(project).not.toBeNull();
       expect(project?.slug).toBe("slug-test");
@@ -236,9 +235,7 @@ describe("ProjectService", () => {
         settings: { webhookUrl: "https://new.example.com/webhook" },
       });
 
-      expect(updated.settings?.webhookUrl).toBe(
-        "https://new.example.com/webhook"
-      );
+      expect(updated.settings?.webhookUrl).toBe("https://new.example.com/webhook");
     });
 
     it("throws for non-existent project", async () => {
@@ -284,11 +281,7 @@ describe("ProjectService", () => {
           )
           .run();
 
-        const member = await projectService.addMember(
-          projectId,
-          "usr_new123",
-          "developer"
-        );
+        const member = await projectService.addMember(projectId, "usr_new123", "developer");
 
         expect(member.id).toMatch(/^pm_/);
         expect(member.userId).toBe("usr_new123");
@@ -320,16 +313,9 @@ describe("ProjectService", () => {
 
         await projectService.addMember(projectId, "usr_role123", "viewer");
 
-        await projectService.updateMemberRole(
-          projectId,
-          "usr_role123",
-          "developer"
-        );
+        await projectService.updateMemberRole(projectId, "usr_role123", "developer");
 
-        const membership = await projectService.getMembership(
-          projectId,
-          "usr_role123"
-        );
+        const membership = await projectService.getMembership(projectId, "usr_role123");
         expect(membership?.role).toBe("developer");
       });
     });
@@ -346,10 +332,7 @@ describe("ProjectService", () => {
 
         await projectService.removeMember(projectId, "usr_remove123");
 
-        const membership = await projectService.getMembership(
-          projectId,
-          "usr_remove123"
-        );
+        const membership = await projectService.getMembership(projectId, "usr_remove123");
         expect(membership).toBeNull();
       });
     });

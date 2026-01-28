@@ -10,8 +10,8 @@
  * 6. Set auth context for downstream handlers
  */
 
-import { hashString } from "@/lib/crypto";
 import { AppError } from "@/lib/errors";
+import { hashString } from "@/lib/hash";
 import type { Env } from "@/types/env";
 import type { ApiKeyRole, CachedApiKey } from "@sdp/types";
 import { type Permission, getPermissionsForApiKeyRole } from "@sdp/types";

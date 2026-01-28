@@ -4,7 +4,6 @@
  * Records all significant actions for compliance and debugging.
  */
 
-import { generateAuditLogId } from "@/lib/crypto";
 import type { Env } from "@/types/env";
 import type { Context } from "hono";
 
@@ -18,7 +17,17 @@ export type AuditAction =
   | "accept_invite"
   | "login"
   | "logout"
-  | "api_call";
+  | "api_call"
+  | "deploy"
+  | "mint"
+  | "burn"
+  | "freeze"
+  | "unfreeze"
+  // Transaction actions
+  | "submit"
+  | "submit_failed"
+  | "sign"
+  | "sign_requested";
 
 export type ResourceType =
   | "organization"
@@ -29,7 +38,14 @@ export type ResourceType =
   | "member"
   | "project"
   | "project_member"
-  | "session";
+  | "session"
+  | "token"
+  | "token_transaction"
+  | "token_allowlist"
+  | "frozen_account"
+  // Transaction resources
+  | "transaction"
+  | "signing_request";
 
 export interface AuditLogEntry {
   organizationId?: string;
@@ -52,7 +68,7 @@ export class AuditService {
     const auth = c.get("apiKey");
     const requestId = c.get("requestId");
 
-    const id = generateAuditLogId();
+    const id = `aud_${crypto.randomUUID()}`;
     const ipAddress = c.req.header("cf-connecting-ip") || c.req.header("x-forwarded-for") || null;
     const userAgent = c.req.header("user-agent") || null;
 
