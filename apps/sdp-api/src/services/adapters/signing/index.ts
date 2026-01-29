@@ -3,24 +3,31 @@
  *
  * Factory functions for creating signing adapters based on configuration.
  * Supports 3-tier resolution: project config → org config → env fallback.
+ *
+ * All signing uses @solana/keychain as the signing module.
+ * Provider names refer to the custody backend:
+ * - "local": In-memory keypair (KeychainMemoryAdapter) from env or encrypted DB storage
+ * - "fireblocks": Fireblocks MPC custody (KeychainFireblocksAdapter)
  */
 
 import type { SigningPort } from "@/services/ports";
 import { SigningError } from "@/services/ports";
 import type { Env } from "@/types/env";
-import { FireblocksAdapter, type FireblocksAdapterConfig } from "./fireblocks";
-import { LocalKeypairAdapter } from "./local";
+import {
+  KeychainFireblocksAdapter,
+  type KeychainFireblocksConfig,
+  KeychainMemoryAdapter,
+} from "./keychain";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Types
 // ═══════════════════════════════════════════════════════════════════════════
 
-/** Supported signing provider types */
+/** Supported signing/custody provider types */
 export type SigningProviderType = "local" | "fireblocks";
 
 /**
  * Database record for signing/custody configuration
- * (mirrors CustodyConfigRecord from old structure)
  */
 export interface SigningConfigRecord {
   id: string;
@@ -41,27 +48,48 @@ export interface SigningConfigRecord {
 /**
  * Create a signing adapter from environment variables.
  * Used as fallback when no database configuration exists.
+ *
+ * Returns a Promise since KeychainMemoryAdapter initialization is async.
  */
-export function createSigningAdapterFromEnv(env: Env): SigningPort {
+export async function createSigningAdapterFromEnv(env: Env): Promise<SigningPort> {
   const provider = (env.SIGNING_PROVIDER ?? "local") as SigningProviderType;
 
   switch (provider) {
     case "fireblocks":
       return createFireblocksAdapterFromEnv(env);
     default:
-      return new LocalKeypairAdapter(env);
+      return createMemoryAdapterFromEnv(env);
   }
+}
+
+/**
+ * Create a KeychainMemoryAdapter from environment variables.
+ */
+async function createMemoryAdapterFromEnv(env: Env): Promise<KeychainMemoryAdapter> {
+  const privateKey = env.CUSTODY_PRIVATE_KEY;
+
+  if (!privateKey) {
+    throw new SigningError(
+      "CUSTODY_PRIVATE_KEY environment variable is not configured",
+      "PROVIDER_NOT_CONFIGURED"
+    );
+  }
+
+  return KeychainMemoryAdapter.fromBase58(privateKey);
 }
 
 /**
  * Create a signing adapter from a database configuration record.
  */
-export function createSigningAdapterFromConfig(record: SigningConfigRecord, env: Env): SigningPort {
+export async function createSigningAdapterFromConfig(
+  record: SigningConfigRecord,
+  env: Env
+): Promise<SigningPort> {
   switch (record.provider) {
     case "fireblocks":
       return createFireblocksAdapterFromRecord(record);
     default:
-      return new LocalKeypairAdapter(env);
+      return createMemoryAdapterFromEnv(env);
   }
 }
 
@@ -69,16 +97,18 @@ export function createSigningAdapterFromConfig(record: SigningConfigRecord, env:
  * Create a signing adapter with 3-tier resolution.
  * Checks project config → org config → env fallback.
  */
-export function createSigningAdapter(env: Env, config?: SigningConfigRecord | null): SigningPort {
+export async function createSigningAdapter(
+  env: Env,
+  config?: SigningConfigRecord | null
+): Promise<SigningPort> {
   if (config) {
     return createSigningAdapterFromConfig(config, env);
   }
-
   return createSigningAdapterFromEnv(env);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Fireblocks Configuration Parsing
+// Fireblocks Configuration (via @solana/keychain-fireblocks)
 // ═══════════════════════════════════════════════════════════════════════════
 
 interface FireblocksConfigJson {
@@ -88,10 +118,12 @@ interface FireblocksConfigJson {
   vaultAccountId?: string;
   assetId?: string;
   apiBaseUrl?: string;
-  defaultWalletId?: string;
+  pollIntervalMs?: number;
+  maxPollAttempts?: number;
+  requestDelayMs?: number;
 }
 
-function createFireblocksAdapterFromEnv(env: Env): FireblocksAdapter {
+function createFireblocksAdapterFromEnv(env: Env): KeychainFireblocksAdapter {
   const apiKey = env.FIREBLOCKS_API_KEY;
   const apiSecret = env.FIREBLOCKS_API_SECRET;
   const vaultId = env.FIREBLOCKS_VAULT_ID;
@@ -104,7 +136,7 @@ function createFireblocksAdapterFromEnv(env: Env): FireblocksAdapter {
     );
   }
 
-  return new FireblocksAdapter({
+  return new KeychainFireblocksAdapter({
     apiKey,
     apiSecretPem: apiSecret,
     vaultAccountId: vaultId,
@@ -113,43 +145,46 @@ function createFireblocksAdapterFromEnv(env: Env): FireblocksAdapter {
   });
 }
 
-function createFireblocksAdapterFromRecord(record: SigningConfigRecord): FireblocksAdapter {
+function createFireblocksAdapterFromRecord(record: SigningConfigRecord): KeychainFireblocksAdapter {
   let parsed: FireblocksConfigJson;
   try {
     parsed = JSON.parse(record.config) as FireblocksConfigJson;
   } catch {
-    throw new SigningError(
-      "Invalid Fireblocks custody configuration JSON",
-      "PROVIDER_NOT_CONFIGURED"
-    );
+    throw new SigningError("Invalid Fireblocks configuration JSON", "PROVIDER_NOT_CONFIGURED");
   }
 
   if (parsed.provider && parsed.provider !== "fireblocks") {
     throw new SigningError("Custody configuration provider mismatch", "PROVIDER_NOT_CONFIGURED");
   }
 
-  if (!parsed.apiKey || !parsed.apiSecretEncrypted || !parsed.vaultAccountId || !parsed.assetId) {
+  if (!parsed.apiKey || !parsed.apiSecretEncrypted || !parsed.vaultAccountId) {
     throw new SigningError(
-      "Fireblocks config missing apiKey, apiSecretEncrypted, vaultAccountId, or assetId",
+      "Fireblocks config missing apiKey, apiSecretEncrypted, or vaultAccountId",
       "PROVIDER_NOT_CONFIGURED"
     );
   }
 
-  const config: FireblocksAdapterConfig = {
+  const config: KeychainFireblocksConfig = {
     apiKey: parsed.apiKey,
     apiSecretPem: parsed.apiSecretEncrypted,
     vaultAccountId: parsed.vaultAccountId,
-    assetId: parsed.assetId,
+    assetId: parsed.assetId ?? "SOL",
     apiBaseUrl: parsed.apiBaseUrl,
-    defaultWalletId: record.defaultWalletId ?? parsed.defaultWalletId,
+    pollIntervalMs: parsed.pollIntervalMs,
+    maxPollAttempts: parsed.maxPollAttempts,
+    requestDelayMs: parsed.requestDelayMs,
   };
 
-  return new FireblocksAdapter(config);
+  return new KeychainFireblocksAdapter(config);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Re-exports
 // ═══════════════════════════════════════════════════════════════════════════
 
-export { FireblocksAdapter } from "./fireblocks";
-export { LocalKeypairAdapter } from "./local";
+export {
+  BaseKeychainAdapter,
+  KeychainFireblocksAdapter,
+  KeychainMemoryAdapter,
+  type KeychainFireblocksConfig,
+} from "./keychain";

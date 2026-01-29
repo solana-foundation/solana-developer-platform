@@ -5,13 +5,13 @@
  * Adapters implement ports to connect domain to infrastructure.
  */
 
-// Signing adapters (custody providers)
+// Signing adapters (custody providers via @solana/keychain)
 export {
   createSigningAdapter,
   createSigningAdapterFromEnv,
   createSigningAdapterFromConfig,
-  FireblocksAdapter,
-  LocalKeypairAdapter,
+  KeychainFireblocksAdapter,
+  KeychainMemoryAdapter,
   type SigningProviderType,
   type SigningConfigRecord,
 } from "./signing";

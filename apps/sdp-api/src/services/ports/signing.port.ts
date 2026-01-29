@@ -4,8 +4,10 @@
  * Interface for custody providers that handle transaction signing.
  * This is a "driven" port - the domain calls out to adapters that implement this interface.
  *
+ * All signing uses @solana/keychain as the signing module.
+ *
  * Implementations:
- * - FireblocksAdapter: Async MPC signing with approval workflows (production)
+ * - KeychainFireblocksAdapter: Fireblocks MPC custody (production)
  * - LocalKeypairAdapter: Sync signing using env keypair (development)
  */
 
@@ -158,4 +160,6 @@ export type SigningErrorCode =
   | "APPROVAL_TIMEOUT"
   | "APPROVAL_REJECTED"
   | "INVALID_REQUEST"
-  | "NETWORK_ERROR";
+  | "NETWORK_ERROR"
+  | "ALREADY_INITIALIZED"
+  | "NOT_FOUND";
