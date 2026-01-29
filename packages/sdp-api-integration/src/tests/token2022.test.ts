@@ -10,8 +10,8 @@ import {
 
 describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Token2022Service Direct", () => {
   it("creates mint using service directly", { timeout: 60000 }, async () => {
-    const token2022 = new Token2022Service(env as Env);
     const signer = await createSigner(env as Env);
+    const token2022 = new Token2022Service(env as Env, signer);
 
     const result = await token2022.createMint({
       decimals: 6,

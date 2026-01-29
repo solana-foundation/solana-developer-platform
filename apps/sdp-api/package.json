@@ -23,15 +23,21 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
+    "@mosaic/sdk": "link:../../external/mosaic/packages/sdk",
+    "@react-email/components": "1.0.6",
+    "@react-email/render": "2.0.4",
     "@sdp/types": "workspace:*",
     "@solana-program/system": "catalog:",
     "@solana-program/token-2022": "catalog:",
     "@solana/addresses": "catalog:",
     "@solana/codecs": "catalog:",
+    "@solana/keychain-core": "0.3.0",
+    "@solana/keychain-fireblocks": "0.2.1",
     "@solana/kit": "catalog:",
     "@solana/signers": "catalog:",
     "hono": "^4.7.0",
     "nanoid": "^5.1.0",
+    "react": "19.2.3",
     "zod": "^3.24.0"
   },
   "devDependencies": {

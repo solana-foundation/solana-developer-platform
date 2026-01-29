@@ -7,6 +7,17 @@
     "node": ">=20.0.0",
     "pnpm": ">=10.0.0"
   },
+  "pnpm": {
+    "overrides": {
+      "@solana/rpc-spec": "5.0.0",
+      "@solana/kit": "5.0.0"
+    },
+    "peerDependencyRules": {
+      "allowedVersions": {
+        "@solana/kit": "^5.0.0"
+      }
+    }
+  },
   "scripts": {
     "dev": "turbo run dev",
     "build": "turbo run build",

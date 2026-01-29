@@ -34,8 +34,14 @@ pnpm-debug.log*
 infra/kora/.keypair.json
 infra/kora/.env
 
+# Local secrets (API keys, private keys)
+.secrets/
+
 # Test coverage
 coverage/
+
+# External dependencies (local only)
+external/mosaic/
 
 # Misc
 *.tsbuildinfo

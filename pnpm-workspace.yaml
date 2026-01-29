@@ -3,16 +3,18 @@ packages:
   - packages/*
 
 catalog:
+  # Aligned with @mosaic/sdk v0.1.0 (uses @solana/kit ^5.0.0)
   '@solana-program/system': ^0.10.0
-  '@solana-program/token-2022': ^0.7.0
+  '@solana-program/token-2022': ^0.6.1
   '@solana/addresses': ^5.0.0
   '@solana/codecs': ^5.0.0
-  '@solana/instructions': ^5.1.0
+  '@solana/instructions': ^5.0.0
   '@solana/keys': ^5.0.0
-  '@solana/kit': ^5.1.0
+  '@solana/kit': ^5.0.0
   '@solana/programs': ^5.0.0
   '@solana/rpc': ^5.0.0
-  '@solana/signers': ^5.4.0
+  '@solana/signers': ^5.0.0
+  '@solana/sysvars': ^5.0.0
   '@solana/transactions': ^5.0.0
 
 strictPeerDependencies: false
