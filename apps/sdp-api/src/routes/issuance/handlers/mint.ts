@@ -3,13 +3,22 @@ import { AppError, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { assertValidAddress } from "@/lib/solana";
 import { AuditService } from "@/services/audit.service";
-import { createSigner, createToken2022Service } from "@/services/solana";
+import { createMosaicService } from "@/services/mosaic";
+import { createOrgSigner } from "@/services/solana";
 import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
 import type { Context } from "hono";
 import { mintSchema } from "../schemas";
 
 type AppContext = Context<{ Bindings: Env }>;
+
+const toMosaicAmount = (amount: string): number => {
+  const raw = BigInt(amount);
+  if (raw > BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw new AppError("BAD_REQUEST", "Amount is too large for Mosaic minting");
+  }
+  return Number(raw);
+};
 
 export const prepareMint = async (c: AppContext) => {
   const { tokenId } = c.req.param();
@@ -67,22 +76,22 @@ export const prepareMint = async (c: AppContext) => {
     }
   }
 
-  // Get mint authority (custody signer)
+  // Get mint authority (custody signer via 3-tier resolution)
+  const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId);
   const mintAuthority = assertValidAddress(token.mintAuthority ?? "", "mintAuthority");
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
   const destination = assertValidAddress(parsed.data.mint.destination, "destination");
 
-  // Build unsigned transaction
-  const token2022 = createToken2022Service(c.env);
-  const prepared = await token2022.prepareMintTo(
-    {
-      mint: mintAddress,
-      destination,
-      amount: BigInt(parsed.data.mint.amount),
-      mintAuthority,
-    },
-    parsed.data.options?.simulate ?? false
-  );
+  // Build unsigned transaction using Mosaic
+  // Note: amount is decimal (e.g., 100 for 100 tokens), SDK converts to raw
+  const mosaic = createMosaicService(c.env, signer);
+  const prepared = await mosaic.prepareMintTo({
+    mint: mintAddress,
+    destination,
+    amount: toMosaicAmount(parsed.data.mint.amount),
+    mintAuthority,
+    feePayer: signer.address,
+  });
 
   // Create transaction record with serialized tx
   const tx = await tokenService.createTransaction({
@@ -120,7 +129,6 @@ export const prepareMint = async (c: AppContext) => {
       lastValidBlockHeight: prepared.lastValidBlockHeight.toString(),
     },
     tokenAccount: prepared.tokenAccount,
-    simulation: prepared.simulation,
   });
 };
 
@@ -178,8 +186,8 @@ export const executeMint = async (c: AppContext) => {
     }
   }
 
-  // Get custody signer
-  const signer = await createSigner(c.env);
+  // Get custody signer (via 3-tier resolution)
+  const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId);
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
   const destination = assertValidAddress(parsed.data.mint.destination, "destination");
 
@@ -196,15 +204,17 @@ export const executeMint = async (c: AppContext) => {
     initiatedByKeyId: auth.id,
   });
 
-  // Execute mint on Solana
-  const token2022 = createToken2022Service(c.env);
+  // Execute mint on Solana using Mosaic
+  // Note: amount is decimal (e.g., 100 for 100 tokens), SDK converts to raw
+  const mosaic = createMosaicService(c.env, signer);
 
   try {
-    const result = await token2022.mintTo({
+    const result = await mosaic.mintTo({
       mint: mintAddress,
       destination,
-      amount: BigInt(parsed.data.mint.amount),
-      mintAuthority: signer,
+      amount: toMosaicAmount(parsed.data.mint.amount),
+      mintAuthority: signer.address,
+      feePayer: signer.address,
     });
 
     // Update transaction with confirmation

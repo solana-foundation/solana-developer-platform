@@ -2,17 +2,35 @@
  * Solana Signer Service
  *
  * Provides signing capabilities for Solana transactions.
- * Uses @solana/kit's KeyPairSigner for compatibility with the SDK.
+ * Uses signing adapters to support multiple custody providers:
+ * - local: Uses CUSTODY_PRIVATE_KEY (development) or org-specific keys from DB
+ * - fireblocks: Uses Fireblocks MPC via @solana/keychain-fireblocks (production)
+ *
+ * Resolution order for createOrgSigner:
+ * 1. Project-specific config (if projectId provided)
+ * 2. Organization-level config
+ * 3. Environment fallback (CUSTODY_PRIVATE_KEY)
  */
 
+import {
+  KeychainFireblocksAdapter,
+  KeychainMemoryAdapter,
+  createSigningAdapterFromEnv,
+} from "@/services/adapters";
+import { createSigningService } from "@/services/domain/signing.service";
 import type { Env } from "@/types/env";
 import { getBase58Codec } from "@solana/codecs";
-import { type Address, type KeyPairSigner, createKeyPairSignerFromBytes } from "@solana/kit";
+import {
+  type Address,
+  type KeyPairSigner,
+  type TransactionSigner,
+  createKeyPairSignerFromBytes,
+} from "@solana/kit";
 
 const base58 = getBase58Codec();
 
-// Re-export KeyPairSigner type for consumers
-export type { KeyPairSigner };
+// Re-export types for consumers
+export type { KeyPairSigner, TransactionSigner };
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Signer Factory
@@ -23,8 +41,8 @@ export type { KeyPairSigner };
  * The keypair should be 64 bytes: 32 byte private + 32 byte public.
  */
 export async function createSignerFromBase58(privateKeyBase58: string): Promise<KeyPairSigner> {
-  // codec.encode converts base58 string → bytes
-  const secretKey = new Uint8Array(base58.encode(privateKeyBase58));
+  // codec.decode converts base58 string → bytes
+  const secretKey = base58.decode(privateKeyBase58);
 
   // Solana keypair format: 64 bytes = 32 byte private + 32 byte public
   if (secretKey.length !== 64) {
@@ -36,11 +54,75 @@ export async function createSignerFromBase58(privateKeyBase58: string): Promise<
 }
 
 /**
- * Create a transaction signer from environment configuration.
- * In development, uses CUSTODY_PRIVATE_KEY.
- * In production, would route to custody provider based on configuration.
+ * Create a transaction signer based on environment configuration.
+ *
+ * Resolves the signing provider from SIGNING_PROVIDER env var:
+ * - "local" (default): Uses CUSTODY_PRIVATE_KEY via KeychainMemoryAdapter
+ * - "fireblocks": Uses Fireblocks via KeychainFireblocksAdapter
+ *
+ * The returned signer is compatible with @solana/kit signing utilities:
+ * - signTransactionMessageWithSigners()
+ * - partiallySignTransactionMessageWithSigners()
+ * - addSignersToTransactionMessage()
+ *
+ * @deprecated Use createOrgSigner() for org-aware signing
  */
-export async function createSigner(env: Env): Promise<KeyPairSigner> {
+export async function createSigner(env: Env): Promise<TransactionSigner> {
+  const adapter = await createSigningAdapterFromEnv(env);
+
+  if (adapter instanceof KeychainMemoryAdapter) {
+    return adapter.getTransactionSigner();
+  }
+
+  if (adapter instanceof KeychainFireblocksAdapter) {
+    return adapter.getTransactionSigner();
+  }
+
+  // Fallback for unknown adapter types
+  throw new Error(`Unsupported signing provider: ${adapter.providerId}`);
+}
+
+/**
+ * Create a transaction signer for an organization with 3-tier resolution.
+ *
+ * Resolution order:
+ * 1. Project-specific config (custody_configs with project_id)
+ * 2. Organization-level config (custody_configs with project_id = NULL)
+ * 3. Environment fallback (CUSTODY_PRIVATE_KEY / SIGNING_PROVIDER)
+ *
+ * This is the recommended signer factory for production use. It enables
+ * per-organization signing keys while maintaining backward compatibility
+ * with env-based signing for orgs that haven't configured custody.
+ *
+ * @param env - Cloudflare Worker environment bindings
+ * @param orgId - Organization ID from auth context
+ * @param projectId - Optional project ID for project-specific signing keys
+ * @returns TransactionSigner compatible with @solana/kit
+ */
+export async function createOrgSigner(
+  env: Env,
+  orgId: string,
+  projectId?: string | null
+): Promise<TransactionSigner> {
+  const signingService = createSigningService(env);
+
+  try {
+    // getTransactionSigner handles 3-tier resolution internally
+    return await signingService.getTransactionSigner(orgId, projectId ?? undefined);
+  } catch {
+    // If org-aware signing fails (e.g., no encryption key configured),
+    // fall back to env-based signing for backward compatibility
+    return createSigner(env);
+  }
+}
+
+/**
+ * Create a KeyPairSigner specifically (only works with local provider).
+ * Use createSigner() for provider-agnostic code.
+ *
+ * @deprecated Use createSigner() instead for provider flexibility
+ */
+export async function createLocalSigner(env: Env): Promise<KeyPairSigner> {
   const privateKey = env.CUSTODY_PRIVATE_KEY;
 
   if (!privateKey) {

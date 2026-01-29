@@ -98,7 +98,7 @@ export class NativeAdapter implements FeePaymentPort {
       );
     }
 
-    const secretKey = new Uint8Array(base58.encode(privateKey));
+    const secretKey = base58.decode(privateKey);
 
     if (secretKey.length !== 64) {
       throw new FeePaymentError(

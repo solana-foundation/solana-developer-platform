@@ -3,7 +3,8 @@ import { AppError, notFound } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import { assertValidAddress } from "@/lib/solana";
 import { AuditService } from "@/services/audit.service";
-import { createSigner, createToken2022Service } from "@/services/solana";
+import { createMosaicService } from "@/services/mosaic";
+import { createOrgSigner } from "@/services/solana";
 import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
 import type { FrozenAccountResponse } from "@sdp/types";
@@ -44,19 +45,17 @@ export const freezeAccount = async (c: AppContext) => {
     throw new AppError("TOKEN_NOT_DEPLOYED", "Token has not been deployed to Solana");
   }
 
-  // Get custody signer (freeze authority)
-  const signer = await createSigner(c.env);
-  const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
+  // Get custody signer (freeze authority, via 3-tier resolution)
+  const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId);
   const accountAddress = assertValidAddress(parsed.data.accountAddress, "accountAddress");
 
-  // Execute freeze on Solana first
-  const token2022 = createToken2022Service(c.env);
+  // Execute freeze on Solana first (Token ACL-aware via Mosaic)
+  const mosaic = createMosaicService(c.env, signer);
 
   try {
-    const result = await token2022.freezeAccount({
-      mint: mintAddress,
-      account: accountAddress,
-      freezeAuthority: signer,
+    const result = await mosaic.freezeAccount({
+      tokenAccount: accountAddress,
+      feePayer: signer.address,
     });
 
     // Record in database after successful on-chain operation
@@ -134,19 +133,17 @@ export const unfreezeAccount = async (c: AppContext) => {
     throw new AppError("TOKEN_NOT_DEPLOYED", "Token has not been deployed to Solana");
   }
 
-  // Get custody signer (freeze authority)
-  const signer = await createSigner(c.env);
-  const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
+  // Get custody signer (freeze authority, via 3-tier resolution)
+  const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId);
   const accountAddress = assertValidAddress(parsed.data.accountAddress, "accountAddress");
 
-  // Execute thaw on Solana first
-  const token2022 = createToken2022Service(c.env);
+  // Execute thaw on Solana first (Token ACL-aware via Mosaic)
+  const mosaic = createMosaicService(c.env, signer);
 
   try {
-    const result = await token2022.thawAccount({
-      mint: mintAddress,
-      account: accountAddress,
-      freezeAuthority: signer,
+    const result = await mosaic.thawAccount({
+      tokenAccount: accountAddress,
+      feePayer: signer.address,
     });
 
     // Update database record after successful on-chain operation

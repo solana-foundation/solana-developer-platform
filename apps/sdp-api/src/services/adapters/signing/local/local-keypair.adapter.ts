@@ -4,7 +4,7 @@
  * Implements SigningPort for local development using a keypair from env vars.
  * Signing is synchronous - no approval workflow required.
  *
- * For production enterprise deployments, use FireblocksAdapter or similar.
+ * For production deployments, use KeychainFireblocksAdapter or KeychainAwsKmsAdapter.
  */
 
 import type {
@@ -137,8 +137,8 @@ export class LocalKeypairAdapter implements SigningPort {
       );
     }
 
-    // codec.encode converts base58 string → bytes
-    const secretKey = new Uint8Array(base58.encode(privateKey));
+    // codec.decode converts base58 string → bytes
+    const secretKey = base58.decode(privateKey);
 
     // Solana keypair format: 64 bytes = 32 byte private + 32 byte public
     if (secretKey.length !== 64) {
