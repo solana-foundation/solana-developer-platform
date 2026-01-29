@@ -10,9 +10,7 @@ import type { Env } from "@/types/env";
 import type { TokenExtensionsConfig } from "@sdp/types";
 import { getCreateAccountInstruction } from "@solana-program/system";
 import {
-  type ExtensionArgs,
   TOKEN_2022_PROGRAM_ADDRESS,
-  extension,
   findAssociatedTokenPda,
   getBurnInstruction,
   getCreateAssociatedTokenIdempotentInstructionAsync,
@@ -27,7 +25,6 @@ import {
 import {
   type Address,
   type Instruction,
-  type KeyPairSigner,
   type Signature,
   type TransactionSigner,
   addSignersToTransactionMessage,
@@ -53,36 +50,7 @@ import {
   getRecentBlockhash,
   simulateTransaction,
 } from "./rpc";
-import { createSigner } from "./signer";
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Helpers
-// ═══════════════════════════════════════════════════════════════════════════
-
-/**
- * JSON stringify replacer that handles BigInt values by converting them to strings.
- * Solana RPC responses often contain bigints (slots, lamports) that JSON.stringify can't handle.
- */
-function bigIntReplacer(_key: string, value: unknown): unknown {
-  return typeof value === "bigint" ? value.toString() : value;
-}
-
-/**
- * Safely stringify a value that may contain BigInt values
- */
-function safeStringify(value: unknown): string {
-  return JSON.stringify(value, bigIntReplacer);
-}
-
-/**
- * Create a proxy "signer" from an address for use in instruction builders.
- * This allows using an external signer's address (like Kora's fee payer)
- * in instructions without having the actual signing capability locally.
- * The real signature will be added later by the external signer.
- */
-function addressAsSigner(address: Address): TransactionSigner {
-  return { address } as TransactionSigner;
-}
+import { addressAsSigner, getExtensionTypes, safeStringify } from "./token-2022.utils";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Types
@@ -126,8 +94,8 @@ export interface MintToOptions {
   destination: Address;
   /** Amount to mint (in base units) */
   amount: bigint;
-  /** Mint authority signer */
-  mintAuthority: KeyPairSigner;
+  /** Mint authority signer (KeyPairSigner or custody TransactionSigner) */
+  mintAuthority: TransactionSigner;
 }
 
 export interface MintToResult {
@@ -146,8 +114,8 @@ export interface BurnOptions {
   source: Address;
   /** Amount to burn (in base units) */
   amount: bigint;
-  /** Owner/authority signer */
-  authority: KeyPairSigner;
+  /** Owner/authority signer (KeyPairSigner or custody TransactionSigner) */
+  authority: TransactionSigner;
 }
 
 export interface BurnResult {
@@ -160,8 +128,8 @@ export interface FreezeOptions {
   mint: Address;
   /** Token account to freeze */
   account: Address;
-  /** Freeze authority signer */
-  freezeAuthority: KeyPairSigner;
+  /** Freeze authority signer (KeyPairSigner or custody TransactionSigner) */
+  freezeAuthority: TransactionSigner;
 }
 
 export interface FreezeResult {
@@ -175,10 +143,12 @@ export interface FreezeResult {
 
 export class Token2022Service {
   private env: Env;
+  private signer: TransactionSigner;
   private feePayment?: FeePaymentPort;
 
-  constructor(env: Env, feePayment?: FeePaymentPort) {
+  constructor(env: Env, signer: TransactionSigner, feePayment?: FeePaymentPort) {
     this.env = env;
+    this.signer = signer;
     this.feePayment = feePayment;
   }
 
@@ -191,14 +161,14 @@ export class Token2022Service {
    */
   async createMint(options: CreateMintOptions): Promise<CreateMintResult> {
     const rpc = createRpc(this.env);
-    const signer = await createSigner(this.env);
+    const signer = this.signer;
 
     // Generate a new mint keypair
     const mintKeypair = await generateKeyPairSigner();
     const mint = mintKeypair.address;
 
     // Get extension args (undefined if no extensions for correct size calculation)
-    const extensionArgs = this.getExtensionTypes(options.extensions);
+    const extensionArgs = getExtensionTypes(options.extensions);
     const hasExtensions = extensionArgs.length > 0;
 
     // Calculate mint account size - pass undefined for no extensions
@@ -381,14 +351,14 @@ export class Token2022Service {
     requestSimulation = false
   ): Promise<PreparedTransaction & { mint: Address }> {
     const rpc = createRpc(this.env);
-    const signer = await createSigner(this.env);
+    const signer = this.signer;
 
     // Generate a new mint keypair
     const mintKeypair = await generateKeyPairSigner();
     const mint = mintKeypair.address;
 
     // Get extension args (undefined if no extensions for correct size calculation)
-    const extensionArgs = this.getExtensionTypes(options.extensions);
+    const extensionArgs = getExtensionTypes(options.extensions);
     const hasExtensions = extensionArgs.length > 0;
 
     // Calculate mint account size - pass undefined for no extensions
@@ -613,7 +583,7 @@ export class Token2022Service {
     requestSimulation = false
   ): Promise<PreparedTransaction & { tokenAccount: Address }> {
     const rpc = createRpc(this.env);
-    const signer = await createSigner(this.env);
+    const signer = this.signer;
 
     const [tokenAccount] = await findAssociatedTokenPda({
       mint: options.mint,
@@ -770,7 +740,7 @@ export class Token2022Service {
     requestSimulation = false
   ): Promise<PreparedTransaction> {
     const rpc = createRpc(this.env);
-    const signer = await createSigner(this.env);
+    const signer = this.signer;
 
     const [tokenAccount] = await findAssociatedTokenPda({
       mint: options.mint,
@@ -992,7 +962,7 @@ export class Token2022Service {
     requestSimulation = false
   ): Promise<PreparedTransaction> {
     const rpc = createRpc(this.env);
-    const signer = await createSigner(this.env);
+    const signer = this.signer;
 
     const instruction = getFreezeAccountInstruction({
       account: options.account,
@@ -1035,7 +1005,7 @@ export class Token2022Service {
     requestSimulation = false
   ): Promise<PreparedTransaction> {
     const rpc = createRpc(this.env);
-    const signer = await createSigner(this.env);
+    const signer = this.signer;
 
     const instruction = getThawAccountInstruction({
       account: options.account,
@@ -1068,58 +1038,5 @@ export class Token2022Service {
       lastValidBlockHeight,
       simulation,
     };
-  }
-
-  // ═════════════════════════════════════════════════════════════════════════
-  // Private Helpers
-  // ═════════════════════════════════════════════════════════════════════════
-
-  /**
-   * Get extension args for getMintSize calculation
-   */
-  private getExtensionTypes(extensions?: TokenExtensionsConfig): ExtensionArgs[] {
-    if (!extensions) return [];
-
-    const types: ExtensionArgs[] = [];
-
-    if (extensions.transferFee) {
-      types.push(
-        // biome-ignore lint/nursery/noSecrets: Token-2022 extension type identifier
-        extension("TransferFeeConfig", {
-          transferFeeConfigAuthority: extensions.transferFee.transferFeeConfigAuthority as Address,
-          withdrawWithheldAuthority: extensions.transferFee.withdrawWithheldAuthority as Address,
-          withheldAmount: 0n,
-          olderTransferFee: {
-            epoch: 0n,
-            maximumFee: BigInt(extensions.transferFee.maxFee),
-            transferFeeBasisPoints: extensions.transferFee.basisPoints,
-          },
-          newerTransferFee: {
-            epoch: 0n,
-            maximumFee: BigInt(extensions.transferFee.maxFee),
-            transferFeeBasisPoints: extensions.transferFee.basisPoints,
-          },
-        })
-      );
-    }
-    if (extensions.permanentDelegate) {
-      types.push(
-        // biome-ignore lint/nursery/noSecrets: Token-2022 extension type identifier
-        extension("PermanentDelegate", {
-          delegate: extensions.permanentDelegate as Address,
-        })
-      );
-    }
-    if (extensions.defaultAccountState) {
-      // 0 = Uninitialized, 1 = Initialized, 2 = Frozen
-      const state = extensions.defaultAccountState === "frozen" ? 2 : 1;
-      // biome-ignore lint/nursery/noSecrets: Token-2022 extension type identifier
-      types.push(extension("DefaultAccountState", { state }));
-    }
-    if (extensions.nonTransferable) {
-      types.push(extension("NonTransferable", {}));
-    }
-
-    return types;
   }
 }

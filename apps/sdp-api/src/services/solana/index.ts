@@ -26,6 +26,7 @@ export {
 export {
   type KeyPairSigner,
   createSigner,
+  createOrgSigner,
   createSignerFromBase58,
   signerControlsAddress,
   getSignerAddress,
