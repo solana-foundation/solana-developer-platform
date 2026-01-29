@@ -1,7 +1,8 @@
 import { AppError } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { AuditService } from "@/services/audit.service";
-import { createEmailService, createMagicLinkEmail } from "@/services/email";
+import { createEmailService } from "@/services/email";
+import { renderMagicLinkEmail } from "@/services/email/templates/magic-link";
 import { MagicLinkService } from "@/services/magic-link.service";
 import { SessionService } from "@/services/session.service";
 import type { Env } from "@/types/env";
@@ -67,11 +68,11 @@ export const sendMagicLink = async (c: AppContext) => {
   }
 
   const verifyUrl = buildMagicLinkUrl(c, token);
-  const emailMessage = createMagicLinkEmail({ email, verifyUrl, expiresAt });
 
   try {
     const emailService = createEmailService(c.env);
-    await emailService.sendEmail(emailMessage);
+    const { html, text, subject } = await renderMagicLinkEmail({ verifyUrl, expiresAt });
+    await emailService.sendEmail({ to: [email], subject, html, text });
   } catch (error) {
     console.error("Failed to send magic link email:", error);
   }

@@ -2,7 +2,7 @@
  * Email provider abstractions
  */
 
-export type EmailProviderName = "resend" | "console";
+export type EmailProviderName = "iterable" | "resend" | "console";
 
 export interface EmailMessage {
   to: string[];

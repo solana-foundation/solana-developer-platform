@@ -3,7 +3,8 @@ import { AppError, notFound } from "@/lib/errors";
 import { hashString } from "@/lib/hash";
 import { created, noContent, success } from "@/lib/response";
 import { AuditService } from "@/services/audit.service";
-import { createEmailService, createInvitationEmail } from "@/services/email";
+import { createEmailService } from "@/services/email";
+import { renderInvitationEmail } from "@/services/email/templates/invitation";
 import type { Env } from "@/types/env";
 import type { OrganizationRole } from "@sdp/types";
 import type { Context } from "hono";
@@ -154,18 +155,17 @@ export const inviteMember = async (c: AppContext) => {
   });
 
   const inviteUrl = buildInvitationUrl(c, token);
-  const emailMessage = createInvitationEmail({
-    email: normalizedEmail,
-    inviterEmail: inviter?.email,
-    organizationName: org?.name,
-    role,
-    inviteUrl,
-    expiresAt,
-  });
 
   try {
     const emailService = createEmailService(c.env);
-    await emailService.sendEmail(emailMessage);
+    const { html, text, subject } = await renderInvitationEmail({
+      inviterEmail: inviter?.email,
+      organizationName: org?.name,
+      role,
+      inviteUrl,
+      expiresAt,
+    });
+    await emailService.sendEmail({ to: [normalizedEmail], subject, html, text });
   } catch (error) {
     console.error("Failed to send invitation email:", error);
   }

@@ -1,23 +1,23 @@
 /**
- * Resend email provider
+ * Iterable email provider
  *
- * Uses Resend's /emails endpoint for transactional emails
+ * Uses Iterable's /api/email/send endpoint for transactional emails
  * with inline HTML content rendered from React Email templates.
  */
 
 import type { EmailProvider, EmailSendPayload, SendEmailResult } from "../types";
 
-const RESEND_API_BASE = "https://api.resend.com";
+const ITERABLE_API_BASE = "https://api.iterable.com/api";
 
-export interface ResendProviderConfig {
+export interface IterableProviderConfig {
   apiKey: string;
 }
 
-export class ResendEmailProvider implements EmailProvider {
-  readonly name = "resend" as const;
+export class IterableEmailProvider implements EmailProvider {
+  readonly name = "iterable" as const;
   private apiKey: string;
 
-  constructor(config: ResendProviderConfig) {
+  constructor(config: IterableProviderConfig) {
     this.apiKey = config.apiKey;
   }
 
@@ -25,31 +25,31 @@ export class ResendEmailProvider implements EmailProvider {
    * Send an email with inline HTML content
    */
   async send(message: EmailSendPayload): Promise<SendEmailResult> {
-    const response = await fetch(`${RESEND_API_BASE}/emails`, {
+    const response = await fetch(`${ITERABLE_API_BASE}/email/send`, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${this.apiKey}`,
+        "Api-Key": this.apiKey,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
+        recipientEmail: message.to[0],
         from: message.from,
-        to: message.to,
         subject: message.subject,
         html: message.html,
         text: message.text,
-        reply_to: message.replyTo,
+        replyTo: message.replyTo,
       }),
     });
 
     if (!response.ok) {
       const text = await response.text().catch(() => "");
-      throw new Error(`Resend error ${response.status}: ${text}`);
+      throw new Error(`Iterable error ${response.status}: ${text}`);
     }
 
     const payload = (await response.json().catch(() => ({}))) as {
-      id?: string;
+      messageId?: string;
     };
 
-    return { provider: this.name, id: payload.id };
+    return { provider: this.name, id: payload.messageId };
   }
 }
