@@ -3,7 +3,7 @@ import { AppError, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { assertValidAddress } from "@/lib/solana";
 import { AuditService } from "@/services/audit.service";
-import { Token2022Service, createSigner } from "@/services/solana";
+import { createSigner, createToken2022Service } from "@/services/solana";
 import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
 import type { Context } from "hono";
@@ -49,7 +49,7 @@ export const prepareBurn = async (c: AppContext) => {
   const source = assertValidAddress(parsed.data.burn.source, "source");
 
   // Build unsigned transaction
-  const token2022 = new Token2022Service(c.env);
+  const token2022 = createToken2022Service(c.env);
   const prepared = await token2022.prepareBurn(
     {
       mint: mintAddress,
@@ -150,7 +150,7 @@ export const executeBurn = async (c: AppContext) => {
   });
 
   // Execute burn on Solana
-  const token2022 = new Token2022Service(c.env);
+  const token2022 = createToken2022Service(c.env);
 
   try {
     const result = await token2022.burn({

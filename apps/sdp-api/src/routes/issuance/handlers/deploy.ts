@@ -2,7 +2,7 @@ import { getAuth } from "@/lib/auth";
 import { AppError, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { AuditService } from "@/services/audit.service";
-import { Token2022Service, createSigner } from "@/services/solana";
+import { createSigner, createToken2022Service } from "@/services/solana";
 import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
 import type { TokenResponse } from "@sdp/types";
@@ -41,8 +41,8 @@ export const deployToken = async (c: AppContext) => {
   const signer = await createSigner(c.env);
   const custodyAddress = signer.address;
 
-  // Create Token-2022 service and deploy
-  const token2022 = new Token2022Service(c.env);
+  // Create Token-2022 service and deploy (uses Kora for fee payment if configured)
+  const token2022 = createToken2022Service(c.env);
 
   const result = await token2022.createMint({
     decimals: token.decimals,
@@ -121,7 +121,7 @@ export const prepareDeploy = async (c: AppContext) => {
   const custodyAddress = signer.address;
 
   // Create Token-2022 service and prepare transaction
-  const token2022 = new Token2022Service(c.env);
+  const token2022 = createToken2022Service(c.env);
 
   const prepared = await token2022.prepareCreateMint(
     {

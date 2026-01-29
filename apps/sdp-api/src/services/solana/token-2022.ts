@@ -5,6 +5,7 @@
  * Uses @solana-program/token-2022 instruction builders with @solana/kit.
  */
 
+import type { FeePaymentPort } from "@/services/ports";
 import type { Env } from "@/types/env";
 import type { TokenExtensionsConfig } from "@sdp/types";
 import { getCreateAccountInstruction } from "@solana-program/system";
@@ -28,21 +29,25 @@ import {
   type Instruction,
   type KeyPairSigner,
   type Signature,
+  type TransactionSigner,
   addSignersToTransactionMessage,
   appendTransactionMessageInstructions,
   compileTransaction,
   createTransactionMessage,
   generateKeyPairSigner,
   getBase64EncodedWireTransaction,
+  getTransactionEncoder,
   pipe,
+  setTransactionMessageFeePayer,
   setTransactionMessageFeePayerSigner,
   setTransactionMessageLifetimeUsingBlockhash,
   signTransactionMessageWithSigners,
 } from "@solana/kit";
+import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
 import {
   type SimulationResult,
-  type TransactionConfirmation,
   accountExists,
+  confirmTransaction,
   createRpc,
   getMinimumBalanceForRentExemption,
   getRecentBlockhash,
@@ -67,6 +72,16 @@ function bigIntReplacer(_key: string, value: unknown): unknown {
  */
 function safeStringify(value: unknown): string {
   return JSON.stringify(value, bigIntReplacer);
+}
+
+/**
+ * Create a proxy "signer" from an address for use in instruction builders.
+ * This allows using an external signer's address (like Kora's fee payer)
+ * in instructions without having the actual signing capability locally.
+ * The real signature will be added later by the external signer.
+ */
+function addressAsSigner(address: Address): TransactionSigner {
+  return { address } as TransactionSigner;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -160,9 +175,11 @@ export interface FreezeResult {
 
 export class Token2022Service {
   private env: Env;
+  private feePayment?: FeePaymentPort;
 
-  constructor(env: Env) {
+  constructor(env: Env, feePayment?: FeePaymentPort) {
     this.env = env;
+    this.feePayment = feePayment;
   }
 
   // ═════════════════════════════════════════════════════════════════════════
@@ -190,7 +207,93 @@ export class Token2022Service {
     // Get rent-exempt balance
     const lamports = await getMinimumBalanceForRentExemption(rpc, mintSize);
 
-    // Build instructions using the library's built-in helpers
+    // Two different flows based on whether Kora is handling fee payment
+    if (this.feePayment) {
+      // Get Kora's fee payer address
+      const feePayerAddress = await this.feePayment.getFeePayer();
+
+      // Build instructions - use addressAsSigner for fee payer in instruction builders
+      const instructions: Instruction[] = [];
+
+      // 1. Create account instruction - payer is Kora's address
+      instructions.push(
+        getCreateAccountInstruction({
+          payer: addressAsSigner(feePayerAddress),
+          newAccount: mintKeypair,
+          lamports,
+          space: mintSize,
+          programAddress: TOKEN_2022_PROGRAM_ADDRESS,
+        })
+      );
+
+      // 2. Pre-initialize extensions (BEFORE initializeMint)
+      if (hasExtensions) {
+        const preInitInstructions = getPreInitializeInstructionsForMintExtensions(
+          mint,
+          extensionArgs
+        );
+        instructions.push(...preInitInstructions);
+      }
+
+      // 3. Initialize mint instruction
+      instructions.push(
+        getInitializeMint2Instruction({
+          mint,
+          decimals: options.decimals,
+          mintAuthority: options.mintAuthority,
+          freezeAuthority: options.freezeAuthority ?? undefined,
+        })
+      );
+
+      // 4. Post-initialize extensions (AFTER initializeMint)
+      if (hasExtensions) {
+        const postInitInstructions = getPostInitializeInstructionsForMintExtensions(
+          mint,
+          addressAsSigner(feePayerAddress),
+          extensionArgs
+        );
+        instructions.push(...postInitInstructions);
+      }
+
+      const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc);
+
+      // Two-signer flow: mint keypair signs locally, Kora adds fee payer signature + submits
+      const transactionMessage = pipe(
+        createTransactionMessage({ version: 0 }),
+        (msg) => setTransactionMessageFeePayer(feePayerAddress, msg),
+        (msg) =>
+          setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, msg),
+        (msg) => appendTransactionMessageInstructions(instructions, msg),
+        // Only add mint keypair as signer - fee payer signature comes from Kora
+        (msg) => addSignersToTransactionMessage([mintKeypair], msg)
+      );
+
+      // Partially sign with mint keypair (required for account creation)
+      const partiallySignedTx =
+        await partiallySignTransactionMessageWithSigners(transactionMessage);
+
+      // Serialize the partially signed transaction and copy to mutable Uint8Array
+      const txEncoder = getTransactionEncoder();
+      const txBytes = new Uint8Array(txEncoder.encode(partiallySignedTx));
+
+      // Send to Kora for fee payer signature and submission
+      const signature = await this.feePayment.signAndSend(txBytes);
+
+      // Wait for confirmation
+      const confirmation = await confirmTransaction(rpc, signature);
+
+      if (confirmation.err) {
+        throw new Error(`Mint creation failed: ${safeStringify(confirmation.err)}`);
+      }
+
+      return {
+        mint,
+        signature,
+        slot: confirmation.slot,
+      };
+    }
+
+    // Original single-signer flow: custody pays and signs everything
     const instructions: Instruction[] = [];
 
     // 1. Create account instruction
@@ -204,7 +307,7 @@ export class Token2022Service {
       })
     );
 
-    // 2. Pre-initialize extensions (BEFORE initializeMint) - uses library helper
+    // 2. Pre-initialize extensions (BEFORE initializeMint)
     if (hasExtensions) {
       const preInitInstructions = getPreInitializeInstructionsForMintExtensions(
         mint,
@@ -223,7 +326,7 @@ export class Token2022Service {
       })
     );
 
-    // 4. Post-initialize extensions (AFTER initializeMint) - uses library helper
+    // 4. Post-initialize extensions (AFTER initializeMint)
     if (hasExtensions) {
       const postInitInstructions = getPostInitializeInstructionsForMintExtensions(
         mint,
@@ -233,7 +336,6 @@ export class Token2022Service {
       instructions.push(...postInitInstructions);
     }
 
-    // Build and sign transaction
     const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc);
 
     const transactionMessage = pipe(
@@ -258,7 +360,7 @@ export class Token2022Service {
       .send();
 
     // Wait for confirmation
-    const confirmation = await this.waitForConfirmation(rpc, signature);
+    const confirmation = await confirmTransaction(rpc, signature);
 
     if (confirmation.err) {
       throw new Error(`Mint creation failed: ${safeStringify(confirmation.err)}`);
@@ -381,10 +483,75 @@ export class Token2022Service {
       tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
     });
 
+    const ataExists = await accountExists(rpc, tokenAccount);
+
+    // Two different flows based on whether Kora is handling fee payment
+    if (this.feePayment) {
+      const feePayerAddress = await this.feePayment.getFeePayer();
+
+      const instructions: Instruction[] = [];
+
+      // Create ATA if it doesn't exist - use addressAsSigner for fee payer
+      if (!ataExists) {
+        instructions.push(
+          await getCreateAssociatedTokenIdempotentInstructionAsync({
+            payer: addressAsSigner(feePayerAddress),
+            owner: options.destination,
+            mint: options.mint,
+            ata: tokenAccount,
+            tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
+          })
+        );
+      }
+
+      // Add mint instruction
+      instructions.push(
+        getMintToInstruction({
+          mint: options.mint,
+          token: tokenAccount,
+          mintAuthority: options.mintAuthority,
+          amount: options.amount,
+        })
+      );
+
+      const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc);
+
+      // Two-signer flow: custody signs as mint authority, Kora adds fee payer + submits
+      const transactionMessage = pipe(
+        createTransactionMessage({ version: 0 }),
+        (msg) => setTransactionMessageFeePayer(feePayerAddress, msg),
+        (msg) =>
+          setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, msg),
+        (msg) => appendTransactionMessageInstructions(instructions, msg),
+        (msg) => addSignersToTransactionMessage([options.mintAuthority], msg)
+      );
+
+      // Sign with mint authority (custody)
+      const partiallySignedTx =
+        await partiallySignTransactionMessageWithSigners(transactionMessage);
+
+      // Serialize and send to Kora (copy to mutable Uint8Array)
+      const txEncoder = getTransactionEncoder();
+      const txBytes = new Uint8Array(txEncoder.encode(partiallySignedTx));
+      const signature = await this.feePayment.signAndSend(txBytes);
+
+      const confirmation = await confirmTransaction(rpc, signature);
+
+      if (confirmation.err) {
+        throw new Error(`Mint failed: ${safeStringify(confirmation.err)}`);
+      }
+
+      return {
+        signature,
+        slot: confirmation.slot,
+        tokenAccount,
+      };
+    }
+
+    // Original single-signer flow
     const instructions: Instruction[] = [];
 
     // Create ATA if it doesn't exist
-    const ataExists = await accountExists(rpc, tokenAccount);
     if (!ataExists) {
       instructions.push(
         await getCreateAssociatedTokenIdempotentInstructionAsync({
@@ -425,7 +592,7 @@ export class Token2022Service {
         encoding: "base64",
       })
       .send();
-    const confirmation = await this.waitForConfirmation(rpc, signature);
+    const confirmation = await confirmTransaction(rpc, signature);
 
     if (confirmation.err) {
       throw new Error(`Mint failed: ${safeStringify(confirmation.err)}`);
@@ -532,6 +699,41 @@ export class Token2022Service {
 
     const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc);
 
+    // Two different flows based on whether Kora is handling fee payment
+    if (this.feePayment) {
+      const feePayerAddress = await this.feePayment.getFeePayer();
+
+      const transactionMessage = pipe(
+        createTransactionMessage({ version: 0 }),
+        (msg) => setTransactionMessageFeePayer(feePayerAddress, msg),
+        (msg) =>
+          setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, msg),
+        (msg) => appendTransactionMessageInstructions([instruction], msg),
+        (msg) => addSignersToTransactionMessage([options.authority], msg)
+      );
+
+      // Sign with authority (custody)
+      const partiallySignedTx =
+        await partiallySignTransactionMessageWithSigners(transactionMessage);
+
+      // Serialize and send to Kora (copy to mutable Uint8Array)
+      const txEncoder = getTransactionEncoder();
+      const txBytes = new Uint8Array(txEncoder.encode(partiallySignedTx));
+      const signature = await this.feePayment.signAndSend(txBytes);
+
+      const confirmation = await confirmTransaction(rpc, signature);
+
+      if (confirmation.err) {
+        throw new Error(`Burn failed: ${safeStringify(confirmation.err)}`);
+      }
+
+      return {
+        signature,
+        slot: confirmation.slot,
+      };
+    }
+
+    // Original single-signer flow
     const transactionMessage = pipe(
       createTransactionMessage({ version: 0 }),
       (msg) => setTransactionMessageFeePayerSigner(options.authority, msg),
@@ -548,7 +750,7 @@ export class Token2022Service {
         encoding: "base64",
       })
       .send();
-    const confirmation = await this.waitForConfirmation(rpc, signature);
+    const confirmation = await confirmTransaction(rpc, signature);
 
     if (confirmation.err) {
       throw new Error(`Burn failed: ${safeStringify(confirmation.err)}`);
@@ -635,6 +837,41 @@ export class Token2022Service {
 
     const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc);
 
+    // Two different flows based on whether Kora is handling fee payment
+    if (this.feePayment) {
+      const feePayerAddress = await this.feePayment.getFeePayer();
+
+      const transactionMessage = pipe(
+        createTransactionMessage({ version: 0 }),
+        (msg) => setTransactionMessageFeePayer(feePayerAddress, msg),
+        (msg) =>
+          setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, msg),
+        (msg) => appendTransactionMessageInstructions([instruction], msg),
+        (msg) => addSignersToTransactionMessage([options.freezeAuthority], msg)
+      );
+
+      // Sign with freeze authority (custody)
+      const partiallySignedTx =
+        await partiallySignTransactionMessageWithSigners(transactionMessage);
+
+      // Serialize and send to Kora (copy to mutable Uint8Array)
+      const txEncoder = getTransactionEncoder();
+      const txBytes = new Uint8Array(txEncoder.encode(partiallySignedTx));
+      const signature = await this.feePayment.signAndSend(txBytes);
+
+      const confirmation = await confirmTransaction(rpc, signature);
+
+      if (confirmation.err) {
+        throw new Error(`Freeze failed: ${safeStringify(confirmation.err)}`);
+      }
+
+      return {
+        signature,
+        slot: confirmation.slot,
+      };
+    }
+
+    // Original single-signer flow
     const transactionMessage = pipe(
       createTransactionMessage({ version: 0 }),
       (msg) => setTransactionMessageFeePayerSigner(options.freezeAuthority, msg),
@@ -651,7 +888,7 @@ export class Token2022Service {
         encoding: "base64",
       })
       .send();
-    const confirmation = await this.waitForConfirmation(rpc, signature);
+    const confirmation = await confirmTransaction(rpc, signature);
 
     if (confirmation.err) {
       throw new Error(`Freeze failed: ${safeStringify(confirmation.err)}`);
@@ -684,6 +921,41 @@ export class Token2022Service {
 
     const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc);
 
+    // Two different flows based on whether Kora is handling fee payment
+    if (this.feePayment) {
+      const feePayerAddress = await this.feePayment.getFeePayer();
+
+      const transactionMessage = pipe(
+        createTransactionMessage({ version: 0 }),
+        (msg) => setTransactionMessageFeePayer(feePayerAddress, msg),
+        (msg) =>
+          setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, msg),
+        (msg) => appendTransactionMessageInstructions([instruction], msg),
+        (msg) => addSignersToTransactionMessage([options.freezeAuthority], msg)
+      );
+
+      // Sign with freeze authority (custody)
+      const partiallySignedTx =
+        await partiallySignTransactionMessageWithSigners(transactionMessage);
+
+      // Serialize and send to Kora (copy to mutable Uint8Array)
+      const txEncoder = getTransactionEncoder();
+      const txBytes = new Uint8Array(txEncoder.encode(partiallySignedTx));
+      const signature = await this.feePayment.signAndSend(txBytes);
+
+      const confirmation = await confirmTransaction(rpc, signature);
+
+      if (confirmation.err) {
+        throw new Error(`Thaw failed: ${safeStringify(confirmation.err)}`);
+      }
+
+      return {
+        signature,
+        slot: confirmation.slot,
+      };
+    }
+
+    // Original single-signer flow
     const transactionMessage = pipe(
       createTransactionMessage({ version: 0 }),
       (msg) => setTransactionMessageFeePayerSigner(options.freezeAuthority, msg),
@@ -700,7 +972,7 @@ export class Token2022Service {
         encoding: "base64",
       })
       .send();
-    const confirmation = await this.waitForConfirmation(rpc, signature);
+    const confirmation = await confirmTransaction(rpc, signature);
 
     if (confirmation.err) {
       throw new Error(`Thaw failed: ${safeStringify(confirmation.err)}`);
@@ -801,49 +1073,6 @@ export class Token2022Service {
   // ═════════════════════════════════════════════════════════════════════════
   // Private Helpers
   // ═════════════════════════════════════════════════════════════════════════
-
-  /**
-   * Wait for transaction confirmation
-   */
-  private async waitForConfirmation(
-    rpc: ReturnType<typeof createRpc>,
-    signature: Signature
-  ): Promise<TransactionConfirmation> {
-    const timeoutMs = 60000;
-    const startTime = Date.now();
-
-    while (Date.now() - startTime < timeoutMs) {
-      const status = await rpc.getSignatureStatuses([signature]).send();
-      const result = status.value[0];
-
-      if (result) {
-        if (
-          result.confirmationStatus === "confirmed" ||
-          result.confirmationStatus === "finalized"
-        ) {
-          return {
-            signature,
-            slot: result.slot,
-            confirmationStatus: result.confirmationStatus,
-            err: result.err,
-          };
-        }
-
-        if (result.err) {
-          return {
-            signature,
-            slot: result.slot,
-            confirmationStatus: result.confirmationStatus ?? "processed",
-            err: result.err,
-          };
-        }
-      }
-
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-    }
-
-    throw new Error(`Transaction ${signature} confirmation timed out`);
-  }
 
   /**
    * Get extension args for getMintSize calculation

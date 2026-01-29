@@ -25,6 +25,13 @@ export default defineWorkersConfig({
             API_VERSION: "v1",
             RUN_INTEGRATION_TESTS: "true",
             SOLANA_MOCK: "false",
+            // Kora configuration - only set if explicitly configured
+            // Local: KORA_RPC_URL=http://localhost:8080 pnpm test
+            // CI: Set KORA_RPC_URL in workflow env
+            ...(process.env.KORA_RPC_URL && {
+              KORA_RPC_URL: process.env.KORA_RPC_URL,
+              FEE_PAYMENT_PROVIDER: "kora",
+            }),
           },
         },
       },

@@ -44,3 +44,6 @@ export {
   type FreezeOptions,
   type FreezeResult,
 } from "./token-2022";
+
+// Service factory (wires up Kora integration when configured)
+export { createToken2022Service } from "./factory";

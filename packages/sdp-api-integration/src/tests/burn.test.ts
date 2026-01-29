@@ -1,15 +1,15 @@
-import { BurnApiResponse, TokenApiResponse } from "../helpers/api-types";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import type { BurnApiResponse, TokenApiResponse } from "../helpers/api-types";
 import {
   RUN_INTEGRATION_TESTS,
   SOLANA_CONFIGURED,
   TEST_PROJECT_API_KEY,
   app,
-  env,
   cleanupIntegrationSuite,
+  env,
   initIntegrationSuite,
   resetIntegrationState,
 } from "../helpers/integration";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Burn Operations", () => {
   let apiKeyHash: string;
@@ -67,38 +67,34 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Burn Operations",
     });
   }, 90000);
 
-  it(
-    "burns tokens from account",
-    { timeout: 60000 },
-    async () => {
-      const burnRes = await request(`/v1/issuance/tokens/${deployedTokenId}/burn`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+  it("burns tokens from account", { timeout: 60000 }, async () => {
+    const burnRes = await request(`/v1/issuance/tokens/${deployedTokenId}/burn`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+      },
+      body: JSON.stringify({
+        burn: {
+          source: custodyAddress,
+          amount: "1000000000",
         },
-        body: JSON.stringify({
-          burn: {
-            source: custodyAddress,
-            amount: "1000000000",
-          },
-        }),
-      });
+      }),
+    });
 
-      expect(burnRes.status).toBe(200);
-      const burned = (await burnRes.json()) as BurnApiResponse;
+    expect(burnRes.status).toBe(200);
+    const burned = (await burnRes.json()) as BurnApiResponse;
 
-      expect(burned.data.transaction.status).toBe("confirmed");
-      expect(burned.data.transaction.signature).toBeTruthy();
+    expect(burned.data.transaction.status).toBe("confirmed");
+    expect(burned.data.transaction.signature).toBeTruthy();
 
-      console.log(`Burn signature: ${burned.data.transaction.signature}`);
+    console.log(`Burn signature: ${burned.data.transaction.signature}`);
 
-      const tokenRes = await request(`/v1/issuance/tokens/${deployedTokenId}`, {
-        headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
-      });
+    const tokenRes = await request(`/v1/issuance/tokens/${deployedTokenId}`, {
+      headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
+    });
 
-      const token = (await tokenRes.json()) as TokenApiResponse;
-      expect(token.data.token.totalSupply).toBe("4000000000");
-    }
-  );
+    const token = (await tokenRes.json()) as TokenApiResponse;
+    expect(token.data.token.totalSupply).toBe("4000000000");
+  });
 });

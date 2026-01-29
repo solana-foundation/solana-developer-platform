@@ -10,12 +10,17 @@ import { executeBurn, prepareBurn } from "./handlers/burn";
 import { deployToken, prepareDeploy } from "./handlers/deploy";
 import { freezeAccount, unfreezeAccount } from "./handlers/freeze";
 import { executeMint, prepareMint } from "./handlers/mint";
+import { getTokenTemplate, listTokenTemplates } from "./handlers/templates";
 import { createToken, getToken, listTokens, updateToken } from "./handlers/tokens";
 
 const issuance = new Hono<{ Bindings: Env }>();
 
 // All routes require authentication
 issuance.use("*", authMiddleware());
+
+// Templates (read-only, any authenticated user can view)
+issuance.get("/templates", requirePermissions("tokens:read"), listTokenTemplates);
+issuance.get("/templates/:templateId", requirePermissions("tokens:read"), getTokenTemplate);
 
 // Token CRUD
 issuance.post("/tokens", requirePermissions("tokens:write"), createToken);

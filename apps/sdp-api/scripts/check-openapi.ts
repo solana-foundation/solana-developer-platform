@@ -1,16 +1,7 @@
 import { createOpenApiDocument } from "../src/openapi/spec";
 
 const doc = createOpenApiDocument();
-const methods = [
-  "get",
-  "post",
-  "put",
-  "patch",
-  "delete",
-  "head",
-  "options",
-  "trace",
-] as const;
+const methods = ["get", "post", "put", "patch", "delete", "head", "options", "trace"] as const;
 
 const errors: string[] = [];
 const operationIds = new Map<string, string>();

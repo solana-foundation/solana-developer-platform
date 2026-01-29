@@ -37,6 +37,23 @@ export interface Env {
   CUSTODY_PRIVATE_KEY?: string;
   SOLANA_MOCK?: string;
   RUN_INTEGRATION_TESTS?: string;
+
+  // Signing provider configuration
+  SIGNING_PROVIDER?: "local" | "fireblocks";
+  FEE_PAYER_PRIVATE_KEY?: string;
+
+  // Fireblocks configuration
+  FIREBLOCKS_API_KEY?: string;
+  FIREBLOCKS_API_SECRET?: string;
+  FIREBLOCKS_VAULT_ID?: string;
+  FIREBLOCKS_ASSET_ID?: string;
+  FIREBLOCKS_API_BASE_URL?: string;
+
+  // Kora (gasless) configuration
+  FEE_PAYMENT_PROVIDER?: "kora" | "native";
+  KORA_RPC_URL?: string;
+  KORA_API_KEY?: string;
+  KORA_TIMEOUT_MS?: string;
 }
 
 // Extend Hono's context with our bindings

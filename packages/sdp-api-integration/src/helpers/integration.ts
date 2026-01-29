@@ -1,6 +1,3 @@
-import app from "@sdp/api/index";
-import { hashString } from "@sdp/api/lib/hash";
-import { Token2022Service, createSigner } from "@sdp/api/services/solana";
 import { TEST_ORG, TEST_USER } from "@sdp/api-test/fixtures/organizations";
 import {
   TEST_PROJECT,
@@ -8,9 +5,13 @@ import {
   TEST_PROJECT_CACHED_KEY,
 } from "@sdp/api-test/fixtures/tokens";
 import { clearTestDatabase, seedTestDatabase } from "@sdp/api-test/mocks/d1";
+import app from "@sdp/api/index";
+import { hashString } from "@sdp/api/lib/hash";
+import { Token2022Service, createSigner } from "@sdp/api/services/solana";
 import { env } from "./env";
 
 const SOLANA_CONFIGURED = !!env.SOLANA_RPC_URL && !!env.CUSTODY_PRIVATE_KEY;
+const KORA_CONFIGURED = !!env.KORA_RPC_URL;
 const RUN_INTEGRATION_TESTS = env.RUN_INTEGRATION_TESTS === "true";
 
 let cachedKeyHash: string | null = null;
@@ -51,13 +52,34 @@ export async function resetIntegrationState(apiKeyHash: string) {
     await rateLimitKV.delete(key.name);
   }
 
-  await db.prepare("DELETE FROM frozen_accounts").run().catch(() => {});
-  await db.prepare("DELETE FROM token_allowlists").run().catch(() => {});
-  await db.prepare("DELETE FROM token_transactions").run().catch(() => {});
-  await db.prepare("DELETE FROM tokens").run().catch(() => {});
-  await db.prepare("DELETE FROM project_members").run().catch(() => {});
-  await db.prepare("DELETE FROM api_keys WHERE project_id IS NOT NULL").run().catch(() => {});
-  await db.prepare("DELETE FROM projects").run().catch(() => {});
+  await db
+    .prepare("DELETE FROM frozen_accounts")
+    .run()
+    .catch(() => {});
+  await db
+    .prepare("DELETE FROM token_allowlists")
+    .run()
+    .catch(() => {});
+  await db
+    .prepare("DELETE FROM token_transactions")
+    .run()
+    .catch(() => {});
+  await db
+    .prepare("DELETE FROM tokens")
+    .run()
+    .catch(() => {});
+  await db
+    .prepare("DELETE FROM project_members")
+    .run()
+    .catch(() => {});
+  await db
+    .prepare("DELETE FROM api_keys WHERE project_id IS NOT NULL")
+    .run()
+    .catch(() => {});
+  await db
+    .prepare("DELETE FROM projects")
+    .run()
+    .catch(() => {});
 
   await db
     .prepare(
@@ -123,5 +145,6 @@ export {
   TEST_PROJECT_API_KEY,
   TEST_PROJECT_CACHED_KEY,
   SOLANA_CONFIGURED,
+  KORA_CONFIGURED,
   RUN_INTEGRATION_TESTS,
 };

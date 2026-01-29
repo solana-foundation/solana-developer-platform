@@ -11,6 +11,7 @@ import {
   mintRequestSchema,
   pageQuerySchema,
   pageSizeQuerySchema,
+  templateIdParamSchema,
   tokenIdParamSchema,
   tokenStatusQuerySchema,
   unfreezeAccountRequestSchema,
@@ -21,6 +22,7 @@ import {
   executeBurnResponse,
   executeMintResponse,
   frozenAccountResponse,
+  listTemplatesResponse,
   prepareBurnResponse,
   prepareDeployResponse,
   prepareMintResponse,
@@ -28,9 +30,59 @@ import {
   tokenAllowlistResponse,
   tokenListResponse,
   tokenResponse,
+  tokenTemplateResponse,
 } from "./responses";
 
 export function registerIssuancePaths(registry: OpenAPIRegistry) {
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Templates
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/issuance/templates",
+    tags: ["Issuance"],
+    summary: "List token templates",
+    operationId: "listTokenTemplates",
+    description:
+      "Returns all available token templates with their default configuration and supported extensions.",
+    security: [{ apiKeyAuth: [] }],
+    responses: {
+      200: {
+        description: "Template list",
+        content: jsonContent(listTemplatesResponse),
+      },
+      ...errorResponses(errorResponseSchema, [401, 403, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/issuance/templates/{templateId}",
+    tags: ["Issuance"],
+    summary: "Get token template",
+    operationId: "getTokenTemplate",
+    description:
+      "Returns details for a specific token template including default decimals, required extensions, and available overrides.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      params: z.object({
+        templateId: templateIdParamSchema,
+      }),
+    },
+    responses: {
+      200: {
+        description: "Template details",
+        content: jsonContent(tokenTemplateResponse),
+      },
+      ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
+    },
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Tokens
+  // ═══════════════════════════════════════════════════════════════════════════
+
   registry.registerPath({
     method: "post",
     path: "/v1/issuance/tokens",

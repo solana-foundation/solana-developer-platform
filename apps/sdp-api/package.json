@@ -30,6 +30,7 @@
     "@solana/addresses": "catalog:",
     "@solana/codecs": "catalog:",
     "@solana/kit": "catalog:",
+    "@solana/signers": "catalog:",
     "hono": "^4.7.0",
     "nanoid": "^5.1.0",
     "zod": "^3.24.0"

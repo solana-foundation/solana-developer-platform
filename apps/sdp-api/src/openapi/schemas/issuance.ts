@@ -412,6 +412,80 @@ export const frozenAccountResponseSchema = z
   })
   .openapi({ description: "Frozen account response payload." });
 
+// Extension override schema for OpenAPI documentation
+const extensionOverridesOpenApiSchema = z
+  .object({
+    confidentialTransfer: z.boolean().optional().openapi({
+      description: "Enable/disable confidential transfers.",
+      example: true,
+    }),
+    transferFee: z
+      .union([
+        z.literal(false),
+        z.object({
+          basisPoints: z.number().int().min(0).max(10000).openapi({
+            description: "Transfer fee in basis points.",
+            example: 50,
+          }),
+          maxFee: z.string().openapi({
+            description: "Maximum fee in base units.",
+            example: "1000000",
+          }),
+          transferFeeConfigAuthority: z.string().optional().openapi({
+            description: "Authority to configure transfer fees. Defaults to platform authority.",
+            example: "So11111111111111111111111111111111111111112",
+          }),
+          withdrawWithheldAuthority: z.string().optional().openapi({
+            description: "Authority to withdraw withheld fees. Defaults to platform authority.",
+            example: "So11111111111111111111111111111111111111112",
+          }),
+        }),
+      ])
+      .optional()
+      .openapi({ description: "Transfer fee configuration or false to disable." }),
+    interestBearing: z
+      .union([
+        z.literal(false),
+        z.object({
+          rate: z.number().openapi({
+            description: "Interest rate in percent.",
+            example: 2.5,
+          }),
+          rateAuthority: z.string().optional().openapi({
+            description: "Authority that can update the rate. Defaults to platform authority.",
+            example: "So11111111111111111111111111111111111111112",
+          }),
+        }),
+      ])
+      .optional()
+      .openapi({ description: "Interest-bearing configuration or false to disable." }),
+    permanentDelegate: z.boolean().optional().openapi({
+      description: "Enable/disable permanent delegate.",
+      example: true,
+    }),
+    nonTransferable: z.boolean().optional().openapi({
+      description: "Enable/disable non-transferable.",
+      example: false,
+    }),
+    defaultAccountState: z
+      .enum(["initialized", "frozen"])
+      .optional()
+      .openapi({ description: "Override default account state.", example: "frozen" }),
+  })
+  .openapi({ description: "Extension overrides to customize template defaults." });
+
+const templateOverridesOpenApiSchema = z
+  .object({
+    extensions: extensionOverridesOpenApiSchema.optional().openapi({
+      description: "Override template extension configuration.",
+    }),
+    requiresAllowlist: z.boolean().optional().openapi({
+      description: "Override allowlist requirement (if template allows).",
+      example: true,
+    }),
+  })
+  .openapi({ description: "Template customization overrides." });
+
 export const createTokenRequestSchema = createTokenSchemaBase
   .extend({
     name: createTokenSchemaBase.shape.name.openapi({
@@ -423,8 +497,8 @@ export const createTokenRequestSchema = createTokenSchemaBase
       example: "EXM",
     }),
     decimals: createTokenSchemaBase.shape.decimals.openapi({
-      description: "Token decimals. Defaults to 9.",
-      example: 9,
+      description: "Token decimals. Defaults to template default (varies by template).",
+      example: 6,
     }),
     description: createTokenSchemaBase.shape.description.openapi({
       description: "Token description.",
@@ -443,11 +517,19 @@ export const createTokenRequestSchema = createTokenSchemaBase
       example: "1000000",
     }),
     template: createTokenSchemaBase.shape.template.openapi({
-      description: "Token template preset.",
+      description: "Token template preset. Defaults to 'custom' if not specified.",
       example: "stablecoin",
     }),
+    overrides: templateOverridesOpenApiSchema.optional().openapi({
+      description: "Template customization overrides.",
+      example: {
+        extensions: {
+          transferFee: { basisPoints: 50, maxFee: "1000000" },
+        },
+      },
+    }),
     extensions: createTokenSchemaBase.shape.extensions.openapi({
-      description: "Token-2022 extension configuration.",
+      description: "DEPRECATED: Use template + overrides instead. Legacy extension configuration.",
       example: {
         confidentialTransfer: false,
         defaultAccountState: "initialized",
@@ -569,3 +651,95 @@ export const addTokenAllowlistRequestSchema = addTokenAllowlistSchemaBase
     }),
   })
   .openapi({ description: "Add token allowlist entry request body." });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Template Schemas
+// ═══════════════════════════════════════════════════════════════════════════
+
+export const extensionStatusSchema = z.enum(["implemented", "disabled", "planned"]).openapi({
+  description: "Extension implementation status.",
+  example: "implemented",
+});
+
+export const templateExtensionInfoSchema = z
+  .object({
+    name: z.string().openapi({
+      description: "Extension identifier.",
+      example: "confidentialTransfer",
+    }),
+    status: extensionStatusSchema,
+    enabled: z.boolean().openapi({
+      description: "Whether the extension feature flag is enabled.",
+      example: true,
+    }),
+  })
+  .openapi({ description: "Extension info with implementation status." });
+
+export const tokenTemplateIdSchema = z
+  .enum(["stablecoin", "rwa", "arcade", "tokenized_security", "custom"])
+  .openapi({
+    description: "Token template identifier.",
+    example: "stablecoin",
+  });
+
+export const tokenTemplateInfoSchema = z
+  .object({
+    id: tokenTemplateIdSchema,
+    name: z.string().openapi({
+      description: "Human-readable template name.",
+      example: "Stablecoin",
+    }),
+    description: z.string().openapi({
+      description: "Template description and use case.",
+      example: "USD-backed stablecoins with compliance controls and privacy features",
+    }),
+    decimals: z.number().int().openapi({
+      description: "Default decimals for this template.",
+      example: 6,
+    }),
+    maxDecimals: z.number().int().openapi({
+      description: "Maximum allowed decimals for this template.",
+      example: 9,
+    }),
+    requiresAllowlist: z.boolean().openapi({
+      description: "Whether allowlist is required by default.",
+      example: true,
+    }),
+    allowlistOverridable: z.boolean().openapi({
+      description: "Whether the allowlist requirement can be overridden.",
+      example: false,
+    }),
+    extensions: z
+      .object({
+        required: z.array(templateExtensionInfoSchema).openapi({
+          description: "Extensions that are required and cannot be disabled.",
+        }),
+        defaultEnabled: z.array(templateExtensionInfoSchema).openapi({
+          description: "Extensions enabled by default but can be disabled.",
+        }),
+        available: z.array(templateExtensionInfoSchema).openapi({
+          description: "Extensions available to enable via overrides.",
+        }),
+      })
+      .openapi({ description: "Template extension configuration." }),
+  })
+  .openapi({ description: "Token template information." });
+
+export const tokenTemplateResponseSchema = z
+  .object({
+    template: tokenTemplateInfoSchema.openapi({ description: "Template details." }),
+  })
+  .openapi({ description: "Token template response payload." });
+
+export const listTemplatesResponseSchema = z
+  .object({
+    templates: z.array(tokenTemplateInfoSchema).openapi({
+      description: "List of available token templates.",
+    }),
+  })
+  .openapi({ description: "List templates response payload." });
+
+export const templateIdParamSchema = z.string().openapi({
+  description: "Template identifier.",
+  example: "stablecoin",
+});

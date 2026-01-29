@@ -60,6 +60,16 @@
           }
         }
       }
+    },
+    {
+      "include": ["**/issuance/templates/**/*.ts"],
+      "linter": {
+        "rules": {
+          "nursery": {
+            "noSecrets": "off"
+          }
+        }
+      }
     }
   ],
   "files": {

@@ -1,15 +1,15 @@
-import { DeployPrepareApiResponse, TokenApiResponse } from "../helpers/api-types";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import type { DeployPrepareApiResponse, TokenApiResponse } from "../helpers/api-types";
 import {
   RUN_INTEGRATION_TESTS,
   SOLANA_CONFIGURED,
   TEST_PROJECT_API_KEY,
   app,
-  env,
   cleanupIntegrationSuite,
+  env,
   initIntegrationSuite,
   resetIntegrationState,
 } from "../helpers/integration";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Token Deployment", () => {
   let apiKeyHash: string;
@@ -30,176 +30,148 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Token Deployment"
     await resetIntegrationState(apiKeyHash);
   });
 
-  it(
-    "deploys a basic Token-2022 mint",
-    { timeout: 60000 },
-    async () => {
-      const createRes = await request(
-        "/v1/issuance/tokens",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+  it("deploys a basic Token-2022 mint", { timeout: 60000 }, async () => {
+    const createRes = await request("/v1/issuance/tokens", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+      },
+      body: JSON.stringify({
+        name: "Devnet Test Token",
+        symbol: "DEVTEST",
+        decimals: 6,
+        isMintable: true,
+        isFreezable: true,
+      }),
+    });
+
+    expect(createRes.status).toBe(201);
+    const created = (await createRes.json()) as TokenApiResponse;
+    const tokenId = created.data.token.id;
+    expect(created.data.token.status).toBe("pending");
+
+    const deployRes = await request(`/v1/issuance/tokens/${tokenId}/deploy`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
+    });
+
+    expect(deployRes.status).toBe(200);
+    const deployed = (await deployRes.json()) as TokenApiResponse;
+
+    expect(deployed.data.token.status).toBe("active");
+    expect(deployed.data.token.mintAddress).toBeTruthy();
+    expect(deployed.data.token.mintAddress).toMatch(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/);
+    expect(deployed.data.token.mintAuthority).toBe(custodyAddress);
+    expect(deployed.data.token.freezeAuthority).toBe(custodyAddress);
+    expect(deployed.data.token.deployedAt).toBeTruthy();
+
+    console.log(`Deployed mint: ${deployed.data.token.mintAddress}`);
+  });
+
+  it("deploys with transfer fee extension", { timeout: 60000 }, async () => {
+    const createRes = await request("/v1/issuance/tokens", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+      },
+      body: JSON.stringify({
+        name: "Transfer Fee Token",
+        symbol: "TFEE",
+        decimals: 6,
+        extensions: {
+          transferFee: {
+            basisPoints: 100,
+            maxFee: "1000000000",
+            transferFeeConfigAuthority: custodyAddress,
+            withdrawWithheldAuthority: custodyAddress,
           },
-          body: JSON.stringify({
-            name: "Devnet Test Token",
-            symbol: "DEVTEST",
-            decimals: 6,
-            isMintable: true,
-            isFreezable: true,
-          }),
-        }
-      );
+        },
+      }),
+    });
 
-      expect(createRes.status).toBe(201);
-      const created = (await createRes.json()) as TokenApiResponse;
-      const tokenId = created.data.token.id;
-      expect(created.data.token.status).toBe("pending");
+    expect(createRes.status).toBe(201);
+    const created = (await createRes.json()) as TokenApiResponse;
+    const tokenId = created.data.token.id;
 
-      const deployRes = await request(`/v1/issuance/tokens/${tokenId}/deploy`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
-      });
+    const deployRes = await request(`/v1/issuance/tokens/${tokenId}/deploy`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
+    });
 
-      expect(deployRes.status).toBe(200);
-      const deployed = (await deployRes.json()) as TokenApiResponse;
+    expect(deployRes.status).toBe(200);
+    const deployed = (await deployRes.json()) as TokenApiResponse;
+    expect(deployed.data.token.mintAddress).toBeTruthy();
 
-      expect(deployed.data.token.status).toBe("active");
-      expect(deployed.data.token.mintAddress).toBeTruthy();
-      expect(deployed.data.token.mintAddress).toMatch(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/);
-      expect(deployed.data.token.mintAuthority).toBe(custodyAddress);
-      expect(deployed.data.token.freezeAuthority).toBe(custodyAddress);
-      expect(deployed.data.token.deployedAt).toBeTruthy();
+    console.log(`Deployed transfer fee mint: ${deployed.data.token.mintAddress}`);
+  });
 
-      console.log(`Deployed mint: ${deployed.data.token.mintAddress}`);
-    }
-  );
+  it("prepares deploy transaction without executing", { timeout: 30000 }, async () => {
+    const createRes = await request("/v1/issuance/tokens", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+      },
+      body: JSON.stringify({
+        name: "Prepare Deploy Token",
+        symbol: "PREP",
+        decimals: 9,
+      }),
+    });
 
-  it(
-    "deploys with transfer fee extension",
-    { timeout: 60000 },
-    async () => {
-      const createRes = await request(
-        "/v1/issuance/tokens",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
-          },
-          body: JSON.stringify({
-            name: "Transfer Fee Token",
-            symbol: "TFEE",
-            decimals: 6,
-            extensions: {
-              transferFee: {
-                basisPoints: 100,
-                maxFee: "1000000000",
-                transferFeeConfigAuthority: custodyAddress,
-                withdrawWithheldAuthority: custodyAddress,
-              },
-            },
-          }),
-        }
-      );
+    const created = (await createRes.json()) as TokenApiResponse;
+    const tokenId = created.data.token.id;
 
-      expect(createRes.status).toBe(201);
-      const created = (await createRes.json()) as TokenApiResponse;
-      const tokenId = created.data.token.id;
+    const prepareRes = await request(`/v1/issuance/tokens/${tokenId}/deploy/prepare`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
+    });
 
-      const deployRes = await request(`/v1/issuance/tokens/${tokenId}/deploy`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
-      });
+    expect(prepareRes.status).toBe(200);
+    const prepared = (await prepareRes.json()) as DeployPrepareApiResponse;
 
-      expect(deployRes.status).toBe(200);
-      const deployed = (await deployRes.json()) as TokenApiResponse;
-      expect(deployed.data.token.mintAddress).toBeTruthy();
+    expect(prepared.data.transaction.serialized).toBeTruthy();
+    expect(prepared.data.transaction.blockhash).toBeTruthy();
+    expect(prepared.data.mint).toBeTruthy();
+    expect(prepared.data.simulation).toBeDefined();
 
-      console.log(`Deployed transfer fee mint: ${deployed.data.token.mintAddress}`);
-    }
-  );
+    const getRes = await request(`/v1/issuance/tokens/${tokenId}`, {
+      headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
+    });
 
-  it(
-    "prepares deploy transaction without executing",
-    { timeout: 30000 },
-    async () => {
-      const createRes = await request(
-        "/v1/issuance/tokens",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
-          },
-          body: JSON.stringify({
-            name: "Prepare Deploy Token",
-            symbol: "PREP",
-            decimals: 9,
-          }),
-        }
-      );
+    const token = (await getRes.json()) as TokenApiResponse;
+    expect(token.data.token.status).toBe("pending");
+  });
 
-      const created = (await createRes.json()) as TokenApiResponse;
-      const tokenId = created.data.token.id;
+  it("rejects deploy for already deployed token", { timeout: 90000 }, async () => {
+    const createRes = await request("/v1/issuance/tokens", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+      },
+      body: JSON.stringify({
+        name: "Already Deployed",
+        symbol: "DONE",
+        decimals: 9,
+      }),
+    });
 
-      const prepareRes = await request(`/v1/issuance/tokens/${tokenId}/deploy/prepare`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
-      });
+    const created = (await createRes.json()) as TokenApiResponse;
+    const tokenId = created.data.token.id;
 
-      expect(prepareRes.status).toBe(200);
-      const prepared = (await prepareRes.json()) as DeployPrepareApiResponse;
+    await request(`/v1/issuance/tokens/${tokenId}/deploy`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
+    });
 
-      expect(prepared.data.transaction.serialized).toBeTruthy();
-      expect(prepared.data.transaction.blockhash).toBeTruthy();
-      expect(prepared.data.mint).toBeTruthy();
-      expect(prepared.data.simulation).toBeDefined();
+    const secondDeployRes = await request(`/v1/issuance/tokens/${tokenId}/deploy`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
+    });
 
-      const getRes = await request(`/v1/issuance/tokens/${tokenId}`, {
-        headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
-      });
-
-      const token = (await getRes.json()) as TokenApiResponse;
-      expect(token.data.token.status).toBe("pending");
-    }
-  );
-
-  it(
-    "rejects deploy for already deployed token",
-    { timeout: 90000 },
-    async () => {
-      const createRes = await request(
-        "/v1/issuance/tokens",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
-          },
-          body: JSON.stringify({
-            name: "Already Deployed",
-            symbol: "DONE",
-            decimals: 9,
-          }),
-        }
-      );
-
-      const created = (await createRes.json()) as TokenApiResponse;
-      const tokenId = created.data.token.id;
-
-      await request(`/v1/issuance/tokens/${tokenId}/deploy`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
-      });
-
-      const secondDeployRes = await request(`/v1/issuance/tokens/${tokenId}/deploy`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
-      });
-
-      expect(secondDeployRes.status).toBe(400);
-    }
-  );
+    expect(secondDeployRes.status).toBe(400);
+  });
 });

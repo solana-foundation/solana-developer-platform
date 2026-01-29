@@ -42,6 +42,112 @@ export type AllowlistEntryStatus = "active" | "revoked";
 export type TokenTemplate = "stablecoin" | "rwa" | "arcade" | "tokenized_security" | "custom";
 
 /**
+ * Extension implementation status for feature flags
+ */
+export type ExtensionImplementationStatus = "implemented" | "disabled" | "planned";
+
+/**
+ * Extension name for Token-2022
+ */
+export type TokenExtensionName =
+  | "confidentialTransfer"
+  | "transferFee"
+  | "interestBearing"
+  | "permanentDelegate"
+  | "nonTransferable"
+  | "defaultAccountState"
+  | "metadataPointer"
+  | "groupPointer";
+
+/**
+ * Extension info for template definitions
+ */
+export interface ExtensionInfo {
+  /** Whether the extension is implemented and available */
+  status: ExtensionImplementationStatus;
+  /** Whether feature flag is enabled (only relevant if status is "implemented") */
+  enabled: boolean;
+  /** Human-readable description */
+  description: string;
+}
+
+/**
+ * Template extension configuration
+ */
+export interface TemplateExtensionConfig {
+  /** Required extensions that cannot be disabled */
+  required: TokenExtensionName[];
+  /** Optional extensions that are included by default but can be disabled */
+  defaultEnabled: TokenExtensionName[];
+  /** Optional extensions not enabled by default but can be enabled */
+  available: TokenExtensionName[];
+  /** Extensions incompatible with this template */
+  incompatible: TokenExtensionName[];
+}
+
+/**
+ * Token template definition
+ */
+export interface TokenTemplateDefinition {
+  /** Template identifier */
+  id: TokenTemplate;
+  /** Human-readable name */
+  name: string;
+  /** Description of the template use case */
+  description: string;
+  /** Default decimals for this template */
+  decimals: number;
+  /** Maximum allowed decimals */
+  maxDecimals: number;
+  /** Whether allowlist is required by default */
+  requiresAllowlist: boolean;
+  /** Whether allowlist requirement can be overridden */
+  allowlistOverridable: boolean;
+  /** Default extensions configuration */
+  extensions: TemplateExtensionConfig;
+  /** Default extension values */
+  defaultExtensions: Partial<TokenExtensionsConfig>;
+}
+
+/**
+ * Template info returned by API (includes extension status)
+ */
+export interface TokenTemplateInfo {
+  /** Template identifier */
+  id: TokenTemplate;
+  /** Human-readable name */
+  name: string;
+  /** Description of the template use case */
+  description: string;
+  /** Default decimals */
+  decimals: number;
+  /** Maximum allowed decimals */
+  maxDecimals: number;
+  /** Whether allowlist is required by default */
+  requiresAllowlist: boolean;
+  /** Whether allowlist requirement can be overridden */
+  allowlistOverridable: boolean;
+  /** Extension configuration with status info */
+  extensions: {
+    required: Array<{
+      name: TokenExtensionName;
+      status: ExtensionImplementationStatus;
+      enabled: boolean;
+    }>;
+    defaultEnabled: Array<{
+      name: TokenExtensionName;
+      status: ExtensionImplementationStatus;
+      enabled: boolean;
+    }>;
+    available: Array<{
+      name: TokenExtensionName;
+      status: ExtensionImplementationStatus;
+      enabled: boolean;
+    }>;
+  };
+}
+
+/**
  * Token-2022 extension configuration
  */
 export interface TokenExtensionsConfig {
@@ -185,8 +291,53 @@ export interface FrozenAccount {
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
+ * Extension overrides for token creation
+ * Set to false to disable an optional extension, or provide config to enable
+ */
+export interface ExtensionOverrides {
+  /** Enable/disable confidential transfers */
+  confidentialTransfer?: boolean;
+  /** Enable/configure transfer fees */
+  transferFee?:
+    | false
+    | {
+        basisPoints: number;
+        maxFee: string;
+        transferFeeConfigAuthority?: string;
+        withdrawWithheldAuthority?: string;
+      };
+  /** Enable/configure interest-bearing */
+  interestBearing?:
+    | false
+    | {
+        rate: number;
+        rateAuthority?: string;
+      };
+  /** Enable/disable permanent delegate (uses platform authority) */
+  permanentDelegate?: boolean;
+  /** Enable/disable non-transferable */
+  nonTransferable?: boolean;
+  /** Set default account state */
+  defaultAccountState?: "initialized" | "frozen";
+}
+
+/**
+ * Template overrides for customization
+ */
+export interface TokenTemplateOverrides {
+  /** Override template extensions */
+  extensions?: ExtensionOverrides;
+  /** Override allowlist requirement (only if template allows) */
+  requiresAllowlist?: boolean;
+}
+
+/**
  * Create token request
  * POST /v1/issuance/tokens
+ *
+ * Two modes:
+ * 1. Template mode: Specify template with optional overrides
+ * 2. Legacy mode: Specify extensions directly (treated as template: "custom")
  */
 export interface CreateTokenRequest {
   name: string;
@@ -196,9 +347,11 @@ export interface CreateTokenRequest {
   uri?: string;
   imageUrl?: string;
   maxSupply?: string;
-  /** Token template (determines extensions) */
+  /** Token template - defaults to "custom" if not specified */
   template?: TokenTemplate;
-  /** Custom extensions configuration (for custom template) */
+  /** Template overrides for customization */
+  overrides?: TokenTemplateOverrides;
+  /** @deprecated Use template + overrides instead. Legacy extensions configuration */
   extensions?: TokenExtensionsConfig;
   /** Require allowlist for transfers */
   requiresAllowlist?: boolean;
@@ -280,6 +433,14 @@ export interface FrozenAccountResponse {
 
 export interface ListFrozenAccountsResponse {
   frozenAccounts: FrozenAccount[];
+}
+
+export interface TokenTemplateResponse {
+  template: TokenTemplateInfo;
+}
+
+export interface ListTemplatesResponse {
+  templates: TokenTemplateInfo[];
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

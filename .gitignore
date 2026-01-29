@@ -30,6 +30,10 @@ pnpm-debug.log*
 .env.local
 .env.*.local
 
+# Kora keypairs and secrets (never commit)
+infra/kora/.keypair.json
+infra/kora/.env
+
 # Test coverage
 coverage/
 

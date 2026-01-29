@@ -27,7 +27,6 @@ import members from "@/routes/members";
 import openapi from "@/routes/openapi";
 import organizations from "@/routes/organizations";
 import projects from "@/routes/projects";
-import transactions from "@/routes/transactions";
 
 // Create app
 const app = new Hono<{ Bindings: Env }>();
@@ -84,7 +83,6 @@ v1.route("/members", members);
 v1.route("/auth", auth);
 v1.route("/projects", projects);
 v1.route("/issuance", issuance);
-v1.route("/transactions", transactions);
 
 app.route("/v1", v1);
 

@@ -8,12 +8,9 @@ import {
   apiKeyResponseSchema,
   createOrganizationResponseSchema,
   currentUserResponseSchema,
-  custodySignAsyncResponseSchema,
-  custodySignSyncResponseSchema,
   executeBurnResponseSchema,
   executeMintResponseSchema,
   frozenAccountResponseSchema,
-  getSigningStatusResponseSchema,
   inviteMemberResponseSchema,
   listApiKeysResponseSchema,
   listMembersResponseSchema,
@@ -21,6 +18,7 @@ import {
   listProjectMembersResponseSchema,
   listProjectsResponseSchema,
   listSessionsResponseSchema,
+  listTemplatesResponseSchema,
   organizationSchema,
   paginatedResponseSchema,
   prepareBurnResponseSchema,
@@ -31,12 +29,12 @@ import {
   revokeApiKeyResponseSchema,
   rotateApiKeyResponseSchema,
   sendMagicLinkResponseSchema,
-  submitTransactionResponseSchema,
   successResponseSchema,
   tokenAllowlistEntrySchema,
   tokenAllowlistResponseSchema,
   tokenResponseSchema,
   tokenSchema,
+  tokenTemplateResponseSchema,
   verifyMagicLinkResponseSchema,
 } from "../schemas";
 
@@ -71,20 +69,6 @@ export const executeMintResponse = successResponseSchema(executeMintResponseSche
 export const prepareBurnResponse = successResponseSchema(prepareBurnResponseSchema);
 export const executeBurnResponse = successResponseSchema(executeBurnResponseSchema);
 
-const submitTransactionEnvelope = z.object({
-  data: submitTransactionResponseSchema,
-});
-export const submitTransactionResponse = successResponseSchema(submitTransactionEnvelope);
-
-const custodySignSyncEnvelope = z.object({ data: custodySignSyncResponseSchema });
-const custodySignAsyncEnvelope = z.object({ data: custodySignAsyncResponseSchema });
-
-export const custodySignSyncResponse = successResponseSchema(custodySignSyncEnvelope);
-export const custodySignAsyncResponse = successResponseSchema(custodySignAsyncEnvelope);
-
-const signingStatusEnvelope = z.object({ data: getSigningStatusResponseSchema });
-export const signingStatusResponse = successResponseSchema(signingStatusEnvelope);
-
 export const sendMagicLinkResponse = successResponseSchema(sendMagicLinkResponseSchema);
 export const verifyMagicLinkResponse = successResponseSchema(verifyMagicLinkResponseSchema);
 export const currentUserResponse = successResponseSchema(currentUserResponseSchema);
@@ -94,3 +78,6 @@ export const allowlistEntriesResponse = successResponseSchema(allowlistEntriesRe
 export const allowlistEntryResponse = successResponseSchema(
   z.object({ entry: allowlistEntrySchema })
 );
+
+export const tokenTemplateResponse = successResponseSchema(tokenTemplateResponseSchema);
+export const listTemplatesResponse = successResponseSchema(listTemplatesResponseSchema);

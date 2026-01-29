@@ -2,9 +2,10 @@ import { getAuth } from "@/lib/auth";
 import { AppError, notFound } from "@/lib/errors";
 import { created, paginated, success } from "@/lib/response";
 import { AuditService } from "@/services/audit.service";
+import { resolveTemplate } from "@/services/issuance/templates";
 import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
-import type { TokenResponse } from "@sdp/types";
+import type { ExtensionOverrides, TokenResponse } from "@sdp/types";
 import type { Context } from "hono";
 import { requireProjectScope } from "../helpers";
 import { createTokenSchema, updateTokenSchema } from "../schemas";
@@ -23,6 +24,29 @@ export const createToken = async (c: AppContext) => {
     });
   }
 
+  // Resolve template with overrides
+  const templateResult = resolveTemplate({
+    template: parsed.data.template,
+    decimals: parsed.data.decimals,
+    requiresAllowlist: parsed.data.requiresAllowlist,
+    overrides: parsed.data.overrides
+      ? {
+          extensions: parsed.data.overrides.extensions as ExtensionOverrides | undefined,
+          requiresAllowlist: parsed.data.overrides.requiresAllowlist,
+        }
+      : undefined,
+    // Legacy mode: pass extensions directly if no template specified
+    extensions: parsed.data.extensions,
+  });
+
+  if (!templateResult.success) {
+    throw new AppError("BAD_REQUEST", "Template validation failed", {
+      errors: templateResult.errors,
+    });
+  }
+
+  const { config } = templateResult;
+
   const tokenService = new TokenService(c.env.DB);
 
   const token = await tokenService.createToken({
@@ -31,15 +55,15 @@ export const createToken = async (c: AppContext) => {
     createdBy: auth.id,
     name: parsed.data.name,
     symbol: parsed.data.symbol,
-    decimals: parsed.data.decimals,
+    decimals: config.decimals,
     description: parsed.data.description,
     uri: parsed.data.uri,
     imageUrl: parsed.data.imageUrl,
-    extensions: parsed.data.extensions,
+    extensions: config.extensions,
     maxSupply: parsed.data.maxSupply,
     isMintable: parsed.data.isMintable,
     isFreezable: parsed.data.isFreezable,
-    requiresAllowlist: parsed.data.requiresAllowlist,
+    requiresAllowlist: config.requiresAllowlist,
   });
 
   // Audit log
@@ -48,7 +72,11 @@ export const createToken = async (c: AppContext) => {
     action: "create",
     resourceType: "token",
     resourceId: token.id,
-    metadata: { name: token.name, symbol: token.symbol },
+    metadata: {
+      name: token.name,
+      symbol: token.symbol,
+      template: config.template,
+    },
   });
 
   const response: TokenResponse = { token };
