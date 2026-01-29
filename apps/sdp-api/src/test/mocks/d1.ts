@@ -182,6 +182,8 @@ export async function seedTestDatabase(env: Env): Promise<void> {
         is_mintable INTEGER DEFAULT 1,
         is_freezable INTEGER DEFAULT 1,
         requires_allowlist INTEGER DEFAULT 0,
+        template TEXT NOT NULL DEFAULT 'custom',
+        abl_list_address TEXT,
         status TEXT NOT NULL DEFAULT 'pending',
         deployed_at TEXT,
         created_by TEXT NOT NULL,
@@ -242,6 +244,55 @@ export async function seedTestDatabase(env: Env): Promise<void> {
         UNIQUE(token_id, account_address)
       )
     `),
+    // Custody configuration tables
+    db.prepare(`
+      CREATE TABLE IF NOT EXISTS custody_configs (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        project_id TEXT,
+        provider TEXT NOT NULL,
+        config TEXT NOT NULL,
+        default_wallet_id TEXT,
+        status TEXT NOT NULL DEFAULT 'active',
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
+        FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+        UNIQUE(organization_id, project_id)
+      )
+    `),
+    db.prepare(`
+      CREATE TABLE IF NOT EXISTS signing_requests (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        custody_config_id TEXT NOT NULL,
+        token_transaction_id TEXT,
+        external_request_id TEXT,
+        status TEXT NOT NULL DEFAULT 'pending',
+        transaction_message TEXT NOT NULL,
+        signatures TEXT,
+        metadata TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        completed_at TEXT,
+        FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
+        FOREIGN KEY (custody_config_id) REFERENCES custody_configs(id) ON DELETE SET NULL,
+        FOREIGN KEY (token_transaction_id) REFERENCES token_transactions(id) ON DELETE SET NULL
+      )
+    `),
+    db.prepare(`
+      CREATE TABLE IF NOT EXISTS custody_wallets (
+        id TEXT PRIMARY KEY,
+        custody_config_id TEXT NOT NULL,
+        wallet_id TEXT NOT NULL,
+        public_key TEXT NOT NULL,
+        label TEXT,
+        purpose TEXT,
+        status TEXT NOT NULL DEFAULT 'active',
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (custody_config_id) REFERENCES custody_configs(id) ON DELETE CASCADE,
+        UNIQUE(custody_config_id, wallet_id)
+      )
+    `),
   ]);
 }
 
@@ -254,6 +305,9 @@ export async function clearTestDatabase(env: Env): Promise<void> {
 
   // Drop tables if they exist (order matters for foreign keys)
   const tables = [
+    "custody_wallets",
+    "signing_requests",
+    "custody_configs",
     "frozen_accounts",
     "token_allowlists",
     "token_transactions",

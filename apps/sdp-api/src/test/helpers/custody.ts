@@ -1,0 +1,166 @@
+/**
+ * Custody test helpers
+ */
+
+import type { SigningConfigRecord } from "@/services/adapters/signing";
+import type { CustodyWallet } from "@/services/stores/custody-config.store";
+import type { Env } from "@/types/env";
+
+/**
+ * Seed a custody config into the test database.
+ */
+export async function seedTestCustodyConfig(env: Env, config: SigningConfigRecord): Promise<void> {
+  await env.DB.prepare(
+    `INSERT INTO custody_configs
+     (id, organization_id, project_id, provider, config, default_wallet_id, status, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  )
+    .bind(
+      config.id,
+      config.organizationId,
+      config.projectId,
+      config.provider,
+      config.config,
+      config.defaultWalletId,
+      config.status,
+      config.createdAt,
+      config.updatedAt
+    )
+    .run();
+}
+
+/**
+ * Seed a custody wallet into the test database.
+ */
+export async function seedTestCustodyWallet(env: Env, wallet: CustodyWallet): Promise<void> {
+  await env.DB.prepare(
+    `INSERT INTO custody_wallets
+     (id, custody_config_id, wallet_id, public_key, label, purpose, status, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  )
+    .bind(
+      wallet.id,
+      wallet.custodyConfigId,
+      wallet.walletId,
+      wallet.publicKey,
+      wallet.label,
+      wallet.purpose,
+      wallet.status,
+      wallet.createdAt
+    )
+    .run();
+}
+
+/**
+ * Seed full custody setup (config + wallet) for an organization.
+ */
+export async function seedTestCustodySetup(
+  env: Env,
+  config: SigningConfigRecord,
+  wallet: CustodyWallet
+): Promise<void> {
+  await seedTestCustodyConfig(env, config);
+  await seedTestCustodyWallet(env, wallet);
+}
+
+/**
+ * Get custody config from test database by ID.
+ */
+export async function getTestCustodyConfig(
+  env: Env,
+  configId: string
+): Promise<SigningConfigRecord | null> {
+  const row = await env.DB.prepare(
+    `SELECT id, organization_id, project_id, provider, config, default_wallet_id, status, created_at, updated_at
+     FROM custody_configs WHERE id = ?`
+  )
+    .bind(configId)
+    .first<{
+      id: string;
+      organization_id: string;
+      project_id: string | null;
+      provider: string;
+      config: string;
+      default_wallet_id: string | null;
+      status: string;
+      created_at: string;
+      updated_at: string;
+    }>();
+
+  if (!row) return null;
+
+  return {
+    id: row.id,
+    organizationId: row.organization_id,
+    projectId: row.project_id,
+    provider: row.provider as "local" | "fireblocks",
+    config: row.config,
+    defaultWalletId: row.default_wallet_id,
+    status: row.status as "active" | "inactive",
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+/**
+ * Get custody config by organization ID from test database.
+ */
+export async function getTestCustodyConfigByOrg(
+  env: Env,
+  orgId: string,
+  projectId?: string
+): Promise<SigningConfigRecord | null> {
+  const query = projectId
+    ? `SELECT id, organization_id, project_id, provider, config, default_wallet_id, status, created_at, updated_at
+       FROM custody_configs WHERE organization_id = ? AND project_id = ? AND status = 'active'`
+    : `SELECT id, organization_id, project_id, provider, config, default_wallet_id, status, created_at, updated_at
+       FROM custody_configs WHERE organization_id = ? AND project_id IS NULL AND status = 'active'`;
+
+  const row = await env.DB.prepare(query)
+    .bind(...(projectId ? [orgId, projectId] : [orgId]))
+    .first<{
+      id: string;
+      organization_id: string;
+      project_id: string | null;
+      provider: string;
+      config: string;
+      default_wallet_id: string | null;
+      status: string;
+      created_at: string;
+      updated_at: string;
+    }>();
+
+  if (!row) return null;
+
+  return {
+    id: row.id,
+    organizationId: row.organization_id,
+    projectId: row.project_id,
+    provider: row.provider as "local" | "fireblocks",
+    config: row.config,
+    defaultWalletId: row.default_wallet_id,
+    status: row.status as "active" | "inactive",
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+/**
+ * Count custody configs in test database.
+ */
+export async function countTestCustodyConfigs(env: Env): Promise<number> {
+  const result = await env.DB.prepare("SELECT COUNT(*) as count FROM custody_configs").first<{
+    count: number;
+  }>();
+  return result?.count ?? 0;
+}
+
+/**
+ * Count custody wallets in test database.
+ */
+export async function countTestCustodyWallets(env: Env): Promise<number> {
+  const result = await env.DB.prepare("SELECT COUNT(*) as count FROM custody_wallets").first<{
+    count: number;
+  }>();
+  return result?.count ?? 0;
+}

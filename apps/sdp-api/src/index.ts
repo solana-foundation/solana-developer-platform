@@ -19,6 +19,7 @@ import type { Env } from "@/types/env";
 import allowlist from "@/routes/allowlist";
 import apiKeys from "@/routes/api-keys";
 import auth from "@/routes/auth";
+import custody from "@/routes/custody";
 import docs from "@/routes/docs";
 // Routes
 import health from "@/routes/health";
@@ -83,6 +84,7 @@ v1.route("/members", members);
 v1.route("/auth", auth);
 v1.route("/projects", projects);
 v1.route("/issuance", issuance);
+v1.route("/custody", custody);
 
 app.route("/v1", v1);
 

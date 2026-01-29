@@ -56,6 +56,11 @@ export const PERMISSIONS = [
   "sessions:read",
   "sessions:write",
 
+  // Custody/signing key management
+  "custody:read",
+  "custody:write",
+  "custody:admin",
+
   // Admin wildcard (all permissions)
   "*",
 ] as const;
