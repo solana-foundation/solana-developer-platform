@@ -497,7 +497,7 @@ export const createTokenRequestSchema = createTokenSchemaBase
       example: "EXM",
     }),
     decimals: createTokenSchemaBase.shape.decimals.openapi({
-      description: "Token decimals. Defaults to template default (varies by template).",
+      description: "Token decimals. Required for Mosaic template creation.",
       example: 6,
     }),
     description: createTokenSchemaBase.shape.description.openapi({
@@ -517,11 +517,11 @@ export const createTokenRequestSchema = createTokenSchemaBase
       example: "1000000",
     }),
     template: createTokenSchemaBase.shape.template.openapi({
-      description: "Token template preset. Defaults to 'custom' if not specified.",
+      description: "Token template preset (Mosaic). Defaults to 'custom' if not specified.",
       example: "stablecoin",
     }),
     overrides: templateOverridesOpenApiSchema.optional().openapi({
-      description: "Template customization overrides.",
+      description: "Deprecated. Template overrides are not applied for Mosaic templates.",
       example: {
         extensions: {
           transferFee: { basisPoints: 50, maxFee: "1000000" },
@@ -676,7 +676,7 @@ export const templateExtensionInfoSchema = z
   .openapi({ description: "Extension info with implementation status." });
 
 export const tokenTemplateIdSchema = z
-  .enum(["stablecoin", "rwa", "arcade", "tokenized_security", "custom"])
+  .enum(["stablecoin", "arcade", "tokenized-security", "custom"])
   .openapi({
     description: "Token template identifier.",
     example: "stablecoin",
@@ -689,39 +689,13 @@ export const tokenTemplateInfoSchema = z
       description: "Human-readable template name.",
       example: "Stablecoin",
     }),
-    description: z.string().openapi({
-      description: "Template description and use case.",
-      example: "USD-backed stablecoins with compliance controls and privacy features",
-    }),
-    decimals: z.number().int().openapi({
-      description: "Default decimals for this template.",
-      example: 6,
-    }),
-    maxDecimals: z.number().int().openapi({
-      description: "Maximum allowed decimals for this template.",
-      example: 9,
-    }),
-    requiresAllowlist: z.boolean().openapi({
-      description: "Whether allowlist is required by default.",
-      example: true,
-    }),
-    allowlistOverridable: z.boolean().openapi({
-      description: "Whether the allowlist requirement can be overridden.",
-      example: false,
-    }),
-    extensions: z
-      .object({
-        required: z.array(templateExtensionInfoSchema).openapi({
-          description: "Extensions that are required and cannot be disabled.",
-        }),
-        defaultEnabled: z.array(templateExtensionInfoSchema).openapi({
-          description: "Extensions enabled by default but can be disabled.",
-        }),
-        available: z.array(templateExtensionInfoSchema).openapi({
-          description: "Extensions available to enable via overrides.",
-        }),
-      })
-      .openapi({ description: "Template extension configuration." }),
+    description: z
+      .string()
+      .optional()
+      .openapi({
+        description: "Template description and use case.",
+        example: "USD-backed stablecoins with compliance controls and privacy features",
+      }),
   })
   .openapi({ description: "Token template information." });
 

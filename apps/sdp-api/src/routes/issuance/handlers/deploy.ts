@@ -2,10 +2,12 @@ import { getAuth } from "@/lib/auth";
 import { AppError, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { AuditService } from "@/services/audit.service";
-import { createSigner, createToken2022Service } from "@/services/solana";
+import { createMosaicService } from "@/services/mosaic";
+import { createOrgSigner } from "@/services/solana";
 import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
 import type { TokenResponse } from "@sdp/types";
+import type { Address } from "@solana/kit";
 import type { Context } from "hono";
 
 type AppContext = Context<{ Bindings: Env }>;
@@ -37,26 +39,37 @@ export const deployToken = async (c: AppContext) => {
     throw new AppError("BAD_REQUEST", "Token already has a mint address");
   }
 
-  // Get custody signer
-  const signer = await createSigner(c.env);
+  // Get custody signer (resolves via 3-tier: project → org → env fallback)
+  const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId);
   const custodyAddress = signer.address;
 
-  // Create Token-2022 service and deploy (uses Kora for fee payment if configured)
-  const token2022 = createToken2022Service(c.env);
+  // Create Mosaic service for template-based token deployment
+  const mosaic = createMosaicService(c.env, signer);
 
-  const result = await token2022.createMint({
+  // Deploy using Mosaic templates - handles ABL setup automatically
+  const result = await mosaic.createToken({
+    template: token.template,
+    metadata: {
+      name: token.name,
+      symbol: token.symbol,
+      uri: token.uri ?? "",
+    },
     decimals: token.decimals,
-    mintAuthority: custodyAddress,
+    mintAuthority: signer,
     freezeAuthority: token.isFreezable ? custodyAddress : null,
+    feePayer: signer,
     extensions: token.extensions ?? undefined,
+    // Enable on-chain ABL for templates that require allowlist
+    enableAbl: token.requiresAllowlist,
   });
 
-  // Update token with deployment info
+  // Update token with deployment info (including ABL list if created)
   const updatedToken = await tokenService.setTokenDeployed(
     tokenId,
-    result.mint,
+    result.mint as Address,
     custodyAddress,
-    token.isFreezable ? custodyAddress : null
+    token.isFreezable ? custodyAddress : null,
+    result.listAddress as Address | undefined
   );
 
   // Create transaction record
@@ -69,6 +82,8 @@ export const deployToken = async (c: AppContext) => {
       mintAddress: result.mint,
       mintAuthority: custodyAddress,
       freezeAuthority: token.isFreezable ? custodyAddress : null,
+      ablListAddress: result.listAddress,
+      template: token.template,
     },
     initiatedByKeyId: auth.id,
   });
@@ -83,6 +98,8 @@ export const deployToken = async (c: AppContext) => {
       mintAddress: result.mint,
       signature: result.signature,
       slot: result.slot.toString(),
+      template: token.template,
+      ablListAddress: result.listAddress,
     },
   });
 
@@ -116,22 +133,27 @@ export const prepareDeploy = async (c: AppContext) => {
     throw new AppError("BAD_REQUEST", "Token already has a mint address");
   }
 
-  // Get custody signer for fee payer
-  const signer = await createSigner(c.env);
+  // Get custody signer (resolves via 3-tier: project → org → env fallback)
+  const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId);
   const custodyAddress = signer.address;
 
-  // Create Token-2022 service and prepare transaction
-  const token2022 = createToken2022Service(c.env);
+  // Create Mosaic service and prepare transaction
+  const mosaic = createMosaicService(c.env, signer);
 
-  const prepared = await token2022.prepareCreateMint(
-    {
-      decimals: token.decimals,
-      mintAuthority: custodyAddress,
-      freezeAuthority: token.isFreezable ? custodyAddress : null,
-      extensions: token.extensions ?? undefined,
+  const prepared = await mosaic.prepareCreateToken({
+    template: token.template,
+    metadata: {
+      name: token.name,
+      symbol: token.symbol,
+      uri: token.uri ?? "",
     },
-    true // Request simulation
-  );
+    decimals: token.decimals,
+    mintAuthority: signer,
+    freezeAuthority: token.isFreezable ? custodyAddress : null,
+    feePayer: signer,
+    extensions: token.extensions ?? undefined,
+    enableAbl: token.requiresAllowlist,
+  });
 
   // Audit log
   const auditService = new AuditService(c.env.DB);
@@ -142,6 +164,7 @@ export const prepareDeploy = async (c: AppContext) => {
     metadata: {
       mode: "prepare",
       mint: prepared.mint,
+      template: token.template,
     },
   });
 
@@ -152,6 +175,6 @@ export const prepareDeploy = async (c: AppContext) => {
       lastValidBlockHeight: prepared.lastValidBlockHeight.toString(),
     },
     mint: prepared.mint,
-    simulation: prepared.simulation,
+    listAddress: prepared.listAddress,
   });
 };

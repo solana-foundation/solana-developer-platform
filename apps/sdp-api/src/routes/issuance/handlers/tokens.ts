@@ -2,10 +2,9 @@ import { getAuth } from "@/lib/auth";
 import { AppError, notFound } from "@/lib/errors";
 import { created, paginated, success } from "@/lib/response";
 import { AuditService } from "@/services/audit.service";
-import { resolveTemplate } from "@/services/issuance/templates";
 import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
-import type { ExtensionOverrides, TokenResponse } from "@sdp/types";
+import type { TokenResponse } from "@sdp/types";
 import type { Context } from "hono";
 import { requireProjectScope } from "../helpers";
 import { createTokenSchema, updateTokenSchema } from "../schemas";
@@ -24,28 +23,12 @@ export const createToken = async (c: AppContext) => {
     });
   }
 
-  // Resolve template with overrides
-  const templateResult = resolveTemplate({
-    template: parsed.data.template,
-    decimals: parsed.data.decimals,
-    requiresAllowlist: parsed.data.requiresAllowlist,
-    overrides: parsed.data.overrides
-      ? {
-          extensions: parsed.data.overrides.extensions as ExtensionOverrides | undefined,
-          requiresAllowlist: parsed.data.overrides.requiresAllowlist,
-        }
-      : undefined,
-    // Legacy mode: pass extensions directly if no template specified
-    extensions: parsed.data.extensions,
-  });
-
-  if (!templateResult.success) {
-    throw new AppError("BAD_REQUEST", "Template validation failed", {
-      errors: templateResult.errors,
-    });
-  }
-
-  const { config } = templateResult;
+  const template =
+    parsed.data.template === "tokenized_security" ? "tokenized-security" : parsed.data.template;
+  const resolvedTemplate = template ?? "custom";
+  const decimals = parsed.data.decimals ?? 9;
+  const requiresAllowlist =
+    parsed.data.overrides?.requiresAllowlist ?? parsed.data.requiresAllowlist ?? false;
 
   const tokenService = new TokenService(c.env.DB);
 
@@ -55,15 +38,16 @@ export const createToken = async (c: AppContext) => {
     createdBy: auth.id,
     name: parsed.data.name,
     symbol: parsed.data.symbol,
-    decimals: config.decimals,
+    decimals,
     description: parsed.data.description,
     uri: parsed.data.uri,
     imageUrl: parsed.data.imageUrl,
-    extensions: config.extensions,
+    template: resolvedTemplate, // Store template for Mosaic deployment
+    extensions: parsed.data.extensions,
     maxSupply: parsed.data.maxSupply,
     isMintable: parsed.data.isMintable,
     isFreezable: parsed.data.isFreezable,
-    requiresAllowlist: config.requiresAllowlist,
+    requiresAllowlist,
   });
 
   // Audit log
@@ -75,7 +59,7 @@ export const createToken = async (c: AppContext) => {
     metadata: {
       name: token.name,
       symbol: token.symbol,
-      template: config.template,
+      template: resolvedTemplate,
     },
   });
 

@@ -39,7 +39,7 @@ export type AllowlistEntryStatus = "active" | "revoked";
 /**
  * Token template types aligned with Mosaic SDK templates
  */
-export type TokenTemplate = "stablecoin" | "rwa" | "arcade" | "tokenized_security" | "custom";
+export type TokenTemplate = "stablecoin" | "rwa" | "arcade" | "tokenized-security" | "custom";
 
 /**
  * Extension implementation status for feature flags
@@ -117,34 +117,8 @@ export interface TokenTemplateInfo {
   id: TokenTemplate;
   /** Human-readable name */
   name: string;
-  /** Description of the template use case */
-  description: string;
-  /** Default decimals */
-  decimals: number;
-  /** Maximum allowed decimals */
-  maxDecimals: number;
-  /** Whether allowlist is required by default */
-  requiresAllowlist: boolean;
-  /** Whether allowlist requirement can be overridden */
-  allowlistOverridable: boolean;
-  /** Extension configuration with status info */
-  extensions: {
-    required: Array<{
-      name: TokenExtensionName;
-      status: ExtensionImplementationStatus;
-      enabled: boolean;
-    }>;
-    defaultEnabled: Array<{
-      name: TokenExtensionName;
-      status: ExtensionImplementationStatus;
-      enabled: boolean;
-    }>;
-    available: Array<{
-      name: TokenExtensionName;
-      status: ExtensionImplementationStatus;
-      enabled: boolean;
-    }>;
-  };
+  /** Optional description of the template use case */
+  description?: string;
 }
 
 /**
@@ -200,6 +174,8 @@ export interface Token {
   mintAuthority: string | null;
   /** Freeze authority public key */
   freezeAuthority: string | null;
+  /** On-chain ABL list address (null until deployed with Mosaic) */
+  ablListAddress: string | null;
   name: string;
   symbol: string;
   decimals: number;
@@ -207,6 +183,8 @@ export interface Token {
   /** Token metadata URI */
   uri: string | null;
   imageUrl: string | null;
+  /** Token template used for creation (determines Mosaic template at deploy) */
+  template: TokenTemplate;
   /** Token-2022 extensions configuration */
   extensions: TokenExtensionsConfig | null;
   /** Current total supply as decimal string */

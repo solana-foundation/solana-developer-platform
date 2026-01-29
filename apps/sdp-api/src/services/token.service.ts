@@ -13,6 +13,7 @@ import type {
   TokenAllowlistEntry,
   TokenExtensionsConfig,
   TokenStatus,
+  TokenTemplate,
   TokenTransaction,
   TokenTransactionStatus,
   TokenTransactionType,
@@ -32,6 +33,8 @@ export interface CreateTokenInput {
   description?: string;
   uri?: string;
   imageUrl?: string;
+  /** Token template (determines Mosaic template at deploy) */
+  template?: TokenTemplate;
   extensions?: TokenExtensionsConfig;
   maxSupply?: string;
   isMintable?: boolean;
@@ -92,12 +95,14 @@ interface TokenRow {
   mint_address: string | null;
   mint_authority: string | null;
   freeze_authority: string | null;
+  abl_list_address: string | null;
   name: string;
   symbol: string;
   decimals: number;
   description: string | null;
   uri: string | null;
   image_url: string | null;
+  template: string;
   extensions: string | null;
   total_supply: string;
   max_supply: string | null;
@@ -179,12 +184,14 @@ export class TokenService {
       mintAddress: null,
       mintAuthority: null,
       freezeAuthority: null,
+      ablListAddress: null,
       name: input.name,
       symbol: input.symbol,
       decimals: input.decimals ?? 9,
       description: input.description ?? null,
       uri: input.uri ?? null,
       imageUrl: input.imageUrl ?? null,
+      template: input.template ?? "custom",
       extensions: input.extensions ?? null,
       totalSupply: "0",
       maxSupply: input.maxSupply ?? null,
@@ -202,10 +209,10 @@ export class TokenService {
       .prepare(
         `INSERT INTO tokens (
           id, project_id, organization_id, mint_address, mint_authority, freeze_authority,
-          name, symbol, decimals, description, uri, image_url, extensions,
-          total_supply, max_supply, is_mintable, is_freezable, requires_allowlist,
+          abl_list_address, name, symbol, decimals, description, uri, image_url, template,
+          extensions, total_supply, max_supply, is_mintable, is_freezable, requires_allowlist,
           status, deployed_at, created_by, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         token.id,
@@ -214,12 +221,14 @@ export class TokenService {
         token.mintAddress,
         token.mintAuthority,
         token.freezeAuthority,
+        token.ablListAddress,
         token.name,
         token.symbol,
         token.decimals,
         token.description,
         token.uri,
         token.imageUrl,
+        token.template,
         token.extensions ? JSON.stringify(token.extensions) : null,
         token.totalSupply,
         token.maxSupply,
@@ -244,8 +253,8 @@ export class TokenService {
     const row = await this.db
       .prepare(
         `SELECT id, project_id, organization_id, mint_address, mint_authority, freeze_authority,
-                name, symbol, decimals, description, uri, image_url, extensions,
-                total_supply, max_supply, is_mintable, is_freezable, requires_allowlist,
+                abl_list_address, name, symbol, decimals, description, uri, image_url, template,
+                extensions, total_supply, max_supply, is_mintable, is_freezable, requires_allowlist,
                 status, deployed_at, created_by, created_at, updated_at
          FROM tokens WHERE id = ?`
       )
@@ -266,8 +275,8 @@ export class TokenService {
     const row = await this.db
       .prepare(
         `SELECT id, project_id, organization_id, mint_address, mint_authority, freeze_authority,
-                name, symbol, decimals, description, uri, image_url, extensions,
-                total_supply, max_supply, is_mintable, is_freezable, requires_allowlist,
+                abl_list_address, name, symbol, decimals, description, uri, image_url, template,
+                extensions, total_supply, max_supply, is_mintable, is_freezable, requires_allowlist,
                 status, deployed_at, created_by, created_at, updated_at
          FROM tokens WHERE mint_address = ?`
       )
@@ -293,8 +302,8 @@ export class TokenService {
     let countQuery = "SELECT COUNT(*) as count FROM tokens WHERE project_id = ?";
     let selectQuery = `
       SELECT id, project_id, organization_id, mint_address, mint_authority, freeze_authority,
-             name, symbol, decimals, description, uri, image_url, extensions,
-             total_supply, max_supply, is_mintable, is_freezable, requires_allowlist,
+             abl_list_address, name, symbol, decimals, description, uri, image_url, template,
+             extensions, total_supply, max_supply, is_mintable, is_freezable, requires_allowlist,
              status, deployed_at, created_by, created_at, updated_at
       FROM tokens WHERE project_id = ?
     `;
@@ -384,13 +393,14 @@ export class TokenService {
   }
 
   /**
-   * Set token as deployed with mint address
+   * Set token as deployed with mint address and optional ABL list
    */
   async setTokenDeployed(
     tokenId: string,
     mintAddress: string,
     mintAuthority: string,
-    freezeAuthority: string | null
+    freezeAuthority: string | null,
+    ablListAddress?: string | null
   ): Promise<Token> {
     const now = new Date().toISOString();
 
@@ -400,12 +410,13 @@ export class TokenService {
           mint_address = ?,
           mint_authority = ?,
           freeze_authority = ?,
+          abl_list_address = ?,
           status = 'active',
           deployed_at = ?,
           updated_at = ?
          WHERE id = ?`
       )
-      .bind(mintAddress, mintAuthority, freezeAuthority, now, now, tokenId)
+      .bind(mintAddress, mintAuthority, freezeAuthority, ablListAddress ?? null, now, now, tokenId)
       .run();
 
     const updated = await this.getToken(tokenId);
@@ -917,12 +928,14 @@ export class TokenService {
       mintAddress: row.mint_address,
       mintAuthority: row.mint_authority,
       freezeAuthority: row.freeze_authority,
+      ablListAddress: row.abl_list_address,
       name: row.name,
       symbol: row.symbol,
       decimals: row.decimals,
       description: row.description,
       uri: row.uri,
       imageUrl: row.image_url,
+      template: (row.template ?? "custom") as TokenTemplate,
       extensions,
       totalSupply: row.total_supply,
       maxSupply: row.max_supply,

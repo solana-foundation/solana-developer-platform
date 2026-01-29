@@ -3,7 +3,7 @@ import { AppError, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { assertValidAddress } from "@/lib/solana";
 import { AuditService } from "@/services/audit.service";
-import { createSigner, createToken2022Service } from "@/services/solana";
+import { createOrgSigner, createToken2022Service } from "@/services/solana";
 import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
 import type { Context } from "hono";
@@ -43,13 +43,13 @@ export const prepareBurn = async (c: AppContext) => {
     throw new AppError("TOKEN_NOT_DEPLOYED", "Token has not been deployed to Solana");
   }
 
-  // Validate addresses and get custody authority
-  const signer = await createSigner(c.env);
+  // Validate addresses and get custody authority (via 3-tier resolution)
+  const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId);
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
   const source = assertValidAddress(parsed.data.burn.source, "source");
 
   // Build unsigned transaction
-  const token2022 = createToken2022Service(c.env);
+  const token2022 = createToken2022Service(c.env, signer);
   const prepared = await token2022.prepareBurn(
     {
       mint: mintAddress,
@@ -131,8 +131,8 @@ export const executeBurn = async (c: AppContext) => {
     throw new AppError("TOKEN_NOT_DEPLOYED", "Token has not been deployed to Solana");
   }
 
-  // Get custody signer
-  const signer = await createSigner(c.env);
+  // Get custody signer (via 3-tier resolution)
+  const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId);
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
   const source = assertValidAddress(parsed.data.burn.source, "source");
 
@@ -150,7 +150,7 @@ export const executeBurn = async (c: AppContext) => {
   });
 
   // Execute burn on Solana
-  const token2022 = createToken2022Service(c.env);
+  const token2022 = createToken2022Service(c.env, signer);
 
   try {
     const result = await token2022.burn({

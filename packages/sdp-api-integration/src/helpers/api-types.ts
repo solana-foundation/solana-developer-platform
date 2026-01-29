@@ -60,3 +60,26 @@ export interface UnfreezeApiResponse
       signature?: string;
     };
   }> {}
+
+export interface TokenAllowlistResponse
+  extends ApiResponse<{
+    entry: {
+      id: string;
+      tokenId: string;
+      address: string;
+      label?: string;
+      kycStatus?: string;
+      status: string;
+    };
+  }> {}
+
+export interface AllowlistListResponse
+  extends ApiResponse<{
+    data: Array<{
+      id: string;
+      tokenId: string;
+      address: string;
+      label?: string;
+      status: string;
+    }>;
+  }> {}

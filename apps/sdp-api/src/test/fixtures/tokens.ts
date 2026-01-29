@@ -61,6 +61,9 @@ export const TEST_TOKEN: Token = {
   createdBy: TEST_PROJECT_API_KEY.id,
   createdAt: "2024-01-01T00:00:00.000Z",
   updatedAt: "2024-01-01T00:00:00.000Z",
+  // Mosaic integration fields
+  ablListAddress: null,
+  template: "custom",
 };
 
 export const TEST_ACTIVE_TOKEN: Token = {

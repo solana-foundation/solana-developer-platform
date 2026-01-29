@@ -17,6 +17,9 @@ import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/d1";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
+// Check if running in mock mode (no RPC access)
+const isMockMode = (env as { SOLANA_MOCK?: string }).SOLANA_MOCK === "true";
+
 describe("Issuance Routes", () => {
   let apiKeyHash: string;
 
@@ -398,7 +401,8 @@ describe("Issuance Routes", () => {
       activeTokenId = TEST_ACTIVE_TOKEN.id;
     });
 
-    it("prepares mint transaction", async () => {
+    // Skip in mock mode - Mosaic SDK requires RPC to fetch mint details
+    it.skipIf(isMockMode)("prepares mint transaction", async () => {
       const res = await app.request(
         `/v1/issuance/tokens/${activeTokenId}/mint/prepare`,
         {
@@ -867,7 +871,8 @@ describe("Issuance Routes", () => {
       expect(body.error.code).toBe("NOT_ON_TOKEN_ALLOWLIST");
     });
 
-    it("allows mint to allowlisted address", async () => {
+    // Skip in mock mode - Mosaic SDK requires RPC to fetch mint details
+    it.skipIf(isMockMode)("allows mint to allowlisted address", async () => {
       // Add to allowlist first
       await app.request(
         `/v1/issuance/tokens/${allowlistTokenId}/allowlist`,
@@ -902,6 +907,314 @@ describe("Issuance Routes", () => {
       );
 
       expect(res.status).toBe(200);
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Template Tests
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  describe("Templates API", () => {
+    describe("GET /v1/issuance/templates", () => {
+      it("lists all templates", async () => {
+        const res = await app.request(
+          "/v1/issuance/templates",
+          {
+            headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
+          },
+          env
+        );
+
+        expect(res.status).toBe(200);
+        const body = await res.json();
+        expect(body.data.templates).toBeInstanceOf(Array);
+        expect(body.data.templates.length).toBe(4);
+
+        // Verify template structure
+        const stablecoin = body.data.templates.find((t: { id: string }) => t.id === "stablecoin");
+        expect(stablecoin).toBeDefined();
+        expect(stablecoin.name).toBe("Stablecoin");
+        const tokenized = body.data.templates.find(
+          (t: { id: string }) => t.id === "tokenized-security"
+        );
+        expect(tokenized).toBeDefined();
+        const custom = body.data.templates.find((t: { id: string }) => t.id === "custom");
+        expect(custom).toBeDefined();
+      });
+    });
+
+    describe("GET /v1/issuance/templates/:templateId", () => {
+      it("returns stablecoin template", async () => {
+        const res = await app.request(
+          "/v1/issuance/templates/stablecoin",
+          {
+            headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
+          },
+          env
+        );
+
+        expect(res.status).toBe(200);
+        const body = await res.json();
+        expect(body.data.template.id).toBe("stablecoin");
+        expect(body.data.template.name).toBe("Stablecoin");
+      });
+
+      it("returns arcade template", async () => {
+        const res = await app.request(
+          "/v1/issuance/templates/arcade",
+          {
+            headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
+          },
+          env
+        );
+
+        expect(res.status).toBe(200);
+        const body = await res.json();
+        expect(body.data.template.id).toBe("arcade");
+        expect(body.data.template.name).toBe("Arcade");
+      });
+
+      it("returns 404 for unknown template", async () => {
+        const res = await app.request(
+          "/v1/issuance/templates/nonexistent",
+          {
+            headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
+          },
+          env
+        );
+
+        expect(res.status).toBe(404);
+      });
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Template-Based Token Creation Tests
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  describe("Template-based Token Creation", () => {
+    it("creates token with arcade template", async () => {
+      const res = await app.request(
+        "/v1/issuance/tokens",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            name: "Arcade Token",
+            symbol: "ARCADE",
+            template: "arcade",
+          }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(201);
+      const body = await res.json();
+      expect(body.data.token.decimals).toBe(0); // Arcade default
+      expect(body.data.token.requiresAllowlist).toBe(false);
+      expect(body.data.token.extensions?.defaultAccountState).toBe("initialized");
+    });
+
+    it("creates token with rwa template", async () => {
+      const res = await app.request(
+        "/v1/issuance/tokens",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            name: "Real Estate Token",
+            symbol: "RWA",
+            template: "rwa",
+          }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(201);
+      const body = await res.json();
+      expect(body.data.token.decimals).toBe(8); // RWA default
+      expect(body.data.token.requiresAllowlist).toBe(true);
+      expect(body.data.token.extensions?.defaultAccountState).toBe("frozen");
+    });
+
+    it("creates token with decimal override", async () => {
+      const res = await app.request(
+        "/v1/issuance/tokens",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            name: "Custom Decimals Arcade",
+            symbol: "CDA",
+            template: "arcade",
+            decimals: 6, // Override arcade's 0 decimals
+          }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(201);
+      const body = await res.json();
+      expect(body.data.token.decimals).toBe(6);
+    });
+
+    it("creates token with extension override", async () => {
+      const res = await app.request(
+        "/v1/issuance/tokens",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            name: "Token with Fees",
+            symbol: "FEE",
+            template: "arcade",
+            overrides: {
+              extensions: {
+                transferFee: {
+                  basisPoints: 50,
+                  maxFee: "1000000",
+                },
+              },
+            },
+          }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(201);
+      const body = await res.json();
+      expect(body.data.token.extensions?.transferFee).toBeDefined();
+      expect(body.data.token.extensions?.transferFee?.basisPoints).toBe(50);
+    });
+
+    it("creates token with allowlist override", async () => {
+      const res = await app.request(
+        "/v1/issuance/tokens",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            name: "Allowlisted Arcade",
+            symbol: "ALLARC",
+            template: "arcade",
+            overrides: {
+              requiresAllowlist: true, // Arcade allows this override
+            },
+          }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(201);
+      const body = await res.json();
+      expect(body.data.token.requiresAllowlist).toBe(true);
+    });
+
+    it("rejects disabling required allowlist for stablecoin", async () => {
+      const res = await app.request(
+        "/v1/issuance/tokens",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            name: "Invalid Stablecoin",
+            symbol: "INVSC",
+            template: "stablecoin",
+            overrides: {
+              requiresAllowlist: false, // Stablecoin doesn't allow this
+              extensions: {
+                confidentialTransfer: false, // Disable feature-flagged extension
+              },
+            },
+          }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error.details?.errors).toBeInstanceOf(Array);
+      expect(
+        body.error.details?.errors.some((e: { code: string }) => e.code === "ALLOWLIST_REQUIRED")
+      ).toBe(true);
+    });
+
+    it("rejects incompatible extension for template", async () => {
+      const res = await app.request(
+        "/v1/issuance/tokens",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            name: "Invalid Arcade",
+            symbol: "INVARC",
+            template: "arcade",
+            overrides: {
+              extensions: {
+                confidentialTransfer: true, // Arcade doesn't support CT
+              },
+            },
+          }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error.details?.errors).toBeInstanceOf(Array);
+      expect(
+        body.error.details?.errors.some((e: { code: string }) => e.code === "EXTENSION_NOT_ALLOWED")
+      ).toBe(true);
+    });
+
+    it("creates token with legacy extensions format (backward compatibility)", async () => {
+      const res = await app.request(
+        "/v1/issuance/tokens",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            name: "Legacy Token",
+            symbol: "LEGACY",
+            // No template specified - legacy mode
+            extensions: {
+              defaultAccountState: "frozen",
+            },
+            requiresAllowlist: true,
+          }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(201);
+      const body = await res.json();
+      expect(body.data.token.decimals).toBe(9); // Custom template default
+      expect(body.data.token.requiresAllowlist).toBe(true);
+      expect(body.data.token.extensions?.defaultAccountState).toBe("frozen");
     });
   });
 });

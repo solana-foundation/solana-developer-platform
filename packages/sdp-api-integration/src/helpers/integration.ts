@@ -8,6 +8,7 @@ import { clearTestDatabase, seedTestDatabase } from "@sdp/api-test/mocks/d1";
 import app from "@sdp/api/index";
 import { hashString } from "@sdp/api/lib/hash";
 import { Token2022Service, createSigner } from "@sdp/api/services/solana";
+import { createMosaicService } from "@sdp/api/services/mosaic";
 import { env } from "./env";
 
 const SOLANA_CONFIGURED = !!env.SOLANA_RPC_URL && !!env.CUSTODY_PRIVATE_KEY;
@@ -139,6 +140,7 @@ export {
   env,
   Token2022Service,
   createSigner,
+  createMosaicService,
   TEST_ORG,
   TEST_USER,
   TEST_PROJECT,
