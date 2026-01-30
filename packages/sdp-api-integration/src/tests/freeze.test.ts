@@ -68,7 +68,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Freeze/Unfreeze O
       body: JSON.stringify({
         mint: {
           destination: custodyAddress,
-          amount: "1000000000",
+          amount: "1",
         },
       }),
     });

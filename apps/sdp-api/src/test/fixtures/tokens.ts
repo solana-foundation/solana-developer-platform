@@ -52,6 +52,7 @@ export const TEST_TOKEN: Token = {
   imageUrl: null,
   extensions: null,
   totalSupply: "0",
+  totalSupplyUpdatedAt: "2024-01-01T00:00:00.000Z",
   maxSupply: "1000000000000000000",
   isMintable: true,
   isFreezable: true,
@@ -98,7 +99,7 @@ export const TEST_TOKEN_TRANSACTION: TokenTransaction = {
   params: {
     // biome-ignore lint/nursery/noSecrets: Test Solana address, not a secret
     destination: "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ",
-    amount: "1000000000",
+    amount: "1",
   },
   slot: null,
   blockTime: null,
@@ -115,9 +116,6 @@ export const TEST_ALLOWLIST_ENTRY: TokenAllowlistEntry = {
   // biome-ignore lint/nursery/noSecrets: Test Solana address, not a secret
   address: "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ",
   label: "Test Wallet",
-  kycStatus: "approved",
-  kycProvider: "test-provider",
-  kycVerifiedAt: "2024-01-01T12:00:00.000Z",
   status: "active",
   addedBy: TEST_PROJECT_API_KEY.id,
   createdAt: "2024-01-01T00:00:00.000Z",

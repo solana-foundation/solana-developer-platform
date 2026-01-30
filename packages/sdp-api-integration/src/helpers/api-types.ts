@@ -68,7 +68,6 @@ export interface TokenAllowlistResponse
       tokenId: string;
       address: string;
       label?: string;
-      kycStatus?: string;
       status: string;
     };
   }> {}

@@ -1,5 +1,42 @@
+import fs from "node:fs";
 import path from "node:path";
 import { defineWorkersConfig } from "@cloudflare/vitest-pool-workers/config";
+
+const DEV_VARS_PATH = path.resolve(__dirname, "../../apps/sdp-api/.dev.vars");
+
+function loadEnvFile(filePath: string): Record<string, string> {
+  if (!fs.existsSync(filePath)) {
+    return {};
+  }
+
+  const content = fs.readFileSync(filePath, "utf8");
+  const vars: Record<string, string> = {};
+
+  for (const line of content.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) {
+      continue;
+    }
+
+    const [key, ...rest] = trimmed.split("=");
+    if (!key) {
+      continue;
+    }
+    vars[key] = rest.join("=");
+  }
+
+  return vars;
+}
+
+const fileEnv = loadEnvFile(DEV_VARS_PATH);
+const getEnv = (key: string, fallback?: string) =>
+  process.env[key] ?? fileEnv[key] ?? fallback;
+
+const custodyEncryptionKey =
+  getEnv("CUSTODY_ENCRYPTION_KEY") ?? Buffer.alloc(32).toString("base64");
+const koraRpcUrl = getEnv("KORA_RPC_URL");
+const koraApiKey = getEnv("KORA_API_KEY");
+const koraTimeoutMs = getEnv("KORA_TIMEOUT_MS");
 
 export default defineWorkersConfig({
   resolve: {
@@ -25,12 +62,19 @@ export default defineWorkersConfig({
             API_VERSION: "v1",
             RUN_INTEGRATION_TESTS: "true",
             SOLANA_MOCK: "false",
+            API_KEY_PEPPER: getEnv("API_KEY_PEPPER", "test-pepper-for-integration"),
+            SOLANA_RPC_URL: getEnv("SOLANA_RPC_URL"),
+            SOLANA_NETWORK: getEnv("SOLANA_NETWORK", "devnet"),
+            CUSTODY_PRIVATE_KEY: getEnv("CUSTODY_PRIVATE_KEY"),
+            CUSTODY_ENCRYPTION_KEY: custodyEncryptionKey,
             // Kora configuration - only set if explicitly configured
             // Local: KORA_RPC_URL=http://localhost:8080 pnpm test
             // CI: Set KORA_RPC_URL in workflow env
-            ...(process.env.KORA_RPC_URL && {
-              KORA_RPC_URL: process.env.KORA_RPC_URL,
+            ...(koraRpcUrl && {
+              KORA_RPC_URL: koraRpcUrl,
               FEE_PAYMENT_PROVIDER: "kora",
+              ...(koraApiKey && { KORA_API_KEY: koraApiKey }),
+              ...(koraTimeoutMs && { KORA_TIMEOUT_MS: koraTimeoutMs }),
             }),
           },
         },

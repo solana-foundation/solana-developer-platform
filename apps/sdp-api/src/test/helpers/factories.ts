@@ -219,6 +219,7 @@ export interface TokenOverrides {
   imageUrl?: string | null;
   extensions?: Token["extensions"];
   totalSupply?: string;
+  totalSupplyUpdatedAt?: string | null;
   maxSupply?: string | null;
   isMintable?: boolean;
   isFreezable?: boolean;
@@ -249,6 +250,7 @@ export function createToken(overrides: TokenOverrides = {}): Token {
     imageUrl: null,
     extensions: null,
     totalSupply: "0",
+    totalSupplyUpdatedAt: "2024-01-01T00:00:00.000Z",
     maxSupply: null,
     isMintable: true,
     isFreezable: true,
@@ -297,7 +299,7 @@ export interface TokenTransactionOverrides {
   serializedTx?: string | null;
   params?: Record<string, unknown>;
   slot?: number | null;
-  blockTime?: number | null;
+  blockTime?: string | null;
   fee?: number | null;
   error?: string | null;
   initiatedByKeyId?: string | null;
@@ -320,7 +322,7 @@ export function createTokenTransaction(
     params: {
       // biome-ignore lint/nursery/noSecrets: Test Solana address
       destination: "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ",
-      amount: "1000000000",
+      amount: "1",
     },
     slot: null,
     blockTime: null,
@@ -342,9 +344,6 @@ export interface TokenAllowlistEntryOverrides {
   tokenId?: string;
   address?: string;
   label?: string | null;
-  kycStatus?: "none" | "pending" | "approved" | "rejected";
-  kycProvider?: string | null;
-  kycVerifiedAt?: string | null;
   status?: "active" | "revoked";
   addedBy?: string;
   createdAt?: string;
@@ -361,9 +360,6 @@ export function createAllowlistEntry(
     // biome-ignore lint/nursery/noSecrets: Test Solana address
     address: "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ",
     label: "Factory Wallet",
-    kycStatus: "approved",
-    kycProvider: null,
-    kycVerifiedAt: null,
     status: "active",
     addedBy: `key_factory_${n.toString().padStart(8, "0")}`,
     createdAt: "2024-01-01T00:00:00.000Z",

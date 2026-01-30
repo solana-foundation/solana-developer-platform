@@ -61,7 +61,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Burn Operations",
       body: JSON.stringify({
         mint: {
           destination: custodyAddress,
-          amount: "5000000000",
+          amount: "5",
         },
       }),
     });
@@ -77,7 +77,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Burn Operations",
       body: JSON.stringify({
         burn: {
           source: custodyAddress,
-          amount: "1000000000",
+          amount: "1",
         },
       }),
     });
@@ -95,6 +95,6 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Burn Operations",
     });
 
     const token = (await tokenRes.json()) as TokenApiResponse;
-    expect(token.data.token.totalSupply).toBe("4000000000");
+    expect(token.data.token.totalSupply).toBe("4");
   });
 });

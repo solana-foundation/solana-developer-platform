@@ -84,7 +84,6 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic ABL Operat
       body: JSON.stringify({
         address: TEST_WALLETS.wallet1,
         label: "Test Wallet 1",
-        kycStatus: "approved",
       }),
     });
 

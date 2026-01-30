@@ -72,11 +72,11 @@ describe("getExtensionTypes", () => {
         // biome-ignore lint/nursery/noSecrets: Test Solana address
         withdrawWithheldAuthority: "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ",
         basisPoints: 100, // 1%
-        maxFee: "1000000000",
+        maxFee: "1.5",
       },
     };
 
-    const result = getExtensionTypes(extensions);
+    const result = getExtensionTypes(extensions, 6);
     expect(result).toHaveLength(1);
     // biome-ignore lint/nursery/noSecrets: Token-2022 extension type identifier
     expect(result[0].__kind).toBe("TransferFeeConfig");

@@ -67,7 +67,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mint Operations",
       body: JSON.stringify({
         mint: {
           destination: custodyAddress,
-          amount: "1000000000",
+          amount: "1",
         },
       }),
     });
@@ -86,7 +86,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mint Operations",
     });
 
     const token = (await tokenRes.json()) as TokenApiResponse;
-    expect(token.data.token.totalSupply).toBe("1000000000");
+    expect(token.data.token.totalSupply).toBe("1");
   });
 
   it("prepares mint transaction (prepare mode)", { timeout: 30000 }, async () => {
@@ -99,7 +99,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mint Operations",
       body: JSON.stringify({
         mint: {
           destination: custodyAddress,
-          amount: "500000000",
+          amount: "1",
         },
         options: { simulate: true },
       }),

@@ -102,8 +102,10 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Token ACL"
         Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
       },
       body: JSON.stringify({
-        destination,
-        amount,
+        mint: {
+          destination,
+          amount,
+        },
       }),
     });
 
@@ -119,7 +121,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Token ACL"
     console.log(`Deployed token: ${mintAddress}`);
 
     // Mint to create the token account
-    const mintResult = await mintToDestination(tokenId, TEST_WALLETS.wallet1, "1000000000");
+    const mintResult = await mintToDestination(tokenId, TEST_WALLETS.wallet1, "1");
     expect(mintResult.data.tokenAccount).toBeTruthy();
     const tokenAccount = mintResult.data.tokenAccount;
     console.log(`Minted to token account: ${tokenAccount}`);
@@ -137,7 +139,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Token ACL"
       }),
     });
 
-    expect(freezeRes.status).toBe(200);
+    expect(freezeRes.status).toBe(201);
     const frozen = (await freezeRes.json()) as FreezeApiResponse;
 
     expect(frozen.data.frozenAccount.accountAddress).toBe(tokenAccount);
@@ -153,7 +155,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Token ACL"
     console.log(`Deployed token: ${mintAddress}`);
 
     // Mint to create the token account
-    const mintResult = await mintToDestination(tokenId, TEST_WALLETS.wallet1, "1000000000");
+    const mintResult = await mintToDestination(tokenId, TEST_WALLETS.wallet1, "1");
     const tokenAccount = mintResult.data.tokenAccount;
     console.log(`Minted to token account: ${tokenAccount}`);
 
@@ -170,7 +172,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Token ACL"
       }),
     });
 
-    expect(freezeRes.status).toBe(200);
+    expect(freezeRes.status).toBe(201);
     console.log("Account frozen, now thawing...");
 
     // Thaw the account
@@ -204,8 +206,8 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Token ACL"
     console.log(`Deployed token: ${mintAddress}`);
 
     // Mint to two different wallets
-    const mint1 = await mintToDestination(tokenId, TEST_WALLETS.wallet1, "1000000000");
-    const mint2 = await mintToDestination(tokenId, TEST_WALLETS.wallet2, "1000000000");
+    const mint1 = await mintToDestination(tokenId, TEST_WALLETS.wallet1, "1");
+    const mint2 = await mintToDestination(tokenId, TEST_WALLETS.wallet2, "1");
 
     // Freeze both accounts
     await request(`/v1/issuance/tokens/${tokenId}/freeze`, {
@@ -282,7 +284,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Token ACL"
     expect(deployed.data.token.freezeAuthority).toBeNull();
 
     // Mint to create the token account
-    const mintResult = await mintToDestination(tokenId, TEST_WALLETS.wallet1, "1000000000");
+    const mintResult = await mintToDestination(tokenId, TEST_WALLETS.wallet1, "1");
 
     // Try to freeze - should fail
     const freezeRes = await request(`/v1/issuance/tokens/${tokenId}/freeze`, {
@@ -307,7 +309,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Token ACL"
     const { tokenId } = await createAndDeployFreezableToken("Not Frozen Token", "NOTF");
 
     // Mint to create the token account (but don't freeze)
-    const mintResult = await mintToDestination(tokenId, TEST_WALLETS.wallet1, "1000000000");
+    const mintResult = await mintToDestination(tokenId, TEST_WALLETS.wallet1, "1");
 
     // Try to thaw without freezing first - should fail
     const thawRes = await request(`/v1/issuance/tokens/${tokenId}/unfreeze`, {

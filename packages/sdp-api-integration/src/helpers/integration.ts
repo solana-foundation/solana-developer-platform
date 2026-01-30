@@ -54,7 +54,23 @@ export async function resetIntegrationState(apiKeyHash: string) {
   }
 
   await db
+    .prepare("DELETE FROM signing_requests")
+    .run()
+    .catch(() => {});
+  await db
+    .prepare("DELETE FROM custody_wallets")
+    .run()
+    .catch(() => {});
+  await db
+    .prepare("DELETE FROM custody_configs")
+    .run()
+    .catch(() => {});
+  await db
     .prepare("DELETE FROM frozen_accounts")
+    .run()
+    .catch(() => {});
+  await db
+    .prepare("DELETE FROM token_allowlist_statuses")
     .run()
     .catch(() => {});
   await db
@@ -62,11 +78,19 @@ export async function resetIntegrationState(apiKeyHash: string) {
     .run()
     .catch(() => {});
   await db
-    .prepare("DELETE FROM token_transactions")
+    .prepare("DELETE FROM issuance_transaction_statuses")
     .run()
     .catch(() => {});
   await db
-    .prepare("DELETE FROM tokens")
+    .prepare("DELETE FROM issuance_transactions")
+    .run()
+    .catch(() => {});
+  await db
+    .prepare("DELETE FROM issued_token_extensions")
+    .run()
+    .catch(() => {});
+  await db
+    .prepare("DELETE FROM issued_tokens")
     .run()
     .catch(() => {});
   await db
