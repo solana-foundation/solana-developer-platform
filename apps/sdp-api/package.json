@@ -34,6 +34,7 @@
     "@solana/keychain-core": "0.3.0",
     "@solana/keychain-fireblocks": "0.2.1",
     "@solana/kit": "catalog:",
+    "@solana/kora": "0.1.2",
     "@solana/signers": "catalog:",
     "drizzle-orm": "^0.45.1",
     "hono": "^4.7.0",

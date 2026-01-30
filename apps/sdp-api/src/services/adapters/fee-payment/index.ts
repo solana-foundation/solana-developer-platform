@@ -95,5 +95,5 @@ function getDefaultKoraUrl(env: Env): string | undefined {
 // Re-exports
 // ═══════════════════════════════════════════════════════════════════════════
 
-export { KoraAdapter, KoraClient, KoraClientError } from "./kora";
+export { KoraAdapter, KoraClient } from "./kora";
 export { NativeAdapter } from "./native";

@@ -31,7 +31,6 @@ describe.skipIf(!KORA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Kora Fee Payment", 
     client = new KoraClient({
       rpcUrl: koraUrl,
       apiKey: env.KORA_API_KEY,
-      timeoutMs: env.KORA_TIMEOUT_MS ? Number.parseInt(env.KORA_TIMEOUT_MS, 10) : 30000,
     });
   });
 

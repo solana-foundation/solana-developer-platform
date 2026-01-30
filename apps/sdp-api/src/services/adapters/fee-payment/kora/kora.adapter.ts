@@ -13,8 +13,15 @@ import {
   getSignatureFromTransaction,
   getTransactionDecoder,
 } from "@solana/kit";
-import { KoraClient, KoraClientError } from "./client";
-import type { KoraAdapterConfig } from "./types";
+import { KoraClient, type KoraClientOptions } from "@solana/kora";
+
+export type KoraAdapterConfig = KoraClientOptions & {
+  /**
+   * Optional request timeout in milliseconds.
+   * Note: The Kora SDK does not currently support timeouts directly.
+   */
+  timeoutMs?: number;
+};
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Adapter Implementation
@@ -27,7 +34,8 @@ export class KoraAdapter implements FeePaymentPort {
   private cachedFeePayer: Address | null = null;
 
   constructor(config: KoraAdapterConfig) {
-    this.client = new KoraClient(config);
+    const { rpcUrl, apiKey, hmacSecret } = config;
+    this.client = new KoraClient({ rpcUrl, apiKey, hmacSecret });
   }
 
   /**
@@ -56,11 +64,11 @@ export class KoraAdapter implements FeePaymentPort {
     try {
       const base64Tx = encodeBase64(transaction);
 
-      const { signedTransaction } = await this.client.signTransaction({
+      const { signed_transaction } = await this.client.signTransaction({
         transaction: base64Tx,
       });
 
-      return decodeBase64(signedTransaction);
+      return decodeBase64(signed_transaction);
     } catch (error) {
       throw this.wrapError(error, "Failed to sign transaction as fee payer");
     }
@@ -102,11 +110,11 @@ export class KoraAdapter implements FeePaymentPort {
     try {
       const base64Tx = encodeBase64(transaction);
 
-      const { feeLamports } = await this.client.estimateTransactionFee({
+      const { fee_in_lamports } = await this.client.estimateTransactionFee({
         transaction: base64Tx,
       });
 
-      return BigInt(feeLamports);
+      return BigInt(fee_in_lamports);
     } catch (error) {
       throw this.wrapError(error, "Failed to estimate transaction fee");
     }
@@ -118,7 +126,7 @@ export class KoraAdapter implements FeePaymentPort {
   async getSupportedTokens(): Promise<Address[]> {
     try {
       const { tokens } = await this.client.getSupportedTokens();
-      return tokens.map((t) => t.mint as Address);
+      return tokens.map((token) => token as Address);
     } catch (error) {
       throw this.wrapError(error, "Failed to get supported tokens");
     }
@@ -129,16 +137,13 @@ export class KoraAdapter implements FeePaymentPort {
   // ═══════════════════════════════════════════════════════════════════════════
 
   private wrapError(error: unknown, message: string): FeePaymentError {
-    if (error instanceof KoraClientError) {
-      return new FeePaymentError(
-        `${message}: ${error.message}`,
-        mapKoraErrorCode(error.code),
-        error
-      );
+    const rpcCode = extractRpcErrorCode(error);
+    if (rpcCode !== undefined) {
+      return new FeePaymentError(`${message}: ${formatErrorMessage(error)}`, mapKoraErrorCode(rpcCode));
     }
 
     return new FeePaymentError(
-      `${message}: ${error instanceof Error ? error.message : "Unknown error"}`,
+      `${message}: ${formatErrorMessage(error)}`,
       "NETWORK_ERROR",
       error instanceof Error ? error : undefined
     );
@@ -168,18 +173,28 @@ function decodeBase64(base64: string): Uint8Array {
   return bytes;
 }
 
-function mapKoraErrorCode(
-  code: import("./client").KoraErrorCode
-): import("@/services/ports").FeePaymentErrorCode {
+function formatErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : "Unknown error";
+}
+
+function extractRpcErrorCode(error: unknown): number | undefined {
+  if (!(error instanceof Error)) return undefined;
+  const match = /RPC Error (-?\d+):/.exec(error.message);
+  if (!match) return undefined;
+  return Number.parseInt(match[1], 10);
+}
+
+function mapKoraErrorCode(code: number): import("@/services/ports").FeePaymentErrorCode {
   switch (code) {
-    case "RATE_LIMITED":
+    case -32001:
       return "RATE_LIMITED";
-    case "INSUFFICIENT_BALANCE":
+    case -32002:
       return "INSUFFICIENT_BALANCE";
-    case "VALIDATION_FAILED":
-    case "INVALID_REQUEST":
+    case -32000:
+    case -32600:
+    case -32602:
       return "SIGNING_FAILED";
-    case "TRANSACTION_FAILED":
+    case -32003:
       return "SUBMISSION_FAILED";
     default:
       return "NETWORK_ERROR";

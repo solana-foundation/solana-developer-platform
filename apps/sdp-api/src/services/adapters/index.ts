@@ -24,7 +24,6 @@ export {
   KoraAdapter,
   NativeAdapter,
   KoraClient,
-  KoraClientError,
   type FeePaymentProviderType,
 } from "./fee-payment";
 
