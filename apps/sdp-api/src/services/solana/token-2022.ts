@@ -2,35 +2,40 @@
  * Token-2022 Service
  *
  * Operations for creating and managing Token-2022 tokens on Solana.
- * Uses @solana-program/token-2022 instruction builders with @solana/kit.
+ * Uses Mosaic SDK transaction builders where available, with direct
+ * Token-2022 instruction building for mint initialization.
  */
 
 import type { FeePaymentPort } from "@/services/ports";
 import type { Env } from "@/types/env";
 import type { TokenExtensionsConfig } from "@sdp/types";
+import type { FullTransaction } from "@mosaic/sdk";
+import {
+  createBurnTransaction,
+  createMintToTransaction,
+  getFreezeTransaction,
+  getThawTransaction,
+  resolveTokenAccount,
+} from "@mosaic/sdk";
 import { getCreateAccountInstruction } from "@solana-program/system";
 import {
   TOKEN_2022_PROGRAM_ADDRESS,
-  fetchMaybeToken,
-  findAssociatedTokenPda,
-  getBurnInstruction,
-  getCreateAssociatedTokenIdempotentInstructionAsync,
-  getFreezeAccountInstruction,
   getInitializeMint2Instruction,
   getMintSize,
-  getMintToInstruction,
   getPostInitializeInstructionsForMintExtensions,
   getPreInitializeInstructionsForMintExtensions,
-  getThawAccountInstruction,
 } from "@solana-program/token-2022";
 import {
   type Address,
   type Instruction,
+  type Rpc,
+  type SolanaRpcApi,
   type Signature,
   type TransactionSigner,
   addSignersToTransactionMessage,
   appendTransactionMessageInstructions,
   compileTransaction,
+  createNoopSigner,
   createTransactionMessage,
   generateKeyPairSigner,
   getBase64EncodedWireTransaction,
@@ -44,7 +49,6 @@ import {
 import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
 import {
   type SimulationResult,
-  accountExists,
   confirmTransaction,
   createRpc,
   getMinimumBalanceForRentExemption,
@@ -93,8 +97,8 @@ export interface MintToOptions {
   mint: Address;
   /** Destination wallet address (owner) */
   destination: Address;
-  /** Amount to mint (in base units) */
-  amount: bigint;
+  /** Amount to mint (in UI/decimal units) */
+  amount: number;
   /** Mint authority signer (KeyPairSigner or custody TransactionSigner) */
   mintAuthority: TransactionSigner;
 }
@@ -113,8 +117,8 @@ export interface BurnOptions {
   mint: Address;
   /** Source token account or owner address */
   source: Address;
-  /** Amount to burn (in base units) */
-  amount: bigint;
+  /** Amount to burn (in UI/decimal units) */
+  amount: number;
   /** Owner/authority signer (KeyPairSigner or custody TransactionSigner) */
   authority: TransactionSigner;
 }
@@ -151,6 +155,60 @@ export class Token2022Service {
     this.env = env;
     this.signer = signer;
     this.feePayment = feePayment;
+  }
+
+  private async resolveFeePayerSigner(
+    fallback: TransactionSigner = this.signer
+  ): Promise<TransactionSigner> {
+    if (!this.feePayment) {
+      return fallback;
+    }
+
+    const feePayer = await this.feePayment.getFeePayer();
+    return createNoopSigner(feePayer);
+  }
+
+  private async signAndSubmit(
+    fullTx: FullTransaction,
+    rpc: Rpc<SolanaRpcApi>,
+    failureMessage: string
+  ): Promise<{ signature: Signature; slot: bigint }> {
+    if (this.feePayment) {
+      const partiallySignedTx = await partiallySignTransactionMessageWithSigners(fullTx);
+      const txEncoder = getTransactionEncoder();
+      const txBytes = new Uint8Array(txEncoder.encode(partiallySignedTx));
+      const signature = await this.feePayment.signAndSend(txBytes);
+      const confirmation = await confirmTransaction(rpc, signature);
+
+      if (confirmation.err) {
+        throw new Error(`${failureMessage}: ${safeStringify(confirmation.err)}`);
+      }
+
+      return {
+        signature,
+        slot: confirmation.slot,
+      };
+    }
+
+    const signedTransaction = await signTransactionMessageWithSigners(fullTx);
+    const encodedTransaction = getBase64EncodedWireTransaction(signedTransaction);
+    const signature = await rpc
+      .sendTransaction(encodedTransaction, {
+        skipPreflight: false,
+        encoding: "base64",
+      })
+      .send();
+
+    const confirmation = await confirmTransaction(rpc, signature);
+
+    if (confirmation.err) {
+      throw new Error(`${failureMessage}: ${safeStringify(confirmation.err)}`);
+    }
+
+    return {
+      signature,
+      slot: confirmation.slot,
+    };
   }
 
   // ═════════════════════════════════════════════════════════════════════════
@@ -453,134 +511,25 @@ export class Token2022Service {
    * Mint tokens to a destination address
    */
   async mintTo(options: MintToOptions): Promise<MintToResult> {
-    const rpc = createRpc(this.env);
+    const rpc = createRpc(this.env) as Rpc<SolanaRpcApi>;
+    const feePayer = await this.resolveFeePayerSigner(options.mintAuthority);
 
-    // Get or derive the destination token account
-    const [tokenAccount] = await findAssociatedTokenPda({
-      mint: options.mint,
-      owner: options.destination,
-      tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
-    });
-
-    const ataExists = await accountExists(rpc, tokenAccount);
-
-    // Two different flows based on whether Kora is handling fee payment
-    if (this.feePayment) {
-      const feePayerAddress = await this.feePayment.getFeePayer();
-
-      const instructions: Instruction[] = [];
-
-      // Create ATA if it doesn't exist - use addressAsSigner for fee payer
-      if (!ataExists) {
-        instructions.push(
-          await getCreateAssociatedTokenIdempotentInstructionAsync({
-            payer: addressAsSigner(feePayerAddress),
-            owner: options.destination,
-            mint: options.mint,
-            ata: tokenAccount,
-            tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
-          })
-        );
-      }
-
-      // Add mint instruction
-      instructions.push(
-        getMintToInstruction({
-          mint: options.mint,
-          token: tokenAccount,
-          mintAuthority: options.mintAuthority,
-          amount: options.amount,
-        })
-      );
-
-      const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc);
-
-      // Two-signer flow: custody signs as mint authority, Kora adds fee payer + submits
-      const transactionMessage = pipe(
-        createTransactionMessage({ version: 0 }),
-        (msg) => setTransactionMessageFeePayer(feePayerAddress, msg),
-        (msg) =>
-          setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, msg),
-        (msg) => appendTransactionMessageInstructions(instructions, msg),
-        (msg) => addSignersToTransactionMessage([options.mintAuthority], msg)
-      );
-
-      // Sign with mint authority (custody)
-      const partiallySignedTx =
-        await partiallySignTransactionMessageWithSigners(transactionMessage);
-
-      // Serialize and send to Kora (copy to mutable Uint8Array)
-      const txEncoder = getTransactionEncoder();
-      const txBytes = new Uint8Array(txEncoder.encode(partiallySignedTx));
-      const signature = await this.feePayment.signAndSend(txBytes);
-
-      const confirmation = await confirmTransaction(rpc, signature);
-
-      if (confirmation.err) {
-        throw new Error(`Mint failed: ${safeStringify(confirmation.err)}`);
-      }
-
-      return {
-        signature,
-        slot: confirmation.slot,
-        tokenAccount,
-      };
-    }
-
-    // Original single-signer flow
-    const instructions: Instruction[] = [];
-
-    // Create ATA if it doesn't exist
-    if (!ataExists) {
-      instructions.push(
-        await getCreateAssociatedTokenIdempotentInstructionAsync({
-          payer: options.mintAuthority,
-          owner: options.destination,
-          mint: options.mint,
-          ata: tokenAccount,
-          tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
-        })
-      );
-    }
-
-    // Add mint instruction
-    instructions.push(
-      getMintToInstruction({
-        mint: options.mint,
-        token: tokenAccount,
-        mintAuthority: options.mintAuthority,
-        amount: options.amount,
-      })
+    const fullTx = await createMintToTransaction(
+      rpc,
+      options.mint,
+      options.destination,
+      options.amount,
+      options.mintAuthority,
+      feePayer
     );
 
-    const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc);
-
-    const transactionMessage = pipe(
-      createTransactionMessage({ version: 0 }),
-      (msg) => setTransactionMessageFeePayerSigner(options.mintAuthority, msg),
-      (msg) =>
-        setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, msg),
-      (msg) => appendTransactionMessageInstructions(instructions, msg)
-    );
-
-    const signedTransaction = await signTransactionMessageWithSigners(transactionMessage);
-    const encodedTransaction = getBase64EncodedWireTransaction(signedTransaction);
-    const signature = await rpc
-      .sendTransaction(encodedTransaction, {
-        skipPreflight: false,
-        encoding: "base64",
-      })
-      .send();
-    const confirmation = await confirmTransaction(rpc, signature);
-
-    if (confirmation.err) {
-      throw new Error(`Mint failed: ${safeStringify(confirmation.err)}`);
-    }
+    const result = await this.signAndSubmit(fullTx, rpc, "Mint failed");
+    const tokenAccountInfo = await resolveTokenAccount(rpc, options.destination, options.mint);
 
     return {
-      signature,
-      slot: confirmation.slot,
-      tokenAccount,
+      signature: result.signature,
+      slot: result.slot,
+      tokenAccount: tokenAccountInfo.tokenAccount,
     };
   }
 
@@ -591,51 +540,27 @@ export class Token2022Service {
     options: Omit<MintToOptions, "mintAuthority"> & { mintAuthority: Address },
     requestSimulation = false
   ): Promise<PreparedTransaction & { tokenAccount: Address }> {
-    const rpc = createRpc(this.env);
-    const signer = this.signer;
+    const rpc = createRpc(this.env) as Rpc<SolanaRpcApi>;
+    const feePayer = await this.resolveFeePayerSigner();
 
-    const [tokenAccount] = await findAssociatedTokenPda({
-      mint: options.mint,
-      owner: options.destination,
-      tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
-    });
-
-    const instructions: Instruction[] = [];
-
-    const ataExists = await accountExists(rpc, tokenAccount);
-    if (!ataExists) {
-      instructions.push(
-        await getCreateAssociatedTokenIdempotentInstructionAsync({
-          payer: signer,
-          owner: options.destination,
-          mint: options.mint,
-          ata: tokenAccount,
-          tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
-        })
-      );
-    }
-
-    instructions.push(
-      getMintToInstruction({
-        mint: options.mint,
-        token: tokenAccount,
-        mintAuthority: signer,
-        amount: options.amount,
-      })
+    const fullTx = await createMintToTransaction(
+      rpc,
+      options.mint,
+      options.destination,
+      options.amount,
+      createNoopSigner(options.mintAuthority),
+      feePayer
     );
 
-    const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc);
-
-    const transactionMessage = pipe(
-      createTransactionMessage({ version: 0 }),
-      (msg) => setTransactionMessageFeePayerSigner(signer, msg),
-      (msg) =>
-        setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, msg),
-      (msg) => appendTransactionMessageInstructions(instructions, msg)
-    );
-
-    const compiledTx = compileTransaction(transactionMessage);
+    const compiledTx = compileTransaction(fullTx);
     const serializedTx = getBase64EncodedWireTransaction(compiledTx);
+    const lifetimeConstraint = (
+      fullTx as {
+        lifetimeConstraint?: { blockhash: string; lastValidBlockHeight: bigint };
+      }
+    ).lifetimeConstraint;
+    const blockhash = lifetimeConstraint?.blockhash ?? "";
+    const lastValidBlockHeight = lifetimeConstraint?.lastValidBlockHeight ?? 0n;
 
     let simulation: SimulationResult | undefined;
     if (requestSimulation) {
@@ -643,10 +568,12 @@ export class Token2022Service {
       simulation = await simulateTransaction(rpc, txBytes);
     }
 
+    const tokenAccountInfo = await resolveTokenAccount(rpc, options.destination, options.mint);
+
     return {
-      tokenAccount,
+      tokenAccount: tokenAccountInfo.tokenAccount,
       serializedTx,
-      blockhash: blockhash as string,
+      blockhash,
       lastValidBlockHeight,
       simulation,
     };
@@ -660,79 +587,32 @@ export class Token2022Service {
    * Burn tokens from a token account
    */
   async burn(options: BurnOptions): Promise<BurnResult> {
-    const rpc = createRpc(this.env);
+    const rpc = createRpc(this.env) as Rpc<SolanaRpcApi>;
 
-    const tokenAccount = await this.resolveBurnTokenAccount(rpc, options.mint, options.source);
+    const authorityAta = await resolveTokenAccount(rpc, options.authority.address, options.mint);
+    const normalizedSource =
+      options.source === options.authority.address ? authorityAta.tokenAccount : options.source;
 
-    const instruction = getBurnInstruction({
-      account: tokenAccount,
-      mint: options.mint,
-      authority: options.authority,
-      amount: options.amount,
-    });
-
-    const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc);
-
-    // Two different flows based on whether Kora is handling fee payment
-    if (this.feePayment) {
-      const feePayerAddress = await this.feePayment.getFeePayer();
-
-      const transactionMessage = pipe(
-        createTransactionMessage({ version: 0 }),
-        (msg) => setTransactionMessageFeePayer(feePayerAddress, msg),
-        (msg) =>
-          setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, msg),
-        (msg) => appendTransactionMessageInstructions([instruction], msg),
-        (msg) => addSignersToTransactionMessage([options.authority], msg)
+    if (normalizedSource !== authorityAta.tokenAccount) {
+      throw new Error(
+        "Burn source must be the authority wallet or its token account. Use force-burn for other accounts."
       );
-
-      // Sign with authority (custody)
-      const partiallySignedTx =
-        await partiallySignTransactionMessageWithSigners(transactionMessage);
-
-      // Serialize and send to Kora (copy to mutable Uint8Array)
-      const txEncoder = getTransactionEncoder();
-      const txBytes = new Uint8Array(txEncoder.encode(partiallySignedTx));
-      const signature = await this.feePayment.signAndSend(txBytes);
-
-      const confirmation = await confirmTransaction(rpc, signature);
-
-      if (confirmation.err) {
-        throw new Error(`Burn failed: ${safeStringify(confirmation.err)}`);
-      }
-
-      return {
-        signature,
-        slot: confirmation.slot,
-      };
     }
 
-    // Original single-signer flow
-    const transactionMessage = pipe(
-      createTransactionMessage({ version: 0 }),
-      (msg) => setTransactionMessageFeePayerSigner(options.authority, msg),
-      (msg) =>
-        setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, msg),
-      (msg) => appendTransactionMessageInstructions([instruction], msg)
+    const feePayer = await this.resolveFeePayerSigner(options.authority);
+    const fullTx = await createBurnTransaction(
+      rpc,
+      options.mint,
+      options.authority,
+      options.amount,
+      feePayer
     );
 
-    const signedTransaction = await signTransactionMessageWithSigners(transactionMessage);
-    const encodedTransaction = getBase64EncodedWireTransaction(signedTransaction);
-    const signature = await rpc
-      .sendTransaction(encodedTransaction, {
-        skipPreflight: false,
-        encoding: "base64",
-      })
-      .send();
-    const confirmation = await confirmTransaction(rpc, signature);
-
-    if (confirmation.err) {
-      throw new Error(`Burn failed: ${safeStringify(confirmation.err)}`);
-    }
+    const result = await this.signAndSubmit(fullTx, rpc, "Burn failed");
 
     return {
-      signature,
-      slot: confirmation.slot,
+      signature: result.signature,
+      slot: result.slot,
     };
   }
 
@@ -743,30 +623,36 @@ export class Token2022Service {
     options: Omit<BurnOptions, "authority"> & { authority: Address },
     requestSimulation = false
   ): Promise<PreparedTransaction> {
-    const rpc = createRpc(this.env);
-    const signer = this.signer;
+    const rpc = createRpc(this.env) as Rpc<SolanaRpcApi>;
+    const feePayer = await this.resolveFeePayerSigner();
 
-    const tokenAccount = await this.resolveBurnTokenAccount(rpc, options.mint, options.source);
+    const authorityAta = await resolveTokenAccount(rpc, options.authority, options.mint);
+    const normalizedSource =
+      options.source === options.authority ? authorityAta.tokenAccount : options.source;
 
-    const instruction = getBurnInstruction({
-      account: tokenAccount,
-      mint: options.mint,
-      authority: signer,
-      amount: options.amount,
-    });
+    if (normalizedSource !== authorityAta.tokenAccount) {
+      throw new Error(
+        "Burn source must be the authority wallet or its token account. Use force-burn for other accounts."
+      );
+    }
 
-    const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc);
-
-    const transactionMessage = pipe(
-      createTransactionMessage({ version: 0 }),
-      (msg) => setTransactionMessageFeePayerSigner(signer, msg),
-      (msg) =>
-        setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, msg),
-      (msg) => appendTransactionMessageInstructions([instruction], msg)
+    const fullTx = await createBurnTransaction(
+      rpc,
+      options.mint,
+      createNoopSigner(options.authority),
+      options.amount,
+      feePayer
     );
 
-    const compiledTx = compileTransaction(transactionMessage);
+    const compiledTx = compileTransaction(fullTx);
     const serializedTx = getBase64EncodedWireTransaction(compiledTx);
+    const lifetimeConstraint = (
+      fullTx as {
+        lifetimeConstraint?: { blockhash: string; lastValidBlockHeight: bigint };
+      }
+    ).lifetimeConstraint;
+    const blockhash = lifetimeConstraint?.blockhash ?? "";
+    const lastValidBlockHeight = lifetimeConstraint?.lastValidBlockHeight ?? 0n;
 
     let simulation: SimulationResult | undefined;
     if (requestSimulation) {
@@ -776,7 +662,7 @@ export class Token2022Service {
 
     return {
       serializedTx,
-      blockhash: blockhash as string,
+      blockhash,
       lastValidBlockHeight,
       simulation,
     };
@@ -797,76 +683,21 @@ export class Token2022Service {
       };
     }
 
-    const rpc = createRpc(this.env);
+    const rpc = createRpc(this.env) as Rpc<SolanaRpcApi>;
+    const feePayer = await this.resolveFeePayerSigner(options.freezeAuthority);
 
-    const instruction = getFreezeAccountInstruction({
-      account: options.account,
-      mint: options.mint,
-      owner: options.freezeAuthority,
+    const fullTx = await getFreezeTransaction({
+      rpc,
+      payer: feePayer,
+      authority: options.freezeAuthority,
+      tokenAccount: options.account,
     });
 
-    const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc);
-
-    // Two different flows based on whether Kora is handling fee payment
-    if (this.feePayment) {
-      const feePayerAddress = await this.feePayment.getFeePayer();
-
-      const transactionMessage = pipe(
-        createTransactionMessage({ version: 0 }),
-        (msg) => setTransactionMessageFeePayer(feePayerAddress, msg),
-        (msg) =>
-          setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, msg),
-        (msg) => appendTransactionMessageInstructions([instruction], msg),
-        (msg) => addSignersToTransactionMessage([options.freezeAuthority], msg)
-      );
-
-      // Sign with freeze authority (custody)
-      const partiallySignedTx =
-        await partiallySignTransactionMessageWithSigners(transactionMessage);
-
-      // Serialize and send to Kora (copy to mutable Uint8Array)
-      const txEncoder = getTransactionEncoder();
-      const txBytes = new Uint8Array(txEncoder.encode(partiallySignedTx));
-      const signature = await this.feePayment.signAndSend(txBytes);
-
-      const confirmation = await confirmTransaction(rpc, signature);
-
-      if (confirmation.err) {
-        throw new Error(`Freeze failed: ${safeStringify(confirmation.err)}`);
-      }
-
-      return {
-        signature,
-        slot: confirmation.slot,
-      };
-    }
-
-    // Original single-signer flow
-    const transactionMessage = pipe(
-      createTransactionMessage({ version: 0 }),
-      (msg) => setTransactionMessageFeePayerSigner(options.freezeAuthority, msg),
-      (msg) =>
-        setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, msg),
-      (msg) => appendTransactionMessageInstructions([instruction], msg)
-    );
-
-    const signedTransaction = await signTransactionMessageWithSigners(transactionMessage);
-    const encodedTransaction = getBase64EncodedWireTransaction(signedTransaction);
-    const signature = await rpc
-      .sendTransaction(encodedTransaction, {
-        skipPreflight: false,
-        encoding: "base64",
-      })
-      .send();
-    const confirmation = await confirmTransaction(rpc, signature);
-
-    if (confirmation.err) {
-      throw new Error(`Freeze failed: ${safeStringify(confirmation.err)}`);
-    }
+    const result = await this.signAndSubmit(fullTx, rpc, "Freeze failed");
 
     return {
-      signature,
-      slot: confirmation.slot,
+      signature: result.signature,
+      slot: result.slot,
     };
   }
 
@@ -881,76 +712,21 @@ export class Token2022Service {
       };
     }
 
-    const rpc = createRpc(this.env);
+    const rpc = createRpc(this.env) as Rpc<SolanaRpcApi>;
+    const feePayer = await this.resolveFeePayerSigner(options.freezeAuthority);
 
-    const instruction = getThawAccountInstruction({
-      account: options.account,
-      mint: options.mint,
-      owner: options.freezeAuthority,
+    const fullTx = await getThawTransaction({
+      rpc,
+      payer: feePayer,
+      authority: options.freezeAuthority,
+      tokenAccount: options.account,
     });
 
-    const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc);
-
-    // Two different flows based on whether Kora is handling fee payment
-    if (this.feePayment) {
-      const feePayerAddress = await this.feePayment.getFeePayer();
-
-      const transactionMessage = pipe(
-        createTransactionMessage({ version: 0 }),
-        (msg) => setTransactionMessageFeePayer(feePayerAddress, msg),
-        (msg) =>
-          setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, msg),
-        (msg) => appendTransactionMessageInstructions([instruction], msg),
-        (msg) => addSignersToTransactionMessage([options.freezeAuthority], msg)
-      );
-
-      // Sign with freeze authority (custody)
-      const partiallySignedTx =
-        await partiallySignTransactionMessageWithSigners(transactionMessage);
-
-      // Serialize and send to Kora (copy to mutable Uint8Array)
-      const txEncoder = getTransactionEncoder();
-      const txBytes = new Uint8Array(txEncoder.encode(partiallySignedTx));
-      const signature = await this.feePayment.signAndSend(txBytes);
-
-      const confirmation = await confirmTransaction(rpc, signature);
-
-      if (confirmation.err) {
-        throw new Error(`Thaw failed: ${safeStringify(confirmation.err)}`);
-      }
-
-      return {
-        signature,
-        slot: confirmation.slot,
-      };
-    }
-
-    // Original single-signer flow
-    const transactionMessage = pipe(
-      createTransactionMessage({ version: 0 }),
-      (msg) => setTransactionMessageFeePayerSigner(options.freezeAuthority, msg),
-      (msg) =>
-        setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, msg),
-      (msg) => appendTransactionMessageInstructions([instruction], msg)
-    );
-
-    const signedTransaction = await signTransactionMessageWithSigners(transactionMessage);
-    const encodedTransaction = getBase64EncodedWireTransaction(signedTransaction);
-    const signature = await rpc
-      .sendTransaction(encodedTransaction, {
-        skipPreflight: false,
-        encoding: "base64",
-      })
-      .send();
-    const confirmation = await confirmTransaction(rpc, signature);
-
-    if (confirmation.err) {
-      throw new Error(`Thaw failed: ${safeStringify(confirmation.err)}`);
-    }
+    const result = await this.signAndSubmit(fullTx, rpc, "Thaw failed");
 
     return {
-      signature,
-      slot: confirmation.slot,
+      signature: result.signature,
+      slot: result.slot,
     };
   }
 
@@ -961,27 +737,26 @@ export class Token2022Service {
     options: Omit<FreezeOptions, "freezeAuthority"> & { freezeAuthority: Address },
     requestSimulation = false
   ): Promise<PreparedTransaction> {
-    const rpc = createRpc(this.env);
-    const signer = this.signer;
+    const rpc = createRpc(this.env) as Rpc<SolanaRpcApi>;
+    const feePayer = await this.resolveFeePayerSigner();
+    const authority = createNoopSigner(options.freezeAuthority);
 
-    const instruction = getFreezeAccountInstruction({
-      account: options.account,
-      mint: options.mint,
-      owner: signer,
+    const fullTx = await getFreezeTransaction({
+      rpc,
+      payer: feePayer,
+      authority,
+      tokenAccount: options.account,
     });
 
-    const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc);
-
-    const transactionMessage = pipe(
-      createTransactionMessage({ version: 0 }),
-      (msg) => setTransactionMessageFeePayerSigner(signer, msg),
-      (msg) =>
-        setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, msg),
-      (msg) => appendTransactionMessageInstructions([instruction], msg)
-    );
-
-    const compiledTx = compileTransaction(transactionMessage);
+    const compiledTx = compileTransaction(fullTx);
     const serializedTx = getBase64EncodedWireTransaction(compiledTx);
+    const lifetimeConstraint = (
+      fullTx as {
+        lifetimeConstraint?: { blockhash: string; lastValidBlockHeight: bigint };
+      }
+    ).lifetimeConstraint;
+    const blockhash = lifetimeConstraint?.blockhash ?? "";
+    const lastValidBlockHeight = lifetimeConstraint?.lastValidBlockHeight ?? 0n;
 
     let simulation: SimulationResult | undefined;
     if (requestSimulation) {
@@ -991,7 +766,7 @@ export class Token2022Service {
 
     return {
       serializedTx,
-      blockhash: blockhash as string,
+      blockhash,
       lastValidBlockHeight,
       simulation,
     };
@@ -1004,27 +779,26 @@ export class Token2022Service {
     options: Omit<FreezeOptions, "freezeAuthority"> & { freezeAuthority: Address },
     requestSimulation = false
   ): Promise<PreparedTransaction> {
-    const rpc = createRpc(this.env);
-    const signer = this.signer;
+    const rpc = createRpc(this.env) as Rpc<SolanaRpcApi>;
+    const feePayer = await this.resolveFeePayerSigner();
+    const authority = createNoopSigner(options.freezeAuthority);
 
-    const instruction = getThawAccountInstruction({
-      account: options.account,
-      mint: options.mint,
-      owner: signer,
+    const fullTx = await getThawTransaction({
+      rpc,
+      payer: feePayer,
+      authority,
+      tokenAccount: options.account,
     });
 
-    const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc);
-
-    const transactionMessage = pipe(
-      createTransactionMessage({ version: 0 }),
-      (msg) => setTransactionMessageFeePayerSigner(signer, msg),
-      (msg) =>
-        setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, msg),
-      (msg) => appendTransactionMessageInstructions([instruction], msg)
-    );
-
-    const compiledTx = compileTransaction(transactionMessage);
+    const compiledTx = compileTransaction(fullTx);
     const serializedTx = getBase64EncodedWireTransaction(compiledTx);
+    const lifetimeConstraint = (
+      fullTx as {
+        lifetimeConstraint?: { blockhash: string; lastValidBlockHeight: bigint };
+      }
+    ).lifetimeConstraint;
+    const blockhash = lifetimeConstraint?.blockhash ?? "";
+    const lastValidBlockHeight = lifetimeConstraint?.lastValidBlockHeight ?? 0n;
 
     let simulation: SimulationResult | undefined;
     if (requestSimulation) {
@@ -1034,32 +808,11 @@ export class Token2022Service {
 
     return {
       serializedTx,
-      blockhash: blockhash as string,
+      blockhash,
       lastValidBlockHeight,
       simulation,
     };
   }
 
-  private async resolveBurnTokenAccount(
-    rpc: ReturnType<typeof createRpc>,
-    mint: Address,
-    source: Address
-  ): Promise<Address> {
-    try {
-      const maybeToken = await fetchMaybeToken(rpc, source);
-      if (maybeToken && maybeToken.data.mint === mint) {
-        return source;
-      }
-    } catch {
-      // Ignore decode errors and fall back to associated token account resolution.
-    }
-
-    const [tokenAccount] = await findAssociatedTokenPda({
-      mint,
-      owner: source,
-      tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
-    });
-
-    return tokenAccount;
-  }
+  // No custom burn token account resolver needed; Mosaic handles ATA resolution.
 }

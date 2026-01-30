@@ -1,5 +1,5 @@
 import { getAuth } from "@/lib/auth";
-import { parseDecimalAmount } from "@/lib/amount";
+import { toMosaicAmount } from "@/lib/amount";
 import { AppError, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { assertValidAddress } from "@/lib/solana";
@@ -48,7 +48,7 @@ export const prepareBurn = async (c: AppContext) => {
   const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId);
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
   const source = assertValidAddress(parsed.data.burn.source, "source");
-  const burnAmount = parseDecimalAmount(parsed.data.burn.amount, token.decimals);
+  const burnAmount = toMosaicAmount(parsed.data.burn.amount, token.decimals);
 
   // Build unsigned transaction
   const token2022 = createToken2022Service(c.env, signer);
@@ -137,7 +137,7 @@ export const executeBurn = async (c: AppContext) => {
   const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId);
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
   const source = assertValidAddress(parsed.data.burn.source, "source");
-  const burnAmount = parseDecimalAmount(parsed.data.burn.amount, token.decimals);
+  const burnAmount = toMosaicAmount(parsed.data.burn.amount, token.decimals);
 
   // Create transaction record first
   const tx = await tokenService.createTransaction({
