@@ -41,8 +41,8 @@ export type { KeyPairSigner, TransactionSigner };
  * The keypair should be 64 bytes: 32 byte private + 32 byte public.
  */
 export async function createSignerFromBase58(privateKeyBase58: string): Promise<KeyPairSigner> {
-  // codec.decode converts base58 string → bytes
-  const secretKey = base58.decode(privateKeyBase58);
+  // codec.encode converts base58 string → bytes
+  const secretKey = base58.encode(privateKeyBase58);
 
   // Solana keypair format: 64 bytes = 32 byte private + 32 byte public
   if (secretKey.length !== 64) {

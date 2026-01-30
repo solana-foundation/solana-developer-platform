@@ -12,12 +12,17 @@
  * - Decimal-aware amount conversion for minting
  */
 
+import { parseDecimalAmount } from "@/lib/amount";
 import type { FeePaymentPort } from "@/services/ports/fee-payment.port";
 import { confirmTransaction, createRpc } from "@/services/solana/rpc";
 import type { Env } from "@/types/env";
 import {
   // Types
   type FullTransaction,
+  createForceBurnTransaction,
+  createForceTransferTransaction,
+  createPauseTransaction,
+  createResumeTransaction,
   createArcadeTokenInitTransaction,
   // Token operations
   createMintToTransaction,
@@ -33,12 +38,15 @@ import {
   getRemoveWalletTransaction,
   getThawPermissionlessTransaction,
   getThawTransaction,
+  getRemoveAuthorityTransaction,
+  getUpdateAuthorityTransaction,
 } from "@mosaic/sdk";
 import {
   type Address,
   type Rpc,
   type SolanaRpcApi,
   type TransactionSigner,
+  createNoopSigner,
   compileTransaction,
   generateKeyPairSigner,
   getBase64EncodedWireTransaction,
@@ -98,8 +106,8 @@ export class MosaicService {
 
     // Determine ACL mode and sRFC-37 enablement
     const aclMode = options.aclMode ?? DEFAULT_ACL_MODE[mosaicTemplate];
-    const enableSrfc37 =
-      options.enableTokenAcl ?? options.enableAbl ?? options.template !== "custom";
+    const requestedSrfc37 = options.enableTokenAcl ?? options.enableAbl ?? false;
+    const enableSrfc37 = requestedSrfc37 && options.freezeAuthority !== null;
 
     const fullTx = await this.buildCreateTokenTransaction(
       mosaicTemplate,
@@ -128,8 +136,8 @@ export class MosaicService {
     const mint = mintKeypair.address;
 
     const aclMode = options.aclMode ?? DEFAULT_ACL_MODE[mosaicTemplate];
-    const enableSrfc37 =
-      options.enableTokenAcl ?? options.enableAbl ?? options.template !== "custom";
+    const requestedSrfc37 = options.enableTokenAcl ?? options.enableAbl ?? false;
+    const enableSrfc37 = requestedSrfc37 && options.freezeAuthority !== null;
 
     const fullTx = await this.buildCreateTokenTransaction(
       mosaicTemplate,
@@ -160,6 +168,15 @@ export class MosaicService {
         ? options.mintAuthority
         : options.mintAuthority.address;
 
+    const freezeAuthority = enableSrfc37 ? undefined : options.freezeAuthority ?? undefined;
+    const permanentDelegateAuthority =
+      typeof options.extensions?.permanentDelegate === "string"
+        ? options.extensions.permanentDelegate
+        : undefined;
+    const pausableAuthority = options.extensions?.pausable?.authority;
+    const scaledUiAmount = options.extensions?.scaledUiAmount;
+    const transferHook = options.extensions?.transferHook;
+
     switch (template) {
       case "stablecoin":
         // Stablecoin: full compliance features with blocklist default
@@ -177,11 +194,11 @@ export class MosaicService {
           feePayer,
           aclMode,
           mintAuthorityAddress, // metadataAuthority
-          mintAuthorityAddress, // pausableAuthority
+          pausableAuthority ?? mintAuthorityAddress, // pausableAuthority
           mintAuthorityAddress, // confidentialBalancesAuthority
-          mintAuthorityAddress, // permanentDelegateAuthority
+          permanentDelegateAuthority ?? mintAuthorityAddress, // permanentDelegateAuthority
           enableSrfc37,
-          options.freezeAuthority ?? undefined
+          freezeAuthority
         );
 
       case "arcade":
@@ -199,10 +216,10 @@ export class MosaicService {
           mintKeypair,
           feePayer,
           mintAuthorityAddress, // metadataAuthority
-          mintAuthorityAddress, // pausableAuthority
-          mintAuthorityAddress, // permanentDelegateAuthority
+          pausableAuthority ?? mintAuthorityAddress, // pausableAuthority
+          permanentDelegateAuthority ?? mintAuthorityAddress, // permanentDelegateAuthority
           enableSrfc37,
-          options.freezeAuthority ?? undefined
+          freezeAuthority
         );
 
       case "tokenized-security":
@@ -217,18 +234,23 @@ export class MosaicService {
           mintAuthority,
           mintKeypair,
           feePayer,
-          options.freezeAuthority ?? undefined,
+          freezeAuthority,
           {
             aclMode,
             metadataAuthority: mintAuthorityAddress,
-            pausableAuthority: mintAuthorityAddress,
+            pausableAuthority: pausableAuthority ?? mintAuthorityAddress,
             confidentialBalancesAuthority: mintAuthorityAddress,
-            permanentDelegateAuthority: mintAuthorityAddress,
+            permanentDelegateAuthority: permanentDelegateAuthority ?? mintAuthorityAddress,
             enableSrfc37,
-            scaledUiAmount: {
-              authority: mintAuthorityAddress,
-              multiplier: 1,
-            },
+            scaledUiAmount: scaledUiAmount
+              ? {
+                  authority: scaledUiAmount.authority ?? mintAuthorityAddress,
+                  multiplier: scaledUiAmount.multiplier,
+                  newMultiplier: scaledUiAmount.newMultiplier,
+                  newMultiplierEffectiveTimestamp:
+                    scaledUiAmount.newMultiplierEffectiveTimestamp ?? undefined,
+                }
+              : undefined,
           }
         );
 
@@ -237,6 +259,9 @@ export class MosaicService {
         const transferFee = extensions.transferFee;
         const interestBearing = extensions.interestBearing;
         const defaultAccountState = extensions.defaultAccountState;
+        const transferFeeMaximum = transferFee
+          ? parseDecimalAmount(transferFee.maxFee, options.decimals)
+          : undefined;
         return createCustomTokenInitTransaction(
           this.rpc,
           options.metadata.name,
@@ -249,21 +274,32 @@ export class MosaicService {
           {
             enableSrfc37,
             aclMode,
-            enableConfidentialBalances: extensions.confidentialTransfer === true,
             enableDefaultAccountState: !!defaultAccountState,
             defaultAccountStateInitialized:
               defaultAccountState !== undefined ? defaultAccountState !== "frozen" : undefined,
             enablePermanentDelegate: !!extensions.permanentDelegate,
+            permanentDelegateAuthority,
+            enablePausable: !!extensions.pausable,
+            pausableAuthority: pausableAuthority,
             enableTransferFee: !!transferFee,
             transferFeeAuthority: transferFee?.transferFeeConfigAuthority,
             withdrawWithheldAuthority: transferFee?.withdrawWithheldAuthority,
             transferFeeBasisPoints: transferFee?.basisPoints,
-            transferFeeMaximum: transferFee ? BigInt(transferFee.maxFee) : undefined,
+            transferFeeMaximum,
             enableInterestBearing: !!interestBearing,
             interestBearingAuthority: interestBearing?.rateAuthority,
             interestRate: interestBearing?.rate,
             enableNonTransferable: extensions.nonTransferable === true,
-            freezeAuthority: options.freezeAuthority ?? undefined,
+            enableScaledUiAmount: !!scaledUiAmount,
+            scaledUiAmountAuthority: scaledUiAmount?.authority,
+            scaledUiAmountMultiplier: scaledUiAmount?.multiplier,
+            scaledUiAmountNewMultiplier: scaledUiAmount?.newMultiplier,
+            scaledUiAmountNewMultiplierEffectiveTimestamp:
+              scaledUiAmount?.newMultiplierEffectiveTimestamp,
+            enableTransferHook: !!transferHook,
+            transferHookAuthority: transferHook?.authority,
+            transferHookProgramId: transferHook?.programId,
+            freezeAuthority,
           }
         );
       }
@@ -286,11 +322,9 @@ export class MosaicService {
    * - Decimal conversion (amount is decimal, e.g., 100 for 100 tokens)
    */
   async mintTo(options: MintToOptions): Promise<MosaicTransactionResult> {
-    const feePayer = this.feePayment
-      ? await this.feePayment.getFeePayer()
-      : options.feePayer === this.signer.address
-        ? this.signer
-        : options.feePayer;
+    const fallbackFeePayer =
+      options.feePayer === this.signer.address ? this.signer : options.feePayer;
+    const feePayer = await this.resolveFeePayer(fallbackFeePayer);
 
     // SDK signature: (rpc, mint, recipient, amount, mintAuthority, feePayer)
     // Note: amount is decimal number, SDK converts using mint decimals
@@ -318,11 +352,9 @@ export class MosaicService {
   async prepareMintTo(
     options: MintToOptions
   ): Promise<MosaicTransaction & { tokenAccount: Address }> {
-    const feePayer = this.feePayment
-      ? await this.feePayment.getFeePayer()
-      : options.feePayer === this.signer.address
-        ? this.signer
-        : options.feePayer;
+    const fallbackFeePayer =
+      options.feePayer === this.signer.address ? this.signer : options.feePayer;
+    const feePayer = await this.resolveFeePayer(fallbackFeePayer);
 
     const fullTx = await createMintToTransaction(
       this.rpc,
@@ -352,13 +384,12 @@ export class MosaicService {
    * For blocklist tokens: blocks wallet from receiving/holding tokens
    */
   async addToList(options: AblWalletOptions): Promise<MosaicTransactionResult> {
-    // TODO: Use computed payer when fee payment abstraction is complete
-    const _payer = this.feePayment ? await this.feePayment.getFeePayer() : options.feePayer;
+    const payer = await this.resolveFeePayerSigner();
 
     // SDK uses object input pattern for ABL operations
     const fullTx = await getAddWalletTransaction({
       rpc: this.rpc,
-      payer: this.signer, // payer must be a TransactionSigner
+      payer, // payer must be a TransactionSigner
       authority: this.signer, // authority as TransactionSigner
       wallet: options.wallet,
       list: options.list,
@@ -371,12 +402,11 @@ export class MosaicService {
    * Remove a wallet from the token's ABL list.
    */
   async removeFromList(options: AblWalletOptions): Promise<MosaicTransactionResult> {
-    // TODO: Use computed payer when fee payment abstraction is complete
-    const _payer = this.feePayment ? await this.feePayment.getFeePayer() : options.feePayer;
+    const payer = await this.resolveFeePayerSigner();
 
     const fullTx = await getRemoveWalletTransaction({
       rpc: this.rpc,
-      payer: this.signer,
+      payer,
       authority: this.signer,
       wallet: options.wallet,
       list: options.list,
@@ -397,11 +427,13 @@ export class MosaicService {
    * - Standard SPL Token-2022 freeze (if freeze authority is a wallet)
    */
   async freezeAccount(options: FreezeThawOptions): Promise<MosaicTransactionResult> {
+    const payer = await this.resolveFeePayerSigner();
+
     // SDK uses object input pattern - note: NO mint parameter!
     // The SDK fetches mint from the token account
     const fullTx = await getFreezeTransaction({
       rpc: this.rpc,
-      payer: this.signer,
+      payer,
       authority: this.signer,
       tokenAccount: options.tokenAccount,
     });
@@ -417,9 +449,11 @@ export class MosaicService {
    * - Standard SPL Token-2022 thaw (if freeze authority is a wallet)
    */
   async thawAccount(options: FreezeThawOptions): Promise<MosaicTransactionResult> {
+    const payer = await this.resolveFeePayerSigner();
+
     const fullTx = await getThawTransaction({
       rpc: this.rpc,
-      payer: this.signer,
+      payer,
       authority: this.signer,
       tokenAccount: options.tokenAccount,
     });
@@ -441,9 +475,11 @@ export class MosaicService {
     tokenAccountOwner: Address,
     _feePayer: Address // TODO: Use when fee payment abstraction is complete
   ): Promise<MosaicTransactionResult> {
+    const payer = await this.resolveFeePayerSigner();
+
     const fullTx = await getThawPermissionlessTransaction({
       rpc: this.rpc,
-      payer: this.signer,
+      payer,
       authority: this.signer,
       mint,
       tokenAccount,
@@ -451,6 +487,215 @@ export class MosaicService {
     });
 
     return this.signAndSubmit(fullTx);
+  }
+
+  // ═════════════════════════════════════════════════════════════════════════
+  // Management & Administration Operations
+  // ═════════════════════════════════════════════════════════════════════════
+
+  async prepareForceTransfer(options: {
+    mint: Address;
+    source: Address;
+    destination: Address;
+    amount: number;
+    permanentDelegate: Address;
+    feePayer: Address;
+  }): Promise<MosaicTransaction> {
+    const fullTx = await createForceTransferTransaction(
+      this.rpc,
+      options.mint,
+      options.source,
+      options.destination,
+      options.amount,
+      createNoopSigner(options.permanentDelegate),
+      createNoopSigner(options.feePayer)
+    );
+
+    return this.toMosaicTransaction(fullTx);
+  }
+
+  async forceTransfer(options: {
+    mint: Address;
+    source: Address;
+    destination: Address;
+    amount: number;
+    permanentDelegate: TransactionSigner;
+    feePayer: TransactionSigner;
+  }): Promise<MosaicTransactionResult> {
+    const feePayer = await this.resolveFeePayerSigner(options.feePayer);
+
+    const fullTx = await createForceTransferTransaction(
+      this.rpc,
+      options.mint,
+      options.source,
+      options.destination,
+      options.amount,
+      options.permanentDelegate,
+      feePayer
+    );
+
+    return this.signAndSubmit(fullTx);
+  }
+
+  async prepareForceBurn(options: {
+    mint: Address;
+    source: Address;
+    amount: number;
+    permanentDelegate: Address;
+    feePayer: Address;
+  }): Promise<MosaicTransaction> {
+    const fullTx = await createForceBurnTransaction(
+      this.rpc,
+      options.mint,
+      options.source,
+      options.amount,
+      createNoopSigner(options.permanentDelegate),
+      createNoopSigner(options.feePayer)
+    );
+
+    return this.toMosaicTransaction(fullTx);
+  }
+
+  async forceBurn(options: {
+    mint: Address;
+    source: Address;
+    amount: number;
+    permanentDelegate: TransactionSigner;
+    feePayer: TransactionSigner;
+  }): Promise<MosaicTransactionResult> {
+    const feePayer = await this.resolveFeePayerSigner(options.feePayer);
+
+    const fullTx = await createForceBurnTransaction(
+      this.rpc,
+      options.mint,
+      options.source,
+      options.amount,
+      options.permanentDelegate,
+      feePayer
+    );
+
+    return this.signAndSubmit(fullTx);
+  }
+
+  async prepareUpdateAuthority(options: {
+    mint: Address;
+    role: Parameters<typeof getUpdateAuthorityTransaction>[0]["role"];
+    currentAuthority: Address;
+    newAuthority: Address | null;
+    feePayer: Address;
+  }): Promise<MosaicTransaction> {
+    const payer = createNoopSigner(options.feePayer);
+    const currentAuthority = createNoopSigner(options.currentAuthority);
+
+    const fullTx =
+      options.newAuthority === null
+        ? await getRemoveAuthorityTransaction({
+            rpc: this.rpc,
+            payer,
+            mint: options.mint,
+            role: options.role,
+            currentAuthority,
+          })
+        : await getUpdateAuthorityTransaction({
+            rpc: this.rpc,
+            payer,
+            mint: options.mint,
+            role: options.role,
+            currentAuthority,
+            newAuthority: options.newAuthority,
+          });
+
+    return this.toMosaicTransaction(fullTx);
+  }
+
+  async updateAuthority(options: {
+    mint: Address;
+    role: Parameters<typeof getUpdateAuthorityTransaction>[0]["role"];
+    currentAuthority: TransactionSigner;
+    newAuthority: Address | null;
+    feePayer: TransactionSigner;
+  }): Promise<MosaicTransactionResult> {
+    const feePayer = await this.resolveFeePayerSigner(options.feePayer);
+
+    const fullTx =
+      options.newAuthority === null
+        ? await getRemoveAuthorityTransaction({
+            rpc: this.rpc,
+            payer: feePayer,
+            mint: options.mint,
+            role: options.role,
+            currentAuthority: options.currentAuthority,
+          })
+        : await getUpdateAuthorityTransaction({
+            rpc: this.rpc,
+            payer: feePayer,
+            mint: options.mint,
+            role: options.role,
+            currentAuthority: options.currentAuthority,
+            newAuthority: options.newAuthority,
+          });
+
+    return this.signAndSubmit(fullTx);
+  }
+
+  async preparePauseToken(options: {
+    mint: Address;
+    pauseAuthority: Address;
+    feePayer: Address;
+  }): Promise<MosaicTransaction> {
+    const { transactionMessage } = await createPauseTransaction(this.rpc, {
+      mint: options.mint,
+      pauseAuthority: createNoopSigner(options.pauseAuthority),
+      feePayer: createNoopSigner(options.feePayer),
+    });
+
+    return this.toMosaicTransaction(transactionMessage);
+  }
+
+  async pauseToken(options: {
+    mint: Address;
+    pauseAuthority: TransactionSigner;
+    feePayer: TransactionSigner;
+  }): Promise<MosaicTransactionResult> {
+    const feePayer = await this.resolveFeePayerSigner(options.feePayer);
+
+    const { transactionMessage } = await createPauseTransaction(this.rpc, {
+      mint: options.mint,
+      pauseAuthority: options.pauseAuthority,
+      feePayer,
+    });
+
+    return this.signAndSubmit(transactionMessage);
+  }
+
+  async prepareUnpauseToken(options: {
+    mint: Address;
+    pauseAuthority: Address;
+    feePayer: Address;
+  }): Promise<MosaicTransaction> {
+    const { transactionMessage } = await createResumeTransaction(this.rpc, {
+      mint: options.mint,
+      pauseAuthority: createNoopSigner(options.pauseAuthority),
+      feePayer: createNoopSigner(options.feePayer),
+    });
+
+    return this.toMosaicTransaction(transactionMessage);
+  }
+
+  async unpauseToken(options: {
+    mint: Address;
+    pauseAuthority: TransactionSigner;
+    feePayer: TransactionSigner;
+  }): Promise<MosaicTransactionResult> {
+    const feePayer = await this.resolveFeePayerSigner(options.feePayer);
+
+    const { transactionMessage } = await createResumeTransaction(this.rpc, {
+      mint: options.mint,
+      pauseAuthority: options.pauseAuthority,
+      feePayer,
+    });
+
+    return this.signAndSubmit(transactionMessage);
   }
 
   // ═════════════════════════════════════════════════════════════════════════
@@ -503,7 +748,26 @@ export class MosaicService {
   }
 
   private async signAndSubmit(fullTx: FullTransaction): Promise<MosaicTransactionResult> {
-    // Sign the transaction with all attached signers
+    if (this.feePayment) {
+      // Two-signer flow: custody signs locally, Kora adds fee payer + submits
+      const partiallySignedTx = await partiallySignTransactionMessageWithSigners(fullTx);
+      const txEncoder = getTransactionEncoder();
+      const txBytes = new Uint8Array(txEncoder.encode(partiallySignedTx));
+
+      const signature = await this.feePayment.signAndSend(txBytes);
+      const confirmation = await confirmTransaction(this.rpc, signature);
+
+      if (confirmation.err) {
+        throw new Error(`Transaction failed: ${safeStringify(confirmation.err)}`);
+      }
+
+      return {
+        signature,
+        slot: confirmation.slot,
+      };
+    }
+
+    // No fee sponsor configured: sign and submit directly
     const signedTx = await signTransactionMessageWithSigners(fullTx);
     const encoded = getBase64EncodedWireTransaction(signedTx);
 
@@ -551,5 +815,27 @@ export class MosaicService {
 
     // Direct signing flow - signers are already attached to the transaction
     return this.signAndSubmit(fullTx);
+  }
+
+  private async resolveFeePayer(
+    fallback: Address | TransactionSigner
+  ): Promise<Address | TransactionSigner> {
+    if (!this.feePayment) {
+      return fallback;
+    }
+
+    const feePayer = await this.feePayment.getFeePayer();
+    return createNoopSigner(feePayer);
+  }
+
+  private async resolveFeePayerSigner(
+    fallback: TransactionSigner = this.signer
+  ): Promise<TransactionSigner> {
+    if (!this.feePayment) {
+      return fallback;
+    }
+
+    const feePayer = await this.feePayment.getFeePayer();
+    return createNoopSigner(feePayer);
   }
 }

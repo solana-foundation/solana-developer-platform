@@ -11,6 +11,7 @@ import type { TokenExtensionsConfig } from "@sdp/types";
 import { getCreateAccountInstruction } from "@solana-program/system";
 import {
   TOKEN_2022_PROGRAM_ADDRESS,
+  fetchMaybeToken,
   findAssociatedTokenPda,
   getBurnInstruction,
   getCreateAssociatedTokenIdempotentInstructionAsync,
@@ -168,7 +169,11 @@ export class Token2022Service {
     const mint = mintKeypair.address;
 
     // Get extension args (undefined if no extensions for correct size calculation)
-    const extensionArgs = getExtensionTypes(options.extensions);
+    const extensionArgs = getExtensionTypes(
+      options.extensions,
+      options.decimals,
+      options.mintAuthority
+    );
     const hasExtensions = extensionArgs.length > 0;
 
     // Calculate mint account size - pass undefined for no extensions
@@ -358,7 +363,11 @@ export class Token2022Service {
     const mint = mintKeypair.address;
 
     // Get extension args (undefined if no extensions for correct size calculation)
-    const extensionArgs = getExtensionTypes(options.extensions);
+    const extensionArgs = getExtensionTypes(
+      options.extensions,
+      options.decimals,
+      options.mintAuthority
+    );
     const hasExtensions = extensionArgs.length > 0;
 
     // Calculate mint account size - pass undefined for no extensions
@@ -653,12 +662,7 @@ export class Token2022Service {
   async burn(options: BurnOptions): Promise<BurnResult> {
     const rpc = createRpc(this.env);
 
-    // Derive token account if source is a wallet
-    const [tokenAccount] = await findAssociatedTokenPda({
-      mint: options.mint,
-      owner: options.source,
-      tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
-    });
+    const tokenAccount = await this.resolveBurnTokenAccount(rpc, options.mint, options.source);
 
     const instruction = getBurnInstruction({
       account: tokenAccount,
@@ -742,11 +746,7 @@ export class Token2022Service {
     const rpc = createRpc(this.env);
     const signer = this.signer;
 
-    const [tokenAccount] = await findAssociatedTokenPda({
-      mint: options.mint,
-      owner: options.source,
-      tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
-    });
+    const tokenAccount = await this.resolveBurnTokenAccount(rpc, options.mint, options.source);
 
     const instruction = getBurnInstruction({
       account: tokenAccount,
@@ -1038,5 +1038,28 @@ export class Token2022Service {
       lastValidBlockHeight,
       simulation,
     };
+  }
+
+  private async resolveBurnTokenAccount(
+    rpc: ReturnType<typeof createRpc>,
+    mint: Address,
+    source: Address
+  ): Promise<Address> {
+    try {
+      const maybeToken = await fetchMaybeToken(rpc, source);
+      if (maybeToken && maybeToken.data.mint === mint) {
+        return source;
+      }
+    } catch {
+      // Ignore decode errors and fall back to associated token account resolution.
+    }
+
+    const [tokenAccount] = await findAssociatedTokenPda({
+      mint,
+      owner: source,
+      tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
+    });
+
+    return tokenAccount;
   }
 }

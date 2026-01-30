@@ -137,8 +137,8 @@ export class LocalKeypairAdapter implements SigningPort {
       );
     }
 
-    // codec.decode converts base58 string → bytes
-    const secretKey = base58.decode(privateKey);
+    // codec.encode converts base58 string → bytes
+    const secretKey = base58.encode(privateKey);
 
     // Solana keypair format: 64 bytes = 32 byte private + 32 byte public
     if (secretKey.length !== 64) {

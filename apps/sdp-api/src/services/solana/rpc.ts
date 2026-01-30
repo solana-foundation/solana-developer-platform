@@ -259,11 +259,14 @@ export async function simulateTransaction(
 
   const result = response.value;
 
+  const serializeError = (value: unknown) =>
+    JSON.stringify(value, (_key, val) => (typeof val === "bigint" ? val.toString() : val));
+
   return {
     success: result.err === null,
     logs: result.logs ?? [],
     unitsConsumed: result.unitsConsumed ?? null,
-    error: result.err ? JSON.stringify(result.err) : null,
+    error: result.err ? serializeError(result.err) : null,
   };
 }
 

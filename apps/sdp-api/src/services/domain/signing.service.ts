@@ -26,8 +26,8 @@ import {
   type Address,
   type KeyPairSigner,
   type TransactionSigner,
-  generateKeyPairSigner,
 } from "@solana/kit";
+import { createKeyPairSignerFromPrivateKeyBytes } from "@solana/signers";
 
 const base58 = getBase58Codec();
 
@@ -61,6 +61,7 @@ export interface SigningRequestStore {
 export interface CreateSigningRequestParams {
   organizationId: string;
   custodyConfigId: string;
+  tokenTransactionId?: string | null;
   externalRequestId: string;
   transactionMessage: string;
   metadata?: Record<string, unknown>;
@@ -70,6 +71,7 @@ export interface SigningRequestRecord {
   id: string;
   organizationId: string;
   custodyConfigId: string;
+  tokenTransactionId?: string | null;
   externalRequestId: string | null;
   status: "pending" | "completed" | "rejected" | "failed";
   transactionMessage: string;
@@ -177,13 +179,17 @@ export class SigningService {
       );
     }
 
-    // Generate a new keypair
-    const keypair = await generateKeyPairSigner();
+    // Generate a new extractable keypair from a random private key seed.
+    const privateKeySeed = crypto.getRandomValues(new Uint8Array(32));
+    const keypair = await createKeyPairSignerFromPrivateKeyBytes(privateKeySeed);
 
-    // Get the full 64-byte secret key and encode as base58
-    // The keypair.keyPair contains the CryptoKeyPair
-    const privateKeyBytes = await exportKeypairBytes(keypair);
-    const privateKeyBase58 = base58.encode(privateKeyBytes);
+    const publicKeyBytes = new Uint8Array(
+      (await crypto.subtle.exportKey("raw", keypair.keyPair.publicKey)) as ArrayBuffer
+    );
+    const privateKeyBytes = new Uint8Array(64);
+    privateKeyBytes.set(privateKeySeed);
+    privateKeyBytes.set(publicKeyBytes, 32);
+    const privateKeyBase58 = base58.decode(privateKeyBytes);
 
     // Encrypt the private key for storage
     const encryption = this.getEncryptionService();
@@ -318,7 +324,7 @@ export class SigningService {
     config: LocalProviderConfig | FireblocksProviderConfig
   ): Promise<void> {
     // This would normally be a direct DB update, but we'll use the upsert pattern
-    // The config JSON is stored in the `config` column of custody_configs
+    // The config JSON is stored in the `config_encrypted` column of custody_configs
     const configStore = this.configStore as CustodyConfigStore;
     const existing = await configStore.getById(configId);
     if (!existing) {
@@ -328,9 +334,16 @@ export class SigningService {
     // Direct D1 update for the config JSON
     // This is safe because we're only updating our own config
     const db = this.env.DB;
+    const encryption = this.getEncryptionService();
+    const encryptedConfig = await encryption.encrypt(
+      existing.organizationId,
+      JSON.stringify(config)
+    );
     await db
-      .prepare("UPDATE custody_configs SET config = ?, updated_at = datetime('now') WHERE id = ?")
-      .bind(JSON.stringify(config), configId)
+      .prepare(
+        "UPDATE custody_configs SET config_encrypted = ?, encryption_version = ?, updated_at = datetime('now') WHERE id = ?"
+      )
+      .bind(encryptedConfig.ciphertext, "sdp-custody-encryption-v1", configId)
       .run();
   }
 
@@ -594,49 +607,6 @@ function decodeBase64(base64: string): Uint8Array {
  * Export the secret key bytes from a KeyPairSigner.
  * Returns the 64-byte secret key (32 private + 32 public).
  */
-async function exportKeypairBytes(signer: KeyPairSigner): Promise<Uint8Array> {
-  // KeyPairSigner wraps a CryptoKeyPair, we need to export the private key
-  // The keyPair property contains the underlying CryptoKeyPair
-  const keyPair = (signer as { keyPair: CryptoKeyPair }).keyPair;
-
-  // Export the private key in PKCS8 format and extract the raw bytes
-  // pkcs8 format always returns ArrayBuffer (not JsonWebKey)
-  const exported = (await crypto.subtle.exportKey("pkcs8", keyPair.privateKey)) as ArrayBuffer;
-  const pkcs8Bytes = new Uint8Array(exported);
-
-  // PKCS8 for Ed25519 has a specific structure:
-  // 30 2e (SEQUENCE, 46 bytes)
-  //   02 01 00 (INTEGER, version 0)
-  //   30 05 (SEQUENCE, 5 bytes - AlgorithmIdentifier)
-  //     06 03 2b6570 (OID 1.3.101.112 = Ed25519)
-  //   04 22 (OCTET STRING, 34 bytes)
-  //     04 20 (OCTET STRING, 32 bytes - the actual private key seed)
-  //       <32 bytes of private key seed>
-  // Total: 48 bytes for the outer structure
-
-  // The private key seed starts at offset 16 (0-indexed) for Ed25519
-  // Verify the structure matches Ed25519 PKCS8
-  if (pkcs8Bytes.length !== 48) {
-    throw new SigningError(`Unexpected PKCS8 key length: ${pkcs8Bytes.length}`, "INVALID_REQUEST");
-  }
-
-  // Extract the 32-byte private seed
-  const privateSeed = pkcs8Bytes.slice(16, 48);
-
-  // Export the public key (raw format always returns ArrayBuffer)
-  const publicKeyExported = (await crypto.subtle.exportKey(
-    "raw",
-    keyPair.publicKey
-  )) as ArrayBuffer;
-  const publicKeyBytes = new Uint8Array(publicKeyExported);
-
-  // Combine into Solana's 64-byte keypair format (seed + public)
-  const combined = new Uint8Array(64);
-  combined.set(privateSeed);
-  combined.set(publicKeyBytes, 32);
-
-  return combined;
-}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Provider Config Types (stored as encrypted JSON)
@@ -670,7 +640,7 @@ interface FireblocksProviderConfig {
  * @returns Configured SigningService instance
  */
 export function createSigningService(env: Env): SigningService {
-  const configStore = new CustodyConfigStore(env.DB);
+  const configStore = new CustodyConfigStore(env.DB, env.CUSTODY_ENCRYPTION_KEY);
   const signingStore = new SigningRequestD1Store(env.DB);
 
   return new SigningService(configStore, signingStore, env);
@@ -696,7 +666,7 @@ export async function createAdapterFromEncryptedConfig(
   orgId: string,
   record: SigningConfigRecord
 ): Promise<SigningPort> {
-  const parsed = JSON.parse(record.config) as LocalProviderConfig | FireblocksProviderConfig;
+  const parsed = await parseConfigRecord(env, orgId, record);
 
   // biome-ignore lint/nursery/noSecrets: This is a type guard, not a secret
   if (parsed.provider === "local" && "encryptedPrivateKey" in parsed) {
@@ -726,4 +696,26 @@ export async function createAdapterFromEncryptedConfig(
 
   // Fall back to standard config creation (for backward compatibility)
   return createSigningAdapterFromConfig(record, env);
+}
+
+async function parseConfigRecord(
+  env: Env,
+  orgId: string,
+  record: SigningConfigRecord
+): Promise<LocalProviderConfig | FireblocksProviderConfig> {
+  try {
+    return JSON.parse(record.config) as LocalProviderConfig | FireblocksProviderConfig;
+  } catch {
+    // Encrypted payload: decrypt then parse.
+    try {
+      const encryption = createEncryptionService(env.CUSTODY_ENCRYPTION_KEY);
+      const decrypted = await encryption.decrypt(orgId, record.config);
+      return JSON.parse(decrypted) as LocalProviderConfig | FireblocksProviderConfig;
+    } catch (error) {
+      throw new SigningError(
+        error instanceof Error ? error.message : "Failed to decrypt custody configuration",
+        "PROVIDER_NOT_CONFIGURED"
+      );
+    }
+  }
 }
