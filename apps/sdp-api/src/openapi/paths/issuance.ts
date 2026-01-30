@@ -7,25 +7,38 @@ import {
   burnRequestSchema,
   createTokenRequestSchema,
   errorResponseSchema,
+  forceBurnRequestSchema,
   freezeAccountRequestSchema,
   mintRequestSchema,
   pageQuerySchema,
   pageSizeQuerySchema,
+  pauseTokenRequestSchema,
+  seizeRequestSchema,
   templateIdParamSchema,
   tokenIdParamSchema,
   tokenStatusQuerySchema,
   unfreezeAccountRequestSchema,
+  updateAuthorityRequestSchema,
   updateTokenRequestSchema,
 } from "../schemas";
 import { errorResponses, jsonContent } from "./helpers";
 import {
   executeBurnResponse,
+  executeForceBurnResponse,
   executeMintResponse,
+  executePauseResponse,
+  executeSeizeResponse,
+  executeUnpauseResponse,
+  executeUpdateAuthorityResponse,
+  frozenAccountListResponse,
   frozenAccountResponse,
   listTemplatesResponse,
   prepareBurnResponse,
   prepareDeployResponse,
+  prepareForceBurnResponse,
   prepareMintResponse,
+  prepareSeizeResponse,
+  prepareUpdateAuthorityResponse,
   tokenAllowlistListResponse,
   tokenAllowlistResponse,
   tokenListResponse,
@@ -328,6 +341,214 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "post",
+    path: "/v1/issuance/tokens/{tokenId}/seize/prepare",
+    tags: ["Issuance"],
+    summary: "Prepare seize transaction",
+    operationId: "prepareSeize",
+    description: "Builds an unsigned force transfer transaction for client-side signing.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      params: z.object({
+        tokenId: tokenIdParamSchema,
+      }),
+      body: {
+        required: true,
+        content: jsonContent(seizeRequestSchema),
+      },
+    },
+    responses: {
+      200: {
+        description: "Prepared seize",
+        content: jsonContent(prepareSeizeResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/issuance/tokens/{tokenId}/seize",
+    tags: ["Issuance"],
+    summary: "Execute seize",
+    operationId: "executeSeize",
+    description: "Forces a transfer using permanent delegate authority.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      params: z.object({
+        tokenId: tokenIdParamSchema,
+      }),
+      body: {
+        required: true,
+        content: jsonContent(seizeRequestSchema),
+      },
+    },
+    responses: {
+      200: {
+        description: "Seize executed",
+        content: jsonContent(executeSeizeResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/issuance/tokens/{tokenId}/force-burn/prepare",
+    tags: ["Issuance"],
+    summary: "Prepare force burn transaction",
+    operationId: "prepareForceBurn",
+    description: "Builds an unsigned force burn transaction for client-side signing.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      params: z.object({
+        tokenId: tokenIdParamSchema,
+      }),
+      body: {
+        required: true,
+        content: jsonContent(forceBurnRequestSchema),
+      },
+    },
+    responses: {
+      200: {
+        description: "Prepared force burn",
+        content: jsonContent(prepareForceBurnResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/issuance/tokens/{tokenId}/force-burn",
+    tags: ["Issuance"],
+    summary: "Execute force burn",
+    operationId: "executeForceBurn",
+    description: "Burns tokens using permanent delegate authority.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      params: z.object({
+        tokenId: tokenIdParamSchema,
+      }),
+      body: {
+        required: true,
+        content: jsonContent(forceBurnRequestSchema),
+      },
+    },
+    responses: {
+      200: {
+        description: "Force burn executed",
+        content: jsonContent(executeForceBurnResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/issuance/tokens/{tokenId}/authority/prepare",
+    tags: ["Issuance"],
+    summary: "Prepare authority update",
+    operationId: "prepareUpdateAuthority",
+    description: "Builds an unsigned authority update transaction for client-side signing.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      params: z.object({
+        tokenId: tokenIdParamSchema,
+      }),
+      body: {
+        required: true,
+        content: jsonContent(updateAuthorityRequestSchema),
+      },
+    },
+    responses: {
+      200: {
+        description: "Prepared authority update",
+        content: jsonContent(prepareUpdateAuthorityResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/issuance/tokens/{tokenId}/authority",
+    tags: ["Issuance"],
+    summary: "Execute authority update",
+    operationId: "executeUpdateAuthority",
+    description: "Updates token authorities using custody signing.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      params: z.object({
+        tokenId: tokenIdParamSchema,
+      }),
+      body: {
+        required: true,
+        content: jsonContent(updateAuthorityRequestSchema),
+      },
+    },
+    responses: {
+      200: {
+        description: "Authority updated",
+        content: jsonContent(executeUpdateAuthorityResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/issuance/tokens/{tokenId}/pause",
+    tags: ["Issuance"],
+    summary: "Pause token transfers",
+    operationId: "pauseToken",
+    description: "Pauses transfers for a token using the pause authority.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      params: z.object({
+        tokenId: tokenIdParamSchema,
+      }),
+      body: {
+        required: true,
+        content: jsonContent(pauseTokenRequestSchema),
+      },
+    },
+    responses: {
+      200: {
+        description: "Token paused",
+        content: jsonContent(executePauseResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/issuance/tokens/{tokenId}/unpause",
+    tags: ["Issuance"],
+    summary: "Unpause token transfers",
+    operationId: "unpauseToken",
+    description: "Resumes transfers for a token using the pause authority.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      params: z.object({
+        tokenId: tokenIdParamSchema,
+      }),
+      body: {
+        required: true,
+        content: jsonContent(pauseTokenRequestSchema),
+      },
+    },
+    responses: {
+      200: {
+        description: "Token unpaused",
+        content: jsonContent(executeUnpauseResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
     path: "/v1/issuance/tokens/{tokenId}/freeze",
     tags: ["Issuance"],
     summary: "Freeze account",
@@ -375,6 +596,32 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
         content: jsonContent(frozenAccountResponse),
       },
       ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/issuance/tokens/{tokenId}/frozen",
+    tags: ["Issuance"],
+    summary: "List frozen accounts",
+    operationId: "listFrozenAccounts",
+    description: "Lists frozen accounts for a token.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      params: z.object({
+        tokenId: tokenIdParamSchema,
+      }),
+      query: z.object({
+        page: pageQuerySchema.optional(),
+        pageSize: pageSizeQuerySchema.optional(),
+      }),
+    },
+    responses: {
+      200: {
+        description: "Frozen accounts",
+        content: jsonContent(frozenAccountListResponse),
+      },
+      ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
     },
   });
 

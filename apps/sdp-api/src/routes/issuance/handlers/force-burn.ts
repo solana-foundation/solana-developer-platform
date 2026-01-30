@@ -1,23 +1,33 @@
 import { getAuth } from "@/lib/auth";
-import { parseDecimalAmount } from "@/lib/amount";
+import { toMosaicAmount } from "@/lib/amount";
 import { AppError, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { assertValidAddress } from "@/lib/solana";
 import { AuditService } from "@/services/audit.service";
-import { createOrgSigner, createToken2022Service } from "@/services/solana";
+import { createMosaicService } from "@/services/mosaic";
+import { createOrgSigner } from "@/services/solana";
+import { createRpc, simulateTransaction } from "@/services/solana/rpc";
 import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
 import type { Context } from "hono";
-import { burnSchema } from "../schemas";
+import { forceBurnSchema } from "../schemas";
 
 type AppContext = Context<{ Bindings: Env }>;
+type TokenRecord = Awaited<ReturnType<TokenService["prototype"]["getToken"]>>;
 
-export const prepareBurn = async (c: AppContext) => {
+const resolvePermanentDelegate = (token: TokenRecord): string | null => {
+  if (!token) {
+    return null;
+  }
+  return token.extensions?.permanentDelegate ?? token.mintAuthority;
+};
+
+export const prepareForceBurn = async (c: AppContext) => {
   const { tokenId } = c.req.param();
   const auth = getAuth(c);
 
   const body = await c.req.json();
-  const parsed = burnSchema.safeParse(body);
+  const parsed = forceBurnSchema.safeParse(body);
 
   if (!parsed.success) {
     throw new AppError("BAD_REQUEST", "Invalid request body", {
@@ -37,55 +47,64 @@ export const prepareBurn = async (c: AppContext) => {
   }
 
   if (token.status !== "active") {
-    throw new AppError("TOKEN_NOT_ACTIVE", "Token must be active to burn");
+    throw new AppError("TOKEN_NOT_ACTIVE", "Token must be active to force burn");
   }
 
   if (!token.mintAddress) {
     throw new AppError("TOKEN_NOT_DEPLOYED", "Token has not been deployed to Solana");
   }
 
-  // Validate addresses and get custody authority (via 3-tier resolution)
+  const permanentDelegateRaw =
+    parsed.data.forceBurn.delegateAuthority ?? resolvePermanentDelegate(token);
+  if (!permanentDelegateRaw) {
+    throw new AppError("BAD_REQUEST", "Permanent delegate is not configured for this token");
+  }
+
   const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId);
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
-  const source = assertValidAddress(parsed.data.burn.source, "source");
-  const burnAmount = parseDecimalAmount(parsed.data.burn.amount, token.decimals);
+  const source = assertValidAddress(parsed.data.forceBurn.source, "source");
+  const permanentDelegate = assertValidAddress(permanentDelegateRaw, "delegateAuthority");
 
-  // Build unsigned transaction
-  const token2022 = createToken2022Service(c.env, signer);
-  const prepared = await token2022.prepareBurn(
-    {
-      mint: mintAddress,
-      source,
-      amount: burnAmount,
-      authority: signer.address,
-    },
-    parsed.data.options?.simulate ?? false
-  );
+  const mosaic = createMosaicService(c.env, signer);
+  const prepared = await mosaic.prepareForceBurn({
+    mint: mintAddress,
+    source,
+    amount: toMosaicAmount(parsed.data.forceBurn.amount, token.decimals),
+    permanentDelegate,
+    feePayer: signer.address,
+  });
 
-  // Create transaction record with serialized tx
+  let simulation;
+  if (parsed.data.options?.simulate) {
+    const rpc = createRpc(c.env);
+    const txBytes = Buffer.from(prepared.serializedTx, "base64");
+    simulation = await simulateTransaction(rpc, txBytes);
+  }
+
   const tx = await tokenService.createTransaction({
     tokenId,
     organizationId: auth.organizationId,
-    type: "burn",
+    type: "force_burn",
     params: {
-      source: parsed.data.burn.source,
-      amount: parsed.data.burn.amount,
-      memo: parsed.data.burn.memo,
+      source: parsed.data.forceBurn.source,
+      amount: parsed.data.forceBurn.amount,
+      delegateAuthority: permanentDelegateRaw,
+      memo: parsed.data.forceBurn.memo,
     },
     serializedTx: prepared.serializedTx,
     initiatedByKeyId: auth.id,
   });
 
-  // Audit log
   const auditService = new AuditService(c.env.DB);
   await auditService.log(c, {
-    action: "burn",
+    action: "force_burn",
     resourceType: "token_transaction",
     resourceId: tx.id,
     metadata: {
       tokenId,
-      source: parsed.data.burn.source,
-      amount: parsed.data.burn.amount,
+      source: parsed.data.forceBurn.source,
+      amount: parsed.data.forceBurn.amount,
+      delegateAuthority: permanentDelegateRaw,
       mode: "prepare",
     },
   });
@@ -97,16 +116,16 @@ export const prepareBurn = async (c: AppContext) => {
       blockhash: prepared.blockhash,
       lastValidBlockHeight: prepared.lastValidBlockHeight.toString(),
     },
-    simulation: prepared.simulation,
+    simulation,
   });
 };
 
-export const executeBurn = async (c: AppContext) => {
+export const executeForceBurn = async (c: AppContext) => {
   const { tokenId } = c.req.param();
   const auth = getAuth(c);
 
   const body = await c.req.json();
-  const parsed = burnSchema.safeParse(body);
+  const parsed = forceBurnSchema.safeParse(body);
 
   if (!parsed.success) {
     throw new AppError("BAD_REQUEST", "Invalid request body", {
@@ -126,72 +145,77 @@ export const executeBurn = async (c: AppContext) => {
   }
 
   if (token.status !== "active") {
-    throw new AppError("TOKEN_NOT_ACTIVE", "Token must be active to burn");
+    throw new AppError("TOKEN_NOT_ACTIVE", "Token must be active to force burn");
   }
 
   if (!token.mintAddress) {
     throw new AppError("TOKEN_NOT_DEPLOYED", "Token has not been deployed to Solana");
   }
 
-  // Get custody signer (via 3-tier resolution)
-  const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId);
-  const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
-  const source = assertValidAddress(parsed.data.burn.source, "source");
-  const burnAmount = parseDecimalAmount(parsed.data.burn.amount, token.decimals);
+  const permanentDelegateRaw =
+    parsed.data.forceBurn.delegateAuthority ?? resolvePermanentDelegate(token);
+  if (!permanentDelegateRaw) {
+    throw new AppError("BAD_REQUEST", "Permanent delegate is not configured for this token");
+  }
 
-  // Create transaction record first
+  const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId);
+  if (permanentDelegateRaw !== signer.address) {
+    throw new AppError("BAD_REQUEST", "Permanent delegate is not controlled by custody");
+  }
+
+  const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
+  const source = assertValidAddress(parsed.data.forceBurn.source, "source");
+
   const tx = await tokenService.createTransaction({
     tokenId,
     organizationId: auth.organizationId,
-    type: "burn",
+    type: "force_burn",
     params: {
-      source: parsed.data.burn.source,
-      amount: parsed.data.burn.amount,
-      memo: parsed.data.burn.memo,
+      source: parsed.data.forceBurn.source,
+      amount: parsed.data.forceBurn.amount,
+      delegateAuthority: permanentDelegateRaw,
+      memo: parsed.data.forceBurn.memo,
     },
     initiatedByKeyId: auth.id,
   });
 
-  // Execute burn on Solana
-  const token2022 = createToken2022Service(c.env, signer);
+  const mosaic = createMosaicService(c.env, signer);
 
   try {
-    const result = await token2022.burn({
+    const result = await mosaic.forceBurn({
       mint: mintAddress,
       source,
-      amount: burnAmount,
-      authority: signer,
+      amount: toMosaicAmount(parsed.data.forceBurn.amount, token.decimals),
+      permanentDelegate: signer,
+      feePayer: signer,
     });
 
-    // Update transaction with confirmation
     const updatedTx = await tokenService.updateTransaction(tx.id, {
       status: "confirmed",
       signature: result.signature,
       slot: Number(result.slot),
     });
 
-    // Update token supply
-    await tokenService.updateSupply(tokenId, parsed.data.burn.amount, "burn");
+    await tokenService.updateSupply(tokenId, parsed.data.forceBurn.amount, "burn");
 
-    // Audit log
     const auditService = new AuditService(c.env.DB);
     await auditService.log(c, {
-      action: "burn",
+      action: "force_burn",
       resourceType: "token_transaction",
       resourceId: tx.id,
       metadata: {
         tokenId,
-        source: parsed.data.burn.source,
-        amount: parsed.data.burn.amount,
-        signature: result.signature,
-        slot: result.slot.toString(),
-        mode: "execute",
+        source: parsed.data.forceBurn.source,
+      amount: parsed.data.forceBurn.amount,
+      delegateAuthority: permanentDelegateRaw,
+      signature: result.signature,
+      slot: result.slot.toString(),
+      mode: "execute",
       },
     });
 
     return success(c, { transaction: updatedTx });
   } catch (error) {
-    // Update transaction as failed
     await tokenService.updateTransaction(tx.id, {
       status: "failed",
       error: error instanceof Error ? error.message : "Unknown error",

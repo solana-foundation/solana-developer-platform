@@ -9,7 +9,13 @@ import {
   createOrganizationResponseSchema,
   currentUserResponseSchema,
   executeBurnResponseSchema,
+  executeForceBurnResponseSchema,
   executeMintResponseSchema,
+  executePauseResponseSchema,
+  executeSeizeResponseSchema,
+  executeUnpauseResponseSchema,
+  executeUpdateAuthorityResponseSchema,
+  frozenAccountSchema,
   frozenAccountResponseSchema,
   inviteMemberResponseSchema,
   listApiKeysResponseSchema,
@@ -23,7 +29,10 @@ import {
   paginatedResponseSchema,
   prepareBurnResponseSchema,
   prepareDeployResponseSchema,
+  prepareForceBurnResponseSchema,
   prepareMintResponseSchema,
+  prepareSeizeResponseSchema,
+  prepareUpdateAuthorityResponseSchema,
   projectMemberResponseSchema,
   projectResponseSchema,
   revokeApiKeyResponseSchema,
@@ -62,12 +71,25 @@ export const tokenListResponse = paginatedResponseSchema(tokenSchema);
 export const tokenAllowlistListResponse = paginatedResponseSchema(tokenAllowlistEntrySchema);
 export const tokenAllowlistResponse = successResponseSchema(tokenAllowlistResponseSchema);
 export const frozenAccountResponse = successResponseSchema(frozenAccountResponseSchema);
+export const frozenAccountListResponse = paginatedResponseSchema(frozenAccountSchema);
 
 export const prepareDeployResponse = successResponseSchema(prepareDeployResponseSchema);
 export const prepareMintResponse = successResponseSchema(prepareMintResponseSchema);
 export const executeMintResponse = successResponseSchema(executeMintResponseSchema);
 export const prepareBurnResponse = successResponseSchema(prepareBurnResponseSchema);
 export const executeBurnResponse = successResponseSchema(executeBurnResponseSchema);
+export const prepareSeizeResponse = successResponseSchema(prepareSeizeResponseSchema);
+export const executeSeizeResponse = successResponseSchema(executeSeizeResponseSchema);
+export const prepareForceBurnResponse = successResponseSchema(prepareForceBurnResponseSchema);
+export const executeForceBurnResponse = successResponseSchema(executeForceBurnResponseSchema);
+export const prepareUpdateAuthorityResponse = successResponseSchema(
+  prepareUpdateAuthorityResponseSchema
+);
+export const executeUpdateAuthorityResponse = successResponseSchema(
+  executeUpdateAuthorityResponseSchema
+);
+export const executePauseResponse = successResponseSchema(executePauseResponseSchema);
+export const executeUnpauseResponse = successResponseSchema(executeUnpauseResponseSchema);
 
 export const sendMagicLinkResponse = successResponseSchema(sendMagicLinkResponseSchema);
 export const verifyMagicLinkResponse = successResponseSchema(verifyMagicLinkResponseSchema);

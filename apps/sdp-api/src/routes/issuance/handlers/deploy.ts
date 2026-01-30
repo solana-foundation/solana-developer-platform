@@ -4,9 +4,11 @@ import { success } from "@/lib/response";
 import { AuditService } from "@/services/audit.service";
 import { createMosaicService } from "@/services/mosaic";
 import { createOrgSigner } from "@/services/solana";
+import { createRpc, simulateTransaction } from "@/services/solana/rpc";
 import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
 import type { TokenResponse } from "@sdp/types";
+import { TOKEN_ACL_PROGRAM_ID } from "@mosaic/sdk";
 import type { Address } from "@solana/kit";
 import type { Context } from "hono";
 
@@ -47,6 +49,8 @@ export const deployToken = async (c: AppContext) => {
   const mosaic = createMosaicService(c.env, signer);
 
   // Deploy using Mosaic templates - handles ABL setup automatically
+  const enableAbl = token.requiresAllowlist && c.env.SOLANA_NETWORK === "mainnet-beta";
+
   const result = await mosaic.createToken({
     template: token.template,
     metadata: {
@@ -60,15 +64,22 @@ export const deployToken = async (c: AppContext) => {
     feePayer: signer,
     extensions: token.extensions ?? undefined,
     // Enable on-chain ABL for templates that require allowlist
-    enableAbl: token.requiresAllowlist,
+    enableAbl,
   });
+
+  const enableSrfc37 = enableAbl && token.isFreezable;
+  const freezeAuthority = token.isFreezable
+    ? enableSrfc37
+      ? TOKEN_ACL_PROGRAM_ID
+      : custodyAddress
+    : null;
 
   // Update token with deployment info (including ABL list if created)
   const updatedToken = await tokenService.setTokenDeployed(
     tokenId,
     result.mint as Address,
     custodyAddress,
-    token.isFreezable ? custodyAddress : null,
+    freezeAuthority,
     result.listAddress as Address | undefined
   );
 
@@ -140,6 +151,8 @@ export const prepareDeploy = async (c: AppContext) => {
   // Create Mosaic service and prepare transaction
   const mosaic = createMosaicService(c.env, signer);
 
+  const enableAbl = token.requiresAllowlist && c.env.SOLANA_NETWORK === "mainnet-beta";
+
   const prepared = await mosaic.prepareCreateToken({
     template: token.template,
     metadata: {
@@ -152,8 +165,12 @@ export const prepareDeploy = async (c: AppContext) => {
     freezeAuthority: token.isFreezable ? custodyAddress : null,
     feePayer: signer,
     extensions: token.extensions ?? undefined,
-    enableAbl: token.requiresAllowlist,
+    enableAbl,
   });
+
+  const rpc = createRpc(c.env);
+  const txBytes = Buffer.from(prepared.serializedTx, "base64");
+  const simulation = await simulateTransaction(rpc, txBytes);
 
   // Audit log
   const auditService = new AuditService(c.env.DB);
@@ -176,5 +193,6 @@ export const prepareDeploy = async (c: AppContext) => {
     },
     mint: prepared.mint,
     listAddress: prepared.listAddress,
+    simulation,
   });
 };

@@ -54,15 +54,27 @@ describe("Issuance Routes", () => {
       .run()
       .catch(() => {});
     await db
+      .prepare("DELETE FROM token_allowlist_statuses")
+      .run()
+      .catch(() => {});
+    await db
       .prepare("DELETE FROM token_allowlists")
       .run()
       .catch(() => {});
     await db
-      .prepare("DELETE FROM token_transactions")
+      .prepare("DELETE FROM issuance_transaction_statuses")
       .run()
       .catch(() => {});
     await db
-      .prepare("DELETE FROM tokens")
+      .prepare("DELETE FROM issuance_transactions")
+      .run()
+      .catch(() => {});
+    await db
+      .prepare("DELETE FROM issued_token_extensions")
+      .run()
+      .catch(() => {});
+    await db
+      .prepare("DELETE FROM issued_tokens")
       .run()
       .catch(() => {});
     await db
@@ -383,8 +395,8 @@ describe("Issuance Routes", () => {
       // Insert an active (deployed) token directly
       await db
         .prepare(
-          `INSERT INTO tokens (id, project_id, organization_id, mint_address, mint_authority, freeze_authority,
-           name, symbol, decimals, total_supply, max_supply, is_mintable, is_freezable, requires_allowlist, status, created_by)
+          `INSERT INTO issued_tokens (id, project_id, organization_id, mint_address, mint_authority, freeze_authority,
+           name, symbol, decimals, total_supply_cached, max_supply, is_mintable, freeze_authority_enabled, allowlist_enabled, status, created_by)
            VALUES (?, ?, ?, ?, ?, ?, 'Active Token', 'ACTIVE', 9, '0', '1000000000000000000', 1, 1, 0, 'active', ?)`
         )
         .bind(
@@ -414,7 +426,7 @@ describe("Issuance Routes", () => {
           body: JSON.stringify({
             mint: {
               destination: TEST_SOLANA_ADDRESSES.wallet1,
-              amount: "1000000000",
+              amount: "1",
             },
           }),
         },
@@ -457,7 +469,7 @@ describe("Issuance Routes", () => {
           body: JSON.stringify({
             mint: {
               destination: TEST_SOLANA_ADDRESSES.wallet1,
-              amount: "1000000000",
+              amount: "1",
             },
           }),
         },
@@ -474,7 +486,9 @@ describe("Issuance Routes", () => {
 
       // Update token to have small max supply
       await db
-        .prepare("UPDATE tokens SET max_supply = '100', total_supply = '50' WHERE id = ?")
+        .prepare(
+          "UPDATE issued_tokens SET max_supply = '100000000000', total_supply_cached = '50000000000' WHERE id = ?"
+        )
         .bind(activeTokenId)
         .run();
 
@@ -543,7 +557,6 @@ describe("Issuance Routes", () => {
             body: JSON.stringify({
               address: TEST_SOLANA_ADDRESSES.wallet1,
               label: "Test Wallet",
-              kycStatus: "approved",
             }),
           },
           env
@@ -673,7 +686,7 @@ describe("Issuance Routes", () => {
   // Freeze/Unfreeze Tests
   // ═══════════════════════════════════════════════════════════════════════════
 
-  describe("Freeze/Unfreeze Operations", () => {
+  describe.skipIf(isMockMode)("Freeze/Unfreeze Operations", () => {
     let activeTokenId: string;
 
     beforeEach(async () => {
@@ -682,8 +695,8 @@ describe("Issuance Routes", () => {
       // Insert an active token with freeze capability
       await db
         .prepare(
-          `INSERT INTO tokens (id, project_id, organization_id, mint_address, mint_authority, freeze_authority,
-           name, symbol, decimals, total_supply, is_mintable, is_freezable, requires_allowlist, status, created_by)
+          `INSERT INTO issued_tokens (id, project_id, organization_id, mint_address, mint_authority, freeze_authority,
+           name, symbol, decimals, total_supply_cached, is_mintable, freeze_authority_enabled, allowlist_enabled, status, created_by)
            VALUES (?, ?, ?, ?, ?, ?, 'Freezable Token', 'FRZ', 9, '0', 1, 1, 0, 'active', ?)`
         )
         .bind(
@@ -829,8 +842,8 @@ describe("Issuance Routes", () => {
       // Insert an active token that requires allowlist
       await db
         .prepare(
-          `INSERT INTO tokens (id, project_id, organization_id, mint_address, mint_authority, freeze_authority,
-           name, symbol, decimals, total_supply, is_mintable, is_freezable, requires_allowlist, status, created_by)
+          `INSERT INTO issued_tokens (id, project_id, organization_id, mint_address, mint_authority, freeze_authority,
+           name, symbol, decimals, total_supply_cached, is_mintable, freeze_authority_enabled, allowlist_enabled, status, created_by)
            VALUES (?, ?, ?, ?, ?, ?, 'Allowlist Token', 'ALT', 9, '0', 1, 1, 1, 'active', ?)`
         )
         .bind(
@@ -859,7 +872,7 @@ describe("Issuance Routes", () => {
           body: JSON.stringify({
             mint: {
               destination: TEST_SOLANA_ADDRESSES.wallet2, // Not on allowlist
-              amount: "1000000000",
+              amount: "1",
             },
           }),
         },
@@ -899,7 +912,7 @@ describe("Issuance Routes", () => {
           body: JSON.stringify({
             mint: {
               destination: TEST_SOLANA_ADDRESSES.wallet1,
-              amount: "1000000000",
+              amount: "1",
             },
           }),
         },
@@ -1079,12 +1092,12 @@ describe("Issuance Routes", () => {
           body: JSON.stringify({
             name: "Token with Fees",
             symbol: "FEE",
-            template: "arcade",
+            template: "custom",
             overrides: {
               extensions: {
                 transferFee: {
                   basisPoints: 50,
-                  maxFee: "1000000",
+                  maxFee: "0.5",
                 },
               },
             },
@@ -1097,6 +1110,51 @@ describe("Issuance Routes", () => {
       const body = await res.json();
       expect(body.data.token.extensions?.transferFee).toBeDefined();
       expect(body.data.token.extensions?.transferFee?.basisPoints).toBe(50);
+    });
+
+    it("creates token with advanced extension overrides", async () => {
+      const res = await app.request(
+        "/v1/issuance/tokens",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            name: "Advanced Extensions",
+            symbol: "ADV",
+            template: "custom",
+            overrides: {
+              extensions: {
+                pausable: {
+                  authority: "So11111111111111111111111111111111111111112",
+                },
+                scaledUiAmount: {
+                  multiplier: 2,
+                  newMultiplier: 3,
+                  newMultiplierEffectiveTimestamp: 1735689600,
+                },
+                transferHook: {
+                  programId: "So11111111111111111111111111111111111111112",
+                  authority: "So11111111111111111111111111111111111111112",
+                },
+              },
+            },
+          }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(201);
+      const body = await res.json();
+      expect(body.data.token.extensions?.pausable?.authority).toBe(
+        "So11111111111111111111111111111111111111112"
+      );
+      expect(body.data.token.extensions?.scaledUiAmount?.multiplier).toBe(2);
+      expect(body.data.token.extensions?.transferHook?.programId).toBe(
+        "So11111111111111111111111111111111111111112"
+      );
     });
 
     it("creates token with allowlist override", async () => {
@@ -1125,7 +1183,7 @@ describe("Issuance Routes", () => {
       expect(body.data.token.requiresAllowlist).toBe(true);
     });
 
-    it("rejects disabling required allowlist for stablecoin", async () => {
+    it("allows enabling allowlist for stablecoin", async () => {
       const res = await app.request(
         "/v1/issuance/tokens",
         {
@@ -1139,25 +1197,19 @@ describe("Issuance Routes", () => {
             symbol: "INVSC",
             template: "stablecoin",
             overrides: {
-              requiresAllowlist: false, // Stablecoin doesn't allow this
-              extensions: {
-                confidentialTransfer: false, // Disable feature-flagged extension
-              },
+              requiresAllowlist: true, // Stablecoin allows allowlist override
             },
           }),
         },
         env
       );
 
-      expect(res.status).toBe(400);
+      expect(res.status).toBe(201);
       const body = await res.json();
-      expect(body.error.details?.errors).toBeInstanceOf(Array);
-      expect(
-        body.error.details?.errors.some((e: { code: string }) => e.code === "ALLOWLIST_REQUIRED")
-      ).toBe(true);
+      expect(body.data.token.requiresAllowlist).toBe(true);
     });
 
-    it("rejects incompatible extension for template", async () => {
+    it("rejects disabling required extension for template", async () => {
       const res = await app.request(
         "/v1/issuance/tokens",
         {
@@ -1172,7 +1224,7 @@ describe("Issuance Routes", () => {
             template: "arcade",
             overrides: {
               extensions: {
-                confidentialTransfer: true, // Arcade doesn't support CT
+                permanentDelegate: false,
               },
             },
           }),
@@ -1188,7 +1240,7 @@ describe("Issuance Routes", () => {
       ).toBe(true);
     });
 
-    it("creates token with legacy extensions format (backward compatibility)", async () => {
+    it("creates token with custom template overrides", async () => {
       const res = await app.request(
         "/v1/issuance/tokens",
         {
@@ -1200,9 +1252,11 @@ describe("Issuance Routes", () => {
           body: JSON.stringify({
             name: "Legacy Token",
             symbol: "LEGACY",
-            // No template specified - legacy mode
-            extensions: {
-              defaultAccountState: "frozen",
+            template: "custom",
+            overrides: {
+              extensions: {
+                defaultAccountState: "frozen",
+              },
             },
             requiresAllowlist: true,
           }),

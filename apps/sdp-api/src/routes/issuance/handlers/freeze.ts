@@ -1,6 +1,6 @@
 import { getAuth } from "@/lib/auth";
 import { AppError, notFound } from "@/lib/errors";
-import { created, success } from "@/lib/response";
+import { created, paginated, success } from "@/lib/response";
 import { assertValidAddress } from "@/lib/solana";
 import { AuditService } from "@/services/audit.service";
 import { createMosaicService } from "@/services/mosaic";
@@ -38,7 +38,7 @@ export const freezeAccount = async (c: AppContext) => {
   }
 
   if (!token.isFreezable) {
-    throw new AppError("BAD_REQUEST", "Token does not support freezing");
+    throw new AppError("BAD_REQUEST", "Token does not support freeze operations");
   }
 
   if (!token.mintAddress) {
@@ -95,7 +95,12 @@ export const freezeAccount = async (c: AppContext) => {
       },
     });
 
-    const response: FrozenAccountResponse = { frozenAccount };
+    const response: FrozenAccountResponse = {
+      frozenAccount: {
+        ...frozenAccount,
+        signature: result.signature,
+      },
+    };
     return created(c, response);
   } catch (error) {
     if (error instanceof Error && error.message === "ACCOUNT_ALREADY_FROZEN") {
@@ -103,6 +108,33 @@ export const freezeAccount = async (c: AppContext) => {
     }
     throw error;
   }
+};
+
+export const listFrozenAccounts = async (c: AppContext) => {
+  const { tokenId } = c.req.param();
+  const auth = getAuth(c);
+
+  const tokenService = new TokenService(c.env.DB);
+  const token = await tokenService.getToken(tokenId);
+
+  if (!token || token.organizationId !== auth?.organizationId) {
+    throw notFound("Token");
+  }
+
+  if (auth?.projectId && token.projectId !== auth.projectId) {
+    throw notFound("Token");
+  }
+
+  const page = Number.parseInt(c.req.query("page") ?? "1", 10);
+  const pageSize = Math.min(Number.parseInt(c.req.query("pageSize") ?? "50", 10), 100);
+  const offset = (page - 1) * pageSize;
+
+  const { frozenAccounts, total } = await tokenService.listFrozenAccounts(tokenId, {
+    limit: pageSize,
+    offset,
+  });
+
+  return paginated(c, frozenAccounts, { total, page, pageSize });
 };
 
 export const unfreezeAccount = async (c: AppContext) => {
@@ -131,6 +163,11 @@ export const unfreezeAccount = async (c: AppContext) => {
 
   if (!token.mintAddress) {
     throw new AppError("TOKEN_NOT_DEPLOYED", "Token has not been deployed to Solana");
+  }
+
+  const frozen = await tokenService.isAccountFrozen(tokenId, parsed.data.accountAddress);
+  if (!frozen) {
+    throw new AppError("ACCOUNT_NOT_FROZEN", "Account is not frozen");
   }
 
   // Get custody signer (freeze authority, via 3-tier resolution)
@@ -180,7 +217,12 @@ export const unfreezeAccount = async (c: AppContext) => {
       },
     });
 
-    const response: FrozenAccountResponse = { frozenAccount };
+    const response: FrozenAccountResponse = {
+      frozenAccount: {
+        ...frozenAccount,
+        signature: result.signature,
+      },
+    };
     return success(c, response);
   } catch (error) {
     if (error instanceof Error && error.message === "ACCOUNT_NOT_FROZEN") {

@@ -1,3 +1,4 @@
+import { isDecimalString } from "@/lib/amount";
 import { z } from "zod";
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -9,7 +10,9 @@ import { z } from "zod";
  */
 const transferFeeConfigSchema = z.object({
   basisPoints: z.number().int().min(0).max(10000),
-  maxFee: z.string(),
+  maxFee: z.string().refine((value) => isDecimalString(value), {
+    message: "Invalid amount format",
+  }),
   transferFeeConfigAuthority: z.string().optional(),
   withdrawWithheldAuthority: z.string().optional(),
 });
@@ -23,27 +26,28 @@ const interestBearingConfigSchema = z.object({
 });
 
 /**
- * Legacy extensions schema (for backward compatibility)
+ * Pausable extension configuration
  */
-const legacyExtensionsSchema = z.object({
-  confidentialTransfer: z.boolean().optional(),
-  transferFee: z
-    .object({
-      basisPoints: z.number().int().min(0).max(10000),
-      maxFee: z.string(),
-      transferFeeConfigAuthority: z.string(),
-      withdrawWithheldAuthority: z.string(),
-    })
-    .optional(),
-  interestBearing: z
-    .object({
-      rate: z.number(),
-      rateAuthority: z.string(),
-    })
-    .optional(),
-  permanentDelegate: z.string().optional(),
-  nonTransferable: z.boolean().optional(),
-  defaultAccountState: z.enum(["initialized", "frozen"]).optional(),
+const pausableConfigSchema = z.object({
+  authority: z.string().min(32).max(44).optional(),
+});
+
+/**
+ * Scaled UI amount extension configuration
+ */
+const scaledUiAmountConfigSchema = z.object({
+  authority: z.string().min(32).max(44).optional(),
+  multiplier: z.number().positive().optional(),
+  newMultiplier: z.number().positive().optional(),
+  newMultiplierEffectiveTimestamp: z.number().int().nonnegative().optional(),
+});
+
+/**
+ * Transfer hook extension configuration
+ */
+const transferHookConfigSchema = z.object({
+  programId: z.string().min(32).max(44),
+  authority: z.string().min(32).max(44).optional(),
 });
 
 /**
@@ -52,14 +56,18 @@ const legacyExtensionsSchema = z.object({
  * - true/false: enable/disable
  * - config object: enable with specific configuration
  */
-const extensionOverridesSchema = z.object({
-  confidentialTransfer: z.boolean().optional(),
-  transferFee: z.union([z.literal(false), transferFeeConfigSchema]).optional(),
-  interestBearing: z.union([z.literal(false), interestBearingConfigSchema]).optional(),
-  permanentDelegate: z.boolean().optional(),
-  nonTransferable: z.boolean().optional(),
-  defaultAccountState: z.enum(["initialized", "frozen"]).optional(),
-});
+const extensionOverridesSchema = z
+  .object({
+    transferFee: z.union([z.literal(false), transferFeeConfigSchema]).optional(),
+    interestBearing: z.union([z.literal(false), interestBearingConfigSchema]).optional(),
+    permanentDelegate: z.union([z.literal(false), z.string()]).optional(),
+    pausable: z.union([z.literal(false), pausableConfigSchema]).optional(),
+    nonTransferable: z.boolean().optional(),
+    defaultAccountState: z.enum(["initialized", "frozen"]).optional(),
+    scaledUiAmount: z.union([z.literal(false), scaledUiAmountConfigSchema]).optional(),
+    transferHook: z.union([z.literal(false), transferHookConfigSchema]).optional(),
+  })
+  .strict();
 
 /**
  * Template overrides schema
@@ -85,9 +93,7 @@ export const tokenTemplateSchema = z.preprocess(
 /**
  * Create token request schema
  *
- * Supports two modes:
- * 1. Template mode: Specify template with optional overrides (recommended)
- * 2. Legacy mode: Specify extensions directly (backward compatible, treated as custom)
+ * Supports template mode with optional overrides.
  */
 export const createTokenSchema = z.object({
   name: z.string().min(1).max(100),
@@ -100,13 +106,14 @@ export const createTokenSchema = z.object({
   description: z.string().max(500).optional(),
   uri: z.string().url().optional(),
   imageUrl: z.string().url().optional(),
-  maxSupply: z.string().regex(/^\d+$/).optional(),
+  maxSupply: z
+    .string()
+    .refine((value) => isDecimalString(value), { message: "Invalid amount format" })
+    .optional(),
   /** Token template - defaults to "custom" if not specified */
   template: tokenTemplateSchema.optional(),
   /** Template overrides for customization */
   overrides: templateOverridesSchema.optional(),
-  /** @deprecated Use template + overrides instead */
-  extensions: legacyExtensionsSchema.optional(),
   requiresAllowlist: z.boolean().optional(),
   isMintable: z.boolean().optional(),
   isFreezable: z.boolean().optional(),
@@ -125,7 +132,9 @@ export const updateTokenSchema = z.object({
 export const mintSchema = z.object({
   mint: z.object({
     destination: z.string().min(32).max(44),
-    amount: z.string().regex(/^\d+$/),
+    amount: z
+      .string()
+      .refine((value) => isDecimalString(value), { message: "Invalid amount format" }),
     memo: z.string().max(100).optional(),
   }),
   options: z
@@ -141,9 +150,77 @@ export const mintSchema = z.object({
 export const burnSchema = z.object({
   burn: z.object({
     source: z.string().min(32).max(44),
-    amount: z.string().regex(/^\d+$/),
+    amount: z
+      .string()
+      .refine((value) => isDecimalString(value), { message: "Invalid amount format" }),
     memo: z.string().max(100).optional(),
   }),
+  options: z
+    .object({
+      priorityFee: z
+        .union([z.enum(["none", "low", "medium", "high"]), z.number().int().min(0)])
+        .optional(),
+      simulate: z.boolean().optional(),
+    })
+    .optional(),
+});
+
+export const seizeSchema = z.object({
+  seize: z.object({
+    source: z.string().min(32).max(44),
+    destination: z.string().min(32).max(44),
+    amount: z
+      .string()
+      .refine((value) => isDecimalString(value), { message: "Invalid amount format" }),
+    delegateAuthority: z.string().min(32).max(44).optional(),
+    memo: z.string().max(100).optional(),
+  }),
+  options: z
+    .object({
+      priorityFee: z
+        .union([z.enum(["none", "low", "medium", "high"]), z.number().int().min(0)])
+        .optional(),
+      simulate: z.boolean().optional(),
+    })
+    .optional(),
+});
+
+export const forceBurnSchema = z.object({
+  forceBurn: z.object({
+    source: z.string().min(32).max(44),
+    amount: z
+      .string()
+      .refine((value) => isDecimalString(value), { message: "Invalid amount format" }),
+    delegateAuthority: z.string().min(32).max(44).optional(),
+    memo: z.string().max(100).optional(),
+  }),
+  options: z
+    .object({
+      priorityFee: z
+        .union([z.enum(["none", "low", "medium", "high"]), z.number().int().min(0)])
+        .optional(),
+      simulate: z.boolean().optional(),
+    })
+    .optional(),
+});
+
+export const updateAuthoritySchema = z.object({
+  authority: z.object({
+    role: z.enum(["mint", "freeze", "permanentDelegate", "metadata"]),
+    currentAuthority: z.string().min(32).max(44).optional(),
+    newAuthority: z.string().min(32).max(44).nullable(),
+  }),
+  options: z
+    .object({
+      priorityFee: z
+        .union([z.enum(["none", "low", "medium", "high"]), z.number().int().min(0)])
+        .optional(),
+      simulate: z.boolean().optional(),
+    })
+    .optional(),
+});
+
+export const pauseTokenSchema = z.object({
   options: z
     .object({
       priorityFee: z
@@ -166,6 +243,4 @@ export const unfreezeSchema = z.object({
 export const addAllowlistSchema = z.object({
   address: z.string().min(32).max(44),
   label: z.string().max(100).optional(),
-  kycStatus: z.enum(["none", "pending", "approved", "rejected"]).optional(),
-  kycProvider: z.string().max(100).optional(),
 });

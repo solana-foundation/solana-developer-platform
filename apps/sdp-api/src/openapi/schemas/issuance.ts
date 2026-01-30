@@ -2,10 +2,14 @@ import {
   addAllowlistSchema as addTokenAllowlistSchemaBase,
   burnSchema as burnSchemaBase,
   createTokenSchema as createTokenSchemaBase,
+  forceBurnSchema as forceBurnSchemaBase,
   freezeSchema as freezeSchemaBase,
   mintSchema as mintSchemaBase,
+  pauseTokenSchema as pauseTokenSchemaBase,
+  seizeSchema as seizeSchemaBase,
   unfreezeSchema as unfreezeSchemaBase,
   updateTokenSchema as updateTokenSchemaBase,
+  updateAuthoritySchema as updateAuthoritySchemaBase,
 } from "../../routes/issuance/schemas";
 import { z } from "./base";
 import {
@@ -23,10 +27,6 @@ import {
 
 export const tokenExtensionsConfigSchema = z
   .object({
-    confidentialTransfer: z.boolean().optional().openapi({
-      description: "Enable confidential transfer extension.",
-      example: false,
-    }),
     transferFee: z
       .object({
         basisPoints: z.number().int().min(0).max(10000).openapi({
@@ -34,8 +34,8 @@ export const tokenExtensionsConfigSchema = z
           example: 25,
         }),
         maxFee: z.string().openapi({
-          description: "Maximum fee in base units.",
-          example: "1000000",
+          description: "Maximum fee in UI units.",
+          example: "0.5",
         }),
         transferFeeConfigAuthority: solanaAddressSchema.openapi({
           description: "Authority to configure transfer fees.",
@@ -65,6 +65,15 @@ export const tokenExtensionsConfigSchema = z
       description: "Permanent delegate address.",
       example: "So11111111111111111111111111111111111111112",
     }),
+    pausable: z
+      .object({
+        authority: solanaAddressSchema.optional().openapi({
+          description: "Authority that can pause/resume transfers.",
+          example: "So11111111111111111111111111111111111111112",
+        }),
+      })
+      .optional()
+      .openapi({ description: "Pausable configuration." }),
     nonTransferable: z
       .boolean()
       .optional()
@@ -73,35 +82,50 @@ export const tokenExtensionsConfigSchema = z
       .enum(["initialized", "frozen"])
       .optional()
       .openapi({ description: "Default account state.", example: "initialized" }),
-    metadataPointer: z
+    scaledUiAmount: z
       .object({
-        authority: solanaAddressSchema.openapi({
-          description: "Metadata pointer authority.",
+        authority: solanaAddressSchema.optional().openapi({
+          description: "Authority that can update scaled UI parameters.",
           example: "So11111111111111111111111111111111111111112",
         }),
-        metadataAddress: solanaAddressSchema.openapi({
-          description: "Metadata account address.",
+        multiplier: z.number().openapi({
+          description: "Current UI multiplier.",
+          example: 1,
+        }),
+        newMultiplier: z.number().openapi({
+          description: "Scheduled multiplier.",
+          example: 2,
+        }),
+        newMultiplierEffectiveTimestamp: z.number().int().openapi({
+          description: "Unix timestamp (seconds) when the new multiplier takes effect.",
+          example: 1735689600,
+        }),
+      })
+      .optional()
+      .openapi({ description: "Scaled UI amount configuration." }),
+    transferHook: z
+      .object({
+        programId: solanaAddressSchema.openapi({
+          description: "Transfer hook program id.",
+          example: "So11111111111111111111111111111111111111112",
+        }),
+        authority: solanaAddressSchema.optional().openapi({
+          description: "Authority that can update the transfer hook program.",
           example: "So11111111111111111111111111111111111111112",
         }),
       })
       .optional()
-      .openapi({ description: "Metadata pointer configuration." }),
-    groupPointer: z
-      .object({
-        authority: solanaAddressSchema.openapi({
-          description: "Group pointer authority.",
-          example: "So11111111111111111111111111111111111111112",
-        }),
-        groupAddress: solanaAddressSchema.openapi({
-          description: "Group address.",
-          example: "So11111111111111111111111111111111111111112",
-        }),
-      })
-      .optional()
-      .openapi({ description: "Group pointer configuration." }),
+      .openapi({ description: "Transfer hook configuration." }),
   })
   .strict()
   .openapi({ description: "Token-2022 extensions configuration." });
+
+export const tokenTemplateIdSchema = z
+  .enum(["stablecoin", "arcade", "tokenized-security", "custom", "rwa"])
+  .openapi({
+    description: "Token template identifier.",
+    example: "stablecoin",
+  });
 
 export const tokenSchema = z
   .object({
@@ -120,6 +144,10 @@ export const tokenSchema = z
       description: "Freeze authority address, if set.",
       example: "So11111111111111111111111111111111111111112",
     }),
+    ablListAddress: solanaAddressSchema.nullable().openapi({
+      description: "On-chain allowlist/blocklist address, if enabled.",
+      example: "So11111111111111111111111111111111111111112",
+    }),
     name: z.string().openapi({ description: "Token name.", example: "Example Token" }),
     symbol: z.string().openapi({ description: "Token symbol.", example: "EXM" }),
     decimals: z.number().int().openapi({ description: "Token decimals.", example: 9 }),
@@ -130,27 +158,42 @@ export const tokenSchema = z
     uri: z
       .string()
       .nullable()
-      .openapi({ description: "Metadata URI.", example: "https://example.com/metadata.json" }),
+      .openapi({
+        description:
+          "Metadata URI passed to on-chain token metadata (points to off-chain JSON).",
+        example: "https://example.com/metadata.json",
+      }),
     imageUrl: z
       .string()
       .nullable()
       .openapi({ description: "Token image URL.", example: "https://example.com/token.png" }),
+    template: tokenTemplateIdSchema.openapi({
+      description: "Token template identifier.",
+      example: "stablecoin",
+    }),
     extensions: tokenExtensionsConfigSchema
       .nullable()
       .openapi({ description: "Token-2022 extensions configuration." }),
     totalSupply: z
       .string()
-      .openapi({ description: "Total supply in base units.", example: "1000000" }),
+      .openapi({
+        description:
+          "Cached total supply in UI units (stored to avoid frequent RPC reads; refreshes asynchronously).",
+        example: "1000000",
+      }),
+    totalSupplyUpdatedAt: isoDateTimeSchema
+      .nullable()
+      .openapi({ description: "Timestamp when supply was last refreshed.", example: null }),
     maxSupply: z
       .string()
       .nullable()
-      .openapi({ description: "Maximum supply in base units, if capped.", example: "10000000" }),
+      .openapi({ description: "Maximum supply in UI units, if capped.", example: "10000000" }),
     isMintable: z
       .boolean()
       .openapi({ description: "Whether additional minting is allowed.", example: true }),
     isFreezable: z
       .boolean()
-      .openapi({ description: "Whether accounts can be frozen.", example: true }),
+      .openapi({ description: "Whether freeze authority is enabled.", example: true }),
     requiresAllowlist: z
       .boolean()
       .openapi({ description: "Whether transfers require allowlist approval.", example: false }),
@@ -182,7 +225,17 @@ export const tokenTransactionSchema = z
     tokenId: tokenIdParamSchema,
     organizationId: orgIdParamSchema,
     type: z
-      .enum(["mint", "burn", "freeze", "unfreeze"])
+      .enum([
+        "mint",
+        "burn",
+        "freeze",
+        "unfreeze",
+        "seize",
+        "force_burn",
+        "update_authority",
+        "pause",
+        "unpause",
+      ])
       .openapi({ description: "Transaction type.", example: "mint" }),
     status: z
       .enum(["pending", "processing", "confirmed", "finalized", "failed"])
@@ -203,11 +256,9 @@ export const tokenTransactionSchema = z
       .int()
       .nullable()
       .openapi({ description: "Slot number, if confirmed.", example: 123456 }),
-    blockTime: z
-      .number()
-      .int()
+    blockTime: isoDateTimeSchema
       .nullable()
-      .openapi({ description: "Block time (unix epoch), if confirmed.", example: 1700000000 }),
+      .openapi({ description: "Block time, if confirmed.", example: "2025-01-01T00:00:00.000Z" }),
     fee: z
       .number()
       .int()
@@ -243,17 +294,6 @@ export const tokenAllowlistEntrySchema = z
       .string()
       .nullable()
       .openapi({ description: "Optional label for the address.", example: "Treasury" }),
-    kycStatus: z
-      .enum(["none", "pending", "approved", "rejected"])
-      .openapi({ description: "KYC status.", example: "approved" }),
-    kycProvider: z
-      .string()
-      .nullable()
-      .openapi({ description: "KYC provider name.", example: "ExampleKYC" }),
-    kycVerifiedAt: isoDateTimeSchema.nullable().openapi({
-      description: "Timestamp when KYC was verified, if any.",
-      example: "2025-01-05T00:00:00.000Z",
-    }),
     status: z
       .enum(["active", "revoked"])
       .openapi({ description: "Allowlist entry status.", example: "active" }),
@@ -300,6 +340,10 @@ export const frozenAccountSchema = z
       .string()
       .nullable()
       .openapi({ description: "Actor identifier that unfroze the account." }),
+    signature: z.string().optional().openapi({
+      description: "Solana transaction signature for the latest freeze/unfreeze.",
+      example: "sig_example",
+    }),
   })
   .openapi({ description: "Frozen account record." });
 
@@ -394,6 +438,76 @@ export const executeBurnResponseSchema = z
   })
   .openapi({ description: "Execute burn response payload." });
 
+export const prepareSeizeResponseSchema = z
+  .object({
+    transaction: tokenTransactionSchema.openapi({ description: "Seize transaction record." }),
+    preparedTransaction: preparedTransactionSchema.openapi({
+      description: "Prepared transaction for seizure.",
+    }),
+    simulation: simulationResultSchema
+      .optional()
+      .openapi({ description: "Optional transaction simulation results." }),
+  })
+  .openapi({ description: "Prepare seize response payload." });
+
+export const executeSeizeResponseSchema = z
+  .object({
+    transaction: tokenTransactionSchema.openapi({ description: "Seize transaction record." }),
+  })
+  .openapi({ description: "Execute seize response payload." });
+
+export const prepareForceBurnResponseSchema = z
+  .object({
+    transaction: tokenTransactionSchema.openapi({ description: "Force burn transaction record." }),
+    preparedTransaction: preparedTransactionSchema.openapi({
+      description: "Prepared transaction for force burn.",
+    }),
+    simulation: simulationResultSchema
+      .optional()
+      .openapi({ description: "Optional transaction simulation results." }),
+  })
+  .openapi({ description: "Prepare force burn response payload." });
+
+export const executeForceBurnResponseSchema = z
+  .object({
+    transaction: tokenTransactionSchema.openapi({ description: "Force burn transaction record." }),
+  })
+  .openapi({ description: "Execute force burn response payload." });
+
+export const prepareUpdateAuthorityResponseSchema = z
+  .object({
+    transaction: tokenTransactionSchema.openapi({
+      description: "Authority update transaction record.",
+    }),
+    preparedTransaction: preparedTransactionSchema.openapi({
+      description: "Prepared transaction for authority update.",
+    }),
+    simulation: simulationResultSchema
+      .optional()
+      .openapi({ description: "Optional transaction simulation results." }),
+  })
+  .openapi({ description: "Prepare authority update response payload." });
+
+export const executeUpdateAuthorityResponseSchema = z
+  .object({
+    transaction: tokenTransactionSchema.openapi({
+      description: "Authority update transaction record.",
+    }),
+  })
+  .openapi({ description: "Execute authority update response payload." });
+
+export const executePauseResponseSchema = z
+  .object({
+    transaction: tokenTransactionSchema.openapi({ description: "Pause transaction record." }),
+  })
+  .openapi({ description: "Execute pause response payload." });
+
+export const executeUnpauseResponseSchema = z
+  .object({
+    transaction: tokenTransactionSchema.openapi({ description: "Unpause transaction record." }),
+  })
+  .openapi({ description: "Execute unpause response payload." });
+
 export const tokenResponseSchema = z
   .object({
     token: tokenSchema.openapi({ description: "Token details." }),
@@ -415,10 +529,6 @@ export const frozenAccountResponseSchema = z
 // Extension override schema for OpenAPI documentation
 const extensionOverridesOpenApiSchema = z
   .object({
-    confidentialTransfer: z.boolean().optional().openapi({
-      description: "Enable/disable confidential transfers.",
-      example: true,
-    }),
     transferFee: z
       .union([
         z.literal(false),
@@ -428,8 +538,8 @@ const extensionOverridesOpenApiSchema = z
             example: 50,
           }),
           maxFee: z.string().openapi({
-            description: "Maximum fee in base units.",
-            example: "1000000",
+            description: "Maximum fee in UI units.",
+            example: "0.5",
           }),
           transferFeeConfigAuthority: z.string().optional().openapi({
             description: "Authority to configure transfer fees. Defaults to platform authority.",
@@ -459,10 +569,25 @@ const extensionOverridesOpenApiSchema = z
       ])
       .optional()
       .openapi({ description: "Interest-bearing configuration or false to disable." }),
-    permanentDelegate: z.boolean().optional().openapi({
-      description: "Enable/disable permanent delegate.",
-      example: true,
-    }),
+    permanentDelegate: z
+      .union([z.literal(false), z.string()])
+      .optional()
+      .openapi({
+        description: "Permanent delegate authority address, or false to disable.",
+        example: "So11111111111111111111111111111111111111112",
+      }),
+    pausable: z
+      .union([
+        z.literal(false),
+        z.object({
+          authority: z.string().optional().openapi({
+            description: "Authority that can pause/resume transfers. Defaults to platform authority.",
+            example: "So11111111111111111111111111111111111111112",
+          }),
+        }),
+      ])
+      .optional()
+      .openapi({ description: "Pausable configuration or false to disable." }),
     nonTransferable: z.boolean().optional().openapi({
       description: "Enable/disable non-transferable.",
       example: false,
@@ -471,6 +596,46 @@ const extensionOverridesOpenApiSchema = z
       .enum(["initialized", "frozen"])
       .optional()
       .openapi({ description: "Override default account state.", example: "frozen" }),
+    scaledUiAmount: z
+      .union([
+        z.literal(false),
+        z.object({
+          authority: z.string().optional().openapi({
+            description: "Authority that can update scaled UI parameters. Defaults to platform authority.",
+            example: "So11111111111111111111111111111111111111112",
+          }),
+          multiplier: z.number().openapi({
+            description: "Current UI multiplier.",
+            example: 1,
+          }),
+          newMultiplier: z.number().optional().openapi({
+            description: "Scheduled multiplier.",
+            example: 2,
+          }),
+          newMultiplierEffectiveTimestamp: z.number().int().optional().openapi({
+            description: "Unix timestamp (seconds) when the new multiplier takes effect.",
+            example: 1735689600,
+          }),
+        }),
+      ])
+      .optional()
+      .openapi({ description: "Scaled UI amount configuration or false to disable." }),
+    transferHook: z
+      .union([
+        z.literal(false),
+        z.object({
+          programId: z.string().openapi({
+            description: "Transfer hook program id.",
+            example: "So11111111111111111111111111111111111111112",
+          }),
+          authority: z.string().optional().openapi({
+            description: "Authority that can update the hook program. Defaults to platform authority.",
+            example: "So11111111111111111111111111111111111111112",
+          }),
+        }),
+      ])
+      .optional()
+      .openapi({ description: "Transfer hook configuration or false to disable." }),
   })
   .openapi({ description: "Extension overrides to customize template defaults." });
 
@@ -497,7 +662,7 @@ export const createTokenRequestSchema = createTokenSchemaBase
       example: "EXM",
     }),
     decimals: createTokenSchemaBase.shape.decimals.openapi({
-      description: "Token decimals. Required for Mosaic template creation.",
+      description: "Token decimals.",
       example: 6,
     }),
     description: createTokenSchemaBase.shape.description.openapi({
@@ -505,7 +670,8 @@ export const createTokenRequestSchema = createTokenSchemaBase
       example: "Example token description.",
     }),
     uri: createTokenSchemaBase.shape.uri.openapi({
-      description: "Metadata URI.",
+      description:
+        "Metadata URI passed to on-chain token metadata (points to off-chain JSON).",
       example: "https://example.com/metadata.json",
     }),
     imageUrl: createTokenSchemaBase.shape.imageUrl.openapi({
@@ -513,26 +679,19 @@ export const createTokenRequestSchema = createTokenSchemaBase
       example: "https://example.com/token.png",
     }),
     maxSupply: createTokenSchemaBase.shape.maxSupply.openapi({
-      description: "Maximum supply as a string (base units).",
+      description: "Maximum supply as a string (UI units).",
       example: "1000000",
     }),
     template: createTokenSchemaBase.shape.template.openapi({
-      description: "Token template preset (Mosaic). Defaults to 'custom' if not specified.",
+      description: "Token template preset. Defaults to 'custom' if not specified.",
       example: "stablecoin",
     }),
     overrides: templateOverridesOpenApiSchema.optional().openapi({
-      description: "Deprecated. Template overrides are not applied for Mosaic templates.",
+      description: "Template overrides to customize defaults.",
       example: {
         extensions: {
-          transferFee: { basisPoints: 50, maxFee: "1000000" },
+          transferFee: { basisPoints: 50, maxFee: "0.5" },
         },
-      },
-    }),
-    extensions: createTokenSchemaBase.shape.extensions.openapi({
-      description: "DEPRECATED: Use template + overrides instead. Legacy extension configuration.",
-      example: {
-        confidentialTransfer: false,
-        defaultAccountState: "initialized",
       },
     }),
     requiresAllowlist: createTokenSchemaBase.shape.requiresAllowlist.openapi({
@@ -609,6 +768,68 @@ export const burnRequestSchema = burnSchemaBase
   })
   .openapi({ description: "Burn request body." });
 
+export const seizeRequestSchema = seizeSchemaBase
+  .extend({
+    seize: seizeSchemaBase.shape.seize.openapi({
+      description: "Forced transfer details.",
+      example: {
+        source: "So11111111111111111111111111111111111111112",
+        destination: "So11111111111111111111111111111111111111112",
+        amount: "250",
+        delegateAuthority: "So11111111111111111111111111111111111111112",
+        memo: "Compliance seizure",
+      },
+    }),
+    options: seizeSchemaBase.shape.options.openapi({
+      description: "Seize execution options.",
+      example: { priorityFee: "low", simulate: true },
+    }),
+  })
+  .openapi({ description: "Seize (force transfer) request body." });
+
+export const forceBurnRequestSchema = forceBurnSchemaBase
+  .extend({
+    forceBurn: forceBurnSchemaBase.shape.forceBurn.openapi({
+      description: "Forced burn details.",
+      example: {
+        source: "So11111111111111111111111111111111111111112",
+        amount: "250",
+        delegateAuthority: "So11111111111111111111111111111111111111112",
+        memo: "Compliance burn",
+      },
+    }),
+    options: forceBurnSchemaBase.shape.options.openapi({
+      description: "Force burn execution options.",
+      example: { priorityFee: "low", simulate: true },
+    }),
+  })
+  .openapi({ description: "Force burn request body." });
+
+export const updateAuthorityRequestSchema = updateAuthoritySchemaBase
+  .extend({
+    authority: updateAuthoritySchemaBase.shape.authority.openapi({
+      description: "Authority update details.",
+      example: {
+        role: "mint",
+        newAuthority: "So11111111111111111111111111111111111111112",
+      },
+    }),
+    options: updateAuthoritySchemaBase.shape.options.openapi({
+      description: "Authority update options.",
+      example: { priorityFee: "low", simulate: true },
+    }),
+  })
+  .openapi({ description: "Update authority request body." });
+
+export const pauseTokenRequestSchema = pauseTokenSchemaBase
+  .extend({
+    options: pauseTokenSchemaBase.shape.options.openapi({
+      description: "Pause/unpause options.",
+      example: { priorityFee: "low", simulate: true },
+    }),
+  })
+  .openapi({ description: "Pause token request body." });
+
 export const freezeAccountRequestSchema = freezeSchemaBase
   .extend({
     accountAddress: freezeSchemaBase.shape.accountAddress.openapi({
@@ -641,14 +862,6 @@ export const addTokenAllowlistRequestSchema = addTokenAllowlistSchemaBase
       description: "Optional label for the allowlist entry.",
       example: "Treasury",
     }),
-    kycStatus: addTokenAllowlistSchemaBase.shape.kycStatus.openapi({
-      description: "KYC status for the address.",
-      example: "approved",
-    }),
-    kycProvider: addTokenAllowlistSchemaBase.shape.kycProvider.openapi({
-      description: "KYC provider name.",
-      example: "ExampleKYC",
-    }),
   })
   .openapi({ description: "Add token allowlist entry request body." });
 
@@ -665,7 +878,7 @@ export const templateExtensionInfoSchema = z
   .object({
     name: z.string().openapi({
       description: "Extension identifier.",
-      example: "confidentialTransfer",
+      example: "transferFee",
     }),
     status: extensionStatusSchema,
     enabled: z.boolean().openapi({
@@ -674,13 +887,6 @@ export const templateExtensionInfoSchema = z
     }),
   })
   .openapi({ description: "Extension info with implementation status." });
-
-export const tokenTemplateIdSchema = z
-  .enum(["stablecoin", "arcade", "tokenized-security", "custom"])
-  .openapi({
-    description: "Token template identifier.",
-    example: "stablecoin",
-  });
 
 export const tokenTemplateInfoSchema = z
   .object({

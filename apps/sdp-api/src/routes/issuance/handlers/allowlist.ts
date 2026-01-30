@@ -67,8 +67,6 @@ export const addAllowlistEntry = async (c: AppContext) => {
       address: parsed.data.address,
       addedBy: auth.id,
       label: parsed.data.label,
-      kycStatus: parsed.data.kycStatus,
-      kycProvider: parsed.data.kycProvider,
     });
 
     // Audit log
