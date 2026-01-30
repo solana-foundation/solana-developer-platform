@@ -711,6 +711,7 @@ export class MosaicService {
     const legacyService = new Token2022Service(this.env, this.signer, this.feePayment);
 
     const result = await legacyService.createMint({
+      metadata: options.metadata,
       decimals: options.decimals,
       mintAuthority: options.mintAuthority,
       freezeAuthority: options.freezeAuthority,

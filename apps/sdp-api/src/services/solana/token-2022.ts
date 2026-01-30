@@ -2,48 +2,33 @@
  * Token-2022 Service
  *
  * Operations for creating and managing Token-2022 tokens on Solana.
- * Uses Mosaic SDK transaction builders where available, with direct
- * Token-2022 instruction building for mint initialization.
+ * Uses Mosaic SDK transaction builders for mint creation and management.
  */
 
+import { parseDecimalAmount } from "@/lib/amount";
 import type { FeePaymentPort } from "@/services/ports";
 import type { Env } from "@/types/env";
 import type { TokenExtensionsConfig } from "@sdp/types";
 import type { FullTransaction } from "@mosaic/sdk";
 import {
+  createCustomTokenInitTransaction,
   createBurnTransaction,
   createMintToTransaction,
   getFreezeTransaction,
   getThawTransaction,
   resolveTokenAccount,
 } from "@mosaic/sdk";
-import { getCreateAccountInstruction } from "@solana-program/system";
-import {
-  TOKEN_2022_PROGRAM_ADDRESS,
-  getInitializeMint2Instruction,
-  getMintSize,
-  getPostInitializeInstructionsForMintExtensions,
-  getPreInitializeInstructionsForMintExtensions,
-} from "@solana-program/token-2022";
 import {
   type Address,
-  type Instruction,
   type Rpc,
   type SolanaRpcApi,
   type Signature,
   type TransactionSigner,
-  addSignersToTransactionMessage,
-  appendTransactionMessageInstructions,
   compileTransaction,
   createNoopSigner,
-  createTransactionMessage,
   generateKeyPairSigner,
   getBase64EncodedWireTransaction,
   getTransactionEncoder,
-  pipe,
-  setTransactionMessageFeePayer,
-  setTransactionMessageFeePayerSigner,
-  setTransactionMessageLifetimeUsingBlockhash,
   signTransactionMessageWithSigners,
 } from "@solana/kit";
 import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
@@ -51,21 +36,25 @@ import {
   type SimulationResult,
   confirmTransaction,
   createRpc,
-  getMinimumBalanceForRentExemption,
-  getRecentBlockhash,
   simulateTransaction,
 } from "./rpc";
-import { addressAsSigner, getExtensionTypes, safeStringify } from "./token-2022.utils";
+import { safeStringify } from "./token-2022.utils";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Types
 // ═══════════════════════════════════════════════════════════════════════════
 
 export interface CreateMintOptions {
+  /** Token metadata */
+  metadata: {
+    name: string;
+    symbol: string;
+    uri: string;
+  };
   /** Token decimals (0-18) */
   decimals: number;
   /** Mint authority address */
-  mintAuthority: Address;
+  mintAuthority: Address | TransactionSigner;
   /** Freeze authority address (null to disable freezing) */
   freezeAuthority: Address | null;
   /** Token-2022 extensions configuration */
@@ -157,6 +146,72 @@ export class Token2022Service {
     this.feePayment = feePayment;
   }
 
+  private buildCustomTokenOptions(options: CreateMintOptions): {
+    enableDefaultAccountState?: boolean;
+    defaultAccountStateInitialized?: boolean;
+    enablePermanentDelegate?: boolean;
+    permanentDelegateAuthority?: Address;
+    enablePausable?: boolean;
+    pausableAuthority?: Address;
+    enableTransferFee?: boolean;
+    transferFeeAuthority?: Address;
+    withdrawWithheldAuthority?: Address;
+    transferFeeBasisPoints?: number;
+    transferFeeMaximum?: bigint;
+    enableInterestBearing?: boolean;
+    interestBearingAuthority?: Address;
+    interestRate?: number;
+    enableNonTransferable?: boolean;
+    enableScaledUiAmount?: boolean;
+    scaledUiAmountAuthority?: Address;
+    scaledUiAmountMultiplier?: number;
+    scaledUiAmountNewMultiplier?: number;
+    scaledUiAmountNewMultiplierEffectiveTimestamp?: number;
+    enableTransferHook?: boolean;
+    transferHookAuthority?: Address;
+    transferHookProgramId?: Address;
+    freezeAuthority?: Address;
+  } {
+    const extensions = options.extensions ?? {};
+    const transferFee = extensions.transferFee;
+    const interestBearing = extensions.interestBearing;
+    const defaultAccountState = extensions.defaultAccountState;
+    const scaledUiAmount = extensions.scaledUiAmount;
+    const transferHook = extensions.transferHook;
+    const transferFeeMaximum = transferFee
+      ? parseDecimalAmount(transferFee.maxFee, options.decimals)
+      : undefined;
+
+    return {
+      enableDefaultAccountState: defaultAccountState !== undefined,
+      defaultAccountStateInitialized:
+        defaultAccountState !== undefined ? defaultAccountState !== "frozen" : undefined,
+      enablePermanentDelegate: !!extensions.permanentDelegate,
+      permanentDelegateAuthority: extensions.permanentDelegate,
+      enablePausable: !!extensions.pausable,
+      pausableAuthority: extensions.pausable?.authority,
+      enableTransferFee: !!transferFee,
+      transferFeeAuthority: transferFee?.transferFeeConfigAuthority,
+      withdrawWithheldAuthority: transferFee?.withdrawWithheldAuthority,
+      transferFeeBasisPoints: transferFee?.basisPoints,
+      transferFeeMaximum,
+      enableInterestBearing: !!interestBearing,
+      interestBearingAuthority: interestBearing?.rateAuthority,
+      interestRate: interestBearing?.rate,
+      enableNonTransferable: extensions.nonTransferable === true,
+      enableScaledUiAmount: !!scaledUiAmount,
+      scaledUiAmountAuthority: scaledUiAmount?.authority,
+      scaledUiAmountMultiplier: scaledUiAmount?.multiplier,
+      scaledUiAmountNewMultiplier: scaledUiAmount?.newMultiplier,
+      scaledUiAmountNewMultiplierEffectiveTimestamp:
+        scaledUiAmount?.newMultiplierEffectiveTimestamp,
+      enableTransferHook: !!transferHook,
+      transferHookAuthority: transferHook?.authority,
+      transferHookProgramId: transferHook?.programId,
+      freezeAuthority: options.freezeAuthority ?? undefined,
+    };
+  }
+
   private async resolveFeePayerSigner(
     fallback: TransactionSigner = this.signer
   ): Promise<TransactionSigner> {
@@ -219,190 +274,28 @@ export class Token2022Service {
    * Create a new Token-2022 mint and deploy it to Solana
    */
   async createMint(options: CreateMintOptions): Promise<CreateMintResult> {
-    const rpc = createRpc(this.env);
-    const signer = this.signer;
-
-    // Generate a new mint keypair
+    const rpc = createRpc(this.env) as Rpc<SolanaRpcApi>;
     const mintKeypair = await generateKeyPairSigner();
-    const mint = mintKeypair.address;
+    const feePayer = await this.resolveFeePayerSigner();
 
-    // Get extension args (undefined if no extensions for correct size calculation)
-    const extensionArgs = getExtensionTypes(
-      options.extensions,
+    const fullTx = await createCustomTokenInitTransaction(
+      rpc,
+      options.metadata.name,
+      options.metadata.symbol,
       options.decimals,
-      options.mintAuthority
-    );
-    const hasExtensions = extensionArgs.length > 0;
-
-    // Calculate mint account size - pass undefined for no extensions
-    const mintSize = getMintSize(hasExtensions ? extensionArgs : undefined);
-
-    // Get rent-exempt balance
-    const lamports = await getMinimumBalanceForRentExemption(rpc, mintSize);
-
-    // Two different flows based on whether Kora is handling fee payment
-    if (this.feePayment) {
-      // Get Kora's fee payer address
-      const feePayerAddress = await this.feePayment.getFeePayer();
-
-      // Build instructions - use addressAsSigner for fee payer in instruction builders
-      const instructions: Instruction[] = [];
-
-      // 1. Create account instruction - payer is Kora's address
-      instructions.push(
-        getCreateAccountInstruction({
-          payer: addressAsSigner(feePayerAddress),
-          newAccount: mintKeypair,
-          lamports,
-          space: mintSize,
-          programAddress: TOKEN_2022_PROGRAM_ADDRESS,
-        })
-      );
-
-      // 2. Pre-initialize extensions (BEFORE initializeMint)
-      if (hasExtensions) {
-        const preInitInstructions = getPreInitializeInstructionsForMintExtensions(
-          mint,
-          extensionArgs
-        );
-        instructions.push(...preInitInstructions);
-      }
-
-      // 3. Initialize mint instruction
-      instructions.push(
-        getInitializeMint2Instruction({
-          mint,
-          decimals: options.decimals,
-          mintAuthority: options.mintAuthority,
-          freezeAuthority: options.freezeAuthority ?? undefined,
-        })
-      );
-
-      // 4. Post-initialize extensions (AFTER initializeMint)
-      if (hasExtensions) {
-        const postInitInstructions = getPostInitializeInstructionsForMintExtensions(
-          mint,
-          addressAsSigner(feePayerAddress),
-          extensionArgs
-        );
-        instructions.push(...postInitInstructions);
-      }
-
-      const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc);
-
-      // Two-signer flow: mint keypair signs locally, Kora adds fee payer signature + submits
-      const transactionMessage = pipe(
-        createTransactionMessage({ version: 0 }),
-        (msg) => setTransactionMessageFeePayer(feePayerAddress, msg),
-        (msg) =>
-          setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, msg),
-        (msg) => appendTransactionMessageInstructions(instructions, msg),
-        // Only add mint keypair as signer - fee payer signature comes from Kora
-        (msg) => addSignersToTransactionMessage([mintKeypair], msg)
-      );
-
-      // Partially sign with mint keypair (required for account creation)
-      const partiallySignedTx =
-        await partiallySignTransactionMessageWithSigners(transactionMessage);
-
-      // Serialize the partially signed transaction and copy to mutable Uint8Array
-      const txEncoder = getTransactionEncoder();
-      const txBytes = new Uint8Array(txEncoder.encode(partiallySignedTx));
-
-      // Send to Kora for fee payer signature and submission
-      const signature = await this.feePayment.signAndSend(txBytes);
-
-      // Wait for confirmation
-      const confirmation = await confirmTransaction(rpc, signature);
-
-      if (confirmation.err) {
-        throw new Error(`Mint creation failed: ${safeStringify(confirmation.err)}`);
-      }
-
-      return {
-        mint,
-        signature,
-        slot: confirmation.slot,
-      };
-    }
-
-    // Original single-signer flow: custody pays and signs everything
-    const instructions: Instruction[] = [];
-
-    // 1. Create account instruction
-    instructions.push(
-      getCreateAccountInstruction({
-        payer: signer,
-        newAccount: mintKeypair,
-        lamports,
-        space: mintSize,
-        programAddress: TOKEN_2022_PROGRAM_ADDRESS,
-      })
+      options.metadata.uri,
+      options.mintAuthority,
+      mintKeypair,
+      feePayer,
+      this.buildCustomTokenOptions(options)
     );
 
-    // 2. Pre-initialize extensions (BEFORE initializeMint)
-    if (hasExtensions) {
-      const preInitInstructions = getPreInitializeInstructionsForMintExtensions(
-        mint,
-        extensionArgs
-      );
-      instructions.push(...preInitInstructions);
-    }
-
-    // 3. Initialize mint instruction
-    instructions.push(
-      getInitializeMint2Instruction({
-        mint,
-        decimals: options.decimals,
-        mintAuthority: options.mintAuthority,
-        freezeAuthority: options.freezeAuthority ?? undefined,
-      })
-    );
-
-    // 4. Post-initialize extensions (AFTER initializeMint)
-    if (hasExtensions) {
-      const postInitInstructions = getPostInitializeInstructionsForMintExtensions(
-        mint,
-        signer,
-        extensionArgs
-      );
-      instructions.push(...postInitInstructions);
-    }
-
-    const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc);
-
-    const transactionMessage = pipe(
-      createTransactionMessage({ version: 0 }),
-      (msg) => setTransactionMessageFeePayerSigner(signer, msg),
-      (msg) =>
-        setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, msg),
-      (msg) => appendTransactionMessageInstructions(instructions, msg),
-      (msg) => addSignersToTransactionMessage([signer, mintKeypair], msg)
-    );
-
-    // Sign the transaction
-    const signedTransaction = await signTransactionMessageWithSigners(transactionMessage);
-
-    // Encode to base64 wire format and send
-    const encodedTransaction = getBase64EncodedWireTransaction(signedTransaction);
-    const signature = await rpc
-      .sendTransaction(encodedTransaction, {
-        skipPreflight: true,
-        encoding: "base64",
-      })
-      .send();
-
-    // Wait for confirmation
-    const confirmation = await confirmTransaction(rpc, signature);
-
-    if (confirmation.err) {
-      throw new Error(`Mint creation failed: ${safeStringify(confirmation.err)}`);
-    }
+    const result = await this.signAndSubmit(fullTx, rpc, "Mint creation failed");
 
     return {
-      mint,
-      signature,
-      slot: confirmation.slot,
+      mint: mintKeypair.address,
+      signature: result.signature,
+      slot: result.slot,
     };
   }
 
@@ -413,80 +306,31 @@ export class Token2022Service {
     options: CreateMintOptions,
     requestSimulation = false
   ): Promise<PreparedTransaction & { mint: Address }> {
-    const rpc = createRpc(this.env);
-    const signer = this.signer;
-
-    // Generate a new mint keypair
+    const rpc = createRpc(this.env) as Rpc<SolanaRpcApi>;
     const mintKeypair = await generateKeyPairSigner();
-    const mint = mintKeypair.address;
+    const feePayer = await this.resolveFeePayerSigner();
 
-    // Get extension args (undefined if no extensions for correct size calculation)
-    const extensionArgs = getExtensionTypes(
-      options.extensions,
+    const fullTx = await createCustomTokenInitTransaction(
+      rpc,
+      options.metadata.name,
+      options.metadata.symbol,
       options.decimals,
-      options.mintAuthority
-    );
-    const hasExtensions = extensionArgs.length > 0;
-
-    // Calculate mint account size - pass undefined for no extensions
-    const mintSize = getMintSize(hasExtensions ? extensionArgs : undefined);
-    const lamports = await getMinimumBalanceForRentExemption(rpc, mintSize);
-
-    // Build instructions using the library's built-in helpers
-    const instructions: Instruction[] = [];
-
-    // 1. Create account instruction
-    instructions.push(
-      getCreateAccountInstruction({
-        payer: signer,
-        newAccount: mintKeypair,
-        lamports,
-        space: mintSize,
-        programAddress: TOKEN_2022_PROGRAM_ADDRESS,
-      })
+      options.metadata.uri,
+      options.mintAuthority,
+      mintKeypair,
+      feePayer,
+      this.buildCustomTokenOptions(options)
     );
 
-    // 2. Pre-initialize extensions (BEFORE initializeMint) - uses library helper
-    if (hasExtensions) {
-      const preInitInstructions = getPreInitializeInstructionsForMintExtensions(
-        mint,
-        extensionArgs
-      );
-      instructions.push(...preInitInstructions);
-    }
-
-    // 3. Initialize mint instruction
-    instructions.push(
-      getInitializeMint2Instruction({
-        mint,
-        decimals: options.decimals,
-        mintAuthority: options.mintAuthority,
-        freezeAuthority: options.freezeAuthority ?? undefined,
-      })
-    );
-
-    // 4. Post-initialize extensions (AFTER initializeMint) - uses library helper
-    if (hasExtensions) {
-      const postInitInstructions = getPostInitializeInstructionsForMintExtensions(
-        mint,
-        signer,
-        extensionArgs
-      );
-      instructions.push(...postInitInstructions);
-    }
-
-    const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc);
-
-    const transactionMessage = pipe(
-      createTransactionMessage({ version: 0 }),
-      (msg) => setTransactionMessageFeePayerSigner(signer, msg),
-      (msg) =>
-        setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, msg),
-      (msg) => appendTransactionMessageInstructions(instructions, msg)
-    );
-
-    const compiledTx = compileTransaction(transactionMessage);
+    const compiledTx = compileTransaction(fullTx);
     const serializedTx = getBase64EncodedWireTransaction(compiledTx);
+    const lifetimeConstraint = (
+      fullTx as {
+        lifetimeConstraint?: { blockhash: string; lastValidBlockHeight: bigint };
+      }
+    ).lifetimeConstraint;
+    const blockhash = lifetimeConstraint?.blockhash ?? "";
+    const lastValidBlockHeight = lifetimeConstraint?.lastValidBlockHeight ?? 0n;
 
     let simulation: SimulationResult | undefined;
     if (requestSimulation) {
@@ -495,9 +339,9 @@ export class Token2022Service {
     }
 
     return {
-      mint,
+      mint: mintKeypair.address,
       serializedTx,
-      blockhash: blockhash as string,
+      blockhash,
       lastValidBlockHeight,
       simulation,
     };

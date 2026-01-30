@@ -14,8 +14,13 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Token2022Service 
     const token2022 = new Token2022Service(env as Env, signer);
 
     const result = await token2022.createMint({
+      metadata: {
+        name: "Token2022 Direct",
+        symbol: "T2022",
+        uri: "https://example.com/token2022.json",
+      },
       decimals: 6,
-      mintAuthority: signer.address,
+      mintAuthority: signer,
       freezeAuthority: signer.address,
     });
 
