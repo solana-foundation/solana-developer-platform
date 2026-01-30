@@ -23,6 +23,11 @@ export type AuditAction =
   | "burn"
   | "freeze"
   | "unfreeze"
+  | "seize"
+  | "force_burn"
+  | "update_authority"
+  | "pause"
+  | "unpause"
   // Transaction actions
   | "submit"
   | "submit_failed"

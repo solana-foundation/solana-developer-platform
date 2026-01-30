@@ -29,7 +29,7 @@ export default defineWorkersConfig({
         },
       },
     },
-    include: ["src/**/*.test.ts", "src/**/*.spec.ts"],
+    include: ["src/**/*.test.ts", "src/**/*.spec.ts", "src/__tests__/**/*.unit.ts"],
     exclude: ["node_modules", ".wrangler", "dist"],
     coverage: {
       provider: "v8",

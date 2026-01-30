@@ -1,4 +1,5 @@
 import { OpenAPIRegistry, OpenApiGeneratorV3 } from "@asteasolutions/zod-to-openapi";
+import type { OpenAPIObject } from "openapi3-ts/oas30";
 
 import { registerAdminPaths } from "./paths/admin";
 import { registerApiKeyPaths } from "./paths/api-keys";
@@ -8,9 +9,8 @@ import { registerIssuancePaths } from "./paths/issuance";
 import { registerMemberPaths } from "./paths/members";
 import { registerOrganizationPaths } from "./paths/organizations";
 import { registerProjectPaths } from "./paths/projects";
-import { registerTransactionPaths } from "./paths/transactions";
 
-export function createOpenApiDocument() {
+export function createOpenApiDocument(): OpenAPIObject {
   const registry = new OpenAPIRegistry();
 
   registry.registerComponent("securitySchemes", "apiKeyAuth", {
@@ -42,7 +42,6 @@ export function createOpenApiDocument() {
   registerAuthPaths(registry);
   registerProjectPaths(registry);
   registerIssuancePaths(registry);
-  registerTransactionPaths(registry);
   registerAdminPaths(registry);
 
   const generator = new OpenApiGeneratorV3(registry.definitions);
@@ -63,7 +62,6 @@ export function createOpenApiDocument() {
       { name: "Auth", description: "Session and magic link authentication." },
       { name: "Projects", description: "Project and project member management." },
       { name: "Issuance", description: "Token issuance, allowlists, and lifecycle operations." },
-      { name: "Transactions", description: "Raw transaction submit/sign endpoints." },
       { name: "Admin", description: "Administrative allowlist management." },
     ],
     servers: [

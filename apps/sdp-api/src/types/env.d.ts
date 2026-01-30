@@ -23,12 +23,13 @@ export interface Env {
 
   // Secrets (set via wrangler secret)
   API_KEY_PEPPER?: string;
+  CUSTODY_ENCRYPTION_KEY?: string; // For encrypting org private keys in DB
 
   // Email configuration
-  EMAIL_PROVIDER?: "resend" | "console";
+  EMAIL_PROVIDER?: "iterable" | "resend" | "console";
   EMAIL_FROM?: string;
+  ITERABLE_API_KEY?: string;
   RESEND_API_KEY?: string;
-  RESEND_FROM_EMAIL?: string;
   FRONTEND_URL?: string;
 
   // Solana configuration
@@ -37,6 +38,23 @@ export interface Env {
   CUSTODY_PRIVATE_KEY?: string;
   SOLANA_MOCK?: string;
   RUN_INTEGRATION_TESTS?: string;
+
+  // Signing provider (custody backend via @solana/keychain)
+  SIGNING_PROVIDER?: "local" | "fireblocks";
+  FEE_PAYER_PRIVATE_KEY?: string;
+
+  // Fireblocks configuration (@solana/keychain-fireblocks)
+  FIREBLOCKS_API_KEY?: string;
+  FIREBLOCKS_API_SECRET?: string;
+  FIREBLOCKS_VAULT_ID?: string;
+  FIREBLOCKS_ASSET_ID?: string;
+  FIREBLOCKS_API_BASE_URL?: string;
+
+  // Kora (gasless) configuration
+  FEE_PAYMENT_PROVIDER?: "kora" | "native";
+  KORA_RPC_URL?: string;
+  KORA_API_KEY?: string;
+  KORA_TIMEOUT_MS?: string;
 }
 
 // Extend Hono's context with our bindings

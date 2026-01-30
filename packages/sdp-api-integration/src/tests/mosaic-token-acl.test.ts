@@ -1,0 +1,329 @@
+/**
+ * Mosaic Token ACL (Freeze/Thaw) Integration Tests
+ *
+ * Tests freeze and thaw operations using Mosaic SDK with sRFC-37 support.
+ * These tests perform real freeze/thaw operations on Solana devnet.
+ *
+ * sRFC-37 (Token ACL) enables:
+ * - Delegated freeze authority to Token ACL program
+ * - Permissionless thaw for compliant wallets
+ * - Fine-grained access control per token account
+ */
+
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import type {
+  FreezeApiResponse,
+  MintApiResponse,
+  TokenApiResponse,
+  UnfreezeApiResponse,
+} from "../helpers/api-types";
+import {
+  RUN_INTEGRATION_TESTS,
+  SOLANA_CONFIGURED,
+  TEST_PROJECT_API_KEY,
+  app,
+  cleanupIntegrationSuite,
+  env,
+  initIntegrationSuite,
+  resetIntegrationState,
+} from "../helpers/integration";
+
+// Test wallet addresses (valid Base58)
+const TEST_WALLETS = {
+  // biome-ignore lint/nursery/noSecrets: Test Solana address
+  wallet1: "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ",
+  // biome-ignore lint/nursery/noSecrets: Test Solana address
+  wallet2: "7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv",
+};
+
+describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Token ACL", () => {
+  let apiKeyHash: string;
+  let custodyAddress = "";
+  const request = (url: string, init?: RequestInit) => app.request(url, init, env);
+
+  beforeAll(async () => {
+    const init = await initIntegrationSuite();
+    apiKeyHash = init.apiKeyHash;
+    custodyAddress = init.custodyAddress;
+  });
+
+  afterAll(async () => {
+    await cleanupIntegrationSuite();
+  });
+
+  beforeEach(async () => {
+    await resetIntegrationState(apiKeyHash);
+  });
+
+  /**
+   * Helper to create and deploy a token with freeze capability
+   */
+  async function createAndDeployFreezableToken(name: string, symbol: string) {
+    const createRes = await request("/v1/issuance/tokens", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+      },
+      body: JSON.stringify({
+        name,
+        symbol,
+        decimals: 6,
+        template: "stablecoin", // Stablecoin template supports sRFC-37
+        isMintable: true,
+        isFreezable: true,
+      }),
+    });
+
+    const created = (await createRes.json()) as TokenApiResponse;
+    const tokenId = created.data.token.id;
+
+    const deployRes = await request(`/v1/issuance/tokens/${tokenId}/deploy`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
+    });
+
+    const deployed = (await deployRes.json()) as TokenApiResponse;
+    return {
+      tokenId,
+      mintAddress: deployed.data.token.mintAddress!,
+      freezeAuthority: deployed.data.token.freezeAuthority!,
+    };
+  }
+
+  /**
+   * Helper to mint tokens to a destination address
+   */
+  async function mintToDestination(tokenId: string, destination: string, amount: string) {
+    const mintRes = await request(`/v1/issuance/tokens/${tokenId}/mint`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+      },
+      body: JSON.stringify({
+        mint: {
+          destination,
+          amount,
+        },
+      }),
+    });
+
+    return (await mintRes.json()) as MintApiResponse;
+  }
+
+  it("freezes a token account", { timeout: 120000 }, async () => {
+    // Create and deploy freezable token
+    const { tokenId, mintAddress } = await createAndDeployFreezableToken(
+      "Freeze Test Token",
+      "FRZT"
+    );
+    console.log(`Deployed token: ${mintAddress}`);
+
+    // Mint to create the token account
+    const mintResult = await mintToDestination(tokenId, TEST_WALLETS.wallet1, "1");
+    expect(mintResult.data.tokenAccount).toBeTruthy();
+    const tokenAccount = mintResult.data.tokenAccount;
+    console.log(`Minted to token account: ${tokenAccount}`);
+
+    // Freeze the account
+    const freezeRes = await request(`/v1/issuance/tokens/${tokenId}/freeze`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+      },
+      body: JSON.stringify({
+        accountAddress: tokenAccount,
+        reason: "Integration test freeze",
+      }),
+    });
+
+    expect(freezeRes.status).toBe(201);
+    const frozen = (await freezeRes.json()) as FreezeApiResponse;
+
+    expect(frozen.data.frozenAccount.accountAddress).toBe(tokenAccount);
+    expect(frozen.data.frozenAccount.reason).toBe("Integration test freeze");
+    expect(frozen.data.frozenAccount.signature).toBeTruthy();
+
+    console.log(`Freeze signature: ${frozen.data.frozenAccount.signature}`);
+  });
+
+  it("thaws a frozen token account", { timeout: 150000 }, async () => {
+    // Create and deploy freezable token
+    const { tokenId, mintAddress } = await createAndDeployFreezableToken("Thaw Test Token", "THWT");
+    console.log(`Deployed token: ${mintAddress}`);
+
+    // Mint to create the token account
+    const mintResult = await mintToDestination(tokenId, TEST_WALLETS.wallet1, "1");
+    const tokenAccount = mintResult.data.tokenAccount;
+    console.log(`Minted to token account: ${tokenAccount}`);
+
+    // Freeze the account first
+    const freezeRes = await request(`/v1/issuance/tokens/${tokenId}/freeze`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+      },
+      body: JSON.stringify({
+        accountAddress: tokenAccount,
+        reason: "To be thawed",
+      }),
+    });
+
+    expect(freezeRes.status).toBe(201);
+    console.log("Account frozen, now thawing...");
+
+    // Thaw the account
+    const thawRes = await request(`/v1/issuance/tokens/${tokenId}/unfreeze`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+      },
+      body: JSON.stringify({
+        accountAddress: tokenAccount,
+      }),
+    });
+
+    expect(thawRes.status).toBe(200);
+    const thawed = (await thawRes.json()) as UnfreezeApiResponse;
+
+    expect(thawed.data.frozenAccount.accountAddress).toBe(tokenAccount);
+    expect(thawed.data.frozenAccount.unfrozenAt).toBeTruthy();
+    expect(thawed.data.frozenAccount.signature).toBeTruthy();
+
+    console.log(`Thaw signature: ${thawed.data.frozenAccount.signature}`);
+  });
+
+  it("lists frozen accounts for a token", { timeout: 120000 }, async () => {
+    // Create and deploy freezable token
+    const { tokenId, mintAddress } = await createAndDeployFreezableToken(
+      "List Frozen Token",
+      "LFT"
+    );
+    console.log(`Deployed token: ${mintAddress}`);
+
+    // Mint to two different wallets
+    const mint1 = await mintToDestination(tokenId, TEST_WALLETS.wallet1, "1");
+    const mint2 = await mintToDestination(tokenId, TEST_WALLETS.wallet2, "1");
+
+    // Freeze both accounts
+    await request(`/v1/issuance/tokens/${tokenId}/freeze`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+      },
+      body: JSON.stringify({
+        accountAddress: mint1.data.tokenAccount,
+        reason: "Test freeze 1",
+      }),
+    });
+
+    await request(`/v1/issuance/tokens/${tokenId}/freeze`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+      },
+      body: JSON.stringify({
+        accountAddress: mint2.data.tokenAccount,
+        reason: "Test freeze 2",
+      }),
+    });
+
+    // List frozen accounts
+    const listRes = await request(`/v1/issuance/tokens/${tokenId}/frozen`, {
+      headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
+    });
+
+    expect(listRes.status).toBe(200);
+    const list = (await listRes.json()) as {
+      data: Array<{ accountAddress: string; reason: string }>;
+      meta: { total: number };
+    };
+
+    expect(list.meta.total).toBe(2);
+    expect(list.data.length).toBe(2);
+
+    const addresses = list.data.map((f) => f.accountAddress);
+    expect(addresses).toContain(mint1.data.tokenAccount);
+    expect(addresses).toContain(mint2.data.tokenAccount);
+  });
+
+  it("rejects freeze for non-freezable token", { timeout: 90000 }, async () => {
+    // Create and deploy non-freezable token
+    const createRes = await request("/v1/issuance/tokens", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+      },
+      body: JSON.stringify({
+        name: "Non-Freezable Token",
+        symbol: "NFT",
+        decimals: 6,
+        template: "custom",
+        isMintable: true,
+        isFreezable: false, // No freeze authority
+      }),
+    });
+
+    const created = (await createRes.json()) as TokenApiResponse;
+    const tokenId = created.data.token.id;
+
+    // Deploy
+    const deployRes = await request(`/v1/issuance/tokens/${tokenId}/deploy`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
+    });
+
+    const deployed = (await deployRes.json()) as TokenApiResponse;
+    expect(deployed.data.token.freezeAuthority).toBeNull();
+
+    // Mint to create the token account
+    const mintResult = await mintToDestination(tokenId, TEST_WALLETS.wallet1, "1");
+
+    // Try to freeze - should fail
+    const freezeRes = await request(`/v1/issuance/tokens/${tokenId}/freeze`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+      },
+      body: JSON.stringify({
+        accountAddress: mintResult.data.tokenAccount,
+        reason: "Should fail",
+      }),
+    });
+
+    expect(freezeRes.status).toBe(400);
+    const error = (await freezeRes.json()) as { error: { code: string; message: string } };
+    expect(error.error.message).toContain("freeze");
+  });
+
+  it("rejects thaw for account that is not frozen", { timeout: 120000 }, async () => {
+    // Create and deploy freezable token
+    const { tokenId } = await createAndDeployFreezableToken("Not Frozen Token", "NOTF");
+
+    // Mint to create the token account (but don't freeze)
+    const mintResult = await mintToDestination(tokenId, TEST_WALLETS.wallet1, "1");
+
+    // Try to thaw without freezing first - should fail
+    const thawRes = await request(`/v1/issuance/tokens/${tokenId}/unfreeze`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+      },
+      body: JSON.stringify({
+        accountAddress: mintResult.data.tokenAccount,
+      }),
+    });
+
+    // Should return 404 (no frozen record) or 400 (not frozen)
+    expect([400, 404]).toContain(thawRes.status);
+  });
+});

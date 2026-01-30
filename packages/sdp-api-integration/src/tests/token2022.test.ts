@@ -1,0 +1,34 @@
+import type { Env } from "@sdp/api/types/env";
+import { describe, expect, it } from "vitest";
+import {
+  RUN_INTEGRATION_TESTS,
+  SOLANA_CONFIGURED,
+  Token2022Service,
+  createSigner,
+  env,
+} from "../helpers/integration";
+
+describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Token2022Service Direct", () => {
+  it("creates mint using service directly", { timeout: 60000 }, async () => {
+    const signer = await createSigner(env as Env);
+    const token2022 = new Token2022Service(env as Env, signer);
+
+    const result = await token2022.createMint({
+      metadata: {
+        name: "Token2022 Direct",
+        symbol: "T2022",
+        uri: "https://example.com/token2022.json",
+      },
+      decimals: 6,
+      mintAuthority: signer,
+      freezeAuthority: signer.address,
+    });
+
+    expect(result.mint).toBeTruthy();
+    expect(result.signature).toBeTruthy();
+    expect(result.slot).toBeGreaterThan(0n);
+
+    console.log(`Direct service mint: ${result.mint}`);
+    console.log(`Signature: ${result.signature}`);
+  });
+});

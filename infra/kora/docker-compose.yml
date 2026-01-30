@@ -1,0 +1,38 @@
+services:
+  redis:
+    image: redis:8-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+      - ./redis.conf:/usr/local/etc/redis/redis.conf:ro
+    restart: unless-stopped
+    command: redis-server /usr/local/etc/redis/redis.conf
+
+  kora:
+    image: ghcr.io/solana-foundation/kora:latest
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./kora.toml:/app/kora.toml:ro
+      - ./signers.toml:/app/signers.toml:ro
+    environment:
+      - RUST_LOG=info
+      - RPC_URL=${RPC_URL:-https://api.devnet.solana.com}
+      - SIGNER_PRIVATE_KEY=${SIGNER_PRIVATE_KEY}
+    command:
+      - kora
+      - --config
+      - /app/kora.toml
+      - --rpc-url
+      - ${RPC_URL:-https://api.devnet.solana.com}
+      - rpc
+      - start
+      - --signers-config
+      - /app/signers.toml
+    restart: unless-stopped
+    depends_on:
+      - redis
+
+volumes:
+  redis_data:

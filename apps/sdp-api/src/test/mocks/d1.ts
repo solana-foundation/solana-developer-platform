@@ -163,7 +163,7 @@ export async function seedTestDatabase(env: Env): Promise<void> {
       )
     `),
     db.prepare(`
-      CREATE TABLE IF NOT EXISTS tokens (
+      CREATE TABLE IF NOT EXISTS issued_tokens (
         id TEXT PRIMARY KEY,
         project_id TEXT NOT NULL,
         organization_id TEXT NOT NULL,
@@ -176,23 +176,36 @@ export async function seedTestDatabase(env: Env): Promise<void> {
         description TEXT,
         uri TEXT,
         image_url TEXT,
-        extensions TEXT,
-        total_supply TEXT DEFAULT '0',
+        total_supply_cached TEXT NOT NULL DEFAULT '0',
+        total_supply_updated_at TEXT,
         max_supply TEXT,
         is_mintable INTEGER DEFAULT 1,
-        is_freezable INTEGER DEFAULT 1,
-        requires_allowlist INTEGER DEFAULT 0,
+        freeze_authority_enabled INTEGER DEFAULT 1,
+        allowlist_enabled INTEGER DEFAULT 0,
         status TEXT NOT NULL DEFAULT 'pending',
         deployed_at TEXT,
         created_by TEXT NOT NULL,
-        created_at TEXT NOT NULL DEFAULT (datetime('now')),
-        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        created_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ','now')),
+        updated_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ','now')),
+        template TEXT NOT NULL DEFAULT 'custom',
+        abl_list_address TEXT,
         FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
         FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE
       )
     `),
     db.prepare(`
-      CREATE TABLE IF NOT EXISTS token_transactions (
+      CREATE TABLE IF NOT EXISTS issued_token_extensions (
+        id TEXT PRIMARY KEY,
+        token_id TEXT NOT NULL,
+        extension TEXT NOT NULL,
+        config TEXT,
+        created_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ','now')),
+        FOREIGN KEY (token_id) REFERENCES issued_tokens(id) ON DELETE CASCADE,
+        UNIQUE(token_id, extension)
+      )
+    `),
+    db.prepare(`
+      CREATE TABLE IF NOT EXISTS issuance_transactions (
         id TEXT PRIMARY KEY,
         token_id TEXT NOT NULL,
         organization_id TEXT NOT NULL,
@@ -200,15 +213,24 @@ export async function seedTestDatabase(env: Env): Promise<void> {
         status TEXT NOT NULL DEFAULT 'pending',
         signature TEXT UNIQUE,
         serialized_tx TEXT,
-        params TEXT NOT NULL,
+        operation_params TEXT NOT NULL,
         slot INTEGER,
-        block_time INTEGER,
+        block_time TEXT,
         fee INTEGER,
         error TEXT,
         initiated_by_key_id TEXT,
-        created_at TEXT NOT NULL DEFAULT (datetime('now')),
-        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-        FOREIGN KEY (token_id) REFERENCES tokens(id) ON DELETE CASCADE
+        created_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ','now')),
+        updated_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ','now')),
+        FOREIGN KEY (token_id) REFERENCES issued_tokens(id) ON DELETE CASCADE
+      )
+    `),
+    db.prepare(`
+      CREATE TABLE IF NOT EXISTS issuance_transaction_statuses (
+        id TEXT PRIMARY KEY,
+        transaction_id TEXT NOT NULL,
+        status TEXT NOT NULL,
+        changed_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ','now')),
+        FOREIGN KEY (transaction_id) REFERENCES issuance_transactions(id) ON DELETE CASCADE
       )
     `),
     db.prepare(`
@@ -217,15 +239,21 @@ export async function seedTestDatabase(env: Env): Promise<void> {
         token_id TEXT NOT NULL,
         address TEXT NOT NULL,
         label TEXT,
-        kyc_status TEXT DEFAULT 'none',
-        kyc_provider TEXT,
-        kyc_verified_at TEXT,
         status TEXT NOT NULL DEFAULT 'active',
         added_by TEXT NOT NULL,
-        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        created_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ','now')),
         revoked_at TEXT,
-        FOREIGN KEY (token_id) REFERENCES tokens(id) ON DELETE CASCADE,
+        FOREIGN KEY (token_id) REFERENCES issued_tokens(id) ON DELETE CASCADE,
         UNIQUE(token_id, address)
+      )
+    `),
+    db.prepare(`
+      CREATE TABLE IF NOT EXISTS token_allowlist_statuses (
+        id TEXT PRIMARY KEY,
+        allowlist_id TEXT NOT NULL,
+        status TEXT NOT NULL,
+        changed_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ','now')),
+        FOREIGN KEY (allowlist_id) REFERENCES token_allowlists(id) ON DELETE CASCADE
       )
     `),
     db.prepare(`
@@ -234,12 +262,62 @@ export async function seedTestDatabase(env: Env): Promise<void> {
         token_id TEXT NOT NULL,
         account_address TEXT NOT NULL,
         reason TEXT,
-        frozen_at TEXT NOT NULL DEFAULT (datetime('now')),
+        frozen_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ','now')),
         frozen_by TEXT NOT NULL,
         unfrozen_at TEXT,
         unfrozen_by TEXT,
-        FOREIGN KEY (token_id) REFERENCES tokens(id) ON DELETE CASCADE,
+        FOREIGN KEY (token_id) REFERENCES issued_tokens(id) ON DELETE CASCADE,
         UNIQUE(token_id, account_address)
+      )
+    `),
+    // Custody configuration tables
+    db.prepare(`
+      CREATE TABLE IF NOT EXISTS custody_configs (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        project_id TEXT,
+        provider TEXT NOT NULL,
+        config_encrypted TEXT NOT NULL,
+        encryption_version TEXT NOT NULL DEFAULT 'sdp-custody-encryption-v1',
+        default_wallet_id TEXT,
+        status TEXT NOT NULL DEFAULT 'active',
+        created_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ','now')),
+        updated_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ','now')),
+        FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
+        FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+        UNIQUE(organization_id, project_id, provider)
+      )
+    `),
+    db.prepare(`
+      CREATE TABLE IF NOT EXISTS signing_requests (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        custody_config_id TEXT,
+        token_transaction_id TEXT,
+        external_request_id TEXT,
+        status TEXT NOT NULL DEFAULT 'pending',
+        transaction_message TEXT NOT NULL,
+        signatures TEXT,
+        metadata TEXT,
+        created_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ','now')),
+        completed_at TEXT,
+        FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
+        FOREIGN KEY (custody_config_id) REFERENCES custody_configs(id) ON DELETE SET NULL,
+        FOREIGN KEY (token_transaction_id) REFERENCES issuance_transactions(id) ON DELETE SET NULL
+      )
+    `),
+    db.prepare(`
+      CREATE TABLE IF NOT EXISTS custody_wallets (
+        id TEXT PRIMARY KEY,
+        custody_config_id TEXT NOT NULL,
+        wallet_id TEXT NOT NULL,
+        public_key TEXT NOT NULL,
+        label TEXT,
+        purpose TEXT,
+        status TEXT NOT NULL DEFAULT 'active',
+        created_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ','now')),
+        FOREIGN KEY (custody_config_id) REFERENCES custody_configs(id) ON DELETE CASCADE,
+        UNIQUE(custody_config_id, wallet_id)
       )
     `),
   ]);
@@ -254,10 +332,16 @@ export async function clearTestDatabase(env: Env): Promise<void> {
 
   // Drop tables if they exist (order matters for foreign keys)
   const tables = [
+    "custody_wallets",
+    "signing_requests",
+    "custody_configs",
     "frozen_accounts",
+    "token_allowlist_statuses",
     "token_allowlists",
-    "token_transactions",
-    "tokens",
+    "issuance_transaction_statuses",
+    "issuance_transactions",
+    "issued_token_extensions",
+    "issued_tokens",
     "magic_links",
     "sessions",
     "project_members",

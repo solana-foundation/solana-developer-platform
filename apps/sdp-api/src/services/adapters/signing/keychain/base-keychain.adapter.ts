@@ -1,0 +1,117 @@
+/**
+ * Base Keychain Adapter
+ *
+ * Abstract base class for adapters that wrap @solana/keychain signers.
+ * Handles the conversion between our SigningPort interface and Keychain's SolanaSigner.
+ *
+ * Key conversions:
+ * - SignRequest.message (Uint8Array) → SignableMessage for Keychain
+ * - SignatureDictionary (Record<Address, SignatureBytes>) → Map<Address, Uint8Array> for SignResult
+ */
+
+import type {
+  GeneratedKeypair,
+  SignRequest,
+  SignResult,
+  SignStatus,
+  SigningPort,
+} from "@/services/ports";
+import { SigningError } from "@/services/ports";
+import type { SolanaSigner } from "@solana/keychain-core";
+import type { Address } from "@solana/kit";
+import { createSignableMessage } from "@solana/signers";
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Base Adapter
+// ═══════════════════════════════════════════════════════════════════════════
+
+export abstract class BaseKeychainAdapter implements SigningPort {
+  /** Provider identifier (e.g., "keychain-fireblocks") */
+  abstract readonly providerId: string;
+
+  /** The underlying Keychain signer */
+  protected abstract signer: SolanaSigner;
+
+  /**
+   * Whether this provider requires async approval workflows.
+   * Override in subclasses that have approval requirements.
+   */
+  requiresApproval(): boolean {
+    return false;
+  }
+
+  /**
+   * Get the public key for the signing wallet.
+   * Keychain signers only support a single address.
+   */
+  async getPublicKey(_walletId?: string): Promise<Address> {
+    return this.signer.address as Address;
+  }
+
+  /**
+   * Sign a transaction message using the Keychain signer.
+   *
+   * Converts our SignRequest to Keychain's SignableMessage format,
+   * then converts the SignatureDictionary result back to our Map format.
+   */
+  async sign(request: SignRequest): Promise<SignResult> {
+    try {
+      // Check signer availability
+      const isAvailable = await this.signer.isAvailable();
+      if (!isAvailable) {
+        return {
+          status: "failed",
+          error: `${this.providerId} signer not available`,
+        };
+      }
+
+      // Create a SignableMessage from our raw bytes
+      const signableMessage = createSignableMessage(request.message);
+
+      // Sign using Keychain's signMessages method
+      const [signatureDict] = await this.signer.signMessages([signableMessage]);
+
+      // Convert SignatureDictionary to our Map<Address, Uint8Array> format
+      const signatures = new Map<Address, Uint8Array>();
+      for (const [addr, sig] of Object.entries(signatureDict)) {
+        // SignatureBytes is a branded Uint8Array, so this conversion is safe
+        signatures.set(addr as Address, sig as Uint8Array);
+      }
+
+      return {
+        status: "completed",
+        signatures,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown signing error";
+      return {
+        status: "failed",
+        error: `${this.providerId}: ${message}`,
+      };
+    }
+  }
+
+  /**
+   * Poll for async signing status.
+   * Not supported by base Keychain adapters since they complete synchronously.
+   * Override in subclasses that have async approval workflows.
+   */
+  getSignStatus(_requestId: string): Promise<SignStatus> {
+    throw new SigningError(
+      `${this.providerId}: async status polling not supported`,
+      "INVALID_REQUEST"
+    );
+  }
+
+  /**
+   * Generate a new keypair in custody.
+   * Not supported by Keychain signers - they work with pre-existing keys.
+   * Use LocalKeypairAdapter for ephemeral keypair generation.
+   */
+  generateKeypair(): Promise<GeneratedKeypair> {
+    throw new SigningError(
+      `${this.providerId}: keypair generation not supported. Use LocalKeypairAdapter for ephemeral keys.`,
+      "INVALID_REQUEST"
+    );
+  }
+}

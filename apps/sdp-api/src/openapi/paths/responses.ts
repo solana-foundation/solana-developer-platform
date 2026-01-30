@@ -8,12 +8,15 @@ import {
   apiKeyResponseSchema,
   createOrganizationResponseSchema,
   currentUserResponseSchema,
-  custodySignAsyncResponseSchema,
-  custodySignSyncResponseSchema,
   executeBurnResponseSchema,
+  executeForceBurnResponseSchema,
   executeMintResponseSchema,
+  executePauseResponseSchema,
+  executeSeizeResponseSchema,
+  executeUnpauseResponseSchema,
+  executeUpdateAuthorityResponseSchema,
+  frozenAccountSchema,
   frozenAccountResponseSchema,
-  getSigningStatusResponseSchema,
   inviteMemberResponseSchema,
   listApiKeysResponseSchema,
   listMembersResponseSchema,
@@ -21,22 +24,26 @@ import {
   listProjectMembersResponseSchema,
   listProjectsResponseSchema,
   listSessionsResponseSchema,
+  listTemplatesResponseSchema,
   organizationSchema,
   paginatedResponseSchema,
   prepareBurnResponseSchema,
   prepareDeployResponseSchema,
+  prepareForceBurnResponseSchema,
   prepareMintResponseSchema,
+  prepareSeizeResponseSchema,
+  prepareUpdateAuthorityResponseSchema,
   projectMemberResponseSchema,
   projectResponseSchema,
   revokeApiKeyResponseSchema,
   rotateApiKeyResponseSchema,
   sendMagicLinkResponseSchema,
-  submitTransactionResponseSchema,
   successResponseSchema,
   tokenAllowlistEntrySchema,
   tokenAllowlistResponseSchema,
   tokenResponseSchema,
   tokenSchema,
+  tokenTemplateResponseSchema,
   verifyMagicLinkResponseSchema,
 } from "../schemas";
 
@@ -64,26 +71,25 @@ export const tokenListResponse = paginatedResponseSchema(tokenSchema);
 export const tokenAllowlistListResponse = paginatedResponseSchema(tokenAllowlistEntrySchema);
 export const tokenAllowlistResponse = successResponseSchema(tokenAllowlistResponseSchema);
 export const frozenAccountResponse = successResponseSchema(frozenAccountResponseSchema);
+export const frozenAccountListResponse = paginatedResponseSchema(frozenAccountSchema);
 
 export const prepareDeployResponse = successResponseSchema(prepareDeployResponseSchema);
 export const prepareMintResponse = successResponseSchema(prepareMintResponseSchema);
 export const executeMintResponse = successResponseSchema(executeMintResponseSchema);
 export const prepareBurnResponse = successResponseSchema(prepareBurnResponseSchema);
 export const executeBurnResponse = successResponseSchema(executeBurnResponseSchema);
-
-const submitTransactionEnvelope = z.object({
-  data: submitTransactionResponseSchema,
-});
-export const submitTransactionResponse = successResponseSchema(submitTransactionEnvelope);
-
-const custodySignSyncEnvelope = z.object({ data: custodySignSyncResponseSchema });
-const custodySignAsyncEnvelope = z.object({ data: custodySignAsyncResponseSchema });
-
-export const custodySignSyncResponse = successResponseSchema(custodySignSyncEnvelope);
-export const custodySignAsyncResponse = successResponseSchema(custodySignAsyncEnvelope);
-
-const signingStatusEnvelope = z.object({ data: getSigningStatusResponseSchema });
-export const signingStatusResponse = successResponseSchema(signingStatusEnvelope);
+export const prepareSeizeResponse = successResponseSchema(prepareSeizeResponseSchema);
+export const executeSeizeResponse = successResponseSchema(executeSeizeResponseSchema);
+export const prepareForceBurnResponse = successResponseSchema(prepareForceBurnResponseSchema);
+export const executeForceBurnResponse = successResponseSchema(executeForceBurnResponseSchema);
+export const prepareUpdateAuthorityResponse = successResponseSchema(
+  prepareUpdateAuthorityResponseSchema
+);
+export const executeUpdateAuthorityResponse = successResponseSchema(
+  executeUpdateAuthorityResponseSchema
+);
+export const executePauseResponse = successResponseSchema(executePauseResponseSchema);
+export const executeUnpauseResponse = successResponseSchema(executeUnpauseResponseSchema);
 
 export const sendMagicLinkResponse = successResponseSchema(sendMagicLinkResponseSchema);
 export const verifyMagicLinkResponse = successResponseSchema(verifyMagicLinkResponseSchema);
@@ -94,3 +100,6 @@ export const allowlistEntriesResponse = successResponseSchema(allowlistEntriesRe
 export const allowlistEntryResponse = successResponseSchema(
   z.object({ entry: allowlistEntrySchema })
 );
+
+export const tokenTemplateResponse = successResponseSchema(tokenTemplateResponseSchema);
+export const listTemplatesResponse = successResponseSchema(listTemplatesResponseSchema);
