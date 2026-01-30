@@ -5,10 +5,10 @@
  * allowlist management, and freeze/unfreeze operations.
  */
 
+import { formatDecimalAmount, parseDecimalAmount } from "@/lib/amount";
 import type {
   AllowlistEntryStatus,
   FrozenAccount,
-  KycStatus,
   Token,
   TokenAllowlistEntry,
   TokenExtensionsConfig,
@@ -33,7 +33,7 @@ export interface CreateTokenInput {
   description?: string;
   uri?: string;
   imageUrl?: string;
-  /** Token template (determines Mosaic template at deploy) */
+  /** Token template */
   template?: TokenTemplate;
   extensions?: TokenExtensionsConfig;
   maxSupply?: string;
@@ -63,7 +63,7 @@ export interface UpdateTokenTransactionInput {
   status?: TokenTransactionStatus;
   signature?: string;
   slot?: number;
-  blockTime?: number;
+  blockTime?: string;
   fee?: number;
   error?: string;
 }
@@ -73,8 +73,6 @@ export interface AddAllowlistInput {
   address: string;
   addedBy: string;
   label?: string;
-  kycStatus?: KycStatus;
-  kycProvider?: string;
 }
 
 export interface FreezeAccountInput {
@@ -103,17 +101,22 @@ interface TokenRow {
   uri: string | null;
   image_url: string | null;
   template: string;
-  extensions: string | null;
-  total_supply: string;
+  total_supply_cached: string;
+  total_supply_updated_at: string | null;
   max_supply: string | null;
   is_mintable: number;
-  is_freezable: number;
-  requires_allowlist: number;
+  freeze_authority_enabled: number;
+  allowlist_enabled: number;
   status: string;
   deployed_at: string | null;
   created_by: string;
   created_at: string;
   updated_at: string;
+}
+
+interface TokenExtensionRow {
+  extension: string;
+  config: string | null;
 }
 
 interface TokenTransactionRow {
@@ -124,9 +127,9 @@ interface TokenTransactionRow {
   status: string;
   signature: string | null;
   serialized_tx: string | null;
-  params: string;
+  operation_params: string;
   slot: number | null;
-  block_time: number | null;
+  block_time: string | null;
   fee: number | null;
   error: string | null;
   initiated_by_key_id: string | null;
@@ -139,9 +142,6 @@ interface AllowlistRow {
   token_id: string;
   address: string;
   label: string | null;
-  kyc_status: string;
-  kyc_provider: string | null;
-  kyc_verified_at: string | null;
   status: string;
   added_by: string;
   created_at: string;
@@ -176,6 +176,10 @@ export class TokenService {
   async createToken(input: CreateTokenInput): Promise<Token> {
     const id = `tok_${crypto.randomUUID()}`;
     const now = new Date().toISOString();
+    const decimals = input.decimals ?? 9;
+    const maxSupplyBaseUnits = input.maxSupply
+      ? parseDecimalAmount(input.maxSupply, decimals).toString()
+      : null;
 
     const token: Token = {
       id,
@@ -187,13 +191,14 @@ export class TokenService {
       ablListAddress: null,
       name: input.name,
       symbol: input.symbol,
-      decimals: input.decimals ?? 9,
+      decimals,
       description: input.description ?? null,
       uri: input.uri ?? null,
       imageUrl: input.imageUrl ?? null,
       template: input.template ?? "custom",
       extensions: input.extensions ?? null,
       totalSupply: "0",
+      totalSupplyUpdatedAt: now,
       maxSupply: input.maxSupply ?? null,
       isMintable: input.isMintable ?? true,
       isFreezable: input.isFreezable ?? true,
@@ -207,11 +212,12 @@ export class TokenService {
 
     await this.db
       .prepare(
-        `INSERT INTO tokens (
+        `INSERT INTO issued_tokens (
           id, project_id, organization_id, mint_address, mint_authority, freeze_authority,
           abl_list_address, name, symbol, decimals, description, uri, image_url, template,
-          extensions, total_supply, max_supply, is_mintable, is_freezable, requires_allowlist,
-          status, deployed_at, created_by, created_at, updated_at
+          total_supply_cached, total_supply_updated_at, max_supply, is_mintable,
+          freeze_authority_enabled, allowlist_enabled, status, deployed_at, created_by,
+          created_at, updated_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
@@ -229,9 +235,9 @@ export class TokenService {
         token.uri,
         token.imageUrl,
         token.template,
-        token.extensions ? JSON.stringify(token.extensions) : null,
-        token.totalSupply,
-        token.maxSupply,
+        parseDecimalAmount(token.totalSupply, decimals).toString(),
+        token.totalSupplyUpdatedAt,
+        maxSupplyBaseUnits,
         token.isMintable ? 1 : 0,
         token.isFreezable ? 1 : 0,
         token.requiresAllowlist ? 1 : 0,
@@ -242,6 +248,10 @@ export class TokenService {
         token.updatedAt
       )
       .run();
+
+    if (token.extensions) {
+      await this.insertTokenExtensions(token.id, token.extensions, token.createdAt);
+    }
 
     return token;
   }
@@ -254,9 +264,10 @@ export class TokenService {
       .prepare(
         `SELECT id, project_id, organization_id, mint_address, mint_authority, freeze_authority,
                 abl_list_address, name, symbol, decimals, description, uri, image_url, template,
-                extensions, total_supply, max_supply, is_mintable, is_freezable, requires_allowlist,
-                status, deployed_at, created_by, created_at, updated_at
-         FROM tokens WHERE id = ?`
+                total_supply_cached, total_supply_updated_at, max_supply, is_mintable,
+                freeze_authority_enabled, allowlist_enabled, status, deployed_at, created_by,
+                created_at, updated_at
+         FROM issued_tokens WHERE id = ?`
       )
       .bind(tokenId)
       .first<TokenRow>();
@@ -265,7 +276,8 @@ export class TokenService {
       return null;
     }
 
-    return this.mapRowToToken(row);
+    const extensions = await this.getTokenExtensions(tokenId);
+    return this.mapRowToToken(row, extensions);
   }
 
   /**
@@ -276,9 +288,10 @@ export class TokenService {
       .prepare(
         `SELECT id, project_id, organization_id, mint_address, mint_authority, freeze_authority,
                 abl_list_address, name, symbol, decimals, description, uri, image_url, template,
-                extensions, total_supply, max_supply, is_mintable, is_freezable, requires_allowlist,
-                status, deployed_at, created_by, created_at, updated_at
-         FROM tokens WHERE mint_address = ?`
+                total_supply_cached, total_supply_updated_at, max_supply, is_mintable,
+                freeze_authority_enabled, allowlist_enabled, status, deployed_at, created_by,
+                created_at, updated_at
+         FROM issued_tokens WHERE mint_address = ?`
       )
       .bind(mintAddress)
       .first<TokenRow>();
@@ -287,7 +300,8 @@ export class TokenService {
       return null;
     }
 
-    return this.mapRowToToken(row);
+    const extensions = await this.getTokenExtensions(row.id);
+    return this.mapRowToToken(row, extensions);
   }
 
   /**
@@ -299,13 +313,14 @@ export class TokenService {
   ): Promise<{ tokens: Token[]; total: number }> {
     const { status, limit = 50, offset = 0 } = options;
 
-    let countQuery = "SELECT COUNT(*) as count FROM tokens WHERE project_id = ?";
+    let countQuery = "SELECT COUNT(*) as count FROM issued_tokens WHERE project_id = ?";
     let selectQuery = `
       SELECT id, project_id, organization_id, mint_address, mint_authority, freeze_authority,
              abl_list_address, name, symbol, decimals, description, uri, image_url, template,
-             extensions, total_supply, max_supply, is_mintable, is_freezable, requires_allowlist,
-             status, deployed_at, created_by, created_at, updated_at
-      FROM tokens WHERE project_id = ?
+             total_supply_cached, total_supply_updated_at, max_supply, is_mintable,
+             freeze_authority_enabled, allowlist_enabled, status, deployed_at, created_by,
+             created_at, updated_at
+      FROM issued_tokens WHERE project_id = ?
     `;
     const params: (string | number)[] = [projectId];
 
@@ -327,8 +342,14 @@ export class TokenService {
       .bind(...params, limit, offset)
       .all<TokenRow>();
 
+    const extensionMap = await this.getExtensionsForTokens(
+      result.results.map((row) => row.id)
+    );
+
     return {
-      tokens: result.results.map((row) => this.mapRowToToken(row)),
+      tokens: result.results.map((row) =>
+        this.mapRowToToken(row, extensionMap.get(row.id) ?? null)
+      ),
       total: countResult?.count ?? 0,
     };
   }
@@ -380,9 +401,80 @@ export class TokenService {
     values.push(tokenId);
 
     await this.db
-      .prepare(`UPDATE tokens SET ${updates.join(", ")} WHERE id = ?`)
+      .prepare(`UPDATE issued_tokens SET ${updates.join(", ")} WHERE id = ?`)
       .bind(...values)
       .run();
+
+    const updated = await this.getToken(tokenId);
+    if (!updated) {
+      throw new Error("TOKEN_NOT_FOUND");
+    }
+
+    return updated;
+  }
+
+  /**
+   * Update token authority fields and related extensions.
+   */
+  async updateTokenAuthorities(
+    tokenId: string,
+    updates: {
+      mintAuthority?: string | null;
+      isMintable?: boolean;
+      freezeAuthority?: string | null;
+      isFreezable?: boolean;
+      permanentDelegate?: string | null;
+    }
+  ): Promise<Token> {
+    const existing = await this.getToken(tokenId);
+    if (!existing) {
+      throw new Error("TOKEN_NOT_FOUND");
+    }
+
+    const now = new Date().toISOString();
+    const fields: string[] = [];
+    const values: (string | number | null)[] = [];
+
+    if (updates.mintAuthority !== undefined) {
+      fields.push("mint_authority = ?");
+      values.push(updates.mintAuthority);
+    }
+
+    if (updates.isMintable !== undefined) {
+      fields.push("is_mintable = ?");
+      values.push(updates.isMintable ? 1 : 0);
+    }
+
+    if (updates.freezeAuthority !== undefined) {
+      fields.push("freeze_authority = ?");
+      values.push(updates.freezeAuthority);
+    }
+
+    if (updates.isFreezable !== undefined) {
+      fields.push("freeze_authority_enabled = ?");
+      values.push(updates.isFreezable ? 1 : 0);
+    }
+
+    if (fields.length > 0) {
+      fields.push("updated_at = ?");
+      values.push(now);
+      values.push(tokenId);
+
+      await this.db
+        .prepare(`UPDATE issued_tokens SET ${fields.join(", ")} WHERE id = ?`)
+        .bind(...values)
+        .run();
+    }
+
+    if (updates.permanentDelegate !== undefined) {
+      if (fields.length === 0) {
+        await this.db
+          .prepare("UPDATE issued_tokens SET updated_at = ? WHERE id = ?")
+          .bind(now, tokenId)
+          .run();
+      }
+      await this.setTokenExtension(tokenId, "permanentDelegate", updates.permanentDelegate, now);
+    }
 
     const updated = await this.getToken(tokenId);
     if (!updated) {
@@ -406,7 +498,7 @@ export class TokenService {
 
     await this.db
       .prepare(
-        `UPDATE tokens SET
+        `UPDATE issued_tokens SET
           mint_address = ?,
           mint_authority = ?,
           freeze_authority = ?,
@@ -436,8 +528,8 @@ export class TokenService {
       throw new Error("TOKEN_NOT_FOUND");
     }
 
-    const currentSupply = BigInt(token.totalSupply);
-    const deltaAmount = BigInt(delta);
+    const currentSupply = parseDecimalAmount(token.totalSupply, token.decimals);
+    const deltaAmount = parseDecimalAmount(delta, token.decimals);
     let newSupply: bigint;
 
     if (operation === "mint") {
@@ -445,7 +537,7 @@ export class TokenService {
 
       // Check max supply
       if (token.maxSupply) {
-        const maxSupply = BigInt(token.maxSupply);
+        const maxSupply = parseDecimalAmount(token.maxSupply, token.decimals);
         if (newSupply > maxSupply) {
           throw new Error("MAX_SUPPLY_EXCEEDED");
         }
@@ -459,8 +551,10 @@ export class TokenService {
 
     const now = new Date().toISOString();
     await this.db
-      .prepare("UPDATE tokens SET total_supply = ?, updated_at = ? WHERE id = ?")
-      .bind(newSupply.toString(), now, tokenId)
+      .prepare(
+        "UPDATE issued_tokens SET total_supply_cached = ?, total_supply_updated_at = ?, updated_at = ? WHERE id = ?"
+      )
+      .bind(newSupply.toString(), now, now, tokenId)
       .run();
   }
 
@@ -495,9 +589,9 @@ export class TokenService {
 
     await this.db
       .prepare(
-        `INSERT INTO token_transactions (
+        `INSERT INTO issuance_transactions (
           id, token_id, organization_id, type, status, signature, serialized_tx,
-          params, slot, block_time, fee, error, initiated_by_key_id, created_at, updated_at
+          operation_params, slot, block_time, fee, error, initiated_by_key_id, created_at, updated_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
@@ -518,6 +612,8 @@ export class TokenService {
         tx.updatedAt
       )
       .run();
+
+    await this.insertTransactionStatus(tx.id, tx.status, tx.createdAt);
 
     return tx;
   }
@@ -568,15 +664,19 @@ export class TokenService {
     values.push(txId);
 
     await this.db
-      .prepare(`UPDATE token_transactions SET ${updates.join(", ")} WHERE id = ?`)
+      .prepare(`UPDATE issuance_transactions SET ${updates.join(", ")} WHERE id = ?`)
       .bind(...values)
       .run();
+
+    if (input.status) {
+      await this.insertTransactionStatus(txId, input.status, now);
+    }
 
     const row = await this.db
       .prepare(
         `SELECT id, token_id, organization_id, type, status, signature, serialized_tx,
-                params, slot, block_time, fee, error, initiated_by_key_id, created_at, updated_at
-         FROM token_transactions WHERE id = ?`
+                operation_params, slot, block_time, fee, error, initiated_by_key_id, created_at, updated_at
+         FROM issuance_transactions WHERE id = ?`
       )
       .bind(txId)
       .first<TokenTransactionRow>();
@@ -595,8 +695,8 @@ export class TokenService {
     const row = await this.db
       .prepare(
         `SELECT id, token_id, organization_id, type, status, signature, serialized_tx,
-                params, slot, block_time, fee, error, initiated_by_key_id, created_at, updated_at
-         FROM token_transactions WHERE id = ?`
+                operation_params, slot, block_time, fee, error, initiated_by_key_id, created_at, updated_at
+         FROM issuance_transactions WHERE id = ?`
       )
       .bind(txId)
       .first<TokenTransactionRow>();
@@ -629,16 +729,12 @@ export class TokenService {
       // Reactivate revoked entry
       await this.db
         .prepare(
-          "UPDATE token_allowlists SET status = 'active', revoked_at = NULL, kyc_status = ?, kyc_provider = ?, label = ?, added_by = ? WHERE id = ?"
+          "UPDATE token_allowlists SET status = 'active', revoked_at = NULL, label = ?, added_by = ? WHERE id = ?"
         )
-        .bind(
-          input.kycStatus ?? "none",
-          input.kycProvider ?? null,
-          input.label ?? null,
-          input.addedBy,
-          existing.id
-        )
+        .bind(input.label ?? null, input.addedBy, existing.id)
         .run();
+
+      await this.insertAllowlistStatus(existing.id, "active", new Date().toISOString());
 
       const entry = await this.getAllowlistEntry(existing.id);
       if (!entry) {
@@ -655,9 +751,6 @@ export class TokenService {
       tokenId: input.tokenId,
       address: input.address,
       label: input.label ?? null,
-      kycStatus: input.kycStatus ?? "none",
-      kycProvider: input.kycProvider ?? null,
-      kycVerifiedAt: null,
       status: "active",
       addedBy: input.addedBy,
       createdAt: now,
@@ -667,24 +760,23 @@ export class TokenService {
     await this.db
       .prepare(
         `INSERT INTO token_allowlists (
-          id, token_id, address, label, kyc_status, kyc_provider, kyc_verified_at,
+          id, token_id, address, label,
           status, added_by, created_at, revoked_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         entry.id,
         entry.tokenId,
         entry.address,
         entry.label,
-        entry.kycStatus,
-        entry.kycProvider,
-        entry.kycVerifiedAt,
         entry.status,
         entry.addedBy,
         entry.createdAt,
         entry.revokedAt
       )
       .run();
+
+    await this.insertAllowlistStatus(entry.id, entry.status, entry.createdAt);
 
     return entry;
   }
@@ -695,7 +787,7 @@ export class TokenService {
   async getAllowlistEntry(entryId: string): Promise<TokenAllowlistEntry | null> {
     const row = await this.db
       .prepare(
-        `SELECT id, token_id, address, label, kyc_status, kyc_provider, kyc_verified_at,
+        `SELECT id, token_id, address, label,
                 status, added_by, created_at, revoked_at
          FROM token_allowlists WHERE id = ?`
       )
@@ -725,7 +817,7 @@ export class TokenService {
 
     const result = await this.db
       .prepare(
-        `SELECT id, token_id, address, label, kyc_status, kyc_provider, kyc_verified_at,
+        `SELECT id, token_id, address, label,
                 status, added_by, created_at, revoked_at
          FROM token_allowlists
          WHERE token_id = ? AND status = ?
@@ -764,6 +856,8 @@ export class TokenService {
       .prepare("UPDATE token_allowlists SET status = 'revoked', revoked_at = ? WHERE id = ?")
       .bind(now, entryId)
       .run();
+
+    await this.insertAllowlistStatus(entryId, "revoked", now);
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -908,18 +1002,171 @@ export class TokenService {
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
+  // Extension and Status Helpers
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  private async insertTokenExtensions(
+    tokenId: string,
+    extensions: TokenExtensionsConfig,
+    createdAt: string
+  ): Promise<void> {
+    const entries = Object.entries(extensions).filter(
+      ([, value]) => value !== undefined && value !== null && value !== false
+    );
+
+    if (!entries.length) {
+      return;
+    }
+
+    const statements = entries.map(([extension, value]) =>
+      this.db
+        .prepare(
+          `INSERT INTO issued_token_extensions (id, token_id, extension, config, created_at)
+           VALUES (?, ?, ?, ?, ?)`
+        )
+        .bind(
+          `tex_${crypto.randomUUID()}`,
+          tokenId,
+          extension,
+          JSON.stringify(value),
+          createdAt
+        )
+    );
+
+    await this.db.batch(statements);
+  }
+
+  private async setTokenExtension(
+    tokenId: string,
+    extension: string,
+    value: unknown | null,
+    createdAt: string
+  ): Promise<void> {
+    if (value === null) {
+      await this.db
+        .prepare("DELETE FROM issued_token_extensions WHERE token_id = ? AND extension = ?")
+        .bind(tokenId, extension)
+        .run();
+      return;
+    }
+
+    const config = value === true ? null : JSON.stringify(value);
+
+    await this.db
+      .prepare(
+        `INSERT INTO issued_token_extensions (id, token_id, extension, config, created_at)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(token_id, extension) DO UPDATE SET config = excluded.config`
+      )
+      .bind(`tex_${crypto.randomUUID()}`, tokenId, extension, config, createdAt)
+      .run();
+  }
+
+  private async getTokenExtensions(tokenId: string): Promise<TokenExtensionsConfig | null> {
+    const result = await this.db
+      .prepare(
+        `SELECT extension, config
+         FROM issued_token_extensions
+         WHERE token_id = ?`
+      )
+      .bind(tokenId)
+      .all<TokenExtensionRow>();
+
+    return this.mapExtensionRows(result.results);
+  }
+
+  private async getExtensionsForTokens(
+    tokenIds: string[]
+  ): Promise<Map<string, TokenExtensionsConfig | null>> {
+    const map = new Map<string, TokenExtensionsConfig | null>();
+
+    if (tokenIds.length === 0) {
+      return map;
+    }
+
+    const placeholders = tokenIds.map(() => "?").join(", ");
+    const rows = await this.db
+      .prepare(
+        `SELECT token_id, extension, config
+         FROM issued_token_extensions
+         WHERE token_id IN (${placeholders})`
+      )
+      .bind(...tokenIds)
+      .all<{ token_id: string; extension: string; config: string | null }>();
+
+    const grouped = new Map<string, TokenExtensionRow[]>();
+    for (const row of rows.results) {
+      const list = grouped.get(row.token_id) ?? [];
+      list.push({ extension: row.extension, config: row.config });
+      grouped.set(row.token_id, list);
+    }
+
+    for (const [tokenId, groupRows] of grouped.entries()) {
+      map.set(tokenId, this.mapExtensionRows(groupRows));
+    }
+
+    return map;
+  }
+
+  private mapExtensionRows(rows: TokenExtensionRow[]): TokenExtensionsConfig | null {
+    if (!rows.length) {
+      return null;
+    }
+
+    const extensions: Record<string, unknown> = {};
+    for (const row of rows) {
+      if (row.config === null) {
+        extensions[row.extension] = true;
+        continue;
+      }
+
+      try {
+        extensions[row.extension] = JSON.parse(row.config) as unknown;
+      } catch {
+        extensions[row.extension] = row.config;
+      }
+    }
+
+    return extensions as TokenExtensionsConfig;
+  }
+
+  private async insertTransactionStatus(
+    transactionId: string,
+    status: TokenTransactionStatus,
+    changedAt: string
+  ): Promise<void> {
+    await this.db
+      .prepare(
+        `INSERT INTO issuance_transaction_statuses (id, transaction_id, status, changed_at)
+         VALUES (?, ?, ?, ?)`
+      )
+      .bind(`its_${crypto.randomUUID()}`, transactionId, status, changedAt)
+      .run();
+  }
+
+  private async insertAllowlistStatus(
+    allowlistId: string,
+    status: AllowlistEntryStatus,
+    changedAt: string
+  ): Promise<void> {
+    await this.db
+      .prepare(
+        `INSERT INTO token_allowlist_statuses (id, allowlist_id, status, changed_at)
+         VALUES (?, ?, ?, ?)`
+      )
+      .bind(`als_${crypto.randomUUID()}`, allowlistId, status, changedAt)
+      .run();
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
   // Row Mapping Helpers
   // ═══════════════════════════════════════════════════════════════════════════
 
-  private mapRowToToken(row: TokenRow): Token {
-    let extensions: TokenExtensionsConfig | null = null;
-    if (row.extensions) {
-      try {
-        extensions = JSON.parse(row.extensions) as TokenExtensionsConfig;
-      } catch {
-        extensions = null;
-      }
-    }
+  private mapRowToToken(row: TokenRow, extensions: TokenExtensionsConfig | null): Token {
+    const totalSupply = formatDecimalAmount(row.total_supply_cached ?? "0", row.decimals);
+    const maxSupply = row.max_supply
+      ? formatDecimalAmount(row.max_supply, row.decimals)
+      : null;
 
     return {
       id: row.id,
@@ -937,11 +1184,12 @@ export class TokenService {
       imageUrl: row.image_url,
       template: (row.template ?? "custom") as TokenTemplate,
       extensions,
-      totalSupply: row.total_supply,
-      maxSupply: row.max_supply,
+      totalSupply,
+      totalSupplyUpdatedAt: row.total_supply_updated_at,
+      maxSupply,
       isMintable: row.is_mintable === 1,
-      isFreezable: row.is_freezable === 1,
-      requiresAllowlist: row.requires_allowlist === 1,
+      isFreezable: row.freeze_authority_enabled === 1,
+      requiresAllowlist: row.allowlist_enabled === 1,
       status: row.status as TokenStatus,
       deployedAt: row.deployed_at,
       createdBy: row.created_by,
@@ -953,7 +1201,7 @@ export class TokenService {
   private mapRowToTransaction(row: TokenTransactionRow): TokenTransaction {
     let params: Record<string, unknown> = {};
     try {
-      params = JSON.parse(row.params) as Record<string, unknown>;
+      params = JSON.parse(row.operation_params) as Record<string, unknown>;
     } catch {
       params = {};
     }
@@ -983,9 +1231,6 @@ export class TokenService {
       tokenId: row.token_id,
       address: row.address,
       label: row.label,
-      kycStatus: row.kyc_status as KycStatus,
-      kycProvider: row.kyc_provider,
-      kycVerifiedAt: row.kyc_verified_at,
       status: row.status as AllowlistEntryStatus,
       addedBy: row.added_by,
       createdAt: row.created_at,

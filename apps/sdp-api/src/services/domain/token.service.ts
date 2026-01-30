@@ -5,6 +5,7 @@
  * Uses ports for RPC, signing, and fee payment.
  */
 
+import { parseDecimalAmount } from "@/lib/amount";
 import type { TokenExtensionsConfig } from "@sdp/types";
 import { getCreateAccountInstruction } from "@solana-program/system";
 import {
@@ -28,6 +29,7 @@ import {
   type Signature,
   type TransactionSigner,
   generateKeyPairSigner,
+  some,
 } from "@solana/kit";
 
 /**
@@ -411,7 +413,11 @@ export class TokenService {
     const feePayer = await this.feePayment.getFeePayer();
 
     // Get extension args
-    const extensionArgs = this.getExtensionTypes(params.extensions);
+    const extensionArgs = this.getExtensionTypes(
+      params.extensions,
+      params.decimals,
+      params.mintAuthority
+    );
     const hasExtensions = extensionArgs.length > 0;
 
     // Calculate mint account size
@@ -499,12 +505,17 @@ export class TokenService {
     return instructions;
   }
 
-  private getExtensionTypes(extensions?: TokenExtensionsConfig): ExtensionArgs[] {
+  private getExtensionTypes(
+    extensions: TokenExtensionsConfig | undefined,
+    decimals: number,
+    defaultAuthority: Address
+  ): ExtensionArgs[] {
     if (!extensions) return [];
 
     const types: ExtensionArgs[] = [];
 
     if (extensions.transferFee) {
+      const maximumFee = parseDecimalAmount(extensions.transferFee.maxFee, decimals);
       types.push(
         // biome-ignore lint/nursery/noSecrets: Token-2022 extension type identifier
         extension("TransferFeeConfig", {
@@ -513,12 +524,12 @@ export class TokenService {
           withheldAmount: 0n,
           olderTransferFee: {
             epoch: 0n,
-            maximumFee: BigInt(extensions.transferFee.maxFee),
+            maximumFee,
             transferFeeBasisPoints: extensions.transferFee.basisPoints,
           },
           newerTransferFee: {
             epoch: 0n,
-            maximumFee: BigInt(extensions.transferFee.maxFee),
+            maximumFee,
             transferFeeBasisPoints: extensions.transferFee.basisPoints,
           },
         })
@@ -543,6 +554,40 @@ export class TokenService {
 
     if (extensions.nonTransferable) {
       types.push(extension("NonTransferable", {}));
+    }
+
+    if (extensions.pausable) {
+      const authority = extensions.pausable.authority ?? defaultAuthority;
+      types.push(
+        // biome-ignore lint/nursery/noSecrets: Token-2022 extension type identifier
+        extension("PausableConfig", { authority: some(authority), paused: false })
+      );
+    }
+
+    if (extensions.scaledUiAmount) {
+      const authority = extensions.scaledUiAmount.authority ?? defaultAuthority;
+      const newMultiplierEffectiveTimestamp =
+        extensions.scaledUiAmount.newMultiplierEffectiveTimestamp ?? 0;
+      types.push(
+        // biome-ignore lint/nursery/noSecrets: Token-2022 extension type identifier
+        extension("ScaledUiAmountConfig", {
+          authority,
+          multiplier: extensions.scaledUiAmount.multiplier ?? 1,
+          newMultiplierEffectiveTimestamp: BigInt(newMultiplierEffectiveTimestamp),
+          newMultiplier: extensions.scaledUiAmount.newMultiplier ?? 1,
+        })
+      );
+    }
+
+    if (extensions.transferHook) {
+      const authority = extensions.transferHook.authority ?? defaultAuthority;
+      types.push(
+        // biome-ignore lint/nursery/noSecrets: Token-2022 extension type identifier
+        extension("TransferHook", {
+          authority,
+          programId: extensions.transferHook.programId as Address,
+        })
+      );
     }
 
     return types;

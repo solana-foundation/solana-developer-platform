@@ -19,7 +19,16 @@
 
 export type TokenStatus = "pending" | "active" | "paused" | "revoked";
 
-export type TokenTransactionType = "mint" | "burn" | "freeze" | "unfreeze";
+export type TokenTransactionType =
+  | "mint"
+  | "burn"
+  | "freeze"
+  | "unfreeze"
+  | "seize"
+  | "force_burn"
+  | "update_authority"
+  | "pause"
+  | "unpause";
 
 export type TokenTransactionStatus =
   | "pending"
@@ -28,8 +37,6 @@ export type TokenTransactionStatus =
   | "finalized"
   | "failed";
 
-export type KycStatus = "none" | "pending" | "approved" | "rejected";
-
 export type AllowlistEntryStatus = "active" | "revoked";
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -37,7 +44,7 @@ export type AllowlistEntryStatus = "active" | "revoked";
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
- * Token template types aligned with Mosaic SDK templates
+ * Token template types aligned with issuance templates.
  */
 export type TokenTemplate = "stablecoin" | "rwa" | "arcade" | "tokenized-security" | "custom";
 
@@ -50,14 +57,14 @@ export type ExtensionImplementationStatus = "implemented" | "disabled" | "planne
  * Extension name for Token-2022
  */
 export type TokenExtensionName =
-  | "confidentialTransfer"
   | "transferFee"
   | "interestBearing"
   | "permanentDelegate"
+  | "pausable"
   | "nonTransferable"
   | "defaultAccountState"
-  | "metadataPointer"
-  | "groupPointer";
+  | "scaledUiAmount"
+  | "transferHook";
 
 /**
  * Extension info for template definitions
@@ -125,11 +132,10 @@ export interface TokenTemplateInfo {
  * Token-2022 extension configuration
  */
 export interface TokenExtensionsConfig {
-  /** Confidential transfers enabled */
-  confidentialTransfer?: boolean;
   /** Transfer fees configuration */
   transferFee?: {
     basisPoints: number;
+    /** Maximum fee in UI units */
     maxFee: string;
     transferFeeConfigAuthority: string;
     withdrawWithheldAuthority: string;
@@ -141,19 +147,32 @@ export interface TokenExtensionsConfig {
   };
   /** Permanent delegate for the token */
   permanentDelegate?: string;
+  /** Pausable extension configuration */
+  pausable?: {
+    /** Authority that can pause/resume transfers */
+    authority?: string;
+  };
   /** Non-transferable (soulbound) */
   nonTransferable?: boolean;
   /** Default account state (initialized, frozen) */
   defaultAccountState?: "initialized" | "frozen";
-  /** Metadata pointer */
-  metadataPointer?: {
-    authority: string;
-    metadataAddress: string;
+  /** Scaled UI amount configuration */
+  scaledUiAmount?: {
+    /** Authority that can update scaling parameters */
+    authority?: string;
+    /** Current UI multiplier */
+    multiplier?: number;
+    /** Scheduled multiplier */
+    newMultiplier?: number;
+    /** Unix timestamp (seconds) when new multiplier becomes active */
+    newMultiplierEffectiveTimestamp?: number;
   };
-  /** Group pointer for token groups */
-  groupPointer?: {
-    authority: string;
-    groupAddress: string;
+  /** Transfer hook configuration */
+  transferHook?: {
+    /** Transfer hook program id */
+    programId: string;
+    /** Authority that can update the hook program */
+    authority?: string;
   };
 }
 
@@ -174,7 +193,7 @@ export interface Token {
   mintAuthority: string | null;
   /** Freeze authority public key */
   freezeAuthority: string | null;
-  /** On-chain ABL list address (null until deployed with Mosaic) */
+  /** On-chain ABL list address (null until deployed) */
   ablListAddress: string | null;
   name: string;
   symbol: string;
@@ -183,12 +202,14 @@ export interface Token {
   /** Token metadata URI */
   uri: string | null;
   imageUrl: string | null;
-  /** Token template used for creation (determines Mosaic template at deploy) */
+  /** Token template used for creation (drives deployment defaults) */
   template: TokenTemplate;
   /** Token-2022 extensions configuration */
   extensions: TokenExtensionsConfig | null;
-  /** Current total supply as decimal string */
+  /** Cached total supply as decimal string (UI units) */
   totalSupply: string;
+  /** Timestamp when cached supply was last updated */
+  totalSupplyUpdatedAt?: string | null;
   /** Maximum supply limit (null = unlimited) */
   maxSupply: string | null;
   isMintable: boolean;
@@ -218,7 +239,7 @@ export interface TokenTransaction {
   /** Operation parameters */
   params: Record<string, unknown>;
   slot: number | null;
-  blockTime: number | null;
+  blockTime: string | null;
   fee: number | null;
   error: string | null;
   initiatedByKeyId: string | null;
@@ -240,9 +261,6 @@ export interface TokenAllowlistEntry {
   address: string;
   /** Human-readable label */
   label: string | null;
-  kycStatus: KycStatus;
-  kycProvider: string | null;
-  kycVerifiedAt: string | null;
   status: AllowlistEntryStatus;
   addedBy: string;
   createdAt: string;
@@ -262,6 +280,8 @@ export interface FrozenAccount {
   frozenBy: string;
   unfrozenAt: string | null;
   unfrozenBy: string | null;
+  /** Signature of the most recent freeze/thaw transaction */
+  signature?: string;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -273,13 +293,12 @@ export interface FrozenAccount {
  * Set to false to disable an optional extension, or provide config to enable
  */
 export interface ExtensionOverrides {
-  /** Enable/disable confidential transfers */
-  confidentialTransfer?: boolean;
   /** Enable/configure transfer fees */
   transferFee?:
     | false
     | {
         basisPoints: number;
+        /** Maximum fee in UI units */
         maxFee: string;
         transferFeeConfigAuthority?: string;
         withdrawWithheldAuthority?: string;
@@ -291,12 +310,35 @@ export interface ExtensionOverrides {
         rate: number;
         rateAuthority?: string;
       };
-  /** Enable/disable permanent delegate (uses platform authority) */
-  permanentDelegate?: boolean;
+  /** Set permanent delegate authority, or false to disable */
+  permanentDelegate?: string | false;
+  /** Enable/configure pausable extension */
+  pausable?:
+    | false
+    | {
+        authority?: string;
+      };
   /** Enable/disable non-transferable */
   nonTransferable?: boolean;
   /** Set default account state */
   defaultAccountState?: "initialized" | "frozen";
+  /** Enable/configure scaled UI amount */
+  scaledUiAmount?:
+    | false
+    | {
+        authority?: string;
+        multiplier?: number;
+        newMultiplier?: number;
+        /** Unix timestamp (seconds) when the new multiplier takes effect */
+        newMultiplierEffectiveTimestamp?: number;
+      };
+  /** Enable/configure transfer hook */
+  transferHook?:
+    | false
+    | {
+        programId: string;
+        authority?: string;
+      };
 }
 
 /**
@@ -313,15 +355,14 @@ export interface TokenTemplateOverrides {
  * Create token request
  * POST /v1/issuance/tokens
  *
- * Two modes:
- * 1. Template mode: Specify template with optional overrides
- * 2. Legacy mode: Specify extensions directly (treated as template: "custom")
+ * Template mode: Specify template with optional overrides.
  */
 export interface CreateTokenRequest {
   name: string;
   symbol: string;
   decimals?: number;
   description?: string;
+  /** Metadata URI passed to on-chain token metadata (points to off-chain JSON). */
   uri?: string;
   imageUrl?: string;
   maxSupply?: string;
@@ -329,8 +370,6 @@ export interface CreateTokenRequest {
   template?: TokenTemplate;
   /** Template overrides for customization */
   overrides?: TokenTemplateOverrides;
-  /** @deprecated Use template + overrides instead. Legacy extensions configuration */
-  extensions?: TokenExtensionsConfig;
   /** Require allowlist for transfers */
   requiresAllowlist?: boolean;
   /** Allow minting after creation */
@@ -359,8 +398,6 @@ export interface UpdateTokenRequest {
 export interface AddAllowlistEntryRequest {
   address: string;
   label?: string;
-  kycStatus?: KycStatus;
-  kycProvider?: string;
 }
 
 /**

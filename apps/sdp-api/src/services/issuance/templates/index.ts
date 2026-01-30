@@ -1,45 +1,36 @@
 /**
- * Template Service (Mosaic-backed)
+ * Template Service
  *
- * Exposes the Mosaic template surface without SDP-specific configuration.
+ * Exposes issuance templates without SDP-specific configuration.
  */
 
-import type { TokenTemplate, TokenTemplateInfo } from "@sdp/types";
+import type { TokenTemplateInfo } from "@sdp/types";
+import { TEMPLATE_DEFINITIONS, normalizeTemplateId, resolveTemplateConfig } from "./definitions";
 
-const MOSAIC_TEMPLATE_IDS = [
-  "stablecoin",
-  "arcade",
-  "tokenized-security",
-  "custom",
-] as const satisfies readonly TokenTemplate[];
-
-const toDisplayName = (id: string) =>
-  id
-    .split("-")
-    .map((part) => (part.length ? part[0].toUpperCase() + part.slice(1) : part))
-    .join(" ");
-
-const normalizeTemplateId = (id: string): TokenTemplate => {
-  if (id === "tokenized_security" || id === "rwa") {
-    return "tokenized-security";
-  }
-  return id as TokenTemplate;
-};
+const TEMPLATE_IDS = Object.keys(TEMPLATE_DEFINITIONS);
 
 export function listTemplates(): TokenTemplateInfo[] {
-  return MOSAIC_TEMPLATE_IDS.map((id) => ({
-    id,
-    name: toDisplayName(id),
-  }));
+  return TEMPLATE_IDS.map((id) => {
+    const template = TEMPLATE_DEFINITIONS[id as keyof typeof TEMPLATE_DEFINITIONS];
+    return {
+      id: template.id,
+      name: template.name,
+      description: template.description,
+    };
+  });
 }
 
 export function getTemplateInfo(id: string): TokenTemplateInfo | undefined {
   const normalized = normalizeTemplateId(id);
-  if (!MOSAIC_TEMPLATE_IDS.includes(normalized)) {
+  const template = TEMPLATE_DEFINITIONS[normalized];
+  if (!template) {
     return undefined;
   }
   return {
-    id: normalized,
-    name: toDisplayName(normalized),
+    id: template.id,
+    name: template.name,
+    description: template.description,
   };
 }
+
+export { normalizeTemplateId, resolveTemplateConfig };
