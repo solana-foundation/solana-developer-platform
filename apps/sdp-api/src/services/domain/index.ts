@@ -25,17 +25,3 @@ export {
   type SigningRequestRecord,
   type CreateSigningRequestParams,
 } from "./signing.service";
-
-// Token service - Token-2022 operations
-export {
-  TokenService,
-  type CreateMintParams,
-  type CreateMintResult,
-  type MintToParams,
-  type MintToResult,
-  type BurnParams,
-  type FreezeParams,
-  type TokenOperationResult,
-  type PreparedMintCreation,
-  type PreparedMintTo,
-} from "./token.service";
