@@ -29,6 +29,8 @@ export interface Env {
   EMAIL_PROVIDER?: "iterable" | "resend" | "console";
   EMAIL_FROM?: string;
   ITERABLE_API_KEY?: string;
+  ITERABLE_PASSTHROUGH_CAMPAIGN_ID?: string;
+  ITERABLE_API_BASE_URL?: string;
   RESEND_API_KEY?: string;
   FRONTEND_URL?: string;
 

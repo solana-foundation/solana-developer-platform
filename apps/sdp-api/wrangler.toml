@@ -30,6 +30,9 @@ id = "local-sessions"
 [vars]
 ENVIRONMENT = "development"
 API_VERSION = "v1"
+EMAIL_PROVIDER = "iterable"
+EMAIL_FROM = "noreply@mail.solana.org"
+ITERABLE_PASSTHROUGH_CAMPAIGN_ID = "16706310"
 
 # Staging environment
 [env.staging]
@@ -60,6 +63,9 @@ id = "YOUR_STAGING_SESSIONS_KV_ID"
 [env.staging.vars]
 ENVIRONMENT = "staging"
 API_VERSION = "v1"
+EMAIL_PROVIDER = "iterable"
+EMAIL_FROM = "noreply@mail.solana.org"
+ITERABLE_PASSTHROUGH_CAMPAIGN_ID = "16706310"
 
 # Production environment
 [env.production]
