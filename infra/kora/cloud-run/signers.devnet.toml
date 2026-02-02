@@ -1,0 +1,10 @@
+# Kora Signer Configuration for SDP Devnet (Cloud Run)
+
+[signer_pool]
+strategy = "round_robin"
+
+[[signers]]
+name = "sdp_fee_payer"
+type = "memory"
+private_key_env = "SIGNER_PRIVATE_KEY"
+weight = 1

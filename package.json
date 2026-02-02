@@ -28,10 +28,11 @@
     "format:check": "biome format .",
     "test": "turbo run test",
     "check": "biome check --write . && turbo run typecheck",
-    "kora:setup": "cd infra/kora && ./setup.sh",
     "kora:up": "docker compose -f infra/kora/docker-compose.yml up -d",
     "kora:down": "docker compose -f infra/kora/docker-compose.yml down",
-    "kora:logs": "docker compose -f infra/kora/docker-compose.yml logs -f kora"
+    "kora:logs": "docker compose -f infra/kora/docker-compose.yml logs -f kora",
+    "kora:devnet:check": "infra/kora/cloud-run/check.sh",
+    "kora:devnet:test": "pnpm --filter @sdp/api-integration test -- src/tests/kora.test.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.0",
