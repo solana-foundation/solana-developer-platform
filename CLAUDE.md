@@ -24,7 +24,8 @@ pnpm check                            # Lint + typecheck combined
 pnpm typecheck                        # Type check all packages
 
 # Testing
-pnpm test                             # Run all tests via Turbo
+pnpm test                             # Run unit tests via Turbo (excludes integration)
+pnpm test:integration                 # Run integration tests via Turbo
 pnpm --filter @sdp/api test            # Run API tests
 pnpm --filter @sdp/api test:watch      # Watch mode
 pnpm --filter @sdp/api test:coverage   # Generate coverage report
