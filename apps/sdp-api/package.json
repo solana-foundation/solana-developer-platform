@@ -23,7 +23,6 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
-    "@mosaic/sdk": "link:../../external/mosaic/packages/sdk",
     "@react-email/components": "1.0.6",
     "@react-email/render": "2.0.4",
     "@sdp/types": "workspace:*",
@@ -35,6 +34,7 @@
     "@solana/keychain-fireblocks": "0.2.1",
     "@solana/kit": "catalog:",
     "@solana/kora": "0.1.2",
+    "@solana/mosaic-sdk": "catalog:",
     "@solana/signers": "catalog:",
     "drizzle-orm": "^0.45.1",
     "hono": "^4.7.0",
