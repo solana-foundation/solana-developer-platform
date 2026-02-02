@@ -11,6 +11,7 @@ catalog:
   '@solana/instructions': ^5.0.0
   '@solana/keys': ^5.0.0
   '@solana/kit': ^5.0.0
+  '@solana/mosaic-sdk': 0.1.0
   '@solana/programs': ^5.0.0
   '@solana/rpc': ^5.0.0
   '@solana/signers': ^5.0.0
