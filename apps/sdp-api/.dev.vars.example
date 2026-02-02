@@ -1,0 +1,9 @@
+# SDP API local dev vars (copy to .dev.vars)
+
+# Solana RPC (devnet). Use your own provider key if possible.
+SOLANA_RPC_URL=https://devnet.helius-rpc.com/?api-key=YOUR_KEY
+
+# Use the shared devnet Kora instance
+KORA_RPC_URL=https://kora-devnet-315956366746.us-central1.run.app
+# KORA_API_KEY=YOUR_KORA_API_KEY (only if API key auth is enabled)
+FEE_PAYMENT_PROVIDER=kora
