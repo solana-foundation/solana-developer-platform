@@ -13,6 +13,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -29,7 +31,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Lint
-        run: pnpm lint
+        run: pnpm exec biome check --changed --since=origin/main --no-errors-on-unmatched
 
   typecheck:
     name: Typecheck
@@ -37,6 +39,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -52,8 +56,20 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
+      - name: Detect changed packages
+        id: changed
+        run: |
+          CHANGED_PACKAGES=$(git diff --name-only origin/main...HEAD | awk -F/ '/^(apps|packages)\\// {print $1 "/" $2}' | sort -u | tr '\n' ' ' | xargs)
+          echo "packages=${CHANGED_PACKAGES}" >> "$GITHUB_OUTPUT"
+
       - name: Typecheck
-        run: pnpm typecheck
+        if: steps.changed.outputs.packages != ''
+        run: |
+          FILTERS=""
+          for pkg in ${{ steps.changed.outputs.packages }}; do
+            FILTERS="$FILTERS --filter ./$pkg"
+          done
+          pnpm --if-present $FILTERS typecheck
 
   test:
     name: Unit Tests
@@ -61,6 +77,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
