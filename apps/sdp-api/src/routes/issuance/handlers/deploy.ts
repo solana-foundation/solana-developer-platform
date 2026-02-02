@@ -8,7 +8,7 @@ import { createRpc, simulateTransaction } from "@/services/solana/rpc";
 import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
 import type { TokenResponse } from "@sdp/types";
-import { TOKEN_ACL_PROGRAM_ID } from "@mosaic/sdk";
+import { TOKEN_ACL_PROGRAM_ID } from "@solana/mosaic-sdk";
 import type { Address } from "@solana/kit";
 import type { Context } from "hono";
 

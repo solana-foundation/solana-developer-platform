@@ -9,7 +9,7 @@ import { parseDecimalAmount } from "@/lib/amount";
 import type { FeePaymentPort } from "@/services/ports";
 import type { Env } from "@/types/env";
 import type { TokenExtensionsConfig } from "@sdp/types";
-import type { FullTransaction } from "@mosaic/sdk";
+import type { FullTransaction } from "@solana/mosaic-sdk";
 import {
   createCustomTokenInitTransaction,
   createBurnTransaction,
@@ -17,7 +17,7 @@ import {
   getFreezeTransaction,
   getThawTransaction,
   resolveTokenAccount,
-} from "@mosaic/sdk";
+} from "@solana/mosaic-sdk";
 import {
   type Address,
   type Rpc,

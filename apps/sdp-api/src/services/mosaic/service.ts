@@ -1,7 +1,7 @@
 /**
  * Mosaic Service
  *
- * Template-based token issuance using @mosaic/sdk.
+ * Template-based token issuance using @solana/mosaic-sdk.
  * Replaces manual Token-2022 transaction building with Mosaic's
  * pre-configured templates and ABL integration.
  *
@@ -40,7 +40,7 @@ import {
   getThawTransaction,
   getRemoveAuthorityTransaction,
   getUpdateAuthorityTransaction,
-} from "@mosaic/sdk";
+} from "@solana/mosaic-sdk";
 import {
   type Address,
   type Rpc,

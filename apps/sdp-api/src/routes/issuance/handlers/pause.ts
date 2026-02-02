@@ -7,7 +7,7 @@ import { createMosaicService } from "@/services/mosaic";
 import { createOrgSigner } from "@/services/solana";
 import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
-import { MINT_ALREADY_PAUSED_ERROR, MINT_NOT_PAUSED_ERROR } from "@mosaic/sdk";
+import { MINT_ALREADY_PAUSED_ERROR, MINT_NOT_PAUSED_ERROR } from "@solana/mosaic-sdk";
 import type { Context } from "hono";
 import { pauseTokenSchema } from "../schemas";
 

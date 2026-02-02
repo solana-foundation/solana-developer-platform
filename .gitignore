@@ -40,8 +40,5 @@ infra/kora/.env
 # Test coverage
 coverage/
 
-# External dependencies (local only)
-external/mosaic/
-
 # Misc
 *.tsbuildinfo
