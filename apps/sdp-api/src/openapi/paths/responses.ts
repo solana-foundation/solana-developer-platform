@@ -15,9 +15,12 @@ import {
   executeSeizeResponseSchema,
   executeUnpauseResponseSchema,
   executeUpdateAuthorityResponseSchema,
+  feeQuoteResponseSchema,
   frozenAccountSchema,
   frozenAccountResponseSchema,
   inviteMemberResponseSchema,
+  listTransfersResponseSchema,
+  listWalletsResponseSchema,
   listApiKeysResponseSchema,
   listMembersResponseSchema,
   listProjectApiKeysResponseSchema,
@@ -31,19 +34,26 @@ import {
   prepareDeployResponseSchema,
   prepareForceBurnResponseSchema,
   prepareMintResponseSchema,
+  prepareTransferResponseSchema,
   prepareSeizeResponseSchema,
   prepareUpdateAuthorityResponseSchema,
   projectMemberResponseSchema,
   projectResponseSchema,
+  rampExecutionResponseSchema,
+  rampQuoteResponseSchema,
   revokeApiKeyResponseSchema,
   rotateApiKeyResponseSchema,
   sendMagicLinkResponseSchema,
   successResponseSchema,
+  transferResponseSchema,
   tokenAllowlistEntrySchema,
   tokenAllowlistResponseSchema,
   tokenResponseSchema,
   tokenSchema,
   tokenTemplateResponseSchema,
+  walletBalancesResponseSchema,
+  walletResponseSchema,
+  paymentRequestResponseSchema,
   verifyMagicLinkResponseSchema,
 } from "../schemas";
 
@@ -103,3 +113,14 @@ export const allowlistEntryResponse = successResponseSchema(
 
 export const tokenTemplateResponse = successResponseSchema(tokenTemplateResponseSchema);
 export const listTemplatesResponse = successResponseSchema(listTemplatesResponseSchema);
+
+export const walletResponse = successResponseSchema(walletResponseSchema);
+export const listWalletsResponse = successResponseSchema(listWalletsResponseSchema);
+export const walletBalancesResponse = successResponseSchema(walletBalancesResponseSchema);
+export const prepareTransferResponse = successResponseSchema(prepareTransferResponseSchema);
+export const transferResponse = successResponseSchema(transferResponseSchema);
+export const listTransfersResponse = successResponseSchema(listTransfersResponseSchema);
+export const paymentRequestResponse = successResponseSchema(paymentRequestResponseSchema);
+export const feeQuoteResponse = successResponseSchema(feeQuoteResponseSchema);
+export const rampQuoteResponse = successResponseSchema(rampQuoteResponseSchema);
+export const rampExecutionResponse = successResponseSchema(rampExecutionResponseSchema);

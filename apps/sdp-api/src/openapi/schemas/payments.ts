@@ -1,0 +1,417 @@
+import { z } from "./base";
+import {
+  base64Schema,
+  isoDateTimeSchema,
+  paymentRequestIdParamSchema,
+  solanaAddressSchema,
+  transferIdParamSchema,
+  walletIdParamSchema,
+} from "./base";
+import { simulationResultSchema } from "./issuance";
+
+export const tokenAmountSchema = z.string().openapi({
+  description: "Token amount in UI units (decimal string).",
+  example: "100.00",
+});
+
+export const walletTypeSchema = z
+  .enum(["treasury", "operations", "user"])
+  .openapi({ description: "Wallet type.", example: "treasury" });
+
+export const custodyProviderSchema = z
+  .enum(["turnkey", "privy", "aws-kms", "fireblocks", "vault"])
+  .openapi({ description: "Custody provider.", example: "fireblocks" });
+
+export const custodyConfigSchema = z
+  .object({
+    provider: custodyProviderSchema,
+    config: z
+      .record(z.unknown())
+      .optional()
+      .openapi({ description: "Provider-specific configuration payload." }),
+  })
+  .openapi({ description: "Custody configuration." });
+
+export const createWalletRequestSchema = z
+  .object({
+    name: z.string().max(64).openapi({ description: "Wallet name.", example: "Ops Wallet" }),
+    type: walletTypeSchema,
+    custody: custodyConfigSchema,
+  })
+  .openapi({ description: "Create wallet request payload." });
+
+export const walletSchema = z
+  .object({
+    id: walletIdParamSchema,
+    address: solanaAddressSchema.openapi({
+      description: "Wallet address.",
+      example: "So11111111111111111111111111111111111111112",
+    }),
+    name: z.string().openapi({ description: "Wallet name.", example: "Treasury Wallet" }),
+    type: walletTypeSchema,
+    custody: z
+      .object({
+        provider: custodyProviderSchema,
+      })
+      .openapi({ description: "Custody provider metadata." }),
+    createdAt: isoDateTimeSchema.openapi({
+      description: "Timestamp when the wallet was created.",
+      example: "2025-01-01T00:00:00.000Z",
+    }),
+  })
+  .openapi({ description: "Managed wallet." });
+
+export const listWalletsResponseSchema = z
+  .object({
+    wallets: z.array(walletSchema).openapi({ description: "Wallet list." }),
+    nextCursor: z
+      .string()
+      .nullable()
+      .optional()
+      .openapi({ description: "Cursor for the next page, if any." }),
+  })
+  .openapi({ description: "List wallets response payload." });
+
+export const tokenBalanceSchema = z
+  .object({
+    token: z.string().openapi({ description: "Token symbol.", example: "USDC" }),
+    mint: solanaAddressSchema.openapi({
+      description: "Token mint address.",
+      example: "So11111111111111111111111111111111111111112",
+    }),
+    amount: z.string().openapi({
+      description: "Raw amount in smallest units.",
+      example: "100000000",
+    }),
+    uiAmount: tokenAmountSchema,
+    decimals: z.number().int().openapi({ description: "Token decimals.", example: 6 }),
+    confidential: z.boolean().openapi({ description: "Confidential balance flag.", example: false }),
+  })
+  .openapi({ description: "Token balance details." });
+
+export const walletBalancesSchema = z
+  .object({
+    walletId: walletIdParamSchema,
+    address: solanaAddressSchema.openapi({ description: "Wallet address." }),
+    balances: z.array(tokenBalanceSchema).openapi({ description: "Token balances." }),
+  })
+  .openapi({ description: "Wallet balances payload." });
+
+export const gaslessConfigSchema = z
+  .object({
+    enabled: z.boolean().openapi({ description: "Enable gasless fees.", example: true }),
+    feeToken: z
+      .string()
+      .optional()
+      .openapi({ description: "Token symbol used to pay fees.", example: "USDC" }),
+  })
+  .openapi({ description: "Gasless fee payment configuration." });
+
+export const createTransferRequestSchema = z
+  .object({
+    source: z.string().openapi({ description: "Source wallet ID." }),
+    destination: solanaAddressSchema.openapi({ description: "Destination wallet address." }),
+    token: z
+      .string()
+      .optional()
+      .openapi({ description: "Token symbol or mint address (omit for SOL)." }),
+    amount: tokenAmountSchema,
+    gasless: gaslessConfigSchema.optional(),
+    memo: z
+      .string()
+      .max(256)
+      .optional()
+      .openapi({ description: "Optional memo for the transfer." }),
+  })
+  .openapi({ description: "Create transfer request payload." });
+
+export const priorityFeeSchema = z
+  .enum(["none", "low", "medium", "high", "auto"])
+  .openapi({ description: "Priority fee level.", example: "auto" });
+
+export const prepareTransferRequestSchema = z
+  .object({
+    source: z.string().openapi({ description: "Source wallet ID or pubkey." }),
+    destination: solanaAddressSchema.openapi({ description: "Destination wallet address." }),
+    token: z
+      .string()
+      .optional()
+      .openapi({ description: "Token symbol or mint address (omit for SOL)." }),
+    amount: tokenAmountSchema,
+    memo: z
+      .string()
+      .max(256)
+      .optional()
+      .openapi({ description: "Optional memo for the transfer." }),
+    reference: solanaAddressSchema
+      .optional()
+      .openapi({ description: "Optional reference key for tracking." }),
+    options: z
+      .object({
+        priorityFee: priorityFeeSchema
+          .optional()
+          .openapi({ description: "Priority fee level (default: auto)." }),
+        simulate: z.boolean().optional().openapi({
+          description: "Include simulation results in the response.",
+          example: true,
+        }),
+      })
+      .optional()
+      .openapi({ description: "Transaction preparation options." }),
+  })
+  .openapi({ description: "Prepare transfer request payload." });
+
+export const unsignedTransactionSchema = z
+  .object({
+    serialized: base64Schema.openapi({ description: "Base64-encoded unsigned transaction." }),
+    message: base64Schema.openapi({ description: "Base64-encoded transaction message." }),
+    recentBlockhash: z
+      .string()
+      .openapi({ description: "Recent blockhash used in the transaction." }),
+    lastValidBlockHeight: z
+      .number()
+      .int()
+      .openapi({ description: "Last valid block height for the transaction." }),
+  })
+  .openapi({ description: "Unsigned transaction payload." });
+
+export const prepareTransferResponseSchema = z
+  .object({
+    transaction: unsignedTransactionSchema.openapi({
+      description: "Unsigned transaction to be signed client-side.",
+    }),
+    simulation: simulationResultSchema
+      .optional()
+      .openapi({ description: "Optional simulation result." }),
+    estimatedFee: z
+      .number()
+      .int()
+      .openapi({ description: "Estimated fee in lamports.", example: 5000 }),
+    meta: z
+      .object({
+        type: z.literal("transfer").openapi({ description: "Transfer intent type." }),
+        source: solanaAddressSchema.openapi({ description: "Source wallet address." }),
+        destination: solanaAddressSchema.openapi({ description: "Destination wallet address." }),
+        token: z.string().optional().openapi({ description: "Token symbol or mint address." }),
+        amount: tokenAmountSchema,
+      })
+      .openapi({ description: "Transfer metadata." }),
+  })
+  .openapi({ description: "Prepare transfer response payload." });
+
+export const transferStatusSchema = z
+  .enum(["pending", "confirmed", "failed"])
+  .openapi({ description: "Transfer status.", example: "confirmed" });
+
+export const transferFeeSchema = z
+  .object({
+    token: z.string().openapi({ description: "Fee token symbol.", example: "USDC" }),
+    amount: tokenAmountSchema,
+  })
+  .openapi({ description: "Transfer fee details." });
+
+export const transferSchema = z
+  .object({
+    id: transferIdParamSchema,
+    signature: z.string().openapi({ description: "Solana transaction signature." }),
+    status: transferStatusSchema,
+    source: solanaAddressSchema.openapi({ description: "Source wallet address." }),
+    destination: solanaAddressSchema.openapi({ description: "Destination wallet address." }),
+    token: z.string().openapi({ description: "Token symbol or mint address." }),
+    amount: tokenAmountSchema,
+    fee: transferFeeSchema.optional().openapi({ description: "Fee details, if available." }),
+    timestamp: isoDateTimeSchema.openapi({
+      description: "Timestamp when the transfer was submitted.",
+      example: "2025-01-01T00:00:00.000Z",
+    }),
+  })
+  .openapi({ description: "Transfer details." });
+
+export const listTransfersResponseSchema = z
+  .object({
+    transfers: z.array(transferSchema).openapi({ description: "Transfer list." }),
+    nextCursor: z
+      .string()
+      .nullable()
+      .optional()
+      .openapi({ description: "Cursor for the next page, if any." }),
+  })
+  .openapi({ description: "List transfers response payload." });
+
+export const createConfidentialTransferRequestSchema = z
+  .object({
+    source: z.string().openapi({ description: "Source wallet ID." }),
+    destination: z.string().openapi({ description: "Destination wallet ID." }),
+    token: z.string().openapi({ description: "Token symbol or mint address." }),
+    amount: tokenAmountSchema,
+  })
+  .openapi({ description: "Create confidential transfer request payload." });
+
+export const createPaymentRequestRequestSchema = z
+  .object({
+    recipient: z.string().openapi({ description: "Recipient wallet ID." }),
+    amount: tokenAmountSchema,
+    token: z.string().openapi({ description: "Token symbol or mint address." }),
+    label: z
+      .string()
+      .max(64)
+      .optional()
+      .openapi({ description: "Merchant/recipient name." }),
+    message: z
+      .string()
+      .max(256)
+      .optional()
+      .openapi({ description: "Payment request description." }),
+    expiresIn: z
+      .number()
+      .int()
+      .min(60)
+      .max(86400)
+      .optional()
+      .openapi({ description: "Expiration time in seconds.", example: 3600 }),
+  })
+  .openapi({ description: "Create payment request payload." });
+
+export const paymentRequestStatusSchema = z
+  .enum(["pending", "fulfilled", "expired", "cancelled"])
+  .openapi({ description: "Payment request status.", example: "pending" });
+
+export const paymentRequestSchema = z
+  .object({
+    id: paymentRequestIdParamSchema,
+    reference: solanaAddressSchema.openapi({ description: "Solana Pay reference address." }),
+    solanaPayUrl: z
+      .string()
+      .url()
+      .openapi({ description: "Solana Pay URL.", example: "solana:example" }),
+    qrCode: z.string().openapi({
+      description: "Base64-encoded QR code SVG.",
+      example: "PHN2ZyB4bWxucz0iLi4uIi8+",
+    }),
+    status: paymentRequestStatusSchema,
+    expiresAt: isoDateTimeSchema.openapi({
+      description: "Expiration timestamp for the request.",
+      example: "2025-01-01T01:00:00.000Z",
+    }),
+  })
+  .openapi({ description: "Payment request details." });
+
+export const feeQuoteSchema = z
+  .object({
+    feeToken: z.string().openapi({ description: "Fee token symbol.", example: "USDC" }),
+    feeAmount: tokenAmountSchema,
+    feeInLamports: z.number().int().openapi({ description: "Fee in lamports.", example: 5000 }),
+    exchangeRate: tokenAmountSchema
+      .optional()
+      .openapi({ description: "Exchange rate for fee token." }),
+    validUntil: isoDateTimeSchema.openapi({ description: "Fee quote expiration." }),
+  })
+  .openapi({ description: "Fee quote details." });
+
+export const rampDirectionSchema = z
+  .enum(["onramp", "offramp"])
+  .openapi({ description: "Ramp direction.", example: "onramp" });
+
+export const rampProviderSchema = z
+  .enum(["bridge", "moonpay", "ramp", "transak"])
+  .openapi({ description: "Ramp provider.", example: "moonpay" });
+
+export const rampQuoteRequestSchema = z
+  .object({
+    direction: rampDirectionSchema,
+    fiatCurrency: z
+      .string()
+      .regex(/^[A-Z]{3}$/)
+      .openapi({ description: "Fiat currency code (ISO 4217).", example: "USD" }),
+    fiatAmount: tokenAmountSchema,
+    cryptoToken: z.string().openapi({ description: "Crypto token symbol.", example: "USDC" }),
+    provider: rampProviderSchema.optional(),
+  })
+  .openapi({ description: "Ramp quote request payload." });
+
+export const rampQuoteSchema = z
+  .object({
+    id: z.string().openapi({ description: "Ramp quote identifier.", example: "quote_example" }),
+    direction: rampDirectionSchema,
+    fiatCurrency: z.string().openapi({ description: "Fiat currency code.", example: "USD" }),
+    fiatAmount: tokenAmountSchema,
+    cryptoToken: z.string().openapi({ description: "Crypto token symbol.", example: "USDC" }),
+    cryptoAmount: tokenAmountSchema,
+    exchangeRate: tokenAmountSchema.optional().openapi({ description: "Exchange rate." }),
+    fees: z
+      .object({
+        network: tokenAmountSchema.optional().openapi({ description: "Network fee." }),
+        provider: tokenAmountSchema.optional().openapi({ description: "Provider fee." }),
+      })
+      .optional()
+      .openapi({ description: "Fee breakdown." }),
+    expiresAt: isoDateTimeSchema.openapi({ description: "Quote expiration." }),
+  })
+  .openapi({ description: "Ramp quote details." });
+
+export const executeRampRequestSchema = z
+  .object({
+    quoteId: z.string().openapi({ description: "Ramp quote identifier." }),
+    destinationWallet: z.string().openapi({ description: "Wallet ID for delivery/debit." }),
+    kycReference: z
+      .string()
+      .optional()
+      .openapi({ description: "Optional KYC reference identifier." }),
+  })
+  .openapi({ description: "Execute ramp request payload." });
+
+export const rampExecutionSchema = z
+  .object({
+    id: z.string().openapi({ description: "Ramp execution identifier.", example: "ramp_example" }),
+    status: z
+      .enum(["pending", "processing", "completed", "failed"])
+      .openapi({ description: "Ramp execution status.", example: "pending" }),
+    redirectUrl: z
+      .string()
+      .url()
+      .optional()
+      .openapi({ description: "Redirect URL for the ramp provider." }),
+  })
+  .openapi({ description: "Ramp execution status." });
+
+export const walletResponseSchema = z
+  .object({
+    wallet: walletSchema.openapi({ description: "Wallet details." }),
+  })
+  .openapi({ description: "Wallet response payload." });
+
+export const walletBalancesResponseSchema = z
+  .object({
+    walletBalances: walletBalancesSchema.openapi({ description: "Wallet balances details." }),
+  })
+  .openapi({ description: "Wallet balances response payload." });
+
+export const transferResponseSchema = z
+  .object({
+    transfer: transferSchema.openapi({ description: "Transfer details." }),
+  })
+  .openapi({ description: "Transfer response payload." });
+
+export const paymentRequestResponseSchema = z
+  .object({
+    paymentRequest: paymentRequestSchema.openapi({ description: "Payment request details." }),
+  })
+  .openapi({ description: "Payment request response payload." });
+
+export const feeQuoteResponseSchema = z
+  .object({
+    feeQuote: feeQuoteSchema.openapi({ description: "Fee quote details." }),
+  })
+  .openapi({ description: "Fee quote response payload." });
+
+export const rampQuoteResponseSchema = z
+  .object({
+    rampQuote: rampQuoteSchema.openapi({ description: "Ramp quote details." }),
+  })
+  .openapi({ description: "Ramp quote response payload." });
+
+export const rampExecutionResponseSchema = z
+  .object({
+    ramp: rampExecutionSchema.openapi({ description: "Ramp execution details." }),
+  })
+  .openapi({ description: "Ramp execution response payload." });

@@ -39,6 +39,9 @@ export const signingRequestIdParamSchema = idSchema(
   "Custody signing request identifier.",
   "sigreq_example"
 );
+export const walletIdParamSchema = idSchema("Wallet identifier.", "wal_example");
+export const transferIdParamSchema = idSchema("Transfer identifier.", "xfr_example");
+export const paymentRequestIdParamSchema = idSchema("Payment request identifier.", "req_example");
 
 export const userIdSchema = idSchema("User identifier.", "usr_example");
 export const invitationIdSchema = idSchema("Invitation identifier.", "inv_example");
@@ -63,6 +66,16 @@ export const pageQuerySchema = z.number().int().positive().openapi({
 export const pageSizeQuerySchema = z.number().int().positive().openapi({
   description: "Number of items per page.",
   example: 50,
+});
+
+export const limitQuerySchema = z.number().int().positive().openapi({
+  description: "Maximum number of items to return.",
+  example: 50,
+});
+
+export const cursorQuerySchema = z.string().min(1).openapi({
+  description: "Cursor for pagination.",
+  example: "cursor_example",
 });
 
 export const includeArchivedQuerySchema = z.boolean().openapi({
