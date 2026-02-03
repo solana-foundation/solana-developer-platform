@@ -75,7 +75,9 @@ export interface CreateOrganizationRequest {
   custody?: CreateOrganizationCustody;
 }
 
-export type CreateOrganizationCustody = CreateOrganizationCustodyFireblocks | CreateOrganizationCustodyPrivy;
+export type CreateOrganizationCustody =
+  | CreateOrganizationCustodyFireblocks
+  | CreateOrganizationCustodyPrivy;
 
 export interface CreateOrganizationCustodyFireblocks {
   provider: "fireblocks";

@@ -23,11 +23,7 @@ import {
 } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import { getBase58Codec } from "@solana/codecs";
-import {
-  type Address,
-  type KeyPairSigner,
-  type TransactionSigner,
-} from "@solana/kit";
+import type { Address, KeyPairSigner, TransactionSigner } from "@solana/kit";
 import { createKeyPairSignerFromPrivateKeyBytes } from "@solana/signers";
 
 const base58 = getBase58Codec();

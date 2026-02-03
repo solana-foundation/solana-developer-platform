@@ -250,7 +250,10 @@ function parseOptionalRequestDelayMs(value?: string): number | undefined {
   if (!value) return undefined;
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed < 0) {
-    throw new SigningError("PRIVY_REQUEST_DELAY_MS must be a non-negative number", "INVALID_REQUEST");
+    throw new SigningError(
+      "PRIVY_REQUEST_DELAY_MS must be a non-negative number",
+      "INVALID_REQUEST"
+    );
   }
   return parsed;
 }

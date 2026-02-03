@@ -7,7 +7,7 @@
 import { SigningError } from "@/services/ports";
 import type { Env } from "@/types/env";
 import type { VaultAddressesResponse } from "@solana/keychain-fireblocks";
-import { importPKCS8, SignJWT } from "jose";
+import { SignJWT, importPKCS8 } from "jose";
 
 const DEFAULT_FIREBLOCKS_API_BASE_URL = "https://api.fireblocks.io";
 const DEFAULT_PRIVY_API_BASE_URL = "https://api.privy.io/v1";
