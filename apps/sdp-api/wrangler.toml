@@ -60,6 +60,10 @@ id = "07f1847404084b69bb7a703bae4ef009"
 [env.dev.vars]
 ENVIRONMENT = "development"
 API_VERSION = "v1"
+SOLANA_NETWORK = "devnet"
+SOLANA_RPC_URL = "https://api.devnet.solana.com"
+FEE_PAYMENT_PROVIDER = "kora"
+KORA_RPC_URL = "https://kora-devnet-315956366746.us-central1.run.app"
 
 # QA / staging environment
 [env.staging]
