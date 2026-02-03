@@ -31,7 +31,41 @@ id = "local-sessions"
 ENVIRONMENT = "development"
 API_VERSION = "v1"
 
-# Staging environment
+# Dev environment
+[env.dev]
+name = "sdp-api-dev"
+
+[[env.dev.d1_databases]]
+binding = "DB"
+database_name = "sdp-db-dev"
+database_id = "eb2253d1-ea79-4c8d-bc17-54714253ab37"
+migrations_dir = "src/db/migrations"
+
+[[env.dev.kv_namespaces]]
+binding = "SDP_API_KEYS"
+id = "8a9ee45dcb21427d84dc70417abc7d7d"
+
+[[env.dev.kv_namespaces]]
+binding = "SDP_RATE_LIMITS"
+id = "06ae0aa312ac4135961131c77f600995"
+
+[[env.dev.kv_namespaces]]
+binding = "SDP_CACHE"
+id = "83637da8fc7a4da6bd9301167888805f"
+
+[[env.dev.kv_namespaces]]
+binding = "SDP_SESSIONS"
+id = "07f1847404084b69bb7a703bae4ef009"
+
+[env.dev.vars]
+ENVIRONMENT = "development"
+API_VERSION = "v1"
+SOLANA_NETWORK = "devnet"
+SOLANA_RPC_URL = "https://api.devnet.solana.com"
+FEE_PAYMENT_PROVIDER = "kora"
+KORA_RPC_URL = "https://kora-devnet-315956366746.us-central1.run.app"
+
+# QA / staging environment
 [env.staging]
 name = "sdp-api-staging"
 

@@ -9,6 +9,7 @@ dist/
 # Cloudflare
 .wrangler/
 .dev.vars
+.cloudflare.*.env
 
 # IDE
 .idea/
