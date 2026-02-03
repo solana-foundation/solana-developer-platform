@@ -32,7 +32,7 @@ ENVIRONMENT = "development"
 API_VERSION = "v1"
 EMAIL_PROVIDER = "iterable"
 EMAIL_FROM = "noreply@mail.solana.org"
-ITERABLE_PASSTHROUGH_CAMPAIGN_ID = "16706310"
+ITERABLE_PASSTHROUGH_CAMPAIGN_ID = "16743294"
 
 # Staging environment
 [env.staging]
@@ -65,7 +65,7 @@ ENVIRONMENT = "staging"
 API_VERSION = "v1"
 EMAIL_PROVIDER = "iterable"
 EMAIL_FROM = "noreply@mail.solana.org"
-ITERABLE_PASSTHROUGH_CAMPAIGN_ID = "16706310"
+ITERABLE_PASSTHROUGH_CAMPAIGN_ID = "16743294"
 
 # Production environment
 [env.production]
