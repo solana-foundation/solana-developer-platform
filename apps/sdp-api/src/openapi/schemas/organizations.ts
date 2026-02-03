@@ -160,6 +160,13 @@ export const createOrganizationRequestSchema = createOrgSchemaBase
       description: "Primary email for allowlist checks.",
       example: "admin@example.com",
     }),
+    custody: createOrgSchemaBase.shape.custody?.openapi({
+      description:
+        "Optional custody configuration to provision a signing wallet for the organization.",
+      example: {
+        provider: "privy",
+      },
+    }),
   })
   .openapi({ description: "Create organization request body." });
 
