@@ -1,6 +1,16 @@
 name: Deploy SDP API (dev)
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - apps/sdp-api/**
+      - packages/**
+      - package.json
+      - pnpm-lock.yaml
+      - pnpm-workspace.yaml
+      - .github/workflows/deploy-sdp-api-dev.yml
   workflow_dispatch:
 
 permissions:
