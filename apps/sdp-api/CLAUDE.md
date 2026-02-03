@@ -88,6 +88,15 @@ pnpm typecheck
 pnpm deploy
 ```
 
+## Cloudflare Environment Switching
+
+1. Create D1 and KV resources for the dev environment.
+2. Fill the `env.dev` IDs in `apps/sdp-api/wrangler.toml`.
+3. Create `apps/sdp-api/.cloudflare.dev.env` from `apps/sdp-api/.cloudflare.dev.env.example`.
+4. Deploy quickly with `pnpm --filter @sdp/api deploy:dev` or `apps/sdp-api/scripts/cloudflare-env.sh dev deploy:dev`.
+
+When QA/prod access is ready, fill `env.staging` / `env.production` and use `deploy:qa` (or `deploy:staging`) and `deploy:production`.
+
 ## Environment Variables
 
 Set via `wrangler.toml` or Cloudflare dashboard:
