@@ -4,7 +4,7 @@
  * Implements SigningPort for local development using a keypair from env vars.
  * Signing is synchronous - no approval workflow required.
  *
- * For production deployments, use KeychainFireblocksAdapter or KeychainAwsKmsAdapter.
+ * For production deployments, use KeychainFireblocksAdapter, KeychainPrivyAdapter, or KeychainAwsKmsAdapter.
  */
 
 import type {

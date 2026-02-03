@@ -39,7 +39,7 @@ export interface Env {
   RUN_INTEGRATION_TESTS?: string;
 
   // Signing provider (custody backend via @solana/keychain)
-  SIGNING_PROVIDER?: "local" | "fireblocks";
+  SIGNING_PROVIDER?: "local" | "fireblocks" | "privy";
   FEE_PAYER_PRIVATE_KEY?: string;
 
   // Fireblocks configuration (@solana/keychain-fireblocks)
@@ -48,6 +48,13 @@ export interface Env {
   FIREBLOCKS_VAULT_ID?: string;
   FIREBLOCKS_ASSET_ID?: string;
   FIREBLOCKS_API_BASE_URL?: string;
+
+  // Privy configuration (@solana/keychain-privy)
+  PRIVY_APP_ID?: string;
+  PRIVY_APP_SECRET?: string;
+  PRIVY_WALLET_ID?: string;
+  PRIVY_API_BASE_URL?: string;
+  PRIVY_REQUEST_DELAY_MS?: string;
 
   // Kora (gasless) configuration
   FEE_PAYMENT_PROVIDER?: "kora" | "native";

@@ -27,6 +27,7 @@ type AppContext = Context<{ Bindings: Env }>;
  *
  * For "local" provider: Generates a new keypair and stores it encrypted in the database.
  * For "fireblocks" provider: Stores Fireblocks credentials and retrieves the public key.
+ * For "privy" provider: Stores Privy credentials and retrieves the public key.
  *
  * POST /custody/initialize
  */
@@ -53,7 +54,7 @@ export const initializeSigning = async (c: AppContext) => {
         parsed.data.projectId,
         { walletLabel: parsed.data.walletLabel }
       );
-    } else {
+    } else if (parsed.data.provider === "fireblocks") {
       result = await signingService.initializeFireblocksSigning(
         auth.organizationId,
         parsed.data.projectId,
@@ -63,6 +64,18 @@ export const initializeSigning = async (c: AppContext) => {
           vaultAccountId: parsed.data.vaultAccountId,
           assetId: parsed.data.assetId,
           apiBaseUrl: parsed.data.apiBaseUrl,
+        }
+      );
+    } else {
+      result = await signingService.initializePrivySigning(
+        auth.organizationId,
+        parsed.data.projectId,
+        {
+          appId: parsed.data.appId,
+          appSecret: parsed.data.appSecret,
+          walletId: parsed.data.walletId,
+          apiBaseUrl: parsed.data.apiBaseUrl,
+          requestDelayMs: parsed.data.requestDelayMs,
         }
       );
     }

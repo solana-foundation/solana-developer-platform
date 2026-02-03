@@ -34,3 +34,24 @@ export interface KeychainFireblocksConfig {
   /** Optional delay in ms between concurrent signing requests (default: 0) */
   requestDelayMs?: number;
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Privy Configuration
+// ═══════════════════════════════════════════════════════════════════════════
+
+export interface KeychainPrivyConfig {
+  /** Privy application ID */
+  appId: string;
+
+  /** Privy application secret */
+  appSecret: string;
+
+  /** Privy wallet ID */
+  walletId: string;
+
+  /** API base URL (default: "https://api.privy.io/v1") */
+  apiBaseUrl?: string;
+
+  /** Optional delay in ms between concurrent signing requests (default: 0) */
+  requestDelayMs?: number;
+}

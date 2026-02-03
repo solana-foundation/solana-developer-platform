@@ -8,6 +8,7 @@
  * Provider names refer to the custody backend:
  * - "local": In-memory keypair (KeychainMemoryAdapter) from env or encrypted DB storage
  * - "fireblocks": Fireblocks MPC custody (KeychainFireblocksAdapter)
+ * - "privy": Privy hosted wallets (KeychainPrivyAdapter)
  */
 
 import type { SigningPort } from "@/services/ports";
@@ -17,6 +18,8 @@ import {
   KeychainFireblocksAdapter,
   type KeychainFireblocksConfig,
   KeychainMemoryAdapter,
+  KeychainPrivyAdapter,
+  type KeychainPrivyConfig,
 } from "./keychain";
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -24,7 +27,7 @@ import {
 // ═══════════════════════════════════════════════════════════════════════════
 
 /** Supported signing/custody provider types */
-export type SigningProviderType = "local" | "fireblocks";
+export type SigningProviderType = "local" | "fireblocks" | "privy";
 
 /**
  * Database record for signing/custody configuration
@@ -57,6 +60,8 @@ export async function createSigningAdapterFromEnv(env: Env): Promise<SigningPort
   switch (provider) {
     case "fireblocks":
       return createFireblocksAdapterFromEnv(env);
+    case "privy":
+      return createPrivyAdapterFromEnv(env);
     default:
       return createMemoryAdapterFromEnv(env);
   }
@@ -88,6 +93,8 @@ export async function createSigningAdapterFromConfig(
   switch (record.provider) {
     case "fireblocks":
       return createFireblocksAdapterFromRecord(record);
+    case "privy":
+      return createPrivyAdapterFromRecord(record);
     default:
       return createMemoryAdapterFromEnv(env);
   }
@@ -123,6 +130,15 @@ interface FireblocksConfigJson {
   requestDelayMs?: number;
 }
 
+interface PrivyConfigJson {
+  provider?: string;
+  appId?: string;
+  appSecretEncrypted?: string;
+  walletId?: string;
+  apiBaseUrl?: string;
+  requestDelayMs?: number;
+}
+
 function createFireblocksAdapterFromEnv(env: Env): KeychainFireblocksAdapter {
   const apiKey = env.FIREBLOCKS_API_KEY;
   const apiSecret = env.FIREBLOCKS_API_SECRET;
@@ -142,6 +158,28 @@ function createFireblocksAdapterFromEnv(env: Env): KeychainFireblocksAdapter {
     vaultAccountId: vaultId,
     assetId,
     apiBaseUrl: env.FIREBLOCKS_API_BASE_URL,
+  });
+}
+
+function createPrivyAdapterFromEnv(env: Env): KeychainPrivyAdapter {
+  const appId = env.PRIVY_APP_ID;
+  const appSecret = env.PRIVY_APP_SECRET;
+  const walletId = env.PRIVY_WALLET_ID;
+  const requestDelayMs = parseOptionalRequestDelayMs(env.PRIVY_REQUEST_DELAY_MS);
+
+  if (!appId || !appSecret || !walletId) {
+    throw new SigningError(
+      "Privy environment variables not configured: PRIVY_APP_ID, PRIVY_APP_SECRET, PRIVY_WALLET_ID",
+      "PROVIDER_NOT_CONFIGURED"
+    );
+  }
+
+  return new KeychainPrivyAdapter({
+    appId,
+    appSecret,
+    walletId,
+    apiBaseUrl: env.PRIVY_API_BASE_URL,
+    requestDelayMs,
   });
 }
 
@@ -178,6 +216,45 @@ function createFireblocksAdapterFromRecord(record: SigningConfigRecord): Keychai
   return new KeychainFireblocksAdapter(config);
 }
 
+function createPrivyAdapterFromRecord(record: SigningConfigRecord): KeychainPrivyAdapter {
+  let parsed: PrivyConfigJson;
+  try {
+    parsed = JSON.parse(record.config) as PrivyConfigJson;
+  } catch {
+    throw new SigningError("Invalid Privy configuration JSON", "PROVIDER_NOT_CONFIGURED");
+  }
+
+  if (parsed.provider && parsed.provider !== "privy") {
+    throw new SigningError("Custody configuration provider mismatch", "PROVIDER_NOT_CONFIGURED");
+  }
+
+  if (!parsed.appId || !parsed.appSecretEncrypted || !parsed.walletId) {
+    throw new SigningError(
+      "Privy config missing appId, appSecretEncrypted, or walletId",
+      "PROVIDER_NOT_CONFIGURED"
+    );
+  }
+
+  const config: KeychainPrivyConfig = {
+    appId: parsed.appId,
+    appSecret: parsed.appSecretEncrypted,
+    walletId: parsed.walletId,
+    apiBaseUrl: parsed.apiBaseUrl,
+    requestDelayMs: parsed.requestDelayMs,
+  };
+
+  return new KeychainPrivyAdapter(config);
+}
+
+function parseOptionalRequestDelayMs(value?: string): number | undefined {
+  if (!value) return undefined;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new SigningError("PRIVY_REQUEST_DELAY_MS must be a non-negative number", "INVALID_REQUEST");
+  }
+  return parsed;
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Re-exports
 // ═══════════════════════════════════════════════════════════════════════════
@@ -186,5 +263,7 @@ export {
   BaseKeychainAdapter,
   KeychainFireblocksAdapter,
   KeychainMemoryAdapter,
+  KeychainPrivyAdapter,
   type KeychainFireblocksConfig,
+  type KeychainPrivyConfig,
 } from "./keychain";

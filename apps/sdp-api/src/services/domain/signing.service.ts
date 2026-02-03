@@ -8,6 +8,7 @@
 import {
   KeychainFireblocksAdapter,
   KeychainMemoryAdapter,
+  KeychainPrivyAdapter,
   type SigningConfigRecord,
   createSigningAdapter,
   createSigningAdapterFromConfig,
@@ -83,7 +84,7 @@ export interface SigningRequestRecord {
  * Signing configuration (union of provider-specific configs)
  */
 export interface SigningConfiguration {
-  provider: "local" | "fireblocks";
+  provider: "local" | "fireblocks" | "privy";
   defaultWalletId?: string;
   // Provider-specific fields stored in encrypted config JSON
 }
@@ -105,6 +106,17 @@ export interface InitFireblocksSigningOptions {
   vaultAccountId: string;
   assetId?: string;
   apiBaseUrl?: string;
+}
+
+/**
+ * Options for initializing org signing with Privy provider.
+ */
+export interface InitPrivySigningOptions {
+  appId: string;
+  appSecret: string;
+  walletId: string;
+  apiBaseUrl?: string;
+  requestDelayMs?: number;
 }
 
 /**
@@ -305,6 +317,81 @@ export class SigningService {
   }
 
   /**
+   * Initialize signing for an organization with Privy provider.
+   *
+   * @param orgId - Organization ID
+   * @param projectId - Optional project ID for project-specific config
+   * @param options - Privy configuration
+   * @returns The new config ID, public key, and wallet ID
+   */
+  async initializePrivySigning(
+    orgId: string,
+    projectId: string | undefined,
+    options: InitPrivySigningOptions
+  ): Promise<InitSigningResult> {
+    // Check if config already exists
+    const existing = await this.configStore.findActive(orgId, projectId);
+    if (existing) {
+      throw new SigningError(
+        `Signing already initialized for org ${orgId}${projectId ? ` project ${projectId}` : ""}`,
+        "ALREADY_INITIALIZED"
+      );
+    }
+
+    // Encrypt the app secret for storage
+    const encryption = this.getEncryptionService();
+    const encryptedSecret = await encryption.encryptPrivateKey(orgId, options.appSecret);
+
+    // Create config with Privy credentials
+    const configJson: PrivyProviderConfig = {
+      provider: "privy",
+      appId: options.appId,
+      appSecretEncrypted: encryptedSecret,
+      walletId: options.walletId,
+      apiBaseUrl: options.apiBaseUrl,
+      requestDelayMs: options.requestDelayMs,
+    };
+
+    // Create the adapter to get the public key
+    const adapter = new KeychainPrivyAdapter({
+      appId: options.appId,
+      appSecret: options.appSecret,
+      walletId: options.walletId,
+      apiBaseUrl: options.apiBaseUrl,
+      requestDelayMs: options.requestDelayMs,
+    });
+
+    const publicKey = await adapter.getPublicKey();
+    const walletId = `privy_${options.walletId}`;
+
+    const configId = await this.configStore.upsert(orgId, projectId, {
+      provider: "privy",
+      defaultWalletId: walletId,
+    });
+
+    // Update the config with the encrypted JSON
+    await this.updateConfigJson(configId, configJson);
+
+    // Create wallet record
+    await this.configStore.createWallet(configId, {
+      walletId,
+      publicKey,
+      label: "Privy Wallet",
+      purpose: "root",
+    });
+
+    // Invalidate cache
+    const cacheKey = `${orgId}:${projectId ?? "org"}`;
+    this.providerCache.delete(cacheKey);
+
+    return {
+      configId,
+      publicKey,
+      walletId,
+    };
+  }
+
+  /**
    * Get the wallets for an organization's custody config.
    */
   async getWallets(orgId: string, projectId?: string): Promise<CustodyWallet[]> {
@@ -317,11 +404,11 @@ export class SigningService {
 
   /**
    * Update the encrypted config JSON for a custody config.
-   * This is a private helper - the public API uses initializeLocalSigning/initializeFireblocksSigning.
+   * This is a private helper - the public API uses initializeLocalSigning/initializeFireblocksSigning/initializePrivySigning.
    */
   private async updateConfigJson(
     configId: string,
-    config: LocalProviderConfig | FireblocksProviderConfig
+    config: LocalProviderConfig | FireblocksProviderConfig | PrivyProviderConfig
   ): Promise<void> {
     // This would normally be a direct DB update, but we'll use the upsert pattern
     // The config JSON is stored in the `config_encrypted` column of custody_configs
@@ -410,7 +497,7 @@ export class SigningService {
 
   /**
    * Get a transaction signer compatible with @solana/kit.
-   * Works with both KeychainMemoryAdapter and KeychainFireblocksAdapter.
+   * Works with KeychainMemoryAdapter, KeychainFireblocksAdapter, and KeychainPrivyAdapter.
    *
    * Returns a TransactionSigner that can be used with:
    * - signTransactionMessageWithSigners()
@@ -425,6 +512,10 @@ export class SigningService {
     }
 
     if (adapter instanceof KeychainFireblocksAdapter) {
+      return adapter.getTransactionSigner();
+    }
+
+    if (adapter instanceof KeychainPrivyAdapter) {
       return adapter.getTransactionSigner();
     }
 
@@ -626,6 +717,15 @@ interface FireblocksProviderConfig {
   apiBaseUrl?: string;
 }
 
+interface PrivyProviderConfig {
+  provider: "privy";
+  appId: string;
+  appSecretEncrypted: string;
+  walletId: string;
+  apiBaseUrl?: string;
+  requestDelayMs?: number;
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Factory Function
 // ═══════════════════════════════════════════════════════════════════════════
@@ -694,6 +794,22 @@ export async function createAdapterFromEncryptedConfig(
     });
   }
 
+  // biome-ignore lint/nursery/noSecrets: This is a type guard, not a secret
+  if (parsed.provider === "privy" && "appSecretEncrypted" in parsed) {
+    // Decrypt the app secret
+    const encryption = createEncryptionService(env.CUSTODY_ENCRYPTION_KEY);
+    const appSecret = await encryption.decryptPrivateKey(orgId, parsed.appSecretEncrypted);
+
+    // Create Privy adapter with decrypted secret
+    return new KeychainPrivyAdapter({
+      appId: parsed.appId,
+      appSecret,
+      walletId: parsed.walletId,
+      apiBaseUrl: parsed.apiBaseUrl,
+      requestDelayMs: parsed.requestDelayMs,
+    });
+  }
+
   // Fall back to standard config creation (for backward compatibility)
   return createSigningAdapterFromConfig(record, env);
 }
@@ -702,15 +818,21 @@ async function parseConfigRecord(
   env: Env,
   orgId: string,
   record: SigningConfigRecord
-): Promise<LocalProviderConfig | FireblocksProviderConfig> {
+): Promise<LocalProviderConfig | FireblocksProviderConfig | PrivyProviderConfig> {
   try {
-    return JSON.parse(record.config) as LocalProviderConfig | FireblocksProviderConfig;
+    return JSON.parse(record.config) as
+      | LocalProviderConfig
+      | FireblocksProviderConfig
+      | PrivyProviderConfig;
   } catch {
     // Encrypted payload: decrypt then parse.
     try {
       const encryption = createEncryptionService(env.CUSTODY_ENCRYPTION_KEY);
       const decrypted = await encryption.decrypt(orgId, record.config);
-      return JSON.parse(decrypted) as LocalProviderConfig | FireblocksProviderConfig;
+      return JSON.parse(decrypted) as
+        | LocalProviderConfig
+        | FireblocksProviderConfig
+        | PrivyProviderConfig;
     } catch (error) {
       throw new SigningError(
         error instanceof Error ? error.message : "Failed to decrypt custody configuration",

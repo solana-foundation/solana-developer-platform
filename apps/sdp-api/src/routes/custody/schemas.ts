@@ -24,9 +24,20 @@ export const initializeFireblocksSchema = z.object({
   apiBaseUrl: z.string().url().optional(),
 });
 
+export const initializePrivySchema = z.object({
+  provider: z.literal("privy"),
+  projectId: z.string().optional(),
+  appId: z.string().min(1),
+  appSecret: z.string().min(1),
+  walletId: z.string().min(1),
+  apiBaseUrl: z.string().url().optional(),
+  requestDelayMs: z.number().int().min(0).max(3000).optional(),
+});
+
 export const initializeSigningSchema = z.discriminatedUnion("provider", [
   initializeLocalSchema,
   initializeFireblocksSchema,
+  initializePrivySchema,
 ]);
 
 export type InitializeSigningRequest = z.infer<typeof initializeSigningSchema>;
@@ -40,7 +51,7 @@ export interface CustodyConfigResponse {
     id: string;
     organizationId: string;
     projectId: string | null;
-    provider: "local" | "fireblocks";
+    provider: "local" | "fireblocks" | "privy";
     publicKey: string;
     defaultWalletId: string | null;
     status: "active" | "inactive";
