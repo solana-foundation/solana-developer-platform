@@ -26,8 +26,6 @@ import {
   listProjectsResponseSchema,
   listSessionsResponseSchema,
   listTemplatesResponseSchema,
-  listTransfersResponseSchema,
-  listWalletsResponseSchema,
   organizationSchema,
   paginatedResponseSchema,
   paymentRequestResponseSchema,
@@ -52,9 +50,11 @@ import {
   tokenSchema,
   tokenTemplateResponseSchema,
   transferResponseSchema,
+  transferSchema,
   verifyMagicLinkResponseSchema,
   walletBalancesResponseSchema,
   walletResponseSchema,
+  walletSchema,
 } from "../schemas";
 
 export const createOrganizationResponse = successResponseSchema(createOrganizationResponseSchema);
@@ -115,11 +115,11 @@ export const tokenTemplateResponse = successResponseSchema(tokenTemplateResponse
 export const listTemplatesResponse = successResponseSchema(listTemplatesResponseSchema);
 
 export const walletResponse = successResponseSchema(walletResponseSchema);
-export const listWalletsResponse = successResponseSchema(listWalletsResponseSchema);
+export const walletListResponse = paginatedResponseSchema(walletSchema);
 export const walletBalancesResponse = successResponseSchema(walletBalancesResponseSchema);
 export const prepareTransferResponse = successResponseSchema(prepareTransferResponseSchema);
 export const transferResponse = successResponseSchema(transferResponseSchema);
-export const listTransfersResponse = successResponseSchema(listTransfersResponseSchema);
+export const transferListResponse = paginatedResponseSchema(transferSchema);
 export const paymentRequestResponse = successResponseSchema(paymentRequestResponseSchema);
 export const feeQuoteResponse = successResponseSchema(feeQuoteResponseSchema);
 export const rampQuoteResponse = successResponseSchema(rampQuoteResponseSchema);

@@ -68,16 +68,6 @@ export const pageSizeQuerySchema = z.number().int().positive().openapi({
   example: 50,
 });
 
-export const limitQuerySchema = z.number().int().positive().openapi({
-  description: "Maximum number of items to return.",
-  example: 50,
-});
-
-export const cursorQuerySchema = z.string().min(1).openapi({
-  description: "Cursor for pagination.",
-  example: "cursor_example",
-});
-
 export const includeArchivedQuerySchema = z.boolean().openapi({
   description: "Include archived resources in results.",
   example: false,

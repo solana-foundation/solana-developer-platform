@@ -6,11 +6,11 @@ import {
   createPaymentRequestRequestSchema,
   createTransferRequestSchema,
   createWalletRequestSchema,
-  cursorQuerySchema,
   errorResponseSchema,
   executeRampRequestSchema,
   isoDateTimeSchema,
-  limitQuerySchema,
+  pageQuerySchema,
+  pageSizeQuerySchema,
   paymentRequestIdParamSchema,
   prepareTransferRequestSchema,
   rampQuoteRequestSchema,
@@ -22,14 +22,14 @@ import {
 import { errorResponses, jsonContent } from "./helpers";
 import {
   feeQuoteResponse,
-  listTransfersResponse,
-  listWalletsResponse,
   paymentRequestResponse,
   prepareTransferResponse,
   rampExecutionResponse,
   rampQuoteResponse,
+  transferListResponse,
   transferResponse,
   walletBalancesResponse,
+  walletListResponse,
   walletResponse,
 } from "./responses";
 
@@ -76,14 +76,14 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     request: {
       query: z.object({
         type: walletTypeSchema.optional(),
-        limit: limitQuerySchema.optional(),
-        cursor: cursorQuerySchema.optional(),
+        page: pageQuerySchema.optional(),
+        pageSize: pageSizeQuerySchema.optional(),
       }),
     },
     responses: {
       200: {
         description: "Wallet list",
-        content: jsonContent(listWalletsResponse),
+        content: jsonContent(walletListResponse),
       },
       ...errorResponses(errorResponseSchema, [401, 403, 500]),
     },
@@ -198,14 +198,14 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         status: transferStatusSchema.optional(),
         from: isoDateTimeSchema.optional().openapi({ description: "Filter from timestamp." }),
         to: isoDateTimeSchema.optional().openapi({ description: "Filter to timestamp." }),
-        limit: limitQuerySchema.optional(),
-        cursor: cursorQuerySchema.optional(),
+        page: pageQuerySchema.optional(),
+        pageSize: pageSizeQuerySchema.optional(),
       }),
     },
     responses: {
       200: {
         description: "Transfer list",
-        content: jsonContent(listTransfersResponse),
+        content: jsonContent(transferListResponse),
       },
       ...errorResponses(errorResponseSchema, [401, 403, 500]),
     },

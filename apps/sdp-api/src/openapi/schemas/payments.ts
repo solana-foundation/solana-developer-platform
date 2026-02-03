@@ -1,13 +1,15 @@
 import { z } from "./base";
 import {
+  apiKeyIdParamSchema,
   base64Schema,
   isoDateTimeSchema,
+  orgIdParamSchema,
   paymentRequestIdParamSchema,
   solanaAddressSchema,
   transferIdParamSchema,
   walletIdParamSchema,
 } from "./base";
-import { simulationResultSchema } from "./issuance";
+import { preparedTransactionSchema, simulationResultSchema } from "./issuance";
 
 export const tokenAmountSchema = z.string().openapi({
   description: "Token amount in UI units (decimal string).",
@@ -60,17 +62,6 @@ export const walletSchema = z
     }),
   })
   .openapi({ description: "Managed wallet." });
-
-export const listWalletsResponseSchema = z
-  .object({
-    wallets: z.array(walletSchema).openapi({ description: "Wallet list." }),
-    nextCursor: z
-      .string()
-      .nullable()
-      .optional()
-      .openapi({ description: "Cursor for the next page, if any." }),
-  })
-  .openapi({ description: "List wallets response payload." });
 
 export const tokenBalanceSchema = z
   .object({
@@ -163,82 +154,79 @@ export const prepareTransferRequestSchema = z
   })
   .openapi({ description: "Prepare transfer request payload." });
 
-export const unsignedTransactionSchema = z
-  .object({
-    serialized: base64Schema.openapi({ description: "Base64-encoded unsigned transaction." }),
-    message: base64Schema.openapi({ description: "Base64-encoded transaction message." }),
-    recentBlockhash: z
-      .string()
-      .openapi({ description: "Recent blockhash used in the transaction." }),
-    lastValidBlockHeight: z
-      .number()
-      .int()
-      .openapi({ description: "Last valid block height for the transaction." }),
-  })
-  .openapi({ description: "Unsigned transaction payload." });
-
-export const prepareTransferResponseSchema = z
-  .object({
-    transaction: unsignedTransactionSchema.openapi({
-      description: "Unsigned transaction to be signed client-side.",
-    }),
-    simulation: simulationResultSchema
-      .optional()
-      .openapi({ description: "Optional simulation result." }),
-    estimatedFee: z
-      .number()
-      .int()
-      .openapi({ description: "Estimated fee in lamports.", example: 5000 }),
-    meta: z
-      .object({
-        type: z.literal("transfer").openapi({ description: "Transfer intent type." }),
-        source: solanaAddressSchema.openapi({ description: "Source wallet address." }),
-        destination: solanaAddressSchema.openapi({ description: "Destination wallet address." }),
-        token: z.string().optional().openapi({ description: "Token symbol or mint address." }),
-        amount: tokenAmountSchema,
-      })
-      .openapi({ description: "Transfer metadata." }),
-  })
-  .openapi({ description: "Prepare transfer response payload." });
+export const transferTypeSchema = z
+  .enum(["transfer", "transfer_confidential"])
+  .openapi({ description: "Transfer type.", example: "transfer" });
 
 export const transferStatusSchema = z
-  .enum(["pending", "confirmed", "failed"])
+  .enum(["pending", "processing", "confirmed", "finalized", "failed"])
   .openapi({ description: "Transfer status.", example: "confirmed" });
-
-export const transferFeeSchema = z
-  .object({
-    token: z.string().openapi({ description: "Fee token symbol.", example: "USDC" }),
-    amount: tokenAmountSchema,
-  })
-  .openapi({ description: "Transfer fee details." });
 
 export const transferSchema = z
   .object({
     id: transferIdParamSchema,
-    signature: z.string().openapi({ description: "Solana transaction signature." }),
+    organizationId: orgIdParamSchema,
+    type: transferTypeSchema,
     status: transferStatusSchema,
-    source: solanaAddressSchema.openapi({ description: "Source wallet address." }),
-    destination: solanaAddressSchema.openapi({ description: "Destination wallet address." }),
-    token: z.string().openapi({ description: "Token symbol or mint address." }),
-    amount: tokenAmountSchema,
-    fee: transferFeeSchema.optional().openapi({ description: "Fee details, if available." }),
-    timestamp: isoDateTimeSchema.openapi({
-      description: "Timestamp when the transfer was submitted.",
-      example: "2025-01-01T00:00:00.000Z",
-    }),
-  })
-  .openapi({ description: "Transfer details." });
-
-export const listTransfersResponseSchema = z
-  .object({
-    transfers: z.array(transferSchema).openapi({ description: "Transfer list." }),
-    nextCursor: z
+    signature: z
       .string()
       .nullable()
+      .openapi({ description: "Solana transaction signature.", example: "sig_example" }),
+    serializedTx: base64Schema.nullable().openapi({
+      description: "Base64-encoded transaction payload, if available.",
+      example: "AQID",
+    }),
+    params: z
+      .record(z.unknown())
+      .openapi({ description: "Operation parameters captured for audit." }),
+    slot: z
+      .number()
+      .int()
+      .nullable()
+      .openapi({ description: "Slot number, if confirmed.", example: 123456 }),
+    blockTime: isoDateTimeSchema
+      .nullable()
+      .openapi({ description: "Block time, if confirmed.", example: "2025-01-01T00:00:00.000Z" }),
+    fee: z
+      .number()
+      .int()
+      .nullable()
+      .openapi({ description: "Transaction fee in lamports.", example: 5000 }),
+    error: z.string().nullable().openapi({
+      description: "Error message if the transaction failed.",
+      example: "Signature failed",
+    }),
+    initiatedByKeyId: apiKeyIdParamSchema
+      .nullable()
+      .openapi({ description: "API key that initiated the transfer." }),
+    source: solanaAddressSchema.optional().openapi({ description: "Source wallet address." }),
+    destination: solanaAddressSchema
       .optional()
-      .openapi({ description: "Cursor for the next page, if any." }),
+      .openapi({ description: "Destination wallet address." }),
+    token: z.string().optional().openapi({ description: "Token symbol or mint address." }),
+    amount: tokenAmountSchema.optional(),
+    createdAt: isoDateTimeSchema.openapi({
+      description: "Creation timestamp.",
+      example: "2025-01-01T00:00:00.000Z",
+    }),
+    updatedAt: isoDateTimeSchema.openapi({
+      description: "Last update timestamp.",
+      example: "2025-01-02T00:00:00.000Z",
+    }),
   })
-  .openapi({ description: "List transfers response payload." });
+  .openapi({ description: "Transfer transaction record." });
+
+export const prepareTransferResponseSchema = z
+  .object({
+    transfer: transferSchema.openapi({ description: "Transfer transaction record." }),
+    preparedTransaction: preparedTransactionSchema.openapi({
+      description: "Prepared transaction for client-side signing.",
+    }),
+    simulation: simulationResultSchema
+      .optional()
+      .openapi({ description: "Optional transaction simulation result." }),
+  })
+  .openapi({ description: "Prepare transfer response payload." });
 
 export const createConfidentialTransferRequestSchema = z
   .object({
