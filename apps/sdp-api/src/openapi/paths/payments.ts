@@ -143,9 +143,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     tags: ["Payments"],
     summary: "Prepare transfer (unsigned)",
     operationId: "preparePaymentTransfer",
-    description: withDraft(
-      "Builds an unsigned transfer transaction for user-managed signing."
-    ),
+    description: withDraft("Builds an unsigned transfer transaction for user-managed signing."),
     security: [{ apiKeyAuth: [] }],
     request: {
       body: {
@@ -196,10 +194,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     request: {
       query: z.object({
         wallet: z.string().optional().openapi({ description: "Filter by wallet ID." }),
-        token: z
-          .string()
-          .optional()
-          .openapi({ description: "Filter by token symbol or mint." }),
+        token: z.string().optional().openapi({ description: "Filter by token symbol or mint." }),
         status: transferStatusSchema.optional(),
         from: isoDateTimeSchema.optional().openapi({ description: "Filter from timestamp." }),
         to: isoDateTimeSchema.optional().openapi({ description: "Filter to timestamp." }),

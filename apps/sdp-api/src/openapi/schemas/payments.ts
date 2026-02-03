@@ -85,7 +85,9 @@ export const tokenBalanceSchema = z
     }),
     uiAmount: tokenAmountSchema,
     decimals: z.number().int().openapi({ description: "Token decimals.", example: 6 }),
-    confidential: z.boolean().openapi({ description: "Confidential balance flag.", example: false }),
+    confidential: z
+      .boolean()
+      .openapi({ description: "Confidential balance flag.", example: false }),
   })
   .openapi({ description: "Token balance details." });
 
@@ -252,11 +254,7 @@ export const createPaymentRequestRequestSchema = z
     recipient: z.string().openapi({ description: "Recipient wallet ID." }),
     amount: tokenAmountSchema,
     token: z.string().openapi({ description: "Token symbol or mint address." }),
-    label: z
-      .string()
-      .max(64)
-      .optional()
-      .openapi({ description: "Merchant/recipient name." }),
+    label: z.string().max(64).optional().openapi({ description: "Merchant/recipient name." }),
     message: z
       .string()
       .max(256)
