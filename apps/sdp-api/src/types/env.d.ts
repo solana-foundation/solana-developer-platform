@@ -26,11 +26,8 @@ export interface Env {
   CUSTODY_ENCRYPTION_KEY?: string; // For encrypting org private keys in DB
 
   // Email configuration
-  EMAIL_PROVIDER?: "iterable" | "resend" | "console";
+  EMAIL_PROVIDER?: "resend" | "console";
   EMAIL_FROM?: string;
-  ITERABLE_API_KEY?: string;
-  ITERABLE_PASSTHROUGH_CAMPAIGN_ID?: string;
-  ITERABLE_API_BASE_URL?: string;
   RESEND_API_KEY?: string;
   FRONTEND_URL?: string;
 
