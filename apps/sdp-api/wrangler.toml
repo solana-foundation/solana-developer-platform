@@ -30,6 +30,7 @@ id = "local-sessions"
 [vars]
 ENVIRONMENT = "development"
 API_VERSION = "v1"
+EMAIL_FROM = "noreply@mail.solana.org"
 
 # Dev environment
 [env.dev]
@@ -94,6 +95,7 @@ id = "YOUR_STAGING_SESSIONS_KV_ID"
 [env.staging.vars]
 ENVIRONMENT = "staging"
 API_VERSION = "v1"
+EMAIL_FROM = "noreply@mail.solana.org"
 
 # Production environment
 [env.production]

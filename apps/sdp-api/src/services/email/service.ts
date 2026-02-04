@@ -4,7 +4,6 @@
 
 import type { Env } from "@/types/env";
 import { ConsoleEmailProvider } from "./providers/console";
-import { IterableEmailProvider } from "./providers/iterable";
 import { ResendEmailProvider } from "./providers/resend";
 import type {
   EmailMessage,
@@ -52,16 +51,15 @@ export function createEmailService(env: Env): EmailService {
 
 function resolveProviderName(env: Env): EmailProviderName {
   if (env.EMAIL_PROVIDER) {
+    if (env.EMAIL_PROVIDER !== "resend" && env.EMAIL_PROVIDER !== "console") {
+      throw new Error(`Unsupported EMAIL_PROVIDER: ${env.EMAIL_PROVIDER}`);
+    }
     return env.EMAIL_PROVIDER;
   }
 
   // Prefer Resend for raw HTML sends (React Email)
   if (env.RESEND_API_KEY) {
     return "resend";
-  }
-
-  if (env.ITERABLE_API_KEY) {
-    return "iterable";
   }
 
   if (env.ENVIRONMENT === "development") {
@@ -77,13 +75,6 @@ function createProvider(name: EmailProviderName, env: Env): EmailProvider {
       throw new Error("RESEND_API_KEY is required for resend provider");
     }
     return new ResendEmailProvider({ apiKey: env.RESEND_API_KEY });
-  }
-
-  if (name === "iterable") {
-    if (!env.ITERABLE_API_KEY) {
-      throw new Error("ITERABLE_API_KEY is required for iterable provider");
-    }
-    return new IterableEmailProvider({ apiKey: env.ITERABLE_API_KEY });
   }
 
   return new ConsoleEmailProvider();
