@@ -45,6 +45,52 @@ export const users = sqliteTable(
   })
 );
 
+export const authUserIdentities = sqliteTable(
+  "auth_user_identities",
+  {
+    id: text("id").primaryKey(),
+    provider: text("provider").notNull(),
+    providerUserId: text("provider_user_id").notNull(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    email: text("email"),
+    createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
+    updatedAt: text("updated_at").notNull().default(sql`(datetime('now'))`),
+  },
+  (table) => ({
+    providerUserUnique: uniqueIndex("auth_user_identities_provider_user_unique").on(
+      table.provider,
+      table.providerUserId
+    ),
+    userIdx: index("idx_auth_user_identities_user").on(table.userId),
+    providerIdx: index("idx_auth_user_identities_provider").on(table.provider),
+  })
+);
+
+export const authOrganizationIdentities = sqliteTable(
+  "auth_organization_identities",
+  {
+    id: text("id").primaryKey(),
+    provider: text("provider").notNull(),
+    providerOrgId: text("provider_org_id").notNull(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    slug: text("slug"),
+    createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
+    updatedAt: text("updated_at").notNull().default(sql`(datetime('now'))`),
+  },
+  (table) => ({
+    providerOrgUnique: uniqueIndex("auth_org_identities_provider_org_unique").on(
+      table.provider,
+      table.providerOrgId
+    ),
+    orgIdx: index("idx_auth_org_identities_org").on(table.organizationId),
+    providerIdx: index("idx_auth_org_identities_provider").on(table.provider),
+  })
+);
+
 export const organizationMembers = sqliteTable(
   "organization_members",
   {

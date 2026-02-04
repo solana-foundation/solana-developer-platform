@@ -49,6 +49,23 @@ function extractApiKey(c: Context<{ Bindings: Env }>): string | null {
   return null;
 }
 
+function extractBearerToken(c: Context<{ Bindings: Env }>): string | null {
+  const authHeader = c.req.header("Authorization");
+  if (!authHeader) {
+    return null;
+  }
+
+  if (!authHeader.startsWith("Bearer ")) {
+    return null;
+  }
+
+  return authHeader.slice(7);
+}
+
+function looksLikeApiKey(token: string): boolean {
+  return token.startsWith("sk_");
+}
+
 /**
  * Look up API key in KV cache
  */
@@ -224,7 +241,7 @@ export function optionalAuth() {
   return async (c: Context<{ Bindings: Env }>, next: Next) => {
     const apiKey = extractApiKey(c);
 
-    if (apiKey) {
+    if (apiKey && looksLikeApiKey(apiKey)) {
       // Reuse the main auth logic but catch errors
       try {
         const authMw = authMiddleware();
@@ -242,13 +259,23 @@ export function optionalAuth() {
  * Unified auth middleware that supports both API key and session auth.
  * Useful for endpoints that can be accessed by both API clients and UI.
  */
-export function unifiedAuthMiddleware(options: { allowSession?: boolean } = {}) {
+export function unifiedAuthMiddleware(
+  options: { allowSession?: boolean; allowClerk?: boolean } = {}
+) {
   return async (c: Context<{ Bindings: Env }>, next: Next) => {
     // Try API key first
     const apiKey = extractApiKey(c);
-    if (apiKey) {
+    if (apiKey && looksLikeApiKey(apiKey)) {
       const authMw = authMiddleware();
       return authMw(c, next);
+    }
+
+    // Try Clerk if allowed and bearer token present
+    const bearerToken = extractBearerToken(c);
+    if (bearerToken && options.allowClerk) {
+      const { clerkAuthMiddleware } = await import("./clerk-auth");
+      const clerkMw = clerkAuthMiddleware();
+      return clerkMw(c, next);
     }
 
     // Try session if allowed

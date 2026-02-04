@@ -31,6 +31,11 @@ export interface Env {
   RESEND_API_KEY?: string;
   FRONTEND_URL?: string;
 
+  // Clerk configuration
+  CLERK_ISSUER?: string;
+  CLERK_JWKS_URL?: string;
+  CLERK_AUDIENCE?: string;
+
   // Solana configuration
   SOLANA_RPC_URL?: string;
   SOLANA_NETWORK?: "devnet" | "mainnet-beta";
@@ -70,6 +75,18 @@ declare module "hono" {
     };
     // Session auth context set by middleware
     session?: CachedSession;
+    // Clerk auth context set by middleware
+    clerk?: {
+      userId: string;
+      organizationId: string;
+      permissions: Permission[];
+      role: string;
+      clerkUserId: string;
+      clerkOrgId: string;
+      email: string | null;
+      orgSlug: string | null;
+      orgRole: string | null;
+    };
     requestId: string;
   }
 }
