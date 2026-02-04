@@ -5,6 +5,8 @@
  */
 
 import { hashString } from "@/lib/hash";
+import type { Env } from "@/types/env";
+import { ClerkAllowlistService } from "./clerk-allowlist.service";
 import type { KVService } from "./kv.service";
 
 export interface AllowlistEntry {
@@ -173,4 +175,17 @@ export class AllowlistService {
       createdAt: row.created_at as string,
     }));
   }
+}
+
+export type AllowlistProvider = AllowlistService | ClerkAllowlistService;
+
+export function createAllowlistService(
+  env: Env,
+  kvService: KVService
+): AllowlistProvider {
+  if (env.ALLOWLIST_PROVIDER === "clerk") {
+    return new ClerkAllowlistService(env);
+  }
+
+  return new AllowlistService(env.DB, kvService);
 }

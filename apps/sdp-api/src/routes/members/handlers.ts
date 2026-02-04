@@ -1,4 +1,3 @@
-import { getAuth } from "@/lib/auth";
 import { AppError, notFound } from "@/lib/errors";
 import { hashString } from "@/lib/hash";
 import { created, noContent, success } from "@/lib/response";
@@ -11,6 +10,41 @@ import type { Context } from "hono";
 import { acceptSchema, inviteSchema } from "./schemas";
 
 type AppContext = Context<{ Bindings: Env }>;
+
+function resolveActor(c: AppContext): {
+  organizationId: string;
+  userId: string | null;
+  apiKeyId: string | null;
+} {
+  const apiKey = c.get("apiKey");
+  if (apiKey) {
+    return {
+      organizationId: apiKey.organizationId,
+      userId: null,
+      apiKeyId: apiKey.id,
+    };
+  }
+
+  const clerk = c.get("clerk");
+  if (clerk) {
+    return {
+      organizationId: clerk.organizationId,
+      userId: clerk.userId,
+      apiKeyId: null,
+    };
+  }
+
+  const session = c.get("session");
+  if (session) {
+    return {
+      organizationId: session.organizationId,
+      userId: session.userId,
+      apiKeyId: null,
+    };
+  }
+
+  throw new AppError("UNAUTHORIZED", "Authentication required");
+}
 
 function randomBase64Url(byteLength: number): string {
   const bytes = new Uint8Array(byteLength);
@@ -39,8 +73,7 @@ function randomBase64Url(byteLength: number): string {
 }
 
 export const listMembers = async (c: AppContext) => {
-  const auth = getAuth(c);
-  const orgId = auth.organizationId;
+  const { organizationId } = resolveActor(c);
 
   const results = await c.env.DB.prepare(
     `SELECT om.id, om.role, om.status, om.created_at,
@@ -50,7 +83,7 @@ export const listMembers = async (c: AppContext) => {
      WHERE om.organization_id = ? AND om.status = 'active'
      ORDER BY om.created_at ASC`
   )
-    .bind(orgId)
+    .bind(organizationId)
     .all();
 
   const memberList = results.results.map((row) => ({
@@ -69,8 +102,7 @@ export const listMembers = async (c: AppContext) => {
 };
 
 export const inviteMember = async (c: AppContext) => {
-  const auth = getAuth(c);
-  const orgId = auth.organizationId;
+  const { organizationId, userId, apiKeyId } = resolveActor(c);
 
   const body = await c.req.json();
   const parsed = inviteSchema.safeParse(body);
@@ -90,7 +122,7 @@ export const inviteMember = async (c: AppContext) => {
      JOIN users u ON om.user_id = u.id
      WHERE om.organization_id = ? AND u.email = ? AND om.status = 'active'`
   )
-    .bind(orgId, normalizedEmail)
+    .bind(organizationId, normalizedEmail)
     .first();
 
   if (existingMember) {
@@ -102,7 +134,7 @@ export const inviteMember = async (c: AppContext) => {
     `SELECT id FROM invitations
      WHERE organization_id = ? AND email = ? AND status = 'pending'`
   )
-    .bind(orgId, normalizedEmail)
+    .bind(organizationId, normalizedEmail)
     .first();
 
   if (existingInvite) {
@@ -110,17 +142,21 @@ export const inviteMember = async (c: AppContext) => {
   }
 
   // Get inviter user ID
-  const inviterKey = await c.env.DB.prepare("SELECT created_by FROM api_keys WHERE id = ?")
-    .bind(auth.id)
-    .first<{ created_by: string }>();
+  const inviterKey =
+    apiKeyId !== null
+      ? await c.env.DB.prepare("SELECT created_by FROM api_keys WHERE id = ?")
+          .bind(apiKeyId)
+          .first<{ created_by: string }>()
+      : null;
 
   const org = await c.env.DB.prepare("SELECT name FROM organizations WHERE id = ?")
-    .bind(orgId)
+    .bind(organizationId)
     .first<{ name: string }>();
 
-  const inviter = inviterKey?.created_by
+  const inviterUserId = userId || inviterKey?.created_by || null;
+  const inviter = inviterUserId
     ? await c.env.DB.prepare("SELECT email FROM users WHERE id = ?")
-        .bind(inviterKey.created_by)
+        .bind(inviterUserId)
         .first<{ email: string }>()
     : null;
 
@@ -136,10 +172,10 @@ export const inviteMember = async (c: AppContext) => {
   )
     .bind(
       invitationId,
-      orgId,
+      organizationId,
       normalizedEmail,
       role,
-      inviterKey?.created_by || "system",
+      inviterUserId || "system",
       tokenHash,
       expiresAt
     )
@@ -152,6 +188,9 @@ export const inviteMember = async (c: AppContext) => {
     resourceType: "invitation",
     resourceId: invitationId,
     metadata: { email: normalizedEmail, role },
+    organizationId: organizationId,
+    userId: inviterUserId || undefined,
+    apiKeyId: apiKeyId || undefined,
   });
 
   const inviteUrl = buildInvitationUrl(c, token);
@@ -298,13 +337,13 @@ export const acceptInvitation = async (c: AppContext) => {
 
 export const removeMember = async (c: AppContext) => {
   const { memberId } = c.req.param();
-  const auth = getAuth(c);
+  const { organizationId, userId, apiKeyId } = resolveActor(c);
 
   // Ensure member belongs to same org
   const member = await c.env.DB.prepare(
     "SELECT id, user_id FROM organization_members WHERE id = ? AND organization_id = ?"
   )
-    .bind(memberId, auth.organizationId)
+    .bind(memberId, organizationId)
     .first<{ id: string; user_id: string }>();
 
   if (!member) {
@@ -322,6 +361,9 @@ export const removeMember = async (c: AppContext) => {
     resourceType: "member",
     resourceId: memberId,
     metadata: { userId: member.user_id },
+    organizationId,
+    userId: userId || undefined,
+    apiKeyId: apiKeyId || undefined,
   });
 
   return noContent(c);

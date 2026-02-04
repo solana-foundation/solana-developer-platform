@@ -209,20 +209,25 @@ export function authMiddleware() {
  */
 export function requirePermissions(...required: Permission[]) {
   return async (c: Context<{ Bindings: Env }>, next: Next) => {
-    const auth = c.get("apiKey");
+    const apiKey = c.get("apiKey");
+    const clerk = c.get("clerk");
+    const session = c.get("session");
 
-    if (!auth) {
+    const permissions =
+      apiKey?.permissions ?? clerk?.permissions ?? session?.permissions ?? null;
+
+    if (!permissions) {
       throw new AppError("UNAUTHORIZED");
     }
 
     // Check for wildcard
-    if (auth.permissions.includes("*")) {
+    if (permissions.includes("*")) {
       await next();
       return;
     }
 
     // Check each required permission
-    const hasAll = required.every((p) => auth.permissions.includes(p));
+    const hasAll = required.every((p) => permissions.includes(p));
     if (!hasAll) {
       throw new AppError(
         "INSUFFICIENT_PERMISSIONS",

@@ -35,6 +35,14 @@ export interface Env {
   CLERK_ISSUER?: string;
   CLERK_JWKS_URL?: string;
   CLERK_AUDIENCE?: string;
+  CLERK_SECRET_KEY?: string;
+  CLERK_API_URL?: string;
+
+  // Allowlist configuration
+  ALLOWLIST_PROVIDER?: "d1" | "clerk";
+  ALLOWLIST_ADMIN_KEY?: string;
+  ALLOWLIST_ADMIN_ORG_ID?: string;
+  ALLOWLIST_ADMIN_ORG_SLUG?: string;
 
   // Solana configuration
   SOLANA_RPC_URL?: string;

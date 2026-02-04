@@ -31,6 +31,7 @@ id = "local-sessions"
 ENVIRONMENT = "development"
 API_VERSION = "v1"
 EMAIL_FROM = "noreply@mail.solana.org"
+ALLOWLIST_PROVIDER = "d1"
 
 # Dev environment
 [env.dev]
@@ -65,6 +66,7 @@ SOLANA_NETWORK = "devnet"
 SOLANA_RPC_URL = "https://api.devnet.solana.com"
 FEE_PAYMENT_PROVIDER = "kora"
 KORA_RPC_URL = "https://kora-devnet-315956366746.us-central1.run.app"
+ALLOWLIST_PROVIDER = "d1"
 
 # QA / staging environment
 [env.staging]
@@ -96,6 +98,7 @@ id = "YOUR_STAGING_SESSIONS_KV_ID"
 ENVIRONMENT = "staging"
 API_VERSION = "v1"
 EMAIL_FROM = "noreply@mail.solana.org"
+ALLOWLIST_PROVIDER = "d1"
 
 # Production environment
 [env.production]
@@ -126,3 +129,4 @@ id = "YOUR_PRODUCTION_SESSIONS_KV_ID"
 [env.production.vars]
 ENVIRONMENT = "production"
 API_VERSION = "v1"
+ALLOWLIST_PROVIDER = "d1"

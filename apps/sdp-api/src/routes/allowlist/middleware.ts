@@ -1,25 +1,44 @@
 import { AppError } from "@/lib/errors";
 import type { Env } from "@/types/env";
+import type { Context, Next } from "hono";
 
-// Simple admin key check middleware
-// In production, use proper admin authentication
+// Allowlist admin middleware.
+// In production, requires either a configured admin key or Clerk org ownership.
 export const adminAuth = async (
-  c: { env: Env; req: { header: (name: string) => string | undefined } },
-  next: () => Promise<void>
+  c: Context<{ Bindings: Env }>,
+  next: Next
 ) => {
   const adminKey = c.req.header("X-Admin-Key");
 
-  // In development, allow without key
   if (c.env.ENVIRONMENT === "development") {
     await next();
     return;
   }
 
-  // In staging/production, require admin key
-  // This should be replaced with proper admin auth
-  if (!adminKey) {
-    throw new AppError("UNAUTHORIZED", "Admin authentication required");
+  if (adminKey && c.env.ALLOWLIST_ADMIN_KEY && adminKey === c.env.ALLOWLIST_ADMIN_KEY) {
+    await next();
+    return;
   }
 
-  await next();
+  const apiKey = c.get("apiKey");
+  if (apiKey?.permissions?.includes("*")) {
+    await next();
+    return;
+  }
+
+  const clerk = c.get("clerk");
+  if (clerk) {
+    const adminOrgId = c.env.ALLOWLIST_ADMIN_ORG_ID;
+    const adminOrgSlug = c.env.ALLOWLIST_ADMIN_ORG_SLUG;
+    const isOrgMatch =
+      (adminOrgId && clerk.organizationId === adminOrgId) ||
+      (adminOrgSlug && clerk.orgSlug === adminOrgSlug);
+
+    if (isOrgMatch && (clerk.role === "owner" || clerk.permissions.includes("*"))) {
+      await next();
+      return;
+    }
+  }
+
+  throw new AppError("FORBIDDEN", "Admin access required");
 };
