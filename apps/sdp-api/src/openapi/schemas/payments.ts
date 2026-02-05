@@ -169,7 +169,7 @@ export const prepareTransferRequestSchema = z
       .max(256)
       .optional()
       .openapi({ description: "Optional memo for the transfer." }),
-    reference: solanaAddressSchema.optional().openapi({
+    referenceAddress: solanaAddressSchema.optional().openapi({
       description: "Optional reference address for tracking (Solana Pay reference account).",
     }),
     options: z
