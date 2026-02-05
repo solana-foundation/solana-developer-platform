@@ -8,6 +8,7 @@ import {
 } from "@clerk/nextjs";
 import { auth } from "@clerk/nextjs/server";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { getOnboardingStatus, linkOrganization } from "./onboarding/actions";
 
 const primaryButtonClass =
@@ -47,6 +48,10 @@ function SecondaryButton({
 export default async function Home() {
   const { userId, orgId } = await auth();
   const onboarding = userId && orgId ? await getOnboardingStatus() : null;
+
+  if (userId && orgId && onboarding?.linked) {
+    redirect("/dashboard");
+  }
 
   return (
     <main className="relative min-h-screen overflow-hidden bg-[color:var(--background)] text-[color:var(--text-high)]">
@@ -194,6 +199,7 @@ export default async function Home() {
                       longer than a few seconds, try again.
                     </p>
                     <form action={linkOrganization} className="mt-6">
+                      <input type="hidden" name="returnTo" value="/dashboard" />
                       <PrimaryButton type="submit">Retry linking</PrimaryButton>
                     </form>
                   </>
