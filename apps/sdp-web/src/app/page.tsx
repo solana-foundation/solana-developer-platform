@@ -46,12 +46,7 @@ function SecondaryButton({
 
 export default async function Home() {
   const { userId, orgId } = await auth();
-  let onboarding = userId && orgId ? await getOnboardingStatus() : null;
-
-  if (orgId && onboarding && !onboarding.linked) {
-    await linkOrganization();
-    onboarding = await getOnboardingStatus();
-  }
+  const onboarding = userId && orgId ? await getOnboardingStatus() : null;
 
   return (
     <main className="relative min-h-screen overflow-hidden bg-[color:var(--background)] text-[color:var(--text-high)]">
