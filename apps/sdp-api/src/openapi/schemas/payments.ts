@@ -224,9 +224,6 @@ export const transferSchema = z
       description: "Base64-encoded transaction payload, if available.",
       example: "base64_tx_example",
     }),
-    requestParams: z
-      .record(z.unknown())
-      .openapi({ description: "Captured request parameters for audit." }),
     slot: z
       .number()
       .int()
