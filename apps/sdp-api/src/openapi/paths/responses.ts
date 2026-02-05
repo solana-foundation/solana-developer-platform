@@ -55,6 +55,7 @@ import {
   transferSchema,
   verifyMagicLinkResponseSchema,
   walletBalancesResponseSchema,
+  walletPolicyResponseSchema,
   walletResponseSchema,
   walletSchema,
 } from "../schemas";
@@ -119,6 +120,7 @@ export const listTemplatesResponse = successResponseSchema(listTemplatesResponse
 export const walletResponse = successResponseSchema(walletResponseSchema);
 export const walletListResponse = paginatedResponseSchema(walletSchema);
 export const walletBalancesResponse = successResponseSchema(walletBalancesResponseSchema);
+export const walletPolicyResponse = successResponseSchema(walletPolicyResponseSchema);
 export const prepareTransferResponse = successResponseSchema(prepareTransferResponseSchema);
 export const transferResponse = successResponseSchema(transferResponseSchema);
 export const transferListResponse = paginatedResponseSchema(transferSchema);

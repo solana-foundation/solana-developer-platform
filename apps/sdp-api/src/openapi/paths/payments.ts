@@ -19,6 +19,7 @@ import {
   transferDirectionSchema,
   transferIdParamSchema,
   transferStatusSchema,
+  updateWalletPolicyRequestSchema,
   walletIdParamSchema,
   walletTypeSchema,
 } from "../schemas";
@@ -35,6 +36,7 @@ import {
   transferResponse,
   walletBalancesResponse,
   walletListResponse,
+  walletPolicyResponse,
   walletResponse,
 } from "./responses";
 
@@ -135,6 +137,54 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         content: jsonContent(walletBalancesResponse),
       },
       ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/payments/wallets/{walletId}/policies",
+    tags: ["Payments"],
+    summary: "Get wallet policy",
+    operationId: "getPaymentWalletPolicy",
+    description: withDraft("Retrieves policy rules for a wallet."),
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      params: z.object({
+        walletId: walletIdParamSchema,
+      }),
+    },
+    responses: {
+      200: {
+        description: "Wallet policy",
+        content: jsonContent(walletPolicyResponse),
+      },
+      ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "put",
+    path: "/v1/payments/wallets/{walletId}/policies",
+    tags: ["Payments"],
+    summary: "Update wallet policy",
+    operationId: "updatePaymentWalletPolicy",
+    description: withDraft("Updates policy rules for a wallet."),
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      params: z.object({
+        walletId: walletIdParamSchema,
+      }),
+      body: {
+        required: true,
+        content: jsonContent(updateWalletPolicyRequestSchema),
+      },
+    },
+    responses: {
+      200: {
+        description: "Wallet policy updated",
+        content: jsonContent(walletPolicyResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
     },
   });
 

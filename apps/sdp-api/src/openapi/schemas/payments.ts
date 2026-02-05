@@ -63,6 +63,50 @@ export const walletSchema = z
   })
   .openapi({ description: "Managed wallet." });
 
+export const walletPolicyModeSchema = z.enum(["none", "allowlist"]).openapi({
+  description: "Policy mode for outbound destinations.",
+  example: "allowlist",
+});
+
+export const walletPolicySchema = z
+  .object({
+    walletId: walletIdParamSchema,
+    mode: walletPolicyModeSchema,
+    destinationAllowlist: z
+      .array(solanaAddressSchema)
+      .openapi({ description: "Allowed destination addresses when allowlist mode is enabled." }),
+    maxTransferAmount: tokenAmountSchema
+      .optional()
+      .openapi({ description: "Maximum amount allowed per transfer." }),
+    maxDailyAmount: tokenAmountSchema
+      .optional()
+      .openapi({ description: "Maximum total amount allowed per day." }),
+    createdAt: isoDateTimeSchema.openapi({
+      description: "Timestamp when the policy was created.",
+      example: "2025-01-01T00:00:00.000Z",
+    }),
+    updatedAt: isoDateTimeSchema.openapi({
+      description: "Timestamp when the policy was last updated.",
+      example: "2025-01-02T00:00:00.000Z",
+    }),
+  })
+  .openapi({ description: "Wallet policy configuration." });
+
+export const updateWalletPolicyRequestSchema = z
+  .object({
+    mode: walletPolicyModeSchema,
+    destinationAllowlist: z
+      .array(solanaAddressSchema)
+      .openapi({ description: "Allowed destination addresses when allowlist mode is enabled." }),
+    maxTransferAmount: tokenAmountSchema
+      .optional()
+      .openapi({ description: "Maximum amount allowed per transfer." }),
+    maxDailyAmount: tokenAmountSchema
+      .optional()
+      .openapi({ description: "Maximum total amount allowed per day." }),
+  })
+  .openapi({ description: "Update wallet policy request payload." });
+
 export const tokenBalanceSchema = z
   .object({
     token: z.string().openapi({ description: "Token symbol.", example: "USDC" }),
@@ -436,6 +480,12 @@ export const walletResponseSchema = z
     wallet: walletSchema.openapi({ description: "Wallet details." }),
   })
   .openapi({ description: "Wallet response payload." });
+
+export const walletPolicyResponseSchema = z
+  .object({
+    policy: walletPolicySchema.openapi({ description: "Wallet policy configuration." }),
+  })
+  .openapi({ description: "Wallet policy response payload." });
 
 export const walletBalancesResponseSchema = z
   .object({
