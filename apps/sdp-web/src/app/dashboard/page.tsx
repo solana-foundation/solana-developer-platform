@@ -9,8 +9,10 @@ import { getOnboardingStatus, linkOrganization } from "../onboarding/actions";
 export default async function DashboardPage({
   searchParams,
 }: {
-  searchParams?: { link?: string };
+  searchParams?: Promise<{ link?: string }>;
 }) {
+  const resolvedSearchParams = searchParams ? await searchParams : undefined;
+  const linkStatus = resolvedSearchParams?.link;
   const { userId, orgId } = await auth();
 
   if (!userId) {
@@ -42,7 +44,7 @@ export default async function DashboardPage({
   const onboarding = await getOnboardingStatus();
 
   if (!onboarding.linked) {
-    if (searchParams?.link !== "failed") {
+    if (linkStatus !== "failed") {
       redirect("/onboarding/link");
     }
     return (
