@@ -4,6 +4,7 @@ import {
   isoDateTimeSchema,
   orgIdParamSchema,
   paymentRequestIdParamSchema,
+  projectIdParamSchema,
   solanaAddressSchema,
   transferIdParamSchema,
   walletIdParamSchema,
@@ -135,6 +136,9 @@ export const walletBalancesSchema = z
 
 export const createTransferRequestSchema = z
   .object({
+    projectId: projectIdParamSchema
+      .optional()
+      .openapi({ description: "Project identifier for the transfer context." }),
     source: z.string().openapi({ description: "Source wallet ID." }),
     destination: solanaAddressSchema.openapi({ description: "Destination wallet address." }),
     token: z.string().openapi({ description: "Token symbol or mint address." }),
@@ -153,6 +157,9 @@ export const priorityFeeSchema = z
 
 export const prepareTransferRequestSchema = z
   .object({
+    projectId: projectIdParamSchema
+      .optional()
+      .openapi({ description: "Project identifier for the transfer context." }),
     source: z.string().openapi({ description: "Source wallet ID or pubkey." }),
     destination: solanaAddressSchema.openapi({ description: "Destination wallet address." }),
     token: z.string().openapi({ description: "Token symbol or mint address." }),
@@ -225,6 +232,9 @@ export const transferSchema = z
   .object({
     id: transferIdParamSchema,
     organizationId: orgIdParamSchema,
+    projectId: projectIdParamSchema
+      .optional()
+      .openapi({ description: "Project identifier for the transfer." }),
     type: transferTypeSchema,
     direction: transferDirectionSchema,
     status: transferStatusSchema,
