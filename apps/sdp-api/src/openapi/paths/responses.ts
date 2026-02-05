@@ -38,8 +38,10 @@ import {
   prepareUpdateAuthorityResponseSchema,
   projectMemberResponseSchema,
   projectResponseSchema,
-  rampExecutionResponseSchema,
-  rampQuoteResponseSchema,
+  offrampExecutionResponseSchema,
+  offrampQuoteResponseSchema,
+  onrampExecutionResponseSchema,
+  onrampQuoteResponseSchema,
   revokeApiKeyResponseSchema,
   rotateApiKeyResponseSchema,
   sendMagicLinkResponseSchema,
@@ -122,5 +124,7 @@ export const transferResponse = successResponseSchema(transferResponseSchema);
 export const transferListResponse = paginatedResponseSchema(transferSchema);
 export const paymentRequestResponse = successResponseSchema(paymentRequestResponseSchema);
 export const feeQuoteResponse = successResponseSchema(feeQuoteResponseSchema);
-export const rampQuoteResponse = successResponseSchema(rampQuoteResponseSchema);
-export const rampExecutionResponse = successResponseSchema(rampExecutionResponseSchema);
+export const onrampQuoteResponse = successResponseSchema(onrampQuoteResponseSchema);
+export const offrampQuoteResponse = successResponseSchema(offrampQuoteResponseSchema);
+export const onrampExecutionResponse = successResponseSchema(onrampExecutionResponseSchema);
+export const offrampExecutionResponse = successResponseSchema(offrampExecutionResponseSchema);
