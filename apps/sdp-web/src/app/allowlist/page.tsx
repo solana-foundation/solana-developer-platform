@@ -51,7 +51,7 @@ export default async function AllowlistPage() {
   const onboarding = await getOnboardingStatus();
 
   if (!onboarding.linked) {
-    redirect("/onboarding/link?returnTo=/allowlist");
+    redirect("/dashboard");
   }
 
   const entries = await listAllowlistEntries();

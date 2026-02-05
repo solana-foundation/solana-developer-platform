@@ -53,7 +53,7 @@ export default async function MembersPage() {
   const onboarding = await getOnboardingStatus();
 
   if (!onboarding.linked) {
-    redirect("/onboarding/link?returnTo=/members");
+    redirect("/dashboard");
   }
 
   const members = await listMembers();

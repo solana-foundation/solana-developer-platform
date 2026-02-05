@@ -5,14 +5,9 @@ import { auth } from "@clerk/nextjs/server";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getOnboardingStatus, linkOrganization } from "../onboarding/actions";
+import { linkOrganizationInApi } from "@/lib/onboarding";
 
-export default async function DashboardPage({
-  searchParams,
-}: {
-  searchParams?: Promise<{ link?: string }>;
-}) {
-  const resolvedSearchParams = searchParams ? await searchParams : undefined;
-  const linkStatus = resolvedSearchParams?.link;
+export default async function DashboardPage() {
   const { userId, orgId } = await auth();
 
   if (!userId) {
@@ -41,12 +36,18 @@ export default async function DashboardPage({
     );
   }
 
-  const onboarding = await getOnboardingStatus();
+  let onboarding = await getOnboardingStatus();
 
   if (!onboarding.linked) {
-    if (linkStatus !== "failed") {
-      redirect("/onboarding/link");
+    try {
+      await linkOrganizationInApi();
+      onboarding = await getOnboardingStatus();
+    } catch {
+      // Ignore auto-link errors and fall back to manual retry UI.
     }
+  }
+
+  if (!onboarding.linked) {
     return (
       <main className="min-h-screen bg-background px-6 py-10 text-foreground">
         <div className="mx-auto flex max-w-3xl flex-col gap-6">
