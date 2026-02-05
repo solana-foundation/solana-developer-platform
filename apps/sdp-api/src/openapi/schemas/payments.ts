@@ -1,6 +1,5 @@
 import { z } from "./base";
 import {
-  apiKeyIdParamSchema,
   base64Schema,
   isoDateTimeSchema,
   orgIdParamSchema,
@@ -209,6 +208,19 @@ export const transferRiskSchema = z
   })
   .openapi({ description: "Risk metadata for the transfer." });
 
+export const transferInitiatorSchema = z
+  .object({
+    type: z
+      .enum(["api_key", "user", "system"])
+      .openapi({ description: "Initiator type.", example: "api_key" }),
+    id: z.string().optional().openapi({ description: "Initiator identifier if applicable." }),
+    display: z
+      .string()
+      .optional()
+      .openapi({ description: "Human-friendly label for the initiator." }),
+  })
+  .openapi({ description: "Initiator metadata for the transfer." });
+
 export const transferSchema = z
   .object({
     id: transferIdParamSchema,
@@ -241,9 +253,9 @@ export const transferSchema = z
       description: "Error message if the transaction failed.",
       example: "Signature failed",
     }),
-    initiatedByKeyId: apiKeyIdParamSchema
-      .nullable()
-      .openapi({ description: "API key that initiated the transfer." }),
+    initiatedBy: transferInitiatorSchema
+      .optional()
+      .openapi({ description: "Initiator that triggered the transfer." }),
     source: solanaAddressSchema.optional().openapi({ description: "Source wallet address." }),
     destination: solanaAddressSchema
       .optional()
