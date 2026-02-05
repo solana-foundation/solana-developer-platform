@@ -312,11 +312,6 @@ export const feeQuoteSchema = z
   .object({
     feeToken: z.string().openapi({ description: "Fee token symbol.", example: "USDC" }),
     feeAmount: tokenAmountSchema,
-    feeInLamports: z.number().int().openapi({ description: "Fee in lamports.", example: 5000 }),
-    exchangeRate: tokenAmountSchema
-      .optional()
-      .openapi({ description: "Exchange rate for fee token." }),
-    validUntil: isoDateTimeSchema.openapi({ description: "Fee quote expiration." }),
   })
   .openapi({ description: "Fee quote details." });
 
