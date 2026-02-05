@@ -15,6 +15,7 @@ import {
   prepareTransferRequestSchema,
   rampQuoteRequestSchema,
   transferIdParamSchema,
+  transferDirectionSchema,
   transferStatusSchema,
   walletIdParamSchema,
   walletTypeSchema,
@@ -194,7 +195,14 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     request: {
       query: z.object({
         wallet: z.string().optional().openapi({ description: "Filter by wallet ID." }),
+        walletAddress: z
+          .string()
+          .optional()
+          .openapi({ description: "Filter by wallet address." }),
         token: z.string().optional().openapi({ description: "Filter by token symbol or mint." }),
+        direction: transferDirectionSchema
+          .optional()
+          .openapi({ description: "Filter by transfer direction." }),
         status: transferStatusSchema.optional(),
         from: isoDateTimeSchema.optional().openapi({ description: "Filter from timestamp." }),
         to: isoDateTimeSchema.optional().openapi({ description: "Filter to timestamp." }),

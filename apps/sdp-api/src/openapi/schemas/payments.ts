@@ -158,15 +158,38 @@ export const transferTypeSchema = z
   .enum(["transfer", "transfer_confidential"])
   .openapi({ description: "Transfer type.", example: "transfer" });
 
+export const transferDirectionSchema = z
+  .enum(["inbound", "outbound"])
+  .openapi({ description: "Transfer direction.", example: "outbound" });
+
 export const transferStatusSchema = z
   .enum(["pending", "processing", "confirmed", "finalized", "failed"])
   .openapi({ description: "Transfer status.", example: "confirmed" });
+
+export const transferRiskLevelSchema = z
+  .enum(["low", "medium", "high", "unknown"])
+  .openapi({ description: "Risk level classification.", example: "low" });
+
+export const transferRiskSchema = z
+  .object({
+    provider: z.string().openapi({ description: "Risk scoring provider.", example: "trm" }),
+    score: z
+      .string()
+      .openapi({ description: "Provider-specific risk score.", example: "0.12" }),
+    level: transferRiskLevelSchema,
+    evaluatedAt: isoDateTimeSchema.openapi({
+      description: "Timestamp when risk was evaluated.",
+      example: "2025-01-01T00:00:00.000Z",
+    }),
+  })
+  .openapi({ description: "Risk metadata for the transfer." });
 
 export const transferSchema = z
   .object({
     id: transferIdParamSchema,
     organizationId: orgIdParamSchema,
     type: transferTypeSchema,
+    direction: transferDirectionSchema,
     status: transferStatusSchema,
     signature: z
       .string()
@@ -205,6 +228,9 @@ export const transferSchema = z
       .openapi({ description: "Destination wallet address." }),
     token: z.string().optional().openapi({ description: "Token symbol or mint address." }),
     amount: tokenAmountSchema.optional(),
+    risk: transferRiskSchema
+      .optional()
+      .openapi({ description: "Optional risk evaluation for the transfer." }),
     createdAt: isoDateTimeSchema.openapi({
       description: "Creation timestamp.",
       example: "2025-01-01T00:00:00.000Z",
