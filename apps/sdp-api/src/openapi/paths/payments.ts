@@ -325,7 +325,9 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     tags: ["Payments"],
     summary: "Create payment request",
     operationId: "createPaymentRequest",
-    description: withDraft("Creates a Solana Pay payment request."),
+    description: withDraft(
+      "Creates a Solana Pay payment request.\n\nNote: For requests that must remain valid beyond ~60 seconds, use nonce accounts. Draft flow: create payment request -> backend prepares tx and signs as fee payer -> client receives request -> forwards to sender -> sender signs and submits."
+    ),
     security: [{ apiKeyAuth: [] }],
     request: {
       body: {
