@@ -44,7 +44,6 @@ export const transferIdParamSchema = idSchema(
   "Transfer identifier (SDP record ID, not the on-chain signature).",
   "xfr_example"
 );
-export const paymentRequestIdParamSchema = idSchema("Payment request identifier.", "req_example");
 
 export const userIdSchema = idSchema("User identifier.", "usr_example");
 export const invitationIdSchema = idSchema("Invitation identifier.", "inv_example");

@@ -3,7 +3,6 @@ import { z } from "zod";
 
 import {
   createConfidentialTransferRequestSchema,
-  createPaymentRequestRequestSchema,
   createTransferRequestSchema,
   createWalletRequestSchema,
   errorResponseSchema,
@@ -14,7 +13,6 @@ import {
   onrampQuoteRequestSchema,
   pageQuerySchema,
   pageSizeQuerySchema,
-  paymentRequestIdParamSchema,
   prepareTransferRequestSchema,
   transferDirectionSchema,
   transferIdParamSchema,
@@ -30,7 +28,6 @@ import {
   offrampQuoteResponse,
   onrampExecutionResponse,
   onrampQuoteResponse,
-  paymentRequestResponse,
   prepareTransferResponse,
   transferListResponse,
   transferResponse,
@@ -310,57 +307,6 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
       200: {
         description: "Transfer details",
         content: jsonContent(transferResponse),
-      },
-      ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
-    },
-  });
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // Payment Requests (Solana Pay)
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  registry.registerPath({
-    method: "post",
-    path: "/v1/payments/requests",
-    tags: ["Payments"],
-    summary: "Create payment request",
-    operationId: "createPaymentRequest",
-    description: withDraft(
-      "Creates a Solana Pay payment request.\n\nNote: For requests that must remain valid beyond ~60 seconds, use nonce accounts. Draft flow: create payment request -> backend prepares tx and signs as fee payer -> client receives request -> forwards to sender -> sender signs and submits."
-    ),
-    security: [{ apiKeyAuth: [] }],
-    request: {
-      body: {
-        required: true,
-        content: jsonContent(createPaymentRequestRequestSchema),
-      },
-    },
-    responses: {
-      201: {
-        description: "Payment request created",
-        content: jsonContent(paymentRequestResponse),
-      },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 500]),
-    },
-  });
-
-  registry.registerPath({
-    method: "get",
-    path: "/v1/payments/requests/{requestId}",
-    tags: ["Payments"],
-    summary: "Get payment request",
-    operationId: "getPaymentRequest",
-    description: withDraft("Retrieves details for a payment request."),
-    security: [{ apiKeyAuth: [] }],
-    request: {
-      params: z.object({
-        requestId: paymentRequestIdParamSchema,
-      }),
-    },
-    responses: {
-      200: {
-        description: "Payment request details",
-        content: jsonContent(paymentRequestResponse),
       },
       ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
     },

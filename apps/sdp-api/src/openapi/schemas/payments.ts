@@ -3,7 +3,6 @@ import {
   base64Schema,
   isoDateTimeSchema,
   orgIdParamSchema,
-  paymentRequestIdParamSchema,
   projectIdParamSchema,
   solanaAddressSchema,
   transferIdParamSchema,
@@ -312,51 +311,6 @@ export const createConfidentialTransferRequestSchema = z
   })
   .openapi({ description: "Create confidential transfer request payload." });
 
-export const createPaymentRequestRequestSchema = z
-  .object({
-    recipient: z.string().openapi({ description: "Recipient wallet ID." }),
-    amount: tokenAmountSchema,
-    token: z.string().openapi({ description: "Token symbol or mint address." }),
-    label: z.string().max(64).optional().openapi({ description: "Merchant/recipient name." }),
-    message: z
-      .string()
-      .max(256)
-      .optional()
-      .openapi({ description: "Payment request description." }),
-    expiresIn: z
-      .number()
-      .int()
-      .min(60)
-      .max(86400)
-      .optional()
-      .openapi({ description: "Expiration time in seconds.", example: 3600 }),
-  })
-  .openapi({ description: "Create payment request payload." });
-
-export const paymentRequestStatusSchema = z
-  .enum(["pending", "fulfilled", "expired", "cancelled"])
-  .openapi({ description: "Payment request status.", example: "pending" });
-
-export const paymentRequestSchema = z
-  .object({
-    id: paymentRequestIdParamSchema,
-    reference: solanaAddressSchema.openapi({ description: "Solana Pay reference address." }),
-    solanaPayUrl: z
-      .string()
-      .url()
-      .openapi({ description: "Solana Pay URL.", example: "solana:example" }),
-    qrCode: z.string().openapi({
-      description: "Base64-encoded QR code SVG.",
-      example: "PHN2ZyB4bWxucz0iLi4uIi8+",
-    }),
-    status: paymentRequestStatusSchema,
-    expiresAt: isoDateTimeSchema.openapi({
-      description: "Expiration timestamp for the request.",
-      example: "2025-01-01T01:00:00.000Z",
-    }),
-  })
-  .openapi({ description: "Payment request details." });
-
 export const feeQuoteSchema = z
   .object({
     feeToken: z.string().openapi({ description: "Fee token symbol.", example: "USDC" }),
@@ -505,12 +459,6 @@ export const transferResponseSchema = z
     transfer: transferSchema.openapi({ description: "Transfer details." }),
   })
   .openapi({ description: "Transfer response payload." });
-
-export const paymentRequestResponseSchema = z
-  .object({
-    paymentRequest: paymentRequestSchema.openapi({ description: "Payment request details." }),
-  })
-  .openapi({ description: "Payment request response payload." });
 
 export const feeQuoteResponseSchema = z
   .object({

@@ -32,7 +32,6 @@ import {
   onrampQuoteResponseSchema,
   organizationSchema,
   paginatedResponseSchema,
-  paymentRequestResponseSchema,
   prepareBurnResponseSchema,
   prepareDeployResponseSchema,
   prepareForceBurnResponseSchema,
@@ -124,7 +123,6 @@ export const walletPolicyResponse = successResponseSchema(walletPolicyResponseSc
 export const prepareTransferResponse = successResponseSchema(prepareTransferResponseSchema);
 export const transferResponse = successResponseSchema(transferResponseSchema);
 export const transferListResponse = paginatedResponseSchema(transferSchema);
-export const paymentRequestResponse = successResponseSchema(paymentRequestResponseSchema);
 export const feeQuoteResponse = successResponseSchema(feeQuoteResponseSchema);
 export const onrampQuoteResponse = successResponseSchema(onrampQuoteResponseSchema);
 export const offrampQuoteResponse = successResponseSchema(offrampQuoteResponseSchema);
