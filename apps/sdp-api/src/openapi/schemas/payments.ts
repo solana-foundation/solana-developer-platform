@@ -222,7 +222,7 @@ export const transferSchema = z
       .openapi({ description: "Solana transaction signature.", example: "sig_example" }),
     serializedTx: base64Schema.nullable().openapi({
       description: "Base64-encoded transaction payload, if available.",
-      example: "AQID",
+      example: "base64_tx_example",
     }),
     params: z
       .record(z.unknown())
