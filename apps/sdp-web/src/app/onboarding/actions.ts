@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { sdpApiFetch } from "@/lib/sdp-api";
+import { linkOrganizationInApi } from "@/lib/onboarding";
 
 export interface OnboardingStatus {
   linked: boolean;
@@ -21,20 +22,14 @@ export async function linkOrganization(formData?: FormData) {
   const returnTo = formData?.get("returnTo");
   const redirectTo = returnTo ? String(returnTo) : null;
 
-  await linkOrganizationSilently();
+  await linkOrganizationInApi();
 
   revalidatePath("/");
+  revalidatePath("/dashboard");
   revalidatePath("/allowlist");
   revalidatePath("/members");
 
   if (redirectTo) {
     redirect(redirectTo);
   }
-}
-
-export async function linkOrganizationSilently() {
-  await sdpApiFetch("/v1/onboarding/link-org", {
-    method: "POST",
-    body: JSON.stringify({}),
-  });
 }

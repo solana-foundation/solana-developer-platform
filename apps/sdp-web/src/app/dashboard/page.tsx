@@ -4,9 +4,13 @@ import { OrganizationSwitcher } from "@clerk/nextjs";
 import { auth } from "@clerk/nextjs/server";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { getOnboardingStatus, linkOrganization, linkOrganizationSilently } from "../onboarding/actions";
+import { getOnboardingStatus, linkOrganization } from "../onboarding/actions";
 
-export default async function DashboardPage() {
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams?: { link?: string };
+}) {
   const { userId, orgId } = await auth();
 
   if (!userId) {
@@ -35,18 +39,12 @@ export default async function DashboardPage() {
     );
   }
 
-  let onboarding = await getOnboardingStatus();
+  const onboarding = await getOnboardingStatus();
 
   if (!onboarding.linked) {
-    try {
-      await linkOrganizationSilently();
-      onboarding = await getOnboardingStatus();
-    } catch {
-      // Ignore auto-link errors and fall back to manual retry UI.
+    if (searchParams?.link !== "failed") {
+      redirect("/onboarding/link");
     }
-  }
-
-  if (!onboarding.linked) {
     return (
       <main className="min-h-screen bg-background px-6 py-10 text-foreground">
         <div className="mx-auto flex max-w-3xl flex-col gap-6">
@@ -62,7 +60,7 @@ export default async function DashboardPage() {
               <p>We are preparing your workspace. If this takes longer than a few seconds, try again.</p>
               <form action={linkOrganization}>
                 <input type="hidden" name="returnTo" value="/dashboard" />
-                <Button type="submit">Link organization</Button>
+                <Button type="submit">Retry setup</Button>
               </form>
             </CardContent>
           </Card>

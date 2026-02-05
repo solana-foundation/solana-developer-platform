@@ -7,9 +7,7 @@ import {
   UserButton,
 } from "@clerk/nextjs";
 import { auth } from "@clerk/nextjs/server";
-import Link from "next/link";
 import { redirect } from "next/navigation";
-import { getOnboardingStatus, linkOrganization, linkOrganizationSilently } from "./onboarding/actions";
 
 const primaryButtonClass =
   "text-button-lg inline-flex h-[var(--button-height-lg)] items-center justify-center rounded-[var(--button-radius-lg)] bg-[color:var(--button-primary-bg)] px-[var(--button-padding-x-lg)] text-[color:var(--button-primary-text)] transition-colors hover:bg-[color:var(--button-primary-bg-hover)]";
@@ -47,18 +45,8 @@ function SecondaryButton({
 
 export default async function Home() {
   const { userId, orgId } = await auth();
-  let onboarding = userId && orgId ? await getOnboardingStatus() : null;
 
-  if (userId && orgId && onboarding && !onboarding.linked) {
-    try {
-      await linkOrganizationSilently();
-      onboarding = await getOnboardingStatus();
-    } catch {
-      // Ignore auto-link errors and fall back to manual retry UI.
-    }
-  }
-
-  if (userId && orgId && onboarding?.linked) {
+  if (userId && orgId) {
     redirect("/dashboard");
   }
 
@@ -165,53 +153,10 @@ export default async function Home() {
                     </div>
                   </>
                 )}
-
-                {orgId && onboarding?.linked && (
-                  <>
-                    <h2 className="text-title-md">You’re in.</h2>
-                    <p className="text-body-md mt-3 text-[color:var(--text-medium)]">
-                      Your organization is linked. Manage access controls and invite
-                      teammates from the console.
-                    </p>
-                    <div className="mt-6 flex flex-wrap gap-3">
-                      <Link className={primaryButtonClass} href="/allowlist">
-                        Manage allowlist
-                      </Link>
-                      <Link className={secondaryButtonClass} href="/members">
-                        Invite members
-                      </Link>
-                    </div>
-
-                    <div
-                      id="api-keys"
-                      className="mt-8 rounded-[20px] border border-[color:var(--border-light)] bg-[color:var(--gray-50)]/60 p-5"
-                    >
-                      <p className="text-body-sm uppercase tracking-[0.16em] text-[color:var(--text-low)]">
-                        API keys
-                      </p>
-                      <p className="text-body-md mt-3 text-[color:var(--text-medium)]">
-                        Create API keys from the console or directly via the SDP API
-                        when you are ready to integrate.
-                      </p>
-                      <div className="mt-4 text-body-sm text-[color:var(--text-low)]">
-                        Endpoint: <span className="text-[color:var(--text-high)]">/v1/api-keys</span>
-                      </div>
-                    </div>
-                  </>
-                )}
-
-                {orgId && onboarding && !onboarding.linked && (
-                  <>
-                    <h2 className="text-title-md">Finishing setup</h2>
-                    <p className="text-body-md mt-3 text-[color:var(--text-medium)]">
-                      We are preparing your workspace. If this takes longer than a
-                      few seconds, try again.
-                    </p>
-                    <form action={linkOrganization} className="mt-6">
-                      <input type="hidden" name="returnTo" value="/dashboard" />
-                      <PrimaryButton type="submit">Retry linking</PrimaryButton>
-                    </form>
-                  </>
+                {orgId && (
+                  <p className="text-body-md text-[color:var(--text-medium)]">
+                    Loading your dashboard…
+                  </p>
                 )}
               </SignedIn>
             </div>
