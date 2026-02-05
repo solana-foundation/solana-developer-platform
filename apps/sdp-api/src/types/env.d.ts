@@ -95,6 +95,13 @@ declare module "hono" {
       orgSlug: string | null;
       orgRole: string | null;
     };
+    clerkOnboarding?: {
+      clerkUserId: string;
+      clerkOrgId: string;
+      orgSlug: string | null;
+      orgRole: string | null;
+      email: string;
+    };
     requestId: string;
   }
 }

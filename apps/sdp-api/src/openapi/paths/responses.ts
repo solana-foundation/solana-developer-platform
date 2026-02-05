@@ -25,6 +25,8 @@ import {
   listProjectsResponseSchema,
   listSessionsResponseSchema,
   listTemplatesResponseSchema,
+  linkOrganizationResponseSchema,
+  onboardingStatusResponseSchema,
   organizationSchema,
   paginatedResponseSchema,
   prepareBurnResponseSchema,
@@ -103,3 +105,6 @@ export const allowlistEntryResponse = successResponseSchema(
 
 export const tokenTemplateResponse = successResponseSchema(tokenTemplateResponseSchema);
 export const listTemplatesResponse = successResponseSchema(listTemplatesResponseSchema);
+
+export const onboardingStatusResponse = successResponseSchema(onboardingStatusResponseSchema);
+export const linkOrganizationResponse = successResponseSchema(linkOrganizationResponseSchema);

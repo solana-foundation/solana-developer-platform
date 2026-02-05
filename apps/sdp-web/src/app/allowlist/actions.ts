@@ -13,7 +13,7 @@ export interface AllowlistEntry {
 }
 
 export async function listAllowlistEntries(): Promise<AllowlistEntry[]> {
-  const response = await sdpApiFetch<{ entries: AllowlistEntry[] }>("/v1/allowlist");
+  const response = await sdpApiFetch<{ entries: AllowlistEntry[] }>("/admin/allowlist");
   return response.entries;
 }
 
@@ -27,7 +27,7 @@ export async function addAllowlistEntry(formData: FormData) {
     throw new Error("Allowlist value is required");
   }
 
-  await sdpApiFetch("/v1/allowlist", {
+  await sdpApiFetch("/admin/allowlist", {
     method: "POST",
     body: JSON.stringify({ type, value }),
   });
@@ -41,7 +41,7 @@ export async function removeAllowlistEntry(formData: FormData) {
     throw new Error("Allowlist entry id is required");
   }
 
-  await sdpApiFetch(`/v1/allowlist/${id}`, {
+  await sdpApiFetch(`/admin/allowlist/${id}`, {
     method: "DELETE",
   });
 

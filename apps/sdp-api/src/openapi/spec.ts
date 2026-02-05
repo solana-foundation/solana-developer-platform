@@ -7,6 +7,7 @@ import { registerAuthPaths } from "./paths/auth";
 import { registerHealthPaths } from "./paths/health";
 import { registerIssuancePaths } from "./paths/issuance";
 import { registerMemberPaths } from "./paths/members";
+import { registerOnboardingPaths } from "./paths/onboarding";
 import { registerOrganizationPaths } from "./paths/organizations";
 import { registerProjectPaths } from "./paths/projects";
 
@@ -43,6 +44,7 @@ export function createOpenApiDocument(): OpenAPIObject {
   registerProjectPaths(registry);
   registerIssuancePaths(registry);
   registerAdminPaths(registry);
+  registerOnboardingPaths(registry);
 
   const generator = new OpenApiGeneratorV3(registry.definitions);
 
@@ -63,6 +65,7 @@ export function createOpenApiDocument(): OpenAPIObject {
       { name: "Projects", description: "Project and project member management." },
       { name: "Issuance", description: "Token issuance, allowlists, and lifecycle operations." },
       { name: "Admin", description: "Administrative allowlist management." },
+      { name: "Onboarding", description: "Clerk organization onboarding and linking." },
     ],
     servers: [
       {

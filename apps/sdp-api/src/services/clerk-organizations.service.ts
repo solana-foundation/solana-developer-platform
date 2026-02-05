@@ -9,6 +9,12 @@ export interface ClerkOrganizationInvitation {
   created_at?: number;
 }
 
+export interface ClerkOrganization {
+  id: string;
+  name?: string;
+  slug?: string;
+}
+
 export class ClerkOrganizationsService {
   private apiBase: string;
   private secretKey: string;
@@ -69,5 +75,9 @@ export class ClerkOrganizationsService {
         body: JSON.stringify(payload),
       }
     );
+  }
+
+  async getOrganization(organizationId: string): Promise<ClerkOrganization> {
+    return this.request<ClerkOrganization>(`/organizations/${organizationId}`);
   }
 }

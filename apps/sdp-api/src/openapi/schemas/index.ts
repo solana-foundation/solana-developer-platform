@@ -6,3 +6,4 @@ export * from "./issuance";
 export * from "./auth";
 export * from "./health";
 export * from "./admin";
+export * from "./onboarding";

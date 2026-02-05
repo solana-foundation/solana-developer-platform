@@ -27,6 +27,7 @@ import issuance from "@/routes/issuance";
 import members from "@/routes/members";
 import openapi from "@/routes/openapi";
 import organizations from "@/routes/organizations";
+import onboarding from "@/routes/onboarding";
 import projects from "@/routes/projects";
 
 // Create app
@@ -85,6 +86,7 @@ v1.route("/auth", auth);
 v1.route("/projects", projects);
 v1.route("/issuance", issuance);
 v1.route("/custody", custody);
+v1.route("/onboarding", onboarding);
 
 app.route("/v1", v1);
 

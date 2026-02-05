@@ -14,9 +14,15 @@ function getApiBaseUrl(): string {
 }
 
 async function getClerkToken(): Promise<string> {
-  const { getToken } = auth();
+  const { getToken, orgId } = await auth();
+  if (!orgId) {
+    throw new Error("Active Clerk organization required");
+  }
+
   const template = process.env.CLERK_JWT_TEMPLATE;
-  const token = template ? await getToken({ template }) : await getToken();
+  const token = template
+    ? await getToken({ template, organizationId: orgId })
+    : await getToken({ organizationId: orgId });
 
   if (!token) {
     throw new Error("Failed to acquire Clerk token");

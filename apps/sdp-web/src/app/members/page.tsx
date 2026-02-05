@@ -18,8 +18,66 @@ import {
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { inviteMember, listMembers } from "./actions";
+import { auth } from "@clerk/nextjs/server";
+import { OrganizationSwitcher } from "@clerk/nextjs";
+import { getOnboardingStatus, linkOrganization } from "../onboarding/actions";
 
 export default async function MembersPage() {
+  const { orgId } = await auth();
+
+  if (!orgId) {
+    return (
+      <main className="min-h-screen bg-background px-6 py-10 text-foreground">
+        <div className="mx-auto flex max-w-3xl flex-col gap-6">
+          <div>
+            <p className="text-sm uppercase tracking-wide text-muted-foreground">
+              Organization
+            </p>
+            <h1 className="text-2xl font-semibold">Invitations</h1>
+          </div>
+          <Card>
+            <CardHeader>
+              <CardTitle>Pick an organization</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3 text-sm text-muted-foreground">
+              <p>You need an active Clerk organization to invite members.</p>
+              <OrganizationSwitcher hidePersonal />
+            </CardContent>
+          </Card>
+        </div>
+      </main>
+    );
+  }
+
+  const onboarding = await getOnboardingStatus();
+
+  if (!onboarding.linked) {
+    return (
+      <main className="min-h-screen bg-background px-6 py-10 text-foreground">
+        <div className="mx-auto flex max-w-3xl flex-col gap-6">
+          <div>
+            <p className="text-sm uppercase tracking-wide text-muted-foreground">
+              Organization
+            </p>
+            <h1 className="text-2xl font-semibold">Invitations</h1>
+          </div>
+          <Card>
+            <CardHeader>
+              <CardTitle>Get started</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3 text-sm text-muted-foreground">
+              <p>Complete onboarding before inviting members.</p>
+              <form action={linkOrganization}>
+                <input type="hidden" name="returnTo" value="/members" />
+                <Button type="submit">Get started</Button>
+              </form>
+            </CardContent>
+          </Card>
+        </div>
+      </main>
+    );
+  }
+
   const members = await listMembers();
 
   return (
