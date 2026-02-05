@@ -3,6 +3,7 @@ import {
   SignedIn,
   SignedOut,
   SignInButton,
+  SignUpButton,
   UserButton,
 } from "@clerk/nextjs";
 import { auth } from "@clerk/nextjs/server";
@@ -133,9 +134,9 @@ export default async function Home() {
                   </label>
                   <div className="flex flex-wrap gap-3">
                     <PrimaryButton type="button">Request access</PrimaryButton>
-                    <SignInButton mode="modal">
+                    <SignUpButton mode="modal">
                       <SecondaryButton>I have an invite</SecondaryButton>
-                    </SignInButton>
+                    </SignUpButton>
                   </div>
                   <p className="text-body-sm text-[color:var(--text-low)]">
                     Prefer a direct intro? Email <span className="text-[color:var(--text-high)]">sdp@solana.org</span>
