@@ -16,8 +16,8 @@ import {
   pageSizeQuerySchema,
   paymentRequestIdParamSchema,
   prepareTransferRequestSchema,
-  transferIdParamSchema,
   transferDirectionSchema,
+  transferIdParamSchema,
   transferStatusSchema,
   walletIdParamSchema,
   walletTypeSchema,
@@ -199,10 +199,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     request: {
       query: z.object({
         wallet: z.string().optional().openapi({ description: "Filter by wallet ID." }),
-        walletAddress: z
-          .string()
-          .optional()
-          .openapi({ description: "Filter by wallet address." }),
+        walletAddress: z.string().optional().openapi({ description: "Filter by wallet address." }),
         token: z.string().optional().openapi({ description: "Filter by token symbol or mint." }),
         direction: transferDirectionSchema
           .optional()

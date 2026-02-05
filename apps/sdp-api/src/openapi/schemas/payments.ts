@@ -173,9 +173,7 @@ export const transferRiskLevelSchema = z
 export const transferRiskSchema = z
   .object({
     provider: z.string().openapi({ description: "Risk scoring provider.", example: "trm" }),
-    score: z
-      .string()
-      .openapi({ description: "Provider-specific risk score.", example: "0.12" }),
+    score: z.string().openapi({ description: "Provider-specific risk score.", example: "0.12" }),
     level: transferRiskLevelSchema,
     evaluatedAt: isoDateTimeSchema.openapi({
       description: "Timestamp when risk was evaluated.",
@@ -429,10 +427,7 @@ export const offrampExecutionSchema = z
     status: z
       .enum(["pending", "processing", "completed", "failed"])
       .openapi({ description: "Ramp execution status.", example: "pending" }),
-    reference: z
-      .string()
-      .optional()
-      .openapi({ description: "Provider reference for the payout." }),
+    reference: z.string().optional().openapi({ description: "Provider reference for the payout." }),
   })
   .openapi({ description: "Off-ramp execution status." });
 
