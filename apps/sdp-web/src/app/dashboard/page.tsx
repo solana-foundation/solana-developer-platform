@@ -4,7 +4,7 @@ import { OrganizationSwitcher } from "@clerk/nextjs";
 import { auth } from "@clerk/nextjs/server";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { getOnboardingStatus, linkOrganization } from "../onboarding/actions";
+import { getOnboardingStatus, linkOrganization, linkOrganizationSilently } from "../onboarding/actions";
 
 export default async function DashboardPage() {
   const { userId, orgId } = await auth();
@@ -35,7 +35,16 @@ export default async function DashboardPage() {
     );
   }
 
-  const onboarding = await getOnboardingStatus();
+  let onboarding = await getOnboardingStatus();
+
+  if (!onboarding.linked) {
+    try {
+      await linkOrganizationSilently();
+      onboarding = await getOnboardingStatus();
+    } catch {
+      // Ignore auto-link errors and fall back to manual retry UI.
+    }
+  }
 
   if (!onboarding.linked) {
     return (
@@ -43,14 +52,14 @@ export default async function DashboardPage() {
         <div className="mx-auto flex max-w-3xl flex-col gap-6">
           <div>
             <p className="text-sm uppercase tracking-wide text-muted-foreground">Dashboard</p>
-            <h1 className="text-2xl font-semibold">Get started</h1>
+            <h1 className="text-2xl font-semibold">Finishing setup</h1>
           </div>
           <Card>
             <CardHeader>
-              <CardTitle>Finish linking your organization</CardTitle>
+              <CardTitle>Preparing your workspace</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4 text-sm text-muted-foreground">
-              <p>Linking connects your Clerk organization to SDP.</p>
+              <p>We are preparing your workspace. If this takes longer than a few seconds, try again.</p>
               <form action={linkOrganization}>
                 <input type="hidden" name="returnTo" value="/dashboard" />
                 <Button type="submit">Link organization</Button>

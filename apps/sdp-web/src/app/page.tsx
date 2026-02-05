@@ -9,7 +9,7 @@ import {
 import { auth } from "@clerk/nextjs/server";
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { getOnboardingStatus, linkOrganization } from "./onboarding/actions";
+import { getOnboardingStatus, linkOrganization, linkOrganizationSilently } from "./onboarding/actions";
 
 const primaryButtonClass =
   "text-button-lg inline-flex h-[var(--button-height-lg)] items-center justify-center rounded-[var(--button-radius-lg)] bg-[color:var(--button-primary-bg)] px-[var(--button-padding-x-lg)] text-[color:var(--button-primary-text)] transition-colors hover:bg-[color:var(--button-primary-bg-hover)]";
@@ -47,7 +47,16 @@ function SecondaryButton({
 
 export default async function Home() {
   const { userId, orgId } = await auth();
-  const onboarding = userId && orgId ? await getOnboardingStatus() : null;
+  let onboarding = userId && orgId ? await getOnboardingStatus() : null;
+
+  if (userId && orgId && onboarding && !onboarding.linked) {
+    try {
+      await linkOrganizationSilently();
+      onboarding = await getOnboardingStatus();
+    } catch {
+      // Ignore auto-link errors and fall back to manual retry UI.
+    }
+  }
 
   if (userId && orgId && onboarding?.linked) {
     redirect("/dashboard");
@@ -193,10 +202,10 @@ export default async function Home() {
 
                 {orgId && onboarding && !onboarding.linked && (
                   <>
-                    <h2 className="text-title-md">Setting up your organization</h2>
+                    <h2 className="text-title-md">Finishing setup</h2>
                     <p className="text-body-md mt-3 text-[color:var(--text-medium)]">
-                      We are linking your Clerk organization to SDP. If this takes
-                      longer than a few seconds, try again.
+                      We are preparing your workspace. If this takes longer than a
+                      few seconds, try again.
                     </p>
                     <form action={linkOrganization} className="mt-6">
                       <input type="hidden" name="returnTo" value="/dashboard" />

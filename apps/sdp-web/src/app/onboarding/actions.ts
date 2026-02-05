@@ -21,10 +21,7 @@ export async function linkOrganization(formData?: FormData) {
   const returnTo = formData?.get("returnTo");
   const redirectTo = returnTo ? String(returnTo) : null;
 
-  await sdpApiFetch("/v1/onboarding/link-org", {
-    method: "POST",
-    body: JSON.stringify({}),
-  });
+  await linkOrganizationSilently();
 
   revalidatePath("/");
   revalidatePath("/allowlist");
@@ -33,4 +30,11 @@ export async function linkOrganization(formData?: FormData) {
   if (redirectTo) {
     redirect(redirectTo);
   }
+}
+
+export async function linkOrganizationSilently() {
+  await sdpApiFetch("/v1/onboarding/link-org", {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
 }
