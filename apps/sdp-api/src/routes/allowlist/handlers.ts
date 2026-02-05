@@ -2,7 +2,6 @@ import { AppError, notFound } from "@/lib/errors";
 import { created, noContent, success } from "@/lib/response";
 import { createAllowlistService } from "@/services/allowlist.service";
 import { AuditService } from "@/services/audit.service";
-import { KVService } from "@/services/kv.service";
 import type { Env } from "@/types/env";
 import type { Context } from "hono";
 import { addEntrySchema } from "./schemas";
@@ -13,8 +12,7 @@ export const listEntries = async (c: AppContext) => {
   const type = c.req.query("type") as "email" | "domain" | undefined;
   const status = c.req.query("status") as "active" | "disabled" | undefined;
 
-  const kvService = new KVService(c.env.SDP_API_KEYS, c.env.SDP_CACHE);
-  const allowlistService = createAllowlistService(c.env, kvService);
+  const allowlistService = createAllowlistService(c.env);
 
   const entries = await allowlistService.listEntries({ type, status });
 
@@ -31,8 +29,7 @@ export const addEntry = async (c: AppContext) => {
     });
   }
 
-  const kvService = new KVService(c.env.SDP_API_KEYS, c.env.SDP_CACHE);
-  const allowlistService = createAllowlistService(c.env, kvService);
+  const allowlistService = createAllowlistService(c.env);
   const auditService = new AuditService(c.env.DB);
 
   try {
@@ -63,8 +60,7 @@ export const addEntry = async (c: AppContext) => {
 export const removeEntry = async (c: AppContext) => {
   const { id } = c.req.param();
 
-  const kvService = new KVService(c.env.SDP_API_KEYS, c.env.SDP_CACHE);
-  const allowlistService = createAllowlistService(c.env, kvService);
+  const allowlistService = createAllowlistService(c.env);
   const auditService = new AuditService(c.env.DB);
 
   const existing = await allowlistService.getEntry(id);

@@ -39,7 +39,6 @@ export interface Env {
   CLERK_API_URL?: string;
 
   // Allowlist configuration
-  ALLOWLIST_PROVIDER?: "d1" | "clerk";
   ALLOWLIST_ADMIN_KEY?: string;
   ALLOWLIST_ADMIN_ORG_ID?: string;
   ALLOWLIST_ADMIN_ORG_SLUG?: string;

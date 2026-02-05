@@ -131,6 +131,7 @@ export const linkOrganization = async (c: AppContext) => {
     body.name?.trim() ||
     clerkOrg.name?.trim() ||
     "New Organization";
+  const tier = "free";
   const slugBase =
     body.slug?.trim() ||
     clerkOrg.slug?.trim() ||

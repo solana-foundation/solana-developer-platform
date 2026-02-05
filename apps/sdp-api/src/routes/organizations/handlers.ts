@@ -3,7 +3,6 @@ import { hashString } from "@/lib/hash";
 import { created, noContent, success } from "@/lib/response";
 import { createAllowlistService } from "@/services/allowlist.service";
 import { AuditService } from "@/services/audit.service";
-import { KVService } from "@/services/kv.service";
 import type { Env } from "@/types/env";
 import type { CreateOrganizationResponse, Organization } from "@sdp/types";
 import type { Context } from "hono";
@@ -62,15 +61,15 @@ export const createOrganization = async (c: AppContext) => {
   const slug = parsed.data.slug || name.toLowerCase().replace(/[^a-z0-9]+/g, "-");
 
   // Initialize services
-  const kvService = new KVService(c.env.SDP_API_KEYS, c.env.SDP_CACHE);
-  const allowlistService = createAllowlistService(c.env, kvService);
+  const allowlistService = createAllowlistService(c.env);
   const auditService = new AuditService(c.env.DB);
 
   // Check allowlist
-  const { allowed, tier } = await allowlistService.isEmailAllowed(email);
+  const { allowed } = await allowlistService.isEmailAllowed(email);
   if (!allowed) {
     throw new AppError("NOT_ALLOWLISTED", "Email or domain not on allowlist");
   }
+  const tier = "free";
 
   // Check if slug is taken
   const existing = await c.env.DB.prepare("SELECT id FROM organizations WHERE slug = ?")
