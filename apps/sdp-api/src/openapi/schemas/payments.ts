@@ -216,10 +216,10 @@ export const transferSchema = z
     type: transferTypeSchema,
     direction: transferDirectionSchema,
     status: transferStatusSchema,
-    signature: z
-      .string()
-      .nullable()
-      .openapi({ description: "Solana transaction signature.", example: "sig_example" }),
+    signature: z.string().nullable().openapi({
+      description: "Solana transaction signature (tx id/hash).",
+      example: "sig_example",
+    }),
     serializedTx: base64Schema.nullable().openapi({
       description: "Base64-encoded transaction payload, if available.",
       example: "base64_tx_example",
