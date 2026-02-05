@@ -1,6 +1,6 @@
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 
-const isPublicRoute = createRouteMatcher(["/sign-in(.*)", "/"]);
+const isPublicRoute = createRouteMatcher(["/sign-in(.*)", "/", "/dashboard(.*)"]);
 
 export const proxy = clerkMiddleware((auth, req) => {
   if (!isPublicRoute(req)) {
