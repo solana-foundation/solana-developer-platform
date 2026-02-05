@@ -329,7 +329,6 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     request: {
       query: z.object({
         token: z.string().openapi({ description: "Fee token symbol or mint address." }),
-        amount: z.string().openapi({ description: "Transfer amount." }),
       }),
     },
     responses: {
