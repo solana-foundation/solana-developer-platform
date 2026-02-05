@@ -40,7 +40,10 @@ export const signingRequestIdParamSchema = idSchema(
   "sigreq_example"
 );
 export const walletIdParamSchema = idSchema("Wallet identifier.", "wal_example");
-export const transferIdParamSchema = idSchema("Transfer identifier.", "xfr_example");
+export const transferIdParamSchema = idSchema(
+  "Transfer identifier (SDP record ID, not the on-chain signature).",
+  "xfr_example"
+);
 export const paymentRequestIdParamSchema = idSchema("Payment request identifier.", "req_example");
 
 export const userIdSchema = idSchema("User identifier.", "usr_example");
