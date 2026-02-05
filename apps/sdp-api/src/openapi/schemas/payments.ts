@@ -248,6 +248,11 @@ export const transferSchema = z
     destination: solanaAddressSchema
       .optional()
       .openapi({ description: "Destination wallet address." }),
+    memo: z
+      .string()
+      .max(256)
+      .optional()
+      .openapi({ description: "Optional memo for the transfer." }),
     token: z.string().optional().openapi({ description: "Token symbol or mint address." }),
     amount: tokenAmountSchema.optional(),
     risk: transferRiskSchema
