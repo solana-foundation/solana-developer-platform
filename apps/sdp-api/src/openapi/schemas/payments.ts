@@ -138,10 +138,7 @@ export const createTransferRequestSchema = z
   .object({
     source: z.string().openapi({ description: "Source wallet ID." }),
     destination: solanaAddressSchema.openapi({ description: "Destination wallet address." }),
-    token: z
-      .string()
-      .optional()
-      .openapi({ description: "Token symbol or mint address (omit for SOL)." }),
+    token: z.string().openapi({ description: "Token symbol or mint address." }),
     amount: tokenAmountSchema,
     memo: z
       .string()
@@ -159,10 +156,7 @@ export const prepareTransferRequestSchema = z
   .object({
     source: z.string().openapi({ description: "Source wallet ID or pubkey." }),
     destination: solanaAddressSchema.openapi({ description: "Destination wallet address." }),
-    token: z
-      .string()
-      .optional()
-      .openapi({ description: "Token symbol or mint address (omit for SOL)." }),
+    token: z.string().openapi({ description: "Token symbol or mint address." }),
     amount: tokenAmountSchema,
     memo: z
       .string()
