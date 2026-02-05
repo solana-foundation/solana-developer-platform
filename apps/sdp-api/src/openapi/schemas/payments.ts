@@ -134,16 +134,6 @@ export const walletBalancesSchema = z
   })
   .openapi({ description: "Wallet balances payload." });
 
-export const gaslessConfigSchema = z
-  .object({
-    enabled: z.boolean().openapi({ description: "Enable gasless fees.", example: true }),
-    feeToken: z
-      .string()
-      .optional()
-      .openapi({ description: "Token symbol used to pay fees.", example: "USDC" }),
-  })
-  .openapi({ description: "Gasless fee payment configuration." });
-
 export const createTransferRequestSchema = z
   .object({
     source: z.string().openapi({ description: "Source wallet ID." }),
@@ -153,7 +143,6 @@ export const createTransferRequestSchema = z
       .optional()
       .openapi({ description: "Token symbol or mint address (omit for SOL)." }),
     amount: tokenAmountSchema,
-    gasless: gaslessConfigSchema.optional(),
     memo: z
       .string()
       .max(256)
