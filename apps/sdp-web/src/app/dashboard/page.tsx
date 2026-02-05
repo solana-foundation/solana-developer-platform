@@ -26,7 +26,7 @@ export default async function DashboardPage() {
               <CardTitle>Choose an organization</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3 text-sm text-muted-foreground">
-              <p>You need an active Clerk organization to continue.</p>
+              <p>You need an organization to continue.</p>
               <OrganizationSwitcher hidePersonal />
             </CardContent>
           </Card>

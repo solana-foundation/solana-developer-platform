@@ -40,7 +40,7 @@ export default async function MembersPage() {
               <CardTitle>Pick an organization</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3 text-sm text-muted-foreground">
-              <p>You need an active Clerk organization to invite members.</p>
+              <p>You need an organization to invite members.</p>
               <OrganizationSwitcher hidePersonal />
             </CardContent>
           </Card>

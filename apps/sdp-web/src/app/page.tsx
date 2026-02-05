@@ -158,7 +158,7 @@ export default async function Home() {
                   <>
                     <h2 className="text-title-md">Select your organization</h2>
                     <p className="text-body-md mt-3 text-[color:var(--text-medium)]">
-                      Choose or create a Clerk organization to continue onboarding.
+                      Choose or create an organization to continue.
                     </p>
                     <div className="mt-6">
                       <OrganizationSwitcher hidePersonal />

@@ -38,7 +38,7 @@ export default async function AllowlistPage() {
               <CardTitle>Pick an organization</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3 text-sm text-muted-foreground">
-              <p>You need an active Clerk organization to manage the allowlist.</p>
+              <p>You need an organization to manage the allowlist.</p>
               <OrganizationSwitcher hidePersonal />
             </CardContent>
           </Card>
