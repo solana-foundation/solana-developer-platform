@@ -2,6 +2,7 @@
  * Allowlist Management Routes (Internal Admin)
  */
 
+import { unifiedAuthMiddleware } from "@/middleware/auth";
 import type { Env } from "@/types/env";
 import { Hono } from "hono";
 import { addEntry, listEntries, removeEntry } from "./handlers";
@@ -9,6 +10,7 @@ import { adminAuth } from "./middleware";
 
 const allowlist = new Hono<{ Bindings: Env }>();
 
+allowlist.use("*", unifiedAuthMiddleware({ allowClerk: true, allowSession: true }));
 allowlist.use("*", adminAuth);
 
 allowlist.get("/", listEntries);

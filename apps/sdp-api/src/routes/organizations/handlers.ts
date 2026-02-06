@@ -1,7 +1,7 @@
 import { AppError, conflict, notFound } from "@/lib/errors";
 import { hashString } from "@/lib/hash";
 import { created, noContent, success } from "@/lib/response";
-import { AllowlistService } from "@/services/allowlist.service";
+import { createAllowlistService } from "@/services/allowlist.service";
 import { AuditService } from "@/services/audit.service";
 import {
   provisionFireblocksVaultAccount,
@@ -80,8 +80,7 @@ export const createOrganization = async (c: AppContext) => {
   const slug = parsed.data.slug || name.toLowerCase().replace(/[^a-z0-9]+/g, "-");
 
   // Initialize services
-  const kvService = new KVService(c.env.SDP_API_KEYS, c.env.SDP_CACHE);
-  const allowlistService = new AllowlistService(c.env.DB, kvService);
+  const allowlistService = createAllowlistService(c.env);
   const auditService = new AuditService(c.env.DB);
 
   // Check allowlist

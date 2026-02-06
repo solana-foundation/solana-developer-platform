@@ -115,14 +115,14 @@ export interface TemplateResolutionResult {
   errors: TemplateOverrideError[];
 }
 
-export const normalizeTemplateId = (id?: string): TokenTemplate => {
+export const normalizeTemplateId = (id?: string): CanonicalTemplate => {
   if (!id) {
     return "custom";
   }
   if (id === "tokenized_security" || id === "rwa") {
     return "tokenized-security";
   }
-  return id as TokenTemplate;
+  return id as CanonicalTemplate;
 };
 
 const cloneExtensions = (
@@ -158,13 +158,12 @@ export function resolveTemplateConfig(
   decimalsOverride?: number
 ): TemplateResolutionResult {
   const normalizedTemplate = normalizeTemplateId(templateId);
-  const definition = TEMPLATE_DEFINITIONS[normalizedTemplate as CanonicalTemplate];
+  const definition = TEMPLATE_DEFINITIONS[normalizedTemplate];
   const errors: TemplateOverrideError[] = [];
 
   const decimals = decimalsOverride ?? definition.decimals;
   let requiresAllowlist = definition.requiresAllowlist;
-  const requestedAllowlist =
-    overrides?.requiresAllowlist ?? requiresAllowlistOverride ?? undefined;
+  const requestedAllowlist = overrides?.requiresAllowlist ?? requiresAllowlistOverride ?? undefined;
 
   if (requestedAllowlist !== undefined) {
     if (!definition.allowlistOverridable && requestedAllowlist !== definition.requiresAllowlist) {
@@ -203,7 +202,11 @@ export function resolveTemplateConfig(
         continue;
       }
 
-      applyExtensionOverride(baseExtensions, extension, value as ExtensionOverrides[TokenExtensionName]);
+      applyExtensionOverride(
+        baseExtensions,
+        extension,
+        value as ExtensionOverrides[TokenExtensionName]
+      );
     }
   }
 

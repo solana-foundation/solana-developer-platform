@@ -3,6 +3,8 @@ export * from "./organizations";
 export * from "./api-keys";
 export * from "./projects";
 export * from "./issuance";
+export * from "./payments";
 export * from "./auth";
 export * from "./health";
 export * from "./admin";
+export * from "./onboarding";

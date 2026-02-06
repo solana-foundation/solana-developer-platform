@@ -1,5 +1,5 @@
-import { getAuth } from "@/lib/auth";
 import { toMosaicAmount } from "@/lib/amount";
+import { getAuth } from "@/lib/auth";
 import { AppError, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { assertValidAddress } from "@/lib/solana";
@@ -13,7 +13,7 @@ import type { Context } from "hono";
 import { forceBurnSchema } from "../schemas";
 
 type AppContext = Context<{ Bindings: Env }>;
-type TokenRecord = Awaited<ReturnType<TokenService["prototype"]["getToken"]>>;
+type TokenRecord = Awaited<ReturnType<TokenService["getToken"]>>;
 
 const resolvePermanentDelegate = (token: TokenRecord): string | null => {
   if (!token) {
@@ -63,6 +63,7 @@ export const prepareForceBurn = async (c: AppContext) => {
   const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId);
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
   const source = assertValidAddress(parsed.data.forceBurn.source, "source");
+  // biome-ignore lint/nursery/noSecrets: Field label used for error messages, not a secret.
   const permanentDelegate = assertValidAddress(permanentDelegateRaw, "delegateAuthority");
 
   const mosaic = createMosaicService(c.env, signer);
@@ -74,7 +75,7 @@ export const prepareForceBurn = async (c: AppContext) => {
     feePayer: signer.address,
   });
 
-  let simulation;
+  let simulation: unknown;
   if (parsed.data.options?.simulate) {
     const rpc = createRpc(c.env);
     const txBytes = Buffer.from(prepared.serializedTx, "base64");
@@ -206,11 +207,11 @@ export const executeForceBurn = async (c: AppContext) => {
       metadata: {
         tokenId,
         source: parsed.data.forceBurn.source,
-      amount: parsed.data.forceBurn.amount,
-      delegateAuthority: permanentDelegateRaw,
-      signature: result.signature,
-      slot: result.slot.toString(),
-      mode: "execute",
+        amount: parsed.data.forceBurn.amount,
+        delegateAuthority: permanentDelegateRaw,
+        signature: result.signature,
+        slot: result.slot.toString(),
+        mode: "execute",
       },
     });
 

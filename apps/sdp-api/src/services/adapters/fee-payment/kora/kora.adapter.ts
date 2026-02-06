@@ -32,6 +32,7 @@ export class KoraAdapter implements FeePaymentPort {
 
   private client: KoraClient;
   private cachedFeePayer: Address | null = null;
+  private cachedFeeToken: string | null = null;
 
   constructor(config: KoraAdapterConfig) {
     const { rpcUrl, apiKey, hmacSecret } = config;
@@ -109,9 +110,11 @@ export class KoraAdapter implements FeePaymentPort {
   async estimateFee(transaction: Uint8Array): Promise<bigint> {
     try {
       const base64Tx = encodeBase64(transaction);
+      const feeToken = await this.resolveFeeToken();
 
       const { fee_in_lamports } = await this.client.estimateTransactionFee({
         transaction: base64Tx,
+        fee_token: feeToken,
       });
 
       return BigInt(fee_in_lamports);
@@ -136,10 +139,29 @@ export class KoraAdapter implements FeePaymentPort {
   // Private Methods
   // ═══════════════════════════════════════════════════════════════════════════
 
+  private async resolveFeeToken(): Promise<string> {
+    if (this.cachedFeeToken) {
+      return this.cachedFeeToken;
+    }
+
+    const { tokens } = await this.client.getSupportedTokens();
+    const feeToken = tokens?.[0];
+
+    if (!feeToken) {
+      throw new Error("Kora returned no supported fee tokens");
+    }
+
+    this.cachedFeeToken = feeToken;
+    return feeToken;
+  }
+
   private wrapError(error: unknown, message: string): FeePaymentError {
     const rpcCode = extractRpcErrorCode(error);
     if (rpcCode !== undefined) {
-      return new FeePaymentError(`${message}: ${formatErrorMessage(error)}`, mapKoraErrorCode(rpcCode));
+      return new FeePaymentError(
+        `${message}: ${formatErrorMessage(error)}`,
+        mapKoraErrorCode(rpcCode)
+      );
     }
 
     return new FeePaymentError(
