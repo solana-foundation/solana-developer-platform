@@ -9,6 +9,7 @@ import { registerIssuancePaths } from "./paths/issuance";
 import { registerMemberPaths } from "./paths/members";
 import { registerOnboardingPaths } from "./paths/onboarding";
 import { registerOrganizationPaths } from "./paths/organizations";
+import { registerPaymentsPaths } from "./paths/payments";
 import { registerProjectPaths } from "./paths/projects";
 
 export function createOpenApiDocument(): OpenAPIObject {
@@ -43,6 +44,7 @@ export function createOpenApiDocument(): OpenAPIObject {
   registerAuthPaths(registry);
   registerProjectPaths(registry);
   registerIssuancePaths(registry);
+  registerPaymentsPaths(registry);
   registerAdminPaths(registry);
   registerOnboardingPaths(registry);
 
@@ -64,6 +66,10 @@ export function createOpenApiDocument(): OpenAPIObject {
       { name: "Auth", description: "Session and magic link authentication." },
       { name: "Projects", description: "Project and project member management." },
       { name: "Issuance", description: "Token issuance, allowlists, and lifecycle operations." },
+      {
+        name: "Payments",
+        description: "Draft payments API for wallets, transfers, and Solana Pay (not implemented).",
+      },
       { name: "Admin", description: "Administrative allowlist management." },
       { name: "Onboarding", description: "Clerk organization onboarding and linking." },
     ],
