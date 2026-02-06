@@ -5,18 +5,17 @@
  * and sets a Clerk auth context for downstream handlers.
  */
 
-import { AppError, unauthorized } from "@/lib/errors";
+import { type OrganizationRole, mapClerkRoleToOrgRole } from "@/lib/clerk-role";
 import {
   type ClerkJwtPayload,
   extractBearerToken,
   resolveClerkEmail,
   verifyClerkJwt,
 } from "@/lib/clerk-token";
+import { AppError, unauthorized } from "@/lib/errors";
 import type { Env } from "@/types/env";
 import { getPermissionsForOrgRole } from "@sdp/types";
 import type { Context, Next } from "hono";
-
-type OrganizationRole = "owner" | "admin" | "developer" | "viewer";
 
 async function resolveClerkUser(db: D1Database, clerkUserId: string) {
   return db
@@ -49,13 +48,6 @@ async function resolveOrgRole(db: D1Database, userId: string, organizationId: st
     )
     .bind(userId, organizationId)
     .first<{ role: string }>();
-}
-
-function mapClerkRoleToOrgRole(role: string | null | undefined): OrganizationRole {
-  if (role === "org:admin") {
-    return "admin";
-  }
-  return "developer";
 }
 
 async function ensureClerkUser(
@@ -153,11 +145,7 @@ async function ensureMembership(
       .bind(memberId, params.organizationId, params.userId, role)
       .run();
   } catch {
-    const existingAfterInsert = await resolveOrgRole(
-      db,
-      params.userId,
-      params.organizationId
-    );
+    const existingAfterInsert = await resolveOrgRole(db, params.userId, params.organizationId);
     if (existingAfterInsert?.role) {
       return existingAfterInsert.role as OrganizationRole;
     }
@@ -175,10 +163,7 @@ async function ensureMembership(
   return role;
 }
 
-async function buildClerkContext(
-  c: Context<{ Bindings: Env }>,
-  payload: ClerkJwtPayload
-) {
+async function buildClerkContext(c: Context<{ Bindings: Env }>, payload: ClerkJwtPayload) {
   const email = resolveClerkEmail(payload);
   if (!email) {
     throw new AppError("UNAUTHORIZED", "Clerk token missing email");

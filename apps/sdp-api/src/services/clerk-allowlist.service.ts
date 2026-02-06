@@ -95,10 +95,12 @@ export class ClerkAllowlistService {
     };
   }
 
-  async listEntries(options: {
-    type?: "email" | "domain";
-    status?: "active" | "disabled";
-  } = {}): Promise<AllowlistEntry[]> {
+  async listEntries(
+    options: {
+      type?: "email" | "domain";
+      status?: "active" | "disabled";
+    } = {}
+  ): Promise<AllowlistEntry[]> {
     if (options.status && options.status !== "active") {
       return [];
     }
@@ -122,13 +124,10 @@ export class ClerkAllowlistService {
   }): Promise<AllowlistEntry> {
     const identifier = entry.value.toLowerCase().trim();
 
-    const created = await this.request<ClerkAllowlistIdentifier>(
-      "/allowlist-identifiers",
-      {
-        method: "POST",
-        body: JSON.stringify({ identifier, notify: false }),
-      }
-    );
+    const created = await this.request<ClerkAllowlistIdentifier>("/allowlist-identifiers", {
+      method: "POST",
+      body: JSON.stringify({ identifier, notify: false }),
+    });
 
     return this.toAllowlistEntry({
       ...created,

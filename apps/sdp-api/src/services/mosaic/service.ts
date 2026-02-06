@@ -165,15 +165,15 @@ export class MosaicService {
         : options.mintAuthority;
     const mintAuthorityAddress =
       typeof options.mintAuthority === "string"
-        ? options.mintAuthority
-        : options.mintAuthority.address;
+        ? (options.mintAuthority as Address)
+        : (options.mintAuthority.address as Address);
 
     const freezeAuthority = enableSrfc37 ? undefined : options.freezeAuthority ?? undefined;
     const permanentDelegateAuthority =
       typeof options.extensions?.permanentDelegate === "string"
-        ? options.extensions.permanentDelegate
+        ? (options.extensions.permanentDelegate as Address)
         : undefined;
-    const pausableAuthority = options.extensions?.pausable?.authority;
+    const pausableAuthority = options.extensions?.pausable?.authority as Address | undefined;
     const scaledUiAmount = options.extensions?.scaledUiAmount;
     const transferHook = options.extensions?.transferHook;
 
@@ -244,7 +244,7 @@ export class MosaicService {
             enableSrfc37,
             scaledUiAmount: scaledUiAmount
               ? {
-                  authority: scaledUiAmount.authority ?? mintAuthorityAddress,
+                  authority: (scaledUiAmount.authority as Address | undefined) ?? mintAuthorityAddress,
                   multiplier: scaledUiAmount.multiplier,
                   newMultiplier: scaledUiAmount.newMultiplier,
                   newMultiplierEffectiveTimestamp:
@@ -282,23 +282,23 @@ export class MosaicService {
             enablePausable: !!extensions.pausable,
             pausableAuthority: pausableAuthority,
             enableTransferFee: !!transferFee,
-            transferFeeAuthority: transferFee?.transferFeeConfigAuthority,
-            withdrawWithheldAuthority: transferFee?.withdrawWithheldAuthority,
+            transferFeeAuthority: transferFee?.transferFeeConfigAuthority as Address | undefined,
+            withdrawWithheldAuthority: transferFee?.withdrawWithheldAuthority as Address | undefined,
             transferFeeBasisPoints: transferFee?.basisPoints,
             transferFeeMaximum,
             enableInterestBearing: !!interestBearing,
-            interestBearingAuthority: interestBearing?.rateAuthority,
+            interestBearingAuthority: interestBearing?.rateAuthority as Address | undefined,
             interestRate: interestBearing?.rate,
             enableNonTransferable: extensions.nonTransferable === true,
             enableScaledUiAmount: !!scaledUiAmount,
-            scaledUiAmountAuthority: scaledUiAmount?.authority,
+            scaledUiAmountAuthority: scaledUiAmount?.authority as Address | undefined,
             scaledUiAmountMultiplier: scaledUiAmount?.multiplier,
             scaledUiAmountNewMultiplier: scaledUiAmount?.newMultiplier,
             scaledUiAmountNewMultiplierEffectiveTimestamp:
               scaledUiAmount?.newMultiplierEffectiveTimestamp,
             enableTransferHook: !!transferHook,
-            transferHookAuthority: transferHook?.authority,
-            transferHookProgramId: transferHook?.programId,
+            transferHookAuthority: transferHook?.authority as Address | undefined,
+            transferHookProgramId: transferHook?.programId as Address | undefined,
             freezeAuthority,
           }
         );

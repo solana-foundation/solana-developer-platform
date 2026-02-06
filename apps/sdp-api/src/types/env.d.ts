@@ -37,6 +37,7 @@ export interface Env {
   CLERK_AUDIENCE?: string;
   CLERK_SECRET_KEY?: string;
   CLERK_API_URL?: string;
+  CLERK_WEBHOOK_SECRET?: string;
 
   // Allowlist configuration
   ALLOWLIST_ADMIN_KEY?: string;

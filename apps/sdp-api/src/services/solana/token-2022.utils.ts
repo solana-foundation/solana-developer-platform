@@ -8,7 +8,7 @@
 import { parseDecimalAmount } from "@/lib/amount";
 import type { TokenExtensionsConfig } from "@sdp/types";
 import { type ExtensionArgs, extension } from "@solana-program/token-2022";
-import { type Address, type TransactionSigner, some } from "@solana/kit";
+import { assertIsAddress, type Address, type TransactionSigner, some } from "@solana/kit";
 
 /**
  * JSON stringify replacer that handles BigInt values by converting them to strings.
@@ -33,6 +33,15 @@ export function safeStringify(value: unknown): string {
  */
 export function addressAsSigner(address: Address): TransactionSigner {
   return { address } as TransactionSigner;
+}
+
+function toAddress(value: string, fieldName: string): Address {
+  try {
+    assertIsAddress(value);
+    return value;
+  } catch {
+    throw new Error(`Invalid Solana address for ${fieldName}: ${value}`);
+  }
 }
 
 /**
@@ -61,11 +70,19 @@ export function getExtensionTypes(
       throw new Error("Token decimals are required for transfer fee configuration");
     }
     const maximumFee = parseDecimalAmount(extensions.transferFee.maxFee, decimals);
+    const transferFeeConfigAuthority = toAddress(
+      extensions.transferFee.transferFeeConfigAuthority,
+      "extensions.transferFee.transferFeeConfigAuthority"
+    );
+    const withdrawWithheldAuthority = toAddress(
+      extensions.transferFee.withdrawWithheldAuthority,
+      "extensions.transferFee.withdrawWithheldAuthority"
+    );
     types.push(
       // biome-ignore lint/nursery/noSecrets: Token-2022 extension type identifier
       extension("TransferFeeConfig", {
-        transferFeeConfigAuthority: extensions.transferFee.transferFeeConfigAuthority as Address,
-        withdrawWithheldAuthority: extensions.transferFee.withdrawWithheldAuthority as Address,
+        transferFeeConfigAuthority,
+        withdrawWithheldAuthority,
         withheldAmount: 0n,
         olderTransferFee: {
           epoch: 0n,
@@ -82,10 +99,11 @@ export function getExtensionTypes(
   }
 
   if (extensions.permanentDelegate) {
+    const delegate = toAddress(extensions.permanentDelegate, "extensions.permanentDelegate");
     types.push(
       // biome-ignore lint/nursery/noSecrets: Token-2022 extension type identifier
       extension("PermanentDelegate", {
-        delegate: extensions.permanentDelegate as Address,
+        delegate,
       })
     );
   }
@@ -102,7 +120,9 @@ export function getExtensionTypes(
   }
 
   if (extensions.pausable) {
-    const authority = extensions.pausable.authority ?? defaultAuthority;
+    const authority = extensions.pausable.authority
+      ? toAddress(extensions.pausable.authority, "extensions.pausable.authority")
+      : defaultAuthority;
     if (!authority) {
       throw new Error("Pausable authority is required");
     }
@@ -113,7 +133,9 @@ export function getExtensionTypes(
   }
 
   if (extensions.scaledUiAmount) {
-    const authority = extensions.scaledUiAmount.authority ?? defaultAuthority;
+    const authority = extensions.scaledUiAmount.authority
+      ? toAddress(extensions.scaledUiAmount.authority, "extensions.scaledUiAmount.authority")
+      : defaultAuthority;
     if (!authority) {
       throw new Error("Scaled UI amount authority is required");
     }
@@ -131,15 +153,18 @@ export function getExtensionTypes(
   }
 
   if (extensions.transferHook) {
-    const authority = extensions.transferHook.authority ?? defaultAuthority;
+    const authority = extensions.transferHook.authority
+      ? toAddress(extensions.transferHook.authority, "extensions.transferHook.authority")
+      : defaultAuthority;
     if (!authority) {
       throw new Error("Transfer hook authority is required");
     }
+    const programId = toAddress(extensions.transferHook.programId, "extensions.transferHook.programId");
     types.push(
       // biome-ignore lint/nursery/noSecrets: Token-2022 extension type identifier
       extension("TransferHook", {
         authority,
-        programId: extensions.transferHook.programId as Address,
+        programId,
       })
     );
   }

@@ -127,16 +127,9 @@ export const linkOrganization = async (c: AppContext) => {
   const clerkService = new ClerkOrganizationsService(c.env);
   const clerkOrg = await clerkService.getOrganization(clerk.clerkOrgId);
 
-  const orgName =
-    body.name?.trim() ||
-    clerkOrg.name?.trim() ||
-    "New Organization";
+  const orgName = body.name?.trim() || clerkOrg.name?.trim() || "New Organization";
   const tier = "free";
-  const slugBase =
-    body.slug?.trim() ||
-    clerkOrg.slug?.trim() ||
-    clerk.orgSlug ||
-    slugify(orgName);
+  const slugBase = body.slug?.trim() || clerkOrg.slug?.trim() || clerk.orgSlug || slugify(orgName);
   const slug = await ensureUniqueSlug(c.env.DB, slugBase);
 
   const normalizedEmail = clerk.email.toLowerCase();

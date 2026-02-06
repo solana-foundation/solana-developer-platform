@@ -2,9 +2,9 @@
  * Onboarding Routes
  */
 
+import { clerkOnboardingMiddleware } from "@/middleware/clerk-onboarding";
 import type { Env } from "@/types/env";
 import { Hono } from "hono";
-import { clerkOnboardingMiddleware } from "@/middleware/clerk-onboarding";
 import { getOnboardingStatus, linkOrganization } from "./handlers";
 
 const onboarding = new Hono<{ Bindings: Env }>();

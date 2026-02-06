@@ -1,7 +1,7 @@
 import { internalError } from "@/lib/errors";
 import type { Env } from "@/types/env";
-import { createRemoteJWKSet, jwtVerify, type JWTPayload } from "jose";
 import type { Context } from "hono";
+import { type JWTPayload, createRemoteJWKSet, jwtVerify } from "jose";
 
 export interface ClerkJwtPayload extends JWTPayload {
   sub?: string;
@@ -68,10 +68,7 @@ export function resolveClerkConfig(env: Env) {
   };
 }
 
-export async function verifyClerkJwt(
-  token: string,
-  env: Env
-): Promise<ClerkJwtPayload> {
+export async function verifyClerkJwt(token: string, env: Env): Promise<ClerkJwtPayload> {
   const config = resolveClerkConfig(env);
   const jwks = getJwks(config.jwksUrl);
 

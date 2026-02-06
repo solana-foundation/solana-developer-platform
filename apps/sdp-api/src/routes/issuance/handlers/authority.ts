@@ -15,7 +15,7 @@ import { updateAuthoritySchema } from "../schemas";
 type AppContext = Context<{ Bindings: Env }>;
 
 type AuthorityRole = "mint" | "freeze" | "permanentDelegate" | "metadata";
-type TokenRecord = Awaited<ReturnType<TokenService["prototype"]["getToken"]>>;
+type TokenRecord = Awaited<ReturnType<TokenService["getToken"]>>;
 
 type AuthorityUpdate = {
   mintAuthority?: string | null;

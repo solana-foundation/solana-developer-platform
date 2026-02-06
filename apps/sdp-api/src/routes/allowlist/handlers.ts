@@ -37,7 +37,7 @@ export const addEntry = async (c: AppContext) => {
       id: `al_${crypto.randomUUID()}`,
       type: parsed.data.type,
       value: parsed.data.value,
-      tier: parsed.data.tier,
+      tier: parsed.data.tier ?? "standard",
       notes: parsed.data.notes,
     });
 

@@ -4,10 +4,7 @@ import type { Context, Next } from "hono";
 
 // Allowlist admin middleware.
 // In production, requires either a configured admin key or Clerk org ownership.
-export const adminAuth = async (
-  c: Context<{ Bindings: Env }>,
-  next: Next
-) => {
+export const adminAuth = async (c: Context<{ Bindings: Env }>, next: Next) => {
   const adminKey = c.req.header("X-Admin-Key");
 
   if (c.env.ENVIRONMENT === "development") {

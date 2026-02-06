@@ -13,7 +13,7 @@ import type { Context } from "hono";
 import { seizeSchema } from "../schemas";
 
 type AppContext = Context<{ Bindings: Env }>;
-type TokenRecord = Awaited<ReturnType<TokenService["prototype"]["getToken"]>>;
+type TokenRecord = Awaited<ReturnType<TokenService["getToken"]>>;
 
 const resolvePermanentDelegate = (token: TokenRecord): string | null => {
   if (!token) {

@@ -213,8 +213,7 @@ export function requirePermissions(...required: Permission[]) {
     const clerk = c.get("clerk");
     const session = c.get("session");
 
-    const permissions =
-      apiKey?.permissions ?? clerk?.permissions ?? session?.permissions ?? null;
+    const permissions = apiKey?.permissions ?? clerk?.permissions ?? session?.permissions ?? null;
 
     if (!permissions) {
       throw new AppError("UNAUTHORIZED");

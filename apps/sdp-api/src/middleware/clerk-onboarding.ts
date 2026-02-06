@@ -1,9 +1,10 @@
-import { AppError, unauthorized } from "@/lib/errors";
 import {
+  type ClerkJwtPayload,
   extractBearerToken,
   resolveClerkEmail,
   verifyClerkJwt,
 } from "@/lib/clerk-token";
+import { AppError, unauthorized } from "@/lib/errors";
 import type { Env } from "@/types/env";
 import type { Context, Next } from "hono";
 
@@ -15,7 +16,7 @@ export function clerkOnboardingMiddleware() {
       throw unauthorized("Clerk session required");
     }
 
-    let payload;
+    let payload: ClerkJwtPayload;
     try {
       payload = await verifyClerkJwt(token, c.env);
     } catch (error) {
