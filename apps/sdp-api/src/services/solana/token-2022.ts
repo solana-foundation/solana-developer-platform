@@ -9,21 +9,13 @@ import { parseDecimalAmount } from "@/lib/amount";
 import type { FeePaymentPort } from "@/services/ports";
 import type { Env } from "@/types/env";
 import type { TokenExtensionsConfig } from "@sdp/types";
-import type { FullTransaction } from "@solana/mosaic-sdk";
-import {
-  createCustomTokenInitTransaction,
-  createBurnTransaction,
-  createMintToTransaction,
-  getFreezeTransaction,
-  getThawTransaction,
-  resolveTokenAccount,
-} from "@solana/mosaic-sdk";
 import {
   type Address,
   type Rpc,
-  type SolanaRpcApi,
   type Signature,
+  type SolanaRpcApi,
   type TransactionSigner,
+  assertIsAddress,
   compileTransaction,
   createNoopSigner,
   generateKeyPairSigner,
@@ -31,13 +23,17 @@ import {
   getTransactionEncoder,
   signTransactionMessageWithSigners,
 } from "@solana/kit";
-import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
+import type { FullTransaction } from "@solana/mosaic-sdk";
 import {
-  type SimulationResult,
-  confirmTransaction,
-  createRpc,
-  simulateTransaction,
-} from "./rpc";
+  createBurnTransaction,
+  createCustomTokenInitTransaction,
+  createMintToTransaction,
+  getFreezeTransaction,
+  getThawTransaction,
+  resolveTokenAccount,
+} from "@solana/mosaic-sdk";
+import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
+import { type SimulationResult, confirmTransaction, createRpc, simulateTransaction } from "./rpc";
 import { safeStringify } from "./token-2022.utils";
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -182,32 +178,65 @@ export class Token2022Service {
       ? parseDecimalAmount(transferFee.maxFee, options.decimals)
       : undefined;
 
+    const toAddress = (value: string, fieldName: string): Address => {
+      try {
+        assertIsAddress(value);
+        return value;
+      } catch {
+        throw new Error(`Invalid Solana address for ${fieldName}: ${value}`);
+      }
+    };
+
     return {
       enableDefaultAccountState: defaultAccountState !== undefined,
       defaultAccountStateInitialized:
         defaultAccountState !== undefined ? defaultAccountState !== "frozen" : undefined,
       enablePermanentDelegate: !!extensions.permanentDelegate,
-      permanentDelegateAuthority: extensions.permanentDelegate,
+      permanentDelegateAuthority: extensions.permanentDelegate
+        ? toAddress(extensions.permanentDelegate, "extensions.permanentDelegate")
+        : undefined,
       enablePausable: !!extensions.pausable,
-      pausableAuthority: extensions.pausable?.authority,
+      pausableAuthority: extensions.pausable?.authority
+        ? toAddress(extensions.pausable.authority, "extensions.pausable.authority")
+        : undefined,
       enableTransferFee: !!transferFee,
-      transferFeeAuthority: transferFee?.transferFeeConfigAuthority,
-      withdrawWithheldAuthority: transferFee?.withdrawWithheldAuthority,
+      transferFeeAuthority: transferFee
+        ? toAddress(
+            transferFee.transferFeeConfigAuthority,
+            // biome-ignore lint/nursery/noSecrets: Not a secret, used as an error path label.
+            "extensions.transferFee.transferFeeConfigAuthority"
+          )
+        : undefined,
+      withdrawWithheldAuthority: transferFee
+        ? toAddress(
+            transferFee.withdrawWithheldAuthority,
+            // biome-ignore lint/nursery/noSecrets: Not a secret, used as an error path label.
+            "extensions.transferFee.withdrawWithheldAuthority"
+          )
+        : undefined,
       transferFeeBasisPoints: transferFee?.basisPoints,
       transferFeeMaximum,
       enableInterestBearing: !!interestBearing,
-      interestBearingAuthority: interestBearing?.rateAuthority,
+      interestBearingAuthority: interestBearing
+        ? toAddress(interestBearing.rateAuthority, "extensions.interestBearing.rateAuthority")
+        : undefined,
       interestRate: interestBearing?.rate,
       enableNonTransferable: extensions.nonTransferable === true,
       enableScaledUiAmount: !!scaledUiAmount,
-      scaledUiAmountAuthority: scaledUiAmount?.authority,
+      scaledUiAmountAuthority: scaledUiAmount?.authority
+        ? toAddress(scaledUiAmount.authority, "extensions.scaledUiAmount.authority")
+        : undefined,
       scaledUiAmountMultiplier: scaledUiAmount?.multiplier,
       scaledUiAmountNewMultiplier: scaledUiAmount?.newMultiplier,
       scaledUiAmountNewMultiplierEffectiveTimestamp:
         scaledUiAmount?.newMultiplierEffectiveTimestamp,
       enableTransferHook: !!transferHook,
-      transferHookAuthority: transferHook?.authority,
-      transferHookProgramId: transferHook?.programId,
+      transferHookAuthority: transferHook?.authority
+        ? toAddress(transferHook.authority, "extensions.transferHook.authority")
+        : undefined,
+      transferHookProgramId: transferHook
+        ? toAddress(transferHook.programId, "extensions.transferHook.programId")
+        : undefined,
       freezeAuthority: options.freezeAuthority ?? undefined,
     };
   }

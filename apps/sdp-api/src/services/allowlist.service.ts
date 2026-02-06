@@ -1,11 +1,11 @@
 /**
  * Allowlist Service
  *
- * Manages email/domain allowlist for access control.
+ * D1-backed allowlist used for SDP org provisioning flows.
+ * Clerk has its own allowlist for signups; this service is intentionally local and testable.
  */
 
-import { hashString } from "@/lib/hash";
-import type { KVService } from "./kv.service";
+import type { Env } from "@/types/env";
 
 export interface AllowlistEntry {
   id: string;
@@ -17,107 +17,122 @@ export interface AllowlistEntry {
   createdAt: string;
 }
 
-export class AllowlistService {
-  constructor(
-    private db: D1Database,
-    private kv: KVService
-  ) {}
+export interface AllowlistProvider {
+  listEntries(options?: { type?: "email" | "domain"; status?: "active" | "disabled" }): Promise<
+    AllowlistEntry[]
+  >;
+  addEntry(entry: {
+    id: string;
+    type: "email" | "domain";
+    value: string;
+    tier: string;
+    notes?: string | null;
+  }): Promise<AllowlistEntry>;
+  removeEntry(id: string): Promise<void>;
+  getEntry(id: string): Promise<AllowlistEntry | null>;
+  isEmailAllowed(email: string): Promise<{ allowed: boolean; tier: string }>;
+}
 
-  /**
-   * Check if an email is allowed to create an organization
-   * Checks both direct email and domain allowlists
-   */
-  async isEmailAllowed(email: string): Promise<{ allowed: boolean; tier: string }> {
-    const normalizedEmail = email.toLowerCase().trim();
-    const domain = normalizedEmail.split("@")[1];
+class D1AllowlistService implements AllowlistProvider {
+  constructor(private db: D1Database) {}
 
-    // Check email hash in KV cache first
-    const emailHash = await hashString(normalizedEmail);
-    if (await this.kv.isEmailAllowlisted(emailHash)) {
-      return { allowed: true, tier: "standard" };
+  async listEntries(
+    options: { type?: "email" | "domain"; status?: "active" | "disabled" } = {}
+  ): Promise<AllowlistEntry[]> {
+    const where: string[] = [];
+    const params: string[] = [];
+
+    if (options.type) {
+      where.push("type = ?");
+      params.push(options.type);
+    }
+    if (options.status) {
+      where.push("status = ?");
+      params.push(options.status);
     }
 
-    // Check domain in KV cache
-    const domainTier = await this.kv.isDomainAllowlisted(domain);
-    if (domainTier) {
-      return { allowed: true, tier: domainTier };
-    }
+    const sql = `
+      SELECT id, type, value, tier, notes, status, created_at
+      FROM allowlist
+      ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+      ORDER BY created_at DESC
+    `;
 
-    // Fall back to D1 lookup
-    const result = await this.db
-      .prepare(
-        `SELECT type, value, tier FROM allowlist
-         WHERE status = 'active'
-         AND ((type = 'email' AND value = ?) OR (type = 'domain' AND value = ?))
-         LIMIT 1`
-      )
-      .bind(normalizedEmail, domain)
-      .first<{ type: string; value: string; tier: string }>();
+    const res = await this.db
+      .prepare(sql)
+      .bind(...params)
+      .all<{
+        id: string;
+        type: string;
+        value: string;
+        tier: string | null;
+        notes: string | null;
+        status: string;
+        created_at: string;
+      }>();
 
-    if (result) {
-      // Cache the result
-      if (result.type === "email") {
-        await this.kv.setEmailAllowlisted(emailHash, result.tier);
-      } else {
-        await this.kv.setDomainAllowlisted(domain, result.tier);
-      }
-      return { allowed: true, tier: result.tier };
-    }
-
-    return { allowed: false, tier: "standard" };
+    return (res.results ?? []).map((row) => ({
+      id: row.id,
+      type: row.type as "email" | "domain",
+      value: row.value,
+      tier: row.tier ?? "standard",
+      notes: row.notes,
+      status: row.status as "active" | "disabled",
+      createdAt: row.created_at,
+    }));
   }
 
-  /**
-   * Add an entry to the allowlist
-   */
   async addEntry(entry: {
     id: string;
     type: "email" | "domain";
     value: string;
-    tier?: string;
-    notes?: string;
+    tier: string;
+    notes?: string | null;
   }): Promise<AllowlistEntry> {
-    const normalizedValue = entry.value.toLowerCase().trim();
+    const value = entry.value.toLowerCase().trim();
+    const now = new Date().toISOString();
 
     await this.db
       .prepare(
-        `INSERT INTO allowlist (id, type, value, tier, notes, status)
-         VALUES (?, ?, ?, ?, ?, 'active')`
+        `INSERT INTO allowlist (id, type, value, tier, notes, status, created_at)
+         VALUES (?, ?, ?, ?, ?, 'active', ?)`
       )
-      .bind(entry.id, entry.type, normalizedValue, entry.tier || "standard", entry.notes || null)
+      .bind(entry.id, entry.type, value, entry.tier, entry.notes ?? null, now)
       .run();
 
     return {
       id: entry.id,
       type: entry.type,
-      value: normalizedValue,
-      tier: entry.tier || "standard",
-      notes: entry.notes || null,
+      value,
+      tier: entry.tier,
+      notes: entry.notes ?? null,
       status: "active",
-      createdAt: new Date().toISOString(),
+      createdAt: now,
     };
   }
 
-  /**
-   * Remove an entry from the allowlist
-   */
   async removeEntry(id: string): Promise<void> {
-    await this.db.prepare(`UPDATE allowlist SET status = 'disabled' WHERE id = ?`).bind(id).run();
+    // Soft-disable to preserve auditability and avoid id reuse.
+    await this.db.prepare("UPDATE allowlist SET status = 'disabled' WHERE id = ?").bind(id).run();
   }
 
-  /**
-   * Get a single allowlist entry by ID
-   */
   async getEntry(id: string): Promise<AllowlistEntry | null> {
-    const row = await this.db.prepare("SELECT * FROM allowlist WHERE id = ?").bind(id).first<{
-      id: string;
-      type: "email" | "domain";
-      value: string;
-      tier: string;
-      notes: string | null;
-      status: "active" | "disabled";
-      created_at: string;
-    }>();
+    const row = await this.db
+      .prepare(
+        `SELECT id, type, value, tier, notes, status, created_at
+         FROM allowlist
+         WHERE id = ?`
+      )
+      .bind(id)
+      .first<{
+        id: string;
+        type: string;
+        value: string;
+        tier: string | null;
+        notes: string | null;
+        status: string;
+        created_at: string;
+      }>();
 
     if (!row) {
       return null;
@@ -125,52 +140,37 @@ export class AllowlistService {
 
     return {
       id: row.id,
-      type: row.type,
+      type: row.type as "email" | "domain",
       value: row.value,
-      tier: row.tier,
+      tier: row.tier ?? "standard",
       notes: row.notes,
-      status: row.status,
+      status: row.status as "active" | "disabled",
       createdAt: row.created_at,
     };
   }
 
-  /**
-   * List all allowlist entries
-   */
-  async listEntries(
-    options: {
-      type?: "email" | "domain";
-      status?: "active" | "disabled";
-      limit?: number;
-      offset?: number;
-    } = {}
-  ): Promise<AllowlistEntry[]> {
-    const { type, status = "active", limit = 100, offset = 0 } = options;
+  async isEmailAllowed(email: string): Promise<{ allowed: boolean; tier: string }> {
+    const normalized = email.toLowerCase().trim();
+    const domain = normalized.split("@")[1] ?? "";
 
-    let query = "SELECT * FROM allowlist WHERE status = ?";
-    const params: (string | number)[] = [status];
+    const row = await this.db
+      .prepare(
+        `SELECT tier
+         FROM allowlist
+         WHERE status = 'active'
+           AND (
+             (type = 'email' AND lower(value) = ?)
+             OR (type = 'domain' AND lower(value) = ?)
+           )
+         LIMIT 1`
+      )
+      .bind(normalized, domain)
+      .first<{ tier: string | null }>();
 
-    if (type) {
-      query += " AND type = ?";
-      params.push(type);
-    }
-
-    query += " ORDER BY created_at DESC LIMIT ? OFFSET ?";
-    params.push(limit, offset);
-
-    const results = await this.db
-      .prepare(query)
-      .bind(...params)
-      .all();
-
-    return results.results.map((row) => ({
-      id: row.id as string,
-      type: row.type as "email" | "domain",
-      value: row.value as string,
-      tier: row.tier as string,
-      notes: row.notes as string | null,
-      status: row.status as "active" | "disabled",
-      createdAt: row.created_at as string,
-    }));
+    return { allowed: Boolean(row), tier: row?.tier ?? "standard" };
   }
+}
+
+export function createAllowlistService(env: Env): AllowlistProvider {
+  return new D1AllowlistService(env.DB);
 }

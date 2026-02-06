@@ -19,10 +19,17 @@
     }
   },
   "scripts": {
-    "dev": "turbo run dev",
+    "dev": "turbo run dev:local",
+    "dev:web": "turbo run dev --filter=sdp-web",
+    "dev:api": "turbo run dev --filter=@sdp/api",
+    "dev:api:local": "turbo run dev:local --filter=@sdp/api",
     "build": "turbo run build",
+    "build:web": "turbo run build --filter=sdp-web",
+    "build:api": "turbo run build --filter=@sdp/api",
     "typecheck": "turbo run typecheck",
+    "typecheck:all": "turbo run typecheck",
     "lint": "biome check .",
+    "lint:all": "turbo run lint",
     "lint:fix": "biome check --write .",
     "format": "biome format --write .",
     "format:check": "biome format .",

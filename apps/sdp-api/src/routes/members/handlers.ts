@@ -1,16 +1,77 @@
-import { getAuth } from "@/lib/auth";
 import { AppError, notFound } from "@/lib/errors";
 import { hashString } from "@/lib/hash";
 import { created, noContent, success } from "@/lib/response";
 import { AuditService } from "@/services/audit.service";
-import { createEmailService } from "@/services/email";
-import { renderInvitationEmail } from "@/services/email/templates/invitation";
+import { ClerkOrganizationsService } from "@/services/clerk-organizations.service";
 import type { Env } from "@/types/env";
 import type { OrganizationRole } from "@sdp/types";
 import type { Context } from "hono";
 import { acceptSchema, inviteSchema } from "./schemas";
 
 type AppContext = Context<{ Bindings: Env }>;
+
+function resolveActor(c: AppContext): {
+  organizationId: string;
+  userId: string | null;
+  apiKeyId: string | null;
+} {
+  const apiKey = c.get("apiKey");
+  if (apiKey) {
+    return {
+      organizationId: apiKey.organizationId,
+      userId: null,
+      apiKeyId: apiKey.id,
+    };
+  }
+
+  const clerk = c.get("clerk");
+  if (clerk) {
+    return {
+      organizationId: clerk.organizationId,
+      userId: clerk.userId,
+      apiKeyId: null,
+    };
+  }
+
+  const session = c.get("session");
+  if (session) {
+    return {
+      organizationId: session.organizationId,
+      userId: session.userId,
+      apiKeyId: null,
+    };
+  }
+
+  throw new AppError("UNAUTHORIZED", "Authentication required");
+}
+
+function mapRoleToClerkRole(role: OrganizationRole): string {
+  if (role === "owner" || role === "admin") {
+    return "org:admin";
+  }
+  return "org:member";
+}
+
+async function getClerkOrgId(db: D1Database, organizationId: string): Promise<string | null> {
+  const row = await db
+    .prepare(
+      `SELECT provider_org_id
+       FROM auth_organization_identities
+       WHERE provider = 'clerk' AND organization_id = ?`
+    )
+    .bind(organizationId)
+    .first<{ provider_org_id: string }>();
+
+  return row?.provider_org_id ?? null;
+}
+
+function resolveInviteRedirectUrl(env: Env): string | undefined {
+  const base = env.FRONTEND_URL?.replace(/\/$/, "");
+  if (!base) {
+    return undefined;
+  }
+  return `${base}/members`;
+}
 
 function randomBase64Url(byteLength: number): string {
   const bytes = new Uint8Array(byteLength);
@@ -39,8 +100,7 @@ function randomBase64Url(byteLength: number): string {
 }
 
 export const listMembers = async (c: AppContext) => {
-  const auth = getAuth(c);
-  const orgId = auth.organizationId;
+  const { organizationId } = resolveActor(c);
 
   const results = await c.env.DB.prepare(
     `SELECT om.id, om.role, om.status, om.created_at,
@@ -50,7 +110,7 @@ export const listMembers = async (c: AppContext) => {
      WHERE om.organization_id = ? AND om.status = 'active'
      ORDER BY om.created_at ASC`
   )
-    .bind(orgId)
+    .bind(organizationId)
     .all();
 
   const memberList = results.results.map((row) => ({
@@ -69,8 +129,8 @@ export const listMembers = async (c: AppContext) => {
 };
 
 export const inviteMember = async (c: AppContext) => {
-  const auth = getAuth(c);
-  const orgId = auth.organizationId;
+  const { organizationId, userId, apiKeyId } = resolveActor(c);
+  const clerk = c.get("clerk");
 
   const body = await c.req.json();
   const parsed = inviteSchema.safeParse(body);
@@ -83,6 +143,7 @@ export const inviteMember = async (c: AppContext) => {
 
   const { email, role } = parsed.data;
   const normalizedEmail = email.toLowerCase().trim();
+  const clerkRole = mapRoleToClerkRole(role);
 
   // Check if user already exists and is a member
   const existingMember = await c.env.DB.prepare(
@@ -90,7 +151,7 @@ export const inviteMember = async (c: AppContext) => {
      JOIN users u ON om.user_id = u.id
      WHERE om.organization_id = ? AND u.email = ? AND om.status = 'active'`
   )
-    .bind(orgId, normalizedEmail)
+    .bind(organizationId, normalizedEmail)
     .first();
 
   if (existingMember) {
@@ -102,29 +163,46 @@ export const inviteMember = async (c: AppContext) => {
     `SELECT id FROM invitations
      WHERE organization_id = ? AND email = ? AND status = 'pending'`
   )
-    .bind(orgId, normalizedEmail)
+    .bind(organizationId, normalizedEmail)
     .first();
 
   if (existingInvite) {
     throw new AppError("CONFLICT", "Invitation already sent to this email");
   }
 
-  // Get inviter user ID
-  const inviterKey = await c.env.DB.prepare("SELECT created_by FROM api_keys WHERE id = ?")
-    .bind(auth.id)
-    .first<{ created_by: string }>();
+  if (!clerk?.clerkUserId) {
+    throw new AppError("UNAUTHORIZED", "Clerk user required to send invites");
+  }
 
-  const org = await c.env.DB.prepare("SELECT name FROM organizations WHERE id = ?")
-    .bind(orgId)
-    .first<{ name: string }>();
+  const clerkOrgId = await getClerkOrgId(c.env.DB, organizationId);
+  if (!clerkOrgId) {
+    throw new AppError("BAD_REQUEST", "Organization is not linked to Clerk");
+  }
 
-  const inviter = inviterKey?.created_by
-    ? await c.env.DB.prepare("SELECT email FROM users WHERE id = ?")
-        .bind(inviterKey.created_by)
-        .first<{ email: string }>()
-    : null;
+  const inviterKey =
+    apiKeyId !== null
+      ? await c.env.DB.prepare("SELECT created_by FROM api_keys WHERE id = ?")
+          .bind(apiKeyId)
+          .first<{ created_by: string }>()
+      : null;
 
-  // Create invitation
+  const inviterUserId = userId || inviterKey?.created_by || null;
+
+  const clerkService = new ClerkOrganizationsService(c.env);
+  const redirectUrl = resolveInviteRedirectUrl(c.env);
+  const clerkInvitation = await clerkService.createOrganizationInvitation({
+    organizationId: clerkOrgId,
+    inviterUserId: clerk.clerkUserId,
+    emailAddress: normalizedEmail,
+    role: clerkRole,
+    redirectUrl,
+    publicMetadata: {
+      sdpRole: role,
+      sdpOrganizationId: organizationId,
+    },
+  });
+
+  // Create local invitation record for role mapping
   const invitationId = `inv_${crypto.randomUUID()}`;
   const token = randomBase64Url(32);
   const tokenHash = await hashString(token);
@@ -136,10 +214,10 @@ export const inviteMember = async (c: AppContext) => {
   )
     .bind(
       invitationId,
-      orgId,
+      organizationId,
       normalizedEmail,
       role,
-      inviterKey?.created_by || "system",
+      inviterUserId || "system",
       tokenHash,
       expiresAt
     )
@@ -151,63 +229,30 @@ export const inviteMember = async (c: AppContext) => {
     action: "invite",
     resourceType: "invitation",
     resourceId: invitationId,
-    metadata: { email: normalizedEmail, role },
+    metadata: {
+      email: normalizedEmail,
+      role,
+      clerkInvitationId: clerkInvitation.id,
+      clerkRole,
+    },
+    organizationId: organizationId,
+    userId: inviterUserId || undefined,
+    apiKeyId: apiKeyId || undefined,
   });
 
-  const inviteUrl = buildInvitationUrl(c, token);
-
-  try {
-    const emailService = createEmailService(c.env);
-    const { html, text, subject } = await renderInvitationEmail({
-      inviterEmail: inviter?.email,
-      organizationName: org?.name,
-      role,
-      inviteUrl,
-      expiresAt,
-    });
-    await emailService.sendEmail({ to: [normalizedEmail], subject, html, text });
-  } catch (error) {
-    console.error("Failed to send invitation email:", error);
-  }
-
-  // In dev, return token in response for testing
   const response = {
     invitation: {
       id: invitationId,
       email: normalizedEmail,
       role,
       expiresAt,
+      clerkInvitationId: clerkInvitation.id,
     },
     ...(c.env.ENVIRONMENT === "development" && { token }),
   };
 
   return created(c, response);
 };
-
-function buildInvitationUrl(c: AppContext, token: string): string {
-  const frontendUrl = c.env.FRONTEND_URL?.replace(/\/$/, "");
-  if (frontendUrl) {
-    return `${frontendUrl}/invite?token=${encodeURIComponent(token)}`;
-  }
-
-  const originHeader = c.req.header("Origin");
-  if (originHeader) {
-    return `${originHeader.replace(/\/$/, "")}/invite?token=${encodeURIComponent(token)}`;
-  }
-
-  const referer = c.req.header("Referer");
-  if (referer) {
-    try {
-      const origin = new URL(referer).origin;
-      return `${origin}/invite?token=${encodeURIComponent(token)}`;
-    } catch {
-      // Ignore invalid referer
-    }
-  }
-
-  const origin = new URL(c.req.url).origin;
-  return `${origin}/invite?token=${encodeURIComponent(token)}`;
-}
 
 export const acceptInvitation = async (c: AppContext) => {
   const body = await c.req.json();
@@ -298,13 +343,13 @@ export const acceptInvitation = async (c: AppContext) => {
 
 export const removeMember = async (c: AppContext) => {
   const { memberId } = c.req.param();
-  const auth = getAuth(c);
+  const { organizationId, userId, apiKeyId } = resolveActor(c);
 
   // Ensure member belongs to same org
   const member = await c.env.DB.prepare(
     "SELECT id, user_id FROM organization_members WHERE id = ? AND organization_id = ?"
   )
-    .bind(memberId, auth.organizationId)
+    .bind(memberId, organizationId)
     .first<{ id: string; user_id: string }>();
 
   if (!member) {
@@ -322,6 +367,9 @@ export const removeMember = async (c: AppContext) => {
     resourceType: "member",
     resourceId: memberId,
     metadata: { userId: member.user_id },
+    organizationId,
+    userId: userId || undefined,
+    apiKeyId: apiKeyId || undefined,
   });
 
   return noContent(c);
