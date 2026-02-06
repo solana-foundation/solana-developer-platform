@@ -158,7 +158,10 @@ export class KoraAdapter implements FeePaymentPort {
   private wrapError(error: unknown, message: string): FeePaymentError {
     const rpcCode = extractRpcErrorCode(error);
     if (rpcCode !== undefined) {
-      return new FeePaymentError(`${message}: ${formatErrorMessage(error)}`, mapKoraErrorCode(rpcCode));
+      return new FeePaymentError(
+        `${message}: ${formatErrorMessage(error)}`,
+        mapKoraErrorCode(rpcCode)
+      );
     }
 
     return new FeePaymentError(

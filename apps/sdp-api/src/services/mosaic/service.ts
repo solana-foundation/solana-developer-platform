@@ -17,42 +17,42 @@ import type { FeePaymentPort } from "@/services/ports/fee-payment.port";
 import { confirmTransaction, createRpc } from "@/services/solana/rpc";
 import type { Env } from "@/types/env";
 import {
-  // Types
-  type FullTransaction,
-  createForceBurnTransaction,
-  createForceTransferTransaction,
-  createPauseTransaction,
-  createResumeTransaction,
-  createArcadeTokenInitTransaction,
-  // Token operations
-  createMintToTransaction,
-  // Template builders
-  createCustomTokenInitTransaction,
-  createStablecoinInitTransaction,
-  createTokenizedSecurityInitTransaction,
-  resolveTokenAccount,
-  // ABL wallet management (object input pattern)
-  getAddWalletTransaction,
-  // Token ACL freeze/thaw (object input pattern)
-  getFreezeTransaction,
-  getRemoveWalletTransaction,
-  getThawPermissionlessTransaction,
-  getThawTransaction,
-  getRemoveAuthorityTransaction,
-  getUpdateAuthorityTransaction,
-} from "@solana/mosaic-sdk";
-import {
   type Address,
   type Rpc,
   type SolanaRpcApi,
   type TransactionSigner,
-  createNoopSigner,
   compileTransaction,
+  createNoopSigner,
   generateKeyPairSigner,
   getBase64EncodedWireTransaction,
   getTransactionEncoder,
   signTransactionMessageWithSigners,
 } from "@solana/kit";
+import {
+  // Types
+  type FullTransaction,
+  createArcadeTokenInitTransaction,
+  // Template builders
+  createCustomTokenInitTransaction,
+  createForceBurnTransaction,
+  createForceTransferTransaction,
+  // Token operations
+  createMintToTransaction,
+  createPauseTransaction,
+  createResumeTransaction,
+  createStablecoinInitTransaction,
+  createTokenizedSecurityInitTransaction,
+  // ABL wallet management (object input pattern)
+  getAddWalletTransaction,
+  // Token ACL freeze/thaw (object input pattern)
+  getFreezeTransaction,
+  getRemoveAuthorityTransaction,
+  getRemoveWalletTransaction,
+  getThawPermissionlessTransaction,
+  getThawTransaction,
+  getUpdateAuthorityTransaction,
+  resolveTokenAccount,
+} from "@solana/mosaic-sdk";
 import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
 import {
   type AblWalletOptions,
@@ -168,7 +168,7 @@ export class MosaicService {
         ? (options.mintAuthority as Address)
         : (options.mintAuthority.address as Address);
 
-    const freezeAuthority = enableSrfc37 ? undefined : options.freezeAuthority ?? undefined;
+    const freezeAuthority = enableSrfc37 ? undefined : (options.freezeAuthority ?? undefined);
     const permanentDelegateAuthority =
       typeof options.extensions?.permanentDelegate === "string"
         ? (options.extensions.permanentDelegate as Address)
@@ -244,7 +244,8 @@ export class MosaicService {
             enableSrfc37,
             scaledUiAmount: scaledUiAmount
               ? {
-                  authority: (scaledUiAmount.authority as Address | undefined) ?? mintAuthorityAddress,
+                  authority:
+                    (scaledUiAmount.authority as Address | undefined) ?? mintAuthorityAddress,
                   multiplier: scaledUiAmount.multiplier,
                   newMultiplier: scaledUiAmount.newMultiplier,
                   newMultiplierEffectiveTimestamp:
@@ -283,7 +284,9 @@ export class MosaicService {
             pausableAuthority: pausableAuthority,
             enableTransferFee: !!transferFee,
             transferFeeAuthority: transferFee?.transferFeeConfigAuthority as Address | undefined,
-            withdrawWithheldAuthority: transferFee?.withdrawWithheldAuthority as Address | undefined,
+            withdrawWithheldAuthority: transferFee?.withdrawWithheldAuthority as
+              | Address
+              | undefined,
             transferFeeBasisPoints: transferFee?.basisPoints,
             transferFeeMaximum,
             enableInterestBearing: !!interestBearing,

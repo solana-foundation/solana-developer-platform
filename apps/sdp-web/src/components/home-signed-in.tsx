@@ -1,7 +1,7 @@
 "use client";
 
-import { OrganizationSwitcher, useAuth } from "@clerk/nextjs";
 import { AutoDashboardRedirect } from "@/components/redirects";
+import { OrganizationSwitcher, useAuth } from "@clerk/nextjs";
 
 export function HomeSignedInCard() {
   const { isLoaded, orgId } = useAuth();
@@ -27,9 +27,7 @@ export function HomeSignedInCard() {
   return (
     <>
       <AutoDashboardRedirect />
-      <p className="text-body-md text-[color:var(--text-medium)]">
-        Loading your dashboard...
-      </p>
+      <p className="text-body-md text-[color:var(--text-medium)]">Loading your dashboard...</p>
     </>
   );
 }

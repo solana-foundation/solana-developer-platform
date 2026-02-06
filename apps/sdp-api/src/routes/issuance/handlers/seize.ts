@@ -1,5 +1,5 @@
-import { getAuth } from "@/lib/auth";
 import { toMosaicAmount } from "@/lib/amount";
+import { getAuth } from "@/lib/auth";
 import { AppError, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { assertValidAddress } from "@/lib/solana";
@@ -71,6 +71,7 @@ export const prepareSeize = async (c: AppContext) => {
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
   const source = assertValidAddress(parsed.data.seize.source, "source");
   const destination = assertValidAddress(parsed.data.seize.destination, "destination");
+  // biome-ignore lint/nursery/noSecrets: Field label used for error messages, not a secret.
   const permanentDelegate = assertValidAddress(permanentDelegateRaw, "delegateAuthority");
 
   const mosaic = createMosaicService(c.env, signer);
@@ -83,7 +84,7 @@ export const prepareSeize = async (c: AppContext) => {
     feePayer: signer.address,
   });
 
-  let simulation;
+  let simulation: unknown;
   if (parsed.data.options?.simulate) {
     const rpc = createRpc(c.env);
     const txBytes = Buffer.from(prepared.serializedTx, "base64");
@@ -225,12 +226,12 @@ export const executeSeize = async (c: AppContext) => {
       metadata: {
         tokenId,
         source: parsed.data.seize.source,
-      destination: parsed.data.seize.destination,
-      amount: parsed.data.seize.amount,
-      delegateAuthority: permanentDelegateRaw,
-      signature: result.signature,
-      slot: result.slot.toString(),
-      mode: "execute",
+        destination: parsed.data.seize.destination,
+        amount: parsed.data.seize.amount,
+        delegateAuthority: permanentDelegateRaw,
+        signature: result.signature,
+        slot: result.slot.toString(),
+        mode: "execute",
       },
     });
 

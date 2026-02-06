@@ -119,7 +119,7 @@ export const prepareUpdateAuthority = async (c: AppContext) => {
     feePayer: signer.address,
   });
 
-  let simulation;
+  let simulation: unknown;
   if (parsed.data.options?.simulate) {
     const rpc = createRpc(c.env);
     const txBytes = Buffer.from(prepared.serializedTx, "base64");

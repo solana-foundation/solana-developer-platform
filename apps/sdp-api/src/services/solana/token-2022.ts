@@ -9,20 +9,11 @@ import { parseDecimalAmount } from "@/lib/amount";
 import type { FeePaymentPort } from "@/services/ports";
 import type { Env } from "@/types/env";
 import type { TokenExtensionsConfig } from "@sdp/types";
-import type { FullTransaction } from "@solana/mosaic-sdk";
-import {
-  createCustomTokenInitTransaction,
-  createBurnTransaction,
-  createMintToTransaction,
-  getFreezeTransaction,
-  getThawTransaction,
-  resolveTokenAccount,
-} from "@solana/mosaic-sdk";
 import {
   type Address,
   type Rpc,
-  type SolanaRpcApi,
   type Signature,
+  type SolanaRpcApi,
   type TransactionSigner,
   assertIsAddress,
   compileTransaction,
@@ -32,13 +23,17 @@ import {
   getTransactionEncoder,
   signTransactionMessageWithSigners,
 } from "@solana/kit";
-import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
+import type { FullTransaction } from "@solana/mosaic-sdk";
 import {
-  type SimulationResult,
-  confirmTransaction,
-  createRpc,
-  simulateTransaction,
-} from "./rpc";
+  createBurnTransaction,
+  createCustomTokenInitTransaction,
+  createMintToTransaction,
+  getFreezeTransaction,
+  getThawTransaction,
+  resolveTokenAccount,
+} from "@solana/mosaic-sdk";
+import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
+import { type SimulationResult, confirmTransaction, createRpc, simulateTransaction } from "./rpc";
 import { safeStringify } from "./token-2022.utils";
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -208,11 +203,16 @@ export class Token2022Service {
       transferFeeAuthority: transferFee
         ? toAddress(
             transferFee.transferFeeConfigAuthority,
+            // biome-ignore lint/nursery/noSecrets: Not a secret, used as an error path label.
             "extensions.transferFee.transferFeeConfigAuthority"
           )
         : undefined,
       withdrawWithheldAuthority: transferFee
-        ? toAddress(transferFee.withdrawWithheldAuthority, "extensions.transferFee.withdrawWithheldAuthority")
+        ? toAddress(
+            transferFee.withdrawWithheldAuthority,
+            // biome-ignore lint/nursery/noSecrets: Not a secret, used as an error path label.
+            "extensions.transferFee.withdrawWithheldAuthority"
+          )
         : undefined,
       transferFeeBasisPoints: transferFee?.basisPoints,
       transferFeeMaximum,

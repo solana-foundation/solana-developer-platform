@@ -8,7 +8,7 @@
 import { parseDecimalAmount } from "@/lib/amount";
 import type { TokenExtensionsConfig } from "@sdp/types";
 import { type ExtensionArgs, extension } from "@solana-program/token-2022";
-import { assertIsAddress, type Address, type TransactionSigner, some } from "@solana/kit";
+import { type Address, type TransactionSigner, assertIsAddress, some } from "@solana/kit";
 
 /**
  * JSON stringify replacer that handles BigInt values by converting them to strings.
@@ -72,10 +72,12 @@ export function getExtensionTypes(
     const maximumFee = parseDecimalAmount(extensions.transferFee.maxFee, decimals);
     const transferFeeConfigAuthority = toAddress(
       extensions.transferFee.transferFeeConfigAuthority,
+      // biome-ignore lint/nursery/noSecrets: Not a secret, used as an error path label.
       "extensions.transferFee.transferFeeConfigAuthority"
     );
     const withdrawWithheldAuthority = toAddress(
       extensions.transferFee.withdrawWithheldAuthority,
+      // biome-ignore lint/nursery/noSecrets: Not a secret, used as an error path label.
       "extensions.transferFee.withdrawWithheldAuthority"
     );
     types.push(
@@ -126,10 +128,7 @@ export function getExtensionTypes(
     if (!authority) {
       throw new Error("Pausable authority is required");
     }
-    types.push(
-      // biome-ignore lint/nursery/noSecrets: Token-2022 extension type identifier
-      extension("PausableConfig", { authority: some(authority), paused: false })
-    );
+    types.push(extension("PausableConfig", { authority: some(authority), paused: false }));
   }
 
   if (extensions.scaledUiAmount) {
@@ -159,9 +158,11 @@ export function getExtensionTypes(
     if (!authority) {
       throw new Error("Transfer hook authority is required");
     }
-    const programId = toAddress(extensions.transferHook.programId, "extensions.transferHook.programId");
+    const programId = toAddress(
+      extensions.transferHook.programId,
+      "extensions.transferHook.programId"
+    );
     types.push(
-      // biome-ignore lint/nursery/noSecrets: Token-2022 extension type identifier
       extension("TransferHook", {
         authority,
         programId,

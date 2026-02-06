@@ -1,5 +1,5 @@
-import { AppError, badRequest } from "@/lib/errors";
 import { mapClerkRoleToOrgRole } from "@/lib/clerk-role";
+import { AppError, badRequest } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { ClerkOrganizationsService } from "@/services/clerk-organizations.service";
 import { ClerkUsersService } from "@/services/clerk-users.service";
@@ -107,9 +107,8 @@ function extractMember(data: Record<string, unknown>): ClerkMemberData {
 }
 
 async function resolveUserEmail(env: Env, member: ClerkMemberData): Promise<string> {
-  if (member.email && member.email.includes("@")) {
-    return member.email.toLowerCase();
-  }
+  const email = member.email;
+  if (email?.includes("@")) return email.toLowerCase();
 
   if (!member.userId) {
     throw badRequest("Clerk member missing user id");
@@ -119,8 +118,7 @@ async function resolveUserEmail(env: Env, member: ClerkMemberData): Promise<stri
   const user = await clerkUsers.getUser(member.userId);
 
   const emails = user.email_addresses || [];
-  const primary =
-    emails.find((item) => item.id === user.primary_email_address_id) || emails[0];
+  const primary = emails.find((item) => item.id === user.primary_email_address_id) || emails[0];
 
   if (!primary?.email_address) {
     throw new AppError("BAD_REQUEST", "Clerk user missing email");
@@ -129,10 +127,7 @@ async function resolveUserEmail(env: Env, member: ClerkMemberData): Promise<stri
   return primary.email_address.toLowerCase();
 }
 
-async function ensureOrganizationMapping(
-  c: AppContext,
-  org: ClerkOrgData
-): Promise<string> {
+async function ensureOrganizationMapping(c: AppContext, org: ClerkOrgData): Promise<string> {
   if (!org.id) {
     throw badRequest("Clerk organization id missing");
   }
@@ -215,7 +210,7 @@ async function ensureUserMapping(
   }
 
   const normalizedEmail = params.email.toLowerCase();
-  let user = await c.env.DB.prepare("SELECT id FROM users WHERE email = ?")
+  const user = await c.env.DB.prepare("SELECT id FROM users WHERE email = ?")
     .bind(normalizedEmail)
     .first<{ id: string }>();
 
@@ -271,10 +266,7 @@ async function handleOrganizationCreated(c: AppContext, data: Record<string, unk
   await ensureOrganizationMapping(c, org);
 }
 
-async function handleOrganizationMembershipCreated(
-  c: AppContext,
-  data: Record<string, unknown>
-) {
+async function handleOrganizationMembershipCreated(c: AppContext, data: Record<string, unknown>) {
   const org = extractOrganization(data);
   const member = extractMember(data);
 
@@ -335,6 +327,7 @@ export const handleClerkWebhook = async (c: AppContext) => {
     case "organization.created":
       await handleOrganizationCreated(c, data);
       break;
+    // biome-ignore lint/nursery/noSecrets: Webhook event type literal, not a secret.
     case "organizationMembership.created":
       await handleOrganizationMembershipCreated(c, data);
       break;

@@ -163,8 +163,7 @@ export function resolveTemplateConfig(
 
   const decimals = decimalsOverride ?? definition.decimals;
   let requiresAllowlist = definition.requiresAllowlist;
-  const requestedAllowlist =
-    overrides?.requiresAllowlist ?? requiresAllowlistOverride ?? undefined;
+  const requestedAllowlist = overrides?.requiresAllowlist ?? requiresAllowlistOverride ?? undefined;
 
   if (requestedAllowlist !== undefined) {
     if (!definition.allowlistOverridable && requestedAllowlist !== definition.requiresAllowlist) {
@@ -203,7 +202,11 @@ export function resolveTemplateConfig(
         continue;
       }
 
-      applyExtensionOverride(baseExtensions, extension, value as ExtensionOverrides[TokenExtensionName]);
+      applyExtensionOverride(
+        baseExtensions,
+        extension,
+        value as ExtensionOverrides[TokenExtensionName]
+      );
     }
   }
 
