@@ -1,9 +1,9 @@
 "use server";
 
+import { linkOrganizationInApi } from "@/lib/onboarding";
+import { sdpApiFetch } from "@/lib/sdp-api";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { sdpApiFetch } from "@/lib/sdp-api";
-import { linkOrganizationInApi } from "@/lib/onboarding";
 
 export interface OnboardingStatus {
   linked: boolean;

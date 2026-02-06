@@ -25,7 +25,7 @@ async function getClerkToken(): Promise<string> {
 
   if (template) {
     try {
-      token = await getToken({ template, organizationId: orgId });
+      token = await getToken({ template });
     } catch (error) {
       templateError = error;
     }
@@ -33,7 +33,7 @@ async function getClerkToken(): Promise<string> {
 
   if (!token) {
     try {
-      token = await getToken({ organizationId: orgId });
+      token = await getToken();
     } catch (error) {
       if (templateError) {
         throw templateError;
@@ -49,10 +49,7 @@ async function getClerkToken(): Promise<string> {
   return token;
 }
 
-export async function sdpApiFetch<T>(
-  path: string,
-  options: RequestInit = {}
-): Promise<T> {
+export async function sdpApiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = await getClerkToken();
   const url = `${getApiBaseUrl()}${path.startsWith("/") ? path : `/${path}`}`;
 

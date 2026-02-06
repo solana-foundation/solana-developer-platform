@@ -1,6 +1,6 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { auth } from "@clerk/nextjs/server";
 import { OrganizationSwitcher } from "@clerk/nextjs";
+import { auth } from "@clerk/nextjs/server";
 
 export default async function AllowlistPage() {
   const { orgId } = await auth();

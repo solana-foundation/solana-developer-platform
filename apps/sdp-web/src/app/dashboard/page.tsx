@@ -1,13 +1,41 @@
-import { redirect } from "next/navigation";
-import { OrganizationSwitcher, UserButton } from "@clerk/nextjs";
-import { auth } from "@clerk/nextjs/server";
+"use client";
+
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { OrganizationSwitcher, SignInButton, UserButton, useAuth } from "@clerk/nextjs";
 
-export default async function DashboardPage() {
-  const { userId, orgId } = await auth();
+export default function DashboardPage() {
+  const { isLoaded, isSignedIn, orgId } = useAuth();
 
-  if (!userId) {
-    redirect("/");
+  if (!isLoaded) {
+    return (
+      <main className="min-h-screen bg-background px-6 py-10 text-foreground">
+        <div className="mx-auto flex max-w-3xl flex-col gap-6">
+          <p className="text-sm uppercase tracking-wide text-muted-foreground">Dashboard</p>
+          <h1 className="text-2xl font-semibold">Loading...</h1>
+        </div>
+      </main>
+    );
+  }
+
+  if (!isSignedIn) {
+    return (
+      <main className="min-h-screen bg-background px-6 py-10 text-foreground">
+        <div className="mx-auto flex max-w-3xl flex-col gap-6">
+          <p className="text-sm uppercase tracking-wide text-muted-foreground">Dashboard</p>
+          <h1 className="text-2xl font-semibold">Sign in to continue</h1>
+          <div>
+            <SignInButton mode="modal">
+              <button
+                type="button"
+                className="text-button-lg inline-flex h-[var(--button-height-lg)] items-center justify-center rounded-[var(--button-radius-lg)] bg-[color:var(--button-primary-bg)] px-[var(--button-padding-x-lg)] text-[color:var(--button-primary-text)] transition-colors hover:bg-[color:var(--button-primary-bg-hover)]"
+              >
+                Sign in
+              </button>
+            </SignInButton>
+          </div>
+        </div>
+      </main>
+    );
   }
 
   if (!orgId) {

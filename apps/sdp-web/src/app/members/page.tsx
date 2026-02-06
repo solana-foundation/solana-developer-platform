@@ -1,6 +1,6 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { auth } from "@clerk/nextjs/server";
 import { OrganizationSwitcher } from "@clerk/nextjs";
+import { auth } from "@clerk/nextjs/server";
 
 export default async function MembersPage() {
   const { orgId } = await auth();
@@ -10,9 +10,7 @@ export default async function MembersPage() {
       <main className="min-h-screen bg-background px-6 py-10 text-foreground">
         <div className="mx-auto flex max-w-3xl flex-col gap-6">
           <div>
-            <p className="text-sm uppercase tracking-wide text-muted-foreground">
-              Organization
-            </p>
+            <p className="text-sm uppercase tracking-wide text-muted-foreground">Organization</p>
             <h1 className="text-2xl font-semibold">Invitations</h1>
           </div>
           <Card>
@@ -33,9 +31,7 @@ export default async function MembersPage() {
     <main className="min-h-screen bg-background px-6 py-10 text-foreground">
       <div className="mx-auto flex max-w-3xl flex-col gap-8">
         <div>
-          <p className="text-sm uppercase tracking-wide text-muted-foreground">
-            Organization
-          </p>
+          <p className="text-sm uppercase tracking-wide text-muted-foreground">Organization</p>
           <h1 className="text-2xl font-semibold">Invitations</h1>
         </div>
 

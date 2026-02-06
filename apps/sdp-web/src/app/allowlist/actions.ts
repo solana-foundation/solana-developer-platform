@@ -1,7 +1,7 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
 import { sdpApiFetch } from "@/lib/sdp-api";
+import { revalidatePath } from "next/cache";
 
 export interface AllowlistEntry {
   id: string;
@@ -19,9 +19,7 @@ export async function listAllowlistEntries(): Promise<AllowlistEntry[]> {
 
 export async function addAllowlistEntry(formData: FormData) {
   const value = String(formData.get("value") ?? "").trim();
-  const type = (String(formData.get("type") ?? "email").trim() || "email") as
-    | "email"
-    | "domain";
+  const type = (String(formData.get("type") ?? "email").trim() || "email") as "email" | "domain";
 
   if (!value) {
     throw new Error("Allowlist value is required");

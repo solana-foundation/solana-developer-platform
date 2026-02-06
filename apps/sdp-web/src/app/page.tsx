@@ -1,13 +1,6 @@
-import {
-  OrganizationSwitcher,
-  SignedIn,
-  SignedOut,
-  SignInButton,
-  SignUpButton,
-  UserButton,
-} from "@clerk/nextjs";
-import { auth } from "@clerk/nextjs/server";
-import { redirect } from "next/navigation";
+import { HomeSignedInCard } from "@/components/home-signed-in";
+import { SignedIn, SignedOut, UserButton } from "@clerk/nextjs";
+import { startSignIn, startSignUp } from "./auth/actions";
 
 const primaryButtonClass =
   "text-button-lg inline-flex h-[var(--button-height-lg)] items-center justify-center rounded-[var(--button-radius-lg)] bg-[color:var(--button-primary-bg)] px-[var(--button-padding-x-lg)] text-[color:var(--button-primary-text)] transition-colors hover:bg-[color:var(--button-primary-bg-hover)]";
@@ -44,12 +37,6 @@ function SecondaryButton({
 }
 
 export default async function Home() {
-  const { userId, orgId } = await auth();
-
-  if (userId && orgId) {
-    redirect("/dashboard");
-  }
-
   return (
     <main className="relative min-h-screen overflow-hidden bg-[color:var(--background)] text-[color:var(--text-high)]">
       <div className="pointer-events-none absolute inset-0">
@@ -71,13 +58,12 @@ export default async function Home() {
           </div>
           <div className="flex items-center gap-3">
             <SignedIn>
-              <OrganizationSwitcher hidePersonal />
               <UserButton />
             </SignedIn>
             <SignedOut>
-              <SignInButton mode="modal">
-                <SecondaryButton>Sign in</SecondaryButton>
-              </SignInButton>
+              <form action={startSignIn}>
+                <SecondaryButton type="submit">Sign in</SecondaryButton>
+              </form>
             </SignedOut>
           </div>
         </header>
@@ -91,9 +77,9 @@ export default async function Home() {
               A unified platform for building on Solana.
             </h1>
             <p className="text-body-lg max-w-xl text-[color:var(--text-medium)]">
-              SDP brings issuance, payments, and trading workflows into a single API
-              layer. Build, test, and launch production-grade Solana products with
-              the partners and controls your team already uses.
+              SDP brings issuance, payments, and trading workflows into a single API layer. Build,
+              test, and launch production-grade Solana products with the partners and controls your
+              team already uses.
             </p>
 
             <div className="mt-6 grid gap-3 text-body-md text-[color:var(--text-medium)]">
@@ -117,47 +103,33 @@ export default async function Home() {
               <SignedOut>
                 <h2 className="text-title-md">Join the waitlist</h2>
                 <p className="text-body-md mt-3 text-[color:var(--text-medium)]">
-                  SDP is invite-only for now. Share your work email and we will
-                  follow up with access details.
+                  SDP is invite-only for now. Share your work email and we will follow up with
+                  access details.
                 </p>
-                <form className="mt-6 grid gap-4">
-                  <label className="text-body-sm text-[color:var(--text-low)]">
-                    Work email
-                    <input
-                      type="email"
-                      placeholder="you@company.com"
-                      className="mt-2 w-full rounded-[14px] border border-[color:var(--border-light)] bg-[color:var(--white)] px-4 py-3 text-body-md text-[color:var(--text-high)] outline-none transition focus:border-[color:var(--border-strong)]"
-                    />
-                  </label>
-                  <div className="flex flex-wrap gap-3">
+                <div className="mt-6 grid gap-4">
+                  <form className="grid gap-4">
+                    <label className="text-body-sm text-[color:var(--text-low)]">
+                      Work email
+                      <input
+                        type="email"
+                        placeholder="you@company.com"
+                        className="mt-2 w-full rounded-[14px] border border-[color:var(--border-light)] bg-[color:var(--white)] px-4 py-3 text-body-md text-[color:var(--text-high)] outline-none transition focus:border-[color:var(--border-strong)]"
+                      />
+                    </label>
                     <PrimaryButton type="button">Request access</PrimaryButton>
-                    <SignUpButton mode="modal">
-                      <SecondaryButton>I have an invite</SecondaryButton>
-                    </SignUpButton>
-                  </div>
+                  </form>
+                  <form action={startSignUp}>
+                    <SecondaryButton type="submit">I have an invite</SecondaryButton>
+                  </form>
                   <p className="text-body-sm text-[color:var(--text-low)]">
-                    Prefer a direct intro? Email <span className="text-[color:var(--text-high)]">sdp@solana.org</span>
+                    Prefer a direct intro? Email{" "}
+                    <span className="text-[color:var(--text-high)]">sdp@solana.org</span>
                   </p>
-                </form>
+                </div>
               </SignedOut>
 
               <SignedIn>
-                {!orgId && (
-                  <>
-                    <h2 className="text-title-md">Select your organization</h2>
-                    <p className="text-body-md mt-3 text-[color:var(--text-medium)]">
-                      Choose or create an organization to continue.
-                    </p>
-                    <div className="mt-6">
-                      <OrganizationSwitcher hidePersonal />
-                    </div>
-                  </>
-                )}
-                {orgId && (
-                  <p className="text-body-md text-[color:var(--text-medium)]">
-                    Loading your dashboard…
-                  </p>
-                )}
+                <HomeSignedInCard />
               </SignedIn>
             </div>
           </section>
