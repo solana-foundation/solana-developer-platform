@@ -80,24 +80,38 @@ export class KoraAdapter implements FeePaymentPort {
    * This is the primary method for gasless transaction submission.
    */
   async signAndSend(transaction: Uint8Array): Promise<Signature> {
-    try {
-      const base64Tx = encodeBase64(transaction);
+    const base64Tx = encodeBase64(transaction);
 
-      const { signed_transaction } = await this.client.signAndSendTransaction({
-        transaction: base64Tx,
-      });
+    // Kora may submit via an RPC that is slightly behind the one we used to fetch the blockhash.
+    // In that case, simulation can fail with "Blockhash not found" even though the blockhash is
+    // valid cluster-wide. A short retry usually resolves this without re-signing.
+    const maxRetries = 2;
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        const { signed_transaction } = await this.client.signAndSendTransaction({
+          transaction: base64Tx,
+        });
 
-      // Decode the signed transaction using @solana/kit's decoder
-      const signedTxBytes = decodeBase64(signed_transaction);
-      const decodedTx = getTransactionDecoder().decode(signedTxBytes);
+        // Decode the signed transaction using @solana/kit's decoder
+        const signedTxBytes = decodeBase64(signed_transaction);
+        const decodedTx = getTransactionDecoder().decode(signedTxBytes);
 
-      // Extract the signature (first signer's signature = transaction ID)
-      const signature = getSignatureFromTransaction(decodedTx);
+        // Extract the signature (first signer's signature = transaction ID)
+        const signature = getSignatureFromTransaction(decodedTx);
 
-      return signature;
-    } catch (error) {
-      throw this.wrapError(error, "Failed to sign and send transaction");
+        return signature;
+      } catch (error) {
+        if (attempt < maxRetries && isBlockhashNotFoundError(error)) {
+          await sleep((attempt + 1) * 500);
+          continue;
+        }
+
+        throw this.wrapError(error, "Failed to sign and send transaction");
+      }
     }
+
+    // Unreachable: loop always returns or throws.
+    throw new FeePaymentError("Failed to sign and send transaction", "NETWORK_ERROR");
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -206,6 +220,14 @@ function extractRpcErrorCode(error: unknown): number | undefined {
   return Number.parseInt(match[1], 10);
 }
 
+function isBlockhashNotFoundError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  // Examples:
+  // "RPC Error -32000: Invalid transaction: Transaction simulation failed: Blockhash not found"
+  // "Transaction simulation failed: Blockhash not found"
+  return error.message.toLowerCase().includes("blockhash not found");
+}
+
 function mapKoraErrorCode(code: number): import("@/services/ports").FeePaymentErrorCode {
   switch (code) {
     case -32001:
@@ -221,4 +243,8 @@ function mapKoraErrorCode(code: number): import("@/services/ports").FeePaymentEr
     default:
       return "NETWORK_ERROR";
   }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
