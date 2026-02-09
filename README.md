@@ -18,11 +18,11 @@ Integration tests require:
   - Example: `https://api.devnet.solana.com`
 - `CUSTODY_PRIVATE_KEY`
   - Base58-encoded **64-byte** Solana keypair (same format as `solana-keygen` keypair JSON, but base58-encoded).
+- `KORA_RPC_URL`
+  - Example: `https://kora-devnet-315956366746.us-central1.run.app`
 
 Optional (recommended):
 
-- `KORA_RPC_URL`
-  - If set, Kora sponsors transaction fees (so your custody wallet does not need devnet SOL).
 - `KORA_API_KEY`
   - Only required if your Kora endpoint needs it.
 - `KORA_MIN_BALANCE_LAMPORTS`
@@ -67,7 +67,6 @@ From the repo root:
 export SOLANA_RPC_URL="https://api.devnet.solana.com"
 export CUSTODY_PRIVATE_KEY="..."
 
-# Optional (recommended): sponsor fees via Kora
 export KORA_RPC_URL="https://kora-devnet-315956366746.us-central1.run.app"
 # export KORA_API_KEY="..."
 
@@ -77,4 +76,7 @@ pnpm test:integration
 Notes:
 
 - The suite includes Kora tests. Kora connectivity/funding is validated up-front (fail-fast).
+- Even with Kora fee sponsorship, the custody authority account must exist on-chain (some downstream SDKs require this).
+  - The test preflight will attempt a small `requestAirdrop` on devnet if the custody account does not exist.
+  - If your `SOLANA_RPC_URL` provider disables airdrops, you must fund the custody public key once (any amount) and rerun.
 - If you want to run only the Kora smoke test: `pnpm kora:devnet:test`.
