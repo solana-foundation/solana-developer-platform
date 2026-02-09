@@ -109,13 +109,18 @@ export async function createSigner(env: Env): Promise<TransactionSigner> {
 export async function createOrgSigner(
   env: Env,
   orgId: string,
-  projectId?: string | null
+  projectId?: string | null,
+  walletId?: string | null
 ): Promise<TransactionSigner> {
   const signingService = createSigningService(env);
 
   try {
     // getTransactionSigner handles 3-tier resolution internally
-    return await signingService.getTransactionSigner(orgId, projectId ?? undefined);
+    return await signingService.getTransactionSigner(
+      orgId,
+      projectId ?? undefined,
+      walletId ?? undefined
+    );
   } catch {
     // If org-aware signing fails (e.g., no encryption key configured),
     // fall back to env-based signing for backward compatibility

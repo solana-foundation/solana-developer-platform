@@ -58,7 +58,12 @@ export const pauseToken = async (c: AppContext) => {
     throw new AppError("BAD_REQUEST", "Pause authority is not configured for this token");
   }
 
-  const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId);
+  const signer = await createOrgSigner(
+    c.env,
+    auth.organizationId,
+    auth.projectId,
+    auth.signingWalletId
+  );
   if (pauseAuthorityRaw !== signer.address) {
     throw new AppError("BAD_REQUEST", "Pause authority is not controlled by custody");
   }
@@ -145,7 +150,12 @@ export const unpauseToken = async (c: AppContext) => {
     throw new AppError("BAD_REQUEST", "Pause authority is not configured for this token");
   }
 
-  const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId);
+  const signer = await createOrgSigner(
+    c.env,
+    auth.organizationId,
+    auth.projectId,
+    auth.signingWalletId
+  );
   if (pauseAuthorityRaw !== signer.address) {
     throw new AppError("BAD_REQUEST", "Pause authority is not controlled by custody");
   }

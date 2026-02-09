@@ -1,5 +1,5 @@
-import { getAuth } from "@/lib/auth";
 import { parseDecimalAmount, toMosaicAmount } from "@/lib/amount";
+import { getAuth } from "@/lib/auth";
 import { AppError, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { assertValidAddress } from "@/lib/solana";
@@ -71,7 +71,12 @@ export const prepareMint = async (c: AppContext) => {
   }
 
   // Get mint authority (custody signer via 3-tier resolution)
-  const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId);
+  const signer = await createOrgSigner(
+    c.env,
+    auth.organizationId,
+    auth.projectId,
+    auth.signingWalletId
+  );
   const mintAuthority = assertValidAddress(token.mintAuthority ?? "", "mintAuthority");
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
   const destination = assertValidAddress(parsed.data.mint.destination, "destination");
@@ -87,7 +92,7 @@ export const prepareMint = async (c: AppContext) => {
     feePayer: signer.address,
   });
 
-  let simulation;
+  let simulation: unknown;
   if (parsed.data.options?.simulate) {
     const rpc = createRpc(c.env);
     const txBytes = Buffer.from(prepared.serializedTx, "base64");
@@ -189,7 +194,12 @@ export const executeMint = async (c: AppContext) => {
   }
 
   // Get custody signer (via 3-tier resolution)
-  const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId);
+  const signer = await createOrgSigner(
+    c.env,
+    auth.organizationId,
+    auth.projectId,
+    auth.signingWalletId
+  );
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
   const destination = assertValidAddress(parsed.data.mint.destination, "destination");
 
