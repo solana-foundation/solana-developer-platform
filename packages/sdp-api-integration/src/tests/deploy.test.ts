@@ -3,18 +3,16 @@ import type { DeployPrepareApiResponse, TokenApiResponse } from "../helpers/api-
 import {
   RUN_INTEGRATION_TESTS,
   SOLANA_CONFIGURED,
-  TEST_PROJECT_API_KEY,
-  app,
   cleanupIntegrationSuite,
-  env,
   initIntegrationSuite,
+  requestWithApiKey,
   resetIntegrationState,
 } from "../helpers/integration";
 
 describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Token Deployment", () => {
   let apiKeyHash: string;
   let custodyAddress = "";
-  const request = (url: string, init?: RequestInit) => app.request(url, init, env);
+  const request = requestWithApiKey();
 
   beforeAll(async () => {
     const init = await initIntegrationSuite();
@@ -35,7 +33,6 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Token Deployment"
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
       },
       body: JSON.stringify({
         name: "Devnet Test Token",
@@ -53,7 +50,6 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Token Deployment"
 
     const deployRes = await request(`/v1/issuance/tokens/${tokenId}/deploy`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
     });
 
     expect(deployRes.status).toBe(200);
@@ -74,7 +70,6 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Token Deployment"
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
       },
       body: JSON.stringify({
         name: "Transfer Fee Token",
@@ -97,7 +92,6 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Token Deployment"
 
     const deployRes = await request(`/v1/issuance/tokens/${tokenId}/deploy`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
     });
 
     expect(deployRes.status).toBe(200);
@@ -112,7 +106,6 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Token Deployment"
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
       },
       body: JSON.stringify({
         name: "Prepare Deploy Token",
@@ -126,7 +119,6 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Token Deployment"
 
     const prepareRes = await request(`/v1/issuance/tokens/${tokenId}/deploy/prepare`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
     });
 
     expect(prepareRes.status).toBe(200);
@@ -137,9 +129,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Token Deployment"
     expect(prepared.data.mint).toBeTruthy();
     expect(prepared.data.simulation).toBeDefined();
 
-    const getRes = await request(`/v1/issuance/tokens/${tokenId}`, {
-      headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
-    });
+    const getRes = await request(`/v1/issuance/tokens/${tokenId}`);
 
     const token = (await getRes.json()) as TokenApiResponse;
     expect(token.data.token.status).toBe("pending");
@@ -150,7 +140,6 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Token Deployment"
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
       },
       body: JSON.stringify({
         name: "Already Deployed",
@@ -164,12 +153,10 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Token Deployment"
 
     await request(`/v1/issuance/tokens/${tokenId}/deploy`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
     });
 
     const secondDeployRes = await request(`/v1/issuance/tokens/${tokenId}/deploy`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
     });
 
     expect(secondDeployRes.status).toBe(400);

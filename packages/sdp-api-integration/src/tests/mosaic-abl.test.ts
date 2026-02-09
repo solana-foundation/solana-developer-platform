@@ -10,15 +10,13 @@
  */
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import type { TokenApiResponse, TokenAllowlistResponse } from "../helpers/api-types";
+import type { TokenAllowlistResponse, TokenApiResponse } from "../helpers/api-types";
 import {
   RUN_INTEGRATION_TESTS,
   SOLANA_CONFIGURED,
-  TEST_PROJECT_API_KEY,
-  app,
   cleanupIntegrationSuite,
-  env,
   initIntegrationSuite,
+  requestWithApiKey,
   resetIntegrationState,
 } from "../helpers/integration";
 
@@ -34,13 +32,11 @@ const TEST_WALLETS = {
 
 describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic ABL Operations", () => {
   let apiKeyHash: string;
-  let custodyAddress = "";
-  const request = (url: string, init?: RequestInit) => app.request(url, init, env);
+  const request = requestWithApiKey();
 
   beforeAll(async () => {
     const init = await initIntegrationSuite();
     apiKeyHash = init.apiKeyHash;
-    custodyAddress = init.custodyAddress;
   });
 
   afterAll(async () => {
@@ -57,7 +53,6 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic ABL Operat
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
       },
       body: JSON.stringify({
         name: "ABL Test Token",
@@ -79,7 +74,6 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic ABL Operat
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
       },
       body: JSON.stringify({
         address: TEST_WALLETS.wallet1,
@@ -100,7 +94,6 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic ABL Operat
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
       },
       body: JSON.stringify({
         name: "List Test Token",
@@ -120,7 +113,6 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic ABL Operat
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
         },
         body: JSON.stringify({
           address,
@@ -130,9 +122,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic ABL Operat
     }
 
     // List allowlist entries
-    const listRes = await request(`/v1/issuance/tokens/${tokenId}/allowlist`, {
-      headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
-    });
+    const listRes = await request(`/v1/issuance/tokens/${tokenId}/allowlist`);
 
     expect(listRes.status).toBe(200);
     const list = (await listRes.json()) as {
@@ -155,7 +145,6 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic ABL Operat
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
       },
       body: JSON.stringify({
         name: "Remove Test Token",
@@ -174,7 +163,6 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic ABL Operat
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
       },
       body: JSON.stringify({
         address: TEST_WALLETS.wallet1,
@@ -188,15 +176,12 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic ABL Operat
     // Remove wallet
     const removeRes = await request(`/v1/issuance/tokens/${tokenId}/allowlist/${entryId}`, {
       method: "DELETE",
-      headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
     });
 
     expect(removeRes.status).toBe(204);
 
     // Verify removal
-    const listRes = await request(`/v1/issuance/tokens/${tokenId}/allowlist`, {
-      headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
-    });
+    const listRes = await request(`/v1/issuance/tokens/${tokenId}/allowlist`);
 
     const list = (await listRes.json()) as {
       data: Array<{ address: string; status: string }>;
@@ -216,7 +201,6 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic ABL Operat
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
       },
       body: JSON.stringify({
         name: "Dupe Test Token",
@@ -235,7 +219,6 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic ABL Operat
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
       },
       body: JSON.stringify({
         address: TEST_WALLETS.wallet1,
@@ -248,7 +231,6 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic ABL Operat
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
       },
       body: JSON.stringify({
         address: TEST_WALLETS.wallet1,
@@ -265,7 +247,6 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic ABL Operat
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
       },
       body: JSON.stringify({
         name: "Invalid Addr Token",
@@ -284,7 +265,6 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic ABL Operat
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
       },
       body: JSON.stringify({
         address: "not-a-valid-solana-address",

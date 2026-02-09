@@ -1,16 +1,17 @@
+import { transferLamportsFromEnv } from "@/services/solana/funding";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { TokenApiResponse } from "../helpers/api-types";
 import {
+  KORA_CONFIGURED,
   RUN_INTEGRATION_TESTS,
   SOLANA_CONFIGURED,
-  TEST_PROJECT_API_KEY,
-  app,
   cleanupIntegrationSuite,
   env,
   initIntegrationSuite,
+  request as rawRequest,
+  requestWithApiKey,
   resetIntegrationState,
 } from "../helpers/integration";
-import { transferLamportsFromEnv } from "@/services/solana/funding";
 
 async function callRpc<T>(method: string, params: unknown[]): Promise<T> {
   const rpcUrl = env.SOLANA_RPC_URL;
@@ -48,7 +49,7 @@ async function ensureFunded(recipient: string, minimumLamports: number) {
 
 describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Custody Local Signing", () => {
   let apiKeyHash: string;
-  const request = (url: string, init?: RequestInit) => app.request(url, init, env);
+  const request = requestWithApiKey();
 
   beforeAll(async () => {
     const init = await initIntegrationSuite();
@@ -68,7 +69,6 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Custody Local Sig
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
       },
       body: JSON.stringify({ provider: "local", walletLabel: "Integration Wallet" }),
     });
@@ -81,11 +81,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Custody Local Sig
     const { configId, publicKey } = initBody.data;
     expect(publicKey).toMatch(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/);
 
-    const configRes = await request("/v1/custody/config", {
-      headers: {
-        Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
-      },
-    });
+    const configRes = await request("/v1/custody/config");
 
     expect(configRes.status).toBe(200);
     const configBody = (await configRes.json()) as {
@@ -105,13 +101,15 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Custody Local Sig
     expect(configRow?.config_encrypted).toBeTruthy();
     expect(() => JSON.parse(configRow?.config_encrypted ?? "")).toThrow();
 
-    await ensureFunded(publicKey, 500_000_000);
+    // If Kora is enabled, it sponsors transaction fees so the custody wallet doesn't need SOL.
+    if (!KORA_CONFIGURED) {
+      await ensureFunded(publicKey, 500_000_000);
+    }
 
     const createRes = await request("/v1/issuance/tokens", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
       },
       body: JSON.stringify({
         name: "Custody Token",
@@ -128,7 +126,6 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Custody Local Sig
 
     const deployRes = await request(`/v1/issuance/tokens/${tokenId}/deploy`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
     });
 
     expect(deployRes.status).toBe(200);
@@ -137,10 +134,10 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Custody Local Sig
   });
 
   it("requires auth for custody endpoints", async () => {
-    const configRes = await request("/v1/custody/config");
+    const configRes = await rawRequest("/v1/custody/config");
     expect(configRes.status).toBe(401);
 
-    const initRes = await request("/v1/custody/initialize", {
+    const initRes = await rawRequest("/v1/custody/initialize", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ provider: "local" }),
