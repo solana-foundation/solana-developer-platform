@@ -1,4 +1,5 @@
 import { KoraClient } from "@sdp/api/services/adapters";
+import { createSignerFromBase58 } from "@sdp/api/services/solana";
 import { env } from "./env";
 
 type SolanaRpcResponse<T> =
@@ -37,11 +38,26 @@ async function runPreflight(): Promise<void> {
     );
   }
 
+  // Narrow optional env vars to concrete strings (Biome forbids non-null assertions).
+  const solanaRpcUrl = env.SOLANA_RPC_URL;
+  const custodyPrivateKey = env.CUSTODY_PRIVATE_KEY;
+  const koraUrl = env.KORA_RPC_URL;
+  if (!solanaRpcUrl || !custodyPrivateKey || !koraUrl) {
+    // This should be unreachable because of the `missing` check above.
+    throw new Error("Integration preflight internal error: required env vars were missing.");
+  }
+
   // Validate Solana RPC connectivity early so failures are explicit.
-  await assertSolanaRpcHealthy(env.SOLANA_RPC_URL);
+  await assertSolanaRpcHealthy(solanaRpcUrl);
+
+  // Ensure the custody signer exists on-chain.
+  //
+  // Even with Kora fee sponsorship, some downstream libraries (ex: Mosaic SDK) expect the
+  // authority account to exist (ie. have been created with at least 1 lamport) and will error
+  // if RPC returns `null` for getAccountInfo(publicKey).
+  await ensureCustodyAccountExists(solanaRpcUrl, custodyPrivateKey);
 
   // Validate Kora connectivity and that it can sponsor transactions (fee payer exists and is funded).
-  const koraUrl = env.KORA_RPC_URL;
   const koraClient = new KoraClient({
     rpcUrl: koraUrl,
     ...(env.KORA_API_KEY ? { apiKey: env.KORA_API_KEY } : {}),
@@ -64,13 +80,36 @@ async function runPreflight(): Promise<void> {
     );
   }
 
-  const feePayerLamports = await solanaGetBalance(env.SOLANA_RPC_URL, feePayerAddress);
+  const feePayerLamports = await solanaGetBalance(solanaRpcUrl, feePayerAddress);
   const minLamports = getKoraMinBalanceLamports();
   if (feePayerLamports < minLamports) {
     throw new Error(
       `Kora preflight failed: fee payer balance too low (${feePayerLamports} lamports, min ${minLamports}).`
     );
   }
+}
+
+async function ensureCustodyAccountExists(rpcUrl: string, custodyPrivateKeyBase58: string) {
+  const signer = await createSignerFromBase58(custodyPrivateKeyBase58);
+  const custodyAddress = signer.address;
+
+  const exists = await solanaAccountExists(rpcUrl, custodyAddress);
+  if (exists) return;
+
+  // Devnet-only convenience: request a small airdrop so the account exists on-chain.
+  // If the RPC provider blocks airdrops, we fail fast with actionable instructions.
+  const airdropLamports = 1_000_000; // 0.001 SOL is enough to create the account.
+  // biome-ignore lint/nursery/noSecrets: label string (false positive).
+  await withLabel("Solana.requestAirdrop(custody)", async () => {
+    await solanaRequestAirdrop(rpcUrl, custodyAddress, airdropLamports);
+    await waitForAccountExistence(rpcUrl, custodyAddress, 30_000);
+  }).catch((err) => {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(
+      `Custody signer does not exist on-chain (${custodyAddress}). ` +
+        `Fund it once on devnet (ex: request an airdrop) then rerun. Details: ${msg}`
+    );
+  });
 }
 
 function getKoraMinBalanceLamports(): number {
@@ -107,6 +146,49 @@ async function solanaGetBalance(rpcUrl: string, address: string): Promise<number
     { commitment: "confirmed" },
   ]);
   return resp.value ?? 0;
+}
+
+async function solanaAccountExists(rpcUrl: string, address: string): Promise<boolean> {
+  type AccountInfo = {
+    value: null | {
+      lamports: number;
+      owner: string;
+      executable: boolean;
+      rentEpoch: number;
+      data: [string, string];
+    };
+  };
+
+  const resp = await solanaRpc<AccountInfo>(rpcUrl, "getAccountInfo", [
+    address,
+    { encoding: "base64", commitment: "confirmed" },
+  ]);
+  return resp.value !== null;
+}
+
+async function solanaRequestAirdrop(
+  rpcUrl: string,
+  address: string,
+  lamports: number
+): Promise<string> {
+  // Many public RPC providers disable airdrops; we surface a clear error if so.
+  return await solanaRpc<string>(rpcUrl, "requestAirdrop", [address, lamports]);
+}
+
+async function waitForAccountExistence(rpcUrl: string, address: string, timeoutMs: number) {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    // eslint-disable-next-line no-await-in-loop
+    const exists = await solanaAccountExists(rpcUrl, address);
+    if (exists) return;
+    // eslint-disable-next-line no-await-in-loop
+    await sleep(1_000);
+  }
+  throw new Error(`Timed out waiting for account ${address} to exist on-chain.`);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function solanaRpc<T>(rpcUrl: string, method: string, params: unknown[]): Promise<T> {
