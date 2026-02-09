@@ -4,7 +4,10 @@ import { created, success } from "@/lib/response";
 import { apiKeyCreateSchema } from "@/routes/api-keys/schemas";
 import { ApiKeyService } from "@/services/api-key.service";
 import { AuditService } from "@/services/audit.service";
+import { createSigningService } from "@/services/domain/signing.service";
+import { SigningError } from "@/services/ports";
 import { ProjectService } from "@/services/project.service";
+import type { WalletPurpose } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import type { ApiKeyRole, CreateApiKeyResponse } from "@sdp/types";
 import type { Context } from "hono";
@@ -68,9 +71,71 @@ export const createProjectApiKey = async (c: AppContext) => {
     description,
     role = "api_developer",
     environment = "sandbox",
+    permissions,
     allowedIps,
     expiresAt,
+    signingWalletId,
+    provisionWallet,
+    walletLabel,
+    walletPurpose,
   } = parsed.data;
+
+  if (permissions && !auth.permissions.includes("*")) {
+    throw new AppError("INSUFFICIENT_PERMISSIONS", "Custom permission sets require owner access");
+  }
+
+  if (provisionWallet && signingWalletId) {
+    throw new AppError(
+      "BAD_REQUEST",
+      "Provide either signingWalletId or provisionWallet, not both"
+    );
+  }
+
+  let resolvedSigningWalletId: string | null | undefined = signingWalletId ?? undefined;
+
+  if (provisionWallet) {
+    if (!(auth.permissions.includes("*") || auth.permissions.includes("custody:admin"))) {
+      throw new AppError("INSUFFICIENT_PERMISSIONS", "Required permissions: custody:admin");
+    }
+
+    const signingService = createSigningService(c.env);
+    try {
+      const wallet = await signingService.createWallet(auth.organizationId, projectId, {
+        label: walletLabel,
+        purpose: walletPurpose as WalletPurpose | undefined,
+      });
+      resolvedSigningWalletId = wallet.walletId;
+    } catch (error) {
+      if (error instanceof SigningError) {
+        if (error.code === "NOT_FOUND") {
+          throw new AppError("CONFLICT", error.message);
+        }
+        throw new AppError("BAD_REQUEST", error.message);
+      }
+      throw error;
+    }
+  } else if (resolvedSigningWalletId) {
+    const wallet = await c.env.DB.prepare(
+      `SELECT c.project_id as project_id
+       FROM custody_wallets w
+       JOIN custody_configs c ON c.id = w.custody_config_id
+       WHERE c.organization_id = ? AND w.wallet_id = ? AND c.status = 'active' AND w.status = 'active'
+       LIMIT 1`
+    )
+      .bind(auth.organizationId, resolvedSigningWalletId)
+      .first<{ project_id: string | null }>();
+
+    if (!wallet) {
+      throw new AppError("BAD_REQUEST", "Unknown signingWalletId");
+    }
+
+    if (wallet.project_id && wallet.project_id !== projectId) {
+      throw new AppError(
+        "BAD_REQUEST",
+        "Project API keys cannot bind to wallets from other projects"
+      );
+    }
+  }
 
   const apiKeyService = new ApiKeyService(c.env.DB);
   const createdKey = await apiKeyService.createApiKey({
@@ -80,9 +145,11 @@ export const createProjectApiKey = async (c: AppContext) => {
     name,
     description,
     role,
+    permissions,
     environment,
     allowedIps,
     expiresAt,
+    signingWalletId: resolvedSigningWalletId ?? null,
     pepper: c.env.API_KEY_PEPPER,
   });
 
@@ -92,7 +159,14 @@ export const createProjectApiKey = async (c: AppContext) => {
     action: "create",
     resourceType: "api_key",
     resourceId: createdKey.id,
-    metadata: { projectId, name, role, environment },
+    metadata: {
+      projectId,
+      name,
+      role,
+      environment,
+      signingWalletId: resolvedSigningWalletId ?? null,
+      provisionedWallet: Boolean(provisionWallet),
+    },
   });
 
   const response: CreateApiKeyResponse = {

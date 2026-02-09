@@ -87,6 +87,7 @@ declare module "hono" {
       role: string;
       permissions: Permission[];
       environment: string;
+      signingWalletId: string | null;
     };
     // Session auth context set by middleware
     session?: CachedSession;

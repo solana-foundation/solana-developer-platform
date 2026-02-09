@@ -27,11 +27,9 @@ export const initializeFireblocksSchema = z.object({
 export const initializePrivySchema = z.object({
   provider: z.literal("privy"),
   projectId: z.string().optional(),
-  appId: z.string().min(1),
-  appSecret: z.string().min(1),
-  walletId: z.string().min(1),
   apiBaseUrl: z.string().url().optional(),
   requestDelayMs: z.number().int().min(0).max(3000).optional(),
+  walletLabel: z.string().max(100).optional(),
 });
 
 export const initializeSigningSchema = z.discriminatedUnion("provider", [
@@ -41,6 +39,21 @@ export const initializeSigningSchema = z.discriminatedUnion("provider", [
 ]);
 
 export type InitializeSigningRequest = z.infer<typeof initializeSigningSchema>;
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Create Wallet
+// ═══════════════════════════════════════════════════════════════════════════
+
+export const createWalletSchema = z.object({
+  projectId: z.string().optional(),
+  label: z.string().max(100).optional(),
+  purpose: z
+    .enum(["root", "mint_authority", "freeze_authority", "fee_payer", "transfer"])
+    .optional(),
+  setDefault: z.boolean().optional(),
+});
+
+export type CreateWalletRequest = z.infer<typeof createWalletSchema>;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Response Types

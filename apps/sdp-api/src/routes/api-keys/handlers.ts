@@ -3,7 +3,10 @@ import { AppError, notFound } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import { ApiKeyService } from "@/services/api-key.service";
 import { AuditService } from "@/services/audit.service";
+import { createSigningService } from "@/services/domain/signing.service";
 import { KVService } from "@/services/kv.service";
+import { SigningError } from "@/services/ports";
+import type { WalletPurpose } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import type {
   ApiKeyRole,
@@ -58,9 +61,68 @@ export const createApiKey = async (c: AppContext) => {
     description,
     role = "api_developer",
     environment = "sandbox",
+    permissions,
     allowedIps,
     expiresAt,
+    signingWalletId,
+    provisionWallet,
+    walletLabel,
+    walletPurpose,
   } = parsed.data;
+
+  if (permissions && !auth.permissions.includes("*")) {
+    throw new AppError("INSUFFICIENT_PERMISSIONS", "Custom permission sets require owner access");
+  }
+
+  if (provisionWallet && signingWalletId) {
+    throw new AppError(
+      "BAD_REQUEST",
+      "Provide either signingWalletId or provisionWallet, not both"
+    );
+  }
+
+  let resolvedSigningWalletId: string | null | undefined = signingWalletId ?? undefined;
+
+  if (provisionWallet) {
+    if (!(auth.permissions.includes("*") || auth.permissions.includes("custody:admin"))) {
+      throw new AppError("INSUFFICIENT_PERMISSIONS", "Required permissions: custody:admin");
+    }
+
+    const signingService = createSigningService(c.env);
+    try {
+      const wallet = await signingService.createWallet(auth.organizationId, undefined, {
+        label: walletLabel,
+        purpose: walletPurpose as WalletPurpose | undefined,
+      });
+      resolvedSigningWalletId = wallet.walletId;
+    } catch (error) {
+      if (error instanceof SigningError) {
+        if (error.code === "NOT_FOUND") {
+          throw new AppError("CONFLICT", error.message);
+        }
+        throw new AppError("BAD_REQUEST", error.message);
+      }
+      throw error;
+    }
+  } else if (resolvedSigningWalletId) {
+    const wallet = await c.env.DB.prepare(
+      `SELECT c.project_id as project_id
+       FROM custody_wallets w
+       JOIN custody_configs c ON c.id = w.custody_config_id
+       WHERE c.organization_id = ? AND w.wallet_id = ? AND c.status = 'active' AND w.status = 'active'
+       LIMIT 1`
+    )
+      .bind(orgId, resolvedSigningWalletId)
+      .first<{ project_id: string | null }>();
+
+    if (!wallet) {
+      throw new AppError("BAD_REQUEST", "Unknown signingWalletId");
+    }
+
+    if (wallet.project_id) {
+      throw new AppError("BAD_REQUEST", "Org-level API keys cannot bind to project wallets");
+    }
+  }
 
   const apiKeyService = new ApiKeyService(c.env.DB);
   const createdKey = await apiKeyService.createApiKey({
@@ -69,9 +131,11 @@ export const createApiKey = async (c: AppContext) => {
     name,
     description,
     role,
+    permissions,
     environment,
     allowedIps,
     expiresAt,
+    signingWalletId: resolvedSigningWalletId ?? null,
     pepper: c.env.API_KEY_PEPPER,
   });
 
@@ -81,7 +145,13 @@ export const createApiKey = async (c: AppContext) => {
     action: "create",
     resourceType: "api_key",
     resourceId: createdKey.id,
-    metadata: { name, role, environment },
+    metadata: {
+      name,
+      role,
+      environment,
+      signingWalletId: resolvedSigningWalletId ?? null,
+      provisionedWallet: Boolean(provisionWallet),
+    },
   });
 
   const response: CreateApiKeyResponse = {
@@ -117,10 +187,12 @@ export const getApiKey = async (c: AppContext) => {
     description: key.description,
     keyPrefix: key.keyPrefix,
     role: key.role,
+    permissions: key.permissions,
     environment: key.environment,
     status: key.status,
     projectId: key.projectId,
     allowedIps: key.allowedIps,
+    signingWalletId: key.signingWalletId,
     lastUsedAt: key.lastUsedAt,
     expiresAt: key.expiresAt,
     rotatedFrom: key.rotatedFrom,
@@ -144,10 +216,10 @@ export const updateApiKey = async (c: AppContext) => {
 
   // Verify key belongs to this organization
   const existing = await c.env.DB.prepare(
-    "SELECT id, key_hash FROM api_keys WHERE id = ? AND organization_id = ?"
+    "SELECT id, key_hash, project_id FROM api_keys WHERE id = ? AND organization_id = ?"
   )
     .bind(keyId, auth.organizationId)
-    .first<{ id: string; key_hash: string }>();
+    .first<{ id: string; key_hash: string; project_id: string | null }>();
 
   if (!existing) {
     throw notFound("API key");
@@ -176,6 +248,47 @@ export const updateApiKey = async (c: AppContext) => {
     values.push(parsed.data.expiresAt);
   }
 
+  if (parsed.data.permissions !== undefined) {
+    if (parsed.data.permissions && !auth.permissions.includes("*")) {
+      throw new AppError("INSUFFICIENT_PERMISSIONS", "Custom permission sets require owner access");
+    }
+
+    updates.push("permissions = ?");
+    values.push(parsed.data.permissions ? JSON.stringify(parsed.data.permissions) : null);
+  }
+
+  if (parsed.data.signingWalletId !== undefined) {
+    if (parsed.data.signingWalletId) {
+      const wallet = await c.env.DB.prepare(
+        `SELECT c.project_id as project_id
+         FROM custody_wallets w
+         JOIN custody_configs c ON c.id = w.custody_config_id
+         WHERE c.organization_id = ? AND w.wallet_id = ? AND c.status = 'active' AND w.status = 'active'
+         LIMIT 1`
+      )
+        .bind(auth.organizationId, parsed.data.signingWalletId)
+        .first<{ project_id: string | null }>();
+
+      if (!wallet) {
+        throw new AppError("BAD_REQUEST", "Unknown signingWalletId");
+      }
+
+      if (!existing.project_id && wallet.project_id) {
+        throw new AppError("BAD_REQUEST", "Org-level API keys cannot bind to project wallets");
+      }
+
+      if (existing.project_id && wallet.project_id && wallet.project_id !== existing.project_id) {
+        throw new AppError(
+          "BAD_REQUEST",
+          "Project API keys cannot bind to wallets from other projects"
+        );
+      }
+    }
+
+    updates.push("signing_wallet_id = ?");
+    values.push(parsed.data.signingWalletId);
+  }
+
   if (updates.length === 0) {
     throw new AppError("BAD_REQUEST", "No fields to update");
   }
@@ -185,8 +298,12 @@ export const updateApiKey = async (c: AppContext) => {
     .bind(...values)
     .run();
 
-  // Invalidate cache if IP restrictions changed
-  if (parsed.data.allowedIps !== undefined) {
+  // Invalidate cache if auth-relevant fields changed
+  if (
+    parsed.data.allowedIps !== undefined ||
+    parsed.data.permissions !== undefined ||
+    parsed.data.signingWalletId !== undefined
+  ) {
     const kvService = new KVService(c.env.SDP_API_KEYS, c.env.SDP_CACHE);
     await kvService.deleteApiKey(existing.key_hash);
   }

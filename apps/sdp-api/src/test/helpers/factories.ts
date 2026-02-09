@@ -179,6 +179,7 @@ export interface CachedApiKeyOverrides {
   environment?: "sandbox" | "production";
   rateLimitTier?: "standard" | "elevated" | "unlimited";
   allowedIps?: string[] | null;
+  signingWalletId?: string | null;
   status?: "active" | "revoked" | "expired";
   expiresAt?: string | null;
 }
@@ -194,6 +195,7 @@ export function createCachedApiKey(overrides: CachedApiKeyOverrides = {}): Cache
     environment: "sandbox",
     rateLimitTier: "standard",
     allowedIps: null,
+    signingWalletId: null,
     status: "active",
     expiresAt: null,
     ...overrides,

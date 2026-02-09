@@ -94,7 +94,7 @@ export async function createSigningAdapterFromConfig(
     case "fireblocks":
       return createFireblocksAdapterFromRecord(record);
     case "privy":
-      return createPrivyAdapterFromRecord(record);
+      return createPrivyAdapterFromRecord(record, env);
     default:
       return createMemoryAdapterFromEnv(env);
   }
@@ -137,6 +137,7 @@ interface PrivyConfigJson {
   walletId?: string;
   apiBaseUrl?: string;
   requestDelayMs?: number;
+  privyAppId?: string;
 }
 
 function createFireblocksAdapterFromEnv(env: Env): KeychainFireblocksAdapter {
@@ -177,9 +178,9 @@ function createPrivyAdapterFromEnv(env: Env): KeychainPrivyAdapter {
   return new KeychainPrivyAdapter({
     appId,
     appSecret,
-    walletId,
     apiBaseUrl: env.PRIVY_API_BASE_URL,
     requestDelayMs,
+    defaultWalletId: walletId,
   });
 }
 
@@ -216,7 +217,7 @@ function createFireblocksAdapterFromRecord(record: SigningConfigRecord): Keychai
   return new KeychainFireblocksAdapter(config);
 }
 
-function createPrivyAdapterFromRecord(record: SigningConfigRecord): KeychainPrivyAdapter {
+function createPrivyAdapterFromRecord(record: SigningConfigRecord, env: Env): KeychainPrivyAdapter {
   let parsed: PrivyConfigJson;
   try {
     parsed = JSON.parse(record.config) as PrivyConfigJson;
@@ -228,19 +229,23 @@ function createPrivyAdapterFromRecord(record: SigningConfigRecord): KeychainPriv
     throw new SigningError("Custody configuration provider mismatch", "PROVIDER_NOT_CONFIGURED");
   }
 
-  if (!parsed.appId || !parsed.appSecretEncrypted || !parsed.walletId) {
+  const appId = parsed.appId ?? parsed.privyAppId ?? env.PRIVY_APP_ID;
+  const appSecret = parsed.appSecretEncrypted ?? env.PRIVY_APP_SECRET;
+  const defaultWalletId = parsed.walletId ?? record.defaultWalletId ?? env.PRIVY_WALLET_ID;
+
+  if (!appId || !appSecret || !defaultWalletId) {
     throw new SigningError(
-      "Privy config missing appId, appSecretEncrypted, or walletId",
+      "Privy config missing appId/appSecret/walletId and env is not configured",
       "PROVIDER_NOT_CONFIGURED"
     );
   }
 
   const config: KeychainPrivyConfig = {
-    appId: parsed.appId,
-    appSecret: parsed.appSecretEncrypted,
-    walletId: parsed.walletId,
+    appId,
+    appSecret,
     apiBaseUrl: parsed.apiBaseUrl,
     requestDelayMs: parsed.requestDelayMs,
+    defaultWalletId,
   };
 
   return new KeychainPrivyAdapter(config);

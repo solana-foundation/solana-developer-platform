@@ -11,8 +11,10 @@ import type { Env } from "@/types/env";
 import type { Context } from "hono";
 import {
   type CustodyConfigResponse,
+  type CustodyWalletResponse,
   type CustodyWalletsResponse,
   type InitializeSigningResponse,
+  createWalletSchema,
   initializeSigningSchema,
 } from "./schemas";
 
@@ -71,11 +73,9 @@ export const initializeSigning = async (c: AppContext) => {
         auth.organizationId,
         parsed.data.projectId,
         {
-          appId: parsed.data.appId,
-          appSecret: parsed.data.appSecret,
-          walletId: parsed.data.walletId,
           apiBaseUrl: parsed.data.apiBaseUrl,
           requestDelayMs: parsed.data.requestDelayMs,
+          walletLabel: parsed.data.walletLabel,
         }
       );
     }
@@ -90,6 +90,60 @@ export const initializeSigning = async (c: AppContext) => {
   } catch (error) {
     if (error instanceof SigningError) {
       if (error.code === "ALREADY_INITIALIZED") {
+        throw new AppError("CONFLICT", error.message);
+      }
+      throw new AppError("BAD_REQUEST", error.message);
+    }
+    throw error;
+  }
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Create Wallet
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Provision a new custody wallet for the organization (or project).
+ *
+ * POST /custody/wallets
+ */
+export const createWallet = async (c: AppContext) => {
+  const auth = getAuth(c);
+
+  const body = await c.req.json();
+  const parsed = createWalletSchema.safeParse(body);
+
+  if (!parsed.success) {
+    throw new AppError("BAD_REQUEST", "Invalid request body", {
+      errors: parsed.error.flatten().fieldErrors,
+    });
+  }
+
+  const signingService = createSigningService(c.env);
+
+  try {
+    const wallet = await signingService.createWallet(auth.organizationId, parsed.data.projectId, {
+      label: parsed.data.label,
+      purpose: parsed.data.purpose,
+      setDefault: parsed.data.setDefault,
+    });
+
+    const response: CustodyWalletResponse = {
+      wallet: {
+        id: wallet.id,
+        walletId: wallet.walletId,
+        publicKey: wallet.publicKey,
+        label: wallet.label,
+        purpose: wallet.purpose,
+        status: wallet.status,
+        createdAt: wallet.createdAt,
+      },
+    };
+
+    return created(c, response);
+  } catch (error) {
+    if (error instanceof SigningError) {
+      if (error.code === "NOT_FOUND") {
         throw new AppError("CONFLICT", error.message);
       }
       throw new AppError("BAD_REQUEST", error.message);
@@ -183,13 +237,15 @@ export const listWallets = async (c: AppContext) => {
 export const getPublicKey = async (c: AppContext) => {
   const auth = getAuth(c);
   const projectId = c.req.query("projectId");
+  const walletId = c.req.query("walletId");
 
   const signingService = createSigningService(c.env);
 
   try {
     const publicKey = await signingService.getPublicKey(
       auth.organizationId,
-      projectId ?? undefined
+      projectId ?? undefined,
+      walletId ?? undefined
     );
 
     return success(c, { publicKey });

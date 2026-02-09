@@ -1,12 +1,20 @@
+import { PERMISSIONS } from "@sdp/types";
 import { z } from "zod";
 
 export const apiKeyCreateSchema = z.object({
   name: z.string().min(1).max(100),
   description: z.string().max(500).optional(),
   role: z.enum(["api_admin", "api_developer", "api_readonly"]).optional(),
+  permissions: z.array(z.enum(PERMISSIONS)).optional(),
   environment: z.enum(["sandbox", "production"]).optional(),
   allowedIps: z.array(z.string()).optional(),
   expiresAt: z.string().datetime().optional(),
+  signingWalletId: z.string().min(1).optional(),
+  provisionWallet: z.boolean().optional(),
+  walletLabel: z.string().max(100).optional(),
+  walletPurpose: z
+    .enum(["root", "mint_authority", "freeze_authority", "fee_payer", "transfer"])
+    .optional(),
 });
 
 export const apiKeyUpdateSchema = z.object({
@@ -14,6 +22,8 @@ export const apiKeyUpdateSchema = z.object({
   description: z.string().max(500).nullable().optional(),
   allowedIps: z.array(z.string()).nullable().optional(),
   expiresAt: z.string().datetime().nullable().optional(),
+  permissions: z.array(z.enum(PERMISSIONS)).nullable().optional(),
+  signingWalletId: z.string().min(1).nullable().optional(),
 });
 
 export const apiKeyRotateSchema = z.object({
