@@ -1,6 +1,17 @@
 {
   "$schema": "https://turbo.build/schema.json",
   "globalDependencies": [".env", ".env.*"],
+  "globalEnv": [
+    "API_KEY_PEPPER",
+    "CUSTODY_PRIVATE_KEY",
+    "KORA_API_KEY",
+    "KORA_MIN_BALANCE_LAMPORTS",
+    "KORA_RPC_URL",
+    "KORA_TIMEOUT_MS",
+    "RUN_INTEGRATION_TESTS",
+    "SOLANA_NETWORK",
+    "SOLANA_RPC_URL"
+  ],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
