@@ -20,11 +20,9 @@ import type {
 import {
   RUN_INTEGRATION_TESTS,
   SOLANA_CONFIGURED,
-  TEST_PROJECT_API_KEY,
-  app,
   cleanupIntegrationSuite,
-  env,
   initIntegrationSuite,
+  requestWithApiKey,
   resetIntegrationState,
 } from "../helpers/integration";
 
@@ -38,13 +36,11 @@ const TEST_WALLETS = {
 
 describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Token ACL", () => {
   let apiKeyHash: string;
-  let custodyAddress = "";
-  const request = (url: string, init?: RequestInit) => app.request(url, init, env);
+  const request = requestWithApiKey();
 
   beforeAll(async () => {
     const init = await initIntegrationSuite();
     apiKeyHash = init.apiKeyHash;
-    custodyAddress = init.custodyAddress;
   });
 
   afterAll(async () => {
@@ -63,7 +59,6 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Token ACL"
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
       },
       body: JSON.stringify({
         name,
@@ -80,14 +75,21 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Token ACL"
 
     const deployRes = await request(`/v1/issuance/tokens/${tokenId}/deploy`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
     });
 
     const deployed = (await deployRes.json()) as TokenApiResponse;
+    const mintAddress = deployed.data.token.mintAddress;
+    const freezeAuthority = deployed.data.token.freezeAuthority;
+    if (!mintAddress) {
+      throw new Error("Expected deployed token to include mintAddress");
+    }
+    if (!freezeAuthority) {
+      throw new Error("Expected deployed token to include freezeAuthority");
+    }
     return {
       tokenId,
-      mintAddress: deployed.data.token.mintAddress!,
-      freezeAuthority: deployed.data.token.freezeAuthority!,
+      mintAddress,
+      freezeAuthority,
     };
   }
 
@@ -99,7 +101,6 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Token ACL"
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
       },
       body: JSON.stringify({
         mint: {
@@ -131,7 +132,6 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Token ACL"
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
       },
       body: JSON.stringify({
         accountAddress: tokenAccount,
@@ -164,7 +164,6 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Token ACL"
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
       },
       body: JSON.stringify({
         accountAddress: tokenAccount,
@@ -180,7 +179,6 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Token ACL"
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
       },
       body: JSON.stringify({
         accountAddress: tokenAccount,
@@ -214,7 +212,6 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Token ACL"
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
       },
       body: JSON.stringify({
         accountAddress: mint1.data.tokenAccount,
@@ -226,7 +223,6 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Token ACL"
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
       },
       body: JSON.stringify({
         accountAddress: mint2.data.tokenAccount,
@@ -235,9 +231,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Token ACL"
     });
 
     // List frozen accounts
-    const listRes = await request(`/v1/issuance/tokens/${tokenId}/frozen`, {
-      headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
-    });
+    const listRes = await request(`/v1/issuance/tokens/${tokenId}/frozen`);
 
     expect(listRes.status).toBe(200);
     const list = (await listRes.json()) as {
@@ -259,7 +253,6 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Token ACL"
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
       },
       body: JSON.stringify({
         name: "Non-Freezable Token",
@@ -277,7 +270,6 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Token ACL"
     // Deploy
     const deployRes = await request(`/v1/issuance/tokens/${tokenId}/deploy`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
     });
 
     const deployed = (await deployRes.json()) as TokenApiResponse;
@@ -291,7 +283,6 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Token ACL"
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
       },
       body: JSON.stringify({
         accountAddress: mintResult.data.tokenAccount,
@@ -316,7 +307,6 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Token ACL"
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
       },
       body: JSON.stringify({
         accountAddress: mintResult.data.tokenAccount,

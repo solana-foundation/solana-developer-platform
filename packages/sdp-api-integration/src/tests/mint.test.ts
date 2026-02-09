@@ -7,11 +7,9 @@ import type {
 import {
   RUN_INTEGRATION_TESTS,
   SOLANA_CONFIGURED,
-  TEST_PROJECT_API_KEY,
-  app,
   cleanupIntegrationSuite,
-  env,
   initIntegrationSuite,
+  requestWithApiKey,
   resetIntegrationState,
 } from "../helpers/integration";
 
@@ -19,7 +17,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mint Operations",
   let apiKeyHash: string;
   let custodyAddress = "";
   let deployedTokenId = "";
-  const request = (url: string, init?: RequestInit) => app.request(url, init, env);
+  const request = requestWithApiKey();
 
   beforeAll(async () => {
     const init = await initIntegrationSuite();
@@ -38,7 +36,6 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mint Operations",
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
       },
       body: JSON.stringify({
         name: "Mint Test Token",
@@ -53,7 +50,6 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mint Operations",
 
     await request(`/v1/issuance/tokens/${deployedTokenId}/deploy`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
     });
   }, 60000);
 
@@ -62,7 +58,6 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mint Operations",
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
       },
       body: JSON.stringify({
         mint: {
@@ -81,9 +76,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mint Operations",
 
     console.log(`Mint signature: ${minted.data.transaction.signature}`);
 
-    const tokenRes = await request(`/v1/issuance/tokens/${deployedTokenId}`, {
-      headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
-    });
+    const tokenRes = await request(`/v1/issuance/tokens/${deployedTokenId}`);
 
     const token = (await tokenRes.json()) as TokenApiResponse;
     expect(token.data.token.totalSupply).toBe("1");
@@ -94,7 +87,6 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mint Operations",
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
       },
       body: JSON.stringify({
         mint: {

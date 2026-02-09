@@ -3,15 +3,15 @@ import { describe, expect, it } from "vitest";
 import {
   RUN_INTEGRATION_TESTS,
   SOLANA_CONFIGURED,
-  Token2022Service,
   createSigner,
+  createToken2022Service,
   env,
 } from "../helpers/integration";
 
 describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Token2022Service Direct", () => {
   it("creates mint using service directly", { timeout: 60000 }, async () => {
     const signer = await createSigner(env as Env);
-    const token2022 = new Token2022Service(env as Env, signer);
+    const token2022 = createToken2022Service(env as Env, signer);
 
     const result = await token2022.createMint({
       metadata: {

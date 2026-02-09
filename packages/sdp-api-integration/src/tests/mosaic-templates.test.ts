@@ -10,18 +10,16 @@ import type { TokenApiResponse } from "../helpers/api-types";
 import {
   RUN_INTEGRATION_TESTS,
   SOLANA_CONFIGURED,
-  TEST_PROJECT_API_KEY,
-  app,
   cleanupIntegrationSuite,
-  env,
   initIntegrationSuite,
+  requestWithApiKey,
   resetIntegrationState,
 } from "../helpers/integration";
 
 describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Template Deployment", () => {
   let apiKeyHash: string;
   let custodyAddress = "";
-  const request = (url: string, init?: RequestInit) => app.request(url, init, env);
+  const request = requestWithApiKey();
 
   beforeAll(async () => {
     const init = await initIntegrationSuite();
@@ -43,7 +41,6 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Template D
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
       },
       body: JSON.stringify({
         name: "Test Stablecoin",
@@ -64,7 +61,6 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Template D
     // Deploy the token
     const deployRes = await request(`/v1/issuance/tokens/${tokenId}/deploy`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
     });
 
     expect(deployRes.status).toBe(200);
@@ -85,7 +81,6 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Template D
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
       },
       body: JSON.stringify({
         name: "Test Arcade Token",
@@ -107,7 +102,6 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Template D
     // Deploy the token
     const deployRes = await request(`/v1/issuance/tokens/${tokenId}/deploy`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
     });
 
     expect(deployRes.status).toBe(200);
@@ -131,7 +125,6 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Template D
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
       },
       body: JSON.stringify({
         name: "Test Security Token",
@@ -152,7 +145,6 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Template D
     // Deploy the token
     const deployRes = await request(`/v1/issuance/tokens/${tokenId}/deploy`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
     });
 
     expect(deployRes.status).toBe(200);
@@ -171,7 +163,6 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Template D
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
       },
       body: JSON.stringify({
         name: "Test Custom Token",
@@ -191,7 +182,6 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Template D
     // Deploy the token
     const deployRes = await request(`/v1/issuance/tokens/${tokenId}/deploy`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
     });
 
     expect(deployRes.status).toBe(200);
@@ -205,9 +195,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Template D
   });
 
   it("lists available templates", { timeout: 10000 }, async () => {
-    const res = await request("/v1/issuance/templates", {
-      headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
-    });
+    const res = await request("/v1/issuance/templates");
 
     expect(res.status).toBe(200);
     const body = (await res.json()) as { data: { templates: Array<{ id: string; name: string }> } };
@@ -223,9 +211,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Template D
   });
 
   it("gets specific template info", { timeout: 10000 }, async () => {
-    const res = await request("/v1/issuance/templates/stablecoin", {
-      headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
-    });
+    const res = await request("/v1/issuance/templates/stablecoin");
 
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
