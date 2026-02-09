@@ -25,9 +25,11 @@ import docs from "@/routes/docs";
 import health from "@/routes/health";
 import issuance from "@/routes/issuance";
 import members from "@/routes/members";
+import onboarding from "@/routes/onboarding";
 import openapi from "@/routes/openapi";
 import organizations from "@/routes/organizations";
 import projects from "@/routes/projects";
+import webhooks from "@/routes/webhooks";
 
 // Create app
 const app = new Hono<{ Bindings: Env }>();
@@ -65,7 +67,7 @@ app.use("*", async (c, next) => {
 });
 
 // Rate limiting (skip health check paths)
-app.use("*", skipRateLimitPaths("/health", "/health/ready", "/openapi.json", "/docs"));
+app.use("*", skipRateLimitPaths("/health", "/health/ready", "/openapi.json", "/docs", "/webhooks"));
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Routes
@@ -75,6 +77,7 @@ app.use("*", skipRateLimitPaths("/health", "/health/ready", "/openapi.json", "/d
 app.route("/health", health);
 app.route("/openapi.json", openapi);
 app.route("/docs", docs);
+app.route("/webhooks", webhooks);
 
 // API v1
 const v1 = new Hono<{ Bindings: Env }>();
@@ -85,6 +88,7 @@ v1.route("/auth", auth);
 v1.route("/projects", projects);
 v1.route("/issuance", issuance);
 v1.route("/custody", custody);
+v1.route("/onboarding", onboarding);
 
 app.route("/v1", v1);
 

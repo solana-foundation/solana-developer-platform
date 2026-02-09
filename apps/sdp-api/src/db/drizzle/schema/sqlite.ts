@@ -1,11 +1,5 @@
 import { sql } from "drizzle-orm";
-import {
-  index,
-  integer,
-  sqliteTable,
-  text,
-  uniqueIndex,
-} from "drizzle-orm/sqlite-core";
+import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 // Note: JSON blobs are stored as TEXT for D1 + Postgres portability.
 
@@ -42,6 +36,52 @@ export const users = sqliteTable(
   (table) => ({
     emailIdx: index("idx_users_email").on(table.email),
     statusIdx: index("idx_users_status").on(table.status),
+  })
+);
+
+export const authUserIdentities = sqliteTable(
+  "auth_user_identities",
+  {
+    id: text("id").primaryKey(),
+    provider: text("provider").notNull(),
+    providerUserId: text("provider_user_id").notNull(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    email: text("email"),
+    createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
+    updatedAt: text("updated_at").notNull().default(sql`(datetime('now'))`),
+  },
+  (table) => ({
+    providerUserUnique: uniqueIndex("auth_user_identities_provider_user_unique").on(
+      table.provider,
+      table.providerUserId
+    ),
+    userIdx: index("idx_auth_user_identities_user").on(table.userId),
+    providerIdx: index("idx_auth_user_identities_provider").on(table.provider),
+  })
+);
+
+export const authOrganizationIdentities = sqliteTable(
+  "auth_organization_identities",
+  {
+    id: text("id").primaryKey(),
+    provider: text("provider").notNull(),
+    providerOrgId: text("provider_org_id").notNull(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    slug: text("slug"),
+    createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
+    updatedAt: text("updated_at").notNull().default(sql`(datetime('now'))`),
+  },
+  (table) => ({
+    providerOrgUnique: uniqueIndex("auth_org_identities_provider_org_unique").on(
+      table.provider,
+      table.providerOrgId
+    ),
+    orgIdx: index("idx_auth_org_identities_org").on(table.organizationId),
+    providerIdx: index("idx_auth_org_identities_provider").on(table.provider),
   })
 );
 
@@ -123,7 +163,9 @@ export const invitations = sqliteTable(
       .references(() => organizations.id, { onDelete: "cascade" }),
     email: text("email").notNull(),
     role: text("role").notNull().default("member"),
-    invitedBy: text("invited_by").notNull().references(() => users.id),
+    invitedBy: text("invited_by")
+      .notNull()
+      .references(() => users.id),
     tokenHash: text("token_hash").notNull(),
     expiresAt: text("expires_at").notNull(),
     status: text("status").notNull().default("pending"),
@@ -150,7 +192,9 @@ export const projects = sqliteTable(
     environment: text("environment").notNull().default("sandbox"),
     settings: text("settings"),
     status: text("status").notNull().default("active"),
-    createdBy: text("created_by").notNull().references(() => users.id),
+    createdBy: text("created_by")
+      .notNull()
+      .references(() => users.id),
     createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
     updatedAt: text("updated_at").notNull().default(sql`(datetime('now'))`),
   },
@@ -172,7 +216,9 @@ export const apiKeys = sqliteTable(
     organizationId: text("organization_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
-    createdBy: text("created_by").notNull().references(() => users.id),
+    createdBy: text("created_by")
+      .notNull()
+      .references(() => users.id),
     name: text("name").notNull(),
     keyPrefix: text("key_prefix").notNull(),
     keyHash: text("key_hash").notNull(),
@@ -295,12 +341,8 @@ export const issuedTokens = sqliteTable(
     status: text("status").notNull().default("pending"),
     deployedAt: text("deployed_at"),
     createdBy: text("created_by").notNull(),
-    createdAt: text("created_at")
-      .notNull()
-      .default(sql`(STRFTIME('%Y-%m-%dT%H:%M:%fZ','now'))`),
-    updatedAt: text("updated_at")
-      .notNull()
-      .default(sql`(STRFTIME('%Y-%m-%dT%H:%M:%fZ','now'))`),
+    createdAt: text("created_at").notNull().default(sql`(STRFTIME('%Y-%m-%dT%H:%M:%fZ','now'))`),
+    updatedAt: text("updated_at").notNull().default(sql`(STRFTIME('%Y-%m-%dT%H:%M:%fZ','now'))`),
     template: text("template").notNull().default("custom"),
     ablListAddress: text("abl_list_address"),
   },
@@ -323,15 +365,14 @@ export const issuedTokenExtensions = sqliteTable(
       .references(() => issuedTokens.id, { onDelete: "cascade" }),
     extension: text("extension").notNull(),
     config: text("config"),
-    createdAt: text("created_at")
-      .notNull()
-      .default(sql`(STRFTIME('%Y-%m-%dT%H:%M:%fZ','now'))`),
+    createdAt: text("created_at").notNull().default(sql`(STRFTIME('%Y-%m-%dT%H:%M:%fZ','now'))`),
   },
   (table) => ({
     tokenIdx: index("idx_issued_token_extensions_token").on(table.tokenId),
-    tokenExtensionUnique: uniqueIndex(
-      "issued_token_extensions_token_id_extension_unique"
-    ).on(table.tokenId, table.extension),
+    tokenExtensionUnique: uniqueIndex("issued_token_extensions_token_id_extension_unique").on(
+      table.tokenId,
+      table.extension
+    ),
   })
 );
 
@@ -355,12 +396,8 @@ export const issuanceTransactions = sqliteTable(
     fee: integer("fee"),
     error: text("error"),
     initiatedByKeyId: text("initiated_by_key_id"),
-    createdAt: text("created_at")
-      .notNull()
-      .default(sql`(STRFTIME('%Y-%m-%dT%H:%M:%fZ','now'))`),
-    updatedAt: text("updated_at")
-      .notNull()
-      .default(sql`(STRFTIME('%Y-%m-%dT%H:%M:%fZ','now'))`),
+    createdAt: text("created_at").notNull().default(sql`(STRFTIME('%Y-%m-%dT%H:%M:%fZ','now'))`),
+    updatedAt: text("updated_at").notNull().default(sql`(STRFTIME('%Y-%m-%dT%H:%M:%fZ','now'))`),
   },
   (table) => ({
     tokenIdx: index("idx_issuance_tx_token").on(table.tokenId),
@@ -378,9 +415,7 @@ export const issuanceTransactionStatuses = sqliteTable(
       .notNull()
       .references(() => issuanceTransactions.id, { onDelete: "cascade" }),
     status: text("status").notNull(),
-    changedAt: text("changed_at")
-      .notNull()
-      .default(sql`(STRFTIME('%Y-%m-%dT%H:%M:%fZ','now'))`),
+    changedAt: text("changed_at").notNull().default(sql`(STRFTIME('%Y-%m-%dT%H:%M:%fZ','now'))`),
   },
   (table) => ({
     transactionIdx: index("idx_issuance_tx_status_tx").on(table.transactionId),
@@ -399,9 +434,7 @@ export const tokenAllowlists = sqliteTable(
     label: text("label"),
     status: text("status").notNull().default("active"),
     addedBy: text("added_by").notNull(),
-    createdAt: text("created_at")
-      .notNull()
-      .default(sql`(STRFTIME('%Y-%m-%dT%H:%M:%fZ','now'))`),
+    createdAt: text("created_at").notNull().default(sql`(STRFTIME('%Y-%m-%dT%H:%M:%fZ','now'))`),
     revokedAt: text("revoked_at"),
   },
   (table) => ({
@@ -423,9 +456,7 @@ export const tokenAllowlistStatuses = sqliteTable(
       .notNull()
       .references(() => tokenAllowlists.id, { onDelete: "cascade" }),
     status: text("status").notNull(),
-    changedAt: text("changed_at")
-      .notNull()
-      .default(sql`(STRFTIME('%Y-%m-%dT%H:%M:%fZ','now'))`),
+    changedAt: text("changed_at").notNull().default(sql`(STRFTIME('%Y-%m-%dT%H:%M:%fZ','now'))`),
   },
   (table) => ({
     allowlistIdx: index("idx_token_allowlist_statuses_entry").on(table.allowlistId),
@@ -442,9 +473,7 @@ export const frozenAccounts = sqliteTable(
       .references(() => issuedTokens.id, { onDelete: "cascade" }),
     accountAddress: text("account_address").notNull(),
     reason: text("reason"),
-    frozenAt: text("frozen_at")
-      .notNull()
-      .default(sql`(STRFTIME('%Y-%m-%dT%H:%M:%fZ','now'))`),
+    frozenAt: text("frozen_at").notNull().default(sql`(STRFTIME('%Y-%m-%dT%H:%M:%fZ','now'))`),
     frozenBy: text("frozen_by").notNull(),
     unfrozenAt: text("unfrozen_at"),
     unfrozenBy: text("unfrozen_by"),
@@ -469,24 +498,15 @@ export const custodyConfigs = sqliteTable(
     projectId: text("project_id").references(() => projects.id, { onDelete: "cascade" }),
     provider: text("provider").notNull(),
     configEncrypted: text("config_encrypted").notNull(),
-    encryptionVersion: text("encryption_version")
-      .notNull()
-      .default("sdp-custody-encryption-v1"),
+    encryptionVersion: text("encryption_version").notNull().default("sdp-custody-encryption-v1"),
     defaultWalletId: text("default_wallet_id"),
     status: text("status").notNull().default("active"),
-    createdAt: text("created_at")
-      .notNull()
-      .default(sql`(STRFTIME('%Y-%m-%dT%H:%M:%fZ','now'))`),
-    updatedAt: text("updated_at")
-      .notNull()
-      .default(sql`(STRFTIME('%Y-%m-%dT%H:%M:%fZ','now'))`),
+    createdAt: text("created_at").notNull().default(sql`(STRFTIME('%Y-%m-%dT%H:%M:%fZ','now'))`),
+    updatedAt: text("updated_at").notNull().default(sql`(STRFTIME('%Y-%m-%dT%H:%M:%fZ','now'))`),
   },
   (table) => ({
     orgIdx: index("idx_custody_configs_org").on(table.organizationId),
-    projectIdx: index("idx_custody_configs_project").on(
-      table.organizationId,
-      table.projectId
-    ),
+    projectIdx: index("idx_custody_configs_project").on(table.organizationId, table.projectId),
     statusIdx: index("idx_custody_configs_status").on(table.status),
     orgProjectProviderUnique: uniqueIndex(
       "custody_configs_organization_id_project_id_provider_unique"
@@ -504,20 +524,15 @@ export const signingRequests = sqliteTable(
     custodyConfigId: text("custody_config_id").references(() => custodyConfigs.id, {
       onDelete: "set null",
     }),
-    tokenTransactionId: text("token_transaction_id").references(
-      () => issuanceTransactions.id,
-      {
-        onDelete: "set null",
-      }
-    ),
+    tokenTransactionId: text("token_transaction_id").references(() => issuanceTransactions.id, {
+      onDelete: "set null",
+    }),
     externalRequestId: text("external_request_id"),
     status: text("status").notNull().default("pending"),
     transactionMessage: text("transaction_message").notNull(),
     signatures: text("signatures"),
     metadata: text("metadata"),
-    createdAt: text("created_at")
-      .notNull()
-      .default(sql`(STRFTIME('%Y-%m-%dT%H:%M:%fZ','now'))`),
+    createdAt: text("created_at").notNull().default(sql`(STRFTIME('%Y-%m-%dT%H:%M:%fZ','now'))`),
     completedAt: text("completed_at"),
   },
   (table) => ({
@@ -540,9 +555,7 @@ export const custodyWallets = sqliteTable(
     label: text("label"),
     purpose: text("purpose"),
     status: text("status").notNull().default("active"),
-    createdAt: text("created_at")
-      .notNull()
-      .default(sql`(STRFTIME('%Y-%m-%dT%H:%M:%fZ','now'))`),
+    createdAt: text("created_at").notNull().default(sql`(STRFTIME('%Y-%m-%dT%H:%M:%fZ','now'))`),
   },
   (table) => ({
     configIdx: index("idx_custody_wallets_config").on(table.custodyConfigId),

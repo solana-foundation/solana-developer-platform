@@ -10,11 +10,9 @@ import {
   KORA_CONFIGURED,
   RUN_INTEGRATION_TESTS,
   SOLANA_CONFIGURED,
-  TEST_PROJECT_API_KEY,
-  app,
   cleanupIntegrationSuite,
-  env,
   initIntegrationSuite,
+  requestWithApiKey,
   resetIntegrationState,
 } from "../helpers/integration";
 
@@ -23,7 +21,7 @@ describe.skipIf(!KORA_CONFIGURED || !SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS
   () => {
     let apiKeyHash: string;
     let custodyAddress = "";
-    const request = (url: string, init?: RequestInit) => app.request(url, init, env);
+    const request = requestWithApiKey();
 
     beforeAll(async () => {
       const init = await initIntegrationSuite();
@@ -44,7 +42,6 @@ describe.skipIf(!KORA_CONFIGURED || !SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
         },
         body: JSON.stringify({
           name: "Kora Devnet Token",
@@ -61,7 +58,6 @@ describe.skipIf(!KORA_CONFIGURED || !SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS
 
       const deployRes = await request(`/v1/issuance/tokens/${tokenId}/deploy`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
       });
 
       expect(deployRes.status).toBe(200);
@@ -72,7 +68,6 @@ describe.skipIf(!KORA_CONFIGURED || !SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
         },
         body: JSON.stringify({
           mint: {
@@ -94,7 +89,6 @@ describe.skipIf(!KORA_CONFIGURED || !SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
         },
         body: JSON.stringify({ accountAddress: tokenAccount }),
       });
@@ -107,7 +101,6 @@ describe.skipIf(!KORA_CONFIGURED || !SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
         },
         body: JSON.stringify({ accountAddress: tokenAccount }),
       });
@@ -120,7 +113,6 @@ describe.skipIf(!KORA_CONFIGURED || !SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
         },
         body: JSON.stringify({
           burn: {

@@ -1,8 +1,7 @@
 import { AppError, notFound } from "@/lib/errors";
 import { created, noContent, success } from "@/lib/response";
-import { AllowlistService } from "@/services/allowlist.service";
+import { createAllowlistService } from "@/services/allowlist.service";
 import { AuditService } from "@/services/audit.service";
-import { KVService } from "@/services/kv.service";
 import type { Env } from "@/types/env";
 import type { Context } from "hono";
 import { addEntrySchema } from "./schemas";
@@ -13,8 +12,7 @@ export const listEntries = async (c: AppContext) => {
   const type = c.req.query("type") as "email" | "domain" | undefined;
   const status = c.req.query("status") as "active" | "disabled" | undefined;
 
-  const kvService = new KVService(c.env.SDP_API_KEYS, c.env.SDP_CACHE);
-  const allowlistService = new AllowlistService(c.env.DB, kvService);
+  const allowlistService = createAllowlistService(c.env);
 
   const entries = await allowlistService.listEntries({ type, status });
 
@@ -31,25 +29,22 @@ export const addEntry = async (c: AppContext) => {
     });
   }
 
-  const kvService = new KVService(c.env.SDP_API_KEYS, c.env.SDP_CACHE);
-  const allowlistService = new AllowlistService(c.env.DB, kvService);
+  const allowlistService = createAllowlistService(c.env);
   const auditService = new AuditService(c.env.DB);
-
-  const id = `al_${crypto.randomUUID()}`;
 
   try {
     const entry = await allowlistService.addEntry({
-      id,
+      id: `al_${crypto.randomUUID()}`,
       type: parsed.data.type,
       value: parsed.data.value,
-      tier: parsed.data.tier,
+      tier: parsed.data.tier ?? "standard",
       notes: parsed.data.notes,
     });
 
     await auditService.log(c, {
       action: "create",
       resourceType: "allowlist",
-      resourceId: id,
+      resourceId: entry.id,
       metadata: parsed.data,
     });
 
@@ -65,8 +60,7 @@ export const addEntry = async (c: AppContext) => {
 export const removeEntry = async (c: AppContext) => {
   const { id } = c.req.param();
 
-  const kvService = new KVService(c.env.SDP_API_KEYS, c.env.SDP_CACHE);
-  const allowlistService = new AllowlistService(c.env.DB, kvService);
+  const allowlistService = createAllowlistService(c.env);
   const auditService = new AuditService(c.env.DB);
 
   const existing = await allowlistService.getEntry(id);

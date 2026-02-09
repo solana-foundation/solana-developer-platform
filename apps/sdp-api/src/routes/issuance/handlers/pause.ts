@@ -12,7 +12,7 @@ import type { Context } from "hono";
 import { pauseTokenSchema } from "../schemas";
 
 type AppContext = Context<{ Bindings: Env }>;
-type TokenRecord = Awaited<ReturnType<TokenService["prototype"]["getToken"]>>;
+type TokenRecord = Awaited<ReturnType<TokenService["getToken"]>>;
 
 const resolvePauseAuthority = (token: TokenRecord): string | null => {
   if (!token) {

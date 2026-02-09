@@ -7,8 +7,8 @@ import {
 import { clearTestDatabase, seedTestDatabase } from "@sdp/api-test/mocks/d1";
 import app from "@sdp/api/index";
 import { hashString } from "@sdp/api/lib/hash";
-import { Token2022Service, createSigner } from "@sdp/api/services/solana";
 import { createMosaicService } from "@sdp/api/services/mosaic";
+import { Token2022Service, createSigner, createToken2022Service } from "@sdp/api/services/solana";
 import { env } from "./env";
 
 const SOLANA_CONFIGURED = !!env.SOLANA_RPC_URL && !!env.CUSTODY_PRIVATE_KEY;
@@ -159,11 +159,24 @@ export async function cleanupIntegrationSuite() {
   await clearTestDatabase(env);
 }
 
+export function request(url: string, init?: RequestInit) {
+  return app.request(url, init, env);
+}
+
+export function requestWithApiKey(apiKey: string = TEST_PROJECT_API_KEY.raw) {
+  return (url: string, init: RequestInit = {}) => {
+    const headers = new Headers(init.headers);
+    headers.set("Authorization", `Bearer ${apiKey}`);
+    return request(url, { ...init, headers });
+  };
+}
+
 export {
   app,
   env,
   Token2022Service,
   createSigner,
+  createToken2022Service,
   createMosaicService,
   TEST_ORG,
   TEST_USER,

@@ -39,28 +39,29 @@ name = "sdp-api-dev"
 [[env.dev.d1_databases]]
 binding = "DB"
 database_name = "sdp-db-dev"
-database_id = "eb2253d1-ea79-4c8d-bc17-54714253ab37"
+database_id = "9e6d2e56-8e3d-47fc-8f8a-50db03d1cacc"
 migrations_dir = "src/db/migrations"
 
 [[env.dev.kv_namespaces]]
 binding = "SDP_API_KEYS"
-id = "8a9ee45dcb21427d84dc70417abc7d7d"
+id = "0aed6bde7a5a49589f1696ae719c1586"
 
 [[env.dev.kv_namespaces]]
 binding = "SDP_RATE_LIMITS"
-id = "06ae0aa312ac4135961131c77f600995"
+id = "261d95813340417380d9ba317403b6bd"
 
 [[env.dev.kv_namespaces]]
 binding = "SDP_CACHE"
-id = "83637da8fc7a4da6bd9301167888805f"
+id = "628af2da2be8447b81848ba26ea0977d"
 
 [[env.dev.kv_namespaces]]
 binding = "SDP_SESSIONS"
-id = "07f1847404084b69bb7a703bae4ef009"
+id = "56172f4bd6484367af2eaf0039246802"
 
 [env.dev.vars]
 ENVIRONMENT = "development"
 API_VERSION = "v1"
+EMAIL_FROM = "noreply@mail.solana.org"
 SOLANA_NETWORK = "devnet"
 SOLANA_RPC_URL = "https://api.devnet.solana.com"
 FEE_PAYMENT_PROVIDER = "kora"
@@ -73,24 +74,24 @@ name = "sdp-api-staging"
 [[env.staging.d1_databases]]
 binding = "DB"
 database_name = "sdp-db-staging"
-database_id = "YOUR_STAGING_DB_ID"
+database_id = "219ab0d9-b467-4f15-9a69-06de58e44b5e"
 migrations_dir = "src/db/migrations"
 
 [[env.staging.kv_namespaces]]
 binding = "SDP_API_KEYS"
-id = "YOUR_STAGING_KV_ID"
+id = "9b49110bb0fe4b0eae73cd0a2b03ab51"
 
 [[env.staging.kv_namespaces]]
 binding = "SDP_RATE_LIMITS"
-id = "YOUR_STAGING_RATELIMIT_KV_ID"
+id = "2749d080ce474f59b7904df00f3c561f"
 
 [[env.staging.kv_namespaces]]
 binding = "SDP_CACHE"
-id = "YOUR_STAGING_CACHE_KV_ID"
+id = "35aeb577699f4ad990b842f2bc2449dc"
 
 [[env.staging.kv_namespaces]]
 binding = "SDP_SESSIONS"
-id = "YOUR_STAGING_SESSIONS_KV_ID"
+id = "d610bc5eecd74c3586b0a13c73e995fb"
 
 [env.staging.vars]
 ENVIRONMENT = "staging"
@@ -104,25 +105,26 @@ name = "sdp-api-production"
 [[env.production.d1_databases]]
 binding = "DB"
 database_name = "sdp-db-production"
-database_id = "YOUR_PRODUCTION_DB_ID"
+database_id = "b2ea9846-4a2e-4b29-890c-89b40f88f756"
 migrations_dir = "src/db/migrations"
 
 [[env.production.kv_namespaces]]
 binding = "SDP_API_KEYS"
-id = "YOUR_PRODUCTION_KV_ID"
+id = "b03b0acc592c4f3ba0e0ba47dd275475"
 
 [[env.production.kv_namespaces]]
 binding = "SDP_RATE_LIMITS"
-id = "YOUR_PRODUCTION_RATELIMIT_KV_ID"
+id = "9f1aa19f944947539fb8739426a4457f"
 
 [[env.production.kv_namespaces]]
 binding = "SDP_CACHE"
-id = "YOUR_PRODUCTION_CACHE_KV_ID"
+id = "b82a4bf1c9a14609bfc69cfb6c7df17d"
 
 [[env.production.kv_namespaces]]
 binding = "SDP_SESSIONS"
-id = "YOUR_PRODUCTION_SESSIONS_KV_ID"
+id = "67fb59b197f84084b42d595cb058a722"
 
 [env.production.vars]
 ENVIRONMENT = "production"
 API_VERSION = "v1"
+EMAIL_FROM = "noreply@mail.solana.org"

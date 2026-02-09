@@ -22,6 +22,18 @@ export interface ApiKeyContext {
   environment: string;
 }
 
+export interface ClerkAuthContext {
+  userId: string;
+  organizationId: string;
+  role: string;
+  permissions: Permission[];
+  clerkUserId: string;
+  clerkOrgId: string;
+  email: string | null;
+  orgSlug: string | null;
+  orgRole: string | null;
+}
+
 /**
  * Get authenticated API key context from request.
  * Use this in protected routes instead of c.get("apiKey")!
@@ -50,5 +62,23 @@ export function getAuth(c: Context<{ Bindings: Env }>): ApiKeyContext {
     role: auth.role,
     permissions: auth.permissions,
     environment: auth.environment,
+  };
+}
+
+export function getClerkAuth(c: Context<{ Bindings: Env }>): ClerkAuthContext {
+  const auth = c.get("clerk");
+  if (!auth) {
+    throw new AppError("UNAUTHORIZED", "Clerk authentication required");
+  }
+  return {
+    userId: auth.userId,
+    organizationId: auth.organizationId,
+    role: auth.role,
+    permissions: auth.permissions,
+    clerkUserId: auth.clerkUserId,
+    clerkOrgId: auth.clerkOrgId,
+    email: auth.email ?? null,
+    orgSlug: auth.orgSlug ?? null,
+    orgRole: auth.orgRole ?? null,
   };
 }

@@ -15,7 +15,7 @@ import { updateAuthoritySchema } from "../schemas";
 type AppContext = Context<{ Bindings: Env }>;
 
 type AuthorityRole = "mint" | "freeze" | "permanentDelegate" | "metadata";
-type TokenRecord = Awaited<ReturnType<TokenService["prototype"]["getToken"]>>;
+type TokenRecord = Awaited<ReturnType<TokenService["getToken"]>>;
 
 type AuthorityUpdate = {
   mintAuthority?: string | null;
@@ -119,7 +119,7 @@ export const prepareUpdateAuthority = async (c: AppContext) => {
     feePayer: signer.address,
   });
 
-  let simulation;
+  let simulation: unknown;
   if (parsed.data.options?.simulate) {
     const rpc = createRpc(c.env);
     const txBytes = Buffer.from(prepared.serializedTx, "base64");

@@ -96,3 +96,70 @@ jobs:
 
       - name: Unit tests
         run: pnpm test
+
+  build_api:
+    name: Build API
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.1
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Build API (Wrangler dry-run)
+        run: pnpm --filter ./apps/sdp-api build
+
+  integration_tests:
+    name: Integration Tests (Devnet/Kora)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # Devnet configuration (override as needed via repository/organization secrets)
+      SOLANA_NETWORK: devnet
+      SOLANA_RPC_URL: ${{ secrets.SOLANA_RPC_URL || 'https://api.devnet.solana.com' }}
+
+      # Kora configuration (override as needed)
+      KORA_RPC_URL: ${{ secrets.KORA_RPC_URL || 'https://kora-devnet-315956366746.us-central1.run.app' }}
+      KORA_API_KEY: ${{ secrets.KORA_API_KEY }}
+
+      # Required: a signing key for the custody wallet (Base58-encoded 64-byte keypair)
+      CUSTODY_PRIVATE_KEY: ${{ secrets.CUSTODY_PRIVATE_KEY }}
+
+      # Optional: tighten/loosen the fail-fast sponsor-funds check (lamports)
+      KORA_MIN_BALANCE_LAMPORTS: ${{ secrets.KORA_MIN_BALANCE_LAMPORTS }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.1
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Integration tests
+        run: pnpm test:integration
