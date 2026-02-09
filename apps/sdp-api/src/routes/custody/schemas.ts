@@ -56,6 +56,27 @@ export const createWalletSchema = z.object({
 export type CreateWalletRequest = z.infer<typeof createWalletSchema>;
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Switch Signing Provider
+// ═══════════════════════════════════════════════════════════════════════════
+
+// For now, switching uses the same shape as initialize. The handler deactivates the
+// existing config for the scope (org or project) and then runs the initializer.
+export const switchSigningSchema = initializeSigningSchema;
+
+export type SwitchSigningRequest = z.infer<typeof switchSigningSchema>;
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Set Default Wallet
+// ═══════════════════════════════════════════════════════════════════════════
+
+export const setDefaultWalletSchema = z.object({
+  projectId: z.string().optional(),
+  walletId: z.string().min(1),
+});
+
+export type SetDefaultWalletRequest = z.infer<typeof setDefaultWalletSchema>;
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Response Types
 // ═══════════════════════════════════════════════════════════════════════════
 
