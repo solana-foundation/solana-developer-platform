@@ -72,6 +72,25 @@ export interface CreateOrganizationRequest {
   name: string;
   slug?: string;
   email: string; // Creator's email (for allowlist check)
+  custody?: CreateOrganizationCustody;
+}
+
+export type CreateOrganizationCustody =
+  | CreateOrganizationCustodyFireblocks
+  | CreateOrganizationCustodyPrivy;
+
+export interface CreateOrganizationCustodyFireblocks {
+  provider: "fireblocks";
+  apiBaseUrl?: string;
+  assetId?: string;
+  vaultAccountId?: string;
+}
+
+export interface CreateOrganizationCustodyPrivy {
+  provider: "privy";
+  apiBaseUrl?: string;
+  walletId?: string;
+  requestDelayMs?: number;
 }
 
 export interface CreateOrganizationResponse {

@@ -36,6 +36,7 @@
     "@solana/codecs": "catalog:",
     "@solana/keychain-core": "0.3.0",
     "@solana/keychain-fireblocks": "0.2.1",
+    "@solana/keychain-privy": "0.3.0",
     "@solana/kit": "catalog:",
     "@solana/kora": "0.1.2",
     "@solana/mosaic-sdk": "catalog:",

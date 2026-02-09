@@ -8,6 +8,7 @@
  *
  * Implementations:
  * - KeychainFireblocksAdapter: Fireblocks MPC custody (production)
+ * - KeychainPrivyAdapter: Privy hosted wallets (production)
  * - LocalKeypairAdapter: Sync signing using env keypair (development)
  */
 

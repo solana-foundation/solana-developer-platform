@@ -12,6 +12,7 @@ export {
   createSigningAdapterFromConfig,
   KeychainFireblocksAdapter,
   KeychainMemoryAdapter,
+  KeychainPrivyAdapter,
   type SigningProviderType,
   type SigningConfigRecord,
 } from "./signing";

@@ -3,7 +3,13 @@ import { hashString } from "@/lib/hash";
 import { created, noContent, success } from "@/lib/response";
 import { createAllowlistService } from "@/services/allowlist.service";
 import { AuditService } from "@/services/audit.service";
+import {
+  provisionFireblocksVaultAccount,
+  provisionPrivyWallet,
+} from "@/services/custody/provisioning";
+import { createSigningService } from "@/services/domain/signing.service";
 import { KVService } from "@/services/kv.service";
+import { SigningError } from "@/services/ports";
 import type { Env } from "@/types/env";
 import type { CreateOrganizationResponse, Organization } from "@sdp/types";
 import type { Context } from "hono";
@@ -48,6 +54,18 @@ function createApiKeyMaterial(environment: "sandbox" | "production"): {
   return { key, prefix };
 }
 
+async function cleanupCustodyForOrg(env: Env, orgId: string): Promise<void> {
+  await env.DB.batch([
+    env.DB.prepare(
+      `DELETE FROM custody_wallets
+       WHERE custody_config_id IN (
+         SELECT id FROM custody_configs WHERE organization_id = ?
+       )`
+    ).bind(orgId),
+    env.DB.prepare("DELETE FROM custody_configs WHERE organization_id = ?").bind(orgId),
+  ]);
+}
+
 export const createOrganization = async (c: AppContext) => {
   const body = await c.req.json();
   const parsed = createOrgSchema.safeParse(body);
@@ -58,7 +76,7 @@ export const createOrganization = async (c: AppContext) => {
     });
   }
 
-  const { name, email } = parsed.data;
+  const { name, email, custody } = parsed.data;
   const slug = parsed.data.slug || name.toLowerCase().replace(/[^a-z0-9]+/g, "-");
 
   // Initialize services
@@ -85,6 +103,61 @@ export const createOrganization = async (c: AppContext) => {
   const userId = `usr_${crypto.randomUUID()}`;
   const memberId = `mem_${crypto.randomUUID()}`;
   const apiKeyId = `key_${crypto.randomUUID()}`;
+
+  if (custody) {
+    const signingService = createSigningService(c.env);
+
+    try {
+      if (custody.provider === "fireblocks") {
+        const { vaultAccountId, assetId } = await provisionFireblocksVaultAccount(c.env, {
+          orgId,
+          orgSlug: slug,
+          assetId: custody.assetId,
+          apiBaseUrl: custody.apiBaseUrl,
+          vaultAccountId: custody.vaultAccountId,
+        });
+
+        if (!c.env.FIREBLOCKS_API_KEY || !c.env.FIREBLOCKS_API_SECRET) {
+          throw new SigningError(
+            "Fireblocks environment variables not configured: FIREBLOCKS_API_KEY, FIREBLOCKS_API_SECRET",
+            "PROVIDER_NOT_CONFIGURED"
+          );
+        }
+
+        await signingService.initializeFireblocksSigning(orgId, undefined, {
+          apiKey: c.env.FIREBLOCKS_API_KEY,
+          apiSecretPem: c.env.FIREBLOCKS_API_SECRET,
+          vaultAccountId,
+          assetId,
+          apiBaseUrl: custody.apiBaseUrl ?? c.env.FIREBLOCKS_API_BASE_URL,
+        });
+      } else {
+        const { walletId } = await provisionPrivyWallet(c.env, {
+          walletId: custody.walletId,
+          apiBaseUrl: custody.apiBaseUrl,
+        });
+
+        if (!c.env.PRIVY_APP_ID || !c.env.PRIVY_APP_SECRET) {
+          throw new SigningError(
+            "Privy environment variables not configured: PRIVY_APP_ID, PRIVY_APP_SECRET",
+            "PROVIDER_NOT_CONFIGURED"
+          );
+        }
+
+        await signingService.initializePrivySigning(orgId, undefined, {
+          appId: c.env.PRIVY_APP_ID,
+          appSecret: c.env.PRIVY_APP_SECRET,
+          walletId,
+          apiBaseUrl: custody.apiBaseUrl ?? c.env.PRIVY_API_BASE_URL,
+          requestDelayMs: custody.requestDelayMs,
+        });
+      }
+    } catch (error) {
+      await cleanupCustodyForOrg(c.env, orgId);
+      const message = error instanceof Error ? error.message : "Custody initialization failed";
+      throw new AppError("BAD_REQUEST", message);
+    }
+  }
 
   // Generate API key
   const { key, prefix } = createApiKeyMaterial("sandbox");
@@ -117,7 +190,14 @@ export const createOrganization = async (c: AppContext) => {
     ).bind(apiKeyId, orgId, userId, prefix, keyHash),
   ];
 
-  await c.env.DB.batch(batch);
+  try {
+    await c.env.DB.batch(batch);
+  } catch (error) {
+    if (custody) {
+      await cleanupCustodyForOrg(c.env, orgId);
+    }
+    throw error;
+  }
 
   // Audit log
   await auditService.log(c, {

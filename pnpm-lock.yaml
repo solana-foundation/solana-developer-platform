@@ -72,6 +72,9 @@ importers:
       '@solana/keychain-fireblocks':
         specifier: 0.2.1
         version: 0.2.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
+      '@solana/keychain-privy':
+        specifier: 0.3.0
+        version: 0.3.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
       '@solana/kit':
         specifier: 5.0.0
         version: 5.0.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)(ws@8.19.0)
@@ -2595,6 +2598,9 @@ packages:
 
   '@solana/keychain-fireblocks@0.2.1':
     resolution: {integrity: sha512-GB0k5OmO3Ajfd9RmTVTfKdAx4GKktsUvoc6JzrvqF4K2zboqAcgoYiDbKFA3rUnbasvENBFbvvMbBk/z+jHJBw==}
+
+  '@solana/keychain-privy@0.3.0':
+    resolution: {integrity: sha512-qVnK52b9KZyGCe/nOBDvW5XXxKfE1/9iEXDCCi9VGG4TPCRXliw1be4+4OVxVML/5W6yhMjF258/FdgJUeAx0A==}
 
   '@solana/keys@5.0.0':
     resolution: {integrity: sha512-kWkR7NslpTttk5i1BhBNCDtVQDkEtgkdsM3Jp9TGPk0GFjBjBwrQStw3vvwLe8itEIvRFGFZU6JHEk8HLS0WLQ==}
@@ -7215,6 +7221,19 @@ snapshots:
       '@solana/signers': 5.4.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
       '@solana/transactions': 5.4.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
       jose: 6.1.3
+    transitivePeerDependencies:
+      - fastestsmallesttextencoderdecoder
+      - typescript
+
+  '@solana/keychain-privy@0.3.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)':
+    dependencies:
+      '@solana/addresses': 5.4.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
+      '@solana/codecs-core': 5.4.0(typescript@5.9.3)
+      '@solana/codecs-strings': 5.4.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
+      '@solana/keychain-core': 0.3.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
+      '@solana/keys': 5.4.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
+      '@solana/signers': 5.4.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
+      '@solana/transactions': 5.4.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
     transitivePeerDependencies:
       - fastestsmallesttextencoderdecoder
       - typescript
