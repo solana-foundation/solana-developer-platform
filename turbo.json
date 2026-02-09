@@ -3,12 +3,18 @@
   "globalDependencies": [".env", ".env.*"],
   "globalEnv": [
     "API_KEY_PEPPER",
+    "CLERK_JWT_TEMPLATE",
+    "CLERK_SECRET_KEY",
     "CUSTODY_PRIVATE_KEY",
     "KORA_API_KEY",
     "KORA_MIN_BALANCE_LAMPORTS",
     "KORA_RPC_URL",
     "KORA_TIMEOUT_MS",
+    "NEXT_PUBLIC_API_BASE_URL",
+    "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY",
+    "NEXT_PUBLIC_SDP_API_BASE_URL",
     "RUN_INTEGRATION_TESTS",
+    "SDP_API_BASE_URL",
     "SOLANA_NETWORK",
     "SOLANA_RPC_URL"
   ],
