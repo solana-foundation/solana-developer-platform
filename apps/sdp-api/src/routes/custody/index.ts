@@ -8,7 +8,15 @@
 import { authMiddleware, requirePermissions } from "@/middleware/auth";
 import type { Env } from "@/types/env";
 import { Hono } from "hono";
-import { createWallet, getConfig, getPublicKey, initializeSigning, listWallets } from "./handlers";
+import {
+  createWallet,
+  getConfig,
+  getPublicKey,
+  initializeSigning,
+  listWallets,
+  setDefaultWallet,
+  switchSigning,
+} from "./handlers";
 
 const custody = new Hono<{ Bindings: Env }>();
 
@@ -17,7 +25,9 @@ custody.use("*", authMiddleware());
 
 // Initialize signing (requires admin)
 custody.post("/initialize", requirePermissions("custody:admin"), initializeSigning);
+custody.post("/switch", requirePermissions("custody:admin"), switchSigning);
 custody.post("/wallets", requirePermissions("custody:admin"), createWallet);
+custody.post("/default-wallet", requirePermissions("custody:admin"), setDefaultWallet);
 
 // Read configuration and wallets
 custody.get("/config", requirePermissions("custody:read"), getConfig);

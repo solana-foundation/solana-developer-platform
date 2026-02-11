@@ -16,6 +16,8 @@ import {
   type InitializeSigningResponse,
   createWalletSchema,
   initializeSigningSchema,
+  setDefaultWalletSchema,
+  switchSigningSchema,
 } from "./schemas";
 
 type AppContext = Context<{ Bindings: Env }>;
@@ -98,6 +100,86 @@ export const initializeSigning = async (c: AppContext) => {
   }
 };
 
+/**
+ * Switch the signing provider for the organization (or project).
+ *
+ * This deactivates the existing active custody config for the requested scope and then
+ * initializes the requested provider. Existing on-chain authorities are NOT rotated.
+ *
+ * POST /custody/switch
+ */
+export const switchSigning = async (c: AppContext) => {
+  const auth = getAuth(c);
+
+  const body = await c.req.json();
+  const parsed = switchSigningSchema.safeParse(body);
+
+  if (!parsed.success) {
+    throw new AppError("BAD_REQUEST", "Invalid request body", {
+      errors: parsed.error.flatten().fieldErrors,
+    });
+  }
+
+  const signingService = createSigningService(c.env);
+
+  // Deactivate any active config for the requested scope so initialize* does not conflict.
+  const projectId = parsed.data.projectId;
+  if (projectId) {
+    await c.env.DB.prepare(
+      `UPDATE custody_configs
+       SET status = 'inactive', updated_at = datetime('now')
+       WHERE organization_id = ? AND project_id = ? AND status = 'active'`
+    )
+      .bind(auth.organizationId, projectId)
+      .run();
+  } else {
+    await c.env.DB.prepare(
+      `UPDATE custody_configs
+       SET status = 'inactive', updated_at = datetime('now')
+       WHERE organization_id = ? AND project_id IS NULL AND status = 'active'`
+    )
+      .bind(auth.organizationId)
+      .run();
+  }
+
+  try {
+    let result: { configId: string; publicKey: string; walletId: string };
+
+    if (parsed.data.provider === "local") {
+      result = await signingService.initializeLocalSigning(auth.organizationId, projectId, {
+        walletLabel: parsed.data.walletLabel,
+      });
+    } else if (parsed.data.provider === "fireblocks") {
+      result = await signingService.initializeFireblocksSigning(auth.organizationId, projectId, {
+        apiKey: parsed.data.apiKey,
+        apiSecretPem: parsed.data.apiSecretPem,
+        vaultAccountId: parsed.data.vaultAccountId,
+        assetId: parsed.data.assetId,
+        apiBaseUrl: parsed.data.apiBaseUrl,
+      });
+    } else {
+      result = await signingService.initializePrivySigning(auth.organizationId, projectId, {
+        apiBaseUrl: parsed.data.apiBaseUrl,
+        requestDelayMs: parsed.data.requestDelayMs,
+        walletLabel: parsed.data.walletLabel,
+      });
+    }
+
+    const response: InitializeSigningResponse = {
+      configId: result.configId,
+      publicKey: result.publicKey,
+      walletId: result.walletId,
+    };
+
+    return created(c, response);
+  } catch (error) {
+    if (error instanceof SigningError) {
+      throw new AppError("BAD_REQUEST", error.message);
+    }
+    throw error;
+  }
+};
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Create Wallet
 // ═══════════════════════════════════════════════════════════════════════════
@@ -150,6 +232,70 @@ export const createWallet = async (c: AppContext) => {
     }
     throw error;
   }
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Set Default Wallet
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Set the default wallet for the active custody configuration.
+ *
+ * POST /custody/default-wallet
+ */
+export const setDefaultWallet = async (c: AppContext) => {
+  const auth = getAuth(c);
+
+  const body = await c.req.json();
+  const parsed = setDefaultWalletSchema.safeParse(body);
+
+  if (!parsed.success) {
+    throw new AppError("BAD_REQUEST", "Invalid request body", {
+      errors: parsed.error.flatten().fieldErrors,
+    });
+  }
+
+  const projectId = parsed.data.projectId ?? null;
+  const config = await c.env.DB.prepare(
+    projectId
+      ? `SELECT id FROM custody_configs
+         WHERE organization_id = ? AND project_id = ? AND status = 'active'
+         ORDER BY updated_at DESC
+         LIMIT 1`
+      : `SELECT id FROM custody_configs
+         WHERE organization_id = ? AND project_id IS NULL AND status = 'active'
+         ORDER BY updated_at DESC
+         LIMIT 1`
+  )
+    .bind(...(projectId ? [auth.organizationId, projectId] : [auth.organizationId]))
+    .first<{ id: string }>();
+
+  if (!config?.id) {
+    throw new AppError("CONFLICT", "Custody not initialized");
+  }
+
+  const wallet = await c.env.DB.prepare(
+    `SELECT id
+     FROM custody_wallets
+     WHERE custody_config_id = ? AND wallet_id = ? AND status = 'active'
+     LIMIT 1`
+  )
+    .bind(config.id, parsed.data.walletId)
+    .first<{ id: string }>();
+
+  if (!wallet) {
+    throw new AppError("BAD_REQUEST", "Unknown walletId for this custody configuration");
+  }
+
+  await c.env.DB.prepare(
+    `UPDATE custody_configs
+     SET default_wallet_id = ?, updated_at = datetime('now')
+     WHERE id = ?`
+  )
+    .bind(parsed.data.walletId, config.id)
+    .run();
+
+  return success(c, { defaultWalletId: parsed.data.walletId });
 };
 
 // ═══════════════════════════════════════════════════════════════════════════

@@ -2,6 +2,7 @@
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { OrganizationSwitcher, SignInButton, UserButton, useAuth } from "@clerk/nextjs";
+import Link from "next/link";
 
 export default function DashboardPage() {
   const { isLoaded, isSignedIn, orgId } = useAuth();
@@ -96,6 +97,21 @@ export default function DashboardPage() {
             </CardContent>
           </Card>
         </div>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Custody</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-wrap items-center justify-between gap-4 text-sm text-muted-foreground">
+            <p>Manage your signing provider and custody wallets.</p>
+            <Link
+              href="/dashboard/custody"
+              className="text-foreground underline underline-offset-4"
+            >
+              Open custody settings
+            </Link>
+          </CardContent>
+        </Card>
       </div>
     </main>
   );
