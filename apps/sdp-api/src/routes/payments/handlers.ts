@@ -340,6 +340,79 @@ async function updateTransferRecord(
   return updated;
 }
 
+async function getTransferRowById(
+  c: AppContext,
+  transferId: string,
+  organizationId: string,
+  projectId: string | null
+): Promise<TransferRow | null> {
+  const baseSql = `SELECT id, organization_id, project_id, wallet_id, source_address, destination_address,
+                          token, amount, memo, type, direction, status, signature, serialized_tx,
+                          slot, block_time, fee, error, initiated_by_key_id, created_at, updated_at
+                   FROM payment_transfers
+                   WHERE id = ? AND organization_id = ?`;
+
+  return projectId
+    ? c.env.DB.prepare(`${baseSql} AND project_id = ? LIMIT 1`)
+        .bind(transferId, organizationId, projectId)
+        .first<TransferRow>()
+    : c.env.DB.prepare(`${baseSql} LIMIT 1`).bind(transferId, organizationId).first<TransferRow>();
+}
+
+async function getTransferRowBySignature(
+  c: AppContext,
+  signature: string,
+  organizationId: string,
+  projectId: string | null
+): Promise<TransferRow | null> {
+  const baseSql = `SELECT id, organization_id, project_id, wallet_id, source_address, destination_address,
+                          token, amount, memo, type, direction, status, signature, serialized_tx,
+                          slot, block_time, fee, error, initiated_by_key_id, created_at, updated_at
+                   FROM payment_transfers
+                   WHERE signature = ? AND organization_id = ?`;
+
+  return projectId
+    ? c.env.DB.prepare(`${baseSql} AND project_id = ? LIMIT 1`)
+        .bind(signature, organizationId, projectId)
+        .first<TransferRow>()
+    : c.env.DB.prepare(`${baseSql} LIMIT 1`).bind(signature, organizationId).first<TransferRow>();
+}
+
+async function getTransferRowsBySignatures(
+  c: AppContext,
+  signatures: string[],
+  organizationId: string,
+  projectId: string | null
+): Promise<Map<string, TransferRow>> {
+  if (signatures.length === 0) {
+    return new Map();
+  }
+
+  const placeholders = signatures.map(() => "?").join(", ");
+  const baseSql = `SELECT id, organization_id, project_id, wallet_id, source_address, destination_address,
+                          token, amount, memo, type, direction, status, signature, serialized_tx,
+                          slot, block_time, fee, error, initiated_by_key_id, created_at, updated_at
+                   FROM payment_transfers
+                   WHERE organization_id = ? AND signature IN (${placeholders})`;
+
+  const rows = projectId
+    ? await c.env.DB.prepare(`${baseSql} AND project_id = ?`)
+        .bind(organizationId, ...signatures, projectId)
+        .all<TransferRow>()
+    : await c.env.DB.prepare(baseSql)
+        .bind(organizationId, ...signatures)
+        .all<TransferRow>();
+
+  const bySignature = new Map<string, TransferRow>();
+  for (const row of rows.results ?? []) {
+    if (row.signature) {
+      bySignature.set(row.signature, row);
+    }
+  }
+
+  return bySignature;
+}
+
 async function prepareSolTransfer(
   c: AppContext,
   sourceAddress: Address,
@@ -437,6 +510,112 @@ async function executeSolTransfer(
     signature,
     slot: Number(confirmation.slot),
     blockTime: new Date().toISOString(),
+  };
+}
+
+function mapOnChainStatus(input: { confirmationStatus?: string | null; err?: unknown }) {
+  if (input.err) return "failed" as const;
+  if (input.confirmationStatus === "finalized") return "finalized" as const;
+  if (input.confirmationStatus === "processed") return "processing" as const;
+  return "confirmed" as const;
+}
+
+function unixSecondsToIso(seconds: number | null | undefined): string | null {
+  if (typeof seconds !== "number") return null;
+  return new Date(seconds * 1000).toISOString();
+}
+
+function coerceInstructionInfoValue(value: unknown): string | number | null {
+  if (typeof value === "string" || typeof value === "number") return value;
+  if (typeof value === "bigint") return Number(value);
+  return null;
+}
+
+function inferOnChainTransferDetails(
+  tx: unknown,
+  queriedAddress: string
+): {
+  type: "transfer" | "transfer_confidential";
+  direction: "inbound" | "outbound";
+  source?: string;
+  destination?: string;
+  token?: string;
+  amount?: string;
+  fee?: number | null;
+} {
+  const candidate = tx as {
+    meta?: { fee?: number };
+    transaction?: {
+      message?: {
+        instructions?: Array<{
+          parsed?: { type?: string; info?: Record<string, unknown> };
+        }>;
+      };
+    };
+  };
+
+  const instructions = candidate.transaction?.message?.instructions ?? [];
+  for (const instruction of instructions) {
+    const parsed = instruction.parsed;
+    if (!parsed?.info) continue;
+
+    const sourceRaw = coerceInstructionInfoValue(parsed.info.source);
+    const destinationRaw = coerceInstructionInfoValue(parsed.info.destination);
+    const authorityRaw = coerceInstructionInfoValue(parsed.info.authority);
+    const mintRaw = coerceInstructionInfoValue(parsed.info.mint);
+    const lamportsRaw = coerceInstructionInfoValue(parsed.info.lamports);
+    const amountRaw = coerceInstructionInfoValue(parsed.info.amount);
+    const tokenAmountUiRaw =
+      typeof parsed.info.tokenAmount === "object" && parsed.info.tokenAmount !== null
+        ? coerceInstructionInfoValue(
+            (parsed.info.tokenAmount as Record<string, unknown>).uiAmountString
+          )
+        : null;
+
+    const source = typeof sourceRaw === "string" ? sourceRaw : undefined;
+    const destination = typeof destinationRaw === "string" ? destinationRaw : undefined;
+    const authority = typeof authorityRaw === "string" ? authorityRaw : undefined;
+
+    const direction =
+      source === queriedAddress || authority === queriedAddress ? "outbound" : "inbound";
+
+    if (typeof lamportsRaw === "number" || typeof lamportsRaw === "string") {
+      const lamports = BigInt(lamportsRaw);
+      return {
+        type: "transfer",
+        direction,
+        source,
+        destination,
+        token: "SOL",
+        amount: formatDecimalAmount(lamports, 9),
+        fee: candidate.meta?.fee ?? null,
+      };
+    }
+
+    if (source || destination || authority) {
+      return {
+        type: parsed.type?.toLowerCase().includes("confidential")
+          ? "transfer_confidential"
+          : "transfer",
+        direction,
+        source: source ?? authority,
+        destination,
+        token: typeof mintRaw === "string" ? mintRaw : undefined,
+        amount:
+          typeof tokenAmountUiRaw === "string"
+            ? tokenAmountUiRaw
+            : typeof amountRaw === "string" || typeof amountRaw === "number"
+              ? String(amountRaw)
+              : undefined,
+        fee: candidate.meta?.fee ?? null,
+      };
+    }
+  }
+
+  return {
+    type: "transfer",
+    direction: "outbound",
+    fee: candidate.meta?.fee ?? null,
   };
 }
 
@@ -763,82 +942,184 @@ export async function listTransfers(c: AppContext) {
     });
   }
 
-  const auth = getAuth(c);
+  const scope = await resolveScope(c);
   const { wallet, walletAddress, token, direction, status, from, to, page, pageSize } = parsed.data;
 
-  const whereClauses: string[] = ["organization_id = ?"];
-  const bindings: (string | number)[] = [auth.organizationId];
-
-  if (auth.projectId) {
-    whereClauses.push("project_id = ?");
-    bindings.push(auth.projectId);
-  }
-
+  const selectedWalletAddresses = new Set<string>();
   if (wallet) {
-    whereClauses.push("wallet_id = ?");
-    bindings.push(wallet);
+    selectedWalletAddresses.add(resolveWallet(scope.wallets, wallet).publicKey);
   }
-
   if (walletAddress) {
-    whereClauses.push("(source_address = ? OR destination_address = ?)");
-    bindings.push(walletAddress, walletAddress);
+    selectedWalletAddresses.add(assertValidAddress(walletAddress, "walletAddress"));
+  }
+  if (!wallet && !walletAddress) {
+    for (const w of scope.wallets) selectedWalletAddresses.add(w.publicKey);
   }
 
-  if (token) {
-    whereClauses.push("token = ?");
-    bindings.push(token);
+  const addressList = Array.from(selectedWalletAddresses);
+  if (addressList.length === 0) {
+    return paginated(c, [], { total: 0, page, pageSize });
   }
 
-  if (direction) {
-    whereClauses.push("direction = ?");
-    bindings.push(direction);
+  const rpc = createRpc(c.env);
+  const fetchLimit = Math.min(1000, page * pageSize + 200);
+
+  const signatureRows = await Promise.all(
+    addressList.map(async (address) => {
+      const rows = (await (
+        rpc as unknown as {
+          getSignaturesForAddress: (
+            addr: string,
+            options: { limit: number; commitment: "confirmed" }
+          ) => { send: () => Promise<Array<Record<string, unknown>>> };
+        }
+      )
+        .getSignaturesForAddress(address, {
+          limit: fetchLimit,
+          commitment: "confirmed",
+        })
+        .send()) as Array<{
+        signature: string;
+        slot: number;
+        err: unknown;
+        confirmationStatus?: string | null;
+        blockTime?: number | null;
+      }>;
+
+      return rows.map((row) => ({ ...row, queriedAddress: address }));
+    })
+  );
+
+  const bySignature = new Map<
+    string,
+    {
+      signature: string;
+      slot: number;
+      err: unknown;
+      confirmationStatus?: string | null;
+      blockTime?: number | null;
+      queriedAddress: string;
+    }
+  >();
+
+  for (const rows of signatureRows) {
+    for (const row of rows) {
+      if (!bySignature.has(row.signature)) {
+        bySignature.set(row.signature, row);
+      }
+    }
   }
+
+  let merged = Array.from(bySignature.values());
+  merged.sort((a, b) => b.slot - a.slot);
 
   if (status) {
-    whereClauses.push("status = ?");
-    bindings.push(status);
+    merged = merged.filter((row) => mapOnChainStatus(row) === status);
   }
-
   if (from) {
-    whereClauses.push("created_at >= ?");
-    bindings.push(from);
+    const minDate = Date.parse(from);
+    merged = merged.filter((row) => {
+      const iso = unixSecondsToIso(row.blockTime);
+      return iso ? Date.parse(iso) >= minDate : false;
+    });
   }
-
   if (to) {
-    whereClauses.push("created_at <= ?");
-    bindings.push(to);
+    const maxDate = Date.parse(to);
+    merged = merged.filter((row) => {
+      const iso = unixSecondsToIso(row.blockTime);
+      return iso ? Date.parse(iso) <= maxDate : false;
+    });
   }
 
-  const whereSql = `WHERE ${whereClauses.join(" AND ")}`;
-
-  const countRow = await c.env.DB.prepare(
-    `SELECT COUNT(*) as total
-     FROM payment_transfers
-     ${whereSql}`
-  )
-    .bind(...bindings)
-    .first<{ total: number }>();
-
-  const total = Number(countRow?.total ?? 0);
   const offset = (page - 1) * pageSize;
-
-  const rows = await c.env.DB.prepare(
-    `SELECT id, organization_id, project_id, wallet_id, source_address, destination_address,
-            token, amount, memo, type, direction, status, signature, serialized_tx,
-            slot, block_time, fee, error, initiated_by_key_id, created_at, updated_at
-     FROM payment_transfers
-     ${whereSql}
-     ORDER BY created_at DESC
-     LIMIT ? OFFSET ?`
-  )
-    .bind(...bindings, pageSize, offset)
-    .all<TransferRow>();
-
-  return paginated(
+  const slicedPlusOne = merged.slice(offset, offset + pageSize + 1);
+  const hasMore = slicedPlusOne.length > pageSize;
+  const pageItems = hasMore ? slicedPlusOne.slice(0, pageSize) : slicedPlusOne;
+  const transferRowsBySignature = await getTransferRowsBySignatures(
     c,
-    (rows.results ?? []).map((row) => mapTransferRow(row)),
-    { total, page, pageSize }
+    pageItems.map((row) => row.signature),
+    scope.auth.organizationId,
+    scope.auth.projectId
   );
+
+  const transfers = await Promise.all(
+    pageItems.map(async (row) => {
+      const tx = await (
+        rpc as unknown as {
+          getTransaction: (
+            signature: string,
+            options: {
+              commitment: "confirmed";
+              maxSupportedTransactionVersion: number;
+              encoding: "jsonParsed";
+            }
+          ) => { send: () => Promise<unknown> };
+        }
+      )
+        .getTransaction(row.signature, {
+          commitment: "confirmed",
+          maxSupportedTransactionVersion: 0,
+          encoding: "jsonParsed",
+        })
+        .send();
+
+      const details = inferOnChainTransferDetails(tx, row.queriedAddress);
+      const blockTimeIso = unixSecondsToIso(row.blockTime) ?? new Date().toISOString();
+      const persisted = transferRowsBySignature.get(row.signature);
+      const persistedTransfer = persisted ? mapTransferRow(persisted) : null;
+
+      return {
+        id: persistedTransfer?.id ?? row.signature,
+        organizationId: scope.auth.organizationId,
+        ...(scope.auth.projectId ? { projectId: scope.auth.projectId } : {}),
+        type: persistedTransfer?.type ?? details.type,
+        direction: persistedTransfer?.direction ?? details.direction,
+        status: mapOnChainStatus(row),
+        signature: row.signature,
+        serializedTx: persistedTransfer?.serializedTx ?? null,
+        slot: row.slot,
+        blockTime: unixSecondsToIso(row.blockTime),
+        fee: details.fee ?? persistedTransfer?.fee ?? null,
+        error: row.err ? JSON.stringify(row.err) : null,
+        ...(persistedTransfer?.initiatedBy ? { initiatedBy: persistedTransfer.initiatedBy } : {}),
+        ...(details.source
+          ? { source: details.source }
+          : persistedTransfer?.source
+            ? { source: persistedTransfer.source }
+            : {}),
+        ...(details.destination
+          ? { destination: details.destination }
+          : persistedTransfer?.destination
+            ? { destination: persistedTransfer.destination }
+            : {}),
+        ...(details.token
+          ? { token: details.token }
+          : persistedTransfer?.token
+            ? { token: persistedTransfer.token }
+            : {}),
+        ...(details.amount
+          ? { amount: details.amount }
+          : persistedTransfer?.amount
+            ? { amount: persistedTransfer.amount }
+            : {}),
+        ...(persistedTransfer?.memo ? { memo: persistedTransfer.memo } : {}),
+        createdAt: persistedTransfer?.createdAt ?? blockTimeIso,
+        updatedAt: persistedTransfer?.updatedAt ?? blockTimeIso,
+      };
+    })
+  );
+
+  let filteredTransfers = transfers;
+  if (token) {
+    filteredTransfers = filteredTransfers.filter((t) => t.token === token);
+  }
+  if (direction) {
+    filteredTransfers = filteredTransfers.filter((t) => t.direction === direction);
+  }
+
+  const total = hasMore ? offset + filteredTransfers.length + 1 : offset + filteredTransfers.length;
+
+  return paginated(c, filteredTransfers, { total, page, pageSize });
 }
 
 export async function getTransfer(c: AppContext) {
@@ -847,24 +1128,87 @@ export async function getTransfer(c: AppContext) {
     throw new AppError("BAD_REQUEST", "Invalid transfer ID");
   }
 
+  const transferId = params.data.transferId;
   const auth = getAuth(c);
-  const baseSql = `SELECT id, organization_id, project_id, wallet_id, source_address, destination_address,
-                          token, amount, memo, type, direction, status, signature, serialized_tx,
-                          slot, block_time, fee, error, initiated_by_key_id, created_at, updated_at
-                   FROM payment_transfers
-                   WHERE id = ? AND organization_id = ?`;
 
-  const row = auth.projectId
-    ? await c.env.DB.prepare(`${baseSql} AND project_id = ? LIMIT 1`)
-        .bind(params.data.transferId, auth.organizationId, auth.projectId)
-        .first<TransferRow>()
-    : await c.env.DB.prepare(`${baseSql} LIMIT 1`)
-        .bind(params.data.transferId, auth.organizationId)
-        .first<TransferRow>();
+  if (transferId.startsWith("xfr_")) {
+    const row = await getTransferRowById(c, transferId, auth.organizationId, auth.projectId);
 
-  if (!row) {
+    if (!row) {
+      throw new AppError("NOT_FOUND", "Transfer not found");
+    }
+
+    return success(c, { transfer: mapTransferRow(row) });
+  }
+
+  const bySignature = await getTransferRowBySignature(
+    c,
+    transferId,
+    auth.organizationId,
+    auth.projectId
+  );
+  if (bySignature) {
+    return success(c, { transfer: mapTransferRow(bySignature) });
+  }
+
+  const scope = await resolveScope(c);
+  const rpc = createRpc(c.env);
+
+  const tx = await (
+    rpc as unknown as {
+      getTransaction: (
+        signature: string,
+        options: {
+          commitment: "confirmed";
+          maxSupportedTransactionVersion: number;
+          encoding: "jsonParsed";
+        }
+      ) => { send: () => Promise<unknown> };
+    }
+  )
+    .getTransaction(transferId, {
+      commitment: "confirmed",
+      maxSupportedTransactionVersion: 0,
+      encoding: "jsonParsed",
+    })
+    .send();
+
+  if (!tx) {
     throw new AppError("NOT_FOUND", "Transfer not found");
   }
 
-  return success(c, { transfer: mapTransferRow(row) });
+  const walletAddress = scope.wallets[0]?.publicKey ?? "";
+  const details = inferOnChainTransferDetails(tx, walletAddress);
+  const parsedTx = tx as {
+    slot?: number;
+    blockTime?: number | null;
+    meta?: { err?: unknown };
+  };
+  const blockTimeIso = unixSecondsToIso(parsedTx.blockTime) ?? new Date().toISOString();
+
+  return success(c, {
+    transfer: {
+      id: transferId,
+      organizationId: scope.auth.organizationId,
+      ...(scope.auth.projectId ? { projectId: scope.auth.projectId } : {}),
+      type: details.type,
+      direction: details.direction,
+      status: mapOnChainStatus({
+        err: parsedTx.meta?.err,
+        confirmationStatus: "confirmed",
+      }),
+      signature: transferId,
+      serializedTx: null,
+      slot: parsedTx.slot ?? null,
+      blockTime: unixSecondsToIso(parsedTx.blockTime),
+      fee: details.fee ?? null,
+      error: parsedTx.meta?.err ? JSON.stringify(parsedTx.meta.err) : null,
+      ...(details.source ? { source: details.source } : {}),
+      ...(details.destination ? { destination: details.destination } : {}),
+      ...(details.token ? { token: details.token } : {}),
+      ...(details.amount ? { amount: details.amount } : {}),
+      createdAt: blockTimeIso,
+      updatedAt: blockTimeIso,
+    },
+  });
 }
