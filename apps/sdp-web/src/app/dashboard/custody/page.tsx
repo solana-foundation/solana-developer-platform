@@ -94,7 +94,9 @@ export default async function CustodyPage() {
             <Card>
               <CardHeader>
                 <CardTitle>Signing configuration</CardTitle>
-                <CardDescription>Controls which custody wallet signs new API actions.</CardDescription>
+                <CardDescription>
+                  Controls which custody wallet signs new API actions.
+                </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4 text-sm">
                 <div className="grid gap-2">
@@ -200,7 +202,9 @@ export default async function CustodyPage() {
                       return (
                         <TableRow key={w.id}>
                           <TableCell className="font-medium">{w.label ?? "Untitled"}</TableCell>
-                          <TableCell className="text-muted-foreground">{w.purpose ?? "-"}</TableCell>
+                          <TableCell className="text-muted-foreground">
+                            {w.purpose ?? "-"}
+                          </TableCell>
                           <TableCell className="font-mono text-xs">{w.publicKey}</TableCell>
                           <TableCell className="font-mono text-xs text-muted-foreground">
                             {w.walletId}

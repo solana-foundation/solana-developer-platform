@@ -66,7 +66,12 @@ export default async function CustodySetupPage() {
 
               <div className="grid gap-2">
                 <Label htmlFor="requestDelayMs">Privy request delay (ms, optional)</Label>
-                <Input id="requestDelayMs" name="requestDelayMs" placeholder="0" inputMode="numeric" />
+                <Input
+                  id="requestDelayMs"
+                  name="requestDelayMs"
+                  placeholder="0"
+                  inputMode="numeric"
+                />
               </div>
 
               <div className="flex flex-wrap items-center gap-3">
@@ -89,4 +94,3 @@ export default async function CustodySetupPage() {
     </main>
   );
 }
-

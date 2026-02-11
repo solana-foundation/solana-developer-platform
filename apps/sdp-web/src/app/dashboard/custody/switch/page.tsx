@@ -20,11 +20,7 @@ export default async function CustodySwitchPage() {
   return (
     <main className="min-h-screen bg-background px-6 py-10 text-foreground">
       <div className="mx-auto flex max-w-3xl flex-col gap-8">
-        <DashboardHeader
-          title="Change provider"
-          subtitle="Custody"
-          backHref="/dashboard/custody"
-        />
+        <DashboardHeader title="Change provider" subtitle="Custody" backHref="/dashboard/custody" />
 
         <Card>
           <CardHeader>
@@ -70,7 +66,12 @@ export default async function CustodySwitchPage() {
 
               <div className="grid gap-2">
                 <Label htmlFor="requestDelayMs">Privy request delay (ms, optional)</Label>
-                <Input id="requestDelayMs" name="requestDelayMs" placeholder="0" inputMode="numeric" />
+                <Input
+                  id="requestDelayMs"
+                  name="requestDelayMs"
+                  placeholder="0"
+                  inputMode="numeric"
+                />
               </div>
 
               <div className="grid gap-2">
@@ -93,4 +94,3 @@ export default async function CustodySwitchPage() {
     </main>
   );
 }
-

@@ -104,7 +104,10 @@ export default function DashboardPage() {
           </CardHeader>
           <CardContent className="flex flex-wrap items-center justify-between gap-4 text-sm text-muted-foreground">
             <p>Manage your signing provider and custody wallets.</p>
-            <Link href="/dashboard/custody" className="text-foreground underline underline-offset-4">
+            <Link
+              href="/dashboard/custody"
+              className="text-foreground underline underline-offset-4"
+            >
               Open custody settings
             </Link>
           </CardContent>

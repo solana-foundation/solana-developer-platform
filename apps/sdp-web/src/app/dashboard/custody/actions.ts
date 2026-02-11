@@ -104,4 +104,3 @@ export async function setDefaultCustodyWallet(formData: FormData) {
   revalidatePath("/dashboard/custody");
   redirect("/dashboard/custody");
 }
-
