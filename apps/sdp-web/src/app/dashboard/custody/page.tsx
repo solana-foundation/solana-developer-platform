@@ -1,3 +1,4 @@
+import { linkOrganization } from "@/app/onboarding/actions";
 import { DashboardHeader } from "@/components/dashboard-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -47,8 +48,8 @@ async function getCustodyConfig(): Promise<CustodyConfig | null> {
     const body = await res.text();
     throw new Error(`SDP API request failed (${res.status}): ${body}`);
   }
-  const json = (await res.json()) as { config: CustodyConfig };
-  return json.config;
+  const json = (await res.json()) as { data: { config: CustodyConfig } };
+  return json.data.config;
 }
 
 export default async function CustodyPage() {
@@ -58,6 +59,34 @@ export default async function CustodyPage() {
   }
   if (!orgId) {
     redirect("/dashboard");
+  }
+
+  const onboarding = await sdpApiFetch<{ linked: boolean }>("/v1/onboarding/status");
+  if (!onboarding.linked) {
+    return (
+      <main className="min-h-screen bg-background px-6 py-10 text-foreground">
+        <div className="mx-auto flex max-w-5xl flex-col gap-8">
+          <DashboardHeader title="Custody" subtitle="Dashboard" backHref="/dashboard" />
+          <Card>
+            <CardHeader>
+              <CardTitle>Link your organization</CardTitle>
+              <CardDescription>
+                This Clerk organization is not linked to a local SDP organization yet.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                Link it now to enable custody configuration and wallet management.
+              </p>
+              <form action={linkOrganization}>
+                <input type="hidden" name="returnTo" value="/dashboard/custody" />
+                <Button type="submit">Link organization</Button>
+              </form>
+            </CardContent>
+          </Card>
+        </div>
+      </main>
+    );
   }
 
   const [config, walletsResp] = await Promise.all([

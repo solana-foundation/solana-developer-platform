@@ -76,5 +76,11 @@ export async function sdpApiFetch<T>(path: string, options: RequestInit = {}): P
     return {} as T;
   }
 
-  return (await res.json()) as T;
+  const json = (await res.json()) as unknown;
+
+  if (json && typeof json === "object" && "data" in json) {
+    return (json as { data: T }).data;
+  }
+
+  return json as T;
 }

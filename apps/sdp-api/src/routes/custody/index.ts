@@ -5,7 +5,7 @@
  * Enables per-org custody while maintaining backward compatibility with env-based signing.
  */
 
-import { authMiddleware, requirePermissions } from "@/middleware/auth";
+import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import type { Env } from "@/types/env";
 import { Hono } from "hono";
 import {
@@ -21,7 +21,7 @@ import {
 const custody = new Hono<{ Bindings: Env }>();
 
 // All routes require authentication
-custody.use("*", authMiddleware());
+custody.use("*", unifiedAuthMiddleware({ allowClerk: true, allowSession: true }));
 
 // Initialize signing (requires admin)
 custody.post("/initialize", requirePermissions("custody:admin"), initializeSigning);

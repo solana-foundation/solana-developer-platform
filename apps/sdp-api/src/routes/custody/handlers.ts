@@ -2,7 +2,6 @@
  * Custody API Handlers
  */
 
-import { getAuth } from "@/lib/auth";
 import { AppError } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import { createSigningService } from "@/services/domain/signing.service";
@@ -22,6 +21,25 @@ import {
 
 type AppContext = Context<{ Bindings: Env }>;
 
+function resolveActor(c: AppContext): { organizationId: string } {
+  const apiKey = c.get("apiKey");
+  if (apiKey) {
+    return { organizationId: apiKey.organizationId };
+  }
+
+  const clerk = c.get("clerk");
+  if (clerk) {
+    return { organizationId: clerk.organizationId };
+  }
+
+  const session = c.get("session");
+  if (session) {
+    return { organizationId: session.organizationId };
+  }
+
+  throw new AppError("UNAUTHORIZED", "Authentication required");
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Initialize Signing
 // ═══════════════════════════════════════════════════════════════════════════
@@ -36,7 +54,7 @@ type AppContext = Context<{ Bindings: Env }>;
  * POST /custody/initialize
  */
 export const initializeSigning = async (c: AppContext) => {
-  const auth = getAuth(c);
+  const actor = resolveActor(c);
 
   const body = await c.req.json();
   const parsed = initializeSigningSchema.safeParse(body);
@@ -54,13 +72,13 @@ export const initializeSigning = async (c: AppContext) => {
 
     if (parsed.data.provider === "local") {
       result = await signingService.initializeLocalSigning(
-        auth.organizationId,
+        actor.organizationId,
         parsed.data.projectId,
         { walletLabel: parsed.data.walletLabel }
       );
     } else if (parsed.data.provider === "fireblocks") {
       result = await signingService.initializeFireblocksSigning(
-        auth.organizationId,
+        actor.organizationId,
         parsed.data.projectId,
         {
           apiKey: parsed.data.apiKey,
@@ -72,7 +90,7 @@ export const initializeSigning = async (c: AppContext) => {
       );
     } else {
       result = await signingService.initializePrivySigning(
-        auth.organizationId,
+        actor.organizationId,
         parsed.data.projectId,
         {
           apiBaseUrl: parsed.data.apiBaseUrl,
@@ -109,7 +127,7 @@ export const initializeSigning = async (c: AppContext) => {
  * POST /custody/switch
  */
 export const switchSigning = async (c: AppContext) => {
-  const auth = getAuth(c);
+  const actor = resolveActor(c);
 
   const body = await c.req.json();
   const parsed = switchSigningSchema.safeParse(body);
@@ -128,9 +146,9 @@ export const switchSigning = async (c: AppContext) => {
     await c.env.DB.prepare(
       `UPDATE custody_configs
        SET status = 'inactive', updated_at = datetime('now')
-       WHERE organization_id = ? AND project_id = ? AND status = 'active'`
+      WHERE organization_id = ? AND project_id = ? AND status = 'active'`
     )
-      .bind(auth.organizationId, projectId)
+      .bind(actor.organizationId, projectId)
       .run();
   } else {
     await c.env.DB.prepare(
@@ -138,7 +156,7 @@ export const switchSigning = async (c: AppContext) => {
        SET status = 'inactive', updated_at = datetime('now')
        WHERE organization_id = ? AND project_id IS NULL AND status = 'active'`
     )
-      .bind(auth.organizationId)
+      .bind(actor.organizationId)
       .run();
   }
 
@@ -146,11 +164,11 @@ export const switchSigning = async (c: AppContext) => {
     let result: { configId: string; publicKey: string; walletId: string };
 
     if (parsed.data.provider === "local") {
-      result = await signingService.initializeLocalSigning(auth.organizationId, projectId, {
+      result = await signingService.initializeLocalSigning(actor.organizationId, projectId, {
         walletLabel: parsed.data.walletLabel,
       });
     } else if (parsed.data.provider === "fireblocks") {
-      result = await signingService.initializeFireblocksSigning(auth.organizationId, projectId, {
+      result = await signingService.initializeFireblocksSigning(actor.organizationId, projectId, {
         apiKey: parsed.data.apiKey,
         apiSecretPem: parsed.data.apiSecretPem,
         vaultAccountId: parsed.data.vaultAccountId,
@@ -158,7 +176,7 @@ export const switchSigning = async (c: AppContext) => {
         apiBaseUrl: parsed.data.apiBaseUrl,
       });
     } else {
-      result = await signingService.initializePrivySigning(auth.organizationId, projectId, {
+      result = await signingService.initializePrivySigning(actor.organizationId, projectId, {
         apiBaseUrl: parsed.data.apiBaseUrl,
         requestDelayMs: parsed.data.requestDelayMs,
         walletLabel: parsed.data.walletLabel,
@@ -190,7 +208,7 @@ export const switchSigning = async (c: AppContext) => {
  * POST /custody/wallets
  */
 export const createWallet = async (c: AppContext) => {
-  const auth = getAuth(c);
+  const actor = resolveActor(c);
 
   const body = await c.req.json();
   const parsed = createWalletSchema.safeParse(body);
@@ -204,7 +222,7 @@ export const createWallet = async (c: AppContext) => {
   const signingService = createSigningService(c.env);
 
   try {
-    const wallet = await signingService.createWallet(auth.organizationId, parsed.data.projectId, {
+    const wallet = await signingService.createWallet(actor.organizationId, parsed.data.projectId, {
       label: parsed.data.label,
       purpose: parsed.data.purpose,
       setDefault: parsed.data.setDefault,
@@ -244,7 +262,7 @@ export const createWallet = async (c: AppContext) => {
  * POST /custody/default-wallet
  */
 export const setDefaultWallet = async (c: AppContext) => {
-  const auth = getAuth(c);
+  const actor = resolveActor(c);
 
   const body = await c.req.json();
   const parsed = setDefaultWalletSchema.safeParse(body);
@@ -267,7 +285,7 @@ export const setDefaultWallet = async (c: AppContext) => {
          ORDER BY updated_at DESC
          LIMIT 1`
   )
-    .bind(...(projectId ? [auth.organizationId, projectId] : [auth.organizationId]))
+    .bind(...(projectId ? [actor.organizationId, projectId] : [actor.organizationId]))
     .first<{ id: string }>();
 
   if (!config?.id) {
@@ -308,18 +326,18 @@ export const setDefaultWallet = async (c: AppContext) => {
  * GET /custody/config
  */
 export const getConfig = async (c: AppContext) => {
-  const auth = getAuth(c);
+  const actor = resolveActor(c);
   const projectId = c.req.query("projectId");
 
   const signingService = createSigningService(c.env);
-  const config = await signingService.getConfiguration(auth.organizationId, projectId);
+  const config = await signingService.getConfiguration(actor.organizationId, projectId);
 
   if (!config) {
     throw new AppError("NOT_FOUND", "No custody configuration found for this organization");
   }
 
   // Get the public key from the adapter
-  const publicKey = await signingService.getPublicKey(auth.organizationId, projectId ?? undefined);
+  const publicKey = await signingService.getPublicKey(actor.organizationId, projectId ?? undefined);
 
   const response: CustodyConfigResponse = {
     config: {
@@ -347,11 +365,11 @@ export const getConfig = async (c: AppContext) => {
  * GET /custody/wallets
  */
 export const listWallets = async (c: AppContext) => {
-  const auth = getAuth(c);
+  const actor = resolveActor(c);
   const projectId = c.req.query("projectId");
 
   const signingService = createSigningService(c.env);
-  const wallets = await signingService.getWallets(auth.organizationId, projectId);
+  const wallets = await signingService.getWallets(actor.organizationId, projectId);
 
   const response: CustodyWalletsResponse = {
     wallets: wallets.map((w) => ({
@@ -381,7 +399,7 @@ export const listWallets = async (c: AppContext) => {
  * GET /custody/public-key
  */
 export const getPublicKey = async (c: AppContext) => {
-  const auth = getAuth(c);
+  const actor = resolveActor(c);
   const projectId = c.req.query("projectId");
   const walletId = c.req.query("walletId");
 
@@ -389,7 +407,7 @@ export const getPublicKey = async (c: AppContext) => {
 
   try {
     const publicKey = await signingService.getPublicKey(
-      auth.organizationId,
+      actor.organizationId,
       projectId ?? undefined,
       walletId ?? undefined
     );
