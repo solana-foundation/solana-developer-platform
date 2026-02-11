@@ -13,11 +13,11 @@ import {
 } from "./base";
 
 export const initializeSigningRequestSchema = initializeSigningSchemaBase.openapi({
-  description: "Initialize custody provider for the organization or project.",
+  description: "Initialize wallet signing provider for the organization or project.",
 });
 
 export const switchSigningRequestSchema = switchSigningSchemaBase.openapi({
-  description: "Switch the active custody provider for the organization or project.",
+  description: "Switch the active wallet signing provider for the organization or project.",
 });
 
 export const createCustodyWalletRequestSchema = createWalletSchemaBase
@@ -32,17 +32,17 @@ export const createCustodyWalletRequestSchema = createWalletSchemaBase
       example: "mint_authority",
     }),
     setDefault: createWalletSchemaBase.shape.setDefault.openapi({
-      description: "Set this wallet as the default signer for the active custody config.",
+      description: "Set this wallet as the default signer for the active wallet signing config.",
       example: true,
     }),
   })
-  .openapi({ description: "Create custody wallet request body." });
+  .openapi({ description: "Create wallet request body." });
 
 export const setDefaultWalletRequestSchema = setDefaultWalletSchemaBase
   .extend({
     projectId: projectIdParamSchema.optional(),
     walletId: walletIdParamSchema.openapi({
-      description: "Wallet ID to set as default for the active custody config.",
+      description: "Wallet ID to set as default for the active wallet signing config.",
       example: "privy_wallet_123",
     }),
   })
@@ -51,7 +51,7 @@ export const setDefaultWalletRequestSchema = setDefaultWalletSchemaBase
 export const initializeSigningResponseSchema = z
   .object({
     configId: z.string().openapi({
-      description: "Created custody config ID.",
+      description: "Created wallet signing config ID.",
       example: "cfg_example",
     }),
     publicKey: solanaAddressSchema.openapi({
@@ -62,15 +62,15 @@ export const initializeSigningResponseSchema = z
       example: "privy_wallet_123",
     }),
   })
-  .openapi({ description: "Custody initialization result." });
+  .openapi({ description: "Wallet signing initialization result." });
 
 export const orgCustodyProviderSchema = z
   .enum(["local", "fireblocks", "privy"])
-  .openapi({ description: "Custody provider.", example: "privy" });
+  .openapi({ description: "Wallet signing provider.", example: "privy" });
 
 export const custodyWalletSchema = z
   .object({
-    id: z.string().openapi({ description: "Custody wallet record ID.", example: "cw_example" }),
+    id: z.string().openapi({ description: "Wallet record ID.", example: "cw_example" }),
     walletId: walletIdParamSchema.openapi({
       description: "Provider wallet ID.",
       example: "privy_wallet_123",
@@ -90,25 +90,25 @@ export const custodyWalletSchema = z
     }),
     createdAt: isoDateTimeSchema,
   })
-  .openapi({ description: "Custody wallet details." });
+  .openapi({ description: "Wallet details." });
 
 export const custodyWalletResponseSchema = z
   .object({
     wallet: custodyWalletSchema,
   })
-  .openapi({ description: "Created custody wallet response payload." });
+  .openapi({ description: "Created wallet response payload." });
 
 export const custodyWalletsResponseSchema = z
   .object({
-    wallets: z.array(custodyWalletSchema).openapi({ description: "Custody wallets." }),
+    wallets: z.array(custodyWalletSchema).openapi({ description: "Wallets." }),
   })
-  .openapi({ description: "Custody wallets list response payload." });
+  .openapi({ description: "Wallets list response payload." });
 
 export const orgCustodyConfigSchema = z
   .object({
-    id: z.string().openapi({ description: "Custody config ID.", example: "cfg_example" }),
+    id: z.string().openapi({ description: "Wallet signing config ID.", example: "cfg_example" }),
     organizationId: z.string().openapi({
-      description: "Organization ID that owns this custody config.",
+      description: "Organization ID that owns this wallet signing config.",
       example: "org_example",
     }),
     projectId: projectIdParamSchema
@@ -127,13 +127,13 @@ export const orgCustodyConfigSchema = z
     }),
     createdAt: isoDateTimeSchema,
   })
-  .openapi({ description: "Custody configuration details." });
+  .openapi({ description: "Wallet signing configuration details." });
 
 export const custodyConfigResponseSchema = z
   .object({
     config: orgCustodyConfigSchema,
   })
-  .openapi({ description: "Custody configuration response payload." });
+  .openapi({ description: "Wallet signing configuration response payload." });
 
 export const setDefaultWalletResponseSchema = z
   .object({
@@ -148,4 +148,4 @@ export const custodyPublicKeyResponseSchema = z
   .object({
     publicKey: solanaAddressSchema,
   })
-  .openapi({ description: "Custody public key response payload." });
+  .openapi({ description: "Wallet public key response payload." });
