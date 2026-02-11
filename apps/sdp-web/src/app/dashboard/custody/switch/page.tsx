@@ -55,26 +55,6 @@ export default async function CustodySwitchPage() {
               </div>
 
               <div className="grid gap-2">
-                <Label htmlFor="apiBaseUrl">Privy API base URL (optional)</Label>
-                <Input
-                  id="apiBaseUrl"
-                  name="apiBaseUrl"
-                  placeholder="https://api.privy.io"
-                  inputMode="url"
-                />
-              </div>
-
-              <div className="grid gap-2">
-                <Label htmlFor="requestDelayMs">Privy request delay (ms, optional)</Label>
-                <Input
-                  id="requestDelayMs"
-                  name="requestDelayMs"
-                  placeholder="0"
-                  inputMode="numeric"
-                />
-              </div>
-
-              <div className="grid gap-2">
                 <Label htmlFor="confirm">Confirmation</Label>
                 <Input id="confirm" name="confirm" placeholder="SWITCH" />
               </div>

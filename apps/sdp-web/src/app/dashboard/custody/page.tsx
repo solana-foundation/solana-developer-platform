@@ -13,7 +13,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { sdpApiFetch, sdpApiRequest } from "@/lib/sdp-api";
-import { auth } from "@clerk/nextjs/server";
+import { auth, clerkClient } from "@clerk/nextjs/server";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createCustodyWallet, setDefaultCustodyWallet } from "./actions";
@@ -41,6 +41,12 @@ interface CustodyWallet {
   createdAt: string;
 }
 
+interface ClerkOrganizationSummary {
+  id: string;
+  name: string | null;
+  slug: string | null;
+}
+
 async function getCustodyConfig(): Promise<CustodyConfig | null> {
   const res = await sdpApiRequest("/v1/custody/config");
   if (res.status === 404) return null;
@@ -50,6 +56,26 @@ async function getCustodyConfig(): Promise<CustodyConfig | null> {
   }
   const json = (await res.json()) as { data: { config: CustodyConfig } };
   return json.data.config;
+}
+
+async function getClerkOrganizationSummary(organizationId: string): Promise<ClerkOrganizationSummary> {
+  try {
+    const client = await clerkClient();
+    const organization = await client.organizations.getOrganization({
+      organizationId,
+    });
+    return {
+      id: organization.id,
+      name: organization.name ?? null,
+      slug: organization.slug ?? null,
+    };
+  } catch {
+    return {
+      id: organizationId,
+      name: null,
+      slug: null,
+    };
+  }
 }
 
 export default async function CustodyPage() {
@@ -63,24 +89,44 @@ export default async function CustodyPage() {
 
   const onboarding = await sdpApiFetch<{ linked: boolean }>("/v1/onboarding/status");
   if (!onboarding.linked) {
+    const organization = await getClerkOrganizationSummary(orgId);
+
     return (
       <main className="min-h-screen bg-background px-6 py-10 text-foreground">
         <div className="mx-auto flex max-w-5xl flex-col gap-8">
           <DashboardHeader title="Custody" subtitle="Dashboard" backHref="/dashboard" />
           <Card>
             <CardHeader>
-              <CardTitle>Link your organization</CardTitle>
+              <CardTitle>Confirm organization details</CardTitle>
               <CardDescription>
-                This Clerk organization is not linked to a local SDP organization yet.
+                Review the Clerk organization details below before linking it in SDP.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+              <div className="rounded-md border border-border bg-muted/20 p-4 text-sm">
+                <div className="flex flex-wrap items-center justify-between gap-2 py-1">
+                  <span className="text-muted-foreground">Organization name</span>
+                  <span className="font-medium text-foreground">
+                    {organization.name ?? "Unavailable"}
+                  </span>
+                </div>
+                <div className="flex flex-wrap items-center justify-between gap-2 py-1">
+                  <span className="text-muted-foreground">Organization slug</span>
+                  <span className="font-mono text-xs text-foreground">
+                    {organization.slug ?? "Unavailable"}
+                  </span>
+                </div>
+                <div className="flex flex-wrap items-center justify-between gap-2 py-1">
+                  <span className="text-muted-foreground">Clerk organization ID</span>
+                  <span className="font-mono text-xs text-foreground">{organization.id}</span>
+                </div>
+              </div>
               <p className="text-sm text-muted-foreground">
-                Link it now to enable custody configuration and wallet management.
+                Confirming will link this Clerk organization in SDP (D1) and enable custody setup.
               </p>
               <form action={linkOrganization}>
                 <input type="hidden" name="returnTo" value="/dashboard/custody" />
-                <Button type="submit">Link organization</Button>
+                <Button type="submit">Confirm and link organization</Button>
               </form>
             </CardContent>
           </Card>

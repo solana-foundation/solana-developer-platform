@@ -13,19 +13,9 @@ function getOptionalString(formData: FormData, key: string): string | undefined 
   return value ? value : undefined;
 }
 
-function getOptionalNumber(formData: FormData, key: string): number | undefined {
-  const raw = getOptionalString(formData, key);
-  if (!raw) return undefined;
-  const parsed = Number(raw);
-  if (Number.isNaN(parsed)) return undefined;
-  return parsed;
-}
-
 export async function initializeCustody(formData: FormData) {
   const provider = (getString(formData, "provider") || "privy") as "privy" | "local";
   const walletLabel = getOptionalString(formData, "walletLabel");
-  const requestDelayMs = getOptionalNumber(formData, "requestDelayMs");
-  const apiBaseUrl = getOptionalString(formData, "apiBaseUrl");
 
   if (provider === "local") {
     await sdpApiFetch("/v1/custody/initialize", {
@@ -35,7 +25,7 @@ export async function initializeCustody(formData: FormData) {
   } else {
     await sdpApiFetch("/v1/custody/initialize", {
       method: "POST",
-      body: JSON.stringify({ provider, walletLabel, requestDelayMs, apiBaseUrl }),
+      body: JSON.stringify({ provider, walletLabel }),
     });
   }
 
@@ -47,8 +37,6 @@ export async function switchCustodyProvider(formData: FormData) {
   const provider = (getString(formData, "provider") || "privy") as "privy" | "local";
   const confirm = getString(formData, "confirm");
   const walletLabel = getOptionalString(formData, "walletLabel");
-  const requestDelayMs = getOptionalNumber(formData, "requestDelayMs");
-  const apiBaseUrl = getOptionalString(formData, "apiBaseUrl");
 
   if (confirm.toLowerCase() !== "switch") {
     throw new Error("Type SWITCH to confirm provider change");
@@ -62,7 +50,7 @@ export async function switchCustodyProvider(formData: FormData) {
   } else {
     await sdpApiFetch("/v1/custody/switch", {
       method: "POST",
-      body: JSON.stringify({ provider, walletLabel, requestDelayMs, apiBaseUrl }),
+      body: JSON.stringify({ provider, walletLabel }),
     });
   }
 
