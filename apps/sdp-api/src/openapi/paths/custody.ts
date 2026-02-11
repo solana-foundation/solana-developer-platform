@@ -19,12 +19,12 @@ import { custodyConfigResponse, custodyWalletResponse, custodyWalletsResponse } 
 export function registerCustodyPaths(registry: OpenAPIRegistry) {
   registry.registerPath({
     method: "post",
-    path: "/v1/custody/initialize",
-    tags: ["Custody"],
-    summary: "Initialize custody",
-    operationId: "initializeCustody",
+    path: "/v1/wallets/initialize",
+    tags: ["Wallets"],
+    summary: "Initialize wallet signing",
+    operationId: "initializeWalletSigning",
     description:
-      "Initializes custody for the organization or project by creating an active signing configuration.",
+      "Initializes wallet signing for the organization or project by creating an active signing configuration.",
     security: [{ apiKeyAuth: [] }],
     request: {
       body: {
@@ -34,7 +34,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
     },
     responses: {
       201: {
-        description: "Custody initialized",
+        description: "Wallet signing initialized",
         content: jsonContent(initializeSigningResponseSchema),
       },
       ...errorResponses(errorResponseSchema, [400, 401, 403, 409, 500]),
@@ -43,12 +43,12 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "post",
-    path: "/v1/custody/switch",
-    tags: ["Custody"],
-    summary: "Switch custody provider",
-    operationId: "switchCustodyProvider",
+    path: "/v1/wallets/switch",
+    tags: ["Wallets"],
+    summary: "Switch wallet signing provider",
+    operationId: "switchWalletSigningProvider",
     description:
-      "Switches the active custody provider for the organization or project without rotating existing on-chain authorities.",
+      "Switches the active wallet signing provider for the organization or project without rotating existing on-chain authorities.",
     security: [{ apiKeyAuth: [] }],
     request: {
       body: {
@@ -58,7 +58,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
     },
     responses: {
       201: {
-        description: "Custody provider switched",
+        description: "Wallet signing provider switched",
         content: jsonContent(initializeSigningResponseSchema),
       },
       ...errorResponses(errorResponseSchema, [400, 401, 403, 500]),
@@ -67,11 +67,11 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "post",
-    path: "/v1/custody/wallets",
-    tags: ["Custody"],
-    summary: "Create custody wallet",
-    operationId: "createCustodyWallet",
-    description: "Provisions a new wallet for the active custody provider configuration.",
+    path: "/v1/wallets",
+    tags: ["Wallets"],
+    summary: "Create wallet",
+    operationId: "createWallet",
+    description: "Provisions a new wallet for the active signing provider configuration.",
     security: [{ apiKeyAuth: [] }],
     request: {
       body: {
@@ -90,11 +90,11 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "post",
-    path: "/v1/custody/default-wallet",
-    tags: ["Custody"],
-    summary: "Set default custody wallet",
-    operationId: "setDefaultCustodyWallet",
-    description: "Sets the default wallet for the active custody configuration.",
+    path: "/v1/wallets/default-wallet",
+    tags: ["Wallets"],
+    summary: "Set default wallet",
+    operationId: "setDefaultWallet",
+    description: "Sets the default wallet for the active signing configuration.",
     security: [{ apiKeyAuth: [] }],
     request: {
       body: {
@@ -113,11 +113,11 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "get",
-    path: "/v1/custody/config",
-    tags: ["Custody"],
-    summary: "Get custody config",
-    operationId: "getCustodyConfig",
-    description: "Returns the active custody configuration for the organization or project.",
+    path: "/v1/wallets/config",
+    tags: ["Wallets"],
+    summary: "Get wallet signing config",
+    operationId: "getWalletConfig",
+    description: "Returns the active wallet signing configuration for the organization or project.",
     security: [{ apiKeyAuth: [] }],
     request: {
       query: z.object({
@@ -126,7 +126,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
     },
     responses: {
       200: {
-        description: "Custody config",
+        description: "Wallet signing config",
         content: jsonContent(custodyConfigResponse),
       },
       ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
@@ -135,11 +135,11 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "get",
-    path: "/v1/custody/wallets",
-    tags: ["Custody"],
-    summary: "List custody wallets",
-    operationId: "listCustodyWallets",
-    description: "Lists wallets for the active custody configuration.",
+    path: "/v1/wallets",
+    tags: ["Wallets"],
+    summary: "List wallets",
+    operationId: "listWallets",
+    description: "Lists wallets for the active signing configuration.",
     security: [{ apiKeyAuth: [] }],
     request: {
       query: z.object({
@@ -148,7 +148,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
     },
     responses: {
       200: {
-        description: "Custody wallets",
+        description: "Wallets",
         content: jsonContent(custodyWalletsResponse),
       },
       ...errorResponses(errorResponseSchema, [401, 403, 500]),
@@ -157,11 +157,11 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "get",
-    path: "/v1/custody/public-key",
-    tags: ["Custody"],
-    summary: "Get custody public key",
-    operationId: "getCustodyPublicKey",
-    description: "Returns the active custody public key for transaction construction.",
+    path: "/v1/wallets/public-key",
+    tags: ["Wallets"],
+    summary: "Get wallet public key",
+    operationId: "getWalletPublicKey",
+    description: "Returns the active wallet public key for transaction construction.",
     security: [{ apiKeyAuth: [] }],
     request: {
       query: z.object({
@@ -171,7 +171,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
     },
     responses: {
       200: {
-        description: "Custody public key",
+        description: "Wallet public key",
         content: jsonContent(custodyPublicKeyResponseSchema),
       },
       ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),

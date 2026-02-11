@@ -66,7 +66,10 @@ export function createOpenApiDocument(): OpenAPIObject {
       { name: "API Keys", description: "API key management endpoints." },
       { name: "Members", description: "Organization membership invitations and roles." },
       { name: "Auth", description: "Session authentication and management." },
-      { name: "Custody", description: "Custody provider configuration and wallet management." },
+      {
+        name: "Wallets",
+        description: "Wallet signing provider configuration and wallet management.",
+      },
       { name: "Projects", description: "Project and project member management." },
       { name: "Issuance", description: "Token issuance, allowlists, and lifecycle operations." },
       {
