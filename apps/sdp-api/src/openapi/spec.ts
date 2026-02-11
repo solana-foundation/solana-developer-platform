@@ -71,7 +71,8 @@ export function createOpenApiDocument(): OpenAPIObject {
       { name: "Issuance", description: "Token issuance, allowlists, and lifecycle operations." },
       {
         name: "Payments",
-        description: "Draft payments API for wallets, transfers, and Solana Pay (not implemented).",
+        description:
+          "Payments behavior on top of custody-managed wallets (balances, policies, transfers). Wallet provisioning and custody configuration live under the Custody tag. Some payments endpoints remain draft and are explicitly marked.",
       },
       { name: "Admin", description: "Administrative allowlist management." },
       { name: "Onboarding", description: "Clerk organization onboarding and linking." },
