@@ -1,8 +1,7 @@
 /**
- * Custody Routes
+ * Wallet Routes
  *
- * Manages organization-specific signing key configuration.
- * Enables per-org custody while maintaining backward compatibility with env-based signing.
+ * Manages organization-specific signing key configuration and wallet provisioning.
  */
 
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
@@ -18,20 +17,20 @@ import {
   switchSigning,
 } from "./handlers";
 
-const custody = new Hono<{ Bindings: Env }>();
+const wallets = new Hono<{ Bindings: Env }>();
 
 // All routes require authentication
-custody.use("*", unifiedAuthMiddleware({ allowClerk: true, allowSession: true }));
+wallets.use("*", unifiedAuthMiddleware({ allowClerk: true, allowSession: true }));
 
 // Initialize signing (requires admin)
-custody.post("/initialize", requirePermissions("custody:admin"), initializeSigning);
-custody.post("/switch", requirePermissions("custody:admin"), switchSigning);
-custody.post("/wallets", requirePermissions("custody:admin"), createWallet);
-custody.post("/default-wallet", requirePermissions("custody:admin"), setDefaultWallet);
+wallets.post("/initialize", requirePermissions("custody:admin"), initializeSigning);
+wallets.post("/switch", requirePermissions("custody:admin"), switchSigning);
+wallets.post("/", requirePermissions("custody:admin"), createWallet);
+wallets.post("/default-wallet", requirePermissions("custody:admin"), setDefaultWallet);
 
 // Read configuration and wallets
-custody.get("/config", requirePermissions("custody:read"), getConfig);
-custody.get("/wallets", requirePermissions("custody:read"), listWallets);
-custody.get("/public-key", requirePermissions("custody:read"), getPublicKey);
+wallets.get("/config", requirePermissions("custody:read"), getConfig);
+wallets.get("/", requirePermissions("custody:read"), listWallets);
+wallets.get("/public-key", requirePermissions("custody:read"), getPublicKey);
 
-export default custody;
+export default wallets;

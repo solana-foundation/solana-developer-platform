@@ -36,7 +36,7 @@ export const tokenIdParamSchema = idSchema("Token identifier.", "tok_example");
 export const allowlistEntryIdParamSchema = idSchema("Allowlist entry identifier.", "al_example");
 export const sessionIdParamSchema = idSchema("Session identifier.", "ses_example");
 export const signingRequestIdParamSchema = idSchema(
-  "Custody signing request identifier.",
+  "Wallet signing request identifier.",
   "sigreq_example"
 );
 export const walletIdParamSchema = idSchema("Wallet identifier.", "wal_example");

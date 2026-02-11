@@ -65,7 +65,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Custody Local Sig
   });
 
   it("initializes local custody and uses it for deployments", { timeout: 120000 }, async () => {
-    const initRes = await request("/v1/custody/initialize", {
+    const initRes = await request("/v1/wallets/initialize", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -81,7 +81,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Custody Local Sig
     const { configId, publicKey } = initBody.data;
     expect(publicKey).toMatch(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/);
 
-    const configRes = await request("/v1/custody/config");
+    const configRes = await request("/v1/wallets/config");
 
     expect(configRes.status).toBe(200);
     const configBody = (await configRes.json()) as {
@@ -134,10 +134,10 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Custody Local Sig
   });
 
   it("requires auth for custody endpoints", async () => {
-    const configRes = await rawRequest("/v1/custody/config");
+    const configRes = await rawRequest("/v1/wallets/config");
     expect(configRes.status).toBe(401);
 
-    const initRes = await rawRequest("/v1/custody/initialize", {
+    const initRes = await rawRequest("/v1/wallets/initialize", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ provider: "local" }),
