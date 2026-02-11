@@ -45,7 +45,6 @@ import {
   projectResponseSchema,
   revokeApiKeyResponseSchema,
   rotateApiKeyResponseSchema,
-  sendMagicLinkResponseSchema,
   successResponseSchema,
   tokenAllowlistEntrySchema,
   tokenAllowlistResponseSchema,
@@ -54,7 +53,6 @@ import {
   tokenTemplateResponseSchema,
   transferResponseSchema,
   transferSchema,
-  verifyMagicLinkResponseSchema,
   walletBalancesResponseSchema,
   walletPolicyResponseSchema,
   walletResponseSchema,
@@ -105,8 +103,6 @@ export const executeUpdateAuthorityResponse = successResponseSchema(
 export const executePauseResponse = successResponseSchema(executePauseResponseSchema);
 export const executeUnpauseResponse = successResponseSchema(executeUnpauseResponseSchema);
 
-export const sendMagicLinkResponse = successResponseSchema(sendMagicLinkResponseSchema);
-export const verifyMagicLinkResponse = successResponseSchema(verifyMagicLinkResponseSchema);
 export const currentUserResponse = successResponseSchema(currentUserResponseSchema);
 export const listSessionsResponse = successResponseSchema(listSessionsResponseSchema);
 

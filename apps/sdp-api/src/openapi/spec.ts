@@ -63,7 +63,7 @@ export function createOpenApiDocument(): OpenAPIObject {
       { name: "Organizations", description: "Organization provisioning and settings." },
       { name: "API Keys", description: "API key management endpoints." },
       { name: "Members", description: "Organization membership invitations and roles." },
-      { name: "Auth", description: "Session and magic link authentication." },
+      { name: "Auth", description: "Session authentication and management." },
       { name: "Projects", description: "Project and project member management." },
       { name: "Issuance", description: "Token issuance, allowlists, and lifecycle operations." },
       {

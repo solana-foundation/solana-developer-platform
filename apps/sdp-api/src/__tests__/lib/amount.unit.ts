@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
 import { formatDecimalAmount, parseDecimalAmount, toMosaicAmount } from "@/lib/amount";
+import { describe, expect, it } from "vitest";
 
 describe("amount helpers", () => {
   it("parses integer amounts", () => {
@@ -15,9 +15,7 @@ describe("amount helpers", () => {
   });
 
   it("rejects too many decimal places", () => {
-    expect(() => parseDecimalAmount("1.2345678", 6)).toThrow(
-      "Amount has too many decimal places"
-    );
+    expect(() => parseDecimalAmount("1.2345678", 6)).toThrow("Amount has too many decimal places");
   });
 
   it("formats base units to decimal strings", () => {

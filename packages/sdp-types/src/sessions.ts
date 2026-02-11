@@ -1,12 +1,12 @@
 /**
  * Session Types
  *
- * Sessions for UI authentication using magic link (passwordless) auth.
+ * Sessions for UI authentication.
  */
 
 import type { Permission } from "./permissions";
 
-export type AuthMethod = "magic_link";
+export type AuthMethod = "session";
 
 export interface Session {
   id: string; // ses_xxxxxxxxxxxx
@@ -30,45 +30,6 @@ export interface CachedSession {
   organizationId: string;
   permissions: Permission[];
   expiresAt: string;
-}
-
-export interface MagicLink {
-  id: string; // ml_xxxxxxxxxxxx
-  email: string;
-  tokenHash: string;
-  organizationId: string | null;
-  expiresAt: string;
-  usedAt: string | null;
-  createdAt: string;
-}
-
-// API Request/Response types
-export interface SendMagicLinkRequest {
-  email: string;
-  organizationId?: string; // Optional: direct to specific org
-}
-
-export interface SendMagicLinkResponse {
-  success: boolean;
-  message: string;
-  expiresAt: string;
-}
-
-export interface VerifyMagicLinkResponse {
-  session: {
-    id: string;
-    expiresAt: string;
-  };
-  user: {
-    id: string;
-    email: string;
-    name: string | null;
-  };
-  organization: {
-    id: string;
-    name: string;
-    slug: string;
-  } | null;
 }
 
 export interface CurrentUserResponse {

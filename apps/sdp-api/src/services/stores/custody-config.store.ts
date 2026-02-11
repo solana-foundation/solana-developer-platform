@@ -13,7 +13,7 @@ import type {
   SigningRequestRecord,
   SigningRequestStore,
 } from "@/services/domain/signing.service";
-import { createEncryptionService, type EncryptionService } from "@/services/encryption.service";
+import { type EncryptionService, createEncryptionService } from "@/services/encryption.service";
 import type { SignStatus } from "@/services/ports";
 
 // ═══════════════════════════════════════════════════════════════════════════
