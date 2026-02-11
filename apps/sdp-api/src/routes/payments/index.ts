@@ -2,7 +2,9 @@ import { authMiddleware, requirePermissions } from "@/middleware/auth";
 import type { Env } from "@/types/env";
 import { Hono } from "hono";
 import {
+  createConfidentialTransfer,
   createTransfer,
+  getFeeQuote,
   getTransfer,
   getWalletBalances,
   getWalletPolicy,
@@ -36,7 +38,13 @@ payments.post(
   prepareTransfer
 );
 payments.post("/transfers", requirePermissions("payments:write", "wallets:read"), createTransfer);
+payments.post(
+  "/transfers/confidential",
+  requirePermissions("payments:write", "wallets:read"),
+  createConfidentialTransfer
+);
 payments.get("/transfers", requirePermissions("payments:read"), listTransfers);
 payments.get("/transfers/:transferId", requirePermissions("payments:read"), getTransfer);
+payments.get("/fees/quote", requirePermissions("payments:read"), getFeeQuote);
 
 export default payments;

@@ -32,7 +32,9 @@ import {
 } from "@solana/kit";
 import type { Context } from "hono";
 import {
+  createConfidentialTransferSchema,
   createTransferSchema,
+  feeQuoteQuerySchema,
   listTransfersQuerySchema,
   prepareTransferSchema,
   transferIdParamsSchema,
@@ -1209,6 +1211,107 @@ export async function getTransfer(c: AppContext) {
       ...(details.amount ? { amount: details.amount } : {}),
       createdAt: blockTimeIso,
       updatedAt: blockTimeIso,
+    },
+  });
+}
+
+export async function createConfidentialTransfer(c: AppContext) {
+  const body = await c.req.json();
+  const parsed = createConfidentialTransferSchema.safeParse(body);
+
+  if (!parsed.success) {
+    throw new AppError("BAD_REQUEST", "Invalid request body", {
+      errors: parsed.error.flatten().fieldErrors,
+    });
+  }
+
+  if (isNativeSolToken(parsed.data.token)) {
+    throw new AppError("BAD_REQUEST", "Confidential transfers require a token mint, not SOL");
+  }
+
+  const scope = await resolveScope(c);
+  assertProjectContext(parsed.data.projectId, scope.auth.projectId);
+
+  const sourceWallet = resolveWallet(scope.wallets, parsed.data.source);
+  const destinationWallet = resolveWallet(scope.wallets, parsed.data.destination);
+  const sourceAddress = assertValidAddress(sourceWallet.publicKey, "source");
+  const destinationAddress = assertValidAddress(destinationWallet.publicKey, "destination");
+  const mintAddress = assertValidAddress(parsed.data.token, "token");
+
+  const transfer = await createTransferRecord(c, {
+    organizationId: scope.auth.organizationId,
+    projectId: scope.auth.projectId,
+    walletId: sourceWallet.walletId,
+    sourceAddress: sourceWallet.publicKey,
+    destinationAddress: destinationWallet.publicKey,
+    token: parsed.data.token,
+    amount: parsed.data.amount,
+    memo: parsed.data.memo,
+    type: "transfer_confidential",
+    status: "processing",
+    initiatedByKeyId: scope.auth.id,
+  });
+
+  try {
+    const signer = await createOrgSigner(
+      c.env,
+      scope.auth.organizationId,
+      scope.auth.projectId ?? undefined,
+      sourceWallet.walletId
+    );
+
+    const mosaic = createMosaicService(c.env, signer);
+    const result = await mosaic.transfer({
+      mint: mintAddress,
+      from: sourceAddress,
+      to: destinationAddress,
+      amount: parsed.data.amount,
+      memo: parsed.data.memo,
+      authority: signer,
+      feePayer: signer,
+    });
+
+    const updated = await updateTransferRecord(c, transfer.id, {
+      status: "confirmed",
+      signature: result.signature,
+      slot: Number(result.slot),
+      blockTime: new Date().toISOString(),
+      error: null,
+    });
+
+    return success(c, { transfer: mapTransferRow(updated) });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown confidential transfer error";
+    await updateTransferRecord(c, transfer.id, {
+      status: "failed",
+      error: message,
+      blockTime: new Date().toISOString(),
+    });
+
+    if (error instanceof AppError) {
+      throw error;
+    }
+
+    throw new AppError("SOLANA_RPC_ERROR", message);
+  }
+}
+
+export async function getFeeQuote(c: AppContext) {
+  const parsed = feeQuoteQuerySchema.safeParse(c.req.query());
+
+  if (!parsed.success) {
+    throw new AppError("BAD_REQUEST", "Invalid query parameters", {
+      errors: parsed.error.flatten().fieldErrors,
+    });
+  }
+
+  const feeToken = parsed.data.token.toUpperCase() === "SOL" ? "SOL" : parsed.data.token;
+  const feeAmount = feeToken === "SOL" ? "0.000005" : "0.01";
+
+  return success(c, {
+    feeQuote: {
+      feeToken,
+      feeAmount,
     },
   });
 }

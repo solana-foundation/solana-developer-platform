@@ -45,6 +45,19 @@ export const prepareTransferSchema = createTransferSchema.extend({
     .optional(),
 });
 
+export const createConfidentialTransferSchema = z.object({
+  projectId: z.string().min(1).optional(),
+  source: z.string().min(1),
+  destination: z.string().min(1),
+  token: z.string().min(1),
+  amount: transferAmountSchema,
+  memo: z.string().max(256).optional(),
+});
+
+export const feeQuoteQuerySchema = z.object({
+  token: z.string().min(1),
+});
+
 export const listTransfersQuerySchema = z.object({
   wallet: z.string().min(1).optional(),
   walletAddress: z.string().min(32).max(44).optional(),

@@ -328,10 +328,18 @@ export const prepareTransferResponseSchema = z
 
 export const createConfidentialTransferRequestSchema = z
   .object({
-    source: z.string().openapi({ description: "Source wallet ID." }),
-    destination: z.string().openapi({ description: "Destination wallet ID." }),
+    projectId: projectIdParamSchema
+      .optional()
+      .openapi({ description: "Project identifier for the transfer context." }),
+    source: z.string().openapi({ description: "Source wallet ID from /v1/wallets." }),
+    destination: z.string().openapi({ description: "Destination wallet ID from /v1/wallets." }),
     token: z.string().openapi({ description: "Token symbol or mint address." }),
     amount: tokenAmountSchema,
+    memo: z
+      .string()
+      .max(256)
+      .optional()
+      .openapi({ description: "Optional memo for the transfer." }),
   })
   .openapi({ description: "Create confidential transfer request payload." });
 

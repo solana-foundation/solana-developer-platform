@@ -205,7 +205,8 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     tags: ["Payments"],
     summary: "Create confidential transfer",
     operationId: "createConfidentialTransfer",
-    description: withDraft("Creates a confidential transfer using Token-2022."),
+    description:
+      "Executes a confidential transfer using server-side wallet signing for a wallet-managed source account.",
     security: [{ apiKeyAuth: [] }],
     request: {
       body: {
@@ -254,7 +255,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     tags: ["Payments"],
     summary: "Get fee quote",
     operationId: "getPaymentFeeQuote",
-    description: withDraft("Retrieves a fee quote for a transfer."),
+    description: "Retrieves a fee quote for a transfer.",
     security: [{ apiKeyAuth: [] }],
     request: {
       query: z.object({
