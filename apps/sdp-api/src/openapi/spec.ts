@@ -75,7 +75,7 @@ export function createOpenApiDocument(): OpenAPIObject {
       {
         name: "Payments",
         description:
-          "Payments behavior on top of custody-managed wallets (balances, policies, transfers). Wallet provisioning and custody configuration live under the Custody tag. Some payments endpoints remain draft and are explicitly marked.",
+          "Payments behavior on top of wallet-managed accounts (balances, policies, transfers). Wallet provisioning and signing configuration live under the Wallets tag. Some payments endpoints remain draft and are explicitly marked.",
       },
       { name: "Admin", description: "Administrative allowlist management." },
       { name: "Onboarding", description: "Clerk organization onboarding and linking." },

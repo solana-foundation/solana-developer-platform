@@ -1,7 +1,7 @@
 import { formatDecimalAmount, parseDecimalAmount } from "@/lib/amount";
 import { getAuth } from "@/lib/auth";
 import { AppError } from "@/lib/errors";
-import { success } from "@/lib/response";
+import { paginated, success } from "@/lib/response";
 import { assertValidAddress } from "@/lib/solana";
 import { createSigningService } from "@/services/domain/signing.service";
 import { createMosaicService } from "@/services/mosaic";
@@ -33,7 +33,9 @@ import {
 import type { Context } from "hono";
 import {
   createTransferSchema,
+  listTransfersQuerySchema,
   prepareTransferSchema,
+  transferIdParamsSchema,
   updateWalletPolicySchema,
   walletIdParamsSchema,
 } from "./schemas";
@@ -146,10 +148,7 @@ async function resolveScope(c: AppContext) {
 function resolveWallet(wallets: CustodyWallet[], walletId: string): CustodyWallet {
   const wallet = wallets.find((entry) => entry.walletId === walletId);
   if (!wallet) {
-    throw new AppError(
-      "NOT_FOUND",
-      "Wallet not found. Provision wallets through /v1/custody/wallets"
-    );
+    throw new AppError("NOT_FOUND", "Wallet not found. Provision wallets through /v1/wallets");
   }
   return wallet;
 }
@@ -754,4 +753,118 @@ export async function createTransfer(c: AppContext) {
 
     throw new AppError("SOLANA_RPC_ERROR", message);
   }
+}
+
+export async function listTransfers(c: AppContext) {
+  const parsed = listTransfersQuerySchema.safeParse(c.req.query());
+  if (!parsed.success) {
+    throw new AppError("BAD_REQUEST", "Invalid query parameters", {
+      errors: parsed.error.flatten().fieldErrors,
+    });
+  }
+
+  const auth = getAuth(c);
+  const { wallet, walletAddress, token, direction, status, from, to, page, pageSize } = parsed.data;
+
+  const whereClauses: string[] = ["organization_id = ?"];
+  const bindings: (string | number)[] = [auth.organizationId];
+
+  if (auth.projectId) {
+    whereClauses.push("project_id = ?");
+    bindings.push(auth.projectId);
+  }
+
+  if (wallet) {
+    whereClauses.push("wallet_id = ?");
+    bindings.push(wallet);
+  }
+
+  if (walletAddress) {
+    whereClauses.push("(source_address = ? OR destination_address = ?)");
+    bindings.push(walletAddress, walletAddress);
+  }
+
+  if (token) {
+    whereClauses.push("token = ?");
+    bindings.push(token);
+  }
+
+  if (direction) {
+    whereClauses.push("direction = ?");
+    bindings.push(direction);
+  }
+
+  if (status) {
+    whereClauses.push("status = ?");
+    bindings.push(status);
+  }
+
+  if (from) {
+    whereClauses.push("created_at >= ?");
+    bindings.push(from);
+  }
+
+  if (to) {
+    whereClauses.push("created_at <= ?");
+    bindings.push(to);
+  }
+
+  const whereSql = `WHERE ${whereClauses.join(" AND ")}`;
+
+  const countRow = await c.env.DB.prepare(
+    `SELECT COUNT(*) as total
+     FROM payment_transfers
+     ${whereSql}`
+  )
+    .bind(...bindings)
+    .first<{ total: number }>();
+
+  const total = Number(countRow?.total ?? 0);
+  const offset = (page - 1) * pageSize;
+
+  const rows = await c.env.DB.prepare(
+    `SELECT id, organization_id, project_id, wallet_id, source_address, destination_address,
+            token, amount, memo, type, direction, status, signature, serialized_tx,
+            slot, block_time, fee, error, initiated_by_key_id, created_at, updated_at
+     FROM payment_transfers
+     ${whereSql}
+     ORDER BY created_at DESC
+     LIMIT ? OFFSET ?`
+  )
+    .bind(...bindings, pageSize, offset)
+    .all<TransferRow>();
+
+  return paginated(
+    c,
+    (rows.results ?? []).map((row) => mapTransferRow(row)),
+    { total, page, pageSize }
+  );
+}
+
+export async function getTransfer(c: AppContext) {
+  const params = transferIdParamsSchema.safeParse(c.req.param());
+  if (!params.success) {
+    throw new AppError("BAD_REQUEST", "Invalid transfer ID");
+  }
+
+  const auth = getAuth(c);
+  const baseSql = `SELECT id, organization_id, project_id, wallet_id, source_address, destination_address,
+                          token, amount, memo, type, direction, status, signature, serialized_tx,
+                          slot, block_time, fee, error, initiated_by_key_id, created_at, updated_at
+                   FROM payment_transfers
+                   WHERE id = ? AND organization_id = ?`;
+
+  const row = auth.projectId
+    ? await c.env.DB.prepare(`${baseSql} AND project_id = ? LIMIT 1`)
+        .bind(params.data.transferId, auth.organizationId, auth.projectId)
+        .first<TransferRow>()
+    : await c.env.DB.prepare(`${baseSql} LIMIT 1`)
+        .bind(params.data.transferId, auth.organizationId)
+        .first<TransferRow>();
+
+  if (!row) {
+    throw new AppError("NOT_FOUND", "Transfer not found");
+  }
+
+  return success(c, { transfer: mapTransferRow(row) });
 }

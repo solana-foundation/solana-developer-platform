@@ -49,7 +49,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Get wallet balances",
     operationId: "getPaymentWalletBalances",
     description:
-      "Retrieves balances for a custody wallet. Wallet lifecycle and provisioning are managed through /v1/custody/wallets.",
+      "Retrieves balances for a wallet. Wallet lifecycle and provisioning are managed through /v1/wallets.",
     security: [{ apiKeyAuth: [] }],
     request: {
       params: z.object({
@@ -72,7 +72,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Get wallet policy",
     operationId: "getPaymentWalletPolicy",
     description:
-      "Retrieves payment policy rules for a custody wallet. Policies are payment controls layered on top of custody-managed wallets.",
+      "Retrieves payment policy rules for a wallet. Policies are payment controls layered on top of wallet-managed accounts.",
     security: [{ apiKeyAuth: [] }],
     request: {
       params: z.object({
@@ -95,7 +95,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Update wallet policy",
     operationId: "updatePaymentWalletPolicy",
     description:
-      "Updates payment policy rules for a custody wallet. Wallet provisioning and default selection remain in /v1/custody.",
+      "Updates payment policy rules for a wallet. Wallet provisioning and default selection remain in /v1/wallets.",
     security: [{ apiKeyAuth: [] }],
     request: {
       params: z.object({
@@ -126,7 +126,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Prepare transfer (unsigned)",
     operationId: "preparePaymentTransfer",
     description:
-      "Builds an unsigned transfer transaction for a custody wallet. The source walletId must reference a wallet from /v1/custody/wallets.",
+      "Builds an unsigned transfer transaction for a wallet. The source walletId must reference a wallet from /v1/wallets.",
     security: [{ apiKeyAuth: [] }],
     request: {
       body: {
@@ -147,10 +147,10 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     method: "post",
     path: "/v1/payments/transfers",
     tags: ["Payments"],
-    summary: "Execute transfer (custody)",
+    summary: "Execute transfer (wallet signing)",
     operationId: "createPaymentTransfer",
     description:
-      "Executes a transfer using server-side custody signing. The source walletId must reference a wallet from /v1/custody/wallets.",
+      "Executes a transfer using server-side wallet signing. The source walletId must reference a wallet from /v1/wallets.",
     security: [{ apiKeyAuth: [] }],
     request: {
       body: {
@@ -173,9 +173,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     tags: ["Payments"],
     summary: "List transfers",
     operationId: "listPaymentTransfers",
-    description: withDraft(
-      "Lists payment transfers for the authenticated organization or project scope."
-    ),
+    description: "Lists payment transfers for the authenticated organization or project scope.",
     security: [{ apiKeyAuth: [] }],
     request: {
       query: z.object({
@@ -230,7 +228,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     tags: ["Payments"],
     summary: "Get transfer",
     operationId: "getPaymentTransfer",
-    description: withDraft("Retrieves details for a specific transfer."),
+    description: "Retrieves details for a specific transfer.",
     security: [{ apiKeyAuth: [] }],
     request: {
       params: z.object({
