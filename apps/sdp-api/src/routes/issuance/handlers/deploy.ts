@@ -8,8 +8,8 @@ import { createRpc, simulateTransaction } from "@/services/solana/rpc";
 import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
 import type { TokenResponse } from "@sdp/types";
-import { TOKEN_ACL_PROGRAM_ID } from "@solana/mosaic-sdk";
 import type { Address } from "@solana/kit";
+import { TOKEN_ACL_PROGRAM_ID } from "@solana/mosaic-sdk";
 import type { Context } from "hono";
 
 type AppContext = Context<{ Bindings: Env }>;
@@ -42,7 +42,12 @@ export const deployToken = async (c: AppContext) => {
   }
 
   // Get custody signer (resolves via 3-tier: project → org → env fallback)
-  const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId);
+  const signer = await createOrgSigner(
+    c.env,
+    auth.organizationId,
+    auth.projectId,
+    auth.signingWalletId
+  );
   const custodyAddress = signer.address;
 
   // Create Mosaic service for template-based token deployment
@@ -145,7 +150,12 @@ export const prepareDeploy = async (c: AppContext) => {
   }
 
   // Get custody signer (resolves via 3-tier: project → org → env fallback)
-  const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId);
+  const signer = await createOrgSigner(
+    c.env,
+    auth.organizationId,
+    auth.projectId,
+    auth.signingWalletId
+  );
   const custodyAddress = signer.address;
 
   // Create Mosaic service and prepare transaction

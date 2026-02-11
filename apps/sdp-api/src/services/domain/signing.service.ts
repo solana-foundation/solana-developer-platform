@@ -13,6 +13,7 @@ import {
   createSigningAdapter,
   createSigningAdapterFromConfig,
 } from "@/services/adapters";
+import { provisionPrivyWallet } from "@/services/custody/provisioning";
 import { type EncryptionService, createEncryptionService } from "@/services/encryption.service";
 import type { SignRequest, SignResult, SignStatus, SigningPort } from "@/services/ports";
 import { SigningError } from "@/services/ports";
@@ -20,6 +21,7 @@ import {
   CustodyConfigStore,
   type CustodyWallet,
   SigningRequestD1Store,
+  type WalletPurpose,
 } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import { getBase58Codec } from "@solana/codecs";
@@ -108,11 +110,9 @@ export interface InitFireblocksSigningOptions {
  * Options for initializing org signing with Privy provider.
  */
 export interface InitPrivySigningOptions {
-  appId: string;
-  appSecret: string;
-  walletId: string;
   apiBaseUrl?: string;
   requestDelayMs?: number;
+  walletLabel?: string;
 }
 
 /**
@@ -227,8 +227,7 @@ export class SigningService {
     });
 
     // Invalidate cache
-    const cacheKey = `${orgId}:${projectId ?? "org"}`;
-    this.providerCache.delete(cacheKey);
+    this.providerCache.delete(configId);
 
     return {
       configId,
@@ -302,8 +301,7 @@ export class SigningService {
     });
 
     // Invalidate cache
-    const cacheKey = `${orgId}:${projectId ?? "org"}`;
-    this.providerCache.delete(cacheKey);
+    this.providerCache.delete(configId);
 
     return {
       configId,
@@ -334,31 +332,29 @@ export class SigningService {
       );
     }
 
-    // Encrypt the app secret for storage
-    const encryption = this.getEncryptionService();
-    const encryptedSecret = await encryption.encryptPrivateKey(orgId, options.appSecret);
+    const appId = this.env.PRIVY_APP_ID;
+    const appSecret = this.env.PRIVY_APP_SECRET;
 
-    // Create config with Privy credentials
+    // Privy is platform-managed: users never provide app credentials.
+    if (!appId || !appSecret) {
+      throw new SigningError(
+        "Privy environment variables not configured: PRIVY_APP_ID, PRIVY_APP_SECRET",
+        "PROVIDER_NOT_CONFIGURED"
+      );
+    }
+
+    // Provision a new Privy server wallet under the platform app.
+    const provisioned = await provisionPrivyWallet(this.env, { apiBaseUrl: options.apiBaseUrl });
+    const publicKey = provisioned.address as Address;
+    const walletId = normalizePrivyWalletId(provisioned.walletId);
+
+    // Store only non-secret provider metadata in D1.
     const configJson: PrivyProviderConfig = {
       provider: "privy",
-      appId: options.appId,
-      appSecretEncrypted: encryptedSecret,
-      walletId: options.walletId,
       apiBaseUrl: options.apiBaseUrl,
       requestDelayMs: options.requestDelayMs,
+      privyAppId: appId,
     };
-
-    // Create the adapter to get the public key
-    const adapter = new KeychainPrivyAdapter({
-      appId: options.appId,
-      appSecret: options.appSecret,
-      walletId: options.walletId,
-      apiBaseUrl: options.apiBaseUrl,
-      requestDelayMs: options.requestDelayMs,
-    });
-
-    const publicKey = await adapter.getPublicKey();
-    const walletId = `privy_${options.walletId}`;
 
     const configId = await this.configStore.upsert(orgId, projectId, {
       provider: "privy",
@@ -372,13 +368,12 @@ export class SigningService {
     await this.configStore.createWallet(configId, {
       walletId,
       publicKey,
-      label: "Privy Wallet",
+      label: options.walletLabel ?? "Default",
       purpose: "root",
     });
 
     // Invalidate cache
-    const cacheKey = `${orgId}:${projectId ?? "org"}`;
-    this.providerCache.delete(cacheKey);
+    this.providerCache.delete(configId);
 
     return {
       configId,
@@ -396,6 +391,55 @@ export class SigningService {
       return [];
     }
     return this.configStore.getWallets(config.id);
+  }
+
+  /**
+   * Provision a new wallet in custody for the resolved provider configuration.
+   *
+   * For V1 we support wallet provisioning for the Privy provider (platform-managed).
+   */
+  async createWallet(
+    orgId: string,
+    projectId: string | undefined,
+    params: { label?: string; purpose?: WalletPurpose; setDefault?: boolean }
+  ): Promise<CustodyWallet> {
+    const config = await this.configStore.findActive(orgId, projectId);
+    if (!config) {
+      throw new SigningError("Custody not initialized", "NOT_FOUND");
+    }
+
+    if (config.provider !== "privy") {
+      throw new SigningError(
+        `Wallet provisioning not supported for provider: ${config.provider}`,
+        "INVALID_REQUEST"
+      );
+    }
+
+    const parsed = await parseConfigRecord(this.env, orgId, config);
+    const apiBaseUrl =
+      parsed.provider === "privy" ? (parsed.apiBaseUrl ?? this.env.PRIVY_API_BASE_URL) : undefined;
+
+    const provisioned = await provisionPrivyWallet(this.env, { apiBaseUrl });
+    const walletId = normalizePrivyWalletId(provisioned.walletId);
+
+    const wallet = await this.configStore.createWallet(config.id, {
+      walletId,
+      publicKey: provisioned.address,
+      label: params.label,
+      purpose: params.purpose,
+    });
+
+    if (params.setDefault) {
+      await this.env.DB.prepare(
+        `UPDATE custody_configs SET default_wallet_id = ?, updated_at = datetime('now') WHERE id = ?`
+      )
+        .bind(walletId, config.id)
+        .run();
+
+      this.providerCache.delete(config.id);
+    }
+
+    return wallet;
   }
 
   /**
@@ -443,35 +487,79 @@ export class SigningService {
    * 3. Environment fallback (KeychainMemoryAdapter with CUSTODY_PRIVATE_KEY)
    */
   async getAdapter(orgId: string, projectId?: string): Promise<SigningPort> {
-    const cacheKey = `${orgId}:${projectId ?? "org"}`;
+    const config = await this.configStore.findActive(orgId, projectId);
+    return this.getAdapterForConfig(orgId, config);
+  }
+
+  private async getAdapterForConfig(
+    orgId: string,
+    config: SigningConfigRecord | null
+  ): Promise<SigningPort> {
+    const cacheKey = config?.id ?? ENV_FALLBACK_CONFIG_ID;
 
     const cached = this.providerCache.get(cacheKey);
     if (cached) {
       return cached;
     }
 
-    const config = await this.configStore.findActive(orgId, projectId);
-
-    // If we have a config, use the encrypted config handler
-    // This decrypts private keys before creating the adapter
-    let adapter: SigningPort;
-    if (config) {
-      adapter = await createAdapterFromEncryptedConfig(this.env, orgId, config);
-    } else {
-      // Fall back to environment-based adapter
-      adapter = await createSigningAdapter(this.env, null);
-    }
+    const adapter = config
+      ? await createAdapterFromEncryptedConfig(this.env, orgId, config)
+      : await createSigningAdapter(this.env, null);
 
     this.providerCache.set(cacheKey, adapter);
     return adapter;
+  }
+
+  private async resolveAdapterForRequest(
+    orgId: string,
+    projectId: string | undefined,
+    walletId?: string | null
+  ): Promise<{ adapter: SigningPort; walletId?: string }> {
+    if (!walletId) {
+      const config = await this.configStore.findActive(orgId, projectId);
+      const adapter = await this.getAdapterForConfig(orgId, config);
+      return { adapter };
+    }
+
+    const walletRow = await this.env.DB.prepare(
+      `SELECT c.id as custody_config_id, c.project_id as project_id
+       FROM custody_wallets w
+       JOIN custody_configs c ON c.id = w.custody_config_id
+       WHERE c.organization_id = ? AND w.wallet_id = ? AND c.status = 'active' AND w.status = 'active'
+       LIMIT 1`
+    )
+      .bind(orgId, walletId)
+      .first<{ custody_config_id: string; project_id: string | null }>();
+
+    if (!walletRow) {
+      throw new SigningError("Custody wallet not found", "WALLET_NOT_FOUND");
+    }
+
+    // Org-level keys cannot reference project-scoped wallets.
+    if (!projectId && walletRow.project_id) {
+      throw new SigningError("Custody wallet not found", "WALLET_NOT_FOUND");
+    }
+
+    // Project-scoped keys can reference org-level wallets or wallets in the same project.
+    if (projectId && walletRow.project_id && walletRow.project_id !== projectId) {
+      throw new SigningError("Custody wallet not found", "WALLET_NOT_FOUND");
+    }
+
+    const config = await this.configStore.getById(walletRow.custody_config_id);
+    if (!config || config.organizationId !== orgId || config.status !== "active") {
+      throw new SigningError("Custody configuration not found", "WALLET_NOT_FOUND");
+    }
+
+    const adapter = await this.getAdapterForConfig(orgId, config);
+    return { adapter, walletId };
   }
 
   /**
    * Get the public key for the signing wallet.
    */
   async getPublicKey(orgId: string, projectId?: string, walletId?: string): Promise<Address> {
-    const adapter = await this.getAdapter(orgId, projectId);
-    return adapter.getPublicKey(walletId);
+    const resolved = await this.resolveAdapterForRequest(orgId, projectId, walletId);
+    return resolved.adapter.getPublicKey(resolved.walletId);
   }
 
   /**
@@ -500,8 +588,13 @@ export class SigningService {
    * - partiallySignTransactionMessageWithSigners()
    * - addSignersToTransactionMessage()
    */
-  async getTransactionSigner(orgId: string, projectId?: string): Promise<TransactionSigner> {
-    const adapter = await this.getAdapter(orgId, projectId);
+  async getTransactionSigner(
+    orgId: string,
+    projectId?: string,
+    walletId?: string | null
+  ): Promise<TransactionSigner> {
+    const resolved = await this.resolveAdapterForRequest(orgId, projectId, walletId);
+    const adapter = resolved.adapter;
 
     if (adapter instanceof KeychainMemoryAdapter) {
       return adapter.getTransactionSigner();
@@ -512,7 +605,7 @@ export class SigningService {
     }
 
     if (adapter instanceof KeychainPrivyAdapter) {
-      return adapter.getTransactionSigner();
+      return adapter.getTransactionSigner(resolved.walletId);
     }
 
     throw new SigningError(
@@ -627,11 +720,10 @@ export class SigningService {
     projectId: string | undefined,
     config: SigningConfiguration
   ): Promise<void> {
-    await this.configStore.upsert(orgId, projectId, config);
+    const configId = await this.configStore.upsert(orgId, projectId, config);
 
-    // Invalidate cache
-    const cacheKey = `${orgId}:${projectId ?? "org"}`;
-    this.providerCache.delete(cacheKey);
+    // Invalidate cache for this config.
+    this.providerCache.delete(configId);
   }
 
   /**
@@ -654,8 +746,11 @@ export class SigningService {
    * Call this after key rotation or config updates to force re-resolution.
    */
   invalidateCache(orgId: string, projectId?: string): void {
-    const cacheKey = `${orgId}:${projectId ?? "org"}`;
-    this.providerCache.delete(cacheKey);
+    // Cache keys are config IDs; resolving the current one would require I/O.
+    // Clearing the in-memory cache is safe and keeps the API behavior correct.
+    void orgId;
+    void projectId;
+    this.providerCache.clear();
   }
 
   /**
@@ -690,6 +785,22 @@ function decodeBase64(base64: string): Uint8Array {
   return bytes;
 }
 
+function normalizePrivyWalletId(walletId: string): string {
+  return walletId.startsWith("privy_") ? walletId : `privy_${walletId}`;
+}
+
+function parseOptionalRequestDelayMs(value?: string): number | undefined {
+  if (!value) return undefined;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new SigningError(
+      "PRIVY_REQUEST_DELAY_MS must be a non-negative number",
+      "INVALID_REQUEST"
+    );
+  }
+  return parsed;
+}
+
 /**
  * Export the secret key bytes from a KeyPairSigner.
  * Returns the 64-byte secret key (32 private + 32 public).
@@ -715,11 +826,14 @@ interface FireblocksProviderConfig {
 
 interface PrivyProviderConfig {
   provider: "privy";
-  appId: string;
-  appSecretEncrypted: string;
-  walletId: string;
+  // Legacy (pre reseller model): credentials stored in D1.
+  appId?: string;
+  appSecretEncrypted?: string;
+  walletId?: string;
   apiBaseUrl?: string;
   requestDelayMs?: number;
+  // Reseller model (platform-managed): non-secret metadata only.
+  privyAppId?: string;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -792,6 +906,15 @@ export async function createAdapterFromEncryptedConfig(
 
   // biome-ignore lint/nursery/noSecrets: This is a type guard, not a secret
   if (parsed.provider === "privy" && "appSecretEncrypted" in parsed) {
+    if (!parsed.appId || !parsed.walletId) {
+      throw new SigningError("Privy config missing appId or walletId", "PROVIDER_NOT_CONFIGURED");
+    }
+
+    if (!parsed.appSecretEncrypted) {
+      // biome-ignore lint/nursery/noSecrets: Not a secret, just a field name in an error message
+      throw new SigningError("Privy config missing appSecretEncrypted", "PROVIDER_NOT_CONFIGURED");
+    }
+
     // Decrypt the app secret
     const encryption = createEncryptionService(env.CUSTODY_ENCRYPTION_KEY);
     const appSecret = await encryption.decryptPrivateKey(orgId, parsed.appSecretEncrypted);
@@ -800,9 +923,40 @@ export async function createAdapterFromEncryptedConfig(
     return new KeychainPrivyAdapter({
       appId: parsed.appId,
       appSecret,
-      walletId: parsed.walletId,
       apiBaseUrl: parsed.apiBaseUrl,
       requestDelayMs: parsed.requestDelayMs,
+      defaultWalletId: record.defaultWalletId ?? normalizePrivyWalletId(parsed.walletId),
+    });
+  }
+
+  if (parsed.provider === "privy") {
+    const appId = env.PRIVY_APP_ID ?? parsed.privyAppId ?? parsed.appId;
+    const appSecret = env.PRIVY_APP_SECRET;
+
+    if (!appId || !appSecret) {
+      throw new SigningError(
+        "Privy environment variables not configured: PRIVY_APP_ID, PRIVY_APP_SECRET",
+        "PROVIDER_NOT_CONFIGURED"
+      );
+    }
+
+    const requestDelayMs =
+      parsed.requestDelayMs ?? parseOptionalRequestDelayMs(env.PRIVY_REQUEST_DELAY_MS);
+
+    const defaultWalletId =
+      record.defaultWalletId ??
+      (parsed.walletId ? normalizePrivyWalletId(parsed.walletId) : undefined);
+
+    if (!defaultWalletId) {
+      throw new SigningError("Privy config missing default wallet ID", "PROVIDER_NOT_CONFIGURED");
+    }
+
+    return new KeychainPrivyAdapter({
+      appId,
+      appSecret,
+      apiBaseUrl: parsed.apiBaseUrl ?? env.PRIVY_API_BASE_URL,
+      requestDelayMs,
+      defaultWalletId,
     });
   }
 

@@ -1,65 +1,11 @@
 import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
 import { z } from "zod";
 
-import {
-  errorResponseSchema,
-  magicLinkTokenQuerySchema,
-  sendMagicLinkRequestSchema,
-  sessionIdParamSchema,
-} from "../schemas";
+import { errorResponseSchema, sessionIdParamSchema } from "../schemas";
 import { errorResponses, jsonContent } from "./helpers";
-import {
-  actionSuccessResponse,
-  currentUserResponse,
-  listSessionsResponse,
-  sendMagicLinkResponse,
-  verifyMagicLinkResponse,
-} from "./responses";
+import { actionSuccessResponse, currentUserResponse, listSessionsResponse } from "./responses";
 
 export function registerAuthPaths(registry: OpenAPIRegistry) {
-  registry.registerPath({
-    method: "post",
-    path: "/v1/auth/magic-link",
-    tags: ["Auth"],
-    summary: "Send magic link",
-    operationId: "sendMagicLink",
-    description: "Sends a magic link email if the account exists.",
-    request: {
-      body: {
-        required: true,
-        content: jsonContent(sendMagicLinkRequestSchema),
-      },
-    },
-    responses: {
-      200: {
-        description: "Magic link sent",
-        content: jsonContent(sendMagicLinkResponse),
-      },
-      ...errorResponses(errorResponseSchema, [400, 401, 500]),
-    },
-  });
-
-  registry.registerPath({
-    method: "get",
-    path: "/v1/auth/magic-link/verify",
-    tags: ["Auth"],
-    summary: "Verify magic link",
-    operationId: "verifyMagicLink",
-    description: "Verifies a magic link token and creates a session.",
-    request: {
-      query: z.object({
-        token: magicLinkTokenQuerySchema,
-      }),
-    },
-    responses: {
-      200: {
-        description: "Magic link verified",
-        content: jsonContent(verifyMagicLinkResponse),
-      },
-      ...errorResponses(errorResponseSchema, [400, 401, 404, 500]),
-    },
-  });
-
   registry.registerPath({
     method: "post",
     path: "/v1/auth/logout",

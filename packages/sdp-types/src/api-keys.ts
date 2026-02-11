@@ -29,6 +29,7 @@ export interface ApiKey {
   revokedAt: string | null;
   rotatedFrom: string | null; // Previous key ID if this was created via rotation
   rotationDeadline: string | null; // Grace period end for the rotated-from key
+  signingWalletId: string | null; // Custody wallet binding (e.g. privy_xxx)
   status: ApiKeyStatus;
   createdAt: string;
 }
@@ -45,6 +46,7 @@ export interface CachedApiKey {
   environment: ApiKeyEnvironment;
   rateLimitTier: RateLimitTier;
   allowedIps: string[] | null;
+  signingWalletId: string | null;
   status: ApiKeyStatus;
   expiresAt: string | null;
 }
@@ -58,6 +60,10 @@ export interface CreateApiKeyRequest {
   environment?: ApiKeyEnvironment;
   allowedIps?: string[]; // CIDR ranges for IP restriction
   expiresAt?: string; // ISO date string
+  signingWalletId?: string;
+  provisionWallet?: boolean;
+  walletLabel?: string;
+  walletPurpose?: string;
 }
 
 export interface UpdateApiKeyRequest {
@@ -65,6 +71,8 @@ export interface UpdateApiKeyRequest {
   description?: string;
   allowedIps?: string[] | null; // null to remove IP restrictions
   expiresAt?: string | null; // null to remove expiration
+  permissions?: Permission[] | null; // null to revert to role defaults
+  signingWalletId?: string | null; // null to unset binding
 }
 
 export interface RotateApiKeyRequest {

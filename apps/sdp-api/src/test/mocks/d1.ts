@@ -70,6 +70,7 @@ export async function seedTestDatabase(env: Env): Promise<void> {
         revoked_at TEXT,
         rotated_from TEXT,
         rotation_deadline TEXT,
+        signing_wallet_id TEXT,
         created_at TEXT DEFAULT (datetime('now')),
         FOREIGN KEY (organization_id) REFERENCES organizations(id),
         FOREIGN KEY (project_id) REFERENCES projects(id)

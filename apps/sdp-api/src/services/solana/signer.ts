@@ -20,6 +20,7 @@ import {
   createSigningAdapterFromEnv,
 } from "@/services/adapters";
 import { createSigningService } from "@/services/domain/signing.service";
+import { SigningError } from "@/services/ports";
 import type { Env } from "@/types/env";
 import { getBase58Codec } from "@solana/codecs";
 import {
@@ -109,17 +110,25 @@ export async function createSigner(env: Env): Promise<TransactionSigner> {
 export async function createOrgSigner(
   env: Env,
   orgId: string,
-  projectId?: string | null
+  projectId?: string | null,
+  walletId?: string | null
 ): Promise<TransactionSigner> {
   const signingService = createSigningService(env);
 
   try {
     // getTransactionSigner handles 3-tier resolution internally
-    return await signingService.getTransactionSigner(orgId, projectId ?? undefined);
-  } catch {
-    // If org-aware signing fails (e.g., no encryption key configured),
-    // fall back to env-based signing for backward compatibility
-    return createSigner(env);
+    return await signingService.getTransactionSigner(
+      orgId,
+      projectId ?? undefined,
+      walletId ?? undefined
+    );
+  } catch (error) {
+    // Keep backward compatibility only for legacy provider configuration issues.
+    // Do not mask wallet binding failures or other explicit request errors.
+    if (error instanceof SigningError && error.code === "PROVIDER_NOT_CONFIGURED" && !walletId) {
+      return createSigner(env);
+    }
+    throw error;
   }
 }
 

@@ -85,8 +85,7 @@ const templateOverridesSchema = z.object({
  * Template type enum
  */
 export const tokenTemplateSchema = z.preprocess(
-  (value) =>
-    value === "tokenized_security" || value === "rwa" ? "tokenized-security" : value,
+  (value) => (value === "tokenized_security" || value === "rwa" ? "tokenized-security" : value),
   z.enum(["stablecoin", "arcade", "tokenized-security", "custom"])
 );
 

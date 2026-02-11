@@ -10,7 +10,6 @@ const createOrgCustodySchema = z.discriminatedUnion("provider", [
   z.object({
     provider: z.literal("privy"),
     apiBaseUrl: z.string().url().optional(),
-    walletId: z.string().min(1).optional(),
     requestDelayMs: z.number().int().min(0).max(3000).optional(),
   }),
 ]);

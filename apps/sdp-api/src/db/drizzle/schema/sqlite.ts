@@ -236,12 +236,14 @@ export const apiKeys = sqliteTable(
     allowedIps: text("allowed_ips"),
     rotatedFrom: text("rotated_from"),
     rotationDeadline: text("rotation_deadline"),
+    signingWalletId: text("signing_wallet_id"),
   },
   (table) => ({
     orgIdx: index("idx_api_keys_org").on(table.organizationId),
     hashIdx: uniqueIndex("idx_api_keys_hash").on(table.keyHash),
     statusIdx: index("idx_api_keys_status").on(table.status),
     projectIdx: index("idx_api_keys_project").on(table.projectId),
+    signingWalletIdx: index("idx_api_keys_signing_wallet_id").on(table.signingWalletId),
   })
 );
 

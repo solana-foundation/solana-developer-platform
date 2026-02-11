@@ -67,7 +67,12 @@ export const prepareSeize = async (c: AppContext) => {
     throw new AppError("BAD_REQUEST", "Permanent delegate is not configured for this token");
   }
 
-  const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId);
+  const signer = await createOrgSigner(
+    c.env,
+    auth.organizationId,
+    auth.projectId,
+    auth.signingWalletId
+  );
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
   const source = assertValidAddress(parsed.data.seize.source, "source");
   const destination = assertValidAddress(parsed.data.seize.destination, "destination");
@@ -177,7 +182,12 @@ export const executeSeize = async (c: AppContext) => {
     throw new AppError("BAD_REQUEST", "Permanent delegate is not configured for this token");
   }
 
-  const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId);
+  const signer = await createOrgSigner(
+    c.env,
+    auth.organizationId,
+    auth.projectId,
+    auth.signingWalletId
+  );
   if (permanentDelegateRaw !== signer.address) {
     throw new AppError("BAD_REQUEST", "Permanent delegate is not controlled by custody");
   }

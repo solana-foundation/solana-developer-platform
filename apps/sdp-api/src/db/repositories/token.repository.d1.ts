@@ -1,8 +1,12 @@
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { formatDecimalAmount } from "@/lib/amount";
 import type { Token, TokenExtensionsConfig, TokenStatus, TokenTemplate } from "@sdp/types";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { issuedTokenExtensions, issuedTokens } from "../drizzle/schema/sqlite";
-import type { ListTokensOptions, TokenRepository, TokenRepositoryContext } from "./token.repository";
+import type {
+  ListTokensOptions,
+  TokenRepository,
+  TokenRepositoryContext,
+} from "./token.repository";
 
 const parseExtensionValue = (value: string | null): unknown => {
   if (!value) {
@@ -71,25 +75,22 @@ const buildListWhere = (projectId: string, status?: string) => {
   return eq(issuedTokens.projectId, projectId);
 };
 
-export const createD1TokenRepository = (
-  context: TokenRepositoryContext
-): TokenRepository => {
+export const createD1TokenRepository = (context: TokenRepositoryContext): TokenRepository => {
   const { db } = context;
 
   return {
     async getById(tokenId: string) {
-      const row = await db
-        .select()
-        .from(issuedTokens)
-        .where(eq(issuedTokens.id, tokenId))
-        .get();
+      const row = await db.select().from(issuedTokens).where(eq(issuedTokens.id, tokenId)).get();
 
       if (!row) {
         return null;
       }
 
       const extensionsRows = await db
-        .select({ extension: issuedTokenExtensions.extension, config: issuedTokenExtensions.config })
+        .select({
+          extension: issuedTokenExtensions.extension,
+          config: issuedTokenExtensions.config,
+        })
         .from(issuedTokenExtensions)
         .where(eq(issuedTokenExtensions.tokenId, tokenId))
         .all();

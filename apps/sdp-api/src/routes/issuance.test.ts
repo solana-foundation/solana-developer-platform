@@ -687,9 +687,7 @@ describe("Issuance Routes", () => {
   // ═══════════════════════════════════════════════════════════════════════════
 
   describe.skipIf(isMockMode)("Freeze/Unfreeze Operations", () => {
-    let activeTokenId: string;
-
-    beforeEach(async () => {
+    const seedFreezableToken = async (): Promise<string> => {
       const db = (env as { DB: D1Database }).DB;
 
       // Insert an active token with freeze capability
@@ -710,11 +708,13 @@ describe("Issuance Routes", () => {
         )
         .run();
 
-      activeTokenId = TEST_ACTIVE_TOKEN.id;
-    });
+      return TEST_ACTIVE_TOKEN.id;
+    };
 
     describe("POST /v1/issuance/tokens/:tokenId/freeze", () => {
       it("freezes an account", async () => {
+        const activeTokenId = await seedFreezableToken();
+
         const res = await app.request(
           `/v1/issuance/tokens/${activeTokenId}/freeze`,
           {
@@ -739,6 +739,8 @@ describe("Issuance Routes", () => {
       });
 
       it("returns 400 for already frozen account", async () => {
+        const activeTokenId = await seedFreezableToken();
+
         // Freeze first
         await app.request(
           `/v1/issuance/tokens/${activeTokenId}/freeze`,
@@ -775,6 +777,8 @@ describe("Issuance Routes", () => {
 
     describe("POST /v1/issuance/tokens/:tokenId/unfreeze", () => {
       it("unfreezes an account", async () => {
+        const activeTokenId = await seedFreezableToken();
+
         // Freeze first
         await app.request(
           `/v1/issuance/tokens/${activeTokenId}/freeze`,
@@ -809,6 +813,8 @@ describe("Issuance Routes", () => {
       });
 
       it("returns 400 for non-frozen account", async () => {
+        const activeTokenId = await seedFreezableToken();
+
         const res = await app.request(
           `/v1/issuance/tokens/${activeTokenId}/unfreeze`,
           {
@@ -1113,6 +1119,8 @@ describe("Issuance Routes", () => {
     });
 
     it("creates token with advanced extension overrides", async () => {
+      const extensionAuthority = TEST_SOLANA_ADDRESSES.wallet1;
+
       const res = await app.request(
         "/v1/issuance/tokens",
         {
@@ -1128,7 +1136,7 @@ describe("Issuance Routes", () => {
             overrides: {
               extensions: {
                 pausable: {
-                  authority: "So11111111111111111111111111111111111111112",
+                  authority: extensionAuthority,
                 },
                 scaledUiAmount: {
                   multiplier: 2,
@@ -1136,8 +1144,8 @@ describe("Issuance Routes", () => {
                   newMultiplierEffectiveTimestamp: 1735689600,
                 },
                 transferHook: {
-                  programId: "So11111111111111111111111111111111111111112",
-                  authority: "So11111111111111111111111111111111111111112",
+                  programId: extensionAuthority,
+                  authority: extensionAuthority,
                 },
               },
             },
@@ -1148,13 +1156,9 @@ describe("Issuance Routes", () => {
 
       expect(res.status).toBe(201);
       const body = await res.json();
-      expect(body.data.token.extensions?.pausable?.authority).toBe(
-        "So11111111111111111111111111111111111111112"
-      );
+      expect(body.data.token.extensions?.pausable?.authority).toBe(extensionAuthority);
       expect(body.data.token.extensions?.scaledUiAmount?.multiplier).toBe(2);
-      expect(body.data.token.extensions?.transferHook?.programId).toBe(
-        "So11111111111111111111111111111111111111112"
-      );
+      expect(body.data.token.extensions?.transferHook?.programId).toBe(extensionAuthority);
     });
 
     it("creates token with allowlist override", async () => {

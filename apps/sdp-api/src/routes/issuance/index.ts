@@ -54,11 +54,7 @@ issuance.post(
   requirePermissions("tokens:admin"),
   prepareForceBurn
 );
-issuance.post(
-  "/tokens/:tokenId/force-burn",
-  requirePermissions("tokens:admin"),
-  executeForceBurn
-);
+issuance.post("/tokens/:tokenId/force-burn", requirePermissions("tokens:admin"), executeForceBurn);
 
 // Authority Updates
 issuance.post(

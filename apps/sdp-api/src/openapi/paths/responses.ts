@@ -8,6 +8,9 @@ import {
   apiKeyResponseSchema,
   createOrganizationResponseSchema,
   currentUserResponseSchema,
+  custodyConfigResponseSchema,
+  custodyWalletResponseSchema,
+  custodyWalletsResponseSchema,
   executeBurnResponseSchema,
   executeForceBurnResponseSchema,
   executeMintResponseSchema,
@@ -45,7 +48,6 @@ import {
   projectResponseSchema,
   revokeApiKeyResponseSchema,
   rotateApiKeyResponseSchema,
-  sendMagicLinkResponseSchema,
   successResponseSchema,
   tokenAllowlistEntrySchema,
   tokenAllowlistResponseSchema,
@@ -54,7 +56,6 @@ import {
   tokenTemplateResponseSchema,
   transferResponseSchema,
   transferSchema,
-  verifyMagicLinkResponseSchema,
   walletBalancesResponseSchema,
   walletPolicyResponseSchema,
   walletResponseSchema,
@@ -105,10 +106,11 @@ export const executeUpdateAuthorityResponse = successResponseSchema(
 export const executePauseResponse = successResponseSchema(executePauseResponseSchema);
 export const executeUnpauseResponse = successResponseSchema(executeUnpauseResponseSchema);
 
-export const sendMagicLinkResponse = successResponseSchema(sendMagicLinkResponseSchema);
-export const verifyMagicLinkResponse = successResponseSchema(verifyMagicLinkResponseSchema);
 export const currentUserResponse = successResponseSchema(currentUserResponseSchema);
 export const listSessionsResponse = successResponseSchema(listSessionsResponseSchema);
+export const custodyConfigResponse = successResponseSchema(custodyConfigResponseSchema);
+export const custodyWalletResponse = successResponseSchema(custodyWalletResponseSchema);
+export const custodyWalletsResponse = successResponseSchema(custodyWalletsResponseSchema);
 
 export const allowlistEntriesResponse = successResponseSchema(allowlistEntriesResponseSchema);
 export const allowlistEntryResponse = successResponseSchema(

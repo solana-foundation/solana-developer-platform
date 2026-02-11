@@ -4,7 +4,6 @@
 
 import type { Env } from "@/types/env";
 import { Hono } from "hono";
-import { sendMagicLink, verifyMagicLink } from "./handlers/magic-link";
 import {
   getCurrentUser,
   listSessions,
@@ -14,10 +13,6 @@ import {
 } from "./handlers/sessions";
 
 const auth = new Hono<{ Bindings: Env }>();
-
-// Magic link flow
-auth.post("/magic-link", sendMagicLink);
-auth.get("/magic-link/verify", verifyMagicLink);
 
 // Session-protected routes
 auth.post("/logout", requireSession(), logout);

@@ -8,8 +8,8 @@ import type { Env } from "@/types/env";
 import { getTransferSolInstruction } from "@solana-program/system";
 import {
   type Address,
-  appendTransactionMessageInstructions,
   addSignersToTransactionMessage,
+  appendTransactionMessageInstructions,
   createTransactionMessage,
   getBase64EncodedWireTransaction,
   pipe,

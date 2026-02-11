@@ -49,11 +49,11 @@ async function getClerkToken(): Promise<string> {
   return token;
 }
 
-export async function sdpApiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
+export async function sdpApiRequest(path: string, options: RequestInit = {}): Promise<Response> {
   const token = await getClerkToken();
   const url = `${getApiBaseUrl()}${path.startsWith("/") ? path : `/${path}`}`;
 
-  const res = await fetch(url, {
+  return fetch(url, {
     ...options,
     headers: {
       Authorization: `Bearer ${token}`,
@@ -62,6 +62,10 @@ export async function sdpApiFetch<T>(path: string, options: RequestInit = {}): P
     },
     cache: "no-store",
   });
+}
+
+export async function sdpApiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const res = await sdpApiRequest(path, options);
 
   if (!res.ok) {
     const body = await res.text();
@@ -72,5 +76,11 @@ export async function sdpApiFetch<T>(path: string, options: RequestInit = {}): P
     return {} as T;
   }
 
-  return (await res.json()) as T;
+  const json = (await res.json()) as unknown;
+
+  if (json && typeof json === "object" && "data" in json) {
+    return (json as { data: T }).data;
+  }
+
+  return json as T;
 }

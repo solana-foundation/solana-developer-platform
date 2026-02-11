@@ -3,10 +3,7 @@ import { hashString } from "@/lib/hash";
 import { created, noContent, success } from "@/lib/response";
 import { createAllowlistService } from "@/services/allowlist.service";
 import { AuditService } from "@/services/audit.service";
-import {
-  provisionFireblocksVaultAccount,
-  provisionPrivyWallet,
-} from "@/services/custody/provisioning";
+import { provisionFireblocksVaultAccount } from "@/services/custody/provisioning";
 import { createSigningService } from "@/services/domain/signing.service";
 import { KVService } from "@/services/kv.service";
 import { SigningError } from "@/services/ports";
@@ -132,22 +129,7 @@ export const createOrganization = async (c: AppContext) => {
           apiBaseUrl: custody.apiBaseUrl ?? c.env.FIREBLOCKS_API_BASE_URL,
         });
       } else {
-        const { walletId } = await provisionPrivyWallet(c.env, {
-          walletId: custody.walletId,
-          apiBaseUrl: custody.apiBaseUrl,
-        });
-
-        if (!c.env.PRIVY_APP_ID || !c.env.PRIVY_APP_SECRET) {
-          throw new SigningError(
-            "Privy environment variables not configured: PRIVY_APP_ID, PRIVY_APP_SECRET",
-            "PROVIDER_NOT_CONFIGURED"
-          );
-        }
-
         await signingService.initializePrivySigning(orgId, undefined, {
-          appId: c.env.PRIVY_APP_ID,
-          appSecret: c.env.PRIVY_APP_SECRET,
-          walletId,
           apiBaseUrl: custody.apiBaseUrl ?? c.env.PRIVY_API_BASE_URL,
           requestDelayMs: custody.requestDelayMs,
         });

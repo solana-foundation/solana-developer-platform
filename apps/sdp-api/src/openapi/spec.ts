@@ -4,6 +4,7 @@ import type { OpenAPIObject } from "openapi3-ts/oas30";
 import { registerAdminPaths } from "./paths/admin";
 import { registerApiKeyPaths } from "./paths/api-keys";
 import { registerAuthPaths } from "./paths/auth";
+import { registerCustodyPaths } from "./paths/custody";
 import { registerHealthPaths } from "./paths/health";
 import { registerIssuancePaths } from "./paths/issuance";
 import { registerMemberPaths } from "./paths/members";
@@ -42,6 +43,7 @@ export function createOpenApiDocument(): OpenAPIObject {
   registerApiKeyPaths(registry);
   registerMemberPaths(registry);
   registerAuthPaths(registry);
+  registerCustodyPaths(registry);
   registerProjectPaths(registry);
   registerIssuancePaths(registry);
   registerPaymentsPaths(registry);
@@ -63,7 +65,8 @@ export function createOpenApiDocument(): OpenAPIObject {
       { name: "Organizations", description: "Organization provisioning and settings." },
       { name: "API Keys", description: "API key management endpoints." },
       { name: "Members", description: "Organization membership invitations and roles." },
-      { name: "Auth", description: "Session and magic link authentication." },
+      { name: "Auth", description: "Session authentication and management." },
+      { name: "Custody", description: "Custody provider configuration and wallet management." },
       { name: "Projects", description: "Project and project member management." },
       { name: "Issuance", description: "Token issuance, allowlists, and lifecycle operations." },
       {

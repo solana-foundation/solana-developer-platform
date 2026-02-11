@@ -8,8 +8,8 @@ import {
   pauseTokenSchema as pauseTokenSchemaBase,
   seizeSchema as seizeSchemaBase,
   unfreezeSchema as unfreezeSchemaBase,
-  updateTokenSchema as updateTokenSchemaBase,
   updateAuthoritySchema as updateAuthoritySchemaBase,
+  updateTokenSchema as updateTokenSchemaBase,
 } from "../../routes/issuance/schemas";
 import { z } from "./base";
 import {
@@ -155,14 +155,10 @@ export const tokenSchema = z
       .string()
       .nullable()
       .openapi({ description: "Token description.", example: "Example token description." }),
-    uri: z
-      .string()
-      .nullable()
-      .openapi({
-        description:
-          "Metadata URI passed to on-chain token metadata (points to off-chain JSON).",
-        example: "https://example.com/metadata.json",
-      }),
+    uri: z.string().nullable().openapi({
+      description: "Metadata URI passed to on-chain token metadata (points to off-chain JSON).",
+      example: "https://example.com/metadata.json",
+    }),
     imageUrl: z
       .string()
       .nullable()
@@ -174,13 +170,11 @@ export const tokenSchema = z
     extensions: tokenExtensionsConfigSchema
       .nullable()
       .openapi({ description: "Token-2022 extensions configuration." }),
-    totalSupply: z
-      .string()
-      .openapi({
-        description:
-          "Cached total supply in UI units (stored to avoid frequent RPC reads; refreshes asynchronously).",
-        example: "1000000",
-      }),
+    totalSupply: z.string().openapi({
+      description:
+        "Cached total supply in UI units (stored to avoid frequent RPC reads; refreshes asynchronously).",
+      example: "1000000",
+    }),
     totalSupplyUpdatedAt: isoDateTimeSchema
       .nullable()
       .openapi({ description: "Timestamp when supply was last refreshed.", example: null }),
@@ -581,7 +575,8 @@ const extensionOverridesOpenApiSchema = z
         z.literal(false),
         z.object({
           authority: z.string().optional().openapi({
-            description: "Authority that can pause/resume transfers. Defaults to platform authority.",
+            description:
+              "Authority that can pause/resume transfers. Defaults to platform authority.",
             example: "So11111111111111111111111111111111111111112",
           }),
         }),
@@ -601,7 +596,8 @@ const extensionOverridesOpenApiSchema = z
         z.literal(false),
         z.object({
           authority: z.string().optional().openapi({
-            description: "Authority that can update scaled UI parameters. Defaults to platform authority.",
+            description:
+              "Authority that can update scaled UI parameters. Defaults to platform authority.",
             example: "So11111111111111111111111111111111111111112",
           }),
           multiplier: z.number().openapi({
@@ -629,7 +625,8 @@ const extensionOverridesOpenApiSchema = z
             example: "So11111111111111111111111111111111111111112",
           }),
           authority: z.string().optional().openapi({
-            description: "Authority that can update the hook program. Defaults to platform authority.",
+            description:
+              "Authority that can update the hook program. Defaults to platform authority.",
             example: "So11111111111111111111111111111111111111112",
           }),
         }),
@@ -670,8 +667,7 @@ export const createTokenRequestSchema = createTokenSchemaBase
       example: "Example token description.",
     }),
     uri: createTokenSchemaBase.shape.uri.openapi({
-      description:
-        "Metadata URI passed to on-chain token metadata (points to off-chain JSON).",
+      description: "Metadata URI passed to on-chain token metadata (points to off-chain JSON).",
       example: "https://example.com/metadata.json",
     }),
     imageUrl: createTokenSchemaBase.shape.imageUrl.openapi({
@@ -895,13 +891,10 @@ export const tokenTemplateInfoSchema = z
       description: "Human-readable template name.",
       example: "Stablecoin",
     }),
-    description: z
-      .string()
-      .optional()
-      .openapi({
-        description: "Template description and use case.",
-        example: "USD-backed stablecoins with compliance controls and privacy features",
-      }),
+    description: z.string().optional().openapi({
+      description: "Template description and use case.",
+      example: "USD-backed stablecoins with compliance controls and privacy features",
+    }),
   })
   .openapi({ description: "Token template information." });
 

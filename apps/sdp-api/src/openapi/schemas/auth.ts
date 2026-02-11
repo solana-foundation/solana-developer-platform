@@ -1,44 +1,5 @@
-import { sendMagicLinkSchema as sendMagicLinkSchemaBase } from "../../routes/auth/schemas";
 import { z } from "./base";
 import { isoDateTimeSchema, orgIdParamSchema, sessionIdParamSchema, userIdSchema } from "./base";
-import { userSchema } from "./organizations";
-
-export const sendMagicLinkResponseSchema = z
-  .object({
-    success: z.boolean().openapi({ description: "Delivery status.", example: true }),
-    message: z.string().openapi({
-      description: "Human-readable status message.",
-      example: "Magic link sent.",
-    }),
-    expiresAt: isoDateTimeSchema.openapi({
-      description: "Expiration timestamp for the magic link.",
-      example: "2025-01-01T00:15:00.000Z",
-    }),
-  })
-  .openapi({ description: "Magic link send response payload." });
-
-export const verifyMagicLinkResponseSchema = z
-  .object({
-    session: z
-      .object({
-        id: sessionIdParamSchema,
-        expiresAt: isoDateTimeSchema.openapi({
-          description: "Session expiration timestamp.",
-          example: "2025-01-01T01:00:00.000Z",
-        }),
-      })
-      .openapi({ description: "Session created by the magic link." }),
-    user: userSchema.openapi({ description: "Authenticated user details." }),
-    organization: z
-      .object({
-        id: orgIdParamSchema,
-        name: z.string().openapi({ description: "Organization name.", example: "Example Org" }),
-        slug: z.string().openapi({ description: "Organization slug.", example: "example-org" }),
-      })
-      .nullable()
-      .openapi({ description: "Organization context, if available." }),
-  })
-  .openapi({ description: "Magic link verification response payload." });
 
 export const currentUserResponseSchema = z
   .object({
@@ -87,7 +48,7 @@ export const listSessionsResponseSchema = z
         z
           .object({
             id: sessionIdParamSchema,
-            authMethod: z.literal("magic_link").openapi({
+            authMethod: z.literal("session").openapi({
               description: "Authentication method used by the session.",
             }),
             ipAddress: z
@@ -115,16 +76,3 @@ export const listSessionsResponseSchema = z
       .openapi({ description: "Active sessions." }),
   })
   .openapi({ description: "List of active sessions." });
-
-export const sendMagicLinkRequestSchema = sendMagicLinkSchemaBase
-  .extend({
-    email: sendMagicLinkSchemaBase.shape.email.openapi({
-      description: "User email to send the magic link to.",
-      example: "user@example.com",
-    }),
-    organizationId: sendMagicLinkSchemaBase.shape.organizationId.openapi({
-      description: "Optional organization to scope the login.",
-      example: "org_example",
-    }),
-  })
-  .openapi({ description: "Send magic link request body." });

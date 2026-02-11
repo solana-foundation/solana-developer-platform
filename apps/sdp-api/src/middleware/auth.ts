@@ -26,6 +26,7 @@ interface ApiKeyContext {
   role: ApiKeyRole;
   permissions: Permission[];
   environment: string;
+  signingWalletId: string | null;
 }
 
 /**
@@ -85,7 +86,7 @@ async function getFromD1AndCache(
   const result = await db
     .prepare(
       `SELECT id, organization_id, project_id, role, permissions, environment,
-              rate_limit_tier, allowed_ips, status, expires_at
+              rate_limit_tier, allowed_ips, signing_wallet_id, status, expires_at
        FROM api_keys
        WHERE key_hash = ?`
     )
@@ -99,6 +100,7 @@ async function getFromD1AndCache(
       environment: string;
       rate_limit_tier: string;
       allowed_ips: string | null;
+      signing_wallet_id: string | null;
       status: string;
       expires_at: string | null;
     }>();
@@ -118,6 +120,7 @@ async function getFromD1AndCache(
     environment: result.environment as "sandbox" | "production",
     rateLimitTier: result.rate_limit_tier as "standard" | "elevated" | "unlimited",
     allowedIps: result.allowed_ips ? JSON.parse(result.allowed_ips) : null,
+    signingWalletId: result.signing_wallet_id,
     status: result.status as "active" | "revoked" | "expired",
     expiresAt: result.expires_at,
   };
@@ -193,6 +196,7 @@ export function authMiddleware() {
       role: cachedKey.role,
       permissions: cachedKey.permissions,
       environment: cachedKey.environment,
+      signingWalletId: cachedKey.signingWalletId ?? null,
     };
 
     c.set("apiKey", authContext);

@@ -46,7 +46,12 @@ export const freezeAccount = async (c: AppContext) => {
   }
 
   // Get custody signer (freeze authority, via 3-tier resolution)
-  const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId);
+  const signer = await createOrgSigner(
+    c.env,
+    auth.organizationId,
+    auth.projectId,
+    auth.signingWalletId
+  );
   const accountAddress = assertValidAddress(parsed.data.accountAddress, "accountAddress");
 
   // Execute freeze on Solana first (Token ACL-aware via Mosaic)
@@ -171,7 +176,12 @@ export const unfreezeAccount = async (c: AppContext) => {
   }
 
   // Get custody signer (freeze authority, via 3-tier resolution)
-  const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId);
+  const signer = await createOrgSigner(
+    c.env,
+    auth.organizationId,
+    auth.projectId,
+    auth.signingWalletId
+  );
   const accountAddress = assertValidAddress(parsed.data.accountAddress, "accountAddress");
 
   // Execute thaw on Solana first (Token ACL-aware via Mosaic)

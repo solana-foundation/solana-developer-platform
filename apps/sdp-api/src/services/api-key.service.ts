@@ -5,7 +5,7 @@
  */
 
 import { hashString } from "@/lib/hash";
-import type { ApiKeyEnvironment, ApiKeyRole, ApiKeyStatus } from "@sdp/types";
+import type { ApiKeyEnvironment, ApiKeyRole, ApiKeyStatus, Permission } from "@sdp/types";
 import { createApiKeyMaterial, parseJsonArray } from "./api-key.utils";
 
 export interface ApiKeyListItem {
@@ -24,6 +24,8 @@ export interface ApiKeyListItem {
 export interface ApiKeyDetails extends ApiKeyListItem {
   projectId: string | null;
   allowedIps: string[] | null;
+  permissions: Permission[] | null;
+  signingWalletId: string | null;
   rotatedFrom: string | null;
   rotationDeadline: string | null;
 }
@@ -35,9 +37,11 @@ export interface CreateApiKeyInput {
   name: string;
   description?: string | null;
   role: ApiKeyRole;
+  permissions?: Permission[] | null;
   environment: ApiKeyEnvironment;
   allowedIps?: string[] | null;
   expiresAt?: string | null;
+  signingWalletId?: string | null;
   pepper?: string;
 }
 
@@ -87,6 +91,8 @@ interface ApiKeyListRow {
 interface ApiKeyDetailsRow extends ApiKeyListRow {
   project_id: string | null;
   allowed_ips: string | null;
+  permissions: string | null;
+  signing_wallet_id: string | null;
   rotated_from: string | null;
   rotation_deadline: string | null;
 }
@@ -128,7 +134,8 @@ export class ApiKeyService {
     const row = await this.db
       .prepare(
         `SELECT id, name, description, key_prefix, role, environment, status,
-                project_id, allowed_ips, last_used_at, expires_at, rotated_from, rotation_deadline, created_at
+                project_id, allowed_ips, permissions, signing_wallet_id,
+                last_used_at, expires_at, rotated_from, rotation_deadline, created_at
          FROM api_keys
          WHERE id = ? AND organization_id = ?`
       )
@@ -143,6 +150,8 @@ export class ApiKeyService {
       ...this.mapListRow(row),
       projectId: row.project_id,
       allowedIps: parseJsonArray(row.allowed_ips),
+      permissions: row.permissions ? (JSON.parse(row.permissions) as Permission[]) : null,
+      signingWalletId: row.signing_wallet_id,
       rotatedFrom: row.rotated_from,
       rotationDeadline: row.rotation_deadline,
     };
@@ -164,8 +173,8 @@ export class ApiKeyService {
       .prepare(
         `INSERT INTO api_keys (
           id, organization_id, project_id, created_by, name, description, key_prefix, key_hash,
-          role, environment, allowed_ips, expires_at, status
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')`
+          role, permissions, environment, allowed_ips, signing_wallet_id, expires_at, status
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')`
       )
       .bind(
         keyId,
@@ -177,8 +186,10 @@ export class ApiKeyService {
         prefix,
         keyHash,
         input.role,
+        input.permissions ? JSON.stringify(input.permissions) : null,
         input.environment,
         input.allowedIps ? JSON.stringify(input.allowedIps) : null,
+        input.signingWalletId ?? null,
         input.expiresAt ?? null
       )
       .run();
@@ -204,7 +215,7 @@ export class ApiKeyService {
   ): Promise<RotateApiKeyResult | null> {
     const existing = await this.db
       .prepare(
-        `SELECT id, name, description, key_hash, role, environment, project_id, allowed_ips, created_by
+        `SELECT id, name, description, key_hash, role, permissions, environment, project_id, allowed_ips, signing_wallet_id, created_by
          FROM api_keys
          WHERE id = ? AND organization_id = ? AND status = 'active'`
       )
@@ -215,9 +226,11 @@ export class ApiKeyService {
         description: string | null;
         key_hash: string;
         role: ApiKeyRole;
+        permissions: string | null;
         environment: ApiKeyEnvironment;
         project_id: string | null;
         allowed_ips: string | null;
+        signing_wallet_id: string | null;
         created_by: string;
       }>();
 
@@ -236,8 +249,8 @@ export class ApiKeyService {
         .prepare(
           `INSERT INTO api_keys (
             id, organization_id, project_id, created_by, name, description, key_prefix, key_hash,
-            role, environment, allowed_ips, rotated_from, status
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')`
+            role, permissions, environment, allowed_ips, signing_wallet_id, rotated_from, status
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')`
         )
         .bind(
           newKeyId,
@@ -249,8 +262,10 @@ export class ApiKeyService {
           newPrefix,
           newKeyHash,
           existing.role,
+          existing.permissions,
           existing.environment,
           existing.allowed_ips,
+          existing.signing_wallet_id,
           keyId
         ),
       this.db

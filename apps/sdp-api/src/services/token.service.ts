@@ -342,9 +342,7 @@ export class TokenService {
       .bind(...params, limit, offset)
       .all<TokenRow>();
 
-    const extensionMap = await this.getExtensionsForTokens(
-      result.results.map((row) => row.id)
-    );
+    const extensionMap = await this.getExtensionsForTokens(result.results.map((row) => row.id));
 
     return {
       tokens: result.results.map((row) =>
@@ -1024,13 +1022,7 @@ export class TokenService {
           `INSERT INTO issued_token_extensions (id, token_id, extension, config, created_at)
            VALUES (?, ?, ?, ?, ?)`
         )
-        .bind(
-          `tex_${crypto.randomUUID()}`,
-          tokenId,
-          extension,
-          JSON.stringify(value),
-          createdAt
-        )
+        .bind(`tex_${crypto.randomUUID()}`, tokenId, extension, JSON.stringify(value), createdAt)
     );
 
     await this.db.batch(statements);
@@ -1164,9 +1156,7 @@ export class TokenService {
 
   private mapRowToToken(row: TokenRow, extensions: TokenExtensionsConfig | null): Token {
     const totalSupply = formatDecimalAmount(row.total_supply_cached ?? "0", row.decimals);
-    const maxSupply = row.max_supply
-      ? formatDecimalAmount(row.max_supply, row.decimals)
-      : null;
+    const maxSupply = row.max_supply ? formatDecimalAmount(row.max_supply, row.decimals) : null;
 
     return {
       id: row.id,

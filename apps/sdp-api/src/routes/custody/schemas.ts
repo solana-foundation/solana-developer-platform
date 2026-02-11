@@ -27,11 +27,9 @@ export const initializeFireblocksSchema = z.object({
 export const initializePrivySchema = z.object({
   provider: z.literal("privy"),
   projectId: z.string().optional(),
-  appId: z.string().min(1),
-  appSecret: z.string().min(1),
-  walletId: z.string().min(1),
   apiBaseUrl: z.string().url().optional(),
   requestDelayMs: z.number().int().min(0).max(3000).optional(),
+  walletLabel: z.string().max(100).optional(),
 });
 
 export const initializeSigningSchema = z.discriminatedUnion("provider", [
@@ -41,6 +39,42 @@ export const initializeSigningSchema = z.discriminatedUnion("provider", [
 ]);
 
 export type InitializeSigningRequest = z.infer<typeof initializeSigningSchema>;
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Create Wallet
+// ═══════════════════════════════════════════════════════════════════════════
+
+export const createWalletSchema = z.object({
+  projectId: z.string().optional(),
+  label: z.string().max(100).optional(),
+  purpose: z
+    .enum(["root", "mint_authority", "freeze_authority", "fee_payer", "transfer"])
+    .optional(),
+  setDefault: z.boolean().optional(),
+});
+
+export type CreateWalletRequest = z.infer<typeof createWalletSchema>;
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Switch Signing Provider
+// ═══════════════════════════════════════════════════════════════════════════
+
+// For now, switching uses the same shape as initialize. The handler deactivates the
+// existing config for the scope (org or project) and then runs the initializer.
+export const switchSigningSchema = initializeSigningSchema;
+
+export type SwitchSigningRequest = z.infer<typeof switchSigningSchema>;
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Set Default Wallet
+// ═══════════════════════════════════════════════════════════════════════════
+
+export const setDefaultWalletSchema = z.object({
+  projectId: z.string().optional(),
+  walletId: z.string().min(1),
+});
+
+export type SetDefaultWalletRequest = z.infer<typeof setDefaultWalletSchema>;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Response Types

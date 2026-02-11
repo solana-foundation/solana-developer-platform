@@ -20,6 +20,7 @@ export interface ApiKeyContext {
   role: string;
   permissions: Permission[];
   environment: string;
+  signingWalletId: string | null;
 }
 
 export interface ClerkAuthContext {
@@ -62,6 +63,7 @@ export function getAuth(c: Context<{ Bindings: Env }>): ApiKeyContext {
     role: auth.role,
     permissions: auth.permissions,
     environment: auth.environment,
+    signingWalletId: auth.signingWalletId ?? null,
   };
 }
 

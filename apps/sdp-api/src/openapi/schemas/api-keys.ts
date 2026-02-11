@@ -1,3 +1,4 @@
+import { PERMISSIONS } from "@sdp/types";
 import {
   apiKeyCreateSchema as apiKeyCreateSchemaBase,
   apiKeyRotateSchema as apiKeyRotateSchemaBase,
@@ -22,6 +23,11 @@ export const apiKeyEnvironmentSchema = z
 export const apiKeyStatusSchema = z
   .enum(["active", "revoked", "expired"])
   .openapi({ description: "API key status.", example: "active" });
+
+export const permissionSchema = z.enum(PERMISSIONS).openapi({
+  description: "Permission granted to the API key.",
+  example: "tokens:write",
+});
 
 export const apiKeyListItemSchema = z
   .object({
@@ -56,6 +62,13 @@ export const apiKeyDetailSchema = z
     }),
     keyPrefix: apiKeyPrefixSchema,
     role: apiKeyRoleSchema,
+    permissions: z
+      .array(permissionSchema)
+      .nullable()
+      .openapi({
+        description: "Custom permissions override. Null means role defaults.",
+        example: ["tokens:read", "tokens:write"],
+      }),
     environment: apiKeyEnvironmentSchema,
     status: apiKeyStatusSchema,
     projectId: projectIdParamSchema
@@ -68,6 +81,10 @@ export const apiKeyDetailSchema = z
         description: "CIDR ranges permitted to use the key.",
         example: ["203.0.113.0/24"],
       }),
+    signingWalletId: z.string().nullable().openapi({
+      description: "Optional custody wallet bound to this API key for signing.",
+      example: "privy_wallet_123",
+    }),
     lastUsedAt: isoDateTimeSchema.nullable().openapi({
       description: "Timestamp of the last key usage.",
       example: "2025-01-10T12:00:00.000Z",
@@ -193,6 +210,26 @@ export const createApiKeyRequestSchema = apiKeyCreateSchemaBase
       description: "Optional expiration timestamp.",
       example: "2025-12-31T00:00:00.000Z",
     }),
+    permissions: apiKeyCreateSchemaBase.shape.permissions.openapi({
+      description: "Optional explicit permission set. Requires owner-level access.",
+      example: ["tokens:read", "tokens:write"],
+    }),
+    signingWalletId: apiKeyCreateSchemaBase.shape.signingWalletId.openapi({
+      description: "Optional existing custody wallet ID to bind this key to.",
+      example: "privy_wallet_123",
+    }),
+    provisionWallet: apiKeyCreateSchemaBase.shape.provisionWallet.openapi({
+      description: "If true, provisions a new custody wallet and binds it to the key.",
+      example: false,
+    }),
+    walletLabel: apiKeyCreateSchemaBase.shape.walletLabel.openapi({
+      description: "Optional label for a provisioned wallet.",
+      example: "Mint authority wallet",
+    }),
+    walletPurpose: apiKeyCreateSchemaBase.shape.walletPurpose.openapi({
+      description: "Optional purpose for a provisioned wallet.",
+      example: "mint_authority",
+    }),
   })
   .openapi({ description: "Create API key request body." });
 
@@ -213,6 +250,14 @@ export const updateApiKeyRequestSchema = apiKeyUpdateSchemaBase
     expiresAt: apiKeyUpdateSchemaBase.shape.expiresAt.openapi({
       description: "Updated expiration. Use null to clear.",
       example: "2026-01-01T00:00:00.000Z",
+    }),
+    permissions: apiKeyUpdateSchemaBase.shape.permissions.openapi({
+      description: "Updated explicit permission set. Use null to revert to role defaults.",
+      example: ["tokens:read", "tokens:write"],
+    }),
+    signingWalletId: apiKeyUpdateSchemaBase.shape.signingWalletId.openapi({
+      description: "Updated signing wallet binding. Use null to clear.",
+      example: "privy_wallet_123",
     }),
   })
   .openapi({ description: "Update API key request body." });

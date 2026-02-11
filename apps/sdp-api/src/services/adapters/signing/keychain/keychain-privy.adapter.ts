@@ -20,9 +20,9 @@ export class KeychainPrivyAdapter extends BaseKeychainAdapter {
   readonly providerId = "privy";
 
   protected signer!: SolanaSigner;
-  private privySigner: PrivySigner | null = null;
-  private initialized = false;
+
   private readonly config: KeychainPrivyConfig;
+  private readonly signerByWalletId = new Map<string, Promise<PrivySigner>>();
 
   constructor(config: KeychainPrivyConfig) {
     super();
@@ -32,30 +32,8 @@ export class KeychainPrivyAdapter extends BaseKeychainAdapter {
   /**
    * Get the underlying PrivySigner for direct use with @solana/kit.
    */
-  async getTransactionSigner(): Promise<PrivySigner> {
-    await this.ensureInitialized();
-    return this.privySigner as PrivySigner;
-  }
-
-  /**
-   * Initialize the Privy signer.
-   * Must be called before any signing operations to fetch the public key.
-   */
-  async init(): Promise<void> {
-    if (this.initialized) {
-      return;
-    }
-
-    this.privySigner = await PrivySigner.create({
-      appId: this.config.appId,
-      appSecret: this.config.appSecret,
-      walletId: this.config.walletId,
-      apiBaseUrl: this.config.apiBaseUrl,
-      requestDelayMs: this.config.requestDelayMs,
-    });
-
-    this.signer = this.privySigner as unknown as SolanaSigner;
-    this.initialized = true;
+  async getTransactionSigner(walletId?: string): Promise<PrivySigner> {
+    return this.getPrivySigner(walletId);
   }
 
   /**
@@ -68,25 +46,45 @@ export class KeychainPrivyAdapter extends BaseKeychainAdapter {
   /**
    * Get the public key, ensuring initialization first.
    */
-  async getPublicKey(_walletId?: string): Promise<Address> {
-    await this.ensureInitialized();
-    return this.signer.address as Address;
+  async getPublicKey(walletId?: string): Promise<Address> {
+    const signer = await this.getPrivySigner(walletId);
+    return signer.address as Address;
   }
 
   /**
-   * Ensure the signer is initialized before signing.
+   * SigningPort does not specify a wallet ID; for Privy, we always sign with the
+   * configured default wallet.
    */
   async sign(request: SignRequest): Promise<SignResult> {
-    await this.ensureInitialized();
+    const signer = await this.getPrivySigner();
+    this.signer = signer as unknown as SolanaSigner;
     return super.sign(request);
   }
 
-  /**
-   * Ensure the signer is initialized before operations.
-   */
-  private async ensureInitialized(): Promise<void> {
-    if (!this.initialized) {
-      await this.init();
+  private async getPrivySigner(walletId?: string): Promise<PrivySigner> {
+    const normalizedWalletId = walletId ?? this.config.defaultWalletId;
+    if (!normalizedWalletId) {
+      throw new Error("Privy wallet ID is required");
     }
+
+    const cacheKey = normalizedWalletId;
+    const existing = this.signerByWalletId.get(cacheKey);
+    if (existing) {
+      return existing;
+    }
+
+    const created = PrivySigner.create({
+      appId: this.config.appId,
+      appSecret: this.config.appSecret,
+      walletId: denormalizePrivyWalletId(normalizedWalletId),
+      apiBaseUrl: this.config.apiBaseUrl,
+      requestDelayMs: this.config.requestDelayMs,
+    });
+    this.signerByWalletId.set(cacheKey, created);
+    return created;
   }
+}
+
+function denormalizePrivyWalletId(walletId: string): string {
+  return walletId.startsWith("privy_") ? walletId.slice("privy_".length) : walletId;
 }
