@@ -58,7 +58,9 @@ async function getCustodyConfig(): Promise<CustodyConfig | null> {
   return json.data.config;
 }
 
-async function getClerkOrganizationSummary(organizationId: string): Promise<ClerkOrganizationSummary> {
+async function getClerkOrganizationSummary(
+  organizationId: string
+): Promise<ClerkOrganizationSummary> {
   try {
     const client = await clerkClient();
     const organization = await client.organizations.getOrganization({
