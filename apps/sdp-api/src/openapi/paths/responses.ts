@@ -8,6 +8,9 @@ import {
   apiKeyResponseSchema,
   createOrganizationResponseSchema,
   currentUserResponseSchema,
+  custodyConfigResponseSchema,
+  custodyWalletResponseSchema,
+  custodyWalletsResponseSchema,
   executeBurnResponseSchema,
   executeForceBurnResponseSchema,
   executeMintResponseSchema,
@@ -105,6 +108,9 @@ export const executeUnpauseResponse = successResponseSchema(executeUnpauseRespon
 
 export const currentUserResponse = successResponseSchema(currentUserResponseSchema);
 export const listSessionsResponse = successResponseSchema(listSessionsResponseSchema);
+export const custodyConfigResponse = successResponseSchema(custodyConfigResponseSchema);
+export const custodyWalletResponse = successResponseSchema(custodyWalletResponseSchema);
+export const custodyWalletsResponse = successResponseSchema(custodyWalletsResponseSchema);
 
 export const allowlistEntriesResponse = successResponseSchema(allowlistEntriesResponseSchema);
 export const allowlistEntryResponse = successResponseSchema(

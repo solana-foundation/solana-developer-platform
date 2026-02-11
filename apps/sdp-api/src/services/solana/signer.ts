@@ -20,6 +20,7 @@ import {
   createSigningAdapterFromEnv,
 } from "@/services/adapters";
 import { createSigningService } from "@/services/domain/signing.service";
+import { SigningError } from "@/services/ports";
 import type { Env } from "@/types/env";
 import { getBase58Codec } from "@solana/codecs";
 import {
@@ -121,10 +122,13 @@ export async function createOrgSigner(
       projectId ?? undefined,
       walletId ?? undefined
     );
-  } catch {
-    // If org-aware signing fails (e.g., no encryption key configured),
-    // fall back to env-based signing for backward compatibility
-    return createSigner(env);
+  } catch (error) {
+    // Keep backward compatibility only for legacy provider configuration issues.
+    // Do not mask wallet binding failures or other explicit request errors.
+    if (error instanceof SigningError && error.code === "PROVIDER_NOT_CONFIGURED" && !walletId) {
+      return createSigner(env);
+    }
+    throw error;
   }
 }
 
