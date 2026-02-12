@@ -206,6 +206,44 @@ function mapTransferRow(row: TransferRow) {
   };
 }
 
+type JsonParsedTokenAccountEntry = {
+  account?: {
+    data?: {
+      parsed?: {
+        info?: unknown;
+      };
+    };
+  };
+};
+
+type JsonParsedTokenAccountsByOwnerResponse = {
+  value?: JsonParsedTokenAccountEntry[];
+};
+
+type TokenAccountsByOwnerRpc = {
+  getTokenAccountsByOwner: (
+    address: Address,
+    filter: { programId: Address },
+    config: { encoding: "jsonParsed"; commitment: "confirmed" }
+  ) => {
+    send: () => Promise<JsonParsedTokenAccountsByOwnerResponse>;
+  };
+};
+
+async function getTokenAccountsByOwnerJsonParsed(
+  rpc: ReturnType<typeof createRpc>,
+  owner: Address,
+  programId: Address
+): Promise<JsonParsedTokenAccountsByOwnerResponse> {
+  return (rpc as unknown as TokenAccountsByOwnerRpc)
+    .getTokenAccountsByOwner(
+      owner,
+      { programId },
+      { encoding: "jsonParsed", commitment: "confirmed" }
+    )
+    .send();
+}
+
 function parseTokenAmountInfo(
   value: unknown
 ): { mint: string; amount: bigint; decimals: number; uiAmount?: string } | null {
@@ -264,33 +302,7 @@ async function getSplTokenBalances(
   const balancesByMint = new Map<string, { amount: bigint; decimals: number; uiAmount?: string }>();
 
   for (const programId of SPL_TOKEN_PROGRAM_IDS) {
-    const response = await (
-      rpc as unknown as {
-        getTokenAccountsByOwner: (
-          address: Address,
-          filter: { programId: Address },
-          config: { encoding: "jsonParsed"; commitment: "confirmed" }
-        ) => {
-          send: () => Promise<{
-            value?: Array<{
-              account?: {
-                data?: {
-                  parsed?: {
-                    info?: unknown;
-                  };
-                };
-              };
-            }>;
-          }>;
-        };
-      }
-    )
-      .getTokenAccountsByOwner(
-        owner,
-        { programId },
-        { encoding: "jsonParsed", commitment: "confirmed" }
-      )
-      .send();
+    const response = await getTokenAccountsByOwnerJsonParsed(rpc, owner, programId);
 
     for (const account of response.value ?? []) {
       const parsed = parseTokenAmountInfo(account.account?.data?.parsed?.info);
