@@ -37,9 +37,7 @@ import {
   getTransactionEncoder,
   pipe,
   setTransactionMessageFeePayer,
-  setTransactionMessageFeePayerSigner,
   setTransactionMessageLifetimeUsingBlockhash,
-  signTransactionMessageWithSigners,
 } from "@solana/kit";
 import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
 import type { Context } from "hono";
@@ -66,6 +64,14 @@ const TRANSFER_LIMITS_POLICY_TYPE = "transfer_limits";
 
 function getPaymentsRepository(c: AppContext) {
   return createD1PaymentsRepository({ db: createD1Drizzle(c.env.DB) });
+}
+
+function getFeePayment(c: AppContext) {
+  return createFeePaymentAdapter(c.env);
+}
+
+async function getSponsoredFeePayer(c: AppContext): Promise<Address> {
+  return getFeePayment(c).getFeePayer();
 }
 
 function isNativeSolToken(token: string): boolean {
@@ -590,9 +596,7 @@ async function prepareSolTransfer(
 
   const rpc = createRpc(c.env);
   const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc, "confirmed");
-  const feePayer = c.env.KORA_RPC_URL
-    ? await createFeePaymentAdapter(c.env).getFeePayer()
-    : sourceAddress;
+  const feePayer = await getSponsoredFeePayer(c);
 
   const instruction = getTransferSolInstruction({
     source: createNoopSigner(sourceAddress),
@@ -641,8 +645,8 @@ async function executeSolTransfer(
 
   const rpc = createRpc(c.env);
   const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc, "confirmed");
-  const feePayment = c.env.KORA_RPC_URL ? createFeePaymentAdapter(c.env) : undefined;
-  const feePayer = feePayment ? await feePayment.getFeePayer() : undefined;
+  const feePayment = getFeePayment(c);
+  const feePayer = await feePayment.getFeePayer();
 
   const instruction = getTransferSolInstruction({
     source: signer,
@@ -650,38 +654,18 @@ async function executeSolTransfer(
     amount: lamports,
   });
 
-  const message = feePayment
-    ? pipe(
-        createTransactionMessage({ version: 0 }),
-        (m) => setTransactionMessageFeePayer(feePayer as Address, m),
-        (m) => setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, m),
-        (m) => appendTransactionMessageInstructions([instruction], m),
-        (m) => addSignersToTransactionMessage([signer], m)
-      )
-    : pipe(
-        createTransactionMessage({ version: 0 }),
-        (m) => setTransactionMessageFeePayerSigner(signer, m),
-        (m) => setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, m),
-        (m) => appendTransactionMessageInstructions([instruction], m),
-        (m) => addSignersToTransactionMessage([signer], m)
-      );
+  const message = pipe(
+    createTransactionMessage({ version: 0 }),
+    (m) => setTransactionMessageFeePayer(feePayer, m),
+    (m) => setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, m),
+    (m) => appendTransactionMessageInstructions([instruction], m),
+    (m) => addSignersToTransactionMessage([signer], m)
+  );
 
-  const signature = feePayment
-    ? await (async () => {
-        const partiallySigned = await partiallySignTransactionMessageWithSigners(message);
-        const txEncoder = getTransactionEncoder();
-        const txBytes = new Uint8Array(txEncoder.encode(partiallySigned));
-        return feePayment.signAndSend(txBytes);
-      })()
-    : await (async () => {
-        const signed = await signTransactionMessageWithSigners(message);
-        const encoded = getBase64EncodedWireTransaction(signed);
-        return rpc
-          .sendTransaction(encoded, {
-            encoding: "base64",
-          })
-          .send();
-      })();
+  const partiallySigned = await partiallySignTransactionMessageWithSigners(message);
+  const txEncoder = getTransactionEncoder();
+  const txBytes = new Uint8Array(txEncoder.encode(partiallySigned));
+  const signature = await feePayment.signAndSend(txBytes);
 
   const confirmation = await confirmTransaction(rpc, signature, {
     commitment: "confirmed",
@@ -921,6 +905,7 @@ export async function prepareTransfer(c: AppContext) {
     );
 
     const mosaic = createMosaicService(c.env, signer);
+    const feePayer = await getSponsoredFeePayer(c);
     const preparedTokenTransfer = await mosaic.prepareTransfer({
       mint: mintAddress,
       from: sourceAddress,
@@ -928,7 +913,7 @@ export async function prepareTransfer(c: AppContext) {
       amount: parsed.data.amount,
       memo: parsed.data.memo,
       authority: signer.address,
-      feePayer: signer.address,
+      feePayer,
     });
 
     prepared = {
@@ -1035,6 +1020,7 @@ export async function createTransfer(c: AppContext) {
     );
 
     const mosaic = createMosaicService(c.env, signer);
+    const feePayer = await getSponsoredFeePayer(c);
     const result = await mosaic.transfer({
       mint: mintAddress,
       from: sourceAddress,
@@ -1042,7 +1028,7 @@ export async function createTransfer(c: AppContext) {
       amount: parsed.data.amount,
       memo: parsed.data.memo,
       authority: signer,
-      feePayer: signer,
+      feePayer: createNoopSigner(feePayer),
     });
 
     const updated = await updateTransferRecord(c, transfer.id, {
