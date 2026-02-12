@@ -639,7 +639,6 @@ export async function getWalletBalances(c: AppContext) {
         amount: lamports.toString(),
         uiAmount: formatDecimalAmount(lamports, 9),
         decimals: 9,
-        confidential: false,
       },
     ],
   };
