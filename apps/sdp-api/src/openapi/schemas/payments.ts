@@ -112,7 +112,7 @@ export const updateWalletPolicyRequestSchema = z
 
 export const tokenBalanceSchema = z
   .object({
-    token: z.string().openapi({ description: "Token symbol.", example: "USDC" }),
+    token: z.string().openapi({ description: "Token symbol or mint address.", example: "USDC" }),
     mint: solanaAddressSchema.openapi({
       description: "Token mint address.",
       example: "So11111111111111111111111111111111111111112",
