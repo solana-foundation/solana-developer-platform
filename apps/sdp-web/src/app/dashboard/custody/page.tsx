@@ -94,46 +94,44 @@ export default async function CustodyPage() {
     const organization = await getClerkOrganizationSummary(orgId);
 
     return (
-      <main className="min-h-screen bg-background px-6 py-10 text-foreground">
-        <div className="mx-auto flex max-w-5xl flex-col gap-8">
-          <DashboardHeader title="Custody" subtitle="Dashboard" backHref="/dashboard" />
-          <Card>
-            <CardHeader>
-              <CardTitle>Confirm organization details</CardTitle>
-              <CardDescription>
-                Review the Clerk organization details below before linking it in SDP.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="rounded-md border border-border bg-muted/20 p-4 text-sm">
-                <div className="flex flex-wrap items-center justify-between gap-2 py-1">
-                  <span className="text-muted-foreground">Organization name</span>
-                  <span className="font-medium text-foreground">
-                    {organization.name ?? "Unavailable"}
-                  </span>
-                </div>
-                <div className="flex flex-wrap items-center justify-between gap-2 py-1">
-                  <span className="text-muted-foreground">Organization slug</span>
-                  <span className="font-mono text-xs text-foreground">
-                    {organization.slug ?? "Unavailable"}
-                  </span>
-                </div>
-                <div className="flex flex-wrap items-center justify-between gap-2 py-1">
-                  <span className="text-muted-foreground">Clerk organization ID</span>
-                  <span className="font-mono text-xs text-foreground">{organization.id}</span>
-                </div>
+      <div className="mx-auto flex max-w-5xl flex-col gap-8">
+        <DashboardHeader title="Wallets" />
+        <Card>
+          <CardHeader>
+            <CardTitle>Confirm organization details</CardTitle>
+            <CardDescription>
+              Review the Clerk organization details below before linking it in SDP.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="rounded-xl border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.04)] p-4 text-sm">
+              <div className="flex flex-wrap items-center justify-between gap-2 py-1">
+                <span className="text-[rgba(28,28,29,0.72)]">Organization name</span>
+                <span className="font-medium text-[#1c1c1d]">
+                  {organization.name ?? "Unavailable"}
+                </span>
               </div>
-              <p className="text-sm text-muted-foreground">
-                Confirming will link this Clerk organization in SDP (D1) and enable custody setup.
-              </p>
-              <form action={linkOrganization}>
-                <input type="hidden" name="returnTo" value="/dashboard/custody" />
-                <Button type="submit">Confirm and link organization</Button>
-              </form>
-            </CardContent>
-          </Card>
-        </div>
-      </main>
+              <div className="flex flex-wrap items-center justify-between gap-2 py-1">
+                <span className="text-[rgba(28,28,29,0.72)]">Organization slug</span>
+                <span className="font-mono text-xs text-[#1c1c1d]">
+                  {organization.slug ?? "Unavailable"}
+                </span>
+              </div>
+              <div className="flex flex-wrap items-center justify-between gap-2 py-1">
+                <span className="text-[rgba(28,28,29,0.72)]">Clerk organization ID</span>
+                <span className="font-mono text-xs text-[#1c1c1d]">{organization.id}</span>
+              </div>
+            </div>
+            <p className="text-sm text-[rgba(28,28,29,0.72)]">
+              Confirming will link this Clerk organization in SDP (D1) and enable wallet setup.
+            </p>
+            <form action={linkOrganization}>
+              <input type="hidden" name="returnTo" value="/dashboard/wallets" />
+              <Button type="submit">Confirm and link organization</Button>
+            </form>
+          </CardContent>
+        </Card>
+      </div>
     );
   }
 
@@ -144,24 +142,23 @@ export default async function CustodyPage() {
   const wallets = walletsResp.wallets;
 
   return (
-    <main className="min-h-screen bg-background px-6 py-10 text-foreground">
-      <div className="mx-auto flex max-w-5xl flex-col gap-8">
-        <DashboardHeader title="Custody" subtitle="Dashboard" backHref="/dashboard" />
+    <div className="mx-auto flex max-w-5xl flex-col gap-8">
+      <DashboardHeader title="Wallets" />
 
         {!config ? (
           <Card>
             <CardHeader>
-              <CardTitle>Enable custody</CardTitle>
+              <CardTitle>Enable wallets</CardTitle>
               <CardDescription>
                 Provision your first signing wallet to authorize API operations.
               </CardDescription>
             </CardHeader>
-            <CardContent className="flex flex-wrap items-center justify-between gap-4">
-              <div className="text-sm text-muted-foreground">
-                This creates a master signing wallet for your organization. You can add more wallets
-                later and choose which one signs by default.
-              </div>
-              <Link href="/dashboard/custody/setup">
+              <CardContent className="flex flex-wrap items-center justify-between gap-4">
+                <div className="text-sm text-[rgba(28,28,29,0.72)]">
+                  This creates a master signing wallet for your organization. You can add more wallets
+                  later and choose which one signs by default.
+                </div>
+              <Link href="/dashboard/wallets/setup">
                 <Button>Get started</Button>
               </Link>
             </CardContent>
@@ -172,34 +169,34 @@ export default async function CustodyPage() {
               <CardHeader>
                 <CardTitle>Signing configuration</CardTitle>
                 <CardDescription>
-                  Controls which custody wallet signs new API actions.
+                  Controls which wallet signs new API actions.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4 text-sm">
                 <div className="grid gap-2">
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <span className="text-muted-foreground">Provider</span>
-                    <span className="font-medium text-foreground">{config.provider}</span>
+                    <span className="text-[rgba(28,28,29,0.72)]">Provider</span>
+                    <span className="font-medium text-[#1c1c1d]">{config.provider}</span>
                   </div>
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <span className="text-muted-foreground">Master address</span>
-                    <span className="font-mono text-xs text-foreground">{config.publicKey}</span>
+                    <span className="text-[rgba(28,28,29,0.72)]">Master address</span>
+                    <span className="font-mono text-xs text-[#1c1c1d]">{config.publicKey}</span>
                   </div>
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <span className="text-muted-foreground">Default wallet</span>
-                    <span className="font-mono text-xs text-foreground">
+                    <span className="text-[rgba(28,28,29,0.72)]">Default wallet</span>
+                    <span className="font-mono text-xs text-[#1c1c1d]">
                       {config.defaultWalletId ?? "Not set"}
                     </span>
                   </div>
                 </div>
 
                 <div className="flex flex-wrap gap-3">
-                  <Link href="/dashboard/custody/switch">
+                  <Link href="/dashboard/wallets/switch">
                     <Button variant="secondary">Change provider</Button>
                   </Link>
                 </div>
 
-                <div className="rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+                <div className="rounded-xl border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.04)] px-3 py-2 text-xs text-[rgba(28,28,29,0.64)]">
                   Changing providers affects new actions only. Existing on-chain authorities are not
                   automatically rotated.
                 </div>
@@ -213,7 +210,7 @@ export default async function CustodyPage() {
               </CardHeader>
               <CardContent className="space-y-4">
                 {config.provider !== "privy" ? (
-                  <p className="text-sm text-muted-foreground">
+                  <p className="text-sm text-[rgba(28,28,29,0.72)]">
                     Wallet provisioning is only available for the Privy provider right now.
                   </p>
                 ) : (
@@ -227,7 +224,7 @@ export default async function CustodyPage() {
                       <select
                         id="purpose"
                         name="purpose"
-                        className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground"
+                        className="h-10 w-full rounded-lg border border-[rgba(28,28,29,0.16)] bg-white px-3 text-sm text-[#1c1c1d]"
                         defaultValue=""
                       >
                         <option value="">Not set</option>
@@ -237,11 +234,11 @@ export default async function CustodyPage() {
                         <option value="fee_payer">fee_payer</option>
                         <option value="transfer">transfer</option>
                       </select>
-                      <p className="text-xs text-muted-foreground">
+                      <p className="text-xs text-[rgba(28,28,29,0.64)]">
                         Purposes are used for future policy and UI grouping.
                       </p>
                     </div>
-                    <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <label className="flex items-center gap-2 text-sm text-[rgba(28,28,29,0.72)]">
                       <input type="checkbox" name="setDefault" />
                       Make default
                     </label>
@@ -260,7 +257,7 @@ export default async function CustodyPage() {
           </CardHeader>
           <CardContent>
             {wallets.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No wallets found.</p>
+              <p className="text-sm text-[rgba(28,28,29,0.72)]">No wallets found.</p>
             ) : (
               <div className="overflow-x-auto">
                 <Table>
@@ -279,16 +276,16 @@ export default async function CustodyPage() {
                       return (
                         <TableRow key={w.id}>
                           <TableCell className="font-medium">{w.label ?? "Untitled"}</TableCell>
-                          <TableCell className="text-muted-foreground">
+                          <TableCell className="text-[rgba(28,28,29,0.72)]">
                             {w.purpose ?? "-"}
                           </TableCell>
                           <TableCell className="font-mono text-xs">{w.publicKey}</TableCell>
-                          <TableCell className="font-mono text-xs text-muted-foreground">
+                          <TableCell className="font-mono text-xs text-[rgba(28,28,29,0.72)]">
                             {w.walletId}
                           </TableCell>
                           <TableCell className="text-right">
                             {isDefault ? (
-                              <span className="text-xs font-medium text-foreground">Default</span>
+                              <span className="text-xs font-medium text-[#1c1c1d]">Default</span>
                             ) : (
                               <form action={setDefaultCustodyWallet}>
                                 <input type="hidden" name="walletId" value={w.walletId} />
@@ -307,7 +304,6 @@ export default async function CustodyPage() {
             )}
           </CardContent>
         </Card>
-      </div>
-    </main>
+    </div>
   );
 }
