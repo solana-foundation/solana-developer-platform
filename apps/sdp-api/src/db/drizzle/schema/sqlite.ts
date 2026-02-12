@@ -576,16 +576,15 @@ export const paymentWalletPolicies = sqliteTable(
     custodyWalletId: text("custody_wallet_id")
       .notNull()
       .references(() => custodyWallets.id, { onDelete: "cascade" }),
-    destinationAllowlist: text("destination_allowlist").notNull().default("[]"),
-    maxTransferAmount: text("max_transfer_amount"),
-    maxDailyAmount: text("max_daily_amount"),
+    policyType: text("policy_type").notNull(),
+    policy: text("policy").notNull(),
     createdAt: text("created_at").notNull().default(sql`(STRFTIME('%Y-%m-%dT%H:%M:%fZ','now'))`),
     updatedAt: text("updated_at").notNull().default(sql`(STRFTIME('%Y-%m-%dT%H:%M:%fZ','now'))`),
   },
   (table) => ({
-    walletUnique: uniqueIndex("payment_wallet_policies_custody_wallet_id_unique").on(
-      table.custodyWalletId
-    ),
+    walletPolicyTypeUnique: uniqueIndex(
+      "payment_wallet_policies_custody_wallet_id_policy_type_unique"
+    ).on(table.custodyWalletId, table.policyType),
     walletIdx: index("idx_payment_wallet_policies_wallet").on(table.custodyWalletId),
   })
 );

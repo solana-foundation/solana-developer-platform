@@ -33,9 +33,10 @@ const mapTransferRow = (row: typeof paymentTransfers.$inferSelect): PaymentTrans
 });
 
 const mapPolicyRow = (row: typeof paymentWalletPolicies.$inferSelect): PaymentWalletPolicyRow => ({
-  destination_allowlist: row.destinationAllowlist,
-  max_transfer_amount: row.maxTransferAmount,
-  max_daily_amount: row.maxDailyAmount,
+  id: row.id,
+  custody_wallet_id: row.custodyWalletId,
+  policy_type: row.policyType,
+  policy: row.policy,
   created_at: row.createdAt,
   updated_at: row.updatedAt,
 });
@@ -62,12 +63,12 @@ export const createD1PaymentsRepository = (
     return db.select().from(paymentTransfers).where(eq(paymentTransfers.id, transferId)).get();
   };
 
-  const getWalletPolicyInternal = async (custodyWalletId: string) => {
+  const getWalletPoliciesInternal = async (custodyWalletId: string) => {
     return db
       .select()
       .from(paymentWalletPolicies)
       .where(eq(paymentWalletPolicies.custodyWalletId, custodyWalletId))
-      .get();
+      .all();
   };
 
   const buildTransferUpdateSet = (
@@ -180,36 +181,39 @@ export const createD1PaymentsRepository = (
       return rows.map(mapTransferRow);
     },
 
-    async getWalletPolicyByCustodyWalletId(custodyWalletId) {
-      const row = await getWalletPolicyInternal(custodyWalletId);
-      return row ? mapPolicyRow(row) : null;
+    async getWalletPoliciesByCustodyWalletId(custodyWalletId) {
+      const rows = await getWalletPoliciesInternal(custodyWalletId);
+      return rows.map(mapPolicyRow);
     },
 
-    async upsertWalletPolicy(input) {
-      await db
-        .insert(paymentWalletPolicies)
-        .values({
-          id: input.id,
-          custodyWalletId: input.custodyWalletId,
-          destinationAllowlist: input.destinationAllowlist,
-          maxTransferAmount: input.maxTransferAmount,
-          maxDailyAmount: input.maxDailyAmount,
-          createdAt: input.createdAt,
-          updatedAt: input.updatedAt,
-        })
-        .onConflictDoUpdate({
-          target: paymentWalletPolicies.custodyWalletId,
-          set: {
-            destinationAllowlist: input.destinationAllowlist,
-            maxTransferAmount: input.maxTransferAmount,
-            maxDailyAmount: input.maxDailyAmount,
-            updatedAt: input.updatedAt,
-          },
-        })
-        .run();
+    async upsertWalletPolicies(inputs) {
+      if (inputs.length === 0) {
+        return [];
+      }
 
-      const row = await getWalletPolicyInternal(input.custodyWalletId);
-      return row ? mapPolicyRow(row) : null;
+      for (const input of inputs) {
+        await db
+          .insert(paymentWalletPolicies)
+          .values({
+            id: input.id,
+            custodyWalletId: input.custodyWalletId,
+            policyType: input.policyType,
+            policy: input.policy,
+            createdAt: input.createdAt,
+            updatedAt: input.updatedAt,
+          })
+          .onConflictDoUpdate({
+            target: [paymentWalletPolicies.custodyWalletId, paymentWalletPolicies.policyType],
+            set: {
+              policy: input.policy,
+              updatedAt: input.updatedAt,
+            },
+          })
+          .run();
+      }
+
+      const rows = await getWalletPoliciesInternal(inputs[0].custodyWalletId);
+      return rows.map(mapPolicyRow);
     },
   };
 };

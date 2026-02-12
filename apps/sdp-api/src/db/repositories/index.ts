@@ -5,6 +5,7 @@ export type {
   PaymentTransferRow,
   PaymentTransferStatus,
   PaymentTransferType,
+  PaymentWalletPolicyType,
   PaymentWalletPolicyRow,
   PaymentsRepository,
   PaymentsRepositoryContext,
