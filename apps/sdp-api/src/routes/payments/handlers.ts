@@ -14,7 +14,6 @@ import { paginated, success } from "@/lib/response";
 import { assertValidAddress } from "@/lib/solana";
 import { createFeePaymentAdapter } from "@/services/adapters/fee-payment";
 import { createSigningService } from "@/services/domain/signing.service";
-import { createMosaicService } from "@/services/mosaic";
 import { createOrgSigner } from "@/services/solana";
 import {
   confirmTransaction,
@@ -26,6 +25,11 @@ import {
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import { getTransferSolInstruction } from "@solana-program/system";
+import {
+  findAssociatedTokenPda,
+  getCreateAssociatedTokenIdempotentInstruction,
+  getTransferCheckedInstruction,
+} from "@solana-program/token-2022";
 import type { Address } from "@solana/kit";
 import {
   addSignersToTransactionMessage,
@@ -215,6 +219,7 @@ function mapTransferRow(row: TransferRow) {
 }
 
 type JsonParsedTokenAccountEntry = {
+  pubkey?: string;
   account?: {
     data?: {
       parsed?: {
@@ -392,6 +397,63 @@ async function getSplTokenBalances(
       uiAmount: balance.uiAmount ?? formatDecimalAmount(balance.amount, balance.decimals),
       decimals: balance.decimals,
     }));
+}
+
+function assertSupportedTokenProgram(program: string): Address {
+  if (program === SPL_TOKEN_PROGRAM_ID || program === SPL_TOKEN_2022_PROGRAM_ID) {
+    return program as Address;
+  }
+  throw new AppError("BAD_REQUEST", "Unsupported token program for mint");
+}
+
+async function resolveMintTokenProgram(
+  rpc: ReturnType<typeof createRpc>,
+  mint: Address
+): Promise<Address> {
+  const mintAccountInfo = await getAccountInfo(rpc, mint);
+  if (!mintAccountInfo) {
+    throw new AppError("BAD_REQUEST", "Token mint account does not exist");
+  }
+  return assertSupportedTokenProgram(mintAccountInfo.owner);
+}
+
+async function resolveSourceTokenAccount(
+  rpc: ReturnType<typeof createRpc>,
+  owner: Address,
+  mint: Address,
+  tokenProgram: Address
+): Promise<{ tokenAccount: Address; decimals: number }> {
+  const response = await getTokenAccountsByOwnerJsonParsed(rpc, owner, tokenProgram);
+  let selected: { tokenAccount: Address; decimals: number; amount: bigint } | null = null;
+
+  for (const account of response.value ?? []) {
+    if (typeof account.pubkey !== "string") {
+      continue;
+    }
+
+    const parsed = parseTokenAmountInfo(account.account?.data?.parsed?.info);
+    if (!parsed || parsed.mint !== mint) {
+      continue;
+    }
+
+    const tokenAccount = assertValidAddress(account.pubkey, "sourceToken");
+    if (!selected || parsed.amount > selected.amount) {
+      selected = {
+        tokenAccount,
+        decimals: parsed.decimals,
+        amount: parsed.amount,
+      };
+    }
+  }
+
+  if (!selected) {
+    throw new AppError("BAD_REQUEST", "Source wallet has no token account for this mint");
+  }
+
+  return {
+    tokenAccount: selected.tokenAccount,
+    decimals: selected.decimals,
+  };
 }
 
 async function resolveScope(c: AppContext) {
@@ -682,6 +744,169 @@ async function executeSolTransfer(
   };
 }
 
+async function prepareSplTransfer(
+  c: AppContext,
+  sourceAddress: Address,
+  destinationAddress: Address,
+  mintAddress: Address,
+  amount: string
+): Promise<{ serializedTx: string; blockhash: string; lastValidBlockHeight: string }> {
+  const rpc = createRpc(c.env);
+  const tokenProgram = await resolveMintTokenProgram(rpc, mintAddress);
+  const sourceTokenAccount = await resolveSourceTokenAccount(
+    rpc,
+    sourceAddress,
+    mintAddress,
+    tokenProgram
+  );
+  const transferAmount = parseDecimalAmount(amount, sourceTokenAccount.decimals);
+
+  if (transferAmount <= 0n) {
+    throw new AppError("BAD_REQUEST", "Transfer amount must be greater than zero");
+  }
+
+  const [destinationTokenAccount] = await findAssociatedTokenPda({
+    owner: destinationAddress,
+    tokenProgram,
+    mint: mintAddress,
+  });
+  const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc, "confirmed");
+  const feePayer = await getSponsoredFeePayer(c);
+  const feePayerSigner = createNoopSigner(feePayer);
+
+  const createDestinationAtaInstruction = getCreateAssociatedTokenIdempotentInstruction({
+    payer: feePayerSigner,
+    ata: destinationTokenAccount,
+    owner: destinationAddress,
+    mint: mintAddress,
+    tokenProgram,
+  });
+  const transferInstruction = getTransferCheckedInstruction(
+    {
+      source: sourceTokenAccount.tokenAccount,
+      mint: mintAddress,
+      destination: destinationTokenAccount,
+      authority: createNoopSigner(sourceAddress),
+      amount: transferAmount,
+      decimals: sourceTokenAccount.decimals,
+    },
+    { programAddress: tokenProgram }
+  );
+
+  const message = pipe(
+    createTransactionMessage({ version: 0 }),
+    (m) => setTransactionMessageFeePayer(feePayer, m),
+    (m) => setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, m),
+    (m) =>
+      appendTransactionMessageInstructions(
+        [createDestinationAtaInstruction, transferInstruction],
+        m
+      )
+  );
+
+  const compiled = compileTransaction(message);
+
+  return {
+    serializedTx: getBase64EncodedWireTransaction(compiled),
+    blockhash: blockhash as string,
+    lastValidBlockHeight: lastValidBlockHeight.toString(),
+  };
+}
+
+async function executeSplTransfer(
+  c: AppContext,
+  sourceWallet: CustodyWallet,
+  destinationAddress: Address,
+  mintAddress: Address,
+  amount: string
+): Promise<{ signature: string; slot: number | null; blockTime: string | null }> {
+  const auth = getAuth(c);
+  const signer = await createOrgSigner(
+    c.env,
+    auth.organizationId,
+    auth.projectId ?? undefined,
+    sourceWallet.walletId
+  );
+
+  if (signer.address !== sourceWallet.publicKey) {
+    throw new AppError("BAD_REQUEST", "Resolved signing wallet does not match source wallet");
+  }
+
+  const rpc = createRpc(c.env);
+  const tokenProgram = await resolveMintTokenProgram(rpc, mintAddress);
+  const sourceTokenAccount = await resolveSourceTokenAccount(
+    rpc,
+    signer.address,
+    mintAddress,
+    tokenProgram
+  );
+  const transferAmount = parseDecimalAmount(amount, sourceTokenAccount.decimals);
+
+  if (transferAmount <= 0n) {
+    throw new AppError("BAD_REQUEST", "Transfer amount must be greater than zero");
+  }
+
+  const [destinationTokenAccount] = await findAssociatedTokenPda({
+    owner: destinationAddress,
+    tokenProgram,
+    mint: mintAddress,
+  });
+  const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc, "confirmed");
+  const feePayment = getFeePayment(c);
+  const feePayer = await feePayment.getFeePayer();
+  const feePayerSigner = createNoopSigner(feePayer);
+
+  const createDestinationAtaInstruction = getCreateAssociatedTokenIdempotentInstruction({
+    payer: feePayerSigner,
+    ata: destinationTokenAccount,
+    owner: destinationAddress,
+    mint: mintAddress,
+    tokenProgram,
+  });
+  const transferInstruction = getTransferCheckedInstruction(
+    {
+      source: sourceTokenAccount.tokenAccount,
+      mint: mintAddress,
+      destination: destinationTokenAccount,
+      authority: signer,
+      amount: transferAmount,
+      decimals: sourceTokenAccount.decimals,
+    },
+    { programAddress: tokenProgram }
+  );
+
+  const message = pipe(
+    createTransactionMessage({ version: 0 }),
+    (m) => setTransactionMessageFeePayer(feePayer, m),
+    (m) => setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, m),
+    (m) =>
+      appendTransactionMessageInstructions(
+        [createDestinationAtaInstruction, transferInstruction],
+        m
+      ),
+    (m) => addSignersToTransactionMessage([signer], m)
+  );
+
+  const partiallySigned = await partiallySignTransactionMessageWithSigners(message);
+  const txEncoder = getTransactionEncoder();
+  const txBytes = new Uint8Array(txEncoder.encode(partiallySigned));
+  const signature = await feePayment.signAndSend(txBytes);
+
+  const confirmation = await confirmTransaction(rpc, signature, {
+    commitment: "confirmed",
+  });
+
+  if (confirmation.err) {
+    throw new AppError("TRANSACTION_FAILED", "SPL token transfer failed on-chain");
+  }
+
+  return {
+    signature,
+    slot: Number(confirmation.slot),
+    blockTime: new Date().toISOString(),
+  };
+}
+
 function mapOnChainStatus(input: { confirmationStatus?: string | null; err?: unknown }) {
   if (input.err) return "failed" as const;
   if (input.confirmationStatus === "finalized") return "finalized" as const;
@@ -897,30 +1122,13 @@ export async function prepareTransfer(c: AppContext) {
     prepared = await prepareSolTransfer(c, sourceAddress, destinationAddress, parsed.data.amount);
   } else {
     const mintAddress = assertValidAddress(parsed.data.token, "token");
-    const signer = await createOrgSigner(
-      c.env,
-      scope.auth.organizationId,
-      scope.auth.projectId ?? undefined,
-      sourceWallet.walletId
+    prepared = await prepareSplTransfer(
+      c,
+      sourceAddress,
+      destinationAddress,
+      mintAddress,
+      parsed.data.amount
     );
-
-    const mosaic = createMosaicService(c.env, signer);
-    const feePayer = await getSponsoredFeePayer(c);
-    const preparedTokenTransfer = await mosaic.prepareTransfer({
-      mint: mintAddress,
-      from: sourceAddress,
-      to: destinationAddress,
-      amount: parsed.data.amount,
-      memo: parsed.data.memo,
-      authority: signer.address,
-      feePayer,
-    });
-
-    prepared = {
-      serializedTx: preparedTokenTransfer.serializedTx,
-      blockhash: preparedTokenTransfer.blockhash,
-      lastValidBlockHeight: preparedTokenTransfer.lastValidBlockHeight.toString(),
-    };
   }
 
   const transfer = await createTransferRecord(c, {
@@ -977,7 +1185,6 @@ export async function createTransfer(c: AppContext) {
   assertProjectContext(parsed.data.projectId, scope.auth.projectId);
 
   const sourceWallet = resolveWallet(scope.wallets, parsed.data.source);
-  const sourceAddress = assertValidAddress(sourceWallet.publicKey, "source");
   const destinationAddress = assertValidAddress(parsed.data.destination, "destination");
 
   const transfer = await createTransferRecord(c, {
@@ -1012,30 +1219,19 @@ export async function createTransfer(c: AppContext) {
     }
 
     const mintAddress = assertValidAddress(parsed.data.token, "token");
-    const signer = await createOrgSigner(
-      c.env,
-      scope.auth.organizationId,
-      scope.auth.projectId ?? undefined,
-      sourceWallet.walletId
+    const result = await executeSplTransfer(
+      c,
+      sourceWallet,
+      destinationAddress,
+      mintAddress,
+      parsed.data.amount
     );
-
-    const mosaic = createMosaicService(c.env, signer);
-    const feePayer = await getSponsoredFeePayer(c);
-    const result = await mosaic.transfer({
-      mint: mintAddress,
-      from: sourceAddress,
-      to: destinationAddress,
-      amount: parsed.data.amount,
-      memo: parsed.data.memo,
-      authority: signer,
-      feePayer: createNoopSigner(feePayer),
-    });
 
     const updated = await updateTransferRecord(c, transfer.id, {
       status: "confirmed",
       signature: result.signature,
-      slot: Number(result.slot),
-      blockTime: new Date().toISOString(),
+      slot: result.slot,
+      blockTime: result.blockTime,
       error: null,
     });
 
