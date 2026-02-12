@@ -14,6 +14,7 @@ import { paginated, success } from "@/lib/response";
 import { assertValidAddress } from "@/lib/solana";
 import { createFeePaymentAdapter } from "@/services/adapters/fee-payment";
 import { createSigningService } from "@/services/domain/signing.service";
+import { createMosaicService } from "@/services/mosaic";
 import { createOrgSigner } from "@/services/solana";
 import {
   confirmTransaction,
