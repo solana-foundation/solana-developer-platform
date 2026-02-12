@@ -4,6 +4,7 @@ import type {
   PaymentTransferRow as TransferRow,
   PaymentTransferStatus as TransferStatus,
   PaymentTransferType as TransferType,
+  PaymentWalletPolicyRow as WalletPolicyRow,
 } from "@/db/repositories/payments.repository";
 import { createD1PaymentsRepository } from "@/db/repositories/payments.repository.d1";
 import { formatDecimalAmount, parseDecimalAmount } from "@/lib/amount";
@@ -54,6 +55,9 @@ import {
 type AppContext = Context<{ Bindings: Env }>;
 // biome-ignore lint/nursery/noSecrets: Solana native SOL mint address constant, not a secret.
 const SOL_MINT = "So11111111111111111111111111111111111111112";
+const PAYMENT_POLICY_VERSION = 1;
+const DESTINATION_ALLOWLIST_POLICY_TYPE = "destination_allowlist";
+const TRANSFER_LIMITS_POLICY_TYPE = "transfer_limits";
 
 function getPaymentsRepository(c: AppContext) {
   return createD1PaymentsRepository({ db: createD1Drizzle(c.env.DB) });
@@ -64,14 +68,107 @@ function isNativeSolToken(token: string): boolean {
   return normalized.toUpperCase() === "SOL" || normalized === SOL_MINT;
 }
 
-function parseDestinationAllowlist(raw: string): string[] {
+function parsePolicyDocument(raw: string): Record<string, unknown> | null {
   try {
     const parsed = JSON.parse(raw) as unknown;
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter((value): value is string => typeof value === "string");
+    if (parsed === null || Array.isArray(parsed) || typeof parsed !== "object") {
+      return null;
+    }
+    return parsed as Record<string, unknown>;
   } catch {
+    return null;
+  }
+}
+
+function parseDestinationAllowlistPolicy(raw: string): string[] {
+  const document = parsePolicyDocument(raw);
+  if (!document || document.version !== PAYMENT_POLICY_VERSION) {
     return [];
   }
+
+  const value = document.destinationAllowlist;
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter((entry): entry is string => typeof entry === "string");
+}
+
+function parseTransferLimitsPolicy(raw: string): {
+  maxTransferAmount?: string;
+  maxDailyAmount?: string;
+} {
+  const document = parsePolicyDocument(raw);
+  if (!document || document.version !== PAYMENT_POLICY_VERSION) {
+    return {};
+  }
+
+  const payload: { maxTransferAmount?: string; maxDailyAmount?: string } = {};
+  if (typeof document.maxTransferAmount === "string") {
+    payload.maxTransferAmount = document.maxTransferAmount;
+  }
+  if (typeof document.maxDailyAmount === "string") {
+    payload.maxDailyAmount = document.maxDailyAmount;
+  }
+
+  return payload;
+}
+
+function buildWalletPolicyPayload(
+  walletId: string,
+  rows: WalletPolicyRow[],
+  fallbackTimestamp: string
+): {
+  walletId: string;
+  destinationAllowlist: string[];
+  maxTransferAmount?: string;
+  maxDailyAmount?: string;
+  createdAt: string;
+  updatedAt: string;
+} {
+  if (rows.length === 0) {
+    return {
+      walletId,
+      destinationAllowlist: [],
+      createdAt: fallbackTimestamp,
+      updatedAt: fallbackTimestamp,
+    };
+  }
+
+  let destinationAllowlist: string[] = [];
+  let maxTransferAmount: string | undefined;
+  let maxDailyAmount: string | undefined;
+
+  for (const row of rows) {
+    if (row.policy_type === DESTINATION_ALLOWLIST_POLICY_TYPE) {
+      destinationAllowlist = parseDestinationAllowlistPolicy(row.policy);
+      continue;
+    }
+
+    if (row.policy_type === TRANSFER_LIMITS_POLICY_TYPE) {
+      const parsed = parseTransferLimitsPolicy(row.policy);
+      maxTransferAmount = parsed.maxTransferAmount;
+      maxDailyAmount = parsed.maxDailyAmount;
+    }
+  }
+
+  const createdAt = rows.reduce(
+    (earliest, row) => (row.created_at < earliest ? row.created_at : earliest),
+    rows[0].created_at
+  );
+  const updatedAt = rows.reduce(
+    (latest, row) => (row.updated_at > latest ? row.updated_at : latest),
+    rows[0].updated_at
+  );
+
+  return {
+    walletId,
+    destinationAllowlist,
+    ...(maxTransferAmount ? { maxTransferAmount } : {}),
+    ...(maxDailyAmount ? { maxDailyAmount } : {}),
+    createdAt,
+    updatedAt,
+  };
 }
 
 function mapTransferRow(row: TransferRow) {
@@ -582,27 +679,8 @@ export async function getWalletPolicy(c: AppContext) {
   const { wallet } = await resolveWalletFromParams(c);
   const repository = getPaymentsRepository(c);
 
-  const row = await repository.getWalletPolicyByCustodyWalletId(wallet.id);
-
-  if (!row) {
-    const defaultPolicy = {
-      walletId: wallet.walletId,
-      destinationAllowlist: [],
-      createdAt: wallet.createdAt,
-      updatedAt: wallet.createdAt,
-    };
-
-    return success(c, { policy: defaultPolicy });
-  }
-
-  const payload = {
-    walletId: wallet.walletId,
-    destinationAllowlist: parseDestinationAllowlist(row.destination_allowlist),
-    ...(row.max_transfer_amount ? { maxTransferAmount: row.max_transfer_amount } : {}),
-    ...(row.max_daily_amount ? { maxDailyAmount: row.max_daily_amount } : {}),
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  };
+  const rows = await repository.getWalletPoliciesByCustodyWalletId(wallet.id);
+  const payload = buildWalletPolicyPayload(wallet.walletId, rows, wallet.createdAt);
 
   return success(c, { policy: payload });
 }
@@ -621,30 +699,37 @@ export async function updateWalletPolicy(c: AppContext) {
   }
 
   const now = new Date().toISOString();
-  const allowlist = parsed.data.destinationAllowlist;
+  const rows = await repository.upsertWalletPolicies([
+    {
+      id: `pwp_${crypto.randomUUID()}`,
+      custodyWalletId: wallet.id,
+      policyType: DESTINATION_ALLOWLIST_POLICY_TYPE,
+      policy: JSON.stringify({
+        version: PAYMENT_POLICY_VERSION,
+        destinationAllowlist: parsed.data.destinationAllowlist,
+      }),
+      createdAt: now,
+      updatedAt: now,
+    },
+    {
+      id: `pwp_${crypto.randomUUID()}`,
+      custodyWalletId: wallet.id,
+      policyType: TRANSFER_LIMITS_POLICY_TYPE,
+      policy: JSON.stringify({
+        version: PAYMENT_POLICY_VERSION,
+        maxTransferAmount: parsed.data.maxTransferAmount ?? null,
+        maxDailyAmount: parsed.data.maxDailyAmount ?? null,
+      }),
+      createdAt: now,
+      updatedAt: now,
+    },
+  ]);
 
-  const row = await repository.upsertWalletPolicy({
-    id: `pwp_${crypto.randomUUID()}`,
-    custodyWalletId: wallet.id,
-    destinationAllowlist: JSON.stringify(allowlist),
-    maxTransferAmount: parsed.data.maxTransferAmount ?? null,
-    maxDailyAmount: parsed.data.maxDailyAmount ?? null,
-    createdAt: now,
-    updatedAt: now,
-  });
-
-  if (!row) {
+  if (rows.length === 0) {
     throw new AppError("INTERNAL_ERROR", "Failed to persist wallet policy");
   }
 
-  const payload = {
-    walletId: wallet.walletId,
-    destinationAllowlist: parseDestinationAllowlist(row.destination_allowlist),
-    ...(row.max_transfer_amount ? { maxTransferAmount: row.max_transfer_amount } : {}),
-    ...(row.max_daily_amount ? { maxDailyAmount: row.max_daily_amount } : {}),
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  };
+  const payload = buildWalletPolicyPayload(wallet.walletId, rows, now);
 
   return success(c, { policy: payload });
 }

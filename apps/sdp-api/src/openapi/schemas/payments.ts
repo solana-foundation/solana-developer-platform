@@ -89,7 +89,7 @@ export const walletPolicySchema = z
   })
   .openapi({
     description:
-      "Payment policy configuration for a wallet-managed account. Wallet lifecycle belongs to /v1/wallets.",
+      "Payment policy configuration for a wallet-managed account. Wallet lifecycle belongs to /v1/wallets, while payment controls are internally stored as typed policy records.",
   });
 
 export const updateWalletPolicyRequestSchema = z
@@ -105,7 +105,10 @@ export const updateWalletPolicyRequestSchema = z
       .optional()
       .openapi({ description: "Maximum total amount allowed per day." }),
   })
-  .openapi({ description: "Update wallet policy request payload." });
+  .openapi({
+    description:
+      "Update wallet policy request payload. Controls map to typed internal policy records for provider-specific extensibility.",
+  });
 
 export const tokenBalanceSchema = z
   .object({
