@@ -3,6 +3,7 @@ import { getAuth } from "@/lib/auth";
 import { AppError } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { assertValidAddress } from "@/lib/solana";
+import { createFeePaymentAdapter } from "@/services/adapters/fee-payment";
 import { createSigningService } from "@/services/domain/signing.service";
 import { createMosaicService } from "@/services/mosaic";
 import { createOrgSigner } from "@/services/solana";
@@ -24,12 +25,14 @@ import {
   createNoopSigner,
   createTransactionMessage,
   getBase64EncodedWireTransaction,
+  getTransactionEncoder,
   pipe,
   setTransactionMessageFeePayer,
   setTransactionMessageFeePayerSigner,
   setTransactionMessageLifetimeUsingBlockhash,
   signTransactionMessageWithSigners,
 } from "@solana/kit";
+import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
 import type { Context } from "hono";
 import {
   createTransferSchema,
@@ -354,6 +357,9 @@ async function prepareSolTransfer(
 
   const rpc = createRpc(c.env);
   const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc, "confirmed");
+  const feePayer = c.env.KORA_RPC_URL
+    ? await createFeePaymentAdapter(c.env).getFeePayer()
+    : sourceAddress;
 
   const instruction = getTransferSolInstruction({
     source: createNoopSigner(sourceAddress),
@@ -363,7 +369,7 @@ async function prepareSolTransfer(
 
   const message = pipe(
     createTransactionMessage({ version: 0 }),
-    (m) => setTransactionMessageFeePayer(sourceAddress, m),
+    (m) => setTransactionMessageFeePayer(feePayer, m),
     (m) => setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, m),
     (m) => appendTransactionMessageInstructions([instruction], m)
   );
@@ -402,6 +408,8 @@ async function executeSolTransfer(
 
   const rpc = createRpc(c.env);
   const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc, "confirmed");
+  const feePayment = c.env.KORA_RPC_URL ? createFeePaymentAdapter(c.env) : undefined;
+  const feePayer = feePayment ? await feePayment.getFeePayer() : undefined;
 
   const instruction = getTransferSolInstruction({
     source: signer,
@@ -409,22 +417,38 @@ async function executeSolTransfer(
     amount: lamports,
   });
 
-  const message = pipe(
-    createTransactionMessage({ version: 0 }),
-    (m) => setTransactionMessageFeePayerSigner(signer, m),
-    (m) => setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, m),
-    (m) => appendTransactionMessageInstructions([instruction], m),
-    (m) => addSignersToTransactionMessage([signer], m)
-  );
+  const message = feePayment
+    ? pipe(
+        createTransactionMessage({ version: 0 }),
+        (m) => setTransactionMessageFeePayer(feePayer as Address, m),
+        (m) => setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, m),
+        (m) => appendTransactionMessageInstructions([instruction], m),
+        (m) => addSignersToTransactionMessage([signer], m)
+      )
+    : pipe(
+        createTransactionMessage({ version: 0 }),
+        (m) => setTransactionMessageFeePayerSigner(signer, m),
+        (m) => setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, m),
+        (m) => appendTransactionMessageInstructions([instruction], m),
+        (m) => addSignersToTransactionMessage([signer], m)
+      );
 
-  const signed = await signTransactionMessageWithSigners(message);
-  const encoded = getBase64EncodedWireTransaction(signed);
-
-  const signature = await rpc
-    .sendTransaction(encoded, {
-      encoding: "base64",
-    })
-    .send();
+  const signature = feePayment
+    ? await (async () => {
+        const partiallySigned = await partiallySignTransactionMessageWithSigners(message);
+        const txEncoder = getTransactionEncoder();
+        const txBytes = new Uint8Array(txEncoder.encode(partiallySigned));
+        return feePayment.signAndSend(txBytes);
+      })()
+    : await (async () => {
+        const signed = await signTransactionMessageWithSigners(message);
+        const encoded = getBase64EncodedWireTransaction(signed);
+        return rpc
+          .sendTransaction(encoded, {
+            encoding: "base64",
+          })
+          .send();
+      })();
 
   const confirmation = await confirmTransaction(rpc, signature, {
     commitment: "confirmed",
