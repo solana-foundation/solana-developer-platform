@@ -357,17 +357,8 @@ async function getTransferRowById(
   organizationId: string,
   projectId: string | null
 ): Promise<TransferRow | null> {
-  const baseSql = `SELECT id, organization_id, project_id, wallet_id, source_address, destination_address,
-                          token, amount, memo, type, direction, status, signature, serialized_tx,
-                          slot, block_time, fee, error, initiated_by_key_id, created_at, updated_at
-                   FROM payment_transfers
-                   WHERE id = ? AND organization_id = ?`;
-
-  return projectId
-    ? c.env.DB.prepare(`${baseSql} AND project_id = ? LIMIT 1`)
-        .bind(transferId, organizationId, projectId)
-        .first<TransferRow>()
-    : c.env.DB.prepare(`${baseSql} LIMIT 1`).bind(transferId, organizationId).first<TransferRow>();
+  const repository = getPaymentsRepository(c);
+  return repository.getTransferById({ transferId, organizationId, projectId });
 }
 
 async function getTransferRowBySignature(
@@ -376,17 +367,8 @@ async function getTransferRowBySignature(
   organizationId: string,
   projectId: string | null
 ): Promise<TransferRow | null> {
-  const baseSql = `SELECT id, organization_id, project_id, wallet_id, source_address, destination_address,
-                          token, amount, memo, type, direction, status, signature, serialized_tx,
-                          slot, block_time, fee, error, initiated_by_key_id, created_at, updated_at
-                   FROM payment_transfers
-                   WHERE signature = ? AND organization_id = ?`;
-
-  return projectId
-    ? c.env.DB.prepare(`${baseSql} AND project_id = ? LIMIT 1`)
-        .bind(signature, organizationId, projectId)
-        .first<TransferRow>()
-    : c.env.DB.prepare(`${baseSql} LIMIT 1`).bind(signature, organizationId).first<TransferRow>();
+  const repository = getPaymentsRepository(c);
+  return repository.getTransferBySignature({ signature, organizationId, projectId });
 }
 
 async function getTransferRowsBySignatures(
@@ -395,27 +377,15 @@ async function getTransferRowsBySignatures(
   organizationId: string,
   projectId: string | null
 ): Promise<Map<string, TransferRow>> {
-  if (signatures.length === 0) {
-    return new Map();
-  }
-
-  const placeholders = signatures.map(() => "?").join(", ");
-  const baseSql = `SELECT id, organization_id, project_id, wallet_id, source_address, destination_address,
-                          token, amount, memo, type, direction, status, signature, serialized_tx,
-                          slot, block_time, fee, error, initiated_by_key_id, created_at, updated_at
-                   FROM payment_transfers
-                   WHERE organization_id = ? AND signature IN (${placeholders})`;
-
-  const rows = projectId
-    ? await c.env.DB.prepare(`${baseSql} AND project_id = ?`)
-        .bind(organizationId, ...signatures, projectId)
-        .all<TransferRow>()
-    : await c.env.DB.prepare(baseSql)
-        .bind(organizationId, ...signatures)
-        .all<TransferRow>();
+  const repository = getPaymentsRepository(c);
+  const rows = await repository.listTransfersBySignatures({
+    signatures,
+    organizationId,
+    projectId,
+  });
 
   const bySignature = new Map<string, TransferRow>();
-  for (const row of rows.results ?? []) {
+  for (const row of rows) {
     if (row.signature) {
       bySignature.set(row.signature, row);
     }
