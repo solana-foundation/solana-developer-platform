@@ -568,3 +568,67 @@ export const custodyWallets = sqliteTable(
     ),
   })
 );
+
+export const paymentWalletPolicies = sqliteTable(
+  "payment_wallet_policies",
+  {
+    id: text("id").primaryKey(),
+    custodyWalletId: text("custody_wallet_id")
+      .notNull()
+      .references(() => custodyWallets.id, { onDelete: "cascade" }),
+    mode: text("mode").notNull().default("none"),
+    destinationAllowlist: text("destination_allowlist").notNull().default("[]"),
+    maxTransferAmount: text("max_transfer_amount"),
+    maxDailyAmount: text("max_daily_amount"),
+    createdAt: text("created_at").notNull().default(sql`(STRFTIME('%Y-%m-%dT%H:%M:%fZ','now'))`),
+    updatedAt: text("updated_at").notNull().default(sql`(STRFTIME('%Y-%m-%dT%H:%M:%fZ','now'))`),
+  },
+  (table) => ({
+    walletUnique: uniqueIndex("payment_wallet_policies_custody_wallet_id_unique").on(
+      table.custodyWalletId
+    ),
+    walletIdx: index("idx_payment_wallet_policies_wallet").on(table.custodyWalletId),
+  })
+);
+
+export const paymentTransfers = sqliteTable(
+  "payment_transfers",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    projectId: text("project_id").references(() => projects.id, { onDelete: "cascade" }),
+    walletId: text("wallet_id").notNull(),
+    sourceAddress: text("source_address").notNull(),
+    destinationAddress: text("destination_address").notNull(),
+    token: text("token").notNull(),
+    amount: text("amount").notNull(),
+    memo: text("memo"),
+    type: text("type").notNull(),
+    direction: text("direction").notNull(),
+    status: text("status").notNull(),
+    signature: text("signature"),
+    serializedTx: text("serialized_tx"),
+    slot: integer("slot"),
+    blockTime: text("block_time"),
+    fee: integer("fee"),
+    error: text("error"),
+    initiatedByKeyId: text("initiated_by_key_id"),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => ({
+    signatureUnique: uniqueIndex("payment_transfers_signature_unique").on(table.signature),
+    orgCreatedIdx: index("idx_payment_transfers_org_created").on(
+      table.organizationId,
+      table.createdAt
+    ),
+    projectCreatedIdx: index("idx_payment_transfers_project_created").on(
+      table.projectId,
+      table.createdAt
+    ),
+    walletIdx: index("idx_payment_transfers_wallet").on(table.walletId),
+    statusIdx: index("idx_payment_transfers_status").on(table.status),
+  })
+);

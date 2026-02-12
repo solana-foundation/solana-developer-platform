@@ -1,3 +1,11 @@
+import { createD1Drizzle } from "@/db/drizzle";
+import type {
+  PaymentTransferDirection as TransferDirection,
+  PaymentTransferRow as TransferRow,
+  PaymentTransferStatus as TransferStatus,
+  PaymentTransferType as TransferType,
+} from "@/db/repositories/payments.repository";
+import { createD1PaymentsRepository } from "@/db/repositories/payments.repository.d1";
 import { formatDecimalAmount, parseDecimalAmount } from "@/lib/amount";
 import { getAuth } from "@/lib/auth";
 import { AppError } from "@/lib/errors";
@@ -44,43 +52,13 @@ import {
   updateWalletPolicySchema,
   walletIdParamsSchema,
 } from "./schemas";
+
 type AppContext = Context<{ Bindings: Env }>;
 // biome-ignore lint/nursery/noSecrets: Solana native SOL mint address constant, not a secret.
 const SOL_MINT = "So11111111111111111111111111111111111111112";
-type TransferDirection = "inbound" | "outbound";
-type TransferType = "transfer" | "transfer_confidential";
-type TransferStatus = "pending" | "processing" | "confirmed" | "finalized" | "failed";
-interface PolicyRow {
-  mode: "none" | "allowlist";
-  destination_allowlist: string;
-  max_transfer_amount: string | null;
-  max_daily_amount: string | null;
-  created_at: string;
-  updated_at: string;
-}
 
-interface TransferRow {
-  id: string;
-  organization_id: string;
-  project_id: string | null;
-  wallet_id: string;
-  source_address: string;
-  destination_address: string;
-  token: string;
-  amount: string;
-  memo: string | null;
-  type: TransferType;
-  direction: TransferDirection;
-  status: TransferStatus;
-  signature: string | null;
-  serialized_tx: string | null;
-  slot: number | null;
-  block_time: string | null;
-  fee: number | null;
-  error: string | null;
-  initiated_by_key_id: string | null;
-  created_at: string;
-  updated_at: string;
+function getPaymentsRepository(c: AppContext) {
+  return createD1PaymentsRepository({ db: createD1Drizzle(c.env.DB) });
 }
 
 function isNativeSolToken(token: string): boolean {
@@ -211,59 +189,28 @@ async function createTransferRecord(
     initiatedByKeyId?: string;
   }
 ): Promise<TransferRow> {
+  const repository = getPaymentsRepository(c);
   const id = `xfr_${crypto.randomUUID()}`;
   const now = new Date().toISOString();
 
-  await c.env.DB.prepare(
-    `INSERT INTO payment_transfers (
-       id,
-       organization_id,
-       project_id,
-       wallet_id,
-       source_address,
-       destination_address,
-       token,
-       amount,
-       memo,
-       type,
-       direction,
-       status,
-       serialized_tx,
-       initiated_by_key_id,
-       created_at,
-       updated_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  )
-    .bind(
-      id,
-      input.organizationId,
-      input.projectId,
-      input.walletId,
-      input.sourceAddress,
-      input.destinationAddress,
-      input.token,
-      input.amount,
-      input.memo ?? null,
-      input.type ?? "transfer",
-      input.direction ?? "outbound",
-      input.status ?? "pending",
-      input.serializedTx ?? null,
-      input.initiatedByKeyId ?? null,
-      now,
-      now
-    )
-    .run();
-
-  const createdRow = await c.env.DB.prepare(
-    `SELECT id, organization_id, project_id, wallet_id, source_address, destination_address,
-            token, amount, memo, type, direction, status, signature, serialized_tx,
-            slot, block_time, fee, error, initiated_by_key_id, created_at, updated_at
-     FROM payment_transfers
-     WHERE id = ?
-     LIMIT 1`
-  )
-    .bind(id)
-    .first<TransferRow>();
+  const createdRow = await repository.createTransfer({
+    id,
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    walletId: input.walletId,
+    sourceAddress: input.sourceAddress,
+    destinationAddress: input.destinationAddress,
+    token: input.token,
+    amount: input.amount,
+    memo: input.memo ?? null,
+    type: input.type ?? "transfer",
+    direction: input.direction ?? "outbound",
+    status: input.status ?? "pending",
+    serializedTx: input.serializedTx ?? null,
+    initiatedByKeyId: input.initiatedByKeyId ?? null,
+    createdAt: now,
+    updatedAt: now,
+  });
 
   if (!createdRow) {
     throw new AppError("INTERNAL_ERROR", "Failed to create payment transfer record");
@@ -285,61 +232,23 @@ async function updateTransferRecord(
     error?: string | null;
   }
 ): Promise<TransferRow> {
-  const existing = await c.env.DB.prepare(
-    `SELECT id, organization_id, project_id, wallet_id, source_address, destination_address,
-            token, amount, memo, type, direction, status, signature, serialized_tx,
-            slot, block_time, fee, error, initiated_by_key_id, created_at, updated_at
-     FROM payment_transfers
-     WHERE id = ?
-     LIMIT 1`
-  )
-    .bind(transferId)
-    .first<TransferRow>();
-
-  if (!existing) {
-    throw new AppError("INTERNAL_ERROR", "Payment transfer record not found for update");
-  }
-
+  const repository = getPaymentsRepository(c);
   const now = new Date().toISOString();
 
-  await c.env.DB.prepare(
-    `UPDATE payment_transfers
-     SET status = ?,
-         signature = ?,
-         serialized_tx = ?,
-         slot = ?,
-         block_time = ?,
-         fee = ?,
-         error = ?,
-         updated_at = ?
-     WHERE id = ?`
-  )
-    .bind(
-      patch.status ?? existing.status,
-      patch.signature ?? existing.signature,
-      patch.serializedTx ?? existing.serialized_tx,
-      patch.slot ?? existing.slot,
-      patch.blockTime ?? existing.block_time,
-      patch.fee ?? existing.fee,
-      patch.error ?? existing.error,
-      now,
-      transferId
-    )
-    .run();
-
-  const updated = await c.env.DB.prepare(
-    `SELECT id, organization_id, project_id, wallet_id, source_address, destination_address,
-            token, amount, memo, type, direction, status, signature, serialized_tx,
-            slot, block_time, fee, error, initiated_by_key_id, created_at, updated_at
-     FROM payment_transfers
-     WHERE id = ?
-     LIMIT 1`
-  )
-    .bind(transferId)
-    .first<TransferRow>();
+  const updated = await repository.updateTransfer({
+    transferId,
+    status: patch.status,
+    signature: patch.signature,
+    serializedTx: patch.serializedTx,
+    slot: patch.slot,
+    blockTime: patch.blockTime,
+    fee: patch.fee,
+    error: patch.error,
+    updatedAt: now,
+  });
 
   if (!updated) {
-    throw new AppError("INTERNAL_ERROR", "Failed to update payment transfer record");
+    throw new AppError("INTERNAL_ERROR", "Payment transfer record not found for update");
   }
 
   return updated;
@@ -673,15 +582,9 @@ export async function getWalletBalances(c: AppContext) {
 
 export async function getWalletPolicy(c: AppContext) {
   const { wallet } = await resolveWalletFromParams(c);
+  const repository = getPaymentsRepository(c);
 
-  const row = await c.env.DB.prepare(
-    `SELECT mode, destination_allowlist, max_transfer_amount, max_daily_amount, created_at, updated_at
-     FROM payment_wallet_policies
-     WHERE custody_wallet_id = ?
-     LIMIT 1`
-  )
-    .bind(wallet.id)
-    .first<PolicyRow>();
+  const row = await repository.getWalletPolicyByCustodyWalletId(wallet.id);
 
   if (!row) {
     const defaultPolicy = {
@@ -710,6 +613,7 @@ export async function getWalletPolicy(c: AppContext) {
 
 export async function updateWalletPolicy(c: AppContext) {
   const { wallet } = await resolveWalletFromParams(c);
+  const repository = getPaymentsRepository(c);
 
   const body = await c.req.json();
   const parsed = updateWalletPolicySchema.safeParse(body);
@@ -724,44 +628,16 @@ export async function updateWalletPolicy(c: AppContext) {
   const mode = parsed.data.mode;
   const allowlist = mode === "allowlist" ? parsed.data.destinationAllowlist : [];
 
-  await c.env.DB.prepare(
-    `INSERT INTO payment_wallet_policies (
-       id,
-       custody_wallet_id,
-       mode,
-       destination_allowlist,
-       max_transfer_amount,
-       max_daily_amount,
-       created_at,
-       updated_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT(custody_wallet_id) DO UPDATE SET
-       mode = excluded.mode,
-       destination_allowlist = excluded.destination_allowlist,
-       max_transfer_amount = excluded.max_transfer_amount,
-       max_daily_amount = excluded.max_daily_amount,
-       updated_at = excluded.updated_at`
-  )
-    .bind(
-      `pwp_${crypto.randomUUID()}`,
-      wallet.id,
-      mode,
-      JSON.stringify(allowlist),
-      parsed.data.maxTransferAmount ?? null,
-      parsed.data.maxDailyAmount ?? null,
-      now,
-      now
-    )
-    .run();
-
-  const row = await c.env.DB.prepare(
-    `SELECT mode, destination_allowlist, max_transfer_amount, max_daily_amount, created_at, updated_at
-     FROM payment_wallet_policies
-     WHERE custody_wallet_id = ?
-     LIMIT 1`
-  )
-    .bind(wallet.id)
-    .first<PolicyRow>();
+  const row = await repository.upsertWalletPolicy({
+    id: `pwp_${crypto.randomUUID()}`,
+    custodyWalletId: wallet.id,
+    mode,
+    destinationAllowlist: JSON.stringify(allowlist),
+    maxTransferAmount: parsed.data.maxTransferAmount ?? null,
+    maxDailyAmount: parsed.data.maxDailyAmount ?? null,
+    createdAt: now,
+    updatedAt: now,
+  });
 
   if (!row) {
     throw new AppError("INTERNAL_ERROR", "Failed to persist wallet policy");
