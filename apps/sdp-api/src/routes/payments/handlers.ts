@@ -55,6 +55,11 @@ import {
 type AppContext = Context<{ Bindings: Env }>;
 // biome-ignore lint/nursery/noSecrets: Solana native SOL mint address constant, not a secret.
 const SOL_MINT = "So11111111111111111111111111111111111111112";
+// biome-ignore lint/nursery/noSecrets: Solana SPL Token program ID, not a secret.
+const SPL_TOKEN_PROGRAM_ID = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA" as Address;
+// biome-ignore lint/nursery/noSecrets: Solana Token-2022 program ID, not a secret.
+const SPL_TOKEN_2022_PROGRAM_ID = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb" as Address;
+const SPL_TOKEN_PROGRAM_IDS = [SPL_TOKEN_PROGRAM_ID, SPL_TOKEN_2022_PROGRAM_ID] as const;
 const PAYMENT_POLICY_VERSION = 1;
 const DESTINATION_ALLOWLIST_POLICY_TYPE = "destination_allowlist";
 const TRANSFER_LIMITS_POLICY_TYPE = "transfer_limits";
@@ -201,6 +206,123 @@ function mapTransferRow(row: TransferRow) {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+function parseTokenAmountInfo(
+  value: unknown
+): { mint: string; amount: bigint; decimals: number; uiAmount?: string } | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+
+  const info = value as Record<string, unknown>;
+  const mint = typeof info.mint === "string" ? info.mint : null;
+  if (!mint) {
+    return null;
+  }
+
+  const tokenAmount =
+    typeof info.tokenAmount === "object" && info.tokenAmount !== null
+      ? (info.tokenAmount as Record<string, unknown>)
+      : null;
+  if (!tokenAmount) {
+    return null;
+  }
+
+  const rawAmount = tokenAmount.amount;
+  const rawDecimals = tokenAmount.decimals;
+
+  if (
+    (typeof rawAmount !== "string" && typeof rawAmount !== "number") ||
+    typeof rawDecimals !== "number"
+  ) {
+    return null;
+  }
+
+  let amount: bigint;
+  try {
+    amount = BigInt(String(rawAmount));
+  } catch {
+    return null;
+  }
+
+  const decimals = Number(rawDecimals);
+  if (!Number.isInteger(decimals) || decimals < 0) {
+    return null;
+  }
+
+  const uiAmount =
+    typeof tokenAmount.uiAmountString === "string" ? tokenAmount.uiAmountString : undefined;
+
+  return { mint, amount, decimals, uiAmount };
+}
+
+async function getSplTokenBalances(
+  rpc: ReturnType<typeof createRpc>,
+  owner: Address
+): Promise<
+  Array<{ token: string; mint: string; amount: string; uiAmount: string; decimals: number }>
+> {
+  const balancesByMint = new Map<string, { amount: bigint; decimals: number; uiAmount?: string }>();
+
+  for (const programId of SPL_TOKEN_PROGRAM_IDS) {
+    const response = await (
+      rpc as unknown as {
+        getTokenAccountsByOwner: (
+          address: Address,
+          filter: { programId: Address },
+          config: { encoding: "jsonParsed"; commitment: "confirmed" }
+        ) => {
+          send: () => Promise<{
+            value?: Array<{
+              account?: {
+                data?: {
+                  parsed?: {
+                    info?: unknown;
+                  };
+                };
+              };
+            }>;
+          }>;
+        };
+      }
+    )
+      .getTokenAccountsByOwner(
+        owner,
+        { programId },
+        { encoding: "jsonParsed", commitment: "confirmed" }
+      )
+      .send();
+
+    for (const account of response.value ?? []) {
+      const parsed = parseTokenAmountInfo(account.account?.data?.parsed?.info);
+      if (!parsed || parsed.amount <= 0n) {
+        continue;
+      }
+
+      const existing = balancesByMint.get(parsed.mint);
+      if (existing) {
+        existing.amount += parsed.amount;
+        continue;
+      }
+
+      balancesByMint.set(parsed.mint, {
+        amount: parsed.amount,
+        decimals: parsed.decimals,
+        uiAmount: parsed.uiAmount,
+      });
+    }
+  }
+
+  return Array.from(balancesByMint.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([mint, balance]) => ({
+      token: mint,
+      mint,
+      amount: balance.amount.toString(),
+      uiAmount: balance.uiAmount ?? formatDecimalAmount(balance.amount, balance.decimals),
+      decimals: balance.decimals,
+    }));
 }
 
 async function resolveScope(c: AppContext) {
@@ -624,6 +746,7 @@ export async function getWalletBalances(c: AppContext) {
 
   const rpc = createRpc(c.env);
   const accountInfo = await getAccountInfo(rpc, wallet.publicKey as Address);
+  const splBalances = await getSplTokenBalances(rpc, wallet.publicKey as Address);
 
   const lamports = accountInfo?.lamports ?? 0n;
 
@@ -638,6 +761,7 @@ export async function getWalletBalances(c: AppContext) {
         uiAmount: formatDecimalAmount(lamports, 9),
         decimals: 9,
       },
+      ...splBalances,
     ],
   };
 
