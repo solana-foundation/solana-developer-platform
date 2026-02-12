@@ -3,11 +3,13 @@ import type { DrizzleDbClient } from "./base";
 export type PaymentTransferDirection = "inbound" | "outbound";
 export type PaymentTransferType = "transfer" | "transfer_confidential";
 export type PaymentTransferStatus = "pending" | "processing" | "confirmed" | "finalized" | "failed";
+export type PaymentWalletPolicyType = string;
 
 export interface PaymentWalletPolicyRow {
-  destination_allowlist: string;
-  max_transfer_amount: string | null;
-  max_daily_amount: string | null;
+  id: string;
+  custody_wallet_id: string;
+  policy_type: PaymentWalletPolicyType;
+  policy: string;
   created_at: string;
   updated_at: string;
 }
@@ -70,9 +72,8 @@ export interface UpdatePaymentTransferInput {
 export interface UpsertPaymentWalletPolicyInput {
   id: string;
   custodyWalletId: string;
-  destinationAllowlist: string;
-  maxTransferAmount: string | null;
-  maxDailyAmount: string | null;
+  policyType: PaymentWalletPolicyType;
+  policy: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -99,6 +100,6 @@ export interface PaymentsRepository {
     organizationId: string;
     projectId: string | null;
   }): Promise<PaymentTransferRow[]>;
-  getWalletPolicyByCustodyWalletId(custodyWalletId: string): Promise<PaymentWalletPolicyRow | null>;
-  upsertWalletPolicy(input: UpsertPaymentWalletPolicyInput): Promise<PaymentWalletPolicyRow | null>;
+  getWalletPoliciesByCustodyWalletId(custodyWalletId: string): Promise<PaymentWalletPolicyRow[]>;
+  upsertWalletPolicies(input: UpsertPaymentWalletPolicyInput[]): Promise<PaymentWalletPolicyRow[]>;
 }
