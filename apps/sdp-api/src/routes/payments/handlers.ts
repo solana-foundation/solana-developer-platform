@@ -587,7 +587,6 @@ export async function getWalletPolicy(c: AppContext) {
   if (!row) {
     const defaultPolicy = {
       walletId: wallet.walletId,
-      mode: "none",
       destinationAllowlist: [],
       createdAt: wallet.createdAt,
       updatedAt: wallet.createdAt,
@@ -598,7 +597,6 @@ export async function getWalletPolicy(c: AppContext) {
 
   const payload = {
     walletId: wallet.walletId,
-    mode: row.mode,
     destinationAllowlist: parseDestinationAllowlist(row.destination_allowlist),
     ...(row.max_transfer_amount ? { maxTransferAmount: row.max_transfer_amount } : {}),
     ...(row.max_daily_amount ? { maxDailyAmount: row.max_daily_amount } : {}),
@@ -623,13 +621,11 @@ export async function updateWalletPolicy(c: AppContext) {
   }
 
   const now = new Date().toISOString();
-  const mode = parsed.data.mode;
-  const allowlist = mode === "allowlist" ? parsed.data.destinationAllowlist : [];
+  const allowlist = parsed.data.destinationAllowlist;
 
   const row = await repository.upsertWalletPolicy({
     id: `pwp_${crypto.randomUUID()}`,
     custodyWalletId: wallet.id,
-    mode,
     destinationAllowlist: JSON.stringify(allowlist),
     maxTransferAmount: parsed.data.maxTransferAmount ?? null,
     maxDailyAmount: parsed.data.maxDailyAmount ?? null,
@@ -643,7 +639,6 @@ export async function updateWalletPolicy(c: AppContext) {
 
   const payload = {
     walletId: wallet.walletId,
-    mode: row.mode,
     destinationAllowlist: parseDestinationAllowlist(row.destination_allowlist),
     ...(row.max_transfer_amount ? { maxTransferAmount: row.max_transfer_amount } : {}),
     ...(row.max_daily_amount ? { maxDailyAmount: row.max_daily_amount } : {}),

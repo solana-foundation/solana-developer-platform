@@ -1,7 +1,6 @@
 CREATE TABLE payment_wallet_policies (
     id TEXT PRIMARY KEY,
     custody_wallet_id TEXT NOT NULL UNIQUE,
-    mode TEXT NOT NULL DEFAULT 'none',
     destination_allowlist TEXT NOT NULL DEFAULT '[]',
     max_transfer_amount TEXT,
     max_daily_amount TEXT,

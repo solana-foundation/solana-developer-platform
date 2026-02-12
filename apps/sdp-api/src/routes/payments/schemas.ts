@@ -10,7 +10,6 @@ export const transferIdParamsSchema = z.object({
 });
 
 export const updateWalletPolicySchema = z.object({
-  mode: z.enum(["none", "allowlist"]),
   destinationAllowlist: z.array(z.string().min(32).max(44)).max(500),
   maxTransferAmount: z
     .string()
