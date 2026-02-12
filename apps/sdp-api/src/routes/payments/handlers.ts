@@ -246,6 +246,57 @@ async function getTokenAccountsByOwnerJsonParsed(
     .send();
 }
 
+type SignatureStatusRow = {
+  signature: string;
+  slot: number;
+  err: unknown;
+  confirmationStatus?: string | null;
+  blockTime?: number | null;
+};
+
+type SignaturesForAddressRpc = {
+  getSignaturesForAddress: (
+    address: string,
+    options: { limit: number; commitment: "confirmed" }
+  ) => {
+    send: () => Promise<SignatureStatusRow[]>;
+  };
+};
+
+async function getSignaturesForAddressConfirmed(
+  rpc: ReturnType<typeof createRpc>,
+  address: string,
+  limit: number
+): Promise<SignatureStatusRow[]> {
+  return (rpc as unknown as SignaturesForAddressRpc)
+    .getSignaturesForAddress(address, { limit, commitment: "confirmed" })
+    .send();
+}
+
+type TransactionBySignatureRpc = {
+  getTransaction: (
+    signature: string,
+    options: {
+      commitment: "confirmed";
+      maxSupportedTransactionVersion: number;
+      encoding: "jsonParsed";
+    }
+  ) => { send: () => Promise<unknown> };
+};
+
+async function getTransactionJsonParsed(
+  rpc: ReturnType<typeof createRpc>,
+  signature: string
+): Promise<unknown> {
+  return (rpc as unknown as TransactionBySignatureRpc)
+    .getTransaction(signature, {
+      commitment: "confirmed",
+      maxSupportedTransactionVersion: 0,
+      encoding: "jsonParsed",
+    })
+    .send();
+}
+
 function parseTokenAmountInfo(
   value: unknown
 ): { mint: string; amount: bigint; decimals: number; uiAmount?: string } | null {
@@ -1051,25 +1102,7 @@ export async function listTransfers(c: AppContext) {
 
   const signatureRows = await Promise.all(
     addressList.map(async (address) => {
-      const rows = (await (
-        rpc as unknown as {
-          getSignaturesForAddress: (
-            addr: string,
-            options: { limit: number; commitment: "confirmed" }
-          ) => { send: () => Promise<Array<Record<string, unknown>>> };
-        }
-      )
-        .getSignaturesForAddress(address, {
-          limit: fetchLimit,
-          commitment: "confirmed",
-        })
-        .send()) as Array<{
-        signature: string;
-        slot: number;
-        err: unknown;
-        confirmationStatus?: string | null;
-        blockTime?: number | null;
-      }>;
+      const rows = await getSignaturesForAddressConfirmed(rpc, address, fetchLimit);
 
       return rows.map((row) => ({ ...row, queriedAddress: address }));
     })
@@ -1129,24 +1162,7 @@ export async function listTransfers(c: AppContext) {
 
   const transfers = await Promise.all(
     pageItems.map(async (row) => {
-      const tx = await (
-        rpc as unknown as {
-          getTransaction: (
-            signature: string,
-            options: {
-              commitment: "confirmed";
-              maxSupportedTransactionVersion: number;
-              encoding: "jsonParsed";
-            }
-          ) => { send: () => Promise<unknown> };
-        }
-      )
-        .getTransaction(row.signature, {
-          commitment: "confirmed",
-          maxSupportedTransactionVersion: 0,
-          encoding: "jsonParsed",
-        })
-        .send();
+      const tx = await getTransactionJsonParsed(rpc, row.signature);
 
       const details = inferOnChainTransferDetails(tx, row.queriedAddress);
       const blockTimeIso = unixSecondsToIso(row.blockTime) ?? new Date().toISOString();
@@ -1239,24 +1255,7 @@ export async function getTransfer(c: AppContext) {
   const scope = await resolveScope(c);
   const rpc = createRpc(c.env);
 
-  const tx = await (
-    rpc as unknown as {
-      getTransaction: (
-        signature: string,
-        options: {
-          commitment: "confirmed";
-          maxSupportedTransactionVersion: number;
-          encoding: "jsonParsed";
-        }
-      ) => { send: () => Promise<unknown> };
-    }
-  )
-    .getTransaction(transferId, {
-      commitment: "confirmed",
-      maxSupportedTransactionVersion: 0,
-      encoding: "jsonParsed",
-    })
-    .send();
+  const tx = await getTransactionJsonParsed(rpc, transferId);
 
   if (!tx) {
     throw new AppError("NOT_FOUND", "Transfer not found");
