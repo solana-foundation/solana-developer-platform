@@ -62,21 +62,16 @@ export const walletSchema = z
   })
   .openapi({ description: "Managed wallet." });
 
-export const walletPolicyModeSchema = z.enum(["none", "allowlist"]).openapi({
-  description: "Policy mode for outbound destinations.",
-  example: "allowlist",
-});
-
 export const walletPolicySchema = z
   .object({
     walletId: walletIdParamSchema.openapi({
       description: "Custody wallet ID from /v1/custody/wallets.",
       example: "wal_example",
     }),
-    mode: walletPolicyModeSchema,
-    destinationAllowlist: z
-      .array(solanaAddressSchema)
-      .openapi({ description: "Allowed destination addresses when allowlist mode is enabled." }),
+    destinationAllowlist: z.array(solanaAddressSchema).openapi({
+      description:
+        "Allowed destination addresses. An empty array means no destination restrictions.",
+    }),
     maxTransferAmount: tokenAmountSchema
       .optional()
       .openapi({ description: "Maximum amount allowed per transfer." }),
@@ -99,10 +94,10 @@ export const walletPolicySchema = z
 
 export const updateWalletPolicyRequestSchema = z
   .object({
-    mode: walletPolicyModeSchema,
-    destinationAllowlist: z
-      .array(solanaAddressSchema)
-      .openapi({ description: "Allowed destination addresses when allowlist mode is enabled." }),
+    destinationAllowlist: z.array(solanaAddressSchema).openapi({
+      description:
+        "Allowed destination addresses. An empty array means no destination restrictions.",
+    }),
     maxTransferAmount: tokenAmountSchema
       .optional()
       .openapi({ description: "Maximum amount allowed per transfer." }),

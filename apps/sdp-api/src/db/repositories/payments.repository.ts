@@ -3,10 +3,8 @@ import type { DrizzleDbClient } from "./base";
 export type PaymentTransferDirection = "inbound" | "outbound";
 export type PaymentTransferType = "transfer" | "transfer_confidential";
 export type PaymentTransferStatus = "pending" | "processing" | "confirmed" | "finalized" | "failed";
-export type PaymentWalletPolicyMode = "none" | "allowlist";
 
 export interface PaymentWalletPolicyRow {
-  mode: PaymentWalletPolicyMode;
   destination_allowlist: string;
   max_transfer_amount: string | null;
   max_daily_amount: string | null;
@@ -72,7 +70,6 @@ export interface UpdatePaymentTransferInput {
 export interface UpsertPaymentWalletPolicyInput {
   id: string;
   custodyWalletId: string;
-  mode: PaymentWalletPolicyMode;
   destinationAllowlist: string;
   maxTransferAmount: string | null;
   maxDailyAmount: string | null;
