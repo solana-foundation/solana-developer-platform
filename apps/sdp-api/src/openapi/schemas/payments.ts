@@ -125,7 +125,8 @@ export const tokenBalanceSchema = z
     decimals: z.number().int().openapi({ description: "Token decimals.", example: 6 }),
     confidential: z
       .boolean()
-      .openapi({ description: "Confidential balance flag.", example: false }),
+      .optional()
+      .openapi({ description: "Confidential balance flag (when applicable).", example: false }),
   })
   .openapi({ description: "Token balance details." });
 
