@@ -576,7 +576,6 @@ export const paymentWalletPolicies = sqliteTable(
     custodyWalletId: text("custody_wallet_id")
       .notNull()
       .references(() => custodyWallets.id, { onDelete: "cascade" }),
-    mode: text("mode").notNull().default("none"),
     destinationAllowlist: text("destination_allowlist").notNull().default("[]"),
     maxTransferAmount: text("max_transfer_amount"),
     maxDailyAmount: text("max_daily_amount"),

@@ -33,7 +33,6 @@ const mapTransferRow = (row: typeof paymentTransfers.$inferSelect): PaymentTrans
 });
 
 const mapPolicyRow = (row: typeof paymentWalletPolicies.$inferSelect): PaymentWalletPolicyRow => ({
-  mode: row.mode as PaymentWalletPolicyRow["mode"],
   destination_allowlist: row.destinationAllowlist,
   max_transfer_amount: row.maxTransferAmount,
   max_daily_amount: row.maxDailyAmount,
@@ -192,7 +191,6 @@ export const createD1PaymentsRepository = (
         .values({
           id: input.id,
           custodyWalletId: input.custodyWalletId,
-          mode: input.mode,
           destinationAllowlist: input.destinationAllowlist,
           maxTransferAmount: input.maxTransferAmount,
           maxDailyAmount: input.maxDailyAmount,
@@ -202,7 +200,6 @@ export const createD1PaymentsRepository = (
         .onConflictDoUpdate({
           target: paymentWalletPolicies.custodyWalletId,
           set: {
-            mode: input.mode,
             destinationAllowlist: input.destinationAllowlist,
             maxTransferAmount: input.maxTransferAmount,
             maxDailyAmount: input.maxDailyAmount,
