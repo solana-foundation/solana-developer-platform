@@ -284,29 +284,41 @@ interface PrivyRequestParams {
 }
 
 async function privyRequest<T>(params: PrivyRequestParams): Promise<T> {
-  const response = await fetch(`${params.apiBaseUrl}${params.path}`, {
-    method: params.method,
-    headers: {
-      Authorization: params.authHeader,
-      "privy-app-id": params.appId,
-      ...(params.body ? { "Content-Type": "application/json" } : {}),
-    },
-    body: params.body ? JSON.stringify(params.body) : undefined,
-  });
+  try {
+    const response = await fetch(`${params.apiBaseUrl}${params.path}`, {
+      method: params.method,
+      headers: {
+        Authorization: params.authHeader,
+        "privy-app-id": params.appId,
+        ...(params.body ? { "Content-Type": "application/json" } : {}),
+      },
+      body: params.body ? JSON.stringify(params.body) : undefined,
+    });
 
-  if (!response.ok) {
-    const errorText = await response.text().catch(() => "Failed to read error response");
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => "Failed to read error response");
+      throw new SigningError(
+        `Privy API error: ${response.status} - ${errorText}`,
+        "PROVIDER_NOT_CONFIGURED"
+      );
+    }
+
+    if (response.status === 204 || response.headers.get("content-length") === "0") {
+      return undefined as T;
+    }
+
+    return (await response.json()) as T;
+  } catch (error) {
+    if (error instanceof SigningError) {
+      throw error;
+    }
+
     throw new SigningError(
-      `Privy API error: ${response.status} - ${errorText}`,
-      "PROVIDER_NOT_CONFIGURED"
+      `Failed to call Privy API: ${error instanceof Error ? error.message : "Unknown error"}`,
+      "NETWORK_ERROR",
+      error instanceof Error ? error : undefined
     );
   }
-
-  if (response.status === 204 || response.headers.get("content-length") === "0") {
-    return undefined as T;
-  }
-
-  return (await response.json()) as T;
 }
 
 function encodeBasicAuth(value: string): string {
