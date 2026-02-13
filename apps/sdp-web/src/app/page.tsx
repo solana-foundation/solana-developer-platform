@@ -59,7 +59,10 @@ export default function Home() {
           </SignedIn>
         </div>
 
-        <div className="relative hidden h-[470px] w-full overflow-visible lg:block" aria-hidden="true">
+        <div
+          className="relative hidden h-[470px] w-full overflow-visible lg:block"
+          aria-hidden="true"
+        >
           <div className="absolute right-[8px] top-0 flex h-[443px] w-[625px] items-center">
             <div className="relative h-[443px] w-[313px]">
               <Image
@@ -72,7 +75,13 @@ export default function Home() {
             </div>
 
             <div className="relative ml-[-1px] flex h-[443px] w-[313px] items-center justify-center">
-              <Image src="/landing/hero-plate.svg" alt="" width={313} height={443} className="h-full w-full" />
+              <Image
+                src="/landing/hero-plate.svg"
+                alt=""
+                width={313}
+                height={443}
+                className="h-full w-full"
+              />
             </div>
 
             <div className="absolute left-0 top-[-75px] h-[60px] w-px bg-[rgba(28,28,29,0.2)]" />

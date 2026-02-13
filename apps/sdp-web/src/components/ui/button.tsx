@@ -12,8 +12,7 @@ const buttonVariants = cva(
         default: "bg-[#0f0f10] text-white hover:bg-black",
         destructive:
           "bg-[#c71f37] text-white hover:bg-[#af1a2f] focus-visible:ring-[rgba(199,31,55,0.35)]",
-        outline:
-          "border border-[rgba(28,28,29,0.16)] bg-white hover:bg-[rgba(28,28,29,0.04)]",
+        outline: "border border-[rgba(28,28,29,0.16)] bg-white hover:bg-[rgba(28,28,29,0.04)]",
         secondary: "bg-[rgba(28,28,29,0.08)] text-[#1c1c1d] hover:bg-[rgba(28,28,29,0.14)]",
         ghost: "bg-transparent hover:bg-[rgba(28,28,29,0.08)]",
         link: "text-[#1c1c1d] underline-offset-4 hover:underline",

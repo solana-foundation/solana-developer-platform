@@ -147,7 +147,9 @@ export default async function ApiKeysPage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3 text-sm text-[rgba(28,28,29,0.74)]">
-            <p>Use rotation when key material may be exposed or as part of scheduled key hygiene.</p>
+            <p>
+              Use rotation when key material may be exposed or as part of scheduled key hygiene.
+            </p>
             <p>Grace period must be between 0 and 168 hours.</p>
             <p>Only active keys can be rotated.</p>
             <p>New key secrets are shown once after each rotation.</p>
