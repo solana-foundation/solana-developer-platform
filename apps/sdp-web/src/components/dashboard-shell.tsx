@@ -1,20 +1,24 @@
 "use client";
 
 import { OrganizationSwitcher, SignInButton, UserButton, useAuth } from "@clerk/nextjs";
+import { motion } from "framer-motion";
 import {
   ArrowLeftRight,
-  ChevronDown,
   Coins,
   KeyRound,
+  ChevronDown,
   LayoutDashboard,
+  Library,
   PanelLeft,
+  PanelRight,
+  Settings2,
   Wallet,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
+import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 
 type NavItem = {
   label: string;
@@ -22,15 +26,32 @@ type NavItem = {
   icon: LucideIcon;
 };
 
-const createNav: NavItem[] = [
-  { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-  { label: "Wallets", href: "/dashboard/wallets", icon: Wallet },
+type NavSection = {
+  title: string;
+  items: NavItem[];
+};
+
+const navSections: NavSection[] = [
+  {
+    title: "Create",
+    items: [
+      { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+      { label: "Wallets", href: "/dashboard/wallets", icon: Wallet },
+    ],
+  },
+  {
+    title: "Manage",
+    items: [
+      { label: "Issuance", href: "/dashboard/issuance", icon: Coins },
+      { label: "Payments", href: "/dashboard/payments", icon: ArrowLeftRight },
+      { label: "API keys", href: "/dashboard/api-keys", icon: KeyRound },
+    ],
+  },
 ];
 
-const manageNav: NavItem[] = [
-  { label: "Issuance", href: "/dashboard/issuance", icon: Coins },
-  { label: "Payments", href: "/dashboard/payments", icon: ArrowLeftRight },
-  { label: "API keys", href: "/dashboard/api-keys", icon: KeyRound },
+const bottomNavItems: NavItem[] = [
+  { label: "API Docs", href: "#", icon: Library },
+  { label: "Settings", href: "#", icon: Settings2 },
 ];
 
 function isItemActive(pathname: string, href: string): boolean {
@@ -69,7 +90,7 @@ function SidebarGroup({
               className={[
                 "flex h-10 items-center gap-3 rounded-[10px] px-3 text-[16px] leading-[24px] transition-colors",
                 active
-                  ? "bg-[rgba(28,28,29,0.10)] text-[#1c1c1d]"
+                  ? "border border-[rgba(28,28,29,0.08)] bg-white text-[#1c1c1d]"
                   : "text-[rgba(28,28,29,0.76)] hover:bg-[rgba(28,28,29,0.06)] hover:text-[#1c1c1d]",
               ].join(" ")}
             >
@@ -86,11 +107,13 @@ function SidebarGroup({
 export function DashboardShell({ children }: { children: ReactNode }) {
   const { isLoaded, isSignedIn, orgId } = useAuth();
   const pathname = usePathname();
+  const { isSidebarOpen, selectedProject, setSidebarOpen } = useDashboardWorkspace();
+  const sidebarWidth = 296;
 
   if (!isLoaded) {
     return (
-      <main className="min-h-screen bg-[#e9e7de] px-3 py-3 text-[#1c1c1d] md:px-4">
-        <div className="mx-auto max-w-5xl rounded-2xl border border-[rgba(28,28,29,0.08)] bg-white/70 p-6">
+      <main className="min-h-screen bg-[#e9e7de] p-0 text-[#1c1c1d]">
+        <div className="mx-auto max-w-5xl border border-[rgba(28,28,29,0.08)] bg-white/70 p-6">
           <p className="text-sm text-[rgba(28,28,29,0.56)]">Loading dashboard...</p>
         </div>
       </main>
@@ -99,8 +122,8 @@ export function DashboardShell({ children }: { children: ReactNode }) {
 
   if (!isSignedIn) {
     return (
-      <main className="min-h-screen bg-[#e9e7de] px-3 py-3 text-[#1c1c1d] md:px-4">
-        <div className="mx-auto max-w-3xl rounded-2xl border border-[rgba(28,28,29,0.08)] bg-white/70 p-6">
+      <main className="min-h-screen bg-[#e9e7de] p-0 text-[#1c1c1d]">
+        <div className="mx-auto max-w-3xl border border-[rgba(28,28,29,0.08)] bg-white/70 p-6">
           <h1 className="text-[34px] leading-[1.05] font-medium tracking-[-0.3px]">
             Sign in to continue
           </h1>
@@ -124,8 +147,8 @@ export function DashboardShell({ children }: { children: ReactNode }) {
 
   if (!orgId) {
     return (
-      <main className="min-h-screen bg-[#e9e7de] px-3 py-3 text-[#1c1c1d] md:px-4">
-        <div className="mx-auto max-w-3xl rounded-2xl border border-[rgba(28,28,29,0.08)] bg-white/70 p-6">
+      <main className="min-h-screen bg-[#e9e7de] p-0 text-[#1c1c1d]">
+        <div className="mx-auto max-w-3xl border border-[rgba(28,28,29,0.08)] bg-white/70 p-6">
           <h1 className="text-[34px] leading-[1.05] font-medium tracking-[-0.3px]">
             Select an organization
           </h1>
@@ -141,61 +164,101 @@ export function DashboardShell({ children }: { children: ReactNode }) {
   }
 
   return (
-    <main className="min-h-screen bg-[#e9e7de] px-3 py-3 text-[#1c1c1d] md:px-4">
-      <div className="mx-auto grid max-w-[1520px] gap-2 lg:grid-cols-[296px_1fr]">
-        <header className="col-span-full flex h-12 items-center justify-between rounded-[12px] border border-[rgba(28,28,29,0.08)] bg-[rgba(255,255,255,0.75)] px-3 backdrop-blur-sm md:px-3">
-          <div className="flex min-w-0 items-center gap-3">
-            <Link href="/dashboard" aria-label="Go to dashboard">
-              <Image src="/landing/solana-logo.svg" alt="Solana" width={18} height={16} />
-            </Link>
-            <div className="hidden items-center gap-3 md:flex">
-              <OrganizationSwitcher hidePersonal />
-              <span className="text-[rgba(28,28,29,0.36)]">/</span>
-              <span className="text-sm text-[rgba(28,28,29,0.72)]">Default project</span>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-3 md:gap-5">
-            <nav className="hidden items-center gap-5 md:flex">
-              <Link href="#" className="text-sm text-[rgba(28,28,29,0.72)] hover:text-[#1c1c1d]">
-                API Docs
-              </Link>
-            </nav>
-            <UserButton />
-          </div>
-        </header>
-
-        <aside className="hidden h-[calc(100vh-84px)] rounded-[16px] border border-[rgba(28,28,29,0.12)] bg-[rgba(255,255,255,0.74)] p-3 lg:flex lg:flex-col">
-          <div className="space-y-6">
-            <div className="relative overflow-hidden rounded-[10px] border border-[rgba(28,28,29,0.16)] bg-white px-2 py-3 shadow-[0_1px_3px_rgba(0,0,0,0.08)]">
+    <main className="min-h-screen bg-[#e9e7de] p-0 text-[#1c1c1d]">
+      <div
+        className={[
+          "mx-auto grid min-h-screen w-full max-w-none gap-0",
+          "lg:grid-cols-[auto_1fr]",
+        ].join(" ")}
+      >
+        <motion.aside
+          initial={false}
+          animate={{ width: isSidebarOpen ? sidebarWidth : 0 }}
+          transition={{ duration: 0.22, ease: "easeInOut" }}
+          style={{ pointerEvents: isSidebarOpen ? "auto" : "none" }}
+          className={[
+            "hidden overflow-hidden border border-[rgba(28,28,29,0.10)] border-r-0 bg-[#e9e7de] lg:flex lg:flex-col lg:justify-between",
+          ].join(" ")}
+        >
+          <div className="w-[296px] space-y-6 p-3">
+            <div className="relative px-2 py-3">
               <div className="mb-2 flex items-center justify-between pl-1 pr-2">
                 <div className="flex min-w-0 items-center gap-2">
-                  <div className="flex h-7 w-7 items-center justify-center rounded-[6px] bg-white">
-                    <Image
-                      src="/landing/solana-logo.svg"
-                      alt=""
-                      width={18}
-                      height={18}
-                      className="h-4 w-4"
-                    />
+                  <div className="min-w-0 flex-1">
+                    <OrganizationSwitcher hidePersonal />
                   </div>
-                  <p className="truncate text-[16px] font-medium">Ramp</p>
                 </div>
-                <ChevronDown className="h-4 w-4 text-[rgba(28,28,29,0.56)]" />
-              </div>
-              <div className="flex items-center justify-end">
-                <PanelLeft className="h-5 w-5 text-[rgba(28,28,29,0.56)]" />
+                <motion.button
+                  type="button"
+                  aria-label="Close navigation"
+                  onClick={() => setSidebarOpen(false)}
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-[rgba(28,28,29,0.72)] transition-colors hover:bg-[rgba(28,28,29,0.08)]"
+                  whileHover={{ scale: 1.05, rotate: -3 }}
+                  whileTap={{ scale: 0.95, rotate: -10 }}
+                >
+                  <motion.div
+                    initial={{ rotate: -10 }}
+                    animate={{ rotate: 0 }}
+                    transition={{ duration: 0.18 }}
+                  >
+                    <PanelLeft className="h-5 w-5" />
+                  </motion.div>
+                </motion.button>
               </div>
             </div>
-            <SidebarGroup title="Create" items={createNav} pathname={pathname} />
-            <SidebarGroup title="Manage" items={manageNav} pathname={pathname} />
+            {navSections.map((section) => (
+              <SidebarGroup
+                key={section.title}
+                title={section.title}
+                items={section.items}
+                pathname={pathname}
+              />
+            ))}
           </div>
-        </aside>
+          <div className="space-y-2 pb-1">
+            {bottomNavItems.map((item) => {
+              const Icon = item.icon;
+              return (
+                <Link
+                  key={item.label}
+                  href={item.href}
+                  className="flex h-10 items-center gap-3 rounded-[10px] px-3 text-[16px] leading-[24px] text-[rgba(28,28,29,0.76)] transition-colors hover:bg-[rgba(28,28,29,0.06)] hover:text-[#1c1c1d]"
+                >
+                  <Icon className="h-5 w-5" strokeWidth={1.9} />
+                  <span>{item.label}</span>
+                </Link>
+              );
+            })}
+          </div>
+        </motion.aside>
 
-        <section className="relative min-h-[calc(100vh-84px)] rounded-[24px] border border-[rgba(28,28,29,0.08)] bg-[rgba(255,255,255,0.7)] px-3 py-6 md:p-6">
-          <div className="pointer-events-none absolute left-6 top-6 hidden h-10 items-center gap-2 rounded-[10px] border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.02)] px-3 py-2 text-sm md:inline-flex">
-            <span className="text-[rgba(28,28,29,0.72)]">Default Project</span>
-            <ChevronDown className="h-4 w-4 text-[rgba(28,28,29,0.72)]" />
+        <section className="relative rounded-[16px] border border-[rgba(28,28,29,0.08)] bg-[rgba(255,255,255,0.8)] px-3 py-6 md:p-6 lg:rounded-tl-[16px]">
+          {!isSidebarOpen ? (
+            <motion.button
+              type="button"
+              aria-label="Open navigation"
+              onClick={() => setSidebarOpen(true)}
+              className="absolute left-4 top-6 z-20 inline-flex h-8 w-8 items-center justify-center rounded-lg text-[rgba(28,28,29,0.72)] transition-colors hover:bg-[rgba(28,28,29,0.08)]"
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.93, rotate: 8 }}
+            >
+              <motion.div
+                initial={{ rotate: 10 }}
+                animate={{ rotate: 0 }}
+                transition={{ duration: 0.18 }}
+              >
+                <PanelRight className="h-4 w-4" />
+              </motion.div>
+            </motion.button>
+          ) : null}
+          <div className="pointer-events-none absolute right-6 top-6 z-20 hidden items-center gap-2 md:flex">
+            <div className="pointer-events-none flex h-10 items-center gap-2 rounded-[10px] border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.02)] px-3 py-2 text-sm">
+              <span className="text-[rgba(28,28,29,0.72)]">{selectedProject}</span>
+              <ChevronDown className="h-4 w-4 text-[rgba(28,28,29,0.72)]" />
+            </div>
+            <div className="pointer-events-auto">
+              <UserButton afterSignOutUrl="/sign-in" />
+            </div>
           </div>
           {children}
         </section>

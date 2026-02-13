@@ -47,6 +47,10 @@ interface ClerkOrganizationSummary {
   slug: string | null;
 }
 
+type CustodyPageProps = {
+  variant?: "default" | "wallets";
+};
+
 async function getCustodyConfig(): Promise<CustodyConfig | null> {
   const res = await sdpApiRequest("/v1/custody/config");
   if (res.status === 404) return null;
@@ -80,7 +84,7 @@ async function getClerkOrganizationSummary(
   }
 }
 
-export default async function CustodyPage() {
+export default async function CustodyPage({ variant = "default" }: CustodyPageProps = {}) {
   const { userId, orgId } = await auth();
   if (!userId) {
     redirect("/sign-in");
@@ -88,14 +92,32 @@ export default async function CustodyPage() {
   if (!orgId) {
     redirect("/dashboard");
   }
+  const isWalletsTheme = variant === "wallets";
+  const pageContainerClassName = isWalletsTheme
+    ? "w-full flex flex-col gap-8 pt-16"
+    : "mx-auto flex max-w-5xl flex-col gap-8";
+  const walletsHeroClassName = isWalletsTheme
+    ? "rounded-[16px] border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.04)] px-4 py-5"
+    : "";
 
   const onboarding = await sdpApiFetch<{ linked: boolean }>("/v1/onboarding/status");
   if (!onboarding.linked) {
     const organization = await getClerkOrganizationSummary(orgId);
 
     return (
-      <div className="mx-auto flex max-w-5xl flex-col gap-8">
-        <DashboardHeader title="Wallets" />
+      <div className={pageContainerClassName}>
+        {isWalletsTheme ? (
+          <section className={walletsHeroClassName}>
+            <h2 className="text-[22px] leading-[30px] font-medium tracking-[-0.25px] text-[#1c1c1d]">
+              Wallets
+            </h2>
+            <p className="mt-1 text-sm text-[rgba(28,28,29,0.72)]">
+              Connect and provision signing wallets for API actions.
+            </p>
+          </section>
+        ) : (
+          <DashboardHeader title="Wallets" />
+        )}
         <Card>
           <CardHeader>
             <CardTitle>Confirm organization details</CardTitle>
@@ -142,8 +164,19 @@ export default async function CustodyPage() {
   const wallets = walletsResp.wallets;
 
   return (
-    <div className="mx-auto flex max-w-5xl flex-col gap-8">
-      <DashboardHeader title="Wallets" />
+    <div className={pageContainerClassName}>
+      {isWalletsTheme ? (
+        <section className={walletsHeroClassName}>
+          <h2 className="text-[22px] leading-[30px] font-medium tracking-[-0.25px] text-[#1c1c1d]">
+            Wallets
+          </h2>
+          <p className="mt-1 text-sm text-[rgba(28,28,29,0.72)]">
+            Build, route, and manage signing wallets for your organization.
+          </p>
+        </section>
+      ) : (
+        <DashboardHeader title="Wallets" />
+      )}
 
       {!config ? (
         <Card>
