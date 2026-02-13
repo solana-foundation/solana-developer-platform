@@ -45,13 +45,16 @@ export async function consumeApiKeyFlash(): Promise<ApiKeyFlash | null> {
   const raw = jar.get(API_KEY_FLASH_COOKIE)?.value;
   if (!raw) return null;
 
-  jar.delete(API_KEY_FLASH_COOKIE);
-
   try {
     return JSON.parse(raw) as ApiKeyFlash;
   } catch {
     return null;
   }
+}
+
+export async function clearApiKeyFlashAction() {
+  const jar = await cookies();
+  jar.delete(API_KEY_FLASH_COOKIE);
 }
 
 export async function createApiKeyAction(formData: FormData) {
