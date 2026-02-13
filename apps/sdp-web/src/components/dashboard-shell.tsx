@@ -1,7 +1,15 @@
 "use client";
 
 import { OrganizationSwitcher, SignInButton, UserButton, useAuth } from "@clerk/nextjs";
-import { ArrowLeftRight, Coins, KeyRound, LayoutDashboard, Wallet } from "lucide-react";
+import {
+  ArrowLeftRight,
+  ChevronDown,
+  Coins,
+  KeyRound,
+  LayoutDashboard,
+  PanelLeft,
+  Wallet,
+} from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
@@ -46,7 +54,9 @@ function SidebarGroup({
 }) {
   return (
     <div className="space-y-2">
-      <p className="px-3 text-sm text-[rgba(28,28,29,0.48)]">{title}</p>
+      <p className="px-3 text-[12px] uppercase tracking-[0.4px] text-[rgba(28,28,29,0.48)]">
+        {title}
+      </p>
       <div className="space-y-1">
         {items.map((item) => {
           const Icon = item.icon;
@@ -57,7 +67,7 @@ function SidebarGroup({
               key={item.label}
               href={item.href}
               className={[
-                "flex h-10 items-center gap-3 rounded-[10px] px-3 text-[19px] leading-6 transition-colors",
+                "flex h-11 items-center gap-3 rounded-[10px] px-3 text-[16px] leading-[24px] transition-colors",
                 active
                   ? "bg-[rgba(28,28,29,0.10)] text-[#1c1c1d]"
                   : "text-[rgba(28,28,29,0.76)] hover:bg-[rgba(28,28,29,0.06)] hover:text-[#1c1c1d]",
@@ -79,7 +89,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
 
   if (!isLoaded) {
     return (
-      <main className="min-h-screen bg-gradient-to-b from-[#e9e7de] to-[#f5f4ef] px-4 py-4 text-[#1c1c1d] md:px-6">
+      <main className="min-h-screen bg-[#e9e7de] px-4 py-4 text-[#1c1c1d] md:px-6">
         <div className="mx-auto max-w-5xl rounded-2xl border border-[rgba(28,28,29,0.08)] bg-white/70 p-8">
           <p className="text-sm text-[rgba(28,28,29,0.56)]">Loading dashboard...</p>
         </div>
@@ -89,7 +99,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
 
   if (!isSignedIn) {
     return (
-      <main className="min-h-screen bg-gradient-to-b from-[#e9e7de] to-[#f5f4ef] px-4 py-4 text-[#1c1c1d] md:px-6">
+      <main className="min-h-screen bg-[#e9e7de] px-4 py-4 text-[#1c1c1d] md:px-6">
         <div className="mx-auto max-w-3xl rounded-2xl border border-[rgba(28,28,29,0.08)] bg-white/70 p-8">
           <h1 className="text-[34px] leading-[1.05] font-medium tracking-[-0.3px]">
             Sign in to continue
@@ -114,7 +124,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
 
   if (!orgId) {
     return (
-      <main className="min-h-screen bg-gradient-to-b from-[#e9e7de] to-[#f5f4ef] px-4 py-4 text-[#1c1c1d] md:px-6">
+      <main className="min-h-screen bg-[#e9e7de] px-4 py-4 text-[#1c1c1d] md:px-6">
         <div className="mx-auto max-w-3xl rounded-2xl border border-[rgba(28,28,29,0.08)] bg-white/70 p-8">
           <h1 className="text-[34px] leading-[1.05] font-medium tracking-[-0.3px]">
             Select an organization
@@ -131,12 +141,12 @@ export function DashboardShell({ children }: { children: ReactNode }) {
   }
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-[#e9e7de] to-[#f5f4ef] px-4 py-4 text-[#1c1c1d] md:px-6">
-      <div className="mx-auto grid max-w-[1520px] gap-3 lg:grid-cols-[232px_1fr]">
-        <header className="col-span-full flex h-14 items-center justify-between rounded-xl border border-[rgba(28,28,29,0.08)] bg-[rgba(255,255,255,0.55)] px-3 backdrop-blur-sm md:px-5">
+    <main className="min-h-screen bg-[#e9e7de] px-4 py-4 text-[#1c1c1d] md:px-6">
+      <div className="mx-auto grid max-w-[1520px] gap-3 lg:grid-cols-[296px_1fr]">
+        <header className="col-span-full flex h-14 items-center justify-between rounded-[12px] border border-[rgba(28,28,29,0.08)] bg-[rgba(255,255,255,0.75)] px-3 backdrop-blur-sm md:px-4">
           <div className="flex min-w-0 items-center gap-3">
             <Link href="/dashboard" aria-label="Go to dashboard">
-              <Image src="/landing/solana-logo.svg" alt="Solana" width={20} height={18} />
+              <Image src="/landing/solana-logo.svg" alt="Solana" width={18} height={16} />
             </Link>
             <div className="hidden items-center gap-3 md:flex">
               <OrganizationSwitcher hidePersonal />
@@ -155,14 +165,38 @@ export function DashboardShell({ children }: { children: ReactNode }) {
           </div>
         </header>
 
-        <aside className="hidden h-[calc(100vh-96px)] rounded-xl border border-[rgba(28,28,29,0.08)] bg-[rgba(255,255,255,0.45)] p-3 lg:flex lg:flex-col">
+        <aside className="hidden h-[calc(100vh-96px)] rounded-[16px] border border-[rgba(28,28,29,0.12)] bg-[rgba(255,255,255,0.74)] p-4 lg:flex lg:flex-col">
           <div className="space-y-8">
+            <div className="relative overflow-hidden rounded-[10px] border border-[rgba(28,28,29,0.16)] bg-white px-2 py-3 shadow-[0_1px_3px_rgba(0,0,0,0.08)]">
+              <div className="mb-3 flex items-center justify-between pl-1 pr-2">
+                <div className="flex min-w-0 items-center gap-2">
+                  <div className="flex h-7 w-7 items-center justify-center rounded-[6px] bg-white">
+                    <Image
+                      src="/landing/solana-logo.svg"
+                      alt=""
+                      width={18}
+                      height={18}
+                      className="h-4 w-4"
+                    />
+                  </div>
+                  <p className="truncate text-[16px] font-medium">Ramp</p>
+                </div>
+                <ChevronDown className="h-4 w-4 text-[rgba(28,28,29,0.56)]" />
+              </div>
+              <div className="flex items-center justify-end">
+                <PanelLeft className="h-5 w-5 text-[rgba(28,28,29,0.56)]" />
+              </div>
+            </div>
             <SidebarGroup title="Create" items={createNav} pathname={pathname} />
             <SidebarGroup title="Manage" items={manageNav} pathname={pathname} />
           </div>
         </aside>
 
-        <section className="relative min-h-[calc(100vh-96px)] rounded-xl border border-[rgba(28,28,29,0.08)] bg-[rgba(255,255,255,0.68)] p-5 md:p-8">
+        <section className="relative min-h-[calc(100vh-96px)] rounded-[24px] border border-[rgba(28,28,29,0.08)] bg-[rgba(255,255,255,0.7)] px-4 py-8 md:p-7">
+          <div className="pointer-events-none absolute left-8 top-8 hidden h-11 items-center gap-2 rounded-[10px] border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.02)] px-3 py-2 text-sm md:inline-flex">
+            <span className="text-[rgba(28,28,29,0.72)]">Default Project</span>
+            <ChevronDown className="h-4 w-4 text-[rgba(28,28,29,0.72)]" />
+          </div>
           {children}
         </section>
       </div>
