@@ -23,6 +23,7 @@ function resolveActor(c: AppContext): {
   organizationId: string;
   permissions: Permission[];
   apiKeyId: string | null;
+  userId: string | null;
 } {
   const apiKey = c.get("apiKey");
   if (apiKey) {
@@ -30,6 +31,7 @@ function resolveActor(c: AppContext): {
       organizationId: apiKey.organizationId,
       permissions: apiKey.permissions,
       apiKeyId: apiKey.id,
+      userId: null,
     };
   }
 
@@ -39,6 +41,7 @@ function resolveActor(c: AppContext): {
       organizationId: clerk.organizationId,
       permissions: clerk.permissions,
       apiKeyId: null,
+      userId: clerk.userId,
     };
   }
 
@@ -48,6 +51,7 @@ function resolveActor(c: AppContext): {
       organizationId: session.organizationId,
       permissions: session.permissions,
       apiKeyId: null,
+      userId: session.userId,
     };
   }
 
@@ -162,7 +166,8 @@ export const createApiKey = async (c: AppContext) => {
   const apiKeyService = new ApiKeyService(c.env.DB);
   const createdKey = await apiKeyService.createApiKey({
     organizationId: orgId,
-    createdByKeyId: actor.apiKeyId ?? "system",
+    createdByKeyId: actor.apiKeyId ?? undefined,
+    createdByUserId: actor.userId ?? undefined,
     name,
     description,
     role,

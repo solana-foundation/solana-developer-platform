@@ -15,6 +15,7 @@ import { sdpApiFetch } from "@/lib/sdp-api";
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { consumeApiKeyFlash, createApiKeyAction, rotateApiKeyAction } from "./actions";
+import { FlashClearTrigger } from "./flash-clear-trigger";
 
 type ApiKeyRole = "api_admin" | "api_developer" | "api_readonly";
 type ApiKeyEnvironment = "sandbox" | "production";
@@ -62,27 +63,30 @@ export default async function ApiKeysPage() {
       <DashboardHeader title="API keys" />
 
       {flash ? (
-        <Card className={flash.level === "error" ? "border-[#c71f37]/25" : "border-[#1c1c1d]/12"}>
-          <CardHeader>
-            <CardTitle>{flash.level === "error" ? "Action failed" : "Key ready"}</CardTitle>
-            <CardDescription>{flash.message}</CardDescription>
-          </CardHeader>
-          {flash.key ? (
-            <CardContent className="space-y-2">
-              <Label htmlFor="generated-key">One-time secret key</Label>
-              <Input
-                id="generated-key"
-                readOnly
-                value={flash.key}
-                className="font-mono text-xs"
-                onFocus={(event) => event.currentTarget.select()}
-              />
-              <p className="text-xs text-[rgba(28,28,29,0.72)]">
-                Store this key securely now. SDP only shows it once.
-              </p>
-            </CardContent>
-          ) : null}
-        </Card>
+        <>
+          <FlashClearTrigger />
+          <Card className={flash.level === "error" ? "border-[#c71f37]/25" : "border-[#1c1c1d]/12"}>
+            <CardHeader>
+              <CardTitle>{flash.level === "error" ? "Action failed" : "Key ready"}</CardTitle>
+              <CardDescription>{flash.message}</CardDescription>
+            </CardHeader>
+            {flash.key ? (
+              <CardContent className="space-y-2">
+                <Label htmlFor="generated-key">One-time secret key</Label>
+                <Input
+                  id="generated-key"
+                  readOnly
+                  value={flash.key}
+                  className="font-mono text-xs"
+                  onFocus={(event) => event.currentTarget.select()}
+                />
+                <p className="text-xs text-[rgba(28,28,29,0.72)]">
+                  Store this key securely now. SDP only shows it once.
+                </p>
+              </CardContent>
+            ) : null}
+          </Card>
+        </>
       ) : null}
 
       <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">

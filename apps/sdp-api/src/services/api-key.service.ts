@@ -5,6 +5,7 @@
  */
 
 import { hashString } from "@/lib/hash";
+import { AppError } from "@/lib/errors";
 import type { ApiKeyEnvironment, ApiKeyRole, ApiKeyStatus, Permission } from "@sdp/types";
 import { createApiKeyMaterial, parseJsonArray } from "./api-key.utils";
 
@@ -33,7 +34,8 @@ export interface ApiKeyDetails extends ApiKeyListItem {
 export interface CreateApiKeyInput {
   organizationId: string;
   projectId?: string | null;
-  createdByKeyId: string;
+  createdByKeyId?: string;
+  createdByUserId?: string;
   name: string;
   description?: string | null;
   role: ApiKeyRole;
@@ -162,12 +164,19 @@ export class ApiKeyService {
     const { key, prefix } = createApiKeyMaterial(input.environment);
     const keyHash = await hashString(key, input.pepper);
 
-    const creatorKey = await this.db
-      .prepare("SELECT created_by FROM api_keys WHERE id = ?")
-      .bind(input.createdByKeyId)
-      .first<{ created_by: string }>();
+    let createdBy = input.createdByUserId?.trim() || "";
 
-    const createdBy = creatorKey?.created_by ?? "system";
+    if (!createdBy && input.createdByKeyId) {
+      const creatorKey = await this.db
+        .prepare("SELECT created_by FROM api_keys WHERE id = ?")
+        .bind(input.createdByKeyId)
+        .first<{ created_by: string }>();
+      createdBy = creatorKey?.created_by || "";
+    }
+
+    if (!createdBy) {
+      throw new AppError("INTERNAL_ERROR", "Unable to resolve API key creator");
+    }
 
     await this.db
       .prepare(
