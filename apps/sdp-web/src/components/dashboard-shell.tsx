@@ -57,7 +57,7 @@ function SidebarGroup({
       <p className="px-3 text-[12px] uppercase tracking-[0.4px] text-[rgba(28,28,29,0.48)]">
         {title}
       </p>
-      <div className="space-y-1">
+      <div className="space-y-0.5">
         {items.map((item) => {
           const Icon = item.icon;
           const active = isItemActive(pathname, item.href);
@@ -67,7 +67,7 @@ function SidebarGroup({
               key={item.label}
               href={item.href}
               className={[
-                "flex h-11 items-center gap-3 rounded-[10px] px-3 text-[16px] leading-[24px] transition-colors",
+                "flex h-10 items-center gap-3 rounded-[10px] px-3 text-[16px] leading-[24px] transition-colors",
                 active
                   ? "bg-[rgba(28,28,29,0.10)] text-[#1c1c1d]"
                   : "text-[rgba(28,28,29,0.76)] hover:bg-[rgba(28,28,29,0.06)] hover:text-[#1c1c1d]",
@@ -89,8 +89,8 @@ export function DashboardShell({ children }: { children: ReactNode }) {
 
   if (!isLoaded) {
     return (
-      <main className="min-h-screen bg-[#e9e7de] px-4 py-4 text-[#1c1c1d] md:px-6">
-        <div className="mx-auto max-w-5xl rounded-2xl border border-[rgba(28,28,29,0.08)] bg-white/70 p-8">
+      <main className="min-h-screen bg-[#e9e7de] px-3 py-3 text-[#1c1c1d] md:px-4">
+        <div className="mx-auto max-w-5xl rounded-2xl border border-[rgba(28,28,29,0.08)] bg-white/70 p-6">
           <p className="text-sm text-[rgba(28,28,29,0.56)]">Loading dashboard...</p>
         </div>
       </main>
@@ -99,8 +99,8 @@ export function DashboardShell({ children }: { children: ReactNode }) {
 
   if (!isSignedIn) {
     return (
-      <main className="min-h-screen bg-[#e9e7de] px-4 py-4 text-[#1c1c1d] md:px-6">
-        <div className="mx-auto max-w-3xl rounded-2xl border border-[rgba(28,28,29,0.08)] bg-white/70 p-8">
+      <main className="min-h-screen bg-[#e9e7de] px-3 py-3 text-[#1c1c1d] md:px-4">
+        <div className="mx-auto max-w-3xl rounded-2xl border border-[rgba(28,28,29,0.08)] bg-white/70 p-6">
           <h1 className="text-[34px] leading-[1.05] font-medium tracking-[-0.3px]">
             Sign in to continue
           </h1>
@@ -124,8 +124,8 @@ export function DashboardShell({ children }: { children: ReactNode }) {
 
   if (!orgId) {
     return (
-      <main className="min-h-screen bg-[#e9e7de] px-4 py-4 text-[#1c1c1d] md:px-6">
-        <div className="mx-auto max-w-3xl rounded-2xl border border-[rgba(28,28,29,0.08)] bg-white/70 p-8">
+      <main className="min-h-screen bg-[#e9e7de] px-3 py-3 text-[#1c1c1d] md:px-4">
+        <div className="mx-auto max-w-3xl rounded-2xl border border-[rgba(28,28,29,0.08)] bg-white/70 p-6">
           <h1 className="text-[34px] leading-[1.05] font-medium tracking-[-0.3px]">
             Select an organization
           </h1>
@@ -141,9 +141,9 @@ export function DashboardShell({ children }: { children: ReactNode }) {
   }
 
   return (
-    <main className="min-h-screen bg-[#e9e7de] px-4 py-4 text-[#1c1c1d] md:px-6">
-      <div className="mx-auto grid max-w-[1520px] gap-3 lg:grid-cols-[296px_1fr]">
-        <header className="col-span-full flex h-14 items-center justify-between rounded-[12px] border border-[rgba(28,28,29,0.08)] bg-[rgba(255,255,255,0.75)] px-3 backdrop-blur-sm md:px-4">
+    <main className="min-h-screen bg-[#e9e7de] px-3 py-3 text-[#1c1c1d] md:px-4">
+      <div className="mx-auto grid max-w-[1520px] gap-2 lg:grid-cols-[296px_1fr]">
+        <header className="col-span-full flex h-12 items-center justify-between rounded-[12px] border border-[rgba(28,28,29,0.08)] bg-[rgba(255,255,255,0.75)] px-3 backdrop-blur-sm md:px-3">
           <div className="flex min-w-0 items-center gap-3">
             <Link href="/dashboard" aria-label="Go to dashboard">
               <Image src="/landing/solana-logo.svg" alt="Solana" width={18} height={16} />
@@ -165,10 +165,10 @@ export function DashboardShell({ children }: { children: ReactNode }) {
           </div>
         </header>
 
-        <aside className="hidden h-[calc(100vh-96px)] rounded-[16px] border border-[rgba(28,28,29,0.12)] bg-[rgba(255,255,255,0.74)] p-4 lg:flex lg:flex-col">
-          <div className="space-y-8">
+        <aside className="hidden h-[calc(100vh-84px)] rounded-[16px] border border-[rgba(28,28,29,0.12)] bg-[rgba(255,255,255,0.74)] p-3 lg:flex lg:flex-col">
+          <div className="space-y-6">
             <div className="relative overflow-hidden rounded-[10px] border border-[rgba(28,28,29,0.16)] bg-white px-2 py-3 shadow-[0_1px_3px_rgba(0,0,0,0.08)]">
-              <div className="mb-3 flex items-center justify-between pl-1 pr-2">
+              <div className="mb-2 flex items-center justify-between pl-1 pr-2">
                 <div className="flex min-w-0 items-center gap-2">
                   <div className="flex h-7 w-7 items-center justify-center rounded-[6px] bg-white">
                     <Image
@@ -192,8 +192,8 @@ export function DashboardShell({ children }: { children: ReactNode }) {
           </div>
         </aside>
 
-        <section className="relative min-h-[calc(100vh-96px)] rounded-[24px] border border-[rgba(28,28,29,0.08)] bg-[rgba(255,255,255,0.7)] px-4 py-8 md:p-7">
-          <div className="pointer-events-none absolute left-8 top-8 hidden h-11 items-center gap-2 rounded-[10px] border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.02)] px-3 py-2 text-sm md:inline-flex">
+        <section className="relative min-h-[calc(100vh-84px)] rounded-[24px] border border-[rgba(28,28,29,0.08)] bg-[rgba(255,255,255,0.7)] px-3 py-6 md:p-6">
+          <div className="pointer-events-none absolute left-6 top-6 hidden h-10 items-center gap-2 rounded-[10px] border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.02)] px-3 py-2 text-sm md:inline-flex">
             <span className="text-[rgba(28,28,29,0.72)]">Default Project</span>
             <ChevronDown className="h-4 w-4 text-[rgba(28,28,29,0.72)]" />
           </div>

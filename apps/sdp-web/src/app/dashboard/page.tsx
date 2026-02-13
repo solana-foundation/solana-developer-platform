@@ -39,7 +39,7 @@ const dashboardCards: DashboardCard[] = [
 
 export default function DashboardPage() {
   return (
-    <div className="relative flex min-h-[calc(100vh-160px)] flex-col items-center justify-center px-4 pt-10 md:px-0">
+    <div className="relative flex min-h-[calc(100vh-120px)] flex-col items-center justify-center px-3 pt-6 md:px-0">
       <div className="flex items-center gap-3">
         <p className="text-[36px] leading-[40px] font-medium tracking-[-0.3px] text-[rgba(28,28,29,0.72)]">
           Get started with
@@ -52,7 +52,7 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      <div className="mt-8 grid w-full max-w-[720px] gap-3 sm:grid-cols-2">
+      <div className="mt-6 grid w-full max-w-[720px] gap-3 sm:grid-cols-2">
         {dashboardCards.map((card) => {
           const Icon = card.icon;
 
