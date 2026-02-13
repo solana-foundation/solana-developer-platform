@@ -6,6 +6,7 @@
 
 import { AppError } from "@/lib/errors";
 import { hashString } from "@/lib/hash";
+import { AppError } from "@/lib/errors";
 import type { ApiKeyEnvironment, ApiKeyRole, ApiKeyStatus, Permission } from "@sdp/types";
 import { createApiKeyMaterial, parseJsonArray } from "./api-key.utils";
 
