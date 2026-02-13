@@ -1,12 +1,13 @@
 "use client";
 
+import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { OrganizationSwitcher, SignInButton, UserButton, useAuth } from "@clerk/nextjs";
 import { motion } from "framer-motion";
 import {
   ArrowLeftRight,
+  ChevronDown,
   Coins,
   KeyRound,
-  ChevronDown,
   LayoutDashboard,
   Library,
   PanelLeft,
@@ -18,7 +19,6 @@ import type { LucideIcon } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
-import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 
 type NavItem = {
   label: string;

@@ -1,13 +1,6 @@
 "use client";
 
-import {
-  type ReactNode,
-  createContext,
-  useCallback,
-  useContext,
-  useMemo,
-  useState,
-} from "react";
+import { type ReactNode, createContext, useCallback, useContext, useMemo, useState } from "react";
 
 type DashboardWorkspaceContextValue = {
   isSidebarOpen: boolean;
@@ -17,7 +10,9 @@ type DashboardWorkspaceContextValue = {
   toggleSidebar: () => void;
 };
 
-const DashboardWorkspaceContext = createContext<DashboardWorkspaceContextValue | undefined>(undefined);
+const DashboardWorkspaceContext = createContext<DashboardWorkspaceContextValue | undefined>(
+  undefined
+);
 
 type DashboardWorkspaceProviderProps = {
   children: ReactNode;
@@ -49,16 +44,21 @@ export function DashboardWorkspaceProvider({
       setSidebarOpen,
       toggleSidebar,
     }),
-    [isSidebarOpen, selectedProject, setSidebarOpen, toggleSidebar],
+    [isSidebarOpen, selectedProject, setSidebarOpen, toggleSidebar]
   );
 
-  return <DashboardWorkspaceContext.Provider value={value}>{children}</DashboardWorkspaceContext.Provider>;
+  return (
+    <DashboardWorkspaceContext.Provider value={value}>
+      {children}
+    </DashboardWorkspaceContext.Provider>
+  );
 }
 
 export function useDashboardWorkspace() {
   const context = useContext(DashboardWorkspaceContext);
 
   if (!context) {
+    // biome-ignore lint/nursery/noSecrets: This is a React hook guard message, not a secret.
     throw new Error("useDashboardWorkspace must be used within a DashboardWorkspaceProvider");
   }
 
