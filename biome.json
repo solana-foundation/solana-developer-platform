@@ -73,7 +73,7 @@
     }
   ],
   "files": {
-    "ignore": ["node_modules", ".wrangler", "dist", "*.d.ts", "pnpm-lock.yaml"]
+    "ignore": ["node_modules", ".wrangler", ".next", "dist", "*.d.ts", "pnpm-lock.yaml"]
   },
   "vcs": {
     "enabled": true,

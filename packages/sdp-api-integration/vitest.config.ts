@@ -29,8 +29,7 @@ function loadEnvFile(filePath: string): Record<string, string> {
 }
 
 const fileEnv = loadEnvFile(DEV_VARS_PATH);
-const getEnv = (key: string, fallback?: string) =>
-  process.env[key] ?? fileEnv[key] ?? fallback;
+const getEnv = (key: string, fallback?: string) => process.env[key] ?? fileEnv[key] ?? fallback;
 
 const custodyEncryptionKey =
   getEnv("CUSTODY_ENCRYPTION_KEY") ?? Buffer.alloc(32).toString("base64");
