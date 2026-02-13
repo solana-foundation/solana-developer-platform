@@ -254,7 +254,10 @@ async function ensureMembership(
     .run();
 }
 
-async function deactivateMembership(c: AppContext, params: { organizationId: string; userId: string }) {
+async function deactivateMembership(
+  c: AppContext,
+  params: { organizationId: string; userId: string }
+) {
   await c.env.DB.prepare(
     `UPDATE organization_members
      SET status = 'inactive'
@@ -383,9 +386,11 @@ export const handleClerkWebhook = async (c: AppContext) => {
     case "organizationMembership.created":
       await handleOrganizationMembershipCreated(c, data);
       break;
+    // biome-ignore lint/nursery/noSecrets: Webhook event type literal, not a secret.
     case "organizationMembership.updated":
       await handleOrganizationMembershipUpdated(c, data);
       break;
+    // biome-ignore lint/nursery/noSecrets: Webhook event type literal, not a secret.
     case "organizationMembership.deleted":
       await handleOrganizationMembershipDeleted(c, data);
       break;
