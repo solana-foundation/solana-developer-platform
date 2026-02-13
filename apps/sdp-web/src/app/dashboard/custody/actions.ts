@@ -18,12 +18,12 @@ export async function initializeCustody(formData: FormData) {
   const walletLabel = getOptionalString(formData, "walletLabel");
 
   if (provider === "local") {
-    await sdpApiFetch("/v1/custody/initialize", {
+    await sdpApiFetch("/v1/wallets/initialize", {
       method: "POST",
       body: JSON.stringify({ provider, walletLabel }),
     });
   } else {
-    await sdpApiFetch("/v1/custody/initialize", {
+    await sdpApiFetch("/v1/wallets/initialize", {
       method: "POST",
       body: JSON.stringify({ provider, walletLabel }),
     });
@@ -44,12 +44,12 @@ export async function switchCustodyProvider(formData: FormData) {
   }
 
   if (provider === "local") {
-    await sdpApiFetch("/v1/custody/switch", {
+    await sdpApiFetch("/v1/wallets/switch", {
       method: "POST",
       body: JSON.stringify({ provider, walletLabel }),
     });
   } else {
-    await sdpApiFetch("/v1/custody/switch", {
+    await sdpApiFetch("/v1/wallets/switch", {
       method: "POST",
       body: JSON.stringify({ provider, walletLabel }),
     });
@@ -71,7 +71,7 @@ export async function createCustodyWallet(formData: FormData) {
     | undefined;
   const setDefault = getString(formData, "setDefault") === "on";
 
-  await sdpApiFetch("/v1/custody/wallets", {
+  await sdpApiFetch("/v1/wallets", {
     method: "POST",
     body: JSON.stringify({ label, purpose, setDefault }),
   });
@@ -87,7 +87,7 @@ export async function setDefaultCustodyWallet(formData: FormData) {
     throw new Error("walletId is required");
   }
 
-  await sdpApiFetch("/v1/custody/default-wallet", {
+  await sdpApiFetch("/v1/wallets/default-wallet", {
     method: "POST",
     body: JSON.stringify({ walletId }),
   });

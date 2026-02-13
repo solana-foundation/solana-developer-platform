@@ -1,5 +1,5 @@
 /**
- * Custody API Handlers
+ * Wallet API Handlers
  */
 
 import { AppError } from "@/lib/errors";
@@ -51,7 +51,7 @@ function resolveActor(c: AppContext): { organizationId: string } {
  * For "fireblocks" provider: Stores Fireblocks credentials and retrieves the public key.
  * For "privy" provider: Stores Privy credentials and retrieves the public key.
  *
- * POST /custody/initialize
+ * POST /wallets/initialize
  */
 export const initializeSigning = async (c: AppContext) => {
   const actor = resolveActor(c);
@@ -121,10 +121,10 @@ export const initializeSigning = async (c: AppContext) => {
 /**
  * Switch the signing provider for the organization (or project).
  *
- * This deactivates the existing active custody config for the requested scope and then
+ * This deactivates the existing active wallet signing config for the requested scope and then
  * initializes the requested provider. Existing on-chain authorities are NOT rotated.
  *
- * POST /custody/switch
+ * POST /wallets/switch
  */
 export const switchSigning = async (c: AppContext) => {
   const actor = resolveActor(c);
@@ -203,9 +203,9 @@ export const switchSigning = async (c: AppContext) => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
- * Provision a new custody wallet for the organization (or project).
+ * Provision a new wallet for the organization (or project).
  *
- * POST /custody/wallets
+ * POST /wallets
  */
 export const createWallet = async (c: AppContext) => {
   const actor = resolveActor(c);
@@ -257,9 +257,9 @@ export const createWallet = async (c: AppContext) => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
- * Set the default wallet for the active custody configuration.
+ * Set the default wallet for the active wallet signing configuration.
  *
- * POST /custody/default-wallet
+ * POST /wallets/default-wallet
  */
 export const setDefaultWallet = async (c: AppContext) => {
   const actor = resolveActor(c);
@@ -289,7 +289,7 @@ export const setDefaultWallet = async (c: AppContext) => {
     .first<{ id: string }>();
 
   if (!config?.id) {
-    throw new AppError("CONFLICT", "Custody not initialized");
+    throw new AppError("CONFLICT", "Wallet signing is not initialized");
   }
 
   const wallet = await c.env.DB.prepare(
@@ -302,7 +302,7 @@ export const setDefaultWallet = async (c: AppContext) => {
     .first<{ id: string }>();
 
   if (!wallet) {
-    throw new AppError("BAD_REQUEST", "Unknown walletId for this custody configuration");
+    throw new AppError("BAD_REQUEST", "Unknown walletId for this wallet signing configuration");
   }
 
   await c.env.DB.prepare(
@@ -321,9 +321,9 @@ export const setDefaultWallet = async (c: AppContext) => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
- * Get the current custody configuration for the organization.
+ * Get the current wallet signing configuration for the organization.
  *
- * GET /custody/config
+ * GET /wallets/config
  */
 export const getConfig = async (c: AppContext) => {
   const actor = resolveActor(c);
@@ -333,7 +333,7 @@ export const getConfig = async (c: AppContext) => {
   const config = await signingService.getConfiguration(actor.organizationId, projectId);
 
   if (!config) {
-    throw new AppError("NOT_FOUND", "No custody configuration found for this organization");
+    throw new AppError("NOT_FOUND", "No wallet signing configuration found for this organization");
   }
 
   // Get the public key from the adapter
@@ -360,9 +360,9 @@ export const getConfig = async (c: AppContext) => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
- * List wallets for the organization's custody configuration.
+ * List wallets for the organization's active signing configuration.
  *
- * GET /custody/wallets
+ * GET /wallets
  */
 export const listWallets = async (c: AppContext) => {
   const actor = resolveActor(c);
@@ -393,10 +393,10 @@ export const listWallets = async (c: AppContext) => {
 /**
  * Get the public key for the organization's signing wallet.
  *
- * This endpoint is useful for clients that need to know the custody address
+ * This endpoint is useful for clients that need to know the wallet address
  * for constructing transactions.
  *
- * GET /custody/public-key
+ * GET /wallets/public-key
  */
 export const getPublicKey = async (c: AppContext) => {
   const actor = resolveActor(c);

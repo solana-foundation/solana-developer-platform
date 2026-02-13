@@ -52,7 +52,7 @@ type CustodyPageProps = {
 };
 
 async function getCustodyConfig(): Promise<CustodyConfig | null> {
-  const res = await sdpApiRequest("/v1/custody/config");
+  const res = await sdpApiRequest("/v1/wallets/config");
   if (res.status === 404) return null;
   if (!res.ok) {
     const body = await res.text();
@@ -159,7 +159,7 @@ export default async function CustodyPage({ variant = "default" }: CustodyPagePr
 
   const [config, walletsResp] = await Promise.all([
     getCustodyConfig(),
-    sdpApiFetch<{ wallets: CustodyWallet[] }>("/v1/custody/wallets"),
+    sdpApiFetch<{ wallets: CustodyWallet[] }>("/v1/wallets"),
   ]);
   const wallets = walletsResp.wallets;
 

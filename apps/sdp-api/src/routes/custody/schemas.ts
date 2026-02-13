@@ -1,5 +1,5 @@
 /**
- * Custody API Schemas
+ * Wallet API Schemas
  */
 
 import { z } from "zod";
