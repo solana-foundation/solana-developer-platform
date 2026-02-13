@@ -81,6 +81,8 @@ export const ORGANIZATION_ROLES = {
       "api-keys:read",
       "api-keys:write",
       "audit:read",
+      "custody:read",
+      "custody:admin",
     ] as Permission[],
   },
   developer: {
