@@ -239,25 +239,28 @@ async function ensureMembership(
   c: AppContext,
   params: { organizationId: string; userId: string; role: string | null }
 ) {
-  const existing = await c.env.DB.prepare(
-    `SELECT id
-     FROM organization_members
+  const role = mapClerkRoleToOrgRole(params.role);
+
+  const memberId = `mem_${crypto.randomUUID()}`;
+  await c.env.DB.prepare(
+    `INSERT INTO organization_members (id, organization_id, user_id, role, status)
+     VALUES (?, ?, ?, ?, 'active')
+     ON CONFLICT(organization_id, user_id)
+     DO UPDATE SET
+       role = excluded.role,
+       status = 'active'`
+  )
+    .bind(memberId, params.organizationId, params.userId, role)
+    .run();
+}
+
+async function deactivateMembership(c: AppContext, params: { organizationId: string; userId: string }) {
+  await c.env.DB.prepare(
+    `UPDATE organization_members
+     SET status = 'inactive'
      WHERE organization_id = ? AND user_id = ?`
   )
     .bind(params.organizationId, params.userId)
-    .first<{ id: string }>();
-
-  if (existing?.id) {
-    return;
-  }
-
-  const role = mapClerkRoleToOrgRole(params.role);
-
-  await c.env.DB.prepare(
-    `INSERT OR IGNORE INTO organization_members (id, organization_id, user_id, role, status)
-     VALUES (?, ?, ?, ?, 'active')`
-  )
-    .bind(`mem_${crypto.randomUUID()}`, params.organizationId, params.userId, role)
     .run();
 }
 
@@ -285,6 +288,55 @@ async function handleOrganizationMembershipCreated(c: AppContext, data: Record<s
   });
 
   await ensureMembership(c, { organizationId, userId, role: member.role });
+}
+
+async function handleOrganizationMembershipUpdated(c: AppContext, data: Record<string, unknown>) {
+  const org = extractOrganization(data);
+  const member = extractMember(data);
+
+  if (!org.id) {
+    throw badRequest("Clerk organization id missing");
+  }
+  if (!member.userId) {
+    throw badRequest("Clerk member user id missing");
+  }
+
+  const organizationId = await ensureOrganizationMapping(c, org);
+  const email = await resolveUserEmail(c.env, member);
+  const userId = await ensureUserMapping(c, {
+    clerkUserId: member.userId,
+    email,
+  });
+
+  await ensureMembership(c, { organizationId, userId, role: member.role });
+}
+
+async function handleOrganizationMembershipDeleted(c: AppContext, data: Record<string, unknown>) {
+  const org = extractOrganization(data);
+  const member = extractMember(data);
+
+  if (!org.id) {
+    return;
+  }
+
+  if (!member.userId) {
+    return;
+  }
+
+  const organizationId = await ensureOrganizationMapping(c, org);
+  const identity = await c.env.DB.prepare(
+    `SELECT user_id
+     FROM auth_user_identities
+     WHERE provider = 'clerk' AND provider_user_id = ?`
+  )
+    .bind(member.userId)
+    .first<{ user_id: string }>();
+
+  if (!identity?.user_id) {
+    return;
+  }
+
+  await deactivateMembership(c, { organizationId, userId: identity.user_id });
 }
 
 function requiredHeader(c: AppContext, name: string) {
@@ -330,6 +382,12 @@ export const handleClerkWebhook = async (c: AppContext) => {
     // biome-ignore lint/nursery/noSecrets: Webhook event type literal, not a secret.
     case "organizationMembership.created":
       await handleOrganizationMembershipCreated(c, data);
+      break;
+    case "organizationMembership.updated":
+      await handleOrganizationMembershipUpdated(c, data);
+      break;
+    case "organizationMembership.deleted":
+      await handleOrganizationMembershipDeleted(c, data);
       break;
     default:
       break;
