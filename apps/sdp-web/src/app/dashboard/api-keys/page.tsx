@@ -16,6 +16,7 @@ import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { consumeApiKeyFlash, createApiKeyAction, rotateApiKeyAction } from "./actions";
 import { FlashClearTrigger } from "./flash-clear-trigger";
+import { GeneratedApiKeyInput } from "./generated-key-input";
 
 type ApiKeyRole = "api_admin" | "api_developer" | "api_readonly";
 type ApiKeyEnvironment = "sandbox" | "production";
@@ -73,13 +74,7 @@ export default async function ApiKeysPage() {
             {flash.key ? (
               <CardContent className="space-y-2">
                 <Label htmlFor="generated-key">One-time secret key</Label>
-                <Input
-                  id="generated-key"
-                  readOnly
-                  value={flash.key}
-                  className="font-mono text-xs"
-                  onFocus={(event) => event.currentTarget.select()}
-                />
+                <GeneratedApiKeyInput value={flash.key} />
                 <p className="text-xs text-[rgba(28,28,29,0.72)]">
                   Store this key securely now. SDP only shows it once.
                 </p>
