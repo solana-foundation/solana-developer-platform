@@ -39,7 +39,7 @@ const dashboardCards: DashboardCard[] = [
 
 export default function DashboardPage() {
   return (
-    <div className="relative flex min-h-[calc(100vh-120px)] flex-col items-center justify-center pt-6">
+    <div className="relative flex min-h-[calc(100vh-16.5rem)] w-full flex-col items-center justify-center py-6">
       <div className="flex items-center gap-3">
         <p className="text-[36px] leading-[40px] font-medium tracking-[-0.3px] text-[rgba(28,28,29,0.72)]">
           Get started with

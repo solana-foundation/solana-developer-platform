@@ -1,4 +1,3 @@
-import { DashboardHeader } from "@/components/dashboard-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -18,9 +17,7 @@ export default async function CustodySwitchPage() {
   }
 
   return (
-    <div className="mx-auto flex max-w-3xl flex-col gap-8">
-      <DashboardHeader title="Change provider" />
-
+    <div className="w-full max-w-3xl flex flex-col gap-6">
       <Card>
         <CardHeader>
           <CardTitle>Switch wallet provider</CardTitle>

@@ -67,6 +67,10 @@ function looksLikeApiKey(token: string): boolean {
   return token.startsWith("sk_");
 }
 
+function looksLikeJwt(token: string): boolean {
+  return token.split(".").length === 3;
+}
+
 /**
  * Look up API key in KV cache
  */
@@ -121,7 +125,7 @@ async function getFromD1AndCache(
     rateLimitTier: result.rate_limit_tier as "standard" | "elevated" | "unlimited",
     allowedIps: result.allowed_ips ? JSON.parse(result.allowed_ips) : null,
     signingWalletId: result.signing_wallet_id,
-    status: result.status as "active" | "revoked" | "expired",
+    status: result.status as "active" | "revoked" | "expired" | "deactivated",
     expiresAt: result.expires_at,
   };
 
@@ -175,7 +179,7 @@ export function authMiddleware() {
     }
 
     // Check status
-    if (cachedKey.status === "revoked") {
+    if (cachedKey.status === "revoked" || cachedKey.status === "deactivated") {
       throw new AppError("REVOKED_API_KEY");
     }
 
@@ -278,12 +282,22 @@ export function unifiedAuthMiddleware(
       return authMw(c, next);
     }
 
-    // Try Clerk if allowed and bearer token present
     const bearerToken = extractBearerToken(c);
-    if (bearerToken && options.allowClerk) {
-      const { clerkAuthMiddleware } = await import("./clerk-auth");
-      const clerkMw = clerkAuthMiddleware();
-      return clerkMw(c, next);
+
+    if (bearerToken) {
+      // Non-JWT bearer tokens should still be treated as API keys
+      // so invalid formats return INVALID_API_KEY consistently.
+      if (looksLikeApiKey(bearerToken) || !looksLikeJwt(bearerToken)) {
+        const authMw = authMiddleware();
+        return authMw(c, next);
+      }
+
+      // JWT bearer token path (Clerk)
+      if (options.allowClerk) {
+        const { clerkAuthMiddleware } = await import("./clerk-auth");
+        const clerkMw = clerkAuthMiddleware();
+        return clerkMw(c, next);
+      }
     }
 
     // Try session if allowed

@@ -1,11 +1,8 @@
-import { DashboardHeader } from "@/components/dashboard-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 export default function DashboardMembersPage() {
   return (
-    <div className="mx-auto flex max-w-5xl flex-col gap-8">
-      <DashboardHeader title="Members" />
-
+    <div className="w-full max-w-5xl flex flex-col gap-6">
       <Card>
         <CardHeader>
           <CardTitle>Coming soon</CardTitle>

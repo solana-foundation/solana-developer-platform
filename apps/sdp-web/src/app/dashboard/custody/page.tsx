@@ -1,9 +1,6 @@
 import { linkOrganization } from "@/app/onboarding/actions";
-import { DashboardHeader } from "@/components/dashboard-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Table,
   TableBody,
@@ -16,7 +13,7 @@ import { sdpApiFetch, sdpApiRequest } from "@/lib/sdp-api";
 import { auth, clerkClient } from "@clerk/nextjs/server";
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { createCustodyWallet, setDefaultCustodyWallet } from "./actions";
+import { setDefaultCustodyWallet } from "./actions";
 
 type CustodyProvider = "privy" | "local" | "fireblocks";
 
@@ -46,10 +43,6 @@ interface ClerkOrganizationSummary {
   name: string | null;
   slug: string | null;
 }
-
-type CustodyPageProps = {
-  variant?: "default" | "wallets";
-};
 
 async function getCustodyConfig(): Promise<CustodyConfig | null> {
   const res = await sdpApiRequest("/v1/wallets/config");
@@ -84,7 +77,7 @@ async function getClerkOrganizationSummary(
   }
 }
 
-export default async function CustodyPage({ variant = "default" }: CustodyPageProps = {}) {
+export default async function CustodyPage() {
   const { userId, orgId } = await auth();
   if (!userId) {
     redirect("/sign-in");
@@ -92,13 +85,7 @@ export default async function CustodyPage({ variant = "default" }: CustodyPagePr
   if (!orgId) {
     redirect("/dashboard");
   }
-  const isWalletsTheme = variant === "wallets";
-  const pageContainerClassName = isWalletsTheme
-    ? "w-full flex flex-col gap-8 pt-16"
-    : "mx-auto flex max-w-5xl flex-col gap-8";
-  const walletsHeroClassName = isWalletsTheme
-    ? "rounded-[16px] border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.04)] px-4 py-5"
-    : "";
+  const pageContainerClassName = "w-full max-w-5xl flex flex-col gap-6";
 
   const onboarding = await sdpApiFetch<{ linked: boolean }>("/v1/onboarding/status");
   if (!onboarding.linked) {
@@ -106,18 +93,6 @@ export default async function CustodyPage({ variant = "default" }: CustodyPagePr
 
     return (
       <div className={pageContainerClassName}>
-        {isWalletsTheme ? (
-          <section className={walletsHeroClassName}>
-            <h2 className="text-[22px] leading-[30px] font-medium tracking-[-0.25px] text-[#1c1c1d]">
-              Wallets
-            </h2>
-            <p className="mt-1 text-sm text-[rgba(28,28,29,0.72)]">
-              Connect and provision signing wallets for API actions.
-            </p>
-          </section>
-        ) : (
-          <DashboardHeader title="Wallets" />
-        )}
         <Card>
           <CardHeader>
             <CardTitle>Confirm organization details</CardTitle>
@@ -165,19 +140,6 @@ export default async function CustodyPage({ variant = "default" }: CustodyPagePr
 
   return (
     <div className={pageContainerClassName}>
-      {isWalletsTheme ? (
-        <section className={walletsHeroClassName}>
-          <h2 className="text-[22px] leading-[30px] font-medium tracking-[-0.25px] text-[#1c1c1d]">
-            Wallets
-          </h2>
-          <p className="mt-1 text-sm text-[rgba(28,28,29,0.72)]">
-            Build, route, and manage signing wallets for your organization.
-          </p>
-        </section>
-      ) : (
-        <DashboardHeader title="Wallets" />
-      )}
-
       {!config ? (
         <Card>
           <CardHeader>
@@ -197,88 +159,41 @@ export default async function CustodyPage({ variant = "default" }: CustodyPagePr
           </CardContent>
         </Card>
       ) : (
-        <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
-          <Card>
-            <CardHeader>
-              <CardTitle>Signing configuration</CardTitle>
-              <CardDescription>Controls which wallet signs new API actions.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4 text-sm">
-              <div className="grid gap-2">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="text-[rgba(28,28,29,0.72)]">Provider</span>
-                  <span className="font-medium text-[#1c1c1d]">{config.provider}</span>
-                </div>
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="text-[rgba(28,28,29,0.72)]">Master address</span>
-                  <span className="font-mono text-xs text-[#1c1c1d]">{config.publicKey}</span>
-                </div>
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="text-[rgba(28,28,29,0.72)]">Default wallet</span>
-                  <span className="font-mono text-xs text-[#1c1c1d]">
-                    {config.defaultWalletId ?? "Not set"}
-                  </span>
-                </div>
+        <Card>
+          <CardHeader>
+            <CardTitle>Signing configuration</CardTitle>
+            <CardDescription>Controls which wallet signs new API actions.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4 text-sm">
+            <div className="grid gap-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-[rgba(28,28,29,0.72)]">Provider</span>
+                <span className="font-medium text-[#1c1c1d]">{config.provider}</span>
               </div>
-
-              <div className="flex flex-wrap gap-3">
-                <Link href="/dashboard/wallets/switch">
-                  <Button variant="secondary">Change provider</Button>
-                </Link>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-[rgba(28,28,29,0.72)]">Master address</span>
+                <span className="font-mono text-xs text-[#1c1c1d]">{config.publicKey}</span>
               </div>
-
-              <div className="rounded-xl border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.04)] px-3 py-2 text-xs text-[rgba(28,28,29,0.64)]">
-                Changing providers affects new actions only. Existing on-chain authorities are not
-                automatically rotated.
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-[rgba(28,28,29,0.72)]">Default wallet</span>
+                <span className="font-mono text-xs text-[#1c1c1d]">
+                  {config.defaultWalletId ?? "Not set"}
+                </span>
               </div>
-            </CardContent>
-          </Card>
+            </div>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>New wallet</CardTitle>
-              <CardDescription>Create an additional signing wallet.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {config.provider !== "privy" ? (
-                <p className="text-sm text-[rgba(28,28,29,0.72)]">
-                  Wallet provisioning is only available for the Privy provider right now.
-                </p>
-              ) : (
-                <form action={createCustodyWallet} className="grid gap-4">
-                  <div className="grid gap-2">
-                    <Label htmlFor="label">Label</Label>
-                    <Input id="label" name="label" placeholder="Signing wallet" />
-                  </div>
-                  <div className="grid gap-2">
-                    <Label htmlFor="purpose">Purpose (optional)</Label>
-                    <select
-                      id="purpose"
-                      name="purpose"
-                      className="h-10 w-full rounded-lg border border-[rgba(28,28,29,0.16)] bg-white px-3 text-sm text-[#1c1c1d]"
-                      defaultValue=""
-                    >
-                      <option value="">Not set</option>
-                      <option value="root">root</option>
-                      <option value="mint_authority">mint_authority</option>
-                      <option value="freeze_authority">freeze_authority</option>
-                      <option value="fee_payer">fee_payer</option>
-                      <option value="transfer">transfer</option>
-                    </select>
-                    <p className="text-xs text-[rgba(28,28,29,0.64)]">
-                      Purposes are used for future policy and UI grouping.
-                    </p>
-                  </div>
-                  <label className="flex items-center gap-2 text-sm text-[rgba(28,28,29,0.72)]">
-                    <input type="checkbox" name="setDefault" />
-                    Make default
-                  </label>
-                  <Button type="submit">Create wallet</Button>
-                </form>
-              )}
-            </CardContent>
-          </Card>
-        </div>
+            <div className="flex flex-wrap gap-3">
+              <Link href="/dashboard/wallets/switch">
+                <Button variant="secondary">Change provider</Button>
+              </Link>
+            </div>
+
+            <div className="rounded-xl border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.04)] px-3 py-2 text-xs text-[rgba(28,28,29,0.64)]">
+              Changing providers affects new actions only. Existing on-chain authorities are not
+              automatically rotated.
+            </div>
+          </CardContent>
+        </Card>
       )}
 
       <Card>

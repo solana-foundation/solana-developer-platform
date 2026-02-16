@@ -1,8 +1,6 @@
-import { DashboardHeader } from "@/components/dashboard-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Table,
   TableBody,
@@ -14,13 +12,14 @@ import {
 import { sdpApiFetch } from "@/lib/sdp-api";
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
-import { consumeApiKeyFlash, createApiKeyAction, rotateApiKeyAction } from "./actions";
+import { consumeApiKeyFlash, rotateApiKeyAction } from "./actions";
+import { DeleteApiKeyModal } from "./delete-api-key-modal";
 import { FlashClearTrigger } from "./flash-clear-trigger";
-import { GeneratedApiKeyInput } from "./generated-key-input";
+import { GeneratedApiKeyModal } from "./generated-key-modal";
 
 type ApiKeyRole = "api_admin" | "api_developer" | "api_readonly";
 type ApiKeyEnvironment = "sandbox" | "production";
-type ApiKeyStatus = "active" | "revoked" | "expired";
+type ApiKeyStatus = "active" | "revoked" | "expired" | "deactivated";
 
 interface ApiKeyRecord {
   id: string;
@@ -58,110 +57,44 @@ export default async function ApiKeysPage() {
   const apiKeys = [...apiKeysResponse.apiKeys].sort((a, b) => {
     return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
   });
+  const hasGeneratedKeyFlash = Boolean(flash?.key);
 
   return (
-    <div className="mx-auto flex max-w-5xl flex-col gap-8">
-      <DashboardHeader title="API keys" />
-
+    <div className="w-full max-w-5xl flex flex-col gap-6">
       {flash ? (
         <>
-          <FlashClearTrigger />
-          <Card className={flash.level === "error" ? "border-[#c71f37]/25" : "border-[#1c1c1d]/12"}>
-            <CardHeader>
-              <CardTitle>{flash.level === "error" ? "Action failed" : "Key ready"}</CardTitle>
-              <CardDescription>{flash.message}</CardDescription>
-            </CardHeader>
-            {flash.key ? (
-              <CardContent className="space-y-2">
-                <Label htmlFor="generated-key">One-time secret key</Label>
-                <GeneratedApiKeyInput value={flash.key} />
-                <p className="text-xs text-[rgba(28,28,29,0.72)]">
-                  Store this key securely now. SDP only shows it once.
-                </p>
-              </CardContent>
-            ) : null}
-          </Card>
+          {!hasGeneratedKeyFlash ? <FlashClearTrigger /> : null}
+          {hasGeneratedKeyFlash ? (
+            <GeneratedApiKeyModal
+              keyValue={flash.key ?? ""}
+              message={flash.message}
+              keyPrefix={flash.keyPrefix}
+            />
+          ) : (
+            <Card
+              className={flash.level === "error" ? "border-[#c71f37]/25" : "border-[#1c1c1d]/12"}
+            >
+              <CardHeader>
+                <CardTitle>{flash.level === "error" ? "Action failed" : "Notice"}</CardTitle>
+                <CardDescription>{flash.message}</CardDescription>
+              </CardHeader>
+            </Card>
+          )}
         </>
       ) : null}
-
-      <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
-        <Card>
-          <CardHeader>
-            <CardTitle>Create API key</CardTitle>
-            <CardDescription>
-              Generate an organization key for sandbox or production usage.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form action={createApiKeyAction} className="grid gap-4">
-              <div className="grid gap-2">
-                <Label htmlFor="name">Name</Label>
-                <Input id="name" name="name" placeholder="CI deploy key" required />
-              </div>
-
-              <div className="grid gap-2 sm:grid-cols-2">
-                <div className="grid gap-2">
-                  <Label htmlFor="role">Role</Label>
-                  <select
-                    id="role"
-                    name="role"
-                    defaultValue="api_developer"
-                    className="h-10 w-full rounded-lg border border-[rgba(28,28,29,0.16)] bg-white px-3 text-sm text-[#1c1c1d]"
-                  >
-                    <option value="api_admin">Admin</option>
-                    <option value="api_developer">Developer</option>
-                    <option value="api_readonly">Read only</option>
-                  </select>
-                </div>
-
-                <div className="grid gap-2">
-                  <Label htmlFor="environment">Environment</Label>
-                  <select
-                    id="environment"
-                    name="environment"
-                    defaultValue="sandbox"
-                    className="h-10 w-full rounded-lg border border-[rgba(28,28,29,0.16)] bg-white px-3 text-sm text-[#1c1c1d]"
-                  >
-                    <option value="sandbox">Sandbox</option>
-                    <option value="production">Production</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid gap-2">
-                <Label htmlFor="expiresAt">Expiration (optional)</Label>
-                <Input id="expiresAt" name="expiresAt" type="datetime-local" />
-              </div>
-
-              <Button type="submit">Generate key</Button>
-            </form>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Rotation</CardTitle>
-            <CardDescription>
-              Rotate active keys and keep the old key valid during a grace period.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3 text-sm text-[rgba(28,28,29,0.74)]">
-            <p>
-              Use rotation when key material may be exposed or as part of scheduled key hygiene.
-            </p>
-            <p>Grace period must be between 0 and 168 hours.</p>
-            <p>Only active keys can be rotated.</p>
-            <p>New key secrets are shown once after each rotation.</p>
-          </CardContent>
-        </Card>
-      </div>
 
       <Card>
         <CardHeader>
           <CardTitle>Existing API keys</CardTitle>
-          <CardDescription>Manage key lifecycle for your organization.</CardDescription>
+          <CardDescription>Active and historical keys for this workspace.</CardDescription>
         </CardHeader>
         <CardContent>
+          <div className="mb-4 rounded-[10px] border border-[rgba(28,28,29,0.14)] bg-[rgba(28,28,29,0.03)] px-3 py-2 text-xs text-[rgba(28,28,29,0.72)]">
+            <p className="text-xs text-[rgba(28,28,29,0.72)]">
+              Rotation hint: rotate active keys only, use a grace period between 0 and 168 hours,
+              and keep old key secrets secure. New key secrets are shown once.
+            </p>
+          </div>
           {apiKeys.length === 0 ? (
             <p className="text-sm text-[rgba(28,28,29,0.72)]">No API keys found.</p>
           ) : (
@@ -177,7 +110,7 @@ export default async function ApiKeysPage() {
                     <TableHead>Last used</TableHead>
                     <TableHead>Expires</TableHead>
                     <TableHead>Created</TableHead>
-                    <TableHead className="text-right">Rotate</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -201,28 +134,33 @@ export default async function ApiKeysPage() {
                           {formatDate(key.createdAt)}
                         </TableCell>
                         <TableCell className="text-right">
-                          {canRotate ? (
-                            <form
-                              action={rotateApiKeyAction}
-                              className="inline-flex items-center justify-end gap-2"
-                            >
-                              <input type="hidden" name="keyId" value={key.id} />
-                              <Input
-                                type="number"
-                                name="grace"
-                                min={0}
-                                max={168}
-                                defaultValue={24}
-                                className="h-8 w-[88px] text-xs"
-                                aria-label={`Grace period hours for ${key.name}`}
-                              />
-                              <Button type="submit" size="sm" variant="secondary">
-                                Rotate
-                              </Button>
-                            </form>
-                          ) : (
-                            <span className="text-xs text-[rgba(28,28,29,0.48)]">Unavailable</span>
-                          )}
+                          <div className="flex items-center justify-end gap-2">
+                            {canRotate ? (
+                              <form
+                                action={rotateApiKeyAction}
+                                className="inline-flex items-center justify-end gap-2"
+                              >
+                                <input type="hidden" name="keyId" value={key.id} />
+                                <Input
+                                  type="number"
+                                  name="grace"
+                                  min={0}
+                                  max={168}
+                                  defaultValue={24}
+                                  className="h-8 w-[88px] text-xs"
+                                  aria-label={`Grace period hours for ${key.name}`}
+                                />
+                                <Button type="submit" size="sm" variant="secondary">
+                                  Rotate
+                                </Button>
+                              </form>
+                            ) : (
+                              <span className="text-xs text-[rgba(28,28,29,0.48)]">
+                                Unavailable
+                              </span>
+                            )}
+                            <DeleteApiKeyModal keyId={key.id} keyName={key.name} />
+                          </div>
                         </TableCell>
                       </TableRow>
                     );

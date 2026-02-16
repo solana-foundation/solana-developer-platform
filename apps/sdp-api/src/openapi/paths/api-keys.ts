@@ -137,14 +137,25 @@ export function registerApiKeyPaths(registry: OpenAPIRegistry) {
     method: "delete",
     path: "/v1/api-keys/{keyId}",
     tags: ["API Keys"],
-    summary: "Revoke API key",
+    summary: "Deactivate API key",
     operationId: "revokeApiKey",
-    description: "Revokes an API key and invalidates it immediately.",
+    description: "Deactivates (soft deletes) an API key and invalidates it immediately.",
     security: [{ apiKeyAuth: [] }],
     request: {
       params: z.object({
         keyId: apiKeyIdParamSchema,
       }),
+      body: {
+        required: true,
+        content: jsonContent(
+          z.object({
+            confirmation: z.string().min(1).openapi({
+              description: "Type the exact API key name to confirm deletion.",
+              example: "Primary Key",
+            }),
+          })
+        ),
+      },
     },
     responses: {
       200: {

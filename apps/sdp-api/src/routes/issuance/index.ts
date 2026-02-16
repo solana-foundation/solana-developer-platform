@@ -2,7 +2,7 @@
  * Issuance Routes
  */
 
-import { authMiddleware, requirePermissions } from "@/middleware/auth";
+import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import type { Env } from "@/types/env";
 import { Hono } from "hono";
 import { addAllowlistEntry, listAllowlist, removeAllowlistEntry } from "./handlers/allowlist";
@@ -20,7 +20,7 @@ import { createToken, getToken, listTokens, updateToken } from "./handlers/token
 const issuance = new Hono<{ Bindings: Env }>();
 
 // All routes require authentication
-issuance.use("*", authMiddleware());
+issuance.use("*", unifiedAuthMiddleware({ allowClerk: true, allowSession: true }));
 
 // Templates (read-only, any authenticated user can view)
 issuance.get("/templates", requirePermissions("tokens:read"), listTokenTemplates);

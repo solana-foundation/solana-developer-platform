@@ -72,7 +72,7 @@ export const listApiKeys = async (c: AppContext) => {
       keyPrefix: key.keyPrefix,
       role: key.role as ApiKeyRole,
       environment: key.environment as "sandbox" | "production",
-      status: key.status as "active" | "revoked" | "expired",
+      status: key.status,
       lastUsedAt: key.lastUsedAt,
       expiresAt: key.expiresAt,
       createdAt: key.createdAt,
@@ -163,11 +163,51 @@ export const createApiKey = async (c: AppContext) => {
     }
   }
 
+  const resolveCreatorFallback = async (): Promise<string | null> => {
+    if (actor.userId) {
+      return actor.userId;
+    }
+
+    if (!actor.apiKeyId) {
+      return null;
+    }
+
+    const creator = await c.env.DB.prepare(
+      `SELECT created_by
+       FROM api_keys
+       WHERE id = ? AND organization_id = ?`
+    )
+      .bind(actor.apiKeyId, orgId)
+      .first<{ created_by: string }>();
+
+    if (creator?.created_by) {
+      return creator.created_by;
+    }
+
+    const orgOwner = await c.env.DB.prepare(
+      `SELECT user_id
+       FROM organization_members
+       WHERE organization_id = ? AND role IN ('owner', 'admin')
+       ORDER BY created_at ASC
+       LIMIT 1`
+    )
+      .bind(orgId)
+      .first<{ user_id: string }>();
+
+    return orgOwner?.user_id ?? null;
+  };
+
+  const createdBy = await resolveCreatorFallback();
+
+  if (!createdBy) {
+    throw new AppError("UNAUTHORIZED", "Could not resolve authenticated user for API key creation");
+  }
+
   const apiKeyService = new ApiKeyService(c.env.DB);
   const createdKey = await apiKeyService.createApiKey({
     organizationId: orgId,
+    createdByUserId: createdBy,
     createdByKeyId: actor.apiKeyId ?? undefined,
-    createdByUserId: actor.userId ?? undefined,
     name,
     description,
     role,
@@ -422,6 +462,33 @@ export const revokeApiKey = async (c: AppContext) => {
     throw new AppError("BAD_REQUEST", "Cannot revoke the API key being used for this request");
   }
 
+  const body = await c.req.json().catch(() => ({}));
+  const confirmation = (body && typeof body === "object" && typeof (body as { confirmation?: unknown }).confirmation === "string")
+    ? String((body as { confirmation: string }).confirmation).trim()
+    : "";
+
+  const existing = await c.env.DB.prepare(
+    "SELECT id, name, status, revoked_at FROM api_keys WHERE id = ? AND organization_id = ?"
+  )
+    .bind(keyId, actor.organizationId)
+    .first<{ id: string; name: string; status: string; revoked_at: string | null }>();
+
+  if (!existing) {
+    throw notFound("API key");
+  }
+
+  if (existing.status === "deactivated" || existing.status === "revoked") {
+    return success(c, { success: true, revokedAt: existing.revoked_at ?? new Date().toISOString() });
+  }
+
+  if (!confirmation) {
+    throw new AppError("BAD_REQUEST", "Confirmation is required to deactivate an API key");
+  }
+
+  if (confirmation !== existing.name) {
+    throw new AppError("BAD_REQUEST", "Confirmation did not match the key name");
+  }
+
   const apiKeyService = new ApiKeyService(c.env.DB);
   const revokedKey = await apiKeyService.revokeApiKey(keyId, actor.organizationId);
 
@@ -436,13 +503,14 @@ export const revokeApiKey = async (c: AppContext) => {
   // Audit log
   const auditService = new AuditService(c.env.DB);
   await auditService.log(c, {
-    action: "revoke",
+    action: "delete",
     resourceType: "api_key",
     resourceId: keyId,
+    metadata: { action: "deactivate" },
   });
 
   return success(c, {
     success: true,
-    revokedAt: new Date().toISOString(),
+    revokedAt: revokedKey.revokedAt,
   });
 };
