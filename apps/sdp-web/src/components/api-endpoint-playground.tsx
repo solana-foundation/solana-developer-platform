@@ -11,8 +11,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { getStoredApiKeySecret, normalizeApiKeyInput, storeApiKeySecret } from "@/lib/playground-api-keys";
 import { Check, ChevronDown, Copy, Loader2, Play } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 const CUSTOM_KEY_OPTION_ID = "__custom__";
 
@@ -93,14 +94,6 @@ function hasJsonBody(method: ApiEndpointMethod): boolean {
   return method !== "GET" && method !== "DELETE";
 }
 
-function normalizeApiKeyInput(rawValue: string): string {
-  const trimmed = rawValue.trim();
-  if (trimmed.startsWith("Bearer ")) {
-    return trimmed.slice(7).trim();
-  }
-  return trimmed;
-}
-
 export function ApiEndpointPlayground({
   title,
   description,
@@ -117,7 +110,8 @@ export function ApiEndpointPlayground({
   const [selectedApiKeyId, setSelectedApiKeyId] = useState<string>(
     apiKeys[0]?.id ?? CUSTOM_KEY_OPTION_ID
   );
-  const [apiKeyValuesById, setApiKeyValuesById] = useState<Record<string, string>>({});
+  const [apiKeyInput, setApiKeyInput] = useState("");
+  const [attachedApiKey, setAttachedApiKey] = useState<string | null>(null);
   const [requestBodyText, setRequestBodyText] = useState<string>(() => {
     if (!hasJsonBody(method) || requestBodyExample === undefined) {
       return "";
@@ -131,8 +125,24 @@ export function ApiEndpointPlayground({
   const [isOpen, setIsOpen] = useState(defaultOpen);
 
   const bodyEnabled = hasJsonBody(method);
-  const selectedApiKeyValue = apiKeyValuesById[selectedApiKeyId] ?? "";
   const selectedApiKeyMeta = apiKeys.find((apiKey) => apiKey.id === selectedApiKeyId) ?? null;
+  const selectedApiKeyPrefix = selectedApiKeyMeta?.keyPrefix ?? null;
+  const isCustomApiKeySelection = selectedApiKeyId === CUSTOM_KEY_OPTION_ID;
+
+  useEffect(() => {
+    if (isCustomApiKeySelection) {
+      setAttachedApiKey(null);
+      return;
+    }
+
+    const stored = getStoredApiKeySecret({
+      apiKeyId: selectedApiKeyId,
+      keyPrefix: selectedApiKeyPrefix,
+    });
+
+    setAttachedApiKey(stored);
+    setApiKeyInput(stored ?? "");
+  }, [isCustomApiKeySelection, selectedApiKeyId, selectedApiKeyPrefix]);
 
   const fetchSnippet = useMemo(() => {
     const normalizedPath = formatPath(path);
@@ -167,13 +177,6 @@ export function ApiEndpointPlayground({
     ].join("\n");
   }, [bodyEnabled, effectiveApiBaseUrl, method, path, requestBodyText]);
 
-  const onApiKeyValueChange = (value: string) => {
-    setApiKeyValuesById((previous) => ({
-      ...previous,
-      [selectedApiKeyId]: value,
-    }));
-  };
-
   const onCopyFetch = async () => {
     try {
       await navigator.clipboard.writeText(fetchSnippet);
@@ -184,18 +187,59 @@ export function ApiEndpointPlayground({
     }
   };
 
+  const onAttachSelectedKey = () => {
+    if (isCustomApiKeySelection) {
+      return;
+    }
+
+    const normalized = normalizeApiKeyInput(apiKeyInput);
+    if (!normalized) {
+      setExecuteError("Paste the full key value before attaching it to the selected key.");
+      return;
+    }
+    if (!normalized.startsWith("sk_test_") && !normalized.startsWith("sk_live_")) {
+      setExecuteError("Invalid API key format. Paste the raw key value (sk_test_... or sk_live_...).");
+      return;
+    }
+
+    storeApiKeySecret({
+      value: normalized,
+      apiKeyId: selectedApiKeyId,
+      keyPrefix: selectedApiKeyPrefix,
+    });
+    setAttachedApiKey(normalized);
+    setApiKeyInput(normalized);
+    setExecuteError(null);
+  };
+
   const onExecute = async () => {
     setExecuteError(null);
     setExecutionResult(null);
 
-    const apiKey = normalizeApiKeyInput(selectedApiKeyValue);
+    const normalizedInput = normalizeApiKeyInput(apiKeyInput);
+    const apiKey = isCustomApiKeySelection
+      ? normalizedInput
+      : normalizedInput || normalizeApiKeyInput(attachedApiKey ?? "");
+
     if (!apiKey) {
-      setExecuteError("API key value is required to execute a request.");
+      setExecuteError(
+        isCustomApiKeySelection
+          ? "API key value is required to execute a request."
+          : "No key is attached to the selected API key. Paste it once and click Attach selected key."
+      );
       return;
     }
     if (!apiKey.startsWith("sk_test_") && !apiKey.startsWith("sk_live_")) {
       setExecuteError("Invalid API key format. Paste the raw key value (sk_test_... or sk_live_...).");
       return;
+    }
+    if (!isCustomApiKeySelection) {
+      storeApiKeySecret({
+        value: apiKey,
+        apiKeyId: selectedApiKeyId,
+        keyPrefix: selectedApiKeyPrefix,
+      });
+      setAttachedApiKey(apiKey);
     }
 
     let parsedBody: unknown;
@@ -318,11 +362,27 @@ export function ApiEndpointPlayground({
             <Label>API key value</Label>
             <Input
               type="password"
-              value={selectedApiKeyValue}
-              onChange={(event) => onApiKeyValueChange(event.currentTarget.value)}
+              value={apiKeyInput}
+              onChange={(event) => setApiKeyInput(event.currentTarget.value)}
               placeholder="Paste secret key value (shown once at creation/rotation)"
               autoComplete="off"
             />
+            {isCustomApiKeySelection ? (
+              <p className="text-xs text-[rgba(28,28,29,0.64)]">
+                Custom mode uses this value directly for execution.
+              </p>
+            ) : (
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs text-[rgba(28,28,29,0.64)]">
+                  {attachedApiKey
+                    ? "A key is attached to this selection. Run executes a real authenticated call."
+                    : "No key attached yet. Paste the full key and attach it once."}
+                </p>
+                <Button type="button" size="sm" variant="secondary" onClick={onAttachSelectedKey}>
+                  Attach selected key
+                </Button>
+              </div>
+            )}
           </div>
         </div>
 
