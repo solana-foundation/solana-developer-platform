@@ -10,13 +10,10 @@ export const isoDateTimeSchema = z.string().datetime().openapi({
   example: "2025-01-01T00:00:00.000Z",
 });
 
-export const idempotencyKeyHeaderSchema = z
-  .string()
-  .min(1)
-  .openapi({
-    description: "Idempotency key for safely retrying mutating requests.",
-    example: "idempotency_example_12345",
-  });
+export const idempotencyKeyHeaderSchema = z.string().min(1).openapi({
+  description: "Idempotency key for safely retrying mutating requests.",
+  example: "idempotency_example_12345",
+});
 
 export const requestIdSchema = z.string().min(1).openapi({
   description: "Request identifier for tracing.",

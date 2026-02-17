@@ -47,6 +47,7 @@ import {
   tokenListResponse,
   tokenResponse,
   tokenTemplateResponse,
+  tokenTransactionsResponse,
 } from "./responses";
 
 export function registerIssuancePaths(registry: OpenAPIRegistry) {
