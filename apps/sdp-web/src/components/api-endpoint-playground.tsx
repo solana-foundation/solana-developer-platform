@@ -105,7 +105,6 @@ export function ApiEndpointPlayground({
   defaultOpen = false,
 }: ApiEndpointPlaygroundProps) {
   const defaultApiBaseUrl = useMemo(getDefaultApiBaseUrl, []);
-  const [pathValue, setPathValue] = useState(path);
   const [selectedApiKeyId, setSelectedApiKeyId] = useState<string>(
     apiKeys[0]?.id ?? CUSTOM_KEY_OPTION_ID
   );
@@ -127,7 +126,7 @@ export function ApiEndpointPlayground({
   const selectedApiKeyMeta = apiKeys.find((apiKey) => apiKey.id === selectedApiKeyId) ?? null;
 
   const fetchSnippet = useMemo(() => {
-    const normalizedPath = formatPath(pathValue);
+    const normalizedPath = formatPath(path);
     const isAbsolute = normalizedPath.startsWith("http://") || normalizedPath.startsWith("https://");
     const targetExpression = isAbsolute
       ? `"${normalizedPath}"`
@@ -157,7 +156,7 @@ export function ApiEndpointPlayground({
       "const payload = await response.json();",
       "console.log(payload);",
     ].join("\n");
-  }, [bodyEnabled, defaultApiBaseUrl, method, pathValue, requestBodyText]);
+  }, [bodyEnabled, defaultApiBaseUrl, method, path, requestBodyText]);
 
   const onApiKeyValueChange = (value: string) => {
     setApiKeyValuesById((previous) => ({
@@ -200,7 +199,7 @@ export function ApiEndpointPlayground({
     setIsExecuting(true);
 
     try {
-      const response = await fetch(resolveEndpointUrl(pathValue, defaultApiBaseUrl), {
+      const response = await fetch(resolveEndpointUrl(path, defaultApiBaseUrl), {
         method,
         headers: {
           Authorization: `Bearer ${apiKey}`,
@@ -312,20 +311,6 @@ export function ApiEndpointPlayground({
               autoComplete="off"
             />
           </div>
-        </div>
-
-        <div className="space-y-2">
-          <Label>Endpoint path</Label>
-          <Input
-            value={pathValue}
-            onChange={(event) => setPathValue(event.currentTarget.value)}
-            placeholder="/v1/issuance/templates"
-            autoComplete="off"
-          />
-          <p className="text-xs text-[rgba(28,28,29,0.64)]">
-            Use a full URL or a path relative to{" "}
-            <code>{defaultApiBaseUrl || "NEXT_PUBLIC_SDP_API_BASE_URL"}</code>.
-          </p>
         </div>
 
         {bodyEnabled ? (
