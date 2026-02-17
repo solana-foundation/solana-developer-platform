@@ -1,3 +1,8 @@
+import { SectionEntry } from "@/app/dashboard/wallets/section-entry";
+import {
+  WalletsSigningConfigSkeleton,
+  WalletsTableSectionSkeleton,
+} from "@/app/dashboard/wallets/wallets-page-skeleton";
 import { linkOrganization } from "@/app/onboarding/actions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -9,10 +14,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { sdpApiFetch, sdpApiRequest } from "@/lib/sdp-api";
+import { type SdpApiClient, createSdpApiClient } from "@/lib/sdp-api";
 import { auth, clerkClient } from "@clerk/nextjs/server";
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { Suspense } from "react";
 import { setDefaultCustodyWallet } from "./actions";
 
 type CustodyProvider = "privy" | "local" | "fireblocks";
@@ -44,8 +50,17 @@ interface ClerkOrganizationSummary {
   slug: string | null;
 }
 
-async function getCustodyConfig(): Promise<CustodyConfig | null> {
-  const res = await sdpApiRequest("/v1/wallets/config");
+type SettledResult<T> = { ok: true; value: T } | { ok: false; error: unknown };
+
+function settle<T>(promise: Promise<T>): Promise<SettledResult<T>> {
+  return promise.then(
+    (value) => ({ ok: true, value }),
+    (error) => ({ ok: false, error })
+  );
+}
+
+async function getCustodyConfig(request: SdpApiClient["request"]): Promise<CustodyConfig | null> {
+  const res = await request("/v1/wallets/config");
   if (res.status === 404) return null;
   if (!res.ok) {
     const body = await res.text();
@@ -77,70 +92,81 @@ async function getClerkOrganizationSummary(
   }
 }
 
-export default async function CustodyPage() {
-  const { userId, orgId } = await auth();
-  if (!userId) {
-    redirect("/sign-in");
-  }
-  if (!orgId) {
-    redirect("/dashboard");
-  }
-  const pageContainerClassName = "w-full max-w-5xl flex flex-col gap-6";
-
-  const onboarding = await sdpApiFetch<{ linked: boolean }>("/v1/onboarding/status");
-  if (!onboarding.linked) {
-    const organization = await getClerkOrganizationSummary(orgId);
-
-    return (
-      <div className={pageContainerClassName}>
-        <Card>
-          <CardHeader>
-            <CardTitle>Confirm organization details</CardTitle>
-            <CardDescription>
-              Review the Clerk organization details below before linking it in SDP.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="rounded-xl border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.04)] p-4 text-sm">
-              <div className="flex flex-wrap items-center justify-between gap-2 py-1">
-                <span className="text-[rgba(28,28,29,0.72)]">Organization name</span>
-                <span className="font-medium text-[#1c1c1d]">
-                  {organization.name ?? "Unavailable"}
-                </span>
-              </div>
-              <div className="flex flex-wrap items-center justify-between gap-2 py-1">
-                <span className="text-[rgba(28,28,29,0.72)]">Organization slug</span>
-                <span className="font-mono text-xs text-[#1c1c1d]">
-                  {organization.slug ?? "Unavailable"}
-                </span>
-              </div>
-              <div className="flex flex-wrap items-center justify-between gap-2 py-1">
-                <span className="text-[rgba(28,28,29,0.72)]">Clerk organization ID</span>
-                <span className="font-mono text-xs text-[#1c1c1d]">{organization.id}</span>
-              </div>
-            </div>
-            <p className="text-sm text-[rgba(28,28,29,0.72)]">
-              Confirming will link this Clerk organization in SDP (D1) and enable wallet setup.
-            </p>
-            <form action={linkOrganization}>
-              <input type="hidden" name="returnTo" value="/dashboard/wallets" />
-              <Button type="submit">Confirm and link organization</Button>
-            </form>
-          </CardContent>
-        </Card>
-      </div>
-    );
+async function OnboardingGateSection({
+  orgId,
+  onboardingPromise,
+}: {
+  orgId: string;
+  onboardingPromise: Promise<{ linked: boolean }>;
+}) {
+  const onboarding = await onboardingPromise;
+  if (onboarding.linked) {
+    return null;
   }
 
-  const [config, walletsResp] = await Promise.all([
-    getCustodyConfig(),
-    sdpApiFetch<{ wallets: CustodyWallet[] }>("/v1/wallets"),
-  ]);
-  const wallets = walletsResp.wallets;
+  const organization = await getClerkOrganizationSummary(orgId);
 
   return (
-    <div className={pageContainerClassName}>
-      {!config ? (
+    <SectionEntry>
+      <Card>
+        <CardHeader>
+          <CardTitle>Confirm organization details</CardTitle>
+          <CardDescription>
+            Review the Clerk organization details below before linking it in SDP.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="rounded-xl border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.04)] p-4 text-sm">
+            <div className="flex flex-wrap items-center justify-between gap-2 py-1">
+              <span className="text-[rgba(28,28,29,0.72)]">Organization name</span>
+              <span className="font-medium text-[#1c1c1d]">
+                {organization.name ?? "Unavailable"}
+              </span>
+            </div>
+            <div className="flex flex-wrap items-center justify-between gap-2 py-1">
+              <span className="text-[rgba(28,28,29,0.72)]">Organization slug</span>
+              <span className="font-mono text-xs text-[#1c1c1d]">
+                {organization.slug ?? "Unavailable"}
+              </span>
+            </div>
+            <div className="flex flex-wrap items-center justify-between gap-2 py-1">
+              <span className="text-[rgba(28,28,29,0.72)]">Clerk organization ID</span>
+              <span className="font-mono text-xs text-[#1c1c1d]">{organization.id}</span>
+            </div>
+          </div>
+          <p className="text-sm text-[rgba(28,28,29,0.72)]">
+            Confirming will link this Clerk organization in SDP (D1) and enable wallet setup.
+          </p>
+          <form action={linkOrganization}>
+            <input type="hidden" name="returnTo" value="/dashboard/wallets" />
+            <Button type="submit">Confirm and link organization</Button>
+          </form>
+        </CardContent>
+      </Card>
+    </SectionEntry>
+  );
+}
+
+type LinkedCustodyData = {
+  config: CustodyConfig | null;
+  wallets: CustodyWallet[];
+};
+
+async function SigningConfigurationSection({
+  linkedDataPromise,
+}: {
+  linkedDataPromise: Promise<LinkedCustodyData | null>;
+}) {
+  const linkedData = await linkedDataPromise;
+  if (!linkedData) {
+    return null;
+  }
+
+  const { config } = linkedData;
+
+  if (!config) {
+    return (
+      <SectionEntry>
         <Card>
           <CardHeader>
             <CardTitle>Enable wallets</CardTitle>
@@ -158,44 +184,65 @@ export default async function CustodyPage() {
             </Link>
           </CardContent>
         </Card>
-      ) : (
-        <Card>
-          <CardHeader>
-            <CardTitle>Signing configuration</CardTitle>
-            <CardDescription>Controls which wallet signs new API actions.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4 text-sm">
-            <div className="grid gap-2">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="text-[rgba(28,28,29,0.72)]">Provider</span>
-                <span className="font-medium text-[#1c1c1d]">{config.provider}</span>
-              </div>
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="text-[rgba(28,28,29,0.72)]">Master address</span>
-                <span className="font-mono text-xs text-[#1c1c1d]">{config.publicKey}</span>
-              </div>
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="text-[rgba(28,28,29,0.72)]">Default wallet</span>
-                <span className="font-mono text-xs text-[#1c1c1d]">
-                  {config.defaultWalletId ?? "Not set"}
-                </span>
-              </div>
-            </div>
+      </SectionEntry>
+    );
+  }
 
-            <div className="flex flex-wrap gap-3">
-              <Link href="/dashboard/wallets/switch">
-                <Button variant="secondary">Change provider</Button>
-              </Link>
+  return (
+    <SectionEntry delay={0.02}>
+      <Card>
+        <CardHeader>
+          <CardTitle>Signing configuration</CardTitle>
+          <CardDescription>Controls which wallet signs new API actions.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4 text-sm">
+          <div className="grid gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-[rgba(28,28,29,0.72)]">Provider</span>
+              <span className="font-medium text-[#1c1c1d]">{config.provider}</span>
             </div>
-
-            <div className="rounded-xl border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.04)] px-3 py-2 text-xs text-[rgba(28,28,29,0.64)]">
-              Changing providers affects new actions only. Existing on-chain authorities are not
-              automatically rotated.
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-[rgba(28,28,29,0.72)]">Master address</span>
+              <span className="font-mono text-xs text-[#1c1c1d]">{config.publicKey}</span>
             </div>
-          </CardContent>
-        </Card>
-      )}
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-[rgba(28,28,29,0.72)]">Default wallet</span>
+              <span className="font-mono text-xs text-[#1c1c1d]">
+                {config.defaultWalletId ?? "Not set"}
+              </span>
+            </div>
+          </div>
 
+          <div className="flex flex-wrap gap-3">
+            <Link href="/dashboard/wallets/switch">
+              <Button variant="secondary">Change provider</Button>
+            </Link>
+          </div>
+
+          <div className="rounded-xl border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.04)] px-3 py-2 text-xs text-[rgba(28,28,29,0.64)]">
+            Changing providers affects new actions only. Existing on-chain authorities are not
+            automatically rotated.
+          </div>
+        </CardContent>
+      </Card>
+    </SectionEntry>
+  );
+}
+
+async function WalletsSection({
+  linkedDataPromise,
+}: {
+  linkedDataPromise: Promise<LinkedCustodyData | null>;
+}) {
+  const linkedData = await linkedDataPromise;
+  if (!linkedData) {
+    return null;
+  }
+
+  const { config, wallets } = linkedData;
+
+  return (
+    <SectionEntry delay={0.08}>
       <Card>
         <CardHeader>
           <CardTitle>Wallets</CardTitle>
@@ -250,6 +297,80 @@ export default async function CustodyPage() {
           )}
         </CardContent>
       </Card>
+    </SectionEntry>
+  );
+}
+
+async function PrimaryWalletSection({
+  orgId,
+  onboardingPromise,
+  linkedDataPromise,
+}: {
+  orgId: string;
+  onboardingPromise: Promise<{ linked: boolean }>;
+  linkedDataPromise: Promise<LinkedCustodyData | null>;
+}) {
+  const onboarding = await onboardingPromise;
+
+  if (!onboarding.linked) {
+    return <OnboardingGateSection orgId={orgId} onboardingPromise={Promise.resolve(onboarding)} />;
+  }
+
+  return <SigningConfigurationSection linkedDataPromise={linkedDataPromise} />;
+}
+
+export default async function CustodyPage() {
+  const { userId, orgId } = await auth();
+  if (!userId) {
+    redirect("/sign-in");
+  }
+  if (!orgId) {
+    redirect("/dashboard");
+  }
+
+  const pageContainerClassName = "w-full max-w-5xl flex flex-col gap-6";
+  const apiClient = await createSdpApiClient();
+  const onboardingPromise = apiClient.fetch<{ linked: boolean }>("/v1/onboarding/status");
+  const configResultPromise = settle(getCustodyConfig(apiClient.request));
+  const walletsResultPromise = settle(apiClient.fetch<{ wallets: CustodyWallet[] }>("/v1/wallets"));
+  const linkedDataPromise: Promise<LinkedCustodyData | null> = onboardingPromise.then(
+    async (onboarding) => {
+      if (!onboarding.linked) {
+        return null;
+      }
+
+      const [configResult, walletsResult] = await Promise.all([
+        configResultPromise,
+        walletsResultPromise,
+      ]);
+
+      if (!configResult.ok) {
+        throw configResult.error;
+      }
+
+      if (!walletsResult.ok) {
+        throw walletsResult.error;
+      }
+
+      return {
+        config: configResult.value,
+        wallets: walletsResult.value.wallets,
+      };
+    }
+  );
+
+  return (
+    <div className={pageContainerClassName}>
+      <Suspense fallback={<WalletsSigningConfigSkeleton />}>
+        <PrimaryWalletSection
+          orgId={orgId}
+          onboardingPromise={onboardingPromise}
+          linkedDataPromise={linkedDataPromise}
+        />
+      </Suspense>
+      <Suspense fallback={<WalletsTableSectionSkeleton />}>
+        <WalletsSection linkedDataPromise={linkedDataPromise} />
+      </Suspense>
     </div>
   );
 }
