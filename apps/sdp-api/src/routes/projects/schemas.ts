@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+const projectRpcProviderSchema = z.enum(["default", "triton", "helius", "alchemy", "custom"]);
+
 export const createProjectSchema = z.object({
   name: z.string().min(1).max(100),
   slug: z
@@ -12,11 +14,25 @@ export const createProjectSchema = z.object({
   environment: z.enum(["sandbox", "beta", "production"]).optional(),
   settings: z
     .object({
+      rpcProvider: projectRpcProviderSchema.optional(),
       rpcEndpoint: z.string().url().optional(),
       webhookUrl: z.string().url().optional(),
       metadata: z.record(z.string()).optional(),
     })
-    .optional(),
+    .optional()
+    .superRefine((value, ctx) => {
+      if (!value) {
+        return;
+      }
+
+      if (value.rpcProvider === "custom" && !value.rpcEndpoint) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["rpcEndpoint"],
+          message: "rpcEndpoint is required when rpcProvider is custom",
+        });
+      }
+    }),
 });
 
 export const updateProjectSchema = z.object({
@@ -25,6 +41,7 @@ export const updateProjectSchema = z.object({
   environment: z.enum(["sandbox", "beta", "production"]).optional(),
   settings: z
     .object({
+      rpcProvider: projectRpcProviderSchema.optional(),
       rpcEndpoint: z.string().url().optional(),
       webhookUrl: z.string().url().optional(),
       metadata: z.record(z.string()).optional(),

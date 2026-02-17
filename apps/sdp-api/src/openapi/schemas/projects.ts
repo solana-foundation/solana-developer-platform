@@ -17,9 +17,14 @@ import { userSchema } from "./organizations";
 
 export const projectSettingsSchema = z
   .object({
+    rpcProvider: z.enum(["default", "triton", "helius", "alchemy", "custom"]).optional().openapi({
+      description:
+        "Preferred RPC provider for this project. Use `custom` with `rpcEndpoint` for a dedicated endpoint.",
+      example: "helius",
+    }),
     rpcEndpoint: z.string().url().optional().openapi({
-      description: "Custom Solana RPC endpoint for the project.",
-      example: "https://api.devnet.solana.com",
+      description: "Custom Solana RPC endpoint for the project (used when rpcProvider=custom).",
+      example: "https://rpc.example.com",
     }),
     webhookUrl: z.string().url().optional().openapi({
       description: "Webhook URL for event notifications.",
@@ -153,7 +158,7 @@ export const createProjectRequestSchema = createProjectSchemaBase
     settings: createProjectSchemaBase.shape.settings.openapi({
       description: "Optional project settings.",
       example: {
-        rpcEndpoint: "https://api.devnet.solana.com",
+        rpcProvider: "triton",
         webhookUrl: "https://example.com/webhook",
         metadata: { region: "us" },
       },
@@ -178,7 +183,8 @@ export const updateProjectRequestSchema = updateProjectSchemaBase
     settings: updateProjectSchemaBase.shape.settings.openapi({
       description: "Updated project settings. Use null to clear.",
       example: {
-        rpcEndpoint: "https://api.mainnet-beta.solana.com",
+        rpcProvider: "custom",
+        rpcEndpoint: "https://rpc.example.com",
       },
     }),
   })

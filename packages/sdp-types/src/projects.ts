@@ -10,10 +10,13 @@ export type ProjectEnvironment = "sandbox" | "beta" | "production";
 
 export type ProjectStatus = "active" | "archived";
 
+export type ProjectRpcProvider = "default" | "triton" | "helius" | "alchemy" | "custom";
+
 // Re-export ProjectRole for convenience
 export type { ProjectRole } from "./permissions";
 
 export interface ProjectSettings {
+  rpcProvider?: ProjectRpcProvider;
   rpcEndpoint?: string;
   webhookUrl?: string;
   metadata?: Record<string, string>;

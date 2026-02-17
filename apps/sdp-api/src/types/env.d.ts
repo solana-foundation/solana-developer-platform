@@ -46,6 +46,13 @@ export interface Env {
 
   // Solana configuration
   SOLANA_RPC_URL?: string;
+  SOLANA_RPC_DEFAULT_PROVIDER?: "triton" | "helius" | "alchemy" | "default";
+  SOLANA_RPC_TRITON_URL?: string;
+  SOLANA_RPC_TRITON_API_KEY?: string;
+  SOLANA_RPC_HELIUS_URL?: string;
+  SOLANA_RPC_HELIUS_API_KEY?: string;
+  SOLANA_RPC_ALCHEMY_URL?: string;
+  SOLANA_RPC_ALCHEMY_API_KEY?: string;
   SOLANA_NETWORK?: "devnet" | "mainnet-beta";
   CUSTODY_PRIVATE_KEY?: string;
   SOLANA_MOCK?: string;
