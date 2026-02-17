@@ -42,6 +42,7 @@ export interface ApiEndpointPlaygroundProps {
   expectedResponse: unknown;
   requestBodyExample?: unknown;
   apiKeys: ApiPlaygroundApiKeyOption[];
+  apiBaseUrl?: string | null;
   defaultOpen?: boolean;
 }
 
@@ -81,14 +82,11 @@ function resolveEndpointUrl(path: string, baseUrl: string): string {
     return normalizedPath;
   }
 
-  const runtimeBaseUrl =
-    baseUrl || (typeof window !== "undefined" ? window.location.origin.replace(/\/$/, "") : "");
-
-  if (!runtimeBaseUrl) {
+  if (!baseUrl) {
     throw new Error("Missing API base URL for browser execution");
   }
 
-  return `${runtimeBaseUrl}${normalizedPath}`;
+  return `${baseUrl}${normalizedPath}`;
 }
 
 function hasJsonBody(method: ApiEndpointMethod): boolean {
@@ -103,9 +101,11 @@ export function ApiEndpointPlayground({
   expectedResponse,
   requestBodyExample,
   apiKeys,
+  apiBaseUrl,
   defaultOpen = false,
 }: ApiEndpointPlaygroundProps) {
   const defaultApiBaseUrl = useMemo(getDefaultApiBaseUrl, []);
+  const effectiveApiBaseUrl = (apiBaseUrl ?? defaultApiBaseUrl ?? "").replace(/\/$/, "");
   const [selectedApiKeyId, setSelectedApiKeyId] = useState<string>(
     apiKeys[0]?.id ?? CUSTOM_KEY_OPTION_ID
   );
@@ -146,7 +146,7 @@ export function ApiEndpointPlayground({
     }
 
     return [
-      "const API_BASE_URL = " + JSON.stringify(defaultApiBaseUrl || "https://api.example.com") + ";",
+      "const API_BASE_URL = " + JSON.stringify(effectiveApiBaseUrl || "https://api.example.com") + ";",
       "const API_KEY = \"<paste_api_key_here>\";",
       "",
       `const response = await fetch(${targetExpression}, {`,
@@ -157,7 +157,7 @@ export function ApiEndpointPlayground({
       "const payload = await response.json();",
       "console.log(payload);",
     ].join("\n");
-  }, [bodyEnabled, defaultApiBaseUrl, method, path, requestBodyText]);
+  }, [bodyEnabled, effectiveApiBaseUrl, method, path, requestBodyText]);
 
   const onApiKeyValueChange = (value: string) => {
     setApiKeyValuesById((previous) => ({
@@ -200,7 +200,7 @@ export function ApiEndpointPlayground({
     setIsExecuting(true);
 
     try {
-      const response = await fetch(resolveEndpointUrl(path, defaultApiBaseUrl), {
+      const response = await fetch(resolveEndpointUrl(path, effectiveApiBaseUrl), {
         method,
         headers: {
           Authorization: `Bearer ${apiKey}`,
@@ -357,7 +357,7 @@ export function ApiEndpointPlayground({
             )}
           </div>
         </div>
-        </CardContent>
+      </CardContent>
       ) : null}
     </Card>
   );

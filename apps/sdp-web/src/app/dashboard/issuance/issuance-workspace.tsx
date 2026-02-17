@@ -22,12 +22,6 @@ import { Search } from "lucide-react";
 import { useMemo, useState } from "react";
 import { type IssuanceTemplateId, getTemplateCatalogEntry } from "./template-catalog";
 
-interface IssuanceTemplateView {
-  id: string;
-  name: string;
-  description?: string;
-}
-
 interface IssuanceTokenView {
   id: string;
   name: string;
@@ -152,9 +146,9 @@ const issuancePlaygroundEndpointConfigs: IssuancePlaygroundEndpointConfig[] = [
 ];
 
 interface IssuanceWorkspaceProps {
-  templates: IssuanceTemplateView[];
   tokens: IssuanceTokenView[];
   apiKeys: ApiPlaygroundApiKeyOption[];
+  apiBaseUrl: string | null;
   templatesError: string | null;
   tokensError: string | null;
 }
@@ -185,9 +179,9 @@ function truncateAddress(value: string | null): string {
 }
 
 export function IssuanceWorkspace({
-  templates,
   tokens,
   apiKeys,
+  apiBaseUrl,
   templatesError,
   tokensError,
 }: IssuanceWorkspaceProps) {
@@ -390,6 +384,7 @@ export function IssuanceWorkspace({
                   expectedResponse={endpointConfig.expectedResponse}
                   requestBodyExample={endpointConfig.requestBodyExample}
                   apiKeys={apiKeys}
+                  apiBaseUrl={apiBaseUrl}
                   defaultOpen={endpointConfig.path === "/v1/issuance/templates"}
                 />
               ))}

@@ -2,7 +2,6 @@ import { createSdpApiClient, type SdpApiClient } from "@/lib/sdp-api";
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { IssuanceWorkspace } from "./issuance-workspace";
-import { issuanceTemplateCatalog } from "./template-catalog";
 
 interface IssuanceTemplateView {
   id: string;
@@ -193,21 +192,18 @@ export default async function IssuancePage() {
     redirect("/dashboard");
   }
 
+  const apiBaseUrl = (
+    process.env.SDP_API_BASE_URL ||
+    process.env.NEXT_PUBLIC_SDP_API_BASE_URL ||
+    process.env.NEXT_PUBLIC_API_BASE_URL ||
+    ""
+  ).replace(/\/$/, "");
   const apiClient = await createSdpApiClient();
   const [templatesResult, tokensResult, apiKeysResult] = await Promise.all([
     fetchTemplates(apiClient.request),
     fetchTokens(apiClient.request),
     fetchApiKeys(apiClient.request),
   ]);
-
-  const templates =
-    templatesResult.data && templatesResult.data.length > 0
-      ? templatesResult.data
-      : issuanceTemplateCatalog.map((template) => ({
-          id: template.id,
-          name: template.name,
-          description: template.description,
-        }));
 
   const tokens = tokensResult.data ?? [];
   const apiKeys = apiKeysResult.data ?? [];
@@ -220,9 +216,9 @@ export default async function IssuancePage() {
 
   return (
     <IssuanceWorkspace
-      templates={templates}
       tokens={tokens}
       apiKeys={apiKeys}
+      apiBaseUrl={apiBaseUrl || null}
       templatesError={templatesError}
       tokensError={tokensError}
     />
