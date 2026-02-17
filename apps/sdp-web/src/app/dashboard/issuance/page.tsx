@@ -49,7 +49,6 @@ function parseErrorMessage(body: string): string {
   }
 }
 
-async function fetchTemplates(): Promise<FetchResult<IssuanceTemplateView[]>> {
 async function fetchTemplates(request: SdpApiClient["request"]): Promise<FetchResult<IssuanceTemplateView[]>> {
   try {
     const response = await request("/v1/issuance/templates");
@@ -87,7 +86,6 @@ async function fetchTemplates(request: SdpApiClient["request"]): Promise<FetchRe
   }
 }
 
-async function fetchTokens(): Promise<FetchResult<IssuanceTokenView[]>> {
 async function fetchTokens(request: SdpApiClient["request"]): Promise<FetchResult<IssuanceTokenView[]>> {
   try {
     const tokensPath = `/v1/issuance/tokens?${new URLSearchParams({
@@ -141,7 +139,6 @@ async function fetchTokens(request: SdpApiClient["request"]): Promise<FetchResul
   }
 }
 
-async function fetchApiKeys(): Promise<FetchResult<IssuanceApiKeyView[]>> {
 async function fetchApiKeys(request: SdpApiClient["request"]): Promise<FetchResult<IssuanceApiKeyView[]>> {
   try {
     const response = await request("/v1/api-keys");
