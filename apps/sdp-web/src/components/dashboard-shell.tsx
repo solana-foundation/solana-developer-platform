@@ -2,6 +2,7 @@
 
 import { CreateApiKeyModal } from "@/app/dashboard/api-keys/create-api-key-modal";
 import { CreateWalletModal } from "@/app/dashboard/custody/create-wallet-modal";
+import { IssuanceApiKeySelector } from "@/app/dashboard/issuance/issuance-api-key-selector";
 import { CreateIssuanceTokenModal } from "@/app/dashboard/issuance/create-token-modal";
 import { DashboardQuickActions } from "@/components/dashboard-quick-actions";
 import { IssuanceHeaderTabs } from "@/components/issuance-header-tabs";
@@ -92,7 +93,12 @@ function getDashboardPageConfig(pathname: string): DashboardPageConfig {
     return {
       title: "Issuance",
       quickActionsLeft: <IssuanceHeaderTabs />,
-      quickActionsRight: <CreateIssuanceTokenModal />,
+      quickActionsRight: (
+        <>
+          <IssuanceApiKeySelector />
+          <CreateIssuanceTokenModal />
+        </>
+      ),
     };
   }
   if (pathname.startsWith("/dashboard/payments")) {
