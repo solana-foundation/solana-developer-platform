@@ -1,4 +1,4 @@
-import { createSdpApiClient, type SdpApiClient } from "@/lib/sdp-api";
+import { type SdpApiClient, createSdpApiClient } from "@/lib/sdp-api";
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { IssuanceWorkspace } from "./issuance-workspace";
@@ -48,7 +48,9 @@ function parseErrorMessage(body: string): string {
   }
 }
 
-async function fetchTemplates(request: SdpApiClient["request"]): Promise<FetchResult<IssuanceTemplateView[]>> {
+async function fetchTemplates(
+  request: SdpApiClient["request"]
+): Promise<FetchResult<IssuanceTemplateView[]>> {
   try {
     const response = await request("/v1/issuance/templates");
     if (!response.ok) {
@@ -85,7 +87,9 @@ async function fetchTemplates(request: SdpApiClient["request"]): Promise<FetchRe
   }
 }
 
-async function fetchTokens(request: SdpApiClient["request"]): Promise<FetchResult<IssuanceTokenView[]>> {
+async function fetchTokens(
+  request: SdpApiClient["request"]
+): Promise<FetchResult<IssuanceTokenView[]>> {
   try {
     const tokensPath = `/v1/issuance/tokens?${new URLSearchParams({
       page: "1",
@@ -138,7 +142,9 @@ async function fetchTokens(request: SdpApiClient["request"]): Promise<FetchResul
   }
 }
 
-async function fetchApiKeys(request: SdpApiClient["request"]): Promise<FetchResult<IssuanceApiKeyView[]>> {
+async function fetchApiKeys(
+  request: SdpApiClient["request"]
+): Promise<FetchResult<IssuanceApiKeyView[]>> {
   try {
     const response = await request("/v1/api-keys");
     if (!response.ok) {

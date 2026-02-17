@@ -4,7 +4,6 @@ import { ApiEndpointPlayground } from "@/components/api-endpoint-playground";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { getStoredApiKeySecret } from "@/lib/playground-api-keys";
 import {
   Table,
   TableBody,
@@ -14,6 +13,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
+import { getStoredApiKeySecret } from "@/lib/playground-api-keys";
 import { AnimatePresence, motion } from "framer-motion";
 import { Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -64,7 +64,7 @@ const issuancePlaygroundEndpointConfigs: IssuancePlaygroundEndpointConfig[] = [
     title: "List tokens",
     description: "Page through tokens in the active organization or project scope.",
     method: "GET",
-    path: "/v1/issuance/tokens?page=1&pageSize=20",
+    path: "/v1/issuance/tokens",
     expectedResponse: {
       data: [
         {
@@ -72,7 +72,7 @@ const issuancePlaygroundEndpointConfigs: IssuancePlaygroundEndpointConfig[] = [
           name: "Acme Dollar",
           symbol: "ACME",
           status: "active",
-          mintAddress: "So11111111111111111111111111111111111111112",
+          mintAddress: "mint_acme_primary",
           totalSupply: "1250000",
         },
       ],
@@ -123,7 +123,7 @@ const issuancePlaygroundEndpointConfigs: IssuancePlaygroundEndpointConfig[] = [
     title: "List token transactions",
     description: "Retrieve issuance transaction audit history for one token.",
     method: "GET",
-    path: "/v1/issuance/tokens/{tokenId}/transactions?page=1&pageSize=20",
+    path: "/v1/issuance/tokens/{tokenId}/transactions",
     expectedResponse: {
       data: {
         items: [
@@ -190,12 +190,8 @@ export function IssuanceWorkspace({
   templatesError,
   tokensError,
 }: IssuanceWorkspaceProps) {
-  const {
-    issuanceTab,
-    setIssuanceTab,
-    selectedIssuanceApiKeyId,
-    setIssuanceApiKeys,
-  } = useDashboardWorkspace();
+  const { issuanceTab, setIssuanceTab, selectedIssuanceApiKeyId, setIssuanceApiKeys } =
+    useDashboardWorkspace();
   const [search, setSearch] = useState("");
   const [playgroundApiKeyValue, setPlaygroundApiKeyValue] = useState("");
 
@@ -385,14 +381,14 @@ export function IssuanceWorkspace({
               <CardHeader>
                 <CardTitle>Issuance API playground</CardTitle>
                 <CardDescription>
-                  Reusable per-endpoint playground cards with expected responses, fetch snippet copy,
-                  API key selector, and live execution.
+                  Reusable per-endpoint playground cards with expected responses, fetch snippet
+                  copy, API key selector, and live execution.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="rounded-xl border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.02)] p-3 text-xs text-[rgba(28,28,29,0.64)]">
-                  Endpoints with <code>{"{tokenId}"}</code> require a real token id in their configured
-                  path before execution.
+                  Endpoints with <code>{"{tokenId}"}</code> require a real token id in their
+                  configured path before execution.
                 </div>
                 {templatesError ? (
                   <div className="rounded-xl border border-[#c71f37]/20 bg-[#c71f37]/[0.03] p-3 text-sm text-[#8a1f2a]">

@@ -92,12 +92,16 @@ export function ApiEndpointPlayground({
 
   const fetchSnippet = useMemo(() => {
     const normalizedPath = formatPath(path);
-    const isAbsolute = normalizedPath.startsWith("http://") || normalizedPath.startsWith("https://");
+    const isAbsolute =
+      normalizedPath.startsWith("http://") || normalizedPath.startsWith("https://");
     const targetExpression = isAbsolute
       ? `"${normalizedPath}"`
-      : "`" + "${API_BASE_URL}" + `${normalizedPath}` + "`";
+      : `\`\${API_BASE_URL}${normalizedPath}\``;
 
-    const headerLines = ['Authorization: `Bearer ${API_KEY}`', '"Content-Type": "application/json"'];
+    const headerLines = [
+      "Authorization: `Bearer ${API_KEY}`",
+      '"Content-Type": "application/json"',
+    ];
 
     let bodyLine = "";
     if (bodyEnabled && requestBodyText.trim()) {
@@ -110,8 +114,8 @@ export function ApiEndpointPlayground({
     }
 
     return [
-      "const API_BASE_URL = " + JSON.stringify(effectiveApiBaseUrl || "https://api.example.com") + ";",
-      "const API_KEY = \"<paste_api_key_here>\";",
+      `const API_BASE_URL = ${JSON.stringify(effectiveApiBaseUrl || "https://api.example.com")};`,
+      'const API_KEY = "<paste_api_key_here>";',
       "",
       `const response = await fetch(${targetExpression}, {`,
       `  method: "${method}",`,
@@ -140,7 +144,11 @@ export function ApiEndpointPlayground({
     const normalizedApiKey = normalizeApiKeyInput(apiKeyValue);
     const hasApiKey = Boolean(normalizedApiKey);
 
-    if (hasApiKey && !normalizedApiKey.startsWith("sk_test_") && !normalizedApiKey.startsWith("sk_live_")) {
+    if (
+      hasApiKey &&
+      !normalizedApiKey.startsWith("sk_test_") &&
+      !normalizedApiKey.startsWith("sk_live_")
+    ) {
       setExecuteError("Invalid API key format. Use a raw key value (sk_test_... or sk_live_...).");
       return;
     }
