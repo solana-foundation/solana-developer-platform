@@ -1,8 +1,7 @@
-import { sdpApiRequest } from "@/lib/sdp-api";
+import { type SdpApiClient, createSdpApiClient } from "@/lib/sdp-api";
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { IssuanceWorkspace } from "./issuance-workspace";
-import { issuanceTemplateCatalog } from "./template-catalog";
 
 interface IssuanceTemplateView {
   id: string;
@@ -20,6 +19,14 @@ interface IssuanceTokenView {
   totalSupply: string;
   createdAt: string;
   deployedAt: string | null;
+}
+
+interface IssuanceApiKeyView {
+  id: string;
+  name: string;
+  keyPrefix: string;
+  role: string;
+  environment: string;
 }
 
 interface FetchResult<T> {
@@ -41,9 +48,11 @@ function parseErrorMessage(body: string): string {
   }
 }
 
-async function fetchTemplates(): Promise<FetchResult<IssuanceTemplateView[]>> {
+async function fetchTemplates(
+  request: SdpApiClient["request"]
+): Promise<FetchResult<IssuanceTemplateView[]>> {
   try {
-    const response = await sdpApiRequest("/v1/issuance/templates");
+    const response = await request("/v1/issuance/templates");
     if (!response.ok) {
       const body = await response.text();
       return {
@@ -78,13 +87,15 @@ async function fetchTemplates(): Promise<FetchResult<IssuanceTemplateView[]>> {
   }
 }
 
-async function fetchTokens(): Promise<FetchResult<IssuanceTokenView[]>> {
+async function fetchTokens(
+  request: SdpApiClient["request"]
+): Promise<FetchResult<IssuanceTokenView[]>> {
   try {
     const tokensPath = `/v1/issuance/tokens?${new URLSearchParams({
       page: "1",
       pageSize: "100",
     }).toString()}`;
-    const response = await sdpApiRequest(tokensPath);
+    const response = await request(tokensPath);
     if (!response.ok) {
       const body = await response.text();
       return {
@@ -131,6 +142,53 @@ async function fetchTokens(): Promise<FetchResult<IssuanceTokenView[]>> {
   }
 }
 
+async function fetchApiKeys(
+  request: SdpApiClient["request"]
+): Promise<FetchResult<IssuanceApiKeyView[]>> {
+  try {
+    const response = await request("/v1/api-keys");
+    if (!response.ok) {
+      const body = await response.text();
+      return {
+        ok: false,
+        status: response.status,
+        error: parseErrorMessage(body),
+      };
+    }
+
+    const json = (await response.json()) as {
+      data?: {
+        apiKeys?: Array<{
+          id?: string;
+          name?: string;
+          keyPrefix?: string;
+          role?: string;
+          environment?: string;
+          status?: string;
+        }>;
+      };
+    };
+
+    const apiKeys = (json?.data?.apiKeys ?? [])
+      .filter((apiKey): apiKey is NonNullable<typeof apiKey> => Boolean(apiKey?.id))
+      .filter((apiKey) => apiKey.status === "active")
+      .map((apiKey) => ({
+        id: apiKey.id ?? "",
+        name: apiKey.name ?? "Unnamed key",
+        keyPrefix: apiKey.keyPrefix ?? "sdp_...",
+        role: apiKey.role ?? "api_developer",
+        environment: apiKey.environment ?? "sandbox",
+      }));
+
+    return { ok: true, data: apiKeys };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Unable to load API keys",
+    };
+  }
+}
+
 export default async function IssuancePage() {
   const { userId, orgId } = await auth();
   if (!userId) {
@@ -140,18 +198,21 @@ export default async function IssuancePage() {
     redirect("/dashboard");
   }
 
-  const [templatesResult, tokensResult] = await Promise.all([fetchTemplates(), fetchTokens()]);
-
-  const templates =
-    templatesResult.data && templatesResult.data.length > 0
-      ? templatesResult.data
-      : issuanceTemplateCatalog.map((template) => ({
-          id: template.id,
-          name: template.name,
-          description: template.description,
-        }));
+  const apiBaseUrl = (
+    process.env.SDP_API_BASE_URL ||
+    process.env.NEXT_PUBLIC_SDP_API_BASE_URL ||
+    process.env.NEXT_PUBLIC_API_BASE_URL ||
+    ""
+  ).replace(/\/$/, "");
+  const apiClient = await createSdpApiClient();
+  const [templatesResult, tokensResult, apiKeysResult] = await Promise.all([
+    fetchTemplates(apiClient.request),
+    fetchTokens(apiClient.request),
+    fetchApiKeys(apiClient.request),
+  ]);
 
   const tokens = tokensResult.data ?? [];
+  const apiKeys = apiKeysResult.data ?? [];
   const templatesError = templatesResult.ok
     ? null
     : `Template API ${templatesResult.status ?? "unavailable"}: ${templatesResult.error ?? "Unknown error"}`;
@@ -161,8 +222,9 @@ export default async function IssuancePage() {
 
   return (
     <IssuanceWorkspace
-      templates={templates}
       tokens={tokens}
+      apiKeys={apiKeys}
+      apiBaseUrl={apiBaseUrl || null}
       templatesError={templatesError}
       tokensError={tokensError}
     />

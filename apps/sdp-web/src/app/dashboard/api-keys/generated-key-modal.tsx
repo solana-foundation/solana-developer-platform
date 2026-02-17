@@ -3,7 +3,8 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { useState } from "react";
+import { storeApiKeySecret } from "@/lib/playground-api-keys";
+import { useEffect, useState } from "react";
 import { clearApiKeyFlashAction } from "./actions";
 import { GeneratedApiKeyInput } from "./generated-key-input";
 
@@ -16,6 +17,17 @@ interface GeneratedApiKeyModalProps {
 function GeneratedApiKeyModal({ keyValue, message, keyPrefix }: GeneratedApiKeyModalProps) {
   const [isOpen, setIsOpen] = useState(true);
   const [copyLabel, setCopyLabel] = useState("Copy");
+
+  useEffect(() => {
+    if (!keyValue) {
+      return;
+    }
+
+    storeApiKeySecret({
+      value: keyValue,
+      keyPrefix: keyPrefix ?? null,
+    });
+  }, [keyValue, keyPrefix]);
 
   if (!isOpen) {
     return null;
