@@ -76,6 +76,16 @@ describe("ProjectService", () => {
       expect(project.slug).toBe("my-custom-slug");
     });
 
+    it("defaults rpc provider to round robin when settings are omitted", async () => {
+      const project = await projectService.createProject({
+        organizationId: TEST_ORG.id,
+        createdBy: TEST_USER.id,
+        name: "Default RPC Provider",
+      });
+
+      expect(project.settings?.rpcProvider).toBe("default");
+    });
+
     it("creates a project with settings", async () => {
       const project = await projectService.createProject({
         organizationId: TEST_ORG.id,
@@ -236,6 +246,42 @@ describe("ProjectService", () => {
       });
 
       expect(updated.settings?.webhookUrl).toBe("https://new.example.com/webhook");
+    });
+
+    it("preserves existing rpc provider when settings update omits it", async () => {
+      const project = await projectService.createProject({
+        organizationId: TEST_ORG.id,
+        createdBy: TEST_USER.id,
+        name: "Preserve RPC Provider",
+        settings: {
+          rpcProvider: "triton",
+        },
+      });
+
+      const updated = await projectService.updateProject(project.id, {
+        settings: { webhookUrl: "https://updated.example.com/webhook" },
+      });
+
+      expect(updated.settings?.rpcProvider).toBe("triton");
+    });
+
+    it("switches provider to default and clears custom endpoint", async () => {
+      const project = await projectService.createProject({
+        organizationId: TEST_ORG.id,
+        createdBy: TEST_USER.id,
+        name: "Switch RPC Provider",
+        settings: {
+          rpcProvider: "custom",
+          rpcEndpoint: "https://rpc.custom.example.com",
+        },
+      });
+
+      const updated = await projectService.updateProject(project.id, {
+        settings: { rpcProvider: "default" },
+      });
+
+      expect(updated.settings?.rpcProvider).toBe("default");
+      expect(updated.settings?.rpcEndpoint).toBeUndefined();
     });
 
     it("throws for non-existent project", async () => {

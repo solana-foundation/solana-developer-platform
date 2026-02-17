@@ -19,6 +19,10 @@ import {
 
 export const organizationSettingsSchema = z
   .object({
+    rpcProvider: z.enum(["default", "triton", "helius", "alchemy"]).optional().openapi({
+      description: "Organization-wide preferred RPC provider. `default` uses SDP round-robin.",
+      example: "default",
+    }),
     defaultEnvironment: z.enum(["sandbox", "production"]).optional().openapi({
       description: "Default environment for new resources.",
       example: "production",
@@ -183,6 +187,7 @@ export const updateOrganizationRequestSchema = updateOrgSchemaBase
     settings: updateOrgSchemaBase.shape.settings.openapi({
       description: "Organization settings to update.",
       example: {
+        rpcProvider: "helius",
         defaultEnvironment: "production",
         allowedIpAddresses: ["203.0.113.0/24"],
       },

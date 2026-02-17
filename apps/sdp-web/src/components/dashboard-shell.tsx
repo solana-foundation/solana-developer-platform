@@ -57,7 +57,7 @@ const navSections: NavSection[] = [
 
 const bottomNavItems: NavItem[] = [
   { label: "API Docs", href: "#", icon: Library },
-  { label: "Settings", href: "#", icon: Settings2 },
+  { label: "Settings", href: "/dashboard/settings", icon: Settings2 },
 ];
 
 type DashboardPageConfig = {
@@ -106,6 +106,9 @@ function getDashboardPageConfig(pathname: string): DashboardPageConfig {
   }
   if (pathname.startsWith("/dashboard/members")) {
     return { title: "Members" };
+  }
+  if (pathname.startsWith("/dashboard/settings")) {
+    return { title: "Settings" };
   }
   if (pathname.startsWith("/dashboard/allowlist")) {
     return { title: "Allowlist" };

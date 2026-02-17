@@ -1,12 +1,12 @@
 import { z } from "./base";
 
-const rpcProviderIdSchema = z.enum(["triton", "helius", "alchemy", "default", "custom"]).openapi({
+const rpcProviderIdSchema = z.enum(["triton", "helius", "alchemy", "default"]).openapi({
   description: "Resolved RPC provider identifier.",
-  example: "helius",
+  example: "default",
 });
 
 const rpcSelectionModeSchema = z
-  .enum(["project_provider", "project_custom_endpoint", "round_robin_default"])
+  .enum(["organization_provider", "round_robin_default"])
   .openapi({
     description: "How the relay selected the provider endpoint.",
     example: "round_robin_default",

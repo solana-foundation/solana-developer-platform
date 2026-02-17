@@ -4,8 +4,8 @@
 SOLANA_RPC_URL=https://solana-devnet.g.alchemy.com/v2/_G0iGKcdVsxAfhB-Bmo0b
 SOLANA_RPC_DEFAULT_PROVIDER=alchemy
 SOLANA_RPC_ALCHEMY_URL=https://solana-devnet.g.alchemy.com/v2/_G0iGKcdVsxAfhB-Bmo0b
+SOLANA_RPC_TRITON_URL=https://solanaf-sdp-7436.devnet.rpcpool.com
 # Optional managed RPC providers for relay round-robin
-# SOLANA_RPC_TRITON_URL=https://triton.rpc.example
 # SOLANA_RPC_TRITON_API_KEY=YOUR_TRITON_KEY
 # SOLANA_RPC_HELIUS_URL=https://mainnet.helius-rpc.com/
 # SOLANA_RPC_HELIUS_API_KEY=YOUR_HELIUS_KEY

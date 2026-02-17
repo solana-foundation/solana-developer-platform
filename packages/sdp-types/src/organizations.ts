@@ -11,6 +11,7 @@ export type OrganizationStatus = "active" | "suspended" | "deleted";
 export type MemberStatus = "active" | "suspended" | "removed";
 
 export type InvitationStatus = "pending" | "accepted" | "expired" | "revoked";
+export type OrganizationRpcProvider = "default" | "triton" | "helius" | "alchemy";
 
 export interface Organization {
   id: string; // org_xxxxxxxxxxxx
@@ -24,6 +25,7 @@ export interface Organization {
 }
 
 export interface OrganizationSettings {
+  rpcProvider?: OrganizationRpcProvider;
   defaultEnvironment?: "sandbox" | "production";
   webhookSecret?: string;
   allowedIpAddresses?: string[];

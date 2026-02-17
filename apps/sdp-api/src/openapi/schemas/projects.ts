@@ -19,8 +19,8 @@ export const projectSettingsSchema = z
   .object({
     rpcProvider: z.enum(["default", "triton", "helius", "alchemy", "custom"]).optional().openapi({
       description:
-        "Preferred RPC provider for this project. Use `custom` with `rpcEndpoint` for a dedicated endpoint.",
-      example: "helius",
+        "Preferred RPC provider for this project. Defaults to `default` (round-robin managed providers). Use `custom` with `rpcEndpoint` for a dedicated endpoint.",
+      example: "default",
     }),
     rpcEndpoint: z.string().url().optional().openapi({
       description: "Custom Solana RPC endpoint for the project (used when rpcProvider=custom).",
@@ -39,7 +39,9 @@ export const projectSettingsSchema = z
       }),
   })
   .strict()
-  .openapi({ description: "Project settings." });
+  .openapi({
+    description: "Project settings. `rpcProvider` defaults to `default` (round-robin) when omitted.",
+  });
 
 export const projectSchema = z
   .object({
@@ -54,9 +56,9 @@ export const projectSchema = z
     environment: z
       .enum(["sandbox", "beta", "production"])
       .openapi({ description: "Project environment.", example: "sandbox" }),
-    settings: projectSettingsSchema
-      .nullable()
-      .openapi({ description: "Project settings (nullable when unset)." }),
+    settings: projectSettingsSchema.openapi({
+      description: "Project settings with normalized defaults.",
+    }),
     status: z.enum(["active", "archived"]).openapi({
       description: "Project status.",
       example: "active",
@@ -158,7 +160,7 @@ export const createProjectRequestSchema = createProjectSchemaBase
     settings: createProjectSchemaBase.shape.settings.openapi({
       description: "Optional project settings.",
       example: {
-        rpcProvider: "triton",
+        rpcProvider: "default",
         webhookUrl: "https://example.com/webhook",
         metadata: { region: "us" },
       },

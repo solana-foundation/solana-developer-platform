@@ -31,6 +31,7 @@ export const updateOrgSchema = z.object({
   name: z.string().min(1).max(100).optional(),
   settings: z
     .object({
+      rpcProvider: z.enum(["default", "triton", "helius", "alchemy"]).optional(),
       defaultEnvironment: z.enum(["sandbox", "production"]).optional(),
       allowedIpAddresses: z.array(z.string()).optional(),
     })

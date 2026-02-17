@@ -9,11 +9,47 @@ import { createSigningService } from "@/services/domain/signing.service";
 import { KVService } from "@/services/kv.service";
 import { SigningError } from "@/services/ports";
 import type { Env } from "@/types/env";
-import type { CreateOrganizationResponse, Organization } from "@sdp/types";
+import type { CreateOrganizationResponse, Organization, OrganizationSettings } from "@sdp/types";
 import type { Context } from "hono";
 import { createOrgSchema, updateOrgSchema } from "./schemas";
 
 type AppContext = Context<{ Bindings: Env }>;
+
+type OrganizationRow = {
+  id: string;
+  name: string;
+  slug: string;
+  tier: string;
+  status: string;
+  settings: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+function parseOrganizationSettings(raw: string | null): OrganizationSettings | null {
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(raw) as OrganizationSettings;
+  } catch {
+    return null;
+  }
+}
+
+function toOrganizationResponse(row: OrganizationRow): Organization {
+  return {
+    id: row.id,
+    name: row.name,
+    slug: row.slug,
+    tier: row.tier as "free" | "pro" | "enterprise",
+    status: row.status as "active" | "suspended" | "deleted",
+    settings: parseOrganizationSettings(row.settings),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
 
 function randomBase64Url(byteLength: number): string {
   const bytes = new Uint8Array(byteLength);
@@ -238,31 +274,13 @@ export const getOrganization = async (c: AppContext) => {
      FROM organizations WHERE id = ?`
   )
     .bind(orgId)
-    .first<{
-      id: string;
-      name: string;
-      slug: string;
-      tier: string;
-      status: string;
-      settings: string | null;
-      created_at: string;
-      updated_at: string;
-    }>();
+    .first<OrganizationRow>();
 
   if (!org) {
     throw notFound("Organization");
   }
 
-  const response: Organization = {
-    id: org.id,
-    name: org.name,
-    slug: org.slug,
-    tier: org.tier as "free" | "pro" | "enterprise",
-    status: org.status as "active" | "suspended" | "deleted",
-    settings: org.settings ? JSON.parse(org.settings) : null,
-    createdAt: org.created_at,
-    updatedAt: org.updated_at,
-  };
+  const response = toOrganizationResponse(org);
 
   return success(c, response);
 };
@@ -287,14 +305,29 @@ export const updateOrganization = async (c: AppContext) => {
   const updates: string[] = [];
   const params: (string | null)[] = [];
 
+  const existing = await c.env.DB.prepare(
+    `SELECT id, name, slug, tier, status, settings, created_at, updated_at
+     FROM organizations WHERE id = ?`
+  )
+    .bind(orgId)
+    .first<OrganizationRow>();
+
+  if (!existing) {
+    throw notFound("Organization");
+  }
+
   if (parsed.data.name) {
     updates.push("name = ?");
     params.push(parsed.data.name);
   }
 
   if (parsed.data.settings !== undefined) {
+    const mergedSettings: OrganizationSettings = {
+      ...(parseOrganizationSettings(existing.settings) ?? {}),
+      ...parsed.data.settings,
+    };
     updates.push("settings = ?");
-    params.push(JSON.stringify(parsed.data.settings));
+    params.push(JSON.stringify(mergedSettings));
   }
 
   if (updates.length === 0) {
@@ -318,7 +351,7 @@ export const updateOrganization = async (c: AppContext) => {
      FROM organizations WHERE id = ?`
   )
     .bind(orgId)
-    .first();
+    .first<OrganizationRow>();
 
   // Audit log
   const auditService = new AuditService(c.env.DB);
@@ -329,7 +362,11 @@ export const updateOrganization = async (c: AppContext) => {
     metadata: parsed.data,
   });
 
-  return success(c, org);
+  if (!org) {
+    throw notFound("Organization");
+  }
+
+  return success(c, toOrganizationResponse(org));
 };
 
 export const deleteOrganization = async (c: AppContext) => {

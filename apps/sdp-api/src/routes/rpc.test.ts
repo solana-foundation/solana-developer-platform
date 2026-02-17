@@ -130,11 +130,11 @@ describe("RPC Relay Routes", () => {
     (env as { SOLANA_RPC_ALCHEMY_API_KEY?: string }).SOLANA_RPC_ALCHEMY_API_KEY = undefined;
   });
 
-  it("uses project-selected managed provider when configured", async () => {
+  it("uses organization-selected managed provider when configured", async () => {
     const db = (env as { DB: D1Database }).DB;
     await db
-      .prepare("UPDATE projects SET settings = ? WHERE id = ?")
-      .bind(JSON.stringify({ rpcProvider: "helius" }), TEST_PROJECT_ID)
+      .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
+      .bind(JSON.stringify({ rpcProvider: "helius" }), TEST_ORG.id)
       .run();
 
     (env as { SOLANA_RPC_TRITON_URL?: string }).SOLANA_RPC_TRITON_URL = "https://rpc.triton.test";
@@ -156,11 +156,160 @@ describe("RPC Relay Routes", () => {
     expect(response.status).toBe(200);
     const body = await response.json();
     expect(body.data.selected.providerId).toBe("helius");
-    expect(body.data.selected.selectionMode).toBe("project_provider");
+    expect(body.data.selected.selectionMode).toBe("organization_provider");
     expect(String(body.data.selected.endpoint)).toContain("rpc.helius.test");
   });
 
-  it("round-robins providers when project has no explicit provider setting", async () => {
+  it.each([
+    { provider: "triton", url: "https://rpc.triton.test" },
+    { provider: "helius", url: "https://rpc.helius.test" },
+    { provider: "alchemy", url: "https://rpc.alchemy.test" },
+  ])(
+    "connectivity check: relays through $provider when org rpcProvider is set",
+    async ({ provider, url }) => {
+      const db = (env as { DB: D1Database }).DB;
+      await db
+        .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
+        .bind(JSON.stringify({ rpcProvider: provider }), TEST_ORG.id)
+        .run();
+
+      (env as { SOLANA_RPC_TRITON_URL?: string }).SOLANA_RPC_TRITON_URL = "https://rpc.triton.test";
+      (env as { SOLANA_RPC_HELIUS_URL?: string }).SOLANA_RPC_HELIUS_URL = "https://rpc.helius.test";
+      (env as { SOLANA_RPC_ALCHEMY_URL?: string }).SOLANA_RPC_ALCHEMY_URL = "https://rpc.alchemy.test";
+
+      const fetchSpy = vi
+        .spyOn(globalThis, "fetch")
+        .mockImplementation(
+          () =>
+            Promise.resolve(
+              new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: "ok" }), {
+                status: 200,
+                headers: { "Content-Type": "application/json" },
+              })
+            ) as Promise<Response>
+        );
+
+      const relayResponse = await app.request(
+        "/v1/rpc/relay",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY_RAW}`,
+            Origin: "https://dashboard.example.com",
+          },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: 1,
+            method: "getLatestBlockhash",
+            params: [],
+          }),
+        },
+        env
+      );
+
+      expect(relayResponse.status).toBe(200);
+      const body = await relayResponse.json();
+      expect(body.data.provider.id).toBe(provider);
+      expect(body.data.provider.selectionMode).toBe("organization_provider");
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      expect(String(fetchSpy.mock.calls[0][0])).toContain(url);
+
+      fetchSpy.mockRestore();
+    }
+  );
+
+  it("switches relay endpoint after organization rpcProvider is changed", async () => {
+    const db = (env as { DB: D1Database }).DB;
+    await db
+      .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
+      .bind(JSON.stringify({ rpcProvider: "triton" }), TEST_ORG.id)
+      .run();
+
+    (env as { SOLANA_RPC_TRITON_URL?: string }).SOLANA_RPC_TRITON_URL = "https://rpc.triton.test";
+    (env as { SOLANA_RPC_HELIUS_URL?: string }).SOLANA_RPC_HELIUS_URL = "https://rpc.helius.test";
+
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(
+        () =>
+          Promise.resolve(
+            new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: "ok" }), {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            })
+          ) as Promise<Response>
+      );
+
+    const firstRelay = await app.request(
+      "/v1/rpc/relay",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY_RAW}`,
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "getLatestBlockhash",
+          params: [],
+        }),
+      },
+      env
+    );
+
+    const orgUpdate = await app.request(
+      `/v1/organizations/${TEST_ORG.id}`,
+      {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY_RAW}`,
+        },
+        body: JSON.stringify({
+          settings: { rpcProvider: "helius" },
+        }),
+      },
+      env
+    );
+
+    const secondRelay = await app.request(
+      "/v1/rpc/relay",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY_RAW}`,
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 2,
+          method: "getLatestBlockhash",
+          params: [],
+        }),
+      },
+      env
+    );
+
+    expect(firstRelay.status).toBe(200);
+    expect(orgUpdate.status).toBe(200);
+    expect(secondRelay.status).toBe(200);
+
+    const firstBody = await firstRelay.json();
+    const secondBody = await secondRelay.json();
+
+    expect(firstBody.data.provider.id).toBe("triton");
+    expect(secondBody.data.provider.id).toBe("helius");
+
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(String(fetchSpy.mock.calls[0][0])).toContain("rpc.triton.test");
+    expect(String(fetchSpy.mock.calls[1][0])).toContain("rpc.helius.test");
+
+    fetchSpy.mockRestore();
+  });
+
+  it("round-robins providers when org has no explicit provider setting", async () => {
     (env as { SOLANA_RPC_TRITON_URL?: string }).SOLANA_RPC_TRITON_URL = "https://rpc.triton.test";
     (env as { SOLANA_RPC_HELIUS_URL?: string }).SOLANA_RPC_HELIUS_URL = "https://rpc.helius.test";
 
@@ -197,8 +346,8 @@ describe("RPC Relay Routes", () => {
   it("tracks transaction telemetry and origins per provider", async () => {
     const db = (env as { DB: D1Database }).DB;
     await db
-      .prepare("UPDATE projects SET settings = ? WHERE id = ?")
-      .bind(JSON.stringify({ rpcProvider: "triton" }), TEST_PROJECT_ID)
+      .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
+      .bind(JSON.stringify({ rpcProvider: "triton" }), TEST_ORG.id)
       .run();
 
     (env as { SOLANA_RPC_TRITON_URL?: string }).SOLANA_RPC_TRITON_URL = "https://rpc.triton.test";
