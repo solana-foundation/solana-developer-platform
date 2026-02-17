@@ -10,6 +10,14 @@ export const isoDateTimeSchema = z.string().datetime().openapi({
   example: "2025-01-01T00:00:00.000Z",
 });
 
+export const idempotencyKeyHeaderSchema = z
+  .string()
+  .min(1)
+  .openapi({
+    description: "Idempotency key for safely retrying mutating requests.",
+    example: "idempotency_example_12345",
+  });
+
 export const requestIdSchema = z.string().min(1).openapi({
   description: "Request identifier for tracing.",
   example: "req_example",
@@ -86,6 +94,10 @@ export const allowlistTypeQuerySchema = z
 export const allowlistStatusQuerySchema = z
   .enum(["active", "disabled"])
   .openapi({ description: "Filter by allowlist entry status.", example: "active" });
+
+export const tokenTransactionStatusQuerySchema = z
+  .enum(["pending", "processing", "confirmed", "finalized", "failed"])
+  .openapi({ description: "Filter by token transaction status.", example: "confirmed" });
 
 export const magicLinkTokenQuerySchema = z.string().openapi({
   description: "Magic link token from email.",

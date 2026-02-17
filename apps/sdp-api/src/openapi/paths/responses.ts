@@ -53,6 +53,7 @@ import {
   tokenAllowlistResponseSchema,
   tokenResponseSchema,
   tokenSchema,
+  tokenTransactionSchema,
   tokenTemplateResponseSchema,
   transferResponseSchema,
   transferSchema,
@@ -83,6 +84,7 @@ export const listProjectApiKeysResponse = successResponseSchema(listProjectApiKe
 
 export const tokenResponse = successResponseSchema(tokenResponseSchema);
 export const tokenListResponse = paginatedResponseSchema(tokenSchema);
+export const tokenTransactionsResponse = paginatedResponseSchema(tokenTransactionSchema);
 export const tokenAllowlistListResponse = paginatedResponseSchema(tokenAllowlistEntrySchema);
 export const tokenAllowlistResponse = successResponseSchema(tokenAllowlistResponseSchema);
 export const frozenAccountResponse = successResponseSchema(frozenAccountResponseSchema);
