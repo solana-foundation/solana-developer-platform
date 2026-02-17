@@ -324,10 +324,7 @@ export class ApiKeyService {
     };
   }
 
-  async revokeApiKey(
-    keyId: string,
-    organizationId: string,
-  ): Promise<{
+  async revokeApiKey(keyId: string, organizationId: string): Promise<{
     keyHash: string;
     revokedAt: string;
   } | null> {
