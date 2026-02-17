@@ -212,6 +212,8 @@ export async function seedTestDatabase(env: Env): Promise<void> {
         organization_id TEXT NOT NULL,
         type TEXT NOT NULL,
         status TEXT NOT NULL DEFAULT 'pending',
+        idempotency_key TEXT,
+        idempotency_fingerprint TEXT,
         signature TEXT UNIQUE,
         serialized_tx TEXT,
         operation_params TEXT NOT NULL,
@@ -224,6 +226,10 @@ export async function seedTestDatabase(env: Env): Promise<void> {
         updated_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ','now')),
         FOREIGN KEY (token_id) REFERENCES issued_tokens(id) ON DELETE CASCADE
       )
+    `),
+    db.prepare(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_issuance_tx_org_idempotency_key
+        ON issuance_transactions(organization_id, idempotency_key)
     `),
     db.prepare(`
       CREATE TABLE IF NOT EXISTS issuance_transaction_statuses (
