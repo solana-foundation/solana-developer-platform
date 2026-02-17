@@ -463,9 +463,12 @@ export const revokeApiKey = async (c: AppContext) => {
   }
 
   const body = await c.req.json().catch(() => ({}));
-  const confirmation = (body && typeof body === "object" && typeof (body as { confirmation?: unknown }).confirmation === "string")
-    ? String((body as { confirmation: string }).confirmation).trim()
-    : "";
+  const confirmation =
+    body &&
+    typeof body === "object" &&
+    typeof (body as { confirmation?: unknown }).confirmation === "string"
+      ? String((body as { confirmation: string }).confirmation).trim()
+      : "";
 
   const existing = await c.env.DB.prepare(
     "SELECT id, name, status, revoked_at FROM api_keys WHERE id = ? AND organization_id = ?"
@@ -478,7 +481,10 @@ export const revokeApiKey = async (c: AppContext) => {
   }
 
   if (existing.status === "deactivated" || existing.status === "revoked") {
-    return success(c, { success: true, revokedAt: existing.revoked_at ?? new Date().toISOString() });
+    return success(c, {
+      success: true,
+      revokedAt: existing.revoked_at ?? new Date().toISOString(),
+    });
   }
 
   if (!confirmation) {
