@@ -9,6 +9,137 @@ const TEST_PROJECT_ID = "prj_rpc_relay";
 const TEST_API_KEY_ID = "key_rpc_relay";
 const TEST_API_KEY_PREFIX = "sk_test_rpc";
 const TEST_API_KEY_RAW = "sk_test_rpc_relay_key";
+type ManagedProvider = "triton" | "helius" | "alchemy";
+
+type MutableRpcEnv = {
+  SOLANA_RPC_URL?: string;
+  SOLANA_RPC_DEFAULT_PROVIDER?: string;
+  SOLANA_RPC_TRITON_URL?: string;
+  SOLANA_RPC_TRITON_API_KEY?: string;
+  SOLANA_RPC_HELIUS_URL?: string;
+  SOLANA_RPC_HELIUS_API_KEY?: string;
+  SOLANA_RPC_ALCHEMY_URL?: string;
+  SOLANA_RPC_ALCHEMY_API_KEY?: string;
+};
+
+type ProviderRuntimeConfig = {
+  provider: ManagedProvider;
+  url: string;
+  apiKey?: string;
+};
+
+const rpcEnv = env as MutableRpcEnv;
+
+function normalizedValue(value: string | null | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : undefined;
+}
+
+function toHost(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
+}
+
+function getProviderRuntimeConfig(provider: ManagedProvider): ProviderRuntimeConfig | null {
+  if (provider === "triton") {
+    const url = normalizedValue(rpcEnv.SOLANA_RPC_TRITON_URL ?? process.env.SOLANA_RPC_TRITON_URL);
+    if (!url) {
+      return null;
+    }
+    return {
+      provider,
+      url,
+      apiKey: normalizedValue(
+        rpcEnv.SOLANA_RPC_TRITON_API_KEY ??
+          process.env.SOLANA_RPC_TRITON_API_KEY ??
+          process.env.TRITON_API_KEY
+      ),
+    };
+  }
+
+  if (provider === "helius") {
+    const url = normalizedValue(rpcEnv.SOLANA_RPC_HELIUS_URL ?? process.env.SOLANA_RPC_HELIUS_URL);
+    if (!url) {
+      return null;
+    }
+    return {
+      provider,
+      url,
+      apiKey: normalizedValue(
+        rpcEnv.SOLANA_RPC_HELIUS_API_KEY ??
+          process.env.SOLANA_RPC_HELIUS_API_KEY ??
+          process.env.HELIUS_API_KEY
+      ),
+    };
+  }
+
+  const url = normalizedValue(rpcEnv.SOLANA_RPC_ALCHEMY_URL ?? process.env.SOLANA_RPC_ALCHEMY_URL);
+  if (!url) {
+    return null;
+  }
+  return {
+    provider,
+    url,
+    apiKey: normalizedValue(
+      rpcEnv.SOLANA_RPC_ALCHEMY_API_KEY ??
+        process.env.SOLANA_RPC_ALCHEMY_API_KEY ??
+        process.env.ALCHEMY_API_KEY
+    ),
+  };
+}
+
+function applyProviderRuntimeConfigs(configs: ProviderRuntimeConfig[]): void {
+  rpcEnv.SOLANA_RPC_TRITON_URL = undefined;
+  rpcEnv.SOLANA_RPC_TRITON_API_KEY = undefined;
+  rpcEnv.SOLANA_RPC_HELIUS_URL = undefined;
+  rpcEnv.SOLANA_RPC_HELIUS_API_KEY = undefined;
+  rpcEnv.SOLANA_RPC_ALCHEMY_URL = undefined;
+  rpcEnv.SOLANA_RPC_ALCHEMY_API_KEY = undefined;
+
+  for (const config of configs) {
+    if (config.provider === "triton") {
+      rpcEnv.SOLANA_RPC_TRITON_URL = config.url;
+      rpcEnv.SOLANA_RPC_TRITON_API_KEY = config.apiKey;
+      continue;
+    }
+    if (config.provider === "helius") {
+      rpcEnv.SOLANA_RPC_HELIUS_URL = config.url;
+      rpcEnv.SOLANA_RPC_HELIUS_API_KEY = config.apiKey;
+      continue;
+    }
+    rpcEnv.SOLANA_RPC_ALCHEMY_URL = config.url;
+    rpcEnv.SOLANA_RPC_ALCHEMY_API_KEY = config.apiKey;
+  }
+}
+
+const liveProviderConfigs = (["triton", "helius", "alchemy"] as const)
+  .map((provider) => getProviderRuntimeConfig(provider))
+  .filter((provider): provider is ProviderRuntimeConfig => provider !== null);
+
+function getRequiredLiveProviderConfigs(): ProviderRuntimeConfig[] {
+  const requiredProviders: ManagedProvider[] = ["triton", "helius", "alchemy"];
+  const missingProviders = requiredProviders.filter(
+    (provider) => !liveProviderConfigs.some((config) => config.provider === provider)
+  );
+
+  if (missingProviders.length > 0) {
+    throw new Error(
+      `Missing live RPC provider config for: ${missingProviders.join(", ")}. ` +
+        "Set SOLANA_RPC_TRITON_URL, SOLANA_RPC_HELIUS_URL, and SOLANA_RPC_ALCHEMY_URL (plus API keys if needed)."
+    );
+  }
+
+  return requiredProviders.map((provider) => {
+    const config = liveProviderConfigs.find((item) => item.provider === provider);
+    if (!config) {
+      throw new Error(`Missing provider config for ${provider}`);
+    }
+    return config;
+  });
+}
 
 async function clearKvNamespace(namespace: KVNamespace) {
   const listed = await namespace.list();
@@ -120,14 +251,14 @@ describe("RPC Relay Routes", () => {
       })
     );
 
-    (env as { SOLANA_RPC_DEFAULT_PROVIDER?: string }).SOLANA_RPC_DEFAULT_PROVIDER = undefined;
-    (env as { SOLANA_RPC_URL?: string }).SOLANA_RPC_URL = undefined;
-    (env as { SOLANA_RPC_TRITON_URL?: string }).SOLANA_RPC_TRITON_URL = undefined;
-    (env as { SOLANA_RPC_TRITON_API_KEY?: string }).SOLANA_RPC_TRITON_API_KEY = undefined;
-    (env as { SOLANA_RPC_HELIUS_URL?: string }).SOLANA_RPC_HELIUS_URL = undefined;
-    (env as { SOLANA_RPC_HELIUS_API_KEY?: string }).SOLANA_RPC_HELIUS_API_KEY = undefined;
-    (env as { SOLANA_RPC_ALCHEMY_URL?: string }).SOLANA_RPC_ALCHEMY_URL = undefined;
-    (env as { SOLANA_RPC_ALCHEMY_API_KEY?: string }).SOLANA_RPC_ALCHEMY_API_KEY = undefined;
+    rpcEnv.SOLANA_RPC_DEFAULT_PROVIDER = undefined;
+    rpcEnv.SOLANA_RPC_URL = undefined;
+    rpcEnv.SOLANA_RPC_TRITON_URL = undefined;
+    rpcEnv.SOLANA_RPC_TRITON_API_KEY = undefined;
+    rpcEnv.SOLANA_RPC_HELIUS_URL = undefined;
+    rpcEnv.SOLANA_RPC_HELIUS_API_KEY = undefined;
+    rpcEnv.SOLANA_RPC_ALCHEMY_URL = undefined;
+    rpcEnv.SOLANA_RPC_ALCHEMY_API_KEY = undefined;
   });
 
   it("uses organization-selected managed provider when configured", async () => {
@@ -160,34 +291,22 @@ describe("RPC Relay Routes", () => {
     expect(String(body.data.selected.endpoint)).toContain("rpc.helius.test");
   });
 
-  it.each([
-    { provider: "triton", url: "https://rpc.triton.test" },
-    { provider: "helius", url: "https://rpc.helius.test" },
-    { provider: "alchemy", url: "https://rpc.alchemy.test" },
-  ])(
-    "connectivity check: relays through $provider when org rpcProvider is set",
-    async ({ provider, url }) => {
+  it.each(["triton", "helius", "alchemy"] as const)(
+    "connectivity check: relays through %s when org rpcProvider is set",
+    async (provider) => {
+      const allProviderConfigs = getRequiredLiveProviderConfigs();
+      const selectedProviderConfig = allProviderConfigs.find((item) => item.provider === provider);
+      if (!selectedProviderConfig) {
+        throw new Error(`Missing provider config for ${provider}`);
+      }
+
       const db = (env as { DB: D1Database }).DB;
       await db
         .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
         .bind(JSON.stringify({ rpcProvider: provider }), TEST_ORG.id)
         .run();
 
-      (env as { SOLANA_RPC_TRITON_URL?: string }).SOLANA_RPC_TRITON_URL = "https://rpc.triton.test";
-      (env as { SOLANA_RPC_HELIUS_URL?: string }).SOLANA_RPC_HELIUS_URL = "https://rpc.helius.test";
-      (env as { SOLANA_RPC_ALCHEMY_URL?: string }).SOLANA_RPC_ALCHEMY_URL = "https://rpc.alchemy.test";
-
-      const fetchSpy = vi
-        .spyOn(globalThis, "fetch")
-        .mockImplementation(
-          () =>
-            Promise.resolve(
-              new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: "ok" }), {
-                status: 200,
-                headers: { "Content-Type": "application/json" },
-              })
-            ) as Promise<Response>
-        );
+      applyProviderRuntimeConfigs(allProviderConfigs);
 
       const relayResponse = await app.request(
         "/v1/rpc/relay",
@@ -201,7 +320,7 @@ describe("RPC Relay Routes", () => {
           body: JSON.stringify({
             jsonrpc: "2.0",
             id: 1,
-            method: "getLatestBlockhash",
+            method: "getVersion",
             params: [],
           }),
         },
@@ -212,34 +331,26 @@ describe("RPC Relay Routes", () => {
       const body = await relayResponse.json();
       expect(body.data.provider.id).toBe(provider);
       expect(body.data.provider.selectionMode).toBe("organization_provider");
-      expect(fetchSpy).toHaveBeenCalledTimes(1);
-      expect(String(fetchSpy.mock.calls[0][0])).toContain(url);
-
-      fetchSpy.mockRestore();
+      expect(body.data.upstream.ok).toBe(true);
+      expect(String(body.data.provider.endpoint)).toContain(toHost(selectedProviderConfig.url));
     }
   );
 
   it("switches relay endpoint after organization rpcProvider is changed", async () => {
+    const allProviderConfigs = getRequiredLiveProviderConfigs();
+    const initialProvider = allProviderConfigs.find((item) => item.provider === "triton");
+    const updatedProvider = allProviderConfigs.find((item) => item.provider === "helius");
+    if (!initialProvider || !updatedProvider) {
+      throw new Error("Missing required provider configs for triton and helius");
+    }
+
     const db = (env as { DB: D1Database }).DB;
     await db
       .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
-      .bind(JSON.stringify({ rpcProvider: "triton" }), TEST_ORG.id)
+      .bind(JSON.stringify({ rpcProvider: initialProvider.provider }), TEST_ORG.id)
       .run();
 
-    (env as { SOLANA_RPC_TRITON_URL?: string }).SOLANA_RPC_TRITON_URL = "https://rpc.triton.test";
-    (env as { SOLANA_RPC_HELIUS_URL?: string }).SOLANA_RPC_HELIUS_URL = "https://rpc.helius.test";
-
-    const fetchSpy = vi
-      .spyOn(globalThis, "fetch")
-      .mockImplementation(
-        () =>
-          Promise.resolve(
-            new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: "ok" }), {
-              status: 200,
-              headers: { "Content-Type": "application/json" },
-            })
-          ) as Promise<Response>
-      );
+    applyProviderRuntimeConfigs(allProviderConfigs);
 
     const firstRelay = await app.request(
       "/v1/rpc/relay",
@@ -252,7 +363,7 @@ describe("RPC Relay Routes", () => {
         body: JSON.stringify({
           jsonrpc: "2.0",
           id: 1,
-          method: "getLatestBlockhash",
+          method: "getVersion",
           params: [],
         }),
       },
@@ -268,7 +379,7 @@ describe("RPC Relay Routes", () => {
           Authorization: `Bearer ${TEST_API_KEY_RAW}`,
         },
         body: JSON.stringify({
-          settings: { rpcProvider: "helius" },
+          settings: { rpcProvider: updatedProvider.provider },
         }),
       },
       env
@@ -285,7 +396,7 @@ describe("RPC Relay Routes", () => {
         body: JSON.stringify({
           jsonrpc: "2.0",
           id: 2,
-          method: "getLatestBlockhash",
+          method: "getVersion",
           params: [],
         }),
       },
@@ -299,14 +410,12 @@ describe("RPC Relay Routes", () => {
     const firstBody = await firstRelay.json();
     const secondBody = await secondRelay.json();
 
-    expect(firstBody.data.provider.id).toBe("triton");
-    expect(secondBody.data.provider.id).toBe("helius");
-
-    expect(fetchSpy).toHaveBeenCalledTimes(2);
-    expect(String(fetchSpy.mock.calls[0][0])).toContain("rpc.triton.test");
-    expect(String(fetchSpy.mock.calls[1][0])).toContain("rpc.helius.test");
-
-    fetchSpy.mockRestore();
+    expect(firstBody.data.provider.id).toBe(initialProvider.provider);
+    expect(secondBody.data.provider.id).toBe(updatedProvider.provider);
+    expect(firstBody.data.upstream.ok).toBe(true);
+    expect(secondBody.data.upstream.ok).toBe(true);
+    expect(String(firstBody.data.provider.endpoint)).toContain(toHost(initialProvider.url));
+    expect(String(secondBody.data.provider.endpoint)).toContain(toHost(updatedProvider.url));
   });
 
   it("round-robins providers when org has no explicit provider setting", async () => {
