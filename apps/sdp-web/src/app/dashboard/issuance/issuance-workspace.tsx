@@ -1,13 +1,22 @@
 "use client";
-"use client";
 
-import {
-  ApiEndpointPlayground,
-  type ApiPlaygroundApiKeyOption,
-} from "@/components/api-endpoint-playground";
+import { ApiEndpointPlayground } from "@/components/api-endpoint-playground";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  getStoredApiKeySecret,
+  normalizeApiKeyInput,
+  storeApiKeySecret,
+} from "@/lib/playground-api-keys";
 import {
   Table,
   TableBody,
@@ -19,7 +28,7 @@ import {
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { AnimatePresence, motion } from "framer-motion";
 import { Search } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { type IssuanceTemplateId, getTemplateCatalogEntry } from "./template-catalog";
 
 interface IssuanceTokenView {
@@ -145,9 +154,19 @@ const issuancePlaygroundEndpointConfigs: IssuancePlaygroundEndpointConfig[] = [
   },
 ];
 
+const CUSTOM_API_KEY_OPTION_ID = "__custom__";
+
+interface IssuanceApiKeyOption {
+  id: string;
+  name: string;
+  keyPrefix: string;
+  role: string;
+  environment: string;
+}
+
 interface IssuanceWorkspaceProps {
   tokens: IssuanceTokenView[];
-  apiKeys: ApiPlaygroundApiKeyOption[];
+  apiKeys: IssuanceApiKeyOption[];
   apiBaseUrl: string | null;
   templatesError: string | null;
   tokensError: string | null;
@@ -187,6 +206,49 @@ export function IssuanceWorkspace({
 }: IssuanceWorkspaceProps) {
   const { issuanceTab, setIssuanceTab } = useDashboardWorkspace();
   const [search, setSearch] = useState("");
+  const [selectedPlaygroundApiKeyId, setSelectedPlaygroundApiKeyId] = useState<string>(
+    apiKeys[0]?.id ?? CUSTOM_API_KEY_OPTION_ID
+  );
+  const [playgroundApiKeyValue, setPlaygroundApiKeyValue] = useState("");
+
+  const selectedPlaygroundApiKey = useMemo(
+    () => apiKeys.find((key) => key.id === selectedPlaygroundApiKeyId) ?? null,
+    [apiKeys, selectedPlaygroundApiKeyId]
+  );
+  const selectedPlaygroundApiKeyPrefix = selectedPlaygroundApiKey?.keyPrefix ?? null;
+  const hasSelectedRealApiKey = selectedPlaygroundApiKeyId !== CUSTOM_API_KEY_OPTION_ID;
+
+  useEffect(() => {
+    if (!hasSelectedRealApiKey) {
+      return;
+    }
+
+    const stored = getStoredApiKeySecret({
+      apiKeyId: selectedPlaygroundApiKeyId,
+      keyPrefix: selectedPlaygroundApiKeyPrefix,
+    });
+
+    setPlaygroundApiKeyValue(stored ?? "");
+  }, [hasSelectedRealApiKey, selectedPlaygroundApiKeyId, selectedPlaygroundApiKeyPrefix]);
+
+  const onPlaygroundApiKeyValueChange = (value: string) => {
+    setPlaygroundApiKeyValue(value);
+
+    if (!hasSelectedRealApiKey || !selectedPlaygroundApiKey) {
+      return;
+    }
+
+    const normalized = normalizeApiKeyInput(value);
+    if (!normalized.startsWith("sk_test_") && !normalized.startsWith("sk_live_")) {
+      return;
+    }
+
+    storeApiKeySecret({
+      value: normalized,
+      apiKeyId: selectedPlaygroundApiKey.id,
+      keyPrefix: selectedPlaygroundApiKey.keyPrefix,
+    });
+  };
 
   const filteredTokens = useMemo(() => {
     const needle = search.trim().toLowerCase();
@@ -355,6 +417,49 @@ export function IssuanceWorkspace({
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label>API key selector</Label>
+                    <Select
+                      value={selectedPlaygroundApiKeyId}
+                      onValueChange={setSelectedPlaygroundApiKeyId}
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="Select API key profile" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={CUSTOM_API_KEY_OPTION_ID}>Custom API key</SelectItem>
+                        {apiKeys.map((apiKey) => (
+                          <SelectItem key={apiKey.id} value={apiKey.id}>
+                            {apiKey.name} ({apiKey.keyPrefix})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {selectedPlaygroundApiKey ? (
+                      <p className="text-xs text-[rgba(28,28,29,0.64)]">
+                        {selectedPlaygroundApiKey.environment} · {selectedPlaygroundApiKey.role}
+                      </p>
+                    ) : (
+                      <p className="text-xs text-[rgba(28,28,29,0.64)]">
+                        Use custom mode or select an active API key profile.
+                      </p>
+                    )}
+                  </div>
+                  <div className="space-y-2">
+                    <Label>API key value</Label>
+                    <Input
+                      type="password"
+                      value={playgroundApiKeyValue}
+                      onChange={(event) => onPlaygroundApiKeyValueChange(event.currentTarget.value)}
+                      placeholder="Paste the full secret once; Execute uses it automatically"
+                      autoComplete="off"
+                    />
+                    <p className="text-xs text-[rgba(28,28,29,0.64)]">
+                      All endpoint Execute actions use this selected key automatically.
+                    </p>
+                  </div>
+                </div>
                 <div className="rounded-xl border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.02)] p-3 text-xs text-[rgba(28,28,29,0.64)]">
                   Endpoints with <code>{"{tokenId}"}</code> require a real token id in their configured
                   path before execution.
@@ -383,7 +488,7 @@ export function IssuanceWorkspace({
                   path={endpointConfig.path}
                   expectedResponse={endpointConfig.expectedResponse}
                   requestBodyExample={endpointConfig.requestBodyExample}
-                  apiKeys={apiKeys}
+                  apiKeyValue={playgroundApiKeyValue}
                   apiBaseUrl={apiBaseUrl}
                   defaultOpen={endpointConfig.path === "/v1/issuance/templates"}
                 />
