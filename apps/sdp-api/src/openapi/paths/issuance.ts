@@ -43,7 +43,6 @@ import {
   prepareUpdateAuthorityResponse,
   tokenAllowlistListResponse,
   tokenAllowlistResponse,
-  tokenTransactionsResponse,
   tokenListResponse,
   tokenResponse,
   tokenTemplateResponse,
