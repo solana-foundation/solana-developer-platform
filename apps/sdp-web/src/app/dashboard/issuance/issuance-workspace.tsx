@@ -396,6 +396,7 @@ export function IssuanceWorkspace({
                   expectedResponse={endpointConfig.expectedResponse}
                   requestBodyExample={endpointConfig.requestBodyExample}
                   apiKeys={apiKeys}
+                  defaultOpen={endpointConfig.path === "/v1/issuance/templates"}
                 />
               ))}
             </div>

@@ -11,7 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Check, Copy, Loader2, Play } from "lucide-react";
+import { Check, ChevronDown, Copy, Loader2, Play } from "lucide-react";
 import { useMemo, useState } from "react";
 
 const CUSTOM_KEY_OPTION_ID = "__custom__";
@@ -42,6 +42,7 @@ export interface ApiEndpointPlaygroundProps {
   expectedResponse: unknown;
   requestBodyExample?: unknown;
   apiKeys: ApiPlaygroundApiKeyOption[];
+  defaultOpen?: boolean;
 }
 
 function getDefaultApiBaseUrl(): string {
@@ -101,6 +102,7 @@ export function ApiEndpointPlayground({
   expectedResponse,
   requestBodyExample,
   apiKeys,
+  defaultOpen = false,
 }: ApiEndpointPlaygroundProps) {
   const defaultApiBaseUrl = useMemo(getDefaultApiBaseUrl, []);
   const [pathValue, setPathValue] = useState(path);
@@ -118,6 +120,7 @@ export function ApiEndpointPlayground({
   const [copied, setCopied] = useState(false);
   const [executeError, setExecuteError] = useState<string | null>(null);
   const [executionResult, setExecutionResult] = useState<ExecutionResult | null>(null);
+  const [isOpen, setIsOpen] = useState(defaultOpen);
 
   const bodyEnabled = hasJsonBody(method);
   const selectedApiKeyValue = apiKeyValuesById[selectedApiKeyId] ?? "";
@@ -236,25 +239,42 @@ export function ApiEndpointPlayground({
             </code>
           </div>
           <div className="flex items-center gap-2">
-            <Button type="button" variant="secondary" size="sm" onClick={onCopyFetch}>
-              {copied ? <Check className="mr-1 h-4 w-4" /> : <Copy className="mr-1 h-4 w-4" />}
-              Copy as fetch
-            </Button>
-            <Button type="button" size="sm" onClick={onExecute} disabled={isExecuting}>
-              {isExecuting ? (
-                <Loader2 className="mr-1 h-4 w-4 animate-spin" />
-              ) : (
-                <Play className="mr-1 h-4 w-4" />
-              )}
-              Execute
+            {isOpen ? (
+              <>
+                <Button type="button" variant="secondary" size="sm" onClick={onCopyFetch}>
+                  {copied ? <Check className="mr-1 h-4 w-4" /> : <Copy className="mr-1 h-4 w-4" />}
+                  Copy as fetch
+                </Button>
+                <Button type="button" size="sm" onClick={onExecute} disabled={isExecuting}>
+                  {isExecuting ? (
+                    <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Play className="mr-1 h-4 w-4" />
+                  )}
+                  Execute
+                </Button>
+              </>
+            ) : null}
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => setIsOpen((current) => !current)}
+              aria-expanded={isOpen}
+              aria-label={isOpen ? "Collapse endpoint details" : "Expand endpoint details"}
+            >
+              <ChevronDown
+                className={`h-4 w-4 transition-transform ${isOpen ? "rotate-180" : "rotate-0"}`}
+              />
             </Button>
           </div>
         </div>
         <CardTitle className="text-base">{title}</CardTitle>
-        <CardDescription>{description}</CardDescription>
+        {isOpen ? <CardDescription>{description}</CardDescription> : null}
       </CardHeader>
 
-      <CardContent className="space-y-4">
+      {isOpen ? (
+        <CardContent className="space-y-4">
         <div className="grid gap-3 md:grid-cols-2">
           <div className="space-y-2">
             <Label>API key selector</Label>
@@ -351,7 +371,8 @@ export function ApiEndpointPlayground({
             )}
           </div>
         </div>
-      </CardContent>
+        </CardContent>
+      ) : null}
     </Card>
   );
 }
