@@ -9,6 +9,7 @@ import {
   errorResponseSchema,
   forceBurnRequestSchema,
   freezeAccountRequestSchema,
+  idempotencyKeyHeaderSchema,
   mintRequestSchema,
   pageQuerySchema,
   pageSizeQuerySchema,
@@ -17,6 +18,7 @@ import {
   templateIdParamSchema,
   tokenIdParamSchema,
   tokenStatusQuerySchema,
+  tokenTransactionStatusQuerySchema,
   unfreezeAccountRequestSchema,
   updateAuthorityRequestSchema,
   updateTokenRequestSchema,
@@ -44,6 +46,7 @@ import {
   tokenListResponse,
   tokenResponse,
   tokenTemplateResponse,
+  tokenTransactionsResponse,
 } from "./responses";
 
 export function registerIssuancePaths(registry: OpenAPIRegistry) {
@@ -166,6 +169,55 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
   });
 
   registry.registerPath({
+    method: "post",
+    path: "/v1/issuance/tokens/{tokenId}/supply/refresh",
+    tags: ["Issuance"],
+    summary: "Refresh cached token supply",
+    operationId: "refreshTokenSupply",
+    description: "Fetches the current on-chain supply and refreshes the cached totalSupply value.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      params: z.object({
+        tokenId: tokenIdParamSchema,
+      }),
+    },
+    responses: {
+      200: {
+        description: "Token supply refreshed",
+        content: jsonContent(tokenResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500, 502]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/issuance/tokens/{tokenId}/transactions",
+    tags: ["Issuance"],
+    summary: "List token transactions",
+    operationId: "listTokenTransactions",
+    description: "Lists token transactions for an issued token.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      params: z.object({
+        tokenId: tokenIdParamSchema,
+      }),
+      query: z.object({
+        status: tokenTransactionStatusQuerySchema.optional(),
+        page: pageQuerySchema.optional(),
+        pageSize: pageSizeQuerySchema.optional(),
+      }),
+    },
+    responses: {
+      200: {
+        description: "Token transactions",
+        content: jsonContent(tokenTransactionsResponse),
+      },
+      ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
     method: "patch",
     path: "/v1/issuance/tokens/{tokenId}",
     tags: ["Issuance"],
@@ -202,6 +254,9 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     request: {
       params: z.object({
         tokenId: tokenIdParamSchema,
+      }),
+      headers: z.object({
+        "Idempotency-Key": idempotencyKeyHeaderSchema.optional(),
       }),
     },
     responses: {
@@ -273,6 +328,9 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
       params: z.object({
         tokenId: tokenIdParamSchema,
       }),
+      headers: z.object({
+        "Idempotency-Key": idempotencyKeyHeaderSchema.optional(),
+      }),
       body: {
         required: true,
         content: jsonContent(mintRequestSchema),
@@ -324,6 +382,9 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     request: {
       params: z.object({
         tokenId: tokenIdParamSchema,
+      }),
+      headers: z.object({
+        "Idempotency-Key": idempotencyKeyHeaderSchema.optional(),
       }),
       body: {
         required: true,
@@ -377,6 +438,9 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
       params: z.object({
         tokenId: tokenIdParamSchema,
       }),
+      headers: z.object({
+        "Idempotency-Key": idempotencyKeyHeaderSchema.optional(),
+      }),
       body: {
         required: true,
         content: jsonContent(seizeRequestSchema),
@@ -428,6 +492,9 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     request: {
       params: z.object({
         tokenId: tokenIdParamSchema,
+      }),
+      headers: z.object({
+        "Idempotency-Key": idempotencyKeyHeaderSchema.optional(),
       }),
       body: {
         required: true,
@@ -481,6 +548,9 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
       params: z.object({
         tokenId: tokenIdParamSchema,
       }),
+      headers: z.object({
+        "Idempotency-Key": idempotencyKeyHeaderSchema.optional(),
+      }),
       body: {
         required: true,
         content: jsonContent(updateAuthorityRequestSchema),
@@ -506,6 +576,9 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     request: {
       params: z.object({
         tokenId: tokenIdParamSchema,
+      }),
+      headers: z.object({
+        "Idempotency-Key": idempotencyKeyHeaderSchema.optional(),
       }),
       body: {
         required: true,
@@ -533,6 +606,9 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
       params: z.object({
         tokenId: tokenIdParamSchema,
       }),
+      headers: z.object({
+        "Idempotency-Key": idempotencyKeyHeaderSchema.optional(),
+      }),
       body: {
         required: true,
         content: jsonContent(pauseTokenRequestSchema),
@@ -559,6 +635,9 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
       params: z.object({
         tokenId: tokenIdParamSchema,
       }),
+      headers: z.object({
+        "Idempotency-Key": idempotencyKeyHeaderSchema.optional(),
+      }),
       body: {
         required: true,
         content: jsonContent(freezeAccountRequestSchema),
@@ -584,6 +663,9 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     request: {
       params: z.object({
         tokenId: tokenIdParamSchema,
+      }),
+      headers: z.object({
+        "Idempotency-Key": idempotencyKeyHeaderSchema.optional(),
       }),
       body: {
         required: true,

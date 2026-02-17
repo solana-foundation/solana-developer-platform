@@ -124,7 +124,7 @@ export const createOrganizationResponseSchema = z
     apiKey: z
       .object({
         id: apiKeyIdParamSchema,
-        key: z.string().openapi({
+        key: z.string().optional().openapi({
           description: "Full API key. Only returned once.",
           example: "sk_test_example",
         }),
@@ -159,6 +159,10 @@ export const createOrganizationRequestSchema = createOrgSchemaBase
     email: createOrgSchemaBase.shape.email.openapi({
       description: "Primary email for allowlist checks.",
       example: "admin@example.com",
+    }),
+    returnFullApiKey: createOrgSchemaBase.shape.returnFullApiKey?.openapi({
+      description: "Whether to return the full API key. Defaults to false.",
+      example: false,
     }),
     custody: createOrgSchemaBase.shape.custody?.openapi({
       description:

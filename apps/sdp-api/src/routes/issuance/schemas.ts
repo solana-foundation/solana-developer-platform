@@ -100,7 +100,7 @@ export const createTokenSchema = z.object({
     .string()
     .min(1)
     .max(10)
-    .regex(/^[A-Z0-9]+$/),
+    .regex(/^[A-Za-z0-9.]+$/),
   decimals: z.number().int().min(0).max(18).optional(),
   description: z.string().max(500).optional(),
   uri: z.string().url().optional(),

@@ -12,6 +12,8 @@ import { clearKVNamespaces, seedCachedApiKey } from "@/test/mocks/kv";
 import type { CreateOrganizationResponse, Organization } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+const ORGANIZATION_REGISTRATION_TOKEN = "test-org-registration-token";
+
 describe("Organizations routes", () => {
   let validKeyHash: string;
 
@@ -26,10 +28,13 @@ describe("Organizations routes", () => {
   afterEach(async () => {
     await clearTestDatabase(env);
     await clearKVNamespaces(env);
+    env.ORGANIZATION_REGISTRATION_TOKEN = undefined;
   });
 
   describe("POST /v1/organizations", () => {
     beforeEach(async () => {
+      env.ORGANIZATION_REGISTRATION_TOKEN = ORGANIZATION_REGISTRATION_TOKEN;
+
       // Add email to allowlist for org creation
       await env.DB.prepare(
         "INSERT INTO allowlist (id, type, value, tier, status) VALUES (?, ?, ?, ?, ?)"
@@ -43,10 +48,14 @@ describe("Organizations routes", () => {
         "/v1/organizations",
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            "x-organization-registration-token": ORGANIZATION_REGISTRATION_TOKEN,
+          },
           body: JSON.stringify({
             name: "New Org",
             email: "new@example.com",
+            returnFullApiKey: true,
           }),
         },
         env
@@ -62,12 +71,84 @@ describe("Organizations routes", () => {
       expect(body.data.apiKey.keyPrefix).toMatch(/^sk_test_/);
     });
 
+    it("returns only key prefix by default", async () => {
+      const res = await app.request(
+        "/v1/organizations",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-organization-registration-token": ORGANIZATION_REGISTRATION_TOKEN,
+          },
+          body: JSON.stringify({
+            name: "New Org",
+            email: "new@example.com",
+          }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(201);
+
+      const body = (await res.json()) as { data: CreateOrganizationResponse };
+      expect(body.data.apiKey.key).toBeUndefined();
+      expect(body.data.apiKey.keyPrefix).toMatch(/^sk_test_/);
+    });
+
+    it("rejects requests without registration token header", async () => {
+      const res = await app.request(
+        "/v1/organizations",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            name: "New Org",
+            email: "new@example.com",
+          }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(403);
+      const body = (await res.json()) as { error: { code: string } };
+      expect(body.error.code).toBe("FORBIDDEN");
+    });
+
+    it("rejects self-registration when registration token is not configured", async () => {
+      env.ORGANIZATION_REGISTRATION_TOKEN = undefined;
+
+      const res = await app.request(
+        "/v1/organizations",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-organization-registration-token": ORGANIZATION_REGISTRATION_TOKEN,
+          },
+          body: JSON.stringify({
+            name: "New Org",
+            email: "new@example.com",
+          }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(403);
+      const body = (await res.json()) as { error: { code: string } };
+      expect(body.error.code).toBe("FORBIDDEN");
+    });
+
     it("creates organization with custom slug", async () => {
       const res = await app.request(
         "/v1/organizations",
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            "x-organization-registration-token": ORGANIZATION_REGISTRATION_TOKEN,
+          },
           body: JSON.stringify({
             name: "New Org",
             slug: "custom-slug",
@@ -88,7 +169,10 @@ describe("Organizations routes", () => {
         "/v1/organizations",
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            "x-organization-registration-token": ORGANIZATION_REGISTRATION_TOKEN,
+          },
           body: JSON.stringify({
             name: "New Org",
             email: "notallowed@example.com",
@@ -107,7 +191,10 @@ describe("Organizations routes", () => {
         "/v1/organizations",
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            "x-organization-registration-token": ORGANIZATION_REGISTRATION_TOKEN,
+          },
           body: JSON.stringify({
             name: "",
             email: "not-an-email",
@@ -127,7 +214,10 @@ describe("Organizations routes", () => {
         "/v1/organizations",
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            "x-organization-registration-token": ORGANIZATION_REGISTRATION_TOKEN,
+          },
           body: JSON.stringify({
             name: "First Org",
             slug: "same-slug",
@@ -149,7 +239,10 @@ describe("Organizations routes", () => {
         "/v1/organizations",
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            "x-organization-registration-token": ORGANIZATION_REGISTRATION_TOKEN,
+          },
           body: JSON.stringify({
             name: "Second Org",
             slug: "same-slug",
