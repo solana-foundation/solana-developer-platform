@@ -419,7 +419,6 @@ export function IssuanceWorkspace({
                   expectedResponse={endpointConfig.expectedResponse}
                   requestBodyExample={endpointConfig.requestBodyExample}
                   apiKeyValue={playgroundApiKeyValue}
-                  hasSelectedApiKey={Boolean(selectedPlaygroundApiKey)}
                   apiBaseUrl={apiBaseUrl}
                   defaultOpen={endpointConfig.path === "/v1/issuance/templates"}
                 />

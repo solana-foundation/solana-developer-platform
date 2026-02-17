@@ -14,6 +14,7 @@ interface ExecutionResult {
   status: number;
   statusText: string;
   durationMs: number;
+  authMode: "api_key" | "session";
   body: unknown;
 }
 
@@ -25,7 +26,6 @@ export interface ApiEndpointPlaygroundProps {
   expectedResponse: unknown;
   requestBodyExample?: unknown;
   apiKeyValue: string;
-  hasSelectedApiKey?: boolean;
   apiBaseUrl?: string | null;
   defaultOpen?: boolean;
 }
@@ -59,20 +59,6 @@ function formatPath(path: string): string {
   return path;
 }
 
-function resolveEndpointUrl(path: string, baseUrl: string): string {
-  const normalizedPath = formatPath(path);
-
-  if (normalizedPath.startsWith("http://") || normalizedPath.startsWith("https://")) {
-    return normalizedPath;
-  }
-
-  if (!baseUrl) {
-    throw new Error("Missing API base URL for browser execution");
-  }
-
-  return `${baseUrl}${normalizedPath}`;
-}
-
 function hasJsonBody(method: ApiEndpointMethod): boolean {
   return method !== "GET" && method !== "DELETE";
 }
@@ -85,7 +71,6 @@ export function ApiEndpointPlayground({
   expectedResponse,
   requestBodyExample,
   apiKeyValue,
-  hasSelectedApiKey = false,
   apiBaseUrl,
   defaultOpen = false,
 }: ApiEndpointPlaygroundProps) {
@@ -152,18 +137,10 @@ export function ApiEndpointPlayground({
     setExecuteError(null);
     setExecutionResult(null);
 
-    const apiKey = normalizeApiKeyInput(apiKeyValue);
-    if (!apiKey) {
-      if (hasSelectedApiKey) {
-        setExecuteError(
-          "Selected API key is set, but its full secret is not available in this browser session. Rotate/create the key once to capture it."
-        );
-      } else {
-        setExecuteError("Select an API key in the top bar before running.");
-      }
-      return;
-    }
-    if (!apiKey.startsWith("sk_test_") && !apiKey.startsWith("sk_live_")) {
+    const normalizedApiKey = normalizeApiKeyInput(apiKeyValue);
+    const hasApiKey = Boolean(normalizedApiKey);
+
+    if (hasApiKey && !normalizedApiKey.startsWith("sk_test_") && !normalizedApiKey.startsWith("sk_live_")) {
       setExecuteError("Invalid API key format. Use a raw key value (sk_test_... or sk_live_...).");
       return;
     }
@@ -182,24 +159,39 @@ export function ApiEndpointPlayground({
     setIsExecuting(true);
 
     try {
-      const response = await fetch(resolveEndpointUrl(path, effectiveApiBaseUrl), {
-        method,
+      const proxyResponse = await fetch("/api/playground/execute", {
+        method: "POST",
         headers: {
-          Authorization: `Bearer ${apiKey}`,
           "Content-Type": "application/json",
         },
-        body: parsedBody !== undefined ? JSON.stringify(parsedBody) : undefined,
+        body: JSON.stringify({
+          method,
+          path: formatPath(path),
+          body: parsedBody !== undefined ? parsedBody : null,
+          apiKey: hasApiKey ? normalizedApiKey : null,
+        }),
       });
 
-      const text = await response.text();
-      const payload = text ? tryParseJson(text) : {};
+      const envelope = (await proxyResponse.json()) as {
+        ok?: boolean;
+        status?: number;
+        statusText?: string;
+        body?: unknown;
+        error?: string;
+      };
+
+      if (!proxyResponse.ok || envelope.status === undefined || envelope.statusText === undefined) {
+        setExecuteError(envelope.error ?? "Playground execution failed.");
+        return;
+      }
 
       setExecutionResult({
-        ok: response.ok,
-        status: response.status,
-        statusText: response.statusText,
+        ok: envelope.ok ?? false,
+        status: envelope.status,
+        statusText: envelope.statusText,
         durationMs: Date.now() - startedAt,
-        body: payload,
+        authMode: hasApiKey ? "api_key" : "session",
+        body: envelope.body ?? {},
       });
     } catch (error) {
       setExecuteError(error instanceof Error ? error.message : "Request execution failed.");
@@ -287,7 +279,8 @@ export function ApiEndpointPlayground({
                 <div className="space-y-2">
                   <p className="text-xs text-[rgba(28,28,29,0.72)]">
                     Status: {executionResult.status} {executionResult.statusText} ·{" "}
-                    {executionResult.durationMs}ms
+                    {executionResult.durationMs}ms · Auth:{" "}
+                    {executionResult.authMode === "api_key" ? "API key" : "Session"}
                   </p>
                   <pre className="max-h-[280px] overflow-auto rounded-lg border border-[rgba(28,28,29,0.14)] bg-[rgba(28,28,29,0.03)] p-3 text-xs leading-5 text-[rgba(28,28,29,0.82)]">
                     <code>{prettyJson(executionResult.body)}</code>
