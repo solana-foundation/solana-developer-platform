@@ -1,4 +1,4 @@
-import { sdpApiRequest } from "@/lib/sdp-api";
+import { createSdpApiClient, type SdpApiClient } from "@/lib/sdp-api";
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { IssuanceWorkspace } from "./issuance-workspace";
@@ -50,8 +50,9 @@ function parseErrorMessage(body: string): string {
 }
 
 async function fetchTemplates(): Promise<FetchResult<IssuanceTemplateView[]>> {
+async function fetchTemplates(request: SdpApiClient["request"]): Promise<FetchResult<IssuanceTemplateView[]>> {
   try {
-    const response = await sdpApiRequest("/v1/issuance/templates");
+    const response = await request("/v1/issuance/templates");
     if (!response.ok) {
       const body = await response.text();
       return {
@@ -87,12 +88,13 @@ async function fetchTemplates(): Promise<FetchResult<IssuanceTemplateView[]>> {
 }
 
 async function fetchTokens(): Promise<FetchResult<IssuanceTokenView[]>> {
+async function fetchTokens(request: SdpApiClient["request"]): Promise<FetchResult<IssuanceTokenView[]>> {
   try {
     const tokensPath = `/v1/issuance/tokens?${new URLSearchParams({
       page: "1",
       pageSize: "100",
     }).toString()}`;
-    const response = await sdpApiRequest(tokensPath);
+    const response = await request(tokensPath);
     if (!response.ok) {
       const body = await response.text();
       return {
@@ -140,8 +142,9 @@ async function fetchTokens(): Promise<FetchResult<IssuanceTokenView[]>> {
 }
 
 async function fetchApiKeys(): Promise<FetchResult<IssuanceApiKeyView[]>> {
+async function fetchApiKeys(request: SdpApiClient["request"]): Promise<FetchResult<IssuanceApiKeyView[]>> {
   try {
-    const response = await sdpApiRequest("/v1/api-keys");
+    const response = await request("/v1/api-keys");
     if (!response.ok) {
       const body = await response.text();
       return {
@@ -193,10 +196,11 @@ export default async function IssuancePage() {
     redirect("/dashboard");
   }
 
+  const apiClient = await createSdpApiClient();
   const [templatesResult, tokensResult, apiKeysResult] = await Promise.all([
-    fetchTemplates(),
-    fetchTokens(),
-    fetchApiKeys(),
+    fetchTemplates(apiClient.request),
+    fetchTokens(apiClient.request),
+    fetchApiKeys(apiClient.request),
   ]);
 
   const templates =

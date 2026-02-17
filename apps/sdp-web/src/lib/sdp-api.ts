@@ -20,28 +20,15 @@ async function getClerkToken(): Promise<string> {
   }
 
   const template = process.env.CLERK_JWT_TEMPLATE;
-  let token: string | null = null;
-  let templateError: unknown;
-
   if (template) {
-    try {
-      token = await getToken({ template });
-    } catch (error) {
-      templateError = error;
+    const token = await getToken({ template });
+    if (!token) {
+      throw new Error(`Failed to acquire Clerk token from template '${template}'`);
     }
+    return token;
   }
 
-  if (!token) {
-    try {
-      token = await getToken();
-    } catch (error) {
-      if (templateError) {
-        throw templateError;
-      }
-      throw error;
-    }
-  }
-
+  const token = await getToken();
   if (!token) {
     throw new Error("Failed to acquire Clerk token");
   }
