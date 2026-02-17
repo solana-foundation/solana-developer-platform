@@ -1,9 +1,9 @@
-import { linkOrganization } from "@/app/onboarding/actions";
+import { SectionEntry } from "@/app/dashboard/wallets/section-entry";
 import {
   WalletsSigningConfigSkeleton,
   WalletsTableSectionSkeleton,
 } from "@/app/dashboard/wallets/wallets-page-skeleton";
-import { SectionEntry } from "@/app/dashboard/wallets/section-entry";
+import { linkOrganization } from "@/app/onboarding/actions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -14,7 +14,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { createSdpApiClient, type SdpApiClient } from "@/lib/sdp-api";
+import { type SdpApiClient, createSdpApiClient } from "@/lib/sdp-api";
 import { auth, clerkClient } from "@clerk/nextjs/server";
 import Link from "next/link";
 import { redirect } from "next/navigation";
