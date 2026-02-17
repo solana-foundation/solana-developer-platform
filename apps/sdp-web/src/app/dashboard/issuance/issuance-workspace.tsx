@@ -361,9 +361,6 @@ export function IssuanceWorkspace({
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="rounded-xl border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.02)] p-3 text-sm text-[rgba(28,28,29,0.72)]">
-                  Active API keys loaded: <span className="font-medium text-[#1c1c1d]">{apiKeys.length}</span>. Paste the selected key value to execute from the browser.
-                </div>
                 <div className="rounded-xl border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.02)] p-3 text-xs text-[rgba(28,28,29,0.64)]">
                   Endpoints with <code>{"{tokenId}"}</code> require a real token id in their configured
                   path before execution.
