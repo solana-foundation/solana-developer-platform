@@ -127,8 +127,7 @@ function getRequiredLiveProviderConfigs(): ProviderRuntimeConfig[] {
 
   if (missingProviders.length > 0) {
     throw new Error(
-      `Missing live RPC provider config for: ${missingProviders.join(", ")}. ` +
-        "Set SOLANA_RPC_TRITON_URL, SOLANA_RPC_HELIUS_URL, and SOLANA_RPC_ALCHEMY_URL (plus API keys if needed)."
+      `Missing live RPC provider config for: ${missingProviders.join(", ")}. Set SOLANA_RPC_TRITON_URL, SOLANA_RPC_HELIUS_URL, and SOLANA_RPC_ALCHEMY_URL (plus API keys if needed).`
     );
   }
 

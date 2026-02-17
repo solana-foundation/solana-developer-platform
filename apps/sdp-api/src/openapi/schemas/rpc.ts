@@ -5,12 +5,10 @@ const rpcProviderIdSchema = z.enum(["triton", "helius", "alchemy", "default"]).o
   example: "default",
 });
 
-const rpcSelectionModeSchema = z
-  .enum(["organization_provider", "round_robin_default"])
-  .openapi({
-    description: "How the relay selected the provider endpoint.",
-    example: "round_robin_default",
-  });
+const rpcSelectionModeSchema = z.enum(["organization_provider", "round_robin_default"]).openapi({
+  description: "How the relay selected the provider endpoint.",
+  example: "round_robin_default",
+});
 
 const rpcProviderStatsSchema = z
   .object({

@@ -40,7 +40,8 @@ export const projectSettingsSchema = z
   })
   .strict()
   .openapi({
-    description: "Project settings. `rpcProvider` defaults to `default` (round-robin) when omitted.",
+    description:
+      "Project settings. `rpcProvider` defaults to `default` (round-robin) when omitted.",
   });
 
 export const projectSchema = z

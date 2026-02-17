@@ -14,7 +14,11 @@ export type SettingsOrganization = {
   settings: OrganizationSettings | null;
 };
 
-export function OrganizationRpcSettingsForm({ organization }: { organization: SettingsOrganization }) {
+export function OrganizationRpcSettingsForm({
+  organization,
+}: {
+  organization: SettingsOrganization;
+}) {
   const rpcProvider = organization.settings?.rpcProvider ?? "default";
   const [selectedProvider, setSelectedProvider] = useState<
     "default" | "triton" | "helius" | "alchemy"
@@ -24,7 +28,7 @@ export function OrganizationRpcSettingsForm({ organization }: { organization: Se
   useEffect(() => {
     setSelectedProvider(organization.settings?.rpcProvider ?? "default");
     setErrorMessage(null);
-  }, [organization.id, organization.settings?.rpcProvider]);
+  }, [organization.settings?.rpcProvider]);
 
   const saveProvider = async (provider: "default" | "triton" | "helius" | "alchemy") => {
     const formData = new FormData();

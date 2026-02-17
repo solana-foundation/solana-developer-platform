@@ -513,7 +513,7 @@ export class ProjectService {
     }
 
     if (resolved.rpcProvider !== "custom") {
-      delete resolved.rpcEndpoint;
+      resolved.rpcEndpoint = undefined;
     }
 
     return resolved;
