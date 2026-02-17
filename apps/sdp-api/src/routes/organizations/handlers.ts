@@ -1,3 +1,4 @@
+import { getAuth } from "@/lib/auth";
 import { AppError, conflict, notFound } from "@/lib/errors";
 import { hashString } from "@/lib/hash";
 import { created, noContent, success } from "@/lib/response";
@@ -214,7 +215,7 @@ export const createOrganization = async (c: AppContext) => {
 
 export const getOrganization = async (c: AppContext) => {
   const { orgId } = c.req.param();
-  const auth = c.get("apiKey");
+  const auth = getAuth(c);
 
   // Verify access to this organization
   if (auth?.organizationId !== orgId) {
@@ -257,7 +258,7 @@ export const getOrganization = async (c: AppContext) => {
 
 export const updateOrganization = async (c: AppContext) => {
   const { orgId } = c.req.param();
-  const auth = c.get("apiKey");
+  const auth = getAuth(c);
 
   if (auth?.organizationId !== orgId) {
     throw new AppError("FORBIDDEN", "Access denied to this organization");
@@ -322,7 +323,7 @@ export const updateOrganization = async (c: AppContext) => {
 
 export const deleteOrganization = async (c: AppContext) => {
   const { orgId } = c.req.param();
-  const auth = c.get("apiKey");
+  const auth = getAuth(c);
 
   if (auth?.organizationId !== orgId) {
     throw new AppError("FORBIDDEN", "Access denied to this organization");

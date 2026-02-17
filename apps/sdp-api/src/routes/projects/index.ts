@@ -2,7 +2,7 @@
  * Projects Routes
  */
 
-import { authMiddleware, requirePermissions } from "@/middleware/auth";
+import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import type { Env } from "@/types/env";
 import { Hono } from "hono";
 import { createProjectApiKey, listProjectApiKeys } from "./handlers/api-keys";
@@ -23,7 +23,7 @@ import {
 const projects = new Hono<{ Bindings: Env }>();
 
 // All routes require authentication
-projects.use("*", authMiddleware());
+projects.use("*", unifiedAuthMiddleware({ allowClerk: true, allowSession: true }));
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Project CRUD

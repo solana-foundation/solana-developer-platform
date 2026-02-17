@@ -21,7 +21,7 @@ export const apiKeyEnvironmentSchema = z
   .openapi({ description: "API key environment.", example: "sandbox" });
 
 export const apiKeyStatusSchema = z
-  .enum(["active", "revoked", "expired"])
+  .enum(["active", "revoked", "expired", "deactivated"])
   .openapi({ description: "API key status.", example: "active" });
 
 export const permissionSchema = z.enum(PERMISSIONS).openapi({

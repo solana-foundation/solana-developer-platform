@@ -2,10 +2,14 @@
 
 import { type ReactNode, createContext, useCallback, useContext, useMemo, useState } from "react";
 
+export type IssuanceWorkspaceTab = "tokens" | "playground";
+
 type DashboardWorkspaceContextValue = {
   isSidebarOpen: boolean;
   selectedProject: string;
+  issuanceTab: IssuanceWorkspaceTab;
   setSelectedProject: (project: string) => void;
+  setIssuanceTab: (tab: IssuanceWorkspaceTab) => void;
   setSidebarOpen: (open: boolean) => void;
   toggleSidebar: () => void;
 };
@@ -27,6 +31,7 @@ export function DashboardWorkspaceProvider({
 }: DashboardWorkspaceProviderProps) {
   const [isSidebarOpen, setSidebarOpenState] = useState(initialSidebarOpen);
   const [selectedProject, setSelectedProject] = useState(defaultProject);
+  const [issuanceTab, setIssuanceTab] = useState<IssuanceWorkspaceTab>("tokens");
 
   const setSidebarOpen = useCallback((open: boolean) => {
     setSidebarOpenState(open);
@@ -40,11 +45,13 @@ export function DashboardWorkspaceProvider({
     () => ({
       isSidebarOpen,
       selectedProject,
+      issuanceTab,
       setSelectedProject,
+      setIssuanceTab,
       setSidebarOpen,
       toggleSidebar,
     }),
-    [isSidebarOpen, selectedProject, setSidebarOpen, toggleSidebar]
+    [isSidebarOpen, selectedProject, issuanceTab, setSidebarOpen, toggleSidebar]
   );
 
   return (

@@ -180,7 +180,7 @@ export interface CachedApiKeyOverrides {
   rateLimitTier?: "standard" | "elevated" | "unlimited";
   allowedIps?: string[] | null;
   signingWalletId?: string | null;
-  status?: "active" | "revoked" | "expired";
+  status?: "active" | "revoked" | "expired" | "deactivated";
   expiresAt?: string | null;
 }
 
