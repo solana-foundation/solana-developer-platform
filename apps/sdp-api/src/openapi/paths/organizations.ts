@@ -103,5 +103,4 @@ export function registerOrganizationPaths(registry: OpenAPIRegistry) {
       ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
     },
   });
-
 }

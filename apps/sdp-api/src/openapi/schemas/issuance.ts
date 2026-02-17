@@ -239,17 +239,14 @@ export const tokenTransactionSchema = z
       .string()
       .nullable()
       .openapi({ description: "Solana transaction signature.", example: "sig_example" }),
-    idempotencyKey: z
-      .string()
-      .optional()
-      .openapi({ description: "Idempotency key used for this request.", example: "idem_example_12345" }),
-    idempotencyFingerprint: z
-      .string()
-      .optional()
-      .openapi({
-        description: "Request fingerprint used to validate idempotent retries.",
-        example: "4f2d9c7a5e6f1c...",
-      }),
+    idempotencyKey: z.string().optional().openapi({
+      description: "Idempotency key used for this request.",
+      example: "idem_example_12345",
+    }),
+    idempotencyFingerprint: z.string().optional().openapi({
+      description: "Request fingerprint used to validate idempotent retries.",
+      example: "4f2d9c7a5e6f1c...",
+    }),
     serializedTx: base64Schema.nullable().openapi({
       description: "Base64-encoded transaction payload, if available.",
       example: "AQID",

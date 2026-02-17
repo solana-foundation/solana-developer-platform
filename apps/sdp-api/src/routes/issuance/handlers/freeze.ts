@@ -80,7 +80,11 @@ export const freezeAccount = async (c: AppContext) => {
       throw new AppError("BAD_REQUEST", tx.error ?? "Previous freeze request failed");
     }
 
-    const latestRecord = await tokenService.getFrozenAccount(tokenId, parsed.data.accountAddress, true);
+    const latestRecord = await tokenService.getFrozenAccount(
+      tokenId,
+      parsed.data.accountAddress,
+      true
+    );
     if (!latestRecord) {
       throw new AppError("NOT_FOUND", "Replay transaction has no matching account record");
     }
@@ -254,7 +258,11 @@ export const unfreezeAccount = async (c: AppContext) => {
       throw new AppError("BAD_REQUEST", tx.error ?? "Previous unfreeze request failed");
     }
 
-    const latestRecord = await tokenService.getFrozenAccount(tokenId, parsed.data.accountAddress, true);
+    const latestRecord = await tokenService.getFrozenAccount(
+      tokenId,
+      parsed.data.accountAddress,
+      true
+    );
     if (latestRecord) {
       return success(c, {
         frozenAccount: {

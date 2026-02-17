@@ -28,7 +28,7 @@ describe("Organizations routes", () => {
   afterEach(async () => {
     await clearTestDatabase(env);
     await clearKVNamespaces(env);
-    delete env.ORGANIZATION_REGISTRATION_TOKEN;
+    env.ORGANIZATION_REGISTRATION_TOKEN = undefined;
   });
 
   describe("POST /v1/organizations", () => {
@@ -117,7 +117,7 @@ describe("Organizations routes", () => {
     });
 
     it("rejects self-registration when registration token is not configured", async () => {
-      delete env.ORGANIZATION_REGISTRATION_TOKEN;
+      env.ORGANIZATION_REGISTRATION_TOKEN = undefined;
 
       const res = await app.request(
         "/v1/organizations",

@@ -403,7 +403,7 @@ export const issuanceTransactions = sqliteTable(
     createdAt: text("created_at").notNull().default(sql`(STRFTIME('%Y-%m-%dT%H:%M:%fZ','now'))`),
     updatedAt: text("updated_at").notNull().default(sql`(STRFTIME('%Y-%m-%dT%H:%M:%fZ','now'))`),
   },
-    (table) => ({
+  (table) => ({
     tokenIdx: index("idx_issuance_tx_token").on(table.tokenId),
     orgIdx: index("idx_issuance_tx_org").on(table.organizationId),
     statusIdx: index("idx_issuance_tx_status").on(table.status),

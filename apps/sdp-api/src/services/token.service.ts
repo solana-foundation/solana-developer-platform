@@ -600,10 +600,7 @@ export class TokenService {
    */
   async createTransaction(input: CreateTokenTransactionInput): Promise<CreateTransactionResult> {
     if (input.idempotencyKey && !input.idempotencyFingerprint) {
-      throw new AppError(
-        "BAD_REQUEST",
-        "idempotencyFingerprint is required when idempotencyKey is provided"
-      );
+      throw new AppError("BAD_REQUEST", "Missing idempotency fingerprint for idempotency key");
     }
 
     if (input.idempotencyKey) {
@@ -651,7 +648,7 @@ export class TokenService {
           `INSERT INTO issuance_transactions (
           id, token_id, organization_id, type, status, idempotency_key, idempotency_fingerprint,
           signature, serialized_tx, operation_params, slot, block_time, fee, error, initiated_by_key_id, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .bind(
           tx.id,
@@ -659,8 +656,8 @@ export class TokenService {
           tx.organizationId,
           tx.type,
           tx.status,
-          tx.idempotencyKey,
-          tx.idempotencyFingerprint,
+          tx.idempotencyKey ?? null,
+          tx.idempotencyFingerprint ?? null,
           tx.signature,
           tx.serializedTx,
           JSON.stringify(tx.params),
@@ -842,8 +839,7 @@ export class TokenService {
     const { status, organizationId, limit = 50, offset = 0 } = options;
 
     let countQuery = "SELECT COUNT(*) as count FROM issuance_transactions WHERE token_id = ?";
-    let selectQuery =
-      `SELECT id, token_id, organization_id, type, status, idempotency_key, idempotency_fingerprint,
+    let selectQuery = `SELECT id, token_id, organization_id, type, status, idempotency_key, idempotency_fingerprint,
               signature, serialized_tx, operation_params, slot, block_time, fee, error, initiated_by_key_id,
               created_at, updated_at
        FROM issuance_transactions WHERE token_id = ?`;

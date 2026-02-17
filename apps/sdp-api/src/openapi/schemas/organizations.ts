@@ -124,13 +124,10 @@ export const createOrganizationResponseSchema = z
     apiKey: z
       .object({
         id: apiKeyIdParamSchema,
-        key: z
-          .string()
-          .optional()
-          .openapi({
-            description: "Full API key. Only returned once.",
-            example: "sk_test_example",
-          }),
+        key: z.string().optional().openapi({
+          description: "Full API key. Only returned once.",
+          example: "sk_test_example",
+        }),
         keyPrefix: apiKeyPrefixSchema,
       })
       .openapi({ description: "Initial API key for the organization." }),

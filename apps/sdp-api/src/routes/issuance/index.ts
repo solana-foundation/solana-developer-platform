@@ -15,9 +15,9 @@ import { executeMint, prepareMint } from "./handlers/mint";
 import { pauseToken, unpauseToken } from "./handlers/pause";
 import { executeSeize, prepareSeize } from "./handlers/seize";
 import { refreshTokenSupply } from "./handlers/supply";
-import { listTokenTransactions } from "./handlers/transactions";
 import { getTokenTemplate, listTokenTemplates } from "./handlers/templates";
 import { createToken, getToken, listTokens, updateToken } from "./handlers/tokens";
+import { listTokenTransactions } from "./handlers/transactions";
 
 const issuance = new Hono<{ Bindings: Env }>();
 

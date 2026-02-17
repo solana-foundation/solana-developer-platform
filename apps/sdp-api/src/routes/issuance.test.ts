@@ -477,9 +477,9 @@ describe("Issuance Routes", () => {
     });
 
     it("returns 502 when RPC call fails", async () => {
-      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-        new Response("upstream unavailable", { status: 503 })
-      );
+      const fetchSpy = vi
+        .spyOn(globalThis, "fetch")
+        .mockResolvedValue(new Response("upstream unavailable", { status: 503 }));
 
       const res = await app.request(
         `/v1/issuance/tokens/${activeTokenId}/supply/refresh`,

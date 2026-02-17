@@ -227,7 +227,8 @@ export const executeMint = async (c: AppContext) => {
   });
 
   if (replayed) {
-    const txTokenAccount = typeof tx.params.tokenAccount === "string" ? tx.params.tokenAccount : undefined;
+    const txTokenAccount =
+      typeof tx.params.tokenAccount === "string" ? tx.params.tokenAccount : undefined;
     return success(c, {
       transaction: tx,
       tokenAccount: txTokenAccount ?? parsed.data.mint.destination,
