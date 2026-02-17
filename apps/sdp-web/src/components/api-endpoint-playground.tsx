@@ -81,13 +81,14 @@ function resolveEndpointUrl(path: string, baseUrl: string): string {
     return normalizedPath;
   }
 
-  if (!baseUrl) {
-    throw new Error(
-      "Missing NEXT_PUBLIC_SDP_API_BASE_URL (or NEXT_PUBLIC_API_BASE_URL) for browser execution"
-    );
+  const runtimeBaseUrl =
+    baseUrl || (typeof window !== "undefined" ? window.location.origin.replace(/\/$/, "") : "");
+
+  if (!runtimeBaseUrl) {
+    throw new Error("Missing API base URL for browser execution");
   }
 
-  return `${baseUrl}${normalizedPath}`;
+  return `${runtimeBaseUrl}${normalizedPath}`;
 }
 
 function hasJsonBody(method: ApiEndpointMethod): boolean {
