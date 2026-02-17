@@ -93,6 +93,14 @@ function hasJsonBody(method: ApiEndpointMethod): boolean {
   return method !== "GET" && method !== "DELETE";
 }
 
+function normalizeApiKeyInput(rawValue: string): string {
+  const trimmed = rawValue.trim();
+  if (trimmed.startsWith("Bearer ")) {
+    return trimmed.slice(7).trim();
+  }
+  return trimmed;
+}
+
 export function ApiEndpointPlayground({
   title,
   description,
@@ -180,9 +188,13 @@ export function ApiEndpointPlayground({
     setExecuteError(null);
     setExecutionResult(null);
 
-    const apiKey = selectedApiKeyValue.trim();
+    const apiKey = normalizeApiKeyInput(selectedApiKeyValue);
     if (!apiKey) {
       setExecuteError("API key value is required to execute a request.");
+      return;
+    }
+    if (!apiKey.startsWith("sk_test_") && !apiKey.startsWith("sk_live_")) {
+      setExecuteError("Invalid API key format. Paste the raw key value (sk_test_... or sk_live_...).");
       return;
     }
 
