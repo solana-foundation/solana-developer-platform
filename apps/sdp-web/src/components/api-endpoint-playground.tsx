@@ -25,6 +25,7 @@ export interface ApiEndpointPlaygroundProps {
   expectedResponse: unknown;
   requestBodyExample?: unknown;
   apiKeyValue: string;
+  hasSelectedApiKey?: boolean;
   apiBaseUrl?: string | null;
   defaultOpen?: boolean;
 }
@@ -84,6 +85,7 @@ export function ApiEndpointPlayground({
   expectedResponse,
   requestBodyExample,
   apiKeyValue,
+  hasSelectedApiKey = false,
   apiBaseUrl,
   defaultOpen = false,
 }: ApiEndpointPlaygroundProps) {
@@ -152,7 +154,13 @@ export function ApiEndpointPlayground({
 
     const apiKey = normalizeApiKeyInput(apiKeyValue);
     if (!apiKey) {
-      setExecuteError("Set the API key once in the top playground key selector before running.");
+      if (hasSelectedApiKey) {
+        setExecuteError(
+          "Selected API key is set, but its full secret is not available in this browser session. Rotate/create the key once to capture it."
+        );
+      } else {
+        setExecuteError("Select an API key in the top bar before running.");
+      }
       return;
     }
     if (!apiKey.startsWith("sk_test_") && !apiKey.startsWith("sk_live_")) {
