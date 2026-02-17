@@ -1,0 +1,100 @@
+import { getAuth } from "@/lib/auth";
+import { getSolanaConfig } from "@/lib/solana";
+import { AppError, notFound } from "@/lib/errors";
+import { success } from "@/lib/response";
+import { AuditService } from "@/services/audit.service";
+import { TokenService } from "@/services/token.service";
+import type { Env } from "@/types/env";
+import type { TokenResponse } from "@sdp/types";
+import type { Context } from "hono";
+
+type AppContext = Context<{ Bindings: Env }>;
+
+interface TokenSupplyRpcResponse {
+  result?: {
+    value?: {
+      amount?: string;
+    };
+  };
+  error?: {
+    message?: string;
+  };
+}
+
+async function fetchTokenSupplyBaseUnits(rpcUrl: string, mintAddress: string): Promise<string> {
+  const rpcResponse = await fetch(rpcUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: crypto.randomUUID(),
+      method: "getTokenSupply",
+      params: [mintAddress, { commitment: "confirmed" }],
+    }),
+  });
+
+  if (!rpcResponse.ok) {
+    throw new Error(`RPC request failed with status ${rpcResponse.status}`);
+  }
+
+  const payload = (await rpcResponse.json()) as TokenSupplyRpcResponse;
+  if (payload.error) {
+    throw new Error(payload.error.message ?? "RPC returned an error");
+  }
+
+  const amount = payload.result?.value?.amount;
+  if (!amount || !/^\d+$/.test(amount)) {
+    throw new Error("RPC returned an invalid token supply");
+  }
+
+  return amount;
+}
+
+export const refreshTokenSupply = async (c: AppContext) => {
+  const { tokenId } = c.req.param();
+  const auth = getAuth(c);
+
+  const tokenService = new TokenService(c.env.DB);
+  const token = await tokenService.getToken(tokenId);
+
+  if (!token || token.organizationId !== auth?.organizationId) {
+    throw notFound("Token");
+  }
+
+  if (auth?.projectId && token.projectId !== auth.projectId) {
+    throw notFound("Token");
+  }
+
+  if (!token.mintAddress) {
+    throw new AppError("TOKEN_NOT_DEPLOYED", "Token must be deployed before refreshing supply");
+  }
+
+  let supplyBaseUnits: string;
+  try {
+    const { rpcUrl } = getSolanaConfig(c.env);
+    supplyBaseUnits = await fetchTokenSupplyBaseUnits(rpcUrl, token.mintAddress);
+  } catch (error) {
+    throw new AppError(
+      "SOLANA_RPC_ERROR",
+      error instanceof Error ? error.message : "Failed to refresh token supply"
+    );
+  }
+
+  const refreshedToken = await tokenService.setSupplyFromBaseUnits(tokenId, supplyBaseUnits);
+
+  const auditService = new AuditService(c.env.DB);
+  await auditService.log(c, {
+    action: "refresh_supply",
+    resourceType: "token",
+    resourceId: tokenId,
+    metadata: {
+      mintAddress: token.mintAddress,
+      supplyBaseUnits,
+    },
+  });
+
+  const response: TokenResponse = { token: refreshedToken };
+  return success(c, response);
+};

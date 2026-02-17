@@ -51,7 +51,12 @@ export function corsMiddleware(env: Env["ENVIRONMENT"]) {
       return null;
     },
     allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowHeaders: ["Content-Type", "Authorization", "X-Request-ID"],
+    allowHeaders: [
+      "Content-Type",
+      "Authorization",
+      "X-Request-ID",
+      "Idempotency-Key",
+    ],
     exposeHeaders: [
       "X-Request-ID",
       "X-RateLimit-Limit",

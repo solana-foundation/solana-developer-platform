@@ -74,12 +74,23 @@ export const createOrganization = async (c: AppContext) => {
     });
   }
 
-  const { name, email, custody } = parsed.data;
+  const { name, email, custody, returnFullApiKey } = parsed.data;
+  const registrationTokenHeader = c.req.header("x-organization-registration-token");
+  const registrationToken = c.env.ORGANIZATION_REGISTRATION_TOKEN;
   const slug = parsed.data.slug || name.toLowerCase().replace(/[^a-z0-9]+/g, "-");
 
   // Initialize services
   const allowlistService = createAllowlistService(c.env);
   const auditService = new AuditService(c.env.DB);
+
+  // Organization self-registration is gated by a required pre-shared token.
+  if (!registrationToken) {
+    throw new AppError("FORBIDDEN", "Organization self-registration is disabled");
+  }
+
+  if (!registrationTokenHeader || registrationTokenHeader !== registrationToken) {
+    throw new AppError("FORBIDDEN", "Invalid or missing registration token");
+  }
 
   // Check allowlist
   const { allowed, tier } = await allowlistService.isEmailAllowed(email);
@@ -205,8 +216,8 @@ export const createOrganization = async (c: AppContext) => {
     },
     apiKey: {
       id: apiKeyId,
-      key, // Full key - only shown once!
       keyPrefix: prefix,
+      ...(returnFullApiKey ? { key } : {}),
     },
   };
 

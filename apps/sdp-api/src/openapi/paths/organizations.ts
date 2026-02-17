@@ -2,21 +2,13 @@ import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
 
 import { z } from "zod";
 import {
-  acceptInvitationRequestSchema,
   createOrganizationRequestSchema,
   errorResponseSchema,
-  inviteMemberRequestSchema,
   orgIdParamSchema,
   updateOrganizationRequestSchema,
 } from "../schemas";
 import { errorResponses, jsonContent } from "./helpers";
-import {
-  actionSuccessResponse,
-  createOrganizationResponse,
-  inviteMemberResponse,
-  listMembersResponse,
-  organizationResponse,
-} from "./responses";
+import { createOrganizationResponse, organizationResponse } from "./responses";
 
 export function registerOrganizationPaths(registry: OpenAPIRegistry) {
   registry.registerPath({
@@ -26,7 +18,8 @@ export function registerOrganizationPaths(registry: OpenAPIRegistry) {
     summary: "Create organization",
     operationId: "createOrganization",
     description:
-      "Creates an organization and returns a sandbox API key. The full key is returned once.",
+      "Creates an organization and returns an API key summary. Requires x-organization-registration-token. Set returnFullApiKey to true to return the full key once.",
+    security: [{ organizationRegistrationToken: [] }],
     request: {
       body: {
         required: true,
@@ -111,76 +104,4 @@ export function registerOrganizationPaths(registry: OpenAPIRegistry) {
     },
   });
 
-  registry.registerPath({
-    method: "get",
-    path: "/v1/organizations/{orgId}/members",
-    tags: ["Members"],
-    summary: "List organization members",
-    operationId: "listOrganizationMembers",
-    description: "Lists members in the organization.",
-    security: [{ apiKeyAuth: [] }],
-    request: {
-      params: z.object({
-        orgId: orgIdParamSchema,
-      }),
-    },
-    responses: {
-      200: {
-        description: "Members retrieved",
-        content: jsonContent(listMembersResponse),
-      },
-      ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
-    },
-  });
-
-  registry.registerPath({
-    method: "post",
-    path: "/v1/organizations/{orgId}/members",
-    tags: ["Members"],
-    summary: "Invite organization member",
-    operationId: "inviteOrganizationMember",
-    description: "Invites a new member to the organization.",
-    security: [{ apiKeyAuth: [] }],
-    request: {
-      params: z.object({
-        orgId: orgIdParamSchema,
-      }),
-      body: {
-        required: true,
-        content: jsonContent(inviteMemberRequestSchema),
-      },
-    },
-    responses: {
-      201: {
-        description: "Invitation created",
-        content: jsonContent(inviteMemberResponse),
-      },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 409, 500]),
-    },
-  });
-
-  registry.registerPath({
-    method: "post",
-    path: "/v1/organizations/{orgId}/members/accept",
-    tags: ["Members"],
-    summary: "Accept invitation",
-    operationId: "acceptOrganizationInvitation",
-    description: "Accepts an organization member invitation.",
-    request: {
-      params: z.object({
-        orgId: orgIdParamSchema,
-      }),
-      body: {
-        required: true,
-        content: jsonContent(acceptInvitationRequestSchema),
-      },
-    },
-    responses: {
-      200: {
-        description: "Invitation accepted",
-        content: jsonContent(actionSuccessResponse),
-      },
-      ...errorResponses(errorResponseSchema, [400, 404, 409, 500]),
-    },
-  });
 }

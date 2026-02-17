@@ -390,6 +390,8 @@ export const issuanceTransactions = sqliteTable(
       .references(() => organizations.id, { onDelete: "cascade" }),
     type: text("type").notNull(),
     status: text("status").notNull().default("pending"),
+    idempotencyKey: text("idempotency_key"),
+    idempotencyFingerprint: text("idempotency_fingerprint"),
     signature: text("signature"),
     serializedTx: text("serialized_tx"),
     operationParams: text("operation_params").notNull(),
@@ -401,11 +403,15 @@ export const issuanceTransactions = sqliteTable(
     createdAt: text("created_at").notNull().default(sql`(STRFTIME('%Y-%m-%dT%H:%M:%fZ','now'))`),
     updatedAt: text("updated_at").notNull().default(sql`(STRFTIME('%Y-%m-%dT%H:%M:%fZ','now'))`),
   },
-  (table) => ({
+    (table) => ({
     tokenIdx: index("idx_issuance_tx_token").on(table.tokenId),
     orgIdx: index("idx_issuance_tx_org").on(table.organizationId),
     statusIdx: index("idx_issuance_tx_status").on(table.status),
     signatureIdx: uniqueIndex("idx_issuance_tx_signature").on(table.signature),
+    idempotencyIdx: uniqueIndex("idx_issuance_tx_org_idempotency_key").on(
+      table.organizationId,
+      table.idempotencyKey
+    ),
   })
 );
 

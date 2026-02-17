@@ -11,6 +11,7 @@ import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
 import type { Context } from "hono";
 import { mintSchema } from "../schemas";
+import { buildIdempotencyMetadata } from "./idempotency";
 
 type AppContext = Context<{ Bindings: Env }>;
 
@@ -203,8 +204,15 @@ export const executeMint = async (c: AppContext) => {
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
   const destination = assertValidAddress(parsed.data.mint.destination, "destination");
 
+  const idempotencyMetadata = buildIdempotencyMetadata(c.req.header("Idempotency-Key"), {
+    tokenId,
+    operation: "mint",
+    mode: "execute",
+    params: parsed.data,
+  });
+
   // Create transaction record first
-  const tx = await tokenService.createTransaction({
+  const { transaction: tx, replayed } = await tokenService.createTransaction({
     tokenId,
     organizationId: auth.organizationId,
     type: "mint",
@@ -214,7 +222,17 @@ export const executeMint = async (c: AppContext) => {
       memo: parsed.data.mint.memo,
     },
     initiatedByKeyId: auth.id,
+    idempotencyKey: idempotencyMetadata.idempotencyKey,
+    idempotencyFingerprint: idempotencyMetadata.idempotencyFingerprint,
   });
+
+  if (replayed) {
+    const txTokenAccount = typeof tx.params.tokenAccount === "string" ? tx.params.tokenAccount : undefined;
+    return success(c, {
+      transaction: tx,
+      tokenAccount: txTokenAccount ?? parsed.data.mint.destination,
+    });
+  }
 
   // Execute mint on Solana using Mosaic
   // Note: amount is decimal (e.g., 100 for 100 tokens), SDK converts to raw
@@ -230,12 +248,6 @@ export const executeMint = async (c: AppContext) => {
     });
 
     // Update transaction with confirmation
-    const updatedTx = await tokenService.updateTransaction(tx.id, {
-      status: "confirmed",
-      signature: result.signature,
-      slot: Number(result.slot),
-    });
-
     // Update token supply
     await tokenService.updateSupply(tokenId, parsed.data.mint.amount, "mint");
 
@@ -256,7 +268,15 @@ export const executeMint = async (c: AppContext) => {
     });
 
     return success(c, {
-      transaction: updatedTx,
+      transaction: await tokenService.updateTransaction(tx.id, {
+        status: "confirmed",
+        signature: result.signature,
+        slot: Number(result.slot),
+        params: {
+          ...tx.params,
+          tokenAccount: result.tokenAccount,
+        },
+      }),
       tokenAccount: result.tokenAccount,
     });
   } catch (error) {

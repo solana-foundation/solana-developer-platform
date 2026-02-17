@@ -10,6 +10,7 @@ import type { Env } from "@/types/env";
 import type { FrozenAccountResponse } from "@sdp/types";
 import type { Context } from "hono";
 import { freezeSchema, unfreezeSchema } from "../schemas";
+import { buildIdempotencyMetadata } from "./idempotency";
 
 type AppContext = Context<{ Bindings: Env }>;
 
@@ -54,6 +55,44 @@ export const freezeAccount = async (c: AppContext) => {
   );
   const accountAddress = assertValidAddress(parsed.data.accountAddress, "accountAddress");
 
+  const idempotencyMetadata = buildIdempotencyMetadata(c.req.header("Idempotency-Key"), {
+    tokenId,
+    operation: "freeze",
+    mode: "execute",
+    params: parsed.data,
+  });
+
+  const { transaction: tx, replayed } = await tokenService.createTransaction({
+    tokenId,
+    organizationId: auth.organizationId,
+    type: "freeze",
+    params: {
+      accountAddress: parsed.data.accountAddress,
+      reason: parsed.data.reason,
+    },
+    idempotencyKey: idempotencyMetadata.idempotencyKey,
+    idempotencyFingerprint: idempotencyMetadata.idempotencyFingerprint,
+    initiatedByKeyId: auth.id,
+  });
+
+  if (replayed) {
+    if (tx.status === "failed") {
+      throw new AppError("BAD_REQUEST", tx.error ?? "Previous freeze request failed");
+    }
+
+    const latestRecord = await tokenService.getFrozenAccount(tokenId, parsed.data.accountAddress, true);
+    if (!latestRecord) {
+      throw new AppError("NOT_FOUND", "Replay transaction has no matching account record");
+    }
+
+    return created(c, {
+      frozenAccount: {
+        ...latestRecord,
+        signature: tx.signature ?? undefined,
+      },
+    });
+  }
+
   // Execute freeze on Solana first (Token ACL-aware via Mosaic)
   const mosaic = createMosaicService(c.env, signer);
 
@@ -72,17 +111,16 @@ export const freezeAccount = async (c: AppContext) => {
     });
 
     // Create transaction record for the freeze operation
-    await tokenService.createTransaction({
-      tokenId,
-      organizationId: auth.organizationId,
-      type: "freeze",
+    await tokenService.updateTransaction(tx.id, {
+      status: "confirmed",
+      signature: result.signature,
+      slot: Number(result.slot),
       params: {
         accountAddress: parsed.data.accountAddress,
         reason: parsed.data.reason,
         signature: result.signature,
         slot: result.slot.toString(),
       },
-      initiatedByKeyId: auth.id,
     });
 
     // Audit log
@@ -109,8 +147,16 @@ export const freezeAccount = async (c: AppContext) => {
     return created(c, response);
   } catch (error) {
     if (error instanceof Error && error.message === "ACCOUNT_ALREADY_FROZEN") {
+      await tokenService.updateTransaction(tx.id, {
+        status: "failed",
+        error: error.message,
+      });
       throw new AppError("ACCOUNT_FROZEN", "Account is already frozen");
     }
+    await tokenService.updateTransaction(tx.id, {
+      status: "failed",
+      error: error instanceof Error ? error.message : "Unknown error",
+    });
     throw error;
   }
 };
@@ -184,6 +230,43 @@ export const unfreezeAccount = async (c: AppContext) => {
   );
   const accountAddress = assertValidAddress(parsed.data.accountAddress, "accountAddress");
 
+  const idempotencyMetadata = buildIdempotencyMetadata(c.req.header("Idempotency-Key"), {
+    tokenId,
+    operation: "unfreeze",
+    mode: "execute",
+    params: parsed.data,
+  });
+
+  const { transaction: tx, replayed } = await tokenService.createTransaction({
+    tokenId,
+    organizationId: auth.organizationId,
+    type: "unfreeze",
+    params: {
+      accountAddress: parsed.data.accountAddress,
+    },
+    idempotencyKey: idempotencyMetadata.idempotencyKey,
+    idempotencyFingerprint: idempotencyMetadata.idempotencyFingerprint,
+    initiatedByKeyId: auth.id,
+  });
+
+  if (replayed) {
+    if (tx.status === "failed") {
+      throw new AppError("BAD_REQUEST", tx.error ?? "Previous unfreeze request failed");
+    }
+
+    const latestRecord = await tokenService.getFrozenAccount(tokenId, parsed.data.accountAddress, true);
+    if (latestRecord) {
+      return success(c, {
+        frozenAccount: {
+          ...latestRecord,
+          signature: tx.signature ?? undefined,
+        },
+      });
+    }
+
+    throw new AppError("NOT_FOUND", "Replay transaction has no matching account record");
+  }
+
   // Execute thaw on Solana first (Token ACL-aware via Mosaic)
   const mosaic = createMosaicService(c.env, signer);
 
@@ -200,17 +283,10 @@ export const unfreezeAccount = async (c: AppContext) => {
       auth.id
     );
 
-    // Create transaction record for the unfreeze operation
-    await tokenService.createTransaction({
-      tokenId,
-      organizationId: auth.organizationId,
-      type: "unfreeze",
-      params: {
-        accountAddress: parsed.data.accountAddress,
-        signature: result.signature,
-        slot: result.slot.toString(),
-      },
-      initiatedByKeyId: auth.id,
+    await tokenService.updateTransaction(tx.id, {
+      status: "confirmed",
+      signature: result.signature,
+      slot: Number(result.slot),
     });
 
     // Audit log
@@ -236,8 +312,16 @@ export const unfreezeAccount = async (c: AppContext) => {
     return success(c, response);
   } catch (error) {
     if (error instanceof Error && error.message === "ACCOUNT_NOT_FROZEN") {
+      await tokenService.updateTransaction(tx.id, {
+        status: "failed",
+        error: error.message,
+      });
       throw new AppError("ACCOUNT_NOT_FROZEN", "Account is not frozen");
     }
+    await tokenService.updateTransaction(tx.id, {
+      status: "failed",
+      error: error instanceof Error ? error.message : "Unknown error",
+    });
     throw error;
   }
 };

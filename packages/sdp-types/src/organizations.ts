@@ -72,6 +72,7 @@ export interface CreateOrganizationRequest {
   name: string;
   slug?: string;
   email: string; // Creator's email (for allowlist check)
+  returnFullApiKey?: boolean;
   custody?: CreateOrganizationCustody;
 }
 
@@ -97,7 +98,7 @@ export interface CreateOrganizationResponse {
   organization: Organization;
   apiKey: {
     id: string;
-    key: string; // Full key, only shown once
+    key?: string; // Full key, only shown once when returnFullApiKey is true
     keyPrefix: string;
   };
 }

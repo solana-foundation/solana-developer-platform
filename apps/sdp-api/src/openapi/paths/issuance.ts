@@ -169,6 +169,28 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
   });
 
   registry.registerPath({
+    method: "post",
+    path: "/v1/issuance/tokens/{tokenId}/supply/refresh",
+    tags: ["Issuance"],
+    summary: "Refresh cached token supply",
+    operationId: "refreshTokenSupply",
+    description: "Fetches the current on-chain supply and refreshes the cached totalSupply value.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      params: z.object({
+        tokenId: tokenIdParamSchema,
+      }),
+    },
+    responses: {
+      200: {
+        description: "Token supply refreshed",
+        content: jsonContent(tokenResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500, 502]),
+    },
+  });
+
+  registry.registerPath({
     method: "get",
     path: "/v1/issuance/tokens/{tokenId}/transactions",
     tags: ["Issuance"],

@@ -11,6 +11,7 @@ import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
 import type { Context } from "hono";
 import { seizeSchema } from "../schemas";
+import { buildIdempotencyMetadata } from "./idempotency";
 
 type AppContext = Context<{ Bindings: Env }>;
 type TokenRecord = Awaited<ReturnType<TokenService["getToken"]>>;
@@ -96,7 +97,7 @@ export const prepareSeize = async (c: AppContext) => {
     simulation = await simulateTransaction(rpc, txBytes);
   }
 
-  const tx = await tokenService.createTransaction({
+  const { transaction: tx, replayed } = await tokenService.createTransaction({
     tokenId,
     organizationId: auth.organizationId,
     type: "seize",
@@ -196,7 +197,14 @@ export const executeSeize = async (c: AppContext) => {
   const source = assertValidAddress(parsed.data.seize.source, "source");
   const destination = assertValidAddress(parsed.data.seize.destination, "destination");
 
-  const tx = await tokenService.createTransaction({
+  const idempotencyMetadata = buildIdempotencyMetadata(c.req.header("Idempotency-Key"), {
+    tokenId,
+    operation: "seize",
+    mode: "execute",
+    params: parsed.data,
+  });
+
+  const { transaction: tx, replayed } = await tokenService.createTransaction({
     tokenId,
     organizationId: auth.organizationId,
     type: "seize",
@@ -207,8 +215,14 @@ export const executeSeize = async (c: AppContext) => {
       delegateAuthority: permanentDelegateRaw,
       memo: parsed.data.seize.memo,
     },
+    idempotencyKey: idempotencyMetadata.idempotencyKey,
+    idempotencyFingerprint: idempotencyMetadata.idempotencyFingerprint,
     initiatedByKeyId: auth.id,
   });
+
+  if (replayed) {
+    return success(c, { transaction: tx });
+  }
 
   const mosaic = createMosaicService(c.env, signer);
 

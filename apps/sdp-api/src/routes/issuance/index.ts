@@ -14,6 +14,8 @@ import { freezeAccount, listFrozenAccounts, unfreezeAccount } from "./handlers/f
 import { executeMint, prepareMint } from "./handlers/mint";
 import { pauseToken, unpauseToken } from "./handlers/pause";
 import { executeSeize, prepareSeize } from "./handlers/seize";
+import { refreshTokenSupply } from "./handlers/supply";
+import { listTokenTransactions } from "./handlers/transactions";
 import { getTokenTemplate, listTokenTemplates } from "./handlers/templates";
 import { createToken, getToken, listTokens, updateToken } from "./handlers/tokens";
 
@@ -30,6 +32,16 @@ issuance.get("/templates/:templateId", requirePermissions("tokens:read"), getTok
 issuance.post("/tokens", requirePermissions("tokens:write"), createToken);
 issuance.get("/tokens", requirePermissions("tokens:read"), listTokens);
 issuance.get("/tokens/:tokenId", requirePermissions("tokens:read"), getToken);
+issuance.get(
+  "/tokens/:tokenId/transactions",
+  requirePermissions("tokens:read"),
+  listTokenTransactions
+);
+issuance.post(
+  "/tokens/:tokenId/supply/refresh",
+  requirePermissions("tokens:read"),
+  refreshTokenSupply
+);
 issuance.patch("/tokens/:tokenId", requirePermissions("tokens:write"), updateToken);
 
 // Deploy

@@ -28,7 +28,8 @@ export type TokenTransactionType =
   | "force_burn"
   | "update_authority"
   | "pause"
-  | "unpause";
+  | "unpause"
+  | "deploy";
 
 export type TokenTransactionStatus =
   | "pending"
@@ -126,6 +127,20 @@ export interface TokenTemplateInfo {
   name: string;
   /** Optional description of the template use case */
   description?: string;
+  /** Default decimals for this template */
+  decimals?: number;
+  /** Maximum allowed decimals for this template */
+  maxDecimals?: number;
+  /** Whether allowlists are required by default */
+  requiresAllowlist?: boolean;
+  /** Whether allowlist enforcement can be overridden */
+  allowlistOverridable?: boolean;
+  /** Required Token-2022 extensions for this template */
+  requiredExtensions?: string[];
+  /** Extensions that can be configured for this template */
+  availableExtensions?: string[];
+  /** Default extension values used by this template */
+  defaultExtensions?: Partial<TokenExtensionsConfig>;
 }
 
 /**
@@ -232,6 +247,10 @@ export interface TokenTransaction {
   organizationId: string;
   type: TokenTransactionType;
   status: TokenTransactionStatus;
+  /** Request idempotency key */
+  idempotencyKey: string | null;
+  /** Deterministic request fingerprint used with idempotency key */
+  idempotencyFingerprint: string | null;
   /** Solana transaction signature */
   signature: string | null;
   /** Base64 encoded serialized transaction */
@@ -448,6 +467,10 @@ export interface FrozenAccountResponse {
 
 export interface ListFrozenAccountsResponse {
   frozenAccounts: FrozenAccount[];
+}
+
+export interface ListTokenTransactionsResponse {
+  transactions: TokenTransaction[];
 }
 
 export interface TokenTemplateResponse {
