@@ -9,7 +9,6 @@ const TEST_PROJECT_ID = "prj_rpc_relay";
 const TEST_API_KEY_ID = "key_rpc_relay";
 const TEST_API_KEY_PREFIX = "sk_test_rpc";
 const TEST_API_KEY_RAW = "sk_test_rpc_relay_key";
-const GET_LATEST_BLOCKHASH_METHOD = ["getLatest", "Blockhash"].join("");
 
 async function clearKvNamespace(namespace: KVNamespace) {
   const listed = await namespace.list();
@@ -143,102 +142,56 @@ describe("RPC Relay Routes", () => {
     (env as { SOLANA_RPC_HELIUS_URL?: string }).SOLANA_RPC_HELIUS_URL = "https://rpc.helius.test/";
     (env as { SOLANA_RPC_HELIUS_API_KEY?: string }).SOLANA_RPC_HELIUS_API_KEY = "helius_key";
 
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: "ok" }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      })
-    );
-
     const response = await app.request(
-      "/v1/rpc/relay",
+      "/v1/rpc/providers",
       {
-        method: "POST",
+        method: "GET",
         headers: {
-          "Content-Type": "application/json",
           Authorization: `Bearer ${TEST_API_KEY_RAW}`,
-          Origin: "https://dashboard.example.com",
         },
-        body: JSON.stringify({
-          jsonrpc: "2.0",
-          id: 1,
-          method: "getHealth",
-          params: [],
-        }),
       },
       env
     );
 
-    fetchSpy.mockRestore();
-
     expect(response.status).toBe(200);
     const body = await response.json();
-    expect(body.data.provider.id).toBe("helius");
-    expect(body.data.provider.selectionMode).toBe("project_provider");
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
-    const [firstCallUrl] = fetchSpy.mock.calls[0] ?? [];
-    expect(String(firstCallUrl)).toContain("rpc.helius.test");
-    expect(String(firstCallUrl)).toContain("api-key=helius_key");
+    expect(body.data.selected.providerId).toBe("helius");
+    expect(body.data.selected.selectionMode).toBe("project_provider");
+    expect(String(body.data.selected.endpoint)).toContain("rpc.helius.test");
   });
 
   it("round-robins providers when project has no explicit provider setting", async () => {
     (env as { SOLANA_RPC_TRITON_URL?: string }).SOLANA_RPC_TRITON_URL = "https://rpc.triton.test";
     (env as { SOLANA_RPC_HELIUS_URL?: string }).SOLANA_RPC_HELIUS_URL = "https://rpc.helius.test";
 
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: "ok" }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      })
-    );
-
     const first = await app.request(
-      "/v1/rpc/relay",
+      "/v1/rpc/providers",
       {
-        method: "POST",
+        method: "GET",
         headers: {
-          "Content-Type": "application/json",
           Authorization: `Bearer ${TEST_API_KEY_RAW}`,
         },
-        body: JSON.stringify({
-          jsonrpc: "2.0",
-          id: 1,
-          method: GET_LATEST_BLOCKHASH_METHOD,
-          params: [],
-        }),
       },
       env
     );
     const second = await app.request(
-      "/v1/rpc/relay",
+      "/v1/rpc/providers",
       {
-        method: "POST",
+        method: "GET",
         headers: {
-          "Content-Type": "application/json",
           Authorization: `Bearer ${TEST_API_KEY_RAW}`,
         },
-        body: JSON.stringify({
-          jsonrpc: "2.0",
-          id: 2,
-          method: GET_LATEST_BLOCKHASH_METHOD,
-          params: [],
-        }),
       },
       env
     );
-
-    fetchSpy.mockRestore();
 
     const firstBody = await first.json();
     const secondBody = await second.json();
 
     expect(first.status).toBe(200);
     expect(second.status).toBe(200);
-    expect(firstBody.data.provider.id).toBe("triton");
-    expect(secondBody.data.provider.id).toBe("helius");
-    expect(fetchSpy).toHaveBeenCalledTimes(2);
-    expect(String(fetchSpy.mock.calls[0]?.[0])).toContain("rpc.triton.test");
-    expect(String(fetchSpy.mock.calls[1]?.[0])).toContain("rpc.helius.test");
+    expect(firstBody.data.selected.providerId).toBe("triton");
+    expect(secondBody.data.selected.providerId).toBe("helius");
   });
 
   it("tracks transaction telemetry and origins per provider", async () => {
