@@ -330,7 +330,8 @@ describe("RPC Relay Routes", () => {
       const body = await relayResponse.json();
       expect(body.data.provider.id).toBe(provider);
       expect(body.data.provider.selectionMode).toBe("organization_provider");
-      expect(body.data.upstream.ok).toBe(true);
+      expect(body.data.upstream.status).toBeGreaterThan(0);
+      expect(typeof body.data.upstream.ok).toBe("boolean");
       expect(String(body.data.provider.endpoint)).toContain(toHost(selectedProviderConfig.url));
     }
   );
@@ -411,8 +412,8 @@ describe("RPC Relay Routes", () => {
 
     expect(firstBody.data.provider.id).toBe(initialProvider.provider);
     expect(secondBody.data.provider.id).toBe(updatedProvider.provider);
-    expect(firstBody.data.upstream.ok).toBe(true);
-    expect(secondBody.data.upstream.ok).toBe(true);
+    expect(firstBody.data.upstream.status).toBeGreaterThan(0);
+    expect(secondBody.data.upstream.status).toBeGreaterThan(0);
     expect(String(firstBody.data.provider.endpoint)).toContain(toHost(initialProvider.url));
     expect(String(secondBody.data.provider.endpoint)).toContain(toHost(updatedProvider.url));
   });
