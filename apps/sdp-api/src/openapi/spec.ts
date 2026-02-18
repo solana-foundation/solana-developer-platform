@@ -38,6 +38,13 @@ export function createOpenApiDocument(): OpenAPIObject {
     description: "Admin key for internal allowlist management.",
   });
 
+  registry.registerComponent("securitySchemes", "organizationRegistrationToken", {
+    type: "apiKey",
+    in: "header",
+    name: "x-organization-registration-token",
+    description: "Pre-shared token required for organization self-registration.",
+  });
+
   registerHealthPaths(registry);
   registerOrganizationPaths(registry);
   registerApiKeyPaths(registry);
@@ -58,7 +65,7 @@ export function createOpenApiDocument(): OpenAPIObject {
       title: "Solana Developer Platform API",
       version: "0.1.0",
       description:
-        "Production-only OpenAPI spec generated from API schemas and routes. Development-only behavior is intentionally omitted.",
+        "Production-only OpenAPI spec generated from API schemas and routes. API versioning is path-based: /v1 is the current contract, and breaking changes are introduced under a new path major (for example /v2). The OpenAPI info.version tracks spec/document revision for the current path contract.",
     },
     tags: [
       { name: "Health", description: "Service health and readiness endpoints." },

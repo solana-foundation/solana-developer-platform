@@ -172,7 +172,7 @@ export const tokenSchema = z
       .openapi({ description: "Token-2022 extensions configuration." }),
     totalSupply: z.string().openapi({
       description:
-        "Cached total supply in UI units (stored to avoid frequent RPC reads; refreshes asynchronously).",
+        "Cached total supply in UI units (stored to avoid frequent RPC reads). Use POST /v1/issuance/tokens/{tokenId}/supply/refresh to force an on-chain refresh.",
       example: "1000000",
     }),
     totalSupplyUpdatedAt: isoDateTimeSchema
@@ -229,6 +229,7 @@ export const tokenTransactionSchema = z
         "update_authority",
         "pause",
         "unpause",
+        "deploy",
       ])
       .openapi({ description: "Transaction type.", example: "mint" }),
     status: z
@@ -238,6 +239,14 @@ export const tokenTransactionSchema = z
       .string()
       .nullable()
       .openapi({ description: "Solana transaction signature.", example: "sig_example" }),
+    idempotencyKey: z.string().optional().openapi({
+      description: "Idempotency key used for this request.",
+      example: "idem_example_12345",
+    }),
+    idempotencyFingerprint: z.string().optional().openapi({
+      description: "Request fingerprint used to validate idempotent retries.",
+      example: "4f2d9c7a5e6f1c...",
+    }),
     serializedTx: base64Schema.nullable().openapi({
       description: "Base64-encoded transaction payload, if available.",
       example: "AQID",
@@ -884,6 +893,22 @@ export const templateExtensionInfoSchema = z
   })
   .openapi({ description: "Extension info with implementation status." });
 
+const tokenTemplateExtensionSchema = z
+  .enum([
+    "transferFee",
+    "interestBearing",
+    "permanentDelegate",
+    "pausable",
+    "nonTransferable",
+    "defaultAccountState",
+    "scaledUiAmount",
+    "transferHook",
+  ])
+  .openapi({
+    description: "Token-2022 extension name.",
+    example: "transferFee",
+  });
+
 export const tokenTemplateInfoSchema = z
   .object({
     id: tokenTemplateIdSchema,
@@ -894,6 +919,36 @@ export const tokenTemplateInfoSchema = z
     description: z.string().optional().openapi({
       description: "Template description and use case.",
       example: "USD-backed stablecoins with compliance controls and privacy features",
+    }),
+    decimals: z.number().int().openapi({
+      description: "Default decimals for the template.",
+      example: 6,
+    }),
+    maxDecimals: z.number().int().openapi({
+      description: "Maximum allowed decimals for this template.",
+      example: 9,
+    }),
+    requiresAllowlist: z.boolean().openapi({
+      description: "Whether allowlists are required for this template by default.",
+      example: true,
+    }),
+    allowlistOverridable: z.boolean().openapi({
+      description: "Whether allowlist enforcement can be disabled by request.",
+      example: true,
+    }),
+    requiredExtensions: z.array(tokenTemplateExtensionSchema).openapi({
+      description: "Required Token-2022 extensions for this template.",
+      example: ["permanentDelegate", "pausable"],
+    }),
+    availableExtensions: z.array(tokenTemplateExtensionSchema).openapi({
+      description: "Extensions that can be configured for this template.",
+      example: ["scaledUiAmount", "interestBearing"],
+    }),
+    defaultExtensions: z.record(z.unknown()).openapi({
+      description: "Default extension values used by this template.",
+      example: {
+        defaultAccountState: "initialized",
+      },
     }),
   })
   .openapi({ description: "Token template information." });

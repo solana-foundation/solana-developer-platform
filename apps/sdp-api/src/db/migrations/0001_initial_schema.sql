@@ -183,6 +183,8 @@ CREATE TABLE issuance_transactions (
     organization_id TEXT NOT NULL,
     type TEXT NOT NULL,                           
     status TEXT NOT NULL DEFAULT 'pending',       
+    idempotency_key TEXT,
+    idempotency_fingerprint TEXT,
     signature TEXT UNIQUE,                        
     serialized_tx TEXT,                           
     operation_params TEXT NOT NULL,               
@@ -324,6 +326,7 @@ CREATE INDEX idx_issuance_tx_token ON issuance_transactions(token_id);
 CREATE INDEX idx_issuance_tx_org ON issuance_transactions(organization_id);
 CREATE INDEX idx_issuance_tx_status ON issuance_transactions(status);
 CREATE INDEX idx_issuance_tx_signature ON issuance_transactions(signature);
+CREATE UNIQUE INDEX idx_issuance_tx_org_idempotency_key ON issuance_transactions(organization_id, idempotency_key);
 CREATE INDEX idx_issuance_tx_status_tx ON issuance_transaction_statuses(transaction_id);
 CREATE INDEX idx_issuance_tx_status_status ON issuance_transaction_statuses(status);
 CREATE INDEX idx_token_allowlist_token ON token_allowlists(token_id);

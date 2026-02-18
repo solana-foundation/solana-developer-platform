@@ -6,6 +6,7 @@
  */
 
 import { formatDecimalAmount, parseDecimalAmount } from "@/lib/amount";
+import { AppError } from "@/lib/errors";
 import type {
   AllowlistEntryStatus,
   FrozenAccount,
@@ -56,6 +57,8 @@ export interface CreateTokenTransactionInput {
   type: TokenTransactionType;
   params: Record<string, unknown>;
   serializedTx?: string;
+  idempotencyKey?: string;
+  idempotencyFingerprint?: string;
   initiatedByKeyId?: string;
 }
 
@@ -66,6 +69,12 @@ export interface UpdateTokenTransactionInput {
   blockTime?: string;
   fee?: number;
   error?: string;
+  params?: Record<string, unknown>;
+}
+
+export interface CreateTransactionResult {
+  transaction: TokenTransaction;
+  replayed: boolean;
 }
 
 export interface AddAllowlistInput {
@@ -125,6 +134,8 @@ interface TokenTransactionRow {
   organization_id: string;
   type: string;
   status: string;
+  idempotency_key: string | null;
+  idempotency_fingerprint: string | null;
   signature: string | null;
   serialized_tx: string | null;
   operation_params: string;
@@ -556,6 +567,30 @@ export class TokenService {
       .run();
   }
 
+  /**
+   * Set token supply directly from a base-units on-chain value.
+   */
+  async setSupplyFromBaseUnits(tokenId: string, supplyBaseUnits: string): Promise<Token> {
+    if (!/^\d+$/.test(supplyBaseUnits)) {
+      throw new Error("INVALID_SUPPLY");
+    }
+
+    const now = new Date().toISOString();
+    await this.db
+      .prepare(
+        "UPDATE issued_tokens SET total_supply_cached = ?, total_supply_updated_at = ?, updated_at = ? WHERE id = ?"
+      )
+      .bind(supplyBaseUnits, now, now, tokenId)
+      .run();
+
+    const updated = await this.getToken(tokenId);
+    if (!updated) {
+      throw new Error("TOKEN_NOT_FOUND");
+    }
+
+    return updated;
+  }
+
   // ═══════════════════════════════════════════════════════════════════════════
   // Token Transactions
   // ═══════════════════════════════════════════════════════════════════════════
@@ -563,7 +598,27 @@ export class TokenService {
   /**
    * Create a token transaction record
    */
-  async createTransaction(input: CreateTokenTransactionInput): Promise<TokenTransaction> {
+  async createTransaction(input: CreateTokenTransactionInput): Promise<CreateTransactionResult> {
+    if (input.idempotencyKey && !input.idempotencyFingerprint) {
+      throw new AppError("BAD_REQUEST", "Missing idempotency fingerprint for idempotency key");
+    }
+
+    if (input.idempotencyKey) {
+      const existing = await this.findTransactionByIdempotency(
+        input.organizationId,
+        input.idempotencyKey
+      );
+      if (existing) {
+        if (existing.idempotencyFingerprint === input.idempotencyFingerprint) {
+          return { transaction: existing, replayed: true };
+        }
+        throw new AppError(
+          "CONFLICT",
+          "Idempotency key already used with different request payload"
+        );
+      }
+    }
+
     const id = `ttx_${crypto.randomUUID()}`;
     const now = new Date().toISOString();
 
@@ -573,6 +628,8 @@ export class TokenService {
       organizationId: input.organizationId,
       type: input.type,
       status: "pending",
+      idempotencyKey: input.idempotencyKey,
+      idempotencyFingerprint: input.idempotencyFingerprint,
       signature: null,
       serializedTx: input.serializedTx ?? null,
       params: input.params,
@@ -585,35 +642,64 @@ export class TokenService {
       updatedAt: now,
     };
 
-    await this.db
-      .prepare(
-        `INSERT INTO issuance_transactions (
-          id, token_id, organization_id, type, status, signature, serialized_tx,
-          operation_params, slot, block_time, fee, error, initiated_by_key_id, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        tx.id,
-        tx.tokenId,
-        tx.organizationId,
-        tx.type,
-        tx.status,
-        tx.signature,
-        tx.serializedTx,
-        JSON.stringify(tx.params),
-        tx.slot,
-        tx.blockTime,
-        tx.fee,
-        tx.error,
-        tx.initiatedByKeyId,
-        tx.createdAt,
-        tx.updatedAt
-      )
-      .run();
+    try {
+      await this.db
+        .prepare(
+          `INSERT INTO issuance_transactions (
+          id, token_id, organization_id, type, status, idempotency_key, idempotency_fingerprint,
+          signature, serialized_tx, operation_params, slot, block_time, fee, error, initiated_by_key_id, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .bind(
+          tx.id,
+          tx.tokenId,
+          tx.organizationId,
+          tx.type,
+          tx.status,
+          tx.idempotencyKey ?? null,
+          tx.idempotencyFingerprint ?? null,
+          tx.signature,
+          tx.serializedTx,
+          JSON.stringify(tx.params),
+          tx.slot,
+          tx.blockTime,
+          tx.fee,
+          tx.error,
+          tx.initiatedByKeyId,
+          tx.createdAt,
+          tx.updatedAt
+        )
+        .run();
+    } catch (error) {
+      if (
+        input.idempotencyKey &&
+        input.idempotencyFingerprint &&
+        error instanceof Error &&
+        error.message.includes("UNIQUE")
+      ) {
+        const existing = await this.findTransactionByIdempotency(
+          input.organizationId,
+          input.idempotencyKey
+        );
+
+        if (existing) {
+          if (existing.idempotencyFingerprint === input.idempotencyFingerprint) {
+            return { transaction: existing, replayed: true };
+          }
+
+          throw new AppError(
+            "CONFLICT",
+            "Idempotency key already used with different request payload"
+          );
+        }
+      }
+
+      throw error;
+    }
 
     await this.insertTransactionStatus(tx.id, tx.status, tx.createdAt);
 
-    return tx;
+    return { transaction: tx, replayed: false };
   }
 
   /**
@@ -657,6 +743,11 @@ export class TokenService {
       values.push(input.error);
     }
 
+    if (input.params !== undefined) {
+      updates.push("operation_params = ?");
+      values.push(JSON.stringify(input.params));
+    }
+
     updates.push("updated_at = ?");
     values.push(now);
     values.push(txId);
@@ -672,8 +763,9 @@ export class TokenService {
 
     const row = await this.db
       .prepare(
-        `SELECT id, token_id, organization_id, type, status, signature, serialized_tx,
-                operation_params, slot, block_time, fee, error, initiated_by_key_id, created_at, updated_at
+        `SELECT id, token_id, organization_id, type, status, idempotency_key, idempotency_fingerprint,
+                signature, serialized_tx, operation_params, slot, block_time, fee, error, initiated_by_key_id,
+                created_at, updated_at
          FROM issuance_transactions WHERE id = ?`
       )
       .bind(txId)
@@ -692,8 +784,9 @@ export class TokenService {
   async getTransaction(txId: string): Promise<TokenTransaction | null> {
     const row = await this.db
       .prepare(
-        `SELECT id, token_id, organization_id, type, status, signature, serialized_tx,
-                operation_params, slot, block_time, fee, error, initiated_by_key_id, created_at, updated_at
+        `SELECT id, token_id, organization_id, type, status, idempotency_key, idempotency_fingerprint,
+                signature, serialized_tx, operation_params, slot, block_time, fee, error,
+                initiated_by_key_id, created_at, updated_at
          FROM issuance_transactions WHERE id = ?`
       )
       .bind(txId)
@@ -705,6 +798,84 @@ export class TokenService {
 
     return this.mapRowToTransaction(row);
   }
+
+  /**
+   * Find a token transaction by organization + idempotency key
+   */
+  async findTransactionByIdempotency(
+    organizationId: string,
+    idempotencyKey: string
+  ): Promise<TokenTransaction | null> {
+    const row = await this.db
+      .prepare(
+        `SELECT id, token_id, organization_id, type, status, idempotency_key, idempotency_fingerprint,
+                signature, serialized_tx, operation_params, slot, block_time, fee, error, initiated_by_key_id,
+                created_at, updated_at
+         FROM issuance_transactions
+         WHERE organization_id = ? AND idempotency_key = ?`
+      )
+      .bind(organizationId, idempotencyKey)
+      .first<TokenTransactionRow>();
+
+    if (!row) {
+      return null;
+    }
+
+    return this.mapRowToTransaction(row);
+  }
+
+  /**
+   * List transactions for a token
+   */
+  async listTokenTransactions(
+    tokenId: string,
+    options: {
+      status?: TokenTransaction["status"];
+      organizationId?: string;
+      limit?: number;
+      offset?: number;
+    } = {}
+  ): Promise<{ transactions: TokenTransaction[]; total: number }> {
+    const { status, organizationId, limit = 50, offset = 0 } = options;
+
+    let countQuery = "SELECT COUNT(*) as count FROM issuance_transactions WHERE token_id = ?";
+    let selectQuery = `SELECT id, token_id, organization_id, type, status, idempotency_key, idempotency_fingerprint,
+              signature, serialized_tx, operation_params, slot, block_time, fee, error, initiated_by_key_id,
+              created_at, updated_at
+       FROM issuance_transactions WHERE token_id = ?`;
+    const params: (string | number)[] = [tokenId];
+
+    if (organizationId) {
+      countQuery += " AND organization_id = ?";
+      selectQuery += " AND organization_id = ?";
+      params.push(organizationId);
+    }
+
+    if (status) {
+      countQuery += " AND status = ?";
+      selectQuery += " AND status = ?";
+      params.push(status);
+    }
+
+    selectQuery += " ORDER BY created_at DESC LIMIT ? OFFSET ?";
+
+    const countResult = await this.db
+      .prepare(countQuery)
+      .bind(...params)
+      .first<{ count: number }>();
+
+    const result = await this.db
+      .prepare(selectQuery)
+      .bind(...params, limit, offset)
+      .all<TokenTransactionRow>();
+
+    return {
+      transactions: result.results.map((row) => this.mapRowToTransaction(row)),
+      total: countResult?.count ?? 0,
+    };
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
 
   // ═══════════════════════════════════════════════════════════════════════════
   // Allowlist Management
@@ -967,6 +1138,32 @@ export class TokenService {
   }
 
   /**
+   * Get the latest frozen account record for an address
+   */
+  async getFrozenAccount(
+    tokenId: string,
+    accountAddress: string,
+    includeUnfrozen = false
+  ): Promise<FrozenAccount | null> {
+    const row = await this.db
+      .prepare(
+        `SELECT id, token_id, account_address, reason, frozen_at, frozen_by, unfrozen_at, unfrozen_by
+         FROM frozen_accounts
+         WHERE token_id = ? AND account_address = ? ${includeUnfrozen ? "" : "AND unfrozen_at IS NULL"}
+         ORDER BY frozen_at DESC
+         LIMIT 1`
+      )
+      .bind(tokenId, accountAddress)
+      .first<FrozenAccountRow>();
+
+    if (!row) {
+      return null;
+    }
+
+    return this.mapRowToFrozenAccount(row);
+  }
+
+  /**
    * List frozen accounts for a token
    */
   async listFrozenAccounts(
@@ -1202,6 +1399,8 @@ export class TokenService {
       organizationId: row.organization_id,
       type: row.type as TokenTransactionType,
       status: row.status as TokenTransactionStatus,
+      idempotencyKey: row.idempotency_key,
+      idempotencyFingerprint: row.idempotency_fingerprint,
       signature: row.signature,
       serializedTx: row.serialized_tx,
       params,

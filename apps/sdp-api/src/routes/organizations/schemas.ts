@@ -23,6 +23,7 @@ export const createOrgSchema = z.object({
     .regex(/^[a-z0-9-]+$/)
     .optional(),
   email: z.string().email(),
+  returnFullApiKey: z.boolean().optional(),
   custody: createOrgCustodySchema.optional(),
 });
 

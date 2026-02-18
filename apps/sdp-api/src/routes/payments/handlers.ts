@@ -7,7 +7,7 @@ import type {
   PaymentWalletPolicyRow as WalletPolicyRow,
 } from "@/db/repositories/payments.repository";
 import { createD1PaymentsRepository } from "@/db/repositories/payments.repository.d1";
-import { formatDecimalAmount, parseDecimalAmount } from "@/lib/amount";
+import { formatDecimalAmount, isDecimalString, parseDecimalAmount } from "@/lib/amount";
 import { getAuth } from "@/lib/auth";
 import { AppError } from "@/lib/errors";
 import { paginated, success } from "@/lib/response";
@@ -186,6 +186,144 @@ function buildWalletPolicyPayload(
   };
 }
 
+function parseDecimalParts(value: string): { whole: string; fraction: string } {
+  const normalized = value.trim();
+  if (!isDecimalString(normalized)) {
+    throw new AppError("BAD_REQUEST", "Invalid amount format");
+  }
+
+  const [wholeRaw = "", fractionRaw = ""] = normalized.split(".");
+  const whole = (wholeRaw || "0").replace(/^0+(?=\d)/, "");
+  let fraction = fractionRaw ?? "";
+  fraction = fraction.replace(/0+$/, "");
+
+  return {
+    whole: whole.length > 0 ? whole : "0",
+    fraction,
+  };
+}
+
+function compareDecimalAmounts(left: string, right: string): number {
+  const leftParts = parseDecimalParts(left);
+  const rightParts = parseDecimalParts(right);
+
+  if (leftParts.whole.length !== rightParts.whole.length) {
+    return leftParts.whole.length < rightParts.whole.length ? -1 : 1;
+  }
+
+  if (leftParts.whole !== rightParts.whole) {
+    return leftParts.whole < rightParts.whole ? -1 : 1;
+  }
+
+  const scale = Math.max(leftParts.fraction.length, rightParts.fraction.length);
+  const leftFraction = leftParts.fraction.padEnd(scale, "0");
+  const rightFraction = rightParts.fraction.padEnd(scale, "0");
+
+  if (leftFraction === rightFraction) {
+    return 0;
+  }
+
+  return leftFraction < rightFraction ? -1 : 1;
+}
+
+function sumDecimalAmounts(amounts: string[]): string {
+  if (amounts.length === 0) {
+    return "0";
+  }
+
+  const parsed = amounts.map(parseDecimalParts);
+  const scale = parsed.reduce((max, entry) => Math.max(max, entry.fraction.length), 0);
+
+  const total = parsed.reduce((acc, entry) => {
+    const combined = `${entry.whole}${entry.fraction.padEnd(scale, "0")}`;
+    return acc + BigInt(combined);
+  }, 0n);
+
+  if (scale === 0) {
+    return total.toString();
+  }
+
+  const digits = total.toString().padStart(scale + 1, "0");
+  const whole = digits.slice(0, -scale).replace(/^0+(?=\d)/, "") || "0";
+  const fraction = digits.slice(-scale).replace(/0+$/, "");
+
+  return fraction ? `${whole}.${fraction}` : whole;
+}
+
+function addDecimalAmounts(left: string, right: string): string {
+  return sumDecimalAmounts([left, right]);
+}
+
+function getUtcDayWindow(now: Date): { start: string; end: string } {
+  const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+  return {
+    start: start.toISOString(),
+    end: end.toISOString(),
+  };
+}
+
+async function assertWalletPolicyAllowsTransfer(
+  c: AppContext,
+  input: {
+    organizationId: string;
+    projectId: string | null;
+    wallet: CustodyWallet;
+    destinationAddress: string;
+    token: string;
+    amount: string;
+  }
+): Promise<void> {
+  const repository = getPaymentsRepository(c);
+  const rows = await repository.getWalletPoliciesByCustodyWalletId(input.wallet.id);
+
+  if (rows.length === 0) {
+    return;
+  }
+
+  const policy = buildWalletPolicyPayload(input.wallet.walletId, rows, input.wallet.createdAt);
+
+  if (
+    policy.destinationAllowlist.length > 0 &&
+    !policy.destinationAllowlist.includes(input.destinationAddress)
+  ) {
+    throw new AppError("FORBIDDEN", "Destination address is not allowed by wallet policy");
+  }
+
+  if (policy.maxTransferAmount) {
+    if (!isDecimalString(policy.maxTransferAmount)) {
+      throw new AppError("INTERNAL_ERROR", "Wallet policy has invalid maxTransferAmount");
+    }
+
+    if (compareDecimalAmounts(input.amount, policy.maxTransferAmount) > 0) {
+      throw new AppError("FORBIDDEN", "Transfer amount exceeds wallet policy maxTransferAmount");
+    }
+  }
+
+  if (policy.maxDailyAmount) {
+    if (!isDecimalString(policy.maxDailyAmount)) {
+      throw new AppError("INTERNAL_ERROR", "Wallet policy has invalid maxDailyAmount");
+    }
+
+    const dayWindow = getUtcDayWindow(new Date());
+    const amounts = await repository.listTransferAmounts({
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      walletId: input.wallet.walletId,
+      token: input.token,
+      direction: "outbound",
+      statuses: ["pending", "processing", "confirmed", "finalized"],
+      createdAtFrom: dayWindow.start,
+      createdAtTo: dayWindow.end,
+    });
+
+    const projectedTotal = addDecimalAmounts(sumDecimalAmounts(amounts), input.amount);
+    if (compareDecimalAmounts(projectedTotal, policy.maxDailyAmount) > 0) {
+      throw new AppError("FORBIDDEN", "Transfer amount exceeds wallet policy maxDailyAmount");
+    }
+  }
+}
+
 function mapTransferRow(row: TransferRow) {
   return {
     id: row.id,
@@ -307,7 +445,6 @@ async function getTransactionJsonParsed(
     })
     .send();
 }
-
 function parseTokenAmountInfo(
   value: unknown
 ): { mint: string; amount: bigint; decimals: number; uiAmount?: string } | null {
@@ -1012,7 +1149,6 @@ function inferOnChainTransferDetails(
     fee: candidate.meta?.fee ?? null,
   };
 }
-
 export async function getWalletBalances(c: AppContext) {
   const { wallet } = await resolveWalletFromParams(c);
 
@@ -1115,10 +1251,20 @@ export async function prepareTransfer(c: AppContext) {
   const sourceWallet = resolveWallet(scope.wallets, parsed.data.source);
   const sourceAddress = assertValidAddress(sourceWallet.publicKey, "source");
   const destinationAddress = assertValidAddress(parsed.data.destination, "destination");
+  const transferToken = isNativeSolToken(parsed.data.token) ? "SOL" : parsed.data.token;
+
+  await assertWalletPolicyAllowsTransfer(c, {
+    organizationId: scope.auth.organizationId,
+    projectId: scope.auth.projectId,
+    wallet: sourceWallet,
+    destinationAddress,
+    token: transferToken,
+    amount: parsed.data.amount,
+  });
 
   let prepared: { serializedTx: string; blockhash: string; lastValidBlockHeight: string };
 
-  if (isNativeSolToken(parsed.data.token)) {
+  if (transferToken === "SOL") {
     prepared = await prepareSolTransfer(c, sourceAddress, destinationAddress, parsed.data.amount);
   } else {
     const mintAddress = assertValidAddress(parsed.data.token, "token");
@@ -1137,7 +1283,7 @@ export async function prepareTransfer(c: AppContext) {
     walletId: sourceWallet.walletId,
     sourceAddress: sourceWallet.publicKey,
     destinationAddress: parsed.data.destination,
-    token: isNativeSolToken(parsed.data.token) ? "SOL" : parsed.data.token,
+    token: transferToken,
     amount: parsed.data.amount,
     memo: parsed.data.memo,
     status: "pending",
@@ -1186,6 +1332,16 @@ export async function createTransfer(c: AppContext) {
 
   const sourceWallet = resolveWallet(scope.wallets, parsed.data.source);
   const destinationAddress = assertValidAddress(parsed.data.destination, "destination");
+  const transferToken = isNativeSolToken(parsed.data.token) ? "SOL" : parsed.data.token;
+
+  await assertWalletPolicyAllowsTransfer(c, {
+    organizationId: scope.auth.organizationId,
+    projectId: scope.auth.projectId,
+    wallet: sourceWallet,
+    destinationAddress,
+    token: transferToken,
+    amount: parsed.data.amount,
+  });
 
   const transfer = await createTransferRecord(c, {
     organizationId: scope.auth.organizationId,
@@ -1193,7 +1349,7 @@ export async function createTransfer(c: AppContext) {
     walletId: sourceWallet.walletId,
     sourceAddress: sourceWallet.publicKey,
     destinationAddress: parsed.data.destination,
-    token: isNativeSolToken(parsed.data.token) ? "SOL" : parsed.data.token,
+    token: transferToken,
     amount: parsed.data.amount,
     memo: parsed.data.memo,
     status: "processing",

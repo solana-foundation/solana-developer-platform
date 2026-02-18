@@ -37,7 +37,7 @@ export const listProjectApiKeys = async (c: AppContext) => {
       keyPrefix: key.keyPrefix,
       role: key.role as ApiKeyRole,
       environment: key.environment as "sandbox" | "production",
-      status: key.status as "active" | "revoked" | "expired",
+      status: key.status,
       lastUsedAt: key.lastUsedAt,
       expiresAt: key.expiresAt,
       createdAt: key.createdAt,
@@ -141,7 +141,8 @@ export const createProjectApiKey = async (c: AppContext) => {
   const createdKey = await apiKeyService.createApiKey({
     organizationId: auth.organizationId,
     projectId,
-    createdByKeyId: auth.id,
+    createdByKeyId: auth.apiKeyId ?? undefined,
+    createdByUserId: auth.userId ?? undefined,
     name,
     description,
     role,

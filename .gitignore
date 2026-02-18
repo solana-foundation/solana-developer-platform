@@ -5,6 +5,8 @@ node_modules/
 # Build outputs
 dist/
 .turbo/
+.next/
+apps/**/.next/
 
 # Cloudflare
 .wrangler/

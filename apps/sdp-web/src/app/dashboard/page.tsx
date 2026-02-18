@@ -1,118 +1,80 @@
-"use client";
-
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { OrganizationSwitcher, SignInButton, UserButton, useAuth } from "@clerk/nextjs";
+import type { LucideIcon } from "lucide-react";
+import { ArrowLeftRight, Coins, KeyRound, Wallet } from "lucide-react";
+import Image from "next/image";
 import Link from "next/link";
 
+type DashboardCard = {
+  href: string;
+  icon: LucideIcon;
+  title: string;
+  description: string;
+};
+
+const dashboardCards: DashboardCard[] = [
+  {
+    href: "/dashboard/wallets",
+    icon: Wallet,
+    title: "Wallets",
+    description: "Set provider and wallet signers",
+  },
+  {
+    href: "/dashboard/issuance",
+    icon: Coins,
+    title: "Issuance",
+    description: "Issue and manage token assets",
+  },
+  {
+    href: "/dashboard/payments",
+    icon: ArrowLeftRight,
+    title: "Payments",
+    description: "Move funds and track transfers",
+  },
+  {
+    href: "/dashboard/api-keys",
+    icon: KeyRound,
+    title: "API keys",
+    description: "Configure auth credentials",
+  },
+];
+
 export default function DashboardPage() {
-  const { isLoaded, isSignedIn, orgId } = useAuth();
-
-  if (!isLoaded) {
-    return (
-      <main className="min-h-screen bg-background px-6 py-10 text-foreground">
-        <div className="mx-auto flex max-w-3xl flex-col gap-6">
-          <p className="text-sm uppercase tracking-wide text-muted-foreground">Dashboard</p>
-          <h1 className="text-2xl font-semibold">Loading...</h1>
-        </div>
-      </main>
-    );
-  }
-
-  if (!isSignedIn) {
-    return (
-      <main className="min-h-screen bg-background px-6 py-10 text-foreground">
-        <div className="mx-auto flex max-w-3xl flex-col gap-6">
-          <p className="text-sm uppercase tracking-wide text-muted-foreground">Dashboard</p>
-          <h1 className="text-2xl font-semibold">Sign in to continue</h1>
-          <div>
-            <SignInButton mode="modal">
-              <button
-                type="button"
-                className="text-button-lg inline-flex h-[var(--button-height-lg)] items-center justify-center rounded-[var(--button-radius-lg)] bg-[color:var(--button-primary-bg)] px-[var(--button-padding-x-lg)] text-[color:var(--button-primary-text)] transition-colors hover:bg-[color:var(--button-primary-bg-hover)]"
-              >
-                Sign in
-              </button>
-            </SignInButton>
-          </div>
-        </div>
-      </main>
-    );
-  }
-
-  if (!orgId) {
-    return (
-      <main className="min-h-screen bg-background px-6 py-10 text-foreground">
-        <div className="mx-auto flex max-w-3xl flex-col gap-6">
-          <div>
-            <p className="text-sm uppercase tracking-wide text-muted-foreground">Dashboard</p>
-            <h1 className="text-2xl font-semibold">Select an organization</h1>
-          </div>
-          <Card>
-            <CardHeader>
-              <CardTitle>Choose an organization</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3 text-sm text-muted-foreground">
-              <p>You need an organization to continue.</p>
-              <OrganizationSwitcher hidePersonal />
-            </CardContent>
-          </Card>
-        </div>
-      </main>
-    );
-  }
-
   return (
-    <main className="min-h-screen bg-background px-6 py-10 text-foreground">
-      <div className="mx-auto flex max-w-5xl flex-col gap-8">
-        <header className="flex flex-wrap items-center justify-between gap-4">
-          <div>
-            <p className="text-sm uppercase tracking-wide text-muted-foreground">Dashboard</p>
-            <h1 className="text-2xl font-semibold">Welcome to SDP</h1>
-          </div>
-          <div className="flex items-center gap-3">
-            <OrganizationSwitcher hidePersonal />
-            <UserButton />
-          </div>
-        </header>
-
-        <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
-          <Card>
-            <CardHeader>
-              <CardTitle>Organization access</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4 text-sm text-muted-foreground">
-              <p>Organization management is being rolled out next.</p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>API keys</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4 text-sm text-muted-foreground">
-              <p>API keys will be available once the console rollout is complete.</p>
-              <div className="rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-                Endpoint: <span className="text-foreground">/v1/api-keys</span>
-              </div>
-            </CardContent>
-          </Card>
+    <div className="relative flex min-h-[calc(100vh-16.5rem)] w-full flex-col items-center justify-center py-6">
+      <div className="flex items-center gap-3">
+        <p className="text-[36px] leading-[40px] font-medium tracking-[-0.3px] text-[rgba(28,28,29,0.72)]">
+          Get started with
+        </p>
+        <div className="flex items-center gap-2">
+          <Image src="/landing/solana-logo.svg" alt="Solana" width={20} height={20} />
+          <p className="text-[36px] leading-[40px] font-medium tracking-[-0.3px] text-[#1c1c1d]">
+            SDP
+          </p>
         </div>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Custody</CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-wrap items-center justify-between gap-4 text-sm text-muted-foreground">
-            <p>Manage your signing provider and custody wallets.</p>
-            <Link
-              href="/dashboard/custody"
-              className="text-foreground underline underline-offset-4"
-            >
-              Open custody settings
-            </Link>
-          </CardContent>
-        </Card>
       </div>
-    </main>
+
+      <div className="mt-6 grid w-full max-w-[720px] gap-3 sm:grid-cols-2">
+        {dashboardCards.map((card) => {
+          const Icon = card.icon;
+
+          return (
+            <Link
+              key={card.href}
+              href={card.href}
+              className="rounded-[16px] border border-[rgba(28,28,29,0.10)] bg-white p-6 transition hover:bg-[rgba(28,28,29,0.03)]"
+            >
+              <Icon className="h-6 w-6 text-[rgba(28,28,29,0.8)]" />
+              <div className="mt-5 space-y-1">
+                <h2 className="text-[19px] leading-[24px] font-medium tracking-[-0.2px] text-[#1c1c1d]">
+                  {card.title}
+                </h2>
+                <p className="text-[16px] leading-[24px] text-[rgba(28,28,29,0.72)]">
+                  {card.description}
+                </p>
+              </div>
+            </Link>
+          );
+        })}
+      </div>
+    </div>
   );
 }

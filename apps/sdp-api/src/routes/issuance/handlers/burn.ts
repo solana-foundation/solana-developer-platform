@@ -9,6 +9,7 @@ import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
 import type { Context } from "hono";
 import { burnSchema } from "../schemas";
+import { buildIdempotencyMetadata } from "./idempotency";
 
 type AppContext = Context<{ Bindings: Env }>;
 
@@ -149,8 +150,15 @@ export const executeBurn = async (c: AppContext) => {
   const source = assertValidAddress(parsed.data.burn.source, "source");
   const burnAmount = toMosaicAmount(parsed.data.burn.amount, token.decimals);
 
+  const idempotencyMetadata = buildIdempotencyMetadata(c.req.header("Idempotency-Key"), {
+    tokenId,
+    operation: "burn",
+    mode: "execute",
+    params: parsed.data,
+  });
+
   // Create transaction record first
-  const tx = await tokenService.createTransaction({
+  const { transaction: tx, replayed } = await tokenService.createTransaction({
     tokenId,
     organizationId: auth.organizationId,
     type: "burn",
@@ -160,7 +168,13 @@ export const executeBurn = async (c: AppContext) => {
       memo: parsed.data.burn.memo,
     },
     initiatedByKeyId: auth.id,
+    idempotencyKey: idempotencyMetadata.idempotencyKey,
+    idempotencyFingerprint: idempotencyMetadata.idempotencyFingerprint,
   });
+
+  if (replayed) {
+    return success(c, { transaction: tx });
+  }
 
   // Execute burn on Solana
   const token2022 = createToken2022Service(c.env, signer);

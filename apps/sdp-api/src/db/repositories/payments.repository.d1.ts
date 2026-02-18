@@ -1,4 +1,4 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { type SQL, and, eq, gte, inArray, lt } from "drizzle-orm";
 import { paymentTransfers, paymentWalletPolicies } from "../drizzle/schema/sqlite";
 import type {
   PaymentTransferRow,
@@ -44,7 +44,7 @@ const mapPolicyRow = (row: typeof paymentWalletPolicies.$inferSelect): PaymentWa
 const toTransferScopeWhere = (input: {
   organizationId: string;
   projectId: string | null;
-  extra: ReturnType<typeof eq>;
+  extra: SQL<unknown>;
 }) =>
   input.projectId
     ? and(
@@ -181,6 +181,37 @@ export const createD1PaymentsRepository = (
       return rows.map(mapTransferRow);
     },
 
+    async listTransferAmounts(params) {
+      if (params.statuses.length === 0) {
+        return [];
+      }
+
+      const transferFilter = and(
+        eq(paymentTransfers.walletId, params.walletId),
+        eq(paymentTransfers.token, params.token),
+        eq(paymentTransfers.direction, params.direction),
+        inArray(paymentTransfers.status, params.statuses),
+        gte(paymentTransfers.createdAt, params.createdAtFrom),
+        lt(paymentTransfers.createdAt, params.createdAtTo)
+      );
+      if (!transferFilter) {
+        return [];
+      }
+
+      const rows = await db
+        .select({ amount: paymentTransfers.amount })
+        .from(paymentTransfers)
+        .where(
+          toTransferScopeWhere({
+            organizationId: params.organizationId,
+            projectId: params.projectId,
+            extra: transferFilter,
+          })
+        )
+        .all();
+
+      return rows.map((row) => row.amount);
+    },
     async getWalletPoliciesByCustodyWalletId(custodyWalletId) {
       const rows = await getWalletPoliciesInternal(custodyWalletId);
       return rows.map(mapPolicyRow);

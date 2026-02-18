@@ -11,6 +11,7 @@ import type { TokenResponse } from "@sdp/types";
 import type { Address } from "@solana/kit";
 import { TOKEN_ACL_PROGRAM_ID } from "@solana/mosaic-sdk";
 import type { Context } from "hono";
+import { buildIdempotencyMetadata } from "./idempotency";
 
 type AppContext = Context<{ Bindings: Env }>;
 
@@ -41,6 +42,40 @@ export const deployToken = async (c: AppContext) => {
     throw new AppError("BAD_REQUEST", "Token already has a mint address");
   }
 
+  const idempotencyMetadata = buildIdempotencyMetadata(c.req.header("Idempotency-Key"), {
+    tokenId,
+    operation: "deploy",
+    mode: "execute",
+    params: {
+      token: {
+        name: token.name,
+        symbol: token.symbol,
+        template: token.template,
+      },
+      status: token.status,
+    },
+  });
+
+  const { transaction: tx, replayed } = await tokenService.createTransaction({
+    tokenId,
+    organizationId: auth.organizationId,
+    type: "deploy",
+    params: {
+      operation: "deploy",
+      tokenId,
+      template: token.template,
+      name: token.name,
+      symbol: token.symbol,
+    },
+    initiatedByKeyId: auth.id,
+    idempotencyKey: idempotencyMetadata.idempotencyKey,
+    idempotencyFingerprint: idempotencyMetadata.idempotencyFingerprint,
+  });
+
+  if (replayed) {
+    return success(c, { token });
+  }
+
   // Get custody signer (resolves via 3-tier: project → org → env fallback)
   const signer = await createOrgSigner(
     c.env,
@@ -56,71 +91,76 @@ export const deployToken = async (c: AppContext) => {
   // Deploy using Mosaic templates - handles ABL setup automatically
   const enableAbl = token.requiresAllowlist && c.env.SOLANA_NETWORK === "mainnet-beta";
 
-  const result = await mosaic.createToken({
-    template: token.template,
-    metadata: {
-      name: token.name,
-      symbol: token.symbol,
-      uri: token.uri ?? "",
-    },
-    decimals: token.decimals,
-    mintAuthority: signer,
-    freezeAuthority: token.isFreezable ? custodyAddress : null,
-    feePayer: signer,
-    extensions: token.extensions ?? undefined,
-    // Enable on-chain ABL for templates that require allowlist
-    enableAbl,
-  });
-
-  const enableSrfc37 = enableAbl && token.isFreezable;
-  const freezeAuthority = token.isFreezable
-    ? enableSrfc37
-      ? TOKEN_ACL_PROGRAM_ID
-      : custodyAddress
-    : null;
-
-  // Update token with deployment info (including ABL list if created)
-  const updatedToken = await tokenService.setTokenDeployed(
-    tokenId,
-    result.mint as Address,
-    custodyAddress,
-    freezeAuthority,
-    result.listAddress as Address | undefined
-  );
-
-  // Create transaction record
-  await tokenService.createTransaction({
-    tokenId,
-    organizationId: auth.organizationId,
-    type: "mint", // Using "mint" as deploy type for the transaction log
-    params: {
-      operation: "deploy",
-      mintAddress: result.mint,
-      mintAuthority: custodyAddress,
+  try {
+    const result = await mosaic.createToken({
+      template: token.template,
+      metadata: {
+        name: token.name,
+        symbol: token.symbol,
+        uri: token.uri ?? "",
+      },
+      decimals: token.decimals,
+      mintAuthority: signer,
       freezeAuthority: token.isFreezable ? custodyAddress : null,
-      ablListAddress: result.listAddress,
-      template: token.template,
-    },
-    initiatedByKeyId: auth.id,
-  });
+      feePayer: signer,
+      extensions: token.extensions ?? undefined,
+      // Enable on-chain ABL for templates that require allowlist
+      enableAbl,
+    });
 
-  // Audit log
-  const auditService = new AuditService(c.env.DB);
-  await auditService.log(c, {
-    action: "deploy",
-    resourceType: "token",
-    resourceId: tokenId,
-    metadata: {
-      mintAddress: result.mint,
+    const enableSrfc37 = enableAbl && token.isFreezable;
+    const freezeAuthority = token.isFreezable
+      ? enableSrfc37
+        ? TOKEN_ACL_PROGRAM_ID
+        : custodyAddress
+      : null;
+
+    // Update token with deployment info (including ABL list if created)
+    const updatedToken = await tokenService.setTokenDeployed(
+      tokenId,
+      result.mint as Address,
+      custodyAddress,
+      freezeAuthority,
+      result.listAddress as Address | undefined
+    );
+
+    await tokenService.updateTransaction(tx.id, {
+      status: "confirmed",
       signature: result.signature,
-      slot: result.slot.toString(),
-      template: token.template,
-      ablListAddress: result.listAddress,
-    },
-  });
+      slot: Number(result.slot),
+      params: {
+        operation: "deploy",
+        mintAddress: result.mint,
+        mintAuthority: custodyAddress,
+        freezeAuthority: token.isFreezable ? custodyAddress : null,
+        ablListAddress: result.listAddress,
+      },
+    });
 
-  const response: TokenResponse = { token: updatedToken };
-  return success(c, response);
+    // Audit log
+    const auditService = new AuditService(c.env.DB);
+    await auditService.log(c, {
+      action: "deploy",
+      resourceType: "token",
+      resourceId: tokenId,
+      metadata: {
+        mintAddress: result.mint,
+        signature: result.signature,
+        slot: result.slot.toString(),
+        template: token.template,
+        ablListAddress: result.listAddress,
+      },
+    });
+
+    const response: TokenResponse = { token: updatedToken };
+    return success(c, response);
+  } catch (error) {
+    await tokenService.updateTransaction(tx.id, {
+      status: "failed",
+      error: error instanceof Error ? error.message : "Unknown error",
+    });
+    throw error;
+  }
 };
 
 export const prepareDeploy = async (c: AppContext) => {

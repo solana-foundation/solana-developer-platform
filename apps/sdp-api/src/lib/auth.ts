@@ -10,8 +10,11 @@ import type { Permission } from "@sdp/types";
 import type { Context } from "hono";
 import { AppError } from "./errors";
 
+export type AuthType = "api_key" | "clerk" | "session";
+
 /**
- * Strongly-typed API key context returned by getAuth()
+ * Normalized auth context returned by getAuth().
+ * Supports API key, Clerk JWT, and session-authenticated requests.
  */
 export interface ApiKeyContext {
   id: string;
@@ -21,6 +24,9 @@ export interface ApiKeyContext {
   permissions: Permission[];
   environment: string;
   signingWalletId: string | null;
+  authType: AuthType;
+  userId: string | null;
+  apiKeyId: string | null;
 }
 
 export interface ClerkAuthContext {
@@ -52,19 +58,55 @@ export interface ClerkAuthContext {
  * ```
  */
 export function getAuth(c: Context<{ Bindings: Env }>): ApiKeyContext {
-  const auth = c.get("apiKey");
-  if (!auth) {
-    throw new AppError("UNAUTHORIZED", "Authentication required");
+  const apiKey = c.get("apiKey");
+  if (apiKey) {
+    return {
+      id: apiKey.id,
+      organizationId: apiKey.organizationId,
+      projectId: apiKey.projectId ?? null,
+      role: apiKey.role,
+      permissions: apiKey.permissions,
+      environment: apiKey.environment,
+      signingWalletId: apiKey.signingWalletId ?? null,
+      authType: "api_key",
+      userId: null,
+      apiKeyId: apiKey.id,
+    };
   }
-  return {
-    id: auth.id,
-    organizationId: auth.organizationId,
-    projectId: auth.projectId ?? null,
-    role: auth.role,
-    permissions: auth.permissions,
-    environment: auth.environment,
-    signingWalletId: auth.signingWalletId ?? null,
-  };
+
+  const clerk = c.get("clerk");
+  if (clerk) {
+    return {
+      id: clerk.userId,
+      organizationId: clerk.organizationId,
+      projectId: null,
+      role: clerk.role,
+      permissions: clerk.permissions,
+      environment: "dashboard",
+      signingWalletId: null,
+      authType: "clerk",
+      userId: clerk.userId,
+      apiKeyId: null,
+    };
+  }
+
+  const session = c.get("session");
+  if (session) {
+    return {
+      id: session.userId,
+      organizationId: session.organizationId,
+      projectId: null,
+      role: "session",
+      permissions: session.permissions,
+      environment: "dashboard",
+      signingWalletId: null,
+      authType: "session",
+      userId: session.userId,
+      apiKeyId: null,
+    };
+  }
+
+  throw new AppError("UNAUTHORIZED", "Authentication required");
 }
 
 export function getClerkAuth(c: Context<{ Bindings: Env }>): ClerkAuthContext {

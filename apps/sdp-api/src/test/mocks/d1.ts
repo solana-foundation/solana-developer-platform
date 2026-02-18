@@ -212,6 +212,8 @@ export async function seedTestDatabase(env: Env): Promise<void> {
         organization_id TEXT NOT NULL,
         type TEXT NOT NULL,
         status TEXT NOT NULL DEFAULT 'pending',
+        idempotency_key TEXT,
+        idempotency_fingerprint TEXT,
         signature TEXT UNIQUE,
         serialized_tx TEXT,
         operation_params TEXT NOT NULL,
@@ -224,6 +226,10 @@ export async function seedTestDatabase(env: Env): Promise<void> {
         updated_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ','now')),
         FOREIGN KEY (token_id) REFERENCES issued_tokens(id) ON DELETE CASCADE
       )
+    `),
+    db.prepare(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_issuance_tx_org_idempotency_key
+        ON issuance_transactions(organization_id, idempotency_key)
     `),
     db.prepare(`
       CREATE TABLE IF NOT EXISTS issuance_transaction_statuses (
@@ -270,6 +276,65 @@ export async function seedTestDatabase(env: Env): Promise<void> {
         FOREIGN KEY (token_id) REFERENCES issued_tokens(id) ON DELETE CASCADE,
         UNIQUE(token_id, account_address)
       )
+    `),
+    // Payments tables
+    db.prepare(`
+      CREATE TABLE IF NOT EXISTS payment_wallet_policies (
+        id TEXT PRIMARY KEY,
+        custody_wallet_id TEXT NOT NULL,
+        policy_type TEXT NOT NULL,
+        policy TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ','now')),
+        updated_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ','now')),
+        UNIQUE (custody_wallet_id, policy_type)
+      )
+    `),
+    db.prepare(`
+      CREATE INDEX IF NOT EXISTS idx_payment_wallet_policies_wallet
+      ON payment_wallet_policies(custody_wallet_id)
+    `),
+    db.prepare(`
+      CREATE TABLE IF NOT EXISTS payment_transfers (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        project_id TEXT,
+        wallet_id TEXT NOT NULL,
+        source_address TEXT NOT NULL,
+        destination_address TEXT NOT NULL,
+        token TEXT NOT NULL,
+        amount TEXT NOT NULL,
+        memo TEXT,
+        type TEXT NOT NULL,
+        direction TEXT NOT NULL,
+        status TEXT NOT NULL,
+        signature TEXT UNIQUE,
+        serialized_tx TEXT,
+        slot INTEGER,
+        block_time TEXT,
+        fee INTEGER,
+        error TEXT,
+        initiated_by_key_id TEXT,
+        created_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ','now')),
+        updated_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ','now')),
+        FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
+        FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+      )
+    `),
+    db.prepare(`
+      CREATE INDEX IF NOT EXISTS idx_payment_transfers_org_created
+      ON payment_transfers(organization_id, created_at DESC)
+    `),
+    db.prepare(`
+      CREATE INDEX IF NOT EXISTS idx_payment_transfers_project_created
+      ON payment_transfers(project_id, created_at DESC)
+    `),
+    db.prepare(`
+      CREATE INDEX IF NOT EXISTS idx_payment_transfers_wallet
+      ON payment_transfers(wallet_id)
+    `),
+    db.prepare(`
+      CREATE INDEX IF NOT EXISTS idx_payment_transfers_status
+      ON payment_transfers(status)
     `),
     // Custody configuration tables
     db.prepare(`
@@ -336,6 +401,8 @@ export async function clearTestDatabase(env: Env): Promise<void> {
     "custody_wallets",
     "signing_requests",
     "custody_configs",
+    "payment_transfers",
+    "payment_wallet_policies",
     "frozen_accounts",
     "token_allowlist_statuses",
     "token_allowlists",

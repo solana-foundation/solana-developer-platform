@@ -1,3 +1,4 @@
+import { getAuth } from "@/lib/auth";
 import { AppError, conflict, notFound } from "@/lib/errors";
 import { hashString } from "@/lib/hash";
 import { created, noContent, success } from "@/lib/response";
@@ -73,12 +74,23 @@ export const createOrganization = async (c: AppContext) => {
     });
   }
 
-  const { name, email, custody } = parsed.data;
+  const { name, email, custody, returnFullApiKey } = parsed.data;
+  const registrationTokenHeader = c.req.header("x-organization-registration-token");
+  const registrationToken = c.env.ORGANIZATION_REGISTRATION_TOKEN;
   const slug = parsed.data.slug || name.toLowerCase().replace(/[^a-z0-9]+/g, "-");
 
   // Initialize services
   const allowlistService = createAllowlistService(c.env);
   const auditService = new AuditService(c.env.DB);
+
+  // Organization self-registration is gated by a required pre-shared token.
+  if (!registrationToken) {
+    throw new AppError("FORBIDDEN", "Organization self-registration is disabled");
+  }
+
+  if (!registrationTokenHeader || registrationTokenHeader !== registrationToken) {
+    throw new AppError("FORBIDDEN", "Invalid or missing registration token");
+  }
 
   // Check allowlist
   const { allowed, tier } = await allowlistService.isEmailAllowed(email);
@@ -204,8 +216,8 @@ export const createOrganization = async (c: AppContext) => {
     },
     apiKey: {
       id: apiKeyId,
-      key, // Full key - only shown once!
       keyPrefix: prefix,
+      ...(returnFullApiKey ? { key } : {}),
     },
   };
 
@@ -214,7 +226,7 @@ export const createOrganization = async (c: AppContext) => {
 
 export const getOrganization = async (c: AppContext) => {
   const { orgId } = c.req.param();
-  const auth = c.get("apiKey");
+  const auth = getAuth(c);
 
   // Verify access to this organization
   if (auth?.organizationId !== orgId) {
@@ -257,7 +269,7 @@ export const getOrganization = async (c: AppContext) => {
 
 export const updateOrganization = async (c: AppContext) => {
   const { orgId } = c.req.param();
-  const auth = c.get("apiKey");
+  const auth = getAuth(c);
 
   if (auth?.organizationId !== orgId) {
     throw new AppError("FORBIDDEN", "Access denied to this organization");
@@ -322,7 +334,7 @@ export const updateOrganization = async (c: AppContext) => {
 
 export const deleteOrganization = async (c: AppContext) => {
   const { orgId } = c.req.param();
-  const auth = c.get("apiKey");
+  const auth = getAuth(c);
 
   if (auth?.organizationId !== orgId) {
     throw new AppError("FORBIDDEN", "Access denied to this organization");

@@ -11,6 +11,7 @@ import type { Env } from "@/types/env";
 import { AuthorityType } from "@solana-program/token-2022";
 import type { Context } from "hono";
 import { updateAuthoritySchema } from "../schemas";
+import { buildIdempotencyMetadata } from "./idempotency";
 
 type AppContext = Context<{ Bindings: Env }>;
 
@@ -223,7 +224,14 @@ export const executeUpdateAuthority = async (c: AppContext) => {
     ? assertValidAddress(parsed.data.authority.newAuthority, "newAuthority")
     : null;
 
-  const tx = await tokenService.createTransaction({
+  const idempotencyMetadata = buildIdempotencyMetadata(c.req.header("Idempotency-Key"), {
+    tokenId,
+    operation: "update_authority",
+    mode: "execute",
+    params: parsed.data,
+  });
+
+  const { transaction: tx, replayed } = await tokenService.createTransaction({
     tokenId,
     organizationId: auth.organizationId,
     type: "update_authority",
@@ -232,8 +240,14 @@ export const executeUpdateAuthority = async (c: AppContext) => {
       currentAuthority: currentAuthorityRaw,
       newAuthority,
     },
+    idempotencyKey: idempotencyMetadata.idempotencyKey,
+    idempotencyFingerprint: idempotencyMetadata.idempotencyFingerprint,
     initiatedByKeyId: auth.id,
   });
+
+  if (replayed) {
+    return success(c, { transaction: tx });
+  }
 
   const mosaic = createMosaicService(c.env, signer);
 

@@ -4,6 +4,7 @@
  * Shared data access for API key operations.
  */
 
+import { AppError } from "@/lib/errors";
 import { hashString } from "@/lib/hash";
 import type { ApiKeyEnvironment, ApiKeyRole, ApiKeyStatus, Permission } from "@sdp/types";
 import { createApiKeyMaterial, parseJsonArray } from "./api-key.utils";
@@ -33,7 +34,8 @@ export interface ApiKeyDetails extends ApiKeyListItem {
 export interface CreateApiKeyInput {
   organizationId: string;
   projectId?: string | null;
-  createdByKeyId: string;
+  createdByKeyId?: string;
+  createdByUserId?: string;
   name: string;
   description?: string | null;
   role: ApiKeyRole;
@@ -106,7 +108,7 @@ export class ApiKeyService {
         `SELECT id, name, description, key_prefix, role, environment, status,
                 last_used_at, expires_at, created_at
          FROM api_keys
-         WHERE organization_id = ? AND status != 'revoked'
+         WHERE organization_id = ? AND status NOT IN ('revoked', 'deactivated')
          ORDER BY created_at DESC`
       )
       .bind(organizationId)
@@ -121,7 +123,7 @@ export class ApiKeyService {
         `SELECT id, name, description, key_prefix, role, environment, status,
                 last_used_at, expires_at, created_at
          FROM api_keys
-         WHERE project_id = ? AND status != 'revoked'
+         WHERE project_id = ? AND status NOT IN ('revoked', 'deactivated')
          ORDER BY created_at DESC`
       )
       .bind(projectId)
@@ -162,37 +164,67 @@ export class ApiKeyService {
     const { key, prefix } = createApiKeyMaterial(input.environment);
     const keyHash = await hashString(key, input.pepper);
 
-    const creatorKey = await this.db
-      .prepare("SELECT created_by FROM api_keys WHERE id = ?")
-      .bind(input.createdByKeyId)
-      .first<{ created_by: string }>();
+    let createdBy = input.createdByUserId?.trim() || "";
 
-    const createdBy = creatorKey?.created_by ?? "system";
+    if (!createdBy && input.createdByKeyId) {
+      const creatorKey = await this.db
+        .prepare("SELECT created_by FROM api_keys WHERE id = ?")
+        .bind(input.createdByKeyId)
+        .first<{ created_by: string }>();
+      createdBy = creatorKey?.created_by || "";
+    }
 
-    await this.db
-      .prepare(
-        `INSERT INTO api_keys (
+    const actor = await this.db
+      .prepare("SELECT id FROM users WHERE id = ?")
+      .bind(createdBy)
+      .first<{ id: string }>();
+
+    if (!actor) {
+      throw new AppError("INTERNAL_ERROR", "Authenticated actor could not be resolved");
+    }
+
+    try {
+      await this.db
+        .prepare(
+          `INSERT INTO api_keys (
           id, organization_id, project_id, created_by, name, description, key_prefix, key_hash,
           role, permissions, environment, allowed_ips, signing_wallet_id, expires_at, status
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')`
-      )
-      .bind(
-        keyId,
-        input.organizationId,
-        input.projectId ?? null,
-        createdBy,
-        input.name,
-        input.description ?? null,
-        prefix,
-        keyHash,
-        input.role,
-        input.permissions ? JSON.stringify(input.permissions) : null,
-        input.environment,
-        input.allowedIps ? JSON.stringify(input.allowedIps) : null,
-        input.signingWalletId ?? null,
-        input.expiresAt ?? null
-      )
-      .run();
+        )
+        .bind(
+          keyId,
+          input.organizationId,
+          input.projectId ?? null,
+          createdBy,
+          input.name,
+          input.description ?? null,
+          prefix,
+          keyHash,
+          input.role,
+          input.permissions ? JSON.stringify(input.permissions) : null,
+          input.environment,
+          input.allowedIps ? JSON.stringify(input.allowedIps) : null,
+          input.signingWalletId ?? null,
+          input.expiresAt ?? null
+        )
+        .run();
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("UNIQUE")) {
+        throw new AppError(
+          "CONFLICT",
+          "Failed to create API key due to a key collision. Please retry."
+        );
+      }
+
+      if (error instanceof Error && error.message.includes("FOREIGN KEY")) {
+        throw new AppError(
+          "INTERNAL_ERROR",
+          "Creator account is not linked to this organization. Re-authenticate and try again."
+        );
+      }
+
+      throw error;
+    }
 
     return {
       id: keyId,
@@ -292,7 +324,13 @@ export class ApiKeyService {
     };
   }
 
-  async revokeApiKey(keyId: string, organizationId: string): Promise<{ keyHash: string } | null> {
+  async revokeApiKey(
+    keyId: string,
+    organizationId: string
+  ): Promise<{
+    keyHash: string;
+    revokedAt: string;
+  } | null> {
     const key = await this.db
       .prepare("SELECT id, key_hash FROM api_keys WHERE id = ? AND organization_id = ?")
       .bind(keyId, organizationId)
@@ -302,12 +340,13 @@ export class ApiKeyService {
       return null;
     }
 
+    const now = new Date().toISOString();
     await this.db
-      .prepare("UPDATE api_keys SET status = 'revoked', revoked_at = datetime('now') WHERE id = ?")
-      .bind(keyId)
+      .prepare("UPDATE api_keys SET status = 'deactivated', revoked_at = ? WHERE id = ?")
+      .bind(now, keyId)
       .run();
 
-    return { keyHash: key.key_hash };
+    return { keyHash: key.key_hash, revokedAt: now };
   }
 
   private mapListRow(row: ApiKeyListRow): ApiKeyListItem {

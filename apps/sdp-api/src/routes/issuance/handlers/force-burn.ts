@@ -11,6 +11,7 @@ import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
 import type { Context } from "hono";
 import { forceBurnSchema } from "../schemas";
+import { buildIdempotencyMetadata } from "./idempotency";
 
 type AppContext = Context<{ Bindings: Env }>;
 type TokenRecord = Awaited<ReturnType<TokenService["getToken"]>>;
@@ -177,7 +178,14 @@ export const executeForceBurn = async (c: AppContext) => {
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
   const source = assertValidAddress(parsed.data.forceBurn.source, "source");
 
-  const tx = await tokenService.createTransaction({
+  const idempotencyMetadata = buildIdempotencyMetadata(c.req.header("Idempotency-Key"), {
+    tokenId,
+    operation: "force_burn",
+    mode: "execute",
+    params: parsed.data,
+  });
+
+  const { transaction: tx, replayed } = await tokenService.createTransaction({
     tokenId,
     organizationId: auth.organizationId,
     type: "force_burn",
@@ -187,8 +195,14 @@ export const executeForceBurn = async (c: AppContext) => {
       delegateAuthority: permanentDelegateRaw,
       memo: parsed.data.forceBurn.memo,
     },
+    idempotencyKey: idempotencyMetadata.idempotencyKey,
+    idempotencyFingerprint: idempotencyMetadata.idempotencyFingerprint,
     initiatedByKeyId: auth.id,
   });
+
+  if (replayed) {
+    return success(c, { transaction: tx });
+  }
 
   const mosaic = createMosaicService(c.env, signer);
 

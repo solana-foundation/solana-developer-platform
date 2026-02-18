@@ -6,7 +6,7 @@ import type { ApiKeyRole, Permission } from "./permissions";
 
 export type ApiKeyEnvironment = "sandbox" | "production";
 
-export type ApiKeyStatus = "active" | "revoked" | "expired";
+export type ApiKeyStatus = "active" | "revoked" | "expired" | "deactivated";
 
 export type RateLimitTier = "standard" | "elevated" | "unlimited";
 

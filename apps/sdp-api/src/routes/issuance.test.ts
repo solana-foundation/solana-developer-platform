@@ -15,7 +15,7 @@ import {
 } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/d1";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Check if running in mock mode (no RPC access)
 const isMockMode = (env as { SOLANA_MOCK?: string }).SOLANA_MOCK === "true";
@@ -379,6 +379,122 @@ describe("Issuance Routes", () => {
       const body = await res.json();
       expect(body.data.token.name).toBe("Updated Token Name");
       expect(body.data.token.description).toBe("New description");
+    });
+  });
+
+  describe("POST /v1/issuance/tokens/:tokenId/supply/refresh", () => {
+    let activeTokenId: string;
+
+    beforeEach(async () => {
+      if (!(env as { SOLANA_RPC_URL?: string }).SOLANA_RPC_URL) {
+        (env as { SOLANA_RPC_URL?: string }).SOLANA_RPC_URL = "https://rpc.invalid.test";
+      }
+
+      const db = (env as { DB: D1Database }).DB;
+
+      await db
+        .prepare(
+          `INSERT INTO issued_tokens (id, project_id, organization_id, mint_address, mint_authority, freeze_authority,
+           name, symbol, decimals, total_supply_cached, is_mintable, freeze_authority_enabled, allowlist_enabled, status, created_by)
+           VALUES (?, ?, ?, ?, ?, ?, 'Refresh Token', 'RFSH', 9, '0', 1, 1, 0, 'active', ?)`
+        )
+        .bind(
+          TEST_ACTIVE_TOKEN.id,
+          TEST_PROJECT.id,
+          TEST_ORG.id,
+          TEST_ACTIVE_TOKEN.mintAddress,
+          TEST_ACTIVE_TOKEN.mintAuthority,
+          TEST_ACTIVE_TOKEN.freezeAuthority,
+          TEST_PROJECT_API_KEY.id
+        )
+        .run();
+
+      activeTokenId = TEST_ACTIVE_TOKEN.id;
+    });
+
+    it("refreshes cached supply from RPC", async () => {
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: "1",
+            result: {
+              value: {
+                amount: "1500000000",
+              },
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
+      );
+
+      const res = await app.request(
+        `/v1/issuance/tokens/${activeTokenId}/supply/refresh`,
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
+        },
+        env
+      );
+
+      fetchSpy.mockRestore();
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.data.token.id).toBe(activeTokenId);
+      expect(body.data.token.totalSupply).toBe("1.5");
+      expect(body.data.token.totalSupplyUpdatedAt).toBeDefined();
+    });
+
+    it("returns 400 for undeployed token", async () => {
+      const createRes = await app.request(
+        "/v1/issuance/tokens",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({ name: "Pending Token", symbol: "PND" }),
+        },
+        env
+      );
+      const created = await createRes.json();
+      const pendingTokenId = created.data.token.id;
+
+      const res = await app.request(
+        `/v1/issuance/tokens/${pendingTokenId}/supply/refresh`,
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
+        },
+        env
+      );
+
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error.code).toBe("TOKEN_NOT_DEPLOYED");
+    });
+
+    it("returns 502 when RPC call fails", async () => {
+      const fetchSpy = vi
+        .spyOn(globalThis, "fetch")
+        .mockResolvedValue(new Response("upstream unavailable", { status: 503 }));
+
+      const res = await app.request(
+        `/v1/issuance/tokens/${activeTokenId}/supply/refresh`,
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
+        },
+        env
+      );
+
+      fetchSpy.mockRestore();
+
+      expect(res.status).toBe(502);
+      const body = await res.json();
+      expect(body.error.code).toBe("SOLANA_RPC_ERROR");
     });
   });
 

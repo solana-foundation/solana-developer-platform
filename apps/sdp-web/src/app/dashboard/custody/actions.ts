@@ -30,7 +30,8 @@ export async function initializeCustody(formData: FormData) {
   }
 
   revalidatePath("/dashboard/custody");
-  redirect("/dashboard/custody");
+  revalidatePath("/dashboard/wallets");
+  redirect("/dashboard/wallets");
 }
 
 export async function switchCustodyProvider(formData: FormData) {
@@ -55,7 +56,8 @@ export async function switchCustodyProvider(formData: FormData) {
   }
 
   revalidatePath("/dashboard/custody");
-  redirect("/dashboard/custody");
+  revalidatePath("/dashboard/wallets");
+  redirect("/dashboard/wallets");
 }
 
 export async function createCustodyWallet(formData: FormData) {
@@ -75,7 +77,8 @@ export async function createCustodyWallet(formData: FormData) {
   });
 
   revalidatePath("/dashboard/custody");
-  redirect("/dashboard/custody");
+  revalidatePath("/dashboard/wallets");
+  redirect("/dashboard/wallets");
 }
 
 export async function setDefaultCustodyWallet(formData: FormData) {
@@ -90,5 +93,6 @@ export async function setDefaultCustodyWallet(formData: FormData) {
   });
 
   revalidatePath("/dashboard/custody");
-  redirect("/dashboard/custody");
+  revalidatePath("/dashboard/wallets");
+  redirect("/dashboard/wallets");
 }

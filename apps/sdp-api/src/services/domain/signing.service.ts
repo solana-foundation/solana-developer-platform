@@ -419,22 +419,53 @@ export class SigningService {
     const apiBaseUrl =
       parsed.provider === "privy" ? (parsed.apiBaseUrl ?? this.env.PRIVY_API_BASE_URL) : undefined;
 
-    const provisioned = await provisionPrivyWallet(this.env, { apiBaseUrl });
+    let provisioned: { walletId: string; address: string };
+    try {
+      provisioned = await provisionPrivyWallet(this.env, { apiBaseUrl });
+    } catch (error) {
+      if (error instanceof SigningError) {
+        throw error;
+      }
+
+      throw new SigningError(
+        `Failed to provision Privy wallet: ${error instanceof Error ? error.message : "Unknown error"}`,
+        "NETWORK_ERROR",
+        error instanceof Error ? error : undefined
+      );
+    }
+
     const walletId = normalizePrivyWalletId(provisioned.walletId);
 
-    const wallet = await this.configStore.createWallet(config.id, {
-      walletId,
-      publicKey: provisioned.address,
-      label: params.label,
-      purpose: params.purpose,
-    });
+    let wallet: CustodyWallet;
+    try {
+      wallet = await this.configStore.createWallet(config.id, {
+        walletId,
+        publicKey: provisioned.address,
+        label: params.label,
+        purpose: params.purpose,
+      });
+    } catch (error) {
+      throw new SigningError(
+        `Failed to persist wallet record: ${error instanceof Error ? error.message : "Unknown error"}`,
+        "NETWORK_ERROR",
+        error instanceof Error ? error : undefined
+      );
+    }
 
     if (params.setDefault) {
-      await this.env.DB.prepare(
-        `UPDATE custody_configs SET default_wallet_id = ?, updated_at = datetime('now') WHERE id = ?`
-      )
-        .bind(walletId, config.id)
-        .run();
+      try {
+        await this.env.DB.prepare(
+          `UPDATE custody_configs SET default_wallet_id = ?, updated_at = datetime('now') WHERE id = ?`
+        )
+          .bind(walletId, config.id)
+          .run();
+      } catch (error) {
+        throw new SigningError(
+          `Failed to update default wallet: ${error instanceof Error ? error.message : "Unknown error"}`,
+          "NETWORK_ERROR",
+          error instanceof Error ? error : undefined
+        );
+      }
 
       this.providerCache.delete(config.id);
     }
