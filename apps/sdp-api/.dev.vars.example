@@ -10,3 +10,7 @@ FEE_PAYMENT_PROVIDER=kora
 
 # Clerk webhook (required for Clerk org linking)
 CLERK_WEBHOOK_SECRET=whsec_...
+
+# Clerk invitation redirect settings
+FRONTEND_URL=http://localhost:3000
+CLERK_INVITATION_REDIRECT_URL=http://localhost:3000/sign-in

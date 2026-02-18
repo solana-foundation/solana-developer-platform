@@ -1,5 +1,21 @@
 # Solana Developer Platform
 
+## Clerk URL Configuration
+
+Configure Clerk URLs through environment variables so invite/login links never resolve to localhost in deployed environments.
+
+- `apps/sdp-web` (`.env.local` or deployment environment):
+  - `NEXT_PUBLIC_CLERK_SIGN_IN_URL`
+  - `NEXT_PUBLIC_CLERK_SIGN_UP_URL`
+  - `NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL`
+  - `NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL`
+  - Optional: `NEXT_PUBLIC_CLERK_SIGN_IN_FORCE_REDIRECT_URL`, `NEXT_PUBLIC_CLERK_SIGN_UP_FORCE_REDIRECT_URL`
+- `apps/sdp-api` (Cloudflare Worker variables per environment):
+  - `FRONTEND_URL` (example: `https://app.example.com`)
+  - `CLERK_INVITATION_REDIRECT_URL` (recommended, example: `https://app.example.com/sign-in`)
+
+For local Worker development, copy `apps/sdp-api/.dev.vars.example` to `apps/sdp-api/.dev.vars`.
+
 ## Integration Tests (Devnet)
 
 The integration test suite runs against Solana **devnet** and signs real transactions using the **local custody** provider.

@@ -66,11 +66,48 @@ async function getClerkOrgId(db: D1Database, organizationId: string): Promise<st
 }
 
 function resolveInviteRedirectUrl(env: Env): string | undefined {
-  const base = env.FRONTEND_URL?.replace(/\/$/, "");
+  const configured = env.CLERK_INVITATION_REDIRECT_URL?.trim();
+  if (configured) {
+    return configured;
+  }
+
+  const base = env.FRONTEND_URL?.trim().replace(/\/$/, "");
   if (!base) {
     return undefined;
   }
-  return `${base}/members`;
+  return `${base}/sign-in`;
+}
+
+function assertInviteRedirectUrl(env: Env, redirectUrl: string | undefined): string | undefined {
+  if (env.ENVIRONMENT === "development") {
+    return redirectUrl;
+  }
+
+  if (!redirectUrl) {
+    throw new AppError(
+      "INTERNAL_ERROR",
+      "Invite redirect URL is missing. Set CLERK_INVITATION_REDIRECT_URL or FRONTEND_URL."
+    );
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(redirectUrl);
+  } catch {
+    throw new AppError(
+      "INTERNAL_ERROR",
+      "Invite redirect URL is invalid. Set CLERK_INVITATION_REDIRECT_URL to a full https URL."
+    );
+  }
+
+  if (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1") {
+    throw new AppError(
+      "INTERNAL_ERROR",
+      "Invite redirect URL points to localhost in a non-development environment."
+    );
+  }
+
+  return redirectUrl;
 }
 
 function randomBase64Url(byteLength: number): string {
@@ -189,7 +226,7 @@ export const inviteMember = async (c: AppContext) => {
   const inviterUserId = userId || inviterKey?.created_by || null;
 
   const clerkService = new ClerkOrganizationsService(c.env);
-  const redirectUrl = resolveInviteRedirectUrl(c.env);
+  const redirectUrl = assertInviteRedirectUrl(c.env, resolveInviteRedirectUrl(c.env));
   const clerkInvitation = await clerkService.createOrganizationInvitation({
     organizationId: clerkOrgId,
     inviterUserId: clerk.clerkUserId,

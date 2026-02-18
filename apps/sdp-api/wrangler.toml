@@ -31,6 +31,7 @@ id = "local-sessions"
 ENVIRONMENT = "development"
 API_VERSION = "v1"
 EMAIL_FROM = "noreply@mail.solana.org"
+# Local-only defaults for invitation redirects are defined in .dev.vars (see .dev.vars.example).
 
 # Dev environment
 [env.dev]
@@ -62,6 +63,7 @@ id = "56172f4bd6484367af2eaf0039246802"
 ENVIRONMENT = "development"
 API_VERSION = "v1"
 EMAIL_FROM = "noreply@mail.solana.org"
+# Set FRONTEND_URL and/or CLERK_INVITATION_REDIRECT_URL in Cloudflare for this environment.
 SOLANA_NETWORK = "devnet"
 SOLANA_RPC_URL = "https://api.devnet.solana.com"
 FEE_PAYMENT_PROVIDER = "kora"
@@ -97,6 +99,7 @@ id = "d610bc5eecd74c3586b0a13c73e995fb"
 ENVIRONMENT = "staging"
 API_VERSION = "v1"
 EMAIL_FROM = "noreply@mail.solana.org"
+# Set FRONTEND_URL and/or CLERK_INVITATION_REDIRECT_URL in Cloudflare for this environment.
 
 # Production environment
 [env.production]
@@ -128,3 +131,4 @@ id = "67fb59b197f84084b42d595cb058a722"
 ENVIRONMENT = "production"
 API_VERSION = "v1"
 EMAIL_FROM = "noreply@mail.solana.org"
+# Set FRONTEND_URL and/or CLERK_INVITATION_REDIRECT_URL in Cloudflare for this environment.
