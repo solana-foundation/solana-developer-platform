@@ -157,10 +157,25 @@ function assertInviteRedirectUrl(env: Env, redirectUrl: string | undefined): str
     );
   }
 
-  if (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1") {
+  if (parsed.protocol !== "https:") {
     throw new AppError(
       "INTERNAL_ERROR",
-      "Invite redirect URL points to localhost in a non-development environment."
+      "Invite redirect URL must use https in a non-development environment."
+    );
+  }
+
+  const host = parsed.hostname.toLowerCase();
+  const isLoopback =
+    host === "localhost" ||
+    host === "127.0.0.1" ||
+    host === "0.0.0.0" ||
+    host === "::1" ||
+    host === "[::1]";
+
+  if (isLoopback) {
+    throw new AppError(
+      "INTERNAL_ERROR",
+      "Invite redirect URL points to a loopback host in a non-development environment."
     );
   }
 
