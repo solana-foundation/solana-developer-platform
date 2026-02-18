@@ -7,6 +7,15 @@ export const metadata: Metadata = {
   description: "SDP dashboard",
 };
 
+const clerkSignInUrl = process.env.NEXT_PUBLIC_CLERK_SIGN_IN_URL || "/sign-in";
+const clerkSignUpUrl = process.env.NEXT_PUBLIC_CLERK_SIGN_UP_URL || "/sign-up";
+const clerkSignInFallbackRedirectUrl =
+  process.env.NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL || "/dashboard";
+const clerkSignUpFallbackRedirectUrl =
+  process.env.NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL || "/dashboard";
+const clerkSignInForceRedirectUrl = process.env.NEXT_PUBLIC_CLERK_SIGN_IN_FORCE_REDIRECT_URL;
+const clerkSignUpForceRedirectUrl = process.env.NEXT_PUBLIC_CLERK_SIGN_UP_FORCE_REDIRECT_URL;
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -16,10 +25,12 @@ export default function RootLayout({
     <html lang="en">
       <body>
         <ClerkProvider
-          signInUrl="/sign-in"
-          signUpUrl="/sign-up"
-          signInFallbackRedirectUrl="/dashboard"
-          signUpFallbackRedirectUrl="/dashboard"
+          signInUrl={clerkSignInUrl}
+          signUpUrl={clerkSignUpUrl}
+          signInFallbackRedirectUrl={clerkSignInFallbackRedirectUrl}
+          signUpFallbackRedirectUrl={clerkSignUpFallbackRedirectUrl}
+          signInForceRedirectUrl={clerkSignInForceRedirectUrl}
+          signUpForceRedirectUrl={clerkSignUpForceRedirectUrl}
         >
           {children}
         </ClerkProvider>

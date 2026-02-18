@@ -30,6 +30,8 @@ export interface Env {
   EMAIL_FROM?: string;
   RESEND_API_KEY?: string;
   FRONTEND_URL?: string;
+  CLERK_INVITATION_REDIRECT_URL?: string;
+  CLERK_INVITATION_REDIRECT_ALLOWED_HOST_SUFFIXES?: string;
 
   // Clerk configuration
   CLERK_ISSUER?: string;

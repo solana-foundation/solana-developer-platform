@@ -1,4 +1,5 @@
 import { auth } from "@clerk/nextjs/server";
+import { headers as nextHeaders } from "next/headers";
 
 function getApiBaseUrl(): string {
   const base =
@@ -38,15 +39,41 @@ async function getClerkToken(): Promise<string> {
 
 type SdpApiRequestFn = (path: string, options?: RequestInit) => Promise<Response>;
 
+async function resolveSdpWebOrigin(): Promise<string | undefined> {
+  try {
+    const requestHeaders = await nextHeaders();
+    const forwardedHost = requestHeaders.get("x-forwarded-host");
+    const host = forwardedHost || requestHeaders.get("host");
+
+    if (host) {
+      const forwardedProto = requestHeaders.get("x-forwarded-proto");
+      const isLocal = host.startsWith("localhost") || host.startsWith("127.0.0.1");
+      const protocol = forwardedProto || (isLocal ? "http" : "https");
+      return `${protocol}://${host}`;
+    }
+  } catch {
+    // Request headers may be unavailable in some server-only execution paths.
+  }
+
+  const vercelUrl = process.env.VERCEL_URL?.trim();
+  if (vercelUrl) {
+    return `https://${vercelUrl}`;
+  }
+
+  return undefined;
+}
+
 function createSdpApiRequest(token: string): SdpApiRequestFn {
   return async (path: string, options: RequestInit = {}): Promise<Response> => {
     const url = `${getApiBaseUrl()}${path.startsWith("/") ? path : `/${path}`}`;
+    const webOrigin = await resolveSdpWebOrigin();
 
     return fetch(url, {
       ...options,
       headers: {
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
+        ...(webOrigin ? { "X-SDP-Web-Origin": webOrigin } : {}),
         ...(options.headers || {}),
       },
       cache: "no-store",
