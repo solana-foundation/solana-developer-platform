@@ -267,6 +267,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Issuance Endpoint
 
       const sourceTokenAccount = await mintToWallet(tokenId, TEST_WALLETS.wallet1, "3");
       const destinationTokenAccount = await mintToWallet(tokenId, TEST_WALLETS.wallet2, "1");
+      await mintToWallet(tokenId, custodyAddress, "1");
 
       const burnPrepareRes = await request(`/v1/issuance/tokens/${tokenId}/burn/prepare`, {
         method: "POST",
@@ -275,7 +276,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Issuance Endpoint
         },
         body: JSON.stringify({
           burn: {
-            source: sourceTokenAccount,
+            source: custodyAddress,
             amount: "1",
           },
         }),
@@ -366,6 +367,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Issuance Endpoint
       const tokenId = await createAndDeployStablecoin("Issuance Execute Coverage", "ISEXEC");
       const sourceTokenAccount = await mintToWallet(tokenId, TEST_WALLETS.wallet1, "4");
       const destinationTokenAccount = await mintToWallet(tokenId, TEST_WALLETS.wallet2, "1");
+      await mintToWallet(tokenId, custodyAddress, "1");
 
       const pauseRes = await request(`/v1/issuance/tokens/${tokenId}/pause`, {
         method: "POST",
@@ -456,7 +458,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Issuance Endpoint
         },
         body: JSON.stringify({
           burn: {
-            source: sourceTokenAccount,
+            source: custodyAddress,
             amount: "1",
           },
         }),
@@ -528,7 +530,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Issuance Endpoint
       });
       expect(refreshSupplyRes.status).toBe(200);
       const refreshed = (await refreshSupplyRes.json()) as TokenApiResponse;
-      expect(refreshed.data.token.totalSupply).toBe("3");
+      expect(refreshed.data.token.totalSupply).toBe("4");
 
       const confirmedTransactionsRes = await request(
         `/v1/issuance/tokens/${tokenId}/transactions?status=confirmed&page=1&pageSize=50`
