@@ -64,7 +64,65 @@ async function getClerkOrgId(db: D1Database, organizationId: string): Promise<st
   return row?.provider_org_id ?? null;
 }
 
-function resolveInviteRedirectUrl(env: Env): string | undefined {
+function parseHostname(urlValue: string | undefined): string | undefined {
+  const value = urlValue?.trim();
+  if (!value) {
+    return undefined;
+  }
+
+  try {
+    return new URL(value).hostname.toLowerCase();
+  } catch {
+    return undefined;
+  }
+}
+
+function resolveDynamicInviteRedirectUrl(c: AppContext): string | undefined {
+  const originHeader = c.req.header("x-sdp-web-origin")?.trim();
+  if (!originHeader) {
+    return undefined;
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(originHeader);
+  } catch {
+    return undefined;
+  }
+
+  const host = parsed.hostname.toLowerCase();
+  const isLocal = host === "localhost" || host === "127.0.0.1";
+  if (!isLocal && parsed.protocol !== "https:") {
+    return undefined;
+  }
+
+  const exactAllowedHosts = [
+    parseHostname(c.env.CLERK_INVITATION_REDIRECT_URL),
+    parseHostname(c.env.FRONTEND_URL),
+  ].filter((value): value is string => Boolean(value));
+
+  const suffixes = c.env.CLERK_INVITATION_REDIRECT_ALLOWED_HOST_SUFFIXES?.split(",")
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean);
+
+  const hostAllowed =
+    exactAllowedHosts.includes(host) ||
+    Boolean(suffixes?.some((suffix) => host.endsWith(suffix.replace(/^\*\./, "."))));
+
+  if (!hostAllowed) {
+    return undefined;
+  }
+
+  return `${parsed.origin}/sign-in`;
+}
+
+function resolveInviteRedirectUrl(c: AppContext): string | undefined {
+  const dynamic = resolveDynamicInviteRedirectUrl(c);
+  if (dynamic) {
+    return dynamic;
+  }
+
+  const env = c.env;
   const configured = env.CLERK_INVITATION_REDIRECT_URL?.trim();
   if (configured) {
     return configured;
@@ -187,7 +245,7 @@ export const inviteMember = async (c: AppContext) => {
   const inviterUserId = userId || inviterKey?.created_by || null;
 
   const clerkService = new ClerkOrganizationsService(c.env);
-  const redirectUrl = assertInviteRedirectUrl(c.env, resolveInviteRedirectUrl(c.env));
+  const redirectUrl = assertInviteRedirectUrl(c.env, resolveInviteRedirectUrl(c));
   const clerkInvitation = await clerkService.createOrganizationInvitation({
     organizationId: clerkOrgId,
     inviterUserId: clerk.clerkUserId,

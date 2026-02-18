@@ -13,6 +13,7 @@ Configure Clerk URLs through environment variables so invite/login links never r
 - `apps/sdp-api` (Cloudflare Worker variables per environment):
   - `FRONTEND_URL` (example: `https://app.example.com`)
   - `CLERK_INVITATION_REDIRECT_URL` (recommended, example: `https://app.example.com/sign-in`)
+  - Optional: `CLERK_INVITATION_REDIRECT_ALLOWED_HOST_SUFFIXES` (comma-separated suffixes for dynamic web-origin redirects, example: `-solana-foundation.vercel.app`)
 
 For local Worker development, copy `apps/sdp-api/.dev.vars.example` to `apps/sdp-api/.dev.vars`.
 
