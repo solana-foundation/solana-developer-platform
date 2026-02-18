@@ -297,6 +297,8 @@ export interface TokenTransactionOverrides {
   organizationId?: string;
   type?: TokenTransaction["type"];
   status?: TokenTransaction["status"];
+  idempotencyKey?: string | null;
+  idempotencyFingerprint?: string | null;
   signature?: string | null;
   serializedTx?: string | null;
   params?: Record<string, unknown>;
@@ -319,6 +321,8 @@ export function createTokenTransaction(
     organizationId: `org_factory_${n.toString().padStart(8, "0")}`,
     type: "mint",
     status: "pending",
+    idempotencyKey: null,
+    idempotencyFingerprint: null,
     signature: null,
     serializedTx: null,
     params: {

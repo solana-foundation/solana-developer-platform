@@ -86,7 +86,7 @@ export const refreshTokenSupply = async (c: AppContext) => {
 
   const auditService = new AuditService(c.env.DB);
   await auditService.log(c, {
-    action: "refresh_supply",
+    action: "update",
     resourceType: "token",
     resourceId: tokenId,
     metadata: {
