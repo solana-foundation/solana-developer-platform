@@ -124,7 +124,7 @@ jobs:
         run: pnpm --filter ./apps/sdp-api build
 
   integration_tests:
-    name: Integration Tests (Devnet/Kora)
+    name: Integration Tests
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:

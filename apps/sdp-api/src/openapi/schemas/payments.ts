@@ -315,7 +315,6 @@ export const transferSchema = z
 
 export const prepareTransferResponseSchema = z
   .object({
-    transfer: transferSchema.openapi({ description: "Transfer transaction record." }),
     preparedTransaction: preparedTransactionSchema.openapi({
       description: "Prepared transaction for client-side signing.",
     }),

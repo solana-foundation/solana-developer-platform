@@ -9,7 +9,6 @@ export type {
   PaymentWalletPolicyRow,
   PaymentsRepository,
   PaymentsRepositoryContext,
-  UpdatePaymentTransferInput,
   UpsertPaymentWalletPolicyInput,
 } from "./payments.repository";
 export type {

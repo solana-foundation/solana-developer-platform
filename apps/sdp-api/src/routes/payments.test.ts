@@ -5,7 +5,7 @@ import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/d1";
 import { clearKVNamespaces, seedCachedApiKey } from "@/test/mocks/kv";
 import type { CachedApiKey } from "@sdp/types";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const TEST_CONFIG_ID = "cust_cfg_payments_test";
 const TEST_CUSTODY_WALLET_ID = "cwlt_payments_test";
@@ -140,8 +140,137 @@ async function seedWalletPolicy(params: {
   ]);
 }
 
+type JsonRpcRequest = {
+  id: string | number;
+  method: string;
+  params?: unknown[];
+};
+
+function jsonRpcResult(id: string | number, result: unknown) {
+  return { jsonrpc: "2.0", id, result };
+}
+
+function mockRpcFetch(
+  resolver: (
+    request: JsonRpcRequest
+  ) => Promise<{ jsonrpc: string; id: string | number; result: unknown }>
+) {
+  return vi.spyOn(globalThis, "fetch").mockImplementation(async (_input, init) => {
+    const body = init?.body ? JSON.parse(String(init.body)) : null;
+
+    if (Array.isArray(body)) {
+      const responses = await Promise.all(
+        body.map((request) => resolver(request as JsonRpcRequest))
+      );
+      return new Response(JSON.stringify(responses), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    const response = await resolver(body as JsonRpcRequest);
+    return new Response(JSON.stringify(response), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  });
+}
+
+function signatureRow(input: {
+  signature: string;
+  slot: number;
+  blockTime: number;
+  confirmationStatus?: "processed" | "confirmed" | "finalized";
+  err?: unknown;
+}) {
+  return {
+    signature: input.signature,
+    slot: input.slot,
+    err: input.err ?? null,
+    confirmationStatus: input.confirmationStatus ?? "confirmed",
+    blockTime: input.blockTime,
+  };
+}
+
+function solTransferTx(input: {
+  slot: number;
+  blockTime: number;
+  source: string;
+  destination: string;
+  lamports: string;
+}) {
+  return {
+    slot: input.slot,
+    blockTime: input.blockTime,
+    meta: {
+      fee: 5000,
+      err: null,
+    },
+    transaction: {
+      message: {
+        accountKeys: [input.source, input.destination],
+        instructions: [
+          {
+            parsed: {
+              type: "transfer",
+              info: {
+                source: input.source,
+                destination: input.destination,
+                lamports: input.lamports,
+              },
+            },
+          },
+        ],
+      },
+    },
+  };
+}
+
+function splTransferTx(input: {
+  slot: number;
+  blockTime: number;
+  source: string;
+  destination: string;
+  mint: string;
+  uiAmount: string;
+}) {
+  return {
+    slot: input.slot,
+    blockTime: input.blockTime,
+    meta: {
+      fee: 5000,
+      err: null,
+    },
+    transaction: {
+      message: {
+        accountKeys: [input.source, input.destination, input.mint],
+        instructions: [
+          {
+            parsed: {
+              type: "transferChecked",
+              info: {
+                source: input.source,
+                destination: input.destination,
+                authority: input.source,
+                mint: input.mint,
+                tokenAmount: {
+                  uiAmountString: input.uiAmount,
+                },
+              },
+            },
+          },
+        ],
+      },
+    },
+  };
+}
+
 describe("Payments routes", () => {
   beforeEach(async () => {
+    if (!(env as { SOLANA_RPC_URL?: string }).SOLANA_RPC_URL) {
+      (env as { SOLANA_RPC_URL?: string }).SOLANA_RPC_URL = "https://rpc.invalid.test";
+    }
+
     await seedTestDatabase(env);
     await seedAuthAndWallet();
   });
@@ -149,6 +278,7 @@ describe("Payments routes", () => {
   afterEach(async () => {
     await clearTestDatabase(env);
     await clearKVNamespaces(env);
+    vi.restoreAllMocks();
   });
 
   it("blocks prepare transfer when destination is outside allowlist", async () => {
@@ -224,6 +354,14 @@ describe("Payments routes", () => {
       maxDailyAmount: "2.0",
     });
 
+    const fetchSpy = mockRpcFetch(async (request) => {
+      // biome-ignore lint/nursery/noSecrets: JSON-RPC method literal in test fixture.
+      if (request.method === "getSignaturesForAddress") {
+        return jsonRpcResult(request.id, []);
+      }
+      return jsonRpcResult(request.id, null);
+    });
+
     const now = new Date().toISOString();
     await env.DB.prepare(
       `INSERT INTO payment_transfers
@@ -242,7 +380,7 @@ describe("Payments routes", () => {
         null,
         "transfer",
         "outbound",
-        "confirmed",
+        "pending",
         now,
         now
       )
@@ -275,5 +413,176 @@ describe("Payments routes", () => {
     }>();
     expect(transfers.results).toHaveLength(1);
     expect(transfers.results[0]?.id).toBe("xfr_existing_daily_limit");
+
+    fetchSpy.mockRestore();
+  });
+
+  it("rejects listTransfers walletAddress when address is not owned by authenticated org", async () => {
+    const res = await app.request(
+      `/v1/payments/transfers?walletAddress=${TEST_SOLANA_ADDRESSES.wallet2}`,
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+      },
+      env
+    );
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { code: string; message: string } };
+    expect(body.error.code).toBe("BAD_REQUEST");
+    expect(body.error.message).toContain("walletAddress");
+  });
+
+  it("returns NOT_FOUND when transfer signature does not involve any org wallet", async () => {
+    const fetchSpy = mockRpcFetch(async (request) => {
+      if (request.method === "getTransaction") {
+        return jsonRpcResult(
+          request.id,
+          solTransferTx({
+            slot: 123,
+            blockTime: 1_735_920_000,
+            source: TEST_SOLANA_ADDRESSES.wallet2,
+            destination: TEST_SOLANA_ADDRESSES.wallet3,
+            lamports: "500000000",
+          })
+        );
+      }
+      return jsonRpcResult(request.id, null);
+    });
+
+    const res = await app.request(
+      "/v1/payments/transfers/sig_unowned_transfer",
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+      },
+      env
+    );
+
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("NOT_FOUND");
+
+    fetchSpy.mockRestore();
+  });
+
+  it("returns exact total after token and direction filters in listTransfers", async () => {
+    const nowUnix = 1_735_920_000;
+
+    const fetchSpy = mockRpcFetch(async (request) => {
+      // biome-ignore lint/nursery/noSecrets: JSON-RPC method literal in test fixture.
+      if (request.method === "getSignaturesForAddress") {
+        const params = (request.params ?? []) as Array<{
+          limit?: number;
+          before?: string;
+          commitment?: string;
+        }>;
+        const options = params[1];
+        if (options?.before) {
+          return jsonRpcResult(request.id, []);
+        }
+
+        return jsonRpcResult(request.id, [
+          signatureRow({
+            signature: "sig_sol_out",
+            slot: 300,
+            blockTime: nowUnix,
+            confirmationStatus: "confirmed",
+          }),
+          signatureRow({
+            signature: "sig_sol_in",
+            slot: 299,
+            blockTime: nowUnix - 10,
+            confirmationStatus: "confirmed",
+          }),
+          signatureRow({
+            signature: "sig_usdc_out",
+            slot: 298,
+            blockTime: nowUnix - 20,
+            confirmationStatus: "confirmed",
+          }),
+        ]);
+      }
+
+      if (request.method === "getTransaction") {
+        const signature = String(request.params?.[0] ?? "");
+        if (signature === "sig_sol_out") {
+          return jsonRpcResult(
+            request.id,
+            solTransferTx({
+              slot: 300,
+              blockTime: nowUnix,
+              source: TEST_SOLANA_ADDRESSES.wallet1,
+              destination: TEST_SOLANA_ADDRESSES.wallet2,
+              lamports: "1000000000",
+            })
+          );
+        }
+
+        if (signature === "sig_sol_in") {
+          return jsonRpcResult(
+            request.id,
+            solTransferTx({
+              slot: 299,
+              blockTime: nowUnix - 10,
+              source: TEST_SOLANA_ADDRESSES.wallet2,
+              destination: TEST_SOLANA_ADDRESSES.wallet1,
+              lamports: "2000000000",
+            })
+          );
+        }
+
+        if (signature === "sig_usdc_out") {
+          return jsonRpcResult(
+            request.id,
+            splTransferTx({
+              slot: 298,
+              blockTime: nowUnix - 20,
+              source: TEST_SOLANA_ADDRESSES.wallet1,
+              destination: TEST_SOLANA_ADDRESSES.wallet3,
+              mint: TEST_SOLANA_ADDRESSES.mint,
+              uiAmount: "5",
+            })
+          );
+        }
+      }
+
+      return jsonRpcResult(request.id, null);
+    });
+
+    const query = new URLSearchParams({
+      token: "SOL",
+      direction: "outbound",
+      page: "1",
+      pageSize: "50",
+    });
+    const res = await app.request(
+      `/v1/payments/transfers?${query.toString()}`,
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+      },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      data: Array<{ id: string; signature: string; token: string; direction: string }>;
+      meta: { total: number };
+    };
+    expect(body.meta.total).toBe(1);
+    expect(body.data).toHaveLength(1);
+    expect(body.data[0]?.id).toBe("sig_sol_out");
+    expect(body.data[0]?.signature).toBe("sig_sol_out");
+    expect(body.data[0]?.token).toBe("SOL");
+    expect(body.data[0]?.direction).toBe("outbound");
+
+    fetchSpy.mockRestore();
   });
 });

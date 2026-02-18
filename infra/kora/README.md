@@ -16,10 +16,10 @@ cp apps/sdp-api/.dev.vars.example apps/sdp-api/.dev.vars
 pnpm kora:devnet:check
 ```
 
-3) Run the Kora integration test:
+3) Run the integration suite:
 
 ```bash
-pnpm kora:devnet:test
+pnpm test:integration
 ```
 
 ## Environment Variables

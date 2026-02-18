@@ -178,7 +178,10 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     request: {
       query: z.object({
         wallet: z.string().optional().openapi({ description: "Filter by wallet ID." }),
-        walletAddress: z.string().optional().openapi({ description: "Filter by wallet address." }),
+        walletAddress: z
+          .string()
+          .optional()
+          .openapi({ description: "Filter by an address owned by the authenticated scope." }),
         token: z.string().optional().openapi({ description: "Filter by token symbol or mint." }),
         direction: transferDirectionSchema
           .optional()
@@ -228,7 +231,8 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     tags: ["Payments"],
     summary: "Get transfer",
     operationId: "getPaymentTransfer",
-    description: "Retrieves details for a specific transfer.",
+    description:
+      "Retrieves transfer details by on-chain signature, or by pending SDP transfer id (`xfr_*`).",
     security: [{ apiKeyAuth: [] }],
     request: {
       params: z.object({

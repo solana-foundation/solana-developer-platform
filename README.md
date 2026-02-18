@@ -96,4 +96,4 @@ Notes:
 - Even with Kora fee sponsorship, the custody authority account must exist on-chain (some downstream SDKs require this).
   - The test preflight will attempt a small `requestAirdrop` on devnet if the custody account does not exist.
   - If your `SOLANA_RPC_URL` provider disables airdrops, you must fund the custody public key once (any amount) and rerun.
-- If you want to run only the Kora smoke test: `pnpm kora:devnet:test`.
+- To run the integration suite (including Kora tests): `pnpm test:integration`.

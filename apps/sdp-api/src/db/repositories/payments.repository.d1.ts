@@ -5,7 +5,6 @@ import type {
   PaymentWalletPolicyRow,
   PaymentsRepository,
   PaymentsRepositoryContext,
-  UpdatePaymentTransferInput,
 } from "./payments.repository";
 
 const mapTransferRow = (row: typeof paymentTransfers.$inferSelect): PaymentTransferRow => ({
@@ -71,20 +70,6 @@ export const createD1PaymentsRepository = (
       .all();
   };
 
-  const buildTransferUpdateSet = (
-    existing: typeof paymentTransfers.$inferSelect,
-    input: UpdatePaymentTransferInput
-  ) => ({
-    status: input.status ?? existing.status,
-    signature: input.signature ?? existing.signature,
-    serializedTx: input.serializedTx ?? existing.serializedTx,
-    slot: input.slot ?? existing.slot,
-    blockTime: input.blockTime ?? existing.blockTime,
-    fee: input.fee ?? existing.fee,
-    error: input.error ?? existing.error,
-    updatedAt: input.updatedAt,
-  });
-
   return {
     async createTransfer(input) {
       await db
@@ -113,22 +98,6 @@ export const createD1PaymentsRepository = (
       return row ? mapTransferRow(row) : null;
     },
 
-    async updateTransfer(input) {
-      const existing = await getTransferByIdInternal(input.transferId);
-      if (!existing) {
-        return null;
-      }
-
-      await db
-        .update(paymentTransfers)
-        .set(buildTransferUpdateSet(existing, input))
-        .where(eq(paymentTransfers.id, input.transferId))
-        .run();
-
-      const updated = await getTransferByIdInternal(input.transferId);
-      return updated ? mapTransferRow(updated) : null;
-    },
-
     async getTransferById(params) {
       const row = await db
         .select()
@@ -143,42 +112,6 @@ export const createD1PaymentsRepository = (
         .get();
 
       return row ? mapTransferRow(row) : null;
-    },
-
-    async getTransferBySignature(params) {
-      const row = await db
-        .select()
-        .from(paymentTransfers)
-        .where(
-          toTransferScopeWhere({
-            organizationId: params.organizationId,
-            projectId: params.projectId,
-            extra: eq(paymentTransfers.signature, params.signature),
-          })
-        )
-        .get();
-
-      return row ? mapTransferRow(row) : null;
-    },
-
-    async listTransfersBySignatures(params) {
-      if (params.signatures.length === 0) {
-        return [];
-      }
-
-      const rows = await db
-        .select()
-        .from(paymentTransfers)
-        .where(
-          toTransferScopeWhere({
-            organizationId: params.organizationId,
-            projectId: params.projectId,
-            extra: inArray(paymentTransfers.signature, params.signatures),
-          })
-        )
-        .all();
-
-      return rows.map(mapTransferRow);
     },
 
     async listTransferAmounts(params) {

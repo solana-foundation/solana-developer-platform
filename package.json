@@ -34,13 +34,12 @@
     "format": "biome format --write .",
     "format:check": "biome format .",
     "test": "turbo run test --filter=!@sdp/api-integration",
-    "test:integration": "turbo run test --filter=@sdp/api-integration",
+    "test:integration": "pnpm --filter @sdp/api-integration test",
     "check": "biome check --write . && turbo run typecheck",
     "kora:up": "docker compose -f infra/kora/docker-compose.yml up -d",
     "kora:down": "docker compose -f infra/kora/docker-compose.yml down",
     "kora:logs": "docker compose -f infra/kora/docker-compose.yml logs -f kora",
-    "kora:devnet:check": "infra/kora/cloud-run/check.sh",
-    "kora:devnet:test": "pnpm --filter @sdp/api-integration test -- src/tests/kora.test.ts"
+    "kora:devnet:check": "infra/kora/cloud-run/check.sh"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.0",

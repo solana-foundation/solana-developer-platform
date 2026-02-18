@@ -62,9 +62,9 @@ export default defineWorkersConfig({
             RUN_INTEGRATION_TESTS: "true",
             SOLANA_MOCK: "false",
             API_KEY_PEPPER: getEnv("API_KEY_PEPPER", "test-pepper-for-integration"),
-            SOLANA_RPC_URL: getEnv("SOLANA_RPC_URL"),
+            SOLANA_RPC_URL: getEnv("SOLANA_RPC_URL", ""),
             SOLANA_NETWORK: getEnv("SOLANA_NETWORK", "devnet"),
-            CUSTODY_PRIVATE_KEY: getEnv("CUSTODY_PRIVATE_KEY"),
+            CUSTODY_PRIVATE_KEY: getEnv("CUSTODY_PRIVATE_KEY", ""),
             CUSTODY_ENCRYPTION_KEY: custodyEncryptionKey,
             // Kora configuration - only set if explicitly configured
             // Local: KORA_RPC_URL=http://localhost:8080 pnpm test

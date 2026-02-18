@@ -46,8 +46,8 @@ export const signingRequestIdParamSchema = idSchema(
 );
 export const walletIdParamSchema = idSchema("Wallet identifier.", "wal_example");
 export const transferIdParamSchema = idSchema(
-  "Transfer identifier (SDP record ID, not the on-chain signature).",
-  "xfr_example"
+  "Transfer identifier (on-chain signature or pending SDP transfer ID).",
+  "5Nf2...exampleSignature"
 );
 
 export const userIdSchema = idSchema("User identifier.", "usr_example");
