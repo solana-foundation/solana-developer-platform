@@ -100,6 +100,16 @@ export interface PaymentsRepository {
     organizationId: string;
     projectId: string | null;
   }): Promise<PaymentTransferRow[]>;
+  listTransferAmounts(params: {
+    organizationId: string;
+    projectId: string | null;
+    walletId: string;
+    token: string;
+    direction: PaymentTransferDirection;
+    statuses: PaymentTransferStatus[];
+    createdAtFrom: string;
+    createdAtTo: string;
+  }): Promise<string[]>;
   getWalletPoliciesByCustodyWalletId(custodyWalletId: string): Promise<PaymentWalletPolicyRow[]>;
   upsertWalletPolicies(input: UpsertPaymentWalletPolicyInput[]): Promise<PaymentWalletPolicyRow[]>;
 }
