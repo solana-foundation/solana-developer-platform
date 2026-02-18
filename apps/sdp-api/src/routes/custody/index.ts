@@ -29,8 +29,8 @@ wallets.post("/", requirePermissions("custody:admin"), createWallet);
 wallets.post("/default-wallet", requirePermissions("custody:admin"), setDefaultWallet);
 
 // Read configuration and wallets
-wallets.get("/config", requirePermissions("custody:read"), getConfig);
-wallets.get("/", requirePermissions("custody:read"), listWallets);
-wallets.get("/public-key", requirePermissions("custody:read"), getPublicKey);
+wallets.get("/config", requirePermissions("wallets:read"), getConfig);
+wallets.get("/", requirePermissions("wallets:read"), listWallets);
+wallets.get("/public-key", requirePermissions("wallets:read"), getPublicKey);
 
 export default wallets;
