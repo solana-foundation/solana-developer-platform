@@ -28,6 +28,7 @@ import members from "@/routes/members";
 import onboarding from "@/routes/onboarding";
 import openapi from "@/routes/openapi";
 import organizations from "@/routes/organizations";
+import payments from "@/routes/payments";
 import projects from "@/routes/projects";
 import webhooks from "@/routes/webhooks";
 
@@ -89,6 +90,7 @@ v1.route("/projects", projects);
 v1.route("/issuance", issuance);
 v1.route("/wallets", wallets);
 v1.route("/onboarding", onboarding);
+v1.route("/payments", payments);
 
 app.route("/v1", v1);
 

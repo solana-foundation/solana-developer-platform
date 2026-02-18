@@ -62,18 +62,16 @@ export const walletSchema = z
   })
   .openapi({ description: "Managed wallet." });
 
-export const walletPolicyModeSchema = z.enum(["none", "allowlist"]).openapi({
-  description: "Policy mode for outbound destinations.",
-  example: "allowlist",
-});
-
 export const walletPolicySchema = z
   .object({
-    walletId: walletIdParamSchema,
-    mode: walletPolicyModeSchema,
-    destinationAllowlist: z
-      .array(solanaAddressSchema)
-      .openapi({ description: "Allowed destination addresses when allowlist mode is enabled." }),
+    walletId: walletIdParamSchema.openapi({
+      description: "Custody wallet ID from /v1/custody/wallets.",
+      example: "wal_example",
+    }),
+    destinationAllowlist: z.array(solanaAddressSchema).openapi({
+      description:
+        "Allowed destination addresses. An empty array means no destination restrictions.",
+    }),
     maxTransferAmount: tokenAmountSchema
       .optional()
       .openapi({ description: "Maximum amount allowed per transfer." }),
@@ -89,14 +87,17 @@ export const walletPolicySchema = z
       example: "2025-01-02T00:00:00.000Z",
     }),
   })
-  .openapi({ description: "Wallet policy configuration." });
+  .openapi({
+    description:
+      "Payment policy configuration for a custody-managed wallet. Wallet lifecycle belongs to /v1/custody, while payment controls are internally stored as typed policy records.",
+  });
 
 export const updateWalletPolicyRequestSchema = z
   .object({
-    mode: walletPolicyModeSchema,
-    destinationAllowlist: z
-      .array(solanaAddressSchema)
-      .openapi({ description: "Allowed destination addresses when allowlist mode is enabled." }),
+    destinationAllowlist: z.array(solanaAddressSchema).openapi({
+      description:
+        "Allowed destination addresses. An empty array means no destination restrictions.",
+    }),
     maxTransferAmount: tokenAmountSchema
       .optional()
       .openapi({ description: "Maximum amount allowed per transfer." }),
@@ -104,11 +105,14 @@ export const updateWalletPolicyRequestSchema = z
       .optional()
       .openapi({ description: "Maximum total amount allowed per day." }),
   })
-  .openapi({ description: "Update wallet policy request payload." });
+  .openapi({
+    description:
+      "Update wallet policy request payload. Controls map to typed internal policy records for provider-specific extensibility.",
+  });
 
 export const tokenBalanceSchema = z
   .object({
-    token: z.string().openapi({ description: "Token symbol.", example: "USDC" }),
+    token: z.string().openapi({ description: "Token symbol or mint address.", example: "USDC" }),
     mint: solanaAddressSchema.openapi({
       description: "Token mint address.",
       example: "So11111111111111111111111111111111111111112",
@@ -121,24 +125,34 @@ export const tokenBalanceSchema = z
     decimals: z.number().int().openapi({ description: "Token decimals.", example: 6 }),
     confidential: z
       .boolean()
-      .openapi({ description: "Confidential balance flag.", example: false }),
+      .optional()
+      .openapi({ description: "Confidential balance flag (when applicable).", example: false }),
   })
   .openapi({ description: "Token balance details." });
 
 export const walletBalancesSchema = z
   .object({
-    walletId: walletIdParamSchema,
+    walletId: walletIdParamSchema.openapi({
+      description: "Custody wallet ID from /v1/custody/wallets.",
+      example: "wal_example",
+    }),
     address: solanaAddressSchema.openapi({ description: "Wallet address." }),
     balances: z.array(tokenBalanceSchema).openapi({ description: "Token balances." }),
   })
-  .openapi({ description: "Wallet balances payload." });
+  .openapi({
+    description:
+      "Balance payload for a custody-managed wallet. Use /v1/custody/wallets for wallet provisioning and listing.",
+  });
 
 export const createTransferRequestSchema = z
   .object({
     projectId: projectIdParamSchema
       .optional()
       .openapi({ description: "Project identifier for the transfer context." }),
-    source: z.string().openapi({ description: "Source wallet ID." }),
+    source: z.string().openapi({
+      description: "Source custody wallet ID from /v1/custody/wallets.",
+      example: "wal_example",
+    }),
     destination: solanaAddressSchema.openapi({ description: "Destination wallet address." }),
     token: z.string().openapi({ description: "Token symbol or mint address." }),
     amount: tokenAmountSchema,
@@ -148,7 +162,10 @@ export const createTransferRequestSchema = z
       .optional()
       .openapi({ description: "Optional memo for the transfer." }),
   })
-  .openapi({ description: "Create transfer request payload." });
+  .openapi({
+    description:
+      "Create transfer request payload for a custody-managed source wallet. This endpoint does not provision wallets.",
+  });
 
 export const priorityFeeSchema = z
   .enum(["none", "low", "medium", "high", "auto"])
@@ -159,7 +176,10 @@ export const prepareTransferRequestSchema = z
     projectId: projectIdParamSchema
       .optional()
       .openapi({ description: "Project identifier for the transfer context." }),
-    source: z.string().openapi({ description: "Source wallet ID or pubkey." }),
+    source: z.string().openapi({
+      description: "Source custody wallet ID from /v1/custody/wallets.",
+      example: "wal_example",
+    }),
     destination: solanaAddressSchema.openapi({ description: "Destination wallet address." }),
     token: z.string().openapi({ description: "Token symbol or mint address." }),
     amount: tokenAmountSchema,
@@ -184,7 +204,10 @@ export const prepareTransferRequestSchema = z
       .optional()
       .openapi({ description: "Transaction preparation options." }),
   })
-  .openapi({ description: "Prepare transfer request payload." });
+  .openapi({
+    description:
+      "Prepare transfer request payload for a custody-managed source wallet. Wallet provisioning is handled by /v1/custody.",
+  });
 
 export const transferTypeSchema = z
   .enum(["transfer", "transfer_confidential"])
