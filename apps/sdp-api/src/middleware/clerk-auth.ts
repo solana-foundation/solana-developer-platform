@@ -98,7 +98,6 @@ async function ensureMembership(
   params: {
     organizationId: string;
     userId: string;
-    email: string;
     clerkRole?: string | null;
   }
 ): Promise<OrganizationRole> {
@@ -106,34 +105,7 @@ async function ensureMembership(
   if (existing?.role) {
     return existing.role as OrganizationRole;
   }
-
-  const pendingInvite = await db
-    .prepare(
-      `SELECT id, role, expires_at
-       FROM invitations
-       WHERE organization_id = ? AND email = ? AND status = 'pending'
-       ORDER BY created_at DESC
-       LIMIT 1`
-    )
-    .bind(params.organizationId, params.email.toLowerCase())
-    .first<{ id: string; role: string; expires_at: string }>();
-
-  let role: OrganizationRole | null = null;
-
-  if (pendingInvite) {
-    if (new Date(pendingInvite.expires_at) >= new Date()) {
-      role = pendingInvite.role as OrganizationRole;
-    } else {
-      await db
-        .prepare("UPDATE invitations SET status = 'expired' WHERE id = ?")
-        .bind(pendingInvite.id)
-        .run();
-    }
-  }
-
-  if (!role) {
-    role = mapClerkRoleToOrgRole(params.clerkRole);
-  }
+  const role = mapClerkRoleToOrgRole(params.clerkRole);
 
   const memberId = `mem_${crypto.randomUUID()}`;
   try {
@@ -149,15 +121,6 @@ async function ensureMembership(
     if (existingAfterInsert?.role) {
       return existingAfterInsert.role as OrganizationRole;
     }
-  }
-
-  if (pendingInvite && role === (pendingInvite.role as OrganizationRole)) {
-    await db
-      .prepare(
-        "UPDATE invitations SET status = 'accepted', accepted_at = datetime('now') WHERE id = ?"
-      )
-      .bind(pendingInvite.id)
-      .run();
   }
 
   return role;
@@ -181,7 +144,6 @@ async function buildClerkContext(c: Context<{ Bindings: Env }>, payload: ClerkJw
   const role = await ensureMembership(c.env.DB, {
     organizationId: orgIdentity.organization_id,
     userId: userIdentity.userId,
-    email,
     clerkRole: payload.org_role,
   });
 

@@ -1,12 +1,11 @@
 import { AppError, notFound } from "@/lib/errors";
-import { hashString } from "@/lib/hash";
 import { created, noContent, success } from "@/lib/response";
 import { AuditService } from "@/services/audit.service";
 import { ClerkOrganizationsService } from "@/services/clerk-organizations.service";
 import type { Env } from "@/types/env";
 import type { OrganizationRole } from "@sdp/types";
 import type { Context } from "hono";
-import { acceptSchema, inviteSchema } from "./schemas";
+import { inviteSchema } from "./schemas";
 
 type AppContext = Context<{ Bindings: Env }>;
 
@@ -110,32 +109,6 @@ function assertInviteRedirectUrl(env: Env, redirectUrl: string | undefined): str
   return redirectUrl;
 }
 
-function randomBase64Url(byteLength: number): string {
-  const bytes = new Uint8Array(byteLength);
-  crypto.getRandomValues(bytes);
-
-  const globalWithBuffer = globalThis as {
-    Buffer?: {
-      from: (input: Uint8Array) => { toString: (encoding: "base64") => string };
-    };
-  };
-
-  if (globalWithBuffer.Buffer) {
-    return globalWithBuffer.Buffer.from(bytes)
-      .toString("base64")
-      .replace(/\+/g, "-")
-      .replace(/\//g, "_")
-      .replace(/=+$/g, "");
-  }
-
-  let binary = "";
-  for (const byte of bytes) {
-    binary += String.fromCharCode(byte);
-  }
-
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
-}
-
 export const listMembers = async (c: AppContext) => {
   const { organizationId } = resolveActor(c);
 
@@ -195,18 +168,6 @@ export const inviteMember = async (c: AppContext) => {
     throw new AppError("CONFLICT", "User is already a member of this organization");
   }
 
-  // Check for pending invitation
-  const existingInvite = await c.env.DB.prepare(
-    `SELECT id FROM invitations
-     WHERE organization_id = ? AND email = ? AND status = 'pending'`
-  )
-    .bind(organizationId, normalizedEmail)
-    .first();
-
-  if (existingInvite) {
-    throw new AppError("CONFLICT", "Invitation already sent to this email");
-  }
-
   if (!clerk?.clerkUserId) {
     throw new AppError("UNAUTHORIZED", "Clerk user required to send invites");
   }
@@ -239,33 +200,12 @@ export const inviteMember = async (c: AppContext) => {
     },
   });
 
-  // Create local invitation record for role mapping
-  const invitationId = `inv_${crypto.randomUUID()}`;
-  const token = randomBase64Url(32);
-  const tokenHash = await hashString(token);
-  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(); // 7 days
-
-  await c.env.DB.prepare(
-    `INSERT INTO invitations (id, organization_id, email, role, invited_by, token_hash, expires_at, status)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')`
-  )
-    .bind(
-      invitationId,
-      organizationId,
-      normalizedEmail,
-      role,
-      inviterUserId || "system",
-      tokenHash,
-      expiresAt
-    )
-    .run();
-
   // Audit log
   const auditService = new AuditService(c.env.DB);
   await auditService.log(c, {
     action: "invite",
     resourceType: "invitation",
-    resourceId: invitationId,
+    resourceId: clerkInvitation.id,
     metadata: {
       email: normalizedEmail,
       role,
@@ -277,105 +217,17 @@ export const inviteMember = async (c: AppContext) => {
     apiKeyId: apiKeyId || undefined,
   });
 
-  const response = {
+  return created(c, {
     invitation: {
-      id: invitationId,
+      id: clerkInvitation.id,
       email: normalizedEmail,
       role,
-      expiresAt,
-      clerkInvitationId: clerkInvitation.id,
+      status: clerkInvitation.status,
+      createdAt: clerkInvitation.created_at
+        ? new Date(clerkInvitation.created_at).toISOString()
+        : undefined,
     },
-    ...(c.env.ENVIRONMENT === "development" && { token }),
-  };
-
-  return created(c, response);
-};
-
-export const acceptInvitation = async (c: AppContext) => {
-  const body = await c.req.json();
-  const parsed = acceptSchema.safeParse(body);
-
-  if (!parsed.success) {
-    throw new AppError("BAD_REQUEST", "Invalid request body", {
-      errors: parsed.error.flatten().fieldErrors,
-    });
-  }
-
-  const { token, name } = parsed.data;
-  const tokenHash = await hashString(token);
-
-  // Get invitation
-  const invitation = await c.env.DB.prepare(
-    `SELECT id, organization_id, email, role, expires_at, status
-     FROM invitations
-     WHERE token_hash = ?`
-  )
-    .bind(tokenHash)
-    .first<{
-      id: string;
-      organization_id: string;
-      email: string;
-      role: string;
-      expires_at: string;
-      status: string;
-    }>();
-
-  if (!invitation) {
-    throw new AppError("INVALID_INVITATION", "Invalid invitation token");
-  }
-
-  if (invitation.status !== "pending") {
-    throw new AppError("INVALID_INVITATION", "Invitation is no longer valid");
-  }
-
-  if (new Date(invitation.expires_at) < new Date()) {
-    throw new AppError("EXPIRED_INVITATION", "Invitation has expired");
-  }
-
-  // Check if user exists
-  let user = await c.env.DB.prepare("SELECT id, email FROM users WHERE email = ?")
-    .bind(invitation.email)
-    .first<{ id: string; email: string }>();
-
-  if (!user) {
-    // Create new user
-    const userId = `usr_${crypto.randomUUID()}`;
-    await c.env.DB.prepare(
-      `INSERT INTO users (id, email, name, email_verified, status)
-       VALUES (?, ?, ?, 1, 'active')`
-    )
-      .bind(userId, invitation.email, name ?? null)
-      .run();
-
-    user = { id: userId, email: invitation.email };
-  }
-
-  // Create membership
-  const memberId = `mem_${crypto.randomUUID()}`;
-  await c.env.DB.prepare(
-    `INSERT INTO organization_members (id, organization_id, user_id, role, status)
-     VALUES (?, ?, ?, ?, 'active')`
-  )
-    .bind(memberId, invitation.organization_id, user.id, invitation.role)
-    .run();
-
-  // Mark invitation as accepted
-  await c.env.DB.prepare(
-    "UPDATE invitations SET status = 'accepted', accepted_at = datetime('now') WHERE id = ?"
-  )
-    .bind(invitation.id)
-    .run();
-
-  // Audit log
-  const auditService = new AuditService(c.env.DB);
-  await auditService.log(c, {
-    action: "accept_invite",
-    resourceType: "invitation",
-    resourceId: invitation.id,
-    metadata: { email: invitation.email },
   });
-
-  return success(c, { success: true });
 };
 
 export const removeMember = async (c: AppContext) => {

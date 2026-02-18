@@ -1,7 +1,4 @@
-import {
-  acceptSchema as acceptSchemaBase,
-  inviteSchema as inviteSchemaBase,
-} from "../../routes/members/schemas";
+import { inviteSchema as inviteSchemaBase } from "../../routes/members/schemas";
 import {
   createOrgSchema as createOrgSchemaBase,
   updateOrgSchema as updateOrgSchemaBase,
@@ -111,9 +108,13 @@ export const invitationSchema = z
     role: z
       .enum(["owner", "admin", "developer", "viewer"])
       .openapi({ description: "Role offered to the invitee.", example: "developer" }),
-    expiresAt: isoDateTimeSchema.openapi({
-      description: "Invitation expiration timestamp.",
-      example: "2025-02-01T00:00:00.000Z",
+    status: z.string().openapi({
+      description: "Invitation status returned by Clerk.",
+      example: "pending",
+    }),
+    createdAt: isoDateTimeSchema.optional().openapi({
+      description: "Invitation creation timestamp.",
+      example: "2025-01-01T00:00:00.000Z",
     }),
   })
   .openapi({ description: "Invitation summary." });
@@ -202,16 +203,3 @@ export const inviteMemberRequestSchema = inviteSchemaBase
     }),
   })
   .openapi({ description: "Invite member request body." });
-
-export const acceptInvitationRequestSchema = acceptSchemaBase
-  .extend({
-    token: acceptSchemaBase.shape.token.openapi({
-      description: "Invitation token from email.",
-      example: "invitation_token",
-    }),
-    name: acceptSchemaBase.shape.name.openapi({
-      description: "Optional name to set for the user.",
-      example: "Example User",
-    }),
-  })
-  .openapi({ description: "Accept invitation request body." });
