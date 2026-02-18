@@ -10,7 +10,6 @@ import { registerIssuancePaths } from "./paths/issuance";
 import { registerMemberPaths } from "./paths/members";
 import { registerOnboardingPaths } from "./paths/onboarding";
 import { registerOrganizationPaths } from "./paths/organizations";
-import { registerPaymentsPaths } from "./paths/payments";
 import { registerProjectPaths } from "./paths/projects";
 
 export function createOpenApiDocument(): OpenAPIObject {
@@ -38,6 +37,13 @@ export function createOpenApiDocument(): OpenAPIObject {
     description: "Admin key for internal allowlist management.",
   });
 
+  registry.registerComponent("securitySchemes", "organizationRegistrationToken", {
+    type: "apiKey",
+    in: "header",
+    name: "x-organization-registration-token",
+    description: "Pre-shared token required for organization self-registration.",
+  });
+
   registerHealthPaths(registry);
   registerOrganizationPaths(registry);
   registerApiKeyPaths(registry);
@@ -46,7 +52,6 @@ export function createOpenApiDocument(): OpenAPIObject {
   registerCustodyPaths(registry);
   registerProjectPaths(registry);
   registerIssuancePaths(registry);
-  registerPaymentsPaths(registry);
   registerAdminPaths(registry);
   registerOnboardingPaths(registry);
 
@@ -58,7 +63,7 @@ export function createOpenApiDocument(): OpenAPIObject {
       title: "Solana Developer Platform API",
       version: "0.1.0",
       description:
-        "Production-only OpenAPI spec generated from API schemas and routes. Development-only behavior is intentionally omitted.",
+        "Production-only OpenAPI spec generated from API schemas and routes. API versioning is path-based: /v1 is the current contract, and breaking changes are introduced under a new path major (for example /v2). The OpenAPI info.version tracks spec/document revision for the current path contract.",
     },
     tags: [
       { name: "Health", description: "Service health and readiness endpoints." },
@@ -72,11 +77,6 @@ export function createOpenApiDocument(): OpenAPIObject {
       },
       { name: "Projects", description: "Project and project member management." },
       { name: "Issuance", description: "Token issuance, allowlists, and lifecycle operations." },
-      {
-        name: "Payments",
-        description:
-          "Payments behavior on top of custody-managed wallets (balances, policies, transfers). Wallet provisioning and custody configuration live under the Custody tag. Some payments endpoints remain draft and are explicitly marked.",
-      },
       { name: "Admin", description: "Administrative allowlist management." },
       { name: "Onboarding", description: "Clerk organization onboarding and linking." },
     ],

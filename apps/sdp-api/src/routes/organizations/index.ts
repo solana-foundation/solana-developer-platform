@@ -2,7 +2,7 @@
  * Organizations Routes
  */
 
-import { authMiddleware, requirePermissions } from "@/middleware/auth";
+import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import type { Env } from "@/types/env";
 import { Hono } from "hono";
 import {
@@ -18,7 +18,7 @@ const organizations = new Hono<{ Bindings: Env }>();
 organizations.post("/", createOrganization);
 
 // Protected routes below require authentication
-organizations.use("/:orgId/*", authMiddleware());
+organizations.use("/:orgId/*", unifiedAuthMiddleware({ allowClerk: true, allowSession: true }));
 
 organizations.get("/:orgId", requirePermissions("org:read"), getOrganization);
 organizations.patch("/:orgId", requirePermissions("org:write"), updateOrganization);

@@ -50,6 +50,7 @@ export interface Env {
   CUSTODY_PRIVATE_KEY?: string;
   SOLANA_MOCK?: string;
   RUN_INTEGRATION_TESTS?: string;
+  ORGANIZATION_REGISTRATION_TOKEN?: string;
 
   // Signing provider (custody backend via @solana/keychain)
   SIGNING_PROVIDER?: "local" | "fireblocks" | "privy";

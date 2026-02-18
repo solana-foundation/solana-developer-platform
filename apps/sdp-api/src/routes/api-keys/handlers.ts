@@ -1,4 +1,3 @@
-import { getAuth } from "@/lib/auth";
 import { AppError, notFound } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import { ApiKeyService } from "@/services/api-key.service";
@@ -12,6 +11,7 @@ import type {
   ApiKeyRole,
   CreateApiKeyResponse,
   ListApiKeysResponse,
+  Permission,
   RotateApiKeyResponse,
 } from "@sdp/types";
 import type { Context } from "hono";
@@ -19,9 +19,48 @@ import { apiKeyCreateSchema, apiKeyRotateSchema, apiKeyUpdateSchema } from "./sc
 
 type AppContext = Context<{ Bindings: Env }>;
 
+function resolveActor(c: AppContext): {
+  organizationId: string;
+  permissions: Permission[];
+  apiKeyId: string | null;
+  userId: string | null;
+} {
+  const apiKey = c.get("apiKey");
+  if (apiKey) {
+    return {
+      organizationId: apiKey.organizationId,
+      permissions: apiKey.permissions,
+      apiKeyId: apiKey.id,
+      userId: null,
+    };
+  }
+
+  const clerk = c.get("clerk");
+  if (clerk) {
+    return {
+      organizationId: clerk.organizationId,
+      permissions: clerk.permissions,
+      apiKeyId: null,
+      userId: clerk.userId,
+    };
+  }
+
+  const session = c.get("session");
+  if (session) {
+    return {
+      organizationId: session.organizationId,
+      permissions: session.permissions,
+      apiKeyId: null,
+      userId: session.userId,
+    };
+  }
+
+  throw new AppError("UNAUTHORIZED", "Authentication required");
+}
+
 export const listApiKeys = async (c: AppContext) => {
-  const auth = getAuth(c);
-  const orgId = auth.organizationId;
+  const actor = resolveActor(c);
+  const orgId = actor.organizationId;
 
   const apiKeyService = new ApiKeyService(c.env.DB);
   const apiKeys = await apiKeyService.listForOrganization(orgId);
@@ -33,7 +72,7 @@ export const listApiKeys = async (c: AppContext) => {
       keyPrefix: key.keyPrefix,
       role: key.role as ApiKeyRole,
       environment: key.environment as "sandbox" | "production",
-      status: key.status as "active" | "revoked" | "expired",
+      status: key.status,
       lastUsedAt: key.lastUsedAt,
       expiresAt: key.expiresAt,
       createdAt: key.createdAt,
@@ -44,8 +83,8 @@ export const listApiKeys = async (c: AppContext) => {
 };
 
 export const createApiKey = async (c: AppContext) => {
-  const auth = getAuth(c);
-  const orgId = auth.organizationId;
+  const actor = resolveActor(c);
+  const orgId = actor.organizationId;
 
   const body = await c.req.json();
   const parsed = apiKeyCreateSchema.safeParse(body);
@@ -70,7 +109,7 @@ export const createApiKey = async (c: AppContext) => {
     walletPurpose,
   } = parsed.data;
 
-  if (permissions && !auth.permissions.includes("*")) {
+  if (permissions && !actor.permissions.includes("*")) {
     throw new AppError("INSUFFICIENT_PERMISSIONS", "Custom permission sets require owner access");
   }
 
@@ -84,13 +123,13 @@ export const createApiKey = async (c: AppContext) => {
   let resolvedSigningWalletId: string | null | undefined = signingWalletId ?? undefined;
 
   if (provisionWallet) {
-    if (!(auth.permissions.includes("*") || auth.permissions.includes("custody:admin"))) {
+    if (!(actor.permissions.includes("*") || actor.permissions.includes("custody:admin"))) {
       throw new AppError("INSUFFICIENT_PERMISSIONS", "Required permissions: custody:admin");
     }
 
     const signingService = createSigningService(c.env);
     try {
-      const wallet = await signingService.createWallet(auth.organizationId, undefined, {
+      const wallet = await signingService.createWallet(actor.organizationId, undefined, {
         label: walletLabel,
         purpose: walletPurpose as WalletPurpose | undefined,
       });
@@ -124,10 +163,51 @@ export const createApiKey = async (c: AppContext) => {
     }
   }
 
+  const resolveCreatorFallback = async (): Promise<string | null> => {
+    if (actor.userId) {
+      return actor.userId;
+    }
+
+    if (!actor.apiKeyId) {
+      return null;
+    }
+
+    const creator = await c.env.DB.prepare(
+      `SELECT created_by
+       FROM api_keys
+       WHERE id = ? AND organization_id = ?`
+    )
+      .bind(actor.apiKeyId, orgId)
+      .first<{ created_by: string }>();
+
+    if (creator?.created_by) {
+      return creator.created_by;
+    }
+
+    const orgOwner = await c.env.DB.prepare(
+      `SELECT user_id
+       FROM organization_members
+       WHERE organization_id = ? AND role IN ('owner', 'admin')
+       ORDER BY created_at ASC
+       LIMIT 1`
+    )
+      .bind(orgId)
+      .first<{ user_id: string }>();
+
+    return orgOwner?.user_id ?? null;
+  };
+
+  const createdBy = await resolveCreatorFallback();
+
+  if (!createdBy) {
+    throw new AppError("UNAUTHORIZED", "Could not resolve authenticated user for API key creation");
+  }
+
   const apiKeyService = new ApiKeyService(c.env.DB);
   const createdKey = await apiKeyService.createApiKey({
     organizationId: orgId,
-    createdByKeyId: auth.id,
+    createdByUserId: createdBy,
+    createdByKeyId: actor.apiKeyId ?? undefined,
     name,
     description,
     role,
@@ -172,10 +252,10 @@ export const createApiKey = async (c: AppContext) => {
 
 export const getApiKey = async (c: AppContext) => {
   const { keyId } = c.req.param();
-  const auth = getAuth(c);
+  const actor = resolveActor(c);
 
   const apiKeyService = new ApiKeyService(c.env.DB);
-  const key = await apiKeyService.getDetails(keyId, auth.organizationId);
+  const key = await apiKeyService.getDetails(keyId, actor.organizationId);
 
   if (!key) {
     throw notFound("API key");
@@ -203,7 +283,7 @@ export const getApiKey = async (c: AppContext) => {
 
 export const updateApiKey = async (c: AppContext) => {
   const { keyId } = c.req.param();
-  const auth = getAuth(c);
+  const actor = resolveActor(c);
 
   const body = await c.req.json();
   const parsed = apiKeyUpdateSchema.safeParse(body);
@@ -218,7 +298,7 @@ export const updateApiKey = async (c: AppContext) => {
   const existing = await c.env.DB.prepare(
     "SELECT id, key_hash, project_id FROM api_keys WHERE id = ? AND organization_id = ?"
   )
-    .bind(keyId, auth.organizationId)
+    .bind(keyId, actor.organizationId)
     .first<{ id: string; key_hash: string; project_id: string | null }>();
 
   if (!existing) {
@@ -249,7 +329,7 @@ export const updateApiKey = async (c: AppContext) => {
   }
 
   if (parsed.data.permissions !== undefined) {
-    if (parsed.data.permissions && !auth.permissions.includes("*")) {
+    if (parsed.data.permissions && !actor.permissions.includes("*")) {
       throw new AppError("INSUFFICIENT_PERMISSIONS", "Custom permission sets require owner access");
     }
 
@@ -266,7 +346,7 @@ export const updateApiKey = async (c: AppContext) => {
          WHERE c.organization_id = ? AND w.wallet_id = ? AND c.status = 'active' AND w.status = 'active'
          LIMIT 1`
       )
-        .bind(auth.organizationId, parsed.data.signingWalletId)
+        .bind(actor.organizationId, parsed.data.signingWalletId)
         .first<{ project_id: string | null }>();
 
       if (!wallet) {
@@ -322,10 +402,10 @@ export const updateApiKey = async (c: AppContext) => {
 
 export const rotateApiKey = async (c: AppContext) => {
   const { keyId } = c.req.param();
-  const auth = getAuth(c);
+  const actor = resolveActor(c);
 
   // Prevent rotating the key being used
-  if (keyId === auth.id) {
+  if (actor.apiKeyId && keyId === actor.apiKeyId) {
     throw new AppError("BAD_REQUEST", "Cannot rotate the API key being used for this request");
   }
 
@@ -343,7 +423,7 @@ export const rotateApiKey = async (c: AppContext) => {
   const apiKeyService = new ApiKeyService(c.env.DB);
   const rotation = await apiKeyService.rotateApiKey(
     keyId,
-    auth.organizationId,
+    actor.organizationId,
     gracePeriodHours,
     c.env.API_KEY_PEPPER
   );
@@ -375,15 +455,48 @@ export const rotateApiKey = async (c: AppContext) => {
 
 export const revokeApiKey = async (c: AppContext) => {
   const { keyId } = c.req.param();
-  const auth = getAuth(c);
+  const actor = resolveActor(c);
 
   // Prevent revoking your own key
-  if (keyId === auth.id) {
+  if (actor.apiKeyId && keyId === actor.apiKeyId) {
     throw new AppError("BAD_REQUEST", "Cannot revoke the API key being used for this request");
   }
 
+  const body = await c.req.json().catch(() => ({}));
+  const confirmation =
+    body &&
+    typeof body === "object" &&
+    typeof (body as { confirmation?: unknown }).confirmation === "string"
+      ? String((body as { confirmation: string }).confirmation).trim()
+      : "";
+
+  const existing = await c.env.DB.prepare(
+    "SELECT id, name, status, revoked_at FROM api_keys WHERE id = ? AND organization_id = ?"
+  )
+    .bind(keyId, actor.organizationId)
+    .first<{ id: string; name: string; status: string; revoked_at: string | null }>();
+
+  if (!existing) {
+    throw notFound("API key");
+  }
+
+  if (existing.status === "deactivated" || existing.status === "revoked") {
+    return success(c, {
+      success: true,
+      revokedAt: existing.revoked_at ?? new Date().toISOString(),
+    });
+  }
+
+  if (!confirmation) {
+    throw new AppError("BAD_REQUEST", "Confirmation is required to deactivate an API key");
+  }
+
+  if (confirmation !== existing.name) {
+    throw new AppError("BAD_REQUEST", "Confirmation did not match the key name");
+  }
+
   const apiKeyService = new ApiKeyService(c.env.DB);
-  const revokedKey = await apiKeyService.revokeApiKey(keyId, auth.organizationId);
+  const revokedKey = await apiKeyService.revokeApiKey(keyId, actor.organizationId);
 
   if (!revokedKey) {
     throw notFound("API key");
@@ -396,13 +509,14 @@ export const revokeApiKey = async (c: AppContext) => {
   // Audit log
   const auditService = new AuditService(c.env.DB);
   await auditService.log(c, {
-    action: "revoke",
+    action: "delete",
     resourceType: "api_key",
     resourceId: keyId,
+    metadata: { action: "deactivate" },
   });
 
   return success(c, {
     success: true,
-    revokedAt: new Date().toISOString(),
+    revokedAt: revokedKey.revokedAt,
   });
 };

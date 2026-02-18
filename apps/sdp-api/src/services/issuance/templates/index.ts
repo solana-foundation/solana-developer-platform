@@ -16,6 +16,13 @@ export function listTemplates(): TokenTemplateInfo[] {
       id: template.id,
       name: template.name,
       description: template.description,
+      decimals: template.decimals,
+      maxDecimals: template.maxDecimals,
+      requiresAllowlist: template.requiresAllowlist,
+      allowlistOverridable: template.allowlistOverridable,
+      requiredExtensions: template.extensions.required,
+      availableExtensions: template.extensions.available,
+      defaultExtensions: template.defaultExtensions,
     };
   });
 }
@@ -30,6 +37,13 @@ export function getTemplateInfo(id: string): TokenTemplateInfo | undefined {
     id: template.id,
     name: template.name,
     description: template.description,
+    decimals: template.decimals,
+    maxDecimals: template.maxDecimals,
+    requiresAllowlist: template.requiresAllowlist,
+    allowlistOverridable: template.allowlistOverridable,
+    requiredExtensions: template.extensions.required,
+    availableExtensions: template.extensions.available,
+    defaultExtensions: template.defaultExtensions,
   };
 }
 

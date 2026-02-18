@@ -10,6 +10,7 @@ import type { Env } from "@/types/env";
 import { MINT_ALREADY_PAUSED_ERROR, MINT_NOT_PAUSED_ERROR } from "@solana/mosaic-sdk";
 import type { Context } from "hono";
 import { pauseTokenSchema } from "../schemas";
+import { buildIdempotencyMetadata } from "./idempotency";
 
 type AppContext = Context<{ Bindings: Env }>;
 type TokenRecord = Awaited<ReturnType<TokenService["getToken"]>>;
@@ -70,6 +71,30 @@ export const pauseToken = async (c: AppContext) => {
 
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
 
+  const idempotencyMetadata = buildIdempotencyMetadata(c.req.header("Idempotency-Key"), {
+    tokenId,
+    operation: "pause",
+    mode: "execute",
+    params: parsed.data,
+  });
+
+  const { transaction: tx, replayed } = await tokenService.createTransaction({
+    tokenId,
+    organizationId: auth.organizationId,
+    type: "pause",
+    params: {
+      signature: null,
+      slot: null,
+    },
+    idempotencyKey: idempotencyMetadata.idempotencyKey,
+    idempotencyFingerprint: idempotencyMetadata.idempotencyFingerprint,
+    initiatedByKeyId: auth.id,
+  });
+
+  if (replayed) {
+    return success(c, { transaction: tx });
+  }
+
   const mosaic = createMosaicService(c.env, signer);
 
   try {
@@ -80,16 +105,10 @@ export const pauseToken = async (c: AppContext) => {
     });
 
     await tokenService.updateToken(tokenId, { status: "paused" });
-
-    const tx = await tokenService.createTransaction({
-      tokenId,
-      organizationId: auth.organizationId,
-      type: "pause",
-      params: {
-        signature: result.signature,
-        slot: result.slot.toString(),
-      },
-      initiatedByKeyId: auth.id,
+    const confirmedTx = await tokenService.updateTransaction(tx.id, {
+      status: "confirmed",
+      signature: result.signature,
+      slot: Number(result.slot),
     });
 
     const auditService = new AuditService(c.env.DB);
@@ -104,11 +123,19 @@ export const pauseToken = async (c: AppContext) => {
       },
     });
 
-    return success(c, { transaction: tx });
+    return success(c, { transaction: confirmedTx });
   } catch (error) {
     if (error instanceof Error && error.message === MINT_ALREADY_PAUSED_ERROR) {
+      await tokenService.updateTransaction(tx.id, {
+        status: "failed",
+        error: error.message,
+      });
       throw new AppError("BAD_REQUEST", "Token is already paused");
     }
+    await tokenService.updateTransaction(tx.id, {
+      status: "failed",
+      error: error instanceof Error ? error.message : "Unknown error",
+    });
     throw error;
   }
 };
@@ -162,6 +189,30 @@ export const unpauseToken = async (c: AppContext) => {
 
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
 
+  const idempotencyMetadata = buildIdempotencyMetadata(c.req.header("Idempotency-Key"), {
+    tokenId,
+    operation: "unpause",
+    mode: "execute",
+    params: parsed.data,
+  });
+
+  const { transaction: tx, replayed } = await tokenService.createTransaction({
+    tokenId,
+    organizationId: auth.organizationId,
+    type: "unpause",
+    params: {
+      signature: null,
+      slot: null,
+    },
+    idempotencyKey: idempotencyMetadata.idempotencyKey,
+    idempotencyFingerprint: idempotencyMetadata.idempotencyFingerprint,
+    initiatedByKeyId: auth.id,
+  });
+
+  if (replayed) {
+    return success(c, { transaction: tx });
+  }
+
   const mosaic = createMosaicService(c.env, signer);
 
   try {
@@ -172,16 +223,10 @@ export const unpauseToken = async (c: AppContext) => {
     });
 
     await tokenService.updateToken(tokenId, { status: "active" });
-
-    const tx = await tokenService.createTransaction({
-      tokenId,
-      organizationId: auth.organizationId,
-      type: "unpause",
-      params: {
-        signature: result.signature,
-        slot: result.slot.toString(),
-      },
-      initiatedByKeyId: auth.id,
+    const confirmedTx = await tokenService.updateTransaction(tx.id, {
+      status: "confirmed",
+      signature: result.signature,
+      slot: Number(result.slot),
     });
 
     const auditService = new AuditService(c.env.DB);
@@ -196,11 +241,19 @@ export const unpauseToken = async (c: AppContext) => {
       },
     });
 
-    return success(c, { transaction: tx });
+    return success(c, { transaction: confirmedTx });
   } catch (error) {
     if (error instanceof Error && error.message === MINT_NOT_PAUSED_ERROR) {
+      await tokenService.updateTransaction(tx.id, {
+        status: "failed",
+        error: error.message,
+      });
       throw new AppError("BAD_REQUEST", "Token is not paused");
     }
+    await tokenService.updateTransaction(tx.id, {
+      status: "failed",
+      error: error instanceof Error ? error.message : "Unknown error",
+    });
     throw error;
   }
 };

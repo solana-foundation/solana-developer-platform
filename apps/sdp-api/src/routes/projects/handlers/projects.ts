@@ -23,17 +23,34 @@ export const createProject = async (c: AppContext) => {
     });
   }
 
-  // Get the user who created this key (for created_by)
-  const creatorKey = await c.env.DB.prepare("SELECT created_by FROM api_keys WHERE id = ?")
-    .bind(auth.id)
-    .first<{ created_by: string }>();
+  const resolveCreatorUserId = async (): Promise<string | null> => {
+    if (auth.userId) {
+      return auth.userId;
+    }
+
+    if (!auth.apiKeyId) {
+      return null;
+    }
+
+    const creator = await c.env.DB.prepare("SELECT created_by FROM api_keys WHERE id = ?")
+      .bind(auth.apiKeyId)
+      .first<{ created_by: string }>();
+
+    return creator?.created_by ?? null;
+  };
+
+  const creatorUserId = await resolveCreatorUserId();
+
+  if (!creatorUserId) {
+    throw new AppError("UNAUTHORIZED", "Could not resolve authenticated user for project creation");
+  }
 
   const projectService = new ProjectService(c.env.DB);
 
   try {
     const project = await projectService.createProject({
       organizationId: orgId,
-      createdBy: creatorKey?.created_by ?? "system",
+      createdBy: creatorUserId,
       name: parsed.data.name,
       slug: parsed.data.slug,
       description: parsed.data.description,

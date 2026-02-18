@@ -13,7 +13,7 @@ import { createTokenSchema, updateTokenSchema } from "../schemas";
 type AppContext = Context<{ Bindings: Env }>;
 
 export const createToken = async (c: AppContext) => {
-  const { auth, projectId, orgId } = requireProjectScope(c);
+  const { auth, projectId, orgId } = await requireProjectScope(c);
 
   const body = await c.req.json();
   const parsed = createTokenSchema.safeParse(body);
@@ -76,7 +76,7 @@ export const createToken = async (c: AppContext) => {
 };
 
 export const listTokens = async (c: AppContext) => {
-  const { projectId } = requireProjectScope(c);
+  const { projectId } = await requireProjectScope(c);
 
   const status = c.req.query("status") as "pending" | "active" | "paused" | "revoked" | undefined;
   const page = Number.parseInt(c.req.query("page") ?? "1", 10);
