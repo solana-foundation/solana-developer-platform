@@ -1,9 +1,10 @@
 "use server";
 
 import { sdpApiFetch } from "@/lib/sdp-api";
+import { ORGANIZATION_RPC_PROVIDERS, type OrganizationRpcProvider } from "@sdp/types";
 
 type OrganizationSettings = {
-  rpcProvider?: "default" | "triton" | "helius" | "alchemy";
+  rpcProvider?: OrganizationRpcProvider;
 };
 
 type OrganizationRecord = {
@@ -15,8 +16,12 @@ type UpdateOrganizationRpcSettingsResult = {
   status: "success" | "error";
   message: string;
   savedOrganizationId?: string;
-  savedRpcProvider?: "default" | "triton" | "helius" | "alchemy";
+  savedRpcProvider?: OrganizationRpcProvider;
 };
+
+function isOrganizationRpcProvider(value: string): value is OrganizationRpcProvider {
+  return ORGANIZATION_RPC_PROVIDERS.includes(value as OrganizationRpcProvider);
+}
 
 function toErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message) {
@@ -38,14 +43,15 @@ export async function updateOrganizationRpcSettingsAction(
     };
   }
 
-  const allowedProviders = new Set(["default", "triton", "helius", "alchemy"]);
-  const resolvedProvider = allowedProviders.has(rpcProvider) ? rpcProvider : "default";
+  const resolvedProvider: OrganizationRpcProvider = isOrganizationRpcProvider(rpcProvider)
+    ? rpcProvider
+    : "default";
 
   try {
     const updated = await sdpApiFetch<OrganizationRecord>(`/v1/organizations/${organizationId}`, {
       method: "PATCH",
       body: JSON.stringify({
-        settings: { rpcProvider: resolvedProvider as OrganizationSettings["rpcProvider"] },
+        settings: { rpcProvider: resolvedProvider },
       }),
     });
 
@@ -61,7 +67,7 @@ export async function updateOrganizationRpcSettingsAction(
       status: "success",
       message: "RPC settings saved.",
       savedOrganizationId: organizationId,
-      savedRpcProvider: persistedProvider as "default" | "triton" | "helius" | "alchemy",
+      savedRpcProvider: persistedProvider,
     };
   } catch (error) {
     return {

@@ -1,3 +1,4 @@
+import { PROJECT_RPC_PROVIDERS } from "@sdp/types";
 import {
   addMemberSchema as addMemberSchemaBase,
   createProjectSchema as createProjectSchemaBase,
@@ -17,7 +18,7 @@ import { userSchema } from "./organizations";
 
 export const projectSettingsSchema = z
   .object({
-    rpcProvider: z.enum(["default", "triton", "helius", "alchemy", "custom"]).optional().openapi({
+    rpcProvider: z.enum(PROJECT_RPC_PROVIDERS).optional().openapi({
       description:
         "Preferred RPC provider for this project. Defaults to `default` (round-robin managed providers). Use `custom` with `rpcEndpoint` for a dedicated endpoint.",
       example: "default",

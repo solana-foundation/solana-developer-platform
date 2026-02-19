@@ -1,6 +1,7 @@
+import { PROJECT_RPC_PROVIDERS } from "@sdp/types";
 import { z } from "zod";
 
-const projectRpcProviderSchema = z.enum(["default", "triton", "helius", "alchemy", "custom"]);
+const projectRpcProviderSchema = z.enum(PROJECT_RPC_PROVIDERS);
 
 export const createProjectSchema = z.object({
   name: z.string().min(1).max(100),

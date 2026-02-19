@@ -5,12 +5,14 @@
  */
 
 import type { ProjectRole } from "./permissions";
+import { ORGANIZATION_RPC_PROVIDERS } from "./organizations";
 
 export type ProjectEnvironment = "sandbox" | "beta" | "production";
 
 export type ProjectStatus = "active" | "archived";
 
-export type ProjectRpcProvider = "default" | "triton" | "helius" | "alchemy" | "custom";
+export const PROJECT_RPC_PROVIDERS = [...ORGANIZATION_RPC_PROVIDERS, "custom"] as const;
+export type ProjectRpcProvider = (typeof PROJECT_RPC_PROVIDERS)[number];
 
 // Re-export ProjectRole for convenience
 export type { ProjectRole } from "./permissions";

@@ -1,8 +1,12 @@
 import { AppError } from "@/lib/errors";
 import type { Env } from "@/types/env";
-import type { OrganizationSettings } from "@sdp/types";
+import {
+  ORGANIZATION_RPC_PROVIDERS,
+  type OrganizationRpcProvider,
+  type OrganizationSettings,
+} from "@sdp/types";
 
-export type ManagedRpcProviderId = "triton" | "helius" | "alchemy" | "default";
+export type ManagedRpcProviderId = OrganizationRpcProvider;
 export type ResolvedRpcProviderId = ManagedRpcProviderId;
 export type RpcSelectionMode = "organization_provider" | "round_robin_default";
 
@@ -72,9 +76,10 @@ const MAX_ORIGIN_BUCKETS = 20;
 const SEND_TRANSACTION_METHOD = ["send", "Transaction"].join("");
 const SEND_RAW_TRANSACTION_METHOD = ["sendRaw", "Transaction"].join("");
 const TRANSACTION_METHOD_NAMES = new Set([SEND_TRANSACTION_METHOD, SEND_RAW_TRANSACTION_METHOD]);
+const MANAGED_RPC_PROVIDER_SET = new Set<string>(ORGANIZATION_RPC_PROVIDERS);
 
 function isManagedRpcProviderId(value: string): value is ManagedRpcProviderId {
-  return value === "triton" || value === "helius" || value === "alchemy" || value === "default";
+  return MANAGED_RPC_PROVIDER_SET.has(value);
 }
 
 function applyApiKeyTemplate(url: string, apiKey: string): string {
@@ -126,6 +131,13 @@ function withAlchemyApiKey(url: string, apiKey?: string): string {
   }
 
   return appendQueryParam(url, "api_key", apiKey);
+}
+
+function withQuickNodeApiKey(url: string, apiKey?: string): string {
+  if (!apiKey) {
+    return url;
+  }
+  return applyApiKeyTemplate(url, apiKey);
 }
 
 function maskEndpoint(url: string): string {
@@ -213,6 +225,14 @@ function resolveManagedProviders(env: Env): ManagedRpcProvider[] {
     providers.push({
       id: "alchemy",
       url: withAlchemyApiKey(env.SOLANA_RPC_ALCHEMY_URL, env.SOLANA_RPC_ALCHEMY_API_KEY),
+      headers: {},
+    });
+  }
+
+  if (env.SOLANA_RPC_QUICKNODE_URL) {
+    providers.push({
+      id: "quicknode",
+      url: withQuickNodeApiKey(env.SOLANA_RPC_QUICKNODE_URL, env.SOLANA_RPC_QUICKNODE_API_KEY),
       headers: {},
     });
   }

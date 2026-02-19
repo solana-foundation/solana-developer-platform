@@ -1,6 +1,7 @@
+import { ORGANIZATION_RPC_PROVIDERS } from "@sdp/types";
 import { z } from "./base";
 
-const rpcProviderIdSchema = z.enum(["triton", "helius", "alchemy", "default"]).openapi({
+const rpcProviderIdSchema = z.enum(ORGANIZATION_RPC_PROVIDERS).openapi({
   description: "Resolved RPC provider identifier.",
   example: "default",
 });
@@ -31,10 +32,10 @@ const rpcProviderStatsSchema = z
 
 const rpcProviderStatusSchema = z
   .object({
-    id: z.enum(["triton", "helius", "alchemy", "default"]).openapi({ example: "triton" }),
+    id: rpcProviderIdSchema,
     endpoint: z.string().openapi({
       description: "Provider endpoint with secrets redacted.",
-      example: "https://mainnet.helius-rpc.com/?api-key=***",
+      example: "https://rpc.provider.example.com/?api-key=***",
     }),
     stats: rpcProviderStatsSchema,
   })
@@ -53,9 +54,9 @@ export const rpcProvidersResponseSchema = z
       }),
       stats: rpcProviderStatsSchema,
     }),
-    roundRobinOrder: z.array(z.enum(["triton", "helius", "alchemy", "default"])).openapi({
+    roundRobinOrder: z.array(rpcProviderIdSchema).openapi({
       description: "Managed provider order used by round-robin fallback.",
-      example: ["triton", "helius", "alchemy", "default"],
+      example: ["alchemy", "default", "helius", "quicknode", "triton"],
     }),
   })
   .openapi({ description: "RPC provider list and selection summary." });
@@ -66,7 +67,7 @@ const rpcRelayPayloadSchema = z
     z.array(z.object({ method: z.string().min(1) }).passthrough()).min(1),
   ])
   .openapi({
-    description: "JSON-RPC payload forwarded to upstream provider.",
+    description: "JSON-RPC payload proxied to the selected upstream provider.",
     example: { jsonrpc: "2.0", id: 1, method: "getLatestBlockhash", params: [] },
   });
 
@@ -80,7 +81,7 @@ export const rpcRelayResponseSchema = z
       projectId: z.string().nullable().openapi({ example: "prj_example" }),
       endpoint: z.string().openapi({
         description: "Selected endpoint with secrets redacted.",
-        example: "https://mainnet.helius-rpc.com/?api-key=***",
+        example: "https://rpc.provider.example.com/?api-key=***",
       }),
     }),
     upstream: z.object({

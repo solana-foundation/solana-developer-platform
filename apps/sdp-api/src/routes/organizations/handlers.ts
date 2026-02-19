@@ -9,7 +9,15 @@ import { createSigningService } from "@/services/domain/signing.service";
 import { KVService } from "@/services/kv.service";
 import { SigningError } from "@/services/ports";
 import type { Env } from "@/types/env";
-import type { CreateOrganizationResponse, Organization, OrganizationSettings } from "@sdp/types";
+import {
+  type CreateOrganizationResponse,
+  ORGANIZATION_STATUSES,
+  ORGANIZATION_TIERS,
+  type Organization,
+  type OrganizationSettings,
+  type OrganizationStatus,
+  type OrganizationTier,
+} from "@sdp/types";
 import type { Context } from "hono";
 import { createOrgSchema, updateOrgSchema } from "./schemas";
 
@@ -38,13 +46,34 @@ function parseOrganizationSettings(raw: string | null): OrganizationSettings | n
   }
 }
 
+function parseOrganizationTier(value: string): OrganizationTier {
+  if (ORGANIZATION_TIERS.includes(value as OrganizationTier)) {
+    return value as OrganizationTier;
+  }
+  throw new AppError("INTERNAL_ERROR", `Organization tier '${value}' is invalid`);
+}
+
+function parseOrganizationStatus(value: string): OrganizationStatus {
+  if (ORGANIZATION_STATUSES.includes(value as OrganizationStatus)) {
+    return value as OrganizationStatus;
+  }
+  throw new AppError("INTERNAL_ERROR", `Organization status '${value}' is invalid`);
+}
+
+function resolveOrganizationTierFromAllowlist(value: string): OrganizationTier {
+  if (value === "standard") {
+    return "free";
+  }
+  return parseOrganizationTier(value);
+}
+
 function toOrganizationResponse(row: OrganizationRow): Organization {
   return {
     id: row.id,
     name: row.name,
     slug: row.slug,
-    tier: row.tier as "free" | "pro" | "enterprise",
-    status: row.status as "active" | "suspended" | "deleted",
+    tier: parseOrganizationTier(row.tier),
+    status: parseOrganizationStatus(row.status),
     settings: parseOrganizationSettings(row.settings),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -133,6 +162,7 @@ export const createOrganization = async (c: AppContext) => {
   if (!allowed) {
     throw new AppError("NOT_ALLOWLISTED", "Email or domain not on allowlist");
   }
+  const resolvedTier = resolveOrganizationTierFromAllowlist(tier);
 
   // Check if slug is taken
   const existing = await c.env.DB.prepare("SELECT id FROM organizations WHERE slug = ?")
@@ -199,7 +229,7 @@ export const createOrganization = async (c: AppContext) => {
     c.env.DB.prepare(
       `INSERT INTO organizations (id, name, slug, tier, status)
        VALUES (?, ?, ?, ?, 'active')`
-    ).bind(orgId, name, slug, tier),
+    ).bind(orgId, name, slug, resolvedTier),
 
     // User
     c.env.DB.prepare(
@@ -244,7 +274,7 @@ export const createOrganization = async (c: AppContext) => {
       id: orgId,
       name,
       slug,
-      tier: tier as "free" | "pro" | "enterprise",
+      tier: resolvedTier,
       status: "active",
       settings: null,
       createdAt: new Date().toISOString(),

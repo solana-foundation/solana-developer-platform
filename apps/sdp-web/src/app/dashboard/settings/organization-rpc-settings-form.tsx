@@ -1,11 +1,12 @@
 "use client";
 
 import { Label } from "@/components/ui/label";
-import { useEffect, useState } from "react";
+import { ORGANIZATION_RPC_PROVIDERS, type OrganizationRpcProvider } from "@sdp/types";
+import { useState } from "react";
 import { updateOrganizationRpcSettingsAction } from "./actions";
 
 type OrganizationSettings = {
-  rpcProvider?: "default" | "triton" | "helius" | "alchemy";
+  rpcProvider?: OrganizationRpcProvider;
 };
 
 export type SettingsOrganization = {
@@ -14,23 +15,24 @@ export type SettingsOrganization = {
   settings: OrganizationSettings | null;
 };
 
+const RPC_PROVIDER_LABELS: Record<OrganizationRpcProvider, string> = {
+  alchemy: "Alchemy",
+  default: "SDP",
+  helius: "Helius",
+  quicknode: "QuickNode",
+  triton: "Triton",
+};
+
 export function OrganizationRpcSettingsForm({
   organization,
 }: {
   organization: SettingsOrganization;
 }) {
   const rpcProvider = organization.settings?.rpcProvider ?? "default";
-  const [selectedProvider, setSelectedProvider] = useState<
-    "default" | "triton" | "helius" | "alchemy"
-  >(rpcProvider);
+  const [selectedProvider, setSelectedProvider] = useState<OrganizationRpcProvider>(rpcProvider);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  useEffect(() => {
-    setSelectedProvider(organization.settings?.rpcProvider ?? "default");
-    setErrorMessage(null);
-  }, [organization.settings?.rpcProvider]);
-
-  const saveProvider = async (provider: "default" | "triton" | "helius" | "alchemy") => {
+  const saveProvider = async (provider: OrganizationRpcProvider) => {
     const formData = new FormData();
     formData.set("organizationId", organization.id);
     formData.set("rpcProvider", provider);
@@ -69,10 +71,11 @@ export function OrganizationRpcSettingsForm({
               void saveProvider(nextProvider);
             }}
           >
-            <option value="default">SDP</option>
-            <option value="triton">Triton</option>
-            <option value="helius">Helius</option>
-            <option value="alchemy">Alchemy</option>
+            {ORGANIZATION_RPC_PROVIDERS.map((provider) => (
+              <option key={provider} value={provider}>
+                {RPC_PROVIDER_LABELS[provider]}
+              </option>
+            ))}
           </select>
         </div>
       </div>

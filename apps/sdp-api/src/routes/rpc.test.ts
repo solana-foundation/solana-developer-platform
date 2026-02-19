@@ -3,13 +3,14 @@ import { hashString } from "@/lib/hash";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/d1";
+import type { OrganizationRpcProvider } from "@sdp/types";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const TEST_PROJECT_ID = "prj_rpc_relay";
 const TEST_API_KEY_ID = "key_rpc_relay";
 const TEST_API_KEY_PREFIX = "sk_test_rpc";
 const TEST_API_KEY_RAW = "sk_test_rpc_relay_key";
-type ManagedProvider = "triton" | "helius" | "alchemy";
+type ManagedProvider = Exclude<OrganizationRpcProvider, "default">;
 
 type MutableRpcEnv = {
   SOLANA_RPC_URL?: string;
@@ -20,6 +21,8 @@ type MutableRpcEnv = {
   SOLANA_RPC_HELIUS_API_KEY?: string;
   SOLANA_RPC_ALCHEMY_URL?: string;
   SOLANA_RPC_ALCHEMY_API_KEY?: string;
+  SOLANA_RPC_QUICKNODE_URL?: string;
+  SOLANA_RPC_QUICKNODE_API_KEY?: string;
 };
 
 type ProviderRuntimeConfig = {
@@ -76,6 +79,24 @@ function getProviderRuntimeConfig(provider: ManagedProvider): ProviderRuntimeCon
     };
   }
 
+  if (provider === "quicknode") {
+    const url = normalizedValue(
+      rpcEnv.SOLANA_RPC_QUICKNODE_URL ?? process.env.SOLANA_RPC_QUICKNODE_URL
+    );
+    if (!url) {
+      return null;
+    }
+    return {
+      provider,
+      url,
+      apiKey: normalizedValue(
+        rpcEnv.SOLANA_RPC_QUICKNODE_API_KEY ??
+          process.env.SOLANA_RPC_QUICKNODE_API_KEY ??
+          process.env.QUICKNODE_API_KEY
+      ),
+    };
+  }
+
   const url = normalizedValue(rpcEnv.SOLANA_RPC_ALCHEMY_URL ?? process.env.SOLANA_RPC_ALCHEMY_URL);
   if (!url) {
     return null;
@@ -98,6 +119,8 @@ function applyProviderRuntimeConfigs(configs: ProviderRuntimeConfig[]): void {
   rpcEnv.SOLANA_RPC_HELIUS_API_KEY = undefined;
   rpcEnv.SOLANA_RPC_ALCHEMY_URL = undefined;
   rpcEnv.SOLANA_RPC_ALCHEMY_API_KEY = undefined;
+  rpcEnv.SOLANA_RPC_QUICKNODE_URL = undefined;
+  rpcEnv.SOLANA_RPC_QUICKNODE_API_KEY = undefined;
 
   for (const config of configs) {
     if (config.provider === "triton") {
@@ -108,6 +131,11 @@ function applyProviderRuntimeConfigs(configs: ProviderRuntimeConfig[]): void {
     if (config.provider === "helius") {
       rpcEnv.SOLANA_RPC_HELIUS_URL = config.url;
       rpcEnv.SOLANA_RPC_HELIUS_API_KEY = config.apiKey;
+      continue;
+    }
+    if (config.provider === "quicknode") {
+      rpcEnv.SOLANA_RPC_QUICKNODE_URL = config.url;
+      rpcEnv.SOLANA_RPC_QUICKNODE_API_KEY = config.apiKey;
       continue;
     }
     rpcEnv.SOLANA_RPC_ALCHEMY_URL = config.url;
@@ -258,6 +286,8 @@ describe("RPC Relay Routes", () => {
     rpcEnv.SOLANA_RPC_HELIUS_API_KEY = undefined;
     rpcEnv.SOLANA_RPC_ALCHEMY_URL = undefined;
     rpcEnv.SOLANA_RPC_ALCHEMY_API_KEY = undefined;
+    rpcEnv.SOLANA_RPC_QUICKNODE_URL = undefined;
+    rpcEnv.SOLANA_RPC_QUICKNODE_API_KEY = undefined;
   });
 
   it("uses organization-selected managed provider when configured", async () => {
@@ -290,8 +320,54 @@ describe("RPC Relay Routes", () => {
     expect(String(body.data.selected.endpoint)).toContain("rpc.helius.test");
   });
 
+  it("supports quicknode as an organization-selected managed provider", async () => {
+    const db = (env as { DB: D1Database }).DB;
+    await db
+      .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
+      .bind(JSON.stringify({ rpcProvider: "quicknode" }), TEST_ORG.id)
+      .run();
+
+    rpcEnv.SOLANA_RPC_QUICKNODE_URL = "https://rpc.quicknode.test/?api-key={API_KEY}";
+    rpcEnv.SOLANA_RPC_QUICKNODE_API_KEY = "quicknode_key";
+
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { solanaCore: "2.0.0" } }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })
+    );
+
+    const relayResponse = await app.request(
+      "/v1/rpc/proxy",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY_RAW}`,
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "getVersion",
+          params: [],
+        }),
+      },
+      env
+    );
+
+    fetchSpy.mockRestore();
+
+    expect(relayResponse.status).toBe(200);
+
+    const body = await relayResponse.json();
+    expect(body.data.provider.id).toBe("quicknode");
+    expect(body.data.provider.selectionMode).toBe("organization_provider");
+    expect(String(body.data.provider.endpoint)).toContain("rpc.quicknode.test");
+    expect(String(body.data.provider.endpoint)).toContain("api-key=***");
+  });
+
   it.each(["triton", "helius", "alchemy"] as const)(
-    "connectivity check: relays through %s when org rpcProvider is set",
+    "connectivity check: proxies through %s when org rpcProvider is set",
     async (provider) => {
       const allProviderConfigs = getRequiredLiveProviderConfigs();
       const selectedProviderConfig = allProviderConfigs.find((item) => item.provider === provider);
@@ -308,7 +384,7 @@ describe("RPC Relay Routes", () => {
       applyProviderRuntimeConfigs(allProviderConfigs);
 
       const relayResponse = await app.request(
-        "/v1/rpc/relay",
+        "/v1/rpc/proxy",
         {
           method: "POST",
           headers: {
@@ -353,7 +429,7 @@ describe("RPC Relay Routes", () => {
     applyProviderRuntimeConfigs(allProviderConfigs);
 
     const firstRelay = await app.request(
-      "/v1/rpc/relay",
+      "/v1/rpc/proxy",
       {
         method: "POST",
         headers: {
@@ -386,7 +462,7 @@ describe("RPC Relay Routes", () => {
     );
 
     const secondRelay = await app.request(
-      "/v1/rpc/relay",
+      "/v1/rpc/proxy",
       {
         method: "POST",
         headers: {
@@ -452,6 +528,28 @@ describe("RPC Relay Routes", () => {
     expect(secondBody.data.selected.providerId).toBe("helius");
   });
 
+  it("returns 404 for the legacy /v1/rpc/relay path", async () => {
+    const response = await app.request(
+      "/v1/rpc/relay",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY_RAW}`,
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "getVersion",
+          params: [],
+        }),
+      },
+      env
+    );
+
+    expect(response.status).toBe(404);
+  });
+
   it("tracks transaction telemetry and origins per provider", async () => {
     const db = (env as { DB: D1Database }).DB;
     await db
@@ -470,7 +568,7 @@ describe("RPC Relay Routes", () => {
     );
 
     const relayResponse = await app.request(
-      "/v1/rpc/relay",
+      "/v1/rpc/proxy",
       {
         method: "POST",
         headers: {

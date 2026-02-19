@@ -8,6 +8,6 @@ const rpc = new Hono<{ Bindings: Env }>();
 rpc.use("*", unifiedAuthMiddleware({ allowClerk: true, allowSession: true }));
 
 rpc.get("/providers", requirePermissions("tokens:read"), getRpcProviders);
-rpc.post("/relay", requirePermissions("tokens:write"), relayRpcRequest);
+rpc.post("/proxy", requirePermissions("tokens:write"), relayRpcRequest);
 
 export default rpc;

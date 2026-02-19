@@ -33,12 +33,12 @@ export function registerRpcPaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "post",
-    path: "/v1/rpc/relay",
+    path: "/v1/rpc/proxy",
     tags: ["RPC"],
-    summary: "Relay a JSON-RPC request",
-    operationId: "relayRpcRequest",
+    summary: "Proxy a JSON-RPC request",
+    operationId: "proxyRpcRequest",
     description:
-      "Forwards a JSON-RPC request to the resolved provider (project preference or default round-robin) and records relay telemetry.",
+      "Proxies a JSON-RPC request to the resolved provider and records telemetry. Provider selection is controlled via organization/project settings.",
     security: [{ apiKeyAuth: [] }],
     request: {
       query: rpcQuerySchema,
@@ -49,7 +49,7 @@ export function registerRpcPaths(registry: OpenAPIRegistry) {
     },
     responses: {
       200: {
-        description: "Relay response",
+        description: "Proxy response",
         content: jsonContent(rpcRelayResponse),
       },
       ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500, 502]),

@@ -1,11 +1,12 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { createSdpApiClient } from "@/lib/sdp-api";
+import type { OrganizationRpcProvider } from "@sdp/types";
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { OrganizationRpcSettingsForm } from "./organization-rpc-settings-form";
 
 type OrganizationSettings = {
-  rpcProvider?: "default" | "triton" | "helius" | "alchemy";
+  rpcProvider?: OrganizationRpcProvider;
 };
 
 type Organization = {
