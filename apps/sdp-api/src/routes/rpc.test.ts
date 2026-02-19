@@ -143,19 +143,19 @@ function applyProviderRuntimeConfigs(configs: ProviderRuntimeConfig[]): void {
   }
 }
 
-const liveProviderConfigs = (["triton", "helius", "alchemy"] as const)
+const liveProviderConfigs = (["triton", "helius", "alchemy", "quicknode"] as const)
   .map((provider) => getProviderRuntimeConfig(provider))
   .filter((provider): provider is ProviderRuntimeConfig => provider !== null);
 
 function getRequiredLiveProviderConfigs(): ProviderRuntimeConfig[] {
-  const requiredProviders: ManagedProvider[] = ["triton", "helius", "alchemy"];
+  const requiredProviders: ManagedProvider[] = ["triton", "helius", "alchemy", "quicknode"];
   const missingProviders = requiredProviders.filter(
     (provider) => !liveProviderConfigs.some((config) => config.provider === provider)
   );
 
   if (missingProviders.length > 0) {
     throw new Error(
-      `Missing live RPC provider config for: ${missingProviders.join(", ")}. Set SOLANA_RPC_TRITON_URL, SOLANA_RPC_HELIUS_URL, and SOLANA_RPC_ALCHEMY_URL (plus API keys if needed).`
+      `Missing live RPC provider config for: ${missingProviders.join(", ")}. Set SOLANA_RPC_TRITON_URL, SOLANA_RPC_HELIUS_URL, SOLANA_RPC_ALCHEMY_URL, and SOLANA_RPC_QUICKNODE_URL (plus API keys if needed).`
     );
   }
 
@@ -366,7 +366,7 @@ describe("RPC Relay Routes", () => {
     expect(String(body.data.provider.endpoint)).toContain("api-key=***");
   });
 
-  it.each(["triton", "helius", "alchemy"] as const)(
+  it.each(["triton", "helius", "alchemy", "quicknode"] as const)(
     "connectivity check: proxies through %s when org rpcProvider is set",
     async (provider) => {
       const allProviderConfigs = getRequiredLiveProviderConfigs();
