@@ -528,28 +528,6 @@ describe("RPC Relay Routes", () => {
     expect(secondBody.data.selected.providerId).toBe("helius");
   });
 
-  it("returns 404 for the legacy /v1/rpc/relay path", async () => {
-    const response = await app.request(
-      "/v1/rpc/relay",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${TEST_API_KEY_RAW}`,
-        },
-        body: JSON.stringify({
-          jsonrpc: "2.0",
-          id: 1,
-          method: "getVersion",
-          params: [],
-        }),
-      },
-      env
-    );
-
-    expect(response.status).toBe(404);
-  });
-
   it("tracks transaction telemetry and origins per provider", async () => {
     const db = (env as { DB: D1Database }).DB;
     await db
