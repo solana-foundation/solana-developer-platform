@@ -4,8 +4,8 @@
  * Projects group API keys by team or environment within an organization.
  */
 
-import type { ProjectRole } from "./permissions";
 import { ORGANIZATION_RPC_PROVIDERS } from "./organizations";
+import type { ProjectRole } from "./permissions";
 
 export type ProjectEnvironment = "sandbox" | "beta" | "production";
 
