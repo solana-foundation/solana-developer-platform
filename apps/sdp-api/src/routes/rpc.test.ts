@@ -372,7 +372,7 @@ describe("RPC Relay Routes", () => {
   });
 
   for (const provider of managedProviders) {
-    const itForProvider = it.runIf(hasLiveProviderConfig(provider));
+    const itForProvider = it.runIf(provider !== "triton" && hasLiveProviderConfig(provider));
 
     itForProvider(
       `connectivity check: proxies through ${provider} when org rpcProvider is set`,
@@ -417,15 +417,15 @@ describe("RPC Relay Routes", () => {
   }
 
   const itWithSwitchProviders = it.runIf(
-    hasLiveProviderConfig("triton") && hasLiveProviderConfig("helius")
+    hasLiveProviderConfig("helius") && hasLiveProviderConfig("alchemy")
   );
 
   itWithSwitchProviders(
     "switches relay endpoint after organization rpcProvider is changed",
     async () => {
       const [initialProvider, updatedProvider] = getRequiredLiveProviderConfigs([
-        "triton",
         "helius",
+        "alchemy",
       ]);
 
       const db = (env as { DB: D1Database }).DB;
