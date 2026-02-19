@@ -101,7 +101,7 @@ export const prepareMint = async (c: AppContext) => {
   }
 
   // Create transaction record with serialized tx
-  const tx = await tokenService.createTransaction({
+  const { transaction: tx } = await tokenService.createTransaction({
     tokenId,
     organizationId: auth.organizationId,
     type: "mint",
