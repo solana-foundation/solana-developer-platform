@@ -9,6 +9,8 @@ import type { Env } from "@/types/env";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 const TEST_ORG_ID = "org_rpc_service_test";
+const TEST_PROJECT_ID = "prj_rpc_service_test";
+const TEST_USER_ID = "usr_rpc_service_test";
 const appEnv = env as unknown as Env;
 const SEND_RAW_TRANSACTION_METHOD = ["sendRaw", "Transaction"].join("");
 
@@ -61,6 +63,32 @@ describe("rpc-relay.service", () => {
       .bind(TEST_ORG_ID)
       .run();
 
+    await rpcEnv.DB.prepare(
+      `INSERT INTO users (id, email, email_verified, status)
+       VALUES (?, 'rpc-service@example.com', 1, 'active')
+       ON CONFLICT(id) DO UPDATE SET
+         email = excluded.email,
+         email_verified = excluded.email_verified,
+         status = excluded.status`
+    )
+      .bind(TEST_USER_ID)
+      .run();
+
+    await rpcEnv.DB.prepare(
+      `INSERT INTO projects (id, organization_id, name, slug, environment, settings, status, created_by)
+       VALUES (?, ?, 'RPC Service Project', 'rpc-service-project', 'sandbox', NULL, 'active', ?)
+       ON CONFLICT(id) DO UPDATE SET
+         organization_id = excluded.organization_id,
+         name = excluded.name,
+         slug = excluded.slug,
+         environment = excluded.environment,
+         settings = excluded.settings,
+         status = excluded.status,
+         created_by = excluded.created_by`
+    )
+      .bind(TEST_PROJECT_ID, TEST_ORG_ID, TEST_USER_ID)
+      .run();
+
     rpcEnv.SOLANA_RPC_URL = undefined;
     rpcEnv.SOLANA_RPC_DEFAULT_PROVIDER = undefined;
     rpcEnv.SOLANA_RPC_TRITON_URL = undefined;
@@ -98,6 +126,54 @@ describe("rpc-relay.service", () => {
     expect(target.providerId).toBe("quicknode");
     expect(target.selectionMode).toBe("organization_provider");
     expect(target.endpoint).toContain("api-key=qn_secret");
+    expect(target.endpointLabel).toContain("api-key=***");
+  });
+
+  it("prefers project-managed provider over organization provider when project setting is set", async () => {
+    await rpcEnv.DB.prepare("UPDATE organizations SET settings = ? WHERE id = ?")
+      .bind(JSON.stringify({ rpcProvider: "helius" }), TEST_ORG_ID)
+      .run();
+    await rpcEnv.DB.prepare("UPDATE projects SET settings = ? WHERE id = ?")
+      .bind(JSON.stringify({ rpcProvider: "triton" }), TEST_PROJECT_ID)
+      .run();
+
+    rpcEnv.SOLANA_RPC_TRITON_URL = "https://rpc.triton.test";
+    rpcEnv.SOLANA_RPC_HELIUS_URL = "https://rpc.helius.test";
+
+    const target = await resolveRpcTarget({
+      env: appEnv,
+      db: rpcEnv.DB,
+      organizationId: TEST_ORG_ID,
+      authProjectId: TEST_PROJECT_ID,
+      requestedProjectId: null,
+    });
+
+    expect(target.providerId).toBe("triton");
+    expect(target.selectionMode).toBe("project_provider");
+  });
+
+  it("uses project custom endpoint when project rpcProvider is custom", async () => {
+    await rpcEnv.DB.prepare("UPDATE projects SET settings = ? WHERE id = ?")
+      .bind(
+        JSON.stringify({
+          rpcProvider: "custom",
+          rpcEndpoint: "https://rpc.custom-provider.test/?api-key=custom_secret",
+        }),
+        TEST_PROJECT_ID
+      )
+      .run();
+
+    const target = await resolveRpcTarget({
+      env: appEnv,
+      db: rpcEnv.DB,
+      organizationId: TEST_ORG_ID,
+      authProjectId: TEST_PROJECT_ID,
+      requestedProjectId: null,
+    });
+
+    expect(target.providerId).toBe("custom");
+    expect(target.selectionMode).toBe("project_custom_provider");
+    expect(target.endpoint).toContain("custom_secret");
     expect(target.endpointLabel).toContain("api-key=***");
   });
 

@@ -4,11 +4,18 @@ import {
   ORGANIZATION_RPC_PROVIDERS,
   type OrganizationRpcProvider,
   type OrganizationSettings,
+  PROJECT_RPC_PROVIDERS,
+  type ProjectRpcProvider,
+  type ProjectSettings,
 } from "@sdp/types";
 
 export type ManagedRpcProviderId = OrganizationRpcProvider;
-export type ResolvedRpcProviderId = ManagedRpcProviderId;
-export type RpcSelectionMode = "organization_provider" | "round_robin_default";
+export type ResolvedRpcProviderId = ManagedRpcProviderId | "custom";
+export type RpcSelectionMode =
+  | "project_provider"
+  | "project_custom_provider"
+  | "organization_provider"
+  | "round_robin_default";
 
 interface ManagedRpcProvider {
   id: ManagedRpcProviderId;
@@ -77,9 +84,14 @@ const SEND_TRANSACTION_METHOD = ["send", "Transaction"].join("");
 const SEND_RAW_TRANSACTION_METHOD = ["sendRaw", "Transaction"].join("");
 const TRANSACTION_METHOD_NAMES = new Set([SEND_TRANSACTION_METHOD, SEND_RAW_TRANSACTION_METHOD]);
 const MANAGED_RPC_PROVIDER_SET = new Set<string>(ORGANIZATION_RPC_PROVIDERS);
+const PROJECT_RPC_PROVIDER_SET = new Set<string>(PROJECT_RPC_PROVIDERS);
 
 function isManagedRpcProviderId(value: string): value is ManagedRpcProviderId {
   return MANAGED_RPC_PROVIDER_SET.has(value);
+}
+
+function isProjectRpcProviderId(value: string): value is ProjectRpcProvider {
+  return PROJECT_RPC_PROVIDER_SET.has(value);
 }
 
 function applyApiKeyTemplate(url: string, apiKey: string): string {
@@ -284,6 +296,67 @@ async function getOrganizationSettings(
   }
 }
 
+async function getProjectSettings(
+  db: D1Database,
+  organizationId: string,
+  projectId: string
+): Promise<ProjectSettings | null> {
+  const row = await db
+    .prepare(
+      `SELECT settings
+       FROM projects
+       WHERE id = ?
+         AND organization_id = ?
+         AND status = 'active'`
+    )
+    .bind(projectId, organizationId)
+    .first<{ settings: string | null }>();
+
+  if (!row) {
+    throw new AppError("NOT_FOUND", "Project not found");
+  }
+
+  if (!row.settings) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(row.settings) as ProjectSettings;
+  } catch {
+    throw new AppError("INTERNAL_ERROR", "Project settings are invalid JSON");
+  }
+}
+
+function resolveProjectRpcPreference(
+  projectSettings: ProjectSettings | null
+):
+  | { providerType: "default" }
+  | { providerType: "managed"; providerId: ManagedRpcProviderId }
+  | { providerType: "custom"; endpoint: string } {
+  const explicitProvider = projectSettings?.rpcProvider;
+  if (explicitProvider && !isProjectRpcProviderId(explicitProvider)) {
+    throw new AppError("INTERNAL_ERROR", `Project RPC provider '${explicitProvider}' is invalid`);
+  }
+
+  const provider = explicitProvider ?? (projectSettings?.rpcEndpoint ? "custom" : "default");
+  if (provider === "default") {
+    return { providerType: "default" };
+  }
+
+  if (provider === "custom") {
+    const endpoint = projectSettings?.rpcEndpoint?.trim();
+    if (!endpoint) {
+      throw new AppError(
+        "BAD_REQUEST",
+        "Project RPC provider is 'custom' but rpcEndpoint is not configured"
+      );
+    }
+    return { providerType: "custom", endpoint };
+  }
+
+  return { providerType: "managed", providerId: provider };
+}
+
 async function pickRoundRobinProvider(
   cache: KVNamespace,
   providers: ManagedRpcProvider[]
@@ -337,6 +410,44 @@ export function includesTransactionMethod(methodNames: string[]): boolean {
 export async function resolveRpcTarget(input: ResolveRpcTargetInput): Promise<ResolvedRpcTarget> {
   const managedProviders = resolveManagedProviders(input.env);
   const projectId = getEffectiveProjectId(input.authProjectId, input.requestedProjectId);
+
+  if (projectId) {
+    const projectSettings = await getProjectSettings(input.db, input.organizationId, projectId);
+    const projectPreference = resolveProjectRpcPreference(projectSettings);
+
+    if (projectPreference.providerType === "custom") {
+      return {
+        providerId: "custom",
+        projectId,
+        endpoint: projectPreference.endpoint,
+        endpointLabel: maskEndpoint(projectPreference.endpoint),
+        headers: {},
+        selectionMode: "project_custom_provider",
+      };
+    }
+
+    if (projectPreference.providerType === "managed") {
+      const selectedProvider = managedProviders.find(
+        (provider) => provider.id === projectPreference.providerId
+      );
+      if (!selectedProvider) {
+        throw new AppError(
+          "BAD_REQUEST",
+          `Project RPC provider '${projectPreference.providerId}' is not configured in this environment`
+        );
+      }
+
+      return {
+        providerId: selectedProvider.id,
+        projectId,
+        endpoint: selectedProvider.url,
+        endpointLabel: maskEndpoint(selectedProvider.url),
+        headers: selectedProvider.headers,
+        selectionMode: "project_provider",
+      };
+    }
+  }
+
   const organizationSettings = await getOrganizationSettings(input.db, input.organizationId);
   const preferredProvider = organizationSettings?.rpcProvider;
 

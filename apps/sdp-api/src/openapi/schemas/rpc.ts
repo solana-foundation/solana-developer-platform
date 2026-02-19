@@ -1,15 +1,27 @@
-import { ORGANIZATION_RPC_PROVIDERS } from "@sdp/types";
+import { ORGANIZATION_RPC_PROVIDERS, PROJECT_RPC_PROVIDERS } from "@sdp/types";
 import { z } from "./base";
 
-const rpcProviderIdSchema = z.enum(ORGANIZATION_RPC_PROVIDERS).openapi({
-  description: "Resolved RPC provider identifier.",
+const managedRpcProviderIdSchema = z.enum(ORGANIZATION_RPC_PROVIDERS).openapi({
+  description: "Managed RPC provider identifier.",
   example: "default",
 });
 
-const rpcSelectionModeSchema = z.enum(["organization_provider", "round_robin_default"]).openapi({
-  description: "How the relay selected the provider endpoint.",
-  example: "round_robin_default",
+const selectedRpcProviderIdSchema = z.enum(PROJECT_RPC_PROVIDERS).openapi({
+  description: "Resolved RPC provider identifier. Includes `custom` for project-level endpoints.",
+  example: "default",
 });
+
+const rpcSelectionModeSchema = z
+  .enum([
+    "project_provider",
+    "project_custom_provider",
+    "organization_provider",
+    "round_robin_default",
+  ])
+  .openapi({
+    description: "How the relay selected the provider endpoint.",
+    example: "round_robin_default",
+  });
 
 const rpcProviderStatsSchema = z
   .object({
@@ -32,7 +44,7 @@ const rpcProviderStatsSchema = z
 
 const rpcProviderStatusSchema = z
   .object({
-    id: rpcProviderIdSchema,
+    id: managedRpcProviderIdSchema,
     endpoint: z.string().openapi({
       description: "Provider endpoint with secrets redacted.",
       example: "https://rpc.provider.example.com/?api-key=***",
@@ -45,7 +57,7 @@ export const rpcProvidersResponseSchema = z
   .object({
     providers: z.array(rpcProviderStatusSchema),
     selected: z.object({
-      providerId: rpcProviderIdSchema,
+      providerId: selectedRpcProviderIdSchema,
       projectId: z.string().nullable().openapi({ example: "prj_example" }),
       selectionMode: rpcSelectionModeSchema,
       endpoint: z.string().openapi({
@@ -54,7 +66,7 @@ export const rpcProvidersResponseSchema = z
       }),
       stats: rpcProviderStatsSchema,
     }),
-    roundRobinOrder: z.array(rpcProviderIdSchema).openapi({
+    roundRobinOrder: z.array(managedRpcProviderIdSchema).openapi({
       description: "Managed provider order used by round-robin fallback.",
       example: ["alchemy", "default", "helius", "quicknode", "triton"],
     }),
@@ -76,7 +88,7 @@ export const rpcRelayRequestSchema = rpcRelayPayloadSchema;
 export const rpcRelayResponseSchema = z
   .object({
     provider: z.object({
-      id: rpcProviderIdSchema,
+      id: selectedRpcProviderIdSchema,
       selectionMode: rpcSelectionModeSchema,
       projectId: z.string().nullable().openapi({ example: "prj_example" }),
       endpoint: z.string().openapi({
