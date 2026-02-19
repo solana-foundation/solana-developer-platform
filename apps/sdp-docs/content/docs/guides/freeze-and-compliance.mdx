@@ -1,0 +1,270 @@
+---
+title: Freeze and Compliance
+description: Freeze accounts, pause transfers, and seize tokens for compliance operations.
+---
+
+SDP provides compliance controls for tokens that have `isFreezable` enabled or the `pausable` extension. These let you freeze individual accounts, pause all transfers globally, or seize tokens from a specific account.
+
+These operations are currently API-only. All require the `tokens:admin` permission.
+
+## Freeze an account
+
+Prevent a specific account from sending or receiving tokens:
+
+<Tabs items={["curl", "TypeScript", "Java"]}>
+<Tab value="curl">
+```bash
+curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/freeze \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "accountAddress": "3xYZa...2aBc",
+    "reason": "Suspicious activity investigation"
+  }'
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript
+const response = await fetch(
+  "https://api.solana.com/v1/issuance/tokens/tok_abc123/freeze",
+  {
+    method: "POST",
+    headers: {
+      "Authorization": "Bearer sk_test_...",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      accountAddress: "3xYZa...2aBc",
+      reason: "Suspicious activity investigation",
+    }),
+  }
+);
+```
+</Tab>
+<Tab value="Java">
+```java
+HttpRequest request = HttpRequest.newBuilder()
+    .uri(URI.create("https://api.solana.com/v1/issuance/tokens/tok_abc123/freeze"))
+    .header("Authorization", "Bearer sk_test_...")
+    .header("Content-Type", "application/json")
+    .POST(HttpRequest.BodyPublishers.ofString("""
+        {
+          "accountAddress": "3xYZa...2aBc",
+          "reason": "Suspicious activity investigation"
+        }"""))
+    .build();
+```
+</Tab>
+</Tabs>
+
+## Unfreeze an account
+
+<Tabs items={["curl", "TypeScript", "Java"]}>
+<Tab value="curl">
+```bash
+curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/unfreeze \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d '{ "accountAddress": "3xYZa...2aBc" }'
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript
+await fetch(
+  "https://api.solana.com/v1/issuance/tokens/tok_abc123/unfreeze",
+  {
+    method: "POST",
+    headers: {
+      "Authorization": "Bearer sk_test_...",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ accountAddress: "3xYZa...2aBc" }),
+  }
+);
+```
+</Tab>
+<Tab value="Java">
+```java
+HttpRequest request = HttpRequest.newBuilder()
+    .uri(URI.create("https://api.solana.com/v1/issuance/tokens/tok_abc123/unfreeze"))
+    .header("Authorization", "Bearer sk_test_...")
+    .header("Content-Type", "application/json")
+    .POST(HttpRequest.BodyPublishers.ofString("""
+        { "accountAddress": "3xYZa...2aBc" }"""))
+    .build();
+```
+</Tab>
+</Tabs>
+
+## List frozen accounts
+
+<Tabs items={["curl", "TypeScript", "Java"]}>
+<Tab value="curl">
+```bash
+curl https://api.solana.com/v1/issuance/tokens/tok_abc123/frozen \
+  -H "Authorization: Bearer sk_test_..."
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript
+const response = await fetch(
+  "https://api.solana.com/v1/issuance/tokens/tok_abc123/frozen",
+  { headers: { "Authorization": "Bearer sk_test_..." } }
+);
+const { data } = await response.json();
+```
+</Tab>
+<Tab value="Java">
+```java
+HttpRequest request = HttpRequest.newBuilder()
+    .uri(URI.create("https://api.solana.com/v1/issuance/tokens/tok_abc123/frozen"))
+    .header("Authorization", "Bearer sk_test_...")
+    .GET()
+    .build();
+```
+</Tab>
+</Tabs>
+
+## Pause all transfers
+
+Halt all transfers of a token globally. Requires the `pausable` extension:
+
+<Tabs items={["curl", "TypeScript", "Java"]}>
+<Tab value="curl">
+```bash
+curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/pause \
+  -H "Authorization: Bearer sk_test_..."
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript
+await fetch(
+  "https://api.solana.com/v1/issuance/tokens/tok_abc123/pause",
+  {
+    method: "POST",
+    headers: { "Authorization": "Bearer sk_test_..." },
+  }
+);
+```
+</Tab>
+<Tab value="Java">
+```java
+HttpRequest request = HttpRequest.newBuilder()
+    .uri(URI.create("https://api.solana.com/v1/issuance/tokens/tok_abc123/pause"))
+    .header("Authorization", "Bearer sk_test_...")
+    .POST(HttpRequest.BodyPublishers.noBody())
+    .build();
+```
+</Tab>
+</Tabs>
+
+While paused, no transfers, mints, or burns can occur.
+
+## Unpause
+
+<Tabs items={["curl", "TypeScript", "Java"]}>
+<Tab value="curl">
+```bash
+curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/unpause \
+  -H "Authorization: Bearer sk_test_..."
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript
+await fetch(
+  "https://api.solana.com/v1/issuance/tokens/tok_abc123/unpause",
+  {
+    method: "POST",
+    headers: { "Authorization": "Bearer sk_test_..." },
+  }
+);
+```
+</Tab>
+<Tab value="Java">
+```java
+HttpRequest request = HttpRequest.newBuilder()
+    .uri(URI.create("https://api.solana.com/v1/issuance/tokens/tok_abc123/unpause"))
+    .header("Authorization", "Bearer sk_test_...")
+    .POST(HttpRequest.BodyPublishers.noBody())
+    .build();
+```
+</Tab>
+</Tabs>
+
+## Seize tokens
+
+Force-transfer tokens from one account to another without the holder's signature:
+
+<Tabs items={["curl", "TypeScript", "Java"]}>
+<Tab value="curl">
+```bash
+curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/seize \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: seize-001" \
+  -d '{
+    "seize": {
+      "source": "3xYZa...2aBc",
+      "destination": "9aBCd...4eEf",
+      "amount": "1000000",
+      "memo": "Court order #12345"
+    }
+  }'
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript
+await fetch(
+  "https://api.solana.com/v1/issuance/tokens/tok_abc123/seize",
+  {
+    method: "POST",
+    headers: {
+      "Authorization": "Bearer sk_test_...",
+      "Content-Type": "application/json",
+      "Idempotency-Key": "seize-001",
+    },
+    body: JSON.stringify({
+      seize: {
+        source: "3xYZa...2aBc",
+        destination: "9aBCd...4eEf",
+        amount: "1000000",
+        memo: "Court order #12345",
+      },
+    }),
+  }
+);
+```
+</Tab>
+<Tab value="Java">
+```java
+HttpRequest request = HttpRequest.newBuilder()
+    .uri(URI.create("https://api.solana.com/v1/issuance/tokens/tok_abc123/seize"))
+    .header("Authorization", "Bearer sk_test_...")
+    .header("Content-Type", "application/json")
+    .header("Idempotency-Key", "seize-001")
+    .POST(HttpRequest.BodyPublishers.ofString("""
+        {
+          "seize": {
+            "source": "3xYZa...2aBc",
+            "destination": "9aBCd...4eEf",
+            "amount": "1000000",
+            "memo": "Court order #12345"
+          }
+        }"""))
+    .build();
+```
+</Tab>
+</Tabs>
+
+Seize also supports a `/prepare` endpoint for client-side signing.
+
+## Compliance workflow
+
+1. Detect suspicious activity
+2. **Freeze** the affected account
+3. Investigate the account and transactions
+4. Based on findings:
+   - **Unfreeze** if cleared
+   - **Seize** tokens to a recovery address
+   - **Force-burn** tokens if required by regulation
+5. Log all actions with memos for audit trail

@@ -1,0 +1,35 @@
+---
+title: Issuance
+description: Token issuance, allowlists, and lifecycle operations.
+---
+
+| Method | Endpoint | Summary |
+| --- | --- | --- |
+| `GET` | `/v1/issuance/templates` | List token templates |
+| `GET` | `/v1/issuance/templates/{templateId}` | Get token template |
+| `GET` | `/v1/issuance/tokens` | List tokens |
+| `POST` | `/v1/issuance/tokens` | Create token |
+| `GET` | `/v1/issuance/tokens/{tokenId}` | Get token |
+| `PATCH` | `/v1/issuance/tokens/{tokenId}` | Update token |
+| `GET` | `/v1/issuance/tokens/{tokenId}/allowlist` | List token allowlist |
+| `POST` | `/v1/issuance/tokens/{tokenId}/allowlist` | Add token allowlist entry |
+| `DELETE` | `/v1/issuance/tokens/{tokenId}/allowlist/{entryId}` | Remove token allowlist entry |
+| `POST` | `/v1/issuance/tokens/{tokenId}/authority` | Execute authority update |
+| `POST` | `/v1/issuance/tokens/{tokenId}/authority/prepare` | Prepare authority update |
+| `POST` | `/v1/issuance/tokens/{tokenId}/burn` | Execute burn |
+| `POST` | `/v1/issuance/tokens/{tokenId}/burn/prepare` | Prepare burn transaction |
+| `POST` | `/v1/issuance/tokens/{tokenId}/deploy` | Deploy token |
+| `POST` | `/v1/issuance/tokens/{tokenId}/deploy/prepare` | Prepare token deploy transaction |
+| `POST` | `/v1/issuance/tokens/{tokenId}/force-burn` | Execute force burn |
+| `POST` | `/v1/issuance/tokens/{tokenId}/force-burn/prepare` | Prepare force burn transaction |
+| `POST` | `/v1/issuance/tokens/{tokenId}/freeze` | Freeze account |
+| `GET` | `/v1/issuance/tokens/{tokenId}/frozen` | List frozen accounts |
+| `POST` | `/v1/issuance/tokens/{tokenId}/mint` | Execute mint |
+| `POST` | `/v1/issuance/tokens/{tokenId}/mint/prepare` | Prepare mint transaction |
+| `POST` | `/v1/issuance/tokens/{tokenId}/pause` | Pause token transfers |
+| `POST` | `/v1/issuance/tokens/{tokenId}/seize` | Execute seize |
+| `POST` | `/v1/issuance/tokens/{tokenId}/seize/prepare` | Prepare seize transaction |
+| `POST` | `/v1/issuance/tokens/{tokenId}/supply/refresh` | Refresh cached token supply |
+| `GET` | `/v1/issuance/tokens/{tokenId}/transactions` | List token transactions |
+| `POST` | `/v1/issuance/tokens/{tokenId}/unfreeze` | Unfreeze account |
+| `POST` | `/v1/issuance/tokens/{tokenId}/unpause` | Unpause token transfers |

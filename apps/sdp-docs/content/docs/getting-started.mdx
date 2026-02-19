@@ -1,0 +1,205 @@
+---
+title: Getting Started
+description: Get up and running with SDP through the dashboard or API.
+---
+
+Choose your path to get started with the Solana Developer Platform. Both paths lead to the same result — a configured organization with wallet signing and your first token.
+
+<Tabs items={["Dashboard", "API"]}>
+<Tab value="Dashboard">
+
+### 1. Sign up and create an organization
+
+Go to the SDP dashboard and sign up with email, Google, or GitHub. Create an organization when prompted by the Organization Switcher.
+
+### 2. Link your organization
+
+Navigate to **Wallets** and click **Confirm and link organization** to register your Clerk org with the SDP backend.
+
+### 3. Provision a wallet
+
+Click **Get started** on the wallet setup card. Choose **Privy (recommended)** as your provider, give it a label, and click **Provision wallet**.
+
+### 4. Create your first token
+
+Navigate to **Issuance** and click **Create token**. Select a template (Stablecoin, Arcade, Tokenized Security, or Custom), configure the token details, and confirm.
+
+### Next steps
+
+- [Set Up Your Organization](/docs/guides/setup-organization) — detailed org configuration
+- [Set Up Wallets](/docs/guides/setup-wallets) — additional wallets and provider options
+- [Create a Token](/docs/guides/create-a-token) — token templates and extensions
+- [Deploy a Token](/docs/guides/deploy-a-token) — deploy your token on-chain
+
+</Tab>
+<Tab value="API">
+
+### 1. Create an organization and get your API key
+
+<Tabs items={["curl", "TypeScript", "Java"]}>
+<Tab value="curl">
+```bash
+curl -X POST https://api.solana.com/v1/organizations \
+  -H "Content-Type: application/json" \
+  -H "x-organization-registration-token: YOUR_REGISTRATION_TOKEN" \
+  -d '{
+    "name": "Acme Corp",
+    "slug": "acme-corp",
+    "email": "admin@acme.com",
+    "returnFullApiKey": true
+  }'
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript
+const response = await fetch("https://api.solana.com/v1/organizations", {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+    "x-organization-registration-token": "YOUR_REGISTRATION_TOKEN",
+  },
+  body: JSON.stringify({
+    name: "Acme Corp",
+    slug: "acme-corp",
+    email: "admin@acme.com",
+    returnFullApiKey: true,
+  }),
+});
+const { data } = await response.json();
+// Save data.apiKey.key — only shown once
+```
+</Tab>
+<Tab value="Java">
+```java
+HttpRequest request = HttpRequest.newBuilder()
+    .uri(URI.create("https://api.solana.com/v1/organizations"))
+    .header("Content-Type", "application/json")
+    .header("x-organization-registration-token", "YOUR_REGISTRATION_TOKEN")
+    .POST(HttpRequest.BodyPublishers.ofString("""
+        {
+          "name": "Acme Corp",
+          "slug": "acme-corp",
+          "email": "admin@acme.com",
+          "returnFullApiKey": true
+        }"""))
+    .build();
+```
+</Tab>
+</Tabs>
+
+Save the `key` from the response — it's your first API key and is only shown once.
+
+### 2. Initialize wallet signing
+
+<Tabs items={["curl", "TypeScript", "Java"]}>
+<Tab value="curl">
+```bash
+curl -X POST https://api.solana.com/v1/wallets/initialize \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "provider": "privy",
+    "walletLabel": "Master wallet"
+  }'
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript
+await fetch("https://api.solana.com/v1/wallets/initialize", {
+  method: "POST",
+  headers: {
+    "Authorization": "Bearer sk_test_...",
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({
+    provider: "privy",
+    walletLabel: "Master wallet",
+  }),
+});
+```
+</Tab>
+<Tab value="Java">
+```java
+HttpRequest request = HttpRequest.newBuilder()
+    .uri(URI.create("https://api.solana.com/v1/wallets/initialize"))
+    .header("Authorization", "Bearer sk_test_...")
+    .header("Content-Type", "application/json")
+    .POST(HttpRequest.BodyPublishers.ofString("""
+        {
+          "provider": "privy",
+          "walletLabel": "Master wallet"
+        }"""))
+    .build();
+```
+</Tab>
+</Tabs>
+
+### 3. Create your first token
+
+<Tabs items={["curl", "TypeScript", "Java"]}>
+<Tab value="curl">
+```bash
+curl -X POST https://api.solana.com/v1/issuance/tokens \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Acme Dollar",
+    "symbol": "ACME",
+    "decimals": 6,
+    "template": "stablecoin"
+  }'
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript
+const response = await fetch("https://api.solana.com/v1/issuance/tokens", {
+  method: "POST",
+  headers: {
+    "Authorization": "Bearer sk_test_...",
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({
+    name: "Acme Dollar",
+    symbol: "ACME",
+    decimals: 6,
+    template: "stablecoin",
+  }),
+});
+```
+</Tab>
+<Tab value="Java">
+```java
+HttpRequest request = HttpRequest.newBuilder()
+    .uri(URI.create("https://api.solana.com/v1/issuance/tokens"))
+    .header("Authorization", "Bearer sk_test_...")
+    .header("Content-Type", "application/json")
+    .POST(HttpRequest.BodyPublishers.ofString("""
+        {
+          "name": "Acme Dollar",
+          "symbol": "ACME",
+          "decimals": 6,
+          "template": "stablecoin"
+        }"""))
+    .build();
+```
+</Tab>
+</Tabs>
+
+### Next steps
+
+- [Manage API Keys](/docs/guides/manage-api-keys) — create scoped keys for different environments
+- [Deploy a Token](/docs/guides/deploy-a-token) — put your token on-chain
+- [Mint and Burn](/docs/guides/mint-and-burn) — manage token supply
+- [Prepare vs Execute](/docs/guides/prepare-vs-execute) — understand signing modes
+
+</Tab>
+</Tabs>
+
+## Key concepts
+
+| Concept | Description |
+| --- | --- |
+| **Environment** | `sandbox` (devnet) for testing, `production` (mainnet-beta) for real assets |
+| **API key prefix** | `sk_test_` for sandbox, `sk_live_` for production |
+| **Idempotency** | Include an `Idempotency-Key` header on mutation requests to prevent duplicates |
+| **Signing modes** | Execute (SDP signs) or Prepare (you sign) — see [Prepare vs Execute](/docs/guides/prepare-vs-execute) |

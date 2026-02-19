@@ -1,0 +1,33 @@
+{
+  "title": "Solana Developer Platform Docs",
+  "pages": [
+    "what-is-solana-developer-platform",
+    "getting-started",
+    "---Guides---",
+    "guides/setup-organization",
+    "guides/setup-wallets",
+    "guides/manage-api-keys",
+    "guides/create-a-token",
+    "guides/deploy-a-token",
+    "guides/mint-and-burn",
+    "guides/manage-allowlists",
+    "guides/freeze-and-compliance",
+    "guides/transfer-tokens",
+    "guides/prepare-vs-execute",
+    "---Tutorials---",
+    "tutorials/end-to-end-payment-flow",
+    "---Reference---",
+    "reference/issuance-token-types",
+    "reference/api/index",
+    "reference/api/health",
+    "reference/api/organizations",
+    "reference/api/api-keys",
+    "reference/api/members",
+    "reference/api/auth",
+    "reference/api/wallets",
+    "reference/api/projects",
+    "reference/api/issuance",
+    "reference/api/admin",
+    "reference/api/onboarding"
+  ]
+}

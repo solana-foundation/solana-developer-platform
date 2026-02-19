@@ -1,0 +1,36 @@
+---
+title: What is Solana Developer Platform?
+description: Solana for enterprise. One API.
+---
+
+SDP brings issuance, payments, and trading workflows into a single API layer. Build, test, and launch production-grade Solana products with the partners and controls your team already uses.
+
+## What it combines
+
+- **Token issuance** — create, deploy, mint, and burn tokens using Token-2022 with built-in templates for stablecoins, gaming tokens, and regulated assets
+- **Payment orchestration** — transfer tokens between accounts with configurable policies, priority fees, and transaction simulation
+- **Wallet management** — provision and manage Solana signing wallets through custody providers like Privy, without handling key material directly
+- **Compliance controls** — freeze accounts, pause transfers, manage allowlists, and seize tokens when regulation demands it
+- **Two signing modes** — let SDP sign and submit transactions (execute mode) or receive unsigned transactions to sign yourself (prepare mode)
+
+## How it works
+
+SDP exposes a REST API and a dashboard UI. Both connect to the same backend:
+
+1. **Set up** — create an organization, provision a signing wallet, and generate API keys
+2. **Build** — create tokens from templates, deploy them on-chain, and integrate minting and transfers into your product
+3. **Operate** — manage supply, enforce compliance, rotate keys, and monitor transactions
+
+The platform is designed so you can start with common templates and move into more custom flows as your product matures.
+
+## Environments
+
+| Environment | API key prefix | Solana network |
+| --- | --- | --- |
+| Sandbox | `sk_test_` | devnet |
+| Production | `sk_live_` | mainnet-beta |
+
+## Next steps
+
+- [Getting Started](/docs/getting-started) — set up your first organization and token
+- [Guides](/docs/guides/setup-organization) — step-by-step walkthroughs for every workflow

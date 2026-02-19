@@ -1,0 +1,239 @@
+---
+title: Create a Token
+description: Define a new token using templates or custom configuration.
+---
+
+Token creation defines your token's metadata, extensions, and rules. The token is saved in SDP but **not yet deployed** on-chain — see [Deploy a Token](/docs/guides/deploy-a-token) for the next step.
+
+## Templates
+
+SDP provides templates that pre-configure extensions and defaults for common use cases:
+
+| Template | Decimals | Key extensions | Use case |
+| --- | --- | --- | --- |
+| **Stablecoin** | 6 | Permanent delegate, pausable | USD-backed tokens |
+| **Arcade** | 0 | Permanent delegate, pausable | Gaming tokens, loyalty points |
+| **Tokenized Security** | 8 | Permanent delegate, pausable, scaled UI amount | Regulated assets |
+| **Custom** | 9 | None (you choose) | Full control |
+
+<Tabs items={["Dashboard", "API"]}>
+<Tab value="Dashboard">
+
+### 1. Open the create token modal
+
+Navigate to **Issuance** in the sidebar. Click **Create token** in the top right corner.
+
+### 2. Choose a template (Step 1 of 3)
+
+The first step shows a grid of template cards:
+
+- **Stablecoin** — USD-backed stablecoins with compliance controls
+- **Arcade** — closed-loop gaming tokens with optional allowlists
+- **Tokenized Security** — regulated assets with allowlist defaults
+- **Custom** — fully customizable Token-2022 configuration
+
+Select a template and click **Continue**.
+
+### 3. Configure token settings (Step 2 of 3)
+
+Fill in the token form:
+
+- **Token name** (required) — e.g., "Acme Dollar"
+- **Symbol** (required) — 1–10 uppercase alphanumeric characters, e.g., "ACME"
+- **Decimals** — pre-filled by the template, adjustable (0–18)
+- **Description (optional)** — e.g., "Asset-backed token for treasury operations"
+- **Max supply (optional)** — leave empty to keep supply uncapped
+
+Checkboxes:
+
+- **Require allowlist**
+- **Token is mintable** (default: checked)
+- **Token is freezable** (default: checked)
+
+Click **Review** when ready.
+
+### 4. Review and confirm (Step 3 of 3)
+
+The review screen shows a read-only summary of all settings. Click **Create token**.
+
+### 5. Done
+
+A success screen confirms creation with the token name and ID. The token is now in `pending` status, ready to be [deployed](/docs/guides/deploy-a-token).
+
+</Tab>
+<Tab value="API">
+
+### 1. List available templates (optional)
+
+<Tabs items={["curl", "TypeScript", "Java"]}>
+<Tab value="curl">
+```bash
+curl https://api.solana.com/v1/issuance/templates \
+  -H "Authorization: Bearer sk_test_..."
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript
+const response = await fetch("https://api.solana.com/v1/issuance/templates", {
+  headers: { "Authorization": "Bearer sk_test_..." },
+});
+const { data } = await response.json();
+```
+</Tab>
+<Tab value="Java">
+```java
+HttpRequest request = HttpRequest.newBuilder()
+    .uri(URI.create("https://api.solana.com/v1/issuance/templates"))
+    .header("Authorization", "Bearer sk_test_...")
+    .GET()
+    .build();
+```
+</Tab>
+</Tabs>
+
+### 2. Create a token
+
+<Tabs items={["curl", "TypeScript", "Java"]}>
+<Tab value="curl">
+```bash
+curl -X POST https://api.solana.com/v1/issuance/tokens \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Acme Dollar",
+    "symbol": "ACME",
+    "decimals": 6,
+    "description": "USD-backed stablecoin",
+    "template": "stablecoin",
+    "requiresAllowlist": false,
+    "isMintable": true,
+    "isFreezable": true
+  }'
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript
+const response = await fetch("https://api.solana.com/v1/issuance/tokens", {
+  method: "POST",
+  headers: {
+    "Authorization": "Bearer sk_test_...",
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({
+    name: "Acme Dollar",
+    symbol: "ACME",
+    decimals: 6,
+    description: "USD-backed stablecoin",
+    template: "stablecoin",
+    requiresAllowlist: false,
+    isMintable: true,
+    isFreezable: true,
+  }),
+});
+const { data } = await response.json();
+// data.token.id — use this for deploy, mint, etc.
+```
+</Tab>
+<Tab value="Java">
+```java
+HttpRequest request = HttpRequest.newBuilder()
+    .uri(URI.create("https://api.solana.com/v1/issuance/tokens"))
+    .header("Authorization", "Bearer sk_test_...")
+    .header("Content-Type", "application/json")
+    .POST(HttpRequest.BodyPublishers.ofString("""
+        {
+          "name": "Acme Dollar",
+          "symbol": "ACME",
+          "decimals": 6,
+          "description": "USD-backed stablecoin",
+          "template": "stablecoin",
+          "requiresAllowlist": false,
+          "isMintable": true,
+          "isFreezable": true
+        }"""))
+    .build();
+```
+</Tab>
+</Tabs>
+
+The token is created with status `pending`. It must be [deployed](/docs/guides/deploy-a-token) before you can mint or transfer.
+
+### Custom token (no template)
+
+Omit the `template` field or set it to `"custom"` and configure extensions via `overrides`:
+
+<Tabs items={["curl", "TypeScript", "Java"]}>
+<Tab value="curl">
+```bash
+curl -X POST https://api.solana.com/v1/issuance/tokens \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Game Coin",
+    "symbol": "GAME",
+    "decimals": 0,
+    "template": "custom",
+    "overrides": {
+      "pausable": true,
+      "transferFee": {
+        "basisPoints": 50,
+        "maxFee": "1000"
+      }
+    },
+    "isMintable": true,
+    "isFreezable": false
+  }'
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript
+const response = await fetch("https://api.solana.com/v1/issuance/tokens", {
+  method: "POST",
+  headers: {
+    "Authorization": "Bearer sk_test_...",
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({
+    name: "Game Coin",
+    symbol: "GAME",
+    decimals: 0,
+    template: "custom",
+    overrides: {
+      pausable: true,
+      transferFee: { basisPoints: 50, maxFee: "1000" },
+    },
+    isMintable: true,
+    isFreezable: false,
+  }),
+});
+```
+</Tab>
+<Tab value="Java">
+```java
+HttpRequest request = HttpRequest.newBuilder()
+    .uri(URI.create("https://api.solana.com/v1/issuance/tokens"))
+    .header("Authorization", "Bearer sk_test_...")
+    .header("Content-Type", "application/json")
+    .POST(HttpRequest.BodyPublishers.ofString("""
+        {
+          "name": "Game Coin",
+          "symbol": "GAME",
+          "decimals": 0,
+          "template": "custom",
+          "overrides": {
+            "pausable": true,
+            "transferFee": {
+              "basisPoints": 50,
+              "maxFee": "1000"
+            }
+          },
+          "isMintable": true,
+          "isFreezable": false
+        }"""))
+    .build();
+```
+</Tab>
+</Tabs>
+
+</Tab>
+</Tabs>
