@@ -57,6 +57,18 @@ export interface CreatePaymentTransferInput {
   updatedAt: string;
 }
 
+export interface UpdatePaymentTransferInput {
+  transferId: string;
+  status?: PaymentTransferStatus;
+  signature?: string | null;
+  serializedTx?: string | null;
+  slot?: number | null;
+  blockTime?: string | null;
+  fee?: number | null;
+  error?: string | null;
+  updatedAt: string;
+}
+
 export interface UpsertPaymentWalletPolicyInput {
   id: string;
   custodyWalletId: string;
@@ -72,8 +84,14 @@ export interface PaymentsRepositoryContext {
 
 export interface PaymentsRepository {
   createTransfer(input: CreatePaymentTransferInput): Promise<PaymentTransferRow | null>;
+  updateTransfer(input: UpdatePaymentTransferInput): Promise<PaymentTransferRow | null>;
   getTransferById(params: {
     transferId: string;
+    organizationId: string;
+    projectId: string | null;
+  }): Promise<PaymentTransferRow | null>;
+  getTransferBySignature(params: {
+    signature: string;
     organizationId: string;
     projectId: string | null;
   }): Promise<PaymentTransferRow | null>;

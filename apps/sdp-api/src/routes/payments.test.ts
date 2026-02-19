@@ -585,4 +585,168 @@ describe("Payments routes", () => {
 
     fetchSpy.mockRestore();
   });
+
+  it("syncs finalized status into DB from listTransfers RPC history", async () => {
+    const now = new Date().toISOString();
+    const nowUnix = 1_735_920_100;
+
+    await env.DB.prepare(
+      `INSERT INTO payment_transfers
+           (id, organization_id, project_id, wallet_id, source_address, destination_address, token, amount, memo, type, direction, status, signature, slot, block_time, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+      .bind(
+        "xfr_sync_finalized_list",
+        TEST_ORG.id,
+        null,
+        TEST_WALLET_ID,
+        TEST_SOLANA_ADDRESSES.wallet1,
+        TEST_SOLANA_ADDRESSES.wallet2,
+        "SOL",
+        "1",
+        null,
+        "transfer",
+        "outbound",
+        "confirmed",
+        "sig_sync_finalized_list",
+        100,
+        now,
+        now,
+        now
+      )
+      .run();
+
+    const fetchSpy = mockRpcFetch(async (request) => {
+      // biome-ignore lint/nursery/noSecrets: JSON-RPC method literal in test fixture.
+      if (request.method === "getSignaturesForAddress") {
+        const params = (request.params ?? []) as Array<{
+          limit?: number;
+          before?: string;
+          commitment?: string;
+        }>;
+        const options = params[1];
+        if (options?.before) {
+          return jsonRpcResult(request.id, []);
+        }
+
+        return jsonRpcResult(request.id, [
+          signatureRow({
+            signature: "sig_sync_finalized_list",
+            slot: 450,
+            blockTime: nowUnix,
+            confirmationStatus: "finalized",
+          }),
+        ]);
+      }
+
+      if (request.method === "getTransaction") {
+        return jsonRpcResult(
+          request.id,
+          solTransferTx({
+            slot: 450,
+            blockTime: nowUnix,
+            source: TEST_SOLANA_ADDRESSES.wallet1,
+            destination: TEST_SOLANA_ADDRESSES.wallet2,
+            lamports: "1000000000",
+          })
+        );
+      }
+
+      return jsonRpcResult(request.id, null);
+    });
+
+    const res = await app.request(
+      `/v1/payments/transfers?wallet=${TEST_WALLET_ID}`,
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+      },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      data: Array<{ signature: string; status: string }>;
+    };
+    expect(body.data[0]?.signature).toBe("sig_sync_finalized_list");
+    expect(body.data[0]?.status).toBe("finalized");
+
+    const transfer = await env.DB.prepare("SELECT status, slot FROM payment_transfers WHERE id = ?")
+      .bind("xfr_sync_finalized_list")
+      .first<{ status: string; slot: number | null }>();
+    expect(transfer?.status).toBe("finalized");
+    expect(transfer?.slot).toBe(450);
+
+    fetchSpy.mockRestore();
+  });
+
+  it("syncs finalized status into DB when reading an xfr_ transfer with a signature", async () => {
+    const now = new Date().toISOString();
+
+    await env.DB.prepare(
+      `INSERT INTO payment_transfers
+           (id, organization_id, project_id, wallet_id, source_address, destination_address, token, amount, memo, type, direction, status, signature, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+      .bind(
+        "xfr_sync_finalized_get",
+        TEST_ORG.id,
+        null,
+        TEST_WALLET_ID,
+        TEST_SOLANA_ADDRESSES.wallet1,
+        TEST_SOLANA_ADDRESSES.wallet2,
+        "SOL",
+        "1",
+        null,
+        "transfer",
+        "outbound",
+        "confirmed",
+        "sig_sync_finalized_get",
+        now,
+        now
+      )
+      .run();
+
+    const fetchSpy = mockRpcFetch(async (request) => {
+      // biome-ignore lint/nursery/noSecrets: JSON-RPC method literal in test fixture.
+      if (request.method === "getSignatureStatuses") {
+        return jsonRpcResult(request.id, {
+          context: { slot: 600 },
+          value: [
+            {
+              slot: 600,
+              err: null,
+              confirmationStatus: "finalized",
+            },
+          ],
+        });
+      }
+      return jsonRpcResult(request.id, null);
+    });
+
+    const res = await app.request(
+      "/v1/payments/transfers/xfr_sync_finalized_get",
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+      },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { data: { transfer: { status: string } } };
+    expect(body.data.transfer.status).toBe("finalized");
+
+    const transfer = await env.DB.prepare("SELECT status, slot FROM payment_transfers WHERE id = ?")
+      .bind("xfr_sync_finalized_get")
+      .first<{ status: string; slot: number | null }>();
+    expect(transfer?.status).toBe("finalized");
+    expect(transfer?.slot).toBe(600);
+
+    fetchSpy.mockRestore();
+  });
 });

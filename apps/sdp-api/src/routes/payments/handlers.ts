@@ -44,6 +44,7 @@ import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
 import type { Context } from "hono";
 import {
   type SignatureStatusRow,
+  getSignatureConfirmation,
   getTransactionJsonParsed,
   getTransactionsJsonParsedBatch,
   inferTransferFromTransaction,
@@ -824,6 +825,81 @@ async function getTransferRowById(
   return repository.getTransferById({ transferId, organizationId, projectId });
 }
 
+async function updateTransferRecord(
+  c: AppContext,
+  transferId: string,
+  patch: {
+    status?: TransferRow["status"];
+    signature?: string | null;
+    serializedTx?: string | null;
+    slot?: number | null;
+    blockTime?: string | null;
+    fee?: number | null;
+    error?: string | null;
+  }
+): Promise<TransferRow> {
+  const repository = getPaymentsRepository(c);
+  const now = new Date().toISOString();
+
+  const updated = await repository.updateTransfer({
+    transferId,
+    status: patch.status,
+    signature: patch.signature,
+    serializedTx: patch.serializedTx,
+    slot: patch.slot,
+    blockTime: patch.blockTime,
+    fee: patch.fee,
+    error: patch.error,
+    updatedAt: now,
+  });
+
+  if (!updated) {
+    throw new AppError("INTERNAL_ERROR", "Payment transfer record not found for update");
+  }
+
+  return updated;
+}
+
+async function syncFinalizedTransferBySignature(
+  c: AppContext,
+  input: {
+    organizationId: string;
+    projectId: string | null;
+    signature: string;
+    status: TransferRow["status"];
+    slot?: number | bigint | null;
+    blockTime?: string | null;
+    error?: string | null;
+  }
+): Promise<TransferRow | null> {
+  if (input.status !== "finalized") {
+    return null;
+  }
+
+  const repository = getPaymentsRepository(c);
+  const existing = await repository.getTransferBySignature({
+    signature: input.signature,
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+  });
+  if (!existing || existing.status === "finalized") {
+    return null;
+  }
+
+  const slot =
+    typeof input.slot === "bigint"
+      ? Number(input.slot)
+      : typeof input.slot === "number"
+        ? input.slot
+        : null;
+  return updateTransferRecord(c, existing.id, {
+    status: "finalized",
+    slot: slot ?? undefined,
+    blockTime: input.blockTime ?? undefined,
+    ...(input.error !== undefined ? { error: input.error } : {}),
+  });
+}
+
 async function prepareSolTransfer(
   c: AppContext,
   sourceAddress: Address,
@@ -866,7 +942,12 @@ async function executeSolTransfer(
   sourceWallet: CustodyWallet,
   destinationAddress: Address,
   amount: string
-): Promise<{ signature: string; slot: number | null; blockTime: string | null }> {
+): Promise<{
+  signature: string;
+  slot: number | null;
+  blockTime: string | null;
+  status: TransferRow["status"];
+}> {
   const lamports = parseDecimalAmount(amount, 9);
   if (lamports <= 0n) {
     throw new AppError("BAD_REQUEST", "Transfer amount must be greater than zero");
@@ -920,6 +1001,7 @@ async function executeSolTransfer(
     signature,
     slot: Number(confirmation.slot),
     blockTime: new Date().toISOString(),
+    status: confirmation.confirmationStatus === "finalized" ? "finalized" : "confirmed",
   };
 }
 
@@ -998,7 +1080,12 @@ async function executeSplTransfer(
   destinationAddress: Address,
   mintAddress: Address,
   amount: string
-): Promise<{ signature: string; slot: number | null; blockTime: string | null }> {
+): Promise<{
+  signature: string;
+  slot: number | null;
+  blockTime: string | null;
+  status: TransferRow["status"];
+}> {
   const auth = getAuth(c);
   const signer = await createOrgSigner(
     c.env,
@@ -1083,6 +1170,7 @@ async function executeSplTransfer(
     signature,
     slot: Number(confirmation.slot),
     blockTime: new Date().toISOString(),
+    status: confirmation.confirmationStatus === "finalized" ? "finalized" : "confirmed",
   };
 }
 
@@ -1322,8 +1410,26 @@ export async function createTransfer(c: AppContext) {
     amount: parsed.data.amount,
   });
 
+  const transfer = await createTransferRecord(c, {
+    organizationId: scope.auth.organizationId,
+    projectId: scope.auth.projectId,
+    walletId: sourceWallet.walletId,
+    sourceAddress: sourceWallet.publicKey,
+    destinationAddress: parsed.data.destination,
+    token: transferToken,
+    amount: parsed.data.amount,
+    memo: parsed.data.memo,
+    status: "processing",
+    initiatedByKeyId: scope.auth.id,
+  });
+
   try {
-    let executionResult: { signature: string; slot: number | null; blockTime: string | null };
+    let executionResult: {
+      signature: string;
+      slot: number | null;
+      blockTime: string | null;
+      status: TransferRow["status"];
+    };
     if (isNativeSolToken(parsed.data.token)) {
       executionResult = await executeSolTransfer(
         c,
@@ -1342,36 +1448,23 @@ export async function createTransfer(c: AppContext) {
       );
     }
 
-    const timestamp = executionResult.blockTime ?? new Date().toISOString();
-    return success(c, {
-      transfer: {
-        id: executionResult.signature,
-        organizationId: scope.auth.organizationId,
-        ...(scope.auth.projectId ? { projectId: scope.auth.projectId } : {}),
-        type: "transfer",
-        direction: "outbound",
-        status: "confirmed",
-        signature: executionResult.signature,
-        serializedTx: null,
-        slot: executionResult.slot,
-        blockTime: executionResult.blockTime,
-        fee: null,
-        error: null,
-        initiatedBy: {
-          type: "api_key",
-          id: scope.auth.id,
-        },
-        source: sourceWallet.publicKey,
-        destination: parsed.data.destination,
-        ...(parsed.data.memo ? { memo: parsed.data.memo } : {}),
-        token: transferToken,
-        amount: parsed.data.amount,
-        createdAt: timestamp,
-        updatedAt: timestamp,
-      },
+    const updated = await updateTransferRecord(c, transfer.id, {
+      status: executionResult.status,
+      signature: executionResult.signature,
+      slot: executionResult.slot,
+      blockTime: executionResult.blockTime,
+      error: null,
     });
+
+    return success(c, { transfer: mapTransferRow(updated) });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown transfer error";
+    await updateTransferRecord(c, transfer.id, {
+      status: "failed",
+      error: message,
+      blockTime: new Date().toISOString(),
+    });
+
     if (error instanceof AppError) {
       throw error;
     }
@@ -1430,7 +1523,7 @@ export async function listTransfers(c: AppContext) {
       signatures: rows.map((row) => row.signature),
     });
 
-    return rows.map((row) =>
+    const transfers = rows.map((row) =>
       mapOnChainTransfer({
         row,
         tx: txBySignature.get(row.signature) ?? null,
@@ -1439,6 +1532,24 @@ export async function listTransfers(c: AppContext) {
         ownedAddresses: ownedWalletAddresses,
       })
     );
+
+    await Promise.all(
+      transfers
+        .filter((transfer) => transfer.status === "finalized")
+        .map((transfer) =>
+          syncFinalizedTransferBySignature(c, {
+            organizationId: scope.auth.organizationId,
+            projectId: scope.auth.projectId,
+            signature: transfer.signature,
+            status: transfer.status,
+            slot: transfer.slot,
+            blockTime: transfer.blockTime,
+            error: transfer.error,
+          })
+        )
+    );
+
+    return transfers;
   };
 
   const normalizedToken = token ? normalizeTransferToken(token) : undefined;
@@ -1485,7 +1596,31 @@ export async function getTransfer(c: AppContext) {
       throw new AppError("NOT_FOUND", "Transfer not found");
     }
 
-    return success(c, { transfer: mapTransferRow(row) });
+    let transferRow = row;
+    if (row.signature) {
+      try {
+        const rpc = createRpc(c.env);
+        const confirmation = await getSignatureConfirmation(rpc, row.signature);
+        if (confirmation) {
+          const synced = await syncFinalizedTransferBySignature(c, {
+            organizationId: auth.organizationId,
+            projectId: auth.projectId,
+            signature: row.signature,
+            status: mapSignatureStatusToTransferStatus(confirmation),
+            slot: confirmation.slot,
+            blockTime: row.block_time,
+            error: row.error,
+          });
+          if (synced) {
+            transferRow = synced;
+          }
+        }
+      } catch {
+        // Best effort sync only; stale DB status should not fail transfer reads.
+      }
+    }
+
+    return success(c, { transfer: mapTransferRow(transferRow) });
   }
 
   const scope = await resolveScope(c);
@@ -1512,6 +1647,26 @@ export async function getTransfer(c: AppContext) {
   };
   const normalizedToken = details.token ? normalizeTransferToken(details.token) : undefined;
   const blockTimeIso = unixSecondsToIso(parsedTx.blockTime) ?? new Date().toISOString();
+  let confirmation: Awaited<ReturnType<typeof getSignatureConfirmation>> = null;
+  try {
+    confirmation = await getSignatureConfirmation(rpc, transferId);
+  } catch {
+    confirmation = null;
+  }
+  const transferStatus = mapSignatureStatusToTransferStatus({
+    err: confirmation?.err ?? parsedTx.meta?.err,
+    confirmationStatus: confirmation?.confirmationStatus ?? "confirmed",
+  });
+
+  await syncFinalizedTransferBySignature(c, {
+    organizationId: scope.auth.organizationId,
+    projectId: scope.auth.projectId,
+    signature: transferId,
+    status: transferStatus,
+    slot: confirmation?.slot ?? parsedTx.slot,
+    blockTime: unixSecondsToIso(parsedTx.blockTime),
+    error: parsedTx.meta?.err ? JSON.stringify(parsedTx.meta.err) : null,
+  });
 
   return success(c, {
     transfer: {
@@ -1520,10 +1675,7 @@ export async function getTransfer(c: AppContext) {
       ...(scope.auth.projectId ? { projectId: scope.auth.projectId } : {}),
       type: details.type,
       direction: details.direction,
-      status: mapSignatureStatusToTransferStatus({
-        err: parsedTx.meta?.err,
-        confirmationStatus: "confirmed",
-      }),
+      status: transferStatus,
       signature: transferId,
       serializedTx: null,
       slot: slotToNumber(parsedTx.slot),
