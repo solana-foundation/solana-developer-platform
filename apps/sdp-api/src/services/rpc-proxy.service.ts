@@ -61,7 +61,7 @@ export interface ResolvedRpcTarget {
   selectionMode: RpcSelectionMode;
 }
 
-export interface RelayTelemetryInput {
+export interface ProxyTelemetryInput {
   providerId: ResolvedRpcProviderId;
   methodNames: string[];
   statusCode: number;
@@ -313,7 +313,7 @@ function validateRequestedProjectScope(
   if (authProjectId && requestedProjectId && requestedProjectId !== authProjectId) {
     throw new AppError(
       "FORBIDDEN",
-      "Project-scoped API keys cannot relay requests for another project"
+      "Project-scoped API keys cannot proxy requests for another project"
     );
   }
 }
@@ -370,7 +370,7 @@ export async function resolveRpcTarget(input: ResolveRpcTargetInput): Promise<Re
   };
 }
 
-export async function recordRpcRelayTelemetry(cache: KVNamespace, telemetry: RelayTelemetryInput) {
+export async function recordRpcProxyTelemetry(cache: KVNamespace, telemetry: ProxyTelemetryInput) {
   const key = `${STATS_KEY_PREFIX}${telemetry.providerId}`;
   const existing = (await cache.get(key, "json")) as Partial<RpcProviderStatsRecord> | null;
   const stats: RpcProviderStatsRecord = {

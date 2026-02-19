@@ -2,7 +2,7 @@ import {
   includesTransactionMethod,
   listRpcProviders,
   resolveRpcTarget,
-} from "@/services/rpc-relay.service";
+} from "@/services/rpc-proxy.service";
 import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/d1";
 import type { Env } from "@/types/env";
@@ -36,7 +36,7 @@ async function clearKvNamespace(namespace: KVNamespace) {
   }
 }
 
-describe("rpc-relay.service", () => {
+describe("rpc-proxy.service", () => {
   beforeAll(async () => {
     await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
   });
