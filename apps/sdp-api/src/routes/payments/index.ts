@@ -1,0 +1,38 @@
+import { authMiddleware, requirePermissions } from "@/middleware/auth";
+import type { Env } from "@/types/env";
+import { Hono } from "hono";
+import {
+  createTransfer,
+  getWalletBalances,
+  getWalletPolicy,
+  prepareTransfer,
+  updateWalletPolicy,
+} from "./handlers";
+
+const payments = new Hono<{ Bindings: Env }>();
+
+payments.use("*", authMiddleware());
+
+payments.get(
+  "/wallets/:walletId/balances",
+  requirePermissions("wallets:read", "payments:read"),
+  getWalletBalances
+);
+payments.get(
+  "/wallets/:walletId/policies",
+  requirePermissions("wallets:read", "payments:read"),
+  getWalletPolicy
+);
+payments.put(
+  "/wallets/:walletId/policies",
+  requirePermissions("wallets:write", "payments:write"),
+  updateWalletPolicy
+);
+payments.post(
+  "/transfers/prepare",
+  requirePermissions("payments:write", "wallets:read"),
+  prepareTransfer
+);
+payments.post("/transfers", requirePermissions("payments:write", "wallets:read"), createTransfer);
+
+export default payments;

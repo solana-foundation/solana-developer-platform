@@ -131,6 +131,33 @@ export interface MintToOptions {
 }
 
 /**
+ * Options for transfering tokens between wallets.
+ * Amount is a decimal string; Mosaic resolves mint decimals from chain state.
+ */
+export interface TransferOptions {
+  mint: Address;
+  from: Address;
+  to: Address;
+  amount: string;
+  memo?: string;
+  authority: Address;
+  feePayer: Address;
+}
+
+/**
+ * Execution options for transfering tokens with custody signing.
+ */
+export interface ExecuteTransferOptions {
+  mint: Address;
+  from: Address;
+  to: Address;
+  amount: string;
+  memo?: string;
+  authority: TransactionSigner;
+  feePayer: TransactionSigner;
+}
+
+/**
  * Options for burning tokens
  */
 export interface BurnOptions {

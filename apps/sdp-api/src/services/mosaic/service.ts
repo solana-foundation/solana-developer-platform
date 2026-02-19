@@ -42,6 +42,7 @@ import {
   createResumeTransaction,
   createStablecoinInitTransaction,
   createTokenizedSecurityInitTransaction,
+  createTransferTransaction,
   // ABL wallet management (object input pattern)
   getAddWalletTransaction,
   // Token ACL freeze/thaw (object input pattern)
@@ -58,11 +59,13 @@ import {
   type AblWalletOptions,
   type CreateTokenOptions,
   DEFAULT_ACL_MODE,
+  type ExecuteTransferOptions,
   type FreezeThawOptions,
   type MintToOptions,
   type MosaicTransaction,
   type MosaicTransactionResult,
   TEMPLATE_MAP,
+  type TransferOptions,
 } from "./types";
 import { safeStringify } from "./utils";
 
@@ -374,6 +377,46 @@ export class MosaicService {
       ...this.toMosaicTransaction(fullTx),
       tokenAccount: tokenAccountInfo.tokenAccount,
     };
+  }
+
+  /**
+   * Prepare a Token-2022 transfer transaction (unsigned) for client signing.
+   */
+  async prepareTransfer(options: TransferOptions): Promise<MosaicTransaction> {
+    const feePayer = await this.resolveFeePayer(options.feePayer);
+
+    const fullTx = await createTransferTransaction({
+      rpc: this.rpc,
+      mint: options.mint,
+      from: options.from,
+      to: options.to,
+      authority: options.authority,
+      feePayer,
+      amount: options.amount,
+      memo: options.memo,
+    });
+
+    return this.toMosaicTransaction(fullTx);
+  }
+
+  /**
+   * Execute a Token-2022 transfer transaction with custody signing.
+   */
+  async transfer(options: ExecuteTransferOptions): Promise<MosaicTransactionResult> {
+    const feePayer = await this.resolveFeePayerSigner(options.feePayer);
+
+    const fullTx = await createTransferTransaction({
+      rpc: this.rpc,
+      mint: options.mint,
+      from: options.from,
+      to: options.to,
+      authority: options.authority,
+      feePayer,
+      amount: options.amount,
+      memo: options.memo,
+    });
+
+    return this.signAndSubmit(fullTx);
   }
 
   // ═════════════════════════════════════════════════════════════════════════

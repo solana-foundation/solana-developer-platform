@@ -88,7 +88,7 @@ export const prepareForceBurn = async (c: AppContext) => {
     simulation = await simulateTransaction(rpc, txBytes);
   }
 
-  const tx = await tokenService.createTransaction({
+  const { transaction: tx } = await tokenService.createTransaction({
     tokenId,
     organizationId: auth.organizationId,
     type: "force_burn",

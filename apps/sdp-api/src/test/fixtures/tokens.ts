@@ -95,6 +95,8 @@ export const TEST_TOKEN_TRANSACTION: TokenTransaction = {
   organizationId: TEST_ORG.id,
   type: "mint",
   status: "pending",
+  idempotencyKey: null,
+  idempotencyFingerprint: null,
   signature: null,
   serializedTx: null,
   params: {
