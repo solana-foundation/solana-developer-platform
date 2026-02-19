@@ -143,15 +143,20 @@ function applyProviderRuntimeConfigs(configs: ProviderRuntimeConfig[]): void {
   }
 }
 
-const liveProviderConfigs = (["triton", "helius", "alchemy", "quicknode"] as const)
+const managedProviders: ManagedProvider[] = ["triton", "helius", "alchemy", "quicknode"];
+
+const liveProviderConfigs = managedProviders
   .map((provider) => getProviderRuntimeConfig(provider))
   .filter((provider): provider is ProviderRuntimeConfig => provider !== null);
 
-function getRequiredLiveProviderConfigs(): ProviderRuntimeConfig[] {
-  const requiredProviders: ManagedProvider[] = ["triton", "helius", "alchemy", "quicknode"];
-  const missingProviders = requiredProviders.filter(
-    (provider) => !liveProviderConfigs.some((config) => config.provider === provider)
-  );
+function hasLiveProviderConfig(provider: ManagedProvider): boolean {
+  return liveProviderConfigs.some((config) => config.provider === provider);
+}
+
+function getRequiredLiveProviderConfigs(
+  requiredProviders: readonly ManagedProvider[]
+): ProviderRuntimeConfig[] {
+  const missingProviders = requiredProviders.filter((provider) => !hasLiveProviderConfig(provider));
 
   if (missingProviders.length > 0) {
     throw new Error(
@@ -366,31 +371,78 @@ describe("RPC Relay Routes", () => {
     expect(String(body.data.provider.endpoint)).toContain("api-key=***");
   });
 
-  it.each(["triton", "helius", "alchemy", "quicknode"] as const)(
-    "connectivity check: proxies through %s when org rpcProvider is set",
-    async (provider) => {
-      const allProviderConfigs = getRequiredLiveProviderConfigs();
-      const selectedProviderConfig = allProviderConfigs.find((item) => item.provider === provider);
-      if (!selectedProviderConfig) {
-        throw new Error(`Missing provider config for ${provider}`);
+  for (const provider of managedProviders) {
+    const itForProvider = it.runIf(hasLiveProviderConfig(provider));
+
+    itForProvider(
+      `connectivity check: proxies through ${provider} when org rpcProvider is set`,
+      async () => {
+        const [selectedProviderConfig] = getRequiredLiveProviderConfigs([provider]);
+        const db = (env as { DB: D1Database }).DB;
+        await db
+          .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
+          .bind(JSON.stringify({ rpcProvider: provider }), TEST_ORG.id)
+          .run();
+
+        applyProviderRuntimeConfigs(liveProviderConfigs);
+
+        const relayResponse = await app.request(
+          "/v1/rpc/proxy",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_API_KEY_RAW}`,
+              Origin: "https://dashboard.example.com",
+            },
+            body: JSON.stringify({
+              jsonrpc: "2.0",
+              id: 1,
+              method: "getVersion",
+              params: [],
+            }),
+          },
+          env
+        );
+
+        expect(relayResponse.status).toBe(200);
+        const body = await relayResponse.json();
+        expect(body.data.provider.id).toBe(provider);
+        expect(body.data.provider.selectionMode).toBe("organization_provider");
+        expect(body.data.upstream.status).toBeGreaterThan(0);
+        expect(typeof body.data.upstream.ok).toBe("boolean");
+        expect(String(body.data.provider.endpoint)).toContain(toHost(selectedProviderConfig.url));
       }
+    );
+  }
+
+  const itWithSwitchProviders = it.runIf(
+    hasLiveProviderConfig("triton") && hasLiveProviderConfig("helius")
+  );
+
+  itWithSwitchProviders(
+    "switches relay endpoint after organization rpcProvider is changed",
+    async () => {
+      const [initialProvider, updatedProvider] = getRequiredLiveProviderConfigs([
+        "triton",
+        "helius",
+      ]);
 
       const db = (env as { DB: D1Database }).DB;
       await db
         .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
-        .bind(JSON.stringify({ rpcProvider: provider }), TEST_ORG.id)
+        .bind(JSON.stringify({ rpcProvider: initialProvider.provider }), TEST_ORG.id)
         .run();
 
-      applyProviderRuntimeConfigs(allProviderConfigs);
+      applyProviderRuntimeConfigs(liveProviderConfigs);
 
-      const relayResponse = await app.request(
+      const firstRelay = await app.request(
         "/v1/rpc/proxy",
         {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
             Authorization: `Bearer ${TEST_API_KEY_RAW}`,
-            Origin: "https://dashboard.example.com",
           },
           body: JSON.stringify({
             jsonrpc: "2.0",
@@ -402,97 +454,54 @@ describe("RPC Relay Routes", () => {
         env
       );
 
-      expect(relayResponse.status).toBe(200);
-      const body = await relayResponse.json();
-      expect(body.data.provider.id).toBe(provider);
-      expect(body.data.provider.selectionMode).toBe("organization_provider");
-      expect(body.data.upstream.status).toBeGreaterThan(0);
-      expect(typeof body.data.upstream.ok).toBe("boolean");
-      expect(String(body.data.provider.endpoint)).toContain(toHost(selectedProviderConfig.url));
+      const orgUpdate = await app.request(
+        `/v1/organizations/${TEST_ORG.id}`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY_RAW}`,
+          },
+          body: JSON.stringify({
+            settings: { rpcProvider: updatedProvider.provider },
+          }),
+        },
+        env
+      );
+
+      const secondRelay = await app.request(
+        "/v1/rpc/proxy",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY_RAW}`,
+          },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: 2,
+            method: "getVersion",
+            params: [],
+          }),
+        },
+        env
+      );
+
+      expect(firstRelay.status).toBe(200);
+      expect(orgUpdate.status).toBe(200);
+      expect(secondRelay.status).toBe(200);
+
+      const firstBody = await firstRelay.json();
+      const secondBody = await secondRelay.json();
+
+      expect(firstBody.data.provider.id).toBe(initialProvider.provider);
+      expect(secondBody.data.provider.id).toBe(updatedProvider.provider);
+      expect(firstBody.data.upstream.status).toBeGreaterThan(0);
+      expect(secondBody.data.upstream.status).toBeGreaterThan(0);
+      expect(String(firstBody.data.provider.endpoint)).toContain(toHost(initialProvider.url));
+      expect(String(secondBody.data.provider.endpoint)).toContain(toHost(updatedProvider.url));
     }
   );
-
-  it("switches relay endpoint after organization rpcProvider is changed", async () => {
-    const allProviderConfigs = getRequiredLiveProviderConfigs();
-    const initialProvider = allProviderConfigs.find((item) => item.provider === "triton");
-    const updatedProvider = allProviderConfigs.find((item) => item.provider === "helius");
-    if (!initialProvider || !updatedProvider) {
-      throw new Error("Missing required provider configs for triton and helius");
-    }
-
-    const db = (env as { DB: D1Database }).DB;
-    await db
-      .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
-      .bind(JSON.stringify({ rpcProvider: initialProvider.provider }), TEST_ORG.id)
-      .run();
-
-    applyProviderRuntimeConfigs(allProviderConfigs);
-
-    const firstRelay = await app.request(
-      "/v1/rpc/proxy",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${TEST_API_KEY_RAW}`,
-        },
-        body: JSON.stringify({
-          jsonrpc: "2.0",
-          id: 1,
-          method: "getVersion",
-          params: [],
-        }),
-      },
-      env
-    );
-
-    const orgUpdate = await app.request(
-      `/v1/organizations/${TEST_ORG.id}`,
-      {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${TEST_API_KEY_RAW}`,
-        },
-        body: JSON.stringify({
-          settings: { rpcProvider: updatedProvider.provider },
-        }),
-      },
-      env
-    );
-
-    const secondRelay = await app.request(
-      "/v1/rpc/proxy",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${TEST_API_KEY_RAW}`,
-        },
-        body: JSON.stringify({
-          jsonrpc: "2.0",
-          id: 2,
-          method: "getVersion",
-          params: [],
-        }),
-      },
-      env
-    );
-
-    expect(firstRelay.status).toBe(200);
-    expect(orgUpdate.status).toBe(200);
-    expect(secondRelay.status).toBe(200);
-
-    const firstBody = await firstRelay.json();
-    const secondBody = await secondRelay.json();
-
-    expect(firstBody.data.provider.id).toBe(initialProvider.provider);
-    expect(secondBody.data.provider.id).toBe(updatedProvider.provider);
-    expect(firstBody.data.upstream.status).toBeGreaterThan(0);
-    expect(secondBody.data.upstream.status).toBeGreaterThan(0);
-    expect(String(firstBody.data.provider.endpoint)).toContain(toHost(initialProvider.url));
-    expect(String(secondBody.data.provider.endpoint)).toContain(toHost(updatedProvider.url));
-  });
 
   it("round-robins providers when org has no explicit provider setting", async () => {
     (env as { SOLANA_RPC_TRITON_URL?: string }).SOLANA_RPC_TRITON_URL = "https://rpc.triton.test";
