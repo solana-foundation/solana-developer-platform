@@ -90,11 +90,6 @@ export interface PaymentsRepository {
     organizationId: string;
     projectId: string | null;
   }): Promise<PaymentTransferRow | null>;
-  getTransferBySignature(params: {
-    signature: string;
-    organizationId: string;
-    projectId: string | null;
-  }): Promise<PaymentTransferRow | null>;
   listTransferAmounts(params: {
     organizationId: string;
     projectId: string | null;

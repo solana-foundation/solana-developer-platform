@@ -31,24 +31,6 @@ type TransactionBySignatureRpc = {
   ) => { send: () => Promise<unknown> };
 };
 
-export type SignatureConfirmation = {
-  slot: number | bigint;
-  err: unknown;
-  confirmationStatus?: string | null;
-};
-
-type SignatureStatusesRpc = {
-  getSignatureStatuses: (signatures: string[]) => {
-    send: () => Promise<{
-      value: Array<{
-        slot: number | bigint;
-        err: unknown;
-        confirmationStatus?: string | null;
-      } | null>;
-    }>;
-  };
-};
-
 type JsonRpcBatchItem = {
   id?: string | number;
   result?: unknown;
@@ -81,25 +63,6 @@ export async function getTransactionJsonParsed(
       encoding: "jsonParsed",
     })
     .send();
-}
-
-export async function getSignatureConfirmation(
-  rpc: ReturnType<typeof createRpc>,
-  signature: string
-): Promise<SignatureConfirmation | null> {
-  const result = await (rpc as unknown as SignatureStatusesRpc)
-    .getSignatureStatuses([signature])
-    .send();
-  const row = result.value[0];
-  if (!row) {
-    return null;
-  }
-
-  return {
-    slot: row.slot,
-    err: row.err,
-    confirmationStatus: row.confirmationStatus,
-  };
 }
 
 async function fetchTransactionsBatch(

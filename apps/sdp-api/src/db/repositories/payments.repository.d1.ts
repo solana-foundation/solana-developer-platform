@@ -145,22 +145,6 @@ export const createD1PaymentsRepository = (
       return row ? mapTransferRow(row) : null;
     },
 
-    async getTransferBySignature(params) {
-      const row = await db
-        .select()
-        .from(paymentTransfers)
-        .where(
-          toTransferScopeWhere({
-            organizationId: params.organizationId,
-            projectId: params.projectId,
-            extra: eq(paymentTransfers.signature, params.signature),
-          })
-        )
-        .get();
-
-      return row ? mapTransferRow(row) : null;
-    },
-
     async listTransferAmounts(params) {
       if (params.statuses.length === 0) {
         return [];

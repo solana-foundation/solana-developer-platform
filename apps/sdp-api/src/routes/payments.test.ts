@@ -586,7 +586,7 @@ describe("Payments routes", () => {
     fetchSpy.mockRestore();
   });
 
-  it("syncs finalized status into DB from listTransfers RPC history", async () => {
+  it("does not mutate DB status when listTransfers returns finalized from RPC history", async () => {
     const now = new Date().toISOString();
     const nowUnix = 1_735_920_100;
 
@@ -676,13 +676,13 @@ describe("Payments routes", () => {
     const transfer = await env.DB.prepare("SELECT status, slot FROM payment_transfers WHERE id = ?")
       .bind("xfr_sync_finalized_list")
       .first<{ status: string; slot: number | null }>();
-    expect(transfer?.status).toBe("finalized");
-    expect(transfer?.slot).toBe(450);
+    expect(transfer?.status).toBe("confirmed");
+    expect(transfer?.slot).toBe(100);
 
     fetchSpy.mockRestore();
   });
 
-  it("syncs finalized status into DB when reading an xfr_ transfer with a signature", async () => {
+  it("does not mutate DB status when reading an xfr_ transfer", async () => {
     const now = new Date().toISOString();
 
     await env.DB.prepare(
@@ -709,22 +709,7 @@ describe("Payments routes", () => {
       )
       .run();
 
-    const fetchSpy = mockRpcFetch(async (request) => {
-      // biome-ignore lint/nursery/noSecrets: JSON-RPC method literal in test fixture.
-      if (request.method === "getSignatureStatuses") {
-        return jsonRpcResult(request.id, {
-          context: { slot: 600 },
-          value: [
-            {
-              slot: 600,
-              err: null,
-              confirmationStatus: "finalized",
-            },
-          ],
-        });
-      }
-      return jsonRpcResult(request.id, null);
-    });
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
 
     const res = await app.request(
       "/v1/payments/transfers/xfr_sync_finalized_get",
@@ -739,13 +724,14 @@ describe("Payments routes", () => {
 
     expect(res.status).toBe(200);
     const body = (await res.json()) as { data: { transfer: { status: string } } };
-    expect(body.data.transfer.status).toBe("finalized");
+    expect(body.data.transfer.status).toBe("confirmed");
+    expect(fetchSpy).not.toHaveBeenCalled();
 
     const transfer = await env.DB.prepare("SELECT status, slot FROM payment_transfers WHERE id = ?")
       .bind("xfr_sync_finalized_get")
       .first<{ status: string; slot: number | null }>();
-    expect(transfer?.status).toBe("finalized");
-    expect(transfer?.slot).toBe(600);
+    expect(transfer?.status).toBe("confirmed");
+    expect(transfer?.slot).toBeNull();
 
     fetchSpy.mockRestore();
   });
