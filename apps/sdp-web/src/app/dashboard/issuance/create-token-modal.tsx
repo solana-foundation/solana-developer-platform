@@ -153,7 +153,9 @@ function getTemplateDefaultDecimals(template: TemplateSelection): TokenDraft["de
   }
 }
 
-function getTemplateDecimalOptions(template: TemplateSelection): ReadonlyArray<TokenDraft["decimals"]> {
+function getTemplateDecimalOptions(
+  template: TemplateSelection
+): ReadonlyArray<TokenDraft["decimals"]> {
   switch (template) {
     case "stablecoin":
     case "custom":
@@ -250,9 +252,7 @@ function TemplateCard({
             <Icon className="h-5 w-5" />
           </div>
           <div>
-            <p className="text-xl leading-none font-semibold text-[#1c1c1d]">
-              {descriptor.name}
-            </p>
+            <p className="text-xl leading-none font-semibold text-[#1c1c1d]">{descriptor.name}</p>
             <p className="mt-2 text-base text-[rgba(28,28,29,0.58)]">{descriptor.description}</p>
           </div>
         </div>
@@ -481,12 +481,17 @@ export function CreateIssuanceTokenModal() {
                     className="px-6 pb-6"
                   >
                     <div className="space-y-5 rounded-[28px] bg-white p-5">
-                      <p className="text-sm text-[rgba(28,28,29,0.62)]">Fields marked * are required.</p>
+                      <p className="text-sm text-[rgba(28,28,29,0.62)]">
+                        Fields marked * are required.
+                      </p>
 
                       <div className="grid gap-4">
                         <div className="grid gap-2">
                           <Label htmlFor="issuance-token-uri">
-                            Metadata URI <span aria-hidden className="text-[#c71f37]">*</span>
+                            Metadata URI{" "}
+                            <span aria-hidden className="text-[#c71f37]">
+                              *
+                            </span>
                             <span className="sr-only"> (required)</span>
                           </Label>
                           <Input
@@ -506,7 +511,10 @@ export function CreateIssuanceTokenModal() {
 
                         <div className="grid gap-2">
                           <Label htmlFor="issuance-token-name">
-                            Token Name <span aria-hidden className="text-[#c71f37]">*</span>
+                            Token Name{" "}
+                            <span aria-hidden className="text-[#c71f37]">
+                              *
+                            </span>
                             <span className="sr-only"> (required)</span>
                           </Label>
                           <Input
@@ -524,7 +532,10 @@ export function CreateIssuanceTokenModal() {
 
                         <div className="grid gap-2">
                           <Label htmlFor="issuance-token-symbol">
-                            Symbol <span aria-hidden className="text-[#c71f37]">*</span>
+                            Symbol{" "}
+                            <span aria-hidden className="text-[#c71f37]">
+                              *
+                            </span>
                             <span className="sr-only"> (required)</span>
                           </Label>
                           <Input
@@ -542,7 +553,10 @@ export function CreateIssuanceTokenModal() {
 
                         <div className="grid gap-2">
                           <Label>
-                            Decimals <span aria-hidden className="text-[#c71f37]">*</span>
+                            Decimals{" "}
+                            <span aria-hidden className="text-[#c71f37]">
+                              *
+                            </span>
                             <span className="sr-only"> (required)</span>
                           </Label>
                           <div
@@ -631,7 +645,10 @@ export function CreateIssuanceTokenModal() {
                     <div className="space-y-5 rounded-[28px] p-5">
                       <div>
                         <p className="text-3xl font-medium text-[#1c1c1d]">
-                          Access Control Mode <span aria-hidden className="text-[#c71f37]">*</span>
+                          Access Control Mode{" "}
+                          <span aria-hidden className="text-[#c71f37]">
+                            *
+                          </span>
                           <span className="sr-only"> (required)</span>
                         </p>
                         <p className="mt-2 text-lg text-[rgba(28,28,29,0.64)]">
@@ -670,7 +687,9 @@ export function CreateIssuanceTokenModal() {
                               ].join(" ")}
                             >
                               <ShieldCheck className="h-6 w-6 text-[#1c1c1d]" />
-                              <p className="mt-4 text-2xl font-semibold text-[#1c1c1d]">Allowlist</p>
+                              <p className="mt-4 text-2xl font-semibold text-[#1c1c1d]">
+                                Allowlist
+                              </p>
                               <p className="mt-2 text-base text-[rgba(28,28,29,0.66)]">
                                 Only approved addresses can transfer
                               </p>
@@ -711,7 +730,9 @@ export function CreateIssuanceTokenModal() {
                               ].join(" ")}
                             >
                               <ShieldAlert className="h-6 w-6 text-[#1c1c1d]" />
-                              <p className="mt-4 text-2xl font-semibold text-[#1c1c1d]">Blocklist</p>
+                              <p className="mt-4 text-2xl font-semibold text-[#1c1c1d]">
+                                Blocklist
+                              </p>
                               <p className="mt-2 text-base text-[rgba(28,28,29,0.66)]">
                                 Block specific addresses from transfers
                               </p>
@@ -739,11 +760,7 @@ export function CreateIssuanceTokenModal() {
                       >
                         Back
                       </Button>
-                      <Button
-                        type="submit"
-                        disabled={!canSubmit}
-                        className="flex-1"
-                      >
+                      <Button type="submit" disabled={!canSubmit} className="flex-1">
                         {isPending ? "Creating..." : getCreateButtonLabel(template)}
                       </Button>
                     </div>
