@@ -4,13 +4,23 @@
 
 import type { OrganizationRole } from "./permissions";
 
-export type OrganizationTier = "free" | "pro" | "enterprise";
+export const ORGANIZATION_TIERS = ["free", "pro", "enterprise"] as const;
+export type OrganizationTier = (typeof ORGANIZATION_TIERS)[number];
 
-export type OrganizationStatus = "active" | "suspended" | "deleted";
+export const ORGANIZATION_STATUSES = ["active", "suspended", "deleted"] as const;
+export type OrganizationStatus = (typeof ORGANIZATION_STATUSES)[number];
 
 export type MemberStatus = "active" | "suspended" | "removed";
 
 export type InvitationStatus = "pending" | "accepted" | "expired" | "revoked";
+export const ORGANIZATION_RPC_PROVIDERS = [
+  "alchemy",
+  "default",
+  "helius",
+  "quicknode",
+  "triton",
+] as const;
+export type OrganizationRpcProvider = (typeof ORGANIZATION_RPC_PROVIDERS)[number];
 
 export interface Organization {
   id: string; // org_xxxxxxxxxxxx
@@ -24,6 +34,7 @@ export interface Organization {
 }
 
 export interface OrganizationSettings {
+  rpcProvider?: OrganizationRpcProvider;
   defaultEnvironment?: "sandbox" | "production";
   webhookSecret?: string;
   allowedIpAddresses?: string[];

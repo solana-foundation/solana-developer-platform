@@ -30,6 +30,7 @@ import openapi from "@/routes/openapi";
 import organizations from "@/routes/organizations";
 import payments from "@/routes/payments";
 import projects from "@/routes/projects";
+import rpc from "@/routes/rpc";
 import webhooks from "@/routes/webhooks";
 
 // Create app
@@ -87,6 +88,7 @@ v1.route("/api-keys", apiKeys);
 v1.route("/members", members);
 v1.route("/auth", auth);
 v1.route("/projects", projects);
+v1.route("/rpc", rpc);
 v1.route("/issuance", issuance);
 v1.route("/wallets", wallets);
 v1.route("/onboarding", onboarding);

@@ -9,3 +9,4 @@ export * from "./health";
 export * from "./admin";
 export * from "./onboarding";
 export * from "./custody";
+export * from "./rpc";
