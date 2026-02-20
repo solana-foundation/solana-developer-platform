@@ -4,45 +4,91 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { AnimatePresence, motion } from "framer-motion";
-import { CheckCircle2, Sparkles } from "lucide-react";
+import {
+  BadgeDollarSign,
+  ChevronRight,
+  CircleHelp,
+  Gamepad2,
+  ShieldAlert,
+  ShieldCheck,
+  X,
+} from "lucide-react";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useMemo, useState, useTransition } from "react";
+import { toast } from "sonner";
 import { type CreateIssuanceTokenResult, createIssuanceTokenAction } from "./actions";
-import {
-  type IssuanceTemplateId,
-  getTemplateCatalogEntry,
-  issuanceTemplateCatalog,
-} from "./template-catalog";
 
-type WizardStep = 0 | 1 | 2 | 3;
+type TemplateSelection = "stablecoin" | "custom" | "tokenized-security" | "arcade";
+type CreationStep = "identity" | "features";
+type AccessControlMode = "allowlist" | "blocklist";
+
+type FlowState =
+  | {
+      kind: "templateSelection";
+    }
+  | {
+      kind: "creation";
+      template: TemplateSelection;
+      step: CreationStep;
+    };
 
 interface TokenDraft {
-  template: IssuanceTemplateId;
+  template: TemplateSelection | null;
+  uri: string;
   name: string;
   symbol: string;
-  decimals: string;
+  decimals: "" | "0" | "6" | "8" | "9";
+  accessControlMode: AccessControlMode;
+}
+
+interface TemplateCardDescriptor {
+  id: string;
+  name: string;
   description: string;
-  maxSupply: string;
-  requiresAllowlist: boolean;
-  isMintable: boolean;
-  isFreezable: boolean;
+  icon: typeof BadgeDollarSign;
+  iconClassName: string;
+  enabled: boolean;
+  template?: TemplateSelection;
 }
 
-function createInitialDraft(): TokenDraft {
-  return {
+const templateCards: TemplateCardDescriptor[] = [
+  {
+    id: "stablecoin",
+    name: "Stablecoin",
+    description: "Create a regulatory-compliant stablecoin with transfer restrictions.",
+    icon: BadgeDollarSign,
+    iconClassName: "bg-[#dee6ff] text-[#375dff]",
+    enabled: true,
     template: "stablecoin",
-    name: "",
-    symbol: "",
-    decimals: "6",
-    description: "",
-    maxSupply: "",
-    requiresAllowlist: false,
-    isMintable: true,
-    isFreezable: true,
-  };
-}
-
-const wizardLabels = ["Template", "Token setup", "Review"] as const;
+  },
+  {
+    id: "tokenized-security",
+    name: "Tokenized Security",
+    description: "Create a compliant security token with scaled UI amounts and core controls.",
+    icon: ShieldCheck,
+    iconClassName: "bg-[#d8f7e4] text-[#0f9b58]",
+    enabled: true,
+    template: "tokenized-security",
+  },
+  {
+    id: "arcade",
+    name: "Arcade Token",
+    description: "Deploy a gaming or utility token with custom extensions and features.",
+    icon: Gamepad2,
+    iconClassName: "bg-[#f7ead8] text-[#ff6b00]",
+    enabled: true,
+    template: "arcade",
+  },
+  {
+    id: "custom",
+    name: "Custom Token",
+    description: "Build your own token with full control over extensions and parameters.",
+    icon: CircleHelp,
+    iconClassName: "bg-[#ebe5ff] text-[#6436ff]",
+    enabled: true,
+    template: "custom",
+  },
+];
 
 const INITIAL_CREATE_ISSUANCE_TOKEN_RESULT: CreateIssuanceTokenResult = {
   state: "idle",
@@ -51,50 +97,299 @@ const INITIAL_CREATE_ISSUANCE_TOKEN_RESULT: CreateIssuanceTokenResult = {
   tokenName: null,
 };
 
-function getProgressPercent(step: WizardStep): number {
-  if (step === 3) {
-    return 100;
+function createInitialDraft(): TokenDraft {
+  return {
+    template: null,
+    uri: "",
+    name: "",
+    symbol: "",
+    decimals: "",
+    accessControlMode: "blocklist",
+  };
+}
+
+function getTemplateTitle(template: TemplateSelection): string {
+  switch (template) {
+    case "stablecoin":
+      return "Create a Stablecoin";
+    case "custom":
+      return "Create Custom Token";
+    case "tokenized-security":
+      return "Create Tokenized Security";
+    case "arcade":
+      return "Create Arcade Token";
+    default:
+      return "Create Token";
   }
-  return ((step + 1) / wizardLabels.length) * 100;
+}
+
+function getCreateButtonLabel(template: TemplateSelection): string {
+  switch (template) {
+    case "stablecoin":
+      return "Create Stablecoin";
+    case "custom":
+      return "Create Custom Token";
+    case "tokenized-security":
+      return "Create Tokenized Security";
+    case "arcade":
+      return "Create Arcade Token";
+    default:
+      return "Create Token";
+  }
+}
+
+function getTemplateDefaultDecimals(template: TemplateSelection): TokenDraft["decimals"] {
+  switch (template) {
+    case "stablecoin":
+      return "6";
+    case "custom":
+      return "9";
+    case "tokenized-security":
+      return "8";
+    case "arcade":
+      return "0";
+    default:
+      return "6";
+  }
+}
+
+function getTemplateDecimalOptions(
+  template: TemplateSelection
+): ReadonlyArray<TokenDraft["decimals"]> {
+  switch (template) {
+    case "stablecoin":
+    case "custom":
+      return ["6", "9"];
+    case "tokenized-security":
+      return ["8"];
+    case "arcade":
+      return ["0", "6"];
+    default:
+      return ["6", "9"];
+  }
+}
+
+function getDefaultAccessControlMode(template: TemplateSelection): AccessControlMode {
+  return template === "tokenized-security" ? "allowlist" : "blocklist";
+}
+
+function getAccessControlAvailability(
+  template: TemplateSelection,
+  mode: AccessControlMode
+): {
+  available: boolean;
+  note: string;
+} {
+  if (template === "tokenized-security") {
+    if (mode === "allowlist") {
+      return {
+        available: true,
+        note: "Required for Tokenized Security in current API flow.",
+      };
+    }
+    return {
+      available: false,
+      note: "Tokenized Security requires allowlist mode in current API flow.",
+    };
+  }
+
+  return {
+    available: true,
+    note: "Available for this template in current API flow.",
+  };
+}
+
+function toRequiresAllowlist(template: TemplateSelection, mode: AccessControlMode): boolean {
+  if (template === "tokenized-security") {
+    return true;
+  }
+  return mode === "allowlist";
+}
+
+function isValidMetadataUri(value: string): boolean {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return false;
+  }
+
+  try {
+    const parsed = new URL(trimmed);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function normalizeSymbol(symbol: string): string {
+  return symbol
+    .toUpperCase()
+    .replace(/[^A-Z0-9.]/g, "")
+    .slice(0, 10);
+}
+
+function TemplateCard({
+  descriptor,
+  onSelect,
+}: {
+  descriptor: TemplateCardDescriptor;
+  onSelect: (template: TemplateSelection) => void;
+}) {
+  const Icon = descriptor.icon;
+
+  if (!descriptor.enabled || !descriptor.template) {
+    return (
+      <div
+        aria-disabled
+        className="cursor-not-allowed flex items-center justify-between rounded-2xl border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.02)] px-5 py-4 opacity-70"
+      >
+        <div className="flex min-w-0 items-center gap-4">
+          <div
+            className={[
+              "flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl",
+              descriptor.iconClassName,
+            ].join(" ")}
+          >
+            <Icon className="h-5 w-5" />
+          </div>
+          <div>
+            <p className="text-xl leading-none font-semibold text-[#1c1c1d]">{descriptor.name}</p>
+            <p className="mt-2 text-base text-[rgba(28,28,29,0.58)]">{descriptor.description}</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(descriptor.template as TemplateSelection)}
+      className="cursor-pointer flex w-full items-center justify-between rounded-2xl border border-[rgba(28,28,29,0.12)] bg-white px-5 py-4 text-left transition-colors hover:bg-[rgba(28,28,29,0.03)]"
+    >
+      <div className="flex min-w-0 items-center gap-4">
+        <div
+          className={[
+            "flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl",
+            descriptor.iconClassName,
+          ].join(" ")}
+        >
+          <Icon className="h-5 w-5" />
+        </div>
+        <div>
+          <p className="text-xl leading-none font-semibold text-[#1c1c1d]">{descriptor.name}</p>
+          <p className="mt-2 text-base text-[rgba(28,28,29,0.66)]">{descriptor.description}</p>
+        </div>
+      </div>
+      <ChevronRight className="ml-3 h-5 w-5 shrink-0 text-[rgba(28,28,29,0.56)]" />
+    </button>
+  );
 }
 
 export function CreateIssuanceTokenModal() {
   const router = useRouter();
   const [isOpen, setIsOpen] = useState(false);
-  const [step, setStep] = useState<WizardStep>(0);
+  const [flow, setFlow] = useState<FlowState>({ kind: "templateSelection" });
   const [draft, setDraft] = useState<TokenDraft>(createInitialDraft());
   const [submitState, setSubmitState] = useState<CreateIssuanceTokenResult>(
     INITIAL_CREATE_ISSUANCE_TOKEN_RESULT
   );
   const [isPending, startTransition] = useTransition();
 
-  const selectedTemplate = useMemo(() => getTemplateCatalogEntry(draft.template), [draft.template]);
+  const template = flow.kind === "creation" ? flow.template : draft.template;
+  const decimalOptions = useMemo(
+    () => (template ? getTemplateDecimalOptions(template) : []),
+    [template]
+  );
 
-  const canContinueFromSetup =
-    draft.name.trim().length > 0 && /^[A-Z0-9]{1,10}$/.test(draft.symbol);
+  const identityValidation = useMemo(() => {
+    const uri = draft.uri.trim();
+    const name = draft.name.trim();
+    const symbol = draft.symbol.trim();
 
-  const open = () => {
-    setIsOpen(true);
-  };
+    const uriValid = isValidMetadataUri(uri);
+    const nameValid = name.length > 0 && name.length <= 100;
+    const symbolValid = /^[A-Z0-9.]{1,10}$/.test(symbol);
+    const decimalsValid =
+      template !== null && getTemplateDecimalOptions(template).includes(draft.decimals);
 
-  const close = () => {
-    setIsOpen(false);
-    setStep(0);
+    return {
+      uriValid,
+      nameValid,
+      symbolValid,
+      decimalsValid,
+      isValid: uriValid && nameValid && symbolValid && decimalsValid,
+    };
+  }, [draft.uri, draft.name, draft.symbol, draft.decimals, template]);
+
+  const isIdentityStep = flow.kind === "creation" && flow.step === "identity";
+  const isFeaturesStep = flow.kind === "creation" && flow.step === "features";
+  const selectedAccessControlAvailable =
+    template && flow.kind === "creation"
+      ? getAccessControlAvailability(template, draft.accessControlMode).available
+      : false;
+
+  const canContinueFromIdentity = identityValidation.isValid;
+  const canSubmit =
+    flow.kind === "creation" &&
+    identityValidation.isValid &&
+    selectedAccessControlAvailable &&
+    !isPending;
+
+  const reset = () => {
+    setFlow({ kind: "templateSelection" });
     setDraft(createInitialDraft());
     setSubmitState(INITIAL_CREATE_ISSUANCE_TOKEN_RESULT);
   };
 
-  const handleTemplateSelect = (template: IssuanceTemplateId) => {
-    const templateInfo = getTemplateCatalogEntry(template);
+  const close = () => {
+    setIsOpen(false);
+    reset();
+  };
+
+  const open = () => {
+    setIsOpen(true);
+    reset();
+  };
+
+  const handleTemplateSelect = (selectedTemplate: TemplateSelection) => {
     setDraft((previous) => ({
       ...previous,
-      template,
-      decimals: String(templateInfo?.defaultDecimals ?? previous.decimals),
+      template: selectedTemplate,
+      decimals: getTemplateDefaultDecimals(selectedTemplate),
+      accessControlMode: getDefaultAccessControlMode(selectedTemplate),
     }));
+    setFlow({ kind: "creation", template: selectedTemplate, step: "identity" });
+    setSubmitState(INITIAL_CREATE_ISSUANCE_TOKEN_RESULT);
+  };
+
+  const handleBackFromIdentity = () => {
+    setFlow({ kind: "templateSelection" });
+    setSubmitState(INITIAL_CREATE_ISSUANCE_TOKEN_RESULT);
+  };
+
+  const handleBackFromFeatures = () => {
+    if (!template) {
+      return;
+    }
+    setFlow({ kind: "creation", template, step: "identity" });
+    setSubmitState(INITIAL_CREATE_ISSUANCE_TOKEN_RESULT);
+  };
+
+  const handleContinueFromIdentity = () => {
+    if (!template || !canContinueFromIdentity) {
+      return;
+    }
+    setFlow({ kind: "creation", template, step: "features" });
+    setSubmitState(INITIAL_CREATE_ISSUANCE_TOKEN_RESULT);
   };
 
   const handleCreateToken = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+
+    if (!canSubmit || !template) {
+      return;
+    }
+
     const formData = new FormData(event.currentTarget);
 
     startTransition(async () => {
@@ -102,7 +397,8 @@ export function CreateIssuanceTokenModal() {
       setSubmitState(response);
 
       if (response.state === "success") {
-        setStep(3);
+        toast.success(response.message ?? "Token created successfully.");
+        close();
         router.refresh();
       }
     });
@@ -132,370 +428,343 @@ export function CreateIssuanceTokenModal() {
             <motion.div
               initial={{ y: 24, opacity: 0, scale: 0.98 }}
               animate={{ y: 0, opacity: 1, scale: 1 }}
-              exit={{ y: 20, opacity: 0, scale: 0.98 }}
+              exit={{ y: 18, opacity: 0, scale: 0.98 }}
               transition={{ duration: 0.2, ease: "easeOut" }}
-              className="relative z-10 w-full max-w-2xl rounded-3xl border border-[rgba(28,28,29,0.16)] bg-white p-6 shadow-[0_24px_64px_rgba(28,28,29,0.28)]"
+              className="relative z-10 w-full max-w-2xl overflow-hidden rounded-3xl border border-[rgba(28,28,29,0.16)] bg-white text-[#1c1c1d] shadow-[0_24px_64px_rgba(28,28,29,0.28)]"
             >
-              <div className="space-y-3">
-                <div className="flex items-center justify-between gap-3">
-                  <p className="text-sm font-semibold text-[#1c1c1d]">
-                    {step === 3 ? "Token created" : "Create token"}
+              <div className="flex items-start justify-between border-b border-[rgba(28,28,29,0.1)] bg-[rgba(28,28,29,0.02)] px-8 py-7">
+                <div>
+                  <p className="text-4xl leading-none font-semibold">
+                    {template ? getTemplateTitle(template) : "Create New Token"}
                   </p>
-                  <span className="text-xs text-[rgba(28,28,29,0.62)]">
-                    {step === 3 ? "Completed" : `Step ${step + 1} of ${wizardLabels.length}`}
-                  </span>
+                  <p className="mt-2 text-lg text-[rgba(28,28,29,0.62)]">
+                    {template ? "Configure your token parameters" : "Choose how you want to start."}
+                  </p>
                 </div>
-                <div className="h-2 w-full overflow-hidden rounded-full bg-[rgba(28,28,29,0.08)] [direction:ltr]">
-                  <motion.div
-                    className="h-full w-full origin-left rounded-full bg-[#1c1c1d]"
-                    initial={false}
-                    animate={{ scaleX: getProgressPercent(step) / 100 }}
-                    transition={{ duration: 0.28, ease: "easeInOut" }}
-                  />
-                </div>
-                <div className="flex items-center justify-between text-xs text-[rgba(28,28,29,0.62)]">
-                  {wizardLabels.map((label, index) => (
-                    <span
-                      key={label}
-                      className={
-                        step === 3 || step >= index
-                          ? "font-medium text-[#1c1c1d]"
-                          : "text-[rgba(28,28,29,0.48)]"
-                      }
-                    >
-                      {label}
-                    </span>
-                  ))}
-                </div>
+                <button
+                  type="button"
+                  aria-label="Close token creation modal"
+                  onClick={close}
+                  className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-[rgba(28,28,29,0.08)] text-[rgba(28,28,29,0.72)] transition-colors hover:bg-[rgba(28,28,29,0.14)]"
+                >
+                  <X className="h-5 w-5" />
+                </button>
               </div>
 
               <AnimatePresence mode="wait">
-                {step === 0 ? (
+                {flow.kind === "templateSelection" ? (
                   <motion.div
-                    key="template-step"
-                    initial={{ opacity: 0, y: 10 }}
+                    key="template-selection"
+                    initial={{ opacity: 0, y: 8 }}
                     animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -10 }}
-                    className="mt-6 space-y-4"
+                    exit={{ opacity: 0, y: -8 }}
+                    className="px-6 py-6"
                   >
-                    <div>
-                      <p className="text-base font-medium text-[#1c1c1d]">
-                        Choose a token template
-                      </p>
-                      <p className="mt-1 text-sm text-[rgba(28,28,29,0.72)]">
-                        Templates apply sensible defaults similar to Mosaic flows, using SDP API
-                        under the hood.
-                      </p>
+                    <div className="space-y-3">
+                      {templateCards.map((card) => (
+                        <TemplateCard
+                          key={card.id}
+                          descriptor={card}
+                          onSelect={handleTemplateSelect}
+                        />
+                      ))}
                     </div>
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      {issuanceTemplateCatalog.map((template) => {
-                        const isSelected = draft.template === template.id;
-                        return (
-                          <button
-                            key={template.id}
-                            type="button"
-                            onClick={() => handleTemplateSelect(template.id)}
+                  </motion.div>
+                ) : null}
+
+                {isIdentityStep && template ? (
+                  <motion.div
+                    key="identity-step"
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -8 }}
+                    className="px-6 pb-6"
+                  >
+                    <div className="space-y-5 rounded-[28px] bg-white p-5">
+                      <p className="text-sm text-[rgba(28,28,29,0.62)]">
+                        Fields marked * are required.
+                      </p>
+
+                      <div className="grid gap-4">
+                        <div className="grid gap-2">
+                          <Label htmlFor="issuance-token-uri">
+                            Metadata URI{" "}
+                            <span aria-hidden className="text-[#c71f37]">
+                              *
+                            </span>
+                            <span className="sr-only"> (required)</span>
+                          </Label>
+                          <Input
+                            id="issuance-token-uri"
+                            type="url"
+                            value={draft.uri}
+                            onChange={(event) => {
+                              const uri = event.currentTarget.value;
+                              setDraft((previous) => ({ ...previous, uri }));
+                              setSubmitState(INITIAL_CREATE_ISSUANCE_TOKEN_RESULT);
+                            }}
+                            placeholder="https://example.com/metadata.json"
+                            aria-invalid={draft.uri.length > 0 && !identityValidation.uriValid}
+                            required
+                          />
+                        </div>
+
+                        <div className="grid gap-2">
+                          <Label htmlFor="issuance-token-name">
+                            Token Name{" "}
+                            <span aria-hidden className="text-[#c71f37]">
+                              *
+                            </span>
+                            <span className="sr-only"> (required)</span>
+                          </Label>
+                          <Input
+                            id="issuance-token-name"
+                            value={draft.name}
+                            onChange={(event) => {
+                              const name = event.currentTarget.value;
+                              setDraft((previous) => ({ ...previous, name }));
+                              setSubmitState(INITIAL_CREATE_ISSUANCE_TOKEN_RESULT);
+                            }}
+                            placeholder="e.g., USD Coin"
+                            required
+                          />
+                        </div>
+
+                        <div className="grid gap-2">
+                          <Label htmlFor="issuance-token-symbol">
+                            Symbol{" "}
+                            <span aria-hidden className="text-[#c71f37]">
+                              *
+                            </span>
+                            <span className="sr-only"> (required)</span>
+                          </Label>
+                          <Input
+                            id="issuance-token-symbol"
+                            value={draft.symbol}
+                            onChange={(event) => {
+                              const symbol = normalizeSymbol(event.currentTarget.value);
+                              setDraft((previous) => ({ ...previous, symbol }));
+                              setSubmitState(INITIAL_CREATE_ISSUANCE_TOKEN_RESULT);
+                            }}
+                            placeholder="e.g., USDC"
+                            required
+                          />
+                        </div>
+
+                        <div className="grid gap-2">
+                          <Label>
+                            Decimals{" "}
+                            <span aria-hidden className="text-[#c71f37]">
+                              *
+                            </span>
+                            <span className="sr-only"> (required)</span>
+                          </Label>
+                          <div
+                            aria-required="true"
                             className={[
-                              "rounded-2xl border px-4 py-3 text-left transition-colors",
-                              isSelected
-                                ? "border-[#1c1c1d] bg-[rgba(28,28,29,0.05)]"
-                                : "border-[rgba(28,28,29,0.12)] hover:bg-[rgba(28,28,29,0.03)]",
+                              "grid gap-2",
+                              decimalOptions.length > 1 ? "grid-cols-2" : "grid-cols-1",
                             ].join(" ")}
                           >
-                            <p className="text-sm font-semibold text-[#1c1c1d]">{template.name}</p>
-                            <p className="mt-1 text-xs text-[rgba(28,28,29,0.66)]">
-                              {template.description}
-                            </p>
-                            <p className="mt-2 text-xs text-[rgba(28,28,29,0.58)]">
-                              {template.helper}
-                            </p>
-                          </button>
-                        );
-                      })}
+                            {decimalOptions.map((value) => {
+                              const isSelected = draft.decimals === value;
+                              return (
+                                <button
+                                  key={value}
+                                  type="button"
+                                  onClick={() => {
+                                    setDraft((previous) => ({ ...previous, decimals: value }));
+                                    setSubmitState(INITIAL_CREATE_ISSUANCE_TOKEN_RESULT);
+                                  }}
+                                  className={[
+                                    "h-10 rounded-lg border px-3 text-sm font-medium transition-colors",
+                                    isSelected
+                                      ? "border-[#1c1c1d] bg-[rgba(28,28,29,0.05)] text-[#1c1c1d]"
+                                      : "border-[rgba(28,28,29,0.16)] bg-white text-[rgba(28,28,29,0.72)] hover:bg-[rgba(28,28,29,0.03)]",
+                                  ].join(" ")}
+                                >
+                                  {value}
+                                </button>
+                              );
+                            })}
+                          </div>
+                          <p className="text-base text-[rgba(28,28,29,0.62)]">
+                            {template === "stablecoin"
+                              ? "Stablecoin defaults to 6 decimals."
+                              : template === "custom"
+                                ? "Custom tokens default to 9 decimals."
+                                : template === "tokenized-security"
+                                  ? "Tokenized Security uses 8 decimals."
+                                  : "Arcade tokens commonly use 0 decimals."}
+                          </p>
+                        </div>
+                      </div>
                     </div>
-                    <div className="flex items-center justify-end gap-2 pt-2">
-                      <Button type="button" variant="secondary" onClick={close}>
-                        Cancel
+
+                    <div className="mt-5 flex items-center justify-between gap-3">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={handleBackFromIdentity}
+                        className="flex-1"
+                      >
+                        Back
                       </Button>
-                      <Button type="button" onClick={() => setStep(1)}>
+                      <Button
+                        type="button"
+                        onClick={handleContinueFromIdentity}
+                        disabled={!canContinueFromIdentity}
+                        className="flex-1"
+                      >
                         Continue
                       </Button>
                     </div>
                   </motion.div>
                 ) : null}
 
-                {step === 1 ? (
-                  <motion.div
-                    key="setup-step"
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -10 }}
-                    className="mt-6 space-y-4"
-                  >
-                    <div>
-                      <p className="text-base font-medium text-[#1c1c1d]">
-                        Configure token settings
-                      </p>
-                      <p className="mt-1 text-sm text-[rgba(28,28,29,0.72)]">
-                        Fill in core metadata. You can tune supply and controls before deployment.
-                      </p>
-                    </div>
-
-                    <div className="grid gap-4 sm:grid-cols-2">
-                      <div className="grid gap-2 sm:col-span-2">
-                        <Label htmlFor="issuance-token-name">Token name</Label>
-                        <Input
-                          id="issuance-token-name"
-                          value={draft.name}
-                          onChange={(event) => {
-                            const name = event.currentTarget.value;
-                            setDraft((previous) => ({ ...previous, name }));
-                          }}
-                          placeholder="Acme Dollar"
-                        />
-                      </div>
-                      <div className="grid gap-2">
-                        <Label htmlFor="issuance-token-symbol">Symbol</Label>
-                        <Input
-                          id="issuance-token-symbol"
-                          value={draft.symbol}
-                          onChange={(event) => {
-                            const symbol = event.currentTarget.value
-                              .toUpperCase()
-                              .replace(/[^A-Z0-9]/g, "")
-                              .slice(0, 10);
-                            setDraft((previous) => ({ ...previous, symbol }));
-                          }}
-                          placeholder="ACME"
-                        />
-                      </div>
-                      <div className="grid gap-2">
-                        <Label htmlFor="issuance-token-decimals">Decimals</Label>
-                        <Input
-                          id="issuance-token-decimals"
-                          type="number"
-                          min={0}
-                          max={18}
-                          value={draft.decimals}
-                          onChange={(event) => {
-                            const decimals = event.currentTarget.value;
-                            setDraft((previous) => ({ ...previous, decimals }));
-                          }}
-                        />
-                      </div>
-                      <div className="grid gap-2 sm:col-span-2">
-                        <Label htmlFor="issuance-token-description">Description (optional)</Label>
-                        <Input
-                          id="issuance-token-description"
-                          value={draft.description}
-                          onChange={(event) => {
-                            const description = event.currentTarget.value;
-                            setDraft((previous) => ({ ...previous, description }));
-                          }}
-                          placeholder="Asset-backed token for treasury operations"
-                        />
-                      </div>
-                      <div className="grid gap-2 sm:col-span-2">
-                        <Label htmlFor="issuance-token-max-supply">Max supply (optional)</Label>
-                        <Input
-                          id="issuance-token-max-supply"
-                          value={draft.maxSupply}
-                          onChange={(event) => {
-                            const maxSupply = event.currentTarget.value;
-                            setDraft((previous) => ({ ...previous, maxSupply }));
-                          }}
-                          placeholder="100000000"
-                        />
-                        <p className="text-xs text-[rgba(28,28,29,0.62)]">
-                          Leave empty to keep supply uncapped.
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="grid gap-2 rounded-2xl border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.03)] p-3 text-sm">
-                      <label className="flex items-center justify-between gap-3">
-                        <span className="text-[rgba(28,28,29,0.78)]">Require allowlist</span>
-                        <input
-                          type="checkbox"
-                          checked={draft.requiresAllowlist}
-                          onChange={(event) => {
-                            const requiresAllowlist = event.currentTarget.checked;
-                            setDraft((previous) => ({ ...previous, requiresAllowlist }));
-                          }}
-                        />
-                      </label>
-                      <label className="flex items-center justify-between gap-3">
-                        <span className="text-[rgba(28,28,29,0.78)]">Token is mintable</span>
-                        <input
-                          type="checkbox"
-                          checked={draft.isMintable}
-                          onChange={(event) => {
-                            const isMintable = event.currentTarget.checked;
-                            setDraft((previous) => ({ ...previous, isMintable }));
-                          }}
-                        />
-                      </label>
-                      <label className="flex items-center justify-between gap-3">
-                        <span className="text-[rgba(28,28,29,0.78)]">Token is freezable</span>
-                        <input
-                          type="checkbox"
-                          checked={draft.isFreezable}
-                          onChange={(event) => {
-                            const isFreezable = event.currentTarget.checked;
-                            setDraft((previous) => ({ ...previous, isFreezable }));
-                          }}
-                        />
-                      </label>
-                    </div>
-
-                    <div className="flex items-center justify-between gap-2 pt-2">
-                      <Button type="button" variant="secondary" onClick={() => setStep(0)}>
-                        Back
-                      </Button>
-                      <Button
-                        type="button"
-                        disabled={!canContinueFromSetup}
-                        onClick={() => setStep(2)}
-                      >
-                        Review
-                      </Button>
-                    </div>
-                  </motion.div>
-                ) : null}
-
-                {step === 2 ? (
+                {isFeaturesStep && template ? (
                   <motion.form
-                    key="review-step"
+                    key="features-step"
                     onSubmit={handleCreateToken}
-                    initial={{ opacity: 0, y: 10 }}
+                    initial={{ opacity: 0, y: 8 }}
                     animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -10 }}
-                    className="mt-6 space-y-4"
+                    exit={{ opacity: 0, y: -8 }}
+                    className="px-6 pb-6"
                   >
-                    <input type="hidden" name="template" value={draft.template} />
-                    <input type="hidden" name="name" value={draft.name} />
-                    <input type="hidden" name="symbol" value={draft.symbol} />
+                    <input type="hidden" name="template" value={template} />
+                    <input type="hidden" name="uri" value={draft.uri.trim()} />
+                    <input type="hidden" name="name" value={draft.name.trim()} />
+                    <input type="hidden" name="symbol" value={draft.symbol.trim()} />
                     <input type="hidden" name="decimals" value={draft.decimals} />
-                    <input type="hidden" name="description" value={draft.description} />
-                    <input type="hidden" name="maxSupply" value={draft.maxSupply} />
                     <input
                       type="hidden"
                       name="requiresAllowlist"
-                      value={String(draft.requiresAllowlist)}
+                      value={String(toRequiresAllowlist(template, draft.accessControlMode))}
                     />
-                    <input type="hidden" name="isMintable" value={String(draft.isMintable)} />
-                    <input type="hidden" name="isFreezable" value={String(draft.isFreezable)} />
 
-                    <div>
-                      <p className="text-base font-medium text-[#1c1c1d]">Review request</p>
-                      <p className="mt-1 text-sm text-[rgba(28,28,29,0.72)]">
-                        We will submit this token creation request to SDP issuance API.
-                      </p>
-                    </div>
+                    <div className="space-y-5 rounded-[28px] p-5">
+                      <div>
+                        <p className="text-3xl font-medium text-[#1c1c1d]">
+                          Access Control Mode{" "}
+                          <span aria-hidden className="text-[#c71f37]">
+                            *
+                          </span>
+                          <span className="sr-only"> (required)</span>
+                        </p>
+                        <p className="mt-2 text-lg text-[rgba(28,28,29,0.64)]">
+                          Configure transfer restrictions for the selected template.
+                        </p>
+                      </div>
 
-                    <div className="grid gap-2 rounded-2xl border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.03)] p-4 text-sm text-[rgba(28,28,29,0.78)]">
-                      <div className="flex items-center justify-between gap-2">
-                        <span>Template</span>
-                        <span className="font-medium text-[#1c1c1d]">
-                          {selectedTemplate?.name ?? draft.template}
-                        </span>
-                      </div>
-                      <div className="flex items-center justify-between gap-2">
-                        <span>Name</span>
-                        <span className="font-medium text-[#1c1c1d]">{draft.name}</span>
-                      </div>
-                      <div className="flex items-center justify-between gap-2">
-                        <span>Symbol</span>
-                        <span className="font-medium text-[#1c1c1d]">{draft.symbol}</span>
-                      </div>
-                      <div className="flex items-center justify-between gap-2">
-                        <span>Decimals</span>
-                        <span className="font-medium text-[#1c1c1d]">{draft.decimals || "0"}</span>
-                      </div>
-                      <div className="flex items-center justify-between gap-2">
-                        <span>Max supply</span>
-                        <span className="font-medium text-[#1c1c1d]">
-                          {draft.maxSupply || "Uncapped"}
-                        </span>
-                      </div>
-                      <div className="flex items-center justify-between gap-2">
-                        <span>Allowlist</span>
-                        <span className="font-medium text-[#1c1c1d]">
-                          {draft.requiresAllowlist ? "Required" : "Optional"}
-                        </span>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        {(() => {
+                          const allowlistAvailability = getAccessControlAvailability(
+                            template,
+                            "allowlist"
+                          );
+                          return (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (!allowlistAvailability.available) {
+                                  return;
+                                }
+                                setDraft((previous) => ({
+                                  ...previous,
+                                  accessControlMode: "allowlist",
+                                }));
+                                setSubmitState(INITIAL_CREATE_ISSUANCE_TOKEN_RESULT);
+                              }}
+                              aria-disabled={!allowlistAvailability.available}
+                              className={[
+                                "rounded-3xl border p-5 text-left transition-colors",
+                                draft.accessControlMode === "allowlist"
+                                  ? "border-[#1c1c1d] bg-[rgba(28,28,29,0.05)]"
+                                  : "border-[rgba(28,28,29,0.14)] bg-white",
+                                allowlistAvailability.available
+                                  ? "cursor-pointer hover:bg-[rgba(28,28,29,0.03)]"
+                                  : "cursor-not-allowed opacity-60",
+                              ].join(" ")}
+                            >
+                              <ShieldCheck className="h-6 w-6 text-[#1c1c1d]" />
+                              <p className="mt-4 text-2xl font-semibold text-[#1c1c1d]">
+                                Allowlist
+                              </p>
+                              <p className="mt-2 text-base text-[rgba(28,28,29,0.66)]">
+                                Only approved addresses can transfer
+                              </p>
+                              <p className="mt-2 text-sm text-[rgba(28,28,29,0.58)]">
+                                {allowlistAvailability.note}
+                              </p>
+                            </button>
+                          );
+                        })()}
+
+                        {(() => {
+                          const blocklistAvailability = getAccessControlAvailability(
+                            template,
+                            "blocklist"
+                          );
+                          return (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (!blocklistAvailability.available) {
+                                  return;
+                                }
+                                setDraft((previous) => ({
+                                  ...previous,
+                                  accessControlMode: "blocklist",
+                                }));
+                                setSubmitState(INITIAL_CREATE_ISSUANCE_TOKEN_RESULT);
+                              }}
+                              aria-disabled={!blocklistAvailability.available}
+                              className={[
+                                "rounded-3xl border p-5 text-left transition-colors",
+                                draft.accessControlMode === "blocklist"
+                                  ? "border-[#1c1c1d] bg-[rgba(28,28,29,0.05)]"
+                                  : "border-[rgba(28,28,29,0.14)] bg-white",
+                                blocklistAvailability.available
+                                  ? "cursor-pointer hover:bg-[rgba(28,28,29,0.03)]"
+                                  : "cursor-not-allowed opacity-60",
+                              ].join(" ")}
+                            >
+                              <ShieldAlert className="h-6 w-6 text-[#1c1c1d]" />
+                              <p className="mt-4 text-2xl font-semibold text-[#1c1c1d]">
+                                Blocklist
+                              </p>
+                              <p className="mt-2 text-base text-[rgba(28,28,29,0.66)]">
+                                Block specific addresses from transfers
+                              </p>
+                              <p className="mt-2 text-sm text-[rgba(28,28,29,0.58)]">
+                                {blocklistAvailability.note}
+                              </p>
+                            </button>
+                          );
+                        })()}
                       </div>
                     </div>
 
                     {submitState.state === "error" && submitState.message ? (
-                      <div className="rounded-xl border border-[#c71f37]/30 bg-[#c71f37]/6 px-3 py-2 text-sm text-[#8a1f2a]">
+                      <div className="mt-4 rounded-2xl border border-[#c71f37]/30 bg-[#c71f37]/6 px-4 py-3 text-base text-[#8a1f2a]">
                         {submitState.message}
                       </div>
                     ) : null}
 
-                    <div className="flex items-center justify-between gap-2 pt-2">
-                      <Button type="button" variant="secondary" onClick={() => setStep(1)}>
-                        Back
-                      </Button>
-                      <Button type="submit" disabled={isPending}>
-                        {isPending ? "Creating..." : "Create token"}
-                      </Button>
-                    </div>
-                  </motion.form>
-                ) : null}
-
-                {step === 3 ? (
-                  <motion.div
-                    key="success-step"
-                    initial={{ opacity: 0, y: 12 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -10 }}
-                    className="mt-6 space-y-5"
-                  >
-                    <motion.div
-                      initial={{ scale: 0.85, opacity: 0 }}
-                      animate={{ scale: 1, opacity: 1 }}
-                      transition={{ duration: 0.28, ease: "easeOut" }}
-                      className="flex flex-col items-center rounded-2xl border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.03)] px-4 py-8 text-center"
-                    >
-                      <motion.div
-                        animate={{ scale: [0.8, 1.06, 1], rotate: [-10, 6, 0] }}
-                        transition={{ duration: 0.52, ease: "easeOut" }}
-                      >
-                        <CheckCircle2 className="h-12 w-12 text-[#1c1c1d]" />
-                      </motion.div>
-                      <h3 className="mt-4 text-xl font-semibold text-[#1c1c1d]">
-                        Token created successfully
-                      </h3>
-                      <p className="mt-2 text-sm text-[rgba(28,28,29,0.72)]">
-                        {submitState.tokenName
-                          ? `${submitState.tokenName} is now available in your token list.`
-                          : "Your token is now available in your token list."}
-                      </p>
-                      {submitState.tokenId ? (
-                        <p className="mt-2 font-mono text-xs text-[rgba(28,28,29,0.64)]">
-                          {submitState.tokenId}
-                        </p>
-                      ) : null}
-                    </motion.div>
-
-                    <div className="flex items-center justify-between gap-2">
+                    <div className="mt-5 flex items-center justify-between gap-3">
                       <Button
                         type="button"
                         variant="secondary"
-                        onClick={() => {
-                          setStep(0);
-                          setDraft(createInitialDraft());
-                          setSubmitState(INITIAL_CREATE_ISSUANCE_TOKEN_RESULT);
-                        }}
+                        onClick={handleBackFromFeatures}
+                        className="flex-1"
                       >
-                        <Sparkles className="h-4 w-4" />
-                        Create another
+                        Back
                       </Button>
-                      <Button type="button" onClick={close}>
-                        Done
+                      <Button type="submit" disabled={!canSubmit} className="flex-1">
+                        {isPending ? "Creating..." : getCreateButtonLabel(template)}
                       </Button>
                     </div>
-                  </motion.div>
+                  </motion.form>
                 ) : null}
               </AnimatePresence>
             </motion.div>
