@@ -223,13 +223,15 @@ describe("Kora Fee Payment (Devnet)", () => {
 
       expect(createKeyRes.status).toBe(201);
       const createdKeyBody = (await createKeyRes.json()) as {
-        data: { apiKey: { id: string; key: string } };
+        data: { apiKey: { id: string; key: string; name: string } };
       };
 
       const scopedApiKeyId = createdKeyBody.data.apiKey.id;
       const scopedApiKey = createdKeyBody.data.apiKey.key;
+      const scopedApiKeyName = createdKeyBody.data.apiKey.name;
       const requestWithScopedKey = requestWithApiKey(scopedApiKey);
       const memo = `kora signer check ${Date.now()}`;
+      let signerCheckPassed = false;
 
       try {
         const signerCheckRes = await requestWithScopedKey("/v1/wallets/signer-check", {
@@ -278,11 +280,18 @@ describe("Kora Fee Payment (Devnet)", () => {
         const memoText = memoInstruction?.parsed;
         expect(typeof memoText).toBe("string");
         expect(memoText).toBe(memo);
+        signerCheckPassed = true;
       } finally {
         const deleteScopedKeyRes = await request(`/v1/api-keys/${scopedApiKeyId}`, {
           method: "DELETE",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ confirmation: scopedApiKeyName }),
         });
-        expect(deleteScopedKeyRes.status).toBe(200);
+        if (signerCheckPassed) {
+          expect(deleteScopedKeyRes.status).toBe(200);
+        }
       }
     }
   );
