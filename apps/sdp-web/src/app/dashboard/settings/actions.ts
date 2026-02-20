@@ -131,7 +131,10 @@ export async function testOrganizationRpcProviderAction(
     });
 
     const latencyMs = Date.now() - startedAt;
-    const payload = (await response.json()) as { data?: RpcProxyResponse; error?: { message?: string } };
+    const payload = (await response.json()) as {
+      data?: RpcProxyResponse;
+      error?: { message?: string };
+    };
 
     if (!response.ok || !payload.data) {
       return {

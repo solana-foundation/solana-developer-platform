@@ -5,10 +5,7 @@ import { Label } from "@/components/ui/label";
 import { ORGANIZATION_RPC_PROVIDERS, type OrganizationRpcProvider } from "@sdp/types";
 import { useState } from "react";
 import { toast } from "sonner";
-import {
-  testOrganizationRpcProviderAction,
-  updateOrganizationRpcSettingsAction,
-} from "./actions";
+import { testOrganizationRpcProviderAction, updateOrganizationRpcSettingsAction } from "./actions";
 
 type OrganizationSettings = {
   rpcProvider?: OrganizationRpcProvider;
@@ -76,10 +73,11 @@ export function OrganizationRpcSettingsForm({
 
     try {
       const result = await testOrganizationRpcProviderAction(formData);
-      const requestedLabel = RPC_PROVIDER_LABELS[result.requestedProvider] ?? result.requestedProvider;
+      const requestedLabel =
+        RPC_PROVIDER_LABELS[result.requestedProvider] ?? result.requestedProvider;
       const resolvedLabel = result.resolvedProvider
         ? (RPC_PROVIDER_LABELS[result.resolvedProvider as OrganizationRpcProvider] ??
-            result.resolvedProvider)
+          result.resolvedProvider)
         : null;
       const latency = result.latencyMs !== undefined ? `${result.latencyMs}ms` : null;
 
