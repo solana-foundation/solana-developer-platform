@@ -145,3 +145,85 @@ export const relayRpcRequest = async (c: AppContext) => {
     );
   }
 };
+
+export const testRpcConnection = async (c: AppContext) => {
+  const auth = getAuth(c);
+  const queryParse = rpcProjectQuerySchema.safeParse(c.req.query());
+
+  if (!queryParse.success) {
+    throw new AppError("BAD_REQUEST", "Invalid query parameters", {
+      errors: queryParse.error.flatten().fieldErrors,
+    });
+  }
+
+  const methodNames = ["getVersion"];
+  const target = await resolveRpcTarget({
+    env: c.env,
+    db: c.env.DB,
+    organizationId: auth.organizationId,
+    authProjectId: auth.projectId,
+    requestedProjectId: queryParse.data.projectId ?? null,
+  });
+
+  const startedAt = Date.now();
+  const headers = {
+    "Content-Type": "application/json",
+    ...target.headers,
+  };
+
+  try {
+    const upstream = await fetch(target.endpoint, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: "rpc-connectivity-test",
+        method: "getVersion",
+        params: [],
+      }),
+    });
+
+    const rawBody = await upstream.text();
+    const upstreamBody = rawBody ? tryParseJson(rawBody) : null;
+    const elapsedMs = Date.now() - startedAt;
+
+    await recordRpcRelayTelemetry(c.env.SDP_CACHE, {
+      providerId: target.providerId,
+      methodNames,
+      statusCode: upstream.status,
+      latencyMs: elapsedMs,
+      ok: upstream.ok,
+      origin: getTelemetryOrigin(c),
+    });
+
+    return success(c, {
+      provider: {
+        id: target.providerId,
+        selectionMode: target.selectionMode,
+        projectId: target.projectId,
+        endpoint: target.endpointLabel,
+      },
+      upstream: {
+        ok: upstream.ok,
+        status: upstream.status,
+        statusText: upstream.statusText,
+      },
+      methods: methodNames,
+      response: upstreamBody,
+    });
+  } catch (error) {
+    await recordRpcRelayTelemetry(c.env.SDP_CACHE, {
+      providerId: target.providerId,
+      methodNames,
+      statusCode: 0,
+      latencyMs: Date.now() - startedAt,
+      ok: false,
+      origin: getTelemetryOrigin(c),
+    }).catch(() => {});
+
+    throw new AppError(
+      "SOLANA_RPC_ERROR",
+      error instanceof Error ? error.message : "RPC connectivity test failed"
+    );
+  }
+};

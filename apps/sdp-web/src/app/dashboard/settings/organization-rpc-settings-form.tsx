@@ -88,7 +88,9 @@ export function OrganizationRpcSettingsForm({
         });
       } else {
         const isProviderMismatch =
-          !!result.resolvedProvider && result.resolvedProvider !== result.requestedProvider;
+          result.requestedProvider !== "default" &&
+          !!result.resolvedProvider &&
+          result.resolvedProvider !== result.requestedProvider;
 
         toast.error(isProviderMismatch ? "Provider mismatch." : "RPC check failed.", {
           description: isProviderMismatch

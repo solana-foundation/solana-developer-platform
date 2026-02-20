@@ -120,7 +120,7 @@ export async function testOrganizationRpcProviderAction(
   const startedAt = Date.now();
 
   try {
-    const response = await sdpApiRequest("/v1/rpc/proxy", {
+    const response = await sdpApiRequest("/v1/rpc/test", {
       method: "POST",
       body: JSON.stringify({
         jsonrpc: "2.0",
@@ -150,7 +150,7 @@ export async function testOrganizationRpcProviderAction(
       upstream,
     } = payload.data;
 
-    if (resolvedProvider !== requestedProvider) {
+    if (requestedProvider !== "default" && resolvedProvider !== requestedProvider) {
       return {
         status: "error",
         message: `RPC test mismatch (requested ${requestedProvider}, resolved ${resolvedProvider}).`,
