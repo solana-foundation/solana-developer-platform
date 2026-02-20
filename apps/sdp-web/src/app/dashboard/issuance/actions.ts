@@ -48,6 +48,7 @@ function parseErrorMessage(body: string): string {
 export async function createIssuanceTokenAction(
   formData: FormData
 ): Promise<CreateIssuanceTokenResult> {
+  const uri = String(formData.get("uri") ?? "").trim();
   const name = String(formData.get("name") ?? "").trim();
   const symbol = String(formData.get("symbol") ?? "")
     .trim()
@@ -69,10 +70,38 @@ export async function createIssuanceTokenAction(
     };
   }
 
-  if (!symbol || !/^[A-Z0-9]{1,10}$/.test(symbol)) {
+  if (!uri) {
     return {
       state: "error",
-      message: "Symbol must be 1-10 characters, uppercase letters or numbers.",
+      message: "Metadata URI is required.",
+      tokenId: null,
+      tokenName: null,
+    };
+  }
+
+  try {
+    const parsedUri = new URL(uri);
+    if (parsedUri.protocol !== "http:" && parsedUri.protocol !== "https:") {
+      return {
+        state: "error",
+        message: "Metadata URI must use http or https.",
+        tokenId: null,
+        tokenName: null,
+      };
+    }
+  } catch {
+    return {
+      state: "error",
+      message: "Metadata URI must be a valid URL.",
+      tokenId: null,
+      tokenName: null,
+    };
+  }
+
+  if (!symbol || !/^[A-Z0-9.]{1,10}$/.test(symbol)) {
+    return {
+      state: "error",
+      message: "Symbol must be 1-10 characters, uppercase letters, numbers, or periods.",
       tokenId: null,
       tokenName: null,
     };
@@ -91,6 +120,7 @@ export async function createIssuanceTokenAction(
     name: string;
     symbol: string;
     template: string;
+    uri: string;
     description?: string;
     decimals?: number;
     maxSupply?: string;
@@ -101,6 +131,7 @@ export async function createIssuanceTokenAction(
     name,
     symbol,
     template,
+    uri,
     requiresAllowlist,
     isMintable,
     isFreezable,
