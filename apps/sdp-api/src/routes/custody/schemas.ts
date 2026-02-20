@@ -77,6 +77,16 @@ export const setDefaultWalletSchema = z.object({
 export type SetDefaultWalletRequest = z.infer<typeof setDefaultWalletSchema>;
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Signer Check (API key flow)
+// ═══════════════════════════════════════════════════════════════════════════
+
+export const signerCheckSchema = z.object({
+  memo: z.string().max(256).optional(),
+});
+
+export type SignerCheckRequest = z.infer<typeof signerCheckSchema>;
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Response Types
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -113,4 +123,14 @@ export interface InitializeSigningResponse {
   configId: string;
   publicKey: string;
   walletId: string;
+}
+
+export interface SignerCheckResponse {
+  walletId: string;
+  walletAddress: string;
+  feePayer: string;
+  memo: string;
+  signature: string;
+  slot: number;
+  blockTime: string;
 }

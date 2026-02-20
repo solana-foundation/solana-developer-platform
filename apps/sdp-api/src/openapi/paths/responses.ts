@@ -50,6 +50,7 @@ import {
   rotateApiKeyResponseSchema,
   rpcProvidersResponseSchema,
   rpcRelayResponseSchema,
+  signerCheckResponseSchema,
   successResponseSchema,
   tokenAllowlistEntrySchema,
   tokenAllowlistResponseSchema,
@@ -117,6 +118,7 @@ export const listSessionsResponse = successResponseSchema(listSessionsResponseSc
 export const custodyConfigResponse = successResponseSchema(custodyConfigResponseSchema);
 export const custodyWalletResponse = successResponseSchema(custodyWalletResponseSchema);
 export const custodyWalletsResponse = successResponseSchema(custodyWalletsResponseSchema);
+export const custodySignerCheckResponse = successResponseSchema(signerCheckResponseSchema);
 
 export const allowlistEntriesResponse = successResponseSchema(allowlistEntriesResponseSchema);
 export const allowlistEntryResponse = successResponseSchema(

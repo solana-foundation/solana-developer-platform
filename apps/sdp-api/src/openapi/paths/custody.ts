@@ -10,11 +10,17 @@ import {
   projectIdParamSchema,
   setDefaultWalletRequestSchema,
   setDefaultWalletResponseSchema,
+  signerCheckRequestSchema,
   switchSigningRequestSchema,
   walletIdParamSchema,
 } from "../schemas";
 import { errorResponses, jsonContent } from "./helpers";
-import { custodyConfigResponse, custodyWalletResponse, custodyWalletsResponse } from "./responses";
+import {
+  custodyConfigResponse,
+  custodySignerCheckResponse,
+  custodyWalletResponse,
+  custodyWalletsResponse,
+} from "./responses";
 
 export function registerCustodyPaths(registry: OpenAPIRegistry) {
   registry.registerPath({
@@ -175,6 +181,30 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
         content: jsonContent(custodyPublicKeyResponseSchema),
       },
       ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/wallets/signer-check",
+    tags: ["Wallets"],
+    summary: "Check signer via memo transaction",
+    operationId: "checkWalletSigner",
+    description:
+      "Submits a memo transaction using the wallet bound to the authenticated API key. This endpoint requires API-key authentication.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      body: {
+        required: false,
+        content: jsonContent(signerCheckRequestSchema),
+      },
+    },
+    responses: {
+      200: {
+        description: "Signer check transaction submitted",
+        content: jsonContent(custodySignerCheckResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 429, 500, 502]),
     },
   });
 }

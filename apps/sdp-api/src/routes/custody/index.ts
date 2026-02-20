@@ -14,6 +14,7 @@ import {
   initializeSigning,
   listWallets,
   setDefaultWallet,
+  signerCheck,
   switchSigning,
 } from "./handlers";
 
@@ -27,6 +28,7 @@ wallets.post("/initialize", requirePermissions("custody:admin"), initializeSigni
 wallets.post("/switch", requirePermissions("custody:admin"), switchSigning);
 wallets.post("/", requirePermissions("custody:admin"), createWallet);
 wallets.post("/default-wallet", requirePermissions("custody:admin"), setDefaultWallet);
+wallets.post("/signer-check", requirePermissions("wallets:write"), signerCheck);
 
 // Read configuration and wallets
 wallets.get("/config", requirePermissions("wallets:read"), getConfig);
