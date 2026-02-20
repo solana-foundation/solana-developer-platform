@@ -5,7 +5,7 @@ import { Label } from "@/components/ui/label";
 import { ORGANIZATION_RPC_PROVIDERS, type OrganizationRpcProvider } from "@sdp/types";
 import { useState } from "react";
 import { toast } from "sonner";
-import { testOrganizationRpcProviderAction, updateOrganizationRpcSettingsAction } from "./actions";
+import { updateOrganizationRpcSettingsAction } from "./actions";
 
 type OrganizationSettings = {
   rpcProvider?: OrganizationRpcProvider;
@@ -16,6 +16,146 @@ export type SettingsOrganization = {
   name: string;
   settings: OrganizationSettings | null;
 };
+
+type RpcProxyResponse = {
+  provider: {
+    id: string;
+    selectionMode: string;
+    endpoint: string;
+  };
+  upstream: {
+    ok: boolean;
+    status: number;
+    statusText: string;
+  };
+};
+
+type RpcTestResult = {
+  status: "success" | "error";
+  message: string;
+  requestedProvider: OrganizationRpcProvider;
+  resolvedProvider?: string;
+  selectionMode?: string;
+  endpoint?: string;
+  upstreamStatus?: number;
+  upstreamStatusText?: string;
+  latencyMs?: number;
+};
+
+function toRpcTestErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+  return "Failed to test RPC provider.";
+}
+
+async function runRpcProviderTest(
+  requestedProvider: OrganizationRpcProvider
+): Promise<RpcTestResult> {
+  const startedAt = Date.now();
+
+  try {
+    const executeResponse = await fetch("/api/playground/execute", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        method: "POST",
+        path: "/v1/rpc/test",
+        body: {
+          jsonrpc: "2.0",
+          id: "org-rpc-test",
+          method: "getVersion",
+          params: [],
+        },
+        apiKey: null,
+      }),
+    });
+
+    const latencyMs = Date.now() - startedAt;
+    const envelope = (await executeResponse.json()) as {
+      ok?: boolean;
+      status?: number;
+      statusText?: string;
+      body?: {
+        data?: RpcProxyResponse;
+        error?: { message?: string };
+      };
+      error?: string;
+    };
+
+    if (!executeResponse.ok || envelope.status === undefined || envelope.statusText === undefined) {
+      return {
+        status: "error",
+        message: envelope.error ?? "RPC test failed.",
+        requestedProvider,
+        latencyMs,
+      };
+    }
+
+    if (!envelope.ok || !envelope.body?.data) {
+      return {
+        status: "error",
+        message: envelope.body?.error?.message || `RPC test failed (${envelope.status}).`,
+        requestedProvider,
+        latencyMs,
+      };
+    }
+
+    const {
+      provider: { id: resolvedProvider, endpoint, selectionMode },
+      upstream,
+    } = envelope.body.data;
+
+    if (requestedProvider !== "default" && resolvedProvider !== requestedProvider) {
+      return {
+        status: "error",
+        message: `RPC test mismatch (requested ${requestedProvider}, resolved ${resolvedProvider}).`,
+        requestedProvider,
+        resolvedProvider,
+        selectionMode,
+        endpoint,
+        upstreamStatus: upstream.status,
+        upstreamStatusText: upstream.statusText,
+        latencyMs,
+      };
+    }
+
+    if (!upstream.ok) {
+      return {
+        status: "error",
+        message: `RPC upstream returned ${upstream.status} ${upstream.statusText}.`,
+        requestedProvider,
+        resolvedProvider,
+        selectionMode,
+        endpoint,
+        upstreamStatus: upstream.status,
+        upstreamStatusText: upstream.statusText,
+        latencyMs,
+      };
+    }
+
+    return {
+      status: "success",
+      message: `RPC test passed (${upstream.status} ${upstream.statusText}) in ${latencyMs}ms.`,
+      requestedProvider,
+      resolvedProvider,
+      selectionMode,
+      endpoint,
+      upstreamStatus: upstream.status,
+      upstreamStatusText: upstream.statusText,
+      latencyMs,
+    };
+  } catch (error) {
+    return {
+      status: "error",
+      message: toRpcTestErrorMessage(error),
+      requestedProvider,
+      latencyMs: Date.now() - startedAt,
+    };
+  }
+}
 
 const RPC_PROVIDER_LABELS: Record<OrganizationRpcProvider, string> = {
   alchemy: "Alchemy",
@@ -67,12 +207,8 @@ export function OrganizationRpcSettingsForm({
 
     setIsTesting(true);
 
-    const formData = new FormData();
-    formData.set("organizationId", organization.id);
-    formData.set("rpcProvider", selectedProvider);
-
     try {
-      const result = await testOrganizationRpcProviderAction(formData);
+      const result = await runRpcProviderTest(selectedProvider);
       const requestedLabel =
         RPC_PROVIDER_LABELS[result.requestedProvider] ?? result.requestedProvider;
       const resolvedLabel = result.resolvedProvider
