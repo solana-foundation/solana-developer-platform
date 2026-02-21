@@ -203,8 +203,14 @@ describe("Kora Fee Payment (Devnet)", () => {
         }),
       });
 
-      expect(initializeRes.status).toBe(201);
-      const initializeBody = (await initializeRes.json()) as {
+      const initializePayload = await initializeRes.text();
+      if (initializeRes.status !== 201) {
+        throw new Error(
+          `Privy wallet initialization failed (${initializeRes.status}): ${initializePayload}`
+        );
+      }
+
+      const initializeBody = JSON.parse(initializePayload) as {
         data: { configId: string; publicKey: string; walletId: string };
       };
 
