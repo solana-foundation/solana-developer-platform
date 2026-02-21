@@ -7,10 +7,12 @@
 import { SigningError } from "@/services/ports";
 import type { Env } from "@/types/env";
 import type { VaultAddressesResponse } from "@solana/keychain-fireblocks";
-import { SignJWT, importPKCS8 } from "jose";
+import { SignJWT, importJWK, importPKCS8 } from "jose";
 
 const DEFAULT_FIREBLOCKS_API_BASE_URL = "https://api.fireblocks.io";
 const DEFAULT_PRIVY_API_BASE_URL = "https://api.privy.io/v1";
+const DEFAULT_COINBASE_CDP_API_BASE_URL = "https://api.cdp.coinbase.com/platform";
+const DEFAULT_COINBASE_CDP_NETWORK = "solana-devnet";
 const DEFAULT_FIREBLOCKS_ASSET_ID = "SOL";
 
 interface FireblocksVaultAccountResponse {
@@ -22,6 +24,11 @@ interface PrivyWalletResponse {
   id: string;
   address: string;
   chain_type?: string;
+}
+
+interface CoinbaseCdpSolanaAccountResponse {
+  address: string;
+  name?: string;
 }
 
 export interface ProvisionFireblocksOptions {
@@ -45,6 +52,20 @@ export interface ProvisionPrivyOptions {
 export interface ProvisionPrivyResult {
   walletId: string;
   address: string;
+}
+
+export interface ProvisionCoinbaseCdpOptions {
+  orgId: string;
+  orgSlug: string;
+  apiBaseUrl?: string;
+  network?: "solana" | "solana-devnet";
+  walletAddress?: string;
+  accountPolicy?: string;
+}
+
+export interface ProvisionCoinbaseCdpResult {
+  address: string;
+  network: "solana" | "solana-devnet";
 }
 
 export async function provisionFireblocksVaultAccount(
@@ -169,6 +190,67 @@ export async function provisionPrivyWallet(
   return { walletId: created.id, address: created.address };
 }
 
+export async function provisionCoinbaseCdpAccount(
+  env: Env,
+  options: ProvisionCoinbaseCdpOptions
+): Promise<ProvisionCoinbaseCdpResult> {
+  const apiKeyId = env.COINBASE_CDP_API_KEY_ID;
+  const apiKeySecret = env.COINBASE_CDP_API_KEY_SECRET;
+  const walletSecret = env.COINBASE_CDP_WALLET_SECRET;
+
+  if (!apiKeyId || !apiKeySecret || !walletSecret) {
+    throw new SigningError(
+      "Coinbase CDP environment variables not configured: COINBASE_CDP_API_KEY_ID, COINBASE_CDP_API_KEY_SECRET, COINBASE_CDP_WALLET_SECRET",
+      "PROVIDER_NOT_CONFIGURED"
+    );
+  }
+
+  const apiBaseUrl =
+    options.apiBaseUrl ?? env.COINBASE_CDP_API_BASE_URL ?? DEFAULT_COINBASE_CDP_API_BASE_URL;
+  const network = (options.network ??
+    env.COINBASE_CDP_NETWORK ??
+    DEFAULT_COINBASE_CDP_NETWORK) as "solana" | "solana-devnet";
+
+  const existingAddress = options.walletAddress ?? env.COINBASE_CDP_WALLET_ID;
+  if (existingAddress) {
+    const existing = await coinbaseCdpRequest<CoinbaseCdpSolanaAccountResponse>({
+      method: "GET",
+      path: `/v2/solana/accounts/${existingAddress}`,
+      apiBaseUrl,
+      apiKeyId,
+      apiKeySecret,
+      walletSecret,
+    });
+
+    if (!existing?.address) {
+      throw new SigningError("Coinbase CDP wallet lookup failed", "PROVIDER_NOT_CONFIGURED");
+    }
+
+    return { address: existing.address, network };
+  }
+
+  const name = buildCoinbaseCdpAccountName(options.orgSlug || options.orgId);
+  const created = await coinbaseCdpRequest<CoinbaseCdpSolanaAccountResponse>({
+    method: "POST",
+    path: "/v2/solana/accounts",
+    apiBaseUrl,
+    apiKeyId,
+    apiKeySecret,
+    walletSecret,
+    idempotencyKey: crypto.randomUUID(),
+    body: {
+      name,
+      ...(options.accountPolicy ? { accountPolicy: options.accountPolicy } : {}),
+    },
+  });
+
+  if (!created?.address) {
+    throw new SigningError("Coinbase CDP wallet creation failed", "PROVIDER_NOT_CONFIGURED");
+  }
+
+  return { address: created.address, network };
+}
+
 interface FireblocksRequestParams {
   apiBaseUrl: string;
   apiKey: string;
@@ -185,6 +267,17 @@ interface FireblocksAddressesParams {
   apiSecretPem: string;
   vaultAccountId: string;
   assetId: string;
+}
+
+interface CoinbaseCdpRequestParams {
+  method: "GET" | "POST" | "PUT" | "DELETE";
+  path: string;
+  apiBaseUrl: string;
+  apiKeyId: string;
+  apiKeySecret: string;
+  walletSecret: string;
+  idempotencyKey?: string;
+  body?: Record<string, unknown>;
 }
 
 async function fetchFireblocksAddressesWithRetry(
@@ -319,6 +412,282 @@ async function privyRequest<T>(params: PrivyRequestParams): Promise<T> {
       error instanceof Error ? error : undefined
     );
   }
+}
+
+async function coinbaseCdpRequest<T>(params: CoinbaseCdpRequestParams): Promise<T> {
+  const url = new URL(params.path, params.apiBaseUrl);
+  const requestPath = `${url.pathname}${url.search}`;
+  const normalizedBody = params.body ? sortJsonKeys(params.body) : undefined;
+  const bodyJson = normalizedBody ? JSON.stringify(normalizedBody) : undefined;
+
+  try {
+    const bearerToken = await createCoinbaseCdpBearerJwt({
+      apiKeyId: params.apiKeyId,
+      apiKeySecret: params.apiKeySecret,
+      requestMethod: params.method,
+      requestHost: url.host,
+      requestPath,
+    });
+
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${bearerToken}`,
+      ...(bodyJson ? { "Content-Type": "application/json" } : {}),
+      ...(params.idempotencyKey ? { "X-Idempotency-Key": params.idempotencyKey } : {}),
+    };
+
+    if (requiresCoinbaseCdpWalletAuth(params.method, requestPath)) {
+      const walletAuthToken = await createCoinbaseCdpWalletJwt({
+        walletSecret: params.walletSecret,
+        requestMethod: params.method,
+        requestHost: url.host,
+        requestPath,
+        requestData: (normalizedBody ?? {}) as Record<string, unknown>,
+      });
+      headers["X-Wallet-Auth"] = walletAuthToken;
+    }
+
+    const response = await fetch(url.toString(), {
+      method: params.method,
+      headers,
+      body: bodyJson,
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => "Failed to read error response");
+      throw new SigningError(
+        `Coinbase CDP API error: ${response.status} - ${errorText}`,
+        "PROVIDER_NOT_CONFIGURED"
+      );
+    }
+
+    if (response.status === 204 || response.headers.get("content-length") === "0") {
+      return undefined as T;
+    }
+
+    return (await response.json()) as T;
+  } catch (error) {
+    if (error instanceof SigningError) {
+      throw error;
+    }
+
+    throw new SigningError(
+      `Failed to call Coinbase CDP API: ${error instanceof Error ? error.message : "Unknown error"}`,
+      "NETWORK_ERROR",
+      error instanceof Error ? error : undefined
+    );
+  }
+}
+
+interface CoinbaseCdpBearerJwtParams {
+  apiKeyId: string;
+  apiKeySecret: string;
+  requestMethod: string;
+  requestHost: string;
+  requestPath: string;
+}
+
+async function createCoinbaseCdpBearerJwt(params: CoinbaseCdpBearerJwtParams): Promise<string> {
+  const now = Math.floor(Date.now() / 1000);
+  const nonce = randomHex(16);
+  const uri = `${params.requestMethod} ${params.requestHost}${params.requestPath}`;
+
+  const payload = new SignJWT({ uris: [uri] })
+    .setIssuer("cdp")
+    .setSubject(params.apiKeyId)
+    .setIssuedAt(now)
+    .setNotBefore(now)
+    .setExpirationTime(now + 120);
+
+  if (isPemEncodedKey(params.apiKeySecret)) {
+    const key = await importPKCS8(params.apiKeySecret, "ES256");
+    return payload
+      .setProtectedHeader({ alg: "ES256", kid: params.apiKeyId, nonce })
+      .sign(key);
+  }
+
+  const rawKey = decodeBase64ToBytes(params.apiKeySecret);
+  if (rawKey.length !== 64) {
+    throw new SigningError(
+      "COINBASE_CDP_API_KEY_SECRET has an invalid format. Expected EC PEM or base64 Ed25519 private key (64 bytes).",
+      "PROVIDER_NOT_CONFIGURED"
+    );
+  }
+
+  const seed = rawKey.slice(0, 32);
+  const publicKey = rawKey.slice(32);
+  const ed25519Jwk = {
+    crv: "Ed25519",
+    d: toBase64Url(seed),
+    kty: "OKP",
+    x: toBase64Url(publicKey),
+  };
+
+  const key = await importJWK(ed25519Jwk, "EdDSA");
+  return payload
+    .setProtectedHeader({ alg: "EdDSA", kid: params.apiKeyId, nonce })
+    .sign(key);
+}
+
+interface CoinbaseCdpWalletJwtParams {
+  walletSecret: string;
+  requestMethod: string;
+  requestHost: string;
+  requestPath: string;
+  requestData: Record<string, unknown>;
+}
+
+async function createCoinbaseCdpWalletJwt(params: CoinbaseCdpWalletJwtParams): Promise<string> {
+  const now = Math.floor(Date.now() / 1000);
+  const uri = `${params.requestMethod} ${params.requestHost}${params.requestPath}`;
+  const payload: Record<string, unknown> = { uris: [uri] };
+
+  const shouldIncludeReqHash =
+    Object.keys(params.requestData).length > 0 &&
+    Object.values(params.requestData).some((value) => value !== undefined);
+
+  if (shouldIncludeReqHash) {
+    payload.reqHash = await sha256Hex(JSON.stringify(sortJsonKeys(params.requestData)));
+  }
+
+  const pkcs8DerBytes = decodeBase64ToBytes(params.walletSecret);
+  const privateKeyPem = encodePkcs8Pem(pkcs8DerBytes);
+  const key = await importPKCS8(privateKeyPem, "ES256");
+
+  return new SignJWT(payload)
+    .setProtectedHeader({ alg: "ES256", typ: "JWT" })
+    .setIssuedAt(now)
+    .setNotBefore(now)
+    .setJti(randomHex(16))
+    .sign(key);
+}
+
+function requiresCoinbaseCdpWalletAuth(method: string, requestPath: string): boolean {
+  if (!["POST", "PUT", "DELETE"].includes(method.toUpperCase())) {
+    return false;
+  }
+
+  return requestPath.includes("/accounts") || requestPath.includes("/spend-permissions");
+}
+
+function buildCoinbaseCdpAccountName(value: string): string {
+  let normalized = value
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+  if (!normalized) {
+    normalized = "org";
+  }
+
+  let name = `sdp-${normalized}`.slice(0, 36);
+  name = name.replace(/-+$/g, "");
+
+  if (!/^[a-z0-9]/.test(name)) {
+    name = `s${name}`;
+  }
+
+  if (!/[a-z0-9]$/.test(name)) {
+    name = `${name}0`;
+  }
+
+  if (name.length < 2) {
+    name = `sdp-${randomHex(2)}`.slice(0, 36);
+  }
+
+  return name;
+}
+
+function isPemEncodedKey(value: string): boolean {
+  return value.includes("-----BEGIN");
+}
+
+function randomHex(byteLength: number): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(byteLength));
+  return Array.from(bytes)
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+function encodePkcs8Pem(privateKeyDer: Uint8Array): string {
+  const base64 = encodeBase64FromBytes(privateKeyDer);
+  const lines = base64.match(/.{1,64}/g)?.join("\n") ?? base64;
+  return `-----BEGIN PRIVATE KEY-----\n${lines}\n-----END PRIVATE KEY-----`;
+}
+
+function toBase64Url(bytes: Uint8Array): string {
+  return encodeBase64FromBytes(bytes).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function decodeBase64ToBytes(value: string): Uint8Array {
+  const globalWithBuffer = globalThis as {
+    Buffer?: {
+      from: (input: string, encoding: "base64") => Uint8Array;
+    };
+  };
+
+  if (globalWithBuffer.Buffer) {
+    return new Uint8Array(globalWithBuffer.Buffer.from(value, "base64"));
+  }
+
+  if (typeof atob !== "function") {
+    throw new SigningError("Unable to decode base64 secret", "PROVIDER_NOT_CONFIGURED");
+  }
+
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
+function encodeBase64FromBytes(bytes: Uint8Array): string {
+  const globalWithBuffer = globalThis as {
+    Buffer?: {
+      from: (input: Uint8Array) => { toString: (encoding: "base64") => string };
+    };
+  };
+
+  if (globalWithBuffer.Buffer) {
+    return globalWithBuffer.Buffer.from(bytes).toString("base64");
+  }
+
+  let binary = "";
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
+
+  if (typeof btoa !== "function") {
+    throw new SigningError("Unable to encode base64 payload", "PROVIDER_NOT_CONFIGURED");
+  }
+
+  return btoa(binary);
+}
+
+function sortJsonKeys(value: unknown): unknown {
+  if (value === null || value === undefined) {
+    return value;
+  }
+
+  if (typeof value === "bigint") {
+    return value.toString();
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => sortJsonKeys(item));
+  }
+
+  if (typeof value !== "object") {
+    return value;
+  }
+
+  const objectValue = value as Record<string, unknown>;
+  const result: Record<string, unknown> = {};
+  for (const key of Object.keys(objectValue).sort()) {
+    result[key] = sortJsonKeys(objectValue[key]);
+  }
+  return result;
 }
 
 function encodeBasicAuth(value: string): string {

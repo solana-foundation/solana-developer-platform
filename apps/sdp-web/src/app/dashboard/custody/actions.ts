@@ -90,12 +90,27 @@ async function sdpApiFetchWithApiKey<T>(
 }
 
 export async function initializeCustody(formData: FormData) {
-  const provider = (getString(formData, "provider") || "privy") as "privy" | "local";
+  const provider = (getString(formData, "provider") || "privy") as
+    | "privy"
+    | "local"
+    | "fireblocks"
+    | "coinbase_cdp";
   const walletLabel = getOptionalString(formData, "walletLabel");
+  const apiBaseUrl = getOptionalString(formData, "apiBaseUrl");
+  const network = getOptionalString(formData, "network");
+  const walletAddress = getOptionalString(formData, "walletAddress");
+  const accountPolicy = getOptionalString(formData, "accountPolicy");
 
   await sdpApiFetch("/v1/wallets/initialize", {
     method: "POST",
-    body: JSON.stringify({ provider, walletLabel }),
+    body: JSON.stringify({
+      provider,
+      walletLabel,
+      ...(apiBaseUrl ? { apiBaseUrl } : {}),
+      ...(network ? { network } : {}),
+      ...(walletAddress ? { walletAddress } : {}),
+      ...(accountPolicy ? { accountPolicy } : {}),
+    }),
   });
 
   revalidatePath("/dashboard/custody");
@@ -104,9 +119,17 @@ export async function initializeCustody(formData: FormData) {
 }
 
 export async function switchCustodyProvider(formData: FormData) {
-  const provider = (getString(formData, "provider") || "privy") as "privy" | "local";
+  const provider = (getString(formData, "provider") || "privy") as
+    | "privy"
+    | "local"
+    | "fireblocks"
+    | "coinbase_cdp";
   const confirm = getString(formData, "confirm");
   const walletLabel = getOptionalString(formData, "walletLabel");
+  const apiBaseUrl = getOptionalString(formData, "apiBaseUrl");
+  const network = getOptionalString(formData, "network");
+  const walletAddress = getOptionalString(formData, "walletAddress");
+  const accountPolicy = getOptionalString(formData, "accountPolicy");
 
   if (confirm.toLowerCase() !== "switch") {
     throw new Error("Type SWITCH to confirm provider change");
@@ -114,7 +137,14 @@ export async function switchCustodyProvider(formData: FormData) {
 
   await sdpApiFetch("/v1/wallets/switch", {
     method: "POST",
-    body: JSON.stringify({ provider, walletLabel }),
+    body: JSON.stringify({
+      provider,
+      walletLabel,
+      ...(apiBaseUrl ? { apiBaseUrl } : {}),
+      ...(network ? { network } : {}),
+      ...(walletAddress ? { walletAddress } : {}),
+      ...(accountPolicy ? { accountPolicy } : {}),
+    }),
   });
 
   revalidatePath("/dashboard/custody");

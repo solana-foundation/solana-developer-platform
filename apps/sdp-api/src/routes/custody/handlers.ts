@@ -80,6 +80,8 @@ function resolveActor(c: AppContext): { organizationId: string; projectId?: stri
  * For "local" provider: Generates a new keypair and stores it encrypted in the database.
  * For "fireblocks" provider: Stores Fireblocks credentials and retrieves the public key.
  * For "privy" provider: Stores Privy credentials and retrieves the public key.
+ * For "coinbase_cdp" provider: Uses platform-managed CDP credentials and provisions
+ * a Solana account.
  *
  * POST /wallets/initialize
  */
@@ -118,13 +120,25 @@ export const initializeSigning = async (c: AppContext) => {
           apiBaseUrl: parsed.data.apiBaseUrl,
         }
       );
-    } else {
+    } else if (parsed.data.provider === "privy") {
       result = await signingService.initializePrivySigning(
         actor.organizationId,
         parsed.data.projectId,
         {
           apiBaseUrl: parsed.data.apiBaseUrl,
           requestDelayMs: parsed.data.requestDelayMs,
+          walletLabel: parsed.data.walletLabel,
+        }
+      );
+    } else {
+      result = await signingService.initializeCoinbaseCdpSigning(
+        actor.organizationId,
+        parsed.data.projectId,
+        {
+          apiBaseUrl: parsed.data.apiBaseUrl,
+          network: parsed.data.network,
+          walletAddress: parsed.data.walletAddress,
+          accountPolicy: parsed.data.accountPolicy,
           walletLabel: parsed.data.walletLabel,
         }
       );
@@ -205,10 +219,18 @@ export const switchSigning = async (c: AppContext) => {
         assetId: parsed.data.assetId,
         apiBaseUrl: parsed.data.apiBaseUrl,
       });
-    } else {
+    } else if (parsed.data.provider === "privy") {
       result = await signingService.initializePrivySigning(actor.organizationId, projectId, {
         apiBaseUrl: parsed.data.apiBaseUrl,
         requestDelayMs: parsed.data.requestDelayMs,
+        walletLabel: parsed.data.walletLabel,
+      });
+    } else {
+      result = await signingService.initializeCoinbaseCdpSigning(actor.organizationId, projectId, {
+        apiBaseUrl: parsed.data.apiBaseUrl,
+        network: parsed.data.network,
+        walletAddress: parsed.data.walletAddress,
+        accountPolicy: parsed.data.accountPolicy,
         walletLabel: parsed.data.walletLabel,
       });
     }

@@ -62,7 +62,7 @@ export interface Env {
   ORGANIZATION_REGISTRATION_TOKEN?: string;
 
   // Signing provider (custody backend via @solana/keychain)
-  SIGNING_PROVIDER?: "local" | "fireblocks" | "privy";
+  SIGNING_PROVIDER?: "local" | "fireblocks" | "privy" | "coinbase_cdp";
   FEE_PAYER_PRIVATE_KEY?: string;
 
   // Fireblocks configuration (@solana/keychain-fireblocks)
@@ -78,6 +78,14 @@ export interface Env {
   PRIVY_WALLET_ID?: string;
   PRIVY_API_BASE_URL?: string;
   PRIVY_REQUEST_DELAY_MS?: string;
+
+  // Coinbase CDP Server Wallet configuration (Solana)
+  COINBASE_CDP_API_KEY_ID?: string;
+  COINBASE_CDP_API_KEY_SECRET?: string;
+  COINBASE_CDP_WALLET_SECRET?: string;
+  COINBASE_CDP_API_BASE_URL?: string;
+  COINBASE_CDP_NETWORK?: "solana" | "solana-devnet";
+  COINBASE_CDP_WALLET_ID?: string;
 
   // Kora (gasless) configuration
   FEE_PAYMENT_PROVIDER?: "kora" | "native";

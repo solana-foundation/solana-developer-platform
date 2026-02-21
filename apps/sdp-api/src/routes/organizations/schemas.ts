@@ -13,6 +13,16 @@ const createOrgCustodySchema = z.discriminatedUnion("provider", [
     apiBaseUrl: z.string().url().optional(),
     requestDelayMs: z.number().int().min(0).max(3000).optional(),
   }),
+  z.object({
+    provider: z.literal("coinbase_cdp"),
+    apiBaseUrl: z.string().url().optional(),
+    network: z.enum(["solana", "solana-devnet"]).optional(),
+    walletAddress: z.string().min(32).max(44).optional(),
+    accountPolicy: z
+      .string()
+      .regex(/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/)
+      .optional(),
+  }),
 ]);
 
 export const createOrgSchema = z.object({

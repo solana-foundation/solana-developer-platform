@@ -9,6 +9,7 @@
  * - "local": In-memory keypair (KeychainMemoryAdapter) from env or encrypted DB storage
  * - "fireblocks": Fireblocks MPC custody (KeychainFireblocksAdapter)
  * - "privy": Privy hosted wallets (KeychainPrivyAdapter)
+ * - "coinbase_cdp": Coinbase CDP custody (provisioning only; signer support pending)
  */
 
 import type { SigningPort } from "@/services/ports";
@@ -27,7 +28,7 @@ import {
 // ═══════════════════════════════════════════════════════════════════════════
 
 /** Supported signing/custody provider types */
-export type SigningProviderType = "local" | "fireblocks" | "privy";
+export type SigningProviderType = "local" | "fireblocks" | "privy" | "coinbase_cdp";
 
 /**
  * Database record for signing/custody configuration
@@ -62,6 +63,8 @@ export async function createSigningAdapterFromEnv(env: Env): Promise<SigningPort
       return createFireblocksAdapterFromEnv(env);
     case "privy":
       return createPrivyAdapterFromEnv(env);
+    case "coinbase_cdp":
+      throw coinbaseCdpSignerNotSupportedError();
     default:
       return createMemoryAdapterFromEnv(env);
   }
@@ -95,6 +98,8 @@ export async function createSigningAdapterFromConfig(
       return createFireblocksAdapterFromRecord(record);
     case "privy":
       return createPrivyAdapterFromRecord(record, env);
+    case "coinbase_cdp":
+      throw coinbaseCdpSignerNotSupportedError();
     default:
       return createMemoryAdapterFromEnv(env);
   }
@@ -138,6 +143,13 @@ interface PrivyConfigJson {
   apiBaseUrl?: string;
   requestDelayMs?: number;
   privyAppId?: string;
+}
+
+function coinbaseCdpSignerNotSupportedError(): SigningError {
+  return new SigningError(
+    "Coinbase CDP custody is configured, but runtime signer support is not implemented yet.",
+    "INVALID_REQUEST"
+  );
 }
 
 function createFireblocksAdapterFromEnv(env: Env): KeychainFireblocksAdapter {
