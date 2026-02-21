@@ -165,6 +165,12 @@ jobs:
       # Required: a signing key for the custody wallet (Base58-encoded 64-byte keypair)
       CUSTODY_PRIVATE_KEY: ${{ secrets.CUSTODY_PRIVATE_KEY }}
 
+      # Privy configuration for live wallet provisioning/signing integration checks
+      PRIVY_APP_ID: ${{ vars.PRIVY_APP_ID || secrets.PRIVY_APP_ID }}
+      PRIVY_APP_SECRET: ${{ secrets.PRIVY_APP_SECRET }}
+      PRIVY_API_BASE_URL: ${{ vars.PRIVY_API_BASE_URL || secrets.PRIVY_API_BASE_URL }}
+      PRIVY_REQUEST_DELAY_MS: ${{ vars.PRIVY_REQUEST_DELAY_MS || secrets.PRIVY_REQUEST_DELAY_MS }}
+
       # Optional: tighten/loosen the fail-fast sponsor-funds check (lamports)
       KORA_MIN_BALANCE_LAMPORTS: ${{ secrets.KORA_MIN_BALANCE_LAMPORTS }}
     steps:

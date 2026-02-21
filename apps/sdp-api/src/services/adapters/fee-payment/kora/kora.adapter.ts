@@ -48,13 +48,33 @@ export class KoraAdapter implements FeePaymentPort {
       return this.cachedFeePayer;
     }
 
-    try {
-      const { signer_address } = await this.client.getPayerSigner();
-      this.cachedFeePayer = signer_address as Address;
-      return this.cachedFeePayer;
-    } catch (error) {
-      throw this.wrapError(error, "Failed to get fee payer address");
+    const maxRetries = 2;
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        const response = await this.client.getPayerSigner();
+        const feePayer =
+          (response as { signer_address?: string }).signer_address ??
+          (response as { payment_address?: string }).payment_address ??
+          (response as { payerSigner?: string }).payerSigner;
+
+        if (!feePayer) {
+          throw new Error("Kora did not return a fee payer address");
+        }
+
+        this.cachedFeePayer = feePayer as Address;
+        return this.cachedFeePayer;
+      } catch (error) {
+        if (attempt < maxRetries && isRetryableGetFeePayerError(error)) {
+          await sleep((attempt + 1) * 300);
+          continue;
+        }
+
+        throw this.wrapError(error, "Failed to get fee payer address");
+      }
     }
+
+    // Unreachable: loop always returns or throws.
+    throw new FeePaymentError("Failed to get fee payer address", "NETWORK_ERROR");
   }
 
   /**
@@ -226,6 +246,19 @@ function isBlockhashNotFoundError(error: unknown): boolean {
   // "RPC Error -32000: Invalid transaction: Transaction simulation failed: Blockhash not found"
   // "Transaction simulation failed: Blockhash not found"
   return error.message.toLowerCase().includes("blockhash not found");
+}
+
+function isRetryableGetFeePayerError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const message = error.message.toLowerCase();
+  return (
+    message.includes("internal error") ||
+    message.includes("reference =") ||
+    message.includes("network") ||
+    message.includes("fetch failed") ||
+    message.includes("timeout") ||
+    message.includes("temporar")
+  );
 }
 
 function mapKoraErrorCode(code: number): import("@/services/ports").FeePaymentErrorCode {

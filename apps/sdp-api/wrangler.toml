@@ -31,7 +31,13 @@ id = "local-sessions"
 ENVIRONMENT = "development"
 API_VERSION = "v1"
 EMAIL_FROM = "noreply@mail.solana.org"
+SOLANA_NETWORK = "devnet"
+SOLANA_RPC_URL = "https://api.devnet.solana.com"
+SOLANA_RPC_DEFAULT_PROVIDER = "default"
 SOLANA_RPC_TRITON_URL = "https://solanaf-sdp-7436.devnet.rpcpool.com/50cc5df4-1953-414c-b6fb-948aa7ffb0fb"
+# Local dev defaults. Can be overridden by apps/sdp-api/.dev.vars.
+FEE_PAYMENT_PROVIDER = "kora"
+KORA_RPC_URL = "https://kora-devnet-315956366746.us-central1.run.app"
 
 # Dev environment
 [env.dev]
