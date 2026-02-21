@@ -69,6 +69,8 @@ function assertKoraIntegrationEnvConfigured() {
   if (!env.SOLANA_RPC_URL) missing.push("SOLANA_RPC_URL");
   if (!env.CUSTODY_PRIVATE_KEY) missing.push("CUSTODY_PRIVATE_KEY");
   if (!env.KORA_RPC_URL) missing.push("KORA_RPC_URL");
+  if (!env.PRIVY_APP_ID) missing.push("PRIVY_APP_ID");
+  if (!env.PRIVY_APP_SECRET) missing.push("PRIVY_APP_SECRET");
 
   if (missing.length > 0) {
     throw new Error(`Kora integration tests require env configuration: ${missing.join(", ")}.`);
@@ -187,7 +189,7 @@ describe("Kora Fee Payment (Devnet)", () => {
   });
 
   it(
-    "submits signer-check memo with wallet-bound API key via Kora",
+    "submits signer-check memo with Privy wallet-bound API key via Kora",
     { timeout: 120000 },
     async () => {
       const initializeRes = await request("/v1/wallets/initialize", {
@@ -196,8 +198,8 @@ describe("Kora Fee Payment (Devnet)", () => {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          provider: "local",
-          walletLabel: "Kora signer-check integration wallet",
+          provider: "privy",
+          walletLabel: "Kora signer-check Privy integration wallet",
         }),
       });
 

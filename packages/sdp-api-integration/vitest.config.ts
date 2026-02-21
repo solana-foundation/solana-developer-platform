@@ -36,6 +36,10 @@ const custodyEncryptionKey =
 const koraRpcUrl = getEnv("KORA_RPC_URL");
 const koraApiKey = getEnv("KORA_API_KEY");
 const koraTimeoutMs = getEnv("KORA_TIMEOUT_MS");
+const privyAppId = getEnv("PRIVY_APP_ID");
+const privyAppSecret = getEnv("PRIVY_APP_SECRET");
+const privyApiBaseUrl = getEnv("PRIVY_API_BASE_URL");
+const privyRequestDelayMs = getEnv("PRIVY_REQUEST_DELAY_MS");
 
 export default defineWorkersConfig({
   resolve: {
@@ -75,6 +79,10 @@ export default defineWorkersConfig({
               ...(koraApiKey && { KORA_API_KEY: koraApiKey }),
               ...(koraTimeoutMs && { KORA_TIMEOUT_MS: koraTimeoutMs }),
             }),
+            ...(privyAppId && { PRIVY_APP_ID: privyAppId }),
+            ...(privyAppSecret && { PRIVY_APP_SECRET: privyAppSecret }),
+            ...(privyApiBaseUrl && { PRIVY_API_BASE_URL: privyApiBaseUrl }),
+            ...(privyRequestDelayMs && { PRIVY_REQUEST_DELAY_MS: privyRequestDelayMs }),
           },
         },
       },
