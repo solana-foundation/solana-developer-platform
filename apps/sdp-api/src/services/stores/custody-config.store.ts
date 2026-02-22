@@ -144,6 +144,33 @@ export class CustodyConfigStore implements SigningConfigStore {
   }
 
   /**
+   * Find a custody config for a specific provider at the requested scope.
+   * Returns active or inactive records (used for provider re-activation).
+   */
+  async findByProvider(
+    orgId: string,
+    projectId: string | undefined,
+    provider: SigningProviderType
+  ): Promise<SigningConfigRecord | null> {
+    const row = await this.db
+      .prepare(
+        projectId
+          ? `SELECT id, organization_id, project_id, provider, config_encrypted, encryption_version, default_wallet_id, status, created_at, updated_at
+             FROM custody_configs
+             WHERE organization_id = ? AND project_id = ? AND provider = ?
+             LIMIT 1`
+          : `SELECT id, organization_id, project_id, provider, config_encrypted, encryption_version, default_wallet_id, status, created_at, updated_at
+             FROM custody_configs
+             WHERE organization_id = ? AND project_id IS NULL AND provider = ?
+             LIMIT 1`
+      )
+      .bind(...(projectId ? [orgId, projectId, provider] : [orgId, provider]))
+      .first<CustodyConfigRow>();
+
+    return row ? this.mapConfigRow(row) : null;
+  }
+
+  /**
    * Get a custody config by ID.
    */
   async getById(configId: string): Promise<SigningConfigRecord | null> {

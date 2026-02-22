@@ -222,33 +222,76 @@ export async function provisionCoinbaseCdpAccount(
       walletSecret,
     });
 
-    if (!existing?.address) {
+    const resolvedAddress = extractCoinbaseCdpAccountAddress(existing);
+    if (!resolvedAddress) {
       throw new SigningError("Coinbase CDP wallet lookup failed", "PROVIDER_NOT_CONFIGURED");
     }
 
-    return { address: existing.address, network };
+    return { address: resolvedAddress, network };
   }
 
-  const name = buildCoinbaseCdpAccountName(options.orgSlug || options.orgId);
-  const created = await coinbaseCdpRequest<CoinbaseCdpSolanaAccountResponse>({
-    method: "POST",
-    path: "/v2/solana/accounts",
-    apiBaseUrl,
-    apiKeyId,
-    apiKeySecret,
-    walletSecret,
-    idempotencyKey: crypto.randomUUID(),
-    body: {
-      name,
-      ...(options.accountPolicy ? { accountPolicy: options.accountPolicy } : {}),
-    },
-  });
+  const name = buildCoinbaseCdpAccountName(
+    options.orgSlug || options.orgId,
+    resolveCoinbaseCdpAccountScope(env)
+  );
 
-  if (!created?.address) {
-    throw new SigningError("Coinbase CDP wallet creation failed", "PROVIDER_NOT_CONFIGURED");
+  try {
+    const created = await coinbaseCdpRequest<CoinbaseCdpSolanaAccountResponse>({
+      method: "POST",
+      path: "/v2/solana/accounts",
+      apiBaseUrl,
+      apiKeyId,
+      apiKeySecret,
+      walletSecret,
+      idempotencyKey: crypto.randomUUID(),
+      body: {
+        name,
+        ...(options.accountPolicy ? { accountPolicy: options.accountPolicy } : {}),
+      },
+    });
+
+    const createdAddress = extractCoinbaseCdpAccountAddress(created);
+    if (!createdAddress) {
+      throw new SigningError("Coinbase CDP wallet creation failed", "PROVIDER_NOT_CONFIGURED");
+    }
+
+    return { address: createdAddress, network };
+  } catch (error) {
+    if (!isCoinbaseCdpAlreadyExistsError(error)) {
+      throw error;
+    }
+
+    try {
+      const existingByName = await coinbaseCdpRequest<CoinbaseCdpSolanaAccountResponse>({
+        method: "GET",
+        path: `/v2/solana/accounts/by-name/${encodeURIComponent(name)}`,
+        apiBaseUrl,
+        apiKeyId,
+        apiKeySecret,
+        walletSecret,
+      });
+
+      const existingAddressByName = extractCoinbaseCdpAccountAddress(existingByName);
+      if (existingAddressByName) {
+        return { address: existingAddressByName, network };
+      }
+
+      throw new SigningError(
+        `Coinbase CDP account '${name}' already exists but lookup by name returned no address. Provide walletAddress to reuse the account.`,
+        "PROVIDER_NOT_CONFIGURED"
+      );
+    } catch (lookupError) {
+      if (lookupError instanceof SigningError && !isCoinbaseCdpAlreadyExistsError(lookupError)) {
+        throw new SigningError(
+          `Coinbase CDP account '${name}' already exists but could not be resolved by name. Provide walletAddress to reuse the account.`,
+          "PROVIDER_NOT_CONFIGURED",
+          lookupError
+        );
+      }
+
+      throw lookupError;
+    }
   }
-
-  return { address: created.address, network };
 }
 
 interface FireblocksRequestParams {
@@ -578,7 +621,7 @@ function requiresCoinbaseCdpWalletAuth(method: string, requestPath: string): boo
   return requestPath.includes("/accounts") || requestPath.includes("/spend-permissions");
 }
 
-function buildCoinbaseCdpAccountName(value: string): string {
+function buildCoinbaseCdpAccountName(value: string, scope?: string): string {
   let normalized = value
     .toLowerCase()
     .replace(/[^a-z0-9-]+/g, "-")
@@ -589,7 +632,15 @@ function buildCoinbaseCdpAccountName(value: string): string {
     normalized = "org";
   }
 
-  let name = `sdp-${normalized}`.slice(0, 36);
+  const normalizedScope = scope
+    ? scope
+        .toLowerCase()
+        .replace(/[^a-z0-9-]+/g, "-")
+        .replace(/-+/g, "-")
+        .replace(/^-+|-+$/g, "")
+    : "";
+
+  let name = `${normalizedScope ? `sdp-${normalizedScope}` : "sdp"}-${normalized}`.slice(0, 36);
   name = name.replace(/-+$/g, "");
 
   if (!/^[a-z0-9]/.test(name)) {
@@ -605,6 +656,66 @@ function buildCoinbaseCdpAccountName(value: string): string {
   }
 
   return name;
+}
+
+function resolveCoinbaseCdpAccountScope(env: Env): string {
+  const explicitNamespace = env.COINBASE_CDP_ACCOUNT_NAMESPACE?.trim();
+  return explicitNamespace || env.ENVIRONMENT;
+}
+
+function extractCoinbaseCdpAccountAddress(response: unknown): string | null {
+  if (!response || typeof response !== "object") {
+    return null;
+  }
+
+  const record = response as Record<string, unknown>;
+  const directAddress = record.address;
+  if (typeof directAddress === "string" && directAddress.length > 0) {
+    return directAddress;
+  }
+
+  const account = record.account;
+  if (account && typeof account === "object") {
+    const accountAddress = (account as Record<string, unknown>).address;
+    if (typeof accountAddress === "string" && accountAddress.length > 0) {
+      return accountAddress;
+    }
+  }
+
+  const data = record.data;
+  if (data && typeof data === "object" && !Array.isArray(data)) {
+    const dataAddress = (data as Record<string, unknown>).address;
+    if (typeof dataAddress === "string" && dataAddress.length > 0) {
+      return dataAddress;
+    }
+  }
+
+  if (Array.isArray(data)) {
+    for (const entry of data) {
+      if (!entry || typeof entry !== "object") {
+        continue;
+      }
+
+      const entryAddress = (entry as Record<string, unknown>).address;
+      if (typeof entryAddress === "string" && entryAddress.length > 0) {
+        return entryAddress;
+      }
+    }
+  }
+
+  return null;
+}
+
+function isCoinbaseCdpAlreadyExistsError(error: unknown): error is SigningError {
+  if (!(error instanceof SigningError)) {
+    return false;
+  }
+
+  const message = error.message.toLowerCase();
+  return (
+    message.includes("coinbase cdp api error: 409") &&
+    (message.includes("already_exists") || message.includes("already exists"))
+  );
 }
 
 function isPemEncodedKey(value: string): boolean {

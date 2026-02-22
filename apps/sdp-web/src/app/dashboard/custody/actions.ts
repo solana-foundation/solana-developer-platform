@@ -123,7 +123,6 @@ export async function switchCustodyProvider(formData: FormData) {
     | "local"
     | "coinbase_cdp";
   const confirm = getString(formData, "confirm");
-  const walletLabel = getOptionalString(formData, "walletLabel");
   const apiBaseUrl = getOptionalString(formData, "apiBaseUrl");
   const network = getOptionalString(formData, "network");
   const walletAddress = getOptionalString(formData, "walletAddress");
@@ -133,11 +132,28 @@ export async function switchCustodyProvider(formData: FormData) {
     throw new Error("Type SWITCH to confirm provider change");
   }
 
+  const currentConfigResponse = await sdpApiRequest("/v1/wallets/config");
+  if (currentConfigResponse.ok) {
+    const currentConfigJson = (await currentConfigResponse.json()) as {
+      data?: {
+        config?: {
+          provider?: string;
+        };
+      };
+    };
+
+    if (currentConfigJson.data?.config?.provider === provider) {
+      throw new Error(`Provider '${provider}' is already active`);
+    }
+  } else if (currentConfigResponse.status !== 404) {
+    const body = await currentConfigResponse.text();
+    throw new Error(getApiErrorMessageFromText(body));
+  }
+
   await sdpApiFetch("/v1/wallets/switch", {
     method: "POST",
     body: JSON.stringify({
       provider,
-      walletLabel,
       ...(apiBaseUrl ? { apiBaseUrl } : {}),
       ...(network ? { network } : {}),
       ...(walletAddress ? { walletAddress } : {}),
