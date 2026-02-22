@@ -19,5 +19,14 @@ KORA_RPC_URL=https://kora-devnet-315956366746.us-central1.run.app
 # KORA_API_KEY=YOUR_KORA_API_KEY (only if API key auth is enabled)
 FEE_PAYMENT_PROVIDER=kora
 
+# Coinbase CDP platform signer (required for coinbase_cdp custody provider)
+# SIGNING_PROVIDER=coinbase_cdp
+# COINBASE_CDP_API_KEY_ID=YOUR_CDP_API_KEY_ID
+# COINBASE_CDP_API_KEY_SECRET=-----BEGIN EC PRIVATE KEY-----\n...\n-----END EC PRIVATE KEY-----
+# COINBASE_CDP_WALLET_SECRET=BASE64_PKCS8_DER_WALLET_SECRET
+# COINBASE_CDP_API_BASE_URL=https://api.cdp.coinbase.com/platform
+# COINBASE_CDP_NETWORK=solana-devnet
+# COINBASE_CDP_WALLET_ID=YOUR_DEFAULT_CDP_SOLANA_ADDRESS
+
 # Clerk webhook (required for Clerk org linking)
 CLERK_WEBHOOK_SECRET=whsec_...

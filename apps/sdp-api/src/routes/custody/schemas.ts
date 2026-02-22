@@ -32,10 +32,24 @@ export const initializePrivySchema = z.object({
   walletLabel: z.string().max(100).optional(),
 });
 
+export const initializeCoinbaseCdpSchema = z.object({
+  provider: z.literal("coinbase_cdp"),
+  projectId: z.string().optional(),
+  apiBaseUrl: z.string().url().optional(),
+  network: z.enum(["solana", "solana-devnet"]).optional(),
+  walletAddress: z.string().min(32).max(44).optional(),
+  accountPolicy: z
+    .string()
+    .regex(/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/)
+    .optional(),
+  walletLabel: z.string().max(100).optional(),
+});
+
 export const initializeSigningSchema = z.discriminatedUnion("provider", [
   initializeLocalSchema,
   initializeFireblocksSchema,
   initializePrivySchema,
+  initializeCoinbaseCdpSchema,
 ]);
 
 export type InitializeSigningRequest = z.infer<typeof initializeSigningSchema>;
@@ -95,7 +109,7 @@ export interface CustodyConfigResponse {
     id: string;
     organizationId: string;
     projectId: string | null;
-    provider: "local" | "fireblocks" | "privy";
+    provider: "local" | "fireblocks" | "privy" | "coinbase_cdp";
     publicKey: string;
     defaultWalletId: string | null;
     status: "active" | "inactive";

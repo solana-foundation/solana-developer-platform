@@ -4,7 +4,10 @@ import { hashString } from "@/lib/hash";
 import { created, noContent, success } from "@/lib/response";
 import { createAllowlistService } from "@/services/allowlist.service";
 import { AuditService } from "@/services/audit.service";
-import { provisionFireblocksVaultAccount } from "@/services/custody/provisioning";
+import {
+  provisionCoinbaseCdpAccount,
+  provisionFireblocksVaultAccount,
+} from "@/services/custody/provisioning";
 import { createSigningService } from "@/services/domain/signing.service";
 import { KVService } from "@/services/kv.service";
 import { SigningError } from "@/services/ports";
@@ -205,6 +208,22 @@ export const createOrganization = async (c: AppContext) => {
           vaultAccountId,
           assetId,
           apiBaseUrl: custody.apiBaseUrl ?? c.env.FIREBLOCKS_API_BASE_URL,
+        });
+      } else if (custody.provider === "coinbase_cdp") {
+        const provisioned = await provisionCoinbaseCdpAccount(c.env, {
+          orgId,
+          orgSlug: slug,
+          apiBaseUrl: custody.apiBaseUrl,
+          network: custody.network,
+          walletAddress: custody.walletAddress,
+          accountPolicy: custody.accountPolicy,
+        });
+
+        await signingService.initializeCoinbaseCdpSigning(orgId, undefined, {
+          apiBaseUrl: custody.apiBaseUrl ?? c.env.COINBASE_CDP_API_BASE_URL,
+          network: custody.network ?? c.env.COINBASE_CDP_NETWORK,
+          walletAddress: provisioned.address,
+          accountPolicy: custody.accountPolicy,
         });
       } else {
         await signingService.initializePrivySigning(orgId, undefined, {

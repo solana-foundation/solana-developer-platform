@@ -6,6 +6,7 @@
  * - local: Uses CUSTODY_PRIVATE_KEY (development) or org-specific keys from DB
  * - fireblocks: Uses Fireblocks MPC via @solana/keychain-fireblocks (production)
  * - privy: Uses Privy hosted wallets via @solana/keychain-privy
+ * - coinbase_cdp: Uses Coinbase CDP hosted wallets via @sdp/keychain-coinbase
  *
  * Resolution order for createOrgSigner:
  * 1. Project-specific config (if projectId provided)
@@ -14,6 +15,7 @@
  */
 
 import {
+  KeychainCoinbaseAdapter,
   KeychainFireblocksAdapter,
   KeychainMemoryAdapter,
   KeychainPrivyAdapter,
@@ -63,6 +65,7 @@ export async function createSignerFromBase58(privateKeyBase58: string): Promise<
  * - "local" (default): Uses CUSTODY_PRIVATE_KEY via KeychainMemoryAdapter
  * - "fireblocks": Uses Fireblocks via KeychainFireblocksAdapter
  * - "privy": Uses Privy via KeychainPrivyAdapter
+ * - "coinbase_cdp": Uses Coinbase CDP via KeychainCoinbaseAdapter
  *
  * The returned signer is compatible with @solana/kit signing utilities:
  * - signTransactionMessageWithSigners()
@@ -83,6 +86,10 @@ export async function createSigner(env: Env): Promise<TransactionSigner> {
   }
 
   if (adapter instanceof KeychainPrivyAdapter) {
+    return adapter.getTransactionSigner();
+  }
+
+  if (adapter instanceof KeychainCoinbaseAdapter) {
     return adapter.getTransactionSigner();
   }
 

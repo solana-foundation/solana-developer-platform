@@ -9,12 +9,15 @@
  * - "local": In-memory keypair (KeychainMemoryAdapter) from env or encrypted DB storage
  * - "fireblocks": Fireblocks MPC custody (KeychainFireblocksAdapter)
  * - "privy": Privy hosted wallets (KeychainPrivyAdapter)
+ * - "coinbase_cdp": Coinbase CDP hosted wallets (KeychainCoinbaseAdapter)
  */
 
 import type { SigningPort } from "@/services/ports";
 import { SigningError } from "@/services/ports";
 import type { Env } from "@/types/env";
 import {
+  KeychainCoinbaseAdapter,
+  type KeychainCoinbaseConfig,
   KeychainFireblocksAdapter,
   type KeychainFireblocksConfig,
   KeychainMemoryAdapter,
@@ -27,7 +30,7 @@ import {
 // ═══════════════════════════════════════════════════════════════════════════
 
 /** Supported signing/custody provider types */
-export type SigningProviderType = "local" | "fireblocks" | "privy";
+export type SigningProviderType = "local" | "fireblocks" | "privy" | "coinbase_cdp";
 
 /**
  * Database record for signing/custody configuration
@@ -62,6 +65,8 @@ export async function createSigningAdapterFromEnv(env: Env): Promise<SigningPort
       return createFireblocksAdapterFromEnv(env);
     case "privy":
       return createPrivyAdapterFromEnv(env);
+    case "coinbase_cdp":
+      return createCoinbaseAdapterFromEnv(env);
     default:
       return createMemoryAdapterFromEnv(env);
   }
@@ -95,6 +100,8 @@ export async function createSigningAdapterFromConfig(
       return createFireblocksAdapterFromRecord(record);
     case "privy":
       return createPrivyAdapterFromRecord(record, env);
+    case "coinbase_cdp":
+      return createCoinbaseAdapterFromRecord(record, env);
     default:
       return createMemoryAdapterFromEnv(env);
   }
@@ -140,6 +147,13 @@ interface PrivyConfigJson {
   privyAppId?: string;
 }
 
+interface CoinbaseConfigJson {
+  provider?: string;
+  apiBaseUrl?: string;
+  requestDelayMs?: number;
+  walletId?: string;
+}
+
 function createFireblocksAdapterFromEnv(env: Env): KeychainFireblocksAdapter {
   const apiKey = env.FIREBLOCKS_API_KEY;
   const apiSecret = env.FIREBLOCKS_API_SECRET;
@@ -180,6 +194,28 @@ function createPrivyAdapterFromEnv(env: Env): KeychainPrivyAdapter {
     appSecret,
     apiBaseUrl: env.PRIVY_API_BASE_URL,
     requestDelayMs,
+    defaultWalletId: walletId,
+  });
+}
+
+function createCoinbaseAdapterFromEnv(env: Env): KeychainCoinbaseAdapter {
+  const apiKeyId = env.COINBASE_CDP_API_KEY_ID;
+  const apiKeySecret = env.COINBASE_CDP_API_KEY_SECRET;
+  const walletSecret = env.COINBASE_CDP_WALLET_SECRET;
+  const walletId = env.COINBASE_CDP_WALLET_ID;
+
+  if (!apiKeyId || !apiKeySecret || !walletSecret || !walletId) {
+    throw new SigningError(
+      "Coinbase CDP environment variables not configured: COINBASE_CDP_API_KEY_ID, COINBASE_CDP_API_KEY_SECRET, COINBASE_CDP_WALLET_SECRET, COINBASE_CDP_WALLET_ID",
+      "PROVIDER_NOT_CONFIGURED"
+    );
+  }
+
+  return new KeychainCoinbaseAdapter({
+    apiKeyId,
+    apiKeySecret,
+    walletSecret,
+    apiBaseUrl: env.COINBASE_CDP_API_BASE_URL,
     defaultWalletId: walletId,
   });
 }
@@ -251,6 +287,45 @@ function createPrivyAdapterFromRecord(record: SigningConfigRecord, env: Env): Ke
   return new KeychainPrivyAdapter(config);
 }
 
+function createCoinbaseAdapterFromRecord(
+  record: SigningConfigRecord,
+  env: Env
+): KeychainCoinbaseAdapter {
+  let parsed: CoinbaseConfigJson;
+  try {
+    parsed = JSON.parse(record.config) as CoinbaseConfigJson;
+  } catch {
+    throw new SigningError("Invalid Coinbase CDP configuration JSON", "PROVIDER_NOT_CONFIGURED");
+  }
+
+  if (parsed.provider && parsed.provider !== "coinbase_cdp") {
+    throw new SigningError("Custody configuration provider mismatch", "PROVIDER_NOT_CONFIGURED");
+  }
+
+  const apiKeyId = env.COINBASE_CDP_API_KEY_ID;
+  const apiKeySecret = env.COINBASE_CDP_API_KEY_SECRET;
+  const walletSecret = env.COINBASE_CDP_WALLET_SECRET;
+  const defaultWalletId = record.defaultWalletId ?? parsed.walletId ?? env.COINBASE_CDP_WALLET_ID;
+
+  if (!apiKeyId || !apiKeySecret || !walletSecret || !defaultWalletId) {
+    throw new SigningError(
+      "Coinbase CDP config missing API credentials/default wallet and env is not configured",
+      "PROVIDER_NOT_CONFIGURED"
+    );
+  }
+
+  const config: KeychainCoinbaseConfig = {
+    apiKeyId,
+    apiKeySecret,
+    walletSecret,
+    apiBaseUrl: parsed.apiBaseUrl ?? env.COINBASE_CDP_API_BASE_URL,
+    requestDelayMs: parsed.requestDelayMs,
+    defaultWalletId,
+  };
+
+  return new KeychainCoinbaseAdapter(config);
+}
+
 function parseOptionalRequestDelayMs(value?: string): number | undefined {
   if (!value) return undefined;
   const parsed = Number(value);
@@ -269,9 +344,11 @@ function parseOptionalRequestDelayMs(value?: string): number | undefined {
 
 export {
   BaseKeychainAdapter,
+  KeychainCoinbaseAdapter,
   KeychainFireblocksAdapter,
   KeychainMemoryAdapter,
   KeychainPrivyAdapter,
+  type KeychainCoinbaseConfig,
   type KeychainFireblocksConfig,
   type KeychainPrivyConfig,
 } from "./keychain";

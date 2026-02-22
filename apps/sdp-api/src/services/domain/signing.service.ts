@@ -6,6 +6,7 @@
  */
 
 import {
+  KeychainCoinbaseAdapter,
   KeychainFireblocksAdapter,
   KeychainMemoryAdapter,
   KeychainPrivyAdapter,
@@ -13,7 +14,7 @@ import {
   createSigningAdapter,
   createSigningAdapterFromConfig,
 } from "@/services/adapters";
-import { provisionPrivyWallet } from "@/services/custody/provisioning";
+import { provisionCoinbaseCdpAccount, provisionPrivyWallet } from "@/services/custody/provisioning";
 import { type EncryptionService, createEncryptionService } from "@/services/encryption.service";
 import type { SignRequest, SignResult, SignStatus, SigningPort } from "@/services/ports";
 import { SigningError } from "@/services/ports";
@@ -82,7 +83,7 @@ export interface SigningRequestRecord {
  * Signing configuration (union of provider-specific configs)
  */
 export interface SigningConfiguration {
-  provider: "local" | "fireblocks" | "privy";
+  provider: "local" | "fireblocks" | "privy" | "coinbase_cdp";
   defaultWalletId?: string;
   // Provider-specific fields stored in encrypted config JSON
 }
@@ -112,6 +113,17 @@ export interface InitFireblocksSigningOptions {
 export interface InitPrivySigningOptions {
   apiBaseUrl?: string;
   requestDelayMs?: number;
+  walletLabel?: string;
+}
+
+/**
+ * Options for initializing org signing with Coinbase CDP provider.
+ */
+export interface InitCoinbaseCdpSigningOptions {
+  apiBaseUrl?: string;
+  network?: "solana" | "solana-devnet";
+  walletAddress?: string;
+  accountPolicy?: string;
   walletLabel?: string;
 }
 
@@ -383,6 +395,78 @@ export class SigningService {
   }
 
   /**
+   * Initialize signing for an organization with Coinbase CDP provider.
+   *
+   * Note: this currently provisions and manages wallet metadata only.
+   * Runtime transaction signing through keychain is intentionally not enabled yet.
+   */
+  async initializeCoinbaseCdpSigning(
+    orgId: string,
+    projectId: string | undefined,
+    options: InitCoinbaseCdpSigningOptions
+  ): Promise<InitSigningResult> {
+    const existing = await this.configStore.findActive(orgId, projectId);
+    if (existing) {
+      throw new SigningError(
+        `Signing already initialized for org ${orgId}${projectId ? ` project ${projectId}` : ""}`,
+        "ALREADY_INITIALIZED"
+      );
+    }
+
+    if (
+      !this.env.COINBASE_CDP_API_KEY_ID ||
+      !this.env.COINBASE_CDP_API_KEY_SECRET ||
+      !this.env.COINBASE_CDP_WALLET_SECRET
+    ) {
+      throw new SigningError(
+        "Coinbase CDP environment variables not configured: COINBASE_CDP_API_KEY_ID, COINBASE_CDP_API_KEY_SECRET, COINBASE_CDP_WALLET_SECRET",
+        "PROVIDER_NOT_CONFIGURED"
+      );
+    }
+
+    const provisioned = await provisionCoinbaseCdpAccount(this.env, {
+      orgId,
+      orgSlug: orgId,
+      apiBaseUrl: options.apiBaseUrl,
+      network: options.network,
+      walletAddress: options.walletAddress,
+      accountPolicy: options.accountPolicy,
+    });
+
+    const publicKey = provisioned.address as Address;
+    const walletId = normalizeCoinbaseCdpWalletId(provisioned.address);
+
+    const configJson: CoinbaseCdpProviderConfig = {
+      provider: "coinbase_cdp",
+      apiBaseUrl: options.apiBaseUrl,
+      network: provisioned.network,
+      accountPolicy: options.accountPolicy,
+    };
+
+    const configId = await this.configStore.upsert(orgId, projectId, {
+      provider: "coinbase_cdp",
+      defaultWalletId: walletId,
+    });
+
+    await this.updateConfigJson(configId, configJson);
+
+    await this.configStore.createWallet(configId, {
+      walletId,
+      publicKey,
+      label: options.walletLabel ?? "CDP Root Wallet",
+      purpose: "root",
+    });
+
+    this.providerCache.delete(configId);
+
+    return {
+      configId,
+      publicKey,
+      walletId,
+    };
+  }
+
+  /**
    * Get the wallets for an organization's custody config.
    */
   async getWallets(orgId: string, projectId?: string): Promise<CustodyWallet[]> {
@@ -396,7 +480,7 @@ export class SigningService {
   /**
    * Provision a new wallet in custody for the resolved provider configuration.
    *
-   * For V1 we support wallet provisioning for the Privy provider (platform-managed).
+   * For V1 we support wallet provisioning for Privy and Coinbase CDP providers.
    */
   async createWallet(
     orgId: string,
@@ -408,7 +492,7 @@ export class SigningService {
       throw new SigningError("Custody not initialized", "NOT_FOUND");
     }
 
-    if (config.provider !== "privy") {
+    if (config.provider !== "privy" && config.provider !== "coinbase_cdp") {
       throw new SigningError(
         `Wallet provisioning not supported for provider: ${config.provider}`,
         "INVALID_REQUEST"
@@ -416,31 +500,64 @@ export class SigningService {
     }
 
     const parsed = await parseConfigRecord(this.env, orgId, config);
-    const apiBaseUrl =
-      parsed.provider === "privy" ? (parsed.apiBaseUrl ?? this.env.PRIVY_API_BASE_URL) : undefined;
+    let walletId: string;
+    let publicKey: string;
 
-    let provisioned: { walletId: string; address: string };
-    try {
-      provisioned = await provisionPrivyWallet(this.env, { apiBaseUrl });
-    } catch (error) {
-      if (error instanceof SigningError) {
-        throw error;
+    if (parsed.provider === "privy") {
+      const apiBaseUrl = parsed.apiBaseUrl ?? this.env.PRIVY_API_BASE_URL;
+      let provisioned: { walletId: string; address: string };
+      try {
+        provisioned = await provisionPrivyWallet(this.env, { apiBaseUrl });
+      } catch (error) {
+        if (error instanceof SigningError) {
+          throw error;
+        }
+
+        throw new SigningError(
+          `Failed to provision Privy wallet: ${error instanceof Error ? error.message : "Unknown error"}`,
+          "NETWORK_ERROR",
+          error instanceof Error ? error : undefined
+        );
       }
 
+      walletId = normalizePrivyWalletId(provisioned.walletId);
+      publicKey = provisioned.address;
+    } else if (parsed.provider === "coinbase_cdp") {
+      let provisioned: { address: string };
+      try {
+        provisioned = await provisionCoinbaseCdpAccount(this.env, {
+          orgId,
+          orgSlug: orgId,
+          apiBaseUrl: parsed.apiBaseUrl ?? this.env.COINBASE_CDP_API_BASE_URL,
+          network: parsed.network ?? this.env.COINBASE_CDP_NETWORK,
+          accountPolicy: parsed.accountPolicy,
+        });
+      } catch (error) {
+        if (error instanceof SigningError) {
+          throw error;
+        }
+
+        throw new SigningError(
+          `Failed to provision Coinbase CDP wallet: ${error instanceof Error ? error.message : "Unknown error"}`,
+          "NETWORK_ERROR",
+          error instanceof Error ? error : undefined
+        );
+      }
+
+      walletId = normalizeCoinbaseCdpWalletId(provisioned.address);
+      publicKey = provisioned.address;
+    } else {
       throw new SigningError(
-        `Failed to provision Privy wallet: ${error instanceof Error ? error.message : "Unknown error"}`,
-        "NETWORK_ERROR",
-        error instanceof Error ? error : undefined
+        `Wallet provisioning not supported for provider: ${parsed.provider}`,
+        "INVALID_REQUEST"
       );
     }
-
-    const walletId = normalizePrivyWalletId(provisioned.walletId);
 
     let wallet: CustodyWallet;
     try {
       wallet = await this.configStore.createWallet(config.id, {
         walletId,
-        publicKey: provisioned.address,
+        publicKey,
         label: params.label,
         purpose: params.purpose,
       });
@@ -479,7 +596,11 @@ export class SigningService {
    */
   private async updateConfigJson(
     configId: string,
-    config: LocalProviderConfig | FireblocksProviderConfig | PrivyProviderConfig
+    config:
+      | LocalProviderConfig
+      | FireblocksProviderConfig
+      | PrivyProviderConfig
+      | CoinbaseCdpProviderConfig
   ): Promise<void> {
     // This would normally be a direct DB update, but we'll use the upsert pattern
     // The config JSON is stored in the `config_encrypted` column of custody_configs
@@ -612,7 +733,8 @@ export class SigningService {
 
   /**
    * Get a transaction signer compatible with @solana/kit.
-   * Works with KeychainMemoryAdapter, KeychainFireblocksAdapter, and KeychainPrivyAdapter.
+   * Works with KeychainMemoryAdapter, KeychainFireblocksAdapter, KeychainPrivyAdapter,
+   * and KeychainCoinbaseAdapter.
    *
    * Returns a TransactionSigner that can be used with:
    * - signTransactionMessageWithSigners()
@@ -636,6 +758,10 @@ export class SigningService {
     }
 
     if (adapter instanceof KeychainPrivyAdapter) {
+      return adapter.getTransactionSigner(resolved.walletId);
+    }
+
+    if (adapter instanceof KeychainCoinbaseAdapter) {
       return adapter.getTransactionSigner(resolved.walletId);
     }
 
@@ -820,6 +946,10 @@ function normalizePrivyWalletId(walletId: string): string {
   return walletId.startsWith("privy_") ? walletId : `privy_${walletId}`;
 }
 
+function normalizeCoinbaseCdpWalletId(walletAddress: string): string {
+  return walletAddress.startsWith("cdp_") ? walletAddress : `cdp_${walletAddress}`;
+}
+
 function parseOptionalRequestDelayMs(value?: string): number | undefined {
   if (!value) return undefined;
   const parsed = Number(value);
@@ -865,6 +995,14 @@ interface PrivyProviderConfig {
   requestDelayMs?: number;
   // Reseller model (platform-managed): non-secret metadata only.
   privyAppId?: string;
+}
+
+interface CoinbaseCdpProviderConfig {
+  provider: "coinbase_cdp";
+  apiBaseUrl?: string;
+  network?: "solana" | "solana-devnet";
+  accountPolicy?: string;
+  requestDelayMs?: number;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -991,6 +1129,29 @@ export async function createAdapterFromEncryptedConfig(
     });
   }
 
+  if (parsed.provider === "coinbase_cdp") {
+    const apiKeyId = env.COINBASE_CDP_API_KEY_ID;
+    const apiKeySecret = env.COINBASE_CDP_API_KEY_SECRET;
+    const walletSecret = env.COINBASE_CDP_WALLET_SECRET;
+    const defaultWalletId = record.defaultWalletId ?? env.COINBASE_CDP_WALLET_ID;
+
+    if (!apiKeyId || !apiKeySecret || !walletSecret || !defaultWalletId) {
+      throw new SigningError(
+        "Coinbase CDP environment variables not configured: COINBASE_CDP_API_KEY_ID, COINBASE_CDP_API_KEY_SECRET, COINBASE_CDP_WALLET_SECRET, COINBASE_CDP_WALLET_ID",
+        "PROVIDER_NOT_CONFIGURED"
+      );
+    }
+
+    return new KeychainCoinbaseAdapter({
+      apiKeyId,
+      apiKeySecret,
+      walletSecret,
+      apiBaseUrl: parsed.apiBaseUrl ?? env.COINBASE_CDP_API_BASE_URL,
+      requestDelayMs: parsed.requestDelayMs,
+      defaultWalletId,
+    });
+  }
+
   // Fall back to standard config creation (for backward compatibility)
   return createSigningAdapterFromConfig(record, env);
 }
@@ -999,12 +1160,15 @@ async function parseConfigRecord(
   env: Env,
   orgId: string,
   record: SigningConfigRecord
-): Promise<LocalProviderConfig | FireblocksProviderConfig | PrivyProviderConfig> {
+): Promise<
+  LocalProviderConfig | FireblocksProviderConfig | PrivyProviderConfig | CoinbaseCdpProviderConfig
+> {
   try {
     return JSON.parse(record.config) as
       | LocalProviderConfig
       | FireblocksProviderConfig
-      | PrivyProviderConfig;
+      | PrivyProviderConfig
+      | CoinbaseCdpProviderConfig;
   } catch {
     // Encrypted payload: decrypt then parse.
     try {
@@ -1013,7 +1177,8 @@ async function parseConfigRecord(
       return JSON.parse(decrypted) as
         | LocalProviderConfig
         | FireblocksProviderConfig
-        | PrivyProviderConfig;
+        | PrivyProviderConfig
+        | CoinbaseCdpProviderConfig;
     } catch (error) {
       throw new SigningError(
         error instanceof Error ? error.message : "Failed to decrypt custody configuration",

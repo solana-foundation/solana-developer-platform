@@ -41,6 +41,7 @@ export default async function CustodySwitchPage() {
                 defaultValue="privy"
               >
                 <option value="privy">Privy</option>
+                <option value="coinbase_cdp">Coinbase CDP</option>
                 <option value="local">Local (development only)</option>
               </select>
             </div>
