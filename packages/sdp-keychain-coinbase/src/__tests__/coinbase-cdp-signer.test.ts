@@ -24,7 +24,7 @@ describe("CDP signer", () => {
 
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
-      .mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      .mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
         const url =
           typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
 
