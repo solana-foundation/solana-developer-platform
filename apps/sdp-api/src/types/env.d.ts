@@ -86,6 +86,7 @@ export interface Env {
   COINBASE_CDP_API_BASE_URL?: string;
   COINBASE_CDP_NETWORK?: "solana" | "solana-devnet";
   COINBASE_CDP_WALLET_ID?: string;
+  COINBASE_CDP_ACCOUNT_NAMESPACE?: string;
 
   // Kora (gasless) configuration
   FEE_PAYMENT_PROVIDER?: "kora" | "native";
