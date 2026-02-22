@@ -70,9 +70,7 @@ type DashboardPageConfig = {
 function WalletQuickAction() {
   const [loading, setLoading] = useState(true);
   const [disabled, setDisabled] = useState(true);
-  const [disabledReason, setDisabledReason] = useState<string>(
-    "Checking wallet setup status..."
-  );
+  const [disabledReason, setDisabledReason] = useState<string>("Checking wallet setup status...");
 
   useEffect(() => {
     let cancelled = false;
@@ -98,9 +96,7 @@ function WalletQuickAction() {
         const custodyEnabled = payload.custodyEnabled === true;
         setDisabled(!custodyEnabled);
         setDisabledReason(
-          custodyEnabled
-            ? ""
-            : "Enable wallets first in the Signing configuration section."
+          custodyEnabled ? "" : "Enable wallets first in the Signing configuration section."
         );
       } catch {
         if (cancelled) {

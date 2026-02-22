@@ -45,7 +45,8 @@ export async function GET() {
   } catch (error) {
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : "Failed to resolve wallet quick action status",
+        error:
+          error instanceof Error ? error.message : "Failed to resolve wallet quick action status",
       },
       { status: 500 }
     );
