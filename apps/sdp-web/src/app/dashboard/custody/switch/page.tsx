@@ -47,11 +47,6 @@ export default async function CustodySwitchPage() {
             </div>
 
             <div className="grid gap-2">
-              <Label htmlFor="walletLabel">Default wallet label</Label>
-              <Input id="walletLabel" name="walletLabel" placeholder="Default" />
-            </div>
-
-            <div className="grid gap-2">
               <Label htmlFor="confirm">Confirmation</Label>
               <Input id="confirm" name="confirm" placeholder="SWITCH" />
             </div>
