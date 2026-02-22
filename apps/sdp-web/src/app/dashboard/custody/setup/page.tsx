@@ -38,13 +38,11 @@ export default async function CustodySetupPage() {
               >
                 <option value="privy">Privy (recommended)</option>
                 <option value="coinbase_cdp">Coinbase CDP</option>
-                <option value="fireblocks">Fireblocks</option>
                 <option value="local">Local (development only)</option>
               </select>
               <p className="text-xs text-[rgba(28,28,29,0.64)]">
-                Privy, Coinbase CDP, and Fireblocks are managed by SDP server credentials. Local
-                provider mode generates a key stored in the database and should not be used in
-                production.
+                Privy and Coinbase CDP are managed by SDP server credentials. Local provider mode
+                generates a key stored in the database and should not be used in production.
               </p>
             </div>
 

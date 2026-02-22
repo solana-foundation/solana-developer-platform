@@ -211,7 +211,7 @@ export async function provisionCoinbaseCdpAccount(
     env.COINBASE_CDP_NETWORK ??
     DEFAULT_COINBASE_CDP_NETWORK) as "solana" | "solana-devnet";
 
-  const existingAddress = options.walletAddress ?? env.COINBASE_CDP_WALLET_ID;
+  const existingAddress = options.walletAddress;
   if (existingAddress) {
     const existing = await coinbaseCdpRequest<CoinbaseCdpSolanaAccountResponse>({
       method: "GET",
@@ -415,8 +415,7 @@ async function privyRequest<T>(params: PrivyRequestParams): Promise<T> {
 }
 
 async function coinbaseCdpRequest<T>(params: CoinbaseCdpRequestParams): Promise<T> {
-  const url = new URL(params.path, params.apiBaseUrl);
-  const requestPath = `${url.pathname}${url.search}`;
+  const { requestPath, url } = resolveCoinbaseCdpRequestUrl(params.apiBaseUrl, params.path);
   const normalizedBody = params.body ? sortJsonKeys(params.body) : undefined;
   const bodyJson = normalizedBody ? JSON.stringify(normalizedBody) : undefined;
 
@@ -476,6 +475,17 @@ async function coinbaseCdpRequest<T>(params: CoinbaseCdpRequestParams): Promise<
       error instanceof Error ? error : undefined
     );
   }
+}
+
+function resolveCoinbaseCdpRequestUrl(apiBaseUrl: string, path: string): { requestPath: string; url: URL } {
+  const normalizedBaseUrl = apiBaseUrl.endsWith("/") ? apiBaseUrl : `${apiBaseUrl}/`;
+  const normalizedPath = path.startsWith("/") ? path.slice(1) : path;
+  const url = new URL(normalizedPath, normalizedBaseUrl);
+
+  return {
+    requestPath: `${url.pathname}${url.search}`,
+    url,
+  };
 }
 
 interface CoinbaseCdpBearerJwtParams {
