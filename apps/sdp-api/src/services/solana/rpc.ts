@@ -40,6 +40,13 @@ export interface SimulationResult {
   error: string | null;
 }
 
+type SolanaRpcConfig = NonNullable<Parameters<typeof createSolanaRpc>[1]>;
+
+export interface RpcClientOptions {
+  rpcUrl?: string;
+  headers?: SolanaRpcConfig["headers"];
+}
+
 // Type for RPC client
 type SolanaRpc = ReturnType<typeof createSolanaRpc>;
 
@@ -50,9 +57,15 @@ type SolanaRpc = ReturnType<typeof createSolanaRpc>;
 /**
  * Create a configured Solana RPC client from environment
  */
-export function createRpc(env: Env): SolanaRpc {
+export function createRpc(env: Env, options?: RpcClientOptions): SolanaRpc {
   const config = getSolanaConfig(env);
-  return createSolanaRpc(config.rpcUrl);
+  const rpcUrl = options?.rpcUrl ?? config.rpcUrl;
+
+  if (options?.headers && Object.keys(options.headers).length > 0) {
+    return createSolanaRpc(rpcUrl, { headers: options.headers });
+  }
+
+  return createSolanaRpc(rpcUrl);
 }
 
 /**
