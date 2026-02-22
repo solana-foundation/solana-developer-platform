@@ -9,12 +9,7 @@ import { createSigningService } from "@/services/domain/signing.service";
 import { FeePaymentError, SigningError } from "@/services/ports";
 import { resolveRpcTarget } from "@/services/rpc-relay.service";
 import { createOrgSigner } from "@/services/solana";
-import {
-  type RpcClientOptions,
-  confirmTransaction,
-  createRpc,
-  getRecentBlockhash,
-} from "@/services/solana/rpc";
+import { confirmTransaction, createRpc, getRecentBlockhash } from "@/services/solana/rpc";
 import type { Env } from "@/types/env";
 import type { Address } from "@solana/kit";
 import {
@@ -533,7 +528,7 @@ export const signerCheck = async (c: AppContext) => {
 
     const rpc = createRpc(c.env, {
       rpcUrl: rpcTarget.endpoint,
-      headers: rpcTarget.headers as RpcClientOptions["headers"],
+      headers: rpcTarget.headers,
     });
 
     const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc, "confirmed");

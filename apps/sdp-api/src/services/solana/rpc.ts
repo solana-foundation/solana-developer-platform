@@ -41,10 +41,50 @@ export interface SimulationResult {
 }
 
 type SolanaRpcConfig = NonNullable<Parameters<typeof createSolanaRpc>[1]>;
+type AllowedSolanaRpcHeaders = NonNullable<SolanaRpcConfig["headers"]>;
 
 export interface RpcClientOptions {
   rpcUrl?: string;
-  headers?: SolanaRpcConfig["headers"];
+  headers?: Readonly<Record<string, string>>;
+}
+
+const DISALLOWED_RPC_HEADERS = new Set([
+  "accept",
+  "accept-charset",
+  "access-control-request-headers",
+  "access-control-request-method",
+  "connection",
+  "content-length",
+  "content-type",
+  "cookie",
+  "date",
+  "dnt",
+  "expect",
+  "host",
+  "keep-alive",
+  "permissions-policy",
+  "referer",
+  "solana-client",
+  "te",
+  "trailer",
+  "transfer-encoding",
+  "upgrade",
+  "via",
+]);
+
+function assertAllowedRpcHeaders(
+  headers: Readonly<Record<string, string>>
+): asserts headers is AllowedSolanaRpcHeaders {
+  for (const headerName of Object.keys(headers)) {
+    const normalizedHeaderName = headerName.toLowerCase();
+    if (
+      normalizedHeaderName.startsWith("proxy-") ||
+      normalizedHeaderName.startsWith("sec-") ||
+      DISALLOWED_RPC_HEADERS.has(normalizedHeaderName)
+    ) {
+      throw new Error(`Unsupported RPC header: ${headerName}`);
+    }
+  }
 }
 
 // Type for RPC client
@@ -62,6 +102,7 @@ export function createRpc(env: Env, options?: RpcClientOptions): SolanaRpc {
   const rpcUrl = options?.rpcUrl ?? config.rpcUrl;
 
   if (options?.headers && Object.keys(options.headers).length > 0) {
+    assertAllowedRpcHeaders(options.headers);
     return createSolanaRpc(rpcUrl, { headers: options.headers });
   }
 
