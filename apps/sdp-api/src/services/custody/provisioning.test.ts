@@ -2,15 +2,17 @@ import { provisionCoinbaseCdpAccount } from "@/services/custody/provisioning";
 import type { Env } from "@/types/env";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
-const CREATED_ADDRESS = "H3tV2gQpwbUqR8P78xzQ5x7A8n9kXQ2a7P93wHo3GQqk";
-const EXISTING_ADDRESS = "8JpY4aQ6MdbkCHf8W3yxKSL3Ufd9x5x2rE3PV4b6X1Nh";
+// biome-ignore lint/nursery/noSecrets: deterministic non-secret Solana test address.
+const CREATED_ADDRESS = "11111111111111111111111111111111";
+// biome-ignore lint/nursery/noSecrets: deterministic non-secret Solana test address.
+const EXISTING_ADDRESS = "22222222222222222222222222222222";
 
 let keyMaterial: {
   privateKeyPem: string;
   privateKeyPkcs8Base64: string;
 };
 
-describe("provisionCoinbaseCdpAccount", () => {
+describe("coinbase account provisioning", () => {
   beforeAll(async () => {
     keyMaterial = await createEs256KeyMaterial();
   });
