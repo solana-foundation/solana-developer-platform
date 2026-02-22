@@ -10,6 +10,7 @@ export {
   createSigningAdapter,
   createSigningAdapterFromEnv,
   createSigningAdapterFromConfig,
+  KeychainCoinbaseAdapter,
   KeychainFireblocksAdapter,
   KeychainMemoryAdapter,
   KeychainPrivyAdapter,

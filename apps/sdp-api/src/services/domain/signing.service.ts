@@ -6,6 +6,7 @@
  */
 
 import {
+  KeychainCoinbaseAdapter,
   KeychainFireblocksAdapter,
   KeychainMemoryAdapter,
   KeychainPrivyAdapter,
@@ -595,7 +596,11 @@ export class SigningService {
    */
   private async updateConfigJson(
     configId: string,
-    config: LocalProviderConfig | FireblocksProviderConfig | PrivyProviderConfig | CoinbaseCdpProviderConfig
+    config:
+      | LocalProviderConfig
+      | FireblocksProviderConfig
+      | PrivyProviderConfig
+      | CoinbaseCdpProviderConfig
   ): Promise<void> {
     // This would normally be a direct DB update, but we'll use the upsert pattern
     // The config JSON is stored in the `config_encrypted` column of custody_configs
@@ -728,7 +733,8 @@ export class SigningService {
 
   /**
    * Get a transaction signer compatible with @solana/kit.
-   * Works with KeychainMemoryAdapter, KeychainFireblocksAdapter, and KeychainPrivyAdapter.
+   * Works with KeychainMemoryAdapter, KeychainFireblocksAdapter, KeychainPrivyAdapter,
+   * and KeychainCoinbaseAdapter.
    *
    * Returns a TransactionSigner that can be used with:
    * - signTransactionMessageWithSigners()
@@ -752,6 +758,10 @@ export class SigningService {
     }
 
     if (adapter instanceof KeychainPrivyAdapter) {
+      return adapter.getTransactionSigner(resolved.walletId);
+    }
+
+    if (adapter instanceof KeychainCoinbaseAdapter) {
       return adapter.getTransactionSigner(resolved.walletId);
     }
 
@@ -992,6 +1002,7 @@ interface CoinbaseCdpProviderConfig {
   apiBaseUrl?: string;
   network?: "solana" | "solana-devnet";
   accountPolicy?: string;
+  requestDelayMs?: number;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1119,10 +1130,26 @@ export async function createAdapterFromEncryptedConfig(
   }
 
   if (parsed.provider === "coinbase_cdp") {
-    throw new SigningError(
-      "Coinbase CDP custody is configured, but runtime signer support is not implemented yet.",
-      "INVALID_REQUEST"
-    );
+    const apiKeyId = env.COINBASE_CDP_API_KEY_ID;
+    const apiKeySecret = env.COINBASE_CDP_API_KEY_SECRET;
+    const walletSecret = env.COINBASE_CDP_WALLET_SECRET;
+    const defaultWalletId = record.defaultWalletId ?? env.COINBASE_CDP_WALLET_ID;
+
+    if (!apiKeyId || !apiKeySecret || !walletSecret || !defaultWalletId) {
+      throw new SigningError(
+        "Coinbase CDP environment variables not configured: COINBASE_CDP_API_KEY_ID, COINBASE_CDP_API_KEY_SECRET, COINBASE_CDP_WALLET_SECRET, COINBASE_CDP_WALLET_ID",
+        "PROVIDER_NOT_CONFIGURED"
+      );
+    }
+
+    return new KeychainCoinbaseAdapter({
+      apiKeyId,
+      apiKeySecret,
+      walletSecret,
+      apiBaseUrl: parsed.apiBaseUrl ?? env.COINBASE_CDP_API_BASE_URL,
+      requestDelayMs: parsed.requestDelayMs,
+      defaultWalletId,
+    });
   }
 
   // Fall back to standard config creation (for backward compatibility)
