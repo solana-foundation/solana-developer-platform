@@ -30,10 +30,7 @@ describe("helper utilities", () => {
   });
 
   it("reads nested values safely", () => {
-    const value = getNestedProp<{ signature: string }>(
-      { data: { signature: "sig" } },
-      "data.signature"
-    );
+    const value = getNestedProp<string>({ data: { signature: "sig" } }, "data.signature");
     expect(value).toBe("sig");
   });
 });
