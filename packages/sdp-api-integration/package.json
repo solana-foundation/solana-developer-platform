@@ -8,6 +8,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@sdp/keychain-coinbase": "workspace:*",
     "@sdp/types": "workspace:*"
   },
   "devDependencies": {

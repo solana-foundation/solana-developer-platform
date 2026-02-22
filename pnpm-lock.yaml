@@ -215,6 +215,9 @@ importers:
 
   packages/sdp-api-integration:
     dependencies:
+      '@sdp/keychain-coinbase':
+        specifier: workspace:*
+        version: link:../sdp-keychain-coinbase
       '@sdp/types':
         specifier: workspace:*
         version: link:../sdp-types
