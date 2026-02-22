@@ -207,9 +207,9 @@ export async function provisionCoinbaseCdpAccount(
 
   const apiBaseUrl =
     options.apiBaseUrl ?? env.COINBASE_CDP_API_BASE_URL ?? DEFAULT_COINBASE_CDP_API_BASE_URL;
-  const network = (options.network ??
-    env.COINBASE_CDP_NETWORK ??
-    DEFAULT_COINBASE_CDP_NETWORK) as "solana" | "solana-devnet";
+  const network = (options.network ?? env.COINBASE_CDP_NETWORK ?? DEFAULT_COINBASE_CDP_NETWORK) as
+    | "solana"
+    | "solana-devnet";
 
   const existingAddress = options.walletAddress;
   if (existingAddress) {
@@ -477,7 +477,10 @@ async function coinbaseCdpRequest<T>(params: CoinbaseCdpRequestParams): Promise<
   }
 }
 
-function resolveCoinbaseCdpRequestUrl(apiBaseUrl: string, path: string): { requestPath: string; url: URL } {
+function resolveCoinbaseCdpRequestUrl(
+  apiBaseUrl: string,
+  path: string
+): { requestPath: string; url: URL } {
   const normalizedBaseUrl = apiBaseUrl.endsWith("/") ? apiBaseUrl : `${apiBaseUrl}/`;
   const normalizedPath = path.startsWith("/") ? path.slice(1) : path;
   const url = new URL(normalizedPath, normalizedBaseUrl);
@@ -510,9 +513,7 @@ async function createCoinbaseCdpBearerJwt(params: CoinbaseCdpBearerJwtParams): P
 
   if (isPemEncodedKey(params.apiKeySecret)) {
     const key = await importPKCS8(params.apiKeySecret, "ES256");
-    return payload
-      .setProtectedHeader({ alg: "ES256", kid: params.apiKeyId, nonce })
-      .sign(key);
+    return payload.setProtectedHeader({ alg: "ES256", kid: params.apiKeyId, nonce }).sign(key);
   }
 
   const rawKey = decodeBase64ToBytes(params.apiKeySecret);
@@ -533,9 +534,7 @@ async function createCoinbaseCdpBearerJwt(params: CoinbaseCdpBearerJwtParams): P
   };
 
   const key = await importJWK(ed25519Jwk, "EdDSA");
-  return payload
-    .setProtectedHeader({ alg: "EdDSA", kid: params.apiKeyId, nonce })
-    .sign(key);
+  return payload.setProtectedHeader({ alg: "EdDSA", kid: params.apiKeyId, nonce }).sign(key);
 }
 
 interface CoinbaseCdpWalletJwtParams {
