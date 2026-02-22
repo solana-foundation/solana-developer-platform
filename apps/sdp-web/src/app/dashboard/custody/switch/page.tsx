@@ -41,14 +41,10 @@ export default async function CustodySwitchPage() {
                 defaultValue="privy"
               >
                 <option value="privy">Privy</option>
-                <option value="coinbase_cdp">Coinbase CDP (setup only)</option>
+                <option value="coinbase_cdp">Coinbase CDP</option>
                 <option value="fireblocks">Fireblocks</option>
                 <option value="local">Local (development only)</option>
               </select>
-              <p className="text-xs text-[rgba(28,28,29,0.64)]">
-                Coinbase CDP is currently setup/provisioning only in this build (runtime signer
-                pending).
-              </p>
             </div>
 
             <div className="grid gap-2">

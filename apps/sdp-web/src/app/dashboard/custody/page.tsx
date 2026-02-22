@@ -224,12 +224,6 @@ async function SigningConfigurationSection({
             Changing providers affects new actions only. Existing on-chain authorities are not
             automatically rotated.
           </div>
-          {config.provider === "coinbase_cdp" ? (
-            <div className="rounded-xl border border-[rgba(245,158,11,0.35)] bg-[rgba(245,158,11,0.08)] px-3 py-2 text-xs text-[rgba(146,64,14,0.92)]">
-              Coinbase CDP is currently configured for custody setup/provisioning only. Runtime
-              transaction signing is intentionally disabled in this build.
-            </div>
-          ) : null}
         </CardContent>
       </Card>
     </SectionEntry>
@@ -293,13 +287,7 @@ async function WalletsSection({
                                 </Button>
                               </form>
                             ) : null}
-                            {config?.provider === "coinbase_cdp" ? (
-                              <span className="text-xs text-[rgba(28,28,29,0.64)]">
-                                Signer check unavailable
-                              </span>
-                            ) : (
-                              <WalletSignerCheckButton walletId={w.walletId} />
-                            )}
+                            <WalletSignerCheckButton walletId={w.walletId} />
                           </div>
                         </TableCell>
                       </TableRow>
