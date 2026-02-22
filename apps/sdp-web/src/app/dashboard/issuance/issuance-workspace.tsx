@@ -193,7 +193,6 @@ export function IssuanceWorkspace({
   const { issuanceTab, setIssuanceTab, selectedIssuanceApiKeyId, setIssuanceApiKeys } =
     useDashboardWorkspace();
   const [search, setSearch] = useState("");
-  const [playgroundApiKeyValue, setPlaygroundApiKeyValue] = useState("");
 
   useEffect(() => {
     setIssuanceApiKeys(apiKeys);
@@ -204,11 +203,9 @@ export function IssuanceWorkspace({
     [apiKeys, selectedIssuanceApiKeyId]
   );
   const selectedPlaygroundApiKeyPrefix = selectedPlaygroundApiKey?.keyPrefix ?? null;
-
-  useEffect(() => {
+  const playgroundApiKeyValue = useMemo(() => {
     if (!selectedPlaygroundApiKey) {
-      setPlaygroundApiKeyValue("");
-      return;
+      return "";
     }
 
     const stored = getStoredApiKeySecret({
@@ -216,7 +213,7 @@ export function IssuanceWorkspace({
       keyPrefix: selectedPlaygroundApiKeyPrefix,
     });
 
-    setPlaygroundApiKeyValue(stored ?? "");
+    return stored ?? "";
   }, [selectedPlaygroundApiKey, selectedPlaygroundApiKeyPrefix]);
 
   const filteredTokens = useMemo(() => {

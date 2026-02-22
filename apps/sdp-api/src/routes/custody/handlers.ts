@@ -185,8 +185,31 @@ export const switchSigning = async (c: AppContext) => {
 
   const signingService = createSigningService(c.env);
 
-  // Deactivate any active config for the requested scope so initialize* does not conflict.
   const projectId = parsed.data.projectId;
+  const currentConfig = await c.env.DB.prepare(
+    projectId
+      ? `SELECT provider
+         FROM custody_configs
+         WHERE organization_id = ? AND project_id = ? AND status = 'active'
+         ORDER BY updated_at DESC
+         LIMIT 1`
+      : `SELECT provider
+         FROM custody_configs
+         WHERE organization_id = ? AND project_id IS NULL AND status = 'active'
+         ORDER BY updated_at DESC
+         LIMIT 1`
+  )
+    .bind(...(projectId ? [actor.organizationId, projectId] : [actor.organizationId]))
+    .first<{ provider: string }>();
+
+  if (currentConfig?.provider === parsed.data.provider) {
+    throw new AppError(
+      "BAD_REQUEST",
+      `Provider '${parsed.data.provider}' is already active for this scope`
+    );
+  }
+
+  // Deactivate any active config for the requested scope so initialize* does not conflict.
   if (projectId) {
     await c.env.DB.prepare(
       `UPDATE custody_configs
