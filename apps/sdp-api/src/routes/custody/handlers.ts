@@ -7,6 +7,7 @@ import { created, success } from "@/lib/response";
 import { createFeePaymentAdapter } from "@/services/adapters/fee-payment";
 import { createSigningService } from "@/services/domain/signing.service";
 import { FeePaymentError, SigningError } from "@/services/ports";
+import { resolveRpcTarget } from "@/services/rpc-relay.service";
 import { createOrgSigner } from "@/services/solana";
 import { confirmTransaction, createRpc, getRecentBlockhash } from "@/services/solana/rpc";
 import type { Env } from "@/types/env";
@@ -516,7 +517,20 @@ export const signerCheck = async (c: AppContext) => {
 
     const feePayment = createFeePaymentAdapter(c.env);
     const feePayer = await feePayment.getFeePayer();
-    const rpc = createRpc(c.env);
+
+    const rpcTarget = await resolveRpcTarget({
+      env: c.env,
+      db: c.env.DB,
+      organizationId: apiKey.organizationId,
+      authProjectId: apiKey.projectId ?? null,
+      requestedProjectId: null,
+    });
+
+    const rpc = createRpc(c.env, {
+      rpcUrl: rpcTarget.endpoint,
+      headers: rpcTarget.headers,
+    });
+
     const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc, "confirmed");
 
     const memoInstruction = {
