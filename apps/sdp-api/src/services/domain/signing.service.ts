@@ -41,6 +41,11 @@ const base58 = getBase58Codec();
  */
 export interface SigningConfigStore {
   findActive(orgId: string, projectId?: string): Promise<SigningConfigRecord | null>;
+  findByProvider(
+    orgId: string,
+    projectId: string | undefined,
+    provider: SigningConfiguration["provider"]
+  ): Promise<SigningConfigRecord | null>;
   getById(configId: string): Promise<SigningConfigRecord | null>;
   upsert(
     orgId: string,
@@ -168,6 +173,41 @@ export class SigningService {
       this.encryptionService = createEncryptionService(this.env.CUSTODY_ENCRYPTION_KEY);
     }
     return this.encryptionService;
+  }
+
+  private async findReusableProviderWallet(
+    orgId: string,
+    projectId: string | undefined,
+    provider: SigningConfiguration["provider"]
+  ): Promise<{ configId: string; wallet: CustodyWallet } | null> {
+    const existingProviderConfig = await this.configStore.findByProvider(
+      orgId,
+      projectId,
+      provider
+    );
+    if (!existingProviderConfig) {
+      return null;
+    }
+
+    const wallets = await this.configStore.getWallets(existingProviderConfig.id);
+    if (wallets.length === 0) {
+      return null;
+    }
+
+    const selectedWallet =
+      (existingProviderConfig.defaultWalletId
+        ? wallets.find((wallet) => wallet.walletId === existingProviderConfig.defaultWalletId)
+        : undefined) ?? wallets[0];
+
+    const configId = await this.configStore.upsert(orgId, projectId, {
+      provider,
+      defaultWalletId: selectedWallet.walletId,
+    });
+
+    return {
+      configId,
+      wallet: selectedWallet,
+    };
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -355,18 +395,29 @@ export class SigningService {
       );
     }
 
-    // Provision a new Privy server wallet under the platform app.
-    const provisioned = await provisionPrivyWallet(this.env, { apiBaseUrl: options.apiBaseUrl });
-    const publicKey = provisioned.address as Address;
-    const walletId = normalizePrivyWalletId(provisioned.walletId);
-
-    // Store only non-secret provider metadata in D1.
     const configJson: PrivyProviderConfig = {
       provider: "privy",
       apiBaseUrl: options.apiBaseUrl,
       requestDelayMs: options.requestDelayMs,
       privyAppId: appId,
     };
+
+    const reusable = await this.findReusableProviderWallet(orgId, projectId, "privy");
+    if (reusable) {
+      await this.updateConfigJson(reusable.configId, configJson);
+      this.providerCache.delete(reusable.configId);
+
+      return {
+        configId: reusable.configId,
+        publicKey: reusable.wallet.publicKey as Address,
+        walletId: reusable.wallet.walletId,
+      };
+    }
+
+    // Provision a new Privy server wallet under the platform app.
+    const provisioned = await provisionPrivyWallet(this.env, { apiBaseUrl: options.apiBaseUrl });
+    const publicKey = provisioned.address as Address;
+    const walletId = normalizePrivyWalletId(provisioned.walletId);
 
     const configId = await this.configStore.upsert(orgId, projectId, {
       provider: "privy",
@@ -422,6 +473,28 @@ export class SigningService {
         "Coinbase CDP environment variables not configured: COINBASE_CDP_API_KEY_ID, COINBASE_CDP_API_KEY_SECRET, COINBASE_CDP_WALLET_SECRET",
         "PROVIDER_NOT_CONFIGURED"
       );
+    }
+
+    const reusable = options.walletAddress
+      ? null
+      : await this.findReusableProviderWallet(orgId, projectId, "coinbase_cdp");
+
+    if (reusable) {
+      const configJson: CoinbaseCdpProviderConfig = {
+        provider: "coinbase_cdp",
+        apiBaseUrl: options.apiBaseUrl,
+        network: options.network ?? this.env.COINBASE_CDP_NETWORK,
+        accountPolicy: options.accountPolicy,
+      };
+
+      await this.updateConfigJson(reusable.configId, configJson);
+      this.providerCache.delete(reusable.configId);
+
+      return {
+        configId: reusable.configId,
+        publicKey: reusable.wallet.publicKey as Address,
+        walletId: reusable.wallet.walletId,
+      };
     }
 
     const provisioned = await provisionCoinbaseCdpAccount(this.env, {
