@@ -16,8 +16,6 @@ import {
   getBase64EncodedWireTransaction,
 } from "@solana/transactions";
 import type {
-  ParaSignMessageRequest,
-  ParaSignMessageResponse,
   ParaSignRawRequest,
   ParaSignRawResponse,
   ParaSignTransactionRequest,
@@ -242,18 +240,6 @@ export class ParaSigner<TAddress extends string = string> implements SolanaSigne
         message: "Failed to parse hex signature from Para",
       });
     }
-  }
-
-  private async signMessage(
-    base64EncodedMessage: string
-  ): Promise<ParaSignMessageResponse | { data?: ParaSignMessageResponse }> {
-    return this.request<ParaSignMessageResponse | { data?: ParaSignMessageResponse }>({
-      method: "POST",
-      path: `/v1/wallets/${encodeURIComponent(this.walletId)}/sign-message`,
-      body: {
-        message: base64EncodedMessage,
-      } as ParaSignMessageRequest,
-    });
   }
 
   private async signTransaction(

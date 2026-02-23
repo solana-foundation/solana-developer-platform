@@ -1,8 +1,5 @@
 import type { SigningConfigRecord } from "@/services/adapters";
-import {
-  provisionCoinbaseCdpAccount,
-  provisionPrivyWallet,
-} from "@/services/custody/provisioning";
+import { provisionCoinbaseCdpAccount, provisionPrivyWallet } from "@/services/custody/provisioning";
 import { type SigningRequestStore, SigningService } from "@/services/domain/signing.service";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
@@ -91,7 +88,6 @@ describe("signing.service provider reuse", () => {
       defaultWalletId: wallet.walletId,
     });
   });
-
 });
 
 function createService(params: {

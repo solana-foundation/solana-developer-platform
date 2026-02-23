@@ -4,12 +4,12 @@
  * Creates custody wallets for new organizations using provider APIs.
  */
 
+import { Buffer } from "node:buffer";
 import { SigningError } from "@/services/ports";
 import type { Env } from "@/types/env";
 import type { VaultAddressesResponse } from "@solana/keychain-fireblocks";
 import { ApiKeyStamper } from "@solana/keychain-turnkey";
 import { SignJWT, importJWK, importPKCS8 } from "jose";
-import { Buffer } from "node:buffer";
 
 const DEFAULT_FIREBLOCKS_API_BASE_URL = "https://api.fireblocks.io";
 const DEFAULT_PRIVY_API_BASE_URL = "https://api.privy.io/v1";
@@ -789,7 +789,9 @@ async function turnkeyRequest<T>(params: TurnkeyRequestParams): Promise<T> {
     apiPrivateKey: params.apiPrivateKey,
     apiPublicKey: params.apiPublicKey,
   });
-  const stamp = stamper.stamp(body);
+  // ApiKeyStamper is currently synchronous, but normalize in case the SDK
+  // ever changes stamp() to return a Promise.
+  const stamp = await Promise.resolve(stamper.stamp(body));
 
   try {
     const response = await fetch(`${params.apiBaseUrl}${params.path}`, {
