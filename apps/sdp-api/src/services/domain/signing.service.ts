@@ -10,11 +10,16 @@ import {
   KeychainFireblocksAdapter,
   KeychainMemoryAdapter,
   KeychainPrivyAdapter,
+  KeychainTurnkeyAdapter,
   type SigningConfigRecord,
   createSigningAdapter,
   createSigningAdapterFromConfig,
 } from "@/services/adapters";
-import { provisionCoinbaseCdpAccount, provisionPrivyWallet } from "@/services/custody/provisioning";
+import {
+  provisionCoinbaseCdpAccount,
+  provisionPrivyWallet,
+  provisionTurnkeyPrivateKey,
+} from "@/services/custody/provisioning";
 import { type EncryptionService, createEncryptionService } from "@/services/encryption.service";
 import type { SignRequest, SignResult, SignStatus, SigningPort } from "@/services/ports";
 import { SigningError } from "@/services/ports";
@@ -88,7 +93,7 @@ export interface SigningRequestRecord {
  * Signing configuration (union of provider-specific configs)
  */
 export interface SigningConfiguration {
-  provider: "local" | "fireblocks" | "privy" | "coinbase_cdp";
+  provider: "local" | "fireblocks" | "privy" | "coinbase_cdp" | "turnkey";
   defaultWalletId?: string;
   // Provider-specific fields stored in encrypted config JSON
 }
@@ -133,6 +138,16 @@ export interface InitCoinbaseCdpSigningOptions {
 }
 
 /**
+ * Options for initializing org signing with Turnkey provider.
+ */
+export interface InitTurnkeySigningOptions {
+  apiBaseUrl?: string;
+  requestDelayMs?: number;
+  privateKeyId?: string;
+  walletLabel?: string;
+}
+
+/**
  * Result of initializing org signing.
  */
 export interface InitSigningResult {
@@ -140,6 +155,10 @@ export interface InitSigningResult {
   publicKey: Address;
   walletId: string;
 }
+
+type ReusableSigningProvider = "privy" | "coinbase_cdp" | "turnkey";
+
+export type ProviderReuseState = Record<ReusableSigningProvider, boolean>;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Service Implementation
@@ -175,11 +194,11 @@ export class SigningService {
     return this.encryptionService;
   }
 
-  private async findReusableProviderWallet(
+  private async findExistingProviderWallet(
     orgId: string,
     projectId: string | undefined,
-    provider: SigningConfiguration["provider"]
-  ): Promise<{ configId: string; wallet: CustodyWallet } | null> {
+    provider: ReusableSigningProvider
+  ): Promise<{ config: SigningConfigRecord; wallet: CustodyWallet } | null> {
     const existingProviderConfig = await this.configStore.findByProvider(
       orgId,
       projectId,
@@ -199,14 +218,51 @@ export class SigningService {
         ? wallets.find((wallet) => wallet.walletId === existingProviderConfig.defaultWalletId)
         : undefined) ?? wallets[0];
 
+    return {
+      config: existingProviderConfig,
+      wallet: selectedWallet,
+    };
+  }
+
+  private async findReusableProviderWallet(
+    orgId: string,
+    projectId: string | undefined,
+    provider: ReusableSigningProvider
+  ): Promise<{ configId: string; wallet: CustodyWallet } | null> {
+    const existingProviderWallet = await this.findExistingProviderWallet(
+      orgId,
+      projectId,
+      provider
+    );
+    if (!existingProviderWallet) {
+      return null;
+    }
+
     const configId = await this.configStore.upsert(orgId, projectId, {
       provider,
-      defaultWalletId: selectedWallet.walletId,
+      defaultWalletId: existingProviderWallet.wallet.walletId,
     });
 
     return {
       configId,
-      wallet: selectedWallet,
+      wallet: existingProviderWallet.wallet,
+    };
+  }
+
+  async getProviderReuseState(
+    orgId: string,
+    projectId: string | undefined
+  ): Promise<ProviderReuseState> {
+    const [privy, coinbaseCdp, turnkey] = await Promise.all([
+      this.findExistingProviderWallet(orgId, projectId, "privy"),
+      this.findExistingProviderWallet(orgId, projectId, "coinbase_cdp"),
+      this.findExistingProviderWallet(orgId, projectId, "turnkey"),
+    ]);
+
+    return {
+      privy: Boolean(privy),
+      coinbase_cdp: Boolean(coinbaseCdp),
+      turnkey: Boolean(turnkey),
     };
   }
 
@@ -540,6 +596,101 @@ export class SigningService {
   }
 
   /**
+   * Initialize signing for an organization with Turnkey provider.
+   *
+   * Turnkey credentials are platform-managed and wallets are provisioned per
+   * organization/project scope.
+   */
+  async initializeTurnkeySigning(
+    orgId: string,
+    projectId: string | undefined,
+    options: InitTurnkeySigningOptions
+  ): Promise<InitSigningResult> {
+    const existing = await this.configStore.findActive(orgId, projectId);
+    if (existing) {
+      throw new SigningError(
+        `Signing already initialized for org ${orgId}${projectId ? ` project ${projectId}` : ""}`,
+        "ALREADY_INITIALIZED"
+      );
+    }
+
+    if (
+      !this.env.TURNKEY_API_PUBLIC_KEY ||
+      !this.env.TURNKEY_API_PRIVATE_KEY ||
+      !this.env.TURNKEY_ORGANIZATION_ID
+    ) {
+      throw new SigningError(
+        "Turnkey environment variables not configured: TURNKEY_API_PUBLIC_KEY, TURNKEY_API_PRIVATE_KEY, TURNKEY_ORGANIZATION_ID",
+        "PROVIDER_NOT_CONFIGURED"
+      );
+    }
+
+    const reusable = options.privateKeyId
+      ? null
+      : await this.findReusableProviderWallet(orgId, projectId, "turnkey");
+
+    if (reusable) {
+      const reusablePublicKey = reusable.wallet.publicKey as Address;
+      const configJson: TurnkeyProviderConfig = {
+        provider: "turnkey",
+        organizationId: this.env.TURNKEY_ORGANIZATION_ID,
+        apiBaseUrl: options.apiBaseUrl,
+        requestDelayMs: options.requestDelayMs,
+        defaultWalletPublicKey: reusablePublicKey,
+      };
+
+      await this.updateConfigJson(reusable.configId, configJson);
+      this.providerCache.delete(reusable.configId);
+
+      return {
+        configId: reusable.configId,
+        publicKey: reusablePublicKey,
+        walletId: reusable.wallet.walletId,
+      };
+    }
+
+    const provisioned = await provisionTurnkeyPrivateKey(this.env, {
+      orgId,
+      orgSlug: orgId,
+      privateKeyId: options.privateKeyId,
+      apiBaseUrl: options.apiBaseUrl,
+    });
+
+    const publicKey = provisioned.address as Address;
+    const walletId = normalizeTurnkeyWalletId(provisioned.privateKeyId);
+
+    const configJson: TurnkeyProviderConfig = {
+      provider: "turnkey",
+      organizationId: this.env.TURNKEY_ORGANIZATION_ID,
+      apiBaseUrl: options.apiBaseUrl,
+      requestDelayMs: options.requestDelayMs,
+      defaultWalletPublicKey: publicKey,
+    };
+
+    const configId = await this.configStore.upsert(orgId, projectId, {
+      provider: "turnkey",
+      defaultWalletId: walletId,
+    });
+
+    await this.updateConfigJson(configId, configJson);
+
+    await this.configStore.createWallet(configId, {
+      walletId,
+      publicKey,
+      label: options.walletLabel ?? "Turnkey Root Wallet",
+      purpose: "root",
+    });
+
+    this.providerCache.delete(configId);
+
+    return {
+      configId,
+      publicKey,
+      walletId,
+    };
+  }
+
+  /**
    * Get the wallets for an organization's custody config.
    */
   async getWallets(orgId: string, projectId?: string): Promise<CustodyWallet[]> {
@@ -553,7 +704,7 @@ export class SigningService {
   /**
    * Provision a new wallet in custody for the resolved provider configuration.
    *
-   * For V1 we support wallet provisioning for Privy and Coinbase CDP providers.
+   * For V1 we support wallet provisioning for Privy, Coinbase CDP, and Turnkey providers.
    */
   async createWallet(
     orgId: string,
@@ -565,7 +716,11 @@ export class SigningService {
       throw new SigningError("Custody not initialized", "NOT_FOUND");
     }
 
-    if (config.provider !== "privy" && config.provider !== "coinbase_cdp") {
+    if (
+      config.provider !== "privy" &&
+      config.provider !== "coinbase_cdp" &&
+      config.provider !== "turnkey"
+    ) {
       throw new SigningError(
         `Wallet provisioning not supported for provider: ${config.provider}`,
         "INVALID_REQUEST"
@@ -618,6 +773,28 @@ export class SigningService {
       }
 
       walletId = normalizeCoinbaseCdpWalletId(provisioned.address);
+      publicKey = provisioned.address;
+    } else if (parsed.provider === "turnkey") {
+      let provisioned: { privateKeyId: string; address: string };
+      try {
+        provisioned = await provisionTurnkeyPrivateKey(this.env, {
+          orgId,
+          orgSlug: orgId,
+          apiBaseUrl: parsed.apiBaseUrl ?? this.env.TURNKEY_API_BASE_URL,
+        });
+      } catch (error) {
+        if (error instanceof SigningError) {
+          throw error;
+        }
+
+        throw new SigningError(
+          `Failed to provision Turnkey wallet: ${error instanceof Error ? error.message : "Unknown error"}`,
+          "NETWORK_ERROR",
+          error instanceof Error ? error : undefined
+        );
+      }
+
+      walletId = normalizeTurnkeyWalletId(provisioned.privateKeyId);
       publicKey = provisioned.address;
     } else {
       throw new SigningError(
@@ -674,6 +851,7 @@ export class SigningService {
       | FireblocksProviderConfig
       | PrivyProviderConfig
       | CoinbaseCdpProviderConfig
+      | TurnkeyProviderConfig
   ): Promise<void> {
     // This would normally be a direct DB update, but we'll use the upsert pattern
     // The config JSON is stored in the `config_encrypted` column of custody_configs
@@ -739,7 +917,7 @@ export class SigningService {
     orgId: string,
     projectId: string | undefined,
     walletId?: string | null
-  ): Promise<{ adapter: SigningPort; walletId?: string }> {
+  ): Promise<{ adapter: SigningPort; walletId?: string; walletPublicKey?: Address }> {
     if (!walletId) {
       const config = await this.configStore.findActive(orgId, projectId);
       const adapter = await this.getAdapterForConfig(orgId, config);
@@ -747,14 +925,14 @@ export class SigningService {
     }
 
     const walletRow = await this.env.DB.prepare(
-      `SELECT c.id as custody_config_id, c.project_id as project_id
+      `SELECT c.id as custody_config_id, c.project_id as project_id, w.public_key as wallet_public_key
        FROM custody_wallets w
        JOIN custody_configs c ON c.id = w.custody_config_id
        WHERE c.organization_id = ? AND w.wallet_id = ? AND c.status = 'active' AND w.status = 'active'
        LIMIT 1`
     )
       .bind(orgId, walletId)
-      .first<{ custody_config_id: string; project_id: string | null }>();
+      .first<{ custody_config_id: string; project_id: string | null; wallet_public_key: string }>();
 
     if (!walletRow) {
       throw new SigningError("Custody wallet not found", "WALLET_NOT_FOUND");
@@ -776,7 +954,7 @@ export class SigningService {
     }
 
     const adapter = await this.getAdapterForConfig(orgId, config);
-    return { adapter, walletId };
+    return { adapter, walletId, walletPublicKey: walletRow.wallet_public_key as Address };
   }
 
   /**
@@ -784,6 +962,9 @@ export class SigningService {
    */
   async getPublicKey(orgId: string, projectId?: string, walletId?: string): Promise<Address> {
     const resolved = await this.resolveAdapterForRequest(orgId, projectId, walletId);
+    if (resolved.walletPublicKey) {
+      return resolved.walletPublicKey;
+    }
     return resolved.adapter.getPublicKey(resolved.walletId);
   }
 
@@ -807,7 +988,7 @@ export class SigningService {
   /**
    * Get a transaction signer compatible with @solana/kit.
    * Works with KeychainMemoryAdapter, KeychainFireblocksAdapter, KeychainPrivyAdapter,
-   * and KeychainCoinbaseAdapter.
+   * KeychainCoinbaseAdapter, and KeychainTurnkeyAdapter.
    *
    * Returns a TransactionSigner that can be used with:
    * - signTransactionMessageWithSigners()
@@ -836,6 +1017,10 @@ export class SigningService {
 
     if (adapter instanceof KeychainCoinbaseAdapter) {
       return adapter.getTransactionSigner(resolved.walletId);
+    }
+
+    if (adapter instanceof KeychainTurnkeyAdapter) {
+      return adapter.getTransactionSigner(resolved.walletId, resolved.walletPublicKey);
     }
 
     throw new SigningError(
@@ -1023,12 +1208,19 @@ function normalizeCoinbaseCdpWalletId(walletAddress: string): string {
   return walletAddress.startsWith("cdp_") ? walletAddress : `cdp_${walletAddress}`;
 }
 
-function parseOptionalRequestDelayMs(value?: string): number | undefined {
+function normalizeTurnkeyWalletId(privateKeyId: string): string {
+  return privateKeyId.startsWith("turnkey_") ? privateKeyId : `turnkey_${privateKeyId}`;
+}
+
+function parseOptionalRequestDelayMs(
+  value?: string,
+  options?: { envVarName?: string }
+): number | undefined {
   if (!value) return undefined;
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed < 0) {
     throw new SigningError(
-      "PRIVY_REQUEST_DELAY_MS must be a non-negative number",
+      `${options?.envVarName ?? "REQUEST_DELAY_MS"} must be a non-negative number`,
       "INVALID_REQUEST"
     );
   }
@@ -1076,6 +1268,15 @@ interface CoinbaseCdpProviderConfig {
   network?: "solana" | "solana-devnet";
   accountPolicy?: string;
   requestDelayMs?: number;
+}
+
+interface TurnkeyProviderConfig {
+  provider: "turnkey";
+  organizationId?: string;
+  apiBaseUrl?: string;
+  requestDelayMs?: number;
+  privateKeyId?: string;
+  defaultWalletPublicKey?: string;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1183,7 +1384,10 @@ export async function createAdapterFromEncryptedConfig(
     }
 
     const requestDelayMs =
-      parsed.requestDelayMs ?? parseOptionalRequestDelayMs(env.PRIVY_REQUEST_DELAY_MS);
+      parsed.requestDelayMs ??
+      parseOptionalRequestDelayMs(env.PRIVY_REQUEST_DELAY_MS, {
+        envVarName: "PRIVY_REQUEST_DELAY_MS",
+      });
 
     const defaultWalletId =
       record.defaultWalletId ??
@@ -1225,6 +1429,60 @@ export async function createAdapterFromEncryptedConfig(
     });
   }
 
+  if (parsed.provider === "turnkey") {
+    const apiPublicKey = env.TURNKEY_API_PUBLIC_KEY;
+    const apiPrivateKey = env.TURNKEY_API_PRIVATE_KEY;
+    const organizationId = parsed.organizationId ?? env.TURNKEY_ORGANIZATION_ID;
+    const requestDelayMs =
+      parsed.requestDelayMs ??
+      parseOptionalRequestDelayMs(env.TURNKEY_REQUEST_DELAY_MS, {
+        envVarName: "TURNKEY_REQUEST_DELAY_MS",
+      });
+
+    const defaultWalletId =
+      record.defaultWalletId ??
+      (parsed.privateKeyId ? normalizeTurnkeyWalletId(parsed.privateKeyId) : undefined) ??
+      (env.TURNKEY_PRIVATE_KEY_ID
+        ? normalizeTurnkeyWalletId(env.TURNKEY_PRIVATE_KEY_ID)
+        : undefined);
+
+    let defaultWalletPublicKey = parsed.defaultWalletPublicKey ?? env.TURNKEY_PUBLIC_KEY;
+    if (!defaultWalletPublicKey && defaultWalletId) {
+      const wallet = await env.DB.prepare(
+        `SELECT public_key
+         FROM custody_wallets
+         WHERE custody_config_id = ? AND wallet_id = ? AND status = 'active'
+         LIMIT 1`
+      )
+        .bind(record.id, defaultWalletId)
+        .first<{ public_key: string }>();
+      defaultWalletPublicKey = wallet?.public_key;
+    }
+
+    if (
+      !apiPublicKey ||
+      !apiPrivateKey ||
+      !organizationId ||
+      !defaultWalletId ||
+      !defaultWalletPublicKey
+    ) {
+      throw new SigningError(
+        "Turnkey environment variables not configured: TURNKEY_API_PUBLIC_KEY, TURNKEY_API_PRIVATE_KEY, TURNKEY_ORGANIZATION_ID, TURNKEY_PRIVATE_KEY_ID, TURNKEY_PUBLIC_KEY",
+        "PROVIDER_NOT_CONFIGURED"
+      );
+    }
+
+    return new KeychainTurnkeyAdapter({
+      apiPublicKey,
+      apiPrivateKey,
+      organizationId,
+      apiBaseUrl: parsed.apiBaseUrl ?? env.TURNKEY_API_BASE_URL,
+      requestDelayMs,
+      defaultWalletId,
+      defaultWalletPublicKey,
+    });
+  }
+
   // Fall back to standard config creation (for backward compatibility)
   return createSigningAdapterFromConfig(record, env);
 }
@@ -1234,14 +1492,19 @@ async function parseConfigRecord(
   orgId: string,
   record: SigningConfigRecord
 ): Promise<
-  LocalProviderConfig | FireblocksProviderConfig | PrivyProviderConfig | CoinbaseCdpProviderConfig
+  | LocalProviderConfig
+  | FireblocksProviderConfig
+  | PrivyProviderConfig
+  | CoinbaseCdpProviderConfig
+  | TurnkeyProviderConfig
 > {
   try {
     return JSON.parse(record.config) as
       | LocalProviderConfig
       | FireblocksProviderConfig
       | PrivyProviderConfig
-      | CoinbaseCdpProviderConfig;
+      | CoinbaseCdpProviderConfig
+      | TurnkeyProviderConfig;
   } catch {
     // Encrypted payload: decrypt then parse.
     try {
@@ -1251,7 +1514,8 @@ async function parseConfigRecord(
         | LocalProviderConfig
         | FireblocksProviderConfig
         | PrivyProviderConfig
-        | CoinbaseCdpProviderConfig;
+        | CoinbaseCdpProviderConfig
+        | TurnkeyProviderConfig;
     } catch (error) {
       throw new SigningError(
         error instanceof Error ? error.message : "Failed to decrypt custody configuration",

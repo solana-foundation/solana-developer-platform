@@ -7,11 +7,13 @@
 import { SigningError } from "@/services/ports";
 import type { Env } from "@/types/env";
 import type { VaultAddressesResponse } from "@solana/keychain-fireblocks";
+import { ApiKeyStamper } from "@solana/keychain-turnkey";
 import { SignJWT, importJWK, importPKCS8 } from "jose";
 
 const DEFAULT_FIREBLOCKS_API_BASE_URL = "https://api.fireblocks.io";
 const DEFAULT_PRIVY_API_BASE_URL = "https://api.privy.io/v1";
 const DEFAULT_COINBASE_CDP_API_BASE_URL = "https://api.cdp.coinbase.com/platform";
+const DEFAULT_TURNKEY_API_BASE_URL = "https://api.turnkey.com";
 const DEFAULT_COINBASE_CDP_NETWORK = "solana-devnet";
 const DEFAULT_FIREBLOCKS_ASSET_ID = "SOL";
 
@@ -29,6 +31,33 @@ interface PrivyWalletResponse {
 interface CoinbaseCdpSolanaAccountResponse {
   address: string;
   name?: string;
+}
+
+interface TurnkeyActivityResponse {
+  activity?: {
+    status?: string;
+    result?: {
+      createPrivateKeysResultV2?: {
+        privateKeys?: Array<{
+          privateKeyId?: string;
+          addresses?: Array<{
+            format?: string;
+            address?: string;
+          }>;
+        }>;
+      };
+    };
+  };
+}
+
+interface TurnkeyGetPrivateKeyResponse {
+  privateKey?: {
+    privateKeyId?: string;
+    addresses?: Array<{
+      format?: string;
+      address?: string;
+    }>;
+  };
 }
 
 export interface ProvisionFireblocksOptions {
@@ -66,6 +95,18 @@ export interface ProvisionCoinbaseCdpOptions {
 export interface ProvisionCoinbaseCdpResult {
   address: string;
   network: "solana" | "solana-devnet";
+}
+
+export interface ProvisionTurnkeyOptions {
+  orgId: string;
+  orgSlug: string;
+  privateKeyId?: string;
+  apiBaseUrl?: string;
+}
+
+export interface ProvisionTurnkeyResult {
+  privateKeyId: string;
+  address: string;
 }
 
 export async function provisionFireblocksVaultAccount(
@@ -294,6 +335,82 @@ export async function provisionCoinbaseCdpAccount(
   }
 }
 
+export async function provisionTurnkeyPrivateKey(
+  env: Env,
+  options: ProvisionTurnkeyOptions
+): Promise<ProvisionTurnkeyResult> {
+  const apiPublicKey = env.TURNKEY_API_PUBLIC_KEY;
+  const apiPrivateKey = env.TURNKEY_API_PRIVATE_KEY;
+  const organizationId = env.TURNKEY_ORGANIZATION_ID;
+
+  if (!apiPublicKey || !apiPrivateKey || !organizationId) {
+    throw new SigningError(
+      "Turnkey environment variables not configured: TURNKEY_API_PUBLIC_KEY, TURNKEY_API_PRIVATE_KEY, TURNKEY_ORGANIZATION_ID",
+      "PROVIDER_NOT_CONFIGURED"
+    );
+  }
+
+  const apiBaseUrl = options.apiBaseUrl ?? env.TURNKEY_API_BASE_URL ?? DEFAULT_TURNKEY_API_BASE_URL;
+
+  if (options.privateKeyId) {
+    const privateKeyId = denormalizeTurnkeyPrivateKeyId(options.privateKeyId);
+    const existing = await turnkeyRequest<TurnkeyGetPrivateKeyResponse>({
+      apiBaseUrl,
+      apiPublicKey,
+      apiPrivateKey,
+      method: "POST",
+      path: "/public/v1/query/get_private_key",
+      body: {
+        organizationId,
+        privateKeyId,
+      },
+    });
+
+    const address = findSolanaAddress(existing.privateKey?.addresses);
+    if (!existing?.privateKey?.privateKeyId || !address) {
+      throw new SigningError("Turnkey private key lookup failed", "PROVIDER_NOT_CONFIGURED");
+    }
+
+    return {
+      privateKeyId: existing.privateKey.privateKeyId,
+      address,
+    };
+  }
+
+  const created = await turnkeyRequest<TurnkeyActivityResponse>({
+    apiBaseUrl,
+    apiPublicKey,
+    apiPrivateKey,
+    method: "POST",
+    path: "/public/v1/submit/create_private_keys",
+    body: {
+      type: "ACTIVITY_TYPE_CREATE_PRIVATE_KEYS_V2",
+      timestampMs: Date.now().toString(),
+      organizationId,
+      parameters: {
+        privateKeys: [
+          {
+            privateKeyName: buildTurnkeyPrivateKeyName(options.orgSlug || options.orgId),
+            curve: "CURVE_ED25519",
+            privateKeyTags: [],
+            addressFormats: ["ADDRESS_FORMAT_SOLANA"],
+          },
+        ],
+      },
+    },
+  });
+
+  const createdKey = created.activity?.result?.createPrivateKeysResultV2?.privateKeys?.[0];
+
+  const privateKeyId = createdKey?.privateKeyId;
+  const address = findSolanaAddress(createdKey?.addresses);
+  if (!privateKeyId || !address) {
+    throw new SigningError("Turnkey private key creation failed", "PROVIDER_NOT_CONFIGURED");
+  }
+
+  return { privateKeyId, address };
+}
+
 interface FireblocksRequestParams {
   apiBaseUrl: string;
   apiKey: string;
@@ -321,6 +438,15 @@ interface CoinbaseCdpRequestParams {
   walletSecret: string;
   idempotencyKey?: string;
   body?: Record<string, unknown>;
+}
+
+interface TurnkeyRequestParams {
+  method: "POST";
+  path: string;
+  apiBaseUrl: string;
+  apiPublicKey: string;
+  apiPrivateKey: string;
+  body: Record<string, unknown>;
 }
 
 async function fetchFireblocksAddressesWithRetry(
@@ -451,6 +577,50 @@ async function privyRequest<T>(params: PrivyRequestParams): Promise<T> {
 
     throw new SigningError(
       `Failed to call Privy API: ${error instanceof Error ? error.message : "Unknown error"}`,
+      "NETWORK_ERROR",
+      error instanceof Error ? error : undefined
+    );
+  }
+}
+
+async function turnkeyRequest<T>(params: TurnkeyRequestParams): Promise<T> {
+  const body = JSON.stringify(params.body);
+  const stamper = new ApiKeyStamper({
+    apiPrivateKey: params.apiPrivateKey,
+    apiPublicKey: params.apiPublicKey,
+  });
+  const stamp = stamper.stamp(body);
+
+  try {
+    const response = await fetch(`${params.apiBaseUrl}${params.path}`, {
+      method: params.method,
+      headers: {
+        "Content-Type": "application/json",
+        [stamp.stampHeaderName]: stamp.stampHeaderValue,
+      },
+      body,
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => "Failed to read error response");
+      throw new SigningError(
+        `Turnkey API error: ${response.status} - ${errorText}`,
+        "PROVIDER_NOT_CONFIGURED"
+      );
+    }
+
+    if (response.status === 204 || response.headers.get("content-length") === "0") {
+      return undefined as T;
+    }
+
+    return (await response.json()) as T;
+  } catch (error) {
+    if (error instanceof SigningError) {
+      throw error;
+    }
+
+    throw new SigningError(
+      `Failed to call Turnkey API: ${error instanceof Error ? error.message : "Unknown error"}`,
       "NETWORK_ERROR",
       error instanceof Error ? error : undefined
     );
@@ -716,6 +886,50 @@ function isCoinbaseCdpAlreadyExistsError(error: unknown): error is SigningError 
     message.includes("coinbase cdp api error: 409") &&
     (message.includes("already_exists") || message.includes("already exists"))
   );
+}
+
+function buildTurnkeyPrivateKeyName(value: string): string {
+  const suffix = randomHex(2);
+  let normalized = value
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+  if (!normalized) {
+    normalized = "org";
+  }
+
+  let name = `sdp-${normalized}-${suffix}`.slice(0, 60);
+  name = name.replace(/-+$/g, "");
+
+  if (!name) {
+    name = `sdp-${randomHex(3)}`;
+  }
+
+  return name;
+}
+
+function findSolanaAddress(
+  addresses:
+    | Array<{
+        format?: string;
+        address?: string;
+      }>
+    | undefined
+): string | undefined {
+  if (!addresses?.length) return undefined;
+
+  const solana = addresses.find((entry) => entry.format === "ADDRESS_FORMAT_SOLANA");
+  if (solana?.address) {
+    return solana.address;
+  }
+
+  return addresses.find((entry) => Boolean(entry.address))?.address;
+}
+
+function denormalizeTurnkeyPrivateKeyId(privateKeyId: string): string {
+  return privateKeyId.startsWith("turnkey_") ? privateKeyId.slice("turnkey_".length) : privateKeyId;
 }
 
 function isPemEncodedKey(value: string): boolean {

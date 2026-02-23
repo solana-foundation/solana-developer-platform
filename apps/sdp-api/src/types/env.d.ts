@@ -62,7 +62,7 @@ export interface Env {
   ORGANIZATION_REGISTRATION_TOKEN?: string;
 
   // Signing provider (custody backend via @solana/keychain)
-  SIGNING_PROVIDER?: "local" | "fireblocks" | "privy" | "coinbase_cdp";
+  SIGNING_PROVIDER?: "local" | "fireblocks" | "privy" | "coinbase_cdp" | "turnkey";
   FEE_PAYER_PRIVATE_KEY?: string;
 
   // Fireblocks configuration (@solana/keychain-fireblocks)
@@ -87,6 +87,15 @@ export interface Env {
   COINBASE_CDP_NETWORK?: "solana" | "solana-devnet";
   COINBASE_CDP_WALLET_ID?: string;
   COINBASE_CDP_ACCOUNT_NAMESPACE?: string;
+
+  // Turnkey Server Wallet configuration (Solana)
+  TURNKEY_API_PUBLIC_KEY?: string;
+  TURNKEY_API_PRIVATE_KEY?: string;
+  TURNKEY_ORGANIZATION_ID?: string;
+  TURNKEY_API_BASE_URL?: string;
+  TURNKEY_REQUEST_DELAY_MS?: string;
+  TURNKEY_PRIVATE_KEY_ID?: string;
+  TURNKEY_PUBLIC_KEY?: string;
 
   // Kora (gasless) configuration
   FEE_PAYMENT_PROVIDER?: "kora" | "native";

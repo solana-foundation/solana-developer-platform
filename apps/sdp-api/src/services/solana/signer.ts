@@ -7,6 +7,7 @@
  * - fireblocks: Uses Fireblocks MPC via @solana/keychain-fireblocks (production)
  * - privy: Uses Privy hosted wallets via @solana/keychain-privy
  * - coinbase_cdp: Uses Coinbase CDP hosted wallets via @sdp/keychain-coinbase
+ * - turnkey: Uses Turnkey hosted wallets via @solana/keychain-turnkey
  *
  * Resolution order for createOrgSigner:
  * 1. Project-specific config (if projectId provided)
@@ -19,6 +20,7 @@ import {
   KeychainFireblocksAdapter,
   KeychainMemoryAdapter,
   KeychainPrivyAdapter,
+  KeychainTurnkeyAdapter,
   createSigningAdapterFromEnv,
 } from "@/services/adapters";
 import { createSigningService } from "@/services/domain/signing.service";
@@ -66,6 +68,7 @@ export async function createSignerFromBase58(privateKeyBase58: string): Promise<
  * - "fireblocks": Uses Fireblocks via KeychainFireblocksAdapter
  * - "privy": Uses Privy via KeychainPrivyAdapter
  * - "coinbase_cdp": Uses Coinbase CDP via KeychainCoinbaseAdapter
+ * - "turnkey": Uses Turnkey via KeychainTurnkeyAdapter
  *
  * The returned signer is compatible with @solana/kit signing utilities:
  * - signTransactionMessageWithSigners()
@@ -90,6 +93,10 @@ export async function createSigner(env: Env): Promise<TransactionSigner> {
   }
 
   if (adapter instanceof KeychainCoinbaseAdapter) {
+    return adapter.getTransactionSigner();
+  }
+
+  if (adapter instanceof KeychainTurnkeyAdapter) {
     return adapter.getTransactionSigner();
   }
 

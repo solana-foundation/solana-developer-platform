@@ -225,6 +225,12 @@ export const createOrganization = async (c: AppContext) => {
           walletAddress: provisioned.address,
           accountPolicy: custody.accountPolicy,
         });
+      } else if (custody.provider === "turnkey") {
+        await signingService.initializeTurnkeySigning(orgId, undefined, {
+          apiBaseUrl: custody.apiBaseUrl ?? c.env.TURNKEY_API_BASE_URL,
+          requestDelayMs: custody.requestDelayMs,
+          privateKeyId: custody.privateKeyId,
+        });
       } else {
         await signingService.initializePrivySigning(orgId, undefined, {
           apiBaseUrl: custody.apiBaseUrl ?? c.env.PRIVY_API_BASE_URL,
