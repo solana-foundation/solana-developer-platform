@@ -213,21 +213,22 @@ export const switchSigning = async (c: AppContext) => {
   const signingService = createSigningService(c.env);
 
   const projectId = parsed.data.projectId;
-  const currentConfig = await c.env.DB.prepare(
-    projectId
-      ? `SELECT provider
-         FROM custody_configs
-         WHERE organization_id = ? AND project_id = ? AND status = 'active'
-         ORDER BY updated_at DESC
-         LIMIT 1`
-      : `SELECT provider
-         FROM custody_configs
-         WHERE organization_id = ? AND project_id IS NULL AND status = 'active'
-         ORDER BY updated_at DESC
-         LIMIT 1`
+  const scopeBindings = projectId ? [actor.organizationId, projectId] : [actor.organizationId];
+  const scopeClause = projectId
+    ? "organization_id = ? AND project_id = ?"
+    : "organization_id = ? AND project_id IS NULL";
+
+  const activeConfigsResult = await c.env.DB.prepare(
+    `SELECT id, provider
+     FROM custody_configs
+     WHERE ${scopeClause} AND status = 'active'
+     ORDER BY updated_at DESC`
   )
-    .bind(...(projectId ? [actor.organizationId, projectId] : [actor.organizationId]))
-    .first<{ provider: string }>();
+    .bind(...scopeBindings)
+    .all<{ id: string; provider: string }>();
+
+  const activeConfigs = activeConfigsResult.results;
+  const currentConfig = activeConfigs[0];
 
   if (currentConfig?.provider === parsed.data.provider) {
     throw new AppError(
@@ -236,22 +237,16 @@ export const switchSigning = async (c: AppContext) => {
     );
   }
 
+  const previousActiveConfigIds = activeConfigs.map((config) => config.id);
+
   // Deactivate any active config for the requested scope so initialize* does not conflict.
-  if (projectId) {
+  if (previousActiveConfigIds.length > 0) {
     await c.env.DB.prepare(
       `UPDATE custody_configs
        SET status = 'inactive', updated_at = datetime('now')
-      WHERE organization_id = ? AND project_id = ? AND status = 'active'`
+       WHERE ${scopeClause} AND status = 'active'`
     )
-      .bind(actor.organizationId, projectId)
-      .run();
-  } else {
-    await c.env.DB.prepare(
-      `UPDATE custody_configs
-       SET status = 'inactive', updated_at = datetime('now')
-       WHERE organization_id = ? AND project_id IS NULL AND status = 'active'`
-    )
-      .bind(actor.organizationId)
+      .bind(...scopeBindings)
       .run();
   }
 
@@ -308,6 +303,33 @@ export const switchSigning = async (c: AppContext) => {
 
     return created(c, response);
   } catch (error) {
+    if (previousActiveConfigIds.length > 0) {
+      try {
+        // Ensure any partially-created new config for this scope is not left active.
+        await c.env.DB.prepare(
+          `UPDATE custody_configs
+           SET status = 'inactive', updated_at = datetime('now')
+           WHERE ${scopeClause} AND status = 'active'`
+        )
+          .bind(...scopeBindings)
+          .run();
+
+        const placeholders = previousActiveConfigIds.map(() => "?").join(", ");
+        await c.env.DB.prepare(
+          `UPDATE custody_configs
+           SET status = 'active', updated_at = datetime('now')
+           WHERE id IN (${placeholders})`
+        )
+          .bind(...previousActiveConfigIds)
+          .run();
+      } catch (rollbackError) {
+        throw new AppError(
+          "INTERNAL_ERROR",
+          `Provider switch failed (${error instanceof Error ? error.message : "Unknown error"}) and rollback could not restore previous state: ${rollbackError instanceof Error ? rollbackError.message : "Unknown rollback error"}`
+        );
+      }
+    }
+
     if (error instanceof SigningError) {
       throw new AppError("BAD_REQUEST", error.message);
     }

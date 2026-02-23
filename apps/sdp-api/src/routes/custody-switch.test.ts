@@ -1,0 +1,158 @@
+import app from "@/index";
+import { hashString } from "@/lib/hash";
+import { env } from "@/test/helpers/env";
+import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/d1";
+import { clearKVNamespaces, seedCachedApiKey } from "@/test/mocks/kv";
+import type { CachedApiKey } from "@sdp/types";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("@/services/custody/provisioning", async () => {
+  const actual = await vi.importActual<typeof import("@/services/custody/provisioning")>(
+    "@/services/custody/provisioning"
+  );
+  const { SigningError } = await import("@/services/ports");
+
+  return {
+    ...actual,
+    provisionParaWallet: vi
+      .fn()
+      .mockRejectedValue(
+        new SigningError("Forced para provisioning failure for rollback test", "NETWORK_ERROR")
+      ),
+  };
+});
+
+const TEST_CONFIG_ID = "cust_cfg_switch_test";
+const TEST_ORG = {
+  id: "org_custody_switch_test",
+  name: "Custody Switch Test Org",
+  slug: "custody-switch-test-org",
+};
+const TEST_USER = {
+  id: "usr_custody_switch_test",
+  email: "custody-switch-test@example.com",
+};
+const TEST_API_KEY = {
+  id: "key_custody_switch_test",
+  // biome-ignore lint/nursery/noSecrets: Test fixture, not a real secret.
+  raw: "sk_test_custodyswitch12345678901234567890",
+  prefix: "sk_test_cus",
+};
+const TEST_CACHED_API_KEY: CachedApiKey = {
+  id: TEST_API_KEY.id,
+  organizationId: TEST_ORG.id,
+  projectId: null,
+  role: "api_admin",
+  permissions: ["*"],
+  environment: "sandbox",
+  rateLimitTier: "standard",
+  allowedIps: null,
+  signingWalletId: null,
+  status: "active",
+  expiresAt: null,
+};
+
+async function seedAuthAndActiveConfig(): Promise<void> {
+  const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
+  await seedCachedApiKey(env, keyHash, TEST_CACHED_API_KEY);
+
+  await env.DB.batch([
+    env.DB.prepare(
+      "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)"
+    ).bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, "free", "active"),
+    env.DB.prepare(
+      "INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)"
+    ).bind(TEST_USER.id, TEST_USER.email, 1, "active"),
+    env.DB.prepare(
+      `INSERT INTO api_keys
+           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, environment, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(
+      TEST_API_KEY.id,
+      TEST_ORG.id,
+      null,
+      TEST_USER.id,
+      "Custody Switch Test Key",
+      TEST_API_KEY.prefix,
+      keyHash,
+      "api_admin",
+      JSON.stringify(["*"]),
+      "sandbox",
+      "active"
+    ),
+    env.DB.prepare(
+      `INSERT INTO custody_configs
+           (id, organization_id, project_id, provider, config_encrypted, encryption_version, default_wallet_id, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(
+      TEST_CONFIG_ID,
+      TEST_ORG.id,
+      null,
+      "privy",
+      "test-config",
+      "sdp-custody-encryption-v1",
+      "privy_wallet_test",
+      "active"
+    ),
+  ]);
+}
+
+describe("Custody switch rollback", () => {
+  beforeEach(async () => {
+    await seedTestDatabase(env);
+    await seedAuthAndActiveConfig();
+  });
+
+  afterEach(async () => {
+    await clearTestDatabase(env);
+    await clearKVNamespaces(env);
+  });
+
+  it("restores the previous active config when provider initialization fails", async () => {
+    const res = await app.request(
+      "/v1/wallets/switch",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          provider: "para",
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { code: string; message: string } };
+    expect(body.error.code).toBe("BAD_REQUEST");
+
+    const configs = await env.DB.prepare(
+      `SELECT id, provider, status
+           FROM custody_configs
+           WHERE organization_id = ? AND project_id IS NULL
+           ORDER BY id`
+    )
+      .bind(TEST_ORG.id)
+      .all<{ id: string; provider: string; status: string }>();
+
+    expect(configs.results).toEqual([
+      {
+        id: TEST_CONFIG_ID,
+        provider: "privy",
+        status: "active",
+      },
+    ]);
+
+    const paraConfigCount = await env.DB.prepare(
+      `SELECT COUNT(*) as count
+           FROM custody_configs
+           WHERE organization_id = ? AND provider = 'para'`
+    )
+      .bind(TEST_ORG.id)
+      .first<{ count: number }>();
+
+    expect(Number(paraConfigCount?.count ?? 0)).toBe(0);
+  });
+});

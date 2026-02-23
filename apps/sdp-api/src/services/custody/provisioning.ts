@@ -731,13 +731,25 @@ async function waitForParaWalletReady(params: {
   const delayMs = 500;
 
   let latestWallet: ParaWalletResponse | null = null;
+  let latestTransientError: string | null = null;
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    const wallet = await paraRequest<ParaWalletResponse>({
-      apiBaseUrl: params.apiBaseUrl,
-      apiKey: params.apiKey,
-      method: "GET",
-      path: `/v1/wallets/${encodeURIComponent(params.walletId)}`,
-    });
+    let wallet: ParaWalletResponse;
+    try {
+      wallet = await paraRequest<ParaWalletResponse>({
+        apiBaseUrl: params.apiBaseUrl,
+        apiKey: params.apiKey,
+        method: "GET",
+        path: `/v1/wallets/${encodeURIComponent(params.walletId)}`,
+      });
+    } catch (error) {
+      if (!isParaAddressPendingError(error) || attempt === maxAttempts) {
+        throw error;
+      }
+
+      latestTransientError = error.message;
+      await sleep(delayMs);
+      continue;
+    }
 
     latestWallet = wallet;
     if (wallet.status === "ready" && wallet.address) {
@@ -750,9 +762,18 @@ async function waitForParaWalletReady(params: {
   }
 
   throw new SigningError(
-    `Para wallet '${params.walletId}' did not become ready after ${maxAttempts} attempts (status: ${latestWallet?.status ?? "unknown"})`,
+    `Para wallet '${params.walletId}' did not become ready after ${maxAttempts} attempts (status: ${latestWallet?.status ?? "unknown"}${latestTransientError ? `, last error: ${latestTransientError}` : ""})`,
     "PROVIDER_NOT_CONFIGURED"
   );
+}
+
+function isParaAddressPendingError(error: unknown): error is SigningError {
+  if (!(error instanceof SigningError)) {
+    return false;
+  }
+
+  const message = error.message.toLowerCase();
+  return message.includes("para api error: 500") && message.includes("wallet address not found");
 }
 
 function validateParaWallet(
