@@ -1,4 +1,4 @@
-import { provisionCoinbaseCdpAccount } from "@/services/custody/provisioning";
+import { provisionCoinbaseCdpAccount, provisionParaWallet } from "@/services/custody/provisioning";
 import type { Env } from "@/types/env";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
@@ -114,12 +114,94 @@ describe("coinbase account provisioning", () => {
   });
 });
 
+describe("para wallet provisioning", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("retries transient address-not-ready errors while waiting for wallet readiness", async () => {
+    const walletId = "wal_para_123";
+
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
+        const url = toUrlString(input);
+
+        if (url.endsWith("/v1/wallets") && init?.method === "POST") {
+          return jsonResponse({ data: { id: walletId, status: "creating" } }, 200);
+        }
+
+        if (url.endsWith(`/v1/wallets/${walletId}`) && init?.method === "GET") {
+          if (fetchMock.mock.calls.length === 2) {
+            return jsonResponse({ message: "wallet address not found after 6315ms" }, 500);
+          }
+
+          return jsonResponse(
+            {
+              data: {
+                id: walletId,
+                type: "SOLANA",
+                scheme: "ED25519",
+                status: "ready",
+                address: CREATED_ADDRESS,
+              },
+            },
+            200
+          );
+        }
+
+        throw new Error(`Unexpected fetch call: ${init?.method ?? "GET"} ${url}`);
+      });
+
+    const result = await provisionParaWallet(createParaEnv(), {
+      orgId: "org_abc",
+      orgSlug: "Acme Labs",
+    });
+
+    expect(result.walletId).toBe(walletId);
+    expect(result.address).toBe(CREATED_ADDRESS);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("bubbles non-retryable para errors", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
+        const url = toUrlString(input);
+
+        if (url.endsWith("/v1/wallets") && init?.method === "POST") {
+          return jsonResponse({ message: "invalid request" }, 400);
+        }
+
+        throw new Error(`Unexpected fetch call: ${init?.method ?? "GET"} ${url}`);
+      });
+
+    await expect(
+      provisionParaWallet(createParaEnv(), {
+        orgId: "org_abc",
+        orgSlug: "Acme Labs",
+      })
+    ).rejects.toThrowError(/Para API error: 400/i);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
 function createCoinbaseEnv(overrides: Partial<Env> = {}): Env {
   return {
     ENVIRONMENT: "development",
     COINBASE_CDP_API_KEY_ID: "test-api-key-id",
     COINBASE_CDP_API_KEY_SECRET: keyMaterial.privateKeyPem,
     COINBASE_CDP_WALLET_SECRET: keyMaterial.privateKeyPkcs8Base64,
+    ...overrides,
+  } as Env;
+}
+
+function createParaEnv(overrides: Partial<Env> = {}): Env {
+  return {
+    ENVIRONMENT: "development",
+    PARA_API_KEY: "test-para-api-key",
+    PARA_API_BASE_URL: "https://api.getpara.com",
     ...overrides,
   } as Env;
 }
