@@ -9,6 +9,7 @@
  * - Fireblocks: Enterprise MPC custody (@solana/keychain-fireblocks)
  * - Privy: Hosted wallets via Privy API (@solana/keychain-privy)
  * - Coinbase CDP: Hosted wallets via Coinbase CDP API (@sdp/keychain-coinbase)
+ * - Para: Hosted wallets via Para REST API (@sdp/keychain-para)
  * - Turnkey: Hosted wallets via Turnkey API (@solana/keychain-turnkey)
  */
 
@@ -16,6 +17,7 @@
 export type {
   KeychainCoinbaseConfig,
   KeychainFireblocksConfig,
+  KeychainParaConfig,
   KeychainPrivyConfig,
   KeychainTurnkeyConfig,
 } from "./types";
@@ -25,5 +27,6 @@ export { BaseKeychainAdapter } from "./base-keychain.adapter";
 export { KeychainCoinbaseAdapter } from "./keychain-coinbase.adapter";
 export { KeychainFireblocksAdapter } from "./keychain-fireblocks.adapter";
 export { KeychainMemoryAdapter } from "./keychain-memory.adapter";
+export { KeychainParaAdapter } from "./keychain-para.adapter";
 export { KeychainPrivyAdapter } from "./keychain-privy.adapter";
 export { KeychainTurnkeyAdapter } from "./keychain-turnkey.adapter";

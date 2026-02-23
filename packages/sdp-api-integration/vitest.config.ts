@@ -52,6 +52,14 @@ export default defineWorkersConfig({
       "@": path.resolve(__dirname, "../../apps/sdp-api/src"),
       "@sdp/api": path.resolve(__dirname, "../../apps/sdp-api/src"),
       "@sdp/api-test": path.resolve(__dirname, "../../apps/sdp-api/src/test"),
+      "@sdp/keychain-coinbase": path.resolve(
+        __dirname,
+        "../../packages/sdp-keychain-coinbase/src/index.ts"
+      ),
+      "@sdp/keychain-para": path.resolve(
+        __dirname,
+        "../../packages/sdp-keychain-para/src/index.ts"
+      ),
     },
   },
   test: {

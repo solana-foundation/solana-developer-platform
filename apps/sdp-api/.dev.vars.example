@@ -28,6 +28,13 @@ FEE_PAYMENT_PROVIDER=kora
 # COINBASE_CDP_NETWORK=solana-devnet
 # COINBASE_CDP_WALLET_ID=YOUR_DEFAULT_CDP_SOLANA_ADDRESS
 
+# Para platform signer (required for para custody provider)
+# SIGNING_PROVIDER=para
+# PARA_API_KEY=YOUR_PARA_API_KEY
+# PARA_API_BASE_URL=https://api.getpara.com
+# PARA_REQUEST_DELAY_MS=0
+# PARA_WALLET_ID=YOUR_DEFAULT_PARA_WALLET_ID
+
 # Turnkey platform signer (required for turnkey custody provider)
 # SIGNING_PROVIDER=turnkey
 # TURNKEY_API_PUBLIC_KEY=YOUR_TURNKEY_API_PUBLIC_KEY_HEX

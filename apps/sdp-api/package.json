@@ -30,6 +30,7 @@
     "@react-email/components": "1.0.6",
     "@react-email/render": "2.0.4",
     "@sdp/keychain-coinbase": "workspace:*",
+    "@sdp/keychain-para": "workspace:*",
     "@sdp/types": "workspace:*",
     "@solana-program/system": "catalog:",
     "@solana-program/token-2022": "catalog:",

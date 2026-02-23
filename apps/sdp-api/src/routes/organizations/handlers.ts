@@ -7,6 +7,8 @@ import { AuditService } from "@/services/audit.service";
 import {
   provisionCoinbaseCdpAccount,
   provisionFireblocksVaultAccount,
+  provisionParaWallet,
+  provisionTurnkeyPrivateKey,
 } from "@/services/custody/provisioning";
 import { createSigningService } from "@/services/domain/signing.service";
 import { KVService } from "@/services/kv.service";
@@ -225,11 +227,31 @@ export const createOrganization = async (c: AppContext) => {
           walletAddress: provisioned.address,
           accountPolicy: custody.accountPolicy,
         });
+      } else if (custody.provider === "para") {
+        const provisioned = await provisionParaWallet(c.env, {
+          orgId,
+          orgSlug: slug,
+          apiBaseUrl: custody.apiBaseUrl,
+          walletId: custody.walletId,
+        });
+
+        await signingService.initializeParaSigning(orgId, undefined, {
+          apiBaseUrl: custody.apiBaseUrl ?? c.env.PARA_API_BASE_URL,
+          requestDelayMs: custody.requestDelayMs,
+          walletId: provisioned.walletId,
+        });
       } else if (custody.provider === "turnkey") {
+        const provisioned = await provisionTurnkeyPrivateKey(c.env, {
+          orgId,
+          orgSlug: slug,
+          apiBaseUrl: custody.apiBaseUrl,
+          privateKeyId: custody.privateKeyId,
+        });
+
         await signingService.initializeTurnkeySigning(orgId, undefined, {
           apiBaseUrl: custody.apiBaseUrl ?? c.env.TURNKEY_API_BASE_URL,
           requestDelayMs: custody.requestDelayMs,
-          privateKeyId: custody.privateKeyId,
+          privateKeyId: provisioned.privateKeyId,
         });
       } else {
         await signingService.initializePrivySigning(orgId, undefined, {

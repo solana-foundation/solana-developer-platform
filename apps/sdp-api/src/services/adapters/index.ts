@@ -13,6 +13,7 @@ export {
   KeychainCoinbaseAdapter,
   KeychainFireblocksAdapter,
   KeychainMemoryAdapter,
+  KeychainParaAdapter,
   KeychainPrivyAdapter,
   KeychainTurnkeyAdapter,
   type SigningProviderType,

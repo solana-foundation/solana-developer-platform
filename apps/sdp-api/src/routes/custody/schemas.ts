@@ -45,6 +45,15 @@ export const initializeCoinbaseCdpSchema = z.object({
   walletLabel: z.string().max(100).optional(),
 });
 
+export const initializeParaSchema = z.object({
+  provider: z.literal("para"),
+  projectId: z.string().optional(),
+  apiBaseUrl: z.string().url().optional(),
+  requestDelayMs: z.number().int().min(0).max(3000).optional(),
+  walletId: z.string().min(1).optional(),
+  walletLabel: z.string().max(100).optional(),
+});
+
 export const initializeTurnkeySchema = z.object({
   provider: z.literal("turnkey"),
   projectId: z.string().optional(),
@@ -59,6 +68,7 @@ export const initializeSigningSchema = z.discriminatedUnion("provider", [
   initializeFireblocksSchema,
   initializePrivySchema,
   initializeCoinbaseCdpSchema,
+  initializeParaSchema,
   initializeTurnkeySchema,
 ]);
 
@@ -119,7 +129,7 @@ export interface CustodyConfigResponse {
     id: string;
     organizationId: string;
     projectId: string | null;
-    provider: "local" | "fireblocks" | "privy" | "coinbase_cdp" | "turnkey";
+    provider: "local" | "fireblocks" | "privy" | "coinbase_cdp" | "para" | "turnkey";
     publicKey: string;
     defaultWalletId: string | null;
     status: "active" | "inactive";
@@ -145,7 +155,7 @@ export interface CustodyWalletsResponse {
 
 export interface SwitchProviderOptionsResponse {
   providers: Array<{
-    provider: "privy" | "coinbase_cdp" | "turnkey" | "local";
+    provider: "privy" | "coinbase_cdp" | "para" | "turnkey" | "local";
     hasReusableWallet: boolean;
     needsWalletLabel: boolean;
   }>;
