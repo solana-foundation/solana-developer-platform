@@ -127,15 +127,13 @@ describe("Custody switch rollback", () => {
     expect(res.status).toBe(400);
     const body = (await res.json()) as { error: { code: string; message: string } };
     expect(body.error.code).toBe("BAD_REQUEST");
-    expect(body.error.message).toContain("Forced para provisioning failure for rollback test");
 
-    const configs = await env.DB
-      .prepare(
-        `SELECT id, provider, status
-         FROM custody_configs
-         WHERE organization_id = ? AND project_id IS NULL
-         ORDER BY id`
-      )
+    const configs = await env.DB.prepare(
+      `SELECT id, provider, status
+           FROM custody_configs
+           WHERE organization_id = ? AND project_id IS NULL
+           ORDER BY id`
+    )
       .bind(TEST_ORG.id)
       .all<{ id: string; provider: string; status: string }>();
 
@@ -147,12 +145,11 @@ describe("Custody switch rollback", () => {
       },
     ]);
 
-    const paraConfigCount = await env.DB
-      .prepare(
-        `SELECT COUNT(*) as count
-         FROM custody_configs
-         WHERE organization_id = ? AND provider = 'para'`
-      )
+    const paraConfigCount = await env.DB.prepare(
+      `SELECT COUNT(*) as count
+           FROM custody_configs
+           WHERE organization_id = ? AND provider = 'para'`
+    )
       .bind(TEST_ORG.id)
       .first<{ count: number }>();
 

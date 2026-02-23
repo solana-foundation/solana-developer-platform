@@ -213,9 +213,7 @@ export const switchSigning = async (c: AppContext) => {
   const signingService = createSigningService(c.env);
 
   const projectId = parsed.data.projectId;
-  const scopeBindings = projectId
-    ? [actor.organizationId, projectId]
-    : [actor.organizationId];
+  const scopeBindings = projectId ? [actor.organizationId, projectId] : [actor.organizationId];
   const scopeClause = projectId
     ? "organization_id = ? AND project_id = ?"
     : "organization_id = ? AND project_id IS NULL";
@@ -327,7 +325,7 @@ export const switchSigning = async (c: AppContext) => {
       } catch (rollbackError) {
         throw new AppError(
           "INTERNAL_ERROR",
-          `Provider switch failed and rollback could not restore previous state: ${rollbackError instanceof Error ? rollbackError.message : "Unknown rollback error"}`
+          `Provider switch failed (${error instanceof Error ? error.message : "Unknown error"}) and rollback could not restore previous state: ${rollbackError instanceof Error ? rollbackError.message : "Unknown rollback error"}`
         );
       }
     }
