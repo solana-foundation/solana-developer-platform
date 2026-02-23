@@ -229,7 +229,11 @@ export class SigningService {
     projectId: string | undefined,
     provider: ReusableSigningProvider
   ): Promise<{ configId: string; wallet: CustodyWallet } | null> {
-    const existingProviderWallet = await this.findExistingProviderWallet(orgId, projectId, provider);
+    const existingProviderWallet = await this.findExistingProviderWallet(
+      orgId,
+      projectId,
+      provider
+    );
     if (!existingProviderWallet) {
       return null;
     }

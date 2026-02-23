@@ -3,7 +3,7 @@ import { sdpApiRequest } from "@/lib/sdp-api";
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { switchCustodyProvider } from "../actions";
-import { SwitchProviderForm, type SwitchProvider } from "./switch-provider-form";
+import { type SwitchProvider, SwitchProviderForm } from "./switch-provider-form";
 
 const PROVIDER_OPTIONS: Array<{ value: SwitchProvider; label: string }> = [
   { value: "privy", label: "Privy" },

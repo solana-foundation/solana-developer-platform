@@ -275,7 +275,10 @@ async function WalletsSection({
                         </TableCell>
                         <TableCell className="font-mono text-xs">{w.publicKey}</TableCell>
                         <TableCell className="font-mono text-xs text-[rgba(28,28,29,0.72)]">
-                          <div className="max-w-[10rem] truncate sm:max-w-[14rem]" title={w.walletId}>
+                          <div
+                            className="max-w-[10rem] truncate sm:max-w-[14rem]"
+                            title={w.walletId}
+                          >
                             {w.walletId}
                           </div>
                         </TableCell>

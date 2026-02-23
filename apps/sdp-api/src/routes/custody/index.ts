@@ -10,8 +10,8 @@ import { Hono } from "hono";
 import {
   createWallet,
   getConfig,
-  getSwitchProviderOptions,
   getPublicKey,
+  getSwitchProviderOptions,
   initializeSigning,
   listWallets,
   setDefaultWallet,

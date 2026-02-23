@@ -8,8 +8,13 @@
 import type { SignRequest, SignResult } from "@/services/ports";
 import type { SolanaSigner } from "@solana/keychain-core";
 import { TurnkeySigner } from "@solana/keychain-turnkey";
-import type { Address, Transaction, TransactionWithLifetime, TransactionWithinSizeLimit } from "@solana/kit";
-import { createSignableMessage, type SignatureDictionary } from "@solana/signers";
+import type {
+  Address,
+  Transaction,
+  TransactionWithLifetime,
+  TransactionWithinSizeLimit,
+} from "@solana/kit";
+import { type SignatureDictionary, createSignableMessage } from "@solana/signers";
 import { BaseKeychainAdapter } from "./base-keychain.adapter";
 import type { KeychainTurnkeyConfig } from "./types";
 
