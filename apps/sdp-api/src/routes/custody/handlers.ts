@@ -29,6 +29,7 @@ import {
   type CustodyWalletResponse,
   type CustodyWalletsResponse,
   type InitializeSigningResponse,
+  type SwitchProviderOptionsResponse,
   type SignerCheckResponse,
   createWalletSchema,
   initializeSigningSchema,
@@ -80,9 +81,11 @@ function resolveActor(c: AppContext): { organizationId: string; projectId?: stri
  *
  * For "local" provider: Generates a new keypair and stores it encrypted in the database.
  * For "fireblocks" provider: Stores Fireblocks credentials and retrieves the public key.
- * For "privy" provider: Stores Privy credentials and retrieves the public key.
+ * For "privy" provider: Uses platform-managed Privy credentials and provisions a wallet.
  * For "coinbase_cdp" provider: Uses platform-managed CDP credentials and provisions
  * a Solana account.
+ * For "turnkey" provider: Uses platform-managed Turnkey credentials and provisions
+ * a Solana private key.
  *
  * POST /wallets/initialize
  */
@@ -128,6 +131,17 @@ export const initializeSigning = async (c: AppContext) => {
         {
           apiBaseUrl: parsed.data.apiBaseUrl,
           requestDelayMs: parsed.data.requestDelayMs,
+          walletLabel: parsed.data.walletLabel,
+        }
+      );
+    } else if (parsed.data.provider === "turnkey") {
+      result = await signingService.initializeTurnkeySigning(
+        actor.organizationId,
+        parsed.data.projectId,
+        {
+          apiBaseUrl: parsed.data.apiBaseUrl,
+          requestDelayMs: parsed.data.requestDelayMs,
+          privateKeyId: parsed.data.privateKeyId,
           walletLabel: parsed.data.walletLabel,
         }
       );
@@ -249,6 +263,13 @@ export const switchSigning = async (c: AppContext) => {
         requestDelayMs: parsed.data.requestDelayMs,
         walletLabel: parsed.data.walletLabel,
       });
+    } else if (parsed.data.provider === "turnkey") {
+      result = await signingService.initializeTurnkeySigning(actor.organizationId, projectId, {
+        apiBaseUrl: parsed.data.apiBaseUrl,
+        requestDelayMs: parsed.data.requestDelayMs,
+        privateKeyId: parsed.data.privateKeyId,
+        walletLabel: parsed.data.walletLabel,
+      });
     } else {
       result = await signingService.initializeCoinbaseCdpSigning(actor.organizationId, projectId, {
         apiBaseUrl: parsed.data.apiBaseUrl,
@@ -272,6 +293,45 @@ export const switchSigning = async (c: AppContext) => {
     }
     throw error;
   }
+};
+
+/**
+ * Return provider switch options with wallet-reuse hints for UX.
+ *
+ * GET /wallets/switch-options
+ */
+export const getSwitchProviderOptions = async (c: AppContext) => {
+  const actor = resolveActor(c);
+  const projectId = c.req.query("projectId") ?? actor.projectId;
+  const signingService = createSigningService(c.env);
+  const reuseState = await signingService.getProviderReuseState(actor.organizationId, projectId);
+
+  const response: SwitchProviderOptionsResponse = {
+    providers: [
+      {
+        provider: "privy",
+        hasReusableWallet: reuseState.privy,
+        needsWalletLabel: !reuseState.privy,
+      },
+      {
+        provider: "coinbase_cdp",
+        hasReusableWallet: reuseState.coinbase_cdp,
+        needsWalletLabel: !reuseState.coinbase_cdp,
+      },
+      {
+        provider: "turnkey",
+        hasReusableWallet: reuseState.turnkey,
+        needsWalletLabel: !reuseState.turnkey,
+      },
+      {
+        provider: "local",
+        hasReusableWallet: false,
+        needsWalletLabel: true,
+      },
+    ],
+  };
+
+  return success(c, response);
 };
 
 // ═══════════════════════════════════════════════════════════════════════════

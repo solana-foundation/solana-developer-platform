@@ -93,7 +93,8 @@ export async function initializeCustody(formData: FormData) {
   const provider = (getString(formData, "provider") || "privy") as
     | "privy"
     | "local"
-    | "coinbase_cdp";
+    | "coinbase_cdp"
+    | "turnkey";
   const walletLabel = getOptionalString(formData, "walletLabel");
   const apiBaseUrl = getOptionalString(formData, "apiBaseUrl");
   const network = getOptionalString(formData, "network");
@@ -121,8 +122,10 @@ export async function switchCustodyProvider(formData: FormData) {
   const provider = (getString(formData, "provider") || "privy") as
     | "privy"
     | "local"
-    | "coinbase_cdp";
+    | "coinbase_cdp"
+    | "turnkey";
   const confirm = getString(formData, "confirm");
+  const walletLabel = getOptionalString(formData, "walletLabel");
   const apiBaseUrl = getOptionalString(formData, "apiBaseUrl");
   const network = getOptionalString(formData, "network");
   const walletAddress = getOptionalString(formData, "walletAddress");
@@ -154,6 +157,7 @@ export async function switchCustodyProvider(formData: FormData) {
     method: "POST",
     body: JSON.stringify({
       provider,
+      walletLabel,
       ...(apiBaseUrl ? { apiBaseUrl } : {}),
       ...(network ? { network } : {}),
       ...(walletAddress ? { walletAddress } : {}),

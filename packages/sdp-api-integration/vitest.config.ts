@@ -40,6 +40,11 @@ const privyAppId = getEnv("PRIVY_APP_ID");
 const privyAppSecret = getEnv("PRIVY_APP_SECRET");
 const privyApiBaseUrl = getEnv("PRIVY_API_BASE_URL");
 const privyRequestDelayMs = getEnv("PRIVY_REQUEST_DELAY_MS");
+const turnkeyApiPublicKey = getEnv("TURNKEY_API_PUBLIC_KEY");
+const turnkeyApiPrivateKey = getEnv("TURNKEY_API_PRIVATE_KEY");
+const turnkeyOrganizationId = getEnv("TURNKEY_ORGANIZATION_ID");
+const turnkeyApiBaseUrl = getEnv("TURNKEY_API_BASE_URL");
+const turnkeyRequestDelayMs = getEnv("TURNKEY_REQUEST_DELAY_MS");
 
 export default defineWorkersConfig({
   resolve: {
@@ -83,6 +88,11 @@ export default defineWorkersConfig({
             ...(privyAppSecret && { PRIVY_APP_SECRET: privyAppSecret }),
             ...(privyApiBaseUrl && { PRIVY_API_BASE_URL: privyApiBaseUrl }),
             ...(privyRequestDelayMs && { PRIVY_REQUEST_DELAY_MS: privyRequestDelayMs }),
+            ...(turnkeyApiPublicKey && { TURNKEY_API_PUBLIC_KEY: turnkeyApiPublicKey }),
+            ...(turnkeyApiPrivateKey && { TURNKEY_API_PRIVATE_KEY: turnkeyApiPrivateKey }),
+            ...(turnkeyOrganizationId && { TURNKEY_ORGANIZATION_ID: turnkeyOrganizationId }),
+            ...(turnkeyApiBaseUrl && { TURNKEY_API_BASE_URL: turnkeyApiBaseUrl }),
+            ...(turnkeyRequestDelayMs && { TURNKEY_REQUEST_DELAY_MS: turnkeyRequestDelayMs }),
           },
         },
       },

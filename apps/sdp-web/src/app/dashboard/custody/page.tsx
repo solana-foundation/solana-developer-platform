@@ -22,7 +22,7 @@ import { Suspense } from "react";
 import { setDefaultCustodyWallet } from "./actions";
 import { WalletSignerCheckButton } from "./wallet-signer-check-button";
 
-type CustodyProvider = "privy" | "local" | "fireblocks" | "coinbase_cdp";
+type CustodyProvider = "privy" | "local" | "fireblocks" | "coinbase_cdp" | "turnkey";
 
 interface CustodyConfig {
   id: string;
@@ -275,7 +275,9 @@ async function WalletsSection({
                         </TableCell>
                         <TableCell className="font-mono text-xs">{w.publicKey}</TableCell>
                         <TableCell className="font-mono text-xs text-[rgba(28,28,29,0.72)]">
-                          {w.walletId}
+                          <div className="max-w-[10rem] truncate sm:max-w-[14rem]" title={w.walletId}>
+                            {w.walletId}
+                          </div>
                         </TableCell>
                         <TableCell className="text-right">
                           <div className="inline-flex items-center justify-end gap-2">

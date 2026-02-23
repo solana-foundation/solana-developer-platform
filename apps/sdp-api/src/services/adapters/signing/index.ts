@@ -10,6 +10,7 @@
  * - "fireblocks": Fireblocks MPC custody (KeychainFireblocksAdapter)
  * - "privy": Privy hosted wallets (KeychainPrivyAdapter)
  * - "coinbase_cdp": Coinbase CDP hosted wallets (KeychainCoinbaseAdapter)
+ * - "turnkey": Turnkey hosted wallets (KeychainTurnkeyAdapter)
  */
 
 import type { SigningPort } from "@/services/ports";
@@ -23,6 +24,8 @@ import {
   KeychainMemoryAdapter,
   KeychainPrivyAdapter,
   type KeychainPrivyConfig,
+  KeychainTurnkeyAdapter,
+  type KeychainTurnkeyConfig,
 } from "./keychain";
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -30,7 +33,7 @@ import {
 // ═══════════════════════════════════════════════════════════════════════════
 
 /** Supported signing/custody provider types */
-export type SigningProviderType = "local" | "fireblocks" | "privy" | "coinbase_cdp";
+export type SigningProviderType = "local" | "fireblocks" | "privy" | "coinbase_cdp" | "turnkey";
 
 /**
  * Database record for signing/custody configuration
@@ -67,6 +70,8 @@ export async function createSigningAdapterFromEnv(env: Env): Promise<SigningPort
       return createPrivyAdapterFromEnv(env);
     case "coinbase_cdp":
       return createCoinbaseAdapterFromEnv(env);
+    case "turnkey":
+      return createTurnkeyAdapterFromEnv(env);
     default:
       return createMemoryAdapterFromEnv(env);
   }
@@ -102,6 +107,8 @@ export async function createSigningAdapterFromConfig(
       return createPrivyAdapterFromRecord(record, env);
     case "coinbase_cdp":
       return createCoinbaseAdapterFromRecord(record, env);
+    case "turnkey":
+      return createTurnkeyAdapterFromRecord(record, env);
     default:
       return createMemoryAdapterFromEnv(env);
   }
@@ -154,6 +161,16 @@ interface CoinbaseConfigJson {
   walletId?: string;
 }
 
+interface TurnkeyConfigJson {
+  provider?: string;
+  organizationId?: string;
+  apiBaseUrl?: string;
+  requestDelayMs?: number;
+  privateKeyId?: string;
+  publicKey?: string;
+  defaultWalletPublicKey?: string;
+}
+
 function createFireblocksAdapterFromEnv(env: Env): KeychainFireblocksAdapter {
   const apiKey = env.FIREBLOCKS_API_KEY;
   const apiSecret = env.FIREBLOCKS_API_SECRET;
@@ -180,7 +197,9 @@ function createPrivyAdapterFromEnv(env: Env): KeychainPrivyAdapter {
   const appId = env.PRIVY_APP_ID;
   const appSecret = env.PRIVY_APP_SECRET;
   const walletId = env.PRIVY_WALLET_ID;
-  const requestDelayMs = parseOptionalRequestDelayMs(env.PRIVY_REQUEST_DELAY_MS);
+  const requestDelayMs = parseOptionalRequestDelayMs(env.PRIVY_REQUEST_DELAY_MS, {
+    envVarName: "PRIVY_REQUEST_DELAY_MS",
+  });
 
   if (!appId || !appSecret || !walletId) {
     throw new SigningError(
@@ -217,6 +236,34 @@ function createCoinbaseAdapterFromEnv(env: Env): KeychainCoinbaseAdapter {
     walletSecret,
     apiBaseUrl: env.COINBASE_CDP_API_BASE_URL,
     defaultWalletId: walletId,
+  });
+}
+
+function createTurnkeyAdapterFromEnv(env: Env): KeychainTurnkeyAdapter {
+  const apiPublicKey = env.TURNKEY_API_PUBLIC_KEY;
+  const apiPrivateKey = env.TURNKEY_API_PRIVATE_KEY;
+  const organizationId = env.TURNKEY_ORGANIZATION_ID;
+  const walletId = env.TURNKEY_PRIVATE_KEY_ID;
+  const publicKey = env.TURNKEY_PUBLIC_KEY;
+  const requestDelayMs = parseOptionalRequestDelayMs(env.TURNKEY_REQUEST_DELAY_MS, {
+    envVarName: "TURNKEY_REQUEST_DELAY_MS",
+  });
+
+  if (!apiPublicKey || !apiPrivateKey || !organizationId || !walletId || !publicKey) {
+    throw new SigningError(
+      "Turnkey environment variables not configured: TURNKEY_API_PUBLIC_KEY, TURNKEY_API_PRIVATE_KEY, TURNKEY_ORGANIZATION_ID, TURNKEY_PRIVATE_KEY_ID, TURNKEY_PUBLIC_KEY",
+      "PROVIDER_NOT_CONFIGURED"
+    );
+  }
+
+  return new KeychainTurnkeyAdapter({
+    apiPublicKey,
+    apiPrivateKey,
+    organizationId,
+    apiBaseUrl: env.TURNKEY_API_BASE_URL,
+    requestDelayMs,
+    defaultWalletId: normalizeTurnkeyWalletId(walletId),
+    defaultWalletPublicKey: publicKey,
   });
 }
 
@@ -326,16 +373,80 @@ function createCoinbaseAdapterFromRecord(
   return new KeychainCoinbaseAdapter(config);
 }
 
-function parseOptionalRequestDelayMs(value?: string): number | undefined {
+function createTurnkeyAdapterFromRecord(
+  record: SigningConfigRecord,
+  env: Env
+): KeychainTurnkeyAdapter {
+  let parsed: TurnkeyConfigJson;
+  try {
+    parsed = JSON.parse(record.config) as TurnkeyConfigJson;
+  } catch {
+    throw new SigningError("Invalid Turnkey configuration JSON", "PROVIDER_NOT_CONFIGURED");
+  }
+
+  if (parsed.provider && parsed.provider !== "turnkey") {
+    throw new SigningError("Custody configuration provider mismatch", "PROVIDER_NOT_CONFIGURED");
+  }
+
+  const apiPublicKey = env.TURNKEY_API_PUBLIC_KEY;
+  const apiPrivateKey = env.TURNKEY_API_PRIVATE_KEY;
+  const organizationId = parsed.organizationId ?? env.TURNKEY_ORGANIZATION_ID;
+  const requestDelayMs =
+    parsed.requestDelayMs ??
+    parseOptionalRequestDelayMs(env.TURNKEY_REQUEST_DELAY_MS, {
+      envVarName: "TURNKEY_REQUEST_DELAY_MS",
+    });
+
+  const defaultWalletId =
+    record.defaultWalletId ??
+    (parsed.privateKeyId ? normalizeTurnkeyWalletId(parsed.privateKeyId) : undefined) ??
+    (env.TURNKEY_PRIVATE_KEY_ID ? normalizeTurnkeyWalletId(env.TURNKEY_PRIVATE_KEY_ID) : undefined);
+  const defaultWalletPublicKey =
+    parsed.defaultWalletPublicKey ?? parsed.publicKey ?? env.TURNKEY_PUBLIC_KEY;
+
+  if (
+    !apiPublicKey ||
+    !apiPrivateKey ||
+    !organizationId ||
+    !defaultWalletId ||
+    !defaultWalletPublicKey
+  ) {
+    throw new SigningError(
+      "Turnkey config missing API credentials/default wallet and env is not configured",
+      "PROVIDER_NOT_CONFIGURED"
+    );
+  }
+
+  const config: KeychainTurnkeyConfig = {
+    apiPublicKey,
+    apiPrivateKey,
+    organizationId,
+    apiBaseUrl: parsed.apiBaseUrl ?? env.TURNKEY_API_BASE_URL,
+    requestDelayMs,
+    defaultWalletId,
+    defaultWalletPublicKey,
+  };
+
+  return new KeychainTurnkeyAdapter(config);
+}
+
+function parseOptionalRequestDelayMs(
+  value?: string,
+  options?: { envVarName?: string }
+): number | undefined {
   if (!value) return undefined;
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed < 0) {
     throw new SigningError(
-      "PRIVY_REQUEST_DELAY_MS must be a non-negative number",
+      `${options?.envVarName ?? "REQUEST_DELAY_MS"} must be a non-negative number`,
       "INVALID_REQUEST"
     );
   }
   return parsed;
+}
+
+function normalizeTurnkeyWalletId(privateKeyId: string): string {
+  return privateKeyId.startsWith("turnkey_") ? privateKeyId : `turnkey_${privateKeyId}`;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -348,7 +459,9 @@ export {
   KeychainFireblocksAdapter,
   KeychainMemoryAdapter,
   KeychainPrivyAdapter,
+  KeychainTurnkeyAdapter,
   type KeychainCoinbaseConfig,
   type KeychainFireblocksConfig,
   type KeychainPrivyConfig,
+  type KeychainTurnkeyConfig,
 } from "./keychain";

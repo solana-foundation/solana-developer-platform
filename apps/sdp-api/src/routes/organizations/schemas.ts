@@ -23,6 +23,12 @@ const createOrgCustodySchema = z.discriminatedUnion("provider", [
       .regex(/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/)
       .optional(),
   }),
+  z.object({
+    provider: z.literal("turnkey"),
+    apiBaseUrl: z.string().url().optional(),
+    requestDelayMs: z.number().int().min(0).max(3000).optional(),
+    privateKeyId: z.string().min(1).optional(),
+  }),
 ]);
 
 export const createOrgSchema = z.object({
