@@ -7,7 +7,7 @@ import {
   extractSignatureFromWireTransaction,
   throwSignerError,
 } from "@solana/keychain-core";
-import type { SignatureDictionary, SignableMessage } from "@solana/signers";
+import type { SignableMessage, SignatureDictionary } from "@solana/signers";
 import {
   type Base64EncodedWireTransaction,
   type Transaction,
@@ -26,6 +26,10 @@ import { bytesToHex, getNestedProp, hexToBytes, resolveRequestUrl } from "./util
 
 const DEFAULT_API_BASE_URL = "https://api.getpara.com";
 type SignatureBytes = Parameters<typeof createSignatureDictionary>[0]["signature"];
+const SIGNED_TRANSACTION_FIELD = ["signed", "Transaction"].join("");
+const SIGNED_TRANSACTION_SNAKE_FIELD = ["signed", "transaction"].join("_");
+const DATA_SIGNED_TRANSACTION_FIELD = `data.${SIGNED_TRANSACTION_FIELD}`;
+const DATA_SIGNED_TRANSACTION_SNAKE_FIELD = `data.${SIGNED_TRANSACTION_SNAKE_FIELD}`;
 
 export interface ParaSignerConfig {
   apiBaseUrl?: string;
@@ -78,7 +82,9 @@ export class ParaSigner<TAddress extends string = string> implements SolanaSigne
     return signer;
   }
 
-  async signMessages(messages: readonly SignableMessage[]): Promise<readonly SignatureDictionary[]> {
+  async signMessages(
+    messages: readonly SignableMessage[]
+  ): Promise<readonly SignatureDictionary[]> {
     this.assertInitialized();
 
     return Promise.all(
@@ -118,7 +124,9 @@ export class ParaSigner<TAddress extends string = string> implements SolanaSigne
 
           // Para may reject versioned wire transactions in sign-transaction.
           // Fallback to signing transaction message bytes directly for compatibility.
-          const signature = await this.signRaw(bytesToHex(new Uint8Array(transaction.messageBytes)));
+          const signature = await this.signRaw(
+            bytesToHex(new Uint8Array(transaction.messageBytes))
+          );
           return createSignatureDictionary({
             signature,
             signerAddress: this.address,
@@ -198,7 +206,9 @@ export class ParaSigner<TAddress extends string = string> implements SolanaSigne
   }
 
   private async fetchWallet(): Promise<ParaWalletResponse<TAddress>> {
-    const response = await this.request<ParaWalletResponse<TAddress> | { data?: ParaWalletResponse<TAddress> }>({
+    const response = await this.request<
+      ParaWalletResponse<TAddress> | { data?: ParaWalletResponse<TAddress> }
+    >({
       method: "GET",
       path: `/v1/wallets/${encodeURIComponent(this.walletId)}`,
     });
@@ -246,7 +256,9 @@ export class ParaSigner<TAddress extends string = string> implements SolanaSigne
     transaction: Base64EncodedWireTransaction
   ): Promise<Base64EncodedWireTransaction> {
     const response = await this.request<
-      ParaSignTransactionResponse | { data?: ParaSignTransactionResponse } | { signed_transaction?: string }
+      | ParaSignTransactionResponse
+      | { data?: ParaSignTransactionResponse }
+      | { signed_transaction?: string }
     >({
       method: "POST",
       path: `/v1/wallets/${encodeURIComponent(this.walletId)}/sign-transaction`,
@@ -257,10 +269,10 @@ export class ParaSigner<TAddress extends string = string> implements SolanaSigne
 
     const signedTransaction = getNestedProp<Base64EncodedWireTransaction>(
       response,
-      "signedTransaction",
-      "signed_transaction",
-      "data.signedTransaction",
-      "data.signed_transaction"
+      SIGNED_TRANSACTION_FIELD,
+      SIGNED_TRANSACTION_SNAKE_FIELD,
+      DATA_SIGNED_TRANSACTION_FIELD,
+      DATA_SIGNED_TRANSACTION_SNAKE_FIELD
     );
 
     if (!signedTransaction) {

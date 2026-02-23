@@ -224,6 +224,9 @@ importers:
       '@sdp/keychain-coinbase':
         specifier: workspace:*
         version: link:../sdp-keychain-coinbase
+      '@sdp/keychain-para':
+        specifier: workspace:*
+        version: link:../sdp-keychain-para
       '@sdp/types':
         specifier: workspace:*
         version: link:../sdp-types

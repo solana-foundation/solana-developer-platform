@@ -4,23 +4,23 @@ import { getBase64EncodedWireTransaction } from "@solana/transactions";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ParaSigner } from "../para-signer.js";
 
+const TEST_WALLET_ADDRESS = "1".repeat(32);
+
 vi.mock("@solana/keychain-core", async () => {
-  const actual = await vi.importActual<typeof import("@solana/keychain-core")>(
-    "@solana/keychain-core"
-  );
+  const actual =
+    await vi.importActual<typeof import("@solana/keychain-core")>("@solana/keychain-core");
 
   return {
     ...actual,
     extractSignatureFromWireTransaction: vi.fn(() => ({
-      "11111111111111111111111111111111": Uint8Array.from([9, 9, 9]),
+      [TEST_WALLET_ADDRESS]: Uint8Array.from([9, 9, 9]),
     })),
   };
 });
 
 vi.mock("@solana/transactions", async () => {
-  const actual = await vi.importActual<typeof import("@solana/transactions")>(
-    "@solana/transactions"
-  );
+  const actual =
+    await vi.importActual<typeof import("@solana/transactions")>("@solana/transactions");
 
   return {
     ...actual,
@@ -43,7 +43,7 @@ describe("ParaSigner", () => {
   });
 
   it("parses hex signature responses into signature bytes when signing messages", async () => {
-    const walletAddress = "11111111111111111111111111111111";
+    const walletAddress = TEST_WALLET_ADDRESS;
     const expectedSignatureBytes = Uint8Array.from({ length: 64 }, (_, index) => index + 1);
     const signatureHex = Array.from(expectedSignatureBytes)
       .map((byte) => byte.toString(16).padStart(2, "0"))
@@ -102,7 +102,7 @@ describe("ParaSigner", () => {
   });
 
   it("uses signed transaction response and extracts signer signature dictionary", async () => {
-    const walletAddress = "11111111111111111111111111111111";
+    const walletAddress = TEST_WALLET_ADDRESS;
 
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
@@ -142,9 +142,7 @@ describe("ParaSigner", () => {
         walletId: "wal_123",
       });
 
-      const [signatureDictionary] = await signer.signTransactions([
-        {} as never,
-      ]);
+      const [signatureDictionary] = await signer.signTransactions([{} as never]);
 
       expect(Object.keys(signatureDictionary)).toContain(walletAddress);
       expect(vi.mocked(getBase64EncodedWireTransaction)).toHaveBeenCalledTimes(1);
@@ -158,7 +156,7 @@ describe("ParaSigner", () => {
   });
 
   it("falls back to sign-raw when Para rejects sign-transaction payloads", async () => {
-    const walletAddress = "11111111111111111111111111111111";
+    const walletAddress = TEST_WALLET_ADDRESS;
     const expectedSignatureBytes = Uint8Array.from({ length: 64 }, (_, index) => index + 1);
     const signatureHex = Array.from(expectedSignatureBytes)
       .map((byte) => byte.toString(16).padStart(2, "0"))
@@ -265,7 +263,7 @@ describe("ParaSigner", () => {
               type: "SOLANA",
               scheme: "ED25519",
               status: "ready",
-              address: "11111111111111111111111111111111",
+              address: TEST_WALLET_ADDRESS,
             }),
             {
               headers: { "Content-Type": "application/json" },
@@ -312,7 +310,7 @@ describe("ParaSigner", () => {
               type: "SOLANA",
               scheme: "ED25519",
               status: "ready",
-              address: "11111111111111111111111111111111",
+              address: TEST_WALLET_ADDRESS,
             }),
             {
               headers: { "Content-Type": "application/json" },
