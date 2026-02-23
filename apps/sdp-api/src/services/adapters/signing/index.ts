@@ -10,6 +10,7 @@
  * - "fireblocks": Fireblocks MPC custody (KeychainFireblocksAdapter)
  * - "privy": Privy hosted wallets (KeychainPrivyAdapter)
  * - "coinbase_cdp": Coinbase CDP hosted wallets (KeychainCoinbaseAdapter)
+ * - "para": Para hosted wallets (KeychainParaAdapter)
  * - "turnkey": Turnkey hosted wallets (KeychainTurnkeyAdapter)
  */
 
@@ -22,6 +23,8 @@ import {
   KeychainFireblocksAdapter,
   type KeychainFireblocksConfig,
   KeychainMemoryAdapter,
+  KeychainParaAdapter,
+  type KeychainParaConfig,
   KeychainPrivyAdapter,
   type KeychainPrivyConfig,
   KeychainTurnkeyAdapter,
@@ -33,7 +36,13 @@ import {
 // ═══════════════════════════════════════════════════════════════════════════
 
 /** Supported signing/custody provider types */
-export type SigningProviderType = "local" | "fireblocks" | "privy" | "coinbase_cdp" | "turnkey";
+export type SigningProviderType =
+  | "local"
+  | "fireblocks"
+  | "privy"
+  | "coinbase_cdp"
+  | "para"
+  | "turnkey";
 
 /**
  * Database record for signing/custody configuration
@@ -70,6 +79,8 @@ export async function createSigningAdapterFromEnv(env: Env): Promise<SigningPort
       return createPrivyAdapterFromEnv(env);
     case "coinbase_cdp":
       return createCoinbaseAdapterFromEnv(env);
+    case "para":
+      return createParaAdapterFromEnv(env);
     case "turnkey":
       return createTurnkeyAdapterFromEnv(env);
     default:
@@ -107,6 +118,8 @@ export async function createSigningAdapterFromConfig(
       return createPrivyAdapterFromRecord(record, env);
     case "coinbase_cdp":
       return createCoinbaseAdapterFromRecord(record, env);
+    case "para":
+      return createParaAdapterFromRecord(record, env);
     case "turnkey":
       return createTurnkeyAdapterFromRecord(record, env);
     default:
@@ -169,6 +182,13 @@ interface TurnkeyConfigJson {
   privateKeyId?: string;
   publicKey?: string;
   defaultWalletPublicKey?: string;
+}
+
+interface ParaConfigJson {
+  provider?: string;
+  apiBaseUrl?: string;
+  requestDelayMs?: number;
+  walletId?: string;
 }
 
 function createFireblocksAdapterFromEnv(env: Env): KeychainFireblocksAdapter {
@@ -264,6 +284,28 @@ function createTurnkeyAdapterFromEnv(env: Env): KeychainTurnkeyAdapter {
     requestDelayMs,
     defaultWalletId: normalizeTurnkeyWalletId(walletId),
     defaultWalletPublicKey: publicKey,
+  });
+}
+
+function createParaAdapterFromEnv(env: Env): KeychainParaAdapter {
+  const apiKey = env.PARA_API_KEY;
+  const walletId = env.PARA_WALLET_ID;
+  const requestDelayMs = parseOptionalRequestDelayMs(env.PARA_REQUEST_DELAY_MS, {
+    envVarName: "PARA_REQUEST_DELAY_MS",
+  });
+
+  if (!apiKey || !walletId) {
+    throw new SigningError(
+      "Para environment variables not configured: PARA_API_KEY, PARA_WALLET_ID",
+      "PROVIDER_NOT_CONFIGURED"
+    );
+  }
+
+  return new KeychainParaAdapter({
+    apiKey,
+    apiBaseUrl: env.PARA_API_BASE_URL,
+    requestDelayMs,
+    defaultWalletId: normalizeParaWalletId(walletId),
   });
 }
 
@@ -430,6 +472,46 @@ function createTurnkeyAdapterFromRecord(
   return new KeychainTurnkeyAdapter(config);
 }
 
+function createParaAdapterFromRecord(record: SigningConfigRecord, env: Env): KeychainParaAdapter {
+  let parsed: ParaConfigJson;
+  try {
+    parsed = JSON.parse(record.config) as ParaConfigJson;
+  } catch {
+    throw new SigningError("Invalid Para configuration JSON", "PROVIDER_NOT_CONFIGURED");
+  }
+
+  if (parsed.provider && parsed.provider !== "para") {
+    throw new SigningError("Custody configuration provider mismatch", "PROVIDER_NOT_CONFIGURED");
+  }
+
+  const apiKey = env.PARA_API_KEY;
+  const requestDelayMs =
+    parsed.requestDelayMs ??
+    parseOptionalRequestDelayMs(env.PARA_REQUEST_DELAY_MS, {
+      envVarName: "PARA_REQUEST_DELAY_MS",
+    });
+  const defaultWalletId =
+    record.defaultWalletId ??
+    (parsed.walletId ? normalizeParaWalletId(parsed.walletId) : undefined) ??
+    (env.PARA_WALLET_ID ? normalizeParaWalletId(env.PARA_WALLET_ID) : undefined);
+
+  if (!apiKey || !defaultWalletId) {
+    throw new SigningError(
+      "Para config missing API key/default wallet and env is not configured",
+      "PROVIDER_NOT_CONFIGURED"
+    );
+  }
+
+  const config: KeychainParaConfig = {
+    apiKey,
+    apiBaseUrl: parsed.apiBaseUrl ?? env.PARA_API_BASE_URL,
+    requestDelayMs,
+    defaultWalletId,
+  };
+
+  return new KeychainParaAdapter(config);
+}
+
 function parseOptionalRequestDelayMs(
   value?: string,
   options?: { envVarName?: string }
@@ -449,6 +531,10 @@ function normalizeTurnkeyWalletId(privateKeyId: string): string {
   return privateKeyId.startsWith("turnkey_") ? privateKeyId : `turnkey_${privateKeyId}`;
 }
 
+function normalizeParaWalletId(walletId: string): string {
+  return walletId.startsWith("para_") ? walletId : `para_${walletId}`;
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Re-exports
 // ═══════════════════════════════════════════════════════════════════════════
@@ -458,10 +544,12 @@ export {
   KeychainCoinbaseAdapter,
   KeychainFireblocksAdapter,
   KeychainMemoryAdapter,
+  KeychainParaAdapter,
   KeychainPrivyAdapter,
   KeychainTurnkeyAdapter,
   type KeychainCoinbaseConfig,
   type KeychainFireblocksConfig,
+  type KeychainParaConfig,
   type KeychainPrivyConfig,
   type KeychainTurnkeyConfig,
 } from "./keychain";

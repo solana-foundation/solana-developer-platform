@@ -7,6 +7,7 @@ import { AuditService } from "@/services/audit.service";
 import {
   provisionCoinbaseCdpAccount,
   provisionFireblocksVaultAccount,
+  provisionParaWallet,
 } from "@/services/custody/provisioning";
 import { createSigningService } from "@/services/domain/signing.service";
 import { KVService } from "@/services/kv.service";
@@ -224,6 +225,19 @@ export const createOrganization = async (c: AppContext) => {
           network: custody.network ?? c.env.COINBASE_CDP_NETWORK,
           walletAddress: provisioned.address,
           accountPolicy: custody.accountPolicy,
+        });
+      } else if (custody.provider === "para") {
+        const provisioned = await provisionParaWallet(c.env, {
+          orgId,
+          orgSlug: slug,
+          apiBaseUrl: custody.apiBaseUrl,
+          walletId: custody.walletId,
+        });
+
+        await signingService.initializeParaSigning(orgId, undefined, {
+          apiBaseUrl: custody.apiBaseUrl ?? c.env.PARA_API_BASE_URL,
+          requestDelayMs: custody.requestDelayMs,
+          walletId: provisioned.walletId,
         });
       } else if (custody.provider === "turnkey") {
         await signingService.initializeTurnkeySigning(orgId, undefined, {

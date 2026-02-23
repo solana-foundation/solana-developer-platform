@@ -93,7 +93,13 @@ export async function getTestCustodyConfig(
     id: row.id,
     organizationId: row.organization_id,
     projectId: row.project_id,
-    provider: row.provider as "local" | "fireblocks" | "privy",
+    provider: row.provider as
+      | "local"
+      | "fireblocks"
+      | "privy"
+      | "coinbase_cdp"
+      | "para"
+      | "turnkey",
     config: row.config,
     defaultWalletId: row.default_wallet_id,
     status: row.status as "active" | "inactive",
@@ -136,7 +142,13 @@ export async function getTestCustodyConfigByOrg(
     id: row.id,
     organizationId: row.organization_id,
     projectId: row.project_id,
-    provider: row.provider as "local" | "fireblocks" | "privy",
+    provider: row.provider as
+      | "local"
+      | "fireblocks"
+      | "privy"
+      | "coinbase_cdp"
+      | "para"
+      | "turnkey",
     config: row.config,
     defaultWalletId: row.default_wallet_id,
     status: row.status as "active" | "inactive",

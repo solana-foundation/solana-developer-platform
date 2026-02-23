@@ -24,6 +24,12 @@ const createOrgCustodySchema = z.discriminatedUnion("provider", [
       .optional(),
   }),
   z.object({
+    provider: z.literal("para"),
+    apiBaseUrl: z.string().url().optional(),
+    requestDelayMs: z.number().int().min(0).max(3000).optional(),
+    walletId: z.string().min(1).optional(),
+  }),
+  z.object({
     provider: z.literal("turnkey"),
     apiBaseUrl: z.string().url().optional(),
     requestDelayMs: z.number().int().min(0).max(3000).optional(),

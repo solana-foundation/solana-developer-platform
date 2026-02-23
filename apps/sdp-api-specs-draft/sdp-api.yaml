@@ -137,7 +137,7 @@ components:
     #    - Use case: Wallet integrations, user-controlled signing
     #
     # 2. EXECUTE MODE (default, no suffix)
-    #    - Server signs using custody provider (Fireblocks, Dfns, Turnkey, etc.)
+    #    - Server signs using custody provider (Fireblocks, Turnkey, etc.)
     #    - Server submits the transaction
     #    - Returns transaction signature and status
     #    - Use case: Server-side automation, treasury operations

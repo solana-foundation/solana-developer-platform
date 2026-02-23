@@ -84,6 +84,8 @@ function resolveActor(c: AppContext): { organizationId: string; projectId?: stri
  * For "privy" provider: Uses platform-managed Privy credentials and provisions a wallet.
  * For "coinbase_cdp" provider: Uses platform-managed CDP credentials and provisions
  * a Solana account.
+ * For "para" provider: Uses platform-managed Para credentials and provisions
+ * a Solana wallet.
  * For "turnkey" provider: Uses platform-managed Turnkey credentials and provisions
  * a Solana private key.
  *
@@ -142,6 +144,17 @@ export const initializeSigning = async (c: AppContext) => {
           apiBaseUrl: parsed.data.apiBaseUrl,
           requestDelayMs: parsed.data.requestDelayMs,
           privateKeyId: parsed.data.privateKeyId,
+          walletLabel: parsed.data.walletLabel,
+        }
+      );
+    } else if (parsed.data.provider === "para") {
+      result = await signingService.initializeParaSigning(
+        actor.organizationId,
+        parsed.data.projectId,
+        {
+          apiBaseUrl: parsed.data.apiBaseUrl,
+          requestDelayMs: parsed.data.requestDelayMs,
+          walletId: parsed.data.walletId,
           walletLabel: parsed.data.walletLabel,
         }
       );
@@ -270,6 +283,13 @@ export const switchSigning = async (c: AppContext) => {
         privateKeyId: parsed.data.privateKeyId,
         walletLabel: parsed.data.walletLabel,
       });
+    } else if (parsed.data.provider === "para") {
+      result = await signingService.initializeParaSigning(actor.organizationId, projectId, {
+        apiBaseUrl: parsed.data.apiBaseUrl,
+        requestDelayMs: parsed.data.requestDelayMs,
+        walletId: parsed.data.walletId,
+        walletLabel: parsed.data.walletLabel,
+      });
     } else {
       result = await signingService.initializeCoinbaseCdpSigning(actor.organizationId, projectId, {
         apiBaseUrl: parsed.data.apiBaseUrl,
@@ -317,6 +337,11 @@ export const getSwitchProviderOptions = async (c: AppContext) => {
         provider: "coinbase_cdp",
         hasReusableWallet: reuseState.coinbase_cdp,
         needsWalletLabel: !reuseState.coinbase_cdp,
+      },
+      {
+        provider: "para",
+        hasReusableWallet: reuseState.para,
+        needsWalletLabel: !reuseState.para,
       },
       {
         provider: "turnkey",

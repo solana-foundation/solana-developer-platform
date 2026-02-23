@@ -9,10 +9,12 @@ import type { Env } from "@/types/env";
 import type { VaultAddressesResponse } from "@solana/keychain-fireblocks";
 import { ApiKeyStamper } from "@solana/keychain-turnkey";
 import { SignJWT, importJWK, importPKCS8 } from "jose";
+import { Buffer } from "node:buffer";
 
 const DEFAULT_FIREBLOCKS_API_BASE_URL = "https://api.fireblocks.io";
 const DEFAULT_PRIVY_API_BASE_URL = "https://api.privy.io/v1";
 const DEFAULT_COINBASE_CDP_API_BASE_URL = "https://api.cdp.coinbase.com/platform";
+const DEFAULT_PARA_API_BASE_URL = "https://api.getpara.com";
 const DEFAULT_TURNKEY_API_BASE_URL = "https://api.turnkey.com";
 const DEFAULT_COINBASE_CDP_NETWORK = "solana-devnet";
 const DEFAULT_FIREBLOCKS_ASSET_ID = "SOL";
@@ -58,6 +60,15 @@ interface TurnkeyGetPrivateKeyResponse {
       address?: string;
     }>;
   };
+}
+
+interface ParaWalletResponse {
+  id: string;
+  type?: "EVM" | "SOLANA" | "COSMOS";
+  scheme?: "DKLS" | "CGGMP" | "ED25519";
+  status?: "creating" | "ready" | string;
+  address?: string;
+  publicKey?: string;
 }
 
 export interface ProvisionFireblocksOptions {
@@ -107,6 +118,21 @@ export interface ProvisionTurnkeyOptions {
 export interface ProvisionTurnkeyResult {
   privateKeyId: string;
   address: string;
+}
+
+export interface ProvisionParaOptions {
+  orgId: string;
+  orgSlug: string;
+  projectId?: string;
+  walletId?: string;
+  apiBaseUrl?: string;
+}
+
+export interface ProvisionParaResult {
+  walletId: string;
+  address: string;
+  userIdentifier: string;
+  userIdentifierType: "CUSTOM_ID";
 }
 
 export async function provisionFireblocksVaultAccount(
@@ -335,6 +361,69 @@ export async function provisionCoinbaseCdpAccount(
   }
 }
 
+export async function provisionParaWallet(
+  env: Env,
+  options: ProvisionParaOptions
+): Promise<ProvisionParaResult> {
+  const apiKey = env.PARA_API_KEY;
+  if (!apiKey) {
+    throw new SigningError(
+      "Para environment variables not configured: PARA_API_KEY",
+      "PROVIDER_NOT_CONFIGURED"
+    );
+  }
+
+  const apiBaseUrl = options.apiBaseUrl ?? env.PARA_API_BASE_URL ?? DEFAULT_PARA_API_BASE_URL;
+
+  if (options.walletId) {
+    const existing = await paraRequest<ParaWalletResponse>({
+      apiBaseUrl,
+      apiKey,
+      method: "GET",
+      path: `/v1/wallets/${encodeURIComponent(options.walletId)}`,
+    });
+    const validated = validateParaWallet(existing, options.walletId);
+    return {
+      walletId: validated.id,
+      address: validated.address,
+      userIdentifier: buildParaUserIdentifier(options),
+      userIdentifierType: "CUSTOM_ID",
+    };
+  }
+
+  const userIdentifier = buildParaUserIdentifier(options);
+  const created = await paraRequest<ParaWalletResponse>({
+    apiBaseUrl,
+    apiKey,
+    method: "POST",
+    path: "/v1/wallets",
+    body: {
+      type: "SOLANA",
+      scheme: "ED25519",
+      userIdentifier,
+      userIdentifierType: "CUSTOM_ID",
+    },
+  });
+
+  if (!created?.id) {
+    throw new SigningError("Para wallet creation failed", "PROVIDER_NOT_CONFIGURED");
+  }
+
+  const readyWallet = await waitForParaWalletReady({
+    apiBaseUrl,
+    apiKey,
+    walletId: created.id,
+  });
+  const validated = validateParaWallet(readyWallet, created.id);
+
+  return {
+    walletId: validated.id,
+    address: validated.address,
+    userIdentifier,
+    userIdentifierType: "CUSTOM_ID",
+  };
+}
+
 export async function provisionTurnkeyPrivateKey(
   env: Env,
   options: ProvisionTurnkeyOptions
@@ -447,6 +536,14 @@ interface TurnkeyRequestParams {
   apiPublicKey: string;
   apiPrivateKey: string;
   body: Record<string, unknown>;
+}
+
+interface ParaRequestParams {
+  method: "GET" | "POST";
+  path: string;
+  apiBaseUrl: string;
+  apiKey: string;
+  body?: Record<string, unknown>;
 }
 
 async function fetchFireblocksAddressesWithRetry(
@@ -581,6 +678,109 @@ async function privyRequest<T>(params: PrivyRequestParams): Promise<T> {
       error instanceof Error ? error : undefined
     );
   }
+}
+
+async function paraRequest<T>(params: ParaRequestParams): Promise<T> {
+  try {
+    const response = await fetch(`${params.apiBaseUrl}${params.path}`, {
+      method: params.method,
+      headers: {
+        "X-API-Key": params.apiKey,
+        ...(params.body ? { "Content-Type": "application/json" } : {}),
+      },
+      body: params.body ? JSON.stringify(params.body) : undefined,
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => "Failed to read error response");
+      throw new SigningError(
+        `Para API error: ${response.status} - ${errorText}`,
+        "PROVIDER_NOT_CONFIGURED"
+      );
+    }
+
+    if (response.status === 204 || response.headers.get("content-length") === "0") {
+      return undefined as T;
+    }
+
+    const payload = (await response.json()) as unknown;
+    if (payload && typeof payload === "object" && "data" in payload && payload.data) {
+      return payload.data as T;
+    }
+
+    return payload as T;
+  } catch (error) {
+    if (error instanceof SigningError) {
+      throw error;
+    }
+
+    throw new SigningError(
+      `Failed to call Para API: ${error instanceof Error ? error.message : "Unknown error"}`,
+      "NETWORK_ERROR",
+      error instanceof Error ? error : undefined
+    );
+  }
+}
+
+async function waitForParaWalletReady(params: {
+  apiBaseUrl: string;
+  apiKey: string;
+  walletId: string;
+}): Promise<ParaWalletResponse> {
+  const maxAttempts = 8;
+  const delayMs = 500;
+
+  let latestWallet: ParaWalletResponse | null = null;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const wallet = await paraRequest<ParaWalletResponse>({
+      apiBaseUrl: params.apiBaseUrl,
+      apiKey: params.apiKey,
+      method: "GET",
+      path: `/v1/wallets/${encodeURIComponent(params.walletId)}`,
+    });
+
+    latestWallet = wallet;
+    if (wallet.status === "ready" && wallet.address) {
+      return wallet;
+    }
+
+    if (attempt < maxAttempts) {
+      await sleep(delayMs);
+    }
+  }
+
+  throw new SigningError(
+    `Para wallet '${params.walletId}' did not become ready after ${maxAttempts} attempts (status: ${latestWallet?.status ?? "unknown"})`,
+    "PROVIDER_NOT_CONFIGURED"
+  );
+}
+
+function validateParaWallet(
+  wallet: ParaWalletResponse | undefined,
+  walletId: string
+): {
+  id: string;
+  address: string;
+} {
+  if (!wallet?.id || !wallet?.address) {
+    throw new SigningError("Para wallet lookup failed", "PROVIDER_NOT_CONFIGURED");
+  }
+
+  if (wallet.type && wallet.type !== "SOLANA") {
+    throw new SigningError(
+      `Para wallet '${walletId}' is not a Solana wallet`,
+      "PROVIDER_NOT_CONFIGURED"
+    );
+  }
+
+  if (wallet.scheme && wallet.scheme !== "ED25519") {
+    throw new SigningError(`Para wallet '${walletId}' is not ED25519`, "PROVIDER_NOT_CONFIGURED");
+  }
+
+  return {
+    id: wallet.id,
+    address: wallet.address,
+  };
 }
 
 async function turnkeyRequest<T>(params: TurnkeyRequestParams): Promise<T> {
@@ -908,6 +1108,13 @@ function buildTurnkeyPrivateKeyName(value: string): string {
   }
 
   return name;
+}
+
+function buildParaUserIdentifier(options: ProvisionParaOptions): string {
+  const scope = options.projectId
+    ? `org:${options.orgId}:project:${options.projectId}`
+    : `org:${options.orgId}`;
+  return `sdp:${scope}:wallet:${crypto.randomUUID()}`;
 }
 
 function findSolanaAddress(
