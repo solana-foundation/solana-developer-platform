@@ -8,6 +8,7 @@ import { type SwitchProvider, SwitchProviderForm } from "./switch-provider-form"
 const PROVIDER_OPTIONS: Array<{ value: SwitchProvider; label: string }> = [
   { value: "privy", label: "Privy" },
   { value: "coinbase_cdp", label: "Coinbase CDP" },
+  { value: "anchorage", label: "Anchorage" },
   { value: "para", label: "Para" },
   { value: "turnkey", label: "Turnkey" },
   { value: "local", label: "Local (development only)" },
@@ -16,6 +17,7 @@ const PROVIDER_OPTIONS: Array<{ value: SwitchProvider; label: string }> = [
 const DEFAULT_NEEDS_WALLET_LABEL_BY_PROVIDER: Record<SwitchProvider, boolean> = {
   privy: true,
   coinbase_cdp: true,
+  anchorage: true,
   para: true,
   turnkey: true,
   local: true,

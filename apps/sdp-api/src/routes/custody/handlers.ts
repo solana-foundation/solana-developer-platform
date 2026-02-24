@@ -84,6 +84,8 @@ function resolveActor(c: AppContext): { organizationId: string; projectId?: stri
  * For "privy" provider: Uses platform-managed Privy credentials and provisions a wallet.
  * For "coinbase_cdp" provider: Uses platform-managed CDP credentials and provisions
  * a Solana account.
+ * For "anchorage" provider: Uses platform-managed Anchorage API credentials and provisions
+ * a custody wallet.
  * For "para" provider: Uses platform-managed Para credentials and provisions
  * a Solana wallet.
  * For "turnkey" provider: Uses platform-managed Turnkey credentials and provisions
@@ -136,6 +138,31 @@ export const initializeSigning = async (c: AppContext) => {
           walletLabel: parsed.data.walletLabel,
         }
       );
+    } else if (parsed.data.provider === "coinbase_cdp") {
+      result = await signingService.initializeCoinbaseCdpSigning(
+        actor.organizationId,
+        parsed.data.projectId,
+        {
+          apiBaseUrl: parsed.data.apiBaseUrl,
+          network: parsed.data.network,
+          walletAddress: parsed.data.walletAddress,
+          accountPolicy: parsed.data.accountPolicy,
+          walletLabel: parsed.data.walletLabel,
+        }
+      );
+    } else if (parsed.data.provider === "anchorage") {
+      result = await signingService.initializeAnchorageSigning(
+        actor.organizationId,
+        parsed.data.projectId,
+        {
+          apiBaseUrl: parsed.data.apiBaseUrl,
+          vaultId: parsed.data.vaultId,
+          networkId: parsed.data.networkId,
+          subaccountId: parsed.data.subaccountId,
+          walletId: parsed.data.walletId,
+          walletLabel: parsed.data.walletLabel,
+        }
+      );
     } else if (parsed.data.provider === "turnkey") {
       result = await signingService.initializeTurnkeySigning(
         actor.organizationId,
@@ -159,17 +186,7 @@ export const initializeSigning = async (c: AppContext) => {
         }
       );
     } else {
-      result = await signingService.initializeCoinbaseCdpSigning(
-        actor.organizationId,
-        parsed.data.projectId,
-        {
-          apiBaseUrl: parsed.data.apiBaseUrl,
-          network: parsed.data.network,
-          walletAddress: parsed.data.walletAddress,
-          accountPolicy: parsed.data.accountPolicy,
-          walletLabel: parsed.data.walletLabel,
-        }
-      );
+      throw new AppError("BAD_REQUEST", "Unsupported custody provider");
     }
 
     const response: InitializeSigningResponse = {
@@ -271,6 +288,23 @@ export const switchSigning = async (c: AppContext) => {
         requestDelayMs: parsed.data.requestDelayMs,
         walletLabel: parsed.data.walletLabel,
       });
+    } else if (parsed.data.provider === "coinbase_cdp") {
+      result = await signingService.initializeCoinbaseCdpSigning(actor.organizationId, projectId, {
+        apiBaseUrl: parsed.data.apiBaseUrl,
+        network: parsed.data.network,
+        walletAddress: parsed.data.walletAddress,
+        accountPolicy: parsed.data.accountPolicy,
+        walletLabel: parsed.data.walletLabel,
+      });
+    } else if (parsed.data.provider === "anchorage") {
+      result = await signingService.initializeAnchorageSigning(actor.organizationId, projectId, {
+        apiBaseUrl: parsed.data.apiBaseUrl,
+        vaultId: parsed.data.vaultId,
+        networkId: parsed.data.networkId,
+        subaccountId: parsed.data.subaccountId,
+        walletId: parsed.data.walletId,
+        walletLabel: parsed.data.walletLabel,
+      });
     } else if (parsed.data.provider === "turnkey") {
       result = await signingService.initializeTurnkeySigning(actor.organizationId, projectId, {
         apiBaseUrl: parsed.data.apiBaseUrl,
@@ -286,13 +320,7 @@ export const switchSigning = async (c: AppContext) => {
         walletLabel: parsed.data.walletLabel,
       });
     } else {
-      result = await signingService.initializeCoinbaseCdpSigning(actor.organizationId, projectId, {
-        apiBaseUrl: parsed.data.apiBaseUrl,
-        network: parsed.data.network,
-        walletAddress: parsed.data.walletAddress,
-        accountPolicy: parsed.data.accountPolicy,
-        walletLabel: parsed.data.walletLabel,
-      });
+      throw new AppError("BAD_REQUEST", "Unsupported custody provider");
     }
 
     const response: InitializeSigningResponse = {
@@ -359,6 +387,11 @@ export const getSwitchProviderOptions = async (c: AppContext) => {
         provider: "coinbase_cdp",
         hasReusableWallet: reuseState.coinbase_cdp,
         needsWalletLabel: !reuseState.coinbase_cdp,
+      },
+      {
+        provider: "anchorage",
+        hasReusableWallet: reuseState.anchorage,
+        needsWalletLabel: !reuseState.anchorage,
       },
       {
         provider: "para",

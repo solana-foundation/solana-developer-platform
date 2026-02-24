@@ -1,16 +1,22 @@
 import type { SigningConfigRecord } from "@/services/adapters";
-import { provisionCoinbaseCdpAccount, provisionPrivyWallet } from "@/services/custody/provisioning";
+import {
+  provisionAnchorageWallet,
+  provisionCoinbaseCdpAccount,
+  provisionPrivyWallet,
+} from "@/services/custody/provisioning";
 import { type SigningRequestStore, SigningService } from "@/services/domain/signing.service";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/services/custody/provisioning", () => ({
+  provisionAnchorageWallet: vi.fn(),
   provisionCoinbaseCdpAccount: vi.fn(),
   provisionPrivyWallet: vi.fn(),
 }));
 
 const mockedProvisionPrivyWallet = vi.mocked(provisionPrivyWallet);
+const mockedProvisionAnchorageWallet = vi.mocked(provisionAnchorageWallet);
 const mockedProvisionCoinbaseCdpAccount = vi.mocked(provisionCoinbaseCdpAccount);
 
 describe("signing.service provider reuse", () => {
@@ -85,6 +91,44 @@ describe("signing.service provider reuse", () => {
     expect(configStore.createWallet).not.toHaveBeenCalled();
     expect(configStore.upsert).toHaveBeenCalledWith(orgId, undefined, {
       provider: "coinbase_cdp",
+      defaultWalletId: wallet.walletId,
+    });
+  });
+
+  it("reuses the existing Anchorage root wallet when switching back to Anchorage", async () => {
+    const orgId = "org_reuse_anchorage";
+    const configId = "cust_anchorage_reuse";
+    const wallet = createCustodyWallet(
+      configId,
+      "anchorage_wallet_1",
+      "anchorage_wallet_pubkey"
+    );
+    const configRecord = createConfigRecord({
+      id: configId,
+      orgId,
+      provider: "anchorage",
+      defaultWalletId: wallet.walletId,
+    });
+
+    const { service, configStore } = createService({
+      configRecord,
+      wallets: [wallet],
+      envOverrides: {
+        ANCHORAGE_API_ACCESS_KEY: "anchorage-access-key",
+        ANCHORAGE_VAULT_ID: "vault_123",
+        ANCHORAGE_NETWORK_ID: "SOL",
+      },
+    });
+
+    const result = await service.initializeAnchorageSigning(orgId, undefined, {});
+
+    expect(result.walletId).toBe(wallet.walletId);
+    expect(result.publicKey).toBe(wallet.publicKey);
+    expect(result.configId).toBe(configId);
+    expect(mockedProvisionAnchorageWallet).not.toHaveBeenCalled();
+    expect(configStore.createWallet).not.toHaveBeenCalled();
+    expect(configStore.upsert).toHaveBeenCalledWith(orgId, undefined, {
+      provider: "anchorage",
       defaultWalletId: wallet.walletId,
     });
   });

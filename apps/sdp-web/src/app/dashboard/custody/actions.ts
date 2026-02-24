@@ -94,6 +94,7 @@ export async function initializeCustody(formData: FormData) {
     | "privy"
     | "local"
     | "coinbase_cdp"
+    | "anchorage"
     | "para"
     | "turnkey";
   const walletLabel = getOptionalString(formData, "walletLabel");
@@ -124,6 +125,7 @@ export async function switchCustodyProvider(formData: FormData) {
     | "privy"
     | "local"
     | "coinbase_cdp"
+    | "anchorage"
     | "para"
     | "turnkey";
   const confirm = getString(formData, "confirm");

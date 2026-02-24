@@ -227,6 +227,14 @@ export const createOrganization = async (c: AppContext) => {
           walletAddress: provisioned.address,
           accountPolicy: custody.accountPolicy,
         });
+      } else if (custody.provider === "anchorage") {
+        await signingService.initializeAnchorageSigning(orgId, undefined, {
+          apiBaseUrl: custody.apiBaseUrl ?? c.env.ANCHORAGE_API_BASE_URL,
+          vaultId: custody.vaultId ?? c.env.ANCHORAGE_VAULT_ID,
+          networkId: custody.networkId ?? c.env.ANCHORAGE_NETWORK_ID,
+          subaccountId: custody.subaccountId ?? c.env.ANCHORAGE_SUBACCOUNT_ID,
+          walletId: custody.walletId,
+        });
       } else if (custody.provider === "para") {
         const provisioned = await provisionParaWallet(c.env, {
           orgId,

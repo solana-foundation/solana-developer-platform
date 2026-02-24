@@ -62,7 +62,14 @@ export interface Env {
   ORGANIZATION_REGISTRATION_TOKEN?: string;
 
   // Signing provider (custody backend via @solana/keychain)
-  SIGNING_PROVIDER?: "local" | "fireblocks" | "privy" | "coinbase_cdp" | "para" | "turnkey";
+  SIGNING_PROVIDER?:
+    | "local"
+    | "fireblocks"
+    | "privy"
+    | "coinbase_cdp"
+    | "anchorage"
+    | "para"
+    | "turnkey";
   FEE_PAYER_PRIVATE_KEY?: string;
 
   // Fireblocks configuration (@solana/keychain-fireblocks)
@@ -87,6 +94,14 @@ export interface Env {
   COINBASE_CDP_NETWORK?: "solana" | "solana-devnet";
   COINBASE_CDP_WALLET_ID?: string;
   COINBASE_CDP_ACCOUNT_NAMESPACE?: string;
+
+  // Anchorage custody wallet configuration
+  ANCHORAGE_API_BASE_URL?: string;
+  ANCHORAGE_API_ACCESS_KEY?: string;
+  ANCHORAGE_API_SIGNING_KEY?: string;
+  ANCHORAGE_VAULT_ID?: string;
+  ANCHORAGE_NETWORK_ID?: string;
+  ANCHORAGE_SUBACCOUNT_ID?: string;
 
   // Para Server Wallet configuration (Solana)
   PARA_API_KEY?: string;

@@ -38,14 +38,15 @@ export default async function CustodySetupPage() {
               >
                 <option value="privy">Privy (recommended)</option>
                 <option value="coinbase_cdp">Coinbase CDP</option>
+                <option value="anchorage">Anchorage</option>
                 <option value="para">Para</option>
                 <option value="turnkey">Turnkey</option>
                 <option value="local">Local (development only)</option>
               </select>
               <p className="text-xs text-[rgba(28,28,29,0.64)]">
-                Privy, Coinbase CDP, Para, and Turnkey are managed by SDP server credentials. Local
-                provider mode generates a key stored in the database and should not be used in
-                production.
+                Privy, Coinbase CDP, Anchorage, Para, and Turnkey are managed by SDP server
+                credentials. Local provider mode generates a key stored in the database and should
+                not be used in production.
               </p>
             </div>
 

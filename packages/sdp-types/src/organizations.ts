@@ -91,6 +91,7 @@ export type CreateOrganizationCustody =
   | CreateOrganizationCustodyFireblocks
   | CreateOrganizationCustodyPrivy
   | CreateOrganizationCustodyCoinbaseCdp
+  | CreateOrganizationCustodyAnchorage
   | CreateOrganizationCustodyPara
   | CreateOrganizationCustodyTurnkey;
 
@@ -114,6 +115,15 @@ export interface CreateOrganizationCustodyCoinbaseCdp {
   network?: "solana" | "solana-devnet";
   walletAddress?: string;
   accountPolicy?: string;
+}
+
+export interface CreateOrganizationCustodyAnchorage {
+  provider: "anchorage";
+  apiBaseUrl?: string;
+  vaultId?: string;
+  networkId?: string;
+  subaccountId?: string;
+  walletId?: string;
 }
 
 export interface CreateOrganizationCustodyPara {

@@ -71,7 +71,7 @@ export const initializeSigningResponseSchema = z
   .openapi({ description: "Wallet signing initialization result." });
 
 export const orgCustodyProviderSchema = z
-  .enum(["local", "fireblocks", "privy", "coinbase_cdp", "para", "turnkey"])
+  .enum(["local", "fireblocks", "privy", "coinbase_cdp", "anchorage", "para", "turnkey"])
   .openapi({ description: "Wallet signing provider.", example: "privy" });
 
 export const custodyWalletSchema = z

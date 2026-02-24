@@ -16,6 +16,8 @@ const DEFAULT_PRIVY_API_BASE_URL = "https://api.privy.io/v1";
 const DEFAULT_COINBASE_CDP_API_BASE_URL = "https://api.cdp.coinbase.com/platform";
 const DEFAULT_PARA_API_BASE_URL = "https://api.getpara.com";
 const DEFAULT_TURNKEY_API_BASE_URL = "https://api.turnkey.com";
+const DEFAULT_ANCHORAGE_API_BASE_URL_PRODUCTION = "https://api.anchorage.com/v2";
+const DEFAULT_ANCHORAGE_API_BASE_URL_STAGING = "https://api.anchorage-staging.com/v2";
 const DEFAULT_COINBASE_CDP_NETWORK = "solana-devnet";
 const DEFAULT_FIREBLOCKS_ASSET_ID = "SOL";
 
@@ -69,6 +71,22 @@ interface ParaWalletResponse {
   status?: "creating" | "ready" | string;
   address?: string;
   publicKey?: string;
+}
+
+interface AnchorageWalletAddress {
+  address?: string;
+  addressId?: string;
+  addressSignaturePayload?: string;
+  signature?: string;
+}
+
+interface AnchorageWalletResponse {
+  walletId?: string;
+  walletName?: string | null;
+  vaultId?: string;
+  networkId?: string;
+  assetType?: string;
+  depositAddress?: AnchorageWalletAddress;
 }
 
 export interface ProvisionFireblocksOptions {
@@ -133,6 +151,22 @@ export interface ProvisionParaResult {
   address: string;
   userIdentifier: string;
   userIdentifierType: "CUSTOM_ID";
+}
+
+export interface ProvisionAnchorageOptions {
+  vaultId: string;
+  networkId: string;
+  subaccountId?: string;
+  walletId?: string;
+  walletName?: string;
+  apiBaseUrl?: string;
+}
+
+export interface ProvisionAnchorageResult {
+  walletId: string;
+  address: string;
+  networkId: string;
+  walletName?: string | null;
 }
 
 export async function provisionFireblocksVaultAccount(
@@ -361,6 +395,69 @@ export async function provisionCoinbaseCdpAccount(
   }
 }
 
+export async function provisionAnchorageWallet(
+  env: Env,
+  options: ProvisionAnchorageOptions
+): Promise<ProvisionAnchorageResult> {
+  const apiAccessKey = env.ANCHORAGE_API_ACCESS_KEY;
+  if (!apiAccessKey) {
+    throw new SigningError(
+      "Anchorage environment variables not configured: ANCHORAGE_API_ACCESS_KEY",
+      "PROVIDER_NOT_CONFIGURED"
+    );
+  }
+
+  const apiSigningKeyHex = env.ANCHORAGE_API_SIGNING_KEY;
+  const apiBaseUrl = resolveAnchorageApiBaseUrl(env, options.apiBaseUrl);
+
+  if (options.walletId) {
+    const existing = await anchorageRequest<AnchorageWalletResponse>({
+      apiBaseUrl,
+      apiAccessKey,
+      apiSigningKeyHex,
+      method: "GET",
+      path: `/wallets/${encodeURIComponent(options.walletId)}`,
+    });
+
+    const wallet = extractAnchorageWallet(existing);
+    if (!wallet.walletId || !wallet.address) {
+      throw new SigningError("Anchorage wallet lookup failed", "PROVIDER_NOT_CONFIGURED");
+    }
+
+    return {
+      walletId: wallet.walletId,
+      address: wallet.address,
+      networkId: wallet.networkId ?? options.networkId,
+      walletName: wallet.walletName,
+    };
+  }
+
+  const created = await anchorageRequest<AnchorageWalletResponse>({
+    apiBaseUrl,
+    apiAccessKey,
+    apiSigningKeyHex,
+    method: "POST",
+    path: `/vaults/${encodeURIComponent(options.vaultId)}/wallets`,
+    body: {
+      networkId: options.networkId,
+      ...(options.subaccountId ? { subaccountId: options.subaccountId } : {}),
+      ...(options.walletName ? { walletName: options.walletName } : {}),
+    },
+  });
+
+  const wallet = extractAnchorageWallet(created);
+  if (!wallet.walletId || !wallet.address) {
+    throw new SigningError("Anchorage wallet creation failed", "PROVIDER_NOT_CONFIGURED");
+  }
+
+  return {
+    walletId: wallet.walletId,
+    address: wallet.address,
+    networkId: wallet.networkId ?? options.networkId,
+    walletName: wallet.walletName,
+  };
+}
+
 export async function provisionParaWallet(
   env: Env,
   options: ProvisionParaOptions
@@ -526,6 +623,15 @@ interface CoinbaseCdpRequestParams {
   apiKeySecret: string;
   walletSecret: string;
   idempotencyKey?: string;
+  body?: Record<string, unknown>;
+}
+
+interface AnchorageRequestParams {
+  method: "GET" | "POST";
+  path: string;
+  apiBaseUrl: string;
+  apiAccessKey: string;
+  apiSigningKeyHex?: string;
   body?: Record<string, unknown>;
 }
 
@@ -716,6 +822,65 @@ async function paraRequest<T>(params: ParaRequestParams): Promise<T> {
 
     throw new SigningError(
       `Failed to call Para API: ${error instanceof Error ? error.message : "Unknown error"}`,
+      "NETWORK_ERROR",
+      error instanceof Error ? error : undefined
+    );
+  }
+}
+
+async function anchorageRequest<T>(params: AnchorageRequestParams): Promise<T> {
+  const { requestPath, url } = resolveAnchorageRequestUrl(params.apiBaseUrl, params.path);
+  const normalizedBody = params.body ? sortJsonKeys(params.body) : undefined;
+  const bodyJson = normalizedBody ? JSON.stringify(normalizedBody) : undefined;
+
+  try {
+    const headers: Record<string, string> = {
+      Accept: "application/json",
+      "Api-Access-Key": params.apiAccessKey,
+      ...(bodyJson ? { "Content-Type": "application/json" } : {}),
+    };
+
+    if (params.apiSigningKeyHex) {
+      const timestamp = Math.floor(Date.now() / 1000).toString();
+      const signaturePayload = `${timestamp}${params.method.toUpperCase()}${requestPath}${bodyJson ?? ""}`;
+      headers["Api-Timestamp"] = timestamp;
+      headers["Api-Signature"] = await createAnchorageSignature(
+        params.apiSigningKeyHex,
+        new TextEncoder().encode(signaturePayload)
+      );
+    }
+
+    const response = await fetch(url.toString(), {
+      method: params.method,
+      headers,
+      body: bodyJson,
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => "Failed to read error response");
+      throw new SigningError(
+        `Anchorage API error: ${response.status} - ${errorText}`,
+        "PROVIDER_NOT_CONFIGURED"
+      );
+    }
+
+    if (response.status === 204 || response.headers.get("content-length") === "0") {
+      return undefined as T;
+    }
+
+    const payload = (await response.json()) as unknown;
+    if (payload && typeof payload === "object" && "data" in payload && payload.data) {
+      return payload.data as T;
+    }
+
+    return payload as T;
+  } catch (error) {
+    if (error instanceof SigningError) {
+      throw error;
+    }
+
+    throw new SigningError(
+      `Failed to call Anchorage API: ${error instanceof Error ? error.message : "Unknown error"}`,
       "NETWORK_ERROR",
       error instanceof Error ? error : undefined
     );
@@ -927,6 +1092,19 @@ function resolveCoinbaseCdpRequestUrl(
   };
 }
 
+function resolveAnchorageRequestUrl(
+  apiBaseUrl: string,
+  path: string
+): { requestPath: string; url: URL } {
+  const normalizedBaseUrl = apiBaseUrl.endsWith("/") ? apiBaseUrl : `${apiBaseUrl}/`;
+  const normalizedPath = path.startsWith("/") ? path.slice(1) : path;
+  const url = new URL(normalizedPath, normalizedBaseUrl);
+  return {
+    requestPath: `${url.pathname}${url.search}`,
+    url,
+  };
+}
+
 interface CoinbaseCdpBearerJwtParams {
   apiKeyId: string;
   apiKeySecret: string;
@@ -1111,6 +1289,53 @@ function isCoinbaseCdpAlreadyExistsError(error: unknown): error is SigningError 
   );
 }
 
+function extractAnchorageWallet(response: unknown): {
+  walletId?: string;
+  walletName?: string | null;
+  networkId?: string;
+  address?: string;
+} {
+  if (!response || typeof response !== "object") {
+    return {};
+  }
+
+  const record = response as Record<string, unknown>;
+  const walletId = typeof record.walletId === "string" ? record.walletId : undefined;
+  const walletName =
+    typeof record.walletName === "string" || record.walletName === null
+      ? (record.walletName as string | null)
+      : undefined;
+  const networkId = typeof record.networkId === "string" ? record.networkId : undefined;
+
+  const directAddress = typeof record.address === "string" ? record.address : undefined;
+  const depositAddress = record.depositAddress;
+  const nestedAddress =
+    depositAddress && typeof depositAddress === "object"
+      ? ((depositAddress as Record<string, unknown>).address as string | undefined)
+      : undefined;
+
+  return {
+    walletId,
+    walletName,
+    networkId,
+    address: directAddress ?? nestedAddress,
+  };
+}
+
+function resolveAnchorageApiBaseUrl(env: Env, apiBaseUrl?: string): string {
+  if (apiBaseUrl) {
+    return apiBaseUrl;
+  }
+
+  if (env.ANCHORAGE_API_BASE_URL) {
+    return env.ANCHORAGE_API_BASE_URL;
+  }
+
+  return env.ENVIRONMENT === "production"
+    ? DEFAULT_ANCHORAGE_API_BASE_URL_PRODUCTION
+    : DEFAULT_ANCHORAGE_API_BASE_URL_STAGING;
+}
+
 function buildTurnkeyPrivateKeyName(value: string): string {
   const suffix = randomHex(2);
   let normalized = value
@@ -1177,6 +1402,54 @@ function encodePkcs8Pem(privateKeyDer: Uint8Array): string {
   const base64 = encodeBase64FromBytes(privateKeyDer);
   const lines = base64.match(/.{1,64}/g)?.join("\n") ?? base64;
   return `-----BEGIN PRIVATE KEY-----\n${lines}\n-----END PRIVATE KEY-----`;
+}
+
+async function createAnchorageSignature(signingKeyHex: string, message: Uint8Array): Promise<string> {
+  const rawKey = decodeHexToBytes(signingKeyHex);
+  const seed = rawKey.length === 64 ? rawKey.slice(0, 32) : rawKey;
+
+  if (seed.length !== 32) {
+    throw new SigningError(
+      "ANCHORAGE_API_SIGNING_KEY has an invalid format. Expected hex Ed25519 seed (32 bytes) or keypair bytes (64 bytes).",
+      "PROVIDER_NOT_CONFIGURED"
+    );
+  }
+
+  const privateKey = await crypto.subtle.importKey(
+    "pkcs8",
+    encodeEd25519Pkcs8FromSeed(seed),
+    { name: "Ed25519" },
+    false,
+    ["sign"]
+  );
+  const signature = await crypto.subtle.sign({ name: "Ed25519" }, privateKey, message);
+  return bytesToHex(new Uint8Array(signature));
+}
+
+function encodeEd25519Pkcs8FromSeed(seed: Uint8Array): Uint8Array {
+  // ASN.1 PKCS#8 prefix for Ed25519 private keys followed by 32-byte seed.
+  const prefix = decodeHexToBytes("302e020100300506032b657004220420");
+  const output = new Uint8Array(prefix.length + seed.length);
+  output.set(prefix, 0);
+  output.set(seed, prefix.length);
+  return output;
+}
+
+function decodeHexToBytes(value: string): Uint8Array {
+  const normalized = value.trim().replace(/^0x/i, "").replace(/\s+/g, "");
+  if (normalized.length === 0 || normalized.length % 2 !== 0 || !/^[\da-fA-F]+$/.test(normalized)) {
+    throw new SigningError(
+      "Invalid hex payload. Expected an even-length hexadecimal string.",
+      "PROVIDER_NOT_CONFIGURED"
+    );
+  }
+  return new Uint8Array(Buffer.from(normalized, "hex"));
+}
+
+function bytesToHex(bytes: Uint8Array): string {
+  return Array.from(bytes)
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
 }
 
 function toBase64Url(bytes: Uint8Array): string {

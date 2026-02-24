@@ -10,6 +10,7 @@
  * - "fireblocks": Fireblocks MPC custody (KeychainFireblocksAdapter)
  * - "privy": Privy hosted wallets (KeychainPrivyAdapter)
  * - "coinbase_cdp": Coinbase CDP hosted wallets (KeychainCoinbaseAdapter)
+ * - "anchorage": Anchorage wallet custody (metadata/provisioning only; no signer adapter)
  * - "para": Para hosted wallets (KeychainParaAdapter)
  * - "turnkey": Turnkey hosted wallets (KeychainTurnkeyAdapter)
  */
@@ -41,6 +42,7 @@ export type SigningProviderType =
   | "fireblocks"
   | "privy"
   | "coinbase_cdp"
+  | "anchorage"
   | "para"
   | "turnkey";
 
@@ -79,6 +81,8 @@ export async function createSigningAdapterFromEnv(env: Env): Promise<SigningPort
       return createPrivyAdapterFromEnv(env);
     case "coinbase_cdp":
       return createCoinbaseAdapterFromEnv(env);
+    case "anchorage":
+      return createAnchorageNotSupportedAdapter();
     case "para":
       return createParaAdapterFromEnv(env);
     case "turnkey":
@@ -118,6 +122,8 @@ export async function createSigningAdapterFromConfig(
       return createPrivyAdapterFromRecord(record, env);
     case "coinbase_cdp":
       return createCoinbaseAdapterFromRecord(record, env);
+    case "anchorage":
+      return createAnchorageNotSupportedAdapter();
     case "para":
       return createParaAdapterFromRecord(record, env);
     case "turnkey":
@@ -510,6 +516,13 @@ function createParaAdapterFromRecord(record: SigningConfigRecord, env: Env): Key
   };
 
   return new KeychainParaAdapter(config);
+}
+
+function createAnchorageNotSupportedAdapter(): never {
+  throw new SigningError(
+    "Anchorage is configured for custody wallet management only; transaction signing is not supported yet",
+    "INVALID_REQUEST"
+  );
 }
 
 function parseOptionalRequestDelayMs(

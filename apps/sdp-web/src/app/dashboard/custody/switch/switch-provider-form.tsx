@@ -6,7 +6,13 @@ import { Label } from "@/components/ui/label";
 import Link from "next/link";
 import { useState } from "react";
 
-export type SwitchProvider = "privy" | "coinbase_cdp" | "para" | "turnkey" | "local";
+export type SwitchProvider =
+  | "privy"
+  | "coinbase_cdp"
+  | "anchorage"
+  | "para"
+  | "turnkey"
+  | "local";
 
 interface SwitchProviderFormProps {
   action: (formData: FormData) => void | Promise<void>;

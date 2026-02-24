@@ -1,4 +1,8 @@
-import { provisionCoinbaseCdpAccount, provisionParaWallet } from "@/services/custody/provisioning";
+import {
+  provisionAnchorageWallet,
+  provisionCoinbaseCdpAccount,
+  provisionParaWallet,
+} from "@/services/custody/provisioning";
 import type { Env } from "@/types/env";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
@@ -187,6 +191,105 @@ describe("para wallet provisioning", () => {
   });
 });
 
+describe("anchorage wallet provisioning", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("creates an Anchorage wallet and returns its deposit address", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
+        const url = toUrlString(input);
+
+        if (url.endsWith("/v2/vaults/vault_123/wallets") && init?.method === "POST") {
+          const headers = new Headers(init.headers);
+          const body = JSON.parse(String(init.body ?? "{}")) as {
+            networkId?: string;
+            subaccountId?: string;
+            walletName?: string;
+          };
+
+          expect(headers.get("Api-Access-Key")).toBe("anchorage-access-key");
+          expect(body.networkId).toBe("SOL");
+          expect(body.subaccountId).toBe("sub_123");
+          expect(body.walletName).toBe("Treasury");
+
+          return jsonResponse(
+            {
+              walletId: "wal_anch_123",
+              networkId: "SOL",
+              walletName: "Treasury",
+              depositAddress: {
+                address: CREATED_ADDRESS,
+              },
+            },
+            200
+          );
+        }
+
+        throw new Error(`Unexpected fetch call: ${init?.method ?? "GET"} ${url}`);
+      });
+
+    const result = await provisionAnchorageWallet(createAnchorageEnv(), {
+      vaultId: "vault_123",
+      networkId: "SOL",
+      subaccountId: "sub_123",
+      walletName: "Treasury",
+    });
+
+    expect(result.walletId).toBe("wal_anch_123");
+    expect(result.address).toBe(CREATED_ADDRESS);
+    expect(result.networkId).toBe("SOL");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("reads an existing Anchorage wallet by walletId", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
+        const url = toUrlString(input);
+
+        if (url.endsWith("/v2/wallets/wal_existing") && init?.method === "GET") {
+          const headers = new Headers(init.headers);
+          expect(headers.get("Api-Access-Key")).toBe("anchorage-access-key");
+
+          return jsonResponse(
+            {
+              walletId: "wal_existing",
+              networkId: "SOL",
+              depositAddress: {
+                address: EXISTING_ADDRESS,
+              },
+            },
+            200
+          );
+        }
+
+        throw new Error(`Unexpected fetch call: ${init?.method ?? "GET"} ${url}`);
+      });
+
+    const result = await provisionAnchorageWallet(createAnchorageEnv(), {
+      vaultId: "vault_ignored",
+      networkId: "SOL",
+      walletId: "wal_existing",
+    });
+
+    expect(result.walletId).toBe("wal_existing");
+    expect(result.address).toBe(EXISTING_ADDRESS);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("throws when Anchorage access key is missing", async () => {
+    await expect(
+      provisionAnchorageWallet(createAnchorageEnv({ ANCHORAGE_API_ACCESS_KEY: undefined }), {
+        vaultId: "vault_123",
+        networkId: "SOL",
+      })
+    ).rejects.toThrowError(/ANCHORAGE_API_ACCESS_KEY/i);
+  });
+});
+
 function createCoinbaseEnv(overrides: Partial<Env> = {}): Env {
   return {
     ENVIRONMENT: "development",
@@ -202,6 +305,15 @@ function createParaEnv(overrides: Partial<Env> = {}): Env {
     ENVIRONMENT: "development",
     PARA_API_KEY: "test-para-api-key",
     PARA_API_BASE_URL: "https://api.getpara.com",
+    ...overrides,
+  } as Env;
+}
+
+function createAnchorageEnv(overrides: Partial<Env> = {}): Env {
+  return {
+    ENVIRONMENT: "development",
+    ANCHORAGE_API_BASE_URL: "https://api.anchorage-staging.com/v2",
+    ANCHORAGE_API_ACCESS_KEY: "anchorage-access-key",
     ...overrides,
   } as Env;
 }
