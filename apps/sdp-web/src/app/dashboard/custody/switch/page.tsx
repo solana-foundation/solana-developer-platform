@@ -10,6 +10,7 @@ const PROVIDER_OPTIONS: Array<{ value: SwitchProvider; label: string }> = [
   { value: "coinbase_cdp", label: "Coinbase CDP" },
   { value: "para", label: "Para" },
   { value: "turnkey", label: "Turnkey" },
+  { value: "dfns", label: "DFNS" },
   { value: "local", label: "Local (development only)" },
 ];
 
@@ -18,6 +19,7 @@ const DEFAULT_NEEDS_WALLET_LABEL_BY_PROVIDER: Record<SwitchProvider, boolean> = 
   coinbase_cdp: true,
   para: true,
   turnkey: true,
+  dfns: true,
   local: true,
 };
 

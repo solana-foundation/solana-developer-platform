@@ -7,6 +7,7 @@
 
 import {
   KeychainCoinbaseAdapter,
+  KeychainDfnsAdapter,
   KeychainFireblocksAdapter,
   KeychainMemoryAdapter,
   KeychainParaAdapter,
@@ -18,10 +19,12 @@ import {
 } from "@/services/adapters";
 import {
   provisionCoinbaseCdpAccount,
+  provisionDfnsWallet,
   provisionParaWallet,
   provisionPrivyWallet,
   provisionTurnkeyPrivateKey,
 } from "@/services/custody/provisioning";
+import { createDfnsApiClient, normalizeDfnsWalletId } from "@/services/dfns/client";
 import { type EncryptionService, createEncryptionService } from "@/services/encryption.service";
 import type { SignRequest, SignResult, SignStatus, SigningPort } from "@/services/ports";
 import { SigningError } from "@/services/ports";
@@ -95,7 +98,7 @@ export interface SigningRequestRecord {
  * Signing configuration (union of provider-specific configs)
  */
 export interface SigningConfiguration {
-  provider: "local" | "fireblocks" | "privy" | "coinbase_cdp" | "para" | "turnkey";
+  provider: "local" | "fireblocks" | "privy" | "coinbase_cdp" | "para" | "turnkey" | "dfns";
   defaultWalletId?: string;
   // Provider-specific fields stored in encrypted config JSON
 }
@@ -160,6 +163,17 @@ export interface InitTurnkeySigningOptions {
 }
 
 /**
+ * Options for initializing org signing with DFNS provider.
+ */
+export interface InitDfnsSigningOptions {
+  apiBaseUrl?: string;
+  walletId?: string;
+  network?: "Solana" | "SolanaDevnet";
+  signingKeyId?: string;
+  walletLabel?: string;
+}
+
+/**
  * Result of initializing org signing.
  */
 export interface InitSigningResult {
@@ -168,7 +182,7 @@ export interface InitSigningResult {
   walletId: string;
 }
 
-type ReusableSigningProvider = "privy" | "coinbase_cdp" | "para" | "turnkey";
+type ReusableSigningProvider = "privy" | "coinbase_cdp" | "para" | "turnkey" | "dfns";
 
 export type ProviderReuseState = Record<ReusableSigningProvider, boolean>;
 
@@ -265,11 +279,12 @@ export class SigningService {
     orgId: string,
     projectId: string | undefined
   ): Promise<ProviderReuseState> {
-    const [privy, coinbaseCdp, para, turnkey] = await Promise.all([
+    const [privy, coinbaseCdp, para, turnkey, dfns] = await Promise.all([
       this.findExistingProviderWallet(orgId, projectId, "privy"),
       this.findExistingProviderWallet(orgId, projectId, "coinbase_cdp"),
       this.findExistingProviderWallet(orgId, projectId, "para"),
       this.findExistingProviderWallet(orgId, projectId, "turnkey"),
+      this.findExistingProviderWallet(orgId, projectId, "dfns"),
     ]);
 
     return {
@@ -277,6 +292,7 @@ export class SigningService {
       coinbase_cdp: Boolean(coinbaseCdp),
       para: Boolean(para),
       turnkey: Boolean(turnkey),
+      dfns: Boolean(dfns),
     };
   }
 
@@ -795,6 +811,90 @@ export class SigningService {
   }
 
   /**
+   * Initialize signing for an organization with DFNS provider.
+   *
+   * DFNS credentials are platform-managed and wallets are provisioned per
+   * organization/project scope.
+   */
+  async initializeDfnsSigning(
+    orgId: string,
+    projectId: string | undefined,
+    options: InitDfnsSigningOptions
+  ): Promise<InitSigningResult> {
+    const existing = await this.configStore.findActive(orgId, projectId);
+    if (existing) {
+      throw new SigningError(
+        `Signing already initialized for org ${orgId}${projectId ? ` project ${projectId}` : ""}`,
+        "ALREADY_INITIALIZED"
+      );
+    }
+
+    const reusable = options.walletId
+      ? null
+      : await this.findReusableProviderWallet(orgId, projectId, "dfns");
+
+    if (reusable) {
+      const configJson: DfnsProviderConfig = {
+        provider: "dfns",
+        apiBaseUrl: options.apiBaseUrl,
+        network: options.network,
+      };
+
+      await this.updateConfigJson(reusable.configId, configJson);
+      this.providerCache.delete(reusable.configId);
+
+      return {
+        configId: reusable.configId,
+        publicKey: reusable.wallet.publicKey as Address,
+        walletId: reusable.wallet.walletId,
+      };
+    }
+
+    const provisioned = await provisionDfnsWallet(this.env, {
+      orgId,
+      orgSlug: orgId,
+      apiBaseUrl: options.apiBaseUrl,
+      walletId: options.walletId,
+      walletName: options.walletLabel,
+      network: options.network,
+      signingKeyId: options.signingKeyId,
+    });
+
+    const publicKey = provisioned.address as Address;
+    const walletId = normalizeDfnsWalletId(provisioned.walletId);
+
+    const configJson: DfnsProviderConfig = {
+      provider: "dfns",
+      apiBaseUrl: options.apiBaseUrl,
+      network: provisioned.network,
+      walletId: provisioned.walletId,
+      signingKeyId: provisioned.signingKeyId,
+    };
+
+    const configId = await this.configStore.upsert(orgId, projectId, {
+      provider: "dfns",
+      defaultWalletId: walletId,
+    });
+
+    await this.updateConfigJson(configId, configJson);
+
+    await this.configStore.createWallet(configId, {
+      walletId,
+      publicKey,
+      label: options.walletLabel ?? "DFNS Root Wallet",
+      purpose: "root",
+    });
+
+    this.providerCache.delete(configId);
+
+    return {
+      configId,
+      publicKey,
+      walletId,
+    };
+  }
+
+  /**
    * Get the wallets for an organization's custody config.
    */
   async getWallets(orgId: string, projectId?: string): Promise<CustodyWallet[]> {
@@ -808,7 +908,8 @@ export class SigningService {
   /**
    * Provision a new wallet in custody for the resolved provider configuration.
    *
-   * For V1 we support wallet provisioning for Privy, Coinbase CDP, Para, and Turnkey providers.
+   * For V1 we support wallet provisioning for Privy, Coinbase CDP, Para, Turnkey, and DFNS
+   * providers.
    */
   async createWallet(
     orgId: string,
@@ -824,7 +925,8 @@ export class SigningService {
       config.provider !== "privy" &&
       config.provider !== "coinbase_cdp" &&
       config.provider !== "para" &&
-      config.provider !== "turnkey"
+      config.provider !== "turnkey" &&
+      config.provider !== "dfns"
     ) {
       throw new SigningError(
         `Wallet provisioning not supported for provider: ${config.provider}`,
@@ -924,6 +1026,36 @@ export class SigningService {
 
       walletId = normalizeTurnkeyWalletId(provisioned.privateKeyId);
       publicKey = provisioned.address;
+    } else if (parsed.provider === "dfns") {
+      let provisioned: {
+        walletId: string;
+        address: string;
+        network: "Solana" | "SolanaDevnet";
+        signingKeyId: string;
+      };
+      try {
+        provisioned = await provisionDfnsWallet(this.env, {
+          orgId,
+          orgSlug: orgId,
+          apiBaseUrl: parsed.apiBaseUrl ?? this.env.DFNS_API_BASE_URL,
+          network: parsed.network,
+          walletName: params.label,
+          signingKeyId: parsed.signingKeyId,
+        });
+      } catch (error) {
+        if (error instanceof SigningError) {
+          throw error;
+        }
+
+        throw new SigningError(
+          `Failed to provision DFNS wallet: ${error instanceof Error ? error.message : "Unknown error"}`,
+          "NETWORK_ERROR",
+          error instanceof Error ? error : undefined
+        );
+      }
+
+      walletId = normalizeDfnsWalletId(provisioned.walletId);
+      publicKey = provisioned.address;
     } else {
       throw new SigningError(
         `Wallet provisioning not supported for provider: ${parsed.provider}`,
@@ -981,6 +1113,7 @@ export class SigningService {
       | CoinbaseCdpProviderConfig
       | ParaProviderConfig
       | TurnkeyProviderConfig
+      | DfnsProviderConfig
   ): Promise<void> {
     // This would normally be a direct DB update, but we'll use the upsert pattern
     // The config JSON is stored in the `config_encrypted` column of custody_configs
@@ -1117,7 +1250,7 @@ export class SigningService {
   /**
    * Get a transaction signer compatible with @solana/kit.
    * Works with KeychainMemoryAdapter, KeychainFireblocksAdapter, KeychainPrivyAdapter,
-   * KeychainCoinbaseAdapter, KeychainParaAdapter, and KeychainTurnkeyAdapter.
+   * KeychainCoinbaseAdapter, KeychainParaAdapter, KeychainTurnkeyAdapter, and KeychainDfnsAdapter.
    *
    * Returns a TransactionSigner that can be used with:
    * - signTransactionMessageWithSigners()
@@ -1154,6 +1287,10 @@ export class SigningService {
 
     if (adapter instanceof KeychainTurnkeyAdapter) {
       return adapter.getTransactionSigner(resolved.walletId, resolved.walletPublicKey);
+    }
+
+    if (adapter instanceof KeychainDfnsAdapter) {
+      return adapter.getTransactionSigner(resolved.walletId);
     }
 
     throw new SigningError(
@@ -1425,6 +1562,14 @@ interface TurnkeyProviderConfig {
   defaultWalletPublicKey?: string;
 }
 
+interface DfnsProviderConfig {
+  provider: "dfns";
+  apiBaseUrl?: string;
+  network?: "Solana" | "SolanaDevnet";
+  walletId?: string;
+  signingKeyId?: string;
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Factory Function
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1657,6 +1802,25 @@ export async function createAdapterFromEncryptedConfig(
     });
   }
 
+  if (parsed.provider === "dfns") {
+    const defaultWalletId =
+      record.defaultWalletId ??
+      (parsed.walletId ? normalizeDfnsWalletId(parsed.walletId) : undefined) ??
+      (env.DFNS_WALLET_ID ? normalizeDfnsWalletId(env.DFNS_WALLET_ID) : undefined);
+
+    if (!defaultWalletId) {
+      throw new SigningError(
+        "DFNS environment variables not configured: DFNS_WALLET_ID",
+        "PROVIDER_NOT_CONFIGURED"
+      );
+    }
+
+    return new KeychainDfnsAdapter({
+      client: await createDfnsApiClient(env, { apiBaseUrl: parsed.apiBaseUrl }),
+      defaultWalletId,
+    });
+  }
+
   // Fall back to standard config creation (for backward compatibility)
   return createSigningAdapterFromConfig(record, env);
 }
@@ -1672,6 +1836,7 @@ async function parseConfigRecord(
   | CoinbaseCdpProviderConfig
   | ParaProviderConfig
   | TurnkeyProviderConfig
+  | DfnsProviderConfig
 > {
   try {
     return JSON.parse(record.config) as
@@ -1680,7 +1845,8 @@ async function parseConfigRecord(
       | PrivyProviderConfig
       | CoinbaseCdpProviderConfig
       | ParaProviderConfig
-      | TurnkeyProviderConfig;
+      | TurnkeyProviderConfig
+      | DfnsProviderConfig;
   } catch {
     // Encrypted payload: decrypt then parse.
     try {
@@ -1692,7 +1858,8 @@ async function parseConfigRecord(
         | PrivyProviderConfig
         | CoinbaseCdpProviderConfig
         | ParaProviderConfig
-        | TurnkeyProviderConfig;
+        | TurnkeyProviderConfig
+        | DfnsProviderConfig;
     } catch (error) {
       throw new SigningError(
         error instanceof Error ? error.message : "Failed to decrypt custody configuration",

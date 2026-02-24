@@ -5,6 +5,12 @@
  */
 
 import { Buffer } from "node:buffer";
+import {
+  type DfnsNetwork,
+  createDfnsApiClient,
+  denormalizeDfnsWalletId,
+  resolveDfnsNetwork,
+} from "@/services/dfns/client";
 import { SigningError } from "@/services/ports";
 import type { Env } from "@/types/env";
 import type { VaultAddressesResponse } from "@solana/keychain-fireblocks";
@@ -18,6 +24,11 @@ const DEFAULT_PARA_API_BASE_URL = "https://api.getpara.com";
 const DEFAULT_TURNKEY_API_BASE_URL = "https://api.turnkey.com";
 const DEFAULT_COINBASE_CDP_NETWORK = "solana-devnet";
 const DEFAULT_FIREBLOCKS_ASSET_ID = "SOL";
+const DEFAULT_DFNS_WALLET_NAME = "SDP Wallet";
+const DFNS_RECOVERY_MAX_ATTEMPTS = 8;
+const DFNS_RECOVERY_DELAY_MS = 400;
+const DFNS_RECOVERY_LOOKBACK_MS = 120_000;
+const DFNS_RECOVERY_MAX_PAGES = 20;
 
 interface FireblocksVaultAccountResponse {
   id: string;
@@ -133,6 +144,23 @@ export interface ProvisionParaResult {
   address: string;
   userIdentifier: string;
   userIdentifierType: "CUSTOM_ID";
+}
+
+export interface ProvisionDfnsOptions {
+  orgId: string;
+  orgSlug: string;
+  walletId?: string;
+  walletName?: string;
+  apiBaseUrl?: string;
+  network?: DfnsNetwork;
+  signingKeyId?: string;
+}
+
+export interface ProvisionDfnsResult {
+  walletId: string;
+  address: string;
+  network: DfnsNetwork;
+  signingKeyId: string;
 }
 
 export async function provisionFireblocksVaultAccount(
@@ -422,6 +450,57 @@ export async function provisionParaWallet(
     userIdentifier,
     userIdentifierType: "CUSTOM_ID",
   };
+}
+
+export async function provisionDfnsWallet(
+  env: Env,
+  options: ProvisionDfnsOptions
+): Promise<ProvisionDfnsResult> {
+  const client = await createDfnsApiClient(env, { apiBaseUrl: options.apiBaseUrl });
+  const network = options.network ?? resolveDfnsNetwork(env.DFNS_NETWORK);
+  const walletName = buildDfnsWalletName(options);
+  const createStartedAtMs = Date.now();
+
+  try {
+    if (options.walletId) {
+      const existing = await client.wallets.getWallet({
+        walletId: denormalizeDfnsWalletId(options.walletId),
+      });
+      return resolveDfnsWallet(existing, options.walletId);
+    }
+
+    const created = await client.wallets.createWallet({
+      body: {
+        network,
+        name: walletName,
+        ...(options.signingKeyId ? { signingKey: { id: options.signingKeyId } } : {}),
+      },
+    });
+
+    return resolveDfnsWallet(created);
+  } catch (error) {
+    if (isDfnsNonJsonResponseError(error)) {
+      return handleDfnsNonJsonProvisionError({
+        env,
+        options,
+        network,
+        walletName,
+        createStartedAtMs,
+        cause: error,
+      });
+    }
+
+    if (error instanceof SigningError) {
+      throw error;
+    }
+
+    const message = getErrorMessage(error);
+    throw new SigningError(
+      `DFNS wallet provisioning failed: ${message}`,
+      "NETWORK_ERROR",
+      error instanceof Error ? error : undefined
+    );
+  }
 }
 
 export async function provisionTurnkeyPrivateKey(
@@ -1109,6 +1188,279 @@ function isCoinbaseCdpAlreadyExistsError(error: unknown): error is SigningError 
     message.includes("coinbase cdp api error: 409") &&
     (message.includes("already_exists") || message.includes("already exists"))
   );
+}
+
+interface DfnsWalletLike {
+  id?: string;
+  address?: string;
+  network?: string;
+  signingKey?: { id?: string };
+  name?: string;
+  dateCreated?: string;
+}
+
+interface DfnsRecoveryResult {
+  wallet: DfnsWalletLike | null;
+  diagnostics: string;
+}
+
+interface HandleDfnsNonJsonProvisionErrorParams {
+  env: Env;
+  options: ProvisionDfnsOptions;
+  network: DfnsNetwork;
+  walletName: string;
+  createStartedAtMs: number;
+  cause: unknown;
+}
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : "Unknown error";
+}
+
+function buildDfnsNonJsonProvisionErrorMessage(params: {
+  originalErrorMessage: string;
+  attemptedRecovery: boolean;
+  recoveryDiagnostics?: string | null;
+  recoveryFailureMessage?: string | null;
+}): string {
+  if (!params.attemptedRecovery) {
+    return `DFNS wallet provisioning failed: DFNS returned a non-JSON response. Original error: ${params.originalErrorMessage}. Verify DFNS_API_BASE_URL and DFNS auth credentials (token, credential id, private key).`;
+  }
+
+  const recoveryFailureSegment = params.recoveryFailureMessage
+    ? ` Recovery lookup failed: ${params.recoveryFailureMessage}.`
+    : "";
+  const diagnosticsSegment = params.recoveryDiagnostics
+    ? ` Recovery scan: ${params.recoveryDiagnostics}.`
+    : "";
+  return `DFNS wallet provisioning failed: DFNS returned a non-JSON response and automatic recovery could not find a newly created wallet.${recoveryFailureSegment}${diagnosticsSegment} Original error: ${params.originalErrorMessage}. Verify DFNS_API_BASE_URL and DFNS auth credentials (token, credential id, private key).`;
+}
+
+async function handleDfnsNonJsonProvisionError(
+  params: HandleDfnsNonJsonProvisionErrorParams
+): Promise<ProvisionDfnsResult> {
+  const originalErrorMessage = getErrorMessage(params.cause);
+  const attemptedRecovery = !params.options.walletId;
+
+  if (params.options.walletId) {
+    throw new SigningError(
+      buildDfnsNonJsonProvisionErrorMessage({
+        originalErrorMessage,
+        attemptedRecovery,
+      }),
+      "NETWORK_ERROR",
+      params.cause instanceof Error ? params.cause : undefined
+    );
+  }
+
+  let recoveryDiagnostics: string | null = null;
+  let recoveryFailureMessage: string | null = null;
+  let recoveredWallet: DfnsWalletLike | null = null;
+
+  try {
+    const recovery = await recoverRecentlyCreatedDfnsWallet({
+      env: params.env,
+      apiBaseUrl: params.options.apiBaseUrl,
+      network: params.network,
+      walletName: params.walletName,
+      signingKeyId: params.options.signingKeyId,
+      startedAtMs: params.createStartedAtMs,
+    });
+    recoveryDiagnostics = recovery.diagnostics;
+    recoveredWallet = recovery.wallet;
+  } catch (recoveryError) {
+    recoveryFailureMessage = getErrorMessage(recoveryError);
+  }
+
+  if (recoveredWallet) {
+    return resolveDfnsWallet(recoveredWallet);
+  }
+
+  throw new SigningError(
+    buildDfnsNonJsonProvisionErrorMessage({
+      originalErrorMessage,
+      attemptedRecovery,
+      recoveryDiagnostics,
+      recoveryFailureMessage,
+    }),
+    "NETWORK_ERROR",
+    params.cause instanceof Error ? params.cause : undefined
+  );
+}
+
+function isDfnsNonJsonResponseError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const normalized = error.message.toLowerCase();
+  return (
+    normalized.includes("non-json response") ||
+    normalized.includes("unexpected token '<'") ||
+    normalized.includes("is not valid json") ||
+    normalized.includes("unexpected end of json input") ||
+    normalized.includes("invalid json response body")
+  );
+}
+
+async function recoverRecentlyCreatedDfnsWallet(params: {
+  env: Env;
+  apiBaseUrl?: string;
+  network: DfnsNetwork;
+  walletName: string;
+  signingKeyId?: string;
+  startedAtMs: number;
+}): Promise<DfnsRecoveryResult> {
+  const lookbackBoundaryMs = params.startedAtMs - DFNS_RECOVERY_LOOKBACK_MS;
+  const attemptSummaries: string[] = [];
+
+  for (let attempt = 1; attempt <= DFNS_RECOVERY_MAX_ATTEMPTS; attempt += 1) {
+    const wallets = await listDfnsWalletsForRecovery(params.env, params.apiBaseUrl);
+    const exactScopedMatches = wallets.filter((wallet) => {
+      if (wallet.network !== params.network) {
+        return false;
+      }
+
+      if (params.signingKeyId && wallet.signingKey?.id !== params.signingKeyId) {
+        return false;
+      }
+
+      return wallet.name === params.walletName;
+    });
+    const exactScopedRecentMatches = exactScopedMatches.filter((wallet) =>
+      isDfnsWalletCreatedAfter(wallet, lookbackBoundaryMs)
+    );
+    const newestRecentExactScoped = pickNewestDfnsWallet(exactScopedRecentMatches);
+    attemptSummaries.push(
+      [
+        `attempt=${attempt}`,
+        `wallets=${wallets.length}`,
+        `exactScopedMatches=${exactScopedMatches.length}`,
+        `exactScopedRecentMatches=${exactScopedRecentMatches.length}`,
+        `candidate=${newestRecentExactScoped?.id ?? "none"}`,
+      ].join(" ")
+    );
+    if (newestRecentExactScoped) {
+      return {
+        wallet: newestRecentExactScoped,
+        diagnostics: attemptSummaries.join(" | "),
+      };
+    }
+
+    if (attempt < DFNS_RECOVERY_MAX_ATTEMPTS) {
+      await sleep(DFNS_RECOVERY_DELAY_MS);
+    }
+  }
+
+  return {
+    wallet: null,
+    diagnostics: attemptSummaries.join(" | "),
+  };
+}
+
+function isDfnsWalletCreatedAfter(wallet: DfnsWalletLike, boundaryMs: number): boolean {
+  const createdAtMs = Date.parse(wallet.dateCreated ?? "");
+  return Number.isFinite(createdAtMs) && createdAtMs >= boundaryMs;
+}
+
+async function listDfnsWalletsForRecovery(env: Env, apiBaseUrl?: string): Promise<DfnsWalletLike[]> {
+  const client = await createDfnsApiClient(env, { apiBaseUrl });
+  const collected: DfnsWalletLike[] = [];
+  let paginationToken: string | undefined;
+
+  // Keep recovery bounded while still handling accounts with many wallets.
+  for (let pageCount = 0; pageCount < DFNS_RECOVERY_MAX_PAGES; pageCount += 1) {
+    const response = await client.wallets.listWallets({
+      query: {
+        limit: 50,
+        paginationToken,
+      },
+    });
+
+    const items = Array.isArray(response.items) ? response.items : [];
+    collected.push(...items);
+    paginationToken = response.nextPageToken;
+
+    if (!paginationToken) {
+      break;
+    }
+  }
+
+  return collected;
+}
+
+function pickNewestDfnsWallet<T extends { dateCreated?: string }>(wallets: T[]): T | null {
+  if (wallets.length === 0) {
+    return null;
+  }
+
+  let latest = wallets[0];
+  for (let index = 1; index < wallets.length; index += 1) {
+    const current = wallets[index];
+    const latestMs = Date.parse(latest.dateCreated ?? "");
+    const currentMs = Date.parse(current.dateCreated ?? "");
+
+    if (!Number.isFinite(latestMs)) {
+      latest = current;
+      continue;
+    }
+
+    if (!Number.isFinite(currentMs)) {
+      continue;
+    }
+
+    if (currentMs > latestMs) {
+      latest = current;
+    }
+  }
+
+  return latest;
+}
+
+function resolveDfnsWallet(
+  wallet: {
+    id?: string;
+    address?: string;
+    network?: string;
+    signingKey?: { id?: string };
+  },
+  walletIdHint?: string
+): ProvisionDfnsResult {
+  const walletId = wallet.id ?? walletIdHint;
+  if (!walletId) {
+    throw new SigningError(
+      "DFNS wallet lookup failed: missing wallet id",
+      "PROVIDER_NOT_CONFIGURED"
+    );
+  }
+
+  if (!wallet.address) {
+    throw new SigningError(`DFNS wallet '${walletId}' has no address`, "PROVIDER_NOT_CONFIGURED");
+  }
+
+  const network = resolveDfnsNetwork(wallet.network);
+  if (!wallet.signingKey?.id) {
+    throw new SigningError(
+      `DFNS wallet '${walletId}' has no signing key`,
+      "PROVIDER_NOT_CONFIGURED"
+    );
+  }
+
+  return {
+    walletId,
+    address: wallet.address,
+    network,
+    signingKeyId: wallet.signingKey.id,
+  };
+}
+
+function buildDfnsWalletName(options: ProvisionDfnsOptions): string {
+  if (options.walletName?.trim()) {
+    return options.walletName.trim().slice(0, 100);
+  }
+
+  const base = options.orgSlug || options.orgId || DEFAULT_DFNS_WALLET_NAME;
+  return `sdp-${base}`.slice(0, 100);
 }
 
 function buildTurnkeyPrivateKeyName(value: string): string {

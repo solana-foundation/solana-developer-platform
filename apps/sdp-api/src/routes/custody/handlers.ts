@@ -88,6 +88,8 @@ function resolveActor(c: AppContext): { organizationId: string; projectId?: stri
  * a Solana wallet.
  * For "turnkey" provider: Uses platform-managed Turnkey credentials and provisions
  * a Solana private key.
+ * For "dfns" provider: Uses platform-managed DFNS credentials and provisions
+ * a Solana wallet.
  *
  * POST /wallets/initialize
  */
@@ -155,6 +157,18 @@ export const initializeSigning = async (c: AppContext) => {
           apiBaseUrl: parsed.data.apiBaseUrl,
           requestDelayMs: parsed.data.requestDelayMs,
           walletId: parsed.data.walletId,
+          walletLabel: parsed.data.walletLabel,
+        }
+      );
+    } else if (parsed.data.provider === "dfns") {
+      result = await signingService.initializeDfnsSigning(
+        actor.organizationId,
+        parsed.data.projectId,
+        {
+          apiBaseUrl: parsed.data.apiBaseUrl,
+          walletId: parsed.data.walletId,
+          network: parsed.data.network,
+          signingKeyId: parsed.data.signingKeyId,
           walletLabel: parsed.data.walletLabel,
         }
       );
@@ -285,6 +299,14 @@ export const switchSigning = async (c: AppContext) => {
         walletId: parsed.data.walletId,
         walletLabel: parsed.data.walletLabel,
       });
+    } else if (parsed.data.provider === "dfns") {
+      result = await signingService.initializeDfnsSigning(actor.organizationId, projectId, {
+        apiBaseUrl: parsed.data.apiBaseUrl,
+        walletId: parsed.data.walletId,
+        network: parsed.data.network,
+        signingKeyId: parsed.data.signingKeyId,
+        walletLabel: parsed.data.walletLabel,
+      });
     } else {
       result = await signingService.initializeCoinbaseCdpSigning(actor.organizationId, projectId, {
         apiBaseUrl: parsed.data.apiBaseUrl,
@@ -369,6 +391,11 @@ export const getSwitchProviderOptions = async (c: AppContext) => {
         provider: "turnkey",
         hasReusableWallet: reuseState.turnkey,
         needsWalletLabel: !reuseState.turnkey,
+      },
+      {
+        provider: "dfns",
+        hasReusableWallet: reuseState.dfns,
+        needsWalletLabel: !reuseState.dfns,
       },
       {
         provider: "local",

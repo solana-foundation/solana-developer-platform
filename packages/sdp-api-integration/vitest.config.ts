@@ -56,6 +56,10 @@ export default defineWorkersConfig({
         __dirname,
         "../../packages/sdp-keychain-coinbase/src/index.ts"
       ),
+      "@sdp/keychain-dfns": path.resolve(
+        __dirname,
+        "../../packages/sdp-keychain-dfns/src/index.ts"
+      ),
       "@sdp/keychain-para": path.resolve(
         __dirname,
         "../../packages/sdp-keychain-para/src/index.ts"

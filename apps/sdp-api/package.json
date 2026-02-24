@@ -27,6 +27,7 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
+    "@sdp/keychain-dfns": "workspace:*",
     "@react-email/components": "1.0.6",
     "@react-email/render": "2.0.4",
     "@sdp/keychain-coinbase": "workspace:*",

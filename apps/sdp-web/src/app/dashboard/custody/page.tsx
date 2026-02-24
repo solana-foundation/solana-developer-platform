@@ -22,7 +22,14 @@ import { Suspense } from "react";
 import { setDefaultCustodyWallet } from "./actions";
 import { WalletSignerCheckButton } from "./wallet-signer-check-button";
 
-type CustodyProvider = "privy" | "local" | "fireblocks" | "coinbase_cdp" | "para" | "turnkey";
+type CustodyProvider =
+  | "privy"
+  | "local"
+  | "fireblocks"
+  | "coinbase_cdp"
+  | "para"
+  | "turnkey"
+  | "dfns";
 
 interface CustodyConfig {
   id: string;

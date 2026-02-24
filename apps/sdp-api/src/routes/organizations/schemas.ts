@@ -35,6 +35,13 @@ const createOrgCustodySchema = z.discriminatedUnion("provider", [
     requestDelayMs: z.number().int().min(0).max(3000).optional(),
     privateKeyId: z.string().min(1).optional(),
   }),
+  z.object({
+    provider: z.literal("dfns"),
+    apiBaseUrl: z.string().url().optional(),
+    walletId: z.string().min(1).optional(),
+    network: z.enum(["Solana", "SolanaDevnet"]).optional(),
+    signingKeyId: z.string().min(1).optional(),
+  }),
 ]);
 
 export const createOrgSchema = z.object({

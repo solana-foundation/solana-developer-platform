@@ -92,7 +92,8 @@ export type CreateOrganizationCustody =
   | CreateOrganizationCustodyPrivy
   | CreateOrganizationCustodyCoinbaseCdp
   | CreateOrganizationCustodyPara
-  | CreateOrganizationCustodyTurnkey;
+  | CreateOrganizationCustodyTurnkey
+  | CreateOrganizationCustodyDfns;
 
 export interface CreateOrganizationCustodyFireblocks {
   provider: "fireblocks";
@@ -128,6 +129,14 @@ export interface CreateOrganizationCustodyTurnkey {
   apiBaseUrl?: string;
   requestDelayMs?: number;
   privateKeyId?: string;
+}
+
+export interface CreateOrganizationCustodyDfns {
+  provider: "dfns";
+  apiBaseUrl?: string;
+  walletId?: string;
+  network?: "Solana" | "SolanaDevnet";
+  signingKeyId?: string;
 }
 
 export interface CreateOrganizationResponse {

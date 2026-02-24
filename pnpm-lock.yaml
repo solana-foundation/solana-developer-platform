@@ -57,6 +57,9 @@ importers:
       '@sdp/keychain-coinbase':
         specifier: workspace:*
         version: link:../../packages/sdp-keychain-coinbase
+      '@sdp/keychain-dfns':
+        specifier: workspace:*
+        version: link:../../packages/sdp-keychain-dfns
       '@sdp/keychain-para':
         specifier: workspace:*
         version: link:../../packages/sdp-keychain-para
@@ -277,6 +280,31 @@ importers:
       dotenv:
         specifier: ^17.2.3
         version: 17.3.1
+      typescript:
+        specifier: ^5.8.0
+        version: 5.9.3
+      vitest:
+        specifier: ^3.0.0
+        version: 3.2.4(@types/node@22.19.8)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.8.2)
+
+  packages/sdp-keychain-dfns:
+    dependencies:
+      '@solana/addresses':
+        specifier: 'catalog:'
+        version: 5.4.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
+      '@solana/keychain-core':
+        specifier: 0.3.0
+        version: 0.3.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
+      '@solana/signers':
+        specifier: 'catalog:'
+        version: 5.4.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
+      '@solana/transactions':
+        specifier: ^5.0.0
+        version: 5.4.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
+    devDependencies:
+      '@types/node':
+        specifier: ^22.18.8
+        version: 22.19.8
       typescript:
         specifier: ^5.8.0
         version: 5.9.3

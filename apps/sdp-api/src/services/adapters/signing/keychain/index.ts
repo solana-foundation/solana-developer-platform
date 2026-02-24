@@ -11,11 +11,13 @@
  * - Coinbase CDP: Hosted wallets via Coinbase CDP API (@sdp/keychain-coinbase)
  * - Para: Hosted wallets via Para REST API (@sdp/keychain-para)
  * - Turnkey: Hosted wallets via Turnkey API (@solana/keychain-turnkey)
+ * - DFNS: Hosted wallets via DFNS REST API (@sdp/keychain-dfns)
  */
 
 // Types
 export type {
   KeychainCoinbaseConfig,
+  KeychainDfnsConfig,
   KeychainFireblocksConfig,
   KeychainParaConfig,
   KeychainPrivyConfig,
@@ -25,6 +27,7 @@ export type {
 // Adapters
 export { BaseKeychainAdapter } from "./base-keychain.adapter";
 export { KeychainCoinbaseAdapter } from "./keychain-coinbase.adapter";
+export { KeychainDfnsAdapter } from "./keychain-dfns.adapter";
 export { KeychainFireblocksAdapter } from "./keychain-fireblocks.adapter";
 export { KeychainMemoryAdapter } from "./keychain-memory.adapter";
 export { KeychainParaAdapter } from "./keychain-para.adapter";

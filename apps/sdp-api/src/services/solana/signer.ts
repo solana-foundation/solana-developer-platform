@@ -18,6 +18,7 @@
 
 import {
   KeychainCoinbaseAdapter,
+  KeychainDfnsAdapter,
   KeychainFireblocksAdapter,
   KeychainMemoryAdapter,
   KeychainParaAdapter,
@@ -72,6 +73,7 @@ export async function createSignerFromBase58(privateKeyBase58: string): Promise<
  * - "coinbase_cdp": Uses Coinbase CDP via KeychainCoinbaseAdapter
  * - "para": Uses Para via KeychainParaAdapter
  * - "turnkey": Uses Turnkey via KeychainTurnkeyAdapter
+ * - "dfns": Uses DFNS via KeychainDfnsAdapter
  *
  * The returned signer is compatible with @solana/kit signing utilities:
  * - signTransactionMessageWithSigners()
@@ -104,6 +106,10 @@ export async function createSigner(env: Env): Promise<TransactionSigner> {
   }
 
   if (adapter instanceof KeychainTurnkeyAdapter) {
+    return adapter.getTransactionSigner();
+  }
+
+  if (adapter instanceof KeychainDfnsAdapter) {
     return adapter.getTransactionSigner();
   }
 

@@ -6,6 +6,7 @@ import { createAllowlistService } from "@/services/allowlist.service";
 import { AuditService } from "@/services/audit.service";
 import {
   provisionCoinbaseCdpAccount,
+  provisionDfnsWallet,
   provisionFireblocksVaultAccount,
   provisionParaWallet,
   provisionTurnkeyPrivateKey,
@@ -252,6 +253,22 @@ export const createOrganization = async (c: AppContext) => {
           apiBaseUrl: custody.apiBaseUrl ?? c.env.TURNKEY_API_BASE_URL,
           requestDelayMs: custody.requestDelayMs,
           privateKeyId: provisioned.privateKeyId,
+        });
+      } else if (custody.provider === "dfns") {
+        const provisioned = await provisionDfnsWallet(c.env, {
+          orgId,
+          orgSlug: slug,
+          apiBaseUrl: custody.apiBaseUrl,
+          walletId: custody.walletId,
+          network: custody.network,
+          signingKeyId: custody.signingKeyId,
+        });
+
+        await signingService.initializeDfnsSigning(orgId, undefined, {
+          apiBaseUrl: custody.apiBaseUrl ?? c.env.DFNS_API_BASE_URL,
+          walletId: provisioned.walletId,
+          network: provisioned.network,
+          signingKeyId: provisioned.signingKeyId,
         });
       } else {
         await signingService.initializePrivySigning(orgId, undefined, {

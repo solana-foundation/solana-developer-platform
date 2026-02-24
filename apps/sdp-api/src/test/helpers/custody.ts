@@ -99,7 +99,8 @@ export async function getTestCustodyConfig(
       | "privy"
       | "coinbase_cdp"
       | "para"
-      | "turnkey",
+      | "turnkey"
+      | "dfns",
     config: row.config,
     defaultWalletId: row.default_wallet_id,
     status: row.status as "active" | "inactive",
@@ -148,7 +149,8 @@ export async function getTestCustodyConfigByOrg(
       | "privy"
       | "coinbase_cdp"
       | "para"
-      | "turnkey",
+      | "turnkey"
+      | "dfns",
     config: row.config,
     defaultWalletId: row.default_wallet_id,
     status: row.status as "active" | "inactive",

@@ -95,7 +95,8 @@ export async function initializeCustody(formData: FormData) {
     | "local"
     | "coinbase_cdp"
     | "para"
-    | "turnkey";
+    | "turnkey"
+    | "dfns";
   const walletLabel = getOptionalString(formData, "walletLabel");
   const apiBaseUrl = getOptionalString(formData, "apiBaseUrl");
   const network = getOptionalString(formData, "network");
@@ -125,7 +126,8 @@ export async function switchCustodyProvider(formData: FormData) {
     | "local"
     | "coinbase_cdp"
     | "para"
-    | "turnkey";
+    | "turnkey"
+    | "dfns";
   const confirm = getString(formData, "confirm");
   const walletLabel = getOptionalString(formData, "walletLabel");
   const apiBaseUrl = getOptionalString(formData, "apiBaseUrl");
@@ -137,7 +139,7 @@ export async function switchCustodyProvider(formData: FormData) {
     throw new Error("Type SWITCH to confirm provider change");
   }
 
-  await sdpApiFetch("/v1/wallets/switch", {
+  const res = await sdpApiRequest("/v1/wallets/switch", {
     method: "POST",
     body: JSON.stringify({
       provider,
@@ -148,6 +150,12 @@ export async function switchCustodyProvider(formData: FormData) {
       ...(accountPolicy ? { accountPolicy } : {}),
     }),
   });
+
+  const rawBody = await res.text();
+
+  if (!res.ok) {
+    throw new Error(`SDP API request failed (${res.status}): ${rawBody}`);
+  }
 
   revalidatePath("/dashboard/custody");
   revalidatePath("/dashboard/wallets");
