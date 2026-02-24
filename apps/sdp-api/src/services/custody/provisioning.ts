@@ -1363,7 +1363,10 @@ function isDfnsWalletCreatedAfter(wallet: DfnsWalletLike, boundaryMs: number): b
   return Number.isFinite(createdAtMs) && createdAtMs >= boundaryMs;
 }
 
-async function listDfnsWalletsForRecovery(env: Env, apiBaseUrl?: string): Promise<DfnsWalletLike[]> {
+async function listDfnsWalletsForRecovery(
+  env: Env,
+  apiBaseUrl?: string
+): Promise<DfnsWalletLike[]> {
   const client = await createDfnsApiClient(env, { apiBaseUrl });
   const collected: DfnsWalletLike[] = [];
   let paginationToken: string | undefined;

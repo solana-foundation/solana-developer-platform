@@ -4,11 +4,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const { createDfnsApiClientMock } = vi.hoisted(() => ({
   createDfnsApiClientMock: vi.fn(),
 }));
+const testAddressOne = "1".repeat(32);
+const testAddressTwo = "2".repeat(32);
+const testAddressThree = "3".repeat(32);
 
 vi.mock("@/services/dfns/client", async () => {
-  const actual = await vi.importActual<typeof import("@/services/dfns/client")>(
-    "@/services/dfns/client"
-  );
+  const actual =
+    await vi.importActual<typeof import("@/services/dfns/client")>("@/services/dfns/client");
   return {
     ...actual,
     createDfnsApiClient: createDfnsApiClientMock,
@@ -27,7 +29,7 @@ describe("dfns wallet provisioning", () => {
     const client = createMockDfnsClient();
     client.wallets.createWallet.mockResolvedValue({
       id: "wal_123",
-      address: "11111111111111111111111111111111",
+      address: testAddressOne,
       network: "SolanaDevnet",
       signingKey: { id: "key_123" },
     });
@@ -40,7 +42,7 @@ describe("dfns wallet provisioning", () => {
 
     expect(result).toEqual({
       walletId: "wal_123",
-      address: "11111111111111111111111111111111",
+      address: testAddressOne,
       network: "SolanaDevnet",
       signingKeyId: "key_123",
     });
@@ -61,7 +63,7 @@ describe("dfns wallet provisioning", () => {
       items: [
         {
           id: "wal_recovered",
-          address: "22222222222222222222222222222222",
+          address: testAddressTwo,
           network: "SolanaDevnet",
           signingKey: { id: "key_456" },
           name: "sdp-acme",
@@ -79,7 +81,7 @@ describe("dfns wallet provisioning", () => {
 
     expect(result).toEqual({
       walletId: "wal_recovered",
-      address: "22222222222222222222222222222222",
+      address: testAddressTwo,
       network: "SolanaDevnet",
       signingKeyId: "key_456",
     });
@@ -118,7 +120,7 @@ describe("dfns wallet provisioning", () => {
       items: [
         {
           id: "wal_unrelated",
-          address: "33333333333333333333333333333333",
+          address: testAddressThree,
           network: "SolanaDevnet",
           signingKey: { id: "key_789" },
           name: "different-wallet-name",

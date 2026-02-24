@@ -3,6 +3,7 @@ import type { DfnsApiClient } from "@sdp/keychain-dfns";
 import { describe, expect, it, vi } from "vitest";
 
 describe("dfns adapter", () => {
+  const testAddress = "1".repeat(32);
   const expectedSignature = Uint8Array.from({ length: 64 }, (_, index) => index + 1);
   const signatureHex = `0x${Array.from(expectedSignature)
     .map((byte) => byte.toString(16).padStart(2, "0"))
@@ -12,7 +13,7 @@ describe("dfns adapter", () => {
     const getWallet = vi.fn().mockResolvedValue({
       id: "wa_test",
       network: "SolanaDevnet",
-      address: "11111111111111111111111111111111",
+      address: testAddress,
       signingKey: { id: "key_test" },
     });
 
@@ -38,7 +39,7 @@ describe("dfns adapter", () => {
     });
 
     const publicKey = await adapter.getPublicKey();
-    expect(publicKey).toBe("11111111111111111111111111111111");
+    expect(publicKey).toBe(testAddress);
     expect(getWallet).toHaveBeenCalledWith({ walletId: "wa_test" });
   });
 
@@ -46,7 +47,7 @@ describe("dfns adapter", () => {
     const getWallet = vi.fn().mockResolvedValue({
       id: "wa_test",
       network: "SolanaDevnet",
-      address: "11111111111111111111111111111111",
+      address: testAddress,
       signingKey: { id: "key_test" },
     });
     const createSignature = vi.fn().mockResolvedValue({

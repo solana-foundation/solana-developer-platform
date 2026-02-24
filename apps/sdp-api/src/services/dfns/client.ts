@@ -153,7 +153,10 @@ const DFNS_DEFAULT_HEADERS: Readonly<Record<string, string>> = {
   "User-Agent": DFNS_USER_AGENT,
 };
 
-function createDfnsCredentialSignature(privateKeyPem: string, payload: Buffer): DfnsSignatureResult {
+function createDfnsCredentialSignature(
+  privateKeyPem: string,
+  payload: Buffer
+): DfnsSignatureResult {
   let signingKey: crypto.KeyLike = privateKeyPem;
   let keyType: string | undefined;
 
@@ -167,11 +170,20 @@ function createDfnsCredentialSignature(privateKeyPem: string, payload: Buffer): 
 
   const attempts: Array<{ algorithm: "sha256" | "none"; digest: string | undefined }> = [];
   if (keyType === "rsa" || keyType === "rsa-pss") {
-    attempts.push({ algorithm: "sha256", digest: "sha256" }, { algorithm: "none", digest: undefined });
+    attempts.push(
+      { algorithm: "sha256", digest: "sha256" },
+      { algorithm: "none", digest: undefined }
+    );
   } else if (keyType === "ed25519" || keyType === "ed448") {
-    attempts.push({ algorithm: "none", digest: undefined }, { algorithm: "sha256", digest: "sha256" });
+    attempts.push(
+      { algorithm: "none", digest: undefined },
+      { algorithm: "sha256", digest: "sha256" }
+    );
   } else {
-    attempts.push({ algorithm: "none", digest: undefined }, { algorithm: "sha256", digest: "sha256" });
+    attempts.push(
+      { algorithm: "none", digest: undefined },
+      { algorithm: "sha256", digest: "sha256" }
+    );
   }
 
   const failures: string[] = [];
@@ -221,10 +233,7 @@ function normalizeDfnsPath(path: string): string {
   return path.startsWith("/") ? path : `/${path}`;
 }
 
-function applyDfnsQueryParams(
-  url: URL,
-  query?: Record<string, string | number | undefined>
-): void {
+function applyDfnsQueryParams(url: URL, query?: Record<string, string | number | undefined>): void {
   for (const [key, value] of Object.entries(query ?? {})) {
     if (value !== undefined) {
       url.searchParams.set(key, String(value));
