@@ -141,14 +141,7 @@ export interface CustodyConfigResponse {
     id: string;
     organizationId: string;
     projectId: string | null;
-    provider:
-      | "local"
-      | "fireblocks"
-      | "privy"
-      | "coinbase_cdp"
-      | "anchorage"
-      | "para"
-      | "turnkey";
+    provider: "local" | "fireblocks" | "privy" | "coinbase_cdp" | "anchorage" | "para" | "turnkey";
     publicKey: string;
     defaultWalletId: string | null;
     status: "active" | "inactive";

@@ -98,11 +98,7 @@ describe("signing.service provider reuse", () => {
   it("reuses the existing Anchorage root wallet when switching back to Anchorage", async () => {
     const orgId = "org_reuse_anchorage";
     const configId = "cust_anchorage_reuse";
-    const wallet = createCustodyWallet(
-      configId,
-      "anchorage_wallet_1",
-      "anchorage_wallet_pubkey"
-    );
+    const wallet = createCustodyWallet(configId, "anchorage_wallet_1", "anchorage_wallet_pubkey");
     const configRecord = createConfigRecord({
       id: configId,
       orgId,

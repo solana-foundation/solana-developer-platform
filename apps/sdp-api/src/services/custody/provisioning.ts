@@ -1404,7 +1404,10 @@ function encodePkcs8Pem(privateKeyDer: Uint8Array): string {
   return `-----BEGIN PRIVATE KEY-----\n${lines}\n-----END PRIVATE KEY-----`;
 }
 
-async function createAnchorageSignature(signingKeyHex: string, message: Uint8Array): Promise<string> {
+async function createAnchorageSignature(
+  signingKeyHex: string,
+  message: Uint8Array
+): Promise<string> {
   const rawKey = decodeHexToBytes(signingKeyHex);
   const seed = rawKey.length === 64 ? rawKey.slice(0, 32) : rawKey;
 
@@ -1428,6 +1431,7 @@ async function createAnchorageSignature(signingKeyHex: string, message: Uint8Arr
 
 function encodeEd25519Pkcs8FromSeed(seed: Uint8Array): Uint8Array {
   // ASN.1 PKCS#8 prefix for Ed25519 private keys followed by 32-byte seed.
+  // biome-ignore lint/nursery/noSecrets: This is a public PKCS#8 header constant, not credential material.
   const prefix = decodeHexToBytes("302e020100300506032b657004220420");
   const output = new Uint8Array(prefix.length + seed.length);
   output.set(prefix, 0);
