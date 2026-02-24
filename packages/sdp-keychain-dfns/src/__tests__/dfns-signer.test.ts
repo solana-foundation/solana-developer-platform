@@ -1,11 +1,11 @@
-import type { DfnsApiClient } from "../types.js";
 import { extractSignatureFromWireTransaction } from "@solana/keychain-core";
 import { createSignableMessage } from "@solana/signers";
 import { getBase64EncodedWireTransaction } from "@solana/transactions";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DfnsSigner } from "../dfns-signer.js";
+import type { DfnsApiClient } from "../types.js";
 
-const TEST_WALLET_ADDRESS = "11111111111111111111111111111111";
+const TEST_WALLET_ADDRESS = "1".repeat(32);
 
 vi.mock("@solana/keychain-core", async () => {
   const actual =
@@ -233,9 +233,9 @@ describe("DfnsSigner", () => {
       walletId: "wa_test",
     });
 
-    await expect(signer.signMessages([createSignableMessage(Uint8Array.from([9]))])).rejects.toThrow(
-      /policy denied/i
-    );
+    await expect(
+      signer.signMessages([createSignableMessage(Uint8Array.from([9]))])
+    ).rejects.toThrow(/policy denied/i);
   });
 });
 

@@ -80,7 +80,9 @@ export class DfnsSigner<TAddress extends string = string> implements SolanaSigne
     return signer;
   }
 
-  async signMessages(messages: readonly SignableMessage[]): Promise<readonly SignatureDictionary[]> {
+  async signMessages(
+    messages: readonly SignableMessage[]
+  ): Promise<readonly SignatureDictionary[]> {
     this.assertInitialized();
 
     return Promise.all(
@@ -255,7 +257,10 @@ export class DfnsSigner<TAddress extends string = string> implements SolanaSigne
     }
   }
 
-  private async getSignatureRequest(keyId: string, signatureId: string): Promise<DfnsSignatureRequest> {
+  private async getSignatureRequest(
+    keyId: string,
+    signatureId: string
+  ): Promise<DfnsSignatureRequest> {
     try {
       return await this.client.keySignatures.getSignature({
         keyId,
@@ -430,7 +435,11 @@ function extractSignatureBytes(request: DfnsSignatureRequest): SignatureBytes {
 }
 
 function extractSignedTransactionBytes(request: DfnsSignatureRequest): Uint8Array {
-  const candidates = [request.signedData, request.signature?.encoded, request.signatures?.[0]?.encoded];
+  const candidates = [
+    request.signedData,
+    request.signature?.encoded,
+    request.signatures?.[0]?.encoded,
+  ];
 
   for (const candidate of candidates) {
     const parsed = tryParseEncodedBytes(candidate);
@@ -448,9 +457,9 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function buildSignatureTarget(network?: string):
-  | { network: string }
-  | { blockchainKind: typeof SOLANA_BLOCKCHAIN_KIND } {
+function buildSignatureTarget(
+  network?: string
+): { network: string } | { blockchainKind: typeof SOLANA_BLOCKCHAIN_KIND } {
   if (network && network.trim().length > 0) {
     return { network };
   }
