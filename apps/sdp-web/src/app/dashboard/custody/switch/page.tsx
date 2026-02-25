@@ -7,13 +7,24 @@ import { type SwitchProvider, SwitchProviderForm } from "./switch-provider-form"
 
 const PROVIDER_OPTIONS: Array<{ value: SwitchProvider; label: string }> = [
   { value: "privy", label: "Privy" },
+  { value: "fireblocks", label: "Fireblocks" },
   { value: "coinbase_cdp", label: "Coinbase CDP" },
   { value: "para", label: "Para" },
   { value: "turnkey", label: "Turnkey" },
   { value: "local", label: "Local (development only)" },
 ];
 
+const DEFAULT_HAS_REUSABLE_WALLET_BY_PROVIDER: Record<SwitchProvider, boolean> = {
+  fireblocks: false,
+  privy: false,
+  coinbase_cdp: false,
+  para: false,
+  turnkey: false,
+  local: false,
+};
+
 const DEFAULT_NEEDS_WALLET_LABEL_BY_PROVIDER: Record<SwitchProvider, boolean> = {
+  fireblocks: false,
   privy: true,
   coinbase_cdp: true,
   para: true,
@@ -48,33 +59,49 @@ async function getCurrentProvider(): Promise<string | null> {
   return payload.data?.config?.provider ?? null;
 }
 
-async function getNeedsWalletLabelByProvider(): Promise<Record<SwitchProvider, boolean>> {
+async function getProviderCapabilities(): Promise<{
+  hasReusableWalletByProvider: Record<SwitchProvider, boolean>;
+  needsWalletLabelByProvider: Record<SwitchProvider, boolean>;
+}> {
   const response = await sdpApiRequest("/v1/wallets/switch-options");
   if (!response.ok) {
-    return DEFAULT_NEEDS_WALLET_LABEL_BY_PROVIDER;
+    return {
+      hasReusableWalletByProvider: DEFAULT_HAS_REUSABLE_WALLET_BY_PROVIDER,
+      needsWalletLabelByProvider: DEFAULT_NEEDS_WALLET_LABEL_BY_PROVIDER,
+    };
   }
 
   const payload = (await response.json()) as {
     data?: {
       providers?: Array<{
         provider?: string;
+        hasReusableWallet?: boolean;
         needsWalletLabel?: boolean;
       }>;
     };
   };
 
-  const next = { ...DEFAULT_NEEDS_WALLET_LABEL_BY_PROVIDER };
+  const hasReusableWalletByProvider = { ...DEFAULT_HAS_REUSABLE_WALLET_BY_PROVIDER };
+  const needsWalletLabelByProvider = { ...DEFAULT_NEEDS_WALLET_LABEL_BY_PROVIDER };
   for (const provider of payload.data?.providers ?? []) {
-    if (
-      provider.provider &&
-      provider.provider in next &&
-      typeof provider.needsWalletLabel === "boolean"
-    ) {
-      next[provider.provider as SwitchProvider] = provider.needsWalletLabel;
+    if (!provider.provider || !(provider.provider in needsWalletLabelByProvider)) {
+      continue;
+    }
+
+    const key = provider.provider as SwitchProvider;
+    if (typeof provider.hasReusableWallet === "boolean") {
+      hasReusableWalletByProvider[key] = provider.hasReusableWallet;
+    }
+
+    if (typeof provider.needsWalletLabel === "boolean") {
+      needsWalletLabelByProvider[key] = provider.needsWalletLabel;
     }
   }
 
-  return next;
+  return {
+    hasReusableWalletByProvider,
+    needsWalletLabelByProvider,
+  };
 }
 
 export default async function CustodySwitchPage() {
@@ -87,7 +114,8 @@ export default async function CustodySwitchPage() {
   }
 
   const currentProvider = await getCurrentProvider();
-  const needsWalletLabelByProvider = await getNeedsWalletLabelByProvider();
+  const { hasReusableWalletByProvider, needsWalletLabelByProvider } =
+    await getProviderCapabilities();
   const selectableOptions = PROVIDER_OPTIONS.filter((option) => option.value !== currentProvider);
   const defaultProvider = selectableOptions[0]?.value ?? PROVIDER_OPTIONS[0].value;
   const providerOptions = PROVIDER_OPTIONS.map((option) => ({
@@ -124,6 +152,7 @@ export default async function CustodySwitchPage() {
             options={providerOptions}
             defaultProvider={defaultProvider}
             disableSubmit={selectableOptions.length === 0}
+            hasReusableWalletByProvider={hasReusableWalletByProvider}
             needsWalletLabelByProvider={needsWalletLabelByProvider}
           />
         </CardContent>
