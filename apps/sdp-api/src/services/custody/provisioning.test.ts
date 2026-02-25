@@ -86,6 +86,85 @@ describe("coinbase account provisioning", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it("reads account.address when reusing an existing wallet address", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
+        const url = toUrlString(input);
+
+        if (
+          url.endsWith(`/platform/v2/solana/accounts/${EXISTING_ADDRESS}`) &&
+          init?.method === "GET"
+        ) {
+          return jsonResponse({ account: { address: EXISTING_ADDRESS } }, 200);
+        }
+
+        throw new Error(`Unexpected fetch call: ${init?.method ?? "GET"} ${url}`);
+      });
+
+    const result = await provisionCoinbaseCdpAccount(createCoinbaseEnv(), {
+      orgId: "org_abc",
+      orgSlug: "Acme Labs",
+      walletAddress: EXISTING_ADDRESS,
+    });
+
+    expect(result.address).toBe(EXISTING_ADDRESS);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("reads data.address when resolving an already-created account by name", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
+        const url = toUrlString(input);
+
+        if (url.endsWith("/platform/v2/solana/accounts") && init?.method === "POST") {
+          return jsonResponse({ errorType: "already_exists" }, 409);
+        }
+
+        if (url.includes("/platform/v2/solana/accounts/by-name/") && init?.method === "GET") {
+          return jsonResponse({ data: { address: EXISTING_ADDRESS } }, 200);
+        }
+
+        throw new Error(`Unexpected fetch call: ${init?.method ?? "GET"} ${url}`);
+      });
+
+    const result = await provisionCoinbaseCdpAccount(createCoinbaseEnv(), {
+      orgId: "org_abc",
+      orgSlug: "Acme Labs",
+    });
+
+    expect(result.address).toBe(EXISTING_ADDRESS);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("throws when by-name lookup succeeds but does not contain an address", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
+        const url = toUrlString(input);
+
+        if (url.endsWith("/platform/v2/solana/accounts") && init?.method === "POST") {
+          return jsonResponse({ errorType: "already_exists" }, 409);
+        }
+
+        if (url.includes("/platform/v2/solana/accounts/by-name/") && init?.method === "GET") {
+          return jsonResponse({ data: {} }, 200);
+        }
+
+        throw new Error(`Unexpected fetch call: ${init?.method ?? "GET"} ${url}`);
+      });
+
+    await expect(
+      provisionCoinbaseCdpAccount(createCoinbaseEnv(), {
+        orgId: "org_abc",
+        orgSlug: "Acme Labs",
+      })
+    ).rejects.toThrowError(/could not be resolved by name/i);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("throws an actionable error when by-name lookup fails after already_exists", async () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
@@ -116,6 +195,7 @@ describe("coinbase account provisioning", () => {
 
 describe("para wallet provisioning", () => {
   afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
@@ -184,6 +264,106 @@ describe("para wallet provisioning", () => {
     ).rejects.toThrowError(/Para API error: 400/i);
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a reused wallet when it is not a Solana wallet", async () => {
+    const walletId = "wal_para_evm";
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
+        const url = toUrlString(input);
+
+        if (url.endsWith(`/v1/wallets/${walletId}`) && init?.method === "GET") {
+          return jsonResponse(
+            {
+              data: {
+                id: walletId,
+                type: "EVM",
+                scheme: "ED25519",
+                address: CREATED_ADDRESS,
+              },
+            },
+            200
+          );
+        }
+
+        throw new Error(`Unexpected fetch call: ${init?.method ?? "GET"} ${url}`);
+      });
+
+    await expect(
+      provisionParaWallet(createParaEnv(), {
+        orgId: "org_abc",
+        orgSlug: "Acme Labs",
+        walletId,
+      })
+    ).rejects.toThrowError(/not a solana wallet/i);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a reused wallet when it is not ED25519", async () => {
+    const walletId = "wal_para_wrong_scheme";
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
+        const url = toUrlString(input);
+
+        if (url.endsWith(`/v1/wallets/${walletId}`) && init?.method === "GET") {
+          return jsonResponse(
+            {
+              data: {
+                id: walletId,
+                type: "SOLANA",
+                scheme: "DKLS",
+                address: CREATED_ADDRESS,
+              },
+            },
+            200
+          );
+        }
+
+        throw new Error(`Unexpected fetch call: ${init?.method ?? "GET"} ${url}`);
+      });
+
+    await expect(
+      provisionParaWallet(createParaEnv(), {
+        orgId: "org_abc",
+        orgSlug: "Acme Labs",
+        walletId,
+      })
+    ).rejects.toThrowError(/not ed25519/i);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops retrying after max transient address-not-found errors", async () => {
+    vi.useFakeTimers();
+
+    const walletId = "wal_para_retry_limit";
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
+        const url = toUrlString(input);
+
+        if (url.endsWith("/v1/wallets") && init?.method === "POST") {
+          return jsonResponse({ data: { id: walletId, status: "creating" } }, 200);
+        }
+
+        if (url.endsWith(`/v1/wallets/${walletId}`) && init?.method === "GET") {
+          return jsonResponse({ message: "wallet address not found after 6315ms" }, 500);
+        }
+
+        throw new Error(`Unexpected fetch call: ${init?.method ?? "GET"} ${url}`);
+      });
+
+    const provisionPromise = provisionParaWallet(createParaEnv(), {
+      orgId: "org_abc",
+      orgSlug: "Acme Labs",
+    });
+
+    await vi.runAllTimersAsync();
+    await expect(provisionPromise).rejects.toThrowError(/Para API error: 500/i);
+    expect(fetchMock).toHaveBeenCalledTimes(9);
   });
 });
 
