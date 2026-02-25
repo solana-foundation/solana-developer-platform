@@ -5,6 +5,7 @@ import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/d1";
 import { clearKVNamespaces, seedCachedApiKey } from "@/test/mocks/kv";
 import type { CachedApiKey } from "@sdp/types";
+import type { Signature } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/services/solana/rpc", async () => {
@@ -26,6 +27,7 @@ vi.mock("@/services/solana/rpc", async () => {
       confirmationStatus: "confirmed",
       err: null,
     }),
+    getSignaturesForAddress: vi.fn().mockResolvedValue([]),
   };
 });
 
@@ -492,6 +494,38 @@ describe("Payments routes", () => {
     expect(transfers.results[0]?.id).toBe("xfr_existing_daily_limit");
   });
 
+  async function seedTransfer(params: {
+    id: string;
+    status: string;
+    signature?: string | null;
+    walletId?: string;
+  }): Promise<void> {
+    const now = new Date().toISOString();
+    await env.DB.prepare(
+      `INSERT INTO payment_transfers
+           (id, organization_id, project_id, wallet_id, source_address, destination_address, token, amount, memo, type, direction, status, signature, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+      .bind(
+        params.id,
+        TEST_ORG.id,
+        null,
+        params.walletId ?? TEST_WALLET_ID,
+        TEST_SOLANA_ADDRESSES.wallet1,
+        TEST_SOLANA_ADDRESSES.wallet2,
+        "SOL",
+        "1",
+        null,
+        "transfer",
+        "outbound",
+        params.status,
+        params.signature ?? null,
+        now,
+        now
+      )
+      .run();
+  }
+
   describe("execute transfer — happy path", () => {
     it("executes a SOL transfer and returns a confirmed transfer record", async () => {
       const res = await app.request(
@@ -570,6 +604,119 @@ describe("Payments routes", () => {
       expect(transfers.results).toHaveLength(1);
       expect(transfers.results[0]?.status).toBe("failed");
       expect(transfers.results[0]?.error).toBeTruthy();
+    });
+  });
+
+  describe("list transfers", () => {
+    beforeEach(() => {
+      vi.clearAllMocks();
+    });
+
+    it("returns confirmed + pending transfers when wallet filter is provided", async () => {
+      const { getSignaturesForAddress } = await import("@/services/solana/rpc");
+      const confirmedSig =
+        // biome-ignore lint/nursery/noSecrets: Test transaction signature, not a secret.
+        "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy";
+
+      await seedTransfer({ id: "xfr_confirmed_1", status: "confirmed", signature: confirmedSig });
+      await seedTransfer({ id: "xfr_pending_1", status: "pending" });
+
+      vi.mocked(getSignaturesForAddress).mockResolvedValueOnce([
+        {
+          signature: confirmedSig as unknown as Signature,
+          slot: 100n,
+          blockTime: 1700000000n,
+          err: null,
+        },
+      ]);
+
+      const res = await app.request(
+        `/v1/payments/transfers?wallet=${TEST_WALLET_ID}`,
+        {
+          method: "GET",
+          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
+        },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: Array<{ id: string; status: string }>;
+        meta: { total: number };
+      };
+      expect(body.meta.total).toBe(2);
+      expect(body.data).toHaveLength(2);
+      const statuses = body.data.map((t) => t.status).sort();
+      expect(statuses).toEqual(["confirmed", "pending"]);
+    });
+
+    it("returns all transfers via DB-only path when no wallet filter is provided", async () => {
+      const { getSignaturesForAddress } = await import("@/services/solana/rpc");
+
+      await seedTransfer({ id: "xfr_db_1", status: "confirmed" });
+      await seedTransfer({ id: "xfr_db_2", status: "pending" });
+      await seedTransfer({ id: "xfr_db_3", status: "failed" });
+
+      const res = await app.request(
+        "/v1/payments/transfers",
+        {
+          method: "GET",
+          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
+        },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: Array<{ id: string }>;
+        meta: { total: number };
+      };
+      expect(body.data).toHaveLength(3);
+      expect(body.meta.total).toBe(3);
+      expect(vi.mocked(getSignaturesForAddress)).not.toHaveBeenCalled();
+    });
+
+    it("filters by status when status query param is provided", async () => {
+      await seedTransfer({ id: "xfr_status_confirmed", status: "confirmed" });
+      await seedTransfer({ id: "xfr_status_pending", status: "pending" });
+
+      const res = await app.request(
+        // biome-ignore lint/nursery/noSecrets: Test URL query param, not a secret.
+        "/v1/payments/transfers?status=confirmed",
+        {
+          method: "GET",
+          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
+        },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: Array<{ id: string; status: string }>;
+        meta: { total: number };
+      };
+      expect(body.data).toHaveLength(1);
+      expect(body.data[0]?.status).toBe("confirmed");
+    });
+
+    it("returns a single transfer by ID", async () => {
+      await seedTransfer({ id: "xfr_single_1", status: "confirmed" });
+
+      const res = await app.request(
+        "/v1/payments/transfers/xfr_single_1",
+        {
+          method: "GET",
+          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
+        },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: { transfer: { id: string; status: string } };
+      };
+      expect(body.data.transfer.id).toBe("xfr_single_1");
+      expect(body.data.transfer.status).toBe("confirmed");
     });
   });
 });

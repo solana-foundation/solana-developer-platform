@@ -10,16 +10,18 @@ import { createD1PaymentsRepository } from "@/db/repositories/payments.repositor
 import { formatDecimalAmount, isDecimalString, parseDecimalAmount } from "@/lib/amount";
 import { getAuth } from "@/lib/auth";
 import { AppError } from "@/lib/errors";
-import { success } from "@/lib/response";
+import { paginated, success } from "@/lib/response";
 import { assertValidAddress } from "@/lib/solana";
 import { createFeePaymentAdapter } from "@/services/adapters/fee-payment";
 import { createSigningService } from "@/services/domain/signing.service";
+import { withHeliusApiKey } from "@/services/rpc-relay.service";
 import { createOrgSigner } from "@/services/solana";
 import {
   confirmTransaction,
   createRpc,
   getAccountInfo,
   getRecentBlockhash,
+  getSignaturesForAddress,
   simulateTransaction,
 } from "@/services/solana/rpc";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
@@ -47,6 +49,7 @@ import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
 import type { Context } from "hono";
 import {
   createTransferSchema,
+  listTransfersQuerySchema,
   prepareTransferSchema,
   updateWalletPolicySchema,
   walletIdParamsSchema,
@@ -785,7 +788,7 @@ async function executeSolTransfer(
   return {
     signature,
     slot: Number(confirmation.slot),
-    blockTime: new Date().toISOString(),
+    blockTime: null,
   };
 }
 
@@ -948,7 +951,7 @@ async function executeSplTransfer(
   return {
     signature,
     slot: Number(confirmation.slot),
-    blockTime: new Date().toISOString(),
+    blockTime: null,
   };
 }
 
@@ -1120,6 +1123,16 @@ export async function prepareTransfer(c: AppContext) {
   });
 }
 
+function createHeliusRpc(env: Env) {
+  // TODO: Replace with a dedicated indexer (Helius webhooks, Triton stream, or
+  // similar) for production-scale history and comprehensive inbound transfer tracking.
+  // The current approach is limited to the most recent ~200 signatures.
+  const url = env.SOLANA_RPC_HELIUS_URL
+    ? withHeliusApiKey(env.SOLANA_RPC_HELIUS_URL, env.SOLANA_RPC_HELIUS_API_KEY)
+    : env.SOLANA_RPC_URL;
+  return createRpc(env, { rpcUrl: url });
+}
+
 export async function createTransfer(c: AppContext) {
   const body = await c.req.json();
   const parsed = createTransferSchema.safeParse(body);
@@ -1200,7 +1213,7 @@ export async function createTransfer(c: AppContext) {
     await updateTransferRecord(c, transfer.id, {
       status: "failed",
       error: message,
-      blockTime: new Date().toISOString(),
+      blockTime: null,
     });
 
     if (error instanceof AppError) {
@@ -1209,4 +1222,131 @@ export async function createTransfer(c: AppContext) {
 
     throw new AppError("SOLANA_RPC_ERROR", message);
   }
+}
+
+export async function listTransfers(c: AppContext) {
+  const auth = getAuth(c);
+  const query = listTransfersQuerySchema.safeParse(c.req.query());
+  if (!query.success) throw new AppError("BAD_REQUEST", "Invalid query parameters");
+
+  const {
+    page,
+    pageSize,
+    wallet: walletId,
+    walletAddress,
+    token,
+    direction,
+    status,
+    from,
+    to,
+  } = query.data;
+  const repo = getPaymentsRepository(c);
+  const offset = (page - 1) * pageSize;
+
+  let transferRows: TransferRow[];
+  let total: number;
+
+  if (walletId || walletAddress) {
+    // Helius-backed path: fetch on-chain signatures for the wallet address, then
+    // cross-reference with our DB. Append pending/processing/failed from DB (not on-chain yet).
+    //
+    // TODO: Replace getSignaturesForAddress with a dedicated indexer for production use.
+
+    let sourceAddress: string | undefined;
+    let resolvedWalletId: string | undefined;
+
+    if (walletId) {
+      const scope = await resolveScope(c);
+      const wallet = resolveWallet(scope.wallets, walletId);
+      sourceAddress = wallet.publicKey;
+      resolvedWalletId = walletId;
+    } else {
+      sourceAddress = walletAddress;
+    }
+
+    // 1. Fetch on-chain signature history from Helius
+    const heliusRpc = createHeliusRpc(c.env);
+    const onChainSigs = await getSignaturesForAddress(heliusRpc, sourceAddress as Address, {
+      limit: Math.min(pageSize * 5, 200),
+      commitment: "confirmed",
+    });
+    const sigStrings = onChainSigs.map((s) => String(s.signature));
+
+    // 2. Look up on-chain signatures in our DB
+    const confirmedRows = await repo.listTransfersBySignatures({
+      signatures: sigStrings,
+      organizationId: auth.organizationId,
+      projectId: auth.projectId,
+    });
+
+    // 3. Fetch pending/processing/failed from DB (not yet on-chain)
+    const pendingResult = await repo.listTransfers({
+      organizationId: auth.organizationId,
+      projectId: auth.projectId,
+      walletId: resolvedWalletId,
+      sourceAddress: resolvedWalletId ? undefined : walletAddress,
+      statuses: ["pending", "processing", "failed"],
+      token,
+      direction,
+      createdAtFrom: from,
+      createdAtTo: to,
+      limit: 100,
+      offset: 0,
+    });
+
+    // 4. Merge: confirmed (Helius-backed) + non-confirmed (DB), deduplicated
+    const seen = new Set<string>();
+    const merged = [...confirmedRows, ...pendingResult.rows].filter((row) => {
+      if (seen.has(row.id)) return false;
+      seen.add(row.id);
+      return true;
+    });
+
+    // 5. Apply remaining filters and sort
+    const filtered = merged
+      .filter((row) => {
+        if (status && row.status !== status) return false;
+        if (token && row.token !== token) return false;
+        if (direction && row.direction !== direction) return false;
+        return true;
+      })
+      .sort((a, b) => b.created_at.localeCompare(a.created_at));
+
+    total = filtered.length;
+    transferRows = filtered.slice(offset, offset + pageSize);
+  } else {
+    // DB-only path for org-scoped queries without a specific wallet
+    const result = await repo.listTransfers({
+      organizationId: auth.organizationId,
+      projectId: auth.projectId,
+      token,
+      direction,
+      statuses: status ? [status] : undefined,
+      createdAtFrom: from,
+      createdAtTo: to,
+      limit: pageSize,
+      offset,
+    });
+    total = result.total;
+    transferRows = result.rows;
+  }
+
+  const transfers = transferRows.map(mapTransferRow);
+  return paginated(c, transfers, { total, page, pageSize });
+}
+
+export async function getTransfer(c: AppContext) {
+  const auth = getAuth(c);
+  const transferId = c.req.param("transferId");
+  const repo = getPaymentsRepository(c);
+
+  const row = await repo.getTransferById({
+    transferId,
+    organizationId: auth.organizationId,
+    projectId: auth.projectId,
+  });
+
+  if (!row) throw new AppError("NOT_FOUND", "Transfer not found");
+
+  return success(c, { transfer: mapTransferRow(row) });
 }
