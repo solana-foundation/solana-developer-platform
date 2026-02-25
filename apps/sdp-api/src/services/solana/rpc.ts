@@ -370,5 +370,46 @@ export async function getMinimumBalanceForRentExemption(
   return response;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Signature History
+// ═══════════════════════════════════════════════════════════════════════════
+
+export interface SignatureInfo {
+  signature: Signature;
+  slot: bigint;
+  blockTime: bigint | null;
+  err: unknown | null;
+}
+
+/**
+ * Get transaction signatures for an address (newest first)
+ */
+export async function getSignaturesForAddress(
+  rpc: SolanaRpc,
+  address: Address,
+  options?: {
+    limit?: number;
+    before?: Signature;
+    until?: Signature;
+    commitment?: "confirmed" | "finalized";
+  }
+): Promise<SignatureInfo[]> {
+  const response = await rpc
+    .getSignaturesForAddress(address, {
+      limit: options?.limit ?? 100,
+      ...(options?.before ? { before: options.before } : {}),
+      ...(options?.until ? { until: options.until } : {}),
+      commitment: options?.commitment ?? "confirmed",
+    })
+    .send();
+
+  return response.map((item) => ({
+    signature: item.signature,
+    slot: item.slot,
+    blockTime: item.blockTime ?? null,
+    err: item.err ?? null,
+  }));
+}
+
 // Re-export types
 export type { SolanaRpc, Commitment, Signature, Blockhash };

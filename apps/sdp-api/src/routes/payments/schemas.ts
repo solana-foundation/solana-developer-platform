@@ -30,6 +30,18 @@ export const createTransferSchema = z.object({
   memo: z.string().max(256).optional(),
 });
 
+export const listTransfersQuerySchema = z.object({
+  wallet: z.string().optional(),
+  walletAddress: z.string().optional(),
+  token: z.string().optional(),
+  direction: z.enum(["inbound", "outbound"]).optional(),
+  status: z.enum(["pending", "processing", "confirmed", "finalized", "failed"]).optional(),
+  from: z.string().datetime({ offset: true }).optional(),
+  to: z.string().datetime({ offset: true }).optional(),
+  page: z.coerce.number().int().positive().default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(20),
+});
+
 export const prepareTransferSchema = createTransferSchema.extend({
   referenceAddress: z.string().min(32).max(44).optional(),
   options: z

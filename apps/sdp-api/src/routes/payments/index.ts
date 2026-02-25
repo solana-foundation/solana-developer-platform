@@ -3,8 +3,10 @@ import type { Env } from "@/types/env";
 import { Hono } from "hono";
 import {
   createTransfer,
+  getTransfer,
   getWalletBalances,
   getWalletPolicy,
+  listTransfers,
   prepareTransfer,
   updateWalletPolicy,
 } from "./handlers";
@@ -34,5 +36,7 @@ payments.post(
   prepareTransfer
 );
 payments.post("/transfers", requirePermissions("payments:write", "wallets:read"), createTransfer);
+payments.get("/transfers", requirePermissions("payments:read"), listTransfers);
+payments.get("/transfers/:transferId", requirePermissions("payments:read"), getTransfer);
 
 export default payments;
