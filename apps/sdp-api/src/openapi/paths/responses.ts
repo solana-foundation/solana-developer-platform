@@ -31,10 +31,8 @@ import {
   listSessionsResponseSchema,
   listTemplatesResponseSchema,
   offrampExecutionResponseSchema,
-  offrampQuoteResponseSchema,
   onboardingStatusResponseSchema,
   onrampExecutionResponseSchema,
-  onrampQuoteResponseSchema,
   organizationSchema,
   paginatedResponseSchema,
   prepareBurnResponseSchema,
@@ -138,7 +136,5 @@ export const prepareTransferResponse = successResponseSchema(prepareTransferResp
 export const transferResponse = successResponseSchema(transferResponseSchema);
 export const transferListResponse = paginatedResponseSchema(transferSchema);
 export const feeQuoteResponse = successResponseSchema(feeQuoteResponseSchema);
-export const onrampQuoteResponse = successResponseSchema(onrampQuoteResponseSchema);
-export const offrampQuoteResponse = successResponseSchema(offrampQuoteResponseSchema);
 export const onrampExecutionResponse = successResponseSchema(onrampExecutionResponseSchema);
 export const offrampExecutionResponse = successResponseSchema(offrampExecutionResponseSchema);

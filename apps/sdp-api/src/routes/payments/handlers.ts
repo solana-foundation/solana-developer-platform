@@ -49,6 +49,8 @@ import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
 import type { Context } from "hono";
 import {
   createTransferSchema,
+  executeOfframpSchema,
+  executeOnrampSchema,
   listTransfersQuerySchema,
   prepareTransferSchema,
   updateWalletPolicySchema,
@@ -66,6 +68,10 @@ const SPL_TOKEN_PROGRAM_IDS = [SPL_TOKEN_PROGRAM_ID, SPL_TOKEN_2022_PROGRAM_ID] 
 const PAYMENT_POLICY_VERSION = 1;
 const DESTINATION_ALLOWLIST_POLICY_TYPE = "destination_allowlist";
 const TRANSFER_LIMITS_POLICY_TYPE = "transfer_limits";
+const MOONPAY_ONRAMP_URL = "https://buy.moonpay.com";
+const MOONPAY_OFFRAMP_URL = "https://sell.moonpay.com";
+const MOONPAY_SANDBOX_ONRAMP_URL = "https://buy-sandbox.moonpay.com";
+const MOONPAY_SANDBOX_OFFRAMP_URL = "https://sell-sandbox.moonpay.com";
 
 function getPaymentsRepository(c: AppContext) {
   return createD1PaymentsRepository({ db: createD1Drizzle(c.env.DB) });
@@ -573,6 +579,100 @@ function resolveWallet(wallets: CustodyWallet[], walletId: string): CustodyWalle
     );
   }
   return wallet;
+}
+
+function resolveWalletAddress(
+  wallets: CustodyWallet[],
+  walletIdOrAddress: string,
+  fieldName: string
+): string {
+  const matchingWallet = wallets.find((entry) => entry.walletId === walletIdOrAddress);
+  if (matchingWallet) {
+    return matchingWallet.publicKey;
+  }
+  return assertValidAddress(walletIdOrAddress, fieldName);
+}
+
+function normalizeMoonPayCurrencyCode(value: string): string {
+  const normalized = value.trim().toLowerCase();
+  if (!/^[a-z0-9_]+$/.test(normalized)) {
+    throw new AppError("BAD_REQUEST", "cryptoToken must be a valid MoonPay currency code");
+  }
+  return normalized;
+}
+
+type MoonPayConfig = {
+  apiKey: string;
+  secretKey: string;
+  onrampUrl: string;
+  offrampUrl: string;
+};
+
+function getMoonPayConfig(c: AppContext): MoonPayConfig {
+  const apiKey = c.env.MOONPAY_API_KEY?.trim();
+  const secretKey = c.env.MOONPAY_SECRET_KEY?.trim();
+
+  if (!apiKey || !secretKey) {
+    throw new AppError(
+      "INTERNAL_ERROR",
+      "MoonPay is not configured. Set MOONPAY_API_KEY and MOONPAY_SECRET_KEY."
+    );
+  }
+
+  const useProduction = c.env.ENVIRONMENT === "production";
+  const defaultOnrampUrl = useProduction ? MOONPAY_ONRAMP_URL : MOONPAY_SANDBOX_ONRAMP_URL;
+  const defaultOfframpUrl = useProduction ? MOONPAY_OFFRAMP_URL : MOONPAY_SANDBOX_OFFRAMP_URL;
+
+  const onrampUrlRaw = c.env.MOONPAY_ONRAMP_URL ?? defaultOnrampUrl;
+  const offrampUrlRaw = c.env.MOONPAY_OFFRAMP_URL ?? defaultOfframpUrl;
+
+  try {
+    new URL(onrampUrlRaw);
+    new URL(offrampUrlRaw);
+  } catch {
+    throw new AppError("INTERNAL_ERROR", "MoonPay URL configuration is invalid.");
+  }
+
+  return {
+    apiKey,
+    secretKey,
+    onrampUrl: onrampUrlRaw,
+    offrampUrl: offrampUrlRaw,
+  };
+}
+
+async function createMoonPaySignature(unsignedQuery: string, secretKey: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    "raw",
+    encoder.encode(secretKey),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  const signature = await crypto.subtle.sign("HMAC", key, encoder.encode(unsignedQuery));
+  return Buffer.from(signature).toString("base64");
+}
+
+async function buildSignedMoonPayWidgetUrl(
+  baseUrl: string,
+  secretKey: string,
+  params: Record<string, string | undefined>
+): Promise<string> {
+  const url = new URL(baseUrl);
+  const sortedEntries = Object.entries(params).sort(([left], [right]) => left.localeCompare(right));
+
+  for (const [key, value] of sortedEntries) {
+    if (!value) {
+      continue;
+    }
+    url.searchParams.set(key, value);
+  }
+
+  const signature = await createMoonPaySignature(url.search, secretKey);
+  url.searchParams.set("signature", signature);
+
+  return url.toString();
 }
 
 async function resolveWalletFromParams(c: AppContext) {
@@ -1349,4 +1449,83 @@ export async function getTransfer(c: AppContext) {
   if (!row) throw new AppError("NOT_FOUND", "Transfer not found");
 
   return success(c, { transfer: mapTransferRow(row) });
+}
+
+export async function executeOnramp(c: AppContext) {
+  const body = await c.req.json();
+  const parsed = executeOnrampSchema.safeParse(body);
+
+  if (!parsed.success) {
+    throw new AppError("BAD_REQUEST", "Invalid request body", {
+      errors: parsed.error.flatten().fieldErrors,
+    });
+  }
+
+  const scope = await resolveScope(c);
+  const destinationWalletAddress = resolveWalletAddress(
+    scope.wallets,
+    parsed.data.destinationWallet,
+    "destinationWallet"
+  );
+  const moonPay = getMoonPayConfig(c);
+
+  const redirectUrl = await buildSignedMoonPayWidgetUrl(moonPay.onrampUrl, moonPay.secretKey, {
+    apiKey: moonPay.apiKey,
+    baseCurrencyCode: "usd",
+    baseCurrencyAmount: parsed.data.fiatAmount,
+    currencyCode: normalizeMoonPayCurrencyCode(parsed.data.cryptoToken),
+    walletAddress: destinationWalletAddress,
+    redirectURL: parsed.data.redirectUrl,
+    externalCustomerId: parsed.data.kycReference,
+    externalTransactionId: `sdp_onramp_${crypto.randomUUID()}`,
+  });
+
+  return success(c, {
+    ramp: {
+      id: `ramp_${crypto.randomUUID()}`,
+      status: "pending",
+      redirectUrl,
+    },
+  });
+}
+
+export async function executeOfframp(c: AppContext) {
+  const body = await c.req.json();
+  const parsed = executeOfframpSchema.safeParse(body);
+
+  if (!parsed.success) {
+    throw new AppError("BAD_REQUEST", "Invalid request body", {
+      errors: parsed.error.flatten().fieldErrors,
+    });
+  }
+
+  const scope = await resolveScope(c);
+  const sourceWalletAddress = resolveWalletAddress(
+    scope.wallets,
+    parsed.data.sourceWallet,
+    "sourceWallet"
+  );
+  const moonPay = getMoonPayConfig(c);
+  const externalTransactionId = `sdp_offramp_${crypto.randomUUID()}`;
+
+  const redirectUrl = await buildSignedMoonPayWidgetUrl(moonPay.offrampUrl, moonPay.secretKey, {
+    apiKey: moonPay.apiKey,
+    baseCurrencyCode: normalizeMoonPayCurrencyCode(parsed.data.cryptoToken),
+    baseCurrencyAmount: parsed.data.cryptoAmount,
+    quoteCurrencyCode: "usd",
+    walletAddress: sourceWalletAddress,
+    refundWalletAddress: sourceWalletAddress,
+    redirectURL: parsed.data.redirectUrl,
+    externalCustomerId: parsed.data.kycReference,
+    externalTransactionId,
+  });
+
+  return success(c, {
+    ramp: {
+      id: `ramp_${crypto.randomUUID()}`,
+      status: "pending",
+      redirectUrl,
+      reference: externalTransactionId,
+    },
+  });
 }
