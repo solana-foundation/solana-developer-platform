@@ -341,97 +341,63 @@ export const feeQuoteSchema = z
   })
   .openapi({ description: "Fee quote details." });
 
-export const rampProviderSchema = z
-  .enum(["bridge", "moonpay", "ramp", "transak"])
-  .openapi({ description: "Ramp provider.", example: "moonpay" });
-
-export const onrampQuoteRequestSchema = z
-  .object({
-    fiatCurrency: z
-      .string()
-      .regex(/^[A-Z]{3}$/)
-      .openapi({ description: "Fiat currency code (ISO 4217).", example: "USD" }),
-    fiatAmount: tokenAmountSchema,
-    cryptoToken: z.string().openapi({ description: "Crypto token symbol.", example: "USDC" }),
-    provider: rampProviderSchema.optional(),
-  })
-  .openapi({ description: "On-ramp quote request payload." });
-
-export const offrampQuoteRequestSchema = z
-  .object({
-    fiatCurrency: z
-      .string()
-      .regex(/^[A-Z]{3}$/)
-      .openapi({ description: "Fiat currency code (ISO 4217).", example: "USD" }),
-    cryptoToken: z.string().openapi({ description: "Crypto token symbol.", example: "USDC" }),
-    cryptoAmount: tokenAmountSchema.openapi({
-      description: "Amount of crypto to off-ramp.",
-      example: "250.00",
-    }),
-    provider: rampProviderSchema.optional(),
-  })
-  .openapi({ description: "Off-ramp quote request payload." });
-
-export const onrampQuoteSchema = z
-  .object({
-    id: z.string().openapi({ description: "Ramp quote identifier.", example: "quote_example" }),
-    fiatCurrency: z.string().openapi({ description: "Fiat currency code.", example: "USD" }),
-    fiatAmount: tokenAmountSchema,
-    cryptoToken: z.string().openapi({ description: "Crypto token symbol.", example: "USDC" }),
-    cryptoAmount: tokenAmountSchema,
-    exchangeRate: tokenAmountSchema.optional().openapi({ description: "Exchange rate." }),
-    fees: z
-      .object({
-        network: tokenAmountSchema.optional().openapi({ description: "Network fee." }),
-        provider: tokenAmountSchema.optional().openapi({ description: "Provider fee." }),
-      })
-      .optional()
-      .openapi({ description: "Fee breakdown." }),
-    expiresAt: isoDateTimeSchema.openapi({ description: "Quote expiration." }),
-  })
-  .openapi({ description: "On-ramp quote details." });
-
-export const offrampQuoteSchema = z
-  .object({
-    id: z.string().openapi({ description: "Ramp quote identifier.", example: "quote_example" }),
-    fiatCurrency: z.string().openapi({ description: "Fiat currency code.", example: "USD" }),
-    fiatAmount: tokenAmountSchema.openapi({
-      description: "Fiat payout amount.",
-      example: "250.00",
-    }),
-    cryptoToken: z.string().openapi({ description: "Crypto token symbol.", example: "USDC" }),
-    cryptoAmount: tokenAmountSchema,
-    exchangeRate: tokenAmountSchema.optional().openapi({ description: "Exchange rate." }),
-    fees: z
-      .object({
-        network: tokenAmountSchema.optional().openapi({ description: "Network fee." }),
-        provider: tokenAmountSchema.optional().openapi({ description: "Provider fee." }),
-      })
-      .optional()
-      .openapi({ description: "Fee breakdown." }),
-    expiresAt: isoDateTimeSchema.openapi({ description: "Quote expiration." }),
-  })
-  .openapi({ description: "Off-ramp quote details." });
+const moonpayCurrencyCodeSchema = z
+  .string()
+  .regex(/^[a-zA-Z0-9_]+$/)
+  .openapi({
+    description: "MoonPay currency code (for example: `usdc_sol`).",
+    example: "usdc_sol",
+  });
 
 export const executeOnrampRequestSchema = z
   .object({
-    quoteId: z.string().openapi({ description: "Ramp quote identifier." }),
-    destinationWallet: z.string().openapi({ description: "Wallet ID for delivery/debit." }),
+    destinationWallet: z.string().openapi({
+      description: "Destination wallet ID or Solana address for purchased crypto.",
+    }),
+    cryptoToken: moonpayCurrencyCodeSchema,
+    fiatCurrency: z.literal("USD").optional().openapi({
+      description: "Fiat currency for on-ramp. USD only.",
+      example: "USD",
+    }),
+    fiatAmount: tokenAmountSchema.openapi({
+      description: "Fiat amount in USD to purchase crypto with.",
+      example: "100.00",
+    }),
     kycReference: z
       .string()
       .optional()
       .openapi({ description: "Optional KYC reference identifier." }),
+    redirectUrl: z
+      .string()
+      .url()
+      .optional()
+      .openapi({ description: "Optional redirect URL after provider flow completes." }),
   })
   .openapi({ description: "Execute on-ramp request payload." });
 
 export const executeOfframpRequestSchema = z
   .object({
-    quoteId: z.string().openapi({ description: "Ramp quote identifier." }),
-    sourceWallet: z.string().openapi({ description: "Wallet ID for debit." }),
+    sourceWallet: z.string().openapi({
+      description: "Source wallet ID or Solana address for crypto-to-fiat off-ramp.",
+    }),
+    cryptoToken: moonpayCurrencyCodeSchema,
+    fiatCurrency: z.literal("USD").optional().openapi({
+      description: "Fiat payout currency. USD only.",
+      example: "USD",
+    }),
+    cryptoAmount: tokenAmountSchema.openapi({
+      description: "Crypto amount to sell for fiat.",
+      example: "50.00",
+    }),
     kycReference: z
       .string()
       .optional()
       .openapi({ description: "Optional KYC reference identifier." }),
+    redirectUrl: z
+      .string()
+      .url()
+      .optional()
+      .openapi({ description: "Optional redirect URL after provider flow completes." }),
   })
   .openapi({ description: "Execute off-ramp request payload." });
 
@@ -455,6 +421,11 @@ export const offrampExecutionSchema = z
     status: z
       .enum(["pending", "processing", "completed", "failed"])
       .openapi({ description: "Ramp execution status.", example: "pending" }),
+    redirectUrl: z
+      .string()
+      .url()
+      .optional()
+      .openapi({ description: "Redirect URL for the ramp provider." }),
     reference: z.string().optional().openapi({ description: "Provider reference for the payout." }),
   })
   .openapi({ description: "Off-ramp execution status." });
@@ -488,18 +459,6 @@ export const feeQuoteResponseSchema = z
     feeQuote: feeQuoteSchema.openapi({ description: "Fee quote details." }),
   })
   .openapi({ description: "Fee quote response payload." });
-
-export const onrampQuoteResponseSchema = z
-  .object({
-    rampQuote: onrampQuoteSchema.openapi({ description: "On-ramp quote details." }),
-  })
-  .openapi({ description: "On-ramp quote response payload." });
-
-export const offrampQuoteResponseSchema = z
-  .object({
-    rampQuote: offrampQuoteSchema.openapi({ description: "Off-ramp quote details." }),
-  })
-  .openapi({ description: "Off-ramp quote response payload." });
 
 export const onrampExecutionResponseSchema = z
   .object({

@@ -21,6 +21,15 @@ const transferAmountSchema = z
   .string()
   .refine((value) => isDecimalString(value), { message: "Invalid amount format" });
 
+const moonpayAmountSchema = transferAmountSchema.refine(
+  (value) => Number.parseFloat(value) > 0,
+  "Amount must be greater than zero"
+);
+
+const moonpayCurrencyCodeSchema = z
+  .string()
+  .regex(/^[a-zA-Z0-9_]+$/, { message: "Invalid MoonPay currency code" });
+
 export const createTransferSchema = z.object({
   projectId: z.string().min(1).optional(),
   source: z.string().min(1),
@@ -50,4 +59,22 @@ export const prepareTransferSchema = createTransferSchema.extend({
       simulate: z.boolean().optional(),
     })
     .optional(),
+});
+
+export const executeOnrampSchema = z.object({
+  destinationWallet: z.string().min(1),
+  cryptoToken: moonpayCurrencyCodeSchema,
+  fiatCurrency: z.literal("USD").optional(),
+  fiatAmount: moonpayAmountSchema,
+  kycReference: z.string().max(128).optional(),
+  redirectUrl: z.string().url().optional(),
+});
+
+export const executeOfframpSchema = z.object({
+  sourceWallet: z.string().min(1),
+  cryptoToken: moonpayCurrencyCodeSchema,
+  fiatCurrency: z.literal("USD").optional(),
+  cryptoAmount: moonpayAmountSchema,
+  kycReference: z.string().max(128).optional(),
+  redirectUrl: z.string().url().optional(),
 });

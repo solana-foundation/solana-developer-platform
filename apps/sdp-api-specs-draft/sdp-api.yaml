@@ -1025,78 +1025,37 @@ components:
         - feeInLamports
         - validUntil
 
-    RampQuoteRequest:
-      type: object
-      properties:
-        direction:
-          type: string
-          enum: [onramp, offramp]
-        fiatCurrency:
-          type: string
-          pattern: '^[A-Z]{3}$'
-        fiatAmount:
-          $ref: '#/components/schemas/TokenAmount'
-        cryptoToken:
-          type: string
-        provider:
-          type: string
-          enum: [bridge, moonpay, ramp, transak]
-      required:
-        - direction
-        - fiatCurrency
-        - fiatAmount
-        - cryptoToken
-
-    RampQuote:
-      type: object
-      properties:
-        id:
-          type: string
-          pattern: '^quote_[a-zA-Z0-9]+$'
-        direction:
-          type: string
-          enum: [onramp, offramp]
-        fiatCurrency:
-          type: string
-        fiatAmount:
-          $ref: '#/components/schemas/TokenAmount'
-        cryptoToken:
-          type: string
-        cryptoAmount:
-          $ref: '#/components/schemas/TokenAmount'
-        exchangeRate:
-          $ref: '#/components/schemas/TokenAmount'
-        fees:
-          type: object
-          properties:
-            network:
-              $ref: '#/components/schemas/TokenAmount'
-            provider:
-              $ref: '#/components/schemas/TokenAmount'
-        expiresAt:
-          $ref: '#/components/schemas/Timestamp'
-      required:
-        - id
-        - direction
-        - fiatCurrency
-        - fiatAmount
-        - cryptoToken
-        - cryptoAmount
-        - expiresAt
-
     ExecuteRampRequest:
       type: object
       properties:
-        quoteId:
+        direction:
           type: string
+          enum: [onramp, offramp]
         destinationWallet:
           type: string
-          description: Wallet ID for crypto receipt/debit
+          description: Wallet ID or Solana address for on-ramp receipt
+        sourceWallet:
+          type: string
+          description: Wallet ID or Solana address for off-ramp source/refund
+        cryptoToken:
+          type: string
+          description: MoonPay currency code (for example usdc_sol)
+        fiatCurrency:
+          type: string
+          enum: [USD]
+        fiatAmount:
+          $ref: '#/components/schemas/TokenAmount'
+        cryptoAmount:
+          $ref: '#/components/schemas/TokenAmount'
         kycReference:
           type: string
+        redirectUrl:
+          type: string
+          format: uri
       required:
-        - quoteId
-        - destinationWallet
+        - direction
+        - cryptoToken
+        - fiatCurrency
 
     # Transaction Schemas
     SendTransactionRequest:
@@ -2493,42 +2452,11 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
 
-  /payments/ramps/quote:
-    post:
-      tags: [Payments]
-      summary: Get Ramp Quote
-      description: Gets a quote for fiat on/off ramp
-      operationId: getRampQuote
-      parameters:
-        - $ref: '#/components/parameters/environmentHeader'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/RampQuoteRequest'
-      responses:
-        '200':
-          description: Ramp quote retrieved successfully
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: '#/components/schemas/SuccessResponse'
-                  - type: object
-                    properties:
-                      data:
-                        $ref: '#/components/schemas/RampQuote'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-
   /payments/ramps/execute:
     post:
       tags: [Payments]
       summary: Execute Ramp
-      description: Executes a fiat on/off ramp transaction
+      description: Creates a MoonPay fiat/crypto ramp session (USD only)
       operationId: executeRamp
       parameters:
         - $ref: '#/components/parameters/environmentHeader'

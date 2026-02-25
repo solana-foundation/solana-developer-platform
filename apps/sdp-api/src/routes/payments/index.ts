@@ -3,6 +3,8 @@ import type { Env } from "@/types/env";
 import { Hono } from "hono";
 import {
   createTransfer,
+  executeOfframp,
+  executeOnramp,
   getTransfer,
   getWalletBalances,
   getWalletPolicy,
@@ -38,5 +40,15 @@ payments.post(
 payments.post("/transfers", requirePermissions("payments:write", "wallets:read"), createTransfer);
 payments.get("/transfers", requirePermissions("payments:read"), listTransfers);
 payments.get("/transfers/:transferId", requirePermissions("payments:read"), getTransfer);
+payments.post(
+  "/ramps/onramp/execute",
+  requirePermissions("payments:write", "wallets:read"),
+  executeOnramp
+);
+payments.post(
+  "/ramps/offramp/execute",
+  requirePermissions("payments:write", "wallets:read"),
+  executeOfframp
+);
 
 export default payments;
