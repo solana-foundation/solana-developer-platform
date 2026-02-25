@@ -12,6 +12,7 @@ vi.mock("@/services/solana/rpc", async () => {
     await vi.importActual<typeof import("@/services/solana/rpc")>("@/services/solana/rpc");
   return {
     ...actual,
+    createRpc: vi.fn().mockReturnValue({}),
     getRecentBlockhash: vi.fn().mockResolvedValue({
       // biome-ignore lint/nursery/noSecrets: Test blockhash, not a secret.
       blockhash: "EkSnNWid2cvwEVnVx9aBqawnmiCNiDgp3gUdkDPTKN1N",
