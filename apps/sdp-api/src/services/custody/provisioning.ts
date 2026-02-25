@@ -4,12 +4,33 @@
  * Creates custody wallets for new organizations using provider APIs.
  */
 
-import { Buffer } from "node:buffer";
 import { SigningError } from "@/services/ports";
 import type { Env } from "@/types/env";
 import type { VaultAddressesResponse } from "@solana/keychain-fireblocks";
 import { ApiKeyStamper } from "@solana/keychain-turnkey";
-import { SignJWT, importJWK, importPKCS8 } from "jose";
+import { SignJWT, importPKCS8 } from "jose";
+import {
+  buildCoinbaseCdpAccountName,
+  coinbaseCdpRequest,
+  extractCoinbaseCdpAccountAddress,
+  isCoinbaseCdpAlreadyExistsError,
+  resolveCoinbaseCdpAccountScope,
+} from "./provisioning.coinbase";
+import {
+  encodeBasicAuth,
+  parseJsonResponse,
+  randomHex,
+  readErrorResponseText,
+  sha256Hex,
+  sleep,
+} from "./provisioning.common";
+import {
+  type ParaWalletResponse,
+  buildParaUserIdentifier,
+  paraRequest,
+  validateParaWallet,
+  waitForParaWalletReady,
+} from "./provisioning.para";
 
 const DEFAULT_FIREBLOCKS_API_BASE_URL = "https://api.fireblocks.io";
 const DEFAULT_PRIVY_API_BASE_URL = "https://api.privy.io/v1";
@@ -60,15 +81,6 @@ interface TurnkeyGetPrivateKeyResponse {
       address?: string;
     }>;
   };
-}
-
-interface ParaWalletResponse {
-  id: string;
-  type?: "EVM" | "SOLANA" | "COSMOS";
-  scheme?: "DKLS" | "CGGMP" | "ED25519";
-  status?: "creating" | "ready" | string;
-  address?: string;
-  publicKey?: string;
 }
 
 export interface ProvisionFireblocksOptions {
@@ -386,12 +398,18 @@ export async function provisionParaWallet(
     return {
       walletId: validated.id,
       address: validated.address,
-      userIdentifier: buildParaUserIdentifier(options),
+      userIdentifier: buildParaUserIdentifier({
+        orgId: options.orgId,
+        projectId: options.projectId,
+      }),
       userIdentifierType: "CUSTOM_ID",
     };
   }
 
-  const userIdentifier = buildParaUserIdentifier(options);
+  const userIdentifier = buildParaUserIdentifier({
+    orgId: options.orgId,
+    projectId: options.projectId,
+  });
   const created = await paraRequest<ParaWalletResponse>({
     apiBaseUrl,
     apiKey,
@@ -518,17 +536,6 @@ interface FireblocksAddressesParams {
   assetId: string;
 }
 
-interface CoinbaseCdpRequestParams {
-  method: "GET" | "POST" | "PUT" | "DELETE";
-  path: string;
-  apiBaseUrl: string;
-  apiKeyId: string;
-  apiKeySecret: string;
-  walletSecret: string;
-  idempotencyKey?: string;
-  body?: Record<string, unknown>;
-}
-
 interface TurnkeyRequestParams {
   method: "POST";
   path: string;
@@ -536,14 +543,6 @@ interface TurnkeyRequestParams {
   apiPublicKey: string;
   apiPrivateKey: string;
   body: Record<string, unknown>;
-}
-
-interface ParaRequestParams {
-  method: "GET" | "POST";
-  path: string;
-  apiBaseUrl: string;
-  apiKey: string;
-  body?: Record<string, unknown>;
 }
 
 async function fetchFireblocksAddressesWithRetry(
@@ -573,10 +572,6 @@ async function fetchFireblocksAddressesWithRetry(
   return { addresses: [] };
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 async function fireblocksRequest<T>(params: FireblocksRequestParams): Promise<T> {
   const bodyStr = params.body ? JSON.stringify(params.body) : "";
   const token = await createFireblocksJwt(params.apiKey, params.apiSecretPem, params.uri, bodyStr);
@@ -592,18 +587,14 @@ async function fireblocksRequest<T>(params: FireblocksRequestParams): Promise<T>
   });
 
   if (!response.ok && !(params.allowStatuses ?? []).includes(response.status)) {
-    const errorText = await response.text().catch(() => "Failed to read error response");
+    const errorText = await readErrorResponseText(response);
     throw new SigningError(
       `Fireblocks API error: ${response.status} - ${errorText}`,
       "PROVIDER_NOT_CONFIGURED"
     );
   }
 
-  if (response.status === 204 || response.headers.get("content-length") === "0") {
-    return undefined as T;
-  }
-
-  return (await response.json()) as T;
+  return parseJsonResponse<T>(response);
 }
 
 async function createFireblocksJwt(
@@ -623,14 +614,6 @@ async function createFireblocksJwt(
     .setIssuedAt(now)
     .setExpirationTime(now + 30)
     .sign(privateKey);
-}
-
-async function sha256Hex(data: string): Promise<string> {
-  const encoder = new TextEncoder();
-  const dataBuffer = encoder.encode(data);
-  const hashBuffer = await crypto.subtle.digest("SHA-256", dataBuffer);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 interface PrivyRequestParams {
@@ -655,18 +638,14 @@ async function privyRequest<T>(params: PrivyRequestParams): Promise<T> {
     });
 
     if (!response.ok) {
-      const errorText = await response.text().catch(() => "Failed to read error response");
+      const errorText = await readErrorResponseText(response);
       throw new SigningError(
         `Privy API error: ${response.status} - ${errorText}`,
         "PROVIDER_NOT_CONFIGURED"
       );
     }
 
-    if (response.status === 204 || response.headers.get("content-length") === "0") {
-      return undefined as T;
-    }
-
-    return (await response.json()) as T;
+    return parseJsonResponse<T>(response);
   } catch (error) {
     if (error instanceof SigningError) {
       throw error;
@@ -678,130 +657,6 @@ async function privyRequest<T>(params: PrivyRequestParams): Promise<T> {
       error instanceof Error ? error : undefined
     );
   }
-}
-
-async function paraRequest<T>(params: ParaRequestParams): Promise<T> {
-  try {
-    const response = await fetch(`${params.apiBaseUrl}${params.path}`, {
-      method: params.method,
-      headers: {
-        "X-API-Key": params.apiKey,
-        ...(params.body ? { "Content-Type": "application/json" } : {}),
-      },
-      body: params.body ? JSON.stringify(params.body) : undefined,
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text().catch(() => "Failed to read error response");
-      throw new SigningError(
-        `Para API error: ${response.status} - ${errorText}`,
-        "PROVIDER_NOT_CONFIGURED"
-      );
-    }
-
-    if (response.status === 204 || response.headers.get("content-length") === "0") {
-      return undefined as T;
-    }
-
-    const payload = (await response.json()) as unknown;
-    if (payload && typeof payload === "object" && "data" in payload && payload.data) {
-      return payload.data as T;
-    }
-
-    return payload as T;
-  } catch (error) {
-    if (error instanceof SigningError) {
-      throw error;
-    }
-
-    throw new SigningError(
-      `Failed to call Para API: ${error instanceof Error ? error.message : "Unknown error"}`,
-      "NETWORK_ERROR",
-      error instanceof Error ? error : undefined
-    );
-  }
-}
-
-async function waitForParaWalletReady(params: {
-  apiBaseUrl: string;
-  apiKey: string;
-  walletId: string;
-}): Promise<ParaWalletResponse> {
-  const maxAttempts = 8;
-  const delayMs = 500;
-
-  let latestWallet: ParaWalletResponse | null = null;
-  let latestTransientError: string | null = null;
-  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    let wallet: ParaWalletResponse;
-    try {
-      wallet = await paraRequest<ParaWalletResponse>({
-        apiBaseUrl: params.apiBaseUrl,
-        apiKey: params.apiKey,
-        method: "GET",
-        path: `/v1/wallets/${encodeURIComponent(params.walletId)}`,
-      });
-    } catch (error) {
-      if (!isParaAddressPendingError(error) || attempt === maxAttempts) {
-        throw error;
-      }
-
-      latestTransientError = error.message;
-      await sleep(delayMs);
-      continue;
-    }
-
-    latestWallet = wallet;
-    if (wallet.status === "ready" && wallet.address) {
-      return wallet;
-    }
-
-    if (attempt < maxAttempts) {
-      await sleep(delayMs);
-    }
-  }
-
-  throw new SigningError(
-    `Para wallet '${params.walletId}' did not become ready after ${maxAttempts} attempts (status: ${latestWallet?.status ?? "unknown"}${latestTransientError ? `, last error: ${latestTransientError}` : ""})`,
-    "PROVIDER_NOT_CONFIGURED"
-  );
-}
-
-function isParaAddressPendingError(error: unknown): error is SigningError {
-  if (!(error instanceof SigningError)) {
-    return false;
-  }
-
-  const message = error.message.toLowerCase();
-  return message.includes("para api error: 500") && message.includes("wallet address not found");
-}
-
-function validateParaWallet(
-  wallet: ParaWalletResponse | undefined,
-  walletId: string
-): {
-  id: string;
-  address: string;
-} {
-  if (!wallet?.id || !wallet?.address) {
-    throw new SigningError("Para wallet lookup failed", "PROVIDER_NOT_CONFIGURED");
-  }
-
-  if (wallet.type && wallet.type !== "SOLANA") {
-    throw new SigningError(
-      `Para wallet '${walletId}' is not a Solana wallet`,
-      "PROVIDER_NOT_CONFIGURED"
-    );
-  }
-
-  if (wallet.scheme && wallet.scheme !== "ED25519") {
-    throw new SigningError(`Para wallet '${walletId}' is not ED25519`, "PROVIDER_NOT_CONFIGURED");
-  }
-
-  return {
-    id: wallet.id,
-    address: wallet.address,
-  };
 }
 
 async function turnkeyRequest<T>(params: TurnkeyRequestParams): Promise<T> {
@@ -825,18 +680,14 @@ async function turnkeyRequest<T>(params: TurnkeyRequestParams): Promise<T> {
     });
 
     if (!response.ok) {
-      const errorText = await response.text().catch(() => "Failed to read error response");
+      const errorText = await readErrorResponseText(response);
       throw new SigningError(
         `Turnkey API error: ${response.status} - ${errorText}`,
         "PROVIDER_NOT_CONFIGURED"
       );
     }
 
-    if (response.status === 204 || response.headers.get("content-length") === "0") {
-      return undefined as T;
-    }
-
-    return (await response.json()) as T;
+    return parseJsonResponse<T>(response);
   } catch (error) {
     if (error instanceof SigningError) {
       throw error;
@@ -848,267 +699,6 @@ async function turnkeyRequest<T>(params: TurnkeyRequestParams): Promise<T> {
       error instanceof Error ? error : undefined
     );
   }
-}
-
-async function coinbaseCdpRequest<T>(params: CoinbaseCdpRequestParams): Promise<T> {
-  const { requestPath, url } = resolveCoinbaseCdpRequestUrl(params.apiBaseUrl, params.path);
-  const normalizedBody = params.body ? sortJsonKeys(params.body) : undefined;
-  const bodyJson = normalizedBody ? JSON.stringify(normalizedBody) : undefined;
-
-  try {
-    const bearerToken = await createCoinbaseCdpBearerJwt({
-      apiKeyId: params.apiKeyId,
-      apiKeySecret: params.apiKeySecret,
-      requestMethod: params.method,
-      requestHost: url.host,
-      requestPath,
-    });
-
-    const headers: Record<string, string> = {
-      Authorization: `Bearer ${bearerToken}`,
-      ...(bodyJson ? { "Content-Type": "application/json" } : {}),
-      ...(params.idempotencyKey ? { "X-Idempotency-Key": params.idempotencyKey } : {}),
-    };
-
-    if (requiresCoinbaseCdpWalletAuth(params.method, requestPath)) {
-      const walletAuthToken = await createCoinbaseCdpWalletJwt({
-        walletSecret: params.walletSecret,
-        requestMethod: params.method,
-        requestHost: url.host,
-        requestPath,
-        requestData: (normalizedBody ?? {}) as Record<string, unknown>,
-      });
-      headers["X-Wallet-Auth"] = walletAuthToken;
-    }
-
-    const response = await fetch(url.toString(), {
-      method: params.method,
-      headers,
-      body: bodyJson,
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text().catch(() => "Failed to read error response");
-      throw new SigningError(
-        `Coinbase CDP API error: ${response.status} - ${errorText}`,
-        "PROVIDER_NOT_CONFIGURED"
-      );
-    }
-
-    if (response.status === 204 || response.headers.get("content-length") === "0") {
-      return undefined as T;
-    }
-
-    return (await response.json()) as T;
-  } catch (error) {
-    if (error instanceof SigningError) {
-      throw error;
-    }
-
-    throw new SigningError(
-      `Failed to call Coinbase CDP API: ${error instanceof Error ? error.message : "Unknown error"}`,
-      "NETWORK_ERROR",
-      error instanceof Error ? error : undefined
-    );
-  }
-}
-
-function resolveCoinbaseCdpRequestUrl(
-  apiBaseUrl: string,
-  path: string
-): { requestPath: string; url: URL } {
-  const normalizedBaseUrl = apiBaseUrl.endsWith("/") ? apiBaseUrl : `${apiBaseUrl}/`;
-  const normalizedPath = path.startsWith("/") ? path.slice(1) : path;
-  const url = new URL(normalizedPath, normalizedBaseUrl);
-
-  return {
-    requestPath: `${url.pathname}${url.search}`,
-    url,
-  };
-}
-
-interface CoinbaseCdpBearerJwtParams {
-  apiKeyId: string;
-  apiKeySecret: string;
-  requestMethod: string;
-  requestHost: string;
-  requestPath: string;
-}
-
-async function createCoinbaseCdpBearerJwt(params: CoinbaseCdpBearerJwtParams): Promise<string> {
-  const now = Math.floor(Date.now() / 1000);
-  const nonce = randomHex(16);
-  const uri = `${params.requestMethod} ${params.requestHost}${params.requestPath}`;
-
-  const payload = new SignJWT({ uris: [uri] })
-    .setIssuer("cdp")
-    .setSubject(params.apiKeyId)
-    .setIssuedAt(now)
-    .setNotBefore(now)
-    .setExpirationTime(now + 120);
-
-  if (isPemEncodedKey(params.apiKeySecret)) {
-    const key = await importPKCS8(params.apiKeySecret, "ES256");
-    return payload.setProtectedHeader({ alg: "ES256", kid: params.apiKeyId, nonce }).sign(key);
-  }
-
-  const rawKey = decodeBase64ToBytes(params.apiKeySecret);
-  if (rawKey.length !== 64) {
-    throw new SigningError(
-      "COINBASE_CDP_API_KEY_SECRET has an invalid format. Expected EC PEM or base64 Ed25519 private key (64 bytes).",
-      "PROVIDER_NOT_CONFIGURED"
-    );
-  }
-
-  const seed = rawKey.slice(0, 32);
-  const publicKey = rawKey.slice(32);
-  const ed25519Jwk = {
-    crv: "Ed25519",
-    d: toBase64Url(seed),
-    kty: "OKP",
-    x: toBase64Url(publicKey),
-  };
-
-  const key = await importJWK(ed25519Jwk, "EdDSA");
-  return payload.setProtectedHeader({ alg: "EdDSA", kid: params.apiKeyId, nonce }).sign(key);
-}
-
-interface CoinbaseCdpWalletJwtParams {
-  walletSecret: string;
-  requestMethod: string;
-  requestHost: string;
-  requestPath: string;
-  requestData: Record<string, unknown>;
-}
-
-async function createCoinbaseCdpWalletJwt(params: CoinbaseCdpWalletJwtParams): Promise<string> {
-  const now = Math.floor(Date.now() / 1000);
-  const uri = `${params.requestMethod} ${params.requestHost}${params.requestPath}`;
-  const payload: Record<string, unknown> = { uris: [uri] };
-
-  const shouldIncludeReqHash =
-    Object.keys(params.requestData).length > 0 &&
-    Object.values(params.requestData).some((value) => value !== undefined);
-
-  if (shouldIncludeReqHash) {
-    payload.reqHash = await sha256Hex(JSON.stringify(sortJsonKeys(params.requestData)));
-  }
-
-  const pkcs8DerBytes = decodeBase64ToBytes(params.walletSecret);
-  const privateKeyPem = encodePkcs8Pem(pkcs8DerBytes);
-  const key = await importPKCS8(privateKeyPem, "ES256");
-
-  return new SignJWT(payload)
-    .setProtectedHeader({ alg: "ES256", typ: "JWT" })
-    .setIssuedAt(now)
-    .setNotBefore(now)
-    .setJti(randomHex(16))
-    .sign(key);
-}
-
-function requiresCoinbaseCdpWalletAuth(method: string, requestPath: string): boolean {
-  if (!["POST", "PUT", "DELETE"].includes(method.toUpperCase())) {
-    return false;
-  }
-
-  return requestPath.includes("/accounts") || requestPath.includes("/spend-permissions");
-}
-
-function buildCoinbaseCdpAccountName(value: string, scope?: string): string {
-  let normalized = value
-    .toLowerCase()
-    .replace(/[^a-z0-9-]+/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-+|-+$/g, "");
-
-  if (!normalized) {
-    normalized = "org";
-  }
-
-  const normalizedScope = scope
-    ? scope
-        .toLowerCase()
-        .replace(/[^a-z0-9-]+/g, "-")
-        .replace(/-+/g, "-")
-        .replace(/^-+|-+$/g, "")
-    : "";
-
-  let name = `${normalizedScope ? `sdp-${normalizedScope}` : "sdp"}-${normalized}`.slice(0, 36);
-  name = name.replace(/-+$/g, "");
-
-  if (!/^[a-z0-9]/.test(name)) {
-    name = `s${name}`;
-  }
-
-  if (!/[a-z0-9]$/.test(name)) {
-    name = `${name}0`;
-  }
-
-  if (name.length < 2) {
-    name = `sdp-${randomHex(2)}`.slice(0, 36);
-  }
-
-  return name;
-}
-
-function resolveCoinbaseCdpAccountScope(env: Env): string {
-  const explicitNamespace = env.COINBASE_CDP_ACCOUNT_NAMESPACE?.trim();
-  return explicitNamespace || env.ENVIRONMENT;
-}
-
-function extractCoinbaseCdpAccountAddress(response: unknown): string | null {
-  if (!response || typeof response !== "object") {
-    return null;
-  }
-
-  const record = response as Record<string, unknown>;
-  const directAddress = record.address;
-  if (typeof directAddress === "string" && directAddress.length > 0) {
-    return directAddress;
-  }
-
-  const account = record.account;
-  if (account && typeof account === "object") {
-    const accountAddress = (account as Record<string, unknown>).address;
-    if (typeof accountAddress === "string" && accountAddress.length > 0) {
-      return accountAddress;
-    }
-  }
-
-  const data = record.data;
-  if (data && typeof data === "object" && !Array.isArray(data)) {
-    const dataAddress = (data as Record<string, unknown>).address;
-    if (typeof dataAddress === "string" && dataAddress.length > 0) {
-      return dataAddress;
-    }
-  }
-
-  if (Array.isArray(data)) {
-    for (const entry of data) {
-      if (!entry || typeof entry !== "object") {
-        continue;
-      }
-
-      const entryAddress = (entry as Record<string, unknown>).address;
-      if (typeof entryAddress === "string" && entryAddress.length > 0) {
-        return entryAddress;
-      }
-    }
-  }
-
-  return null;
-}
-
-function isCoinbaseCdpAlreadyExistsError(error: unknown): error is SigningError {
-  if (!(error instanceof SigningError)) {
-    return false;
-  }
-
-  const message = error.message.toLowerCase();
-  return (
-    message.includes("coinbase cdp api error: 409") &&
-    (message.includes("already_exists") || message.includes("already exists"))
-  );
 }
 
 function buildTurnkeyPrivateKeyName(value: string): string {
@@ -1133,13 +723,6 @@ function buildTurnkeyPrivateKeyName(value: string): string {
   return name;
 }
 
-function buildParaUserIdentifier(options: ProvisionParaOptions): string {
-  const scope = options.projectId
-    ? `org:${options.orgId}:project:${options.projectId}`
-    : `org:${options.orgId}`;
-  return `sdp:${scope}:wallet:${crypto.randomUUID()}`;
-}
-
 function findSolanaAddress(
   addresses:
     | Array<{
@@ -1160,108 +743,4 @@ function findSolanaAddress(
 
 function denormalizeTurnkeyPrivateKeyId(privateKeyId: string): string {
   return privateKeyId.startsWith("turnkey_") ? privateKeyId.slice("turnkey_".length) : privateKeyId;
-}
-
-function isPemEncodedKey(value: string): boolean {
-  return value.includes("-----BEGIN");
-}
-
-function randomHex(byteLength: number): string {
-  const bytes = crypto.getRandomValues(new Uint8Array(byteLength));
-  return Array.from(bytes)
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-}
-
-function encodePkcs8Pem(privateKeyDer: Uint8Array): string {
-  const base64 = encodeBase64FromBytes(privateKeyDer);
-  const lines = base64.match(/.{1,64}/g)?.join("\n") ?? base64;
-  return `-----BEGIN PRIVATE KEY-----\n${lines}\n-----END PRIVATE KEY-----`;
-}
-
-function toBase64Url(bytes: Uint8Array): string {
-  return encodeBase64FromBytes(bytes).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
-}
-
-function decodeBase64ToBytes(value: string): Uint8Array {
-  const globalWithBuffer = globalThis as {
-    Buffer?: {
-      from: (input: string, encoding: "base64") => Uint8Array;
-    };
-  };
-
-  if (globalWithBuffer.Buffer) {
-    return new Uint8Array(globalWithBuffer.Buffer.from(value, "base64"));
-  }
-
-  if (typeof atob !== "function") {
-    throw new SigningError("Unable to decode base64 secret", "PROVIDER_NOT_CONFIGURED");
-  }
-
-  const binary = atob(value);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i += 1) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return bytes;
-}
-
-function encodeBase64FromBytes(bytes: Uint8Array): string {
-  const globalWithBuffer = globalThis as {
-    Buffer?: {
-      from: (input: Uint8Array) => { toString: (encoding: "base64") => string };
-    };
-  };
-
-  if (globalWithBuffer.Buffer) {
-    return globalWithBuffer.Buffer.from(bytes).toString("base64");
-  }
-
-  let binary = "";
-  for (const byte of bytes) {
-    binary += String.fromCharCode(byte);
-  }
-
-  if (typeof btoa !== "function") {
-    throw new SigningError("Unable to encode base64 payload", "PROVIDER_NOT_CONFIGURED");
-  }
-
-  return btoa(binary);
-}
-
-function sortJsonKeys(value: unknown): unknown {
-  if (value === null || value === undefined) {
-    return value;
-  }
-
-  if (typeof value === "bigint") {
-    return value.toString();
-  }
-
-  if (Array.isArray(value)) {
-    return value.map((item) => sortJsonKeys(item));
-  }
-
-  if (typeof value !== "object") {
-    return value;
-  }
-
-  const objectValue = value as Record<string, unknown>;
-  const result: Record<string, unknown> = {};
-  for (const key of Object.keys(objectValue).sort()) {
-    result[key] = sortJsonKeys(objectValue[key]);
-  }
-  return result;
-}
-
-function encodeBasicAuth(value: string): string {
-  if (typeof btoa === "function") {
-    return btoa(value);
-  }
-
-  if (typeof Buffer !== "undefined") {
-    return Buffer.from(value, "utf-8").toString("base64");
-  }
-
-  throw new SigningError("Unable to encode Basic auth header", "PROVIDER_NOT_CONFIGURED");
 }
