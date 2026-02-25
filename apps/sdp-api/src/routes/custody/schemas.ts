@@ -155,7 +155,7 @@ export interface CustodyWalletsResponse {
 
 export interface SwitchProviderOptionsResponse {
   providers: Array<{
-    provider: "privy" | "coinbase_cdp" | "para" | "turnkey" | "local";
+    provider: "fireblocks" | "privy" | "coinbase_cdp" | "para" | "turnkey" | "local";
     hasReusableWallet: boolean;
     needsWalletLabel: boolean;
   }>;

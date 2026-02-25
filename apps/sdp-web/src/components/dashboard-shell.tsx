@@ -87,6 +87,8 @@ function WalletQuickAction() {
 
         const payload = (await response.json()) as {
           custodyEnabled?: boolean;
+          walletProvisioningEnabled?: boolean;
+          walletProvisioningReason?: string;
         };
 
         if (cancelled) {
@@ -94,10 +96,26 @@ function WalletQuickAction() {
         }
 
         const custodyEnabled = payload.custodyEnabled === true;
-        setDisabled(!custodyEnabled);
-        setDisabledReason(
-          custodyEnabled ? "" : "Enable wallets first in the Signing configuration section."
-        );
+        const walletProvisioningEnabled = payload.walletProvisioningEnabled !== false;
+        const walletProvisioningReason = payload.walletProvisioningReason?.trim();
+
+        if (!custodyEnabled) {
+          setDisabled(true);
+          setDisabledReason("Enable wallets first in the Signing configuration section.");
+          return;
+        }
+
+        if (!walletProvisioningEnabled) {
+          setDisabled(true);
+          setDisabledReason(
+            walletProvisioningReason ||
+              "This provider does not support additional wallet provisioning yet."
+          );
+          return;
+        }
+
+        setDisabled(false);
+        setDisabledReason("");
       } catch {
         if (cancelled) {
           return;
