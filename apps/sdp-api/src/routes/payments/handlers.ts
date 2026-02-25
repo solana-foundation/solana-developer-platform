@@ -1159,6 +1159,11 @@ export async function prepareTransfer(c: AppContext) {
   const destinationAddress = assertValidAddress(parsed.data.destination, "destination");
   const transferToken = isNativeSolToken(parsed.data.token) ? "SOL" : parsed.data.token;
 
+  // TODO: parsed.data.referenceAddress — attach as a memo/reference key to the transaction
+  //       for Solana Pay compatibility and client-side correlation. Not yet implemented.
+  // TODO: parsed.data.options?.priorityFee — add a compute budget instruction to the
+  //       transaction based on the requested priority level. Not yet implemented.
+
   await assertWalletPolicyAllowsTransfer(c, {
     organizationId: scope.auth.organizationId,
     projectId: scope.auth.projectId,
@@ -1223,10 +1228,13 @@ export async function prepareTransfer(c: AppContext) {
   });
 }
 
-function createHeliusRpc(env: Env) {
-  // TODO: Replace with a dedicated indexer (Helius webhooks, Triton stream, or
-  // similar) for production-scale history and comprehensive inbound transfer tracking.
-  // The current approach is limited to the most recent ~200 signatures.
+function createSignatureHistoryRpc(env: Env) {
+  // Prefer Helius when configured for richer signature history (getSignaturesForAddress).
+  // Falls back to the default RPC URL if Helius is not configured.
+  //
+  // TODO: Replace getSignaturesForAddress with a dedicated indexer (Helius webhooks,
+  // Triton stream, or similar) for production-scale history and comprehensive inbound
+  // transfer tracking. The current approach is limited to the most recent ~200 signatures.
   const url = env.SOLANA_RPC_HELIUS_URL
     ? withHeliusApiKey(env.SOLANA_RPC_HELIUS_URL, env.SOLANA_RPC_HELIUS_API_KEY)
     : env.SOLANA_RPC_URL;
@@ -1273,7 +1281,7 @@ export async function createTransfer(c: AppContext) {
   });
 
   try {
-    if (isNativeSolToken(parsed.data.token)) {
+    if (transferToken === "SOL") {
       const solResult = await executeSolTransfer(
         c,
         sourceWallet,
@@ -1364,8 +1372,8 @@ export async function listTransfers(c: AppContext) {
       sourceAddress = walletAddress;
     }
 
-    // 1. Fetch on-chain signature history from Helius
-    const heliusRpc = createHeliusRpc(c.env);
+    // 1. Fetch on-chain signature history via Helius (or fallback RPC)
+    const heliusRpc = createSignatureHistoryRpc(c.env);
     const onChainSigs = await getSignaturesForAddress(heliusRpc, sourceAddress as Address, {
       limit: Math.min(pageSize * 5, 200),
       commitment: "confirmed",
@@ -1379,24 +1387,32 @@ export async function listTransfers(c: AppContext) {
       projectId: auth.projectId,
     });
 
-    // 3. Fetch pending/processing/failed from DB (not yet on-chain)
-    const pendingResult = await repo.listTransfers({
-      organizationId: auth.organizationId,
-      projectId: auth.projectId,
-      walletId: resolvedWalletId,
-      sourceAddress: resolvedWalletId ? undefined : walletAddress,
-      statuses: ["pending", "processing", "failed"],
-      token,
-      direction,
-      createdAtFrom: from,
-      createdAtTo: to,
-      limit: 100,
-      offset: 0,
-    });
+    // 3. Fetch pending/processing/failed from DB (not yet on-chain).
+    //    Skip if the caller's status filter already excludes these — e.g. status=confirmed
+    //    or status=finalized would never match any of these records.
+    const nonChainStatuses: TransferStatus[] = ["pending", "processing", "failed"];
+    const needsNonChainRecords = !status || nonChainStatuses.includes(status);
+    const pendingRows: TransferRow[] = [];
+    if (needsNonChainRecords) {
+      const pendingResult = await repo.listTransfers({
+        organizationId: auth.organizationId,
+        projectId: auth.projectId,
+        walletId: resolvedWalletId,
+        sourceAddress: resolvedWalletId ? undefined : walletAddress,
+        statuses: nonChainStatuses,
+        token,
+        direction,
+        createdAtFrom: from,
+        createdAtTo: to,
+        limit: 100,
+        offset: 0,
+      });
+      pendingRows.push(...pendingResult.rows);
+    }
 
     // 4. Merge: confirmed (Helius-backed) + non-confirmed (DB), deduplicated
     const seen = new Set<string>();
-    const merged = [...confirmedRows, ...pendingResult.rows].filter((row) => {
+    const merged = [...confirmedRows, ...pendingRows].filter((row) => {
       if (seen.has(row.id)) return false;
       seen.add(row.id);
       return true;

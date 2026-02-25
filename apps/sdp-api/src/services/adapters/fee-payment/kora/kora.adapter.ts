@@ -102,9 +102,10 @@ export class KoraAdapter implements FeePaymentPort {
   async signAndSend(transaction: Uint8Array): Promise<Signature> {
     const base64Tx = encodeBase64(transaction);
 
-    // Kora may submit via an RPC that is slightly behind the one we used to fetch the blockhash.
-    // In that case, simulation can fail with "Blockhash not found" even though the blockhash is
-    // valid cluster-wide. A short retry usually resolves this without re-signing.
+    // Retry on transient failures:
+    //  - "Blockhash not found": Kora's RPC may lag behind on blockhash propagation.
+    //  - 502/503/Bad Gateway: The underlying RPC (e.g. Helius devnet) can return transient
+    //    HTTP gateway errors that resolve on the next attempt.
     const maxRetries = 2;
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
@@ -121,7 +122,7 @@ export class KoraAdapter implements FeePaymentPort {
 
         return signature;
       } catch (error) {
-        if (attempt < maxRetries && isBlockhashNotFoundError(error)) {
+        if (attempt < maxRetries && isRetryableSignAndSendError(error)) {
           await sleep((attempt + 1) * 500);
           continue;
         }
@@ -240,12 +241,18 @@ function extractRpcErrorCode(error: unknown): number | undefined {
   return Number.parseInt(match[1], 10);
 }
 
-function isBlockhashNotFoundError(error: unknown): boolean {
+function isRetryableSignAndSendError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
-  // Examples:
-  // "RPC Error -32000: Invalid transaction: Transaction simulation failed: Blockhash not found"
-  // "Transaction simulation failed: Blockhash not found"
-  return error.message.toLowerCase().includes("blockhash not found");
+  const message = error.message.toLowerCase();
+  return (
+    // Kora's RPC may lag behind on blockhash propagation
+    message.includes("blockhash not found") ||
+    // Transient HTTP gateway errors from the underlying RPC (e.g. Helius devnet)
+    message.includes("502") ||
+    message.includes("503") ||
+    message.includes("bad gateway") ||
+    message.includes("service unavailable")
+  );
 }
 
 function isRetryableGetFeePayerError(error: unknown): boolean {
