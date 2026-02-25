@@ -6,61 +6,54 @@ import { Label } from "@/components/ui/label";
 import Link from "next/link";
 import { useState } from "react";
 
-export type SwitchProvider = "fireblocks" | "privy" | "coinbase_cdp" | "para" | "turnkey" | "local";
+type SetupProvider = "fireblocks" | "privy" | "coinbase_cdp" | "para" | "turnkey" | "local";
 
-interface SwitchProviderFormProps {
+interface CustodySetupFormProps {
   action: (formData: FormData) => void | Promise<void>;
-  options: Array<{
-    value: SwitchProvider;
-    label: string;
-    disabled?: boolean;
-  }>;
-  defaultProvider: SwitchProvider;
-  disableSubmit: boolean;
-  hasReusableWalletByProvider: Record<SwitchProvider, boolean>;
-  needsWalletLabelByProvider: Record<SwitchProvider, boolean>;
 }
 
-export function SwitchProviderForm({
-  action,
-  options,
-  defaultProvider,
-  disableSubmit,
-  hasReusableWalletByProvider,
-  needsWalletLabelByProvider,
-}: SwitchProviderFormProps) {
-  const [selectedProvider, setSelectedProvider] = useState<SwitchProvider>(defaultProvider);
+export function CustodySetupForm({ action }: CustodySetupFormProps) {
+  const [selectedProvider, setSelectedProvider] = useState<SetupProvider>("privy");
   const isFireblocks = selectedProvider === "fireblocks";
-  const hasReusableWallet = hasReusableWalletByProvider[selectedProvider] ?? false;
-  const needsWalletLabel = needsWalletLabelByProvider[selectedProvider] ?? true;
 
   return (
     <form action={action} className="grid gap-5">
       <div className="grid gap-2">
-        <Label htmlFor="provider">New provider</Label>
+        <Label htmlFor="provider">Provider</Label>
         <select
           id="provider"
           name="provider"
           className="h-10 w-full rounded-lg border border-[rgba(28,28,29,0.16)] bg-white px-3 text-sm text-[#1c1c1d]"
-          defaultValue={defaultProvider}
-          disabled={disableSubmit}
+          defaultValue="privy"
           onChange={(event) => {
-            setSelectedProvider(event.target.value as SwitchProvider);
+            setSelectedProvider(event.target.value as SetupProvider);
           }}
         >
-          {options.map((option) => (
-            <option key={option.value} value={option.value} disabled={option.disabled}>
-              {option.label}
-            </option>
-          ))}
+          <option value="privy">Privy (recommended)</option>
+          <option value="fireblocks">Fireblocks</option>
+          <option value="coinbase_cdp">Coinbase CDP</option>
+          <option value="para">Para</option>
+          <option value="turnkey">Turnkey</option>
+          <option value="local">Local (development only)</option>
         </select>
+        <p className="text-xs text-[rgba(28,28,29,0.64)]">
+          Fireblocks, Privy, Coinbase CDP, Para, and Turnkey are supported custody providers. Local
+          provider mode generates a key stored in the database and should not be used in production.
+        </p>
+      </div>
+
+      <div className="grid gap-2">
+        <Label htmlFor="walletLabel">Wallet label</Label>
+        <Input id="walletLabel" name="walletLabel" placeholder="Master wallet" />
       </div>
 
       {isFireblocks ? (
         <div className="grid gap-4 rounded-xl border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.03)] p-4">
           <div className="space-y-1">
             <p className="text-sm font-medium text-[#1c1c1d]">Fireblocks credentials</p>
-            <p className="text-xs text-[rgba(28,28,29,0.64)]">Required to switch to Fireblocks.</p>
+            <p className="text-xs text-[rgba(28,28,29,0.64)]">
+              Required when provider is Fireblocks.
+            </p>
           </div>
 
           <div className="grid gap-2">
@@ -102,33 +95,8 @@ export function SwitchProviderForm({
         </div>
       ) : null}
 
-      {needsWalletLabel ? (
-        <div className="grid gap-2">
-          <Label htmlFor="walletLabel">Default wallet label</Label>
-          <Input id="walletLabel" name="walletLabel" placeholder="Default" />
-        </div>
-      ) : hasReusableWallet ? (
-        <p className="text-xs text-[rgba(28,28,29,0.64)]">
-          Existing root wallet found for this provider. Switching will reuse it.
-        </p>
-      ) : null}
-
-      <div className="grid gap-2">
-        <Label htmlFor="confirm">Confirmation</Label>
-        <Input
-          id="confirm"
-          name="confirm"
-          placeholder="SWITCH"
-          required
-          pattern="[sS][wW][iI][tT][cC][hH]"
-          title="Type SWITCH to confirm provider change."
-        />
-      </div>
-
       <div className="flex flex-wrap items-center gap-3">
-        <Button type="submit" disabled={disableSubmit}>
-          Switch provider
-        </Button>
+        <Button type="submit">Provision wallet</Button>
         <Link href="/dashboard/wallets">
           <Button type="button" variant="secondary">
             Cancel

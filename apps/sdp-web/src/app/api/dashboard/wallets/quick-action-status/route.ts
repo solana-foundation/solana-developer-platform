@@ -7,6 +7,7 @@ interface OnboardingStatusResponse {
 
 interface WalletConfigResponse {
   config: {
+    provider: "privy" | "local" | "fireblocks" | "coinbase_cdp" | "para" | "turnkey";
     status: "active" | "inactive";
   };
 }
@@ -22,12 +23,16 @@ export async function GET() {
     if (!onboarding.linked) {
       return NextResponse.json({
         custodyEnabled: false,
+        walletProvisioningEnabled: false,
+        walletProvisioningReason: "Enable wallets first in the Signing configuration section.",
       });
     }
 
     if (configResponse.status === 404) {
       return NextResponse.json({
         custodyEnabled: false,
+        walletProvisioningEnabled: false,
+        walletProvisioningReason: "Enable wallets first in the Signing configuration section.",
       });
     }
 
@@ -37,10 +42,28 @@ export async function GET() {
     }
 
     const parsed = (await configResponse.json()) as { data?: WalletConfigResponse };
-    const custodyEnabled = parsed.data?.config.status === "active";
+    const config = parsed.data?.config;
+    const custodyEnabled = config?.status === "active";
+    const walletProvisioningSupportedProviders = new Set([
+      "privy",
+      "coinbase_cdp",
+      "para",
+      "turnkey",
+    ]);
+    const walletProvisioningEnabled =
+      custodyEnabled &&
+      typeof config?.provider === "string" &&
+      walletProvisioningSupportedProviders.has(config.provider);
+    const walletProvisioningReason = walletProvisioningEnabled
+      ? ""
+      : custodyEnabled
+        ? `Provider '${config?.provider ?? "unknown"}' does not support additional wallet provisioning yet.`
+        : "Enable wallets first in the Signing configuration section.";
 
     return NextResponse.json({
       custodyEnabled,
+      walletProvisioningEnabled,
+      walletProvisioningReason,
     });
   } catch (error) {
     return NextResponse.json(

@@ -351,6 +351,11 @@ export const getSwitchProviderOptions = async (c: AppContext) => {
   const response: SwitchProviderOptionsResponse = {
     providers: [
       {
+        provider: "fireblocks",
+        hasReusableWallet: false,
+        needsWalletLabel: false,
+      },
+      {
         provider: "privy",
         hasReusableWallet: reuseState.privy,
         needsWalletLabel: !reuseState.privy,
