@@ -93,25 +93,57 @@ export async function initializeCustody(formData: FormData) {
   const provider = (getString(formData, "provider") || "privy") as
     | "privy"
     | "local"
+    | "fireblocks"
     | "coinbase_cdp"
     | "para"
     | "turnkey";
   const walletLabel = getOptionalString(formData, "walletLabel");
   const apiBaseUrl = getOptionalString(formData, "apiBaseUrl");
+  const fireblocksApiKey = getOptionalString(formData, "apiKey");
+  const fireblocksApiSecretPem = getOptionalString(formData, "apiSecretPem");
+  const fireblocksVaultAccountId = getOptionalString(formData, "vaultAccountId");
+  const fireblocksAssetId = getOptionalString(formData, "assetId");
   const network = getOptionalString(formData, "network");
   const walletAddress = getOptionalString(formData, "walletAddress");
   const accountPolicy = getOptionalString(formData, "accountPolicy");
 
+  const payload: Record<string, unknown> = {
+    provider,
+    walletLabel,
+  };
+
+  if (provider === "fireblocks") {
+    if (!fireblocksApiKey || !fireblocksApiSecretPem || !fireblocksVaultAccountId) {
+      throw new Error("Fireblocks requires apiKey, apiSecretPem, and vaultAccountId");
+    }
+
+    payload.apiKey = fireblocksApiKey;
+    payload.apiSecretPem = fireblocksApiSecretPem;
+    payload.vaultAccountId = fireblocksVaultAccountId;
+    if (fireblocksAssetId) {
+      payload.assetId = fireblocksAssetId;
+    }
+    if (apiBaseUrl) {
+      payload.apiBaseUrl = apiBaseUrl;
+    }
+  } else {
+    if (apiBaseUrl) {
+      payload.apiBaseUrl = apiBaseUrl;
+    }
+    if (network) {
+      payload.network = network;
+    }
+    if (walletAddress) {
+      payload.walletAddress = walletAddress;
+    }
+    if (accountPolicy) {
+      payload.accountPolicy = accountPolicy;
+    }
+  }
+
   await sdpApiFetch("/v1/wallets/initialize", {
     method: "POST",
-    body: JSON.stringify({
-      provider,
-      walletLabel,
-      ...(apiBaseUrl ? { apiBaseUrl } : {}),
-      ...(network ? { network } : {}),
-      ...(walletAddress ? { walletAddress } : {}),
-      ...(accountPolicy ? { accountPolicy } : {}),
-    }),
+    body: JSON.stringify(payload),
   });
 
   revalidatePath("/dashboard/custody");
@@ -123,12 +155,17 @@ export async function switchCustodyProvider(formData: FormData) {
   const provider = (getString(formData, "provider") || "privy") as
     | "privy"
     | "local"
+    | "fireblocks"
     | "coinbase_cdp"
     | "para"
     | "turnkey";
   const confirm = getString(formData, "confirm");
   const walletLabel = getOptionalString(formData, "walletLabel");
   const apiBaseUrl = getOptionalString(formData, "apiBaseUrl");
+  const fireblocksApiKey = getOptionalString(formData, "apiKey");
+  const fireblocksApiSecretPem = getOptionalString(formData, "apiSecretPem");
+  const fireblocksVaultAccountId = getOptionalString(formData, "vaultAccountId");
+  const fireblocksAssetId = getOptionalString(formData, "assetId");
   const network = getOptionalString(formData, "network");
   const walletAddress = getOptionalString(formData, "walletAddress");
   const accountPolicy = getOptionalString(formData, "accountPolicy");
@@ -137,16 +174,43 @@ export async function switchCustodyProvider(formData: FormData) {
     throw new Error("Type SWITCH to confirm provider change");
   }
 
+  const payload: Record<string, unknown> = {
+    provider,
+    walletLabel,
+  };
+
+  if (provider === "fireblocks") {
+    if (!fireblocksApiKey || !fireblocksApiSecretPem || !fireblocksVaultAccountId) {
+      throw new Error("Fireblocks requires apiKey, apiSecretPem, and vaultAccountId");
+    }
+
+    payload.apiKey = fireblocksApiKey;
+    payload.apiSecretPem = fireblocksApiSecretPem;
+    payload.vaultAccountId = fireblocksVaultAccountId;
+    if (fireblocksAssetId) {
+      payload.assetId = fireblocksAssetId;
+    }
+    if (apiBaseUrl) {
+      payload.apiBaseUrl = apiBaseUrl;
+    }
+  } else {
+    if (apiBaseUrl) {
+      payload.apiBaseUrl = apiBaseUrl;
+    }
+    if (network) {
+      payload.network = network;
+    }
+    if (walletAddress) {
+      payload.walletAddress = walletAddress;
+    }
+    if (accountPolicy) {
+      payload.accountPolicy = accountPolicy;
+    }
+  }
+
   await sdpApiFetch("/v1/wallets/switch", {
     method: "POST",
-    body: JSON.stringify({
-      provider,
-      walletLabel,
-      ...(apiBaseUrl ? { apiBaseUrl } : {}),
-      ...(network ? { network } : {}),
-      ...(walletAddress ? { walletAddress } : {}),
-      ...(accountPolicy ? { accountPolicy } : {}),
-    }),
+    body: JSON.stringify(payload),
   });
 
   revalidatePath("/dashboard/custody");
