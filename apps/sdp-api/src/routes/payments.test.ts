@@ -18,6 +18,14 @@ vi.mock("@/services/solana/rpc", async () => {
       blockhash: "EkSnNWid2cvwEVnVx9aBqawnmiCNiDgp3gUdkDPTKN1N",
       lastValidBlockHeight: 1000n,
     }),
+    confirmTransaction: vi.fn().mockResolvedValue({
+      signature:
+        // biome-ignore lint/nursery/noSecrets: Test transaction signature, not a secret.
+        "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy",
+      slot: 100n,
+      confirmationStatus: "confirmed",
+      err: null,
+    }),
   };
 });
 
@@ -32,8 +40,23 @@ vi.mock("@/services/adapters/fee-payment", async () => {
       // biome-ignore lint/nursery/noSecrets: Test Solana address used as mock fee payer, not a secret.
       getFeePayer: vi.fn().mockResolvedValue("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
       signAsFeePayer: vi.fn(),
-      signAndSend: vi.fn(),
+      signAndSend: vi.fn().mockResolvedValue(
+        // biome-ignore lint/nursery/noSecrets: Test transaction signature, not a secret.
+        "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy"
+      ),
     }),
+  };
+});
+
+vi.mock("@/services/solana", async () => {
+  const actual = await vi.importActual<typeof import("@/services/solana")>("@/services/solana");
+  const { createNoopSigner } = await import("@solana/kit");
+  return {
+    ...actual,
+    createOrgSigner: vi.fn().mockResolvedValue(
+      // biome-ignore lint/nursery/noSecrets: Test Solana address, not a secret.
+      createNoopSigner("8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ")
+    ),
   };
 });
 
@@ -467,5 +490,86 @@ describe("Payments routes", () => {
     }>();
     expect(transfers.results).toHaveLength(1);
     expect(transfers.results[0]?.id).toBe("xfr_existing_daily_limit");
+  });
+
+  describe("execute transfer — happy path", () => {
+    it("executes a SOL transfer and returns a confirmed transfer record", async () => {
+      const res = await app.request(
+        "/v1/payments/transfers",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            source: TEST_WALLET_ID,
+            destination: TEST_SOLANA_ADDRESSES.wallet2,
+            token: "SOL",
+            amount: "1",
+          }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: {
+          transfer: { id: string; status: string; signature: string | null };
+        };
+      };
+      expect(body.data.transfer.status).toBe("confirmed");
+      expect(body.data.transfer.id).toMatch(/^xfr_/);
+      expect(body.data.transfer.signature).toBeTruthy();
+
+      const row = await env.DB.prepare(
+        "SELECT status, signature FROM payment_transfers WHERE id = ?"
+      )
+        .bind(body.data.transfer.id)
+        .first<{ status: string; signature: string | null }>();
+      expect(row?.status).toBe("confirmed");
+      expect(row?.signature).toBeTruthy();
+    });
+
+    it("marks the transfer as failed when execution throws and returns 502", async () => {
+      const { createFeePaymentAdapter } = await import("@/services/adapters/fee-payment");
+      vi.mocked(createFeePaymentAdapter).mockReturnValueOnce({
+        providerId: "mock",
+        // biome-ignore lint/nursery/noSecrets: Test Solana address used as mock fee payer, not a secret.
+        getFeePayer: vi.fn().mockResolvedValue("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
+        signAsFeePayer: vi.fn(),
+        signAndSend: vi.fn().mockRejectedValue(new Error("RPC connection refused")),
+      });
+
+      const res = await app.request(
+        "/v1/payments/transfers",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            source: TEST_WALLET_ID,
+            destination: TEST_SOLANA_ADDRESSES.wallet2,
+            token: "SOL",
+            amount: "1",
+          }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(502);
+      const body = (await res.json()) as { error: { code: string } };
+      expect(body.error.code).toBe("SOLANA_RPC_ERROR");
+
+      const transfers = await env.DB.prepare("SELECT status, error FROM payment_transfers").all<{
+        status: string;
+        error: string | null;
+      }>();
+      expect(transfers.results).toHaveLength(1);
+      expect(transfers.results[0]?.status).toBe("failed");
+      expect(transfers.results[0]?.error).toBeTruthy();
+    });
   });
 });
