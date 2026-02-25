@@ -8,8 +8,6 @@ import {
   executeOfframpRequestSchema,
   executeOnrampRequestSchema,
   isoDateTimeSchema,
-  offrampQuoteRequestSchema,
-  onrampQuoteRequestSchema,
   pageQuerySchema,
   pageSizeQuerySchema,
   prepareTransferRequestSchema,
@@ -23,9 +21,7 @@ import { errorResponses, jsonContent } from "./helpers";
 import {
   feeQuoteResponse,
   offrampExecutionResponse,
-  offrampQuoteResponse,
   onrampExecutionResponse,
-  onrampQuoteResponse,
   prepareTransferResponse,
   transferListResponse,
   transferResponse,
@@ -278,34 +274,11 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "post",
-    path: "/v1/payments/ramps/onramp/quote",
-    tags: ["Payments"],
-    summary: "Get on-ramp quote",
-    operationId: "getPaymentOnrampQuote",
-    description: withDraft("Retrieves a fiat-to-crypto on-ramp quote."),
-    security: [{ apiKeyAuth: [] }],
-    request: {
-      body: {
-        required: true,
-        content: jsonContent(onrampQuoteRequestSchema),
-      },
-    },
-    responses: {
-      200: {
-        description: "On-ramp quote",
-        content: jsonContent(onrampQuoteResponse),
-      },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 500]),
-    },
-  });
-
-  registry.registerPath({
-    method: "post",
     path: "/v1/payments/ramps/onramp/execute",
     tags: ["Payments"],
     summary: "Execute on-ramp",
     operationId: "executePaymentOnramp",
-    description: withDraft("Executes a fiat-to-crypto on-ramp transaction."),
+    description: "Creates a MoonPay fiat-to-crypto on-ramp session (USD-only).",
     security: [{ apiKeyAuth: [] }],
     request: {
       body: {
@@ -324,34 +297,11 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "post",
-    path: "/v1/payments/ramps/offramp/quote",
-    tags: ["Payments"],
-    summary: "Get off-ramp quote",
-    operationId: "getPaymentOfframpQuote",
-    description: withDraft("Retrieves a crypto-to-fiat off-ramp quote."),
-    security: [{ apiKeyAuth: [] }],
-    request: {
-      body: {
-        required: true,
-        content: jsonContent(offrampQuoteRequestSchema),
-      },
-    },
-    responses: {
-      200: {
-        description: "Off-ramp quote",
-        content: jsonContent(offrampQuoteResponse),
-      },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 500]),
-    },
-  });
-
-  registry.registerPath({
-    method: "post",
     path: "/v1/payments/ramps/offramp/execute",
     tags: ["Payments"],
     summary: "Execute off-ramp",
     operationId: "executePaymentOfframp",
-    description: withDraft("Executes a crypto-to-fiat off-ramp transaction."),
+    description: "Creates a MoonPay crypto-to-fiat off-ramp session (USD-only).",
     security: [{ apiKeyAuth: [] }],
     request: {
       body: {

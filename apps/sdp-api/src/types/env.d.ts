@@ -108,6 +108,12 @@ export interface Env {
   KORA_RPC_URL?: string;
   KORA_API_KEY?: string;
   KORA_TIMEOUT_MS?: string;
+
+  // MoonPay ramps configuration
+  MOONPAY_API_KEY?: string;
+  MOONPAY_SECRET_KEY?: string;
+  MOONPAY_ONRAMP_URL?: string;
+  MOONPAY_OFFRAMP_URL?: string;
 }
 
 // Extend Hono's context with our bindings

@@ -1,3 +1,4 @@
+import { createHmac } from "node:crypto";
 import app from "@/index";
 import { hashString } from "@/lib/hash";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
@@ -52,12 +53,12 @@ vi.mock("@/services/adapters/fee-payment", async () => {
 
 vi.mock("@/services/solana", async () => {
   const actual = await vi.importActual<typeof import("@/services/solana")>("@/services/solana");
-  const { createNoopSigner } = await import("@solana/kit");
+  const { address, createNoopSigner } = await import("@solana/kit");
   return {
     ...actual,
     createOrgSigner: vi.fn().mockResolvedValue(
       // biome-ignore lint/nursery/noSecrets: Test Solana address, not a secret.
-      createNoopSigner("8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ")
+      createNoopSigner(address("8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ"))
     ),
   };
 });
@@ -93,6 +94,37 @@ const TEST_CACHED_API_KEY: CachedApiKey = {
   status: "active",
   expiresAt: null,
 };
+
+const TEST_MOONPAY_API_KEY = "pk_test_moonpay";
+const TEST_MOONPAY_SECRET_KEY = "moonpay_secret_key";
+const TEST_MOONPAY_ONRAMP_URL = "https://buy-sandbox.moonpay.com";
+const TEST_MOONPAY_OFFRAMP_URL = "https://sell-sandbox.moonpay.com";
+// biome-ignore lint/nursery/noSecrets: Query parameter key used for test assertions.
+const MOONPAY_PARAM_BASE_CURRENCY_AMOUNT = "baseCurrencyAmount";
+// biome-ignore lint/nursery/noSecrets: Query parameter key used for test assertions.
+const MOONPAY_PARAM_EXTERNAL_CUSTOMER_ID = "externalCustomerId";
+// biome-ignore lint/nursery/noSecrets: Query parameter key used for test assertions.
+const MOONPAY_PARAM_QUOTE_CURRENCY_CODE = "quoteCurrencyCode";
+// biome-ignore lint/nursery/noSecrets: Query parameter key used for test assertions.
+const MOONPAY_PARAM_REFUND_WALLET_ADDRESS = "refundWalletAddress";
+
+let originalMoonPayApiKey: string | undefined;
+let originalMoonPaySecretKey: string | undefined;
+let originalMoonPayOnrampUrl: string | undefined;
+let originalMoonPayOfframpUrl: string | undefined;
+
+function assertMoonPaySignature(url: URL): void {
+  const signature = url.searchParams.get("signature");
+  expect(signature).toBeTruthy();
+
+  const unsignedUrl = new URL(url.toString());
+  unsignedUrl.searchParams.delete("signature");
+
+  const expectedSignature = createHmac("sha256", TEST_MOONPAY_SECRET_KEY)
+    .update(unsignedUrl.search)
+    .digest("base64");
+  expect(signature).toBe(expectedSignature);
+}
 
 async function seedAuthAndWallet(): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
@@ -197,13 +229,141 @@ async function seedWalletPolicy(params: {
 
 describe("Payments routes", () => {
   beforeEach(async () => {
+    originalMoonPayApiKey = env.MOONPAY_API_KEY;
+    originalMoonPaySecretKey = env.MOONPAY_SECRET_KEY;
+    originalMoonPayOnrampUrl = env.MOONPAY_ONRAMP_URL;
+    originalMoonPayOfframpUrl = env.MOONPAY_OFFRAMP_URL;
+
+    env.MOONPAY_API_KEY = TEST_MOONPAY_API_KEY;
+    env.MOONPAY_SECRET_KEY = TEST_MOONPAY_SECRET_KEY;
+    env.MOONPAY_ONRAMP_URL = TEST_MOONPAY_ONRAMP_URL;
+    env.MOONPAY_OFFRAMP_URL = TEST_MOONPAY_OFFRAMP_URL;
+
     await seedTestDatabase(env);
     await seedAuthAndWallet();
   });
 
   afterEach(async () => {
+    env.MOONPAY_API_KEY = originalMoonPayApiKey;
+    env.MOONPAY_SECRET_KEY = originalMoonPaySecretKey;
+    env.MOONPAY_ONRAMP_URL = originalMoonPayOnrampUrl;
+    env.MOONPAY_OFFRAMP_URL = originalMoonPayOfframpUrl;
+
     await clearTestDatabase(env);
     await clearKVNamespaces(env);
+  });
+
+  it("creates a signed MoonPay on-ramp session URL", async () => {
+    const res = await app.request(
+      "/v1/payments/ramps/onramp/execute",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          destinationWallet: TEST_WALLET_ID,
+          cryptoToken: "USDC_SOL",
+          fiatCurrency: "USD",
+          fiatAmount: "120.50",
+          kycReference: "kyc_ref_123",
+          redirectUrl: "https://example.com/onramp-done",
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      data: { ramp: { id: string; status: string; redirectUrl: string } };
+    };
+
+    expect(body.data.ramp.id.startsWith("ramp_")).toBe(true);
+    expect(body.data.ramp.status).toBe("pending");
+
+    const redirect = new URL(body.data.ramp.redirectUrl);
+    expect(redirect.origin).toBe(TEST_MOONPAY_ONRAMP_URL);
+    expect(redirect.searchParams.get("apiKey")).toBe(TEST_MOONPAY_API_KEY);
+    expect(redirect.searchParams.get("baseCurrencyCode")).toBe("usd");
+    expect(redirect.searchParams.get(MOONPAY_PARAM_BASE_CURRENCY_AMOUNT)).toBe("120.50");
+    expect(redirect.searchParams.get("currencyCode")).toBe("usdc_sol");
+    expect(redirect.searchParams.get("walletAddress")).toBe(TEST_SOLANA_ADDRESSES.wallet1);
+    expect(redirect.searchParams.get("redirectURL")).toBe("https://example.com/onramp-done");
+    expect(redirect.searchParams.get(MOONPAY_PARAM_EXTERNAL_CUSTOMER_ID)).toBe("kyc_ref_123");
+    assertMoonPaySignature(redirect);
+  });
+
+  it("creates a signed MoonPay off-ramp session URL", async () => {
+    const res = await app.request(
+      "/v1/payments/ramps/offramp/execute",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          sourceWallet: TEST_WALLET_ID,
+          cryptoToken: "USDC_SOL",
+          fiatCurrency: "USD",
+          cryptoAmount: "75.25",
+          kycReference: "kyc_ref_456",
+          redirectUrl: "https://example.com/offramp-done",
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      data: { ramp: { id: string; status: string; redirectUrl: string; reference: string } };
+    };
+
+    expect(body.data.ramp.id.startsWith("ramp_")).toBe(true);
+    expect(body.data.ramp.status).toBe("pending");
+    expect(body.data.ramp.reference.startsWith("sdp_offramp_")).toBe(true);
+
+    const redirect = new URL(body.data.ramp.redirectUrl);
+    expect(redirect.origin).toBe(TEST_MOONPAY_OFFRAMP_URL);
+    expect(redirect.searchParams.get("apiKey")).toBe(TEST_MOONPAY_API_KEY);
+    expect(redirect.searchParams.get("baseCurrencyCode")).toBe("usdc_sol");
+    expect(redirect.searchParams.get(MOONPAY_PARAM_BASE_CURRENCY_AMOUNT)).toBe("75.25");
+    expect(redirect.searchParams.get(MOONPAY_PARAM_QUOTE_CURRENCY_CODE)).toBe("usd");
+    expect(redirect.searchParams.get("walletAddress")).toBe(TEST_SOLANA_ADDRESSES.wallet1);
+    expect(redirect.searchParams.get(MOONPAY_PARAM_REFUND_WALLET_ADDRESS)).toBe(
+      TEST_SOLANA_ADDRESSES.wallet1
+    );
+    expect(redirect.searchParams.get("redirectURL")).toBe("https://example.com/offramp-done");
+    expect(redirect.searchParams.get(MOONPAY_PARAM_EXTERNAL_CUSTOMER_ID)).toBe("kyc_ref_456");
+    assertMoonPaySignature(redirect);
+  });
+
+  it("returns internal error when MoonPay credentials are not configured", async () => {
+    env.MOONPAY_API_KEY = undefined;
+
+    const res = await app.request(
+      "/v1/payments/ramps/onramp/execute",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          destinationWallet: TEST_WALLET_ID,
+          cryptoToken: "usdc_sol",
+          fiatCurrency: "USD",
+          fiatAmount: "10",
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(500);
+    const body = (await res.json()) as { error: { code: string; message: string } };
+    expect(body.error.code).toBe("INTERNAL_ERROR");
+    expect(body.error.message).toContain("MoonPay is not configured");
   });
 
   it("blocks prepare transfer when destination is outside allowlist", async () => {
