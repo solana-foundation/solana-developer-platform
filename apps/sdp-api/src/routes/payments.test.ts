@@ -5,7 +5,36 @@ import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/d1";
 import { clearKVNamespaces, seedCachedApiKey } from "@/test/mocks/kv";
 import type { CachedApiKey } from "@sdp/types";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("@/services/solana/rpc", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/services/solana/rpc")>("@/services/solana/rpc");
+  return {
+    ...actual,
+    getRecentBlockhash: vi.fn().mockResolvedValue({
+      // biome-ignore lint/nursery/noSecrets: Test blockhash, not a secret.
+      blockhash: "EkSnNWid2cvwEVnVx9aBqawnmiCNiDgp3gUdkDPTKN1N",
+      lastValidBlockHeight: 1000n,
+    }),
+  };
+});
+
+vi.mock("@/services/adapters/fee-payment", async () => {
+  const actual = await vi.importActual<typeof import("@/services/adapters/fee-payment")>(
+    "@/services/adapters/fee-payment"
+  );
+  return {
+    ...actual,
+    createFeePaymentAdapter: vi.fn().mockReturnValue({
+      providerId: "mock",
+      // biome-ignore lint/nursery/noSecrets: Test Solana address used as mock fee payer, not a secret.
+      getFeePayer: vi.fn().mockResolvedValue("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
+      signAsFeePayer: vi.fn(),
+      signAndSend: vi.fn(),
+    }),
+  };
+});
 
 const TEST_CONFIG_ID = "cust_cfg_payments_test";
 const TEST_CUSTODY_WALLET_ID = "cwlt_payments_test";
@@ -216,6 +245,168 @@ describe("Payments routes", () => {
       id: string;
     }>();
     expect(transfers.results).toHaveLength(0);
+  });
+
+  describe("prepare transfer — happy path", () => {
+    it("creates a pending SOL transfer with no wallet policy", async () => {
+      const res = await app.request(
+        "/v1/payments/transfers/prepare",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            source: TEST_WALLET_ID,
+            destination: TEST_SOLANA_ADDRESSES.wallet2,
+            token: "SOL",
+            amount: "1",
+          }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: {
+          transfer: { id: string; status: string };
+          preparedTransaction: { serialized: string; blockhash: string };
+        };
+      };
+      expect(body.data.transfer.status).toBe("pending");
+      expect(body.data.transfer.id).toMatch(/^xfr_/);
+      expect(body.data.preparedTransaction.serialized).toBeTruthy();
+      expect(body.data.preparedTransaction.blockhash).toBe(
+        // biome-ignore lint/nursery/noSecrets: Test blockhash, not a secret.
+        "EkSnNWid2cvwEVnVx9aBqawnmiCNiDgp3gUdkDPTKN1N"
+      );
+
+      const row = await env.DB.prepare(
+        "SELECT status, serialized_tx FROM payment_transfers WHERE id = ?"
+      )
+        .bind(body.data.transfer.id)
+        .first<{ status: string; serialized_tx: string | null }>();
+      expect(row?.status).toBe("pending");
+      expect(row?.serialized_tx).toBeTruthy();
+    });
+
+    it("creates a pending SOL transfer when destination is on the allowlist", async () => {
+      await seedWalletPolicy({
+        destinationAllowlist: [TEST_SOLANA_ADDRESSES.wallet2],
+      });
+
+      const res = await app.request(
+        "/v1/payments/transfers/prepare",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            source: TEST_WALLET_ID,
+            destination: TEST_SOLANA_ADDRESSES.wallet2,
+            token: "SOL",
+            amount: "1",
+          }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: {
+          transfer: { id: string; status: string };
+          preparedTransaction: { serialized: string };
+        };
+      };
+      expect(body.data.transfer.status).toBe("pending");
+      expect(body.data.transfer.id).toMatch(/^xfr_/);
+      expect(body.data.preparedTransaction.serialized).toBeTruthy();
+    });
+
+    it("returns 400 when required field amount is missing", async () => {
+      const res = await app.request(
+        "/v1/payments/transfers/prepare",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            source: TEST_WALLET_ID,
+            destination: TEST_SOLANA_ADDRESSES.wallet2,
+            token: "SOL",
+            // amount omitted
+          }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: { code: string } };
+      expect(body.error.code).toBe("BAD_REQUEST");
+
+      const transfers = await env.DB.prepare("SELECT id FROM payment_transfers").all<{
+        id: string;
+      }>();
+      expect(transfers.results).toHaveLength(0);
+    });
+
+    it("returns 400 when destination address is too short", async () => {
+      const res = await app.request(
+        "/v1/payments/transfers/prepare",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            source: TEST_WALLET_ID,
+            destination: "bad",
+            token: "SOL",
+            amount: "1",
+          }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: { code: string } };
+      expect(body.error.code).toBe("BAD_REQUEST");
+    });
+
+    it("returns 404 when source wallet does not exist", async () => {
+      const res = await app.request(
+        "/v1/payments/transfers/prepare",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            source: "wal_nonexistent_wallet",
+            destination: TEST_SOLANA_ADDRESSES.wallet2,
+            token: "SOL",
+            amount: "1",
+          }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(404);
+      const body = (await res.json()) as { error: { code: string } };
+      expect(body.error.code).toBe("NOT_FOUND");
+
+      const transfers = await env.DB.prepare("SELECT id FROM payment_transfers").all<{
+        id: string;
+      }>();
+      expect(transfers.results).toHaveLength(0);
+    });
   });
 
   it("blocks create transfer when projected daily total exceeds maxDailyAmount", async () => {
