@@ -26,6 +26,8 @@ const moonpayAmountSchema = transferAmountSchema.refine(
   "Amount must be greater than zero"
 );
 
+const rampProviderSchema = z.string().trim().min(1).default("moonpay");
+
 const moonpayCurrencyCodeSchema = z
   .string()
   .regex(/^[a-zA-Z0-9_]+$/, { message: "Invalid MoonPay currency code" });
@@ -62,6 +64,7 @@ export const prepareTransferSchema = createTransferSchema.extend({
 });
 
 export const executeOnrampSchema = z.object({
+  provider: rampProviderSchema,
   destinationWallet: z.string().min(1),
   cryptoToken: moonpayCurrencyCodeSchema,
   fiatCurrency: z.literal("USD").optional(),
@@ -71,6 +74,7 @@ export const executeOnrampSchema = z.object({
 });
 
 export const executeOfframpSchema = z.object({
+  provider: rampProviderSchema,
   sourceWallet: z.string().min(1),
   cryptoToken: moonpayCurrencyCodeSchema,
   fiatCurrency: z.literal("USD").optional(),
