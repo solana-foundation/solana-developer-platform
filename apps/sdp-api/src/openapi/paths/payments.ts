@@ -278,7 +278,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     tags: ["Payments"],
     summary: "Execute on-ramp",
     operationId: "executePaymentOnramp",
-    description: "Creates a MoonPay fiat-to-crypto on-ramp session (USD-only).",
+    description: "Creates a fiat-to-crypto on-ramp session through the selected provider.",
     security: [{ apiKeyAuth: [] }],
     request: {
       body: {
@@ -301,7 +301,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     tags: ["Payments"],
     summary: "Execute off-ramp",
     operationId: "executePaymentOfframp",
-    description: "Creates a MoonPay crypto-to-fiat off-ramp session (USD-only).",
+    description: "Creates a crypto-to-fiat off-ramp session through the selected provider.",
     security: [{ apiKeyAuth: [] }],
     request: {
       body: {

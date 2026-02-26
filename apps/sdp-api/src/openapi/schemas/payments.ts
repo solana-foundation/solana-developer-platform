@@ -349,8 +349,15 @@ const moonpayCurrencyCodeSchema = z
     example: "usdc_sol",
   });
 
+const rampProviderSchema = z.string().min(1).default("moonpay").openapi({
+  description: "Ramp provider identifier. Defaults to MoonPay.",
+  example: "moonpay",
+  default: "moonpay",
+});
+
 export const executeOnrampRequestSchema = z
   .object({
+    provider: rampProviderSchema,
     destinationWallet: z.string().openapi({
       description: "Destination wallet ID or Solana address for purchased crypto.",
     }),
@@ -377,6 +384,7 @@ export const executeOnrampRequestSchema = z
 
 export const executeOfframpRequestSchema = z
   .object({
+    provider: rampProviderSchema,
     sourceWallet: z.string().openapi({
       description: "Source wallet ID or Solana address for crypto-to-fiat off-ramp.",
     }),
