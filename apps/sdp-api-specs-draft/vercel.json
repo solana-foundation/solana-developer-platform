@@ -1,4 +1,6 @@
 {
+  "buildCommand": "pnpm build",
+  "installCommand": "cd ../.. && pnpm install",
   "headers": [
     {
       "source": "/(.*)",
