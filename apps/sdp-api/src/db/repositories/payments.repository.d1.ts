@@ -1,6 +1,19 @@
-import { type SQL, and, desc, eq, gte, inArray, lt, lte, sql } from "drizzle-orm";
+import {
+  type SQL,
+  and,
+  desc,
+  eq,
+  gte,
+  inArray,
+  isNotNull,
+  isNull,
+  lt,
+  lte,
+  sql,
+} from "drizzle-orm";
 import { paymentTransfers, paymentWalletPolicies } from "../drizzle/schema/sqlite";
 import type {
+  ListTransfersByStatusInput,
   ListTransfersInput,
   ListTransfersResult,
   PaymentTransferRow,
@@ -244,6 +257,43 @@ export const createD1PaymentsRepository = (
         .all();
 
       return rows.map((row) => row.amount);
+    },
+
+    async listTransfersByStatus({
+      statuses,
+      hasSignature,
+      createdBefore,
+      updatedBefore,
+      limit,
+      offset,
+    }: ListTransfersByStatusInput): Promise<PaymentTransferRow[]> {
+      if (statuses.length === 0) {
+        return [];
+      }
+
+      const conditions: SQL[] = [inArray(paymentTransfers.status, statuses)];
+      if (hasSignature === true) {
+        conditions.push(isNotNull(paymentTransfers.signature));
+      } else if (hasSignature === false) {
+        conditions.push(isNull(paymentTransfers.signature));
+      }
+      if (createdBefore) {
+        conditions.push(lt(paymentTransfers.createdAt, createdBefore));
+      }
+      if (updatedBefore) {
+        conditions.push(lt(paymentTransfers.updatedAt, updatedBefore));
+      }
+
+      const rows = await db
+        .select()
+        .from(paymentTransfers)
+        .where(and(...conditions))
+        .orderBy(paymentTransfers.updatedAt)
+        .limit(limit)
+        .offset(offset ?? 0)
+        .all();
+
+      return rows.map(mapTransferRow);
     },
 
     async getWalletPoliciesByCustodyWalletId(custodyWalletId) {

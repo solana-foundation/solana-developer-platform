@@ -27,6 +27,10 @@ id = "local-cache"
 binding = "SDP_SESSIONS"
 id = "local-sessions"
 
+[triggers]
+# Run every minute to reconcile pending/processing transfer statuses
+crons = ["* * * * *"]
+
 [vars]
 ENVIRONMENT = "development"
 API_VERSION = "v1"
