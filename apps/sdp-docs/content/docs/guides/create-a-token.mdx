@@ -3,7 +3,7 @@ title: Create a Token
 description: Define a new token using templates or custom configuration.
 ---
 
-Token creation defines your token's metadata, extensions, and rules. The token is saved in SDP but **not yet deployed** on-chain — see [Deploy a Token](/docs/guides/deploy-a-token) for the next step.
+Token creation defines your token's metadata, extensions, and rules. The token is saved in SDP but **not yet deployed** onchain — see [Deploy a Token](/docs/guides/deploy-a-token) for the next step.
 
 ## Templates
 
@@ -160,7 +160,7 @@ The token is created with status `pending`. It must be [deployed](/docs/guides/d
 
 ### Custom token (no template)
 
-Omit the `template` field or set it to `"custom"` and configure extensions via `overrides`:
+Omit the `template` field or set it to `"custom"` and configure extensions via `overrides.extensions`. You can also pass `"rwa"` as a template alias for `"tokenized-security"`.
 
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
@@ -174,10 +174,12 @@ curl -X POST https://api.solana.com/v1/issuance/tokens \
     "decimals": 0,
     "template": "custom",
     "overrides": {
-      "pausable": true,
-      "transferFee": {
-        "basisPoints": 50,
-        "maxFee": "1000"
+      "extensions": {
+        "pausable": {},
+        "transferFee": {
+          "basisPoints": 50,
+          "maxFee": "1000"
+        }
       }
     },
     "isMintable": true,
@@ -199,8 +201,10 @@ const response = await fetch("https://api.solana.com/v1/issuance/tokens", {
     decimals: 0,
     template: "custom",
     overrides: {
-      pausable: true,
-      transferFee: { basisPoints: 50, maxFee: "1000" },
+      extensions: {
+        pausable: {},
+        transferFee: { basisPoints: 50, maxFee: "1000" },
+      },
     },
     isMintable: true,
     isFreezable: false,
@@ -221,10 +225,12 @@ HttpRequest request = HttpRequest.newBuilder()
           "decimals": 0,
           "template": "custom",
           "overrides": {
-            "pausable": true,
-            "transferFee": {
-              "basisPoints": 50,
-              "maxFee": "1000"
+            "extensions": {
+              "pausable": {},
+              "transferFee": {
+                "basisPoints": 50,
+                "maxFee": "1000"
+              }
             }
           },
           "isMintable": true,

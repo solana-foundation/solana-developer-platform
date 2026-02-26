@@ -1,6 +1,6 @@
 ---
 title: Prepare vs Execute
-description: Understand SDP's two signing modes for on-chain transactions.
+description: Understand SDP's two signing modes for onchain transactions.
 ---
 
 Every SDP mutation endpoint that produces a Solana transaction supports two signing modes. The mode you choose determines who signs and submits the transaction.
@@ -169,8 +169,9 @@ Prepare endpoints accept `options.simulate: true` to dry-run the transaction bef
 | Force-burn | `POST .../force-burn` | `POST .../force-burn/prepare` |
 | Seize | `POST .../seize` | `POST .../seize/prepare` |
 | Update authority | `POST .../authority` | `POST .../authority/prepare` |
+| Transfer | `POST /v1/payments/transfers` | `POST /v1/payments/transfers/prepare` |
 
-All paths are prefixed with `/v1/issuance/tokens/{tokenId}`.
+Issuance paths are prefixed with `/v1/issuance/tokens/{tokenId}`. Transfer paths use `/v1/payments`.
 
 ## Idempotency
 

@@ -149,6 +149,65 @@ jobs:
       - name: Build API (Wrangler dry-run)
         run: pnpm --filter ./apps/sdp-api build
 
+  openapi_spec:
+    name: OpenAPI Spec Freshness
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.1
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate OpenAPI spec
+        run: pnpm --filter @sdp/api openapi:generate
+
+      - name: Check spec is up to date
+        run: |
+          if ! git diff --exit-code apps/sdp-api-specs-draft/generated/openapi.json; then
+            echo "::error::OpenAPI spec is out of date. Run 'pnpm --filter @sdp/api openapi:generate' and commit the result."
+            exit 1
+          fi
+
+  build_docs:
+    name: Build Docs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.1
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Build docs
+        run: pnpm --filter sdp-docs build
+
   integration_tests:
     name: Integration Tests (Devnet/Kora)
     runs-on: ubuntu-latest

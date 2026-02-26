@@ -3,13 +3,17 @@ title: Set Up Wallets
 description: Initialize a custody provider and create wallets for signing transactions.
 ---
 
-Wallets are Solana keypairs managed by a custody provider. SDP uses them to sign transactions for token deployment, minting, transfers, and other on-chain operations. You must initialize a signing provider before creating tokens or executing transactions.
+Wallets are Solana keypairs managed by a custody provider. SDP uses them to sign transactions for token deployment, minting, transfers, and other onchain operations. You must initialize a signing provider before creating tokens or executing transactions.
 
 ## Supported providers
 
 | Provider | Description | Use case |
 | --- | --- | --- |
 | **Privy** | Managed custody (recommended) | Production and sandbox |
+| **Fireblocks** | Institutional-grade MPC custody | Enterprise production |
+| **Coinbase CDP** | Coinbase Developer Platform custody | Production |
+| **Para** | MPC wallet infrastructure | Production |
+| **Turnkey** | Non-custodial key management | Production |
 | **Local** | Key stored in the database | Development and testing only |
 
 <Tabs items={["Dashboard", "API"]}>
@@ -40,7 +44,7 @@ After provisioning, the Wallets page shows your signing configuration:
 - **Master address** — the public key of your default wallet
 - **Default wallet** — the wallet ID used when no specific wallet is referenced
 
-A note at the bottom reads: "Changing providers affects new actions only. Existing on-chain authorities are not automatically rotated."
+A note at the bottom reads: "Changing providers affects new actions only. Existing onchain authorities are not automatically rotated."
 
 ### 5. Create additional wallets (optional)
 

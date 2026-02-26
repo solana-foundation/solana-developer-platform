@@ -3,7 +3,7 @@ title: Deploy a Token
 description: Deploy a created token to the Solana blockchain.
 ---
 
-After [creating a token](/docs/guides/create-a-token), deploy it on-chain. Deployment creates the mint account on Solana and assigns authorities to your configured wallets.
+After [creating a token](/docs/guides/create-a-token), deploy it onchain. Deployment creates the mint account on Solana and assigns authorities to your configured wallets.
 
 Deployment is currently API-only. Dashboard deployment is coming soon.
 
@@ -35,7 +35,7 @@ const response = await fetch(
   }
 );
 const { data } = await response.json();
-// data.token.mintAddress — the on-chain address
+// data.token.mintAddress — the onchain address
 ```
 </Tab>
 <Tab value="Java">
@@ -50,7 +50,7 @@ HttpRequest request = HttpRequest.newBuilder()
 </Tab>
 </Tabs>
 
-The token status changes from `pending` to `active`, and `mintAddress` is populated with the on-chain address. No request body is needed.
+The token status changes from `pending` to `active`, and `mintAddress` is populated with the onchain address. No request body is needed.
 
 ## Prepare mode (you sign)
 
@@ -71,7 +71,7 @@ const response = await fetch(
   }
 );
 const { data } = await response.json();
-// data.preparedTransaction.serialized — base64 transaction to sign
+// data.transaction.serialized — base64 transaction to sign
 ```
 </Tab>
 <Tab value="Java">
