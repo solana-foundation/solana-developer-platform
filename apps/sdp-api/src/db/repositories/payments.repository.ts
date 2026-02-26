@@ -78,6 +78,25 @@ export interface UpsertPaymentWalletPolicyInput {
   updatedAt: string;
 }
 
+export interface ListTransfersInput {
+  organizationId: string;
+  projectId: string | null;
+  walletId?: string;
+  sourceAddress?: string;
+  token?: string;
+  direction?: PaymentTransferDirection;
+  statuses?: PaymentTransferStatus[];
+  createdAtFrom?: string;
+  createdAtTo?: string;
+  limit: number;
+  offset: number;
+}
+
+export interface ListTransfersResult {
+  rows: PaymentTransferRow[];
+  total: number;
+}
+
 export interface PaymentsRepositoryContext {
   db: DrizzleDbClient;
 }
@@ -100,6 +119,7 @@ export interface PaymentsRepository {
     organizationId: string;
     projectId: string | null;
   }): Promise<PaymentTransferRow[]>;
+  listTransfers(params: ListTransfersInput): Promise<ListTransfersResult>;
   listTransferAmounts(params: {
     organizationId: string;
     projectId: string | null;

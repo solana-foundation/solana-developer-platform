@@ -5,6 +5,7 @@
  * Different tiers have different limits.
  */
 
+import { verifyClerkJwt } from "@/lib/clerk-token";
 import { AppError } from "@/lib/errors";
 import type { Env } from "@/types/env";
 import type { Context, Next } from "hono";
@@ -65,6 +66,64 @@ function getClientIdentifier(c: Context<{ Bindings: Env }>): string {
   return "unknown";
 }
 
+function extractBearerToken(c: Context<{ Bindings: Env }>): string | null {
+  const authHeader = c.req.header("Authorization");
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return null;
+  }
+
+  return authHeader.slice(7);
+}
+
+function looksLikeJwt(token: string): boolean {
+  return token.split(".").length === 3;
+}
+
+function normalizeIssuer(value: string): string {
+  return value.replace(/\/+$/, "");
+}
+
+function decodeJwtPayload(token: string): Record<string, unknown> | null {
+  const parts = token.split(".");
+  if (parts.length !== 3) {
+    return null;
+  }
+
+  try {
+    const base64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    const padded = base64.padEnd(base64.length + ((4 - (base64.length % 4)) % 4), "=");
+    const json = atob(padded);
+    const parsed = JSON.parse(json) as unknown;
+    return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+function looksLikeClerkJwt(token: string, env: Env): boolean {
+  const expectedIssuer = env.CLERK_ISSUER?.trim();
+  if (!expectedIssuer) {
+    return false;
+  }
+
+  const payload = decodeJwtPayload(token);
+  const tokenIssuer = typeof payload?.iss === "string" ? payload.iss : null;
+  if (!tokenIssuer) {
+    return false;
+  }
+
+  return normalizeIssuer(tokenIssuer) === normalizeIssuer(expectedIssuer);
+}
+
+async function isVerifiedClerkJwt(c: Context<{ Bindings: Env }>, token: string): Promise<boolean> {
+  try {
+    await verifyClerkJwt(token, c.env);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Rate limiting middleware
  */
@@ -72,6 +131,22 @@ export function rateLimitMiddleware() {
   return async (c: Context<{ Bindings: Env }>, next: Next) => {
     const kv = c.env.SDP_RATE_LIMITS;
     const auth = c.get("apiKey");
+    const bearerToken = extractBearerToken(c);
+
+    // Clerk-authenticated dashboard traffic is not rate-limited.
+    // Only bypass when the bearer token verifies as a Clerk JWT.
+    if (
+      !auth &&
+      bearerToken &&
+      looksLikeJwt(bearerToken) &&
+      looksLikeClerkJwt(bearerToken, c.env)
+    ) {
+      const isClerkToken = await isVerifiedClerkJwt(c, bearerToken);
+      if (isClerkToken) {
+        await next();
+        return;
+      }
+    }
 
     // Determine rate limit tier
     let identifier: string;

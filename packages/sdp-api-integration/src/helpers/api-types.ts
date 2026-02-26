@@ -61,6 +61,17 @@ export interface UnfreezeApiResponse
     };
   }> {}
 
+export interface SignerCheckApiResponse
+  extends ApiResponse<{
+    walletId: string;
+    walletAddress: string;
+    feePayer: string;
+    memo: string;
+    signature: string;
+    slot: number;
+    blockTime: string;
+  }> {}
+
 export interface TokenAllowlistResponse
   extends ApiResponse<{
     entry: {

@@ -24,7 +24,7 @@ import {
 import type { LucideIcon } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import type { ReactNode } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 
 type NavItem = {
   label: string;
@@ -64,7 +64,7 @@ const docsHref =
 
 const bottomNavItems: NavItem[] = [
   { label: "API Docs", href: docsHref, icon: Library, external: true },
-  { label: "Settings", href: "#", icon: Settings2 },
+  { label: "Settings", href: "/dashboard/settings", icon: Settings2 },
 ];
 
 type DashboardPageConfig = {
@@ -74,6 +74,85 @@ type DashboardPageConfig = {
   contentWidthClass?: string;
 };
 
+function WalletQuickAction() {
+  const [loading, setLoading] = useState(true);
+  const [disabled, setDisabled] = useState(true);
+  const [disabledReason, setDisabledReason] = useState<string>("Checking wallet setup status...");
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadStatus() {
+      try {
+        const response = await fetch("/api/dashboard/wallets/quick-action-status", {
+          cache: "no-store",
+        });
+
+        if (!response.ok) {
+          throw new Error(`Quick action status failed (${response.status})`);
+        }
+
+        const payload = (await response.json()) as {
+          custodyEnabled?: boolean;
+          walletProvisioningEnabled?: boolean;
+          walletProvisioningReason?: string;
+        };
+
+        if (cancelled) {
+          return;
+        }
+
+        const custodyEnabled = payload.custodyEnabled === true;
+        const walletProvisioningEnabled = payload.walletProvisioningEnabled !== false;
+        const walletProvisioningReason = payload.walletProvisioningReason?.trim();
+
+        if (!custodyEnabled) {
+          setDisabled(true);
+          setDisabledReason("Enable wallets first in the Signing configuration section.");
+          return;
+        }
+
+        if (!walletProvisioningEnabled) {
+          setDisabled(true);
+          setDisabledReason(
+            walletProvisioningReason ||
+              "This provider does not support additional wallet provisioning yet."
+          );
+          return;
+        }
+
+        setDisabled(false);
+        setDisabledReason("");
+      } catch {
+        if (cancelled) {
+          return;
+        }
+
+        // Fall back to enabled if status resolution fails so existing flows remain available.
+        setDisabled(false);
+        setDisabledReason("");
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    }
+
+    loadStatus();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return (
+    <CreateWalletModal
+      disabled={loading || disabled}
+      disabledReason={loading ? "Checking wallet setup status..." : (disabledReason ?? undefined)}
+    />
+  );
+}
+
 function getDashboardPageConfig(pathname: string): DashboardPageConfig {
   if (pathname === "/dashboard") {
     return { title: "Dashboard" };
@@ -81,7 +160,7 @@ function getDashboardPageConfig(pathname: string): DashboardPageConfig {
   if (pathname === "/dashboard/wallets" || pathname === "/dashboard/custody") {
     return {
       title: "Wallets",
-      quickActionsRight: <CreateWalletModal />,
+      quickActionsRight: <WalletQuickAction />,
     };
   }
   if (pathname === "/dashboard/wallets/setup" || pathname === "/dashboard/custody/setup") {
@@ -113,6 +192,9 @@ function getDashboardPageConfig(pathname: string): DashboardPageConfig {
   }
   if (pathname.startsWith("/dashboard/members")) {
     return { title: "Members" };
+  }
+  if (pathname.startsWith("/dashboard/settings")) {
+    return { title: "Settings" };
   }
   if (pathname.startsWith("/dashboard/allowlist")) {
     return { title: "Allowlist" };

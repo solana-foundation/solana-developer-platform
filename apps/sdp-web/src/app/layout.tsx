@@ -1,5 +1,6 @@
 import { ClerkProvider } from "@clerk/nextjs";
 import type { Metadata } from "next";
+import { Toaster } from "sonner";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -22,6 +23,7 @@ export default function RootLayout({
           signUpFallbackRedirectUrl="/dashboard"
         >
           {children}
+          <Toaster position="top-right" richColors closeButton />
         </ClerkProvider>
       </body>
     </html>

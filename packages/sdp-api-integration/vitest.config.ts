@@ -36,6 +36,15 @@ const custodyEncryptionKey =
 const koraRpcUrl = getEnv("KORA_RPC_URL");
 const koraApiKey = getEnv("KORA_API_KEY");
 const koraTimeoutMs = getEnv("KORA_TIMEOUT_MS");
+const privyAppId = getEnv("PRIVY_APP_ID");
+const privyAppSecret = getEnv("PRIVY_APP_SECRET");
+const privyApiBaseUrl = getEnv("PRIVY_API_BASE_URL");
+const privyRequestDelayMs = getEnv("PRIVY_REQUEST_DELAY_MS");
+const turnkeyApiPublicKey = getEnv("TURNKEY_API_PUBLIC_KEY");
+const turnkeyApiPrivateKey = getEnv("TURNKEY_API_PRIVATE_KEY");
+const turnkeyOrganizationId = getEnv("TURNKEY_ORGANIZATION_ID");
+const turnkeyApiBaseUrl = getEnv("TURNKEY_API_BASE_URL");
+const turnkeyRequestDelayMs = getEnv("TURNKEY_REQUEST_DELAY_MS");
 
 export default defineWorkersConfig({
   resolve: {
@@ -43,6 +52,14 @@ export default defineWorkersConfig({
       "@": path.resolve(__dirname, "../../apps/sdp-api/src"),
       "@sdp/api": path.resolve(__dirname, "../../apps/sdp-api/src"),
       "@sdp/api-test": path.resolve(__dirname, "../../apps/sdp-api/src/test"),
+      "@sdp/keychain-coinbase": path.resolve(
+        __dirname,
+        "../../packages/sdp-keychain-coinbase/src/index.ts"
+      ),
+      "@sdp/keychain-para": path.resolve(
+        __dirname,
+        "../../packages/sdp-keychain-para/src/index.ts"
+      ),
     },
   },
   test: {
@@ -75,6 +92,15 @@ export default defineWorkersConfig({
               ...(koraApiKey && { KORA_API_KEY: koraApiKey }),
               ...(koraTimeoutMs && { KORA_TIMEOUT_MS: koraTimeoutMs }),
             }),
+            ...(privyAppId && { PRIVY_APP_ID: privyAppId }),
+            ...(privyAppSecret && { PRIVY_APP_SECRET: privyAppSecret }),
+            ...(privyApiBaseUrl && { PRIVY_API_BASE_URL: privyApiBaseUrl }),
+            ...(privyRequestDelayMs && { PRIVY_REQUEST_DELAY_MS: privyRequestDelayMs }),
+            ...(turnkeyApiPublicKey && { TURNKEY_API_PUBLIC_KEY: turnkeyApiPublicKey }),
+            ...(turnkeyApiPrivateKey && { TURNKEY_API_PRIVATE_KEY: turnkeyApiPrivateKey }),
+            ...(turnkeyOrganizationId && { TURNKEY_ORGANIZATION_ID: turnkeyOrganizationId }),
+            ...(turnkeyApiBaseUrl && { TURNKEY_API_BASE_URL: turnkeyApiBaseUrl }),
+            ...(turnkeyRequestDelayMs && { TURNKEY_REQUEST_DELAY_MS: turnkeyRequestDelayMs }),
           },
         },
       },

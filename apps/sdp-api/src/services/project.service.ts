@@ -75,7 +75,7 @@ export class ProjectService {
       slug,
       description: input.description ?? null,
       environment: input.environment ?? "sandbox",
-      settings: input.settings ?? null,
+      settings: this.resolveProjectSettings(input.settings),
       status: "active",
       createdBy: input.createdBy,
       createdAt: now,
@@ -273,7 +273,17 @@ export class ProjectService {
 
     if (input.settings !== undefined) {
       updates.push("settings = ?");
-      values.push(input.settings ? JSON.stringify(input.settings) : null);
+      const normalizedSettings =
+        input.settings === null
+          ? this.resolveProjectSettings(undefined)
+          : this.resolveProjectSettings(
+              {
+                ...(existing.settings ?? {}),
+                ...input.settings,
+              },
+              existing.settings
+            );
+      values.push(JSON.stringify(normalizedSettings));
     }
 
     updates.push("updated_at = ?");
@@ -457,12 +467,12 @@ export class ProjectService {
     created_at: string;
     updated_at: string;
   }): Project {
-    let settings: ProjectSettings | null = null;
+    let settings: ProjectSettings | undefined;
     if (row.settings) {
       try {
         settings = JSON.parse(row.settings) as ProjectSettings;
       } catch {
-        settings = null;
+        settings = undefined;
       }
     }
 
@@ -473,11 +483,39 @@ export class ProjectService {
       slug: row.slug,
       description: row.description,
       environment: row.environment as ProjectEnvironment,
-      settings,
+      settings: this.resolveProjectSettings(settings),
       status: row.status as "active" | "archived",
       createdBy: row.created_by,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };
+  }
+
+  private resolveProjectSettings(
+    settings?: ProjectSettings | null,
+    fallbackSettings?: ProjectSettings | null
+  ): ProjectSettings {
+    const resolved: ProjectSettings = {
+      ...(settings ?? {}),
+    };
+
+    if (resolved.rpcProvider === undefined) {
+      resolved.rpcProvider =
+        fallbackSettings?.rpcProvider ?? (resolved.rpcEndpoint ? "custom" : "default");
+    }
+
+    if (
+      resolved.rpcProvider === "custom" &&
+      resolved.rpcEndpoint === undefined &&
+      fallbackSettings?.rpcEndpoint
+    ) {
+      resolved.rpcEndpoint = fallbackSettings.rpcEndpoint;
+    }
+
+    if (resolved.rpcProvider !== "custom") {
+      resolved.rpcEndpoint = undefined;
+    }
+
+    return resolved;
   }
 }

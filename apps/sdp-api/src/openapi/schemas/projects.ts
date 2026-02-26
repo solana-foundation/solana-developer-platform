@@ -1,3 +1,4 @@
+import { PROJECT_RPC_PROVIDERS } from "@sdp/types";
 import {
   addMemberSchema as addMemberSchemaBase,
   createProjectSchema as createProjectSchemaBase,
@@ -17,9 +18,14 @@ import { userSchema } from "./organizations";
 
 export const projectSettingsSchema = z
   .object({
+    rpcProvider: z.enum(PROJECT_RPC_PROVIDERS).optional().openapi({
+      description:
+        "Preferred RPC provider for this project. Defaults to `default` (round-robin managed providers). Use `custom` with `rpcEndpoint` for a dedicated endpoint.",
+      example: "default",
+    }),
     rpcEndpoint: z.string().url().optional().openapi({
-      description: "Custom Solana RPC endpoint for the project.",
-      example: "https://api.devnet.solana.com",
+      description: "Custom Solana RPC endpoint for the project (used when rpcProvider=custom).",
+      example: "https://rpc.example.com",
     }),
     webhookUrl: z.string().url().optional().openapi({
       description: "Webhook URL for event notifications.",
@@ -34,7 +40,10 @@ export const projectSettingsSchema = z
       }),
   })
   .strict()
-  .openapi({ description: "Project settings." });
+  .openapi({
+    description:
+      "Project settings. `rpcProvider` defaults to `default` (round-robin) when omitted.",
+  });
 
 export const projectSchema = z
   .object({
@@ -49,9 +58,9 @@ export const projectSchema = z
     environment: z
       .enum(["sandbox", "beta", "production"])
       .openapi({ description: "Project environment.", example: "sandbox" }),
-    settings: projectSettingsSchema
-      .nullable()
-      .openapi({ description: "Project settings (nullable when unset)." }),
+    settings: projectSettingsSchema.openapi({
+      description: "Project settings with normalized defaults.",
+    }),
     status: z.enum(["active", "archived"]).openapi({
       description: "Project status.",
       example: "active",
@@ -153,7 +162,7 @@ export const createProjectRequestSchema = createProjectSchemaBase
     settings: createProjectSchemaBase.shape.settings.openapi({
       description: "Optional project settings.",
       example: {
-        rpcEndpoint: "https://api.devnet.solana.com",
+        rpcProvider: "default",
         webhookUrl: "https://example.com/webhook",
         metadata: { region: "us" },
       },
@@ -178,7 +187,8 @@ export const updateProjectRequestSchema = updateProjectSchemaBase
     settings: updateProjectSchemaBase.shape.settings.openapi({
       description: "Updated project settings. Use null to clear.",
       example: {
-        rpcEndpoint: "https://api.mainnet-beta.solana.com",
+        rpcProvider: "custom",
+        rpcEndpoint: "https://rpc.example.com",
       },
     }),
   })

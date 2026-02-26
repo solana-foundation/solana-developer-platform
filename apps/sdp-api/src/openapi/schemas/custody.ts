@@ -2,6 +2,7 @@ import {
   createWalletSchema as createWalletSchemaBase,
   initializeSigningSchema as initializeSigningSchemaBase,
   setDefaultWalletSchema as setDefaultWalletSchemaBase,
+  signerCheckSchema as signerCheckSchemaBase,
   switchSigningSchema as switchSigningSchemaBase,
 } from "../../routes/custody/schemas";
 import { z } from "./base";
@@ -18,6 +19,11 @@ export const initializeSigningRequestSchema = initializeSigningSchemaBase.openap
 
 export const switchSigningRequestSchema = switchSigningSchemaBase.openapi({
   description: "Switch the active wallet signing provider for the organization or project.",
+});
+
+export const signerCheckRequestSchema = signerCheckSchemaBase.openapi({
+  description:
+    "Optional memo payload for signer check. Signing wallet is resolved from the API key binding.",
 });
 
 export const createCustodyWalletRequestSchema = createWalletSchemaBase
@@ -65,7 +71,7 @@ export const initializeSigningResponseSchema = z
   .openapi({ description: "Wallet signing initialization result." });
 
 export const orgCustodyProviderSchema = z
-  .enum(["local", "fireblocks", "privy"])
+  .enum(["local", "fireblocks", "privy", "coinbase_cdp", "para", "turnkey"])
   .openapi({ description: "Wallet signing provider.", example: "privy" });
 
 export const custodyWalletSchema = z
@@ -149,3 +155,34 @@ export const custodyPublicKeyResponseSchema = z
     publicKey: solanaAddressSchema,
   })
   .openapi({ description: "Wallet public key response payload." });
+
+export const signerCheckResponseSchema = z
+  .object({
+    walletId: walletIdParamSchema.openapi({
+      description: "Signing wallet ID bound to the API key.",
+      example: "privy_wallet_123",
+    }),
+    walletAddress: solanaAddressSchema.openapi({
+      description: "Resolved signer address used for the memo transaction.",
+    }),
+    feePayer: solanaAddressSchema.openapi({
+      description: "Fee payer address (Kora signer).",
+    }),
+    memo: z.string().openapi({
+      description: "Memo text submitted on-chain.",
+      example: "SDP signer check 2026-02-20T00:00:00.000Z",
+    }),
+    signature: z.string().openapi({
+      description: "Submitted Solana transaction signature.",
+      example: "sig_example",
+    }),
+    slot: z.number().int().openapi({
+      description: "Confirmed slot number.",
+      example: 123456789,
+    }),
+    blockTime: isoDateTimeSchema.openapi({
+      description: "Timestamp recorded after confirmation.",
+      example: "2026-02-20T00:00:00.000Z",
+    }),
+  })
+  .openapi({ description: "Signer check response payload." });

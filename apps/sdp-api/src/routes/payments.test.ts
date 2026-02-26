@@ -1,3 +1,4 @@
+import { createHmac } from "node:crypto";
 import app from "@/index";
 import { hashString } from "@/lib/hash";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
@@ -5,7 +6,62 @@ import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/d1";
 import { clearKVNamespaces, seedCachedApiKey } from "@/test/mocks/kv";
 import type { CachedApiKey } from "@sdp/types";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import type { Signature } from "@solana/kit";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("@/services/solana/rpc", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/services/solana/rpc")>("@/services/solana/rpc");
+  return {
+    ...actual,
+    createRpc: vi.fn().mockReturnValue({}),
+    getRecentBlockhash: vi.fn().mockResolvedValue({
+      // biome-ignore lint/nursery/noSecrets: Test blockhash, not a secret.
+      blockhash: "EkSnNWid2cvwEVnVx9aBqawnmiCNiDgp3gUdkDPTKN1N",
+      lastValidBlockHeight: 1000n,
+    }),
+    confirmTransaction: vi.fn().mockResolvedValue({
+      signature:
+        // biome-ignore lint/nursery/noSecrets: Test transaction signature, not a secret.
+        "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy",
+      slot: 100n,
+      confirmationStatus: "confirmed",
+      err: null,
+    }),
+    getSignaturesForAddress: vi.fn().mockResolvedValue([]),
+  };
+});
+
+vi.mock("@/services/adapters/fee-payment", async () => {
+  const actual = await vi.importActual<typeof import("@/services/adapters/fee-payment")>(
+    "@/services/adapters/fee-payment"
+  );
+  return {
+    ...actual,
+    createFeePaymentAdapter: vi.fn().mockReturnValue({
+      providerId: "mock",
+      // biome-ignore lint/nursery/noSecrets: Test Solana address used as mock fee payer, not a secret.
+      getFeePayer: vi.fn().mockResolvedValue("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
+      signAsFeePayer: vi.fn(),
+      signAndSend: vi.fn().mockResolvedValue(
+        // biome-ignore lint/nursery/noSecrets: Test transaction signature, not a secret.
+        "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy"
+      ),
+    }),
+  };
+});
+
+vi.mock("@/services/solana", async () => {
+  const actual = await vi.importActual<typeof import("@/services/solana")>("@/services/solana");
+  const { address, createNoopSigner } = await import("@solana/kit");
+  return {
+    ...actual,
+    createOrgSigner: vi.fn().mockResolvedValue(
+      // biome-ignore lint/nursery/noSecrets: Test Solana address, not a secret.
+      createNoopSigner(address("8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ"))
+    ),
+  };
+});
 
 const TEST_CONFIG_ID = "cust_cfg_payments_test";
 const TEST_CUSTODY_WALLET_ID = "cwlt_payments_test";
@@ -38,6 +94,37 @@ const TEST_CACHED_API_KEY: CachedApiKey = {
   status: "active",
   expiresAt: null,
 };
+
+const TEST_MOONPAY_API_KEY = "pk_test_moonpay";
+const TEST_MOONPAY_SECRET_KEY = "moonpay_secret_key";
+const TEST_MOONPAY_ONRAMP_URL = "https://buy-sandbox.moonpay.com";
+const TEST_MOONPAY_OFFRAMP_URL = "https://sell-sandbox.moonpay.com";
+// biome-ignore lint/nursery/noSecrets: Query parameter key used for test assertions.
+const MOONPAY_PARAM_BASE_CURRENCY_AMOUNT = "baseCurrencyAmount";
+// biome-ignore lint/nursery/noSecrets: Query parameter key used for test assertions.
+const MOONPAY_PARAM_EXTERNAL_CUSTOMER_ID = "externalCustomerId";
+// biome-ignore lint/nursery/noSecrets: Query parameter key used for test assertions.
+const MOONPAY_PARAM_QUOTE_CURRENCY_CODE = "quoteCurrencyCode";
+// biome-ignore lint/nursery/noSecrets: Query parameter key used for test assertions.
+const MOONPAY_PARAM_REFUND_WALLET_ADDRESS = "refundWalletAddress";
+
+let originalMoonPayApiKey: string | undefined;
+let originalMoonPaySecretKey: string | undefined;
+let originalMoonPayOnrampUrl: string | undefined;
+let originalMoonPayOfframpUrl: string | undefined;
+
+function assertMoonPaySignature(url: URL): void {
+  const signature = url.searchParams.get("signature");
+  expect(signature).toBeTruthy();
+
+  const unsignedUrl = new URL(url.toString());
+  unsignedUrl.searchParams.delete("signature");
+
+  const expectedSignature = createHmac("sha256", TEST_MOONPAY_SECRET_KEY)
+    .update(unsignedUrl.search)
+    .digest("base64");
+  expect(signature).toBe(expectedSignature);
+}
 
 async function seedAuthAndWallet(): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
@@ -142,13 +229,141 @@ async function seedWalletPolicy(params: {
 
 describe("Payments routes", () => {
   beforeEach(async () => {
+    originalMoonPayApiKey = env.MOONPAY_API_KEY;
+    originalMoonPaySecretKey = env.MOONPAY_SECRET_KEY;
+    originalMoonPayOnrampUrl = env.MOONPAY_ONRAMP_URL;
+    originalMoonPayOfframpUrl = env.MOONPAY_OFFRAMP_URL;
+
+    env.MOONPAY_API_KEY = TEST_MOONPAY_API_KEY;
+    env.MOONPAY_SECRET_KEY = TEST_MOONPAY_SECRET_KEY;
+    env.MOONPAY_ONRAMP_URL = TEST_MOONPAY_ONRAMP_URL;
+    env.MOONPAY_OFFRAMP_URL = TEST_MOONPAY_OFFRAMP_URL;
+
     await seedTestDatabase(env);
     await seedAuthAndWallet();
   });
 
   afterEach(async () => {
+    env.MOONPAY_API_KEY = originalMoonPayApiKey;
+    env.MOONPAY_SECRET_KEY = originalMoonPaySecretKey;
+    env.MOONPAY_ONRAMP_URL = originalMoonPayOnrampUrl;
+    env.MOONPAY_OFFRAMP_URL = originalMoonPayOfframpUrl;
+
     await clearTestDatabase(env);
     await clearKVNamespaces(env);
+  });
+
+  it("creates a signed MoonPay on-ramp session URL", async () => {
+    const res = await app.request(
+      "/v1/payments/ramps/onramp/execute",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          destinationWallet: TEST_WALLET_ID,
+          cryptoToken: "USDC_SOL",
+          fiatCurrency: "USD",
+          fiatAmount: "120.50",
+          kycReference: "kyc_ref_123",
+          redirectUrl: "https://example.com/onramp-done",
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      data: { ramp: { id: string; status: string; redirectUrl: string } };
+    };
+
+    expect(body.data.ramp.id.startsWith("ramp_")).toBe(true);
+    expect(body.data.ramp.status).toBe("pending");
+
+    const redirect = new URL(body.data.ramp.redirectUrl);
+    expect(redirect.origin).toBe(TEST_MOONPAY_ONRAMP_URL);
+    expect(redirect.searchParams.get("apiKey")).toBe(TEST_MOONPAY_API_KEY);
+    expect(redirect.searchParams.get("baseCurrencyCode")).toBe("usd");
+    expect(redirect.searchParams.get(MOONPAY_PARAM_BASE_CURRENCY_AMOUNT)).toBe("120.50");
+    expect(redirect.searchParams.get("currencyCode")).toBe("usdc_sol");
+    expect(redirect.searchParams.get("walletAddress")).toBe(TEST_SOLANA_ADDRESSES.wallet1);
+    expect(redirect.searchParams.get("redirectURL")).toBe("https://example.com/onramp-done");
+    expect(redirect.searchParams.get(MOONPAY_PARAM_EXTERNAL_CUSTOMER_ID)).toBe("kyc_ref_123");
+    assertMoonPaySignature(redirect);
+  });
+
+  it("creates a signed MoonPay off-ramp session URL", async () => {
+    const res = await app.request(
+      "/v1/payments/ramps/offramp/execute",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          sourceWallet: TEST_WALLET_ID,
+          cryptoToken: "USDC_SOL",
+          fiatCurrency: "USD",
+          cryptoAmount: "75.25",
+          kycReference: "kyc_ref_456",
+          redirectUrl: "https://example.com/offramp-done",
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      data: { ramp: { id: string; status: string; redirectUrl: string; reference: string } };
+    };
+
+    expect(body.data.ramp.id.startsWith("ramp_")).toBe(true);
+    expect(body.data.ramp.status).toBe("pending");
+    expect(body.data.ramp.reference.startsWith("sdp_offramp_")).toBe(true);
+
+    const redirect = new URL(body.data.ramp.redirectUrl);
+    expect(redirect.origin).toBe(TEST_MOONPAY_OFFRAMP_URL);
+    expect(redirect.searchParams.get("apiKey")).toBe(TEST_MOONPAY_API_KEY);
+    expect(redirect.searchParams.get("baseCurrencyCode")).toBe("usdc_sol");
+    expect(redirect.searchParams.get(MOONPAY_PARAM_BASE_CURRENCY_AMOUNT)).toBe("75.25");
+    expect(redirect.searchParams.get(MOONPAY_PARAM_QUOTE_CURRENCY_CODE)).toBe("usd");
+    expect(redirect.searchParams.get("walletAddress")).toBe(TEST_SOLANA_ADDRESSES.wallet1);
+    expect(redirect.searchParams.get(MOONPAY_PARAM_REFUND_WALLET_ADDRESS)).toBe(
+      TEST_SOLANA_ADDRESSES.wallet1
+    );
+    expect(redirect.searchParams.get("redirectURL")).toBe("https://example.com/offramp-done");
+    expect(redirect.searchParams.get(MOONPAY_PARAM_EXTERNAL_CUSTOMER_ID)).toBe("kyc_ref_456");
+    assertMoonPaySignature(redirect);
+  });
+
+  it("returns internal error when MoonPay credentials are not configured", async () => {
+    env.MOONPAY_API_KEY = undefined;
+
+    const res = await app.request(
+      "/v1/payments/ramps/onramp/execute",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          destinationWallet: TEST_WALLET_ID,
+          cryptoToken: "usdc_sol",
+          fiatCurrency: "USD",
+          fiatAmount: "10",
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(500);
+    const body = (await res.json()) as { error: { code: string; message: string } };
+    expect(body.error.code).toBe("INTERNAL_ERROR");
+    expect(body.error.message).toContain("MoonPay is not configured");
   });
 
   it("blocks prepare transfer when destination is outside allowlist", async () => {
@@ -218,6 +433,168 @@ describe("Payments routes", () => {
     expect(transfers.results).toHaveLength(0);
   });
 
+  describe("prepare transfer — happy path", () => {
+    it("creates a pending SOL transfer with no wallet policy", async () => {
+      const res = await app.request(
+        "/v1/payments/transfers/prepare",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            source: TEST_WALLET_ID,
+            destination: TEST_SOLANA_ADDRESSES.wallet2,
+            token: "SOL",
+            amount: "1",
+          }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: {
+          transfer: { id: string; status: string };
+          preparedTransaction: { serialized: string; blockhash: string };
+        };
+      };
+      expect(body.data.transfer.status).toBe("pending");
+      expect(body.data.transfer.id).toMatch(/^xfr_/);
+      expect(body.data.preparedTransaction.serialized).toBeTruthy();
+      expect(body.data.preparedTransaction.blockhash).toBe(
+        // biome-ignore lint/nursery/noSecrets: Test blockhash, not a secret.
+        "EkSnNWid2cvwEVnVx9aBqawnmiCNiDgp3gUdkDPTKN1N"
+      );
+
+      const row = await env.DB.prepare(
+        "SELECT status, serialized_tx FROM payment_transfers WHERE id = ?"
+      )
+        .bind(body.data.transfer.id)
+        .first<{ status: string; serialized_tx: string | null }>();
+      expect(row?.status).toBe("pending");
+      expect(row?.serialized_tx).toBeTruthy();
+    });
+
+    it("creates a pending SOL transfer when destination is on the allowlist", async () => {
+      await seedWalletPolicy({
+        destinationAllowlist: [TEST_SOLANA_ADDRESSES.wallet2],
+      });
+
+      const res = await app.request(
+        "/v1/payments/transfers/prepare",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            source: TEST_WALLET_ID,
+            destination: TEST_SOLANA_ADDRESSES.wallet2,
+            token: "SOL",
+            amount: "1",
+          }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: {
+          transfer: { id: string; status: string };
+          preparedTransaction: { serialized: string };
+        };
+      };
+      expect(body.data.transfer.status).toBe("pending");
+      expect(body.data.transfer.id).toMatch(/^xfr_/);
+      expect(body.data.preparedTransaction.serialized).toBeTruthy();
+    });
+
+    it("returns 400 when required field amount is missing", async () => {
+      const res = await app.request(
+        "/v1/payments/transfers/prepare",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            source: TEST_WALLET_ID,
+            destination: TEST_SOLANA_ADDRESSES.wallet2,
+            token: "SOL",
+            // amount omitted
+          }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: { code: string } };
+      expect(body.error.code).toBe("BAD_REQUEST");
+
+      const transfers = await env.DB.prepare("SELECT id FROM payment_transfers").all<{
+        id: string;
+      }>();
+      expect(transfers.results).toHaveLength(0);
+    });
+
+    it("returns 400 when destination address is too short", async () => {
+      const res = await app.request(
+        "/v1/payments/transfers/prepare",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            source: TEST_WALLET_ID,
+            destination: "bad",
+            token: "SOL",
+            amount: "1",
+          }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: { code: string } };
+      expect(body.error.code).toBe("BAD_REQUEST");
+    });
+
+    it("returns 404 when source wallet does not exist", async () => {
+      const res = await app.request(
+        "/v1/payments/transfers/prepare",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            source: "wal_nonexistent_wallet",
+            destination: TEST_SOLANA_ADDRESSES.wallet2,
+            token: "SOL",
+            amount: "1",
+          }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(404);
+      const body = (await res.json()) as { error: { code: string } };
+      expect(body.error.code).toBe("NOT_FOUND");
+
+      const transfers = await env.DB.prepare("SELECT id FROM payment_transfers").all<{
+        id: string;
+      }>();
+      expect(transfers.results).toHaveLength(0);
+    });
+  });
+
   it("blocks create transfer when projected daily total exceeds maxDailyAmount", async () => {
     await seedWalletPolicy({
       destinationAllowlist: [],
@@ -275,5 +652,231 @@ describe("Payments routes", () => {
     }>();
     expect(transfers.results).toHaveLength(1);
     expect(transfers.results[0]?.id).toBe("xfr_existing_daily_limit");
+  });
+
+  async function seedTransfer(params: {
+    id: string;
+    status: string;
+    signature?: string | null;
+    walletId?: string;
+  }): Promise<void> {
+    const now = new Date().toISOString();
+    await env.DB.prepare(
+      `INSERT INTO payment_transfers
+           (id, organization_id, project_id, wallet_id, source_address, destination_address, token, amount, memo, type, direction, status, signature, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+      .bind(
+        params.id,
+        TEST_ORG.id,
+        null,
+        params.walletId ?? TEST_WALLET_ID,
+        TEST_SOLANA_ADDRESSES.wallet1,
+        TEST_SOLANA_ADDRESSES.wallet2,
+        "SOL",
+        "1",
+        null,
+        "transfer",
+        "outbound",
+        params.status,
+        params.signature ?? null,
+        now,
+        now
+      )
+      .run();
+  }
+
+  describe("execute transfer — happy path", () => {
+    it("executes a SOL transfer and returns a confirmed transfer record", async () => {
+      const res = await app.request(
+        "/v1/payments/transfers",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            source: TEST_WALLET_ID,
+            destination: TEST_SOLANA_ADDRESSES.wallet2,
+            token: "SOL",
+            amount: "1",
+          }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: {
+          transfer: { id: string; status: string; signature: string | null };
+        };
+      };
+      expect(body.data.transfer.status).toBe("confirmed");
+      expect(body.data.transfer.id).toMatch(/^xfr_/);
+      expect(body.data.transfer.signature).toBeTruthy();
+
+      const row = await env.DB.prepare(
+        "SELECT status, signature FROM payment_transfers WHERE id = ?"
+      )
+        .bind(body.data.transfer.id)
+        .first<{ status: string; signature: string | null }>();
+      expect(row?.status).toBe("confirmed");
+      expect(row?.signature).toBeTruthy();
+    });
+
+    it("marks the transfer as failed when execution throws and returns 502", async () => {
+      const { createFeePaymentAdapter } = await import("@/services/adapters/fee-payment");
+      vi.mocked(createFeePaymentAdapter).mockReturnValueOnce({
+        providerId: "mock",
+        // biome-ignore lint/nursery/noSecrets: Test Solana address used as mock fee payer, not a secret.
+        getFeePayer: vi.fn().mockResolvedValue("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
+        signAsFeePayer: vi.fn(),
+        signAndSend: vi.fn().mockRejectedValue(new Error("RPC connection refused")),
+      });
+
+      const res = await app.request(
+        "/v1/payments/transfers",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            source: TEST_WALLET_ID,
+            destination: TEST_SOLANA_ADDRESSES.wallet2,
+            token: "SOL",
+            amount: "1",
+          }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(502);
+      const body = (await res.json()) as { error: { code: string } };
+      expect(body.error.code).toBe("SOLANA_RPC_ERROR");
+
+      const transfers = await env.DB.prepare("SELECT status, error FROM payment_transfers").all<{
+        status: string;
+        error: string | null;
+      }>();
+      expect(transfers.results).toHaveLength(1);
+      expect(transfers.results[0]?.status).toBe("failed");
+      expect(transfers.results[0]?.error).toBeTruthy();
+    });
+  });
+
+  describe("list transfers", () => {
+    beforeEach(() => {
+      vi.clearAllMocks();
+    });
+
+    it("returns confirmed + pending transfers when wallet filter is provided", async () => {
+      const { getSignaturesForAddress } = await import("@/services/solana/rpc");
+      const confirmedSig =
+        // biome-ignore lint/nursery/noSecrets: Test transaction signature, not a secret.
+        "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy";
+
+      await seedTransfer({ id: "xfr_confirmed_1", status: "confirmed", signature: confirmedSig });
+      await seedTransfer({ id: "xfr_pending_1", status: "pending" });
+
+      vi.mocked(getSignaturesForAddress).mockResolvedValueOnce([
+        {
+          signature: confirmedSig as unknown as Signature,
+          slot: 100n,
+          blockTime: 1700000000n,
+          err: null,
+        },
+      ]);
+
+      const res = await app.request(
+        `/v1/payments/transfers?wallet=${TEST_WALLET_ID}`,
+        {
+          method: "GET",
+          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
+        },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: Array<{ id: string; status: string }>;
+        meta: { total: number };
+      };
+      expect(body.meta.total).toBe(2);
+      expect(body.data).toHaveLength(2);
+      const statuses = body.data.map((t) => t.status).sort();
+      expect(statuses).toEqual(["confirmed", "pending"]);
+    });
+
+    it("returns all transfers via DB-only path when no wallet filter is provided", async () => {
+      const { getSignaturesForAddress } = await import("@/services/solana/rpc");
+
+      await seedTransfer({ id: "xfr_db_1", status: "confirmed" });
+      await seedTransfer({ id: "xfr_db_2", status: "pending" });
+      await seedTransfer({ id: "xfr_db_3", status: "failed" });
+
+      const res = await app.request(
+        "/v1/payments/transfers",
+        {
+          method: "GET",
+          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
+        },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: Array<{ id: string }>;
+        meta: { total: number };
+      };
+      expect(body.data).toHaveLength(3);
+      expect(body.meta.total).toBe(3);
+      expect(vi.mocked(getSignaturesForAddress)).not.toHaveBeenCalled();
+    });
+
+    it("filters by status when status query param is provided", async () => {
+      await seedTransfer({ id: "xfr_status_confirmed", status: "confirmed" });
+      await seedTransfer({ id: "xfr_status_pending", status: "pending" });
+
+      const res = await app.request(
+        // biome-ignore lint/nursery/noSecrets: Test URL query param, not a secret.
+        "/v1/payments/transfers?status=confirmed",
+        {
+          method: "GET",
+          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
+        },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: Array<{ id: string; status: string }>;
+        meta: { total: number };
+      };
+      expect(body.data).toHaveLength(1);
+      expect(body.data[0]?.status).toBe("confirmed");
+    });
+
+    it("returns a single transfer by ID", async () => {
+      await seedTransfer({ id: "xfr_single_1", status: "confirmed" });
+
+      const res = await app.request(
+        "/v1/payments/transfers/xfr_single_1",
+        {
+          method: "GET",
+          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
+        },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: { transfer: { id: string; status: string } };
+      };
+      expect(body.data.transfer.id).toBe("xfr_single_1");
+      expect(body.data.transfer.status).toBe("confirmed");
+    });
   });
 });

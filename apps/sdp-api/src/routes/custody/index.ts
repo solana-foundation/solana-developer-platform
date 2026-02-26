@@ -11,9 +11,11 @@ import {
   createWallet,
   getConfig,
   getPublicKey,
+  getSwitchProviderOptions,
   initializeSigning,
   listWallets,
   setDefaultWallet,
+  signerCheck,
   switchSigning,
 } from "./handlers";
 
@@ -27,10 +29,12 @@ wallets.post("/initialize", requirePermissions("custody:admin"), initializeSigni
 wallets.post("/switch", requirePermissions("custody:admin"), switchSigning);
 wallets.post("/", requirePermissions("custody:admin"), createWallet);
 wallets.post("/default-wallet", requirePermissions("custody:admin"), setDefaultWallet);
+wallets.post("/signer-check", requirePermissions("wallets:write"), signerCheck);
 
 // Read configuration and wallets
 wallets.get("/config", requirePermissions("wallets:read"), getConfig);
 wallets.get("/", requirePermissions("wallets:read"), listWallets);
 wallets.get("/public-key", requirePermissions("wallets:read"), getPublicKey);
+wallets.get("/switch-options", requirePermissions("custody:admin"), getSwitchProviderOptions);
 
 export default wallets;

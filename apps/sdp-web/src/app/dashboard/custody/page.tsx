@@ -20,8 +20,9 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
 import { setDefaultCustodyWallet } from "./actions";
+import { WalletSignerCheckButton } from "./wallet-signer-check-button";
 
-type CustodyProvider = "privy" | "local" | "fireblocks";
+type CustodyProvider = "privy" | "local" | "fireblocks" | "coinbase_cdp" | "para" | "turnkey";
 
 interface CustodyConfig {
   id: string;
@@ -260,7 +261,7 @@ async function WalletsSection({
                     <TableHead>Purpose</TableHead>
                     <TableHead>Public key</TableHead>
                     <TableHead>Wallet id</TableHead>
-                    <TableHead className="text-right">Default</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -274,19 +275,25 @@ async function WalletsSection({
                         </TableCell>
                         <TableCell className="font-mono text-xs">{w.publicKey}</TableCell>
                         <TableCell className="font-mono text-xs text-[rgba(28,28,29,0.72)]">
-                          {w.walletId}
+                          <div
+                            className="max-w-[10rem] truncate sm:max-w-[14rem]"
+                            title={w.walletId}
+                          >
+                            {w.walletId}
+                          </div>
                         </TableCell>
                         <TableCell className="text-right">
-                          {isDefault ? (
-                            <span className="text-xs font-medium text-[#1c1c1d]">Default</span>
-                          ) : (
-                            <form action={setDefaultCustodyWallet}>
-                              <input type="hidden" name="walletId" value={w.walletId} />
-                              <Button type="submit" size="sm" variant="secondary">
-                                Set
-                              </Button>
-                            </form>
-                          )}
+                          <div className="inline-flex items-center justify-end gap-2">
+                            {!isDefault ? (
+                              <form action={setDefaultCustodyWallet}>
+                                <input type="hidden" name="walletId" value={w.walletId} />
+                                <Button type="submit" size="sm" variant="secondary">
+                                  Set
+                                </Button>
+                              </form>
+                            ) : null}
+                            <WalletSignerCheckButton walletId={w.walletId} />
+                          </div>
                         </TableCell>
                       </TableRow>
                     );

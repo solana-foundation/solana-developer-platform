@@ -74,6 +74,17 @@ jobs:
   test:
     name: Unit Tests
     runs-on: ubuntu-latest
+    env:
+      SOLANA_RPC_URL: ${{ vars.SOLANA_RPC_URL || secrets.SOLANA_RPC_URL || 'https://api.devnet.solana.com' }}
+      SOLANA_RPC_DEFAULT_PROVIDER: ${{ vars.SOLANA_RPC_DEFAULT_PROVIDER || secrets.SOLANA_RPC_DEFAULT_PROVIDER || 'default' }}
+      SOLANA_RPC_TRITON_URL: ${{ vars.SOLANA_RPC_TRITON_URL || secrets.SOLANA_RPC_TRITON_URL }}
+      SOLANA_RPC_TRITON_API_KEY: ${{ secrets.SOLANA_RPC_TRITON_API_KEY }}
+      SOLANA_RPC_HELIUS_URL: ${{ vars.SOLANA_RPC_HELIUS_URL || secrets.SOLANA_RPC_HELIUS_URL }}
+      SOLANA_RPC_HELIUS_API_KEY: ${{ secrets.SOLANA_RPC_HELIUS_API_KEY }}
+      SOLANA_RPC_ALCHEMY_URL: ${{ vars.SOLANA_RPC_ALCHEMY_URL || secrets.SOLANA_RPC_ALCHEMY_URL }}
+      SOLANA_RPC_ALCHEMY_API_KEY: ${{ secrets.SOLANA_RPC_ALCHEMY_API_KEY }}
+      SOLANA_RPC_QUICKNODE_URL: ${{ vars.SOLANA_RPC_QUICKNODE_URL || secrets.SOLANA_RPC_QUICKNODE_URL }}
+      SOLANA_RPC_QUICKNODE_API_KEY: ${{ secrets.SOLANA_RPC_QUICKNODE_API_KEY }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -93,6 +104,21 @@ jobs:
 
       - name: Install
         run: pnpm install --frozen-lockfile
+
+      - name: Prepare API test vars
+        run: |
+          cat > apps/sdp-api/.dev.vars <<EOF
+          SOLANA_RPC_URL=${SOLANA_RPC_URL}
+          SOLANA_RPC_DEFAULT_PROVIDER=${SOLANA_RPC_DEFAULT_PROVIDER}
+          SOLANA_RPC_TRITON_URL=${SOLANA_RPC_TRITON_URL}
+          SOLANA_RPC_TRITON_API_KEY=${SOLANA_RPC_TRITON_API_KEY}
+          SOLANA_RPC_HELIUS_URL=${SOLANA_RPC_HELIUS_URL}
+          SOLANA_RPC_HELIUS_API_KEY=${SOLANA_RPC_HELIUS_API_KEY}
+          SOLANA_RPC_ALCHEMY_URL=${SOLANA_RPC_ALCHEMY_URL}
+          SOLANA_RPC_ALCHEMY_API_KEY=${SOLANA_RPC_ALCHEMY_API_KEY}
+          SOLANA_RPC_QUICKNODE_URL=${SOLANA_RPC_QUICKNODE_URL}
+          SOLANA_RPC_QUICKNODE_API_KEY=${SOLANA_RPC_QUICKNODE_API_KEY}
+          EOF
 
       - name: Unit tests
         run: pnpm test
@@ -130,7 +156,7 @@ jobs:
     env:
       # Devnet configuration (override as needed via repository/organization secrets)
       SOLANA_NETWORK: devnet
-      SOLANA_RPC_URL: ${{ secrets.SOLANA_RPC_URL || 'https://api.devnet.solana.com' }}
+      SOLANA_RPC_URL: ${{ vars.SOLANA_RPC_URL || secrets.SOLANA_RPC_URL || 'https://api.devnet.solana.com' }}
 
       # Kora configuration (override as needed)
       KORA_RPC_URL: ${{ secrets.KORA_RPC_URL || 'https://kora-devnet-315956366746.us-central1.run.app' }}
@@ -138,6 +164,12 @@ jobs:
 
       # Required: a signing key for the custody wallet (Base58-encoded 64-byte keypair)
       CUSTODY_PRIVATE_KEY: ${{ secrets.CUSTODY_PRIVATE_KEY }}
+
+      # Privy configuration for live wallet provisioning/signing integration checks
+      PRIVY_APP_ID: ${{ vars.PRIVY_APP_ID || secrets.PRIVY_APP_ID }}
+      PRIVY_APP_SECRET: ${{ secrets.PRIVY_APP_SECRET }}
+      PRIVY_API_BASE_URL: ${{ vars.PRIVY_API_BASE_URL || secrets.PRIVY_API_BASE_URL }}
+      PRIVY_REQUEST_DELAY_MS: ${{ vars.PRIVY_REQUEST_DELAY_MS || secrets.PRIVY_REQUEST_DELAY_MS }}
 
       # Optional: tighten/loosen the fail-fast sponsor-funds check (lamports)
       KORA_MIN_BALANCE_LAMPORTS: ${{ secrets.KORA_MIN_BALANCE_LAMPORTS }}

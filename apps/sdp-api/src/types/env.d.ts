@@ -5,7 +5,7 @@
  * configured via wrangler.toml.
  */
 
-import type { CachedSession, Permission } from "@sdp/types";
+import type { CachedSession, OrganizationRpcProvider, Permission } from "@sdp/types";
 
 export interface Env {
   // D1 Database
@@ -46,6 +46,15 @@ export interface Env {
 
   // Solana configuration
   SOLANA_RPC_URL?: string;
+  SOLANA_RPC_DEFAULT_PROVIDER?: OrganizationRpcProvider;
+  SOLANA_RPC_TRITON_URL?: string;
+  SOLANA_RPC_TRITON_API_KEY?: string;
+  SOLANA_RPC_HELIUS_URL?: string;
+  SOLANA_RPC_HELIUS_API_KEY?: string;
+  SOLANA_RPC_ALCHEMY_URL?: string;
+  SOLANA_RPC_ALCHEMY_API_KEY?: string;
+  SOLANA_RPC_QUICKNODE_URL?: string;
+  SOLANA_RPC_QUICKNODE_API_KEY?: string;
   SOLANA_NETWORK?: "devnet" | "mainnet-beta";
   CUSTODY_PRIVATE_KEY?: string;
   SOLANA_MOCK?: string;
@@ -53,7 +62,7 @@ export interface Env {
   ORGANIZATION_REGISTRATION_TOKEN?: string;
 
   // Signing provider (custody backend via @solana/keychain)
-  SIGNING_PROVIDER?: "local" | "fireblocks" | "privy";
+  SIGNING_PROVIDER?: "local" | "fireblocks" | "privy" | "coinbase_cdp" | "para" | "turnkey";
   FEE_PAYER_PRIVATE_KEY?: string;
 
   // Fireblocks configuration (@solana/keychain-fireblocks)
@@ -70,11 +79,41 @@ export interface Env {
   PRIVY_API_BASE_URL?: string;
   PRIVY_REQUEST_DELAY_MS?: string;
 
+  // Coinbase CDP Server Wallet configuration (Solana)
+  COINBASE_CDP_API_KEY_ID?: string;
+  COINBASE_CDP_API_KEY_SECRET?: string;
+  COINBASE_CDP_WALLET_SECRET?: string;
+  COINBASE_CDP_API_BASE_URL?: string;
+  COINBASE_CDP_NETWORK?: "solana" | "solana-devnet";
+  COINBASE_CDP_WALLET_ID?: string;
+  COINBASE_CDP_ACCOUNT_NAMESPACE?: string;
+
+  // Para Server Wallet configuration (Solana)
+  PARA_API_KEY?: string;
+  PARA_API_BASE_URL?: string;
+  PARA_REQUEST_DELAY_MS?: string;
+  PARA_WALLET_ID?: string;
+
+  // Turnkey Server Wallet configuration (Solana)
+  TURNKEY_API_PUBLIC_KEY?: string;
+  TURNKEY_API_PRIVATE_KEY?: string;
+  TURNKEY_ORGANIZATION_ID?: string;
+  TURNKEY_API_BASE_URL?: string;
+  TURNKEY_REQUEST_DELAY_MS?: string;
+  TURNKEY_PRIVATE_KEY_ID?: string;
+  TURNKEY_PUBLIC_KEY?: string;
+
   // Kora (gasless) configuration
   FEE_PAYMENT_PROVIDER?: "kora" | "native";
   KORA_RPC_URL?: string;
   KORA_API_KEY?: string;
   KORA_TIMEOUT_MS?: string;
+
+  // MoonPay ramps configuration
+  MOONPAY_API_KEY?: string;
+  MOONPAY_SECRET_KEY?: string;
+  MOONPAY_ONRAMP_URL?: string;
+  MOONPAY_OFFRAMP_URL?: string;
 }
 
 // Extend Hono's context with our bindings

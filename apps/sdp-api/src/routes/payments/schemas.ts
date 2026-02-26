@@ -21,6 +21,15 @@ const transferAmountSchema = z
   .string()
   .refine((value) => isDecimalString(value), { message: "Invalid amount format" });
 
+const moonpayAmountSchema = transferAmountSchema.refine(
+  (value) => Number.parseFloat(value) > 0,
+  "Amount must be greater than zero"
+);
+
+const moonpayCurrencyCodeSchema = z
+  .string()
+  .regex(/^[a-zA-Z0-9_]+$/, { message: "Invalid MoonPay currency code" });
+
 export const createTransferSchema = z.object({
   projectId: z.string().min(1).optional(),
   source: z.string().min(1),
@@ -28,6 +37,18 @@ export const createTransferSchema = z.object({
   token: z.string().min(1),
   amount: transferAmountSchema,
   memo: z.string().max(256).optional(),
+});
+
+export const listTransfersQuerySchema = z.object({
+  wallet: z.string().optional(),
+  walletAddress: z.string().optional(),
+  token: z.string().optional(),
+  direction: z.enum(["inbound", "outbound"]).optional(),
+  status: z.enum(["pending", "processing", "confirmed", "finalized", "failed"]).optional(),
+  from: z.string().datetime({ offset: true }).optional(),
+  to: z.string().datetime({ offset: true }).optional(),
+  page: z.coerce.number().int().positive().default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(20),
 });
 
 export const prepareTransferSchema = createTransferSchema.extend({
@@ -38,4 +59,22 @@ export const prepareTransferSchema = createTransferSchema.extend({
       simulate: z.boolean().optional(),
     })
     .optional(),
+});
+
+export const executeOnrampSchema = z.object({
+  destinationWallet: z.string().min(1),
+  cryptoToken: moonpayCurrencyCodeSchema,
+  fiatCurrency: z.literal("USD").optional(),
+  fiatAmount: moonpayAmountSchema,
+  kycReference: z.string().max(128).optional(),
+  redirectUrl: z.string().url().optional(),
+});
+
+export const executeOfframpSchema = z.object({
+  sourceWallet: z.string().min(1),
+  cryptoToken: moonpayCurrencyCodeSchema,
+  fiatCurrency: z.literal("USD").optional(),
+  cryptoAmount: moonpayAmountSchema,
+  kycReference: z.string().max(128).optional(),
+  redirectUrl: z.string().url().optional(),
 });

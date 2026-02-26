@@ -4,6 +4,8 @@
     "types": ["@cloudflare/workers-types", "@cloudflare/vitest-pool-workers"],
     "paths": {
       "@/*": ["./src/*"],
+      "@sdp/keychain-coinbase": ["../../packages/sdp-keychain-coinbase/src/index.ts"],
+      "@sdp/keychain-para": ["../../packages/sdp-keychain-para/src/index.ts"],
       "@sdp/types": ["../../packages/sdp-types/src/index.ts"]
     },
     "baseUrl": ".",

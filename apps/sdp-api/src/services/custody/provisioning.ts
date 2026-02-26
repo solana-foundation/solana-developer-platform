@@ -7,10 +7,37 @@
 import { SigningError } from "@/services/ports";
 import type { Env } from "@/types/env";
 import type { VaultAddressesResponse } from "@solana/keychain-fireblocks";
+import { ApiKeyStamper } from "@solana/keychain-turnkey";
 import { SignJWT, importPKCS8 } from "jose";
+import {
+  buildCoinbaseCdpAccountName,
+  coinbaseCdpRequest,
+  extractCoinbaseCdpAccountAddress,
+  isCoinbaseCdpAlreadyExistsError,
+  resolveCoinbaseCdpAccountScope,
+} from "./provisioning.coinbase";
+import {
+  encodeBasicAuth,
+  parseJsonResponse,
+  randomHex,
+  readErrorResponseText,
+  sha256Hex,
+  sleep,
+} from "./provisioning.common";
+import {
+  type ParaWalletResponse,
+  buildParaUserIdentifier,
+  paraRequest,
+  validateParaWallet,
+  waitForParaWalletReady,
+} from "./provisioning.para";
 
 const DEFAULT_FIREBLOCKS_API_BASE_URL = "https://api.fireblocks.io";
 const DEFAULT_PRIVY_API_BASE_URL = "https://api.privy.io/v1";
+const DEFAULT_COINBASE_CDP_API_BASE_URL = "https://api.cdp.coinbase.com/platform";
+const DEFAULT_PARA_API_BASE_URL = "https://api.getpara.com";
+const DEFAULT_TURNKEY_API_BASE_URL = "https://api.turnkey.com";
+const DEFAULT_COINBASE_CDP_NETWORK = "solana-devnet";
 const DEFAULT_FIREBLOCKS_ASSET_ID = "SOL";
 
 interface FireblocksVaultAccountResponse {
@@ -22,6 +49,38 @@ interface PrivyWalletResponse {
   id: string;
   address: string;
   chain_type?: string;
+}
+
+interface CoinbaseCdpSolanaAccountResponse {
+  address: string;
+  name?: string;
+}
+
+interface TurnkeyActivityResponse {
+  activity?: {
+    status?: string;
+    result?: {
+      createPrivateKeysResultV2?: {
+        privateKeys?: Array<{
+          privateKeyId?: string;
+          addresses?: Array<{
+            format?: string;
+            address?: string;
+          }>;
+        }>;
+      };
+    };
+  };
+}
+
+interface TurnkeyGetPrivateKeyResponse {
+  privateKey?: {
+    privateKeyId?: string;
+    addresses?: Array<{
+      format?: string;
+      address?: string;
+    }>;
+  };
 }
 
 export interface ProvisionFireblocksOptions {
@@ -45,6 +104,47 @@ export interface ProvisionPrivyOptions {
 export interface ProvisionPrivyResult {
   walletId: string;
   address: string;
+}
+
+export interface ProvisionCoinbaseCdpOptions {
+  orgId: string;
+  orgSlug: string;
+  apiBaseUrl?: string;
+  network?: "solana" | "solana-devnet";
+  walletAddress?: string;
+  accountPolicy?: string;
+}
+
+export interface ProvisionCoinbaseCdpResult {
+  address: string;
+  network: "solana" | "solana-devnet";
+}
+
+export interface ProvisionTurnkeyOptions {
+  orgId: string;
+  orgSlug: string;
+  privateKeyId?: string;
+  apiBaseUrl?: string;
+}
+
+export interface ProvisionTurnkeyResult {
+  privateKeyId: string;
+  address: string;
+}
+
+export interface ProvisionParaOptions {
+  orgId: string;
+  orgSlug: string;
+  projectId?: string;
+  walletId?: string;
+  apiBaseUrl?: string;
+}
+
+export interface ProvisionParaResult {
+  walletId: string;
+  address: string;
+  userIdentifier: string;
+  userIdentifierType: "CUSTOM_ID";
 }
 
 export async function provisionFireblocksVaultAccount(
@@ -169,6 +269,255 @@ export async function provisionPrivyWallet(
   return { walletId: created.id, address: created.address };
 }
 
+export async function provisionCoinbaseCdpAccount(
+  env: Env,
+  options: ProvisionCoinbaseCdpOptions
+): Promise<ProvisionCoinbaseCdpResult> {
+  const apiKeyId = env.COINBASE_CDP_API_KEY_ID;
+  const apiKeySecret = env.COINBASE_CDP_API_KEY_SECRET;
+  const walletSecret = env.COINBASE_CDP_WALLET_SECRET;
+
+  if (!apiKeyId || !apiKeySecret || !walletSecret) {
+    throw new SigningError(
+      "Coinbase CDP environment variables not configured: COINBASE_CDP_API_KEY_ID, COINBASE_CDP_API_KEY_SECRET, COINBASE_CDP_WALLET_SECRET",
+      "PROVIDER_NOT_CONFIGURED"
+    );
+  }
+
+  const apiBaseUrl =
+    options.apiBaseUrl ?? env.COINBASE_CDP_API_BASE_URL ?? DEFAULT_COINBASE_CDP_API_BASE_URL;
+  const network = (options.network ?? env.COINBASE_CDP_NETWORK ?? DEFAULT_COINBASE_CDP_NETWORK) as
+    | "solana"
+    | "solana-devnet";
+
+  const existingAddress = options.walletAddress;
+  if (existingAddress) {
+    const existing = await coinbaseCdpRequest<CoinbaseCdpSolanaAccountResponse>({
+      method: "GET",
+      path: `/v2/solana/accounts/${existingAddress}`,
+      apiBaseUrl,
+      apiKeyId,
+      apiKeySecret,
+      walletSecret,
+    });
+
+    const resolvedAddress = extractCoinbaseCdpAccountAddress(existing);
+    if (!resolvedAddress) {
+      throw new SigningError("Coinbase CDP wallet lookup failed", "PROVIDER_NOT_CONFIGURED");
+    }
+
+    return { address: resolvedAddress, network };
+  }
+
+  const name = buildCoinbaseCdpAccountName(
+    options.orgSlug || options.orgId,
+    resolveCoinbaseCdpAccountScope(env)
+  );
+
+  try {
+    const created = await coinbaseCdpRequest<CoinbaseCdpSolanaAccountResponse>({
+      method: "POST",
+      path: "/v2/solana/accounts",
+      apiBaseUrl,
+      apiKeyId,
+      apiKeySecret,
+      walletSecret,
+      idempotencyKey: crypto.randomUUID(),
+      body: {
+        name,
+        ...(options.accountPolicy ? { accountPolicy: options.accountPolicy } : {}),
+      },
+    });
+
+    const createdAddress = extractCoinbaseCdpAccountAddress(created);
+    if (!createdAddress) {
+      throw new SigningError("Coinbase CDP wallet creation failed", "PROVIDER_NOT_CONFIGURED");
+    }
+
+    return { address: createdAddress, network };
+  } catch (error) {
+    if (!isCoinbaseCdpAlreadyExistsError(error)) {
+      throw error;
+    }
+
+    try {
+      const existingByName = await coinbaseCdpRequest<CoinbaseCdpSolanaAccountResponse>({
+        method: "GET",
+        path: `/v2/solana/accounts/by-name/${encodeURIComponent(name)}`,
+        apiBaseUrl,
+        apiKeyId,
+        apiKeySecret,
+        walletSecret,
+      });
+
+      const existingAddressByName = extractCoinbaseCdpAccountAddress(existingByName);
+      if (existingAddressByName) {
+        return { address: existingAddressByName, network };
+      }
+
+      throw new SigningError(
+        `Coinbase CDP account '${name}' already exists but lookup by name returned no address. Provide walletAddress to reuse the account.`,
+        "PROVIDER_NOT_CONFIGURED"
+      );
+    } catch (lookupError) {
+      if (lookupError instanceof SigningError && !isCoinbaseCdpAlreadyExistsError(lookupError)) {
+        throw new SigningError(
+          `Coinbase CDP account '${name}' already exists but could not be resolved by name. Provide walletAddress to reuse the account.`,
+          "PROVIDER_NOT_CONFIGURED",
+          lookupError
+        );
+      }
+
+      throw lookupError;
+    }
+  }
+}
+
+export async function provisionParaWallet(
+  env: Env,
+  options: ProvisionParaOptions
+): Promise<ProvisionParaResult> {
+  const apiKey = env.PARA_API_KEY;
+  if (!apiKey) {
+    throw new SigningError(
+      "Para environment variables not configured: PARA_API_KEY",
+      "PROVIDER_NOT_CONFIGURED"
+    );
+  }
+
+  const apiBaseUrl = options.apiBaseUrl ?? env.PARA_API_BASE_URL ?? DEFAULT_PARA_API_BASE_URL;
+
+  if (options.walletId) {
+    const existing = await paraRequest<ParaWalletResponse>({
+      apiBaseUrl,
+      apiKey,
+      method: "GET",
+      path: `/v1/wallets/${encodeURIComponent(options.walletId)}`,
+    });
+    const validated = validateParaWallet(existing, options.walletId);
+    return {
+      walletId: validated.id,
+      address: validated.address,
+      userIdentifier: buildParaUserIdentifier({
+        orgId: options.orgId,
+        projectId: options.projectId,
+      }),
+      userIdentifierType: "CUSTOM_ID",
+    };
+  }
+
+  const userIdentifier = buildParaUserIdentifier({
+    orgId: options.orgId,
+    projectId: options.projectId,
+  });
+  const created = await paraRequest<ParaWalletResponse>({
+    apiBaseUrl,
+    apiKey,
+    method: "POST",
+    path: "/v1/wallets",
+    body: {
+      type: "SOLANA",
+      scheme: "ED25519",
+      userIdentifier,
+      userIdentifierType: "CUSTOM_ID",
+    },
+  });
+
+  if (!created?.id) {
+    throw new SigningError("Para wallet creation failed", "PROVIDER_NOT_CONFIGURED");
+  }
+
+  const readyWallet = await waitForParaWalletReady({
+    apiBaseUrl,
+    apiKey,
+    walletId: created.id,
+  });
+  const validated = validateParaWallet(readyWallet, created.id);
+
+  return {
+    walletId: validated.id,
+    address: validated.address,
+    userIdentifier,
+    userIdentifierType: "CUSTOM_ID",
+  };
+}
+
+export async function provisionTurnkeyPrivateKey(
+  env: Env,
+  options: ProvisionTurnkeyOptions
+): Promise<ProvisionTurnkeyResult> {
+  const apiPublicKey = env.TURNKEY_API_PUBLIC_KEY;
+  const apiPrivateKey = env.TURNKEY_API_PRIVATE_KEY;
+  const organizationId = env.TURNKEY_ORGANIZATION_ID;
+
+  if (!apiPublicKey || !apiPrivateKey || !organizationId) {
+    throw new SigningError(
+      "Turnkey environment variables not configured: TURNKEY_API_PUBLIC_KEY, TURNKEY_API_PRIVATE_KEY, TURNKEY_ORGANIZATION_ID",
+      "PROVIDER_NOT_CONFIGURED"
+    );
+  }
+
+  const apiBaseUrl = options.apiBaseUrl ?? env.TURNKEY_API_BASE_URL ?? DEFAULT_TURNKEY_API_BASE_URL;
+
+  if (options.privateKeyId) {
+    const privateKeyId = denormalizeTurnkeyPrivateKeyId(options.privateKeyId);
+    const existing = await turnkeyRequest<TurnkeyGetPrivateKeyResponse>({
+      apiBaseUrl,
+      apiPublicKey,
+      apiPrivateKey,
+      method: "POST",
+      path: "/public/v1/query/get_private_key",
+      body: {
+        organizationId,
+        privateKeyId,
+      },
+    });
+
+    const address = findSolanaAddress(existing.privateKey?.addresses);
+    if (!existing?.privateKey?.privateKeyId || !address) {
+      throw new SigningError("Turnkey private key lookup failed", "PROVIDER_NOT_CONFIGURED");
+    }
+
+    return {
+      privateKeyId: existing.privateKey.privateKeyId,
+      address,
+    };
+  }
+
+  const created = await turnkeyRequest<TurnkeyActivityResponse>({
+    apiBaseUrl,
+    apiPublicKey,
+    apiPrivateKey,
+    method: "POST",
+    path: "/public/v1/submit/create_private_keys",
+    body: {
+      type: "ACTIVITY_TYPE_CREATE_PRIVATE_KEYS_V2",
+      timestampMs: Date.now().toString(),
+      organizationId,
+      parameters: {
+        privateKeys: [
+          {
+            privateKeyName: buildTurnkeyPrivateKeyName(options.orgSlug || options.orgId),
+            curve: "CURVE_ED25519",
+            privateKeyTags: [],
+            addressFormats: ["ADDRESS_FORMAT_SOLANA"],
+          },
+        ],
+      },
+    },
+  });
+
+  const createdKey = created.activity?.result?.createPrivateKeysResultV2?.privateKeys?.[0];
+
+  const privateKeyId = createdKey?.privateKeyId;
+  const address = findSolanaAddress(createdKey?.addresses);
+  if (!privateKeyId || !address) {
+    throw new SigningError("Turnkey private key creation failed", "PROVIDER_NOT_CONFIGURED");
+  }
+
+  return { privateKeyId, address };
+}
+
 interface FireblocksRequestParams {
   apiBaseUrl: string;
   apiKey: string;
@@ -185,6 +534,15 @@ interface FireblocksAddressesParams {
   apiSecretPem: string;
   vaultAccountId: string;
   assetId: string;
+}
+
+interface TurnkeyRequestParams {
+  method: "POST";
+  path: string;
+  apiBaseUrl: string;
+  apiPublicKey: string;
+  apiPrivateKey: string;
+  body: Record<string, unknown>;
 }
 
 async function fetchFireblocksAddressesWithRetry(
@@ -214,10 +572,6 @@ async function fetchFireblocksAddressesWithRetry(
   return { addresses: [] };
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 async function fireblocksRequest<T>(params: FireblocksRequestParams): Promise<T> {
   const bodyStr = params.body ? JSON.stringify(params.body) : "";
   const token = await createFireblocksJwt(params.apiKey, params.apiSecretPem, params.uri, bodyStr);
@@ -233,18 +587,14 @@ async function fireblocksRequest<T>(params: FireblocksRequestParams): Promise<T>
   });
 
   if (!response.ok && !(params.allowStatuses ?? []).includes(response.status)) {
-    const errorText = await response.text().catch(() => "Failed to read error response");
+    const errorText = await readErrorResponseText(response);
     throw new SigningError(
       `Fireblocks API error: ${response.status} - ${errorText}`,
       "PROVIDER_NOT_CONFIGURED"
     );
   }
 
-  if (response.status === 204 || response.headers.get("content-length") === "0") {
-    return undefined as T;
-  }
-
-  return (await response.json()) as T;
+  return parseJsonResponse<T>(response);
 }
 
 async function createFireblocksJwt(
@@ -264,14 +614,6 @@ async function createFireblocksJwt(
     .setIssuedAt(now)
     .setExpirationTime(now + 30)
     .sign(privateKey);
-}
-
-async function sha256Hex(data: string): Promise<string> {
-  const encoder = new TextEncoder();
-  const dataBuffer = encoder.encode(data);
-  const hashBuffer = await crypto.subtle.digest("SHA-256", dataBuffer);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 interface PrivyRequestParams {
@@ -296,18 +638,14 @@ async function privyRequest<T>(params: PrivyRequestParams): Promise<T> {
     });
 
     if (!response.ok) {
-      const errorText = await response.text().catch(() => "Failed to read error response");
+      const errorText = await readErrorResponseText(response);
       throw new SigningError(
         `Privy API error: ${response.status} - ${errorText}`,
         "PROVIDER_NOT_CONFIGURED"
       );
     }
 
-    if (response.status === 204 || response.headers.get("content-length") === "0") {
-      return undefined as T;
-    }
-
-    return (await response.json()) as T;
+    return parseJsonResponse<T>(response);
   } catch (error) {
     if (error instanceof SigningError) {
       throw error;
@@ -321,14 +659,88 @@ async function privyRequest<T>(params: PrivyRequestParams): Promise<T> {
   }
 }
 
-function encodeBasicAuth(value: string): string {
-  if (typeof btoa === "function") {
-    return btoa(value);
+async function turnkeyRequest<T>(params: TurnkeyRequestParams): Promise<T> {
+  const body = JSON.stringify(params.body);
+  const stamper = new ApiKeyStamper({
+    apiPrivateKey: params.apiPrivateKey,
+    apiPublicKey: params.apiPublicKey,
+  });
+  // ApiKeyStamper is currently synchronous, but normalize in case the SDK
+  // ever changes stamp() to return a Promise.
+  const stamp = await Promise.resolve(stamper.stamp(body));
+
+  try {
+    const response = await fetch(`${params.apiBaseUrl}${params.path}`, {
+      method: params.method,
+      headers: {
+        "Content-Type": "application/json",
+        [stamp.stampHeaderName]: stamp.stampHeaderValue,
+      },
+      body,
+    });
+
+    if (!response.ok) {
+      const errorText = await readErrorResponseText(response);
+      throw new SigningError(
+        `Turnkey API error: ${response.status} - ${errorText}`,
+        "PROVIDER_NOT_CONFIGURED"
+      );
+    }
+
+    return parseJsonResponse<T>(response);
+  } catch (error) {
+    if (error instanceof SigningError) {
+      throw error;
+    }
+
+    throw new SigningError(
+      `Failed to call Turnkey API: ${error instanceof Error ? error.message : "Unknown error"}`,
+      "NETWORK_ERROR",
+      error instanceof Error ? error : undefined
+    );
+  }
+}
+
+function buildTurnkeyPrivateKeyName(value: string): string {
+  const suffix = randomHex(2);
+  let normalized = value
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+  if (!normalized) {
+    normalized = "org";
   }
 
-  if (typeof Buffer !== "undefined") {
-    return Buffer.from(value, "utf-8").toString("base64");
+  let name = `sdp-${normalized}-${suffix}`.slice(0, 60);
+  name = name.replace(/-+$/g, "");
+
+  if (!name) {
+    name = `sdp-${randomHex(3)}`;
   }
 
-  throw new SigningError("Unable to encode Basic auth header", "PROVIDER_NOT_CONFIGURED");
+  return name;
+}
+
+function findSolanaAddress(
+  addresses:
+    | Array<{
+        format?: string;
+        address?: string;
+      }>
+    | undefined
+): string | undefined {
+  if (!addresses?.length) return undefined;
+
+  const solana = addresses.find((entry) => entry.format === "ADDRESS_FORMAT_SOLANA");
+  if (solana?.address) {
+    return solana.address;
+  }
+
+  return addresses.find((entry) => Boolean(entry.address))?.address;
+}
+
+function denormalizeTurnkeyPrivateKeyId(privateKeyId: string): string {
+  return privateKeyId.startsWith("turnkey_") ? privateKeyId.slice("turnkey_".length) : privateKeyId;
 }

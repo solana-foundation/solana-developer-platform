@@ -31,10 +31,8 @@ import {
   listSessionsResponseSchema,
   listTemplatesResponseSchema,
   offrampExecutionResponseSchema,
-  offrampQuoteResponseSchema,
   onboardingStatusResponseSchema,
   onrampExecutionResponseSchema,
-  onrampQuoteResponseSchema,
   organizationSchema,
   paginatedResponseSchema,
   prepareBurnResponseSchema,
@@ -48,6 +46,9 @@ import {
   projectResponseSchema,
   revokeApiKeyResponseSchema,
   rotateApiKeyResponseSchema,
+  rpcProvidersResponseSchema,
+  rpcRelayResponseSchema,
+  signerCheckResponseSchema,
   successResponseSchema,
   tokenAllowlistEntrySchema,
   tokenAllowlistResponseSchema,
@@ -81,6 +82,8 @@ export const listProjectsResponse = successResponseSchema(listProjectsResponseSc
 export const listProjectMembersResponse = successResponseSchema(listProjectMembersResponseSchema);
 export const projectMemberResponse = successResponseSchema(projectMemberResponseSchema);
 export const listProjectApiKeysResponse = successResponseSchema(listProjectApiKeysResponseSchema);
+export const rpcProvidersResponse = successResponseSchema(rpcProvidersResponseSchema);
+export const rpcRelayResponse = successResponseSchema(rpcRelayResponseSchema);
 
 export const tokenResponse = successResponseSchema(tokenResponseSchema);
 export const tokenListResponse = paginatedResponseSchema(tokenSchema);
@@ -113,6 +116,7 @@ export const listSessionsResponse = successResponseSchema(listSessionsResponseSc
 export const custodyConfigResponse = successResponseSchema(custodyConfigResponseSchema);
 export const custodyWalletResponse = successResponseSchema(custodyWalletResponseSchema);
 export const custodyWalletsResponse = successResponseSchema(custodyWalletsResponseSchema);
+export const custodySignerCheckResponse = successResponseSchema(signerCheckResponseSchema);
 
 export const allowlistEntriesResponse = successResponseSchema(allowlistEntriesResponseSchema);
 export const allowlistEntryResponse = successResponseSchema(
@@ -132,7 +136,5 @@ export const prepareTransferResponse = successResponseSchema(prepareTransferResp
 export const transferResponse = successResponseSchema(transferResponseSchema);
 export const transferListResponse = paginatedResponseSchema(transferSchema);
 export const feeQuoteResponse = successResponseSchema(feeQuoteResponseSchema);
-export const onrampQuoteResponse = successResponseSchema(onrampQuoteResponseSchema);
-export const offrampQuoteResponse = successResponseSchema(offrampQuoteResponseSchema);
 export const onrampExecutionResponse = successResponseSchema(onrampExecutionResponseSchema);
 export const offrampExecutionResponse = successResponseSchema(offrampExecutionResponseSchema);

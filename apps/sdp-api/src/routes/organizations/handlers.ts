@@ -4,16 +4,86 @@ import { hashString } from "@/lib/hash";
 import { created, noContent, success } from "@/lib/response";
 import { createAllowlistService } from "@/services/allowlist.service";
 import { AuditService } from "@/services/audit.service";
-import { provisionFireblocksVaultAccount } from "@/services/custody/provisioning";
+import {
+  provisionCoinbaseCdpAccount,
+  provisionFireblocksVaultAccount,
+  provisionParaWallet,
+  provisionTurnkeyPrivateKey,
+} from "@/services/custody/provisioning";
 import { createSigningService } from "@/services/domain/signing.service";
 import { KVService } from "@/services/kv.service";
 import { SigningError } from "@/services/ports";
 import type { Env } from "@/types/env";
-import type { CreateOrganizationResponse, Organization } from "@sdp/types";
+import {
+  type CreateOrganizationResponse,
+  ORGANIZATION_STATUSES,
+  ORGANIZATION_TIERS,
+  type Organization,
+  type OrganizationSettings,
+  type OrganizationStatus,
+  type OrganizationTier,
+} from "@sdp/types";
 import type { Context } from "hono";
 import { createOrgSchema, updateOrgSchema } from "./schemas";
 
 type AppContext = Context<{ Bindings: Env }>;
+
+type OrganizationRow = {
+  id: string;
+  name: string;
+  slug: string;
+  tier: string;
+  status: string;
+  settings: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+function parseOrganizationSettings(raw: string | null): OrganizationSettings | null {
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(raw) as OrganizationSettings;
+  } catch {
+    return null;
+  }
+}
+
+function parseOrganizationTier(value: string): OrganizationTier {
+  if (ORGANIZATION_TIERS.includes(value as OrganizationTier)) {
+    return value as OrganizationTier;
+  }
+  throw new AppError("INTERNAL_ERROR", `Organization tier '${value}' is invalid`);
+}
+
+function parseOrganizationStatus(value: string): OrganizationStatus {
+  if (ORGANIZATION_STATUSES.includes(value as OrganizationStatus)) {
+    return value as OrganizationStatus;
+  }
+  throw new AppError("INTERNAL_ERROR", `Organization status '${value}' is invalid`);
+}
+
+function resolveOrganizationTierFromAllowlist(value: string): OrganizationTier {
+  if (value === "standard") {
+    return "free";
+  }
+  return parseOrganizationTier(value);
+}
+
+function toOrganizationResponse(row: OrganizationRow): Organization {
+  return {
+    id: row.id,
+    name: row.name,
+    slug: row.slug,
+    tier: parseOrganizationTier(row.tier),
+    status: parseOrganizationStatus(row.status),
+    settings: parseOrganizationSettings(row.settings),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
 
 function randomBase64Url(byteLength: number): string {
   const bytes = new Uint8Array(byteLength);
@@ -97,6 +167,7 @@ export const createOrganization = async (c: AppContext) => {
   if (!allowed) {
     throw new AppError("NOT_ALLOWLISTED", "Email or domain not on allowlist");
   }
+  const resolvedTier = resolveOrganizationTierFromAllowlist(tier);
 
   // Check if slug is taken
   const existing = await c.env.DB.prepare("SELECT id FROM organizations WHERE slug = ?")
@@ -140,6 +211,48 @@ export const createOrganization = async (c: AppContext) => {
           assetId,
           apiBaseUrl: custody.apiBaseUrl ?? c.env.FIREBLOCKS_API_BASE_URL,
         });
+      } else if (custody.provider === "coinbase_cdp") {
+        const provisioned = await provisionCoinbaseCdpAccount(c.env, {
+          orgId,
+          orgSlug: slug,
+          apiBaseUrl: custody.apiBaseUrl,
+          network: custody.network,
+          walletAddress: custody.walletAddress,
+          accountPolicy: custody.accountPolicy,
+        });
+
+        await signingService.initializeCoinbaseCdpSigning(orgId, undefined, {
+          apiBaseUrl: custody.apiBaseUrl ?? c.env.COINBASE_CDP_API_BASE_URL,
+          network: custody.network ?? c.env.COINBASE_CDP_NETWORK,
+          walletAddress: provisioned.address,
+          accountPolicy: custody.accountPolicy,
+        });
+      } else if (custody.provider === "para") {
+        const provisioned = await provisionParaWallet(c.env, {
+          orgId,
+          orgSlug: slug,
+          apiBaseUrl: custody.apiBaseUrl,
+          walletId: custody.walletId,
+        });
+
+        await signingService.initializeParaSigning(orgId, undefined, {
+          apiBaseUrl: custody.apiBaseUrl ?? c.env.PARA_API_BASE_URL,
+          requestDelayMs: custody.requestDelayMs,
+          walletId: provisioned.walletId,
+        });
+      } else if (custody.provider === "turnkey") {
+        const provisioned = await provisionTurnkeyPrivateKey(c.env, {
+          orgId,
+          orgSlug: slug,
+          apiBaseUrl: custody.apiBaseUrl,
+          privateKeyId: custody.privateKeyId,
+        });
+
+        await signingService.initializeTurnkeySigning(orgId, undefined, {
+          apiBaseUrl: custody.apiBaseUrl ?? c.env.TURNKEY_API_BASE_URL,
+          requestDelayMs: custody.requestDelayMs,
+          privateKeyId: provisioned.privateKeyId,
+        });
       } else {
         await signingService.initializePrivySigning(orgId, undefined, {
           apiBaseUrl: custody.apiBaseUrl ?? c.env.PRIVY_API_BASE_URL,
@@ -163,7 +276,7 @@ export const createOrganization = async (c: AppContext) => {
     c.env.DB.prepare(
       `INSERT INTO organizations (id, name, slug, tier, status)
        VALUES (?, ?, ?, ?, 'active')`
-    ).bind(orgId, name, slug, tier),
+    ).bind(orgId, name, slug, resolvedTier),
 
     // User
     c.env.DB.prepare(
@@ -208,7 +321,7 @@ export const createOrganization = async (c: AppContext) => {
       id: orgId,
       name,
       slug,
-      tier: tier as "free" | "pro" | "enterprise",
+      tier: resolvedTier,
       status: "active",
       settings: null,
       createdAt: new Date().toISOString(),
@@ -238,31 +351,13 @@ export const getOrganization = async (c: AppContext) => {
      FROM organizations WHERE id = ?`
   )
     .bind(orgId)
-    .first<{
-      id: string;
-      name: string;
-      slug: string;
-      tier: string;
-      status: string;
-      settings: string | null;
-      created_at: string;
-      updated_at: string;
-    }>();
+    .first<OrganizationRow>();
 
   if (!org) {
     throw notFound("Organization");
   }
 
-  const response: Organization = {
-    id: org.id,
-    name: org.name,
-    slug: org.slug,
-    tier: org.tier as "free" | "pro" | "enterprise",
-    status: org.status as "active" | "suspended" | "deleted",
-    settings: org.settings ? JSON.parse(org.settings) : null,
-    createdAt: org.created_at,
-    updatedAt: org.updated_at,
-  };
+  const response = toOrganizationResponse(org);
 
   return success(c, response);
 };
@@ -287,14 +382,29 @@ export const updateOrganization = async (c: AppContext) => {
   const updates: string[] = [];
   const params: (string | null)[] = [];
 
+  const existing = await c.env.DB.prepare(
+    `SELECT id, name, slug, tier, status, settings, created_at, updated_at
+     FROM organizations WHERE id = ?`
+  )
+    .bind(orgId)
+    .first<OrganizationRow>();
+
+  if (!existing) {
+    throw notFound("Organization");
+  }
+
   if (parsed.data.name) {
     updates.push("name = ?");
     params.push(parsed.data.name);
   }
 
   if (parsed.data.settings !== undefined) {
+    const mergedSettings: OrganizationSettings = {
+      ...(parseOrganizationSettings(existing.settings) ?? {}),
+      ...parsed.data.settings,
+    };
     updates.push("settings = ?");
-    params.push(JSON.stringify(parsed.data.settings));
+    params.push(JSON.stringify(mergedSettings));
   }
 
   if (updates.length === 0) {
@@ -318,7 +428,7 @@ export const updateOrganization = async (c: AppContext) => {
      FROM organizations WHERE id = ?`
   )
     .bind(orgId)
-    .first();
+    .first<OrganizationRow>();
 
   // Audit log
   const auditService = new AuditService(c.env.DB);
@@ -329,7 +439,11 @@ export const updateOrganization = async (c: AppContext) => {
     metadata: parsed.data,
   });
 
-  return success(c, org);
+  if (!org) {
+    throw notFound("Organization");
+  }
+
+  return success(c, toOrganizationResponse(org));
 };
 
 export const deleteOrganization = async (c: AppContext) => {

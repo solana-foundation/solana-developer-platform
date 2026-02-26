@@ -10,16 +10,18 @@ import { createD1PaymentsRepository } from "@/db/repositories/payments.repositor
 import { formatDecimalAmount, isDecimalString, parseDecimalAmount } from "@/lib/amount";
 import { getAuth } from "@/lib/auth";
 import { AppError } from "@/lib/errors";
-import { success } from "@/lib/response";
+import { paginated, success } from "@/lib/response";
 import { assertValidAddress } from "@/lib/solana";
 import { createFeePaymentAdapter } from "@/services/adapters/fee-payment";
 import { createSigningService } from "@/services/domain/signing.service";
+import { withHeliusApiKey } from "@/services/rpc-relay.service";
 import { createOrgSigner } from "@/services/solana";
 import {
   confirmTransaction,
   createRpc,
   getAccountInfo,
   getRecentBlockhash,
+  getSignaturesForAddress,
   simulateTransaction,
 } from "@/services/solana/rpc";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
@@ -47,6 +49,9 @@ import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
 import type { Context } from "hono";
 import {
   createTransferSchema,
+  executeOfframpSchema,
+  executeOnrampSchema,
+  listTransfersQuerySchema,
   prepareTransferSchema,
   updateWalletPolicySchema,
   walletIdParamsSchema,
@@ -63,6 +68,10 @@ const SPL_TOKEN_PROGRAM_IDS = [SPL_TOKEN_PROGRAM_ID, SPL_TOKEN_2022_PROGRAM_ID] 
 const PAYMENT_POLICY_VERSION = 1;
 const DESTINATION_ALLOWLIST_POLICY_TYPE = "destination_allowlist";
 const TRANSFER_LIMITS_POLICY_TYPE = "transfer_limits";
+const MOONPAY_ONRAMP_URL = "https://buy.moonpay.com";
+const MOONPAY_OFFRAMP_URL = "https://sell.moonpay.com";
+const MOONPAY_SANDBOX_ONRAMP_URL = "https://buy-sandbox.moonpay.com";
+const MOONPAY_SANDBOX_OFFRAMP_URL = "https://sell-sandbox.moonpay.com";
 
 function getPaymentsRepository(c: AppContext) {
   return createD1PaymentsRepository({ db: createD1Drizzle(c.env.DB) });
@@ -572,6 +581,100 @@ function resolveWallet(wallets: CustodyWallet[], walletId: string): CustodyWalle
   return wallet;
 }
 
+function resolveWalletAddress(
+  wallets: CustodyWallet[],
+  walletIdOrAddress: string,
+  fieldName: string
+): string {
+  const matchingWallet = wallets.find((entry) => entry.walletId === walletIdOrAddress);
+  if (matchingWallet) {
+    return matchingWallet.publicKey;
+  }
+  return assertValidAddress(walletIdOrAddress, fieldName);
+}
+
+function normalizeMoonPayCurrencyCode(value: string): string {
+  const normalized = value.trim().toLowerCase();
+  if (!/^[a-z0-9_]+$/.test(normalized)) {
+    throw new AppError("BAD_REQUEST", "cryptoToken must be a valid MoonPay currency code");
+  }
+  return normalized;
+}
+
+type MoonPayConfig = {
+  apiKey: string;
+  secretKey: string;
+  onrampUrl: string;
+  offrampUrl: string;
+};
+
+function getMoonPayConfig(c: AppContext): MoonPayConfig {
+  const apiKey = c.env.MOONPAY_API_KEY?.trim();
+  const secretKey = c.env.MOONPAY_SECRET_KEY?.trim();
+
+  if (!apiKey || !secretKey) {
+    throw new AppError(
+      "INTERNAL_ERROR",
+      "MoonPay is not configured. Set MOONPAY_API_KEY and MOONPAY_SECRET_KEY."
+    );
+  }
+
+  const useProduction = c.env.ENVIRONMENT === "production";
+  const defaultOnrampUrl = useProduction ? MOONPAY_ONRAMP_URL : MOONPAY_SANDBOX_ONRAMP_URL;
+  const defaultOfframpUrl = useProduction ? MOONPAY_OFFRAMP_URL : MOONPAY_SANDBOX_OFFRAMP_URL;
+
+  const onrampUrlRaw = c.env.MOONPAY_ONRAMP_URL ?? defaultOnrampUrl;
+  const offrampUrlRaw = c.env.MOONPAY_OFFRAMP_URL ?? defaultOfframpUrl;
+
+  try {
+    new URL(onrampUrlRaw);
+    new URL(offrampUrlRaw);
+  } catch {
+    throw new AppError("INTERNAL_ERROR", "MoonPay URL configuration is invalid.");
+  }
+
+  return {
+    apiKey,
+    secretKey,
+    onrampUrl: onrampUrlRaw,
+    offrampUrl: offrampUrlRaw,
+  };
+}
+
+async function createMoonPaySignature(unsignedQuery: string, secretKey: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    "raw",
+    encoder.encode(secretKey),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  const signature = await crypto.subtle.sign("HMAC", key, encoder.encode(unsignedQuery));
+  return Buffer.from(signature).toString("base64");
+}
+
+async function buildSignedMoonPayWidgetUrl(
+  baseUrl: string,
+  secretKey: string,
+  params: Record<string, string | undefined>
+): Promise<string> {
+  const url = new URL(baseUrl);
+  const sortedEntries = Object.entries(params).sort(([left], [right]) => left.localeCompare(right));
+
+  for (const [key, value] of sortedEntries) {
+    if (!value) {
+      continue;
+    }
+    url.searchParams.set(key, value);
+  }
+
+  const signature = await createMoonPaySignature(url.search, secretKey);
+  url.searchParams.set("signature", signature);
+
+  return url.toString();
+}
+
 async function resolveWalletFromParams(c: AppContext) {
   const params = walletIdParamsSchema.safeParse(c.req.param());
   if (!params.success) {
@@ -785,7 +888,7 @@ async function executeSolTransfer(
   return {
     signature,
     slot: Number(confirmation.slot),
-    blockTime: new Date().toISOString(),
+    blockTime: null,
   };
 }
 
@@ -948,7 +1051,7 @@ async function executeSplTransfer(
   return {
     signature,
     slot: Number(confirmation.slot),
-    blockTime: new Date().toISOString(),
+    blockTime: null,
   };
 }
 
@@ -1056,6 +1159,11 @@ export async function prepareTransfer(c: AppContext) {
   const destinationAddress = assertValidAddress(parsed.data.destination, "destination");
   const transferToken = isNativeSolToken(parsed.data.token) ? "SOL" : parsed.data.token;
 
+  // TODO: parsed.data.referenceAddress — attach as a memo/reference key to the transaction
+  //       for Solana Pay compatibility and client-side correlation. Not yet implemented.
+  // TODO: parsed.data.options?.priorityFee — add a compute budget instruction to the
+  //       transaction based on the requested priority level. Not yet implemented.
+
   await assertWalletPolicyAllowsTransfer(c, {
     organizationId: scope.auth.organizationId,
     projectId: scope.auth.projectId,
@@ -1120,6 +1228,19 @@ export async function prepareTransfer(c: AppContext) {
   });
 }
 
+function createSignatureHistoryRpc(env: Env) {
+  // Prefer Helius when configured for richer signature history (getSignaturesForAddress).
+  // Falls back to the default RPC URL if Helius is not configured.
+  //
+  // TODO: Replace getSignaturesForAddress with a dedicated indexer (Helius webhooks,
+  // Triton stream, or similar) for production-scale history and comprehensive inbound
+  // transfer tracking. The current approach is limited to the most recent ~200 signatures.
+  const url = env.SOLANA_RPC_HELIUS_URL
+    ? withHeliusApiKey(env.SOLANA_RPC_HELIUS_URL, env.SOLANA_RPC_HELIUS_API_KEY)
+    : env.SOLANA_RPC_URL;
+  return createRpc(env, { rpcUrl: url });
+}
+
 export async function createTransfer(c: AppContext) {
   const body = await c.req.json();
   const parsed = createTransferSchema.safeParse(body);
@@ -1160,7 +1281,7 @@ export async function createTransfer(c: AppContext) {
   });
 
   try {
-    if (isNativeSolToken(parsed.data.token)) {
+    if (transferToken === "SOL") {
       const solResult = await executeSolTransfer(
         c,
         sourceWallet,
@@ -1200,7 +1321,7 @@ export async function createTransfer(c: AppContext) {
     await updateTransferRecord(c, transfer.id, {
       status: "failed",
       error: message,
-      blockTime: new Date().toISOString(),
+      blockTime: null,
     });
 
     if (error instanceof AppError) {
@@ -1209,4 +1330,218 @@ export async function createTransfer(c: AppContext) {
 
     throw new AppError("SOLANA_RPC_ERROR", message);
   }
+}
+
+export async function listTransfers(c: AppContext) {
+  const auth = getAuth(c);
+  const query = listTransfersQuerySchema.safeParse(c.req.query());
+  if (!query.success) throw new AppError("BAD_REQUEST", "Invalid query parameters");
+
+  const {
+    page,
+    pageSize,
+    wallet: walletId,
+    walletAddress,
+    token,
+    direction,
+    status,
+    from,
+    to,
+  } = query.data;
+  const repo = getPaymentsRepository(c);
+  const offset = (page - 1) * pageSize;
+
+  let transferRows: TransferRow[];
+  let total: number;
+
+  if (walletId || walletAddress) {
+    // Helius-backed path: fetch on-chain signatures for the wallet address, then
+    // cross-reference with our DB. Append pending/processing/failed from DB (not on-chain yet).
+    //
+    // TODO: Replace getSignaturesForAddress with a dedicated indexer for production use.
+
+    let sourceAddress: string | undefined;
+    let resolvedWalletId: string | undefined;
+
+    if (walletId) {
+      const scope = await resolveScope(c);
+      const wallet = resolveWallet(scope.wallets, walletId);
+      sourceAddress = wallet.publicKey;
+      resolvedWalletId = walletId;
+    } else {
+      sourceAddress = walletAddress;
+    }
+
+    // 1. Fetch on-chain signature history via Helius (or fallback RPC)
+    const heliusRpc = createSignatureHistoryRpc(c.env);
+    const onChainSigs = await getSignaturesForAddress(heliusRpc, sourceAddress as Address, {
+      limit: Math.min(pageSize * 5, 200),
+      commitment: "confirmed",
+    });
+    const sigStrings = onChainSigs.map((s) => String(s.signature));
+
+    // 2. Look up on-chain signatures in our DB
+    const confirmedRows = await repo.listTransfersBySignatures({
+      signatures: sigStrings,
+      organizationId: auth.organizationId,
+      projectId: auth.projectId,
+    });
+
+    // 3. Fetch pending/processing/failed from DB (not yet on-chain).
+    //    Skip if the caller's status filter already excludes these — e.g. status=confirmed
+    //    or status=finalized would never match any of these records.
+    const nonChainStatuses: TransferStatus[] = ["pending", "processing", "failed"];
+    const needsNonChainRecords = !status || nonChainStatuses.includes(status);
+    const pendingRows: TransferRow[] = [];
+    if (needsNonChainRecords) {
+      const pendingResult = await repo.listTransfers({
+        organizationId: auth.organizationId,
+        projectId: auth.projectId,
+        walletId: resolvedWalletId,
+        sourceAddress: resolvedWalletId ? undefined : walletAddress,
+        statuses: nonChainStatuses,
+        token,
+        direction,
+        createdAtFrom: from,
+        createdAtTo: to,
+        limit: 100,
+        offset: 0,
+      });
+      pendingRows.push(...pendingResult.rows);
+    }
+
+    // 4. Merge: confirmed (Helius-backed) + non-confirmed (DB), deduplicated
+    const seen = new Set<string>();
+    const merged = [...confirmedRows, ...pendingRows].filter((row) => {
+      if (seen.has(row.id)) return false;
+      seen.add(row.id);
+      return true;
+    });
+
+    // 5. Apply remaining filters and sort
+    const filtered = merged
+      .filter((row) => {
+        if (status && row.status !== status) return false;
+        if (token && row.token !== token) return false;
+        if (direction && row.direction !== direction) return false;
+        return true;
+      })
+      .sort((a, b) => b.created_at.localeCompare(a.created_at));
+
+    total = filtered.length;
+    transferRows = filtered.slice(offset, offset + pageSize);
+  } else {
+    // DB-only path for org-scoped queries without a specific wallet
+    const result = await repo.listTransfers({
+      organizationId: auth.organizationId,
+      projectId: auth.projectId,
+      token,
+      direction,
+      statuses: status ? [status] : undefined,
+      createdAtFrom: from,
+      createdAtTo: to,
+      limit: pageSize,
+      offset,
+    });
+    total = result.total;
+    transferRows = result.rows;
+  }
+
+  const transfers = transferRows.map(mapTransferRow);
+  return paginated(c, transfers, { total, page, pageSize });
+}
+
+export async function getTransfer(c: AppContext) {
+  const auth = getAuth(c);
+  const transferId = c.req.param("transferId");
+  const repo = getPaymentsRepository(c);
+
+  const row = await repo.getTransferById({
+    transferId,
+    organizationId: auth.organizationId,
+    projectId: auth.projectId,
+  });
+
+  if (!row) throw new AppError("NOT_FOUND", "Transfer not found");
+
+  return success(c, { transfer: mapTransferRow(row) });
+}
+
+export async function executeOnramp(c: AppContext) {
+  const body = await c.req.json();
+  const parsed = executeOnrampSchema.safeParse(body);
+
+  if (!parsed.success) {
+    throw new AppError("BAD_REQUEST", "Invalid request body", {
+      errors: parsed.error.flatten().fieldErrors,
+    });
+  }
+
+  const scope = await resolveScope(c);
+  const destinationWalletAddress = resolveWalletAddress(
+    scope.wallets,
+    parsed.data.destinationWallet,
+    "destinationWallet"
+  );
+  const moonPay = getMoonPayConfig(c);
+
+  const redirectUrl = await buildSignedMoonPayWidgetUrl(moonPay.onrampUrl, moonPay.secretKey, {
+    apiKey: moonPay.apiKey,
+    baseCurrencyCode: "usd",
+    baseCurrencyAmount: parsed.data.fiatAmount,
+    currencyCode: normalizeMoonPayCurrencyCode(parsed.data.cryptoToken),
+    walletAddress: destinationWalletAddress,
+    redirectURL: parsed.data.redirectUrl,
+    externalCustomerId: parsed.data.kycReference,
+    externalTransactionId: `sdp_onramp_${crypto.randomUUID()}`,
+  });
+
+  return success(c, {
+    ramp: {
+      id: `ramp_${crypto.randomUUID()}`,
+      status: "pending",
+      redirectUrl,
+    },
+  });
+}
+
+export async function executeOfframp(c: AppContext) {
+  const body = await c.req.json();
+  const parsed = executeOfframpSchema.safeParse(body);
+
+  if (!parsed.success) {
+    throw new AppError("BAD_REQUEST", "Invalid request body", {
+      errors: parsed.error.flatten().fieldErrors,
+    });
+  }
+
+  const scope = await resolveScope(c);
+  const sourceWalletAddress = resolveWalletAddress(
+    scope.wallets,
+    parsed.data.sourceWallet,
+    "sourceWallet"
+  );
+  const moonPay = getMoonPayConfig(c);
+  const externalTransactionId = `sdp_offramp_${crypto.randomUUID()}`;
+
+  const redirectUrl = await buildSignedMoonPayWidgetUrl(moonPay.offrampUrl, moonPay.secretKey, {
+    apiKey: moonPay.apiKey,
+    baseCurrencyCode: normalizeMoonPayCurrencyCode(parsed.data.cryptoToken),
+    baseCurrencyAmount: parsed.data.cryptoAmount,
+    quoteCurrencyCode: "usd",
+    walletAddress: sourceWalletAddress,
+    refundWalletAddress: sourceWalletAddress,
+    redirectURL: parsed.data.redirectUrl,
+    externalCustomerId: parsed.data.kycReference,
+    externalTransactionId,
+  });
+
+  return success(c, {
+    ramp: {
+      id: `ramp_${crypto.randomUUID()}`,
+      status: "pending",
+      redirectUrl,
+      reference: externalTransactionId,
+    },
+  });
 }

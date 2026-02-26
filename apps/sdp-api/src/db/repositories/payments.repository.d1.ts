@@ -1,6 +1,8 @@
-import { type SQL, and, eq, gte, inArray, lt } from "drizzle-orm";
+import { type SQL, and, desc, eq, gte, inArray, lt, lte, sql } from "drizzle-orm";
 import { paymentTransfers, paymentWalletPolicies } from "../drizzle/schema/sqlite";
 import type {
+  ListTransfersInput,
+  ListTransfersResult,
   PaymentTransferRow,
   PaymentWalletPolicyRow,
   PaymentsRepository,
@@ -179,6 +181,37 @@ export const createD1PaymentsRepository = (
         .all();
 
       return rows.map(mapTransferRow);
+    },
+
+    async listTransfers(params: ListTransfersInput): Promise<ListTransfersResult> {
+      const conditions: SQL[] = [eq(paymentTransfers.organizationId, params.organizationId)];
+      if (params.projectId) conditions.push(eq(paymentTransfers.projectId, params.projectId));
+      if (params.walletId) conditions.push(eq(paymentTransfers.walletId, params.walletId));
+      if (params.sourceAddress)
+        conditions.push(eq(paymentTransfers.sourceAddress, params.sourceAddress));
+      if (params.token) conditions.push(eq(paymentTransfers.token, params.token));
+      if (params.direction) conditions.push(eq(paymentTransfers.direction, params.direction));
+      if (params.statuses?.length)
+        conditions.push(inArray(paymentTransfers.status, params.statuses));
+      if (params.createdAtFrom)
+        conditions.push(gte(paymentTransfers.createdAt, params.createdAtFrom));
+      if (params.createdAtTo) conditions.push(lte(paymentTransfers.createdAt, params.createdAtTo));
+
+      const where = and(...conditions);
+
+      const [rows, countRow] = await Promise.all([
+        db
+          .select()
+          .from(paymentTransfers)
+          .where(where)
+          .orderBy(desc(paymentTransfers.createdAt))
+          .limit(params.limit)
+          .offset(params.offset)
+          .all(),
+        db.select({ count: sql<number>`count(*)` }).from(paymentTransfers).where(where).get(),
+      ]);
+
+      return { rows: rows.map(mapTransferRow), total: countRow?.count ?? 0 };
     },
 
     async listTransferAmounts(params) {

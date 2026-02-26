@@ -1,12 +1,49 @@
 # SDP API local dev vars (copy to .dev.vars)
 
 # Solana RPC (devnet). Use your own provider key if possible.
-SOLANA_RPC_URL=https://devnet.helius-rpc.com/?api-key=YOUR_KEY
+SOLANA_RPC_URL=https://api.devnet.solana.com
+SOLANA_RPC_DEFAULT_PROVIDER=default
+SOLANA_RPC_ALCHEMY_URL=https://solana-devnet.g.alchemy.com/v2/{API_KEY}
+SOLANA_RPC_TRITON_URL=https://solana.rpcpool.com/{API_KEY}
+SOLANA_RPC_HELIUS_URL=https://mainnet.helius-rpc.com/?api-key={API_KEY}
+SOLANA_RPC_QUICKNODE_URL=https://example.solana-mainnet.quiknode.pro/{API_KEY}
+# Managed RPC providers for proxy round-robin.
+# For live connectivity tests, configure all provider URLs above.
+# SOLANA_RPC_TRITON_API_KEY=YOUR_TRITON_KEY
+# SOLANA_RPC_HELIUS_API_KEY=YOUR_HELIUS_KEY
+# SOLANA_RPC_ALCHEMY_API_KEY=YOUR_ALCHEMY_KEY
+# SOLANA_RPC_QUICKNODE_API_KEY=YOUR_QUICKNODE_KEY
 
 # Use the shared devnet Kora instance
 KORA_RPC_URL=https://kora-devnet-315956366746.us-central1.run.app
 # KORA_API_KEY=YOUR_KORA_API_KEY (only if API key auth is enabled)
 FEE_PAYMENT_PROVIDER=kora
+
+# Coinbase CDP platform signer (required for coinbase_cdp custody provider)
+# SIGNING_PROVIDER=coinbase_cdp
+# COINBASE_CDP_API_KEY_ID=YOUR_CDP_API_KEY_ID
+# COINBASE_CDP_API_KEY_SECRET=-----BEGIN EC PRIVATE KEY-----\n...\n-----END EC PRIVATE KEY-----
+# COINBASE_CDP_WALLET_SECRET=BASE64_PKCS8_DER_WALLET_SECRET
+# COINBASE_CDP_API_BASE_URL=https://api.cdp.coinbase.com/platform
+# COINBASE_CDP_NETWORK=solana-devnet
+# COINBASE_CDP_WALLET_ID=YOUR_DEFAULT_CDP_SOLANA_ADDRESS
+
+# Para platform signer (required for para custody provider)
+# SIGNING_PROVIDER=para
+# PARA_API_KEY=YOUR_PARA_API_KEY
+# PARA_API_BASE_URL=https://api.getpara.com
+# PARA_REQUEST_DELAY_MS=0
+# PARA_WALLET_ID=YOUR_DEFAULT_PARA_WALLET_ID
+
+# Turnkey platform signer (required for turnkey custody provider)
+# SIGNING_PROVIDER=turnkey
+# TURNKEY_API_PUBLIC_KEY=YOUR_TURNKEY_API_PUBLIC_KEY_HEX
+# TURNKEY_API_PRIVATE_KEY=YOUR_TURNKEY_API_PRIVATE_KEY_HEX
+# TURNKEY_ORGANIZATION_ID=YOUR_TURNKEY_ORGANIZATION_ID
+# TURNKEY_API_BASE_URL=https://api.turnkey.com
+# TURNKEY_REQUEST_DELAY_MS=0
+# TURNKEY_PRIVATE_KEY_ID=YOUR_DEFAULT_TURNKEY_PRIVATE_KEY_ID
+# TURNKEY_PUBLIC_KEY=YOUR_DEFAULT_TURNKEY_SOLANA_PUBLIC_KEY
 
 # Clerk webhook (required for Clerk org linking)
 CLERK_WEBHOOK_SECRET=whsec_...

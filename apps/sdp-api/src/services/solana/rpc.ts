@@ -40,6 +40,53 @@ export interface SimulationResult {
   error: string | null;
 }
 
+type SolanaRpcConfig = NonNullable<Parameters<typeof createSolanaRpc>[1]>;
+type AllowedSolanaRpcHeaders = NonNullable<SolanaRpcConfig["headers"]>;
+
+export interface RpcClientOptions {
+  rpcUrl?: string;
+  headers?: Readonly<Record<string, string>>;
+}
+
+const DISALLOWED_RPC_HEADERS = new Set([
+  "accept",
+  "accept-charset",
+  "access-control-request-headers",
+  "access-control-request-method",
+  "connection",
+  "content-length",
+  "content-type",
+  "cookie",
+  "date",
+  "dnt",
+  "expect",
+  "host",
+  "keep-alive",
+  "permissions-policy",
+  "referer",
+  "solana-client",
+  "te",
+  "trailer",
+  "transfer-encoding",
+  "upgrade",
+  "via",
+]);
+
+function assertAllowedRpcHeaders(
+  headers: Readonly<Record<string, string>>
+): asserts headers is AllowedSolanaRpcHeaders {
+  for (const headerName of Object.keys(headers)) {
+    const normalizedHeaderName = headerName.toLowerCase();
+    if (
+      normalizedHeaderName.startsWith("proxy-") ||
+      normalizedHeaderName.startsWith("sec-") ||
+      DISALLOWED_RPC_HEADERS.has(normalizedHeaderName)
+    ) {
+      throw new Error(`Unsupported RPC header: ${headerName}`);
+    }
+  }
+}
+
 // Type for RPC client
 type SolanaRpc = ReturnType<typeof createSolanaRpc>;
 
@@ -50,9 +97,16 @@ type SolanaRpc = ReturnType<typeof createSolanaRpc>;
 /**
  * Create a configured Solana RPC client from environment
  */
-export function createRpc(env: Env): SolanaRpc {
+export function createRpc(env: Env, options?: RpcClientOptions): SolanaRpc {
   const config = getSolanaConfig(env);
-  return createSolanaRpc(config.rpcUrl);
+  const rpcUrl = options?.rpcUrl ?? config.rpcUrl;
+
+  if (options?.headers && Object.keys(options.headers).length > 0) {
+    assertAllowedRpcHeaders(options.headers);
+    return createSolanaRpc(rpcUrl, { headers: options.headers });
+  }
+
+  return createSolanaRpc(rpcUrl);
 }
 
 /**
@@ -314,6 +368,47 @@ export async function getMinimumBalanceForRentExemption(
   const response = await rpc.getMinimumBalanceForRentExemption(BigInt(dataSize)).send();
 
   return response;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Signature History
+// ═══════════════════════════════════════════════════════════════════════════
+
+export interface SignatureInfo {
+  signature: Signature;
+  slot: bigint;
+  blockTime: bigint | null;
+  err: unknown | null;
+}
+
+/**
+ * Get transaction signatures for an address (newest first)
+ */
+export async function getSignaturesForAddress(
+  rpc: SolanaRpc,
+  address: Address,
+  options?: {
+    limit?: number;
+    before?: Signature;
+    until?: Signature;
+    commitment?: "confirmed" | "finalized";
+  }
+): Promise<SignatureInfo[]> {
+  const response = await rpc
+    .getSignaturesForAddress(address, {
+      limit: options?.limit ?? 100,
+      ...(options?.before ? { before: options.before } : {}),
+      ...(options?.until ? { until: options.until } : {}),
+      commitment: options?.commitment ?? "confirmed",
+    })
+    .send();
+
+  return response.map((item) => ({
+    signature: item.signature,
+    slot: item.slot,
+    blockTime: item.blockTime ?? null,
+    err: item.err ?? null,
+  }));
 }
 
 // Re-export types

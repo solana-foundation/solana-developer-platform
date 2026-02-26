@@ -4,13 +4,23 @@
 
 import type { OrganizationRole } from "./permissions";
 
-export type OrganizationTier = "free" | "pro" | "enterprise";
+export const ORGANIZATION_TIERS = ["free", "pro", "enterprise"] as const;
+export type OrganizationTier = (typeof ORGANIZATION_TIERS)[number];
 
-export type OrganizationStatus = "active" | "suspended" | "deleted";
+export const ORGANIZATION_STATUSES = ["active", "suspended", "deleted"] as const;
+export type OrganizationStatus = (typeof ORGANIZATION_STATUSES)[number];
 
 export type MemberStatus = "active" | "suspended" | "removed";
 
 export type InvitationStatus = "pending" | "accepted" | "expired" | "revoked";
+export const ORGANIZATION_RPC_PROVIDERS = [
+  "alchemy",
+  "default",
+  "helius",
+  "quicknode",
+  "triton",
+] as const;
+export type OrganizationRpcProvider = (typeof ORGANIZATION_RPC_PROVIDERS)[number];
 
 export interface Organization {
   id: string; // org_xxxxxxxxxxxx
@@ -24,6 +34,7 @@ export interface Organization {
 }
 
 export interface OrganizationSettings {
+  rpcProvider?: OrganizationRpcProvider;
   defaultEnvironment?: "sandbox" | "production";
   webhookSecret?: string;
   allowedIpAddresses?: string[];
@@ -78,7 +89,10 @@ export interface CreateOrganizationRequest {
 
 export type CreateOrganizationCustody =
   | CreateOrganizationCustodyFireblocks
-  | CreateOrganizationCustodyPrivy;
+  | CreateOrganizationCustodyPrivy
+  | CreateOrganizationCustodyCoinbaseCdp
+  | CreateOrganizationCustodyPara
+  | CreateOrganizationCustodyTurnkey;
 
 export interface CreateOrganizationCustodyFireblocks {
   provider: "fireblocks";
@@ -92,6 +106,28 @@ export interface CreateOrganizationCustodyPrivy {
   apiBaseUrl?: string;
   walletId?: string;
   requestDelayMs?: number;
+}
+
+export interface CreateOrganizationCustodyCoinbaseCdp {
+  provider: "coinbase_cdp";
+  apiBaseUrl?: string;
+  network?: "solana" | "solana-devnet";
+  walletAddress?: string;
+  accountPolicy?: string;
+}
+
+export interface CreateOrganizationCustodyPara {
+  provider: "para";
+  apiBaseUrl?: string;
+  requestDelayMs?: number;
+  walletId?: string;
+}
+
+export interface CreateOrganizationCustodyTurnkey {
+  provider: "turnkey";
+  apiBaseUrl?: string;
+  requestDelayMs?: number;
+  privateKeyId?: string;
 }
 
 export interface CreateOrganizationResponse {

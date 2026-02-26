@@ -289,6 +289,46 @@ describe("Organizations routes", () => {
       expect(body.data.slug).toBe(TEST_ORG.slug);
     });
 
+    it("returns internal error when organization tier is invalid in storage", async () => {
+      await env.DB.prepare("UPDATE organizations SET tier = ? WHERE id = ?")
+        .bind("standard", TEST_ORG.id)
+        .run();
+
+      const res = await app.request(
+        `/v1/organizations/${TEST_ORG.id}`,
+        {
+          headers: {
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+        },
+        env
+      );
+
+      expect(res.status).toBe(500);
+      const body = (await res.json()) as { error: { code: string } };
+      expect(body.error.code).toBe("INTERNAL_ERROR");
+    });
+
+    it("returns internal error when organization status is invalid in storage", async () => {
+      await env.DB.prepare("UPDATE organizations SET status = ? WHERE id = ?")
+        .bind("unknown", TEST_ORG.id)
+        .run();
+
+      const res = await app.request(
+        `/v1/organizations/${TEST_ORG.id}`,
+        {
+          headers: {
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+        },
+        env
+      );
+
+      expect(res.status).toBe(500);
+      const body = (await res.json()) as { error: { code: string } };
+      expect(body.error.code).toBe("INTERNAL_ERROR");
+    });
+
     it("rejects unauthenticated requests", async () => {
       const res = await app.request(`/v1/organizations/${TEST_ORG.id}`, {}, env);
 
