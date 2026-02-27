@@ -47,3 +47,14 @@ FEE_PAYMENT_PROVIDER=kora
 
 # Clerk webhook (required for Clerk org linking)
 CLERK_WEBHOOK_SECRET=whsec_...
+
+# MoonPay ramps (widget-based)
+# MOONPAY_API_KEY=pk_test_...
+# MOONPAY_SECRET_KEY=sk_test_...
+# MOONPAY_ONRAMP_URL=https://buy-sandbox.moonpay.com
+# MOONPAY_OFFRAMP_URL=https://sell-sandbox.moonpay.com
+
+# Lightspark Grid ramps (API-based)
+# LIGHTSPARK_GRID_CLIENT_ID=YOUR_LIGHTSPARK_TOKEN_ID
+# LIGHTSPARK_GRID_CLIENT_SECRET=YOUR_LIGHTSPARK_CLIENT_SECRET
+# LIGHTSPARK_GRID_API_BASE_URL=https://api.lightspark.com/grid/2025-10-13

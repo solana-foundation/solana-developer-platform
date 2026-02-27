@@ -11,7 +11,7 @@ import { formatDecimalAmount, isDecimalString, parseDecimalAmount } from "@/lib/
 import { getAuth } from "@/lib/auth";
 import { AppError } from "@/lib/errors";
 import { paginated, success } from "@/lib/response";
-import { assertValidAddress } from "@/lib/solana";
+import { assertValidAddress, isAddress } from "@/lib/solana";
 import { createFeePaymentAdapter } from "@/services/adapters/fee-payment";
 import { createSigningService } from "@/services/domain/signing.service";
 import { withHeliusApiKey } from "@/services/rpc-relay.service";
@@ -570,6 +570,56 @@ async function resolveScope(c: AppContext) {
   };
 }
 
+type ResolvedScope = Awaited<ReturnType<typeof resolveScope>>;
+
+type RampExecutionStatus = "pending" | "processing" | "completed" | "failed";
+
+type RampExecutionResult = {
+  id: string;
+  provider: string;
+  status: RampExecutionStatus;
+  redirectUrl?: string;
+  reference?: string;
+};
+
+type ExecuteOnrampInput = {
+  provider: string;
+  destinationWallet: string;
+  cryptoToken: string;
+  fiatCurrency?: "USD";
+  fiatAmount: string;
+  kycReference?: string;
+  redirectUrl?: string;
+};
+
+type ExecuteOfframpInput = {
+  provider: string;
+  sourceWallet: string;
+  cryptoToken: string;
+  fiatCurrency?: "USD";
+  cryptoAmount: string;
+  kycReference?: string;
+  redirectUrl?: string;
+};
+
+type ExecuteRampInput =
+  | ({ direction: "onramp" } & ExecuteOnrampInput)
+  | ({ direction: "offramp" } & ExecuteOfframpInput);
+
+type RampProviderExecutor = {
+  isConfigured: (c: AppContext) => boolean;
+  executeOnramp: (
+    c: AppContext,
+    scope: ResolvedScope,
+    input: ExecuteOnrampInput
+  ) => Promise<RampExecutionResult>;
+  executeOfframp: (
+    c: AppContext,
+    scope: ResolvedScope,
+    input: ExecuteOfframpInput
+  ) => Promise<RampExecutionResult>;
+};
+
 function resolveWallet(wallets: CustodyWallet[], walletId: string): CustodyWallet {
   const wallet = wallets.find((entry) => entry.walletId === walletId);
   if (!wallet) {
@@ -608,6 +658,33 @@ type MoonPayConfig = {
   offrampUrl: string;
 };
 
+type LightsparkConfig = {
+  tokenId: string;
+  clientSecret: string;
+  apiBaseUrl: string;
+};
+
+type LightsparkQuoteStatus = "PENDING" | "PROCESSING" | "COMPLETED" | "FAILED" | "EXPIRED";
+
+type LightsparkQuote = {
+  id?: string;
+  quoteStatus?: LightsparkQuoteStatus;
+  status?: LightsparkQuoteStatus;
+  paymentInstructions?: {
+    url?: string;
+  };
+};
+
+type LightsparkExternalAccount = {
+  id?: string;
+  accountInfo?: {
+    accountType?: string;
+    address?: string;
+  };
+};
+
+const LIGHTSPARK_DEFAULT_GRID_API_URL = "https://api.lightspark.com/grid/2025-10-13";
+
 function getMoonPayConfig(c: AppContext): MoonPayConfig {
   const apiKey = c.env.MOONPAY_API_KEY?.trim();
   const secretKey = c.env.MOONPAY_SECRET_KEY?.trim();
@@ -639,6 +716,309 @@ function getMoonPayConfig(c: AppContext): MoonPayConfig {
     onrampUrl: onrampUrlRaw,
     offrampUrl: offrampUrlRaw,
   };
+}
+
+function isMoonPayConfigured(c: AppContext): boolean {
+  const apiKey = c.env.MOONPAY_API_KEY?.trim();
+  const secretKey = c.env.MOONPAY_SECRET_KEY?.trim();
+  return Boolean(apiKey && secretKey);
+}
+
+function getLightsparkConfig(c: AppContext): LightsparkConfig {
+  const tokenId = c.env.LIGHTSPARK_GRID_CLIENT_ID?.trim();
+  const clientSecret = c.env.LIGHTSPARK_GRID_CLIENT_SECRET?.trim();
+
+  if (!tokenId || !clientSecret) {
+    throw new AppError(
+      "INTERNAL_ERROR",
+      "Lightspark is not configured. Set LIGHTSPARK_GRID_CLIENT_ID and LIGHTSPARK_GRID_CLIENT_SECRET."
+    );
+  }
+
+  const apiBaseUrlRaw =
+    c.env.LIGHTSPARK_GRID_API_BASE_URL?.trim() || LIGHTSPARK_DEFAULT_GRID_API_URL;
+  try {
+    new URL(apiBaseUrlRaw);
+  } catch {
+    throw new AppError("INTERNAL_ERROR", "Lightspark API URL configuration is invalid.");
+  }
+
+  return {
+    tokenId,
+    clientSecret,
+    apiBaseUrl: apiBaseUrlRaw,
+  };
+}
+
+function isLightsparkConfigured(c: AppContext): boolean {
+  const tokenId = c.env.LIGHTSPARK_GRID_CLIENT_ID?.trim();
+  const clientSecret = c.env.LIGHTSPARK_GRID_CLIENT_SECRET?.trim();
+  return Boolean(tokenId && clientSecret);
+}
+
+function encodeBasicAuth(value: string): string {
+  return Buffer.from(value, "utf8").toString("base64");
+}
+
+function safeParseJson(value: string): unknown | null {
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return null;
+  }
+}
+
+async function lightsparkRequest(
+  config: LightsparkConfig,
+  path: string,
+  init: {
+    method: "GET" | "POST";
+    body?: unknown;
+  }
+): Promise<unknown> {
+  const apiBaseUrl = config.apiBaseUrl.endsWith("/") ? config.apiBaseUrl : `${config.apiBaseUrl}/`;
+  const url = new URL(path, apiBaseUrl);
+  const auth = encodeBasicAuth(`${config.tokenId}:${config.clientSecret}`);
+
+  const response = await fetch(url.toString(), {
+    method: init.method,
+    headers: {
+      Authorization: `Basic ${auth}`,
+      "Content-Type": "application/json",
+    },
+    body: init.body === undefined ? undefined : JSON.stringify(init.body),
+  });
+
+  const raw = await response.text();
+  const parsed = safeParseJson(raw);
+
+  if (!response.ok) {
+    const parsedMessage =
+      parsed && typeof parsed === "object"
+        ? ((parsed as { message?: unknown; error?: unknown; reason?: unknown }).message ??
+          (parsed as { message?: unknown; error?: unknown; reason?: unknown }).error ??
+          (parsed as { message?: unknown; error?: unknown; reason?: unknown }).reason)
+        : undefined;
+
+    const message =
+      typeof parsedMessage === "string" && parsedMessage.length > 0
+        ? parsedMessage
+        : `Lightspark request failed with status ${response.status}`;
+
+    throw new AppError("BAD_REQUEST", message);
+  }
+
+  return parsed ?? {};
+}
+
+function normalizeLightsparkCurrencyCode(value: string): string {
+  const normalized = value.trim().toUpperCase();
+  if (!/^[A-Z0-9_]+$/.test(normalized)) {
+    throw new AppError("BAD_REQUEST", "cryptoToken must be a valid Lightspark currency code");
+  }
+  return normalized;
+}
+
+function getLightsparkCurrencyDecimals(currencyCode: string): number {
+  const normalized = currencyCode.trim().toUpperCase();
+  if (normalized === "BTC") {
+    return 8;
+  }
+  if (normalized === "SOL") {
+    return 9;
+  }
+  if (normalized === "USDC") {
+    return 6;
+  }
+
+  throw new AppError(
+    "BAD_REQUEST",
+    `Unsupported lightspark cryptoToken: ${currencyCode}. Supported values: BTC, SOL, USDC`
+  );
+}
+
+function assertLightsparkAccountId(value: string, fieldName: string): string {
+  const normalized = value.trim();
+  if (normalized.length === 0) {
+    throw new AppError("BAD_REQUEST", `${fieldName} is required for lightspark`);
+  }
+  if (!normalized.includes(":")) {
+    throw new AppError(
+      "BAD_REQUEST",
+      `${fieldName} must be a Lightspark account identifier (for example: ExternalAccount:...)`
+    );
+  }
+  return normalized;
+}
+
+function parseLightsparkExternalAccount(payload: unknown): LightsparkExternalAccount {
+  if (typeof payload !== "object" || payload === null) {
+    return {};
+  }
+
+  const raw = payload as {
+    id?: unknown;
+    accountInfo?: {
+      accountType?: unknown;
+      address?: unknown;
+    };
+  };
+
+  return {
+    id: typeof raw.id === "string" ? raw.id : undefined,
+    accountInfo:
+      raw.accountInfo && typeof raw.accountInfo === "object"
+        ? {
+            accountType:
+              typeof raw.accountInfo.accountType === "string"
+                ? raw.accountInfo.accountType
+                : undefined,
+            address:
+              typeof raw.accountInfo.address === "string" ? raw.accountInfo.address : undefined,
+          }
+        : undefined,
+  };
+}
+
+async function listLightsparkCustomerExternalAccounts(
+  config: LightsparkConfig,
+  customerId: string,
+  currency: string
+): Promise<LightsparkExternalAccount[]> {
+  const externalAccounts: LightsparkExternalAccount[] = [];
+  let cursor: string | undefined;
+
+  for (let page = 0; page < 10; page += 1) {
+    const query = new URLSearchParams();
+    query.set("customerId", customerId);
+    query.set("currency", currency);
+    query.set("limit", "100");
+    if (cursor) {
+      query.set("cursor", cursor);
+    }
+
+    const response = await lightsparkRequest(config, `customers/external-accounts?${query}`, {
+      method: "GET",
+    });
+
+    if (typeof response !== "object" || response === null) {
+      throw new AppError("BAD_REQUEST", "Lightspark external accounts response is invalid");
+    }
+
+    const payload = response as {
+      data?: unknown;
+      hasMore?: unknown;
+      nextCursor?: unknown;
+    };
+
+    const accounts = Array.isArray(payload.data) ? payload.data : [];
+    externalAccounts.push(...accounts.map(parseLightsparkExternalAccount));
+
+    const hasMore = payload.hasMore === true;
+    cursor =
+      typeof payload.nextCursor === "string" && payload.nextCursor.length > 0
+        ? payload.nextCursor
+        : undefined;
+
+    if (!hasMore || !cursor) {
+      break;
+    }
+  }
+
+  return externalAccounts;
+}
+
+async function resolveLightsparkOnrampDestinationAccountId(
+  config: LightsparkConfig,
+  customerId: string,
+  destinationWallet: string,
+  currency: string
+): Promise<string> {
+  const normalized = destinationWallet.trim();
+  if (normalized.length === 0) {
+    throw new AppError("BAD_REQUEST", "destinationWallet is required for lightspark");
+  }
+
+  if (normalized.includes(":")) {
+    return assertLightsparkAccountId(normalized, "destinationWallet");
+  }
+
+  if (!isAddress(normalized)) {
+    throw new AppError(
+      "BAD_REQUEST",
+      "destinationWallet must be a Lightspark account id (for example ExternalAccount:...) or a Solana wallet address"
+    );
+  }
+
+  const externalAccounts = await listLightsparkCustomerExternalAccounts(
+    config,
+    customerId,
+    currency
+  );
+  const existing = externalAccounts.find((account) => {
+    if (!account.id) {
+      return false;
+    }
+    const accountType = account.accountInfo?.accountType?.toUpperCase();
+    const address = account.accountInfo?.address;
+    return accountType === "SOLANA_WALLET" && address === normalized;
+  });
+
+  if (existing?.id) {
+    return existing.id;
+  }
+
+  const createResponse = await lightsparkRequest(config, "customers/external-accounts", {
+    method: "POST",
+    body: {
+      customerId,
+      currency,
+      accountInfo: {
+        accountType: "SOLANA_WALLET",
+        address: normalized,
+      },
+    },
+  });
+
+  const created = parseLightsparkExternalAccount(createResponse);
+  if (!created.id) {
+    throw new AppError("BAD_REQUEST", "Lightspark external account response is missing id");
+  }
+
+  return created.id;
+}
+
+function toLightsparkMinorUnitsInteger(value: bigint, fieldName: string): number {
+  if (value > BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw new AppError("BAD_REQUEST", `${fieldName} is too large for Lightspark quote minor units`);
+  }
+
+  return Number(value);
+}
+
+function mapLightsparkQuoteStatus(status: string | undefined): RampExecutionStatus {
+  if (!status) {
+    return "pending";
+  }
+
+  const normalized = status.trim().toUpperCase();
+  if (normalized === "COMPLETED") {
+    return "completed";
+  }
+  if (normalized === "PROCESSING") {
+    return "processing";
+  }
+  if (normalized === "FAILED" || normalized === "EXPIRED") {
+    return "failed";
+  }
+  return "pending";
+}
+
+function parseLightsparkQuote(payload: unknown): LightsparkQuote {
+  if (typeof payload !== "object" || payload === null) {
+    throw new AppError("BAD_REQUEST", "Lightspark response payload is invalid");
+  }
+  return payload as LightsparkQuote;
 }
 
 async function createMoonPaySignature(unsignedQuery: string, secretKey: string): Promise<string> {
@@ -673,6 +1053,221 @@ async function buildSignedMoonPayWidgetUrl(
   url.searchParams.set("signature", signature);
 
   return url.toString();
+}
+
+const moonPayRampProvider: RampProviderExecutor = {
+  isConfigured: isMoonPayConfigured,
+
+  async executeOnramp(c, scope, input) {
+    const destinationWalletAddress = resolveWalletAddress(
+      scope.wallets,
+      input.destinationWallet,
+      "destinationWallet"
+    );
+    const moonPay = getMoonPayConfig(c);
+
+    const redirectUrl = await buildSignedMoonPayWidgetUrl(moonPay.onrampUrl, moonPay.secretKey, {
+      apiKey: moonPay.apiKey,
+      baseCurrencyCode: "usd",
+      baseCurrencyAmount: input.fiatAmount,
+      currencyCode: normalizeMoonPayCurrencyCode(input.cryptoToken),
+      walletAddress: destinationWalletAddress,
+      redirectURL: input.redirectUrl,
+      externalCustomerId: input.kycReference,
+      externalTransactionId: `sdp_onramp_${crypto.randomUUID()}`,
+    });
+
+    return {
+      id: `ramp_${crypto.randomUUID()}`,
+      provider: "moonpay",
+      status: "pending",
+      redirectUrl,
+    };
+  },
+
+  async executeOfframp(c, scope, input) {
+    const sourceWalletAddress = resolveWalletAddress(
+      scope.wallets,
+      input.sourceWallet,
+      "sourceWallet"
+    );
+    const moonPay = getMoonPayConfig(c);
+    const externalTransactionId = `sdp_offramp_${crypto.randomUUID()}`;
+
+    const redirectUrl = await buildSignedMoonPayWidgetUrl(moonPay.offrampUrl, moonPay.secretKey, {
+      apiKey: moonPay.apiKey,
+      baseCurrencyCode: normalizeMoonPayCurrencyCode(input.cryptoToken),
+      baseCurrencyAmount: input.cryptoAmount,
+      quoteCurrencyCode: "usd",
+      walletAddress: sourceWalletAddress,
+      refundWalletAddress: sourceWalletAddress,
+      redirectURL: input.redirectUrl,
+      externalCustomerId: input.kycReference,
+      externalTransactionId,
+    });
+
+    return {
+      id: `ramp_${crypto.randomUUID()}`,
+      provider: "moonpay",
+      status: "pending",
+      redirectUrl,
+      reference: externalTransactionId,
+    };
+  },
+};
+
+const lightsparkRampProvider: RampProviderExecutor = {
+  isConfigured: isLightsparkConfigured,
+
+  async executeOnramp(c, _scope, input) {
+    const customerId = input.kycReference?.trim();
+    if (!customerId) {
+      throw new AppError(
+        "BAD_REQUEST",
+        "kycReference is required for lightspark onramp and must contain a Lightspark customer id"
+      );
+    }
+
+    const cryptoCurrency = normalizeLightsparkCurrencyCode(input.cryptoToken);
+    const fiatAmountMinorUnits = toLightsparkMinorUnitsInteger(
+      parseDecimalAmount(input.fiatAmount, 2),
+      "fiatAmount"
+    );
+    const config = getLightsparkConfig(c);
+    const destinationAccountId = await resolveLightsparkOnrampDestinationAccountId(
+      config,
+      customerId,
+      input.destinationWallet,
+      cryptoCurrency
+    );
+
+    const quoteResponse = await lightsparkRequest(config, "quotes", {
+      method: "POST",
+      body: {
+        source: {
+          sourceType: "REALTIME_FUNDING",
+          customerId,
+          currency: "USD",
+        },
+        destination: {
+          destinationType: "ACCOUNT",
+          accountId: destinationAccountId,
+          currency: cryptoCurrency,
+        },
+        lockedCurrencySide: "SENDING",
+        lockedCurrencyAmount: fiatAmountMinorUnits,
+        description: "SDP onramp",
+      },
+    });
+
+    const quote = parseLightsparkQuote(quoteResponse);
+    return {
+      id: `ramp_${crypto.randomUUID()}`,
+      provider: "lightspark",
+      status: mapLightsparkQuoteStatus(quote.quoteStatus ?? quote.status),
+      redirectUrl: quote.paymentInstructions?.url,
+      reference: quote.id,
+    };
+  },
+
+  async executeOfframp(c, _scope, input) {
+    const sourceAccountId = assertLightsparkAccountId(input.sourceWallet, "sourceWallet");
+    const destinationAccountId = assertLightsparkAccountId(
+      input.kycReference ?? "",
+      "kycReference"
+    );
+    const cryptoCurrency = normalizeLightsparkCurrencyCode(input.cryptoToken);
+    const cryptoAmountMinorUnits = toLightsparkMinorUnitsInteger(
+      parseDecimalAmount(input.cryptoAmount, getLightsparkCurrencyDecimals(cryptoCurrency)),
+      "cryptoAmount"
+    );
+    const config = getLightsparkConfig(c);
+
+    const quoteResponse = await lightsparkRequest(config, "quotes", {
+      method: "POST",
+      body: {
+        source: {
+          sourceType: "ACCOUNT",
+          accountId: sourceAccountId,
+          currency: cryptoCurrency,
+        },
+        destination: {
+          destinationType: "ACCOUNT",
+          accountId: destinationAccountId,
+          currency: "USD",
+        },
+        lockedCurrencySide: "SENDING",
+        lockedCurrencyAmount: cryptoAmountMinorUnits,
+        description: "SDP offramp",
+      },
+    });
+
+    const quote = parseLightsparkQuote(quoteResponse);
+    if (!quote.id) {
+      throw new AppError("BAD_REQUEST", "Lightspark quote response is missing id");
+    }
+
+    const executeResponse = await lightsparkRequest(
+      config,
+      `quotes/${encodeURIComponent(quote.id)}/execute`,
+      {
+        method: "POST",
+      }
+    );
+    const executedQuote = parseLightsparkQuote(executeResponse);
+
+    return {
+      id: `ramp_${crypto.randomUUID()}`,
+      provider: "lightspark",
+      status: mapLightsparkQuoteStatus(executedQuote.quoteStatus ?? executedQuote.status),
+      redirectUrl: executedQuote.paymentInstructions?.url,
+      reference: quote.id,
+    };
+  },
+};
+
+const RAMP_PROVIDER_REGISTRY: Record<string, RampProviderExecutor> = {
+  moonpay: moonPayRampProvider,
+  lightspark: lightsparkRampProvider,
+};
+
+function resolveRampProvider(c: AppContext, providerId: string): RampProviderExecutor {
+  const normalizedProvider = providerId.trim().toLowerCase();
+
+  if (normalizedProvider === "auto") {
+    if (lightsparkRampProvider.isConfigured(c)) {
+      return lightsparkRampProvider;
+    }
+    if (moonPayRampProvider.isConfigured(c)) {
+      return moonPayRampProvider;
+    }
+    throw new AppError(
+      "INTERNAL_ERROR",
+      "No ramp provider is configured. Configure MoonPay or Lightspark credentials."
+    );
+  }
+
+  const provider = RAMP_PROVIDER_REGISTRY[normalizedProvider];
+
+  if (!provider) {
+    throw new AppError("BAD_REQUEST", `Unsupported ramp provider: ${providerId}`);
+  }
+
+  return provider;
+}
+
+async function executeRampWithProvider(
+  c: AppContext,
+  input: ExecuteRampInput
+): Promise<RampExecutionResult> {
+  const scope = await resolveScope(c);
+  const provider = resolveRampProvider(c, input.provider);
+
+  if (input.direction === "onramp") {
+    return provider.executeOnramp(c, scope, input);
+  }
+
+  return provider.executeOfframp(c, scope, input);
 }
 
 async function resolveWalletFromParams(c: AppContext) {
@@ -1477,32 +2072,12 @@ export async function executeOnramp(c: AppContext) {
     });
   }
 
-  const scope = await resolveScope(c);
-  const destinationWalletAddress = resolveWalletAddress(
-    scope.wallets,
-    parsed.data.destinationWallet,
-    "destinationWallet"
-  );
-  const moonPay = getMoonPayConfig(c);
-
-  const redirectUrl = await buildSignedMoonPayWidgetUrl(moonPay.onrampUrl, moonPay.secretKey, {
-    apiKey: moonPay.apiKey,
-    baseCurrencyCode: "usd",
-    baseCurrencyAmount: parsed.data.fiatAmount,
-    currencyCode: normalizeMoonPayCurrencyCode(parsed.data.cryptoToken),
-    walletAddress: destinationWalletAddress,
-    redirectURL: parsed.data.redirectUrl,
-    externalCustomerId: parsed.data.kycReference,
-    externalTransactionId: `sdp_onramp_${crypto.randomUUID()}`,
+  const ramp = await executeRampWithProvider(c, {
+    ...parsed.data,
+    direction: "onramp",
   });
 
-  return success(c, {
-    ramp: {
-      id: `ramp_${crypto.randomUUID()}`,
-      status: "pending",
-      redirectUrl,
-    },
-  });
+  return success(c, { ramp });
 }
 
 export async function executeOfframp(c: AppContext) {
@@ -1515,33 +2090,10 @@ export async function executeOfframp(c: AppContext) {
     });
   }
 
-  const scope = await resolveScope(c);
-  const sourceWalletAddress = resolveWalletAddress(
-    scope.wallets,
-    parsed.data.sourceWallet,
-    "sourceWallet"
-  );
-  const moonPay = getMoonPayConfig(c);
-  const externalTransactionId = `sdp_offramp_${crypto.randomUUID()}`;
-
-  const redirectUrl = await buildSignedMoonPayWidgetUrl(moonPay.offrampUrl, moonPay.secretKey, {
-    apiKey: moonPay.apiKey,
-    baseCurrencyCode: normalizeMoonPayCurrencyCode(parsed.data.cryptoToken),
-    baseCurrencyAmount: parsed.data.cryptoAmount,
-    quoteCurrencyCode: "usd",
-    walletAddress: sourceWalletAddress,
-    refundWalletAddress: sourceWalletAddress,
-    redirectURL: parsed.data.redirectUrl,
-    externalCustomerId: parsed.data.kycReference,
-    externalTransactionId,
+  const ramp = await executeRampWithProvider(c, {
+    ...parsed.data,
+    direction: "offramp",
   });
 
-  return success(c, {
-    ramp: {
-      id: `ramp_${crypto.randomUUID()}`,
-      status: "pending",
-      redirectUrl,
-      reference: externalTransactionId,
-    },
-  });
+  return success(c, { ramp });
 }
