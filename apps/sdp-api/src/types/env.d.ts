@@ -114,6 +114,18 @@ export interface Env {
   MOONPAY_SECRET_KEY?: string;
   MOONPAY_ONRAMP_URL?: string;
   MOONPAY_OFFRAMP_URL?: string;
+
+  // Compliance providers
+  RANGE_API_KEY?: string;
+  RANGE_API_BASE_URL?: string;
+  ELLIPTIC_API_TOKEN?: string;
+  ELLIPTIC_API_KEY?: string;
+  ELLIPTIC_API_SECRET?: string;
+  ELLIPTIC_API_BASE_URL?: string;
+  TRM_API_KEY?: string;
+  TRM_API_BASE_URL?: string;
+  CHAINALYSIS_API_KEY?: string;
+  CHAINALYSIS_API_BASE_URL?: string;
 }
 
 // Extend Hono's context with our bindings

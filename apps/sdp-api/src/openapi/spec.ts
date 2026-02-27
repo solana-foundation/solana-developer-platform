@@ -4,6 +4,7 @@ import type { OpenAPIObject } from "openapi3-ts/oas30";
 import { registerAdminPaths } from "./paths/admin";
 import { registerApiKeyPaths } from "./paths/api-keys";
 import { registerAuthPaths } from "./paths/auth";
+import { registerCompliancePaths } from "./paths/compliance";
 import { registerCustodyPaths } from "./paths/custody";
 import { registerHealthPaths } from "./paths/health";
 import { registerIssuancePaths } from "./paths/issuance";
@@ -54,6 +55,7 @@ export function createOpenApiDocument(): OpenAPIObject {
   registerProjectPaths(registry);
   registerRpcPaths(registry);
   registerIssuancePaths(registry);
+  registerCompliancePaths(registry);
   registerAdminPaths(registry);
   registerOnboardingPaths(registry);
 
@@ -80,6 +82,7 @@ export function createOpenApiDocument(): OpenAPIObject {
       { name: "Projects", description: "Project and project member management." },
       { name: "RPC", description: "Managed Solana RPC relay and provider telemetry." },
       { name: "Issuance", description: "Token issuance, allowlists, and lifecycle operations." },
+      { name: "Compliance", description: "Risk and compliance screening endpoints." },
       { name: "Admin", description: "Administrative allowlist management." },
       { name: "Onboarding", description: "Clerk organization onboarding and linking." },
     ],

@@ -9,7 +9,8 @@ export default function PaymentsPage() {
           <CardTitle>Payments</CardTitle>
         </CardHeader>
         <CardContent className="text-sm text-[rgba(28,28,29,0.72)]">
-          Manage destination-address allowlists and submit transfers from the dashboard.
+          Transfer and destination-address flows now require compliance checks and display provider
+          risk scores before submission.
         </CardContent>
       </Card>
 
