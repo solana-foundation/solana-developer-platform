@@ -570,6 +570,54 @@ async function resolveScope(c: AppContext) {
   };
 }
 
+type ResolvedScope = Awaited<ReturnType<typeof resolveScope>>;
+
+type RampExecutionStatus = "pending" | "processing" | "completed" | "failed";
+
+type RampExecutionResult = {
+  id: string;
+  status: RampExecutionStatus;
+  redirectUrl?: string;
+  reference?: string;
+};
+
+type ExecuteOnrampInput = {
+  provider: string;
+  destinationWallet: string;
+  cryptoToken: string;
+  fiatCurrency?: "USD";
+  fiatAmount: string;
+  kycReference?: string;
+  redirectUrl?: string;
+};
+
+type ExecuteOfframpInput = {
+  provider: string;
+  sourceWallet: string;
+  cryptoToken: string;
+  fiatCurrency?: "USD";
+  cryptoAmount: string;
+  kycReference?: string;
+  redirectUrl?: string;
+};
+
+type ExecuteRampInput =
+  | ({ direction: "onramp" } & ExecuteOnrampInput)
+  | ({ direction: "offramp" } & ExecuteOfframpInput);
+
+type RampProviderExecutor = {
+  executeOnramp: (
+    c: AppContext,
+    scope: ResolvedScope,
+    input: ExecuteOnrampInput
+  ) => Promise<RampExecutionResult>;
+  executeOfframp: (
+    c: AppContext,
+    scope: ResolvedScope,
+    input: ExecuteOfframpInput
+  ) => Promise<RampExecutionResult>;
+};
+
 function resolveWallet(wallets: CustodyWallet[], walletId: string): CustodyWallet {
   const wallet = wallets.find((entry) => entry.walletId === walletId);
   if (!wallet) {
@@ -673,6 +721,92 @@ async function buildSignedMoonPayWidgetUrl(
   url.searchParams.set("signature", signature);
 
   return url.toString();
+}
+
+const moonPayRampProvider: RampProviderExecutor = {
+  async executeOnramp(c, scope, input) {
+    const destinationWalletAddress = resolveWalletAddress(
+      scope.wallets,
+      input.destinationWallet,
+      "destinationWallet"
+    );
+    const moonPay = getMoonPayConfig(c);
+
+    const redirectUrl = await buildSignedMoonPayWidgetUrl(moonPay.onrampUrl, moonPay.secretKey, {
+      apiKey: moonPay.apiKey,
+      baseCurrencyCode: "usd",
+      baseCurrencyAmount: input.fiatAmount,
+      currencyCode: normalizeMoonPayCurrencyCode(input.cryptoToken),
+      walletAddress: destinationWalletAddress,
+      redirectURL: input.redirectUrl,
+      externalCustomerId: input.kycReference,
+      externalTransactionId: `sdp_onramp_${crypto.randomUUID()}`,
+    });
+
+    return {
+      id: `ramp_${crypto.randomUUID()}`,
+      status: "pending",
+      redirectUrl,
+    };
+  },
+
+  async executeOfframp(c, scope, input) {
+    const sourceWalletAddress = resolveWalletAddress(
+      scope.wallets,
+      input.sourceWallet,
+      "sourceWallet"
+    );
+    const moonPay = getMoonPayConfig(c);
+    const externalTransactionId = `sdp_offramp_${crypto.randomUUID()}`;
+
+    const redirectUrl = await buildSignedMoonPayWidgetUrl(moonPay.offrampUrl, moonPay.secretKey, {
+      apiKey: moonPay.apiKey,
+      baseCurrencyCode: normalizeMoonPayCurrencyCode(input.cryptoToken),
+      baseCurrencyAmount: input.cryptoAmount,
+      quoteCurrencyCode: "usd",
+      walletAddress: sourceWalletAddress,
+      refundWalletAddress: sourceWalletAddress,
+      redirectURL: input.redirectUrl,
+      externalCustomerId: input.kycReference,
+      externalTransactionId,
+    });
+
+    return {
+      id: `ramp_${crypto.randomUUID()}`,
+      status: "pending",
+      redirectUrl,
+      reference: externalTransactionId,
+    };
+  },
+};
+
+const RAMP_PROVIDER_REGISTRY: Record<string, RampProviderExecutor> = {
+  moonpay: moonPayRampProvider,
+};
+
+function resolveRampProvider(providerId: string): RampProviderExecutor {
+  const normalizedProvider = providerId.trim().toLowerCase();
+  const provider = RAMP_PROVIDER_REGISTRY[normalizedProvider];
+
+  if (!provider) {
+    throw new AppError("BAD_REQUEST", `Unsupported ramp provider: ${providerId}`);
+  }
+
+  return provider;
+}
+
+async function executeRampWithProvider(
+  c: AppContext,
+  input: ExecuteRampInput
+): Promise<RampExecutionResult> {
+  const scope = await resolveScope(c);
+  const provider = resolveRampProvider(input.provider);
+
+  if (input.direction === "onramp") {
+    return provider.executeOnramp(c, scope, input);
+  }
+
+  return provider.executeOfframp(c, scope, input);
 }
 
 async function resolveWalletFromParams(c: AppContext) {
@@ -1477,32 +1611,12 @@ export async function executeOnramp(c: AppContext) {
     });
   }
 
-  const scope = await resolveScope(c);
-  const destinationWalletAddress = resolveWalletAddress(
-    scope.wallets,
-    parsed.data.destinationWallet,
-    "destinationWallet"
-  );
-  const moonPay = getMoonPayConfig(c);
-
-  const redirectUrl = await buildSignedMoonPayWidgetUrl(moonPay.onrampUrl, moonPay.secretKey, {
-    apiKey: moonPay.apiKey,
-    baseCurrencyCode: "usd",
-    baseCurrencyAmount: parsed.data.fiatAmount,
-    currencyCode: normalizeMoonPayCurrencyCode(parsed.data.cryptoToken),
-    walletAddress: destinationWalletAddress,
-    redirectURL: parsed.data.redirectUrl,
-    externalCustomerId: parsed.data.kycReference,
-    externalTransactionId: `sdp_onramp_${crypto.randomUUID()}`,
+  const ramp = await executeRampWithProvider(c, {
+    ...parsed.data,
+    direction: "onramp",
   });
 
-  return success(c, {
-    ramp: {
-      id: `ramp_${crypto.randomUUID()}`,
-      status: "pending",
-      redirectUrl,
-    },
-  });
+  return success(c, { ramp });
 }
 
 export async function executeOfframp(c: AppContext) {
@@ -1515,33 +1629,10 @@ export async function executeOfframp(c: AppContext) {
     });
   }
 
-  const scope = await resolveScope(c);
-  const sourceWalletAddress = resolveWalletAddress(
-    scope.wallets,
-    parsed.data.sourceWallet,
-    "sourceWallet"
-  );
-  const moonPay = getMoonPayConfig(c);
-  const externalTransactionId = `sdp_offramp_${crypto.randomUUID()}`;
-
-  const redirectUrl = await buildSignedMoonPayWidgetUrl(moonPay.offrampUrl, moonPay.secretKey, {
-    apiKey: moonPay.apiKey,
-    baseCurrencyCode: normalizeMoonPayCurrencyCode(parsed.data.cryptoToken),
-    baseCurrencyAmount: parsed.data.cryptoAmount,
-    quoteCurrencyCode: "usd",
-    walletAddress: sourceWalletAddress,
-    refundWalletAddress: sourceWalletAddress,
-    redirectURL: parsed.data.redirectUrl,
-    externalCustomerId: parsed.data.kycReference,
-    externalTransactionId,
+  const ramp = await executeRampWithProvider(c, {
+    ...parsed.data,
+    direction: "offramp",
   });
 
-  return success(c, {
-    ramp: {
-      id: `ramp_${crypto.randomUUID()}`,
-      status: "pending",
-      redirectUrl,
-      reference: externalTransactionId,
-    },
-  });
+  return success(c, { ramp });
 }

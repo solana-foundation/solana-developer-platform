@@ -339,6 +339,32 @@ describe("Payments routes", () => {
     assertMoonPaySignature(redirect);
   });
 
+  it("returns bad request when provider is not supported", async () => {
+    const res = await app.request(
+      "/v1/payments/ramps/onramp/execute",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          provider: "lightspark",
+          destinationWallet: TEST_WALLET_ID,
+          cryptoToken: "USDC_SOL",
+          fiatCurrency: "USD",
+          fiatAmount: "10.00",
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { code: string; message: string } };
+    expect(body.error.code).toBe("BAD_REQUEST");
+    expect(body.error.message).toContain("Unsupported ramp provider");
+  });
+
   it("returns internal error when MoonPay credentials are not configured", async () => {
     env.MOONPAY_API_KEY = undefined;
 
