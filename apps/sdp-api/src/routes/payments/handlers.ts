@@ -787,8 +787,9 @@ async function lightsparkRequest(
   if (!response.ok) {
     const parsedMessage =
       parsed && typeof parsed === "object"
-        ? ((parsed as { message?: unknown; error?: unknown }).message ??
-          (parsed as { message?: unknown; error?: unknown }).error)
+        ? ((parsed as { message?: unknown; error?: unknown; reason?: unknown }).message ??
+          (parsed as { message?: unknown; error?: unknown; reason?: unknown }).error ??
+          (parsed as { message?: unknown; error?: unknown; reason?: unknown }).reason)
         : undefined;
 
     const message =
@@ -840,6 +841,14 @@ function assertLightsparkAccountId(value: string, fieldName: string): string {
     );
   }
   return normalized;
+}
+
+function toLightsparkMinorUnitsInteger(value: bigint, fieldName: string): number {
+  if (value > BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw new AppError("BAD_REQUEST", `${fieldName} is too large for Lightspark quote minor units`);
+  }
+
+  return Number(value);
 }
 
 function mapLightsparkQuoteStatus(status: string | undefined): RampExecutionStatus {
@@ -979,17 +988,22 @@ const lightsparkRampProvider: RampProviderExecutor = {
       "destinationWallet"
     );
     const cryptoCurrency = normalizeLightsparkCurrencyCode(input.cryptoToken);
-    const fiatAmountMinorUnits = parseDecimalAmount(input.fiatAmount, 2).toString();
+    const fiatAmountMinorUnits = toLightsparkMinorUnitsInteger(
+      parseDecimalAmount(input.fiatAmount, 2),
+      "fiatAmount"
+    );
     const config = getLightsparkConfig(c);
 
     const quoteResponse = await lightsparkRequest(config, "quotes", {
       method: "POST",
       body: {
         source: {
+          sourceType: "REALTIME_FUNDING",
           customerId,
           currency: "USD",
         },
         destination: {
+          destinationType: "ACCOUNT",
           accountId: destinationAccountId,
           currency: cryptoCurrency,
         },
@@ -1016,20 +1030,22 @@ const lightsparkRampProvider: RampProviderExecutor = {
       "kycReference"
     );
     const cryptoCurrency = normalizeLightsparkCurrencyCode(input.cryptoToken);
-    const cryptoAmountMinorUnits = parseDecimalAmount(
-      input.cryptoAmount,
-      getLightsparkCurrencyDecimals(cryptoCurrency)
-    ).toString();
+    const cryptoAmountMinorUnits = toLightsparkMinorUnitsInteger(
+      parseDecimalAmount(input.cryptoAmount, getLightsparkCurrencyDecimals(cryptoCurrency)),
+      "cryptoAmount"
+    );
     const config = getLightsparkConfig(c);
 
     const quoteResponse = await lightsparkRequest(config, "quotes", {
       method: "POST",
       body: {
         source: {
+          sourceType: "ACCOUNT",
           accountId: sourceAccountId,
           currency: cryptoCurrency,
         },
         destination: {
+          destinationType: "ACCOUNT",
           accountId: destinationAccountId,
           currency: "USD",
         },

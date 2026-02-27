@@ -413,13 +413,15 @@ describe("Payments routes", () => {
     expect(headers.Authorization).toBe(lightsparkBasicAuthHeader());
 
     const payload = JSON.parse(String(requestInit?.body)) as {
-      lockedCurrencyAmount: string;
-      source: { customerId: string; currency: string };
-      destination: { accountId: string; currency: string };
+      lockedCurrencyAmount: number;
+      source: { sourceType: string; customerId: string; currency: string };
+      destination: { destinationType: string; accountId: string; currency: string };
     };
-    expect(payload.lockedCurrencyAmount).toBe("1234");
+    expect(payload.lockedCurrencyAmount).toBe(1234);
+    expect(payload.source.sourceType).toBe("REALTIME_FUNDING");
     expect(payload.source.customerId).toBe("Customer:cus_123");
     expect(payload.source.currency).toBe("USD");
+    expect(payload.destination.destinationType).toBe("ACCOUNT");
     expect(payload.destination.accountId).toBe("ExternalAccount:acc_destination_123");
     expect(payload.destination.currency).toBe("BTC");
     fetchSpy.mockRestore();
@@ -492,13 +494,15 @@ describe("Payments routes", () => {
     );
 
     const quoteCallPayload = JSON.parse(String(fetchSpy.mock.calls[0]?.[1]?.body)) as {
-      lockedCurrencyAmount: string;
-      source: { accountId: string; currency: string };
-      destination: { accountId: string; currency: string };
+      lockedCurrencyAmount: number;
+      source: { sourceType: string; accountId: string; currency: string };
+      destination: { destinationType: string; accountId: string; currency: string };
     };
-    expect(quoteCallPayload.lockedCurrencyAmount).toBe("1500000");
+    expect(quoteCallPayload.lockedCurrencyAmount).toBe(1500000);
+    expect(quoteCallPayload.source.sourceType).toBe("ACCOUNT");
     expect(quoteCallPayload.source.accountId).toBe("InternalAccount:acc_source_123");
     expect(quoteCallPayload.source.currency).toBe("BTC");
+    expect(quoteCallPayload.destination.destinationType).toBe("ACCOUNT");
     expect(quoteCallPayload.destination.accountId).toBe("ExternalAccount:acc_destination_456");
     expect(quoteCallPayload.destination.currency).toBe("USD");
     fetchSpy.mockRestore();
