@@ -11,7 +11,7 @@ import { formatDecimalAmount, isDecimalString, parseDecimalAmount } from "@/lib/
 import { getAuth } from "@/lib/auth";
 import { AppError } from "@/lib/errors";
 import { paginated, success } from "@/lib/response";
-import { assertValidAddress } from "@/lib/solana";
+import { assertValidAddress, isAddress } from "@/lib/solana";
 import { createFeePaymentAdapter } from "@/services/adapters/fee-payment";
 import { createSigningService } from "@/services/domain/signing.service";
 import { withHeliusApiKey } from "@/services/rpc-relay.service";
@@ -675,6 +675,14 @@ type LightsparkQuote = {
   };
 };
 
+type LightsparkExternalAccount = {
+  id?: string;
+  accountInfo?: {
+    accountType?: string;
+    address?: string;
+  };
+};
+
 const LIGHTSPARK_DEFAULT_GRID_API_URL = "https://api.lightspark.com/grid/2025-10-13";
 
 function getMoonPayConfig(c: AppContext): MoonPayConfig {
@@ -843,6 +851,143 @@ function assertLightsparkAccountId(value: string, fieldName: string): string {
   return normalized;
 }
 
+function parseLightsparkExternalAccount(payload: unknown): LightsparkExternalAccount {
+  if (typeof payload !== "object" || payload === null) {
+    return {};
+  }
+
+  const raw = payload as {
+    id?: unknown;
+    accountInfo?: {
+      accountType?: unknown;
+      address?: unknown;
+    };
+  };
+
+  return {
+    id: typeof raw.id === "string" ? raw.id : undefined,
+    accountInfo:
+      raw.accountInfo && typeof raw.accountInfo === "object"
+        ? {
+            accountType:
+              typeof raw.accountInfo.accountType === "string"
+                ? raw.accountInfo.accountType
+                : undefined,
+            address:
+              typeof raw.accountInfo.address === "string" ? raw.accountInfo.address : undefined,
+          }
+        : undefined,
+  };
+}
+
+async function listLightsparkCustomerExternalAccounts(
+  config: LightsparkConfig,
+  customerId: string,
+  currency: string
+): Promise<LightsparkExternalAccount[]> {
+  const externalAccounts: LightsparkExternalAccount[] = [];
+  let cursor: string | undefined;
+
+  for (let page = 0; page < 10; page += 1) {
+    const query = new URLSearchParams();
+    query.set("customerId", customerId);
+    query.set("currency", currency);
+    query.set("limit", "100");
+    if (cursor) {
+      query.set("cursor", cursor);
+    }
+
+    const response = await lightsparkRequest(config, `customers/external-accounts?${query}`, {
+      method: "GET",
+    });
+
+    if (typeof response !== "object" || response === null) {
+      throw new AppError("BAD_REQUEST", "Lightspark external accounts response is invalid");
+    }
+
+    const payload = response as {
+      data?: unknown;
+      hasMore?: unknown;
+      nextCursor?: unknown;
+    };
+
+    const accounts = Array.isArray(payload.data) ? payload.data : [];
+    externalAccounts.push(...accounts.map(parseLightsparkExternalAccount));
+
+    const hasMore = payload.hasMore === true;
+    cursor =
+      typeof payload.nextCursor === "string" && payload.nextCursor.length > 0
+        ? payload.nextCursor
+        : undefined;
+
+    if (!hasMore || !cursor) {
+      break;
+    }
+  }
+
+  return externalAccounts;
+}
+
+async function resolveLightsparkOnrampDestinationAccountId(
+  config: LightsparkConfig,
+  customerId: string,
+  destinationWallet: string,
+  currency: string
+): Promise<string> {
+  const normalized = destinationWallet.trim();
+  if (normalized.length === 0) {
+    throw new AppError("BAD_REQUEST", "destinationWallet is required for lightspark");
+  }
+
+  if (normalized.includes(":")) {
+    return assertLightsparkAccountId(normalized, "destinationWallet");
+  }
+
+  if (!isAddress(normalized)) {
+    throw new AppError(
+      "BAD_REQUEST",
+      "destinationWallet must be a Lightspark account id (for example ExternalAccount:...) or a Solana wallet address"
+    );
+  }
+
+  const externalAccounts = await listLightsparkCustomerExternalAccounts(
+    config,
+    customerId,
+    currency
+  );
+  const existing = externalAccounts.find((account) => {
+    if (!account.id) {
+      return false;
+    }
+    const accountType = account.accountInfo?.accountType?.toUpperCase();
+    const address = account.accountInfo?.address;
+    return accountType === "SOLANA_WALLET" && address === normalized;
+  });
+
+  if (existing?.id) {
+    return existing.id;
+  }
+
+  const createResponse = await lightsparkRequest(config, "customers/external-accounts", {
+    method: "POST",
+    body: {
+      customerId,
+      currency,
+      accountInfo: {
+        accountType: "SOLANA_WALLET",
+        address: normalized,
+      },
+    },
+  });
+
+  const created = parseLightsparkExternalAccount(createResponse);
+  if (!created.id) {
+    throw new AppError("BAD_REQUEST", "Lightspark external account response is missing id");
+  }
+
+  return created.id;
+}
+
 function toLightsparkMinorUnitsInteger(value: bigint, fieldName: string): number {
   if (value > BigInt(Number.MAX_SAFE_INTEGER)) {
     throw new AppError("BAD_REQUEST", `${fieldName} is too large for Lightspark quote minor units`);
@@ -983,16 +1128,18 @@ const lightsparkRampProvider: RampProviderExecutor = {
       );
     }
 
-    const destinationAccountId = assertLightsparkAccountId(
-      input.destinationWallet,
-      "destinationWallet"
-    );
     const cryptoCurrency = normalizeLightsparkCurrencyCode(input.cryptoToken);
     const fiatAmountMinorUnits = toLightsparkMinorUnitsInteger(
       parseDecimalAmount(input.fiatAmount, 2),
       "fiatAmount"
     );
     const config = getLightsparkConfig(c);
+    const destinationAccountId = await resolveLightsparkOnrampDestinationAccountId(
+      config,
+      customerId,
+      input.destinationWallet,
+      cryptoCurrency
+    );
 
     const quoteResponse = await lightsparkRequest(config, "quotes", {
       method: "POST",
