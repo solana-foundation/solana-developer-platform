@@ -5,7 +5,7 @@ import type {
 } from "../types";
 
 const DEFAULT_TRM_API_BASE_URL = "https://api.trmlabs.com";
-const TRM_ADDRESS_SCREENING_PATH = "/api/v2/screening/addresses";
+const TRM_ADDRESS_SCREENING_PATH = "/public/v2/screening/addresses";
 
 type TrmAddressScreeningResponse = Array<{
   addressHighestRiskScoreLevel?: unknown;

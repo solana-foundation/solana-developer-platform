@@ -426,7 +426,7 @@ describe("Compliance routes", () => {
     expect(trm?.riskLevel).toBe("High");
 
     const [url, init] = fetchMock.mock.calls[0] ?? [];
-    expect(String(url)).toContain("https://api.trmlabs.com/api/v2/screening/addresses");
+    expect(String(url)).toContain("https://api.trmlabs.com/public/v2/screening/addresses");
     expect((init as RequestInit | undefined)?.method).toBe("POST");
     expect((init as RequestInit | undefined)?.headers).toMatchObject({
       "Content-Type": "application/json",
