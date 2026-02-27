@@ -345,12 +345,13 @@ const moonpayCurrencyCodeSchema = z
   .string()
   .regex(/^[a-zA-Z0-9_]+$/)
   .openapi({
-    description: "MoonPay currency code (for example: `usdc_sol`).",
+    description: "Provider currency code (for example: `usdc_sol` for MoonPay, `BTC` for Grid).",
     example: "usdc_sol",
   });
 
 const rampProviderSchema = z.string().min(1).default("moonpay").openapi({
-  description: "Ramp provider identifier. Defaults to MoonPay.",
+  description:
+    "Ramp provider identifier. Supported values: moonpay, lightspark, auto. Defaults to moonpay.",
   example: "moonpay",
   default: "moonpay",
 });
@@ -412,6 +413,9 @@ export const executeOfframpRequestSchema = z
 export const onrampExecutionSchema = z
   .object({
     id: z.string().openapi({ description: "Ramp execution identifier.", example: "ramp_example" }),
+    provider: z
+      .string()
+      .openapi({ description: "Selected provider used for execution.", example: "moonpay" }),
     status: z
       .enum(["pending", "processing", "completed", "failed"])
       .openapi({ description: "Ramp execution status.", example: "pending" }),
@@ -420,12 +424,19 @@ export const onrampExecutionSchema = z
       .url()
       .optional()
       .openapi({ description: "Redirect URL for the ramp provider." }),
+    reference: z
+      .string()
+      .optional()
+      .openapi({ description: "Provider quote or transaction reference." }),
   })
   .openapi({ description: "On-ramp execution status." });
 
 export const offrampExecutionSchema = z
   .object({
     id: z.string().openapi({ description: "Ramp execution identifier.", example: "ramp_example" }),
+    provider: z
+      .string()
+      .openapi({ description: "Selected provider used for execution.", example: "moonpay" }),
     status: z
       .enum(["pending", "processing", "completed", "failed"])
       .openapi({ description: "Ramp execution status.", example: "pending" }),
