@@ -32,6 +32,7 @@ import payments from "@/routes/payments";
 import projects from "@/routes/projects";
 import rpc from "@/routes/rpc";
 import webhooks from "@/routes/webhooks";
+import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
 
 // Create app
 const app = new Hono<{ Bindings: Env }>();
@@ -160,4 +161,10 @@ app.notFound((c) => {
 // Export
 // ═══════════════════════════════════════════════════════════════════════════
 
-export default app;
+// Attach the scheduled handler to the Hono app so Cloudflare Workers can
+// invoke it for cron triggers, while preserving app.request() for tests.
+export default Object.assign(app, {
+  async scheduled(_event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
+    ctx.waitUntil(trackPendingTransfers(env));
+  },
+});

@@ -411,5 +411,42 @@ export async function getSignaturesForAddress(
   }));
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Signature Status
+// ═══════════════════════════════════════════════════════════════════════════
+
+export interface SignatureStatusInfo {
+  slot: bigint;
+  confirmations: bigint | null;
+  confirmationStatus: "processed" | "confirmed" | "finalized" | null;
+  err: unknown | null;
+}
+
+/**
+ * Batch-fetch status for multiple transaction signatures
+ */
+export async function getSignatureStatuses(
+  rpc: SolanaRpc,
+  signatures: Signature[]
+): Promise<Array<SignatureStatusInfo | null>> {
+  if (signatures.length === 0) {
+    return [];
+  }
+
+  const response = await rpc.getSignatureStatuses(signatures).send();
+
+  return response.value.map((item) =>
+    item
+      ? {
+          slot: item.slot,
+          confirmations: item.confirmations ?? null,
+          confirmationStatus:
+            (item.confirmationStatus as SignatureStatusInfo["confirmationStatus"]) ?? null,
+          err: item.err ?? null,
+        }
+      : null
+  );
+}
+
 // Re-export types
 export type { SolanaRpc, Commitment, Signature, Blockhash };
