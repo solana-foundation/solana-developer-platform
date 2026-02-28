@@ -11,6 +11,7 @@ const rootMetaPath = path.resolve(__dirname, "../content/docs/meta.json");
 
 const HTTP_METHODS = new Set(["get", "post", "put", "patch", "delete", "head", "options"]);
 const SOURCE_PATH = "apps/sdp-api-specs-draft/generated/openapi.json";
+const HIDDEN_TAG_SLUGS = new Set(["rpc", "admin", "onboarding", "auth", "organizations", "members"]);
 
 const slugify = (value) =>
   value
@@ -113,16 +114,13 @@ ${rows}
 `;
 };
 
-const renderIndexPage = ({ totalOperations, tagPages }) => {
+const renderIndexPage = ({ tagPages }) => {
   const links = tagPages.map((tagPage) => `- [${tagPage.title}](./${tagPage.slug})`).join("\n");
 
   return `---
 title: API Reference
 description: Endpoint index from the repository OpenAPI spec.
 ---
-
-- Total endpoints: ${totalOperations}
-- Sections: ${tagPages.length}
 
 ${links}
 `;
@@ -138,6 +136,10 @@ const run = async () => {
   const groupedOperations = new Map();
   for (const operation of operations) {
     const primaryTag = operation.tags[0] || "Other";
+    if (HIDDEN_TAG_SLUGS.has(slugify(primaryTag))) {
+      continue;
+    }
+
     if (!groupedOperations.has(primaryTag)) {
       groupedOperations.set(primaryTag, []);
     }
@@ -157,6 +159,10 @@ const run = async () => {
     .sort((left, right) => left.localeCompare(right));
 
   orderedTags.push(...additionalTags);
+  const exposedOperationsCount = [...groupedOperations.values()].reduce(
+    (total, operationsInTag) => total + operationsInTag.length,
+    0
+  );
 
   await fs.mkdir(outputDir, { recursive: true });
 
@@ -185,7 +191,6 @@ const run = async () => {
   }
 
   const indexContent = renderIndexPage({
-    totalOperations: operations.length,
     tagPages,
   });
 
@@ -249,7 +254,7 @@ const run = async () => {
   });
 
   console.log(
-    `Generated ${operations.length} endpoints across ${tagPages.length} API sections from ${SOURCE_PATH}`
+    `Generated ${exposedOperationsCount} endpoints across ${tagPages.length} API sections from ${SOURCE_PATH}`
   );
 };
 

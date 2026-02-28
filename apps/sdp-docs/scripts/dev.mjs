@@ -1,4 +1,6 @@
 import { spawn } from "node:child_process";
+import { rm } from "node:fs/promises";
+import { resolve } from "node:path";
 
 const run = (command, args) =>
   new Promise((resolve, reject) => {
@@ -18,21 +20,37 @@ const run = (command, args) =>
   });
 
 const runDev = async () => {
+  await rm(resolve(".next"), { recursive: true, force: true });
   await run("pnpm", ["generate:api"]);
-  await run("pnpm", ["exec", "fumadocs-mdx"]);
-  await run("node", ["scripts/patch-fumadocs-source.mjs"]);
+  await run("pnpm", ["generate:source"]);
+
+  const sourceWatcher = spawn("node", ["scripts/watch-source.mjs"], {
+    stdio: "inherit",
+    shell: false,
+  });
 
   const next = spawn("pnpm", ["exec", "next", "dev", "--port", "3001"], {
     stdio: "inherit",
     shell: false,
   });
 
-  const shutdown = () => next.kill("SIGTERM");
+  const shutdown = () => {
+    sourceWatcher.kill("SIGTERM");
+    next.kill("SIGTERM");
+  };
 
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
 
+  sourceWatcher.on("exit", (code) => {
+    if (code && code !== 0) {
+      next.kill("SIGTERM");
+      process.exit(code);
+    }
+  });
+
   next.on("exit", (code) => {
+    sourceWatcher.kill("SIGTERM");
     process.exit(code ?? 0);
   });
 };

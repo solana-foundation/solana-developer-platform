@@ -1,0 +1,29 @@
+import { start } from "fumadocs-mdx/next";
+import { spawn } from "node:child_process";
+
+const run = (command, args) =>
+  new Promise((resolvePromise, rejectPromise) => {
+    const child = spawn(command, args, {
+      stdio: "inherit",
+      shell: false,
+    });
+
+    child.on("error", rejectPromise);
+    child.on("exit", (code) => {
+      if (code === 0) {
+        resolvePromise();
+      } else {
+        rejectPromise(new Error(`${command} ${args.join(" ")} failed with code ${code ?? -1}`));
+      }
+    });
+  });
+
+const runSourceGeneration = async () => {
+  await start(false, "source.config.ts", ".source");
+  await run("node", ["scripts/patch-fumadocs-source.mjs"]);
+};
+
+runSourceGeneration().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
