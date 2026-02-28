@@ -1,5 +1,5 @@
-import { start } from "fumadocs-mdx/next";
 import { spawn } from "node:child_process";
+import { start } from "fumadocs-mdx/next";
 
 const run = (command, args) =>
   new Promise((resolvePromise, rejectPromise) => {
