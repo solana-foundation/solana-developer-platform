@@ -1,0 +1,8 @@
+{
+  "name": "sdp-api-specs-draft",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "pnpm --filter @sdp/api openapi:generate"
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "name": "sdp-docs",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "dev:local": "node scripts/dev.mjs",
+    "build": "pnpm generate:api && pnpm generate:source && next build",
+    "start": "next start --port 3001",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint",
+    "generate:api": "pnpm -C ../sdp-api run openapi:generate && node scripts/generate-api-docs.mjs",
+    "generate:source": "node scripts/generate-source.mjs",
+    "watch:source": "node scripts/watch-source.mjs"
+  },
+  "dependencies": {
+    "fumadocs-core": "^15.7.4",
+    "fumadocs-mdx": "^11.7.4",
+    "fumadocs-ui": "^15.7.4",
+    "lucide-react": "0.562.0",
+    "next": "15.5.12",
+    "react": "19.2.3",
+    "react-dom": "19.2.3"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/mdx": "^2.0.13",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "15.5.12",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  }
+}
