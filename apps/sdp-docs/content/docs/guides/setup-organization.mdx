@@ -1,0 +1,150 @@
+---
+title: Set Up Your Organization
+description: Create and configure your SDP organization through the dashboard or API.
+---
+
+An organization is the top-level container for all your SDP resources — projects, wallets, API keys, and tokens. Every API request is scoped to an organization.
+
+<Tabs items={["Dashboard", "API"]}>
+<Tab value="Dashboard">
+
+### 1. Sign up
+
+Go to the SDP dashboard and click **Sign up**. Authentication is handled by Clerk — you can use email, Google, or GitHub.
+
+### 2. Create or select an organization
+
+After signing in you land on the dashboard. If you don't have an organization yet, the **Organization Switcher** in the top-left of the sidebar prompts you to create one.
+
+### 3. Link your organization
+
+Navigate to **Wallets** in the sidebar. The onboarding card shows your organization details:
+
+- **Organization name**
+- **Organization slug** (URL-safe identifier)
+- **Clerk organization ID**
+
+Click **Confirm and link organization** to register your Clerk org with the SDP backend.
+
+### 4. Next steps
+
+- [Set up wallets](/docs/guides/setup-wallets) for signing transactions
+- [Create API keys](/docs/guides/manage-api-keys) for programmatic access
+- [Create your first token](/docs/guides/create-a-token)
+
+</Tab>
+<Tab value="API">
+
+### 1. Create an organization
+
+<Tabs items={["curl", "TypeScript", "Java"]}>
+<Tab value="curl">
+```bash
+curl -X POST https://api.solana.com/v1/organizations \
+  -H "Content-Type: application/json" \
+  -H "x-organization-registration-token: YOUR_REGISTRATION_TOKEN" \
+  -d '{
+    "name": "Acme Corp",
+    "slug": "acme-corp",
+    "email": "admin@acme.com",
+    "returnFullApiKey": true
+  }'
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript
+const response = await fetch("https://api.solana.com/v1/organizations", {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+    "x-organization-registration-token": "YOUR_REGISTRATION_TOKEN",
+  },
+  body: JSON.stringify({
+    name: "Acme Corp",
+    slug: "acme-corp",
+    email: "admin@acme.com",
+    returnFullApiKey: true,
+  }),
+});
+const { data } = await response.json();
+```
+</Tab>
+<Tab value="Java">
+```java
+HttpRequest request = HttpRequest.newBuilder()
+    .uri(URI.create("https://api.solana.com/v1/organizations"))
+    .header("Content-Type", "application/json")
+    .header("x-organization-registration-token", "YOUR_REGISTRATION_TOKEN")
+    .POST(HttpRequest.BodyPublishers.ofString("""
+        {
+          "name": "Acme Corp",
+          "slug": "acme-corp",
+          "email": "admin@acme.com",
+          "returnFullApiKey": true
+        }"""))
+    .build();
+HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+```
+</Tab>
+</Tabs>
+
+The response includes your organization and first API key. Set `returnFullApiKey: true` to receive the full key material — **it is only returned once**.
+
+### 2. Update settings (optional)
+
+<Tabs items={["curl", "TypeScript", "Java"]}>
+<Tab value="curl">
+```bash
+curl -X PATCH https://api.solana.com/v1/organizations/org_abc123 \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "settings": {
+      "defaultEnvironment": "sandbox",
+      "allowedIpAddresses": ["203.0.113.0/24"]
+    }
+  }'
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript
+await fetch("https://api.solana.com/v1/organizations/org_abc123", {
+  method: "PATCH",
+  headers: {
+    "Authorization": "Bearer sk_test_...",
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({
+    settings: {
+      defaultEnvironment: "sandbox",
+      allowedIpAddresses: ["203.0.113.0/24"],
+    },
+  }),
+});
+```
+</Tab>
+<Tab value="Java">
+```java
+HttpRequest request = HttpRequest.newBuilder()
+    .uri(URI.create("https://api.solana.com/v1/organizations/org_abc123"))
+    .header("Authorization", "Bearer sk_test_...")
+    .header("Content-Type", "application/json")
+    .method("PATCH", HttpRequest.BodyPublishers.ofString("""
+        {
+          "settings": {
+            "defaultEnvironment": "sandbox",
+            "allowedIpAddresses": ["203.0.113.0/24"]
+          }
+        }"""))
+    .build();
+```
+</Tab>
+</Tabs>
+
+### 3. Next steps
+
+- [Set up wallets](/docs/guides/setup-wallets) to enable signing
+- [Create additional API keys](/docs/guides/manage-api-keys) with scoped roles
+
+</Tab>
+</Tabs>

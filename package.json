@@ -21,10 +21,12 @@
   "scripts": {
     "dev": "turbo run dev:local",
     "dev:web": "turbo run dev --filter=sdp-web",
+    "dev:docs": "turbo run dev --filter=sdp-docs",
     "dev:api": "turbo run dev --filter=@sdp/api",
     "dev:api:local": "turbo run dev:local --filter=@sdp/api",
     "build": "turbo run build",
     "build:web": "turbo run build --filter=sdp-web",
+    "build:docs": "turbo run build --filter=sdp-docs",
     "build:api": "turbo run build --filter=@sdp/api",
     "typecheck": "turbo run typecheck",
     "typecheck:all": "turbo run typecheck",

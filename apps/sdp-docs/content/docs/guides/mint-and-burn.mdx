@@ -1,0 +1,304 @@
+---
+title: Mint and Burn Tokens
+description: Increase or decrease token supply by minting and burning.
+---
+
+After [deploying a token](/docs/guides/deploy-a-token), you can mint new tokens to any address and burn tokens from accounts you control. Force-burn lets admins burn from any account without the holder's signature.
+
+These operations are currently API-only.
+
+## Prerequisites
+
+- A deployed token (status: `active`)
+- The `tokens:write` permission (or `tokens:admin` for force-burn)
+
+## Mint tokens
+
+### Execute mode
+
+<Tabs items={["curl", "TypeScript", "Java"]}>
+<Tab value="curl">
+```bash
+curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/mint \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: mint-001" \
+  -d '{
+    "mint": {
+      "destination": "7xKXz...9fGh",
+      "amount": "1000000",
+      "memo": "Initial distribution"
+    }
+  }'
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript
+const response = await fetch(
+  "https://api.solana.com/v1/issuance/tokens/tok_abc123/mint",
+  {
+    method: "POST",
+    headers: {
+      "Authorization": "Bearer sk_test_...",
+      "Content-Type": "application/json",
+      "Idempotency-Key": "mint-001",
+    },
+    body: JSON.stringify({
+      mint: {
+        destination: "7xKXz...9fGh",
+        amount: "1000000",
+        memo: "Initial distribution",
+      },
+    }),
+  }
+);
+const { data } = await response.json();
+```
+</Tab>
+<Tab value="Java">
+```java
+HttpRequest request = HttpRequest.newBuilder()
+    .uri(URI.create("https://api.solana.com/v1/issuance/tokens/tok_abc123/mint"))
+    .header("Authorization", "Bearer sk_test_...")
+    .header("Content-Type", "application/json")
+    .header("Idempotency-Key", "mint-001")
+    .POST(HttpRequest.BodyPublishers.ofString("""
+        {
+          "mint": {
+            "destination": "7xKXz...9fGh",
+            "amount": "1000000",
+            "memo": "Initial distribution"
+          }
+        }"""))
+    .build();
+```
+</Tab>
+</Tabs>
+
+The `amount` is in the smallest unit. For a token with 6 decimals, `"1000000"` equals 1.0 token.
+
+### Prepare mode
+
+Add `/prepare` to simulate before signing:
+
+<Tabs items={["curl", "TypeScript", "Java"]}>
+<Tab value="curl">
+```bash
+curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/mint/prepare \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "mint": {
+      "destination": "7xKXz...9fGh",
+      "amount": "1000000"
+    },
+    "options": { "simulate": true }
+  }'
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript
+const response = await fetch(
+  "https://api.solana.com/v1/issuance/tokens/tok_abc123/mint/prepare",
+  {
+    method: "POST",
+    headers: {
+      "Authorization": "Bearer sk_test_...",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      mint: { destination: "7xKXz...9fGh", amount: "1000000" },
+      options: { simulate: true },
+    }),
+  }
+);
+const { data } = await response.json();
+// data.preparedTransaction.serialized — sign this
+// data.simulation — { success, unitsConsumed, logs }
+```
+</Tab>
+<Tab value="Java">
+```java
+HttpRequest request = HttpRequest.newBuilder()
+    .uri(URI.create("https://api.solana.com/v1/issuance/tokens/tok_abc123/mint/prepare"))
+    .header("Authorization", "Bearer sk_test_...")
+    .header("Content-Type", "application/json")
+    .POST(HttpRequest.BodyPublishers.ofString("""
+        {
+          "mint": {
+            "destination": "7xKXz...9fGh",
+            "amount": "1000000"
+          },
+          "options": { "simulate": true }
+        }"""))
+    .build();
+```
+</Tab>
+</Tabs>
+
+### Priority fees
+
+Control transaction priority with `options.priorityFee`:
+
+Values: `"none"`, `"low"`, `"medium"`, `"high"`, or a specific number in micro-lamports.
+
+## Burn tokens
+
+Burn tokens from an account your wallet controls:
+
+<Tabs items={["curl", "TypeScript", "Java"]}>
+<Tab value="curl">
+```bash
+curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/burn \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: burn-001" \
+  -d '{
+    "burn": {
+      "source": "3xYZa...2aBc",
+      "amount": "500000",
+      "memo": "Redemption"
+    }
+  }'
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript
+await fetch(
+  "https://api.solana.com/v1/issuance/tokens/tok_abc123/burn",
+  {
+    method: "POST",
+    headers: {
+      "Authorization": "Bearer sk_test_...",
+      "Content-Type": "application/json",
+      "Idempotency-Key": "burn-001",
+    },
+    body: JSON.stringify({
+      burn: {
+        source: "3xYZa...2aBc",
+        amount: "500000",
+        memo: "Redemption",
+      },
+    }),
+  }
+);
+```
+</Tab>
+<Tab value="Java">
+```java
+HttpRequest request = HttpRequest.newBuilder()
+    .uri(URI.create("https://api.solana.com/v1/issuance/tokens/tok_abc123/burn"))
+    .header("Authorization", "Bearer sk_test_...")
+    .header("Content-Type", "application/json")
+    .header("Idempotency-Key", "burn-001")
+    .POST(HttpRequest.BodyPublishers.ofString("""
+        {
+          "burn": {
+            "source": "3xYZa...2aBc",
+            "amount": "500000",
+            "memo": "Redemption"
+          }
+        }"""))
+    .build();
+```
+</Tab>
+</Tabs>
+
+The `source` must be a token account address (not a wallet address).
+
+## Force-burn (admin)
+
+Burn tokens from any account without the holder's signature. Requires `tokens:admin` permission:
+
+<Tabs items={["curl", "TypeScript", "Java"]}>
+<Tab value="curl">
+```bash
+curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/force-burn \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: force-burn-001" \
+  -d '{
+    "forceBurn": {
+      "source": "3xYZa...2aBc",
+      "amount": "500000",
+      "memo": "Compliance action"
+    }
+  }'
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript
+await fetch(
+  "https://api.solana.com/v1/issuance/tokens/tok_abc123/force-burn",
+  {
+    method: "POST",
+    headers: {
+      "Authorization": "Bearer sk_test_...",
+      "Content-Type": "application/json",
+      "Idempotency-Key": "force-burn-001",
+    },
+    body: JSON.stringify({
+      forceBurn: {
+        source: "3xYZa...2aBc",
+        amount: "500000",
+        memo: "Compliance action",
+      },
+    }),
+  }
+);
+```
+</Tab>
+<Tab value="Java">
+```java
+HttpRequest request = HttpRequest.newBuilder()
+    .uri(URI.create("https://api.solana.com/v1/issuance/tokens/tok_abc123/force-burn"))
+    .header("Authorization", "Bearer sk_test_...")
+    .header("Content-Type", "application/json")
+    .header("Idempotency-Key", "force-burn-001")
+    .POST(HttpRequest.BodyPublishers.ofString("""
+        {
+          "forceBurn": {
+            "source": "3xYZa...2aBc",
+            "amount": "500000",
+            "memo": "Compliance action"
+          }
+        }"""))
+    .build();
+```
+</Tab>
+</Tabs>
+
+Both burn and force-burn also support `/prepare` endpoints for client-side signing.
+
+## Refresh supply
+
+After minting or burning, refresh the cached supply:
+
+<Tabs items={["curl", "TypeScript", "Java"]}>
+<Tab value="curl">
+```bash
+curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/supply/refresh \
+  -H "Authorization: Bearer sk_test_..."
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript
+await fetch(
+  "https://api.solana.com/v1/issuance/tokens/tok_abc123/supply/refresh",
+  {
+    method: "POST",
+    headers: { "Authorization": "Bearer sk_test_..." },
+  }
+);
+```
+</Tab>
+<Tab value="Java">
+```java
+HttpRequest request = HttpRequest.newBuilder()
+    .uri(URI.create("https://api.solana.com/v1/issuance/tokens/tok_abc123/supply/refresh"))
+    .header("Authorization", "Bearer sk_test_...")
+    .POST(HttpRequest.BodyPublishers.noBody())
+    .build();
+```
+</Tab>
+</Tabs>
