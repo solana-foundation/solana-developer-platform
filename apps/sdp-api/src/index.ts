@@ -19,6 +19,7 @@ import type { Env } from "@/types/env";
 import allowlist from "@/routes/allowlist";
 import apiKeys from "@/routes/api-keys";
 import auth from "@/routes/auth";
+import compliance from "@/routes/compliance";
 import wallets from "@/routes/custody";
 import docs from "@/routes/docs";
 // Routes
@@ -94,6 +95,7 @@ v1.route("/issuance", issuance);
 v1.route("/wallets", wallets);
 v1.route("/onboarding", onboarding);
 v1.route("/payments", payments);
+v1.route("/compliance", compliance);
 
 app.route("/v1", v1);
 

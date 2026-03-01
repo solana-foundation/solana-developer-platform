@@ -48,6 +48,17 @@ FEE_PAYMENT_PROVIDER=kora
 # Clerk webhook (required for Clerk org linking)
 CLERK_WEBHOOK_SECRET=whsec_...
 
+# Compliance providers
+# RANGE_API_KEY=YOUR_RANGE_API_KEY
+# RANGE_API_BASE_URL=https://api.range.org
+# ELLIPTIC_API_TOKEN=YOUR_ELLIPTIC_BEARER_TOKEN
+# ELLIPTIC_API_KEY=YOUR_ELLIPTIC_API_KEY
+# ELLIPTIC_API_SECRET=YOUR_ELLIPTIC_API_SECRET_BASE64
+# ELLIPTIC_API_BASE_URL=https://aml-api.elliptic.co
+# TRM_API_KEY=YOUR_TRM_API_KEY
+# TRM_API_BASE_URL=https://api.trmlabs.com
+# CHAINALYSIS_API_KEY=YOUR_CHAINALYSIS_API_KEY
+# CHAINALYSIS_API_BASE_URL=https://api.chainalysis.com
 # MoonPay ramps (widget-based)
 # MOONPAY_API_KEY=pk_test_...
 # MOONPAY_SECRET_KEY=sk_test_...

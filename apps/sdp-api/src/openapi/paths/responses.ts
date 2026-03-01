@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import {
   actionSuccessSchema,
+  addressScreeningResponseSchema,
   allowlistEntriesResponseSchema,
   allowlistEntrySchema,
   apiKeyDetailSchema,
@@ -117,6 +118,7 @@ export const custodyConfigResponse = successResponseSchema(custodyConfigResponse
 export const custodyWalletResponse = successResponseSchema(custodyWalletResponseSchema);
 export const custodyWalletsResponse = successResponseSchema(custodyWalletsResponseSchema);
 export const custodySignerCheckResponse = successResponseSchema(signerCheckResponseSchema);
+export const addressScreeningResponse = successResponseSchema(addressScreeningResponseSchema);
 
 export const allowlistEntriesResponse = successResponseSchema(allowlistEntriesResponseSchema);
 export const allowlistEntryResponse = successResponseSchema(

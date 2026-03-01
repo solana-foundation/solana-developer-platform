@@ -188,7 +188,10 @@ function getDashboardPageConfig(pathname: string): DashboardPageConfig {
     };
   }
   if (pathname.startsWith("/dashboard/payments")) {
-    return { title: "Payments" };
+    return {
+      title: "Payments",
+      quickActionsLeft: <IssuanceHeaderTabs />,
+    };
   }
   if (pathname.startsWith("/dashboard/members")) {
     return { title: "Members" };
