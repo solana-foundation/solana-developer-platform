@@ -585,12 +585,13 @@ type RampExecutionResult = {
 };
 
 type BvnkComplianceInput = {
-  requesterIpAddress?: string;
   partyDetails?: Record<string, unknown>[];
 };
 
+type RampProviderId = "moonpay" | "lightspark" | "bvnk";
+
 type ExecuteOnrampInput = {
-  provider: string;
+  provider: RampProviderId;
   destinationWallet: string;
   cryptoToken: string;
   fiatCurrency?: "USD";
@@ -601,7 +602,7 @@ type ExecuteOnrampInput = {
 };
 
 type ExecuteOfframpInput = {
-  provider: string;
+  provider: RampProviderId;
   sourceWallet: string;
   cryptoToken: string;
   fiatCurrency?: "USD";
@@ -951,7 +952,11 @@ function mapBvnkPaymentStatus(status: string | undefined): RampExecutionStatus {
   }
 
   const normalized = status.trim().toUpperCase();
-  if (normalized.includes("COMPLETE") || normalized.includes("PAID") || normalized.includes("SUCCESS")) {
+  if (
+    normalized.includes("COMPLETE") ||
+    normalized.includes("PAID") ||
+    normalized.includes("SUCCESS")
+  ) {
     return "completed";
   }
   if (normalized.includes("PROCESS")) {
@@ -976,10 +981,7 @@ function buildBvnkComplianceDetails(
   requesterIpAddress?: string;
   partyDetails: Record<string, unknown>[];
 } {
-  const requesterIpAddressRaw =
-    input?.requesterIpAddress?.trim() ||
-    c.req.header("cf-connecting-ip") ||
-    c.req.header("x-forwarded-for");
+  const requesterIpAddressRaw = c.req.header("cf-connecting-ip") || c.req.header("x-forwarded-for");
   const partyDetails = Array.isArray(input?.partyDetails)
     ? input.partyDetails.filter(
         (entry): entry is Record<string, unknown> =>
@@ -1463,7 +1465,11 @@ const bvnkRampProvider: RampProviderExecutor = {
     }
 
     const config = getBvnkConfig(c);
-    const destinationAddress = resolveWalletAddress(scope.wallets, input.sourceWallet, "sourceWallet");
+    const destinationAddress = resolveWalletAddress(
+      scope.wallets,
+      input.sourceWallet,
+      "sourceWallet"
+    );
     const { currency, network } = normalizeBvnkCurrencyAndNetwork(input.cryptoToken);
     const paidRequiredAmount = toPositiveNumberAmount(input.cryptoAmount, "cryptoAmount");
     const externalReference = `sdp_offramp_${crypto.randomUUID()}`;
@@ -1693,35 +1699,35 @@ const lightsparkRampProvider: RampProviderExecutor = {
   },
 };
 
-const RAMP_PROVIDER_REGISTRY: Record<string, RampProviderExecutor> = {
+const RAMP_PROVIDER_REGISTRY: Record<RampProviderId, RampProviderExecutor> = {
   moonpay: moonPayRampProvider,
   lightspark: lightsparkRampProvider,
   bvnk: bvnkRampProvider,
 };
 
-function resolveRampProvider(c: AppContext, providerId: string): RampProviderExecutor {
-  const normalizedProvider = providerId.trim().toLowerCase();
+function resolveRampProvider(c: AppContext, providerId: RampProviderId): RampProviderExecutor {
+  const provider = RAMP_PROVIDER_REGISTRY[providerId];
+  if (!provider) {
+    throw new AppError("BAD_REQUEST", `Unsupported ramp provider: ${providerId}`);
+  }
 
-  if (normalizedProvider === "auto") {
-    if (lightsparkRampProvider.isConfigured(c)) {
-      return lightsparkRampProvider;
+  if (!provider.isConfigured(c)) {
+    if (providerId === "moonpay") {
+      throw new AppError(
+        "INTERNAL_ERROR",
+        "MoonPay is not configured. Set MOONPAY_API_KEY and MOONPAY_SECRET_KEY."
+      );
     }
-    if (bvnkRampProvider.isConfigured(c)) {
-      return bvnkRampProvider;
-    }
-    if (moonPayRampProvider.isConfigured(c)) {
-      return moonPayRampProvider;
+    if (providerId === "lightspark") {
+      throw new AppError(
+        "INTERNAL_ERROR",
+        "Lightspark is not configured. Set LIGHTSPARK_GRID_CLIENT_ID and LIGHTSPARK_GRID_CLIENT_SECRET."
+      );
     }
     throw new AppError(
       "INTERNAL_ERROR",
-      "No ramp provider is configured. Configure MoonPay, Lightspark, or BVNK credentials."
+      "BVNK is not configured. Set BVNK_WALLET_ID and either BVNK_API_TOKEN or BVNK_HAWK_AUTH_ID/BVNK_HAWK_SECRET_KEY."
     );
-  }
-
-  const provider = RAMP_PROVIDER_REGISTRY[normalizedProvider];
-
-  if (!provider) {
-    throw new AppError("BAD_REQUEST", `Unsupported ramp provider: ${providerId}`);
   }
 
   return provider;

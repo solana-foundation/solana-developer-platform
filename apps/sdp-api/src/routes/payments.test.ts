@@ -305,9 +305,11 @@ describe("Payments routes", () => {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          "x-forwarded-for": "1.1.1.1",
           Authorization: `Bearer ${TEST_API_KEY.raw}`,
         },
         body: JSON.stringify({
+          provider: "moonpay",
           destinationWallet: TEST_WALLET_ID,
           cryptoToken: "USDC_SOL",
           fiatCurrency: "USD",
@@ -349,6 +351,7 @@ describe("Payments routes", () => {
           Authorization: `Bearer ${TEST_API_KEY.raw}`,
         },
         body: JSON.stringify({
+          provider: "moonpay",
           sourceWallet: TEST_WALLET_ID,
           cryptoToken: "USDC_SOL",
           fiatCurrency: "USD",
@@ -740,7 +743,15 @@ describe("Payments routes", () => {
 
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
-      data: { ramp: { id: string; provider: string; status: string; redirectUrl: string; reference: string } };
+      data: {
+        ramp: {
+          id: string;
+          provider: string;
+          status: string;
+          redirectUrl: string;
+          reference: string;
+        };
+      };
     };
 
     expect(body.data.ramp.id.startsWith("ramp_")).toBe(true);
@@ -827,7 +838,6 @@ describe("Payments routes", () => {
           cryptoAmount: "75.25",
           kycReference: "customer_456",
           bvnkCompliance: {
-            requesterIpAddress: "1.1.1.1",
             partyDetails: [
               {
                 type: "BENEFICIARY",
@@ -860,7 +870,9 @@ describe("Payments routes", () => {
     const estimateUrl = String(fetchSpy.mock.calls[0]?.[0]);
     const acceptUrl = String(fetchSpy.mock.calls[1]?.[0]);
     expect(estimateUrl).toBe(`${TEST_BVNK_API_BASE_URL}/api/v1/pay/estimate`);
-    expect(acceptUrl).toBe(`${TEST_BVNK_API_BASE_URL}/api/v1/pay/estimate/estimate_bvnk_123/accept`);
+    expect(acceptUrl).toBe(
+      `${TEST_BVNK_API_BASE_URL}/api/v1/pay/estimate/estimate_bvnk_123/accept`
+    );
     const estimateHeaders = fetchSpy.mock.calls[0]?.[1]?.headers as Record<string, string>;
     const acceptHeaders = fetchSpy.mock.calls[1]?.[1]?.headers as Record<string, string>;
     expect(estimateHeaders.Authorization).toContain(`Hawk id="${TEST_BVNK_HAWK_AUTH_ID}"`);
@@ -879,7 +891,7 @@ describe("Payments routes", () => {
     expect(estimatePayload.paidCurrency).toBe("USDC");
     expect(estimatePayload.paidRequiredAmount).toBe(75.25);
     expect(estimatePayload.network).toBe("SOLANA");
-    expect(estimatePayload.complianceDetails.requesterIpAddress).toBe("1.1.1.1");
+    expect(estimatePayload.complianceDetails.requesterIpAddress).toBeUndefined();
     expect(estimatePayload.complianceDetails.partyDetails).toHaveLength(1);
 
     const acceptPayload = JSON.parse(String(fetchSpy.mock.calls[1]?.[1]?.body)) as {
@@ -891,7 +903,7 @@ describe("Payments routes", () => {
     expect(acceptPayload.payOutDetails.currency).toBe("USDC");
     expect(acceptPayload.payOutDetails.address).toBe(TEST_SOLANA_ADDRESSES.wallet1);
     expect(acceptPayload.payOutDetails.network).toBe("SOLANA");
-    expect(acceptPayload.complianceDetails.requesterIpAddress).toBe("1.1.1.1");
+    expect(acceptPayload.complianceDetails.requesterIpAddress).toBeUndefined();
     expect(acceptPayload.complianceDetails.partyDetails).toHaveLength(1);
     fetchSpy.mockRestore();
   });
@@ -903,6 +915,7 @@ describe("Payments routes", () => {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          "x-forwarded-for": "1.1.1.1",
           Authorization: `Bearer ${TEST_API_KEY.raw}`,
         },
         body: JSON.stringify({
@@ -946,7 +959,7 @@ describe("Payments routes", () => {
     expect(res.status).toBe(400);
     const body = (await res.json()) as { error: { code: string; message: string } };
     expect(body.error.code).toBe("BAD_REQUEST");
-    expect(body.error.message).toContain("Unsupported ramp provider");
+    expect(body.error.message).toContain("Invalid request body");
   });
 
   it("returns internal error when MoonPay credentials are not configured", async () => {
@@ -961,6 +974,7 @@ describe("Payments routes", () => {
           Authorization: `Bearer ${TEST_API_KEY.raw}`,
         },
         body: JSON.stringify({
+          provider: "moonpay",
           destinationWallet: TEST_WALLET_ID,
           cryptoToken: "usdc_sol",
           fiatCurrency: "USD",

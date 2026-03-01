@@ -68,3 +68,5 @@ CLERK_WEBHOOK_SECRET=whsec_...
 # BVNK_HAWK_SECRET_KEY=YOUR_BVNK_HAWK_SECRET_KEY
 # BVNK_WALLET_ID=YOUR_BVNK_WALLET_ID
 # BVNK_API_BASE_URL=https://api.sandbox.bvnk.com
+# Note: BVNK on-ramp can require additional provider-side enablement/compliance setup
+# beyond API credentials (for example pay-in permissions on your merchant account).
