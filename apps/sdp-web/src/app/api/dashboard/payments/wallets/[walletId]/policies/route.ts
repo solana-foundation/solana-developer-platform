@@ -1,0 +1,75 @@
+import { createSdpApiClient } from "@/lib/sdp-api";
+import { NextResponse } from "next/server";
+
+async function readParams(context: { params: Promise<{ walletId: string }> | { walletId: string } }) {
+  const resolved = await context.params;
+  return resolved.walletId;
+}
+
+export async function GET(
+  _request: Request,
+  context: { params: Promise<{ walletId: string }> | { walletId: string } }
+) {
+  try {
+    const walletId = await readParams(context);
+    const apiClient = await createSdpApiClient();
+    const response = await apiClient.request(
+      `/v1/payments/wallets/${encodeURIComponent(walletId)}/policies`
+    );
+
+    const responseBody = await response.text();
+    const contentType = response.headers.get("Content-Type") ?? "application/json";
+
+    return new NextResponse(responseBody, {
+      status: response.status,
+      headers: {
+        "Content-Type": contentType,
+      },
+    });
+  } catch (error) {
+    return NextResponse.json(
+      {
+        error: error instanceof Error ? error.message : "Failed to fetch wallet policy",
+      },
+      { status: 500 }
+    );
+  }
+}
+
+export async function PUT(
+  request: Request,
+  context: { params: Promise<{ walletId: string }> | { walletId: string } }
+) {
+  try {
+    const walletId = await readParams(context);
+    const body = await request.text();
+    const apiClient = await createSdpApiClient();
+    const response = await apiClient.request(
+      `/v1/payments/wallets/${encodeURIComponent(walletId)}/policies`,
+      {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body,
+      }
+    );
+
+    const responseBody = await response.text();
+    const contentType = response.headers.get("Content-Type") ?? "application/json";
+
+    return new NextResponse(responseBody, {
+      status: response.status,
+      headers: {
+        "Content-Type": contentType,
+      },
+    });
+  } catch (error) {
+    return NextResponse.json(
+      {
+        error: error instanceof Error ? error.message : "Failed to update wallet policy",
+      },
+      { status: 500 }
+    );
+  }
+}
