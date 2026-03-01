@@ -32,6 +32,13 @@ const rampCurrencyCodeSchema = z
   .string()
   .regex(/^[a-zA-Z0-9_]+$/, { message: "Invalid ramp currency code" });
 
+const bvnkComplianceSchema = z.object({
+  requesterIpAddress: z.string().trim().min(1).optional(),
+  partyDetails: z
+    .array(z.record(z.string(), z.unknown()))
+    .min(1, { message: "partyDetails must include at least one entry" }),
+});
+
 export const createTransferSchema = z.object({
   projectId: z.string().min(1).optional(),
   source: z.string().min(1),
@@ -71,6 +78,7 @@ export const executeOnrampSchema = z.object({
   fiatAmount: moonpayAmountSchema,
   kycReference: z.string().max(128).optional(),
   redirectUrl: z.string().url().optional(),
+  bvnkCompliance: bvnkComplianceSchema.optional(),
 });
 
 export const executeOfframpSchema = z.object({
@@ -81,4 +89,5 @@ export const executeOfframpSchema = z.object({
   cryptoAmount: moonpayAmountSchema,
   kycReference: z.string().max(128).optional(),
   redirectUrl: z.string().url().optional(),
+  bvnkCompliance: bvnkComplianceSchema.optional(),
 });

@@ -356,6 +356,19 @@ const rampProviderSchema = z.string().min(1).default("moonpay").openapi({
   default: "moonpay",
 });
 
+const bvnkComplianceSchema = z
+  .object({
+    requesterIpAddress: z
+      .string()
+      .optional()
+      .openapi({ description: "Optional requester IP override used for BVNK compliance checks." }),
+    partyDetails: z
+      .array(z.record(z.unknown()))
+      .min(1)
+      .openapi({ description: "BVNK party details payload. Required for BVNK off-ramp flows." }),
+  })
+  .openapi({ description: "Optional BVNK compliance details." });
+
 export const executeOnrampRequestSchema = z
   .object({
     provider: rampProviderSchema,
@@ -380,6 +393,7 @@ export const executeOnrampRequestSchema = z
       .url()
       .optional()
       .openapi({ description: "Optional redirect URL after provider flow completes." }),
+    bvnkCompliance: bvnkComplianceSchema.optional(),
   })
   .openapi({ description: "Execute on-ramp request payload." });
 
@@ -407,6 +421,7 @@ export const executeOfframpRequestSchema = z
       .url()
       .optional()
       .openapi({ description: "Optional redirect URL after provider flow completes." }),
+    bvnkCompliance: bvnkComplianceSchema.optional(),
   })
   .openapi({ description: "Execute off-ramp request payload." });
 

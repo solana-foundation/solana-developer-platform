@@ -584,6 +584,11 @@ type RampExecutionResult = {
   reference?: string;
 };
 
+type BvnkComplianceInput = {
+  requesterIpAddress?: string;
+  partyDetails?: Record<string, unknown>[];
+};
+
 type ExecuteOnrampInput = {
   provider: string;
   destinationWallet: string;
@@ -592,6 +597,7 @@ type ExecuteOnrampInput = {
   fiatAmount: string;
   kycReference?: string;
   redirectUrl?: string;
+  bvnkCompliance?: BvnkComplianceInput;
 };
 
 type ExecuteOfframpInput = {
@@ -602,6 +608,7 @@ type ExecuteOfframpInput = {
   cryptoAmount: string;
   kycReference?: string;
   redirectUrl?: string;
+  bvnkCompliance?: BvnkComplianceInput;
 };
 
 type ExecuteRampInput =
@@ -666,8 +673,12 @@ type LightsparkConfig = {
   apiBaseUrl: string;
 };
 
+type BvnkAuthConfig =
+  | { type: "bearer"; apiToken: string }
+  | { type: "hawk"; authId: string; secretKey: string };
+
 type BvnkConfig = {
-  apiToken: string;
+  auth: BvnkAuthConfig;
   walletId: string;
   apiBaseUrl: string;
 };
@@ -776,12 +787,21 @@ function isLightsparkConfigured(c: AppContext): boolean {
 }
 
 function getBvnkConfig(c: AppContext): BvnkConfig {
+  const hawkAuthId = c.env.BVNK_HAWK_AUTH_ID?.trim();
+  const hawkSecretKey = c.env.BVNK_HAWK_SECRET_KEY?.trim();
   const apiToken = c.env.BVNK_API_TOKEN?.trim();
   const walletId = c.env.BVNK_WALLET_ID?.trim();
-  if (!apiToken || !walletId) {
+  if (!walletId) {
     throw new AppError(
       "INTERNAL_ERROR",
-      "BVNK is not configured. Set BVNK_API_TOKEN and BVNK_WALLET_ID."
+      "BVNK is not configured. Set BVNK_WALLET_ID and either BVNK_API_TOKEN or BVNK_HAWK_AUTH_ID/BVNK_HAWK_SECRET_KEY."
+    );
+  }
+
+  if ((hawkAuthId && !hawkSecretKey) || (!hawkAuthId && hawkSecretKey)) {
+    throw new AppError(
+      "INTERNAL_ERROR",
+      "BVNK Hawk auth is incomplete. Set both BVNK_HAWK_AUTH_ID and BVNK_HAWK_SECRET_KEY."
     );
   }
 
@@ -794,17 +814,39 @@ function getBvnkConfig(c: AppContext): BvnkConfig {
     throw new AppError("INTERNAL_ERROR", "BVNK API URL configuration is invalid.");
   }
 
+  let auth: BvnkAuthConfig;
+  if (hawkAuthId && hawkSecretKey) {
+    auth = {
+      type: "hawk",
+      authId: hawkAuthId,
+      secretKey: hawkSecretKey,
+    };
+  } else if (apiToken) {
+    auth = {
+      type: "bearer",
+      apiToken,
+    };
+  } else {
+    throw new AppError(
+      "INTERNAL_ERROR",
+      "BVNK is not configured. Set BVNK_WALLET_ID and either BVNK_API_TOKEN or BVNK_HAWK_AUTH_ID/BVNK_HAWK_SECRET_KEY."
+    );
+  }
+
   return {
-    apiToken,
+    auth,
     walletId,
     apiBaseUrl,
   };
 }
 
 function isBvnkConfigured(c: AppContext): boolean {
+  const hawkAuthId = c.env.BVNK_HAWK_AUTH_ID?.trim();
+  const hawkSecretKey = c.env.BVNK_HAWK_SECRET_KEY?.trim();
   const apiToken = c.env.BVNK_API_TOKEN?.trim();
   const walletId = c.env.BVNK_WALLET_ID?.trim();
-  return Boolean(apiToken && walletId);
+  const hawkConfigured = Boolean(hawkAuthId && hawkSecretKey);
+  return Boolean(walletId && (apiToken || hawkConfigured));
 }
 
 function encodeBasicAuth(value: string): string {
@@ -926,15 +968,79 @@ function mapBvnkPaymentStatus(status: string | undefined): RampExecutionStatus {
   return "pending";
 }
 
-function buildBvnkComplianceDetails(c: AppContext): {
+function buildBvnkComplianceDetails(
+  c: AppContext,
+  input?: BvnkComplianceInput,
+  options?: { requirePartyDetails?: boolean }
+): {
   requesterIpAddress?: string;
-  partyDetails: unknown[];
+  partyDetails: Record<string, unknown>[];
 } {
-  const requesterIpAddress = c.req.header("cf-connecting-ip") ?? c.req.header("x-forwarded-for");
+  const requesterIpAddressRaw =
+    input?.requesterIpAddress?.trim() ||
+    c.req.header("cf-connecting-ip") ||
+    c.req.header("x-forwarded-for");
+  const partyDetails = Array.isArray(input?.partyDetails)
+    ? input.partyDetails.filter(
+        (entry): entry is Record<string, unknown> =>
+          entry !== null && typeof entry === "object" && !Array.isArray(entry)
+      )
+    : [];
+
+  if (options?.requirePartyDetails && partyDetails.length === 0) {
+    throw new AppError(
+      "BAD_REQUEST",
+      "bvnkCompliance.partyDetails is required for BVNK off-ramp requests."
+    );
+  }
+
   return {
-    ...(requesterIpAddress ? { requesterIpAddress: requesterIpAddress.split(",")[0]?.trim() } : {}),
-    partyDetails: [],
+    ...(requesterIpAddressRaw
+      ? { requesterIpAddress: requesterIpAddressRaw.split(",")[0]?.trim() }
+      : {}),
+    partyDetails,
   };
+}
+
+async function hmacSha256Base64(value: string, secretKey: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    "raw",
+    encoder.encode(secretKey),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  const signature = await crypto.subtle.sign("HMAC", key, encoder.encode(value));
+  return Buffer.from(signature).toString("base64");
+}
+
+async function buildBvnkHawkAuthorizationHeader(
+  url: URL,
+  method: "GET" | "POST",
+  authId: string,
+  secretKey: string
+): Promise<string> {
+  const ts = Math.floor(Date.now() / 1000).toString();
+  const nonce = crypto.randomUUID().replace(/-/g, "").slice(0, 12);
+  const resource = `${url.pathname}${url.search}`;
+  const port = url.port || (url.protocol === "https:" ? "443" : "80");
+
+  const normalized = [
+    "hawk.1.header",
+    ts,
+    nonce,
+    method.toUpperCase(),
+    resource,
+    url.hostname.toLowerCase(),
+    port,
+    "",
+    "",
+    "",
+  ].join("\n");
+
+  const mac = await hmacSha256Base64(normalized, secretKey);
+  return `Hawk id="${authId}", ts="${ts}", nonce="${nonce}", mac="${mac}"`;
 }
 
 async function bvnkRequest(
@@ -947,10 +1053,19 @@ async function bvnkRequest(
 ): Promise<unknown> {
   const apiBaseUrl = config.apiBaseUrl.endsWith("/") ? config.apiBaseUrl : `${config.apiBaseUrl}/`;
   const url = new URL(path.replace(/^\//, ""), apiBaseUrl);
+  const authorization =
+    config.auth.type === "hawk"
+      ? await buildBvnkHawkAuthorizationHeader(
+          url,
+          init.method,
+          config.auth.authId,
+          config.auth.secretKey
+        )
+      : `Bearer ${config.auth.apiToken}`;
   const response = await fetch(url.toString(), {
     method: init.method,
     headers: {
-      Authorization: `Bearer ${config.apiToken}`,
+      Authorization: authorization,
       "Content-Type": "application/json",
       Accept: "application/json",
     },
@@ -1301,6 +1416,7 @@ const bvnkRampProvider: RampProviderExecutor = {
     const { currency, network } = normalizeBvnkCurrencyAndNetwork(input.cryptoToken);
     const amount = toPositiveNumberAmount(input.fiatAmount, "fiatAmount");
     const externalReference = `sdp_onramp_${crypto.randomUUID()}`;
+    const complianceDetails = buildBvnkComplianceDetails(c, input.bvnkCompliance);
 
     const response = await bvnkRequest(config, "/api/v1/pay/summary", {
       method: "POST",
@@ -1318,7 +1434,7 @@ const bvnkRampProvider: RampProviderExecutor = {
           address: destinationAddress,
           network,
         },
-        complianceDetails: buildBvnkComplianceDetails(c),
+        complianceDetails,
       },
     });
 
@@ -1351,6 +1467,9 @@ const bvnkRampProvider: RampProviderExecutor = {
     const { currency, network } = normalizeBvnkCurrencyAndNetwork(input.cryptoToken);
     const paidRequiredAmount = toPositiveNumberAmount(input.cryptoAmount, "cryptoAmount");
     const externalReference = `sdp_offramp_${crypto.randomUUID()}`;
+    const complianceDetails = buildBvnkComplianceDetails(c, input.bvnkCompliance, {
+      requirePartyDetails: true,
+    });
 
     const estimateResponse = await bvnkRequest(config, "/api/v1/pay/estimate", {
       method: "POST",
@@ -1361,7 +1480,7 @@ const bvnkRampProvider: RampProviderExecutor = {
         paidRequiredAmount,
         reference: externalReference,
         network,
-        complianceDetails: buildBvnkComplianceDetails(c),
+        complianceDetails,
       },
     });
 
@@ -1382,7 +1501,7 @@ const bvnkRampProvider: RampProviderExecutor = {
             address: destinationAddress,
             network,
           },
-          complianceDetails: buildBvnkComplianceDetails(c),
+          complianceDetails,
         },
       }
     );

@@ -103,6 +103,8 @@ const TEST_LIGHTSPARK_GRID_CLIENT_ID = "lightspark_token_id";
 const TEST_LIGHTSPARK_GRID_CLIENT_SECRET = "lightspark_client_secret";
 const TEST_LIGHTSPARK_GRID_API_BASE_URL = "https://api.lightspark.test/grid/2025-10-13";
 const TEST_BVNK_API_TOKEN = "bvnk_bearer_token";
+const TEST_BVNK_HAWK_AUTH_ID = "bvnk_hawk_auth_id";
+const TEST_BVNK_HAWK_SECRET_KEY = "bvnk_hawk_secret_key";
 const TEST_BVNK_WALLET_ID = "a:24122329329347:HsdJVhW:1";
 const TEST_BVNK_API_BASE_URL = "https://api.sandbox.bvnk.test";
 // biome-ignore lint/nursery/noSecrets: Query parameter key used for test assertions.
@@ -122,6 +124,8 @@ let originalLightsparkGridClientId: string | undefined;
 let originalLightsparkGridClientSecret: string | undefined;
 let originalLightsparkGridApiBaseUrl: string | undefined;
 let originalBvnkApiToken: string | undefined;
+let originalBvnkHawkAuthId: string | undefined;
+let originalBvnkHawkSecretKey: string | undefined;
 let originalBvnkWalletId: string | undefined;
 let originalBvnkApiBaseUrl: string | undefined;
 
@@ -254,6 +258,8 @@ describe("Payments routes", () => {
     originalLightsparkGridClientSecret = env.LIGHTSPARK_GRID_CLIENT_SECRET;
     originalLightsparkGridApiBaseUrl = env.LIGHTSPARK_GRID_API_BASE_URL;
     originalBvnkApiToken = env.BVNK_API_TOKEN;
+    originalBvnkHawkAuthId = env.BVNK_HAWK_AUTH_ID;
+    originalBvnkHawkSecretKey = env.BVNK_HAWK_SECRET_KEY;
     originalBvnkWalletId = env.BVNK_WALLET_ID;
     originalBvnkApiBaseUrl = env.BVNK_API_BASE_URL;
 
@@ -265,6 +271,8 @@ describe("Payments routes", () => {
     env.LIGHTSPARK_GRID_CLIENT_SECRET = TEST_LIGHTSPARK_GRID_CLIENT_SECRET;
     env.LIGHTSPARK_GRID_API_BASE_URL = TEST_LIGHTSPARK_GRID_API_BASE_URL;
     env.BVNK_API_TOKEN = TEST_BVNK_API_TOKEN;
+    env.BVNK_HAWK_AUTH_ID = undefined;
+    env.BVNK_HAWK_SECRET_KEY = undefined;
     env.BVNK_WALLET_ID = TEST_BVNK_WALLET_ID;
     env.BVNK_API_BASE_URL = TEST_BVNK_API_BASE_URL;
 
@@ -281,6 +289,8 @@ describe("Payments routes", () => {
     env.LIGHTSPARK_GRID_CLIENT_SECRET = originalLightsparkGridClientSecret;
     env.LIGHTSPARK_GRID_API_BASE_URL = originalLightsparkGridApiBaseUrl;
     env.BVNK_API_TOKEN = originalBvnkApiToken;
+    env.BVNK_HAWK_AUTH_ID = originalBvnkHawkAuthId;
+    env.BVNK_HAWK_SECRET_KEY = originalBvnkHawkSecretKey;
     env.BVNK_WALLET_ID = originalBvnkWalletId;
     env.BVNK_API_BASE_URL = originalBvnkApiBaseUrl;
 
@@ -770,6 +780,10 @@ describe("Payments routes", () => {
   });
 
   it("creates and accepts a BVNK off-ramp estimate through the execute endpoint", async () => {
+    env.BVNK_API_TOKEN = undefined;
+    env.BVNK_HAWK_AUTH_ID = TEST_BVNK_HAWK_AUTH_ID;
+    env.BVNK_HAWK_SECRET_KEY = TEST_BVNK_HAWK_SECRET_KEY;
+
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(
@@ -812,6 +826,20 @@ describe("Payments routes", () => {
           fiatCurrency: "USD",
           cryptoAmount: "75.25",
           kycReference: "customer_456",
+          bvnkCompliance: {
+            requesterIpAddress: "1.1.1.1",
+            partyDetails: [
+              {
+                type: "BENEFICIARY",
+                entityType: "INDIVIDUAL",
+                relationshipType: "THIRD_PARTY",
+                firstName: "Test",
+                lastName: "User",
+                dateOfBirth: "1990-01-01",
+                countryCode: "US",
+              },
+            ],
+          },
         }),
       },
       env
@@ -833,6 +861,10 @@ describe("Payments routes", () => {
     const acceptUrl = String(fetchSpy.mock.calls[1]?.[0]);
     expect(estimateUrl).toBe(`${TEST_BVNK_API_BASE_URL}/api/v1/pay/estimate`);
     expect(acceptUrl).toBe(`${TEST_BVNK_API_BASE_URL}/api/v1/pay/estimate/estimate_bvnk_123/accept`);
+    const estimateHeaders = fetchSpy.mock.calls[0]?.[1]?.headers as Record<string, string>;
+    const acceptHeaders = fetchSpy.mock.calls[1]?.[1]?.headers as Record<string, string>;
+    expect(estimateHeaders.Authorization).toContain(`Hawk id="${TEST_BVNK_HAWK_AUTH_ID}"`);
+    expect(acceptHeaders.Authorization).toContain(`Hawk id="${TEST_BVNK_HAWK_AUTH_ID}"`);
 
     const estimatePayload = JSON.parse(String(fetchSpy.mock.calls[0]?.[1]?.body)) as {
       walletId: string;
@@ -840,26 +872,55 @@ describe("Payments routes", () => {
       paidCurrency: string;
       paidRequiredAmount: number;
       network: string;
-      complianceDetails: { partyDetails: unknown[] };
+      complianceDetails: { requesterIpAddress?: string; partyDetails: Record<string, unknown>[] };
     };
     expect(estimatePayload.walletId).toBe(TEST_BVNK_WALLET_ID);
     expect(estimatePayload.walletCurrency).toBe("USD");
     expect(estimatePayload.paidCurrency).toBe("USDC");
     expect(estimatePayload.paidRequiredAmount).toBe(75.25);
     expect(estimatePayload.network).toBe("SOLANA");
-    expect(Array.isArray(estimatePayload.complianceDetails.partyDetails)).toBe(true);
+    expect(estimatePayload.complianceDetails.requesterIpAddress).toBe("1.1.1.1");
+    expect(estimatePayload.complianceDetails.partyDetails).toHaveLength(1);
 
     const acceptPayload = JSON.parse(String(fetchSpy.mock.calls[1]?.[1]?.body)) as {
       customerId: string;
       payOutDetails: { currency: string; address: string; network: string };
-      complianceDetails: { partyDetails: unknown[] };
+      complianceDetails: { requesterIpAddress?: string; partyDetails: Record<string, unknown>[] };
     };
     expect(acceptPayload.customerId).toBe("customer_456");
     expect(acceptPayload.payOutDetails.currency).toBe("USDC");
     expect(acceptPayload.payOutDetails.address).toBe(TEST_SOLANA_ADDRESSES.wallet1);
     expect(acceptPayload.payOutDetails.network).toBe("SOLANA");
-    expect(Array.isArray(acceptPayload.complianceDetails.partyDetails)).toBe(true);
+    expect(acceptPayload.complianceDetails.requesterIpAddress).toBe("1.1.1.1");
+    expect(acceptPayload.complianceDetails.partyDetails).toHaveLength(1);
     fetchSpy.mockRestore();
+  });
+
+  it("returns bad request when BVNK off-ramp is missing compliance party details", async () => {
+    const res = await app.request(
+      "/v1/payments/ramps/offramp/execute",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          provider: "bvnk",
+          sourceWallet: TEST_WALLET_ID,
+          cryptoToken: "USDC_SOLANA",
+          fiatCurrency: "USD",
+          cryptoAmount: "75.25",
+          kycReference: "customer_456",
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { code: string; message: string } };
+    expect(body.error.code).toBe("BAD_REQUEST");
+    expect(body.error.message).toContain("bvnkCompliance.partyDetails is required");
   });
 
   it("returns bad request when provider is not supported", async () => {

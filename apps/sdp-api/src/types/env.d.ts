@@ -122,6 +122,8 @@ export interface Env {
 
   // BVNK ramps configuration
   BVNK_API_TOKEN?: string;
+  BVNK_HAWK_AUTH_ID?: string;
+  BVNK_HAWK_SECRET_KEY?: string;
   BVNK_WALLET_ID?: string;
   BVNK_API_BASE_URL?: string;
 }
