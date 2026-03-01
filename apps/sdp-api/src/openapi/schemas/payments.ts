@@ -351,7 +351,7 @@ const moonpayCurrencyCodeSchema = z
 
 const rampProviderSchema = z.string().min(1).default("moonpay").openapi({
   description:
-    "Ramp provider identifier. Supported values: moonpay, lightspark, auto. Defaults to moonpay.",
+    "Ramp provider identifier. Supported values: moonpay, lightspark, bvnk, auto. Defaults to moonpay.",
   example: "moonpay",
   default: "moonpay",
 });

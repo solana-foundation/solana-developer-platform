@@ -72,6 +72,8 @@ const MOONPAY_ONRAMP_URL = "https://buy.moonpay.com";
 const MOONPAY_OFFRAMP_URL = "https://sell.moonpay.com";
 const MOONPAY_SANDBOX_ONRAMP_URL = "https://buy-sandbox.moonpay.com";
 const MOONPAY_SANDBOX_OFFRAMP_URL = "https://sell-sandbox.moonpay.com";
+const BVNK_PRODUCTION_API_URL = "https://api.bvnk.com";
+const BVNK_SANDBOX_API_URL = "https://api.sandbox.bvnk.com";
 
 function getPaymentsRepository(c: AppContext) {
   return createD1PaymentsRepository({ db: createD1Drizzle(c.env.DB) });
@@ -664,6 +666,12 @@ type LightsparkConfig = {
   apiBaseUrl: string;
 };
 
+type BvnkConfig = {
+  apiToken: string;
+  walletId: string;
+  apiBaseUrl: string;
+};
+
 type LightsparkQuoteStatus = "PENDING" | "PROCESSING" | "COMPLETED" | "FAILED" | "EXPIRED";
 
 type LightsparkQuote = {
@@ -681,6 +689,17 @@ type LightsparkExternalAccount = {
     accountType?: string;
     address?: string;
   };
+};
+
+type BvnkEstimateResponse = {
+  externalId?: string;
+};
+
+type BvnkPaymentSummary = {
+  uuid?: string;
+  status?: string;
+  redirectUrl?: string;
+  reference?: string;
 };
 
 const LIGHTSPARK_DEFAULT_GRID_API_URL = "https://api.lightspark.com/grid/2025-10-13";
@@ -756,6 +775,38 @@ function isLightsparkConfigured(c: AppContext): boolean {
   return Boolean(tokenId && clientSecret);
 }
 
+function getBvnkConfig(c: AppContext): BvnkConfig {
+  const apiToken = c.env.BVNK_API_TOKEN?.trim();
+  const walletId = c.env.BVNK_WALLET_ID?.trim();
+  if (!apiToken || !walletId) {
+    throw new AppError(
+      "INTERNAL_ERROR",
+      "BVNK is not configured. Set BVNK_API_TOKEN and BVNK_WALLET_ID."
+    );
+  }
+
+  const defaultApiBaseUrl =
+    c.env.ENVIRONMENT === "production" ? BVNK_PRODUCTION_API_URL : BVNK_SANDBOX_API_URL;
+  const apiBaseUrl = c.env.BVNK_API_BASE_URL?.trim() || defaultApiBaseUrl;
+  try {
+    new URL(apiBaseUrl);
+  } catch {
+    throw new AppError("INTERNAL_ERROR", "BVNK API URL configuration is invalid.");
+  }
+
+  return {
+    apiToken,
+    walletId,
+    apiBaseUrl,
+  };
+}
+
+function isBvnkConfigured(c: AppContext): boolean {
+  const apiToken = c.env.BVNK_API_TOKEN?.trim();
+  const walletId = c.env.BVNK_WALLET_ID?.trim();
+  return Boolean(apiToken && walletId);
+}
+
 function encodeBasicAuth(value: string): string {
   return Buffer.from(value, "utf8").toString("base64");
 }
@@ -766,6 +817,180 @@ function safeParseJson(value: string): unknown | null {
   } catch {
     return null;
   }
+}
+
+function toPositiveNumberAmount(value: string, fieldName: string): number {
+  const amount = Number.parseFloat(value);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new AppError("BAD_REQUEST", `${fieldName} must be a positive amount`);
+  }
+  return amount;
+}
+
+const BVNK_NETWORK_ALIASES: Record<string, string> = {
+  algo: "ALGORAND",
+  algorand: "ALGORAND",
+  ada: "CARDANO",
+  cardano: "CARDANO",
+  bch: "BITCOIN_CASH",
+  bitcoin_cash: "BITCOIN_CASH",
+  bitcoincash: "BITCOIN_CASH",
+  bnb: "BINANCE",
+  binance: "BINANCE",
+  btc: "BITCOIN",
+  bitcoin: "BITCOIN",
+  doge: "DOGECOIN",
+  dogecoin: "DOGECOIN",
+  eth: "ETHEREUM",
+  ethereum: "ETHEREUM",
+  ltc: "LITECOIN",
+  litecoin: "LITECOIN",
+  matic: "POLYGON",
+  polygon: "POLYGON",
+  sol: "SOLANA",
+  solana: "SOLANA",
+  tron: "TRON",
+  trx: "TRON",
+  xrp: "RIPPLE",
+  ripple: "RIPPLE",
+};
+
+type BvnkCurrencyNetwork = {
+  currency: string;
+  network: string;
+};
+
+function normalizeBvnkCurrencyAndNetwork(value: string): BvnkCurrencyNetwork {
+  const normalized = value.trim().toUpperCase();
+  if (!/^[A-Z0-9_]+$/.test(normalized)) {
+    throw new AppError("BAD_REQUEST", "cryptoToken must be a valid BVNK currency code");
+  }
+
+  const tokenParts = normalized.split("_").filter((part) => part.length > 0);
+  const currency = tokenParts[0];
+  if (!currency) {
+    throw new AppError("BAD_REQUEST", "cryptoToken must include a BVNK currency code");
+  }
+
+  const networkHint = tokenParts.length > 1 ? tokenParts[tokenParts.length - 1]?.toLowerCase() : "";
+  if (networkHint && BVNK_NETWORK_ALIASES[networkHint]) {
+    return {
+      currency,
+      network: BVNK_NETWORK_ALIASES[networkHint],
+    };
+  }
+
+  if (currency === "BTC") {
+    return { currency, network: "BITCOIN" };
+  }
+  if (currency === "ETH") {
+    return { currency, network: "ETHEREUM" };
+  }
+  if (currency === "SOL") {
+    return { currency, network: "SOLANA" };
+  }
+
+  if (currency === "USDC" || currency === "USDT") {
+    throw new AppError(
+      "BAD_REQUEST",
+      "For BVNK stablecoins, include network in cryptoToken (for example: USDC_SOLANA)."
+    );
+  }
+
+  throw new AppError(
+    "BAD_REQUEST",
+    `Unsupported BVNK cryptoToken '${value}'. Provide token with network (for example: BTC, ETH, SOL, USDC_SOLANA).`
+  );
+}
+
+function mapBvnkPaymentStatus(status: string | undefined): RampExecutionStatus {
+  if (!status) {
+    return "pending";
+  }
+
+  const normalized = status.trim().toUpperCase();
+  if (normalized.includes("COMPLETE") || normalized.includes("PAID") || normalized.includes("SUCCESS")) {
+    return "completed";
+  }
+  if (normalized.includes("PROCESS")) {
+    return "processing";
+  }
+  if (
+    normalized.includes("FAIL") ||
+    normalized.includes("EXPIRE") ||
+    normalized.includes("CANCEL") ||
+    normalized.includes("REJECT")
+  ) {
+    return "failed";
+  }
+  return "pending";
+}
+
+function buildBvnkComplianceDetails(c: AppContext): {
+  requesterIpAddress?: string;
+  partyDetails: unknown[];
+} {
+  const requesterIpAddress = c.req.header("cf-connecting-ip") ?? c.req.header("x-forwarded-for");
+  return {
+    ...(requesterIpAddress ? { requesterIpAddress: requesterIpAddress.split(",")[0]?.trim() } : {}),
+    partyDetails: [],
+  };
+}
+
+async function bvnkRequest(
+  config: BvnkConfig,
+  path: string,
+  init: {
+    method: "GET" | "POST";
+    body?: unknown;
+  }
+): Promise<unknown> {
+  const apiBaseUrl = config.apiBaseUrl.endsWith("/") ? config.apiBaseUrl : `${config.apiBaseUrl}/`;
+  const url = new URL(path.replace(/^\//, ""), apiBaseUrl);
+  const response = await fetch(url.toString(), {
+    method: init.method,
+    headers: {
+      Authorization: `Bearer ${config.apiToken}`,
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: init.body === undefined ? undefined : JSON.stringify(init.body),
+  });
+
+  const raw = await response.text();
+  const parsed = safeParseJson(raw);
+
+  if (!response.ok) {
+    const parsedMessage =
+      parsed && typeof parsed === "object"
+        ? ((parsed as { message?: unknown; error?: unknown; reason?: unknown }).message ??
+          (parsed as { message?: unknown; error?: unknown; reason?: unknown }).error ??
+          (parsed as { message?: unknown; error?: unknown; reason?: unknown }).reason)
+        : undefined;
+
+    const message =
+      typeof parsedMessage === "string" && parsedMessage.length > 0
+        ? parsedMessage
+        : `BVNK request failed with status ${response.status}`;
+
+    throw new AppError("BAD_REQUEST", message);
+  }
+
+  return parsed ?? {};
+}
+
+function parseBvnkEstimateResponse(payload: unknown): BvnkEstimateResponse {
+  if (typeof payload !== "object" || payload === null) {
+    throw new AppError("BAD_REQUEST", "BVNK estimate response payload is invalid");
+  }
+  return payload as BvnkEstimateResponse;
+}
+
+function parseBvnkPaymentSummary(payload: unknown): BvnkPaymentSummary {
+  if (typeof payload !== "object" || payload === null) {
+    throw new AppError("BAD_REQUEST", "BVNK payment response payload is invalid");
+  }
+  return payload as BvnkPaymentSummary;
 }
 
 async function lightsparkRequest(
@@ -1055,6 +1280,129 @@ async function buildSignedMoonPayWidgetUrl(
   return url.toString();
 }
 
+const bvnkRampProvider: RampProviderExecutor = {
+  isConfigured: isBvnkConfigured,
+
+  async executeOnramp(c, scope, input) {
+    const customerId = input.kycReference?.trim();
+    if (!customerId) {
+      throw new AppError(
+        "BAD_REQUEST",
+        "kycReference is required for BVNK onramp and must contain a BVNK customer id"
+      );
+    }
+
+    const config = getBvnkConfig(c);
+    const destinationAddress = resolveWalletAddress(
+      scope.wallets,
+      input.destinationWallet,
+      "destinationWallet"
+    );
+    const { currency, network } = normalizeBvnkCurrencyAndNetwork(input.cryptoToken);
+    const amount = toPositiveNumberAmount(input.fiatAmount, "fiatAmount");
+    const externalReference = `sdp_onramp_${crypto.randomUUID()}`;
+
+    const response = await bvnkRequest(config, "/api/v1/pay/summary", {
+      method: "POST",
+      body: {
+        walletId: config.walletId,
+        amount,
+        currency: "USD",
+        type: "IN",
+        reference: externalReference,
+        customerId,
+        returnUrl: input.redirectUrl,
+        payOutDetails: {
+          code: "crypto",
+          currency,
+          address: destinationAddress,
+          network,
+        },
+        complianceDetails: buildBvnkComplianceDetails(c),
+      },
+    });
+
+    const summary = parseBvnkPaymentSummary(response);
+    return {
+      id: `ramp_${crypto.randomUUID()}`,
+      provider: "bvnk",
+      status: mapBvnkPaymentStatus(summary.status),
+      redirectUrl: typeof summary.redirectUrl === "string" ? summary.redirectUrl : undefined,
+      reference:
+        typeof summary.uuid === "string"
+          ? summary.uuid
+          : typeof summary.reference === "string"
+            ? summary.reference
+            : externalReference,
+    };
+  },
+
+  async executeOfframp(c, scope, input) {
+    const customerId = input.kycReference?.trim();
+    if (!customerId) {
+      throw new AppError(
+        "BAD_REQUEST",
+        "kycReference is required for BVNK offramp and must contain a BVNK customer id"
+      );
+    }
+
+    const config = getBvnkConfig(c);
+    const destinationAddress = resolveWalletAddress(scope.wallets, input.sourceWallet, "sourceWallet");
+    const { currency, network } = normalizeBvnkCurrencyAndNetwork(input.cryptoToken);
+    const paidRequiredAmount = toPositiveNumberAmount(input.cryptoAmount, "cryptoAmount");
+    const externalReference = `sdp_offramp_${crypto.randomUUID()}`;
+
+    const estimateResponse = await bvnkRequest(config, "/api/v1/pay/estimate", {
+      method: "POST",
+      body: {
+        walletId: config.walletId,
+        walletCurrency: "USD",
+        paidCurrency: currency,
+        paidRequiredAmount,
+        reference: externalReference,
+        network,
+        complianceDetails: buildBvnkComplianceDetails(c),
+      },
+    });
+
+    const estimate = parseBvnkEstimateResponse(estimateResponse);
+    if (!estimate.externalId) {
+      throw new AppError("BAD_REQUEST", "BVNK estimate response is missing externalId");
+    }
+
+    const summaryResponse = await bvnkRequest(
+      config,
+      `/api/v1/pay/estimate/${encodeURIComponent(estimate.externalId)}/accept`,
+      {
+        method: "POST",
+        body: {
+          customerId,
+          payOutDetails: {
+            currency,
+            address: destinationAddress,
+            network,
+          },
+          complianceDetails: buildBvnkComplianceDetails(c),
+        },
+      }
+    );
+
+    const summary = parseBvnkPaymentSummary(summaryResponse);
+    return {
+      id: `ramp_${crypto.randomUUID()}`,
+      provider: "bvnk",
+      status: mapBvnkPaymentStatus(summary.status),
+      redirectUrl: typeof summary.redirectUrl === "string" ? summary.redirectUrl : undefined,
+      reference:
+        typeof summary.uuid === "string"
+          ? summary.uuid
+          : typeof summary.reference === "string"
+            ? summary.reference
+            : estimate.externalId,
+    };
+  },
+};
+
 const moonPayRampProvider: RampProviderExecutor = {
   isConfigured: isMoonPayConfigured,
 
@@ -1229,6 +1577,7 @@ const lightsparkRampProvider: RampProviderExecutor = {
 const RAMP_PROVIDER_REGISTRY: Record<string, RampProviderExecutor> = {
   moonpay: moonPayRampProvider,
   lightspark: lightsparkRampProvider,
+  bvnk: bvnkRampProvider,
 };
 
 function resolveRampProvider(c: AppContext, providerId: string): RampProviderExecutor {
@@ -1238,12 +1587,15 @@ function resolveRampProvider(c: AppContext, providerId: string): RampProviderExe
     if (lightsparkRampProvider.isConfigured(c)) {
       return lightsparkRampProvider;
     }
+    if (bvnkRampProvider.isConfigured(c)) {
+      return bvnkRampProvider;
+    }
     if (moonPayRampProvider.isConfigured(c)) {
       return moonPayRampProvider;
     }
     throw new AppError(
       "INTERNAL_ERROR",
-      "No ramp provider is configured. Configure MoonPay or Lightspark credentials."
+      "No ramp provider is configured. Configure MoonPay, Lightspark, or BVNK credentials."
     );
   }
 

@@ -119,6 +119,11 @@ export interface Env {
   LIGHTSPARK_GRID_CLIENT_ID?: string;
   LIGHTSPARK_GRID_CLIENT_SECRET?: string;
   LIGHTSPARK_GRID_API_BASE_URL?: string;
+
+  // BVNK ramps configuration
+  BVNK_API_TOKEN?: string;
+  BVNK_WALLET_ID?: string;
+  BVNK_API_BASE_URL?: string;
 }
 
 // Extend Hono's context with our bindings
