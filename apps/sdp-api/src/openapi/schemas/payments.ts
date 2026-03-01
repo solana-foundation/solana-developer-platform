@@ -349,12 +349,20 @@ const moonpayCurrencyCodeSchema = z
     example: "usdc_sol",
   });
 
-const rampProviderSchema = z.string().min(1).default("moonpay").openapi({
+const rampProviderSchema = z.enum(["moonpay", "lightspark", "bvnk"]).openapi({
   description:
-    "Ramp provider identifier. Supported values: moonpay, lightspark, auto. Defaults to moonpay.",
+    "Ramp provider identifier. Explicit provider selection is required because each provider has different flow requirements.",
   example: "moonpay",
-  default: "moonpay",
 });
+
+const bvnkComplianceSchema = z
+  .object({
+    partyDetails: z
+      .array(z.record(z.unknown()))
+      .min(1)
+      .openapi({ description: "BVNK party details payload. Required for BVNK off-ramp flows." }),
+  })
+  .openapi({ description: "Optional BVNK compliance details." });
 
 export const executeOnrampRequestSchema = z
   .object({
@@ -380,8 +388,12 @@ export const executeOnrampRequestSchema = z
       .url()
       .optional()
       .openapi({ description: "Optional redirect URL after provider flow completes." }),
+    bvnkCompliance: bvnkComplianceSchema.optional(),
   })
-  .openapi({ description: "Execute on-ramp request payload." });
+  .openapi({
+    description:
+      "Execute on-ramp request payload. Note: BVNK on-ramp requires additional provider-side account enablement and compliance setup beyond API credentials.",
+  });
 
 export const executeOfframpRequestSchema = z
   .object({
@@ -407,6 +419,7 @@ export const executeOfframpRequestSchema = z
       .url()
       .optional()
       .openapi({ description: "Optional redirect URL after provider flow completes." }),
+    bvnkCompliance: bvnkComplianceSchema.optional(),
   })
   .openapi({ description: "Execute off-ramp request payload." });
 
