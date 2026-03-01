@@ -1,0 +1,17 @@
+---
+title: End-to-end Payment Flow
+description: A high-level payment flow from quote to settlement.
+---
+
+This walkthrough covers a typical payment integration lifecycle:
+
+1. Create or resolve the funding wallet.
+2. Build and validate transfer intent (amount, destination, token).
+3. Choose signing mode:
+- custody execution (server signs and submits)
+- prepare mode (client signs)
+4. Execute the transfer and capture identifiers for observability.
+5. Query transfer status until finalization.
+6. Reconcile with your product ledger and user-facing state.
+
+Use the `Payments` and `Transactions` API pages for endpoint-level request and response details.

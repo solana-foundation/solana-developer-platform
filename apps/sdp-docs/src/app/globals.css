@@ -1,0 +1,95 @@
+@import "../styles/solana-design-system.css";
+
+/* ── Light mode — matches dashboard (oklch values from sdp-web design system) ── */
+:root {
+  --color-fd-background: #e9e7de;
+  --color-fd-foreground: oklch(0.145 0 0);
+  --color-fd-muted: oklch(0.97 0 0);
+  --color-fd-muted-foreground: oklch(0.556 0 0);
+  --color-fd-popover: oklch(1 0 0);
+  --color-fd-popover-foreground: oklch(0.145 0 0);
+  --color-fd-card: oklch(1 0 0);
+  --color-fd-card-foreground: oklch(0.145 0 0);
+  --color-fd-border: oklch(0.922 0 0);
+  --color-fd-primary: oklch(0.205 0 0);
+  --color-fd-primary-foreground: oklch(1 0 0);
+  --color-fd-secondary: oklch(0.97 0 0);
+  --color-fd-secondary-foreground: oklch(0.205 0 0);
+  --color-fd-accent: oklch(0.97 0 0);
+  --color-fd-accent-foreground: oklch(0.205 0 0);
+  --color-fd-ring: oklch(0.708 0 0);
+}
+
+/* ── Dark mode — matches dashboard dark tokens ── */
+.dark {
+  --color-fd-background: oklch(0.145 0 0);
+  --color-fd-foreground: oklch(0.985 0 0);
+  --color-fd-muted: oklch(0.269 0 0);
+  --color-fd-muted-foreground: oklch(0.556 0 0);
+  --color-fd-popover: oklch(0.205 0 0);
+  --color-fd-popover-foreground: oklch(0.985 0 0);
+  --color-fd-card: oklch(0.205 0 0);
+  --color-fd-card-foreground: oklch(0.985 0 0);
+  --color-fd-border: oklch(1 0 0 / 10%);
+  --color-fd-primary: oklch(0.922 0 0);
+  --color-fd-primary-foreground: oklch(0.205 0 0);
+  --color-fd-secondary: oklch(0.269 0 0);
+  --color-fd-secondary-foreground: oklch(0.985 0 0);
+  --color-fd-accent: oklch(0.269 0 0);
+  --color-fd-accent-foreground: oklch(0.985 0 0);
+  --color-fd-ring: oklch(0.556 0 0);
+}
+
+html,
+body {
+  background-color: var(--color-fd-background);
+  color: var(--color-fd-foreground);
+  font-family: var(--font-sans);
+}
+
+.sdp-docs-shell {
+  min-height: 100vh;
+  background-color: var(--color-fd-background);
+  color: var(--color-fd-foreground);
+  font-family: var(--font-sans);
+}
+
+.sdp-docs-shell h1,
+.sdp-docs-shell h2,
+.sdp-docs-shell h3,
+.sdp-docs-shell h4,
+.sdp-docs-shell h5,
+.sdp-docs-shell h6 {
+  color: var(--color-fd-foreground);
+  letter-spacing: -0.01em;
+}
+
+/* ── Inline code ── */
+:not(pre) > code {
+  background-color: var(--color-fd-secondary);
+  color: var(--color-fd-secondary-foreground);
+  border: 1px solid var(--color-fd-border);
+  border-radius: 0.375rem;
+  padding: 0.125rem 0.375rem;
+  font-size: 0.875em;
+}
+
+.dark :not(pre) > code {
+  background-color: oklch(0.3 0 0);
+  color: oklch(0.9 0 0);
+  border-color: oklch(1 0 0 / 15%);
+}
+
+/* ── Hide descriptions on next/prev footer nav buttons ── */
+a.rounded-lg.border.p-4 > p.truncate {
+  display: none;
+}
+
+/* ── Tab panels — white card on beige background (matches dashboard cards) ── */
+[role="tabpanel"] {
+  background-color: var(--color-fd-card);
+  color: var(--color-fd-card-foreground);
+  border: 1px solid var(--color-fd-border);
+  border-radius: 0.75rem;
+  padding: 1.5rem;
+}

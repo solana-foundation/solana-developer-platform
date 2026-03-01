@@ -30,6 +30,7 @@ type NavItem = {
   label: string;
   href: string;
   icon: LucideIcon;
+  external?: boolean;
 };
 
 type NavSection = {
@@ -55,8 +56,14 @@ const navSections: NavSection[] = [
   },
 ];
 
+const docsHref =
+  process.env.NEXT_PUBLIC_SDP_DOCS_URL ||
+  (process.env.NODE_ENV === "development"
+    ? "http://localhost:3001/docs"
+    : "https://platform.solana.com/docs");
+
 const bottomNavItems: NavItem[] = [
-  { label: "API Docs", href: "#", icon: Library },
+  { label: "API Docs", href: docsHref, icon: Library, external: true },
   { label: "Settings", href: "/dashboard/settings", icon: Settings2 },
 ];
 
@@ -368,6 +375,8 @@ export function DashboardShell({ children }: { children: ReactNode }) {
                 <Link
                   key={item.label}
                   href={item.href}
+                  target={item.external ? "_blank" : undefined}
+                  rel={item.external ? "noopener noreferrer" : undefined}
                   className="flex h-10 items-center gap-3 rounded-[10px] px-3 text-[16px] leading-[24px] text-[rgba(28,28,29,0.76)] transition-colors hover:bg-[rgba(28,28,29,0.06)] hover:text-[#1c1c1d]"
                 >
                   <Icon className="h-5 w-5" strokeWidth={1.9} />

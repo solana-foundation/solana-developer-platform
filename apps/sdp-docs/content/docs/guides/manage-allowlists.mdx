@@ -1,0 +1,138 @@
+---
+title: Manage Allowlists
+description: Control which addresses can hold your token using allowlists.
+---
+
+Tokens created with `requiresAllowlist: true` restrict transfers to approved addresses only. Any transfer to an address not on the allowlist will fail. This is essential for regulated tokens like tokenized securities.
+
+These operations are currently API-only.
+
+## Prerequisites
+
+- A token with `requiresAllowlist` enabled
+- The `tokens:write` permission
+
+## Add an address
+
+<Tabs items={["curl", "TypeScript", "Java"]}>
+<Tab value="curl">
+```bash
+curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/allowlist \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "address": "7xKXz...9fGh",
+    "label": "Treasury wallet"
+  }'
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript
+const response = await fetch(
+  "https://api.solana.com/v1/issuance/tokens/tok_abc123/allowlist",
+  {
+    method: "POST",
+    headers: {
+      "Authorization": "Bearer sk_test_...",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      address: "7xKXz...9fGh",
+      label: "Treasury wallet",
+    }),
+  }
+);
+```
+</Tab>
+<Tab value="Java">
+```java
+HttpRequest request = HttpRequest.newBuilder()
+    .uri(URI.create("https://api.solana.com/v1/issuance/tokens/tok_abc123/allowlist"))
+    .header("Authorization", "Bearer sk_test_...")
+    .header("Content-Type", "application/json")
+    .POST(HttpRequest.BodyPublishers.ofString("""
+        {
+          "address": "7xKXz...9fGh",
+          "label": "Treasury wallet"
+        }"""))
+    .build();
+```
+</Tab>
+</Tabs>
+
+The `label` field is optional but recommended for identifying entries.
+
+## List entries
+
+<Tabs items={["curl", "TypeScript", "Java"]}>
+<Tab value="curl">
+```bash
+curl https://api.solana.com/v1/issuance/tokens/tok_abc123/allowlist \
+  -H "Authorization: Bearer sk_test_..."
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript
+const response = await fetch(
+  "https://api.solana.com/v1/issuance/tokens/tok_abc123/allowlist",
+  { headers: { "Authorization": "Bearer sk_test_..." } }
+);
+const { data, meta } = await response.json();
+// meta: { total, page, pageSize, hasMore }
+```
+</Tab>
+<Tab value="Java">
+```java
+HttpRequest request = HttpRequest.newBuilder()
+    .uri(URI.create("https://api.solana.com/v1/issuance/tokens/tok_abc123/allowlist"))
+    .header("Authorization", "Bearer sk_test_...")
+    .GET()
+    .build();
+```
+</Tab>
+</Tabs>
+
+Supports `page` and `pageSize` query parameters for pagination.
+
+## Remove an address
+
+<Tabs items={["curl", "TypeScript", "Java"]}>
+<Tab value="curl">
+```bash
+curl -X DELETE \
+  https://api.solana.com/v1/issuance/tokens/tok_abc123/allowlist/alw_abc123 \
+  -H "Authorization: Bearer sk_test_..."
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript
+await fetch(
+  "https://api.solana.com/v1/issuance/tokens/tok_abc123/allowlist/alw_abc123",
+  {
+    method: "DELETE",
+    headers: { "Authorization": "Bearer sk_test_..." },
+  }
+);
+```
+</Tab>
+<Tab value="Java">
+```java
+HttpRequest request = HttpRequest.newBuilder()
+    .uri(URI.create("https://api.solana.com/v1/issuance/tokens/tok_abc123/allowlist/alw_abc123"))
+    .header("Authorization", "Bearer sk_test_...")
+    .DELETE()
+    .build();
+```
+</Tab>
+</Tabs>
+
+## Workflow
+
+A typical allowlist workflow for a tokenized security:
+
+1. Create the token with `"requiresAllowlist": true` and template `"tokenized-security"`
+2. [Deploy the token](/docs/guides/deploy-a-token)
+3. Collect wallet addresses from KYC-verified users
+4. Add each verified address to the allowlist
+5. [Mint tokens](/docs/guides/mint-and-burn) to allowlisted addresses
+6. Remove addresses when compliance status changes

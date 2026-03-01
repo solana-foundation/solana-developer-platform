@@ -126,6 +126,10 @@ export interface Env {
   TRM_API_BASE_URL?: string;
   CHAINALYSIS_API_KEY?: string;
   CHAINALYSIS_API_BASE_URL?: string;
+  // Lightspark Grid ramps configuration
+  LIGHTSPARK_GRID_CLIENT_ID?: string;
+  LIGHTSPARK_GRID_CLIENT_SECRET?: string;
+  LIGHTSPARK_GRID_API_BASE_URL?: string;
 }
 
 // Extend Hono's context with our bindings

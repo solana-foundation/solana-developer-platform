@@ -92,6 +92,15 @@ export interface ListTransfersInput {
   offset: number;
 }
 
+export interface ListTransfersByStatusInput {
+  statuses: PaymentTransferStatus[];
+  hasSignature?: boolean;
+  createdBefore?: string;
+  updatedBefore?: string;
+  limit: number;
+  offset?: number;
+}
+
 export interface ListTransfersResult {
   rows: PaymentTransferRow[];
   total: number;
@@ -104,6 +113,7 @@ export interface PaymentsRepositoryContext {
 export interface PaymentsRepository {
   createTransfer(input: CreatePaymentTransferInput): Promise<PaymentTransferRow | null>;
   updateTransfer(input: UpdatePaymentTransferInput): Promise<PaymentTransferRow | null>;
+  listTransfersByStatus(params: ListTransfersByStatusInput): Promise<PaymentTransferRow[]>;
   getTransferById(params: {
     transferId: string;
     organizationId: string;
