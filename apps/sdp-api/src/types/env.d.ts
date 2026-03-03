@@ -170,6 +170,11 @@ declare module "hono" {
       permissions: Permission[];
       environment: string;
       signingWalletId: string | null;
+      signingWalletIds?: string[];
+      walletBindings?: Array<{
+        walletId: string;
+        permissions: Permission[];
+      }>;
     };
     // Session auth context set by middleware
     session?: CachedSession;

@@ -6,7 +6,7 @@
  */
 
 import type { Env } from "@/types/env";
-import type { Permission } from "@sdp/types";
+import type { ApiKeyWalletBinding, Permission } from "@sdp/types";
 import type { Context } from "hono";
 import { AppError } from "./errors";
 
@@ -24,6 +24,8 @@ export interface ApiKeyContext {
   permissions: Permission[];
   environment: string;
   signingWalletId: string | null;
+  signingWalletIds: string[];
+  walletBindings: ApiKeyWalletBinding[];
   authType: AuthType;
   userId: string | null;
   apiKeyId: string | null;
@@ -68,6 +70,8 @@ export function getAuth(c: Context<{ Bindings: Env }>): ApiKeyContext {
       permissions: apiKey.permissions,
       environment: apiKey.environment,
       signingWalletId: apiKey.signingWalletId ?? null,
+      signingWalletIds: apiKey.signingWalletIds ?? [],
+      walletBindings: apiKey.walletBindings ?? [],
       authType: "api_key",
       userId: null,
       apiKeyId: apiKey.id,
@@ -84,6 +88,8 @@ export function getAuth(c: Context<{ Bindings: Env }>): ApiKeyContext {
       permissions: clerk.permissions,
       environment: "dashboard",
       signingWalletId: null,
+      signingWalletIds: [],
+      walletBindings: [],
       authType: "clerk",
       userId: clerk.userId,
       apiKeyId: null,
@@ -100,6 +106,8 @@ export function getAuth(c: Context<{ Bindings: Env }>): ApiKeyContext {
       permissions: session.permissions,
       environment: "dashboard",
       signingWalletId: null,
+      signingWalletIds: [],
+      walletBindings: [],
       authType: "session",
       userId: session.userId,
       apiKeyId: null,

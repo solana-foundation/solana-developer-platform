@@ -247,6 +247,27 @@ export const apiKeys = sqliteTable(
   })
 );
 
+export const apiKeyWalletPermissions = sqliteTable(
+  "api_key_wallet_permissions",
+  {
+    id: text("id").primaryKey(),
+    apiKeyId: text("api_key_id")
+      .notNull()
+      .references(() => apiKeys.id, { onDelete: "cascade" }),
+    walletId: text("wallet_id").notNull(),
+    permissions: text("permissions").notNull().default('["*"]'),
+    createdAt: text("created_at").notNull().default(sql`(STRFTIME('%Y-%m-%dT%H:%M:%fZ','now'))`),
+    updatedAt: text("updated_at").notNull().default(sql`(STRFTIME('%Y-%m-%dT%H:%M:%fZ','now'))`),
+  },
+  (table) => ({
+    keyWalletUnique: uniqueIndex("idx_api_key_wallet_permissions_key_wallet").on(
+      table.apiKeyId,
+      table.walletId
+    ),
+    keyIdx: index("idx_api_key_wallet_permissions_key").on(table.apiKeyId),
+  })
+);
+
 export const projectMembers = sqliteTable(
   "project_members",
   {

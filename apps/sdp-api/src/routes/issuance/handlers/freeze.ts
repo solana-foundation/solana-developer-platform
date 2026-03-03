@@ -1,3 +1,4 @@
+import { resolveApiKeySigningWalletId } from "@/lib/api-key-wallet-auth";
 import { getAuth } from "@/lib/auth";
 import { AppError, notFound } from "@/lib/errors";
 import { created, paginated, success } from "@/lib/response";
@@ -46,13 +47,10 @@ export const freezeAccount = async (c: AppContext) => {
     throw new AppError("TOKEN_NOT_DEPLOYED", "Token has not been deployed to Solana");
   }
 
+  const signingWalletId = resolveApiKeySigningWalletId(auth, undefined, ["tokens:admin"]);
+
   // Get custody signer (freeze authority, via 3-tier resolution)
-  const signer = await createOrgSigner(
-    c.env,
-    auth.organizationId,
-    auth.projectId,
-    auth.signingWalletId
-  );
+  const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId, signingWalletId);
   const accountAddress = assertValidAddress(parsed.data.accountAddress, "accountAddress");
 
   const idempotencyMetadata = buildIdempotencyMetadata(c.req.header("Idempotency-Key"), {
@@ -225,13 +223,10 @@ export const unfreezeAccount = async (c: AppContext) => {
     throw new AppError("ACCOUNT_NOT_FROZEN", "Account is not frozen");
   }
 
+  const signingWalletId = resolveApiKeySigningWalletId(auth, undefined, ["tokens:admin"]);
+
   // Get custody signer (freeze authority, via 3-tier resolution)
-  const signer = await createOrgSigner(
-    c.env,
-    auth.organizationId,
-    auth.projectId,
-    auth.signingWalletId
-  );
+  const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId, signingWalletId);
   const accountAddress = assertValidAddress(parsed.data.accountAddress, "accountAddress");
 
   const idempotencyMetadata = buildIdempotencyMetadata(c.req.header("Idempotency-Key"), {

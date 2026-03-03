@@ -82,6 +82,7 @@ export interface ListTransfersInput {
   organizationId: string;
   projectId: string | null;
   walletId?: string;
+  walletIds?: string[];
   sourceAddress?: string;
   token?: string;
   direction?: PaymentTransferDirection;

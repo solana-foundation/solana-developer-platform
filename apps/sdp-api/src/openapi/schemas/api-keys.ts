@@ -29,6 +29,19 @@ export const permissionSchema = z.enum(PERMISSIONS).openapi({
   example: "tokens:write",
 });
 
+export const apiKeyWalletBindingSchema = z
+  .object({
+    walletId: z.string().openapi({
+      description: "Custody wallet ID attached to the API key.",
+      example: "privy_wallet_123",
+    }),
+    permissions: z.array(permissionSchema).openapi({
+      description: "Permissions allowed when this wallet is selected.",
+      example: ["payments:write", "tokens:write"],
+    }),
+  })
+  .openapi({ description: "Wallet-level permission binding for an API key." });
+
 export const apiKeyListItemSchema = z
   .object({
     id: apiKeyIdParamSchema,
@@ -82,8 +95,15 @@ export const apiKeyDetailSchema = z
         example: ["203.0.113.0/24"],
       }),
     signingWalletId: z.string().nullable().openapi({
-      description: "Optional custody wallet bound to this API key for signing.",
+      description: "Default custody wallet bound to this API key for signing.",
       example: "privy_wallet_123",
+    }),
+    signingWalletIds: z.array(z.string()).openapi({
+      description: "All custody wallet IDs bound to this API key.",
+      example: ["privy_wallet_123", "dfns_wallet_456"],
+    }),
+    walletBindings: z.array(apiKeyWalletBindingSchema).openapi({
+      description: "Wallet bindings and wallet-level permission sets for this API key.",
     }),
     lastUsedAt: isoDateTimeSchema.nullable().openapi({
       description: "Timestamp of the last key usage.",
@@ -215,8 +235,17 @@ export const createApiKeyRequestSchema = apiKeyCreateSchemaBase
       example: ["tokens:read", "tokens:write"],
     }),
     signingWalletId: apiKeyCreateSchemaBase.shape.signingWalletId.openapi({
-      description: "Optional existing custody wallet ID to bind this key to.",
+      description: "Optional default custody wallet ID to bind this key to.",
       example: "privy_wallet_123",
+    }),
+    signingWalletIds: apiKeyCreateSchemaBase.shape.signingWalletIds.openapi({
+      description:
+        "Optional list of custody wallet IDs to bind to this key. The first wallet becomes default unless signingWalletId is explicitly set.",
+      example: ["privy_wallet_123", "dfns_wallet_456"],
+    }),
+    walletBindings: apiKeyCreateSchemaBase.shape.walletBindings.openapi({
+      description:
+        "Optional wallet-level permission bindings. Use this to attach multiple wallets with scoped permissions.",
     }),
     provisionWallet: apiKeyCreateSchemaBase.shape.provisionWallet.openapi({
       description: "If true, provisions a new custody wallet and binds it to the key.",
@@ -256,8 +285,17 @@ export const updateApiKeyRequestSchema = apiKeyUpdateSchemaBase
       example: ["tokens:read", "tokens:write"],
     }),
     signingWalletId: apiKeyUpdateSchemaBase.shape.signingWalletId.openapi({
-      description: "Updated signing wallet binding. Use null to clear.",
+      description: "Updated default signing wallet binding. Use null to clear all wallet bindings.",
       example: "privy_wallet_123",
+    }),
+    signingWalletIds: apiKeyUpdateSchemaBase.shape.signingWalletIds.openapi({
+      description:
+        "Updated list of wallet IDs bound to this key. Use null to clear all wallet bindings.",
+      example: ["privy_wallet_123", "dfns_wallet_456"],
+    }),
+    walletBindings: apiKeyUpdateSchemaBase.shape.walletBindings.openapi({
+      description:
+        "Updated wallet-level permission bindings. Use null to clear all wallet bindings.",
     }),
   })
   .openapi({ description: "Update API key request body." });

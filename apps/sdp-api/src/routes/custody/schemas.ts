@@ -172,6 +172,7 @@ export type DeleteWalletRequest = z.infer<typeof deleteWalletSchema>;
 
 export const signerCheckSchema = z.object({
   memo: z.string().max(256).optional(),
+  walletId: z.string().min(1).optional(),
 });
 
 export type SignerCheckRequest = z.infer<typeof signerCheckSchema>;

@@ -2,6 +2,8 @@
  * Wallet API Handlers
  */
 
+import { assertApiKeyWalletAccess, resolveApiKeySigningWalletId } from "@/lib/api-key-wallet-auth";
+import { getAuth } from "@/lib/auth";
 import { AppError } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import { createFeePaymentAdapter } from "@/services/adapters/fee-payment";
@@ -910,13 +912,9 @@ export const getPublicKey = async (c: AppContext) => {
  * POST /wallets/signer-check
  */
 export const signerCheck = async (c: AppContext) => {
-  const apiKey = c.get("apiKey");
-  if (!apiKey) {
+  const auth = getAuth(c);
+  if (auth.authType !== "api_key") {
     throw new AppError("UNAUTHORIZED", "API key authentication is required");
-  }
-
-  if (!apiKey.signingWalletId) {
-    throw new AppError("BAD_REQUEST", "API key is not bound to a signing wallet");
   }
 
   const body = await c.req.json().catch(() => ({}));
@@ -929,13 +927,22 @@ export const signerCheck = async (c: AppContext) => {
   }
 
   const memo = parsed.data.memo?.trim() || `SDP signer check ${new Date().toISOString()}`;
+  const resolvedWalletId = resolveApiKeySigningWalletId(auth, parsed.data.walletId, [
+    "wallets:write",
+  ]);
+
+  if (!resolvedWalletId) {
+    throw new AppError("BAD_REQUEST", "API key is not bound to a signing wallet");
+  }
+
+  assertApiKeyWalletAccess(auth, resolvedWalletId, ["wallets:write"]);
 
   try {
     const signer = await createOrgSigner(
       c.env,
-      apiKey.organizationId,
-      apiKey.projectId ?? undefined,
-      apiKey.signingWalletId
+      auth.organizationId,
+      auth.projectId ?? undefined,
+      resolvedWalletId
     );
 
     const feePayment = createFeePaymentAdapter(c.env);
@@ -944,8 +951,8 @@ export const signerCheck = async (c: AppContext) => {
     const rpcTarget = await resolveRpcTarget({
       env: c.env,
       db: c.env.DB,
-      organizationId: apiKey.organizationId,
-      authProjectId: apiKey.projectId ?? null,
+      organizationId: auth.organizationId,
+      authProjectId: auth.projectId ?? null,
       requestedProjectId: null,
     });
 
@@ -984,7 +991,7 @@ export const signerCheck = async (c: AppContext) => {
     }
 
     const response: SignerCheckResponse = {
-      walletId: apiKey.signingWalletId,
+      walletId: resolvedWalletId,
       walletAddress: signer.address,
       feePayer,
       memo,

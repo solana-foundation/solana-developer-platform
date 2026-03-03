@@ -1,4 +1,5 @@
 import { toMosaicAmount } from "@/lib/amount";
+import { resolveApiKeySigningWalletId } from "@/lib/api-key-wallet-auth";
 import { getAuth } from "@/lib/auth";
 import { AppError, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
@@ -45,13 +46,10 @@ export const prepareBurn = async (c: AppContext) => {
     throw new AppError("TOKEN_NOT_DEPLOYED", "Token has not been deployed to Solana");
   }
 
+  const signingWalletId = resolveApiKeySigningWalletId(auth, undefined, ["tokens:write"]);
+
   // Validate addresses and get custody authority (via 3-tier resolution)
-  const signer = await createOrgSigner(
-    c.env,
-    auth.organizationId,
-    auth.projectId,
-    auth.signingWalletId
-  );
+  const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId, signingWalletId);
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
   const source = assertValidAddress(parsed.data.burn.source, "source");
   const burnAmount = toMosaicAmount(parsed.data.burn.amount, token.decimals);
@@ -139,13 +137,10 @@ export const executeBurn = async (c: AppContext) => {
     throw new AppError("TOKEN_NOT_DEPLOYED", "Token has not been deployed to Solana");
   }
 
+  const signingWalletId = resolveApiKeySigningWalletId(auth, undefined, ["tokens:write"]);
+
   // Get custody signer (via 3-tier resolution)
-  const signer = await createOrgSigner(
-    c.env,
-    auth.organizationId,
-    auth.projectId,
-    auth.signingWalletId
-  );
+  const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId, signingWalletId);
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
   const source = assertValidAddress(parsed.data.burn.source, "source");
   const burnAmount = toMosaicAmount(parsed.data.burn.amount, token.decimals);

@@ -8,6 +8,7 @@ import type {
 } from "@/db/repositories/payments.repository";
 import { createD1PaymentsRepository } from "@/db/repositories/payments.repository.d1";
 import { formatDecimalAmount, isDecimalString, parseDecimalAmount } from "@/lib/amount";
+import { assertApiKeyWalletAccess, getAllowedApiKeyWalletIds } from "@/lib/api-key-wallet-auth";
 import { getAuth } from "@/lib/auth";
 import { AppError } from "@/lib/errors";
 import { paginated, success } from "@/lib/response";
@@ -26,6 +27,7 @@ import {
 } from "@/services/solana/rpc";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
+import type { Permission } from "@sdp/types";
 import { getTransferSolInstruction } from "@solana-program/system";
 import {
   findAssociatedTokenPda,
@@ -644,10 +646,15 @@ function resolveWallet(wallets: CustodyWallet[], walletId: string): CustodyWalle
 function resolveWalletAddress(
   wallets: CustodyWallet[],
   walletIdOrAddress: string,
-  fieldName: string
+  fieldName: string,
+  auth?: ReturnType<typeof getAuth>,
+  requiredWalletPermissions: Permission[] = []
 ): string {
   const matchingWallet = wallets.find((entry) => entry.walletId === walletIdOrAddress);
   if (matchingWallet) {
+    if (auth) {
+      assertApiKeyWalletAccess(auth, matchingWallet.walletId, requiredWalletPermissions);
+    }
     return matchingWallet.publicKey;
   }
   return assertValidAddress(walletIdOrAddress, fieldName);
@@ -1413,7 +1420,9 @@ const bvnkRampProvider: RampProviderExecutor = {
     const destinationAddress = resolveWalletAddress(
       scope.wallets,
       input.destinationWallet,
-      "destinationWallet"
+      "destinationWallet",
+      scope.auth,
+      ["payments:write"]
     );
     const { currency, network } = normalizeBvnkCurrencyAndNetwork(input.cryptoToken);
     const amount = toPositiveNumberAmount(input.fiatAmount, "fiatAmount");
@@ -1468,7 +1477,9 @@ const bvnkRampProvider: RampProviderExecutor = {
     const destinationAddress = resolveWalletAddress(
       scope.wallets,
       input.sourceWallet,
-      "sourceWallet"
+      "sourceWallet",
+      scope.auth,
+      ["payments:write"]
     );
     const { currency, network } = normalizeBvnkCurrencyAndNetwork(input.cryptoToken);
     const paidRequiredAmount = toPositiveNumberAmount(input.cryptoAmount, "cryptoAmount");
@@ -1535,7 +1546,9 @@ const moonPayRampProvider: RampProviderExecutor = {
     const destinationWalletAddress = resolveWalletAddress(
       scope.wallets,
       input.destinationWallet,
-      "destinationWallet"
+      "destinationWallet",
+      scope.auth,
+      ["payments:write"]
     );
     const moonPay = getMoonPayConfig(c);
 
@@ -1562,7 +1575,9 @@ const moonPayRampProvider: RampProviderExecutor = {
     const sourceWalletAddress = resolveWalletAddress(
       scope.wallets,
       input.sourceWallet,
-      "sourceWallet"
+      "sourceWallet",
+      scope.auth,
+      ["payments:write"]
     );
     const moonPay = getMoonPayConfig(c);
     const externalTransactionId = `sdp_offramp_${crypto.randomUUID()}`;
@@ -1747,7 +1762,10 @@ async function executeRampWithProvider(
   return provider.executeOfframp(c, scope, input);
 }
 
-async function resolveWalletFromParams(c: AppContext) {
+async function resolveWalletFromParams(
+  c: AppContext,
+  requiredWalletPermissions: Permission[] = []
+) {
   const params = walletIdParamsSchema.safeParse(c.req.param());
   if (!params.success) {
     throw new AppError("BAD_REQUEST", "Invalid wallet ID");
@@ -1755,6 +1773,7 @@ async function resolveWalletFromParams(c: AppContext) {
 
   const scope = await resolveScope(c);
   const wallet = resolveWallet(scope.wallets, params.data.walletId);
+  assertApiKeyWalletAccess(scope.auth, wallet.walletId, requiredWalletPermissions);
 
   return {
     ...scope,
@@ -2128,7 +2147,7 @@ async function executeSplTransfer(
 }
 
 export async function getWalletBalances(c: AppContext) {
-  const { wallet } = await resolveWalletFromParams(c);
+  const { wallet } = await resolveWalletFromParams(c, ["wallets:read"]);
 
   const rpc = createRpc(c.env);
   const accountInfo = await getAccountInfo(rpc, wallet.publicKey as Address);
@@ -2155,7 +2174,7 @@ export async function getWalletBalances(c: AppContext) {
 }
 
 export async function getWalletPolicy(c: AppContext) {
-  const { wallet } = await resolveWalletFromParams(c);
+  const { wallet } = await resolveWalletFromParams(c, ["wallets:read"]);
   const repository = getPaymentsRepository(c);
 
   const rows = await repository.getWalletPoliciesByCustodyWalletId(wallet.id);
@@ -2165,7 +2184,7 @@ export async function getWalletPolicy(c: AppContext) {
 }
 
 export async function updateWalletPolicy(c: AppContext) {
-  const { wallet } = await resolveWalletFromParams(c);
+  const { wallet } = await resolveWalletFromParams(c, ["wallets:write"]);
   const repository = getPaymentsRepository(c);
 
   const body = await c.req.json();
@@ -2227,6 +2246,7 @@ export async function prepareTransfer(c: AppContext) {
   assertProjectContext(parsed.data.projectId, scope.auth.projectId);
 
   const sourceWallet = resolveWallet(scope.wallets, parsed.data.source);
+  assertApiKeyWalletAccess(scope.auth, sourceWallet.walletId, ["payments:write"]);
   const sourceAddress = assertValidAddress(sourceWallet.publicKey, "source");
   const destinationAddress = assertValidAddress(parsed.data.destination, "destination");
   const transferToken = isNativeSolToken(parsed.data.token) ? "SOL" : parsed.data.token;
@@ -2327,6 +2347,7 @@ export async function createTransfer(c: AppContext) {
   assertProjectContext(parsed.data.projectId, scope.auth.projectId);
 
   const sourceWallet = resolveWallet(scope.wallets, parsed.data.source);
+  assertApiKeyWalletAccess(scope.auth, sourceWallet.walletId, ["payments:write"]);
   const destinationAddress = assertValidAddress(parsed.data.destination, "destination");
   const transferToken = isNativeSolToken(parsed.data.token) ? "SOL" : parsed.data.token;
 
@@ -2408,6 +2429,7 @@ export async function listTransfers(c: AppContext) {
   const auth = getAuth(c);
   const query = listTransfersQuerySchema.safeParse(c.req.query());
   if (!query.success) throw new AppError("BAD_REQUEST", "Invalid query parameters");
+  const allowedWalletIds = getAllowedApiKeyWalletIds(auth);
 
   const {
     page,
@@ -2436,12 +2458,30 @@ export async function listTransfers(c: AppContext) {
     let resolvedWalletId: string | undefined;
 
     if (walletId) {
+      if (allowedWalletIds && !allowedWalletIds.includes(walletId)) {
+        throw new AppError("FORBIDDEN", "API key is not authorized for the requested wallet");
+      }
+
       const scope = await resolveScope(c);
       const wallet = resolveWallet(scope.wallets, walletId);
+      assertApiKeyWalletAccess(scope.auth, wallet.walletId, ["payments:read"]);
       sourceAddress = wallet.publicKey;
       resolvedWalletId = walletId;
     } else {
       sourceAddress = walletAddress;
+      if (allowedWalletIds) {
+        const scope = await resolveScope(c);
+        const matchedWallet = scope.wallets.find(
+          (wallet) =>
+            wallet.publicKey === walletAddress && allowedWalletIds.includes(wallet.walletId)
+        );
+        if (!matchedWallet) {
+          throw new AppError("FORBIDDEN", "API key is not authorized for the requested wallet");
+        }
+
+        sourceAddress = matchedWallet.publicKey;
+        resolvedWalletId = matchedWallet.walletId;
+      }
     }
 
     // 1. Fetch on-chain signature history via Helius (or fallback RPC)
@@ -2458,6 +2498,9 @@ export async function listTransfers(c: AppContext) {
       organizationId: auth.organizationId,
       projectId: auth.projectId,
     });
+    const scopedConfirmedRows = allowedWalletIds
+      ? confirmedRows.filter((row) => allowedWalletIds.includes(row.wallet_id))
+      : confirmedRows;
 
     // 3. Fetch pending/processing/failed from DB (not yet on-chain).
     //    Skip if the caller's status filter already excludes these — e.g. status=confirmed
@@ -2470,6 +2513,7 @@ export async function listTransfers(c: AppContext) {
         organizationId: auth.organizationId,
         projectId: auth.projectId,
         walletId: resolvedWalletId,
+        walletIds: resolvedWalletId ? undefined : (allowedWalletIds ?? undefined),
         sourceAddress: resolvedWalletId ? undefined : walletAddress,
         statuses: nonChainStatuses,
         token,
@@ -2484,7 +2528,7 @@ export async function listTransfers(c: AppContext) {
 
     // 4. Merge: confirmed (Helius-backed) + non-confirmed (DB), deduplicated
     const seen = new Set<string>();
-    const merged = [...confirmedRows, ...pendingRows].filter((row) => {
+    const merged = [...scopedConfirmedRows, ...pendingRows].filter((row) => {
       if (seen.has(row.id)) return false;
       seen.add(row.id);
       return true;
@@ -2507,6 +2551,7 @@ export async function listTransfers(c: AppContext) {
     const result = await repo.listTransfers({
       organizationId: auth.organizationId,
       projectId: auth.projectId,
+      walletIds: allowedWalletIds ?? undefined,
       token,
       direction,
       statuses: status ? [status] : undefined,
@@ -2525,6 +2570,7 @@ export async function listTransfers(c: AppContext) {
 
 export async function getTransfer(c: AppContext) {
   const auth = getAuth(c);
+  const allowedWalletIds = getAllowedApiKeyWalletIds(auth);
   const transferId = c.req.param("transferId");
   const repo = getPaymentsRepository(c);
 
@@ -2535,6 +2581,9 @@ export async function getTransfer(c: AppContext) {
   });
 
   if (!row) throw new AppError("NOT_FOUND", "Transfer not found");
+  if (allowedWalletIds && !allowedWalletIds.includes(row.wallet_id)) {
+    throw new AppError("FORBIDDEN", "API key is not authorized for the requested wallet");
+  }
 
   return success(c, { transfer: mapTransferRow(row) });
 }

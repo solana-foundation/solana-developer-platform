@@ -10,6 +10,11 @@ export type ApiKeyStatus = "active" | "revoked" | "expired" | "deactivated";
 
 export type RateLimitTier = "standard" | "elevated" | "unlimited";
 
+export interface ApiKeyWalletBinding {
+  walletId: string;
+  permissions: Permission[];
+}
+
 export interface ApiKey {
   id: string; // key_xxxxxxxxxxxx
   organizationId: string;
@@ -30,6 +35,8 @@ export interface ApiKey {
   rotatedFrom: string | null; // Previous key ID if this was created via rotation
   rotationDeadline: string | null; // Grace period end for the rotated-from key
   signingWalletId: string | null; // Custody wallet binding (e.g. privy_xxx)
+  signingWalletIds?: string[]; // Optional multi-wallet bindings (wallet IDs)
+  walletBindings?: ApiKeyWalletBinding[]; // Optional wallet-level permission bindings
   status: ApiKeyStatus;
   createdAt: string;
 }
@@ -47,6 +54,8 @@ export interface CachedApiKey {
   rateLimitTier: RateLimitTier;
   allowedIps: string[] | null;
   signingWalletId: string | null;
+  signingWalletIds?: string[];
+  walletBindings?: ApiKeyWalletBinding[];
   status: ApiKeyStatus;
   expiresAt: string | null;
 }
@@ -61,6 +70,11 @@ export interface CreateApiKeyRequest {
   allowedIps?: string[]; // CIDR ranges for IP restriction
   expiresAt?: string; // ISO date string
   signingWalletId?: string;
+  signingWalletIds?: string[];
+  walletBindings?: Array<{
+    walletId: string;
+    permissions?: Permission[];
+  }>;
   provisionWallet?: boolean;
   walletLabel?: string;
   walletPurpose?: string;
@@ -73,6 +87,11 @@ export interface UpdateApiKeyRequest {
   expiresAt?: string | null; // null to remove expiration
   permissions?: Permission[] | null; // null to revert to role defaults
   signingWalletId?: string | null; // null to unset binding
+  signingWalletIds?: string[] | null;
+  walletBindings?: Array<{
+    walletId: string;
+    permissions?: Permission[];
+  }> | null;
 }
 
 export interface RotateApiKeyRequest {

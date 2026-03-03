@@ -77,6 +77,18 @@ export async function seedTestDatabase(env: Env): Promise<void> {
       )
     `),
     db.prepare(`
+      CREATE TABLE IF NOT EXISTS api_key_wallet_permissions (
+        id TEXT PRIMARY KEY,
+        api_key_id TEXT NOT NULL,
+        wallet_id TEXT NOT NULL,
+        permissions TEXT NOT NULL DEFAULT '["*"]',
+        created_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ','now')),
+        updated_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ','now')),
+        FOREIGN KEY (api_key_id) REFERENCES api_keys(id) ON DELETE CASCADE,
+        UNIQUE(api_key_id, wallet_id)
+      )
+    `),
+    db.prepare(`
       CREATE TABLE IF NOT EXISTS audit_logs (
         id TEXT PRIMARY KEY,
         organization_id TEXT,
@@ -427,6 +439,7 @@ export async function clearTestDatabase(env: Env): Promise<void> {
   const tables = [
     "custody_scope_defaults",
     "custody_wallets",
+    "api_key_wallet_permissions",
     "signing_requests",
     "custody_configs",
     "payment_transfers",
