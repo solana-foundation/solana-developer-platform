@@ -247,6 +247,27 @@ export const apiKeys = sqliteTable(
   })
 );
 
+export const apiKeyWalletPermissions = sqliteTable(
+  "api_key_wallet_permissions",
+  {
+    id: text("id").primaryKey(),
+    apiKeyId: text("api_key_id")
+      .notNull()
+      .references(() => apiKeys.id, { onDelete: "cascade" }),
+    walletId: text("wallet_id").notNull(),
+    permissions: text("permissions").notNull().default('["*"]'),
+    createdAt: text("created_at").notNull().default(sql`(STRFTIME('%Y-%m-%dT%H:%M:%fZ','now'))`),
+    updatedAt: text("updated_at").notNull().default(sql`(STRFTIME('%Y-%m-%dT%H:%M:%fZ','now'))`),
+  },
+  (table) => ({
+    keyWalletUnique: uniqueIndex("idx_api_key_wallet_permissions_key_wallet").on(
+      table.apiKeyId,
+      table.walletId
+    ),
+    keyIdx: index("idx_api_key_wallet_permissions_key").on(table.apiKeyId),
+  })
+);
+
 export const projectMembers = sqliteTable(
   "project_members",
   {
@@ -564,6 +585,7 @@ export const custodyWallets = sqliteTable(
     purpose: text("purpose"),
     status: text("status").notNull().default("active"),
     createdAt: text("created_at").notNull().default(sql`(STRFTIME('%Y-%m-%dT%H:%M:%fZ','now'))`),
+    updatedAt: text("updated_at").notNull().default(sql`(STRFTIME('%Y-%m-%dT%H:%M:%fZ','now'))`),
   },
   (table) => ({
     configIdx: index("idx_custody_wallets_config").on(table.custodyConfigId),
@@ -571,6 +593,33 @@ export const custodyWallets = sqliteTable(
     configWalletUnique: uniqueIndex("custody_wallets_custody_config_id_wallet_id_unique").on(
       table.custodyConfigId,
       table.walletId
+    ),
+  })
+);
+
+export const custodyScopeDefaults = sqliteTable(
+  "custody_scope_defaults",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    projectId: text("project_id").references(() => projects.id, { onDelete: "cascade" }),
+    defaultCustodyConfigId: text("default_custody_config_id")
+      .notNull()
+      .references(() => custodyConfigs.id, { onDelete: "cascade" }),
+    createdAt: text("created_at").notNull().default(sql`(STRFTIME('%Y-%m-%dT%H:%M:%fZ','now'))`),
+    updatedAt: text("updated_at").notNull().default(sql`(STRFTIME('%Y-%m-%dT%H:%M:%fZ','now'))`),
+  },
+  (table) => ({
+    orgProjectNotNullUnique: uniqueIndex("idx_custody_scope_defaults_org_project_not_null")
+      .on(table.organizationId, table.projectId)
+      .where(sql`${table.projectId} IS NOT NULL`),
+    orgNullProjectUnique: uniqueIndex("idx_custody_scope_defaults_org_null_project")
+      .on(table.organizationId)
+      .where(sql`${table.projectId} IS NULL`),
+    defaultConfigIdx: index("idx_custody_scope_defaults_default_config").on(
+      table.defaultCustodyConfigId
     ),
   })
 );

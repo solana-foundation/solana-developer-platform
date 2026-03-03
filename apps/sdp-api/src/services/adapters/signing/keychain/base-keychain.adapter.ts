@@ -10,27 +10,36 @@
  */
 
 import type {
+  FullSigningPort,
   GeneratedKeypair,
   SignRequest,
   SignResult,
   SignStatus,
-  SigningPort,
 } from "@/services/ports";
 import { SigningError } from "@/services/ports";
 import type { SolanaSigner } from "@solana/keychain-core";
-import type { Address } from "@solana/kit";
+import type { Address, TransactionSigner } from "@solana/kit";
 import { createSignableMessage } from "@solana/signers";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Base Adapter
 // ═══════════════════════════════════════════════════════════════════════════
 
-export abstract class BaseKeychainAdapter implements SigningPort {
+export abstract class BaseKeychainAdapter implements FullSigningPort {
   /** Provider identifier (e.g., "keychain-fireblocks") */
   abstract readonly providerId: string;
 
   /** The underlying Keychain signer */
   protected abstract signer: SolanaSigner;
+
+  /**
+   * Get an @solana/kit-compatible transaction signer.
+   * Implementations may ignore wallet-level args when single-wallet.
+   */
+  abstract getTransactionSigner(
+    walletId?: string,
+    walletPublicKey?: Address
+  ): Promise<TransactionSigner>;
 
   /**
    * Whether this provider requires async approval workflows.

@@ -32,7 +32,8 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Freeze/Unfreeze O
   });
 
   beforeEach(async () => {
-    await resetIntegrationState(apiKeyHash);
+    const state = await resetIntegrationState(apiKeyHash);
+    custodyAddress = state.custodyAddress;
 
     const createRes = await request("/v1/issuance/tokens", {
       method: "POST",

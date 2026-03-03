@@ -77,6 +77,18 @@ export async function seedTestDatabase(env: Env): Promise<void> {
       )
     `),
     db.prepare(`
+      CREATE TABLE IF NOT EXISTS api_key_wallet_permissions (
+        id TEXT PRIMARY KEY,
+        api_key_id TEXT NOT NULL,
+        wallet_id TEXT NOT NULL,
+        permissions TEXT NOT NULL DEFAULT '["*"]',
+        created_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ','now')),
+        updated_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ','now')),
+        FOREIGN KEY (api_key_id) REFERENCES api_keys(id) ON DELETE CASCADE,
+        UNIQUE(api_key_id, wallet_id)
+      )
+    `),
+    db.prepare(`
       CREATE TABLE IF NOT EXISTS audit_logs (
         id TEXT PRIMARY KEY,
         organization_id TEXT,
@@ -382,9 +394,37 @@ export async function seedTestDatabase(env: Env): Promise<void> {
         purpose TEXT,
         status TEXT NOT NULL DEFAULT 'active',
         created_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ','now')),
+        updated_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ','now')),
         FOREIGN KEY (custody_config_id) REFERENCES custody_configs(id) ON DELETE CASCADE,
         UNIQUE(custody_config_id, wallet_id)
       )
+    `),
+    db.prepare(`
+      CREATE TABLE IF NOT EXISTS custody_scope_defaults (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        project_id TEXT,
+        default_custody_config_id TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ','now')),
+        updated_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ','now')),
+        FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
+        FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+        FOREIGN KEY (default_custody_config_id) REFERENCES custody_configs(id) ON DELETE CASCADE
+      )
+    `),
+    db.prepare(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_custody_scope_defaults_org_project_not_null
+      ON custody_scope_defaults(organization_id, project_id)
+      WHERE project_id IS NOT NULL
+    `),
+    db.prepare(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_custody_scope_defaults_org_null_project
+      ON custody_scope_defaults(organization_id)
+      WHERE project_id IS NULL
+    `),
+    db.prepare(`
+      CREATE INDEX IF NOT EXISTS idx_custody_scope_defaults_default_config
+      ON custody_scope_defaults(default_custody_config_id)
     `),
   ]);
 }
@@ -398,7 +438,9 @@ export async function clearTestDatabase(env: Env): Promise<void> {
 
   // Drop tables if they exist (order matters for foreign keys)
   const tables = [
+    "custody_scope_defaults",
     "custody_wallets",
+    "api_key_wallet_permissions",
     "signing_requests",
     "custody_configs",
     "payment_transfers",

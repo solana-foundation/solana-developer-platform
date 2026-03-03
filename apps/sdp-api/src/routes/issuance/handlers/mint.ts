@@ -1,4 +1,5 @@
 import { parseDecimalAmount, toMosaicAmount } from "@/lib/amount";
+import { resolveApiKeySigningWalletId } from "@/lib/api-key-wallet-auth";
 import { getAuth } from "@/lib/auth";
 import { AppError, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
@@ -71,13 +72,10 @@ export const prepareMint = async (c: AppContext) => {
     }
   }
 
+  const signingWalletId = resolveApiKeySigningWalletId(auth, undefined, ["tokens:write"]);
+
   // Get mint authority (custody signer via 3-tier resolution)
-  const signer = await createOrgSigner(
-    c.env,
-    auth.organizationId,
-    auth.projectId,
-    auth.signingWalletId
-  );
+  const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId, signingWalletId);
   const mintAuthority = assertValidAddress(token.mintAuthority ?? "", "mintAuthority");
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
   const destination = assertValidAddress(parsed.data.mint.destination, "destination");
@@ -194,13 +192,10 @@ export const executeMint = async (c: AppContext) => {
     }
   }
 
+  const signingWalletId = resolveApiKeySigningWalletId(auth, undefined, ["tokens:write"]);
+
   // Get custody signer (via 3-tier resolution)
-  const signer = await createOrgSigner(
-    c.env,
-    auth.organizationId,
-    auth.projectId,
-    auth.signingWalletId
-  );
+  const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId, signingWalletId);
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
   const destination = assertValidAddress(parsed.data.mint.destination, "destination");
 

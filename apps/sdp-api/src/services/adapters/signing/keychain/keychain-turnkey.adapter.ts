@@ -57,8 +57,8 @@ export class KeychainTurnkeyAdapter extends BaseKeychainAdapter {
   /**
    * Get the underlying Turnkey signer for direct use with @solana/kit.
    */
-  async getTransactionSigner(walletId?: string, publicKey?: string): Promise<TurnkeySigner> {
-    return this.getTurnkeySigner(walletId, publicKey);
+  async getTransactionSigner(walletId?: string, walletPublicKey?: Address): Promise<TurnkeySigner> {
+    return this.getTurnkeySigner(walletId, walletPublicKey);
   }
 
   /**
@@ -71,8 +71,8 @@ export class KeychainTurnkeyAdapter extends BaseKeychainAdapter {
   /**
    * Get the public key, ensuring initialization first.
    */
-  async getPublicKey(walletId?: string, publicKey?: string): Promise<Address> {
-    const signer = await this.getTurnkeySigner(walletId, publicKey);
+  async getPublicKey(walletId?: string, walletPublicKey?: Address): Promise<Address> {
+    const signer = await this.getTurnkeySigner(walletId, walletPublicKey);
     return signer.address as Address;
   }
 
@@ -86,14 +86,17 @@ export class KeychainTurnkeyAdapter extends BaseKeychainAdapter {
     return super.sign(request);
   }
 
-  private async getTurnkeySigner(walletId?: string, publicKey?: string): Promise<SdpTurnkeySigner> {
+  private async getTurnkeySigner(
+    walletId?: string,
+    walletPublicKey?: Address
+  ): Promise<SdpTurnkeySigner> {
     const normalizedWalletId = walletId ?? this.config.defaultWalletId;
     if (!normalizedWalletId) {
       throw new Error("Turnkey wallet ID is required");
     }
 
     const resolvedPublicKey =
-      publicKey ||
+      walletPublicKey ||
       (normalizedWalletId === this.config.defaultWalletId
         ? this.config.defaultWalletPublicKey
         : undefined);

@@ -12,7 +12,7 @@
  * - LocalKeypairAdapter: Sync signing using env keypair (development)
  */
 
-import type { Address } from "@solana/kit";
+import type { Address, TransactionSigner } from "@solana/kit";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Port Interface
@@ -57,6 +57,20 @@ export interface SigningPort {
    * Not all providers support this - throws if unsupported.
    */
   generateKeypair?(): Promise<GeneratedKeypair>;
+}
+
+/**
+ * Common interface for custody providers that support full transaction signing.
+ */
+export interface FullSigningPort extends SigningPort {
+  /**
+   * Get an @solana/kit transaction signer for a wallet.
+   */
+  getTransactionSigner(walletId?: string, walletPublicKey?: Address): Promise<TransactionSigner>;
+}
+
+export function isFullSigningPort(port: SigningPort): port is FullSigningPort {
+  return typeof (port as Partial<FullSigningPort>).getTransactionSigner === "function";
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

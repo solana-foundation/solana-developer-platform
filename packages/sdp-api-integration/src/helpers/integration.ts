@@ -7,16 +7,42 @@ import {
 import { clearTestDatabase, seedTestDatabase } from "@sdp/api-test/mocks/d1";
 import app from "@sdp/api/index";
 import { hashString } from "@sdp/api/lib/hash";
+import { createFeePaymentAdapter } from "@sdp/api/services/adapters/fee-payment";
+import { createSigningService } from "@sdp/api/services/domain/signing.service";
 import { createMosaicService } from "@sdp/api/services/mosaic";
-import { Token2022Service, createSigner, createToken2022Service } from "@sdp/api/services/solana";
+import { Token2022Service, createToken2022Service } from "@sdp/api/services/solana";
+import {
+  confirmTransaction,
+  createRpc,
+  getMinimumBalanceForRentExemption,
+  getRecentBlockhash,
+} from "@sdp/api/services/solana/rpc";
+import { getTransferSolInstruction } from "@solana-program/system";
+import {
+  type Address,
+  appendTransactionMessageInstructions,
+  compileTransaction,
+  createNoopSigner,
+  createTransactionMessage,
+  getTransactionEncoder,
+  pipe,
+  setTransactionMessageFeePayer,
+  setTransactionMessageLifetimeUsingBlockhash,
+} from "@solana/kit";
 import { env } from "./env";
 
-const SOLANA_CONFIGURED = !!env.SOLANA_RPC_URL && !!env.CUSTODY_PRIVATE_KEY;
+const PRIVY_CONFIGURED = !!env.PRIVY_APP_ID && !!env.PRIVY_APP_SECRET;
+const SOLANA_CONFIGURED = !!env.SOLANA_RPC_URL && PRIVY_CONFIGURED;
 const KORA_CONFIGURED = !!env.KORA_RPC_URL;
 const RUN_INTEGRATION_TESTS = env.RUN_INTEGRATION_TESTS === "true";
 
 let cachedKeyHash: string | null = null;
 let cachedCustodyAddress: string | null = null;
+const PRIVY_INTEGRATION_AIRDROP_LAMPORTS = 1_000_000;
+
+type SolanaRpcResponse<T> =
+  | { jsonrpc: "2.0"; id: number; result: T }
+  | { jsonrpc: "2.0"; id: number; error: { code: number; message: string; data?: unknown } };
 
 async function computeApiKeyHash(): Promise<string> {
   if (cachedKeyHash) {
@@ -32,18 +58,14 @@ export async function initIntegrationSuite() {
   await seedTestDatabase(env);
 
   const apiKeyHash = await computeApiKeyHash();
-  let custodyAddress = cachedCustodyAddress;
+  const state = await resetIntegrationState(apiKeyHash);
 
-  if (!custodyAddress && SOLANA_CONFIGURED) {
-    const signer = await createSigner(env);
-    custodyAddress = signer.address;
-    cachedCustodyAddress = custodyAddress;
-  }
-
-  return { apiKeyHash, custodyAddress: custodyAddress ?? "" };
+  return { apiKeyHash, custodyAddress: state.custodyAddress };
 }
 
-export async function resetIntegrationState(apiKeyHash: string) {
+export async function resetIntegrationState(
+  apiKeyHash: string
+): Promise<{ custodyAddress: string }> {
   const db = env.DB;
   const apiKeysKV = env.SDP_API_KEYS;
   const rateLimitKV = env.SDP_RATE_LIMITS;
@@ -55,14 +77,6 @@ export async function resetIntegrationState(apiKeyHash: string) {
 
   await db
     .prepare("DELETE FROM signing_requests")
-    .run()
-    .catch(() => {});
-  await db
-    .prepare("DELETE FROM custody_wallets")
-    .run()
-    .catch(() => {});
-  await db
-    .prepare("DELETE FROM custody_configs")
     .run()
     .catch(() => {});
   await db
@@ -153,6 +167,8 @@ export async function resetIntegrationState(apiKeyHash: string) {
     .run();
 
   await apiKeysKV.put(`key:${apiKeyHash}`, JSON.stringify(TEST_PROJECT_CACHED_KEY));
+  cachedCustodyAddress = await ensurePrivyCustodyAddress();
+  return { custodyAddress: cachedCustodyAddress };
 }
 
 export async function cleanupIntegrationSuite() {
@@ -171,11 +187,226 @@ export function requestWithApiKey(apiKey: string = TEST_PROJECT_API_KEY.raw) {
   };
 }
 
+async function ensurePrivyCustodyAddress(): Promise<string> {
+  if (!SOLANA_CONFIGURED) {
+    return "";
+  }
+
+  const signingService = createSigningService(env);
+  const existing = await signingService.getConfigurationByProvider(TEST_ORG.id, undefined, "privy");
+
+  if (!existing) {
+    await signingService.initializePrivySigning(TEST_ORG.id, undefined, {
+      walletLabel: "Integration Root Wallet",
+    });
+  } else {
+    await signingService.setDefaultProvider(TEST_ORG.id, undefined, "privy");
+  }
+
+  const config = await signingService.getConfigurationByProvider(TEST_ORG.id, undefined, "privy");
+  if (!config) {
+    throw new Error("Integration precondition failed: Privy signer configuration not found.");
+  }
+
+  if (!config.defaultWalletId) {
+    const fallbackWallet = await env.DB.prepare(
+      `SELECT wallet_id
+       FROM custody_wallets
+       WHERE custody_config_id = ? AND status = 'active'
+       ORDER BY created_at ASC
+       LIMIT 1`
+    )
+      .bind(config.id)
+      .first<{ wallet_id: string }>();
+
+    if (!fallbackWallet) {
+      throw new Error("Integration precondition failed: Privy signer has no active wallets.");
+    }
+
+    await env.DB.prepare(
+      `UPDATE custody_configs
+       SET default_wallet_id = ?, updated_at = datetime('now')
+       WHERE id = ?`
+    )
+      .bind(fallbackWallet.wallet_id, config.id)
+      .run();
+  }
+
+  const walletRows = (
+    await env.DB.prepare(
+      `SELECT wallet_id, public_key
+       FROM custody_wallets
+       WHERE custody_config_id = ? AND status = 'active'
+       ORDER BY created_at ASC`
+    )
+      .bind(config.id)
+      .all<{ wallet_id: string; public_key: string }>()
+  ).results;
+
+  let preferredWallet = walletRows.find((wallet) => wallet.wallet_id === config.defaultWalletId);
+  if (!preferredWallet) {
+    preferredWallet = walletRows[0];
+  }
+
+  if (!preferredWallet) {
+    throw new Error("Integration precondition failed: Privy signer has no active wallets.");
+  }
+
+  for (const wallet of walletRows) {
+    // eslint-disable-next-line no-await-in-loop
+    const exists = await solanaAccountExists(env.SOLANA_RPC_URL as string, wallet.public_key);
+    if (!exists) {
+      continue;
+    }
+
+    preferredWallet = wallet;
+    break;
+  }
+
+  if (preferredWallet.wallet_id !== config.defaultWalletId) {
+    await env.DB.prepare(
+      `UPDATE custody_configs
+       SET default_wallet_id = ?, updated_at = datetime('now')
+       WHERE id = ?`
+    )
+      .bind(preferredWallet.wallet_id, config.id)
+      .run();
+  }
+
+  const address = preferredWallet.public_key;
+  await ensureAddressAccountExists(address);
+  return address;
+}
+
+async function ensureAddressAccountExists(address: string): Promise<void> {
+  const rpcUrl = env.SOLANA_RPC_URL;
+  if (!rpcUrl) {
+    return;
+  }
+
+  const exists = await solanaAccountExists(rpcUrl, address);
+  if (exists) {
+    return;
+  }
+
+  let koraFundingError: unknown = null;
+  const koraFunded = await fundAddressViaKoraFeePayer(address).catch((error) => {
+    koraFundingError = error;
+    return false;
+  });
+  if (koraFunded) {
+    await waitForAccountExistence(rpcUrl, address, 30_000);
+    return;
+  }
+
+  try {
+    await solanaRequestAirdrop(rpcUrl, address, PRIVY_INTEGRATION_AIRDROP_LAMPORTS);
+    await waitForAccountExistence(rpcUrl, address, 30_000);
+  } catch (airdropError) {
+    const koraMessage =
+      koraFundingError instanceof Error ? koraFundingError.message : String(koraFundingError);
+    const airdropMessage =
+      airdropError instanceof Error ? airdropError.message : String(airdropError);
+
+    throw new Error(
+      `Failed to activate Privy signer account ${address}. ` +
+        `Kora funding failed: ${koraMessage}. ` +
+        `Airdrop failed: ${airdropMessage}`
+    );
+  }
+}
+
+async function fundAddressViaKoraFeePayer(address: string): Promise<boolean> {
+  const rpcUrl = env.SOLANA_RPC_URL;
+  if (!rpcUrl || !env.KORA_RPC_URL) {
+    return false;
+  }
+
+  const feePayment = createFeePaymentAdapter(env);
+  const feePayer = await feePayment.getFeePayer();
+  const rpc = createRpc(env);
+  const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc, "confirmed");
+  const minimumLamports = await getMinimumBalanceForRentExemption(rpc, 0);
+
+  const instruction = getTransferSolInstruction({
+    source: createNoopSigner(feePayer),
+    destination: address as Address,
+    amount: minimumLamports + 1n,
+  });
+
+  const message = pipe(
+    createTransactionMessage({ version: 0 }),
+    (m) => setTransactionMessageFeePayer(feePayer, m),
+    (m) => setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, m),
+    (m) => appendTransactionMessageInstructions([instruction], m)
+  );
+
+  const compiled = compileTransaction(message);
+  const txBytes = new Uint8Array(getTransactionEncoder().encode(compiled));
+  const signature = await feePayment.signAndSend(txBytes);
+  const confirmation = await confirmTransaction(rpc, signature, { commitment: "confirmed" });
+  return !confirmation.err;
+}
+
+async function solanaAccountExists(rpcUrl: string, address: string): Promise<boolean> {
+  type AccountInfo = { value: null | object };
+  const response = await solanaRpc<AccountInfo>(rpcUrl, "getAccountInfo", [
+    address,
+    { encoding: "base64", commitment: "confirmed" },
+  ]);
+  return response.value !== null;
+}
+
+async function solanaRequestAirdrop(
+  rpcUrl: string,
+  address: string,
+  lamports: number
+): Promise<void> {
+  await solanaRpc<string>(rpcUrl, "requestAirdrop", [address, lamports]);
+}
+
+async function waitForAccountExistence(
+  rpcUrl: string,
+  address: string,
+  timeoutMs: number
+): Promise<void> {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    // eslint-disable-next-line no-await-in-loop
+    const exists = await solanaAccountExists(rpcUrl, address);
+    if (exists) {
+      return;
+    }
+    // eslint-disable-next-line no-await-in-loop
+    await sleep(1_000);
+  }
+
+  throw new Error(`Timed out waiting for Privy signer account ${address} to exist on-chain.`);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function solanaRpc<T>(rpcUrl: string, method: string, params: unknown[]): Promise<T> {
+  const response = await fetch(rpcUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+  });
+
+  const payload = (await response.json()) as SolanaRpcResponse<T>;
+  if ("error" in payload) {
+    throw new Error(payload.error.message ?? `Solana RPC error calling ${method}`);
+  }
+
+  return payload.result;
+}
+
 export {
   app,
   env,
   Token2022Service,
-  createSigner,
   createToken2022Service,
   createMosaicService,
   TEST_ORG,
@@ -183,6 +414,7 @@ export {
   TEST_PROJECT,
   TEST_PROJECT_API_KEY,
   TEST_PROJECT_CACHED_KEY,
+  PRIVY_CONFIGURED,
   SOLANA_CONFIGURED,
   KORA_CONFIGURED,
   RUN_INTEGRATION_TESTS,

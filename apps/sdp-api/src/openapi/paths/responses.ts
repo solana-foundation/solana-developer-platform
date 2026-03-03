@@ -10,8 +10,10 @@ import {
   createOrganizationResponseSchema,
   currentUserResponseSchema,
   custodyConfigResponseSchema,
+  custodyConfigsResponseSchema,
   custodyWalletResponseSchema,
   custodyWalletsResponseSchema,
+  deleteWalletResponseSchema,
   executeBurnResponseSchema,
   executeForceBurnResponseSchema,
   executeMintResponseSchema,
@@ -51,6 +53,7 @@ import {
   rpcRelayResponseSchema,
   signerCheckResponseSchema,
   successResponseSchema,
+  switchProviderOptionsResponseSchema,
   tokenAllowlistEntrySchema,
   tokenAllowlistResponseSchema,
   tokenResponseSchema,
@@ -115,9 +118,14 @@ export const executeUnpauseResponse = successResponseSchema(executeUnpauseRespon
 export const currentUserResponse = successResponseSchema(currentUserResponseSchema);
 export const listSessionsResponse = successResponseSchema(listSessionsResponseSchema);
 export const custodyConfigResponse = successResponseSchema(custodyConfigResponseSchema);
+export const custodyConfigsResponse = successResponseSchema(custodyConfigsResponseSchema);
 export const custodyWalletResponse = successResponseSchema(custodyWalletResponseSchema);
 export const custodyWalletsResponse = successResponseSchema(custodyWalletsResponseSchema);
+export const custodyDeleteWalletResponse = successResponseSchema(deleteWalletResponseSchema);
 export const custodySignerCheckResponse = successResponseSchema(signerCheckResponseSchema);
+export const custodySwitchOptionsResponse = successResponseSchema(
+  switchProviderOptionsResponseSchema
+);
 export const addressScreeningResponse = successResponseSchema(addressScreeningResponseSchema);
 
 export const allowlistEntriesResponse = successResponseSchema(allowlistEntriesResponseSchema);

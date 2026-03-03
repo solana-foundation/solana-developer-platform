@@ -3,3 +3,4 @@ out
 build
 .source
 content/docs/reference/api/
+.vercel

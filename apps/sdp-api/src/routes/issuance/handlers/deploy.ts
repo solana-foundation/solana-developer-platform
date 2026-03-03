@@ -1,3 +1,4 @@
+import { resolveApiKeySigningWalletId } from "@/lib/api-key-wallet-auth";
 import { getAuth } from "@/lib/auth";
 import { AppError, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
@@ -76,13 +77,10 @@ export const deployToken = async (c: AppContext) => {
     return success(c, { token });
   }
 
+  const signingWalletId = resolveApiKeySigningWalletId(auth, undefined, ["tokens:write"]);
+
   // Get custody signer (resolves via 3-tier: project → org → env fallback)
-  const signer = await createOrgSigner(
-    c.env,
-    auth.organizationId,
-    auth.projectId,
-    auth.signingWalletId
-  );
+  const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId, signingWalletId);
   const custodyAddress = signer.address;
 
   // Create Mosaic service for template-based token deployment
@@ -189,13 +187,10 @@ export const prepareDeploy = async (c: AppContext) => {
     throw new AppError("BAD_REQUEST", "Token already has a mint address");
   }
 
+  const signingWalletId = resolveApiKeySigningWalletId(auth, undefined, ["tokens:write"]);
+
   // Get custody signer (resolves via 3-tier: project → org → env fallback)
-  const signer = await createOrgSigner(
-    c.env,
-    auth.organizationId,
-    auth.projectId,
-    auth.signingWalletId
-  );
+  const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId, signingWalletId);
   const custodyAddress = signer.address;
 
   // Create Mosaic service and prepare transaction

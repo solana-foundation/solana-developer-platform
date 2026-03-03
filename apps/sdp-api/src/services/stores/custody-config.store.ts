@@ -2,7 +2,7 @@
  * Custody Configuration Store
  *
  * D1 store for managing custody provider configurations and wallets.
- * Supports 3-tier resolution: project config → org config → env fallback.
+ * Supports DB-backed default resolution with project → organization fallback.
  */
 
 import type { SigningConfigRecord, SigningProviderType } from "@/services/adapters/signing";
@@ -14,7 +14,7 @@ import type {
   SigningRequestStore,
 } from "@/services/domain/signing.service";
 import { type EncryptionService, createEncryptionService } from "@/services/encryption.service";
-import type { SignStatus } from "@/services/ports";
+import { type SignStatus, SigningError } from "@/services/ports";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Types
@@ -45,6 +45,8 @@ export interface CreateWalletParams {
   purpose?: WalletPurpose;
 }
 
+export type DeactivateWalletResult = "deactivated" | "wallet_not_found" | "last_wallet";
+
 // D1 row types (snake_case)
 interface CustodyConfigRow {
   id: string;
@@ -68,6 +70,7 @@ interface CustodyWalletRow {
   purpose: string | null;
   status: string;
   created_at: string;
+  updated_at: string | null;
 }
 
 interface SigningRequestRow {
@@ -82,6 +85,15 @@ interface SigningRequestRow {
   metadata: string | null;
   created_at: string;
   completed_at: string | null;
+}
+
+interface CustodyScopeDefaultRow {
+  id: string;
+  organization_id: string;
+  project_id: string | null;
+  default_custody_config_id: string;
+  created_at: string;
+  updated_at: string;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -99,48 +111,42 @@ export class CustodyConfigStore implements SigningConfigStore {
   /**
    * Find the active custody config for an organization/project.
    *
-   * Resolution order (3-tier):
+   * Resolution order:
    * 1. Project-specific config (if projectId provided)
    * 2. Organization-level config (project_id IS NULL)
-   * 3. Returns null → caller falls back to env vars
+   * 3. Returns null
    */
   async findActive(orgId: string, projectId?: string): Promise<SigningConfigRecord | null> {
-    // Try project-specific config first
     if (projectId) {
-      const projectConfig = await this.db
-        .prepare(
-          `SELECT id, organization_id, project_id, provider, config_encrypted, encryption_version, default_wallet_id, status, created_at, updated_at
-           FROM custody_configs
-           WHERE organization_id = ? AND project_id = ? AND status = 'active'
-           ORDER BY updated_at DESC
-           LIMIT 1`
-        )
-        .bind(orgId, projectId)
-        .first<CustodyConfigRow>();
-
-      if (projectConfig) {
-        return this.mapConfigRow(projectConfig);
+      const projectDefault = await this.getDefaultConfig(orgId, projectId);
+      if (projectDefault) {
+        return projectDefault;
       }
     }
 
-    // Fall back to org-level config
-    const orgConfig = await this.db
-      .prepare(
-        `SELECT id, organization_id, project_id, provider, config_encrypted, encryption_version, default_wallet_id, status, created_at, updated_at
+    return this.getDefaultConfig(orgId, undefined);
+  }
+
+  /**
+   * List active custody configs for a scope.
+   */
+  async listActive(orgId: string, projectId?: string): Promise<SigningConfigRecord[]> {
+    const query = projectId
+      ? `SELECT id, organization_id, project_id, provider, config_encrypted, encryption_version, default_wallet_id, status, created_at, updated_at
+         FROM custody_configs
+         WHERE organization_id = ? AND project_id = ? AND status = 'active'
+         ORDER BY updated_at DESC, id DESC`
+      : `SELECT id, organization_id, project_id, provider, config_encrypted, encryption_version, default_wallet_id, status, created_at, updated_at
          FROM custody_configs
          WHERE organization_id = ? AND project_id IS NULL AND status = 'active'
-         ORDER BY updated_at DESC
-         LIMIT 1`
-      )
-      .bind(orgId)
-      .first<CustodyConfigRow>();
+         ORDER BY updated_at DESC, id DESC`;
 
-    if (orgConfig) {
-      return this.mapConfigRow(orgConfig);
-    }
+    const { results } = await this.db
+      .prepare(query)
+      .bind(...(projectId ? [orgId, projectId] : [orgId]))
+      .all<CustodyConfigRow>();
 
-    // No config found → caller should fall back to env vars
-    return null;
+    return results.map((row) => this.mapConfigRow(row));
   }
 
   /**
@@ -168,6 +174,106 @@ export class CustodyConfigStore implements SigningConfigStore {
       .first<CustodyConfigRow>();
 
     return row ? this.mapConfigRow(row) : null;
+  }
+
+  /**
+   * Find an active config for a provider at a scope.
+   */
+  async findActiveByProvider(
+    orgId: string,
+    projectId: string | undefined,
+    provider: SigningProviderType
+  ): Promise<SigningConfigRecord | null> {
+    const row = await this.db
+      .prepare(
+        projectId
+          ? `SELECT id, organization_id, project_id, provider, config_encrypted, encryption_version, default_wallet_id, status, created_at, updated_at
+             FROM custody_configs
+             WHERE organization_id = ? AND project_id = ? AND provider = ? AND status = 'active'
+             LIMIT 1`
+          : `SELECT id, organization_id, project_id, provider, config_encrypted, encryption_version, default_wallet_id, status, created_at, updated_at
+             FROM custody_configs
+             WHERE organization_id = ? AND project_id IS NULL AND provider = ? AND status = 'active'
+             LIMIT 1`
+      )
+      .bind(...(projectId ? [orgId, projectId, provider] : [orgId, provider]))
+      .first<CustodyConfigRow>();
+
+    return row ? this.mapConfigRow(row) : null;
+  }
+
+  /**
+   * Get the default config for a scope.
+   */
+  async getDefaultConfig(orgId: string, projectId?: string): Promise<SigningConfigRecord | null> {
+    const scopeDefault = await this.getScopeDefaultRow(orgId, projectId ?? null);
+    if (!scopeDefault) {
+      return null;
+    }
+
+    const config = await this.db
+      .prepare(
+        `SELECT id, organization_id, project_id, provider, config_encrypted, encryption_version, default_wallet_id, status, created_at, updated_at
+         FROM custody_configs
+         WHERE id = ? AND organization_id = ? AND status = 'active'
+         LIMIT 1`
+      )
+      .bind(scopeDefault.default_custody_config_id, orgId)
+      .first<CustodyConfigRow>();
+
+    return config ? this.mapConfigRow(config) : null;
+  }
+
+  /**
+   * Set the default config pointer for a scope.
+   */
+  async setDefaultConfig(
+    orgId: string,
+    projectId: string | undefined,
+    configId: string
+  ): Promise<void> {
+    const normalizedProjectId = projectId ?? null;
+
+    const matchingConfig = await this.db
+      .prepare(
+        normalizedProjectId
+          ? `SELECT id FROM custody_configs
+             WHERE id = ? AND organization_id = ? AND project_id = ? AND status = 'active'
+             LIMIT 1`
+          : `SELECT id FROM custody_configs
+             WHERE id = ? AND organization_id = ? AND project_id IS NULL AND status = 'active'
+             LIMIT 1`
+      )
+      .bind(...(normalizedProjectId ? [configId, orgId, normalizedProjectId] : [configId, orgId]))
+      .first<{ id: string }>();
+
+    if (!matchingConfig) {
+      throw new SigningError(
+        "Default config must be active and match the requested scope",
+        "NOT_FOUND"
+      );
+    }
+
+    const scopeDefault = await this.getScopeDefaultRow(orgId, normalizedProjectId);
+    if (scopeDefault) {
+      await this.db
+        .prepare(
+          `UPDATE custody_scope_defaults
+           SET default_custody_config_id = ?, updated_at = datetime('now')
+           WHERE id = ?`
+        )
+        .bind(configId, scopeDefault.id)
+        .run();
+      return;
+    }
+
+    await this.db
+      .prepare(
+        `INSERT INTO custody_scope_defaults (id, organization_id, project_id, default_custody_config_id)
+         VALUES (?, ?, ?, ?)`
+      )
+      .bind(`csd_${crypto.randomUUID()}`, orgId, normalizedProjectId, configId)
+      .run();
   }
 
   /**
@@ -283,8 +389,17 @@ export class CustodyConfigStore implements SigningConfigStore {
 
     await this.db
       .prepare(
-        `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, label, purpose, status)
-         VALUES (?, ?, ?, ?, ?, ?, 'active')`
+        `INSERT INTO custody_wallets (
+           id,
+           custody_config_id,
+           wallet_id,
+           public_key,
+           label,
+           purpose,
+           status,
+           updated_at
+         )
+         VALUES (?, ?, ?, ?, ?, ?, 'active', STRFTIME('%Y-%m-%dT%H:%M:%fZ','now'))`
       )
       .bind(
         id,
@@ -318,6 +433,97 @@ export class CustodyConfigStore implements SigningConfigStore {
       .all<CustodyWalletRow>();
 
     return results.map(this.mapWalletRow);
+  }
+
+  /**
+   * Deactivate a wallet record associated with a custody config.
+   */
+  async deactivateWallet(configId: string, walletId: string): Promise<void> {
+    const existing = await this.db
+      .prepare(
+        `SELECT id
+         FROM custody_wallets
+         WHERE custody_config_id = ? AND wallet_id = ? AND status = 'active'
+         LIMIT 1`
+      )
+      .bind(configId, walletId)
+      .first<{ id: string }>();
+
+    if (!existing) {
+      throw new Error("Wallet not found");
+    }
+
+    await this.db
+      .prepare(
+        `UPDATE custody_wallets
+         SET status = 'inactive', updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ','now')
+         WHERE id = ?`
+      )
+      .bind(existing.id)
+      .run();
+  }
+
+  /**
+   * Deactivate a wallet only when at least one other active wallet exists.
+   * Returns an enum result to support race-safe last-wallet guards.
+   */
+  async deactivateWalletIfNotLast(
+    configId: string,
+    walletId: string
+  ): Promise<DeactivateWalletResult> {
+    const result = await this.db
+      .prepare(
+        `UPDATE custody_wallets
+         SET status = 'inactive', updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ','now')
+         WHERE id = (
+           SELECT id
+           FROM custody_wallets
+           WHERE custody_config_id = ? AND wallet_id = ? AND status = 'active'
+           LIMIT 1
+         )
+         AND (
+           SELECT COUNT(*)
+           FROM custody_wallets
+           WHERE custody_config_id = ? AND status = 'active'
+         ) > 1`
+      )
+      .bind(configId, walletId, configId)
+      .run();
+
+    if ((result.meta?.changes ?? 0) > 0) {
+      return "deactivated";
+    }
+
+    const activeWallet = await this.db
+      .prepare(
+        `SELECT id
+         FROM custody_wallets
+         WHERE custody_config_id = ? AND wallet_id = ? AND status = 'active'
+         LIMIT 1`
+      )
+      .bind(configId, walletId)
+      .first<{ id: string }>();
+
+    if (!activeWallet) {
+      return "wallet_not_found";
+    }
+
+    return "last_wallet";
+  }
+
+  /**
+   * Reactivate a wallet previously marked inactive.
+   * Used as a best-effort rollback when external delete fails.
+   */
+  async reactivateWallet(configId: string, walletId: string): Promise<void> {
+    await this.db
+      .prepare(
+        `UPDATE custody_wallets
+         SET status = 'active', updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ','now')
+         WHERE custody_config_id = ? AND wallet_id = ? AND status = 'inactive'`
+      )
+      .bind(configId, walletId)
+      .run();
   }
 
   /**
@@ -373,6 +579,26 @@ export class CustodyConfigStore implements SigningConfigStore {
       this.encryptionService = createEncryptionService(this.encryptionKey);
     }
     return this.encryptionService;
+  }
+
+  private async getScopeDefaultRow(
+    orgId: string,
+    projectId: string | null
+  ): Promise<CustodyScopeDefaultRow | null> {
+    return this.db
+      .prepare(
+        projectId
+          ? `SELECT id, organization_id, project_id, default_custody_config_id, created_at, updated_at
+             FROM custody_scope_defaults
+             WHERE organization_id = ? AND project_id = ?
+             LIMIT 1`
+          : `SELECT id, organization_id, project_id, default_custody_config_id, created_at, updated_at
+             FROM custody_scope_defaults
+             WHERE organization_id = ? AND project_id IS NULL
+             LIMIT 1`
+      )
+      .bind(...(projectId ? [orgId, projectId] : [orgId]))
+      .first<CustodyScopeDefaultRow>();
   }
 
   private mapWalletRow(row: CustodyWalletRow): CustodyWallet {

@@ -1,3 +1,4 @@
+import { resolveApiKeySigningWalletId } from "@/lib/api-key-wallet-auth";
 import { getAuth } from "@/lib/auth";
 import { AppError, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
@@ -109,12 +110,9 @@ export const prepareUpdateAuthority = async (c: AppContext) => {
     ? assertValidAddress(parsed.data.authority.newAuthority, "newAuthority")
     : null;
 
-  const signer = await createOrgSigner(
-    c.env,
-    auth.organizationId,
-    auth.projectId,
-    auth.signingWalletId
-  );
+  const signingWalletId = resolveApiKeySigningWalletId(auth, undefined, ["tokens:admin"]);
+
+  const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId, signingWalletId);
   const mosaic = createMosaicService(c.env, signer);
 
   const prepared = await mosaic.prepareUpdateAuthority({
@@ -209,12 +207,9 @@ export const executeUpdateAuthority = async (c: AppContext) => {
     throw new AppError("BAD_REQUEST", "Current authority is not available for this token");
   }
 
-  const signer = await createOrgSigner(
-    c.env,
-    auth.organizationId,
-    auth.projectId,
-    auth.signingWalletId
-  );
+  const signingWalletId = resolveApiKeySigningWalletId(auth, undefined, ["tokens:admin"]);
+
+  const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId, signingWalletId);
   if (currentAuthorityRaw !== signer.address) {
     throw new AppError("BAD_REQUEST", "Current authority is not controlled by custody");
   }

@@ -1,4 +1,5 @@
 import { toMosaicAmount } from "@/lib/amount";
+import { resolveApiKeySigningWalletId } from "@/lib/api-key-wallet-auth";
 import { getAuth } from "@/lib/auth";
 import { AppError, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
@@ -68,12 +69,9 @@ export const prepareSeize = async (c: AppContext) => {
     throw new AppError("BAD_REQUEST", "Permanent delegate is not configured for this token");
   }
 
-  const signer = await createOrgSigner(
-    c.env,
-    auth.organizationId,
-    auth.projectId,
-    auth.signingWalletId
-  );
+  const signingWalletId = resolveApiKeySigningWalletId(auth, undefined, ["tokens:admin"]);
+
+  const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId, signingWalletId);
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
   const source = assertValidAddress(parsed.data.seize.source, "source");
   const destination = assertValidAddress(parsed.data.seize.destination, "destination");
@@ -183,12 +181,9 @@ export const executeSeize = async (c: AppContext) => {
     throw new AppError("BAD_REQUEST", "Permanent delegate is not configured for this token");
   }
 
-  const signer = await createOrgSigner(
-    c.env,
-    auth.organizationId,
-    auth.projectId,
-    auth.signingWalletId
-  );
+  const signingWalletId = resolveApiKeySigningWalletId(auth, undefined, ["tokens:admin"]);
+
+  const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId, signingWalletId);
   if (permanentDelegateRaw !== signer.address) {
     throw new AppError("BAD_REQUEST", "Permanent delegate is not controlled by custody");
   }

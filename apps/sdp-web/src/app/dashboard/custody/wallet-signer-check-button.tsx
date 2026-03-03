@@ -62,7 +62,7 @@ export function WalletSignerCheckButton({ walletId }: WalletSignerCheckButtonPro
       onClick={runCheck}
       aria-busy={isChecking}
     >
-      {isChecking ? "Checking..." : "Check signer"}
+      {isChecking ? "Proving..." : "Prove ownership"}
     </Button>
   );
 }

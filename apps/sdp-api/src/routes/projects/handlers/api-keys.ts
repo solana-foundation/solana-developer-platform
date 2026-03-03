@@ -2,6 +2,11 @@ import { getAuth } from "@/lib/auth";
 import { AppError, notFound } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import { apiKeyCreateSchema } from "@/routes/api-keys/schemas";
+import {
+  assertWalletBindingsInScope,
+  parseWalletBindingPatch,
+} from "@/routes/api-keys/wallet-bindings";
+import { replaceApiKeyWalletBindings } from "@/services/api-key-wallets.service";
 import { ApiKeyService } from "@/services/api-key.service";
 import { AuditService } from "@/services/audit.service";
 import { createSigningService } from "@/services/domain/signing.service";
@@ -75,6 +80,8 @@ export const createProjectApiKey = async (c: AppContext) => {
     allowedIps,
     expiresAt,
     signingWalletId,
+    signingWalletIds,
+    walletBindings,
     provisionWallet,
     walletLabel,
     walletPurpose,
@@ -84,14 +91,21 @@ export const createProjectApiKey = async (c: AppContext) => {
     throw new AppError("INSUFFICIENT_PERMISSIONS", "Custom permission sets require owner access");
   }
 
-  if (provisionWallet && signingWalletId) {
+  const walletBindingPatch = parseWalletBindingPatch({
+    signingWalletId,
+    signingWalletIds,
+    walletBindings,
+  });
+
+  if (provisionWallet && walletBindingPatch.bindings.length > 0) {
     throw new AppError(
       "BAD_REQUEST",
-      "Provide either signingWalletId or provisionWallet, not both"
+      "Provide either wallet bindings (signingWalletId/signingWalletIds/walletBindings) or provisionWallet, not both"
     );
   }
 
-  let resolvedSigningWalletId: string | null | undefined = signingWalletId ?? undefined;
+  let resolvedSigningWalletId: string | null = walletBindingPatch.defaultSigningWalletId;
+  let resolvedWalletBindings = walletBindingPatch.bindings;
 
   if (provisionWallet) {
     if (!(auth.permissions.includes("*") || auth.permissions.includes("custody:admin"))) {
@@ -105,6 +119,7 @@ export const createProjectApiKey = async (c: AppContext) => {
         purpose: walletPurpose as WalletPurpose | undefined,
       });
       resolvedSigningWalletId = wallet.walletId;
+      resolvedWalletBindings = [{ walletId: wallet.walletId, permissions: ["*"] }];
     } catch (error) {
       if (error instanceof SigningError) {
         if (error.code === "NOT_FOUND") {
@@ -114,27 +129,13 @@ export const createProjectApiKey = async (c: AppContext) => {
       }
       throw error;
     }
-  } else if (resolvedSigningWalletId) {
-    const wallet = await c.env.DB.prepare(
-      `SELECT c.project_id as project_id
-       FROM custody_wallets w
-       JOIN custody_configs c ON c.id = w.custody_config_id
-       WHERE c.organization_id = ? AND w.wallet_id = ? AND c.status = 'active' AND w.status = 'active'
-       LIMIT 1`
-    )
-      .bind(auth.organizationId, resolvedSigningWalletId)
-      .first<{ project_id: string | null }>();
-
-    if (!wallet) {
-      throw new AppError("BAD_REQUEST", "Unknown signingWalletId");
-    }
-
-    if (wallet.project_id && wallet.project_id !== projectId) {
-      throw new AppError(
-        "BAD_REQUEST",
-        "Project API keys cannot bind to wallets from other projects"
-      );
-    }
+  } else {
+    await assertWalletBindingsInScope(
+      c.env.DB,
+      auth.organizationId,
+      projectId,
+      resolvedWalletBindings
+    );
   }
 
   const apiKeyService = new ApiKeyService(c.env.DB);
@@ -150,9 +151,13 @@ export const createProjectApiKey = async (c: AppContext) => {
     environment,
     allowedIps,
     expiresAt,
-    signingWalletId: resolvedSigningWalletId ?? null,
+    signingWalletId: resolvedSigningWalletId,
     pepper: c.env.API_KEY_PEPPER,
   });
+
+  if (resolvedWalletBindings.length > 0) {
+    await replaceApiKeyWalletBindings(c.env.DB, createdKey.id, resolvedWalletBindings);
+  }
 
   // Audit log
   const auditService = new AuditService(c.env.DB);
@@ -165,7 +170,8 @@ export const createProjectApiKey = async (c: AppContext) => {
       name,
       role,
       environment,
-      signingWalletId: resolvedSigningWalletId ?? null,
+      signingWalletId: resolvedSigningWalletId,
+      signingWalletIds: resolvedWalletBindings.map((binding) => binding.walletId),
       provisionedWallet: Boolean(provisionWallet),
     },
   });

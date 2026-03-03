@@ -1,0 +1,125 @@
+import type { Permission } from "@sdp/types";
+
+export interface ApiKeyWalletBinding {
+  walletId: string;
+  permissions: Permission[];
+}
+
+export const DEFAULT_API_KEY_WALLET_PERMISSIONS: Permission[] = ["*"];
+
+export function normalizeApiKeyWalletPermissions(permissions?: Permission[] | null): Permission[] {
+  if (!permissions || permissions.length === 0) {
+    return [...DEFAULT_API_KEY_WALLET_PERMISSIONS];
+  }
+
+  const deduped = Array.from(new Set(permissions));
+  if (deduped.includes("*")) {
+    return ["*"];
+  }
+
+  return deduped;
+}
+
+export async function listApiKeyWalletBindings(
+  db: D1Database,
+  apiKeyId: string
+): Promise<ApiKeyWalletBinding[]> {
+  const result = await db
+    .prepare(
+      `SELECT wallet_id, permissions
+       FROM api_key_wallet_permissions
+       WHERE api_key_id = ?
+       ORDER BY created_at ASC`
+    )
+    .bind(apiKeyId)
+    .all<{ wallet_id: string; permissions: string }>();
+
+  return (result.results ?? []).map((row) => ({
+    walletId: row.wallet_id,
+    permissions: normalizeApiKeyWalletPermissions(safeParsePermissions(row.permissions)),
+  }));
+}
+
+export async function replaceApiKeyWalletBindings(
+  db: D1Database,
+  apiKeyId: string,
+  bindings: ApiKeyWalletBinding[]
+): Promise<void> {
+  const statements: D1PreparedStatement[] = [
+    db.prepare("DELETE FROM api_key_wallet_permissions WHERE api_key_id = ?").bind(apiKeyId),
+  ];
+
+  for (const binding of bindings) {
+    statements.push(
+      db
+        .prepare(
+          `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
+         VALUES (?, ?, ?, ?)`
+        )
+        .bind(
+          `akw_${crypto.randomUUID()}`,
+          apiKeyId,
+          binding.walletId,
+          JSON.stringify(normalizeApiKeyWalletPermissions(binding.permissions))
+        )
+    );
+  }
+
+  await db.batch(statements);
+}
+
+export async function upsertApiKeyWalletBinding(
+  db: D1Database,
+  apiKeyId: string,
+  binding: ApiKeyWalletBinding
+): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT(api_key_id, wallet_id)
+       DO UPDATE SET
+         permissions = excluded.permissions,
+         updated_at = (STRFTIME('%Y-%m-%dT%H:%M:%fZ','now'))`
+    )
+    .bind(
+      `akw_${crypto.randomUUID()}`,
+      apiKeyId,
+      binding.walletId,
+      JSON.stringify(normalizeApiKeyWalletPermissions(binding.permissions))
+    )
+    .run();
+}
+
+export async function cloneApiKeyWalletBindings(
+  db: D1Database,
+  sourceApiKeyId: string,
+  targetApiKeyId: string
+): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
+       SELECT
+         'akw_' || lower(hex(randomblob(16))),
+         ?,
+         wallet_id,
+         permissions
+       FROM api_key_wallet_permissions
+       WHERE api_key_id = ?`
+    )
+    .bind(targetApiKeyId, sourceApiKeyId)
+    .run();
+}
+
+function safeParsePermissions(raw: string): Permission[] | null {
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) {
+      return null;
+    }
+
+    return parsed.filter((entry): entry is Permission => typeof entry === "string");
+  } catch {
+    return null;
+  }
+}

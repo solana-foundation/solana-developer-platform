@@ -5,15 +5,12 @@ import { fileURLToPath } from "node:url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const generatedSpecPath = path.resolve(
-  __dirname,
-  "../../sdp-api-specs-draft/generated/openapi.json"
-);
+const generatedSpecPath = path.resolve(__dirname, "../../sdp-api/generated/openapi.json");
 const outputDir = path.resolve(__dirname, "../content/docs/reference/api");
 const rootMetaPath = path.resolve(__dirname, "../content/docs/meta.json");
 
 const HTTP_METHODS = new Set(["get", "post", "put", "patch", "delete", "head", "options"]);
-const SOURCE_PATH = "apps/sdp-api-specs-draft/generated/openapi.json";
+const SOURCE_PATH = "apps/sdp-api/generated/openapi.json";
 const HIDDEN_TAG_SLUGS = new Set([
   "rpc",
   "admin",

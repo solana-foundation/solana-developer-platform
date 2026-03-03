@@ -5,7 +5,7 @@ import { createOpenApiDocument } from "../src/openapi/spec";
 
 const document = createOpenApiDocument();
 
-const outputDir = path.resolve(process.cwd(), "../sdp-api-specs-draft/generated");
+const outputDir = path.resolve(process.cwd(), "generated");
 const outputPath = path.join(outputDir, "openapi.json");
 
 await mkdir(outputDir, { recursive: true });

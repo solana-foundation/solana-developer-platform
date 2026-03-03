@@ -68,7 +68,8 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Issuance Endpoint
   });
 
   beforeEach(async () => {
-    await resetIntegrationState(apiKeyHash);
+    const state = await resetIntegrationState(apiKeyHash);
+    custodyAddress = state.custodyAddress;
   });
 
   const createStablecoin = async (name: string, symbol: string) => {

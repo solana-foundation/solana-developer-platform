@@ -10,7 +10,9 @@
   "dependencies": {
     "@sdp/keychain-coinbase": "workspace:*",
     "@sdp/keychain-para": "workspace:*",
-    "@sdp/types": "workspace:*"
+    "@sdp/types": "workspace:*",
+    "@solana-program/system": "catalog:",
+    "@solana/kit": "catalog:"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.12.0",

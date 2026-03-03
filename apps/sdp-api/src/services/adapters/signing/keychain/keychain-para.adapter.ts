@@ -32,7 +32,7 @@ export class KeychainParaAdapter extends BaseKeychainAdapter {
   /**
    * Get the underlying Para signer for direct use with @solana/kit.
    */
-  async getTransactionSigner(walletId?: string): Promise<ParaSigner> {
+  async getTransactionSigner(walletId?: string, _walletPublicKey?: Address): Promise<ParaSigner> {
     return this.getParaSigner(walletId);
   }
 

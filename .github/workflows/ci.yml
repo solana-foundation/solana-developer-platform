@@ -188,9 +188,6 @@ jobs:
       KORA_RPC_URL: ${{ secrets.KORA_RPC_URL || 'https://kora-devnet-315956366746.us-central1.run.app' }}
       KORA_API_KEY: ${{ secrets.KORA_API_KEY }}
 
-      # Required: a signing key for the custody wallet (Base58-encoded 64-byte keypair)
-      CUSTODY_PRIVATE_KEY: ${{ secrets.CUSTODY_PRIVATE_KEY }}
-
       # Privy configuration for live wallet provisioning/signing integration checks
       PRIVY_APP_ID: ${{ vars.PRIVY_APP_ID || secrets.PRIVY_APP_ID }}
       PRIVY_APP_SECRET: ${{ secrets.PRIVY_APP_SECRET }}

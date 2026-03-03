@@ -62,7 +62,15 @@ export interface Env {
   ORGANIZATION_REGISTRATION_TOKEN?: string;
 
   // Signing provider (custody backend via @solana/keychain)
-  SIGNING_PROVIDER?: "local" | "fireblocks" | "privy" | "coinbase_cdp" | "para" | "turnkey";
+  SIGNING_PROVIDER?:
+    | "local"
+    | "fireblocks"
+    | "privy"
+    | "coinbase_cdp"
+    | "para"
+    | "turnkey"
+    | "dfns"
+    | "anchorage";
   FEE_PAYER_PRIVATE_KEY?: string;
 
   // Fireblocks configuration (@solana/keychain-fireblocks)
@@ -102,6 +110,17 @@ export interface Env {
   TURNKEY_REQUEST_DELAY_MS?: string;
   TURNKEY_PRIVATE_KEY_ID?: string;
   TURNKEY_PUBLIC_KEY?: string;
+
+  // DFNS Server Wallet configuration (Solana)
+  DFNS_AUTH_TOKEN?: string;
+  DFNS_CREDENTIAL_ID?: string;
+  DFNS_PRIVATE_KEY?: string;
+  DFNS_API_BASE_URL?: string;
+  DFNS_WALLET_ID?: string;
+
+  // Anchorage wallet lifecycle configuration
+  ANCHORAGE_API_KEY?: string;
+  ANCHORAGE_API_BASE_URL?: string;
 
   // Kora (gasless) configuration
   FEE_PAYMENT_PROVIDER?: "kora" | "native";
@@ -151,6 +170,11 @@ declare module "hono" {
       permissions: Permission[];
       environment: string;
       signingWalletId: string | null;
+      signingWalletIds?: string[];
+      walletBindings?: Array<{
+        walletId: string;
+        permissions: Permission[];
+      }>;
     };
     // Session auth context set by middleware
     session?: CachedSession;

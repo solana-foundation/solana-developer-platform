@@ -200,6 +200,9 @@ export const createD1PaymentsRepository = (
       const conditions: SQL[] = [eq(paymentTransfers.organizationId, params.organizationId)];
       if (params.projectId) conditions.push(eq(paymentTransfers.projectId, params.projectId));
       if (params.walletId) conditions.push(eq(paymentTransfers.walletId, params.walletId));
+      if (params.walletIds?.length) {
+        conditions.push(inArray(paymentTransfers.walletId, params.walletIds));
+      }
       if (params.sourceAddress)
         conditions.push(eq(paymentTransfers.sourceAddress, params.sourceAddress));
       if (params.token) conditions.push(eq(paymentTransfers.token, params.token));

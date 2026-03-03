@@ -12,8 +12,8 @@ import type { Env } from "@/types/env";
 export async function seedTestCustodyConfig(env: Env, config: SigningConfigRecord): Promise<void> {
   await env.DB.prepare(
     `INSERT INTO custody_configs
-     (id, organization_id, project_id, provider, config, default_wallet_id, status, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+     (id, organization_id, project_id, provider, config_encrypted, encryption_version, default_wallet_id, status, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   )
     .bind(
       config.id,
@@ -21,12 +21,48 @@ export async function seedTestCustodyConfig(env: Env, config: SigningConfigRecor
       config.projectId,
       config.provider,
       config.config,
+      "sdp-custody-encryption-v1",
       config.defaultWalletId,
       config.status,
       config.createdAt,
       config.updatedAt
     )
     .run();
+
+  if (config.status === "active") {
+    const existingDefault = await env.DB.prepare(
+      config.projectId
+        ? `SELECT id
+           FROM custody_scope_defaults
+           WHERE organization_id = ? AND project_id = ?
+           LIMIT 1`
+        : `SELECT id
+           FROM custody_scope_defaults
+           WHERE organization_id = ? AND project_id IS NULL
+           LIMIT 1`
+    )
+      .bind(
+        ...(config.projectId ? [config.organizationId, config.projectId] : [config.organizationId])
+      )
+      .first<{ id: string }>();
+
+    if (existingDefault) {
+      await env.DB.prepare(
+        `UPDATE custody_scope_defaults
+         SET default_custody_config_id = ?, updated_at = datetime('now')
+         WHERE id = ?`
+      )
+        .bind(config.id, existingDefault.id)
+        .run();
+    } else {
+      await env.DB.prepare(
+        `INSERT INTO custody_scope_defaults (id, organization_id, project_id, default_custody_config_id)
+         VALUES (?, ?, ?, ?)`
+      )
+        .bind(`csd_${config.id}`, config.organizationId, config.projectId, config.id)
+        .run();
+    }
+  }
 }
 
 /**
@@ -71,7 +107,7 @@ export async function getTestCustodyConfig(
   configId: string
 ): Promise<SigningConfigRecord | null> {
   const row = await env.DB.prepare(
-    `SELECT id, organization_id, project_id, provider, config, default_wallet_id, status, created_at, updated_at
+    `SELECT id, organization_id, project_id, provider, config_encrypted as config, default_wallet_id, status, created_at, updated_at
      FROM custody_configs WHERE id = ?`
   )
     .bind(configId)
@@ -117,9 +153,9 @@ export async function getTestCustodyConfigByOrg(
   projectId?: string
 ): Promise<SigningConfigRecord | null> {
   const query = projectId
-    ? `SELECT id, organization_id, project_id, provider, config, default_wallet_id, status, created_at, updated_at
+    ? `SELECT id, organization_id, project_id, provider, config_encrypted as config, default_wallet_id, status, created_at, updated_at
        FROM custody_configs WHERE organization_id = ? AND project_id = ? AND status = 'active'`
-    : `SELECT id, organization_id, project_id, provider, config, default_wallet_id, status, created_at, updated_at
+    : `SELECT id, organization_id, project_id, provider, config_encrypted as config, default_wallet_id, status, created_at, updated_at
        FROM custody_configs WHERE organization_id = ? AND project_id IS NULL AND status = 'active'`;
 
   const row = await env.DB.prepare(query)

@@ -1,3 +1,4 @@
+import { resolveApiKeySigningWalletId } from "@/lib/api-key-wallet-auth";
 import { getAuth } from "@/lib/auth";
 import { AppError, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
@@ -59,12 +60,9 @@ export const pauseToken = async (c: AppContext) => {
     throw new AppError("BAD_REQUEST", "Pause authority is not configured for this token");
   }
 
-  const signer = await createOrgSigner(
-    c.env,
-    auth.organizationId,
-    auth.projectId,
-    auth.signingWalletId
-  );
+  const signingWalletId = resolveApiKeySigningWalletId(auth, undefined, ["tokens:admin"]);
+
+  const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId, signingWalletId);
   if (pauseAuthorityRaw !== signer.address) {
     throw new AppError("BAD_REQUEST", "Pause authority is not controlled by custody");
   }
@@ -177,12 +175,9 @@ export const unpauseToken = async (c: AppContext) => {
     throw new AppError("BAD_REQUEST", "Pause authority is not configured for this token");
   }
 
-  const signer = await createOrgSigner(
-    c.env,
-    auth.organizationId,
-    auth.projectId,
-    auth.signingWalletId
-  );
+  const signingWalletId = resolveApiKeySigningWalletId(auth, undefined, ["tokens:admin"]);
+
+  const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId, signingWalletId);
   if (pauseAuthorityRaw !== signer.address) {
     throw new AppError("BAD_REQUEST", "Pause authority is not controlled by custody");
   }

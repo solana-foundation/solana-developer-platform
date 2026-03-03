@@ -32,7 +32,7 @@ export class KeychainPrivyAdapter extends BaseKeychainAdapter {
   /**
    * Get the underlying PrivySigner for direct use with @solana/kit.
    */
-  async getTransactionSigner(walletId?: string): Promise<PrivySigner> {
+  async getTransactionSigner(walletId?: string, _walletPublicKey?: Address): Promise<PrivySigner> {
     return this.getPrivySigner(walletId);
   }
 

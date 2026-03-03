@@ -48,6 +48,8 @@ export type ResourceType =
   | "token_transaction"
   | "token_allowlist"
   | "frozen_account"
+  | "custody_config"
+  | "custody_wallet"
   // Transaction resources
   | "transaction"
   | "signing_request";

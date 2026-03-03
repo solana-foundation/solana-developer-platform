@@ -13,7 +13,7 @@
 import { AppError } from "@/lib/errors";
 import { hashString } from "@/lib/hash";
 import type { Env } from "@/types/env";
-import type { ApiKeyRole, CachedApiKey } from "@sdp/types";
+import type { ApiKeyRole, ApiKeyWalletBinding, CachedApiKey } from "@sdp/types";
 import { type Permission, getPermissionsForApiKeyRole } from "@sdp/types";
 import type { Context, Next } from "hono";
 
@@ -27,6 +27,8 @@ interface ApiKeyContext {
   permissions: Permission[];
   environment: string;
   signingWalletId: string | null;
+  signingWalletIds: string[];
+  walletBindings: ApiKeyWalletBinding[];
 }
 
 /**
@@ -113,6 +115,27 @@ async function getFromD1AndCache(
     return null;
   }
 
+  const walletBindingsResult = await db
+    .prepare(
+      `SELECT wallet_id, permissions
+       FROM api_key_wallet_permissions
+       WHERE api_key_id = ?
+       ORDER BY created_at ASC`
+    )
+    .bind(result.id)
+    .all<{ wallet_id: string; permissions: string }>();
+
+  const walletBindings: ApiKeyWalletBinding[] = (walletBindingsResult.results ?? []).map((row) => {
+    const parsed = safeParsePermissionsArray(row.permissions);
+    return {
+      walletId: row.wallet_id,
+      permissions: parsed.length > 0 ? parsed : ["*"],
+    };
+  });
+
+  const signingWalletIds = walletBindings.map((binding) => binding.walletId);
+  const signingWalletId = result.signing_wallet_id ?? signingWalletIds[0] ?? null;
+
   const cached: CachedApiKey = {
     id: result.id,
     organizationId: result.organization_id,
@@ -124,7 +147,9 @@ async function getFromD1AndCache(
     environment: result.environment as "sandbox" | "production",
     rateLimitTier: result.rate_limit_tier as "standard" | "elevated" | "unlimited",
     allowedIps: result.allowed_ips ? JSON.parse(result.allowed_ips) : null,
-    signingWalletId: result.signing_wallet_id,
+    signingWalletId,
+    signingWalletIds,
+    walletBindings,
     status: result.status as "active" | "revoked" | "expired" | "deactivated",
     expiresAt: result.expires_at,
   };
@@ -145,6 +170,56 @@ function updateLastUsed(db: D1Database, keyId: string) {
     .bind(keyId)
     .run()
     .catch((err) => console.error("Failed to update last_used_at:", err));
+}
+
+function safeParsePermissionsArray(value: string | null | undefined): Permission[] {
+  if (!value) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return parsed.filter((entry): entry is Permission => typeof entry === "string");
+  } catch {
+    return [];
+  }
+}
+
+function normalizeWalletBindings(cachedKey: CachedApiKey): {
+  signingWalletId: string | null;
+  signingWalletIds: string[];
+  walletBindings: ApiKeyWalletBinding[];
+} {
+  const rawBindings = cachedKey.walletBindings ?? [];
+  const walletBindings = rawBindings
+    .filter((binding) => typeof binding.walletId === "string" && binding.walletId.length > 0)
+    .map((binding) => ({
+      walletId: binding.walletId,
+      permissions:
+        binding.permissions && binding.permissions.length > 0
+          ? binding.permissions
+          : (["*"] as Permission[]),
+    }));
+
+  if (walletBindings.length === 0 && cachedKey.signingWalletId) {
+    walletBindings.push({
+      walletId: cachedKey.signingWalletId,
+      permissions: ["*"],
+    });
+  }
+
+  const signingWalletIds = walletBindings.map((binding) => binding.walletId);
+  const signingWalletId = cachedKey.signingWalletId ?? signingWalletIds[0] ?? null;
+
+  return {
+    signingWalletId,
+    signingWalletIds,
+    walletBindings,
+  };
 }
 
 /**
@@ -193,6 +268,8 @@ export function authMiddleware() {
     }
 
     // Set auth context
+    const normalizedWalletBindings = normalizeWalletBindings(cachedKey);
+
     const authContext: ApiKeyContext = {
       id: cachedKey.id,
       organizationId: cachedKey.organizationId,
@@ -200,7 +277,9 @@ export function authMiddleware() {
       role: cachedKey.role,
       permissions: cachedKey.permissions,
       environment: cachedKey.environment,
-      signingWalletId: cachedKey.signingWalletId ?? null,
+      signingWalletId: normalizedWalletBindings.signingWalletId,
+      signingWalletIds: normalizedWalletBindings.signingWalletIds,
+      walletBindings: normalizedWalletBindings.walletBindings,
     };
 
     c.set("apiKey", authContext);

@@ -32,7 +32,8 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Template D
   });
 
   beforeEach(async () => {
-    await resetIntegrationState(apiKeyHash);
+    const state = await resetIntegrationState(apiKeyHash);
+    custodyAddress = state.custodyAddress;
   });
 
   it("deploys stablecoin template with sRFC-37", { timeout: 90000 }, async () => {
