@@ -151,8 +151,6 @@ importers:
         specifier: ^4.1.0
         version: 4.60.0(@cloudflare/workers-types@4.20260123.0)
 
-  apps/sdp-api-specs-draft: {}
-
   apps/sdp-docs:
     dependencies:
       fumadocs-core:
