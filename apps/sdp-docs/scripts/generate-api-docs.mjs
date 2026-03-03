@@ -5,10 +5,7 @@ import { fileURLToPath } from "node:url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const generatedSpecPath = path.resolve(
-  __dirname,
-  "../../sdp-api/generated/openapi.json"
-);
+const generatedSpecPath = path.resolve(__dirname, "../../sdp-api/generated/openapi.json");
 const outputDir = path.resolve(__dirname, "../content/docs/reference/api");
 const rootMetaPath = path.resolve(__dirname, "../content/docs/meta.json");
 

@@ -22,7 +22,7 @@ function formatProviderHint(providerLabels: string[]): string {
     return "wallet providers";
   }
   if (providerLabels.length === 1) {
-    return providerLabels[0]!;
+    return providerLabels[0] ?? "wallet providers";
   }
   if (providerLabels.length === 2) {
     return `${providerLabels[0]} or ${providerLabels[1]}`;
