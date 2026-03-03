@@ -7,6 +7,7 @@ import {
   errorResponseSchema,
   initializeSigningRequestSchema,
   initializeSigningResponseSchema,
+  orgCustodyProviderSchema,
   projectIdParamSchema,
   setDefaultWalletRequestSchema,
   setDefaultWalletResponseSchema,
@@ -17,7 +18,9 @@ import {
 import { errorResponses, jsonContent } from "./helpers";
 import {
   custodyConfigResponse,
+  custodyConfigsResponse,
   custodySignerCheckResponse,
+  custodySwitchOptionsResponse,
   custodyWalletResponse,
   custodyWalletsResponse,
 } from "./responses";
@@ -54,7 +57,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
     summary: "Switch wallet signing provider",
     operationId: "switchWalletSigningProvider",
     description:
-      "Switches the active wallet signing provider for the organization or project without rotating existing on-chain authorities.",
+      "Ensures the target provider is active and sets it as the default signing provider for the requested scope. Existing on-chain authorities are not rotated.",
     security: [{ apiKeyAuth: [] }],
     request: {
       body: {
@@ -77,7 +80,8 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
     tags: ["Wallets"],
     summary: "Create wallet",
     operationId: "createWallet",
-    description: "Provisions a new wallet for the active signing provider configuration.",
+    description:
+      "Provisions a new wallet for the resolved default signing provider configuration, or for an explicitly targeted provider.",
     security: [{ apiKeyAuth: [] }],
     request: {
       body: {
@@ -100,7 +104,8 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
     tags: ["Wallets"],
     summary: "Set default wallet",
     operationId: "setDefaultWallet",
-    description: "Sets the default wallet for the active signing configuration.",
+    description:
+      "Sets the default wallet for the resolved default provider config, or for an explicitly targeted provider.",
     security: [{ apiKeyAuth: [] }],
     request: {
       body: {
@@ -123,7 +128,8 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
     tags: ["Wallets"],
     summary: "Get wallet signing config",
     operationId: "getWalletConfig",
-    description: "Returns the active wallet signing configuration for the organization or project.",
+    description:
+      "Returns the resolved default wallet signing configuration for the organization or project. Resolution is DB-backed only (no environment fallback).",
     security: [{ apiKeyAuth: [] }],
     request: {
       query: z.object({
@@ -141,15 +147,41 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "get",
-    path: "/v1/wallets",
+    path: "/v1/wallets/configs",
     tags: ["Wallets"],
-    summary: "List wallets",
-    operationId: "listWallets",
-    description: "Lists wallets for the active signing configuration.",
+    summary: "List wallet signing configs",
+    operationId: "listWalletConfigs",
+    description:
+      "Returns active wallet signing configurations for the requested scope plus the resolved default configuration ID.",
     security: [{ apiKeyAuth: [] }],
     request: {
       query: z.object({
         projectId: projectIdParamSchema.optional(),
+      }),
+    },
+    responses: {
+      200: {
+        description: "Wallet signing configurations",
+        content: jsonContent(custodyConfigsResponse),
+      },
+      ...errorResponses(errorResponseSchema, [401, 403, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/wallets",
+    tags: ["Wallets"],
+    summary: "List wallets",
+    operationId: "listWallets",
+    description:
+      "Lists wallets for the resolved default signing provider by default. Use provider/includeAllProviders to query across active providers.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      query: z.object({
+        projectId: projectIdParamSchema.optional(),
+        provider: orgCustodyProviderSchema.optional(),
+        includeAllProviders: z.boolean().optional(),
       }),
     },
     responses: {
@@ -163,11 +195,35 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "get",
+    path: "/v1/wallets/switch-options",
+    tags: ["Wallets"],
+    summary: "List switch provider options",
+    operationId: "listSwitchProviderOptions",
+    description:
+      "Returns provider capability metadata, including active/default status for the requested scope.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      query: z.object({
+        projectId: projectIdParamSchema.optional(),
+      }),
+    },
+    responses: {
+      200: {
+        description: "Provider switch options",
+        content: jsonContent(custodySwitchOptionsResponse),
+      },
+      ...errorResponses(errorResponseSchema, [401, 403, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
     path: "/v1/wallets/public-key",
     tags: ["Wallets"],
     summary: "Get wallet public key",
     operationId: "getWalletPublicKey",
-    description: "Returns the active wallet public key for transaction construction.",
+    description:
+      "Returns the resolved wallet public key for transaction construction. Resolution is DB-backed only (no environment fallback).",
     security: [{ apiKeyAuth: [] }],
     request: {
       query: z.object({

@@ -219,6 +219,14 @@ export async function switchCustodyProvider(formData: FormData) {
 }
 
 export async function createCustodyWallet(formData: FormData) {
+  const provider = getOptionalString(formData, "provider") as
+    | "privy"
+    | "local"
+    | "fireblocks"
+    | "coinbase_cdp"
+    | "para"
+    | "turnkey"
+    | undefined;
   const label = getOptionalString(formData, "label");
   const purpose = getOptionalString(formData, "purpose") as
     | "root"
@@ -231,7 +239,7 @@ export async function createCustodyWallet(formData: FormData) {
 
   await sdpApiFetch("/v1/wallets", {
     method: "POST",
-    body: JSON.stringify({ label, purpose, setDefault }),
+    body: JSON.stringify({ provider, label, purpose, setDefault }),
   });
 
   revalidatePath("/dashboard/custody");
@@ -241,13 +249,21 @@ export async function createCustodyWallet(formData: FormData) {
 
 export async function setDefaultCustodyWallet(formData: FormData) {
   const walletId = getString(formData, "walletId");
+  const provider = getOptionalString(formData, "provider") as
+    | "privy"
+    | "local"
+    | "fireblocks"
+    | "coinbase_cdp"
+    | "para"
+    | "turnkey"
+    | undefined;
   if (!walletId) {
     throw new Error("walletId is required");
   }
 
   await sdpApiFetch("/v1/wallets/default-wallet", {
     method: "POST",
-    body: JSON.stringify({ walletId }),
+    body: JSON.stringify({ walletId, provider }),
   });
 
   revalidatePath("/dashboard/custody");

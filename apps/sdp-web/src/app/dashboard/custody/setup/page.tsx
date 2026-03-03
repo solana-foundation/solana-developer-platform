@@ -17,10 +17,10 @@ export default async function CustodySetupPage() {
     <div className="w-full max-w-3xl flex flex-col gap-6">
       <Card>
         <CardHeader>
-          <CardTitle>Create your master signing wallet</CardTitle>
+          <CardTitle>Create your first signing provider and wallet</CardTitle>
           <CardDescription>
-            This wallet will be used to sign API operations by default. You can create additional
-            wallets later.
+            This provider will sign API operations by default. You can connect additional providers
+            and wallets later.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">

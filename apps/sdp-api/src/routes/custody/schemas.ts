@@ -80,6 +80,7 @@ export type InitializeSigningRequest = z.infer<typeof initializeSigningSchema>;
 
 export const createWalletSchema = z.object({
   projectId: z.string().optional(),
+  provider: z.enum(["local", "fireblocks", "privy", "coinbase_cdp", "para", "turnkey"]).optional(),
   label: z.string().max(100).optional(),
   purpose: z
     .enum(["root", "mint_authority", "freeze_authority", "fee_payer", "transfer"])
@@ -93,9 +94,25 @@ export type CreateWalletRequest = z.infer<typeof createWalletSchema>;
 // Switch Signing Provider
 // ═══════════════════════════════════════════════════════════════════════════
 
-// For now, switching uses the same shape as initialize. The handler deactivates the
-// existing config for the scope (org or project) and then runs the initializer.
-export const switchSigningSchema = initializeSigningSchema;
+// Switching uses the same provider payload shape as initialize.
+// The handler ensures the target provider is active, then updates the default provider
+// pointer for the requested scope.
+export const switchFireblocksSchema = initializeFireblocksSchema.extend({
+  apiKey: initializeFireblocksSchema.shape.apiKey.optional(),
+  apiSecretPem: initializeFireblocksSchema.shape.apiSecretPem.optional(),
+  vaultAccountId: initializeFireblocksSchema.shape.vaultAccountId.optional(),
+  assetId: initializeFireblocksSchema.shape.assetId.optional(),
+  apiBaseUrl: initializeFireblocksSchema.shape.apiBaseUrl.optional(),
+});
+
+export const switchSigningSchema = z.discriminatedUnion("provider", [
+  initializeLocalSchema,
+  switchFireblocksSchema,
+  initializePrivySchema,
+  initializeCoinbaseCdpSchema,
+  initializeParaSchema,
+  initializeTurnkeySchema,
+]);
 
 export type SwitchSigningRequest = z.infer<typeof switchSigningSchema>;
 
@@ -105,6 +122,7 @@ export type SwitchSigningRequest = z.infer<typeof switchSigningSchema>;
 
 export const setDefaultWalletSchema = z.object({
   projectId: z.string().optional(),
+  provider: z.enum(["local", "fireblocks", "privy", "coinbase_cdp", "para", "turnkey"]).optional(),
   walletId: z.string().min(1),
 });
 
@@ -140,6 +158,9 @@ export interface CustodyConfigResponse {
 export interface CustodyWalletResponse {
   wallet: {
     id: string;
+    custodyConfigId?: string;
+    provider?: "local" | "fireblocks" | "privy" | "coinbase_cdp" | "para" | "turnkey";
+    isDefaultProvider?: boolean;
     walletId: string;
     publicKey: string;
     label: string | null;
@@ -153,11 +174,28 @@ export interface CustodyWalletsResponse {
   wallets: CustodyWalletResponse["wallet"][];
 }
 
+export interface CustodyConfigsResponse {
+  configs: Array<{
+    id: string;
+    organizationId: string;
+    projectId: string | null;
+    provider: "local" | "fireblocks" | "privy" | "coinbase_cdp" | "para" | "turnkey";
+    publicKey: string;
+    defaultWalletId: string | null;
+    status: "active" | "inactive";
+    createdAt: string;
+    isDefault: boolean;
+  }>;
+  defaultConfigId: string | null;
+}
+
 export interface SwitchProviderOptionsResponse {
   providers: Array<{
     provider: "fireblocks" | "privy" | "coinbase_cdp" | "para" | "turnkey" | "local";
     hasReusableWallet: boolean;
     needsWalletLabel: boolean;
+    isActive: boolean;
+    isDefault: boolean;
   }>;
 }
 

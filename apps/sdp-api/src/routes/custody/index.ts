@@ -10,6 +10,7 @@ import { Hono } from "hono";
 import {
   createWallet,
   getConfig,
+  getConfigs,
   getPublicKey,
   getSwitchProviderOptions,
   initializeSigning,
@@ -33,6 +34,7 @@ wallets.post("/signer-check", requirePermissions("wallets:write"), signerCheck);
 
 // Read configuration and wallets
 wallets.get("/config", requirePermissions("wallets:read"), getConfig);
+wallets.get("/configs", requirePermissions("wallets:read"), getConfigs);
 wallets.get("/", requirePermissions("wallets:read"), listWallets);
 wallets.get("/public-key", requirePermissions("wallets:read"), getPublicKey);
 wallets.get("/switch-options", requirePermissions("custody:admin"), getSwitchProviderOptions);

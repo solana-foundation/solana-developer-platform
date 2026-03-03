@@ -575,6 +575,31 @@ export const custodyWallets = sqliteTable(
   })
 );
 
+export const custodyScopeDefaults = sqliteTable(
+  "custody_scope_defaults",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    projectId: text("project_id").references(() => projects.id, { onDelete: "cascade" }),
+    defaultCustodyConfigId: text("default_custody_config_id")
+      .notNull()
+      .references(() => custodyConfigs.id, { onDelete: "cascade" }),
+    createdAt: text("created_at").notNull().default(sql`(STRFTIME('%Y-%m-%dT%H:%M:%fZ','now'))`),
+    updatedAt: text("updated_at").notNull().default(sql`(STRFTIME('%Y-%m-%dT%H:%M:%fZ','now'))`),
+  },
+  (table) => ({
+    orgProjectUnique: uniqueIndex("idx_custody_scope_defaults_org_project").on(
+      table.organizationId,
+      table.projectId
+    ),
+    defaultConfigIdx: index("idx_custody_scope_defaults_default_config").on(
+      table.defaultCustodyConfigId
+    ),
+  })
+);
+
 export const paymentWalletPolicies = sqliteTable(
   "payment_wallet_policies",
   {

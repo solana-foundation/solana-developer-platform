@@ -32,6 +32,24 @@ const DEFAULT_NEEDS_WALLET_LABEL_BY_PROVIDER: Record<SwitchProvider, boolean> = 
   local: true,
 };
 
+const DEFAULT_IS_ACTIVE_BY_PROVIDER: Record<SwitchProvider, boolean> = {
+  fireblocks: false,
+  privy: false,
+  coinbase_cdp: false,
+  para: false,
+  turnkey: false,
+  local: false,
+};
+
+const DEFAULT_IS_DEFAULT_BY_PROVIDER: Record<SwitchProvider, boolean> = {
+  fireblocks: false,
+  privy: false,
+  coinbase_cdp: false,
+  para: false,
+  turnkey: false,
+  local: false,
+};
+
 function formatProviderName(provider: string): string {
   const option = PROVIDER_OPTIONS.find((entry) => entry.value === provider);
   if (option) {
@@ -40,34 +58,19 @@ function formatProviderName(provider: string): string {
   return provider;
 }
 
-async function getCurrentProvider(): Promise<string | null> {
-  const response = await sdpApiRequest("/v1/wallets/config");
-  if (response.status === 404) {
-    return null;
-  }
-  if (!response.ok) {
-    return null;
-  }
-
-  const payload = (await response.json()) as {
-    data?: {
-      config?: {
-        provider?: string;
-      };
-    };
-  };
-  return payload.data?.config?.provider ?? null;
-}
-
 async function getProviderCapabilities(): Promise<{
   hasReusableWalletByProvider: Record<SwitchProvider, boolean>;
   needsWalletLabelByProvider: Record<SwitchProvider, boolean>;
+  isActiveByProvider: Record<SwitchProvider, boolean>;
+  isDefaultByProvider: Record<SwitchProvider, boolean>;
 }> {
   const response = await sdpApiRequest("/v1/wallets/switch-options");
   if (!response.ok) {
     return {
       hasReusableWalletByProvider: DEFAULT_HAS_REUSABLE_WALLET_BY_PROVIDER,
       needsWalletLabelByProvider: DEFAULT_NEEDS_WALLET_LABEL_BY_PROVIDER,
+      isActiveByProvider: DEFAULT_IS_ACTIVE_BY_PROVIDER,
+      isDefaultByProvider: DEFAULT_IS_DEFAULT_BY_PROVIDER,
     };
   }
 
@@ -77,12 +80,16 @@ async function getProviderCapabilities(): Promise<{
         provider?: string;
         hasReusableWallet?: boolean;
         needsWalletLabel?: boolean;
+        isActive?: boolean;
+        isDefault?: boolean;
       }>;
     };
   };
 
   const hasReusableWalletByProvider = { ...DEFAULT_HAS_REUSABLE_WALLET_BY_PROVIDER };
   const needsWalletLabelByProvider = { ...DEFAULT_NEEDS_WALLET_LABEL_BY_PROVIDER };
+  const isActiveByProvider = { ...DEFAULT_IS_ACTIVE_BY_PROVIDER };
+  const isDefaultByProvider = { ...DEFAULT_IS_DEFAULT_BY_PROVIDER };
   for (const provider of payload.data?.providers ?? []) {
     if (!provider.provider || !(provider.provider in needsWalletLabelByProvider)) {
       continue;
@@ -96,11 +103,21 @@ async function getProviderCapabilities(): Promise<{
     if (typeof provider.needsWalletLabel === "boolean") {
       needsWalletLabelByProvider[key] = provider.needsWalletLabel;
     }
+
+    if (typeof provider.isActive === "boolean") {
+      isActiveByProvider[key] = provider.isActive;
+    }
+
+    if (typeof provider.isDefault === "boolean") {
+      isDefaultByProvider[key] = provider.isDefault;
+    }
   }
 
   return {
     hasReusableWalletByProvider,
     needsWalletLabelByProvider,
+    isActiveByProvider,
+    isDefaultByProvider,
   };
 }
 
@@ -113,33 +130,45 @@ export default async function CustodySwitchPage() {
     redirect("/dashboard");
   }
 
-  const currentProvider = await getCurrentProvider();
-  const { hasReusableWalletByProvider, needsWalletLabelByProvider } =
-    await getProviderCapabilities();
-  const selectableOptions = PROVIDER_OPTIONS.filter((option) => option.value !== currentProvider);
-  const defaultProvider = selectableOptions[0]?.value ?? PROVIDER_OPTIONS[0].value;
+  const {
+    hasReusableWalletByProvider,
+    needsWalletLabelByProvider,
+    isActiveByProvider,
+    isDefaultByProvider,
+  } = await getProviderCapabilities();
+  const currentDefaultProvider =
+    (Object.entries(isDefaultByProvider).find(([, isDefault]) => isDefault)?.[0] as
+      | SwitchProvider
+      | undefined) ?? null;
+  const defaultProvider = currentDefaultProvider ?? PROVIDER_OPTIONS[0].value;
   const providerOptions = PROVIDER_OPTIONS.map((option) => ({
     value: option.value,
-    label: `${option.label}${option.value === currentProvider ? " (current)" : ""}`,
-    disabled: option.value === currentProvider,
+    label: `${option.label}${
+      isDefaultByProvider[option.value]
+        ? " (default)"
+        : isActiveByProvider[option.value]
+          ? " (connected)"
+          : ""
+    }`,
+    disabled: false,
   }));
 
   return (
     <div className="w-full max-w-3xl flex flex-col gap-6">
       <Card>
         <CardHeader>
-          <CardTitle>Switch wallet provider</CardTitle>
+          <CardTitle>Set default / connect provider</CardTitle>
           <CardDescription>
-            This updates which provider signs new API actions. It does not automatically rotate
-            existing on-chain authorities.
+            Selecting a connected provider sets it as default. Selecting a new provider connects it
+            and sets it as default. Existing on-chain authorities are not rotated automatically.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
-          {currentProvider ? (
+          {currentDefaultProvider ? (
             <div className="rounded-xl border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.04)] px-3 py-2 text-xs text-[rgba(28,28,29,0.72)]">
-              Current provider:{" "}
+              Current default provider:{" "}
               <span className="font-medium text-[#1c1c1d]">
-                {formatProviderName(currentProvider)}
+                {formatProviderName(currentDefaultProvider)}
               </span>
             </div>
           ) : null}
@@ -151,9 +180,10 @@ export default async function CustodySwitchPage() {
             action={switchCustodyProvider}
             options={providerOptions}
             defaultProvider={defaultProvider}
-            disableSubmit={selectableOptions.length === 0}
+            disableSubmit={providerOptions.length === 0}
             hasReusableWalletByProvider={hasReusableWalletByProvider}
             needsWalletLabelByProvider={needsWalletLabelByProvider}
+            isActiveByProvider={isActiveByProvider}
           />
         </CardContent>
       </Card>

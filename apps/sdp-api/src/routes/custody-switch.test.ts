@@ -94,6 +94,11 @@ async function seedAuthAndActiveConfig(): Promise<void> {
       "privy_wallet_test",
       "active"
     ),
+    env.DB.prepare(
+      `INSERT INTO custody_scope_defaults
+           (id, organization_id, project_id, default_custody_config_id)
+         VALUES (?, ?, ?, ?)`
+    ).bind(`csd_${TEST_CONFIG_ID}`, TEST_ORG.id, null, TEST_CONFIG_ID),
   ]);
 }
 
@@ -154,5 +159,16 @@ describe("Custody switch rollback", () => {
       .first<{ count: number }>();
 
     expect(Number(paraConfigCount?.count ?? 0)).toBe(0);
+
+    const scopeDefault = await env.DB.prepare(
+      `SELECT default_custody_config_id
+         FROM custody_scope_defaults
+         WHERE organization_id = ? AND project_id IS NULL
+         LIMIT 1`
+    )
+      .bind(TEST_ORG.id)
+      .first<{ default_custody_config_id: string }>();
+
+    expect(scopeDefault?.default_custody_config_id).toBe(TEST_CONFIG_ID);
   });
 });

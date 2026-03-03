@@ -19,6 +19,7 @@ interface SwitchProviderFormProps {
   disableSubmit: boolean;
   hasReusableWalletByProvider: Record<SwitchProvider, boolean>;
   needsWalletLabelByProvider: Record<SwitchProvider, boolean>;
+  isActiveByProvider: Record<SwitchProvider, boolean>;
 }
 
 export function SwitchProviderForm({
@@ -28,16 +29,18 @@ export function SwitchProviderForm({
   disableSubmit,
   hasReusableWalletByProvider,
   needsWalletLabelByProvider,
+  isActiveByProvider,
 }: SwitchProviderFormProps) {
   const [selectedProvider, setSelectedProvider] = useState<SwitchProvider>(defaultProvider);
   const isFireblocks = selectedProvider === "fireblocks";
   const hasReusableWallet = hasReusableWalletByProvider[selectedProvider] ?? false;
   const needsWalletLabel = needsWalletLabelByProvider[selectedProvider] ?? true;
+  const isActiveProvider = isActiveByProvider[selectedProvider] ?? false;
 
   return (
     <form action={action} className="grid gap-5">
       <div className="grid gap-2">
-        <Label htmlFor="provider">New provider</Label>
+        <Label htmlFor="provider">Provider</Label>
         <select
           id="provider"
           name="provider"
@@ -56,11 +59,13 @@ export function SwitchProviderForm({
         </select>
       </div>
 
-      {isFireblocks ? (
+      {isFireblocks && !isActiveProvider ? (
         <div className="grid gap-4 rounded-xl border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.03)] p-4">
           <div className="space-y-1">
             <p className="text-sm font-medium text-[#1c1c1d]">Fireblocks credentials</p>
-            <p className="text-xs text-[rgba(28,28,29,0.64)]">Required to switch to Fireblocks.</p>
+            <p className="text-xs text-[rgba(28,28,29,0.64)]">
+              Required to connect Fireblocks for the first time.
+            </p>
           </div>
 
           <div className="grid gap-2">
@@ -127,7 +132,7 @@ export function SwitchProviderForm({
 
       <div className="flex flex-wrap items-center gap-3">
         <Button type="submit" disabled={disableSubmit}>
-          Switch provider
+          {isActiveProvider ? "Set as default" : "Connect provider"}
         </Button>
         <Link href="/dashboard/wallets">
           <Button type="button" variant="secondary">

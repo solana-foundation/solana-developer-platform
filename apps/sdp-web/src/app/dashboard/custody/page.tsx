@@ -33,10 +33,14 @@ interface CustodyConfig {
   defaultWalletId: string | null;
   status: "active" | "inactive";
   createdAt: string;
+  isDefault?: boolean;
 }
 
 interface CustodyWallet {
   id: string;
+  custodyConfigId?: string;
+  provider?: CustodyProvider;
+  isDefaultProvider?: boolean;
   walletId: string;
   publicKey: string;
   label: string | null;
@@ -60,15 +64,37 @@ function settle<T>(promise: Promise<T>): Promise<SettledResult<T>> {
   );
 }
 
-async function getCustodyConfig(request: SdpApiClient["request"]): Promise<CustodyConfig | null> {
-  const res = await request("/v1/wallets/config");
-  if (res.status === 404) return null;
+function formatProviderName(provider: CustodyProvider): string {
+  switch (provider) {
+    case "coinbase_cdp":
+      return "Coinbase CDP";
+    case "fireblocks":
+      return "Fireblocks";
+    case "local":
+      return "Local";
+    case "para":
+      return "Para";
+    case "privy":
+      return "Privy";
+    case "turnkey":
+      return "Turnkey";
+    default:
+      return provider;
+  }
+}
+
+async function getCustodyConfigs(
+  request: SdpApiClient["request"]
+): Promise<{ configs: CustodyConfig[]; defaultConfigId: string | null }> {
+  const res = await request("/v1/wallets/configs");
   if (!res.ok) {
     const body = await res.text();
     throw new Error(`SDP API request failed (${res.status}): ${body}`);
   }
-  const json = (await res.json()) as { data: { config: CustodyConfig } };
-  return json.data.config;
+  const json = (await res.json()) as {
+    data: { configs: CustodyConfig[]; defaultConfigId: string | null };
+  };
+  return json.data;
 }
 
 async function getClerkOrganizationSummary(
@@ -149,7 +175,8 @@ async function OnboardingGateSection({
 }
 
 type LinkedCustodyData = {
-  config: CustodyConfig | null;
+  defaultConfig: CustodyConfig | null;
+  configs: CustodyConfig[];
   wallets: CustodyWallet[];
 };
 
@@ -163,22 +190,21 @@ async function SigningConfigurationSection({
     return null;
   }
 
-  const { config } = linkedData;
+  const { defaultConfig, configs } = linkedData;
 
-  if (!config) {
+  if (!defaultConfig) {
     return (
       <SectionEntry>
         <Card>
           <CardHeader>
             <CardTitle>Enable wallets</CardTitle>
             <CardDescription>
-              Provision your first signing wallet to authorize API operations.
+              Create your first signing provider and wallet to authorize API operations.
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-wrap items-center justify-between gap-4">
             <div className="text-sm text-[rgba(28,28,29,0.72)]">
-              This creates a master signing wallet for your organization. You can add more wallets
-              later and choose which one signs by default.
+              You can connect multiple providers over time and set which one signs by default.
             </div>
             <Link href="/dashboard/wallets/setup">
               <Button>Get started</Button>
@@ -193,31 +219,63 @@ async function SigningConfigurationSection({
     <SectionEntry delay={0.02}>
       <Card>
         <CardHeader>
-          <CardTitle>Signing configuration</CardTitle>
-          <CardDescription>Controls which wallet signs new API actions.</CardDescription>
+          <CardTitle>Default signing provider</CardTitle>
+          <CardDescription>Controls which provider signs new API actions by default.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4 text-sm">
           <div className="grid gap-2">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="text-[rgba(28,28,29,0.72)]">Provider</span>
-              <span className="font-medium text-[#1c1c1d]">{config.provider}</span>
+              <span className="font-medium text-[#1c1c1d]">
+                {formatProviderName(defaultConfig.provider)}
+              </span>
             </div>
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="text-[rgba(28,28,29,0.72)]">Master address</span>
-              <span className="font-mono text-xs text-[#1c1c1d]">{config.publicKey}</span>
+              <span className="font-mono text-xs text-[#1c1c1d]">{defaultConfig.publicKey}</span>
             </div>
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="text-[rgba(28,28,29,0.72)]">Default wallet</span>
               <span className="font-mono text-xs text-[#1c1c1d]">
-                {config.defaultWalletId ?? "Not set"}
+                {defaultConfig.defaultWalletId ?? "Not set"}
               </span>
             </div>
           </div>
 
           <div className="flex flex-wrap gap-3">
             <Link href="/dashboard/wallets/switch">
-              <Button variant="secondary">Change provider</Button>
+              <Button variant="secondary">Set default / Connect provider</Button>
             </Link>
+          </div>
+
+          <div className="space-y-2 rounded-xl border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.03)] p-3">
+            <p className="text-xs font-medium text-[rgba(28,28,29,0.8)]">Connected providers</p>
+            {configs.length === 0 ? (
+              <p className="text-xs text-[rgba(28,28,29,0.64)]">No providers connected yet.</p>
+            ) : (
+              <div className="grid gap-2">
+                {configs.map((config) => (
+                  <div
+                    key={config.id}
+                    className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[rgba(28,28,29,0.1)] px-2 py-1.5"
+                  >
+                    <span className="font-medium text-[#1c1c1d]">
+                      {formatProviderName(config.provider)}
+                    </span>
+                    <div className="flex items-center gap-2">
+                      {config.isDefault ? (
+                        <span className="rounded-full bg-[rgba(28,28,29,0.12)] px-2 py-0.5 text-[11px] font-medium text-[#1c1c1d]">
+                          Default
+                        </span>
+                      ) : null}
+                      <span className="font-mono text-[11px] text-[rgba(28,28,29,0.72)]">
+                        {config.defaultWalletId ?? "No default wallet"}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           <div className="rounded-xl border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.04)] px-3 py-2 text-xs text-[rgba(28,28,29,0.64)]">
@@ -240,7 +298,7 @@ async function WalletsSection({
     return null;
   }
 
-  const { config, wallets } = linkedData;
+  const { defaultConfig, wallets } = linkedData;
 
   return (
     <SectionEntry delay={0.08}>
@@ -258,6 +316,7 @@ async function WalletsSection({
                 <TableHeader>
                   <TableRow>
                     <TableHead>Label</TableHead>
+                    <TableHead>Provider</TableHead>
                     <TableHead>Purpose</TableHead>
                     <TableHead>Public key</TableHead>
                     <TableHead>Wallet id</TableHead>
@@ -266,10 +325,23 @@ async function WalletsSection({
                 </TableHeader>
                 <TableBody>
                   {wallets.map((w) => {
-                    const isDefault = config?.defaultWalletId === w.walletId;
+                    const provider = w.provider ?? defaultConfig?.provider ?? "privy";
+                    const isDefaultProvider = w.isDefaultProvider === true;
+                    const isDefaultWallet =
+                      isDefaultProvider && defaultConfig?.defaultWalletId === w.walletId;
                     return (
                       <TableRow key={w.id}>
                         <TableCell className="font-medium">{w.label ?? "Untitled"}</TableCell>
+                        <TableCell className="text-[rgba(28,28,29,0.72)]">
+                          <div className="inline-flex items-center gap-2">
+                            <span>{formatProviderName(provider)}</span>
+                            {isDefaultProvider ? (
+                              <span className="rounded-full bg-[rgba(28,28,29,0.12)] px-2 py-0.5 text-[11px] font-medium text-[#1c1c1d]">
+                                Default provider
+                              </span>
+                            ) : null}
+                          </div>
+                        </TableCell>
                         <TableCell className="text-[rgba(28,28,29,0.72)]">
                           {w.purpose ?? "-"}
                         </TableCell>
@@ -284,9 +356,10 @@ async function WalletsSection({
                         </TableCell>
                         <TableCell className="text-right">
                           <div className="inline-flex items-center justify-end gap-2">
-                            {!isDefault ? (
+                            {isDefaultProvider && !isDefaultWallet ? (
                               <form action={setDefaultCustodyWallet}>
                                 <input type="hidden" name="walletId" value={w.walletId} />
+                                <input type="hidden" name="provider" value={provider} />
                                 <Button type="submit" size="sm" variant="secondary">
                                   Set
                                 </Button>
@@ -338,29 +411,37 @@ export default async function CustodyPage() {
   const pageContainerClassName = "w-full max-w-5xl flex flex-col gap-6";
   const apiClient = await createSdpApiClient();
   const onboardingPromise = apiClient.fetch<{ linked: boolean }>("/v1/onboarding/status");
-  const configResultPromise = settle(getCustodyConfig(apiClient.request));
-  const walletsResultPromise = settle(apiClient.fetch<{ wallets: CustodyWallet[] }>("/v1/wallets"));
+  const configsResultPromise = settle(getCustodyConfigs(apiClient.request));
+  const walletsResultPromise = settle(
+    apiClient.fetch<{ wallets: CustodyWallet[] }>("/v1/wallets?includeAllProviders=true")
+  );
   const linkedDataPromise: Promise<LinkedCustodyData | null> = onboardingPromise.then(
     async (onboarding) => {
       if (!onboarding.linked) {
         return null;
       }
 
-      const [configResult, walletsResult] = await Promise.all([
-        configResultPromise,
+      const [configsResult, walletsResult] = await Promise.all([
+        configsResultPromise,
         walletsResultPromise,
       ]);
 
-      if (!configResult.ok) {
-        throw configResult.error;
+      if (!configsResult.ok) {
+        throw configsResult.error;
       }
 
       if (!walletsResult.ok) {
         throw walletsResult.error;
       }
 
+      const defaultConfig =
+        configsResult.value.configs.find(
+          (config) => config.id === configsResult.value.defaultConfigId
+        ) ?? null;
+
       return {
-        config: configResult.value,
+        defaultConfig,
+        configs: configsResult.value.configs,
         wallets: walletsResult.value.wallets,
       };
     }

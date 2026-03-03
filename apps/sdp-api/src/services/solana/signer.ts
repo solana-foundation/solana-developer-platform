@@ -13,7 +13,6 @@
  * Resolution order for createOrgSigner:
  * 1. Project-specific config (if projectId provided)
  * 2. Organization-level config
- * 3. Environment fallback (CUSTODY_PRIVATE_KEY)
  */
 
 import {
@@ -26,7 +25,6 @@ import {
   createSigningAdapterFromEnv,
 } from "@/services/adapters";
 import { createSigningService } from "@/services/domain/signing.service";
-import { SigningError } from "@/services/ports";
 import type { Env } from "@/types/env";
 import { getBase58Codec } from "@solana/codecs";
 import {
@@ -112,16 +110,14 @@ export async function createSigner(env: Env): Promise<TransactionSigner> {
 }
 
 /**
- * Create a transaction signer for an organization with 3-tier resolution.
+ * Create a transaction signer for an organization with scope default resolution.
  *
  * Resolution order:
- * 1. Project-specific config (custody_configs with project_id)
- * 2. Organization-level config (custody_configs with project_id = NULL)
- * 3. Environment fallback (CUSTODY_PRIVATE_KEY / SIGNING_PROVIDER)
+ * 1. Project default config (if projectId provided)
+ * 2. Organization default config
  *
  * This is the recommended signer factory for production use. It enables
- * per-organization signing keys while maintaining backward compatibility
- * with env-based signing for orgs that haven't configured custody.
+ * per-organization signing keys with explicit DB-backed provider selection.
  *
  * @param env - Cloudflare Worker environment bindings
  * @param orgId - Organization ID from auth context
@@ -135,22 +131,7 @@ export async function createOrgSigner(
   walletId?: string | null
 ): Promise<TransactionSigner> {
   const signingService = createSigningService(env);
-
-  try {
-    // getTransactionSigner handles 3-tier resolution internally
-    return await signingService.getTransactionSigner(
-      orgId,
-      projectId ?? undefined,
-      walletId ?? undefined
-    );
-  } catch (error) {
-    // Keep backward compatibility only for legacy provider configuration issues.
-    // Do not mask wallet binding failures or other explicit request errors.
-    if (error instanceof SigningError && error.code === "PROVIDER_NOT_CONFIGURED" && !walletId) {
-      return createSigner(env);
-    }
-    throw error;
-  }
+  return signingService.getTransactionSigner(orgId, projectId ?? undefined, walletId ?? undefined);
 }
 
 /**

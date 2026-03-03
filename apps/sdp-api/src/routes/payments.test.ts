@@ -191,6 +191,11 @@ async function seedAuthAndWallet(): Promise<void> {
       "active"
     ),
     env.DB.prepare(
+      `INSERT INTO custody_scope_defaults
+           (id, organization_id, project_id, default_custody_config_id)
+         VALUES (?, ?, ?, ?)`
+    ).bind(`csd_${TEST_CONFIG_ID}`, TEST_ORG.id, null, TEST_CONFIG_ID),
+    env.DB.prepare(
       `INSERT INTO custody_wallets
            (id, custody_config_id, wallet_id, public_key, label, purpose, status)
          VALUES (?, ?, ?, ?, ?, ?, ?)`

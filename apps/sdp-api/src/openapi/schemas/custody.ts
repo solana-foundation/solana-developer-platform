@@ -26,9 +26,18 @@ export const signerCheckRequestSchema = signerCheckSchemaBase.openapi({
     "Optional memo payload for signer check. Signing wallet is resolved from the API key binding.",
 });
 
+export const orgCustodyProviderSchema = z
+  .enum(["local", "fireblocks", "privy", "coinbase_cdp", "para", "turnkey"])
+  .openapi({ description: "Wallet signing provider.", example: "privy" });
+
 export const createCustodyWalletRequestSchema = createWalletSchemaBase
   .extend({
     projectId: projectIdParamSchema.optional(),
+    provider: orgCustodyProviderSchema.optional().openapi({
+      description:
+        "Optional provider target. Defaults to the currently resolved default provider for the scope.",
+      example: "privy",
+    }),
     label: createWalletSchemaBase.shape.label.openapi({
       description: "Optional label for the new wallet.",
       example: "Mint authority wallet",
@@ -47,6 +56,11 @@ export const createCustodyWalletRequestSchema = createWalletSchemaBase
 export const setDefaultWalletRequestSchema = setDefaultWalletSchemaBase
   .extend({
     projectId: projectIdParamSchema.optional(),
+    provider: orgCustodyProviderSchema.optional().openapi({
+      description:
+        "Optional provider target. Defaults to the currently resolved default provider for the scope.",
+      example: "privy",
+    }),
     walletId: walletIdParamSchema.openapi({
       description: "Wallet ID to set as default for the active wallet signing config.",
       example: "privy_wallet_123",
@@ -70,13 +84,18 @@ export const initializeSigningResponseSchema = z
   })
   .openapi({ description: "Wallet signing initialization result." });
 
-export const orgCustodyProviderSchema = z
-  .enum(["local", "fireblocks", "privy", "coinbase_cdp", "para", "turnkey"])
-  .openapi({ description: "Wallet signing provider.", example: "privy" });
-
 export const custodyWalletSchema = z
   .object({
     id: z.string().openapi({ description: "Wallet record ID.", example: "cw_example" }),
+    custodyConfigId: z.string().optional().openapi({
+      description: "Owning custody configuration ID.",
+      example: "cfg_example",
+    }),
+    provider: orgCustodyProviderSchema.optional(),
+    isDefaultProvider: z.boolean().optional().openapi({
+      description: "Whether this wallet belongs to the current default provider config.",
+      example: true,
+    }),
     walletId: walletIdParamSchema.openapi({
       description: "Provider wallet ID.",
       example: "privy_wallet_123",
@@ -110,7 +129,7 @@ export const custodyWalletsResponseSchema = z
   })
   .openapi({ description: "Wallets list response payload." });
 
-export const orgCustodyConfigSchema = z
+const orgCustodyConfigBaseSchema = z
   .object({
     id: z.string().openapi({ description: "Wallet signing config ID.", example: "cfg_example" }),
     organizationId: z.string().openapi({
@@ -132,7 +151,9 @@ export const orgCustodyConfigSchema = z
       example: "active",
     }),
     createdAt: isoDateTimeSchema,
-  })
+  });
+
+export const orgCustodyConfigSchema = orgCustodyConfigBaseSchema
   .openapi({ description: "Wallet signing configuration details." });
 
 export const custodyConfigResponseSchema = z
@@ -140,6 +161,51 @@ export const custodyConfigResponseSchema = z
     config: orgCustodyConfigSchema,
   })
   .openapi({ description: "Wallet signing configuration response payload." });
+
+export const custodyConfigsResponseSchema = z
+  .object({
+    configs: z
+      .array(
+        orgCustodyConfigBaseSchema.extend({
+          isDefault: z.boolean().openapi({
+            description: "Whether this configuration is currently the default provider for the scope.",
+            example: true,
+          }),
+        })
+      )
+      .openapi({ description: "Active wallet signing configurations for the requested scope." }),
+    defaultConfigId: z.string().nullable().openapi({
+      description: "Resolved default custody configuration ID for the requested scope.",
+      example: "cfg_example",
+    }),
+  })
+  .openapi({ description: "Wallet signing configurations response payload." });
+
+export const switchProviderOptionsResponseSchema = z
+  .object({
+    providers: z.array(
+      z.object({
+        provider: orgCustodyProviderSchema,
+        hasReusableWallet: z.boolean().openapi({
+          description: "Whether an existing wallet can be reused for this provider.",
+          example: true,
+        }),
+        needsWalletLabel: z.boolean().openapi({
+          description: "Whether the switch flow should prompt for a wallet label.",
+          example: false,
+        }),
+        isActive: z.boolean().openapi({
+          description: "Whether this provider is currently active for the requested scope.",
+          example: true,
+        }),
+        isDefault: z.boolean().openapi({
+          description: "Whether this provider is the current default for the requested scope.",
+          example: false,
+        }),
+      })
+    ),
+  })
+  .openapi({ description: "Provider switch options with activity/default metadata." });
 
 export const setDefaultWalletResponseSchema = z
   .object({
