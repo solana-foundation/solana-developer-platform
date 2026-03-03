@@ -585,6 +585,7 @@ export const custodyWallets = sqliteTable(
     purpose: text("purpose"),
     status: text("status").notNull().default("active"),
     createdAt: text("created_at").notNull().default(sql`(STRFTIME('%Y-%m-%dT%H:%M:%fZ','now'))`),
+    updatedAt: text("updated_at").notNull().default(sql`(STRFTIME('%Y-%m-%dT%H:%M:%fZ','now'))`),
   },
   (table) => ({
     configIdx: index("idx_custody_wallets_config").on(table.custodyConfigId),
@@ -611,10 +612,12 @@ export const custodyScopeDefaults = sqliteTable(
     updatedAt: text("updated_at").notNull().default(sql`(STRFTIME('%Y-%m-%dT%H:%M:%fZ','now'))`),
   },
   (table) => ({
-    orgProjectUnique: uniqueIndex("idx_custody_scope_defaults_org_project").on(
-      table.organizationId,
-      table.projectId
-    ),
+    orgProjectNotNullUnique: uniqueIndex("idx_custody_scope_defaults_org_project_not_null")
+      .on(table.organizationId, table.projectId)
+      .where(sql`${table.projectId} IS NOT NULL`),
+    orgNullProjectUnique: uniqueIndex("idx_custody_scope_defaults_org_null_project")
+      .on(table.organizationId)
+      .where(sql`${table.projectId} IS NULL`),
     defaultConfigIdx: index("idx_custody_scope_defaults_default_config").on(
       table.defaultCustodyConfigId
     ),

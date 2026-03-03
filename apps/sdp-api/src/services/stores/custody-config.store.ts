@@ -70,6 +70,7 @@ interface CustodyWalletRow {
   purpose: string | null;
   status: string;
   created_at: string;
+  updated_at: string | null;
 }
 
 interface SigningRequestRow {
@@ -388,8 +389,17 @@ export class CustodyConfigStore implements SigningConfigStore {
 
     await this.db
       .prepare(
-        `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, label, purpose, status)
-         VALUES (?, ?, ?, ?, ?, ?, 'active')`
+        `INSERT INTO custody_wallets (
+           id,
+           custody_config_id,
+           wallet_id,
+           public_key,
+           label,
+           purpose,
+           status,
+           updated_at
+         )
+         VALUES (?, ?, ?, ?, ?, ?, 'active', STRFTIME('%Y-%m-%dT%H:%M:%fZ','now'))`
       )
       .bind(
         id,
@@ -446,7 +456,7 @@ export class CustodyConfigStore implements SigningConfigStore {
     await this.db
       .prepare(
         `UPDATE custody_wallets
-         SET status = 'inactive'
+         SET status = 'inactive', updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ','now')
          WHERE id = ?`
       )
       .bind(existing.id)
@@ -464,7 +474,7 @@ export class CustodyConfigStore implements SigningConfigStore {
     const result = await this.db
       .prepare(
         `UPDATE custody_wallets
-         SET status = 'inactive'
+         SET status = 'inactive', updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ','now')
          WHERE id = (
            SELECT id
            FROM custody_wallets
@@ -509,7 +519,7 @@ export class CustodyConfigStore implements SigningConfigStore {
     await this.db
       .prepare(
         `UPDATE custody_wallets
-         SET status = 'active'
+         SET status = 'active', updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ','now')
          WHERE custody_config_id = ? AND wallet_id = ? AND status = 'inactive'`
       )
       .bind(configId, walletId)

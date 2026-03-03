@@ -394,6 +394,7 @@ export async function seedTestDatabase(env: Env): Promise<void> {
         purpose TEXT,
         status TEXT NOT NULL DEFAULT 'active',
         created_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ','now')),
+        updated_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ','now')),
         FOREIGN KEY (custody_config_id) REFERENCES custody_configs(id) ON DELETE CASCADE,
         UNIQUE(custody_config_id, wallet_id)
       )
