@@ -406,4 +406,60 @@ describe("Custody multi-provider routes", () => {
 
     expect(defaultPointer?.default_custody_config_id).toBe(PRIVY_CONFIG_ID);
   });
+
+  it("returns 404 when creating a wallet for an uninitialized provider", async () => {
+    const res = await app.request(
+      "/v1/wallets",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          provider: "coinbase_cdp",
+          label: "Missing provider wallet",
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as {
+      error: {
+        code: string;
+        message: string;
+      };
+    };
+    expect(body.error.code).toBe("NOT_FOUND");
+    expect(body.error.message).toContain("Custody not initialized");
+  });
+
+  it("returns 404 when deleting a wallet for an uninitialized provider", async () => {
+    const res = await app.request(
+      "/v1/wallets",
+      {
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          provider: "coinbase_cdp",
+          walletId: "cdp_wallet_missing",
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as {
+      error: {
+        code: string;
+        message: string;
+      };
+    };
+    expect(body.error.code).toBe("NOT_FOUND");
+    expect(body.error.message).toContain("Custody not initialized");
+  });
 });

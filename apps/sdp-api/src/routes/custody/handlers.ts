@@ -590,7 +590,7 @@ export const createWallet = async (c: AppContext) => {
   } catch (error) {
     if (error instanceof SigningError) {
       if (error.code === "NOT_FOUND") {
-        throw new AppError("CONFLICT", error.message);
+        throw new AppError("NOT_FOUND", error.message);
       }
       throw new AppError("BAD_REQUEST", error.message);
     }
@@ -646,7 +646,7 @@ export const deleteWallet = async (c: AppContext) => {
   } catch (error) {
     if (error instanceof SigningError) {
       if (error.code === "NOT_FOUND") {
-        throw new AppError("CONFLICT", error.message);
+        throw new AppError("NOT_FOUND", error.message);
       }
       if (error.code === "WALLET_NOT_FOUND") {
         throw new AppError("NOT_FOUND", error.message);

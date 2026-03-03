@@ -1,6 +1,13 @@
 export const CUSTODY_FEATURES = ["Issuance", "Transfers", "Compliance"] as const;
 
-export type KnownCustodyProvider = "privy" | "fireblocks" | "coinbase_cdp" | "para" | "turnkey";
+export type KnownCustodyProvider =
+  | "privy"
+  | "fireblocks"
+  | "coinbase_cdp"
+  | "para"
+  | "turnkey"
+  | "dfns"
+  | "anchorage";
 
 export interface CustodyProviderCatalogEntry {
   id: KnownCustodyProvider;
@@ -38,6 +45,18 @@ export const CUSTODY_PROVIDER_CATALOG: CustodyProviderCatalogEntry[] = [
     id: "turnkey",
     label: "Turnkey",
     description: "Policy-based key custody for production signing workloads.",
+    supportsAdditionalWallets: true,
+  },
+  {
+    id: "dfns",
+    label: "DFNS",
+    description: "MPC wallet orchestration with secure API-driven signing.",
+    supportsAdditionalWallets: true,
+  },
+  {
+    id: "anchorage",
+    label: "Anchorage",
+    description: "Institutional custody with wallet lifecycle management.",
     supportsAdditionalWallets: true,
   },
 ];

@@ -17,6 +17,22 @@ interface WalletConfigsResponse {
   }>;
 }
 
+function formatProviderHint(providerLabels: string[]): string {
+  if (providerLabels.length === 0) {
+    return "wallet providers";
+  }
+  if (providerLabels.length === 1) {
+    return providerLabels[0]!;
+  }
+  if (providerLabels.length === 2) {
+    return `${providerLabels[0]} or ${providerLabels[1]}`;
+  }
+
+  const head = providerLabels.slice(0, -1).join(", ");
+  const tail = providerLabels[providerLabels.length - 1];
+  return `${head}, or ${tail}`;
+}
+
 export async function GET() {
   try {
     const apiClient = await createSdpApiClient();
@@ -58,13 +74,16 @@ export async function GET() {
     const walletProvisioningProviders = CUSTODY_PROVIDER_CATALOG.filter(
       (provider) => provider.supportsAdditionalWallets && connectedProviderSet.has(provider.id)
     ).map((provider) => provider.id);
+    const additionalWalletProviderLabels = CUSTODY_PROVIDER_CATALOG.filter(
+      (provider) => provider.supportsAdditionalWallets
+    ).map((provider) => provider.label);
 
     const custodyEnabled = connectedProviderSet.size > 0;
     const walletProvisioningEnabled = walletProvisioningProviders.length > 0;
     const walletProvisioningReason = walletProvisioningEnabled
       ? ""
       : custodyEnabled
-        ? "Connect Privy, Coinbase CDP, Para, or Turnkey to create additional wallets."
+        ? `Connect ${formatProviderHint(additionalWalletProviderLabels)} to create additional wallets.`
         : "Enable wallets first in the custody providers section.";
 
     return NextResponse.json({

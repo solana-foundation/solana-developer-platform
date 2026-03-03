@@ -96,7 +96,9 @@ export async function initializeCustody(formData: FormData) {
     | "fireblocks"
     | "coinbase_cdp"
     | "para"
-    | "turnkey";
+    | "turnkey"
+    | "dfns"
+    | "anchorage";
   const walletLabel = getOptionalString(formData, "walletLabel");
   const apiBaseUrl = getOptionalString(formData, "apiBaseUrl");
   const fireblocksApiKey = getOptionalString(formData, "apiKey");
@@ -159,6 +161,8 @@ export async function createCustodyWallet(formData: FormData) {
     | "coinbase_cdp"
     | "para"
     | "turnkey"
+    | "dfns"
+    | "anchorage"
     | undefined;
   const label = getOptionalString(formData, "label");
   const purpose = getOptionalString(formData, "purpose") as

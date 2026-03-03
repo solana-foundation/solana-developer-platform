@@ -111,7 +111,7 @@ async function anchorageRequest<T>(params: AnchorageRequestParams): Promise<T> {
       const errorText = await readErrorResponseText(response);
       throw new SigningError(
         `Anchorage API error: ${response.status} - ${errorText}`,
-        "PROVIDER_NOT_CONFIGURED"
+        "NETWORK_ERROR"
       );
     }
 
