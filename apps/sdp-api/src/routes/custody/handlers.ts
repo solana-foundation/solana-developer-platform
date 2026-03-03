@@ -454,12 +454,15 @@ export const switchSigning = async (c: AppContext) => {
         result.configId
       );
 
+      const wasReactivated =
+        existingScopeConfig?.status === "inactive" && existingScopeConfig.id === result.configId;
+
       await auditService.log(c, {
-        action: existingScopeConfig ? "update" : "create",
+        action: wasReactivated ? "update" : "create",
         resourceType: "custody_config",
         resourceId: result.configId,
         metadata: {
-          event: existingScopeConfig ? "provider_reactivated" : "provider_connected",
+          event: wasReactivated ? "provider_reactivated" : "provider_connected",
           provider: targetProvider,
           projectId: projectId ?? null,
         },

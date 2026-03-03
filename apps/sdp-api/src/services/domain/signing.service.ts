@@ -1243,7 +1243,7 @@ export class SigningService {
         try {
           provisioned = await provisionParaWallet(this.env, {
             orgId,
-            projectId: config.projectId ?? undefined,
+            projectId,
             orgSlug: orgId,
             apiBaseUrl: parsed.apiBaseUrl ?? this.env.PARA_API_BASE_URL,
           });

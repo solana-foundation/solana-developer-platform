@@ -14,7 +14,7 @@ import type {
   SigningRequestStore,
 } from "@/services/domain/signing.service";
 import { type EncryptionService, createEncryptionService } from "@/services/encryption.service";
-import type { SignStatus } from "@/services/ports";
+import { type SignStatus, SigningError } from "@/services/ports";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Types
@@ -247,7 +247,10 @@ export class CustodyConfigStore implements SigningConfigStore {
       .first<{ id: string }>();
 
     if (!matchingConfig) {
-      throw new Error("Default config must be active and match the requested scope");
+      throw new SigningError(
+        "Default config must be active and match the requested scope",
+        "NOT_FOUND"
+      );
     }
 
     const scopeDefault = await this.getScopeDefaultRow(orgId, normalizedProjectId);
@@ -507,7 +510,7 @@ export class CustodyConfigStore implements SigningConfigStore {
       .prepare(
         `UPDATE custody_wallets
          SET status = 'active'
-         WHERE custody_config_id = ? AND wallet_id = ?`
+         WHERE custody_config_id = ? AND wallet_id = ? AND status = 'inactive'`
       )
       .bind(configId, walletId)
       .run();
