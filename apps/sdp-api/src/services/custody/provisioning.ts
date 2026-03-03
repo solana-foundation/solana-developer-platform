@@ -31,6 +31,13 @@ import {
   validateParaWallet,
   waitForParaWalletReady,
 } from "./provisioning.para";
+export {
+  deleteAnchorageWallet,
+  provisionAnchorageWallet,
+  type DeleteAnchorageOptions,
+  type ProvisionAnchorageOptions,
+  type ProvisionAnchorageResult,
+} from "./provisioning.anchorage";
 
 const DEFAULT_FIREBLOCKS_API_BASE_URL = "https://api.fireblocks.io";
 const DEFAULT_PRIVY_API_BASE_URL = "https://api.privy.io/v1";

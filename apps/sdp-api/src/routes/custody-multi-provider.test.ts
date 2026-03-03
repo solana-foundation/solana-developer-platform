@@ -40,6 +40,7 @@ const TEST_CACHED_API_KEY: CachedApiKey = {
 
 const PRIVY_CONFIG_ID = "cust_cfg_privy_multi";
 const PARA_CONFIG_ID = "cust_cfg_para_multi";
+const DFNS_CONFIG_ID = "cust_cfg_dfns_legacy";
 
 async function seedAuthAndConfigs(): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
@@ -295,6 +296,65 @@ describe("Custody multi-provider routes", () => {
         { provider: "privy", isDefault: true },
       ])
     );
+  });
+
+  it("returns config for legacy default providers without adapter resolution", async () => {
+    await env.DB.batch([
+      env.DB.prepare(
+        `INSERT INTO custody_configs
+             (id, organization_id, project_id, provider, config_encrypted, encryption_version, default_wallet_id, status)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      ).bind(
+        DFNS_CONFIG_ID,
+        TEST_ORG.id,
+        null,
+        "dfns",
+        "legacy-config",
+        "sdp-custody-encryption-v1",
+        "dfns_wallet_a",
+        "active"
+      ),
+      env.DB.prepare(
+        `INSERT INTO custody_wallets
+             (id, custody_config_id, wallet_id, public_key, label, purpose, status)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`
+      ).bind(
+        "cwlt_dfns_a",
+        DFNS_CONFIG_ID,
+        "dfns_wallet_a",
+        "DfnsPublicKeyA1111111111111111111111111111",
+        "Dfns Root A",
+        "root",
+        "active"
+      ),
+      env.DB.prepare(
+        `UPDATE custody_scope_defaults
+           SET default_custody_config_id = ?, updated_at = datetime('now')
+           WHERE organization_id = ? AND project_id IS NULL`
+      ).bind(DFNS_CONFIG_ID, TEST_ORG.id),
+    ]);
+
+    const res = await app.request(
+      "/v1/wallets/config",
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+      },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      data: {
+        config: { id: string; provider: string; publicKey: string };
+      };
+    };
+
+    expect(body.data.config.id).toBe(DFNS_CONFIG_ID);
+    expect(body.data.config.provider).toBe("dfns");
+    expect(body.data.config.publicKey).toBe("DfnsPublicKeyA1111111111111111111111111111");
   });
 
   it("sets default wallet for an explicitly targeted provider", async () => {

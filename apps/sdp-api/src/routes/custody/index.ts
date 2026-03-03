@@ -9,6 +9,7 @@ import type { Env } from "@/types/env";
 import { Hono } from "hono";
 import {
   createWallet,
+  deleteWallet,
   getConfig,
   getConfigs,
   getPublicKey,
@@ -29,6 +30,7 @@ wallets.use("*", unifiedAuthMiddleware({ allowClerk: true, allowSession: true })
 wallets.post("/initialize", requirePermissions("custody:admin"), initializeSigning);
 wallets.post("/switch", requirePermissions("custody:admin"), switchSigning);
 wallets.post("/", requirePermissions("custody:admin"), createWallet);
+wallets.delete("/", requirePermissions("custody:admin"), deleteWallet);
 wallets.post("/default-wallet", requirePermissions("custody:admin"), setDefaultWallet);
 wallets.post("/signer-check", requirePermissions("wallets:write"), signerCheck);
 

@@ -15,16 +15,9 @@
  * 2. Organization-level config
  */
 
-import {
-  KeychainCoinbaseAdapter,
-  KeychainFireblocksAdapter,
-  KeychainMemoryAdapter,
-  KeychainParaAdapter,
-  KeychainPrivyAdapter,
-  KeychainTurnkeyAdapter,
-  createSigningAdapterFromEnv,
-} from "@/services/adapters";
+import { createSigningAdapterFromEnv } from "@/services/adapters";
 import { createSigningService } from "@/services/domain/signing.service";
+import { SigningError, isFullSigningPort } from "@/services/ports";
 import type { Env } from "@/types/env";
 import { getBase58Codec } from "@solana/codecs";
 import {
@@ -70,6 +63,8 @@ export async function createSignerFromBase58(privateKeyBase58: string): Promise<
  * - "coinbase_cdp": Uses Coinbase CDP via KeychainCoinbaseAdapter
  * - "para": Uses Para via KeychainParaAdapter
  * - "turnkey": Uses Turnkey via KeychainTurnkeyAdapter
+ * - "dfns": Uses DFNS via KeychainDfnsAdapter
+ * - "anchorage": Not supported for signing (wallet lifecycle only)
  *
  * The returned signer is compatible with @solana/kit signing utilities:
  * - signTransactionMessageWithSigners()
@@ -81,32 +76,14 @@ export async function createSignerFromBase58(privateKeyBase58: string): Promise<
 export async function createSigner(env: Env): Promise<TransactionSigner> {
   const adapter = await createSigningAdapterFromEnv(env);
 
-  if (adapter instanceof KeychainMemoryAdapter) {
-    return adapter.getTransactionSigner();
+  if (!isFullSigningPort(adapter)) {
+    throw new SigningError(
+      `Provider does not support transaction signing: ${adapter.providerId}`,
+      "INVALID_REQUEST"
+    );
   }
 
-  if (adapter instanceof KeychainFireblocksAdapter) {
-    return adapter.getTransactionSigner();
-  }
-
-  if (adapter instanceof KeychainPrivyAdapter) {
-    return adapter.getTransactionSigner();
-  }
-
-  if (adapter instanceof KeychainCoinbaseAdapter) {
-    return adapter.getTransactionSigner();
-  }
-
-  if (adapter instanceof KeychainParaAdapter) {
-    return adapter.getTransactionSigner();
-  }
-
-  if (adapter instanceof KeychainTurnkeyAdapter) {
-    return adapter.getTransactionSigner();
-  }
-
-  // Fallback for unknown adapter types
-  throw new Error(`Unsupported signing provider: ${adapter.providerId}`);
+  return adapter.getTransactionSigner();
 }
 
 /**

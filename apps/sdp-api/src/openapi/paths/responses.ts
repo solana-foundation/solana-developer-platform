@@ -8,11 +8,12 @@ import {
   apiKeyDetailSchema,
   apiKeyResponseSchema,
   createOrganizationResponseSchema,
-    currentUserResponseSchema,
-    custodyConfigResponseSchema,
-    custodyConfigsResponseSchema,
-    custodyWalletResponseSchema,
-    custodyWalletsResponseSchema,
+  currentUserResponseSchema,
+  custodyConfigResponseSchema,
+  custodyConfigsResponseSchema,
+  custodyWalletResponseSchema,
+  custodyWalletsResponseSchema,
+  deleteWalletResponseSchema,
   executeBurnResponseSchema,
   executeForceBurnResponseSchema,
   executeMintResponseSchema,
@@ -48,11 +49,11 @@ import {
   projectResponseSchema,
   revokeApiKeyResponseSchema,
   rotateApiKeyResponseSchema,
-    rpcProvidersResponseSchema,
-    rpcRelayResponseSchema,
-    signerCheckResponseSchema,
-    switchProviderOptionsResponseSchema,
+  rpcProvidersResponseSchema,
+  rpcRelayResponseSchema,
+  signerCheckResponseSchema,
   successResponseSchema,
+  switchProviderOptionsResponseSchema,
   tokenAllowlistEntrySchema,
   tokenAllowlistResponseSchema,
   tokenResponseSchema,
@@ -120,8 +121,11 @@ export const custodyConfigResponse = successResponseSchema(custodyConfigResponse
 export const custodyConfigsResponse = successResponseSchema(custodyConfigsResponseSchema);
 export const custodyWalletResponse = successResponseSchema(custodyWalletResponseSchema);
 export const custodyWalletsResponse = successResponseSchema(custodyWalletsResponseSchema);
+export const custodyDeleteWalletResponse = successResponseSchema(deleteWalletResponseSchema);
 export const custodySignerCheckResponse = successResponseSchema(signerCheckResponseSchema);
-export const custodySwitchOptionsResponse = successResponseSchema(switchProviderOptionsResponseSchema);
+export const custodySwitchOptionsResponse = successResponseSchema(
+  switchProviderOptionsResponseSchema
+);
 export const addressScreeningResponse = successResponseSchema(addressScreeningResponseSchema);
 
 export const allowlistEntriesResponse = successResponseSchema(allowlistEntriesResponseSchema);

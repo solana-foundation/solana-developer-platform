@@ -4,6 +4,7 @@ import { z } from "zod";
 import {
   createCustodyWalletRequestSchema,
   custodyPublicKeyResponseSchema,
+  deleteWalletRequestSchema,
   errorResponseSchema,
   initializeSigningRequestSchema,
   initializeSigningResponseSchema,
@@ -19,6 +20,7 @@ import { errorResponses, jsonContent } from "./helpers";
 import {
   custodyConfigResponse,
   custodyConfigsResponse,
+  custodyDeleteWalletResponse,
   custodySignerCheckResponse,
   custodySwitchOptionsResponse,
   custodyWalletResponse,
@@ -95,6 +97,30 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
         content: jsonContent(custodyWalletResponse),
       },
       ...errorResponses(errorResponseSchema, [400, 401, 403, 409, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "delete",
+    path: "/v1/wallets",
+    tags: ["Wallets"],
+    summary: "Delete wallet",
+    operationId: "deleteWallet",
+    description:
+      "Deletes a wallet from the resolved default signing provider configuration, or from an explicitly targeted provider when that provider supports wallet deletion.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      body: {
+        required: true,
+        content: jsonContent(deleteWalletRequestSchema),
+      },
+    },
+    responses: {
+      200: {
+        description: "Wallet deleted",
+        content: jsonContent(custodyDeleteWalletResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
     },
   });
 

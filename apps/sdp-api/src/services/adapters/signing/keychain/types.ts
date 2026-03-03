@@ -4,6 +4,7 @@
  * Configuration types for Solana Keychain signing backends.
  * These map to the underlying @solana/keychain-* package configs.
  */
+import type { DfnsApiClient } from "@/services/dfns/client";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Fireblocks Configuration
@@ -143,4 +144,24 @@ export interface KeychainTurnkeyConfig {
 
   /** Public key for the default wallet */
   defaultWalletPublicKey?: string;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DFNS Configuration
+// ═══════════════════════════════════════════════════════════════════════════
+
+export interface KeychainDfnsConfig {
+  /** DFNS API client configured with org credentials */
+  client: DfnsApiClient;
+
+  /** Optional delay in ms between concurrent signing requests (default: 0) */
+  requestDelayMs?: number;
+
+  /**
+   * Default wallet identifier. Used when the caller doesn't specify which wallet
+   * to use.
+   *
+   * For DFNS, SDP stores wallet IDs as `dfns_<walletId>` in D1.
+   */
+  defaultWalletId?: string;
 }

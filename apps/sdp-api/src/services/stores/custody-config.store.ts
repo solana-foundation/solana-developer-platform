@@ -224,7 +224,11 @@ export class CustodyConfigStore implements SigningConfigStore {
   /**
    * Set the default config pointer for a scope.
    */
-  async setDefaultConfig(orgId: string, projectId: string | undefined, configId: string): Promise<void> {
+  async setDefaultConfig(
+    orgId: string,
+    projectId: string | undefined,
+    configId: string
+  ): Promise<void> {
     const normalizedProjectId = projectId ?? null;
 
     const matchingConfig = await this.db
@@ -414,6 +418,34 @@ export class CustodyConfigStore implements SigningConfigStore {
       .all<CustodyWalletRow>();
 
     return results.map(this.mapWalletRow);
+  }
+
+  /**
+   * Deactivate a wallet record associated with a custody config.
+   */
+  async deactivateWallet(configId: string, walletId: string): Promise<void> {
+    const existing = await this.db
+      .prepare(
+        `SELECT id
+         FROM custody_wallets
+         WHERE custody_config_id = ? AND wallet_id = ? AND status = 'active'
+         LIMIT 1`
+      )
+      .bind(configId, walletId)
+      .first<{ id: string }>();
+
+    if (!existing) {
+      throw new Error("Wallet not found");
+    }
+
+    await this.db
+      .prepare(
+        `UPDATE custody_wallets
+         SET status = 'inactive'
+         WHERE id = ?`
+      )
+      .bind(existing.id)
+      .run();
   }
 
   /**

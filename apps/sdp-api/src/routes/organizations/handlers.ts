@@ -253,6 +253,19 @@ export const createOrganization = async (c: AppContext) => {
           requestDelayMs: custody.requestDelayMs,
           privateKeyId: provisioned.privateKeyId,
         });
+      } else if (custody.provider === "dfns") {
+        await signingService.initializeDfnsSigning(orgId, undefined, {
+          apiBaseUrl: custody.apiBaseUrl ?? c.env.DFNS_API_BASE_URL,
+          network: custody.network,
+          walletId: custody.walletId,
+          signingKeyId: custody.signingKeyId,
+        });
+      } else if (custody.provider === "anchorage") {
+        await signingService.initializeAnchorageSigning(orgId, undefined, {
+          apiBaseUrl: custody.apiBaseUrl ?? c.env.ANCHORAGE_API_BASE_URL,
+          walletId: custody.walletId,
+          network: custody.network,
+        });
       } else {
         await signingService.initializePrivySigning(orgId, undefined, {
           apiBaseUrl: custody.apiBaseUrl ?? c.env.PRIVY_API_BASE_URL,

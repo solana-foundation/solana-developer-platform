@@ -8,10 +8,6 @@
     "pnpm": ">=10.0.0"
   },
   "pnpm": {
-    "overrides": {
-      "@solana/rpc-spec": "5.0.0",
-      "@solana/kit": "5.0.0"
-    },
     "peerDependencyRules": {
       "allowedVersions": {
         "@solana/kit": "^5.0.0"
@@ -48,5 +44,30 @@
     "@biomejs/biome": "^1.9.0",
     "turbo": "^2.4.0",
     "typescript": "^5.8.0"
+  },
+  "overrides": {
+    "@solana/rpc-spec": "5.0.0",
+    "@solana/kit": "5.0.0"
+  },
+  "workspaces": {
+    "packages": [
+      "apps/*",
+      "packages/*"
+    ],
+    "catalog": {
+      "@solana-program/system": "^0.10.0",
+      "@solana-program/token-2022": "^0.6.1",
+      "@solana/addresses": "^5.0.0",
+      "@solana/codecs": "^5.0.0",
+      "@solana/instructions": "^5.0.0",
+      "@solana/keys": "^5.0.0",
+      "@solana/kit": "^5.0.0",
+      "@solana/mosaic-sdk": "0.1.0",
+      "@solana/programs": "^5.0.0",
+      "@solana/rpc": "^5.0.0",
+      "@solana/signers": "^5.0.0",
+      "@solana/sysvars": "^5.0.0",
+      "@solana/transactions": "^5.0.0"
+    }
   }
 }

@@ -1,7 +1,6 @@
 "use client";
 
 import { CreateApiKeyModal } from "@/app/dashboard/api-keys/create-api-key-modal";
-import { CreateWalletModal } from "@/app/dashboard/custody/create-wallet-modal";
 import { CreateIssuanceTokenModal } from "@/app/dashboard/issuance/create-token-modal";
 import { IssuanceApiKeySelector } from "@/app/dashboard/issuance/issuance-api-key-selector";
 import { DashboardQuickActions } from "@/components/dashboard-quick-actions";
@@ -24,7 +23,7 @@ import {
 import type { LucideIcon } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode } from "react";
 
 type NavItem = {
   label: string;
@@ -75,81 +74,15 @@ type DashboardPageConfig = {
 };
 
 function WalletQuickAction() {
-  const [loading, setLoading] = useState(true);
-  const [disabled, setDisabled] = useState(true);
-  const [disabledReason, setDisabledReason] = useState<string>("Checking wallet setup status...");
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadStatus() {
-      try {
-        const response = await fetch("/api/dashboard/wallets/quick-action-status", {
-          cache: "no-store",
-        });
-
-        if (!response.ok) {
-          throw new Error(`Quick action status failed (${response.status})`);
-        }
-
-        const payload = (await response.json()) as {
-          custodyEnabled?: boolean;
-          walletProvisioningEnabled?: boolean;
-          walletProvisioningReason?: string;
-        };
-
-        if (cancelled) {
-          return;
-        }
-
-        const custodyEnabled = payload.custodyEnabled === true;
-        const walletProvisioningEnabled = payload.walletProvisioningEnabled !== false;
-        const walletProvisioningReason = payload.walletProvisioningReason?.trim();
-
-        if (!custodyEnabled) {
-          setDisabled(true);
-          setDisabledReason("Enable wallets first in the Signing configuration section.");
-          return;
-        }
-
-        if (!walletProvisioningEnabled) {
-          setDisabled(true);
-          setDisabledReason(
-            walletProvisioningReason ||
-              "This provider does not support additional wallet provisioning yet."
-          );
-          return;
-        }
-
-        setDisabled(false);
-        setDisabledReason("");
-      } catch {
-        if (cancelled) {
-          return;
-        }
-
-        // Fall back to enabled if status resolution fails so existing flows remain available.
-        setDisabled(false);
-        setDisabledReason("");
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      }
-    }
-
-    loadStatus();
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
   return (
-    <CreateWalletModal
-      disabled={loading || disabled}
-      disabledReason={loading ? "Checking wallet setup status..." : (disabledReason ?? undefined)}
-    />
+    <Link href="/dashboard/wallets/setup">
+      <button
+        type="button"
+        className="inline-flex h-10 items-center justify-center rounded-md bg-[#1c1c1d] px-4 text-sm font-medium text-white hover:bg-[rgba(28,28,29,0.92)]"
+      >
+        New wallet
+      </button>
+    </Link>
   );
 }
 
@@ -164,10 +97,10 @@ function getDashboardPageConfig(pathname: string): DashboardPageConfig {
     };
   }
   if (pathname === "/dashboard/wallets/setup" || pathname === "/dashboard/custody/setup") {
-    return { title: "Enable wallets", contentWidthClass: "max-w-3xl" };
+    return { title: "Activate provider", contentWidthClass: "max-w-3xl" };
   }
   if (pathname === "/dashboard/wallets/switch" || pathname === "/dashboard/custody/switch") {
-    return { title: "Change provider", contentWidthClass: "max-w-3xl" };
+    return { title: "Activate provider", contentWidthClass: "max-w-3xl" };
   }
   if (pathname === "/dashboard/api-keys") {
     return {

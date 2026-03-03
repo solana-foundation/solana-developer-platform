@@ -136,7 +136,14 @@ export class KeychainMemoryAdapter extends BaseKeychainAdapter {
    * - partiallySignTransactionMessageWithSigners()
    * - addSignersToTransactionMessage()
    */
-  getTransactionSigner(): KeyPairSigner {
+  async getTransactionSigner(
+    _walletId?: string,
+    _walletPublicKey?: Address
+  ): Promise<KeyPairSigner> {
+    return this.keypairSigner;
+  }
+
+  getKeypairSigner(): KeyPairSigner {
     return this.keypairSigner;
   }
 

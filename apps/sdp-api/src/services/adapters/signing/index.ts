@@ -12,14 +12,19 @@
  * - "coinbase_cdp": Coinbase CDP hosted wallets (KeychainCoinbaseAdapter)
  * - "para": Para hosted wallets (KeychainParaAdapter)
  * - "turnkey": Turnkey hosted wallets (KeychainTurnkeyAdapter)
+ * - "dfns": DFNS hosted wallets (KeychainDfnsAdapter)
  */
 
+import type { CustodyProvider } from "@/services/custody/providers";
+import { createDfnsApiClient, normalizeDfnsWalletId } from "@/services/dfns/client";
 import type { SigningPort } from "@/services/ports";
 import { SigningError } from "@/services/ports";
 import type { Env } from "@/types/env";
 import {
   KeychainCoinbaseAdapter,
   type KeychainCoinbaseConfig,
+  KeychainDfnsAdapter,
+  type KeychainDfnsConfig,
   KeychainFireblocksAdapter,
   type KeychainFireblocksConfig,
   KeychainMemoryAdapter,
@@ -36,13 +41,7 @@ import {
 // ═══════════════════════════════════════════════════════════════════════════
 
 /** Supported signing/custody provider types */
-export type SigningProviderType =
-  | "local"
-  | "fireblocks"
-  | "privy"
-  | "coinbase_cdp"
-  | "para"
-  | "turnkey";
+export type SigningProviderType = CustodyProvider;
 
 /**
  * Database record for signing/custody configuration
@@ -70,7 +69,7 @@ export interface SigningConfigRecord {
  * Returns a Promise since KeychainMemoryAdapter initialization is async.
  */
 export async function createSigningAdapterFromEnv(env: Env): Promise<SigningPort> {
-  const provider = (env.SIGNING_PROVIDER ?? "local") as SigningProviderType;
+  const provider = env.SIGNING_PROVIDER ?? "local";
 
   switch (provider) {
     case "fireblocks":
@@ -83,8 +82,20 @@ export async function createSigningAdapterFromEnv(env: Env): Promise<SigningPort
       return createParaAdapterFromEnv(env);
     case "turnkey":
       return createTurnkeyAdapterFromEnv(env);
-    default:
+    case "dfns":
+      return createDfnsAdapterFromEnv(env);
+    case "local":
       return createMemoryAdapterFromEnv(env);
+    case "anchorage":
+      throw new SigningError(
+        "Anchorage does not support transaction signing in SDP",
+        "PROVIDER_NOT_CONFIGURED"
+      );
+    default:
+      throw new SigningError(
+        `Unsupported signing provider: ${provider}`,
+        "PROVIDER_NOT_CONFIGURED"
+      );
   }
 }
 
@@ -122,8 +133,20 @@ export async function createSigningAdapterFromConfig(
       return createParaAdapterFromRecord(record, env);
     case "turnkey":
       return createTurnkeyAdapterFromRecord(record, env);
-    default:
+    case "dfns":
+      return createDfnsAdapterFromRecord(record, env);
+    case "local":
       return createMemoryAdapterFromEnv(env);
+    case "anchorage":
+      throw new SigningError(
+        "Anchorage does not support transaction signing in SDP",
+        "PROVIDER_NOT_CONFIGURED"
+      );
+    default:
+      throw new SigningError(
+        `Unsupported signing provider in custody config: ${record.provider}`,
+        "PROVIDER_NOT_CONFIGURED"
+      );
   }
 }
 
@@ -188,6 +211,12 @@ interface ParaConfigJson {
   provider?: string;
   apiBaseUrl?: string;
   requestDelayMs?: number;
+  walletId?: string;
+}
+
+interface DfnsConfigJson {
+  provider?: string;
+  apiBaseUrl?: string;
   walletId?: string;
 }
 
@@ -307,6 +336,23 @@ function createParaAdapterFromEnv(env: Env): KeychainParaAdapter {
     requestDelayMs,
     defaultWalletId: normalizeParaWalletId(walletId),
   });
+}
+
+async function createDfnsAdapterFromEnv(env: Env): Promise<KeychainDfnsAdapter> {
+  const walletId = env.DFNS_WALLET_ID;
+  if (!walletId) {
+    throw new SigningError(
+      "DFNS environment variables not configured: DFNS_WALLET_ID",
+      "PROVIDER_NOT_CONFIGURED"
+    );
+  }
+
+  const config: KeychainDfnsConfig = {
+    client: await createDfnsApiClient(env),
+    defaultWalletId: normalizeDfnsWalletId(walletId),
+  };
+
+  return new KeychainDfnsAdapter(config);
 }
 
 function createFireblocksAdapterFromRecord(record: SigningConfigRecord): KeychainFireblocksAdapter {
@@ -512,6 +558,41 @@ function createParaAdapterFromRecord(record: SigningConfigRecord, env: Env): Key
   return new KeychainParaAdapter(config);
 }
 
+async function createDfnsAdapterFromRecord(
+  record: SigningConfigRecord,
+  env: Env
+): Promise<KeychainDfnsAdapter> {
+  let parsed: DfnsConfigJson;
+  try {
+    parsed = JSON.parse(record.config) as DfnsConfigJson;
+  } catch {
+    throw new SigningError("Invalid DFNS configuration JSON", "PROVIDER_NOT_CONFIGURED");
+  }
+
+  if (parsed.provider && parsed.provider !== "dfns") {
+    throw new SigningError("Custody configuration provider mismatch", "PROVIDER_NOT_CONFIGURED");
+  }
+
+  const defaultWalletId =
+    record.defaultWalletId ??
+    (parsed.walletId ? normalizeDfnsWalletId(parsed.walletId) : undefined) ??
+    (env.DFNS_WALLET_ID ? normalizeDfnsWalletId(env.DFNS_WALLET_ID) : undefined);
+
+  if (!defaultWalletId) {
+    throw new SigningError(
+      "DFNS config missing default wallet and env is not configured",
+      "PROVIDER_NOT_CONFIGURED"
+    );
+  }
+
+  const config: KeychainDfnsConfig = {
+    client: await createDfnsApiClient(env, { apiBaseUrl: parsed.apiBaseUrl }),
+    defaultWalletId,
+  };
+
+  return new KeychainDfnsAdapter(config);
+}
+
 function parseOptionalRequestDelayMs(
   value?: string,
   options?: { envVarName?: string }
@@ -542,12 +623,14 @@ function normalizeParaWalletId(walletId: string): string {
 export {
   BaseKeychainAdapter,
   KeychainCoinbaseAdapter,
+  KeychainDfnsAdapter,
   KeychainFireblocksAdapter,
   KeychainMemoryAdapter,
   KeychainParaAdapter,
   KeychainPrivyAdapter,
   KeychainTurnkeyAdapter,
   type KeychainCoinbaseConfig,
+  type KeychainDfnsConfig,
   type KeychainFireblocksConfig,
   type KeychainParaConfig,
   type KeychainPrivyConfig,

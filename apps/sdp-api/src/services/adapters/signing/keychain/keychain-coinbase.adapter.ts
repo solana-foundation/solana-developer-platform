@@ -32,7 +32,10 @@ export class KeychainCoinbaseAdapter extends BaseKeychainAdapter {
   /**
    * Get the underlying Coinbase signer for direct use with @solana/kit.
    */
-  async getTransactionSigner(walletId?: string): Promise<CoinbaseCdpSigner> {
+  async getTransactionSigner(
+    walletId?: string,
+    _walletPublicKey?: Address
+  ): Promise<CoinbaseCdpSigner> {
     return this.getCoinbaseSigner(walletId);
   }
 

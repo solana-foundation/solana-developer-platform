@@ -7,6 +7,7 @@
 
 // Signing port - custody provider abstraction
 export type {
+  FullSigningPort,
   SigningPort,
   SignRequest,
   SignResult,
@@ -16,7 +17,7 @@ export type {
   GeneratedKeypair,
   SigningErrorCode,
 } from "./signing.port";
-export { SigningError } from "./signing.port";
+export { SigningError, isFullSigningPort } from "./signing.port";
 
 // Fee payment port - gasless transaction sponsorship
 export type {

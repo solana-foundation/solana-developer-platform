@@ -6,6 +6,7 @@ import { AppError } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import { createFeePaymentAdapter } from "@/services/adapters/fee-payment";
 import { AuditService } from "@/services/audit.service";
+import { CUSTODY_PROVIDERS, type CustodyProvider } from "@/services/custody/providers";
 import { createSigningService } from "@/services/domain/signing.service";
 import { FeePaymentError, SigningError } from "@/services/ports";
 import { resolveRpcTarget } from "@/services/rpc-relay.service";
@@ -30,10 +31,12 @@ import {
   type CustodyConfigsResponse,
   type CustodyWalletResponse,
   type CustodyWalletsResponse,
+  type DeleteWalletResponse,
   type InitializeSigningResponse,
   type SignerCheckResponse,
   type SwitchProviderOptionsResponse,
   createWalletSchema,
+  deleteWalletSchema,
   initializeSigningSchema,
   setDefaultWalletSchema,
   signerCheckSchema,
@@ -46,16 +49,6 @@ type AppContext = Context<{ Bindings: Env }>;
 const MEMO_PROGRAM_ADDRESS = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr" as Address;
 const KORA_MEMO_ALLOWED_PROGRAM_HINT =
   "Add MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr to Kora validation.allowed_programs.";
-
-const CUSTODY_PROVIDERS = [
-  "fireblocks",
-  "privy",
-  "coinbase_cdp",
-  "para",
-  "turnkey",
-  "local",
-] as const;
-type CustodyProvider = (typeof CUSTODY_PROVIDERS)[number];
 
 function isKoraMemoProgramPolicyError(message: string): boolean {
   const normalized = message.toLowerCase();
@@ -135,6 +128,9 @@ async function getPreferredWalletForConfig(
  * a Solana wallet.
  * For "turnkey" provider: Uses platform-managed Turnkey credentials and provisions
  * a Solana private key.
+ * For "dfns" provider: Uses platform-managed DFNS credentials and provisions
+ * a Solana wallet.
+ * For "anchorage" provider: Supports wallet lifecycle (create/delete) without signing.
  *
  * POST /wallets/initialize
  */
@@ -155,68 +151,104 @@ export const initializeSigning = async (c: AppContext) => {
   try {
     let result: { configId: string; publicKey: string; walletId: string };
 
-    if (parsed.data.provider === "local") {
-      result = await signingService.initializeLocalSigning(
-        actor.organizationId,
-        parsed.data.projectId,
-        { walletLabel: parsed.data.walletLabel }
-      );
-    } else if (parsed.data.provider === "fireblocks") {
-      result = await signingService.initializeFireblocksSigning(
-        actor.organizationId,
-        parsed.data.projectId,
-        {
-          apiKey: parsed.data.apiKey,
-          apiSecretPem: parsed.data.apiSecretPem,
-          vaultAccountId: parsed.data.vaultAccountId,
-          assetId: parsed.data.assetId,
-          apiBaseUrl: parsed.data.apiBaseUrl,
-        }
-      );
-    } else if (parsed.data.provider === "privy") {
-      result = await signingService.initializePrivySigning(
-        actor.organizationId,
-        parsed.data.projectId,
-        {
-          apiBaseUrl: parsed.data.apiBaseUrl,
-          requestDelayMs: parsed.data.requestDelayMs,
-          walletLabel: parsed.data.walletLabel,
-        }
-      );
-    } else if (parsed.data.provider === "turnkey") {
-      result = await signingService.initializeTurnkeySigning(
-        actor.organizationId,
-        parsed.data.projectId,
-        {
-          apiBaseUrl: parsed.data.apiBaseUrl,
-          requestDelayMs: parsed.data.requestDelayMs,
-          privateKeyId: parsed.data.privateKeyId,
-          walletLabel: parsed.data.walletLabel,
-        }
-      );
-    } else if (parsed.data.provider === "para") {
-      result = await signingService.initializeParaSigning(
-        actor.organizationId,
-        parsed.data.projectId,
-        {
-          apiBaseUrl: parsed.data.apiBaseUrl,
-          requestDelayMs: parsed.data.requestDelayMs,
-          walletId: parsed.data.walletId,
-          walletLabel: parsed.data.walletLabel,
-        }
-      );
-    } else {
-      result = await signingService.initializeCoinbaseCdpSigning(
-        actor.organizationId,
-        parsed.data.projectId,
-        {
-          apiBaseUrl: parsed.data.apiBaseUrl,
-          network: parsed.data.network,
-          walletAddress: parsed.data.walletAddress,
-          accountPolicy: parsed.data.accountPolicy,
-          walletLabel: parsed.data.walletLabel,
-        }
-      );
+    switch (parsed.data.provider) {
+      case "local":
+        result = await signingService.initializeLocalSigning(
+          actor.organizationId,
+          parsed.data.projectId,
+          {
+            walletLabel: parsed.data.walletLabel,
+          }
+        );
+        break;
+      case "fireblocks":
+        result = await signingService.initializeFireblocksSigning(
+          actor.organizationId,
+          parsed.data.projectId,
+          {
+            apiKey: parsed.data.apiKey,
+            apiSecretPem: parsed.data.apiSecretPem,
+            vaultAccountId: parsed.data.vaultAccountId,
+            assetId: parsed.data.assetId,
+            apiBaseUrl: parsed.data.apiBaseUrl,
+          }
+        );
+        break;
+      case "privy":
+        result = await signingService.initializePrivySigning(
+          actor.organizationId,
+          parsed.data.projectId,
+          {
+            apiBaseUrl: parsed.data.apiBaseUrl,
+            requestDelayMs: parsed.data.requestDelayMs,
+            walletLabel: parsed.data.walletLabel,
+          }
+        );
+        break;
+      case "coinbase_cdp":
+        result = await signingService.initializeCoinbaseCdpSigning(
+          actor.organizationId,
+          parsed.data.projectId,
+          {
+            apiBaseUrl: parsed.data.apiBaseUrl,
+            network: parsed.data.network,
+            walletAddress: parsed.data.walletAddress,
+            accountPolicy: parsed.data.accountPolicy,
+            walletLabel: parsed.data.walletLabel,
+          }
+        );
+        break;
+      case "para":
+        result = await signingService.initializeParaSigning(
+          actor.organizationId,
+          parsed.data.projectId,
+          {
+            apiBaseUrl: parsed.data.apiBaseUrl,
+            requestDelayMs: parsed.data.requestDelayMs,
+            walletId: parsed.data.walletId,
+            walletLabel: parsed.data.walletLabel,
+          }
+        );
+        break;
+      case "turnkey":
+        result = await signingService.initializeTurnkeySigning(
+          actor.organizationId,
+          parsed.data.projectId,
+          {
+            apiBaseUrl: parsed.data.apiBaseUrl,
+            requestDelayMs: parsed.data.requestDelayMs,
+            privateKeyId: parsed.data.privateKeyId,
+            walletLabel: parsed.data.walletLabel,
+          }
+        );
+        break;
+      case "dfns":
+        result = await signingService.initializeDfnsSigning(
+          actor.organizationId,
+          parsed.data.projectId,
+          {
+            apiBaseUrl: parsed.data.apiBaseUrl,
+            network: parsed.data.network,
+            walletId: parsed.data.walletId,
+            signingKeyId: parsed.data.signingKeyId,
+            walletLabel: parsed.data.walletLabel,
+          }
+        );
+        break;
+      case "anchorage":
+        result = await signingService.initializeAnchorageSigning(
+          actor.organizationId,
+          parsed.data.projectId,
+          {
+            apiBaseUrl: parsed.data.apiBaseUrl,
+            walletId: parsed.data.walletId,
+            walletLabel: parsed.data.walletLabel,
+            network: parsed.data.network,
+          }
+        );
+        break;
+      default:
+        throw new AppError("BAD_REQUEST", "Unsupported provider");
     }
 
     const response: InitializeSigningResponse = {
@@ -274,26 +306,33 @@ export const switchSigning = async (c: AppContext) => {
 
   const projectId = parsed.data.projectId;
   const targetProvider = parsed.data.provider;
-  const existingScopeConfig = await c.env.DB
-    .prepare(
-      projectId
-        ? `SELECT id, status, default_wallet_id
+  const existingScopeConfig = await c.env.DB.prepare(
+    projectId
+      ? `SELECT id, status, default_wallet_id
            FROM custody_configs
            WHERE organization_id = ? AND project_id = ? AND provider = ?
            LIMIT 1`
-        : `SELECT id, status, default_wallet_id
+      : `SELECT id, status, default_wallet_id
            FROM custody_configs
            WHERE organization_id = ? AND project_id IS NULL AND provider = ?
            LIMIT 1`
+  )
+    .bind(
+      ...(projectId
+        ? [actor.organizationId, projectId, targetProvider]
+        : [actor.organizationId, targetProvider])
     )
-    .bind(...(projectId ? [actor.organizationId, projectId, targetProvider] : [actor.organizationId, targetProvider]))
     .first<{ id: string; status: "active" | "inactive"; default_wallet_id: string | null }>();
 
   try {
     let result: { configId: string; publicKey: string; walletId: string };
 
     if (existingScopeConfig?.status === "active") {
-      await signingService.setDefaultConfiguration(actor.organizationId, projectId, existingScopeConfig.id);
+      await signingService.setDefaultConfiguration(
+        actor.organizationId,
+        projectId,
+        existingScopeConfig.id
+      );
       const preferredWallet = await getPreferredWalletForConfig(
         c.env.DB,
         existingScopeConfig.id,
@@ -320,56 +359,98 @@ export const switchSigning = async (c: AppContext) => {
         },
       });
     } else {
-      if (targetProvider === "local") {
-        result = await signingService.initializeLocalSigning(actor.organizationId, projectId, {
-          walletLabel: parsed.data.walletLabel,
-        });
-      } else if (targetProvider === "fireblocks") {
-        if (!parsed.data.apiKey || !parsed.data.apiSecretPem || !parsed.data.vaultAccountId) {
-          throw new AppError(
-            "BAD_REQUEST",
-            "Fireblocks requires apiKey, apiSecretPem, and vaultAccountId when connecting a new provider"
-          );
-        }
+      switch (targetProvider) {
+        case "local":
+          result = await signingService.initializeLocalSigning(actor.organizationId, projectId, {
+            walletLabel: parsed.data.walletLabel,
+          });
+          break;
+        case "fireblocks":
+          if (!parsed.data.apiKey || !parsed.data.apiSecretPem || !parsed.data.vaultAccountId) {
+            throw new AppError(
+              "BAD_REQUEST",
+              "Fireblocks requires apiKey, apiSecretPem, and vaultAccountId when connecting a new provider"
+            );
+          }
 
-        result = await signingService.initializeFireblocksSigning(actor.organizationId, projectId, {
-          apiKey: parsed.data.apiKey,
-          apiSecretPem: parsed.data.apiSecretPem,
-          vaultAccountId: parsed.data.vaultAccountId,
-          assetId: parsed.data.assetId,
-          apiBaseUrl: parsed.data.apiBaseUrl,
-        });
-      } else if (targetProvider === "privy") {
-        result = await signingService.initializePrivySigning(actor.organizationId, projectId, {
-          apiBaseUrl: parsed.data.apiBaseUrl,
-          requestDelayMs: parsed.data.requestDelayMs,
-          walletLabel: parsed.data.walletLabel,
-        });
-      } else if (targetProvider === "turnkey") {
-        result = await signingService.initializeTurnkeySigning(actor.organizationId, projectId, {
-          apiBaseUrl: parsed.data.apiBaseUrl,
-          requestDelayMs: parsed.data.requestDelayMs,
-          privateKeyId: parsed.data.privateKeyId,
-          walletLabel: parsed.data.walletLabel,
-        });
-      } else if (targetProvider === "para") {
-        result = await signingService.initializeParaSigning(actor.organizationId, projectId, {
-          apiBaseUrl: parsed.data.apiBaseUrl,
-          requestDelayMs: parsed.data.requestDelayMs,
-          walletId: parsed.data.walletId,
-          walletLabel: parsed.data.walletLabel,
-        });
-      } else {
-        result = await signingService.initializeCoinbaseCdpSigning(actor.organizationId, projectId, {
-          apiBaseUrl: parsed.data.apiBaseUrl,
-          network: parsed.data.network,
-          walletAddress: parsed.data.walletAddress,
-          accountPolicy: parsed.data.accountPolicy,
-          walletLabel: parsed.data.walletLabel,
-        });
+          result = await signingService.initializeFireblocksSigning(
+            actor.organizationId,
+            projectId,
+            {
+              apiKey: parsed.data.apiKey,
+              apiSecretPem: parsed.data.apiSecretPem,
+              vaultAccountId: parsed.data.vaultAccountId,
+              assetId: parsed.data.assetId,
+              apiBaseUrl: parsed.data.apiBaseUrl,
+            }
+          );
+          break;
+        case "privy":
+          result = await signingService.initializePrivySigning(actor.organizationId, projectId, {
+            apiBaseUrl: parsed.data.apiBaseUrl,
+            requestDelayMs: parsed.data.requestDelayMs,
+            walletLabel: parsed.data.walletLabel,
+          });
+          break;
+        case "coinbase_cdp":
+          result = await signingService.initializeCoinbaseCdpSigning(
+            actor.organizationId,
+            projectId,
+            {
+              apiBaseUrl: parsed.data.apiBaseUrl,
+              network: parsed.data.network,
+              walletAddress: parsed.data.walletAddress,
+              accountPolicy: parsed.data.accountPolicy,
+              walletLabel: parsed.data.walletLabel,
+            }
+          );
+          break;
+        case "para":
+          result = await signingService.initializeParaSigning(actor.organizationId, projectId, {
+            apiBaseUrl: parsed.data.apiBaseUrl,
+            requestDelayMs: parsed.data.requestDelayMs,
+            walletId: parsed.data.walletId,
+            walletLabel: parsed.data.walletLabel,
+          });
+          break;
+        case "turnkey":
+          result = await signingService.initializeTurnkeySigning(actor.organizationId, projectId, {
+            apiBaseUrl: parsed.data.apiBaseUrl,
+            requestDelayMs: parsed.data.requestDelayMs,
+            privateKeyId: parsed.data.privateKeyId,
+            walletLabel: parsed.data.walletLabel,
+          });
+          break;
+        case "dfns":
+          result = await signingService.initializeDfnsSigning(actor.organizationId, projectId, {
+            apiBaseUrl: parsed.data.apiBaseUrl,
+            network: parsed.data.network,
+            walletId: parsed.data.walletId,
+            signingKeyId: parsed.data.signingKeyId,
+            walletLabel: parsed.data.walletLabel,
+          });
+          break;
+        case "anchorage":
+          result = await signingService.initializeAnchorageSigning(
+            actor.organizationId,
+            projectId,
+            {
+              apiBaseUrl: parsed.data.apiBaseUrl,
+              walletId: parsed.data.walletId,
+              walletLabel: parsed.data.walletLabel,
+              network: parsed.data.network,
+            }
+          );
+          break;
+        default:
+          throw new AppError("BAD_REQUEST", "Unsupported provider");
       }
 
-      await signingService.setDefaultConfiguration(actor.organizationId, projectId, result.configId);
+      await signingService.setDefaultConfiguration(
+        actor.organizationId,
+        projectId,
+        result.configId
+      );
 
       await auditService.log(c, {
         action: existingScopeConfig ? "update" : "create",
@@ -428,8 +509,8 @@ export const getSwitchProviderOptions = async (c: AppContext) => {
 
   const activeProviders = new Set(configurations.configs.map((config) => config.provider));
   const defaultProvider =
-    configurations.configs.find((config) => config.id === configurations.defaultConfigId)?.provider ??
-    null;
+    configurations.configs.find((config) => config.id === configurations.defaultConfigId)
+      ?.provider ?? null;
 
   const response: SwitchProviderOptionsResponse = {
     providers: CUSTODY_PROVIDERS.map((provider) => {
@@ -508,6 +589,65 @@ export const createWallet = async (c: AppContext) => {
     if (error instanceof SigningError) {
       if (error.code === "NOT_FOUND") {
         throw new AppError("CONFLICT", error.message);
+      }
+      throw new AppError("BAD_REQUEST", error.message);
+    }
+    throw error;
+  }
+};
+
+/**
+ * Delete a wallet for the organization (or project).
+ *
+ * DELETE /wallets
+ */
+export const deleteWallet = async (c: AppContext) => {
+  const actor = resolveActor(c);
+
+  const body = await c.req.json();
+  const parsed = deleteWalletSchema.safeParse(body);
+
+  if (!parsed.success) {
+    throw new AppError("BAD_REQUEST", "Invalid request body", {
+      errors: parsed.error.flatten().fieldErrors,
+    });
+  }
+
+  const projectId = parsed.data.projectId ?? actor.projectId;
+  const signingService = createSigningService(c.env);
+
+  try {
+    await signingService.deleteWallet(actor.organizationId, projectId, {
+      provider: parsed.data.provider,
+      walletId: parsed.data.walletId,
+    });
+
+    const auditService = new AuditService(c.env.DB);
+    await auditService.log(c, {
+      action: "delete",
+      resourceType: "custody_config",
+      resourceId: parsed.data.walletId,
+      metadata: {
+        event: "wallet_deleted",
+        walletId: parsed.data.walletId,
+        provider: parsed.data.provider ?? null,
+        projectId: projectId ?? null,
+      },
+    });
+
+    const response: DeleteWalletResponse = {
+      walletId: parsed.data.walletId,
+      deleted: true,
+    };
+
+    return success(c, response);
+  } catch (error) {
+    if (error instanceof SigningError) {
+      if (error.code === "NOT_FOUND") {
+        throw new AppError("CONFLICT", error.message);
+      }
+      if (error.code === "WALLET_NOT_FOUND") {
+        throw new AppError("NOT_FOUND", error.message);
       }
       throw new AppError("BAD_REQUEST", error.message);
     }
@@ -607,8 +747,12 @@ export const getConfig = async (c: AppContext) => {
     throw new AppError("NOT_FOUND", "No wallet signing configuration found for this organization");
   }
 
-  // Get the public key from the adapter
-  const publicKey = await signingService.getPublicKey(actor.organizationId, projectId ?? undefined);
+  // Resolve public key from persisted wallet metadata so config reads do not depend
+  // on adapter/env availability for legacy providers.
+  const wallet = await getPreferredWalletForConfig(c.env.DB, config.id, config.defaultWalletId);
+  if (!wallet) {
+    throw new AppError("INTERNAL_ERROR", "Active provider is missing an active wallet");
+  }
 
   const response: CustodyConfigResponse = {
     config: {
@@ -616,7 +760,7 @@ export const getConfig = async (c: AppContext) => {
       organizationId: config.organizationId,
       projectId: config.projectId,
       provider: config.provider,
-      publicKey,
+      publicKey: wallet.publicKey,
       defaultWalletId: config.defaultWalletId,
       status: config.status,
       createdAt: config.createdAt,
@@ -682,6 +826,7 @@ export const listWallets = async (c: AppContext) => {
   const actor = resolveActor(c);
   const projectId = c.req.query("projectId") ?? undefined;
   const providerQuery = c.req.query("provider");
+  // biome-ignore lint/nursery/noSecrets: Query parameter name, not a secret.
   const includeAllProviders = parseBooleanQueryParam(c.req.query("includeAllProviders"));
 
   const provider =
