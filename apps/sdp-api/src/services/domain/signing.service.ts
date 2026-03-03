@@ -248,6 +248,8 @@ export class SigningService {
       createWallet: CustodyConfigStore["createWallet"];
       getWallets: CustodyConfigStore["getWallets"];
       deactivateWallet: CustodyConfigStore["deactivateWallet"];
+      deactivateWalletIfNotLast: CustodyConfigStore["deactivateWalletIfNotLast"];
+      reactivateWallet: CustodyConfigStore["reactivateWallet"];
     },
     private signingStore: SigningRequestStore,
     private env: Env
@@ -1000,7 +1002,7 @@ export class SigningService {
    *
    * Anchorage does not currently support transaction signing in SDP.
    */
-  async initializeAnchorageSigning(
+  async initializeAnchorageWalletLifecycle(
     orgId: string,
     projectId: string | undefined,
     options: InitAnchorageSigningOptions
@@ -1050,6 +1052,17 @@ export class SigningService {
       publicKey,
       walletId,
     };
+  }
+
+  /**
+   * @deprecated Use initializeAnchorageWalletLifecycle.
+   */
+  async initializeAnchorageSigning(
+    orgId: string,
+    projectId: string | undefined,
+    options: InitAnchorageSigningOptions
+  ): Promise<InitSigningResult> {
+    return this.initializeAnchorageWalletLifecycle(orgId, projectId, options);
   }
 
   /**
@@ -1380,31 +1393,44 @@ export class SigningService {
       throw new SigningError("Custody wallet not found", "WALLET_NOT_FOUND");
     }
 
-    if (wallets.length <= 1) {
+    const parsed = await parseConfigRecord(this.env, orgId, config);
+    const deactivateResult = await this.configStore.deactivateWalletIfNotLast(
+      config.id,
+      targetWallet.walletId
+    );
+    if (deactivateResult === "wallet_not_found") {
+      throw new SigningError("Custody wallet not found", "WALLET_NOT_FOUND");
+    }
+    if (deactivateResult === "last_wallet") {
       throw new SigningError(
         "Cannot delete the last wallet for an active custody provider",
         "INVALID_REQUEST"
       );
     }
 
-    const parsed = await parseConfigRecord(this.env, orgId, config);
-    if (parsed.provider === "anchorage") {
-      await deleteAnchorageWallet(this.env, {
-        apiBaseUrl: parsed.apiBaseUrl,
-        walletId: denormalizeAnchorageWalletId(targetWallet.walletId),
-      });
-    } else {
-      throw new SigningError(
-        `Wallet deletion not supported for provider: ${parsed.provider}`,
-        "INVALID_REQUEST"
-      );
+    try {
+      if (parsed.provider === "anchorage") {
+        await deleteAnchorageWallet(this.env, {
+          apiBaseUrl: parsed.apiBaseUrl,
+          walletId: denormalizeAnchorageWalletId(targetWallet.walletId),
+        });
+      } else {
+        throw new SigningError(
+          `Wallet deletion not supported for provider: ${parsed.provider}`,
+          "INVALID_REQUEST"
+        );
+      }
+    } catch (error) {
+      await this.configStore.reactivateWallet(config.id, targetWallet.walletId);
+      if (error instanceof SigningError) {
+        throw error;
+      }
+      throw error;
     }
 
-    await this.configStore.deactivateWallet(config.id, targetWallet.walletId);
-
     if (config.defaultWalletId === targetWallet.walletId) {
-      const nextDefaultWalletId =
-        wallets.find((wallet) => wallet.walletId !== targetWallet.walletId)?.walletId ?? null;
+      const remainingWallets = await this.configStore.getWallets(config.id);
+      const nextDefaultWalletId = remainingWallets[0]?.walletId ?? null;
 
       await this.env.DB.prepare(
         `UPDATE custody_configs

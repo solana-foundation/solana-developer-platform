@@ -45,6 +45,8 @@ export interface CreateWalletParams {
   purpose?: WalletPurpose;
 }
 
+export type DeactivateWalletResult = "deactivated" | "wallet_not_found" | "last_wallet";
+
 // D1 row types (snake_case)
 interface CustodyConfigRow {
   id: string;
@@ -445,6 +447,69 @@ export class CustodyConfigStore implements SigningConfigStore {
          WHERE id = ?`
       )
       .bind(existing.id)
+      .run();
+  }
+
+  /**
+   * Deactivate a wallet only when at least one other active wallet exists.
+   * Returns an enum result to support race-safe last-wallet guards.
+   */
+  async deactivateWalletIfNotLast(
+    configId: string,
+    walletId: string
+  ): Promise<DeactivateWalletResult> {
+    const result = await this.db
+      .prepare(
+        `UPDATE custody_wallets
+         SET status = 'inactive'
+         WHERE id = (
+           SELECT id
+           FROM custody_wallets
+           WHERE custody_config_id = ? AND wallet_id = ? AND status = 'active'
+           LIMIT 1
+         )
+         AND (
+           SELECT COUNT(*)
+           FROM custody_wallets
+           WHERE custody_config_id = ? AND status = 'active'
+         ) > 1`
+      )
+      .bind(configId, walletId, configId)
+      .run();
+
+    if ((result.meta?.changes ?? 0) > 0) {
+      return "deactivated";
+    }
+
+    const activeWallet = await this.db
+      .prepare(
+        `SELECT id
+         FROM custody_wallets
+         WHERE custody_config_id = ? AND wallet_id = ? AND status = 'active'
+         LIMIT 1`
+      )
+      .bind(configId, walletId)
+      .first<{ id: string }>();
+
+    if (!activeWallet) {
+      return "wallet_not_found";
+    }
+
+    return "last_wallet";
+  }
+
+  /**
+   * Reactivate a wallet previously marked inactive.
+   * Used as a best-effort rollback when external delete fails.
+   */
+  async reactivateWallet(configId: string, walletId: string): Promise<void> {
+    await this.db
+      .prepare(
+        `UPDATE custody_wallets
+         SET status = 'active'
+         WHERE custody_config_id = ? AND wallet_id = ?`
+      )
+      .bind(configId, walletId)
       .run();
   }
 

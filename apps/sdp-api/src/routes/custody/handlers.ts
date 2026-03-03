@@ -2,7 +2,7 @@
  * Wallet API Handlers
  */
 
-import { assertApiKeyWalletAccess, resolveApiKeySigningWalletId } from "@/lib/api-key-wallet-auth";
+import { resolveApiKeySigningWalletId } from "@/lib/api-key-wallet-auth";
 import { getAuth } from "@/lib/auth";
 import { AppError } from "@/lib/errors";
 import { created, success } from "@/lib/response";
@@ -238,7 +238,7 @@ export const initializeSigning = async (c: AppContext) => {
         );
         break;
       case "anchorage":
-        result = await signingService.initializeAnchorageSigning(
+        result = await signingService.initializeAnchorageWalletLifecycle(
           actor.organizationId,
           parsed.data.projectId,
           {
@@ -433,7 +433,7 @@ export const switchSigning = async (c: AppContext) => {
           });
           break;
         case "anchorage":
-          result = await signingService.initializeAnchorageSigning(
+          result = await signingService.initializeAnchorageWalletLifecycle(
             actor.organizationId,
             projectId,
             {
@@ -786,30 +786,42 @@ export const getConfigs = async (c: AppContext) => {
     projectId
   );
 
-  const resolvedConfigs = await Promise.all(
-    configs.map(async (config) => {
-      const wallet = await getPreferredWalletForConfig(c.env.DB, config.id, config.defaultWalletId);
-      if (!wallet) {
-        throw new AppError("INTERNAL_ERROR", "Active provider is missing an active wallet");
-      }
+  const resolvedConfigs = (
+    await Promise.all(
+      configs.map(async (config) => {
+        const wallet = await getPreferredWalletForConfig(
+          c.env.DB,
+          config.id,
+          config.defaultWalletId
+        );
+        if (!wallet) {
+          return null;
+        }
 
-      return {
-        id: config.id,
-        organizationId: config.organizationId,
-        projectId: config.projectId,
-        provider: config.provider,
-        publicKey: wallet.publicKey,
-        defaultWalletId: config.defaultWalletId,
-        status: config.status,
-        createdAt: config.createdAt,
-        isDefault: defaultConfigId === config.id,
-      };
-    })
-  );
+        return {
+          id: config.id,
+          organizationId: config.organizationId,
+          projectId: config.projectId,
+          provider: config.provider,
+          publicKey: wallet.publicKey,
+          defaultWalletId: config.defaultWalletId,
+          status: config.status,
+          createdAt: config.createdAt,
+        };
+      })
+    )
+  ).filter((config): config is NonNullable<typeof config> => config !== null);
+
+  const availableConfigIds = new Set(resolvedConfigs.map((config) => config.id));
+  const effectiveDefaultConfigId =
+    defaultConfigId && availableConfigIds.has(defaultConfigId) ? defaultConfigId : null;
 
   const response: CustodyConfigsResponse = {
-    configs: resolvedConfigs,
-    defaultConfigId,
+    configs: resolvedConfigs.map((config) => ({
+      ...config,
+      isDefault: effectiveDefaultConfigId === config.id,
+    })),
+    defaultConfigId: effectiveDefaultConfigId,
   };
 
   return success(c, response);
@@ -934,8 +946,6 @@ export const signerCheck = async (c: AppContext) => {
   if (!resolvedWalletId) {
     throw new AppError("BAD_REQUEST", "API key is not bound to a signing wallet");
   }
-
-  assertApiKeyWalletAccess(auth, resolvedWalletId, ["wallets:write"]);
 
   try {
     const signer = await createOrgSigner(

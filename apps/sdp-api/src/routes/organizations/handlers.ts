@@ -261,7 +261,7 @@ export const createOrganization = async (c: AppContext) => {
           signingKeyId: custody.signingKeyId,
         });
       } else if (custody.provider === "anchorage") {
-        await signingService.initializeAnchorageSigning(orgId, undefined, {
+        await signingService.initializeAnchorageWalletLifecycle(orgId, undefined, {
           apiBaseUrl: custody.apiBaseUrl ?? c.env.ANCHORAGE_API_BASE_URL,
           walletId: custody.walletId,
           network: custody.network,

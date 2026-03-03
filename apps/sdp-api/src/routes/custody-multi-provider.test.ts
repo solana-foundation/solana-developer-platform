@@ -306,6 +306,57 @@ describe("Custody multi-provider routes", () => {
     );
   });
 
+  it("skips active configs without wallets in /v1/wallets/configs instead of failing", async () => {
+    const walletlessConfigId = "cust_cfg_walletless";
+    await env.DB.batch([
+      env.DB.prepare(
+        `INSERT INTO custody_configs
+             (id, organization_id, project_id, provider, config_encrypted, encryption_version, default_wallet_id, status)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      ).bind(
+        walletlessConfigId,
+        TEST_ORG.id,
+        null,
+        "turnkey",
+        "test-config",
+        "sdp-custody-encryption-v1",
+        null,
+        "active"
+      ),
+      env.DB.prepare(
+        `UPDATE custody_scope_defaults
+           SET default_custody_config_id = ?, updated_at = datetime('now')
+           WHERE organization_id = ? AND project_id IS NULL`
+      ).bind(walletlessConfigId, TEST_ORG.id),
+    ]);
+
+    const res = await app.request(
+      "/v1/wallets/configs",
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+      },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      data: {
+        defaultConfigId: string | null;
+        configs: Array<{ id: string; provider: string; isDefault: boolean }>;
+      };
+    };
+
+    expect(body.data.configs.map((config) => config.provider)).toEqual(
+      expect.arrayContaining(["privy", "para"])
+    );
+    expect(body.data.configs.some((config) => config.id === walletlessConfigId)).toBe(false);
+    expect(body.data.defaultConfigId).toBeNull();
+    expect(body.data.configs.some((config) => config.isDefault)).toBe(false);
+  });
+
   it("returns config for legacy default providers without adapter resolution", async () => {
     await env.DB.batch([
       env.DB.prepare(
