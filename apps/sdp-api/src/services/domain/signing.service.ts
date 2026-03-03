@@ -269,10 +269,43 @@ export class SigningService {
   private async ensureScopeDefaultConfig(
     orgId: string,
     projectId: string | undefined,
+    configId: string,
+    provider: SigningConfiguration["provider"]
+  ): Promise<void> {
+    // Lifecycle-only providers should never become the implicit default signer.
+    if (!canProviderSign(provider)) {
+      return;
+    }
+
+    const scopeDefault = await this.configStore.getDefaultConfig(orgId, projectId);
+
+    if (scopeDefault && canProviderSign(scopeDefault.provider)) {
+      return;
+    }
+
+    await this.configStore.setDefaultConfig(orgId, projectId, configId);
+  }
+
+  private async ensureScopeDefaultConfigForExistingRecord(
+    orgId: string,
+    projectId: string | undefined,
     configId: string
   ): Promise<void> {
+    const config = await this.configStore.getById(configId);
+    if (!config) {
+      return;
+    }
+    if (!canProviderSign(config.provider)) {
+      return;
+    }
+
     const scopeDefault = await this.configStore.getDefaultConfig(orgId, projectId);
     if (!scopeDefault) {
+      await this.configStore.setDefaultConfig(orgId, projectId, configId);
+      return;
+    }
+
+    if (!canProviderSign(scopeDefault.provider) && canProviderSign(config.provider)) {
       await this.configStore.setDefaultConfig(orgId, projectId, configId);
     }
   }
@@ -458,7 +491,7 @@ export class SigningService {
       provider: "local",
       defaultWalletId: keypair.address,
     });
-    await this.ensureScopeDefaultConfig(orgId, projectId, configId);
+    await this.ensureScopeDefaultConfig(orgId, projectId, configId, "local");
 
     // Update the config with the encrypted JSON
     // Note: We store the encrypted config separately from the schema-level fields
@@ -534,7 +567,7 @@ export class SigningService {
       provider: "fireblocks",
       defaultWalletId: walletId,
     });
-    await this.ensureScopeDefaultConfig(orgId, projectId, configId);
+    await this.ensureScopeDefaultConfig(orgId, projectId, configId, "fireblocks");
 
     // Update the config with the encrypted JSON
     await this.updateConfigJson(configId, configJson);
@@ -600,7 +633,7 @@ export class SigningService {
     const reusable = await this.findReusableProviderWallet(orgId, projectId, "privy");
     if (reusable) {
       await this.updateConfigJson(reusable.configId, configJson);
-      await this.ensureScopeDefaultConfig(orgId, projectId, reusable.configId);
+      await this.ensureScopeDefaultConfigForExistingRecord(orgId, projectId, reusable.configId);
       this.providerCache.delete(reusable.configId);
 
       return {
@@ -619,7 +652,7 @@ export class SigningService {
       provider: "privy",
       defaultWalletId: walletId,
     });
-    await this.ensureScopeDefaultConfig(orgId, projectId, configId);
+    await this.ensureScopeDefaultConfig(orgId, projectId, configId, "privy");
 
     // Update the config with the encrypted JSON
     await this.updateConfigJson(configId, configJson);
@@ -682,7 +715,7 @@ export class SigningService {
       };
 
       await this.updateConfigJson(reusable.configId, configJson);
-      await this.ensureScopeDefaultConfig(orgId, projectId, reusable.configId);
+      await this.ensureScopeDefaultConfigForExistingRecord(orgId, projectId, reusable.configId);
       this.providerCache.delete(reusable.configId);
 
       return {
@@ -715,7 +748,7 @@ export class SigningService {
       provider: "coinbase_cdp",
       defaultWalletId: walletId,
     });
-    await this.ensureScopeDefaultConfig(orgId, projectId, configId);
+    await this.ensureScopeDefaultConfig(orgId, projectId, configId, "coinbase_cdp");
 
     await this.updateConfigJson(configId, configJson);
 
@@ -773,7 +806,7 @@ export class SigningService {
       };
 
       await this.updateConfigJson(reusable.configId, configJson);
-      await this.ensureScopeDefaultConfig(orgId, projectId, reusable.configId);
+      await this.ensureScopeDefaultConfigForExistingRecord(orgId, projectId, reusable.configId);
       this.providerCache.delete(reusable.configId);
 
       return {
@@ -807,7 +840,7 @@ export class SigningService {
       provider: "para",
       defaultWalletId: walletId,
     });
-    await this.ensureScopeDefaultConfig(orgId, projectId, configId);
+    await this.ensureScopeDefaultConfig(orgId, projectId, configId, "para");
 
     await this.updateConfigJson(configId, configJson);
 
@@ -872,7 +905,7 @@ export class SigningService {
       };
 
       await this.updateConfigJson(reusable.configId, configJson);
-      await this.ensureScopeDefaultConfig(orgId, projectId, reusable.configId);
+      await this.ensureScopeDefaultConfigForExistingRecord(orgId, projectId, reusable.configId);
       this.providerCache.delete(reusable.configId);
 
       return {
@@ -904,7 +937,7 @@ export class SigningService {
       provider: "turnkey",
       defaultWalletId: walletId,
     });
-    await this.ensureScopeDefaultConfig(orgId, projectId, configId);
+    await this.ensureScopeDefaultConfig(orgId, projectId, configId, "turnkey");
 
     await this.updateConfigJson(configId, configJson);
 
@@ -956,7 +989,10 @@ export class SigningService {
         });
 
     if (!wallet?.id || !wallet?.address) {
-      throw new SigningError("DFNS wallet provisioning failed", "PROVIDER_NOT_CONFIGURED");
+      throw new SigningError(
+        "DFNS wallet provisioning failed: API returned incomplete wallet payload",
+        "NETWORK_ERROR"
+      );
     }
 
     const walletId = normalizeDfnsWalletId(wallet.id);
@@ -978,7 +1014,7 @@ export class SigningService {
       provider: "dfns",
       defaultWalletId: walletId,
     });
-    await this.ensureScopeDefaultConfig(orgId, projectId, configId);
+    await this.ensureScopeDefaultConfig(orgId, projectId, configId, "dfns");
     await this.updateConfigJson(configId, configJson);
 
     await this.configStore.createWallet(configId, {
@@ -1035,7 +1071,7 @@ export class SigningService {
       provider: "anchorage",
       defaultWalletId: walletId,
     });
-    await this.ensureScopeDefaultConfig(orgId, projectId, configId);
+    await this.ensureScopeDefaultConfig(orgId, projectId, configId, "anchorage");
     await this.updateConfigJson(configId, configJson);
 
     await this.configStore.createWallet(configId, {
@@ -1409,16 +1445,18 @@ export class SigningService {
     }
 
     try {
-      if (parsed.provider === "anchorage") {
-        await deleteAnchorageWallet(this.env, {
-          apiBaseUrl: parsed.apiBaseUrl,
-          walletId: denormalizeAnchorageWalletId(targetWallet.walletId),
-        });
-      } else {
-        throw new SigningError(
-          `Wallet deletion not supported for provider: ${parsed.provider}`,
-          "INVALID_REQUEST"
-        );
+      switch (parsed.provider) {
+        case "anchorage":
+          await deleteAnchorageWallet(this.env, {
+            apiBaseUrl: parsed.apiBaseUrl,
+            walletId: denormalizeAnchorageWalletId(targetWallet.walletId),
+          });
+          break;
+        default:
+          throw new SigningError(
+            `Wallet deletion not supported for provider: ${parsed.provider}`,
+            "INVALID_REQUEST"
+          );
       }
     } catch (error) {
       await this.configStore.reactivateWallet(config.id, targetWallet.walletId);
@@ -1767,7 +1805,7 @@ export class SigningService {
     config: SigningConfiguration
   ): Promise<void> {
     const configId = await this.configStore.upsert(orgId, projectId, config);
-    await this.ensureScopeDefaultConfig(orgId, projectId, configId);
+    await this.ensureScopeDefaultConfig(orgId, projectId, configId, config.provider);
 
     // Invalidate cache for this config.
     this.providerCache.delete(configId);

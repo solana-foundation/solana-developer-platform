@@ -627,7 +627,7 @@ export const deleteWallet = async (c: AppContext) => {
     const auditService = new AuditService(c.env.DB);
     await auditService.log(c, {
       action: "delete",
-      resourceType: "custody_config",
+      resourceType: "custody_wallet",
       resourceId: parsed.data.walletId,
       metadata: {
         event: "wallet_deleted",

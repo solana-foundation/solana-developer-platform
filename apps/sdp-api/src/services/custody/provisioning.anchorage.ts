@@ -14,6 +14,8 @@ interface AnchorageRequestParams {
   body?: Record<string, unknown>;
 }
 
+type AnchorageAuthStrategy = "api-key" | "bearer";
+
 export interface ProvisionAnchorageOptions {
   apiBaseUrl?: string;
   walletId?: string;
@@ -98,14 +100,18 @@ function resolveAnchorageConfig(
 
 async function anchorageRequest<T>(params: AnchorageRequestParams): Promise<T> {
   try {
-    const response = await fetch(`${params.apiBaseUrl}${params.path}`, {
-      method: params.method,
-      headers: {
-        Authorization: `Bearer ${params.apiKey}`,
-        ...(params.body ? { "Content-Type": "application/json" } : {}),
-      },
-      body: params.body ? JSON.stringify(params.body) : undefined,
-    });
+    const requestWithAuth = (authStrategy: AnchorageAuthStrategy) =>
+      fetch(`${params.apiBaseUrl}${params.path}`, {
+        method: params.method,
+        headers: buildAnchorageHeaders(params, authStrategy),
+        body: params.body ? JSON.stringify(params.body) : undefined,
+      });
+
+    let response = await requestWithAuth("api-key");
+    if (!response.ok && (response.status === 401 || response.status === 403)) {
+      // Compatibility fallback for deployments still expecting Bearer auth.
+      response = await requestWithAuth("bearer");
+    }
 
     if (!response.ok) {
       const errorText = await readErrorResponseText(response);
@@ -127,6 +133,24 @@ async function anchorageRequest<T>(params: AnchorageRequestParams): Promise<T> {
       error instanceof Error ? error : undefined
     );
   }
+}
+
+function buildAnchorageHeaders(
+  params: AnchorageRequestParams,
+  authStrategy: AnchorageAuthStrategy
+): Record<string, string> {
+  const headers: Record<string, string> = {};
+  if (authStrategy === "api-key") {
+    headers["Api-Key"] = params.apiKey;
+  } else {
+    headers.Authorization = `Bearer ${params.apiKey}`;
+  }
+
+  if (params.body) {
+    headers["Content-Type"] = "application/json";
+  }
+
+  return headers;
 }
 
 function extractAnchorageWallet(payload: unknown): ProvisionAnchorageResult {
