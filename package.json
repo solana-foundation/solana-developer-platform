@@ -50,10 +50,7 @@
     "@solana/kit": "5.0.0"
   },
   "workspaces": {
-    "packages": [
-      "apps/*",
-      "packages/*"
-    ],
+    "packages": ["apps/*", "packages/*"],
     "catalog": {
       "@solana-program/system": "^0.10.0",
       "@solana-program/token-2022": "^0.6.1",

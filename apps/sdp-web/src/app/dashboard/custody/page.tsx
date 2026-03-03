@@ -1,15 +1,15 @@
-import { SectionEntry } from "@/app/dashboard/wallets/section-entry";
-import {
-  WalletsSigningConfigSkeleton,
-  WalletsTableSectionSkeleton,
-} from "@/app/dashboard/wallets/wallets-page-skeleton";
-import { linkOrganization } from "@/app/onboarding/actions";
 import {
   CUSTODY_FEATURES,
   CUSTODY_PROVIDER_CATALOG,
   formatCustodyProviderName,
   isKnownCustodyProvider,
 } from "@/app/dashboard/custody/provider-catalog";
+import { SectionEntry } from "@/app/dashboard/wallets/section-entry";
+import {
+  WalletsSigningConfigSkeleton,
+  WalletsTableSectionSkeleton,
+} from "@/app/dashboard/wallets/wallets-page-skeleton";
+import { linkOrganization } from "@/app/onboarding/actions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -177,9 +177,7 @@ async function ProvidersSection({
   }
 
   const connectedProviderSet = new Set(
-    linkedData.configs
-      .map((config) => config.provider)
-      .filter(isKnownCustodyProvider)
+    linkedData.configs.map((config) => config.provider).filter(isKnownCustodyProvider)
   );
 
   const connectedCount = connectedProviderSet.size;
@@ -241,7 +239,13 @@ async function ProvidersSection({
 
                   <div className="mt-4">
                     {isActive ? (
-                      <Button type="button" variant="secondary" size="sm" disabled className="w-full">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        disabled
+                        className="w-full"
+                      >
                         Activated
                       </Button>
                     ) : (
@@ -387,8 +391,9 @@ export default async function CustodyPage() {
   const apiClient = await createSdpApiClient();
   const onboardingPromise = apiClient.fetch<{ linked: boolean }>("/v1/onboarding/status");
   const configsResultPromise = settle(getCustodyConfigs(apiClient.request));
+  const walletsQuery = new URLSearchParams({ includeAllProviders: "true" }).toString();
   const walletsResultPromise = settle(
-    apiClient.fetch<{ wallets: CustodyWallet[] }>("/v1/wallets?includeAllProviders=true")
+    apiClient.fetch<{ wallets: CustodyWallet[] }>(`/v1/wallets?${walletsQuery}`)
   );
 
   const linkedDataPromise: Promise<LinkedCustodyData | null> = onboardingPromise.then(

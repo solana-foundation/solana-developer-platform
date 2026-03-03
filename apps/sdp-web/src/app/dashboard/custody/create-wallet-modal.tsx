@@ -1,8 +1,8 @@
 "use client";
 
 import {
-  formatCustodyProviderName,
   type KnownCustodyProvider,
+  formatCustodyProviderName,
 } from "@/app/dashboard/custody/provider-catalog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";

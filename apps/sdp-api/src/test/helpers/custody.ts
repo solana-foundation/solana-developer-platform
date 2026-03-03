@@ -41,7 +41,9 @@ export async function seedTestCustodyConfig(env: Env, config: SigningConfigRecor
            WHERE organization_id = ? AND project_id IS NULL
            LIMIT 1`
     )
-      .bind(...(config.projectId ? [config.organizationId, config.projectId] : [config.organizationId]))
+      .bind(
+        ...(config.projectId ? [config.organizationId, config.projectId] : [config.organizationId])
+      )
       .first<{ id: string }>();
 
     if (existingDefault) {

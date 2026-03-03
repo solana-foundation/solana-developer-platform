@@ -83,7 +83,9 @@ export function CustodySetupForm({
                 <div className="flex items-start justify-between gap-2">
                   <div>
                     <p className="text-sm font-semibold text-[#1c1c1d]">{provider.label}</p>
-                    <p className="mt-1 text-xs text-[rgba(28,28,29,0.64)]">{provider.description}</p>
+                    <p className="mt-1 text-xs text-[rgba(28,28,29,0.64)]">
+                      {provider.description}
+                    </p>
                   </div>
                   {isActive ? (
                     <span className="inline-flex items-center gap-1 rounded-full bg-[rgba(28,28,29,0.12)] px-2 py-0.5 text-[11px] font-medium text-[#1c1c1d]">
@@ -233,7 +235,11 @@ export function CustodySetupForm({
                 </div>
                 <div className="grid gap-2">
                   <Label htmlFor="apiBaseUrl">API base URL (optional)</Label>
-                  <Input id="apiBaseUrl" name="apiBaseUrl" placeholder="https://api.fireblocks.io" />
+                  <Input
+                    id="apiBaseUrl"
+                    name="apiBaseUrl"
+                    placeholder="https://api.fireblocks.io"
+                  />
                 </div>
               </div>
             </div>

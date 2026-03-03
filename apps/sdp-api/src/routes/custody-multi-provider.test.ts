@@ -111,7 +111,7 @@ async function seedAuthAndConfigs(): Promise<void> {
       "cwlt_privy_a",
       PRIVY_CONFIG_ID,
       "privy_wallet_a",
-      "PrivyPublicKeyA111111111111111111111111111",
+      "privy_pubkey_a",
       "Privy Root A",
       "root",
       "active"
@@ -124,7 +124,7 @@ async function seedAuthAndConfigs(): Promise<void> {
       "cwlt_privy_b",
       PRIVY_CONFIG_ID,
       "privy_wallet_b",
-      "PrivyPublicKeyB111111111111111111111111111",
+      "privy_pubkey_b",
       "Privy Root B",
       "transfer",
       "active"
@@ -137,7 +137,7 @@ async function seedAuthAndConfigs(): Promise<void> {
       "cwlt_para_a",
       PARA_CONFIG_ID,
       "para_wallet_a",
-      "ParaPublicKeyA1111111111111111111111111111",
+      "para_pubkey_a",
       "Para Root A",
       "root",
       "active"
@@ -150,7 +150,7 @@ async function seedAuthAndConfigs(): Promise<void> {
       "cwlt_para_b",
       PARA_CONFIG_ID,
       "para_wallet_b",
-      "ParaPublicKeyB1111111111111111111111111111",
+      "para_pubkey_b",
       "Para Root B",
       "transfer",
       "active"
@@ -213,7 +213,7 @@ describe("Custody multi-provider routes", () => {
     expect(defaultPointer?.default_custody_config_id).toBe(PARA_CONFIG_ID);
   });
 
-  it("lists default-provider wallets by default and all wallets when includeAllProviders=true", async () => {
+  it("lists default-provider wallets by default and all wallets when includeAllProviders is enabled", async () => {
     const defaultRes = await app.request(
       "/v1/wallets",
       {
@@ -234,10 +234,16 @@ describe("Custody multi-provider routes", () => {
 
     expect(defaultBody.data.wallets).toHaveLength(2);
     expect(defaultBody.data.wallets.every((wallet) => wallet.provider === "privy")).toBe(true);
-    expect(defaultBody.data.wallets.every((wallet) => wallet.isDefaultProvider === true)).toBe(true);
+    expect(defaultBody.data.wallets.every((wallet) => wallet.isDefaultProvider === true)).toBe(
+      true
+    );
+
+    const includeAllProvidersQuery = new URLSearchParams({
+      includeAllProviders: "true",
+    }).toString();
 
     const allRes = await app.request(
-      "/v1/wallets?includeAllProviders=true",
+      `/v1/wallets?${includeAllProvidersQuery}`,
       {
         method: "GET",
         headers: {
@@ -259,7 +265,9 @@ describe("Custody multi-provider routes", () => {
       new Set(["privy", "para"])
     );
     expect(
-      allBody.data.wallets.filter((wallet) => wallet.isDefaultProvider).map((wallet) => wallet.provider)
+      allBody.data.wallets
+        .filter((wallet) => wallet.isDefaultProvider)
+        .map((wallet) => wallet.provider)
     ).toEqual(["privy", "privy"]);
   });
 
@@ -322,7 +330,7 @@ describe("Custody multi-provider routes", () => {
         "cwlt_dfns_a",
         DFNS_CONFIG_ID,
         "dfns_wallet_a",
-        "DfnsPublicKeyA1111111111111111111111111111",
+        "dfns_pubkey_a",
         "Dfns Root A",
         "root",
         "active"
@@ -354,7 +362,7 @@ describe("Custody multi-provider routes", () => {
 
     expect(body.data.config.id).toBe(DFNS_CONFIG_ID);
     expect(body.data.config.provider).toBe("dfns");
-    expect(body.data.config.publicKey).toBe("DfnsPublicKeyA1111111111111111111111111111");
+    expect(body.data.config.publicKey).toBe("dfns_pubkey_a");
   });
 
   it("sets default wallet for an explicitly targeted provider", async () => {

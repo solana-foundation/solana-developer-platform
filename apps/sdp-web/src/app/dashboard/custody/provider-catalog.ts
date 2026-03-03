@@ -1,11 +1,6 @@
 export const CUSTODY_FEATURES = ["Issuance", "Transfers", "Compliance"] as const;
 
-export type KnownCustodyProvider =
-  | "privy"
-  | "fireblocks"
-  | "coinbase_cdp"
-  | "para"
-  | "turnkey";
+export type KnownCustodyProvider = "privy" | "fireblocks" | "coinbase_cdp" | "para" | "turnkey";
 
 export interface CustodyProviderCatalogEntry {
   id: KnownCustodyProvider;
@@ -47,9 +42,13 @@ export const CUSTODY_PROVIDER_CATALOG: CustodyProviderCatalogEntry[] = [
   },
 ];
 
-const PROVIDER_LABELS = new Map(CUSTODY_PROVIDER_CATALOG.map((provider) => [provider.id, provider.label]));
+const PROVIDER_LABELS = new Map(
+  CUSTODY_PROVIDER_CATALOG.map((provider) => [provider.id, provider.label])
+);
 
-const PROVIDER_SET = new Set<KnownCustodyProvider>(CUSTODY_PROVIDER_CATALOG.map((provider) => provider.id));
+const PROVIDER_SET = new Set<KnownCustodyProvider>(
+  CUSTODY_PROVIDER_CATALOG.map((provider) => provider.id)
+);
 
 export function isKnownCustodyProvider(value: string): value is KnownCustodyProvider {
   return PROVIDER_SET.has(value as KnownCustodyProvider);

@@ -1,10 +1,10 @@
-import { createSdpApiClient } from "@/lib/sdp-api";
-import { NextResponse } from "next/server";
 import {
   CUSTODY_PROVIDER_CATALOG,
   type KnownCustodyProvider,
   isKnownCustodyProvider,
 } from "@/app/dashboard/custody/provider-catalog";
+import { createSdpApiClient } from "@/lib/sdp-api";
+import { NextResponse } from "next/server";
 
 interface OnboardingStatusResponse {
   linked: boolean;

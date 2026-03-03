@@ -52,7 +52,10 @@ export class KeychainFireblocksAdapter extends BaseKeychainAdapter {
    * The FireblocksSigner implements SolanaSigner which extends TransactionPartialSigner,
    * making it compatible with signTransactionMessageWithSigners and other kit utilities.
    */
-  async getTransactionSigner(_walletId?: string, _walletPublicKey?: Address): Promise<FireblocksSigner> {
+  async getTransactionSigner(
+    _walletId?: string,
+    _walletPublicKey?: Address
+  ): Promise<FireblocksSigner> {
     await this.ensureInitialized();
     return this.fireblocksSigner;
   }

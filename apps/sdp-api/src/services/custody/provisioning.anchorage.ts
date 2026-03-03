@@ -75,7 +75,10 @@ export async function deleteAnchorageWallet(
   });
 }
 
-function resolveAnchorageConfig(env: Env, apiBaseUrlOverride?: string): {
+function resolveAnchorageConfig(
+  env: Env,
+  apiBaseUrlOverride?: string
+): {
   apiBaseUrl: string;
   apiKey: string;
 } {
@@ -132,7 +135,10 @@ function extractAnchorageWallet(payload: unknown): ProvisionAnchorageResult {
   const address = readString(record, ["address", "publicKey", "public_key"]);
 
   if (!walletId || !address) {
-    throw new SigningError("Anchorage wallet response missing wallet id or address", "INVALID_REQUEST");
+    throw new SigningError(
+      "Anchorage wallet response missing wallet id or address",
+      "INVALID_REQUEST"
+    );
   }
 
   return { walletId, address };

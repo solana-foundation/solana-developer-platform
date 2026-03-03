@@ -67,7 +67,6 @@ function assertKoraIntegrationEnvConfigured() {
   const missing: string[] = [];
   if (env.RUN_INTEGRATION_TESTS !== "true") missing.push("RUN_INTEGRATION_TESTS=true");
   if (!env.SOLANA_RPC_URL) missing.push("SOLANA_RPC_URL");
-  if (!env.CUSTODY_PRIVATE_KEY) missing.push("CUSTODY_PRIVATE_KEY");
   if (!env.KORA_RPC_URL) missing.push("KORA_RPC_URL");
   if (!env.PRIVY_APP_ID) missing.push("PRIVY_APP_ID");
   if (!env.PRIVY_APP_SECRET) missing.push("PRIVY_APP_SECRET");
@@ -94,7 +93,8 @@ describe("Kora Fee Payment (Devnet)", () => {
   });
 
   beforeEach(async () => {
-    await resetIntegrationState(apiKeyHash);
+    const state = await resetIntegrationState(apiKeyHash);
+    custodyAddress = state.custodyAddress;
   });
 
   it("deploys and manages a token using Kora fee payer", { timeout: 120000 }, async () => {
@@ -192,30 +192,30 @@ describe("Kora Fee Payment (Devnet)", () => {
     "submits signer-check memo with Privy wallet-bound API key via Kora",
     { timeout: 120000 },
     async () => {
-      const initializeRes = await request("/v1/wallets/initialize", {
+      const createWalletRes = await request("/v1/wallets", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
           provider: "privy",
-          walletLabel: "Kora signer-check Privy integration wallet",
+          label: "Kora signer-check Privy integration wallet",
         }),
       });
 
-      const initializePayload = await initializeRes.text();
-      if (initializeRes.status !== 201) {
+      const createWalletPayload = await createWalletRes.text();
+      if (createWalletRes.status !== 201) {
         throw new Error(
-          `Privy wallet initialization failed (${initializeRes.status}): ${initializePayload}`
+          `Privy wallet creation failed (${createWalletRes.status}): ${createWalletPayload}`
         );
       }
 
-      const initializeBody = JSON.parse(initializePayload) as {
-        data: { configId: string; publicKey: string; walletId: string };
+      const createWalletBody = JSON.parse(createWalletPayload) as {
+        data: { wallet: { walletId: string; publicKey: string } };
       };
 
-      const walletId = initializeBody.data.walletId;
-      const walletAddress = initializeBody.data.publicKey;
+      const walletId = createWalletBody.data.wallet.walletId;
+      const walletAddress = createWalletBody.data.wallet.publicKey;
 
       const createKeyRes = await request("/v1/api-keys", {
         method: "POST",

@@ -25,7 +25,8 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Token Deployment"
   });
 
   beforeEach(async () => {
-    await resetIntegrationState(apiKeyHash);
+    const state = await resetIntegrationState(apiKeyHash);
+    custodyAddress = state.custodyAddress;
   });
 
   it("deploys a basic Token-2022 mint", { timeout: 60000 }, async () => {
