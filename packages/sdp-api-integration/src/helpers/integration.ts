@@ -63,7 +63,9 @@ export async function initIntegrationSuite() {
   return { apiKeyHash, custodyAddress: state.custodyAddress };
 }
 
-export async function resetIntegrationState(apiKeyHash: string): Promise<{ custodyAddress: string }> {
+export async function resetIntegrationState(
+  apiKeyHash: string
+): Promise<{ custodyAddress: string }> {
   const db = env.DB;
   const apiKeysKV = env.SDP_API_KEYS;
   const rateLimitKV = env.SDP_RATE_LIMITS;
