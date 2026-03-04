@@ -1152,6 +1152,18 @@ export class SigningService {
     );
   }
 
+  async getWalletById(
+    orgId: string,
+    projectId: string | undefined,
+    walletId: string
+  ): Promise<CustodyWalletWithProvider | null> {
+    const wallets = await this.getWalletsWithProviders(orgId, projectId, {
+      includeAllProviders: true,
+    });
+
+    return wallets.find((wallet) => wallet.walletId === walletId || wallet.id === walletId) ?? null;
+  }
+
   /**
    * Provision a new wallet in custody for the resolved provider configuration.
    *

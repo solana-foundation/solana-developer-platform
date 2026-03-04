@@ -2,8 +2,9 @@
  * Wallet API Handlers
  */
 
-import { resolveApiKeySigningWalletId } from "@/lib/api-key-wallet-auth";
+import { assertApiKeyWalletAccess, resolveApiKeySigningWalletId } from "@/lib/api-key-wallet-auth";
 import { getAuth } from "@/lib/auth";
+import { formatDecimalAmount } from "@/lib/amount";
 import { AppError } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import { createFeePaymentAdapter } from "@/services/adapters/fee-payment";
@@ -13,7 +14,7 @@ import { createSigningService } from "@/services/domain/signing.service";
 import { FeePaymentError, SigningError } from "@/services/ports";
 import { resolveRpcTarget } from "@/services/rpc-relay.service";
 import { createOrgSigner } from "@/services/solana";
-import { confirmTransaction, createRpc, getRecentBlockhash } from "@/services/solana/rpc";
+import { confirmTransaction, createRpc, getAccountInfo, getRecentBlockhash } from "@/services/solana/rpc";
 import type { Env } from "@/types/env";
 import type { Address } from "@solana/kit";
 import {
@@ -31,6 +32,7 @@ import type { Context } from "hono";
 import {
   type CustodyConfigResponse,
   type CustodyConfigsResponse,
+  type CustodyWalletByIdResponse,
   type CustodyWalletResponse,
   type CustodyWalletsResponse,
   type DeleteWalletResponse,
@@ -49,6 +51,8 @@ type AppContext = Context<{ Bindings: Env }>;
 
 // biome-ignore lint/nursery/noSecrets: Solana Memo program id constant, not a secret.
 const MEMO_PROGRAM_ADDRESS = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr" as Address;
+// biome-ignore lint/nursery/noSecrets: Solana native mint address constant, not a secret.
+const SOL_MINT = "So11111111111111111111111111111111111111112";
 const KORA_MEMO_ALLOWED_PROGRAM_HINT =
   "Add MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr to Kora validation.allowed_programs.";
 
@@ -874,6 +878,63 @@ export const listWallets = async (c: AppContext) => {
       status: w.status,
       createdAt: w.createdAt,
     })),
+  };
+
+  return success(c, response);
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Get Wallet By ID
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Get wallet metadata and SOL balance for a specific wallet ID.
+ *
+ * GET /wallets/:walletId
+ */
+export const getWalletById = async (c: AppContext) => {
+  const actor = resolveActor(c);
+  const auth = getAuth(c);
+  const projectId = c.req.query("projectId") ?? actor.projectId;
+  const walletId = c.req.param("walletId")?.trim();
+
+  if (!walletId) {
+    throw new AppError("BAD_REQUEST", "Invalid wallet ID");
+  }
+
+  const signingService = createSigningService(c.env);
+  const wallet = await signingService.getWalletById(actor.organizationId, projectId, walletId);
+
+  if (!wallet) {
+    throw new AppError("NOT_FOUND", "Wallet not found");
+  }
+
+  assertApiKeyWalletAccess(auth, wallet.walletId, ["wallets:read"]);
+
+  const rpc = createRpc(c.env);
+  const accountInfo = await getAccountInfo(rpc, wallet.publicKey as Address);
+  const lamports = accountInfo?.lamports ?? 0n;
+
+  const response: CustodyWalletByIdResponse = {
+    wallet: {
+      id: wallet.id,
+      custodyConfigId: wallet.custodyConfigId,
+      provider: wallet.provider,
+      isDefaultProvider: wallet.isDefaultProvider,
+      walletId: wallet.walletId,
+      publicKey: wallet.publicKey,
+      label: wallet.label,
+      purpose: wallet.purpose,
+      status: wallet.status,
+      createdAt: wallet.createdAt,
+      balance: {
+        token: "SOL",
+        mint: SOL_MINT,
+        amount: lamports.toString(),
+        uiAmount: formatDecimalAmount(lamports, 9),
+        decimals: 9,
+      },
+    },
   };
 
   return success(c, response);
