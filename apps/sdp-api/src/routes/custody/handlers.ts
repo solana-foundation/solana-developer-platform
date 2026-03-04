@@ -2,9 +2,9 @@
  * Wallet API Handlers
  */
 
+import { formatDecimalAmount } from "@/lib/amount";
 import { assertApiKeyWalletAccess, resolveApiKeySigningWalletId } from "@/lib/api-key-wallet-auth";
 import { getAuth } from "@/lib/auth";
-import { formatDecimalAmount } from "@/lib/amount";
 import { AppError } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import { createFeePaymentAdapter } from "@/services/adapters/fee-payment";
@@ -14,7 +14,12 @@ import { createSigningService } from "@/services/domain/signing.service";
 import { FeePaymentError, SigningError } from "@/services/ports";
 import { resolveRpcTarget } from "@/services/rpc-relay.service";
 import { createOrgSigner } from "@/services/solana";
-import { confirmTransaction, createRpc, getAccountInfo, getRecentBlockhash } from "@/services/solana/rpc";
+import {
+  confirmTransaction,
+  createRpc,
+  getAccountInfo,
+  getRecentBlockhash,
+} from "@/services/solana/rpc";
 import type { Env } from "@/types/env";
 import type { Address } from "@solana/kit";
 import {

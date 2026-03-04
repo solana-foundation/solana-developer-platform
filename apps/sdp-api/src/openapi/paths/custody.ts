@@ -21,9 +21,9 @@ import {
   custodyConfigResponse,
   custodyConfigsResponse,
   custodyDeleteWalletResponse,
-  custodyWalletByIdResponse,
   custodySignerCheckResponse,
   custodySwitchOptionsResponse,
+  custodyWalletByIdResponse,
   custodyWalletResponse,
   custodyWalletsResponse,
 } from "./responses";
