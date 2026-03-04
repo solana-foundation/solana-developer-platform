@@ -73,7 +73,7 @@ function getSentryOptions(env: Env) {
 }
 
 function captureUnexpectedError(err: Error, c: Context<{ Bindings: Env }>): void {
-  if (!c.env.SENTRY_DSN) {
+  if (!c.env.SENTRY_DSN?.trim()) {
     return;
   }
 
@@ -106,7 +106,7 @@ function captureUnexpectedError(err: Error, c: Context<{ Bindings: Env }>): void
       if (clerk.orgSlug) {
         scope.setTag("organization_slug", clerk.orgSlug);
       }
-      scope.setUser({ id: clerk.userId, email: clerk.email ?? undefined });
+      scope.setUser({ id: clerk.userId });
     }
 
     Sentry.captureException(err);
