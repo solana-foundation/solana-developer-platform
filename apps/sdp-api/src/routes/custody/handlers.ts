@@ -914,7 +914,14 @@ export const getWalletById = async (c: AppContext) => {
     throw new AppError("NOT_FOUND", "Wallet not found");
   }
 
-  assertApiKeyWalletAccess(auth, wallet.walletId, ["wallets:read"]);
+  try {
+    assertApiKeyWalletAccess(auth, wallet.walletId, ["wallets:read"]);
+  } catch (error) {
+    if (error instanceof AppError && error.code === "FORBIDDEN") {
+      throw new AppError("NOT_FOUND", "Wallet not found");
+    }
+    throw error;
+  }
 
   const rpc = createRpc(c.env);
   const accountInfo = await getAccountInfo(rpc, wallet.publicKey as Address);

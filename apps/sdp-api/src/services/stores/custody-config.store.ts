@@ -31,6 +31,11 @@ export interface CustodyWallet {
   createdAt: string;
 }
 
+export interface CustodyWalletLookup extends CustodyWallet {
+  provider: SigningProviderType;
+  projectId: string | null;
+}
+
 export type WalletPurpose =
   | "root"
   | "mint_authority"
@@ -71,6 +76,11 @@ interface CustodyWalletRow {
   status: string;
   created_at: string;
   updated_at: string | null;
+}
+
+interface CustodyWalletLookupRow extends CustodyWalletRow {
+  provider: string;
+  project_id: string | null;
 }
 
 interface SigningRequestRow {
@@ -436,6 +446,72 @@ export class CustodyConfigStore implements SigningConfigStore {
   }
 
   /**
+   * Find a single active wallet by identifier (wallet_id or custody_wallets.id)
+   * within the resolved scope (project-first, then org fallback).
+   */
+  async findActiveWalletByIdentifier(
+    orgId: string,
+    projectId: string | undefined,
+    walletIdentifier: string
+  ): Promise<CustodyWalletLookup | null> {
+    const row = projectId
+      ? await this.db
+          .prepare(
+            `SELECT
+               w.id,
+               w.custody_config_id,
+               w.wallet_id,
+               w.public_key,
+               w.label,
+               w.purpose,
+               w.status,
+               w.created_at,
+               w.updated_at,
+               c.provider,
+               c.project_id
+             FROM custody_wallets w
+             JOIN custody_configs c ON c.id = w.custody_config_id
+             WHERE c.organization_id = ?
+               AND c.status = 'active'
+               AND w.status = 'active'
+               AND (w.wallet_id = ? OR w.id = ?)
+               AND (c.project_id = ? OR c.project_id IS NULL)
+             ORDER BY CASE WHEN c.project_id = ? THEN 0 ELSE 1 END, c.updated_at DESC, c.id DESC
+             LIMIT 1`
+          )
+          .bind(orgId, walletIdentifier, walletIdentifier, projectId, projectId)
+          .first<CustodyWalletLookupRow>()
+      : await this.db
+          .prepare(
+            `SELECT
+               w.id,
+               w.custody_config_id,
+               w.wallet_id,
+               w.public_key,
+               w.label,
+               w.purpose,
+               w.status,
+               w.created_at,
+               w.updated_at,
+               c.provider,
+               c.project_id
+             FROM custody_wallets w
+             JOIN custody_configs c ON c.id = w.custody_config_id
+             WHERE c.organization_id = ?
+               AND c.project_id IS NULL
+               AND c.status = 'active'
+               AND w.status = 'active'
+               AND (w.wallet_id = ? OR w.id = ?)
+             ORDER BY c.updated_at DESC, c.id DESC
+             LIMIT 1`
+          )
+          .bind(orgId, walletIdentifier, walletIdentifier)
+          .first<CustodyWalletLookupRow>();
+
+    return row ? this.mapWalletLookupRow(row) : null;
+  }
+
+  /**
    * Deactivate a wallet record associated with a custody config.
    */
   async deactivateWallet(configId: string, walletId: string): Promise<void> {
@@ -611,6 +687,14 @@ export class CustodyConfigStore implements SigningConfigStore {
       purpose: row.purpose as WalletPurpose | null,
       status: row.status as "active" | "inactive",
       createdAt: row.created_at,
+    };
+  }
+
+  private mapWalletLookupRow(row: CustodyWalletLookupRow): CustodyWalletLookup {
+    return {
+      ...this.mapWalletRow(row),
+      provider: row.provider as SigningProviderType,
+      projectId: row.project_id,
     };
   }
 }

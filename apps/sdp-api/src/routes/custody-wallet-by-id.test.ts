@@ -145,6 +145,14 @@ async function seedAuthAndConfigs(): Promise<void> {
   ]);
 }
 
+async function seedCachedKey(override: Partial<CachedApiKey>): Promise<void> {
+  const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
+  await seedCachedApiKey(env, keyHash, {
+    ...TEST_CACHED_API_KEY,
+    ...override,
+  });
+}
+
 describe("Custody wallet by ID route", () => {
   beforeEach(async () => {
     await seedTestDatabase(env);
@@ -208,5 +216,63 @@ describe("Custody wallet by ID route", () => {
     );
 
     expect(res.status).toBe(401);
+  });
+
+  it("returns 404 when the wallet does not exist", async () => {
+    const res = await app.request(
+      "/v1/wallets/does_not_exist",
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+      },
+      env
+    );
+
+    expect(res.status).toBe(404);
+  });
+
+  it("returns 404 for API keys bound to a different wallet to avoid wallet enumeration", async () => {
+    await seedCachedKey({
+      walletBindings: [
+        {
+          walletId: "privy_wallet_a",
+          permissions: ["wallets:read"],
+        },
+      ],
+    });
+
+    const res = await app.request(
+      "/v1/wallets/para_wallet_a",
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+      },
+      env
+    );
+
+    expect(res.status).toBe(404);
+  });
+
+  it("returns 403 when the API key does not include wallets:read permission", async () => {
+    await seedCachedKey({
+      permissions: ["payments:read"],
+    });
+
+    const res = await app.request(
+      "/v1/wallets/para_wallet_a",
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+      },
+      env
+    );
+
+    expect(res.status).toBe(403);
   });
 });

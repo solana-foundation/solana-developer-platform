@@ -41,6 +41,7 @@ import type { SignRequest, SignResult, SignStatus, SigningPort } from "@/service
 import {
   CustodyConfigStore,
   type CustodyWallet,
+  type CustodyWalletLookup,
   SigningRequestD1Store,
   type WalletPurpose,
 } from "@/services/stores/custody-config.store";
@@ -247,6 +248,7 @@ export class SigningService {
     private configStore: SigningConfigStore & {
       createWallet: CustodyConfigStore["createWallet"];
       getWallets: CustodyConfigStore["getWallets"];
+      findActiveWalletByIdentifier: CustodyConfigStore["findActiveWalletByIdentifier"];
       deactivateWallet: CustodyConfigStore["deactivateWallet"];
       deactivateWalletIfNotLast: CustodyConfigStore["deactivateWalletIfNotLast"];
       reactivateWallet: CustodyConfigStore["reactivateWallet"];
@@ -1157,11 +1159,13 @@ export class SigningService {
     projectId: string | undefined,
     walletId: string
   ): Promise<CustodyWalletWithProvider | null> {
-    const wallets = await this.getWalletsWithProviders(orgId, projectId, {
-      includeAllProviders: true,
-    });
+    const wallet = await this.configStore.findActiveWalletByIdentifier(orgId, projectId, walletId);
+    if (!wallet) {
+      return null;
+    }
 
-    return wallets.find((wallet) => wallet.walletId === walletId || wallet.id === walletId) ?? null;
+    const defaultConfig = await this.configStore.findActive(orgId, projectId);
+    return this.mapWalletLookup(wallet, defaultConfig?.id ?? null);
   }
 
   /**
@@ -1704,6 +1708,24 @@ export class SigningService {
     }
 
     return adapter.getTransactionSigner(resolved.walletId, resolved.walletPublicKey);
+  }
+
+  private mapWalletLookup(
+    wallet: CustodyWalletLookup,
+    defaultConfigId: string | null
+  ): CustodyWalletWithProvider {
+    return {
+      id: wallet.id,
+      custodyConfigId: wallet.custodyConfigId,
+      walletId: wallet.walletId,
+      publicKey: wallet.publicKey,
+      label: wallet.label,
+      purpose: wallet.purpose,
+      status: wallet.status,
+      createdAt: wallet.createdAt,
+      provider: wallet.provider,
+      isDefaultProvider: defaultConfigId === wallet.custodyConfigId,
+    };
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
