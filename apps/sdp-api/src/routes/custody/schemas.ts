@@ -229,6 +229,28 @@ export interface CustodyWalletsResponse {
   wallets: CustodyWalletResponse["wallet"][];
 }
 
+export interface CustodyWalletByIdResponse {
+  wallet: CustodyWalletResponse["wallet"] & {
+    custodyConfigId: string;
+    provider:
+      | "local"
+      | "fireblocks"
+      | "privy"
+      | "coinbase_cdp"
+      | "para"
+      | "turnkey"
+      | "dfns"
+      | "anchorage";
+    balance: {
+      token: "SOL";
+      mint: string;
+      amount: string;
+      uiAmount: string;
+      decimals: 9;
+    };
+  };
+}
+
 export interface CustodyConfigsResponse {
   configs: Array<{
     id: string;

@@ -14,6 +14,7 @@ import {
   getConfigs,
   getPublicKey,
   getSwitchProviderOptions,
+  getWalletById,
   initializeSigning,
   listWallets,
   setDefaultWallet,
@@ -40,5 +41,6 @@ wallets.get("/configs", requirePermissions("wallets:read"), getConfigs);
 wallets.get("/", requirePermissions("wallets:read"), listWallets);
 wallets.get("/public-key", requirePermissions("wallets:read"), getPublicKey);
 wallets.get("/switch-options", requirePermissions("custody:admin"), getSwitchProviderOptions);
+wallets.get("/:walletId", requirePermissions("wallets:read"), getWalletById);
 
 export default wallets;

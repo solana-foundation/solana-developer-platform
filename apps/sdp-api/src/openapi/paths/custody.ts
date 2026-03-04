@@ -23,6 +23,7 @@ import {
   custodyDeleteWalletResponse,
   custodySignerCheckResponse,
   custodySwitchOptionsResponse,
+  custodyWalletByIdResponse,
   custodyWalletResponse,
   custodyWalletsResponse,
 } from "./responses";
@@ -287,6 +288,32 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
         content: jsonContent(custodySignerCheckResponse),
       },
       ...errorResponses(errorResponseSchema, [400, 401, 403, 429, 500, 502]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/wallets/{walletId}",
+    tags: ["Wallets"],
+    summary: "Get wallet by ID",
+    operationId: "getWalletById",
+    description:
+      "Returns wallet metadata, custody provider, public key, and current SOL balance for a specific wallet ID. This endpoint requires authenticated access.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      params: z.object({
+        walletId: walletIdParamSchema,
+      }),
+      query: z.object({
+        projectId: projectIdParamSchema.optional(),
+      }),
+    },
+    responses: {
+      200: {
+        description: "Wallet details",
+        content: jsonContent(custodyWalletByIdResponse),
+      },
+      ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
     },
   });
 }

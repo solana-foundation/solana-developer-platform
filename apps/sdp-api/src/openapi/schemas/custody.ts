@@ -100,38 +100,40 @@ export const initializeSigningResponseSchema = z
   })
   .openapi({ description: "Wallet signing initialization result." });
 
-export const custodyWalletSchema = z
-  .object({
-    id: z.string().openapi({ description: "Wallet record ID.", example: "cw_example" }),
-    custodyConfigId: z.string().optional().openapi({
-      description: "Owning custody configuration ID.",
-      example: "cfg_example",
-    }),
-    provider: orgCustodyProviderSchema.optional(),
-    isDefaultProvider: z.boolean().optional().openapi({
-      description: "Whether this wallet belongs to the current default provider config.",
-      example: true,
-    }),
-    walletId: walletIdParamSchema.openapi({
-      description: "Provider wallet ID.",
-      example: "privy_wallet_123",
-    }),
-    publicKey: solanaAddressSchema,
-    label: z.string().nullable().openapi({
-      description: "Optional wallet label.",
-      example: "Root Signing Wallet",
-    }),
-    purpose: z
-      .enum(["root", "mint_authority", "freeze_authority", "fee_payer", "transfer"])
-      .nullable()
-      .openapi({ description: "Optional wallet purpose.", example: "root" }),
-    status: z.enum(["active", "inactive"]).openapi({
-      description: "Wallet status.",
-      example: "active",
-    }),
-    createdAt: isoDateTimeSchema,
-  })
-  .openapi({ description: "Wallet details." });
+const custodyWalletBaseSchema = z.object({
+  id: z.string().openapi({ description: "Wallet record ID.", example: "cw_example" }),
+  custodyConfigId: z.string().optional().openapi({
+    description: "Owning custody configuration ID.",
+    example: "cfg_example",
+  }),
+  provider: orgCustodyProviderSchema.optional(),
+  isDefaultProvider: z.boolean().optional().openapi({
+    description: "Whether this wallet belongs to the current default provider config.",
+    example: true,
+  }),
+  walletId: walletIdParamSchema.openapi({
+    description: "Provider wallet ID.",
+    example: "privy_wallet_123",
+  }),
+  publicKey: solanaAddressSchema,
+  label: z.string().nullable().openapi({
+    description: "Optional wallet label.",
+    example: "Root Signing Wallet",
+  }),
+  purpose: z
+    .enum(["root", "mint_authority", "freeze_authority", "fee_payer", "transfer"])
+    .nullable()
+    .openapi({ description: "Optional wallet purpose.", example: "root" }),
+  status: z.enum(["active", "inactive"]).openapi({
+    description: "Wallet status.",
+    example: "active",
+  }),
+  createdAt: isoDateTimeSchema,
+});
+
+export const custodyWalletSchema = custodyWalletBaseSchema.openapi({
+  description: "Wallet details.",
+});
 
 export const custodyWalletResponseSchema = z
   .object({
@@ -144,6 +146,47 @@ export const custodyWalletsResponseSchema = z
     wallets: z.array(custodyWalletSchema).openapi({ description: "Wallets." }),
   })
   .openapi({ description: "Wallets list response payload." });
+
+export const custodyWalletByIdResponseSchema = z
+  .object({
+    wallet: custodyWalletBaseSchema
+      .extend({
+        custodyConfigId: z.string().openapi({
+          description: "Owning custody configuration ID.",
+          example: "cfg_example",
+        }),
+        provider: orgCustodyProviderSchema.openapi({
+          description: "Wallet custody provider.",
+          example: "privy",
+        }),
+        balance: z
+          .object({
+            token: z.literal("SOL").openapi({
+              description: "Balance token symbol.",
+              example: "SOL",
+            }),
+            mint: z.string().openapi({
+              description: "Native SOL mint address.",
+              example: "So11111111111111111111111111111111111111112",
+            }),
+            amount: z.string().openapi({
+              description: "Raw lamports balance as a string.",
+              example: "123456789",
+            }),
+            uiAmount: z.string().openapi({
+              description: "Human-readable SOL balance.",
+              example: "0.123456789",
+            }),
+            decimals: z.literal(9).openapi({
+              description: "Token decimals for SOL.",
+              example: 9,
+            }),
+          })
+          .openapi({ description: "Current SOL balance for the wallet public key." }),
+      })
+      .openapi({ description: "Wallet details with provider and SOL balance." }),
+  })
+  .openapi({ description: "Wallet details by ID response payload." });
 
 const orgCustodyConfigBaseSchema = z.object({
   id: z.string().openapi({ description: "Wallet signing config ID.", example: "cfg_example" }),

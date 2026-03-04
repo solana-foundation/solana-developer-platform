@@ -11,6 +11,7 @@ import {
   currentUserResponseSchema,
   custodyConfigResponseSchema,
   custodyConfigsResponseSchema,
+  custodyWalletByIdResponseSchema,
   custodyWalletResponseSchema,
   custodyWalletsResponseSchema,
   deleteWalletResponseSchema,
@@ -121,6 +122,7 @@ export const custodyConfigResponse = successResponseSchema(custodyConfigResponse
 export const custodyConfigsResponse = successResponseSchema(custodyConfigsResponseSchema);
 export const custodyWalletResponse = successResponseSchema(custodyWalletResponseSchema);
 export const custodyWalletsResponse = successResponseSchema(custodyWalletsResponseSchema);
+export const custodyWalletByIdResponse = successResponseSchema(custodyWalletByIdResponseSchema);
 export const custodyDeleteWalletResponse = successResponseSchema(deleteWalletResponseSchema);
 export const custodySignerCheckResponse = successResponseSchema(signerCheckResponseSchema);
 export const custodySwitchOptionsResponse = successResponseSchema(
