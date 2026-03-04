@@ -4,14 +4,16 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import type { FrozenAccount, Token, TokenAllowlistEntry, TokenTransaction } from "@sdp/types";
 import {
-  ArrowUpRight,
-  ChevronDown,
-  Copy,
-  Loader2,
-} from "lucide-react";
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import type { FrozenAccount, Token, TokenAllowlistEntry, TokenTransaction } from "@sdp/types";
+import { ArrowUpRight, ChevronDown, Copy, Loader2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type ReactNode, useMemo, useState, useTransition } from "react";
@@ -287,7 +289,8 @@ function getExplorerHref(mintAddress: string | null): string | null {
   }
 
   const cluster = process.env.NEXT_PUBLIC_SOLANA_NETWORK;
-  const query = cluster && cluster !== "mainnet-beta" ? `?cluster=${encodeURIComponent(cluster)}` : "";
+  const query =
+    cluster && cluster !== "mainnet-beta" ? `?cluster=${encodeURIComponent(cluster)}` : "";
   return `https://explorer.solana.com/address/${mintAddress}${query}`;
 }
 
@@ -362,11 +365,20 @@ function ActionCard({
   );
 }
 
-function OverviewRow({ label, value, monospace = false }: { label: string; value: string; monospace?: boolean }) {
+function OverviewRow({
+  label,
+  value,
+  monospace = false,
+}: { label: string; value: string; monospace?: boolean }) {
   return (
     <div className="flex items-center justify-between gap-4 border-b border-[rgba(28,28,29,0.08)] px-4 py-3 last:border-b-0">
       <p className="text-[15px] text-[rgba(28,28,29,0.68)]">{label}</p>
-      <p className={["text-right text-[15px] text-[#1c1c1d]", monospace ? "font-mono text-xs" : ""].join(" ")}>
+      <p
+        className={[
+          "text-right text-[15px] text-[#1c1c1d]",
+          monospace ? "font-mono text-xs" : "",
+        ].join(" ")}
+      >
         {value}
       </p>
     </div>
@@ -388,17 +400,25 @@ export function TokenManagementWorkspace({
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("permissions");
   const [isActionMenuOpen, setIsActionMenuOpen] = useState(false);
   const [activeAction, setActiveAction] = useState<AdminAction | null>("update-metadata");
-  const [actionConfirmation, setActionConfirmation] = useState<ActionConfirmationState | null>(null);
+  const [actionConfirmation, setActionConfirmation] = useState<ActionConfirmationState | null>(
+    null
+  );
   const [metadataForm, setMetadataForm] = useState<MetadataFormState>(() =>
     createInitialMetadataForm(token)
   );
   const [mintForm, setMintForm] = useState<MintFormState>(createInitialMintForm);
   const [burnForm, setBurnForm] = useState<BurnFormState>(createInitialBurnForm);
   const [seizeForm, setSeizeForm] = useState<SeizeFormState>(createInitialSeizeForm);
-  const [forceBurnForm, setForceBurnForm] = useState<ForceBurnFormState>(createInitialForceBurnForm);
-  const [authorityForm, setAuthorityForm] = useState<AuthorityFormState>(createInitialAuthorityForm);
+  const [forceBurnForm, setForceBurnForm] = useState<ForceBurnFormState>(
+    createInitialForceBurnForm
+  );
+  const [authorityForm, setAuthorityForm] = useState<AuthorityFormState>(
+    createInitialAuthorityForm
+  );
   const [freezeForm, setFreezeForm] = useState<FreezeFormState>(createInitialFreezeForm);
-  const [allowlistForm, setAllowlistForm] = useState<AllowlistFormState>(createInitialAllowlistForm);
+  const [allowlistForm, setAllowlistForm] = useState<AllowlistFormState>(
+    createInitialAllowlistForm
+  );
   const [lastActionResult, setLastActionResult] = useState<ActionExecutionResult | null>(null);
 
   const tokenBasePath = useMemo(() => `/v1/issuance/tokens/${token.id}`, [token.id]);
@@ -587,22 +607,24 @@ export function TokenManagementWorkspace({
   };
 
   const handleDeploy = (mode: "prepare" | "execute") => {
-    runAction({
-      label: `Deploy token (${mode})`,
-      method: "POST",
-      path: `${tokenBasePath}/deploy${mode === "prepare" ? "/prepare" : ""}`,
-      body: {},
-    },
-    mode === "execute"
-      ? {
-          requiresConfirmation: true,
-          confirmationTitle: "Deploy token?",
-          confirmationDescription: "This will submit the deploy transaction on-chain.",
-          confirmButtonLabel: "Deploy now",
-          submitToast: "Submitting deploy transaction...",
-          successToast: "Deploy transaction finalized.",
-        }
-      : undefined);
+    runAction(
+      {
+        label: `Deploy token (${mode})`,
+        method: "POST",
+        path: `${tokenBasePath}/deploy${mode === "prepare" ? "/prepare" : ""}`,
+        body: {},
+      },
+      mode === "execute"
+        ? {
+            requiresConfirmation: true,
+            confirmationTitle: "Deploy token?",
+            confirmationDescription: "This will submit the deploy transaction on-chain.",
+            confirmButtonLabel: "Deploy now",
+            submitToast: "Submitting deploy transaction...",
+            successToast: "Deploy transaction finalized.",
+          }
+        : undefined
+    );
   };
 
   const handleRefreshSupply = () => {
@@ -622,28 +644,30 @@ export function TokenManagementWorkspace({
       return;
     }
 
-    runAction({
-      label: `Mint (${mode})`,
-      method: "POST",
-      path: `${tokenBasePath}/mint${mode === "prepare" ? "/prepare" : ""}`,
-      body: {
-        mint: {
-          destination,
-          amount,
-          memo: asOptionalString(mintForm.memo),
+    runAction(
+      {
+        label: `Mint (${mode})`,
+        method: "POST",
+        path: `${tokenBasePath}/mint${mode === "prepare" ? "/prepare" : ""}`,
+        body: {
+          mint: {
+            destination,
+            amount,
+            memo: asOptionalString(mintForm.memo),
+          },
         },
       },
-    },
-    mode === "execute"
-      ? {
-          requiresConfirmation: true,
-          confirmationTitle: "Mint tokens?",
-          confirmationDescription: "This will submit a mint transaction on-chain.",
-          confirmButtonLabel: "Mint now",
-          submitToast: "Submitting mint transaction...",
-          successToast: "Mint transaction finalized.",
-        }
-      : undefined);
+      mode === "execute"
+        ? {
+            requiresConfirmation: true,
+            confirmationTitle: "Mint tokens?",
+            confirmationDescription: "This will submit a mint transaction on-chain.",
+            confirmButtonLabel: "Mint now",
+            submitToast: "Submitting mint transaction...",
+            successToast: "Mint transaction finalized.",
+          }
+        : undefined
+    );
   };
 
   const handleBurn = (mode: "prepare" | "execute") => {
@@ -654,28 +678,30 @@ export function TokenManagementWorkspace({
       return;
     }
 
-    runAction({
-      label: `Burn (${mode})`,
-      method: "POST",
-      path: `${tokenBasePath}/burn${mode === "prepare" ? "/prepare" : ""}`,
-      body: {
-        burn: {
-          source,
-          amount,
-          memo: asOptionalString(burnForm.memo),
+    runAction(
+      {
+        label: `Burn (${mode})`,
+        method: "POST",
+        path: `${tokenBasePath}/burn${mode === "prepare" ? "/prepare" : ""}`,
+        body: {
+          burn: {
+            source,
+            amount,
+            memo: asOptionalString(burnForm.memo),
+          },
         },
       },
-    },
-    mode === "execute"
-      ? {
-          requiresConfirmation: true,
-          confirmationTitle: "Burn tokens?",
-          confirmationDescription: "This will submit a burn transaction on-chain.",
-          confirmButtonLabel: "Burn now",
-          submitToast: "Submitting burn transaction...",
-          successToast: "Burn transaction finalized.",
-        }
-      : undefined);
+      mode === "execute"
+        ? {
+            requiresConfirmation: true,
+            confirmationTitle: "Burn tokens?",
+            confirmationDescription: "This will submit a burn transaction on-chain.",
+            confirmButtonLabel: "Burn now",
+            submitToast: "Submitting burn transaction...",
+            successToast: "Burn transaction finalized.",
+          }
+        : undefined
+    );
   };
 
   const handleSeize = (mode: "prepare" | "execute") => {
@@ -687,30 +713,33 @@ export function TokenManagementWorkspace({
       return;
     }
 
-    runAction({
-      label: `Seize (${mode})`,
-      method: "POST",
-      path: `${tokenBasePath}/seize${mode === "prepare" ? "/prepare" : ""}`,
-      body: {
-        seize: {
-          source,
-          destination,
-          amount,
-          delegateAuthority: asOptionalString(seizeForm.delegateAuthority),
-          memo: asOptionalString(seizeForm.memo),
+    runAction(
+      {
+        label: `Seize (${mode})`,
+        method: "POST",
+        path: `${tokenBasePath}/seize${mode === "prepare" ? "/prepare" : ""}`,
+        body: {
+          seize: {
+            source,
+            destination,
+            amount,
+            delegateAuthority: asOptionalString(seizeForm.delegateAuthority),
+            memo: asOptionalString(seizeForm.memo),
+          },
         },
       },
-    },
-    mode === "execute"
-      ? {
-          requiresConfirmation: true,
-          confirmationTitle: "Force transfer?",
-          confirmationDescription: "This will submit a seize (force transfer) transaction on-chain.",
-          confirmButtonLabel: "Transfer now",
-          submitToast: "Submitting force transfer transaction...",
-          successToast: "Force transfer transaction finalized.",
-        }
-      : undefined);
+      mode === "execute"
+        ? {
+            requiresConfirmation: true,
+            confirmationTitle: "Force transfer?",
+            confirmationDescription:
+              "This will submit a seize (force transfer) transaction on-chain.",
+            confirmButtonLabel: "Transfer now",
+            submitToast: "Submitting force transfer transaction...",
+            successToast: "Force transfer transaction finalized.",
+          }
+        : undefined
+    );
   };
 
   const handleForceBurn = (mode: "prepare" | "execute") => {
@@ -721,73 +750,81 @@ export function TokenManagementWorkspace({
       return;
     }
 
-    runAction({
-      label: `Force Burn (${mode})`,
-      method: "POST",
-      path: `${tokenBasePath}/force-burn${mode === "prepare" ? "/prepare" : ""}`,
-      body: {
-        forceBurn: {
-          source,
-          amount,
-          delegateAuthority: asOptionalString(forceBurnForm.delegateAuthority),
-          memo: asOptionalString(forceBurnForm.memo),
+    runAction(
+      {
+        label: `Force Burn (${mode})`,
+        method: "POST",
+        path: `${tokenBasePath}/force-burn${mode === "prepare" ? "/prepare" : ""}`,
+        body: {
+          forceBurn: {
+            source,
+            amount,
+            delegateAuthority: asOptionalString(forceBurnForm.delegateAuthority),
+            memo: asOptionalString(forceBurnForm.memo),
+          },
         },
       },
-    },
-    mode === "execute"
-      ? {
-          requiresConfirmation: true,
-          confirmationTitle: "Force burn tokens?",
-          confirmationDescription: "This will submit a force-burn transaction on-chain.",
-          confirmButtonLabel: "Force burn now",
-          submitToast: "Submitting force-burn transaction...",
-          successToast: "Force-burn transaction finalized.",
-        }
-      : undefined);
+      mode === "execute"
+        ? {
+            requiresConfirmation: true,
+            confirmationTitle: "Force burn tokens?",
+            confirmationDescription: "This will submit a force-burn transaction on-chain.",
+            confirmButtonLabel: "Force burn now",
+            submitToast: "Submitting force-burn transaction...",
+            successToast: "Force-burn transaction finalized.",
+          }
+        : undefined
+    );
   };
 
   const handleAuthorityUpdate = (mode: "prepare" | "execute") => {
-    runAction({
-      label: `Update authority (${mode})`,
-      method: "POST",
-      path: `${tokenBasePath}/authority${mode === "prepare" ? "/prepare" : ""}`,
-      body: {
-        authority: {
-          role: authorityForm.role,
-          currentAuthority: asOptionalString(authorityForm.currentAuthority),
-          newAuthority: authorityForm.newAuthority.trim() || null,
+    runAction(
+      {
+        label: `Update authority (${mode})`,
+        method: "POST",
+        path: `${tokenBasePath}/authority${mode === "prepare" ? "/prepare" : ""}`,
+        body: {
+          authority: {
+            role: authorityForm.role,
+            currentAuthority: asOptionalString(authorityForm.currentAuthority),
+            newAuthority: authorityForm.newAuthority.trim() || null,
+          },
         },
       },
-    },
-    mode === "execute"
-      ? {
-          requiresConfirmation: true,
-          confirmationTitle: "Update authority?",
-          confirmationDescription: "This will submit an authority update transaction on-chain.",
-          confirmButtonLabel: "Update now",
-          submitToast: "Submitting authority update transaction...",
-          successToast: "Authority update finalized.",
-        }
-      : undefined);
+      mode === "execute"
+        ? {
+            requiresConfirmation: true,
+            confirmationTitle: "Update authority?",
+            confirmationDescription: "This will submit an authority update transaction on-chain.",
+            confirmButtonLabel: "Update now",
+            submitToast: "Submitting authority update transaction...",
+            successToast: "Authority update finalized.",
+          }
+        : undefined
+    );
   };
 
   const handlePause = (pause: boolean) => {
-    runAction({
-      label: pause ? "Pause token" : "Unpause token",
-      method: "POST",
-      path: `${tokenBasePath}/${pause ? "pause" : "unpause"}`,
-      body: {},
-    },
-    {
-      requiresConfirmation: true,
-      confirmationTitle: pause ? "Pause token?" : "Unpause token?",
-      confirmationDescription: pause
-        ? "This will submit a pause transaction on-chain."
-        : "This will submit an unpause transaction on-chain.",
-      confirmButtonLabel: pause ? "Pause now" : "Unpause now",
-      submitToast: pause ? "Submitting pause transaction..." : "Submitting unpause transaction...",
-      successToast: pause ? "Pause transaction finalized." : "Unpause transaction finalized.",
-    });
+    runAction(
+      {
+        label: pause ? "Pause token" : "Unpause token",
+        method: "POST",
+        path: `${tokenBasePath}/${pause ? "pause" : "unpause"}`,
+        body: {},
+      },
+      {
+        requiresConfirmation: true,
+        confirmationTitle: pause ? "Pause token?" : "Unpause token?",
+        confirmationDescription: pause
+          ? "This will submit a pause transaction on-chain."
+          : "This will submit an unpause transaction on-chain.",
+        confirmButtonLabel: pause ? "Pause now" : "Unpause now",
+        submitToast: pause
+          ? "Submitting pause transaction..."
+          : "Submitting unpause transaction...",
+        successToast: pause ? "Pause transaction finalized." : "Unpause transaction finalized.",
+      }
+    );
   };
 
   const handleFreeze = (unfreeze: boolean) => {
@@ -798,42 +835,46 @@ export function TokenManagementWorkspace({
     }
 
     if (unfreeze) {
-      runAction({
-        label: "Unfreeze account",
+      runAction(
+        {
+          label: "Unfreeze account",
+          method: "POST",
+          path: `${tokenBasePath}/unfreeze`,
+          body: {
+            accountAddress,
+          },
+        },
+        {
+          requiresConfirmation: true,
+          confirmationTitle: "Unfreeze account?",
+          confirmationDescription: "This will submit an unfreeze transaction on-chain.",
+          confirmButtonLabel: "Unfreeze now",
+          submitToast: "Submitting unfreeze transaction...",
+          successToast: "Unfreeze transaction finalized.",
+        }
+      );
+      return;
+    }
+
+    runAction(
+      {
+        label: "Freeze account",
         method: "POST",
-        path: `${tokenBasePath}/unfreeze`,
+        path: `${tokenBasePath}/freeze`,
         body: {
           accountAddress,
+          reason: asOptionalString(freezeForm.reason),
         },
       },
       {
         requiresConfirmation: true,
-        confirmationTitle: "Unfreeze account?",
-        confirmationDescription: "This will submit an unfreeze transaction on-chain.",
-        confirmButtonLabel: "Unfreeze now",
-        submitToast: "Submitting unfreeze transaction...",
-        successToast: "Unfreeze transaction finalized.",
-      });
-      return;
-    }
-
-    runAction({
-      label: "Freeze account",
-      method: "POST",
-      path: `${tokenBasePath}/freeze`,
-      body: {
-        accountAddress,
-        reason: asOptionalString(freezeForm.reason),
-      },
-    },
-    {
-      requiresConfirmation: true,
-      confirmationTitle: "Freeze account?",
-      confirmationDescription: "This will submit a freeze transaction on-chain.",
-      confirmButtonLabel: "Freeze now",
-      submitToast: "Submitting freeze transaction...",
-      successToast: "Freeze transaction finalized.",
-    });
+        confirmationTitle: "Freeze account?",
+        confirmationDescription: "This will submit a freeze transaction on-chain.",
+        confirmButtonLabel: "Freeze now",
+        submitToast: "Submitting freeze transaction...",
+        successToast: "Freeze transaction finalized.",
+      }
+    );
   };
 
   const handleAddAllowlist = () => {
@@ -875,7 +916,9 @@ export function TokenManagementWorkspace({
             {token.symbol.slice(0, 1) || "T"}
           </div>
           <div className="min-w-0">
-            <h2 className="truncate text-[30px] leading-[1.1] font-medium text-[#1c1c1d]">{token.name}</h2>
+            <h2 className="truncate text-[30px] leading-[1.1] font-medium text-[#1c1c1d]">
+              {token.name}
+            </h2>
             <p className="truncate text-[17px] text-[rgba(28,28,29,0.66)]">{token.symbol}</p>
           </div>
         </div>
@@ -1016,9 +1059,15 @@ export function TokenManagementWorkspace({
       ) : null}
 
       <section className="space-y-3">
-        <h3 className="text-[36px] leading-[40px] font-medium tracking-[-0.3px] text-[#1c1c1d]">Token Overview</h3>
+        <h3 className="text-[36px] leading-[40px] font-medium tracking-[-0.3px] text-[#1c1c1d]">
+          Token Overview
+        </h3>
         <div className="overflow-hidden rounded-2xl border border-[rgba(28,28,29,0.12)] bg-white">
-          <OverviewRow label="Token Address" value={token.mintAddress ?? "Not deployed"} monospace />
+          <OverviewRow
+            label="Token Address"
+            value={token.mintAddress ?? "Not deployed"}
+            monospace
+          />
           <OverviewRow label="Mint Authority" value={token.mintAuthority ?? "None"} monospace />
           <OverviewRow label="Supply" value={token.totalSupply} />
           <OverviewRow label="Created" value={formatDate(token.createdAt)} />
@@ -1028,7 +1077,9 @@ export function TokenManagementWorkspace({
       </section>
 
       <section className="space-y-3">
-        <h3 className="text-[36px] leading-[40px] font-medium tracking-[-0.3px] text-[#1c1c1d]">Settings</h3>
+        <h3 className="text-[36px] leading-[40px] font-medium tracking-[-0.3px] text-[#1c1c1d]">
+          Settings
+        </h3>
         <div className="border-b border-[rgba(28,28,29,0.12)]">
           <div className="flex gap-8">
             <button
@@ -1145,7 +1196,10 @@ export function TokenManagementWorkspace({
               <Input
                 value={metadataForm.description}
                 onChange={(event) =>
-                  setMetadataForm((previous) => ({ ...previous, description: event.currentTarget.value }))
+                  setMetadataForm((previous) => ({
+                    ...previous,
+                    description: event.currentTarget.value,
+                  }))
                 }
               />
             </Label>
@@ -1163,7 +1217,10 @@ export function TokenManagementWorkspace({
               <Input
                 value={metadataForm.imageUrl}
                 onChange={(event) =>
-                  setMetadataForm((previous) => ({ ...previous, imageUrl: event.currentTarget.value }))
+                  setMetadataForm((previous) => ({
+                    ...previous,
+                    imageUrl: event.currentTarget.value,
+                  }))
                 }
               />
             </Label>
@@ -1176,7 +1233,12 @@ export function TokenManagementWorkspace({
 
       {activeAction === "refresh-supply" ? (
         <ActionCard title="Refresh Supply" description="Fetch supply from RPC and update cache.">
-          <Button type="button" variant="secondary" onClick={handleRefreshSupply} disabled={isPending}>
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={handleRefreshSupply}
+            disabled={isPending}
+          >
             Refresh supply
           </Button>
         </ActionCard>
@@ -1190,7 +1252,10 @@ export function TokenManagementWorkspace({
               <Input
                 value={mintForm.destination}
                 onChange={(event) =>
-                  setMintForm((previous) => ({ ...previous, destination: event.currentTarget.value }))
+                  setMintForm((previous) => ({
+                    ...previous,
+                    destination: event.currentTarget.value,
+                  }))
                 }
               />
             </Label>
@@ -1214,7 +1279,12 @@ export function TokenManagementWorkspace({
             </Label>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button type="button" variant="outline" onClick={() => handleMint("prepare")} disabled={isPending}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => handleMint("prepare")}
+              disabled={isPending}
+            >
               Mint (prepare)
             </Button>
             <Button type="button" onClick={() => handleMint("execute")} disabled={isPending}>
@@ -1256,7 +1326,12 @@ export function TokenManagementWorkspace({
             </Label>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button type="button" variant="outline" onClick={() => handleBurn("prepare")} disabled={isPending}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => handleBurn("prepare")}
+              disabled={isPending}
+            >
               Burn (prepare)
             </Button>
             <Button type="button" onClick={() => handleBurn("execute")} disabled={isPending}>
@@ -1267,7 +1342,10 @@ export function TokenManagementWorkspace({
       ) : null}
 
       {activeAction === "seize" ? (
-        <ActionCard title="Force Transfer" description="Administrative seizure transfer between accounts.">
+        <ActionCard
+          title="Force Transfer"
+          description="Administrative seizure transfer between accounts."
+        >
           <div className="grid gap-3 md:grid-cols-2">
             <Label>
               Source
@@ -1283,7 +1361,10 @@ export function TokenManagementWorkspace({
               <Input
                 value={seizeForm.destination}
                 onChange={(event) =>
-                  setSeizeForm((previous) => ({ ...previous, destination: event.currentTarget.value }))
+                  setSeizeForm((previous) => ({
+                    ...previous,
+                    destination: event.currentTarget.value,
+                  }))
                 }
               />
             </Label>
@@ -1301,7 +1382,10 @@ export function TokenManagementWorkspace({
               <Input
                 value={seizeForm.delegateAuthority}
                 onChange={(event) =>
-                  setSeizeForm((previous) => ({ ...previous, delegateAuthority: event.currentTarget.value }))
+                  setSeizeForm((previous) => ({
+                    ...previous,
+                    delegateAuthority: event.currentTarget.value,
+                  }))
                 }
               />
             </Label>
@@ -1316,7 +1400,12 @@ export function TokenManagementWorkspace({
             </Label>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button type="button" variant="outline" onClick={() => handleSeize("prepare")} disabled={isPending}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => handleSeize("prepare")}
+              disabled={isPending}
+            >
               Seize (prepare)
             </Button>
             <Button type="button" onClick={() => handleSeize("execute")} disabled={isPending}>
@@ -1327,14 +1416,20 @@ export function TokenManagementWorkspace({
       ) : null}
 
       {activeAction === "force-burn" ? (
-        <ActionCard title="Force Burn" description="Administrative forced burn from source account.">
+        <ActionCard
+          title="Force Burn"
+          description="Administrative forced burn from source account."
+        >
           <div className="grid gap-3 md:grid-cols-2">
             <Label>
               Source
               <Input
                 value={forceBurnForm.source}
                 onChange={(event) =>
-                  setForceBurnForm((previous) => ({ ...previous, source: event.currentTarget.value }))
+                  setForceBurnForm((previous) => ({
+                    ...previous,
+                    source: event.currentTarget.value,
+                  }))
                 }
               />
             </Label>
@@ -1343,7 +1438,10 @@ export function TokenManagementWorkspace({
               <Input
                 value={forceBurnForm.amount}
                 onChange={(event) =>
-                  setForceBurnForm((previous) => ({ ...previous, amount: event.currentTarget.value }))
+                  setForceBurnForm((previous) => ({
+                    ...previous,
+                    amount: event.currentTarget.value,
+                  }))
                 }
               />
             </Label>
@@ -1352,7 +1450,10 @@ export function TokenManagementWorkspace({
               <Input
                 value={forceBurnForm.delegateAuthority}
                 onChange={(event) =>
-                  setForceBurnForm((previous) => ({ ...previous, delegateAuthority: event.currentTarget.value }))
+                  setForceBurnForm((previous) => ({
+                    ...previous,
+                    delegateAuthority: event.currentTarget.value,
+                  }))
                 }
               />
             </Label>
@@ -1420,7 +1521,10 @@ export function TokenManagementWorkspace({
               <Input
                 value={authorityForm.newAuthority}
                 onChange={(event) =>
-                  setAuthorityForm((previous) => ({ ...previous, newAuthority: event.currentTarget.value }))
+                  setAuthorityForm((previous) => ({
+                    ...previous,
+                    newAuthority: event.currentTarget.value,
+                  }))
                 }
               />
             </Label>
@@ -1434,7 +1538,11 @@ export function TokenManagementWorkspace({
             >
               Authority (prepare)
             </Button>
-            <Button type="button" onClick={() => handleAuthorityUpdate("execute")} disabled={isPending}>
+            <Button
+              type="button"
+              onClick={() => handleAuthorityUpdate("execute")}
+              disabled={isPending}
+            >
               Authority (execute)
             </Button>
           </div>
@@ -1444,7 +1552,12 @@ export function TokenManagementWorkspace({
       {activeAction === "pause" ? (
         <ActionCard title="Pause Controls" description="Pause or resume token-wide transfers.">
           <div className="flex flex-wrap gap-2">
-            <Button type="button" variant="outline" onClick={() => handlePause(true)} disabled={isPending}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => handlePause(true)}
+              disabled={isPending}
+            >
               Pause token
             </Button>
             <Button type="button" onClick={() => handlePause(false)} disabled={isPending}>
@@ -1462,7 +1575,10 @@ export function TokenManagementWorkspace({
               <Input
                 value={freezeForm.accountAddress}
                 onChange={(event) =>
-                  setFreezeForm((previous) => ({ ...previous, accountAddress: event.currentTarget.value }))
+                  setFreezeForm((previous) => ({
+                    ...previous,
+                    accountAddress: event.currentTarget.value,
+                  }))
                 }
               />
             </Label>
@@ -1477,7 +1593,12 @@ export function TokenManagementWorkspace({
             </Label>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button type="button" variant="outline" onClick={() => handleFreeze(false)} disabled={isPending}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => handleFreeze(false)}
+              disabled={isPending}
+            >
               Freeze account
             </Button>
             <Button type="button" onClick={() => handleFreeze(true)} disabled={isPending}>
@@ -1495,7 +1616,10 @@ export function TokenManagementWorkspace({
               <Input
                 value={allowlistForm.address}
                 onChange={(event) =>
-                  setAllowlistForm((previous) => ({ ...previous, address: event.currentTarget.value }))
+                  setAllowlistForm((previous) => ({
+                    ...previous,
+                    address: event.currentTarget.value,
+                  }))
                 }
               />
             </Label>
@@ -1504,7 +1628,10 @@ export function TokenManagementWorkspace({
               <Input
                 value={allowlistForm.label}
                 onChange={(event) =>
-                  setAllowlistForm((previous) => ({ ...previous, label: event.currentTarget.value }))
+                  setAllowlistForm((previous) => ({
+                    ...previous,
+                    label: event.currentTarget.value,
+                  }))
                 }
               />
             </Label>
@@ -1526,7 +1653,9 @@ export function TokenManagementWorkspace({
                 >
                   <div className="min-w-0">
                     <p className="truncate font-mono text-xs text-[#1c1c1d]">{entry.address}</p>
-                    <p className="text-xs text-[rgba(28,28,29,0.62)]">{entry.label ?? "No label"}</p>
+                    <p className="text-xs text-[rgba(28,28,29,0.62)]">
+                      {entry.label ?? "No label"}
+                    </p>
                   </div>
                   <Button
                     type="button"
@@ -1593,7 +1722,9 @@ export function TokenManagementWorkspace({
               {allowlistError ? (
                 <p className="mt-1 text-sm text-[#8a1f2a]">{allowlistError}</p>
               ) : (
-                <p className="mt-1 text-sm text-[rgba(28,28,29,0.66)]">{allowlistEntries.length} entries</p>
+                <p className="mt-1 text-sm text-[rgba(28,28,29,0.66)]">
+                  {allowlistEntries.length} entries
+                </p>
               )}
             </div>
             <div className="rounded-xl border border-[rgba(28,28,29,0.12)] p-3">
@@ -1601,7 +1732,9 @@ export function TokenManagementWorkspace({
               {frozenAccountsError ? (
                 <p className="mt-1 text-sm text-[#8a1f2a]">{frozenAccountsError}</p>
               ) : (
-                <p className="mt-1 text-sm text-[rgba(28,28,29,0.66)]">{frozenAccounts.length} accounts</p>
+                <p className="mt-1 text-sm text-[rgba(28,28,29,0.66)]">
+                  {frozenAccounts.length} accounts
+                </p>
               )}
             </div>
           </CardContent>
@@ -1616,7 +1749,11 @@ export function TokenManagementWorkspace({
         <CardContent>
           {lastActionResult ? (
             <div className="space-y-2">
-              <p className={lastActionResult.ok ? "text-sm text-[#0f9b58]" : "text-sm text-[#8a1f2a]"}>
+              <p
+                className={
+                  lastActionResult.ok ? "text-sm text-[#0f9b58]" : "text-sm text-[#8a1f2a]"
+                }
+              >
                 {lastActionResult.message}
               </p>
               <pre className="max-h-[320px] overflow-auto rounded-xl border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.03)] p-3 text-xs text-[#1c1c1d]">
@@ -1624,7 +1761,9 @@ export function TokenManagementWorkspace({
               </pre>
             </div>
           ) : (
-            <p className="text-sm text-[rgba(28,28,29,0.68)]">Select and run an action to inspect response data.</p>
+            <p className="text-sm text-[rgba(28,28,29,0.68)]">
+              Select and run an action to inspect response data.
+            </p>
           )}
         </CardContent>
       </Card>
@@ -1672,7 +1811,6 @@ export function TokenManagementWorkspace({
           Running action...
         </div>
       ) : null}
-
     </div>
   );
 }

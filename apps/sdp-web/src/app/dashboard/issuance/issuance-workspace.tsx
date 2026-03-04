@@ -291,7 +291,9 @@ export function IssuanceWorkspace({
             </div>
 
             {tokens.length > 0 && filteredTokens.length === 0 ? (
-              <p className="text-sm text-[rgba(28,28,29,0.64)]">No tokens match your current search.</p>
+              <p className="text-sm text-[rgba(28,28,29,0.64)]">
+                No tokens match your current search.
+              </p>
             ) : null}
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
@@ -326,20 +328,31 @@ export function IssuanceWorkspace({
                   <div className="mt-6 space-y-2 rounded-xl border border-[rgba(28,28,29,0.08)] bg-[rgba(28,28,29,0.03)] p-3">
                     <div className="flex items-center justify-between text-sm">
                       <span className="text-[rgba(28,28,29,0.58)]">Type</span>
-                      <span className="font-medium text-[#1c1c1d]">{getTokenTypeLabel(token.template)}</span>
+                      <span className="font-medium text-[#1c1c1d]">
+                        {getTokenTypeLabel(token.template)}
+                      </span>
                     </div>
                     <div className="flex items-center justify-between text-sm">
                       <span className="text-[rgba(28,28,29,0.58)]">Supply</span>
-                      <span className="font-medium text-[#1c1c1d]">{formatSupply(token.totalSupply)}</span>
+                      <span className="font-medium text-[#1c1c1d]">
+                        {formatSupply(token.totalSupply)}
+                      </span>
                     </div>
                     <div className="flex items-center justify-between text-sm">
                       <span className="text-[rgba(28,28,29,0.58)]">Created</span>
-                      <span className="font-medium text-[#1c1c1d]">{formatDate(token.createdAt)}</span>
+                      <span className="font-medium text-[#1c1c1d]">
+                        {formatDate(token.createdAt)}
+                      </span>
                     </div>
                   </div>
 
                   <div className="mt-auto pt-3">
-                    <Button type="button" variant="outline" className="h-11 w-full rounded-[10px]" asChild>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-11 w-full rounded-[10px]"
+                      asChild
+                    >
                       <Link href={`/dashboard/issuance/${token.id}`}>Manage</Link>
                     </Button>
                   </div>
