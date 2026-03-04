@@ -1,0 +1,144 @@
+import { type SdpApiClient, createSdpApiClient } from "@/lib/sdp-api";
+import { auth } from "@clerk/nextjs/server";
+import type { FrozenAccount, Token, TokenAllowlistEntry, TokenTransaction } from "@sdp/types";
+import { notFound, redirect } from "next/navigation";
+import { TokenManagementWorkspace } from "./token-management-workspace";
+
+interface TokenManagementPageProps {
+  params: Promise<{
+    tokenId: string;
+  }>;
+}
+
+interface FetchResult<T> {
+  status: number | null;
+  data: T | null;
+  error: string | null;
+}
+
+function parseErrorMessage(body: string): string {
+  try {
+    const parsed = JSON.parse(body) as {
+      error?: { message?: string };
+      message?: string;
+    };
+    return parsed?.error?.message ?? parsed?.message ?? body;
+  } catch {
+    return body || "Unknown error";
+  }
+}
+
+async function fetchData<T>(
+  request: SdpApiClient["request"],
+  path: string,
+  map: (payload: unknown) => T
+): Promise<FetchResult<T>> {
+  try {
+    const response = await request(path);
+    if (!response.ok) {
+      const body = await response.text();
+      return {
+        status: response.status,
+        data: null,
+        error: parseErrorMessage(body),
+      };
+    }
+
+    const payload = (await response.json()) as {
+      data?: unknown;
+    };
+
+    return {
+      status: response.status,
+      data: map(payload?.data),
+      error: null,
+    };
+  } catch (error) {
+    return {
+      status: null,
+      data: null,
+      error: error instanceof Error ? error.message : "Request failed",
+    };
+  }
+}
+
+function mapToken(payload: unknown): Token | null {
+  if (!payload || typeof payload !== "object") {
+    return null;
+  }
+
+  const token = (payload as { token?: Token }).token;
+  return token ?? null;
+}
+
+function mapList<T>(payload: unknown): T[] {
+  if (!Array.isArray(payload)) {
+    return [];
+  }
+  return payload as T[];
+}
+
+export default async function IssuanceTokenManagementPage({ params }: TokenManagementPageProps) {
+  const { userId, orgId } = await auth();
+  if (!userId) {
+    redirect("/sign-in");
+  }
+  if (!orgId) {
+    redirect("/dashboard");
+  }
+
+  const { tokenId } = await params;
+  const apiClient = await createSdpApiClient();
+
+  const [tokenResult, transactionsResult, allowlistResult, frozenResult] = await Promise.all([
+    fetchData<Token | null>(apiClient.request, `/v1/issuance/tokens/${tokenId}`, mapToken),
+    fetchData<TokenTransaction[]>(
+      apiClient.request,
+      `/v1/issuance/tokens/${tokenId}/transactions?page=1&pageSize=100`,
+      (payload) => mapList<TokenTransaction>(payload)
+    ),
+    fetchData<TokenAllowlistEntry[]>(
+      apiClient.request,
+      `/v1/issuance/tokens/${tokenId}/allowlist?page=1&pageSize=100`,
+      (payload) => mapList<TokenAllowlistEntry>(payload)
+    ),
+    fetchData<FrozenAccount[]>(
+      apiClient.request,
+      `/v1/issuance/tokens/${tokenId}/frozen?page=1&pageSize=100`,
+      (payload) => mapList<FrozenAccount>(payload)
+    ),
+  ]);
+
+  if (tokenResult.status === 404 || !tokenResult.data) {
+    notFound();
+  }
+
+  return (
+    <TokenManagementWorkspace
+      token={tokenResult.data}
+      tokenError={
+        tokenResult.error
+          ? `Token API ${tokenResult.status ?? "unavailable"}: ${tokenResult.error}`
+          : null
+      }
+      transactions={transactionsResult.data ?? []}
+      transactionsError={
+        transactionsResult.error
+          ? `Transactions API ${transactionsResult.status ?? "unavailable"}: ${transactionsResult.error}`
+          : null
+      }
+      allowlistEntries={allowlistResult.data ?? []}
+      allowlistError={
+        allowlistResult.error
+          ? `Allowlist API ${allowlistResult.status ?? "unavailable"}: ${allowlistResult.error}`
+          : null
+      }
+      frozenAccounts={frozenResult.data ?? []}
+      frozenAccountsError={
+        frozenResult.error
+          ? `Frozen API ${frozenResult.status ?? "unavailable"}: ${frozenResult.error}`
+          : null
+      }
+    />
+  );
+}
