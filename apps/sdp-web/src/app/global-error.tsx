@@ -6,8 +6,10 @@ import { useEffect } from "react";
 
 export default function GlobalError({
   error,
+  reset,
 }: {
   error: Error & { digest?: string };
+  reset: () => void;
 }) {
   useEffect(() => {
     Sentry.captureException(error);
@@ -21,6 +23,9 @@ export default function GlobalError({
         does not expose status codes for errors, we simply pass 0 to render a
         generic error message. */}
         <NextError statusCode={0} />
+        <button onClick={() => reset()} type="button">
+          Try again
+        </button>
       </body>
     </html>
   );
