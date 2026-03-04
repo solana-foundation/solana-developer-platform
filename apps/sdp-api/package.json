@@ -32,6 +32,7 @@
     "@sdp/keychain-coinbase": "workspace:*",
     "@sdp/keychain-para": "workspace:*",
     "@sdp/types": "workspace:*",
+    "@sentry/cloudflare": "^10.42.0",
     "@solana-program/system": "catalog:",
     "@solana-program/token-2022": "catalog:",
     "@solana/addresses": "catalog:",

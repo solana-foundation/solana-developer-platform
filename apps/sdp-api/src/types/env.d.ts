@@ -24,6 +24,8 @@ export interface Env {
   // Secrets (set via wrangler secret)
   API_KEY_PEPPER?: string;
   CUSTODY_ENCRYPTION_KEY?: string; // For encrypting org private keys in DB
+  SENTRY_DSN?: string;
+  SENTRY_TRACES_SAMPLE_RATE?: string;
 
   // Email configuration
   EMAIL_PROVIDER?: "resend" | "console";

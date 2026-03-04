@@ -1,5 +1,9 @@
 # SDP API local dev vars (copy to .dev.vars)
 
+# Sentry
+# SENTRY_DSN=https://examplePublicKey@o0.ingest.us.sentry.io/0
+# SENTRY_TRACES_SAMPLE_RATE=1.0
+
 # Solana RPC (devnet). Use your own provider key if possible.
 SOLANA_RPC_URL=https://api.devnet.solana.com
 SOLANA_RPC_DEFAULT_PROVIDER=default
