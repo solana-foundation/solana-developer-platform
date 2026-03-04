@@ -13,6 +13,7 @@
   "dependencies": {
     "@clerk/nextjs": "6.37.2",
     "@sdp/types": "workspace:*",
+    "@sentry/nextjs": "^10.42.0",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
     "framer-motion": "^11.18.2",
