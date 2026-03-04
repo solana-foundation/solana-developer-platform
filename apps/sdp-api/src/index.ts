@@ -5,7 +5,8 @@
  * Built with Hono, D1, and KV
  */
 
-import { Hono } from "hono";
+import * as Sentry from "@sentry/cloudflare";
+import { type Context, Hono } from "hono";
 import { logger } from "hono/logger";
 import { prettyJSON } from "hono/pretty-json";
 import { secureHeaders } from "hono/secure-headers";
@@ -37,6 +38,80 @@ import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
 
 // Create app
 const app = new Hono<{ Bindings: Env }>();
+
+const SENTRY_PENDING_TRANSFERS_MONITOR = "sdp-api-track-pending-transfers";
+const PENDING_TRANSFERS_CRON = "* * * * *";
+
+function parseSentryTraceSampleRate(value: string | undefined, fallback: number): number {
+  if (!value) {
+    return fallback;
+  }
+
+  const parsed = Number.parseFloat(value);
+  if (!Number.isFinite(parsed) || parsed < 0 || parsed > 1) {
+    return fallback;
+  }
+
+  return parsed;
+}
+
+function getSentryOptions(env: Env) {
+  const dsn = env.SENTRY_DSN?.trim();
+  const defaultTraceSampleRate = env.ENVIRONMENT === "production" ? 0.1 : 1;
+  const tracesSampleRate = parseSentryTraceSampleRate(
+    env.SENTRY_TRACES_SAMPLE_RATE,
+    defaultTraceSampleRate
+  );
+
+  return {
+    ...(dsn ? { dsn } : {}),
+    enabled: Boolean(dsn),
+    environment: env.ENVIRONMENT,
+    tracesSampleRate,
+    sendDefaultPii: false,
+  };
+}
+
+function captureUnexpectedError(err: Error, c: Context<{ Bindings: Env }>): void {
+  if (!c.env.SENTRY_DSN?.trim()) {
+    return;
+  }
+
+  const requestId = c.get("requestId");
+  const path = new URL(c.req.url).pathname;
+
+  Sentry.withScope((scope) => {
+    scope.setTag("request_id", requestId);
+    scope.setTag("http_method", c.req.method);
+    scope.setTag("http_path", path);
+
+    const apiKey = c.get("apiKey");
+    const session = c.get("session");
+    const clerk = c.get("clerk");
+
+    if (apiKey) {
+      scope.setTag("auth_type", "api_key");
+      scope.setTag("organization_id", apiKey.organizationId);
+      if (apiKey.projectId) {
+        scope.setTag("project_id", apiKey.projectId);
+      }
+      scope.setUser({ id: `api_key:${apiKey.id}` });
+    } else if (session) {
+      scope.setTag("auth_type", "session");
+      scope.setTag("organization_id", session.organizationId);
+      scope.setUser({ id: session.userId });
+    } else if (clerk) {
+      scope.setTag("auth_type", "clerk");
+      scope.setTag("organization_id", clerk.organizationId);
+      if (clerk.orgSlug) {
+        scope.setTag("organization_slug", clerk.orgSlug);
+      }
+      scope.setUser({ id: clerk.userId });
+    }
+
+    Sentry.captureException(err);
+  });
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Global Middleware
@@ -132,6 +207,7 @@ app.onError((err, c) => {
     error: err.message,
     stack: err.stack,
   });
+  captureUnexpectedError(err, c);
 
   return c.json(
     {
@@ -165,8 +241,33 @@ app.notFound((c) => {
 
 // Attach the scheduled handler to the Hono app so Cloudflare Workers can
 // invoke it for cron triggers, while preserving app.request() for tests.
-export default Object.assign(app, {
-  async scheduled(_event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
-    ctx.waitUntil(trackPendingTransfers(env));
+const worker = {
+  fetch(request: Request, env: Env, ctx: ExecutionContext): Response | Promise<Response> {
+    return app.fetch(request, env, ctx);
   },
-});
+  async scheduled(
+    _controller: ScheduledController,
+    env: Env,
+    ctx: ExecutionContext
+  ): Promise<void> {
+    const runPendingTransferTracking = () => trackPendingTransfers(env);
+    if (!env.SENTRY_DSN) {
+      ctx.waitUntil(runPendingTransferTracking());
+      return;
+    }
+
+    ctx.waitUntil(
+      Sentry.withMonitor(SENTRY_PENDING_TRANSFERS_MONITOR, runPendingTransferTracking, {
+        schedule: {
+          type: "crontab",
+          value: PENDING_TRANSFERS_CRON,
+        },
+      })
+    );
+  },
+  request: app.request.bind(app),
+} satisfies ExportedHandler<Env> & {
+  request: typeof app.request;
+};
+
+export default Sentry.withSentry(getSentryOptions, worker);
