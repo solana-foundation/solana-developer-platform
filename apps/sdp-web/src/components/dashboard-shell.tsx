@@ -387,6 +387,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
                     left={quickActionsLeft}
                     right={pageConfig.quickActionsRight}
                     compact={false}
+                    align={pageConfig.backAction ? "start" : "end"}
                   />
                 </div>
               </div>
