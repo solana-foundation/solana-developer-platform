@@ -1,20 +1,15 @@
-import { createD1Drizzle } from "@/db/drizzle";
 import type {
   PaymentTransferDirection as TransferDirection,
   PaymentTransferRow as TransferRow,
   PaymentTransferStatus as TransferStatus,
   PaymentTransferType as TransferType,
-  PaymentWalletPolicyRow as WalletPolicyRow,
 } from "@/db/repositories/payments.repository";
-import { createD1PaymentsRepository } from "@/db/repositories/payments.repository.d1";
-import { formatDecimalAmount, isDecimalString, parseDecimalAmount } from "@/lib/amount";
+import { formatDecimalAmount, parseDecimalAmount } from "@/lib/amount";
 import { assertApiKeyWalletAccess, getAllowedApiKeyWalletIds } from "@/lib/api-key-wallet-auth";
 import { getAuth } from "@/lib/auth";
 import { AppError } from "@/lib/errors";
 import { paginated, success } from "@/lib/response";
 import { assertValidAddress, isAddress } from "@/lib/solana";
-import { createFeePaymentAdapter } from "@/services/adapters/fee-payment";
-import { createSigningService } from "@/services/domain/signing.service";
 import { withHeliusApiKey } from "@/services/rpc-relay.service";
 import { createOrgSigner } from "@/services/solana";
 import {
@@ -48,7 +43,14 @@ import {
   setTransactionMessageLifetimeUsingBlockhash,
 } from "@solana/kit";
 import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
-import type { Context } from "hono";
+import {
+  type AppContext,
+  getFeePayment,
+  getPaymentsRepository,
+  getSponsoredFeePayer,
+} from "./context";
+import { mapTransferRow } from "./mappers";
+import { assertWalletPolicyAllowsTransfer, buildWalletPolicyPayload } from "./policy";
 import {
   createTransferSchema,
   executeOfframpSchema,
@@ -58,8 +60,7 @@ import {
   updateWalletPolicySchema,
   walletIdParamsSchema,
 } from "./schemas";
-
-type AppContext = Context<{ Bindings: Env }>;
+import { type ResolvedScope, resolveScope, resolveWallet, resolveWalletAddress } from "./wallets";
 // biome-ignore lint/nursery/noSecrets: Solana native SOL mint address constant, not a secret.
 const SOL_MINT = "So11111111111111111111111111111111111111112";
 // biome-ignore lint/nursery/noSecrets: Solana SPL Token program ID, not a secret.
@@ -77,294 +78,9 @@ const MOONPAY_SANDBOX_OFFRAMP_URL = "https://sell-sandbox.moonpay.com";
 const BVNK_PRODUCTION_API_URL = "https://api.bvnk.com";
 const BVNK_SANDBOX_API_URL = "https://api.sandbox.bvnk.com";
 
-function getPaymentsRepository(c: AppContext) {
-  return createD1PaymentsRepository({ db: createD1Drizzle(c.env.DB) });
-}
-
-function getFeePayment(c: AppContext) {
-  return createFeePaymentAdapter(c.env);
-}
-
-async function getSponsoredFeePayer(c: AppContext): Promise<Address> {
-  return getFeePayment(c).getFeePayer();
-}
-
 function isNativeSolToken(token: string): boolean {
   const normalized = token.trim();
   return normalized.toUpperCase() === "SOL" || normalized === SOL_MINT;
-}
-
-function parsePolicyDocument(raw: string): Record<string, unknown> | null {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (parsed === null || Array.isArray(parsed) || typeof parsed !== "object") {
-      return null;
-    }
-    return parsed as Record<string, unknown>;
-  } catch {
-    return null;
-  }
-}
-
-function parseDestinationAllowlistPolicy(raw: string): string[] {
-  const document = parsePolicyDocument(raw);
-  if (!document || document.version !== PAYMENT_POLICY_VERSION) {
-    return [];
-  }
-
-  const value = document.destinationAllowlist;
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  return value.filter((entry): entry is string => typeof entry === "string");
-}
-
-function parseTransferLimitsPolicy(raw: string): {
-  maxTransferAmount?: string;
-  maxDailyAmount?: string;
-} {
-  const document = parsePolicyDocument(raw);
-  if (!document || document.version !== PAYMENT_POLICY_VERSION) {
-    return {};
-  }
-
-  const payload: { maxTransferAmount?: string; maxDailyAmount?: string } = {};
-  if (typeof document.maxTransferAmount === "string") {
-    payload.maxTransferAmount = document.maxTransferAmount;
-  }
-  if (typeof document.maxDailyAmount === "string") {
-    payload.maxDailyAmount = document.maxDailyAmount;
-  }
-
-  return payload;
-}
-
-function buildWalletPolicyPayload(
-  walletId: string,
-  rows: WalletPolicyRow[],
-  fallbackTimestamp: string
-): {
-  walletId: string;
-  destinationAllowlist: string[];
-  maxTransferAmount?: string;
-  maxDailyAmount?: string;
-  createdAt: string;
-  updatedAt: string;
-} {
-  if (rows.length === 0) {
-    return {
-      walletId,
-      destinationAllowlist: [],
-      createdAt: fallbackTimestamp,
-      updatedAt: fallbackTimestamp,
-    };
-  }
-
-  let destinationAllowlist: string[] = [];
-  let maxTransferAmount: string | undefined;
-  let maxDailyAmount: string | undefined;
-
-  for (const row of rows) {
-    if (row.policy_type === DESTINATION_ALLOWLIST_POLICY_TYPE) {
-      destinationAllowlist = parseDestinationAllowlistPolicy(row.policy);
-      continue;
-    }
-
-    if (row.policy_type === TRANSFER_LIMITS_POLICY_TYPE) {
-      const parsed = parseTransferLimitsPolicy(row.policy);
-      maxTransferAmount = parsed.maxTransferAmount;
-      maxDailyAmount = parsed.maxDailyAmount;
-    }
-  }
-
-  const createdAt = rows.reduce(
-    (earliest, row) => (row.created_at < earliest ? row.created_at : earliest),
-    rows[0].created_at
-  );
-  const updatedAt = rows.reduce(
-    (latest, row) => (row.updated_at > latest ? row.updated_at : latest),
-    rows[0].updated_at
-  );
-
-  return {
-    walletId,
-    destinationAllowlist,
-    ...(maxTransferAmount ? { maxTransferAmount } : {}),
-    ...(maxDailyAmount ? { maxDailyAmount } : {}),
-    createdAt,
-    updatedAt,
-  };
-}
-
-function parseDecimalParts(value: string): { whole: string; fraction: string } {
-  const normalized = value.trim();
-  if (!isDecimalString(normalized)) {
-    throw new AppError("BAD_REQUEST", "Invalid amount format");
-  }
-
-  const [wholeRaw = "", fractionRaw = ""] = normalized.split(".");
-  const whole = (wholeRaw || "0").replace(/^0+(?=\d)/, "");
-  let fraction = fractionRaw ?? "";
-  fraction = fraction.replace(/0+$/, "");
-
-  return {
-    whole: whole.length > 0 ? whole : "0",
-    fraction,
-  };
-}
-
-function compareDecimalAmounts(left: string, right: string): number {
-  const leftParts = parseDecimalParts(left);
-  const rightParts = parseDecimalParts(right);
-
-  if (leftParts.whole.length !== rightParts.whole.length) {
-    return leftParts.whole.length < rightParts.whole.length ? -1 : 1;
-  }
-
-  if (leftParts.whole !== rightParts.whole) {
-    return leftParts.whole < rightParts.whole ? -1 : 1;
-  }
-
-  const scale = Math.max(leftParts.fraction.length, rightParts.fraction.length);
-  const leftFraction = leftParts.fraction.padEnd(scale, "0");
-  const rightFraction = rightParts.fraction.padEnd(scale, "0");
-
-  if (leftFraction === rightFraction) {
-    return 0;
-  }
-
-  return leftFraction < rightFraction ? -1 : 1;
-}
-
-function sumDecimalAmounts(amounts: string[]): string {
-  if (amounts.length === 0) {
-    return "0";
-  }
-
-  const parsed = amounts.map(parseDecimalParts);
-  const scale = parsed.reduce((max, entry) => Math.max(max, entry.fraction.length), 0);
-
-  const total = parsed.reduce((acc, entry) => {
-    const combined = `${entry.whole}${entry.fraction.padEnd(scale, "0")}`;
-    return acc + BigInt(combined);
-  }, 0n);
-
-  if (scale === 0) {
-    return total.toString();
-  }
-
-  const digits = total.toString().padStart(scale + 1, "0");
-  const whole = digits.slice(0, -scale).replace(/^0+(?=\d)/, "") || "0";
-  const fraction = digits.slice(-scale).replace(/0+$/, "");
-
-  return fraction ? `${whole}.${fraction}` : whole;
-}
-
-function addDecimalAmounts(left: string, right: string): string {
-  return sumDecimalAmounts([left, right]);
-}
-
-function getUtcDayWindow(now: Date): { start: string; end: string } {
-  const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-  const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
-  return {
-    start: start.toISOString(),
-    end: end.toISOString(),
-  };
-}
-
-async function assertWalletPolicyAllowsTransfer(
-  c: AppContext,
-  input: {
-    organizationId: string;
-    projectId: string | null;
-    wallet: CustodyWallet;
-    destinationAddress: string;
-    token: string;
-    amount: string;
-  }
-): Promise<void> {
-  const repository = getPaymentsRepository(c);
-  const rows = await repository.getWalletPoliciesByCustodyWalletId(input.wallet.id);
-
-  if (rows.length === 0) {
-    return;
-  }
-
-  const policy = buildWalletPolicyPayload(input.wallet.walletId, rows, input.wallet.createdAt);
-
-  if (
-    policy.destinationAllowlist.length > 0 &&
-    !policy.destinationAllowlist.includes(input.destinationAddress)
-  ) {
-    throw new AppError("FORBIDDEN", "Destination address is not allowed by wallet policy");
-  }
-
-  if (policy.maxTransferAmount) {
-    if (!isDecimalString(policy.maxTransferAmount)) {
-      throw new AppError("INTERNAL_ERROR", "Wallet policy has invalid maxTransferAmount");
-    }
-
-    if (compareDecimalAmounts(input.amount, policy.maxTransferAmount) > 0) {
-      throw new AppError("FORBIDDEN", "Transfer amount exceeds wallet policy maxTransferAmount");
-    }
-  }
-
-  if (policy.maxDailyAmount) {
-    if (!isDecimalString(policy.maxDailyAmount)) {
-      throw new AppError("INTERNAL_ERROR", "Wallet policy has invalid maxDailyAmount");
-    }
-
-    const dayWindow = getUtcDayWindow(new Date());
-    const amounts = await repository.listTransferAmounts({
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      walletId: input.wallet.walletId,
-      token: input.token,
-      direction: "outbound",
-      statuses: ["pending", "processing", "confirmed", "finalized"],
-      createdAtFrom: dayWindow.start,
-      createdAtTo: dayWindow.end,
-    });
-
-    const projectedTotal = addDecimalAmounts(sumDecimalAmounts(amounts), input.amount);
-    if (compareDecimalAmounts(projectedTotal, policy.maxDailyAmount) > 0) {
-      throw new AppError("FORBIDDEN", "Transfer amount exceeds wallet policy maxDailyAmount");
-    }
-  }
-}
-
-function mapTransferRow(row: TransferRow) {
-  return {
-    id: row.id,
-    organizationId: row.organization_id,
-    ...(row.project_id ? { projectId: row.project_id } : {}),
-    type: row.type,
-    direction: row.direction,
-    status: row.status,
-    signature: row.signature,
-    serializedTx: row.serialized_tx,
-    slot: row.slot,
-    blockTime: row.block_time,
-    fee: row.fee,
-    error: row.error,
-    ...(row.initiated_by_key_id
-      ? {
-          initiatedBy: {
-            type: "api_key",
-            id: row.initiated_by_key_id,
-          },
-        }
-      : {}),
-    source: row.source_address,
-    destination: row.destination_address,
-    ...(row.memo ? { memo: row.memo } : {}),
-    token: row.token,
-    amount: row.amount,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  };
 }
 
 type JsonParsedTokenAccountEntry = {
@@ -554,28 +270,6 @@ async function resolveSourceTokenAccount(
   };
 }
 
-async function resolveScope(c: AppContext) {
-  const auth = getAuth(c);
-  const signingService = createSigningService(c.env);
-  const config = await signingService.getConfiguration(
-    auth.organizationId,
-    auth.projectId ?? undefined
-  );
-
-  if (!config) {
-    throw new AppError("NOT_FOUND", "Custody configuration is not initialized for this scope");
-  }
-
-  const wallets = await signingService.getWallets(auth.organizationId, auth.projectId ?? undefined);
-
-  return {
-    auth,
-    wallets,
-  };
-}
-
-type ResolvedScope = Awaited<ReturnType<typeof resolveScope>>;
-
 type RampExecutionStatus = "pending" | "processing" | "completed" | "failed";
 
 type RampExecutionResult = {
@@ -631,34 +325,6 @@ type RampProviderExecutor = {
     input: ExecuteOfframpInput
   ) => Promise<RampExecutionResult>;
 };
-
-function resolveWallet(wallets: CustodyWallet[], walletId: string): CustodyWallet {
-  const wallet = wallets.find((entry) => entry.walletId === walletId);
-  if (!wallet) {
-    throw new AppError(
-      "NOT_FOUND",
-      "Wallet not found. Provision wallets through /v1/custody/wallets"
-    );
-  }
-  return wallet;
-}
-
-function resolveWalletAddress(
-  wallets: CustodyWallet[],
-  walletIdOrAddress: string,
-  fieldName: string,
-  auth?: ReturnType<typeof getAuth>,
-  requiredWalletPermissions: Permission[] = []
-): string {
-  const matchingWallet = wallets.find((entry) => entry.walletId === walletIdOrAddress);
-  if (matchingWallet) {
-    if (auth) {
-      assertApiKeyWalletAccess(auth, matchingWallet.walletId, requiredWalletPermissions);
-    }
-    return matchingWallet.publicKey;
-  }
-  return assertValidAddress(walletIdOrAddress, fieldName);
-}
 
 function normalizeMoonPayCurrencyCode(value: string): string {
   const normalized = value.trim().toLowerCase();
