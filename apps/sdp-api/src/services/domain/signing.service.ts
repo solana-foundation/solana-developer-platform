@@ -17,7 +17,6 @@ import {
   canProviderSign,
 } from "@/services/custody/providers";
 import {
-  deleteAnchorageWallet,
   provisionAnchorageWallet,
   provisionCoinbaseCdpAccount,
   provisionParaWallet,
@@ -25,7 +24,6 @@ import {
   provisionTurnkeyPrivateKey,
 } from "@/services/custody/provisioning";
 import {
-  type DfnsWallet,
   createDfnsApiClient,
   normalizeDfnsWalletId,
   resolveDfnsNetwork,
@@ -43,13 +41,16 @@ import {
   parseConfigRecord,
 } from "@/services/domain/signing/provider-config";
 import {
-  denormalizeAnchorageWalletId,
   normalizeAnchorageWalletId,
   normalizeCoinbaseCdpWalletId,
   normalizeParaWalletId,
   normalizePrivyWalletId,
   normalizeTurnkeyWalletId,
 } from "@/services/domain/signing/provider-wallet-ids";
+import {
+  createProviderWallet,
+  deleteProviderWallet,
+} from "@/services/domain/signing/provider-wallet-lifecycle";
 import { type EncryptionService, createEncryptionService } from "@/services/encryption.service";
 import { SigningError, isFullSigningPort } from "@/services/ports";
 import type { SignRequest, SignResult, SignStatus, SigningPort } from "@/services/ports";
@@ -1220,171 +1221,15 @@ export class SigningService {
     }
 
     const parsed = await parseConfigRecord(this.env, orgId, config);
-    let walletId: string;
-    let publicKey: string;
-
-    switch (parsed.provider) {
-      case "privy": {
-        const apiBaseUrl = parsed.apiBaseUrl ?? this.env.PRIVY_API_BASE_URL;
-        let provisioned: { walletId: string; address: string };
-        try {
-          provisioned = await provisionPrivyWallet(this.env, { apiBaseUrl });
-        } catch (error) {
-          if (error instanceof SigningError) {
-            throw error;
-          }
-
-          throw new SigningError(
-            `Failed to provision Privy wallet: ${error instanceof Error ? error.message : "Unknown error"}`,
-            "NETWORK_ERROR",
-            error instanceof Error ? error : undefined
-          );
-        }
-
-        walletId = normalizePrivyWalletId(provisioned.walletId);
-        publicKey = provisioned.address;
-        break;
-      }
-      case "coinbase_cdp": {
-        let provisioned: { address: string };
-        try {
-          provisioned = await provisionCoinbaseCdpAccount(this.env, {
-            orgId,
-            orgSlug: orgId,
-            apiBaseUrl: parsed.apiBaseUrl ?? this.env.COINBASE_CDP_API_BASE_URL,
-            network: parsed.network ?? this.env.COINBASE_CDP_NETWORK,
-            accountPolicy: parsed.accountPolicy,
-          });
-        } catch (error) {
-          if (error instanceof SigningError) {
-            throw error;
-          }
-
-          throw new SigningError(
-            `Failed to provision Coinbase CDP wallet: ${error instanceof Error ? error.message : "Unknown error"}`,
-            "NETWORK_ERROR",
-            error instanceof Error ? error : undefined
-          );
-        }
-
-        walletId = normalizeCoinbaseCdpWalletId(provisioned.address);
-        publicKey = provisioned.address;
-        break;
-      }
-      case "para": {
-        let provisioned: { walletId: string; address: string };
-        try {
-          provisioned = await provisionParaWallet(this.env, {
-            orgId,
-            projectId,
-            orgSlug: orgId,
-            apiBaseUrl: parsed.apiBaseUrl ?? this.env.PARA_API_BASE_URL,
-          });
-        } catch (error) {
-          if (error instanceof SigningError) {
-            throw error;
-          }
-
-          throw new SigningError(
-            `Failed to provision Para wallet: ${error instanceof Error ? error.message : "Unknown error"}`,
-            "NETWORK_ERROR",
-            error instanceof Error ? error : undefined
-          );
-        }
-
-        walletId = normalizeParaWalletId(provisioned.walletId);
-        publicKey = provisioned.address;
-        break;
-      }
-      case "turnkey": {
-        let provisioned: { privateKeyId: string; address: string };
-        try {
-          provisioned = await provisionTurnkeyPrivateKey(this.env, {
-            orgId,
-            orgSlug: orgId,
-            apiBaseUrl: parsed.apiBaseUrl ?? this.env.TURNKEY_API_BASE_URL,
-          });
-        } catch (error) {
-          if (error instanceof SigningError) {
-            throw error;
-          }
-
-          throw new SigningError(
-            `Failed to provision Turnkey wallet: ${error instanceof Error ? error.message : "Unknown error"}`,
-            "NETWORK_ERROR",
-            error instanceof Error ? error : undefined
-          );
-        }
-
-        walletId = normalizeTurnkeyWalletId(provisioned.privateKeyId);
-        publicKey = provisioned.address;
-        break;
-      }
-      case "dfns": {
-        let provisioned: DfnsWallet;
-        try {
-          const client = await createDfnsApiClient(this.env, { apiBaseUrl: parsed.apiBaseUrl });
-          const network = resolveDfnsNetwork(parsed.network);
-          provisioned = await client.wallets.createWallet({
-            body: {
-              network,
-              ...(params.label ? { name: params.label } : {}),
-              ...(parsed.signingKeyId ? { signingKey: { id: parsed.signingKeyId } } : {}),
-            },
-          });
-        } catch (error) {
-          if (error instanceof SigningError) {
-            throw error;
-          }
-
-          throw new SigningError(
-            `Failed to provision DFNS wallet: ${error instanceof Error ? error.message : "Unknown error"}`,
-            "NETWORK_ERROR",
-            error instanceof Error ? error : undefined
-          );
-        }
-
-        if (!provisioned.id || !provisioned.address) {
-          throw new SigningError(
-            "DFNS wallet creation returned incomplete payload",
-            "NETWORK_ERROR"
-          );
-        }
-
-        walletId = normalizeDfnsWalletId(provisioned.id);
-        publicKey = provisioned.address;
-        break;
-      }
-      case "anchorage": {
-        let provisioned: { walletId: string; address: string };
-        try {
-          provisioned = await provisionAnchorageWallet(this.env, {
-            apiBaseUrl: parsed.apiBaseUrl,
-            walletLabel: params.label,
-            network: parsed.network,
-          });
-        } catch (error) {
-          if (error instanceof SigningError) {
-            throw error;
-          }
-
-          throw new SigningError(
-            `Failed to provision Anchorage wallet: ${error instanceof Error ? error.message : "Unknown error"}`,
-            "NETWORK_ERROR",
-            error instanceof Error ? error : undefined
-          );
-        }
-
-        walletId = normalizeAnchorageWalletId(provisioned.walletId);
-        publicKey = provisioned.address;
-        break;
-      }
-      default:
-        throw new SigningError(
-          `Wallet provisioning not supported for provider: ${parsed.provider}`,
-          "INVALID_REQUEST"
-        );
-    }
+    const { walletId, publicKey } = await createProviderWallet({
+      env: this.env,
+      orgId,
+      projectId,
+      params: {
+        label: params.label,
+      },
+      parsed,
+    });
 
     let wallet: CustodyWallet;
     try {
@@ -1478,19 +1323,11 @@ export class SigningService {
     }
 
     try {
-      switch (parsed.provider) {
-        case "anchorage":
-          await deleteAnchorageWallet(this.env, {
-            apiBaseUrl: parsed.apiBaseUrl,
-            walletId: denormalizeAnchorageWalletId(targetWallet.walletId),
-          });
-          break;
-        default:
-          throw new SigningError(
-            `Wallet deletion not supported for provider: ${parsed.provider}`,
-            "INVALID_REQUEST"
-          );
-      }
+      await deleteProviderWallet({
+        env: this.env,
+        walletId: targetWallet.walletId,
+        parsed,
+      });
     } catch (error) {
       await this.configStore.reactivateWallet(config.id, targetWallet.walletId);
       if (error instanceof SigningError) {
