@@ -65,6 +65,7 @@ const bottomNavItems: NavItem[] = [
 type DashboardPageConfig = {
   title: string;
   headerNav?: ReactNode;
+  showHeaderNavRow?: boolean;
   contentWidthClass?: string;
   hideHeaderSelectors?: boolean;
   backAction?: {
@@ -92,6 +93,7 @@ function getDashboardPageConfig(pathname: string): DashboardPageConfig {
   if (pathname === "/dashboard/wallets" || pathname === "/dashboard/custody") {
     return {
       title: "Wallets",
+      showHeaderNavRow: true,
       contentWidthClass: "max-w-none",
     };
   }
@@ -205,6 +207,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
   ) : (
     pageConfig.headerNav
   );
+  const shouldRenderHeaderNavRow = pageConfig.showHeaderNavRow || Boolean(headerNav);
 
   if (!isLoaded) {
     return (
@@ -365,7 +368,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
                 )}
               </div>
 
-              {headerNav ? (
+              {shouldRenderHeaderNavRow ? (
                 <div className="-mx-3 border-b border-[rgba(28,28,29,0.10)] md:-mx-6">
                   <div
                     className={[
