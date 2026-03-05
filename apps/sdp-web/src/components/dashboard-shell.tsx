@@ -134,6 +134,7 @@ function getDashboardPageConfig(pathname: string): DashboardPageConfig {
     return {
       title: "Issuance",
       hideHeaderSelectors: true,
+      contentWidthClass: "max-w-none",
       backAction: {
         href: "/dashboard/issuance",
         label: "Back to overview",
