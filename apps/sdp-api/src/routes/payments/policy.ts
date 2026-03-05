@@ -10,9 +10,9 @@ import {
   sumDecimalAmounts,
 } from "./decimal";
 
-const PAYMENT_POLICY_VERSION = 1;
-const DESTINATION_ALLOWLIST_POLICY_TYPE = "destination_allowlist";
-const TRANSFER_LIMITS_POLICY_TYPE = "transfer_limits";
+export const PAYMENT_POLICY_VERSION = 1;
+export const DESTINATION_ALLOWLIST_POLICY_TYPE = "destination_allowlist";
+export const TRANSFER_LIMITS_POLICY_TYPE = "transfer_limits";
 
 function parsePolicyDocument(raw: string): Record<string, unknown> | null {
   try {

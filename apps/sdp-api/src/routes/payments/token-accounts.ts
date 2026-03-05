@@ -1,0 +1,204 @@
+import { formatDecimalAmount } from "@/lib/amount";
+import { AppError } from "@/lib/errors";
+import { assertValidAddress } from "@/lib/solana";
+import { type createRpc, getAccountInfo } from "@/services/solana/rpc";
+import type { Address } from "@solana/kit";
+
+// biome-ignore lint/nursery/noSecrets: Solana native SOL mint address constant, not a secret.
+export const SOL_MINT = "So11111111111111111111111111111111111111112";
+// biome-ignore lint/nursery/noSecrets: Solana SPL Token program ID, not a secret.
+const SPL_TOKEN_PROGRAM_ID = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA" as Address;
+// biome-ignore lint/nursery/noSecrets: Solana Token-2022 program ID, not a secret.
+const SPL_TOKEN_2022_PROGRAM_ID = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb" as Address;
+const SPL_TOKEN_PROGRAM_IDS = [SPL_TOKEN_PROGRAM_ID, SPL_TOKEN_2022_PROGRAM_ID] as const;
+export function isNativeSolToken(token: string): boolean {
+  const normalized = token.trim();
+  return normalized.toUpperCase() === "SOL" || normalized === SOL_MINT;
+}
+
+type JsonParsedTokenAccountEntry = {
+  pubkey?: string;
+  account?: {
+    data?: {
+      parsed?: {
+        info?: unknown;
+      };
+    };
+  };
+};
+
+type JsonParsedTokenAccountsByOwnerResponse = {
+  value?: JsonParsedTokenAccountEntry[];
+};
+
+type TokenAccountsByOwnerRpc = {
+  getTokenAccountsByOwner: (
+    address: Address,
+    filter: { programId: Address },
+    config: { encoding: "jsonParsed"; commitment: "confirmed" }
+  ) => {
+    send: () => Promise<JsonParsedTokenAccountsByOwnerResponse>;
+  };
+};
+
+async function getTokenAccountsByOwnerJsonParsed(
+  rpc: ReturnType<typeof createRpc>,
+  owner: Address,
+  programId: Address
+): Promise<JsonParsedTokenAccountsByOwnerResponse> {
+  return (rpc as unknown as TokenAccountsByOwnerRpc)
+    .getTokenAccountsByOwner(
+      owner,
+      { programId },
+      { encoding: "jsonParsed", commitment: "confirmed" }
+    )
+    .send();
+}
+
+function parseTokenAmountInfo(
+  value: unknown
+): { mint: string; amount: bigint; decimals: number; uiAmount?: string } | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+
+  const info = value as Record<string, unknown>;
+  const mint = typeof info.mint === "string" ? info.mint : null;
+  if (!mint) {
+    return null;
+  }
+
+  const tokenAmount =
+    typeof info.tokenAmount === "object" && info.tokenAmount !== null
+      ? (info.tokenAmount as Record<string, unknown>)
+      : null;
+  if (!tokenAmount) {
+    return null;
+  }
+
+  const rawAmount = tokenAmount.amount;
+  const rawDecimals = tokenAmount.decimals;
+
+  if (
+    (typeof rawAmount !== "string" && typeof rawAmount !== "number") ||
+    typeof rawDecimals !== "number"
+  ) {
+    return null;
+  }
+
+  let amount: bigint;
+  try {
+    amount = BigInt(String(rawAmount));
+  } catch {
+    return null;
+  }
+
+  const decimals = Number(rawDecimals);
+  if (!Number.isInteger(decimals) || decimals < 0) {
+    return null;
+  }
+
+  const uiAmount =
+    typeof tokenAmount.uiAmountString === "string" ? tokenAmount.uiAmountString : undefined;
+
+  return { mint, amount, decimals, uiAmount };
+}
+
+export async function getSplTokenBalances(
+  rpc: ReturnType<typeof createRpc>,
+  owner: Address
+): Promise<
+  Array<{ token: string; mint: string; amount: string; uiAmount: string; decimals: number }>
+> {
+  const balancesByMint = new Map<string, { amount: bigint; decimals: number; uiAmount?: string }>();
+
+  for (const programId of SPL_TOKEN_PROGRAM_IDS) {
+    const response = await getTokenAccountsByOwnerJsonParsed(rpc, owner, programId);
+
+    for (const account of response.value ?? []) {
+      const parsed = parseTokenAmountInfo(account.account?.data?.parsed?.info);
+      if (!parsed || parsed.amount <= 0n) {
+        continue;
+      }
+
+      const existing = balancesByMint.get(parsed.mint);
+      if (existing) {
+        existing.amount += parsed.amount;
+        continue;
+      }
+
+      balancesByMint.set(parsed.mint, {
+        amount: parsed.amount,
+        decimals: parsed.decimals,
+        uiAmount: parsed.uiAmount,
+      });
+    }
+  }
+
+  return Array.from(balancesByMint.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([mint, balance]) => ({
+      token: mint,
+      mint,
+      amount: balance.amount.toString(),
+      uiAmount: balance.uiAmount ?? formatDecimalAmount(balance.amount, balance.decimals),
+      decimals: balance.decimals,
+    }));
+}
+
+function assertSupportedTokenProgram(program: string): Address {
+  if (program === SPL_TOKEN_PROGRAM_ID || program === SPL_TOKEN_2022_PROGRAM_ID) {
+    return program as Address;
+  }
+  throw new AppError("BAD_REQUEST", "Unsupported token program for mint");
+}
+
+export async function resolveMintTokenProgram(
+  rpc: ReturnType<typeof createRpc>,
+  mint: Address
+): Promise<Address> {
+  const mintAccountInfo = await getAccountInfo(rpc, mint);
+  if (!mintAccountInfo) {
+    throw new AppError("BAD_REQUEST", "Token mint account does not exist");
+  }
+  return assertSupportedTokenProgram(mintAccountInfo.owner);
+}
+
+export async function resolveSourceTokenAccount(
+  rpc: ReturnType<typeof createRpc>,
+  owner: Address,
+  mint: Address,
+  tokenProgram: Address
+): Promise<{ tokenAccount: Address; decimals: number }> {
+  const response = await getTokenAccountsByOwnerJsonParsed(rpc, owner, tokenProgram);
+  let selected: { tokenAccount: Address; decimals: number; amount: bigint } | null = null;
+
+  for (const account of response.value ?? []) {
+    if (typeof account.pubkey !== "string") {
+      continue;
+    }
+
+    const parsed = parseTokenAmountInfo(account.account?.data?.parsed?.info);
+    if (!parsed || parsed.mint !== mint) {
+      continue;
+    }
+
+    const tokenAccount = assertValidAddress(account.pubkey, "sourceToken");
+    if (!selected || parsed.amount > selected.amount) {
+      selected = {
+        tokenAccount,
+        decimals: parsed.decimals,
+        amount: parsed.amount,
+      };
+    }
+  }
+
+  if (!selected) {
+    throw new AppError("BAD_REQUEST", "Source wallet has no token account for this mint");
+  }
+
+  return {
+    tokenAccount: selected.tokenAccount,
+    decimals: selected.decimals,
+  };
+}
