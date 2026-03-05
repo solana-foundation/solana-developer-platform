@@ -6,13 +6,8 @@
  */
 
 import {
-  KeychainCoinbaseAdapter,
-  KeychainDfnsAdapter,
   KeychainFireblocksAdapter,
   KeychainMemoryAdapter,
-  KeychainParaAdapter,
-  KeychainPrivyAdapter,
-  KeychainTurnkeyAdapter,
   type SigningConfigRecord,
 } from "@/services/adapters";
 import {
@@ -35,6 +30,26 @@ import {
   normalizeDfnsWalletId,
   resolveDfnsNetwork,
 } from "@/services/dfns/client";
+import { createAdapterFromEncryptedConfig } from "@/services/domain/signing/provider-adapter-factory";
+import {
+  type AnchorageProviderConfig,
+  type CoinbaseCdpProviderConfig,
+  type DfnsProviderConfig,
+  type FireblocksProviderConfig,
+  type LocalProviderConfig,
+  type ParaProviderConfig,
+  type PrivyProviderConfig,
+  type TurnkeyProviderConfig,
+  parseConfigRecord,
+} from "@/services/domain/signing/provider-config";
+import {
+  denormalizeAnchorageWalletId,
+  normalizeAnchorageWalletId,
+  normalizeCoinbaseCdpWalletId,
+  normalizeParaWalletId,
+  normalizePrivyWalletId,
+  normalizeTurnkeyWalletId,
+} from "@/services/domain/signing/provider-wallet-ids";
 import { type EncryptionService, createEncryptionService } from "@/services/encryption.service";
 import { SigningError, isFullSigningPort } from "@/services/ports";
 import type { SignRequest, SignResult, SignStatus, SigningPort } from "@/services/ports";
@@ -49,6 +64,8 @@ import type { Env } from "@/types/env";
 import { getBase58Codec } from "@solana/codecs";
 import type { Address, KeyPairSigner, TransactionSigner } from "@solana/kit";
 import { createKeyPairSignerFromPrivateKeyBytes } from "@solana/signers";
+
+export { createAdapterFromEncryptedConfig };
 
 const base58 = getBase58Codec();
 
@@ -1906,28 +1923,6 @@ export class SigningService {
 // Utilities
 // ═══════════════════════════════════════════════════════════════════════════
 
-class LifecycleOnlyAdapter implements SigningPort {
-  constructor(public readonly providerId: string) {}
-
-  async getPublicKey(): Promise<Address> {
-    throw new SigningError(
-      `Provider does not support transaction signing: ${this.providerId}`,
-      "INVALID_REQUEST"
-    );
-  }
-
-  async sign(_request: SignRequest): Promise<SignResult> {
-    throw new SigningError(
-      `Provider does not support transaction signing: ${this.providerId}`,
-      "INVALID_REQUEST"
-    );
-  }
-
-  requiresApproval(): boolean {
-    return false;
-  }
-}
-
 function encodeBase64(bytes: Uint8Array): string {
   let binary = "";
   for (const byte of bytes) {
@@ -1947,116 +1942,10 @@ function decodeBase64(base64: string): Uint8Array {
   return bytes;
 }
 
-function normalizePrivyWalletId(walletId: string): string {
-  return walletId.startsWith("privy_") ? walletId : `privy_${walletId}`;
-}
-
-function normalizeCoinbaseCdpWalletId(walletAddress: string): string {
-  return walletAddress.startsWith("cdp_") ? walletAddress : `cdp_${walletAddress}`;
-}
-
-function normalizeParaWalletId(walletId: string): string {
-  return walletId.startsWith("para_") ? walletId : `para_${walletId}`;
-}
-
-function normalizeTurnkeyWalletId(privateKeyId: string): string {
-  return privateKeyId.startsWith("turnkey_") ? privateKeyId : `turnkey_${privateKeyId}`;
-}
-
-function normalizeAnchorageWalletId(walletId: string): string {
-  return walletId.startsWith("anchorage_") ? walletId : `anchorage_${walletId}`;
-}
-
-function denormalizeAnchorageWalletId(walletId: string): string {
-  return walletId.startsWith("anchorage_") ? walletId.slice("anchorage_".length) : walletId;
-}
-
-function parseOptionalRequestDelayMs(
-  value?: string,
-  options?: { envVarName?: string }
-): number | undefined {
-  if (!value) return undefined;
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed < 0) {
-    throw new SigningError(
-      `${options?.envVarName ?? "REQUEST_DELAY_MS"} must be a non-negative number`,
-      "INVALID_REQUEST"
-    );
-  }
-  return parsed;
-}
-
 /**
  * Export the secret key bytes from a KeyPairSigner.
  * Returns the 64-byte secret key (32 private + 32 public).
  */
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Provider Config Types (stored as encrypted JSON)
-// ═══════════════════════════════════════════════════════════════════════════
-
-interface LocalProviderConfig {
-  provider: "local";
-  encryptedPrivateKey: string;
-}
-
-interface FireblocksProviderConfig {
-  provider: "fireblocks";
-  apiKey: string;
-  apiSecretEncrypted: string;
-  vaultAccountId: string;
-  assetId: string;
-  apiBaseUrl?: string;
-}
-
-interface PrivyProviderConfig {
-  provider: "privy";
-  apiBaseUrl?: string;
-  requestDelayMs?: number;
-  privyAppId?: string;
-  walletId?: string;
-}
-
-interface CoinbaseCdpProviderConfig {
-  provider: "coinbase_cdp";
-  apiBaseUrl?: string;
-  network?: "solana" | "solana-devnet";
-  accountPolicy?: string;
-  requestDelayMs?: number;
-}
-
-interface ParaProviderConfig {
-  provider: "para";
-  apiBaseUrl?: string;
-  requestDelayMs?: number;
-  walletId?: string;
-  userIdentifier?: string;
-  userIdentifierType?: "CUSTOM_ID";
-}
-
-interface TurnkeyProviderConfig {
-  provider: "turnkey";
-  organizationId?: string;
-  apiBaseUrl?: string;
-  requestDelayMs?: number;
-  privateKeyId?: string;
-  defaultWalletPublicKey?: string;
-}
-
-interface DfnsProviderConfig {
-  provider: "dfns";
-  apiBaseUrl?: string;
-  network?: "Solana" | "SolanaDevnet";
-  walletId?: string;
-  signingKeyId?: string;
-}
-
-interface AnchorageProviderConfig {
-  provider: "anchorage";
-  apiBaseUrl?: string;
-  walletId?: string;
-  network?: "solana" | "solana-devnet";
-}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Factory Function
@@ -2076,295 +1965,4 @@ export function createSigningService(env: Env): SigningService {
   const signingStore = new SigningRequestD1Store(env.DB);
 
   return new SigningService(configStore, signingStore, env);
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Enhanced Adapter Creation (with decryption support)
-// ═══════════════════════════════════════════════════════════════════════════
-
-/**
- * Create a signing adapter from a database config record with decryption.
- *
- * This version handles decrypting the stored private key for local providers
- * before creating the adapter.
- *
- * @param env - Environment for encryption key
- * @param orgId - Organization ID for key derivation
- * @param record - Config record from database
- * @returns Configured SigningPort adapter
- */
-export async function createAdapterFromEncryptedConfig(
-  env: Env,
-  orgId: string,
-  record: SigningConfigRecord
-): Promise<SigningPort> {
-  const parsed = await parseConfigRecord(env, orgId, record);
-
-  if (parsed.provider === "local") {
-    // biome-ignore lint/nursery/noSecrets: Config field name check, not a secret value.
-    if (!("encryptedPrivateKey" in parsed) || !parsed.encryptedPrivateKey) {
-      throw new SigningError(
-        "Local custody config missing encrypted private key",
-        "PROVIDER_NOT_CONFIGURED"
-      );
-    }
-
-    // Decrypt the private key
-    const encryption = createEncryptionService(env.CUSTODY_ENCRYPTION_KEY);
-    const privateKeyBase58 = await encryption.decryptPrivateKey(orgId, parsed.encryptedPrivateKey);
-
-    // Create adapter with decrypted key
-    return KeychainMemoryAdapter.fromBase58(privateKeyBase58);
-  }
-
-  if (parsed.provider === "fireblocks") {
-    // biome-ignore lint/nursery/noSecrets: Config field name check, not a secret value.
-    if (!("apiSecretEncrypted" in parsed) || !parsed.apiSecretEncrypted) {
-      throw new SigningError(
-        "Fireblocks config missing encrypted API secret",
-        "PROVIDER_NOT_CONFIGURED"
-      );
-    }
-
-    // Decrypt the API secret
-    const encryption = createEncryptionService(env.CUSTODY_ENCRYPTION_KEY);
-    const apiSecretPem = await encryption.decryptPrivateKey(orgId, parsed.apiSecretEncrypted);
-
-    // Create Fireblocks adapter with decrypted secret
-    return new KeychainFireblocksAdapter({
-      apiKey: parsed.apiKey,
-      apiSecretPem,
-      vaultAccountId: parsed.vaultAccountId,
-      assetId: parsed.assetId,
-      apiBaseUrl: parsed.apiBaseUrl,
-    });
-  }
-
-  if (parsed.provider === "privy") {
-    const appId = env.PRIVY_APP_ID ?? parsed.privyAppId;
-    const appSecret = env.PRIVY_APP_SECRET;
-
-    if (!appId || !appSecret) {
-      throw new SigningError(
-        "Privy environment variables not configured: PRIVY_APP_ID, PRIVY_APP_SECRET",
-        "PROVIDER_NOT_CONFIGURED"
-      );
-    }
-
-    const requestDelayMs =
-      parsed.requestDelayMs ??
-      parseOptionalRequestDelayMs(env.PRIVY_REQUEST_DELAY_MS, {
-        envVarName: "PRIVY_REQUEST_DELAY_MS",
-      });
-
-    const defaultWalletId =
-      record.defaultWalletId ??
-      (parsed.walletId ? normalizePrivyWalletId(parsed.walletId) : undefined);
-
-    if (!defaultWalletId) {
-      throw new SigningError("Privy config missing default wallet ID", "PROVIDER_NOT_CONFIGURED");
-    }
-
-    return new KeychainPrivyAdapter({
-      appId,
-      appSecret,
-      apiBaseUrl: parsed.apiBaseUrl ?? env.PRIVY_API_BASE_URL,
-      requestDelayMs,
-      defaultWalletId,
-    });
-  }
-
-  if (parsed.provider === "coinbase_cdp") {
-    const apiKeyId = env.COINBASE_CDP_API_KEY_ID;
-    const apiKeySecret = env.COINBASE_CDP_API_KEY_SECRET;
-    const walletSecret = env.COINBASE_CDP_WALLET_SECRET;
-    const defaultWalletId = record.defaultWalletId;
-
-    if (!apiKeyId || !apiKeySecret || !walletSecret || !defaultWalletId) {
-      throw new SigningError(
-        "Coinbase CDP configuration is missing credentials or default wallet ID",
-        "PROVIDER_NOT_CONFIGURED"
-      );
-    }
-
-    return new KeychainCoinbaseAdapter({
-      apiKeyId,
-      apiKeySecret,
-      walletSecret,
-      apiBaseUrl: parsed.apiBaseUrl ?? env.COINBASE_CDP_API_BASE_URL,
-      requestDelayMs: parsed.requestDelayMs,
-      defaultWalletId,
-    });
-  }
-
-  if (parsed.provider === "para") {
-    const apiKey = env.PARA_API_KEY;
-    const requestDelayMs =
-      parsed.requestDelayMs ??
-      parseOptionalRequestDelayMs(env.PARA_REQUEST_DELAY_MS, {
-        envVarName: "PARA_REQUEST_DELAY_MS",
-      });
-
-    const defaultWalletId =
-      record.defaultWalletId ??
-      (parsed.walletId ? normalizeParaWalletId(parsed.walletId) : undefined);
-
-    if (!apiKey || !defaultWalletId) {
-      throw new SigningError(
-        "Para configuration is missing API key or default wallet ID",
-        "PROVIDER_NOT_CONFIGURED"
-      );
-    }
-
-    return new KeychainParaAdapter({
-      apiKey,
-      apiBaseUrl: parsed.apiBaseUrl ?? env.PARA_API_BASE_URL,
-      requestDelayMs,
-      defaultWalletId,
-    });
-  }
-
-  if (parsed.provider === "turnkey") {
-    const apiPublicKey = env.TURNKEY_API_PUBLIC_KEY;
-    const apiPrivateKey = env.TURNKEY_API_PRIVATE_KEY;
-    const organizationId = parsed.organizationId ?? env.TURNKEY_ORGANIZATION_ID;
-    const requestDelayMs =
-      parsed.requestDelayMs ??
-      parseOptionalRequestDelayMs(env.TURNKEY_REQUEST_DELAY_MS, {
-        envVarName: "TURNKEY_REQUEST_DELAY_MS",
-      });
-
-    const defaultWalletId =
-      record.defaultWalletId ??
-      (parsed.privateKeyId ? normalizeTurnkeyWalletId(parsed.privateKeyId) : undefined);
-
-    let defaultWalletPublicKey = parsed.defaultWalletPublicKey ?? env.TURNKEY_PUBLIC_KEY;
-    if (!defaultWalletPublicKey && defaultWalletId) {
-      const wallet = await env.DB.prepare(
-        `SELECT public_key
-         FROM custody_wallets
-         WHERE custody_config_id = ? AND wallet_id = ? AND status = 'active'
-         LIMIT 1`
-      )
-        .bind(record.id, defaultWalletId)
-        .first<{ public_key: string }>();
-      defaultWalletPublicKey = wallet?.public_key;
-    }
-
-    if (
-      !apiPublicKey ||
-      !apiPrivateKey ||
-      !organizationId ||
-      !defaultWalletId ||
-      !defaultWalletPublicKey
-    ) {
-      throw new SigningError(
-        "Turnkey configuration is missing credentials or default wallet metadata",
-        "PROVIDER_NOT_CONFIGURED"
-      );
-    }
-
-    return new KeychainTurnkeyAdapter({
-      apiPublicKey,
-      apiPrivateKey,
-      organizationId,
-      apiBaseUrl: parsed.apiBaseUrl ?? env.TURNKEY_API_BASE_URL,
-      requestDelayMs,
-      defaultWalletId,
-      defaultWalletPublicKey,
-    });
-  }
-
-  if (parsed.provider === "dfns") {
-    const defaultWalletId =
-      record.defaultWalletId ??
-      (parsed.walletId ? normalizeDfnsWalletId(parsed.walletId) : undefined);
-
-    if (!defaultWalletId) {
-      throw new SigningError(
-        "DFNS configuration is missing a default wallet ID",
-        "PROVIDER_NOT_CONFIGURED"
-      );
-    }
-
-    return new KeychainDfnsAdapter({
-      client: await createDfnsApiClient(env, { apiBaseUrl: parsed.apiBaseUrl }),
-      defaultWalletId,
-    });
-  }
-
-  if (parsed.provider === "anchorage") {
-    return new LifecycleOnlyAdapter("anchorage");
-  }
-
-  throw new SigningError(
-    `Unsupported custody configuration provider: ${record.provider}`,
-    "PROVIDER_NOT_CONFIGURED"
-  );
-}
-
-async function parseConfigRecord(
-  env: Env,
-  orgId: string,
-  record: SigningConfigRecord
-): Promise<ProviderConfigRecord> {
-  const parsedDirect = tryParseJson(record.config);
-  if (parsedDirect !== null) {
-    return coerceProviderConfig(parsedDirect, record.provider);
-  }
-
-  // Encrypted payload: decrypt then parse.
-  try {
-    const encryption = createEncryptionService(env.CUSTODY_ENCRYPTION_KEY);
-    const decrypted = await encryption.decrypt(orgId, record.config);
-    const parsedDecrypted = tryParseJson(decrypted);
-    if (parsedDecrypted === null) {
-      throw new SigningError(
-        "Custody configuration must be a valid JSON object",
-        "PROVIDER_NOT_CONFIGURED"
-      );
-    }
-
-    return coerceProviderConfig(parsedDecrypted, record.provider);
-  } catch (error) {
-    if (error instanceof SigningError) {
-      throw error;
-    }
-    throw new SigningError(
-      error instanceof Error ? error.message : "Failed to decrypt custody configuration",
-      "PROVIDER_NOT_CONFIGURED"
-    );
-  }
-}
-
-type ProviderConfigRecord =
-  | LocalProviderConfig
-  | FireblocksProviderConfig
-  | PrivyProviderConfig
-  | CoinbaseCdpProviderConfig
-  | ParaProviderConfig
-  | TurnkeyProviderConfig
-  | DfnsProviderConfig
-  | AnchorageProviderConfig;
-
-function tryParseJson(value: string): unknown | null {
-  try {
-    return JSON.parse(value);
-  } catch {
-    return null;
-  }
-}
-
-function coerceProviderConfig(
-  parsed: unknown,
-  recordProvider: SigningConfigRecord["provider"]
-): ProviderConfigRecord {
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    return { provider: recordProvider } as ProviderConfigRecord;
-  }
-
-  return {
-    ...(parsed as Record<string, unknown>),
-    provider: recordProvider,
-  } as ProviderConfigRecord;
 }
