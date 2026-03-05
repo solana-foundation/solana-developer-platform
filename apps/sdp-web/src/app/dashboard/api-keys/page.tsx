@@ -1,6 +1,4 @@
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import {
   Table,
   TableBody,
@@ -12,8 +10,8 @@ import {
 import { sdpApiFetch } from "@/lib/sdp-api";
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
-import { consumeApiKeyFlash, rotateApiKeyAction } from "./actions";
-import { DeleteApiKeyModal } from "./delete-api-key-modal";
+import { consumeApiKeyFlash } from "./actions";
+import { ApiKeyActionsMenu } from "./api-key-actions-menu";
 import { FlashClearTrigger } from "./flash-clear-trigger";
 import { GeneratedApiKeyModal } from "./generated-key-modal";
 
@@ -146,34 +144,12 @@ export default async function ApiKeysPage() {
                         <TableCell className="text-xs text-[rgba(28,28,29,0.72)]">
                           {formatDate(key.createdAt)}
                         </TableCell>
-                        <TableCell className="text-right whitespace-normal">
-                          <div className="flex flex-wrap items-center justify-end gap-2">
-                            {canRotate ? (
-                              <form
-                                action={rotateApiKeyAction}
-                                className="inline-flex flex-wrap items-center justify-end gap-2"
-                              >
-                                <input type="hidden" name="keyId" value={key.id} />
-                                <Input
-                                  type="number"
-                                  name="grace"
-                                  min={0}
-                                  max={168}
-                                  defaultValue={24}
-                                  className="h-8 w-[72px] text-xs"
-                                  aria-label={`Grace period hours for ${key.name}`}
-                                />
-                                <Button type="submit" size="sm" variant="secondary">
-                                  Rotate
-                                </Button>
-                              </form>
-                            ) : (
-                              <span className="text-xs text-[rgba(28,28,29,0.48)]">
-                                Unavailable
-                              </span>
-                            )}
-                            <DeleteApiKeyModal keyId={key.id} keyName={key.name} />
-                          </div>
+                        <TableCell className="text-right">
+                          <ApiKeyActionsMenu
+                            keyId={key.id}
+                            keyName={key.name}
+                            canRotate={canRotate}
+                          />
                         </TableCell>
                       </TableRow>
                     );
