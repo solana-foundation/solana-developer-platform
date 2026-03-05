@@ -60,7 +60,7 @@ export default async function ApiKeysPage() {
   const hasGeneratedKeyFlash = Boolean(flash?.key);
 
   return (
-    <div className="w-full max-w-5xl flex flex-col gap-6">
+    <div className="w-full flex flex-col gap-6">
       {flash ? (
         <>
           {!hasGeneratedKeyFlash ? <FlashClearTrigger /> : null}

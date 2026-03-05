@@ -120,6 +120,8 @@ function getDashboardPageConfig(pathname: string): DashboardPageConfig {
   if (pathname === "/dashboard/api-keys") {
     return {
       title: "API keys",
+      showHeaderNavRow: true,
+      contentWidthClass: "max-w-none",
     };
   }
   if (pathname === "/dashboard/issuance") {
