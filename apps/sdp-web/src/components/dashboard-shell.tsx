@@ -98,10 +98,24 @@ function getDashboardPageConfig(pathname: string): DashboardPageConfig {
     };
   }
   if (pathname === "/dashboard/wallets/setup" || pathname === "/dashboard/custody/setup") {
-    return { title: "Activate provider", contentWidthClass: "max-w-3xl" };
+    return {
+      title: "Activate provider",
+      contentWidthClass: "max-w-3xl",
+      backAction: {
+        href: "/dashboard/wallets",
+        label: "Back to wallets",
+      },
+    };
   }
   if (pathname === "/dashboard/wallets/switch" || pathname === "/dashboard/custody/switch") {
-    return { title: "Activate provider", contentWidthClass: "max-w-3xl" };
+    return {
+      title: "Activate provider",
+      contentWidthClass: "max-w-3xl",
+      backAction: {
+        href: "/dashboard/wallets",
+        label: "Back to wallets",
+      },
+    };
   }
   if (pathname === "/dashboard/api-keys") {
     return {

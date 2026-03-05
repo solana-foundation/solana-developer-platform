@@ -251,11 +251,6 @@ export function CustodySetupForm({
         <Button type="submit" disabled={isConnected && !canCreateAdditionalWallet}>
           {isConnected ? "Create wallet" : "Connect provider & create wallet"}
         </Button>
-        <Link href="/dashboard/wallets/setup">
-          <Button type="button" variant="secondary">
-            Back to providers
-          </Button>
-        </Link>
         <Link href="/dashboard/wallets">
           <Button type="button" variant="secondary">
             Cancel
