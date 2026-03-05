@@ -1,4 +1,11 @@
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import {
   Table,
   TableBody,
@@ -12,6 +19,7 @@ import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { consumeApiKeyFlash } from "./actions";
 import { ApiKeyActionsMenu } from "./api-key-actions-menu";
+import { CreateApiKeyModal } from "./create-api-key-modal";
 import { FlashClearTrigger } from "./flash-clear-trigger";
 import { GeneratedApiKeyModal } from "./generated-key-modal";
 
@@ -89,6 +97,9 @@ export default async function ApiKeysPage() {
         <CardHeader>
           <CardTitle>Existing API keys</CardTitle>
           <CardDescription>Active and historical keys for this workspace.</CardDescription>
+          <CardAction>
+            <CreateApiKeyModal triggerLabel="New API key" />
+          </CardAction>
         </CardHeader>
         <CardContent>
           <div className="mb-4 rounded-[10px] border border-[rgba(28,28,29,0.14)] bg-[rgba(28,28,29,0.03)] px-3 py-2 text-xs text-[rgba(28,28,29,0.72)]">
@@ -101,61 +112,61 @@ export default async function ApiKeysPage() {
             <p className="text-sm text-[rgba(28,28,29,0.72)]">No API keys found.</p>
           ) : (
             <Table className="table-fixed">
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-[14%]">Name</TableHead>
-                    <TableHead className="w-[14%]">Prefix</TableHead>
-                    <TableHead className="w-[10%]">Role</TableHead>
-                    <TableHead className="w-[8%]">Env</TableHead>
-                    <TableHead className="w-[10%]">Status</TableHead>
-                    <TableHead className="w-[11%]">Last used</TableHead>
-                    <TableHead className="w-[11%]">Expires</TableHead>
-                    <TableHead className="w-[11%]">Created</TableHead>
-                    <TableHead className="w-[21%] text-right">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {apiKeys.map((key) => {
-                    const canRotate = key.status === "active";
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-[14%]">Name</TableHead>
+                  <TableHead className="w-[14%]">Prefix</TableHead>
+                  <TableHead className="w-[10%]">Role</TableHead>
+                  <TableHead className="w-[8%]">Env</TableHead>
+                  <TableHead className="w-[10%]">Status</TableHead>
+                  <TableHead className="w-[11%]">Last used</TableHead>
+                  <TableHead className="w-[11%]">Expires</TableHead>
+                  <TableHead className="w-[11%]">Created</TableHead>
+                  <TableHead className="w-[21%] text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {apiKeys.map((key) => {
+                  const canRotate = key.status === "active";
 
-                    return (
-                      <TableRow key={key.id}>
-                        <TableCell className="font-medium">
-                          <span className="block truncate">{key.name}</span>
-                        </TableCell>
-                        <TableCell className="font-mono text-xs">
-                          <span className="block truncate">{key.keyPrefix}</span>
-                        </TableCell>
-                        <TableCell className="text-xs">
-                          <span className="block truncate">{key.role}</span>
-                        </TableCell>
-                        <TableCell className="text-xs">
-                          <span className="block truncate">{key.environment}</span>
-                        </TableCell>
-                        <TableCell className="text-xs">
-                          <span className="block truncate">{key.status}</span>
-                        </TableCell>
-                        <TableCell className="text-xs text-[rgba(28,28,29,0.72)]">
-                          {formatDate(key.lastUsedAt)}
-                        </TableCell>
-                        <TableCell className="text-xs text-[rgba(28,28,29,0.72)]">
-                          {formatDate(key.expiresAt)}
-                        </TableCell>
-                        <TableCell className="text-xs text-[rgba(28,28,29,0.72)]">
-                          {formatDate(key.createdAt)}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <ApiKeyActionsMenu
-                            keyId={key.id}
-                            keyName={key.name}
-                            canRotate={canRotate}
-                          />
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
+                  return (
+                    <TableRow key={key.id}>
+                      <TableCell className="font-medium">
+                        <span className="block truncate">{key.name}</span>
+                      </TableCell>
+                      <TableCell className="font-mono text-xs">
+                        <span className="block truncate">{key.keyPrefix}</span>
+                      </TableCell>
+                      <TableCell className="text-xs">
+                        <span className="block truncate">{key.role}</span>
+                      </TableCell>
+                      <TableCell className="text-xs">
+                        <span className="block truncate">{key.environment}</span>
+                      </TableCell>
+                      <TableCell className="text-xs">
+                        <span className="block truncate">{key.status}</span>
+                      </TableCell>
+                      <TableCell className="text-xs text-[rgba(28,28,29,0.72)]">
+                        {formatDate(key.lastUsedAt)}
+                      </TableCell>
+                      <TableCell className="text-xs text-[rgba(28,28,29,0.72)]">
+                        {formatDate(key.expiresAt)}
+                      </TableCell>
+                      <TableCell className="text-xs text-[rgba(28,28,29,0.72)]">
+                        {formatDate(key.createdAt)}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <ApiKeyActionsMenu
+                          keyId={key.id}
+                          keyName={key.name}
+                          canRotate={canRotate}
+                        />
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
           )}
         </CardContent>
       </Card>
