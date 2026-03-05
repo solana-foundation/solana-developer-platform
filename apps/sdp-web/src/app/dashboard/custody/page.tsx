@@ -387,7 +387,7 @@ export default async function CustodyPage() {
     redirect("/dashboard");
   }
 
-  const pageContainerClassName = "w-full max-w-5xl flex flex-col gap-6";
+  const pageContainerClassName = "w-full flex flex-col gap-6";
   const apiClient = await createSdpApiClient();
   const onboardingPromise = apiClient.fetch<{ linked: boolean }>("/v1/onboarding/status");
   const configsResultPromise = settle(getCustodyConfigs(apiClient.request));

@@ -65,7 +65,7 @@ export function WalletsTableSectionSkeleton() {
 
 export function WalletsPageSkeleton() {
   return (
-    <div className="w-full max-w-5xl flex flex-col gap-6">
+    <div className="w-full flex flex-col gap-6">
       <WalletsOnboardingSkeleton />
       <WalletsSigningConfigSkeleton />
       <WalletsTableSectionSkeleton />

@@ -109,6 +109,7 @@ function getDashboardPageConfig(pathname: string): DashboardPageConfig {
     return {
       title: "Wallets",
       quickActionsRight: <WalletQuickAction />,
+      contentWidthClass: "max-w-none",
     };
   }
   if (pathname === "/dashboard/wallets/setup" || pathname === "/dashboard/custody/setup") {
