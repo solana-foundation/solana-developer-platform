@@ -293,10 +293,7 @@ function getExplorerHref(mintAddress: string | null): string | null {
     return null;
   }
 
-  const cluster = process.env.NEXT_PUBLIC_SOLANA_NETWORK;
-  const query =
-    cluster && cluster !== "mainnet-beta" ? `?cluster=${encodeURIComponent(cluster)}` : "";
-  return `https://explorer.solana.com/address/${mintAddress}${query}`;
+  return `https://explorer.solana.com/address/${mintAddress}?cluster=devnet`;
 }
 
 async function executeActionRequest(input: ActionExecutionInput): Promise<ActionExecutionResult> {
