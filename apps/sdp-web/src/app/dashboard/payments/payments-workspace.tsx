@@ -11,55 +11,16 @@ import {
   type ComplianceIntent,
   type ComplianceProviderResult,
 } from "@/lib/compliance";
+import type {
+  PaymentsDashboardWallet as WalletRecord,
+  PaymentsDashboardWalletsEnvelope as WalletsEnvelope,
+  PaymentTransferEnvelope as TransferEnvelope,
+  PaymentTransferSummary as TransferRecord,
+  PaymentWalletPolicy as WalletPolicy,
+  PaymentWalletPolicyEnvelope as WalletPolicyEnvelope,
+} from "@sdp/types";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-
-type WalletRecord = {
-  id: string;
-  walletId: string;
-  publicKey: string;
-  label: string | null;
-};
-
-type WalletsEnvelope = {
-  data?: {
-    wallets?: WalletRecord[];
-  };
-  error?: {
-    message?: string;
-  };
-};
-
-type WalletPolicy = {
-  walletId: string;
-  destinationAllowlist: string[];
-  maxTransferAmount?: string;
-  maxDailyAmount?: string;
-};
-
-type WalletPolicyEnvelope = {
-  data?: {
-    policy?: WalletPolicy;
-  };
-  error?: {
-    message?: string;
-  };
-};
-
-type TransferRecord = {
-  id: string;
-  status: string;
-  signature: string | null;
-};
-
-type TransferEnvelope = {
-  data?: {
-    transfer?: TransferRecord;
-  };
-  error?: {
-    message?: string;
-  };
-};
 
 type ComplianceSnapshot = {
   address: string;

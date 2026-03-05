@@ -20,6 +20,10 @@
       "types": "./src/api-keys.ts",
       "import": "./src/api-keys.ts"
     },
+    "./payments": {
+      "types": "./src/payments.ts",
+      "import": "./src/payments.ts"
+    },
     "./permissions": {
       "types": "./src/permissions.ts",
       "import": "./src/permissions.ts"
