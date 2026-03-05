@@ -123,7 +123,12 @@ export function TokenActionAdminForms({
             </Label>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button type="button" variant="outline" onClick={() => onSeize("prepare")} disabled={isPending}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => onSeize("prepare")}
+              disabled={isPending}
+            >
               Seize (prepare)
             </Button>
             <Button type="button" onClick={() => onSeize("execute")} disabled={isPending}>
@@ -269,7 +274,12 @@ export function TokenActionAdminForms({
       {activeAction === "pause" ? (
         <TokenActionCard title="Pause Controls" description="Pause or resume token-wide transfers.">
           <div className="flex flex-wrap gap-2">
-            <Button type="button" variant="outline" onClick={() => onPause(true)} disabled={isPending}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => onPause(true)}
+              disabled={isPending}
+            >
               Pause token
             </Button>
             <Button type="button" onClick={() => onPause(false)} disabled={isPending}>
@@ -305,7 +315,12 @@ export function TokenActionAdminForms({
             </Label>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button type="button" variant="outline" onClick={() => onFreeze(false)} disabled={isPending}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => onFreeze(false)}
+              disabled={isPending}
+            >
               Freeze account
             </Button>
             <Button type="button" onClick={() => onFreeze(true)} disabled={isPending}>
@@ -360,7 +375,9 @@ export function TokenActionAdminForms({
                 >
                   <div className="min-w-0">
                     <p className="truncate font-mono text-xs text-[#1c1c1d]">{entry.address}</p>
-                    <p className="text-xs text-[rgba(28,28,29,0.62)]">{entry.label ?? "No label"}</p>
+                    <p className="text-xs text-[rgba(28,28,29,0.62)]">
+                      {entry.label ?? "No label"}
+                    </p>
                   </div>
                   <Button
                     type="button"

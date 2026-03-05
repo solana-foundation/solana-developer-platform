@@ -1,6 +1,9 @@
 "use client";
 
-import type { PaymentsDashboardWallet as WalletRecord, PaymentWalletPolicy as WalletPolicy } from "@sdp/types";
+import type {
+  PaymentWalletPolicy as WalletPolicy,
+  PaymentsDashboardWallet as WalletRecord,
+} from "@sdp/types";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import {

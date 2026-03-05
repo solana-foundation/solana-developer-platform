@@ -1,9 +1,9 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
-import { type FormEvent } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { ShieldAlert, ShieldCheck } from "lucide-react";
+import type { FormEvent } from "react";
 import type { CreateIssuanceTokenResult } from "./actions";
 import type { AccessControlMode, TemplateSelection, TokenDraft } from "./create-token-modal.types";
 import {
@@ -59,7 +59,10 @@ export function CreateTokenFeaturesStep({
       <div className="space-y-5 rounded-[28px] p-5">
         <div>
           <p className="text-3xl font-medium text-[#1c1c1d]">
-            Access Control Mode <span aria-hidden className="text-[#c71f37]">*</span>
+            Access Control Mode{" "}
+            <span aria-hidden className="text-[#c71f37]">
+              *
+            </span>
             <span className="sr-only"> (required)</span>
           </p>
           <p className="mt-2 text-lg text-[rgba(28,28,29,0.64)]">
@@ -145,7 +148,9 @@ function AccessControlOption({
         isSelected
           ? "border-[#1c1c1d] bg-[rgba(28,28,29,0.05)]"
           : "border-[rgba(28,28,29,0.14)] bg-white",
-        availability.available ? "cursor-pointer hover:bg-[rgba(28,28,29,0.03)]" : "cursor-not-allowed opacity-60",
+        availability.available
+          ? "cursor-pointer hover:bg-[rgba(28,28,29,0.03)]"
+          : "cursor-not-allowed opacity-60",
       ].join(" ")}
     >
       {icon}

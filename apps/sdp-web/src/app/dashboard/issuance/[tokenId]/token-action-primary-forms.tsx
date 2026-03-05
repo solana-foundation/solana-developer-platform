@@ -112,7 +112,10 @@ export function TokenActionPrimaryForms({
       ) : null}
 
       {activeAction === "refresh-supply" ? (
-        <TokenActionCard title="Refresh Supply" description="Fetch supply from RPC and update cache.">
+        <TokenActionCard
+          title="Refresh Supply"
+          description="Fetch supply from RPC and update cache."
+        >
           <Button type="button" variant="secondary" onClick={onRefreshSupply} disabled={isPending}>
             Refresh supply
           </Button>
@@ -120,7 +123,10 @@ export function TokenActionPrimaryForms({
       ) : null}
 
       {activeAction === "mint" ? (
-        <TokenActionCard title="Mint Tokens" description="Mint to destination wallet/token account.">
+        <TokenActionCard
+          title="Mint Tokens"
+          description="Mint to destination wallet/token account."
+        >
           <div className="grid gap-3 md:grid-cols-2">
             <Label>
               Destination
@@ -154,7 +160,12 @@ export function TokenActionPrimaryForms({
             </Label>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button type="button" variant="outline" onClick={() => onMint("prepare")} disabled={isPending}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => onMint("prepare")}
+              disabled={isPending}
+            >
               Mint (prepare)
             </Button>
             <Button type="button" onClick={() => onMint("execute")} disabled={isPending}>
@@ -196,7 +207,12 @@ export function TokenActionPrimaryForms({
             </Label>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button type="button" variant="outline" onClick={() => onBurn("prepare")} disabled={isPending}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => onBurn("prepare")}
+              disabled={isPending}
+            >
               Burn (prepare)
             </Button>
             <Button type="button" onClick={() => onBurn("execute")} disabled={isPending}>

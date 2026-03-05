@@ -77,8 +77,14 @@ export function TokenManagementHeader({
               <div className="p-1">
                 <MenuAction label="Mint Tokens" onClick={() => onSelectAction("mint")} />
                 <MenuAction label="Burn Tokens" onClick={() => onSelectAction("burn")} />
-                <MenuAction label="Update Metadata" onClick={() => onSelectAction("update-metadata")} />
-                <MenuAction label="Refresh Supply" onClick={() => onSelectAction("refresh-supply")} />
+                <MenuAction
+                  label="Update Metadata"
+                  onClick={() => onSelectAction("update-metadata")}
+                />
+                <MenuAction
+                  label="Refresh Supply"
+                  onClick={() => onSelectAction("refresh-supply")}
+                />
               </div>
               <div className="border-y border-[rgba(28,28,29,0.08)] px-3 py-2 text-xs font-medium tracking-wide text-[rgba(28,28,29,0.6)] uppercase">
                 Administrative

@@ -21,7 +21,9 @@ const run = async () => {
   try {
     content = await fs.readFile(sourceIndexPath, "utf8");
   } catch (error) {
-    throw new Error("Missing .source/index.ts. Run fumadocs-mdx before patching.", { cause: error });
+    throw new Error("Missing .source/index.ts. Run fumadocs-mdx before patching.", {
+      cause: error,
+    });
   }
 
   const replaced = content

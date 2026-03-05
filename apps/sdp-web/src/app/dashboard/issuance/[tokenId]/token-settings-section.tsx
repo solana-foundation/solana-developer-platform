@@ -83,7 +83,12 @@ export function TokenSettingsSection({
                   {formatValue(row.value)}
                   {row.value ? <Copy className="h-3 w-3" /> : null}
                 </button>
-                <Button type="button" variant="outline" size="sm" onClick={() => onEditAction(row.action)}>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => onEditAction(row.action)}
+                >
                   Edit
                 </Button>
               </div>

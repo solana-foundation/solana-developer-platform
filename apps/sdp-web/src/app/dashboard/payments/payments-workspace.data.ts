@@ -1,17 +1,17 @@
 "use client";
 
 import {
-  screenAddressCompliance,
   type ComplianceIntent,
   type ComplianceProviderResult,
+  screenAddressCompliance,
 } from "@/lib/compliance";
 import type {
-  PaymentsDashboardWallet as WalletRecord,
-  PaymentsDashboardWalletsEnvelope as WalletsEnvelope,
   PaymentTransferEnvelope as TransferEnvelope,
   PaymentTransferSummary as TransferRecord,
   PaymentWalletPolicy as WalletPolicy,
   PaymentWalletPolicyEnvelope as WalletPolicyEnvelope,
+  PaymentsDashboardWallet as WalletRecord,
+  PaymentsDashboardWalletsEnvelope as WalletsEnvelope,
 } from "@sdp/types";
 import type { ComplianceSnapshot } from "./payments-workspace.types";
 
@@ -45,7 +45,11 @@ export function toProviderLabel(value: string): string {
 }
 
 export function formatRiskScore(result: ComplianceProviderResult): string {
-  if (typeof result.riskScore === "number" && typeof result.riskLevel === "string" && result.riskLevel) {
+  if (
+    typeof result.riskScore === "number" &&
+    typeof result.riskLevel === "string" &&
+    result.riskLevel
+  ) {
     return `${result.riskScore} - ${result.riskLevel}`;
   }
   if (typeof result.riskScore === "number") {
@@ -170,7 +174,10 @@ export async function fetchWalletPolicy(walletId: string): Promise<WalletPolicy>
   );
 }
 
-export async function updateWalletPolicy(walletId: string, policy: WalletPolicy): Promise<WalletPolicy> {
+export async function updateWalletPolicy(
+  walletId: string,
+  policy: WalletPolicy
+): Promise<WalletPolicy> {
   const response = await fetch(
     `/api/dashboard/payments/wallets/${encodeURIComponent(walletId)}/policies`,
     {

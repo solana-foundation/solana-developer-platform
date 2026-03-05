@@ -9,12 +9,7 @@ import { toast } from "sonner";
 import { type CreateIssuanceTokenResult, createIssuanceTokenAction } from "./actions";
 import { CreateTokenFeaturesStep } from "./create-token-features-step";
 import { CreateTokenIdentityStep } from "./create-token-identity-step";
-import { TemplateSelectionStep } from "./create-token-template-selection-step";
-import type {
-  FlowState,
-  TemplateSelection,
-  TokenDraft,
-} from "./create-token-modal.types";
+import type { FlowState, TemplateSelection, TokenDraft } from "./create-token-modal.types";
 import {
   INITIAL_CREATE_ISSUANCE_TOKEN_RESULT,
   createInitialDraft,
@@ -25,6 +20,7 @@ import {
   getTemplateTitle,
   isValidMetadataUri,
 } from "./create-token-modal.utils";
+import { TemplateSelectionStep } from "./create-token-template-selection-step";
 
 interface CreateIssuanceTokenModalProps {
   open?: boolean;
@@ -60,7 +56,8 @@ export function CreateIssuanceTokenModal({
     uriValid: isValidMetadataUri(uri),
     nameValid: name.length > 0 && name.length <= 100,
     symbolValid: /^[A-Z0-9.]{1,10}$/.test(symbol),
-    decimalsValid: template !== null && getTemplateDecimalOptions(template).includes(draft.decimals),
+    decimalsValid:
+      template !== null && getTemplateDecimalOptions(template).includes(draft.decimals),
   };
   const isIdentityStep = flow.kind === "creation" && flow.step === "identity";
   const isFeaturesStep = flow.kind === "creation" && flow.step === "features";

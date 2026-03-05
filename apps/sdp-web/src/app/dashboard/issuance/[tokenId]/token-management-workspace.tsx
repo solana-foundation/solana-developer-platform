@@ -8,9 +8,6 @@ import { TokenActionForms } from "./token-action-forms";
 import { TokenActionResponseCard } from "./token-action-response-card";
 import { TokenControlListsSection } from "./token-control-lists-section";
 import { TokenManagementHeader } from "./token-management-header";
-import { TokenOverviewSection } from "./token-overview-section";
-import { TokenSettingsSection } from "./token-settings-section";
-import { TokenTransactionsSection } from "./token-transactions-section";
 import type {
   AdminAction,
   SettingsTab,
@@ -31,6 +28,9 @@ import {
   getPermissionRows,
   isPositiveAmount,
 } from "./token-management-workspace.utils";
+import { TokenOverviewSection } from "./token-overview-section";
+import { TokenSettingsSection } from "./token-settings-section";
+import { TokenTransactionsSection } from "./token-transactions-section";
 import { useTokenActionRunner } from "./use-token-action-runner";
 
 export function TokenManagementWorkspace({
@@ -49,8 +49,14 @@ export function TokenManagementWorkspace({
   frozenAccountsTotal,
   frozenAccountsHasMore,
 }: TokenManagementWorkspaceProps) {
-  const { isPending, lastActionResult, actionConfirmation, runAction, dismissActionConfirmation, confirmAction } =
-    useTokenActionRunner();
+  const {
+    isPending,
+    lastActionResult,
+    actionConfirmation,
+    runAction,
+    dismissActionConfirmation,
+    confirmAction,
+  } = useTokenActionRunner();
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("permissions");
   const [isActionMenuOpen, setIsActionMenuOpen] = useState(false);
   const [activeAction, setActiveAction] = useState<AdminAction | null>("update-metadata");

@@ -4,12 +4,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { motion } from "framer-motion";
+import type { IdentityValidation, TemplateSelection, TokenDraft } from "./create-token-modal.types";
 import { normalizeSymbol } from "./create-token-modal.utils";
-import type {
-  IdentityValidation,
-  TemplateSelection,
-  TokenDraft,
-} from "./create-token-modal.types";
 
 interface CreateTokenIdentityStepProps {
   template: TemplateSelection;
@@ -46,7 +42,10 @@ export function CreateTokenIdentityStep({
         <div className="grid gap-4">
           <div className="grid gap-2">
             <Label htmlFor="issuance-token-uri">
-              Metadata URI <span aria-hidden className="text-[#c71f37]">*</span>
+              Metadata URI{" "}
+              <span aria-hidden className="text-[#c71f37]">
+                *
+              </span>
               <span className="sr-only"> (required)</span>
             </Label>
             <Input
@@ -62,7 +61,10 @@ export function CreateTokenIdentityStep({
 
           <div className="grid gap-2">
             <Label htmlFor="issuance-token-name">
-              Token Name <span aria-hidden className="text-[#c71f37]">*</span>
+              Token Name{" "}
+              <span aria-hidden className="text-[#c71f37]">
+                *
+              </span>
               <span className="sr-only"> (required)</span>
             </Label>
             <Input
@@ -76,7 +78,10 @@ export function CreateTokenIdentityStep({
 
           <div className="grid gap-2">
             <Label htmlFor="issuance-token-symbol">
-              Symbol <span aria-hidden className="text-[#c71f37]">*</span>
+              Symbol{" "}
+              <span aria-hidden className="text-[#c71f37]">
+                *
+              </span>
               <span className="sr-only"> (required)</span>
             </Label>
             <Input
@@ -92,7 +97,10 @@ export function CreateTokenIdentityStep({
 
           <div className="grid gap-2">
             <Label>
-              Decimals <span aria-hidden className="text-[#c71f37]">*</span>
+              Decimals{" "}
+              <span aria-hidden className="text-[#c71f37]">
+                *
+              </span>
               <span className="sr-only"> (required)</span>
             </Label>
             <div

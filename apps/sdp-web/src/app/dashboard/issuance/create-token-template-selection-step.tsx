@@ -2,8 +2,8 @@
 
 import { motion } from "framer-motion";
 import { ChevronRight } from "lucide-react";
-import { templateCards } from "./create-token-modal.utils";
 import type { TemplateSelection } from "./create-token-modal.types";
+import { templateCards } from "./create-token-modal.utils";
 
 interface TemplateSelectionStepProps {
   onSelect: (template: TemplateSelection) => void;

@@ -1,6 +1,13 @@
 "use client";
 
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { formatRiskScore, riskToneClassName, toProviderLabel } from "./payments-workspace.data";
 import type { ComplianceSnapshot } from "./payments-workspace.types";
 
