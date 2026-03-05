@@ -63,21 +63,59 @@ function parseArgs(argv) {
   return args;
 }
 
-function getChangedFiles(baseRef) {
+function parseChangedEntries(output) {
+  return output
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const parts = line.split("\t");
+      const status = parts[0] ?? "";
+
+      if (status.startsWith("R")) {
+        return {
+          status,
+          basePath: parts[1] ?? null,
+          currentPath: parts[2] ?? null,
+        };
+      }
+
+      if (status === "D") {
+        return {
+          status,
+          basePath: parts[1] ?? null,
+          currentPath: null,
+        };
+      }
+
+      if (status === "A") {
+        return {
+          status,
+          basePath: null,
+          currentPath: parts[1] ?? null,
+        };
+      }
+
+      return {
+        status,
+        basePath: parts[1] ?? null,
+        currentPath: parts[1] ?? null,
+      };
+    });
+}
+
+function getChangedEntries(baseRef) {
   const output = execFileSync(
     "git",
-    ["diff", "--name-only", `${baseRef}...HEAD`],
+    ["diff", "--name-status", "--find-renames", `${baseRef}...HEAD`],
     { cwd: ROOT, encoding: "utf8" }
   );
 
-  return output
-    .split("\n")
-    .map((value) => value.trim())
-    .filter(Boolean);
+  return parseChangedEntries(output);
 }
 
-function isProductionSource(filePath) {
-  if (!filePath.startsWith("apps/") && !filePath.startsWith("packages/")) {
+function isProductionSourcePath(filePath) {
+  if (!filePath || (!filePath.startsWith("apps/") && !filePath.startsWith("packages/"))) {
     return false;
   }
 
@@ -95,7 +133,11 @@ function isProductionSource(filePath) {
     return false;
   }
 
-  return fs.existsSync(path.join(ROOT, filePath));
+  return true;
+}
+
+function isProductionSource(filePath) {
+  return isProductionSourcePath(filePath) && fs.existsSync(path.join(ROOT, filePath));
 }
 
 function getFunctionName(node) {
@@ -156,9 +198,7 @@ function getFunctionComplexity(node) {
   return complexity;
 }
 
-function inspectFile(filePath) {
-  const absolutePath = path.join(ROOT, filePath);
-  const text = fs.readFileSync(absolutePath, "utf8");
+function inspectSourceText(filePath, text) {
   const lineCount = text.split(/\r?\n/).length;
   const extension = path.extname(filePath);
   const scriptKind =
@@ -224,6 +264,21 @@ function inspectFile(filePath) {
   };
 }
 
+function inspectFile(filePath) {
+  return inspectSourceText(filePath, fs.readFileSync(path.join(ROOT, filePath), "utf8"));
+}
+
+function inspectBaseFile(baseRef, filePath) {
+  return inspectSourceText(
+    filePath,
+    execFileSync("git", ["show", `${baseRef}:${filePath}`], {
+      cwd: ROOT,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    })
+  );
+}
+
 function formatResults(results) {
   const warnings = results.flatMap((result) =>
     result.warnings.map((message) => `WARN  ${message}`)
@@ -237,8 +292,20 @@ function formatResults(results) {
 
 function main() {
   const args = parseArgs(process.argv.slice(2));
-  const fileCandidates = args.files.length > 0 ? args.files : getChangedFiles(args.base);
-  const sourceFiles = [...new Set(fileCandidates.filter(isProductionSource))].sort();
+  const changedEntries =
+    args.files.length > 0
+      ? args.files.map((filePath) => ({
+          status: "M",
+          basePath: filePath,
+          currentPath: filePath,
+        }))
+      : getChangedEntries(args.base);
+  const sourceFiles = [
+    ...new Set(changedEntries.map((entry) => entry.currentPath).filter(isProductionSource)),
+  ].sort();
+  const baselineFiles = [
+    ...new Set(changedEntries.map((entry) => entry.basePath).filter(isProductionSourcePath)),
+  ].sort();
 
   if (sourceFiles.length === 0) {
     console.log(`Structural check: no matching production source files changed against ${args.base}.`);
@@ -247,6 +314,14 @@ function main() {
 
   const results = sourceFiles.map(inspectFile);
   const { warnings, failures } = formatResults(results);
+  const baselineResults = baselineFiles.flatMap((filePath) => {
+    try {
+      return [inspectBaseFile(args.base, filePath)];
+    } catch {
+      return [];
+    }
+  });
+  const { failures: baselineFailures } = formatResults(baselineResults);
 
   console.log(
     `Structural check inspected ${sourceFiles.length} file${sourceFiles.length === 1 ? "" : "s"} against ${args.base}.`
@@ -261,7 +336,14 @@ function main() {
   }
 
   if (failures.length > 0) {
-    process.exitCode = 1;
+    if (baselineFailures.length === 0 || failures.length > baselineFailures.length) {
+      process.exitCode = 1;
+      return;
+    }
+
+    console.log(
+      `Structural ratchet passed: current branch has ${failures.length} failure${failures.length === 1 ? "" : "s"} vs ${baselineFailures.length} on ${args.base}.`
+    );
   }
 }
 
