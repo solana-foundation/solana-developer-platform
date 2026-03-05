@@ -216,7 +216,6 @@ export function DashboardShell({ children }: { children: ReactNode }) {
   const sidebarWidth = 296;
   const pageConfig = getDashboardPageConfig(pathname);
   const contentWidthClass = pageConfig.contentWidthClass ?? "max-w-5xl";
-  const hasCompactTopAction = Boolean(pageConfig.backAction);
   const quickActionsLeft = pageConfig.backAction ? (
     <HeaderBackAction href={pageConfig.backAction.href} label={pageConfig.backAction.label} />
   ) : (
@@ -349,7 +348,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
 
         <section className="relative rounded-[16px] border border-[rgba(28,28,29,0.08)] bg-[rgba(255,255,255,0.8)] px-3 py-5 md:p-6 lg:rounded-tl-[16px]">
           <div className="w-full space-y-6">
-            <div className={hasCompactTopAction ? "space-y-2" : "space-y-4"}>
+            <div className="space-y-4">
               <div className="flex items-start justify-between gap-3">
                 <div className="flex min-w-0 items-center gap-3">
                   {!isSidebarOpen ? (
@@ -387,7 +386,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
                   <DashboardQuickActions
                     left={quickActionsLeft}
                     right={pageConfig.quickActionsRight}
-                    compact={hasCompactTopAction}
+                    compact={false}
                   />
                 </div>
               </div>
