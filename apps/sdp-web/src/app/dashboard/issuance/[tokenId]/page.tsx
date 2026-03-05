@@ -14,6 +14,13 @@ interface FetchResult<T> {
   status: number | null;
   data: T | null;
   error: string | null;
+  total: number | null;
+  hasMore: boolean;
+}
+
+interface PaginatedMeta {
+  total?: number;
+  hasMore?: boolean;
 }
 
 function parseErrorMessage(body: string): string {
@@ -41,23 +48,30 @@ async function fetchData<T>(
         status: response.status,
         data: null,
         error: parseErrorMessage(body),
+        total: null,
+        hasMore: false,
       };
     }
 
     const payload = (await response.json()) as {
       data?: unknown;
+      meta?: PaginatedMeta;
     };
 
     return {
       status: response.status,
       data: map(payload?.data),
       error: null,
+      total: typeof payload.meta?.total === "number" ? payload.meta.total : null,
+      hasMore: payload.meta?.hasMore === true,
     };
   } catch (error) {
     return {
       status: null,
       data: null,
       error: error instanceof Error ? error.message : "Request failed",
+      total: null,
+      hasMore: false,
     };
   }
 }
@@ -127,18 +141,24 @@ export default async function IssuanceTokenManagementPage({ params }: TokenManag
           ? `Transactions API ${transactionsResult.status ?? "unavailable"}: ${transactionsResult.error}`
           : null
       }
+      transactionsTotal={transactionsResult.total}
+      transactionsHasMore={transactionsResult.hasMore}
       allowlistEntries={allowlistResult.data ?? []}
       allowlistError={
         allowlistResult.error
           ? `Allowlist API ${allowlistResult.status ?? "unavailable"}: ${allowlistResult.error}`
           : null
       }
+      allowlistTotal={allowlistResult.total}
+      allowlistHasMore={allowlistResult.hasMore}
       frozenAccounts={frozenResult.data ?? []}
       frozenAccountsError={
         frozenResult.error
           ? `Frozen API ${frozenResult.status ?? "unavailable"}: ${frozenResult.error}`
           : null
       }
+      frozenAccountsTotal={frozenResult.total}
+      frozenAccountsHasMore={frozenResult.hasMore}
     />
   );
 }

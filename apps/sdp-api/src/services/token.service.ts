@@ -1361,6 +1361,7 @@ export class TokenService {
       organizationId: row.organization_id,
       mintAddress: row.mint_address,
       mintAuthority: row.mint_authority,
+      metadataAuthority: row.mint_authority,
       freezeAuthority: row.freeze_authority,
       ablListAddress: row.abl_list_address,
       name: row.name,

@@ -104,8 +104,8 @@ export default async function ApiKeysPage() {
         <CardContent>
           <div className="mb-4 rounded-[10px] border border-[rgba(28,28,29,0.14)] bg-[rgba(28,28,29,0.03)] px-3 py-2 text-xs text-[rgba(28,28,29,0.72)]">
             <p className="text-xs text-[rgba(28,28,29,0.72)]">
-              Rotation hint: rotate active keys only, use a grace period between 0 and 168 hours,
-              and keep old key secrets secure. New key secrets are shown once.
+              Rotation hint: rotate active keys only. The dashboard uses a 24-hour grace period;
+              use the API for custom grace values (0-168h). New key secrets are shown once.
             </p>
           </div>
           {apiKeys.length === 0 ? (

@@ -6,6 +6,8 @@ import { useState } from "react";
 import { rotateApiKeyAction } from "./actions";
 import { DeleteApiKeyModal } from "./delete-api-key-modal";
 
+const DEFAULT_ROTATION_GRACE_HOURS = 24;
+
 interface ApiKeyActionsMenuProps {
   keyId: string;
   keyName: string;
@@ -40,18 +42,18 @@ export function ApiKeyActionsMenu({ keyId, keyName, canRotate }: ApiKeyActionsMe
               {canRotate ? (
                 <form action={rotateApiKeyAction}>
                   <input type="hidden" name="keyId" value={keyId} />
-                  <input type="hidden" name="grace" value="24" />
+                  <input type="hidden" name="grace" value={String(DEFAULT_ROTATION_GRACE_HOURS)} />
                   <button
                     type="submit"
                     onClick={() => setIsMenuOpen(false)}
                     className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm hover:bg-[rgba(28,28,29,0.05)]"
                   >
-                    Rotate key
+                    Rotate key ({DEFAULT_ROTATION_GRACE_HOURS}h grace)
                   </button>
                 </form>
               ) : (
                 <span className="flex w-full cursor-not-allowed items-center rounded-lg px-3 py-2 text-left text-sm text-[rgba(28,28,29,0.45)]">
-                  Rotate key
+                  Rotate key ({DEFAULT_ROTATION_GRACE_HOURS}h grace)
                 </span>
               )}
 

@@ -82,10 +82,16 @@ interface TokenManagementWorkspaceProps {
   tokenError: string | null;
   transactions: TokenTransaction[];
   transactionsError: string | null;
+  transactionsTotal: number | null;
+  transactionsHasMore: boolean;
   allowlistEntries: TokenAllowlistEntry[];
   allowlistError: string | null;
+  allowlistTotal: number | null;
+  allowlistHasMore: boolean;
   frozenAccounts: FrozenAccount[];
   frozenAccountsError: string | null;
+  frozenAccountsTotal: number | null;
+  frozenAccountsHasMore: boolean;
 }
 
 interface MetadataFormState {
@@ -293,7 +299,12 @@ function getExplorerHref(mintAddress: string | null): string | null {
     return null;
   }
 
-  return `https://explorer.solana.com/address/${mintAddress}?cluster=devnet`;
+  const cluster = process.env.NEXT_PUBLIC_SOLANA_NETWORK?.trim() || "devnet";
+  const clusterQuery =
+    cluster === "mainnet-beta" || cluster === "mainnet"
+      ? ""
+      : `?cluster=${encodeURIComponent(cluster)}`;
+  return `https://explorer.solana.com/address/${mintAddress}${clusterQuery}`;
 }
 
 async function executeActionRequest(input: ActionExecutionInput): Promise<ActionExecutionResult> {
@@ -392,10 +403,16 @@ export function TokenManagementWorkspace({
   tokenError,
   transactions,
   transactionsError,
+  transactionsTotal,
+  transactionsHasMore,
   allowlistEntries,
   allowlistError,
+  allowlistTotal,
+  allowlistHasMore,
   frozenAccounts,
   frozenAccountsError,
+  frozenAccountsTotal,
+  frozenAccountsHasMore,
 }: TokenManagementWorkspaceProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -426,6 +443,7 @@ export function TokenManagementWorkspace({
   const tokenBasePath = useMemo(() => `/v1/issuance/tokens/${token.id}`, [token.id]);
   const explorerHref = useMemo(() => getExplorerHref(token.mintAddress), [token.mintAddress]);
   const canDeployToken = token.status === "pending" && !token.mintAddress;
+  const metadataAuthority = token.metadataAuthority ?? token.mintAuthority;
 
   const permissionRows = useMemo<PermissionRow[]>(
     () => [
@@ -447,7 +465,7 @@ export function TokenManagementWorkspace({
         id: "metadata-authority",
         title: "Metadata Authority",
         helper: "Can update token metadata.",
-        value: token.mintAuthority,
+        value: metadataAuthority,
         action: "update-metadata",
       },
       {
@@ -465,7 +483,7 @@ export function TokenManagementWorkspace({
         action: "authority",
       },
     ],
-    [token]
+    [metadataAuthority, token]
   );
 
   const extensionRows = useMemo<ExtensionRow[]>(
@@ -1711,28 +1729,37 @@ export function TokenManagementWorkspace({
             ) : transactions.length === 0 ? (
               <p className="text-sm text-[rgba(28,28,29,0.68)]">No transactions yet.</p>
             ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Type</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Signature</TableHead>
-                    <TableHead>Created</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {transactions.slice(0, 12).map((transaction) => (
-                    <TableRow key={transaction.id}>
-                      <TableCell>{transaction.type}</TableCell>
-                      <TableCell>{transaction.status}</TableCell>
-                      <TableCell className="max-w-[220px] truncate font-mono text-xs">
-                        {transaction.signature ?? "—"}
-                      </TableCell>
-                      <TableCell>{formatDate(transaction.createdAt)}</TableCell>
+              <div className="space-y-3">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Type</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Signature</TableHead>
+                      <TableHead>Created</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                  </TableHeader>
+                  <TableBody>
+                    {transactions.slice(0, 12).map((transaction) => (
+                      <TableRow key={transaction.id}>
+                        <TableCell>{transaction.type}</TableCell>
+                        <TableCell>{transaction.status}</TableCell>
+                        <TableCell className="max-w-[220px] truncate font-mono text-xs">
+                          {transaction.signature ?? "—"}
+                        </TableCell>
+                        <TableCell>{formatDate(transaction.createdAt)}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+                {transactionsHasMore ? (
+                  <p className="text-xs text-[rgba(28,28,29,0.62)]">
+                    Showing first {transactions.length} transactions
+                    {transactionsTotal ? ` of ${transactionsTotal}` : ""}. Use pagination to view
+                    older records.
+                  </p>
+                ) : null}
+              </div>
             )}
           </CardContent>
         </Card>
@@ -1748,9 +1775,16 @@ export function TokenManagementWorkspace({
               {allowlistError ? (
                 <p className="mt-1 text-sm text-[#8a1f2a]">{allowlistError}</p>
               ) : (
-                <p className="mt-1 text-sm text-[rgba(28,28,29,0.66)]">
-                  {allowlistEntries.length} entries
-                </p>
+                <>
+                  <p className="mt-1 text-sm text-[rgba(28,28,29,0.66)]">
+                    {(allowlistTotal ?? allowlistEntries.length).toLocaleString("en-US")} entries
+                  </p>
+                  {allowlistHasMore ? (
+                    <p className="mt-1 text-xs text-[rgba(28,28,29,0.62)]">
+                      Showing first {allowlistEntries.length.toLocaleString("en-US")} entries.
+                    </p>
+                  ) : null}
+                </>
               )}
             </div>
             <div className="rounded-xl border border-[rgba(28,28,29,0.12)] p-3">
@@ -1758,9 +1792,17 @@ export function TokenManagementWorkspace({
               {frozenAccountsError ? (
                 <p className="mt-1 text-sm text-[#8a1f2a]">{frozenAccountsError}</p>
               ) : (
-                <p className="mt-1 text-sm text-[rgba(28,28,29,0.66)]">
-                  {frozenAccounts.length} accounts
-                </p>
+                <>
+                  <p className="mt-1 text-sm text-[rgba(28,28,29,0.66)]">
+                    {(frozenAccountsTotal ?? frozenAccounts.length).toLocaleString("en-US")}{" "}
+                    accounts
+                  </p>
+                  {frozenAccountsHasMore ? (
+                    <p className="mt-1 text-xs text-[rgba(28,28,29,0.62)]">
+                      Showing first {frozenAccounts.length.toLocaleString("en-US")} accounts.
+                    </p>
+                  ) : null}
+                </>
               )}
             </div>
           </CardContent>
