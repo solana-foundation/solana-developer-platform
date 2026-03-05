@@ -1,7 +1,5 @@
 "use client";
 
-import { CreateApiKeyModal } from "@/app/dashboard/api-keys/create-api-key-modal";
-import { DashboardQuickActions } from "@/components/dashboard-quick-actions";
 import { IssuanceHeaderTabs } from "@/components/issuance-header-tabs";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { OrganizationSwitcher, SignInButton, UserButton, useAuth } from "@clerk/nextjs";
@@ -66,8 +64,7 @@ const bottomNavItems: NavItem[] = [
 
 type DashboardPageConfig = {
   title: string;
-  quickActionsLeft?: ReactNode;
-  quickActionsRight?: ReactNode;
+  headerNav?: ReactNode;
   contentWidthClass?: string;
   hideHeaderSelectors?: boolean;
   backAction?: {
@@ -75,19 +72,6 @@ type DashboardPageConfig = {
     label: string;
   };
 };
-
-function WalletQuickAction() {
-  return (
-    <Link href="/dashboard/wallets/setup">
-      <button
-        type="button"
-        className="inline-flex h-10 items-center justify-center rounded-md bg-[#1c1c1d] px-4 text-sm font-medium text-white hover:bg-[rgba(28,28,29,0.92)]"
-      >
-        New wallet
-      </button>
-    </Link>
-  );
-}
 
 function HeaderBackAction({ href, label }: { href: string; label: string }) {
   return (
@@ -108,7 +92,6 @@ function getDashboardPageConfig(pathname: string): DashboardPageConfig {
   if (pathname === "/dashboard/wallets" || pathname === "/dashboard/custody") {
     return {
       title: "Wallets",
-      quickActionsRight: <WalletQuickAction />,
       contentWidthClass: "max-w-none",
     };
   }
@@ -121,13 +104,12 @@ function getDashboardPageConfig(pathname: string): DashboardPageConfig {
   if (pathname === "/dashboard/api-keys") {
     return {
       title: "API keys",
-      quickActionsRight: <CreateApiKeyModal triggerMode="button" triggerLabel="Create API key" />,
     };
   }
   if (pathname === "/dashboard/issuance") {
     return {
       title: "Issuance",
-      quickActionsLeft: <IssuanceHeaderTabs />,
+      headerNav: <IssuanceHeaderTabs />,
       hideHeaderSelectors: true,
       contentWidthClass: "max-w-none",
     };
@@ -145,7 +127,7 @@ function getDashboardPageConfig(pathname: string): DashboardPageConfig {
   if (pathname.startsWith("/dashboard/payments")) {
     return {
       title: "Payments",
-      quickActionsLeft: <IssuanceHeaderTabs />,
+      headerNav: <IssuanceHeaderTabs />,
       contentWidthClass: "max-w-none",
     };
   }
@@ -218,10 +200,10 @@ export function DashboardShell({ children }: { children: ReactNode }) {
   const sidebarWidth = 296;
   const pageConfig = getDashboardPageConfig(pathname);
   const contentWidthClass = pageConfig.contentWidthClass ?? "max-w-5xl";
-  const quickActionsLeft = pageConfig.backAction ? (
+  const headerNav = pageConfig.backAction ? (
     <HeaderBackAction href={pageConfig.backAction.href} label={pageConfig.backAction.label} />
   ) : (
-    pageConfig.quickActionsLeft
+    pageConfig.headerNav
   );
 
   if (!isLoaded) {
@@ -383,16 +365,20 @@ export function DashboardShell({ children }: { children: ReactNode }) {
                 )}
               </div>
 
-              <div className="-mx-3 border-b border-[rgba(28,28,29,0.10)] md:-mx-6">
-                <div className="px-3 md:px-6">
-                  <DashboardQuickActions
-                    left={quickActionsLeft}
-                    right={pageConfig.quickActionsRight}
-                    compact={false}
-                    align={pageConfig.backAction ? "start" : "end"}
-                  />
+              {headerNav ? (
+                <div className="-mx-3 border-b border-[rgba(28,28,29,0.10)] md:-mx-6">
+                  <div
+                    className={[
+                      "px-3 md:px-6",
+                      pageConfig.backAction
+                        ? "flex min-h-[56px] items-start pt-1"
+                        : "flex min-h-[56px] items-end",
+                    ].join(" ")}
+                  >
+                    {headerNav}
+                  </div>
                 </div>
-              </div>
+              ) : null}
             </div>
             <div className={["mx-auto w-full", contentWidthClass].join(" ")}>{children}</div>
           </div>
