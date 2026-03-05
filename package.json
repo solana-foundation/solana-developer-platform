@@ -33,6 +33,7 @@
     "format:check": "biome format .",
     "test": "turbo run test --filter=!@sdp/api-integration",
     "test:integration": "turbo run test --filter=@sdp/api-integration",
+    "structural:check": "node scripts/structural-check.mjs",
     "check": "biome check --write . && turbo run typecheck",
     "kora:up": "docker compose -f infra/kora/docker-compose.yml up -d",
     "kora:down": "docker compose -f infra/kora/docker-compose.yml down",
