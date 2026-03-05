@@ -281,9 +281,16 @@ async function WalletsSection({
   return (
     <SectionEntry delay={0.08}>
       <Card>
-        <CardHeader>
-          <CardTitle>Wallets</CardTitle>
-          <CardDescription>Signing wallets available to your organization.</CardDescription>
+        <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="space-y-1">
+            <CardTitle>Wallets</CardTitle>
+            <CardDescription>Signing wallets available to your organization.</CardDescription>
+          </div>
+          <Link href="/dashboard/wallets/setup">
+            <Button type="button" size="sm" className="shrink-0">
+              New wallet
+            </Button>
+          </Link>
         </CardHeader>
         <CardContent>
           {wallets.length === 0 ? (
