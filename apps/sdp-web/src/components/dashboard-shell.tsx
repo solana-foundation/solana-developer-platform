@@ -289,7 +289,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
           transition={{ duration: 0.22, ease: "easeInOut" }}
           style={{ pointerEvents: isSidebarOpen ? "auto" : "none" }}
           className={[
-            "hidden overflow-hidden border border-[rgba(28,28,29,0.10)] border-r-0 bg-[#e9e7de] lg:flex lg:flex-col lg:justify-between",
+            "hidden overflow-hidden border border-[rgba(28,28,29,0.10)] border-r-0 bg-[#e9e7de] lg:sticky lg:top-0 lg:flex lg:h-screen lg:flex-col lg:justify-between",
           ].join(" ")}
         >
           <div className="w-[296px] space-y-6 p-3">
