@@ -4,15 +4,8 @@ import { hashString } from "@/lib/hash";
 import { created, noContent, success } from "@/lib/response";
 import { createAllowlistService } from "@/services/allowlist.service";
 import { AuditService } from "@/services/audit.service";
-import {
-  provisionCoinbaseCdpAccount,
-  provisionFireblocksVaultAccount,
-  provisionParaWallet,
-  provisionTurnkeyPrivateKey,
-} from "@/services/custody/provisioning";
-import { createSigningService } from "@/services/domain/signing.service";
 import { KVService } from "@/services/kv.service";
-import { SigningError } from "@/services/ports";
+import { createOrganizationOnboardingService } from "@/services/organization-onboarding.service";
 import type { Env } from "@/types/env";
 import {
   type CreateOrganizationResponse,
@@ -122,18 +115,6 @@ function createApiKeyMaterial(environment: "sandbox" | "production"): {
   return { key, prefix };
 }
 
-async function cleanupCustodyForOrg(env: Env, orgId: string): Promise<void> {
-  await env.DB.batch([
-    env.DB.prepare(
-      `DELETE FROM custody_wallets
-       WHERE custody_config_id IN (
-         SELECT id FROM custody_configs WHERE organization_id = ?
-       )`
-    ).bind(orgId),
-    env.DB.prepare("DELETE FROM custody_configs WHERE organization_id = ?").bind(orgId),
-  ]);
-}
-
 export const createOrganization = async (c: AppContext) => {
   const body = await c.req.json();
   const parsed = createOrgSchema.safeParse(body);
@@ -152,6 +133,7 @@ export const createOrganization = async (c: AppContext) => {
   // Initialize services
   const allowlistService = createAllowlistService(c.env);
   const auditService = new AuditService(c.env.DB);
+  const onboardingService = createOrganizationOnboardingService(c.env);
 
   // Organization self-registration is gated by a required pre-shared token.
   if (!registrationToken) {
@@ -185,95 +167,9 @@ export const createOrganization = async (c: AppContext) => {
   const apiKeyId = `key_${crypto.randomUUID()}`;
 
   if (custody) {
-    const signingService = createSigningService(c.env);
-
     try {
-      if (custody.provider === "fireblocks") {
-        const { vaultAccountId, assetId } = await provisionFireblocksVaultAccount(c.env, {
-          orgId,
-          orgSlug: slug,
-          assetId: custody.assetId,
-          apiBaseUrl: custody.apiBaseUrl,
-          vaultAccountId: custody.vaultAccountId,
-        });
-
-        if (!c.env.FIREBLOCKS_API_KEY || !c.env.FIREBLOCKS_API_SECRET) {
-          throw new SigningError(
-            "Fireblocks environment variables not configured: FIREBLOCKS_API_KEY, FIREBLOCKS_API_SECRET",
-            "PROVIDER_NOT_CONFIGURED"
-          );
-        }
-
-        await signingService.initializeFireblocksSigning(orgId, undefined, {
-          apiKey: c.env.FIREBLOCKS_API_KEY,
-          apiSecretPem: c.env.FIREBLOCKS_API_SECRET,
-          vaultAccountId,
-          assetId,
-          apiBaseUrl: custody.apiBaseUrl ?? c.env.FIREBLOCKS_API_BASE_URL,
-        });
-      } else if (custody.provider === "coinbase_cdp") {
-        const provisioned = await provisionCoinbaseCdpAccount(c.env, {
-          orgId,
-          orgSlug: slug,
-          apiBaseUrl: custody.apiBaseUrl,
-          network: custody.network,
-          walletAddress: custody.walletAddress,
-          accountPolicy: custody.accountPolicy,
-        });
-
-        await signingService.initializeCoinbaseCdpSigning(orgId, undefined, {
-          apiBaseUrl: custody.apiBaseUrl ?? c.env.COINBASE_CDP_API_BASE_URL,
-          network: custody.network ?? c.env.COINBASE_CDP_NETWORK,
-          walletAddress: provisioned.address,
-          accountPolicy: custody.accountPolicy,
-        });
-      } else if (custody.provider === "para") {
-        const provisioned = await provisionParaWallet(c.env, {
-          orgId,
-          orgSlug: slug,
-          apiBaseUrl: custody.apiBaseUrl,
-          walletId: custody.walletId,
-        });
-
-        await signingService.initializeParaSigning(orgId, undefined, {
-          apiBaseUrl: custody.apiBaseUrl ?? c.env.PARA_API_BASE_URL,
-          requestDelayMs: custody.requestDelayMs,
-          walletId: provisioned.walletId,
-        });
-      } else if (custody.provider === "turnkey") {
-        const provisioned = await provisionTurnkeyPrivateKey(c.env, {
-          orgId,
-          orgSlug: slug,
-          apiBaseUrl: custody.apiBaseUrl,
-          privateKeyId: custody.privateKeyId,
-        });
-
-        await signingService.initializeTurnkeySigning(orgId, undefined, {
-          apiBaseUrl: custody.apiBaseUrl ?? c.env.TURNKEY_API_BASE_URL,
-          requestDelayMs: custody.requestDelayMs,
-          privateKeyId: provisioned.privateKeyId,
-        });
-      } else if (custody.provider === "dfns") {
-        await signingService.initializeDfnsSigning(orgId, undefined, {
-          apiBaseUrl: custody.apiBaseUrl ?? c.env.DFNS_API_BASE_URL,
-          network: custody.network,
-          walletId: custody.walletId,
-          signingKeyId: custody.signingKeyId,
-        });
-      } else if (custody.provider === "anchorage") {
-        await signingService.initializeAnchorageWalletLifecycle(orgId, undefined, {
-          apiBaseUrl: custody.apiBaseUrl ?? c.env.ANCHORAGE_API_BASE_URL,
-          walletId: custody.walletId,
-          network: custody.network,
-        });
-      } else {
-        await signingService.initializePrivySigning(orgId, undefined, {
-          apiBaseUrl: custody.apiBaseUrl ?? c.env.PRIVY_API_BASE_URL,
-          requestDelayMs: custody.requestDelayMs,
-        });
-      }
+      await onboardingService.initializeCustody(orgId, slug, custody);
     } catch (error) {
-      await cleanupCustodyForOrg(c.env, orgId);
       const message = error instanceof Error ? error.message : "Custody initialization failed";
       throw new AppError("BAD_REQUEST", message);
     }
@@ -314,7 +210,7 @@ export const createOrganization = async (c: AppContext) => {
     await c.env.DB.batch(batch);
   } catch (error) {
     if (custody) {
-      await cleanupCustodyForOrg(c.env, orgId);
+      await onboardingService.cleanupCustody(orgId);
     }
     throw error;
   }
