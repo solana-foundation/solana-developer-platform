@@ -145,6 +145,7 @@ function getDashboardPageConfig(pathname: string): DashboardPageConfig {
     return {
       title: "Payments",
       quickActionsLeft: <IssuanceHeaderTabs />,
+      contentWidthClass: "max-w-none",
     };
   }
   if (pathname.startsWith("/dashboard/members")) {
