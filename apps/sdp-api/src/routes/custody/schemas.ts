@@ -3,6 +3,17 @@
  */
 
 import { CUSTODY_PROVIDERS } from "@/services/custody/providers";
+import type {
+  CustodyConfigResponse,
+  CustodyConfigsResponse,
+  CustodyWalletByIdResponse,
+  CustodyWalletResponse,
+  CustodyWalletsResponse,
+  DeleteWalletResponse,
+  InitializeSigningResponse,
+  SignerCheckResponse,
+  SwitchProviderOptionsResponse,
+} from "@sdp/types";
 import { z } from "zod";
 
 const custodyProviderSchema = z.enum(CUSTODY_PROVIDERS);
@@ -181,134 +192,14 @@ export type SignerCheckRequest = z.infer<typeof signerCheckSchema>;
 // Response Types
 // ═══════════════════════════════════════════════════════════════════════════
 
-export interface CustodyConfigResponse {
-  config: {
-    id: string;
-    organizationId: string;
-    projectId: string | null;
-    provider:
-      | "local"
-      | "fireblocks"
-      | "privy"
-      | "coinbase_cdp"
-      | "para"
-      | "turnkey"
-      | "dfns"
-      | "anchorage";
-    publicKey: string;
-    defaultWalletId: string | null;
-    status: "active" | "inactive";
-    createdAt: string;
-  };
-}
-
-export interface CustodyWalletResponse {
-  wallet: {
-    id: string;
-    custodyConfigId?: string;
-    provider?:
-      | "local"
-      | "fireblocks"
-      | "privy"
-      | "coinbase_cdp"
-      | "para"
-      | "turnkey"
-      | "dfns"
-      | "anchorage";
-    isDefaultProvider?: boolean;
-    walletId: string;
-    publicKey: string;
-    label: string | null;
-    purpose: string | null;
-    status: "active" | "inactive";
-    createdAt: string;
-  };
-}
-
-export interface CustodyWalletsResponse {
-  wallets: CustodyWalletResponse["wallet"][];
-}
-
-export interface CustodyWalletByIdResponse {
-  wallet: CustodyWalletResponse["wallet"] & {
-    custodyConfigId: string;
-    provider:
-      | "local"
-      | "fireblocks"
-      | "privy"
-      | "coinbase_cdp"
-      | "para"
-      | "turnkey"
-      | "dfns"
-      | "anchorage";
-    balance: {
-      token: "SOL";
-      mint: string;
-      amount: string;
-      uiAmount: string;
-      decimals: 9;
-    };
-  };
-}
-
-export interface CustodyConfigsResponse {
-  configs: Array<{
-    id: string;
-    organizationId: string;
-    projectId: string | null;
-    provider:
-      | "local"
-      | "fireblocks"
-      | "privy"
-      | "coinbase_cdp"
-      | "para"
-      | "turnkey"
-      | "dfns"
-      | "anchorage";
-    publicKey: string;
-    defaultWalletId: string | null;
-    status: "active" | "inactive";
-    createdAt: string;
-    isDefault: boolean;
-  }>;
-  defaultConfigId: string | null;
-}
-
-export interface SwitchProviderOptionsResponse {
-  providers: Array<{
-    provider:
-      | "fireblocks"
-      | "privy"
-      | "coinbase_cdp"
-      | "para"
-      | "turnkey"
-      | "dfns"
-      | "anchorage"
-      | "local";
-    hasReusableWallet: boolean;
-    needsWalletLabel: boolean;
-    isActive: boolean;
-    isDefault: boolean;
-  }>;
-}
-
-export interface DeleteWalletResponse {
-  walletId: string;
-  deleted: true;
-}
-
-export interface InitializeSigningResponse {
-  configId: string;
-  publicKey: string;
-  walletId: string;
-}
-
-export interface SignerCheckResponse {
-  walletId: string;
-  walletAddress: string;
-  feePayer: string;
-  memo: string;
-  signature: string;
-  slot: number;
-  blockTime: string;
-}
+export type {
+  CustodyConfigResponse,
+  CustodyConfigsResponse,
+  CustodyWalletByIdResponse,
+  CustodyWalletResponse,
+  CustodyWalletsResponse,
+  DeleteWalletResponse,
+  InitializeSigningResponse,
+  SignerCheckResponse,
+  SwitchProviderOptionsResponse,
+};
