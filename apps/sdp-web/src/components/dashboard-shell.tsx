@@ -9,7 +9,6 @@ import { motion } from "framer-motion";
 import {
   ArrowLeft,
   ArrowLeftRight,
-  ChevronDown,
   Coins,
   KeyRound,
   LayoutDashboard,
@@ -213,7 +212,7 @@ function SidebarGroup({
 export function DashboardShell({ children }: { children: ReactNode }) {
   const { isLoaded, isSignedIn, orgId } = useAuth();
   const pathname = usePathname();
-  const { isSidebarOpen, selectedProject, setSidebarOpen } = useDashboardWorkspace();
+  const { isSidebarOpen, setSidebarOpen } = useDashboardWorkspace();
   const sidebarWidth = 296;
   const pageConfig = getDashboardPageConfig(pathname);
   const contentWidthClass = pageConfig.contentWidthClass ?? "max-w-5xl";
@@ -374,12 +373,6 @@ export function DashboardShell({ children }: { children: ReactNode }) {
                   <h1 className="text-[36px] leading-[40px] font-medium tracking-[-0.3px] text-[#1c1c1d]">
                     {pageConfig.title}
                   </h1>
-                  {pageConfig.hideHeaderSelectors ? null : (
-                    <div className="pointer-events-none hidden h-10 items-center gap-2 rounded-[10px] border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.02)] px-3 py-2 text-sm md:flex">
-                      <span className="text-[rgba(28,28,29,0.72)]">{selectedProject}</span>
-                      <ChevronDown className="h-4 w-4 text-[rgba(28,28,29,0.72)]" />
-                    </div>
-                  )}
                 </div>
 
                 {pageConfig.hideHeaderSelectors ? null : (
