@@ -3,6 +3,7 @@
  */
 
 export * from "./permissions";
+export * from "./custody";
 export * from "./organizations";
 export * from "./api-keys";
 export * from "./projects";

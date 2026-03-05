@@ -12,6 +12,10 @@
       "types": "./src/organizations.ts",
       "import": "./src/organizations.ts"
     },
+    "./custody": {
+      "types": "./src/custody.ts",
+      "import": "./src/custody.ts"
+    },
     "./api-keys": {
       "types": "./src/api-keys.ts",
       "import": "./src/api-keys.ts"
