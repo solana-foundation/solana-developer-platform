@@ -2,6 +2,7 @@
  * Organization Types
  */
 
+import type { OrganizationCustodyRequest } from "./custody";
 import type { OrganizationRole } from "./permissions";
 
 export const ORGANIZATION_TIERS = ["free", "pro", "enterprise"] as const;
@@ -84,50 +85,7 @@ export interface CreateOrganizationRequest {
   slug?: string;
   email: string; // Creator's email (for allowlist check)
   returnFullApiKey?: boolean;
-  custody?: CreateOrganizationCustody;
-}
-
-export type CreateOrganizationCustody =
-  | CreateOrganizationCustodyFireblocks
-  | CreateOrganizationCustodyPrivy
-  | CreateOrganizationCustodyCoinbaseCdp
-  | CreateOrganizationCustodyPara
-  | CreateOrganizationCustodyTurnkey;
-
-export interface CreateOrganizationCustodyFireblocks {
-  provider: "fireblocks";
-  apiBaseUrl?: string;
-  assetId?: string;
-  vaultAccountId?: string;
-}
-
-export interface CreateOrganizationCustodyPrivy {
-  provider: "privy";
-  apiBaseUrl?: string;
-  walletId?: string;
-  requestDelayMs?: number;
-}
-
-export interface CreateOrganizationCustodyCoinbaseCdp {
-  provider: "coinbase_cdp";
-  apiBaseUrl?: string;
-  network?: "solana" | "solana-devnet";
-  walletAddress?: string;
-  accountPolicy?: string;
-}
-
-export interface CreateOrganizationCustodyPara {
-  provider: "para";
-  apiBaseUrl?: string;
-  requestDelayMs?: number;
-  walletId?: string;
-}
-
-export interface CreateOrganizationCustodyTurnkey {
-  provider: "turnkey";
-  apiBaseUrl?: string;
-  requestDelayMs?: number;
-  privateKeyId?: string;
+  custody?: OrganizationCustodyRequest;
 }
 
 export interface CreateOrganizationResponse {

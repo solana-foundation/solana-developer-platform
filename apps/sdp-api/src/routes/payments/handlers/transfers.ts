@@ -1,0 +1,804 @@
+import type {
+  PaymentTransferDirection as TransferDirection,
+  PaymentTransferRow as TransferRow,
+  PaymentTransferStatus as TransferStatus,
+  PaymentTransferType as TransferType,
+} from "@/db/repositories/payments.repository";
+import { parseDecimalAmount } from "@/lib/amount";
+import { assertApiKeyWalletAccess, getAllowedApiKeyWalletIds } from "@/lib/api-key-wallet-auth";
+import { getAuth } from "@/lib/auth";
+import { AppError } from "@/lib/errors";
+import { paginated, success } from "@/lib/response";
+import { assertValidAddress } from "@/lib/solana";
+import { withHeliusApiKey } from "@/services/rpc-relay.service";
+import { createOrgSigner } from "@/services/solana";
+import {
+  confirmTransaction,
+  createRpc,
+  getRecentBlockhash,
+  getSignaturesForAddress,
+  simulateTransaction,
+} from "@/services/solana/rpc";
+import type { CustodyWallet } from "@/services/stores/custody-config.store";
+import type { Env } from "@/types/env";
+import type { Permission } from "@sdp/types";
+import { getTransferSolInstruction } from "@solana-program/system";
+import {
+  findAssociatedTokenPda,
+  getCreateAssociatedTokenIdempotentInstruction,
+  getTransferCheckedInstruction,
+} from "@solana-program/token-2022";
+import type { Address } from "@solana/kit";
+import {
+  addSignersToTransactionMessage,
+  appendTransactionMessageInstructions,
+  compileTransaction,
+  createNoopSigner,
+  createTransactionMessage,
+  getBase64EncodedWireTransaction,
+  getTransactionEncoder,
+  pipe,
+  setTransactionMessageFeePayer,
+  setTransactionMessageLifetimeUsingBlockhash,
+} from "@solana/kit";
+import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
+import {
+  type AppContext,
+  getFeePayment,
+  getPaymentsRepository,
+  getSponsoredFeePayer,
+} from "../context";
+import { mapTransferRow } from "../mappers";
+import { assertWalletPolicyAllowsTransfer } from "../policy";
+import {
+  createTransferSchema,
+  listTransfersQuerySchema,
+  prepareTransferSchema,
+  walletIdParamsSchema,
+} from "../schemas";
+import {
+  isNativeSolToken,
+  resolveMintTokenProgram,
+  resolveSourceTokenAccount,
+} from "../token-accounts";
+import { resolveScope, resolveWallet } from "../wallets";
+
+export async function resolveWalletFromParams(
+  c: AppContext,
+  requiredWalletPermissions: Permission[] = []
+) {
+  const params = walletIdParamsSchema.safeParse(c.req.param());
+  if (!params.success) {
+    throw new AppError("BAD_REQUEST", "Invalid wallet ID");
+  }
+
+  const scope = await resolveScope(c);
+  const wallet = resolveWallet(scope.wallets, params.data.walletId);
+  assertApiKeyWalletAccess(scope.auth, wallet.walletId, requiredWalletPermissions);
+
+  return {
+    ...scope,
+    wallet,
+  };
+}
+
+function assertProjectContext(
+  bodyProjectId: string | undefined,
+  authProjectId: string | null
+): void {
+  if (!bodyProjectId) {
+    return;
+  }
+
+  if (!authProjectId) {
+    throw new AppError(
+      "BAD_REQUEST",
+      "projectId overrides are not supported for org-scoped keys in payments endpoints"
+    );
+  }
+
+  if (bodyProjectId !== authProjectId) {
+    throw new AppError("BAD_REQUEST", "projectId does not match the authenticated API key scope");
+  }
+}
+
+async function createTransferRecord(
+  c: AppContext,
+  input: {
+    organizationId: string;
+    projectId: string | null;
+    walletId: string;
+    sourceAddress: string;
+    destinationAddress: string;
+    token: string;
+    amount: string;
+    memo?: string;
+    type?: TransferType;
+    direction?: TransferDirection;
+    status?: TransferStatus;
+    serializedTx?: string;
+    initiatedByKeyId?: string;
+  }
+): Promise<TransferRow> {
+  const repository = getPaymentsRepository(c);
+  const id = `xfr_${crypto.randomUUID()}`;
+  const now = new Date().toISOString();
+
+  const createdRow = await repository.createTransfer({
+    id,
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    walletId: input.walletId,
+    sourceAddress: input.sourceAddress,
+    destinationAddress: input.destinationAddress,
+    token: input.token,
+    amount: input.amount,
+    memo: input.memo ?? null,
+    type: input.type ?? "transfer",
+    direction: input.direction ?? "outbound",
+    status: input.status ?? "pending",
+    serializedTx: input.serializedTx ?? null,
+    initiatedByKeyId: input.initiatedByKeyId ?? null,
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  if (!createdRow) {
+    throw new AppError("INTERNAL_ERROR", "Failed to create payment transfer record");
+  }
+
+  return createdRow;
+}
+
+async function updateTransferRecord(
+  c: AppContext,
+  transferId: string,
+  patch: {
+    status?: TransferStatus;
+    signature?: string | null;
+    serializedTx?: string | null;
+    slot?: number | null;
+    blockTime?: string | null;
+    fee?: number | null;
+    error?: string | null;
+  }
+): Promise<TransferRow> {
+  const repository = getPaymentsRepository(c);
+  const now = new Date().toISOString();
+
+  const updated = await repository.updateTransfer({
+    transferId,
+    status: patch.status,
+    signature: patch.signature,
+    serializedTx: patch.serializedTx,
+    slot: patch.slot,
+    blockTime: patch.blockTime,
+    fee: patch.fee,
+    error: patch.error,
+    updatedAt: now,
+  });
+
+  if (!updated) {
+    throw new AppError("INTERNAL_ERROR", "Payment transfer record not found for update");
+  }
+
+  return updated;
+}
+
+async function prepareSolTransfer(
+  c: AppContext,
+  sourceAddress: Address,
+  destinationAddress: Address,
+  amount: string
+): Promise<{ serializedTx: string; blockhash: string; lastValidBlockHeight: string }> {
+  const lamports = parseDecimalAmount(amount, 9);
+  if (lamports <= 0n) {
+    throw new AppError("BAD_REQUEST", "Transfer amount must be greater than zero");
+  }
+
+  const rpc = createRpc(c.env);
+  const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc, "confirmed");
+  const feePayer = await getSponsoredFeePayer(c);
+
+  const instruction = getTransferSolInstruction({
+    source: createNoopSigner(sourceAddress),
+    destination: destinationAddress,
+    amount: lamports,
+  });
+
+  const message = pipe(
+    createTransactionMessage({ version: 0 }),
+    (m) => setTransactionMessageFeePayer(feePayer, m),
+    (m) => setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, m),
+    (m) => appendTransactionMessageInstructions([instruction], m)
+  );
+
+  const compiled = compileTransaction(message);
+
+  return {
+    serializedTx: getBase64EncodedWireTransaction(compiled),
+    blockhash: blockhash as string,
+    lastValidBlockHeight: lastValidBlockHeight.toString(),
+  };
+}
+
+async function executeSolTransfer(
+  c: AppContext,
+  sourceWallet: CustodyWallet,
+  destinationAddress: Address,
+  amount: string
+): Promise<{ signature: string; slot: number | null; blockTime: string | null }> {
+  const lamports = parseDecimalAmount(amount, 9);
+  if (lamports <= 0n) {
+    throw new AppError("BAD_REQUEST", "Transfer amount must be greater than zero");
+  }
+
+  const auth = getAuth(c);
+  const signer = await createOrgSigner(
+    c.env,
+    auth.organizationId,
+    auth.projectId ?? undefined,
+    sourceWallet.walletId
+  );
+
+  if (signer.address !== sourceWallet.publicKey) {
+    throw new AppError("BAD_REQUEST", "Resolved signing wallet does not match source wallet");
+  }
+
+  const rpc = createRpc(c.env);
+  const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc, "confirmed");
+  const feePayment = getFeePayment(c);
+  const feePayer = await feePayment.getFeePayer();
+
+  const instruction = getTransferSolInstruction({
+    source: signer,
+    destination: destinationAddress,
+    amount: lamports,
+  });
+
+  const message = pipe(
+    createTransactionMessage({ version: 0 }),
+    (m) => setTransactionMessageFeePayer(feePayer, m),
+    (m) => setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, m),
+    (m) => appendTransactionMessageInstructions([instruction], m),
+    (m) => addSignersToTransactionMessage([signer], m)
+  );
+
+  const partiallySigned = await partiallySignTransactionMessageWithSigners(message);
+  const txEncoder = getTransactionEncoder();
+  const txBytes = new Uint8Array(txEncoder.encode(partiallySigned));
+  const signature = await feePayment.signAndSend(txBytes);
+
+  const confirmation = await confirmTransaction(rpc, signature, {
+    commitment: "confirmed",
+  });
+
+  if (confirmation.err) {
+    throw new AppError("TRANSACTION_FAILED", "SOL transfer failed on-chain");
+  }
+
+  return {
+    signature,
+    slot: Number(confirmation.slot),
+    blockTime: null,
+  };
+}
+
+async function prepareSplTransfer(
+  c: AppContext,
+  sourceAddress: Address,
+  destinationAddress: Address,
+  mintAddress: Address,
+  amount: string
+): Promise<{ serializedTx: string; blockhash: string; lastValidBlockHeight: string }> {
+  const rpc = createRpc(c.env);
+  const tokenProgram = await resolveMintTokenProgram(rpc, mintAddress);
+  const sourceTokenAccount = await resolveSourceTokenAccount(
+    rpc,
+    sourceAddress,
+    mintAddress,
+    tokenProgram
+  );
+  const transferAmount = parseDecimalAmount(amount, sourceTokenAccount.decimals);
+
+  if (transferAmount <= 0n) {
+    throw new AppError("BAD_REQUEST", "Transfer amount must be greater than zero");
+  }
+
+  const [destinationTokenAccount] = await findAssociatedTokenPda({
+    owner: destinationAddress,
+    tokenProgram,
+    mint: mintAddress,
+  });
+  const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc, "confirmed");
+  const feePayer = await getSponsoredFeePayer(c);
+  const feePayerSigner = createNoopSigner(feePayer);
+
+  const createDestinationAtaInstruction = getCreateAssociatedTokenIdempotentInstruction({
+    payer: feePayerSigner,
+    ata: destinationTokenAccount,
+    owner: destinationAddress,
+    mint: mintAddress,
+    tokenProgram,
+  });
+  const transferInstruction = getTransferCheckedInstruction(
+    {
+      source: sourceTokenAccount.tokenAccount,
+      mint: mintAddress,
+      destination: destinationTokenAccount,
+      authority: createNoopSigner(sourceAddress),
+      amount: transferAmount,
+      decimals: sourceTokenAccount.decimals,
+    },
+    { programAddress: tokenProgram }
+  );
+
+  const message = pipe(
+    createTransactionMessage({ version: 0 }),
+    (m) => setTransactionMessageFeePayer(feePayer, m),
+    (m) => setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, m),
+    (m) =>
+      appendTransactionMessageInstructions(
+        [createDestinationAtaInstruction, transferInstruction],
+        m
+      )
+  );
+
+  const compiled = compileTransaction(message);
+
+  return {
+    serializedTx: getBase64EncodedWireTransaction(compiled),
+    blockhash: blockhash as string,
+    lastValidBlockHeight: lastValidBlockHeight.toString(),
+  };
+}
+
+async function executeSplTransfer(
+  c: AppContext,
+  sourceWallet: CustodyWallet,
+  destinationAddress: Address,
+  mintAddress: Address,
+  amount: string
+): Promise<{ signature: string; slot: number | null; blockTime: string | null }> {
+  const auth = getAuth(c);
+  const signer = await createOrgSigner(
+    c.env,
+    auth.organizationId,
+    auth.projectId ?? undefined,
+    sourceWallet.walletId
+  );
+
+  if (signer.address !== sourceWallet.publicKey) {
+    throw new AppError("BAD_REQUEST", "Resolved signing wallet does not match source wallet");
+  }
+
+  const rpc = createRpc(c.env);
+  const tokenProgram = await resolveMintTokenProgram(rpc, mintAddress);
+  const sourceTokenAccount = await resolveSourceTokenAccount(
+    rpc,
+    signer.address,
+    mintAddress,
+    tokenProgram
+  );
+  const transferAmount = parseDecimalAmount(amount, sourceTokenAccount.decimals);
+
+  if (transferAmount <= 0n) {
+    throw new AppError("BAD_REQUEST", "Transfer amount must be greater than zero");
+  }
+
+  const [destinationTokenAccount] = await findAssociatedTokenPda({
+    owner: destinationAddress,
+    tokenProgram,
+    mint: mintAddress,
+  });
+  const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc, "confirmed");
+  const feePayment = getFeePayment(c);
+  const feePayer = await feePayment.getFeePayer();
+  const feePayerSigner = createNoopSigner(feePayer);
+
+  const createDestinationAtaInstruction = getCreateAssociatedTokenIdempotentInstruction({
+    payer: feePayerSigner,
+    ata: destinationTokenAccount,
+    owner: destinationAddress,
+    mint: mintAddress,
+    tokenProgram,
+  });
+  const transferInstruction = getTransferCheckedInstruction(
+    {
+      source: sourceTokenAccount.tokenAccount,
+      mint: mintAddress,
+      destination: destinationTokenAccount,
+      authority: signer,
+      amount: transferAmount,
+      decimals: sourceTokenAccount.decimals,
+    },
+    { programAddress: tokenProgram }
+  );
+
+  const message = pipe(
+    createTransactionMessage({ version: 0 }),
+    (m) => setTransactionMessageFeePayer(feePayer, m),
+    (m) => setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, m),
+    (m) =>
+      appendTransactionMessageInstructions(
+        [createDestinationAtaInstruction, transferInstruction],
+        m
+      ),
+    (m) => addSignersToTransactionMessage([signer], m)
+  );
+
+  const partiallySigned = await partiallySignTransactionMessageWithSigners(message);
+  const txEncoder = getTransactionEncoder();
+  const txBytes = new Uint8Array(txEncoder.encode(partiallySigned));
+  const signature = await feePayment.signAndSend(txBytes);
+
+  const confirmation = await confirmTransaction(rpc, signature, {
+    commitment: "confirmed",
+  });
+
+  if (confirmation.err) {
+    throw new AppError("TRANSACTION_FAILED", "SPL token transfer failed on-chain");
+  }
+
+  return {
+    signature,
+    slot: Number(confirmation.slot),
+    blockTime: null,
+  };
+}
+
+export async function prepareTransfer(c: AppContext) {
+  const body = await c.req.json();
+  const parsed = prepareTransferSchema.safeParse(body);
+
+  if (!parsed.success) {
+    throw new AppError("BAD_REQUEST", "Invalid request body", {
+      errors: parsed.error.flatten().fieldErrors,
+    });
+  }
+
+  const scope = await resolveScope(c);
+  assertProjectContext(parsed.data.projectId, scope.auth.projectId);
+
+  const sourceWallet = resolveWallet(scope.wallets, parsed.data.source);
+  assertApiKeyWalletAccess(scope.auth, sourceWallet.walletId, ["payments:write"]);
+  const sourceAddress = assertValidAddress(sourceWallet.publicKey, "source");
+  const destinationAddress = assertValidAddress(parsed.data.destination, "destination");
+  const transferToken = isNativeSolToken(parsed.data.token) ? "SOL" : parsed.data.token;
+
+  // TODO: parsed.data.referenceAddress — attach as a memo/reference key to the transaction
+  //       for Solana Pay compatibility and client-side correlation. Not yet implemented.
+  // TODO: parsed.data.options?.priorityFee — add a compute budget instruction to the
+  //       transaction based on the requested priority level. Not yet implemented.
+
+  await assertWalletPolicyAllowsTransfer(c, {
+    organizationId: scope.auth.organizationId,
+    projectId: scope.auth.projectId,
+    wallet: sourceWallet,
+    destinationAddress,
+    token: transferToken,
+    amount: parsed.data.amount,
+  });
+
+  let prepared: { serializedTx: string; blockhash: string; lastValidBlockHeight: string };
+
+  if (transferToken === "SOL") {
+    prepared = await prepareSolTransfer(c, sourceAddress, destinationAddress, parsed.data.amount);
+  } else {
+    const mintAddress = assertValidAddress(parsed.data.token, "token");
+    prepared = await prepareSplTransfer(
+      c,
+      sourceAddress,
+      destinationAddress,
+      mintAddress,
+      parsed.data.amount
+    );
+  }
+
+  const transfer = await createTransferRecord(c, {
+    organizationId: scope.auth.organizationId,
+    projectId: scope.auth.projectId,
+    walletId: sourceWallet.walletId,
+    sourceAddress: sourceWallet.publicKey,
+    destinationAddress: parsed.data.destination,
+    token: transferToken,
+    amount: parsed.data.amount,
+    memo: parsed.data.memo,
+    status: "pending",
+    serializedTx: prepared.serializedTx,
+    initiatedByKeyId: scope.auth.id,
+  });
+
+  let simulation:
+    | { success: boolean; logs: string[]; unitsConsumed: string | null; error: string | null }
+    | undefined;
+  if (parsed.data.options?.simulate) {
+    const rpc = createRpc(c.env);
+    const txBytes = Buffer.from(prepared.serializedTx, "base64");
+    const simulated = await simulateTransaction(rpc, txBytes);
+    simulation = {
+      success: simulated.success,
+      logs: simulated.logs,
+      unitsConsumed: simulated.unitsConsumed ? simulated.unitsConsumed.toString() : null,
+      error: simulated.error,
+    };
+  }
+
+  return success(c, {
+    transfer: mapTransferRow(transfer),
+    preparedTransaction: {
+      serialized: prepared.serializedTx,
+      blockhash: prepared.blockhash,
+      lastValidBlockHeight: prepared.lastValidBlockHeight,
+    },
+    ...(simulation ? { simulation } : {}),
+  });
+}
+
+function createSignatureHistoryRpc(env: Env) {
+  // Prefer Helius when configured for richer signature history (getSignaturesForAddress).
+  // Falls back to the default RPC URL if Helius is not configured.
+  //
+  // TODO: Replace getSignaturesForAddress with a dedicated indexer (Helius webhooks,
+  // Triton stream, or similar) for production-scale history and comprehensive inbound
+  // transfer tracking. The current approach is limited to the most recent ~200 signatures.
+  const url = env.SOLANA_RPC_HELIUS_URL
+    ? withHeliusApiKey(env.SOLANA_RPC_HELIUS_URL, env.SOLANA_RPC_HELIUS_API_KEY)
+    : env.SOLANA_RPC_URL;
+  return createRpc(env, { rpcUrl: url });
+}
+
+export async function createTransfer(c: AppContext) {
+  const body = await c.req.json();
+  const parsed = createTransferSchema.safeParse(body);
+
+  if (!parsed.success) {
+    throw new AppError("BAD_REQUEST", "Invalid request body", {
+      errors: parsed.error.flatten().fieldErrors,
+    });
+  }
+
+  const scope = await resolveScope(c);
+  assertProjectContext(parsed.data.projectId, scope.auth.projectId);
+
+  const sourceWallet = resolveWallet(scope.wallets, parsed.data.source);
+  assertApiKeyWalletAccess(scope.auth, sourceWallet.walletId, ["payments:write"]);
+  const destinationAddress = assertValidAddress(parsed.data.destination, "destination");
+  const transferToken = isNativeSolToken(parsed.data.token) ? "SOL" : parsed.data.token;
+
+  await assertWalletPolicyAllowsTransfer(c, {
+    organizationId: scope.auth.organizationId,
+    projectId: scope.auth.projectId,
+    wallet: sourceWallet,
+    destinationAddress,
+    token: transferToken,
+    amount: parsed.data.amount,
+  });
+
+  const transfer = await createTransferRecord(c, {
+    organizationId: scope.auth.organizationId,
+    projectId: scope.auth.projectId,
+    walletId: sourceWallet.walletId,
+    sourceAddress: sourceWallet.publicKey,
+    destinationAddress: parsed.data.destination,
+    token: transferToken,
+    amount: parsed.data.amount,
+    memo: parsed.data.memo,
+    status: "processing",
+    initiatedByKeyId: scope.auth.id,
+  });
+
+  try {
+    if (transferToken === "SOL") {
+      const solResult = await executeSolTransfer(
+        c,
+        sourceWallet,
+        destinationAddress,
+        parsed.data.amount
+      );
+      const updated = await updateTransferRecord(c, transfer.id, {
+        status: "confirmed",
+        signature: solResult.signature,
+        slot: solResult.slot,
+        blockTime: solResult.blockTime,
+        error: null,
+      });
+      return success(c, { transfer: mapTransferRow(updated) });
+    }
+
+    const mintAddress = assertValidAddress(parsed.data.token, "token");
+    const result = await executeSplTransfer(
+      c,
+      sourceWallet,
+      destinationAddress,
+      mintAddress,
+      parsed.data.amount
+    );
+
+    const updated = await updateTransferRecord(c, transfer.id, {
+      status: "confirmed",
+      signature: result.signature,
+      slot: result.slot,
+      blockTime: result.blockTime,
+      error: null,
+    });
+
+    return success(c, { transfer: mapTransferRow(updated) });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown transfer error";
+    await updateTransferRecord(c, transfer.id, {
+      status: "failed",
+      error: message,
+      blockTime: null,
+    });
+
+    if (error instanceof AppError) {
+      throw error;
+    }
+
+    throw new AppError("SOLANA_RPC_ERROR", message);
+  }
+}
+
+export async function listTransfers(c: AppContext) {
+  const auth = getAuth(c);
+  const query = listTransfersQuerySchema.safeParse(c.req.query());
+  if (!query.success) throw new AppError("BAD_REQUEST", "Invalid query parameters");
+  const allowedWalletIds = getAllowedApiKeyWalletIds(auth);
+
+  const {
+    page,
+    pageSize,
+    wallet: walletId,
+    walletAddress,
+    token,
+    direction,
+    status,
+    from,
+    to,
+  } = query.data;
+  const repo = getPaymentsRepository(c);
+  const offset = (page - 1) * pageSize;
+
+  let transferRows: TransferRow[];
+  let total: number;
+
+  if (walletId || walletAddress) {
+    // Helius-backed path: fetch on-chain signatures for the wallet address, then
+    // cross-reference with our DB. Append pending/processing/failed from DB (not on-chain yet).
+    //
+    // TODO: Replace getSignaturesForAddress with a dedicated indexer for production use.
+
+    let sourceAddress: string | undefined;
+    let resolvedWalletId: string | undefined;
+
+    if (walletId) {
+      if (allowedWalletIds && !allowedWalletIds.includes(walletId)) {
+        throw new AppError("FORBIDDEN", "API key is not authorized for the requested wallet");
+      }
+
+      const scope = await resolveScope(c);
+      const wallet = resolveWallet(scope.wallets, walletId);
+      assertApiKeyWalletAccess(scope.auth, wallet.walletId, ["payments:read"]);
+      sourceAddress = wallet.publicKey;
+      resolvedWalletId = walletId;
+    } else {
+      sourceAddress = walletAddress;
+      if (allowedWalletIds) {
+        const scope = await resolveScope(c);
+        const matchedWallet = scope.wallets.find(
+          (wallet) =>
+            wallet.publicKey === walletAddress && allowedWalletIds.includes(wallet.walletId)
+        );
+        if (!matchedWallet) {
+          throw new AppError("FORBIDDEN", "API key is not authorized for the requested wallet");
+        }
+
+        sourceAddress = matchedWallet.publicKey;
+        resolvedWalletId = matchedWallet.walletId;
+      }
+    }
+
+    // 1. Fetch on-chain signature history via Helius (or fallback RPC)
+    const heliusRpc = createSignatureHistoryRpc(c.env);
+    const onChainSigs = await getSignaturesForAddress(heliusRpc, sourceAddress as Address, {
+      limit: Math.min(pageSize * 5, 200),
+      commitment: "confirmed",
+    });
+    const sigStrings = onChainSigs.map((s) => String(s.signature));
+
+    // 2. Look up on-chain signatures in our DB
+    const confirmedRows = await repo.listTransfersBySignatures({
+      signatures: sigStrings,
+      organizationId: auth.organizationId,
+      projectId: auth.projectId,
+    });
+    const scopedConfirmedRows = allowedWalletIds
+      ? confirmedRows.filter((row) => allowedWalletIds.includes(row.wallet_id))
+      : confirmedRows;
+
+    // 3. Fetch pending/processing/failed from DB (not yet on-chain).
+    //    Skip if the caller's status filter already excludes these — e.g. status=confirmed
+    //    or status=finalized would never match any of these records.
+    const nonChainStatuses: TransferStatus[] = ["pending", "processing", "failed"];
+    const needsNonChainRecords = !status || nonChainStatuses.includes(status);
+    const pendingRows: TransferRow[] = [];
+    if (needsNonChainRecords) {
+      const pendingResult = await repo.listTransfers({
+        organizationId: auth.organizationId,
+        projectId: auth.projectId,
+        walletId: resolvedWalletId,
+        walletIds: resolvedWalletId ? undefined : (allowedWalletIds ?? undefined),
+        sourceAddress: resolvedWalletId ? undefined : walletAddress,
+        statuses: nonChainStatuses,
+        token,
+        direction,
+        createdAtFrom: from,
+        createdAtTo: to,
+        limit: 100,
+        offset: 0,
+      });
+      pendingRows.push(...pendingResult.rows);
+    }
+
+    // 4. Merge: confirmed (Helius-backed) + non-confirmed (DB), deduplicated
+    const seen = new Set<string>();
+    const merged = [...scopedConfirmedRows, ...pendingRows].filter((row) => {
+      if (seen.has(row.id)) return false;
+      seen.add(row.id);
+      return true;
+    });
+
+    // 5. Apply remaining filters and sort
+    const filtered = merged
+      .filter((row) => {
+        if (status && row.status !== status) return false;
+        if (token && row.token !== token) return false;
+        if (direction && row.direction !== direction) return false;
+        return true;
+      })
+      .sort((a, b) => b.created_at.localeCompare(a.created_at));
+
+    total = filtered.length;
+    transferRows = filtered.slice(offset, offset + pageSize);
+  } else {
+    // DB-only path for org-scoped queries without a specific wallet
+    const result = await repo.listTransfers({
+      organizationId: auth.organizationId,
+      projectId: auth.projectId,
+      walletIds: allowedWalletIds ?? undefined,
+      token,
+      direction,
+      statuses: status ? [status] : undefined,
+      createdAtFrom: from,
+      createdAtTo: to,
+      limit: pageSize,
+      offset,
+    });
+    total = result.total;
+    transferRows = result.rows;
+  }
+
+  const transfers = transferRows.map(mapTransferRow);
+  return paginated(c, transfers, { total, page, pageSize });
+}
+
+export async function getTransfer(c: AppContext) {
+  const auth = getAuth(c);
+  const allowedWalletIds = getAllowedApiKeyWalletIds(auth);
+  const transferId = c.req.param("transferId");
+  const repo = getPaymentsRepository(c);
+
+  const row = await repo.getTransferById({
+    transferId,
+    organizationId: auth.organizationId,
+    projectId: auth.projectId,
+  });
+
+  if (!row) throw new AppError("NOT_FOUND", "Transfer not found");
+  if (allowedWalletIds && !allowedWalletIds.includes(row.wallet_id)) {
+    throw new AppError("FORBIDDEN", "API key is not authorized for the requested wallet");
+  }
+
+  return success(c, { transfer: mapTransferRow(row) });
+}

@@ -8,8 +8,9 @@
     "build": "pnpm generate:api && pnpm generate:source && next build",
     "start": "next start --port 3001",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint",
-    "generate:api": "pnpm -C ../sdp-api run openapi:generate && node scripts/generate-api-docs.mjs",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "generate:api": "pnpm -C ../sdp-api run openapi:generate && node scripts/generate-api-docs.mjs && pnpm exec biome check --write content/docs/meta.json content/docs/reference/api/meta.json",
     "generate:source": "node scripts/generate-source.mjs",
     "watch:source": "node scripts/watch-source.mjs"
   },
@@ -28,8 +29,6 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "eslint": "^9",
-    "eslint-config-next": "15.5.12",
     "tailwindcss": "^4",
     "typescript": "^5"
   }

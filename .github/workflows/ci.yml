@@ -31,7 +31,9 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Lint
-        run: pnpm exec biome check --changed --since=origin/main --no-errors-on-unmatched
+        run: |
+          git diff --name-only --diff-filter=d -z origin/main...HEAD \
+            | xargs -0 --no-run-if-empty pnpm exec biome check --no-errors-on-unmatched
 
   typecheck:
     name: Typecheck
