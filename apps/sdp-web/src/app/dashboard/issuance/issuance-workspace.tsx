@@ -244,7 +244,8 @@ export function IssuanceWorkspace({
       return (
         token.name.toLowerCase().includes(needle) ||
         token.symbol.toLowerCase().includes(needle) ||
-        token.id.toLowerCase().includes(needle)
+        token.id.toLowerCase().includes(needle) ||
+        (token.mintAddress ? token.mintAddress.toLowerCase().includes(needle) : false)
       );
     });
   }, [tokens, search]);

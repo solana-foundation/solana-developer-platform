@@ -251,6 +251,11 @@ function asOptionalString(value: string): string | undefined {
   return trimmed ? trimmed : undefined;
 }
 
+function isPositiveAmount(value: string): boolean {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0;
+}
+
 function formatValue(value: string | null | undefined): string {
   if (!value) {
     return "None";
@@ -643,6 +648,10 @@ export function TokenManagementWorkspace({
       toast.error("Mint destination and amount are required.");
       return;
     }
+    if (!isPositiveAmount(amount)) {
+      toast.error("Amount must be a positive number.");
+      return;
+    }
 
     runAction(
       {
@@ -675,6 +684,10 @@ export function TokenManagementWorkspace({
     const amount = burnForm.amount.trim();
     if (!source || !amount) {
       toast.error("Burn source and amount are required.");
+      return;
+    }
+    if (!isPositiveAmount(amount)) {
+      toast.error("Amount must be a positive number.");
       return;
     }
 
@@ -712,6 +725,10 @@ export function TokenManagementWorkspace({
       toast.error("Seize source, destination, and amount are required.");
       return;
     }
+    if (!isPositiveAmount(amount)) {
+      toast.error("Amount must be a positive number.");
+      return;
+    }
 
     runAction(
       {
@@ -747,6 +764,10 @@ export function TokenManagementWorkspace({
     const amount = forceBurnForm.amount.trim();
     if (!source || !amount) {
       toast.error("Force-burn source and amount are required.");
+      return;
+    }
+    if (!isPositiveAmount(amount)) {
+      toast.error("Amount must be a positive number.");
       return;
     }
 
@@ -923,7 +944,7 @@ export function TokenManagementWorkspace({
           </div>
         </div>
 
-        <div className="relative flex items-center gap-2">
+        <div className="relative z-30 flex items-center gap-2">
           {explorerHref ? (
             <Button variant="outline" asChild>
               <Link href={explorerHref} target="_blank" rel="noopener noreferrer">
@@ -946,107 +967,115 @@ export function TokenManagementWorkspace({
           </Button>
 
           {isActionMenuOpen ? (
-            <div className="absolute top-[44px] right-0 z-20 w-[260px] overflow-hidden rounded-xl border border-[rgba(28,28,29,0.12)] bg-white shadow-[0_14px_28px_rgba(28,28,29,0.16)]">
-              <div className="border-b border-[rgba(28,28,29,0.08)] px-3 py-2 text-xs font-medium tracking-wide text-[rgba(28,28,29,0.6)] uppercase">
-                Token Actions
+            <>
+              <button
+                type="button"
+                aria-label="Close admin actions menu"
+                className="fixed inset-0 z-20 cursor-default bg-transparent"
+                onClick={() => setIsActionMenuOpen(false)}
+              />
+              <div className="absolute top-[44px] right-0 z-30 w-[260px] overflow-hidden rounded-xl border border-[rgba(28,28,29,0.12)] bg-white shadow-[0_14px_28px_rgba(28,28,29,0.16)]">
+                <div className="border-b border-[rgba(28,28,29,0.08)] px-3 py-2 text-xs font-medium tracking-wide text-[rgba(28,28,29,0.6)] uppercase">
+                  Token Actions
+                </div>
+                <div className="p-1">
+                  <button
+                    type="button"
+                    onClick={() => selectAction("mint")}
+                    className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm hover:bg-[rgba(28,28,29,0.05)]"
+                  >
+                    Mint Tokens
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => selectAction("burn")}
+                    className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm hover:bg-[rgba(28,28,29,0.05)]"
+                  >
+                    Burn Tokens
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => selectAction("update-metadata")}
+                    className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm hover:bg-[rgba(28,28,29,0.05)]"
+                  >
+                    Update Metadata
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => selectAction("refresh-supply")}
+                    className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm hover:bg-[rgba(28,28,29,0.05)]"
+                  >
+                    Refresh Supply
+                  </button>
+                </div>
+                <div className="border-y border-[rgba(28,28,29,0.08)] px-3 py-2 text-xs font-medium tracking-wide text-[rgba(28,28,29,0.6)] uppercase">
+                  Administrative
+                </div>
+                <div className="p-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!canDeployToken) {
+                        return;
+                      }
+                      setIsActionMenuOpen(false);
+                      handleDeploy("execute");
+                    }}
+                    disabled={!canDeployToken || isPending}
+                    className={[
+                      "flex w-full items-center rounded-lg px-3 py-2 text-left text-sm",
+                      canDeployToken
+                        ? "hover:bg-[rgba(28,28,29,0.05)]"
+                        : "cursor-not-allowed text-[rgba(28,28,29,0.42)] opacity-60",
+                    ].join(" ")}
+                  >
+                    Deploy Token
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => selectAction("seize")}
+                    className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm hover:bg-[rgba(28,28,29,0.05)]"
+                  >
+                    Force Transfer
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => selectAction("force-burn")}
+                    className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm hover:bg-[rgba(28,28,29,0.05)]"
+                  >
+                    Force Burn
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => selectAction("freeze")}
+                    className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm hover:bg-[rgba(28,28,29,0.05)]"
+                  >
+                    Freeze / Unfreeze Account
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => selectAction("pause")}
+                    className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm hover:bg-[rgba(28,28,29,0.05)]"
+                  >
+                    Pause / Unpause Token
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => selectAction("authority")}
+                    className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm hover:bg-[rgba(28,28,29,0.05)]"
+                  >
+                    Update Authority
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => selectAction("allowlist")}
+                    className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm hover:bg-[rgba(28,28,29,0.05)]"
+                  >
+                    Manage Allowlist
+                  </button>
+                </div>
               </div>
-              <div className="p-1">
-                <button
-                  type="button"
-                  onClick={() => selectAction("mint")}
-                  className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm hover:bg-[rgba(28,28,29,0.05)]"
-                >
-                  Mint Tokens
-                </button>
-                <button
-                  type="button"
-                  onClick={() => selectAction("burn")}
-                  className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm hover:bg-[rgba(28,28,29,0.05)]"
-                >
-                  Burn Tokens
-                </button>
-                <button
-                  type="button"
-                  onClick={() => selectAction("update-metadata")}
-                  className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm hover:bg-[rgba(28,28,29,0.05)]"
-                >
-                  Update Metadata
-                </button>
-                <button
-                  type="button"
-                  onClick={() => selectAction("refresh-supply")}
-                  className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm hover:bg-[rgba(28,28,29,0.05)]"
-                >
-                  Refresh Supply
-                </button>
-              </div>
-              <div className="border-y border-[rgba(28,28,29,0.08)] px-3 py-2 text-xs font-medium tracking-wide text-[rgba(28,28,29,0.6)] uppercase">
-                Administrative
-              </div>
-              <div className="p-1">
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (!canDeployToken) {
-                      return;
-                    }
-                    setIsActionMenuOpen(false);
-                    handleDeploy("execute");
-                  }}
-                  disabled={!canDeployToken || isPending}
-                  className={[
-                    "flex w-full items-center rounded-lg px-3 py-2 text-left text-sm",
-                    canDeployToken
-                      ? "hover:bg-[rgba(28,28,29,0.05)]"
-                      : "cursor-not-allowed text-[rgba(28,28,29,0.42)] opacity-60",
-                  ].join(" ")}
-                >
-                  Deploy Token
-                </button>
-                <button
-                  type="button"
-                  onClick={() => selectAction("seize")}
-                  className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm hover:bg-[rgba(28,28,29,0.05)]"
-                >
-                  Force Transfer
-                </button>
-                <button
-                  type="button"
-                  onClick={() => selectAction("force-burn")}
-                  className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm hover:bg-[rgba(28,28,29,0.05)]"
-                >
-                  Force Burn
-                </button>
-                <button
-                  type="button"
-                  onClick={() => selectAction("freeze")}
-                  className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm hover:bg-[rgba(28,28,29,0.05)]"
-                >
-                  Freeze / Unfreeze Account
-                </button>
-                <button
-                  type="button"
-                  onClick={() => selectAction("pause")}
-                  className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm hover:bg-[rgba(28,28,29,0.05)]"
-                >
-                  Pause / Unpause Token
-                </button>
-                <button
-                  type="button"
-                  onClick={() => selectAction("authority")}
-                  className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm hover:bg-[rgba(28,28,29,0.05)]"
-                >
-                  Update Authority
-                </button>
-                <button
-                  type="button"
-                  onClick={() => selectAction("allowlist")}
-                  className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm hover:bg-[rgba(28,28,29,0.05)]"
-                >
-                  Manage Allowlist
-                </button>
-              </div>
-            </div>
+            </>
           ) : null}
         </div>
       </div>
