@@ -129,6 +129,7 @@ function getDashboardPageConfig(pathname: string): DashboardPageConfig {
       title: "Issuance",
       quickActionsLeft: <IssuanceHeaderTabs />,
       hideHeaderSelectors: true,
+      contentWidthClass: "max-w-none",
     };
   }
   if (pathname.startsWith("/dashboard/issuance/")) {
