@@ -285,15 +285,37 @@ function TemplateCard({
   );
 }
 
-export function CreateIssuanceTokenModal() {
+interface CreateIssuanceTokenModalProps {
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  hideTrigger?: boolean;
+  triggerLabel?: string;
+  triggerClassName?: string;
+}
+
+export function CreateIssuanceTokenModal({
+  open,
+  onOpenChange,
+  hideTrigger = false,
+  triggerLabel = "Create token",
+  triggerClassName,
+}: CreateIssuanceTokenModalProps = {}) {
   const router = useRouter();
-  const [isOpen, setIsOpen] = useState(false);
+  const [isOpenInternal, setIsOpenInternal] = useState(false);
   const [flow, setFlow] = useState<FlowState>({ kind: "templateSelection" });
   const [draft, setDraft] = useState<TokenDraft>(createInitialDraft());
   const [submitState, setSubmitState] = useState<CreateIssuanceTokenResult>(
     INITIAL_CREATE_ISSUANCE_TOKEN_RESULT
   );
   const [isPending, startTransition] = useTransition();
+  const isOpen = open ?? isOpenInternal;
+
+  const setIsOpen = (next: boolean) => {
+    if (open === undefined) {
+      setIsOpenInternal(next);
+    }
+    onOpenChange?.(next);
+  };
 
   const template = flow.kind === "creation" ? flow.template : draft.template;
   const decimalOptions = useMemo(
@@ -343,11 +365,6 @@ export function CreateIssuanceTokenModal() {
 
   const close = () => {
     setIsOpen(false);
-    reset();
-  };
-
-  const open = () => {
-    setIsOpen(true);
     reset();
   };
 
@@ -406,9 +423,11 @@ export function CreateIssuanceTokenModal() {
 
   return (
     <>
-      <Button type="button" onClick={open}>
-        Create token
-      </Button>
+      {hideTrigger ? null : (
+        <Button type="button" className={triggerClassName} onClick={() => setIsOpen(true)}>
+          {triggerLabel}
+        </Button>
+      )}
 
       <AnimatePresence>
         {isOpen ? (

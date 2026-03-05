@@ -206,6 +206,8 @@ export interface Token {
   mintAddress: string | null;
   /** Mint authority public key */
   mintAuthority: string | null;
+  /** Metadata update authority public key (falls back to mint authority when omitted) */
+  metadataAuthority?: string | null;
   /** Freeze authority public key */
   freezeAuthority: string | null;
   /** On-chain ABL list address (null until deployed) */

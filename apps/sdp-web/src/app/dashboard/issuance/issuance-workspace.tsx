@@ -4,19 +4,13 @@ import { ApiEndpointPlayground } from "@/components/api-endpoint-playground";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { getStoredApiKeySecret } from "@/lib/playground-api-keys";
 import { AnimatePresence, motion } from "framer-motion";
-import { Search } from "lucide-react";
+import { Plus, Search } from "lucide-react";
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import { CreateIssuanceTokenModal } from "./create-token-modal";
 import { type IssuanceTemplateId, getTemplateCatalogEntry } from "./template-catalog";
 
 interface IssuanceTokenView {
@@ -25,6 +19,7 @@ interface IssuanceTokenView {
   symbol: string;
   status: string;
   template: IssuanceTemplateId | "rwa" | string;
+  imageUrl: string | null;
   mintAddress: string | null;
   totalSupply: string;
   createdAt: string;
@@ -162,25 +157,47 @@ function formatDate(value: string | null | undefined): string {
   if (!value) {
     return "—";
   }
+
+  const isoDateMatch = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+  if (isoDateMatch) {
+    const [, year, month, day] = isoDateMatch;
+    return `${month}/${day}/${year}`;
+  }
+
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
     return value;
   }
-  return date.toLocaleDateString();
+
+  return date.toLocaleDateString("en-US");
 }
 
-function normalizeStatus(status: string): string {
-  return status.replaceAll("_", " ");
-}
-
-function truncateAddress(value: string | null): string {
-  if (!value) {
-    return "Not deployed";
+function formatSupply(value: string): string {
+  const normalized = value.trim();
+  if (!normalized) {
+    return "0";
   }
-  if (value.length <= 12) {
+
+  const parsed = Number.parseFloat(normalized);
+  if (!Number.isFinite(parsed)) {
     return value;
   }
-  return `${value.slice(0, 4)}...${value.slice(-4)}`;
+
+  const formatted = new Intl.NumberFormat("en-US", {
+    notation: "compact",
+    maximumFractionDigits: parsed >= 100 ? 0 : 1,
+  }).format(parsed);
+
+  return formatted.replace(/\.0([A-Za-z])$/, "$1");
+}
+
+function getTokenTypeLabel(template: IssuanceTokenView["template"]): string {
+  const templateEntry = getTemplateCatalogEntry(template);
+  if (templateEntry?.name) {
+    return templateEntry.name;
+  }
+
+  return template;
 }
 
 export function IssuanceWorkspace({
@@ -193,6 +210,7 @@ export function IssuanceWorkspace({
   const { issuanceTab, setIssuanceTab, selectedIssuanceApiKeyId, setIssuanceApiKeys } =
     useDashboardWorkspace();
   const [search, setSearch] = useState("");
+  const [isCreateTokenModalOpen, setIsCreateTokenModalOpen] = useState(false);
 
   useEffect(() => {
     setIssuanceApiKeys(apiKeys);
@@ -232,14 +250,6 @@ export function IssuanceWorkspace({
     });
   }, [tokens, search]);
 
-  const stats = useMemo(() => {
-    const total = tokens.length;
-    const active = tokens.filter((token) => token.status === "active").length;
-    const pending = tokens.filter((token) => token.status === "pending").length;
-    const deployed = tokens.filter((token) => token.mintAddress).length;
-    return { total, active, pending, deployed };
-  }, [tokens]);
-
   return (
     <div className="w-full space-y-6">
       <AnimatePresence mode="wait">
@@ -252,118 +262,119 @@ export function IssuanceWorkspace({
             transition={{ duration: 0.2, ease: "easeOut" }}
             className="space-y-6"
           >
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              <Card className="gap-2 py-4">
-                <CardHeader className="px-4">
-                  <CardDescription>Total tokens</CardDescription>
-                  <CardTitle>{stats.total}</CardTitle>
-                </CardHeader>
-              </Card>
-              <Card className="gap-2 py-4">
-                <CardHeader className="px-4">
-                  <CardDescription>Active</CardDescription>
-                  <CardTitle>{stats.active}</CardTitle>
-                </CardHeader>
-              </Card>
-              <Card className="gap-2 py-4">
-                <CardHeader className="px-4">
-                  <CardDescription>Pending</CardDescription>
-                  <CardTitle>{stats.pending}</CardTitle>
-                </CardHeader>
-              </Card>
-              <Card className="gap-2 py-4">
-                <CardHeader className="px-4">
-                  <CardDescription>Deployed mints</CardDescription>
-                  <CardTitle>{stats.deployed}</CardTitle>
-                </CardHeader>
-              </Card>
-            </div>
-
             {tokensError ? (
-              <Card className="border-[#c71f37]/20 bg-[#c71f37]/[0.03]">
-                <CardHeader>
-                  <CardTitle>Unable to load tokens</CardTitle>
-                  <CardDescription>{tokensError}</CardDescription>
-                </CardHeader>
-              </Card>
+              <div className="rounded-xl border border-[#c71f37]/20 bg-[#c71f37]/[0.03] px-4 py-3">
+                <p className="text-sm font-medium text-[#8a1f2a]">Unable to load tokens</p>
+                <p className="mt-1 text-sm text-[#8a1f2a]">{tokensError}</p>
+              </div>
             ) : null}
 
-            <Card>
-              <CardHeader className="gap-3">
-                <CardTitle>Token inventory</CardTitle>
-                <CardDescription>
-                  Search and inspect issued tokens tracked in this organization workspace.
-                </CardDescription>
-                <div className="relative w-full sm:max-w-[320px]">
-                  <Search className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-[rgba(28,28,29,0.52)]" />
-                  <Input
-                    value={search}
-                    onChange={(event) => {
-                      const value = event.currentTarget.value;
-                      setSearch(value);
-                    }}
-                    className="pl-9"
-                    placeholder="Find by token, symbol, mint or id"
-                  />
-                </div>
-              </CardHeader>
-              <CardContent>
-                {filteredTokens.length === 0 ? (
-                  <p className="text-sm text-[rgba(28,28,29,0.72)]">
-                    {tokens.length === 0
-                      ? "No tokens found yet. Use Create token in quick actions to start."
-                      : "No tokens match your current search."}
-                  </p>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Token</TableHead>
-                          <TableHead>Template</TableHead>
-                          <TableHead>Status</TableHead>
-                          <TableHead>Total supply</TableHead>
-                          <TableHead>Mint</TableHead>
-                          <TableHead>Created</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {filteredTokens.map((token) => {
-                          const template = getTemplateCatalogEntry(token.template) ?? null;
-                          return (
-                            <TableRow key={token.id}>
-                              <TableCell>
-                                <div>
-                                  <p className="font-medium text-[#1c1c1d]">{token.name}</p>
-                                  <p className="text-xs text-[rgba(28,28,29,0.62)]">
-                                    {token.symbol}
-                                  </p>
-                                </div>
-                              </TableCell>
-                              <TableCell>{template?.name ?? token.template}</TableCell>
-                              <TableCell>
-                                <span className="rounded-full bg-[rgba(28,28,29,0.08)] px-2 py-0.5 text-xs capitalize">
-                                  {normalizeStatus(token.status)}
-                                </span>
-                              </TableCell>
-                              <TableCell className="font-mono text-xs">
-                                {token.totalSupply}
-                              </TableCell>
-                              <TableCell className="font-mono text-xs">
-                                {truncateAddress(token.mintAddress)}
-                              </TableCell>
-                              <TableCell className="text-xs text-[rgba(28,28,29,0.66)]">
-                                {formatDate(token.createdAt)}
-                              </TableCell>
-                            </TableRow>
-                          );
-                        })}
-                      </TableBody>
-                    </Table>
+            <div className="flex items-center gap-3">
+              <div className="relative flex-1">
+                <Search className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-[rgba(28,28,29,0.52)]" />
+                <Input
+                  value={search}
+                  onChange={(event) => {
+                    const value = event.currentTarget.value;
+                    setSearch(value);
+                  }}
+                  className="h-10 rounded-[10px] border-[rgba(28,28,29,0.16)] bg-white pl-9"
+                  placeholder="Search"
+                />
+              </div>
+              <Button
+                type="button"
+                className="h-10 rounded-[10px] bg-[#1c1c1d] px-4 text-white hover:bg-[rgba(28,28,29,0.92)]"
+                onClick={() => setIsCreateTokenModalOpen(true)}
+              >
+                Create token
+              </Button>
+            </div>
+
+            {tokens.length > 0 && filteredTokens.length === 0 ? (
+              <p className="text-sm text-[rgba(28,28,29,0.64)]">
+                No tokens match your current search.
+              </p>
+            ) : null}
+
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+              {filteredTokens.map((token) => (
+                <article
+                  key={token.id}
+                  className="flex min-h-[340px] flex-col rounded-2xl border border-[rgba(28,28,29,0.1)] bg-[#fcfcfa] p-5 shadow-[0_2px_10px_rgba(28,28,29,0.05)]"
+                >
+                  <div className="mb-4 h-14 w-14 overflow-hidden rounded-full border border-[rgba(28,28,29,0.1)] bg-white">
+                    {token.imageUrl ? (
+                      // Token logos are dynamic external assets from API data.
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={token.imageUrl}
+                        alt={`${token.name} logo`}
+                        className="h-full w-full object-cover"
+                      />
+                    ) : (
+                      <div className="flex h-full w-full items-center justify-center text-lg font-semibold text-[rgba(28,28,29,0.58)]">
+                        {token.symbol.slice(0, 1) || "?"}
+                      </div>
+                    )}
                   </div>
-                )}
-              </CardContent>
-            </Card>
+
+                  <p className="text-sm font-medium tracking-wide text-[rgba(28,28,29,0.58)] uppercase">
+                    {token.symbol}
+                  </p>
+                  <h3 className="mt-1 text-[30px] leading-[1.1] font-medium text-[#1c1c1d]">
+                    {token.name}
+                  </h3>
+
+                  <div className="mt-6 space-y-2 rounded-xl border border-[rgba(28,28,29,0.08)] bg-[rgba(28,28,29,0.03)] p-3">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-[rgba(28,28,29,0.58)]">Type</span>
+                      <span className="font-medium text-[#1c1c1d]">
+                        {getTokenTypeLabel(token.template)}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-[rgba(28,28,29,0.58)]">Supply</span>
+                      <span className="font-medium text-[#1c1c1d]">
+                        {formatSupply(token.totalSupply)}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-[rgba(28,28,29,0.58)]">Created</span>
+                      <span className="font-medium text-[#1c1c1d]">
+                        {formatDate(token.createdAt)}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="mt-auto pt-3">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-11 w-full rounded-[10px]"
+                      asChild
+                    >
+                      <Link href={`/dashboard/issuance/${token.id}`}>Manage</Link>
+                    </Button>
+                  </div>
+                </article>
+              ))}
+
+              <button
+                type="button"
+                onClick={() => setIsCreateTokenModalOpen(true)}
+                className="flex min-h-[340px] items-center justify-center rounded-2xl border border-dashed border-[rgba(28,28,29,0.2)] bg-[#fcfcfa] text-[rgba(28,28,29,0.5)] transition-colors hover:border-[rgba(28,28,29,0.35)] hover:text-[rgba(28,28,29,0.75)]"
+                aria-label="Add new token"
+              >
+                <Plus className="h-6 w-6" />
+              </button>
+            </div>
+
+            <CreateIssuanceTokenModal
+              open={isCreateTokenModalOpen}
+              onOpenChange={setIsCreateTokenModalOpen}
+              hideTrigger
+            />
           </motion.div>
         ) : (
           <motion.div

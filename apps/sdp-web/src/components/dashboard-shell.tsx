@@ -1,16 +1,12 @@
 "use client";
 
-import { CreateApiKeyModal } from "@/app/dashboard/api-keys/create-api-key-modal";
-import { CreateIssuanceTokenModal } from "@/app/dashboard/issuance/create-token-modal";
-import { IssuanceApiKeySelector } from "@/app/dashboard/issuance/issuance-api-key-selector";
-import { DashboardQuickActions } from "@/components/dashboard-quick-actions";
 import { IssuanceHeaderTabs } from "@/components/issuance-header-tabs";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { OrganizationSwitcher, SignInButton, UserButton, useAuth } from "@clerk/nextjs";
 import { motion } from "framer-motion";
 import {
+  ArrowLeft,
   ArrowLeftRight,
-  ChevronDown,
   Coins,
   KeyRound,
   LayoutDashboard,
@@ -68,20 +64,24 @@ const bottomNavItems: NavItem[] = [
 
 type DashboardPageConfig = {
   title: string;
-  quickActionsLeft?: ReactNode;
-  quickActionsRight?: ReactNode;
+  headerNav?: ReactNode;
+  showHeaderNavRow?: boolean;
   contentWidthClass?: string;
+  hideHeaderSelectors?: boolean;
+  backAction?: {
+    href: string;
+    label: string;
+  };
 };
 
-function WalletQuickAction() {
+function HeaderBackAction({ href, label }: { href: string; label: string }) {
   return (
-    <Link href="/dashboard/wallets/setup">
-      <button
-        type="button"
-        className="inline-flex h-10 items-center justify-center rounded-md bg-[#1c1c1d] px-4 text-sm font-medium text-white hover:bg-[rgba(28,28,29,0.92)]"
-      >
-        New wallet
-      </button>
+    <Link
+      href={href}
+      className="inline-flex h-7 items-center gap-1.5 rounded-[8px] text-[rgba(28,28,29,0.72)] transition-colors hover:text-[#1c1c1d]"
+    >
+      <ArrowLeft className="h-4 w-4" />
+      <span className="text-[13px] leading-[18px] font-medium">{label}</span>
     </Link>
   );
 }
@@ -93,37 +93,61 @@ function getDashboardPageConfig(pathname: string): DashboardPageConfig {
   if (pathname === "/dashboard/wallets" || pathname === "/dashboard/custody") {
     return {
       title: "Wallets",
-      quickActionsRight: <WalletQuickAction />,
+      showHeaderNavRow: true,
+      contentWidthClass: "max-w-none",
     };
   }
   if (pathname === "/dashboard/wallets/setup" || pathname === "/dashboard/custody/setup") {
-    return { title: "Activate provider", contentWidthClass: "max-w-3xl" };
+    return {
+      title: "Activate provider",
+      contentWidthClass: "max-w-3xl",
+      backAction: {
+        href: "/dashboard/wallets",
+        label: "Back to wallets",
+      },
+    };
   }
   if (pathname === "/dashboard/wallets/switch" || pathname === "/dashboard/custody/switch") {
-    return { title: "Activate provider", contentWidthClass: "max-w-3xl" };
+    return {
+      title: "Activate provider",
+      contentWidthClass: "max-w-3xl",
+      backAction: {
+        href: "/dashboard/wallets",
+        label: "Back to wallets",
+      },
+    };
   }
   if (pathname === "/dashboard/api-keys") {
     return {
       title: "API keys",
-      quickActionsRight: <CreateApiKeyModal triggerMode="button" triggerLabel="Create API key" />,
+      showHeaderNavRow: true,
+      contentWidthClass: "max-w-none",
     };
   }
-  if (pathname.startsWith("/dashboard/issuance")) {
+  if (pathname === "/dashboard/issuance") {
     return {
       title: "Issuance",
-      quickActionsLeft: <IssuanceHeaderTabs />,
-      quickActionsRight: (
-        <>
-          <IssuanceApiKeySelector />
-          <CreateIssuanceTokenModal />
-        </>
-      ),
+      headerNav: <IssuanceHeaderTabs />,
+      hideHeaderSelectors: true,
+      contentWidthClass: "max-w-none",
+    };
+  }
+  if (pathname.startsWith("/dashboard/issuance/")) {
+    return {
+      title: "Issuance",
+      hideHeaderSelectors: true,
+      contentWidthClass: "max-w-none",
+      backAction: {
+        href: "/dashboard/issuance",
+        label: "Back to overview",
+      },
     };
   }
   if (pathname.startsWith("/dashboard/payments")) {
     return {
       title: "Payments",
-      quickActionsLeft: <IssuanceHeaderTabs />,
+      headerNav: <IssuanceHeaderTabs />,
+      contentWidthClass: "max-w-none",
     };
   }
   if (pathname.startsWith("/dashboard/members")) {
@@ -191,10 +215,16 @@ function SidebarGroup({
 export function DashboardShell({ children }: { children: ReactNode }) {
   const { isLoaded, isSignedIn, orgId } = useAuth();
   const pathname = usePathname();
-  const { isSidebarOpen, selectedProject, setSidebarOpen } = useDashboardWorkspace();
+  const { isSidebarOpen, setSidebarOpen } = useDashboardWorkspace();
   const sidebarWidth = 296;
   const pageConfig = getDashboardPageConfig(pathname);
   const contentWidthClass = pageConfig.contentWidthClass ?? "max-w-5xl";
+  const headerNav = pageConfig.backAction ? (
+    <HeaderBackAction href={pageConfig.backAction.href} label={pageConfig.backAction.label} />
+  ) : (
+    pageConfig.headerNav
+  );
+  const shouldRenderHeaderNavRow = pageConfig.showHeaderNavRow || Boolean(headerNav);
 
   if (!isLoaded) {
     return (
@@ -263,7 +293,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
           transition={{ duration: 0.22, ease: "easeInOut" }}
           style={{ pointerEvents: isSidebarOpen ? "auto" : "none" }}
           className={[
-            "hidden overflow-hidden border border-[rgba(28,28,29,0.10)] border-r-0 bg-[#e9e7de] lg:flex lg:flex-col lg:justify-between",
+            "hidden overflow-hidden border border-[rgba(28,28,29,0.10)] border-r-0 bg-[#e9e7de] lg:sticky lg:top-0 lg:flex lg:h-screen lg:flex-col lg:justify-between",
           ].join(" ")}
         >
           <div className="w-[296px] space-y-6 p-3">
@@ -321,8 +351,8 @@ export function DashboardShell({ children }: { children: ReactNode }) {
         </motion.aside>
 
         <section className="relative rounded-[16px] border border-[rgba(28,28,29,0.08)] bg-[rgba(255,255,255,0.8)] px-3 py-5 md:p-6 lg:rounded-tl-[16px]">
-          <div className={["mx-auto w-full", contentWidthClass].join(" ")}>
-            <div className="mb-6 space-y-4">
+          <div className="w-full space-y-6">
+            <div className="space-y-4">
               <div className="flex items-start justify-between gap-3">
                 <div className="flex min-w-0 items-center gap-3">
                   {!isSidebarOpen ? (
@@ -346,23 +376,31 @@ export function DashboardShell({ children }: { children: ReactNode }) {
                   <h1 className="text-[36px] leading-[40px] font-medium tracking-[-0.3px] text-[#1c1c1d]">
                     {pageConfig.title}
                   </h1>
-                  <div className="pointer-events-none hidden h-10 items-center gap-2 rounded-[10px] border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.02)] px-3 py-2 text-sm md:flex">
-                    <span className="text-[rgba(28,28,29,0.72)]">{selectedProject}</span>
-                    <ChevronDown className="h-4 w-4 text-[rgba(28,28,29,0.72)]" />
-                  </div>
                 </div>
 
-                <div className="flex items-center gap-2">
-                  <UserButton afterSignOutUrl="/sign-in" />
-                </div>
+                {pageConfig.hideHeaderSelectors ? null : (
+                  <div className="flex items-center gap-2">
+                    <UserButton afterSignOutUrl="/sign-in" />
+                  </div>
+                )}
               </div>
 
-              <DashboardQuickActions
-                left={pageConfig.quickActionsLeft}
-                right={pageConfig.quickActionsRight}
-              />
+              {shouldRenderHeaderNavRow ? (
+                <div className="-mx-3 border-b border-[rgba(28,28,29,0.10)] md:-mx-6">
+                  <div
+                    className={[
+                      "px-3 md:px-6",
+                      pageConfig.backAction
+                        ? "flex min-h-[56px] items-start pt-1"
+                        : "flex min-h-[56px] items-end",
+                    ].join(" ")}
+                  >
+                    {headerNav}
+                  </div>
+                </div>
+              ) : null}
             </div>
-            {children}
+            <div className={["mx-auto w-full", contentWidthClass].join(" ")}>{children}</div>
           </div>
         </section>
       </div>

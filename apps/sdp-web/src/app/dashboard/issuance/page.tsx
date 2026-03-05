@@ -15,6 +15,7 @@ interface IssuanceTokenView {
   symbol: string;
   status: string;
   template: string;
+  imageUrl: string | null;
   mintAddress: string | null;
   totalSupply: string;
   createdAt: string;
@@ -112,6 +113,7 @@ async function fetchTokens(
         symbol?: string;
         status?: string;
         template?: string;
+        imageUrl?: string | null;
         mintAddress?: string | null;
         totalSupply?: string;
         createdAt?: string;
@@ -127,6 +129,7 @@ async function fetchTokens(
         symbol: token.symbol ?? "-",
         status: token.status ?? "pending",
         template: token.template ?? "custom",
+        imageUrl: token.imageUrl ?? null,
         mintAddress: token.mintAddress ?? null,
         totalSupply: token.totalSupply ?? "0",
         createdAt: token.createdAt ?? "",

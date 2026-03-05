@@ -3,17 +3,23 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import type { ReactNode } from "react";
 import { useState } from "react";
 import { deactivateApiKeyAction } from "./actions";
 
 interface DeleteApiKeyModalProps {
   keyId: string;
   keyName: string;
+  renderTrigger?: (open: () => void) => ReactNode;
 }
 
-export function DeleteApiKeyModal({ keyId, keyName }: DeleteApiKeyModalProps) {
+export function DeleteApiKeyModal({ keyId, keyName, renderTrigger }: DeleteApiKeyModalProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [confirmation, setConfirmation] = useState("");
+
+  const open = () => {
+    setIsOpen(true);
+  };
 
   const close = () => {
     setIsOpen(false);
@@ -24,15 +30,19 @@ export function DeleteApiKeyModal({ keyId, keyName }: DeleteApiKeyModalProps) {
 
   return (
     <>
-      <Button
-        type="button"
-        variant="secondary"
-        size="sm"
-        className="border-[#c71f37] text-[#c71f37] hover:bg-[#c71f37]/10"
-        onClick={() => setIsOpen(true)}
-      >
-        Delete
-      </Button>
+      {renderTrigger ? (
+        renderTrigger(open)
+      ) : (
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          className="border-[#c71f37] text-[#c71f37] hover:bg-[#c71f37]/10"
+          onClick={open}
+        >
+          Delete
+        </Button>
+      )}
 
       {isOpen ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center px-4 py-6">

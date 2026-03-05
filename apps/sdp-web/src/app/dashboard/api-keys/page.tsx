@@ -1,6 +1,11 @@
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import {
   Table,
   TableBody,
@@ -12,8 +17,9 @@ import {
 import { sdpApiFetch } from "@/lib/sdp-api";
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
-import { consumeApiKeyFlash, rotateApiKeyAction } from "./actions";
-import { DeleteApiKeyModal } from "./delete-api-key-modal";
+import { consumeApiKeyFlash } from "./actions";
+import { ApiKeyActionsMenu } from "./api-key-actions-menu";
+import { CreateApiKeyModal } from "./create-api-key-modal";
 import { FlashClearTrigger } from "./flash-clear-trigger";
 import { GeneratedApiKeyModal } from "./generated-key-modal";
 
@@ -37,7 +43,11 @@ function formatDate(value: string | null): string {
   if (!value) return "Never";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString();
+  return date.toLocaleDateString("en-US", {
+    month: "short",
+    day: "2-digit",
+    year: "numeric",
+  });
 }
 
 export default async function ApiKeysPage() {
@@ -60,7 +70,7 @@ export default async function ApiKeysPage() {
   const hasGeneratedKeyFlash = Boolean(flash?.key);
 
   return (
-    <div className="w-full max-w-5xl flex flex-col gap-6">
+    <div className="w-full flex flex-col gap-6">
       {flash ? (
         <>
           {!hasGeneratedKeyFlash ? <FlashClearTrigger /> : null}
@@ -87,87 +97,76 @@ export default async function ApiKeysPage() {
         <CardHeader>
           <CardTitle>Existing API keys</CardTitle>
           <CardDescription>Active and historical keys for this workspace.</CardDescription>
+          <CardAction>
+            <CreateApiKeyModal triggerLabel="New API key" />
+          </CardAction>
         </CardHeader>
         <CardContent>
           <div className="mb-4 rounded-[10px] border border-[rgba(28,28,29,0.14)] bg-[rgba(28,28,29,0.03)] px-3 py-2 text-xs text-[rgba(28,28,29,0.72)]">
             <p className="text-xs text-[rgba(28,28,29,0.72)]">
-              Rotation hint: rotate active keys only, use a grace period between 0 and 168 hours,
-              and keep old key secrets secure. New key secrets are shown once.
+              Rotation hint: rotate active keys only. The dashboard uses a 24-hour grace period; use
+              the API for custom grace values (0-168h). New key secrets are shown once.
             </p>
           </div>
           {apiKeys.length === 0 ? (
             <p className="text-sm text-[rgba(28,28,29,0.72)]">No API keys found.</p>
           ) : (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Name</TableHead>
-                    <TableHead>Prefix</TableHead>
-                    <TableHead>Role</TableHead>
-                    <TableHead>Env</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Last used</TableHead>
-                    <TableHead>Expires</TableHead>
-                    <TableHead>Created</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {apiKeys.map((key) => {
-                    const canRotate = key.status === "active";
+            <Table className="table-fixed">
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-[14%]">Name</TableHead>
+                  <TableHead className="w-[14%]">Prefix</TableHead>
+                  <TableHead className="w-[10%]">Role</TableHead>
+                  <TableHead className="w-[8%]">Env</TableHead>
+                  <TableHead className="w-[10%]">Status</TableHead>
+                  <TableHead className="w-[11%]">Last used</TableHead>
+                  <TableHead className="w-[11%]">Expires</TableHead>
+                  <TableHead className="w-[11%]">Created</TableHead>
+                  <TableHead className="w-[21%] text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {apiKeys.map((key) => {
+                  const canRotate = key.status === "active";
 
-                    return (
-                      <TableRow key={key.id}>
-                        <TableCell className="font-medium">{key.name}</TableCell>
-                        <TableCell className="font-mono text-xs">{key.keyPrefix}</TableCell>
-                        <TableCell>{key.role}</TableCell>
-                        <TableCell>{key.environment}</TableCell>
-                        <TableCell>{key.status}</TableCell>
-                        <TableCell className="text-xs text-[rgba(28,28,29,0.72)]">
-                          {formatDate(key.lastUsedAt)}
-                        </TableCell>
-                        <TableCell className="text-xs text-[rgba(28,28,29,0.72)]">
-                          {formatDate(key.expiresAt)}
-                        </TableCell>
-                        <TableCell className="text-xs text-[rgba(28,28,29,0.72)]">
-                          {formatDate(key.createdAt)}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex items-center justify-end gap-2">
-                            {canRotate ? (
-                              <form
-                                action={rotateApiKeyAction}
-                                className="inline-flex items-center justify-end gap-2"
-                              >
-                                <input type="hidden" name="keyId" value={key.id} />
-                                <Input
-                                  type="number"
-                                  name="grace"
-                                  min={0}
-                                  max={168}
-                                  defaultValue={24}
-                                  className="h-8 w-[88px] text-xs"
-                                  aria-label={`Grace period hours for ${key.name}`}
-                                />
-                                <Button type="submit" size="sm" variant="secondary">
-                                  Rotate
-                                </Button>
-                              </form>
-                            ) : (
-                              <span className="text-xs text-[rgba(28,28,29,0.48)]">
-                                Unavailable
-                              </span>
-                            )}
-                            <DeleteApiKeyModal keyId={key.id} keyName={key.name} />
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            </div>
+                  return (
+                    <TableRow key={key.id}>
+                      <TableCell className="font-medium">
+                        <span className="block truncate">{key.name}</span>
+                      </TableCell>
+                      <TableCell className="font-mono text-xs">
+                        <span className="block truncate">{key.keyPrefix}</span>
+                      </TableCell>
+                      <TableCell className="text-xs">
+                        <span className="block truncate">{key.role}</span>
+                      </TableCell>
+                      <TableCell className="text-xs">
+                        <span className="block truncate">{key.environment}</span>
+                      </TableCell>
+                      <TableCell className="text-xs">
+                        <span className="block truncate">{key.status}</span>
+                      </TableCell>
+                      <TableCell className="text-xs text-[rgba(28,28,29,0.72)]">
+                        {formatDate(key.lastUsedAt)}
+                      </TableCell>
+                      <TableCell className="text-xs text-[rgba(28,28,29,0.72)]">
+                        {formatDate(key.expiresAt)}
+                      </TableCell>
+                      <TableCell className="text-xs text-[rgba(28,28,29,0.72)]">
+                        {formatDate(key.createdAt)}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <ApiKeyActionsMenu
+                          keyId={key.id}
+                          keyName={key.name}
+                          canRotate={canRotate}
+                        />
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
           )}
         </CardContent>
       </Card>
