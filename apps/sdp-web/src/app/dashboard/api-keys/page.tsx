@@ -37,7 +37,11 @@ function formatDate(value: string | null): string {
   if (!value) return "Never";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString();
+  return date.toLocaleDateString("en-US", {
+    month: "short",
+    day: "2-digit",
+    year: "numeric",
+  });
 }
 
 export default async function ApiKeysPage() {
@@ -98,19 +102,18 @@ export default async function ApiKeysPage() {
           {apiKeys.length === 0 ? (
             <p className="text-sm text-[rgba(28,28,29,0.72)]">No API keys found.</p>
           ) : (
-            <div className="overflow-x-auto">
-              <Table>
+            <Table className="table-fixed">
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Name</TableHead>
-                    <TableHead>Prefix</TableHead>
-                    <TableHead>Role</TableHead>
-                    <TableHead>Env</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Last used</TableHead>
-                    <TableHead>Expires</TableHead>
-                    <TableHead>Created</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
+                    <TableHead className="w-[14%]">Name</TableHead>
+                    <TableHead className="w-[14%]">Prefix</TableHead>
+                    <TableHead className="w-[10%]">Role</TableHead>
+                    <TableHead className="w-[8%]">Env</TableHead>
+                    <TableHead className="w-[10%]">Status</TableHead>
+                    <TableHead className="w-[11%]">Last used</TableHead>
+                    <TableHead className="w-[11%]">Expires</TableHead>
+                    <TableHead className="w-[11%]">Created</TableHead>
+                    <TableHead className="w-[21%] text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -119,11 +122,21 @@ export default async function ApiKeysPage() {
 
                     return (
                       <TableRow key={key.id}>
-                        <TableCell className="font-medium">{key.name}</TableCell>
-                        <TableCell className="font-mono text-xs">{key.keyPrefix}</TableCell>
-                        <TableCell>{key.role}</TableCell>
-                        <TableCell>{key.environment}</TableCell>
-                        <TableCell>{key.status}</TableCell>
+                        <TableCell className="font-medium">
+                          <span className="block truncate">{key.name}</span>
+                        </TableCell>
+                        <TableCell className="font-mono text-xs">
+                          <span className="block truncate">{key.keyPrefix}</span>
+                        </TableCell>
+                        <TableCell className="text-xs">
+                          <span className="block truncate">{key.role}</span>
+                        </TableCell>
+                        <TableCell className="text-xs">
+                          <span className="block truncate">{key.environment}</span>
+                        </TableCell>
+                        <TableCell className="text-xs">
+                          <span className="block truncate">{key.status}</span>
+                        </TableCell>
                         <TableCell className="text-xs text-[rgba(28,28,29,0.72)]">
                           {formatDate(key.lastUsedAt)}
                         </TableCell>
@@ -133,12 +146,12 @@ export default async function ApiKeysPage() {
                         <TableCell className="text-xs text-[rgba(28,28,29,0.72)]">
                           {formatDate(key.createdAt)}
                         </TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex items-center justify-end gap-2">
+                        <TableCell className="text-right whitespace-normal">
+                          <div className="flex flex-wrap items-center justify-end gap-2">
                             {canRotate ? (
                               <form
                                 action={rotateApiKeyAction}
-                                className="inline-flex items-center justify-end gap-2"
+                                className="inline-flex flex-wrap items-center justify-end gap-2"
                               >
                                 <input type="hidden" name="keyId" value={key.id} />
                                 <Input
@@ -147,7 +160,7 @@ export default async function ApiKeysPage() {
                                   min={0}
                                   max={168}
                                   defaultValue={24}
-                                  className="h-8 w-[88px] text-xs"
+                                  className="h-8 w-[72px] text-xs"
                                   aria-label={`Grace period hours for ${key.name}`}
                                 />
                                 <Button type="submit" size="sm" variant="secondary">
@@ -167,7 +180,6 @@ export default async function ApiKeysPage() {
                   })}
                 </TableBody>
               </Table>
-            </div>
           )}
         </CardContent>
       </Card>
