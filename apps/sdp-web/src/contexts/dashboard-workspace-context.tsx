@@ -1,10 +1,11 @@
 "use client";
 
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { type ReactNode, createContext, useCallback, useContext, useMemo, useState } from "react";
 
 export type IssuanceWorkspaceTab = "tokens" | "playground";
 
-export interface DashboardIssuanceApiKeyOption {
+export interface DashboardPlaygroundApiKeyOption {
   id: string;
   name: string;
   keyPrefix: string;
@@ -16,10 +17,10 @@ type DashboardWorkspaceContextValue = {
   isSidebarOpen: boolean;
   selectedProject: string;
   issuanceTab: IssuanceWorkspaceTab;
-  issuanceApiKeys: DashboardIssuanceApiKeyOption[];
-  selectedIssuanceApiKeyId: string | null;
-  setIssuanceApiKeys: (keys: DashboardIssuanceApiKeyOption[]) => void;
-  setSelectedIssuanceApiKeyId: (id: string | null) => void;
+  playgroundApiKeys: DashboardPlaygroundApiKeyOption[];
+  selectedPlaygroundApiKeyId: string | null;
+  setPlaygroundApiKeys: (keys: DashboardPlaygroundApiKeyOption[]) => void;
+  setSelectedPlaygroundApiKeyId: (id: string | null) => void;
   setSelectedProject: (project: string) => void;
   setIssuanceTab: (tab: IssuanceWorkspaceTab) => void;
   setSidebarOpen: (open: boolean) => void;
@@ -41,19 +42,28 @@ export function DashboardWorkspaceProvider({
   defaultProject = "Default Project",
   initialSidebarOpen = true,
 }: DashboardWorkspaceProviderProps) {
+  const pathname = usePathname();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [isSidebarOpen, setSidebarOpenState] = useState(initialSidebarOpen);
   const [selectedProject, setSelectedProject] = useState(defaultProject);
-  const [issuanceTab, setIssuanceTab] = useState<IssuanceWorkspaceTab>("tokens");
-  const [issuanceApiKeys, setIssuanceApiKeysState] = useState<DashboardIssuanceApiKeyOption[]>([]);
-  const [selectedIssuanceApiKeyId, setSelectedIssuanceApiKeyId] = useState<string | null>(null);
+  const [playgroundApiKeys, setPlaygroundApiKeysState] = useState<
+    DashboardPlaygroundApiKeyOption[]
+  >([]);
+  const [selectedPlaygroundApiKeyId, setSelectedPlaygroundApiKeyId] = useState<string | null>(null);
+
+  const issuanceTab: IssuanceWorkspaceTab = useMemo(() => {
+    const tab = searchParams.get("tab");
+    return tab === "playground" ? "playground" : "tokens";
+  }, [searchParams]);
 
   const setSidebarOpen = useCallback((open: boolean) => {
     setSidebarOpenState(open);
   }, []);
 
-  const setIssuanceApiKeys = useCallback((keys: DashboardIssuanceApiKeyOption[]) => {
-    setIssuanceApiKeysState(keys);
-    setSelectedIssuanceApiKeyId((current) => {
+  const setPlaygroundApiKeys = useCallback((keys: DashboardPlaygroundApiKeyOption[]) => {
+    setPlaygroundApiKeysState(keys);
+    setSelectedPlaygroundApiKeyId((current) => {
       if (keys.length === 0) {
         return null;
       }
@@ -68,15 +78,27 @@ export function DashboardWorkspaceProvider({
     setSidebarOpenState((current) => !current);
   }, []);
 
+  const setIssuanceTab = useCallback(
+    (tab: IssuanceWorkspaceTab) => {
+      const params = new URLSearchParams(searchParams.toString());
+
+      params.set("tab", tab === "playground" ? "playground" : "overview");
+
+      const query = params.toString();
+      router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+    },
+    [pathname, router, searchParams]
+  );
+
   const value = useMemo<DashboardWorkspaceContextValue>(
     () => ({
       isSidebarOpen,
       selectedProject,
       issuanceTab,
-      issuanceApiKeys,
-      selectedIssuanceApiKeyId,
-      setIssuanceApiKeys,
-      setSelectedIssuanceApiKeyId,
+      playgroundApiKeys,
+      selectedPlaygroundApiKeyId,
+      setPlaygroundApiKeys,
+      setSelectedPlaygroundApiKeyId,
       setSelectedProject,
       setIssuanceTab,
       setSidebarOpen,
@@ -84,11 +106,12 @@ export function DashboardWorkspaceProvider({
     }),
     [
       isSidebarOpen,
-      issuanceApiKeys,
+      playgroundApiKeys,
       issuanceTab,
-      selectedIssuanceApiKeyId,
+      selectedPlaygroundApiKeyId,
       selectedProject,
-      setIssuanceApiKeys,
+      setPlaygroundApiKeys,
+      setIssuanceTab,
       setSidebarOpen,
       toggleSidebar,
     ]

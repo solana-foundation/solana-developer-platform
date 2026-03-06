@@ -215,7 +215,7 @@ function SidebarGroup({
 export function DashboardShell({ children }: { children: ReactNode }) {
   const { isLoaded, isSignedIn, orgId } = useAuth();
   const pathname = usePathname();
-  const { isSidebarOpen, setSidebarOpen } = useDashboardWorkspace();
+  const { isSidebarOpen, issuanceTab, setSidebarOpen } = useDashboardWorkspace();
   const sidebarWidth = 296;
   const pageConfig = getDashboardPageConfig(pathname);
   const contentWidthClass = pageConfig.contentWidthClass ?? "max-w-5xl";
@@ -225,6 +225,9 @@ export function DashboardShell({ children }: { children: ReactNode }) {
     pageConfig.headerNav
   );
   const shouldRenderHeaderNavRow = pageConfig.showHeaderNavRow || Boolean(headerNav);
+  const shouldLockViewportScroll =
+    issuanceTab === "playground" &&
+    (pathname === "/dashboard/issuance" || pathname.startsWith("/dashboard/payments"));
 
   if (!isLoaded) {
     return (
@@ -280,10 +283,16 @@ export function DashboardShell({ children }: { children: ReactNode }) {
   }
 
   return (
-    <main className="min-h-screen bg-[#e9e7de] p-0 text-[#1c1c1d]">
+    <main
+      className={[
+        "min-h-screen bg-[#e9e7de] p-0 text-[#1c1c1d]",
+        shouldLockViewportScroll ? "h-screen overflow-hidden" : "",
+      ].join(" ")}
+    >
       <div
         className={[
           "mx-auto grid min-h-screen w-full max-w-none gap-0",
+          shouldLockViewportScroll ? "h-full" : "",
           "lg:grid-cols-[auto_1fr]",
         ].join(" ")}
       >
@@ -350,8 +359,18 @@ export function DashboardShell({ children }: { children: ReactNode }) {
           </div>
         </motion.aside>
 
-        <section className="relative rounded-[16px] border border-[rgba(28,28,29,0.08)] bg-[rgba(255,255,255,0.8)] px-3 py-5 md:p-6 lg:rounded-tl-[16px]">
-          <div className="w-full space-y-6">
+        <section
+          className={[
+            "relative rounded-[16px] border border-[rgba(28,28,29,0.08)] bg-[rgba(255,255,255,0.8)] px-3 py-5 md:p-6 lg:rounded-tl-[16px]",
+            shouldLockViewportScroll ? "flex min-h-0 flex-col overflow-hidden" : "",
+          ].join(" ")}
+        >
+          <div
+            className={[
+              "w-full",
+              shouldLockViewportScroll ? "flex min-h-0 flex-1 flex-col gap-0" : "space-y-6",
+            ].join(" ")}
+          >
             <div className="space-y-4">
               <div className="flex items-start justify-between gap-3">
                 <div className="flex min-w-0 items-center gap-3">
@@ -400,7 +419,17 @@ export function DashboardShell({ children }: { children: ReactNode }) {
                 </div>
               ) : null}
             </div>
-            <div className={["mx-auto w-full", contentWidthClass].join(" ")}>{children}</div>
+            <div
+              className={[
+                "mx-auto w-full",
+                contentWidthClass,
+                shouldLockViewportScroll
+                  ? "min-h-0 flex-1 overflow-hidden -mx-3 md:-mx-6 -mb-5 md:-mb-6"
+                  : "",
+              ].join(" ")}
+            >
+              {children}
+            </div>
           </div>
         </section>
       </div>

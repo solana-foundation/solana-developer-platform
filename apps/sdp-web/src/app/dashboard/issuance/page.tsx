@@ -1,6 +1,7 @@
 import { type SdpApiClient, createSdpApiClient } from "@/lib/sdp-api";
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
+import { fetchActiveApiKeys, resolvePlaygroundApiBaseUrl } from "../playground-api-data";
 import { IssuanceWorkspace } from "./issuance-workspace";
 
 interface IssuanceTemplateView {
@@ -20,14 +21,6 @@ interface IssuanceTokenView {
   totalSupply: string;
   createdAt: string;
   deployedAt: string | null;
-}
-
-interface IssuanceApiKeyView {
-  id: string;
-  name: string;
-  keyPrefix: string;
-  role: string;
-  environment: string;
 }
 
 interface FetchResult<T> {
@@ -145,53 +138,6 @@ async function fetchTokens(
   }
 }
 
-async function fetchApiKeys(
-  request: SdpApiClient["request"]
-): Promise<FetchResult<IssuanceApiKeyView[]>> {
-  try {
-    const response = await request("/v1/api-keys");
-    if (!response.ok) {
-      const body = await response.text();
-      return {
-        ok: false,
-        status: response.status,
-        error: parseErrorMessage(body),
-      };
-    }
-
-    const json = (await response.json()) as {
-      data?: {
-        apiKeys?: Array<{
-          id?: string;
-          name?: string;
-          keyPrefix?: string;
-          role?: string;
-          environment?: string;
-          status?: string;
-        }>;
-      };
-    };
-
-    const apiKeys = (json?.data?.apiKeys ?? [])
-      .filter((apiKey): apiKey is NonNullable<typeof apiKey> => Boolean(apiKey?.id))
-      .filter((apiKey) => apiKey.status === "active")
-      .map((apiKey) => ({
-        id: apiKey.id ?? "",
-        name: apiKey.name ?? "Unnamed key",
-        keyPrefix: apiKey.keyPrefix ?? "sdp_...",
-        role: apiKey.role ?? "api_developer",
-        environment: apiKey.environment ?? "sandbox",
-      }));
-
-    return { ok: true, data: apiKeys };
-  } catch (error) {
-    return {
-      ok: false,
-      error: error instanceof Error ? error.message : "Unable to load API keys",
-    };
-  }
-}
-
 export default async function IssuancePage() {
   const { userId, orgId } = await auth();
   if (!userId) {
@@ -201,17 +147,12 @@ export default async function IssuancePage() {
     redirect("/dashboard");
   }
 
-  const apiBaseUrl = (
-    process.env.SDP_API_BASE_URL ||
-    process.env.NEXT_PUBLIC_SDP_API_BASE_URL ||
-    process.env.NEXT_PUBLIC_API_BASE_URL ||
-    ""
-  ).replace(/\/$/, "");
+  const apiBaseUrl = resolvePlaygroundApiBaseUrl();
   const apiClient = await createSdpApiClient();
   const [templatesResult, tokensResult, apiKeysResult] = await Promise.all([
     fetchTemplates(apiClient.request),
     fetchTokens(apiClient.request),
-    fetchApiKeys(apiClient.request),
+    fetchActiveApiKeys(apiClient.request),
   ]);
 
   const tokens = tokensResult.data ?? [];
@@ -226,8 +167,9 @@ export default async function IssuancePage() {
   return (
     <IssuanceWorkspace
       tokens={tokens}
+      templates={templatesResult.data ?? []}
       apiKeys={apiKeys}
-      apiBaseUrl={apiBaseUrl || null}
+      apiBaseUrl={apiBaseUrl}
       templatesError={templatesError}
       tokensError={tokensError}
     />
