@@ -46,6 +46,7 @@ export function PaymentsWorkspace({ apiBaseUrl, apiKeys }: PaymentsWorkspaceProp
       void import("./payments-playground");
     };
 
+    // biome-ignore lint/nursery/noSecrets: requestIdleCallback is a browser API, not a secret.
     if (typeof window !== "undefined" && "requestIdleCallback" in window) {
       const idleId = window.requestIdleCallback(preloadPlayground);
       return () => window.cancelIdleCallback(idleId);

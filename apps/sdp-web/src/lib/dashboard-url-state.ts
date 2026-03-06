@@ -53,7 +53,7 @@ export function useDashboardUrlState() {
     const nextParams = new URLSearchParams(window.location.search);
 
     for (const [key, value] of Object.entries(updates)) {
-      if (value && value.trim()) {
+      if (value?.trim()) {
         nextParams.set(key, value);
       } else {
         nextParams.delete(key);

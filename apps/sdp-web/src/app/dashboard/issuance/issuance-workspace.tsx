@@ -129,6 +129,7 @@ export function IssuanceWorkspace({
       void import("./issuance-playground");
     };
 
+    // biome-ignore lint/nursery/noSecrets: requestIdleCallback is a browser API, not a secret.
     if (typeof window !== "undefined" && "requestIdleCallback" in window) {
       const idleId = window.requestIdleCallback(preloadPlayground);
       return () => window.cancelIdleCallback(idleId);
