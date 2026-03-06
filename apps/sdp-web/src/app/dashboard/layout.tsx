@@ -1,6 +1,6 @@
 import { DashboardShell } from "@/components/dashboard-shell";
 import { DashboardWorkspaceProvider } from "@/contexts/dashboard-workspace-context";
-import { Suspense, type ReactNode } from "react";
+import { type ReactNode, Suspense } from "react";
 
 function DashboardLayoutFallback({ children }: { children: ReactNode }) {
   return <div className="min-h-screen bg-[#e9e7de]">{children}</div>;

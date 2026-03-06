@@ -5,8 +5,9 @@ import { Input } from "@/components/ui/input";
 import { normalizeApiKeyInput } from "@/lib/playground-api-keys";
 import { cn } from "@/lib/utils";
 import { Clock3, Copy, Loader2, Play, Sparkles } from "lucide-react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { CSSProperties, ReactNode } from "react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 export type ApiPlaygroundMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
@@ -469,10 +470,12 @@ export function ApiPlaygroundShell({
   productName,
   rightMessages = [],
 }: ApiPlaygroundShellProps) {
+  const pathname = usePathname();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const initialEndpoint =
     endpoints.find((endpoint) => endpoint.id === defaultEndpointId) ?? endpoints[0];
   const initialEndpointId = initialEndpoint?.id ?? "";
-  const [selectedEndpointId, setSelectedEndpointId] = useState(initialEndpoint?.id ?? "");
   const [fieldValues, setFieldValues] = useState<Record<string, string>>(() =>
     initialEndpoint ? buildInitialFieldValues(initialEndpoint) : {}
   );
@@ -483,9 +486,10 @@ export function ApiPlaygroundShell({
   const [executionResult, setExecutionResult] = useState<ExecutionResult | null>(null);
   const [copiedAction, setCopiedAction] = useState<"code" | "ai" | null>(null);
   const endpointsRef = useRef(endpoints);
+  const endpointParam = searchParams.get("endpoint");
 
-  const activeEndpointId = endpoints.some((endpoint) => endpoint.id === selectedEndpointId)
-    ? selectedEndpointId
+  const activeEndpointId = endpoints.some((endpoint) => endpoint.id === endpointParam)
+    ? (endpointParam ?? "")
     : initialEndpointId;
   const activeEndpoint =
     endpoints.find((endpoint) => endpoint.id === activeEndpointId) ?? initialEndpoint;
@@ -497,6 +501,24 @@ export function ApiPlaygroundShell({
   useEffect(() => {
     endpointsRef.current = endpoints;
   }, [endpoints]);
+
+  const updateEndpointInUrl = useCallback(
+    (endpointId: string) => {
+      const params = new URLSearchParams(searchParams.toString());
+      params.set("endpoint", endpointId);
+      const query = params.toString();
+      router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+    },
+    [pathname, router, searchParams]
+  );
+
+  useEffect(() => {
+    if (!activeEndpointId || endpointParam === activeEndpointId) {
+      return;
+    }
+
+    updateEndpointInUrl(activeEndpointId);
+  }, [activeEndpointId, endpointParam, updateEndpointInUrl]);
 
   useEffect(() => {
     if (!activeEndpointId) {
@@ -701,7 +723,7 @@ export function ApiPlaygroundShell({
               aria-label="Select API endpoint"
               className="absolute inset-0 h-full w-full cursor-pointer appearance-none rounded-[14px] opacity-0"
               value={activeEndpoint.id}
-              onChange={(event) => setSelectedEndpointId(event.currentTarget.value)}
+              onChange={(event) => updateEndpointInUrl(event.currentTarget.value)}
             >
               {endpoints.map((endpoint) => (
                 <option key={endpoint.id} value={endpoint.id}>
