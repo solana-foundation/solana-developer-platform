@@ -18,7 +18,7 @@ export interface Env {
   SDP_SESSIONS: KVNamespace;
 
   // Environment variables
-  ENVIRONMENT: "development" | "staging" | "production";
+  ENVIRONMENT: "development" | "production";
   API_VERSION: string;
 
   // Secrets (set via wrangler secret)
