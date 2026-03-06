@@ -1,8 +1,6 @@
 "use client";
 
-import { ApiEndpointPlayground } from "@/components/api-endpoint-playground";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { getStoredApiKeySecret } from "@/lib/playground-api-keys";
@@ -11,6 +9,7 @@ import { Plus, Search } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { CreateIssuanceTokenModal } from "./create-token-modal";
+import { IssuancePlayground } from "./issuance-playground";
 import { type IssuanceTemplateId, getTemplateCatalogEntry } from "./template-catalog";
 
 interface IssuanceTokenView {
@@ -26,117 +25,6 @@ interface IssuanceTokenView {
   deployedAt: string | null;
 }
 
-interface IssuancePlaygroundEndpointConfig {
-  title: string;
-  description: string;
-  method: "GET" | "POST";
-  path: string;
-  expectedResponse: unknown;
-  requestBodyExample?: unknown;
-}
-
-const issuancePlaygroundEndpointConfigs: IssuancePlaygroundEndpointConfig[] = [
-  {
-    title: "List templates",
-    description: "Fetch supported issuance templates and defaults.",
-    method: "GET",
-    path: "/v1/issuance/templates",
-    expectedResponse: {
-      data: {
-        templates: [
-          {
-            id: "stablecoin",
-            name: "Stablecoin",
-            defaultDecimals: 6,
-            requiredExtensions: ["transferFee"],
-            optionalExtensions: ["pausable"],
-          },
-        ],
-      },
-    },
-  },
-  {
-    title: "List tokens",
-    description: "Page through tokens in the active organization or project scope.",
-    method: "GET",
-    path: "/v1/issuance/tokens",
-    expectedResponse: {
-      data: [
-        {
-          id: "tok_abc123",
-          name: "Acme Dollar",
-          symbol: "ACME",
-          status: "active",
-          mintAddress: "mint_acme_primary",
-          totalSupply: "1250000",
-        },
-      ],
-      meta: { page: 1, pageSize: 20, total: 1, totalPages: 1 },
-    },
-  },
-  {
-    title: "Create token",
-    description: "Create a new token record from a template before deployment.",
-    method: "POST",
-    path: "/v1/issuance/tokens",
-    requestBodyExample: {
-      name: "Acme Dollar",
-      symbol: "ACME",
-      template: "stablecoin",
-      decimals: 6,
-      description: "USD-backed settlement asset",
-      uri: "https://example.com/metadata/acme-usd.json",
-    },
-    expectedResponse: {
-      data: {
-        token: {
-          id: "tok_abc123",
-          name: "Acme Dollar",
-          symbol: "ACME",
-          status: "pending",
-          deployedAt: null,
-        },
-      },
-    },
-  },
-  {
-    title: "Refresh total supply",
-    description: "Force a read from chain and update cached total supply for a token.",
-    method: "POST",
-    path: "/v1/issuance/tokens/{tokenId}/supply/refresh",
-    expectedResponse: {
-      data: {
-        token: {
-          id: "tok_abc123",
-          totalSupply: "1250000",
-          totalSupplyUpdatedAt: "2026-02-17T12:00:00.000Z",
-        },
-      },
-    },
-  },
-  {
-    title: "List token transactions",
-    description: "Retrieve issuance transaction audit history for one token.",
-    method: "GET",
-    path: "/v1/issuance/tokens/{tokenId}/transactions",
-    expectedResponse: {
-      data: {
-        items: [
-          {
-            id: "tx_abc123",
-            tokenId: "tok_abc123",
-            type: "mint",
-            status: "confirmed",
-            signature: "5P7B...",
-            createdAt: "2026-02-16T10:20:30.000Z",
-          },
-        ],
-      },
-      meta: { page: 1, pageSize: 20, total: 1, totalPages: 1 },
-    },
-  },
-];
-
 interface IssuanceApiKeyOption {
   id: string;
   name: string;
@@ -145,8 +33,15 @@ interface IssuanceApiKeyOption {
   environment: string;
 }
 
+interface IssuanceTemplateOption {
+  id: string;
+  name: string;
+  description?: string;
+}
+
 interface IssuanceWorkspaceProps {
   tokens: IssuanceTokenView[];
+  templates: IssuanceTemplateOption[];
   apiKeys: IssuanceApiKeyOption[];
   apiBaseUrl: string | null;
   templatesError: string | null;
@@ -202,23 +97,24 @@ function getTokenTypeLabel(template: IssuanceTokenView["template"]): string {
 
 export function IssuanceWorkspace({
   tokens,
+  templates,
   apiKeys,
   apiBaseUrl,
   templatesError,
   tokensError,
 }: IssuanceWorkspaceProps) {
-  const { issuanceTab, setIssuanceTab, selectedIssuanceApiKeyId, setIssuanceApiKeys } =
-    useDashboardWorkspace();
+  const { issuanceTab, selectedPlaygroundApiKeyId, setPlaygroundApiKeys } = useDashboardWorkspace();
   const [search, setSearch] = useState("");
   const [isCreateTokenModalOpen, setIsCreateTokenModalOpen] = useState(false);
+  const isPlaygroundTab = issuanceTab === "playground";
 
   useEffect(() => {
-    setIssuanceApiKeys(apiKeys);
-  }, [apiKeys, setIssuanceApiKeys]);
+    setPlaygroundApiKeys(apiKeys);
+  }, [apiKeys, setPlaygroundApiKeys]);
 
   const selectedPlaygroundApiKey = useMemo(
-    () => apiKeys.find((key) => key.id === selectedIssuanceApiKeyId) ?? null,
-    [apiKeys, selectedIssuanceApiKeyId]
+    () => apiKeys.find((key) => key.id === selectedPlaygroundApiKeyId) ?? null,
+    [apiKeys, selectedPlaygroundApiKeyId]
   );
   const selectedPlaygroundApiKeyPrefix = selectedPlaygroundApiKey?.keyPrefix ?? null;
   const playgroundApiKeyValue = useMemo(() => {
@@ -251,7 +147,7 @@ export function IssuanceWorkspace({
   }, [tokens, search]);
 
   return (
-    <div className="w-full space-y-6">
+    <div className={isPlaygroundTab ? "flex h-full min-h-0 w-full flex-col" : "w-full space-y-6"}>
       <AnimatePresence mode="wait">
         {issuanceTab === "tokens" ? (
           <motion.div
@@ -383,57 +279,16 @@ export function IssuanceWorkspace({
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -8 }}
             transition={{ duration: 0.2, ease: "easeOut" }}
-            className="space-y-6"
+            className="h-full min-h-0 w-full"
           >
-            <Card>
-              <CardHeader>
-                <CardTitle>Issuance API playground</CardTitle>
-                <CardDescription>
-                  Reusable per-endpoint playground cards with expected responses, fetch snippet
-                  copy, API key selector, and live execution.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="rounded-xl border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.02)] p-3 text-xs text-[rgba(28,28,29,0.64)]">
-                  Endpoints with <code>{"{tokenId}"}</code> require a real token id in their
-                  configured path before execution.
-                </div>
-                {templatesError ? (
-                  <div className="rounded-xl border border-[#c71f37]/20 bg-[#c71f37]/[0.03] p-3 text-sm text-[#8a1f2a]">
-                    Templates status: {templatesError}
-                  </div>
-                ) : null}
-                {apiKeys.length === 0 ? (
-                  <div className="rounded-xl border border-[#c71f37]/20 bg-[#c71f37]/[0.03] p-3 text-sm text-[#8a1f2a]">
-                    No active API keys found. Create one in API keys before running mutable issuance
-                    endpoints.
-                  </div>
-                ) : null}
-              </CardContent>
-            </Card>
-
-            <div className="space-y-4">
-              {issuancePlaygroundEndpointConfigs.map((endpointConfig) => (
-                <ApiEndpointPlayground
-                  key={`${endpointConfig.method}-${endpointConfig.path}`}
-                  title={endpointConfig.title}
-                  description={endpointConfig.description}
-                  method={endpointConfig.method}
-                  path={endpointConfig.path}
-                  expectedResponse={endpointConfig.expectedResponse}
-                  requestBodyExample={endpointConfig.requestBodyExample}
-                  apiKeyValue={playgroundApiKeyValue}
-                  apiBaseUrl={apiBaseUrl}
-                  defaultOpen={endpointConfig.path === "/v1/issuance/templates"}
-                />
-              ))}
-            </div>
-
-            <div className="flex justify-end">
-              <Button type="button" variant="secondary" onClick={() => setIssuanceTab("tokens")}>
-                Back to tokens
-              </Button>
-            </div>
+            <IssuancePlayground
+              apiBaseUrl={apiBaseUrl}
+              apiKeyValue={playgroundApiKeyValue}
+              hasActiveApiKeys={apiKeys.length > 0}
+              templates={templates}
+              templatesError={templatesError}
+              tokens={tokens}
+            />
           </motion.div>
         )}
       </AnimatePresence>

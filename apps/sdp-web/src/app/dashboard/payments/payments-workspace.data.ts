@@ -174,6 +174,40 @@ export async function fetchWalletPolicy(walletId: string): Promise<WalletPolicy>
   );
 }
 
+interface TransferListEnvelope {
+  data?: Array<{
+    id?: string;
+    status?: string;
+    signature?: string | null;
+  }>;
+  error?: {
+    message?: string;
+  };
+}
+
+export async function fetchTransfers(): Promise<TransferRecord[]> {
+  const transfersQuery = new URLSearchParams({
+    page: "1",
+    pageSize: "20",
+  }).toString();
+  const response = await fetch(`/api/dashboard/payments/transfers?${transfersQuery}`, {
+    method: "GET",
+    cache: "no-store",
+  });
+  const body = (await response.json().catch(() => ({}))) as TransferListEnvelope;
+  if (!response.ok) {
+    throw new Error(getApiError(body, `Transfer list request failed (${response.status}).`));
+  }
+
+  return (body.data ?? [])
+    .filter((transfer): transfer is NonNullable<typeof transfer> => Boolean(transfer?.id))
+    .map((transfer) => ({
+      id: transfer.id ?? "",
+      status: transfer.status ?? "pending",
+      signature: transfer.signature ?? null,
+    }));
+}
+
 export async function updateWalletPolicy(
   walletId: string,
   policy: WalletPolicy

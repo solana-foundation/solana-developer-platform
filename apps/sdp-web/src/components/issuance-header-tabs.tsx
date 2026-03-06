@@ -28,7 +28,7 @@ export function IssuanceHeaderTabs() {
           {issuanceTab === tab.id ? (
             <motion.span
               layoutId="issuance-tab-active-underline"
-              className="absolute right-0 bottom-[-1px] left-0 h-[3px] bg-[#1c1c1d]"
+              className="absolute right-0 bottom-[-1px] left-0 h-[2px] bg-[rgba(28,28,29,0.84)]"
               transition={{ type: "spring", stiffness: 500, damping: 36, mass: 0.6 }}
             />
           ) : null}

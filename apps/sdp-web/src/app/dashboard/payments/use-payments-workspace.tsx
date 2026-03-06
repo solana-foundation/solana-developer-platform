@@ -1,6 +1,7 @@
 "use client";
 
 import type {
+  PaymentTransferSummary as TransferRecord,
   PaymentWalletPolicy as WalletPolicy,
   PaymentsDashboardWallet as WalletRecord,
 } from "@sdp/types";
@@ -8,6 +9,7 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
   createTransfer,
+  fetchTransfers,
   fetchWalletPolicy,
   fetchWallets,
   getDevnetExplorerUrl,
@@ -62,6 +64,7 @@ export interface TransferSectionState {
 }
 
 export interface PaymentsWorkspaceState {
+  recentTransfers: TransferRecord[];
   wallets: WalletRecord[];
   walletsLoading: boolean;
   walletsError: string | null;
@@ -71,6 +74,7 @@ export interface PaymentsWorkspaceState {
 
 export function usePaymentsWorkspace(): PaymentsWorkspaceState {
   const [wallets, setWallets] = useState<WalletRecord[]>([]);
+  const [recentTransfers, setRecentTransfers] = useState<TransferRecord[]>([]);
   const [walletsLoading, setWalletsLoading] = useState(true);
   const [walletsError, setWalletsError] = useState<string | null>(null);
 
@@ -105,7 +109,12 @@ export function usePaymentsWorkspace(): PaymentsWorkspaceState {
       setWalletsLoading(true);
       setWalletsError(null);
       try {
-        setWallets(await fetchWallets());
+        const [loadedWallets, loadedTransfers] = await Promise.all([
+          fetchWallets(),
+          fetchTransfers().catch(() => []),
+        ]);
+        setWallets(loadedWallets);
+        setRecentTransfers(loadedTransfers);
       } catch (error) {
         setWalletsError(error instanceof Error ? error.message : "Failed to load wallets.");
       } finally {
@@ -314,6 +323,9 @@ export function usePaymentsWorkspace(): PaymentsWorkspaceState {
         amount: transferAmount.trim(),
         memo: transferMemo.trim() || undefined,
       });
+      setRecentTransfers((current) =>
+        [transfer, ...current.filter((entry) => entry.id !== transfer.id)].slice(0, 20)
+      );
 
       if (transfer.signature) {
         toast.success("Transfer submitted.", {
@@ -372,6 +384,7 @@ export function usePaymentsWorkspace(): PaymentsWorkspaceState {
   };
 
   return {
+    recentTransfers,
     wallets,
     walletsLoading,
     walletsError,
