@@ -83,44 +83,6 @@ SOLANA_RPC_QUICKNODE_URL = "https://evocative-old-mansion.solana-devnet.quiknode
 FEE_PAYMENT_PROVIDER = "kora"
 KORA_RPC_URL = "https://kora-devnet-315956366746.us-central1.run.app"
 
-# QA / staging environment
-[env.staging]
-name = "sdp-api-staging"
-
-[[env.staging.d1_databases]]
-binding = "DB"
-database_name = "sdp-db-staging"
-database_id = "219ab0d9-b467-4f15-9a69-06de58e44b5e"
-migrations_dir = "src/db/migrations"
-
-[[env.staging.kv_namespaces]]
-binding = "SDP_API_KEYS"
-id = "9b49110bb0fe4b0eae73cd0a2b03ab51"
-
-[[env.staging.kv_namespaces]]
-binding = "SDP_RATE_LIMITS"
-id = "2749d080ce474f59b7904df00f3c561f"
-
-[[env.staging.kv_namespaces]]
-binding = "SDP_CACHE"
-id = "35aeb577699f4ad990b842f2bc2449dc"
-
-[[env.staging.kv_namespaces]]
-binding = "SDP_SESSIONS"
-id = "d610bc5eecd74c3586b0a13c73e995fb"
-
-[env.staging.vars]
-ENVIRONMENT = "staging"
-API_VERSION = "v1"
-EMAIL_FROM = "noreply@mail.solana.org"
-SOLANA_NETWORK = "devnet"
-SOLANA_RPC_URL = "https://api.devnet.solana.com"
-SOLANA_RPC_DEFAULT_PROVIDER = "default"
-SOLANA_RPC_ALCHEMY_URL = "https://solana-devnet.g.alchemy.com/v2/{API_KEY}"
-SOLANA_RPC_TRITON_URL = "https://solanaf-sdp-7436.devnet.rpcpool.com/50cc5df4-1953-414c-b6fb-948aa7ffb0fb"
-SOLANA_RPC_HELIUS_URL = "https://mainnet.helius-rpc.com/?api-key={API_KEY}"
-SOLANA_RPC_QUICKNODE_URL = "https://example.solana-mainnet.quiknode.pro/{API_KEY}"
-
 # Production environment
 [env.production]
 name = "sdp-api-production"

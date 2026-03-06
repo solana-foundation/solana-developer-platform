@@ -1,5 +1,46 @@
 # Solana Developer Platform
 
+## Release Operations
+
+This repo uses a two-environment release model for the API:
+
+- `main` deploys the API to `dev`
+- semver tags `vX.Y.Z` deploy the API to `production`
+- production rollback is a manual redeploy of a previous semver tag
+
+### GitHub Setup
+
+Configure these before relying on the release flow:
+
+- GitHub environments: `dev` and `production`
+- GitHub secrets for both environments:
+  - `CLOUDFLARE_API_TOKEN`
+  - `CLOUDFLARE_ACCOUNT_ID`
+- Repository secret:
+  - `RELEASE_PLEASE_TOKEN`
+
+`RELEASE_PLEASE_TOKEN` must be a PAT or GitHub App token. The default `GITHUB_TOKEN` is not sufficient if you want the tag created by Release Please to trigger the production deploy workflow.
+
+### Release Flow
+
+1. Open PRs against `main` with semantic titles such as `feat: ...`, `fix: ...`, or `perf: ...`.
+2. Merge changes into `main`.
+3. Release Please opens or updates the release PR.
+4. Merge the release PR to create a Git tag like `v1.2.3`.
+5. The tag push triggers the production deploy workflow automatically.
+
+### Rollback
+
+To roll back production:
+
+1. Open GitHub Actions.
+2. Run `Deploy SDP API`.
+3. Set `environment=production`.
+4. Set `ref` to the previously released tag, for example `v1.2.2`.
+5. Leave `run_migrations=false` unless you explicitly need to run migrations.
+
+Important: code rollback is supported, but schema rollback is not automated. Production migrations should remain backward-compatible with the previously deployed application version.
+
 ## Integration Tests (Devnet)
 
 The integration test suite runs against Solana **devnet** and signs real transactions using the **Privy custody** provider.

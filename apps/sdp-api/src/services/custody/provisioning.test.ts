@@ -29,7 +29,7 @@ describe("coinbase account provisioning", () => {
 
         if (url.endsWith("/platform/v2/solana/accounts") && init?.method === "POST") {
           const body = JSON.parse(String(init.body ?? "{}")) as { name?: string };
-          expect(body.name).toBe("sdp-staging-acme-labs");
+          expect(body.name).toBe("sdp-production-acme-labs");
 
           return jsonResponse({ address: CREATED_ADDRESS }, 200);
         }
@@ -39,7 +39,7 @@ describe("coinbase account provisioning", () => {
 
     const result = await provisionCoinbaseCdpAccount(
       createCoinbaseEnv({
-        ENVIRONMENT: "staging",
+        ENVIRONMENT: "production",
       }),
       {
         orgId: "org_abc",
