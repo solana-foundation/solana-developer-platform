@@ -1,12 +1,20 @@
 "use client";
 
+import { ApiPlaygroundShellSkeleton } from "@/components/api-playground-shell-skeleton";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { getStoredApiKeySecret } from "@/lib/playground-api-keys";
+import dynamic from "next/dynamic";
 import { useEffect, useMemo } from "react";
 import { PaymentsDestinationAllowlistCard } from "./payments-destination-allowlist-card";
-import { PaymentsPlayground } from "./payments-playground";
 import { PaymentsTransferCard } from "./payments-transfer-card";
 import { usePaymentsWorkspace } from "./use-payments-workspace";
+
+const PaymentsPlayground = dynamic(
+  () => import("./payments-playground").then((module) => module.PaymentsPlayground),
+  {
+    loading: () => <ApiPlaygroundShellSkeleton />,
+  }
+);
 
 interface PaymentsApiKeyOption {
   id: string;
@@ -28,6 +36,25 @@ export function PaymentsWorkspace({ apiBaseUrl, apiKeys }: PaymentsWorkspaceProp
   useEffect(() => {
     setPlaygroundApiKeys(apiKeys);
   }, [apiKeys, setPlaygroundApiKeys]);
+
+  useEffect(() => {
+    if (issuanceTab === "playground") {
+      return;
+    }
+
+    const preloadPlayground = () => {
+      void import("./payments-playground");
+    };
+
+    // biome-ignore lint/nursery/noSecrets: requestIdleCallback is a browser API, not a secret.
+    if (typeof window !== "undefined" && "requestIdleCallback" in window) {
+      const idleId = window.requestIdleCallback(preloadPlayground);
+      return () => window.cancelIdleCallback(idleId);
+    }
+
+    const timeoutId = globalThis.setTimeout(preloadPlayground, 600);
+    return () => globalThis.clearTimeout(timeoutId);
+  }, [issuanceTab]);
 
   const selectedPlaygroundApiKey = useMemo(
     () => apiKeys.find((key) => key.id === selectedPlaygroundApiKeyId) ?? null,

@@ -1,16 +1,24 @@
 "use client";
 
+import { ApiPlaygroundShellSkeleton } from "@/components/api-playground-shell-skeleton";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { getStoredApiKeySecret } from "@/lib/playground-api-keys";
 import { AnimatePresence, motion } from "framer-motion";
 import { Plus, Search } from "lucide-react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { CreateIssuanceTokenModal } from "./create-token-modal";
-import { IssuancePlayground } from "./issuance-playground";
 import { type IssuanceTemplateId, getTemplateCatalogEntry } from "./template-catalog";
+
+const IssuancePlayground = dynamic(
+  () => import("./issuance-playground").then((module) => module.IssuancePlayground),
+  {
+    loading: () => <ApiPlaygroundShellSkeleton />,
+  }
+);
 
 interface IssuanceTokenView {
   id: string;
@@ -111,6 +119,25 @@ export function IssuanceWorkspace({
   useEffect(() => {
     setPlaygroundApiKeys(apiKeys);
   }, [apiKeys, setPlaygroundApiKeys]);
+
+  useEffect(() => {
+    if (isPlaygroundTab) {
+      return;
+    }
+
+    const preloadPlayground = () => {
+      void import("./issuance-playground");
+    };
+
+    // biome-ignore lint/nursery/noSecrets: requestIdleCallback is a browser API, not a secret.
+    if (typeof window !== "undefined" && "requestIdleCallback" in window) {
+      const idleId = window.requestIdleCallback(preloadPlayground);
+      return () => window.cancelIdleCallback(idleId);
+    }
+
+    const timeoutId = globalThis.setTimeout(preloadPlayground, 600);
+    return () => globalThis.clearTimeout(timeoutId);
+  }, [isPlaygroundTab]);
 
   const selectedPlaygroundApiKey = useMemo(
     () => apiKeys.find((key) => key.id === selectedPlaygroundApiKeyId) ?? null,
