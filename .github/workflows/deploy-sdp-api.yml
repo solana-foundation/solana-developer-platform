@@ -5,6 +5,8 @@ on:
     branches:
       - main
     tags:
+      # NOTE: paths filters do not apply to tag pushes; every matching tag
+      # intentionally triggers a production deploy for that release version.
       - v*.*.*
     paths:
       - apps/sdp-api/**

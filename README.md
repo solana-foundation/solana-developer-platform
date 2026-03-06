@@ -19,7 +19,7 @@ Configure these before relying on the release flow:
 - Repository secret:
   - `RELEASE_PLEASE_TOKEN`
 
-`RELEASE_PLEASE_TOKEN` must be a PAT or GitHub App token. The default `GITHUB_TOKEN` is not sufficient if you want the tag created by Release Please to trigger the production deploy workflow.
+`RELEASE_PLEASE_TOKEN` must be a PAT or GitHub App token with at least `contents: write` and `pull-requests: write`. The default `GITHUB_TOKEN` is not sufficient if you want the tag created by Release Please to trigger the production deploy workflow.
 
 ### Release Flow
 
