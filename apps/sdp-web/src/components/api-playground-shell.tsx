@@ -6,7 +6,7 @@ import { normalizeApiKeyInput } from "@/lib/playground-api-keys";
 import { cn } from "@/lib/utils";
 import { Clock3, Copy, Loader2, Play, Sparkles } from "lucide-react";
 import type { CSSProperties, ReactNode } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 export type ApiPlaygroundMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
@@ -178,6 +178,10 @@ function getMethodBadgeClassName(method: ApiPlaygroundMethod): string {
   }
 
   return "bg-[#dce5d7] text-[#445646]";
+}
+
+function isValidSdpApiKey(rawValue: string): boolean {
+  return /^sk_(test|live)_[A-Za-z0-9_-]+$/.test(rawValue);
 }
 
 function buildFetchSnippet(
@@ -467,6 +471,7 @@ export function ApiPlaygroundShell({
 }: ApiPlaygroundShellProps) {
   const initialEndpoint =
     endpoints.find((endpoint) => endpoint.id === defaultEndpointId) ?? endpoints[0];
+  const initialEndpointId = initialEndpoint?.id ?? "";
   const [selectedEndpointId, setSelectedEndpointId] = useState(initialEndpoint?.id ?? "");
   const [fieldValues, setFieldValues] = useState<Record<string, string>>(() =>
     initialEndpoint ? buildInitialFieldValues(initialEndpoint) : {}
@@ -477,25 +482,38 @@ export function ApiPlaygroundShell({
   const [executeError, setExecuteError] = useState<string | null>(null);
   const [executionResult, setExecutionResult] = useState<ExecutionResult | null>(null);
   const [copiedAction, setCopiedAction] = useState<"code" | "ai" | null>(null);
+  const endpointsRef = useRef(endpoints);
 
+  const activeEndpointId = endpoints.some((endpoint) => endpoint.id === selectedEndpointId)
+    ? selectedEndpointId
+    : initialEndpointId;
   const activeEndpoint =
-    endpoints.find((endpoint) => endpoint.id === selectedEndpointId) ?? initialEndpoint;
+    endpoints.find((endpoint) => endpoint.id === activeEndpointId) ?? initialEndpoint;
   const effectiveApiBaseUrl = useMemo(
     () => (apiBaseUrl ?? getDefaultApiBaseUrl()).replace(/\/$/, ""),
     [apiBaseUrl]
   );
 
   useEffect(() => {
-    if (!activeEndpoint) {
+    endpointsRef.current = endpoints;
+  }, [endpoints]);
+
+  useEffect(() => {
+    if (!activeEndpointId) {
       return;
     }
 
-    setFieldValues(buildInitialFieldValues(activeEndpoint));
+    const endpoint = endpointsRef.current.find((entry) => entry.id === activeEndpointId);
+    if (!endpoint) {
+      return;
+    }
+
+    setFieldValues(buildInitialFieldValues(endpoint));
     setMobileSection("request");
     setActivePanel("code");
     setExecutionResult(null);
     setExecuteError(null);
-  }, [activeEndpoint]);
+  }, [activeEndpointId]);
 
   const requestBody = useMemo(
     () => (activeEndpoint ? buildRequestBody(activeEndpoint.bodyFields, fieldValues) : null),
@@ -587,13 +605,9 @@ export function ApiPlaygroundShell({
     const normalizedApiKey = normalizeApiKeyInput(apiKeyValue);
     const hasApiKey = Boolean(normalizedApiKey);
 
-    if (
-      hasApiKey &&
-      !normalizedApiKey.startsWith("sk_test_") &&
-      !normalizedApiKey.startsWith("sk_live_")
-    ) {
+    if (hasApiKey && !isValidSdpApiKey(normalizedApiKey)) {
       setExecuteError(
-        "Invalid API key format. Use a raw key value starting with sk_test_ or sk_live_."
+        "Invalid API key format. Use a raw key value like sk_test_... or sk_live_... with a valid suffix."
       );
       setActivePanel("response");
       return;
