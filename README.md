@@ -6,6 +6,7 @@ This repo uses a two-environment release model for the API:
 
 - `main` deploys the API to `dev`
 - semver tags `vX.Y.Z` deploy the API to `production`
+- legacy tags in the form `solana-developer-platform-vX.Y.Z` are still accepted for rollback compatibility
 - production rollback is a manual redeploy of a previous semver tag
 
 ### GitHub Setup
@@ -37,6 +38,7 @@ To roll back production:
 2. Run `Deploy SDP API`.
 3. Set `environment=production`.
 4. Set `ref` to the previously released tag, for example `v1.2.2`.
+   Legacy release tags like `solana-developer-platform-v0.2.0` are also accepted.
 5. Leave `run_migrations=false` unless you explicitly need to run migrations.
 
 Important: code rollback is supported, but schema rollback is not automated. Production migrations should remain backward-compatible with the previously deployed application version.
