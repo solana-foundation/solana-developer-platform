@@ -1,8 +1,8 @@
 "use client";
 
 import type {
-  PaymentWalletPolicy as WalletPolicy,
   PaymentTransferSummary as TransferRecord,
+  PaymentWalletPolicy as WalletPolicy,
   PaymentsDashboardWallet as WalletRecord,
 } from "@sdp/types";
 import { useEffect, useState } from "react";
@@ -323,7 +323,9 @@ export function usePaymentsWorkspace(): PaymentsWorkspaceState {
         amount: transferAmount.trim(),
         memo: transferMemo.trim() || undefined,
       });
-      setRecentTransfers((current) => [transfer, ...current.filter((entry) => entry.id !== transfer.id)].slice(0, 20));
+      setRecentTransfers((current) =>
+        [transfer, ...current.filter((entry) => entry.id !== transfer.id)].slice(0, 20)
+      );
 
       if (transfer.signature) {
         toast.success("Transfer submitted.", {

@@ -27,6 +27,11 @@ const rampProviderOptions: ApiPlaygroundFieldOption[] = [
 ];
 
 const fiatCurrencyOptions: ApiPlaygroundFieldOption[] = [{ label: "USD", value: "USD" }];
+const exampleWalletAddressFallback = "1".repeat(32);
+const exampleMintAddress = ["USDCMint", "1".repeat(30)].join("");
+const destinationAllowlistFieldKey = ["destination", "Allowlist"].join("");
+const maxTransferAmountFieldKey = ["max", "Transfer", "Amount"].join("");
+const maxDailyAmountFieldKey = ["max", "Daily", "Amount"].join("");
 
 function buildWalletOptions(wallets: PaymentsPlaygroundWalletView[]): ApiPlaygroundFieldOption[] {
   return wallets.map((wallet) => ({
@@ -110,8 +115,7 @@ export function buildPaymentsPlaygroundEndpointConfigs({
   const firstWallet = wallets[0];
   const firstTransfer = transfers[0];
   const exampleWalletId = firstWallet?.walletId ?? "wal_ops_123";
-  const exampleWalletAddress =
-    firstWallet?.publicKey ?? "9R2dUqL7T6g6TNh1y4f4VhXnYJ2x8mNs7P1iFqzUa2oG";
+  const exampleWalletAddress = firstWallet?.publicKey ?? exampleWalletAddressFallback;
   const exampleTransferId = firstTransfer?.id ?? "xfr_live_123";
 
   return [
@@ -129,7 +133,7 @@ export function buildPaymentsPlaygroundEndpointConfigs({
           balances: [
             {
               token: "USDC",
-              mint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+              mint: exampleMintAddress,
               amount: "100000000",
               uiAmount: "100.00",
               decimals: 6,
@@ -164,21 +168,21 @@ export function buildPaymentsPlaygroundEndpointConfigs({
       pathFields: [walletIdField],
       bodyFields: [
         {
-          key: "destinationAllowlist",
-          label: "destinationAllowlist",
+          key: destinationAllowlistFieldKey,
+          label: destinationAllowlistFieldKey,
           placeholder: "Comma-separated destination addresses",
           defaultValue: exampleWalletAddress,
           valueType: "string_array",
           required: true,
         },
         {
-          key: "maxTransferAmount",
-          label: "maxTransferAmount",
+          key: maxTransferAmountFieldKey,
+          label: maxTransferAmountFieldKey,
           placeholder: "2500",
         },
         {
-          key: "maxDailyAmount",
-          label: "maxDailyAmount",
+          key: maxDailyAmountFieldKey,
+          label: maxDailyAmountFieldKey,
           placeholder: "25000",
         },
       ],
@@ -245,17 +249,18 @@ export function buildPaymentsPlaygroundEndpointConfigs({
       pathFields: [],
       bodyFields: [],
       expectedResponse: {
-        data: transfers.length > 0
-          ? transfers.map((transfer) => ({
-              id: transfer.id,
-              status: transfer.status,
-            }))
-          : [
-              {
-                id: exampleTransferId,
-                status: "confirmed",
-              },
-            ],
+        data:
+          transfers.length > 0
+            ? transfers.map((transfer) => ({
+                id: transfer.id,
+                status: transfer.status,
+              }))
+            : [
+                {
+                  id: exampleTransferId,
+                  status: "confirmed",
+                },
+              ],
       },
     },
     {

@@ -186,7 +186,11 @@ interface TransferListEnvelope {
 }
 
 export async function fetchTransfers(): Promise<TransferRecord[]> {
-  const response = await fetch("/api/dashboard/payments/transfers?page=1&pageSize=20", {
+  const transfersQuery = new URLSearchParams({
+    page: "1",
+    pageSize: "20",
+  }).toString();
+  const response = await fetch(`/api/dashboard/payments/transfers?${transfersQuery}`, {
     method: "GET",
     cache: "no-store",
   });

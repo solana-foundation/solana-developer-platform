@@ -45,6 +45,8 @@ const authorityRoleOptions: ApiPlaygroundFieldOption[] = [
   { label: "Metadata", value: "metadata" },
 ];
 
+const exampleTokenAccountAddress = "1".repeat(32);
+
 function buildTokenOptions(tokens: IssuancePlaygroundTokenView[]): ApiPlaygroundFieldOption[] {
   return tokens.map((token) => ({
     value: token.id,
@@ -144,17 +146,18 @@ export function buildIssuancePlaygroundEndpointConfigs({
       bodyFields: [],
       expectedResponse: {
         data: {
-          templates: templates.length > 0
-            ? templates.map((template) => ({
-                id: template.id,
-                name: template.name,
-              }))
-            : [
-                {
-                  id: exampleTemplateId,
-                  name: exampleTemplateName,
-                },
-              ],
+          templates:
+            templates.length > 0
+              ? templates.map((template) => ({
+                  id: template.id,
+                  name: template.name,
+                }))
+              : [
+                  {
+                    id: exampleTemplateId,
+                    name: exampleTemplateName,
+                  },
+                ],
         },
       },
     },
@@ -244,21 +247,22 @@ export function buildIssuancePlaygroundEndpointConfigs({
       pathFields: [],
       bodyFields: [],
       expectedResponse: {
-        data: tokens.length > 0
-          ? tokens.map((token) => ({
-              id: token.id,
-              name: token.name,
-              symbol: token.symbol,
-              mintAddress: token.mintAddress,
-            }))
-          : [
-              {
-                id: exampleTokenId,
-                name: exampleTokenName,
-                symbol: exampleTokenSymbol,
-                mintAddress: firstToken?.mintAddress ?? null,
-              },
-            ],
+        data:
+          tokens.length > 0
+            ? tokens.map((token) => ({
+                id: token.id,
+                name: token.name,
+                symbol: token.symbol,
+                mintAddress: token.mintAddress,
+              }))
+            : [
+                {
+                  id: exampleTokenId,
+                  name: exampleTokenName,
+                  symbol: exampleTokenSymbol,
+                  mintAddress: firstToken?.mintAddress ?? null,
+                },
+              ],
       },
     },
     {
@@ -635,7 +639,7 @@ export function buildIssuancePlaygroundEndpointConfigs({
       ],
       expectedResponse: {
         data: {
-          accountAddress: "9R2dUqL7T6g6TNh1y4f4VhXnYJ2x8mNs7P1iFqzUa2oG",
+          accountAddress: exampleTokenAccountAddress,
           status: "frozen",
         },
       },
@@ -656,7 +660,7 @@ export function buildIssuancePlaygroundEndpointConfigs({
       ],
       expectedResponse: {
         data: {
-          accountAddress: "9R2dUqL7T6g6TNh1y4f4VhXnYJ2x8mNs7P1iFqzUa2oG",
+          accountAddress: exampleTokenAccountAddress,
           status: "active",
         },
       },
@@ -672,7 +676,7 @@ export function buildIssuancePlaygroundEndpointConfigs({
         data: {
           accounts: [
             {
-              address: "9R2dUqL7T6g6TNh1y4f4VhXnYJ2x8mNs7P1iFqzUa2oG",
+              address: exampleTokenAccountAddress,
               frozenAt: "2026-03-06T12:00:00.000Z",
             },
           ],
@@ -691,7 +695,7 @@ export function buildIssuancePlaygroundEndpointConfigs({
           items: [
             {
               id: "allow_123",
-              address: "9R2dUqL7T6g6TNh1y4f4VhXnYJ2x8mNs7P1iFqzUa2oG",
+              address: exampleTokenAccountAddress,
               label: "Treasury",
             },
           ],
@@ -721,7 +725,7 @@ export function buildIssuancePlaygroundEndpointConfigs({
         data: {
           entry: {
             id: "allow_123",
-            address: "9R2dUqL7T6g6TNh1y4f4VhXnYJ2x8mNs7P1iFqzUa2oG",
+            address: exampleTokenAccountAddress,
             label: "Treasury",
           },
         },

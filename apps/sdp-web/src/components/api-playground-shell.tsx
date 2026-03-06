@@ -132,14 +132,14 @@ function buildRequestBody(
 
   const payload: Record<string, unknown> = {};
 
-  fields.forEach((field) => {
+  for (const field of fields) {
     const rawValue = values[field.key] ?? "";
     if (!rawValue.trim()) {
-      return;
+      continue;
     }
 
     setNestedValue(payload, field.key, serializeFieldValue(field, rawValue));
-  });
+  }
 
   return Object.keys(payload).length > 0 ? payload : null;
 }
@@ -235,9 +235,12 @@ function buildAiInstructions(
   ].join("\n");
 }
 
-function FieldLabel({ children }: { children: string }) {
+function FieldLabel({ children, htmlFor }: { children: string; htmlFor: string }) {
   return (
-    <label className="text-[12px] leading-5 font-medium tracking-[0.02em] text-[rgba(28,28,29,0.68)]">
+    <label
+      htmlFor={htmlFor}
+      className="text-[12px] leading-5 font-medium tracking-[0.02em] text-[rgba(28,28,29,0.68)]"
+    >
       {children}
     </label>
   );
@@ -439,6 +442,7 @@ function CodeBlockContent({
     >
       {renderedHtml ? (
         <div
+          // biome-ignore lint/security/noDangerouslySetInnerHtml: Shiki returns HTML for syntax-highlighted code blocks.
           dangerouslySetInnerHTML={{ __html: renderedHtml }}
           className="h-full [&_.shiki]:m-0 [&_.shiki]:h-full [&_.shiki]:min-h-full [&_.shiki]:w-full [&_.shiki]:overflow-visible [&_.shiki]:bg-transparent [&_.shiki]:p-0 [&_.shiki]:text-sm [&_.shiki]:leading-7 [&_.shiki]:[color:var(--shiki-foreground)] [&_.shiki_code]:block [&_.shiki_code]:min-h-full [&_.shiki_code]:min-w-full [&_.shiki_code]:whitespace-normal [&_.shiki_code_.line]:block [&_.shiki_code_.line]:whitespace-pre"
         />
@@ -540,6 +544,9 @@ export function ApiPlaygroundShell({
   const panelContent =
     activePanel === "code" ? codeSnippet : activePanel === "response" ? responseBody : exampleBody;
   const panelLanguage: HighlightLanguage = activePanel === "code" ? "javascript" : "json";
+
+  const getFieldId = (fieldKey: string) =>
+    `${activeEndpoint.id}-${fieldKey.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
 
   const updateFieldValue = (fieldKey: string, value: string) => {
     setFieldValues((current) => ({
@@ -710,10 +717,12 @@ export function ApiPlaygroundShell({
 
       <div className="border-b border-[rgba(28,28,29,0.1)] px-6 py-4 lg:hidden">
         <div className="grid grid-cols-2 gap-1 rounded-full bg-[rgba(28,28,29,0.06)] p-1">
-          {([
-            ["request", "Request"],
-            ["output", "Output"],
-          ] as const).map(([value, label]) => (
+          {(
+            [
+              ["request", "Request"],
+              ["output", "Output"],
+            ] as const
+          ).map(([value, label]) => (
             <button
               key={value}
               type="button"
@@ -733,11 +742,7 @@ export function ApiPlaygroundShell({
 
       <div className="flex min-h-0 flex-1 flex-col border-b border-[rgba(28,28,29,0.1)] lg:grid lg:grid-cols-2">
         <div
-          className={cn(
-            "min-h-0",
-            mobileSection === "request" ? "flex-1" : "hidden",
-            "lg:block"
-          )}
+          className={cn("min-h-0", mobileSection === "request" ? "flex-1" : "hidden", "lg:block")}
         >
           <div className="flex h-full min-h-0 flex-col px-6 py-6">
             {leftMessages.length > 0 ? (
@@ -762,8 +767,9 @@ export function ApiPlaygroundShell({
                   <div className="space-y-4">
                     {activeEndpoint.pathFields.map((field) => (
                       <div key={field.key} className="space-y-2">
-                        <FieldLabel>{field.label}</FieldLabel>
+                        <FieldLabel htmlFor={getFieldId(field.key)}>{field.label}</FieldLabel>
                         <Input
+                          id={getFieldId(field.key)}
                           value={fieldValues[field.key] ?? ""}
                           onChange={(event) =>
                             updateFieldValue(field.key, event.currentTarget.value)
@@ -785,9 +791,10 @@ export function ApiPlaygroundShell({
                   <div className="space-y-4">
                     {activeEndpoint.bodyFields.map((field) => (
                       <div key={field.key} className="space-y-2">
-                        <FieldLabel>{field.label}</FieldLabel>
+                        <FieldLabel htmlFor={getFieldId(field.key)}>{field.label}</FieldLabel>
                         {field.kind === "select" ? (
                           <select
+                            id={getFieldId(field.key)}
                             value={fieldValues[field.key] ?? ""}
                             onChange={(event) =>
                               updateFieldValue(field.key, event.currentTarget.value)
@@ -803,6 +810,7 @@ export function ApiPlaygroundShell({
                           </select>
                         ) : (
                           <Input
+                            id={getFieldId(field.key)}
                             value={fieldValues[field.key] ?? ""}
                             onChange={(event) =>
                               updateFieldValue(field.key, event.currentTarget.value)
