@@ -2,10 +2,10 @@
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useDashboardUrlState } from "@/lib/dashboard-url-state";
 import { normalizeApiKeyInput } from "@/lib/playground-api-keys";
 import { cn } from "@/lib/utils";
 import { Clock3, Copy, Loader2, Play, Sparkles } from "lucide-react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { CSSProperties, ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -470,9 +470,7 @@ export function ApiPlaygroundShell({
   productName,
   rightMessages = [],
 }: ApiPlaygroundShellProps) {
-  const pathname = usePathname();
-  const router = useRouter();
-  const searchParams = useSearchParams();
+  const { replaceSearchParams, searchParams } = useDashboardUrlState();
   const initialEndpoint =
     endpoints.find((endpoint) => endpoint.id === defaultEndpointId) ?? endpoints[0];
   const initialEndpointId = initialEndpoint?.id ?? "";
@@ -504,12 +502,11 @@ export function ApiPlaygroundShell({
 
   const updateEndpointInUrl = useCallback(
     (endpointId: string) => {
-      const params = new URLSearchParams(searchParams.toString());
-      params.set("endpoint", endpointId);
-      const query = params.toString();
-      router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+      replaceSearchParams({
+        endpoint: endpointId,
+      });
     },
-    [pathname, router, searchParams]
+    [replaceSearchParams]
   );
 
   useEffect(() => {

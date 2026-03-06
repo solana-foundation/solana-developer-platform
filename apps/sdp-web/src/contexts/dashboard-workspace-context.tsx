@@ -1,6 +1,6 @@
 "use client";
 
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useDashboardUrlState } from "@/lib/dashboard-url-state";
 import { type ReactNode, createContext, useCallback, useContext, useMemo, useState } from "react";
 
 export type IssuanceWorkspaceTab = "tokens" | "playground";
@@ -42,9 +42,7 @@ export function DashboardWorkspaceProvider({
   defaultProject = "Default Project",
   initialSidebarOpen = true,
 }: DashboardWorkspaceProviderProps) {
-  const pathname = usePathname();
-  const router = useRouter();
-  const searchParams = useSearchParams();
+  const { replaceSearchParams, searchParams } = useDashboardUrlState();
   const [isSidebarOpen, setSidebarOpenState] = useState(initialSidebarOpen);
   const [selectedProject, setSelectedProject] = useState(defaultProject);
   const [playgroundApiKeys, setPlaygroundApiKeysState] = useState<
@@ -80,14 +78,11 @@ export function DashboardWorkspaceProvider({
 
   const setIssuanceTab = useCallback(
     (tab: IssuanceWorkspaceTab) => {
-      const params = new URLSearchParams(searchParams.toString());
-
-      params.set("tab", tab === "playground" ? "playground" : "overview");
-
-      const query = params.toString();
-      router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+      replaceSearchParams({
+        tab: tab === "playground" ? "playground" : "overview",
+      });
     },
-    [pathname, router, searchParams]
+    [replaceSearchParams]
   );
 
   const value = useMemo<DashboardWorkspaceContextValue>(
