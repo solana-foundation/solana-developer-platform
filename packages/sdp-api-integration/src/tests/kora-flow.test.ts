@@ -225,6 +225,7 @@ describe("Kora Fee Payment (Devnet)", () => {
         body: JSON.stringify({
           name: "Signer check integration key",
           permissions: ["wallets:write"],
+          walletScope: "selected",
           signingWalletId: walletId,
         }),
       });
