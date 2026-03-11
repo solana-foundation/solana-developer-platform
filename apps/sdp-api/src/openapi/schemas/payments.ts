@@ -345,8 +345,9 @@ const moonpayCurrencyCodeSchema = z
   .string()
   .regex(/^[a-zA-Z0-9_]+$/)
   .openapi({
-    description: "Provider currency code (for example: `usdc_sol` for MoonPay, `BTC` for Grid).",
-    example: "usdc_sol",
+    description:
+      "Crypto token symbol or provider currency code. Simple symbols like `USDC` and `SOL` are normalized server-side for supported providers.",
+    example: "USDC",
   });
 
 const rampProviderSchema = z.enum(["moonpay", "lightspark", "bvnk"]).openapi({
@@ -376,7 +377,8 @@ export const executeOnrampRequestSchema = z
       example: "USD",
     }),
     fiatAmount: tokenAmountSchema.openapi({
-      description: "Fiat amount in USD to purchase crypto with.",
+      description:
+        "Fiat amount in USD to purchase crypto with. MoonPay on-ramp requires at least 20 USD.",
       example: "100.00",
     }),
     kycReference: z

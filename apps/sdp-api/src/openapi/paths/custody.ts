@@ -23,6 +23,7 @@ import {
   custodyDeleteWalletResponse,
   custodySignerCheckResponse,
   custodySwitchOptionsResponse,
+  custodyWalletAggregateResponse,
   custodyWalletByIdResponse,
   custodyWalletResponse,
   custodyWalletsResponse,
@@ -209,12 +210,38 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
         projectId: projectIdParamSchema.optional(),
         provider: orgCustodyProviderSchema.optional(),
         includeAllProviders: z.boolean().optional(),
+        includeBalances: z.boolean().optional(),
       }),
     },
     responses: {
       200: {
         description: "Wallets",
         content: jsonContent(custodyWalletsResponse),
+      },
+      ...errorResponses(errorResponseSchema, [401, 403, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/wallets/aggregate",
+    tags: ["Wallets"],
+    summary: "Aggregate wallet balances",
+    operationId: "aggregateWalletBalances",
+    description:
+      "Aggregates tracked wallet balances for the requested scope. Defaults to aggregating across all active providers for the organization scope.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      query: z.object({
+        projectId: projectIdParamSchema.optional(),
+        provider: orgCustodyProviderSchema.optional(),
+        includeAllProviders: z.boolean().optional(),
+      }),
+    },
+    responses: {
+      200: {
+        description: "Aggregated wallet balances",
+        content: jsonContent(custodyWalletAggregateResponse),
       },
       ...errorResponses(errorResponseSchema, [401, 403, 500]),
     },

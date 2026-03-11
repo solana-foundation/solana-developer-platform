@@ -13,7 +13,7 @@ export async function GET(request: Request) {
       query.set("includeAllProviders", "true");
     }
 
-    const response = await apiClient.request(`/v1/wallets?${query.toString()}`);
+    const response = await apiClient.request(`/v1/wallets/aggregate?${query.toString()}`);
     const body = await response.text();
     const contentType = response.headers.get("Content-Type") ?? "application/json";
 
@@ -26,7 +26,7 @@ export async function GET(request: Request) {
   } catch (error) {
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : "Failed to fetch wallets",
+        error: error instanceof Error ? error.message : "Failed to fetch aggregate wallet balances",
       },
       { status: 500 }
     );

@@ -196,6 +196,7 @@ export interface CustodyWalletSummary {
   purpose: string | null;
   status: CustodyWalletStatus;
   createdAt: string;
+  balances?: CustodyWalletTokenBalance[];
 }
 
 export interface CustodyWalletBalance {
@@ -204,6 +205,14 @@ export interface CustodyWalletBalance {
   amount: string;
   uiAmount: string;
   decimals: 9;
+}
+
+export interface CustodyWalletTokenBalance {
+  token: string;
+  mint: string;
+  amount: string;
+  uiAmount: string;
+  decimals: number;
 }
 
 export interface CustodyWalletWithBalance extends CustodyWalletSummary {
@@ -234,6 +243,15 @@ export interface CustodyWalletResponse {
 
 export interface CustodyWalletsResponse {
   wallets: CustodyWalletSummary[];
+}
+
+export interface CustodyWalletAggregate {
+  walletCount: number;
+  balances: CustodyWalletTokenBalance[];
+}
+
+export interface CustodyWalletAggregateResponse {
+  aggregate: CustodyWalletAggregate;
 }
 
 export interface CustodyWalletByIdResponse {

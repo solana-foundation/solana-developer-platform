@@ -6,6 +6,8 @@ import {
   screenAddressCompliance,
 } from "@/lib/compliance";
 import type {
+  CustodyWalletAggregate,
+  PaymentsWalletAggregateEnvelope,
   PaymentTransferEnvelope as TransferEnvelope,
   PaymentTransferSummary as TransferRecord,
   PaymentWalletPolicy as WalletPolicy,
@@ -20,6 +22,20 @@ type ApiErrorBody = {
     message?: string;
   };
 };
+
+export interface PaymentWalletBalance {
+  token: string;
+  mint: string;
+  amount: string;
+  uiAmount: string;
+  decimals: number;
+}
+
+export interface PaymentWalletBalancesSnapshot {
+  walletId: string;
+  address: string;
+  balances: PaymentWalletBalance[];
+}
 
 type RiskTone = "green" | "yellow" | "red" | "neutral";
 
@@ -141,16 +157,42 @@ export function riskToneClassName(result: ComplianceProviderResult): string {
   return "border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.05)] text-[rgba(28,28,29,0.72)]";
 }
 
-export async function fetchWallets(): Promise<WalletRecord[]> {
-  const response = await fetch("/api/dashboard/wallets", {
+export async function fetchWallets(
+  options: {
+    signal?: AbortSignal;
+  } = {}
+): Promise<WalletRecord[]> {
+  const query = new URLSearchParams({
+    includeBalances: "true",
+  }).toString();
+  const response = await fetch(`/api/dashboard/wallets?${query}`, {
     method: "GET",
     cache: "no-store",
+    signal: options.signal,
   });
   const body = (await response.json().catch(() => ({}))) as WalletsEnvelope;
   if (!response.ok) {
     throw new Error(getApiError(body, `Wallet list request failed (${response.status}).`));
   }
   return body.data?.wallets ?? [];
+}
+
+export async function fetchWalletAggregate(signal?: AbortSignal): Promise<CustodyWalletAggregate> {
+  const response = await fetch("/api/dashboard/wallets/aggregate", {
+    method: "GET",
+    cache: "no-store",
+    signal,
+  });
+  const body = (await response.json().catch(() => ({}))) as PaymentsWalletAggregateEnvelope;
+  if (!response.ok) {
+    throw new Error(getApiError(body, `Wallet aggregate request failed (${response.status}).`));
+  }
+
+  if (!body.data?.aggregate) {
+    throw new Error("Wallet aggregate response is missing aggregate details.");
+  }
+
+  return body.data.aggregate;
 }
 
 export async function fetchWalletPolicy(walletId: string): Promise<WalletPolicy> {
@@ -177,22 +219,82 @@ export async function fetchWalletPolicy(walletId: string): Promise<WalletPolicy>
 interface TransferListEnvelope {
   data?: Array<{
     id?: string;
+    type?: string;
+    direction?: string;
     status?: string;
     signature?: string | null;
+    source?: string;
+    destination?: string;
+    token?: string;
+    amount?: string;
+    memo?: string;
+    createdAt?: string;
+    updatedAt?: string;
   }>;
   error?: {
     message?: string;
   };
 }
 
-export async function fetchTransfers(): Promise<TransferRecord[]> {
+interface WalletBalancesEnvelope {
+  data?:
+    | {
+        walletBalances?: PaymentWalletBalancesSnapshot;
+      }
+    | {
+        walletId?: string;
+        address?: string;
+        balances?: PaymentWalletBalance[];
+      };
+  error?: {
+    message?: string;
+  };
+}
+
+function resolveWalletBalancesSnapshot(
+  envelope: WalletBalancesEnvelope
+): PaymentWalletBalancesSnapshot | null {
+  if (
+    envelope.data &&
+    "walletBalances" in envelope.data &&
+    envelope.data.walletBalances &&
+    typeof envelope.data.walletBalances.walletId === "string"
+  ) {
+    return envelope.data.walletBalances;
+  }
+
+  if (
+    envelope.data &&
+    "walletId" in envelope.data &&
+    typeof envelope.data.walletId === "string" &&
+    typeof envelope.data.address === "string" &&
+    Array.isArray(envelope.data.balances)
+  ) {
+    return {
+      walletId: envelope.data.walletId,
+      address: envelope.data.address,
+      balances: envelope.data.balances,
+    };
+  }
+
+  return null;
+}
+
+export async function fetchTransfers(
+  options: {
+    walletId?: string;
+    signal?: AbortSignal;
+  } = {}
+): Promise<TransferRecord[]> {
   const transfersQuery = new URLSearchParams({
     page: "1",
     pageSize: "20",
+    ...(options.walletId ? { wallet: options.walletId } : {}),
   }).toString();
   const response = await fetch(`/api/dashboard/payments/transfers?${transfersQuery}`, {
     method: "GET",
     cache: "no-store",
+    signal: options.signal,
   });
   const body = (await response.json().catch(() => ({}))) as TransferListEnvelope;
   if (!response.ok) {
@@ -203,9 +305,43 @@ export async function fetchTransfers(): Promise<TransferRecord[]> {
     .filter((transfer): transfer is NonNullable<typeof transfer> => Boolean(transfer?.id))
     .map((transfer) => ({
       id: transfer.id ?? "",
+      ...(transfer.type ? { type: transfer.type } : {}),
+      ...(transfer.direction ? { direction: transfer.direction } : {}),
       status: transfer.status ?? "pending",
       signature: transfer.signature ?? null,
+      ...(transfer.source ? { source: transfer.source } : {}),
+      ...(transfer.destination ? { destination: transfer.destination } : {}),
+      ...(transfer.token ? { token: transfer.token } : {}),
+      ...(transfer.amount ? { amount: transfer.amount } : {}),
+      ...(transfer.memo ? { memo: transfer.memo } : {}),
+      ...(transfer.createdAt ? { createdAt: transfer.createdAt } : {}),
+      ...(transfer.updatedAt ? { updatedAt: transfer.updatedAt } : {}),
     }));
+}
+
+export async function fetchWalletBalances(
+  walletId: string,
+  signal?: AbortSignal
+): Promise<PaymentWalletBalancesSnapshot> {
+  const response = await fetch(
+    `/api/dashboard/payments/wallets/${encodeURIComponent(walletId)}/balances`,
+    {
+      method: "GET",
+      cache: "no-store",
+      signal,
+    }
+  );
+  const body = (await response.json().catch(() => ({}))) as WalletBalancesEnvelope;
+  if (!response.ok) {
+    throw new Error(getApiError(body, `Wallet balances request failed (${response.status}).`));
+  }
+
+  const snapshot = resolveWalletBalancesSnapshot(body);
+  if (!snapshot) {
+    throw new Error("Wallet balances response is missing balance details.");
+  }
+
+  return snapshot;
 }
 
 export async function updateWalletPolicy(

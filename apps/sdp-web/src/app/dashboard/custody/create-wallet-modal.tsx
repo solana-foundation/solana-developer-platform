@@ -7,6 +7,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useEscapeKey } from "@/lib/use-escape-key";
 import { useState } from "react";
 import { createCustodyWallet } from "./actions";
 
@@ -27,6 +28,8 @@ export function CreateWalletModal({
   const close = () => {
     setIsOpen(false);
   };
+
+  useEscapeKey(isOpen, close);
 
   return (
     <>

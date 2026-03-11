@@ -1,6 +1,7 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
+import { useEscapeKey } from "@/lib/use-escape-key";
 import { AnimatePresence, motion } from "framer-motion";
 import { X } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -102,6 +103,8 @@ export function CreateIssuanceTokenModal({
     setIsOpen(false);
     reset();
   };
+
+  useEscapeKey(isOpen, close);
 
   const handleTemplateSelect = (selectedTemplate: TemplateSelection) => {
     setDraft((previous) => ({

@@ -7,6 +7,7 @@ import type {
 } from "@sdp/types";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import useSWR from "swr";
 import {
   createTransfer,
   fetchTransfers,
@@ -17,6 +18,9 @@ import {
   updateWalletPolicy,
 } from "./payments-workspace.data";
 import type { ComplianceSnapshot } from "./payments-workspace.types";
+
+const PAYMENTS_WORKSPACE_WALLETS_KEY = "payments-workspace-wallets";
+const PAYMENTS_WORKSPACE_TRANSFERS_KEY = "payments-workspace-transfers";
 
 export interface DestinationAllowlistSectionState {
   walletId: string;
@@ -73,10 +77,23 @@ export interface PaymentsWorkspaceState {
 }
 
 export function usePaymentsWorkspace(): PaymentsWorkspaceState {
-  const [wallets, setWallets] = useState<WalletRecord[]>([]);
-  const [recentTransfers, setRecentTransfers] = useState<TransferRecord[]>([]);
-  const [walletsLoading, setWalletsLoading] = useState(true);
-  const [walletsError, setWalletsError] = useState<string | null>(null);
+  const {
+    data: wallets = [],
+    error: walletsFetchError,
+    isLoading: walletsLoading,
+    mutate: mutateWallets,
+  } = useSWR<WalletRecord[]>(PAYMENTS_WORKSPACE_WALLETS_KEY, fetchWallets, {
+    revalidateOnFocus: true,
+    refreshInterval: 30_000,
+  });
+  const { data: recentTransfers = [], mutate: mutateTransfers } = useSWR<TransferRecord[]>(
+    PAYMENTS_WORKSPACE_TRANSFERS_KEY,
+    () => fetchTransfers(),
+    {
+      revalidateOnFocus: true,
+      refreshInterval: 10_000,
+    }
+  );
 
   const [addWalletId, setAddWalletIdState] = useState("");
   const [addAddress, setAddAddressState] = useState("");
@@ -104,26 +121,12 @@ export function usePaymentsWorkspace(): PaymentsWorkspaceState {
   const [transferAllowlistDismissed, setTransferAllowlistDismissed] = useState(false);
   const [isSubmittingTransfer, setIsSubmittingTransfer] = useState(false);
 
-  useEffect(() => {
-    const loadWallets = async () => {
-      setWalletsLoading(true);
-      setWalletsError(null);
-      try {
-        const [loadedWallets, loadedTransfers] = await Promise.all([
-          fetchWallets(),
-          fetchTransfers().catch(() => []),
-        ]);
-        setWallets(loadedWallets);
-        setRecentTransfers(loadedTransfers);
-      } catch (error) {
-        setWalletsError(error instanceof Error ? error.message : "Failed to load wallets.");
-      } finally {
-        setWalletsLoading(false);
-      }
-    };
-
-    void loadWallets();
-  }, []);
+  const walletsError =
+    walletsFetchError instanceof Error
+      ? walletsFetchError.message
+      : walletsFetchError
+        ? "Failed to load wallets."
+        : null;
 
   useEffect(() => {
     if (wallets.length === 0) {
@@ -267,6 +270,7 @@ export function usePaymentsWorkspace(): PaymentsWorkspaceState {
         destinationAllowlist: [...allowlistAddresses, addAddressTrimmed],
       });
       setAddPolicy(updated);
+      void mutateWallets();
       if (addWalletId === transferSource) {
         setTransferPolicyAllowlist(updated.destinationAllowlist);
       }
@@ -323,9 +327,15 @@ export function usePaymentsWorkspace(): PaymentsWorkspaceState {
         amount: transferAmount.trim(),
         memo: transferMemo.trim() || undefined,
       });
-      setRecentTransfers((current) =>
-        [transfer, ...current.filter((entry) => entry.id !== transfer.id)].slice(0, 20)
+      await mutateTransfers(
+        (current) =>
+          [transfer, ...(current ?? []).filter((entry) => entry.id !== transfer.id)].slice(0, 20),
+        {
+          revalidate: false,
+        }
       );
+      void mutateTransfers();
+      void mutateWallets();
 
       if (transfer.signature) {
         toast.success("Transfer submitted.", {

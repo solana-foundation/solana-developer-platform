@@ -131,9 +131,40 @@ const custodyWalletBaseSchema = z.object({
   createdAt: isoDateTimeSchema,
 });
 
-export const custodyWalletSchema = custodyWalletBaseSchema.openapi({
-  description: "Wallet details.",
-});
+const custodyWalletTokenBalanceSchema = z
+  .object({
+    token: z.string().openapi({
+      description: "Tracked token symbol.",
+      example: "USDC",
+    }),
+    mint: solanaAddressSchema.openapi({
+      description: "Tracked token mint address.",
+      example: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+    }),
+    amount: z.string().openapi({
+      description: "Raw token amount as a string.",
+      example: "1250000",
+    }),
+    uiAmount: z.string().openapi({
+      description: "Human-readable token balance.",
+      example: "1.25",
+    }),
+    decimals: z.number().int().nonnegative().openapi({
+      description: "Token decimals.",
+      example: 6,
+    }),
+  })
+  .openapi({ description: "Tracked fungible token balance." });
+
+export const custodyWalletSchema = custodyWalletBaseSchema
+  .extend({
+    balances: z.array(custodyWalletTokenBalanceSchema).optional().openapi({
+      description: "Optional tracked token balances for the wallet.",
+    }),
+  })
+  .openapi({
+    description: "Wallet details.",
+  });
 
 export const custodyWalletResponseSchema = z
   .object({
@@ -146,6 +177,22 @@ export const custodyWalletsResponseSchema = z
     wallets: z.array(custodyWalletSchema).openapi({ description: "Wallets." }),
   })
   .openapi({ description: "Wallets list response payload." });
+
+export const custodyWalletAggregateResponseSchema = z
+  .object({
+    aggregate: z
+      .object({
+        walletCount: z.number().int().nonnegative().openapi({
+          description: "Number of wallets included in the aggregate.",
+          example: 3,
+        }),
+        balances: z.array(custodyWalletTokenBalanceSchema).openapi({
+          description: "Aggregated tracked token balances across the included wallets.",
+        }),
+      })
+      .openapi({ description: "Aggregated wallet balance summary." }),
+  })
+  .openapi({ description: "Aggregated wallet balance response payload." });
 
 export const custodyWalletByIdResponseSchema = z
   .object({

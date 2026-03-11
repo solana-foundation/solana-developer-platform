@@ -14,7 +14,9 @@ interface PaymentsPlaygroundProps {
   apiKeyValue: string;
   hasActiveApiKeys: boolean;
   transfers: PaymentsPlaygroundTransferView[];
+  transfersError: string | null;
   wallets: PaymentsPlaygroundWalletView[];
+  walletsError: string | null;
 }
 
 export function PaymentsPlayground({
@@ -22,7 +24,9 @@ export function PaymentsPlayground({
   apiKeyValue,
   hasActiveApiKeys,
   transfers,
+  transfersError,
   wallets,
+  walletsError,
 }: PaymentsPlaygroundProps) {
   const endpoints = useMemo(
     () => buildPaymentsPlaygroundEndpointConfigs({ transfers, wallets }),
@@ -37,6 +41,10 @@ export function PaymentsPlayground({
       apiBaseUrl={apiBaseUrl}
       apiKeyValue={apiKeyValue}
       apiKeySelector={<PlaygroundApiKeySelector />}
+      leftMessages={[
+        ...(walletsError ? [{ text: walletsError, tone: "critical" as const }] : []),
+        ...(transfersError ? [{ text: transfersError, tone: "critical" as const }] : []),
+      ]}
       rightMessages={
         hasActiveApiKeys
           ? []

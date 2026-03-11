@@ -6,6 +6,7 @@ import { CUSTODY_PROVIDERS } from "@/services/custody/providers";
 import type {
   CustodyConfigResponse,
   CustodyConfigsResponse,
+  CustodyWalletAggregateResponse,
   CustodyWalletByIdResponse,
   CustodyWalletResponse,
   CustodyWalletsResponse,
@@ -195,6 +196,7 @@ export type SignerCheckRequest = z.infer<typeof signerCheckSchema>;
 export type {
   CustodyConfigResponse,
   CustodyConfigsResponse,
+  CustodyWalletAggregateResponse,
   CustodyWalletByIdResponse,
   CustodyWalletResponse,
   CustodyWalletsResponse,

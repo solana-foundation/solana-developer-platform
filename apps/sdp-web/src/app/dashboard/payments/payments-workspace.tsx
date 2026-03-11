@@ -3,11 +3,14 @@
 import { ApiPlaygroundShellSkeleton } from "@/components/api-playground-shell-skeleton";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { getStoredApiKeySecret } from "@/lib/playground-api-keys";
+import type {
+  CustodyWalletAggregate,
+  PaymentTransferSummary,
+  PaymentsDashboardWallet,
+} from "@sdp/types";
 import dynamic from "next/dynamic";
 import { useEffect, useMemo } from "react";
-import { PaymentsDestinationAllowlistCard } from "./payments-destination-allowlist-card";
-import { PaymentsTransferCard } from "./payments-transfer-card";
-import { usePaymentsWorkspace } from "./use-payments-workspace";
+import { PaymentsOverview } from "./payments-overview";
 
 const PaymentsPlayground = dynamic(
   () => import("./payments-playground").then((module) => module.PaymentsPlayground),
@@ -27,18 +30,33 @@ interface PaymentsApiKeyOption {
 interface PaymentsWorkspaceProps {
   apiBaseUrl: string | null;
   apiKeys: PaymentsApiKeyOption[];
+  wallets: PaymentsDashboardWallet[];
+  walletsError: string | null;
+  aggregate: CustodyWalletAggregate | null;
+  aggregateError: string | null;
+  transfers: PaymentTransferSummary[];
+  transfersError: string | null;
 }
 
-export function PaymentsWorkspace({ apiBaseUrl, apiKeys }: PaymentsWorkspaceProps) {
+export function PaymentsWorkspace({
+  apiBaseUrl,
+  apiKeys,
+  wallets,
+  walletsError,
+  aggregate,
+  aggregateError,
+  transfers,
+  transfersError,
+}: PaymentsWorkspaceProps) {
   const { issuanceTab, selectedPlaygroundApiKeyId, setPlaygroundApiKeys } = useDashboardWorkspace();
-  const workspace = usePaymentsWorkspace();
+  const isPlaygroundTab = issuanceTab === "playground";
 
   useEffect(() => {
     setPlaygroundApiKeys(apiKeys);
   }, [apiKeys, setPlaygroundApiKeys]);
 
   useEffect(() => {
-    if (issuanceTab === "playground") {
+    if (isPlaygroundTab) {
       return;
     }
 
@@ -54,7 +72,7 @@ export function PaymentsWorkspace({ apiBaseUrl, apiKeys }: PaymentsWorkspaceProp
 
     const timeoutId = globalThis.setTimeout(preloadPlayground, 600);
     return () => globalThis.clearTimeout(timeoutId);
-  }, [issuanceTab]);
+  }, [isPlaygroundTab]);
 
   const selectedPlaygroundApiKey = useMemo(
     () => apiKeys.find((key) => key.id === selectedPlaygroundApiKeyId) ?? null,
@@ -74,33 +92,30 @@ export function PaymentsWorkspace({ apiBaseUrl, apiKeys }: PaymentsWorkspaceProp
     return stored ?? "";
   }, [selectedPlaygroundApiKey, selectedPlaygroundApiKeyPrefix]);
 
-  if (issuanceTab === "playground") {
+  if (isPlaygroundTab) {
     return (
       <div className="flex h-full min-h-0 w-full flex-col">
         <PaymentsPlayground
           apiBaseUrl={apiBaseUrl}
           apiKeyValue={playgroundApiKeyValue}
           hasActiveApiKeys={apiKeys.length > 0}
-          transfers={workspace.recentTransfers}
-          wallets={workspace.wallets}
+          transfers={transfers}
+          transfersError={transfersError}
+          wallets={wallets}
+          walletsError={walletsError}
         />
       </div>
     );
   }
 
   return (
-    <div className="grid gap-6">
-      <PaymentsDestinationAllowlistCard
-        wallets={workspace.wallets}
-        walletsLoading={workspace.walletsLoading}
-        walletsError={workspace.walletsError}
-        section={workspace.addAddressSection}
-      />
-      <PaymentsTransferCard
-        wallets={workspace.wallets}
-        walletsLoading={workspace.walletsLoading}
-        section={workspace.transferSection}
-      />
-    </div>
+    <PaymentsOverview
+      wallets={wallets}
+      walletsError={walletsError}
+      aggregate={aggregate}
+      aggregateError={aggregateError}
+      transfers={transfers}
+      transfersError={transfersError}
+    />
   );
 }

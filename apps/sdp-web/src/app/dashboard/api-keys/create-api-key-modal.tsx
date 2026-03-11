@@ -3,6 +3,7 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useEscapeKey } from "@/lib/use-escape-key";
 import { Plus } from "lucide-react";
 import { useState } from "react";
 import { createApiKeyAction } from "./actions";
@@ -51,6 +52,8 @@ export function CreateApiKeyModal({
     setStep(1);
     setDraft(normalizeDraft());
   };
+
+  useEscapeKey(isOpen, close);
 
   const nextStep = () => {
     if (!draft.name.trim()) return;
