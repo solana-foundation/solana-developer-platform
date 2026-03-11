@@ -77,33 +77,6 @@
               }
             }
           ]
-        },
-        {
-          "name": "List members",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{apiKey}}"
-              }
-            ],
-            "url": "{{baseUrl}}/v1/members",
-            "description": "Lists members of the authenticated organization."
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status 200\", function () { pm.response.to.have.status(200); });",
-                  "const body = pm.response.json();",
-                  "pm.expect(body.data.members, \"members array\").to.be.an(\"array\");"
-                ]
-              }
-            }
-          ]
         }
       ]
     },
@@ -920,79 +893,6 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test(\"Status 204\", function () { pm.response.to.have.status(204); });"
-                ]
-              }
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "name": "RPC",
-      "item": [
-        {
-          "name": "List RPC providers",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{apiKey}}"
-              }
-            ],
-            "url": "{{baseUrl}}/v1/rpc/providers",
-            "description": "Lists managed RPC providers, aggregated telemetry, and the currently selected provider for the caller/project context."
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status 200\", function () { pm.response.to.have.status(200); });",
-                  "const body = pm.response.json();",
-                  "pm.expect(body.data.providers, \"providers array\").to.be.an(\"array\");"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Proxy getLatestBlockhash",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{apiKey}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": "{{baseUrl}}/v1/rpc/proxy",
-            "description": "Proxies a JSON-RPC request to the resolved provider and records telemetry. Provider selection is controlled via organization/project settings.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"getLatestBlockhash\",\n  \"params\": []\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status 200\", function () { pm.response.to.have.status(200); });",
-                  "const body = pm.response.json();",
-                  "pm.expect(body.data.provider).to.exist;",
-                  "pm.expect(body.data.response).to.exist;"
                 ]
               }
             }

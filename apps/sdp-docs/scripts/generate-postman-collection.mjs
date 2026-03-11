@@ -16,6 +16,14 @@ const environmentTemplatePath = path.join(
 
 const DEFAULT_EXTERNAL_ADDRESS = "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ";
 const DEFAULT_SECONDARY_ADDRESS = "7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv";
+const HIDDEN_TAG_SLUGS = new Set([
+  "rpc",
+  "admin",
+  "onboarding",
+  "auth",
+  "organizations",
+  "members",
+]);
 
 const JSON_HEADERS = [{ key: "Content-Type", value: "application/json" }];
 const AUTH_HEADER = { key: "Authorization", value: "Bearer {{apiKey}}" };
@@ -117,6 +125,13 @@ function slugTitle(value) {
   return value.replace(/([a-z])([A-Z])/g, "$1 $2");
 }
 
+function slugify(value) {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
 function operationRequestDescription(operation) {
   return operation?.description || operation?.summary || slugTitle(operation?.operationId || "");
 }
@@ -168,6 +183,11 @@ function apiKeyOperationsFromSpec(spec) {
         continue;
       }
 
+      const primaryTag = Array.isArray(operation.tags) ? operation.tags[0] : null;
+      if (primaryTag && HIDDEN_TAG_SLUGS.has(slugify(primaryTag))) {
+        continue;
+      }
+
       operations.set(operation.operationId, {
         operationId: operation.operationId,
         method: method.toUpperCase(),
@@ -188,6 +208,8 @@ const excludedOperations = {
     "Requires an explicit organization id and mutates shared organization settings, so it is excluded from the CI-safe admin suite.",
   deleteOrganization:
     "Destructive organization deletion is not safe for a recurring required CI suite.",
+  listMembers:
+    "The Members tag is intentionally hidden from the public docs, so it is excluded from the downloadable Postman suite.",
   inviteMember:
     "The handler requires a Clerk-authenticated human user to send invitations, so a machine API key cannot execute it.",
   removeMember:
@@ -208,6 +230,10 @@ const excludedOperations = {
     "Requires a mutable project member target and is excluded from the CI-safe suite.",
   removeProjectMember:
     "Requires a mutable project member target and is excluded from the CI-safe suite.",
+  listRpcProviders:
+    "The RPC tag is intentionally hidden from the public docs, so it is excluded from the downloadable Postman suite.",
+  proxyRpcRequest:
+    "The RPC tag is intentionally hidden from the public docs, so it is excluded from the downloadable Postman suite.",
   executePaymentOnramp:
     "Depends on external provider availability and hosted third-party ramp services, so it is excluded from the required CI suite.",
   executePaymentOfframp:
@@ -233,18 +259,6 @@ function automatedRequests(operations) {
         "const wallet = body.data.wallets[0];",
         'pm.collectionVariables.set("walletId", wallet.walletId);',
         'pm.collectionVariables.set("walletPublicKey", wallet.publicKey);'
-      ),
-    }),
-    request({
-      operationId: "listMembers",
-      folder: ["Bootstrap"],
-      name: "List members",
-      method: "GET",
-      url: "/v1/members",
-      description: op("listMembers"),
-      tests: jsonStatusTest(
-        200,
-        'pm.expect(body.data.members, "members array").to.be.an("array");'
       ),
     }),
     request({
@@ -559,41 +573,6 @@ function automatedRequests(operations) {
       description: op("archiveProject"),
       prerequest: [requireVar("projectId")],
       tests: statusTest(204),
-    }),
-    request({
-      operationId: "listRpcProviders",
-      folder: ["RPC"],
-      name: "List RPC providers",
-      method: "GET",
-      url: "/v1/rpc/providers",
-      description: op("listRpcProviders"),
-      tests: jsonStatusTest(
-        200,
-        'pm.expect(body.data.providers, "providers array").to.be.an("array");'
-      ),
-    }),
-    request({
-      operationId: "proxyRpcRequest",
-      folder: ["RPC"],
-      name: "Proxy getLatestBlockhash",
-      method: "POST",
-      url: "/v1/rpc/proxy",
-      description: op("proxyRpcRequest"),
-      body: JSON.stringify(
-        {
-          jsonrpc: "2.0",
-          id: 1,
-          method: "getLatestBlockhash",
-          params: [],
-        },
-        null,
-        2
-      ),
-      tests: jsonStatusTest(
-        200,
-        "pm.expect(body.data.provider).to.exist;",
-        "pm.expect(body.data.response).to.exist;"
-      ),
     }),
     request({
       operationId: "listTokenTemplates",
@@ -1326,6 +1305,7 @@ async function run() {
 
   const automatedIds = new Set(automated.map((entry) => entry.operationId));
   const excludedIds = new Set(Object.keys(excludedOperations));
+  const visibleExcludedIds = [...excludedIds].filter((operationId) => operations.has(operationId));
 
   const uncovered = [...operations.keys()].filter(
     (operationId) => !automatedIds.has(operationId) && !excludedIds.has(operationId)
@@ -1384,8 +1364,9 @@ async function run() {
     sourceOpenApi: "apps/sdp-api/generated/openapi.json",
     totals: {
       apiKeyOperations: operations.size,
-      automated: automated.length,
-      excluded: excludedIds.size,
+      coveredOperations: automatedIds.size,
+      automatedRequests: automated.length,
+      excluded: visibleExcludedIds.length,
     },
     automated: automated.map(({ operationId, folder, item }) => {
       const operation = operations.get(operationId);
@@ -1397,7 +1378,7 @@ async function run() {
         path: operation?.path ?? null,
       };
     }),
-    excluded: [...excludedIds].sort().map((operationId) => {
+    excluded: visibleExcludedIds.sort().map((operationId) => {
       const operation = operations.get(operationId);
       return {
         operationId,
@@ -1413,7 +1394,7 @@ async function run() {
   await writeJson(environmentTemplatePath, buildEnvironmentTemplate());
 
   console.log(
-    `Generated Postman collection with ${automated.length} automated operations and ${excludedIds.size} exclusions.`
+    `Generated Postman collection with ${automated.length} automated requests covering ${automatedIds.size} visible API-key operations and ${visibleExcludedIds.length} visible exclusions.`
   );
 }
 
