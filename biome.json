@@ -71,6 +71,19 @@
       }
     },
     {
+      "include": ["apps/sdp-docs/scripts/generate-postman-collection.mjs"],
+      "linter": {
+        "rules": {
+          "complexity": {
+            "noExcessiveCognitiveComplexity": "off"
+          },
+          "nursery": {
+            "noSecrets": "off"
+          }
+        }
+      }
+    },
+    {
       "include": ["**/issuance/templates/**/*.ts"],
       "linter": {
         "rules": {
