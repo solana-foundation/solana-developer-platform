@@ -109,7 +109,7 @@ function resolvePaymentsAddress(transfer: PaymentTransferSummary): string {
 
 export function computeTodaysVolume(transfers: PaymentTransferSummary[]): number | null {
   const now = new Date();
-  const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const startOfDay = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
   let hasNumericAmount = false;
 
   const total = transfers.reduce((sum, transfer) => {
@@ -230,13 +230,14 @@ export async function fetchCreateWalletProviders(
 }
 
 export async function fetchIssuanceTokens(
-  request: SdpApiClient["request"]
+  request: SdpApiClient["request"],
+  pageSize = 100
 ): Promise<FetchResult<HomeIssuanceToken[]>> {
   try {
     const response = await request(
       `/v1/issuance/tokens?${new URLSearchParams({
         page: "1",
-        pageSize: "100",
+        pageSize: String(pageSize),
       }).toString()}`
     );
     if (!response.ok) {

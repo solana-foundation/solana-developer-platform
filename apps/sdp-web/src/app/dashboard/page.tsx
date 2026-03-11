@@ -21,7 +21,7 @@ export default async function DashboardPage() {
     redirect("/sign-in");
   }
   if (!orgId) {
-    redirect("/dashboard");
+    return null;
   }
 
   const apiClient = await createSdpApiClient();
@@ -30,7 +30,7 @@ export default async function DashboardPage() {
       fetchPaymentsAggregate(apiClient.request),
       fetchPaymentTransfers(apiClient.request, 100),
       fetchCreateWalletProviders(apiClient.request),
-      fetchIssuanceTokens(apiClient.request),
+      fetchIssuanceTokens(apiClient.request, 10),
     ]);
 
   const issuanceActivityResult =

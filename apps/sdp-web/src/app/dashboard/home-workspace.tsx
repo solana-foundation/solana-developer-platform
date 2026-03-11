@@ -125,7 +125,7 @@ export function HomeWorkspace({
               ) : null}
             </div>
             <Button asChild variant="secondary" size="sm">
-              <Link href="/dashboard/payments">See all</Link>
+              <Link href="/dashboard/payments">See all payments</Link>
             </Button>
           </div>
 
@@ -158,11 +158,7 @@ export function HomeWorkspace({
                           <TableCell className="font-medium">{row.type}</TableCell>
                           <TableCell className="text-[rgba(28,28,29,0.78)]">{row.token}</TableCell>
                           <TableCell className="text-[rgba(28,28,29,0.78)]">
-                            {row.sourceKind === "payments"
-                              ? formatDisplayAmount(row.amount, row.token)
-                              : row.amount === "—"
-                                ? "—"
-                                : formatDisplayAmount(row.amount, row.token)}
+                            {row.amount === "—" ? "—" : formatDisplayAmount(row.amount, row.token)}
                           </TableCell>
                           <TableCell
                             className="pr-6 font-mono text-xs text-[rgba(28,28,29,0.72)]"
