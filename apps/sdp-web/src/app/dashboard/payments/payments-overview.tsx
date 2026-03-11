@@ -33,6 +33,15 @@ import { type FormEvent, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
 import {
+  formatCurrencyAmount,
+  formatDirection,
+  formatDisplayAmount,
+  formatTimestamp,
+  resolveAggregateBalanceRows,
+  resolveCounterparty,
+  resolveTotalBalance,
+} from "./payments-overview.utils";
+import {
   fetchTransfers,
   fetchWalletAggregate,
   fetchWallets,
@@ -51,10 +60,6 @@ interface PaymentsOverviewProps {
   transfersError: string | null;
 }
 
-const REQUIRED_AGGREGATE_BALANCE_ROWS = [
-  { token: "SOL", mint: "sol" },
-  { token: "USDC", mint: "usdc" },
-] as const;
 const REQUIRED_ACTION_ASSETS = ["SOL", "USDC"] as const;
 const MOONPAY_ONRAMP_MIN_USD = 20;
 const PAYMENTS_OVERVIEW_WALLETS_KEY = "payments-overview-wallets";
@@ -94,65 +99,6 @@ interface RampExecutionEnvelope {
   };
 }
 
-function formatDisplayAmount(value?: string, token?: string): string {
-  if (!value) {
-    return token ? `- ${token}` : "-";
-  }
-
-  const numericValue = Number(value);
-  const formattedValue = Number.isFinite(numericValue)
-    ? new Intl.NumberFormat("en-US", {
-        minimumFractionDigits: numericValue >= 100 ? 0 : 2,
-        maximumFractionDigits: 6,
-      }).format(numericValue)
-    : value;
-
-  return token ? `${formattedValue} ${token}` : formattedValue;
-}
-
-function formatCurrencyAmount(value: number | string | null): string {
-  if (value === null) {
-    return "$0.00";
-  }
-
-  const numericValue = typeof value === "number" ? value : Number(value);
-  if (!Number.isFinite(numericValue)) {
-    return "$0.00";
-  }
-
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(numericValue);
-}
-
-function formatTimestamp(value?: string): string {
-  if (!value) {
-    return "Pending";
-  }
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return "Pending";
-  }
-
-  return new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(date);
-}
-
-function formatDirection(direction?: string): string {
-  if (!direction) {
-    return "Unknown";
-  }
-  return direction[0]?.toUpperCase() + direction.slice(1);
-}
-
 function statusClassName(status: string): string {
   switch (status.toLowerCase()) {
     case "confirmed":
@@ -166,103 +112,6 @@ function statusClassName(status: string): string {
     default:
       return "border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.05)] text-[rgba(28,28,29,0.72)]";
   }
-}
-
-function resolveCounterparty(transfer: TransferRecord): string {
-  if (transfer.direction === "outbound") {
-    return transfer.destination ?? "Unavailable";
-  }
-
-  if (transfer.direction === "inbound") {
-    return transfer.source ?? "Unavailable";
-  }
-
-  return transfer.destination ?? transfer.source ?? "Unavailable";
-}
-
-function resolveTotalBalance(balances: CustodyWalletTokenBalance[]): number | null {
-  if (balances.length === 0) {
-    return null;
-  }
-
-  let hasNumericBalance = false;
-  const total = balances.reduce((sum, balance) => {
-    const numericValue = Number(balance.uiAmount);
-    if (!Number.isFinite(numericValue)) {
-      return sum;
-    }
-
-    hasNumericBalance = true;
-    return sum + numericValue;
-  }, 0);
-
-  return hasNumericBalance ? total : null;
-}
-
-function aggregateBalancesFromWallets(wallets: WalletRecord[]): CustodyWalletTokenBalance[] {
-  const aggregate = new Map<
-    string,
-    { token: string; mint: string; amount: number; decimals: number }
-  >();
-
-  for (const wallet of wallets) {
-    for (const balance of wallet.balances ?? []) {
-      const current = aggregate.get(balance.mint);
-      const numericValue = Number(balance.uiAmount);
-      if (!Number.isFinite(numericValue)) {
-        continue;
-      }
-
-      if (!current) {
-        aggregate.set(balance.mint, {
-          token: balance.token,
-          mint: balance.mint,
-          amount: numericValue,
-          decimals: balance.decimals,
-        });
-        continue;
-      }
-
-      current.amount += numericValue;
-    }
-  }
-
-  return [...aggregate.values()].map((entry) => ({
-    token: entry.token,
-    mint: entry.mint,
-    amount: "0",
-    uiAmount: entry.amount.toString(),
-    decimals: entry.decimals,
-  }));
-}
-
-function normalizeAggregateBalances(
-  balances: CustodyWalletTokenBalance[]
-): CustodyWalletTokenBalance[] {
-  const balancesByToken = new Map(
-    balances.map((balance) => [balance.token.toUpperCase(), balance] as const)
-  );
-
-  const requiredBalances = REQUIRED_AGGREGATE_BALANCE_ROWS.map(({ token, mint }) => {
-    const existingBalance = balancesByToken.get(token);
-    if (existingBalance) {
-      return existingBalance;
-    }
-
-    return {
-      token,
-      mint,
-      amount: "0",
-      uiAmount: "0",
-      decimals: token === "SOL" ? 9 : 6,
-    };
-  });
-
-  const remainingBalances = balances.filter(
-    (balance) => !REQUIRED_AGGREGATE_BALANCE_ROWS.some(({ token }) => token === balance.token)
-  );
-
-  return [...requiredBalances, ...remainingBalances];
 }
 
 function resolvePrimaryWalletBalance(
@@ -1595,13 +1444,10 @@ export function PaymentsOverview({
     }
   }, [liveWallets, selectedWalletId]);
 
-  const aggregateBalances = useMemo(() => {
-    if (liveAggregate?.balances) {
-      return normalizeAggregateBalances(liveAggregate.balances);
-    }
-
-    return normalizeAggregateBalances(aggregateBalancesFromWallets(liveWallets));
-  }, [liveAggregate, liveWallets]);
+  const aggregateBalances = useMemo(
+    () => resolveAggregateBalanceRows(liveAggregate, liveWallets),
+    [liveAggregate, liveWallets]
+  );
   const totalBalance = resolveTotalBalance(aggregateBalances);
   const hasWallets = liveWallets.length > 0;
   const walletCount = liveAggregate?.walletCount ?? liveWallets.length;

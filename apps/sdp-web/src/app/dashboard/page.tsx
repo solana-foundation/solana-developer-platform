@@ -1,80 +1,85 @@
-import type { LucideIcon } from "lucide-react";
-import { ArrowLeftRight, Coins, KeyRound, Wallet } from "lucide-react";
-import Image from "next/image";
-import Link from "next/link";
+import { createSdpApiClient } from "@/lib/sdp-api";
+import { auth } from "@clerk/nextjs/server";
+import { redirect } from "next/navigation";
+import {
+  buildHomeActivityRows,
+  computeTodaysVolume,
+  fetchCreateWalletProviders,
+  fetchIssuanceTokens,
+  fetchOrgIssuanceActivity,
+} from "./home-page.data";
+import { HomeWorkspace } from "./home-workspace";
+import {
+  normalizeAggregateBalances,
+  resolveTotalBalance,
+} from "./payments/payments-overview.utils";
+import { fetchPaymentTransfers, fetchPaymentsAggregate } from "./payments/payments-page.data";
 
-type DashboardCard = {
-  href: string;
-  icon: LucideIcon;
-  title: string;
-  description: string;
-};
+export default async function DashboardPage() {
+  const { userId, orgId } = await auth();
+  if (!userId) {
+    redirect("/sign-in");
+  }
+  if (!orgId) {
+    redirect("/dashboard");
+  }
 
-const dashboardCards: DashboardCard[] = [
-  {
-    href: "/dashboard/wallets",
-    icon: Wallet,
-    title: "Wallets",
-    description: "Set provider and wallet signers",
-  },
-  {
-    href: "/dashboard/issuance",
-    icon: Coins,
-    title: "Issuance",
-    description: "Issue and manage token assets",
-  },
-  {
-    href: "/dashboard/payments",
-    icon: ArrowLeftRight,
-    title: "Payments",
-    description: "Move funds and track transfers",
-  },
-  {
-    href: "/dashboard/api-keys",
-    icon: KeyRound,
-    title: "API keys",
-    description: "Configure auth credentials",
-  },
-];
+  const apiClient = await createSdpApiClient();
+  const [aggregateResult, transfersResult, walletProvidersResult, issuanceTokensResult] =
+    await Promise.all([
+      fetchPaymentsAggregate(apiClient.request),
+      fetchPaymentTransfers(apiClient.request, 100),
+      fetchCreateWalletProviders(apiClient.request),
+      fetchIssuanceTokens(apiClient.request),
+    ]);
 
-export default function DashboardPage() {
+  const issuanceActivityResult =
+    issuanceTokensResult.ok && issuanceTokensResult.data
+      ? await fetchOrgIssuanceActivity(apiClient.request, issuanceTokensResult.data)
+      : { rows: [], error: null };
+
+  const totalBalance = aggregateResult.data?.balances
+    ? resolveTotalBalance(normalizeAggregateBalances(aggregateResult.data.balances))
+    : null;
+  const todaysVolume = transfersResult.data ? computeTodaysVolume(transfersResult.data) : null;
+  const activityRows = buildHomeActivityRows(
+    transfersResult.data ?? [],
+    issuanceActivityResult.rows
+  );
+
+  const aggregateError = aggregateResult.ok ? null : "Balance data is unavailable right now.";
+  const transfersError = transfersResult.ok ? null : "Payments activity is unavailable right now.";
+  const walletProvidersError = walletProvidersResult.ok
+    ? null
+    : "Wallet providers are unavailable right now.";
+  const issuanceTokensError = issuanceTokensResult.ok
+    ? null
+    : "Issuance activity is unavailable right now.";
+
+  const activityError =
+    activityRows.length === 0
+      ? (transfersError ?? issuanceTokensError ?? issuanceActivityResult.error)
+      : null;
+  const activityNotice = [transfersError, issuanceTokensError, issuanceActivityResult.error]
+    .filter(Boolean)
+    .join(" ");
+
   return (
-    <div className="relative flex min-h-[calc(100vh-16.5rem)] w-full flex-col items-center justify-center py-6">
-      <div className="flex items-center gap-3">
-        <p className="text-[36px] leading-[40px] font-medium tracking-[-0.3px] text-[rgba(28,28,29,0.72)]">
-          Get started with
-        </p>
-        <div className="flex items-center gap-2">
-          <Image src="/landing/solana-logo.svg" alt="Solana" width={20} height={20} />
-          <p className="text-[36px] leading-[40px] font-medium tracking-[-0.3px] text-[#1c1c1d]">
-            SDP
-          </p>
-        </div>
-      </div>
-
-      <div className="mt-6 grid w-full max-w-[720px] gap-3 sm:grid-cols-2">
-        {dashboardCards.map((card) => {
-          const Icon = card.icon;
-
-          return (
-            <Link
-              key={card.href}
-              href={card.href}
-              className="rounded-[16px] border border-[rgba(28,28,29,0.10)] bg-white p-6 transition hover:bg-[rgba(28,28,29,0.03)]"
-            >
-              <Icon className="h-6 w-6 text-[rgba(28,28,29,0.8)]" />
-              <div className="mt-5 space-y-1">
-                <h2 className="text-[19px] leading-[24px] font-medium tracking-[-0.2px] text-[#1c1c1d]">
-                  {card.title}
-                </h2>
-                <p className="text-[16px] leading-[24px] text-[rgba(28,28,29,0.72)]">
-                  {card.description}
-                </p>
-              </div>
-            </Link>
-          );
-        })}
-      </div>
-    </div>
+    <HomeWorkspace
+      totalBalance={totalBalance}
+      totalBalanceError={aggregateError}
+      todaysVolume={todaysVolume}
+      todaysVolumeError={transfersError}
+      activityRows={activityRows}
+      activityError={activityError}
+      activityNotice={activityNotice || null}
+      walletProviders={walletProvidersResult.data ?? []}
+      walletDisabledReason={
+        walletProvidersError ??
+        ((walletProvidersResult.data?.length ?? 0) === 0
+          ? "Connect a provider that supports additional wallet provisioning first."
+          : null)
+      }
+    />
   );
 }

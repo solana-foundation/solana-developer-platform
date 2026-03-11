@@ -37,7 +37,7 @@ const navSections: NavSection[] = [
   {
     title: "Create",
     items: [
-      { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+      { label: "Home", href: "/dashboard", icon: LayoutDashboard },
       { label: "Wallets", href: "/dashboard/wallets", icon: Wallet },
     ],
   },
@@ -88,7 +88,7 @@ function HeaderBackAction({ href, label }: { href: string; label: string }) {
 
 function getDashboardPageConfig(pathname: string): DashboardPageConfig {
   if (pathname === "/dashboard") {
-    return { title: "Dashboard" };
+    return { title: "Home" };
   }
   if (pathname === "/dashboard/wallets" || pathname === "/dashboard/custody") {
     return {
@@ -159,7 +159,7 @@ function getDashboardPageConfig(pathname: string): DashboardPageConfig {
   if (pathname.startsWith("/dashboard/allowlist")) {
     return { title: "Allowlist" };
   }
-  return { title: "Dashboard" };
+  return { title: "Home" };
 }
 
 function isItemActive(pathname: string, href: string): boolean {
