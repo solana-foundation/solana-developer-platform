@@ -36,6 +36,7 @@ import {
   fetchTransfers,
   fetchWalletAggregate,
   fetchWallets,
+  getDevnetExplorerUrl,
   runComplianceCheck,
 } from "./payments-workspace.data";
 import type { ComplianceSnapshot } from "./payments-workspace.types";
@@ -91,10 +92,6 @@ interface RampExecutionEnvelope {
   error?: {
     message?: string;
   };
-}
-
-function getDevnetExplorerUrl(signature: string): string {
-  return `https://explorer.solana.com/tx/${encodeURIComponent(signature)}?cluster=devnet`;
 }
 
 function formatDisplayAmount(value?: string, token?: string): string {
@@ -646,7 +643,7 @@ function QuickActionRequestFields({
   const isBelowMoonPayOnrampMinimum =
     selectedFlow === "moonpay_onramp" &&
     amount.trim().length > 0 &&
-    (numericAmount === null || numericAmount < 20);
+    (numericAmount === null || numericAmount < MOONPAY_ONRAMP_MIN_USD);
   const destinationTrimmed = destination.trim();
 
   return (
@@ -1308,13 +1305,24 @@ function QuickActionModal({
         position: "bottom-right",
       }
     );
-    const ramp = await executeRampFlow(direction, buildRampPayload(wallet));
-    setRampExecution(ramp);
 
-    toast.success(`${providerLabel} flow ready.`, {
-      id: loadingToastId,
-      position: "bottom-right",
-    });
+    try {
+      const ramp = await executeRampFlow(direction, buildRampPayload(wallet));
+      setRampExecution(ramp);
+
+      toast.success(`${providerLabel} flow ready.`, {
+        id: loadingToastId,
+        position: "bottom-right",
+      });
+    } catch (error) {
+      toast.error(`${title} flow failed to initialize.`, {
+        id: loadingToastId,
+        description:
+          error instanceof Error ? error.message : "Try again. No request was submitted.",
+        position: "bottom-right",
+      });
+      throw error;
+    }
   };
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -1342,11 +1350,13 @@ function QuickActionModal({
         await submitRampFlow(selectedWallet);
       }
     } catch (error) {
-      toast.error(`${title} flow failed to initialize.`, {
-        description:
-          error instanceof Error ? error.message : "Try again. No request was submitted.",
-        position: "bottom-right",
-      });
+      if (isTransferFlow) {
+        toast.error(`${title} flow failed to initialize.`, {
+          description:
+            error instanceof Error ? error.message : "Try again. No request was submitted.",
+          position: "bottom-right",
+        });
+      }
     } finally {
       setIsSubmitting(false);
     }
