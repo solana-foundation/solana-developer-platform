@@ -3,6 +3,7 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useEscapeKey } from "@/lib/use-escape-key";
 import type { ReactNode } from "react";
 import { useState } from "react";
 import { deactivateApiKeyAction } from "./actions";
@@ -25,6 +26,8 @@ export function DeleteApiKeyModal({ keyId, keyName, renderTrigger }: DeleteApiKe
     setIsOpen(false);
     setConfirmation("");
   };
+
+  useEscapeKey(isOpen, close);
 
   const canSubmit = confirmation.trim() === keyName.trim();
 

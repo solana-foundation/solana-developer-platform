@@ -6,11 +6,17 @@ import { created, success } from "@/lib/response";
 import { AuditService } from "@/services/audit.service";
 import { CUSTODY_PROVIDERS, type CustodyProvider } from "@/services/custody/providers";
 import { createSigningService } from "@/services/domain/signing.service";
+import {
+  aggregateTrackedWalletBalances,
+  getTrackedWalletBalancesByOwner,
+} from "@/services/helius-das.service";
 import { SigningError } from "@/services/ports";
 import { createRpc, getAccountInfo } from "@/services/solana/rpc";
+import type { CustodyWalletTokenBalance } from "@sdp/types";
 import type { Address } from "@solana/kit";
 import { type AppContext, parseBooleanQueryParam, resolveActor } from "../context";
 import {
+  type CustodyWalletAggregateResponse,
   type CustodyWalletByIdResponse,
   type CustodyWalletResponse,
   type CustodyWalletsResponse,
@@ -22,6 +28,69 @@ import {
 
 // biome-ignore lint/nursery/noSecrets: Solana native mint address constant, not a secret.
 const SOL_MINT = "So11111111111111111111111111111111111111112";
+
+function resolveWalletFilters(
+  c: AppContext,
+  options: { defaultIncludeAllProviders?: boolean } = {}
+) {
+  const projectId = c.req.query("projectId") ?? undefined;
+  const providerQuery = c.req.query("provider");
+  // biome-ignore lint/nursery/noSecrets: Query parameter name, not a secret.
+  const includeAllProviders = c.req.query("includeAllProviders");
+  const includeBalances = parseBooleanQueryParam(c.req.query("includeBalances"));
+
+  const provider =
+    providerQuery && CUSTODY_PROVIDERS.includes(providerQuery as CustodyProvider)
+      ? (providerQuery as CustodyProvider)
+      : undefined;
+
+  if (providerQuery && !provider) {
+    throw new AppError("BAD_REQUEST", "Invalid provider query parameter");
+  }
+
+  return {
+    projectId,
+    provider,
+    includeBalances,
+    includeAllProviders:
+      includeAllProviders === undefined
+        ? options.defaultIncludeAllProviders === true
+        : parseBooleanQueryParam(includeAllProviders),
+  };
+}
+
+async function getScopedWallets(
+  c: AppContext,
+  options: { defaultIncludeAllProviders?: boolean } = {}
+) {
+  const actor = resolveActor(c);
+  const filters = resolveWalletFilters(c, options);
+  const signingService = createSigningService(c.env);
+  const wallets = await signingService.getWalletsWithProviders(
+    actor.organizationId,
+    filters.projectId,
+    {
+      provider: filters.provider,
+      includeAllProviders: filters.includeAllProviders,
+    }
+  );
+
+  return { wallets, filters };
+}
+
+async function getBalancesByWalletId(
+  c: AppContext,
+  walletPublicKeys: Array<{ walletId: string; publicKey: string }>
+) {
+  const balancesByOwner = await getTrackedWalletBalancesByOwner(
+    c.env,
+    walletPublicKeys.map((wallet) => wallet.publicKey)
+  );
+
+  return new Map(
+    walletPublicKeys.map((wallet) => [wallet.walletId, balancesByOwner.get(wallet.publicKey) ?? []])
+  );
+}
 
 export const createWallet = async (c: AppContext) => {
   const actor = resolveActor(c);
@@ -184,26 +253,16 @@ export const setDefaultWallet = async (c: AppContext) => {
 };
 
 export const listWallets = async (c: AppContext) => {
-  const actor = resolveActor(c);
-  const projectId = c.req.query("projectId") ?? undefined;
-  const providerQuery = c.req.query("provider");
-  // biome-ignore lint/nursery/noSecrets: Query parameter name, not a secret.
-  const includeAllProviders = parseBooleanQueryParam(c.req.query("includeAllProviders"));
-
-  const provider =
-    providerQuery && CUSTODY_PROVIDERS.includes(providerQuery as CustodyProvider)
-      ? (providerQuery as CustodyProvider)
-      : undefined;
-
-  if (providerQuery && !provider) {
-    throw new AppError("BAD_REQUEST", "Invalid provider query parameter");
-  }
-
-  const signingService = createSigningService(c.env);
-  const wallets = await signingService.getWalletsWithProviders(actor.organizationId, projectId, {
-    provider,
-    includeAllProviders,
-  });
+  const { wallets, filters } = await getScopedWallets(c);
+  const balancesByWalletId = filters.includeBalances
+    ? await getBalancesByWalletId(
+        c,
+        wallets.map((wallet) => ({
+          walletId: wallet.walletId,
+          publicKey: wallet.publicKey,
+        }))
+      )
+    : new Map<string, CustodyWalletTokenBalance[]>();
 
   const response: CustodyWalletsResponse = {
     wallets: wallets.map((wallet) => ({
@@ -217,7 +276,34 @@ export const listWallets = async (c: AppContext) => {
       purpose: wallet.purpose,
       status: wallet.status,
       createdAt: wallet.createdAt,
+      ...(filters.includeBalances
+        ? {
+            balances: balancesByWalletId.get(wallet.walletId) ?? [],
+          }
+        : {}),
     })),
+  };
+
+  return success(c, response);
+};
+
+export const getWalletAggregate = async (c: AppContext) => {
+  const { wallets } = await getScopedWallets(c, { defaultIncludeAllProviders: true });
+  const balancesByWalletId = await getBalancesByWalletId(
+    c,
+    wallets.map((wallet) => ({
+      walletId: wallet.walletId,
+      publicKey: wallet.publicKey,
+    }))
+  );
+
+  const response: CustodyWalletAggregateResponse = {
+    aggregate: {
+      walletCount: wallets.length,
+      balances: aggregateTrackedWalletBalances(
+        wallets.map((wallet) => balancesByWalletId.get(wallet.walletId) ?? [])
+      ),
+    },
   };
 
   return success(c, response);

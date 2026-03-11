@@ -316,7 +316,7 @@ describe("Payments routes", () => {
         body: JSON.stringify({
           provider: "moonpay",
           destinationWallet: TEST_WALLET_ID,
-          cryptoToken: "USDC_SOL",
+          cryptoToken: "USDC",
           fiatCurrency: "USD",
           fiatAmount: "120.50",
           kycReference: "kyc_ref_123",
@@ -358,7 +358,7 @@ describe("Payments routes", () => {
         body: JSON.stringify({
           provider: "moonpay",
           sourceWallet: TEST_WALLET_ID,
-          cryptoToken: "USDC_SOL",
+          cryptoToken: "USDC",
           fiatCurrency: "USD",
           cryptoAmount: "75.25",
           kycReference: "kyc_ref_456",
@@ -390,6 +390,32 @@ describe("Payments routes", () => {
     expect(redirect.searchParams.get("redirectURL")).toBe("https://example.com/offramp-done");
     expect(redirect.searchParams.get(MOONPAY_PARAM_EXTERNAL_CUSTOMER_ID)).toBe("kyc_ref_456");
     assertMoonPaySignature(redirect);
+  });
+
+  it("returns bad request when MoonPay on-ramp amount is below the minimum", async () => {
+    const res = await app.request(
+      "/v1/payments/ramps/onramp/execute",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          provider: "moonpay",
+          destinationWallet: TEST_WALLET_ID,
+          cryptoToken: "USDC",
+          fiatCurrency: "USD",
+          fiatAmount: "10.00",
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { code: string; message: string } };
+    expect(body.error.code).toBe("BAD_REQUEST");
+    expect(body.error.message).toContain("at least 20 USD");
   });
 
   it("creates a Lightspark on-ramp quote through the execute endpoint", async () => {
@@ -737,7 +763,7 @@ describe("Payments routes", () => {
         body: JSON.stringify({
           provider: "bvnk",
           destinationWallet: TEST_WALLET_ID,
-          cryptoToken: "USDC_SOLANA",
+          cryptoToken: "USDC",
           fiatCurrency: "USD",
           fiatAmount: "120.50",
           kycReference: "customer_123",
@@ -838,7 +864,7 @@ describe("Payments routes", () => {
         body: JSON.stringify({
           provider: "bvnk",
           sourceWallet: TEST_WALLET_ID,
-          cryptoToken: "USDC_SOLANA",
+          cryptoToken: "USDC",
           fiatCurrency: "USD",
           cryptoAmount: "75.25",
           kycReference: "customer_456",
@@ -926,7 +952,7 @@ describe("Payments routes", () => {
         body: JSON.stringify({
           provider: "bvnk",
           sourceWallet: TEST_WALLET_ID,
-          cryptoToken: "USDC_SOLANA",
+          cryptoToken: "USDC",
           fiatCurrency: "USD",
           cryptoAmount: "75.25",
           kycReference: "customer_456",
@@ -953,7 +979,7 @@ describe("Payments routes", () => {
         body: JSON.stringify({
           provider: "unsupported_provider",
           destinationWallet: TEST_WALLET_ID,
-          cryptoToken: "USDC_SOL",
+          cryptoToken: "USDC",
           fiatCurrency: "USD",
           fiatAmount: "10.00",
         }),
@@ -981,9 +1007,9 @@ describe("Payments routes", () => {
         body: JSON.stringify({
           provider: "moonpay",
           destinationWallet: TEST_WALLET_ID,
-          cryptoToken: "usdc_sol",
+          cryptoToken: "USDC",
           fiatCurrency: "USD",
-          fiatAmount: "10",
+          fiatAmount: "20",
         }),
       },
       env
@@ -1038,7 +1064,7 @@ describe("Payments routes", () => {
         body: JSON.stringify({
           provider: "bvnk",
           destinationWallet: TEST_WALLET_ID,
-          cryptoToken: "USDC_SOLANA",
+          cryptoToken: "USDC",
           fiatCurrency: "USD",
           fiatAmount: "10",
           kycReference: "customer_123",

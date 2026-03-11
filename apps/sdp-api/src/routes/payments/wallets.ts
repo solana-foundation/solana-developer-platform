@@ -10,16 +10,13 @@ import type { AppContext } from "./context";
 export async function resolveScope(c: AppContext) {
   const auth = getAuth(c);
   const signingService = createSigningService(c.env);
-  const config = await signingService.getConfiguration(
+  const wallets = await signingService.getWalletsWithProviders(
     auth.organizationId,
-    auth.projectId ?? undefined
+    auth.projectId ?? undefined,
+    {
+      includeAllProviders: true,
+    }
   );
-
-  if (!config) {
-    throw new AppError("NOT_FOUND", "Custody configuration is not initialized for this scope");
-  }
-
-  const wallets = await signingService.getWallets(auth.organizationId, auth.projectId ?? undefined);
 
   return {
     auth,

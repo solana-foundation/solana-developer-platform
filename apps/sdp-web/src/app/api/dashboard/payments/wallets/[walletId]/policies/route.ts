@@ -1,7 +1,9 @@
 import { createSdpApiClient } from "@/lib/sdp-api";
 import { NextResponse } from "next/server";
 
-async function readParams(context: { params: Promise<{ walletId: string }> | { walletId: string } }) {
+async function readParams(context: {
+  params: Promise<{ walletId: string }> | { walletId: string };
+}) {
   const resolved = await context.params;
   return resolved.walletId;
 }

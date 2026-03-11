@@ -10,6 +10,7 @@ const MOONPAY_ONRAMP_URL = "https://buy.moonpay.com";
 const MOONPAY_OFFRAMP_URL = "https://sell.moonpay.com";
 const MOONPAY_SANDBOX_ONRAMP_URL = "https://buy-sandbox.moonpay.com";
 const MOONPAY_SANDBOX_OFFRAMP_URL = "https://sell-sandbox.moonpay.com";
+const MOONPAY_ONRAMP_MIN_USD = 20;
 const BVNK_PRODUCTION_API_URL = "https://api.bvnk.com";
 const BVNK_SANDBOX_API_URL = "https://api.sandbox.bvnk.com";
 
@@ -70,11 +71,27 @@ type RampProviderExecutor = {
 };
 
 function normalizeMoonPayCurrencyCode(value: string): string {
-  const normalized = value.trim().toLowerCase();
-  if (!/^[a-z0-9_]+$/.test(normalized)) {
-    throw new AppError("BAD_REQUEST", "cryptoToken must be a valid MoonPay currency code");
+  const normalized = value.trim().toUpperCase();
+  if (!/^[A-Z0-9_]+$/.test(normalized)) {
+    throw new AppError(
+      "BAD_REQUEST",
+      "cryptoToken must be a valid token symbol or MoonPay currency code"
+    );
   }
-  return normalized;
+
+  if (normalized === "USDC") {
+    return "usdc_sol";
+  }
+
+  if (normalized === "USDT") {
+    return "usdt_sol";
+  }
+
+  if (normalized.endsWith("_SOLANA")) {
+    return `${normalized.slice(0, -"_SOLANA".length)}_SOL`.toLowerCase();
+  }
+
+  return normalized.toLowerCase();
 }
 
 type MoonPayConfig = {
@@ -350,10 +367,7 @@ function normalizeBvnkCurrencyAndNetwork(value: string): BvnkCurrencyNetwork {
   }
 
   if (currency === "USDC" || currency === "USDT") {
-    throw new AppError(
-      "BAD_REQUEST",
-      "For BVNK stablecoins, include network in cryptoToken (for example: USDC_SOLANA)."
-    );
+    return { currency, network: "SOLANA" };
   }
 
   throw new AppError(
@@ -959,6 +973,13 @@ const moonPayRampProvider: RampProviderExecutor = {
       scope.auth,
       ["payments:write"]
     );
+    const amount = toPositiveNumberAmount(input.fiatAmount, "fiatAmount");
+    if (amount < MOONPAY_ONRAMP_MIN_USD) {
+      throw new AppError(
+        "BAD_REQUEST",
+        `MoonPay on-ramp requires fiatAmount to be at least ${MOONPAY_ONRAMP_MIN_USD} USD`
+      );
+    }
     const moonPay = getMoonPayConfig(c);
 
     const redirectUrl = await buildSignedMoonPayWidgetUrl(moonPay.onrampUrl, moonPay.secretKey, {

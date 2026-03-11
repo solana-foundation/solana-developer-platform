@@ -1,6 +1,7 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
+import { useEscapeKey } from "@/lib/use-escape-key";
 import type { ActionConfirmationState } from "./token-management-workspace.types";
 
 interface TokenActionConfirmationDialogProps {
@@ -16,6 +17,8 @@ export function TokenActionConfirmationDialog({
   onCancel,
   onConfirm,
 }: TokenActionConfirmationDialogProps) {
+  useEscapeKey(Boolean(actionConfirmation) && !isPending, onCancel);
+
   if (!actionConfirmation) {
     return null;
   }

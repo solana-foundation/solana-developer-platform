@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { storeApiKeySecret } from "@/lib/playground-api-keys";
+import { useEscapeKey } from "@/lib/use-escape-key";
 import { useEffect, useState } from "react";
 import { clearApiKeyFlashAction } from "./actions";
 import { GeneratedApiKeyInput } from "./generated-key-input";
@@ -37,6 +38,10 @@ function GeneratedApiKeyModal({ keyValue, message, keyPrefix }: GeneratedApiKeyM
     setIsOpen(false);
     await clearApiKeyFlashAction();
   };
+
+  useEscapeKey(isOpen, () => {
+    void close();
+  });
 
   const copy = async () => {
     try {

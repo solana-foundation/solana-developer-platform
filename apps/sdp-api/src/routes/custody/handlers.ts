@@ -11,6 +11,7 @@ export {
   createWallet,
   deleteWallet,
   getPublicKey,
+  getWalletAggregate,
   getWalletById,
   listWallets,
   setDefaultWallet,

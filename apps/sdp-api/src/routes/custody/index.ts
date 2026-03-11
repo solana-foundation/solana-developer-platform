@@ -14,6 +14,7 @@ import {
   getConfigs,
   getPublicKey,
   getSwitchProviderOptions,
+  getWalletAggregate,
   getWalletById,
   initializeSigning,
   listWallets,
@@ -39,6 +40,7 @@ wallets.post("/signer-check", requirePermissions("wallets:write"), signerCheck);
 wallets.get("/config", requirePermissions("wallets:read"), getConfig);
 wallets.get("/configs", requirePermissions("wallets:read"), getConfigs);
 wallets.get("/", requirePermissions("wallets:read"), listWallets);
+wallets.get("/aggregate", requirePermissions("wallets:read"), getWalletAggregate);
 wallets.get("/public-key", requirePermissions("wallets:read"), getPublicKey);
 wallets.get("/switch-options", requirePermissions("custody:admin"), getSwitchProviderOptions);
 wallets.get("/:walletId", requirePermissions("wallets:read"), getWalletById);

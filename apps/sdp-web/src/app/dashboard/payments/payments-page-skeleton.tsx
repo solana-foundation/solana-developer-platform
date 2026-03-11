@@ -1,17 +1,38 @@
 import { SkeletonBlock } from "@/components/ui/skeleton-block";
 
-function PaymentsSectionSkeleton() {
+function PaymentsOverviewSkeleton() {
   return (
-    <section className="rounded-2xl border border-[rgba(28,28,29,0.1)] bg-white/80 p-5 shadow-[0_2px_10px_rgba(28,28,29,0.04)] animate-pulse">
-      <div className="space-y-3">
-        <SkeletonBlock className="h-6 w-36" />
-        <SkeletonBlock className="h-4 w-[54%]" />
+    <section>
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(20rem,1fr)]">
+        <div className="rounded-[4px] bg-[rgba(28,28,29,0.04)] px-8 py-10 sm:px-14">
+          <SkeletonBlock className="h-5 w-40 rounded-[4px]" />
+          <SkeletonBlock className="mt-6 h-14 w-56 rounded-[4px]" />
+        </div>
+        <div className="grid gap-3">
+          {Array.from({ length: 3 }, (_, index) => (
+            <SkeletonBlock
+              key={`payments-balance-skeleton-${index + 1}`}
+              className="h-[78px] w-full rounded-[4px]"
+            />
+          ))}
+        </div>
       </div>
-      <div className="mt-6 space-y-4">
-        {Array.from({ length: 4 }, (_, index) => (
+    </section>
+  );
+}
+
+function PaymentsTransactionsSkeleton() {
+  return (
+    <section className="rounded-3xl border border-[rgba(28,28,29,0.1)] bg-white/85 p-5 shadow-[0_12px_32px_rgba(28,28,29,0.04)] animate-pulse">
+      <div className="space-y-3">
+        <SkeletonBlock className="h-6 w-40" />
+        <SkeletonBlock className="h-4 w-[46%]" />
+      </div>
+      <div className="mt-6 space-y-3">
+        {Array.from({ length: 5 }, (_, index) => (
           <SkeletonBlock
-            key={`payments-row-skeleton-${index + 1}`}
-            className={index % 2 === 0 ? "h-11 w-full" : "h-11 w-[88%]"}
+            key={`payments-transaction-skeleton-${index + 1}`}
+            className="h-12 w-full"
           />
         ))}
       </div>
@@ -22,8 +43,12 @@ function PaymentsSectionSkeleton() {
 export function PaymentsPageSkeleton() {
   return (
     <div className="grid gap-6">
-      <PaymentsSectionSkeleton />
-      <PaymentsSectionSkeleton />
+      <div className="flex flex-wrap gap-3">
+        <SkeletonBlock className="h-10 w-24 rounded-full" />
+        <SkeletonBlock className="h-10 w-28 rounded-full" />
+      </div>
+      <PaymentsOverviewSkeleton />
+      <PaymentsTransactionsSkeleton />
     </div>
   );
 }
