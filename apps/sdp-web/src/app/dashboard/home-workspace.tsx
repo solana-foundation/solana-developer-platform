@@ -12,6 +12,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import type { PaymentsDashboardWallet } from "@sdp/types";
 import Link from "next/link";
 import type { HomeActivityRow } from "./home-page.data";
 import { formatCurrencyAmount, formatDisplayAmount } from "./payments/payments-overview.utils";
@@ -24,6 +25,7 @@ interface HomeWorkspaceProps {
   activityRows: HomeActivityRow[];
   activityError: string | null;
   activityNotice: string | null;
+  wallets: PaymentsDashboardWallet[];
   walletProviders: KnownCustodyProvider[];
   walletDisabledReason: string | null;
 }
@@ -89,6 +91,7 @@ export function HomeWorkspace({
   activityRows,
   activityError,
   activityNotice,
+  wallets,
   walletProviders,
   walletDisabledReason,
 }: HomeWorkspaceProps) {
@@ -96,7 +99,11 @@ export function HomeWorkspace({
     <div className="w-full space-y-8 py-2">
       <SectionEntry>
         <div className="flex flex-wrap items-center justify-end gap-3">
-          <CreateApiKeyModal triggerLabel="Create API key" triggerVariant="secondary" />
+          <CreateApiKeyModal
+            triggerLabel="Create API key"
+            triggerVariant="secondary"
+            wallets={wallets}
+          />
           <CreateWalletModal
             triggerLabel="Create Wallet"
             providers={walletProviders}

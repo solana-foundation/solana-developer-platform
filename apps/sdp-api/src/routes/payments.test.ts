@@ -211,6 +211,14 @@ async function seedAuthAndWallet(): Promise<void> {
   ]);
 }
 
+async function seedCachedKey(override: Partial<CachedApiKey>): Promise<void> {
+  const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
+  await seedCachedApiKey(env, keyHash, {
+    ...TEST_CACHED_API_KEY,
+    ...override,
+  });
+}
+
 async function seedWalletPolicy(params: {
   destinationAllowlist: string[];
   maxTransferAmount?: string;
@@ -390,6 +398,91 @@ describe("Payments routes", () => {
     expect(redirect.searchParams.get("redirectURL")).toBe("https://example.com/offramp-done");
     expect(redirect.searchParams.get(MOONPAY_PARAM_EXTERNAL_CUSTOMER_ID)).toBe("kyc_ref_456");
     assertMoonPaySignature(redirect);
+  });
+
+  it("blocks MoonPay off-ramp when the wallet policy maxTransferAmount is exceeded", async () => {
+    await seedWalletPolicy({
+      destinationAllowlist: [],
+      maxTransferAmount: "50.00",
+    });
+
+    const res = await app.request(
+      "/v1/payments/ramps/offramp/execute",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          provider: "moonpay",
+          sourceWallet: TEST_WALLET_ID,
+          cryptoToken: "USDC",
+          fiatCurrency: "USD",
+          cryptoAmount: "75.25",
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("FORBIDDEN");
+  });
+
+  it("does not apply outbound wallet policy checks to MoonPay on-ramp", async () => {
+    await seedWalletPolicy({
+      destinationAllowlist: [],
+      maxTransferAmount: "10.00",
+    });
+
+    const res = await app.request(
+      "/v1/payments/ramps/onramp/execute",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          provider: "moonpay",
+          destinationWallet: TEST_WALLET_ID,
+          cryptoToken: "USDC",
+          fiatCurrency: "USD",
+          fiatAmount: "25.00",
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(200);
+  });
+
+  it("checks wallet bindings when a custody wallet public key is used for MoonPay off-ramp", async () => {
+    await seedCachedKey({
+      walletBindings: [{ walletId: "wal_other_wallet", permissions: ["payments:write"] }],
+    });
+
+    const res = await app.request(
+      "/v1/payments/ramps/offramp/execute",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          provider: "moonpay",
+          sourceWallet: TEST_SOLANA_ADDRESSES.wallet1,
+          cryptoToken: "USDC",
+          fiatCurrency: "USD",
+          cryptoAmount: "25.00",
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(403);
   });
 
   it("returns bad request when MoonPay on-ramp amount is below the minimum", async () => {

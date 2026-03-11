@@ -3,6 +3,7 @@ import { AppError } from "@/lib/errors";
 import { describe, expect, it } from "vitest";
 import {
   assertApiKeyWalletAccess,
+  filterApiKeyWallets,
   getAllowedApiKeyWalletIds,
   resolveApiKeySigningWalletId,
 } from "./api-key-wallet-auth";
@@ -80,5 +81,22 @@ describe("api-key wallet auth helpers", () => {
     });
 
     expect(getAllowedApiKeyWalletIds(auth)).toEqual(["wal_a", "wal_b"]);
+  });
+
+  it("filters wallet collections to the bound wallet set", () => {
+    const auth = createApiKeyAuth({
+      walletBindings: [{ walletId: "wal_a", permissions: ["wallets:read"] }],
+    });
+
+    expect(
+      filterApiKeyWallets(
+        auth,
+        [
+          { walletId: "wal_a", label: "A" },
+          { walletId: "wal_b", label: "B" },
+        ],
+        ["wallets:read"]
+      )
+    ).toEqual([{ walletId: "wal_a", label: "A" }]);
   });
 });

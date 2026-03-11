@@ -1,5 +1,9 @@
 import { formatDecimalAmount } from "@/lib/amount";
-import { assertApiKeyWalletAccess } from "@/lib/api-key-wallet-auth";
+import {
+  assertApiKeyWalletAccess,
+  filterApiKeyWallets,
+  resolveApiKeySigningWalletId,
+} from "@/lib/api-key-wallet-auth";
 import { getAuth } from "@/lib/auth";
 import { AppError } from "@/lib/errors";
 import { created, success } from "@/lib/response";
@@ -63,6 +67,7 @@ async function getScopedWallets(
   c: AppContext,
   options: { defaultIncludeAllProviders?: boolean } = {}
 ) {
+  const auth = getAuth(c);
   const actor = resolveActor(c);
   const filters = resolveWalletFilters(c, options);
   const signingService = createSigningService(c.env);
@@ -75,7 +80,10 @@ async function getScopedWallets(
     }
   );
 
-  return { wallets, filters };
+  return {
+    wallets: filterApiKeyWallets(auth, wallets, ["wallets:read"]),
+    filters,
+  };
 }
 
 async function getBalancesByWalletId(
@@ -366,12 +374,14 @@ export const getWalletById = async (c: AppContext) => {
 
 export const getPublicKey = async (c: AppContext) => {
   const actor = resolveActor(c);
+  const auth = getAuth(c);
   const projectId = c.req.query("projectId");
-  const walletId = c.req.query("walletId");
+  const requestedWalletId = c.req.query("walletId");
 
   const signingService = createSigningService(c.env);
 
   try {
+    const walletId = resolveApiKeySigningWalletId(auth, requestedWalletId, ["wallets:read"]);
     const publicKey = await signingService.getPublicKey(
       actor.organizationId,
       projectId ?? undefined,
@@ -380,6 +390,9 @@ export const getPublicKey = async (c: AppContext) => {
 
     return success(c, { publicKey });
   } catch (error) {
+    if (error instanceof AppError && error.code === "FORBIDDEN") {
+      throw new AppError("NOT_FOUND", "Wallet not found");
+    }
     if (error instanceof SigningError) {
       throw new AppError("NOT_FOUND", "No signing key configured for this organization");
     }

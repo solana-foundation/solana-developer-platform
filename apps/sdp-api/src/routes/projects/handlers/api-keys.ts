@@ -4,7 +4,7 @@ import { created, success } from "@/lib/response";
 import { apiKeyCreateSchema } from "@/routes/api-keys/schemas";
 import {
   assertWalletBindingsInScope,
-  parseWalletBindingPatch,
+  resolveCreateWalletScope,
 } from "@/routes/api-keys/wallet-bindings";
 import { replaceApiKeyWalletBindings } from "@/services/api-key-wallets.service";
 import { ApiKeyService } from "@/services/api-key.service";
@@ -77,6 +77,7 @@ export const createProjectApiKey = async (c: AppContext) => {
     role = "api_developer",
     environment = "sandbox",
     permissions,
+    walletScope,
     allowedIps,
     expiresAt,
     signingWalletId,
@@ -91,21 +92,16 @@ export const createProjectApiKey = async (c: AppContext) => {
     throw new AppError("INSUFFICIENT_PERMISSIONS", "Custom permission sets require owner access");
   }
 
-  const walletBindingPatch = parseWalletBindingPatch({
+  const walletSelection = resolveCreateWalletScope({
+    walletScope,
     signingWalletId,
     signingWalletIds,
     walletBindings,
+    provisionWallet,
   });
 
-  if (provisionWallet && walletBindingPatch.bindings.length > 0) {
-    throw new AppError(
-      "BAD_REQUEST",
-      "Provide either wallet bindings (signingWalletId/signingWalletIds/walletBindings) or provisionWallet, not both"
-    );
-  }
-
-  let resolvedSigningWalletId: string | null = walletBindingPatch.defaultSigningWalletId;
-  let resolvedWalletBindings = walletBindingPatch.bindings;
+  let resolvedSigningWalletId: string | null = walletSelection.defaultSigningWalletId;
+  let resolvedWalletBindings = walletSelection.bindings;
 
   if (provisionWallet) {
     if (!(auth.permissions.includes("*") || auth.permissions.includes("custody:admin"))) {
@@ -170,6 +166,7 @@ export const createProjectApiKey = async (c: AppContext) => {
       name,
       role,
       environment,
+      walletScope: resolvedWalletBindings.length > 0 ? "selected" : "all",
       signingWalletId: resolvedSigningWalletId,
       signingWalletIds: resolvedWalletBindings.map((binding) => binding.walletId),
       provisionedWallet: Boolean(provisionWallet),

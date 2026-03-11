@@ -44,7 +44,9 @@ export function resolveWalletAddress(
   auth?: ReturnType<typeof getAuth>,
   requiredWalletPermissions: Permission[] = []
 ): string {
-  const matchingWallet = wallets.find((entry) => entry.walletId === walletIdOrAddress);
+  const matchingWallet = wallets.find(
+    (entry) => entry.walletId === walletIdOrAddress || entry.publicKey === walletIdOrAddress
+  );
   if (matchingWallet) {
     if (auth) {
       assertApiKeyWalletAccess(auth, matchingWallet.walletId, requiredWalletPermissions);

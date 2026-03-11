@@ -20,7 +20,11 @@ import type {
 } from "@sdp/types";
 import type { Context } from "hono";
 import { apiKeyCreateSchema, apiKeyRotateSchema, apiKeyUpdateSchema } from "./schemas";
-import { assertWalletBindingsInScope, parseWalletBindingPatch } from "./wallet-bindings";
+import {
+  assertWalletBindingsInScope,
+  resolveCreateWalletScope,
+  resolveUpdateWalletScope,
+} from "./wallet-bindings";
 
 type AppContext = Context<{ Bindings: Env }>;
 
@@ -106,6 +110,7 @@ export const createApiKey = async (c: AppContext) => {
     role = "api_developer",
     environment = "sandbox",
     permissions,
+    walletScope,
     allowedIps,
     expiresAt,
     signingWalletId,
@@ -120,21 +125,16 @@ export const createApiKey = async (c: AppContext) => {
     throw new AppError("INSUFFICIENT_PERMISSIONS", "Custom permission sets require owner access");
   }
 
-  const walletBindingPatch = parseWalletBindingPatch({
+  const walletSelection = resolveCreateWalletScope({
+    walletScope,
     signingWalletId,
     signingWalletIds,
     walletBindings,
+    provisionWallet,
   });
 
-  if (provisionWallet && walletBindingPatch.bindings.length > 0) {
-    throw new AppError(
-      "BAD_REQUEST",
-      "Provide either wallet bindings (signingWalletId/signingWalletIds/walletBindings) or provisionWallet, not both"
-    );
-  }
-
-  let resolvedSigningWalletId: string | null = walletBindingPatch.defaultSigningWalletId;
-  let resolvedWalletBindings = walletBindingPatch.bindings;
+  let resolvedSigningWalletId: string | null = walletSelection.defaultSigningWalletId;
+  let resolvedWalletBindings = walletSelection.bindings;
 
   if (provisionWallet) {
     if (!(actor.permissions.includes("*") || actor.permissions.includes("custody:admin"))) {
@@ -232,6 +232,7 @@ export const createApiKey = async (c: AppContext) => {
       name,
       role,
       environment,
+      walletScope: resolvedWalletBindings.length > 0 ? "selected" : "all",
       signingWalletId: resolvedSigningWalletId,
       signingWalletIds: resolvedWalletBindings.map((binding) => binding.walletId),
       provisionedWallet: Boolean(provisionWallet),
@@ -278,6 +279,7 @@ export const getApiKey = async (c: AppContext) => {
     status: key.status,
     projectId: key.projectId,
     allowedIps: key.allowedIps,
+    walletScope: walletBindings.length > 0 ? "selected" : "all",
     signingWalletId: key.signingWalletId,
     signingWalletIds: walletBindings.map((binding) => binding.walletId),
     walletBindings,
@@ -313,7 +315,8 @@ export const updateApiKey = async (c: AppContext) => {
     throw notFound("API key");
   }
 
-  const walletBindingPatch = parseWalletBindingPatch({
+  const walletSelection = resolveUpdateWalletScope({
+    walletScope: parsed.data.walletScope,
     signingWalletId: parsed.data.signingWalletId,
     signingWalletIds: parsed.data.signingWalletIds,
     walletBindings: parsed.data.walletBindings,
@@ -351,15 +354,15 @@ export const updateApiKey = async (c: AppContext) => {
     values.push(parsed.data.permissions ? JSON.stringify(parsed.data.permissions) : null);
   }
 
-  if (walletBindingPatch.touched) {
+  if (walletSelection.touched) {
     await assertWalletBindingsInScope(
       c.env.DB,
       actor.organizationId,
       existing.project_id,
-      walletBindingPatch.bindings
+      walletSelection.bindings
     );
     updates.push("signing_wallet_id = ?");
-    values.push(walletBindingPatch.defaultSigningWalletId);
+    values.push(walletSelection.defaultSigningWalletId);
   }
 
   if (updates.length === 0) {
@@ -371,15 +374,15 @@ export const updateApiKey = async (c: AppContext) => {
     .bind(...values)
     .run();
 
-  if (walletBindingPatch.touched) {
-    await replaceApiKeyWalletBindings(c.env.DB, keyId, walletBindingPatch.bindings);
+  if (walletSelection.touched) {
+    await replaceApiKeyWalletBindings(c.env.DB, keyId, walletSelection.bindings);
   }
 
   // Invalidate cache if auth-relevant fields changed
   if (
     parsed.data.allowedIps !== undefined ||
     parsed.data.permissions !== undefined ||
-    walletBindingPatch.touched
+    walletSelection.touched
   ) {
     const kvService = new KVService(c.env.SDP_API_KEYS, c.env.SDP_CACHE);
     await kvService.deleteApiKey(existing.key_hash);
