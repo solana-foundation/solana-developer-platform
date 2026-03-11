@@ -1,0 +1,802 @@
+{
+  "generatedAt": "2026-03-11T22:55:56.855Z",
+  "sourceOpenApi": "apps/sdp-api/generated/openapi.json",
+  "totals": {
+    "apiKeyOperations": 78,
+    "automated": 72,
+    "excluded": 17
+  },
+  "automated": [
+    {
+      "operationId": "listWallets",
+      "folder": [
+        "Bootstrap"
+      ],
+      "name": "List wallets",
+      "method": "GET",
+      "path": "/v1/wallets"
+    },
+    {
+      "operationId": "listMembers",
+      "folder": [
+        "Bootstrap"
+      ],
+      "name": "List members",
+      "method": "GET",
+      "path": "/v1/members"
+    },
+    {
+      "operationId": "listApiKeys",
+      "folder": [
+        "API Keys"
+      ],
+      "name": "List API keys",
+      "method": "GET",
+      "path": "/v1/api-keys"
+    },
+    {
+      "operationId": "createApiKey",
+      "folder": [
+        "API Keys"
+      ],
+      "name": "Create temporary API key",
+      "method": "POST",
+      "path": "/v1/api-keys"
+    },
+    {
+      "operationId": "getApiKey",
+      "folder": [
+        "API Keys"
+      ],
+      "name": "Get temporary API key",
+      "method": "GET",
+      "path": "/v1/api-keys/{keyId}"
+    },
+    {
+      "operationId": "updateApiKey",
+      "folder": [
+        "API Keys"
+      ],
+      "name": "Update temporary API key",
+      "method": "PATCH",
+      "path": "/v1/api-keys/{keyId}"
+    },
+    {
+      "operationId": "rotateApiKey",
+      "folder": [
+        "API Keys"
+      ],
+      "name": "Rotate temporary API key",
+      "method": "POST",
+      "path": "/v1/api-keys/{keyId}/rotate"
+    },
+    {
+      "operationId": "revokeApiKey",
+      "folder": [
+        "API Keys"
+      ],
+      "name": "Revoke temporary API key",
+      "method": "DELETE",
+      "path": "/v1/api-keys/{keyId}"
+    },
+    {
+      "operationId": "getWalletById",
+      "folder": [
+        "Wallets"
+      ],
+      "name": "Get wallet by id",
+      "method": "GET",
+      "path": "/v1/wallets/{walletId}"
+    },
+    {
+      "operationId": "getWalletPublicKey",
+      "folder": [
+        "Wallets"
+      ],
+      "name": "Get wallet public key",
+      "method": "GET",
+      "path": "/v1/wallets/public-key"
+    },
+    {
+      "operationId": "getWalletConfig",
+      "folder": [
+        "Wallets"
+      ],
+      "name": "Get wallet config",
+      "method": "GET",
+      "path": "/v1/wallets/config"
+    },
+    {
+      "operationId": "listWalletConfigs",
+      "folder": [
+        "Wallets"
+      ],
+      "name": "List wallet configs",
+      "method": "GET",
+      "path": "/v1/wallets/configs"
+    },
+    {
+      "operationId": "listSwitchProviderOptions",
+      "folder": [
+        "Wallets"
+      ],
+      "name": "List switch provider options",
+      "method": "GET",
+      "path": "/v1/wallets/switch-options"
+    },
+    {
+      "operationId": "aggregateWalletBalances",
+      "folder": [
+        "Wallets"
+      ],
+      "name": "Aggregate wallet balances",
+      "method": "GET",
+      "path": "/v1/wallets/aggregate"
+    },
+    {
+      "operationId": "checkWalletSigner",
+      "folder": [
+        "Wallets"
+      ],
+      "name": "Signer check",
+      "method": "POST",
+      "path": "/v1/wallets/signer-check"
+    },
+    {
+      "operationId": "createProject",
+      "folder": [
+        "Projects"
+      ],
+      "name": "Create temporary project",
+      "method": "POST",
+      "path": "/v1/projects"
+    },
+    {
+      "operationId": "listProjects",
+      "folder": [
+        "Projects"
+      ],
+      "name": "List projects",
+      "method": "GET",
+      "path": "/v1/projects"
+    },
+    {
+      "operationId": "getProject",
+      "folder": [
+        "Projects"
+      ],
+      "name": "Get temporary project",
+      "method": "GET",
+      "path": "/v1/projects/{projectId}"
+    },
+    {
+      "operationId": "updateProject",
+      "folder": [
+        "Projects"
+      ],
+      "name": "Update temporary project",
+      "method": "PATCH",
+      "path": "/v1/projects/{projectId}"
+    },
+    {
+      "operationId": "listProjectMembers",
+      "folder": [
+        "Projects"
+      ],
+      "name": "List project members",
+      "method": "GET",
+      "path": "/v1/projects/{projectId}/members"
+    },
+    {
+      "operationId": "createProjectApiKey",
+      "folder": [
+        "Projects"
+      ],
+      "name": "Create project API key",
+      "method": "POST",
+      "path": "/v1/projects/{projectId}/api-keys"
+    },
+    {
+      "operationId": "listProjectApiKeys",
+      "folder": [
+        "Projects"
+      ],
+      "name": "List project API keys",
+      "method": "GET",
+      "path": "/v1/projects/{projectId}/api-keys"
+    },
+    {
+      "operationId": "archiveProject",
+      "folder": [
+        "Projects"
+      ],
+      "name": "Archive temporary project",
+      "method": "DELETE",
+      "path": "/v1/projects/{projectId}"
+    },
+    {
+      "operationId": "listRpcProviders",
+      "folder": [
+        "RPC"
+      ],
+      "name": "List RPC providers",
+      "method": "GET",
+      "path": "/v1/rpc/providers"
+    },
+    {
+      "operationId": "proxyRpcRequest",
+      "folder": [
+        "RPC"
+      ],
+      "name": "Proxy getLatestBlockhash",
+      "method": "POST",
+      "path": "/v1/rpc/proxy"
+    },
+    {
+      "operationId": "listTokenTemplates",
+      "folder": [
+        "Issuance",
+        "CRUD"
+      ],
+      "name": "List token templates",
+      "method": "GET",
+      "path": "/v1/issuance/templates"
+    },
+    {
+      "operationId": "getTokenTemplate",
+      "folder": [
+        "Issuance",
+        "CRUD"
+      ],
+      "name": "Get stablecoin template",
+      "method": "GET",
+      "path": "/v1/issuance/templates/{templateId}"
+    },
+    {
+      "operationId": "createToken",
+      "folder": [
+        "Issuance",
+        "CRUD"
+      ],
+      "name": "Create CRUD token",
+      "method": "POST",
+      "path": "/v1/issuance/tokens"
+    },
+    {
+      "operationId": "listTokens",
+      "folder": [
+        "Issuance",
+        "CRUD"
+      ],
+      "name": "List tokens",
+      "method": "GET",
+      "path": "/v1/issuance/tokens"
+    },
+    {
+      "operationId": "getToken",
+      "folder": [
+        "Issuance",
+        "CRUD"
+      ],
+      "name": "Get CRUD token",
+      "method": "GET",
+      "path": "/v1/issuance/tokens/{tokenId}"
+    },
+    {
+      "operationId": "updateToken",
+      "folder": [
+        "Issuance",
+        "CRUD"
+      ],
+      "name": "Update CRUD token",
+      "method": "PATCH",
+      "path": "/v1/issuance/tokens/{tokenId}"
+    },
+    {
+      "operationId": "listTokenAllowlist",
+      "folder": [
+        "Issuance",
+        "CRUD"
+      ],
+      "name": "List token allowlist",
+      "method": "GET",
+      "path": "/v1/issuance/tokens/{tokenId}/allowlist"
+    },
+    {
+      "operationId": "addTokenAllowlistEntry",
+      "folder": [
+        "Issuance",
+        "CRUD"
+      ],
+      "name": "Add allowlist entry",
+      "method": "POST",
+      "path": "/v1/issuance/tokens/{tokenId}/allowlist"
+    },
+    {
+      "operationId": "listTokenAllowlist",
+      "folder": [
+        "Issuance",
+        "CRUD"
+      ],
+      "name": "List token allowlist after insert",
+      "method": "GET",
+      "path": "/v1/issuance/tokens/{tokenId}/allowlist"
+    },
+    {
+      "operationId": "removeTokenAllowlistEntry",
+      "folder": [
+        "Issuance",
+        "CRUD"
+      ],
+      "name": "Remove allowlist entry",
+      "method": "DELETE",
+      "path": "/v1/issuance/tokens/{tokenId}/allowlist/{entryId}"
+    },
+    {
+      "operationId": "createToken",
+      "folder": [
+        "Issuance",
+        "Prepare"
+      ],
+      "name": "Create prepare token",
+      "method": "POST",
+      "path": "/v1/issuance/tokens"
+    },
+    {
+      "operationId": "prepareDeployToken",
+      "folder": [
+        "Issuance",
+        "Prepare"
+      ],
+      "name": "Prepare deploy token",
+      "method": "POST",
+      "path": "/v1/issuance/tokens/{tokenId}/deploy/prepare"
+    },
+    {
+      "operationId": "deployToken",
+      "folder": [
+        "Issuance",
+        "Prepare"
+      ],
+      "name": "Deploy prepare token",
+      "method": "POST",
+      "path": "/v1/issuance/tokens/{tokenId}/deploy"
+    },
+    {
+      "operationId": "prepareMint",
+      "folder": [
+        "Issuance",
+        "Prepare"
+      ],
+      "name": "Prepare mint",
+      "method": "POST",
+      "path": "/v1/issuance/tokens/{tokenId}/mint/prepare"
+    },
+    {
+      "operationId": "executeMint",
+      "folder": [
+        "Issuance",
+        "Prepare"
+      ],
+      "name": "Mint to external address",
+      "method": "POST",
+      "path": "/v1/issuance/tokens/{tokenId}/mint"
+    },
+    {
+      "operationId": "executeMint",
+      "folder": [
+        "Issuance",
+        "Prepare"
+      ],
+      "name": "Mint to secondary address",
+      "method": "POST",
+      "path": "/v1/issuance/tokens/{tokenId}/mint"
+    },
+    {
+      "operationId": "executeMint",
+      "folder": [
+        "Issuance",
+        "Prepare"
+      ],
+      "name": "Mint to custody wallet",
+      "method": "POST",
+      "path": "/v1/issuance/tokens/{tokenId}/mint"
+    },
+    {
+      "operationId": "prepareBurn",
+      "folder": [
+        "Issuance",
+        "Prepare"
+      ],
+      "name": "Prepare burn",
+      "method": "POST",
+      "path": "/v1/issuance/tokens/{tokenId}/burn/prepare"
+    },
+    {
+      "operationId": "prepareSeize",
+      "folder": [
+        "Issuance",
+        "Prepare"
+      ],
+      "name": "Prepare seize",
+      "method": "POST",
+      "path": "/v1/issuance/tokens/{tokenId}/seize/prepare"
+    },
+    {
+      "operationId": "prepareForceBurn",
+      "folder": [
+        "Issuance",
+        "Prepare"
+      ],
+      "name": "Prepare force burn",
+      "method": "POST",
+      "path": "/v1/issuance/tokens/{tokenId}/force-burn/prepare"
+    },
+    {
+      "operationId": "prepareUpdateAuthority",
+      "folder": [
+        "Issuance",
+        "Prepare"
+      ],
+      "name": "Prepare authority update",
+      "method": "POST",
+      "path": "/v1/issuance/tokens/{tokenId}/authority/prepare"
+    },
+    {
+      "operationId": "listTokenTransactions",
+      "folder": [
+        "Issuance",
+        "Prepare"
+      ],
+      "name": "List pending token transactions",
+      "method": "GET",
+      "path": "/v1/issuance/tokens/{tokenId}/transactions"
+    },
+    {
+      "operationId": "createToken",
+      "folder": [
+        "Issuance",
+        "Execute"
+      ],
+      "name": "Create execute token",
+      "method": "POST",
+      "path": "/v1/issuance/tokens"
+    },
+    {
+      "operationId": "deployToken",
+      "folder": [
+        "Issuance",
+        "Execute"
+      ],
+      "name": "Deploy execute token",
+      "method": "POST",
+      "path": "/v1/issuance/tokens/{tokenId}/deploy"
+    },
+    {
+      "operationId": "executeMint",
+      "folder": [
+        "Issuance",
+        "Execute"
+      ],
+      "name": "Mint execute source account",
+      "method": "POST",
+      "path": "/v1/issuance/tokens/{tokenId}/mint"
+    },
+    {
+      "operationId": "executeMint",
+      "folder": [
+        "Issuance",
+        "Execute"
+      ],
+      "name": "Mint execute destination account",
+      "method": "POST",
+      "path": "/v1/issuance/tokens/{tokenId}/mint"
+    },
+    {
+      "operationId": "executeMint",
+      "folder": [
+        "Issuance",
+        "Execute"
+      ],
+      "name": "Mint execute custody account",
+      "method": "POST",
+      "path": "/v1/issuance/tokens/{tokenId}/mint"
+    },
+    {
+      "operationId": "pauseToken",
+      "folder": [
+        "Issuance",
+        "Execute"
+      ],
+      "name": "Pause token",
+      "method": "POST",
+      "path": "/v1/issuance/tokens/{tokenId}/pause"
+    },
+    {
+      "operationId": "getToken",
+      "folder": [
+        "Issuance",
+        "Execute"
+      ],
+      "name": "Get paused token",
+      "method": "GET",
+      "path": "/v1/issuance/tokens/{tokenId}"
+    },
+    {
+      "operationId": "unpauseToken",
+      "folder": [
+        "Issuance",
+        "Execute"
+      ],
+      "name": "Unpause token",
+      "method": "POST",
+      "path": "/v1/issuance/tokens/{tokenId}/unpause"
+    },
+    {
+      "operationId": "freezeAccount",
+      "folder": [
+        "Issuance",
+        "Execute"
+      ],
+      "name": "Freeze token account",
+      "method": "POST",
+      "path": "/v1/issuance/tokens/{tokenId}/freeze"
+    },
+    {
+      "operationId": "listFrozenAccounts",
+      "folder": [
+        "Issuance",
+        "Execute"
+      ],
+      "name": "List frozen accounts",
+      "method": "GET",
+      "path": "/v1/issuance/tokens/{tokenId}/frozen"
+    },
+    {
+      "operationId": "unfreezeAccount",
+      "folder": [
+        "Issuance",
+        "Execute"
+      ],
+      "name": "Unfreeze token account",
+      "method": "POST",
+      "path": "/v1/issuance/tokens/{tokenId}/unfreeze"
+    },
+    {
+      "operationId": "executeBurn",
+      "folder": [
+        "Issuance",
+        "Execute"
+      ],
+      "name": "Burn tokens",
+      "method": "POST",
+      "path": "/v1/issuance/tokens/{tokenId}/burn"
+    },
+    {
+      "operationId": "executeSeize",
+      "folder": [
+        "Issuance",
+        "Execute"
+      ],
+      "name": "Seize tokens",
+      "method": "POST",
+      "path": "/v1/issuance/tokens/{tokenId}/seize"
+    },
+    {
+      "operationId": "executeForceBurn",
+      "folder": [
+        "Issuance",
+        "Execute"
+      ],
+      "name": "Force burn tokens",
+      "method": "POST",
+      "path": "/v1/issuance/tokens/{tokenId}/force-burn"
+    },
+    {
+      "operationId": "executeUpdateAuthority",
+      "folder": [
+        "Issuance",
+        "Execute"
+      ],
+      "name": "Update mint authority",
+      "method": "POST",
+      "path": "/v1/issuance/tokens/{tokenId}/authority"
+    },
+    {
+      "operationId": "refreshTokenSupply",
+      "folder": [
+        "Issuance",
+        "Execute"
+      ],
+      "name": "Refresh token supply",
+      "method": "POST",
+      "path": "/v1/issuance/tokens/{tokenId}/supply/refresh"
+    },
+    {
+      "operationId": "listTokenTransactions",
+      "folder": [
+        "Issuance",
+        "Execute"
+      ],
+      "name": "List confirmed token transactions",
+      "method": "GET",
+      "path": "/v1/issuance/tokens/{tokenId}/transactions"
+    },
+    {
+      "operationId": "screenComplianceAddress",
+      "folder": [
+        "Compliance"
+      ],
+      "name": "Screen address",
+      "method": "POST",
+      "path": "/v1/compliance/address-screenings"
+    },
+    {
+      "operationId": "getPaymentWalletBalances",
+      "folder": [
+        "Payments"
+      ],
+      "name": "Get wallet balances",
+      "method": "GET",
+      "path": "/v1/payments/wallets/{walletId}/balances"
+    },
+    {
+      "operationId": "getPaymentWalletPolicy",
+      "folder": [
+        "Payments"
+      ],
+      "name": "Get wallet policy",
+      "method": "GET",
+      "path": "/v1/payments/wallets/{walletId}/policies"
+    },
+    {
+      "operationId": "updatePaymentWalletPolicy",
+      "folder": [
+        "Payments"
+      ],
+      "name": "Update wallet policy",
+      "method": "PUT",
+      "path": "/v1/payments/wallets/{walletId}/policies"
+    },
+    {
+      "operationId": "preparePaymentTransfer",
+      "folder": [
+        "Payments"
+      ],
+      "name": "Prepare SOL transfer",
+      "method": "POST",
+      "path": "/v1/payments/transfers/prepare"
+    },
+    {
+      "operationId": "createPaymentTransfer",
+      "folder": [
+        "Payments"
+      ],
+      "name": "Execute SOL transfer",
+      "method": "POST",
+      "path": "/v1/payments/transfers"
+    },
+    {
+      "operationId": "listPaymentTransfers",
+      "folder": [
+        "Payments"
+      ],
+      "name": "List wallet transfers",
+      "method": "GET",
+      "path": "/v1/payments/transfers"
+    },
+    {
+      "operationId": "getPaymentTransfer",
+      "folder": [
+        "Payments"
+      ],
+      "name": "Get executed transfer",
+      "method": "GET",
+      "path": "/v1/payments/transfers/{transferId}"
+    }
+  ],
+  "excluded": [
+    {
+      "operationId": "addProjectMember",
+      "reason": "Requires an additional organization member user id, which is not derivable from a single admin API key bootstrap flow.",
+      "method": "POST",
+      "path": "/v1/projects/{projectId}/members"
+    },
+    {
+      "operationId": "createWallet",
+      "reason": "Wallet provisioning depends on provider capabilities and mutates shared custody state, so it is excluded from the recurring suite.",
+      "method": "POST",
+      "path": "/v1/wallets"
+    },
+    {
+      "operationId": "deleteOrganization",
+      "reason": "Destructive organization deletion is not safe for a recurring required CI suite.",
+      "method": "DELETE",
+      "path": "/v1/organizations/{orgId}"
+    },
+    {
+      "operationId": "deleteWallet",
+      "reason": "Wallet deletion mutates shared custody state and is excluded from the recurring suite.",
+      "method": "DELETE",
+      "path": "/v1/wallets"
+    },
+    {
+      "operationId": "executePaymentOfframp",
+      "reason": "Depends on external provider availability and hosted third-party ramp services, so it is excluded from the required CI suite.",
+      "method": "POST",
+      "path": "/v1/payments/ramps/offramp/execute"
+    },
+    {
+      "operationId": "executePaymentOnramp",
+      "reason": "Depends on external provider availability and hosted third-party ramp services, so it is excluded from the required CI suite.",
+      "method": "POST",
+      "path": "/v1/payments/ramps/onramp/execute"
+    },
+    {
+      "operationId": "getOnboardingStatus",
+      "reason": "Requires a Clerk onboarding session, not an API key.",
+      "method": "GET",
+      "path": "/v1/onboarding/status"
+    },
+    {
+      "operationId": "getOrganization",
+      "reason": "Requires an explicit organization id that cannot be derived from a bare API key in the collection bootstrap flow.",
+      "method": "GET",
+      "path": "/v1/organizations/{orgId}"
+    },
+    {
+      "operationId": "initializeWalletSigning",
+      "reason": "Initializes org-level custody configuration and is excluded from the recurring suite to avoid provider bootstrap side effects.",
+      "method": "POST",
+      "path": "/v1/wallets/initialize"
+    },
+    {
+      "operationId": "inviteMember",
+      "reason": "The handler requires a Clerk-authenticated human user to send invitations, so a machine API key cannot execute it.",
+      "method": "POST",
+      "path": "/v1/members/invite"
+    },
+    {
+      "operationId": "linkOnboardingOrganization",
+      "reason": "Requires a Clerk onboarding session, not an API key.",
+      "method": "POST",
+      "path": "/v1/onboarding/link-org"
+    },
+    {
+      "operationId": "removeMember",
+      "reason": "Organization member removal is excluded from the CI-safe suite because it mutates human membership state.",
+      "method": "DELETE",
+      "path": "/v1/members/{memberId}"
+    },
+    {
+      "operationId": "removeProjectMember",
+      "reason": "Requires a mutable project member target and is excluded from the CI-safe suite.",
+      "method": "DELETE",
+      "path": "/v1/projects/{projectId}/members/{memberId}"
+    },
+    {
+      "operationId": "setDefaultWallet",
+      "reason": "Changing the default wallet mutates shared custody state and is excluded from the recurring suite.",
+      "method": "POST",
+      "path": "/v1/wallets/default-wallet"
+    },
+    {
+      "operationId": "switchWalletSigningProvider",
+      "reason": "Switches the org default signing provider and is excluded from the recurring suite to avoid global side effects.",
+      "method": "POST",
+      "path": "/v1/wallets/switch"
+    },
+    {
+      "operationId": "updateOrganization",
+      "reason": "Requires an explicit organization id and mutates shared organization settings, so it is excluded from the CI-safe admin suite.",
+      "method": "PATCH",
+      "path": "/v1/organizations/{orgId}"
+    },
+    {
+      "operationId": "updateProjectMember",
+      "reason": "Requires a mutable project member target and is excluded from the CI-safe suite.",
+      "method": "PATCH",
+      "path": "/v1/projects/{projectId}/members/{memberId}"
+    }
+  ]
+}

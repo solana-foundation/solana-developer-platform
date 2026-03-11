@@ -33,6 +33,7 @@
     "format:check": "biome format .",
     "test": "turbo run test --filter=!@sdp/api-integration",
     "test:integration": "turbo run test --filter=@sdp/api-integration",
+    "test:postman": "pnpm -C apps/sdp-api run openapi:generate && pnpm --filter sdp-docs generate:postman && node scripts/run-postman-api-key-suite.mjs",
     "check": "biome check --write . && turbo run typecheck",
     "kora:up": "docker compose -f infra/kora/docker-compose.yml up -d",
     "kora:down": "docker compose -f infra/kora/docker-compose.yml down",
@@ -42,6 +43,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.0",
+    "newman": "6.2.2",
     "turbo": "^2.4.0",
     "typescript": "^5.8.0"
   },

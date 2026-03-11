@@ -11,6 +11,7 @@ import { registerIssuancePaths } from "./paths/issuance";
 import { registerMemberPaths } from "./paths/members";
 import { registerOnboardingPaths } from "./paths/onboarding";
 import { registerOrganizationPaths } from "./paths/organizations";
+import { registerPaymentsPaths } from "./paths/payments";
 import { registerProjectPaths } from "./paths/projects";
 import { registerRpcPaths } from "./paths/rpc";
 
@@ -55,6 +56,7 @@ export function createOpenApiDocument(): OpenAPIObject {
   registerProjectPaths(registry);
   registerRpcPaths(registry);
   registerIssuancePaths(registry);
+  registerPaymentsPaths(registry);
   registerCompliancePaths(registry);
   registerAdminPaths(registry);
   registerOnboardingPaths(registry);
@@ -82,6 +84,10 @@ export function createOpenApiDocument(): OpenAPIObject {
       { name: "Projects", description: "Project and project member management." },
       { name: "RPC", description: "Managed Solana RPC relay and provider telemetry." },
       { name: "Issuance", description: "Token issuance, allowlists, and lifecycle operations." },
+      {
+        name: "Payments",
+        description: "Wallet balances, transfer execution, policies, and ramps.",
+      },
       { name: "Compliance", description: "Risk and compliance screening endpoints." },
       { name: "Admin", description: "Administrative allowlist management." },
       { name: "Onboarding", description: "Clerk organization onboarding and linking." },

@@ -24,6 +24,7 @@
     "reference/api/wallets",
     "reference/api/projects",
     "reference/api/issuance",
+    "reference/api/payments",
     "reference/api/compliance"
   ]
 }

@@ -220,3 +220,33 @@ jobs:
 
       - name: Integration tests
         run: pnpm test:integration
+
+  postman_api_key_suite:
+    name: Postman API Key Suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      POSTMAN_API_BASE_URL: ${{ vars.POSTMAN_API_BASE_URL || secrets.POSTMAN_API_BASE_URL }}
+      POSTMAN_ADMIN_API_KEY: ${{ secrets.POSTMAN_ADMIN_API_KEY }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.1
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Run Postman API key suite
+        run: pnpm test:postman

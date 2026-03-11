@@ -2,7 +2,6 @@ import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
 import { z } from "zod";
 
 import {
-  createConfidentialTransferRequestSchema,
   createTransferRequestSchema,
   errorResponseSchema,
   executeOfframpRequestSchema,
@@ -19,7 +18,6 @@ import {
 } from "../schemas";
 import { errorResponses, jsonContent } from "./helpers";
 import {
-  feeQuoteResponse,
   offrampExecutionResponse,
   onrampExecutionResponse,
   prepareTransferResponse,
@@ -28,10 +26,6 @@ import {
   walletBalancesResponse,
   walletPolicyResponse,
 } from "./responses";
-
-const draftNotice =
-  "DRAFT: This endpoint is not implemented yet. It is provided for discussion and review only.";
-const withDraft = (description: string) => `${draftNotice}\n\n${description}`;
 
 export function registerPaymentsPaths(registry: OpenAPIRegistry) {
   // ═══════════════════════════════════════════════════════════════════════════
@@ -169,9 +163,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     tags: ["Payments"],
     summary: "List transfers",
     operationId: "listPaymentTransfers",
-    description: withDraft(
-      "Lists payment transfers for the authenticated organization or project scope."
-    ),
+    description: "Lists payment transfers for the authenticated organization or project scope.",
     security: [{ apiKeyAuth: [] }],
     request: {
       query: z.object({
@@ -198,35 +190,12 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
   });
 
   registry.registerPath({
-    method: "post",
-    path: "/v1/payments/transfers/confidential",
-    tags: ["Payments"],
-    summary: "Create confidential transfer",
-    operationId: "createConfidentialTransfer",
-    description: withDraft("Creates a confidential transfer using Token-2022."),
-    security: [{ apiKeyAuth: [] }],
-    request: {
-      body: {
-        required: true,
-        content: jsonContent(createConfidentialTransferRequestSchema),
-      },
-    },
-    responses: {
-      200: {
-        description: "Confidential transfer executed",
-        content: jsonContent(transferResponse),
-      },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 500]),
-    },
-  });
-
-  registry.registerPath({
     method: "get",
     path: "/v1/payments/transfers/{transferId}",
     tags: ["Payments"],
     summary: "Get transfer",
     operationId: "getPaymentTransfer",
-    description: withDraft("Retrieves details for a specific transfer."),
+    description: "Retrieves details for a specific transfer.",
     security: [{ apiKeyAuth: [] }],
     request: {
       params: z.object({
@@ -241,36 +210,6 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
       ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
     },
   });
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // Fees
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  registry.registerPath({
-    method: "get",
-    path: "/v1/payments/fees/quote",
-    tags: ["Payments"],
-    summary: "Get fee quote",
-    operationId: "getPaymentFeeQuote",
-    description: withDraft("Retrieves a fee quote for a transfer."),
-    security: [{ apiKeyAuth: [] }],
-    request: {
-      query: z.object({
-        token: z.string().openapi({ description: "Fee token symbol or mint address." }),
-      }),
-    },
-    responses: {
-      200: {
-        description: "Fee quote",
-        content: jsonContent(feeQuoteResponse),
-      },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 500]),
-    },
-  });
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // Ramps
-  // ═══════════════════════════════════════════════════════════════════════════
 
   registry.registerPath({
     method: "post",

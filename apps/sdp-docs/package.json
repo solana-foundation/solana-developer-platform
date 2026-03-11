@@ -5,12 +5,13 @@
   "scripts": {
     "dev": "node scripts/dev.mjs",
     "dev:local": "node scripts/dev.mjs",
-    "build": "pnpm generate:api && pnpm generate:source && next build",
+    "build": "pnpm generate:api && pnpm generate:postman && pnpm generate:source && next build",
     "start": "next start --port 3001",
     "typecheck": "tsc --noEmit",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "generate:api": "pnpm -C ../sdp-api run openapi:generate && node scripts/generate-api-docs.mjs && pnpm exec biome check --write content/docs/meta.json content/docs/reference/api/meta.json",
+    "generate:postman": "node scripts/generate-postman-collection.mjs",
     "generate:source": "node scripts/generate-source.mjs",
     "watch:source": "node scripts/watch-source.mjs"
   },
