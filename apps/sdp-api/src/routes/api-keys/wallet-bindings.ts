@@ -1,6 +1,6 @@
 import { AppError } from "@/lib/errors";
 import { normalizeApiKeyWalletPermissions } from "@/services/api-key-wallets.service";
-import type { ApiKeyWalletBinding, Permission } from "@sdp/types";
+import type { ApiKeyWalletBinding, ApiKeyWalletScope, Permission } from "@sdp/types";
 
 type WalletBindingInput = {
   walletId: string;
@@ -17,6 +17,11 @@ export type ParsedWalletBindingPatch = {
   touched: boolean;
   defaultSigningWalletId: string | null;
   bindings: ApiKeyWalletBinding[];
+};
+
+type WalletScopeInput = WalletBindingPatchInput & {
+  walletScope?: ApiKeyWalletScope;
+  provisionWallet?: boolean;
 };
 
 function trimWalletId(walletId: string): string {
@@ -120,6 +125,119 @@ export function parseWalletBindingPatch(input: WalletBindingPatchInput): ParsedW
     touched,
     defaultSigningWalletId,
     bindings,
+  };
+}
+
+export function resolveCreateWalletScope(input: WalletScopeInput): {
+  walletScope: ApiKeyWalletScope;
+  defaultSigningWalletId: string | null;
+  bindings: ApiKeyWalletBinding[];
+} {
+  const walletScope = input.walletScope;
+  if (!walletScope) {
+    throw new AppError("BAD_REQUEST", "walletScope is required");
+  }
+
+  const walletBindingPatch = parseWalletBindingPatch(input);
+
+  if (walletScope === "all") {
+    if (input.provisionWallet) {
+      throw new AppError(
+        "BAD_REQUEST",
+        "walletScope 'all' cannot be combined with provisionWallet"
+      );
+    }
+    if (walletBindingPatch.touched) {
+      throw new AppError(
+        "BAD_REQUEST",
+        "walletScope 'all' cannot be combined with signingWalletId, signingWalletIds, or walletBindings"
+      );
+    }
+
+    return {
+      walletScope,
+      defaultSigningWalletId: null,
+      bindings: [],
+    };
+  }
+
+  if (!input.provisionWallet && walletBindingPatch.bindings.length === 0) {
+    throw new AppError(
+      "BAD_REQUEST",
+      "walletScope 'selected' requires wallet bindings or provisionWallet"
+    );
+  }
+
+  return {
+    walletScope,
+    defaultSigningWalletId: walletBindingPatch.defaultSigningWalletId,
+    bindings: walletBindingPatch.bindings,
+  };
+}
+
+export function resolveUpdateWalletScope(input: WalletScopeInput): {
+  walletScope: ApiKeyWalletScope | undefined;
+  defaultSigningWalletId: string | null;
+  bindings: ApiKeyWalletBinding[];
+  touched: boolean;
+} {
+  const walletBindingPatch = parseWalletBindingPatch(input);
+  const walletScope = input.walletScope;
+
+  if (walletScope === undefined) {
+    if (walletBindingPatch.touched) {
+      throw new AppError(
+        "BAD_REQUEST",
+        "walletScope is required when updating API key wallet access"
+      );
+    }
+
+    return {
+      walletScope,
+      defaultSigningWalletId: walletBindingPatch.defaultSigningWalletId,
+      bindings: walletBindingPatch.bindings,
+      touched: false,
+    };
+  }
+
+  if (walletScope === "all") {
+    if (input.provisionWallet) {
+      throw new AppError(
+        "BAD_REQUEST",
+        "walletScope 'all' cannot be combined with provisionWallet"
+      );
+    }
+    if (walletBindingPatch.touched) {
+      throw new AppError(
+        "BAD_REQUEST",
+        "walletScope 'all' cannot be combined with signingWalletId, signingWalletIds, or walletBindings"
+      );
+    }
+
+    return {
+      walletScope,
+      defaultSigningWalletId: null,
+      bindings: [],
+      touched: true,
+    };
+  }
+
+  if (input.provisionWallet) {
+    throw new AppError("BAD_REQUEST", "provisionWallet is only supported during API key creation");
+  }
+
+  if (!walletBindingPatch.touched || walletBindingPatch.bindings.length === 0) {
+    throw new AppError(
+      "BAD_REQUEST",
+      "walletScope 'selected' requires signingWalletId, signingWalletIds, or walletBindings"
+    );
+  }
+
+  return {
+    walletScope,
+    defaultSigningWalletId: walletBindingPatch.defaultSigningWalletId,
+    bindings: walletBindingPatch.bindings,
+    touched: true,
   };
 }
 

@@ -61,6 +61,12 @@ export async function createApiKeyAction(formData: FormData) {
   const name = String(formData.get("name") ?? "").trim();
   const role = String(formData.get("role") ?? "api_developer");
   const environment = String(formData.get("environment") ?? "sandbox");
+  const walletScope = String(formData.get("walletScope") ?? "").trim();
+  const defaultWalletId = String(formData.get("signingWalletId") ?? "").trim();
+  const signingWalletIds = formData
+    .getAll("signingWalletIds")
+    .map((value) => String(value).trim())
+    .filter(Boolean);
   const expiresAtRaw = String(formData.get("expiresAt") ?? "").trim();
 
   if (!name) {
@@ -71,11 +77,30 @@ export async function createApiKeyAction(formData: FormData) {
     redirect(API_KEYS_PAGE_PATH);
   }
 
+  if (walletScope !== "all" && walletScope !== "selected") {
+    await setFlash({
+      level: "error",
+      message: "Choose whether this key can access all wallets or selected wallets.",
+    });
+    redirect(API_KEYS_PAGE_PATH);
+  }
+
+  if (walletScope === "selected" && signingWalletIds.length === 0) {
+    await setFlash({
+      level: "error",
+      message: "Select at least one wallet for a wallet-scoped API key.",
+    });
+    redirect(API_KEYS_PAGE_PATH);
+  }
+
   const payload: {
     name: string;
     role: "api_admin" | "api_developer" | "api_readonly";
     environment: "sandbox" | "production";
+    walletScope: "all" | "selected";
     expiresAt?: string;
+    signingWalletId?: string;
+    signingWalletIds?: string[];
   } = {
     name,
     role:
@@ -83,7 +108,13 @@ export async function createApiKeyAction(formData: FormData) {
         ? role
         : "api_developer",
     environment: environment === "production" ? "production" : "sandbox",
+    walletScope: walletScope === "selected" ? "selected" : "all",
   };
+
+  if (walletScope === "selected") {
+    payload.signingWalletIds = signingWalletIds;
+    payload.signingWalletId = defaultWalletId || signingWalletIds[0];
+  }
 
   if (expiresAtRaw) {
     const parsedDate = new Date(expiresAtRaw);
@@ -123,7 +154,7 @@ export async function createApiKeyAction(formData: FormData) {
     });
   }
 
-  revalidatePath(API_KEYS_PAGE_PATH);
+  revalidatePath(API_KEYS_PAGE_PATH, "page");
   redirect(API_KEYS_PAGE_PATH);
 }
 
@@ -169,7 +200,7 @@ export async function rotateApiKeyAction(formData: FormData) {
     });
   }
 
-  revalidatePath(API_KEYS_PAGE_PATH);
+  revalidatePath(API_KEYS_PAGE_PATH, "page");
   redirect(API_KEYS_PAGE_PATH);
 }
 
@@ -229,6 +260,6 @@ export async function deactivateApiKeyAction(formData: FormData) {
     });
   }
 
-  revalidatePath(API_KEYS_PAGE_PATH);
+  revalidatePath(API_KEYS_PAGE_PATH, "page");
   redirect(API_KEYS_PAGE_PATH);
 }

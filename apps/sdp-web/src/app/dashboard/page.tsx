@@ -13,7 +13,11 @@ import {
   normalizeAggregateBalances,
   resolveTotalBalance,
 } from "./payments/payments-overview.utils";
-import { fetchPaymentTransfers, fetchPaymentsAggregate } from "./payments/payments-page.data";
+import {
+  fetchPaymentTransfers,
+  fetchPaymentsAggregate,
+  fetchPaymentsWallets,
+} from "./payments/payments-page.data";
 
 export default async function DashboardPage() {
   const { userId, orgId } = await auth();
@@ -25,13 +29,19 @@ export default async function DashboardPage() {
   }
 
   const apiClient = await createSdpApiClient();
-  const [aggregateResult, transfersResult, walletProvidersResult, issuanceTokensResult] =
-    await Promise.all([
-      fetchPaymentsAggregate(apiClient.request),
-      fetchPaymentTransfers(apiClient.request, 100),
-      fetchCreateWalletProviders(apiClient.request),
-      fetchIssuanceTokens(apiClient.request, 10),
-    ]);
+  const [
+    aggregateResult,
+    transfersResult,
+    walletsResult,
+    walletProvidersResult,
+    issuanceTokensResult,
+  ] = await Promise.all([
+    fetchPaymentsAggregate(apiClient.request),
+    fetchPaymentTransfers(apiClient.request, 100),
+    fetchPaymentsWallets(apiClient.request),
+    fetchCreateWalletProviders(apiClient.request),
+    fetchIssuanceTokens(apiClient.request, 10),
+  ]);
 
   const issuanceActivityResult =
     issuanceTokensResult.ok && issuanceTokensResult.data
@@ -73,6 +83,7 @@ export default async function DashboardPage() {
       activityRows={activityRows}
       activityError={activityError}
       activityNotice={activityNotice || null}
+      wallets={walletsResult.data ?? []}
       walletProviders={walletProvidersResult.data ?? []}
       walletDisabledReason={
         walletProvidersError ??

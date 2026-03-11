@@ -14,14 +14,18 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { sdpApiFetch } from "@/lib/sdp-api";
+import { createSdpApiClient, sdpApiFetch } from "@/lib/sdp-api";
 import { auth } from "@clerk/nextjs/server";
+import type { PaymentsDashboardWallet } from "@sdp/types";
 import { redirect } from "next/navigation";
+import { fetchPaymentsWallets } from "../payments/payments-page.data";
 import { consumeApiKeyFlash } from "./actions";
 import { ApiKeyActionsMenu } from "./api-key-actions-menu";
 import { CreateApiKeyModal } from "./create-api-key-modal";
 import { FlashClearTrigger } from "./flash-clear-trigger";
 import { GeneratedApiKeyModal } from "./generated-key-modal";
+
+export const dynamic = "force-dynamic";
 
 type ApiKeyRole = "api_admin" | "api_developer" | "api_readonly";
 type ApiKeyEnvironment = "sandbox" | "production";
@@ -50,6 +54,12 @@ function formatDate(value: string | null): string {
   });
 }
 
+function formatRole(role: ApiKeyRole): string {
+  if (role === "api_admin") return "Admin";
+  if (role === "api_readonly") return "Read only";
+  return "Developer";
+}
+
 export default async function ApiKeysPage() {
   const { userId, orgId } = await auth();
   if (!userId) {
@@ -59,15 +69,18 @@ export default async function ApiKeysPage() {
     redirect("/dashboard");
   }
 
-  const [flash, apiKeysResponse] = await Promise.all([
+  const apiClient = await createSdpApiClient();
+  const [flash, apiKeysResponse, walletsResponse] = await Promise.all([
     consumeApiKeyFlash(),
     sdpApiFetch<{ apiKeys: ApiKeyRecord[] }>("/v1/api-keys"),
+    fetchPaymentsWallets(apiClient.request),
   ]);
 
   const apiKeys = [...apiKeysResponse.apiKeys].sort((a, b) => {
     return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
   });
   const hasGeneratedKeyFlash = Boolean(flash?.key);
+  const wallets: PaymentsDashboardWallet[] = walletsResponse.ok ? (walletsResponse.data ?? []) : [];
 
   return (
     <div className="w-full flex flex-col gap-6">
@@ -98,7 +111,7 @@ export default async function ApiKeysPage() {
           <CardTitle>Existing API keys</CardTitle>
           <CardDescription>Active and historical keys for this workspace.</CardDescription>
           <CardAction>
-            <CreateApiKeyModal triggerLabel="New API key" />
+            <CreateApiKeyModal triggerLabel="New API key" wallets={wallets} />
           </CardAction>
         </CardHeader>
         <CardContent>
@@ -138,7 +151,7 @@ export default async function ApiKeysPage() {
                         <span className="block truncate">{key.keyPrefix}</span>
                       </TableCell>
                       <TableCell className="text-xs">
-                        <span className="block truncate">{key.role}</span>
+                        <span className="block truncate">{formatRole(key.role)}</span>
                       </TableCell>
                       <TableCell className="text-xs">
                         <span className="block truncate">{key.environment}</span>

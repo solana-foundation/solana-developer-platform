@@ -20,6 +20,11 @@ export const apiKeyEnvironmentSchema = z
   .enum(["sandbox", "production"])
   .openapi({ description: "API key environment.", example: "sandbox" });
 
+export const apiKeyWalletScopeSchema = z.enum(["all", "selected"]).openapi({
+  description: "Whether the key can use all wallets in scope or only explicitly selected wallets.",
+  example: "selected",
+});
+
 export const apiKeyStatusSchema = z
   .enum(["active", "revoked", "expired", "deactivated"])
   .openapi({ description: "API key status.", example: "active" });
@@ -94,6 +99,7 @@ export const apiKeyDetailSchema = z
         description: "CIDR ranges permitted to use the key.",
         example: ["203.0.113.0/24"],
       }),
+    walletScope: apiKeyWalletScopeSchema,
     signingWalletId: z.string().nullable().openapi({
       description: "Default custody wallet bound to this API key for signing.",
       example: "privy_wallet_123",
@@ -222,6 +228,11 @@ export const createApiKeyRequestSchema = apiKeyCreateSchemaBase
       description: "Target environment for the key.",
       example: "sandbox",
     }),
+    walletScope: apiKeyCreateSchemaBase.shape.walletScope.openapi({
+      description:
+        "Explicit wallet access mode. Use 'all' to allow every wallet in scope or 'selected' to bind specific wallets.",
+      example: "selected",
+    }),
     allowedIps: apiKeyCreateSchemaBase.shape.allowedIps.openapi({
       description: "Optional list of CIDR ranges allowed to use the key.",
       example: ["203.0.113.0/24"],
@@ -271,6 +282,11 @@ export const updateApiKeyRequestSchema = apiKeyUpdateSchemaBase
     description: apiKeyUpdateSchemaBase.shape.description.openapi({
       description: "Updated description. Use null to clear.",
       example: "Rotated key for new service.",
+    }),
+    walletScope: apiKeyUpdateSchemaBase.shape.walletScope.openapi({
+      description:
+        "Updated wallet access mode. Provide this when changing wallet bindings, or by itself to reset the key to all wallets.",
+      example: "all",
     }),
     allowedIps: apiKeyUpdateSchemaBase.shape.allowedIps.openapi({
       description: "Updated IP allowlist. Use null to clear.",

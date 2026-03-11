@@ -12,6 +12,7 @@ export const apiKeyCreateSchema = z.object({
   role: z.enum(["api_admin", "api_developer", "api_readonly"]).optional(),
   permissions: z.array(z.enum(PERMISSIONS)).optional(),
   environment: z.enum(["sandbox", "production"]).optional(),
+  walletScope: z.enum(["all", "selected"]),
   allowedIps: z.array(z.string()).optional(),
   expiresAt: z.string().datetime().optional(),
   signingWalletId: z.string().min(1).optional(),
@@ -27,6 +28,7 @@ export const apiKeyCreateSchema = z.object({
 export const apiKeyUpdateSchema = z.object({
   name: z.string().min(1).max(100).optional(),
   description: z.string().max(500).nullable().optional(),
+  walletScope: z.enum(["all", "selected"]).optional(),
   allowedIps: z.array(z.string()).nullable().optional(),
   expiresAt: z.string().datetime().nullable().optional(),
   permissions: z.array(z.enum(PERMISSIONS)).nullable().optional(),

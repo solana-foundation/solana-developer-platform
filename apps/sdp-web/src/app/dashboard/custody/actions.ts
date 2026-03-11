@@ -228,7 +228,9 @@ export async function checkWalletSignerMemoAction(
         name: keyName,
         role: "api_developer",
         environment: "sandbox",
+        walletScope: "selected",
         signingWalletId: resolvedWalletId,
+        signingWalletIds: [resolvedWalletId],
         expiresAt: new Date(now + 10 * 60 * 1000).toISOString(),
       }),
     });

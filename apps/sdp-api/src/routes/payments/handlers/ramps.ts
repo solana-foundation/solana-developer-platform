@@ -3,6 +3,7 @@ import { AppError } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { isAddress } from "@/lib/solana";
 import type { AppContext } from "../context";
+import { assertWalletPolicyAllowsTransfer } from "../policy";
 import { executeOfframpSchema, executeOnrampSchema } from "../schemas";
 import { type ResolvedScope, resolveScope, resolveWalletAddress } from "../wallets";
 
@@ -1187,6 +1188,20 @@ async function executeRampWithProvider(
 
   if (input.direction === "onramp") {
     return provider.executeOnramp(c, scope, input);
+  }
+
+  const sourceWallet = scope.wallets.find(
+    (wallet) => wallet.walletId === input.sourceWallet || wallet.publicKey === input.sourceWallet
+  );
+  if (sourceWallet) {
+    await assertWalletPolicyAllowsTransfer(c, {
+      organizationId: scope.auth.organizationId,
+      projectId: scope.auth.projectId,
+      wallet: sourceWallet,
+      enforceDestinationAllowlist: false,
+      token: input.cryptoToken,
+      amount: input.cryptoAmount,
+    });
   }
 
   return provider.executeOfframp(c, scope, input);

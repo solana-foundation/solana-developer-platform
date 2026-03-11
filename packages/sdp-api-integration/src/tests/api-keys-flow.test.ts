@@ -94,6 +94,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("API Key Integrati
             "payments:write",
             "wallets:read",
           ],
+          walletScope: "selected",
           signingWalletId: sourceWallet.walletId,
         }),
       });

@@ -499,6 +499,7 @@ describe("Projects Routes", () => {
           body: JSON.stringify({
             name: "Project Key",
             environment: "sandbox",
+            walletScope: "all",
           }),
         },
         env
@@ -521,7 +522,7 @@ describe("Projects Routes", () => {
             "Content-Type": "application/json",
             Authorization: `Bearer ${TEST_API_KEY.raw}`,
           },
-          body: JSON.stringify({ name: "Listed Key" }),
+          body: JSON.stringify({ name: "Listed Key", walletScope: "all" }),
         },
         env
       );

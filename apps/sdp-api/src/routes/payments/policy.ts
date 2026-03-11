@@ -123,7 +123,8 @@ export async function assertWalletPolicyAllowsTransfer(
     organizationId: string;
     projectId: string | null;
     wallet: CustodyWallet;
-    destinationAddress: string;
+    destinationAddress?: string | null;
+    enforceDestinationAllowlist?: boolean;
     token: string;
     amount: string;
   }
@@ -137,9 +138,12 @@ export async function assertWalletPolicyAllowsTransfer(
 
   const policy = buildWalletPolicyPayload(input.wallet.walletId, rows, input.wallet.createdAt);
 
+  const shouldEnforceDestinationAllowlist = input.enforceDestinationAllowlist !== false;
+
   if (
+    shouldEnforceDestinationAllowlist &&
     policy.destinationAllowlist.length > 0 &&
-    !policy.destinationAllowlist.includes(input.destinationAddress)
+    (!input.destinationAddress || !policy.destinationAllowlist.includes(input.destinationAddress))
   ) {
     throw new AppError("FORBIDDEN", "Destination address is not allowed by wallet policy");
   }

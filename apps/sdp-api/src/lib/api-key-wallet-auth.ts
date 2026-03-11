@@ -17,6 +17,15 @@ function normalizeBindings(auth: ApiKeyContext): ApiKeyWalletBinding[] {
   return [];
 }
 
+function getBindingForWallet(auth: ApiKeyContext, walletId: string): ApiKeyWalletBinding | null {
+  const bindings = normalizeBindings(auth);
+  if (bindings.length === 0) {
+    return null;
+  }
+
+  return bindings.find((entry) => entry.walletId === walletId) ?? null;
+}
+
 function hasBindingPermission(
   binding: ApiKeyWalletBinding,
   requiredPermissions: Permission[]
@@ -46,7 +55,7 @@ export function assertApiKeyWalletAccess(
     return;
   }
 
-  const binding = bindings.find((entry) => entry.walletId === walletId);
+  const binding = getBindingForWallet(auth, walletId);
   if (!binding) {
     throw new AppError("FORBIDDEN", "API key is not authorized for the requested wallet");
   }
@@ -101,4 +110,27 @@ export function getAllowedApiKeyWalletIds(auth: ApiKeyContext): string[] | null 
   }
 
   return bindings.map((binding) => binding.walletId);
+}
+
+export function filterApiKeyWallets<T extends { walletId: string }>(
+  auth: ApiKeyContext,
+  wallets: T[],
+  requiredPermissions: Permission[] = []
+): T[] {
+  if (auth.authType !== "api_key") {
+    return wallets;
+  }
+
+  const bindings = normalizeBindings(auth);
+  if (bindings.length === 0) {
+    return wallets;
+  }
+
+  return wallets.filter((wallet) => {
+    const binding = getBindingForWallet(auth, wallet.walletId);
+    if (!binding) {
+      return false;
+    }
+    return hasBindingPermission(binding, requiredPermissions);
+  });
 }

@@ -10,6 +10,8 @@ export type ApiKeyStatus = "active" | "revoked" | "expired" | "deactivated";
 
 export type RateLimitTier = "standard" | "elevated" | "unlimited";
 
+export type ApiKeyWalletScope = "all" | "selected";
+
 export interface ApiKeyWalletBinding {
   walletId: string;
   permissions: Permission[];
@@ -67,6 +69,7 @@ export interface CreateApiKeyRequest {
   role?: ApiKeyRole;
   permissions?: Permission[];
   environment?: ApiKeyEnvironment;
+  walletScope: ApiKeyWalletScope;
   allowedIps?: string[]; // CIDR ranges for IP restriction
   expiresAt?: string; // ISO date string
   signingWalletId?: string;
@@ -83,6 +86,7 @@ export interface CreateApiKeyRequest {
 export interface UpdateApiKeyRequest {
   name?: string;
   description?: string;
+  walletScope?: ApiKeyWalletScope;
   allowedIps?: string[] | null; // null to remove IP restrictions
   expiresAt?: string | null; // null to remove expiration
   permissions?: Permission[] | null; // null to revert to role defaults

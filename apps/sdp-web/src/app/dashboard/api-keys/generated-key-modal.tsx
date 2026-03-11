@@ -30,10 +30,6 @@ function GeneratedApiKeyModal({ keyValue, message, keyPrefix }: GeneratedApiKeyM
     });
   }, [keyValue, keyPrefix]);
 
-  if (!isOpen) {
-    return null;
-  }
-
   const close = async () => {
     setIsOpen(false);
     await clearApiKeyFlashAction();
@@ -42,6 +38,10 @@ function GeneratedApiKeyModal({ keyValue, message, keyPrefix }: GeneratedApiKeyM
   useEscapeKey(isOpen, () => {
     void close();
   });
+
+  if (!isOpen) {
+    return null;
+  }
 
   const copy = async () => {
     try {
