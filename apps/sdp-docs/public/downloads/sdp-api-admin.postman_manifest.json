@@ -1,669 +1,499 @@
 {
-  "generatedAt": "2026-03-11T23:25:28.214Z",
+  "generatedAt": "1970-01-01T00:00:00.000Z",
   "sourceOpenApi": "apps/sdp-api/generated/openapi.json",
   "totals": {
     "apiKeyOperations": 68,
     "coveredOperations": 58,
-    "automatedRequests": 69,
+    "automatedRequests": 70,
     "excluded": 10
   },
   "automated": [
     {
       "operationId": "listWallets",
-      "folder": [
-        "Bootstrap"
-      ],
+      "folder": ["Bootstrap"],
       "name": "List wallets",
       "method": "GET",
       "path": "/v1/wallets"
     },
     {
       "operationId": "listApiKeys",
-      "folder": [
-        "API Keys"
-      ],
+      "folder": ["API Keys"],
       "name": "List API keys",
       "method": "GET",
       "path": "/v1/api-keys"
     },
     {
       "operationId": "createApiKey",
-      "folder": [
-        "API Keys"
-      ],
+      "folder": ["API Keys"],
       "name": "Create temporary API key",
       "method": "POST",
       "path": "/v1/api-keys"
     },
     {
       "operationId": "getApiKey",
-      "folder": [
-        "API Keys"
-      ],
+      "folder": ["API Keys"],
       "name": "Get temporary API key",
       "method": "GET",
       "path": "/v1/api-keys/{keyId}"
     },
     {
       "operationId": "updateApiKey",
-      "folder": [
-        "API Keys"
-      ],
+      "folder": ["API Keys"],
       "name": "Update temporary API key",
       "method": "PATCH",
       "path": "/v1/api-keys/{keyId}"
     },
     {
       "operationId": "rotateApiKey",
-      "folder": [
-        "API Keys"
-      ],
+      "folder": ["API Keys"],
       "name": "Rotate temporary API key",
       "method": "POST",
       "path": "/v1/api-keys/{keyId}/rotate"
     },
     {
       "operationId": "revokeApiKey",
-      "folder": [
-        "API Keys"
-      ],
+      "folder": ["API Keys"],
       "name": "Revoke temporary API key",
       "method": "DELETE",
       "path": "/v1/api-keys/{keyId}"
     },
     {
+      "operationId": "revokeApiKey",
+      "folder": ["API Keys"],
+      "name": "Revoke original temporary API key",
+      "method": "DELETE",
+      "path": "/v1/api-keys/{keyId}"
+    },
+    {
       "operationId": "getWalletById",
-      "folder": [
-        "Wallets"
-      ],
+      "folder": ["Wallets"],
       "name": "Get wallet by id",
       "method": "GET",
       "path": "/v1/wallets/{walletId}"
     },
     {
       "operationId": "getWalletPublicKey",
-      "folder": [
-        "Wallets"
-      ],
+      "folder": ["Wallets"],
       "name": "Get wallet public key",
       "method": "GET",
       "path": "/v1/wallets/public-key"
     },
     {
       "operationId": "getWalletConfig",
-      "folder": [
-        "Wallets"
-      ],
+      "folder": ["Wallets"],
       "name": "Get wallet config",
       "method": "GET",
       "path": "/v1/wallets/config"
     },
     {
       "operationId": "listWalletConfigs",
-      "folder": [
-        "Wallets"
-      ],
+      "folder": ["Wallets"],
       "name": "List wallet configs",
       "method": "GET",
       "path": "/v1/wallets/configs"
     },
     {
       "operationId": "listSwitchProviderOptions",
-      "folder": [
-        "Wallets"
-      ],
+      "folder": ["Wallets"],
       "name": "List switch provider options",
       "method": "GET",
       "path": "/v1/wallets/switch-options"
     },
     {
       "operationId": "aggregateWalletBalances",
-      "folder": [
-        "Wallets"
-      ],
+      "folder": ["Wallets"],
       "name": "Aggregate wallet balances",
       "method": "GET",
       "path": "/v1/wallets/aggregate"
     },
     {
       "operationId": "checkWalletSigner",
-      "folder": [
-        "Wallets"
-      ],
+      "folder": ["Wallets"],
       "name": "Signer check",
       "method": "POST",
       "path": "/v1/wallets/signer-check"
     },
     {
       "operationId": "createProject",
-      "folder": [
-        "Projects"
-      ],
+      "folder": ["Projects"],
       "name": "Create temporary project",
       "method": "POST",
       "path": "/v1/projects"
     },
     {
       "operationId": "listProjects",
-      "folder": [
-        "Projects"
-      ],
+      "folder": ["Projects"],
       "name": "List projects",
       "method": "GET",
       "path": "/v1/projects"
     },
     {
       "operationId": "getProject",
-      "folder": [
-        "Projects"
-      ],
+      "folder": ["Projects"],
       "name": "Get temporary project",
       "method": "GET",
       "path": "/v1/projects/{projectId}"
     },
     {
       "operationId": "updateProject",
-      "folder": [
-        "Projects"
-      ],
+      "folder": ["Projects"],
       "name": "Update temporary project",
       "method": "PATCH",
       "path": "/v1/projects/{projectId}"
     },
     {
       "operationId": "listProjectMembers",
-      "folder": [
-        "Projects"
-      ],
+      "folder": ["Projects"],
       "name": "List project members",
       "method": "GET",
       "path": "/v1/projects/{projectId}/members"
     },
     {
       "operationId": "createProjectApiKey",
-      "folder": [
-        "Projects"
-      ],
+      "folder": ["Projects"],
       "name": "Create project API key",
       "method": "POST",
       "path": "/v1/projects/{projectId}/api-keys"
     },
     {
       "operationId": "listProjectApiKeys",
-      "folder": [
-        "Projects"
-      ],
+      "folder": ["Projects"],
       "name": "List project API keys",
       "method": "GET",
       "path": "/v1/projects/{projectId}/api-keys"
     },
     {
       "operationId": "archiveProject",
-      "folder": [
-        "Projects"
-      ],
+      "folder": ["Projects"],
       "name": "Archive temporary project",
       "method": "DELETE",
       "path": "/v1/projects/{projectId}"
     },
     {
       "operationId": "listTokenTemplates",
-      "folder": [
-        "Issuance",
-        "CRUD"
-      ],
+      "folder": ["Issuance", "CRUD"],
       "name": "List token templates",
       "method": "GET",
       "path": "/v1/issuance/templates"
     },
     {
       "operationId": "getTokenTemplate",
-      "folder": [
-        "Issuance",
-        "CRUD"
-      ],
+      "folder": ["Issuance", "CRUD"],
       "name": "Get stablecoin template",
       "method": "GET",
       "path": "/v1/issuance/templates/{templateId}"
     },
     {
       "operationId": "createToken",
-      "folder": [
-        "Issuance",
-        "CRUD"
-      ],
+      "folder": ["Issuance", "CRUD"],
       "name": "Create CRUD token",
       "method": "POST",
       "path": "/v1/issuance/tokens"
     },
     {
       "operationId": "listTokens",
-      "folder": [
-        "Issuance",
-        "CRUD"
-      ],
+      "folder": ["Issuance", "CRUD"],
       "name": "List tokens",
       "method": "GET",
       "path": "/v1/issuance/tokens"
     },
     {
       "operationId": "getToken",
-      "folder": [
-        "Issuance",
-        "CRUD"
-      ],
+      "folder": ["Issuance", "CRUD"],
       "name": "Get CRUD token",
       "method": "GET",
       "path": "/v1/issuance/tokens/{tokenId}"
     },
     {
       "operationId": "updateToken",
-      "folder": [
-        "Issuance",
-        "CRUD"
-      ],
+      "folder": ["Issuance", "CRUD"],
       "name": "Update CRUD token",
       "method": "PATCH",
       "path": "/v1/issuance/tokens/{tokenId}"
     },
     {
       "operationId": "listTokenAllowlist",
-      "folder": [
-        "Issuance",
-        "CRUD"
-      ],
+      "folder": ["Issuance", "CRUD"],
       "name": "List token allowlist",
       "method": "GET",
       "path": "/v1/issuance/tokens/{tokenId}/allowlist"
     },
     {
       "operationId": "addTokenAllowlistEntry",
-      "folder": [
-        "Issuance",
-        "CRUD"
-      ],
+      "folder": ["Issuance", "CRUD"],
       "name": "Add allowlist entry",
       "method": "POST",
       "path": "/v1/issuance/tokens/{tokenId}/allowlist"
     },
     {
       "operationId": "listTokenAllowlist",
-      "folder": [
-        "Issuance",
-        "CRUD"
-      ],
+      "folder": ["Issuance", "CRUD"],
       "name": "List token allowlist after insert",
       "method": "GET",
       "path": "/v1/issuance/tokens/{tokenId}/allowlist"
     },
     {
       "operationId": "removeTokenAllowlistEntry",
-      "folder": [
-        "Issuance",
-        "CRUD"
-      ],
+      "folder": ["Issuance", "CRUD"],
       "name": "Remove allowlist entry",
       "method": "DELETE",
       "path": "/v1/issuance/tokens/{tokenId}/allowlist/{entryId}"
     },
     {
       "operationId": "createToken",
-      "folder": [
-        "Issuance",
-        "Prepare"
-      ],
+      "folder": ["Issuance", "Prepare"],
       "name": "Create prepare token",
       "method": "POST",
       "path": "/v1/issuance/tokens"
     },
     {
       "operationId": "prepareDeployToken",
-      "folder": [
-        "Issuance",
-        "Prepare"
-      ],
+      "folder": ["Issuance", "Prepare"],
       "name": "Prepare deploy token",
       "method": "POST",
       "path": "/v1/issuance/tokens/{tokenId}/deploy/prepare"
     },
     {
       "operationId": "deployToken",
-      "folder": [
-        "Issuance",
-        "Prepare"
-      ],
+      "folder": ["Issuance", "Prepare"],
       "name": "Deploy prepare token",
       "method": "POST",
       "path": "/v1/issuance/tokens/{tokenId}/deploy"
     },
     {
       "operationId": "prepareMint",
-      "folder": [
-        "Issuance",
-        "Prepare"
-      ],
+      "folder": ["Issuance", "Prepare"],
       "name": "Prepare mint",
       "method": "POST",
       "path": "/v1/issuance/tokens/{tokenId}/mint/prepare"
     },
     {
       "operationId": "executeMint",
-      "folder": [
-        "Issuance",
-        "Prepare"
-      ],
+      "folder": ["Issuance", "Prepare"],
       "name": "Mint to external address",
       "method": "POST",
       "path": "/v1/issuance/tokens/{tokenId}/mint"
     },
     {
       "operationId": "executeMint",
-      "folder": [
-        "Issuance",
-        "Prepare"
-      ],
+      "folder": ["Issuance", "Prepare"],
       "name": "Mint to secondary address",
       "method": "POST",
       "path": "/v1/issuance/tokens/{tokenId}/mint"
     },
     {
       "operationId": "executeMint",
-      "folder": [
-        "Issuance",
-        "Prepare"
-      ],
+      "folder": ["Issuance", "Prepare"],
       "name": "Mint to custody wallet",
       "method": "POST",
       "path": "/v1/issuance/tokens/{tokenId}/mint"
     },
     {
       "operationId": "prepareBurn",
-      "folder": [
-        "Issuance",
-        "Prepare"
-      ],
+      "folder": ["Issuance", "Prepare"],
       "name": "Prepare burn",
       "method": "POST",
       "path": "/v1/issuance/tokens/{tokenId}/burn/prepare"
     },
     {
       "operationId": "prepareSeize",
-      "folder": [
-        "Issuance",
-        "Prepare"
-      ],
+      "folder": ["Issuance", "Prepare"],
       "name": "Prepare seize",
       "method": "POST",
       "path": "/v1/issuance/tokens/{tokenId}/seize/prepare"
     },
     {
       "operationId": "prepareForceBurn",
-      "folder": [
-        "Issuance",
-        "Prepare"
-      ],
+      "folder": ["Issuance", "Prepare"],
       "name": "Prepare force burn",
       "method": "POST",
       "path": "/v1/issuance/tokens/{tokenId}/force-burn/prepare"
     },
     {
       "operationId": "prepareUpdateAuthority",
-      "folder": [
-        "Issuance",
-        "Prepare"
-      ],
+      "folder": ["Issuance", "Prepare"],
       "name": "Prepare authority update",
       "method": "POST",
       "path": "/v1/issuance/tokens/{tokenId}/authority/prepare"
     },
     {
       "operationId": "listTokenTransactions",
-      "folder": [
-        "Issuance",
-        "Prepare"
-      ],
+      "folder": ["Issuance", "Prepare"],
       "name": "List pending token transactions",
       "method": "GET",
       "path": "/v1/issuance/tokens/{tokenId}/transactions"
     },
     {
       "operationId": "createToken",
-      "folder": [
-        "Issuance",
-        "Execute"
-      ],
+      "folder": ["Issuance", "Execute"],
       "name": "Create execute token",
       "method": "POST",
       "path": "/v1/issuance/tokens"
     },
     {
       "operationId": "deployToken",
-      "folder": [
-        "Issuance",
-        "Execute"
-      ],
+      "folder": ["Issuance", "Execute"],
       "name": "Deploy execute token",
       "method": "POST",
       "path": "/v1/issuance/tokens/{tokenId}/deploy"
     },
     {
       "operationId": "executeMint",
-      "folder": [
-        "Issuance",
-        "Execute"
-      ],
+      "folder": ["Issuance", "Execute"],
       "name": "Mint execute source account",
       "method": "POST",
       "path": "/v1/issuance/tokens/{tokenId}/mint"
     },
     {
       "operationId": "executeMint",
-      "folder": [
-        "Issuance",
-        "Execute"
-      ],
+      "folder": ["Issuance", "Execute"],
       "name": "Mint execute destination account",
       "method": "POST",
       "path": "/v1/issuance/tokens/{tokenId}/mint"
     },
     {
       "operationId": "executeMint",
-      "folder": [
-        "Issuance",
-        "Execute"
-      ],
+      "folder": ["Issuance", "Execute"],
       "name": "Mint execute custody account",
       "method": "POST",
       "path": "/v1/issuance/tokens/{tokenId}/mint"
     },
     {
       "operationId": "pauseToken",
-      "folder": [
-        "Issuance",
-        "Execute"
-      ],
+      "folder": ["Issuance", "Execute"],
       "name": "Pause token",
       "method": "POST",
       "path": "/v1/issuance/tokens/{tokenId}/pause"
     },
     {
       "operationId": "getToken",
-      "folder": [
-        "Issuance",
-        "Execute"
-      ],
+      "folder": ["Issuance", "Execute"],
       "name": "Get paused token",
       "method": "GET",
       "path": "/v1/issuance/tokens/{tokenId}"
     },
     {
       "operationId": "unpauseToken",
-      "folder": [
-        "Issuance",
-        "Execute"
-      ],
+      "folder": ["Issuance", "Execute"],
       "name": "Unpause token",
       "method": "POST",
       "path": "/v1/issuance/tokens/{tokenId}/unpause"
     },
     {
       "operationId": "freezeAccount",
-      "folder": [
-        "Issuance",
-        "Execute"
-      ],
+      "folder": ["Issuance", "Execute"],
       "name": "Freeze token account",
       "method": "POST",
       "path": "/v1/issuance/tokens/{tokenId}/freeze"
     },
     {
       "operationId": "listFrozenAccounts",
-      "folder": [
-        "Issuance",
-        "Execute"
-      ],
+      "folder": ["Issuance", "Execute"],
       "name": "List frozen accounts",
       "method": "GET",
       "path": "/v1/issuance/tokens/{tokenId}/frozen"
     },
     {
       "operationId": "unfreezeAccount",
-      "folder": [
-        "Issuance",
-        "Execute"
-      ],
+      "folder": ["Issuance", "Execute"],
       "name": "Unfreeze token account",
       "method": "POST",
       "path": "/v1/issuance/tokens/{tokenId}/unfreeze"
     },
     {
       "operationId": "executeBurn",
-      "folder": [
-        "Issuance",
-        "Execute"
-      ],
+      "folder": ["Issuance", "Execute"],
       "name": "Burn tokens",
       "method": "POST",
       "path": "/v1/issuance/tokens/{tokenId}/burn"
     },
     {
       "operationId": "executeSeize",
-      "folder": [
-        "Issuance",
-        "Execute"
-      ],
+      "folder": ["Issuance", "Execute"],
       "name": "Seize tokens",
       "method": "POST",
       "path": "/v1/issuance/tokens/{tokenId}/seize"
     },
     {
       "operationId": "executeForceBurn",
-      "folder": [
-        "Issuance",
-        "Execute"
-      ],
+      "folder": ["Issuance", "Execute"],
       "name": "Force burn tokens",
       "method": "POST",
       "path": "/v1/issuance/tokens/{tokenId}/force-burn"
     },
     {
       "operationId": "executeUpdateAuthority",
-      "folder": [
-        "Issuance",
-        "Execute"
-      ],
+      "folder": ["Issuance", "Execute"],
       "name": "Update mint authority",
       "method": "POST",
       "path": "/v1/issuance/tokens/{tokenId}/authority"
     },
     {
       "operationId": "refreshTokenSupply",
-      "folder": [
-        "Issuance",
-        "Execute"
-      ],
+      "folder": ["Issuance", "Execute"],
       "name": "Refresh token supply",
       "method": "POST",
       "path": "/v1/issuance/tokens/{tokenId}/supply/refresh"
     },
     {
       "operationId": "listTokenTransactions",
-      "folder": [
-        "Issuance",
-        "Execute"
-      ],
+      "folder": ["Issuance", "Execute"],
       "name": "List confirmed token transactions",
       "method": "GET",
       "path": "/v1/issuance/tokens/{tokenId}/transactions"
     },
     {
       "operationId": "screenComplianceAddress",
-      "folder": [
-        "Compliance"
-      ],
+      "folder": ["Compliance"],
       "name": "Screen address",
       "method": "POST",
       "path": "/v1/compliance/address-screenings"
     },
     {
       "operationId": "getPaymentWalletBalances",
-      "folder": [
-        "Payments"
-      ],
+      "folder": ["Payments"],
       "name": "Get wallet balances",
       "method": "GET",
       "path": "/v1/payments/wallets/{walletId}/balances"
     },
     {
       "operationId": "getPaymentWalletPolicy",
-      "folder": [
-        "Payments"
-      ],
+      "folder": ["Payments"],
       "name": "Get wallet policy",
       "method": "GET",
       "path": "/v1/payments/wallets/{walletId}/policies"
     },
     {
       "operationId": "updatePaymentWalletPolicy",
-      "folder": [
-        "Payments"
-      ],
+      "folder": ["Payments"],
       "name": "Update wallet policy",
       "method": "PUT",
       "path": "/v1/payments/wallets/{walletId}/policies"
     },
     {
       "operationId": "preparePaymentTransfer",
-      "folder": [
-        "Payments"
-      ],
+      "folder": ["Payments"],
       "name": "Prepare SOL transfer",
       "method": "POST",
       "path": "/v1/payments/transfers/prepare"
     },
     {
       "operationId": "createPaymentTransfer",
-      "folder": [
-        "Payments"
-      ],
+      "folder": ["Payments"],
       "name": "Execute SOL transfer",
       "method": "POST",
       "path": "/v1/payments/transfers"
     },
     {
       "operationId": "listPaymentTransfers",
-      "folder": [
-        "Payments"
-      ],
+      "folder": ["Payments"],
       "name": "List wallet transfers",
       "method": "GET",
       "path": "/v1/payments/transfers"
     },
     {
       "operationId": "getPaymentTransfer",
-      "folder": [
-        "Payments"
-      ],
+      "folder": ["Payments"],
       "name": "Get executed transfer",
       "method": "GET",
       "path": "/v1/payments/transfers/{transferId}"

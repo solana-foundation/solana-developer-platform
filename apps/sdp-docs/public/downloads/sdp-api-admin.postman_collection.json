@@ -291,8 +291,12 @@
                 "exec": [
                   "pm.test(\"Status 201\", function () { pm.response.to.have.status(201); });",
                   "const body = pm.response.json();",
+                  "pm.collectionVariables.set(\"previousTemporaryApiKeyId\", pm.collectionVariables.get(\"temporaryApiKeyId\"));",
+                  "pm.collectionVariables.set(\"previousTemporaryApiKeyName\", pm.collectionVariables.get(\"temporaryApiKeyName\"));",
                   "pm.expect(body.data.apiKey.id).to.match(/^key_/);",
-                  "pm.expect(body.data.apiKey.key).to.match(/^sk_test_/);"
+                  "pm.expect(body.data.apiKey.key).to.match(/^sk_test_/);",
+                  "pm.collectionVariables.set(\"temporaryApiKeyId\", body.data.apiKey.id);",
+                  "pm.collectionVariables.set(\"temporaryApiKeyName\", body.data.apiKey.name);"
                 ]
               }
             }
@@ -332,6 +336,56 @@
                 "exec": [
                   "if (!pm.collectionVariables.get(\"temporaryApiKeyId\")) { throw new Error(\"temporaryApiKeyId is required before this request.\"); }",
                   "if (!pm.collectionVariables.get(\"temporaryApiKeyName\")) { throw new Error(\"temporaryApiKeyName is required before this request.\"); }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", function () { pm.response.to.have.status(200); });",
+                  "const body = pm.response.json();",
+                  "pm.expect(body.data.success).to.eql(true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Revoke original temporary API key",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{apiKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/api-keys/{{previousTemporaryApiKeyId}}",
+            "description": "Deactivates (soft deletes) an API key and invalidates it immediately.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"confirmation\": \"{{previousTemporaryApiKeyName}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.collectionVariables.get(\"previousTemporaryApiKeyId\")) { throw new Error(\"previousTemporaryApiKeyId is required before this request.\"); }",
+                  "if (!pm.collectionVariables.get(\"previousTemporaryApiKeyName\")) { throw new Error(\"previousTemporaryApiKeyName is required before this request.\"); }"
                 ]
               }
             },

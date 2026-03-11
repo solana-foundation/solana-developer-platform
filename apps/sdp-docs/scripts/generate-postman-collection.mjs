@@ -16,6 +16,8 @@ const environmentTemplatePath = path.join(
 
 const DEFAULT_EXTERNAL_ADDRESS = "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ";
 const DEFAULT_SECONDARY_ADDRESS = "7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv";
+// Keep generated artifacts stable across docs builds.
+const DETERMINISTIC_TIMESTAMP = "1970-01-01T00:00:00.000Z";
 const HIDDEN_TAG_SLUGS = new Set([
   "rpc",
   "admin",
@@ -155,7 +157,7 @@ function buildEnvironmentTemplate() {
       },
     ],
     _postman_variable_scope: "environment",
-    _postman_exported_at: new Date().toISOString(),
+    _postman_exported_at: DETERMINISTIC_TIMESTAMP,
     _postman_exported_using: "Codex",
   };
 }
@@ -344,8 +346,12 @@ function automatedRequests(operations) {
       body: JSON.stringify({ gracePeriodHours: 1 }, null, 2),
       tests: jsonStatusTest(
         201,
+        'pm.collectionVariables.set("previousTemporaryApiKeyId", pm.collectionVariables.get("temporaryApiKeyId"));',
+        'pm.collectionVariables.set("previousTemporaryApiKeyName", pm.collectionVariables.get("temporaryApiKeyName"));',
         "pm.expect(body.data.apiKey.id).to.match(/^key_/);",
-        "pm.expect(body.data.apiKey.key).to.match(/^sk_test_/);"
+        "pm.expect(body.data.apiKey.key).to.match(/^sk_test_/);",
+        'pm.collectionVariables.set("temporaryApiKeyId", body.data.apiKey.id);',
+        'pm.collectionVariables.set("temporaryApiKeyName", body.data.apiKey.name);'
       ),
     }),
     request({
@@ -357,6 +363,20 @@ function automatedRequests(operations) {
       description: op("revokeApiKey"),
       prerequest: [requireVar("temporaryApiKeyId"), requireVar("temporaryApiKeyName")],
       body: JSON.stringify({ confirmation: "{{temporaryApiKeyName}}" }, null, 2),
+      tests: jsonStatusTest(200, "pm.expect(body.data.success).to.eql(true);"),
+    }),
+    request({
+      operationId: "revokeApiKey",
+      folder: ["API Keys"],
+      name: "Revoke original temporary API key",
+      method: "DELETE",
+      url: "/v1/api-keys/{{previousTemporaryApiKeyId}}",
+      description: op("revokeApiKey"),
+      prerequest: [
+        requireVar("previousTemporaryApiKeyId"),
+        requireVar("previousTemporaryApiKeyName"),
+      ],
+      body: JSON.stringify({ confirmation: "{{previousTemporaryApiKeyName}}" }, null, 2),
       tests: jsonStatusTest(200, "pm.expect(body.data.success).to.eql(true);"),
     }),
     request({
@@ -1360,7 +1380,7 @@ async function run() {
   };
 
   const manifest = {
-    generatedAt: new Date().toISOString(),
+    generatedAt: DETERMINISTIC_TIMESTAMP,
     sourceOpenApi: "apps/sdp-api/generated/openapi.json",
     totals: {
       apiKeyOperations: operations.size,

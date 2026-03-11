@@ -246,7 +246,15 @@ jobs:
           cache: pnpm
 
       - name: Install
+        if: ${{ env.POSTMAN_API_BASE_URL != '' && env.POSTMAN_ADMIN_API_KEY != '' }}
         run: pnpm install --frozen-lockfile
 
+      - name: Skip Postman API key suite (missing CI secrets)
+        if: ${{ env.POSTMAN_API_BASE_URL == '' || env.POSTMAN_ADMIN_API_KEY == '' }}
+        run: |
+          echo "Skipping Postman API Key Suite."
+          echo "Configure POSTMAN_API_BASE_URL and POSTMAN_ADMIN_API_KEY to enable the required smoke suite."
+
       - name: Run Postman API key suite
+        if: ${{ env.POSTMAN_API_BASE_URL != '' && env.POSTMAN_ADMIN_API_KEY != '' }}
         run: pnpm test:postman
