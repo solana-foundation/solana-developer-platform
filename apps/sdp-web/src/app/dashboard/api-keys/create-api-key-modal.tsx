@@ -37,11 +37,13 @@ function formatDisplayDate(value: string): string {
 interface CreateApiKeyModalProps {
   triggerMode?: "button" | "icon";
   triggerLabel?: string;
+  triggerVariant?: "default" | "secondary";
 }
 
 export function CreateApiKeyModal({
   triggerMode = "button",
   triggerLabel = "Create API key",
+  triggerVariant = "default",
 }: CreateApiKeyModalProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [step, setStep] = useState<1 | 2>(1);
@@ -65,7 +67,7 @@ export function CreateApiKeyModal({
       <Button
         type="button"
         size={triggerMode === "icon" ? "icon" : "default"}
-        variant={triggerMode === "icon" ? "secondary" : "default"}
+        variant={triggerMode === "icon" ? "secondary" : triggerVariant}
         onClick={() => setIsOpen(true)}
         aria-label={triggerMode === "icon" ? "Create API key" : triggerLabel}
       >

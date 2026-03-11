@@ -15,12 +15,14 @@ interface CreateWalletModalProps {
   disabled?: boolean;
   disabledReason?: string;
   providers?: KnownCustodyProvider[];
+  triggerLabel?: string;
 }
 
 export function CreateWalletModal({
   disabled = false,
   disabledReason,
   providers = [],
+  triggerLabel = "New wallet",
 }: CreateWalletModalProps) {
   const [isOpen, setIsOpen] = useState(false);
   const hasProviderOptions = providers.length > 0;
@@ -39,7 +41,7 @@ export function CreateWalletModal({
         disabled={disabled}
         title={disabled ? disabledReason : undefined}
       >
-        New wallet
+        {triggerLabel}
       </Button>
 
       {isOpen ? (
