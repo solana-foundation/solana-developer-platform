@@ -6,8 +6,8 @@ import { getPageContentStyle } from "./page-layout";
 
 const headerSpacingClassNames = {
   displayContainer:
-    "px-[var(--layout-page-header-display-inset)] pt-[var(--layout-page-header-display-padding-top)]",
-  defaultInset: "px-[var(--layout-page-header-default-inset)]",
+    "px-[var(--page-layout-inline-padding)] pt-[var(--layout-page-header-display-padding-top)]",
+  defaultInset: "px-[var(--page-layout-inline-padding)]",
   titleRow:
     "pt-[var(--layout-page-header-title-padding-top)] pb-[var(--layout-page-header-title-padding-bottom)]",
   secondaryRow: "pb-[var(--layout-page-header-secondary-padding-bottom)]",

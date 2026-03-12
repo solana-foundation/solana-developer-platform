@@ -12,7 +12,7 @@ The dashboard now uses composable layout primitives instead of a route-aware she
 - `PageHeader`: page-level header for title, actions, tabs, and back links
 - `PageBody`: scrolling body container with width presets or full-bleed fill mode
 
-Declare width once with `PageLayout` so wide/narrow headers, tabs, back links, and body content share the same horizontal grid. The `display` header variant uses shell-level inset tokens instead.
+Declare width and inset once with `PageLayout` so headers, tabs, back links, and body content share the same horizontal grid. Display-style pages should use `inset="display"` alongside `variant="display"` so the hero header and body content stay aligned.
 Sidebar width, shell gutter, nav row density, and header insets are defined by layout tokens in `src/styles/solana-design-system.css`; shared layout primitives should consume those tokens instead of hard-coded spacing classes.
 
 ## Page Pattern
@@ -47,6 +47,15 @@ Use `fill` when the page content needs to own the full remaining viewport withou
   <PageBody fill>
     <ApiPlayground />
   </PageBody>
+</PageLayout>
+```
+
+Display pages should opt into the larger shell gutter once at the layout level:
+
+```tsx
+<PageLayout width="default" inset="display">
+  <PageHeader variant="display" title="Home" />
+  <PageBody>{/* aligned display content */}</PageBody>
 </PageLayout>
 ```
 

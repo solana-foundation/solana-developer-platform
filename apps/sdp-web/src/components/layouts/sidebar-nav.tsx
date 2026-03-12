@@ -137,7 +137,7 @@ function OrgSwitcherPill({ orgName, orgImageUrl, onClick }: OrgSwitcherPillProps
     <button
       type="button"
       onClick={onClick}
-      className="relative flex w-full cursor-pointer items-center gap-[var(--layout-shell-top-controls-gap)] rounded-[10px] border border-[rgba(28,28,29,0.08)] bg-white py-2 pr-3 pl-2 shadow-[0px_1px_3px_0px_rgba(0,0,0,0.1)] outline-none transition-[background-color,box-shadow] duration-150 ease-out hover:bg-[rgba(255,255,255,0.9)] focus-visible:ring-2 focus-visible:ring-[rgba(28,28,29,0.14)] motion-reduce:transition-none"
+      className="relative flex max-w-[var(--layout-shell-top-control-max-width)] cursor-pointer items-center gap-[var(--layout-shell-top-controls-gap)] rounded-[10px] border border-[rgba(28,28,29,0.08)] bg-white py-2 pr-3 pl-2 shadow-[0px_1px_3px_0px_rgba(0,0,0,0.1)] outline-none transition-[background-color,box-shadow] duration-150 ease-out hover:bg-[rgba(255,255,255,0.9)] focus-visible:ring-2 focus-visible:ring-[rgba(28,28,29,0.14)] motion-reduce:transition-none"
     >
       {orgImageUrl ? (
         <Image src={orgImageUrl} alt={orgName} width={28} height={28} className="rounded-[6px]" />
@@ -251,15 +251,15 @@ export function SidebarNav({
     <nav
       aria-label="Main navigation"
       className={cn(
-        "flex w-[var(--layout-shell-sidebar-width)] shrink-0 flex-col justify-between bg-[#e9e7de]",
+        "flex w-full max-w-[var(--layout-shell-sidebar-width)] shrink-0 flex-col justify-between bg-[#e9e7de]",
         className
       )}
     >
       {/* Top: org switcher + nav sections */}
-      <div className="flex flex-col gap-[var(--layout-shell-sidebar-top-gap)] p-[var(--layout-shell-sidebar-padding)]">
+      <div className="flex flex-col gap-[var(--layout-shell-sidebar-top-gap)] px-[var(--layout-shell-sidebar-padding-inline)] py-[var(--layout-shell-sidebar-padding-block)]">
         {/* Org switcher row */}
-        <div className="flex items-center gap-[var(--layout-shell-top-controls-gap)]">
-          <div className="min-w-0 flex-1">
+        <div className="flex items-center justify-between gap-[var(--layout-shell-top-controls-gap)]">
+          <div className="min-w-0 max-w-[var(--layout-shell-top-control-max-width)] shrink">
             {orgSwitcher ?? (
               <OrgSwitcherPill orgName={orgName} orgImageUrl={orgImageUrl} onClick={onOrgClick} />
             )}
@@ -292,7 +292,7 @@ export function SidebarNav({
 
       {/* Bottom: API keys, Docs, Settings, divider, user profile */}
       <div className="flex flex-col">
-        <div className="flex flex-col gap-[var(--layout-shell-sidebar-section-title-gap)] p-[var(--layout-shell-sidebar-padding)]">
+        <div className="flex flex-col gap-[var(--layout-shell-sidebar-section-title-gap)] px-[var(--layout-shell-sidebar-padding-inline)] py-[var(--layout-shell-sidebar-padding-block)]">
           {bottomNavItems.map((item) => (
             <NavItemLink key={item.label} item={item} pathname={pathname} />
           ))}

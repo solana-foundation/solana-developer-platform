@@ -375,7 +375,8 @@
   --layout-shell-sidebar-width: 272px;
   --layout-shell-frame-radius: 24px;
   --layout-shell-frame-border-width: 1.5px;
-  --layout-shell-sidebar-padding: var(--space-8);
+  --layout-shell-sidebar-padding-inline: var(--space-8);
+  --layout-shell-sidebar-padding-block: var(--space-8);
   --layout-shell-sidebar-top-gap: var(--space-8);
   --layout-shell-sidebar-sections-gap: var(--space-6);
   --layout-shell-sidebar-section-title-gap: var(--space-2);
@@ -387,10 +388,17 @@
   --layout-shell-nav-row-gap: var(--space-3);
   --layout-shell-nav-row-radius: 12px;
   --layout-shell-top-controls-gap: var(--space-2);
-  --layout-shell-collapse-button-size: 36px;
+  --layout-shell-top-control-icon-size: 20px;
+  --layout-shell-collapse-button-size: var(--layout-shell-top-control-icon-size);
+  --layout-shell-top-control-max-width: calc(
+    var(--layout-shell-sidebar-width) -
+    (var(--layout-shell-sidebar-padding-inline) * 2) -
+    var(--layout-shell-collapse-button-size) -
+    var(--layout-shell-top-controls-gap)
+  );
   --layout-shell-trigger-size: 32px;
-  --layout-shell-trigger-inline-padding: calc(var(--layout-shell-gutter) + var(--space-4));
-  --layout-shell-trigger-top-padding: calc(var(--layout-shell-gutter) + var(--space-3));
+  --layout-shell-trigger-inline-padding: var(--layout-shell-sidebar-padding-inline);
+  --layout-shell-trigger-top-padding: var(--layout-shell-sidebar-padding-block);
   --layout-page-header-display-inset: var(--page-margin-lg);
   --layout-page-header-default-inset: var(--page-margin-sm);
   --layout-page-header-display-padding-top: 128px;

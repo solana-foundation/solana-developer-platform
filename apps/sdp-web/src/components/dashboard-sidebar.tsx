@@ -8,9 +8,9 @@ import { useRef } from "react";
 
 const organizationSwitcherAppearance = {
   elements: {
-    rootBox: "block w-full",
+    rootBox: "inline-block max-w-[var(--layout-shell-top-control-max-width)]",
     organizationSwitcherTrigger:
-      "relative flex h-auto w-full items-center gap-2 rounded-[10px] border border-[rgba(28,28,29,0.08)] bg-white py-2 pr-3 pl-2 shadow-[0px_1px_3px_0px_rgba(0,0,0,0.1)] outline-none transition-[background-color,box-shadow] duration-150 ease-out hover:bg-[rgba(255,255,255,0.9)] focus-visible:ring-2 focus-visible:ring-[rgba(28,28,29,0.14)] motion-reduce:transition-none after:pointer-events-none after:absolute after:inset-[-1px] after:rounded-[inherit] after:shadow-[inset_0px_-1px_0px_0px_rgba(0,0,0,0.1)] after:content-['']",
+      "relative flex h-auto max-w-[var(--layout-shell-top-control-max-width)] items-center gap-[var(--layout-shell-top-controls-gap)] rounded-[10px] border border-[rgba(28,28,29,0.08)] bg-white py-2 pr-3 pl-2 shadow-[0px_1px_3px_0px_rgba(0,0,0,0.1)] outline-none transition-[background-color,box-shadow] duration-150 ease-out hover:bg-[rgba(255,255,255,0.9)] focus-visible:ring-2 focus-visible:ring-[rgba(28,28,29,0.14)] motion-reduce:transition-none after:pointer-events-none after:absolute after:inset-[-1px] after:rounded-[inherit] after:shadow-[inset_0px_-1px_0px_0px_rgba(0,0,0,0.1)] after:content-['']",
     organizationSwitcherTriggerIcon: "h-6 w-6 shrink-0 text-text-extra-low",
     organizationPreview__organizationSwitcherTrigger: "min-w-0 flex flex-1 items-center gap-2",
     organizationPreviewAvatarContainer__organizationSwitcherTrigger: "shrink-0",
@@ -37,8 +37,11 @@ export function DashboardSidebar() {
       initial={false}
       animate={{ width: isSidebarOpen ? "var(--layout-shell-sidebar-width)" : 0 }}
       transition={{ duration: 0.22, ease: "easeInOut" }}
-      style={{ pointerEvents: isSidebarOpen ? "auto" : "none" }}
-      className="relative hidden overflow-hidden lg:sticky lg:top-0 lg:flex lg:h-screen lg:shrink-0"
+      style={{
+        maxWidth: "var(--layout-shell-sidebar-width)",
+        pointerEvents: isSidebarOpen ? "auto" : "none",
+      }}
+      className="relative hidden w-full overflow-hidden lg:sticky lg:top-0 lg:flex lg:h-screen lg:shrink-0"
     >
       <SidebarNav
         orgName={organization?.name ?? "Organization"}
