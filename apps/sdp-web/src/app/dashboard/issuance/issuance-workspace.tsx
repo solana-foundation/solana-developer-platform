@@ -7,7 +7,6 @@ import { Input } from "@/components/ui/input";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { getStoredApiKeySecret } from "@/lib/playground-api-keys";
 import type { PaymentsDashboardWallet } from "@sdp/types";
-import { AnimatePresence, motion } from "framer-motion";
 import { Plus, Search } from "lucide-react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
@@ -180,17 +179,10 @@ export function IssuanceWorkspace({
   }, [tokens, search]);
 
   return (
-    <AnimatePresence mode="wait">
+    <>
       {issuanceTab === "tokens" ? (
         <PageBody key="tokens-body">
-          <motion.div
-            key="tokens-tab"
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }}
-            transition={{ duration: 0.2, ease: "easeOut" }}
-            className="w-full space-y-6"
-          >
+          <div className="w-full space-y-6">
             {tokensError ? (
               <div className="rounded-xl border border-[#c71f37]/20 bg-[#c71f37]/[0.03] px-4 py-3">
                 <p className="text-sm font-medium text-[#8a1f2a]">Unable to load tokens</p>
@@ -297,18 +289,11 @@ export function IssuanceWorkspace({
               signerWalletsError={signerWalletsError}
               hideTrigger
             />
-          </motion.div>
+          </div>
         </PageBody>
       ) : (
         <PageBody key="playground-body" fill>
-          <motion.div
-            key="playground-tab"
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }}
-            transition={{ duration: 0.2, ease: "easeOut" }}
-            className="h-full min-h-0 w-full"
-          >
+          <div className="h-full min-h-0 w-full">
             <IssuancePlayground
               apiBaseUrl={apiBaseUrl}
               apiKeyValue={playgroundApiKeyValue}
@@ -317,9 +302,9 @@ export function IssuanceWorkspace({
               templatesError={templatesError}
               tokens={tokens}
             />
-          </motion.div>
+          </div>
         </PageBody>
       )}
-    </AnimatePresence>
+    </>
   );
 }

@@ -1,6 +1,5 @@
 "use client";
 
-import { SectionEntry } from "@/app/dashboard/wallets/section-entry";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -1459,173 +1458,167 @@ export function PaymentsOverview({
   return (
     <>
       <div className="grid gap-6">
-        <SectionEntry>
-          <div className="flex flex-wrap items-center gap-3">
-            <Button
-              type="button"
-              className="rounded-full px-5"
-              onClick={() => setSendModalOpen(true)}
-              disabled={!hasWallets}
-            >
-              <ArrowUpRight className="size-4" />
-              Send
-            </Button>
-            <Button
-              type="button"
-              className="rounded-full px-5"
-              onClick={() => setReceiveModalOpen(true)}
-              disabled={!hasWallets}
-            >
-              <ArrowDownLeft className="size-4" />
-              Receive
-            </Button>
-          </div>
-        </SectionEntry>
+        <div className="flex flex-wrap items-center gap-3">
+          <Button
+            type="button"
+            className="rounded-full px-5"
+            onClick={() => setSendModalOpen(true)}
+            disabled={!hasWallets}
+          >
+            <ArrowUpRight className="size-4" />
+            Send
+          </Button>
+          <Button
+            type="button"
+            className="rounded-full px-5"
+            onClick={() => setReceiveModalOpen(true)}
+            disabled={!hasWallets}
+          >
+            <ArrowDownLeft className="size-4" />
+            Receive
+          </Button>
+        </div>
 
-        <SectionEntry delay={0.04}>
-          <div className="grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(20rem,0.8fr)]">
-            <div className="flex min-h-[244px] flex-col justify-between rounded-[24px] border border-[rgba(28,28,29,0.08)] bg-[rgba(28,28,29,0.03)] p-8 sm:p-10">
-              <div className="space-y-3">
-                <p className="text-[15px] font-medium tracking-[0.01em] text-[#1c1c1d]">
-                  Total SDP balance
-                </p>
-              </div>
-              <div className="space-y-3">
-                <p className="text-[38px] leading-none font-medium tracking-[-0.05em] text-[#1c1c1d] sm:text-[54px]">
-                  {formatCurrencyAmount(totalBalance)}
-                </p>
-                <p className="text-sm text-[rgba(28,28,29,0.56)]">
-                  Aggregated across {walletCount} {walletCount === 1 ? "wallet" : "wallets"}.
-                </p>
-              </div>
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(20rem,0.8fr)]">
+          <div className="flex min-h-[244px] flex-col justify-between rounded-[24px] border border-[rgba(28,28,29,0.08)] bg-[rgba(28,28,29,0.03)] p-8 sm:p-10">
+            <div className="space-y-3">
+              <p className="text-[15px] font-medium tracking-[0.01em] text-[#1c1c1d]">
+                Total SDP balance
+              </p>
             </div>
-
-            <div className="grid gap-1.5">
-              {aggregateBalances.length > 0 ? (
-                aggregateBalances.map((balance) => (
-                  <div
-                    key={`${balance.token}-${balance.mint}`}
-                    className="flex min-h-[78px] items-center justify-between gap-4 rounded-[20px] border border-[rgba(28,28,29,0.08)] bg-[rgba(28,28,29,0.03)] px-6 py-5"
-                  >
-                    <p className="text-[18px] font-medium tracking-[0.04em] text-[#1c1c1d] uppercase">
-                      {balance.token}
-                    </p>
-                    <p className="text-right text-[18px] font-medium tracking-[0.01em] text-[#1c1c1d] sm:text-[20px]">
-                      {formatCurrencyAmount(balance.uiAmount)}
-                    </p>
-                  </div>
-                ))
-              ) : (
-                <div className="flex min-h-[78px] items-center rounded-[20px] border border-[rgba(28,28,29,0.08)] bg-[rgba(28,28,29,0.03)] px-6 py-5 text-sm text-[rgba(28,28,29,0.64)]">
-                  No aggregated balance rows available yet.
-                </div>
-              )}
+            <div className="space-y-3">
+              <p className="text-[38px] leading-none font-medium tracking-[-0.05em] text-[#1c1c1d] sm:text-[54px]">
+                {formatCurrencyAmount(totalBalance)}
+              </p>
+              <p className="text-sm text-[rgba(28,28,29,0.56)]">
+                Aggregated across {walletCount} {walletCount === 1 ? "wallet" : "wallets"}.
+              </p>
             </div>
           </div>
 
-          {liveWalletsError ? (
-            <p className="mt-4 text-sm text-[#9e2b38]">{liveWalletsError}</p>
-          ) : null}
-          {liveAggregateError ? (
-            <p className="mt-2 text-sm text-[#9e2b38]">{liveAggregateError}</p>
-          ) : null}
-        </SectionEntry>
-
-        <SectionEntry delay={0.08}>
-          <Card>
-            <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-              <div className="space-y-1">
-                <CardTitle>Recent transactions</CardTitle>
-                <CardDescription>
-                  Latest transfer activity across all organization wallets.
-                </CardDescription>
-              </div>
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={handleRefresh}
-                disabled={isRefreshing}
-              >
-                <RefreshCw className={`size-4 ${isRefreshing ? "animate-spin" : ""}`} />
-                {isRefreshing ? "Refreshing..." : "Refresh"}
-              </Button>
-            </CardHeader>
-            <CardContent>
-              {liveTransfersError ? (
-                <p className="text-sm text-[#9e2b38]">{liveTransfersError}</p>
-              ) : liveTransfers.length === 0 ? (
-                <p className="text-sm text-[rgba(28,28,29,0.72)]">No transactions found yet.</p>
-              ) : (
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Status</TableHead>
-                        <TableHead>Direction</TableHead>
-                        <TableHead>Asset</TableHead>
-                        <TableHead>Counterparty</TableHead>
-                        <TableHead>Signature</TableHead>
-                        <TableHead>Created</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {liveTransfers.map((transfer) => {
-                        const counterparty = resolveCounterparty(transfer);
-
-                        return (
-                          <TableRow key={transfer.id}>
-                            <TableCell>
-                              <span
-                                className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${statusClassName(transfer.status)}`}
-                              >
-                                {transfer.status}
-                              </span>
-                            </TableCell>
-                            <TableCell className="text-[rgba(28,28,29,0.72)]">
-                              {formatDirection(transfer.direction)}
-                            </TableCell>
-                            <TableCell className="font-medium">
-                              {formatDisplayAmount(transfer.amount, transfer.token)}
-                            </TableCell>
-                            <TableCell className="font-mono text-xs text-[rgba(28,28,29,0.72)]">
-                              <div
-                                className="max-w-[12rem] truncate sm:max-w-[18rem]"
-                                title={counterparty}
-                              >
-                                {counterparty}
-                              </div>
-                            </TableCell>
-                            <TableCell className="font-mono text-xs">
-                              {transfer.signature ? (
-                                <a
-                                  href={getDevnetExplorerUrl(transfer.signature)}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="inline-flex items-center gap-1 text-[#1c1c1d] underline underline-offset-2"
-                                  title={transfer.signature}
-                                >
-                                  <span className="max-w-[9rem] truncate sm:max-w-[12rem]">
-                                    {transfer.signature}
-                                  </span>
-                                  <ExternalLink className="size-3" />
-                                </a>
-                              ) : (
-                                <span className="text-[rgba(28,28,29,0.52)]">Pending</span>
-                              )}
-                            </TableCell>
-                            <TableCell className="text-[rgba(28,28,29,0.72)]">
-                              {formatTimestamp(transfer.createdAt)}
-                            </TableCell>
-                          </TableRow>
-                        );
-                      })}
-                    </TableBody>
-                  </Table>
+          <div className="grid gap-1.5">
+            {aggregateBalances.length > 0 ? (
+              aggregateBalances.map((balance) => (
+                <div
+                  key={`${balance.token}-${balance.mint}`}
+                  className="flex min-h-[78px] items-center justify-between gap-4 rounded-[20px] border border-[rgba(28,28,29,0.08)] bg-[rgba(28,28,29,0.03)] px-6 py-5"
+                >
+                  <p className="text-[18px] font-medium tracking-[0.04em] text-[#1c1c1d] uppercase">
+                    {balance.token}
+                  </p>
+                  <p className="text-right text-[18px] font-medium tracking-[0.01em] text-[#1c1c1d] sm:text-[20px]">
+                    {formatCurrencyAmount(balance.uiAmount)}
+                  </p>
                 </div>
-              )}
-            </CardContent>
-          </Card>
-        </SectionEntry>
+              ))
+            ) : (
+              <div className="flex min-h-[78px] items-center rounded-[20px] border border-[rgba(28,28,29,0.08)] bg-[rgba(28,28,29,0.03)] px-6 py-5 text-sm text-[rgba(28,28,29,0.64)]">
+                No aggregated balance rows available yet.
+              </div>
+            )}
+          </div>
+        </div>
+
+        {liveWalletsError ? (
+          <p className="mt-4 text-sm text-[#9e2b38]">{liveWalletsError}</p>
+        ) : null}
+        {liveAggregateError ? (
+          <p className="mt-2 text-sm text-[#9e2b38]">{liveAggregateError}</p>
+        ) : null}
+
+        <Card>
+          <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="space-y-1">
+              <CardTitle>Recent transactions</CardTitle>
+              <CardDescription>
+                Latest transfer activity across all organization wallets.
+              </CardDescription>
+            </div>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={handleRefresh}
+              disabled={isRefreshing}
+            >
+              <RefreshCw className={`size-4 ${isRefreshing ? "animate-spin" : ""}`} />
+              {isRefreshing ? "Refreshing..." : "Refresh"}
+            </Button>
+          </CardHeader>
+          <CardContent>
+            {liveTransfersError ? (
+              <p className="text-sm text-[#9e2b38]">{liveTransfersError}</p>
+            ) : liveTransfers.length === 0 ? (
+              <p className="text-sm text-[rgba(28,28,29,0.72)]">No transactions found yet.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Direction</TableHead>
+                      <TableHead>Asset</TableHead>
+                      <TableHead>Counterparty</TableHead>
+                      <TableHead>Signature</TableHead>
+                      <TableHead>Created</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {liveTransfers.map((transfer) => {
+                      const counterparty = resolveCounterparty(transfer);
+
+                      return (
+                        <TableRow key={transfer.id}>
+                          <TableCell>
+                            <span
+                              className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${statusClassName(transfer.status)}`}
+                            >
+                              {transfer.status}
+                            </span>
+                          </TableCell>
+                          <TableCell className="text-[rgba(28,28,29,0.72)]">
+                            {formatDirection(transfer.direction)}
+                          </TableCell>
+                          <TableCell className="font-medium">
+                            {formatDisplayAmount(transfer.amount, transfer.token)}
+                          </TableCell>
+                          <TableCell className="font-mono text-xs text-[rgba(28,28,29,0.72)]">
+                            <div
+                              className="max-w-[12rem] truncate sm:max-w-[18rem]"
+                              title={counterparty}
+                            >
+                              {counterparty}
+                            </div>
+                          </TableCell>
+                          <TableCell className="font-mono text-xs">
+                            {transfer.signature ? (
+                              <a
+                                href={getDevnetExplorerUrl(transfer.signature)}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="inline-flex items-center gap-1 text-[#1c1c1d] underline underline-offset-2"
+                                title={transfer.signature}
+                              >
+                                <span className="max-w-[9rem] truncate sm:max-w-[12rem]">
+                                  {transfer.signature}
+                                </span>
+                                <ExternalLink className="size-3" />
+                              </a>
+                            ) : (
+                              <span className="text-[rgba(28,28,29,0.52)]">Pending</span>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-[rgba(28,28,29,0.72)]">
+                            {formatTimestamp(transfer.createdAt)}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </div>
 
       <QuickActionModal

@@ -1,4 +1,3 @@
-import { SectionEntry } from "@/app/dashboard/wallets/section-entry";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -87,76 +86,72 @@ export function HomeWorkspace({
 }: HomeWorkspaceProps) {
   return (
     <div className="w-full space-y-8 py-2">
-      <SectionEntry delay={0.04}>
-        <div className="grid gap-4 md:grid-cols-2">
-          <MetricCard label="Total Balance" value={totalBalance} error={totalBalanceError} />
-          <MetricCard label="Today's Volume" value={todaysVolume} error={todaysVolumeError} />
-        </div>
-      </SectionEntry>
+      <div className="grid gap-4 md:grid-cols-2">
+        <MetricCard label="Total Balance" value={totalBalance} error={totalBalanceError} />
+        <MetricCard label="Today's Volume" value={todaysVolume} error={todaysVolumeError} />
+      </div>
 
-      <SectionEntry delay={0.08}>
-        <div className="space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="space-y-1">
-              <h2 className="text-[30px] leading-none font-medium tracking-[-0.03em] text-[#1c1c1d]">
-                Recent Transactions
-              </h2>
-              {activityNotice ? (
-                <p className="text-sm text-[rgba(28,28,29,0.56)]">{activityNotice}</p>
-              ) : null}
-            </div>
-            <Button asChild variant="secondary" size="sm">
-              <Link href="/dashboard/payments">See all payments</Link>
-            </Button>
+      <div className="space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="space-y-1">
+            <h2 className="text-[30px] leading-none font-medium tracking-[-0.03em] text-[#1c1c1d]">
+              Recent Transactions
+            </h2>
+            {activityNotice ? (
+              <p className="text-sm text-[rgba(28,28,29,0.56)]">{activityNotice}</p>
+            ) : null}
           </div>
-
-          <Card className="gap-0 rounded-[20px] border-[rgba(28,28,29,0.1)] py-0 shadow-none">
-            <CardContent className="px-0 py-0">
-              {activityError ? (
-                <div className="px-6 py-5 text-sm text-[#9e2b38]">{activityError}</div>
-              ) : activityRows.length === 0 ? (
-                <div className="px-6 py-5 text-sm text-[rgba(28,28,29,0.72)]">
-                  No recent activity found yet.
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead className="pl-6">Time</TableHead>
-                        <TableHead>Type</TableHead>
-                        <TableHead>Token</TableHead>
-                        <TableHead>Amount</TableHead>
-                        <TableHead className="pr-6">Address</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {activityRows.map((row) => (
-                        <TableRow key={row.id}>
-                          <TableCell className="pl-6 text-[rgba(28,28,29,0.72)]">
-                            {formatRelativeTime(row.createdAt)}
-                          </TableCell>
-                          <TableCell className="font-medium">{row.type}</TableCell>
-                          <TableCell className="text-[rgba(28,28,29,0.78)]">{row.token}</TableCell>
-                          <TableCell className="text-[rgba(28,28,29,0.78)]">
-                            {row.amount === "—" ? "—" : formatDisplayAmount(row.amount, row.token)}
-                          </TableCell>
-                          <TableCell
-                            className="pr-6 font-mono text-xs text-[rgba(28,28,29,0.72)]"
-                            title={row.address}
-                          >
-                            {truncateMiddle(row.address, 6, 4)}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
-              )}
-            </CardContent>
-          </Card>
+          <Button asChild variant="secondary" size="sm">
+            <Link href="/dashboard/payments">See all payments</Link>
+          </Button>
         </div>
-      </SectionEntry>
+
+        <Card className="gap-0 rounded-[20px] border-[rgba(28,28,29,0.1)] py-0 shadow-none">
+          <CardContent className="px-0 py-0">
+            {activityError ? (
+              <div className="px-6 py-5 text-sm text-[#9e2b38]">{activityError}</div>
+            ) : activityRows.length === 0 ? (
+              <div className="px-6 py-5 text-sm text-[rgba(28,28,29,0.72)]">
+                No recent activity found yet.
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="pl-6">Time</TableHead>
+                      <TableHead>Type</TableHead>
+                      <TableHead>Token</TableHead>
+                      <TableHead>Amount</TableHead>
+                      <TableHead className="pr-6">Address</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {activityRows.map((row) => (
+                      <TableRow key={row.id}>
+                        <TableCell className="pl-6 text-[rgba(28,28,29,0.72)]">
+                          {formatRelativeTime(row.createdAt)}
+                        </TableCell>
+                        <TableCell className="font-medium">{row.type}</TableCell>
+                        <TableCell className="text-[rgba(28,28,29,0.78)]">{row.token}</TableCell>
+                        <TableCell className="text-[rgba(28,28,29,0.78)]">
+                          {row.amount === "—" ? "—" : formatDisplayAmount(row.amount, row.token)}
+                        </TableCell>
+                        <TableCell
+                          className="pr-6 font-mono text-xs text-[rgba(28,28,29,0.72)]"
+                          title={row.address}
+                        >
+                          {truncateMiddle(row.address, 6, 4)}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }
