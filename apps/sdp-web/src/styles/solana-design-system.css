@@ -227,7 +227,7 @@
   --border-extra-light: color-mix(in srgb, var(--gray-1300) 4%, transparent);
 
   /* Typography - Font Family */
-  --font-sans: "Inter Variable", "Inter", system-ui, sans-serif;
+  --font-sans: "Inter", system-ui, sans-serif;
 
   /* ==========================================================================
      Dark Mode Font Weight Compensation
@@ -270,23 +270,24 @@
   --font-weight-semibold: calc(var(--font-weight-semibold-base) * var(--fw-mult));
   --font-weight-bold: calc(var(--font-weight-bold-base) * var(--fw-mult));
 
-  /* Typography - Tracking */
-  --tracking-tight: -0.01em;
-  --tracking-normal: 0;
-  --tracking-wide: 0.01em;
+  /* Typography - Tracking (dark mode offset adds slight spacing for narrower glyphs) */
+  --tracking-tight: calc(-0.01em + var(--tracking-dark-offset));
+  --tracking-normal: calc(0em + var(--tracking-dark-offset));
+  --tracking-wide: calc(0.01em + var(--tracking-dark-offset));
 
   /* Typography - Line Heights */
   --leading-none: 1;
   --leading-tight: 1.1;
+  --leading-title: 1.17;
   --leading-snug: 1.25;
   --leading-normal: 1.5;
 
-  /* Typography - Fluid Sizes (768px → 1440px) */
-  --text-display: clamp(36px, calc(36px + (48 - 36) * ((100vw - 768px) / (1440 - 768))), 48px);
+  /* Typography - Fluid Sizes (768px → 1440px, min values match Figma mobile spec) */
+  --text-display: clamp(34px, calc(34px + (48 - 34) * ((100vw - 768px) / (1440 - 768))), 48px);
   --text-title-xl: clamp(28px, calc(28px + (36 - 28) * ((100vw - 768px) / (1440 - 768))), 36px);
-  --text-title-lg: clamp(22px, calc(22px + (28 - 22) * ((100vw - 768px) / (1440 - 768))), 28px);
-  --text-title-md: clamp(19px, calc(19px + (24 - 19) * ((100vw - 768px) / (1440 - 768))), 24px);
-  --text-title-sm: clamp(16px, calc(16px + (19 - 16) * ((100vw - 768px) / (1440 - 768))), 19px);
+  --text-title-lg: clamp(24px, calc(24px + (28 - 24) * ((100vw - 768px) / (1440 - 768))), 28px);
+  --text-title-md: clamp(21px, calc(21px + (24 - 21) * ((100vw - 768px) / (1440 - 768))), 24px);
+  --text-title-sm: clamp(17px, calc(17px + (19 - 17) * ((100vw - 768px) / (1440 - 768))), 19px);
 
   /* Typography - Static Sizes */
   --text-headline-lg: 16px;
@@ -355,6 +356,10 @@
   --button-gap-md: 6px;
   --button-gap-sm: 4px;
 
+  /* Page layout margins */
+  --page-margin-lg: 128px;
+  --page-margin-sm: 64px;
+
   --radius: 0.625rem;
 
   --background: oklch(1 0 0);
@@ -402,6 +407,7 @@
   font-weight: var(--font-weight-medium);
   line-height: var(--leading-tight);
   letter-spacing: var(--tracking-tight);
+  text-wrap: balance;
 }
 
 .text-title-xl {
@@ -410,29 +416,32 @@
   font-weight: var(--font-weight-medium);
   line-height: var(--leading-tight);
   letter-spacing: var(--tracking-tight);
+  text-wrap: balance;
 }
 
 .text-title-lg {
   font-family: var(--font-sans);
   font-size: var(--text-title-lg);
   font-weight: var(--font-weight-medium);
-  line-height: var(--leading-tight);
-  letter-spacing: var(--tracking-tight);
+  line-height: var(--leading-title);
+  letter-spacing: var(--tracking-normal);
+  text-wrap: balance;
 }
 
 .text-title-md {
   font-family: var(--font-sans);
   font-size: var(--text-title-md);
   font-weight: var(--font-weight-medium);
-  line-height: var(--leading-tight);
-  letter-spacing: var(--tracking-tight);
+  line-height: var(--leading-title);
+  letter-spacing: var(--tracking-normal);
+  text-wrap: balance;
 }
 
 .text-title-sm {
   font-family: var(--font-sans);
   font-size: var(--text-title-sm);
   font-weight: var(--font-weight-medium);
-  line-height: 24px;
+  line-height: var(--leading-snug);
   letter-spacing: var(--tracking-tight);
 }
 
@@ -475,7 +484,7 @@
   font-size: var(--text-body-md-size);
   font-weight: var(--font-weight-regular);
   line-height: var(--leading-normal);
-  letter-spacing: var(--tracking-tight);
+  letter-spacing: var(--tracking-normal);
 }
 
 .text-body-md-bold {
@@ -483,14 +492,14 @@
   font-size: var(--text-body-md-size);
   font-weight: var(--font-weight-bold);
   line-height: var(--leading-normal);
-  letter-spacing: var(--tracking-tight);
+  letter-spacing: var(--tracking-normal);
 }
 
 .text-body-sm {
   font-family: var(--font-sans);
   font-size: var(--text-body-sm-size);
   font-weight: var(--font-weight-regular);
-  line-height: 1.4;
+  line-height: var(--leading-normal);
   letter-spacing: var(--tracking-normal);
 }
 
@@ -498,7 +507,7 @@
   font-family: var(--font-sans);
   font-size: var(--text-body-sm-size);
   font-weight: var(--font-weight-bold);
-  line-height: 1.4;
+  line-height: var(--leading-normal);
   letter-spacing: var(--tracking-normal);
 }
 
@@ -506,33 +515,33 @@
 .text-button-xl {
   font-family: var(--font-sans);
   font-size: var(--text-button-xl);
-  font-weight: var(--font-weight-medium);
+  font-weight: var(--font-weight-semibold);
   line-height: var(--leading-none);
-  letter-spacing: var(--tracking-wide);
+  letter-spacing: var(--tracking-normal);
 }
 
 .text-button-lg {
   font-family: var(--font-sans);
   font-size: var(--text-button-lg);
-  font-weight: var(--font-weight-medium);
+  font-weight: var(--font-weight-semibold);
   line-height: var(--leading-none);
-  letter-spacing: var(--tracking-wide);
+  letter-spacing: var(--tracking-normal);
 }
 
 .text-button-md {
   font-family: var(--font-sans);
   font-size: var(--text-button-md);
-  font-weight: var(--font-weight-medium);
+  font-weight: var(--font-weight-semibold);
   line-height: var(--leading-none);
-  letter-spacing: var(--tracking-wide);
+  letter-spacing: var(--tracking-normal);
 }
 
 .text-button-sm {
   font-family: var(--font-sans);
   font-size: var(--text-button-sm);
-  font-weight: var(--font-weight-medium);
+  font-weight: var(--font-weight-semibold);
   line-height: var(--leading-none);
-  letter-spacing: var(--tracking-wide);
+  letter-spacing: var(--tracking-normal);
 }
 
 /* Legacy aliases for backwards compatibility */
@@ -556,23 +565,23 @@
   font-family: var(--font-sans);
   font-size: var(--text-title-lg);
   font-weight: var(--font-weight-medium);
-  line-height: var(--leading-tight);
-  letter-spacing: var(--tracking-tight);
+  line-height: var(--leading-title);
+  letter-spacing: var(--tracking-normal);
 }
 
 .text-title-4 {
   font-family: var(--font-sans);
   font-size: var(--text-title-md);
   font-weight: var(--font-weight-medium);
-  line-height: var(--leading-tight);
-  letter-spacing: var(--tracking-tight);
+  line-height: var(--leading-title);
+  letter-spacing: var(--tracking-normal);
 }
 
 .text-title-5 {
   font-family: var(--font-sans);
   font-size: var(--text-title-sm);
   font-weight: var(--font-weight-medium);
-  line-height: 24px;
+  line-height: var(--leading-snug);
   letter-spacing: var(--tracking-tight);
 }
 
@@ -590,6 +599,34 @@
   font-weight: var(--font-weight-semibold);
   line-height: var(--leading-tight);
   letter-spacing: var(--tracking-tight);
+}
+
+/* Number utilities (tabular + lining nums for data display) */
+.text-number-lg {
+  font-family: var(--font-sans);
+  font-size: var(--text-body-lg-size);
+  font-weight: var(--font-weight-regular);
+  line-height: var(--leading-normal);
+  letter-spacing: var(--tracking-normal);
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+.text-number-md {
+  font-family: var(--font-sans);
+  font-size: var(--text-body-md-size);
+  font-weight: var(--font-weight-regular);
+  line-height: var(--leading-normal);
+  letter-spacing: var(--tracking-normal);
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+.text-number-sm {
+  font-family: var(--font-sans);
+  font-size: var(--text-body-sm-size);
+  font-weight: var(--font-weight-regular);
+  line-height: var(--leading-normal);
+  letter-spacing: var(--tracking-normal);
+  font-variant-numeric: tabular-nums lining-nums;
 }
 
 body {
@@ -743,6 +780,7 @@ body {
 
   body {
     @apply bg-background text-foreground;
+    font-family: var(--font-sans);
 
     /* ==========================================================================
        Font Smoothing
