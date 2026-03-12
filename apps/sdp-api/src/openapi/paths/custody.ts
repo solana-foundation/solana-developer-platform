@@ -14,6 +14,7 @@ import {
   setDefaultWalletResponseSchema,
   signerCheckRequestSchema,
   switchSigningRequestSchema,
+  updateCustodyWalletRequestSchema,
   walletIdParamSchema,
 } from "../schemas";
 import { errorResponses, jsonContent } from "./helpers";
@@ -341,6 +342,35 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
         content: jsonContent(custodyWalletByIdResponse),
       },
       ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "patch",
+    path: "/v1/wallets/{walletId}",
+    tags: ["Wallets"],
+    summary: "Update wallet",
+    operationId: "updateWallet",
+    description: "Updates editable wallet metadata such as the display label.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      params: z.object({
+        walletId: walletIdParamSchema,
+      }),
+      query: z.object({
+        projectId: projectIdParamSchema.optional(),
+      }),
+      body: {
+        required: true,
+        content: jsonContent(updateCustodyWalletRequestSchema),
+      },
+    },
+    responses: {
+      200: {
+        description: "Wallet updated",
+        content: jsonContent(custodyWalletResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
     },
   });
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
+import type { PaymentsDashboardWallet } from "@sdp/types";
 import { AnimatePresence, motion } from "framer-motion";
 import { ShieldAlert, ShieldCheck } from "lucide-react";
 import type { FormEvent } from "react";
@@ -15,10 +16,13 @@ import {
 interface CreateTokenFeaturesStepProps {
   template: TemplateSelection;
   draft: TokenDraft;
+  signerWallets: PaymentsDashboardWallet[];
+  signerWalletsError: string | null;
   submitState: CreateIssuanceTokenResult;
   isPending: boolean;
   canSubmit: boolean;
   onAccessControlModeChange: (mode: AccessControlMode) => void;
+  onSigningWalletChange: (walletId: string) => void;
   onBack: () => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }
@@ -26,15 +30,21 @@ interface CreateTokenFeaturesStepProps {
 export function CreateTokenFeaturesStep({
   template,
   draft,
+  signerWallets,
+  signerWalletsError,
   submitState,
   isPending,
   canSubmit,
   onAccessControlModeChange,
+  onSigningWalletChange,
   onBack,
   onSubmit,
 }: CreateTokenFeaturesStepProps) {
   const allowlistAvailability = getAccessControlAvailability(template, "allowlist");
   const blocklistAvailability = getAccessControlAvailability(template, "blocklist");
+  const availableSignerWallets = signerWallets.filter(
+    (wallet) => wallet.walletId.trim() && wallet.publicKey.trim()
+  );
 
   return (
     <motion.form
@@ -57,6 +67,49 @@ export function CreateTokenFeaturesStep({
       />
 
       <div className="space-y-5 rounded-[28px] p-5">
+        <div className="grid gap-2">
+          <label
+            htmlFor="issuance-token-main-signer"
+            className="text-3xl font-medium text-[#1c1c1d]"
+          >
+            Main Signer
+          </label>
+          {availableSignerWallets.length > 0 ? (
+            <>
+              <select
+                id="issuance-token-main-signer"
+                name="signingWalletId"
+                value={draft.signingWalletId}
+                onChange={(event) => onSigningWalletChange(event.currentTarget.value)}
+                required
+                className="h-12 w-full rounded-[14px] border border-[rgba(28,28,29,0.14)] bg-white px-4 text-base text-[#1c1c1d] shadow-none outline-none transition-[box-shadow,border-color] focus:border-[rgba(28,28,29,0.28)] focus:ring-2 focus:ring-[rgba(28,28,29,0.12)]"
+              >
+                <option value="" disabled>
+                  Select signer wallet
+                </option>
+                {availableSignerWallets.map((wallet) => (
+                  <option key={wallet.id} value={wallet.walletId}>
+                    {wallet.label ? `${wallet.label} · ${wallet.walletId}` : wallet.walletId}
+                  </option>
+                ))}
+              </select>
+              <p className="text-base text-[rgba(28,28,29,0.62)]">
+                This wallet will be used as the token&apos;s main signer for deploy and later token
+                actions.
+              </p>
+            </>
+          ) : signerWalletsError ? (
+            <p className="rounded-2xl border border-[#c71f37]/20 bg-[#c71f37]/[0.03] px-4 py-3 text-base text-[#8a1f2a]">
+              {signerWalletsError}
+            </p>
+          ) : (
+            <p className="rounded-2xl border border-[rgba(28,28,29,0.08)] bg-[rgba(28,28,29,0.03)] px-4 py-3 text-base text-[rgba(28,28,29,0.62)]">
+              No controlled wallets are available yet. The token will use the current default
+              signer.
+            </p>
+          )}
+        </div>
+
         <div>
           <p className="text-3xl font-medium text-[#1c1c1d]">
             Access Control Mode{" "}

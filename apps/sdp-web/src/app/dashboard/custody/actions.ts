@@ -43,7 +43,7 @@ function getApiErrorMessageFromText(body: string): string {
   return body;
 }
 
-function toSignerCheckErrorMessage(error: unknown): string {
+function toApiActionErrorMessage(error: unknown): string {
   const raw = extractErrorMessage(error).trim();
 
   // Format thrown by sdpApiFetch helpers: "SDP API request failed (XXX): <body>"
@@ -183,6 +183,50 @@ export async function createCustodyWallet(formData: FormData) {
   redirect("/dashboard/wallets");
 }
 
+export type UpdateWalletLabelActionResult =
+  | {
+      status: "success";
+      label: string | null;
+    }
+  | {
+      status: "error";
+      message: string;
+    };
+
+export async function updateWalletLabelAction(
+  walletId: string,
+  label: string
+): Promise<UpdateWalletLabelActionResult> {
+  const resolvedWalletId = walletId.trim();
+  if (!resolvedWalletId) {
+    return { status: "error", message: "walletId is required" };
+  }
+
+  const nextLabel = label.trim();
+
+  try {
+    await sdpApiFetch(`/v1/wallets/${encodeURIComponent(resolvedWalletId)}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        label: nextLabel || null,
+      }),
+    });
+
+    revalidatePath("/dashboard/custody");
+    revalidatePath("/dashboard/wallets");
+
+    return {
+      status: "success",
+      label: nextLabel || null,
+    };
+  } catch (error) {
+    return {
+      status: "error",
+      message: toApiActionErrorMessage(error),
+    };
+  }
+}
+
 interface EphemeralApiKeyResponse {
   apiKey: {
     id: string;
@@ -254,7 +298,7 @@ export async function checkWalletSignerMemoAction(
   } catch (error) {
     return {
       status: "error",
-      message: toSignerCheckErrorMessage(error),
+      message: toApiActionErrorMessage(error),
     };
   } finally {
     if (ephemeralKey) {
@@ -267,5 +311,93 @@ export async function checkWalletSignerMemoAction(
         // Best-effort cleanup of short-lived key.
       }
     }
+  }
+}
+
+interface RpcRelayResponse {
+  response?: {
+    result?: string;
+    error?: {
+      code?: number;
+      message?: string;
+    };
+  };
+}
+
+function parseSolToLamports(value: string): number {
+  const normalized = value.trim();
+  if (!/^\d+(\.\d{1,9})?$/.test(normalized)) {
+    throw new Error("Enter a valid SOL amount");
+  }
+
+  const [wholePart, fractionPart = ""] = normalized.split(".");
+  const lamportsWhole = Number(wholePart) * 1_000_000_000;
+  const lamportsFraction = Number(`${fractionPart}000000000`.slice(0, 9));
+  const lamports = lamportsWhole + lamportsFraction;
+
+  if (!Number.isFinite(lamports) || !Number.isSafeInteger(lamports) || lamports <= 0) {
+    throw new Error("Amount must be greater than zero");
+  }
+
+  return lamports;
+}
+
+export type WalletFaucetActionResult =
+  | {
+      status: "success";
+      amountSol: string;
+      signature: string;
+    }
+  | {
+      status: "error";
+      message: string;
+    };
+
+export async function requestWalletFaucetAction(
+  walletAddress: string,
+  amountSol: string
+): Promise<WalletFaucetActionResult> {
+  const resolvedWalletAddress = walletAddress.trim();
+  if (!resolvedWalletAddress) {
+    return { status: "error", message: "wallet address is required" };
+  }
+
+  try {
+    const lamports = parseSolToLamports(amountSol);
+    const rpcResponse = await sdpApiFetch<RpcRelayResponse>("/v1/rpc/proxy", {
+      method: "POST",
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: `wallet-faucet-${resolvedWalletAddress}`,
+        method: "requestAirdrop",
+        params: [resolvedWalletAddress, lamports],
+      }),
+    });
+
+    if (rpcResponse.response?.error?.message) {
+      return {
+        status: "error",
+        message: rpcResponse.response.error.message,
+      };
+    }
+
+    const signature = rpcResponse.response?.result?.trim();
+    if (!signature) {
+      return {
+        status: "error",
+        message: "RPC provider did not return an airdrop signature",
+      };
+    }
+
+    return {
+      status: "success",
+      amountSol: amountSol.trim(),
+      signature,
+    };
+  } catch (error) {
+    return {
+      status: "error",
+      message: toApiActionErrorMessage(error),
+    };
   }
 }

@@ -5,14 +5,17 @@ import { formatDate } from "./token-management-workspace.utils";
 
 interface TokenOverviewSectionProps {
   token: Token;
+  showTitle?: boolean;
 }
 
-export function TokenOverviewSection({ token }: TokenOverviewSectionProps) {
+export function TokenOverviewSection({ token, showTitle = true }: TokenOverviewSectionProps) {
   return (
     <section className="space-y-3">
-      <h3 className="text-[36px] leading-[40px] font-medium tracking-[-0.3px] text-[#1c1c1d]">
-        Token Overview
-      </h3>
+      {showTitle ? (
+        <h3 className="text-[36px] leading-[40px] font-medium tracking-[-0.3px] text-[#1c1c1d]">
+          Token Overview
+        </h3>
+      ) : null}
       <div className="overflow-hidden rounded-2xl border border-[rgba(28,28,29,0.12)] bg-white">
         <OverviewRow label="Token Address" value={token.mintAddress ?? "Not deployed"} monospace />
         <OverviewRow label="Mint Authority" value={token.mintAuthority ?? "None"} monospace />

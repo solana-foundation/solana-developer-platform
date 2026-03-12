@@ -241,6 +241,7 @@ export function createToken(overrides: TokenOverrides = {}): Token {
     id: `tok_factory_${n.toString().padStart(8, "0")}`,
     projectId: `prj_factory_${n.toString().padStart(8, "0")}`,
     organizationId: `org_factory_${n.toString().padStart(8, "0")}`,
+    signingWalletId: null,
     mintAddress: null,
     mintAuthority: null,
     freezeAuthority: null,

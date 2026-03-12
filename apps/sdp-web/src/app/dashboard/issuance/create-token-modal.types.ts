@@ -17,6 +17,7 @@ export interface TokenDraft {
   uri: string;
   name: string;
   symbol: string;
+  signingWalletId: string;
   decimals: "" | "0" | "6" | "8" | "9";
   accessControlMode: AccessControlMode;
 }

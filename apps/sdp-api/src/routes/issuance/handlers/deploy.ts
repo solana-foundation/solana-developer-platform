@@ -12,6 +12,7 @@ import type { TokenResponse } from "@sdp/types";
 import type { Address } from "@solana/kit";
 import { TOKEN_ACL_PROGRAM_ID } from "@solana/mosaic-sdk";
 import type { Context } from "hono";
+import { deployTokenSchema } from "../schemas";
 import { buildIdempotencyMetadata } from "./idempotency";
 
 type AppContext = Context<{ Bindings: Env }>;
@@ -19,6 +20,14 @@ type AppContext = Context<{ Bindings: Env }>;
 export const deployToken = async (c: AppContext) => {
   const { tokenId } = c.req.param();
   const auth = getAuth(c);
+  const body = await c.req.json().catch(() => ({}));
+  const parsed = deployTokenSchema.safeParse(body);
+
+  if (!parsed.success) {
+    throw new AppError("BAD_REQUEST", "Invalid request body", {
+      errors: parsed.error.flatten().fieldErrors,
+    });
+  }
 
   const tokenService = new TokenService(c.env.DB);
   const token = await tokenService.getToken(tokenId);
@@ -77,7 +86,11 @@ export const deployToken = async (c: AppContext) => {
     return success(c, { token });
   }
 
-  const signingWalletId = resolveApiKeySigningWalletId(auth, undefined, ["tokens:write"]);
+  const signingWalletId = resolveApiKeySigningWalletId(
+    auth,
+    parsed.data.signingWalletId ?? token.signingWalletId,
+    ["tokens:write"]
+  );
 
   // Get custody signer (resolves via 3-tier: project → org → env fallback)
   const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId, signingWalletId);
@@ -164,6 +177,14 @@ export const deployToken = async (c: AppContext) => {
 export const prepareDeploy = async (c: AppContext) => {
   const { tokenId } = c.req.param();
   const auth = getAuth(c);
+  const body = await c.req.json().catch(() => ({}));
+  const parsed = deployTokenSchema.safeParse(body);
+
+  if (!parsed.success) {
+    throw new AppError("BAD_REQUEST", "Invalid request body", {
+      errors: parsed.error.flatten().fieldErrors,
+    });
+  }
 
   const tokenService = new TokenService(c.env.DB);
   const token = await tokenService.getToken(tokenId);
@@ -187,7 +208,11 @@ export const prepareDeploy = async (c: AppContext) => {
     throw new AppError("BAD_REQUEST", "Token already has a mint address");
   }
 
-  const signingWalletId = resolveApiKeySigningWalletId(auth, undefined, ["tokens:write"]);
+  const signingWalletId = resolveApiKeySigningWalletId(
+    auth,
+    parsed.data.signingWalletId ?? token.signingWalletId,
+    ["tokens:write"]
+  );
 
   // Get custody signer (resolves via 3-tier: project → org → env fallback)
   const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId, signingWalletId);

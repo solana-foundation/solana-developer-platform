@@ -21,6 +21,7 @@ import {
   setDefaultWallet,
   signerCheck,
   switchSigning,
+  updateWallet,
 } from "./handlers";
 
 const wallets = new Hono<{ Bindings: Env }>();
@@ -34,6 +35,7 @@ wallets.post("/switch", requirePermissions("custody:admin"), switchSigning);
 wallets.post("/", requirePermissions("custody:admin"), createWallet);
 wallets.delete("/", requirePermissions("custody:admin"), deleteWallet);
 wallets.post("/default-wallet", requirePermissions("custody:admin"), setDefaultWallet);
+wallets.patch("/:walletId", requirePermissions("custody:admin"), updateWallet);
 wallets.post("/signer-check", requirePermissions("wallets:write"), signerCheck);
 
 // Read configuration and wallets

@@ -1,8 +1,10 @@
+import { resolveApiKeySigningWalletId } from "@/lib/api-key-wallet-auth";
 import { getAuth } from "@/lib/auth";
 import { AppError, notFound } from "@/lib/errors";
 import { created, paginated, success } from "@/lib/response";
 import { AuditService } from "@/services/audit.service";
 import { normalizeTemplateId, resolveTemplateConfig } from "@/services/issuance/templates";
+import { createOrgSigner } from "@/services/solana";
 import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
 import type { TokenResponse } from "@sdp/types";
@@ -39,11 +41,19 @@ export const createToken = async (c: AppContext) => {
   }
 
   const tokenService = new TokenService(c.env.DB);
+  const signingWalletId = resolveApiKeySigningWalletId(auth, parsed.data.signingWalletId, [
+    "tokens:write",
+  ]);
+
+  if (signingWalletId) {
+    await createOrgSigner(c.env, orgId, projectId, signingWalletId);
+  }
 
   const token = await tokenService.createToken({
     projectId,
     organizationId: orgId,
     createdBy: auth.id,
+    signingWalletId,
     name: parsed.data.name,
     symbol: parsed.data.symbol,
     decimals: resolved.decimals,

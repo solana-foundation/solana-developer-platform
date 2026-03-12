@@ -180,6 +180,7 @@ export async function seedTestDatabase(env: Env): Promise<void> {
         id TEXT PRIMARY KEY,
         project_id TEXT NOT NULL,
         organization_id TEXT NOT NULL,
+        signing_wallet_id TEXT,
         mint_address TEXT UNIQUE,
         mint_authority TEXT,
         freeze_authority TEXT,

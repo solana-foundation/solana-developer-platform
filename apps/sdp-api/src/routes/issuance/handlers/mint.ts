@@ -72,7 +72,11 @@ export const prepareMint = async (c: AppContext) => {
     }
   }
 
-  const signingWalletId = resolveApiKeySigningWalletId(auth, undefined, ["tokens:write"]);
+  const signingWalletId = resolveApiKeySigningWalletId(
+    auth,
+    parsed.data.signingWalletId ?? token.signingWalletId,
+    ["tokens:write"]
+  );
 
   // Get mint authority (custody signer via 3-tier resolution)
   const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId, signingWalletId);
@@ -192,7 +196,11 @@ export const executeMint = async (c: AppContext) => {
     }
   }
 
-  const signingWalletId = resolveApiKeySigningWalletId(auth, undefined, ["tokens:write"]);
+  const signingWalletId = resolveApiKeySigningWalletId(
+    auth,
+    parsed.data.signingWalletId ?? token.signingWalletId,
+    ["tokens:write"]
+  );
 
   // Get custody signer (via 3-tier resolution)
   const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId, signingWalletId);

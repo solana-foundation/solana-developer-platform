@@ -1,0 +1,66 @@
+import { spawn } from "node:child_process";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const scriptDir = path.dirname(fileURLToPath(import.meta.url));
+const appDir = path.resolve(scriptDir, "..");
+const wranglerBin = path.join(
+  appDir,
+  "node_modules",
+  ".bin",
+  process.platform === "win32" ? "wrangler.cmd" : "wrangler"
+);
+let activeChild = null;
+
+for (const signal of ["SIGINT", "SIGTERM"]) {
+  process.on(signal, () => {
+    if (activeChild && !activeChild.killed) {
+      activeChild.kill(signal);
+    }
+  });
+}
+
+function run(command, args) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      cwd: appDir,
+      stdio: "inherit",
+      env: process.env,
+    });
+    activeChild = child;
+
+    child.on("error", reject);
+    child.on("exit", (code, signal) => {
+      activeChild = null;
+      if (signal) {
+        reject(new Error(`Command terminated by signal ${signal}`));
+        return;
+      }
+
+      if (code !== 0) {
+        reject(new Error(`Command failed with exit code ${code ?? 1}`));
+        return;
+      }
+
+      resolve();
+    });
+  });
+}
+
+const devArgs = ["dev", "--local", "--persist-to=.wrangler/state"];
+
+try {
+  await run(wranglerBin, [
+    "d1",
+    "migrations",
+    "apply",
+    "DB",
+    "--local",
+    "--persist-to=.wrangler/state",
+  ]);
+  await run(wranglerBin, devArgs);
+} catch (error) {
+  const message = error instanceof Error ? error.message : "Unknown local dev startup error";
+  console.error(message);
+  process.exit(1);
+}

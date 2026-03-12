@@ -15,5 +15,6 @@ export {
   getWalletById,
   listWallets,
   setDefaultWallet,
+  updateWallet,
 } from "./handlers/wallets";
 export { signerCheck } from "./handlers/signer-check";

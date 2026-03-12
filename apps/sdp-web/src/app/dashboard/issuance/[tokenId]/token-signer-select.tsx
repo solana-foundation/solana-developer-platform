@@ -1,0 +1,62 @@
+"use client";
+
+import type { PaymentsDashboardWallet } from "@sdp/types";
+import { useId } from "react";
+import { getSignerWalletOptionLabel } from "./token-management-workspace.utils";
+
+interface TokenSignerSelectProps {
+  signerWallets: PaymentsDashboardWallet[];
+  signerWalletId: string;
+  signerUnavailableReason: string | null;
+  onSignerWalletIdChange: (value: string) => void;
+  label?: string;
+}
+
+export function TokenSignerSelect({
+  signerWallets,
+  signerWalletId,
+  signerUnavailableReason,
+  onSignerWalletIdChange,
+  label = "Signer",
+}: TokenSignerSelectProps) {
+  const fieldId = useId();
+  const isUnavailable = Boolean(signerUnavailableReason) || signerWallets.length === 0;
+  const message =
+    signerUnavailableReason ?? "SDP will sign this transaction with the selected wallet.";
+
+  return (
+    <div className="space-y-2">
+      <label
+        htmlFor={fieldId}
+        className="block text-[12px] leading-5 font-medium tracking-[0.02em] text-[rgba(28,28,29,0.68)]"
+      >
+        {label}
+      </label>
+      <select
+        id={fieldId}
+        value={signerWalletId}
+        required={!isUnavailable}
+        disabled={isUnavailable}
+        onChange={(event) => onSignerWalletIdChange(event.currentTarget.value)}
+        className="h-11 w-full rounded-[12px] border border-[rgba(28,28,29,0.12)] bg-white px-4 text-sm text-[#1c1c1d] shadow-none outline-none transition-[box-shadow,border-color] focus:border-[rgba(28,28,29,0.28)] focus:ring-2 focus:ring-[rgba(28,28,29,0.12)] disabled:cursor-not-allowed disabled:bg-[rgba(28,28,29,0.04)] disabled:text-[rgba(28,28,29,0.45)]"
+      >
+        <option value="" disabled>
+          Select a signer wallet
+        </option>
+        {signerWallets.map((wallet) => (
+          <option key={wallet.id} value={wallet.walletId}>
+            {getSignerWalletOptionLabel(wallet)}
+          </option>
+        ))}
+      </select>
+      <p
+        className={[
+          "text-sm",
+          isUnavailable ? "text-[#8a1f2a]" : "text-[rgba(28,28,29,0.68)]",
+        ].join(" ")}
+      >
+        {message}
+      </p>
+    </div>
+  );
+}

@@ -42,6 +42,7 @@ export const TEST_TOKEN: Token = {
   id: "tok_test123456789",
   projectId: TEST_PROJECT.id,
   organizationId: TEST_ORG.id,
+  signingWalletId: null,
   mintAddress: null,
   mintAuthority: null,
   freezeAuthority: null,

@@ -26,7 +26,9 @@ import { CheckCircle2 } from "lucide-react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
-import { WalletSignerCheckButton } from "./wallet-signer-check-button";
+import { WalletActionsMenu } from "./wallet-actions-menu";
+import { WalletAddressCopyButton } from "./wallet-address-copy-button";
+import { WalletLabelInlineEditor } from "./wallet-label-inline-editor";
 
 interface CustodyConfig {
   id: string;
@@ -300,66 +302,60 @@ async function WalletsSection({
                 : "No wallets found yet for the connected providers."}
             </p>
           ) : (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Label</TableHead>
-                    <TableHead>Provider</TableHead>
-                    <TableHead>Purpose</TableHead>
-                    <TableHead>Public key</TableHead>
-                    <TableHead>Wallet id</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {wallets.map((wallet) => (
-                    <TableRow key={wallet.id}>
-                      <TableCell className="font-medium">
-                        <div
-                          className="max-w-[10rem] truncate sm:max-w-[14rem]"
-                          title={wallet.label ?? "Untitled"}
-                        >
-                          {wallet.label ?? "Untitled"}
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-[rgba(28,28,29,0.72)]">
-                        <div
-                          className="max-w-[10rem] truncate sm:max-w-[12rem]"
-                          title={formatCustodyProviderName(wallet.provider ?? "unknown")}
-                        >
-                          {formatCustodyProviderName(wallet.provider ?? "unknown")}
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-[rgba(28,28,29,0.72)]">
-                        {wallet.purpose ?? "-"}
-                      </TableCell>
-                      <TableCell className="font-mono text-xs">
-                        <div
-                          className="block max-w-[10rem] truncate sm:max-w-[16rem]"
-                          title={wallet.publicKey}
-                        >
+            <Table className="table-fixed">
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-[22%]">Label</TableHead>
+                  <TableHead className="w-[10%]">Provider</TableHead>
+                  <TableHead className="w-[8%]">Purpose</TableHead>
+                  <TableHead className="w-[24%]">Public key</TableHead>
+                  <TableHead className="w-[24%]">Wallet id</TableHead>
+                  <TableHead className="w-[12%] text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {wallets.map((wallet) => (
+                  <TableRow key={wallet.id}>
+                    <TableCell className="font-medium">
+                      <WalletLabelInlineEditor walletId={wallet.walletId} label={wallet.label} />
+                    </TableCell>
+                    <TableCell className="text-[rgba(28,28,29,0.72)]">
+                      <div
+                        className="truncate"
+                        title={formatCustodyProviderName(wallet.provider ?? "unknown")}
+                      >
+                        {formatCustodyProviderName(wallet.provider ?? "unknown")}
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-[rgba(28,28,29,0.72)]">
+                      {wallet.purpose ?? "-"}
+                    </TableCell>
+                    <TableCell className="font-mono text-xs">
+                      <div className="flex items-center gap-1.5">
+                        <div className="block min-w-0 truncate" title={wallet.publicKey}>
                           {wallet.publicKey}
                         </div>
-                      </TableCell>
-                      <TableCell className="font-mono text-xs text-[rgba(28,28,29,0.72)]">
-                        <div
-                          className="block max-w-[10rem] truncate sm:max-w-[14rem]"
-                          title={wallet.walletId}
-                        >
-                          {wallet.walletId}
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <div className="inline-flex items-center justify-end gap-2">
-                          <WalletSignerCheckButton walletId={wallet.walletId} />
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
+                        <WalletAddressCopyButton address={wallet.publicKey} />
+                      </div>
+                    </TableCell>
+                    <TableCell className="font-mono text-xs text-[rgba(28,28,29,0.72)]">
+                      <div className="block truncate" title={wallet.walletId}>
+                        {wallet.walletId}
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div className="inline-flex items-center justify-end">
+                        <WalletActionsMenu
+                          walletAddress={wallet.publicKey}
+                          walletId={wallet.walletId}
+                          walletLabel={wallet.label}
+                        />
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
           )}
         </CardContent>
       </Card>

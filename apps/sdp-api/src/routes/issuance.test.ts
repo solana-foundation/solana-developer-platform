@@ -4,6 +4,7 @@
 
 import app from "@/index";
 import { hashString } from "@/lib/hash";
+import { MosaicService } from "@/services/mosaic";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import {
   TEST_ACTIVE_TOKEN,
@@ -888,6 +889,41 @@ describe("Issuance Routes", () => {
         expect(res.status).toBe(400);
         const body = await res.json();
         expect(body.error.code).toBe("ACCOUNT_FROZEN");
+      });
+
+      it("returns a structured token-account error when the provided address is not a token account", async () => {
+        const activeTokenId = await seedFreezableToken();
+        vi.spyOn(MosaicService.prototype, "freezeAccount").mockRejectedValueOnce(
+          new Error("Token account not found")
+        );
+
+        const res = await app.request(
+          `/v1/issuance/tokens/${activeTokenId}/freeze`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+            },
+            body: JSON.stringify({
+              accountAddress: TEST_SOLANA_ADDRESSES.wallet1,
+            }),
+          },
+          env
+        );
+
+        expect(res.status).toBe(400);
+        const body = (await res.json()) as {
+          error: {
+            code: string;
+            message: string;
+            details?: { field?: string; hint?: string };
+          };
+        };
+        expect(body.error.code).toBe("TOKEN_ACCOUNT_NOT_FOUND");
+        expect(body.error.message).toContain("token account");
+        expect(body.error.details?.field).toBe("accountAddress");
+        expect(body.error.details?.hint).toContain("wallet public key");
       });
     });
 

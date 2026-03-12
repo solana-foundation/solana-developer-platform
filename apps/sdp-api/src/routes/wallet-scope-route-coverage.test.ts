@@ -30,6 +30,7 @@ describe("wallet-scoped route coverage inventory", () => {
       "GET /:walletId",
       "GET /aggregate",
       "GET /public-key",
+      "PATCH /:walletId",
       "POST /signer-check",
     ]);
   });

@@ -15,6 +15,25 @@ import { buildIdempotencyMetadata } from "./idempotency";
 
 type AppContext = Context<{ Bindings: Env }>;
 
+function toFreezeOperationAppError(error: unknown): AppError | null {
+  if (!(error instanceof Error)) {
+    return null;
+  }
+
+  if (error.message === "Token account not found") {
+    return new AppError(
+      "TOKEN_ACCOUNT_NOT_FOUND",
+      "Token account not found for this mint. Provide the token account address that holds this token, not the owner wallet address.",
+      {
+        field: "accountAddress",
+        hint: "Use the token account address for this mint rather than the wallet public key.",
+      }
+    );
+  }
+
+  return null;
+}
+
 export const freezeAccount = async (c: AppContext) => {
   const { tokenId } = c.req.param();
   const auth = getAuth(c);
@@ -47,7 +66,9 @@ export const freezeAccount = async (c: AppContext) => {
     throw new AppError("TOKEN_NOT_DEPLOYED", "Token has not been deployed to Solana");
   }
 
-  const signingWalletId = resolveApiKeySigningWalletId(auth, undefined, ["tokens:admin"]);
+  const signingWalletId = resolveApiKeySigningWalletId(auth, token.signingWalletId, [
+    "tokens:admin",
+  ]);
 
   // Get custody signer (freeze authority, via 3-tier resolution)
   const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId, signingWalletId);
@@ -155,10 +176,15 @@ export const freezeAccount = async (c: AppContext) => {
       });
       throw new AppError("ACCOUNT_FROZEN", "Account is already frozen");
     }
+
+    const mappedError = toFreezeOperationAppError(error);
     await tokenService.updateTransaction(tx.id, {
       status: "failed",
-      error: error instanceof Error ? error.message : "Unknown error",
+      error: mappedError?.message ?? (error instanceof Error ? error.message : "Unknown error"),
     });
+    if (mappedError) {
+      throw mappedError;
+    }
     throw error;
   }
 };
@@ -223,7 +249,9 @@ export const unfreezeAccount = async (c: AppContext) => {
     throw new AppError("ACCOUNT_NOT_FROZEN", "Account is not frozen");
   }
 
-  const signingWalletId = resolveApiKeySigningWalletId(auth, undefined, ["tokens:admin"]);
+  const signingWalletId = resolveApiKeySigningWalletId(auth, token.signingWalletId, [
+    "tokens:admin",
+  ]);
 
   // Get custody signer (freeze authority, via 3-tier resolution)
   const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId, signingWalletId);
@@ -321,10 +349,15 @@ export const unfreezeAccount = async (c: AppContext) => {
       });
       throw new AppError("ACCOUNT_NOT_FROZEN", "Account is not frozen");
     }
+
+    const mappedError = toFreezeOperationAppError(error);
     await tokenService.updateTransaction(tx.id, {
       status: "failed",
-      error: error instanceof Error ? error.message : "Unknown error",
+      error: mappedError?.message ?? (error instanceof Error ? error.message : "Unknown error"),
     });
+    if (mappedError) {
+      throw mappedError;
+    }
     throw error;
   }
 };

@@ -1,6 +1,6 @@
 "use client";
 
-import type { TokenAllowlistEntry } from "@sdp/types";
+import type { PaymentsDashboardWallet, TokenAllowlistEntry } from "@sdp/types";
 import type { Dispatch, SetStateAction } from "react";
 import { TokenActionAdminForms } from "./token-action-admin-forms";
 import { TokenActionPrimaryForms } from "./token-action-primary-forms";
@@ -19,6 +19,7 @@ import type {
 interface TokenActionFormsProps {
   activeAction: AdminAction | null;
   isPending: boolean;
+  tokenStatus: "pending" | "active" | "paused" | "revoked";
   metadataForm: MetadataFormState;
   setMetadataForm: Dispatch<SetStateAction<MetadataFormState>>;
   mintForm: MintFormState;
@@ -37,13 +38,16 @@ interface TokenActionFormsProps {
   setAllowlistForm: Dispatch<SetStateAction<AllowlistFormState>>;
   allowlistEntries: TokenAllowlistEntry[];
   allowlistError: string | null;
+  signerWallets: PaymentsDashboardWallet[];
+  signerUnavailableReason: string | null;
+  onSignerWalletIdChange: (value: string) => void;
   onUpdateMetadata: () => void;
   onRefreshSupply: () => void;
-  onMint: (mode: "prepare" | "execute") => void;
-  onBurn: (mode: "prepare" | "execute") => void;
-  onSeize: (mode: "prepare" | "execute") => void;
-  onForceBurn: (mode: "prepare" | "execute") => void;
-  onAuthorityUpdate: (mode: "prepare" | "execute") => void;
+  onMint: () => void;
+  onBurn: () => void;
+  onSeize: () => void;
+  onForceBurn: () => void;
+  onAuthorityUpdate: () => void;
   onPause: (pause: boolean) => void;
   onFreeze: (unfreeze: boolean) => void;
   onAddAllowlist: () => void;
@@ -62,6 +66,9 @@ export function TokenActionForms(props: TokenActionFormsProps) {
         setMintForm={props.setMintForm}
         burnForm={props.burnForm}
         setBurnForm={props.setBurnForm}
+        signerWallets={props.signerWallets}
+        signerUnavailableReason={props.signerUnavailableReason}
+        onSignerWalletIdChange={props.onSignerWalletIdChange}
         onUpdateMetadata={props.onUpdateMetadata}
         onRefreshSupply={props.onRefreshSupply}
         onMint={props.onMint}
@@ -70,6 +77,7 @@ export function TokenActionForms(props: TokenActionFormsProps) {
       <TokenActionAdminForms
         activeAction={props.activeAction}
         isPending={props.isPending}
+        tokenStatus={props.tokenStatus}
         seizeForm={props.seizeForm}
         setSeizeForm={props.setSeizeForm}
         forceBurnForm={props.forceBurnForm}
@@ -82,6 +90,9 @@ export function TokenActionForms(props: TokenActionFormsProps) {
         setAllowlistForm={props.setAllowlistForm}
         allowlistEntries={props.allowlistEntries}
         allowlistError={props.allowlistError}
+        signerWallets={props.signerWallets}
+        signerUnavailableReason={props.signerUnavailableReason}
+        onSignerWalletIdChange={props.onSignerWalletIdChange}
         onSeize={props.onSeize}
         onForceBurn={props.onForceBurn}
         onAuthorityUpdate={props.onAuthorityUpdate}

@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useState } from "react";
 import { toast } from "sonner";
 import type {
   ActionConfirmationState,
@@ -13,30 +13,35 @@ import { executeActionRequest } from "./token-management-workspace.utils";
 
 export function useTokenActionRunner() {
   const router = useRouter();
-  const [isPending, startTransition] = useTransition();
-  const [lastActionResult, setLastActionResult] = useState<ActionExecutionResult | null>(null);
+  const [isPending, setIsPending] = useState(false);
   const [actionConfirmation, setActionConfirmation] = useState<ActionConfirmationState | null>(
     null
   );
 
-  const executeAction = (input: ActionExecutionInput, options: RunActionOptions = {}) => {
+  const executeAction = async (
+    input: ActionExecutionInput,
+    options: RunActionOptions = {}
+  ): Promise<ActionExecutionResult> => {
     const submitToast = options.submitToast ?? `Submitting ${input.label.toLowerCase()}...`;
     const successToast = options.successToast ?? "Transaction finalized successfully.";
     const toastId = toast.loading(submitToast);
 
-    startTransition(async () => {
+    setIsPending(true);
+    try {
       const result = await executeActionRequest(input);
-      setLastActionResult(result);
 
       if (result.ok) {
         setActionConfirmation(null);
         toast.success(successToast, { id: toastId });
         router.refresh();
-        return;
+        return result;
       }
 
       toast.error(result.message, { id: toastId });
-    });
+      return result;
+    } finally {
+      setIsPending(false);
+    }
   };
 
   const runAction = (input: ActionExecutionInput, options: RunActionOptions = {}) => {
@@ -56,7 +61,7 @@ export function useTokenActionRunner() {
       return;
     }
 
-    executeAction(input, options);
+    void executeAction(input, options);
   };
 
   const dismissActionConfirmation = () => {
@@ -69,14 +74,14 @@ export function useTokenActionRunner() {
       return;
     }
     setActionConfirmation(null);
-    executeAction(pendingConfirmation.input, pendingConfirmation.options);
+    void executeAction(pendingConfirmation.input, pendingConfirmation.options);
   };
 
   return {
     isPending,
-    lastActionResult,
     actionConfirmation,
     runAction,
+    runActionImmediately: executeAction,
     dismissActionConfirmation,
     confirmAction,
   };

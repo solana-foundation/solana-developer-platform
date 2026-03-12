@@ -110,7 +110,11 @@ export const prepareUpdateAuthority = async (c: AppContext) => {
     ? assertValidAddress(parsed.data.authority.newAuthority, "newAuthority")
     : null;
 
-  const signingWalletId = resolveApiKeySigningWalletId(auth, undefined, ["tokens:admin"]);
+  const signingWalletId = resolveApiKeySigningWalletId(
+    auth,
+    parsed.data.signingWalletId ?? token.signingWalletId,
+    ["tokens:admin"]
+  );
 
   const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId, signingWalletId);
   const mosaic = createMosaicService(c.env, signer);
@@ -207,7 +211,11 @@ export const executeUpdateAuthority = async (c: AppContext) => {
     throw new AppError("BAD_REQUEST", "Current authority is not available for this token");
   }
 
-  const signingWalletId = resolveApiKeySigningWalletId(auth, undefined, ["tokens:admin"]);
+  const signingWalletId = resolveApiKeySigningWalletId(
+    auth,
+    parsed.data.signingWalletId ?? token.signingWalletId,
+    ["tokens:admin"]
+  );
 
   const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId, signingWalletId);
   if (currentAuthorityRaw !== signer.address) {

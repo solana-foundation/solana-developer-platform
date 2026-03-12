@@ -26,6 +26,7 @@ export type ErrorCode =
   | "TOKEN_NOT_DEPLOYED"
   | "TOKEN_PAUSED"
   | "NOT_ON_TOKEN_ALLOWLIST"
+  | "TOKEN_ACCOUNT_NOT_FOUND"
   | "ACCOUNT_FROZEN"
   | "ACCOUNT_NOT_FROZEN"
   | "MAX_SUPPLY_EXCEEDED"
@@ -70,6 +71,7 @@ const ERROR_STATUS_CODES: Record<ErrorCode, number> = {
   TOKEN_NOT_DEPLOYED: 400,
   TOKEN_PAUSED: 400,
   NOT_ON_TOKEN_ALLOWLIST: 403,
+  TOKEN_ACCOUNT_NOT_FOUND: 400,
   ACCOUNT_FROZEN: 400,
   ACCOUNT_NOT_FROZEN: 400,
   MAX_SUPPLY_EXCEEDED: 400,
@@ -105,6 +107,7 @@ const DEFAULT_ERROR_MESSAGES: Record<ErrorCode, string> = {
   TOKEN_NOT_DEPLOYED: "Token has not been deployed to Solana",
   TOKEN_PAUSED: "Token operations are paused",
   NOT_ON_TOKEN_ALLOWLIST: "Address is not on the token allowlist",
+  TOKEN_ACCOUNT_NOT_FOUND: "Token account not found for this mint",
   ACCOUNT_FROZEN: "Account is frozen",
   ACCOUNT_NOT_FROZEN: "Account is not frozen",
   MAX_SUPPLY_EXCEEDED: "Operation would exceed maximum supply",

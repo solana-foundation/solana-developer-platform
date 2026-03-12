@@ -28,6 +28,7 @@ export interface CreateTokenInput {
   projectId: string;
   organizationId: string;
   createdBy: string;
+  signingWalletId?: string | null;
   name: string;
   symbol: string;
   decimals?: number;
@@ -99,6 +100,7 @@ interface TokenRow {
   id: string;
   project_id: string;
   organization_id: string;
+  signing_wallet_id: string | null;
   mint_address: string | null;
   mint_authority: string | null;
   freeze_authority: string | null;
@@ -196,6 +198,7 @@ export class TokenService {
       id,
       projectId: input.projectId,
       organizationId: input.organizationId,
+      signingWalletId: input.signingWalletId ?? null,
       mintAddress: null,
       mintAuthority: null,
       freezeAuthority: null,
@@ -224,17 +227,18 @@ export class TokenService {
     await this.db
       .prepare(
         `INSERT INTO issued_tokens (
-          id, project_id, organization_id, mint_address, mint_authority, freeze_authority,
+          id, project_id, organization_id, signing_wallet_id, mint_address, mint_authority, freeze_authority,
           abl_list_address, name, symbol, decimals, description, uri, image_url, template,
           total_supply_cached, total_supply_updated_at, max_supply, is_mintable,
           freeze_authority_enabled, allowlist_enabled, status, deployed_at, created_by,
           created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         token.id,
         token.projectId,
         token.organizationId,
+        token.signingWalletId,
         token.mintAddress,
         token.mintAuthority,
         token.freezeAuthority,
@@ -274,6 +278,7 @@ export class TokenService {
     const row = await this.db
       .prepare(
         `SELECT id, project_id, organization_id, mint_address, mint_authority, freeze_authority,
+                signing_wallet_id,
                 abl_list_address, name, symbol, decimals, description, uri, image_url, template,
                 total_supply_cached, total_supply_updated_at, max_supply, is_mintable,
                 freeze_authority_enabled, allowlist_enabled, status, deployed_at, created_by,
@@ -298,6 +303,7 @@ export class TokenService {
     const row = await this.db
       .prepare(
         `SELECT id, project_id, organization_id, mint_address, mint_authority, freeze_authority,
+                signing_wallet_id,
                 abl_list_address, name, symbol, decimals, description, uri, image_url, template,
                 total_supply_cached, total_supply_updated_at, max_supply, is_mintable,
                 freeze_authority_enabled, allowlist_enabled, status, deployed_at, created_by,
@@ -327,6 +333,7 @@ export class TokenService {
     let countQuery = "SELECT COUNT(*) as count FROM issued_tokens WHERE project_id = ?";
     let selectQuery = `
       SELECT id, project_id, organization_id, mint_address, mint_authority, freeze_authority,
+             signing_wallet_id,
              abl_list_address, name, symbol, decimals, description, uri, image_url, template,
              total_supply_cached, total_supply_updated_at, max_supply, is_mintable,
              freeze_authority_enabled, allowlist_enabled, status, deployed_at, created_by,
@@ -1359,6 +1366,7 @@ export class TokenService {
       id: row.id,
       projectId: row.project_id,
       organizationId: row.organization_id,
+      signingWalletId: row.signing_wallet_id,
       mintAddress: row.mint_address,
       mintAuthority: row.mint_authority,
       metadataAuthority: row.mint_authority,

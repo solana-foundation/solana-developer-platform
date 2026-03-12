@@ -67,7 +67,6 @@ type DashboardPageConfig = {
   headerNav?: ReactNode;
   showHeaderNavRow?: boolean;
   contentWidthClass?: string;
-  hideHeaderSelectors?: boolean;
   backAction?: {
     href: string;
     label: string;
@@ -128,14 +127,12 @@ function getDashboardPageConfig(pathname: string): DashboardPageConfig {
     return {
       title: "Issuance",
       headerNav: <IssuanceHeaderTabs />,
-      hideHeaderSelectors: true,
       contentWidthClass: "max-w-none",
     };
   }
   if (pathname.startsWith("/dashboard/issuance/")) {
     return {
       title: "Issuance",
-      hideHeaderSelectors: true,
       contentWidthClass: "max-w-none",
       backAction: {
         href: "/dashboard/issuance",
@@ -397,11 +394,9 @@ export function DashboardShell({ children }: { children: ReactNode }) {
                   </h1>
                 </div>
 
-                {pageConfig.hideHeaderSelectors ? null : (
-                  <div className="flex items-center gap-2">
-                    <UserButton afterSignOutUrl="/sign-in" />
-                  </div>
-                )}
+                <div className="flex items-center gap-2">
+                  <UserButton afterSignOutUrl="/sign-in" />
+                </div>
               </div>
 
               {shouldRenderHeaderNavRow ? (

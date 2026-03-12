@@ -60,7 +60,9 @@ export const pauseToken = async (c: AppContext) => {
     throw new AppError("BAD_REQUEST", "Pause authority is not configured for this token");
   }
 
-  const signingWalletId = resolveApiKeySigningWalletId(auth, undefined, ["tokens:admin"]);
+  const signingWalletId = resolveApiKeySigningWalletId(auth, token.signingWalletId, [
+    "tokens:admin",
+  ]);
 
   const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId, signingWalletId);
   if (pauseAuthorityRaw !== signer.address) {
@@ -175,7 +177,9 @@ export const unpauseToken = async (c: AppContext) => {
     throw new AppError("BAD_REQUEST", "Pause authority is not configured for this token");
   }
 
-  const signingWalletId = resolveApiKeySigningWalletId(auth, undefined, ["tokens:admin"]);
+  const signingWalletId = resolveApiKeySigningWalletId(auth, token.signingWalletId, [
+    "tokens:admin",
+  ]);
 
   const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId, signingWalletId);
   if (pauseAuthorityRaw !== signer.address) {
