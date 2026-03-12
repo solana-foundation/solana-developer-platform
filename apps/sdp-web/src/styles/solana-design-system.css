@@ -275,11 +275,16 @@
   --tracking-normal: calc(0em + var(--tracking-dark-offset));
   --tracking-wide: calc(0.01em + var(--tracking-dark-offset));
 
-  /* Typography - Line Heights */
+  /* Typography - Line Heights (Fluid, matching Figma specs) */
+  --leading-display: clamp(38px, calc(38px + (52 - 38) * ((100vw - 768px) / (1440 - 768))), 52px);
+  --leading-title-xl: clamp(32px, calc(32px + (40 - 32) * ((100vw - 768px) / (1440 - 768))), 40px);
+  --leading-title-lg: clamp(28px, calc(28px + (32 - 28) * ((100vw - 768px) / (1440 - 768))), 32px);
+  --leading-title-md: clamp(25px, calc(25px + (28 - 25) * ((100vw - 768px) / (1440 - 768))), 28px);
+  --leading-title-sm: clamp(22px, calc(22px + (24 - 22) * ((100vw - 768px) / (1440 - 768))), 24px);
+
+  /* Typography - Line Heights (Static) */
   --leading-none: 1;
-  --leading-tight: 1.1;
-  --leading-title: 1.17;
-  --leading-snug: 1.25;
+  --leading-headline: 1.2;
   --leading-normal: 1.5;
 
   /* Typography - Fluid Sizes (768px → 1440px, min values match Figma mobile spec) */
@@ -451,7 +456,7 @@
   font-family: var(--font-sans);
   font-size: var(--text-display);
   font-weight: var(--font-weight-medium);
-  line-height: var(--leading-tight);
+  line-height: var(--leading-display);
   letter-spacing: var(--tracking-tight);
   text-wrap: balance;
 }
@@ -460,7 +465,7 @@
   font-family: var(--font-sans);
   font-size: var(--text-title-xl);
   font-weight: var(--font-weight-medium);
-  line-height: var(--leading-tight);
+  line-height: var(--leading-title-xl);
   letter-spacing: var(--tracking-tight);
   text-wrap: balance;
 }
@@ -469,7 +474,7 @@
   font-family: var(--font-sans);
   font-size: var(--text-title-lg);
   font-weight: var(--font-weight-medium);
-  line-height: var(--leading-title);
+  line-height: var(--leading-title-lg);
   letter-spacing: var(--tracking-normal);
   text-wrap: balance;
 }
@@ -478,7 +483,7 @@
   font-family: var(--font-sans);
   font-size: var(--text-title-md);
   font-weight: var(--font-weight-medium);
-  line-height: var(--leading-title);
+  line-height: var(--leading-title-md);
   letter-spacing: var(--tracking-normal);
   text-wrap: balance;
 }
@@ -487,8 +492,8 @@
   font-family: var(--font-sans);
   font-size: var(--text-title-sm);
   font-weight: var(--font-weight-medium);
-  line-height: var(--leading-snug);
-  letter-spacing: var(--tracking-tight);
+  line-height: var(--leading-title-sm);
+  letter-spacing: var(--tracking-normal);
 }
 
 /* Headlines (Static) */
@@ -496,7 +501,7 @@
   font-family: var(--font-sans);
   font-size: var(--text-headline-lg);
   font-weight: var(--font-weight-semibold);
-  line-height: var(--leading-tight);
+  line-height: var(--leading-headline);
   letter-spacing: var(--tracking-tight);
 }
 
@@ -504,7 +509,7 @@
   font-family: var(--font-sans);
   font-size: var(--text-headline-md);
   font-weight: var(--font-weight-semibold);
-  line-height: var(--leading-tight);
+  line-height: var(--leading-headline);
   letter-spacing: var(--tracking-tight);
 }
 
@@ -595,7 +600,7 @@
   font-family: var(--font-sans);
   font-size: var(--text-display);
   font-weight: var(--font-weight-medium);
-  line-height: var(--leading-tight);
+  line-height: var(--leading-display);
   letter-spacing: var(--tracking-tight);
 }
 
@@ -603,7 +608,7 @@
   font-family: var(--font-sans);
   font-size: var(--text-title-xl);
   font-weight: var(--font-weight-medium);
-  line-height: var(--leading-tight);
+  line-height: var(--leading-title-xl);
   letter-spacing: var(--tracking-tight);
 }
 
@@ -611,7 +616,7 @@
   font-family: var(--font-sans);
   font-size: var(--text-title-lg);
   font-weight: var(--font-weight-medium);
-  line-height: var(--leading-title);
+  line-height: var(--leading-title-lg);
   letter-spacing: var(--tracking-normal);
 }
 
@@ -619,7 +624,7 @@
   font-family: var(--font-sans);
   font-size: var(--text-title-md);
   font-weight: var(--font-weight-medium);
-  line-height: var(--leading-title);
+  line-height: var(--leading-title-md);
   letter-spacing: var(--tracking-normal);
 }
 
@@ -627,8 +632,8 @@
   font-family: var(--font-sans);
   font-size: var(--text-title-sm);
   font-weight: var(--font-weight-medium);
-  line-height: var(--leading-snug);
-  letter-spacing: var(--tracking-tight);
+  line-height: var(--leading-title-sm);
+  letter-spacing: var(--tracking-normal);
 }
 
 .text-body-l {
@@ -641,10 +646,10 @@
 
 .text-nav-item {
   font-family: var(--font-sans);
-  font-size: var(--text-headline-md);
-  font-weight: var(--font-weight-semibold);
-  line-height: var(--leading-tight);
-  letter-spacing: var(--tracking-tight);
+  font-size: var(--text-body-lg-size);
+  font-weight: var(--font-weight-bold);
+  line-height: var(--leading-normal);
+  letter-spacing: var(--tracking-normal);
 }
 
 /* Number utilities (tabular + lining nums for data display) */
@@ -828,7 +833,7 @@ body {
     @apply bg-background text-foreground;
     font-family: var(--font-sans);
 
-    /* Enable Inter's optical size axis for automatic size-based tuning */
+    /* Inter's opsz axis — Figma enables this by default, so we match it here */
     font-optical-sizing: auto;
   }
 }

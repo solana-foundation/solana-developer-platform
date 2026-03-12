@@ -28,7 +28,7 @@ export function PageTabs({
             type="button"
             onClick={() => onTabChange(tab.id)}
             className={cn(
-              "relative cursor-pointer pb-5 text-[16px] leading-[24px] font-semibold transition-colors",
+              "relative cursor-pointer pb-5 text-body-lg-bold transition-colors",
               isActive
                 ? "text-text-high"
                 : "text-text-low hover:text-text-medium"

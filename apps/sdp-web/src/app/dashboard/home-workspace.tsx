@@ -43,7 +43,7 @@ function formatRelativeTime(value: string): string {
   }
 
   const diffDays = Math.round(diffHours / 24);
-  return formatter.format(diffDays, "day");
+  return relativeTimeFormatter.format(diffDays, "day");
 }
 
 function truncateMiddle(value: string, start = 4, end = 4): string {
@@ -66,11 +66,11 @@ function MetricCard({
   return (
     <Card className="gap-0 rounded-[18px] border-[rgba(28,28,29,0.1)] py-0 shadow-none">
       <CardContent className="space-y-2 px-6 py-6">
-        <p className="text-[15px] text-[rgba(28,28,29,0.56)]">{label}</p>
-        <p className="text-[24px] leading-none font-medium tracking-[-0.03em] text-[#1c1c1d] sm:text-[30px]">
+        <p className="text-body-md text-text-low">{label}</p>
+        <p className="text-title-md sm:text-title-xl text-text-extra-high">
           {error ? "Unavailable" : formatCurrencyAmount(value)}
         </p>
-        {error ? <p className="text-sm text-[#9e2b38]">{error}</p> : null}
+        {error ? <p className="text-body-md text-[#9e2b38]">{error}</p> : null}
       </CardContent>
     </Card>
   );
@@ -95,11 +95,11 @@ export function HomeWorkspace({
       <div className="space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="space-y-1">
-            <h2 className="text-[30px] leading-none font-medium tracking-[-0.03em] text-[#1c1c1d]">
+            <h2 className="text-title-xl text-text-extra-high">
               Recent Transactions
             </h2>
             {activityNotice ? (
-              <p className="text-sm text-[rgba(28,28,29,0.56)]">{activityNotice}</p>
+              <p className="text-body-md text-text-low">{activityNotice}</p>
             ) : null}
           </div>
           <Button asChild variant="secondary" size="sm">
@@ -133,7 +133,7 @@ export function HomeWorkspace({
                         <TableCell className="pl-6 text-[rgba(28,28,29,0.72)]">
                           {formatRelativeTime(row.createdAt)}
                         </TableCell>
-                        <TableCell className="font-medium">{row.type}</TableCell>
+                        <TableCell className="font-[var(--font-weight-medium)]">{row.type}</TableCell>
                         <TableCell className="text-[rgba(28,28,29,0.78)]">{row.token}</TableCell>
                         <TableCell className="text-[rgba(28,28,29,0.78)]">
                           {row.amount === "—" ? "—" : formatDisplayAmount(row.amount, row.token)}

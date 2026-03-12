@@ -205,7 +205,7 @@ export function PageHeaderSkeleton({
     return (
       <div className={className}>
         <div
-          className="mx-auto flex w-full items-center justify-between gap-6 px-[var(--page-margin-sm)] pt-[128px]"
+          className="mx-auto flex w-full items-center justify-between gap-6 px-[var(--page-layout-inline-padding)] pt-[var(--layout-page-header-display-padding-top)]"
           style={contentStyle}
         >
           <SkeletonBlock className={cn("h-12 max-w-full", titleWidthClassName)} />
@@ -218,8 +218,8 @@ export function PageHeaderSkeleton({
   return (
     <div className={cn("bg-white", className)}>
       {showTitleRow ? (
-        <div className="mx-auto w-full px-[var(--page-margin-sm)]" style={contentStyle}>
-          <div className="flex items-center justify-between gap-6 pt-[44px] pb-6">
+        <div className="mx-auto w-full px-[var(--page-layout-inline-padding)]" style={contentStyle}>
+          <div className="flex items-center justify-between gap-6 pt-[var(--layout-page-header-title-padding-top)] pb-[var(--layout-page-header-title-padding-bottom)]">
             <SkeletonBlock className={cn("h-11 max-w-full", titleWidthClassName)} />
             {action}
           </div>
@@ -229,8 +229,8 @@ export function PageHeaderSkeleton({
         <div className="border-b-[1.5px] border-border-light">
           <div
             className={cn(
-              "mx-auto w-full px-[var(--page-margin-sm)] pb-4",
-              showTitleRow ? "" : "pt-[44px]"
+              "mx-auto w-full px-[var(--page-layout-inline-padding)] pb-[var(--layout-page-header-secondary-padding-bottom)]",
+              showTitleRow ? "" : "pt-[var(--layout-page-header-title-padding-top)]"
             )}
             style={contentStyle}
           >
@@ -240,7 +240,7 @@ export function PageHeaderSkeleton({
       ) : null}
       {tabs ? (
         <div className="border-b-[1.5px] border-border-light">
-          <div className="mx-auto w-full px-[var(--page-margin-sm)]" style={contentStyle}>
+          <div className="mx-auto w-full px-[var(--page-layout-inline-padding)]" style={contentStyle}>
             <div className="flex items-end gap-8 py-5">
               <SkeletonBlock className="h-6 w-24 rounded-[4px]" />
               <SkeletonBlock className="h-6 w-36 rounded-[4px]" />

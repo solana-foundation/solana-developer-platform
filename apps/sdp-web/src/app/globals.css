@@ -46,6 +46,25 @@
   --color-sidebar-ring: var(--sidebar-ring);
 }
 
+@layer clerk {
+  .cl-popoverCard {
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.04), 0 2px 8px rgba(0, 0, 0, 0.08) !important;
+  }
+
+  .cl-organizationSwitcherTrigger {
+    width: 100% !important;
+    height: 100% !important;
+  }
+
+  .cl-organizationSwitcherPopoverCard {
+    margin-top: -8px !important;
+    min-width: calc(
+      var(--layout-shell-sidebar-width) - 2 *
+        var(--layout-shell-sidebar-padding-inline)
+    ) !important;
+  }
+}
+
 html,
 body {
   background-color: #e9e7de;
