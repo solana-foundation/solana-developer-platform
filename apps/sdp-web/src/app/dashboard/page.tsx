@@ -78,7 +78,7 @@ export default async function DashboardPage() {
     .join(" ");
 
   return (
-    <PageLayout width="default">
+    <PageLayout width="default" inset="display">
       <PageHeader
         variant="display"
         title="Home"
