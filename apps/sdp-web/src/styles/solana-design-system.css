@@ -226,8 +226,8 @@
   --border-light: color-mix(in srgb, var(--gray-1300) 12%, transparent);
   --border-extra-light: color-mix(in srgb, var(--gray-1300) 4%, transparent);
 
-  /* Typography - Font Family */
-  --font-sans: "Inter", system-ui, sans-serif;
+  /* Typography - Font Family
+     Provided by next/font in src/app/layout.tsx */
 
   /* ==========================================================================
      Dark Mode Font Weight Compensation
@@ -827,17 +827,6 @@ body {
   body {
     @apply bg-background text-foreground;
     font-family: var(--font-sans);
-
-    /* ==========================================================================
-       Font Smoothing
-
-       Grayscale antialiasing provides consistent rendering:
-       - Prevents color fringing from subpixel rendering
-       - Especially important on dark backgrounds
-       - Standard practice for design systems
-       ========================================================================== */
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
 
     /* Enable Inter's optical size axis for automatic size-based tuning */
     font-optical-sizing: auto;
