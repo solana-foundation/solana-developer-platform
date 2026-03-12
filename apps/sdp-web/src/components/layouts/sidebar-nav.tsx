@@ -1,17 +1,8 @@
 "use client";
 
 import { cn } from "@/lib/utils";
-import {
-  NavApiKeys,
-  NavDocs,
-  NavHome,
-  NavIssuance,
-  NavPayments,
-  NavSettings,
-  NavWallets,
-  PanelLeft,
-} from "@/components/ui/icons";
-import type { LucideIcon, LucideProps } from "@/components/ui/icons";
+import { BookOpen, Coins, Home, KeyRound, PanelLeft, Send, Settings2, Wallet } from "lucide-react";
+import type { LucideIcon, LucideProps } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -37,16 +28,16 @@ const navSections: NavSection[] = [
     title: "Create",
     density: "default",
     items: [
-      { label: "Home", href: "/dashboard", icon: NavHome },
-      { label: "Wallets", href: "/dashboard/wallets", icon: NavWallets },
+      { label: "Home", href: "/dashboard", icon: Home },
+      { label: "Wallets", href: "/dashboard/wallets", icon: Wallet },
     ],
   },
   {
     title: "Manage",
     density: "compact",
     items: [
-      { label: "Issuance", href: "/dashboard/issuance", icon: NavIssuance },
-      { label: "Payments", href: "/dashboard/payments", icon: NavPayments },
+      { label: "Issuance", href: "/dashboard/issuance", icon: Coins },
+      { label: "Payments", href: "/dashboard/payments", icon: Send },
     ],
   },
 ];
@@ -58,14 +49,14 @@ const docsHref =
     : "https://platform.solana.com/docs");
 
 const bottomNavItems: NavItem[] = [
-  { label: "API keys", href: "/dashboard/api-keys", icon: NavApiKeys },
-  { label: "Docs", href: docsHref, icon: NavDocs, external: true },
-  { label: "Settings", href: "/dashboard/settings", icon: NavSettings },
+  { label: "API keys", href: "/dashboard/api-keys", icon: KeyRound },
+  { label: "Docs", href: docsHref, icon: BookOpen, external: true },
+  { label: "Settings", href: "/dashboard/settings", icon: Settings2 },
 ];
 
 const sidebarIconProps: LucideProps = {
   className: "h-5 w-5 shrink-0",
-  strokeWidth: 2.3,
+  strokeWidth: 1.8,
 };
 
 function isItemActive(pathname: string, href: string): boolean {
