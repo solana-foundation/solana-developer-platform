@@ -126,6 +126,12 @@ export const createWalletSchema = z.object({
 
 export type CreateWalletRequest = z.infer<typeof createWalletSchema>;
 
+export const updateWalletSchema = z.object({
+  label: z.string().max(100).nullable().optional(),
+});
+
+export type UpdateWalletRequest = z.infer<typeof updateWalletSchema>;
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Switch Signing Provider
 // ═══════════════════════════════════════════════════════════════════════════

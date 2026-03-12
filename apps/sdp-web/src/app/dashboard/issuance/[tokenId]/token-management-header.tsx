@@ -1,134 +1,148 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
-import { ArrowUpRight, ChevronDown } from "lucide-react";
+import { ArrowUpRight, Copy } from "lucide-react";
 import Link from "next/link";
-import type { AdminAction } from "./token-management-workspace.types";
+import { TokenDisabledActionTooltip } from "./token-disabled-action-tooltip";
 
 interface TokenManagementHeaderProps {
   tokenName: string;
   tokenSymbol: string;
+  tokenStatus: "pending" | "active" | "paused" | "revoked";
+  tokenAddress: string | null;
+  tokenImageUrl: string | null;
   explorerHref: string | null;
   canDeployToken: boolean;
   isPending: boolean;
-  isActionMenuOpen: boolean;
-  onActionMenuToggle: () => void;
-  onActionMenuClose: () => void;
-  onSelectAction: (action: AdminAction) => void;
+  deployDisabledReason?: string | null;
+  mintDisabledReason?: string | null;
+  burnDisabledReason?: string | null;
+  pauseDisabledReason?: string | null;
+  onCopyAddress: () => void;
+  onMintSelect: () => void;
+  onBurnSelect: () => void;
   onDeploy: () => void;
+  onUnpause: () => void;
 }
 
 export function TokenManagementHeader({
   tokenName,
   tokenSymbol,
+  tokenStatus,
+  tokenAddress,
+  tokenImageUrl,
   explorerHref,
   canDeployToken,
   isPending,
-  isActionMenuOpen,
-  onActionMenuToggle,
-  onActionMenuClose,
-  onSelectAction,
+  deployDisabledReason,
+  mintDisabledReason,
+  burnDisabledReason,
+  pauseDisabledReason,
+  onCopyAddress,
+  onMintSelect,
+  onBurnSelect,
   onDeploy,
+  onUnpause,
 }: TokenManagementHeaderProps) {
+  const tokenAddressLabel = tokenAddress
+    ? `${tokenAddress.slice(0, 5)}...${tokenAddress.slice(-4)}`
+    : "Not deployed";
+
   return (
-    <div className="flex flex-wrap items-start justify-between gap-4">
-      <div className="flex min-w-0 items-center gap-3">
-        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-[rgba(28,28,29,0.14)] bg-white text-[18px] font-semibold text-[rgba(28,28,29,0.66)]">
-          {tokenSymbol.slice(0, 1) || "T"}
-        </div>
-        <div className="min-w-0">
-          <h2 className="truncate text-[30px] leading-[1.1] font-medium text-[#1c1c1d]">
-            {tokenName}
-          </h2>
-          <p className="truncate text-[17px] text-[rgba(28,28,29,0.66)]">{tokenSymbol}</p>
-        </div>
-      </div>
-
-      <div className="relative z-30 flex items-center gap-2">
-        {explorerHref ? (
-          <Button variant="outline" asChild>
-            <Link href={explorerHref} target="_blank" rel="noopener noreferrer">
-              Explorer
-              <ArrowUpRight className="h-4 w-4" />
-            </Link>
-          </Button>
-        ) : (
-          <Button variant="outline" disabled>
-            Explorer
-          </Button>
-        )}
-        <Button type="button" variant="secondary" onClick={onActionMenuToggle}>
-          Admin Actions
-          <ChevronDown className="h-4 w-4" />
-        </Button>
-
-        {isActionMenuOpen ? (
-          <>
-            <button
-              type="button"
-              aria-label="Close admin actions menu"
-              className="fixed inset-0 z-20 cursor-default bg-transparent"
-              onClick={onActionMenuClose}
+    <div className="flex flex-col gap-8">
+      <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+        <div className="flex min-w-0 items-start gap-4">
+          {tokenImageUrl ? (
+            <img
+              src={tokenImageUrl}
+              alt={tokenName}
+              className="h-14 w-14 shrink-0 rounded-full border border-[rgba(28,28,29,0.12)] object-cover"
             />
-            <div className="absolute top-[44px] right-0 z-30 w-[260px] overflow-hidden rounded-xl border border-[rgba(28,28,29,0.12)] bg-white shadow-[0_14px_28px_rgba(28,28,29,0.16)]">
-              <div className="border-b border-[rgba(28,28,29,0.08)] px-3 py-2 text-xs font-medium tracking-wide text-[rgba(28,28,29,0.6)] uppercase">
-                Token Actions
-              </div>
-              <div className="p-1">
-                <MenuAction label="Mint Tokens" onClick={() => onSelectAction("mint")} />
-                <MenuAction label="Burn Tokens" onClick={() => onSelectAction("burn")} />
-                <MenuAction
-                  label="Update Metadata"
-                  onClick={() => onSelectAction("update-metadata")}
-                />
-                <MenuAction
-                  label="Refresh Supply"
-                  onClick={() => onSelectAction("refresh-supply")}
-                />
-              </div>
-              <div className="border-y border-[rgba(28,28,29,0.08)] px-3 py-2 text-xs font-medium tracking-wide text-[rgba(28,28,29,0.6)] uppercase">
-                Administrative
-              </div>
-              <div className="p-1">
+          ) : (
+            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full border border-[rgba(28,28,29,0.14)] bg-white text-[20px] font-semibold text-[#1c1c1d]">
+              {tokenSymbol.slice(0, 1) || "T"}
+            </div>
+          )}
+
+          <div className="min-w-0">
+            <h2 className="truncate text-[42px] leading-[1.02] font-medium tracking-[-0.5px] text-[#1c1c1d]">
+              {tokenName}
+            </h2>
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-[18px] text-[rgba(28,28,29,0.68)]">
+              <span className="font-mono text-[15px] tracking-[-0.1px]">{tokenAddressLabel}</span>
+              {tokenAddress ? (
                 <button
                   type="button"
-                  onClick={onDeploy}
-                  disabled={!canDeployToken || isPending}
-                  className={[
-                    "flex w-full items-center rounded-lg px-3 py-2 text-left text-sm",
-                    canDeployToken
-                      ? "hover:bg-[rgba(28,28,29,0.05)]"
-                      : "cursor-not-allowed text-[rgba(28,28,29,0.42)] opacity-60",
-                  ].join(" ")}
+                  onClick={onCopyAddress}
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-[10px] border border-[rgba(28,28,29,0.12)] bg-white text-[rgba(28,28,29,0.62)] transition-colors hover:text-[#1c1c1d]"
+                  aria-label="Copy token address"
                 >
-                  Deploy Token
+                  <Copy className="h-4 w-4" />
                 </button>
-                <MenuAction label="Force Transfer" onClick={() => onSelectAction("seize")} />
-                <MenuAction label="Force Burn" onClick={() => onSelectAction("force-burn")} />
-                <MenuAction
-                  label="Freeze / Unfreeze Account"
-                  onClick={() => onSelectAction("freeze")}
-                />
-                <MenuAction label="Pause / Unpause Token" onClick={() => onSelectAction("pause")} />
-                <MenuAction label="Update Authority" onClick={() => onSelectAction("authority")} />
-                <MenuAction label="Manage Allowlist" onClick={() => onSelectAction("allowlist")} />
-              </div>
+              ) : null}
+              <span className="rounded-full border border-[rgba(28,28,29,0.1)] bg-white px-3 py-1 text-[13px] font-medium text-[rgba(28,28,29,0.62)] uppercase">
+                {tokenSymbol}
+              </span>
             </div>
-          </>
-        ) : null}
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          {explorerHref ? (
+            <Button variant="outline" asChild>
+              <Link href={explorerHref} target="_blank" rel="noopener noreferrer">
+                Explorer
+                <ArrowUpRight className="h-4 w-4" />
+              </Link>
+            </Button>
+          ) : null}
+
+          {canDeployToken ? (
+            <TokenDisabledActionTooltip reason={isPending ? null : deployDisabledReason}>
+              <Button
+                type="button"
+                onClick={onDeploy}
+                disabled={isPending || Boolean(deployDisabledReason)}
+              >
+                Deploy
+              </Button>
+            </TokenDisabledActionTooltip>
+          ) : (
+            <>
+              {tokenStatus === "paused" ? (
+                <TokenDisabledActionTooltip reason={isPending ? null : pauseDisabledReason}>
+                  <Button
+                    type="button"
+                    onClick={onUnpause}
+                    disabled={isPending || Boolean(pauseDisabledReason)}
+                  >
+                    Unpause
+                  </Button>
+                </TokenDisabledActionTooltip>
+              ) : null}
+              <TokenDisabledActionTooltip reason={isPending ? null : mintDisabledReason}>
+                <Button
+                  type="button"
+                  onClick={onMintSelect}
+                  disabled={isPending || Boolean(mintDisabledReason)}
+                >
+                  Mint
+                </Button>
+              </TokenDisabledActionTooltip>
+              <TokenDisabledActionTooltip reason={isPending ? null : burnDisabledReason}>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={onBurnSelect}
+                  disabled={isPending || Boolean(burnDisabledReason)}
+                >
+                  Burn
+                </Button>
+              </TokenDisabledActionTooltip>
+            </>
+          )}
+        </div>
       </div>
     </div>
-  );
-}
-
-function MenuAction({ label, onClick }: { label: string; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm hover:bg-[rgba(28,28,29,0.05)]"
-    >
-      {label}
-    </button>
   );
 }

@@ -43,6 +43,7 @@ const mapTokenRow = (
   id: row.id,
   projectId: row.projectId,
   organizationId: row.organizationId,
+  signingWalletId: row.signingWalletId,
   mintAddress: row.mintAddress,
   mintAuthority: row.mintAuthority,
   freezeAuthority: row.freezeAuthority,

@@ -28,6 +28,7 @@ import {
   createWalletSchema,
   deleteWalletSchema,
   setDefaultWalletSchema,
+  updateWalletSchema,
 } from "../schemas";
 
 // biome-ignore lint/nursery/noSecrets: Solana native mint address constant, not a secret.
@@ -258,6 +259,84 @@ export const setDefaultWallet = async (c: AppContext) => {
   });
 
   return success(c, { defaultWalletId: parsed.data.walletId });
+};
+
+export const updateWallet = async (c: AppContext) => {
+  const actor = resolveActor(c);
+  const auth = getAuth(c);
+  const projectId = c.req.query("projectId") ?? actor.projectId;
+  const walletId = c.req.param("walletId")?.trim();
+
+  if (!walletId) {
+    throw new AppError("BAD_REQUEST", "Invalid wallet ID");
+  }
+
+  const body = await c.req.json();
+  const parsed = updateWalletSchema.safeParse(body);
+
+  if (!parsed.success) {
+    throw new AppError("BAD_REQUEST", "Invalid request body", {
+      errors: parsed.error.flatten().fieldErrors,
+    });
+  }
+
+  const signingService = createSigningService(c.env);
+  const wallet = await signingService.getWalletById(actor.organizationId, projectId, walletId);
+
+  if (!wallet) {
+    throw new AppError("NOT_FOUND", "Wallet not found");
+  }
+
+  try {
+    assertApiKeyWalletAccess(auth, wallet.walletId, ["wallets:write"]);
+  } catch (error) {
+    if (error instanceof AppError && error.code === "FORBIDDEN") {
+      throw new AppError("NOT_FOUND", "Wallet not found");
+    }
+    throw error;
+  }
+
+  const nextLabel = parsed.data.label?.trim() ? parsed.data.label.trim() : null;
+
+  await c.env.DB.prepare(
+    `UPDATE custody_wallets
+     SET label = ?, updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ','now')
+     WHERE id = ?`
+  )
+    .bind(nextLabel, wallet.id)
+    .run();
+
+  const auditService = new AuditService(c.env.DB);
+  await auditService.log(c, {
+    action: "update",
+    resourceType: "custody_wallet",
+    resourceId: wallet.id,
+    metadata: {
+      event: "wallet_label_updated",
+      walletId: wallet.walletId,
+      previousLabel: wallet.label ?? null,
+      label: nextLabel,
+      projectId: projectId ?? null,
+      provider: wallet.provider ?? null,
+    },
+  });
+
+  const response: CustodyWalletResponse = {
+    wallet: {
+      id: wallet.id,
+      custodyConfigId: wallet.custodyConfigId,
+      provider: wallet.provider,
+      isDefaultProvider: wallet.isDefaultProvider,
+      walletId: wallet.walletId,
+      publicKey: wallet.publicKey,
+      label: nextLabel,
+      purpose: wallet.purpose,
+      status: wallet.status,
+      createdAt: wallet.createdAt,
+    },
+  };
+
+  return success(c, response);
 };
 
 export const listWallets = async (c: AppContext) => {

@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { getStoredApiKeySecret } from "@/lib/playground-api-keys";
+import type { PaymentsDashboardWallet } from "@sdp/types";
 import { AnimatePresence, motion } from "framer-motion";
 import { Plus, Search } from "lucide-react";
 import dynamic from "next/dynamic";
@@ -51,9 +52,11 @@ interface IssuanceWorkspaceProps {
   tokens: IssuanceTokenView[];
   templates: IssuanceTemplateOption[];
   apiKeys: IssuanceApiKeyOption[];
+  signerWallets: PaymentsDashboardWallet[];
   apiBaseUrl: string | null;
   templatesError: string | null;
   tokensError: string | null;
+  signerWalletsError: string | null;
 }
 
 function formatDate(value: string | null | undefined): string {
@@ -107,9 +110,11 @@ export function IssuanceWorkspace({
   tokens,
   templates,
   apiKeys,
+  signerWallets,
   apiBaseUrl,
   templatesError,
   tokensError,
+  signerWalletsError,
 }: IssuanceWorkspaceProps) {
   const { issuanceTab, selectedPlaygroundApiKeyId, setPlaygroundApiKeys } = useDashboardWorkspace();
   const [search, setSearch] = useState("");
@@ -296,6 +301,8 @@ export function IssuanceWorkspace({
             <CreateIssuanceTokenModal
               open={isCreateTokenModalOpen}
               onOpenChange={setIsCreateTokenModalOpen}
+              signerWallets={signerWallets}
+              signerWalletsError={signerWalletsError}
               hideTrigger
             />
           </motion.div>

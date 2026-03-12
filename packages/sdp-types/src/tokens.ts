@@ -202,6 +202,8 @@ export interface Token {
   id: string; // tok_xxxxxxxxxxxx
   projectId: string;
   organizationId: string;
+  /** Preferred custody wallet ID used for token deploy/admin/write actions. */
+  signingWalletId: string | null;
   /** Solana mint address (null until deployed) */
   mintAddress: string | null;
   /** Mint authority public key */
@@ -381,6 +383,8 @@ export interface TokenTemplateOverrides {
 export interface CreateTokenRequest {
   name: string;
   symbol: string;
+  /** Preferred custody wallet ID for token deploy/admin/write actions. */
+  signingWalletId?: string;
   decimals?: number;
   description?: string;
   /** Metadata URI passed to on-chain token metadata (points to off-chain JSON). */

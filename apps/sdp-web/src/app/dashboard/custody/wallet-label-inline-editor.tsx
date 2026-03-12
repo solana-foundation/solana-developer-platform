@@ -1,0 +1,114 @@
+"use client";
+
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Check, Pencil, X } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useEffect, useState, useTransition } from "react";
+import { toast } from "sonner";
+import { updateWalletLabelAction } from "./actions";
+
+interface WalletLabelInlineEditorProps {
+  walletId: string;
+  label: string | null;
+}
+
+export function WalletLabelInlineEditor({ walletId, label }: WalletLabelInlineEditorProps) {
+  const router = useRouter();
+  const [isEditing, setIsEditing] = useState(false);
+  const [draft, setDraft] = useState(label ?? "");
+  const [isPending, startTransition] = useTransition();
+
+  useEffect(() => {
+    setDraft(label ?? "");
+  }, [label]);
+
+  const handleCancel = () => {
+    setDraft(label ?? "");
+    setIsEditing(false);
+  };
+
+  const handleSubmit = () => {
+    startTransition(async () => {
+      const result = await updateWalletLabelAction(walletId, draft);
+
+      if (result.status === "success") {
+        toast.success("Wallet label updated.");
+        setIsEditing(false);
+        router.refresh();
+        return;
+      }
+
+      toast.error("Unable to update wallet label.", {
+        description: result.message,
+      });
+    });
+  };
+
+  if (isEditing) {
+    return (
+      <div className="flex min-w-0 max-w-full items-center gap-1">
+        <Input
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          maxLength={100}
+          placeholder="Untitled"
+          className="h-8 min-w-0 w-full"
+          disabled={isPending}
+          autoFocus
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              handleSubmit();
+              return;
+            }
+            if (event.key === "Escape") {
+              event.preventDefault();
+              handleCancel();
+            }
+          }}
+        />
+        <Button
+          type="button"
+          size="icon-xs"
+          onClick={handleSubmit}
+          disabled={isPending}
+          aria-label="Save wallet label"
+          title="Save wallet label"
+        >
+          <Check className="h-3 w-3" />
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="icon-xs"
+          onClick={handleCancel}
+          disabled={isPending}
+          aria-label="Cancel wallet label edit"
+          title="Cancel wallet label edit"
+        >
+          <X className="h-3 w-3" />
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="group flex min-w-0 items-center gap-1">
+      <div className="min-w-0 truncate" title={label ?? "Untitled"}>
+        {label ?? "Untitled"}
+      </div>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-xs"
+        onClick={() => setIsEditing(true)}
+        aria-label="Edit wallet label"
+        title="Edit wallet label"
+        className="opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"
+      >
+        <Pencil className="h-3 w-3" />
+      </Button>
+    </div>
+  );
+}

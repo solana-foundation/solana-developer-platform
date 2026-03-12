@@ -312,4 +312,70 @@ describe("Custody wallet scope routes", () => {
 
     expect(res.status).toBe(404);
   });
+
+  it("updates the label when the wallet is inside the API key bindings", async () => {
+    await seedCachedKey({
+      walletBindings: [{ walletId: "para_wallet_a", permissions: ["wallets:write"] }],
+    });
+
+    const res = await app.request(
+      "/v1/wallets/para_wallet_a",
+      {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          label: "Operations",
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      data: {
+        wallet: {
+          walletId: string;
+          label: string | null;
+        };
+      };
+    };
+    expect(body.data.wallet).toMatchObject({
+      walletId: "para_wallet_a",
+      label: "Operations",
+    });
+
+    const updated = await env.DB.prepare(
+      "SELECT label FROM custody_wallets WHERE wallet_id = ? LIMIT 1"
+    )
+      .bind("para_wallet_a")
+      .first<{ label: string | null }>();
+
+    expect(updated?.label).toBe("Operations");
+  });
+
+  it("returns 404 when updating a wallet outside the API key bindings", async () => {
+    await seedCachedKey({
+      walletBindings: [{ walletId: "privy_wallet_a", permissions: ["wallets:write"] }],
+    });
+
+    const res = await app.request(
+      "/v1/wallets/para_wallet_a",
+      {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          label: "Operations",
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(404);
+  });
 });

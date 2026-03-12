@@ -62,7 +62,11 @@ export const prepareForceBurn = async (c: AppContext) => {
     throw new AppError("BAD_REQUEST", "Permanent delegate is not configured for this token");
   }
 
-  const signingWalletId = resolveApiKeySigningWalletId(auth, undefined, ["tokens:admin"]);
+  const signingWalletId = resolveApiKeySigningWalletId(
+    auth,
+    parsed.data.signingWalletId ?? token.signingWalletId,
+    ["tokens:admin"]
+  );
 
   const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId, signingWalletId);
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
@@ -163,7 +167,11 @@ export const executeForceBurn = async (c: AppContext) => {
     throw new AppError("BAD_REQUEST", "Permanent delegate is not configured for this token");
   }
 
-  const signingWalletId = resolveApiKeySigningWalletId(auth, undefined, ["tokens:admin"]);
+  const signingWalletId = resolveApiKeySigningWalletId(
+    auth,
+    parsed.data.signingWalletId ?? token.signingWalletId,
+    ["tokens:admin"]
+  );
 
   const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId, signingWalletId);
   if (permanentDelegateRaw !== signer.address) {

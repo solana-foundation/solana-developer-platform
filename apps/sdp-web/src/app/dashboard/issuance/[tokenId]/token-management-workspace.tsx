@@ -1,16 +1,24 @@
 "use client";
 
+import { Button } from "@/components/ui/button";
 import { Loader2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { TokenActionConfirmationDialog } from "./token-action-confirmation-dialog";
 import { TokenActionForms } from "./token-action-forms";
-import { TokenActionResponseCard } from "./token-action-response-card";
+import { TokenAuthorityModal } from "./token-authority-modal";
 import { TokenControlListsSection } from "./token-control-lists-section";
+import { TokenDisabledActionTooltip } from "./token-disabled-action-tooltip";
+import {
+  type FundManagementModalAction,
+  TokenFundManagementSection,
+} from "./token-fund-management-section";
 import { TokenManagementHeader } from "./token-management-header";
+import { TokenManagementModalShell } from "./token-management-modal-shell";
 import type {
   AdminAction,
-  SettingsTab,
+  PermissionRow,
+  TokenManagementTab,
   TokenManagementWorkspaceProps,
 } from "./token-management-workspace.types";
 import {
@@ -23,19 +31,80 @@ import {
   createInitialMetadataForm,
   createInitialMintForm,
   createInitialSeizeForm,
+  getDefaultActionForTab,
   getExplorerHref,
   getExtensionRows,
   getPermissionRows,
+  getSignerSelectionForAction,
+  getTabForAction,
+  getTokenActionDisabledReasons,
   isPositiveAmount,
+  resolveAuthorityAddressForRole,
 } from "./token-management-workspace.utils";
 import { TokenOverviewSection } from "./token-overview-section";
 import { TokenSettingsSection } from "./token-settings-section";
+import { TokenSignerSelect } from "./token-signer-select";
 import { TokenTransactionsSection } from "./token-transactions-section";
 import { useTokenActionRunner } from "./use-token-action-runner";
+
+const managementTabs: Array<{ id: TokenManagementTab; label: string }> = [
+  { id: "overview", label: "Overview" },
+  { id: "permissions", label: "Permissions" },
+  { id: "extensions", label: "Extensions" },
+  { id: "compliance", label: "Compliance" },
+  { id: "metadata", label: "Metadata" },
+  { id: "fund-management", label: "Fund Management" },
+];
+
+const complianceActions: Array<{ id: AdminAction; label: string }> = [
+  { id: "allowlist", label: "Allowlist" },
+  { id: "freeze", label: "Freeze" },
+  { id: "pause", label: "Pause" },
+];
+
+const liveFundManagementRows: Array<{
+  id: FundManagementModalAction;
+  title: string;
+  helper: string;
+  actionLabel: string;
+}> = [
+  {
+    id: "mint",
+    title: "Mint Tokens",
+    helper: "Create new supply in a destination wallet or token account.",
+    actionLabel: "Mint",
+  },
+  {
+    id: "burn",
+    title: "Burn Tokens",
+    helper: "Remove supply from a source wallet or token account.",
+    actionLabel: "Burn",
+  },
+  {
+    id: "seize",
+    title: "Force Transfer",
+    helper: "Move tokens administratively between two accounts.",
+    actionLabel: "Transfer",
+  },
+  {
+    id: "force-burn",
+    title: "Force Burn",
+    helper: "Burn tokens administratively from a source account.",
+    actionLabel: "Burn",
+  },
+  {
+    id: "refresh-supply",
+    title: "Refresh Supply",
+    helper: "Sync the cached supply value from on-chain state.",
+    actionLabel: "Refresh",
+  },
+];
 
 export function TokenManagementWorkspace({
   token,
   tokenError,
+  authorityWallets,
+  authorityWalletsError,
   transactions,
   transactionsError,
   transactionsTotal,
@@ -51,15 +120,23 @@ export function TokenManagementWorkspace({
 }: TokenManagementWorkspaceProps) {
   const {
     isPending,
-    lastActionResult,
     actionConfirmation,
     runAction,
+    runActionImmediately,
     dismissActionConfirmation,
     confirmAction,
   } = useTokenActionRunner();
-  const [settingsTab, setSettingsTab] = useState<SettingsTab>("permissions");
-  const [isActionMenuOpen, setIsActionMenuOpen] = useState(false);
-  const [activeAction, setActiveAction] = useState<AdminAction | null>("update-metadata");
+  const [activeTab, setActiveTab] = useState<TokenManagementTab>("permissions");
+  const [activeAction, setActiveAction] = useState<AdminAction | null>(null);
+  const [authorityModalRow, setAuthorityModalRow] = useState<PermissionRow | null>(null);
+  const [authorityModalCurrentAuthority, setAuthorityModalCurrentAuthority] = useState<
+    string | null
+  >(null);
+  const [authorityModalNewAuthority, setAuthorityModalNewAuthority] = useState("");
+  const [authorityModalSignerWalletId, setAuthorityModalSignerWalletId] = useState("");
+  const [fundManagementModalAction, setFundManagementModalAction] =
+    useState<FundManagementModalAction | null>(null);
+  const [deploySignerWalletId, setDeploySignerWalletId] = useState("");
   const [metadataForm, setMetadataForm] = useState(() => createInitialMetadataForm(token));
   const [mintForm, setMintForm] = useState(createInitialMintForm);
   const [burnForm, setBurnForm] = useState(createInitialBurnForm);
@@ -72,9 +149,109 @@ export function TokenManagementWorkspace({
   const tokenBasePath = `/v1/issuance/tokens/${token.id}`;
   const explorerHref = getExplorerHref(token.mintAddress);
   const canDeployToken = token.status === "pending" && !token.mintAddress;
+  const {
+    mintDisabledReason,
+    burnDisabledReason,
+    seizeDisabledReason,
+    forceBurnDisabledReason,
+    pauseDisabledReason,
+    freezeDisabledReason,
+  } = getTokenActionDisabledReasons(token);
   const metadataAuthority = token.metadataAuthority ?? token.mintAuthority;
-  const permissionRows = getPermissionRows(token, metadataAuthority);
+  const withWalletLoadError = <T extends { unavailableReason: string | null }>(selection: T): T => {
+    if (authorityWalletsError && selection.unavailableReason) {
+      return { ...selection, unavailableReason: authorityWalletsError };
+    }
+
+    return selection;
+  };
+  const deploySignerSelection = withWalletLoadError(
+    getSignerSelectionForAction({
+      action: "deploy",
+      token,
+      authorityWallets,
+      metadataAuthority,
+    })
+  );
+  const mintSignerSelection = withWalletLoadError(
+    getSignerSelectionForAction({
+      action: "mint",
+      token,
+      authorityWallets,
+      metadataAuthority,
+    })
+  );
+  const burnSignerSelection = withWalletLoadError(
+    getSignerSelectionForAction({
+      action: "burn",
+      token,
+      authorityWallets,
+      metadataAuthority,
+    })
+  );
+  const seizeSignerSelection = withWalletLoadError(
+    getSignerSelectionForAction({
+      action: "seize",
+      token,
+      authorityWallets,
+      metadataAuthority,
+    })
+  );
+  const forceBurnSignerSelection = withWalletLoadError(
+    getSignerSelectionForAction({
+      action: "force-burn",
+      token,
+      authorityWallets,
+      metadataAuthority,
+    })
+  );
+  const permissionRows = getPermissionRows(token, metadataAuthority).map((row) => ({
+    ...row,
+    editDisabledReason: withWalletLoadError(
+      getSignerSelectionForAction({
+        action: "authority",
+        token,
+        authorityWallets,
+        metadataAuthority,
+        permissionRow: row,
+      })
+    ).unavailableReason,
+  }));
   const extensionRows = getExtensionRows(token);
+  const effectiveMintDisabledReason = mintDisabledReason ?? mintSignerSelection.unavailableReason;
+  const effectiveBurnDisabledReason = burnDisabledReason ?? burnSignerSelection.unavailableReason;
+  const effectiveSeizeDisabledReason =
+    seizeDisabledReason ?? seizeSignerSelection.unavailableReason;
+  const effectiveForceBurnDisabledReason =
+    forceBurnDisabledReason ?? forceBurnSignerSelection.unavailableReason;
+  const fundManagementDisabledReasons: Record<FundManagementModalAction, string | null> = {
+    deploy: deploySignerSelection.unavailableReason,
+    mint: effectiveMintDisabledReason,
+    burn: effectiveBurnDisabledReason,
+    seize: effectiveSeizeDisabledReason,
+    "force-burn": effectiveForceBurnDisabledReason,
+    "refresh-supply": null,
+  };
+  const complianceActionDisabledReasons: Partial<Record<AdminAction, string | null>> = {
+    freeze: freezeDisabledReason,
+    pause: pauseDisabledReason,
+  };
+  const fundManagementRows = canDeployToken
+    ? [
+        {
+          id: "deploy" as const,
+          title: "Deploy Token",
+          helper: "Deploy this token on-chain before running other fund operations.",
+          actionLabel: "Deploy",
+          disabled: Boolean(fundManagementDisabledReasons.deploy),
+          disabledReason: fundManagementDisabledReasons.deploy,
+        },
+      ]
+    : liveFundManagementRows.map((row) => ({
+        ...row,
+        disabled: Boolean(fundManagementDisabledReasons[row.id]),
+        disabledReason: fundManagementDisabledReasons[row.id],
+      }));
 
   const handleCopy = async (value: string | null) => {
     if (!value) {
@@ -110,24 +287,24 @@ export function TokenManagementWorkspace({
     });
   };
 
-  const handleDeploy = (mode: "prepare" | "execute") => {
+  const handleDeploy = () => {
     runAction(
       {
-        label: `Deploy token (${mode})`,
+        label: "Deploy token",
         method: "POST",
-        path: `${tokenBasePath}/deploy${mode === "prepare" ? "/prepare" : ""}`,
-        body: {},
+        path: `${tokenBasePath}/deploy`,
+        body: {
+          signingWalletId: deploySignerWalletId || undefined,
+        },
       },
-      mode === "execute"
-        ? {
-            requiresConfirmation: true,
-            confirmationTitle: "Deploy token?",
-            confirmationDescription: "This will submit the deploy transaction on-chain.",
-            confirmButtonLabel: "Deploy now",
-            submitToast: "Submitting deploy transaction...",
-            successToast: "Deploy transaction finalized.",
-          }
-        : undefined
+      {
+        requiresConfirmation: true,
+        confirmationTitle: "Deploy token?",
+        confirmationDescription: "This will submit the deploy transaction on-chain.",
+        confirmButtonLabel: "Deploy now",
+        submitToast: "Submitting deploy transaction...",
+        successToast: "Deploy transaction finalized.",
+      }
     );
   };
 
@@ -140,7 +317,12 @@ export function TokenManagementWorkspace({
     });
   };
 
-  const handleMint = (mode: "prepare" | "execute") => {
+  const handleMint = () => {
+    if (effectiveMintDisabledReason) {
+      toast.error(effectiveMintDisabledReason);
+      return;
+    }
+
     const destination = mintForm.destination.trim();
     const amount = mintForm.amount.trim();
     if (!destination || !amount) {
@@ -154,10 +336,11 @@ export function TokenManagementWorkspace({
 
     runAction(
       {
-        label: `Mint (${mode})`,
+        label: "Mint tokens",
         method: "POST",
-        path: `${tokenBasePath}/mint${mode === "prepare" ? "/prepare" : ""}`,
+        path: `${tokenBasePath}/mint`,
         body: {
+          signingWalletId: mintForm.signingWalletId || undefined,
           mint: {
             destination,
             amount,
@@ -165,20 +348,23 @@ export function TokenManagementWorkspace({
           },
         },
       },
-      mode === "execute"
-        ? {
-            requiresConfirmation: true,
-            confirmationTitle: "Mint tokens?",
-            confirmationDescription: "This will submit a mint transaction on-chain.",
-            confirmButtonLabel: "Mint now",
-            submitToast: "Submitting mint transaction...",
-            successToast: "Mint transaction finalized.",
-          }
-        : undefined
+      {
+        requiresConfirmation: true,
+        confirmationTitle: "Mint tokens?",
+        confirmationDescription: "This will submit a mint transaction on-chain.",
+        confirmButtonLabel: "Mint now",
+        submitToast: "Submitting mint transaction...",
+        successToast: "Mint transaction finalized.",
+      }
     );
   };
 
-  const handleBurn = (mode: "prepare" | "execute") => {
+  const handleBurn = () => {
+    if (effectiveBurnDisabledReason) {
+      toast.error(effectiveBurnDisabledReason);
+      return;
+    }
+
     const source = burnForm.source.trim();
     const amount = burnForm.amount.trim();
     if (!source || !amount) {
@@ -192,10 +378,11 @@ export function TokenManagementWorkspace({
 
     runAction(
       {
-        label: `Burn (${mode})`,
+        label: "Burn tokens",
         method: "POST",
-        path: `${tokenBasePath}/burn${mode === "prepare" ? "/prepare" : ""}`,
+        path: `${tokenBasePath}/burn`,
         body: {
+          signingWalletId: burnForm.signingWalletId || undefined,
           burn: {
             source,
             amount,
@@ -203,20 +390,23 @@ export function TokenManagementWorkspace({
           },
         },
       },
-      mode === "execute"
-        ? {
-            requiresConfirmation: true,
-            confirmationTitle: "Burn tokens?",
-            confirmationDescription: "This will submit a burn transaction on-chain.",
-            confirmButtonLabel: "Burn now",
-            submitToast: "Submitting burn transaction...",
-            successToast: "Burn transaction finalized.",
-          }
-        : undefined
+      {
+        requiresConfirmation: true,
+        confirmationTitle: "Burn tokens?",
+        confirmationDescription: "This will submit a burn transaction on-chain.",
+        confirmButtonLabel: "Burn now",
+        submitToast: "Submitting burn transaction...",
+        successToast: "Burn transaction finalized.",
+      }
     );
   };
 
-  const handleSeize = (mode: "prepare" | "execute") => {
+  const handleSeize = () => {
+    if (effectiveSeizeDisabledReason) {
+      toast.error(effectiveSeizeDisabledReason);
+      return;
+    }
+
     const source = seizeForm.source.trim();
     const destination = seizeForm.destination.trim();
     const amount = seizeForm.amount.trim();
@@ -231,10 +421,11 @@ export function TokenManagementWorkspace({
 
     runAction(
       {
-        label: `Seize (${mode})`,
+        label: "Force transfer",
         method: "POST",
-        path: `${tokenBasePath}/seize${mode === "prepare" ? "/prepare" : ""}`,
+        path: `${tokenBasePath}/seize`,
         body: {
+          signingWalletId: seizeForm.signingWalletId || undefined,
           seize: {
             source,
             destination,
@@ -244,21 +435,23 @@ export function TokenManagementWorkspace({
           },
         },
       },
-      mode === "execute"
-        ? {
-            requiresConfirmation: true,
-            confirmationTitle: "Force transfer?",
-            confirmationDescription:
-              "This will submit a seize (force transfer) transaction on-chain.",
-            confirmButtonLabel: "Transfer now",
-            submitToast: "Submitting force transfer transaction...",
-            successToast: "Force transfer transaction finalized.",
-          }
-        : undefined
+      {
+        requiresConfirmation: true,
+        confirmationTitle: "Force transfer?",
+        confirmationDescription: "This will submit a seize (force transfer) transaction on-chain.",
+        confirmButtonLabel: "Transfer now",
+        submitToast: "Submitting force transfer transaction...",
+        successToast: "Force transfer transaction finalized.",
+      }
     );
   };
 
-  const handleForceBurn = (mode: "prepare" | "execute") => {
+  const handleForceBurn = () => {
+    if (effectiveForceBurnDisabledReason) {
+      toast.error(effectiveForceBurnDisabledReason);
+      return;
+    }
+
     const source = forceBurnForm.source.trim();
     const amount = forceBurnForm.amount.trim();
     if (!source || !amount) {
@@ -272,10 +465,11 @@ export function TokenManagementWorkspace({
 
     runAction(
       {
-        label: `Force Burn (${mode})`,
+        label: "Force burn",
         method: "POST",
-        path: `${tokenBasePath}/force-burn${mode === "prepare" ? "/prepare" : ""}`,
+        path: `${tokenBasePath}/force-burn`,
         body: {
+          signingWalletId: forceBurnForm.signingWalletId || undefined,
           forceBurn: {
             source,
             amount,
@@ -284,25 +478,23 @@ export function TokenManagementWorkspace({
           },
         },
       },
-      mode === "execute"
-        ? {
-            requiresConfirmation: true,
-            confirmationTitle: "Force burn tokens?",
-            confirmationDescription: "This will submit a force-burn transaction on-chain.",
-            confirmButtonLabel: "Force burn now",
-            submitToast: "Submitting force-burn transaction...",
-            successToast: "Force-burn transaction finalized.",
-          }
-        : undefined
+      {
+        requiresConfirmation: true,
+        confirmationTitle: "Force burn tokens?",
+        confirmationDescription: "This will submit a force-burn transaction on-chain.",
+        confirmButtonLabel: "Force burn now",
+        submitToast: "Submitting force-burn transaction...",
+        successToast: "Force-burn transaction finalized.",
+      }
     );
   };
 
-  const handleAuthorityUpdate = (mode: "prepare" | "execute") => {
+  const handleAuthorityUpdate = () => {
     runAction(
       {
-        label: `Update authority (${mode})`,
+        label: "Update authority",
         method: "POST",
-        path: `${tokenBasePath}/authority${mode === "prepare" ? "/prepare" : ""}`,
+        path: `${tokenBasePath}/authority`,
         body: {
           authority: {
             role: authorityForm.role,
@@ -311,20 +503,23 @@ export function TokenManagementWorkspace({
           },
         },
       },
-      mode === "execute"
-        ? {
-            requiresConfirmation: true,
-            confirmationTitle: "Update authority?",
-            confirmationDescription: "This will submit an authority update transaction on-chain.",
-            confirmButtonLabel: "Update now",
-            submitToast: "Submitting authority update transaction...",
-            successToast: "Authority update finalized.",
-          }
-        : undefined
+      {
+        requiresConfirmation: true,
+        confirmationTitle: "Update authority?",
+        confirmationDescription: "This will submit an authority update transaction on-chain.",
+        confirmButtonLabel: "Update now",
+        submitToast: "Submitting authority update transaction...",
+        successToast: "Authority update finalized.",
+      }
     );
   };
 
   const handlePause = (pause: boolean) => {
+    if (pauseDisabledReason) {
+      toast.error(pauseDisabledReason);
+      return;
+    }
+
     runAction(
       {
         label: pause ? "Pause token" : "Unpause token",
@@ -348,6 +543,11 @@ export function TokenManagementWorkspace({
   };
 
   const handleFreeze = (unfreeze: boolean) => {
+    if (freezeDisabledReason) {
+      toast.error(freezeDisabledReason);
+      return;
+    }
+
     const accountAddress = freezeForm.accountAddress.trim();
     if (!accountAddress) {
       toast.error("Account address is required.");
@@ -423,53 +623,226 @@ export function TokenManagementWorkspace({
     });
   };
 
-  const selectAction = (action: AdminAction) => {
-    setActiveAction(action);
-    setIsActionMenuOpen(false);
+  const handleAuthorityModalOpen = (row: PermissionRow) => {
+    const currentAuthority = resolveAuthorityAddressForRole(
+      token,
+      row.authorityRole,
+      metadataAuthority
+    );
+    const signerSelection = withWalletLoadError(
+      getSignerSelectionForAction({
+        action: "authority",
+        token,
+        authorityWallets,
+        metadataAuthority,
+        permissionRow: row,
+      })
+    );
+
+    setAuthorityModalRow(row);
+    setAuthorityModalCurrentAuthority(currentAuthority);
+    setAuthorityModalNewAuthority(row.value ?? "");
+    setAuthorityModalSignerWalletId(signerSelection.defaultWalletId);
   };
 
-  return (
-    <div className="space-y-8 pb-8">
-      <TokenManagementHeader
-        tokenName={token.name}
-        tokenSymbol={token.symbol}
-        explorerHref={explorerHref}
-        canDeployToken={canDeployToken}
-        isPending={isPending}
-        isActionMenuOpen={isActionMenuOpen}
-        onActionMenuToggle={() => setIsActionMenuOpen((open) => !open)}
-        onActionMenuClose={() => setIsActionMenuOpen(false)}
-        onSelectAction={selectAction}
-        onDeploy={() => {
-          if (!canDeployToken) {
-            return;
-          }
-          setIsActionMenuOpen(false);
-          handleDeploy("execute");
-        }}
-      />
+  const handleAuthorityModalClose = () => {
+    if (isPending) {
+      return;
+    }
 
-      {tokenError ? (
-        <div className="rounded-xl border border-[#c71f37]/20 bg-[#c71f37]/[0.03] px-4 py-3">
-          <p className="text-sm font-medium text-[#8a1f2a]">Token load warning</p>
-          <p className="mt-1 text-sm text-[#8a1f2a]">{tokenError}</p>
-        </div>
-      ) : null}
+    setAuthorityModalRow(null);
+    setAuthorityModalCurrentAuthority(null);
+    setAuthorityModalNewAuthority("");
+    setAuthorityModalSignerWalletId("");
+  };
 
-      <TokenOverviewSection token={token} />
+  const handleAuthorityModalConfirm = async () => {
+    if (!authorityModalRow) {
+      return;
+    }
 
-      <TokenSettingsSection
-        settingsTab={settingsTab}
-        permissionRows={permissionRows}
-        extensionRows={extensionRows}
-        onSettingsTabChange={setSettingsTab}
-        onCopy={handleCopy}
-        onEditAction={setActiveAction}
-      />
+    const result = await runActionImmediately(
+      {
+        label: `Update ${authorityModalRow.title}`,
+        method: "POST",
+        path: `${tokenBasePath}/authority`,
+        body: {
+          signingWalletId: authorityModalSignerWalletId || undefined,
+          authority: {
+            role: authorityModalRow.authorityRole,
+            currentAuthority: authorityModalCurrentAuthority ?? undefined,
+            newAuthority: asOptionalString(authorityModalNewAuthority) ?? null,
+          },
+        },
+      },
+      {
+        submitToast: `Updating ${authorityModalRow.title.toLowerCase()}...`,
+        successToast: `${authorityModalRow.title} updated.`,
+      }
+    );
 
+    if (result.ok) {
+      handleAuthorityModalClose();
+    }
+  };
+
+  const openFundManagementModal = (action: FundManagementModalAction) => {
+    if (fundManagementDisabledReasons[action]) {
+      return;
+    }
+
+    switch (action) {
+      case "deploy":
+        setDeploySignerWalletId(deploySignerSelection.defaultWalletId);
+        break;
+      case "mint":
+        setMintForm((previous) => ({
+          ...previous,
+          signingWalletId: mintSignerSelection.defaultWalletId,
+        }));
+        break;
+      case "burn":
+        setBurnForm((previous) => ({
+          ...previous,
+          signingWalletId: burnSignerSelection.defaultWalletId,
+        }));
+        break;
+      case "seize":
+        setSeizeForm((previous) => ({
+          ...previous,
+          signingWalletId: seizeSignerSelection.defaultWalletId,
+        }));
+        break;
+      case "force-burn":
+        setForceBurnForm((previous) => ({
+          ...previous,
+          signingWalletId: forceBurnSignerSelection.defaultWalletId,
+        }));
+        break;
+      case "refresh-supply":
+        break;
+    }
+
+    setActiveTab("fund-management");
+    setFundManagementModalAction(action);
+  };
+
+  const closeFundManagementModal = () => {
+    if (isPending) {
+      return;
+    }
+
+    setFundManagementModalAction(null);
+  };
+
+  const submitFundManagementAction = (action: FundManagementModalAction) => {
+    closeFundManagementModal();
+
+    switch (action) {
+      case "deploy":
+        handleDeploy();
+        return;
+      case "mint":
+        handleMint();
+        return;
+      case "burn":
+        handleBurn();
+        return;
+      case "seize":
+        handleSeize();
+        return;
+      case "force-burn":
+        handleForceBurn();
+        return;
+      case "refresh-supply":
+        handleRefreshSupply();
+        return;
+    }
+  };
+
+  const handleTabChange = (tab: TokenManagementTab) => {
+    setActiveTab(tab);
+
+    const nextDefaultAction =
+      tab === "fund-management" && canDeployToken ? null : getDefaultActionForTab(tab);
+    if (nextDefaultAction) {
+      setActiveAction(nextDefaultAction);
+      return;
+    }
+
+    setActiveAction((currentAction) =>
+      currentAction && getTabForAction(currentAction) === tab ? currentAction : null
+    );
+  };
+
+  const selectAction = (action: AdminAction) => {
+    setActiveTab(getTabForAction(action));
+    setActiveAction(action);
+  };
+
+  const getActionSignerProps = (action: AdminAction | FundManagementModalAction | null) => {
+    switch (action) {
+      case "mint":
+        return {
+          signerWallets: mintSignerSelection.wallets,
+          signerUnavailableReason: mintSignerSelection.unavailableReason,
+          onSignerWalletIdChange: (value: string) =>
+            setMintForm((previous) => ({ ...previous, signingWalletId: value })),
+        };
+      case "burn":
+        return {
+          signerWallets: burnSignerSelection.wallets,
+          signerUnavailableReason: burnSignerSelection.unavailableReason,
+          onSignerWalletIdChange: (value: string) =>
+            setBurnForm((previous) => ({ ...previous, signingWalletId: value })),
+        };
+      case "seize":
+        return {
+          signerWallets: seizeSignerSelection.wallets,
+          signerUnavailableReason: seizeSignerSelection.unavailableReason,
+          onSignerWalletIdChange: (value: string) =>
+            setSeizeForm((previous) => ({ ...previous, signingWalletId: value })),
+        };
+      case "force-burn":
+        return {
+          signerWallets: forceBurnSignerSelection.wallets,
+          signerUnavailableReason: forceBurnSignerSelection.unavailableReason,
+          onSignerWalletIdChange: (value: string) =>
+            setForceBurnForm((previous) => ({ ...previous, signingWalletId: value })),
+        };
+      default:
+        return {
+          signerWallets: [],
+          signerUnavailableReason: null,
+          onSignerWalletIdChange: (_value: string) => {},
+        };
+    }
+  };
+
+  const visibleActionSignerProps = getActionSignerProps(activeAction);
+  const fundManagementActionSignerProps = getActionSignerProps(fundManagementModalAction);
+  const authorityModalSignerSelection = authorityModalRow
+    ? withWalletLoadError(
+        getSignerSelectionForAction({
+          action: "authority",
+          token,
+          authorityWallets,
+          metadataAuthority,
+          permissionRow: authorityModalRow,
+        })
+      )
+    : {
+        wallets: [],
+        defaultWalletId: "",
+        unavailableReason: null,
+      };
+
+  const visibleActionForm =
+    activeAction && getTabForAction(activeAction) === activeTab ? (
       <TokenActionForms
         activeAction={activeAction}
         isPending={isPending}
+        tokenStatus={token.status}
         metadataForm={metadataForm}
         setMetadataForm={setMetadataForm}
         mintForm={mintForm}
@@ -488,6 +861,9 @@ export function TokenManagementWorkspace({
         setAllowlistForm={setAllowlistForm}
         allowlistEntries={allowlistEntries}
         allowlistError={allowlistError}
+        signerWallets={visibleActionSignerProps.signerWallets}
+        signerUnavailableReason={visibleActionSignerProps.signerUnavailableReason}
+        onSignerWalletIdChange={visibleActionSignerProps.onSignerWalletIdChange}
         onUpdateMetadata={handleUpdateMetadata}
         onRefreshSupply={handleRefreshSupply}
         onMint={handleMint}
@@ -500,27 +876,279 @@ export function TokenManagementWorkspace({
         onAddAllowlist={handleAddAllowlist}
         onRemoveAllowlist={handleRemoveAllowlist}
       />
+    ) : null;
 
-      <div className="grid gap-4 xl:grid-cols-2">
-        <TokenTransactionsSection
-          transactions={transactions}
-          transactionsError={transactionsError}
-          transactionsTotal={transactionsTotal}
-          transactionsHasMore={transactionsHasMore}
-        />
-        <TokenControlListsSection
-          allowlistEntriesCount={allowlistEntries.length}
-          allowlistError={allowlistError}
-          allowlistTotal={allowlistTotal}
-          allowlistHasMore={allowlistHasMore}
-          frozenAccountsCount={frozenAccounts.length}
-          frozenAccountsError={frozenAccountsError}
-          frozenAccountsTotal={frozenAccountsTotal}
-          frozenAccountsHasMore={frozenAccountsHasMore}
-        />
+  return (
+    <div className="space-y-8 pb-8">
+      <TokenManagementHeader
+        tokenName={token.name}
+        tokenSymbol={token.symbol}
+        tokenStatus={token.status}
+        tokenAddress={token.mintAddress}
+        tokenImageUrl={token.imageUrl}
+        explorerHref={explorerHref}
+        canDeployToken={canDeployToken}
+        isPending={isPending}
+        deployDisabledReason={deploySignerSelection.unavailableReason}
+        mintDisabledReason={effectiveMintDisabledReason}
+        burnDisabledReason={effectiveBurnDisabledReason}
+        pauseDisabledReason={pauseDisabledReason}
+        onCopyAddress={() => void handleCopy(token.mintAddress)}
+        onMintSelect={() => openFundManagementModal("mint")}
+        onBurnSelect={() => openFundManagementModal("burn")}
+        onDeploy={() => {
+          if (!canDeployToken) {
+            return;
+          }
+          openFundManagementModal("deploy");
+        }}
+        onUnpause={() => handlePause(false)}
+      />
+
+      <div className="border-b border-[rgba(28,28,29,0.12)]">
+        <div className="flex flex-wrap gap-8">
+          {managementTabs.map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => handleTabChange(tab.id)}
+              className={[
+                "relative pb-4 text-[15px] leading-[24px] font-medium transition-colors sm:text-[16px]",
+                activeTab === tab.id
+                  ? "text-[#1c1c1d]"
+                  : "text-[rgba(28,28,29,0.54)] hover:text-[#1c1c1d]",
+              ].join(" ")}
+            >
+              {tab.label}
+              {activeTab === tab.id ? (
+                <span className="absolute right-0 bottom-[-1px] left-0 h-[2px] bg-[#1c1c1d]" />
+              ) : null}
+            </button>
+          ))}
+        </div>
       </div>
 
-      <TokenActionResponseCard result={lastActionResult} />
+      {tokenError ? (
+        <div className="rounded-xl border border-[#c71f37]/20 bg-[#c71f37]/[0.03] px-4 py-3">
+          <p className="text-sm font-medium text-[#8a1f2a]">Token load warning</p>
+          <p className="mt-1 text-sm text-[#8a1f2a]">{tokenError}</p>
+        </div>
+      ) : null}
+
+      {token.status === "paused" ? (
+        <div className="flex flex-col gap-3 rounded-xl border border-[rgba(217,119,6,0.24)] bg-[rgba(245,158,11,0.08)] px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-sm font-medium text-[#92400e]">Token is paused</p>
+            <p className="mt-1 text-sm text-[#92400e]">
+              Minting, burning, and administrative transfer actions are disabled until the token is
+              unpaused.
+            </p>
+          </div>
+          <TokenDisabledActionTooltip reason={isPending ? null : pauseDisabledReason}>
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => handlePause(false)}
+              disabled={isPending || Boolean(pauseDisabledReason)}
+            >
+              Unpause token
+            </Button>
+          </TokenDisabledActionTooltip>
+        </div>
+      ) : null}
+
+      {activeTab === "overview" ? (
+        <div className="space-y-4">
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)]">
+            <TokenOverviewSection token={token} showTitle={false} />
+            <TokenControlListsSection
+              allowlistEntriesCount={allowlistEntries.length}
+              allowlistError={allowlistError}
+              allowlistTotal={allowlistTotal}
+              allowlistHasMore={allowlistHasMore}
+              frozenAccountsCount={frozenAccounts.length}
+              frozenAccountsError={frozenAccountsError}
+              frozenAccountsTotal={frozenAccountsTotal}
+              frozenAccountsHasMore={frozenAccountsHasMore}
+            />
+          </div>
+          <TokenTransactionsSection
+            transactions={transactions}
+            transactionsError={transactionsError}
+            transactionsTotal={transactionsTotal}
+            transactionsHasMore={transactionsHasMore}
+          />
+        </div>
+      ) : null}
+
+      {activeTab === "permissions" ? (
+        <div className="space-y-4">
+          <TokenSettingsSection
+            mode="permissions"
+            permissionRows={permissionRows}
+            extensionRows={extensionRows}
+            showTitle={false}
+            canEditAuthorities={!canDeployToken}
+            onCopy={handleCopy}
+            onEditAuthority={handleAuthorityModalOpen}
+          />
+        </div>
+      ) : null}
+
+      {activeTab === "extensions" ? (
+        <div className="space-y-4">
+          <TokenSettingsSection
+            mode="extensions"
+            permissionRows={permissionRows}
+            extensionRows={extensionRows}
+            showTitle={false}
+            canEditAuthorities={!canDeployToken}
+            onCopy={handleCopy}
+            onEditAuthority={handleAuthorityModalOpen}
+          />
+        </div>
+      ) : null}
+
+      {activeTab === "compliance" ? (
+        <div className="space-y-4">
+          <ActionSelector
+            actions={complianceActions}
+            activeAction={activeAction}
+            disabledReasons={complianceActionDisabledReasons}
+            onSelectAction={selectAction}
+          />
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
+            <div>{visibleActionForm}</div>
+            <TokenControlListsSection
+              allowlistEntriesCount={allowlistEntries.length}
+              allowlistError={allowlistError}
+              allowlistTotal={allowlistTotal}
+              allowlistHasMore={allowlistHasMore}
+              frozenAccountsCount={frozenAccounts.length}
+              frozenAccountsError={frozenAccountsError}
+              frozenAccountsTotal={frozenAccountsTotal}
+              frozenAccountsHasMore={frozenAccountsHasMore}
+            />
+          </div>
+        </div>
+      ) : null}
+
+      {activeTab === "metadata" ? (
+        <div className="space-y-4">
+          {visibleActionForm}
+          <TokenOverviewSection token={token} showTitle={false} />
+        </div>
+      ) : null}
+
+      {activeTab === "fund-management" ? (
+        <div className="space-y-4">
+          <TokenFundManagementSection
+            rows={fundManagementRows}
+            onOpenAction={openFundManagementModal}
+          />
+          <TokenTransactionsSection
+            transactions={transactions}
+            transactionsError={transactionsError}
+            transactionsTotal={transactionsTotal}
+            transactionsHasMore={transactionsHasMore}
+          />
+        </div>
+      ) : null}
+
+      <TokenAuthorityModal
+        row={authorityModalRow}
+        currentAuthorityValue={authorityModalCurrentAuthority}
+        newAuthority={authorityModalNewAuthority}
+        authorityWallets={authorityWallets}
+        authorityWalletsError={authorityWalletsError}
+        signerWallets={authorityModalSignerSelection.wallets}
+        signerWalletId={authorityModalSignerWalletId}
+        signerUnavailableReason={authorityModalSignerSelection.unavailableReason}
+        isPending={isPending}
+        onNewAuthorityChange={setAuthorityModalNewAuthority}
+        onSignerWalletIdChange={setAuthorityModalSignerWalletId}
+        onCancel={handleAuthorityModalClose}
+        onConfirm={handleAuthorityModalConfirm}
+      />
+
+      <TokenManagementModalShell
+        isOpen={Boolean(fundManagementModalAction)}
+        isPending={isPending}
+        onClose={closeFundManagementModal}
+      >
+        {fundManagementModalAction === "deploy" ? (
+          <div className="rounded-2xl border border-[rgba(28,28,29,0.12)] bg-white p-5 shadow-[0_20px_40px_rgba(0,0,0,0.16)]">
+            <p className="text-[24px] leading-[1.15] font-medium text-[#1c1c1d]">Deploy token</p>
+            <p className="mt-2 text-[15px] leading-[1.45] text-[rgba(28,28,29,0.72)]">
+              This will deploy the token on-chain so fund management actions can be used.
+            </p>
+            <div className="mt-5 space-y-5">
+              <TokenSignerSelect
+                signerWallets={deploySignerSelection.wallets}
+                signerWalletId={deploySignerWalletId}
+                signerUnavailableReason={deploySignerSelection.unavailableReason}
+                onSignerWalletIdChange={setDeploySignerWalletId}
+              />
+              <div className="flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={closeFundManagementModal}
+                  disabled={isPending}
+                  className="inline-flex h-10 items-center rounded-[12px] border border-[rgba(28,28,29,0.16)] bg-white px-4 text-sm font-medium text-[#1c1c1d] transition-colors hover:bg-[rgba(28,28,29,0.04)] disabled:pointer-events-none disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => submitFundManagementAction("deploy")}
+                  disabled={isPending || Boolean(deploySignerSelection.unavailableReason)}
+                  className="inline-flex h-10 items-center rounded-[12px] bg-[#0f0f10] px-4 text-sm font-medium text-white transition-colors hover:bg-black disabled:pointer-events-none disabled:opacity-50"
+                >
+                  Deploy now
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : fundManagementModalAction ? (
+          <TokenActionForms
+            activeAction={fundManagementModalAction}
+            isPending={isPending}
+            tokenStatus={token.status}
+            metadataForm={metadataForm}
+            setMetadataForm={setMetadataForm}
+            mintForm={mintForm}
+            setMintForm={setMintForm}
+            burnForm={burnForm}
+            setBurnForm={setBurnForm}
+            seizeForm={seizeForm}
+            setSeizeForm={setSeizeForm}
+            forceBurnForm={forceBurnForm}
+            setForceBurnForm={setForceBurnForm}
+            authorityForm={authorityForm}
+            setAuthorityForm={setAuthorityForm}
+            freezeForm={freezeForm}
+            setFreezeForm={setFreezeForm}
+            allowlistForm={allowlistForm}
+            setAllowlistForm={setAllowlistForm}
+            allowlistEntries={allowlistEntries}
+            allowlistError={allowlistError}
+            signerWallets={fundManagementActionSignerProps.signerWallets}
+            signerUnavailableReason={fundManagementActionSignerProps.signerUnavailableReason}
+            onSignerWalletIdChange={fundManagementActionSignerProps.onSignerWalletIdChange}
+            onUpdateMetadata={handleUpdateMetadata}
+            onRefreshSupply={() => submitFundManagementAction("refresh-supply")}
+            onMint={() => submitFundManagementAction("mint")}
+            onBurn={() => submitFundManagementAction("burn")}
+            onSeize={() => submitFundManagementAction("seize")}
+            onForceBurn={() => submitFundManagementAction("force-burn")}
+            onAuthorityUpdate={handleAuthorityUpdate}
+            onPause={handlePause}
+            onFreeze={handleFreeze}
+            onAddAllowlist={handleAddAllowlist}
+            onRemoveAllowlist={handleRemoveAllowlist}
+          />
+        ) : null}
+      </TokenManagementModalShell>
 
       <TokenActionConfirmationDialog
         actionConfirmation={actionConfirmation}
@@ -535,6 +1163,40 @@ export function TokenManagementWorkspace({
           Running action...
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function ActionSelector({
+  actions,
+  activeAction,
+  disabledReasons,
+  onSelectAction,
+}: {
+  actions: Array<{ id: AdminAction; label: string }>;
+  activeAction: AdminAction | null;
+  disabledReasons?: Partial<Record<AdminAction, string | null>>;
+  onSelectAction: (action: AdminAction) => void;
+}) {
+  return (
+    <div className="flex flex-wrap gap-2">
+      {actions.map((action) => (
+        <TokenDisabledActionTooltip key={action.id} reason={disabledReasons?.[action.id]}>
+          <button
+            type="button"
+            onClick={() => onSelectAction(action.id)}
+            disabled={Boolean(disabledReasons?.[action.id])}
+            className={[
+              "inline-flex h-10 items-center rounded-[12px] px-4 text-sm font-medium transition-colors",
+              activeAction === action.id
+                ? "bg-[#0f0f10] text-white"
+                : "bg-[rgba(28,28,29,0.08)] text-[#1c1c1d] hover:bg-[rgba(28,28,29,0.14)] disabled:pointer-events-none disabled:opacity-50",
+            ].join(" ")}
+          >
+            {action.label}
+          </button>
+        </TokenDisabledActionTooltip>
+      ))}
     </div>
   );
 }

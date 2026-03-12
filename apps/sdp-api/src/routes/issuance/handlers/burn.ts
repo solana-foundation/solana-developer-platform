@@ -46,7 +46,11 @@ export const prepareBurn = async (c: AppContext) => {
     throw new AppError("TOKEN_NOT_DEPLOYED", "Token has not been deployed to Solana");
   }
 
-  const signingWalletId = resolveApiKeySigningWalletId(auth, undefined, ["tokens:write"]);
+  const signingWalletId = resolveApiKeySigningWalletId(
+    auth,
+    parsed.data.signingWalletId ?? token.signingWalletId,
+    ["tokens:write"]
+  );
 
   // Validate addresses and get custody authority (via 3-tier resolution)
   const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId, signingWalletId);
@@ -137,7 +141,11 @@ export const executeBurn = async (c: AppContext) => {
     throw new AppError("TOKEN_NOT_DEPLOYED", "Token has not been deployed to Solana");
   }
 
-  const signingWalletId = resolveApiKeySigningWalletId(auth, undefined, ["tokens:write"]);
+  const signingWalletId = resolveApiKeySigningWalletId(
+    auth,
+    parsed.data.signingWalletId ?? token.signingWalletId,
+    ["tokens:write"]
+  );
 
   // Get custody signer (via 3-tier resolution)
   const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId, signingWalletId);

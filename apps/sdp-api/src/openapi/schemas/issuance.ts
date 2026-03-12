@@ -23,6 +23,7 @@ import {
   tokenAllowlistEntryIdSchema,
   tokenIdParamSchema,
   tokenTransactionIdSchema,
+  walletIdParamSchema,
 } from "./base";
 
 export const tokenExtensionsConfigSchema = z
@@ -132,6 +133,10 @@ export const tokenSchema = z
     id: tokenIdParamSchema,
     projectId: projectIdParamSchema,
     organizationId: orgIdParamSchema,
+    signingWalletId: walletIdParamSchema.nullable().openapi({
+      description: "Preferred custody wallet ID used for token deploy/admin/write actions.",
+      example: "wal_example",
+    }),
     mintAddress: solanaAddressSchema.nullable().openapi({
       description: "Mint address once deployed.",
       example: "So11111111111111111111111111111111111111112",
@@ -691,6 +696,10 @@ export const createTokenRequestSchema = createTokenSchemaBase
       description: "Token template preset. Defaults to 'custom' if not specified.",
       example: "stablecoin",
     }),
+    signingWalletId: walletIdParamSchema.optional().openapi({
+      description: "Preferred custody wallet ID for token deploy/admin/write actions.",
+      example: "wal_example",
+    }),
     overrides: templateOverridesOpenApiSchema.optional().openapi({
       description: "Template overrides to customize defaults.",
       example: {
@@ -741,6 +750,10 @@ export const updateTokenRequestSchema = updateTokenSchemaBase
 
 export const mintRequestSchema = mintSchemaBase
   .extend({
+    signingWalletId: mintSchemaBase.shape.signingWalletId.openapi({
+      description: "Optional custody wallet ID to use as the signer for this action.",
+      example: "wal_example",
+    }),
     mint: mintSchemaBase.shape.mint.openapi({
       description: "Mint operation details.",
       example: {
@@ -758,6 +771,10 @@ export const mintRequestSchema = mintSchemaBase
 
 export const burnRequestSchema = burnSchemaBase
   .extend({
+    signingWalletId: burnSchemaBase.shape.signingWalletId.openapi({
+      description: "Optional custody wallet ID to use as the signer for this action.",
+      example: "wal_example",
+    }),
     burn: burnSchemaBase.shape.burn.openapi({
       description: "Burn operation details.",
       example: {
@@ -775,6 +792,10 @@ export const burnRequestSchema = burnSchemaBase
 
 export const seizeRequestSchema = seizeSchemaBase
   .extend({
+    signingWalletId: seizeSchemaBase.shape.signingWalletId.openapi({
+      description: "Optional custody wallet ID to use as the signer for this action.",
+      example: "wal_example",
+    }),
     seize: seizeSchemaBase.shape.seize.openapi({
       description: "Forced transfer details.",
       example: {
@@ -794,6 +815,10 @@ export const seizeRequestSchema = seizeSchemaBase
 
 export const forceBurnRequestSchema = forceBurnSchemaBase
   .extend({
+    signingWalletId: forceBurnSchemaBase.shape.signingWalletId.openapi({
+      description: "Optional custody wallet ID to use as the signer for this action.",
+      example: "wal_example",
+    }),
     forceBurn: forceBurnSchemaBase.shape.forceBurn.openapi({
       description: "Forced burn details.",
       example: {
@@ -812,6 +837,10 @@ export const forceBurnRequestSchema = forceBurnSchemaBase
 
 export const updateAuthorityRequestSchema = updateAuthoritySchemaBase
   .extend({
+    signingWalletId: updateAuthoritySchemaBase.shape.signingWalletId.openapi({
+      description: "Optional custody wallet ID to use as the signer for this action.",
+      example: "wal_example",
+    }),
     authority: updateAuthoritySchemaBase.shape.authority.openapi({
       description: "Authority update details.",
       example: {
@@ -845,6 +874,10 @@ export const freezeAccountRequestSchema = freezeSchemaBase
       description: "Optional reason for freezing.",
       example: "Compliance hold",
     }),
+    signingWalletId: freezeSchemaBase.shape.signingWalletId.openapi({
+      description: "Optional custody wallet ID to use as the signer for this request.",
+      example: "privy_abcd1234",
+    }),
   })
   .openapi({ description: "Freeze account request body." });
 
@@ -853,6 +886,10 @@ export const unfreezeAccountRequestSchema = unfreezeSchemaBase
     accountAddress: unfreezeSchemaBase.shape.accountAddress.openapi({
       description: "Token account or owner address to unfreeze.",
       example: "So11111111111111111111111111111111111111112",
+    }),
+    signingWalletId: unfreezeSchemaBase.shape.signingWalletId.openapi({
+      description: "Optional custody wallet ID to use as the signer for this request.",
+      example: "privy_abcd1234",
     }),
   })
   .openapi({ description: "Unfreeze account request body." });

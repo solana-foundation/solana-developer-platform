@@ -63,6 +63,7 @@ export function createInitialDraft(): TokenDraft {
     uri: "",
     name: "",
     symbol: "",
+    signingWalletId: "",
     decimals: "",
     accessControlMode: "blocklist",
   };

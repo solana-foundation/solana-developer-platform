@@ -5,6 +5,7 @@ import {
   setDefaultWalletSchema as setDefaultWalletSchemaBase,
   signerCheckSchema as signerCheckSchemaBase,
   switchSigningSchema as switchSigningSchemaBase,
+  updateWalletSchema as updateWalletSchemaBase,
 } from "../../routes/custody/schemas";
 import { z } from "./base";
 import {
@@ -83,6 +84,15 @@ export const deleteWalletRequestSchema = deleteWalletSchemaBase
     }),
   })
   .openapi({ description: "Delete wallet request body." });
+
+export const updateCustodyWalletRequestSchema = updateWalletSchemaBase
+  .extend({
+    label: updateWalletSchemaBase.shape.label.openapi({
+      description: "Optional wallet label. Set to null to clear the label.",
+      example: "Treasury signer",
+    }),
+  })
+  .openapi({ description: "Update wallet request body." });
 
 export const initializeSigningResponseSchema = z
   .object({

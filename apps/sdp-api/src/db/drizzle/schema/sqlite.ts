@@ -346,6 +346,7 @@ export const issuedTokens = sqliteTable(
     organizationId: text("organization_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
+    signingWalletId: text("signing_wallet_id"),
     mintAddress: text("mint_address").unique(),
     mintAuthority: text("mint_authority"),
     freezeAuthority: text("freeze_authority"),

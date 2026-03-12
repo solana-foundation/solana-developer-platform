@@ -2,6 +2,7 @@ import { type SdpApiClient, createSdpApiClient } from "@/lib/sdp-api";
 import { auth } from "@clerk/nextjs/server";
 import type { FrozenAccount, Token, TokenAllowlistEntry, TokenTransaction } from "@sdp/types";
 import { notFound, redirect } from "next/navigation";
+import { fetchPaymentsWallets } from "../../payments/payments-page.data";
 import { TokenManagementWorkspace } from "./token-management-workspace";
 
 interface TokenManagementPageProps {
@@ -104,24 +105,26 @@ export default async function IssuanceTokenManagementPage({ params }: TokenManag
   const { tokenId } = await params;
   const apiClient = await createSdpApiClient();
 
-  const [tokenResult, transactionsResult, allowlistResult, frozenResult] = await Promise.all([
-    fetchData<Token | null>(apiClient.request, `/v1/issuance/tokens/${tokenId}`, mapToken),
-    fetchData<TokenTransaction[]>(
-      apiClient.request,
-      `/v1/issuance/tokens/${tokenId}/transactions?page=1&pageSize=100`,
-      (payload) => mapList<TokenTransaction>(payload)
-    ),
-    fetchData<TokenAllowlistEntry[]>(
-      apiClient.request,
-      `/v1/issuance/tokens/${tokenId}/allowlist?page=1&pageSize=100`,
-      (payload) => mapList<TokenAllowlistEntry>(payload)
-    ),
-    fetchData<FrozenAccount[]>(
-      apiClient.request,
-      `/v1/issuance/tokens/${tokenId}/frozen?page=1&pageSize=100`,
-      (payload) => mapList<FrozenAccount>(payload)
-    ),
-  ]);
+  const [tokenResult, walletsResult, transactionsResult, allowlistResult, frozenResult] =
+    await Promise.all([
+      fetchData<Token | null>(apiClient.request, `/v1/issuance/tokens/${tokenId}`, mapToken),
+      fetchPaymentsWallets(apiClient.request),
+      fetchData<TokenTransaction[]>(
+        apiClient.request,
+        `/v1/issuance/tokens/${tokenId}/transactions?page=1&pageSize=100`,
+        (payload) => mapList<TokenTransaction>(payload)
+      ),
+      fetchData<TokenAllowlistEntry[]>(
+        apiClient.request,
+        `/v1/issuance/tokens/${tokenId}/allowlist?page=1&pageSize=100`,
+        (payload) => mapList<TokenAllowlistEntry>(payload)
+      ),
+      fetchData<FrozenAccount[]>(
+        apiClient.request,
+        `/v1/issuance/tokens/${tokenId}/frozen?page=1&pageSize=100`,
+        (payload) => mapList<FrozenAccount>(payload)
+      ),
+    ]);
 
   if (tokenResult.status === 404 || !tokenResult.data) {
     notFound();
@@ -134,6 +137,10 @@ export default async function IssuanceTokenManagementPage({ params }: TokenManag
         tokenResult.error
           ? `Token API ${tokenResult.status ?? "unavailable"}: ${tokenResult.error}`
           : null
+      }
+      authorityWallets={walletsResult.ok ? (walletsResult.data ?? []) : []}
+      authorityWalletsError={
+        walletsResult.ok ? null : (walletsResult.error ?? "Wallets unavailable")
       }
       transactions={transactionsResult.data ?? []}
       transactionsError={

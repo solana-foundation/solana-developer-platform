@@ -2,8 +2,8 @@
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import type { Dispatch, SetStateAction } from "react";
+import type { PaymentsDashboardWallet } from "@sdp/types";
+import { type ComponentProps, type Dispatch, type SetStateAction, useId } from "react";
 import { TokenActionCard } from "./token-action-card";
 import type {
   AdminAction,
@@ -11,6 +11,8 @@ import type {
   MetadataFormState,
   MintFormState,
 } from "./token-management-workspace.types";
+import { NON_WHITESPACE_PATTERN, SOLANA_ADDRESS_PATTERN } from "./token-management-workspace.utils";
+import { TokenSignerSelect } from "./token-signer-select";
 
 interface TokenActionPrimaryFormsProps {
   activeAction: AdminAction | null;
@@ -21,10 +23,13 @@ interface TokenActionPrimaryFormsProps {
   setMintForm: Dispatch<SetStateAction<MintFormState>>;
   burnForm: BurnFormState;
   setBurnForm: Dispatch<SetStateAction<BurnFormState>>;
+  signerWallets: PaymentsDashboardWallet[];
+  signerUnavailableReason: string | null;
+  onSignerWalletIdChange: (value: string) => void;
   onUpdateMetadata: () => void;
   onRefreshSupply: () => void;
-  onMint: (mode: "prepare" | "execute") => void;
-  onBurn: (mode: "prepare" | "execute") => void;
+  onMint: () => void;
+  onBurn: () => void;
 }
 
 export function TokenActionPrimaryForms({
@@ -36,6 +41,9 @@ export function TokenActionPrimaryForms({
   setMintForm,
   burnForm,
   setBurnForm,
+  signerWallets,
+  signerUnavailableReason,
+  onSignerWalletIdChange,
   onUpdateMetadata,
   onRefreshSupply,
   onMint,
@@ -45,69 +53,78 @@ export function TokenActionPrimaryForms({
     <>
       {activeAction === "update-metadata" ? (
         <TokenActionCard title="Update Metadata" description="Edit token metadata and status.">
-          <div className="grid gap-3 md:grid-cols-2">
-            <Label>
-              Name
-              <Input
-                value={metadataForm.name}
-                onChange={(event) =>
-                  setMetadataForm((previous) => ({ ...previous, name: event.currentTarget.value }))
-                }
-              />
-            </Label>
-            <Label>
-              Status
-              <select
-                className="h-10 w-full rounded-[10px] border border-[rgba(28,28,29,0.16)] bg-white px-3 text-sm"
-                value={metadataForm.status}
-                onChange={(event) =>
-                  setMetadataForm((previous) => ({
-                    ...previous,
-                    status: event.currentTarget.value as "active" | "paused",
-                  }))
-                }
-              >
-                <option value="active">active</option>
-                <option value="paused">paused</option>
-              </select>
-            </Label>
-            <Label>
-              Description
-              <Input
-                value={metadataForm.description}
-                onChange={(event) =>
-                  setMetadataForm((previous) => ({
-                    ...previous,
-                    description: event.currentTarget.value,
-                  }))
-                }
-              />
-            </Label>
-            <Label>
-              URI
-              <Input
-                value={metadataForm.uri}
-                onChange={(event) =>
-                  setMetadataForm((previous) => ({ ...previous, uri: event.currentTarget.value }))
-                }
-              />
-            </Label>
-            <Label className="md:col-span-2">
-              Image URL
-              <Input
-                value={metadataForm.imageUrl}
-                onChange={(event) =>
-                  setMetadataForm((previous) => ({
-                    ...previous,
-                    imageUrl: event.currentTarget.value,
-                  }))
-                }
-              />
-            </Label>
-          </div>
-          <Button type="button" onClick={onUpdateMetadata} disabled={isPending}>
-            Save metadata
-          </Button>
+          <form
+            className="space-y-4"
+            onSubmit={(event) => {
+              event.preventDefault();
+              onUpdateMetadata();
+            }}
+          >
+            <ActionField
+              label="Name"
+              value={metadataForm.name}
+              required
+              pattern={NON_WHITESPACE_PATTERN}
+              title="Enter a token name."
+              onChange={(value) =>
+                setMetadataForm((previous) => ({
+                  ...previous,
+                  name: value,
+                }))
+              }
+            />
+            <ActionSelect
+              label="Status"
+              value={metadataForm.status}
+              onChange={(value) =>
+                setMetadataForm((previous) => ({
+                  ...previous,
+                  status: value as "active" | "paused",
+                }))
+              }
+              options={[
+                { label: "active", value: "active" },
+                { label: "paused", value: "paused" },
+              ]}
+            />
+            <ActionField
+              label="Description"
+              value={metadataForm.description}
+              onChange={(value) =>
+                setMetadataForm((previous) => ({
+                  ...previous,
+                  description: value,
+                }))
+              }
+            />
+            <ActionField
+              label="URI"
+              type="url"
+              inputMode="url"
+              value={metadataForm.uri}
+              onChange={(value) =>
+                setMetadataForm((previous) => ({
+                  ...previous,
+                  uri: value,
+                }))
+              }
+            />
+            <ActionField
+              label="Image URL"
+              type="url"
+              inputMode="url"
+              value={metadataForm.imageUrl}
+              onChange={(value) =>
+                setMetadataForm((previous) => ({
+                  ...previous,
+                  imageUrl: value,
+                }))
+              }
+            />
+            <Button type="submit" disabled={isPending}>
+              Save metadata
+            </Button>
+          </form>
         </TokenActionCard>
       ) : null}
 
@@ -127,100 +144,213 @@ export function TokenActionPrimaryForms({
           title="Mint Tokens"
           description="Mint to destination wallet/token account."
         >
-          <div className="grid gap-3 md:grid-cols-2">
-            <Label>
-              Destination
-              <Input
-                value={mintForm.destination}
-                onChange={(event) =>
-                  setMintForm((previous) => ({
-                    ...previous,
-                    destination: event.currentTarget.value,
-                  }))
-                }
-              />
-            </Label>
-            <Label>
-              Amount
-              <Input
-                value={mintForm.amount}
-                onChange={(event) =>
-                  setMintForm((previous) => ({ ...previous, amount: event.currentTarget.value }))
-                }
-              />
-            </Label>
-            <Label className="md:col-span-2">
-              Memo
-              <Input
-                value={mintForm.memo}
-                onChange={(event) =>
-                  setMintForm((previous) => ({ ...previous, memo: event.currentTarget.value }))
-                }
-              />
-            </Label>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => onMint("prepare")}
-              disabled={isPending}
-            >
-              Mint (prepare)
+          <form
+            className="space-y-4"
+            onSubmit={(event) => {
+              event.preventDefault();
+              onMint();
+            }}
+          >
+            <TokenSignerSelect
+              signerWallets={signerWallets}
+              signerWalletId={mintForm.signingWalletId}
+              signerUnavailableReason={signerUnavailableReason}
+              onSignerWalletIdChange={onSignerWalletIdChange}
+            />
+            <ActionField
+              label="Destination"
+              value={mintForm.destination}
+              required
+              pattern={SOLANA_ADDRESS_PATTERN}
+              title="Enter a valid Solana address."
+              onChange={(value) =>
+                setMintForm((previous) => ({
+                  ...previous,
+                  destination: value,
+                }))
+              }
+            />
+            <ActionField
+              label="Amount"
+              type="number"
+              inputMode="decimal"
+              min="0.000000001"
+              step="any"
+              value={mintForm.amount}
+              required
+              onChange={(value) =>
+                setMintForm((previous) => ({
+                  ...previous,
+                  amount: value,
+                }))
+              }
+            />
+            <ActionField
+              label="Memo"
+              value={mintForm.memo}
+              onChange={(value) =>
+                setMintForm((previous) => ({
+                  ...previous,
+                  memo: value,
+                }))
+              }
+            />
+            <Button type="submit" disabled={isPending || Boolean(signerUnavailableReason)}>
+              Mint tokens
             </Button>
-            <Button type="button" onClick={() => onMint("execute")} disabled={isPending}>
-              Mint (execute)
-            </Button>
-          </div>
+          </form>
         </TokenActionCard>
       ) : null}
 
       {activeAction === "burn" ? (
         <TokenActionCard title="Burn Tokens" description="Burn from source wallet/token account.">
-          <div className="grid gap-3 md:grid-cols-2">
-            <Label>
-              Source
-              <Input
-                value={burnForm.source}
-                onChange={(event) =>
-                  setBurnForm((previous) => ({ ...previous, source: event.currentTarget.value }))
-                }
-              />
-            </Label>
-            <Label>
-              Amount
-              <Input
-                value={burnForm.amount}
-                onChange={(event) =>
-                  setBurnForm((previous) => ({ ...previous, amount: event.currentTarget.value }))
-                }
-              />
-            </Label>
-            <Label className="md:col-span-2">
-              Memo
-              <Input
-                value={burnForm.memo}
-                onChange={(event) =>
-                  setBurnForm((previous) => ({ ...previous, memo: event.currentTarget.value }))
-                }
-              />
-            </Label>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => onBurn("prepare")}
-              disabled={isPending}
-            >
-              Burn (prepare)
+          <form
+            className="space-y-4"
+            onSubmit={(event) => {
+              event.preventDefault();
+              onBurn();
+            }}
+          >
+            <TokenSignerSelect
+              signerWallets={signerWallets}
+              signerWalletId={burnForm.signingWalletId}
+              signerUnavailableReason={signerUnavailableReason}
+              onSignerWalletIdChange={onSignerWalletIdChange}
+            />
+            <ActionField
+              label="Source"
+              value={burnForm.source}
+              required
+              pattern={SOLANA_ADDRESS_PATTERN}
+              title="Enter a valid Solana address."
+              onChange={(value) =>
+                setBurnForm((previous) => ({
+                  ...previous,
+                  source: value,
+                }))
+              }
+            />
+            <ActionField
+              label="Amount"
+              type="number"
+              inputMode="decimal"
+              min="0.000000001"
+              step="any"
+              value={burnForm.amount}
+              required
+              onChange={(value) =>
+                setBurnForm((previous) => ({
+                  ...previous,
+                  amount: value,
+                }))
+              }
+            />
+            <ActionField
+              label="Memo"
+              value={burnForm.memo}
+              onChange={(value) =>
+                setBurnForm((previous) => ({
+                  ...previous,
+                  memo: value,
+                }))
+              }
+            />
+            <Button type="submit" disabled={isPending || Boolean(signerUnavailableReason)}>
+              Burn tokens
             </Button>
-            <Button type="button" onClick={() => onBurn("execute")} disabled={isPending}>
-              Burn (execute)
-            </Button>
-          </div>
+          </form>
         </TokenActionCard>
       ) : null}
     </>
+  );
+}
+
+function ActionField({
+  label,
+  value,
+  onChange,
+  type = "text",
+  required = false,
+  pattern,
+  title,
+  min,
+  step,
+  placeholder,
+  inputMode,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  type?: ComponentProps<typeof Input>["type"];
+  required?: boolean;
+  pattern?: string;
+  title?: string;
+  min?: string;
+  step?: string;
+  placeholder?: string;
+  inputMode?: ComponentProps<typeof Input>["inputMode"];
+}) {
+  const fieldId = useId();
+
+  return (
+    <div className="space-y-2">
+      <label
+        htmlFor={fieldId}
+        className="block text-[12px] leading-5 font-medium tracking-[0.02em] text-[rgba(28,28,29,0.68)]"
+      >
+        {label}
+      </label>
+      <Input
+        id={fieldId}
+        type={type}
+        value={value}
+        required={required}
+        pattern={pattern}
+        title={title}
+        min={min}
+        step={step}
+        placeholder={placeholder}
+        inputMode={inputMode}
+        onChange={(event) => onChange(event.currentTarget.value)}
+        className="h-11 rounded-[12px] border-[rgba(28,28,29,0.12)] bg-white px-4 shadow-none"
+      />
+    </div>
+  );
+}
+
+function ActionSelect({
+  label,
+  value,
+  onChange,
+  options,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  options: Array<{ label: string; value: string }>;
+}) {
+  const fieldId = useId();
+
+  return (
+    <div className="space-y-2">
+      <label
+        htmlFor={fieldId}
+        className="block text-[12px] leading-5 font-medium tracking-[0.02em] text-[rgba(28,28,29,0.68)]"
+      >
+        {label}
+      </label>
+      <select
+        id={fieldId}
+        value={value}
+        onChange={(event) => onChange(event.currentTarget.value)}
+        className="h-11 w-full rounded-[12px] border border-[rgba(28,28,29,0.12)] bg-white px-4 text-sm text-[#1c1c1d] shadow-none outline-none transition-[box-shadow,border-color] focus:border-[rgba(28,28,29,0.28)] focus:ring-2 focus:ring-[rgba(28,28,29,0.12)]"
+      >
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </div>
   );
 }

@@ -101,6 +101,7 @@ export const createTokenSchema = z.object({
     .min(1)
     .max(10)
     .regex(/^[A-Za-z0-9.]+$/),
+  signingWalletId: z.string().min(1).optional(),
   decimals: z.number().int().min(0).max(18).optional(),
   description: z.string().max(500).optional(),
   uri: z.string().url().optional(),
@@ -129,6 +130,7 @@ export const updateTokenSchema = z.object({
 });
 
 export const mintSchema = z.object({
+  signingWalletId: z.string().min(1).optional(),
   mint: z.object({
     destination: z.string().min(32).max(44),
     amount: z
@@ -147,6 +149,7 @@ export const mintSchema = z.object({
 });
 
 export const burnSchema = z.object({
+  signingWalletId: z.string().min(1).optional(),
   burn: z.object({
     source: z.string().min(32).max(44),
     amount: z
@@ -165,6 +168,7 @@ export const burnSchema = z.object({
 });
 
 export const seizeSchema = z.object({
+  signingWalletId: z.string().min(1).optional(),
   seize: z.object({
     source: z.string().min(32).max(44),
     destination: z.string().min(32).max(44),
@@ -185,6 +189,7 @@ export const seizeSchema = z.object({
 });
 
 export const forceBurnSchema = z.object({
+  signingWalletId: z.string().min(1).optional(),
   forceBurn: z.object({
     source: z.string().min(32).max(44),
     amount: z
@@ -204,6 +209,7 @@ export const forceBurnSchema = z.object({
 });
 
 export const updateAuthoritySchema = z.object({
+  signingWalletId: z.string().min(1).optional(),
   authority: z.object({
     role: z.enum(["mint", "freeze", "permanentDelegate", "metadata"]),
     currentAuthority: z.string().min(32).max(44).optional(),
@@ -217,6 +223,10 @@ export const updateAuthoritySchema = z.object({
       simulate: z.boolean().optional(),
     })
     .optional(),
+});
+
+export const deployTokenSchema = z.object({
+  signingWalletId: z.string().min(1).optional(),
 });
 
 export const pauseTokenSchema = z.object({
@@ -233,10 +243,12 @@ export const pauseTokenSchema = z.object({
 export const freezeSchema = z.object({
   accountAddress: z.string().min(32).max(44),
   reason: z.string().max(500).optional(),
+  signingWalletId: z.string().min(1).optional(),
 });
 
 export const unfreezeSchema = z.object({
   accountAddress: z.string().min(32).max(44),
+  signingWalletId: z.string().min(1).optional(),
 });
 
 export const addAllowlistSchema = z.object({

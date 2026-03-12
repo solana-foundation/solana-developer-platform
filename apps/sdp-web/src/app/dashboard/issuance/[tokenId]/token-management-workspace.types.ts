@@ -1,7 +1,19 @@
-import type { FrozenAccount, Token, TokenAllowlistEntry, TokenTransaction } from "@sdp/types";
+import type {
+  FrozenAccount,
+  PaymentsDashboardWallet,
+  Token,
+  TokenAllowlistEntry,
+  TokenTransaction,
+} from "@sdp/types";
 
 export type HttpMethod = "GET" | "POST" | "PATCH" | "DELETE";
-export type SettingsTab = "permissions" | "extensions";
+export type TokenManagementTab =
+  | "overview"
+  | "permissions"
+  | "extensions"
+  | "compliance"
+  | "metadata"
+  | "fund-management";
 export type AdminAction =
   | "update-metadata"
   | "refresh-supply"
@@ -61,6 +73,8 @@ export interface ActionConfirmationState {
 export interface TokenManagementWorkspaceProps {
   token: Token;
   tokenError: string | null;
+  authorityWallets: PaymentsDashboardWallet[];
+  authorityWalletsError: string | null;
   transactions: TokenTransaction[];
   transactionsError: string | null;
   transactionsTotal: number | null;
@@ -87,12 +101,14 @@ export interface MintFormState {
   destination: string;
   amount: string;
   memo: string;
+  signingWalletId: string;
 }
 
 export interface BurnFormState {
   source: string;
   amount: string;
   memo: string;
+  signingWalletId: string;
 }
 
 export interface SeizeFormState {
@@ -101,6 +117,7 @@ export interface SeizeFormState {
   amount: string;
   delegateAuthority: string;
   memo: string;
+  signingWalletId: string;
 }
 
 export interface ForceBurnFormState {
@@ -108,6 +125,7 @@ export interface ForceBurnFormState {
   amount: string;
   delegateAuthority: string;
   memo: string;
+  signingWalletId: string;
 }
 
 export interface AuthorityFormState {
@@ -131,7 +149,8 @@ export interface PermissionRow {
   title: string;
   helper: string;
   value: string | null;
-  action: AdminAction;
+  authorityRole: AuthorityFormState["role"];
+  editDisabledReason?: string | null;
 }
 
 export interface ExtensionRow {

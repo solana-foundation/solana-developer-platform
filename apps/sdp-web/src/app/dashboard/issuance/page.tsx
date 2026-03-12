@@ -1,6 +1,7 @@
 import { type SdpApiClient, createSdpApiClient } from "@/lib/sdp-api";
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
+import { fetchPaymentsWallets } from "../payments/payments-page.data";
 import { fetchActiveApiKeys, resolvePlaygroundApiBaseUrl } from "../playground-api-data";
 import { IssuanceWorkspace } from "./issuance-workspace";
 
@@ -149,10 +150,11 @@ export default async function IssuancePage() {
 
   const apiBaseUrl = resolvePlaygroundApiBaseUrl();
   const apiClient = await createSdpApiClient();
-  const [templatesResult, tokensResult, apiKeysResult] = await Promise.all([
+  const [templatesResult, tokensResult, apiKeysResult, signerWalletsResult] = await Promise.all([
     fetchTemplates(apiClient.request),
     fetchTokens(apiClient.request),
     fetchActiveApiKeys(apiClient.request),
+    fetchPaymentsWallets(apiClient.request),
   ]);
 
   const tokens = tokensResult.data ?? [];
@@ -169,9 +171,15 @@ export default async function IssuancePage() {
       tokens={tokens}
       templates={templatesResult.data ?? []}
       apiKeys={apiKeys}
+      signerWallets={signerWalletsResult.data ?? []}
       apiBaseUrl={apiBaseUrl}
       templatesError={templatesError}
       tokensError={tokensError}
+      signerWalletsError={
+        signerWalletsResult.ok
+          ? null
+          : `Wallet API ${signerWalletsResult.status ?? "unavailable"}: ${signerWalletsResult.error ?? "Unknown error"}`
+      }
     />
   );
 }

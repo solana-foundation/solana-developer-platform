@@ -2,6 +2,7 @@
 
 import { Button } from "@/components/ui/button";
 import { useEscapeKey } from "@/lib/use-escape-key";
+import type { PaymentsDashboardWallet } from "@sdp/types";
 import { AnimatePresence, motion } from "framer-motion";
 import { X } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -24,6 +25,8 @@ import {
 import { TemplateSelectionStep } from "./create-token-template-selection-step";
 
 interface CreateIssuanceTokenModalProps {
+  signerWallets?: PaymentsDashboardWallet[];
+  signerWalletsError?: string | null;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
   hideTrigger?: boolean;
@@ -32,6 +35,8 @@ interface CreateIssuanceTokenModalProps {
 }
 
 export function CreateIssuanceTokenModal({
+  signerWallets = [],
+  signerWalletsError = null,
   open,
   onOpenChange,
   hideTrigger = false,
@@ -233,12 +238,19 @@ export function CreateIssuanceTokenModal({
                   <CreateTokenFeaturesStep
                     template={template}
                     draft={draft}
+                    signerWallets={signerWallets}
+                    signerWalletsError={signerWalletsError}
                     submitState={submitState}
                     isPending={isPending}
                     canSubmit={canSubmit}
                     onAccessControlModeChange={(mode) =>
                       updateDraft({
                         accessControlMode: mode,
+                      })
+                    }
+                    onSigningWalletChange={(signingWalletId) =>
+                      updateDraft({
+                        signingWalletId,
                       })
                     }
                     onBack={handleBackFromFeatures}
