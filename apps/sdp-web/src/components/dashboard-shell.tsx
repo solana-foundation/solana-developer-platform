@@ -279,25 +279,38 @@ function OrgSwitcherPill() {
 
 function UserProfileRow() {
   const { user } = useUser();
+  const userBtnRef = useRef<HTMLDivElement>(null);
 
   if (!user) return null;
 
   return (
-    <div className="flex h-12 items-center gap-3 rounded-[12px] p-3">
-      {user.imageUrl ? (
-        <Image
-          src={user.imageUrl}
-          alt={user.fullName ?? ""}
-          width={20}
-          height={20}
-          className="shrink-0 rounded-full"
-        />
-      ) : (
-        <div className="h-5 w-5 shrink-0 rounded-full bg-[rgba(28,28,29,0.12)]" />
-      )}
-      <span className="min-w-0 truncate text-[16px] font-[550] leading-[24px] text-[rgba(28,28,29,0.72)]">
-        {user.fullName}
-      </span>
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => {
+          const trigger = userBtnRef.current?.querySelector("button");
+          trigger?.click();
+        }}
+        className="flex h-12 w-full items-center gap-3 rounded-[12px] p-3 transition-colors hover:bg-[rgba(28,28,29,0.04)]"
+      >
+        {user.imageUrl ? (
+          <Image
+            src={user.imageUrl}
+            alt={user.fullName ?? ""}
+            width={20}
+            height={20}
+            className="shrink-0 rounded-full"
+          />
+        ) : (
+          <div className="h-5 w-5 shrink-0 rounded-full bg-[rgba(28,28,29,0.12)]" />
+        )}
+        <span className="min-w-0 truncate text-[16px] font-[550] leading-[24px] text-[rgba(28,28,29,0.72)]">
+          {user.fullName}
+        </span>
+      </button>
+      <div ref={userBtnRef} className="absolute top-0 left-0 opacity-0 pointer-events-none [&>div]:pointer-events-auto [&>div]:opacity-100">
+        <UserButton afterSignOutUrl="/sign-in" />
+      </div>
     </div>
   );
 }
