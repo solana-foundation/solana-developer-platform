@@ -335,8 +335,12 @@ function parseSolToLamports(value: string): number {
   const lamportsFraction = Number(`${fractionPart}000000000`.slice(0, 9));
   const lamports = lamportsWhole + lamportsFraction;
 
-  if (!Number.isFinite(lamports) || !Number.isSafeInteger(lamports) || lamports <= 0) {
+  if (!Number.isFinite(lamports) || lamports <= 0) {
     throw new Error("Amount must be greater than zero");
+  }
+
+  if (!Number.isSafeInteger(lamports)) {
+    throw new Error("Amount is too large to convert safely");
   }
 
   return lamports;

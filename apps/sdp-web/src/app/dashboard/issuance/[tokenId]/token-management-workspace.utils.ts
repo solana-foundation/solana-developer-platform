@@ -131,10 +131,38 @@ export function hasReachedMaxSupply(totalSupply: string, maxSupply: string | nul
     return false;
   }
 
-  const total = Number(totalSupply);
-  const max = Number(maxSupply);
+  const comparison = compareNonNegativeDecimalStrings(totalSupply, maxSupply);
+  return comparison !== null && comparison >= 0;
+}
 
-  return Number.isFinite(total) && Number.isFinite(max) && total >= max;
+function compareNonNegativeDecimalStrings(left: string, right: string): number | null {
+  const leftMatch = /^(\d+)(?:\.(\d+))?$/.exec(left.trim());
+  const rightMatch = /^(\d+)(?:\.(\d+))?$/.exec(right.trim());
+  if (!leftMatch || !rightMatch) {
+    return null;
+  }
+
+  const leftWhole = leftMatch[1].replace(/^0+(?=\d)/, "");
+  const rightWhole = rightMatch[1].replace(/^0+(?=\d)/, "");
+  if (leftWhole.length !== rightWhole.length) {
+    return leftWhole.length > rightWhole.length ? 1 : -1;
+  }
+
+  if (leftWhole !== rightWhole) {
+    return leftWhole > rightWhole ? 1 : -1;
+  }
+
+  const leftFraction = (leftMatch[2] ?? "").replace(/0+$/, "");
+  const rightFraction = (rightMatch[2] ?? "").replace(/0+$/, "");
+  const scale = Math.max(leftFraction.length, rightFraction.length);
+  const normalizedLeftFraction = leftFraction.padEnd(scale, "0");
+  const normalizedRightFraction = rightFraction.padEnd(scale, "0");
+
+  if (normalizedLeftFraction === normalizedRightFraction) {
+    return 0;
+  }
+
+  return normalizedLeftFraction > normalizedRightFraction ? 1 : -1;
 }
 
 function getTokenLifecycleDisabledReason(

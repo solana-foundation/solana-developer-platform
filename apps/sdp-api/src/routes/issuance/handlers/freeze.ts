@@ -66,9 +66,11 @@ export const freezeAccount = async (c: AppContext) => {
     throw new AppError("TOKEN_NOT_DEPLOYED", "Token has not been deployed to Solana");
   }
 
-  const signingWalletId = resolveApiKeySigningWalletId(auth, token.signingWalletId, [
-    "tokens:admin",
-  ]);
+  const signingWalletId = resolveApiKeySigningWalletId(
+    auth,
+    parsed.data.signingWalletId ?? token.signingWalletId,
+    ["tokens:admin"]
+  );
 
   // Get custody signer (freeze authority, via 3-tier resolution)
   const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId, signingWalletId);
@@ -249,9 +251,11 @@ export const unfreezeAccount = async (c: AppContext) => {
     throw new AppError("ACCOUNT_NOT_FROZEN", "Account is not frozen");
   }
 
-  const signingWalletId = resolveApiKeySigningWalletId(auth, token.signingWalletId, [
-    "tokens:admin",
-  ]);
+  const signingWalletId = resolveApiKeySigningWalletId(
+    auth,
+    parsed.data.signingWalletId ?? token.signingWalletId,
+    ["tokens:admin"]
+  );
 
   // Get custody signer (freeze authority, via 3-tier resolution)
   const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId, signingWalletId);

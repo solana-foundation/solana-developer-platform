@@ -243,10 +243,12 @@ export const pauseTokenSchema = z.object({
 export const freezeSchema = z.object({
   accountAddress: z.string().min(32).max(44),
   reason: z.string().max(500).optional(),
+  signingWalletId: z.string().min(1).optional(),
 });
 
 export const unfreezeSchema = z.object({
   accountAddress: z.string().min(32).max(44),
+  signingWalletId: z.string().min(1).optional(),
 });
 
 export const addAllowlistSchema = z.object({

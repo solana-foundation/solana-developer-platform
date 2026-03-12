@@ -874,6 +874,10 @@ export const freezeAccountRequestSchema = freezeSchemaBase
       description: "Optional reason for freezing.",
       example: "Compliance hold",
     }),
+    signingWalletId: freezeSchemaBase.shape.signingWalletId.openapi({
+      description: "Optional custody wallet ID to use as the signer for this request.",
+      example: "privy_abcd1234",
+    }),
   })
   .openapi({ description: "Freeze account request body." });
 
@@ -882,6 +886,10 @@ export const unfreezeAccountRequestSchema = unfreezeSchemaBase
     accountAddress: unfreezeSchemaBase.shape.accountAddress.openapi({
       description: "Token account or owner address to unfreeze.",
       example: "So11111111111111111111111111111111111111112",
+    }),
+    signingWalletId: unfreezeSchemaBase.shape.signingWalletId.openapi({
+      description: "Optional custody wallet ID to use as the signer for this request.",
+      example: "privy_abcd1234",
     }),
   })
   .openapi({ description: "Unfreeze account request body." });

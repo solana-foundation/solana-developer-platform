@@ -64,27 +64,43 @@ export function TokenAuthorityModal({
     }
 
     if (!walletModeAvailable) {
-      setMode("custom");
-      setSelectedWalletValue("");
+      if (mode !== "custom") {
+        setMode("custom");
+      }
+      if (selectedWalletValue !== "") {
+        setSelectedWalletValue("");
+      }
       return;
     }
 
     const normalizedAuthority = newAuthority.trim();
     if (!normalizedAuthority) {
-      setMode("wallet");
-      setSelectedWalletValue(REMOVE_AUTHORITY_VALUE);
+      if (mode !== "wallet") {
+        setMode("wallet");
+      }
+      if (selectedWalletValue !== REMOVE_AUTHORITY_VALUE) {
+        setSelectedWalletValue(REMOVE_AUTHORITY_VALUE);
+      }
       return;
     }
 
     if (controlledWalletValues.has(normalizedAuthority)) {
-      setMode("wallet");
-      setSelectedWalletValue(normalizedAuthority);
+      if (mode !== "wallet") {
+        setMode("wallet");
+      }
+      if (selectedWalletValue !== normalizedAuthority) {
+        setSelectedWalletValue(normalizedAuthority);
+      }
       return;
     }
 
-    setMode("custom");
-    setSelectedWalletValue("");
-  }, [controlledWalletValues, newAuthority, row, walletModeAvailable]);
+    if (mode !== "custom") {
+      setMode("custom");
+    }
+    if (selectedWalletValue !== "") {
+      setSelectedWalletValue("");
+    }
+  }, [controlledWalletValues, mode, newAuthority, row, selectedWalletValue, walletModeAvailable]);
 
   if (!row) {
     return null;
