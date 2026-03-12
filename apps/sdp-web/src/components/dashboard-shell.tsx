@@ -2,24 +2,32 @@
 
 import { IssuanceHeaderTabs } from "@/components/issuance-header-tabs";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
-import { OrganizationSwitcher, SignInButton, UserButton, useAuth } from "@clerk/nextjs";
+import {
+  OrganizationSwitcher,
+  SignInButton,
+  UserButton,
+  useAuth,
+  useOrganization,
+  useUser,
+} from "@clerk/nextjs";
 import { motion } from "framer-motion";
 import {
   ArrowLeft,
-  ArrowLeftRight,
+  BookOpen,
   Coins,
+  Home,
   KeyRound,
-  LayoutDashboard,
-  Library,
   PanelLeft,
   PanelRight,
+  Send,
   Settings2,
   Wallet,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import type { ReactNode } from "react";
+import { useRef, type ReactNode } from "react";
 
 type NavItem = {
   label: string;
@@ -37,7 +45,7 @@ const navSections: NavSection[] = [
   {
     title: "Create",
     items: [
-      { label: "Home", href: "/dashboard", icon: LayoutDashboard },
+      { label: "Home", href: "/dashboard", icon: Home },
       { label: "Wallets", href: "/dashboard/wallets", icon: Wallet },
     ],
   },
@@ -45,8 +53,7 @@ const navSections: NavSection[] = [
     title: "Manage",
     items: [
       { label: "Issuance", href: "/dashboard/issuance", icon: Coins },
-      { label: "Payments", href: "/dashboard/payments", icon: ArrowLeftRight },
-      { label: "API keys", href: "/dashboard/api-keys", icon: KeyRound },
+      { label: "Payments", href: "/dashboard/payments", icon: Send },
     ],
   },
 ];
@@ -58,7 +65,8 @@ const docsHref =
     : "https://platform.solana.com/docs");
 
 const bottomNavItems: NavItem[] = [
-  { label: "API Docs", href: docsHref, icon: Library, external: true },
+  { label: "API keys", href: "/dashboard/api-keys", icon: KeyRound },
+  { label: "Docs", href: docsHref, icon: BookOpen, external: true },
   { label: "Settings", href: "/dashboard/settings", icon: Settings2 },
 ];
 
@@ -169,6 +177,34 @@ function isItemActive(pathname: string, href: string): boolean {
   return pathname.startsWith(href);
 }
 
+function NavItemLink({
+  item,
+  pathname,
+}: {
+  item: NavItem;
+  pathname: string;
+}) {
+  const Icon = item.icon;
+  const active = !item.external && isItemActive(pathname, item.href);
+
+  return (
+    <Link
+      href={item.href}
+      target={item.external ? "_blank" : undefined}
+      rel={item.external ? "noopener noreferrer" : undefined}
+      className={[
+        "flex h-12 items-center gap-3 rounded-[12px] border p-3 text-[16px] font-[550] leading-[24px] transition-colors",
+        active
+          ? "border-[rgba(28,28,29,0.04)] bg-white text-[rgba(28,28,29,0.88)]"
+          : "border-transparent text-[rgba(28,28,29,0.72)] hover:bg-[rgba(28,28,29,0.04)] hover:text-[rgba(28,28,29,0.88)]",
+      ].join(" ")}
+    >
+      <Icon className="h-5 w-5" strokeWidth={1.5} />
+      <span>{item.label}</span>
+    </Link>
+  );
+}
+
 function SidebarGroup({
   title,
   items,
@@ -179,32 +215,89 @@ function SidebarGroup({
   pathname: string;
 }) {
   return (
-    <div className="space-y-2">
-      <p className="px-3 text-[12px] uppercase tracking-[0.4px] text-[rgba(28,28,29,0.48)]">
+    <div className="flex flex-col gap-2">
+      <p className="px-3 text-[12px] font-[550] leading-[18px] text-[rgba(28,28,29,0.56)]">
         {title}
       </p>
-      <div className="space-y-0.5">
-        {items.map((item) => {
-          const Icon = item.icon;
-          const active = isItemActive(pathname, item.href);
-
-          return (
-            <Link
-              key={item.label}
-              href={item.href}
-              className={[
-                "flex h-10 items-center gap-3 rounded-[10px] px-3 text-[16px] leading-[24px] transition-colors",
-                active
-                  ? "border border-[rgba(28,28,29,0.08)] bg-white text-[#1c1c1d]"
-                  : "text-[rgba(28,28,29,0.76)] hover:bg-[rgba(28,28,29,0.06)] hover:text-[#1c1c1d]",
-              ].join(" ")}
-            >
-              <Icon className="h-5 w-5" strokeWidth={1.9} />
-              <span>{item.label}</span>
-            </Link>
-          );
-        })}
+      <div className="flex flex-col gap-1">
+        {items.map((item) => (
+          <NavItemLink key={item.label} item={item} pathname={pathname} />
+        ))}
       </div>
+    </div>
+  );
+}
+
+function OrgSwitcherPill() {
+  const { organization } = useOrganization();
+  const switcherRef = useRef<HTMLDivElement>(null);
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => {
+          const trigger = switcherRef.current?.querySelector("button");
+          trigger?.click();
+        }}
+        className="flex w-full items-center gap-2 rounded-[10px] border border-[rgba(28,28,29,0.08)] bg-white py-2 pr-3 pl-2 shadow-[0px_1px_3px_rgba(0,0,0,0.1),inset_0px_-1px_0px_rgba(0,0,0,0.1)] transition-colors hover:bg-[rgba(255,255,255,0.9)]"
+      >
+        {organization?.imageUrl ? (
+          <Image
+            src={organization.imageUrl}
+            alt={organization.name ?? ""}
+            width={28}
+            height={28}
+            className="shrink-0 rounded-[6px]"
+          />
+        ) : (
+          <div className="h-7 w-7 shrink-0 rounded-[6px] bg-[rgba(28,28,29,0.08)]" />
+        )}
+        <span className="min-w-0 flex-1 truncate text-left text-[16px] leading-[24px] font-[550] text-black">
+          {organization?.name ?? "Organization"}
+        </span>
+        <svg
+          className="h-5 w-5 shrink-0 text-[rgba(28,28,29,0.48)]"
+          viewBox="0 0 24 24"
+          fill="none"
+        >
+          <path
+            d="M6 9l6 6 6-6"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      </button>
+      <div ref={switcherRef} className="absolute top-0 left-0 opacity-0 pointer-events-none [&>div]:pointer-events-auto [&>div]:opacity-100">
+        <OrganizationSwitcher hidePersonal />
+      </div>
+    </div>
+  );
+}
+
+function UserProfileRow() {
+  const { user } = useUser();
+
+  if (!user) return null;
+
+  return (
+    <div className="flex h-12 items-center gap-3 rounded-[12px] p-3">
+      {user.imageUrl ? (
+        <Image
+          src={user.imageUrl}
+          alt={user.fullName ?? ""}
+          width={20}
+          height={20}
+          className="shrink-0 rounded-full"
+        />
+      ) : (
+        <div className="h-5 w-5 shrink-0 rounded-full bg-[rgba(28,28,29,0.12)]" />
+      )}
+      <span className="min-w-0 truncate text-[16px] font-[550] leading-[24px] text-[rgba(28,28,29,0.72)]">
+        {user.fullName}
+      </span>
     </div>
   );
 }
@@ -298,61 +391,59 @@ export function DashboardShell({ children }: { children: ReactNode }) {
           animate={{ width: isSidebarOpen ? sidebarWidth : 0 }}
           transition={{ duration: 0.22, ease: "easeInOut" }}
           style={{ pointerEvents: isSidebarOpen ? "auto" : "none" }}
-          className={[
-            "hidden overflow-hidden border border-[rgba(28,28,29,0.10)] border-r-0 bg-[#e9e7de] lg:sticky lg:top-0 lg:flex lg:h-screen lg:flex-col lg:justify-between",
-          ].join(" ")}
+          className="hidden overflow-hidden border border-[rgba(28,28,29,0.10)] border-r-0 bg-[#e9e7de] lg:sticky lg:top-0 lg:flex lg:h-screen lg:flex-col lg:justify-between"
         >
-          <div className="w-[296px] space-y-6 p-3">
-            <div className="relative px-2 py-3">
-              <div className="mb-2 flex items-center justify-between pl-1 pr-2">
-                <div className="flex min-w-0 items-center gap-2">
-                  <div className="min-w-0 flex-1">
-                    <OrganizationSwitcher hidePersonal />
-                  </div>
-                </div>
-                <motion.button
-                  type="button"
-                  aria-label="Close navigation"
-                  onClick={() => setSidebarOpen(false)}
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-[rgba(28,28,29,0.72)] transition-colors hover:bg-[rgba(28,28,29,0.08)]"
-                  whileHover={{ scale: 1.05, rotate: -3 }}
-                  whileTap={{ scale: 0.95, rotate: -10 }}
-                >
-                  <motion.div
-                    initial={{ rotate: -10 }}
-                    animate={{ rotate: 0 }}
-                    transition={{ duration: 0.18 }}
-                  >
-                    <PanelLeft className="h-5 w-5" />
-                  </motion.div>
-                </motion.button>
+          {/* Top: org switcher + nav sections */}
+          <div className="flex w-[272px] flex-col gap-8 p-8">
+            {/* Org switcher row */}
+            <div className="flex items-center gap-2">
+              <div className="min-w-0 flex-1">
+                <OrgSwitcherPill />
               </div>
-            </div>
-            {navSections.map((section) => (
-              <SidebarGroup
-                key={section.title}
-                title={section.title}
-                items={section.items}
-                pathname={pathname}
-              />
-            ))}
-          </div>
-          <div className="space-y-2 pb-1">
-            {bottomNavItems.map((item) => {
-              const Icon = item.icon;
-              return (
-                <Link
-                  key={item.label}
-                  href={item.href}
-                  target={item.external ? "_blank" : undefined}
-                  rel={item.external ? "noopener noreferrer" : undefined}
-                  className="flex h-10 items-center gap-3 rounded-[10px] px-3 text-[16px] leading-[24px] text-[rgba(28,28,29,0.76)] transition-colors hover:bg-[rgba(28,28,29,0.06)] hover:text-[#1c1c1d]"
+              <motion.button
+                type="button"
+                aria-label="Close navigation"
+                onClick={() => setSidebarOpen(false)}
+                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-[rgba(28,28,29,0.72)] transition-colors hover:bg-[rgba(28,28,29,0.08)]"
+                whileHover={{ scale: 1.05, rotate: -3 }}
+                whileTap={{ scale: 0.95, rotate: -10 }}
+              >
+                <motion.div
+                  initial={{ rotate: -10 }}
+                  animate={{ rotate: 0 }}
+                  transition={{ duration: 0.18 }}
                 >
-                  <Icon className="h-5 w-5" strokeWidth={1.9} />
-                  <span>{item.label}</span>
-                </Link>
-              );
-            })}
+                  <PanelLeft className="h-5 w-5" />
+                </motion.div>
+              </motion.button>
+            </div>
+
+            {/* Nav sections with gap-6 between them */}
+            <div className="flex flex-col gap-6">
+              {navSections.map((section) => (
+                <SidebarGroup
+                  key={section.title}
+                  title={section.title}
+                  items={section.items}
+                  pathname={pathname}
+                />
+              ))}
+            </div>
+          </div>
+
+          {/* Bottom: API keys, Docs, Settings, divider, user profile */}
+          <div className="flex w-[272px] flex-col">
+            <div className="flex flex-col gap-2 p-8">
+              {bottomNavItems.map((item) => (
+                <NavItemLink key={item.label} item={item} pathname={pathname} />
+              ))}
+              {/* Divider */}
+              <div className="h-[1.5px] bg-[rgba(28,28,29,0.04)]" />
+              {/* User profile row */}
+              <UserProfileRow />
+            </div>
+            {/* Bottom border */}
+            <div className="h-px bg-[rgba(28,28,29,0.12)]" />
           </div>
         </motion.aside>
 

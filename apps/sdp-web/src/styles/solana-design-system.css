@@ -356,9 +356,9 @@
   --button-gap-md: 6px;
   --button-gap-sm: 4px;
 
-  /* Page layout margins */
-  --page-margin-lg: 128px;
-  --page-margin-sm: 64px;
+  /* Page layout margins — fluid: shrink on small screens, full size on wide */
+  --page-margin-lg: clamp(24px, 4vw + 16px, 128px);
+  --page-margin-sm: clamp(20px, 3vw + 8px, 64px);
 
   --radius: 0.625rem;
 
