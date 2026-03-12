@@ -56,7 +56,7 @@ const bottomNavItems: NavItem[] = [
 
 const sidebarIconProps: LucideProps = {
   className: "h-5 w-5 shrink-0",
-  strokeWidth: 1.8,
+  strokeWidth: 2,
 };
 
 function isItemActive(pathname: string, href: string): boolean {
@@ -83,12 +83,12 @@ function NavItemLink({
       target={item.external ? "_blank" : undefined}
       rel={item.external ? "noopener noreferrer" : undefined}
       aria-current={active ? "page" : undefined}
-      className={cn(
-        "text-body-lg-bold flex h-[var(--layout-shell-nav-row-height)] w-full cursor-pointer items-center gap-[var(--layout-shell-nav-row-gap)] rounded-[var(--layout-shell-nav-row-radius)] border border-transparent p-[var(--layout-shell-nav-row-padding)] outline-none transition-[background-color,border-color,color,box-shadow] duration-150 ease-out focus-visible:ring-2 focus-visible:ring-[rgba(28,28,29,0.14)] motion-reduce:transition-none",
+      className={`text-nav-item ${cn(
+        "flex h-[var(--layout-shell-nav-row-height)] w-full cursor-pointer items-center gap-[var(--layout-shell-nav-row-gap)] rounded-[var(--layout-shell-nav-row-radius)] border border-transparent p-[var(--layout-shell-nav-row-padding)] outline-none transition-[background-color,border-color,color,box-shadow] duration-150 ease-out focus-visible:ring-2 focus-visible:ring-[rgba(28,28,29,0.14)] motion-reduce:transition-none",
         active
           ? "border-border-extra-light bg-white text-text-high"
           : "text-text-medium hover:border-border-extra-light hover:bg-border-extra-light hover:text-text-high"
-      )}
+      )}`}
     >
       <Icon {...sidebarIconProps} />
       <span>{item.label}</span>
@@ -193,7 +193,7 @@ function UserProfileRow({ userName, userImageUrl, onUserClick }: UserProfileRowP
         />
       ) : (
         <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[rgba(28,28,29,0.12)]">
-          <span className="text-[9px] font-semibold text-[rgba(28,28,29,0.48)]">
+          <span className="text-[9px] font-[var(--font-weight-semibold)] text-[rgba(28,28,29,0.48)]">
             {userName.charAt(0).toUpperCase()}
           </span>
         </div>
@@ -228,7 +228,9 @@ export interface SidebarNavProps {
   userName: string;
   userImageUrl?: string;
   orgSwitcher?: ReactNode;
+  orgSwitcherOverlay?: ReactNode;
   userRow?: ReactNode;
+  userRowOverlay?: ReactNode;
   onOrgClick?: () => void;
   onUserClick?: () => void;
   onCollapse?: () => void;
@@ -241,7 +243,9 @@ export function SidebarNav({
   userName,
   userImageUrl,
   orgSwitcher,
+  orgSwitcherOverlay,
   userRow,
+  userRowOverlay,
   onOrgClick,
   onUserClick,
   onCollapse,
@@ -261,10 +265,11 @@ export function SidebarNav({
       <div className="flex flex-col gap-[var(--layout-shell-sidebar-top-gap)] px-[var(--layout-shell-sidebar-padding-inline)] py-[var(--layout-shell-sidebar-padding-block)]">
         {/* Org switcher row */}
         <div className="flex items-center justify-between gap-[var(--layout-shell-top-controls-gap)]">
-          <div className="min-w-0 max-w-[var(--layout-shell-top-control-max-width)] shrink">
+          <div className="relative min-w-0 max-w-[var(--layout-shell-top-control-max-width)] shrink">
             {orgSwitcher ?? (
               <OrgSwitcherPill orgName={orgName} orgImageUrl={orgImageUrl} onClick={onOrgClick} />
             )}
+            {orgSwitcherOverlay}
           </div>
           {onCollapse && (
             <button
@@ -301,13 +306,16 @@ export function SidebarNav({
           {/* Divider */}
           <div className="h-[1.5px] bg-border-extra-light" />
           {/* User profile row */}
-          {userRow ?? (
-            <UserProfileRow
-              userName={userName}
-              userImageUrl={userImageUrl}
-              onUserClick={onUserClick}
-            />
-          )}
+          <div className="relative">
+            {userRow ?? (
+              <UserProfileRow
+                userName={userName}
+                userImageUrl={userImageUrl}
+                onUserClick={onUserClick}
+              />
+            )}
+            {userRowOverlay}
+          </div>
         </div>
         {/* Bottom border */}
         <div className="h-px bg-border-light" />
