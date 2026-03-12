@@ -10,11 +10,19 @@ export const pageWidthValues = {
 
 export type PageWidth = keyof typeof pageWidthValues;
 
+export const pageInsetValues = {
+  default: "var(--layout-page-header-default-inset)",
+  display: "var(--layout-page-header-display-inset)",
+} as const;
+
+export type PageInset = keyof typeof pageInsetValues;
+
 const DEFAULT_PAGE_WIDTH = pageWidthValues.default;
 
-export function getPageLayoutStyle(width: PageWidth): CSSProperties {
+export function getPageLayoutStyle(width: PageWidth, inset: PageInset): CSSProperties {
   return {
     "--page-layout-max-width": pageWidthValues[width],
+    "--page-layout-inline-padding": pageInsetValues[inset],
   } as CSSProperties;
 }
 
@@ -26,15 +34,21 @@ export function getPageContentStyle(): CSSProperties {
 
 interface PageLayoutProps {
   width?: PageWidth;
+  inset?: PageInset;
   children: ReactNode;
   className?: string;
 }
 
-export function PageLayout({ width = "default", children, className }: PageLayoutProps) {
+export function PageLayout({
+  width = "default",
+  inset = "default",
+  children,
+  className,
+}: PageLayoutProps) {
   return (
     <div
       className={cn("flex min-h-0 flex-1 flex-col", className)}
-      style={getPageLayoutStyle(width)}
+      style={getPageLayoutStyle(width, inset)}
     >
       {children}
     </div>

@@ -1,8 +1,17 @@
 "use client";
 
 import { cn } from "@/lib/utils";
-import { BookOpen, Coins, Home, KeyRound, PanelLeft, Send, Settings2, Wallet } from "lucide-react";
-import type { LucideIcon, LucideProps } from "lucide-react";
+import {
+  NavApiKeys,
+  NavDocs,
+  NavHome,
+  NavIssuance,
+  NavPayments,
+  NavSettings,
+  NavWallets,
+  PanelLeft,
+} from "@/components/ui/icons";
+import type { LucideIcon, LucideProps } from "@/components/ui/icons";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -28,16 +37,16 @@ const navSections: NavSection[] = [
     title: "Create",
     density: "default",
     items: [
-      { label: "Home", href: "/dashboard", icon: Home },
-      { label: "Wallets", href: "/dashboard/wallets", icon: Wallet },
+      { label: "Home", href: "/dashboard", icon: NavHome },
+      { label: "Wallets", href: "/dashboard/wallets", icon: NavWallets },
     ],
   },
   {
     title: "Manage",
     density: "compact",
     items: [
-      { label: "Issuance", href: "/dashboard/issuance", icon: Coins },
-      { label: "Payments", href: "/dashboard/payments", icon: Send },
+      { label: "Issuance", href: "/dashboard/issuance", icon: NavIssuance },
+      { label: "Payments", href: "/dashboard/payments", icon: NavPayments },
     ],
   },
 ];
@@ -49,14 +58,14 @@ const docsHref =
     : "https://platform.solana.com/docs");
 
 const bottomNavItems: NavItem[] = [
-  { label: "API keys", href: "/dashboard/api-keys", icon: KeyRound },
-  { label: "Docs", href: docsHref, icon: BookOpen, external: true },
-  { label: "Settings", href: "/dashboard/settings", icon: Settings2 },
+  { label: "API keys", href: "/dashboard/api-keys", icon: NavApiKeys },
+  { label: "Docs", href: docsHref, icon: NavDocs, external: true },
+  { label: "Settings", href: "/dashboard/settings", icon: NavSettings },
 ];
 
 const sidebarIconProps: LucideProps = {
   className: "h-5 w-5 shrink-0",
-  strokeWidth: 1.8,
+  strokeWidth: 2.3,
 };
 
 function isItemActive(pathname: string, href: string): boolean {
@@ -228,6 +237,7 @@ export interface SidebarNavProps {
   userName: string;
   userImageUrl?: string;
   orgSwitcher?: ReactNode;
+  userRow?: ReactNode;
   onOrgClick?: () => void;
   onUserClick?: () => void;
   onCollapse?: () => void;
@@ -240,6 +250,7 @@ export function SidebarNav({
   userName,
   userImageUrl,
   orgSwitcher,
+  userRow,
   onOrgClick,
   onUserClick,
   onCollapse,
@@ -299,11 +310,13 @@ export function SidebarNav({
           {/* Divider */}
           <div className="h-[1.5px] bg-border-extra-light" />
           {/* User profile row */}
-          <UserProfileRow
-            userName={userName}
-            userImageUrl={userImageUrl}
-            onUserClick={onUserClick}
-          />
+          {userRow ?? (
+            <UserProfileRow
+              userName={userName}
+              userImageUrl={userImageUrl}
+              onUserClick={onUserClick}
+            />
+          )}
         </div>
         {/* Bottom border */}
         <div className="h-px bg-border-light" />

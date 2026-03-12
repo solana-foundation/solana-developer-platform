@@ -1,5 +1,9 @@
 "use client";
 
+import {
+  SidebarOrgSwitcherSkeleton,
+  SidebarUserRowSkeleton,
+} from "@/components/dashboard-loading";
 import { SidebarNav } from "@/components/layouts";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { OrganizationSwitcher, UserButton, useOrganization, useUser } from "@clerk/nextjs";
@@ -31,6 +35,8 @@ export function DashboardSidebar() {
   const { user } = useUser();
   const { isSidebarOpen, setSidebarOpen } = useDashboardWorkspace();
   const userButtonRef = useRef<HTMLDivElement>(null);
+  const userName =
+    user?.fullName ?? user?.username ?? user?.primaryEmailAddress?.emailAddress ?? "";
 
   return (
     <motion.aside
@@ -44,21 +50,23 @@ export function DashboardSidebar() {
       className="relative hidden w-full overflow-hidden lg:sticky lg:top-0 lg:flex lg:h-screen lg:shrink-0"
     >
       <SidebarNav
-        orgName={organization?.name ?? "Organization"}
+        orgName={organization?.name ?? ""}
         orgImageUrl={organization?.imageUrl}
-        userName={
-          user?.fullName ?? user?.username ?? user?.primaryEmailAddress?.emailAddress ?? "User"
-        }
+        userName={userName}
         userImageUrl={user?.imageUrl}
         orgSwitcher={
-          <OrganizationSwitcher hidePersonal appearance={organizationSwitcherAppearance} />
+          <OrganizationSwitcher
+            hidePersonal
+            appearance={organizationSwitcherAppearance}
+            fallback={<SidebarOrgSwitcherSkeleton />}
+          />
         }
+        userRow={user ? undefined : <SidebarUserRowSkeleton />}
         onUserClick={() => {
           const trigger = userButtonRef.current?.querySelector("button");
           trigger?.click();
         }}
         onCollapse={() => setSidebarOpen(false)}
-        className="border-[var(--layout-shell-frame-border-width)] border-r-0 border-[rgba(28,28,29,0.10)]"
       />
 
       <div

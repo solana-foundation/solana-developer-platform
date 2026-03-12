@@ -1,7 +1,8 @@
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { SkeletonBlock } from "@/components/ui/skeleton-block";
 
 function SkeletonLine({ widthClass = "w-full" }: { widthClass?: string }) {
-  return <div className={`h-4 rounded bg-[rgba(28,28,29,0.10)] ${widthClass}`} />;
+  return <SkeletonBlock className={`h-4 rounded-[4px] ${widthClass}`} />;
 }
 
 function SkeletonRows({ rows }: { rows: number }) {
@@ -19,7 +20,7 @@ function SkeletonRows({ rows }: { rows: number }) {
 
 export function WalletsOnboardingSkeleton() {
   return (
-    <Card className="min-h-[300px] animate-pulse">
+    <Card className="min-h-[300px]">
       <CardHeader className="space-y-3">
         <SkeletonLine widthClass="w-56" />
         <SkeletonLine widthClass="w-[72%]" />
@@ -36,14 +37,14 @@ export function WalletsOnboardingSkeleton() {
 
 export function WalletsSigningConfigSkeleton() {
   return (
-    <Card className="min-h-[284px] animate-pulse">
+    <Card className="min-h-[284px]">
       <CardHeader className="space-y-3">
         <SkeletonLine widthClass="w-44" />
         <SkeletonLine widthClass="w-[54%]" />
       </CardHeader>
       <CardContent className="space-y-4">
         <SkeletonRows rows={4} />
-        <div className="h-10 w-36 rounded-[10px] bg-[rgba(28,28,29,0.10)]" />
+        <SkeletonBlock className="h-10 w-36 rounded-[10px]" />
       </CardContent>
     </Card>
   );
@@ -51,7 +52,7 @@ export function WalletsSigningConfigSkeleton() {
 
 export function WalletsTableSectionSkeleton() {
   return (
-    <Card className="min-h-[360px] animate-pulse">
+    <Card className="min-h-[360px]">
       <CardHeader className="space-y-3">
         <SkeletonLine widthClass="w-20" />
         <SkeletonLine widthClass="w-[46%]" />

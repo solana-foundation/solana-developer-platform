@@ -16,7 +16,7 @@ export function PageBody({ children, fill = false, className }: PageBodyProps) {
   return (
     <div className="flex-1 overflow-y-auto">
       <div
-        className={cn("mx-auto w-full px-[var(--page-margin-sm)] py-6", className)}
+        className={cn("mx-auto w-full px-[var(--page-layout-inline-padding)] py-6", className)}
         style={getPageContentStyle()}
       >
         {children}

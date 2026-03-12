@@ -1,3 +1,4 @@
+import { ActionPillsSkeleton } from "@/components/dashboard-loading";
 import { SkeletonBlock } from "@/components/ui/skeleton-block";
 
 function PaymentsOverviewSkeleton() {
@@ -23,7 +24,7 @@ function PaymentsOverviewSkeleton() {
 
 function PaymentsTransactionsSkeleton() {
   return (
-    <section className="rounded-3xl border border-[rgba(28,28,29,0.1)] bg-white/85 p-5 shadow-[0_12px_32px_rgba(28,28,29,0.04)] animate-pulse">
+    <section className="rounded-3xl border border-[rgba(28,28,29,0.1)] bg-white/85 p-5 shadow-[0_12px_32px_rgba(28,28,29,0.04)]">
       <div className="space-y-3">
         <SkeletonBlock className="h-6 w-40" />
         <SkeletonBlock className="h-4 w-[46%]" />
@@ -43,10 +44,7 @@ function PaymentsTransactionsSkeleton() {
 export function PaymentsPageSkeleton() {
   return (
     <div className="grid gap-6">
-      <div className="flex flex-wrap gap-3">
-        <SkeletonBlock className="h-10 w-24 rounded-full" />
-        <SkeletonBlock className="h-10 w-28 rounded-full" />
-      </div>
+      <ActionPillsSkeleton />
       <PaymentsOverviewSkeleton />
       <PaymentsTransactionsSkeleton />
     </div>

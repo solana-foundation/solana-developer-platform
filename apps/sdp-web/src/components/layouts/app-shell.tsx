@@ -6,6 +6,10 @@ interface AppShellProps {
 }
 
 export function AppShell({ sidebar, children }: AppShellProps) {
+  const mainClassName = sidebar
+    ? "flex-1 pt-[var(--layout-shell-gutter)] pr-[var(--layout-shell-gutter)] pb-[var(--layout-shell-gutter)] pl-0"
+    : "flex-1 p-[var(--layout-shell-gutter)]";
+
   return (
     <div className="flex h-screen bg-[#e9e7de]">
       <a
@@ -15,7 +19,7 @@ export function AppShell({ sidebar, children }: AppShellProps) {
         Skip to content
       </a>
       {sidebar}
-      <main id="main-content" className="flex-1 p-[var(--layout-shell-gutter)]">
+      <main id="main-content" className={mainClassName}>
         <div className="flex h-full flex-col overflow-hidden rounded-[var(--layout-shell-frame-radius)] border-[var(--layout-shell-frame-border-width)] border-border-extra-light bg-[rgba(255,255,255,0.8)]">
           {children}
         </div>
