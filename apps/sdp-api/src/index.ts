@@ -26,6 +26,7 @@ import docs from "@/routes/docs";
 // Routes
 import health from "@/routes/health";
 import issuance from "@/routes/issuance";
+import llms from "@/routes/llms";
 import members from "@/routes/members";
 import onboarding from "@/routes/onboarding";
 import openapi from "@/routes/openapi";
@@ -146,7 +147,10 @@ app.use("*", async (c, next) => {
 });
 
 // Rate limiting (skip health check paths)
-app.use("*", skipRateLimitPaths("/health", "/health/ready", "/openapi.json", "/docs", "/webhooks"));
+app.use(
+  "*",
+  skipRateLimitPaths("/health", "/health/ready", "/openapi.json", "/docs", "/llms.txt", "/webhooks")
+);
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Routes
@@ -156,6 +160,7 @@ app.use("*", skipRateLimitPaths("/health", "/health/ready", "/openapi.json", "/d
 app.route("/health", health);
 app.route("/openapi.json", openapi);
 app.route("/docs", docs);
+app.route("/llms.txt", llms);
 app.route("/webhooks", webhooks);
 
 // API v1

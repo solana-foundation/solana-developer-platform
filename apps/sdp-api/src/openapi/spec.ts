@@ -1,4 +1,5 @@
 import { OpenAPIRegistry, OpenApiGeneratorV3 } from "@asteasolutions/zod-to-openapi";
+import { DEFAULT_SDP_API_URL } from "@sdp/types";
 import type { OpenAPIObject } from "openapi3-ts/oas30";
 
 import { registerAdminPaths } from "./paths/admin";
@@ -98,7 +99,7 @@ export function createOpenApiDocument(): OpenAPIObject {
         description: "Local development",
       },
       {
-        url: "https://api.solana.com",
+        url: DEFAULT_SDP_API_URL,
         description: "Production",
       },
     ],

@@ -3,6 +3,7 @@
 import { IssuanceHeaderTabs } from "@/components/issuance-header-tabs";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { OrganizationSwitcher, SignInButton, UserButton, useAuth } from "@clerk/nextjs";
+import { DEFAULT_SDP_DOCS_URL } from "@sdp/types";
 import { motion } from "framer-motion";
 import {
   ArrowLeft,
@@ -53,9 +54,7 @@ const navSections: NavSection[] = [
 
 const docsHref =
   process.env.NEXT_PUBLIC_SDP_DOCS_URL ||
-  (process.env.NODE_ENV === "development"
-    ? "http://localhost:3001/docs"
-    : "https://platform.solana.com/docs");
+  (process.env.NODE_ENV === "development" ? "http://localhost:3001/docs" : DEFAULT_SDP_DOCS_URL);
 
 const bottomNavItems: NavItem[] = [
   { label: "API Docs", href: docsHref, icon: Library, external: true },

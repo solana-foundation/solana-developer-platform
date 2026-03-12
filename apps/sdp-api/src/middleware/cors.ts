@@ -3,6 +3,7 @@
  */
 
 import type { Env } from "@/types/env";
+import { getSdpDocsOrigin } from "@sdp/types";
 import { cors } from "hono/cors";
 
 /**
@@ -15,7 +16,7 @@ export function corsMiddleware(env: Env["ENVIRONMENT"]) {
           "https://solana.com",
           "https://www.solana.com",
           "https://developer.solana.com",
-          "https://docs.solana.com",
+          getSdpDocsOrigin(),
         ]
       : [
           "http://localhost:3000",
