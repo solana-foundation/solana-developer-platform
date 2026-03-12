@@ -177,9 +177,12 @@ function buildSections(meta: DocsMeta, pages: Map<string, DocsPage>): Section[] 
 }
 
 function buildKeyPages(pages: Map<string, DocsPage>): DocsPage[] {
-  return KEY_PAGE_SLUGS.flatMap((slug) => {
+  return KEY_PAGE_SLUGS.map((slug) => {
     const page = pages.get(slug);
-    return page ? [page] : [];
+    if (!page) {
+      throw new Error(`Missing required key docs page "${slug}" for llms.txt generation`);
+    }
+    return page;
   });
 }
 

@@ -10,6 +10,7 @@ const __dirname = path.dirname(__filename);
 const docsContentDir = path.resolve(__dirname, "../content/docs");
 const docsMetaPath = path.resolve(docsContentDir, "meta.json");
 const configPath = path.resolve(__dirname, "link-check.config.json");
+const EXTERNAL_URL_TIMEOUT_MS = 10_000;
 
 type DocsMeta = {
   pages?: string[];
@@ -153,6 +154,7 @@ async function probeExternalUrl(
     const response = await fetch(url, {
       method,
       redirect: "follow",
+      signal: AbortSignal.timeout(EXTERNAL_URL_TIMEOUT_MS),
       headers: {
         "user-agent": "sdp-docs-link-checker/1.0",
       },
@@ -265,8 +267,15 @@ async function run(): Promise<void> {
     }
   }
 
-  for (const [url, refs] of externalUrls) {
-    const result = await probeExternalUrl(url);
+  const externalProbeResults = await Promise.all(
+    [...externalUrls.entries()].map(async ([url, refs]) => ({
+      url,
+      refs,
+      result: await probeExternalUrl(url),
+    }))
+  );
+
+  for (const { url, refs, result } of externalProbeResults) {
     if (result.ok) {
       continue;
     }
