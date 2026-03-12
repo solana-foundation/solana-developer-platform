@@ -42,6 +42,7 @@ const flushPatch = async () => {
 
   try {
     await run("node", ["scripts/patch-fumadocs-source.mjs"]);
+    await run("pnpm", ["generate:ai"]);
   } catch (error) {
     console.error("[MDX] failed to patch generated source");
     console.error(error);

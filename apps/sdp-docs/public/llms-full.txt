@@ -1,0 +1,45 @@
+# Solana Developer Platform
+
+> Full public docs map for Solana Developer Platform, generated from the docs navigation and public API reference.
+
+## Canonical URLs
+- Docs: https://platform.solana.com/docs
+- API: https://api.solana.com
+- Interactive API docs: https://api.solana.com/docs
+- OpenAPI: https://api.solana.com/openapi.json
+- Repo: https://github.com/solana-foundation/solana-developer-platform
+- Agent guide: https://github.com/solana-foundation/solana-developer-platform/blob/main/AGENTS.md
+
+## Docs
+- [What is Solana Developer Platform?](https://platform.solana.com/docs/what-is-solana-developer-platform): A dashboard and API for issuing, transferring, and managing Solana tokens with built-in compliance controls.
+- [Getting Started](https://platform.solana.com/docs/getting-started): Get up and running with SDP through the dashboard.
+
+## Guides
+- [Set Up Your Organization](https://platform.solana.com/docs/guides/setup-organization): Create and configure your SDP organization through the dashboard.
+- [Set Up Wallets](https://platform.solana.com/docs/guides/setup-wallets): Initialize a custody provider and create wallets for signing transactions.
+- [Manage API Keys](https://platform.solana.com/docs/guides/manage-api-keys): Create, rotate, and revoke API keys with role-based access and environment scoping.
+- [Create a Token](https://platform.solana.com/docs/guides/create-a-token): Define a new token using templates or custom configuration.
+- [Deploy a Token](https://platform.solana.com/docs/guides/deploy-a-token): Deploy a created token to the Solana blockchain.
+- [Mint and Burn Tokens](https://platform.solana.com/docs/guides/mint-and-burn): Increase or decrease token supply by minting and burning.
+- [Manage Allowlists](https://platform.solana.com/docs/guides/manage-allowlists): Control which addresses can hold your token using allowlists.
+- [Freeze and Compliance](https://platform.solana.com/docs/guides/freeze-and-compliance): Freeze accounts, pause transfers, and seize tokens for compliance operations.
+- [Transfer Tokens](https://platform.solana.com/docs/guides/transfer-tokens): Send tokens between accounts using SDP's payment orchestration.
+- [Prepare vs Execute](https://platform.solana.com/docs/guides/prepare-vs-execute): Understand SDP's two signing modes for onchain transactions.
+
+## Tutorials
+- [End-to-end Payment Flow](https://platform.solana.com/docs/tutorials/end-to-end-payment-flow): A high-level payment flow from quote to settlement.
+
+## Reference
+- [Issuance Token Types](https://platform.solana.com/docs/reference/issuance-token-types): Supported issuance templates and default controls.
+- [API Reference](https://platform.solana.com/docs/reference/api): Endpoint index from the repository OpenAPI spec.
+- [Health](https://platform.solana.com/docs/reference/api/health): Service health and readiness endpoints.
+- [API Keys](https://platform.solana.com/docs/reference/api/api-keys): API key management endpoints.
+- [Wallets](https://platform.solana.com/docs/reference/api/wallets): Wallet signing provider configuration and wallet management.
+- [Projects](https://platform.solana.com/docs/reference/api/projects): Project and project member management.
+- [Issuance](https://platform.solana.com/docs/reference/api/issuance): Token issuance, allowlists, and lifecycle operations.
+- [Payments](https://platform.solana.com/docs/reference/api/payments): Wallet balances, transfer execution, policies, and ramps.
+- [Compliance](https://platform.solana.com/docs/reference/api/compliance): Risk and compliance screening endpoints.
+
+## Notes
+- Generated from docs navigation and public API reference pages.
+- Hidden or internal-only APIs are intentionally excluded.

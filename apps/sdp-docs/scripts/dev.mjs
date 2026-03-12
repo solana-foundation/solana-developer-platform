@@ -22,6 +22,7 @@ const run = (command, args) =>
 const runDev = async () => {
   await rm(resolve(".next"), { recursive: true, force: true });
   await run("pnpm", ["generate:api"]);
+  await run("pnpm", ["generate:ai"]);
   await run("pnpm", ["generate:source"]);
 
   const sourceWatcher = spawn("node", ["scripts/watch-source.mjs"], {

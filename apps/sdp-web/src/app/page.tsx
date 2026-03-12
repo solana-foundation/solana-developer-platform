@@ -1,7 +1,13 @@
 import { HomeSignedInCard } from "@/components/home-signed-in";
 import { SignedIn, SignedOut, UserButton } from "@clerk/nextjs";
+import { DEFAULT_SDP_DOCS_URL } from "@sdp/types";
 import Image from "next/image";
+import Link from "next/link";
 import { startSignIn, startSignUp } from "./auth/actions";
+
+const docsHref =
+  process.env.NEXT_PUBLIC_SDP_DOCS_URL ||
+  (process.env.NODE_ENV === "development" ? "http://localhost:3001/docs" : DEFAULT_SDP_DOCS_URL);
 
 export default function Home() {
   return (
@@ -9,7 +15,13 @@ export default function Home() {
       <header className="border-b border-[rgba(28,28,29,0.08)]">
         <div className="mx-auto flex h-[72px] max-w-[1200px] items-center justify-between px-6 xl:px-0">
           <Image src="/landing/solana-logo.svg" alt="Solana" width={20} height={18} />
-          <div className="flex items-center">
+          <div className="flex items-center gap-5">
+            <Link
+              href={docsHref}
+              className="text-sm font-medium text-[rgba(28,28,29,0.72)] transition-colors hover:text-[#1c1c1d]"
+            >
+              Docs
+            </Link>
             <SignedOut>
               <form action={startSignIn}>
                 <button

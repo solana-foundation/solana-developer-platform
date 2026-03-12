@@ -1,3 +1,4 @@
+import { getDocsPagePath } from "@/lib/site";
 import { source } from "@/lib/source";
 import { Tab, Tabs } from "fumadocs-ui/components/tabs";
 import defaultMdxComponents from "fumadocs-ui/mdx";
@@ -25,6 +26,30 @@ type DocsPageProps = {
   params: Promise<{ slug?: string[] }>;
 };
 
+type ResolvedPage = {
+  page: NonNullable<ReturnType<typeof source.getPage>>;
+  pageSlug: string[];
+};
+
+function resolvePage(slug?: string[]): ResolvedPage | null {
+  if (!slug || slug.length === 0) {
+    return null;
+  }
+
+  const directPage = source.getPage(slug);
+  if (directPage) {
+    return { page: directPage, pageSlug: slug };
+  }
+
+  const indexSlug = [...slug, "index"];
+  const indexPage = source.getPage(indexSlug);
+  if (indexPage) {
+    return { page: indexPage, pageSlug: indexSlug };
+  }
+
+  return null;
+}
+
 export default async function Page({ params }: DocsPageProps) {
   const { slug } = await params;
 
@@ -32,13 +57,13 @@ export default async function Page({ params }: DocsPageProps) {
     redirect("/docs/what-is-solana-developer-platform");
   }
 
-  const page = source.getPage(slug);
+  const resolvedPage = resolvePage(slug);
 
-  if (!page) {
+  if (!resolvedPage) {
     notFound();
   }
 
-  const data = page.data as DocsData;
+  const data = resolvedPage.page.data as DocsData;
   const MDX = data.body ?? data.content;
 
   if (!MDX) {
@@ -62,16 +87,19 @@ export async function generateStaticParams() {
 
 export async function generateMetadata({ params }: DocsPageProps): Promise<Metadata> {
   const { slug } = await params;
-  const page = source.getPage(slug);
+  const resolvedPage = resolvePage(slug);
 
-  if (!page) {
+  if (!resolvedPage) {
     return {};
   }
 
-  const data = page.data as DocsData;
+  const data = resolvedPage.page.data as DocsData;
 
   return {
     title: data.title,
     description: data.description,
+    alternates: {
+      canonical: getDocsPagePath(Array.isArray(slug) ? slug.join("/") : ""),
+    },
   };
 }

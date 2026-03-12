@@ -177,6 +177,37 @@ jobs:
       - name: Build docs
         run: pnpm --filter sdp-docs build
 
+  docs_integrity:
+    name: Docs Integrity
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.1
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate public docs artifacts
+        run: |
+          pnpm --filter sdp-docs generate:api
+          pnpm --filter sdp-docs generate:ai
+
+      - name: Check docs links
+        run: pnpm --filter sdp-docs check:links
+
   integration_tests:
     name: Integration Tests (Devnet/Kora)
     runs-on: ubuntu-latest

@@ -122,7 +122,9 @@ ${rows}
 };
 
 const renderIndexPage = ({ tagPages }) => {
-  const links = tagPages.map((tagPage) => `- [${tagPage.title}](./${tagPage.slug})`).join("\n");
+  const links = tagPages
+    .map((tagPage) => `- [${tagPage.title}](/docs/reference/api/${tagPage.slug})`)
+    .join("\n");
 
   return `---
 title: API Reference

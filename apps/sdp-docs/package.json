@@ -5,16 +5,19 @@
   "scripts": {
     "dev": "node scripts/dev.mjs",
     "dev:local": "node scripts/dev.mjs",
-    "build": "pnpm generate:api && pnpm generate:source && next build",
+    "build": "pnpm generate:api && pnpm generate:ai && pnpm generate:source && next build",
     "start": "next start --port 3001",
     "typecheck": "tsc --noEmit",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "generate:api": "pnpm -C ../sdp-api run openapi:generate && node scripts/generate-api-docs.mjs && pnpm exec biome check --write content/docs/meta.json content/docs/reference/api/meta.json",
+    "generate:ai": "tsx scripts/generate-ai-resources.ts",
     "generate:source": "node scripts/generate-source.mjs",
+    "check:links": "tsx scripts/check-links.ts",
     "watch:source": "node scripts/watch-source.mjs"
   },
   "dependencies": {
+    "@sdp/types": "workspace:*",
     "fumadocs-core": "^15.7.4",
     "fumadocs-mdx": "^11.7.4",
     "fumadocs-ui": "^15.7.4",
@@ -30,6 +33,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "tailwindcss": "^4",
+    "tsx": "4.21.0",
     "typescript": "^5"
   }
 }
