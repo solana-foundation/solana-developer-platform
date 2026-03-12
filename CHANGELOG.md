@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.4.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.3.0...v0.4.0) (2026-03-12)
+
+
+### Features
+
+* **api:** unify wallet-scoped authorization ([#81](https://github.com/solana-foundation/solana-developer-platform/issues/81)) ([63caac2](https://github.com/solana-foundation/solana-developer-platform/commit/63caac2313f4ec41f5efd7ee709846217d5b46d9))
+* **dashboard:** redesign home summary ([#80](https://github.com/solana-foundation/solana-developer-platform/issues/80)) ([2d2533e](https://github.com/solana-foundation/solana-developer-platform/commit/2d2533e970cf834a693c3bfed78d2789cfde1e82))
+* **docs:** add postman api key suite ([#82](https://github.com/solana-foundation/solana-developer-platform/issues/82)) ([eb3cebc](https://github.com/solana-foundation/solana-developer-platform/commit/eb3cebcdc297b55004f30b48452d0e74dcd7d6db))
+* **issuance:** redesign token management workflow ([#84](https://github.com/solana-foundation/solana-developer-platform/issues/84)) ([3973bb8](https://github.com/solana-foundation/solana-developer-platform/commit/3973bb8a8df22924e5ae3911338a46a70ee54f02))
+* **payments:** overhaul payments overview and ramp demos ([#78](https://github.com/solana-foundation/solana-developer-platform/issues/78)) ([c12efeb](https://github.com/solana-foundation/solana-developer-platform/commit/c12efeb9a2d7e7d70c04ef214e231c883b6404be))
+
 ## [0.3.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.2.0...v0.3.0) (2026-03-06)
 
 
