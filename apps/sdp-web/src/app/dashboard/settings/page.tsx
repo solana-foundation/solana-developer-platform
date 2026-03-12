@@ -1,3 +1,4 @@
+import { PageBody, PageHeader, PageLayout } from "@/components/layouts";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { createSdpApiClient } from "@/lib/sdp-api";
 import { auth } from "@clerk/nextjs/server";
@@ -76,40 +77,45 @@ export default async function SettingsPage() {
   }
 
   return (
-    <div className="w-full flex flex-col gap-6">
-      <Card>
-        <CardHeader>
-          <CardTitle>Organization settings</CardTitle>
-          <CardDescription>
-            Configure the RPC provider used across this organization.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          <div className="w-full space-y-6">
-            {loadError ? (
-              <div className="rounded-xl border border-[rgba(158,43,56,0.2)] bg-[rgba(158,43,56,0.06)] px-3 py-2 text-sm text-[#9e2b38]">
-                Failed to load organization settings.
-              </div>
-            ) : null}
+    <PageLayout width="narrow">
+      <PageHeader variant="narrow" title="Settings" />
+      <PageBody>
+        <div className="w-full flex flex-col gap-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Organization settings</CardTitle>
+              <CardDescription>
+                Configure the RPC provider used across this organization.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="w-full space-y-6">
+                {loadError ? (
+                  <div className="rounded-xl border border-[rgba(158,43,56,0.2)] bg-[rgba(158,43,56,0.06)] px-3 py-2 text-sm text-[#9e2b38]">
+                    Failed to load organization settings.
+                  </div>
+                ) : null}
 
-            {!loadError && !organization && isLinked ? (
-              <div className="rounded-xl border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.04)] px-3 py-2 text-sm text-[rgba(28,28,29,0.68)]">
-                Organization not found.
-              </div>
-            ) : null}
+                {!loadError && !organization && isLinked ? (
+                  <div className="rounded-xl border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.04)] px-3 py-2 text-sm text-[rgba(28,28,29,0.68)]">
+                    Organization not found.
+                  </div>
+                ) : null}
 
-            {!loadError && organization ? (
-              <OrganizationRpcSettingsForm organization={organization} />
-            ) : null}
+                {!loadError && organization ? (
+                  <OrganizationRpcSettingsForm organization={organization} />
+                ) : null}
 
-            {!loadError && !organization && !isLinked ? (
-              <div className="rounded-xl border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.04)] px-3 py-2 text-sm text-[rgba(28,28,29,0.68)]">
-                This Clerk organization is not linked to an SDP organization yet.
+                {!loadError && !organization && !isLinked ? (
+                  <div className="rounded-xl border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.04)] px-3 py-2 text-sm text-[rgba(28,28,29,0.68)]">
+                    This Clerk organization is not linked to an SDP organization yet.
+                  </div>
+                ) : null}
               </div>
-            ) : null}
-          </div>
-        </CardContent>
-      </Card>
-    </div>
+            </CardContent>
+          </Card>
+        </div>
+      </PageBody>
+    </PageLayout>
   );
 }

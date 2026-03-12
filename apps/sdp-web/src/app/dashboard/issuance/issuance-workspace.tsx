@@ -1,6 +1,7 @@
 "use client";
 
 import { ApiPlaygroundShellSkeleton } from "@/components/api-playground-shell-skeleton";
+import { PageBody } from "@/components/layouts";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
@@ -179,16 +180,16 @@ export function IssuanceWorkspace({
   }, [tokens, search]);
 
   return (
-    <div className={isPlaygroundTab ? "flex h-full min-h-0 w-full flex-col" : "w-full space-y-6"}>
-      <AnimatePresence mode="wait">
-        {issuanceTab === "tokens" ? (
+    <AnimatePresence mode="wait">
+      {issuanceTab === "tokens" ? (
+        <PageBody key="tokens-body">
           <motion.div
             key="tokens-tab"
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -8 }}
             transition={{ duration: 0.2, ease: "easeOut" }}
-            className="space-y-6"
+            className="w-full space-y-6"
           >
             {tokensError ? (
               <div className="rounded-xl border border-[#c71f37]/20 bg-[#c71f37]/[0.03] px-4 py-3">
@@ -197,26 +198,17 @@ export function IssuanceWorkspace({
               </div>
             ) : null}
 
-            <div className="flex items-center gap-3">
-              <div className="relative flex-1">
-                <Search className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-[rgba(28,28,29,0.52)]" />
-                <Input
-                  value={search}
-                  onChange={(event) => {
-                    const value = event.currentTarget.value;
-                    setSearch(value);
-                  }}
-                  className="h-10 rounded-[10px] border-[rgba(28,28,29,0.16)] bg-white pl-9"
-                  placeholder="Search"
-                />
-              </div>
-              <Button
-                type="button"
-                className="h-10 rounded-[10px] bg-[#1c1c1d] px-4 text-white hover:bg-[rgba(28,28,29,0.92)]"
-                onClick={() => setIsCreateTokenModalOpen(true)}
-              >
-                Create token
-              </Button>
+            <div className="relative max-w-sm">
+              <Search className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-[rgba(28,28,29,0.52)]" />
+              <Input
+                value={search}
+                onChange={(event) => {
+                  const value = event.currentTarget.value;
+                  setSearch(value);
+                }}
+                className="h-10 rounded-[10px] border-[rgba(28,28,29,0.16)] bg-white pl-9"
+                placeholder="Search"
+              />
             </div>
 
             {tokens.length > 0 && filteredTokens.length === 0 ? (
@@ -306,7 +298,9 @@ export function IssuanceWorkspace({
               hideTrigger
             />
           </motion.div>
-        ) : (
+        </PageBody>
+      ) : (
+        <PageBody key="playground-body" fill>
           <motion.div
             key="playground-tab"
             initial={{ opacity: 0, y: 10 }}
@@ -324,8 +318,8 @@ export function IssuanceWorkspace({
               tokens={tokens}
             />
           </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
+        </PageBody>
+      )}
+    </AnimatePresence>
   );
 }

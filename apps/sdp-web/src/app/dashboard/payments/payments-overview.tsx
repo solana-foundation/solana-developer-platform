@@ -1483,12 +1483,14 @@ export function PaymentsOverview({
         </SectionEntry>
 
         <SectionEntry delay={0.04}>
-          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(20rem,1fr)]">
-            <div className="flex min-h-[244px] flex-col justify-center rounded-[4px] bg-[rgba(28,28,29,0.04)] px-8 py-10 sm:px-14">
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(20rem,0.8fr)]">
+            <div className="flex min-h-[244px] flex-col justify-between rounded-[24px] border border-[rgba(28,28,29,0.08)] bg-[rgba(28,28,29,0.03)] p-8 sm:p-10">
               <div className="space-y-3">
                 <p className="text-[15px] font-medium tracking-[0.01em] text-[#1c1c1d]">
                   Total SDP balance
                 </p>
+              </div>
+              <div className="space-y-3">
                 <p className="text-[38px] leading-none font-medium tracking-[-0.05em] text-[#1c1c1d] sm:text-[54px]">
                   {formatCurrencyAmount(totalBalance)}
                 </p>
@@ -1503,7 +1505,7 @@ export function PaymentsOverview({
                 aggregateBalances.map((balance) => (
                   <div
                     key={`${balance.token}-${balance.mint}`}
-                    className="flex min-h-[78px] items-center justify-between gap-4 rounded-[4px] bg-[rgba(28,28,29,0.04)] px-6 py-5"
+                    className="flex min-h-[78px] items-center justify-between gap-4 rounded-[20px] border border-[rgba(28,28,29,0.08)] bg-[rgba(28,28,29,0.03)] px-6 py-5"
                   >
                     <p className="text-[18px] font-medium tracking-[0.04em] text-[#1c1c1d] uppercase">
                       {balance.token}
@@ -1514,7 +1516,7 @@ export function PaymentsOverview({
                   </div>
                 ))
               ) : (
-                <div className="flex min-h-[78px] items-center rounded-[4px] bg-[rgba(28,28,29,0.04)] px-6 py-5 text-sm text-[rgba(28,28,29,0.64)]">
+                <div className="flex min-h-[78px] items-center rounded-[20px] border border-[rgba(28,28,29,0.08)] bg-[rgba(28,28,29,0.03)] px-6 py-5 text-sm text-[rgba(28,28,29,0.64)]">
                   No aggregated balance rows available yet.
                 </div>
               )}

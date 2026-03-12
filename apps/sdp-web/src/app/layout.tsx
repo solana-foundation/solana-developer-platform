@@ -24,6 +24,7 @@ export default function RootLayout({
     <html lang="en" className={inter.variable}>
       <body>
         <ClerkProvider
+          appearance={{ cssLayerName: "clerk" }}
           signInUrl="/sign-in"
           signUpUrl="/sign-up"
           signInFallbackRedirectUrl="/dashboard"

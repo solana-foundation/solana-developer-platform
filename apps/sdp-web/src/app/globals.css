@@ -1,3 +1,5 @@
+@layer theme, base, clerk, components, utilities;
+
 @import "../styles/solana-design-system.css";
 
 /* Ensure Tailwind scans app source files */

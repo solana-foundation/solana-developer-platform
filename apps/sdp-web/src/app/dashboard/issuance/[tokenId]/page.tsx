@@ -1,3 +1,4 @@
+import { PageBody, PageHeader, PageLayout } from "@/components/layouts";
 import { type SdpApiClient, createSdpApiClient } from "@/lib/sdp-api";
 import { auth } from "@clerk/nextjs/server";
 import type { FrozenAccount, Token, TokenAllowlistEntry, TokenTransaction } from "@sdp/types";
@@ -131,41 +132,49 @@ export default async function IssuanceTokenManagementPage({ params }: TokenManag
   }
 
   return (
-    <TokenManagementWorkspace
-      token={tokenResult.data}
-      tokenError={
-        tokenResult.error
-          ? `Token API ${tokenResult.status ?? "unavailable"}: ${tokenResult.error}`
-          : null
-      }
-      authorityWallets={walletsResult.ok ? (walletsResult.data ?? []) : []}
-      authorityWalletsError={
-        walletsResult.ok ? null : (walletsResult.error ?? "Wallets unavailable")
-      }
-      transactions={transactionsResult.data ?? []}
-      transactionsError={
-        transactionsResult.error
-          ? `Transactions API ${transactionsResult.status ?? "unavailable"}: ${transactionsResult.error}`
-          : null
-      }
-      transactionsTotal={transactionsResult.total}
-      transactionsHasMore={transactionsResult.hasMore}
-      allowlistEntries={allowlistResult.data ?? []}
-      allowlistError={
-        allowlistResult.error
-          ? `Allowlist API ${allowlistResult.status ?? "unavailable"}: ${allowlistResult.error}`
-          : null
-      }
-      allowlistTotal={allowlistResult.total}
-      allowlistHasMore={allowlistResult.hasMore}
-      frozenAccounts={frozenResult.data ?? []}
-      frozenAccountsError={
-        frozenResult.error
-          ? `Frozen API ${frozenResult.status ?? "unavailable"}: ${frozenResult.error}`
-          : null
-      }
-      frozenAccountsTotal={frozenResult.total}
-      frozenAccountsHasMore={frozenResult.hasMore}
-    />
+    <PageLayout width="full">
+      <PageHeader
+        variant="narrow"
+        backLink={{ href: "/dashboard/issuance", label: "Back to overview" }}
+      />
+      <PageBody>
+        <TokenManagementWorkspace
+          token={tokenResult.data}
+          tokenError={
+            tokenResult.error
+              ? `Token API ${tokenResult.status ?? "unavailable"}: ${tokenResult.error}`
+              : null
+          }
+          authorityWallets={walletsResult.ok ? (walletsResult.data ?? []) : []}
+          authorityWalletsError={
+            walletsResult.ok ? null : (walletsResult.error ?? "Wallets unavailable")
+          }
+          transactions={transactionsResult.data ?? []}
+          transactionsError={
+            transactionsResult.error
+              ? `Transactions API ${transactionsResult.status ?? "unavailable"}: ${transactionsResult.error}`
+              : null
+          }
+          transactionsTotal={transactionsResult.total}
+          transactionsHasMore={transactionsResult.hasMore}
+          allowlistEntries={allowlistResult.data ?? []}
+          allowlistError={
+            allowlistResult.error
+              ? `Allowlist API ${allowlistResult.status ?? "unavailable"}: ${allowlistResult.error}`
+              : null
+          }
+          allowlistTotal={allowlistResult.total}
+          allowlistHasMore={allowlistResult.hasMore}
+          frozenAccounts={frozenResult.data ?? []}
+          frozenAccountsError={
+            frozenResult.error
+              ? `Frozen API ${frozenResult.status ?? "unavailable"}: ${frozenResult.error}`
+              : null
+          }
+          frozenAccountsTotal={frozenResult.total}
+          frozenAccountsHasMore={frozenResult.hasMore}
+        />
+      </PageBody>
+    </PageLayout>
   );
 }

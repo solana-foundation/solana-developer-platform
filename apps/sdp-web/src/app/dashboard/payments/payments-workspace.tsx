@@ -1,6 +1,7 @@
 "use client";
 
 import { ApiPlaygroundShellSkeleton } from "@/components/api-playground-shell-skeleton";
+import { PageBody } from "@/components/layouts";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { getStoredApiKeySecret } from "@/lib/playground-api-keys";
 import type {
@@ -94,28 +95,32 @@ export function PaymentsWorkspace({
 
   if (isPlaygroundTab) {
     return (
-      <div className="flex h-full min-h-0 w-full flex-col">
-        <PaymentsPlayground
-          apiBaseUrl={apiBaseUrl}
-          apiKeyValue={playgroundApiKeyValue}
-          hasActiveApiKeys={apiKeys.length > 0}
-          transfers={transfers}
-          transfersError={transfersError}
-          wallets={wallets}
-          walletsError={walletsError}
-        />
-      </div>
+      <PageBody fill>
+        <div className="h-full min-h-0 w-full">
+          <PaymentsPlayground
+            apiBaseUrl={apiBaseUrl}
+            apiKeyValue={playgroundApiKeyValue}
+            hasActiveApiKeys={apiKeys.length > 0}
+            transfers={transfers}
+            transfersError={transfersError}
+            wallets={wallets}
+            walletsError={walletsError}
+          />
+        </div>
+      </PageBody>
     );
   }
 
   return (
-    <PaymentsOverview
-      wallets={wallets}
-      walletsError={walletsError}
-      aggregate={aggregate}
-      aggregateError={aggregateError}
-      transfers={transfers}
-      transfersError={transfersError}
-    />
+    <PageBody>
+      <PaymentsOverview
+        wallets={wallets}
+        walletsError={walletsError}
+        aggregate={aggregate}
+        aggregateError={aggregateError}
+        transfers={transfers}
+        transfersError={transfersError}
+      />
+    </PageBody>
   );
 }

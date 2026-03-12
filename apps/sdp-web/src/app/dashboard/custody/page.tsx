@@ -10,6 +10,7 @@ import {
   WalletsTableSectionSkeleton,
 } from "@/app/dashboard/wallets/wallets-page-skeleton";
 import { linkOrganization } from "@/app/onboarding/actions";
+import { PageBody, PageHeader, PageLayout } from "@/components/layouts";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -390,7 +391,6 @@ export default async function CustodyPage() {
     redirect("/dashboard");
   }
 
-  const pageContainerClassName = "w-full flex flex-col gap-6";
   const apiClient = await createSdpApiClient();
   const onboardingPromise = apiClient.fetch<{ linked: boolean }>("/v1/onboarding/status");
   const configsResultPromise = settle(getCustodyConfigs(apiClient.request));
@@ -426,17 +426,22 @@ export default async function CustodyPage() {
   );
 
   return (
-    <div className={pageContainerClassName}>
-      <Suspense fallback={<WalletsSigningConfigSkeleton />}>
-        <PrimarySection
-          orgId={orgId}
-          onboardingPromise={onboardingPromise}
-          linkedDataPromise={linkedDataPromise}
-        />
-      </Suspense>
-      <Suspense fallback={<WalletsTableSectionSkeleton />}>
-        <WalletsSection linkedDataPromise={linkedDataPromise} />
-      </Suspense>
-    </div>
+    <PageLayout width="full">
+      <PageHeader variant="wide" title="Wallets" />
+      <PageBody>
+        <div className="w-full flex flex-col gap-6">
+          <Suspense fallback={<WalletsSigningConfigSkeleton />}>
+            <PrimarySection
+              orgId={orgId}
+              onboardingPromise={onboardingPromise}
+              linkedDataPromise={linkedDataPromise}
+            />
+          </Suspense>
+          <Suspense fallback={<WalletsTableSectionSkeleton />}>
+            <WalletsSection linkedDataPromise={linkedDataPromise} />
+          </Suspense>
+        </div>
+      </PageBody>
+    </PageLayout>
   );
 }

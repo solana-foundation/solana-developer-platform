@@ -1,8 +1,11 @@
+import { IssuanceHeaderTabs } from "@/components/issuance-header-tabs";
+import { PageHeader, PageLayout } from "@/components/layouts";
 import { type SdpApiClient, createSdpApiClient } from "@/lib/sdp-api";
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { fetchPaymentsWallets } from "../payments/payments-page.data";
 import { fetchActiveApiKeys, resolvePlaygroundApiBaseUrl } from "../playground-api-data";
+import { CreateIssuanceTokenModal } from "./create-token-modal";
 import { IssuanceWorkspace } from "./issuance-workspace";
 
 interface IssuanceTemplateView {
@@ -167,19 +170,27 @@ export default async function IssuancePage() {
     : `Token API ${tokensResult.status ?? "unavailable"}: ${tokensResult.error ?? "Unknown error"}`;
 
   return (
-    <IssuanceWorkspace
-      tokens={tokens}
-      templates={templatesResult.data ?? []}
-      apiKeys={apiKeys}
-      signerWallets={signerWalletsResult.data ?? []}
-      apiBaseUrl={apiBaseUrl}
-      templatesError={templatesError}
-      tokensError={tokensError}
-      signerWalletsError={
-        signerWalletsResult.ok
-          ? null
-          : `Wallet API ${signerWalletsResult.status ?? "unavailable"}: ${signerWalletsResult.error ?? "Unknown error"}`
-      }
-    />
+    <PageLayout width="full">
+      <PageHeader
+        variant="wide"
+        title="Issuance"
+        action={<CreateIssuanceTokenModal signerWallets={signerWalletsResult.data ?? []} />}
+        tabs={<IssuanceHeaderTabs />}
+      />
+      <IssuanceWorkspace
+        tokens={tokens}
+        templates={templatesResult.data ?? []}
+        apiKeys={apiKeys}
+        signerWallets={signerWalletsResult.data ?? []}
+        apiBaseUrl={apiBaseUrl}
+        templatesError={templatesError}
+        tokensError={tokensError}
+        signerWalletsError={
+          signerWalletsResult.ok
+            ? null
+            : `Wallet API ${signerWalletsResult.status ?? "unavailable"}: ${signerWalletsResult.error ?? "Unknown error"}`
+        }
+      />
+    </PageLayout>
   );
 }

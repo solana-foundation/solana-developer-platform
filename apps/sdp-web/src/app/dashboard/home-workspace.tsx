@@ -1,6 +1,3 @@
-import { CreateApiKeyModal } from "@/app/dashboard/api-keys/create-api-key-modal";
-import { CreateWalletModal } from "@/app/dashboard/custody/create-wallet-modal";
-import type { KnownCustodyProvider } from "@/app/dashboard/custody/provider-catalog";
 import { SectionEntry } from "@/app/dashboard/wallets/section-entry";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -12,7 +9,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import type { PaymentsDashboardWallet } from "@sdp/types";
 import Link from "next/link";
 import type { HomeActivityRow } from "./home-page.data";
 import { formatCurrencyAmount, formatDisplayAmount } from "./payments/payments-overview.utils";
@@ -25,9 +21,6 @@ interface HomeWorkspaceProps {
   activityRows: HomeActivityRow[];
   activityError: string | null;
   activityNotice: string | null;
-  wallets: PaymentsDashboardWallet[];
-  walletProviders: KnownCustodyProvider[];
-  walletDisabledReason: string | null;
 }
 
 function formatRelativeTime(value: string): string {
@@ -91,28 +84,9 @@ export function HomeWorkspace({
   activityRows,
   activityError,
   activityNotice,
-  wallets,
-  walletProviders,
-  walletDisabledReason,
 }: HomeWorkspaceProps) {
   return (
     <div className="w-full space-y-8 py-2">
-      <SectionEntry>
-        <div className="flex flex-wrap items-center justify-end gap-3">
-          <CreateApiKeyModal
-            triggerLabel="Create API key"
-            triggerVariant="secondary"
-            wallets={wallets}
-          />
-          <CreateWalletModal
-            triggerLabel="Create Wallet"
-            providers={walletProviders}
-            disabled={walletProviders.length === 0}
-            disabledReason={walletDisabledReason ?? undefined}
-          />
-        </div>
-      </SectionEntry>
-
       <SectionEntry delay={0.04}>
         <div className="grid gap-4 md:grid-cols-2">
           <MetricCard label="Total Balance" value={totalBalance} error={totalBalanceError} />

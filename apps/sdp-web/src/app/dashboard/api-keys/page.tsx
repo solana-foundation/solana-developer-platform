@@ -1,3 +1,4 @@
+import { PageBody, PageHeader, PageLayout } from "@/components/layouts";
 import {
   Card,
   CardAction,
@@ -83,106 +84,113 @@ export default async function ApiKeysPage() {
   const wallets: PaymentsDashboardWallet[] = walletsResponse.ok ? (walletsResponse.data ?? []) : [];
 
   return (
-    <div className="w-full flex flex-col gap-6">
-      {flash ? (
-        <>
-          {!hasGeneratedKeyFlash ? <FlashClearTrigger /> : null}
-          {hasGeneratedKeyFlash ? (
-            <GeneratedApiKeyModal
-              keyValue={flash.key ?? ""}
-              message={flash.message}
-              keyPrefix={flash.keyPrefix}
-            />
-          ) : (
-            <Card
-              className={flash.level === "error" ? "border-[#c71f37]/25" : "border-[#1c1c1d]/12"}
-            >
-              <CardHeader>
-                <CardTitle>{flash.level === "error" ? "Action failed" : "Notice"}</CardTitle>
-                <CardDescription>{flash.message}</CardDescription>
-              </CardHeader>
-            </Card>
-          )}
-        </>
-      ) : null}
+    <PageLayout width="full">
+      <PageHeader variant="wide" title="API keys" />
+      <PageBody>
+        <div className="w-full flex flex-col gap-6">
+          {flash ? (
+            <>
+              {!hasGeneratedKeyFlash ? <FlashClearTrigger /> : null}
+              {hasGeneratedKeyFlash ? (
+                <GeneratedApiKeyModal
+                  keyValue={flash.key ?? ""}
+                  message={flash.message}
+                  keyPrefix={flash.keyPrefix}
+                />
+              ) : (
+                <Card
+                  className={
+                    flash.level === "error" ? "border-[#c71f37]/25" : "border-[#1c1c1d]/12"
+                  }
+                >
+                  <CardHeader>
+                    <CardTitle>{flash.level === "error" ? "Action failed" : "Notice"}</CardTitle>
+                    <CardDescription>{flash.message}</CardDescription>
+                  </CardHeader>
+                </Card>
+              )}
+            </>
+          ) : null}
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Existing API keys</CardTitle>
-          <CardDescription>Active and historical keys for this workspace.</CardDescription>
-          <CardAction>
-            <CreateApiKeyModal triggerLabel="New API key" wallets={wallets} />
-          </CardAction>
-        </CardHeader>
-        <CardContent>
-          <div className="mb-4 rounded-[10px] border border-[rgba(28,28,29,0.14)] bg-[rgba(28,28,29,0.03)] px-3 py-2 text-xs text-[rgba(28,28,29,0.72)]">
-            <p className="text-xs text-[rgba(28,28,29,0.72)]">
-              Rotation hint: rotate active keys only. The dashboard uses a 24-hour grace period; use
-              the API for custom grace values (0-168h). New key secrets are shown once.
-            </p>
-          </div>
-          {apiKeys.length === 0 ? (
-            <p className="text-sm text-[rgba(28,28,29,0.72)]">No API keys found.</p>
-          ) : (
-            <Table className="table-fixed">
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-[14%]">Name</TableHead>
-                  <TableHead className="w-[14%]">Prefix</TableHead>
-                  <TableHead className="w-[10%]">Role</TableHead>
-                  <TableHead className="w-[8%]">Env</TableHead>
-                  <TableHead className="w-[10%]">Status</TableHead>
-                  <TableHead className="w-[11%]">Last used</TableHead>
-                  <TableHead className="w-[11%]">Expires</TableHead>
-                  <TableHead className="w-[11%]">Created</TableHead>
-                  <TableHead className="w-[21%] text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {apiKeys.map((key) => {
-                  const canRotate = key.status === "active";
-
-                  return (
-                    <TableRow key={key.id}>
-                      <TableCell className="font-medium">
-                        <span className="block truncate">{key.name}</span>
-                      </TableCell>
-                      <TableCell className="font-mono text-xs">
-                        <span className="block truncate">{key.keyPrefix}</span>
-                      </TableCell>
-                      <TableCell className="text-xs">
-                        <span className="block truncate">{formatRole(key.role)}</span>
-                      </TableCell>
-                      <TableCell className="text-xs">
-                        <span className="block truncate">{key.environment}</span>
-                      </TableCell>
-                      <TableCell className="text-xs">
-                        <span className="block truncate">{key.status}</span>
-                      </TableCell>
-                      <TableCell className="text-xs text-[rgba(28,28,29,0.72)]">
-                        {formatDate(key.lastUsedAt)}
-                      </TableCell>
-                      <TableCell className="text-xs text-[rgba(28,28,29,0.72)]">
-                        {formatDate(key.expiresAt)}
-                      </TableCell>
-                      <TableCell className="text-xs text-[rgba(28,28,29,0.72)]">
-                        {formatDate(key.createdAt)}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <ApiKeyActionsMenu
-                          keyId={key.id}
-                          keyName={key.name}
-                          canRotate={canRotate}
-                        />
-                      </TableCell>
+          <Card>
+            <CardHeader>
+              <CardTitle>Existing API keys</CardTitle>
+              <CardDescription>Active and historical keys for this workspace.</CardDescription>
+              <CardAction>
+                <CreateApiKeyModal triggerLabel="New API key" wallets={wallets} />
+              </CardAction>
+            </CardHeader>
+            <CardContent>
+              <div className="mb-4 rounded-[10px] border border-[rgba(28,28,29,0.14)] bg-[rgba(28,28,29,0.03)] px-3 py-2 text-xs text-[rgba(28,28,29,0.72)]">
+                <p className="text-xs text-[rgba(28,28,29,0.72)]">
+                  Rotation hint: rotate active keys only. The dashboard uses a 24-hour grace period;
+                  use the API for custom grace values (0-168h). New key secrets are shown once.
+                </p>
+              </div>
+              {apiKeys.length === 0 ? (
+                <p className="text-sm text-[rgba(28,28,29,0.72)]">No API keys found.</p>
+              ) : (
+                <Table className="table-fixed">
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-[14%]">Name</TableHead>
+                      <TableHead className="w-[14%]">Prefix</TableHead>
+                      <TableHead className="w-[10%]">Role</TableHead>
+                      <TableHead className="w-[8%]">Env</TableHead>
+                      <TableHead className="w-[10%]">Status</TableHead>
+                      <TableHead className="w-[11%]">Last used</TableHead>
+                      <TableHead className="w-[11%]">Expires</TableHead>
+                      <TableHead className="w-[11%]">Created</TableHead>
+                      <TableHead className="w-[21%] text-right">Actions</TableHead>
                     </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
-    </div>
+                  </TableHeader>
+                  <TableBody>
+                    {apiKeys.map((key) => {
+                      const canRotate = key.status === "active";
+
+                      return (
+                        <TableRow key={key.id}>
+                          <TableCell className="font-medium">
+                            <span className="block truncate">{key.name}</span>
+                          </TableCell>
+                          <TableCell className="font-mono text-xs">
+                            <span className="block truncate">{key.keyPrefix}</span>
+                          </TableCell>
+                          <TableCell className="text-xs">
+                            <span className="block truncate">{formatRole(key.role)}</span>
+                          </TableCell>
+                          <TableCell className="text-xs">
+                            <span className="block truncate">{key.environment}</span>
+                          </TableCell>
+                          <TableCell className="text-xs">
+                            <span className="block truncate">{key.status}</span>
+                          </TableCell>
+                          <TableCell className="text-xs text-[rgba(28,28,29,0.72)]">
+                            {formatDate(key.lastUsedAt)}
+                          </TableCell>
+                          <TableCell className="text-xs text-[rgba(28,28,29,0.72)]">
+                            {formatDate(key.expiresAt)}
+                          </TableCell>
+                          <TableCell className="text-xs text-[rgba(28,28,29,0.72)]">
+                            {formatDate(key.createdAt)}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <ApiKeyActionsMenu
+                              keyId={key.id}
+                              keyName={key.name}
+                              canRotate={canRotate}
+                            />
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      </PageBody>
+    </PageLayout>
   );
 }

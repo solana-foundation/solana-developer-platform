@@ -244,7 +244,7 @@ export function OrganizationRpcSettingsForm({
 
   return (
     <div className="grid gap-5">
-      <div className="w-full max-w-3xl space-y-5">
+      <div className="w-full space-y-5">
         <div className="rounded-xl border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.03)] px-3 py-2">
           <div className="flex items-center gap-3">
             <span className="text-sm text-[rgba(28,28,29,0.7)]">
@@ -291,7 +291,7 @@ export function OrganizationRpcSettingsForm({
       </div>
 
       {errorMessage ? (
-        <div className="w-full max-w-3xl rounded-xl border border-[rgba(158,43,56,0.2)] bg-[rgba(158,43,56,0.06)] px-3 py-2 text-sm text-[#9e2b38]">
+        <div className="w-full rounded-xl border border-[rgba(158,43,56,0.2)] bg-[rgba(158,43,56,0.06)] px-3 py-2 text-sm text-[#9e2b38]">
           {errorMessage}
         </div>
       ) : null}

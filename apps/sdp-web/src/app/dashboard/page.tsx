@@ -1,3 +1,6 @@
+import { CreateApiKeyModal } from "@/app/dashboard/api-keys/create-api-key-modal";
+import { CreateWalletModal } from "@/app/dashboard/custody/create-wallet-modal";
+import { PageBody, PageHeader, PageLayout } from "@/components/layouts";
 import { createSdpApiClient } from "@/lib/sdp-api";
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
@@ -75,22 +78,43 @@ export default async function DashboardPage() {
     .join(" ");
 
   return (
-    <HomeWorkspace
-      totalBalance={totalBalance}
-      totalBalanceError={aggregateError}
-      todaysVolume={todaysVolume}
-      todaysVolumeError={transfersError}
-      activityRows={activityRows}
-      activityError={activityError}
-      activityNotice={activityNotice || null}
-      wallets={walletsResult.data ?? []}
-      walletProviders={walletProvidersResult.data ?? []}
-      walletDisabledReason={
-        walletProvidersError ??
-        ((walletProvidersResult.data?.length ?? 0) === 0
-          ? "Connect a provider that supports additional wallet provisioning first."
-          : null)
-      }
-    />
+    <PageLayout width="default">
+      <PageHeader
+        variant="display"
+        title="Home"
+        action={
+          <div className="flex flex-wrap items-center gap-3">
+            <CreateApiKeyModal
+              triggerLabel="Create API key"
+              triggerVariant="secondary"
+              wallets={walletsResult.data ?? []}
+            />
+            <CreateWalletModal
+              triggerLabel="Create Wallet"
+              providers={walletProvidersResult.data ?? []}
+              disabled={(walletProvidersResult.data?.length ?? 0) === 0}
+              disabledReason={
+                walletProvidersError ??
+                ((walletProvidersResult.data?.length ?? 0) === 0
+                  ? "Connect a provider that supports additional wallet provisioning first."
+                  : null) ??
+                undefined
+              }
+            />
+          </div>
+        }
+      />
+      <PageBody>
+        <HomeWorkspace
+          totalBalance={totalBalance}
+          totalBalanceError={aggregateError}
+          todaysVolume={todaysVolume}
+          todaysVolumeError={transfersError}
+          activityRows={activityRows}
+          activityError={activityError}
+          activityNotice={activityNotice || null}
+        />
+      </PageBody>
+    </PageLayout>
   );
 }

@@ -1,20 +1,12 @@
 "use client";
 
-import {
-  BookOpen,
-  Coins,
-  Home,
-  KeyRound,
-  PanelLeft,
-  Send,
-  Settings2,
-  Wallet,
-} from "lucide-react";
-import type { LucideIcon } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { BookOpen, Coins, Home, KeyRound, PanelLeft, Send, Settings2, Wallet } from "lucide-react";
+import type { LucideIcon, LucideProps } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { cn } from "@/lib/utils";
+import type { ReactNode } from "react";
 
 type NavItem = {
   label: string;
@@ -23,14 +15,18 @@ type NavItem = {
   external?: boolean;
 };
 
+type NavSectionDensity = "default" | "compact";
+
 type NavSection = {
   title: string;
+  density: NavSectionDensity;
   items: NavItem[];
 };
 
 const navSections: NavSection[] = [
   {
     title: "Create",
+    density: "default",
     items: [
       { label: "Home", href: "/dashboard", icon: Home },
       { label: "Wallets", href: "/dashboard/wallets", icon: Wallet },
@@ -38,6 +34,7 @@ const navSections: NavSection[] = [
   },
   {
     title: "Manage",
+    density: "compact",
     items: [
       { label: "Issuance", href: "/dashboard/issuance", icon: Coins },
       { label: "Payments", href: "/dashboard/payments", icon: Send },
@@ -56,6 +53,11 @@ const bottomNavItems: NavItem[] = [
   { label: "Docs", href: docsHref, icon: BookOpen, external: true },
   { label: "Settings", href: "/dashboard/settings", icon: Settings2 },
 ];
+
+const sidebarIconProps: LucideProps = {
+  className: "h-5 w-5 shrink-0",
+  strokeWidth: 1.8,
+};
 
 function isItemActive(pathname: string, href: string): boolean {
   if (href === "/dashboard") return pathname === "/dashboard";
@@ -80,14 +82,15 @@ function NavItemLink({
       href={item.href}
       target={item.external ? "_blank" : undefined}
       rel={item.external ? "noopener noreferrer" : undefined}
+      aria-current={active ? "page" : undefined}
       className={cn(
-        "flex h-12 items-center gap-3 rounded-[12px] p-3 text-[16px] font-[550] leading-[24px] transition-colors",
+        "text-body-lg-bold flex h-[var(--layout-shell-nav-row-height)] w-full cursor-pointer items-center gap-[var(--layout-shell-nav-row-gap)] rounded-[var(--layout-shell-nav-row-radius)] border border-transparent p-[var(--layout-shell-nav-row-padding)] outline-none transition-[background-color,border-color,color,box-shadow] duration-150 ease-out focus-visible:ring-2 focus-visible:ring-[rgba(28,28,29,0.14)] motion-reduce:transition-none",
         active
-          ? "border border-[rgba(28,28,29,0.04)] bg-white text-[rgba(28,28,29,0.88)]"
-          : "text-[rgba(28,28,29,0.72)] hover:bg-[rgba(28,28,29,0.04)] hover:text-[rgba(28,28,29,0.88)]"
+          ? "border-border-extra-light bg-white text-text-high"
+          : "text-text-medium hover:border-border-extra-light hover:bg-border-extra-light hover:text-text-high"
       )}
     >
-      <Icon className="h-5 w-5" strokeWidth={1.5} />
+      <Icon {...sidebarIconProps} />
       <span>{item.label}</span>
     </Link>
   );
@@ -95,19 +98,26 @@ function NavItemLink({
 
 function SidebarGroup({
   title,
+  density,
   items,
   pathname,
 }: {
   title: string;
+  density: NavSectionDensity;
   items: NavItem[];
   pathname: string;
 }) {
+  const rowGapClassName =
+    density === "compact"
+      ? "gap-[var(--layout-shell-sidebar-row-gap-compact)]"
+      : "gap-[var(--layout-shell-sidebar-row-gap-default)]";
+
   return (
-    <div className="flex flex-col gap-2">
-      <p className="px-3 text-[12px] font-[550] leading-[18px] text-[rgba(28,28,29,0.56)]">
+    <div className="flex flex-col gap-[var(--layout-shell-sidebar-section-title-gap)]">
+      <p className="text-body-sm-bold px-[var(--layout-shell-sidebar-section-label-padding-inline)] text-text-low">
         {title}
       </p>
-      <div className="flex flex-col gap-1">
+      <div className={cn("flex flex-col", rowGapClassName)}>
         {items.map((item) => (
           <NavItemLink key={item.label} item={item} pathname={pathname} />
         ))}
@@ -127,39 +137,36 @@ function OrgSwitcherPill({ orgName, orgImageUrl, onClick }: OrgSwitcherPillProps
     <button
       type="button"
       onClick={onClick}
-      className="flex w-full items-center gap-2 rounded-[10px] border border-[rgba(28,28,29,0.08)] bg-white py-2 pr-3 pl-2 shadow-[0px_1px_3px_rgba(0,0,0,0.1),inset_0px_-1px_0px_rgba(0,0,0,0.1)] transition-colors hover:bg-[rgba(255,255,255,0.9)]"
+      className="relative flex w-full cursor-pointer items-center gap-[var(--layout-shell-top-controls-gap)] rounded-[10px] border border-[rgba(28,28,29,0.08)] bg-white py-2 pr-3 pl-2 shadow-[0px_1px_3px_0px_rgba(0,0,0,0.1)] outline-none transition-[background-color,box-shadow] duration-150 ease-out hover:bg-[rgba(255,255,255,0.9)] focus-visible:ring-2 focus-visible:ring-[rgba(28,28,29,0.14)] motion-reduce:transition-none"
     >
       {orgImageUrl ? (
-        <Image
-          src={orgImageUrl}
-          alt={orgName}
-          width={28}
-          height={28}
-          className="rounded-[6px]"
-        />
+        <Image src={orgImageUrl} alt={orgName} width={28} height={28} className="rounded-[6px]" />
       ) : (
         <div className="flex h-7 w-7 items-center justify-center rounded-[6px] bg-[rgba(28,28,29,0.08)]">
-          <span className="text-[12px] font-semibold text-[rgba(28,28,29,0.48)]">
+          <span className="text-[12px] font-[var(--font-weight-semibold)] text-text-low">
             {orgName.charAt(0).toUpperCase()}
           </span>
         </div>
       )}
-      <span className="min-w-0 flex-1 truncate text-left text-[16px] leading-[24px] font-[550] text-black">
+      <span className="text-body-lg-bold min-w-0 flex-1 truncate text-left text-text-extra-high">
         {orgName}
       </span>
       <svg
-        className="h-6 w-6 shrink-0 text-[rgba(28,28,29,0.56)]"
+        className="h-6 w-6 shrink-0 text-text-extra-low"
         viewBox="0 0 24 24"
         fill="none"
+        aria-hidden="true"
+        focusable="false"
       >
         <path
           d="M6 9l6 6 6-6"
           stroke="currentColor"
-          strokeWidth="3"
+          strokeWidth="1.5"
           strokeLinecap="round"
           strokeLinejoin="round"
         />
       </svg>
+      <div className="absolute inset-[-1px] pointer-events-none rounded-[inherit] shadow-[inset_0px_-1px_0px_0px_rgba(0,0,0,0.1)]" />
     </button>
   );
 }
@@ -171,6 +178,9 @@ interface UserProfileRowProps {
 }
 
 function UserProfileRow({ userName, userImageUrl, onUserClick }: UserProfileRowProps) {
+  const rowClassName =
+    "flex h-[var(--layout-shell-nav-row-height)] w-full items-center gap-[var(--layout-shell-nav-row-gap)] rounded-[var(--layout-shell-nav-row-radius)] p-[var(--layout-shell-nav-row-padding)]";
+
   const content = (
     <>
       {userImageUrl ? (
@@ -188,7 +198,7 @@ function UserProfileRow({ userName, userImageUrl, onUserClick }: UserProfileRowP
           </span>
         </div>
       )}
-      <span className="min-w-0 truncate text-[16px] font-[550] leading-[24px] text-[rgba(28,28,29,0.72)]">
+      <span className="text-body-lg-bold min-w-0 truncate text-text-medium">
         {userName}
       </span>
     </>
@@ -199,18 +209,17 @@ function UserProfileRow({ userName, userImageUrl, onUserClick }: UserProfileRowP
       <button
         type="button"
         onClick={onUserClick}
-        className="flex h-12 w-full items-center gap-3 rounded-[12px] p-3 transition-colors hover:bg-[rgba(28,28,29,0.04)]"
+        className={cn(
+          rowClassName,
+          "cursor-pointer outline-none transition-[background-color,box-shadow] duration-150 ease-out hover:bg-border-extra-light focus-visible:ring-2 focus-visible:ring-[rgba(28,28,29,0.14)] motion-reduce:transition-none"
+        )}
       >
         {content}
       </button>
     );
   }
 
-  return (
-    <div className="flex h-12 items-center gap-3 rounded-[12px] p-3">
-      {content}
-    </div>
-  );
+  return <div className={rowClassName}>{content}</div>;
 }
 
 export interface SidebarNavProps {
@@ -218,6 +227,7 @@ export interface SidebarNavProps {
   orgImageUrl?: string;
   userName: string;
   userImageUrl?: string;
+  orgSwitcher?: ReactNode;
   onOrgClick?: () => void;
   onUserClick?: () => void;
   onCollapse?: () => void;
@@ -229,6 +239,7 @@ export function SidebarNav({
   orgImageUrl,
   userName,
   userImageUrl,
+  orgSwitcher,
   onOrgClick,
   onUserClick,
   onCollapse,
@@ -240,39 +251,38 @@ export function SidebarNav({
     <nav
       aria-label="Main navigation"
       className={cn(
-        "flex w-[272px] shrink-0 flex-col justify-between bg-[#e9e7de]",
+        "flex w-[var(--layout-shell-sidebar-width)] shrink-0 flex-col justify-between bg-[#e9e7de]",
         className
       )}
     >
       {/* Top: org switcher + nav sections */}
-      <div className="flex flex-col gap-8 p-8">
+      <div className="flex flex-col gap-[var(--layout-shell-sidebar-top-gap)] p-[var(--layout-shell-sidebar-padding)]">
         {/* Org switcher row */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-[var(--layout-shell-top-controls-gap)]">
           <div className="min-w-0 flex-1">
-            <OrgSwitcherPill
-              orgName={orgName}
-              orgImageUrl={orgImageUrl}
-              onClick={onOrgClick}
-            />
+            {orgSwitcher ?? (
+              <OrgSwitcherPill orgName={orgName} orgImageUrl={orgImageUrl} onClick={onOrgClick} />
+            )}
           </div>
           {onCollapse && (
             <button
               type="button"
               aria-label="Close navigation"
               onClick={onCollapse}
-              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-[rgba(28,28,29,0.72)] transition-colors hover:bg-[rgba(28,28,29,0.08)]"
+              className="inline-flex h-[var(--layout-shell-collapse-button-size)] w-[var(--layout-shell-collapse-button-size)] shrink-0 cursor-pointer items-center justify-center rounded-lg text-text-medium outline-none transition-[background-color,box-shadow,color] duration-150 ease-out hover:bg-[rgba(28,28,29,0.08)] focus-visible:ring-2 focus-visible:ring-[rgba(28,28,29,0.14)] motion-reduce:transition-none"
             >
-              <PanelLeft className="h-5 w-5" />
+              <PanelLeft {...sidebarIconProps} />
             </button>
           )}
         </div>
 
         {/* Nav sections */}
-        <div className="flex flex-col gap-6">
+        <div className="flex flex-col gap-[var(--layout-shell-sidebar-sections-gap)]">
           {navSections.map((section) => (
             <SidebarGroup
               key={section.title}
               title={section.title}
+              density={section.density}
               items={section.items}
               pathname={pathname}
             />
@@ -282,17 +292,21 @@ export function SidebarNav({
 
       {/* Bottom: API keys, Docs, Settings, divider, user profile */}
       <div className="flex flex-col">
-        <div className="flex flex-col gap-2 p-8">
+        <div className="flex flex-col gap-[var(--layout-shell-sidebar-section-title-gap)] p-[var(--layout-shell-sidebar-padding)]">
           {bottomNavItems.map((item) => (
             <NavItemLink key={item.label} item={item} pathname={pathname} />
           ))}
           {/* Divider */}
-          <div className="h-[1.5px] bg-[rgba(28,28,29,0.04)]" />
+          <div className="h-[1.5px] bg-border-extra-light" />
           {/* User profile row */}
-          <UserProfileRow userName={userName} userImageUrl={userImageUrl} onUserClick={onUserClick} />
+          <UserProfileRow
+            userName={userName}
+            userImageUrl={userImageUrl}
+            onUserClick={onUserClick}
+          />
         </div>
         {/* Bottom border */}
-        <div className="h-px bg-[rgba(28,28,29,0.12)]" />
+        <div className="h-px bg-border-light" />
       </div>
     </nav>
   );

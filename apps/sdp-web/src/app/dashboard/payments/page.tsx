@@ -1,3 +1,5 @@
+import { IssuanceHeaderTabs } from "@/components/issuance-header-tabs";
+import { PageHeader, PageLayout } from "@/components/layouts";
 import { createSdpApiClient } from "@/lib/sdp-api";
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
@@ -41,7 +43,8 @@ export default async function PaymentsPage() {
     : `Transfer API ${transfersResult.status ?? "unavailable"}: ${transfersResult.error ?? "Unknown error"}`;
 
   return (
-    <div className="flex h-full min-h-0 w-full flex-col">
+    <PageLayout width="full">
+      <PageHeader variant="wide" title="Payments" tabs={<IssuanceHeaderTabs />} />
       <PaymentsWorkspace
         apiBaseUrl={apiBaseUrl}
         apiKeys={apiKeys}
@@ -52,6 +55,6 @@ export default async function PaymentsPage() {
         transfers={transfers}
         transfersError={transfersError}
       />
-    </div>
+    </PageLayout>
   );
 }
