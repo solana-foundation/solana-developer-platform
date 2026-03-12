@@ -200,7 +200,6 @@ export function PageHeaderSkeleton({
   className,
 }: PageHeaderSkeletonProps) {
   const contentStyle = getPageContentStyle();
-  const shouldRenderTitleRow = showTitleRow;
 
   if (variant === "display") {
     return (
@@ -218,7 +217,7 @@ export function PageHeaderSkeleton({
 
   return (
     <div className={cn("bg-white", className)}>
-      {shouldRenderTitleRow ? (
+      {showTitleRow ? (
         <div className="mx-auto w-full px-[var(--page-margin-sm)]" style={contentStyle}>
           <div className="flex items-center justify-between gap-6 pt-[44px] pb-6">
             <SkeletonBlock className={cn("h-11 max-w-full", titleWidthClassName)} />
@@ -231,7 +230,7 @@ export function PageHeaderSkeleton({
           <div
             className={cn(
               "mx-auto w-full px-[var(--page-margin-sm)] pb-4",
-              shouldRenderTitleRow ? "" : "pt-[44px]"
+              showTitleRow ? "" : "pt-[44px]"
             )}
             style={contentStyle}
           >

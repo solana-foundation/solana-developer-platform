@@ -12,6 +12,8 @@ import Link from "next/link";
 import type { HomeActivityRow } from "./home-page.data";
 import { formatCurrencyAmount, formatDisplayAmount } from "./payments/payments-overview.utils";
 
+const relativeTimeFormatter = new Intl.RelativeTimeFormat("en-US", { numeric: "auto" });
+
 interface HomeWorkspaceProps {
   totalBalance: number | null;
   totalBalanceError: string | null;
@@ -30,15 +32,14 @@ function formatRelativeTime(value: string): string {
 
   const diffMs = date.getTime() - Date.now();
   const diffMinutes = Math.round(diffMs / 60_000);
-  const formatter = new Intl.RelativeTimeFormat("en-US", { numeric: "auto" });
 
   if (Math.abs(diffMinutes) < 60) {
-    return formatter.format(diffMinutes, "minute");
+    return relativeTimeFormatter.format(diffMinutes, "minute");
   }
 
   const diffHours = Math.round(diffMinutes / 60);
   if (Math.abs(diffHours) < 24) {
-    return formatter.format(diffHours, "hour");
+    return relativeTimeFormatter.format(diffHours, "hour");
   }
 
   const diffDays = Math.round(diffHours / 24);
