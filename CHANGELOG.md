@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.1](https://github.com/solana-foundation/solana-developer-platform/compare/v0.5.0...v0.5.1) (2026-03-13)
+
+
+### Bug Fixes
+
+* **web:** route home wallet CTA to wallets ([#92](https://github.com/solana-foundation/solana-developer-platform/issues/92)) ([5e461d9](https://github.com/solana-foundation/solana-developer-platform/commit/5e461d980357bfa6ebb5268e5822be2808f4b100))
+
 ## [0.5.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.4.0...v0.5.0) (2026-03-13)
 
 
