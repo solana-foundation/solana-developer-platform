@@ -91,7 +91,7 @@ function getDashboardPageConfig(pathname: string): DashboardPageConfig {
   if (pathname === "/dashboard/wallets" || pathname === "/dashboard/custody") {
     return {
       title: "Wallets",
-      showHeaderNavRow: true,
+      headerNav: <IssuanceHeaderTabs />,
       contentWidthClass: "max-w-none",
     };
   }
@@ -109,6 +109,19 @@ function getDashboardPageConfig(pathname: string): DashboardPageConfig {
     return {
       title: "Activate provider",
       contentWidthClass: "max-w-3xl",
+      backAction: {
+        href: "/dashboard/wallets",
+        label: "Back to wallets",
+      },
+    };
+  }
+  if (
+    (pathname.startsWith("/dashboard/wallets/") && pathname !== "/dashboard/wallets/setup") ||
+    (pathname.startsWith("/dashboard/custody/") && pathname !== "/dashboard/custody/setup")
+  ) {
+    return {
+      title: "Wallets",
+      contentWidthClass: "max-w-none",
       backAction: {
         href: "/dashboard/wallets",
         label: "Back to wallets",
@@ -223,7 +236,10 @@ export function DashboardShell({ children }: { children: ReactNode }) {
   const shouldRenderHeaderNavRow = pageConfig.showHeaderNavRow || Boolean(headerNav);
   const shouldLockViewportScroll =
     issuanceTab === "playground" &&
-    (pathname === "/dashboard/issuance" || pathname.startsWith("/dashboard/payments"));
+    (pathname === "/dashboard/issuance" ||
+      pathname.startsWith("/dashboard/payments") ||
+      pathname === "/dashboard/wallets" ||
+      pathname === "/dashboard/custody");
 
   if (!isLoaded) {
     return (

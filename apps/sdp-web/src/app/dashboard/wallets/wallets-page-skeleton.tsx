@@ -1,74 +1,73 @@
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
-
-function SkeletonLine({ widthClass = "w-full" }: { widthClass?: string }) {
-  return <div className={`h-4 rounded bg-[rgba(28,28,29,0.10)] ${widthClass}`} />;
+function SkeletonBlock({ className }: { className: string }) {
+  return <div className={`animate-pulse rounded-[16px] bg-[rgba(28,28,29,0.1)] ${className}`} />;
 }
 
-function SkeletonRows({ rows }: { rows: number }) {
+function WalletCardSkeleton() {
   return (
-    <div className="space-y-3">
-      {Array.from({ length: rows }, (_, idx) => (
-        <SkeletonLine
-          key={`row-skeleton-${idx + 1}`}
-          widthClass={idx % 2 === 0 ? "w-[92%]" : "w-[76%]"}
-        />
-      ))}
+    <div className="animate-pulse rounded-2xl border border-[rgba(28,28,29,0.08)] bg-[#fcfcfa] p-5">
+      <SkeletonBlock className="h-12 w-12 rounded-2xl" />
+      <div className="mt-4 space-y-2">
+        <SkeletonBlock className="h-4 w-24" />
+        <SkeletonBlock className="h-8 w-40" />
+      </div>
+      <div className="mt-6 space-y-3 rounded-xl border border-[rgba(28,28,29,0.06)] bg-white/70 p-3">
+        <SkeletonBlock className="h-4 w-full" />
+        <SkeletonBlock className="h-4 w-full" />
+        <SkeletonBlock className="h-4 w-full" />
+      </div>
+      <SkeletonBlock className="mt-3 h-11 w-full rounded-[10px]" />
+    </div>
+  );
+}
+
+function ProviderCardSkeleton() {
+  return (
+    <div className="animate-pulse rounded-2xl border border-[rgba(28,28,29,0.08)] bg-[#fcfcfa] p-5">
+      <div className="flex items-start justify-between gap-4">
+        <SkeletonBlock className="h-12 w-12 rounded-2xl" />
+        <SkeletonBlock className="h-6 w-24 rounded-full" />
+      </div>
+      <div className="mt-5 space-y-2">
+        <SkeletonBlock className="h-7 w-32" />
+        <SkeletonBlock className="h-4 w-full" />
+        <SkeletonBlock className="h-4 w-4/5" />
+      </div>
+      <div className="mt-4 flex gap-2">
+        <SkeletonBlock className="h-6 w-20 rounded-full" />
+        <SkeletonBlock className="h-6 w-24 rounded-full" />
+      </div>
+      <SkeletonBlock className="mt-8 h-9 w-full rounded-[10px]" />
     </div>
   );
 }
 
 export function WalletsOnboardingSkeleton() {
   return (
-    <Card className="min-h-[300px] animate-pulse">
-      <CardHeader className="space-y-3">
-        <SkeletonLine widthClass="w-56" />
-        <SkeletonLine widthClass="w-[72%]" />
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="rounded-xl border border-[rgba(28,28,29,0.08)] bg-[rgba(28,28,29,0.04)] p-4">
-          <SkeletonRows rows={3} />
-        </div>
-        <SkeletonLine widthClass="w-[48%]" />
-      </CardContent>
-    </Card>
-  );
-}
-
-export function WalletsSigningConfigSkeleton() {
-  return (
-    <Card className="min-h-[284px] animate-pulse">
-      <CardHeader className="space-y-3">
-        <SkeletonLine widthClass="w-44" />
-        <SkeletonLine widthClass="w-[54%]" />
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <SkeletonRows rows={4} />
-        <div className="h-10 w-36 rounded-[10px] bg-[rgba(28,28,29,0.10)]" />
-      </CardContent>
-    </Card>
-  );
-}
-
-export function WalletsTableSectionSkeleton() {
-  return (
-    <Card className="min-h-[360px] animate-pulse">
-      <CardHeader className="space-y-3">
-        <SkeletonLine widthClass="w-20" />
-        <SkeletonLine widthClass="w-[46%]" />
-      </CardHeader>
-      <CardContent className="space-y-3">
-        <SkeletonRows rows={5} />
-      </CardContent>
-    </Card>
+    <div className="space-y-6">
+      <div className="space-y-3">
+        <SkeletonBlock className="h-7 w-64" />
+        <SkeletonBlock className="h-4 w-[52%]" />
+      </div>
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        {Array.from({ length: 6 }, (_, index) => (
+          <ProviderCardSkeleton key={`provider-skeleton-${index + 1}`} />
+        ))}
+      </div>
+    </div>
   );
 }
 
 export function WalletsPageSkeleton() {
   return (
-    <div className="w-full flex flex-col gap-6">
-      <WalletsOnboardingSkeleton />
-      <WalletsSigningConfigSkeleton />
-      <WalletsTableSectionSkeleton />
+    <div className="w-full space-y-6 py-2">
+      <div className="flex justify-end">
+        <SkeletonBlock className="h-10 w-32 rounded-[10px]" />
+      </div>
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        {Array.from({ length: 5 }, (_, index) => (
+          <WalletCardSkeleton key={`wallet-card-skeleton-${index + 1}`} />
+        ))}
+      </div>
     </div>
   );
 }
