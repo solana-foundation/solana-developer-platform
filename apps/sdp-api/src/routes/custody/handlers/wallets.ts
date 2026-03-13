@@ -422,9 +422,20 @@ export const getWalletById = async (c: AppContext) => {
     throw error;
   }
 
-  const rpc = createRpc(c.env);
-  const accountInfo = await getAccountInfo(rpc, wallet.publicKey as Address);
-  const lamports = accountInfo?.lamports ?? 0n;
+  let lamports = 0n;
+
+  try {
+    const rpc = createRpc(c.env);
+    const accountInfo = await getAccountInfo(rpc, wallet.publicKey as Address);
+    lamports = accountInfo?.lamports ?? 0n;
+  } catch (error) {
+    console.error("getWalletById: failed to fetch wallet balance", {
+      requestId: c.get("requestId"),
+      walletId: wallet.walletId,
+      publicKey: wallet.publicKey,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 
   const response: CustodyWalletByIdResponse = {
     wallet: {

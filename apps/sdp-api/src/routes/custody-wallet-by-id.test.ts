@@ -1,5 +1,6 @@
 import app from "@/index";
 import { hashString } from "@/lib/hash";
+import { getAccountInfo } from "@/services/solana/rpc";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/d1";
@@ -54,6 +55,7 @@ const TEST_CACHED_API_KEY: CachedApiKey = {
 
 const PRIVY_CONFIG_ID = "cust_cfg_wallet_by_id_privy";
 const PARA_CONFIG_ID = "cust_cfg_wallet_by_id_para";
+const mockedGetAccountInfo = vi.mocked(getAccountInfo);
 
 async function seedAuthAndConfigs(): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
@@ -155,6 +157,10 @@ async function seedCachedKey(override: Partial<CachedApiKey>): Promise<void> {
 
 describe("Custody wallet by ID route", () => {
   beforeEach(async () => {
+    mockedGetAccountInfo.mockReset();
+    mockedGetAccountInfo.mockResolvedValue({
+      lamports: 4200000000n,
+    } as Awaited<ReturnType<typeof getAccountInfo>>);
     await seedTestDatabase(env);
     await seedAuthAndConfigs();
   });
@@ -274,5 +280,42 @@ describe("Custody wallet by ID route", () => {
     );
 
     expect(res.status).toBe(403);
+  });
+
+  it("falls back to a zero SOL balance when the RPC lookup fails", async () => {
+    mockedGetAccountInfo.mockRejectedValueOnce(new Error("RPC unavailable"));
+
+    const res = await app.request(
+      "/v1/wallets/para_wallet_a",
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+      },
+      env
+    );
+
+    expect(res.status).toBe(200);
+
+    const body = (await res.json()) as {
+      data: {
+        wallet: {
+          balance: {
+            token: string;
+            amount: string;
+            uiAmount: string;
+            decimals: number;
+          };
+        };
+      };
+    };
+
+    expect(body.data.wallet.balance).toMatchObject({
+      token: "SOL",
+      amount: "0",
+      uiAmount: "0",
+      decimals: 9,
+    });
   });
 });
