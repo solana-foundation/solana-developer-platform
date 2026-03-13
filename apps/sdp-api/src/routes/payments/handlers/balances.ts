@@ -18,9 +18,31 @@ export async function getWalletBalances(c: AppContext) {
   const { wallet } = await resolveWalletFromParams(c, ["wallets:read"]);
 
   const rpc = createRpc(c.env);
-  const accountInfo = await getAccountInfo(rpc, wallet.publicKey as Address);
-  const splBalances = await getSplTokenBalances(rpc, wallet.publicKey as Address);
-  const lamports = accountInfo?.lamports ?? 0n;
+  let lamports = 0n;
+  let splBalances: Awaited<ReturnType<typeof getSplTokenBalances>> = [];
+
+  try {
+    const accountInfo = await getAccountInfo(rpc, wallet.publicKey as Address);
+    lamports = accountInfo?.lamports ?? 0n;
+  } catch (error) {
+    console.error("getWalletBalances: failed to fetch SOL balance", {
+      requestId: c.get("requestId"),
+      walletId: wallet.walletId,
+      publicKey: wallet.publicKey,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  try {
+    splBalances = await getSplTokenBalances(rpc, wallet.publicKey as Address);
+  } catch (error) {
+    console.error("getWalletBalances: failed to fetch SPL balances", {
+      requestId: c.get("requestId"),
+      walletId: wallet.walletId,
+      publicKey: wallet.publicKey,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 
   return success(c, {
     walletBalances: {
