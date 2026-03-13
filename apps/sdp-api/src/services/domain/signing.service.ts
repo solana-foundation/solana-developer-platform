@@ -266,6 +266,7 @@ export class SigningService {
     private configStore: SigningConfigStore & {
       createWallet: CustodyConfigStore["createWallet"];
       getWallets: CustodyConfigStore["getWallets"];
+      getWalletsForConfigs: CustodyConfigStore["getWalletsForConfigs"];
       findActiveWalletByIdentifier: CustodyConfigStore["findActiveWalletByIdentifier"];
       deactivateWallet: CustodyConfigStore["deactivateWallet"];
       deactivateWalletIfNotLast: CustodyConfigStore["deactivateWalletIfNotLast"];
@@ -1156,15 +1157,12 @@ export class SigningService {
       return [];
     }
 
-    const groupedWallets = await Promise.all(
-      configs.map(async (config) => ({
-        config,
-        wallets: await this.configStore.getWallets(config.id),
-      }))
+    const walletsByConfigId = await this.configStore.getWalletsForConfigs(
+      configs.map((config) => config.id)
     );
 
-    return groupedWallets.flatMap(({ config, wallets }) =>
-      wallets.map((wallet) => ({
+    return configs.flatMap((config) =>
+      (walletsByConfigId.get(config.id) ?? []).map((wallet) => ({
         ...wallet,
         provider: config.provider,
         isDefaultProvider: defaultConfigId === config.id,

@@ -445,6 +445,35 @@ export class CustodyConfigStore implements SigningConfigStore {
     return results.map(this.mapWalletRow);
   }
 
+  async getWalletsForConfigs(configIds: string[]): Promise<Map<string, CustodyWallet[]>> {
+    if (configIds.length === 0) {
+      return new Map();
+    }
+
+    const placeholders = configIds.map(() => "?").join(", ");
+    const { results } = await this.db
+      .prepare(
+        `SELECT * FROM custody_wallets
+         WHERE custody_config_id IN (${placeholders}) AND status = 'active'
+         ORDER BY created_at ASC`
+      )
+      .bind(...configIds)
+      .all<CustodyWalletRow>();
+
+    const walletsByConfigId = new Map(
+      configIds.map((configId) => [configId, [] as CustodyWallet[]])
+    );
+
+    for (const row of results) {
+      const wallets = walletsByConfigId.get(row.custody_config_id);
+      if (wallets) {
+        wallets.push(this.mapWalletRow(row));
+      }
+    }
+
+    return walletsByConfigId;
+  }
+
   /**
    * Find a single active wallet by identifier (wallet_id or custody_wallets.id)
    * within the resolved scope (project-first, then org fallback).

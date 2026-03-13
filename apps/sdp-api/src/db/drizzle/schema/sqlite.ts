@@ -101,6 +101,16 @@ export const organizationMembers = sqliteTable(
   },
   (table) => ({
     orgIdx: index("idx_org_members_org").on(table.organizationId),
+    orgStatusCreatedIdx: index("idx_org_members_org_status_created").on(
+      table.organizationId,
+      table.status,
+      table.createdAt
+    ),
+    orgRoleCreatedIdx: index("idx_org_members_org_role_created").on(
+      table.organizationId,
+      table.role,
+      table.createdAt
+    ),
     userIdx: index("idx_org_members_user").on(table.userId),
     orgUserUnique: uniqueIndex("organization_members_organization_id_user_id_unique").on(
       table.organizationId,
@@ -174,6 +184,11 @@ export const invitations = sqliteTable(
   (table) => ({
     orgIdx: index("idx_invitations_org").on(table.organizationId),
     emailIdx: index("idx_invitations_email").on(table.email),
+    orgEmailStatusIdx: index("idx_invitations_org_email_status").on(
+      table.organizationId,
+      table.email,
+      table.status
+    ),
     tokenIdx: uniqueIndex("idx_invitations_token").on(table.tokenHash),
     statusIdx: index("idx_invitations_status").on(table.status),
   })
@@ -240,6 +255,7 @@ export const apiKeys = sqliteTable(
   },
   (table) => ({
     orgIdx: index("idx_api_keys_org").on(table.organizationId),
+    orgCreatedIdx: index("idx_api_keys_org_created").on(table.organizationId, table.createdAt),
     hashIdx: uniqueIndex("idx_api_keys_hash").on(table.keyHash),
     statusIdx: index("idx_api_keys_status").on(table.status),
     projectIdx: index("idx_api_keys_project").on(table.projectId),
@@ -265,6 +281,10 @@ export const apiKeyWalletPermissions = sqliteTable(
       table.walletId
     ),
     keyIdx: index("idx_api_key_wallet_permissions_key").on(table.apiKeyId),
+    keyCreatedIdx: index("idx_api_key_wallet_permissions_key_created").on(
+      table.apiKeyId,
+      table.createdAt
+    ),
   })
 );
 
@@ -311,6 +331,11 @@ export const sessions = sqliteTable(
   },
   (table) => ({
     userIdx: index("idx_sessions_user").on(table.userId),
+    userRevokedCreatedIdx: index("idx_sessions_user_revoked_created").on(
+      table.userId,
+      table.revokedAt,
+      table.createdAt
+    ),
     orgIdx: index("idx_sessions_org").on(table.organizationId),
     expiresIdx: index("idx_sessions_expires").on(table.expiresAt),
   })
@@ -372,6 +397,15 @@ export const issuedTokens = sqliteTable(
   },
   (table) => ({
     projectIdx: index("idx_issued_tokens_project").on(table.projectId),
+    projectCreatedIdx: index("idx_issued_tokens_project_created").on(
+      table.projectId,
+      table.createdAt
+    ),
+    projectStatusCreatedIdx: index("idx_issued_tokens_project_status_created").on(
+      table.projectId,
+      table.status,
+      table.createdAt
+    ),
     orgIdx: index("idx_issued_tokens_org").on(table.organizationId),
     mintIdx: index("idx_issued_tokens_mint").on(table.mintAddress),
     statusIdx: index("idx_issued_tokens_status").on(table.status),
@@ -427,6 +461,12 @@ export const issuanceTransactions = sqliteTable(
   },
   (table) => ({
     tokenIdx: index("idx_issuance_tx_token").on(table.tokenId),
+    tokenCreatedIdx: index("idx_issuance_tx_token_created").on(table.tokenId, table.createdAt),
+    tokenStatusCreatedIdx: index("idx_issuance_tx_token_status_created").on(
+      table.tokenId,
+      table.status,
+      table.createdAt
+    ),
     orgIdx: index("idx_issuance_tx_org").on(table.organizationId),
     statusIdx: index("idx_issuance_tx_status").on(table.status),
     signatureIdx: uniqueIndex("idx_issuance_tx_signature").on(table.signature),
@@ -469,6 +509,11 @@ export const tokenAllowlists = sqliteTable(
   },
   (table) => ({
     tokenIdx: index("idx_token_allowlist_token").on(table.tokenId),
+    tokenStatusCreatedIdx: index("idx_token_allowlist_token_status_created").on(
+      table.tokenId,
+      table.status,
+      table.createdAt
+    ),
     addressIdx: index("idx_token_allowlist_address").on(table.address),
     statusIdx: index("idx_token_allowlist_status").on(table.status),
     tokenAddressUnique: uniqueIndex("token_allowlists_token_id_address_unique").on(
@@ -510,6 +555,9 @@ export const frozenAccounts = sqliteTable(
   },
   (table) => ({
     tokenIdx: index("idx_frozen_accounts_token").on(table.tokenId),
+    tokenFrozenActiveIdx: index("idx_frozen_accounts_token_frozen_active")
+      .on(table.tokenId, table.frozenAt)
+      .where(sql`${table.unfrozenAt} IS NULL`),
     addressIdx: index("idx_frozen_accounts_address").on(table.accountAddress),
     tokenAccountUnique: uniqueIndex("frozen_accounts_token_id_account_address_unique").on(
       table.tokenId,
@@ -537,6 +585,12 @@ export const custodyConfigs = sqliteTable(
   (table) => ({
     orgIdx: index("idx_custody_configs_org").on(table.organizationId),
     projectIdx: index("idx_custody_configs_project").on(table.organizationId, table.projectId),
+    orgProjectStatusUpdatedIdx: index("idx_custody_configs_org_project_status_updated").on(
+      table.organizationId,
+      table.projectId,
+      table.status,
+      table.updatedAt
+    ),
     statusIdx: index("idx_custody_configs_status").on(table.status),
     orgProjectProviderUnique: uniqueIndex(
       "custody_configs_organization_id_project_id_provider_unique"
@@ -590,6 +644,15 @@ export const custodyWallets = sqliteTable(
   },
   (table) => ({
     configIdx: index("idx_custody_wallets_config").on(table.custodyConfigId),
+    configStatusIdx: index("idx_custody_wallets_config_status").on(
+      table.custodyConfigId,
+      table.status
+    ),
+    configPurposeStatusIdx: index("idx_custody_wallets_config_purpose_status").on(
+      table.custodyConfigId,
+      table.purpose,
+      table.status
+    ),
     publicKeyIdx: index("idx_custody_wallets_public_key").on(table.publicKey),
     configWalletUnique: uniqueIndex("custody_wallets_custody_config_id_wallet_id_unique").on(
       table.custodyConfigId,
@@ -684,5 +747,9 @@ export const paymentTransfers = sqliteTable(
     ),
     walletIdx: index("idx_payment_transfers_wallet").on(table.walletId),
     statusIdx: index("idx_payment_transfers_status").on(table.status),
+    statusUpdatedIdx: index("idx_payment_transfers_status_updated").on(
+      table.status,
+      table.updatedAt
+    ),
   })
 );

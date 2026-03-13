@@ -20,12 +20,15 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
   });
 }
 
-function run(command, args) {
+function run(command, args, options = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       cwd: appDir,
       stdio: "inherit",
-      env: process.env,
+      env: {
+        ...process.env,
+        ...options.env,
+      },
     });
     activeChild = child;
 
@@ -50,14 +53,14 @@ function run(command, args) {
 const devArgs = ["dev", "--local", "--persist-to=.wrangler/state"];
 
 try {
-  await run(wranglerBin, [
-    "d1",
-    "migrations",
-    "apply",
-    "DB",
-    "--local",
-    "--persist-to=.wrangler/state",
-  ]);
+  await run(
+    wranglerBin,
+    ["d1", "migrations", "apply", "DB", "--local", "--persist-to=.wrangler/state"],
+    {
+      // Wrangler skips the confirmation prompt in non-interactive mode.
+      env: { CI: "1" },
+    }
+  );
   await run(wranglerBin, devArgs);
 } catch (error) {
   const message = error instanceof Error ? error.message : "Unknown local dev startup error";

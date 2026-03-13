@@ -22,7 +22,7 @@ export default async function PaymentsPage() {
   const apiClient = await createSdpApiClient();
   const [apiKeysResult, walletsResult, aggregateResult, transfersResult] = await Promise.all([
     fetchActiveApiKeys(apiClient.request),
-    fetchPaymentsWallets(apiClient.request),
+    fetchPaymentsWallets(apiClient.request, { includeBalances: true }),
     fetchPaymentsAggregate(apiClient.request),
     fetchPaymentTransfers(apiClient.request),
   ]);
