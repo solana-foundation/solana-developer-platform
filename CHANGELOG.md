@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.5.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.4.0...v0.5.0) (2026-03-13)
+
+
+### Features
+
+* **docs:** add ai discovery resources ([#85](https://github.com/solana-foundation/solana-developer-platform/issues/85)) ([b57bcf8](https://github.com/solana-foundation/solana-developer-platform/commit/b57bcf803662890e4c1b16b53957ecf55fc91f2f))
+* **wallets:** redesign setup and management flows ([#89](https://github.com/solana-foundation/solana-developer-platform/issues/89)) ([2e0a309](https://github.com/solana-foundation/solana-developer-platform/commit/2e0a309d08a8b25141ec4f5619f8e6953b4cbf2f))
+
+
+### Bug Fixes
+
+* tolerate wallet balance RPC failures ([#91](https://github.com/solana-foundation/solana-developer-platform/issues/91)) ([6db468c](https://github.com/solana-foundation/solana-developer-platform/commit/6db468ceba7b76dcdcd7f077b8a0dcc294c47880))
+
+
+### Performance Improvements
+
+* improve dashboard load performance ([#90](https://github.com/solana-foundation/solana-developer-platform/issues/90)) ([33035a7](https://github.com/solana-foundation/solana-developer-platform/commit/33035a7243b0c9fb1e309afcc4f75ce8a81b3b1c))
+
 ## [0.4.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.3.0...v0.4.0) (2026-03-12)
 
 
