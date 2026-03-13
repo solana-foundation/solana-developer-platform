@@ -384,6 +384,102 @@ describe("Payments routes", () => {
     });
   });
 
+  it("keeps SPL balances when only the SOL lookup fails", async () => {
+    mockedGetAccountInfo.mockRejectedValueOnce(new Error("rpc unavailable"));
+    mockedGetSplTokenBalances.mockResolvedValueOnce([
+      {
+        token: "USDC",
+        mint: "usdc_mint_test",
+        amount: "1250000",
+        uiAmount: "1.25",
+        decimals: 6,
+      },
+    ]);
+
+    const res = await app.request(
+      `/v1/payments/wallets/${TEST_WALLET_ID}/balances`,
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+      },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      data: {
+        walletBalances: {
+          balances: Array<{
+            token: string;
+            mint: string;
+            amount: string;
+            uiAmount: string;
+            decimals: number;
+          }>;
+        };
+      };
+    };
+
+    expect(body.data.walletBalances.balances).toEqual([
+      {
+        token: "SOL",
+        mint: SOL_MINT,
+        amount: "0",
+        uiAmount: "0",
+        decimals: 9,
+      },
+      {
+        token: "USDC",
+        mint: "usdc_mint_test",
+        amount: "1250000",
+        uiAmount: "1.25",
+        decimals: 6,
+      },
+    ]);
+  });
+
+  it("keeps the SOL balance when only the SPL lookup fails", async () => {
+    mockedGetSplTokenBalances.mockRejectedValueOnce(new Error("rpc unavailable"));
+
+    const res = await app.request(
+      `/v1/payments/wallets/${TEST_WALLET_ID}/balances`,
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+      },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      data: {
+        walletBalances: {
+          balances: Array<{
+            token: string;
+            mint: string;
+            amount: string;
+            uiAmount: string;
+            decimals: number;
+          }>;
+        };
+      };
+    };
+
+    expect(body.data.walletBalances.balances).toEqual([
+      {
+        token: "SOL",
+        mint: SOL_MINT,
+        amount: "4200000000",
+        uiAmount: "4.2",
+        decimals: 9,
+      },
+    ]);
+  });
+
   it("creates a signed MoonPay on-ramp session URL", async () => {
     const res = await app.request(
       "/v1/payments/ramps/onramp/execute",
