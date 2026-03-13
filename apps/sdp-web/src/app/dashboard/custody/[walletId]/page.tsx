@@ -1,0 +1,241 @@
+import {
+  formatCustodyProviderName,
+  isKnownCustodyProvider,
+} from "@/app/dashboard/custody/provider-catalog";
+import { WalletActionsMenu } from "@/app/dashboard/custody/wallet-actions-menu";
+import { WalletAddressCopyButton } from "@/app/dashboard/custody/wallet-address-copy-button";
+import { WalletProviderMark } from "@/app/dashboard/custody/wallet-provider-mark";
+import { type SdpApiClient, createSdpApiClient } from "@/lib/sdp-api";
+import { auth } from "@clerk/nextjs/server";
+import type { CustodyWalletSummary } from "@sdp/types";
+import { notFound, redirect } from "next/navigation";
+import type { ReactNode } from "react";
+import {
+  formatCurrencyAmount,
+  formatDisplayAmount,
+  resolveTotalBalance,
+} from "../../payments/payments-overview.utils";
+
+function formatPurpose(value: string | null): string | null {
+  if (!value) {
+    return null;
+  }
+
+  switch (value) {
+    case "root":
+      return null;
+    case "mint_authority":
+      return "Mint authority";
+    case "freeze_authority":
+      return "Freeze authority";
+    case "fee_payer":
+      return "Fee payer";
+    case "transfer":
+      return "Transfers";
+    default:
+      return value.replaceAll("_", " ");
+  }
+}
+
+function truncateMiddle(value: string, start = 6, end = 4): string {
+  if (value.length <= start + end + 3) {
+    return value;
+  }
+
+  return `${value.slice(0, start)}...${value.slice(-end)}`;
+}
+
+async function getWalletsWithBalances(
+  request: SdpApiClient["request"]
+): Promise<CustodyWalletSummary[]> {
+  // biome-ignore lint/nursery/noSecrets: This is a public API path with query flags, not a secret.
+  const response = await request("/v1/wallets?includeAllProviders=true&includeBalances=true");
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`SDP API request failed (${response.status}): ${body}`);
+  }
+
+  const json = (await response.json()) as {
+    data?: { wallets?: CustodyWalletSummary[] };
+  };
+  return json.data?.wallets ?? [];
+}
+
+export default async function WalletDetailPage({
+  params,
+}: {
+  params: Promise<{ walletId: string }>;
+}) {
+  const { userId, orgId } = await auth();
+  if (!userId) {
+    redirect("/sign-in");
+  }
+  if (!orgId) {
+    redirect("/dashboard");
+  }
+
+  const { walletId } = await params;
+  const resolvedWalletId = decodeURIComponent(walletId);
+  const apiClient = await createSdpApiClient();
+  const wallets = await getWalletsWithBalances(apiClient.request);
+  const wallet = wallets.find((entry) => entry.walletId === resolvedWalletId);
+
+  if (!wallet) {
+    notFound();
+  }
+
+  const provider =
+    wallet.provider && isKnownCustodyProvider(wallet.provider) ? wallet.provider : null;
+  const totalBalance = resolveTotalBalance(wallet.balances ?? []);
+  const purposeLabel = formatPurpose(wallet.purpose);
+
+  return (
+    <div className="w-full space-y-6 py-2">
+      <div className="flex justify-end">
+        <WalletActionsMenu
+          walletAddress={wallet.publicKey}
+          walletId={wallet.walletId}
+          walletLabel={wallet.label}
+          triggerMode="button"
+          triggerLabel="Actions"
+          triggerClassName="w-auto"
+        />
+      </div>
+
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
+        <section className="overflow-hidden rounded-2xl border border-[rgba(28,28,29,0.12)] bg-white">
+          <div className="space-y-6 p-6">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div className="flex items-start gap-4">
+                {provider ? <WalletProviderMark provider={provider} /> : null}
+                <div className="space-y-2">
+                  <h2 className="text-[36px] leading-[1.02] font-medium tracking-[-0.04em] text-[#1c1c1d]">
+                    {wallet.label?.trim() || "Untitled wallet"}
+                  </h2>
+                  <p className="text-sm text-[rgba(28,28,29,0.58)]">
+                    {provider ? formatCustodyProviderName(provider) : "Wallet"}
+                  </p>
+                </div>
+              </div>
+              {purposeLabel ? (
+                <span className="rounded-full bg-[rgba(28,28,29,0.08)] px-3 py-1.5 text-xs font-medium text-[#1c1c1d]">
+                  {purposeLabel}
+                </span>
+              ) : null}
+            </div>
+
+            <div className="overflow-hidden rounded-2xl border border-[rgba(28,28,29,0.08)] bg-[rgba(28,28,29,0.03)]">
+              <WalletInfoRow
+                label="Public key"
+                value={wallet.publicKey}
+                monospace
+                trailing={<WalletAddressCopyButton address={wallet.publicKey} />}
+              />
+              <WalletInfoRow label="Wallet ID" value={wallet.walletId} monospace />
+              <WalletInfoRow label="Status" value={wallet.status} />
+              {provider ? (
+                <WalletInfoRow label="Provider" value={formatCustodyProviderName(provider)} />
+              ) : null}
+              {purposeLabel ? <WalletInfoRow label="Purpose" value={purposeLabel} /> : null}
+            </div>
+          </div>
+        </section>
+
+        <section className="overflow-hidden rounded-2xl border border-[rgba(28,28,29,0.12)] bg-white">
+          <div className="space-y-6 p-6">
+            <div>
+              <p className="text-xs font-medium tracking-[0.14em] text-[rgba(28,28,29,0.48)] uppercase">
+                Total balance
+              </p>
+              <p className="mt-3 text-[38px] leading-none font-medium tracking-[-0.05em] text-[#1c1c1d]">
+                {formatCurrencyAmount(totalBalance)}
+              </p>
+            </div>
+
+            <div className="overflow-hidden rounded-2xl border border-[rgba(28,28,29,0.08)] bg-[rgba(28,28,29,0.03)]">
+              <WalletInfoRow label="Address" value={truncateMiddle(wallet.publicKey)} monospace />
+              <WalletInfoRow
+                label="Provider"
+                value={provider ? formatCustodyProviderName(provider) : "Unknown"}
+              />
+              {purposeLabel ? <WalletInfoRow label="Purpose" value={purposeLabel} /> : null}
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <section className="space-y-3">
+        <h3 className="text-[36px] leading-[40px] font-medium tracking-[-0.3px] text-[#1c1c1d]">
+          Balances
+        </h3>
+
+        {wallet.balances && wallet.balances.length > 0 ? (
+          <div className="overflow-hidden rounded-2xl border border-[rgba(28,28,29,0.12)] bg-white">
+            {wallet.balances.map((balance) => (
+              <WalletBalanceRow
+                key={`${balance.mint}-${balance.token}`}
+                label={balance.token}
+                value={formatDisplayAmount(balance.uiAmount, balance.token)}
+                mint={balance.mint}
+              />
+            ))}
+          </div>
+        ) : (
+          <div className="rounded-2xl border border-[rgba(28,28,29,0.12)] bg-white px-4 py-4 text-sm text-[rgba(28,28,29,0.62)]">
+            No tracked balances found yet for this wallet.
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function WalletInfoRow({
+  label,
+  value,
+  monospace = false,
+  trailing,
+}: {
+  label: string;
+  value: string;
+  monospace?: boolean;
+  trailing?: ReactNode;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-4 border-b border-[rgba(28,28,29,0.08)] px-4 py-3 last:border-b-0">
+      <p className="text-[15px] text-[rgba(28,28,29,0.68)]">{label}</p>
+      <div className="flex min-w-0 items-center gap-2">
+        <p
+          className={[
+            "truncate text-right text-[15px] text-[#1c1c1d]",
+            monospace ? "font-mono text-xs" : "",
+          ].join(" ")}
+          title={value}
+        >
+          {value}
+        </p>
+        {trailing}
+      </div>
+    </div>
+  );
+}
+
+function WalletBalanceRow({
+  label,
+  value,
+  mint,
+}: {
+  label: string;
+  value: string;
+  mint: string;
+}) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-4 border-b border-[rgba(28,28,29,0.08)] px-4 py-3 last:border-b-0">
+      <div>
+        <p className="text-[17px] font-medium text-[#1c1c1d]">{label}</p>
+        <p className="font-mono text-xs text-[rgba(28,28,29,0.52)]">{mint}</p>
+      </div>
+      <p className="text-[15px] text-[#1c1c1d]">{value}</p>
+    </div>
+  );
+}

@@ -1,0 +1,161 @@
+"use client";
+
+import { ApiPlaygroundShellSkeleton } from "@/components/api-playground-shell-skeleton";
+import { Button } from "@/components/ui/button";
+import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
+import { getStoredApiKeySecret } from "@/lib/playground-api-keys";
+import type { CustodyWalletSummary } from "@sdp/types";
+import { AnimatePresence, motion } from "framer-motion";
+import dynamic from "next/dynamic";
+import { useEffect, useMemo, useState } from "react";
+import type { KnownCustodyProvider } from "./provider-catalog";
+import { WalletProvisionModal } from "./wallet-provision-modal";
+import { WalletsOverview } from "./wallets-overview";
+
+const WalletsPlayground = dynamic(
+  () => import("./wallets-playground").then((module) => module.WalletsPlayground),
+  {
+    loading: () => <ApiPlaygroundShellSkeleton />,
+  }
+);
+
+interface WalletsApiKeyOption {
+  id: string;
+  name: string;
+  keyPrefix: string;
+  role: string;
+  environment: string;
+}
+
+interface WalletsWorkspaceProps {
+  apiBaseUrl: string | null;
+  apiKeys: WalletsApiKeyOption[];
+  connectedProviders: KnownCustodyProvider[];
+  configsError: string | null;
+  wallets: CustodyWalletSummary[];
+  walletsError: string | null;
+}
+
+export function WalletsWorkspace({
+  apiBaseUrl,
+  apiKeys,
+  connectedProviders,
+  configsError,
+  wallets,
+  walletsError,
+}: WalletsWorkspaceProps) {
+  const { issuanceTab, selectedPlaygroundApiKeyId, setPlaygroundApiKeys } = useDashboardWorkspace();
+  const [isProvisionModalOpen, setIsProvisionModalOpen] = useState(false);
+  const [preferredProvider, setPreferredProvider] = useState<KnownCustodyProvider | null>(null);
+  const isPlaygroundTab = issuanceTab === "playground";
+
+  useEffect(() => {
+    setPlaygroundApiKeys(apiKeys);
+  }, [apiKeys, setPlaygroundApiKeys]);
+
+  useEffect(() => {
+    if (isPlaygroundTab) {
+      return;
+    }
+
+    const preloadPlayground = () => {
+      void import("./wallets-playground");
+    };
+
+    // biome-ignore lint/nursery/noSecrets: requestIdleCallback is a browser API, not a secret.
+    if (typeof window !== "undefined" && "requestIdleCallback" in window) {
+      const idleId = window.requestIdleCallback(preloadPlayground);
+      return () => window.cancelIdleCallback(idleId);
+    }
+
+    const timeoutId = globalThis.setTimeout(preloadPlayground, 600);
+    return () => globalThis.clearTimeout(timeoutId);
+  }, [isPlaygroundTab]);
+
+  const selectedPlaygroundApiKey = useMemo(
+    () => apiKeys.find((key) => key.id === selectedPlaygroundApiKeyId) ?? null,
+    [apiKeys, selectedPlaygroundApiKeyId]
+  );
+  const selectedPlaygroundApiKeyPrefix = selectedPlaygroundApiKey?.keyPrefix ?? null;
+  const playgroundApiKeyValue = useMemo(() => {
+    if (!selectedPlaygroundApiKey) {
+      return "";
+    }
+
+    const stored = getStoredApiKeySecret({
+      apiKeyId: selectedPlaygroundApiKey.id,
+      keyPrefix: selectedPlaygroundApiKeyPrefix,
+    });
+
+    return stored ?? "";
+  }, [selectedPlaygroundApiKey, selectedPlaygroundApiKeyPrefix]);
+
+  const openProvisionModal = (provider: KnownCustodyProvider | null) => {
+    setPreferredProvider(provider);
+    setIsProvisionModalOpen(true);
+  };
+
+  return (
+    <div className={isPlaygroundTab ? "flex h-full min-h-0 w-full flex-col" : "w-full"}>
+      <AnimatePresence mode="wait">
+        {isPlaygroundTab ? (
+          <motion.div
+            key="playground-tab"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.2, ease: "easeOut" }}
+            className="flex h-full min-h-0 w-full flex-col"
+          >
+            <WalletsPlayground
+              apiBaseUrl={apiBaseUrl}
+              apiKeyValue={playgroundApiKeyValue}
+              connectedProviders={connectedProviders}
+              configsError={configsError}
+              hasActiveApiKeys={apiKeys.length > 0}
+              wallets={wallets.map((wallet) => ({
+                walletId: wallet.walletId,
+                label: wallet.label,
+                provider: wallet.provider ?? null,
+                publicKey: wallet.publicKey,
+              }))}
+              walletsError={walletsError}
+            />
+          </motion.div>
+        ) : (
+          <motion.div
+            key="overview-tab"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.2, ease: "easeOut" }}
+            className="w-full space-y-6"
+          >
+            {wallets.length > 0 ? (
+              <div className="flex items-center justify-end">
+                <Button type="button" onClick={() => openProvisionModal(null)}>
+                  Create Wallet
+                </Button>
+              </div>
+            ) : null}
+
+            <WalletsOverview
+              connectedProviders={connectedProviders}
+              configsError={configsError}
+              wallets={wallets}
+              walletsError={walletsError}
+              onCreateWallet={openProvisionModal}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <WalletProvisionModal
+        isOpen={isProvisionModalOpen}
+        onClose={() => setIsProvisionModalOpen(false)}
+        connectedProviders={connectedProviders}
+        preferredProvider={preferredProvider}
+      />
+    </div>
+  );
+}

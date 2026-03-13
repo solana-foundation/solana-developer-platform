@@ -14,7 +14,8 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useEscapeKey } from "@/lib/use-escape-key";
-import { Droplets, Ellipsis, ShieldCheck } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { ChevronDown, Droplets, Ellipsis, ShieldCheck } from "lucide-react";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 
@@ -22,6 +23,9 @@ interface WalletActionsMenuProps {
   walletAddress: string;
   walletId: string;
   walletLabel: string | null;
+  triggerLabel?: string;
+  triggerMode?: "button" | "icon";
+  triggerClassName?: string;
 }
 
 function getDevnetExplorerUrl(signature: string): string {
@@ -38,6 +42,9 @@ export function WalletActionsMenu({
   walletAddress,
   walletId,
   walletLabel,
+  triggerLabel = "Actions",
+  triggerMode = "icon",
+  triggerClassName,
 }: WalletActionsMenuProps) {
   const [isFaucetOpen, setIsFaucetOpen] = useState(false);
   const [isBusy, startTransition] = useTransition();
@@ -123,15 +130,30 @@ export function WalletActionsMenu({
     <>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button
-            type="button"
-            variant="outline"
-            size="icon-sm"
-            aria-label={`Wallet actions for ${resolvedWalletLabel}`}
-            disabled={isBusy}
-          >
-            <Ellipsis className="h-4 w-4" />
-          </Button>
+          {triggerMode === "button" ? (
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              className={cn("min-w-[132px] justify-between", triggerClassName)}
+              aria-label={`Wallet actions for ${resolvedWalletLabel}`}
+              disabled={isBusy}
+            >
+              <span>{triggerLabel}</span>
+              <ChevronDown className="h-4 w-4" />
+            </Button>
+          ) : (
+            <Button
+              type="button"
+              variant="outline"
+              size="icon-sm"
+              className={triggerClassName}
+              aria-label={`Wallet actions for ${resolvedWalletLabel}`}
+              disabled={isBusy}
+            >
+              <Ellipsis className="h-4 w-4" />
+            </Button>
+          )}
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-44">
           <DropdownMenuItem onSelect={() => setIsFaucetOpen(true)} disabled={isBusy}>

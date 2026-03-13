@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  CUSTODY_FEATURES,
   CUSTODY_PROVIDER_CATALOG,
   type KnownCustodyProvider,
   formatCustodyProviderName,
@@ -95,7 +94,7 @@ export function CustodySetupForm({
                   ) : null}
                 </div>
                 <div className="mt-3 flex flex-wrap gap-1.5">
-                  {CUSTODY_FEATURES.map((feature) => (
+                  {provider.capabilities.map((feature) => (
                     <span
                       key={feature}
                       className="rounded-full border border-[rgba(28,28,29,0.16)] bg-[rgba(28,28,29,0.04)] px-2 py-0.5 text-[11px] text-[rgba(28,28,29,0.78)]"
@@ -145,7 +144,7 @@ export function CustodySetupForm({
       <div className="grid gap-2">
         <Label>Available features</Label>
         <div className="flex flex-wrap gap-2">
-          {CUSTODY_FEATURES.map((feature) => (
+          {selectedProviderEntry.capabilities.map((feature) => (
             <span
               key={feature}
               className="rounded-full border border-[rgba(28,28,29,0.16)] bg-[rgba(28,28,29,0.04)] px-2 py-0.5 text-xs text-[rgba(28,28,29,0.78)]"
