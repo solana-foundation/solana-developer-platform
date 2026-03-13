@@ -466,10 +466,7 @@ export class CustodyConfigStore implements SigningConfigStore {
       const wallets = walletsByConfigId.get(row.custody_config_id);
       if (wallets) {
         wallets.push(this.mapWalletRow(row));
-        continue;
       }
-
-      walletsByConfigId.set(row.custody_config_id, [this.mapWalletRow(row)]);
     }
 
     return walletsByConfigId;

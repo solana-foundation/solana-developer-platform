@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/table";
 import { useEscapeKey } from "@/lib/use-escape-key";
 import type {
+  CustodyWalletAggregate,
   CustodyWalletTokenBalance,
   PaymentTransferSummary as TransferRecord,
   PaymentsDashboardWallet as WalletRecord,
@@ -41,6 +42,7 @@ import {
   resolveTotalBalance,
 } from "./payments-overview.utils";
 import {
+  fetchWalletAggregate,
   fetchTransfers,
   fetchWallets,
   getDevnetExplorerUrl,
@@ -52,6 +54,8 @@ import { ProviderRiskTable } from "./provider-risk-table";
 interface PaymentsOverviewProps {
   wallets: WalletRecord[];
   walletsError: string | null;
+  aggregate: CustodyWalletAggregate | null;
+  aggregateError: string | null;
   transfers: TransferRecord[];
   transfersError: string | null;
 }
@@ -59,6 +63,7 @@ interface PaymentsOverviewProps {
 const REQUIRED_ACTION_ASSETS = ["SOL", "USDC"] as const;
 const MOONPAY_ONRAMP_MIN_USD = 20;
 const PAYMENTS_OVERVIEW_WALLETS_KEY = "payments-overview-wallets";
+const PAYMENTS_OVERVIEW_AGGREGATE_KEY = "payments-overview-aggregate";
 const PAYMENTS_OVERVIEW_TRANSFERS_KEY = "payments-overview-transfers";
 const BVNK_COUNTRY_OPTIONS = [
   { label: "United States", value: "US" },
@@ -1365,6 +1370,8 @@ function QuickActionModal({
 export function PaymentsOverview({
   wallets,
   walletsError,
+  aggregate,
+  aggregateError,
   transfers,
   transfersError,
 }: PaymentsOverviewProps) {
@@ -1379,6 +1386,20 @@ export function PaymentsOverview({
     refreshInterval: 30_000,
   });
   const {
+    data: swrAggregate,
+    error: aggregateFetchError,
+    isValidating: aggregateRefreshing,
+    mutate: mutateAggregate,
+  } = useSWR<CustodyWalletAggregate>(
+    PAYMENTS_OVERVIEW_AGGREGATE_KEY,
+    () => fetchWalletAggregate(),
+    {
+      fallbackData: aggregateError || !aggregate ? undefined : aggregate,
+      revalidateOnFocus: true,
+      refreshInterval: 30_000,
+    }
+  );
+  const {
     data: swrTransfers,
     error: transfersFetchError,
     isValidating: transfersRefreshing,
@@ -1390,18 +1411,24 @@ export function PaymentsOverview({
   });
 
   const liveWallets = swrWallets ?? wallets;
+  const liveAggregate = swrAggregate ?? aggregate;
   const liveTransfers = swrTransfers ?? transfers;
   const liveWalletsError = walletsFetchError
     ? resolveRequestError(walletsFetchError, walletsError)
     : swrWallets === undefined
       ? walletsError
       : null;
+  const liveAggregateError = aggregateFetchError
+    ? resolveRequestError(aggregateFetchError, aggregateError)
+    : swrAggregate === undefined
+      ? aggregateError
+      : null;
   const liveTransfersError = transfersFetchError
     ? resolveRequestError(transfersFetchError, transfersError)
     : swrTransfers === undefined
       ? transfersError
       : null;
-  const isRefreshing = walletsRefreshing || transfersRefreshing;
+  const isRefreshing = walletsRefreshing || aggregateRefreshing || transfersRefreshing;
   const [selectedWalletId, setSelectedWalletId] = useState("");
   const [sendModalOpen, setSendModalOpen] = useState(false);
   const [receiveModalOpen, setReceiveModalOpen] = useState(false);
@@ -1417,13 +1444,16 @@ export function PaymentsOverview({
     }
   }, [liveWallets, selectedWalletId]);
 
-  const aggregateBalances = useMemo(() => resolveAggregateBalanceRows(null, liveWallets), [liveWallets]);
+  const aggregateBalances = useMemo(
+    () => resolveAggregateBalanceRows(liveAggregate, liveWallets),
+    [liveAggregate, liveWallets]
+  );
   const totalBalance = resolveTotalBalance(aggregateBalances);
   const hasWallets = liveWallets.length > 0;
-  const walletCount = liveWallets.length;
+  const walletCount = liveAggregate?.walletCount ?? liveWallets.length;
 
   const handleRefresh = () => {
-    void Promise.all([mutateWallets(), mutateTransfers()]);
+    void Promise.all([mutateWallets(), mutateAggregate(), mutateTransfers()]);
   };
 
   return (
@@ -1493,6 +1523,9 @@ export function PaymentsOverview({
 
           {liveWalletsError ? (
             <p className="mt-4 text-sm text-[#9e2b38]">{liveWalletsError}</p>
+          ) : null}
+          {liveAggregateError ? (
+            <p className="mt-2 text-sm text-[#9e2b38]">{liveAggregateError}</p>
           ) : null}
         </SectionEntry>
 
