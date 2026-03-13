@@ -73,7 +73,7 @@ export default async function ApiKeysPage() {
   const [flash, apiKeysResponse, walletsResponse] = await Promise.all([
     consumeApiKeyFlash(),
     sdpApiFetch<{ apiKeys: ApiKeyRecord[] }>("/v1/api-keys"),
-    fetchPaymentsWallets(apiClient.request),
+    fetchPaymentsWallets(apiClient.request, { includeBalances: false }),
   ]);
 
   const apiKeys = [...apiKeysResponse.apiKeys].sort((a, b) => {

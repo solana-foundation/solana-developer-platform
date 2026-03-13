@@ -12,6 +12,10 @@ export interface FetchResult<T> {
   error?: string;
 }
 
+interface FetchPaymentsWalletsOptions {
+  includeBalances?: boolean;
+}
+
 function parseErrorMessage(body: string): string {
   try {
     const parsed = JSON.parse(body) as {
@@ -25,12 +29,13 @@ function parseErrorMessage(body: string): string {
 }
 
 export async function fetchPaymentsWallets(
-  request: SdpApiClient["request"]
+  request: SdpApiClient["request"],
+  options: FetchPaymentsWalletsOptions = {}
 ): Promise<FetchResult<PaymentsDashboardWallet[]>> {
   try {
     const query = new URLSearchParams({
       includeAllProviders: "true",
-      includeBalances: "true",
+      ...(options.includeBalances ? { includeBalances: "true" } : {}),
     }).toString();
     const response = await request(`/v1/wallets?${query}`);
     if (!response.ok) {

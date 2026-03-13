@@ -2,11 +2,7 @@ import { createSdpApiClient } from "@/lib/sdp-api";
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { fetchActiveApiKeys, resolvePlaygroundApiBaseUrl } from "../playground-api-data";
-import {
-  fetchPaymentTransfers,
-  fetchPaymentsAggregate,
-  fetchPaymentsWallets,
-} from "./payments-page.data";
+import { fetchPaymentTransfers, fetchPaymentsWallets } from "./payments-page.data";
 import { PaymentsWorkspace } from "./payments-workspace";
 
 export default async function PaymentsPage() {
@@ -20,22 +16,17 @@ export default async function PaymentsPage() {
 
   const apiBaseUrl = resolvePlaygroundApiBaseUrl();
   const apiClient = await createSdpApiClient();
-  const [apiKeysResult, walletsResult, aggregateResult, transfersResult] = await Promise.all([
+  const [apiKeysResult, walletsResult, transfersResult] = await Promise.all([
     fetchActiveApiKeys(apiClient.request),
-    fetchPaymentsWallets(apiClient.request),
-    fetchPaymentsAggregate(apiClient.request),
+    fetchPaymentsWallets(apiClient.request, { includeBalances: true }),
     fetchPaymentTransfers(apiClient.request),
   ]);
   const apiKeys = apiKeysResult.data ?? [];
   const wallets = walletsResult.data ?? [];
-  const aggregate = aggregateResult.data ?? null;
   const transfers = transfersResult.data ?? [];
   const walletsError = walletsResult.ok
     ? null
     : `Wallet API ${walletsResult.status ?? "unavailable"}: ${walletsResult.error ?? "Unknown error"}`;
-  const aggregateError = aggregateResult.ok
-    ? null
-    : `Wallet aggregate API ${aggregateResult.status ?? "unavailable"}: ${aggregateResult.error ?? "Unknown error"}`;
   const transfersError = transfersResult.ok
     ? null
     : `Transfer API ${transfersResult.status ?? "unavailable"}: ${transfersResult.error ?? "Unknown error"}`;
@@ -47,8 +38,6 @@ export default async function PaymentsPage() {
         apiKeys={apiKeys}
         wallets={wallets}
         walletsError={walletsError}
-        aggregate={aggregate}
-        aggregateError={aggregateError}
         transfers={transfers}
         transfersError={transfersError}
       />

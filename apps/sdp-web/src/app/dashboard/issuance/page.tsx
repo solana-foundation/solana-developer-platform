@@ -154,7 +154,7 @@ export default async function IssuancePage() {
     fetchTemplates(apiClient.request),
     fetchTokens(apiClient.request),
     fetchActiveApiKeys(apiClient.request),
-    fetchPaymentsWallets(apiClient.request),
+    fetchPaymentsWallets(apiClient.request, { includeBalances: false }),
   ]);
 
   const tokens = tokensResult.data ?? [];

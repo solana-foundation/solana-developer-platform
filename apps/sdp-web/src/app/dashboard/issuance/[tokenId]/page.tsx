@@ -108,7 +108,7 @@ export default async function IssuanceTokenManagementPage({ params }: TokenManag
   const [tokenResult, walletsResult, transactionsResult, allowlistResult, frozenResult] =
     await Promise.all([
       fetchData<Token | null>(apiClient.request, `/v1/issuance/tokens/${tokenId}`, mapToken),
-      fetchPaymentsWallets(apiClient.request),
+      fetchPaymentsWallets(apiClient.request, { includeBalances: false }),
       fetchData<TokenTransaction[]>(
         apiClient.request,
         `/v1/issuance/tokens/${tokenId}/transactions?page=1&pageSize=100`,

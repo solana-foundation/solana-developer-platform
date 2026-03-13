@@ -38,7 +38,7 @@ export default async function DashboardPage() {
   ] = await Promise.all([
     fetchPaymentsAggregate(apiClient.request),
     fetchPaymentTransfers(apiClient.request, 100),
-    fetchPaymentsWallets(apiClient.request),
+    fetchPaymentsWallets(apiClient.request, { includeBalances: false }),
     fetchCreateWalletProviders(apiClient.request),
     fetchIssuanceTokens(apiClient.request, 10),
   ]);

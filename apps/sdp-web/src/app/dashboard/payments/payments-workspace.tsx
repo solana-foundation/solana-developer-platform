@@ -3,11 +3,7 @@
 import { ApiPlaygroundShellSkeleton } from "@/components/api-playground-shell-skeleton";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { getStoredApiKeySecret } from "@/lib/playground-api-keys";
-import type {
-  CustodyWalletAggregate,
-  PaymentTransferSummary,
-  PaymentsDashboardWallet,
-} from "@sdp/types";
+import type { PaymentTransferSummary, PaymentsDashboardWallet } from "@sdp/types";
 import dynamic from "next/dynamic";
 import { useEffect, useMemo } from "react";
 import { PaymentsOverview } from "./payments-overview";
@@ -32,8 +28,6 @@ interface PaymentsWorkspaceProps {
   apiKeys: PaymentsApiKeyOption[];
   wallets: PaymentsDashboardWallet[];
   walletsError: string | null;
-  aggregate: CustodyWalletAggregate | null;
-  aggregateError: string | null;
   transfers: PaymentTransferSummary[];
   transfersError: string | null;
 }
@@ -43,8 +37,6 @@ export function PaymentsWorkspace({
   apiKeys,
   wallets,
   walletsError,
-  aggregate,
-  aggregateError,
   transfers,
   transfersError,
 }: PaymentsWorkspaceProps) {
@@ -112,8 +104,6 @@ export function PaymentsWorkspace({
     <PaymentsOverview
       wallets={wallets}
       walletsError={walletsError}
-      aggregate={aggregate}
-      aggregateError={aggregateError}
       transfers={transfers}
       transfersError={transfersError}
     />
