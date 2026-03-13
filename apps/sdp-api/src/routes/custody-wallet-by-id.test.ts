@@ -34,7 +34,6 @@ const TEST_USER = {
 
 const TEST_API_KEY = {
   id: "key_custody_wallet_by_id",
-  // biome-ignore lint/nursery/noSecrets: Test fixture only.
   raw: "sk_test_custodywalletbyid1234567890",
   prefix: "sk_test_wal",
 };
