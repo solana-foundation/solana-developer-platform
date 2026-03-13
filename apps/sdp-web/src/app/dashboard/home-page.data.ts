@@ -1,16 +1,6 @@
-import {
-  CUSTODY_PROVIDER_CATALOG,
-  type KnownCustodyProvider,
-  isKnownCustodyProvider,
-} from "@/app/dashboard/custody/provider-catalog";
 import type { SdpApiClient } from "@/lib/sdp-api";
 import type { PaymentTransferSummary, TokenTransaction } from "@sdp/types";
 import type { FetchResult } from "./payments/payments-page.data";
-
-interface CustodyConfigSummary {
-  provider?: string;
-  status?: "active" | "inactive";
-}
 
 interface HomeIssuanceToken {
   id: string;
@@ -180,53 +170,6 @@ export function buildHomeActivityRows(
       return new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime();
     })
     .slice(0, 10);
-}
-
-export async function fetchCreateWalletProviders(
-  request: SdpApiClient["request"]
-): Promise<FetchResult<KnownCustodyProvider[]>> {
-  try {
-    const response = await request("/v1/wallets/configs");
-    if (!response.ok) {
-      const body = await response.text();
-      return {
-        ok: false,
-        status: response.status,
-        error: parseErrorMessage(body),
-      };
-    }
-
-    const json = (await response.json()) as {
-      data?: {
-        configs?: CustodyConfigSummary[];
-      };
-    };
-
-    const supportedProviderIds = new Set(
-      CUSTODY_PROVIDER_CATALOG.filter((provider) => provider.supportsAdditionalWallets).map(
-        (provider) => provider.id
-      )
-    );
-
-    const providers = [
-      ...new Set(
-        (json.data?.configs ?? [])
-          .filter((config): config is CustodyConfigSummary & { provider: string } => {
-            return config.status === "active" && typeof config.provider === "string";
-          })
-          .map((config) => config.provider)
-          .filter(isKnownCustodyProvider)
-          .filter((provider) => supportedProviderIds.has(provider))
-      ),
-    ];
-
-    return { ok: true, data: providers };
-  } catch (error) {
-    return {
-      ok: false,
-      error: error instanceof Error ? error.message : "Unable to load wallet providers",
-    };
-  }
 }
 
 export async function fetchIssuanceTokens(

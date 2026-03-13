@@ -4,7 +4,6 @@ import { redirect } from "next/navigation";
 import {
   buildHomeActivityRows,
   computeTodaysVolume,
-  fetchCreateWalletProviders,
   fetchIssuanceTokens,
   fetchOrgIssuanceActivity,
 } from "./home-page.data";
@@ -29,19 +28,14 @@ export default async function DashboardPage() {
   }
 
   const apiClient = await createSdpApiClient();
-  const [
-    aggregateResult,
-    transfersResult,
-    walletsResult,
-    walletProvidersResult,
-    issuanceTokensResult,
-  ] = await Promise.all([
-    fetchPaymentsAggregate(apiClient.request),
-    fetchPaymentTransfers(apiClient.request, 100),
-    fetchPaymentsWallets(apiClient.request, { includeBalances: false }),
-    fetchCreateWalletProviders(apiClient.request),
-    fetchIssuanceTokens(apiClient.request, 10),
-  ]);
+  const [aggregateResult, transfersResult, walletsResult, issuanceTokensResult] = await Promise.all(
+    [
+      fetchPaymentsAggregate(apiClient.request),
+      fetchPaymentTransfers(apiClient.request, 100),
+      fetchPaymentsWallets(apiClient.request, { includeBalances: false }),
+      fetchIssuanceTokens(apiClient.request, 10),
+    ]
+  );
 
   const issuanceActivityResult =
     issuanceTokensResult.ok && issuanceTokensResult.data
@@ -59,9 +53,6 @@ export default async function DashboardPage() {
 
   const aggregateError = aggregateResult.ok ? null : "Balance data is unavailable right now.";
   const transfersError = transfersResult.ok ? null : "Payments activity is unavailable right now.";
-  const walletProvidersError = walletProvidersResult.ok
-    ? null
-    : "Wallet providers are unavailable right now.";
   const issuanceTokensError = issuanceTokensResult.ok
     ? null
     : "Issuance activity is unavailable right now.";
@@ -84,13 +75,6 @@ export default async function DashboardPage() {
       activityError={activityError}
       activityNotice={activityNotice || null}
       wallets={walletsResult.data ?? []}
-      walletProviders={walletProvidersResult.data ?? []}
-      walletDisabledReason={
-        walletProvidersError ??
-        ((walletProvidersResult.data?.length ?? 0) === 0
-          ? "Connect a provider that supports additional wallet provisioning first."
-          : null)
-      }
     />
   );
 }

@@ -7,6 +7,7 @@ import { useEscapeKey } from "@/lib/use-escape-key";
 import type { PaymentsDashboardWallet } from "@sdp/types";
 import { Plus } from "lucide-react";
 import { type Dispatch, type SetStateAction, useState } from "react";
+import { useFormStatus } from "react-dom";
 import { createApiKeyAction } from "./actions";
 
 type ApiKeyRole = "api_admin" | "api_developer" | "api_readonly";
@@ -369,13 +370,23 @@ function CreateApiKeyReviewStep({
       <p className="text-xs text-[rgba(28,28,29,0.72)]">
         After creation, the full key will be shown once in a secure modal.
       </p>
-      <div className="mt-3 flex items-center justify-end gap-2">
-        <Button type="button" variant="secondary" onClick={onBack}>
-          Back
-        </Button>
-        <Button type="submit">Create key</Button>
-      </div>
+      <CreateApiKeyReviewActions onBack={onBack} />
     </form>
+  );
+}
+
+function CreateApiKeyReviewActions({ onBack }: { onBack: () => void }) {
+  const { pending } = useFormStatus();
+
+  return (
+    <div className="mt-3 flex items-center justify-end gap-2">
+      <Button type="button" variant="secondary" onClick={onBack} disabled={pending}>
+        Back
+      </Button>
+      <Button type="submit" disabled={pending} aria-busy={pending}>
+        {pending ? "Creating..." : "Create key"}
+      </Button>
+    </div>
   );
 }
 
