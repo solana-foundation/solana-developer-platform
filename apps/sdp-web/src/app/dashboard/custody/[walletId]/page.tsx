@@ -4,10 +4,11 @@ import {
 } from "@/app/dashboard/custody/provider-catalog";
 import { WalletActionsMenu } from "@/app/dashboard/custody/wallet-actions-menu";
 import { WalletAddressCopyButton } from "@/app/dashboard/custody/wallet-address-copy-button";
+import { formatPurpose, truncateMiddle } from "@/app/dashboard/custody/wallet-format-utils";
 import { WalletProviderMark } from "@/app/dashboard/custody/wallet-provider-mark";
 import { type SdpApiClient, createSdpApiClient } from "@/lib/sdp-api";
 import { auth } from "@clerk/nextjs/server";
-import type { CustodyWalletSummary } from "@sdp/types";
+import type { CustodyWalletByIdResponse, CustodyWalletTokenBalance } from "@sdp/types";
 import { notFound, redirect } from "next/navigation";
 import type { ReactNode } from "react";
 import {
@@ -16,49 +17,51 @@ import {
   resolveTotalBalance,
 } from "../../payments/payments-overview.utils";
 
-function formatPurpose(value: string | null): string | null {
-  if (!value) {
-    return null;
-  }
-
-  switch (value) {
-    case "root":
-      return null;
-    case "mint_authority":
-      return "Mint authority";
-    case "freeze_authority":
-      return "Freeze authority";
-    case "fee_payer":
-      return "Fee payer";
-    case "transfer":
-      return "Transfers";
-    default:
-      return value.replaceAll("_", " ");
-  }
+interface WalletBalancesResponse {
+  walletBalances?: {
+    walletId: string;
+    address: string;
+    balances: CustodyWalletTokenBalance[];
+  };
 }
 
-function truncateMiddle(value: string, start = 6, end = 4): string {
-  if (value.length <= start + end + 3) {
-    return value;
+async function getWalletDetail(
+  request: SdpApiClient["request"],
+  walletId: string
+): Promise<CustodyWalletByIdResponse["wallet"]> {
+  const response = await request(`/v1/wallets/${encodeURIComponent(walletId)}`);
+  if (response.status === 404) {
+    notFound();
   }
-
-  return `${value.slice(0, start)}...${value.slice(-end)}`;
-}
-
-async function getWalletsWithBalances(
-  request: SdpApiClient["request"]
-): Promise<CustodyWalletSummary[]> {
-  // biome-ignore lint/nursery/noSecrets: This is a public API path with query flags, not a secret.
-  const response = await request("/v1/wallets?includeAllProviders=true&includeBalances=true");
   if (!response.ok) {
     const body = await response.text();
     throw new Error(`SDP API request failed (${response.status}): ${body}`);
   }
 
-  const json = (await response.json()) as {
-    data?: { wallets?: CustodyWalletSummary[] };
-  };
-  return json.data?.wallets ?? [];
+  const json = (await response.json()) as { data?: CustodyWalletByIdResponse };
+  const wallet = json.data?.wallet;
+  if (!wallet) {
+    notFound();
+  }
+
+  return wallet;
+}
+
+async function getWalletTrackedBalances(
+  request: SdpApiClient["request"],
+  walletId: string
+): Promise<CustodyWalletTokenBalance[]> {
+  const response = await request(`/v1/payments/wallets/${encodeURIComponent(walletId)}/balances`);
+  if (response.status === 404) {
+    return [];
+  }
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`SDP API request failed (${response.status}): ${body}`);
+  }
+
+  const json = (await response.json()) as { data?: WalletBalancesResponse };
+  return json.data?.walletBalances?.balances ?? [];
 }
 
 export default async function WalletDetailPage({
@@ -77,16 +80,15 @@ export default async function WalletDetailPage({
   const { walletId } = await params;
   const resolvedWalletId = decodeURIComponent(walletId);
   const apiClient = await createSdpApiClient();
-  const wallets = await getWalletsWithBalances(apiClient.request);
-  const wallet = wallets.find((entry) => entry.walletId === resolvedWalletId);
-
-  if (!wallet) {
-    notFound();
-  }
+  const [wallet, trackedBalances] = await Promise.all([
+    getWalletDetail(apiClient.request, resolvedWalletId),
+    getWalletTrackedBalances(apiClient.request, resolvedWalletId),
+  ]);
 
   const provider =
     wallet.provider && isKnownCustodyProvider(wallet.provider) ? wallet.provider : null;
-  const totalBalance = resolveTotalBalance(wallet.balances ?? []);
+  const balances = trackedBalances.length > 0 ? trackedBalances : [wallet.balance];
+  const totalBalance = resolveTotalBalance(balances);
   const purposeLabel = formatPurpose(wallet.purpose);
 
   return (
@@ -169,9 +171,9 @@ export default async function WalletDetailPage({
           Balances
         </h3>
 
-        {wallet.balances && wallet.balances.length > 0 ? (
+        {balances.length > 0 ? (
           <div className="overflow-hidden rounded-2xl border border-[rgba(28,28,29,0.12)] bg-white">
-            {wallet.balances.map((balance) => (
+            {balances.map((balance) => (
               <WalletBalanceRow
                 key={`${balance.mint}-${balance.token}`}
                 label={balance.token}

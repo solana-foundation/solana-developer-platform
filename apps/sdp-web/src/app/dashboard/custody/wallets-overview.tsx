@@ -4,8 +4,10 @@ import {
   CUSTODY_PROVIDER_CATALOG,
   type KnownCustodyProvider,
   formatCustodyProviderName,
+  isKnownCustodyProvider,
 } from "@/app/dashboard/custody/provider-catalog";
 import { WalletAddressCopyButton } from "@/app/dashboard/custody/wallet-address-copy-button";
+import { formatPurpose, formatWalletMeta } from "@/app/dashboard/custody/wallet-format-utils";
 import { WalletLabelInlineEditor } from "@/app/dashboard/custody/wallet-label-inline-editor";
 import { Button } from "@/components/ui/button";
 import type { CustodyWalletSummary } from "@sdp/types";
@@ -13,39 +15,6 @@ import { Plus } from "lucide-react";
 import Link from "next/link";
 import { formatCurrencyAmount, resolveTotalBalance } from "../payments/payments-overview.utils";
 import { WalletProviderMark } from "./wallet-provider-mark";
-
-function truncateMiddle(value: string, start = 6, end = 4): string {
-  if (value.length <= start + end + 3) {
-    return value;
-  }
-
-  return `${value.slice(0, start)}...${value.slice(-end)}`;
-}
-
-function formatWalletMeta(value: string, start = 8, end = 6): string {
-  return truncateMiddle(value, start, end);
-}
-
-function formatPurpose(value: string | null): string | null {
-  if (!value) {
-    return null;
-  }
-
-  switch (value) {
-    case "root":
-      return null;
-    case "mint_authority":
-      return "Mint authority";
-    case "freeze_authority":
-      return "Freeze authority";
-    case "fee_payer":
-      return "Fee payer";
-    case "transfer":
-      return "Transfers";
-    default:
-      return value.replaceAll("_", " ");
-  }
-}
 
 interface WalletsOverviewProps {
   connectedProviders: KnownCustodyProvider[];
@@ -154,7 +123,8 @@ export function WalletsOverview({
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         {wallets.map((wallet) => {
-          const provider = wallet.provider as KnownCustodyProvider | undefined;
+          const provider =
+            wallet.provider && isKnownCustodyProvider(wallet.provider) ? wallet.provider : null;
           const purposeLabel = formatPurpose(wallet.purpose);
           const totalBalance = resolveTotalBalance(wallet.balances ?? []);
 
