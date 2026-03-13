@@ -7,6 +7,7 @@
     "guides/setup-organization",
     "guides/setup-wallets",
     "guides/manage-api-keys",
+    "guides/tokenize-an-asset",
     "guides/create-a-token",
     "guides/deploy-a-token",
     "guides/mint-and-burn",

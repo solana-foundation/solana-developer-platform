@@ -24,6 +24,7 @@
 - [Set Up Your Organization](https://platform.solana.com/docs/guides/setup-organization): Create and configure your SDP organization through the dashboard.
 - [Set Up Wallets](https://platform.solana.com/docs/guides/setup-wallets): Initialize a custody provider and create wallets for signing transactions.
 - [Manage API Keys](https://platform.solana.com/docs/guides/manage-api-keys): Create, rotate, and revoke API keys with role-based access and environment scoping.
+- [Tokenize an Asset](https://platform.solana.com/docs/guides/tokenize-an-asset): Map a real-world tokenization use case to the right SDP template, authorities, and API flow.
 - [Create a Token](https://platform.solana.com/docs/guides/create-a-token): Define a new token using templates or custom configuration.
 - [Deploy a Token](https://platform.solana.com/docs/guides/deploy-a-token): Deploy a created token to the Solana blockchain.
 - [Mint and Burn Tokens](https://platform.solana.com/docs/guides/mint-and-burn): Increase or decrease token supply by minting and burning.
@@ -38,6 +39,9 @@
 - [Issuance](https://platform.solana.com/docs/reference/api/issuance): Token issuance, allowlists, and lifecycle operations.
 - [Payments](https://platform.solana.com/docs/reference/api/payments): Wallet balances, transfer execution, policies, and ramps.
 - [Compliance](https://platform.solana.com/docs/reference/api/compliance): Risk and compliance screening endpoints.
+
+## Skills
+- [Agent guide](https://github.com/solana-foundation/solana-developer-platform/blob/main/AGENTS.md): Canonical repo entry point for coding agents, including the repo-local `sdp-tokenization` skill.
 
 ## Machine-readable resources
 - [llms-full.txt](https://platform.solana.com/llms-full.txt)

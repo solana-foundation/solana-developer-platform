@@ -1,0 +1,4 @@
+interface:
+  display_name: "SDP Tokenization"
+  short_description: "Explain and plan tokenization workflows on Solana Developer Platform"
+  default_prompt: "Explain how to tokenize a stablecoin, tokenized security, loyalty token, or custom asset on Solana Developer Platform, including the right template, required authorities, API flow, and operational controls."

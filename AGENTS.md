@@ -44,3 +44,13 @@ Public docs and AI artifacts should mirror the supported public surface only.
 - Prefer reusing generated docs/OpenAPI metadata instead of duplicating route inventories by hand.
 - Keep public URLs coherent with the shared site constants in `@sdp/types/site`.
 - When changing docs URLs or discovery resources, update both the docs site and any product links that point at it.
+
+## Repo-local skills
+
+- `skills/sdp-tokenization/SKILL.md`: consumer-facing skill for explaining how to tokenize assets with SDP using the supported public docs and API surface.
+
+When updating repo-local skills:
+
+- keep them grounded in the public docs and API reference instead of internal handlers
+- prefer concise `SKILL.md` files with deeper material moved into `references/`
+- expose new skills from this file so they remain discoverable through the repo's AI entry point
