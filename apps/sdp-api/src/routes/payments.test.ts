@@ -1,6 +1,8 @@
 import { createHmac } from "node:crypto";
 import app from "@/index";
 import { hashString } from "@/lib/hash";
+import { SOL_MINT, getSplTokenBalances } from "@/routes/payments/token-accounts";
+import { getAccountInfo } from "@/services/solana/rpc";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/d1";
@@ -15,6 +17,10 @@ vi.mock("@/services/solana/rpc", async () => {
   return {
     ...actual,
     createRpc: vi.fn().mockReturnValue({}),
+    getAccountInfo: vi.fn().mockResolvedValue({
+      lamports: 4200000000n,
+      owner: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+    }),
     getRecentBlockhash: vi.fn().mockResolvedValue({
       // biome-ignore lint/nursery/noSecrets: Test blockhash, not a secret.
       blockhash: "EkSnNWid2cvwEVnVx9aBqawnmiCNiDgp3gUdkDPTKN1N",
@@ -29,6 +35,16 @@ vi.mock("@/services/solana/rpc", async () => {
       err: null,
     }),
     getSignaturesForAddress: vi.fn().mockResolvedValue([]),
+  };
+});
+
+vi.mock("@/routes/payments/token-accounts", async () => {
+  const actual = await vi.importActual<typeof import("@/routes/payments/token-accounts")>(
+    "@/routes/payments/token-accounts"
+  );
+  return {
+    ...actual,
+    getSplTokenBalances: vi.fn().mockResolvedValue([]),
   };
 });
 
@@ -128,6 +144,8 @@ let originalBvnkHawkAuthId: string | undefined;
 let originalBvnkHawkSecretKey: string | undefined;
 let originalBvnkWalletId: string | undefined;
 let originalBvnkApiBaseUrl: string | undefined;
+const mockedGetAccountInfo = vi.mocked(getAccountInfo);
+const mockedGetSplTokenBalances = vi.mocked(getSplTokenBalances);
 
 function assertMoonPaySignature(url: URL): void {
   const signature = url.searchParams.get("signature");
@@ -263,6 +281,14 @@ async function seedWalletPolicy(params: {
 
 describe("Payments routes", () => {
   beforeEach(async () => {
+    mockedGetAccountInfo.mockReset();
+    mockedGetAccountInfo.mockResolvedValue({
+      lamports: 4200000000n,
+      owner: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+    } as Awaited<ReturnType<typeof getAccountInfo>>);
+    mockedGetSplTokenBalances.mockReset();
+    mockedGetSplTokenBalances.mockResolvedValue([]);
+
     originalMoonPayApiKey = env.MOONPAY_API_KEY;
     originalMoonPaySecretKey = env.MOONPAY_SECRET_KEY;
     originalMoonPayOnrampUrl = env.MOONPAY_ONRAMP_URL;
@@ -309,6 +335,149 @@ describe("Payments routes", () => {
 
     await clearTestDatabase(env);
     await clearKVNamespaces(env);
+  });
+
+  it("falls back to a zero SOL balance when RPC balance lookups fail", async () => {
+    mockedGetAccountInfo.mockRejectedValueOnce(new Error("rpc unavailable"));
+    mockedGetSplTokenBalances.mockRejectedValueOnce(new Error("rpc unavailable"));
+
+    const res = await app.request(
+      `/v1/payments/wallets/${TEST_WALLET_ID}/balances`,
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+      },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      data: {
+        walletBalances: {
+          walletId: string;
+          address: string;
+          balances: Array<{
+            token: string;
+            mint: string;
+            amount: string;
+            uiAmount: string;
+            decimals: number;
+          }>;
+        };
+      };
+    };
+
+    expect(body.data.walletBalances).toEqual({
+      walletId: TEST_WALLET_ID,
+      address: TEST_SOLANA_ADDRESSES.wallet1,
+      balances: [
+        {
+          token: "SOL",
+          mint: SOL_MINT,
+          amount: "0",
+          uiAmount: "0",
+          decimals: 9,
+        },
+      ],
+    });
+  });
+
+  it("keeps SPL balances when only the SOL lookup fails", async () => {
+    mockedGetAccountInfo.mockRejectedValueOnce(new Error("rpc unavailable"));
+    mockedGetSplTokenBalances.mockResolvedValueOnce([
+      {
+        token: "USDC",
+        mint: "usdc_mint_test",
+        amount: "1250000",
+        uiAmount: "1.25",
+        decimals: 6,
+      },
+    ]);
+
+    const res = await app.request(
+      `/v1/payments/wallets/${TEST_WALLET_ID}/balances`,
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+      },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      data: {
+        walletBalances: {
+          balances: Array<{
+            token: string;
+            mint: string;
+            amount: string;
+            uiAmount: string;
+            decimals: number;
+          }>;
+        };
+      };
+    };
+
+    expect(body.data.walletBalances.balances).toEqual([
+      {
+        token: "SOL",
+        mint: SOL_MINT,
+        amount: "0",
+        uiAmount: "0",
+        decimals: 9,
+      },
+      {
+        token: "USDC",
+        mint: "usdc_mint_test",
+        amount: "1250000",
+        uiAmount: "1.25",
+        decimals: 6,
+      },
+    ]);
+  });
+
+  it("keeps the SOL balance when only the SPL lookup fails", async () => {
+    mockedGetSplTokenBalances.mockRejectedValueOnce(new Error("rpc unavailable"));
+
+    const res = await app.request(
+      `/v1/payments/wallets/${TEST_WALLET_ID}/balances`,
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+      },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      data: {
+        walletBalances: {
+          balances: Array<{
+            token: string;
+            mint: string;
+            amount: string;
+            uiAmount: string;
+            decimals: number;
+          }>;
+        };
+      };
+    };
+
+    expect(body.data.walletBalances.balances).toEqual([
+      {
+        token: "SOL",
+        mint: SOL_MINT,
+        amount: "4200000000",
+        uiAmount: "4.2",
+        decimals: 9,
+      },
+    ]);
   });
 
   it("creates a signed MoonPay on-ramp session URL", async () => {
