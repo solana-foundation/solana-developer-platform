@@ -15,9 +15,73 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Run Release Please
+        id: release
         uses: googleapis/release-please-action@v4
         with:
           # Use a PAT or GitHub App token so the created tag can trigger downstream deploy workflows.
           token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
           config-file: .github/release-please-config.json
           manifest-file: .github/.release-please-manifest.json
+
+      - name: Find release PR branch
+        id: release-pr
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+        run: |
+          pr_json=$(gh pr list \
+            --repo "$GITHUB_REPOSITORY" \
+            --state open \
+            --base main \
+            --json number,headRefName,title \
+            --limit 20)
+
+          pr_number=$(printf '%s' "$pr_json" | jq -r '.[] | select(.title | startswith("chore(main): release ")) | .number' | head -n 1)
+          head_ref=$(printf '%s' "$pr_json" | jq -r '.[] | select(.title | startswith("chore(main): release ")) | .headRefName' | head -n 1)
+
+          echo "number=${pr_number}" >> "$GITHUB_OUTPUT"
+          echo "head_ref=${head_ref}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout release PR branch
+        if: steps.release-pr.outputs.head_ref != ''
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ steps.release-pr.outputs.head_ref }}
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+
+      - name: Setup pnpm
+        if: steps.release-pr.outputs.head_ref != ''
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.1
+
+      - name: Setup Node
+        if: steps.release-pr.outputs.head_ref != ''
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install
+        if: steps.release-pr.outputs.head_ref != ''
+        run: pnpm install --frozen-lockfile
+
+      - name: Format release files
+        if: steps.release-pr.outputs.head_ref != ''
+        run: pnpm exec biome check --write package.json CHANGELOG.md .github/.release-please-manifest.json
+
+      - name: Commit formatted release files
+        if: steps.release-pr.outputs.head_ref != ''
+        env:
+          HEAD_REF: ${{ steps.release-pr.outputs.head_ref }}
+        run: |
+          if git diff --quiet -- package.json CHANGELOG.md .github/.release-please-manifest.json; then
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add package.json CHANGELOG.md .github/.release-please-manifest.json
+          git commit -m "chore: format release files"
+          git push origin "HEAD:${HEAD_REF}"
