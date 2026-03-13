@@ -460,7 +460,9 @@ export class CustodyConfigStore implements SigningConfigStore {
       .bind(...configIds)
       .all<CustodyWalletRow>();
 
-    const walletsByConfigId = new Map(configIds.map((configId) => [configId, [] as CustodyWallet[]]));
+    const walletsByConfigId = new Map(
+      configIds.map((configId) => [configId, [] as CustodyWallet[]])
+    );
 
     for (const row of results) {
       const wallets = walletsByConfigId.get(row.custody_config_id);

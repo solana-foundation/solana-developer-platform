@@ -42,8 +42,8 @@ import {
   resolveTotalBalance,
 } from "./payments-overview.utils";
 import {
-  fetchWalletAggregate,
   fetchTransfers,
+  fetchWalletAggregate,
   fetchWallets,
   getDevnetExplorerUrl,
   runComplianceCheck,
