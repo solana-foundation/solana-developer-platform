@@ -1,6 +1,4 @@
 import { CreateApiKeyModal } from "@/app/dashboard/api-keys/create-api-key-modal";
-import { CreateWalletModal } from "@/app/dashboard/custody/create-wallet-modal";
-import type { KnownCustodyProvider } from "@/app/dashboard/custody/provider-catalog";
 import { SectionEntry } from "@/app/dashboard/wallets/section-entry";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -26,8 +24,6 @@ interface HomeWorkspaceProps {
   activityError: string | null;
   activityNotice: string | null;
   wallets: PaymentsDashboardWallet[];
-  walletProviders: KnownCustodyProvider[];
-  walletDisabledReason: string | null;
 }
 
 function formatRelativeTime(value: string): string {
@@ -92,8 +88,6 @@ export function HomeWorkspace({
   activityError,
   activityNotice,
   wallets,
-  walletProviders,
-  walletDisabledReason,
 }: HomeWorkspaceProps) {
   return (
     <div className="w-full space-y-8 py-2">
@@ -104,12 +98,9 @@ export function HomeWorkspace({
             triggerVariant="secondary"
             wallets={wallets}
           />
-          <CreateWalletModal
-            triggerLabel="Create Wallet"
-            providers={walletProviders}
-            disabled={walletProviders.length === 0}
-            disabledReason={walletDisabledReason ?? undefined}
-          />
+          <Button asChild>
+            <Link href="/dashboard/wallets">Create Wallet</Link>
+          </Button>
         </div>
       </SectionEntry>
 
