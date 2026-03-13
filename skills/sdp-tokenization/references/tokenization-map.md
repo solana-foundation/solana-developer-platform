@@ -6,6 +6,7 @@ Use this file as the quick reference for answering tokenization questions on top
 
 - Product overview: `apps/sdp-docs/content/docs/what-is-solana-developer-platform.mdx`
 - Getting started: `apps/sdp-docs/content/docs/getting-started.mdx`
+- Organization setup: `apps/sdp-docs/content/docs/guides/setup-organization.mdx`
 - Wallet setup: `apps/sdp-docs/content/docs/guides/setup-wallets.mdx`
 - API keys: `apps/sdp-docs/content/docs/guides/manage-api-keys.mdx`
 - Create token: `apps/sdp-docs/content/docs/guides/create-a-token.mdx`
@@ -15,10 +16,10 @@ Use this file as the quick reference for answering tokenization questions on top
 - Freeze and compliance: `apps/sdp-docs/content/docs/guides/freeze-and-compliance.mdx`
 - Transfers: `apps/sdp-docs/content/docs/guides/transfer-tokens.mdx`
 - Prepare vs execute: `apps/sdp-docs/content/docs/guides/prepare-vs-execute.mdx`
-- Issuance API reference: `apps/sdp-docs/content/docs/reference/api/issuance.mdx`
-- Payments API reference: `apps/sdp-docs/content/docs/reference/api/payments.mdx`
-- Wallets API reference: `apps/sdp-docs/content/docs/reference/api/wallets.mdx`
-- API keys API reference: `apps/sdp-docs/content/docs/reference/api/api-keys.mdx`
+- Issuance OpenAPI paths: `apps/sdp-api/src/openapi/paths/issuance.ts`
+- Payments OpenAPI paths: `apps/sdp-api/src/openapi/paths/payments.ts`
+- Wallets OpenAPI paths: `apps/sdp-api/src/openapi/paths/custody.ts`
+- API keys OpenAPI paths: `apps/sdp-api/src/openapi/paths/api-keys.ts`
 
 ## Business case to SDP mapping
 

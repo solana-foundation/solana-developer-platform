@@ -12,7 +12,6 @@ Use this skill when someone wants to understand how to tokenize an asset with So
 Stay on the supported public surface only:
 
 - public docs under `apps/sdp-docs/content/docs/**`
-- public API reference under `apps/sdp-docs/content/docs/reference/api/**`
 - public API contract in `apps/sdp-api/src/openapi/**`
 
 Do not rely on hidden or internal route families.
@@ -63,7 +62,7 @@ Default to these sections unless the user asks for something narrower:
 
 - Open `references/tokenization-map.md` first for the public playbook.
 - Open specific guides only for the steps actually relevant to the user.
-- Open `apps/sdp-docs/content/docs/reference/api/issuance.mdx` and `apps/sdp-docs/content/docs/reference/api/payments.mdx` when the user needs endpoint-level mapping.
+- Open `apps/sdp-api/src/openapi/paths/issuance.ts` and `apps/sdp-api/src/openapi/paths/payments.ts` when the user needs endpoint-level mapping from committed source.
 
 ## Boundaries
 
