@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.2](https://github.com/solana-foundation/solana-developer-platform/compare/v0.5.1...v0.5.2) (2026-03-14)
+
+
+### Bug Fixes
+
+* **wallets:** remove provider card descriptions ([#94](https://github.com/solana-foundation/solana-developer-platform/issues/94)) ([594e00e](https://github.com/solana-foundation/solana-developer-platform/commit/594e00e96573150beb32e635eb86b842e3236a9f))
+
 ## [0.5.1](https://github.com/solana-foundation/solana-developer-platform/compare/v0.5.0...v0.5.1) (2026-03-13)
 
 
