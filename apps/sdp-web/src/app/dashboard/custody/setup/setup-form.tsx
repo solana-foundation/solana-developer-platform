@@ -80,12 +80,7 @@ export function CustodySetupForm({
                 ].join(" ")}
               >
                 <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <p className="text-sm font-semibold text-[#1c1c1d]">{provider.label}</p>
-                    <p className="mt-1 text-xs text-[rgba(28,28,29,0.64)]">
-                      {provider.description}
-                    </p>
-                  </div>
+                  <p className="text-sm font-semibold text-[#1c1c1d]">{provider.label}</p>
                   {isActive ? (
                     <span className="inline-flex items-center gap-1 rounded-full bg-[rgba(28,28,29,0.12)] px-2 py-0.5 text-[11px] font-medium text-[#1c1c1d]">
                       <CheckCircle2 className="h-3.5 w-3.5" />
