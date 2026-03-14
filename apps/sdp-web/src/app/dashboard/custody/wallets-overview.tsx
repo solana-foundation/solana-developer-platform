@@ -73,9 +73,6 @@ export function WalletsOverview({
                   <h3 className="text-[30px] leading-[1.1] font-medium tracking-[-0.03em] text-[#1c1c1d]">
                     {provider.label}
                   </h3>
-                  <p className="text-sm leading-6 text-[rgba(28,28,29,0.62)]">
-                    {provider.description}
-                  </p>
                 </div>
 
                 <div className="mt-4 flex flex-wrap gap-2">
