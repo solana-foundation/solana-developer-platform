@@ -1,6 +1,6 @@
 {
   "name": "solana-developer-platform",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "private": true,
   "packageManager": "pnpm@10.15.1",
   "engines": {
@@ -50,7 +50,10 @@
     "@solana/kit": "5.0.0"
   },
   "workspaces": {
-    "packages": ["apps/*", "packages/*"],
+    "packages": [
+      "apps/*",
+      "packages/*"
+    ],
     "catalog": {
       "@solana-program/system": "^0.10.0",
       "@solana-program/token-2022": "^0.6.1",
