@@ -9,6 +9,7 @@ import { WalletProviderMark } from "@/app/dashboard/custody/wallet-provider-mark
 import { type SdpApiClient, createSdpApiClient } from "@/lib/sdp-api";
 import { auth } from "@clerk/nextjs/server";
 import type { CustodyWalletByIdResponse, CustodyWalletTokenBalance } from "@sdp/types";
+import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import type { ReactNode } from "react";
 import {
@@ -23,6 +24,11 @@ interface WalletBalancesResponse {
     address: string;
     balances: CustodyWalletTokenBalance[];
   };
+}
+
+interface OwnedTokenRoute {
+  id: string;
+  mintAddress: string | null;
 }
 
 async function getWalletDetail(
@@ -64,6 +70,33 @@ async function getWalletTrackedBalances(
   return json.data?.walletBalances?.balances ?? [];
 }
 
+async function getOwnedTokenRoutes(request: SdpApiClient["request"]): Promise<Map<string, string>> {
+  try {
+    // biome-ignore lint/nursery/noSecrets: Public API path with pagination query parameters.
+    const response = await request("/v1/issuance/tokens?page=1&pageSize=100");
+    if (!response.ok) {
+      return new Map();
+    }
+
+    const json = (await response.json()) as {
+      data?: OwnedTokenRoute[];
+    };
+
+    return new Map(
+      (json.data ?? [])
+        .filter(
+          (token): token is { id: string; mintAddress: string } =>
+            typeof token.id === "string" &&
+            typeof token.mintAddress === "string" &&
+            token.mintAddress.trim().length > 0
+        )
+        .map((token) => [token.mintAddress, token.id] as const)
+    );
+  } catch {
+    return new Map();
+  }
+}
+
 export default async function WalletDetailPage({
   params,
 }: {
@@ -80,9 +113,10 @@ export default async function WalletDetailPage({
   const { walletId } = await params;
   const resolvedWalletId = decodeURIComponent(walletId);
   const apiClient = await createSdpApiClient();
-  const [wallet, trackedBalances] = await Promise.all([
+  const [wallet, trackedBalances, ownedTokensByMint] = await Promise.all([
     getWalletDetail(apiClient.request, resolvedWalletId),
     getWalletTrackedBalances(apiClient.request, resolvedWalletId),
+    getOwnedTokenRoutes(apiClient.request),
   ]);
 
   const provider =
@@ -173,14 +207,20 @@ export default async function WalletDetailPage({
 
         {balances.length > 0 ? (
           <div className="overflow-hidden rounded-2xl border border-[rgba(28,28,29,0.12)] bg-white">
-            {balances.map((balance) => (
-              <WalletBalanceRow
-                key={`${balance.mint}-${balance.token}`}
-                label={balance.token}
-                value={formatDisplayAmount(balance.uiAmount, balance.token)}
-                mint={balance.mint}
-              />
-            ))}
+            {balances.map((balance) => {
+              const ownedTokenId =
+                balance.token === "SOL" ? null : (ownedTokensByMint.get(balance.mint) ?? null);
+
+              return (
+                <WalletBalanceRow
+                  key={`${balance.mint}-${balance.token}`}
+                  label={balance.token}
+                  value={formatDisplayAmount(balance.uiAmount, balance.token)}
+                  mint={balance.mint}
+                  href={ownedTokenId ? `/dashboard/issuance/${ownedTokenId}` : null}
+                />
+              );
+            })}
           </div>
         ) : (
           <div className="rounded-2xl border border-[rgba(28,28,29,0.12)] bg-white px-4 py-4 text-sm text-[rgba(28,28,29,0.62)]">
@@ -226,18 +266,35 @@ function WalletBalanceRow({
   label,
   value,
   mint,
+  href = null,
 }: {
   label: string;
   value: string;
   mint: string;
+  href?: string | null;
 }) {
-  return (
-    <div className="flex flex-wrap items-center justify-between gap-4 border-b border-[rgba(28,28,29,0.08)] px-4 py-3 last:border-b-0">
+  const content = (
+    <div
+      className={[
+        "flex flex-wrap items-center justify-between gap-4 border-b border-[rgba(28,28,29,0.08)] px-4 py-3 last:border-b-0",
+        href ? "transition-colors hover:bg-[rgba(28,28,29,0.03)]" : "",
+      ].join(" ")}
+    >
       <div>
         <p className="text-[17px] font-medium text-[#1c1c1d]">{label}</p>
         <p className="font-mono text-xs text-[rgba(28,28,29,0.52)]">{mint}</p>
       </div>
       <p className="text-[15px] text-[#1c1c1d]">{value}</p>
     </div>
+  );
+
+  if (!href) {
+    return content;
+  }
+
+  return (
+    <Link href={href} className="block focus-visible:outline-none">
+      {content}
+    </Link>
   );
 }

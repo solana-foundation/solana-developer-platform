@@ -14,15 +14,6 @@ import { useEffect, useMemo, useState } from "react";
 import { useFormStatus } from "react-dom";
 import { WalletProviderMark } from "./wallet-provider-mark";
 
-const PURPOSE_OPTIONS = [
-  { value: "", label: "Not set" },
-  { value: "root", label: "Root wallet" },
-  { value: "mint_authority", label: "Mint authority" },
-  { value: "freeze_authority", label: "Freeze authority" },
-  { value: "fee_payer", label: "Fee payer" },
-  { value: "transfer", label: "Transfers" },
-] as const;
-
 function resolveInitialProvider(
   preferredProvider: KnownCustodyProvider | null,
   connectedProviders: KnownCustodyProvider[]
@@ -184,24 +175,6 @@ export function WalletProvisionModal({
               required
             />
           </div>
-
-          {isConnected ? (
-            <div className="grid gap-2">
-              <Label htmlFor="wallet-purpose">Permissions</Label>
-              <select
-                id="wallet-purpose"
-                name="purpose"
-                className="h-12 w-full rounded-[14px] border border-[rgba(28,28,29,0.12)] bg-white px-3 text-sm text-[#1c1c1d]"
-                defaultValue=""
-              >
-                {PURPOSE_OPTIONS.map((option) => (
-                  <option key={option.value || "unset"} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-          ) : null}
 
           {!isConnected && isFireblocks ? (
             <div className="grid gap-4 rounded-[18px] border border-[rgba(28,28,29,0.1)] bg-[rgba(28,28,29,0.02)] p-4">

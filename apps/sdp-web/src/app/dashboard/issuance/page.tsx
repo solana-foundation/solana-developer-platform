@@ -31,6 +31,18 @@ interface FetchResult<T> {
   error?: string;
 }
 
+function resolveTokenListNotice(result: FetchResult<IssuanceTokenView[]>): string | null {
+  if (result.ok) {
+    return null;
+  }
+
+  if (typeof result.status === "number" && result.status >= 400 && result.status < 500) {
+    return "We couldn't load the token list right now. Refresh the page to try again.";
+  }
+
+  return "We couldn't load the token list right now. You can still create a token or try again shortly.";
+}
+
 function parseErrorMessage(body: string): string {
   try {
     const parsed = JSON.parse(body) as {
@@ -162,9 +174,6 @@ export default async function IssuancePage() {
   const templatesError = templatesResult.ok
     ? null
     : `Template API ${templatesResult.status ?? "unavailable"}: ${templatesResult.error ?? "Unknown error"}`;
-  const tokensError = tokensResult.ok
-    ? null
-    : `Token API ${tokensResult.status ?? "unavailable"}: ${tokensResult.error ?? "Unknown error"}`;
 
   return (
     <IssuanceWorkspace
@@ -174,7 +183,7 @@ export default async function IssuancePage() {
       signerWallets={signerWalletsResult.data ?? []}
       apiBaseUrl={apiBaseUrl}
       templatesError={templatesError}
-      tokensError={tokensError}
+      tokensNotice={resolveTokenListNotice(tokensResult)}
       signerWalletsError={
         signerWalletsResult.ok
           ? null

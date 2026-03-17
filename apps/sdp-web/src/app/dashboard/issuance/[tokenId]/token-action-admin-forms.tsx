@@ -301,7 +301,10 @@ export function TokenActionAdminForms({
       ) : null}
 
       {activeAction === "freeze" ? (
-        <TokenActionCard title="Freeze Controls" description="Freeze or thaw a token account.">
+        <TokenActionCard
+          title="Freeze Controls"
+          description="Freeze or thaw a wallet's token holdings for this mint."
+        >
           <form
             className="space-y-4"
             onSubmit={(event) => {
@@ -312,11 +315,12 @@ export function TokenActionAdminForms({
             }}
           >
             <ActionField
-              label="Account Address"
+              label="Wallet Address"
               value={freezeForm.accountAddress}
               required
               pattern={SOLANA_ADDRESS_PATTERN}
-              title="Enter a valid Solana address."
+              title="Enter the wallet address. SDP will derive the associated token account for this mint automatically."
+              placeholder="Wallet address that holds this token"
               onChange={(value) =>
                 setFreezeForm((previous) => ({
                   ...previous,
@@ -324,6 +328,10 @@ export function TokenActionAdminForms({
                 }))
               }
             />
+            <p className="text-sm leading-6 text-[rgba(28,28,29,0.64)]">
+              Enter the wallet address that holds this token. SDP derives the associated token
+              account automatically for this mint.
+            </p>
             <ActionField
               label="Reason (freeze only)"
               value={freezeForm.reason}
@@ -347,7 +355,10 @@ export function TokenActionAdminForms({
       ) : null}
 
       {activeAction === "allowlist" ? (
-        <TokenActionCard title="Allowlist" description="Add or remove allowlist addresses.">
+        <TokenActionCard
+          title="Allowlist"
+          description="Manage the approved destination addresses for this token."
+        >
           <form
             className="space-y-4"
             onSubmit={(event) => {
@@ -387,7 +398,7 @@ export function TokenActionAdminForms({
             {allowlistError ? (
               <p className="text-sm text-[#8a1f2a]">{allowlistError}</p>
             ) : allowlistEntries.length === 0 ? (
-              <p className="text-sm text-[rgba(28,28,29,0.68)]">No active allowlist entries.</p>
+              <p className="text-sm text-[rgba(28,28,29,0.68)]">No allowlist entries yet.</p>
             ) : (
               <div className="space-y-2">
                 {allowlistEntries.map((entry) => (
@@ -408,7 +419,7 @@ export function TokenActionAdminForms({
                       onClick={() => onRemoveAllowlist(entry.id)}
                       disabled={isPending}
                     >
-                      Remove
+                      Remove entry
                     </Button>
                   </div>
                 ))}

@@ -145,18 +145,21 @@ export function getAccessControlAvailability(
     if (mode === "allowlist") {
       return {
         available: true,
-        note: "Required for Tokenized Security in current API flow.",
+        note: "Required for this template.",
       };
     }
     return {
       available: false,
-      note: "Tokenized Security requires allowlist mode in current API flow.",
+      note: "This template cannot be created without an allowlist.",
     };
   }
 
   return {
     available: true,
-    note: "Available for this template in current API flow.",
+    note:
+      mode === "allowlist"
+        ? "Require approved destinations before minting or controlled transfers."
+        : "Create the token without an allowlist.",
   };
 }
 

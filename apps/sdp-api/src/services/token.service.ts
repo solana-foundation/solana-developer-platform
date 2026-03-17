@@ -103,6 +103,7 @@ interface TokenRow {
   signing_wallet_id: string | null;
   mint_address: string | null;
   mint_authority: string | null;
+  metadata_authority: string | null;
   freeze_authority: string | null;
   abl_list_address: string | null;
   name: string;
@@ -128,6 +129,11 @@ interface TokenRow {
 interface TokenExtensionRow {
   extension: string;
   config: string | null;
+}
+
+interface TokenExtensionState {
+  extensions: TokenExtensionsConfig | null;
+  metadataAuthority: string | null;
 }
 
 interface TokenTransactionRow {
@@ -227,12 +233,12 @@ export class TokenService {
     await this.db
       .prepare(
         `INSERT INTO issued_tokens (
-          id, project_id, organization_id, signing_wallet_id, mint_address, mint_authority, freeze_authority,
+          id, project_id, organization_id, signing_wallet_id, mint_address, mint_authority, metadata_authority, freeze_authority,
           abl_list_address, name, symbol, decimals, description, uri, image_url, template,
           total_supply_cached, total_supply_updated_at, max_supply, is_mintable,
           freeze_authority_enabled, allowlist_enabled, status, deployed_at, created_by,
           created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         token.id,
@@ -241,6 +247,7 @@ export class TokenService {
         token.signingWalletId,
         token.mintAddress,
         token.mintAuthority,
+        token.metadataAuthority ?? null,
         token.freezeAuthority,
         token.ablListAddress,
         token.name,
@@ -277,7 +284,7 @@ export class TokenService {
   async getToken(tokenId: string): Promise<Token | null> {
     const row = await this.db
       .prepare(
-        `SELECT id, project_id, organization_id, mint_address, mint_authority, freeze_authority,
+        `SELECT id, project_id, organization_id, mint_address, mint_authority, metadata_authority, freeze_authority,
                 signing_wallet_id,
                 abl_list_address, name, symbol, decimals, description, uri, image_url, template,
                 total_supply_cached, total_supply_updated_at, max_supply, is_mintable,
@@ -292,8 +299,8 @@ export class TokenService {
       return null;
     }
 
-    const extensions = await this.getTokenExtensions(tokenId);
-    return this.mapRowToToken(row, extensions);
+    const extensionState = await this.getTokenExtensionState(tokenId);
+    return this.mapRowToToken(row, extensionState);
   }
 
   /**
@@ -302,7 +309,7 @@ export class TokenService {
   async getTokenByMint(mintAddress: string): Promise<Token | null> {
     const row = await this.db
       .prepare(
-        `SELECT id, project_id, organization_id, mint_address, mint_authority, freeze_authority,
+        `SELECT id, project_id, organization_id, mint_address, mint_authority, metadata_authority, freeze_authority,
                 signing_wallet_id,
                 abl_list_address, name, symbol, decimals, description, uri, image_url, template,
                 total_supply_cached, total_supply_updated_at, max_supply, is_mintable,
@@ -317,8 +324,8 @@ export class TokenService {
       return null;
     }
 
-    const extensions = await this.getTokenExtensions(row.id);
-    return this.mapRowToToken(row, extensions);
+    const extensionState = await this.getTokenExtensionState(row.id);
+    return this.mapRowToToken(row, extensionState);
   }
 
   /**
@@ -332,7 +339,7 @@ export class TokenService {
 
     let countQuery = "SELECT COUNT(*) as count FROM issued_tokens WHERE project_id = ?";
     let selectQuery = `
-      SELECT id, project_id, organization_id, mint_address, mint_authority, freeze_authority,
+      SELECT id, project_id, organization_id, mint_address, mint_authority, metadata_authority, freeze_authority,
              signing_wallet_id,
              abl_list_address, name, symbol, decimals, description, uri, image_url, template,
              total_supply_cached, total_supply_updated_at, max_supply, is_mintable,
@@ -360,11 +367,16 @@ export class TokenService {
       .bind(...params, limit, offset)
       .all<TokenRow>();
 
-    const extensionMap = await this.getExtensionsForTokens(result.results.map((row) => row.id));
+    const extensionMap = await this.getExtensionStatesForTokens(
+      result.results.map((row) => row.id)
+    );
 
     return {
       tokens: result.results.map((row) =>
-        this.mapRowToToken(row, extensionMap.get(row.id) ?? null)
+        this.mapRowToToken(
+          row,
+          extensionMap.get(row.id) ?? { extensions: null, metadataAuthority: null }
+        )
       ),
       total: countResult?.count ?? 0,
     };
@@ -436,6 +448,7 @@ export class TokenService {
     tokenId: string,
     updates: {
       mintAuthority?: string | null;
+      metadataAuthority?: string | null;
       isMintable?: boolean;
       freezeAuthority?: string | null;
       isFreezable?: boolean;
@@ -459,6 +472,11 @@ export class TokenService {
     if (updates.isMintable !== undefined) {
       fields.push("is_mintable = ?");
       values.push(updates.isMintable ? 1 : 0);
+    }
+
+    if (updates.metadataAuthority !== undefined) {
+      fields.push("metadata_authority = ?");
+      values.push(updates.metadataAuthority);
     }
 
     if (updates.freezeAuthority !== undefined) {
@@ -517,6 +535,7 @@ export class TokenService {
         `UPDATE issued_tokens SET
           mint_address = ?,
           mint_authority = ?,
+          metadata_authority = ?,
           freeze_authority = ?,
           abl_list_address = ?,
           status = 'active',
@@ -524,7 +543,16 @@ export class TokenService {
           updated_at = ?
          WHERE id = ?`
       )
-      .bind(mintAddress, mintAuthority, freezeAuthority, ablListAddress ?? null, now, now, tokenId)
+      .bind(
+        mintAddress,
+        mintAuthority,
+        mintAuthority,
+        freezeAuthority,
+        ablListAddress ?? null,
+        now,
+        now,
+        tokenId
+      )
       .run();
 
     const updated = await this.getToken(tokenId);
@@ -1044,20 +1072,21 @@ export class TokenService {
    * Freeze an account
    */
   async freezeAccount(input: FreezeAccountInput): Promise<FrozenAccount> {
-    // Check if already frozen
     const existing = await this.db
       .prepare(
-        "SELECT id FROM frozen_accounts WHERE token_id = ? AND account_address = ? AND unfrozen_at IS NULL"
+        `SELECT id, token_id, account_address, reason, frozen_at, frozen_by, unfrozen_at, unfrozen_by
+         FROM frozen_accounts
+         WHERE token_id = ? AND account_address = ?`
       )
       .bind(input.tokenId, input.accountAddress)
-      .first<{ id: string }>();
+      .first<FrozenAccountRow>();
 
-    if (existing) {
+    if (existing?.unfrozen_at === null) {
       throw new Error("ACCOUNT_ALREADY_FROZEN");
     }
 
-    const id = `frz_${crypto.randomUUID()}`;
     const now = new Date().toISOString();
+    const id = existing?.id ?? `frz_${crypto.randomUUID()}`;
 
     const frozenAccount: FrozenAccount = {
       id,
@@ -1070,23 +1099,39 @@ export class TokenService {
       unfrozenBy: null,
     };
 
-    await this.db
-      .prepare(
-        `INSERT INTO frozen_accounts (
-          id, token_id, account_address, reason, frozen_at, frozen_by, unfrozen_at, unfrozen_by
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        frozenAccount.id,
-        frozenAccount.tokenId,
-        frozenAccount.accountAddress,
-        frozenAccount.reason,
-        frozenAccount.frozenAt,
-        frozenAccount.frozenBy,
-        frozenAccount.unfrozenAt,
-        frozenAccount.unfrozenBy
-      )
-      .run();
+    if (existing) {
+      await this.db
+        .prepare(
+          `UPDATE frozen_accounts
+           SET reason = ?, frozen_at = ?, frozen_by = ?, unfrozen_at = NULL, unfrozen_by = NULL
+           WHERE id = ?`
+        )
+        .bind(
+          frozenAccount.reason,
+          frozenAccount.frozenAt,
+          frozenAccount.frozenBy,
+          frozenAccount.id
+        )
+        .run();
+    } else {
+      await this.db
+        .prepare(
+          `INSERT INTO frozen_accounts (
+            id, token_id, account_address, reason, frozen_at, frozen_by, unfrozen_at, unfrozen_by
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .bind(
+          frozenAccount.id,
+          frozenAccount.tokenId,
+          frozenAccount.accountAddress,
+          frozenAccount.reason,
+          frozenAccount.frozenAt,
+          frozenAccount.frozenBy,
+          frozenAccount.unfrozenAt,
+          frozenAccount.unfrozenBy
+        )
+        .run();
+    }
 
     return frozenAccount;
   }
@@ -1258,7 +1303,7 @@ export class TokenService {
       .run();
   }
 
-  private async getTokenExtensions(tokenId: string): Promise<TokenExtensionsConfig | null> {
+  private async getTokenExtensionState(tokenId: string): Promise<TokenExtensionState> {
     const result = await this.db
       .prepare(
         `SELECT extension, config
@@ -1271,10 +1316,10 @@ export class TokenService {
     return this.mapExtensionRows(result.results);
   }
 
-  private async getExtensionsForTokens(
+  private async getExtensionStatesForTokens(
     tokenIds: string[]
-  ): Promise<Map<string, TokenExtensionsConfig | null>> {
-    const map = new Map<string, TokenExtensionsConfig | null>();
+  ): Promise<Map<string, TokenExtensionState>> {
+    const map = new Map<string, TokenExtensionState>();
 
     if (tokenIds.length === 0) {
       return map;
@@ -1304,13 +1349,23 @@ export class TokenService {
     return map;
   }
 
-  private mapExtensionRows(rows: TokenExtensionRow[]): TokenExtensionsConfig | null {
-    if (!rows.length) {
-      return null;
-    }
-
+  private mapExtensionRows(rows: TokenExtensionRow[]): TokenExtensionState {
     const extensions: Record<string, unknown> = {};
+    let metadataAuthority: string | null = null;
+
     for (const row of rows) {
+      if (row.extension === "metadataAuthority") {
+        if (row.config !== null) {
+          try {
+            const parsed = JSON.parse(row.config) as unknown;
+            metadataAuthority = typeof parsed === "string" ? parsed : row.config;
+          } catch {
+            metadataAuthority = row.config;
+          }
+        }
+        continue;
+      }
+
       if (row.config === null) {
         extensions[row.extension] = true;
         continue;
@@ -1323,7 +1378,10 @@ export class TokenService {
       }
     }
 
-    return extensions as TokenExtensionsConfig;
+    return {
+      extensions: Object.keys(extensions).length > 0 ? (extensions as TokenExtensionsConfig) : null,
+      metadataAuthority,
+    };
   }
 
   private async insertTransactionStatus(
@@ -1358,7 +1416,7 @@ export class TokenService {
   // Row Mapping Helpers
   // ═══════════════════════════════════════════════════════════════════════════
 
-  private mapRowToToken(row: TokenRow, extensions: TokenExtensionsConfig | null): Token {
+  private mapRowToToken(row: TokenRow, extensionState: TokenExtensionState): Token {
     const totalSupply = formatDecimalAmount(row.total_supply_cached ?? "0", row.decimals);
     const maxSupply = row.max_supply ? formatDecimalAmount(row.max_supply, row.decimals) : null;
 
@@ -1369,7 +1427,8 @@ export class TokenService {
       signingWalletId: row.signing_wallet_id,
       mintAddress: row.mint_address,
       mintAuthority: row.mint_authority,
-      metadataAuthority: row.mint_authority,
+      metadataAuthority:
+        extensionState.metadataAuthority ?? row.metadata_authority ?? row.mint_authority,
       freezeAuthority: row.freeze_authority,
       ablListAddress: row.abl_list_address,
       name: row.name,
@@ -1379,7 +1438,7 @@ export class TokenService {
       uri: row.uri,
       imageUrl: row.image_url,
       template: (row.template ?? "custom") as TokenTemplate,
-      extensions,
+      extensions: extensionState.extensions,
       totalSupply,
       totalSupplyUpdatedAt: row.total_supply_updated_at,
       maxSupply,

@@ -57,6 +57,24 @@ function toApiActionErrorMessage(error: unknown): string {
   return `${getApiErrorMessageFromText(body)} (HTTP ${status})`;
 }
 
+function parseApiActionError(error: unknown): { status: number; message: string } | null {
+  const raw = extractErrorMessage(error).trim();
+  const match = /^SDP API request failed \((\d+)\):\s*([\s\S]*)$/.exec(raw);
+  if (!match) {
+    return null;
+  }
+
+  const status = Number.parseInt(match[1] ?? "", 10);
+  if (!Number.isFinite(status)) {
+    return null;
+  }
+
+  return {
+    status,
+    message: getApiErrorMessageFromText(match[2] ?? ""),
+  };
+}
+
 async function sdpApiFetchWithApiKey<T>(
   path: string,
   apiKey: string,
@@ -143,10 +161,31 @@ export async function initializeCustody(formData: FormData) {
     }
   }
 
-  await sdpApiFetch("/v1/wallets/initialize", {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
+  try {
+    await sdpApiFetch("/v1/wallets/initialize", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  } catch (error) {
+    const apiError = parseApiActionError(error);
+
+    if (
+      apiError?.status === 409 &&
+      apiError.message.includes("Signing already initialized for org")
+    ) {
+      await sdpApiFetch("/v1/wallets", {
+        method: "POST",
+        body: JSON.stringify({
+          provider,
+          label: walletLabel,
+          purpose: "root",
+          setDefault: true,
+        }),
+      });
+    } else {
+      throw error;
+    }
+  }
 
   revalidatePath("/dashboard/custody");
   revalidatePath("/dashboard/wallets");
@@ -165,17 +204,10 @@ export async function createCustodyWallet(formData: FormData) {
     | "anchorage"
     | undefined;
   const label = getOptionalString(formData, "label");
-  const purpose = getOptionalString(formData, "purpose") as
-    | "root"
-    | "mint_authority"
-    | "freeze_authority"
-    | "fee_payer"
-    | "transfer"
-    | undefined;
 
   await sdpApiFetch("/v1/wallets", {
     method: "POST",
-    body: JSON.stringify({ provider, label, purpose }),
+    body: JSON.stringify({ provider, label }),
   });
 
   revalidatePath("/dashboard/custody");

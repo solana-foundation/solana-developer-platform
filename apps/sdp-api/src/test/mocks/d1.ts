@@ -183,6 +183,7 @@ export async function seedTestDatabase(env: Env): Promise<void> {
         signing_wallet_id TEXT,
         mint_address TEXT UNIQUE,
         mint_authority TEXT,
+        metadata_authority TEXT,
         freeze_authority TEXT,
         name TEXT NOT NULL,
         symbol TEXT NOT NULL,

@@ -52,7 +52,7 @@ export function TokenActionPrimaryForms({
   return (
     <>
       {activeAction === "update-metadata" ? (
-        <TokenActionCard title="Update Metadata" description="Edit token metadata and status.">
+        <TokenActionCard title="Update Metadata" description="Edit token metadata.">
           <form
             className="space-y-4"
             onSubmit={(event) => {
@@ -72,20 +72,6 @@ export function TokenActionPrimaryForms({
                   name: value,
                 }))
               }
-            />
-            <ActionSelect
-              label="Status"
-              value={metadataForm.status}
-              onChange={(value) =>
-                setMetadataForm((previous) => ({
-                  ...previous,
-                  status: value as "active" | "paused",
-                }))
-              }
-              options={[
-                { label: "active", value: "active" },
-                { label: "paused", value: "paused" },
-              ]}
             />
             <ActionField
               label="Description"
@@ -314,43 +300,6 @@ function ActionField({
         onChange={(event) => onChange(event.currentTarget.value)}
         className="h-11 rounded-[12px] border-[rgba(28,28,29,0.12)] bg-white px-4 shadow-none"
       />
-    </div>
-  );
-}
-
-function ActionSelect({
-  label,
-  value,
-  onChange,
-  options,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  options: Array<{ label: string; value: string }>;
-}) {
-  const fieldId = useId();
-
-  return (
-    <div className="space-y-2">
-      <label
-        htmlFor={fieldId}
-        className="block text-[12px] leading-5 font-medium tracking-[0.02em] text-[rgba(28,28,29,0.68)]"
-      >
-        {label}
-      </label>
-      <select
-        id={fieldId}
-        value={value}
-        onChange={(event) => onChange(event.currentTarget.value)}
-        className="h-11 w-full rounded-[12px] border border-[rgba(28,28,29,0.12)] bg-white px-4 text-sm text-[#1c1c1d] shadow-none outline-none transition-[box-shadow,border-color] focus:border-[rgba(28,28,29,0.28)] focus:ring-2 focus:ring-[rgba(28,28,29,0.12)]"
-      >
-        {options.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
     </div>
   );
 }

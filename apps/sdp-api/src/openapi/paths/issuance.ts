@@ -223,7 +223,8 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     tags: ["Issuance"],
     summary: "Update token",
     operationId: "updateToken",
-    description: "Updates token metadata or status.",
+    description:
+      "Updates stored token fields. For deployed tokens, metadata fields are also written on-chain through the current metadata authority.",
     security: [{ apiKeyAuth: [] }],
     request: {
       params: z.object({

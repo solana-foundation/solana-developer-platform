@@ -541,6 +541,72 @@ export class CustodyConfigStore implements SigningConfigStore {
   }
 
   /**
+   * Find a single active wallet by public key within the resolved scope
+   * (project-first, then organization fallback).
+   */
+  async findActiveWalletByPublicKey(
+    orgId: string,
+    projectId: string | undefined,
+    publicKey: string
+  ): Promise<CustodyWalletLookup | null> {
+    const row = projectId
+      ? await this.db
+          .prepare(
+            `SELECT
+               w.id,
+               w.custody_config_id,
+               w.wallet_id,
+               w.public_key,
+               w.label,
+               w.purpose,
+               w.status,
+               w.created_at,
+               w.updated_at,
+               c.provider,
+               c.project_id
+             FROM custody_wallets w
+             JOIN custody_configs c ON c.id = w.custody_config_id
+             WHERE c.organization_id = ?
+               AND c.status = 'active'
+               AND w.status = 'active'
+               AND w.public_key = ?
+               AND (c.project_id = ? OR c.project_id IS NULL)
+             ORDER BY CASE WHEN c.project_id = ? THEN 0 ELSE 1 END, c.updated_at DESC, c.id DESC
+             LIMIT 1`
+          )
+          .bind(orgId, publicKey, projectId, projectId)
+          .first<CustodyWalletLookupRow>()
+      : await this.db
+          .prepare(
+            `SELECT
+               w.id,
+               w.custody_config_id,
+               w.wallet_id,
+               w.public_key,
+               w.label,
+               w.purpose,
+               w.status,
+               w.created_at,
+               w.updated_at,
+               c.provider,
+               c.project_id
+             FROM custody_wallets w
+             JOIN custody_configs c ON c.id = w.custody_config_id
+             WHERE c.organization_id = ?
+               AND c.project_id IS NULL
+               AND c.status = 'active'
+               AND w.status = 'active'
+               AND w.public_key = ?
+             ORDER BY c.updated_at DESC, c.id DESC
+             LIMIT 1`
+          )
+          .bind(orgId, publicKey)
+          .first<CustodyWalletLookupRow>();
+
+    return row ? this.mapWalletLookupRow(row) : null;
+  }
+
+  /**
    * Deactivate a wallet record associated with a custody config.
    */
   async deactivateWallet(configId: string, walletId: string): Promise<void> {

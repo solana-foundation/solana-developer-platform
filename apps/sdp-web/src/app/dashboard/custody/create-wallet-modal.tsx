@@ -86,26 +86,6 @@ export function CreateWalletModal({
                 <Input id="create-wallet-label" name="label" placeholder="Signing wallet" />
               </div>
 
-              <div className="grid gap-2">
-                <Label htmlFor="create-wallet-purpose">Purpose (optional)</Label>
-                <select
-                  id="create-wallet-purpose"
-                  name="purpose"
-                  className="h-10 w-full rounded-lg border border-[rgba(28,28,29,0.16)] bg-white px-3 text-sm text-[#1c1c1d]"
-                  defaultValue=""
-                >
-                  <option value="">Not set</option>
-                  <option value="root">root</option>
-                  <option value="mint_authority">mint_authority</option>
-                  <option value="freeze_authority">freeze_authority</option>
-                  <option value="fee_payer">fee_payer</option>
-                  <option value="transfer">transfer</option>
-                </select>
-                <p className="text-xs text-[rgba(28,28,29,0.64)]">
-                  Purposes are used for future policy and UI grouping.
-                </p>
-              </div>
-
               {!hasProviderOptions ? (
                 <p className="text-xs text-[rgba(28,28,29,0.64)]">
                   Connect a provider that supports additional wallet provisioning first.

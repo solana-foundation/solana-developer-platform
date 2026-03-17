@@ -287,6 +287,69 @@ export async function confirmTransaction(
   throw new Error(`Transaction ${signature} confirmation timed out`);
 }
 
+/**
+ * Request an airdrop and wait for confirmation.
+ */
+export async function requestAndConfirmAirdrop(
+  env: Env,
+  address: Address,
+  lamports: bigint | number,
+  options?: {
+    commitment?: Commitment;
+    timeoutMs?: number;
+  }
+): Promise<TransactionConfirmation> {
+  const rpcUrl = getSolanaConfig(env).rpcUrl;
+  const response = await fetch(rpcUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "requestAirdrop",
+      params: [address, Number(lamports)],
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Airdrop request failed with HTTP ${response.status}`);
+  }
+
+  const payload = (await response.json()) as {
+    result?: string;
+    error?: {
+      code?: number;
+      message?: string;
+      data?: unknown;
+    };
+  };
+
+  if (payload.error) {
+    throw new Error(payload.error.message ?? "Airdrop request failed");
+  }
+
+  if (!payload.result) {
+    throw new Error("Airdrop request returned no signature");
+  }
+
+  const rpc = createRpc(env);
+  const confirmation = await confirmTransaction(rpc, payload.result as Signature, {
+    commitment: options?.commitment,
+    timeoutMs: options?.timeoutMs,
+  });
+
+  if (confirmation.err) {
+    const serializedError = JSON.stringify(confirmation.err, (_key, value) =>
+      typeof value === "bigint" ? value.toString() : value
+    );
+    throw new Error(`Airdrop transaction ${confirmation.signature} failed: ${serializedError}`);
+  }
+
+  return confirmation;
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Transaction Simulation
 // ═══════════════════════════════════════════════════════════════════════════

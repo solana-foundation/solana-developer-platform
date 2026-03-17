@@ -61,10 +61,12 @@ function MetricCard({
   label,
   value,
   error,
+  hint,
 }: {
   label: string;
   value: number | null;
   error: string | null;
+  hint?: string | null;
 }) {
   return (
     <Card className="gap-0 rounded-[18px] border-[rgba(28,28,29,0.1)] py-0 shadow-none">
@@ -74,6 +76,7 @@ function MetricCard({
           {error ? "Unavailable" : formatCurrencyAmount(value)}
         </p>
         {error ? <p className="text-sm text-[#9e2b38]">{error}</p> : null}
+        {!error && hint ? <p className="text-sm text-[rgba(28,28,29,0.56)]">{hint}</p> : null}
       </CardContent>
     </Card>
   );
@@ -89,6 +92,21 @@ export function HomeWorkspace({
   activityNotice,
   wallets,
 }: HomeWorkspaceProps) {
+  const isWalletEmptyState = wallets.length === 0;
+  const totalBalanceHint = isWalletEmptyState
+    ? "Create your first wallet to start tracking balances."
+    : totalBalance === null
+      ? "No tracked balances found yet."
+      : null;
+  const todaysVolumeHint = isWalletEmptyState
+    ? "Payment activity will appear after you create a wallet."
+    : todaysVolume === null
+      ? "No payment volume recorded yet."
+      : null;
+  const emptyActivityMessage = isWalletEmptyState
+    ? "Create your first wallet to start tracking balances and activity."
+    : "No recent activity found yet.";
+
   return (
     <div className="w-full space-y-8 py-2">
       <SectionEntry>
@@ -106,8 +124,18 @@ export function HomeWorkspace({
 
       <SectionEntry delay={0.04}>
         <div className="grid gap-4 md:grid-cols-2">
-          <MetricCard label="Total Balance" value={totalBalance} error={totalBalanceError} />
-          <MetricCard label="Today's Volume" value={todaysVolume} error={todaysVolumeError} />
+          <MetricCard
+            label="Total Balance"
+            value={totalBalance}
+            error={totalBalanceError}
+            hint={totalBalanceHint}
+          />
+          <MetricCard
+            label="Today's Volume"
+            value={todaysVolume}
+            error={todaysVolumeError}
+            hint={todaysVolumeHint}
+          />
         </div>
       </SectionEntry>
 
@@ -133,7 +161,7 @@ export function HomeWorkspace({
                 <div className="px-6 py-5 text-sm text-[#9e2b38]">{activityError}</div>
               ) : activityRows.length === 0 ? (
                 <div className="px-6 py-5 text-sm text-[rgba(28,28,29,0.72)]">
-                  No recent activity found yet.
+                  {emptyActivityMessage}
                 </div>
               ) : (
                 <div className="overflow-x-auto">

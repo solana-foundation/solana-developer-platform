@@ -1,16 +1,18 @@
-import { resolveApiKeySigningWalletId } from "@/lib/api-key-wallet-auth";
 import { getAuth } from "@/lib/auth";
 import { AppError, notFound } from "@/lib/errors";
 import { created, paginated, success } from "@/lib/response";
-import { assertValidAddress } from "@/lib/solana";
+import { type Address, assertValidAddress } from "@/lib/solana";
 import { AuditService } from "@/services/audit.service";
 import { createMosaicService } from "@/services/mosaic";
-import { createOrgSigner } from "@/services/solana";
+import { createRpc } from "@/services/solana/rpc";
 import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
 import type { FrozenAccountResponse } from "@sdp/types";
+import type { Rpc, SolanaRpcApi } from "@solana/kit";
+import { resolveTokenAccount } from "@solana/mosaic-sdk";
 import type { Context } from "hono";
 import { freezeSchema, unfreezeSchema } from "../schemas";
+import { resolveAuthoritySigner, resolveCurrentAuthorityForRole } from "./authority-resolution";
 import { buildIdempotencyMetadata } from "./idempotency";
 
 type AppContext = Context<{ Bindings: Env }>;
@@ -20,18 +22,90 @@ function toFreezeOperationAppError(error: unknown): AppError | null {
     return null;
   }
 
-  if (error.message === "Token account not found") {
+  if (
+    error.message === "Token account not found" ||
+    error.message === "Failed to parse token account data" ||
+    error.message.startsWith("Unable to parse token account data") ||
+    error.message.includes("is not a valid account for mint") ||
+    error.message.includes("is not for mint")
+  ) {
     return new AppError(
       "TOKEN_ACCOUNT_NOT_FOUND",
-      "Token account not found for this mint. Provide the token account address that holds this token, not the owner wallet address.",
+      "No token holding account was found for this mint. Provide a wallet address that holds this token or the matching token account.",
       {
         field: "accountAddress",
-        hint: "Use the token account address for this mint rather than the wallet public key.",
+        hint: "Use a wallet that already holds this token, or provide the matching token account address.",
       }
     );
   }
 
   return null;
+}
+
+function readParsedTokenAccountOwner(data: unknown): string | null {
+  if (!data || typeof data !== "object" || !("parsed" in data)) {
+    return null;
+  }
+
+  const parsed = data.parsed;
+  if (!parsed || typeof parsed !== "object" || !("info" in parsed)) {
+    return null;
+  }
+
+  const info = parsed.info;
+  if (!info || typeof info !== "object" || !("owner" in info)) {
+    return null;
+  }
+
+  return typeof info.owner === "string" ? info.owner : null;
+}
+
+async function resolveFreezeTarget(
+  env: Env,
+  requestedAddress: Address,
+  mintAddress: Address
+): Promise<{ tokenAccount: Address }> {
+  const rpc = createRpc(env) as Rpc<SolanaRpcApi>;
+  const resolved = await resolveTokenAccount(rpc, requestedAddress, mintAddress);
+
+  if (!resolved.isInitialized) {
+    throw new AppError(
+      "TOKEN_ACCOUNT_NOT_FOUND",
+      "This wallet does not currently have a token account for this mint.",
+      {
+        field: "accountAddress",
+        hint: "Use a wallet that already holds this token, or provide the matching token account address.",
+      }
+    );
+  }
+
+  if (resolved.tokenAccount !== requestedAddress) {
+    return {
+      tokenAccount: resolved.tokenAccount,
+    };
+  }
+
+  const accountInfo = await rpc
+    .getAccountInfo(resolved.tokenAccount, { encoding: "jsonParsed" })
+    .send();
+  const owner = readParsedTokenAccountOwner(accountInfo.value?.data);
+
+  if (!owner) {
+    throw new AppError(
+      "TOKEN_ACCOUNT_NOT_FOUND",
+      "Unable to determine the owner wallet for this token account.",
+      {
+        field: "accountAddress",
+        hint: "Provide a wallet that already holds this token, or verify that the token account address is correct for this mint.",
+      }
+    );
+  }
+
+  assertValidAddress(owner, "accountAddress");
+
+  return {
+    tokenAccount: resolved.tokenAccount,
+  };
 }
 
 export const freezeAccount = async (c: AppContext) => {
@@ -66,21 +140,36 @@ export const freezeAccount = async (c: AppContext) => {
     throw new AppError("TOKEN_NOT_DEPLOYED", "Token has not been deployed to Solana");
   }
 
-  const signingWalletId = resolveApiKeySigningWalletId(
-    auth,
-    parsed.data.signingWalletId ?? token.signingWalletId,
-    ["tokens:admin"]
+  const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
+  const currentAuthorityRaw = await resolveCurrentAuthorityForRole(
+    c.env,
+    tokenService,
+    token,
+    "freeze"
   );
 
-  // Get custody signer (freeze authority, via 3-tier resolution)
-  const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId, signingWalletId);
-  const accountAddress = assertValidAddress(parsed.data.accountAddress, "accountAddress");
+  if (!currentAuthorityRaw) {
+    throw new AppError("BAD_REQUEST", "Current freeze authority is not available for this token");
+  }
+
+  const { signer } = await resolveAuthoritySigner({
+    env: c.env,
+    auth,
+    token,
+    requestedWalletId: parsed.data.signingWalletId,
+    currentAuthority: currentAuthorityRaw,
+  });
+  const requestedAddress = assertValidAddress(parsed.data.accountAddress, "accountAddress");
+  const { tokenAccount } = await resolveFreezeTarget(c.env, requestedAddress, mintAddress);
 
   const idempotencyMetadata = buildIdempotencyMetadata(c.req.header("Idempotency-Key"), {
     tokenId,
     operation: "freeze",
     mode: "execute",
-    params: parsed.data,
+    params: {
+      ...parsed.data,
+      accountAddress: tokenAccount,
+    },
   });
 
   const { transaction: tx, replayed } = await tokenService.createTransaction({
@@ -88,7 +177,7 @@ export const freezeAccount = async (c: AppContext) => {
     organizationId: auth.organizationId,
     type: "freeze",
     params: {
-      accountAddress: parsed.data.accountAddress,
+      accountAddress: tokenAccount,
       reason: parsed.data.reason,
     },
     idempotencyKey: idempotencyMetadata.idempotencyKey,
@@ -101,11 +190,7 @@ export const freezeAccount = async (c: AppContext) => {
       throw new AppError("BAD_REQUEST", tx.error ?? "Previous freeze request failed");
     }
 
-    const latestRecord = await tokenService.getFrozenAccount(
-      tokenId,
-      parsed.data.accountAddress,
-      true
-    );
+    const latestRecord = await tokenService.getFrozenAccount(tokenId, tokenAccount, true);
     if (!latestRecord) {
       throw new AppError("NOT_FOUND", "Replay transaction has no matching account record");
     }
@@ -123,14 +208,14 @@ export const freezeAccount = async (c: AppContext) => {
 
   try {
     const result = await mosaic.freezeAccount({
-      tokenAccount: accountAddress,
+      tokenAccount,
       feePayer: signer.address,
     });
 
     // Record in database after successful on-chain operation
     const frozenAccount = await tokenService.freezeAccount({
       tokenId,
-      accountAddress: parsed.data.accountAddress,
+      accountAddress: tokenAccount,
       frozenBy: auth.id,
       reason: parsed.data.reason,
     });
@@ -141,8 +226,9 @@ export const freezeAccount = async (c: AppContext) => {
       signature: result.signature,
       slot: Number(result.slot),
       params: {
-        accountAddress: parsed.data.accountAddress,
+        accountAddress: tokenAccount,
         reason: parsed.data.reason,
+        tokenAccountAddress: tokenAccount,
         signature: result.signature,
         slot: result.slot.toString(),
       },
@@ -156,7 +242,8 @@ export const freezeAccount = async (c: AppContext) => {
       resourceId: frozenAccount.id,
       metadata: {
         tokenId,
-        accountAddress: parsed.data.accountAddress,
+        accountAddress: tokenAccount,
+        tokenAccountAddress: tokenAccount,
         reason: parsed.data.reason,
         signature: result.signature,
         slot: result.slot.toString(),
@@ -246,26 +333,42 @@ export const unfreezeAccount = async (c: AppContext) => {
     throw new AppError("TOKEN_NOT_DEPLOYED", "Token has not been deployed to Solana");
   }
 
-  const frozen = await tokenService.isAccountFrozen(tokenId, parsed.data.accountAddress);
+  const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
+  const currentAuthorityRaw = await resolveCurrentAuthorityForRole(
+    c.env,
+    tokenService,
+    token,
+    "freeze"
+  );
+
+  if (!currentAuthorityRaw) {
+    throw new AppError("BAD_REQUEST", "Current freeze authority is not available for this token");
+  }
+
+  const requestedAddress = assertValidAddress(parsed.data.accountAddress, "accountAddress");
+  const { tokenAccount } = await resolveFreezeTarget(c.env, requestedAddress, mintAddress);
+
+  const frozen = await tokenService.isAccountFrozen(tokenId, tokenAccount);
   if (!frozen) {
     throw new AppError("ACCOUNT_NOT_FROZEN", "Account is not frozen");
   }
 
-  const signingWalletId = resolveApiKeySigningWalletId(
+  const { signer } = await resolveAuthoritySigner({
+    env: c.env,
     auth,
-    parsed.data.signingWalletId ?? token.signingWalletId,
-    ["tokens:admin"]
-  );
-
-  // Get custody signer (freeze authority, via 3-tier resolution)
-  const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId, signingWalletId);
-  const accountAddress = assertValidAddress(parsed.data.accountAddress, "accountAddress");
+    token,
+    requestedWalletId: parsed.data.signingWalletId,
+    currentAuthority: currentAuthorityRaw,
+  });
 
   const idempotencyMetadata = buildIdempotencyMetadata(c.req.header("Idempotency-Key"), {
     tokenId,
     operation: "unfreeze",
     mode: "execute",
-    params: parsed.data,
+    params: {
+      ...parsed.data,
+      accountAddress: tokenAccount,
+    },
   });
 
   const { transaction: tx, replayed } = await tokenService.createTransaction({
@@ -273,7 +376,7 @@ export const unfreezeAccount = async (c: AppContext) => {
     organizationId: auth.organizationId,
     type: "unfreeze",
     params: {
-      accountAddress: parsed.data.accountAddress,
+      accountAddress: tokenAccount,
     },
     idempotencyKey: idempotencyMetadata.idempotencyKey,
     idempotencyFingerprint: idempotencyMetadata.idempotencyFingerprint,
@@ -285,11 +388,7 @@ export const unfreezeAccount = async (c: AppContext) => {
       throw new AppError("BAD_REQUEST", tx.error ?? "Previous unfreeze request failed");
     }
 
-    const latestRecord = await tokenService.getFrozenAccount(
-      tokenId,
-      parsed.data.accountAddress,
-      true
-    );
+    const latestRecord = await tokenService.getFrozenAccount(tokenId, tokenAccount, true);
     if (latestRecord) {
       return success(c, {
         frozenAccount: {
@@ -307,16 +406,12 @@ export const unfreezeAccount = async (c: AppContext) => {
 
   try {
     const result = await mosaic.thawAccount({
-      tokenAccount: accountAddress,
+      tokenAccount,
       feePayer: signer.address,
     });
 
     // Update database record after successful on-chain operation
-    const frozenAccount = await tokenService.unfreezeAccount(
-      tokenId,
-      parsed.data.accountAddress,
-      auth.id
-    );
+    const frozenAccount = await tokenService.unfreezeAccount(tokenId, tokenAccount, auth.id);
 
     await tokenService.updateTransaction(tx.id, {
       status: "confirmed",
@@ -332,7 +427,8 @@ export const unfreezeAccount = async (c: AppContext) => {
       resourceId: frozenAccount.id,
       metadata: {
         tokenId,
-        accountAddress: parsed.data.accountAddress,
+        accountAddress: tokenAccount,
+        tokenAccountAddress: tokenAccount,
         signature: result.signature,
         slot: result.slot.toString(),
       },

@@ -46,6 +46,7 @@ const authorityRoleOptions: ApiPlaygroundFieldOption[] = [
 ];
 
 const exampleTokenAccountAddress = "1".repeat(32);
+const exampleWalletAddress = "2".repeat(32);
 
 function buildTokenOptions(tokens: IssuancePlaygroundTokenView[]): ApiPlaygroundFieldOption[] {
   return tokens.map((token) => ({
@@ -628,7 +629,7 @@ export function buildIssuancePlaygroundEndpointConfigs({
         {
           key: "accountAddress",
           label: "accountAddress",
-          placeholder: "Account address to freeze",
+          placeholder: "Wallet address to freeze",
           required: true,
         },
         {
@@ -639,7 +640,7 @@ export function buildIssuancePlaygroundEndpointConfigs({
       ],
       expectedResponse: {
         data: {
-          accountAddress: exampleTokenAccountAddress,
+          accountAddress: exampleWalletAddress,
           status: "frozen",
         },
       },
@@ -654,13 +655,13 @@ export function buildIssuancePlaygroundEndpointConfigs({
         {
           key: "accountAddress",
           label: "accountAddress",
-          placeholder: "Account address to unfreeze",
+          placeholder: "Wallet address to unfreeze",
           required: true,
         },
       ],
       expectedResponse: {
         data: {
-          accountAddress: exampleTokenAccountAddress,
+          accountAddress: exampleWalletAddress,
           status: "active",
         },
       },

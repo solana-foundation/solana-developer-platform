@@ -4,6 +4,7 @@
 
 import app from "@/index";
 import { hashString } from "@/lib/hash";
+import * as AuthorityResolution from "@/routes/issuance/handlers/authority-resolution";
 import { MosaicService } from "@/services/mosaic";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import {
@@ -16,6 +17,7 @@ import {
 } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/d1";
+import * as MosaicSdk from "@solana/mosaic-sdk";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Check if running in mock mode (no RPC access)
@@ -276,7 +278,6 @@ describe("Issuance Routes", () => {
 
     it("supports pagination", async () => {
       const res = await app.request(
-        // biome-ignore lint/nursery/noSecrets: URL query string, not a secret
         "/v1/issuance/tokens?page=1&pageSize=10",
         {
           headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
@@ -380,6 +381,110 @@ describe("Issuance Routes", () => {
       const body = await res.json();
       expect(body.data.token.name).toBe("Updated Token Name");
       expect(body.data.token.description).toBe("New description");
+    });
+
+    it("updates deployed token metadata on-chain before persisting local fields", async () => {
+      const db = (env as { DB: D1Database }).DB;
+      const activeTokenId = "tok_metadataupdate1";
+
+      await db
+        .prepare(
+          `INSERT INTO issued_tokens (
+            id, project_id, organization_id, signing_wallet_id, mint_address, mint_authority,
+            metadata_authority, freeze_authority, name, symbol, decimals, description, uri,
+            image_url, total_supply_cached, is_mintable, freeze_authority_enabled,
+            allowlist_enabled, status, deployed_at, created_by
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '0', 1, 1, 0, 'active', ?, ?)`
+        )
+        .bind(
+          activeTokenId,
+          TEST_PROJECT.id,
+          TEST_ORG.id,
+          null,
+          TEST_ACTIVE_TOKEN.mintAddress,
+          TEST_ACTIVE_TOKEN.mintAuthority,
+          TEST_SOLANA_ADDRESSES.wallet3,
+          TEST_ACTIVE_TOKEN.freezeAuthority,
+          "Deployed Token",
+          "DPLY",
+          6,
+          null,
+          "https://example.com/original.json",
+          null,
+          "2024-01-02T00:00:00.000Z",
+          TEST_PROJECT_API_KEY.id
+        )
+        .run();
+
+      const resolveCurrentAuthoritySpy = vi
+        .spyOn(AuthorityResolution, "resolveCurrentAuthorityForRole")
+        .mockResolvedValueOnce(TEST_SOLANA_ADDRESSES.wallet3);
+      const resolveAuthoritySignerSpy = vi
+        .spyOn(AuthorityResolution, "resolveAuthoritySigner")
+        .mockResolvedValueOnce({
+          signer: { address: TEST_SOLANA_ADDRESSES.wallet3 } as never,
+          walletId: "wal_test_metadata",
+        });
+      const updateMetadataSpy = vi
+        .spyOn(MosaicService.prototype, "updateMetadata")
+        .mockResolvedValueOnce({
+          signature: "sig_metadata_update",
+          slot: 123n,
+        });
+
+      try {
+        const res = await app.request(
+          `/v1/issuance/tokens/${activeTokenId}`,
+          {
+            method: "PATCH",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+            },
+            body: JSON.stringify({
+              name: "On-chain Updated Name",
+              description: "On-chain description",
+              uri: "https://example.com/updated.json",
+              imageUrl: "https://example.com/token.png",
+            }),
+          },
+          env
+        );
+
+        expect(res.status).toBe(200);
+        const body = await res.json();
+        expect(body.data.token.name).toBe("On-chain Updated Name");
+        expect(body.data.token.description).toBe("On-chain description");
+        expect(body.data.token.uri).toBe("https://example.com/updated.json");
+        expect(body.data.token.imageUrl).toBe("https://example.com/token.png");
+
+        expect(resolveCurrentAuthoritySpy).toHaveBeenCalledWith(
+          env,
+          expect.anything(),
+          expect.objectContaining({ id: activeTokenId }),
+          "metadata"
+        );
+        expect(resolveAuthoritySignerSpy).toHaveBeenCalledWith(
+          expect.objectContaining({
+            auth: expect.objectContaining({ organizationId: TEST_ORG.id }),
+            token: expect.objectContaining({ id: activeTokenId }),
+            currentAuthority: TEST_SOLANA_ADDRESSES.wallet3,
+          })
+        );
+        expect(updateMetadataSpy).toHaveBeenCalledWith({
+          mint: TEST_ACTIVE_TOKEN.mintAddress,
+          name: "On-chain Updated Name",
+          description: "On-chain description",
+          uri: "https://example.com/updated.json",
+          imageUrl: "https://example.com/token.png",
+          updateAuthority: expect.objectContaining({ address: TEST_SOLANA_ADDRESSES.wallet3 }),
+          feePayer: expect.objectContaining({ address: TEST_SOLANA_ADDRESSES.wallet3 }),
+        });
+      } finally {
+        resolveCurrentAuthoritySpy.mockRestore();
+        resolveAuthoritySignerSpy.mockRestore();
+        updateMetadataSpy.mockRestore();
+      }
     });
   });
 
@@ -828,9 +933,19 @@ describe("Issuance Routes", () => {
       return TEST_ACTIVE_TOKEN.id;
     };
 
+    const mockResolvedTokenAccount = () =>
+      vi.spyOn(MosaicSdk, "resolveTokenAccount").mockResolvedValue({
+        tokenAccount: TEST_SOLANA_ADDRESSES.wallet2,
+        isInitialized: true,
+        isFrozen: false,
+        balance: 0n,
+        uiBalance: 0,
+      } as Awaited<ReturnType<typeof MosaicSdk.resolveTokenAccount>>);
+
     describe("POST /v1/issuance/tokens/:tokenId/freeze", () => {
       it("freezes an account", async () => {
         const activeTokenId = await seedFreezableToken();
+        mockResolvedTokenAccount();
 
         const res = await app.request(
           `/v1/issuance/tokens/${activeTokenId}/freeze`,
@@ -851,12 +966,13 @@ describe("Issuance Routes", () => {
         expect(res.status).toBe(201);
         const body = await res.json();
         expect(body.data.frozenAccount.id).toMatch(/^frz_/);
-        expect(body.data.frozenAccount.accountAddress).toBe(TEST_SOLANA_ADDRESSES.wallet1);
+        expect(body.data.frozenAccount.accountAddress).toBe(TEST_SOLANA_ADDRESSES.wallet2);
         expect(body.data.frozenAccount.reason).toBe("Suspicious activity");
       });
 
       it("returns 400 for already frozen account", async () => {
         const activeTokenId = await seedFreezableToken();
+        mockResolvedTokenAccount();
 
         // Freeze first
         await app.request(
@@ -891,10 +1007,51 @@ describe("Issuance Routes", () => {
         expect(body.error.code).toBe("ACCOUNT_FROZEN");
       });
 
-      it("returns a structured token-account error when the provided address is not a token account", async () => {
+      it("returns a structured token-account error when the wallet does not hold this mint", async () => {
         const activeTokenId = await seedFreezableToken();
+        mockResolvedTokenAccount();
+        vi.mocked(MosaicSdk.resolveTokenAccount).mockResolvedValueOnce({
+          tokenAccount: TEST_SOLANA_ADDRESSES.wallet2,
+          isInitialized: false,
+          isFrozen: true,
+          balance: 0n,
+          uiBalance: 0,
+        } as Awaited<ReturnType<typeof MosaicSdk.resolveTokenAccount>>);
+
+        const res = await app.request(
+          `/v1/issuance/tokens/${activeTokenId}/freeze`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+            },
+            body: JSON.stringify({
+              accountAddress: TEST_SOLANA_ADDRESSES.wallet1,
+            }),
+          },
+          env
+        );
+
+        expect(res.status).toBe(400);
+        const body = (await res.json()) as {
+          error: {
+            code: string;
+            message: string;
+            details?: { field?: string; hint?: string };
+          };
+        };
+        expect(body.error.code).toBe("TOKEN_ACCOUNT_NOT_FOUND");
+        expect(body.error.message).toContain("wallet");
+        expect(body.error.details?.field).toBe("accountAddress");
+        expect(body.error.details?.hint).toContain("holds this token");
+      });
+
+      it("maps token-account parser failures to a structured wallet error", async () => {
+        const activeTokenId = await seedFreezableToken();
+        mockResolvedTokenAccount();
         vi.spyOn(MosaicService.prototype, "freezeAccount").mockRejectedValueOnce(
-          new Error("Token account not found")
+          new Error("Failed to parse token account data")
         );
 
         const res = await app.request(
@@ -921,15 +1078,106 @@ describe("Issuance Routes", () => {
           };
         };
         expect(body.error.code).toBe("TOKEN_ACCOUNT_NOT_FOUND");
-        expect(body.error.message).toContain("token account");
+        expect(body.error.message).toContain("wallet");
         expect(body.error.details?.field).toBe("accountAddress");
-        expect(body.error.details?.hint).toContain("wallet public key");
+        expect(body.error.details?.hint).toContain("matching token account");
+      });
+
+      it("can freeze an account again after it was unfrozen", async () => {
+        const activeTokenId = await seedFreezableToken();
+        const db = (env as { DB: D1Database }).DB;
+        mockResolvedTokenAccount();
+
+        const freezeSpy = vi.spyOn(MosaicService.prototype, "freezeAccount").mockResolvedValue({
+          signature: "sig_freeze_refreeze",
+          slot: 123n,
+        });
+        const thawSpy = vi.spyOn(MosaicService.prototype, "thawAccount").mockResolvedValue({
+          signature: "sig_thaw_refreeze",
+          slot: 124n,
+        });
+
+        try {
+          const firstFreezeRes = await app.request(
+            `/v1/issuance/tokens/${activeTokenId}/freeze`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({
+                accountAddress: TEST_SOLANA_ADDRESSES.wallet1,
+                reason: "Initial freeze",
+              }),
+            },
+            env
+          );
+
+          expect(firstFreezeRes.status).toBe(201);
+          const firstFreezeBody = await firstFreezeRes.json();
+          const frozenRecordId = firstFreezeBody.data.frozenAccount.id as string;
+
+          const unfreezeRes = await app.request(
+            `/v1/issuance/tokens/${activeTokenId}/unfreeze`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({ accountAddress: TEST_SOLANA_ADDRESSES.wallet1 }),
+            },
+            env
+          );
+
+          expect(unfreezeRes.status).toBe(200);
+
+          const secondFreezeRes = await app.request(
+            `/v1/issuance/tokens/${activeTokenId}/freeze`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({
+                accountAddress: TEST_SOLANA_ADDRESSES.wallet1,
+                reason: "Frozen again",
+              }),
+            },
+            env
+          );
+
+          expect(secondFreezeRes.status).toBe(201);
+          const secondFreezeBody = await secondFreezeRes.json();
+          expect(secondFreezeBody.data.frozenAccount.id).toBe(frozenRecordId);
+          expect(secondFreezeBody.data.frozenAccount.reason).toBe("Frozen again");
+
+          const storedRows = await db
+            .prepare(
+              `SELECT id, unfrozen_at, reason
+               FROM frozen_accounts
+               WHERE token_id = ? AND account_address = ?`
+            )
+            .bind(activeTokenId, TEST_SOLANA_ADDRESSES.wallet2)
+            .all<{ id: string; unfrozen_at: string | null; reason: string | null }>();
+
+          expect(storedRows.results).toHaveLength(1);
+          expect(storedRows.results[0]?.id).toBe(frozenRecordId);
+          expect(storedRows.results[0]?.unfrozen_at).toBeNull();
+          expect(storedRows.results[0]?.reason).toBe("Frozen again");
+        } finally {
+          freezeSpy.mockRestore();
+          thawSpy.mockRestore();
+        }
       });
     });
 
     describe("POST /v1/issuance/tokens/:tokenId/unfreeze", () => {
       it("unfreezes an account", async () => {
         const activeTokenId = await seedFreezableToken();
+        mockResolvedTokenAccount();
 
         // Freeze first
         await app.request(
@@ -966,6 +1214,7 @@ describe("Issuance Routes", () => {
 
       it("returns 400 for non-frozen account", async () => {
         const activeTokenId = await seedFreezableToken();
+        mockResolvedTokenAccount();
 
         const res = await app.request(
           `/v1/issuance/tokens/${activeTokenId}/unfreeze`,

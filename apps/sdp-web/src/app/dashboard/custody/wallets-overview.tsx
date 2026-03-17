@@ -7,13 +7,13 @@ import {
   isKnownCustodyProvider,
 } from "@/app/dashboard/custody/provider-catalog";
 import { WalletAddressCopyButton } from "@/app/dashboard/custody/wallet-address-copy-button";
+import { WalletCardBalanceValue } from "@/app/dashboard/custody/wallet-card-balance-value";
 import { formatPurpose, formatWalletMeta } from "@/app/dashboard/custody/wallet-format-utils";
 import { WalletLabelInlineEditor } from "@/app/dashboard/custody/wallet-label-inline-editor";
 import { Button } from "@/components/ui/button";
 import type { CustodyWalletSummary } from "@sdp/types";
 import { Plus } from "lucide-react";
 import Link from "next/link";
-import { formatCurrencyAmount, resolveTotalBalance } from "../payments/payments-overview.utils";
 import { WalletProviderMark } from "./wallet-provider-mark";
 
 interface WalletsOverviewProps {
@@ -123,7 +123,6 @@ export function WalletsOverview({
           const provider =
             wallet.provider && isKnownCustodyProvider(wallet.provider) ? wallet.provider : null;
           const purposeLabel = formatPurpose(wallet.purpose);
-          const totalBalance = resolveTotalBalance(wallet.balances ?? []);
 
           return (
             <article
@@ -152,9 +151,10 @@ export function WalletsOverview({
               <div className="mt-6 space-y-2 rounded-xl border border-[rgba(28,28,29,0.08)] bg-[rgba(28,28,29,0.03)] p-3">
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-[rgba(28,28,29,0.58)]">Balance</span>
-                  <span className="font-medium text-[#1c1c1d]">
-                    {formatCurrencyAmount(totalBalance)}
-                  </span>
+                  <WalletCardBalanceValue
+                    walletId={wallet.walletId}
+                    initialBalances={wallet.balances ?? []}
+                  />
                 </div>
                 {purposeLabel ? (
                   <div className="flex items-center justify-between text-sm">

@@ -1,23 +1,23 @@
-import { resolveApiKeySigningWalletId } from "@/lib/api-key-wallet-auth";
 import { getAuth } from "@/lib/auth";
 import { AppError, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { assertValidAddress } from "@/lib/solana";
 import { AuditService } from "@/services/audit.service";
 import { createMosaicService } from "@/services/mosaic";
-import { createOrgSigner } from "@/services/solana";
 import { createRpc, simulateTransaction } from "@/services/solana/rpc";
 import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
 import { AuthorityType } from "@solana-program/token-2022";
 import type { Context } from "hono";
 import { updateAuthoritySchema } from "../schemas";
+import {
+  type AuthorityRole,
+  resolveAuthoritySigner,
+  resolveCurrentAuthorityForRole,
+} from "./authority-resolution";
 import { buildIdempotencyMetadata } from "./idempotency";
 
 type AppContext = Context<{ Bindings: Env }>;
-
-type AuthorityRole = "mint" | "freeze" | "permanentDelegate" | "metadata";
-type TokenRecord = Awaited<ReturnType<TokenService["getToken"]>>;
 
 type AuthorityUpdate = {
   mintAuthority?: string | null;
@@ -37,31 +37,6 @@ const mapAuthorityRole = (role: AuthorityRole): AuthorityType | "Metadata" => {
       return AuthorityType.PermanentDelegate;
     case "metadata":
       return "Metadata";
-  }
-};
-
-const resolveCurrentAuthority = (
-  token: TokenRecord,
-  role: AuthorityRole,
-  override?: string
-): string | null => {
-  if (!token) {
-    return null;
-  }
-
-  if (override) {
-    return override;
-  }
-
-  switch (role) {
-    case "mint":
-      return token.mintAuthority;
-    case "freeze":
-      return token.freezeAuthority;
-    case "permanentDelegate":
-      return token.extensions?.permanentDelegate ?? token.mintAuthority;
-    case "metadata":
-      return token.mintAuthority;
   }
 };
 
@@ -94,7 +69,9 @@ export const prepareUpdateAuthority = async (c: AppContext) => {
   }
 
   const role = parsed.data.authority.role;
-  const currentAuthorityRaw = resolveCurrentAuthority(
+  const currentAuthorityRaw = await resolveCurrentAuthorityForRole(
+    c.env,
+    tokenService,
     token,
     role,
     parsed.data.authority.currentAuthority
@@ -110,13 +87,13 @@ export const prepareUpdateAuthority = async (c: AppContext) => {
     ? assertValidAddress(parsed.data.authority.newAuthority, "newAuthority")
     : null;
 
-  const signingWalletId = resolveApiKeySigningWalletId(
+  const { signer } = await resolveAuthoritySigner({
+    env: c.env,
     auth,
-    parsed.data.signingWalletId ?? token.signingWalletId,
-    ["tokens:admin"]
-  );
-
-  const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId, signingWalletId);
+    token,
+    requestedWalletId: parsed.data.signingWalletId,
+    currentAuthority: currentAuthorityRaw,
+  });
   const mosaic = createMosaicService(c.env, signer);
 
   const prepared = await mosaic.prepareUpdateAuthority({
@@ -201,7 +178,9 @@ export const executeUpdateAuthority = async (c: AppContext) => {
   }
 
   const role = parsed.data.authority.role;
-  const currentAuthorityRaw = resolveCurrentAuthority(
+  const currentAuthorityRaw = await resolveCurrentAuthorityForRole(
+    c.env,
+    tokenService,
     token,
     role,
     parsed.data.authority.currentAuthority
@@ -211,16 +190,13 @@ export const executeUpdateAuthority = async (c: AppContext) => {
     throw new AppError("BAD_REQUEST", "Current authority is not available for this token");
   }
 
-  const signingWalletId = resolveApiKeySigningWalletId(
+  const { signer } = await resolveAuthoritySigner({
+    env: c.env,
     auth,
-    parsed.data.signingWalletId ?? token.signingWalletId,
-    ["tokens:admin"]
-  );
-
-  const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId, signingWalletId);
-  if (currentAuthorityRaw !== signer.address) {
-    throw new AppError("BAD_REQUEST", "Current authority is not controlled by custody");
-  }
+    token,
+    requestedWalletId: parsed.data.signingWalletId,
+    currentAuthority: currentAuthorityRaw,
+  });
 
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
   const newAuthority = parsed.data.authority.newAuthority

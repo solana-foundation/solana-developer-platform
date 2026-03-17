@@ -13,6 +13,7 @@ import type { Address } from "@solana/kit";
 import { TOKEN_ACL_PROGRAM_ID } from "@solana/mosaic-sdk";
 import type { Context } from "hono";
 import { deployTokenSchema } from "../schemas";
+import { getInitialPermanentDelegateAuthority } from "./authority-resolution";
 import { buildIdempotencyMetadata } from "./idempotency";
 
 type AppContext = Context<{ Bindings: Env }>;
@@ -127,13 +128,21 @@ export const deployToken = async (c: AppContext) => {
       : null;
 
     // Update token with deployment info (including ABL list if created)
-    const updatedToken = await tokenService.setTokenDeployed(
+    const deployedToken = await tokenService.setTokenDeployed(
       tokenId,
       result.mint as Address,
       custodyAddress,
       freezeAuthority,
       result.listAddress as Address | undefined
     );
+
+    const initialPermanentDelegate = getInitialPermanentDelegateAuthority(token, custodyAddress);
+    const updatedToken =
+      initialPermanentDelegate !== undefined
+        ? await tokenService.updateTokenAuthorities(tokenId, {
+            permanentDelegate: initialPermanentDelegate,
+          })
+        : deployedToken;
 
     await tokenService.updateTransaction(tx.id, {
       status: "confirmed",

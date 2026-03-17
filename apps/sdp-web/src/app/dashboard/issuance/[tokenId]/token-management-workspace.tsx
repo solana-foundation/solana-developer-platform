@@ -56,12 +56,6 @@ const managementTabs: Array<{ id: TokenManagementTab; label: string }> = [
   { id: "fund-management", label: "Fund Management" },
 ];
 
-const complianceActions: Array<{ id: AdminAction; label: string }> = [
-  { id: "allowlist", label: "Allowlist" },
-  { id: "freeze", label: "Freeze" },
-  { id: "pause", label: "Pause" },
-];
-
 const liveFundManagementRows: Array<{
   id: FundManagementModalAction;
   title: string;
@@ -218,6 +212,12 @@ export function TokenManagementWorkspace({
     ).unavailableReason,
   }));
   const extensionRows = getExtensionRows(token);
+  const showAllowlistControls = token.requiresAllowlist;
+  const complianceActions: Array<{ id: AdminAction; label: string }> = [
+    ...(showAllowlistControls ? [{ id: "allowlist" as const, label: "Allowlist" }] : []),
+    { id: "freeze", label: "Freeze" },
+    { id: "pause", label: "Pause" },
+  ];
   const effectiveMintDisabledReason = mintDisabledReason ?? mintSignerSelection.unavailableReason;
   const effectiveBurnDisabledReason = burnDisabledReason ?? burnSignerSelection.unavailableReason;
   const effectiveSeizeDisabledReason =
@@ -282,7 +282,6 @@ export function TokenManagementWorkspace({
         description: metadataForm.description.trim() ? metadataForm.description.trim() : null,
         uri: metadataForm.uri.trim() ? metadataForm.uri.trim() : null,
         imageUrl: metadataForm.imageUrl.trim() ? metadataForm.imageUrl.trim() : null,
-        status: metadataForm.status,
       },
     });
   };
@@ -764,7 +763,11 @@ export function TokenManagementWorkspace({
     setActiveTab(tab);
 
     const nextDefaultAction =
-      tab === "fund-management" && canDeployToken ? null : getDefaultActionForTab(tab);
+      tab === "fund-management" && canDeployToken
+        ? null
+        : tab === "compliance" && !showAllowlistControls
+          ? "freeze"
+          : getDefaultActionForTab(tab);
     if (nextDefaultAction) {
       setActiveAction(nextDefaultAction);
       return;
@@ -962,6 +965,7 @@ export function TokenManagementWorkspace({
           <div className="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)]">
             <TokenOverviewSection token={token} showTitle={false} />
             <TokenControlListsSection
+              showAllowlist={showAllowlistControls}
               allowlistEntriesCount={allowlistEntries.length}
               allowlistError={allowlistError}
               allowlistTotal={allowlistTotal}
@@ -1020,6 +1024,7 @@ export function TokenManagementWorkspace({
           <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
             <div>{visibleActionForm}</div>
             <TokenControlListsSection
+              showAllowlist={showAllowlistControls}
               allowlistEntriesCount={allowlistEntries.length}
               allowlistError={allowlistError}
               allowlistTotal={allowlistTotal}
@@ -1061,12 +1066,9 @@ export function TokenManagementWorkspace({
         newAuthority={authorityModalNewAuthority}
         authorityWallets={authorityWallets}
         authorityWalletsError={authorityWalletsError}
-        signerWallets={authorityModalSignerSelection.wallets}
-        signerWalletId={authorityModalSignerWalletId}
         signerUnavailableReason={authorityModalSignerSelection.unavailableReason}
         isPending={isPending}
         onNewAuthorityChange={setAuthorityModalNewAuthority}
-        onSignerWalletIdChange={setAuthorityModalSignerWalletId}
         onCancel={handleAuthorityModalClose}
         onConfirm={handleAuthorityModalConfirm}
       />
