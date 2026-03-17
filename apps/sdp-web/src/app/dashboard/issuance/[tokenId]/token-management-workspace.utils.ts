@@ -26,7 +26,6 @@ export function createInitialMetadataForm(token: Token): MetadataFormState {
     description: token.description ?? "",
     uri: token.uri ?? "",
     imageUrl: token.imageUrl ?? "",
-    status: token.status === "paused" ? "paused" : "active",
   };
 }
 
@@ -385,8 +384,8 @@ export function getAvailableSignerWallets(
 }
 
 export function getSignerWalletOptionLabel(wallet: PaymentsDashboardWallet): string {
-  const primaryLabel = wallet.label?.trim() || wallet.walletId;
-  return `${primaryLabel} · ${formatValue(wallet.publicKey)}`;
+  const primaryLabel = wallet.label?.trim() || "Unlabeled wallet";
+  return `${primaryLabel} · ${formatValue(wallet.walletId)} · ${formatValue(wallet.publicKey)}`;
 }
 
 function findSignerWalletById(
@@ -523,12 +522,16 @@ export function getExtensionRows(token: Token): ExtensionRow[] {
       helper: "Base template applied to this token.",
       value: token.template,
     },
-    {
-      id: "allowlist",
-      title: "Allowlist Enforcement",
-      helper: "Requires destination allowlisting for controlled actions.",
-      value: token.requiresAllowlist ? "Enabled" : "Disabled",
-    },
+    ...(token.requiresAllowlist
+      ? [
+          {
+            id: "allowlist",
+            title: "Allowlist",
+            helper: "Mint and controlled transfer destinations must be on the token allowlist.",
+            value: "Enabled",
+          } satisfies ExtensionRow,
+        ]
+      : []),
     {
       id: "mintable",
       title: "Mintable",

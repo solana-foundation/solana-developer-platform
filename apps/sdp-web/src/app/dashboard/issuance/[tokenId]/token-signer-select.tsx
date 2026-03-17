@@ -3,6 +3,7 @@
 import type { PaymentsDashboardWallet } from "@sdp/types";
 import { useId } from "react";
 import { getSignerWalletOptionLabel } from "./token-management-workspace.utils";
+import { TokenWalletIdentityCard } from "./token-wallet-identity-card";
 
 interface TokenSignerSelectProps {
   signerWallets: PaymentsDashboardWallet[];
@@ -10,6 +11,7 @@ interface TokenSignerSelectProps {
   signerUnavailableReason: string | null;
   onSignerWalletIdChange: (value: string) => void;
   label?: string;
+  showSelectionSummary?: boolean;
 }
 
 export function TokenSignerSelect({
@@ -18,11 +20,14 @@ export function TokenSignerSelect({
   signerUnavailableReason,
   onSignerWalletIdChange,
   label = "Signer",
+  showSelectionSummary = false,
 }: TokenSignerSelectProps) {
   const fieldId = useId();
   const isUnavailable = Boolean(signerUnavailableReason) || signerWallets.length === 0;
   const message =
     signerUnavailableReason ?? "SDP will sign this transaction with the selected wallet.";
+  const selectedWallet =
+    signerWallets.find((wallet) => wallet.walletId === signerWalletId) ?? signerWallets[0] ?? null;
 
   return (
     <div className="space-y-2">
@@ -57,6 +62,9 @@ export function TokenSignerSelect({
       >
         {message}
       </p>
+      {showSelectionSummary && !isUnavailable && selectedWallet ? (
+        <TokenWalletIdentityCard wallet={selectedWallet} />
+      ) : null}
     </div>
   );
 }

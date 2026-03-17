@@ -374,6 +374,7 @@ export const issuedTokens = sqliteTable(
     signingWalletId: text("signing_wallet_id"),
     mintAddress: text("mint_address").unique(),
     mintAuthority: text("mint_authority"),
+    metadataAuthority: text("metadata_authority"),
     freezeAuthority: text("freeze_authority"),
     name: text("name").notNull(),
     symbol: text("symbol").notNull(),

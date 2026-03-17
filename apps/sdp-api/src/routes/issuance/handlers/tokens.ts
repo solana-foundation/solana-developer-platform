@@ -2,8 +2,10 @@ import { resolveApiKeySigningWalletId } from "@/lib/api-key-wallet-auth";
 import { getAuth } from "@/lib/auth";
 import { AppError, notFound } from "@/lib/errors";
 import { created, paginated, success } from "@/lib/response";
+import { assertValidAddress } from "@/lib/solana";
 import { AuditService } from "@/services/audit.service";
 import { normalizeTemplateId, resolveTemplateConfig } from "@/services/issuance/templates";
+import { createMosaicService } from "@/services/mosaic";
 import { createOrgSigner } from "@/services/solana";
 import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
@@ -11,8 +13,38 @@ import type { TokenResponse } from "@sdp/types";
 import type { Context } from "hono";
 import { requireProjectScope } from "../helpers";
 import { createTokenSchema, updateTokenSchema } from "../schemas";
+import { resolveAuthoritySigner, resolveCurrentAuthorityForRole } from "./authority-resolution";
 
 type AppContext = Context<{ Bindings: Env }>;
+
+function getOnChainMetadataPatch(input: {
+  name?: string;
+  description?: string | null;
+  uri?: string | null;
+  imageUrl?: string | null;
+}) {
+  const patch: {
+    name?: string;
+    description?: string | null;
+    uri?: string | null;
+    imageUrl?: string | null;
+  } = {};
+
+  if (input.name !== undefined) {
+    patch.name = input.name;
+  }
+  if (input.description !== undefined) {
+    patch.description = input.description;
+  }
+  if (input.uri !== undefined) {
+    patch.uri = input.uri;
+  }
+  if (input.imageUrl !== undefined) {
+    patch.imageUrl = input.imageUrl;
+  }
+
+  return patch;
+}
 
 export const createToken = async (c: AppContext) => {
   const { auth, projectId, orgId } = await requireProjectScope(c);
@@ -149,6 +181,46 @@ export const updateToken = async (c: AppContext) => {
   }
 
   try {
+    const metadataPatch = getOnChainMetadataPatch(parsed.data);
+    const shouldUpdateMetadataOnChain =
+      Boolean(existing.mintAddress) &&
+      existing.status !== "pending" &&
+      Object.keys(metadataPatch).length > 0;
+
+    let metadataUpdateSignature: string | null = null;
+    let metadataUpdateSlot: string | null = null;
+
+    if (shouldUpdateMetadataOnChain) {
+      const currentAuthorityRaw = await resolveCurrentAuthorityForRole(
+        c.env,
+        tokenService,
+        existing,
+        "metadata"
+      );
+
+      if (!currentAuthorityRaw) {
+        throw new AppError("BAD_REQUEST", "Metadata authority is not available for this token");
+      }
+
+      const { signer } = await resolveAuthoritySigner({
+        env: c.env,
+        auth,
+        token: existing,
+        currentAuthority: currentAuthorityRaw,
+      });
+
+      const mosaic = createMosaicService(c.env, signer);
+      const result = await mosaic.updateMetadata({
+        mint: assertValidAddress(existing.mintAddress as string, "mintAddress"),
+        ...metadataPatch,
+        updateAuthority: signer,
+        feePayer: signer,
+      });
+
+      metadataUpdateSignature = result?.signature ?? null;
+      metadataUpdateSlot = result ? result.slot.toString() : null;
+    }
+
     const token = await tokenService.updateToken(tokenId, parsed.data);
 
     // Audit log
@@ -157,7 +229,12 @@ export const updateToken = async (c: AppContext) => {
       action: "update",
       resourceType: "token",
       resourceId: tokenId,
-      metadata: parsed.data,
+      metadata: {
+        ...parsed.data,
+        onChainMetadataUpdated: shouldUpdateMetadataOnChain,
+        metadataUpdateSignature,
+        metadataUpdateSlot,
+      },
     });
 
     const response: TokenResponse = { token };

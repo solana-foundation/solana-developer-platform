@@ -94,7 +94,6 @@ export interface MetadataFormState {
   description: string;
   uri: string;
   imageUrl: string;
-  status: "active" | "paused";
 }
 
 export interface MintFormState {

@@ -325,7 +325,8 @@ export const frozenAccountSchema = z
     id: frozenAccountIdSchema,
     tokenId: tokenIdParamSchema,
     accountAddress: solanaAddressSchema.openapi({
-      description: "Token account or owner address that is frozen.",
+      description:
+        "Wallet address associated with the frozen token holdings for this mint. SDP resolves the underlying token account automatically.",
       example: "So11111111111111111111111111111111111111112",
     }),
     reason: z
@@ -726,19 +727,23 @@ export const createTokenRequestSchema = createTokenSchemaBase
 export const updateTokenRequestSchema = updateTokenSchemaBase
   .extend({
     name: updateTokenSchemaBase.shape.name.openapi({
-      description: "Updated token name.",
+      description:
+        "Updated token name. For deployed tokens, this updates on-chain Token-2022 metadata using the current metadata authority.",
       example: "Example Token Updated",
     }),
     description: updateTokenSchemaBase.shape.description.openapi({
-      description: "Updated description. Use null to clear.",
+      description:
+        "Updated token description. For deployed tokens, this writes the on-chain `description` metadata field. Use null to clear the displayed value.",
       example: "Updated token description.",
     }),
     uri: updateTokenSchemaBase.shape.uri.openapi({
-      description: "Updated metadata URI. Use null to clear.",
+      description:
+        "Updated metadata URI. For deployed tokens, this updates the on-chain Token-2022 metadata URI using the current metadata authority. Use null to clear.",
       example: "https://example.com/metadata.json",
     }),
     imageUrl: updateTokenSchemaBase.shape.imageUrl.openapi({
-      description: "Updated image URL. Use null to clear.",
+      description:
+        "Updated image URL. For deployed tokens, this writes the on-chain `image` metadata field. Use null to clear the displayed value.",
       example: "https://example.com/token.png",
     }),
     status: updateTokenSchemaBase.shape.status.openapi({
@@ -867,7 +872,8 @@ export const pauseTokenRequestSchema = pauseTokenSchemaBase
 export const freezeAccountRequestSchema = freezeSchemaBase
   .extend({
     accountAddress: freezeSchemaBase.shape.accountAddress.openapi({
-      description: "Token account or owner address to freeze.",
+      description:
+        "Wallet or token account address to freeze. SDP resolves the associated token account automatically when a wallet address is provided.",
       example: "So11111111111111111111111111111111111111112",
     }),
     reason: freezeSchemaBase.shape.reason.openapi({
@@ -884,7 +890,8 @@ export const freezeAccountRequestSchema = freezeSchemaBase
 export const unfreezeAccountRequestSchema = unfreezeSchemaBase
   .extend({
     accountAddress: unfreezeSchemaBase.shape.accountAddress.openapi({
-      description: "Token account or owner address to unfreeze.",
+      description:
+        "Wallet or token account address to unfreeze. SDP resolves the associated token account automatically when a wallet address is provided.",
       example: "So11111111111111111111111111111111111111112",
     }),
     signingWalletId: unfreezeSchemaBase.shape.signingWalletId.openapi({

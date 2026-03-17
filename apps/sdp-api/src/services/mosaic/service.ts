@@ -16,16 +16,29 @@ import { parseDecimalAmount } from "@/lib/amount";
 import type { FeePaymentPort } from "@/services/ports/fee-payment.port";
 import { confirmTransaction, createRpc } from "@/services/solana/rpc";
 import type { Env } from "@/types/env";
+import { getTransferSolInstruction } from "@solana-program/system";
+import {
+  TOKEN_2022_PROGRAM_ADDRESS,
+  decodeMint,
+  getMintSize,
+  getUpdateTokenMetadataFieldInstruction,
+} from "@solana-program/token-2022";
 import {
   type Address,
   type Rpc,
   type SolanaRpcApi,
   type TransactionSigner,
+  appendTransactionMessageInstructions,
   compileTransaction,
   createNoopSigner,
+  createTransactionMessage,
+  fetchEncodedAccount,
   generateKeyPairSigner,
   getBase64EncodedWireTransaction,
   getTransactionEncoder,
+  pipe,
+  setTransactionMessageFeePayerSigner,
+  setTransactionMessageLifetimeUsingBlockhash,
   signTransactionMessageWithSigners,
 } from "@solana/kit";
 import {
@@ -51,6 +64,7 @@ import {
   getRemoveWalletTransaction,
   getThawPermissionlessTransaction,
   getThawTransaction,
+  getTokenMetadata,
   getUpdateAuthorityTransaction,
   resolveTokenAccount,
 } from "@solana/mosaic-sdk";
@@ -66,6 +80,7 @@ import {
   type MosaicTransactionResult,
   TEMPLATE_MAP,
   type TransferOptions,
+  type UpdateMetadataOptions,
 } from "./types";
 import { safeStringify } from "./utils";
 
@@ -682,6 +697,141 @@ export class MosaicService {
           });
 
     return this.signAndSubmit(fullTx);
+  }
+
+  async updateMetadata(options: UpdateMetadataOptions): Promise<MosaicTransactionResult | null> {
+    const feePayer = await this.resolveFeePayerSigner(options.feePayer);
+    const encodedMint = await fetchEncodedAccount(this.rpc, options.mint, {
+      commitment: "confirmed",
+    });
+
+    if (!encodedMint.exists) {
+      throw new Error(`Mint account not found at address: ${options.mint}`);
+    }
+
+    const decodedMint = decodeMint(encodedMint);
+    const currentMetadata = await getTokenMetadata(this.rpc, options.mint, "confirmed");
+
+    if (!currentMetadata) {
+      throw new Error("Token metadata extension is not available for this mint");
+    }
+
+    const updates: Array<{ field: string; value: string }> = [];
+
+    const maybePushUpdate = (field: string, nextValue: string, currentValue?: string | null) => {
+      const normalizedCurrent = currentValue ?? "";
+      if (nextValue === normalizedCurrent) {
+        return;
+      }
+
+      updates.push({ field, value: nextValue });
+    };
+
+    if (options.name !== undefined) {
+      maybePushUpdate("name", options.name, currentMetadata.name);
+    }
+
+    if (options.uri !== undefined) {
+      maybePushUpdate("uri", options.uri ?? "", currentMetadata.uri);
+    }
+
+    if (options.description !== undefined) {
+      maybePushUpdate(
+        "description",
+        options.description ?? "",
+        currentMetadata.additionalMetadata?.get("description")
+      );
+    }
+
+    if (options.imageUrl !== undefined) {
+      maybePushUpdate(
+        "image",
+        options.imageUrl ?? "",
+        currentMetadata.additionalMetadata?.get("image")
+      );
+    }
+
+    if (updates.length === 0) {
+      return null;
+    }
+
+    const toMetadataField = (field: string) => {
+      switch (field) {
+        case "name":
+          return { __kind: "Name" } as const;
+        case "symbol":
+          return { __kind: "Symbol" } as const;
+        case "uri":
+          return { __kind: "Uri" } as const;
+        default:
+          return { __kind: "Key", fields: [field] as const } as const;
+      }
+    };
+
+    const currentExtensions =
+      decodedMint.data.extensions?.__option === "Some" ? decodedMint.data.extensions.value : [];
+    const updatedAdditionalMetadata = new Map(currentMetadata.additionalMetadata ?? []);
+
+    if (options.description !== undefined) {
+      updatedAdditionalMetadata.set("description", options.description ?? "");
+    }
+
+    if (options.imageUrl !== undefined) {
+      updatedAdditionalMetadata.set("image", options.imageUrl ?? "");
+    }
+
+    const targetExtensions = currentExtensions.map((extension) =>
+      extension.__kind === "TokenMetadata"
+        ? {
+            ...extension,
+            name: options.name ?? currentMetadata.name ?? extension.name,
+            uri: options.uri ?? currentMetadata.uri ?? extension.uri,
+            additionalMetadata: updatedAdditionalMetadata,
+          }
+        : extension
+    );
+    const targetMintSize = getMintSize(targetExtensions);
+    const currentMintSize = encodedMint.data.length;
+    const targetRent = await this.rpc
+      .getMinimumBalanceForRentExemption(BigInt(targetMintSize))
+      .send();
+    const additionalRentLamports =
+      targetMintSize > currentMintSize && targetRent > encodedMint.lamports
+        ? targetRent - encodedMint.lamports
+        : 0n;
+
+    const instructions = [
+      ...(additionalRentLamports > 0n
+        ? [
+            getTransferSolInstruction({
+              source: feePayer,
+              destination: options.mint,
+              amount: additionalRentLamports,
+            }),
+          ]
+        : []),
+      ...updates.map((update) =>
+        getUpdateTokenMetadataFieldInstruction(
+          {
+            metadata: options.mint,
+            updateAuthority: options.updateAuthority,
+            field: toMetadataField(update.field),
+            value: update.value,
+          },
+          { programAddress: TOKEN_2022_PROGRAM_ADDRESS }
+        )
+      ),
+    ];
+
+    const { value: latestBlockhash } = await this.rpc.getLatestBlockhash().send();
+    const transactionMessage = pipe(
+      createTransactionMessage({ version: 0 }),
+      (tx) => setTransactionMessageFeePayerSigner(feePayer, tx),
+      (tx) => setTransactionMessageLifetimeUsingBlockhash(latestBlockhash, tx),
+      (tx) => appendTransactionMessageInstructions(instructions, tx)
+    );
+
+    return this.signAndSubmit(transactionMessage);
   }
 
   async preparePauseToken(options: {

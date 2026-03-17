@@ -112,29 +112,29 @@ export function CreateTokenFeaturesStep({
 
         <div>
           <p className="text-3xl font-medium text-[#1c1c1d]">
-            Access Control Mode{" "}
+            Allowlist{" "}
             <span aria-hidden className="text-[#c71f37]">
               *
             </span>
             <span className="sr-only"> (required)</span>
           </p>
           <p className="mt-2 text-lg text-[rgba(28,28,29,0.64)]">
-            Configure transfer restrictions for the selected template.
+            Choose whether this token should require approved destination addresses.
           </p>
         </div>
 
         <div className="grid gap-3 sm:grid-cols-2">
           <AccessControlOption
-            title="Allowlist"
-            description="Only approved addresses can transfer"
+            title="Enabled"
+            description="Only approved destinations can receive controlled token actions."
             icon={<ShieldCheck className="h-6 w-6 text-[#1c1c1d]" />}
             availability={allowlistAvailability}
             isSelected={draft.accessControlMode === "allowlist"}
             onSelect={() => onAccessControlModeChange("allowlist")}
           />
           <AccessControlOption
-            title="Blocklist"
-            description="Block specific addresses from transfers"
+            title="Disabled"
+            description="This token will not use an allowlist."
             icon={<ShieldAlert className="h-6 w-6 text-[#1c1c1d]" />}
             availability={blocklistAvailability}
             isSelected={draft.accessControlMode === "blocklist"}

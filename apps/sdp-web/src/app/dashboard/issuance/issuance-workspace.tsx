@@ -55,7 +55,7 @@ interface IssuanceWorkspaceProps {
   signerWallets: PaymentsDashboardWallet[];
   apiBaseUrl: string | null;
   templatesError: string | null;
-  tokensError: string | null;
+  tokensNotice: string | null;
   signerWalletsError: string | null;
 }
 
@@ -113,7 +113,7 @@ export function IssuanceWorkspace({
   signerWallets,
   apiBaseUrl,
   templatesError,
-  tokensError,
+  tokensNotice,
   signerWalletsError,
 }: IssuanceWorkspaceProps) {
   const { issuanceTab, selectedPlaygroundApiKeyId, setPlaygroundApiKeys } = useDashboardWorkspace();
@@ -177,6 +177,7 @@ export function IssuanceWorkspace({
       );
     });
   }, [tokens, search]);
+  const hasTokens = tokens.length > 0;
 
   return (
     <div className={isPlaygroundTab ? "flex h-full min-h-0 w-full flex-col" : "w-full space-y-6"}>
@@ -190,10 +191,10 @@ export function IssuanceWorkspace({
             transition={{ duration: 0.2, ease: "easeOut" }}
             className="space-y-6"
           >
-            {tokensError ? (
-              <div className="rounded-xl border border-[#c71f37]/20 bg-[#c71f37]/[0.03] px-4 py-3">
-                <p className="text-sm font-medium text-[#8a1f2a]">Unable to load tokens</p>
-                <p className="mt-1 text-sm text-[#8a1f2a]">{tokensError}</p>
+            {tokensNotice && tokens.length > 0 ? (
+              <div className="rounded-xl border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.03)] px-4 py-3">
+                <p className="text-sm font-medium text-[#1c1c1d]">Token list unavailable</p>
+                <p className="mt-1 text-sm text-[rgba(28,28,29,0.72)]">{tokensNotice}</p>
               </div>
             ) : null}
 
@@ -219,7 +220,7 @@ export function IssuanceWorkspace({
               </Button>
             </div>
 
-            {tokens.length > 0 && filteredTokens.length === 0 ? (
+            {hasTokens && filteredTokens.length === 0 ? (
               <p className="text-sm text-[rgba(28,28,29,0.64)]">
                 No tokens match your current search.
               </p>

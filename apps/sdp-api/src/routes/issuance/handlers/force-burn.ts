@@ -1,28 +1,19 @@
 import { toMosaicAmount } from "@/lib/amount";
-import { resolveApiKeySigningWalletId } from "@/lib/api-key-wallet-auth";
 import { getAuth } from "@/lib/auth";
 import { AppError, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { assertValidAddress } from "@/lib/solana";
 import { AuditService } from "@/services/audit.service";
 import { createMosaicService } from "@/services/mosaic";
-import { createOrgSigner } from "@/services/solana";
 import { createRpc, simulateTransaction } from "@/services/solana/rpc";
 import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
 import type { Context } from "hono";
 import { forceBurnSchema } from "../schemas";
+import { resolveAuthoritySigner, resolvePermanentDelegateAuthority } from "./authority-resolution";
 import { buildIdempotencyMetadata } from "./idempotency";
 
 type AppContext = Context<{ Bindings: Env }>;
-type TokenRecord = Awaited<ReturnType<TokenService["getToken"]>>;
-
-const resolvePermanentDelegate = (token: TokenRecord): string | null => {
-  if (!token) {
-    return null;
-  }
-  return token.extensions?.permanentDelegate ?? token.mintAuthority;
-};
 
 export const prepareForceBurn = async (c: AppContext) => {
   const { tokenId } = c.req.param();
@@ -57,18 +48,19 @@ export const prepareForceBurn = async (c: AppContext) => {
   }
 
   const permanentDelegateRaw =
-    parsed.data.forceBurn.delegateAuthority ?? resolvePermanentDelegate(token);
+    parsed.data.forceBurn.delegateAuthority ??
+    (await resolvePermanentDelegateAuthority(c.env, tokenService, token));
   if (!permanentDelegateRaw) {
     throw new AppError("BAD_REQUEST", "Permanent delegate is not configured for this token");
   }
 
-  const signingWalletId = resolveApiKeySigningWalletId(
+  const { signer } = await resolveAuthoritySigner({
+    env: c.env,
     auth,
-    parsed.data.signingWalletId ?? token.signingWalletId,
-    ["tokens:admin"]
-  );
-
-  const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId, signingWalletId);
+    token,
+    requestedWalletId: parsed.data.signingWalletId,
+    currentAuthority: permanentDelegateRaw,
+  });
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
   const source = assertValidAddress(parsed.data.forceBurn.source, "source");
   // biome-ignore lint/nursery/noSecrets: Field label used for error messages, not a secret.
@@ -162,21 +154,19 @@ export const executeForceBurn = async (c: AppContext) => {
   }
 
   const permanentDelegateRaw =
-    parsed.data.forceBurn.delegateAuthority ?? resolvePermanentDelegate(token);
+    parsed.data.forceBurn.delegateAuthority ??
+    (await resolvePermanentDelegateAuthority(c.env, tokenService, token));
   if (!permanentDelegateRaw) {
     throw new AppError("BAD_REQUEST", "Permanent delegate is not configured for this token");
   }
 
-  const signingWalletId = resolveApiKeySigningWalletId(
+  const { signer } = await resolveAuthoritySigner({
+    env: c.env,
     auth,
-    parsed.data.signingWalletId ?? token.signingWalletId,
-    ["tokens:admin"]
-  );
-
-  const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId, signingWalletId);
-  if (permanentDelegateRaw !== signer.address) {
-    throw new AppError("BAD_REQUEST", "Permanent delegate is not controlled by custody");
-  }
+    token,
+    requestedWalletId: parsed.data.signingWalletId,
+    currentAuthority: permanentDelegateRaw,
+  });
 
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
   const source = assertValidAddress(parsed.data.forceBurn.source, "source");

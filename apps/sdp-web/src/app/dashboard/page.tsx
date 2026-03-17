@@ -42,6 +42,8 @@ export default async function DashboardPage() {
       ? await fetchOrgIssuanceActivity(apiClient.request, issuanceTokensResult.data)
       : { rows: [], error: null };
 
+  const wallets = walletsResult.data ?? [];
+  const isWalletEmptyState = walletsResult.ok && wallets.length === 0;
   const totalBalance = aggregateResult.data?.balances
     ? resolveTotalBalance(normalizeAggregateBalances(aggregateResult.data.balances))
     : null;
@@ -51,8 +53,10 @@ export default async function DashboardPage() {
     issuanceActivityResult.rows
   );
 
-  const aggregateError = aggregateResult.ok ? null : "Balance data is unavailable right now.";
-  const transfersError = transfersResult.ok ? null : "Payments activity is unavailable right now.";
+  const aggregateError =
+    aggregateResult.ok || isWalletEmptyState ? null : "Balance data is unavailable right now.";
+  const transfersError =
+    transfersResult.ok || isWalletEmptyState ? null : "Payments activity is unavailable right now.";
   const issuanceTokensError = issuanceTokensResult.ok
     ? null
     : "Issuance activity is unavailable right now.";
@@ -74,7 +78,7 @@ export default async function DashboardPage() {
       activityRows={activityRows}
       activityError={activityError}
       activityNotice={activityNotice || null}
-      wallets={walletsResult.data ?? []}
+      wallets={wallets}
     />
   );
 }

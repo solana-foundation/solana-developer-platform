@@ -191,6 +191,19 @@ export interface ForceTransferOptions {
   feePayer: Address;
 }
 
+/**
+ * Options for updating on-chain token metadata fields.
+ */
+export interface UpdateMetadataOptions {
+  mint: Address;
+  name?: string;
+  uri?: string | null;
+  description?: string | null;
+  imageUrl?: string | null;
+  updateAuthority: TransactionSigner;
+  feePayer: TransactionSigner;
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // ABL (Allowlist/Blocklist) Types
 // ═══════════════════════════════════════════════════════════════════════════
