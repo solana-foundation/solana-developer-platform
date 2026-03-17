@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.3](https://github.com/solana-foundation/solana-developer-platform/compare/v0.5.2...v0.5.3) (2026-03-17)
+
+
+### Bug Fixes
+
+* **custody:** improve wallet and token management flows ([#96](https://github.com/solana-foundation/solana-developer-platform/issues/96)) ([66e2f8f](https://github.com/solana-foundation/solana-developer-platform/commit/66e2f8f7c1409c7bd46a748fe224d0c85c75acdf))
+
 ## [0.5.2](https://github.com/solana-foundation/solana-developer-platform/compare/v0.5.1...v0.5.2) (2026-03-14)
 
 
