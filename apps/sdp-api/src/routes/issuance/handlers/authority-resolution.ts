@@ -157,11 +157,11 @@ export async function resolveMetadataAuthority(
     const { rpcUrl } = getSolanaConfig(env);
     const { metadataAuthority } = await fetchMintPermanentDelegate(rpcUrl, token.mintAddress);
 
-    if (metadataAuthority && token.metadataAuthority !== metadataAuthority) {
+    if (metadataAuthority !== token.metadataAuthority) {
       await tokenService.updateTokenAuthorities(token.id, { metadataAuthority });
     }
 
-    return metadataAuthority ?? token.metadataAuthority ?? token.mintAuthority;
+    return metadataAuthority;
   } catch (error) {
     throw new AppError(
       "SOLANA_RPC_ERROR",

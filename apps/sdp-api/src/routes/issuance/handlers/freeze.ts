@@ -64,7 +64,7 @@ async function resolveFreezeTarget(
   env: Env,
   requestedAddress: Address,
   mintAddress: Address
-): Promise<{ tokenAccount: Address; walletAddress: Address }> {
+): Promise<{ tokenAccount: Address }> {
   const rpc = createRpc(env) as Rpc<SolanaRpcApi>;
   const resolved = await resolveTokenAccount(rpc, requestedAddress, mintAddress);
 
@@ -82,7 +82,6 @@ async function resolveFreezeTarget(
   if (resolved.tokenAccount !== requestedAddress) {
     return {
       tokenAccount: resolved.tokenAccount,
-      walletAddress: requestedAddress,
     };
   }
 
@@ -102,9 +101,10 @@ async function resolveFreezeTarget(
     );
   }
 
+  assertValidAddress(owner, "accountAddress");
+
   return {
     tokenAccount: resolved.tokenAccount,
-    walletAddress: assertValidAddress(owner, "accountAddress"),
   };
 }
 
@@ -160,11 +160,7 @@ export const freezeAccount = async (c: AppContext) => {
     currentAuthority: currentAuthorityRaw,
   });
   const requestedAddress = assertValidAddress(parsed.data.accountAddress, "accountAddress");
-  const { tokenAccount, walletAddress } = await resolveFreezeTarget(
-    c.env,
-    requestedAddress,
-    mintAddress
-  );
+  const { tokenAccount } = await resolveFreezeTarget(c.env, requestedAddress, mintAddress);
 
   const idempotencyMetadata = buildIdempotencyMetadata(c.req.header("Idempotency-Key"), {
     tokenId,
@@ -172,7 +168,7 @@ export const freezeAccount = async (c: AppContext) => {
     mode: "execute",
     params: {
       ...parsed.data,
-      accountAddress: walletAddress,
+      accountAddress: tokenAccount,
     },
   });
 
@@ -181,7 +177,7 @@ export const freezeAccount = async (c: AppContext) => {
     organizationId: auth.organizationId,
     type: "freeze",
     params: {
-      accountAddress: walletAddress,
+      accountAddress: tokenAccount,
       reason: parsed.data.reason,
     },
     idempotencyKey: idempotencyMetadata.idempotencyKey,
@@ -194,7 +190,7 @@ export const freezeAccount = async (c: AppContext) => {
       throw new AppError("BAD_REQUEST", tx.error ?? "Previous freeze request failed");
     }
 
-    const latestRecord = await tokenService.getFrozenAccount(tokenId, walletAddress, true);
+    const latestRecord = await tokenService.getFrozenAccount(tokenId, tokenAccount, true);
     if (!latestRecord) {
       throw new AppError("NOT_FOUND", "Replay transaction has no matching account record");
     }
@@ -219,7 +215,7 @@ export const freezeAccount = async (c: AppContext) => {
     // Record in database after successful on-chain operation
     const frozenAccount = await tokenService.freezeAccount({
       tokenId,
-      accountAddress: walletAddress,
+      accountAddress: tokenAccount,
       frozenBy: auth.id,
       reason: parsed.data.reason,
     });
@@ -230,7 +226,7 @@ export const freezeAccount = async (c: AppContext) => {
       signature: result.signature,
       slot: Number(result.slot),
       params: {
-        accountAddress: walletAddress,
+        accountAddress: tokenAccount,
         reason: parsed.data.reason,
         tokenAccountAddress: tokenAccount,
         signature: result.signature,
@@ -246,7 +242,7 @@ export const freezeAccount = async (c: AppContext) => {
       resourceId: frozenAccount.id,
       metadata: {
         tokenId,
-        accountAddress: walletAddress,
+        accountAddress: tokenAccount,
         tokenAccountAddress: tokenAccount,
         reason: parsed.data.reason,
         signature: result.signature,
@@ -350,13 +346,9 @@ export const unfreezeAccount = async (c: AppContext) => {
   }
 
   const requestedAddress = assertValidAddress(parsed.data.accountAddress, "accountAddress");
-  const { tokenAccount, walletAddress } = await resolveFreezeTarget(
-    c.env,
-    requestedAddress,
-    mintAddress
-  );
+  const { tokenAccount } = await resolveFreezeTarget(c.env, requestedAddress, mintAddress);
 
-  const frozen = await tokenService.isAccountFrozen(tokenId, walletAddress);
+  const frozen = await tokenService.isAccountFrozen(tokenId, tokenAccount);
   if (!frozen) {
     throw new AppError("ACCOUNT_NOT_FROZEN", "Account is not frozen");
   }
@@ -375,7 +367,7 @@ export const unfreezeAccount = async (c: AppContext) => {
     mode: "execute",
     params: {
       ...parsed.data,
-      accountAddress: walletAddress,
+      accountAddress: tokenAccount,
     },
   });
 
@@ -384,7 +376,7 @@ export const unfreezeAccount = async (c: AppContext) => {
     organizationId: auth.organizationId,
     type: "unfreeze",
     params: {
-      accountAddress: walletAddress,
+      accountAddress: tokenAccount,
     },
     idempotencyKey: idempotencyMetadata.idempotencyKey,
     idempotencyFingerprint: idempotencyMetadata.idempotencyFingerprint,
@@ -396,7 +388,7 @@ export const unfreezeAccount = async (c: AppContext) => {
       throw new AppError("BAD_REQUEST", tx.error ?? "Previous unfreeze request failed");
     }
 
-    const latestRecord = await tokenService.getFrozenAccount(tokenId, walletAddress, true);
+    const latestRecord = await tokenService.getFrozenAccount(tokenId, tokenAccount, true);
     if (latestRecord) {
       return success(c, {
         frozenAccount: {
@@ -419,7 +411,7 @@ export const unfreezeAccount = async (c: AppContext) => {
     });
 
     // Update database record after successful on-chain operation
-    const frozenAccount = await tokenService.unfreezeAccount(tokenId, walletAddress, auth.id);
+    const frozenAccount = await tokenService.unfreezeAccount(tokenId, tokenAccount, auth.id);
 
     await tokenService.updateTransaction(tx.id, {
       status: "confirmed",
@@ -435,7 +427,7 @@ export const unfreezeAccount = async (c: AppContext) => {
       resourceId: frozenAccount.id,
       metadata: {
         tokenId,
-        accountAddress: walletAddress,
+        accountAddress: tokenAccount,
         tokenAccountAddress: tokenAccount,
         signature: result.signature,
         slot: result.slot.toString(),

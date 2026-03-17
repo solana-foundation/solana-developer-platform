@@ -966,7 +966,7 @@ describe("Issuance Routes", () => {
         expect(res.status).toBe(201);
         const body = await res.json();
         expect(body.data.frozenAccount.id).toMatch(/^frz_/);
-        expect(body.data.frozenAccount.accountAddress).toBe(TEST_SOLANA_ADDRESSES.wallet1);
+        expect(body.data.frozenAccount.accountAddress).toBe(TEST_SOLANA_ADDRESSES.wallet2);
         expect(body.data.frozenAccount.reason).toBe("Suspicious activity");
       });
 
@@ -1160,7 +1160,7 @@ describe("Issuance Routes", () => {
                FROM frozen_accounts
                WHERE token_id = ? AND account_address = ?`
             )
-            .bind(activeTokenId, TEST_SOLANA_ADDRESSES.wallet1)
+            .bind(activeTokenId, TEST_SOLANA_ADDRESSES.wallet2)
             .all<{ id: string; unfrozen_at: string | null; reason: string | null }>();
 
           expect(storedRows.results).toHaveLength(1);

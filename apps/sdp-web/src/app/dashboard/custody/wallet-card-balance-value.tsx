@@ -50,7 +50,7 @@ async function fetchWalletBalances(walletId: string): Promise<CustodyWalletToken
 }
 
 export function WalletCardBalanceValue({ walletId, initialBalances }: WalletCardBalanceValueProps) {
-  const { data } = useSWR<CustodyWalletTokenBalance[]>(
+  const { data, error } = useSWR<CustodyWalletTokenBalance[]>(
     walletId ? `wallet-card-balance:${walletId}` : null,
     () => fetchWalletBalances(walletId),
     {
@@ -64,5 +64,10 @@ export function WalletCardBalanceValue({ walletId, initialBalances }: WalletCard
 
   const totalBalance = resolveTotalBalance(data ?? initialBalances);
 
-  return <span className="font-medium text-[#1c1c1d]">{formatCurrencyAmount(totalBalance)}</span>;
+  return (
+    <span className={`font-medium ${error ? "text-[rgba(28,28,29,0.4)]" : "text-[#1c1c1d]"}`}>
+      {formatCurrencyAmount(totalBalance)}
+      {error ? <span className="sr-only"> (stale)</span> : null}
+    </span>
+  );
 }

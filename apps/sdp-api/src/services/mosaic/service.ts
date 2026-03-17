@@ -759,8 +759,6 @@ export class MosaicService {
       switch (field) {
         case "name":
           return { __kind: "Name" } as const;
-        case "symbol":
-          return { __kind: "Symbol" } as const;
         case "uri":
           return { __kind: "Uri" } as const;
         default:
