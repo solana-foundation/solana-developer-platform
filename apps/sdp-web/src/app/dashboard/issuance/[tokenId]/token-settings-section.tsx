@@ -38,6 +38,7 @@ export function TokenSettingsSection({
           {permissionRows.map((row) => (
             <div
               key={row.id}
+              data-testid={`permission-row-${row.id}`}
               className="flex flex-wrap items-center justify-between gap-3 border-b border-[rgba(28,28,29,0.08)] px-4 py-3 last:border-b-0"
             >
               <div>
@@ -79,6 +80,7 @@ export function TokenSettingsSection({
           {extensionRows.map((row) => (
             <div
               key={row.id}
+              data-testid={`extension-row-${row.id}`}
               className="flex flex-wrap items-center justify-between gap-3 border-b border-[rgba(28,28,29,0.08)] px-4 py-3 last:border-b-0"
             >
               <div>

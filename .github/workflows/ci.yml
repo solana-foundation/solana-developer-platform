@@ -252,17 +252,38 @@ jobs:
       - name: Integration tests
         run: pnpm test:integration
 
-  ui_smoke:
-    name: UI Smoke
+  issuance_e2e:
+    name: Issuance E2E
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
     env:
       NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ vars.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}
       CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
       CLERK_JWT_TEMPLATE: ${{ vars.CLERK_JWT_TEMPLATE || 'sdp-api' }}
-      SDP_API_BASE_URL: ${{ vars.SDP_API_BASE_URL || 'https://sdp-api-dev.solana.workers.dev' }}
-      NEXT_PUBLIC_SDP_API_BASE_URL: ${{ vars.NEXT_PUBLIC_SDP_API_BASE_URL || vars.SDP_API_BASE_URL || 'https://sdp-api-dev.solana.workers.dev' }}
       E2E_CLERK_ORG_NAME: ${{ vars.E2E_CLERK_ORG_NAME || 'Solana' }}
+      E2E_CLERK_TEST_EMAIL: ${{ vars.E2E_CLERK_TEST_EMAIL || 'e2e-smoke+sdp-web@example.com' }}
+      SOLANA_NETWORK: devnet
+      SOLANA_RPC_URL: ${{ vars.SOLANA_RPC_URL || secrets.SOLANA_RPC_URL || 'https://api.devnet.solana.com' }}
+      SOLANA_RPC_DEFAULT_PROVIDER: ${{ vars.SOLANA_RPC_DEFAULT_PROVIDER || secrets.SOLANA_RPC_DEFAULT_PROVIDER || 'default' }}
+      SOLANA_RPC_TRITON_URL: ${{ vars.SOLANA_RPC_TRITON_URL || secrets.SOLANA_RPC_TRITON_URL }}
+      SOLANA_RPC_TRITON_API_KEY: ${{ secrets.SOLANA_RPC_TRITON_API_KEY }}
+      SOLANA_RPC_HELIUS_URL: ${{ vars.SOLANA_RPC_HELIUS_URL || secrets.SOLANA_RPC_HELIUS_URL }}
+      SOLANA_RPC_HELIUS_API_KEY: ${{ secrets.SOLANA_RPC_HELIUS_API_KEY }}
+      SOLANA_RPC_ALCHEMY_URL: ${{ vars.SOLANA_RPC_ALCHEMY_URL || secrets.SOLANA_RPC_ALCHEMY_URL }}
+      SOLANA_RPC_ALCHEMY_API_KEY: ${{ secrets.SOLANA_RPC_ALCHEMY_API_KEY }}
+      SOLANA_RPC_QUICKNODE_URL: ${{ vars.SOLANA_RPC_QUICKNODE_URL || secrets.SOLANA_RPC_QUICKNODE_URL }}
+      SOLANA_RPC_QUICKNODE_API_KEY: ${{ secrets.SOLANA_RPC_QUICKNODE_API_KEY }}
+      PRIVY_APP_ID: ${{ vars.PRIVY_APP_ID || secrets.PRIVY_APP_ID }}
+      PRIVY_APP_SECRET: ${{ secrets.PRIVY_APP_SECRET }}
+      PRIVY_API_BASE_URL: ${{ vars.PRIVY_API_BASE_URL || secrets.PRIVY_API_BASE_URL }}
+      PRIVY_REQUEST_DELAY_MS: ${{ vars.PRIVY_REQUEST_DELAY_MS || secrets.PRIVY_REQUEST_DELAY_MS }}
+      KORA_RPC_URL: ${{ secrets.KORA_RPC_URL || 'https://kora-devnet-315956366746.us-central1.run.app' }}
+      KORA_API_KEY: ${{ secrets.KORA_API_KEY }}
+      API_KEY_PEPPER: ${{ secrets.API_KEY_PEPPER || 'playwright-ci-pepper' }}
+      CUSTODY_ENCRYPTION_KEY: ${{ secrets.CUSTODY_ENCRYPTION_KEY }}
+      PLAYWRIGHT_API_URL: http://127.0.0.1:8787
+      PLAYWRIGHT_API_PORT: "8787"
+      PLAYWRIGHT_API_PERSIST_PATH: .wrangler/state-playwright
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -283,11 +304,63 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
+      - name: Derive Clerk issuer for local API
+        run: |
+          CLERK_HOST=$(node - <<'NODE'
+          const key = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY || "";
+          const encoded = key.split("_").slice(2).join("_");
+          if (!encoded) {
+            throw new Error("NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY is required for issuance e2e");
+          }
+          const normalized = encoded.replace(/-/g, "+").replace(/_/g, "/");
+          const padded = normalized + "=".repeat((4 - (normalized.length % 4)) % 4);
+          const decoded = Buffer.from(padded, "base64").toString("utf8").replace(/\$/g, "").trim();
+          if (!decoded) {
+            throw new Error("Unable to derive Clerk frontend host from publishable key");
+          }
+          process.stdout.write(decoded);
+          NODE
+          )
+          echo "CLERK_ISSUER=https://${CLERK_HOST}" >> "$GITHUB_ENV"
+          echo "CLERK_JWKS_URL=https://${CLERK_HOST}/.well-known/jwks.json" >> "$GITHUB_ENV"
+          echo "SDP_API_BASE_URL=http://127.0.0.1:8787" >> "$GITHUB_ENV"
+          echo "NEXT_PUBLIC_SDP_API_BASE_URL=http://127.0.0.1:8787" >> "$GITHUB_ENV"
+
+      - name: Prepare local API runtime vars
+        run: |
+          cat > apps/sdp-api/.dev.vars <<EOF
+          CLERK_SECRET_KEY=${CLERK_SECRET_KEY}
+          CLERK_ISSUER=${CLERK_ISSUER}
+          CLERK_JWKS_URL=${CLERK_JWKS_URL}
+          CLERK_JWT_TEMPLATE=${CLERK_JWT_TEMPLATE}
+          FRONTEND_URL=http://localhost:3000
+          PRIVY_APP_ID=${PRIVY_APP_ID}
+          PRIVY_APP_SECRET=${PRIVY_APP_SECRET}
+          PRIVY_API_BASE_URL=${PRIVY_API_BASE_URL}
+          PRIVY_REQUEST_DELAY_MS=${PRIVY_REQUEST_DELAY_MS}
+          CUSTODY_ENCRYPTION_KEY=${CUSTODY_ENCRYPTION_KEY}
+          API_KEY_PEPPER=${API_KEY_PEPPER}
+          SOLANA_NETWORK=${SOLANA_NETWORK}
+          SOLANA_RPC_URL=${SOLANA_RPC_URL}
+          SOLANA_RPC_DEFAULT_PROVIDER=${SOLANA_RPC_DEFAULT_PROVIDER}
+          SOLANA_RPC_TRITON_URL=${SOLANA_RPC_TRITON_URL}
+          SOLANA_RPC_TRITON_API_KEY=${SOLANA_RPC_TRITON_API_KEY}
+          SOLANA_RPC_HELIUS_URL=${SOLANA_RPC_HELIUS_URL}
+          SOLANA_RPC_HELIUS_API_KEY=${SOLANA_RPC_HELIUS_API_KEY}
+          SOLANA_RPC_ALCHEMY_URL=${SOLANA_RPC_ALCHEMY_URL}
+          SOLANA_RPC_ALCHEMY_API_KEY=${SOLANA_RPC_ALCHEMY_API_KEY}
+          SOLANA_RPC_QUICKNODE_URL=${SOLANA_RPC_QUICKNODE_URL}
+          SOLANA_RPC_QUICKNODE_API_KEY=${SOLANA_RPC_QUICKNODE_API_KEY}
+          KORA_RPC_URL=${KORA_RPC_URL}
+          KORA_API_KEY=${KORA_API_KEY}
+          SIGNING_PROVIDER=privy
+          EOF
+
       - name: Install Playwright browser
         run: pnpm --filter sdp-web exec playwright install --with-deps chromium
 
-      - name: Run UI smoke test
-        run: pnpm --filter sdp-web test:e2e:smoke
+      - name: Run issuance e2e suite
+        run: pnpm --filter sdp-web test:e2e:issuance
 
       - name: Upload Playwright artifacts
         if: always()

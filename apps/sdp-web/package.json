@@ -9,7 +9,7 @@
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "lint": "eslint",
-    "test:e2e:smoke": "playwright test --config=playwright.config.ts --project=smoke"
+    "test:e2e:issuance": "playwright test --config=playwright.config.ts --project=issuance"
   },
   "dependencies": {
     "@clerk/nextjs": "6.37.2",
@@ -33,6 +33,9 @@
     "@clerk/backend": "3.2.1",
     "@clerk/testing": "2.0.5",
     "@playwright/test": "1.58.2",
+    "@solana-program/system": "catalog:",
+    "@solana/kora": "0.1.2",
+    "@solana/kit": "catalog:",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/qrcode": "1.5.6",

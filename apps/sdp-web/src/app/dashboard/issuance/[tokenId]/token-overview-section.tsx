@@ -38,7 +38,13 @@ function OverviewRow({
   monospace?: boolean;
 }) {
   return (
-    <div className="flex items-center justify-between gap-4 border-b border-[rgba(28,28,29,0.08)] px-4 py-3 last:border-b-0">
+    <div
+      data-testid={`overview-row-${label
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/(^-|-$)/g, "")}`}
+      className="flex items-center justify-between gap-4 border-b border-[rgba(28,28,29,0.08)] px-4 py-3 last:border-b-0"
+    >
       <p className="text-[15px] text-[rgba(28,28,29,0.68)]">{label}</p>
       <p
         className={[

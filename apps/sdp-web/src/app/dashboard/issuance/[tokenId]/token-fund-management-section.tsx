@@ -34,6 +34,7 @@ export function TokenFundManagementSection({
       {rows.map((row) => (
         <div
           key={row.id}
+          data-testid={`fund-management-row-${row.id}`}
           className="flex flex-wrap items-center justify-between gap-3 border-b border-[rgba(28,28,29,0.08)] px-4 py-4 last:border-b-0"
         >
           <div>
