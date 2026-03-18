@@ -9,7 +9,7 @@ import { assertApiKeyWalletAccess, getAllowedApiKeyWalletIds } from "@/lib/api-k
 import { getAuth } from "@/lib/auth";
 import { AppError } from "@/lib/errors";
 import { paginated, success } from "@/lib/response";
-import { assertValidAddress } from "@/lib/solana";
+import { assertValidAddress, getSolanaConfig } from "@/lib/solana";
 import { withHeliusApiKey } from "@/services/rpc-relay.service";
 import { createOrgSigner } from "@/services/solana";
 import {
@@ -544,7 +544,7 @@ function createSignatureHistoryRpc(env: Env) {
   // transfer tracking. The current approach is limited to the most recent ~200 signatures.
   const url = env.SOLANA_RPC_HELIUS_URL
     ? withHeliusApiKey(env.SOLANA_RPC_HELIUS_URL, env.SOLANA_RPC_HELIUS_API_KEY)
-    : env.SOLANA_RPC_URL;
+    : getSolanaConfig(env).rpcUrl;
   return createRpc(env, { rpcUrl: url });
 }
 
