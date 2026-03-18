@@ -32,7 +32,7 @@ export default defineConfig({
       command: "node scripts/dev-local.mjs",
       cwd: path.join(__dirname, "../sdp-api"),
       url: `${localApiUrl}/health`,
-      reuseExistingServer: false,
+      reuseExistingServer: !process.env.CI,
       env: {
         ...resolveProcessEnv(),
         SDP_API_LOCAL_PERSIST_PATH: apiPersistPath,
@@ -47,7 +47,7 @@ export default defineConfig({
       command: "pnpm exec next dev --hostname localhost --port 3000",
       cwd: __dirname,
       url: env.baseURL,
-      reuseExistingServer: false,
+      reuseExistingServer: !process.env.CI,
       env: {
         ...resolveProcessEnv(),
         ...env.webServerEnv,

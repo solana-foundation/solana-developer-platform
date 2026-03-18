@@ -107,7 +107,6 @@ test.describe
 
       await expect(page.getByRole("button", { name: "Deploy" })).toBeVisible();
       await page.getByRole("button", { name: "Deploy" }).click();
-      await page.getByRole("button", { name: "Deploy now", exact: true }).click();
       await Promise.all([waitForExecuteResponse(page), confirmAction(page, "Deploy now")]);
 
       await waitForToast(page, "Deploy transaction finalized.");

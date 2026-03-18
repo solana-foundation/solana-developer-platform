@@ -218,7 +218,7 @@ jobs:
       SOLANA_RPC_URL: ${{ vars.SOLANA_RPC_URL || secrets.SOLANA_RPC_URL || 'https://api.devnet.solana.com' }}
 
       # Kora configuration (override as needed)
-      KORA_RPC_URL: ${{ secrets.KORA_RPC_URL || 'https://kora-devnet-315956366746.us-central1.run.app' }}
+      KORA_RPC_URL: ${{ secrets.KORA_RPC_URL }}
       KORA_API_KEY: ${{ secrets.KORA_API_KEY }}
 
       # Privy configuration for live wallet provisioning/signing integration checks
@@ -249,6 +249,17 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
+      - name: Validate integration runtime secrets
+        run: |
+          if [ -z "${KORA_RPC_URL}" ]; then
+            echo "KORA_RPC_URL must be set for integration tests" >&2
+            exit 1
+          fi
+          if [ -z "${PRIVY_APP_ID}" ] || [ -z "${PRIVY_APP_SECRET}" ]; then
+            echo "PRIVY_APP_ID and PRIVY_APP_SECRET must be set for integration tests" >&2
+            exit 1
+          fi
+
       - name: Integration tests
         run: pnpm test:integration
 
@@ -277,7 +288,7 @@ jobs:
       PRIVY_APP_SECRET: ${{ secrets.PRIVY_APP_SECRET }}
       PRIVY_API_BASE_URL: ${{ vars.PRIVY_API_BASE_URL || secrets.PRIVY_API_BASE_URL }}
       PRIVY_REQUEST_DELAY_MS: ${{ vars.PRIVY_REQUEST_DELAY_MS || secrets.PRIVY_REQUEST_DELAY_MS }}
-      KORA_RPC_URL: ${{ secrets.KORA_RPC_URL || 'https://kora-devnet-315956366746.us-central1.run.app' }}
+      KORA_RPC_URL: ${{ secrets.KORA_RPC_URL }}
       KORA_API_KEY: ${{ secrets.KORA_API_KEY }}
       API_KEY_PEPPER: ${{ secrets.API_KEY_PEPPER || 'playwright-ci-pepper' }}
       CUSTODY_ENCRYPTION_KEY: ${{ secrets.CUSTODY_ENCRYPTION_KEY }}
@@ -303,6 +314,21 @@ jobs:
 
       - name: Install
         run: pnpm install --frozen-lockfile
+
+      - name: Validate issuance e2e runtime secrets
+        run: |
+          if [ -z "${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY}" ] || [ -z "${CLERK_SECRET_KEY}" ]; then
+            echo "Clerk publishable and secret keys must be set for issuance e2e" >&2
+            exit 1
+          fi
+          if [ -z "${PRIVY_APP_ID}" ] || [ -z "${PRIVY_APP_SECRET}" ]; then
+            echo "PRIVY_APP_ID and PRIVY_APP_SECRET must be set for issuance e2e" >&2
+            exit 1
+          fi
+          if [ -z "${KORA_RPC_URL}" ]; then
+            echo "KORA_RPC_URL must be set for issuance e2e" >&2
+            exit 1
+          fi
 
       - name: Derive Clerk issuer for local API
         run: |

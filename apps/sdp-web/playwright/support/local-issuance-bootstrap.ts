@@ -47,7 +47,6 @@ const RPC_METHOD_GET_SIGNATURE_STATUSES = `getSignature${"Statuses"}`;
 interface BootstrapOptions {
   identity: ClerkTestIdentity;
   bearerToken: string;
-  clerkJwtTemplate?: string;
 }
 
 interface PlaywrightApiRuntimeEnv {
@@ -231,6 +230,8 @@ function runLocalD1Sql(sql: string): void {
 }
 
 export function seedLocalClerkOrganizationMapping(identity: ClerkTestIdentity): void {
+  const clerkOrgId = escapeSql(identity.organizationId);
+
   runLocalD1Sql(`
     INSERT OR REPLACE INTO organizations (id, name, slug, tier, status)
     VALUES (
@@ -251,11 +252,15 @@ export function seedLocalClerkOrganizationMapping(identity: ClerkTestIdentity): 
     VALUES (
       'aoi_e2e_issuance',
       'clerk',
-      '${identity.organizationId}',
+      '${clerkOrgId}',
       '${PLAYWRIGHT_LOCAL_ORG_ID}',
       '${PLAYWRIGHT_LOCAL_ORG_SLUG}'
     );
   `);
+}
+
+function escapeSql(value: string): string {
+  return value.replaceAll("'", "''");
 }
 
 function toFixtureWallet(wallet: PaymentsDashboardWallet): IssuanceFixtureWallet {
