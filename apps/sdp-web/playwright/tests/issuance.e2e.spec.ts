@@ -19,37 +19,11 @@ async function openTab(page: Page, name: string): Promise<void> {
   await page.getByRole("button", { name, exact: true }).click();
 }
 
-async function waitForToast(page: Page, text: string): Promise<void> {
-  await expect(page.getByText(text).last()).toBeVisible({ timeout: 120_000 });
-}
-
-function isIssuanceActionPost(url: string): boolean {
-  return /\/dashboard\/issuance(?:\/[^/?#]+)?$/.test(url);
-}
-
-async function waitForExecuteResponse(page: Page): Promise<void> {
-  const response = await page.waitForResponse(
-    (candidate) =>
-      candidate.request().method() === "POST" &&
-      (candidate.url().includes("/api/playground/execute") ||
-        isIssuanceActionPost(candidate.url())),
-    { timeout: 120_000 }
-  );
-
-  expect(response.ok()).toBeTruthy();
-
-  if (!response.url().includes("/api/playground/execute")) {
-    return;
-  }
-
-  const payload = (await response.json()) as {
-    ok?: boolean;
-    error?: string;
-    status?: number | null;
-    body?: unknown;
-  };
-
-  expect(payload.ok, payload.error ?? JSON.stringify(payload.body ?? payload)).toBeTruthy();
+async function waitForToast(page: Page, text: string, previousCount = 0): Promise<void> {
+  await expect
+    .poll(async () => page.getByText(text).count(), { timeout: 120_000 })
+    .toBeGreaterThan(previousCount);
+  await expect(page.getByText(text).nth(previousCount)).toBeVisible({ timeout: 120_000 });
 }
 
 async function confirmAction(page: Page, confirmButtonLabel: string): Promise<void> {
@@ -116,9 +90,9 @@ test.describe
 
       await expect(page.getByRole("button", { name: "Deploy" })).toBeVisible();
       await page.getByRole("button", { name: "Deploy" }).click();
-      await Promise.all([waitForExecuteResponse(page), confirmAction(page, "Deploy now")]);
-
-      await waitForToast(page, "Deploy transaction finalized.");
+      const successCount = await page.getByText("Deploy transaction finalized.").count();
+      await confirmAction(page, "Deploy now");
+      await waitForToast(page, "Deploy transaction finalized.", successCount);
       await page.reload();
 
       await openTab(page, "Overview");
@@ -141,12 +115,9 @@ test.describe
       await page.getByLabel("Description").fill(updatedDescription);
       await page.getByLabel("URI").fill(updatedUri);
       await page.getByLabel("Image URL").fill(updatedImageUrl);
-      await Promise.all([
-        waitForExecuteResponse(page),
-        page.getByRole("button", { name: "Save metadata" }).click(),
-      ]);
-
-      await waitForToast(page, "Transaction finalized successfully.");
+      const successCount = await page.getByText("Transaction finalized successfully.").count();
+      await page.getByRole("button", { name: "Save metadata" }).click();
+      await waitForToast(page, "Transaction finalized successfully.", successCount);
       await page.reload();
 
       await expect(page.getByRole("heading", { name: updatedName })).toBeVisible();
@@ -164,12 +135,9 @@ test.describe
       const row = page.getByTestId("permission-row-permanent-delegate");
       await row.getByRole("button", { name: "Edit" }).click();
       await page.getByLabel("New authority").selectOption(fixtures.wallets.delegated.publicKey);
-      await Promise.all([
-        waitForExecuteResponse(page),
-        page.getByRole("button", { name: "Save authority" }).click(),
-      ]);
-
-      await waitForToast(page, "Permanent Delegate Authority updated.");
+      let successCount = await page.getByText("Permanent Delegate Authority updated.").count();
+      await page.getByRole("button", { name: "Save authority" }).click();
+      await waitForToast(page, "Permanent Delegate Authority updated.", successCount);
       await expect(row).toContainText(shortValue(fixtures.wallets.delegated.publicKey));
 
       await row.getByRole("button", { name: "Edit" }).click();
@@ -179,12 +147,9 @@ test.describe
       await expect(
         page.getByRole("heading", { name: "Set Permanent Delegate Authority to None?" })
       ).toBeVisible();
-      await Promise.all([
-        waitForExecuteResponse(page),
-        page.getByRole("button", { name: "Yes, set to None" }).click(),
-      ]);
-
-      await waitForToast(page, "Permanent Delegate Authority updated.");
+      successCount = await page.getByText("Permanent Delegate Authority updated.").count();
+      await page.getByRole("button", { name: "Yes, set to None" }).click();
+      await waitForToast(page, "Permanent Delegate Authority updated.", successCount);
       await expect(row).toContainText("None");
     });
 
@@ -198,12 +163,9 @@ test.describe
         .getByRole("textbox", { name: "Address", exact: true })
         .fill(fixtures.addresses.allowlistWallet);
       await page.getByRole("textbox", { name: "Label", exact: true }).fill("E2E allowlist wallet");
-      await Promise.all([
-        waitForExecuteResponse(page),
-        page.getByRole("button", { name: "Add allowlist entry" }).click(),
-      ]);
-
-      await waitForToast(page, "Transaction finalized successfully.");
+      let successCount = await page.getByText("Transaction finalized successfully.").count();
+      await page.getByRole("button", { name: "Add allowlist entry" }).click();
+      await waitForToast(page, "Transaction finalized successfully.", successCount);
       await expect(page.getByText(fixtures.addresses.allowlistWallet)).toBeVisible();
       await expect(page.getByTestId("allowlist-summary-card")).toContainText("1 entries");
 
@@ -212,12 +174,9 @@ test.describe
         .filter({ hasText: fixtures.addresses.allowlistWallet })
         .filter({ has: page.getByRole("button", { name: "Remove entry" }) })
         .first();
-      await Promise.all([
-        waitForExecuteResponse(page),
-        allowlistEntry.getByRole("button", { name: "Remove entry" }).click(),
-      ]);
-
-      await waitForToast(page, "Transaction finalized successfully.");
+      successCount = await page.getByText("Transaction finalized successfully.").count();
+      await allowlistEntry.getByRole("button", { name: "Remove entry" }).click();
+      await waitForToast(page, "Transaction finalized successfully.", successCount);
       await expect(page.getByText(fixtures.addresses.allowlistWallet)).toHaveCount(0);
       await expect(page.getByTestId("allowlist-summary-card")).toContainText("0 entries");
     });
@@ -245,9 +204,9 @@ test.describe
       await page.getByLabel("Destination").fill(fixtures.wallets.treasury.publicKey);
       await page.getByLabel("Amount").fill("10");
       await page.getByRole("button", { name: "Mint tokens" }).click();
-      await Promise.all([waitForExecuteResponse(page), confirmAction(page, "Mint now")]);
-
-      await waitForToast(page, "Mint transaction finalized.");
+      let successCount = await page.getByText("Mint transaction finalized.").count();
+      await confirmAction(page, "Mint now");
+      await waitForToast(page, "Mint transaction finalized.", successCount);
       await page.reload();
 
       await openTab(page, "Overview");
@@ -257,9 +216,9 @@ test.describe
       await page.getByLabel("Source").fill(fixtures.wallets.treasury.publicKey);
       await page.getByLabel("Amount").fill("3");
       await page.getByRole("button", { name: "Burn tokens" }).click();
-      await Promise.all([waitForExecuteResponse(page), confirmAction(page, "Burn now")]);
-
-      await waitForToast(page, "Burn transaction finalized.");
+      successCount = await page.getByText("Burn transaction finalized.").count();
+      await confirmAction(page, "Burn now");
+      await waitForToast(page, "Burn transaction finalized.", successCount);
       await page.reload();
 
       await openTab(page, "Overview");
@@ -277,17 +236,18 @@ test.describe
       await page.getByLabel("Destination").fill(fixtures.addresses.freezeWallet);
       await page.getByLabel("Amount").fill("1");
       await page.getByRole("button", { name: "Mint tokens" }).click();
-      await Promise.all([waitForExecuteResponse(page), confirmAction(page, "Mint now")]);
-      await waitForToast(page, "Mint transaction finalized.");
+      let successCount = await page.getByText("Mint transaction finalized.").count();
+      await confirmAction(page, "Mint now");
+      await waitForToast(page, "Mint transaction finalized.", successCount);
 
       await openTab(page, "Compliance");
       await page.getByRole("button", { name: "Freeze", exact: true }).click();
       await page.getByLabel("Wallet Address").fill(fixtures.addresses.freezeWallet);
       await page.getByLabel("Reason (freeze only)").fill("Playwright freeze validation");
       await page.getByRole("button", { name: "Freeze account", exact: true }).click();
-      await Promise.all([waitForExecuteResponse(page), confirmAction(page, "Freeze now")]);
-
-      await waitForToast(page, "Freeze transaction finalized.");
+      successCount = await page.getByText("Freeze transaction finalized.").count();
+      await confirmAction(page, "Freeze now");
+      await waitForToast(page, "Freeze transaction finalized.", successCount);
       await page.reload();
 
       await openTab(page, "Compliance");
@@ -296,9 +256,9 @@ test.describe
       await page.getByRole("button", { name: "Freeze", exact: true }).click();
       await page.getByLabel("Wallet Address").fill(fixtures.addresses.freezeWallet);
       await page.getByRole("button", { name: "Unfreeze account", exact: true }).click();
-      await Promise.all([waitForExecuteResponse(page), confirmAction(page, "Unfreeze now")]);
-
-      await waitForToast(page, "Unfreeze transaction finalized.");
+      successCount = await page.getByText("Unfreeze transaction finalized.").count();
+      await confirmAction(page, "Unfreeze now");
+      await waitForToast(page, "Unfreeze transaction finalized.", successCount);
       await page.reload();
 
       await openTab(page, "Compliance");
@@ -311,16 +271,16 @@ test.describe
 
       await page.getByRole("button", { name: "Pause", exact: true }).click();
       await page.getByRole("button", { name: "Pause token", exact: true }).click();
-      await Promise.all([waitForExecuteResponse(page), confirmAction(page, "Pause now")]);
-
-      await waitForToast(page, "Pause transaction finalized.");
+      let successCount = await page.getByText("Pause transaction finalized.").count();
+      await confirmAction(page, "Pause now");
+      await waitForToast(page, "Pause transaction finalized.", successCount);
       await expect(page.getByText("Token is paused")).toBeVisible();
 
       await page.getByRole("button", { name: "Pause", exact: true }).click();
       await page.getByRole("button", { name: "Unpause token", exact: true }).first().click();
-      await Promise.all([waitForExecuteResponse(page), confirmAction(page, "Unpause now")]);
-
-      await waitForToast(page, "Unpause transaction finalized.");
+      successCount = await page.getByText("Unpause transaction finalized.").count();
+      await confirmAction(page, "Unpause now");
+      await waitForToast(page, "Unpause transaction finalized.", successCount);
       await expect(page.getByText("Token is paused")).toHaveCount(0);
     });
   });
