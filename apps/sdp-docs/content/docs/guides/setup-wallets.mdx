@@ -14,7 +14,8 @@ Wallets are Solana keypairs managed by a custody provider. SDP uses them to sign
 | **Coinbase CDP** | Coinbase Developer Platform custody | Production |
 | **Para** | MPC wallet infrastructure | Production |
 | **Turnkey** | Non-custodial key management | Production |
-| **Local** | Key stored in the database | Development and testing only |
+| **DFNS** | API-driven MPC wallet orchestration | Production |
+| **Anchorage** | Institutional custody with managed wallet lifecycle | Compliance and treasury operations |
 
 <Tabs items={["Dashboard", "API"]}>
 <Tab value="Dashboard">
@@ -25,24 +26,26 @@ Open the sidebar and click **Wallets**. If you haven't linked your organization 
 
 ### 2. Start wallet setup
 
-Click **Get started** on the "Enable wallets" card. This takes you to the setup page titled **Create your master signing wallet**.
+Click **Get started** on the wallet setup card. This opens the provider setup flow.
 
 ### 3. Configure your provider
 
 Fill in the setup form:
 
-- **Provider** — select **Privy (recommended)** for production or **Local (development only)** for testing
-- **Wallet label** — a descriptive name (placeholder: "Master wallet")
+- **Provider** — choose from the supported custody providers shown in the setup grid
+- **Wallet label** — a descriptive name for the first wallet
+- **Fireblocks credentials** — required only when the selected provider is Fireblocks
 
-Click **Provision wallet** to initialize signing.
+Click **Connect provider & create wallet** to initialize signing and provision the first wallet.
 
 ### 4. View your wallet
 
-After provisioning, the Wallets page shows your signing configuration:
+After provisioning, the Wallets page shows your active provider configuration and wallet cards:
 
 - **Provider** — the active custody provider
-- **Master address** — the public key of your default wallet
-- **Default wallet** — the wallet ID used when no specific wallet is referenced
+- **Address** — the wallet public key
+- **Wallet ID** — the custody wallet identifier used by SDP
+- **Balance** — the latest cached balance for the wallet
 
 A note at the bottom reads: "Changing providers affects new actions only. Existing onchain authorities are not automatically rotated."
 
@@ -50,9 +53,11 @@ A note at the bottom reads: "Changing providers affects new actions only. Existi
 
 Click **New wallet** in the top right. The modal has:
 
-- **Label** — descriptive name (placeholder: "Signing wallet")
-- **Purpose (optional)** — one of: `root`, `mint_authority`, `freeze_authority`, `fee_payer`, `transfer`
-- **Make default** — checkbox to set this as the default signing wallet
+- **Provider** — preselected when only one active provider can create wallets, otherwise selectable
+- **Capabilities** — provider feature chips for issuance, transfers, or compliance
+- **Wallet label** — descriptive name (placeholder: "Signing wallet")
+
+Some providers can be connected but do not yet support provisioning additional wallets from the dashboard.
 
 </Tab>
 <Tab value="API">
@@ -152,7 +157,7 @@ HttpRequest request = HttpRequest.newBuilder()
 </Tab>
 </Tabs>
 
-Available purposes: `root`, `mint_authority`, `freeze_authority`, `fee_payer`, `transfer`.
+The `purpose` field is optional metadata in the API. The current dashboard create-wallet flow does not expose wallet-purpose selection.
 
 ### 3. Check signing configuration
 

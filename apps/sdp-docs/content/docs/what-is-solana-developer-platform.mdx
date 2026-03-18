@@ -11,9 +11,9 @@ Solana Developer Platform (SDP) is a dashboard and REST API for issuing, transfe
 
 **Wallet custody** — Provision signing wallets through integrated custody providers. SDP manages the signing infrastructure so your team never handles private keys directly.
 
-**Compliance operations** — Freeze individual accounts, pause transfers, seize tokens, and manage allowlists to restrict which addresses can hold a token. All compliance actions accept a reason or memo field for audit trails.
+**Compliance operations** — Freeze individual accounts, pause token activity, seize tokens, and manage allowlists for regulated issuance flows. Selected compliance actions accept reason or memo fields for audit trails.
 
-**Two signing modes** — Every mutation endpoint supports both modes:
+**Two signing modes** — SDP supports both modes for transaction-building flows such as issuance, payments, and compliance actions:
 
 - **Execute** — SDP builds, signs, and submits the transaction in one API call
 - **Prepare** — SDP builds the transaction and returns it unsigned. You sign with your own infrastructure (hardware wallet, multisig, internal HSM) and submit it yourself.

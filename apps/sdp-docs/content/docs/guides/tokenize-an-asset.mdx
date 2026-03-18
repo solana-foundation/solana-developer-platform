@@ -47,7 +47,7 @@ See the full public endpoint map in the [Issuance API reference](/docs/reference
 ## Operational constraints
 
 - A token must be created before deployment, and deployed before minting or transfer operations.
-- Token actions that target an account often require a token account address, not an owner wallet address.
+- Token actions that target an account may accept either a wallet address or a token account address depending on the endpoint. Freeze and unfreeze flows accept a holder wallet address and derive the associated token account when possible.
 - If the relevant authority is external to SDP custody, prefer prepare flows or rotate the authority to a controlled wallet first.
 - If the token is paused, minting and transfer-related operations should be treated as unavailable until it is unpaused.
 
