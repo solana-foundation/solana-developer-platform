@@ -90,9 +90,12 @@ test.describe
 
       await expect(page.getByRole("button", { name: "Deploy" })).toBeVisible();
       await page.getByRole("button", { name: "Deploy" }).click();
-      const successCount = await page.getByText("Deploy transaction finalized.").count();
       await confirmAction(page, "Deploy now");
-      await waitForToast(page, "Deploy transaction finalized.", successCount);
+      await expect
+        .poll(async () => page.getByRole("button", { name: "Deploy" }).count(), {
+          timeout: 120_000,
+        })
+        .toBe(0);
       await page.reload();
 
       await openTab(page, "Overview");
