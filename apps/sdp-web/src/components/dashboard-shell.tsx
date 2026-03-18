@@ -64,12 +64,24 @@ const bottomNavItems: NavItem[] = [
 type DashboardPageConfig = {
   title: string;
   headerNav?: ReactNode;
+  centeredTitle?: string;
+  topBarLeadingContent?: ReactNode;
   showHeaderNavRow?: boolean;
   contentWidthClass?: string;
+  hideTitle?: boolean;
   backAction?: {
     href: string;
     label: string;
   };
+};
+
+type DashboardTopBarProps = {
+  isSidebarOpen: boolean;
+  setSidebarOpen: (value: boolean) => void;
+  hideTitle?: boolean;
+  title: string;
+  centeredTitle?: string;
+  topBarLeadingContent?: ReactNode;
 };
 
 function HeaderBackAction({ href, label }: { href: string; label: string }) {
@@ -81,6 +93,78 @@ function HeaderBackAction({ href, label }: { href: string; label: string }) {
       <ArrowLeft className="h-4 w-4" />
       <span className="text-[13px] leading-[18px] font-medium">{label}</span>
     </Link>
+  );
+}
+
+function SidebarToggle({
+  isSidebarOpen,
+  setSidebarOpen,
+}: {
+  isSidebarOpen: boolean;
+  setSidebarOpen: (value: boolean) => void;
+}) {
+  if (isSidebarOpen) {
+    return null;
+  }
+
+  return (
+    <motion.button
+      type="button"
+      aria-label="Open navigation"
+      onClick={() => setSidebarOpen(true)}
+      className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-[rgba(28,28,29,0.72)] transition-colors hover:bg-[rgba(28,28,29,0.08)]"
+      whileHover={{ scale: 1.05 }}
+      whileTap={{ scale: 0.93, rotate: 8 }}
+    >
+      <motion.div initial={{ rotate: 10 }} animate={{ rotate: 0 }} transition={{ duration: 0.18 }}>
+        <PanelRight className="h-4 w-4" />
+      </motion.div>
+    </motion.button>
+  );
+}
+
+function DashboardTopBar({
+  isSidebarOpen,
+  setSidebarOpen,
+  hideTitle,
+  title,
+  centeredTitle,
+  topBarLeadingContent,
+}: DashboardTopBarProps) {
+  if (centeredTitle) {
+    return (
+      <div className="grid min-h-[40px] grid-cols-[1fr_auto_1fr] items-start gap-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <SidebarToggle isSidebarOpen={isSidebarOpen} setSidebarOpen={setSidebarOpen} />
+          {topBarLeadingContent}
+        </div>
+        <div className="flex items-start justify-center">
+          <h1 className="text-center text-[36px] leading-[40px] font-medium tracking-[-0.3px] text-[#1c1c1d]">
+            {centeredTitle}
+          </h1>
+        </div>
+        <div className="flex items-center justify-end gap-2">
+          <UserButton afterSignOutUrl="/sign-in" />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-start justify-between gap-3">
+      <div className="flex min-w-0 items-center gap-3">
+        <SidebarToggle isSidebarOpen={isSidebarOpen} setSidebarOpen={setSidebarOpen} />
+        {hideTitle ? null : (
+          <h1 className="text-[36px] leading-[40px] font-medium tracking-[-0.3px] text-[#1c1c1d]">
+            {title}
+          </h1>
+        )}
+      </div>
+
+      <div className="flex items-center gap-2">
+        <UserButton afterSignOutUrl="/sign-in" />
+      </div>
+    </div>
   );
 }
 
@@ -152,10 +236,24 @@ function getDashboardPageConfig(pathname: string): DashboardPageConfig {
       },
     };
   }
-  if (pathname.startsWith("/dashboard/payments")) {
+  if (pathname === "/dashboard/payments") {
     return {
       title: "Payments",
       headerNav: <IssuanceHeaderTabs />,
+      contentWidthClass: "max-w-none",
+    };
+  }
+  if (pathname.startsWith("/dashboard/payments/")) {
+    const actionTitle = pathname.endsWith("/receive") ? "Receive" : "Send";
+
+    return {
+      title: "",
+      hideTitle: true,
+      showHeaderNavRow: true,
+      centeredTitle: actionTitle,
+      topBarLeadingContent: (
+        <HeaderBackAction href="/dashboard/payments" label="Back to payments" />
+      ),
       contentWidthClass: "max-w-none",
     };
   }
@@ -228,12 +326,15 @@ export function DashboardShell({ children }: { children: ReactNode }) {
   const sidebarWidth = 296;
   const pageConfig = getDashboardPageConfig(pathname);
   const contentWidthClass = pageConfig.contentWidthClass ?? "max-w-5xl";
-  const headerNav = pageConfig.backAction ? (
+  const backAction = pageConfig.backAction ? (
     <HeaderBackAction href={pageConfig.backAction.href} label={pageConfig.backAction.label} />
-  ) : (
-    pageConfig.headerNav
-  );
-  const shouldRenderHeaderNavRow = pageConfig.showHeaderNavRow || Boolean(headerNav);
+  ) : null;
+  const headerNav = pageConfig.headerNav;
+  const centeredTitle = pageConfig.centeredTitle;
+  const topBarLeadingContent = pageConfig.topBarLeadingContent;
+  const shouldRenderHeaderNavRow =
+    pageConfig.showHeaderNavRow || Boolean(backAction) || Boolean(headerNav);
+  const shouldRenderTopBarBorder = Boolean(centeredTitle) && !shouldRenderHeaderNavRow;
   const shouldLockViewportScroll =
     issuanceTab === "playground" &&
     (pathname === "/dashboard/issuance" ||
@@ -384,47 +485,49 @@ export function DashboardShell({ children }: { children: ReactNode }) {
             ].join(" ")}
           >
             <div className="space-y-4">
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex min-w-0 items-center gap-3">
-                  {!isSidebarOpen ? (
-                    <motion.button
-                      type="button"
-                      aria-label="Open navigation"
-                      onClick={() => setSidebarOpen(true)}
-                      className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-[rgba(28,28,29,0.72)] transition-colors hover:bg-[rgba(28,28,29,0.08)]"
-                      whileHover={{ scale: 1.05 }}
-                      whileTap={{ scale: 0.93, rotate: 8 }}
-                    >
-                      <motion.div
-                        initial={{ rotate: 10 }}
-                        animate={{ rotate: 0 }}
-                        transition={{ duration: 0.18 }}
-                      >
-                        <PanelRight className="h-4 w-4" />
-                      </motion.div>
-                    </motion.button>
-                  ) : null}
-                  <h1 className="text-[36px] leading-[40px] font-medium tracking-[-0.3px] text-[#1c1c1d]">
-                    {pageConfig.title}
-                  </h1>
+              {shouldRenderTopBarBorder ? (
+                <div className="-mx-3 border-b border-[rgba(28,28,29,0.10)] px-3 pb-4 md:-mx-6 md:px-6">
+                  <DashboardTopBar
+                    isSidebarOpen={isSidebarOpen}
+                    setSidebarOpen={setSidebarOpen}
+                    hideTitle={pageConfig.hideTitle}
+                    title={pageConfig.title}
+                    centeredTitle={centeredTitle}
+                    topBarLeadingContent={topBarLeadingContent}
+                  />
                 </div>
-
-                <div className="flex items-center gap-2">
-                  <UserButton afterSignOutUrl="/sign-in" />
-                </div>
-              </div>
+              ) : (
+                <DashboardTopBar
+                  isSidebarOpen={isSidebarOpen}
+                  setSidebarOpen={setSidebarOpen}
+                  hideTitle={pageConfig.hideTitle}
+                  title={pageConfig.title}
+                  centeredTitle={centeredTitle}
+                  topBarLeadingContent={topBarLeadingContent}
+                />
+              )}
 
               {shouldRenderHeaderNavRow ? (
                 <div className="-mx-3 border-b border-[rgba(28,28,29,0.10)] md:-mx-6">
                   <div
                     className={[
                       "px-3 md:px-6",
-                      pageConfig.backAction
-                        ? "flex min-h-[56px] items-start pt-1"
-                        : "flex min-h-[56px] items-end",
+                      backAction && headerNav
+                        ? "grid min-h-[56px] grid-cols-[1fr_auto_1fr] items-center"
+                        : backAction
+                          ? "flex min-h-[56px] items-start pt-1"
+                          : "flex min-h-[56px] items-end",
                     ].join(" ")}
                   >
-                    {headerNav}
+                    {backAction && headerNav ? (
+                      <>
+                        <div className="flex items-center justify-start">{backAction}</div>
+                        <div className="flex items-center justify-center">{headerNav}</div>
+                        <div />
+                      </>
+                    ) : (
+                      (backAction ?? headerNav)
+                    )}
                   </div>
                 </div>
               ) : null}

@@ -251,6 +251,23 @@ interface WalletBalancesEnvelope {
   };
 }
 
+export interface PaymentRampExecution {
+  id: string;
+  provider: string;
+  status: string;
+  redirectUrl?: string;
+  reference?: string;
+}
+
+interface RampExecutionEnvelope {
+  data?: {
+    ramp?: PaymentRampExecution;
+  };
+  error?: {
+    message?: string;
+  };
+}
+
 function resolveWalletBalancesSnapshot(
   envelope: WalletBalancesEnvelope
 ): PaymentWalletBalancesSnapshot | null {
@@ -404,6 +421,30 @@ export async function createTransfer(input: {
   }
 
   return body.data.transfer;
+}
+
+export async function executeRampFlow(
+  direction: "onramp" | "offramp",
+  payload: Record<string, unknown>
+): Promise<PaymentRampExecution> {
+  const response = await fetch(`/api/dashboard/payments/ramps/${direction}/execute`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+  const body = (await response.json().catch(() => ({}))) as RampExecutionEnvelope;
+
+  if (!response.ok) {
+    throw new Error(getApiError(body, `Ramp request failed (${response.status}).`));
+  }
+
+  if (!body.data?.ramp) {
+    throw new Error("Ramp response is missing execution details.");
+  }
+
+  return body.data.ramp;
 }
 
 export async function runComplianceCheck(

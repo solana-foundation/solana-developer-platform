@@ -1018,7 +1018,6 @@ const moonPayRampProvider: RampProviderExecutor = {
       baseCurrencyCode: normalizeMoonPayCurrencyCode(input.cryptoToken),
       baseCurrencyAmount: input.cryptoAmount,
       quoteCurrencyCode: "usd",
-      walletAddress: sourceWalletAddress,
       refundWalletAddress: sourceWalletAddress,
       redirectURL: input.redirectUrl,
       externalCustomerId: input.kycReference,
