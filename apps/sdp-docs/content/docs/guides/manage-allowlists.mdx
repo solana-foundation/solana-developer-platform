@@ -3,14 +3,14 @@ title: Manage Allowlists
 description: Control which addresses can hold your token using allowlists.
 ---
 
-Tokens created with `requiresAllowlist: true` restrict transfers to approved addresses only. Any transfer to an address not on the allowlist will fail. This is essential for regulated tokens like tokenized securities.
+Tokens created with `requiresAllowlist: true` keep a list of approved destination addresses for controlled token actions. SDP enforces that list on allowlist-aware issuance flows such as minting and administrative transfers. Payment transfers use wallet-level destination allowlists instead of this token allowlist. This is essential for regulated tokens like tokenized securities.
 
-These operations are currently API-only.
+When a token is created without an allowlist, the dashboard hides allowlist management for that token.
 
 ## Prerequisites
 
 - A token with `requiresAllowlist` enabled
-- The `tokens:write` permission
+- The `tokens:write` permission for API key callers
 
 ## Add an address
 

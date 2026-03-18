@@ -5,11 +5,11 @@ description: Freeze accounts, pause transfers, and seize tokens for compliance o
 
 SDP provides compliance controls for tokens that have `isFreezable` enabled or the `pausable` extension. These let you freeze individual accounts, pause all transfers globally, or seize tokens from a specific account.
 
-These operations are currently API-only. All require the `tokens:admin` permission.
+These controls are available from the dashboard and the API. API key callers need `tokens:admin`.
 
 ## Freeze an account
 
-Prevent a specific account from sending or receiving tokens:
+Prevent a specific holder from sending or receiving tokens:
 
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
@@ -56,6 +56,8 @@ HttpRequest request = HttpRequest.newBuilder()
 ```
 </Tab>
 </Tabs>
+
+The `accountAddress` can be the holder wallet address or the matching token account. SDP derives the associated token account when needed.
 
 ## Unfreeze an account
 
@@ -125,9 +127,9 @@ HttpRequest request = HttpRequest.newBuilder()
 </Tab>
 </Tabs>
 
-## Pause all transfers
+## Pause token activity
 
-Halt all transfers of a token globally. Requires the `pausable` extension:
+Halt token activity globally. Requires the `pausable` extension:
 
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
@@ -158,7 +160,7 @@ HttpRequest request = HttpRequest.newBuilder()
 </Tab>
 </Tabs>
 
-While paused, no transfers, mints, or burns can occur.
+While paused, transfer-related and supply-management actions should be treated as unavailable until the token is unpaused.
 
 ## Unpause
 

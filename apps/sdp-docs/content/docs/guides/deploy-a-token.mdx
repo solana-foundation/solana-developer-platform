@@ -5,7 +5,7 @@ description: Deploy a created token to the Solana blockchain.
 
 After [creating a token](/docs/guides/create-a-token), deploy it onchain. Deployment creates the mint account on Solana and assigns authorities to your configured wallets.
 
-Deployment is currently API-only. Dashboard deployment is coming soon.
+You can deploy from the dashboard or through the API. In the dashboard, open the pending token and use **Deploy** from the token header or fund management panel.
 
 ## Prerequisites
 
@@ -50,7 +50,7 @@ HttpRequest request = HttpRequest.newBuilder()
 </Tab>
 </Tabs>
 
-The token status changes from `pending` to `active`, and `mintAddress` is populated with the onchain address. No request body is needed.
+The token status changes from `pending` to `active`, and `mintAddress` is populated with the onchain address. No request body is required for the public deploy endpoint.
 
 ## Prepare mode (you sign)
 

@@ -5,7 +5,7 @@ description: Increase or decrease token supply by minting and burning.
 
 After [deploying a token](/docs/guides/deploy-a-token), you can mint new tokens to any address and burn tokens from accounts you control. Force-burn lets admins burn from any account without the holder's signature.
 
-These operations are currently API-only.
+These operations are available from the dashboard and the API.
 
 ## Prerequisites
 
@@ -204,7 +204,7 @@ HttpRequest request = HttpRequest.newBuilder()
 </Tab>
 </Tabs>
 
-The `source` must be a token account address (not a wallet address).
+The `source` can be the authority wallet or its token account. Use force-burn for other holder accounts.
 
 ## Force-burn (admin)
 

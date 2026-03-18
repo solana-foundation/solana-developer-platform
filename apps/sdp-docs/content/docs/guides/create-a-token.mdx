@@ -29,36 +29,34 @@ The first step shows a grid of template cards:
 
 - **Stablecoin** — USD-backed stablecoins with compliance controls
 - **Arcade** — closed-loop gaming tokens with optional allowlists
-- **Tokenized Security** — regulated assets with allowlist defaults
+- **Tokenized Security** — regulated assets with an allowlist requirement
 - **Custom** — fully customizable Token-2022 configuration
 
 Select a template and click **Continue**.
 
 ### 3. Configure token settings (Step 2 of 3)
 
-Fill in the token form:
+Enter the token identity details:
 
+- **Metadata URI** (required) — HTTPS URL for the token metadata JSON
 - **Token name** (required) — e.g., "Acme Dollar"
 - **Symbol** (required) — 1–10 uppercase alphanumeric characters, e.g., "ACME"
-- **Decimals** — pre-filled by the template, adjustable (0–18)
-- **Description (optional)** — e.g., "Asset-backed token for treasury operations"
-- **Max supply (optional)** — leave empty to keep supply uncapped
+- **Decimals** — chosen from the options allowed by the selected template
 
-Checkboxes:
+Click **Continue** when ready.
 
-- **Require allowlist**
-- **Token is mintable** (default: checked)
-- **Token is freezable** (default: checked)
+### 4. Choose operational settings (Step 3 of 3)
 
-Click **Review** when ready.
+Choose the operational settings:
 
-### 4. Review and confirm (Step 3 of 3)
+- **Main signer** — the controlled wallet SDP should use for deploy and later token actions
+- **Allowlist** — enabled or disabled, depending on the template's rules
 
-The review screen shows a read-only summary of all settings. Click **Create token**.
+For `tokenized-security`, allowlist is required and cannot be disabled. Click **Create token** to save the draft.
 
 ### 5. Done
 
-A success screen confirms creation with the token name and ID. The token is now in `pending` status, ready to be [deployed](/docs/guides/deploy-a-token).
+A success toast confirms creation. The token is now in `pending` status, ready to be [deployed](/docs/guides/deploy-a-token).
 
 </Tab>
 <Tab value="API">
