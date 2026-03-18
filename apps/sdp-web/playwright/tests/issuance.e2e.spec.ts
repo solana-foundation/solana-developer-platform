@@ -23,15 +23,24 @@ async function waitForToast(page: Page, text: string): Promise<void> {
   await expect(page.getByText(text).last()).toBeVisible({ timeout: 120_000 });
 }
 
+function isIssuanceActionPost(url: string): boolean {
+  return /\/dashboard\/issuance(?:\/[^/?#]+)?$/.test(url);
+}
+
 async function waitForExecuteResponse(page: Page): Promise<void> {
   const response = await page.waitForResponse(
     (candidate) =>
-      candidate.url().includes("/api/playground/execute") &&
-      candidate.request().method() === "POST",
+      candidate.request().method() === "POST" &&
+      (candidate.url().includes("/api/playground/execute") ||
+        isIssuanceActionPost(candidate.url())),
     { timeout: 120_000 }
   );
 
   expect(response.ok()).toBeTruthy();
+
+  if (!response.url().includes("/api/playground/execute")) {
+    return;
+  }
 
   const payload = (await response.json()) as {
     ok?: boolean;
