@@ -90,8 +90,16 @@ test.describe
 
       await expect(page.getByRole("button", { name: "Deploy" })).toBeVisible();
       await page.getByRole("button", { name: "Deploy" }).click();
+      await expect(
+        page.getByText(
+          "This will deploy the token on-chain so fund management actions can be used."
+        )
+      ).toBeVisible();
+      await page.getByRole("button", { name: "Deploy now", exact: true }).click();
+      await expect(page.getByRole("heading", { name: "Deploy token?" })).toBeVisible();
+      const successCount = await page.getByText("Deploy transaction finalized.").count();
       await confirmAction(page, "Deploy now");
-      await page.waitForTimeout(3_000);
+      await waitForToast(page, "Deploy transaction finalized.", successCount);
       await expect
         .poll(
           async () => {
