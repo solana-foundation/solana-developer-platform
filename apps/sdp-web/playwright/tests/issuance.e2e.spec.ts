@@ -30,16 +30,6 @@ async function confirmAction(page: Page, confirmButtonLabel: string): Promise<vo
   await page.getByRole("button", { name: confirmButtonLabel, exact: true }).click();
 }
 
-async function waitForTokenPageAction(page: Page, tokenId: string): Promise<void> {
-  await page.waitForResponse(
-    (response) =>
-      response.request().method() === "POST" &&
-      response.url().includes(`/dashboard/issuance/${tokenId}`) &&
-      response.status() === 200,
-    { timeout: 120_000 }
-  );
-}
-
 async function openFundManagementAction(page: Page, action: string): Promise<void> {
   await openTab(page, "Fund Management");
   const row = page.getByTestId(`fund-management-row-${action}`);
@@ -100,16 +90,18 @@ test.describe
 
       await expect(page.getByRole("button", { name: "Deploy" })).toBeVisible();
       await page.getByRole("button", { name: "Deploy" }).click();
-      await Promise.all([
-        waitForTokenPageAction(page, fixtures.tokens.pending.id),
-        confirmAction(page, "Deploy now"),
-      ]);
-      await page.reload();
-
-      await openTab(page, "Overview");
-      await expect(page.getByTestId("overview-row-token-address")).not.toContainText(
-        "Not deployed"
-      );
+      await confirmAction(page, "Deploy now");
+      await page.waitForTimeout(3_000);
+      await expect
+        .poll(
+          async () => {
+            await page.reload();
+            await openTab(page, "Overview");
+            return (await page.getByTestId("overview-row-token-address").textContent()) ?? "";
+          },
+          { timeout: 120_000, intervals: [1_000, 2_000, 5_000] }
+        )
+        .not.toContain("Not deployed");
       await expect(page.getByRole("button", { name: "Deploy" })).toHaveCount(0);
     });
 
