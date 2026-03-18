@@ -44,6 +44,7 @@ infra/kora/.env
 # Test coverage
 coverage/
 apps/sdp-web/playwright/.clerk/
+apps/sdp-web/playwright/.fixtures/
 apps/sdp-web/playwright-report/
 apps/sdp-web/test-results/
 

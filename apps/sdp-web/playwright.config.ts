@@ -4,6 +4,10 @@ import { getE2EEnv } from "./playwright/env";
 
 const env = getE2EEnv();
 const authStatePath = path.join(__dirname, "playwright/.clerk/user.json");
+const fixturesPath = path.join(__dirname, "playwright/.fixtures/issuance.json");
+const localApiPort = process.env.PLAYWRIGHT_API_PORT ?? "8787";
+const localApiUrl = process.env.PLAYWRIGHT_API_URL ?? `http://127.0.0.1:${localApiPort}`;
+const apiPersistPath = process.env.PLAYWRIGHT_API_PERSIST_PATH ?? ".wrangler/state-playwright";
 
 function resolveProcessEnv(): Record<string, string> {
   return Object.fromEntries(
@@ -15,26 +19,46 @@ export default defineConfig({
   testDir: "./playwright/tests",
   fullyParallel: false,
   forbidOnly: Boolean(process.env.CI),
-  retries: process.env.CI ? 2 : 0,
+  retries: 0,
+  timeout: 180_000,
   workers: 1,
   reporter: process.env.CI ? [["github"], ["html", { open: "never" }]] : [["list"]],
   use: {
     baseURL: env.baseURL,
     trace: "on-first-retry",
   },
-  webServer: {
-    command: "pnpm exec next dev --hostname localhost --port 3000",
-    cwd: __dirname,
-    url: env.baseURL,
-    reuseExistingServer: !process.env.CI,
-    env: {
-      ...resolveProcessEnv(),
-      ...env.webServerEnv,
+  webServer: [
+    {
+      command: "node scripts/dev-local.mjs",
+      cwd: path.join(__dirname, "../sdp-api"),
+      url: `${localApiUrl}/health`,
+      reuseExistingServer: !process.env.CI,
+      env: {
+        ...resolveProcessEnv(),
+        SDP_API_LOCAL_PERSIST_PATH: apiPersistPath,
+        SDP_API_PORT: localApiPort,
+        SDP_API_RESET_LOCAL_STATE: "1",
+      },
+      stdout: "pipe",
+      stderr: "pipe",
+      timeout: 180_000,
     },
-    stdout: "pipe",
-    stderr: "pipe",
-    timeout: 120_000,
-  },
+    {
+      command: "pnpm exec next dev --hostname localhost --port 3000",
+      cwd: __dirname,
+      url: env.baseURL,
+      reuseExistingServer: !process.env.CI,
+      env: {
+        ...resolveProcessEnv(),
+        ...env.webServerEnv,
+        SDP_API_BASE_URL: localApiUrl,
+        NEXT_PUBLIC_SDP_API_BASE_URL: localApiUrl,
+      },
+      stdout: "pipe",
+      stderr: "pipe",
+      timeout: 180_000,
+    },
+  ],
   projects: [
     {
       name: "auth-setup",
@@ -44,8 +68,8 @@ export default defineConfig({
       },
     },
     {
-      name: "smoke",
-      testMatch: /.*\.smoke\.spec\.ts/,
+      name: "issuance",
+      testMatch: /.*issuance.*\.spec\.ts/,
       dependencies: ["auth-setup"],
       use: {
         ...devices["Desktop Chrome"],
@@ -53,4 +77,10 @@ export default defineConfig({
       },
     },
   ],
+  outputDir: path.join(__dirname, "test-results"),
+  metadata: {
+    authStatePath,
+    fixturesPath,
+    localApiUrl,
+  },
 });

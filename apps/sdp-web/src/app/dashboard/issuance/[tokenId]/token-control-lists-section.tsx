@@ -35,7 +35,10 @@ export function TokenControlListsSection({
       </CardHeader>
       <CardContent className="space-y-4">
         {showAllowlist ? (
-          <div className="rounded-xl border border-[rgba(28,28,29,0.12)] p-3">
+          <div
+            data-testid="allowlist-summary-card"
+            className="rounded-xl border border-[rgba(28,28,29,0.12)] p-3"
+          >
             <p className="text-sm font-medium text-[#1c1c1d]">Allowlist Entries</p>
             {allowlistError ? (
               <p className="mt-1 text-sm text-[#8a1f2a]">{allowlistError}</p>
@@ -53,7 +56,10 @@ export function TokenControlListsSection({
             )}
           </div>
         ) : null}
-        <div className="rounded-xl border border-[rgba(28,28,29,0.12)] p-3">
+        <div
+          data-testid="frozen-accounts-summary-card"
+          className="rounded-xl border border-[rgba(28,28,29,0.12)] p-3"
+        >
           <p className="text-sm font-medium text-[#1c1c1d]">Frozen Accounts</p>
           {frozenAccountsError ? (
             <p className="mt-1 text-sm text-[#8a1f2a]">{frozenAccountsError}</p>

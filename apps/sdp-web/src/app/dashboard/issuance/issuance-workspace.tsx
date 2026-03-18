@@ -230,6 +230,7 @@ export function IssuanceWorkspace({
               {filteredTokens.map((token) => (
                 <article
                   key={token.id}
+                  data-testid={`token-card-${token.id}`}
                   className="flex min-h-[340px] flex-col rounded-2xl border border-[rgba(28,28,29,0.1)] bg-[#fcfcfa] p-5 shadow-[0_2px_10px_rgba(28,28,29,0.05)]"
                 >
                   <div className="mb-4 h-14 w-14 overflow-hidden rounded-full border border-[rgba(28,28,29,0.1)] bg-white">
@@ -292,6 +293,7 @@ export function IssuanceWorkspace({
               <button
                 type="button"
                 onClick={() => setIsCreateTokenModalOpen(true)}
+                data-testid="token-add-card"
                 className="flex min-h-[340px] items-center justify-center rounded-2xl border border-dashed border-[rgba(28,28,29,0.2)] bg-[#fcfcfa] text-[rgba(28,28,29,0.5)] transition-colors hover:border-[rgba(28,28,29,0.35)] hover:text-[rgba(28,28,29,0.75)]"
                 aria-label="Add new token"
               >

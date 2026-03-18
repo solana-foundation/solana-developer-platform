@@ -49,7 +49,7 @@ export function TokenTransactionsSection({
               </TableHeader>
               <TableBody>
                 {transactions.slice(0, 12).map((transaction) => (
-                  <TableRow key={transaction.id}>
+                  <TableRow key={transaction.id} data-testid={`transaction-row-${transaction.id}`}>
                     <TableCell>{transaction.type}</TableCell>
                     <TableCell>{transaction.status}</TableCell>
                     <TableCell className="max-w-[220px] truncate font-mono text-xs">

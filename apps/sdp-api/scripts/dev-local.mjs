@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -10,6 +11,9 @@ const wranglerBin = path.join(
   ".bin",
   process.platform === "win32" ? "wrangler.cmd" : "wrangler"
 );
+const persistTo = process.env.SDP_API_LOCAL_PERSIST_PATH ?? ".wrangler/state";
+const port = process.env.SDP_API_PORT ?? "8787";
+const shouldResetLocalState = process.env.SDP_API_RESET_LOCAL_STATE === "1";
 let activeChild = null;
 
 for (const signal of ["SIGINT", "SIGTERM"]) {
@@ -50,12 +54,15 @@ function run(command, args, options = {}) {
   });
 }
 
-const devArgs = ["dev", "--local", "--persist-to=.wrangler/state"];
+const devArgs = ["dev", "--local", `--persist-to=${persistTo}`, "--port", port];
 
 try {
+  if (shouldResetLocalState) {
+    fs.rmSync(path.resolve(appDir, persistTo), { recursive: true, force: true });
+  }
   await run(
     wranglerBin,
-    ["d1", "migrations", "apply", "DB", "--local", "--persist-to=.wrangler/state"],
+    ["d1", "migrations", "apply", "DB", "--local", `--persist-to=${persistTo}`],
     {
       // Wrangler skips the confirmation prompt in non-interactive mode.
       env: { CI: "1" },
