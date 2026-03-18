@@ -328,33 +328,42 @@ jobs:
 
       - name: Prepare local API runtime vars
         run: |
-          cat > apps/sdp-api/.dev.vars <<EOF
-          CLERK_SECRET_KEY=${CLERK_SECRET_KEY}
-          CLERK_ISSUER=${CLERK_ISSUER}
-          CLERK_JWKS_URL=${CLERK_JWKS_URL}
-          CLERK_JWT_TEMPLATE=${CLERK_JWT_TEMPLATE}
-          FRONTEND_URL=http://localhost:3000
-          PRIVY_APP_ID=${PRIVY_APP_ID}
-          PRIVY_APP_SECRET=${PRIVY_APP_SECRET}
-          PRIVY_API_BASE_URL=${PRIVY_API_BASE_URL}
-          PRIVY_REQUEST_DELAY_MS=${PRIVY_REQUEST_DELAY_MS}
-          CUSTODY_ENCRYPTION_KEY=${CUSTODY_ENCRYPTION_KEY}
-          API_KEY_PEPPER=${API_KEY_PEPPER}
-          SOLANA_NETWORK=${SOLANA_NETWORK}
-          SOLANA_RPC_URL=${SOLANA_RPC_URL}
-          SOLANA_RPC_DEFAULT_PROVIDER=${SOLANA_RPC_DEFAULT_PROVIDER}
-          SOLANA_RPC_TRITON_URL=${SOLANA_RPC_TRITON_URL}
-          SOLANA_RPC_TRITON_API_KEY=${SOLANA_RPC_TRITON_API_KEY}
-          SOLANA_RPC_HELIUS_URL=${SOLANA_RPC_HELIUS_URL}
-          SOLANA_RPC_HELIUS_API_KEY=${SOLANA_RPC_HELIUS_API_KEY}
-          SOLANA_RPC_ALCHEMY_URL=${SOLANA_RPC_ALCHEMY_URL}
-          SOLANA_RPC_ALCHEMY_API_KEY=${SOLANA_RPC_ALCHEMY_API_KEY}
-          SOLANA_RPC_QUICKNODE_URL=${SOLANA_RPC_QUICKNODE_URL}
-          SOLANA_RPC_QUICKNODE_API_KEY=${SOLANA_RPC_QUICKNODE_API_KEY}
-          KORA_RPC_URL=${KORA_RPC_URL}
-          KORA_API_KEY=${KORA_API_KEY}
-          SIGNING_PROVIDER=privy
-          EOF
+          DEFAULT_CUSTODY_ENCRYPTION_KEY=$(node -e 'process.stdout.write(Buffer.alloc(32, 7).toString("base64"))')
+
+          write_var() {
+            local key="$1"
+            local value="${2-}"
+            if [ -n "$value" ]; then
+              printf '%s=%s\n' "$key" "$value" >> apps/sdp-api/.dev.vars
+            fi
+          }
+
+          : > apps/sdp-api/.dev.vars
+          write_var CLERK_SECRET_KEY "${CLERK_SECRET_KEY}"
+          write_var CLERK_ISSUER "${CLERK_ISSUER}"
+          write_var CLERK_JWKS_URL "${CLERK_JWKS_URL}"
+          write_var CLERK_JWT_TEMPLATE "${CLERK_JWT_TEMPLATE}"
+          write_var FRONTEND_URL "http://localhost:3000"
+          write_var PRIVY_APP_ID "${PRIVY_APP_ID}"
+          write_var PRIVY_APP_SECRET "${PRIVY_APP_SECRET}"
+          write_var PRIVY_API_BASE_URL "${PRIVY_API_BASE_URL:-https://api.privy.io/v1}"
+          write_var PRIVY_REQUEST_DELAY_MS "${PRIVY_REQUEST_DELAY_MS}"
+          write_var CUSTODY_ENCRYPTION_KEY "${CUSTODY_ENCRYPTION_KEY:-$DEFAULT_CUSTODY_ENCRYPTION_KEY}"
+          write_var API_KEY_PEPPER "${API_KEY_PEPPER}"
+          write_var SOLANA_NETWORK "${SOLANA_NETWORK}"
+          write_var SOLANA_RPC_URL "${SOLANA_RPC_URL}"
+          write_var SOLANA_RPC_DEFAULT_PROVIDER "${SOLANA_RPC_DEFAULT_PROVIDER}"
+          write_var SOLANA_RPC_TRITON_URL "${SOLANA_RPC_TRITON_URL}"
+          write_var SOLANA_RPC_TRITON_API_KEY "${SOLANA_RPC_TRITON_API_KEY}"
+          write_var SOLANA_RPC_HELIUS_URL "${SOLANA_RPC_HELIUS_URL}"
+          write_var SOLANA_RPC_HELIUS_API_KEY "${SOLANA_RPC_HELIUS_API_KEY}"
+          write_var SOLANA_RPC_ALCHEMY_URL "${SOLANA_RPC_ALCHEMY_URL}"
+          write_var SOLANA_RPC_ALCHEMY_API_KEY "${SOLANA_RPC_ALCHEMY_API_KEY}"
+          write_var SOLANA_RPC_QUICKNODE_URL "${SOLANA_RPC_QUICKNODE_URL}"
+          write_var SOLANA_RPC_QUICKNODE_API_KEY "${SOLANA_RPC_QUICKNODE_API_KEY}"
+          write_var KORA_RPC_URL "${KORA_RPC_URL}"
+          write_var KORA_API_KEY "${KORA_API_KEY}"
+          write_var SIGNING_PROVIDER "privy"
 
       - name: Install Playwright browser
         run: pnpm --filter sdp-web exec playwright install --with-deps chromium
