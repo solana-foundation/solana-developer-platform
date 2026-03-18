@@ -14,6 +14,9 @@ const HTTP_METHODS = new Set(["get", "post", "put", "patch", "delete", "head", "
 const SOURCE_PATH = "apps/sdp-api/generated/openapi.json";
 const escapeTableText = (value) => value.replace(/\|/g, "\\|");
 
+const renderOperationRow = (operation) =>
+  `| \`${operation.method}\` | \`${operation.path}\` | ${escapeTableText(operation.summary || "-")} |`;
+
 const parseJsonSpec = (spec) => {
   const tagDescriptions = new Map();
   for (const tag of spec.tags || []) {
@@ -90,10 +93,7 @@ const renderTagPage = ({ tagName, description, operations }) => {
   });
 
   const rows = sortedOperations
-    .map(
-      (operation) =>
-        `| \`${operation.method}\` | \`${operation.path}\` | ${escapeTableText(operation.summary || "-")} |`
-    )
+    .map(renderOperationRow)
     .join("\n");
 
   return `---
@@ -129,6 +129,54 @@ ${links}
 
 const writeJson = async (filePath, value) => {
   await fs.writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+};
+
+const extractRenderedRows = (content) =>
+  content
+    .split("\n")
+    .filter((line) => line.startsWith("| `"));
+
+const validateGeneratedTagPages = async ({ outputDir, tagPages, groupedOperations }) => {
+  const generatedSlugs = new Set(tagPages.map((tagPage) => tagPage.slug));
+  const missingPublicPages = [...REQUIRED_PUBLIC_TAG_SLUGS].filter((slug) => !generatedSlugs.has(slug));
+
+  if (missingPublicPages.length > 0) {
+    throw new Error(
+      `Generated API docs are missing required public sections: ${missingPublicPages.join(", ")}`
+    );
+  }
+
+  let documentedOperationsCount = 0;
+
+  for (const tagPage of tagPages) {
+    const source = await fs.readFile(path.join(outputDir, `${tagPage.slug}.mdx`), "utf8");
+    const actualRows = extractRenderedRows(source);
+    const expectedRows = (groupedOperations.get(tagPage.title) || [])
+      .slice()
+      .sort((left, right) => {
+        if (left.path === right.path) {
+          return left.method.localeCompare(right.method);
+        }
+        return left.path.localeCompare(right.path);
+      })
+      .map(renderOperationRow);
+
+    documentedOperationsCount += actualRows.length;
+
+    if (actualRows.length !== expectedRows.length) {
+      throw new Error(
+        `Generated API docs for ${tagPage.title} document ${actualRows.length} operations, expected ${expectedRows.length}`
+      );
+    }
+
+    for (const row of expectedRows) {
+      if (!actualRows.includes(row)) {
+        throw new Error(`Generated API docs for ${tagPage.title} are missing row: ${row}`);
+      }
+    }
+  }
+
+  return documentedOperationsCount;
 };
 
 const run = async () => {
@@ -253,6 +301,18 @@ const run = async () => {
     title: existingMeta?.title || "Solana Developer Platform Docs",
     pages: newPages,
   });
+
+  const documentedOperationsCount = await validateGeneratedTagPages({
+    outputDir,
+    tagPages,
+    groupedOperations,
+  });
+
+  if (documentedOperationsCount !== exposedOperationsCount) {
+    throw new Error(
+      `Generated API docs document ${documentedOperationsCount} operations, expected ${exposedOperationsCount}`
+    );
+  }
 
   console.log(
     `Generated ${exposedOperationsCount} endpoints across ${tagPages.length} API sections from ${SOURCE_PATH}`
