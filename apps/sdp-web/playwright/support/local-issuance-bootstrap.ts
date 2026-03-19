@@ -36,7 +36,7 @@ import { type LocalApiClient, createLocalApiClient } from "./local-api-client";
 const PLAYWRIGHT_LOCAL_ORG_ID = "org_e2e_issuance";
 const PLAYWRIGHT_LOCAL_ORG_NAME = "E2E Issuance Org";
 const PLAYWRIGHT_LOCAL_ORG_SLUG = "e2e-issuance";
-const DEFAULT_LOCAL_API_URL = "http://127.0.0.1:8787";
+const DEFAULT_LOCAL_API_URL = "http://127.0.0.1:8788";
 const DEFAULT_API_PERSIST_PATH = ".wrangler/state-playwright";
 const DEFAULT_CLERK_JWT_TEMPLATE = "sdp-api";
 const DEFAULT_METADATA_IMAGE_URL = "https://example.com/assets/sdp-e2e-token.png";
@@ -191,8 +191,7 @@ function getPlaywrightApiRuntimeEnv(): PlaywrightApiRuntimeEnv {
       process.env.CLERK_JWT_TEMPLATE ??
       process.env.NEXT_PUBLIC_CLERK_JWT_TEMPLATE ??
       DEFAULT_CLERK_JWT_TEMPLATE,
-    localApiBaseUrl:
-      process.env.PLAYWRIGHT_API_URL ?? process.env.SDP_API_BASE_URL ?? DEFAULT_LOCAL_API_URL,
+    localApiBaseUrl: process.env.PLAYWRIGHT_API_URL ?? DEFAULT_LOCAL_API_URL,
     persistPath: process.env.PLAYWRIGHT_API_PERSIST_PATH ?? DEFAULT_API_PERSIST_PATH,
     solanaRpcUrl,
     koraRpcUrl: readValue("KORA_RPC_URL"),
@@ -231,6 +230,11 @@ function runLocalD1Sql(sql: string): void {
 
 export function seedLocalClerkOrganizationMapping(identity: ClerkTestIdentity): void {
   const clerkOrgId = escapeSql(identity.organizationId);
+  const clerkUserId = escapeSql(identity.userId);
+  const clerkEmail = escapeSql(identity.email.toLowerCase());
+  const localUserId = "usr_e2e_issuance_admin";
+  const localMemberId = "mem_e2e_issuance_admin";
+  const localUserIdentityId = "aui_e2e_issuance_admin";
 
   runLocalD1Sql(`
     INSERT OR REPLACE INTO organizations (id, name, slug, tier, status)
@@ -255,6 +259,45 @@ export function seedLocalClerkOrganizationMapping(identity: ClerkTestIdentity): 
       '${clerkOrgId}',
       '${PLAYWRIGHT_LOCAL_ORG_ID}',
       '${PLAYWRIGHT_LOCAL_ORG_SLUG}'
+    );
+
+    INSERT OR REPLACE INTO users (id, email, email_verified, name, status)
+    VALUES (
+      '${localUserId}',
+      '${clerkEmail}',
+      1,
+      'SDP E2E Admin',
+      'active'
+    );
+
+    INSERT OR REPLACE INTO auth_user_identities (
+      id,
+      provider,
+      provider_user_id,
+      user_id,
+      email
+    )
+    VALUES (
+      '${localUserIdentityId}',
+      'clerk',
+      '${clerkUserId}',
+      '${localUserId}',
+      '${clerkEmail}'
+    );
+
+    INSERT OR REPLACE INTO organization_members (
+      id,
+      organization_id,
+      user_id,
+      role,
+      status
+    )
+    VALUES (
+      '${localMemberId}',
+      '${PLAYWRIGHT_LOCAL_ORG_ID}',
+      '${localUserId}',
+      'admin',
+      'active'
     );
   `);
 }

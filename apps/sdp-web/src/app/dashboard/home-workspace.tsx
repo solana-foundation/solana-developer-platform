@@ -1,7 +1,7 @@
 import { CreateApiKeyModal } from "@/app/dashboard/api-keys/create-api-key-modal";
 import { SectionEntry } from "@/app/dashboard/wallets/section-entry";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Table,
   TableBody,
@@ -10,6 +10,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import type { PaymentsDashboardWallet } from "@sdp/types";
 import Link from "next/link";
 import type { HomeActivityRow } from "./home-page.data";
@@ -49,12 +50,23 @@ function formatRelativeTime(value: string): string {
   return formatter.format(diffDays, "day");
 }
 
-function truncateMiddle(value: string, start = 4, end = 4): string {
-  if (value.length <= start + end + 3) {
-    return value;
-  }
-
-  return `${value.slice(0, start)}...${value.slice(-end)}`;
+function TruncatedTableText({
+  value,
+  className,
+}: {
+  value: string;
+  className?: string;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <div className={className ?? "truncate"}>{value}</div>
+      </TooltipTrigger>
+      <TooltipContent side="top" align="start" className="max-w-[32rem] break-all text-xs">
+        {value}
+      </TooltipContent>
+    </Tooltip>
+  );
 }
 
 function MetricCard({
@@ -141,62 +153,83 @@ export function HomeWorkspace({
 
       <SectionEntry delay={0.08}>
         <div className="space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="space-y-1">
-              <h2 className="text-[30px] leading-none font-medium tracking-[-0.03em] text-[#1c1c1d]">
-                Recent Transactions
-              </h2>
-              {activityNotice ? (
-                <p className="text-sm text-[rgba(28,28,29,0.56)]">{activityNotice}</p>
-              ) : null}
-            </div>
-            <Button asChild variant="secondary" size="sm">
-              <Link href="/dashboard/payments">See all payments</Link>
-            </Button>
-          </div>
-
-          <Card className="gap-0 rounded-[20px] border-[rgba(28,28,29,0.1)] py-0 shadow-none">
-            <CardContent className="px-0 py-0">
+          <Card className="min-w-0 overflow-hidden">
+            <CardHeader className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div className="min-w-0 space-y-1">
+                <CardTitle>Recent transactions</CardTitle>
+                {activityNotice ? (
+                  <CardDescription>{activityNotice}</CardDescription>
+                ) : (
+                  <CardDescription>
+                    Latest wallet and issuance activity across the organization.
+                  </CardDescription>
+                )}
+              </div>
+              <Button asChild variant="secondary" size="sm">
+                <Link href="/dashboard/payments">See all payments</Link>
+              </Button>
+            </CardHeader>
+            <CardContent>
               {activityError ? (
-                <div className="px-6 py-5 text-sm text-[#9e2b38]">{activityError}</div>
+                <p className="text-sm text-[#9e2b38]">{activityError}</p>
               ) : activityRows.length === 0 ? (
-                <div className="px-6 py-5 text-sm text-[rgba(28,28,29,0.72)]">
-                  {emptyActivityMessage}
-                </div>
+                <p className="text-sm text-[rgba(28,28,29,0.72)]">{emptyActivityMessage}</p>
               ) : (
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead className="pl-6">Time</TableHead>
-                        <TableHead>Type</TableHead>
-                        <TableHead>Token</TableHead>
-                        <TableHead>Amount</TableHead>
-                        <TableHead className="pr-6">Address</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {activityRows.map((row) => (
-                        <TableRow key={row.id}>
-                          <TableCell className="pl-6 text-[rgba(28,28,29,0.72)]">
-                            {formatRelativeTime(row.createdAt)}
-                          </TableCell>
-                          <TableCell className="font-medium">{row.type}</TableCell>
-                          <TableCell className="text-[rgba(28,28,29,0.78)]">{row.token}</TableCell>
-                          <TableCell className="text-[rgba(28,28,29,0.78)]">
-                            {row.amount === "—" ? "—" : formatDisplayAmount(row.amount, row.token)}
-                          </TableCell>
-                          <TableCell
-                            className="pr-6 font-mono text-xs text-[rgba(28,28,29,0.72)]"
-                            title={row.address}
-                          >
-                            {truncateMiddle(row.address, 6, 4)}
-                          </TableCell>
+                <TooltipProvider>
+                  <div className="min-w-0">
+                    <Table className="table-fixed">
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="w-[8rem] pl-6">Time</TableHead>
+                          <TableHead className="w-[calc(100%-8rem)] md:hidden">Activity</TableHead>
+                          <TableHead className="hidden w-[10rem] md:table-cell">Type</TableHead>
+                          <TableHead className="hidden w-[8rem] md:table-cell">Token</TableHead>
+                          <TableHead className="hidden w-[10rem] md:table-cell">Amount</TableHead>
+                          <TableHead className="hidden pr-6 md:table-cell">Address</TableHead>
                         </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
+                      </TableHeader>
+                      <TableBody>
+                        {activityRows.map((row) => {
+                          const timeLabel = formatRelativeTime(row.createdAt);
+                          const amountLabel =
+                            row.amount === "—" ? "—" : formatDisplayAmount(row.amount, row.token);
+
+                          return (
+                            <TableRow key={row.id}>
+                              <TableCell className="pl-6 text-[rgba(28,28,29,0.72)]">
+                                {timeLabel}
+                              </TableCell>
+                              <TableCell className="min-w-0 md:hidden">
+                                <div className="min-w-0">
+                                  <div className="truncate font-medium">{row.type}</div>
+                                  <div className="mt-1 truncate text-xs text-[rgba(28,28,29,0.56)]">
+                                    {amountLabel}
+                                  </div>
+                                  <TruncatedTableText
+                                    value={row.address}
+                                    className="mt-1 truncate font-mono text-xs text-[rgba(28,28,29,0.56)]"
+                                  />
+                                </div>
+                              </TableCell>
+                              <TableCell className="hidden font-medium md:table-cell">
+                                {row.type}
+                              </TableCell>
+                              <TableCell className="hidden text-[rgba(28,28,29,0.78)] md:table-cell">
+                                <TruncatedTableText value={row.token} className="truncate" />
+                              </TableCell>
+                              <TableCell className="hidden text-[rgba(28,28,29,0.78)] md:table-cell">
+                                <TruncatedTableText value={amountLabel} className="truncate" />
+                              </TableCell>
+                              <TableCell className="hidden pr-6 font-mono text-xs text-[rgba(28,28,29,0.72)] md:table-cell">
+                                <TruncatedTableText value={row.address} className="truncate" />
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </TooltipProvider>
               )}
             </CardContent>
           </Card>

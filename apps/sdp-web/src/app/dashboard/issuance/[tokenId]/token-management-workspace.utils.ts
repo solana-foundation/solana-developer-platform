@@ -483,7 +483,7 @@ export function resolveAuthorityAddressForRole(
     case "metadata":
       return metadataAuthority;
     case "permanentDelegate":
-      return token.extensions?.permanentDelegate ?? token.mintAuthority;
+      return token.extensions?.permanentDelegate ?? null;
   }
 }
 

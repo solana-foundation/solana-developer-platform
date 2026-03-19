@@ -9,7 +9,7 @@ import {
 } from "./home-page.data";
 import { HomeWorkspace } from "./home-workspace";
 import {
-  normalizeAggregateBalances,
+  aggregateBalancesFromWallets,
   resolveTotalBalance,
 } from "./payments/payments-overview.utils";
 import {
@@ -45,8 +45,8 @@ export default async function DashboardPage() {
   const wallets = walletsResult.data ?? [];
   const isWalletEmptyState = walletsResult.ok && wallets.length === 0;
   const totalBalance = aggregateResult.data?.balances
-    ? resolveTotalBalance(normalizeAggregateBalances(aggregateResult.data.balances))
-    : null;
+    ? resolveTotalBalance(aggregateResult.data.balances)
+    : resolveTotalBalance(aggregateBalancesFromWallets(wallets));
   const todaysVolume = transfersResult.data ? computeTodaysVolume(transfersResult.data) : null;
   const activityRows = buildHomeActivityRows(
     transfersResult.data ?? [],

@@ -11,6 +11,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import type {
   CustodyWalletAggregate,
   PaymentTransferSummary as TransferRecord,
@@ -21,13 +22,17 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useMemo } from "react";
 import useSWR from "swr";
 import {
+  aggregateBalancesFromWallets,
   formatCurrencyAmount,
   formatDirection,
   formatDisplayAmount,
   formatTimestamp,
+  resolveAggregateBalanceDisplayToken,
   resolveAggregateBalanceRows,
   resolveCounterparty,
   resolveTotalBalance,
+  resolveUsdBalanceValue,
+  selectTopAggregateBalanceRows,
 } from "./payments-overview.utils";
 import {
   fetchTransfers,
@@ -41,6 +46,7 @@ interface PaymentsOverviewProps {
   walletsError: string | null;
   aggregate: CustodyWalletAggregate | null;
   aggregateError: string | null;
+  issuedTokenSymbolsByMint: Record<string, string>;
   transfers: TransferRecord[];
   transfersError: string | null;
 }
@@ -76,11 +82,31 @@ function resolveRequestError(error: unknown, fallback: string | null): string | 
   return fallback;
 }
 
+function TruncatedTableText({
+  value,
+  className,
+}: {
+  value: string;
+  className?: string;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <div className={className ?? "truncate"}>{value}</div>
+      </TooltipTrigger>
+      <TooltipContent side="top" align="start" className="max-w-[32rem] break-all text-xs">
+        {value}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
 export function PaymentsOverview({
   wallets,
   walletsError,
   aggregate,
   aggregateError,
+  issuedTokenSymbolsByMint,
   transfers,
   transfersError,
 }: PaymentsOverviewProps) {
@@ -149,7 +175,15 @@ export function PaymentsOverview({
     () => resolveAggregateBalanceRows(liveAggregate, liveWallets),
     [liveAggregate, liveWallets]
   );
-  const totalBalance = resolveTotalBalance(aggregateBalances);
+  const topAggregateBalances = useMemo(
+    () => selectTopAggregateBalanceRows(aggregateBalances, issuedTokenSymbolsByMint),
+    [aggregateBalances, issuedTokenSymbolsByMint]
+  );
+  const totalBalanceSource = useMemo(
+    () => liveAggregate?.balances ?? aggregateBalancesFromWallets(liveWallets),
+    [liveAggregate, liveWallets]
+  );
+  const totalBalance = resolveTotalBalance(totalBalanceSource);
   const hasWallets = liveWallets.length > 0;
   const walletCount = liveAggregate?.walletCount ?? liveWallets.length;
 
@@ -199,23 +233,37 @@ export function PaymentsOverview({
           </div>
 
           <div className="grid min-w-0 gap-1.5">
-            {aggregateBalances.length > 0 ? (
-              aggregateBalances.map((balance) => (
-                <div
-                  key={`${balance.token}-${balance.mint}`}
-                  className="flex min-h-[78px] items-center justify-between gap-4 rounded-[4px] bg-[rgba(28,28,29,0.04)] px-6 py-5"
-                >
-                  <p className="text-[18px] font-medium tracking-[0.04em] text-[#1c1c1d] uppercase">
-                    {balance.token}
-                  </p>
-                  <p className="text-right text-[18px] font-medium tracking-[0.01em] text-[#1c1c1d] sm:text-[20px]">
-                    {formatCurrencyAmount(balance.uiAmount)}
-                  </p>
-                </div>
-              ))
+            {topAggregateBalances.length > 0 ? (
+              topAggregateBalances.map((balance) => {
+                const usdValue = resolveUsdBalanceValue(balance);
+                const displayToken = resolveAggregateBalanceDisplayToken(
+                  balance,
+                  issuedTokenSymbolsByMint
+                );
+
+                return (
+                  <div
+                    key={`${balance.token}-${balance.mint}`}
+                    className="flex min-h-[78px] min-w-0 items-center justify-between gap-4 overflow-hidden rounded-[4px] bg-[rgba(28,28,29,0.04)] px-6 py-5"
+                  >
+                    <p
+                      className="min-w-0 truncate text-[18px] font-medium tracking-[0.04em] text-[#1c1c1d] uppercase"
+                      title={displayToken}
+                    >
+                      {displayToken}
+                    </p>
+                    <p
+                      className="min-w-0 max-w-[40%] truncate text-right text-[18px] font-medium tracking-[0.01em] text-[#1c1c1d] sm:text-[20px]"
+                      title={formatCurrencyAmount(usdValue)}
+                    >
+                      {formatCurrencyAmount(usdValue)}
+                    </p>
+                  </div>
+                );
+              })
             ) : (
               <div className="flex min-h-[78px] items-center rounded-[4px] bg-[rgba(28,28,29,0.04)] px-6 py-5 text-sm text-[rgba(28,28,29,0.64)]">
-                No aggregated balance rows available yet.
+                No USD-valued asset rows available yet.
               </div>
             )}
           </div>
@@ -231,16 +279,17 @@ export function PaymentsOverview({
 
       <SectionEntry delay={0.08}>
         <Card className="min-w-0 overflow-hidden">
-          <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-            <div className="space-y-1">
+          <CardHeader className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="min-w-0 space-y-1">
               <CardTitle>Recent transactions</CardTitle>
-              <CardDescription>
+              <CardDescription className="hidden sm:block">
                 Latest transfer activity across all organization wallets.
               </CardDescription>
             </div>
             <Button
               type="button"
               variant="secondary"
+              className="hidden sm:inline-flex"
               onClick={handleRefresh}
               disabled={isRefreshing}
             >
@@ -254,72 +303,92 @@ export function PaymentsOverview({
             ) : liveTransfers.length === 0 ? (
               <p className="text-sm text-[rgba(28,28,29,0.72)]">No transactions found yet.</p>
             ) : (
-              <div className="min-w-0">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Direction</TableHead>
-                      <TableHead>Asset</TableHead>
-                      <TableHead>Counterparty</TableHead>
-                      <TableHead>Signature</TableHead>
-                      <TableHead>Created</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {liveTransfers.map((transfer) => {
-                      const counterparty = resolveCounterparty(transfer);
+              <TooltipProvider>
+                <div className="min-w-0">
+                  <Table className="table-fixed">
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-[9rem]">Status</TableHead>
+                        <TableHead className="w-[calc(100%-9rem)] md:w-[22%]">
+                          <span className="md:hidden">Transfer</span>
+                          <span className="hidden md:inline">Asset</span>
+                        </TableHead>
+                        <TableHead className="hidden w-[8rem] md:table-cell">Direction</TableHead>
+                        <TableHead className="hidden w-[26%] md:table-cell">Counterparty</TableHead>
+                        <TableHead className="hidden w-[22%] md:table-cell">Signature</TableHead>
+                        <TableHead className="hidden w-[10rem] md:table-cell">Created</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {liveTransfers.map((transfer) => {
+                        const counterparty = resolveCounterparty(transfer);
+                        const assetLabel = formatDisplayAmount(transfer.amount, transfer.token);
+                        const directionLabel = formatDirection(transfer.direction);
+                        const createdLabel = formatTimestamp(transfer.createdAt);
 
-                      return (
-                        <TableRow key={transfer.id}>
-                          <TableCell>
-                            <span
-                              className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${statusClassName(transfer.status)}`}
-                            >
-                              {transfer.status}
-                            </span>
-                          </TableCell>
-                          <TableCell className="text-[rgba(28,28,29,0.72)]">
-                            {formatDirection(transfer.direction)}
-                          </TableCell>
-                          <TableCell className="font-medium">
-                            {formatDisplayAmount(transfer.amount, transfer.token)}
-                          </TableCell>
-                          <TableCell className="font-mono text-xs text-[rgba(28,28,29,0.72)]">
-                            <div
-                              className="max-w-[12rem] truncate sm:max-w-[18rem]"
-                              title={counterparty}
-                            >
-                              {counterparty}
-                            </div>
-                          </TableCell>
-                          <TableCell className="font-mono text-xs">
-                            {transfer.signature ? (
-                              <a
-                                href={getDevnetExplorerUrl(transfer.signature)}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="inline-flex items-center gap-1 text-[#1c1c1d] underline underline-offset-2"
-                                title={transfer.signature}
+                        return (
+                          <TableRow key={transfer.id}>
+                            <TableCell>
+                              <span
+                                className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${statusClassName(transfer.status)}`}
                               >
-                                <span className="max-w-[9rem] truncate sm:max-w-[12rem]">
-                                  {transfer.signature}
-                                </span>
-                                <ExternalLink className="size-3" />
-                              </a>
-                            ) : (
-                              <span className="text-[rgba(28,28,29,0.52)]">Pending</span>
-                            )}
-                          </TableCell>
-                          <TableCell className="text-[rgba(28,28,29,0.72)]">
-                            {formatTimestamp(transfer.createdAt)}
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
-              </div>
+                                {transfer.status}
+                              </span>
+                            </TableCell>
+                            <TableCell className="min-w-0 font-medium">
+                              <div className="min-w-0">
+                                <TruncatedTableText value={assetLabel} className="truncate" />
+                                <div className="mt-1 text-xs font-normal text-[rgba(28,28,29,0.56)] md:hidden">
+                                  <span>{directionLabel}</span>
+                                  <span className="mx-1.5">·</span>
+                                  <span>{createdLabel}</span>
+                                </div>
+                              </div>
+                            </TableCell>
+                            <TableCell className="hidden text-[rgba(28,28,29,0.72)] md:table-cell">
+                              {directionLabel}
+                            </TableCell>
+                            <TableCell className="hidden min-w-0 font-mono text-xs text-[rgba(28,28,29,0.72)] md:table-cell">
+                              <TruncatedTableText value={counterparty} className="truncate" />
+                            </TableCell>
+                            <TableCell className="hidden min-w-0 font-mono text-xs md:table-cell">
+                              {transfer.signature ? (
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <a
+                                      href={getDevnetExplorerUrl(transfer.signature)}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="flex min-w-0 items-center gap-1 text-[#1c1c1d] underline underline-offset-2"
+                                    >
+                                      <span className="block min-w-0 truncate">
+                                        {transfer.signature}
+                                      </span>
+                                      <ExternalLink className="size-3 shrink-0" />
+                                    </a>
+                                  </TooltipTrigger>
+                                  <TooltipContent
+                                    side="top"
+                                    align="start"
+                                    className="max-w-[32rem] break-all text-xs"
+                                  >
+                                    {transfer.signature}
+                                  </TooltipContent>
+                                </Tooltip>
+                              ) : (
+                                <span className="text-[rgba(28,28,29,0.52)]">Pending</span>
+                              )}
+                            </TableCell>
+                            <TableCell className="hidden text-[rgba(28,28,29,0.72)] md:table-cell">
+                              {createdLabel}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
+              </TooltipProvider>
             )}
           </CardContent>
         </Card>
