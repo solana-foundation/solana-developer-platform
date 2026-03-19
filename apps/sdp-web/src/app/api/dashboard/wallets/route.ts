@@ -1,9 +1,12 @@
+import { createTimedTrace, logRouteResult } from "@/lib/request-tracing";
 import { createSdpApiClient } from "@/lib/sdp-api";
 import { NextResponse } from "next/server";
 
 export async function GET(request: Request) {
+  const trace = createTimedTrace("route.dashboard.wallets", request);
+
   try {
-    const apiClient = await createSdpApiClient();
+    const apiClient = await createSdpApiClient(trace.childContext("route.dashboard.wallets.api"));
     const url = new URL(request.url);
     const query = new URLSearchParams(url.searchParams);
 
@@ -17,18 +20,36 @@ export async function GET(request: Request) {
     const body = await response.text();
     const contentType = response.headers.get("Content-Type") ?? "application/json";
 
-    return new NextResponse(body, {
+    const nextResponse = new NextResponse(body, {
       status: response.status,
       headers: {
         "Content-Type": contentType,
+        "X-SDP-Trace-ID": trace.traceId,
+        "Server-Timing": trace.serverTiming(),
       },
     });
+
+    logRouteResult(trace, response.status, {
+      query: query.toString(),
+    });
+
+    return nextResponse;
   } catch (error) {
-    return NextResponse.json(
+    const response = NextResponse.json(
       {
         error: error instanceof Error ? error.message : "Failed to fetch wallets",
       },
-      { status: 500 }
+      {
+        status: 500,
+        headers: {
+          "X-SDP-Trace-ID": trace.traceId,
+          "Server-Timing": trace.serverTiming(),
+        },
+      }
     );
+    logRouteResult(trace, 500, {
+      error: error instanceof Error ? error.message : "Failed to fetch wallets",
+    });
+    return response;
   }
 }

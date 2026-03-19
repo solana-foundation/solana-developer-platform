@@ -1,3 +1,4 @@
+import { createTimedTrace } from "@/lib/request-tracing";
 import { type SdpApiClient, createSdpApiClient } from "@/lib/sdp-api";
 import { auth } from "@clerk/nextjs/server";
 import type { FrozenAccount, Token, TokenAllowlistEntry, TokenTransaction } from "@sdp/types";
@@ -103,69 +104,106 @@ export default async function IssuanceTokenManagementPage({ params }: TokenManag
   }
 
   const { tokenId } = await params;
-  const apiClient = await createSdpApiClient();
+  const trace = createTimedTrace("dashboard.issuance.token.page");
 
-  const [tokenResult, walletsResult, transactionsResult, allowlistResult, frozenResult] =
-    await Promise.all([
-      fetchData<Token | null>(apiClient.request, `/v1/issuance/tokens/${tokenId}`, mapToken),
-      fetchPaymentsWallets(apiClient.request, { includeBalances: false }),
-      fetchData<TokenTransaction[]>(
-        apiClient.request,
-        `/v1/issuance/tokens/${tokenId}/transactions?page=1&pageSize=100`,
-        (payload) => mapList<TokenTransaction>(payload)
-      ),
-      fetchData<TokenAllowlistEntry[]>(
-        apiClient.request,
-        `/v1/issuance/tokens/${tokenId}/allowlist?page=1&pageSize=100`,
-        (payload) => mapList<TokenAllowlistEntry>(payload)
-      ),
-      fetchData<FrozenAccount[]>(
-        apiClient.request,
-        `/v1/issuance/tokens/${tokenId}/frozen?page=1&pageSize=100`,
-        (payload) => mapList<FrozenAccount>(payload)
-      ),
-    ]);
+  try {
+    const apiClient = await trace.step("create_sdp_api_client", () =>
+      createSdpApiClient(trace.childContext("dashboard.issuance.token.api"))
+    );
 
-  if (tokenResult.status === 404 || !tokenResult.data) {
-    notFound();
+    const [tokenResult, walletsResult, transactionsResult, allowlistResult, frozenResult] =
+      await Promise.all([
+        trace.step("fetch_token", () =>
+          fetchData<Token | null>(apiClient.request, `/v1/issuance/tokens/${tokenId}`, mapToken)
+        ),
+        trace.step("fetch_authority_wallets", () =>
+          fetchPaymentsWallets(apiClient.request, { includeBalances: false })
+        ),
+        trace.step("fetch_transactions", () =>
+          fetchData<TokenTransaction[]>(
+            apiClient.request,
+            `/v1/issuance/tokens/${tokenId}/transactions?page=1&pageSize=100`,
+            (payload) => mapList<TokenTransaction>(payload)
+          )
+        ),
+        trace.step("fetch_allowlist", () =>
+          fetchData<TokenAllowlistEntry[]>(
+            apiClient.request,
+            `/v1/issuance/tokens/${tokenId}/allowlist?page=1&pageSize=100`,
+            (payload) => mapList<TokenAllowlistEntry>(payload)
+          )
+        ),
+        trace.step("fetch_frozen_accounts", () =>
+          fetchData<FrozenAccount[]>(
+            apiClient.request,
+            `/v1/issuance/tokens/${tokenId}/frozen?page=1&pageSize=100`,
+            (payload) => mapList<FrozenAccount>(payload)
+          )
+        ),
+      ]);
+
+    if (tokenResult.status === 404 || !tokenResult.data) {
+      trace.log({
+        ok: false,
+        tokenId,
+        notFound: true,
+      });
+      notFound();
+    }
+
+    trace.log({
+      ok: true,
+      tokenId,
+      transactionCount: transactionsResult.data?.length ?? 0,
+      allowlistCount: allowlistResult.data?.length ?? 0,
+      frozenCount: frozenResult.data?.length ?? 0,
+      authorityWalletCount: walletsResult.data?.length ?? 0,
+    });
+
+    return (
+      <TokenManagementWorkspace
+        token={tokenResult.data}
+        tokenError={
+          tokenResult.error
+            ? `Token API ${tokenResult.status ?? "unavailable"}: ${tokenResult.error}`
+            : null
+        }
+        authorityWallets={walletsResult.ok ? (walletsResult.data ?? []) : []}
+        authorityWalletsError={
+          walletsResult.ok ? null : (walletsResult.error ?? "Wallets unavailable")
+        }
+        transactions={transactionsResult.data ?? []}
+        transactionsError={
+          transactionsResult.error
+            ? `Transactions API ${transactionsResult.status ?? "unavailable"}: ${transactionsResult.error}`
+            : null
+        }
+        transactionsTotal={transactionsResult.total}
+        transactionsHasMore={transactionsResult.hasMore}
+        allowlistEntries={allowlistResult.data ?? []}
+        allowlistError={
+          allowlistResult.error
+            ? `Allowlist API ${allowlistResult.status ?? "unavailable"}: ${allowlistResult.error}`
+            : null
+        }
+        allowlistTotal={allowlistResult.total}
+        allowlistHasMore={allowlistResult.hasMore}
+        frozenAccounts={frozenResult.data ?? []}
+        frozenAccountsError={
+          frozenResult.error
+            ? `Frozen API ${frozenResult.status ?? "unavailable"}: ${frozenResult.error}`
+            : null
+        }
+        frozenAccountsTotal={frozenResult.total}
+        frozenAccountsHasMore={frozenResult.hasMore}
+      />
+    );
+  } catch (error) {
+    trace.log({
+      ok: false,
+      tokenId,
+      error: error instanceof Error ? error.message : "Unknown error",
+    });
+    throw error;
   }
-
-  return (
-    <TokenManagementWorkspace
-      token={tokenResult.data}
-      tokenError={
-        tokenResult.error
-          ? `Token API ${tokenResult.status ?? "unavailable"}: ${tokenResult.error}`
-          : null
-      }
-      authorityWallets={walletsResult.ok ? (walletsResult.data ?? []) : []}
-      authorityWalletsError={
-        walletsResult.ok ? null : (walletsResult.error ?? "Wallets unavailable")
-      }
-      transactions={transactionsResult.data ?? []}
-      transactionsError={
-        transactionsResult.error
-          ? `Transactions API ${transactionsResult.status ?? "unavailable"}: ${transactionsResult.error}`
-          : null
-      }
-      transactionsTotal={transactionsResult.total}
-      transactionsHasMore={transactionsResult.hasMore}
-      allowlistEntries={allowlistResult.data ?? []}
-      allowlistError={
-        allowlistResult.error
-          ? `Allowlist API ${allowlistResult.status ?? "unavailable"}: ${allowlistResult.error}`
-          : null
-      }
-      allowlistTotal={allowlistResult.total}
-      allowlistHasMore={allowlistResult.hasMore}
-      frozenAccounts={frozenResult.data ?? []}
-      frozenAccountsError={
-        frozenResult.error
-          ? `Frozen API ${frozenResult.status ?? "unavailable"}: ${frozenResult.error}`
-          : null
-      }
-      frozenAccountsTotal={frozenResult.total}
-      frozenAccountsHasMore={frozenResult.hasMore}
-    />
-  );
 }

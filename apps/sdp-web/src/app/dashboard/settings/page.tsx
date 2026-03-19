@@ -1,4 +1,5 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { createTimedTrace } from "@/lib/request-tracing";
 import { createSdpApiClient } from "@/lib/sdp-api";
 import { auth } from "@clerk/nextjs/server";
 import type { OrganizationRpcProvider } from "@sdp/types";
@@ -36,16 +37,22 @@ export default async function SettingsPage() {
     redirect("/dashboard");
   }
 
+  const trace = createTimedTrace("dashboard.settings.page");
+
   let organization: Organization | null = null;
   let isLinked = true;
   let loadError = false;
 
   try {
-    const apiClient = await createSdpApiClient();
+    const apiClient = await trace.step("create_sdp_api_client", () =>
+      createSdpApiClient(trace.childContext("dashboard.settings.api"))
+    );
     let onboardingFailed = false;
 
     try {
-      const onboarding = await apiClient.fetch<OnboardingStatusResponse>("/v1/onboarding/status");
+      const onboarding = await trace.step("fetch_onboarding_status", () =>
+        apiClient.fetch<OnboardingStatusResponse>("/v1/onboarding/status")
+      );
       isLinked = onboarding.linked;
       organization = onboarding.organization;
     } catch {
@@ -54,25 +61,42 @@ export default async function SettingsPage() {
 
     if (!organization && isLinked) {
       try {
-        const projectsPayload = await apiClient.fetch<ProjectListResponse>("/v1/projects");
+        const projectsPayload = await trace.step("fetch_projects", () =>
+          apiClient.fetch<ProjectListResponse>("/v1/projects")
+        );
         const inferredOrgId = projectsPayload.projects[0]?.organizationId;
         if (inferredOrgId) {
-          organization = await apiClient.fetch<Organization>(`/v1/organizations/${inferredOrgId}`);
+          organization = await trace.step("fetch_inferred_organization", () =>
+            apiClient.fetch<Organization>(`/v1/organizations/${inferredOrgId}`)
+          );
         }
       } catch {}
     }
 
     if (!organization && isLinked && orgId) {
       try {
-        organization = await apiClient.fetch<Organization>(`/v1/organizations/${orgId}`);
+        organization = await trace.step("fetch_org_by_active_org_id", () =>
+          apiClient.fetch<Organization>(`/v1/organizations/${orgId}`)
+        );
       } catch {}
     }
 
     if (!organization && isLinked && onboardingFailed) {
       loadError = true;
     }
-  } catch {
+
+    trace.log({
+      ok: !loadError,
+      isLinked,
+      hasOrganization: Boolean(organization),
+      loadError,
+    });
+  } catch (error) {
     loadError = true;
+    trace.log({
+      ok: false,
+      error: error instanceof Error ? error.message : "Unknown error",
+    });
   }
 
   return (
