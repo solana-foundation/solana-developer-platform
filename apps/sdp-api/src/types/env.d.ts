@@ -200,5 +200,7 @@ declare module "hono" {
       email: string;
     };
     requestId: string;
+    traceId: string;
+    requestSource: string;
   }
 }
