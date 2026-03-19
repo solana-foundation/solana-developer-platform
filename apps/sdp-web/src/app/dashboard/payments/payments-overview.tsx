@@ -22,7 +22,6 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useMemo } from "react";
 import useSWR from "swr";
 import {
-  aggregateBalancesFromWallets,
   formatCurrencyAmount,
   formatDirection,
   formatDisplayAmount,
@@ -179,11 +178,7 @@ export function PaymentsOverview({
     () => selectTopAggregateBalanceRows(aggregateBalances, issuedTokenSymbolsByMint),
     [aggregateBalances, issuedTokenSymbolsByMint]
   );
-  const totalBalanceSource = useMemo(
-    () => liveAggregate?.balances ?? aggregateBalancesFromWallets(liveWallets),
-    [liveAggregate, liveWallets]
-  );
-  const totalBalance = resolveTotalBalance(totalBalanceSource);
+  const totalBalance = resolveTotalBalance(aggregateBalances);
   const hasWallets = liveWallets.length > 0;
   const walletCount = liveAggregate?.walletCount ?? liveWallets.length;
 

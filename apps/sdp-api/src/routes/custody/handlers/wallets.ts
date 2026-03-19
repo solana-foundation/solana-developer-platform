@@ -88,7 +88,8 @@ async function getScopedWallets(
 
 async function getBalancesByWalletId(
   c: AppContext,
-  walletPublicKeys: Array<{ walletId: string; publicKey: string }>
+  walletPublicKeys: Array<{ walletId: string; publicKey: string }>,
+  options: { includeUsdValues?: boolean } = {}
 ) {
   const rpc = createRpc(c.env);
   const balancesByWalletId = await Promise.all(
@@ -136,7 +137,13 @@ async function getBalancesByWalletId(
     })
   );
 
-  return attachUsdValuesToBalanceMap(c.env, new Map(balancesByWalletId));
+  const balancesMap = new Map(balancesByWalletId);
+
+  if (options.includeUsdValues === false) {
+    return balancesMap;
+  }
+
+  return attachUsdValuesToBalanceMap(c.env, balancesMap);
 }
 
 export const createWallet = async (c: AppContext) => {
@@ -419,7 +426,8 @@ export const getWalletAggregate = async (c: AppContext) => {
     wallets.map((wallet) => ({
       walletId: wallet.walletId,
       publicKey: wallet.publicKey,
-    }))
+    })),
+    { includeUsdValues: false }
   );
   const aggregatedBalances = await attachUsdValuesToBalances(
     c.env,

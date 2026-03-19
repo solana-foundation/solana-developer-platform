@@ -10,6 +10,30 @@ const DEVNET_USDC_MINT = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
 // biome-ignore lint/nursery/noSecrets: Mainnet USDC mint address constant, not a secret.
 const MAINNET_USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 
+function parseIntegerAmount(value: string): bigint | null {
+  if (!/^\d+$/.test(value)) {
+    return null;
+  }
+
+  try {
+    return BigInt(value);
+  } catch {
+    return null;
+  }
+}
+
+function formatUiAmountFromRaw(amount: bigint, decimals: number): string {
+  if (decimals <= 0) {
+    return amount.toString();
+  }
+
+  const scale = BigInt(10) ** BigInt(decimals);
+  const whole = amount / scale;
+  const fraction = (amount % scale).toString().padStart(decimals, "0").replace(/0+$/, "");
+
+  return fraction ? `${whole}.${fraction}` : whole.toString();
+}
+
 function resolveFallbackUsdValue(
   balance: Pick<CustodyWalletTokenBalance, "token" | "mint" | "uiAmount">
 ) {
@@ -129,15 +153,16 @@ export function resolveTotalBalance(balances: CustodyWalletTokenBalance[]): numb
 export function aggregateBalancesFromWallets(wallets: WalletRecord[]): CustodyWalletTokenBalance[] {
   const aggregate = new Map<
     string,
-    { token: string; mint: string; amount: number; decimals: number; usdValue: number | null }
+    { token: string; mint: string; amount: bigint; decimals: number; usdValue: number | null }
   >();
 
   for (const wallet of wallets) {
     for (const balance of wallet.balances ?? []) {
       const current = aggregate.get(balance.mint);
       const numericValue = Number(balance.uiAmount);
+      const rawAmount = parseIntegerAmount(balance.amount);
       const usdValue = resolveUsdBalanceValue(balance);
-      if (!Number.isFinite(numericValue)) {
+      if (!Number.isFinite(numericValue) || rawAmount === null) {
         continue;
       }
 
@@ -145,14 +170,14 @@ export function aggregateBalancesFromWallets(wallets: WalletRecord[]): CustodyWa
         aggregate.set(balance.mint, {
           token: balance.token,
           mint: balance.mint,
-          amount: numericValue,
+          amount: rawAmount,
           decimals: balance.decimals,
           usdValue,
         });
         continue;
       }
 
-      current.amount += numericValue;
+      current.amount += rawAmount;
       if (usdValue !== null) {
         current.usdValue = (current.usdValue ?? 0) + usdValue;
       }
@@ -162,8 +187,8 @@ export function aggregateBalancesFromWallets(wallets: WalletRecord[]): CustodyWa
   return [...aggregate.values()].map((entry) => ({
     token: entry.token,
     mint: entry.mint,
-    amount: "0",
-    uiAmount: entry.amount.toString(),
+    amount: entry.amount.toString(),
+    uiAmount: formatUiAmountFromRaw(entry.amount, entry.decimals),
     decimals: entry.decimals,
     ...(entry.usdValue !== null ? { usdValue: Number(entry.usdValue.toFixed(6)) } : {}),
   }));
