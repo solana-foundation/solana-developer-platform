@@ -1,6 +1,8 @@
+import { createSdpApiClient } from "@/lib/sdp-api";
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { PaymentsActionPage } from "../payments-action-page";
+import { fetchPaymentsIssuedTokenSymbols } from "../payments-page.data";
 
 export default async function PaymentsSendPage() {
   const { userId, orgId } = await auth();
@@ -11,5 +13,18 @@ export default async function PaymentsSendPage() {
     redirect("/dashboard");
   }
 
-  return <PaymentsActionPage mode="send" wallets={[]} walletsError={null} />;
+  const apiClient = await createSdpApiClient();
+  const issuedTokenSymbolsResult = await fetchPaymentsIssuedTokenSymbols(apiClient.request);
+  const issuedTokenSymbolsByMint = Object.fromEntries(
+    (issuedTokenSymbolsResult.data ?? []).map((token) => [token.mintAddress, token.symbol])
+  );
+
+  return (
+    <PaymentsActionPage
+      mode="send"
+      wallets={[]}
+      walletsError={null}
+      issuedTokenSymbolsByMint={issuedTokenSymbolsByMint}
+    />
+  );
 }

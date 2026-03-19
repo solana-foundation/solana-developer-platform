@@ -17,7 +17,7 @@ import type {
   PaymentsDashboardWallet as WalletRecord,
 } from "@sdp/types";
 import { ArrowDownLeft, ArrowUpRight, ExternalLink, RefreshCw } from "lucide-react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useMemo } from "react";
 import useSWR from "swr";
 import {
@@ -85,12 +85,14 @@ export function PaymentsOverview({
   transfersError,
 }: PaymentsOverviewProps) {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const refreshSeed = searchParams.get("refresh") ?? "default";
   const {
     data: swrWallets,
     error: walletsFetchError,
     isValidating: walletsRefreshing,
     mutate: mutateWallets,
-  } = useSWR<WalletRecord[]>(PAYMENTS_OVERVIEW_WALLETS_KEY, () => fetchWallets(), {
+  } = useSWR<WalletRecord[]>([PAYMENTS_OVERVIEW_WALLETS_KEY, refreshSeed], () => fetchWallets(), {
     fallbackData: walletsError ? undefined : wallets,
     revalidateOnFocus: true,
     refreshInterval: 30_000,
@@ -101,7 +103,7 @@ export function PaymentsOverview({
     isValidating: aggregateRefreshing,
     mutate: mutateAggregate,
   } = useSWR<CustodyWalletAggregate>(
-    PAYMENTS_OVERVIEW_AGGREGATE_KEY,
+    [PAYMENTS_OVERVIEW_AGGREGATE_KEY, refreshSeed],
     () => fetchWalletAggregate(),
     {
       fallbackData: aggregateError || !aggregate ? undefined : aggregate,
@@ -114,11 +116,15 @@ export function PaymentsOverview({
     error: transfersFetchError,
     isValidating: transfersRefreshing,
     mutate: mutateTransfers,
-  } = useSWR<TransferRecord[]>(PAYMENTS_OVERVIEW_TRANSFERS_KEY, () => fetchTransfers(), {
-    fallbackData: transfersError ? undefined : transfers,
-    revalidateOnFocus: true,
-    refreshInterval: 10_000,
-  });
+  } = useSWR<TransferRecord[]>(
+    [PAYMENTS_OVERVIEW_TRANSFERS_KEY, refreshSeed],
+    () => fetchTransfers(),
+    {
+      fallbackData: transfersError ? undefined : transfers,
+      revalidateOnFocus: true,
+      refreshInterval: 10_000,
+    }
+  );
 
   const liveWallets = swrWallets ?? wallets;
   const liveAggregate = swrAggregate ?? aggregate;
@@ -152,9 +158,9 @@ export function PaymentsOverview({
   };
 
   return (
-    <div className="grid gap-6">
+    <div className="grid min-w-0 gap-6 overflow-x-hidden">
       <SectionEntry>
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex min-w-0 flex-wrap items-center gap-3">
           <Button
             type="button"
             className="rounded-full px-5"
@@ -177,7 +183,7 @@ export function PaymentsOverview({
       </SectionEntry>
 
       <SectionEntry delay={0.04}>
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(20rem,1fr)]">
+        <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(20rem,1fr)]">
           <div className="flex min-h-[244px] flex-col justify-center rounded-[4px] bg-[rgba(28,28,29,0.04)] px-8 py-10 sm:px-14">
             <div className="space-y-3">
               <p className="text-[15px] font-medium tracking-[0.01em] text-[#1c1c1d]">
@@ -192,7 +198,7 @@ export function PaymentsOverview({
             </div>
           </div>
 
-          <div className="grid gap-1.5">
+          <div className="grid min-w-0 gap-1.5">
             {aggregateBalances.length > 0 ? (
               aggregateBalances.map((balance) => (
                 <div
@@ -224,7 +230,7 @@ export function PaymentsOverview({
       </SectionEntry>
 
       <SectionEntry delay={0.08}>
-        <Card>
+        <Card className="min-w-0 overflow-hidden">
           <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div className="space-y-1">
               <CardTitle>Recent transactions</CardTitle>
@@ -248,7 +254,7 @@ export function PaymentsOverview({
             ) : liveTransfers.length === 0 ? (
               <p className="text-sm text-[rgba(28,28,29,0.72)]">No transactions found yet.</p>
             ) : (
-              <div className="overflow-x-auto">
+              <div className="min-w-0">
                 <Table>
                   <TableHeader>
                     <TableRow>

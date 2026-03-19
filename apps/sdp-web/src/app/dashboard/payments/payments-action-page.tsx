@@ -26,8 +26,10 @@ import { toast } from "sonner";
 import useSWR from "swr";
 import {
   type PaymentRampExecution,
+  type PaymentWalletBalance,
   createTransfer,
   executeRampFlow,
+  fetchWalletBalances,
   fetchWalletPolicy,
   fetchWallets,
   getDevnetExplorerUrl,
@@ -40,11 +42,19 @@ interface PaymentsActionPageProps {
   mode: "send" | "receive";
   wallets: PaymentsDashboardWallet[];
   walletsError: string | null;
+  issuedTokenSymbolsByMint: Record<string, string>;
 }
 
 const REQUIRED_ACTION_ASSETS = ["SOL", "USDC"] as const;
 const MOONPAY_ONRAMP_MIN_USD = 20;
 const PAYMENTS_ACTION_WALLETS_KEY = "payments-action-wallets";
+const PAYMENTS_ACTION_WALLET_BALANCES_KEY = "payments-action-wallet-balances";
+// biome-ignore lint/nursery/noSecrets: Solana native mint address constant, not a secret.
+const SOL_MINT = "So11111111111111111111111111111111111111112";
+// biome-ignore lint/nursery/noSecrets: Devnet USDC mint address constant, not a secret.
+const DEVNET_USDC_MINT = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
+// biome-ignore lint/nursery/noSecrets: Mainnet USDC mint address constant, not a secret.
+const MAINNET_USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const BVNK_COUNTRY_OPTIONS = [
   { label: "United States", value: "US" },
   { label: "Canada", value: "CA" },
@@ -127,6 +137,19 @@ const OFFRAMP_PROVIDER_OPTIONS: ProviderOption[] = [
   },
 ];
 
+const KNOWN_ASSET_MINTS: Record<string, string[]> = {
+  SOL: [SOL_MINT],
+  USDC: [DEVNET_USDC_MINT, MAINNET_USDC_MINT],
+};
+
+function buildPaymentsReturnUrl(refreshToken?: string | null): string {
+  if (!refreshToken) {
+    return "/dashboard/payments";
+  }
+
+  return `/dashboard/payments?refresh=${encodeURIComponent(refreshToken)}`;
+}
+
 function parseOptionalNumber(value: string): number | null {
   const numericValue = Number.parseFloat(value);
   return Number.isFinite(numericValue) ? numericValue : null;
@@ -147,26 +170,93 @@ function resolvePrimaryWalletBalance(wallet: PaymentsDashboardWallet | null) {
   );
 }
 
-function getWalletActionLabel(wallet: PaymentsDashboardWallet): string {
+function resolveBalanceDisplayToken(
+  balance: PaymentWalletBalance,
+  issuedTokenSymbolsByMint: Record<string, string>
+): string {
+  const normalizedToken = balance.token.trim().toUpperCase();
+  const normalizedMint = balance.mint.trim();
+  const issuedTokenSymbol = issuedTokenSymbolsByMint[normalizedMint]?.trim();
+
+  if (issuedTokenSymbol) {
+    return issuedTokenSymbol.toUpperCase();
+  }
+
+  if (normalizedToken === "SOL" || normalizedMint === SOL_MINT) {
+    return "SOL";
+  }
+
+  if (
+    normalizedToken === "USDC" ||
+    normalizedMint === DEVNET_USDC_MINT ||
+    normalizedMint === MAINNET_USDC_MINT
+  ) {
+    return "USDC";
+  }
+
+  return normalizedToken || normalizedMint;
+}
+
+function balanceMatchesAsset(
+  balance: PaymentWalletBalance,
+  asset: string,
+  issuedTokenSymbolsByMint: Record<string, string>
+): boolean {
+  const normalizedAsset = asset.trim().toUpperCase();
+  if (!normalizedAsset) {
+    return false;
+  }
+
+  if (resolveBalanceDisplayToken(balance, issuedTokenSymbolsByMint) === normalizedAsset) {
+    return true;
+  }
+
+  return KNOWN_ASSET_MINTS[normalizedAsset]?.includes(balance.mint.trim()) ?? false;
+}
+
+function getWalletActionLabel(
+  wallet: PaymentsDashboardWallet,
+  issuedTokenSymbolsByMint: Record<string, string>
+): string {
   const balance = resolvePrimaryWalletBalance(wallet);
   if (!balance) {
     return wallet.label ?? wallet.walletId;
   }
 
-  return `${wallet.label ?? wallet.walletId} · ${balance.uiAmount} ${balance.token}`;
+  return `${wallet.label ?? wallet.walletId} · ${balance.uiAmount} ${resolveBalanceDisplayToken(balance, issuedTokenSymbolsByMint)}`;
 }
 
-function resolveWalletActionAssets(wallet: PaymentsDashboardWallet | null): string[] {
+function resolveWalletActionAssets(
+  wallet: PaymentsDashboardWallet | null,
+  issuedTokenSymbolsByMint: Record<string, string>
+): string[] {
   const assetSet = new Set<string>(REQUIRED_ACTION_ASSETS);
 
   for (const balance of wallet?.balances ?? []) {
-    const token = balance.token.trim().toUpperCase();
+    const token = resolveBalanceDisplayToken(balance, issuedTokenSymbolsByMint);
     if (token) {
       assetSet.add(token);
     }
   }
 
   return [...assetSet];
+}
+
+function resolveWalletAssetBalance(
+  wallet: PaymentsDashboardWallet | null,
+  asset: string,
+  issuedTokenSymbolsByMint: Record<string, string>
+): NonNullable<PaymentsDashboardWallet["balances"]>[number] | null {
+  const normalizedAsset = asset.trim().toUpperCase();
+  if (!wallet || !normalizedAsset) {
+    return null;
+  }
+
+  return (
+    wallet.balances?.find((balance) =>
+      balanceMatchesAsset(balance, normalizedAsset, issuedTokenSymbolsByMint)
+    ) ?? null
+  );
 }
 
 function appendMoonpayReviewRows(
@@ -490,6 +580,21 @@ function WalletAddressQrCode({ address }: { address: string }) {
           </p>
           <div className="rounded-[18px] border border-[rgba(28,28,29,0.08)] bg-white px-4 py-3">
             <p className="break-all font-mono text-xs text-[rgba(28,28,29,0.78)]">{address}</p>
+          </div>
+          <div className="flex justify-end">
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => {
+                void navigator.clipboard.writeText(address);
+                toast.success("Address copied.", {
+                  position: "bottom-right",
+                });
+              }}
+            >
+              <Copy className="size-4" />
+              Copy address
+            </Button>
           </div>
         </div>
       </div>
@@ -831,7 +936,13 @@ function RampProviderFields({
   );
 }
 
-export function PaymentsActionPage({ mode, wallets, walletsError }: PaymentsActionPageProps) {
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: this component intentionally coordinates the full multi-step payments flow in one place.
+export function PaymentsActionPage({
+  mode,
+  wallets,
+  walletsError,
+  issuedTokenSymbolsByMint,
+}: PaymentsActionPageProps) {
   const router = useRouter();
 
   const [branch, setBranch] = useState<ActionBranch | null>(null);
@@ -840,6 +951,7 @@ export function PaymentsActionPage({ mode, wallets, walletsError }: PaymentsActi
   const [selectedWalletId, setSelectedWalletId] = useState("");
   const [selectedAsset, setSelectedAsset] = useState("USDC");
   const [amount, setAmount] = useState("");
+  const [amountTouched, setAmountTouched] = useState(false);
   const [destination, setDestination] = useState("");
   const [memo, setMemo] = useState("");
   const [reference, setReference] = useState("");
@@ -901,7 +1013,41 @@ export function PaymentsActionPage({ mode, wallets, walletsError }: PaymentsActi
     () => liveWallets.find((wallet) => wallet.walletId === selectedWalletId) ?? null,
     [liveWallets, selectedWalletId]
   );
-  const assetOptions = useMemo(() => resolveWalletActionAssets(selectedWallet), [selectedWallet]);
+  const { data: selectedWalletBalancesSnapshot } = useSWR(
+    selectedWalletId ? [PAYMENTS_ACTION_WALLET_BALANCES_KEY, selectedWalletId] : null,
+    ([, walletId]: readonly [string, string]) => fetchWalletBalances(walletId),
+    {
+      revalidateOnFocus: false,
+      revalidateIfStale: false,
+    }
+  );
+  const selectedWalletWithBalances = useMemo(() => {
+    if (!selectedWallet) {
+      return null;
+    }
+
+    if (selectedWalletBalancesSnapshot?.walletId !== selectedWallet.walletId) {
+      return selectedWallet;
+    }
+
+    return {
+      ...selectedWallet,
+      balances: selectedWalletBalancesSnapshot.balances,
+    };
+  }, [selectedWallet, selectedWalletBalancesSnapshot]);
+  const assetOptions = useMemo(
+    () => resolveWalletActionAssets(selectedWalletWithBalances, issuedTokenSymbolsByMint),
+    [issuedTokenSymbolsByMint, selectedWalletWithBalances]
+  );
+  const selectedAssetBalance = useMemo(
+    () =>
+      resolveWalletAssetBalance(
+        selectedWalletWithBalances,
+        selectedAsset,
+        issuedTokenSymbolsByMint
+      ),
+    [issuedTokenSymbolsByMint, selectedAsset, selectedWalletWithBalances]
+  );
 
   useEffect(() => {
     if (assetOptions.length === 0) {
@@ -944,6 +1090,25 @@ export function PaymentsActionPage({ mode, wallets, walletsError }: PaymentsActi
     provider === "moonpay" &&
     amount.trim().length > 0 &&
     (numericAmount === null || numericAmount < MOONPAY_ONRAMP_MIN_USD);
+  const availableSelectedAssetAmount = useMemo(() => {
+    if (!selectedAsset) {
+      return null;
+    }
+
+    if (!selectedAssetBalance) {
+      return 0;
+    }
+
+    const numericValue = Number(selectedAssetBalance.uiAmount);
+    return Number.isFinite(numericValue) ? numericValue : 0;
+  }, [selectedAsset, selectedAssetBalance]);
+  const exceedsSelectedAssetBalance =
+    isTransferBranch &&
+    !!selectedAsset &&
+    amount.trim().length > 0 &&
+    numericAmount !== null &&
+    availableSelectedAssetAmount !== null &&
+    numericAmount > availableSelectedAssetAmount;
 
   useEffect(() => {
     if (!isTransferBranch || !selectedWalletId) {
@@ -990,6 +1155,7 @@ export function PaymentsActionPage({ mode, wallets, walletsError }: PaymentsActi
 
   const resetFlowFields = () => {
     setAmount("");
+    setAmountTouched(false);
     setDestination("");
     setMemo("");
     setReference("");
@@ -1047,6 +1213,7 @@ export function PaymentsActionPage({ mode, wallets, walletsError }: PaymentsActi
         !!selectedAsset &&
         !!destinationTrimmed &&
         !!amount.trim() &&
+        !exceedsSelectedAssetBalance &&
         (hasTransferComplianceForDestination || destinationIsAllowlisted)
       );
     }
@@ -1100,6 +1267,7 @@ export function PaymentsActionPage({ mode, wallets, walletsError }: PaymentsActi
     customerId,
     destinationIsAllowlisted,
     destinationTrimmed,
+    exceedsSelectedAssetBalance,
     hasTransferComplianceForDestination,
     isBelowMoonPayOnrampMinimum,
     isDepositBranch,
@@ -1212,7 +1380,10 @@ export function PaymentsActionPage({ mode, wallets, walletsError }: PaymentsActi
       const transfer = await createTransfer({
         source: selectedWalletId,
         destination: destinationTrimmed,
-        token: selectedAsset.trim() || "SOL",
+        token:
+          selectedAssetBalance?.mint?.trim() ||
+          (selectedAsset.trim().toUpperCase() === "SOL" ? "SOL" : selectedAsset.trim()) ||
+          "SOL",
         amount: amount.trim(),
         ...(memo.trim() ? { memo: memo.trim() } : {}),
       });
@@ -1367,7 +1538,7 @@ export function PaymentsActionPage({ mode, wallets, walletsError }: PaymentsActi
 
     if (currentStep.id === "review") {
       if (executionState === "success") {
-        router.push("/dashboard/payments");
+        router.push(buildPaymentsReturnUrl(transferResult?.id ?? rampExecution?.id ?? null));
         return;
       }
 
@@ -1419,7 +1590,7 @@ export function PaymentsActionPage({ mode, wallets, walletsError }: PaymentsActi
 
   const secondaryLabel = useMemo(() => {
     if (currentStep.id === "branch") {
-      return "Back to payments";
+      return "Back";
     }
 
     if (currentStep.id === "review" && executionState === "success") {
@@ -1513,7 +1684,8 @@ export function PaymentsActionPage({ mode, wallets, walletsError }: PaymentsActi
         <Select value={value} onValueChange={onChange} disabled={!hasWallets}>
           <SelectTrigger
             id={`${mode}-wallet`}
-            className="h-12 rounded-[16px] border-[rgba(28,28,29,0.12)] bg-white px-4 shadow-none"
+            size="lg"
+            className="h-12 w-full rounded-[16px] border-[rgba(28,28,29,0.12)] bg-white px-4 shadow-none"
           >
             <SelectValue placeholder="Select wallet" />
           </SelectTrigger>
@@ -1523,7 +1695,7 @@ export function PaymentsActionPage({ mode, wallets, walletsError }: PaymentsActi
           >
             {liveWallets.map((wallet) => (
               <SelectItem key={wallet.walletId} value={wallet.walletId}>
-                {getWalletActionLabel(wallet)}
+                {getWalletActionLabel(wallet, issuedTokenSymbolsByMint)}
               </SelectItem>
             ))}
           </SelectContent>
@@ -1533,52 +1705,70 @@ export function PaymentsActionPage({ mode, wallets, walletsError }: PaymentsActi
   };
 
   const renderAssetAndAmount = (amountLabel: string) => (
-    <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_160px]">
-      <div className="space-y-2">
-        <Label htmlFor={`${mode}-amount`}>{amountLabel}</Label>
-        <Input
-          id={`${mode}-amount`}
-          type="number"
-          inputMode="decimal"
-          min="0.000001"
-          step="any"
-          value={amount}
-          onChange={(event) => {
-            setAmount(event.currentTarget.value);
-            resetExecution();
-          }}
-          placeholder="1.00"
-          className="h-12 rounded-[16px] border-[rgba(28,28,29,0.12)] bg-white px-4 shadow-none"
-        />
-      </div>
-      <div className="space-y-2">
-        <Label htmlFor={`${mode}-asset`}>Asset</Label>
-        <Select
-          value={selectedAsset}
-          onValueChange={(value) => {
-            setSelectedAsset(value);
-            resetExecution();
-          }}
-          disabled={walletsLoading || assetOptions.length === 0}
-        >
-          <SelectTrigger
-            id={`${mode}-asset`}
+    <div className="space-y-1">
+      <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_160px]">
+        <div className="space-y-2">
+          <Label htmlFor={`${mode}-amount`}>{amountLabel}</Label>
+          <Input
+            id={`${mode}-amount`}
+            type="number"
+            inputMode="decimal"
+            min="0.000001"
+            step="any"
+            value={amount}
+            onChange={(event) => {
+              setAmount(event.currentTarget.value);
+              if (event.currentTarget.value.trim().length > 0) {
+                setAmountTouched(true);
+              }
+              resetExecution();
+            }}
+            onBlur={() => setAmountTouched(true)}
+            placeholder="1.00"
             className="h-12 rounded-[16px] border-[rgba(28,28,29,0.12)] bg-white px-4 shadow-none"
+          />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor={`${mode}-asset`}>Asset</Label>
+          <Select
+            value={selectedAsset}
+            onValueChange={(value) => {
+              setSelectedAsset(value);
+              resetExecution();
+            }}
+            disabled={walletsLoading || assetOptions.length === 0}
           >
-            <SelectValue placeholder="Select asset" />
-          </SelectTrigger>
-          <SelectContent
-            position="popper"
-            className="rounded-2xl border-[rgba(28,28,29,0.12)] bg-white"
-          >
-            {assetOptions.map((asset) => (
-              <SelectItem key={asset} value={asset}>
-                {asset}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+            <SelectTrigger
+              id={`${mode}-asset`}
+              size="lg"
+              className="h-12 rounded-[16px] border-[rgba(28,28,29,0.12)] bg-white px-4 shadow-none"
+            >
+              <SelectValue placeholder="Select asset" />
+            </SelectTrigger>
+            <SelectContent
+              position="popper"
+              className="rounded-2xl border-[rgba(28,28,29,0.12)] bg-white"
+            >
+              {assetOptions.map((asset) => (
+                <SelectItem key={asset} value={asset}>
+                  {asset}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
       </div>
+      <p
+        className={[
+          "h-5 text-sm leading-5",
+          amountTouched && exceedsSelectedAssetBalance
+            ? "text-[#9e2b38]"
+            : "invisible text-transparent",
+        ].join(" ")}
+      >
+        Insufficient {selectedAsset}. Available balance: {selectedAssetBalance?.uiAmount ?? "0"}{" "}
+        {selectedAsset}.
+      </p>
     </div>
   );
 
@@ -1627,15 +1817,8 @@ export function PaymentsActionPage({ mode, wallets, walletsError }: PaymentsActi
               policyLoading || transferComplianceLoading || !selectedWalletId || !destinationTrimmed
             }
           >
-            {policyLoading
-              ? "Loading wallet policy..."
-              : transferComplianceLoading
-                ? "Checking..."
-                : "Check risk score"}
+            Run a risk check
           </Button>
-          <p className="text-sm text-[rgba(28,28,29,0.56)]">
-            Risk check is required unless the destination is already on the wallet allowlist.
-          </p>
         </div>
       )}
       {policyError ? <p className="text-sm text-[#9e2b38]">{policyError}</p> : null}
@@ -1692,6 +1875,7 @@ export function PaymentsActionPage({ mode, wallets, walletsError }: PaymentsActi
           >
             <SelectTrigger
               id={`${mode}-deposit-asset`}
+              size="lg"
               className="h-12 rounded-[16px] border-[rgba(28,28,29,0.12)] bg-white px-4 shadow-none"
             >
               <SelectValue placeholder="Select asset" />
@@ -1786,7 +1970,7 @@ export function PaymentsActionPage({ mode, wallets, walletsError }: PaymentsActi
             <p className="text-[20px] font-medium text-[#115e3d]">Transfer submitted</p>
             <p className="mt-2 text-sm text-[#115e3d]">
               {transferResult.signature
-                ? "The transfer was signed and broadcast successfully."
+                ? "The transfer was signed and broadcast successfully. It will appear in the transaction list when you return to Payments."
                 : `Current status: ${transferResult.status}`}
             </p>
           </div>
@@ -1925,23 +2109,6 @@ export function PaymentsActionPage({ mode, wallets, walletsError }: PaymentsActi
         ]}
       />
       <WalletAddressQrCode address={selectedWallet?.publicKey ?? ""} />
-      {selectedWallet?.publicKey ? (
-        <div className="flex justify-end">
-          <Button
-            type="button"
-            variant="secondary"
-            onClick={() => {
-              void navigator.clipboard.writeText(selectedWallet.publicKey);
-              toast.success("Address copied.", {
-                position: "bottom-right",
-              });
-            }}
-          >
-            <Copy className="size-4" />
-            Copy address
-          </Button>
-        </div>
-      ) : null}
     </div>
   );
 
@@ -2025,31 +2192,37 @@ export function PaymentsActionPage({ mode, wallets, walletsError }: PaymentsActi
         {renderCurrentStep()}
       </div>
 
-      <div className="mx-auto flex w-full max-w-3xl flex-col gap-3 sm:flex-row-reverse">
-        {showPrimaryAction ? (
+      {currentStep.id !== "branch" ? (
+        <div
+          className={`mx-auto flex w-full max-w-3xl flex-col gap-3 ${
+            showPrimaryAction ? "sm:flex-row sm:justify-between" : "sm:flex-row sm:justify-start"
+          }`}
+        >
           <Button
             type="button"
+            variant="secondary"
             className="h-14 rounded-full text-base"
-            disabled={primaryDisabled}
+            disabled={executionState === "submitting"}
             onClick={() => {
-              void handlePrimaryAction();
+              void handleSecondaryAction();
             }}
           >
-            {primaryLabel}
+            {secondaryLabel}
           </Button>
-        ) : null}
-        <Button
-          type="button"
-          variant="secondary"
-          className="h-14 rounded-full text-base"
-          disabled={executionState === "submitting"}
-          onClick={() => {
-            void handleSecondaryAction();
-          }}
-        >
-          {secondaryLabel}
-        </Button>
-      </div>
+          {showPrimaryAction ? (
+            <Button
+              type="button"
+              className="h-14 rounded-full text-base"
+              disabled={primaryDisabled}
+              onClick={() => {
+                void handlePrimaryAction();
+              }}
+            >
+              {primaryLabel}
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -41,6 +41,18 @@ function extractErrorMessage(body: string): string {
   return body;
 }
 
+function isNotInBlockchainResponse(responseStatus: number, body: string): boolean {
+  if (responseStatus !== 404) {
+    return false;
+  }
+
+  return (
+    body.includes("NotInBlockchain") ||
+    body.includes("has not yet been processed into the Elliptic tool") ||
+    body.includes("does not exist on the blockchain")
+  );
+}
+
 function decodeBase64(value: string): Uint8Array {
   const trimmed = value.trim();
   if (!trimmed) {
@@ -216,6 +228,16 @@ export class EllipticComplianceProvider implements ComplianceProvider {
 
       if (!response.ok) {
         const body = extractErrorMessage(await response.text().catch(() => ""));
+        if (isNotInBlockchainResponse(response.status, body)) {
+          return {
+            provider: this.name,
+            status: "ok",
+            riskScore: null,
+            riskLevel: "Check passed",
+            evaluatedAt,
+          };
+        }
+
         return {
           provider: this.name,
           status: "error",

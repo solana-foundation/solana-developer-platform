@@ -99,6 +99,18 @@ function resolveRiskTone(result: ComplianceProviderResult): RiskTone {
     return "neutral";
   }
 
+  if (result.provider === "elliptic" && result.riskLevel?.toLowerCase() === "check passed") {
+    return "green";
+  }
+
+  if (
+    result.provider === "trm" &&
+    result.riskScore === null &&
+    (!result.riskLevel || !result.riskLevel.trim())
+  ) {
+    return "green";
+  }
+
   if (typeof result.riskScore === "number") {
     if (result.riskScore >= 7) {
       return "red";

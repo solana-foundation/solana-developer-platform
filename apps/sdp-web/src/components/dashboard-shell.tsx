@@ -319,6 +319,7 @@ function SidebarGroup({
   );
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: this shell intentionally coordinates route-specific dashboard layout behavior in one place.
 export function DashboardShell({ children }: { children: ReactNode }) {
   const { isLoaded, isSignedIn, orgId } = useAuth();
   const pathname = usePathname();
@@ -335,6 +336,8 @@ export function DashboardShell({ children }: { children: ReactNode }) {
   const shouldRenderHeaderNavRow =
     pageConfig.showHeaderNavRow || Boolean(backAction) || Boolean(headerNav);
   const shouldRenderTopBarBorder = Boolean(centeredTitle) && !shouldRenderHeaderNavRow;
+  const shouldClipHorizontalOverflow =
+    pathname === "/dashboard/payments" || pathname.startsWith("/dashboard/payments/");
   const shouldLockViewportScroll =
     issuanceTab === "playground" &&
     (pathname === "/dashboard/issuance" ||
@@ -481,6 +484,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
           <div
             className={[
               "w-full",
+              shouldClipHorizontalOverflow ? "overflow-x-hidden" : "",
               shouldLockViewportScroll ? "flex min-h-0 flex-1 flex-col gap-0" : "space-y-6",
             ].join(" ")}
           >
@@ -536,6 +540,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
               className={[
                 "mx-auto w-full",
                 contentWidthClass,
+                shouldClipHorizontalOverflow ? "overflow-x-hidden" : "",
                 shouldLockViewportScroll
                   ? "min-h-0 flex-1 overflow-hidden -mx-3 md:-mx-6 -mb-5 md:-mb-6"
                   : "",

@@ -1,5 +1,6 @@
 "use client";
 
+import { Button } from "@/components/ui/button";
 import {
   Table,
   TableBody,
@@ -8,6 +9,10 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { useEscapeKey } from "@/lib/use-escape-key";
+import { X } from "lucide-react";
+import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { formatRiskScore, riskToneClassName, toProviderLabel } from "./payments-workspace.data";
 import type { ComplianceSnapshot } from "./payments-workspace.types";
 
@@ -18,6 +23,17 @@ interface ProviderRiskTableProps {
 }
 
 export function ProviderRiskTable({ title, snapshot, onClose }: ProviderRiskTableProps) {
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+    return () => setMounted(false);
+  }, []);
+
+  useEscapeKey(Boolean(snapshot) && mounted, () => {
+    onClose?.();
+  });
+
   if (!snapshot || snapshot.providers.length === 0) {
     return null;
   }
@@ -26,50 +42,74 @@ export function ProviderRiskTable({ title, snapshot, onClose }: ProviderRiskTabl
     toProviderLabel(left.provider).localeCompare(toProviderLabel(right.provider))
   );
 
-  return (
-    <div className="rounded-xl border border-[rgba(28,28,29,0.12)] bg-white p-3">
-      <div className="mb-3 flex items-center justify-between gap-2">
-        <p className="text-sm font-semibold text-[#1c1c1d]">{title}</p>
-        <div className="flex items-center gap-2">
-          <p className="text-xs text-[rgba(28,28,29,0.56)]">
-            {new Date(snapshot.checkedAt).toLocaleString()}
-          </p>
+  if (!mounted) {
+    return null;
+  }
+
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-4 py-6">
+      <button
+        type="button"
+        className="absolute inset-0 bg-[rgba(18,18,19,0.44)]"
+        aria-label={`Close ${title}`}
+        onClick={() => onClose?.()}
+      />
+      <div className="relative z-10 w-full max-w-2xl rounded-[24px] border border-[rgba(28,28,29,0.12)] bg-white p-6 shadow-lg">
+        <div className="mb-5 flex items-start justify-between gap-4">
+          <div className="space-y-1">
+            <p className="text-[22px] font-medium text-[#1c1c1d]">{title}</p>
+            <p className="text-sm text-[rgba(28,28,29,0.56)]">
+              {new Date(snapshot.checkedAt).toLocaleString()}
+            </p>
+            <p className="text-sm text-[rgba(28,28,29,0.56)]">
+              This screening checks major risk factors such as sanctions exposure and other
+              compliance signals from the connected providers.
+            </p>
+          </div>
           {onClose ? (
             <button
               type="button"
-              onClick={onClose}
+              onClick={() => onClose()}
               aria-label={`Close ${title}`}
-              className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-[rgba(28,28,29,0.12)] text-xs font-semibold text-[rgba(28,28,29,0.66)] transition-colors hover:bg-[rgba(28,28,29,0.06)]"
+              className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-[rgba(28,28,29,0.12)] text-[rgba(28,28,29,0.66)] transition-colors hover:bg-[rgba(28,28,29,0.06)]"
             >
-              X
+              <X className="size-4" />
             </button>
           ) : null}
         </div>
-      </div>
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Provider</TableHead>
-            <TableHead>Risk score</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {providers.map((provider) => (
-            <TableRow key={provider.provider}>
-              <TableCell className="font-medium text-[#1c1c1d]">
-                {toProviderLabel(provider.provider)}
-              </TableCell>
-              <TableCell className="text-[rgba(28,28,29,0.8)]">
-                <span
-                  className={`inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium ${riskToneClassName(provider)}`}
-                >
-                  {formatRiskScore(provider)}
-                </span>
-              </TableCell>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Provider</TableHead>
+              <TableHead>Analysis</TableHead>
             </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-    </div>
+          </TableHeader>
+          <TableBody>
+            {providers.map((provider) => (
+              <TableRow key={provider.provider}>
+                <TableCell className="font-medium text-[#1c1c1d]">
+                  {toProviderLabel(provider.provider)}
+                </TableCell>
+                <TableCell className="text-[rgba(28,28,29,0.8)]">
+                  <span
+                    className={`inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium ${riskToneClassName(provider)}`}
+                  >
+                    {formatRiskScore(provider)}
+                  </span>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+        {onClose ? (
+          <div className="mt-6 flex justify-end">
+            <Button type="button" variant="secondary" onClick={() => onClose()}>
+              Dismiss
+            </Button>
+          </div>
+        ) : null}
+      </div>
+    </div>,
+    document.body
   );
 }
