@@ -123,6 +123,14 @@ export const tokenBalanceSchema = z
     }),
     uiAmount: tokenAmountSchema,
     decimals: z.number().int().openapi({ description: "Token decimals.", example: 6 }),
+    usdPrice: z.number().optional().openapi({
+      description: "Resolved USD price per token when available.",
+      example: 1,
+    }),
+    usdValue: z.number().optional().openapi({
+      description: "Resolved USD value of this balance when pricing is available.",
+      example: 100,
+    }),
     confidential: z
       .boolean()
       .optional()

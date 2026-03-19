@@ -2,7 +2,7 @@ import { withSentryConfig } from "@sentry/nextjs";
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  distDir: process.env.PLAYWRIGHT_NEXT_DIST_DIR?.trim() || ".next",
 };
 
 export default withSentryConfig(nextConfig, {

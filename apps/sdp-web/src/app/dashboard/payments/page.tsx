@@ -5,6 +5,7 @@ import { fetchActiveApiKeys, resolvePlaygroundApiBaseUrl } from "../playground-a
 import {
   fetchPaymentTransfers,
   fetchPaymentsAggregate,
+  fetchPaymentsIssuedTokenSymbols,
   fetchPaymentsWallets,
 } from "./payments-page.data";
 import { PaymentsWorkspace } from "./payments-workspace";
@@ -20,16 +21,21 @@ export default async function PaymentsPage() {
 
   const apiBaseUrl = resolvePlaygroundApiBaseUrl();
   const apiClient = await createSdpApiClient();
-  const [apiKeysResult, walletsResult, aggregateResult, transfersResult] = await Promise.all([
-    fetchActiveApiKeys(apiClient.request),
-    fetchPaymentsWallets(apiClient.request, { includeBalances: true }),
-    fetchPaymentsAggregate(apiClient.request),
-    fetchPaymentTransfers(apiClient.request),
-  ]);
+  const [apiKeysResult, walletsResult, aggregateResult, transfersResult, issuedTokenSymbolsResult] =
+    await Promise.all([
+      fetchActiveApiKeys(apiClient.request),
+      fetchPaymentsWallets(apiClient.request, { includeBalances: true }),
+      fetchPaymentsAggregate(apiClient.request),
+      fetchPaymentTransfers(apiClient.request),
+      fetchPaymentsIssuedTokenSymbols(apiClient.request),
+    ]);
   const apiKeys = apiKeysResult.data ?? [];
   const wallets = walletsResult.data ?? [];
   const aggregate = aggregateResult.data ?? null;
   const transfers = transfersResult.data ?? [];
+  const issuedTokenSymbolsByMint = Object.fromEntries(
+    (issuedTokenSymbolsResult.data ?? []).map((token) => [token.mintAddress, token.symbol])
+  );
   const walletsError = walletsResult.ok
     ? null
     : `Wallet API ${walletsResult.status ?? "unavailable"}: ${walletsResult.error ?? "Unknown error"}`;
@@ -49,6 +55,7 @@ export default async function PaymentsPage() {
         walletsError={walletsError}
         aggregate={aggregate}
         aggregateError={aggregateError}
+        issuedTokenSymbolsByMint={issuedTokenSymbolsByMint}
         transfers={transfers}
         transfersError={transfersError}
       />

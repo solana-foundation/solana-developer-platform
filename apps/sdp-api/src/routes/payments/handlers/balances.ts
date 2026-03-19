@@ -1,6 +1,7 @@
 import { formatDecimalAmount } from "@/lib/amount";
 import { AppError } from "@/lib/errors";
 import { success } from "@/lib/response";
+import { attachUsdValuesToBalances } from "@/services/helius-das.service";
 import { createRpc, getAccountInfo } from "@/services/solana/rpc";
 import type { Address } from "@solana/kit";
 import { type AppContext, getPaymentsRepository } from "../context";
@@ -44,20 +45,22 @@ export async function getWalletBalances(c: AppContext) {
     });
   }
 
+  const balances = await attachUsdValuesToBalances(c.env, [
+    {
+      token: "SOL",
+      mint: SOL_MINT,
+      amount: lamports.toString(),
+      uiAmount: formatDecimalAmount(lamports, 9),
+      decimals: 9,
+    },
+    ...splBalances,
+  ]);
+
   return success(c, {
     walletBalances: {
       walletId: wallet.walletId,
       address: wallet.publicKey,
-      balances: [
-        {
-          token: "SOL",
-          mint: SOL_MINT,
-          amount: lamports.toString(),
-          uiAmount: formatDecimalAmount(lamports, 9),
-          decimals: 9,
-        },
-        ...splBalances,
-      ],
+      balances,
     },
   });
 }

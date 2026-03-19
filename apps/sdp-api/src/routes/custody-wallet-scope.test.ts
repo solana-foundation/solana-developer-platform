@@ -1,37 +1,45 @@
 import app from "@/index";
 import { hashString } from "@/lib/hash";
+import { getSplTokenBalances } from "@/routes/payments/token-accounts";
 import { createSigningService } from "@/services/domain/signing.service";
+import { getAccountInfo } from "@/services/solana/rpc";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/d1";
 import { clearKVNamespaces, seedCachedApiKey } from "@/test/mocks/kv";
-import type { CachedApiKey, CustodyWalletTokenBalance } from "@sdp/types";
+import type { CachedApiKey } from "@sdp/types";
 import { address } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/services/helius-das.service", async () => {
-  const actual = await vi.importActual<typeof import("@/services/helius-das.service")>(
-    "@/services/helius-das.service"
+vi.mock("@/services/solana/rpc", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/services/solana/rpc")>("@/services/solana/rpc");
+  return {
+    ...actual,
+    createRpc: vi.fn().mockReturnValue({}),
+    getAccountInfo: vi.fn().mockResolvedValue({
+      lamports: 0n,
+      owner: "11111111111111111111111111111111",
+    }),
+  };
+});
+
+vi.mock("@/routes/payments/token-accounts", async () => {
+  const actual = await vi.importActual<typeof import("@/routes/payments/token-accounts")>(
+    "@/routes/payments/token-accounts"
   );
 
   return {
     ...actual,
-    getTrackedWalletBalancesByOwner: vi.fn(async (_env, owners: string[]) => {
-      return new Map<string, CustodyWalletTokenBalance[]>(
-        owners.map((owner) => [
-          owner,
-          [
-            {
-              token: "USDC",
-              mint: "usdc_mint",
-              amount: "1000000",
-              uiAmount: owner.endsWith("a") ? "1.0" : "2.0",
-              decimals: 6,
-            },
-          ],
-        ])
-      );
-    }),
+    getSplTokenBalances: vi.fn().mockResolvedValue([
+      {
+        token: "USDC",
+        mint: "usdc_mint",
+        amount: "1000000",
+        uiAmount: "1.0",
+        decimals: 6,
+      },
+    ]),
   };
 });
 
@@ -207,12 +215,27 @@ describe("Custody wallet scope routes", () => {
   beforeEach(async () => {
     await seedTestDatabase(env);
     await seedAuthAndConfigs();
+    vi.mocked(getAccountInfo).mockResolvedValue({
+      lamports: 0n,
+      owner: "11111111111111111111111111111111",
+    } as Awaited<ReturnType<typeof getAccountInfo>>);
+    vi.mocked(getSplTokenBalances).mockResolvedValue([
+      {
+        token: "USDC",
+        mint: "usdc_mint",
+        amount: "1000000",
+        uiAmount: "1.0",
+        decimals: 6,
+      },
+    ]);
   });
 
   afterEach(async () => {
     await clearTestDatabase(env);
     await clearKVNamespaces(env);
     vi.mocked(createSigningService).mockClear();
+    vi.mocked(getAccountInfo).mockClear();
+    vi.mocked(getSplTokenBalances).mockClear();
   });
 
   it("filters listed wallets to the API key bindings", async () => {
@@ -261,15 +284,16 @@ describe("Custody wallet scope routes", () => {
       data: {
         aggregate: {
           walletCount: number;
-          balances: Array<{ token: string; uiAmount: string }>;
+          balances: Array<{ token: string; uiAmount: string; usdValue?: number }>;
         };
       };
     };
     expect(body.data.aggregate.walletCount).toBe(1);
-    expect(body.data.aggregate.balances).toHaveLength(1);
-    expect(body.data.aggregate.balances[0]).toMatchObject({
+    expect(body.data.aggregate.balances).toHaveLength(2);
+    expect(body.data.aggregate.balances.find((balance) => balance.token === "USDC")).toMatchObject({
       token: "USDC",
       uiAmount: "1",
+      usdValue: 1,
     });
   });
 

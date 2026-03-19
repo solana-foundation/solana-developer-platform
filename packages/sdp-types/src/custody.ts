@@ -205,6 +205,8 @@ export interface CustodyWalletBalance {
   amount: string;
   uiAmount: string;
   decimals: 9;
+  usdPrice?: number;
+  usdValue?: number;
 }
 
 export interface CustodyWalletTokenBalance {
@@ -213,6 +215,8 @@ export interface CustodyWalletTokenBalance {
   amount: string;
   uiAmount: string;
   decimals: number;
+  usdPrice?: number;
+  usdValue?: number;
 }
 
 export interface CustodyWalletWithBalance extends CustodyWalletSummary {

@@ -10,6 +10,7 @@ const MAINNET_USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 
 interface TrackedAssetDefinition {
   decimals: number;
+  isUsdStable?: boolean;
   mint: string;
   token: string;
 }
@@ -29,6 +30,10 @@ interface HeliusTokenInfo {
   ui_amount?: number | string | null;
   uiAmountString?: string | null;
   ui_amount_string?: string | null;
+  price_info?: {
+    price_per_token?: number | null;
+    currency?: string | null;
+  } | null;
 }
 
 interface HeliusSearchAssetItem {
@@ -48,14 +53,59 @@ interface HeliusSearchAssetsResponse {
   };
 }
 
-function resolveTrackedAssets(env: Env): Map<string, TrackedAssetDefinition> {
+interface HeliusGetAssetBatchItem {
+  id?: string;
+  token_info?: HeliusTokenInfo | null;
+}
+
+interface HeliusGetAssetBatchResponse {
+  error?: HeliusRpcError;
+  result?: HeliusGetAssetBatchItem[];
+}
+
+async function resolveTrackedAssets(env: Env): Promise<Map<string, TrackedAssetDefinition>> {
   const network = env.SOLANA_NETWORK ?? "devnet";
   const trackedAssets: TrackedAssetDefinition[] =
     network === "mainnet-beta"
-      ? [{ token: "USDC", mint: MAINNET_USDC_MINT, decimals: 6 }]
-      : [{ token: "USDC", mint: DEVNET_USDC_MINT, decimals: 6 }];
+      ? [{ token: "USDC", mint: MAINNET_USDC_MINT, decimals: 6, isUsdStable: true }]
+      : [{ token: "USDC", mint: DEVNET_USDC_MINT, decimals: 6, isUsdStable: true }];
 
-  return new Map(trackedAssets.map((asset) => [asset.mint, asset]));
+  const trackedAssetsByMint = new Map(trackedAssets.map((asset) => [asset.mint, asset]));
+
+  try {
+    const result = await env.DB.prepare(
+      `SELECT mint_address, symbol, decimals
+         FROM issued_tokens
+        WHERE template = 'stablecoin'
+          AND mint_address IS NOT NULL
+          AND deployed_at IS NOT NULL`
+    ).all<{
+      decimals?: number | null;
+      mint_address?: string | null;
+      symbol?: string | null;
+    }>();
+
+    for (const row of result.results ?? []) {
+      const mint = row.mint_address?.trim();
+      if (!mint) {
+        continue;
+      }
+
+      trackedAssetsByMint.set(mint, {
+        token: row.symbol?.trim() || mint,
+        mint,
+        decimals:
+          typeof row.decimals === "number" && Number.isInteger(row.decimals) && row.decimals >= 0
+            ? row.decimals
+            : 6,
+        isUsdStable: true,
+      });
+    }
+  } catch {
+    // Ignore D1 lookup failures and fall back to built-in tracked assets.
+  }
+
+  return trackedAssetsByMint;
 }
 
 function resolveHeliusDasUrl(env: Env): string | null {
@@ -64,6 +114,27 @@ function resolveHeliusDasUrl(env: Env): string | null {
   }
 
   return withHeliusApiKey(env.SOLANA_RPC_HELIUS_URL, env.SOLANA_RPC_HELIUS_API_KEY);
+}
+
+function resolveKnownUsdPrice(
+  balance: Pick<CustodyWalletTokenBalance, "mint" | "token">,
+  trackedAssets: Map<string, TrackedAssetDefinition>
+): number | null {
+  const trackedAsset = trackedAssets.get(balance.mint.trim());
+  if (trackedAsset?.isUsdStable) {
+    return 1;
+  }
+
+  const normalizedToken = balance.token.trim().toUpperCase();
+  if (
+    normalizedToken === "USDC" ||
+    balance.mint === DEVNET_USDC_MINT ||
+    balance.mint === MAINNET_USDC_MINT
+  ) {
+    return 1;
+  }
+
+  return null;
 }
 
 function parseIntegerString(value: number | string | null | undefined): string | null {
@@ -202,6 +273,144 @@ async function fetchTrackedBalancesForOwner(
     .filter((balance): balance is CustodyWalletTokenBalance => Boolean(balance));
 }
 
+async function fetchUsdPricesByMint(
+  heliusDasUrl: string,
+  mints: string[]
+): Promise<Map<string, number>> {
+  if (mints.length === 0) {
+    return new Map();
+  }
+
+  const response = await fetch(heliusDasUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: `wallet-prices-${mints.length}`,
+      method: "getAssetBatch",
+      params: {
+        ids: mints,
+        displayOptions: {
+          showFungible: true,
+        },
+      },
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Helius DAS request failed (${response.status})`);
+  }
+
+  const payload = (await response.json()) as HeliusGetAssetBatchResponse;
+  if (payload.error?.message) {
+    throw new Error(payload.error.message);
+  }
+
+  const pricesByMint = new Map<string, number>();
+
+  for (const asset of payload.result ?? []) {
+    const mint = asset.id?.trim();
+    const pricePerToken = asset.token_info?.price_info?.price_per_token;
+    const currency = asset.token_info?.price_info?.currency?.trim().toUpperCase() ?? "USD";
+
+    if (
+      mint &&
+      typeof pricePerToken === "number" &&
+      Number.isFinite(pricePerToken) &&
+      pricePerToken >= 0 &&
+      (currency === "USD" || currency === "USDC")
+    ) {
+      pricesByMint.set(mint, pricePerToken);
+    }
+  }
+
+  return pricesByMint;
+}
+
+async function resolveUsdPricesForBalances(
+  env: Env,
+  balances: CustodyWalletTokenBalance[]
+): Promise<{
+  pricesByMint: Map<string, number>;
+  trackedAssets: Map<string, TrackedAssetDefinition>;
+}> {
+  const trackedAssets = await resolveTrackedAssets(env);
+  const pricesByMint = new Map<string, number>();
+
+  for (const balance of balances) {
+    const knownUsdPrice = resolveKnownUsdPrice(balance, trackedAssets);
+    if (knownUsdPrice !== null) {
+      pricesByMint.set(balance.mint, knownUsdPrice);
+    }
+  }
+
+  const heliusDasUrl = resolveHeliusDasUrl(env);
+  const unresolvedMints = [...new Set(balances.map((balance) => balance.mint))].filter(
+    (mint) => !pricesByMint.has(mint)
+  );
+
+  if (!heliusDasUrl || unresolvedMints.length === 0) {
+    return { pricesByMint, trackedAssets };
+  }
+
+  try {
+    const fetchedPrices = await fetchUsdPricesByMint(heliusDasUrl, unresolvedMints);
+    for (const [mint, price] of fetchedPrices) {
+      pricesByMint.set(mint, price);
+    }
+  } catch {
+    // Ignore price lookup failures; callers will fall back to unpriced balances.
+  }
+
+  return { pricesByMint, trackedAssets };
+}
+
+function enrichBalancesWithUsdValues(
+  balances: CustodyWalletTokenBalance[],
+  pricesByMint: Map<string, number>,
+  trackedAssets: Map<string, TrackedAssetDefinition>
+): CustodyWalletTokenBalance[] {
+  return balances.map((balance) => {
+    const usdPrice = pricesByMint.get(balance.mint) ?? resolveKnownUsdPrice(balance, trackedAssets);
+    const uiAmount = Number(balance.uiAmount);
+
+    if (usdPrice === null || !Number.isFinite(usdPrice) || !Number.isFinite(uiAmount)) {
+      return balance;
+    }
+
+    return {
+      ...balance,
+      usdPrice,
+      usdValue: Number((uiAmount * usdPrice).toFixed(6)),
+    };
+  });
+}
+
+export async function attachUsdValuesToBalances(
+  env: Env,
+  balances: CustodyWalletTokenBalance[]
+): Promise<CustodyWalletTokenBalance[]> {
+  const { pricesByMint, trackedAssets } = await resolveUsdPricesForBalances(env, balances);
+  return enrichBalancesWithUsdValues(balances, pricesByMint, trackedAssets);
+}
+
+export async function attachUsdValuesToBalanceMap(
+  env: Env,
+  balancesByWalletId: Map<string, CustodyWalletTokenBalance[]>
+): Promise<Map<string, CustodyWalletTokenBalance[]>> {
+  const allBalances = [...balancesByWalletId.values()].flat();
+  const { pricesByMint, trackedAssets } = await resolveUsdPricesForBalances(env, allBalances);
+
+  return new Map(
+    [...balancesByWalletId.entries()].map(([walletId, balances]) => [
+      walletId,
+      enrichBalancesWithUsdValues(balances, pricesByMint, trackedAssets),
+    ])
+  );
+}
+
 export async function getTrackedWalletBalancesByOwner(
   env: Env,
   ownerAddresses: string[]
@@ -217,7 +426,7 @@ export async function getTrackedWalletBalancesByOwner(
     return balancesByOwner;
   }
 
-  const trackedAssets = resolveTrackedAssets(env);
+  const trackedAssets = await resolveTrackedAssets(env);
   const uniqueOwners = [...new Set(ownerAddresses)];
   const results = await Promise.allSettled(
     uniqueOwners.map(async (ownerAddress) => ({

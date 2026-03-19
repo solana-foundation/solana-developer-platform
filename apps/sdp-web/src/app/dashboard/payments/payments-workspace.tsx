@@ -34,6 +34,7 @@ interface PaymentsWorkspaceProps {
   walletsError: string | null;
   aggregate: CustodyWalletAggregate | null;
   aggregateError: string | null;
+  issuedTokenSymbolsByMint: Record<string, string>;
   transfers: PaymentTransferSummary[];
   transfersError: string | null;
 }
@@ -45,6 +46,7 @@ export function PaymentsWorkspace({
   walletsError,
   aggregate,
   aggregateError,
+  issuedTokenSymbolsByMint,
   transfers,
   transfersError,
 }: PaymentsWorkspaceProps) {
@@ -114,6 +116,7 @@ export function PaymentsWorkspace({
       walletsError={walletsError}
       aggregate={aggregate}
       aggregateError={aggregateError}
+      issuedTokenSymbolsByMint={issuedTokenSymbolsByMint}
       transfers={transfers}
       transfersError={transfersError}
     />

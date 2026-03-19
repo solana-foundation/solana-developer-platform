@@ -7,12 +7,14 @@ import {
 import { getAuth } from "@/lib/auth";
 import { AppError } from "@/lib/errors";
 import { created, success } from "@/lib/response";
+import { SOL_MINT, getSplTokenBalances } from "@/routes/payments/token-accounts";
 import { AuditService } from "@/services/audit.service";
 import { CUSTODY_PROVIDERS, type CustodyProvider } from "@/services/custody/providers";
 import { createSigningService } from "@/services/domain/signing.service";
 import {
   aggregateTrackedWalletBalances,
-  getTrackedWalletBalancesByOwner,
+  attachUsdValuesToBalanceMap,
+  attachUsdValuesToBalances,
 } from "@/services/helius-das.service";
 import { SigningError } from "@/services/ports";
 import { createRpc, getAccountInfo } from "@/services/solana/rpc";
@@ -30,9 +32,6 @@ import {
   setDefaultWalletSchema,
   updateWalletSchema,
 } from "../schemas";
-
-// biome-ignore lint/nursery/noSecrets: Solana native mint address constant, not a secret.
-const SOL_MINT = "So11111111111111111111111111111111111111112";
 
 function resolveWalletFilters(
   c: AppContext,
@@ -89,16 +88,62 @@ async function getScopedWallets(
 
 async function getBalancesByWalletId(
   c: AppContext,
-  walletPublicKeys: Array<{ walletId: string; publicKey: string }>
+  walletPublicKeys: Array<{ walletId: string; publicKey: string }>,
+  options: { includeUsdValues?: boolean } = {}
 ) {
-  const balancesByOwner = await getTrackedWalletBalancesByOwner(
-    c.env,
-    walletPublicKeys.map((wallet) => wallet.publicKey)
+  const rpc = createRpc(c.env);
+  const balancesByWalletId = await Promise.all(
+    walletPublicKeys.map(async (wallet) => {
+      let lamports = 0n;
+      let splBalances: Awaited<ReturnType<typeof getSplTokenBalances>> = [];
+
+      try {
+        const accountInfo = await getAccountInfo(rpc, wallet.publicKey as Address);
+        lamports = accountInfo?.lamports ?? 0n;
+      } catch (error) {
+        // biome-ignore lint/nursery/noSecrets: Operational log message, not a secret.
+        console.error("getBalancesByWalletId: failed to fetch SOL balance", {
+          requestId: c.get("requestId"),
+          walletId: wallet.walletId,
+          publicKey: wallet.publicKey,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+
+      try {
+        splBalances = await getSplTokenBalances(rpc, wallet.publicKey as Address);
+      } catch (error) {
+        // biome-ignore lint/nursery/noSecrets: Operational log message, not a secret.
+        console.error("getBalancesByWalletId: failed to fetch SPL balances", {
+          requestId: c.get("requestId"),
+          walletId: wallet.walletId,
+          publicKey: wallet.publicKey,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+
+      const walletBalances: CustodyWalletTokenBalance[] = [
+        {
+          token: "SOL",
+          mint: SOL_MINT,
+          amount: lamports.toString(),
+          uiAmount: formatDecimalAmount(lamports, 9),
+          decimals: 9,
+        },
+        ...splBalances,
+      ];
+
+      return [wallet.walletId, walletBalances] as const;
+    })
   );
 
-  return new Map(
-    walletPublicKeys.map((wallet) => [wallet.walletId, balancesByOwner.get(wallet.publicKey) ?? []])
-  );
+  const balancesMap = new Map(balancesByWalletId);
+
+  if (options.includeUsdValues === false) {
+    return balancesMap;
+  }
+
+  return attachUsdValuesToBalanceMap(c.env, balancesMap);
 }
 
 export const createWallet = async (c: AppContext) => {
@@ -381,15 +426,20 @@ export const getWalletAggregate = async (c: AppContext) => {
     wallets.map((wallet) => ({
       walletId: wallet.walletId,
       publicKey: wallet.publicKey,
-    }))
+    })),
+    { includeUsdValues: false }
+  );
+  const aggregatedBalances = await attachUsdValuesToBalances(
+    c.env,
+    aggregateTrackedWalletBalances(
+      wallets.map((wallet) => balancesByWalletId.get(wallet.walletId) ?? [])
+    )
   );
 
   const response: CustodyWalletAggregateResponse = {
     aggregate: {
       walletCount: wallets.length,
-      balances: aggregateTrackedWalletBalances(
-        wallets.map((wallet) => balancesByWalletId.get(wallet.walletId) ?? [])
-      ),
+      balances: aggregatedBalances,
     },
   };
 
@@ -437,6 +487,26 @@ export const getWalletById = async (c: AppContext) => {
     });
   }
 
+  const solBalance = {
+    token: "SOL" as const,
+    mint: SOL_MINT,
+    amount: lamports.toString(),
+    uiAmount: formatDecimalAmount(lamports, 9),
+    decimals: 9 as const,
+  };
+  const [pricedSolBalanceResult] = await attachUsdValuesToBalances(c.env, [solBalance]);
+  const pricedSolBalance = pricedSolBalanceResult
+    ? {
+        ...solBalance,
+        ...(typeof pricedSolBalanceResult.usdPrice === "number"
+          ? { usdPrice: pricedSolBalanceResult.usdPrice }
+          : {}),
+        ...(typeof pricedSolBalanceResult.usdValue === "number"
+          ? { usdValue: pricedSolBalanceResult.usdValue }
+          : {}),
+      }
+    : solBalance;
+
   const response: CustodyWalletByIdResponse = {
     wallet: {
       id: wallet.id,
@@ -449,13 +519,7 @@ export const getWalletById = async (c: AppContext) => {
       purpose: wallet.purpose,
       status: wallet.status,
       createdAt: wallet.createdAt,
-      balance: {
-        token: "SOL",
-        mint: SOL_MINT,
-        amount: lamports.toString(),
-        uiAmount: formatDecimalAmount(lamports, 9),
-        decimals: 9,
-      },
+      balance: pricedSolBalance,
     },
   };
 

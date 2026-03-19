@@ -5,10 +5,60 @@ import type {
   PaymentsDashboardWallet as WalletRecord,
 } from "@sdp/types";
 
-const REQUIRED_AGGREGATE_BALANCE_ROWS = [
-  { token: "SOL", mint: "sol" },
-  { token: "USDC", mint: "usdc" },
-] as const;
+// biome-ignore lint/nursery/noSecrets: Devnet USDC mint address constant, not a secret.
+const DEVNET_USDC_MINT = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
+// biome-ignore lint/nursery/noSecrets: Mainnet USDC mint address constant, not a secret.
+const MAINNET_USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+
+function parseIntegerAmount(value: string): bigint | null {
+  if (!/^\d+$/.test(value)) {
+    return null;
+  }
+
+  try {
+    return BigInt(value);
+  } catch {
+    return null;
+  }
+}
+
+function formatUiAmountFromRaw(amount: bigint, decimals: number): string {
+  if (decimals <= 0) {
+    return amount.toString();
+  }
+
+  const scale = BigInt(10) ** BigInt(decimals);
+  const whole = amount / scale;
+  const fraction = (amount % scale).toString().padStart(decimals, "0").replace(/0+$/, "");
+
+  return fraction ? `${whole}.${fraction}` : whole.toString();
+}
+
+function resolveFallbackUsdValue(
+  balance: Pick<CustodyWalletTokenBalance, "token" | "mint" | "uiAmount">
+) {
+  const normalizedToken = balance.token.trim().toUpperCase();
+  if (
+    normalizedToken !== "USDC" &&
+    balance.mint !== DEVNET_USDC_MINT &&
+    balance.mint !== MAINNET_USDC_MINT
+  ) {
+    return null;
+  }
+
+  const uiAmount = Number(balance.uiAmount);
+  return Number.isFinite(uiAmount) ? uiAmount : null;
+}
+
+export function resolveUsdBalanceValue(
+  balance: Pick<CustodyWalletTokenBalance, "token" | "mint" | "uiAmount" | "usdValue">
+): number | null {
+  if (typeof balance.usdValue === "number" && Number.isFinite(balance.usdValue)) {
+    return balance.usdValue;
+  }
+
+  return resolveFallbackUsdValue(balance);
+}
 
 export function formatDisplayAmount(value?: string, token?: string): string {
   if (!value) {
@@ -88,13 +138,13 @@ export function resolveTotalBalance(balances: CustodyWalletTokenBalance[]): numb
 
   let hasNumericBalance = false;
   const total = balances.reduce((sum, balance) => {
-    const numericValue = Number(balance.uiAmount);
-    if (!Number.isFinite(numericValue)) {
+    const usdValue = resolveUsdBalanceValue(balance);
+    if (usdValue === null) {
       return sum;
     }
 
     hasNumericBalance = true;
-    return sum + numericValue;
+    return sum + usdValue;
   }, 0);
 
   return hasNumericBalance ? total : null;
@@ -103,14 +153,16 @@ export function resolveTotalBalance(balances: CustodyWalletTokenBalance[]): numb
 export function aggregateBalancesFromWallets(wallets: WalletRecord[]): CustodyWalletTokenBalance[] {
   const aggregate = new Map<
     string,
-    { token: string; mint: string; amount: number; decimals: number }
+    { token: string; mint: string; amount: bigint; decimals: number; usdValue: number | null }
   >();
 
   for (const wallet of wallets) {
     for (const balance of wallet.balances ?? []) {
       const current = aggregate.get(balance.mint);
       const numericValue = Number(balance.uiAmount);
-      if (!Number.isFinite(numericValue)) {
+      const rawAmount = parseIntegerAmount(balance.amount);
+      const usdValue = resolveUsdBalanceValue(balance);
+      if (!Number.isFinite(numericValue) || rawAmount === null) {
         continue;
       }
 
@@ -118,52 +170,104 @@ export function aggregateBalancesFromWallets(wallets: WalletRecord[]): CustodyWa
         aggregate.set(balance.mint, {
           token: balance.token,
           mint: balance.mint,
-          amount: numericValue,
+          amount: rawAmount,
           decimals: balance.decimals,
+          usdValue,
         });
         continue;
       }
 
-      current.amount += numericValue;
+      current.amount += rawAmount;
+      if (usdValue !== null) {
+        current.usdValue = (current.usdValue ?? 0) + usdValue;
+      }
     }
   }
 
   return [...aggregate.values()].map((entry) => ({
     token: entry.token,
     mint: entry.mint,
-    amount: "0",
-    uiAmount: entry.amount.toString(),
+    amount: entry.amount.toString(),
+    uiAmount: formatUiAmountFromRaw(entry.amount, entry.decimals),
     decimals: entry.decimals,
+    ...(entry.usdValue !== null ? { usdValue: Number(entry.usdValue.toFixed(6)) } : {}),
   }));
 }
 
 export function normalizeAggregateBalances(
   balances: CustodyWalletTokenBalance[]
 ): CustodyWalletTokenBalance[] {
-  const balancesByToken = new Map(
-    balances.map((balance) => [balance.token.toUpperCase(), balance] as const)
-  );
+  return balances
+    .filter((balance) => balance.token.trim().toUpperCase() !== "SOL")
+    .filter((balance) => resolveUsdBalanceValue(balance) !== null)
+    .sort((left, right) => {
+      const leftIsUsdc = left.token.trim().toUpperCase() === "USDC";
+      const rightIsUsdc = right.token.trim().toUpperCase() === "USDC";
 
-  const requiredBalances = REQUIRED_AGGREGATE_BALANCE_ROWS.map(({ token, mint }) => {
-    const existingBalance = balancesByToken.get(token);
-    if (existingBalance) {
-      return existingBalance;
+      if (leftIsUsdc && !rightIsUsdc) {
+        return -1;
+      }
+      if (!leftIsUsdc && rightIsUsdc) {
+        return 1;
+      }
+
+      return left.token.localeCompare(right.token);
+    });
+}
+
+export function resolveAggregateBalanceDisplayToken(
+  balance: Pick<CustodyWalletTokenBalance, "token" | "mint">,
+  issuedTokenSymbolsByMint: Record<string, string>
+): string {
+  const normalizedMint = balance.mint.trim();
+  const issuedTokenSymbol = issuedTokenSymbolsByMint[normalizedMint]?.trim();
+
+  if (issuedTokenSymbol) {
+    return issuedTokenSymbol.toUpperCase();
+  }
+
+  const normalizedToken = balance.token.trim().toUpperCase();
+  if (normalizedToken) {
+    return normalizedToken;
+  }
+
+  return normalizedMint;
+}
+
+export function selectTopAggregateBalanceRows(
+  balances: CustodyWalletTokenBalance[],
+  issuedTokenSymbolsByMint: Record<string, string>,
+  limit = 3
+): CustodyWalletTokenBalance[] {
+  if (balances.length <= limit) {
+    return balances;
+  }
+
+  const sorted = [...balances].sort((left, right) => {
+    const leftIsUsdc =
+      resolveAggregateBalanceDisplayToken(left, issuedTokenSymbolsByMint) === "USDC";
+    const rightIsUsdc =
+      resolveAggregateBalanceDisplayToken(right, issuedTokenSymbolsByMint) === "USDC";
+
+    if (leftIsUsdc && !rightIsUsdc) {
+      return -1;
+    }
+    if (!leftIsUsdc && rightIsUsdc) {
+      return 1;
     }
 
-    return {
-      token,
-      mint,
-      amount: "0",
-      uiAmount: "0",
-      decimals: token === "SOL" ? 9 : 6,
-    };
+    const leftUsdValue = resolveUsdBalanceValue(left) ?? 0;
+    const rightUsdValue = resolveUsdBalanceValue(right) ?? 0;
+    if (leftUsdValue !== rightUsdValue) {
+      return rightUsdValue - leftUsdValue;
+    }
+
+    return resolveAggregateBalanceDisplayToken(left, issuedTokenSymbolsByMint).localeCompare(
+      resolveAggregateBalanceDisplayToken(right, issuedTokenSymbolsByMint)
+    );
   });
 
-  const remainingBalances = balances.filter(
-    (balance) => !REQUIRED_AGGREGATE_BALANCE_ROWS.some(({ token }) => token === balance.token)
-  );
-
-  return [...requiredBalances, ...remainingBalances];
+  return sorted.slice(0, limit);
 }
 
 export function resolveAggregateBalanceRows(

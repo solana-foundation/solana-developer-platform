@@ -5,9 +5,11 @@ import { getE2EEnv } from "./playwright/env";
 const env = getE2EEnv();
 const authStatePath = path.join(__dirname, "playwright/.clerk/user.json");
 const fixturesPath = path.join(__dirname, "playwright/.fixtures/issuance.json");
-const localApiPort = process.env.PLAYWRIGHT_API_PORT ?? "8787";
+const localApiPort = process.env.PLAYWRIGHT_API_PORT ?? "8788";
 const localApiUrl = process.env.PLAYWRIGHT_API_URL ?? `http://127.0.0.1:${localApiPort}`;
 const apiPersistPath = process.env.PLAYWRIGHT_API_PERSIST_PATH ?? ".wrangler/state-playwright";
+const webPort = new URL(env.baseURL).port || "3001";
+const nextDistDir = process.env.PLAYWRIGHT_NEXT_DIST_DIR ?? ".next-playwright";
 
 function resolveProcessEnv(): Record<string, string> {
   return Object.fromEntries(
@@ -32,7 +34,7 @@ export default defineConfig({
       command: "node scripts/dev-local.mjs",
       cwd: path.join(__dirname, "../sdp-api"),
       url: `${localApiUrl}/health`,
-      reuseExistingServer: !process.env.CI,
+      reuseExistingServer: false,
       env: {
         ...resolveProcessEnv(),
         SDP_API_LOCAL_PERSIST_PATH: apiPersistPath,
@@ -44,13 +46,14 @@ export default defineConfig({
       timeout: 180_000,
     },
     {
-      command: "pnpm exec next dev --hostname localhost --port 3000",
+      command: `pnpm exec next dev --hostname localhost --port ${webPort}`,
       cwd: __dirname,
       url: env.baseURL,
-      reuseExistingServer: !process.env.CI,
+      reuseExistingServer: false,
       env: {
         ...resolveProcessEnv(),
         ...env.webServerEnv,
+        PLAYWRIGHT_NEXT_DIST_DIR: nextDistDir,
         SDP_API_BASE_URL: localApiUrl,
         NEXT_PUBLIC_SDP_API_BASE_URL: localApiUrl,
       },
