@@ -25,8 +25,8 @@ catalogs:
       specifier: ^5.0.0
       version: 5.0.0
     '@solana/mosaic-sdk':
-      specifier: 0.1.0
-      version: 0.1.0
+      specifier: 0.1.1
+      version: 0.1.1
     '@solana/signers':
       specifier: ^5.0.0
       version: 5.4.0
@@ -97,7 +97,7 @@ importers:
         version: 0.1.2(@solana-program/token@0.9.0(@solana/kit@5.0.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)(ws@8.19.0)))(@solana/kit@5.0.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)(ws@8.19.0))
       '@solana/mosaic-sdk':
         specifier: 'catalog:'
-        version: 0.1.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)(ws@8.19.0)
+        version: 0.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)(ws@8.19.0)
       '@solana/signers':
         specifier: 'catalog:'
         version: 5.4.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)
@@ -3362,8 +3362,8 @@ packages:
       '@solana-program/token': ^0.9.0
       '@solana/kit': ^5.0.0
 
-  '@solana/mosaic-sdk@0.1.0':
-    resolution: {integrity: sha512-vH6ATgvboOHKzGAlOVXhZjfMI5htPjaO1rSQVCFqcc9ng216/nsAjWl2A5NwdyeVc82vLmLBzj/Y7zgYqW/G7A==}
+  '@solana/mosaic-sdk@0.1.1':
+    resolution: {integrity: sha512-SsZ9PMMBhFuZo9z+vCTyQ8lC+/FJ2OxiVJXkXOnB0atLDRwk4n64JSmSIykvKzZeWFX3CSxuX54OOv4QU9nuXg==}
     peerDependencies:
       typescript: ^5.0.0
 
@@ -10034,7 +10034,7 @@ snapshots:
       '@solana-program/token': 0.9.0(@solana/kit@5.0.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)(ws@8.19.0))
       '@solana/kit': 5.0.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)(ws@8.19.0)
 
-  '@solana/mosaic-sdk@0.1.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)(ws@8.19.0)':
+  '@solana/mosaic-sdk@0.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)(ws@8.19.0)':
     dependencies:
       '@solana-program/memo': 0.10.0(@solana/kit@5.0.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)(ws@8.19.0))
       '@solana-program/system': 0.10.0(@solana/kit@5.0.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)(ws@8.19.0))
