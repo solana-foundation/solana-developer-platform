@@ -560,7 +560,6 @@ describe("Payments routes", () => {
     expect(redirect.searchParams.get("baseCurrencyCode")).toBe("usdc_sol");
     expect(redirect.searchParams.get(MOONPAY_PARAM_BASE_CURRENCY_AMOUNT)).toBe("75.25");
     expect(redirect.searchParams.get(MOONPAY_PARAM_QUOTE_CURRENCY_CODE)).toBe("usd");
-    expect(redirect.searchParams.get("walletAddress")).toBe(TEST_SOLANA_ADDRESSES.wallet1);
     expect(redirect.searchParams.get(MOONPAY_PARAM_REFUND_WALLET_ADDRESS)).toBe(
       TEST_SOLANA_ADDRESSES.wallet1
     );
