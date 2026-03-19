@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { clearApiKeyFlashAction } from "./actions";
 
 export function FlashClearTrigger() {
   const cleared = useRef(false);
@@ -9,7 +8,10 @@ export function FlashClearTrigger() {
   useEffect(() => {
     if (cleared.current) return;
     cleared.current = true;
-    void clearApiKeyFlashAction();
+    void fetch("/api/dashboard/api-keys/flash", {
+      method: "DELETE",
+      credentials: "same-origin",
+    });
   }, []);
 
   return null;

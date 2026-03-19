@@ -40,6 +40,77 @@ function extractErrorMessage(error: unknown): string {
   return "Unknown error";
 }
 
+function normalizeDeactivateApiKeyInput(input: {
+  keyId: string;
+  keyName: string;
+  confirmation: string;
+}): {
+  keyId: string;
+  keyName: string;
+  confirmation: string;
+} {
+  return {
+    keyId: input.keyId.trim(),
+    keyName: input.keyName.trim(),
+    confirmation: input.confirmation.trim(),
+  };
+}
+
+async function deactivateApiKeyRequest(input: {
+  keyId: string;
+  keyName: string;
+  confirmation: string;
+}): Promise<{ ok: true; message: string } | { ok: false; message: string }> {
+  const { keyId, keyName, confirmation } = normalizeDeactivateApiKeyInput(input);
+
+  if (!keyId) {
+    return {
+      ok: false,
+      message: "Missing API key id for deletion.",
+    };
+  }
+
+  if (!keyName) {
+    return {
+      ok: false,
+      message: "Missing API key name for deletion confirmation.",
+    };
+  }
+
+  if (!confirmation) {
+    return {
+      ok: false,
+      message: "Type the key name to confirm API key deletion.",
+    };
+  }
+
+  if (confirmation !== keyName) {
+    return {
+      ok: false,
+      message: "Confirmation did not match the key name.",
+    };
+  }
+
+  try {
+    await sdpApiFetch(`/v1/api-keys/${keyId}`, {
+      method: "DELETE",
+      body: JSON.stringify({
+        confirmation,
+      }),
+    });
+
+    return {
+      ok: true,
+      message: `API key "${keyName}" has been deactivated.`,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      message: `Delete failed: ${extractErrorMessage(error)}`,
+    };
+  }
+}
+
 export async function consumeApiKeyFlash(): Promise<ApiKeyFlash | null> {
   const jar = await cookies();
   const raw = jar.get(API_KEY_FLASH_COOKIE)?.value;
@@ -205,61 +276,30 @@ export async function rotateApiKeyAction(formData: FormData) {
 }
 
 export async function deactivateApiKeyAction(formData: FormData) {
-  const keyId = String(formData.get("keyId") ?? "").trim();
-  const keyName = String(formData.get("keyName") ?? "").trim();
-  const confirmation = String(formData.get("confirmation") ?? "").trim();
+  const result = await deactivateApiKeyRequest({
+    keyId: String(formData.get("keyId") ?? ""),
+    keyName: String(formData.get("keyName") ?? ""),
+    confirmation: String(formData.get("confirmation") ?? ""),
+  });
 
-  if (!keyId) {
-    await setFlash({
-      level: "error",
-      message: "Missing API key id for deletion.",
-    });
-    redirect(API_KEYS_PAGE_PATH);
-  }
-
-  if (!keyName) {
-    await setFlash({
-      level: "error",
-      message: "Missing API key name for deletion confirmation.",
-    });
-    redirect(API_KEYS_PAGE_PATH);
-  }
-
-  if (!confirmation) {
-    await setFlash({
-      level: "error",
-      message: "Type the key name to confirm API key deletion.",
-    });
-    redirect(API_KEYS_PAGE_PATH);
-  }
-
-  if (confirmation !== keyName) {
-    await setFlash({
-      level: "error",
-      message: "Confirmation did not match the key name.",
-    });
-    redirect(API_KEYS_PAGE_PATH);
-  }
-
-  try {
-    await sdpApiFetch(`/v1/api-keys/${keyId}`, {
-      method: "DELETE",
-      body: JSON.stringify({
-        confirmation,
-      }),
-    });
-
-    await setFlash({
-      level: "success",
-      message: `API key "${keyName}" has been deactivated.`,
-    });
-  } catch (error) {
-    await setFlash({
-      level: "error",
-      message: `Delete failed: ${extractErrorMessage(error)}`,
-    });
-  }
+  await setFlash({
+    level: result.ok ? "success" : "error",
+    message: result.message,
+  });
 
   revalidatePath(API_KEYS_PAGE_PATH, "page");
   redirect(API_KEYS_PAGE_PATH);
+}
+
+export async function deactivateApiKeyInlineAction(input: {
+  keyId: string;
+  keyName: string;
+  confirmation: string;
+}): Promise<{ ok: true; message: string } | { ok: false; message: string }> {
+  const result = await deactivateApiKeyRequest(input);
+  if (result.ok) {
+    revalidatePath(API_KEYS_PAGE_PATH, "page");
+  }
+
+  return result;
 }

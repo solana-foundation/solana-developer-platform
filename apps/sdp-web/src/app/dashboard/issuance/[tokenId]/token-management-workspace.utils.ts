@@ -369,6 +369,66 @@ export function getPermissionRows(token: Token, metadataAuthority: string | null
   ];
 }
 
+function getPendingAuthoritySignerWallet(
+  token: Token,
+  authorityWallets: PaymentsDashboardWallet[]
+): PaymentsDashboardWallet | null {
+  const availableWallets = getAvailableSignerWallets(authorityWallets);
+  if (availableWallets.length === 0) {
+    return null;
+  }
+
+  return findSignerWalletById(availableWallets, token.signingWalletId) ?? availableWallets[0];
+}
+
+function pendingTokenRequiresPermanentDelegate(token: Token): boolean {
+  return (
+    token.template === "stablecoin" ||
+    token.template === "arcade" ||
+    token.template === "tokenized-security"
+  );
+}
+
+export function getDisplayedAuthorityAddress({
+  token,
+  role,
+  metadataAuthority,
+  authorityWallets,
+}: {
+  token: Token;
+  role: AuthorityFormState["role"];
+  metadataAuthority: string | null;
+  authorityWallets: PaymentsDashboardWallet[];
+}): string | null {
+  const resolvedAuthority = resolveAuthorityAddressForRole(token, role, metadataAuthority);
+  if (resolvedAuthority) {
+    return resolvedAuthority;
+  }
+
+  if (token.status !== "pending") {
+    return null;
+  }
+
+  const pendingSignerWallet = getPendingAuthoritySignerWallet(token, authorityWallets);
+  if (!pendingSignerWallet) {
+    return null;
+  }
+
+  switch (role) {
+    case "mint":
+    case "metadata":
+      return pendingSignerWallet.publicKey;
+    case "freeze":
+      return token.isFreezable ? pendingSignerWallet.publicKey : null;
+    case "permanentDelegate":
+      if (typeof token.extensions?.permanentDelegate === "string") {
+        return token.extensions.permanentDelegate;
+      }
+
+      return pendingTokenRequiresPermanentDelegate(token) ? pendingSignerWallet.publicKey : null;
+  }
+}
+
 export type SignerAwareAction = "deploy" | "mint" | "burn" | "seize" | "force-burn" | "authority";
 
 export interface SignerSelectionState {

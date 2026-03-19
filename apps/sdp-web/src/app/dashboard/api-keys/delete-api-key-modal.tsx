@@ -5,43 +5,98 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useEscapeKey } from "@/lib/use-escape-key";
 import type { ReactNode } from "react";
-import { useState } from "react";
-import { deactivateApiKeyAction } from "./actions";
+import { useEffect, useState } from "react";
+import { toast } from "sonner";
+import { deactivateApiKeyInlineAction } from "./actions";
 
 interface DeleteApiKeyModalProps {
   keyId: string;
   keyName: string;
   renderTrigger?: (open: () => void) => ReactNode;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  onDeleted?: () => void;
 }
 
-export function DeleteApiKeyModal({ keyId, keyName, renderTrigger }: DeleteApiKeyModalProps) {
-  const [isOpen, setIsOpen] = useState(false);
+export function DeleteApiKeyModal({
+  keyId,
+  keyName,
+  renderTrigger,
+  open: isOpenProp,
+  onOpenChange,
+  onDeleted,
+}: DeleteApiKeyModalProps) {
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
   const [confirmation, setConfirmation] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const isControlled = isOpenProp !== undefined;
+  const isOpen = isControlled ? isOpenProp : uncontrolledOpen;
 
-  const open = () => {
-    setIsOpen(true);
+  useEffect(() => {
+    if (!isOpen) {
+      setConfirmation("");
+      setIsSubmitting(false);
+    }
+  }, [isOpen]);
+
+  const openModal = () => {
+    if (isControlled) {
+      onOpenChange?.(true);
+      return;
+    }
+
+    setUncontrolledOpen(true);
   };
 
   const close = () => {
-    setIsOpen(false);
-    setConfirmation("");
+    if (isControlled) {
+      onOpenChange?.(false);
+      return;
+    }
+
+    setUncontrolledOpen(false);
   };
 
   useEscapeKey(isOpen, close);
 
   const canSubmit = confirmation.trim() === keyName.trim();
 
+  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!canSubmit || isSubmitting) {
+      return;
+    }
+
+    setIsSubmitting(true);
+
+    const result = await deactivateApiKeyInlineAction({
+      keyId,
+      keyName,
+      confirmation,
+    });
+
+    if (result.ok) {
+      close();
+      toast.success(result.message);
+      onDeleted?.();
+      return;
+    }
+
+    setIsSubmitting(false);
+    toast.error(result.message);
+  };
+
   return (
     <>
       {renderTrigger ? (
-        renderTrigger(open)
+        renderTrigger(openModal)
       ) : (
         <Button
           type="button"
           variant="secondary"
           size="sm"
           className="border-[#c71f37] text-[#c71f37] hover:bg-[#c71f37]/10"
-          onClick={open}
+          onClick={openModal}
         >
           Delete
         </Button>
@@ -55,7 +110,7 @@ export function DeleteApiKeyModal({ keyId, keyName, renderTrigger }: DeleteApiKe
             aria-label="Close confirmation modal"
             onClick={close}
           />
-          <div className="relative z-10 w-full max-w-md rounded-xl border border-[rgba(28,28,29,0.16)] bg-white p-5 shadow-lg">
+          <div className="relative z-10 w-full max-w-md rounded-xl border border-[rgba(28,28,29,0.16)] bg-white p-5 text-left shadow-lg">
             <p className="text-sm font-medium text-[#1c1c1d]">Delete API key</p>
             <p className="mt-2 text-sm text-[rgba(28,28,29,0.72)]">
               This removes the key without deleting the row.
@@ -64,7 +119,7 @@ export function DeleteApiKeyModal({ keyId, keyName, renderTrigger }: DeleteApiKe
               Type <span className="font-mono font-medium">{keyName}</span> to confirm.
             </p>
 
-            <form action={deactivateApiKeyAction} className="mt-4 space-y-3">
+            <form onSubmit={handleSubmit} className="mt-4 space-y-3">
               <input type="hidden" name="keyId" value={keyId} />
               <input type="hidden" name="keyName" value={keyName} />
               <Label htmlFor={`confirm-${keyId}`} className="text-sm">
@@ -78,20 +133,45 @@ export function DeleteApiKeyModal({ keyId, keyName, renderTrigger }: DeleteApiKe
                 placeholder="Paste exact key name"
                 autoFocus
                 autoComplete="off"
+                disabled={isSubmitting}
               />
 
-              <div className="mt-4 flex justify-end gap-2">
-                <Button type="button" variant="secondary" onClick={close}>
-                  Cancel
-                </Button>
-                <Button type="submit" variant="destructive" disabled={!canSubmit}>
-                  Delete key
-                </Button>
-              </div>
+              <DeleteApiKeyFormActions
+                canSubmit={canSubmit}
+                onCancel={close}
+                isSubmitting={isSubmitting}
+              />
             </form>
           </div>
         </div>
       ) : null}
     </>
+  );
+}
+
+function DeleteApiKeyFormActions({
+  canSubmit,
+  onCancel,
+  isSubmitting,
+}: {
+  canSubmit: boolean;
+  onCancel: () => void;
+  isSubmitting: boolean;
+}) {
+  return (
+    <div className="mt-4 flex justify-end gap-2">
+      <Button type="button" variant="secondary" onClick={onCancel} disabled={isSubmitting}>
+        Cancel
+      </Button>
+      <Button
+        type="submit"
+        variant="destructive"
+        disabled={!canSubmit || isSubmitting}
+        aria-busy={isSubmitting}
+        className="min-w-[104px]"
+      >
+        {isSubmitting ? "Deleting..." : "Delete key"}
+      </Button>
+    </div>
   );
 }

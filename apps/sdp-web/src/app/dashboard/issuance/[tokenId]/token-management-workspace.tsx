@@ -32,6 +32,7 @@ import {
   createInitialMintForm,
   createInitialSeizeForm,
   getDefaultActionForTab,
+  getDisplayedAuthorityAddress,
   getExplorerHref,
   getExtensionRows,
   getPermissionRows,
@@ -199,18 +200,37 @@ export function TokenManagementWorkspace({
       metadataAuthority,
     })
   );
-  const permissionRows = getPermissionRows(token, metadataAuthority).map((row) => ({
-    ...row,
-    editDisabledReason: withWalletLoadError(
-      getSignerSelectionForAction({
-        action: "authority",
-        token,
-        authorityWallets,
-        metadataAuthority,
-        permissionRow: row,
-      })
-    ).unavailableReason,
-  }));
+  const permissionRows = getPermissionRows(token, metadataAuthority).map((row) => {
+    const displayedAuthorityAddress = getDisplayedAuthorityAddress({
+      token,
+      role: row.authorityRole,
+      metadataAuthority,
+      authorityWallets,
+    });
+    const rowWithDisplayedValue = {
+      ...row,
+      value: displayedAuthorityAddress,
+    };
+
+    return {
+      ...rowWithDisplayedValue,
+      editDisabledReason: withWalletLoadError(
+        getSignerSelectionForAction({
+          action: "authority",
+          token,
+          authorityWallets,
+          metadataAuthority,
+          permissionRow: rowWithDisplayedValue,
+        })
+      ).unavailableReason,
+    };
+  });
+  const displayedMintAuthority = getDisplayedAuthorityAddress({
+    token,
+    role: "mint",
+    metadataAuthority,
+    authorityWallets,
+  });
   const extensionRows = getExtensionRows(token);
   const showAllowlistControls = token.requiresAllowlist;
   const complianceActions: Array<{ id: AdminAction; label: string }> = [
@@ -963,7 +983,11 @@ export function TokenManagementWorkspace({
       {activeTab === "overview" ? (
         <div className="space-y-4">
           <div className="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)]">
-            <TokenOverviewSection token={token} showTitle={false} />
+            <TokenOverviewSection
+              token={token}
+              showTitle={false}
+              mintAuthorityValue={displayedMintAuthority}
+            />
             <TokenControlListsSection
               showAllowlist={showAllowlistControls}
               allowlistEntriesCount={allowlistEntries.length}
@@ -1041,7 +1065,11 @@ export function TokenManagementWorkspace({
       {activeTab === "metadata" ? (
         <div className="space-y-4">
           {visibleActionForm}
-          <TokenOverviewSection token={token} showTitle={false} />
+          <TokenOverviewSection
+            token={token}
+            showTitle={false}
+            mintAuthorityValue={displayedMintAuthority}
+          />
         </div>
       ) : null}
 
