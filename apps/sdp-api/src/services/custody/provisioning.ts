@@ -104,6 +104,7 @@ export interface ProvisionFireblocksOptions {
 export interface ProvisionFireblocksResult {
   vaultAccountId: string;
   assetId: string;
+  apiBaseUrl: string;
 }
 
 export interface ProvisionPrivyOptions {
@@ -229,7 +230,7 @@ export async function provisionFireblocksVaultAccount(
     );
   }
 
-  return { vaultAccountId, assetId };
+  return { vaultAccountId, assetId, apiBaseUrl };
 }
 
 export async function provisionPrivyWallet(

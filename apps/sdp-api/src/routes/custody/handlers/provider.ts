@@ -7,6 +7,10 @@ import type { CustodyProvider } from "@/services/custody/providers";
 import { provisionFireblocksVaultAccount } from "@/services/custody/provisioning";
 import { normalizePem } from "@/services/custody/provisioning.common";
 import { createSigningService } from "@/services/domain/signing.service";
+import {
+  type FireblocksProviderConfig,
+  parseConfigRecord,
+} from "@/services/domain/signing/provider-config";
 import { SigningError } from "@/services/ports";
 import { type AppContext, getPreferredWalletForConfig, resolveActor } from "../context";
 import {
@@ -40,9 +44,11 @@ export const initializeSigning = async (c: AppContext) => {
 
   try {
     const result = await initializeProviderConnection(
+      c,
       signingService,
       c.env,
       actor.organizationId,
+      await resolveOrganizationSlug(c, actor.organizationId),
       parsed.data
     );
 
@@ -121,9 +127,11 @@ export const switchSigning = async (c: AppContext) => {
       });
     } else {
       result = await initializeProviderConnection(
+        c,
         signingService,
         c.env,
         actor.organizationId,
+        await resolveOrganizationSlug(c, actor.organizationId),
         parsed.data
       );
 
@@ -205,9 +213,11 @@ export const getSwitchProviderOptions = async (c: AppContext) => {
 };
 
 async function initializeProviderConnection(
+  c: AppContext,
   signingService: ReturnType<typeof createSigningService>,
   env: AppContext["env"],
   organizationId: string,
+  organizationSlug: string,
   request: InitializeSigningRequest | SwitchSigningRequest
 ): Promise<SigningInitializationResult> {
   switch (request.provider) {
@@ -222,19 +232,31 @@ async function initializeProviderConnection(
 
       const resolvedApiKey = env.FIREBLOCKS_API_KEY;
       const resolvedApiSecretPem = normalizePem(env.FIREBLOCKS_API_SECRET);
+      const existingFireblocksConfig = await findScopeFireblocksConfig(
+        c,
+        organizationId,
+        request.projectId
+      );
 
-      const { vaultAccountId, assetId } = await provisionFireblocksVaultAccount(env, {
-        orgId: organizationId,
-        orgSlug: organizationId,
-        apiKey: resolvedApiKey,
-        apiSecretPem: resolvedApiSecretPem,
-      });
+      const { vaultAccountId, assetId, apiBaseUrl } = existingFireblocksConfig
+        ? {
+            vaultAccountId: existingFireblocksConfig.vaultAccountId,
+            assetId: existingFireblocksConfig.assetId,
+            apiBaseUrl: existingFireblocksConfig.apiBaseUrl,
+          }
+        : await provisionFireblocksVaultAccount(env, {
+            orgId: organizationId,
+            orgSlug: organizationSlug,
+            apiKey: resolvedApiKey,
+            apiSecretPem: env.FIREBLOCKS_API_SECRET,
+          });
 
       return signingService.initializeFireblocksSigning(organizationId, request.projectId, {
         apiKey: resolvedApiKey,
         apiSecretPem: resolvedApiSecretPem,
         vaultAccountId,
         assetId,
+        apiBaseUrl,
         walletLabel: request.walletLabel,
       });
     }
@@ -305,6 +327,86 @@ async function findScopeConfigByProvider(
   )
     .bind(...(projectId ? [organizationId, projectId, provider] : [organizationId, provider]))
     .first<{ id: string; status: "active" | "inactive"; default_wallet_id: string | null }>();
+}
+
+async function findScopeProviderConfigRecord(
+  c: AppContext,
+  organizationId: string,
+  projectId: string | undefined,
+  provider: CustodyProvider
+) {
+  return c.env.DB.prepare(
+    projectId
+      ? `SELECT id,
+                organization_id,
+                project_id,
+                provider,
+                config_encrypted AS config,
+                default_wallet_id,
+                status,
+                created_at,
+                updated_at
+           FROM custody_configs
+           WHERE organization_id = ? AND project_id = ? AND provider = ?
+           LIMIT 1`
+      : `SELECT id,
+                organization_id,
+                project_id,
+                provider,
+                config_encrypted AS config,
+                default_wallet_id,
+                status,
+                created_at,
+                updated_at
+           FROM custody_configs
+           WHERE organization_id = ? AND project_id IS NULL AND provider = ?
+           LIMIT 1`
+  )
+    .bind(...(projectId ? [organizationId, projectId, provider] : [organizationId, provider]))
+    .first<{
+      id: string;
+      organization_id: string;
+      project_id: string | null;
+      provider: CustodyProvider;
+      config: string;
+      default_wallet_id: string | null;
+      status: "active" | "inactive";
+      created_at: string;
+      updated_at: string;
+    }>();
+}
+
+async function findScopeFireblocksConfig(
+  c: AppContext,
+  organizationId: string,
+  projectId: string | undefined
+): Promise<FireblocksProviderConfig | null> {
+  const record = await findScopeProviderConfigRecord(c, organizationId, projectId, "fireblocks");
+  if (!record) {
+    return null;
+  }
+
+  const parsed = await parseConfigRecord(c.env, organizationId, {
+    id: record.id,
+    organizationId: record.organization_id,
+    projectId: record.project_id,
+    provider: record.provider,
+    config: record.config,
+    defaultWalletId: record.default_wallet_id,
+    status: record.status,
+    createdAt: record.created_at,
+    updatedAt: record.updated_at,
+  });
+
+  return parsed.provider === "fireblocks" ? parsed : null;
+}
+
+async function resolveOrganizationSlug(c: AppContext, organizationId: string): Promise<string> {
+  const row = await c.env.DB.prepare("SELECT slug FROM organizations WHERE id = ? LIMIT 1")
+    .bind(organizationId)
+    .first<{ slug: string | null }>();
+
+  return row?.slug?.trim() || organizationId;
 }
 
 async function logDefaultProviderChanged(
