@@ -201,9 +201,6 @@ export const executeMint = async (c: AppContext) => {
     parsed.data.signingWalletId ?? token.signingWalletId,
     ["tokens:write"]
   );
-
-  // Get custody signer (via 3-tier resolution)
-  const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId, signingWalletId);
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
   const destination = assertValidAddress(parsed.data.mint.destination, "destination");
 
@@ -238,11 +235,19 @@ export const executeMint = async (c: AppContext) => {
     });
   }
 
-  // Execute mint on Solana using Mosaic
-  // Note: amount is decimal (e.g., 100 for 100 tokens), SDK converts to raw
-  const mosaic = createMosaicService(c.env, signer);
-
   try {
+    // Get custody signer (via 3-tier resolution)
+    const signer = await createOrgSigner(
+      c.env,
+      auth.organizationId,
+      auth.projectId,
+      signingWalletId
+    );
+
+    // Execute mint on Solana using Mosaic
+    // Note: amount is decimal (e.g., 100 for 100 tokens), SDK converts to raw
+    const mosaic = createMosaicService(c.env, signer);
+
     const result = await mosaic.mintTo({
       mint: mintAddress,
       destination,

@@ -25,9 +25,6 @@ export class OrganizationOnboardingService {
           const { vaultAccountId, assetId } = await provisionFireblocksVaultAccount(this.env, {
             orgId,
             orgSlug,
-            assetId: custody.assetId,
-            apiBaseUrl: custody.apiBaseUrl,
-            vaultAccountId: custody.vaultAccountId,
           });
 
           if (!this.env.FIREBLOCKS_API_KEY || !this.env.FIREBLOCKS_API_SECRET) {
@@ -42,7 +39,7 @@ export class OrganizationOnboardingService {
             apiSecretPem: this.env.FIREBLOCKS_API_SECRET,
             vaultAccountId,
             assetId,
-            apiBaseUrl: custody.apiBaseUrl ?? this.env.FIREBLOCKS_API_BASE_URL,
+            apiBaseUrl: this.env.FIREBLOCKS_API_BASE_URL,
           });
           return;
         }

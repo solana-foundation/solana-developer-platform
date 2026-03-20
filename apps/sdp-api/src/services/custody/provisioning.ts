@@ -18,6 +18,7 @@ import {
 } from "./provisioning.coinbase";
 import {
   encodeBasicAuth,
+  normalizePem,
   parseJsonResponse,
   randomHex,
   readErrorResponseText,
@@ -96,6 +97,8 @@ export interface ProvisionFireblocksOptions {
   assetId?: string;
   apiBaseUrl?: string;
   vaultAccountId?: string;
+  apiKey?: string;
+  apiSecretPem?: string;
 }
 
 export interface ProvisionFireblocksResult {
@@ -158,8 +161,12 @@ export async function provisionFireblocksVaultAccount(
   env: Env,
   options: ProvisionFireblocksOptions
 ): Promise<ProvisionFireblocksResult> {
-  const apiKey = env.FIREBLOCKS_API_KEY;
-  const apiSecretPem = env.FIREBLOCKS_API_SECRET;
+  const apiKey = options.apiKey ?? env.FIREBLOCKS_API_KEY;
+  const apiSecretPem = options.apiSecretPem
+    ? normalizePem(options.apiSecretPem)
+    : env.FIREBLOCKS_API_SECRET
+      ? normalizePem(env.FIREBLOCKS_API_SECRET)
+      : undefined;
 
   if (!apiKey || !apiSecretPem) {
     throw new SigningError(

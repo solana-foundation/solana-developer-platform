@@ -24,9 +24,6 @@ export type CustodyWalletStatus = "active" | "inactive";
 
 export interface FireblocksCustodyOptions {
   provider: "fireblocks";
-  apiBaseUrl?: string;
-  assetId?: string;
-  vaultAccountId?: string;
 }
 
 export interface PrivyCustodyOptions {
@@ -90,8 +87,6 @@ export interface InitializeLocalSigningRequest {
 
 export interface InitializeFireblocksSigningRequest extends FireblocksCustodyOptions {
   projectId?: string;
-  apiKey: string;
-  apiSecretPem: string;
   walletLabel?: string;
 }
 

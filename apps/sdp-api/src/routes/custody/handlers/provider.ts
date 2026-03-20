@@ -1,8 +1,11 @@
 import { AppError } from "@/lib/errors";
 import { created, success } from "@/lib/response";
+import { clearWalletCaches } from "@/routes/custody/handlers/wallets";
 import { AuditService } from "@/services/audit.service";
 import { CUSTODY_PROVIDERS } from "@/services/custody/providers";
 import type { CustodyProvider } from "@/services/custody/providers";
+import { provisionFireblocksVaultAccount } from "@/services/custody/provisioning";
+import { normalizePem } from "@/services/custody/provisioning.common";
 import { createSigningService } from "@/services/domain/signing.service";
 import { SigningError } from "@/services/ports";
 import { type AppContext, getPreferredWalletForConfig, resolveActor } from "../context";
@@ -38,6 +41,7 @@ export const initializeSigning = async (c: AppContext) => {
   try {
     const result = await initializeProviderConnection(
       signingService,
+      c.env,
       actor.organizationId,
       parsed.data
     );
@@ -53,6 +57,8 @@ export const initializeSigning = async (c: AppContext) => {
         projectId: parsed.data.projectId ?? null,
       },
     });
+
+    clearWalletCaches();
 
     return created(c, toInitializeSigningResponse(result));
   } catch (error) {
@@ -116,6 +122,7 @@ export const switchSigning = async (c: AppContext) => {
     } else {
       result = await initializeProviderConnection(
         signingService,
+        c.env,
         actor.organizationId,
         parsed.data
       );
@@ -145,6 +152,8 @@ export const switchSigning = async (c: AppContext) => {
         provider: targetProvider,
       });
     }
+
+    clearWalletCaches();
 
     return created(c, toInitializeSigningResponse(result));
   } catch (error) {
@@ -197,6 +206,7 @@ export const getSwitchProviderOptions = async (c: AppContext) => {
 
 async function initializeProviderConnection(
   signingService: ReturnType<typeof createSigningService>,
+  env: AppContext["env"],
   organizationId: string,
   request: InitializeSigningRequest | SwitchSigningRequest
 ): Promise<SigningInitializationResult> {
@@ -205,21 +215,29 @@ async function initializeProviderConnection(
       return signingService.initializeLocalSigning(organizationId, request.projectId, {
         walletLabel: request.walletLabel,
       });
-    case "fireblocks":
-      if (!request.apiKey || !request.apiSecretPem || !request.vaultAccountId) {
-        throw new AppError(
-          "BAD_REQUEST",
-          "Fireblocks requires apiKey, apiSecretPem, and vaultAccountId when connecting a new provider"
-        );
+    case "fireblocks": {
+      if (!env.FIREBLOCKS_API_KEY || !env.FIREBLOCKS_API_SECRET) {
+        throw new AppError("BAD_REQUEST", "Fireblocks backend credentials are not configured");
       }
 
-      return signingService.initializeFireblocksSigning(organizationId, request.projectId, {
-        apiKey: request.apiKey,
-        apiSecretPem: request.apiSecretPem,
-        vaultAccountId: request.vaultAccountId,
-        assetId: request.assetId,
-        apiBaseUrl: request.apiBaseUrl,
+      const resolvedApiKey = env.FIREBLOCKS_API_KEY;
+      const resolvedApiSecretPem = normalizePem(env.FIREBLOCKS_API_SECRET);
+
+      const { vaultAccountId, assetId } = await provisionFireblocksVaultAccount(env, {
+        orgId: organizationId,
+        orgSlug: organizationId,
+        apiKey: resolvedApiKey,
+        apiSecretPem: resolvedApiSecretPem,
       });
+
+      return signingService.initializeFireblocksSigning(organizationId, request.projectId, {
+        apiKey: resolvedApiKey,
+        apiSecretPem: resolvedApiSecretPem,
+        vaultAccountId,
+        assetId,
+        walletLabel: request.walletLabel,
+      });
+    }
     case "privy":
       return signingService.initializePrivySigning(organizationId, request.projectId, {
         apiBaseUrl: request.apiBaseUrl,

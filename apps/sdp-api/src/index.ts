@@ -16,6 +16,7 @@ import { corsMiddleware } from "@/middleware/cors";
 import { skipRateLimitPaths } from "@/middleware/rate-limit";
 import { requestIdMiddleware } from "@/middleware/request-id";
 import { requestTracingMiddleware } from "@/middleware/request-tracing";
+import { SigningError } from "@/services/ports";
 import type { Env } from "@/types/env";
 
 import allowlist from "@/routes/allowlist";
@@ -119,6 +120,46 @@ function captureUnexpectedError(err: Error, c: Context<{ Bindings: Env }>): void
   });
 }
 
+function mapSigningError(err: SigningError): {
+  status: 400 | 404 | 409 | 502 | 504;
+  code: string;
+  message: string;
+} {
+  switch (err.code) {
+    case "WALLET_NOT_FOUND":
+    case "NOT_FOUND":
+      return { status: 404, code: err.code, message: err.message };
+    case "ALREADY_INITIALIZED":
+      return { status: 409, code: err.code, message: err.message };
+    case "APPROVAL_TIMEOUT":
+      return { status: 504, code: err.code, message: err.message };
+    case "APPROVAL_REJECTED":
+      return { status: 409, code: err.code, message: err.message };
+    case "NETWORK_ERROR":
+    case "SIGNING_FAILED":
+      return { status: 502, code: err.code, message: err.message };
+    default:
+      return { status: 400, code: err.code, message: err.message };
+  }
+}
+
+function getFireblocksBlockedError(err: Error): {
+  status: 400;
+  code: "SIGNING_BLOCKED";
+  message: string;
+} | null {
+  if (!err.message.includes("Transaction failed with status: BLOCKED")) {
+    return null;
+  }
+
+  return {
+    status: 400,
+    code: "SIGNING_BLOCKED",
+    message:
+      "Fireblocks blocked this signing request. Confirm raw signing is enabled for this workspace and that the raw-signing policy allows this API user and vault.",
+  };
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Global Middleware
 // ═══════════════════════════════════════════════════════════════════════════
@@ -214,6 +255,36 @@ app.onError((err, c) => {
         meta: { requestId },
       },
       err.statusCode as 400
+    );
+  }
+
+  if (err instanceof SigningError) {
+    const mapped = mapSigningError(err);
+    c.header("X-SDP-Trace-ID", traceId);
+    return c.json(
+      {
+        error: {
+          code: mapped.code,
+          message: mapped.message,
+        },
+        meta: { requestId },
+      },
+      mapped.status
+    );
+  }
+
+  const fireblocksBlocked = getFireblocksBlockedError(err);
+  if (fireblocksBlocked) {
+    c.header("X-SDP-Trace-ID", traceId);
+    return c.json(
+      {
+        error: {
+          code: fireblocksBlocked.code,
+          message: fireblocksBlocked.message,
+        },
+        meta: { requestId },
+      },
+      fireblocksBlocked.status
     );
   }
 

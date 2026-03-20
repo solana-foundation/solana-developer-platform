@@ -117,6 +117,10 @@ export function encodePkcs8Pem(privateKeyDer: Uint8Array): string {
   return `-----BEGIN PRIVATE KEY-----\n${lines}\n-----END PRIVATE KEY-----`;
 }
 
+export function normalizePem(value: string): string {
+  return value.replace(/\\n/g, "\n").trim();
+}
+
 export function encodeBasicAuth(value: string): string {
   if (typeof btoa === "function") {
     return btoa(value);

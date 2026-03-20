@@ -16,6 +16,7 @@
  */
 
 import type { CustodyProvider } from "@/services/custody/providers";
+import { normalizePem } from "@/services/custody/provisioning.common";
 import { createDfnsApiClient, normalizeDfnsWalletId } from "@/services/dfns/client";
 import type { SigningPort } from "@/services/ports";
 import { SigningError } from "@/services/ports";
@@ -222,7 +223,7 @@ interface DfnsConfigJson {
 
 function createFireblocksAdapterFromEnv(env: Env): KeychainFireblocksAdapter {
   const apiKey = env.FIREBLOCKS_API_KEY;
-  const apiSecret = env.FIREBLOCKS_API_SECRET;
+  const apiSecret = env.FIREBLOCKS_API_SECRET ? normalizePem(env.FIREBLOCKS_API_SECRET) : undefined;
   const vaultId = env.FIREBLOCKS_VAULT_ID;
   const assetId = env.FIREBLOCKS_ASSET_ID ?? "SOL";
 
