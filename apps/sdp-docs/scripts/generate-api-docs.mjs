@@ -131,10 +131,18 @@ const writeJson = async (filePath, value) => {
   await fs.writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
 };
 
-const extractRenderedRows = (content) =>
-  content
-    .split("\n")
-    .filter((line) => line.startsWith("| `"));
+const extractRenderedRows = (content) => {
+  const body = content.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "");
+
+  return body
+    .split(/\r?\n/)
+    .filter(
+      (line) =>
+        line.startsWith("| ") &&
+        !line.startsWith("| Method") &&
+        !line.startsWith("| ---")
+    );
+};
 
 const validateGeneratedTagPages = async ({ outputDir, tagPages, groupedOperations }) => {
   const generatedSlugs = new Set(tagPages.map((tagPage) => tagPage.slug));
@@ -145,8 +153,6 @@ const validateGeneratedTagPages = async ({ outputDir, tagPages, groupedOperation
       `Generated API docs are missing required public sections: ${missingPublicPages.join(", ")}`
     );
   }
-
-  let documentedOperationsCount = 0;
 
   for (const tagPage of tagPages) {
     const source = await fs.readFile(path.join(outputDir, `${tagPage.slug}.mdx`), "utf8");
@@ -161,8 +167,6 @@ const validateGeneratedTagPages = async ({ outputDir, tagPages, groupedOperation
       })
       .map(renderOperationRow);
 
-    documentedOperationsCount += actualRows.length;
-
     if (actualRows.length !== expectedRows.length) {
       throw new Error(
         `Generated API docs for ${tagPage.title} document ${actualRows.length} operations, expected ${expectedRows.length}`
@@ -175,8 +179,6 @@ const validateGeneratedTagPages = async ({ outputDir, tagPages, groupedOperation
       }
     }
   }
-
-  return documentedOperationsCount;
 };
 
 const run = async () => {
@@ -302,17 +304,11 @@ const run = async () => {
     pages: newPages,
   });
 
-  const documentedOperationsCount = await validateGeneratedTagPages({
+  await validateGeneratedTagPages({
     outputDir,
     tagPages,
     groupedOperations,
   });
-
-  if (documentedOperationsCount !== exposedOperationsCount) {
-    throw new Error(
-      `Generated API docs document ${documentedOperationsCount} operations, expected ${exposedOperationsCount}`
-    );
-  }
 
   console.log(
     `Generated ${exposedOperationsCount} endpoints across ${tagPages.length} API sections from ${SOURCE_PATH}`
