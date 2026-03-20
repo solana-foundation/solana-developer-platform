@@ -63,12 +63,6 @@ export const pauseToken = async (c: AppContext) => {
   const signingWalletId = resolveApiKeySigningWalletId(auth, token.signingWalletId, [
     "tokens:admin",
   ]);
-
-  const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId, signingWalletId);
-  if (pauseAuthorityRaw !== signer.address) {
-    throw new AppError("BAD_REQUEST", "Pause authority is not controlled by custody");
-  }
-
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
 
   const idempotencyMetadata = buildIdempotencyMetadata(c.req.header("Idempotency-Key"), {
@@ -95,9 +89,19 @@ export const pauseToken = async (c: AppContext) => {
     return success(c, { transaction: tx });
   }
 
-  const mosaic = createMosaicService(c.env, signer);
-
   try {
+    const signer = await createOrgSigner(
+      c.env,
+      auth.organizationId,
+      auth.projectId,
+      signingWalletId
+    );
+    if (pauseAuthorityRaw !== signer.address) {
+      throw new AppError("BAD_REQUEST", "Pause authority is not controlled by custody");
+    }
+
+    const mosaic = createMosaicService(c.env, signer);
+
     const result = await mosaic.pauseToken({
       mint: mintAddress,
       pauseAuthority: signer,
@@ -180,12 +184,6 @@ export const unpauseToken = async (c: AppContext) => {
   const signingWalletId = resolveApiKeySigningWalletId(auth, token.signingWalletId, [
     "tokens:admin",
   ]);
-
-  const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId, signingWalletId);
-  if (pauseAuthorityRaw !== signer.address) {
-    throw new AppError("BAD_REQUEST", "Pause authority is not controlled by custody");
-  }
-
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
 
   const idempotencyMetadata = buildIdempotencyMetadata(c.req.header("Idempotency-Key"), {
@@ -212,9 +210,19 @@ export const unpauseToken = async (c: AppContext) => {
     return success(c, { transaction: tx });
   }
 
-  const mosaic = createMosaicService(c.env, signer);
-
   try {
+    const signer = await createOrgSigner(
+      c.env,
+      auth.organizationId,
+      auth.projectId,
+      signingWalletId
+    );
+    if (pauseAuthorityRaw !== signer.address) {
+      throw new AppError("BAD_REQUEST", "Pause authority is not controlled by custody");
+    }
+
+    const mosaic = createMosaicService(c.env, signer);
+
     const result = await mosaic.unpauseToken({
       mint: mintAddress,
       pauseAuthority: signer,

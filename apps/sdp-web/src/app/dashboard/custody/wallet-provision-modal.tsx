@@ -87,7 +87,6 @@ export function WalletProvisionModal({
     [selectedProvider]
   );
   const isConnected = connectedProviderSet.has(selectedProvider);
-  const isFireblocks = selectedProvider === "fireblocks";
   const supportsAdditionalWallets = selectedProviderEntry?.supportsAdditionalWallets ?? false;
   const canProvisionWallet = !isConnected || supportsAdditionalWallets;
   const formAction = isConnected ? createCustodyWallet : initializeCustody;
@@ -175,63 +174,6 @@ export function WalletProvisionModal({
               required
             />
           </div>
-
-          {!isConnected && isFireblocks ? (
-            <div className="grid gap-4 rounded-[18px] border border-[rgba(28,28,29,0.1)] bg-[rgba(28,28,29,0.02)] p-4">
-              <div className="space-y-1">
-                <p className="text-sm font-semibold text-[#1c1c1d]">Fireblocks credentials</p>
-                <p className="text-xs text-[rgba(28,28,29,0.62)]">
-                  Fireblocks requires credentials during wallet creation.
-                </p>
-              </div>
-
-              <div className="grid gap-2">
-                <Label htmlFor="wallet-fireblocks-api-key">API key</Label>
-                <Input
-                  id="wallet-fireblocks-api-key"
-                  name="apiKey"
-                  placeholder="Fireblocks API key"
-                  required
-                />
-              </div>
-
-              <div className="grid gap-2">
-                <Label htmlFor="wallet-fireblocks-secret">API secret PEM</Label>
-                <textarea
-                  id="wallet-fireblocks-secret"
-                  name="apiSecretPem"
-                  className="min-h-28 w-full rounded-[14px] border border-[rgba(28,28,29,0.12)] bg-white px-3 py-3 text-sm text-[#1c1c1d]"
-                  placeholder="-----BEGIN PRIVATE KEY-----"
-                  required
-                />
-              </div>
-
-              <div className="grid gap-2">
-                <Label htmlFor="wallet-fireblocks-vault">Vault account ID</Label>
-                <Input
-                  id="wallet-fireblocks-vault"
-                  name="vaultAccountId"
-                  placeholder="Vault account ID"
-                  required
-                />
-              </div>
-
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="grid gap-2">
-                  <Label htmlFor="wallet-fireblocks-asset">Asset ID</Label>
-                  <Input id="wallet-fireblocks-asset" name="assetId" placeholder="SOL" />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="wallet-fireblocks-base-url">API base URL</Label>
-                  <Input
-                    id="wallet-fireblocks-base-url"
-                    name="apiBaseUrl"
-                    placeholder="https://api.fireblocks.io"
-                  />
-                </div>
-              </div>
-            </div>
-          ) : null}
 
           {!canProvisionWallet ? (
             <div className="rounded-[16px] border border-[rgba(28,28,29,0.1)] bg-[rgba(28,28,29,0.03)] px-4 py-3 text-sm text-[rgba(28,28,29,0.68)]">

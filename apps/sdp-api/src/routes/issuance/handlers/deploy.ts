@@ -93,17 +93,22 @@ export const deployToken = async (c: AppContext) => {
     ["tokens:write"]
   );
 
-  // Get custody signer (resolves via 3-tier: project → org → env fallback)
-  const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId, signingWalletId);
-  const custodyAddress = signer.address;
-
-  // Create Mosaic service for template-based token deployment
-  const mosaic = createMosaicService(c.env, signer);
-
   // Deploy using Mosaic templates - handles ABL setup automatically
   const enableAbl = token.requiresAllowlist && c.env.SOLANA_NETWORK === "mainnet-beta";
 
   try {
+    // Get custody signer (resolves via 3-tier: project → org → env fallback)
+    const signer = await createOrgSigner(
+      c.env,
+      auth.organizationId,
+      auth.projectId,
+      signingWalletId
+    );
+    const custodyAddress = signer.address;
+
+    // Create Mosaic service for template-based token deployment
+    const mosaic = createMosaicService(c.env, signer);
+
     const result = await mosaic.createToken({
       template: token.template,
       metadata: {

@@ -66,7 +66,7 @@ const walletSummaryCache = new Map<string, CacheEntry<CustodyWalletSummary[]>>()
 const walletAggregateCache = new Map<string, CacheEntry<CustodyWalletAggregate>>();
 const walletBalanceCache = new Map<string, CacheEntry<CustodyWalletTokenBalance[]>>();
 
-function clearWalletCaches() {
+export function clearWalletCaches() {
   walletSummaryCache.clear();
   walletAggregateCache.clear();
   walletBalanceCache.clear();

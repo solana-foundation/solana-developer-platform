@@ -17,7 +17,9 @@ import {
 import { TokenManagementHeader } from "./token-management-header";
 import { TokenManagementModalShell } from "./token-management-modal-shell";
 import {
+  type TokenAuthorityWalletsData,
   type TokenManagementSupportingData,
+  fetchTokenAuthorityWallets,
   fetchTokenManagementSupportingData,
 } from "./token-management-workspace.data";
 import type {
@@ -113,6 +115,13 @@ function LoadingSection({ message }: { message: string }) {
   );
 }
 
+function canLoadAuthorityWallets(
+  activeTab: TokenManagementTab,
+  tokenStatus: TokenManagementWorkspaceProps["token"]["status"]
+): boolean {
+  return activeTab !== "overview" || tokenStatus === "pending";
+}
+
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: token management intentionally centralizes action orchestration and tab coordination in one workspace.
 export function TokenManagementWorkspace({
   token,
@@ -160,6 +169,7 @@ export function TokenManagementWorkspace({
   const [freezeForm, setFreezeForm] = useState(createInitialFreezeForm);
   const [allowlistForm, setAllowlistForm] = useState(createInitialAllowlistForm);
   const shouldLoadSupportingData = activeTab !== "overview";
+  const shouldLoadAuthorityWallets = canLoadAuthorityWallets(activeTab, token.status);
   const hasInitialSupportingData =
     initialAuthorityWallets.length > 0 ||
     initialTransactions.length > 0 ||
@@ -204,6 +214,26 @@ export function TokenManagementWorkspace({
     ]
   );
   const {
+    data: authorityWalletsData,
+    error: authorityWalletsRequestError,
+    mutate: mutateAuthorityWallets,
+  } = useSWR(
+    shouldLoadAuthorityWallets ? ["token-management-authority-wallets", token.id] : null,
+    ([, tokenId]: readonly [string, string]) => fetchTokenAuthorityWallets(tokenId),
+    {
+      fallbackData:
+        initialAuthorityWallets.length > 0 || initialAuthorityWalletsError !== null
+          ? ({
+              authorityWallets: initialAuthorityWallets,
+              authorityWalletsError: initialAuthorityWalletsError,
+            } satisfies TokenAuthorityWalletsData)
+          : undefined,
+      refreshInterval: 60_000,
+      revalidateOnFocus: true,
+      revalidateIfStale: false,
+    }
+  );
+  const {
     data: supportingData,
     error: supportingDataRequestError,
     mutate: mutateSupportingData,
@@ -225,6 +255,13 @@ export function TokenManagementWorkspace({
   const supportingDataLoading =
     shouldLoadSupportingData && supportingData === undefined && !supportingDataError;
   const resolvedSupportingData = supportingData ?? initialSupportingData;
+  const authorityWalletsFetchError = authorityWalletsRequestError
+    ? authorityWalletsRequestError instanceof Error
+      ? authorityWalletsRequestError.message
+      : "Unable to load signer wallets."
+    : null;
+  const authorityWalletsLoading =
+    shouldLoadAuthorityWallets && authorityWalletsData === undefined && !authorityWalletsFetchError;
   const revalidateSupportingDataAfterSuccess = async () => {
     if (!shouldLoadSupportingData) {
       return;
@@ -232,11 +269,19 @@ export function TokenManagementWorkspace({
 
     await mutateSupportingData();
   };
+  const revalidateAuthorityWalletsAfterSuccess = async () => {
+    if (!shouldLoadAuthorityWallets) {
+      return;
+    }
+
+    await mutateAuthorityWallets();
+  };
   const runAction = (input: ActionExecutionInput, options: RunActionOptions = {}) =>
     runActionBase(input, {
       ...options,
       onSuccess: async (result) => {
         await options.onSuccess?.(result);
+        await revalidateAuthorityWalletsAfterSuccess();
         await revalidateSupportingDataAfterSuccess();
       },
     });
@@ -245,11 +290,17 @@ export function TokenManagementWorkspace({
       ...options,
       onSuccess: async (result) => {
         await options.onSuccess?.(result);
+        await revalidateAuthorityWalletsAfterSuccess();
         await revalidateSupportingDataAfterSuccess();
       },
     });
-  const authorityWallets = resolvedSupportingData.authorityWallets;
-  const authorityWalletsError = supportingDataError ?? resolvedSupportingData.authorityWalletsError;
+  const authorityWallets =
+    authorityWalletsData?.authorityWallets ?? resolvedSupportingData.authorityWallets;
+  const authorityWalletsError =
+    authorityWalletsFetchError ??
+    authorityWalletsData?.authorityWalletsError ??
+    supportingDataError ??
+    resolvedSupportingData.authorityWalletsError;
   const transactions = resolvedSupportingData.transactions;
   const transactionsError = supportingDataError ?? resolvedSupportingData.transactionsError;
   const transactionsTotal = resolvedSupportingData.transactionsTotal;
@@ -276,6 +327,10 @@ export function TokenManagementWorkspace({
   } = getTokenActionDisabledReasons(token);
   const metadataAuthority = token.metadataAuthority ?? token.mintAuthority;
   const withWalletLoadError = <T extends { unavailableReason: string | null }>(selection: T): T => {
+    if (authorityWalletsLoading && selection.unavailableReason) {
+      return { ...selection, unavailableReason: "Loading signer wallets…" };
+    }
+
     if (authorityWalletsError && selection.unavailableReason) {
       return { ...selection, unavailableReason: authorityWalletsError };
     }

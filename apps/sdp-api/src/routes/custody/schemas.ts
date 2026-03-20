@@ -32,11 +32,7 @@ export const initializeLocalSchema = z.object({
 export const initializeFireblocksSchema = z.object({
   provider: z.literal("fireblocks"),
   projectId: z.string().optional(),
-  apiKey: z.string().min(1),
-  apiSecretPem: z.string().min(1),
-  vaultAccountId: z.string().min(1),
-  assetId: z.string().default("SOL"),
-  apiBaseUrl: z.string().url().optional(),
+  walletLabel: z.string().max(100).optional(),
 });
 
 export const initializePrivySchema = z.object({
@@ -136,20 +132,9 @@ export type UpdateWalletRequest = z.infer<typeof updateWalletSchema>;
 // Switch Signing Provider
 // ═══════════════════════════════════════════════════════════════════════════
 
-// Switching uses the same provider payload shape as initialize.
-// The handler ensures the target provider is active, then updates the default provider
-// pointer for the requested scope.
-export const switchFireblocksSchema = initializeFireblocksSchema.extend({
-  apiKey: initializeFireblocksSchema.shape.apiKey.optional(),
-  apiSecretPem: initializeFireblocksSchema.shape.apiSecretPem.optional(),
-  vaultAccountId: initializeFireblocksSchema.shape.vaultAccountId.optional(),
-  assetId: initializeFireblocksSchema.shape.assetId.optional(),
-  apiBaseUrl: initializeFireblocksSchema.shape.apiBaseUrl.optional(),
-});
-
 export const switchSigningSchema = z.discriminatedUnion("provider", [
   initializeLocalSchema,
-  switchFireblocksSchema,
+  initializeFireblocksSchema,
   initializePrivySchema,
   initializeCoinbaseCdpSchema,
   initializeParaSchema,

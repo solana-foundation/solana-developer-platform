@@ -157,6 +157,7 @@ export interface InitFireblocksSigningOptions {
   vaultAccountId: string;
   assetId?: string;
   apiBaseUrl?: string;
+  walletLabel?: string;
 }
 
 /**
@@ -597,7 +598,7 @@ export class SigningService {
     await this.configStore.createWallet(configId, {
       walletId,
       publicKey,
-      label: "Fireblocks Vault",
+      label: options.walletLabel ?? "Fireblocks Vault",
       purpose: "root",
     });
 

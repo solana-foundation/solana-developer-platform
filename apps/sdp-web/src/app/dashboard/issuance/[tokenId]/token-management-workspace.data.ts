@@ -14,6 +14,16 @@ interface SupportingDataEnvelope {
   };
 }
 
+interface AuthorityWalletsEnvelope {
+  data?: {
+    authorityWallets?: PaymentsDashboardWallet[];
+    authorityWalletsError?: string | null;
+  };
+  error?: {
+    message?: string;
+  };
+}
+
 export interface TokenManagementSupportingData {
   authorityWallets: PaymentsDashboardWallet[];
   authorityWalletsError: string | null;
@@ -29,6 +39,11 @@ export interface TokenManagementSupportingData {
   frozenAccountsError: string | null;
   frozenAccountsTotal: number | null;
   frozenAccountsHasMore: boolean;
+}
+
+export interface TokenAuthorityWalletsData {
+  authorityWallets: PaymentsDashboardWallet[];
+  authorityWalletsError: string | null;
 }
 
 function getApiError(body: SupportingDataEnvelope, fallback: string): string {
@@ -66,4 +81,36 @@ export async function fetchTokenManagementSupportingData(
   }
 
   return body.data;
+}
+
+export async function fetchTokenAuthorityWallets(
+  tokenId: string,
+  options: {
+    signal?: AbortSignal;
+  } = {}
+): Promise<TokenAuthorityWalletsData> {
+  const response = await fetch(
+    `/api/dashboard/issuance/tokens/${encodeURIComponent(tokenId)}/authority-wallets`,
+    {
+      method: "GET",
+      cache: "no-store",
+      signal: options.signal,
+    }
+  );
+  const body = (await response.json().catch(() => ({}))) as AuthorityWalletsEnvelope;
+
+  if (!response.ok) {
+    throw new Error(
+      getApiError(
+        body as SupportingDataEnvelope,
+        `Authority wallet request failed (${response.status}).`
+      )
+    );
+  }
+
+  return {
+    authorityWallets: Array.isArray(body.data?.authorityWallets) ? body.data.authorityWallets : [],
+    authorityWalletsError:
+      typeof body.data?.authorityWalletsError === "string" ? body.data.authorityWalletsError : null,
+  };
 }

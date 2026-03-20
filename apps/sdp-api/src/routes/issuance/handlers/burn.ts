@@ -146,9 +146,6 @@ export const executeBurn = async (c: AppContext) => {
     parsed.data.signingWalletId ?? token.signingWalletId,
     ["tokens:write"]
   );
-
-  // Get custody signer (via 3-tier resolution)
-  const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId, signingWalletId);
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
   const source = assertValidAddress(parsed.data.burn.source, "source");
   const burnAmount = toMosaicAmount(parsed.data.burn.amount, token.decimals);
@@ -178,11 +175,18 @@ export const executeBurn = async (c: AppContext) => {
   if (replayed) {
     return success(c, { transaction: tx });
   }
-
-  // Execute burn on Solana
-  const token2022 = createToken2022Service(c.env, signer);
-
   try {
+    // Get custody signer (via 3-tier resolution)
+    const signer = await createOrgSigner(
+      c.env,
+      auth.organizationId,
+      auth.projectId,
+      signingWalletId
+    );
+
+    // Execute burn on Solana
+    const token2022 = createToken2022Service(c.env, signer);
+
     const result = await token2022.burn({
       mint: mintAddress,
       source,

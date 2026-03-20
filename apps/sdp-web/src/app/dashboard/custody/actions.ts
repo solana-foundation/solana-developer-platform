@@ -118,35 +118,17 @@ export async function initializeCustody(formData: FormData) {
     | "dfns"
     | "anchorage";
   const walletLabel = getOptionalString(formData, "walletLabel");
-  const apiBaseUrl = getOptionalString(formData, "apiBaseUrl");
-  const fireblocksApiKey = getOptionalString(formData, "apiKey");
-  const fireblocksApiSecretPem = getOptionalString(formData, "apiSecretPem");
-  const fireblocksVaultAccountId = getOptionalString(formData, "vaultAccountId");
-  const fireblocksAssetId = getOptionalString(formData, "assetId");
   const network = getOptionalString(formData, "network");
   const walletAddress = getOptionalString(formData, "walletAddress");
   const accountPolicy = getOptionalString(formData, "accountPolicy");
+  const apiBaseUrl = getOptionalString(formData, "apiBaseUrl");
 
   const payload: Record<string, unknown> = {
     provider,
     walletLabel,
   };
 
-  if (provider === "fireblocks") {
-    if (!fireblocksApiKey || !fireblocksApiSecretPem || !fireblocksVaultAccountId) {
-      throw new Error("Fireblocks requires apiKey, apiSecretPem, and vaultAccountId");
-    }
-
-    payload.apiKey = fireblocksApiKey;
-    payload.apiSecretPem = fireblocksApiSecretPem;
-    payload.vaultAccountId = fireblocksVaultAccountId;
-    if (fireblocksAssetId) {
-      payload.assetId = fireblocksAssetId;
-    }
-    if (apiBaseUrl) {
-      payload.apiBaseUrl = apiBaseUrl;
-    }
-  } else {
+  if (provider !== "fireblocks") {
     if (apiBaseUrl) {
       payload.apiBaseUrl = apiBaseUrl;
     }

@@ -4,9 +4,6 @@ import { z } from "zod";
 const createOrgCustodySchema = z.discriminatedUnion("provider", [
   z.object({
     provider: z.literal("fireblocks"),
-    apiBaseUrl: z.string().url().optional(),
-    assetId: z.string().min(1).optional(),
-    vaultAccountId: z.string().min(1).optional(),
   }),
   z.object({
     provider: z.literal("privy"),

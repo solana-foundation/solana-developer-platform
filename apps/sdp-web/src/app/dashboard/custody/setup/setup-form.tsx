@@ -110,7 +110,6 @@ export function CustodySetupForm({
     CUSTODY_PROVIDER_CATALOG.find((provider) => provider.id === selectedProvider) ??
     CUSTODY_PROVIDER_CATALOG[0];
   const isConnected = connectedProviderSet.has(selectedProvider);
-  const isFireblocks = selectedProvider === "fireblocks";
   const supportsAdditionalWallets = selectedProviderEntry.supportsAdditionalWallets;
   const canCreateAdditionalWallet = !isConnected || supportsAdditionalWallets;
   const formAction = isConnected ? createWalletAction : initializeAction;
@@ -169,58 +168,6 @@ export function CustodySetupForm({
             <Label htmlFor="walletLabel">Wallet label</Label>
             <Input id="walletLabel" name="walletLabel" placeholder="Primary wallet" />
           </div>
-
-          {isFireblocks ? (
-            <div className="grid gap-4 rounded-xl border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.03)] p-4">
-              <div className="space-y-1">
-                <p className="text-sm font-medium text-[#1c1c1d]">Fireblocks credentials</p>
-                <p className="text-xs text-[rgba(28,28,29,0.64)]">
-                  Required when provider is Fireblocks.
-                </p>
-              </div>
-
-              <div className="grid gap-2">
-                <Label htmlFor="apiKey">API key</Label>
-                <Input id="apiKey" name="apiKey" placeholder="Fireblocks API key" required />
-              </div>
-
-              <div className="grid gap-2">
-                <Label htmlFor="apiSecretPem">API secret PEM</Label>
-                <textarea
-                  id="apiSecretPem"
-                  name="apiSecretPem"
-                  className="min-h-28 w-full rounded-lg border border-[rgba(28,28,29,0.16)] bg-white px-3 py-2 text-sm text-[#1c1c1d]"
-                  placeholder="-----BEGIN PRIVATE KEY-----"
-                  required
-                />
-              </div>
-
-              <div className="grid gap-2">
-                <Label htmlFor="vaultAccountId">Vault account ID</Label>
-                <Input
-                  id="vaultAccountId"
-                  name="vaultAccountId"
-                  placeholder="Vault account ID"
-                  required
-                />
-              </div>
-
-              <div className="grid gap-2 md:grid-cols-2 md:gap-4">
-                <div className="grid gap-2">
-                  <Label htmlFor="assetId">Asset ID (optional)</Label>
-                  <Input id="assetId" name="assetId" placeholder="SOL" />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="apiBaseUrl">API base URL (optional)</Label>
-                  <Input
-                    id="apiBaseUrl"
-                    name="apiBaseUrl"
-                    placeholder="https://api.fireblocks.io"
-                  />
-                </div>
-              </div>
-            </div>
-          ) : null}
         </>
       )}
 
