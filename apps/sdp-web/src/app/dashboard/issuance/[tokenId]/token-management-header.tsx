@@ -13,6 +13,7 @@ interface TokenManagementHeaderProps {
   tokenImageUrl: string | null;
   explorerHref: string | null;
   canDeployToken: boolean;
+  canManageTokenAdmin: boolean;
   isPending: boolean;
   deployDisabledReason?: string | null;
   mintDisabledReason?: string | null;
@@ -33,6 +34,7 @@ export function TokenManagementHeader({
   tokenImageUrl,
   explorerHref,
   canDeployToken,
+  canManageTokenAdmin,
   isPending,
   deployDisabledReason,
   mintDisabledReason,
@@ -109,7 +111,7 @@ export function TokenManagementHeader({
             </TokenDisabledActionTooltip>
           ) : (
             <>
-              {tokenStatus === "paused" ? (
+              {tokenStatus === "paused" && canManageTokenAdmin ? (
                 <TokenDisabledActionTooltip reason={isPending ? null : pauseDisabledReason}>
                   <Button
                     type="button"

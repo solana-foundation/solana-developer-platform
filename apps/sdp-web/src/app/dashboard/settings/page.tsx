@@ -1,4 +1,5 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createSdpApiClient } from "@/lib/sdp-api";
 import { auth } from "@clerk/nextjs/server";
@@ -29,7 +30,7 @@ type ProjectListResponse = {
 };
 
 export default async function SettingsPage() {
-  const { userId, orgId } = await auth();
+  const { userId, orgId, orgRole } = await auth();
   if (!userId) {
     redirect("/sign-in");
   }
@@ -38,6 +39,7 @@ export default async function SettingsPage() {
   }
 
   const trace = createTimedTrace("dashboard.settings.page");
+  const dashboardAccess = resolveDashboardAccess(orgRole);
 
   let organization: Organization | null = null;
   let isLinked = true;
@@ -123,7 +125,10 @@ export default async function SettingsPage() {
             ) : null}
 
             {!loadError && organization ? (
-              <OrganizationRpcSettingsForm organization={organization} />
+              <OrganizationRpcSettingsForm
+                organization={organization}
+                canManageSettings={dashboardAccess.capabilities.canManageOrgSettings}
+              />
             ) : null}
 
             {!loadError && !organization && !isLinked ? (

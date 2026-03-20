@@ -44,7 +44,8 @@ export function WalletsWorkspace({
   wallets,
   walletsError,
 }: WalletsWorkspaceProps) {
-  const { issuanceTab, selectedPlaygroundApiKeyId, setPlaygroundApiKeys } = useDashboardWorkspace();
+  const { dashboardAccess, issuanceTab, selectedPlaygroundApiKeyId, setPlaygroundApiKeys } =
+    useDashboardWorkspace();
   const [isProvisionModalOpen, setIsProvisionModalOpen] = useState(false);
   const [preferredProvider, setPreferredProvider] = useState<KnownCustodyProvider | null>(null);
   const isPlaygroundTab = issuanceTab === "playground";
@@ -131,7 +132,7 @@ export function WalletsWorkspace({
             transition={{ duration: 0.2, ease: "easeOut" }}
             className="w-full space-y-6"
           >
-            {wallets.length > 0 ? (
+            {wallets.length > 0 && dashboardAccess.capabilities.canManageCustody ? (
               <div className="flex items-center justify-end">
                 <Button type="button" onClick={() => openProvisionModal(null)}>
                   Create Wallet
@@ -144,18 +145,21 @@ export function WalletsWorkspace({
               configsError={configsError}
               wallets={wallets}
               walletsError={walletsError}
+              canManageCustody={dashboardAccess.capabilities.canManageCustody}
               onCreateWallet={openProvisionModal}
             />
           </motion.div>
         )}
       </AnimatePresence>
 
-      <WalletProvisionModal
-        isOpen={isProvisionModalOpen}
-        onClose={() => setIsProvisionModalOpen(false)}
-        connectedProviders={connectedProviders}
-        preferredProvider={preferredProvider}
-      />
+      {dashboardAccess.capabilities.canManageCustody ? (
+        <WalletProvisionModal
+          isOpen={isProvisionModalOpen}
+          onClose={() => setIsProvisionModalOpen(false)}
+          connectedProviders={connectedProviders}
+          preferredProvider={preferredProvider}
+        />
+      ) : null}
     </div>
   );
 }

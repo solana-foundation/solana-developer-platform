@@ -17,6 +17,7 @@ import Link from "next/link";
 import { WalletProviderMark } from "./wallet-provider-mark";
 
 interface WalletsOverviewProps {
+  canManageCustody: boolean;
   connectedProviders: KnownCustodyProvider[];
   configsError: string | null;
   wallets: CustodyWalletSummary[];
@@ -25,6 +26,7 @@ interface WalletsOverviewProps {
 }
 
 export function WalletsOverview({
+  canManageCustody,
   connectedProviders,
   configsError,
   wallets,
@@ -47,65 +49,69 @@ export function WalletsOverview({
       <div className="space-y-6">
         <div className="space-y-2">
           <h2 className="text-[34px] leading-[1.04] font-medium tracking-[-0.03em] text-[#1c1c1d]">
-            Create your first wallet
+            {canManageCustody ? "Create your first wallet" : "No wallets available"}
           </h2>
           <p className="max-w-2xl text-[15px] text-[rgba(28,28,29,0.62)]">
-            Choose a custody provider to connect and create the first wallet for your organization.
+            {canManageCustody
+              ? "Choose a custody provider to connect and create the first wallet for your organization."
+              : "Wallet creation is limited to admins. Once a wallet is created, you can still use it across the dashboard."}
           </p>
           {configsError ? <p className="text-sm text-[#9e2b38]">{configsError}</p> : null}
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          {CUSTODY_PROVIDER_CATALOG.map((provider) => {
-            const isConnected = connectedProviderSet.has(provider.id);
-            const isDisabled = isConnected && !provider.supportsAdditionalWallets;
+        {canManageCustody ? (
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            {CUSTODY_PROVIDER_CATALOG.map((provider) => {
+              const isConnected = connectedProviderSet.has(provider.id);
+              const isDisabled = isConnected && !provider.supportsAdditionalWallets;
 
-            return (
-              <article
-                key={provider.id}
-                className="flex min-h-[340px] flex-col rounded-2xl border border-[rgba(28,28,29,0.1)] bg-[#fcfcfa] p-5 shadow-[0_2px_10px_rgba(28,28,29,0.05)]"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <WalletProviderMark provider={provider.id} />
-                </div>
+              return (
+                <article
+                  key={provider.id}
+                  className="flex min-h-[340px] flex-col rounded-2xl border border-[rgba(28,28,29,0.1)] bg-[#fcfcfa] p-5 shadow-[0_2px_10px_rgba(28,28,29,0.05)]"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <WalletProviderMark provider={provider.id} />
+                  </div>
 
-                <div className="mt-5 space-y-2">
-                  <h3 className="text-[30px] leading-[1.1] font-medium tracking-[-0.03em] text-[#1c1c1d]">
-                    {provider.label}
-                  </h3>
-                </div>
+                  <div className="mt-5 space-y-2">
+                    <h3 className="text-[30px] leading-[1.1] font-medium tracking-[-0.03em] text-[#1c1c1d]">
+                      {provider.label}
+                    </h3>
+                  </div>
 
-                <div className="mt-4 flex flex-wrap gap-2">
-                  {provider.capabilities.map((feature) => (
-                    <span
-                      key={feature}
-                      className="rounded-full border border-[rgba(28,28,29,0.1)] bg-[rgba(28,28,29,0.03)] px-2.5 py-1 text-[11px] font-medium text-[rgba(28,28,29,0.68)]"
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    {provider.capabilities.map((feature) => (
+                      <span
+                        key={feature}
+                        className="rounded-full border border-[rgba(28,28,29,0.1)] bg-[rgba(28,28,29,0.03)] px-2.5 py-1 text-[11px] font-medium text-[rgba(28,28,29,0.68)]"
+                      >
+                        {feature}
+                      </span>
+                    ))}
+                  </div>
+
+                  <div className="mt-auto pt-6">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      className="w-full"
+                      onClick={() => onCreateWallet(provider.id)}
+                      disabled={isDisabled}
+                      title={
+                        isDisabled
+                          ? `${provider.label} is already connected, but additional wallets are not available yet.`
+                          : undefined
+                      }
                     >
-                      {feature}
-                    </span>
-                  ))}
-                </div>
-
-                <div className="mt-auto pt-6">
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    className="w-full"
-                    onClick={() => onCreateWallet(provider.id)}
-                    disabled={isDisabled}
-                    title={
-                      isDisabled
-                        ? `${provider.label} is already connected, but additional wallets are not available yet.`
-                        : undefined
-                    }
-                  >
-                    New wallet
-                  </Button>
-                </div>
-              </article>
-            );
-          })}
-        </div>
+                      New wallet
+                    </Button>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        ) : null}
       </div>
     );
   }
@@ -144,7 +150,11 @@ export function WalletsOverview({
               </p>
               <div className="mt-1 min-w-0 text-[30px] leading-[1.1] font-medium tracking-[-0.03em] text-[#1c1c1d]">
                 <div className="min-w-0">
-                  <WalletLabelInlineEditor walletId={wallet.walletId} label={wallet.label} />
+                  <WalletLabelInlineEditor
+                    walletId={wallet.walletId}
+                    label={wallet.label}
+                    canEdit={canManageCustody}
+                  />
                 </div>
               </div>
 
@@ -196,13 +206,15 @@ export function WalletsOverview({
           );
         })}
 
-        <button
-          type="button"
-          onClick={() => onCreateWallet(null)}
-          className="flex min-h-[340px] items-center justify-center rounded-2xl border border-dashed border-[rgba(28,28,29,0.2)] bg-[#fcfcfa] text-[rgba(28,28,29,0.5)] transition-colors hover:border-[rgba(28,28,29,0.35)] hover:text-[rgba(28,28,29,0.75)]"
-        >
-          <Plus className="h-6 w-6" />
-        </button>
+        {canManageCustody ? (
+          <button
+            type="button"
+            onClick={() => onCreateWallet(null)}
+            className="flex min-h-[340px] items-center justify-center rounded-2xl border border-dashed border-[rgba(28,28,29,0.2)] bg-[#fcfcfa] text-[rgba(28,28,29,0.5)] transition-colors hover:border-[rgba(28,28,29,0.35)] hover:text-[rgba(28,28,29,0.75)]"
+          >
+            <Plus className="h-6 w-6" />
+          </button>
+        ) : null}
       </div>
     </div>
   );

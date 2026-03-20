@@ -1,8 +1,9 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
+import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { Loader2 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
 import { TokenActionConfirmationDialog } from "./token-action-confirmation-dialog";
@@ -141,6 +142,7 @@ export function TokenManagementWorkspace({
   frozenAccountsTotal: initialFrozenAccountsTotal,
   frozenAccountsHasMore: initialFrozenAccountsHasMore,
 }: TokenManagementWorkspaceProps) {
+  const { dashboardAccess } = useDashboardWorkspace();
   const {
     isPending,
     actionConfirmation,
@@ -316,6 +318,7 @@ export function TokenManagementWorkspace({
 
   const tokenBasePath = `/v1/issuance/tokens/${token.id}`;
   const explorerHref = getExplorerHref(token.mintAddress);
+  const canManageTokenAdmin = dashboardAccess.capabilities.canManageTokenAdmin;
   const canDeployToken = token.status === "pending" && !token.mintAddress;
   const {
     mintDisabledReason,
@@ -391,15 +394,17 @@ export function TokenManagementWorkspace({
 
     return {
       ...rowWithDisplayedValue,
-      editDisabledReason: withWalletLoadError(
-        getSignerSelectionForAction({
-          action: "authority",
-          token,
-          authorityWallets,
-          metadataAuthority,
-          permissionRow: rowWithDisplayedValue,
-        })
-      ).unavailableReason,
+      editDisabledReason: canManageTokenAdmin
+        ? withWalletLoadError(
+            getSignerSelectionForAction({
+              action: "authority",
+              token,
+              authorityWallets,
+              metadataAuthority,
+              permissionRow: rowWithDisplayedValue,
+            })
+          ).unavailableReason
+        : "Only admins can edit token authorities.",
     };
   });
   const displayedMintAuthority = getDisplayedAuthorityAddress({
@@ -410,10 +415,21 @@ export function TokenManagementWorkspace({
   });
   const extensionRows = getExtensionRows(token);
   const showAllowlistControls = token.requiresAllowlist;
+  const visibleManagementTabs = useMemo(
+    () =>
+      managementTabs.filter(
+        (tab) => tab.id !== "compliance" || showAllowlistControls || canManageTokenAdmin
+      ),
+    [canManageTokenAdmin, showAllowlistControls]
+  );
   const complianceActions: Array<{ id: AdminAction; label: string }> = [
     ...(showAllowlistControls ? [{ id: "allowlist" as const, label: "Allowlist" }] : []),
-    { id: "freeze", label: "Freeze" },
-    { id: "pause", label: "Pause" },
+    ...(canManageTokenAdmin
+      ? [
+          { id: "freeze" as const, label: "Freeze" },
+          { id: "pause" as const, label: "Pause" },
+        ]
+      : []),
   ];
   const effectiveMintDisabledReason = mintDisabledReason ?? mintSignerSelection.unavailableReason;
   const effectiveBurnDisabledReason = burnDisabledReason ?? burnSignerSelection.unavailableReason;
@@ -444,11 +460,24 @@ export function TokenManagementWorkspace({
           disabledReason: fundManagementDisabledReasons.deploy,
         },
       ]
-    : liveFundManagementRows.map((row) => ({
-        ...row,
-        disabled: Boolean(fundManagementDisabledReasons[row.id]),
-        disabledReason: fundManagementDisabledReasons[row.id],
-      }));
+    : liveFundManagementRows
+        .filter((row) =>
+          canManageTokenAdmin
+            ? true
+            : row.id === "mint" || row.id === "burn" || row.id === "refresh-supply"
+        )
+        .map((row) => ({
+          ...row,
+          disabled: Boolean(fundManagementDisabledReasons[row.id]),
+          disabledReason: fundManagementDisabledReasons[row.id],
+        }));
+
+  useEffect(() => {
+    if (!visibleManagementTabs.some((tab) => tab.id === activeTab)) {
+      setActiveTab("overview");
+      setActiveAction(null);
+    }
+  }, [activeTab, visibleManagementTabs]);
 
   const handleCopy = async (value: string | null) => {
     if (!value) {
@@ -962,9 +991,11 @@ export function TokenManagementWorkspace({
     const nextDefaultAction =
       tab === "fund-management" && canDeployToken
         ? null
-        : tab === "compliance" && !showAllowlistControls
+        : tab === "compliance" && !showAllowlistControls && canManageTokenAdmin
           ? "freeze"
-          : getDefaultActionForTab(tab);
+          : tab === "compliance" && (!showAllowlistControls || !canManageTokenAdmin)
+            ? null
+            : getDefaultActionForTab(tab);
     if (nextDefaultAction) {
       setActiveAction(nextDefaultAction);
       return;
@@ -1093,6 +1124,7 @@ export function TokenManagementWorkspace({
         mintDisabledReason={effectiveMintDisabledReason}
         burnDisabledReason={effectiveBurnDisabledReason}
         pauseDisabledReason={pauseDisabledReason}
+        canManageTokenAdmin={canManageTokenAdmin}
         onCopyAddress={() => void handleCopy(token.mintAddress)}
         onMintSelect={() => openFundManagementModal("mint")}
         onBurnSelect={() => openFundManagementModal("burn")}
@@ -1107,7 +1139,7 @@ export function TokenManagementWorkspace({
 
       <div className="border-b border-[rgba(28,28,29,0.12)]">
         <div className="flex flex-wrap gap-8">
-          {managementTabs.map((tab) => (
+          {visibleManagementTabs.map((tab) => (
             <button
               key={tab.id}
               type="button"
@@ -1144,16 +1176,18 @@ export function TokenManagementWorkspace({
               unpaused.
             </p>
           </div>
-          <TokenDisabledActionTooltip reason={isPending ? null : pauseDisabledReason}>
-            <Button
-              type="button"
-              size="sm"
-              onClick={() => handlePause(false)}
-              disabled={isPending || Boolean(pauseDisabledReason)}
-            >
-              Unpause token
-            </Button>
-          </TokenDisabledActionTooltip>
+          {canManageTokenAdmin ? (
+            <TokenDisabledActionTooltip reason={isPending ? null : pauseDisabledReason}>
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => handlePause(false)}
+                disabled={isPending || Boolean(pauseDisabledReason)}
+              >
+                Unpause token
+              </Button>
+            </TokenDisabledActionTooltip>
+          ) : null}
         </div>
       ) : null}
 
@@ -1177,7 +1211,7 @@ export function TokenManagementWorkspace({
               permissionRows={permissionRows}
               extensionRows={extensionRows}
               showTitle={false}
-              canEditAuthorities={!canDeployToken}
+              canEditAuthorities={!canDeployToken && canManageTokenAdmin}
               onCopy={handleCopy}
               onEditAuthority={handleAuthorityModalOpen}
             />
@@ -1192,7 +1226,7 @@ export function TokenManagementWorkspace({
             permissionRows={permissionRows}
             extensionRows={extensionRows}
             showTitle={false}
-            canEditAuthorities={!canDeployToken}
+            canEditAuthorities={!canDeployToken && canManageTokenAdmin}
             onCopy={handleCopy}
             onEditAuthority={handleAuthorityModalOpen}
           />
