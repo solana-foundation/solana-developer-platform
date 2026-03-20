@@ -21,8 +21,10 @@ import {
   fetchTokenManagementSupportingData,
 } from "./token-management-workspace.data";
 import type {
+  ActionExecutionInput,
   AdminAction,
   PermissionRow,
+  RunActionOptions,
   TokenManagementTab,
   TokenManagementWorkspaceProps,
 } from "./token-management-workspace.types";
@@ -133,8 +135,8 @@ export function TokenManagementWorkspace({
   const {
     isPending,
     actionConfirmation,
-    runAction,
-    runActionImmediately,
+    runAction: runActionBase,
+    runActionImmediately: runActionImmediatelyBase,
     dismissActionConfirmation,
     confirmAction,
   } = useTokenActionRunner();
@@ -201,7 +203,11 @@ export function TokenManagementWorkspace({
       initialTransactionsTotal,
     ]
   );
-  const { data: supportingData, error: supportingDataRequestError } = useSWR(
+  const {
+    data: supportingData,
+    error: supportingDataRequestError,
+    mutate: mutateSupportingData,
+  } = useSWR(
     shouldLoadSupportingData ? ["token-management-supporting-data", token.id] : null,
     ([, tokenId]: readonly [string, string]) => fetchTokenManagementSupportingData(tokenId),
     {
@@ -218,6 +224,29 @@ export function TokenManagementWorkspace({
   const supportingDataLoading =
     shouldLoadSupportingData && supportingData === undefined && !supportingDataError;
   const resolvedSupportingData = supportingData ?? initialSupportingData;
+  const revalidateSupportingDataAfterSuccess = async () => {
+    if (!shouldLoadSupportingData) {
+      return;
+    }
+
+    await mutateSupportingData();
+  };
+  const runAction = (input: ActionExecutionInput, options: RunActionOptions = {}) =>
+    runActionBase(input, {
+      ...options,
+      onSuccess: async (result) => {
+        await options.onSuccess?.(result);
+        await revalidateSupportingDataAfterSuccess();
+      },
+    });
+  const runActionImmediately = (input: ActionExecutionInput, options: RunActionOptions = {}) =>
+    runActionImmediatelyBase(input, {
+      ...options,
+      onSuccess: async (result) => {
+        await options.onSuccess?.(result);
+        await revalidateSupportingDataAfterSuccess();
+      },
+    });
   const authorityWallets = resolvedSupportingData.authorityWallets;
   const authorityWalletsError = supportingDataError ?? resolvedSupportingData.authorityWalletsError;
   const transactions = resolvedSupportingData.transactions;
