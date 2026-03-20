@@ -1,3 +1,5 @@
+"use client";
+
 import { CreateApiKeyModal } from "@/app/dashboard/api-keys/create-api-key-modal";
 import { SectionEntry } from "@/app/dashboard/wallets/section-entry";
 import { Button } from "@/components/ui/button";
@@ -13,19 +15,17 @@ import {
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import type { PaymentsDashboardWallet } from "@sdp/types";
 import Link from "next/link";
-import type { HomeActivityRow } from "./home-page.data";
+import useSWR from "swr";
+import { fetchHomeActivity } from "./home-workspace.data";
 import { formatCurrencyAmount, formatDisplayAmount } from "./payments/payments-overview.utils";
 
 interface HomeWorkspaceProps {
   totalBalance: number | null;
   totalBalanceError: string | null;
-  todaysVolume: number | null;
-  todaysVolumeError: string | null;
-  activityRows: HomeActivityRow[];
-  activityError: string | null;
-  activityNotice: string | null;
   wallets: PaymentsDashboardWallet[];
 }
+
+const HOME_ACTIVITY_KEY = "dashboard-home-activity";
 
 function formatRelativeTime(value: string): string {
   const date = new Date(value);
@@ -94,30 +94,46 @@ function MetricCard({
   );
 }
 
-export function HomeWorkspace({
-  totalBalance,
-  totalBalanceError,
-  todaysVolume,
-  todaysVolumeError,
-  activityRows,
-  activityError,
-  activityNotice,
-  wallets,
-}: HomeWorkspaceProps) {
+export function HomeWorkspace({ totalBalance, totalBalanceError, wallets }: HomeWorkspaceProps) {
+  const { data: activitySnapshot, error: activityRequestError } = useSWR(
+    HOME_ACTIVITY_KEY,
+    () => fetchHomeActivity(),
+    {
+      revalidateOnFocus: true,
+      refreshInterval: 20_000,
+    }
+  );
   const isWalletEmptyState = wallets.length === 0;
   const totalBalanceHint = isWalletEmptyState
     ? "Create your first wallet to start tracking balances."
     : totalBalance === null
       ? "No tracked balances found yet."
       : null;
+  const todaysVolume = activitySnapshot?.todaysVolume ?? null;
+  const todaysVolumeError = activityRequestError
+    ? activityRequestError instanceof Error
+      ? activityRequestError.message
+      : "Activity is unavailable right now."
+    : (activitySnapshot?.activityError ?? null);
+  const activityRows = activitySnapshot?.activityRows ?? [];
+  const activityError = activityRequestError
+    ? activityRequestError instanceof Error
+      ? activityRequestError.message
+      : "Activity is unavailable right now."
+    : (activitySnapshot?.activityError ?? null);
+  const activityNotice = activitySnapshot?.activityNotice ?? null;
   const todaysVolumeHint = isWalletEmptyState
     ? "Payment activity will appear after you create a wallet."
     : todaysVolume === null
-      ? "No payment volume recorded yet."
+      ? activitySnapshot
+        ? "No payment volume recorded yet."
+        : "Loading payment activity..."
       : null;
   const emptyActivityMessage = isWalletEmptyState
     ? "Create your first wallet to start tracking balances and activity."
-    : "No recent activity found yet.";
+    : activitySnapshot
+      ? "No recent activity found yet."
+      : "Loading recent activity...";
 
   return (
     <div className="w-full space-y-8 py-2">

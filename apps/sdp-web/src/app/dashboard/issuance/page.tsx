@@ -152,7 +152,11 @@ async function fetchTokens(
   }
 }
 
-export default async function IssuancePage() {
+interface IssuancePageProps {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+}
+
+export default async function IssuancePage({ searchParams }: IssuancePageProps) {
   const { userId, orgId } = await auth();
   if (!userId) {
     redirect("/sign-in");
@@ -164,17 +168,30 @@ export default async function IssuancePage() {
   const trace = createTimedTrace("dashboard.issuance.page");
 
   try {
+    const resolvedSearchParams = searchParams ? await searchParams : undefined;
+    const currentTab =
+      resolvedSearchParams?.tab === "playground" ||
+      (Array.isArray(resolvedSearchParams?.tab) && resolvedSearchParams.tab[0] === "playground")
+        ? "playground"
+        : "tokens";
+    const isPlaygroundTab = currentTab === "playground";
     const apiBaseUrl = resolvePlaygroundApiBaseUrl();
     const apiClient = await trace.step("create_sdp_api_client", () =>
       createSdpApiClient(trace.childContext("dashboard.issuance.api"))
     );
     const [templatesResult, tokensResult, apiKeysResult, signerWalletsResult] = await Promise.all([
-      trace.step("fetch_templates", () => fetchTemplates(apiClient.request)),
+      isPlaygroundTab
+        ? trace.step("fetch_templates", () => fetchTemplates(apiClient.request))
+        : Promise.resolve({ ok: true as const, data: [] }),
       trace.step("fetch_tokens", () => fetchTokens(apiClient.request)),
-      trace.step("fetch_active_api_keys", () => fetchActiveApiKeys(apiClient.request)),
-      trace.step("fetch_signer_wallets", () =>
-        fetchPaymentsWallets(apiClient.request, { includeBalances: false })
-      ),
+      isPlaygroundTab
+        ? trace.step("fetch_active_api_keys", () => fetchActiveApiKeys(apiClient.request))
+        : Promise.resolve({ ok: true as const, data: [] }),
+      isPlaygroundTab
+        ? trace.step("fetch_signer_wallets", () =>
+            fetchPaymentsWallets(apiClient.request, { view: "summary" })
+          )
+        : Promise.resolve({ ok: true as const, data: [] }),
     ]);
 
     const tokens = tokensResult.data ?? [];
@@ -185,6 +202,7 @@ export default async function IssuancePage() {
 
     trace.log({
       ok: true,
+      tab: currentTab,
       tokenCount: tokens.length,
       templateCount: templatesResult.data?.length ?? 0,
       apiKeyCount: apiKeys.length,

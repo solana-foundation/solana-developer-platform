@@ -17,6 +17,7 @@ interface CreateTokenFeaturesStepProps {
   template: TemplateSelection;
   draft: TokenDraft;
   signerWallets: PaymentsDashboardWallet[];
+  signerWalletsLoading: boolean;
   signerWalletsError: string | null;
   submitState: CreateIssuanceTokenResult;
   isPending: boolean;
@@ -31,6 +32,7 @@ export function CreateTokenFeaturesStep({
   template,
   draft,
   signerWallets,
+  signerWalletsLoading,
   signerWalletsError,
   submitState,
   isPending,
@@ -98,6 +100,10 @@ export function CreateTokenFeaturesStep({
                 actions.
               </p>
             </>
+          ) : signerWalletsLoading ? (
+            <p className="rounded-2xl border border-[rgba(28,28,29,0.08)] bg-[rgba(28,28,29,0.03)] px-4 py-3 text-base text-[rgba(28,28,29,0.62)]">
+              Loading signer wallets…
+            </p>
           ) : signerWalletsError ? (
             <p className="rounded-2xl border border-[#c71f37]/20 bg-[#c71f37]/[0.03] px-4 py-3 text-base text-[#8a1f2a]">
               {signerWalletsError}

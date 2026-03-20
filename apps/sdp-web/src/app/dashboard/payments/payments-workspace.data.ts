@@ -175,7 +175,7 @@ export async function fetchWallets(
   } = {}
 ): Promise<WalletRecord[]> {
   const query = new URLSearchParams({
-    includeBalances: "true",
+    view: "summary",
   }).toString();
   const response = await fetch(`/api/dashboard/wallets?${query}`, {
     method: "GET",
