@@ -212,7 +212,8 @@ export function TokenManagementWorkspace({
     ([, tokenId]: readonly [string, string]) => fetchTokenManagementSupportingData(tokenId),
     {
       fallbackData: hasInitialSupportingData ? initialSupportingData : undefined,
-      revalidateOnFocus: false,
+      refreshInterval: 60_000,
+      revalidateOnFocus: true,
       revalidateIfStale: false,
     }
   );

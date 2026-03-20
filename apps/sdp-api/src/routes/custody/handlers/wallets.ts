@@ -1,7 +1,7 @@
 import { formatDecimalAmount } from "@/lib/amount";
 import {
   assertApiKeyWalletAccess,
-  getAllowedApiKeyWalletIds,
+  getAllowedApiKeyWalletIdsForPermissions,
   resolveApiKeySigningWalletId,
 } from "@/lib/api-key-wallet-auth";
 import { getAuth } from "@/lib/auth";
@@ -244,10 +244,13 @@ async function queryWalletSummaries(
     return [];
   }
 
-  const allowedWalletIds = getAllowedApiKeyWalletIds(auth);
+  const allowedWalletIds = getAllowedApiKeyWalletIdsForPermissions(auth, ["wallets:read"]);
+  if (allowedWalletIds !== null && allowedWalletIds.length === 0) {
+    return [];
+  }
   const configPlaceholders = configIds.map(() => "?").join(", ");
   const allowedWalletClause =
-    allowedWalletIds && allowedWalletIds.length > 0
+    allowedWalletIds !== null && allowedWalletIds.length > 0
       ? `AND w.wallet_id IN (${allowedWalletIds.map(() => "?").join(", ")})`
       : "";
 
@@ -294,7 +297,7 @@ function buildWalletCacheKey(
 ): string {
   const auth = getAuth(c);
   const actor = resolveActor(c);
-  const allowedWalletIds = getAllowedApiKeyWalletIds(auth);
+  const allowedWalletIds = getAllowedApiKeyWalletIdsForPermissions(auth, ["wallets:read"]);
 
   return JSON.stringify({
     kind,
@@ -302,7 +305,6 @@ function buildWalletCacheKey(
     projectId: filters.projectId ?? null,
     provider: filters.provider ?? null,
     includeAllProviders: filters.includeAllProviders,
-    view: filters.view,
     authType: auth.authType,
     apiKeyId: auth.apiKeyId,
     allowedWalletIds: allowedWalletIds ? [...allowedWalletIds].sort() : null,

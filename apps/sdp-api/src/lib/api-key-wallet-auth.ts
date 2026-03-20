@@ -112,6 +112,24 @@ export function getAllowedApiKeyWalletIds(auth: ApiKeyContext): string[] | null 
   return bindings.map((binding) => binding.walletId);
 }
 
+export function getAllowedApiKeyWalletIdsForPermissions(
+  auth: ApiKeyContext,
+  requiredPermissions: Permission[] = []
+): string[] | null {
+  if (auth.authType !== "api_key") {
+    return null;
+  }
+
+  const bindings = normalizeBindings(auth);
+  if (bindings.length === 0) {
+    return null;
+  }
+
+  return bindings
+    .filter((binding) => hasBindingPermission(binding, requiredPermissions))
+    .map((binding) => binding.walletId);
+}
+
 export function filterApiKeyWallets<T extends { walletId: string }>(
   auth: ApiKeyContext,
   wallets: T[],
