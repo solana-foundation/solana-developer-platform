@@ -38,7 +38,21 @@ function resolveSchemaRef(spec, schema) {
   return current;
 }
 
-function buildExampleFromSchema(spec, schema) {
+function getSchemaRef(schema) {
+  return schema && typeof schema === "object" && "$ref" in schema && schema.$ref
+    ? schema.$ref
+    : null;
+}
+
+function buildExampleFromSchema(spec, schema, visitedRefs = new Set()) {
+  const schemaRef = getSchemaRef(schema);
+  if (schemaRef) {
+    if (visitedRefs.has(schemaRef)) {
+      return null;
+    }
+    visitedRefs.add(schemaRef);
+  }
+
   const resolvedSchema = resolveSchemaRef(spec, schema);
   if (!resolvedSchema || typeof resolvedSchema !== "object") {
     return null;
@@ -57,16 +71,16 @@ function buildExampleFromSchema(spec, schema) {
   }
 
   if (Array.isArray(resolvedSchema.oneOf) && resolvedSchema.oneOf.length > 0) {
-    return buildExampleFromSchema(spec, resolvedSchema.oneOf[0]);
+    return buildExampleFromSchema(spec, resolvedSchema.oneOf[0], new Set(visitedRefs));
   }
 
   if (Array.isArray(resolvedSchema.anyOf) && resolvedSchema.anyOf.length > 0) {
-    return buildExampleFromSchema(spec, resolvedSchema.anyOf[0]);
+    return buildExampleFromSchema(spec, resolvedSchema.anyOf[0], new Set(visitedRefs));
   }
 
   if (Array.isArray(resolvedSchema.allOf) && resolvedSchema.allOf.length > 0) {
     return resolvedSchema.allOf.reduce((merged, branch) => {
-      const branchExample = buildExampleFromSchema(spec, branch);
+      const branchExample = buildExampleFromSchema(spec, branch, new Set(visitedRefs));
       if (
         branchExample &&
         typeof branchExample === "object" &&
@@ -91,12 +105,15 @@ function buildExampleFromSchema(spec, schema) {
   if (schemaType === "object") {
     const properties = resolvedSchema.properties ?? {};
     return Object.fromEntries(
-      Object.entries(properties).map(([key, value]) => [key, buildExampleFromSchema(spec, value)])
+      Object.entries(properties).map(([key, value]) => [
+        key,
+        buildExampleFromSchema(spec, value, new Set(visitedRefs)),
+      ])
     );
   }
 
   if (schemaType === "array") {
-    return [buildExampleFromSchema(spec, resolvedSchema.items)];
+    return [buildExampleFromSchema(spec, resolvedSchema.items, new Set(visitedRefs))];
   }
 
   if (schemaType === "string") {
@@ -123,6 +140,25 @@ function buildExampleFromSchema(spec, schema) {
   return null;
 }
 
+function getNamedExampleValue(examples) {
+  if (!examples || typeof examples !== "object") {
+    return undefined;
+  }
+
+  for (const example of Object.values(examples)) {
+    if (
+      example &&
+      typeof example === "object" &&
+      "value" in example &&
+      example.value !== undefined
+    ) {
+      return example.value;
+    }
+  }
+
+  return undefined;
+}
+
 function getRequestHeaders(operation) {
   const headers = [];
 
@@ -145,9 +181,8 @@ function getRequestBody(spec, operation) {
 
   const example =
     jsonBody.example ??
-    (Array.isArray(jsonBody.examples) && jsonBody.examples.length > 0
-      ? jsonBody.examples[0]
-      : buildExampleFromSchema(spec, jsonBody.schema));
+    getNamedExampleValue(jsonBody.examples) ??
+    buildExampleFromSchema(spec, jsonBody.schema);
 
   return {
     mode: "raw",

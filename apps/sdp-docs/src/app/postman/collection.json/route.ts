@@ -1,9 +1,9 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { POSTMAN_COLLECTION_FILENAME } from "../../../../scripts/lib/public-openapi.mjs";
 
 export const runtime = "nodejs";
 
-const POSTMAN_COLLECTION_FILENAME = "solana-developer-platform-public.postman_collection.json";
 const collectionPath = path.join(process.cwd(), "public", "postman", POSTMAN_COLLECTION_FILENAME);
 
 export async function GET() {
