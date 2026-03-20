@@ -14,6 +14,7 @@ export interface FetchResult<T> {
 
 interface FetchPaymentsWalletsOptions {
   includeBalances?: boolean;
+  view?: "default" | "summary";
 }
 
 export interface PaymentsIssuedTokenSymbol {
@@ -40,6 +41,7 @@ export async function fetchPaymentsWallets(
   try {
     const query = new URLSearchParams({
       includeAllProviders: "true",
+      ...(options.view === "summary" ? { view: "summary" } : {}),
       ...(options.includeBalances ? { includeBalances: "true" } : {}),
     }).toString();
     const response = await request(`/v1/wallets?${query}`);

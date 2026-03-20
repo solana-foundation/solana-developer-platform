@@ -12,7 +12,7 @@ async function gotoIssuanceDashboard(page: Page): Promise<void> {
 
 async function gotoToken(page: Page, tokenId: string): Promise<void> {
   await page.goto(`/dashboard/issuance/${tokenId}`);
-  await expect(page.getByTestId("permission-row-mint-authority")).toBeVisible();
+  await expect(page.getByTestId("overview-row-token-address")).toBeVisible();
 }
 
 async function openTab(page: Page, name: string): Promise<void> {
@@ -87,9 +87,11 @@ test.describe
       page,
     }) => {
       await gotoToken(page, fixtures.tokens.pending.id);
+      await openTab(page, "Fund Management");
 
-      await expect(page.getByRole("button", { name: "Deploy" })).toBeVisible();
-      await page.getByRole("button", { name: "Deploy" }).click();
+      const deployRow = page.getByTestId("fund-management-row-deploy");
+      await expect(deployRow.getByRole("button", { name: "Deploy" })).toBeVisible();
+      await deployRow.getByRole("button", { name: "Deploy" }).click();
       await expect(
         page.getByText(
           "This will deploy the token on-chain so fund management actions can be used."
@@ -142,6 +144,7 @@ test.describe
       page,
     }) => {
       await gotoToken(page, fixtures.tokens.allowlisted.id);
+      await openTab(page, "Permissions");
 
       const row = page.getByTestId("permission-row-permanent-delegate");
       await row.getByRole("button", { name: "Edit" }).click();

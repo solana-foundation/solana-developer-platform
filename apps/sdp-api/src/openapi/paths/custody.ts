@@ -212,6 +212,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
         provider: orgCustodyProviderSchema.optional(),
         includeAllProviders: z.boolean().optional(),
         includeBalances: z.boolean().optional(),
+        view: z.enum(["summary"]).optional(),
       }),
     },
     responses: {

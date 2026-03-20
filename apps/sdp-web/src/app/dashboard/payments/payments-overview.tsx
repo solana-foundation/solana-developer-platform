@@ -12,11 +12,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import type {
-  CustodyWalletAggregate,
-  PaymentTransferSummary as TransferRecord,
-  PaymentsDashboardWallet as WalletRecord,
-} from "@sdp/types";
+import type { CustodyWalletAggregate, PaymentTransferSummary as TransferRecord } from "@sdp/types";
 import { ArrowDownLeft, ArrowUpRight, ExternalLink, RefreshCw } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMemo } from "react";
@@ -27,7 +23,6 @@ import {
   formatDisplayAmount,
   formatTimestamp,
   resolveAggregateBalanceDisplayToken,
-  resolveAggregateBalanceRows,
   resolveCounterparty,
   resolveTotalBalance,
   resolveUsdBalanceValue,
@@ -36,13 +31,10 @@ import {
 import {
   fetchTransfers,
   fetchWalletAggregate,
-  fetchWallets,
   getDevnetExplorerUrl,
 } from "./payments-workspace.data";
 
 interface PaymentsOverviewProps {
-  wallets: WalletRecord[];
-  walletsError: string | null;
   aggregate: CustodyWalletAggregate | null;
   aggregateError: string | null;
   issuedTokenSymbolsByMint: Record<string, string>;
@@ -50,7 +42,6 @@ interface PaymentsOverviewProps {
   transfersError: string | null;
 }
 
-const PAYMENTS_OVERVIEW_WALLETS_KEY = "payments-overview-wallets";
 const PAYMENTS_OVERVIEW_AGGREGATE_KEY = "payments-overview-aggregate";
 const PAYMENTS_OVERVIEW_TRANSFERS_KEY = "payments-overview-transfers";
 
@@ -101,8 +92,6 @@ function TruncatedTableText({
 }
 
 export function PaymentsOverview({
-  wallets,
-  walletsError,
   aggregate,
   aggregateError,
   issuedTokenSymbolsByMint,
@@ -112,16 +101,6 @@ export function PaymentsOverview({
   const router = useRouter();
   const searchParams = useSearchParams();
   const refreshSeed = searchParams.get("refresh") ?? "default";
-  const {
-    data: swrWallets,
-    error: walletsFetchError,
-    isValidating: walletsRefreshing,
-    mutate: mutateWallets,
-  } = useSWR<WalletRecord[]>([PAYMENTS_OVERVIEW_WALLETS_KEY, refreshSeed], () => fetchWallets(), {
-    fallbackData: walletsError ? undefined : wallets,
-    revalidateOnFocus: true,
-    refreshInterval: 30_000,
-  });
   const {
     data: swrAggregate,
     error: aggregateFetchError,
@@ -151,14 +130,8 @@ export function PaymentsOverview({
     }
   );
 
-  const liveWallets = swrWallets ?? wallets;
   const liveAggregate = swrAggregate ?? aggregate;
   const liveTransfers = swrTransfers ?? transfers;
-  const liveWalletsError = walletsFetchError
-    ? resolveRequestError(walletsFetchError, walletsError)
-    : swrWallets === undefined
-      ? walletsError
-      : null;
   const liveAggregateError = aggregateFetchError
     ? resolveRequestError(aggregateFetchError, aggregateError)
     : swrAggregate === undefined
@@ -169,21 +142,18 @@ export function PaymentsOverview({
     : swrTransfers === undefined
       ? transfersError
       : null;
-  const isRefreshing = walletsRefreshing || aggregateRefreshing || transfersRefreshing;
-  const aggregateBalances = useMemo(
-    () => resolveAggregateBalanceRows(liveAggregate, liveWallets),
-    [liveAggregate, liveWallets]
-  );
+  const isRefreshing = aggregateRefreshing || transfersRefreshing;
+  const aggregateBalances = useMemo(() => liveAggregate?.balances ?? [], [liveAggregate]);
   const topAggregateBalances = useMemo(
     () => selectTopAggregateBalanceRows(aggregateBalances, issuedTokenSymbolsByMint),
     [aggregateBalances, issuedTokenSymbolsByMint]
   );
   const totalBalance = resolveTotalBalance(aggregateBalances);
-  const hasWallets = liveWallets.length > 0;
-  const walletCount = liveAggregate?.walletCount ?? liveWallets.length;
+  const walletCount = liveAggregate?.walletCount ?? 0;
+  const hasWallets = walletCount > 0;
 
   const handleRefresh = () => {
-    void Promise.all([mutateWallets(), mutateAggregate(), mutateTransfers()]);
+    void Promise.all([mutateAggregate(), mutateTransfers()]);
   };
 
   return (
@@ -264,11 +234,8 @@ export function PaymentsOverview({
           </div>
         </div>
 
-        {liveWalletsError ? (
-          <p className="mt-4 text-sm text-[#9e2b38]">{liveWalletsError}</p>
-        ) : null}
         {liveAggregateError ? (
-          <p className="mt-2 text-sm text-[#9e2b38]">{liveAggregateError}</p>
+          <p className="mt-4 text-sm text-[#9e2b38]">{liveAggregateError}</p>
         ) : null}
       </SectionEntry>
 

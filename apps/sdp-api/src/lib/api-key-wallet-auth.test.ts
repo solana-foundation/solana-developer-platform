@@ -5,6 +5,7 @@ import {
   assertApiKeyWalletAccess,
   filterApiKeyWallets,
   getAllowedApiKeyWalletIds,
+  getAllowedApiKeyWalletIdsForPermissions,
   resolveApiKeySigningWalletId,
 } from "./api-key-wallet-auth";
 
@@ -81,6 +82,17 @@ describe("api-key wallet auth helpers", () => {
     });
 
     expect(getAllowedApiKeyWalletIds(auth)).toEqual(["wal_a", "wal_b"]);
+  });
+
+  it("filters allowed wallet IDs by the required wallet permissions", () => {
+    const auth = createApiKeyAuth({
+      walletBindings: [
+        { walletId: "wal_read", permissions: ["wallets:read"] },
+        { walletId: "wal_write", permissions: ["wallets:write"] },
+      ],
+    });
+
+    expect(getAllowedApiKeyWalletIdsForPermissions(auth, ["wallets:read"])).toEqual(["wal_read"]);
   });
 
   it("filters wallet collections to the bound wallet set", () => {

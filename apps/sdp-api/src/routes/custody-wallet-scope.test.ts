@@ -263,6 +263,56 @@ describe("Custody wallet scope routes", () => {
     expect(body.data.wallets.map((wallet) => wallet.walletId)).toEqual(["para_wallet_a"]);
   });
 
+  it("excludes bound wallets that lack wallets:read from the summary view", async () => {
+    await seedCachedKey({
+      walletBindings: [{ walletId: "para_wallet_a", permissions: ["wallets:write"] }],
+    });
+
+    const res = await app.request(
+      "/v1/wallets?includeAllProviders=true&view=summary",
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+      },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      data: {
+        wallets: Array<{ walletId: string }>;
+      };
+    };
+    expect(body.data.wallets).toEqual([]);
+  });
+
+  it("returns summary wallets without hydrating balances", async () => {
+    const res = await app.request(
+      "/v1/wallets?includeAllProviders=true&view=summary",
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+      },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      data: {
+        wallets: Array<{ walletId: string; balances?: unknown[] }>;
+      };
+    };
+
+    expect(body.data.wallets).toHaveLength(3);
+    expect(body.data.wallets.every((wallet) => wallet.balances === undefined)).toBe(true);
+    expect(getAccountInfo).not.toHaveBeenCalled();
+    expect(getSplTokenBalances).not.toHaveBeenCalled();
+  });
+
   it("filters aggregate wallets to the API key bindings", async () => {
     await seedCachedKey({
       walletBindings: [{ walletId: "privy_wallet_b", permissions: ["wallets:read"] }],

@@ -112,8 +112,6 @@ export function PaymentsWorkspace({
 
   return (
     <PaymentsOverview
-      wallets={wallets}
-      walletsError={walletsError}
       aggregate={aggregate}
       aggregateError={aggregateError}
       issuedTokenSymbolsByMint={issuedTokenSymbolsByMint}

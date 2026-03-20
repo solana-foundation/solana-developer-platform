@@ -1,7 +1,7 @@
 import { formatDecimalAmount } from "@/lib/amount";
 import {
   assertApiKeyWalletAccess,
-  filterApiKeyWallets,
+  getAllowedApiKeyWalletIdsForPermissions,
   resolveApiKeySigningWalletId,
 } from "@/lib/api-key-wallet-auth";
 import { getAuth } from "@/lib/auth";
@@ -18,7 +18,11 @@ import {
 } from "@/services/helius-das.service";
 import { SigningError } from "@/services/ports";
 import { createRpc, getAccountInfo } from "@/services/solana/rpc";
-import type { CustodyWalletTokenBalance } from "@sdp/types";
+import type {
+  CustodyWalletAggregate,
+  CustodyWalletSummary,
+  CustodyWalletTokenBalance,
+} from "@sdp/types";
 import type { Address } from "@solana/kit";
 import { type AppContext, parseBooleanQueryParam, resolveActor } from "../context";
 import {
@@ -33,6 +37,303 @@ import {
   updateWalletSchema,
 } from "../schemas";
 
+const SUMMARY_CACHE_TTL_MS = 15_000;
+const AGGREGATE_CACHE_TTL_MS = 10_000;
+const WALLET_BALANCE_CACHE_TTL_MS = 10_000;
+
+interface CacheEntry<T> {
+  expiresAt: number;
+  value: T;
+}
+
+interface WalletSummaryConfigRow {
+  id: string;
+}
+
+interface WalletSummaryRow {
+  id: string;
+  custody_config_id: string;
+  wallet_id: string;
+  public_key: string;
+  label: string | null;
+  purpose: string | null;
+  status: string;
+  created_at: string;
+  provider: string;
+}
+
+const walletSummaryCache = new Map<string, CacheEntry<CustodyWalletSummary[]>>();
+const walletAggregateCache = new Map<string, CacheEntry<CustodyWalletAggregate>>();
+const walletBalanceCache = new Map<string, CacheEntry<CustodyWalletTokenBalance[]>>();
+
+function clearWalletCaches() {
+  walletSummaryCache.clear();
+  walletAggregateCache.clear();
+  walletBalanceCache.clear();
+}
+
+function readCache<T>(cache: Map<string, CacheEntry<T>>, key: string): T | null {
+  const entry = cache.get(key);
+  if (!entry) {
+    return null;
+  }
+
+  if (entry.expiresAt <= Date.now()) {
+    cache.delete(key);
+    return null;
+  }
+
+  return entry.value;
+}
+
+function writeCache<T>(cache: Map<string, CacheEntry<T>>, key: string, value: T, ttlMs: number): T {
+  cache.set(key, {
+    value,
+    expiresAt: Date.now() + ttlMs,
+  });
+
+  return value;
+}
+
+function logWalletStep(
+  c: AppContext,
+  route: "list_wallets" | "aggregate_wallets",
+  step: string,
+  startedAt: number,
+  extra: Record<string, unknown> = {}
+) {
+  console.info(
+    JSON.stringify({
+      event: "sdp_api_wallets_step",
+      timestamp: new Date().toISOString(),
+      requestId: c.get("requestId"),
+      traceId: c.get("traceId") ?? null,
+      route,
+      step,
+      durationMs: Number((performance.now() - startedAt).toFixed(1)),
+      ...extra,
+    })
+  );
+}
+
+async function resolveDefaultConfigId(
+  db: D1Database,
+  organizationId: string,
+  projectId?: string
+): Promise<string | null> {
+  if (projectId) {
+    const scopedDefault = await db
+      .prepare(
+        `SELECT default_custody_config_id
+         FROM custody_scope_defaults
+         WHERE organization_id = ? AND project_id = ?
+         LIMIT 1`
+      )
+      .bind(organizationId, projectId)
+      .first<{ default_custody_config_id: string }>();
+
+    if (scopedDefault?.default_custody_config_id) {
+      return scopedDefault.default_custody_config_id;
+    }
+  }
+
+  const orgDefault = await db
+    .prepare(
+      `SELECT default_custody_config_id
+       FROM custody_scope_defaults
+       WHERE organization_id = ? AND project_id IS NULL
+       LIMIT 1`
+    )
+    .bind(organizationId)
+    .first<{ default_custody_config_id: string }>();
+
+  return orgDefault?.default_custody_config_id ?? null;
+}
+
+async function resolveSummaryConfigIds(
+  c: AppContext,
+  filters: ReturnType<typeof resolveWalletFilters>
+): Promise<{ configIds: string[]; defaultConfigId: string | null }> {
+  const actor = resolveActor(c);
+  const defaultConfigId = await resolveDefaultConfigId(
+    c.env.DB,
+    actor.organizationId,
+    filters.projectId
+  );
+
+  if (filters.includeAllProviders) {
+    const includeAllProvidersQuery = filters.projectId
+      ? `SELECT id
+         FROM custody_configs
+         WHERE organization_id = ?
+           AND status = 'active'
+           AND (project_id = ? OR project_id IS NULL)
+           ${filters.provider ? "AND provider = ?" : ""}
+         ORDER BY updated_at DESC, id DESC`
+      : `SELECT id
+         FROM custody_configs
+         WHERE organization_id = ?
+           AND status = 'active'
+           AND project_id IS NULL
+           ${filters.provider ? "AND provider = ?" : ""}
+         ORDER BY updated_at DESC, id DESC`;
+
+    const rows = await c.env.DB.prepare(includeAllProvidersQuery)
+      .bind(
+        ...(filters.projectId
+          ? filters.provider
+            ? [actor.organizationId, filters.projectId, filters.provider]
+            : [actor.organizationId, filters.projectId]
+          : filters.provider
+            ? [actor.organizationId, filters.provider]
+            : [actor.organizationId])
+      )
+      .all<WalletSummaryConfigRow>();
+
+    return {
+      configIds: (rows.results ?? []).map((row) => row.id),
+      defaultConfigId,
+    };
+  }
+
+  if (filters.provider) {
+    const providerRow = filters.projectId
+      ? await c.env.DB.prepare(
+          `SELECT id
+           FROM custody_configs
+           WHERE organization_id = ?
+             AND status = 'active'
+             AND provider = ?
+             AND (project_id = ? OR project_id IS NULL)
+           ORDER BY CASE WHEN project_id = ? THEN 0 ELSE 1 END, updated_at DESC, id DESC
+           LIMIT 1`
+        )
+          .bind(actor.organizationId, filters.provider, filters.projectId, filters.projectId)
+          .first<WalletSummaryConfigRow>()
+      : await c.env.DB.prepare(
+          `SELECT id
+           FROM custody_configs
+           WHERE organization_id = ?
+             AND status = 'active'
+             AND provider = ?
+             AND project_id IS NULL
+           LIMIT 1`
+        )
+          .bind(actor.organizationId, filters.provider)
+          .first<WalletSummaryConfigRow>();
+
+    return {
+      configIds: providerRow?.id ? [providerRow.id] : [],
+      defaultConfigId,
+    };
+  }
+
+  return {
+    configIds: defaultConfigId ? [defaultConfigId] : [],
+    defaultConfigId,
+  };
+}
+
+async function queryWalletSummaries(
+  c: AppContext,
+  filters: ReturnType<typeof resolveWalletFilters>
+): Promise<CustodyWalletSummary[]> {
+  const auth = getAuth(c);
+  const { configIds, defaultConfigId } = await resolveSummaryConfigIds(c, filters);
+  if (configIds.length === 0) {
+    return [];
+  }
+
+  const allowedWalletIds = getAllowedApiKeyWalletIdsForPermissions(auth, ["wallets:read"]);
+  if (allowedWalletIds !== null && allowedWalletIds.length === 0) {
+    return [];
+  }
+  const configPlaceholders = configIds.map(() => "?").join(", ");
+  const allowedWalletClause =
+    allowedWalletIds !== null && allowedWalletIds.length > 0
+      ? `AND w.wallet_id IN (${allowedWalletIds.map(() => "?").join(", ")})`
+      : "";
+
+  const rows = await c.env.DB.prepare(
+    `SELECT
+       w.id,
+       w.custody_config_id,
+       w.wallet_id,
+       w.public_key,
+       w.label,
+       w.purpose,
+       w.status,
+       w.created_at,
+       c.provider
+     FROM custody_wallets w
+     JOIN custody_configs c ON c.id = w.custody_config_id
+     WHERE w.status = 'active'
+       AND c.status = 'active'
+       AND c.id IN (${configPlaceholders})
+       ${allowedWalletClause}
+     ORDER BY CASE WHEN c.id = ? THEN 0 ELSE 1 END, c.updated_at DESC, c.id DESC, w.created_at ASC`
+  )
+    .bind(...configIds, ...(allowedWalletIds ?? []), defaultConfigId ?? "")
+    .all<WalletSummaryRow>();
+
+  return (rows.results ?? []).map((row) => ({
+    id: row.id,
+    custodyConfigId: row.custody_config_id,
+    provider: row.provider as CustodyWalletSummary["provider"],
+    isDefaultProvider: row.custody_config_id === defaultConfigId,
+    walletId: row.wallet_id,
+    publicKey: row.public_key,
+    label: row.label,
+    purpose: row.purpose,
+    status: row.status as CustodyWalletSummary["status"],
+    createdAt: row.created_at,
+  }));
+}
+
+function buildWalletCacheKey(
+  c: AppContext,
+  filters: ReturnType<typeof resolveWalletFilters>,
+  kind: "summary" | "aggregate"
+): string {
+  const auth = getAuth(c);
+  const actor = resolveActor(c);
+  const allowedWalletIds = getAllowedApiKeyWalletIdsForPermissions(auth, ["wallets:read"]);
+
+  return JSON.stringify({
+    kind,
+    organizationId: actor.organizationId,
+    projectId: filters.projectId ?? null,
+    provider: filters.provider ?? null,
+    includeAllProviders: filters.includeAllProviders,
+    authType: auth.authType,
+    apiKeyId: auth.apiKeyId,
+    allowedWalletIds: allowedWalletIds ? [...allowedWalletIds].sort() : null,
+  });
+}
+
+async function getCachedWalletSummaries(
+  c: AppContext,
+  filters: ReturnType<typeof resolveWalletFilters>,
+  route: "list_wallets" | "aggregate_wallets"
+): Promise<CustodyWalletSummary[]> {
+  const cacheKey = buildWalletCacheKey(c, filters, "summary");
+  const cached = readCache(walletSummaryCache, cacheKey);
+  if (cached) {
+    logWalletStep(c, route, "wallet_summary_cache_hit", performance.now(), {
+      walletCount: cached.length,
+    });
+    return cached;
+  }
+
+  const startedAt = performance.now();
+  const wallets = await queryWalletSummaries(c, filters);
+  logWalletStep(c, route, "query_wallet_summaries", startedAt, {
+    walletCount: wallets.length,
+  });
+
+  return writeCache(walletSummaryCache, cacheKey, wallets, SUMMARY_CACHE_TTL_MS);
+}
+
 function resolveWalletFilters(
   c: AppContext,
   options: { defaultIncludeAllProviders?: boolean } = {}
@@ -42,6 +343,7 @@ function resolveWalletFilters(
   // biome-ignore lint/nursery/noSecrets: Query parameter name, not a secret.
   const includeAllProviders = c.req.query("includeAllProviders");
   const includeBalances = parseBooleanQueryParam(c.req.query("includeBalances"));
+  const view = c.req.query("view") === "summary" ? "summary" : "default";
 
   const provider =
     providerQuery && CUSTODY_PROVIDERS.includes(providerQuery as CustodyProvider)
@@ -55,34 +357,12 @@ function resolveWalletFilters(
   return {
     projectId,
     provider,
+    view,
     includeBalances,
     includeAllProviders:
       includeAllProviders === undefined
         ? options.defaultIncludeAllProviders === true
         : parseBooleanQueryParam(includeAllProviders),
-  };
-}
-
-async function getScopedWallets(
-  c: AppContext,
-  options: { defaultIncludeAllProviders?: boolean } = {}
-) {
-  const auth = getAuth(c);
-  const actor = resolveActor(c);
-  const filters = resolveWalletFilters(c, options);
-  const signingService = createSigningService(c.env);
-  const wallets = await signingService.getWalletsWithProviders(
-    actor.organizationId,
-    filters.projectId,
-    {
-      provider: filters.provider,
-      includeAllProviders: filters.includeAllProviders,
-    }
-  );
-
-  return {
-    wallets: filterApiKeyWallets(auth, wallets, ["wallets:read"]),
-    filters,
   };
 }
 
@@ -94,44 +374,60 @@ async function getBalancesByWalletId(
   const rpc = createRpc(c.env);
   const balancesByWalletId = await Promise.all(
     walletPublicKeys.map(async (wallet) => {
-      let lamports = 0n;
-      let splBalances: Awaited<ReturnType<typeof getSplTokenBalances>> = [];
+      const cachedBalances = readCache(walletBalanceCache, wallet.publicKey);
+      if (cachedBalances) {
+        return [wallet.walletId, cachedBalances] as const;
+      }
 
-      try {
-        const accountInfo = await getAccountInfo(rpc, wallet.publicKey as Address);
-        lamports = accountInfo?.lamports ?? 0n;
-      } catch (error) {
+      const [solBalanceResult, splBalancesResult] = await Promise.allSettled([
+        getAccountInfo(rpc, wallet.publicKey as Address),
+        getSplTokenBalances(rpc, wallet.publicKey as Address),
+      ]);
+      const lamports =
+        solBalanceResult.status === "fulfilled" ? (solBalanceResult.value?.lamports ?? 0n) : 0n;
+      const splBalances = splBalancesResult.status === "fulfilled" ? splBalancesResult.value : [];
+
+      if (solBalanceResult.status === "rejected") {
         // biome-ignore lint/nursery/noSecrets: Operational log message, not a secret.
         console.error("getBalancesByWalletId: failed to fetch SOL balance", {
           requestId: c.get("requestId"),
           walletId: wallet.walletId,
           publicKey: wallet.publicKey,
-          error: error instanceof Error ? error.message : String(error),
+          error:
+            solBalanceResult.reason instanceof Error
+              ? solBalanceResult.reason.message
+              : String(solBalanceResult.reason),
         });
       }
 
-      try {
-        splBalances = await getSplTokenBalances(rpc, wallet.publicKey as Address);
-      } catch (error) {
+      if (splBalancesResult.status === "rejected") {
         // biome-ignore lint/nursery/noSecrets: Operational log message, not a secret.
         console.error("getBalancesByWalletId: failed to fetch SPL balances", {
           requestId: c.get("requestId"),
           walletId: wallet.walletId,
           publicKey: wallet.publicKey,
-          error: error instanceof Error ? error.message : String(error),
+          error:
+            splBalancesResult.reason instanceof Error
+              ? splBalancesResult.reason.message
+              : String(splBalancesResult.reason),
         });
       }
 
-      const walletBalances: CustodyWalletTokenBalance[] = [
-        {
-          token: "SOL",
-          mint: SOL_MINT,
-          amount: lamports.toString(),
-          uiAmount: formatDecimalAmount(lamports, 9),
-          decimals: 9,
-        },
-        ...splBalances,
-      ];
+      const walletBalances = writeCache(
+        walletBalanceCache,
+        wallet.publicKey,
+        [
+          {
+            token: "SOL",
+            mint: SOL_MINT,
+            amount: lamports.toString(),
+            uiAmount: formatDecimalAmount(lamports, 9),
+            decimals: 9,
+          },
+          ...splBalances,
+        ],
+        WALLET_BALANCE_CACHE_TTL_MS
+      );
 
       return [wallet.walletId, walletBalances] as const;
     })
@@ -179,6 +475,8 @@ export const createWallet = async (c: AppContext) => {
         createdAt: wallet.createdAt,
       },
     };
+
+    clearWalletCaches();
 
     return created(c, response);
   } catch (error) {
@@ -230,6 +528,8 @@ export const deleteWallet = async (c: AppContext) => {
       walletId: parsed.data.walletId,
       deleted: true,
     };
+
+    clearWalletCaches();
 
     return success(c, response);
   } catch (error) {
@@ -302,6 +602,8 @@ export const setDefaultWallet = async (c: AppContext) => {
       projectId: projectId ?? null,
     },
   });
+
+  clearWalletCaches();
 
   return success(c, { defaultWalletId: parsed.data.walletId });
 };
@@ -381,11 +683,15 @@ export const updateWallet = async (c: AppContext) => {
     },
   };
 
+  clearWalletCaches();
+
   return success(c, response);
 };
 
 export const listWallets = async (c: AppContext) => {
-  const { wallets, filters } = await getScopedWallets(c);
+  const filters = resolveWalletFilters(c);
+  const wallets = await getCachedWalletSummaries(c, filters, "list_wallets");
+  const balancesStartedAt = performance.now();
   const balancesByWalletId = filters.includeBalances
     ? await getBalancesByWalletId(
         c,
@@ -395,6 +701,12 @@ export const listWallets = async (c: AppContext) => {
         }))
       )
     : new Map<string, CustodyWalletTokenBalance[]>();
+
+  if (filters.includeBalances) {
+    logWalletStep(c, "list_wallets", "fetch_wallet_balances", balancesStartedAt, {
+      walletCount: wallets.length,
+    });
+  }
 
   const response: CustodyWalletsResponse = {
     wallets: wallets.map((wallet) => ({
@@ -420,7 +732,20 @@ export const listWallets = async (c: AppContext) => {
 };
 
 export const getWalletAggregate = async (c: AppContext) => {
-  const { wallets } = await getScopedWallets(c, { defaultIncludeAllProviders: true });
+  const filters = resolveWalletFilters(c, { defaultIncludeAllProviders: true });
+  const aggregateCacheKey = buildWalletCacheKey(c, filters, "aggregate");
+  const cachedAggregate = readCache(walletAggregateCache, aggregateCacheKey);
+  if (cachedAggregate) {
+    logWalletStep(c, "aggregate_wallets", "aggregate_cache_hit", performance.now(), {
+      walletCount: cachedAggregate.walletCount,
+    });
+    return success(c, {
+      aggregate: cachedAggregate,
+    } satisfies CustodyWalletAggregateResponse);
+  }
+
+  const wallets = await getCachedWalletSummaries(c, filters, "aggregate_wallets");
+  const balancesStartedAt = performance.now();
   const balancesByWalletId = await getBalancesByWalletId(
     c,
     wallets.map((wallet) => ({
@@ -429,18 +754,33 @@ export const getWalletAggregate = async (c: AppContext) => {
     })),
     { includeUsdValues: false }
   );
+  logWalletStep(c, "aggregate_wallets", "fetch_wallet_balances", balancesStartedAt, {
+    walletCount: wallets.length,
+  });
+
+  const aggregateStartedAt = performance.now();
   const aggregatedBalances = await attachUsdValuesToBalances(
     c.env,
     aggregateTrackedWalletBalances(
       wallets.map((wallet) => balancesByWalletId.get(wallet.walletId) ?? [])
     )
   );
+  logWalletStep(c, "aggregate_wallets", "attach_usd_values", aggregateStartedAt, {
+    balanceCount: aggregatedBalances.length,
+  });
 
-  const response: CustodyWalletAggregateResponse = {
-    aggregate: {
+  const aggregate = writeCache(
+    walletAggregateCache,
+    aggregateCacheKey,
+    {
       walletCount: wallets.length,
       balances: aggregatedBalances,
     },
+    AGGREGATE_CACHE_TTL_MS
+  );
+
+  const response: CustodyWalletAggregateResponse = {
+    aggregate,
   };
 
   return success(c, response);
