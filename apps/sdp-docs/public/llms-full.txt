@@ -32,6 +32,7 @@
 
 ## Reference
 - [Issuance Token Types](https://platform.solana.com/docs/reference/issuance-token-types): Supported issuance templates and default controls.
+- [Postman Collection](https://platform.solana.com/docs/reference/postman-collection): Download the public SDP API Postman collection generated from the OpenAPI contract.
 - [API Reference](https://platform.solana.com/docs/reference/api): Endpoint index from the repository OpenAPI spec.
 - [Health](https://platform.solana.com/docs/reference/api/health): Service health and readiness endpoints.
 - [API Keys](https://platform.solana.com/docs/reference/api/api-keys): API key management endpoints.

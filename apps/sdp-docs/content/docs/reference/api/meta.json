@@ -1,0 +1,13 @@
+{
+  "title": "API",
+  "pages": [
+    "index",
+    "health",
+    "api-keys",
+    "wallets",
+    "projects",
+    "issuance",
+    "payments",
+    "compliance"
+  ]
+}

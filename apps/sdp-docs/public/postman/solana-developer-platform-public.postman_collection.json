@@ -1,0 +1,1290 @@
+{
+  "info": {
+    "name": "Solana Developer Platform Public API",
+    "description": "Public Postman collection generated from the SDP OpenAPI contract. Internal-only endpoint families are excluded.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{sdpApiKey}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "https://api.solana.com",
+      "type": "string"
+    },
+    {
+      "key": "sdpApiKey",
+      "value": "sk_test_your_api_key",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "Health check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/health",
+            "description": "Returns service health and build metadata."
+          }
+        },
+        {
+          "name": "Readiness check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/health/ready",
+            "description": "Performs readiness checks for downstream dependencies."
+          }
+        }
+      ]
+    },
+    {
+      "name": "API Keys",
+      "item": [
+        {
+          "name": "List API keys",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/api-keys",
+            "description": "Lists API keys for the authenticated organization."
+          }
+        },
+        {
+          "name": "Create API key",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/api-keys",
+            "description": "Creates a new API key. The full key is returned once.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Primary Key\",\n  \"description\": \"Used by backend service.\",\n  \"role\": \"api_developer\",\n  \"permissions\": [\n    \"tokens:read\",\n    \"tokens:write\"\n  ],\n  \"environment\": \"sandbox\",\n  \"walletScope\": \"selected\",\n  \"allowedIps\": [\n    \"203.0.113.0/24\"\n  ],\n  \"expiresAt\": \"2025-12-31T00:00:00.000Z\",\n  \"signingWalletId\": \"privy_wallet_123\",\n  \"signingWalletIds\": [\n    \"privy_wallet_123\",\n    \"dfns_wallet_456\"\n  ],\n  \"walletBindings\": [\n    {\n      \"walletId\": \"\",\n      \"permissions\": [\n        \"tokens:read\"\n      ]\n    }\n  ],\n  \"provisionWallet\": false,\n  \"walletLabel\": \"Mint authority wallet\",\n  \"walletPurpose\": \"mint_authority\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Get API key",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/api-keys/{{keyId}}",
+            "description": "Gets API key details by id."
+          }
+        },
+        {
+          "name": "Update API key",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/api-keys/{{keyId}}",
+            "description": "Updates API key attributes. Use null to clear optional fields.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Primary Key Updated\",\n  \"description\": \"Rotated key for new service.\",\n  \"walletScope\": \"all\",\n  \"allowedIps\": [\n    \"203.0.113.0/24\"\n  ],\n  \"expiresAt\": \"2026-01-01T00:00:00.000Z\",\n  \"permissions\": [\n    \"tokens:read\",\n    \"tokens:write\"\n  ],\n  \"signingWalletId\": \"privy_wallet_123\",\n  \"signingWalletIds\": [\n    \"privy_wallet_123\",\n    \"dfns_wallet_456\"\n  ],\n  \"walletBindings\": [\n    {\n      \"walletId\": \"\",\n      \"permissions\": [\n        \"tokens:read\"\n      ]\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Deactivate API key",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/api-keys/{{keyId}}",
+            "description": "Deactivates (soft deletes) an API key and invalidates it immediately.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"confirmation\": \"Primary Key\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Rotate API key",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/api-keys/{{keyId}}/rotate",
+            "description": "Rotates an API key and returns the new key plus the old key grace period.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"gracePeriodHours\": 24\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Wallets",
+      "item": [
+        {
+          "name": "Initialize wallet signing",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/wallets/initialize",
+            "description": "Initializes wallet signing for the organization or project by creating an active signing configuration.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"provider\": \"local\",\n  \"projectId\": \"\",\n  \"walletLabel\": \"\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Switch wallet signing provider",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/wallets/switch",
+            "description": "Ensures the target provider is active and sets it as the default signing provider for the requested scope. Existing on-chain authorities are not rotated.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"provider\": \"local\",\n  \"projectId\": \"\",\n  \"walletLabel\": \"\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "List wallets",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/wallets",
+            "description": "Lists wallets for the resolved default signing provider by default. Use provider/includeAllProviders to query across active providers."
+          }
+        },
+        {
+          "name": "Create wallet",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/wallets",
+            "description": "Provisions a new wallet for the resolved default signing provider configuration, or for an explicitly targeted provider.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"projectId\": \"prj_example\",\n  \"provider\": \"privy\",\n  \"label\": \"Mint authority wallet\",\n  \"purpose\": \"mint_authority\",\n  \"setDefault\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Delete wallet",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/wallets",
+            "description": "Deletes a wallet from the resolved default signing provider configuration, or from an explicitly targeted provider when that provider supports wallet deletion.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"projectId\": \"prj_example\",\n  \"provider\": \"anchorage\",\n  \"walletId\": \"anchorage_wallet_123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Set default wallet",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/wallets/default-wallet",
+            "description": "Sets the default wallet for the resolved default provider config, or for an explicitly targeted provider.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"projectId\": \"prj_example\",\n  \"provider\": \"privy\",\n  \"walletId\": \"privy_wallet_123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Get wallet signing config",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/wallets/config",
+            "description": "Returns the resolved default wallet signing configuration for the organization or project. Resolution is DB-backed only (no environment fallback)."
+          }
+        },
+        {
+          "name": "List wallet signing configs",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/wallets/configs",
+            "description": "Returns active wallet signing configurations for the requested scope plus the resolved default configuration ID."
+          }
+        },
+        {
+          "name": "Aggregate wallet balances",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/wallets/aggregate",
+            "description": "Aggregates tracked wallet balances for the requested scope. Defaults to aggregating across all active providers for the organization scope."
+          }
+        },
+        {
+          "name": "List switch provider options",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/wallets/switch-options",
+            "description": "Returns provider capability metadata, including active/default status for the requested scope."
+          }
+        },
+        {
+          "name": "Get wallet public key",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/wallets/public-key",
+            "description": "Returns the resolved wallet public key for transaction construction. Resolution is DB-backed only (no environment fallback)."
+          }
+        },
+        {
+          "name": "Check signer via memo transaction",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/wallets/signer-check",
+            "description": "Submits a memo transaction using the wallet bound to the authenticated API key. This endpoint requires API-key authentication.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"memo\": \"\",\n  \"walletId\": \"\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Get wallet by ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/wallets/{{walletId}}",
+            "description": "Returns wallet metadata, custody provider, public key, and current SOL balance for a specific wallet ID. This endpoint requires authenticated access."
+          }
+        },
+        {
+          "name": "Update wallet",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/wallets/{{walletId}}",
+            "description": "Updates editable wallet metadata such as the display label.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"label\": \"Treasury signer\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Projects",
+      "item": [
+        {
+          "name": "List projects",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/projects",
+            "description": "Lists projects in the organization."
+          }
+        },
+        {
+          "name": "Create project",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/projects",
+            "description": "Creates a project within the organization.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Payments\",\n  \"slug\": \"payments\",\n  \"description\": \"Project for payments workflows.\",\n  \"environment\": \"sandbox\",\n  \"settings\": {\n    \"rpcProvider\": \"default\",\n    \"webhookUrl\": \"https://example.com/webhook\",\n    \"metadata\": {\n      \"region\": \"us\"\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Get project",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/projects/{{projectId}}",
+            "description": "Gets project details."
+          }
+        },
+        {
+          "name": "Update project",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/projects/{{projectId}}",
+            "description": "Updates project attributes.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Payments Updated\",\n  \"description\": \"Updated project description.\",\n  \"environment\": \"production\",\n  \"settings\": {\n    \"rpcProvider\": \"custom\",\n    \"rpcEndpoint\": \"https://rpc.example.com\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Archive project",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/v1/projects/{{projectId}}",
+            "description": "Archives a project and prevents future writes."
+          }
+        },
+        {
+          "name": "List project members",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/projects/{{projectId}}/members",
+            "description": "Lists members assigned to the project."
+          }
+        },
+        {
+          "name": "Add project member",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/projects/{{projectId}}/members",
+            "description": "Adds an organization member to the project.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userId\": \"usr_example\",\n  \"role\": \"developer\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Update project member",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/projects/{{projectId}}/members/{{memberId}}",
+            "description": "Updates a project member role.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"role\": \"admin\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Remove project member",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/v1/projects/{{projectId}}/members/{{memberId}}",
+            "description": "Removes a member from the project."
+          }
+        },
+        {
+          "name": "List project API keys",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/projects/{{projectId}}/api-keys",
+            "description": "Lists API keys scoped to the project."
+          }
+        },
+        {
+          "name": "Create project API key",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/projects/{{projectId}}/api-keys",
+            "description": "Creates an API key scoped to the project. The full key is returned once.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Primary Key\",\n  \"description\": \"Used by backend service.\",\n  \"role\": \"api_developer\",\n  \"permissions\": [\n    \"tokens:read\",\n    \"tokens:write\"\n  ],\n  \"environment\": \"sandbox\",\n  \"walletScope\": \"selected\",\n  \"allowedIps\": [\n    \"203.0.113.0/24\"\n  ],\n  \"expiresAt\": \"2025-12-31T00:00:00.000Z\",\n  \"signingWalletId\": \"privy_wallet_123\",\n  \"signingWalletIds\": [\n    \"privy_wallet_123\",\n    \"dfns_wallet_456\"\n  ],\n  \"walletBindings\": [\n    {\n      \"walletId\": \"\",\n      \"permissions\": [\n        \"tokens:read\"\n      ]\n    }\n  ],\n  \"provisionWallet\": false,\n  \"walletLabel\": \"Mint authority wallet\",\n  \"walletPurpose\": \"mint_authority\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Issuance",
+      "item": [
+        {
+          "name": "List token templates",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/issuance/templates",
+            "description": "Returns all available token templates with their default configuration and supported extensions."
+          }
+        },
+        {
+          "name": "Get token template",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/issuance/templates/{{templateId}}",
+            "description": "Returns details for a specific token template including default decimals, required extensions, and available overrides."
+          }
+        },
+        {
+          "name": "List tokens",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/issuance/tokens",
+            "description": "Lists tokens for the current project or organization."
+          }
+        },
+        {
+          "name": "Create token",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/issuance/tokens",
+            "description": "Creates a token record that can later be deployed to Solana.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Example Token\",\n  \"symbol\": \"EXM\",\n  \"signingWalletId\": \"wal_example\",\n  \"decimals\": 6,\n  \"description\": \"Example token description.\",\n  \"uri\": \"https://example.com/metadata.json\",\n  \"imageUrl\": \"https://example.com/token.png\",\n  \"maxSupply\": \"1000000\",\n  \"template\": \"stablecoin\",\n  \"overrides\": {\n    \"extensions\": {\n      \"transferFee\": {\n        \"basisPoints\": 50,\n        \"maxFee\": \"0.5\"\n      }\n    }\n  },\n  \"requiresAllowlist\": true,\n  \"isMintable\": true,\n  \"isFreezable\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Get token",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}",
+            "description": "Gets token details."
+          }
+        },
+        {
+          "name": "Update token",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}",
+            "description": "Updates stored token fields. For deployed tokens, metadata fields are also written on-chain through the current metadata authority.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Example Token Updated\",\n  \"description\": \"Updated token description.\",\n  \"uri\": \"https://example.com/metadata.json\",\n  \"imageUrl\": \"https://example.com/token.png\",\n  \"status\": \"active\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Refresh cached token supply",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/supply/refresh",
+            "description": "Fetches the current on-chain supply and refreshes the cached totalSupply value."
+          }
+        },
+        {
+          "name": "List token transactions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/transactions",
+            "description": "Lists token transactions for an issued token."
+          }
+        },
+        {
+          "name": "Deploy token",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/deploy",
+            "description": "Deploys the token to Solana using custody signing."
+          }
+        },
+        {
+          "name": "Prepare token deploy transaction",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/deploy/prepare",
+            "description": "Builds an unsigned deploy transaction for client-side signing."
+          }
+        },
+        {
+          "name": "Prepare mint transaction",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/mint/prepare",
+            "description": "Builds an unsigned mint transaction for client-side signing.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"signingWalletId\": \"wal_example\",\n  \"mint\": {\n    \"destination\": \"So11111111111111111111111111111111111111112\",\n    \"amount\": \"1000\",\n    \"memo\": \"Payout\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Execute mint",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/mint",
+            "description": "Mints tokens using custody signing and submission.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"signingWalletId\": \"wal_example\",\n  \"mint\": {\n    \"destination\": \"So11111111111111111111111111111111111111112\",\n    \"amount\": \"1000\",\n    \"memo\": \"Payout\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Prepare burn transaction",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/burn/prepare",
+            "description": "Builds an unsigned burn transaction for client-side signing.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"signingWalletId\": \"wal_example\",\n  \"burn\": {\n    \"source\": \"So11111111111111111111111111111111111111112\",\n    \"amount\": \"1000\",\n    \"memo\": \"Correction\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Execute burn",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/burn",
+            "description": "Burns tokens using custody signing and submission.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"signingWalletId\": \"wal_example\",\n  \"burn\": {\n    \"source\": \"So11111111111111111111111111111111111111112\",\n    \"amount\": \"1000\",\n    \"memo\": \"Correction\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Prepare seize transaction",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/seize/prepare",
+            "description": "Builds an unsigned force transfer transaction for client-side signing.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"signingWalletId\": \"wal_example\",\n  \"seize\": {\n    \"source\": \"So11111111111111111111111111111111111111112\",\n    \"destination\": \"So11111111111111111111111111111111111111112\",\n    \"amount\": \"250\",\n    \"delegateAuthority\": \"So11111111111111111111111111111111111111112\",\n    \"memo\": \"Compliance seizure\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Execute seize",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/seize",
+            "description": "Forces a transfer using permanent delegate authority.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"signingWalletId\": \"wal_example\",\n  \"seize\": {\n    \"source\": \"So11111111111111111111111111111111111111112\",\n    \"destination\": \"So11111111111111111111111111111111111111112\",\n    \"amount\": \"250\",\n    \"delegateAuthority\": \"So11111111111111111111111111111111111111112\",\n    \"memo\": \"Compliance seizure\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Prepare force burn transaction",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/force-burn/prepare",
+            "description": "Builds an unsigned force burn transaction for client-side signing.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"signingWalletId\": \"wal_example\",\n  \"forceBurn\": {\n    \"source\": \"So11111111111111111111111111111111111111112\",\n    \"amount\": \"250\",\n    \"delegateAuthority\": \"So11111111111111111111111111111111111111112\",\n    \"memo\": \"Compliance burn\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Execute force burn",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/force-burn",
+            "description": "Burns tokens using permanent delegate authority.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"signingWalletId\": \"wal_example\",\n  \"forceBurn\": {\n    \"source\": \"So11111111111111111111111111111111111111112\",\n    \"amount\": \"250\",\n    \"delegateAuthority\": \"So11111111111111111111111111111111111111112\",\n    \"memo\": \"Compliance burn\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Prepare authority update",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/authority/prepare",
+            "description": "Builds an unsigned authority update transaction for client-side signing.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"signingWalletId\": \"wal_example\",\n  \"authority\": {\n    \"role\": \"mint\",\n    \"newAuthority\": \"So11111111111111111111111111111111111111112\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Execute authority update",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/authority",
+            "description": "Updates token authorities using custody signing.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"signingWalletId\": \"wal_example\",\n  \"authority\": {\n    \"role\": \"mint\",\n    \"newAuthority\": \"So11111111111111111111111111111111111111112\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Pause token transfers",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/pause",
+            "description": "Pauses transfers for a token using the pause authority.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Unpause token transfers",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/unpause",
+            "description": "Resumes transfers for a token using the pause authority.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Freeze account",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/freeze",
+            "description": "Freezes a token account to prevent transfers.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"accountAddress\": \"So11111111111111111111111111111111111111112\",\n  \"reason\": \"Compliance hold\",\n  \"signingWalletId\": \"privy_abcd1234\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Unfreeze account",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/unfreeze",
+            "description": "Unfreezes a token account so it can be used again.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"accountAddress\": \"So11111111111111111111111111111111111111112\",\n  \"signingWalletId\": \"privy_abcd1234\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "List frozen accounts",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/frozen",
+            "description": "Lists frozen accounts for a token."
+          }
+        },
+        {
+          "name": "List token allowlist",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/allowlist",
+            "description": "Lists allowlist entries for a token."
+          }
+        },
+        {
+          "name": "Add token allowlist entry",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/allowlist",
+            "description": "Adds an allowlist entry for a token.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"address\": \"So11111111111111111111111111111111111111112\",\n  \"label\": \"Treasury\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Remove token allowlist entry",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/allowlist/{{entryId}}",
+            "description": "Removes an allowlist entry from a token."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Payments",
+      "item": [
+        {
+          "name": "Get wallet balances",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/payments/wallets/{{walletId}}/balances",
+            "description": "Retrieves balances for a custody wallet. Wallet lifecycle and provisioning are managed through /v1/custody/wallets."
+          }
+        },
+        {
+          "name": "Get wallet policy",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/payments/wallets/{{walletId}}/policies",
+            "description": "Retrieves payment policy rules for a custody wallet. Policies are payment controls layered on top of custody-managed wallets."
+          }
+        },
+        {
+          "name": "Update wallet policy",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/payments/wallets/{{walletId}}/policies",
+            "description": "Updates payment policy rules for a custody wallet. Wallet provisioning and default selection remain in /v1/custody.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"destinationAllowlist\": [\n    \"So11111111111111111111111111111111111111112\"\n  ],\n  \"maxTransferAmount\": \"100.00\",\n  \"maxDailyAmount\": \"100.00\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Prepare transfer (unsigned)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/payments/transfers/prepare",
+            "description": "Builds an unsigned transfer transaction for a custody wallet. The source walletId must reference a wallet from /v1/custody/wallets.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"projectId\": \"prj_example\",\n  \"source\": \"wal_example\",\n  \"destination\": \"So11111111111111111111111111111111111111112\",\n  \"token\": \"\",\n  \"amount\": \"100.00\",\n  \"memo\": \"\",\n  \"referenceAddress\": \"So11111111111111111111111111111111111111112\",\n  \"options\": {\n    \"priorityFee\": \"auto\",\n    \"simulate\": true\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "List transfers",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/payments/transfers",
+            "description": "Lists payment transfers for the authenticated organization or project scope."
+          }
+        },
+        {
+          "name": "Execute transfer (custody)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/payments/transfers",
+            "description": "Executes a transfer using server-side custody signing. The source walletId must reference a wallet from /v1/custody/wallets.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"projectId\": \"prj_example\",\n  \"source\": \"wal_example\",\n  \"destination\": \"So11111111111111111111111111111111111111112\",\n  \"token\": \"\",\n  \"amount\": \"100.00\",\n  \"memo\": \"\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Get transfer",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/payments/transfers/{{transferId}}",
+            "description": "Retrieves details for a specific transfer."
+          }
+        },
+        {
+          "name": "Execute on-ramp",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/payments/ramps/onramp/execute",
+            "description": "Creates a fiat-to-crypto on-ramp session through the selected provider.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"provider\": \"moonpay\",\n  \"destinationWallet\": \"\",\n  \"cryptoToken\": \"USDC\",\n  \"fiatCurrency\": \"USD\",\n  \"fiatAmount\": \"100.00\",\n  \"kycReference\": \"\",\n  \"redirectUrl\": \"https://example.com\",\n  \"bvnkCompliance\": {\n    \"partyDetails\": [\n      {}\n    ]\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Execute off-ramp",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/payments/ramps/offramp/execute",
+            "description": "Creates a crypto-to-fiat off-ramp session through the selected provider.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"provider\": \"moonpay\",\n  \"sourceWallet\": \"\",\n  \"cryptoToken\": \"USDC\",\n  \"fiatCurrency\": \"USD\",\n  \"cryptoAmount\": \"50.00\",\n  \"kycReference\": \"\",\n  \"redirectUrl\": \"https://example.com\",\n  \"bvnkCompliance\": {\n    \"partyDetails\": [\n      {}\n    ]\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Compliance",
+      "item": [
+        {
+          "name": "Screen an address across configured compliance providers",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/compliance/address-screenings",
+            "description": "Runs address screening against configured compliance providers and returns provider-level risk scores.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"address\": \"8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ\",\n  \"network\": \"solana\",\n  \"intent\": \"transfer_destination\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

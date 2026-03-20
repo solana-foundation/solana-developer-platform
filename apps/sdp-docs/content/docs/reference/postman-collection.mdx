@@ -1,0 +1,27 @@
+---
+title: Postman Collection
+description: Download the public SDP API Postman collection generated from the OpenAPI contract.
+---
+
+The Postman collection is generated from the same public OpenAPI contract that powers the API reference. It includes only end-user-facing API families:
+
+- Health
+- API Keys
+- Wallets
+- Projects
+- Issuance
+- Payments
+- Compliance
+
+Internal-only endpoint families such as `rpc`, `admin`, `onboarding`, `auth`, `organizations`, and `members` are intentionally excluded.
+
+<div>
+  <a href="/postman/collection.json" download>Download Postman collection</a>
+  {" · "}
+  <a href="/postman/collection.json">Open raw JSON</a>
+</div>
+
+When you import the collection into Postman, set:
+
+- `baseUrl` to the SDP API environment you want to target
+- `sdpApiKey` to your bearer API key

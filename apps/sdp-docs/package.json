@@ -10,7 +10,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
-    "generate:api": "pnpm -C ../sdp-api run openapi:generate && node scripts/generate-api-docs.mjs && pnpm exec biome check --write content/docs/meta.json content/docs/reference/api/meta.json",
+    "generate:api": "pnpm -C ../sdp-api run openapi:generate && node scripts/generate-api-docs.mjs && node scripts/generate-postman-collection.mjs && pnpm exec biome check --write content/docs/meta.json content/docs/reference/api/meta.json",
     "generate:ai": "tsx scripts/generate-ai-resources.ts",
     "generate:source": "node scripts/generate-source.mjs",
     "check:links": "tsx scripts/check-links.ts",
