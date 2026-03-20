@@ -3,6 +3,7 @@ import {
   type Permission,
   getPermissionsForOrgRole,
   hasPermission,
+  normalizeOrganizationRole,
 } from "@sdp/types";
 
 export interface DashboardCapabilities {
@@ -20,13 +21,7 @@ export interface DashboardAccess {
 }
 
 export function mapClerkRoleToDashboardRole(role: string | null | undefined): OrganizationRole {
-  if (role === "org:owner") {
-    return "owner";
-  }
-  if (role === "org:admin") {
-    return "admin";
-  }
-  return "developer";
+  return normalizeOrganizationRole(role);
 }
 
 export function resolveDashboardAccess(role: string | null | undefined): DashboardAccess {

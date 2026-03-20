@@ -242,7 +242,7 @@ export const createApiKeyRequestSchema = apiKeyCreateSchemaBase
       example: "2025-12-31T00:00:00.000Z",
     }),
     permissions: apiKeyCreateSchemaBase.shape.permissions.openapi({
-      description: "Optional explicit permission set. Requires owner-level access.",
+      description: "Optional explicit permission set. Requires admin access.",
       example: ["tokens:read", "tokens:write"],
     }),
     signingWalletId: apiKeyCreateSchemaBase.shape.signingWalletId.openapi({

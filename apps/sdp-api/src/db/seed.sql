@@ -16,9 +16,9 @@ INSERT INTO users (id, email, email_verified, name, status) VALUES
 INSERT INTO organizations (id, name, slug, tier, status) VALUES
     ('org_test123456789', 'Test Organization', 'test-org', 'free', 'active');
 
--- Link user to organization as owner
+-- Link user to organization as admin
 INSERT INTO organization_members (id, organization_id, user_id, role, status) VALUES
-    ('mem_test123456789', 'org_test123456789', 'usr_test123456789', 'owner', 'active');
+    ('mem_test123456789', 'org_test123456789', 'usr_test123456789', 'admin', 'active');
 
 -- Create a test API key
 -- Note: This is the hash of "sk_test_abcdefghijklmnopqrstuvwxyz123456"

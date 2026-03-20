@@ -5,7 +5,7 @@
  * and sets a Clerk auth context for downstream handlers.
  */
 
-import { type OrganizationRole, mapClerkRoleToOrgRole } from "@/lib/clerk-role";
+import { mapClerkRoleToOrgRole } from "@/lib/clerk-role";
 import {
   type ClerkJwtPayload,
   extractBearerToken,
@@ -14,7 +14,11 @@ import {
 } from "@/lib/clerk-token";
 import { AppError, unauthorized } from "@/lib/errors";
 import type { Env } from "@/types/env";
-import { getPermissionsForOrgRole } from "@sdp/types";
+import {
+  type OrganizationRole,
+  getPermissionsForOrgRole,
+  normalizeOrganizationRole,
+} from "@sdp/types";
 import type { Context, Next } from "hono";
 
 async function resolveClerkUser(db: D1Database, clerkUserId: string) {
@@ -104,7 +108,18 @@ async function ensureMembership(
 ): Promise<OrganizationRole> {
   const existing = await resolveOrgRole(db, params.userId, params.organizationId);
   if (existing?.role) {
-    return existing.role as OrganizationRole;
+    const normalizedRole = normalizeOrganizationRole(existing.role);
+    if (normalizedRole !== existing.role) {
+      await db
+        .prepare(
+          `UPDATE organization_members
+           SET role = ?
+           WHERE user_id = ? AND organization_id = ? AND status = 'active'`
+        )
+        .bind(normalizedRole, params.userId, params.organizationId)
+        .run();
+    }
+    return normalizedRole;
   }
 
   const pendingInvite = await db
@@ -122,7 +137,13 @@ async function ensureMembership(
 
   if (pendingInvite) {
     if (new Date(pendingInvite.expires_at) >= new Date()) {
-      role = pendingInvite.role as OrganizationRole;
+      role = normalizeOrganizationRole(pendingInvite.role);
+      if (role !== pendingInvite.role) {
+        await db
+          .prepare("UPDATE invitations SET role = ? WHERE id = ?")
+          .bind(role, pendingInvite.id)
+          .run();
+      }
     } else {
       await db
         .prepare("UPDATE invitations SET status = 'expired' WHERE id = ?")
@@ -147,11 +168,11 @@ async function ensureMembership(
   } catch {
     const existingAfterInsert = await resolveOrgRole(db, params.userId, params.organizationId);
     if (existingAfterInsert?.role) {
-      return existingAfterInsert.role as OrganizationRole;
+      return normalizeOrganizationRole(existingAfterInsert.role);
     }
   }
 
-  if (pendingInvite && role === (pendingInvite.role as OrganizationRole)) {
+  if (pendingInvite && role === normalizeOrganizationRole(pendingInvite.role)) {
     await db
       .prepare(
         "UPDATE invitations SET status = 'accepted', accepted_at = datetime('now') WHERE id = ?"

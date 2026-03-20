@@ -24,6 +24,6 @@ export const TEST_MEMBER = {
   id: "mem_test123456789",
   organizationId: TEST_ORG.id,
   userId: TEST_USER.id,
-  role: "owner" as const,
+  role: "admin" as const,
   status: "active" as const,
 };
