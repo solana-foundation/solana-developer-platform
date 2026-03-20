@@ -8,6 +8,8 @@ import { X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useState, useTransition } from "react";
 import { toast } from "sonner";
+import useSWR from "swr";
+import { fetchWallets } from "../payments/payments-workspace.data";
 import { type CreateIssuanceTokenResult, createIssuanceTokenAction } from "./actions";
 import { CreateTokenFeaturesStep } from "./create-token-features-step";
 import { CreateTokenIdentityStep } from "./create-token-identity-step";
@@ -34,6 +36,7 @@ interface CreateIssuanceTokenModalProps {
   triggerClassName?: string;
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: modal flow intentionally coordinates multi-step issuance creation in one component.
 export function CreateIssuanceTokenModal({
   signerWallets = [],
   signerWalletsError = null,
@@ -67,6 +70,26 @@ export function CreateIssuanceTokenModal({
   };
   const isIdentityStep = flow.kind === "creation" && flow.step === "identity";
   const isFeaturesStep = flow.kind === "creation" && flow.step === "features";
+  const shouldLoadSignerWallets = isOpen && isFeaturesStep;
+  const hasServerWalletSnapshot = signerWallets.length > 0 || signerWalletsError !== null;
+  const { data: liveSignerWalletsData, error: liveSignerWalletsError } = useSWR(
+    shouldLoadSignerWallets ? "issuance-create-token-signer-wallets" : null,
+    () => fetchWallets(),
+    {
+      fallbackData: hasServerWalletSnapshot ? signerWallets : undefined,
+      revalidateOnFocus: false,
+      revalidateIfStale: false,
+    }
+  );
+  const liveSignerWallets = liveSignerWalletsData ?? signerWallets;
+  const signerWalletsLoading = shouldLoadSignerWallets && liveSignerWalletsData === undefined;
+  const resolvedSignerWalletsError = liveSignerWalletsError
+    ? liveSignerWalletsError instanceof Error
+      ? liveSignerWalletsError.message
+      : "Unable to load signer wallets."
+    : liveSignerWalletsData === undefined
+      ? signerWalletsError
+      : null;
   const selectedAccessControlAvailable =
     template && flow.kind === "creation"
       ? getAccessControlAvailability(template, draft.accessControlMode).available
@@ -238,8 +261,9 @@ export function CreateIssuanceTokenModal({
                   <CreateTokenFeaturesStep
                     template={template}
                     draft={draft}
-                    signerWallets={signerWallets}
-                    signerWalletsError={signerWalletsError}
+                    signerWallets={liveSignerWallets}
+                    signerWalletsLoading={signerWalletsLoading}
+                    signerWalletsError={resolvedSignerWalletsError}
                     submitState={submitState}
                     isPending={isPending}
                     canSubmit={canSubmit}

@@ -163,6 +163,14 @@ const custodyWalletTokenBalanceSchema = z
       description: "Token decimals.",
       example: 6,
     }),
+    usdPrice: z.number().optional().openapi({
+      description: "Resolved USD price per token when available.",
+      example: 1,
+    }),
+    usdValue: z.number().optional().openapi({
+      description: "Resolved USD value of this balance when pricing is available.",
+      example: 125.5,
+    }),
   })
   .openapi({ description: "Tracked fungible token balance." });
 

@@ -15,6 +15,7 @@ import { AppError } from "@/lib/errors";
 import { corsMiddleware } from "@/middleware/cors";
 import { skipRateLimitPaths } from "@/middleware/rate-limit";
 import { requestIdMiddleware } from "@/middleware/request-id";
+import { requestTracingMiddleware } from "@/middleware/request-tracing";
 import type { Env } from "@/types/env";
 
 import allowlist from "@/routes/allowlist";
@@ -79,10 +80,14 @@ function captureUnexpectedError(err: Error, c: Context<{ Bindings: Env }>): void
   }
 
   const requestId = c.get("requestId");
+  const traceId = c.get("traceId");
+  const requestSource = c.get("requestSource");
   const path = new URL(c.req.url).pathname;
 
   Sentry.withScope((scope) => {
     scope.setTag("request_id", requestId);
+    scope.setTag("trace_id", traceId);
+    scope.setTag("request_source", requestSource);
     scope.setTag("http_method", c.req.method);
     scope.setTag("http_path", path);
 
@@ -120,6 +125,9 @@ function captureUnexpectedError(err: Error, c: Context<{ Bindings: Env }>): void
 
 // Request ID for tracing
 app.use("*", requestIdMiddleware());
+
+// Request trace + duration logging
+app.use("*", requestTracingMiddleware());
 
 // Security headers
 app.use("*", secureHeaders());
@@ -191,8 +199,11 @@ app.get("/", (c) => c.redirect("/health"));
 
 app.onError((err, c) => {
   const requestId = c.get("requestId");
+  const traceId = c.get("traceId");
+  const requestSource = c.get("requestSource");
 
   if (err instanceof AppError) {
+    c.header("X-SDP-Trace-ID", traceId);
     return c.json(
       {
         error: {
@@ -209,11 +220,14 @@ app.onError((err, c) => {
   // Log unexpected errors
   console.error("Unexpected error:", {
     requestId,
+    traceId,
+    source: requestSource,
     error: err.message,
     stack: err.stack,
   });
   captureUnexpectedError(err, c);
 
+  c.header("X-SDP-Trace-ID", traceId);
   return c.json(
     {
       error: {

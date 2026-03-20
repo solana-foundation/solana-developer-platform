@@ -13,6 +13,7 @@ import {
 import { linkOrganization } from "@/app/onboarding/actions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { createTimedTrace } from "@/lib/request-tracing";
 import { type SdpApiClient, createSdpApiClient } from "@/lib/sdp-api";
 import { auth, clerkClient } from "@clerk/nextjs/server";
 import type { CustodyConfigSummary, CustodyWalletSummary } from "@sdp/types";
@@ -137,52 +138,79 @@ export default async function CustodyPage() {
     redirect("/dashboard");
   }
 
-  const apiClient = await createSdpApiClient();
-  const onboarding = await apiClient.fetch<{ linked: boolean }>("/v1/onboarding/status");
+  const trace = createTimedTrace("dashboard.custody.page");
 
-  if (!onboarding.linked) {
+  try {
+    const apiClient = await trace.step("create_sdp_api_client", () =>
+      createSdpApiClient(trace.childContext("dashboard.custody.api"))
+    );
+    const onboarding = await trace.step("fetch_onboarding_status", () =>
+      apiClient.fetch<{ linked: boolean }>("/v1/onboarding/status")
+    );
+
+    if (!onboarding.linked) {
+      trace.log({
+        ok: true,
+        linked: false,
+      });
+
+      return (
+        <Suspense fallback={<WalletsOnboardingSkeleton />}>
+          <OnboardingGateSection orgId={orgId} />
+        </Suspense>
+      );
+    }
+
+    const [configsResult, walletsResult, apiKeysResult] = await Promise.all([
+      trace.step("fetch_custody_configs", () => settle(getCustodyConfigs(apiClient.request))),
+      trace.step("fetch_custody_wallets", () => settle(getCustodyWallets(apiClient.request))),
+      trace.step("fetch_active_api_keys", () => fetchActiveApiKeys(apiClient.request)),
+    ]);
+
+    const connectedProviders: KnownCustodyProvider[] = configsResult.ok
+      ? configsResult.value.configs
+          .filter((config) => config.status === "active")
+          .map((config) => config.provider)
+          .filter(isKnownCustodyProvider)
+      : [];
+
+    const configsError = configsResult.ok
+      ? null
+      : configsResult.error instanceof Error
+        ? configsResult.error.message
+        : "Unable to load wallet providers";
+    const walletsError = walletsResult.ok
+      ? null
+      : walletsResult.error instanceof Error
+        ? walletsResult.error.message
+        : "Unable to load wallets";
+    const apiKeys = apiKeysResult.ok ? (apiKeysResult.data ?? []) : [];
+
+    trace.log({
+      ok: true,
+      linked: true,
+      connectedProviderCount: connectedProviders.length,
+      walletCount: walletsResult.ok ? walletsResult.value.length : 0,
+      apiKeyCount: apiKeys.length,
+    });
+
     return (
-      <Suspense fallback={<WalletsOnboardingSkeleton />}>
-        <OnboardingGateSection orgId={orgId} />
+      <Suspense fallback={<WalletsPageSkeleton />}>
+        <WalletsWorkspace
+          apiBaseUrl={resolvePlaygroundApiBaseUrl()}
+          apiKeys={apiKeys}
+          connectedProviders={connectedProviders}
+          configsError={configsError}
+          wallets={walletsResult.ok ? walletsResult.value : []}
+          walletsError={walletsError}
+        />
       </Suspense>
     );
+  } catch (error) {
+    trace.log({
+      ok: false,
+      error: error instanceof Error ? error.message : "Unknown error",
+    });
+    throw error;
   }
-
-  const [configsResult, walletsResult, apiKeysResult] = await Promise.all([
-    settle(getCustodyConfigs(apiClient.request)),
-    settle(getCustodyWallets(apiClient.request)),
-    fetchActiveApiKeys(apiClient.request),
-  ]);
-
-  const connectedProviders: KnownCustodyProvider[] = configsResult.ok
-    ? configsResult.value.configs
-        .filter((config) => config.status === "active")
-        .map((config) => config.provider)
-        .filter(isKnownCustodyProvider)
-    : [];
-
-  const configsError = configsResult.ok
-    ? null
-    : configsResult.error instanceof Error
-      ? configsResult.error.message
-      : "Unable to load wallet providers";
-  const walletsError = walletsResult.ok
-    ? null
-    : walletsResult.error instanceof Error
-      ? walletsResult.error.message
-      : "Unable to load wallets";
-  const apiKeys = apiKeysResult.ok ? (apiKeysResult.data ?? []) : [];
-
-  return (
-    <Suspense fallback={<WalletsPageSkeleton />}>
-      <WalletsWorkspace
-        apiBaseUrl={resolvePlaygroundApiBaseUrl()}
-        apiKeys={apiKeys}
-        connectedProviders={connectedProviders}
-        configsError={configsError}
-        wallets={walletsResult.ok ? walletsResult.value : []}
-        walletsError={walletsError}
-      />
-    </Suspense>
-  );
 }

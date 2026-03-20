@@ -3,6 +3,7 @@ import {
   type KnownCustodyProvider,
   isKnownCustodyProvider,
 } from "@/app/dashboard/custody/provider-catalog";
+import { createTimedTrace, logRouteResult } from "@/lib/request-tracing";
 import { createSdpApiClient } from "@/lib/sdp-api";
 import { NextResponse } from "next/server";
 
@@ -33,30 +34,54 @@ function formatProviderHint(providerLabels: string[]): string {
   return `${head}, or ${tail}`;
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  const trace = createTimedTrace("route.dashboard.wallets.quick_action_status", request);
+
   try {
-    const apiClient = await createSdpApiClient();
+    const apiClient = await createSdpApiClient(
+      trace.childContext("route.dashboard.wallets.quick_action_status.api")
+    );
     const [onboarding, configsResponse] = await Promise.all([
       apiClient.fetch<OnboardingStatusResponse>("/v1/onboarding/status"),
       apiClient.request("/v1/wallets/configs"),
     ]);
 
     if (!onboarding.linked) {
-      return NextResponse.json({
-        custodyEnabled: false,
-        walletProvisioningEnabled: false,
-        walletProvisioningReason: "Enable wallets first in the custody providers section.",
-        walletProvisioningProviders: [] as KnownCustodyProvider[],
-      });
+      const response = NextResponse.json(
+        {
+          custodyEnabled: false,
+          walletProvisioningEnabled: false,
+          walletProvisioningReason: "Enable wallets first in the custody providers section.",
+          walletProvisioningProviders: [] as KnownCustodyProvider[],
+        },
+        {
+          headers: {
+            "X-SDP-Trace-ID": trace.traceId,
+            "Server-Timing": trace.serverTiming(),
+          },
+        }
+      );
+      logRouteResult(trace, 200, { linked: false });
+      return response;
     }
 
     if (configsResponse.status === 404) {
-      return NextResponse.json({
-        custodyEnabled: false,
-        walletProvisioningEnabled: false,
-        walletProvisioningReason: "Enable wallets first in the custody providers section.",
-        walletProvisioningProviders: [] as KnownCustodyProvider[],
-      });
+      const response = NextResponse.json(
+        {
+          custodyEnabled: false,
+          walletProvisioningEnabled: false,
+          walletProvisioningReason: "Enable wallets first in the custody providers section.",
+          walletProvisioningProviders: [] as KnownCustodyProvider[],
+        },
+        {
+          headers: {
+            "X-SDP-Trace-ID": trace.traceId,
+            "Server-Timing": trace.serverTiming(),
+          },
+        }
+      );
+      logRouteResult(trace, 200, { configsMissing: true });
+      return response;
     }
 
     if (!configsResponse.ok) {
@@ -86,19 +111,44 @@ export async function GET() {
         ? `Connect ${formatProviderHint(additionalWalletProviderLabels)} to create additional wallets.`
         : "Enable wallets first in the custody providers section.";
 
-    return NextResponse.json({
+    const response = NextResponse.json(
+      {
+        custodyEnabled,
+        walletProvisioningEnabled,
+        walletProvisioningReason,
+        walletProvisioningProviders,
+      },
+      {
+        headers: {
+          "X-SDP-Trace-ID": trace.traceId,
+          "Server-Timing": trace.serverTiming(),
+        },
+      }
+    );
+    logRouteResult(trace, 200, {
       custodyEnabled,
       walletProvisioningEnabled,
-      walletProvisioningReason,
-      walletProvisioningProviders,
+      providerCount: walletProvisioningProviders.length,
     });
+    return response;
   } catch (error) {
-    return NextResponse.json(
+    const response = NextResponse.json(
       {
         error:
           error instanceof Error ? error.message : "Failed to resolve wallet quick action status",
       },
-      { status: 500 }
+      {
+        status: 500,
+        headers: {
+          "X-SDP-Trace-ID": trace.traceId,
+          "Server-Timing": trace.serverTiming(),
+        },
+      }
     );
+    logRouteResult(trace, 500, {
+      error:
+        error instanceof Error ? error.message : "Failed to resolve wallet quick action status",
+    });
+    return response;
   }
 }

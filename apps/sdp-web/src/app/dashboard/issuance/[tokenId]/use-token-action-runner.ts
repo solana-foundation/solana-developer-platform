@@ -33,6 +33,7 @@ export function useTokenActionRunner() {
       if (result.ok) {
         setActionConfirmation(null);
         toast.success(successToast, { id: toastId });
+        await options.onSuccess?.(result);
         router.refresh();
         return result;
       }
@@ -56,6 +57,7 @@ export function useTokenActionRunner() {
           confirmButtonLabel: options.confirmButtonLabel ?? "Go ahead",
           submitToast: options.submitToast ?? `Submitting ${input.label.toLowerCase()}...`,
           successToast: options.successToast ?? "Transaction finalized successfully.",
+          onSuccess: options.onSuccess,
         },
       });
       return;

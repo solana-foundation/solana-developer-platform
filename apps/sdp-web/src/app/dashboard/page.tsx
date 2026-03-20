@@ -1,22 +1,10 @@
+import { createTimedTrace } from "@/lib/request-tracing";
 import { createSdpApiClient } from "@/lib/sdp-api";
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
-import {
-  buildHomeActivityRows,
-  computeTodaysVolume,
-  fetchIssuanceTokens,
-  fetchOrgIssuanceActivity,
-} from "./home-page.data";
 import { HomeWorkspace } from "./home-workspace";
-import {
-  normalizeAggregateBalances,
-  resolveTotalBalance,
-} from "./payments/payments-overview.utils";
-import {
-  fetchPaymentTransfers,
-  fetchPaymentsAggregate,
-  fetchPaymentsWallets,
-} from "./payments/payments-page.data";
+import { resolveTotalBalance } from "./payments/payments-overview.utils";
+import { fetchPaymentsAggregate, fetchPaymentsWallets } from "./payments/payments-page.data";
 
 export default async function DashboardPage() {
   const { userId, orgId } = await auth();
@@ -27,58 +15,44 @@ export default async function DashboardPage() {
     return null;
   }
 
-  const apiClient = await createSdpApiClient();
-  const [aggregateResult, transfersResult, walletsResult, issuanceTokensResult] = await Promise.all(
-    [
-      fetchPaymentsAggregate(apiClient.request),
-      fetchPaymentTransfers(apiClient.request, 100),
-      fetchPaymentsWallets(apiClient.request, { includeBalances: false }),
-      fetchIssuanceTokens(apiClient.request, 10),
-    ]
-  );
+  const trace = createTimedTrace("dashboard.home.page");
 
-  const issuanceActivityResult =
-    issuanceTokensResult.ok && issuanceTokensResult.data
-      ? await fetchOrgIssuanceActivity(apiClient.request, issuanceTokensResult.data)
-      : { rows: [], error: null };
+  try {
+    const apiClient = await trace.step("create_sdp_api_client", () =>
+      createSdpApiClient(trace.childContext("dashboard.home.api"))
+    );
+    const [aggregateResult, walletsResult] = await Promise.all([
+      trace.step("fetch_payments_aggregate", () => fetchPaymentsAggregate(apiClient.request)),
+      trace.step("fetch_wallet_summaries", () =>
+        fetchPaymentsWallets(apiClient.request, { view: "summary" })
+      ),
+    ]);
 
-  const wallets = walletsResult.data ?? [];
-  const isWalletEmptyState = walletsResult.ok && wallets.length === 0;
-  const totalBalance = aggregateResult.data?.balances
-    ? resolveTotalBalance(normalizeAggregateBalances(aggregateResult.data.balances))
-    : null;
-  const todaysVolume = transfersResult.data ? computeTodaysVolume(transfersResult.data) : null;
-  const activityRows = buildHomeActivityRows(
-    transfersResult.data ?? [],
-    issuanceActivityResult.rows
-  );
+    const wallets = walletsResult.data ?? [];
+    const isWalletEmptyState = walletsResult.ok && wallets.length === 0;
+    const totalBalance = resolveTotalBalance(aggregateResult.data?.balances ?? []);
 
-  const aggregateError =
-    aggregateResult.ok || isWalletEmptyState ? null : "Balance data is unavailable right now.";
-  const transfersError =
-    transfersResult.ok || isWalletEmptyState ? null : "Payments activity is unavailable right now.";
-  const issuanceTokensError = issuanceTokensResult.ok
-    ? null
-    : "Issuance activity is unavailable right now.";
+    const aggregateError =
+      aggregateResult.ok || isWalletEmptyState ? null : "Balance data is unavailable right now.";
 
-  const activityError =
-    activityRows.length === 0
-      ? (transfersError ?? issuanceTokensError ?? issuanceActivityResult.error)
-      : null;
-  const activityNotice = [transfersError, issuanceTokensError, issuanceActivityResult.error]
-    .filter(Boolean)
-    .join(" ");
+    trace.log({
+      ok: true,
+      walletCount: wallets.length,
+      hasAggregate: Boolean(aggregateResult.data?.balances),
+    });
 
-  return (
-    <HomeWorkspace
-      totalBalance={totalBalance}
-      totalBalanceError={aggregateError}
-      todaysVolume={todaysVolume}
-      todaysVolumeError={transfersError}
-      activityRows={activityRows}
-      activityError={activityError}
-      activityNotice={activityNotice || null}
-      wallets={wallets}
-    />
-  );
+    return (
+      <HomeWorkspace
+        totalBalance={totalBalance}
+        totalBalanceError={aggregateError}
+        wallets={wallets}
+      />
+    );
+  } catch (error) {
+    trace.log({
+      ok: false,
+      error: error instanceof Error ? error.message : "Unknown error",
+    });
+    throw error;
+  }
 }

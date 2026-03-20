@@ -3,7 +3,7 @@ import path from "node:path";
 
 const DEFAULT_CLERK_TEST_ORG_NAME = "Solana";
 const DEFAULT_CLERK_TEST_EMAIL = "e2e-smoke+sdp-web@example.com";
-const BASE_URL = "http://localhost:3000";
+const BASE_URL = "http://localhost:3100";
 
 type E2EEnv = {
   baseURL: string;

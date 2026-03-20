@@ -2,8 +2,9 @@
 
 import { Button } from "@/components/ui/button";
 import { Loader2 } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { toast } from "sonner";
+import useSWR from "swr";
 import { TokenActionConfirmationDialog } from "./token-action-confirmation-dialog";
 import { TokenActionForms } from "./token-action-forms";
 import { TokenAuthorityModal } from "./token-authority-modal";
@@ -15,9 +16,15 @@ import {
 } from "./token-fund-management-section";
 import { TokenManagementHeader } from "./token-management-header";
 import { TokenManagementModalShell } from "./token-management-modal-shell";
+import {
+  type TokenManagementSupportingData,
+  fetchTokenManagementSupportingData,
+} from "./token-management-workspace.data";
 import type {
+  ActionExecutionInput,
   AdminAction,
   PermissionRow,
+  RunActionOptions,
   TokenManagementTab,
   TokenManagementWorkspaceProps,
 } from "./token-management-workspace.types";
@@ -32,6 +39,7 @@ import {
   createInitialMintForm,
   createInitialSeizeForm,
   getDefaultActionForTab,
+  getDisplayedAuthorityAddress,
   getExplorerHref,
   getExtensionRows,
   getPermissionRows,
@@ -94,33 +102,45 @@ const liveFundManagementRows: Array<{
   },
 ];
 
+function LoadingSection({ message }: { message: string }) {
+  return (
+    <div className="flex min-h-[180px] items-center justify-center rounded-2xl border border-[rgba(28,28,29,0.08)] bg-[rgba(28,28,29,0.02)] px-6 py-10">
+      <div className="flex items-center gap-3 text-sm text-[rgba(28,28,29,0.64)]">
+        <Loader2 className="size-4 animate-spin" />
+        <span>{message}</span>
+      </div>
+    </div>
+  );
+}
+
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: token management intentionally centralizes action orchestration and tab coordination in one workspace.
 export function TokenManagementWorkspace({
   token,
   tokenError,
-  authorityWallets,
-  authorityWalletsError,
-  transactions,
-  transactionsError,
-  transactionsTotal,
-  transactionsHasMore,
-  allowlistEntries,
-  allowlistError,
-  allowlistTotal,
-  allowlistHasMore,
-  frozenAccounts,
-  frozenAccountsError,
-  frozenAccountsTotal,
-  frozenAccountsHasMore,
+  authorityWallets: initialAuthorityWallets,
+  authorityWalletsError: initialAuthorityWalletsError,
+  transactions: initialTransactions,
+  transactionsError: initialTransactionsError,
+  transactionsTotal: initialTransactionsTotal,
+  transactionsHasMore: initialTransactionsHasMore,
+  allowlistEntries: initialAllowlistEntries,
+  allowlistError: initialAllowlistError,
+  allowlistTotal: initialAllowlistTotal,
+  allowlistHasMore: initialAllowlistHasMore,
+  frozenAccounts: initialFrozenAccounts,
+  frozenAccountsError: initialFrozenAccountsError,
+  frozenAccountsTotal: initialFrozenAccountsTotal,
+  frozenAccountsHasMore: initialFrozenAccountsHasMore,
 }: TokenManagementWorkspaceProps) {
   const {
     isPending,
     actionConfirmation,
-    runAction,
-    runActionImmediately,
+    runAction: runActionBase,
+    runActionImmediately: runActionImmediatelyBase,
     dismissActionConfirmation,
     confirmAction,
   } = useTokenActionRunner();
-  const [activeTab, setActiveTab] = useState<TokenManagementTab>("permissions");
+  const [activeTab, setActiveTab] = useState<TokenManagementTab>("overview");
   const [activeAction, setActiveAction] = useState<AdminAction | null>(null);
   const [authorityModalRow, setAuthorityModalRow] = useState<PermissionRow | null>(null);
   const [authorityModalCurrentAuthority, setAuthorityModalCurrentAuthority] = useState<
@@ -139,6 +159,109 @@ export function TokenManagementWorkspace({
   const [authorityForm, setAuthorityForm] = useState(createInitialAuthorityForm);
   const [freezeForm, setFreezeForm] = useState(createInitialFreezeForm);
   const [allowlistForm, setAllowlistForm] = useState(createInitialAllowlistForm);
+  const shouldLoadSupportingData = activeTab !== "overview";
+  const hasInitialSupportingData =
+    initialAuthorityWallets.length > 0 ||
+    initialTransactions.length > 0 ||
+    initialAllowlistEntries.length > 0 ||
+    initialFrozenAccounts.length > 0 ||
+    initialAuthorityWalletsError !== null ||
+    initialTransactionsError !== null ||
+    initialAllowlistError !== null ||
+    initialFrozenAccountsError !== null;
+  const initialSupportingData = useMemo<TokenManagementSupportingData>(
+    () => ({
+      authorityWallets: initialAuthorityWallets,
+      authorityWalletsError: initialAuthorityWalletsError,
+      transactions: initialTransactions,
+      transactionsError: initialTransactionsError,
+      transactionsTotal: initialTransactionsTotal,
+      transactionsHasMore: initialTransactionsHasMore,
+      allowlistEntries: initialAllowlistEntries,
+      allowlistError: initialAllowlistError,
+      allowlistTotal: initialAllowlistTotal,
+      allowlistHasMore: initialAllowlistHasMore,
+      frozenAccounts: initialFrozenAccounts,
+      frozenAccountsError: initialFrozenAccountsError,
+      frozenAccountsTotal: initialFrozenAccountsTotal,
+      frozenAccountsHasMore: initialFrozenAccountsHasMore,
+    }),
+    [
+      initialAllowlistEntries,
+      initialAllowlistError,
+      initialAllowlistHasMore,
+      initialAllowlistTotal,
+      initialAuthorityWallets,
+      initialAuthorityWalletsError,
+      initialFrozenAccounts,
+      initialFrozenAccountsError,
+      initialFrozenAccountsHasMore,
+      initialFrozenAccountsTotal,
+      initialTransactions,
+      initialTransactionsError,
+      initialTransactionsHasMore,
+      initialTransactionsTotal,
+    ]
+  );
+  const {
+    data: supportingData,
+    error: supportingDataRequestError,
+    mutate: mutateSupportingData,
+  } = useSWR(
+    shouldLoadSupportingData ? ["token-management-supporting-data", token.id] : null,
+    ([, tokenId]: readonly [string, string]) => fetchTokenManagementSupportingData(tokenId),
+    {
+      fallbackData: hasInitialSupportingData ? initialSupportingData : undefined,
+      refreshInterval: 60_000,
+      revalidateOnFocus: true,
+      revalidateIfStale: false,
+    }
+  );
+  const supportingDataError = supportingDataRequestError
+    ? supportingDataRequestError instanceof Error
+      ? supportingDataRequestError.message
+      : "Unable to load token management data."
+    : null;
+  const supportingDataLoading =
+    shouldLoadSupportingData && supportingData === undefined && !supportingDataError;
+  const resolvedSupportingData = supportingData ?? initialSupportingData;
+  const revalidateSupportingDataAfterSuccess = async () => {
+    if (!shouldLoadSupportingData) {
+      return;
+    }
+
+    await mutateSupportingData();
+  };
+  const runAction = (input: ActionExecutionInput, options: RunActionOptions = {}) =>
+    runActionBase(input, {
+      ...options,
+      onSuccess: async (result) => {
+        await options.onSuccess?.(result);
+        await revalidateSupportingDataAfterSuccess();
+      },
+    });
+  const runActionImmediately = (input: ActionExecutionInput, options: RunActionOptions = {}) =>
+    runActionImmediatelyBase(input, {
+      ...options,
+      onSuccess: async (result) => {
+        await options.onSuccess?.(result);
+        await revalidateSupportingDataAfterSuccess();
+      },
+    });
+  const authorityWallets = resolvedSupportingData.authorityWallets;
+  const authorityWalletsError = supportingDataError ?? resolvedSupportingData.authorityWalletsError;
+  const transactions = resolvedSupportingData.transactions;
+  const transactionsError = supportingDataError ?? resolvedSupportingData.transactionsError;
+  const transactionsTotal = resolvedSupportingData.transactionsTotal;
+  const transactionsHasMore = resolvedSupportingData.transactionsHasMore;
+  const allowlistEntries = resolvedSupportingData.allowlistEntries;
+  const allowlistError = supportingDataError ?? resolvedSupportingData.allowlistError;
+  const allowlistTotal = resolvedSupportingData.allowlistTotal;
+  const allowlistHasMore = resolvedSupportingData.allowlistHasMore;
+  const frozenAccounts = resolvedSupportingData.frozenAccounts;
+  const frozenAccountsError = supportingDataError ?? resolvedSupportingData.frozenAccountsError;
+  const frozenAccountsTotal = resolvedSupportingData.frozenAccountsTotal;
+  const frozenAccountsHasMore = resolvedSupportingData.frozenAccountsHasMore;
 
   const tokenBasePath = `/v1/issuance/tokens/${token.id}`;
   const explorerHref = getExplorerHref(token.mintAddress);
@@ -199,18 +322,37 @@ export function TokenManagementWorkspace({
       metadataAuthority,
     })
   );
-  const permissionRows = getPermissionRows(token, metadataAuthority).map((row) => ({
-    ...row,
-    editDisabledReason: withWalletLoadError(
-      getSignerSelectionForAction({
-        action: "authority",
-        token,
-        authorityWallets,
-        metadataAuthority,
-        permissionRow: row,
-      })
-    ).unavailableReason,
-  }));
+  const permissionRows = getPermissionRows(token, metadataAuthority).map((row) => {
+    const displayedAuthorityAddress = getDisplayedAuthorityAddress({
+      token,
+      role: row.authorityRole,
+      metadataAuthority,
+      authorityWallets,
+    });
+    const rowWithDisplayedValue = {
+      ...row,
+      value: displayedAuthorityAddress,
+    };
+
+    return {
+      ...rowWithDisplayedValue,
+      editDisabledReason: withWalletLoadError(
+        getSignerSelectionForAction({
+          action: "authority",
+          token,
+          authorityWallets,
+          metadataAuthority,
+          permissionRow: rowWithDisplayedValue,
+        })
+      ).unavailableReason,
+    };
+  });
+  const displayedMintAuthority = getDisplayedAuthorityAddress({
+    token,
+    role: "mint",
+    metadataAuthority,
+    authorityWallets,
+  });
   const extensionRows = getExtensionRows(token);
   const showAllowlistControls = token.requiresAllowlist;
   const complianceActions: Array<{ id: AdminAction; label: string }> = [
@@ -962,41 +1104,30 @@ export function TokenManagementWorkspace({
 
       {activeTab === "overview" ? (
         <div className="space-y-4">
-          <div className="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)]">
-            <TokenOverviewSection token={token} showTitle={false} />
-            <TokenControlListsSection
-              showAllowlist={showAllowlistControls}
-              allowlistEntriesCount={allowlistEntries.length}
-              allowlistError={allowlistError}
-              allowlistTotal={allowlistTotal}
-              allowlistHasMore={allowlistHasMore}
-              frozenAccountsCount={frozenAccounts.length}
-              frozenAccountsError={frozenAccountsError}
-              frozenAccountsTotal={frozenAccountsTotal}
-              frozenAccountsHasMore={frozenAccountsHasMore}
-            />
-          </div>
-          <TokenTransactionsSection
-            transactions={transactions}
-            transactionsError={transactionsError}
-            transactionsTotal={transactionsTotal}
-            transactionsHasMore={transactionsHasMore}
+          <TokenOverviewSection
+            token={token}
+            showTitle={false}
+            mintAuthorityValue={displayedMintAuthority}
           />
         </div>
       ) : null}
 
       {activeTab === "permissions" ? (
-        <div className="space-y-4">
-          <TokenSettingsSection
-            mode="permissions"
-            permissionRows={permissionRows}
-            extensionRows={extensionRows}
-            showTitle={false}
-            canEditAuthorities={!canDeployToken}
-            onCopy={handleCopy}
-            onEditAuthority={handleAuthorityModalOpen}
-          />
-        </div>
+        supportingDataLoading ? (
+          <LoadingSection message="Loading authority wallet access…" />
+        ) : (
+          <div className="space-y-4">
+            <TokenSettingsSection
+              mode="permissions"
+              permissionRows={permissionRows}
+              extensionRows={extensionRows}
+              showTitle={false}
+              canEditAuthorities={!canDeployToken}
+              onCopy={handleCopy}
+              onEditAuthority={handleAuthorityModalOpen}
+            />
+          </div>
+        )
       ) : null}
 
       {activeTab === "extensions" ? (
@@ -1014,50 +1145,62 @@ export function TokenManagementWorkspace({
       ) : null}
 
       {activeTab === "compliance" ? (
-        <div className="space-y-4">
-          <ActionSelector
-            actions={complianceActions}
-            activeAction={activeAction}
-            disabledReasons={complianceActionDisabledReasons}
-            onSelectAction={selectAction}
-          />
-          <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
-            <div>{visibleActionForm}</div>
-            <TokenControlListsSection
-              showAllowlist={showAllowlistControls}
-              allowlistEntriesCount={allowlistEntries.length}
-              allowlistError={allowlistError}
-              allowlistTotal={allowlistTotal}
-              allowlistHasMore={allowlistHasMore}
-              frozenAccountsCount={frozenAccounts.length}
-              frozenAccountsError={frozenAccountsError}
-              frozenAccountsTotal={frozenAccountsTotal}
-              frozenAccountsHasMore={frozenAccountsHasMore}
+        supportingDataLoading ? (
+          <LoadingSection message="Loading compliance controls…" />
+        ) : (
+          <div className="space-y-4">
+            <ActionSelector
+              actions={complianceActions}
+              activeAction={activeAction}
+              disabledReasons={complianceActionDisabledReasons}
+              onSelectAction={selectAction}
             />
+            <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
+              <div>{visibleActionForm}</div>
+              <TokenControlListsSection
+                showAllowlist={showAllowlistControls}
+                allowlistEntriesCount={allowlistEntries.length}
+                allowlistError={allowlistError}
+                allowlistTotal={allowlistTotal}
+                allowlistHasMore={allowlistHasMore}
+                frozenAccountsCount={frozenAccounts.length}
+                frozenAccountsError={frozenAccountsError}
+                frozenAccountsTotal={frozenAccountsTotal}
+                frozenAccountsHasMore={frozenAccountsHasMore}
+              />
+            </div>
           </div>
-        </div>
+        )
       ) : null}
 
       {activeTab === "metadata" ? (
         <div className="space-y-4">
           {visibleActionForm}
-          <TokenOverviewSection token={token} showTitle={false} />
+          <TokenOverviewSection
+            token={token}
+            showTitle={false}
+            mintAuthorityValue={displayedMintAuthority}
+          />
         </div>
       ) : null}
 
       {activeTab === "fund-management" ? (
-        <div className="space-y-4">
-          <TokenFundManagementSection
-            rows={fundManagementRows}
-            onOpenAction={openFundManagementModal}
-          />
-          <TokenTransactionsSection
-            transactions={transactions}
-            transactionsError={transactionsError}
-            transactionsTotal={transactionsTotal}
-            transactionsHasMore={transactionsHasMore}
-          />
-        </div>
+        supportingDataLoading ? (
+          <LoadingSection message="Loading fund management data…" />
+        ) : (
+          <div className="space-y-4">
+            <TokenFundManagementSection
+              rows={fundManagementRows}
+              onOpenAction={openFundManagementModal}
+            />
+            <TokenTransactionsSection
+              transactions={transactions}
+              transactionsError={transactionsError}
+              transactionsTotal={transactionsTotal}
+              transactionsHasMore={transactionsHasMore}
+            />
+          </div>
+        )
       ) : null}
 
       <TokenAuthorityModal

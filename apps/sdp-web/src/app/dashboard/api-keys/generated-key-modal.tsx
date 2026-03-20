@@ -5,8 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { storeApiKeySecret } from "@/lib/playground-api-keys";
 import { useEscapeKey } from "@/lib/use-escape-key";
-import { useEffect, useState } from "react";
-import { clearApiKeyFlashAction } from "./actions";
+import { useEffect, useRef, useState } from "react";
 import { GeneratedApiKeyInput } from "./generated-key-input";
 
 interface GeneratedApiKeyModalProps {
@@ -18,6 +17,7 @@ interface GeneratedApiKeyModalProps {
 function GeneratedApiKeyModal({ keyValue, message, keyPrefix }: GeneratedApiKeyModalProps) {
   const [isOpen, setIsOpen] = useState(true);
   const [copyLabel, setCopyLabel] = useState("Copy");
+  const clearedFlash = useRef(false);
 
   useEffect(() => {
     if (!keyValue) {
@@ -30,9 +30,20 @@ function GeneratedApiKeyModal({ keyValue, message, keyPrefix }: GeneratedApiKeyM
     });
   }, [keyValue, keyPrefix]);
 
+  useEffect(() => {
+    if (clearedFlash.current) {
+      return;
+    }
+
+    clearedFlash.current = true;
+    void fetch("/api/dashboard/api-keys/flash", {
+      method: "DELETE",
+      credentials: "same-origin",
+    });
+  }, []);
+
   const close = async () => {
     setIsOpen(false);
-    await clearApiKeyFlashAction();
   };
 
   useEscapeKey(isOpen, () => {
@@ -62,7 +73,7 @@ function GeneratedApiKeyModal({ keyValue, message, keyPrefix }: GeneratedApiKeyM
         className="absolute inset-0 bg-black/35"
         onClick={close}
       />
-      <div className="relative z-10 w-full max-w-lg rounded-2xl border border-[rgba(28,28,29,0.16)] bg-white p-6 shadow-lg">
+      <div className="relative z-10 w-full max-w-lg rounded-2xl border border-[rgba(28,28,29,0.16)] bg-white p-6 text-left shadow-lg">
         <p className="text-sm font-semibold text-[#1c1c1d]">API key generated</p>
         <p className="mt-2 text-sm text-[rgba(28,28,29,0.72)]">{message}</p>
 

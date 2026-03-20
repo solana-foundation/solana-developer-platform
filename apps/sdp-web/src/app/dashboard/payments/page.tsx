@@ -1,3 +1,4 @@
+import { createTimedTrace } from "@/lib/request-tracing";
 import { createSdpApiClient } from "@/lib/sdp-api";
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
@@ -5,11 +6,16 @@ import { fetchActiveApiKeys, resolvePlaygroundApiBaseUrl } from "../playground-a
 import {
   fetchPaymentTransfers,
   fetchPaymentsAggregate,
+  fetchPaymentsIssuedTokenSymbols,
   fetchPaymentsWallets,
 } from "./payments-page.data";
 import { PaymentsWorkspace } from "./payments-workspace";
 
-export default async function PaymentsPage() {
+interface PaymentsPageProps {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+}
+
+export default async function PaymentsPage({ searchParams }: PaymentsPageProps) {
   const { userId, orgId } = await auth();
   if (!userId) {
     redirect("/sign-in");
@@ -18,40 +24,91 @@ export default async function PaymentsPage() {
     redirect("/dashboard");
   }
 
-  const apiBaseUrl = resolvePlaygroundApiBaseUrl();
-  const apiClient = await createSdpApiClient();
-  const [apiKeysResult, walletsResult, aggregateResult, transfersResult] = await Promise.all([
-    fetchActiveApiKeys(apiClient.request),
-    fetchPaymentsWallets(apiClient.request, { includeBalances: true }),
-    fetchPaymentsAggregate(apiClient.request),
-    fetchPaymentTransfers(apiClient.request),
-  ]);
-  const apiKeys = apiKeysResult.data ?? [];
-  const wallets = walletsResult.data ?? [];
-  const aggregate = aggregateResult.data ?? null;
-  const transfers = transfersResult.data ?? [];
-  const walletsError = walletsResult.ok
-    ? null
-    : `Wallet API ${walletsResult.status ?? "unavailable"}: ${walletsResult.error ?? "Unknown error"}`;
-  const aggregateError = aggregateResult.ok
-    ? null
-    : `Wallet aggregate API ${aggregateResult.status ?? "unavailable"}: ${aggregateResult.error ?? "Unknown error"}`;
-  const transfersError = transfersResult.ok
-    ? null
-    : `Transfer API ${transfersResult.status ?? "unavailable"}: ${transfersResult.error ?? "Unknown error"}`;
+  const trace = createTimedTrace("dashboard.payments.page");
 
-  return (
-    <div className="flex h-full min-h-0 w-full flex-col">
-      <PaymentsWorkspace
-        apiBaseUrl={apiBaseUrl}
-        apiKeys={apiKeys}
-        wallets={wallets}
-        walletsError={walletsError}
-        aggregate={aggregate}
-        aggregateError={aggregateError}
-        transfers={transfers}
-        transfersError={transfersError}
-      />
-    </div>
-  );
+  try {
+    const resolvedSearchParams = searchParams ? await searchParams : undefined;
+    const currentTab =
+      resolvedSearchParams?.tab === "playground" ||
+      (Array.isArray(resolvedSearchParams?.tab) && resolvedSearchParams.tab[0] === "playground")
+        ? "playground"
+        : "overview";
+    const isPlaygroundTab = currentTab === "playground";
+    const apiBaseUrl = resolvePlaygroundApiBaseUrl();
+    const apiClient = await trace.step("create_sdp_api_client", () =>
+      createSdpApiClient(trace.childContext("dashboard.payments.api"))
+    );
+    const [
+      apiKeysResult,
+      walletsResult,
+      aggregateResult,
+      transfersResult,
+      issuedTokenSymbolsResult,
+    ] = await Promise.all([
+      isPlaygroundTab
+        ? trace.step("fetch_active_api_keys", () => fetchActiveApiKeys(apiClient.request))
+        : Promise.resolve({ ok: true as const, data: [] }),
+      isPlaygroundTab
+        ? trace.step("fetch_payments_wallet_summaries", () =>
+            fetchPaymentsWallets(apiClient.request, { view: "summary" })
+          )
+        : Promise.resolve({ ok: true as const, data: [] }),
+      isPlaygroundTab
+        ? Promise.resolve({ ok: true as const, data: null })
+        : trace.step("fetch_payments_aggregate", () => fetchPaymentsAggregate(apiClient.request)),
+      trace.step("fetch_payment_transfers", () => fetchPaymentTransfers(apiClient.request)),
+      isPlaygroundTab
+        ? Promise.resolve({ ok: true as const, data: [] })
+        : trace.step("fetch_payment_token_symbols", () =>
+            fetchPaymentsIssuedTokenSymbols(apiClient.request)
+          ),
+    ]);
+    const apiKeys = apiKeysResult.data ?? [];
+    const wallets = walletsResult.data ?? [];
+    const aggregate = aggregateResult.data ?? null;
+    const transfers = transfersResult.data ?? [];
+    const issuedTokenSymbolsByMint = Object.fromEntries(
+      (issuedTokenSymbolsResult.data ?? []).map((token) => [token.mintAddress, token.symbol])
+    );
+    const walletsError = walletsResult.ok
+      ? null
+      : `Wallet API ${walletsResult.status ?? "unavailable"}: ${walletsResult.error ?? "Unknown error"}`;
+    const aggregateError = aggregateResult.ok
+      ? null
+      : `Wallet aggregate API ${aggregateResult.status ?? "unavailable"}: ${aggregateResult.error ?? "Unknown error"}`;
+    const transfersError = transfersResult.ok
+      ? null
+      : `Transfer API ${transfersResult.status ?? "unavailable"}: ${transfersResult.error ?? "Unknown error"}`;
+
+    trace.log({
+      ok: true,
+      tab: currentTab,
+      walletCount: wallets.length,
+      transferCount: transfers.length,
+      apiKeyCount: apiKeys.length,
+      hasAggregate: Boolean(aggregate),
+    });
+
+    return (
+      <div className="flex h-full min-h-0 w-full flex-col">
+        <PaymentsWorkspace
+          apiBaseUrl={apiBaseUrl}
+          apiKeys={apiKeys}
+          wallets={wallets}
+          walletsError={walletsError}
+          aggregate={aggregate}
+          aggregateError={aggregateError}
+          issuedTokenSymbolsByMint={issuedTokenSymbolsByMint}
+          transfers={transfers}
+          transfersError={transfersError}
+        />
+      </div>
+    );
+  } catch (error) {
+    trace.log({
+      ok: false,
+      error: error instanceof Error ? error.message : "Unknown error",
+    });
+    throw error;
+  }
 }

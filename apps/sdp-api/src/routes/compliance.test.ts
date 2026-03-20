@@ -18,7 +18,6 @@ const TEST_USER = {
 };
 const TEST_API_KEY = {
   id: "key_compliance_test",
-  // biome-ignore lint/nursery/noSecrets: Test fixture, not a real secret.
   raw: "sk_test_compliance12345678901234567890",
   prefix: "sk_test_com",
 };
@@ -237,7 +236,6 @@ describe("Compliance routes", () => {
 
   it("returns an Elliptic risk score when Elliptic API is configured", async () => {
     env.ELLIPTIC_API_KEY = "elliptic_test_api_key";
-    // biome-ignore lint/nursery/noSecrets: Test fixture, not a real secret.
     env.ELLIPTIC_API_SECRET = "Ynl0ZXNlY3JldA==";
     const nowSpy = vi.spyOn(Date, "now").mockReturnValue(1_700_000_000_000);
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
@@ -368,6 +366,69 @@ describe("Compliance routes", () => {
       Authorization: "Bearer elliptic_access_token",
       "Content-Type": "application/json",
     });
+  });
+
+  it("treats Elliptic NotInBlockchain responses as a passed check", async () => {
+    env.ELLIPTIC_API_KEY = "elliptic_test_api_key";
+    env.ELLIPTIC_API_SECRET = "Ynl0ZXNlY3JldA==";
+    env.ELLIPTIC_API_TOKEN = undefined;
+
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          name: "NotInBlockchain",
+          message:
+            "The submitted address with hash 9cjSk5dhJpjxgckZ3q2KJqmXr2cCv7XgSm4e4YMrVJ1s has not yet been processed into the Elliptic tool or does not exist on the blockchain.",
+          status: 404,
+        }),
+        {
+          status: 404,
+          headers: {
+            "Content-Type": "application/json",
+          },
+        }
+      )
+    );
+
+    const res = await app.request(
+      "/v1/compliance/address-screenings",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          address: TEST_SOLANA_ADDRESSES.wallet1,
+          network: "solana",
+          intent: "transfer_destination",
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      data: {
+        screening: {
+          providers: Array<{
+            provider: string;
+            status: string;
+            riskScore: number | null;
+            riskLevel?: string;
+            message?: string;
+          }>;
+        };
+      };
+    };
+
+    const elliptic = body.data.screening.providers.find((entry) => entry.provider === "elliptic");
+    expect(elliptic).toMatchObject({
+      status: "ok",
+      riskScore: null,
+      riskLevel: "Check passed",
+    });
+    expect(elliptic?.message).toBeUndefined();
   });
 
   it("returns a TRM risk score when TRM API is configured", async () => {

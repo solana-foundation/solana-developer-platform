@@ -14,6 +14,12 @@ export interface FetchResult<T> {
 
 interface FetchPaymentsWalletsOptions {
   includeBalances?: boolean;
+  view?: "default" | "summary";
+}
+
+export interface PaymentsIssuedTokenSymbol {
+  mintAddress: string;
+  symbol: string;
 }
 
 function parseErrorMessage(body: string): string {
@@ -35,6 +41,7 @@ export async function fetchPaymentsWallets(
   try {
     const query = new URLSearchParams({
       includeAllProviders: "true",
+      ...(options.view === "summary" ? { view: "summary" } : {}),
       ...(options.includeBalances ? { includeBalances: "true" } : {}),
     }).toString();
     const response = await request(`/v1/wallets?${query}`);
@@ -185,6 +192,56 @@ export async function fetchPaymentTransfers(
     return {
       ok: false,
       error: error instanceof Error ? error.message : "Unable to load transfers",
+    };
+  }
+}
+
+export async function fetchPaymentsIssuedTokenSymbols(
+  request: SdpApiClient["request"],
+  pageSize = 100
+): Promise<FetchResult<PaymentsIssuedTokenSymbol[]>> {
+  try {
+    const response = await request(
+      `/v1/issuance/tokens?${new URLSearchParams({
+        page: "1",
+        pageSize: String(pageSize),
+      }).toString()}`
+    );
+    if (!response.ok) {
+      const body = await response.text();
+      return {
+        ok: false,
+        status: response.status,
+        error: parseErrorMessage(body),
+      };
+    }
+
+    const json = (await response.json()) as {
+      data?: Array<{
+        mintAddress?: string | null;
+        symbol?: string;
+      }>;
+    };
+
+    const tokens = (json?.data ?? [])
+      .filter(
+        (
+          token
+        ): token is {
+          mintAddress: string;
+          symbol?: string;
+        } => typeof token?.mintAddress === "string" && token.mintAddress.length > 0
+      )
+      .map((token) => ({
+        mintAddress: token.mintAddress,
+        symbol: token.symbol?.trim() || token.mintAddress,
+      }));
+
+    return { ok: true, data: tokens };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Unable to load issued token symbols",
     };
   }
 }

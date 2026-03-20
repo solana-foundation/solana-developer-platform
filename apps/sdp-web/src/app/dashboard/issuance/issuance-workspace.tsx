@@ -106,6 +106,10 @@ function getTokenTypeLabel(template: IssuanceTokenView["template"]): string {
   return template;
 }
 
+function getDeploymentStatus(token: IssuanceTokenView): "pending" | "active" {
+  return token.mintAddress || token.deployedAt ? "active" : "pending";
+}
+
 export function IssuanceWorkspace({
   tokens,
   templates,
@@ -233,22 +237,41 @@ export function IssuanceWorkspace({
                   data-testid={`token-card-${token.id}`}
                   className="flex min-h-[340px] flex-col rounded-2xl border border-[rgba(28,28,29,0.1)] bg-[#fcfcfa] p-5 shadow-[0_2px_10px_rgba(28,28,29,0.05)]"
                 >
-                  <div className="mb-4 h-14 w-14 overflow-hidden rounded-full border border-[rgba(28,28,29,0.1)] bg-white">
-                    {token.imageUrl ? (
-                      // Token logos are dynamic external assets from API data.
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={token.imageUrl}
-                        alt={`${token.name} logo`}
-                        className="h-full w-full object-cover"
-                      />
-                    ) : (
-                      <div className="flex h-full w-full items-center justify-center text-lg font-semibold text-[rgba(28,28,29,0.58)]">
-                        {token.symbol.slice(0, 1) || "?"}
-                      </div>
-                    )}
-                  </div>
+                  {(() => {
+                    const deploymentStatus = getDeploymentStatus(token);
 
+                    return (
+                      <div className="mb-4 flex items-start justify-between gap-3">
+                        <div className="h-14 w-14 overflow-hidden rounded-full border border-[rgba(28,28,29,0.1)] bg-white">
+                          {token.imageUrl ? (
+                            // Token logos are dynamic external assets from API data.
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={token.imageUrl}
+                              alt={`${token.name} logo`}
+                              className="h-full w-full object-cover"
+                            />
+                          ) : (
+                            <div className="flex h-full w-full items-center justify-center text-lg font-semibold text-[rgba(28,28,29,0.58)]">
+                              {token.symbol.slice(0, 1) || "?"}
+                            </div>
+                          )}
+                        </div>
+
+                        <span
+                          data-testid={`token-card-status-${token.id}`}
+                          className={[
+                            "inline-flex items-center rounded-full px-3 py-1 text-xs font-medium tracking-[0.02em] capitalize",
+                            deploymentStatus === "active"
+                              ? "bg-[rgba(12,128,76,0.10)] text-[#0c804c]"
+                              : "bg-[rgba(28,28,29,0.08)] text-[rgba(28,28,29,0.72)]",
+                          ].join(" ")}
+                        >
+                          {deploymentStatus}
+                        </span>
+                      </div>
+                    );
+                  })()}
                   <p className="text-sm font-medium tracking-wide text-[rgba(28,28,29,0.58)] uppercase">
                     {token.symbol}
                   </p>

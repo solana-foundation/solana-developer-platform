@@ -1,3 +1,4 @@
+import { createTimedTrace } from "@/lib/request-tracing";
 import { type SdpApiClient, createSdpApiClient } from "@/lib/sdp-api";
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
@@ -151,7 +152,11 @@ async function fetchTokens(
   }
 }
 
-export default async function IssuancePage() {
+interface IssuancePageProps {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+}
+
+export default async function IssuancePage({ searchParams }: IssuancePageProps) {
   const { userId, orgId } = await auth();
   if (!userId) {
     redirect("/sign-in");
@@ -160,35 +165,71 @@ export default async function IssuancePage() {
     redirect("/dashboard");
   }
 
-  const apiBaseUrl = resolvePlaygroundApiBaseUrl();
-  const apiClient = await createSdpApiClient();
-  const [templatesResult, tokensResult, apiKeysResult, signerWalletsResult] = await Promise.all([
-    fetchTemplates(apiClient.request),
-    fetchTokens(apiClient.request),
-    fetchActiveApiKeys(apiClient.request),
-    fetchPaymentsWallets(apiClient.request, { includeBalances: false }),
-  ]);
+  const trace = createTimedTrace("dashboard.issuance.page");
 
-  const tokens = tokensResult.data ?? [];
-  const apiKeys = apiKeysResult.data ?? [];
-  const templatesError = templatesResult.ok
-    ? null
-    : `Template API ${templatesResult.status ?? "unavailable"}: ${templatesResult.error ?? "Unknown error"}`;
+  try {
+    const resolvedSearchParams = searchParams ? await searchParams : undefined;
+    const currentTab =
+      resolvedSearchParams?.tab === "playground" ||
+      (Array.isArray(resolvedSearchParams?.tab) && resolvedSearchParams.tab[0] === "playground")
+        ? "playground"
+        : "tokens";
+    const isPlaygroundTab = currentTab === "playground";
+    const apiBaseUrl = resolvePlaygroundApiBaseUrl();
+    const apiClient = await trace.step("create_sdp_api_client", () =>
+      createSdpApiClient(trace.childContext("dashboard.issuance.api"))
+    );
+    const [templatesResult, tokensResult, apiKeysResult, signerWalletsResult] = await Promise.all([
+      isPlaygroundTab
+        ? trace.step("fetch_templates", () => fetchTemplates(apiClient.request))
+        : Promise.resolve({ ok: true as const, data: [] }),
+      trace.step("fetch_tokens", () => fetchTokens(apiClient.request)),
+      isPlaygroundTab
+        ? trace.step("fetch_active_api_keys", () => fetchActiveApiKeys(apiClient.request))
+        : Promise.resolve({ ok: true as const, data: [] }),
+      isPlaygroundTab
+        ? trace.step("fetch_signer_wallets", () =>
+            fetchPaymentsWallets(apiClient.request, { view: "summary" })
+          )
+        : Promise.resolve({ ok: true as const, data: [] }),
+    ]);
 
-  return (
-    <IssuanceWorkspace
-      tokens={tokens}
-      templates={templatesResult.data ?? []}
-      apiKeys={apiKeys}
-      signerWallets={signerWalletsResult.data ?? []}
-      apiBaseUrl={apiBaseUrl}
-      templatesError={templatesError}
-      tokensNotice={resolveTokenListNotice(tokensResult)}
-      signerWalletsError={
-        signerWalletsResult.ok
-          ? null
-          : `Wallet API ${signerWalletsResult.status ?? "unavailable"}: ${signerWalletsResult.error ?? "Unknown error"}`
-      }
-    />
-  );
+    const tokens = tokensResult.data ?? [];
+    const apiKeys = apiKeysResult.data ?? [];
+    const templatesError = templatesResult.ok
+      ? null
+      : `Template API ${templatesResult.status ?? "unavailable"}: ${templatesResult.error ?? "Unknown error"}`;
+
+    trace.log({
+      ok: true,
+      tab: currentTab,
+      tokenCount: tokens.length,
+      templateCount: templatesResult.data?.length ?? 0,
+      apiKeyCount: apiKeys.length,
+      signerWalletCount: signerWalletsResult.data?.length ?? 0,
+    });
+
+    return (
+      <IssuanceWorkspace
+        tokens={tokens}
+        templates={templatesResult.data ?? []}
+        apiKeys={apiKeys}
+        signerWallets={signerWalletsResult.data ?? []}
+        apiBaseUrl={apiBaseUrl}
+        templatesError={templatesError}
+        tokensNotice={resolveTokenListNotice(tokensResult)}
+        signerWalletsError={
+          signerWalletsResult.ok
+            ? null
+            : `Wallet API ${signerWalletsResult.status ?? "unavailable"}: ${signerWalletsResult.error ?? "Unknown error"}`
+        }
+      />
+    );
+  } catch (error) {
+    trace.log({
+      ok: false,
+      error: error instanceof Error ? error.message : "Unknown error",
+    });
+    throw error;
+  }
 }

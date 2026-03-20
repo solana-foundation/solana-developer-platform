@@ -54,6 +54,7 @@ export interface RunActionOptions {
   confirmButtonLabel?: string;
   submitToast?: string;
   successToast?: string;
+  onSuccess?: (result: ActionExecutionResult) => Promise<void> | void;
 }
 
 export interface ActionConfirmationState {
@@ -67,7 +68,8 @@ export interface ActionConfirmationState {
       | "submitToast"
       | "successToast"
     >
-  >;
+  > &
+    Pick<RunActionOptions, "onSuccess">;
 }
 
 export interface TokenManagementWorkspaceProps {

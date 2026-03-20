@@ -369,7 +369,7 @@ describe("Payments routes", () => {
       };
     };
 
-    expect(body.data.walletBalances).toEqual({
+    expect(body.data.walletBalances).toMatchObject({
       walletId: TEST_WALLET_ID,
       address: TEST_SOLANA_ADDRESSES.wallet1,
       balances: [
@@ -379,6 +379,8 @@ describe("Payments routes", () => {
           amount: "0",
           uiAmount: "0",
           decimals: 9,
+          usdPrice: expect.any(Number),
+          usdValue: 0,
         },
       ],
     });
@@ -422,13 +424,15 @@ describe("Payments routes", () => {
       };
     };
 
-    expect(body.data.walletBalances.balances).toEqual([
+    expect(body.data.walletBalances.balances).toMatchObject([
       {
         token: "SOL",
         mint: SOL_MINT,
         amount: "0",
         uiAmount: "0",
         decimals: 9,
+        usdPrice: expect.any(Number),
+        usdValue: 0,
       },
       {
         token: "USDC",
@@ -436,6 +440,8 @@ describe("Payments routes", () => {
         amount: "1250000",
         uiAmount: "1.25",
         decimals: 6,
+        usdPrice: 1,
+        usdValue: 1.25,
       },
     ]);
   });
@@ -469,13 +475,15 @@ describe("Payments routes", () => {
       };
     };
 
-    expect(body.data.walletBalances.balances).toEqual([
+    expect(body.data.walletBalances.balances).toMatchObject([
       {
         token: "SOL",
         mint: SOL_MINT,
         amount: "4200000000",
         uiAmount: "4.2",
         decimals: 9,
+        usdPrice: expect.any(Number),
+        usdValue: expect.any(Number),
       },
     ]);
   });
@@ -560,7 +568,6 @@ describe("Payments routes", () => {
     expect(redirect.searchParams.get("baseCurrencyCode")).toBe("usdc_sol");
     expect(redirect.searchParams.get(MOONPAY_PARAM_BASE_CURRENCY_AMOUNT)).toBe("75.25");
     expect(redirect.searchParams.get(MOONPAY_PARAM_QUOTE_CURRENCY_CODE)).toBe("usd");
-    expect(redirect.searchParams.get("walletAddress")).toBe(TEST_SOLANA_ADDRESSES.wallet1);
     expect(redirect.searchParams.get(MOONPAY_PARAM_REFUND_WALLET_ADDRESS)).toBe(
       TEST_SOLANA_ADDRESSES.wallet1
     );

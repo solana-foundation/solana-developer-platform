@@ -6,9 +6,14 @@ import { formatDate } from "./token-management-workspace.utils";
 interface TokenOverviewSectionProps {
   token: Token;
   showTitle?: boolean;
+  mintAuthorityValue?: string | null;
 }
 
-export function TokenOverviewSection({ token, showTitle = true }: TokenOverviewSectionProps) {
+export function TokenOverviewSection({
+  token,
+  showTitle = true,
+  mintAuthorityValue,
+}: TokenOverviewSectionProps) {
   return (
     <section className="space-y-3">
       {showTitle ? (
@@ -18,7 +23,7 @@ export function TokenOverviewSection({ token, showTitle = true }: TokenOverviewS
       ) : null}
       <div className="overflow-hidden rounded-2xl border border-[rgba(28,28,29,0.12)] bg-white">
         <OverviewRow label="Token Address" value={token.mintAddress ?? "Not deployed"} monospace />
-        <OverviewRow label="Mint Authority" value={token.mintAuthority ?? "None"} monospace />
+        <OverviewRow label="Mint Authority" value={mintAuthorityValue ?? "None"} monospace />
         <OverviewRow label="Supply" value={token.totalSupply} />
         <OverviewRow label="Created" value={formatDate(token.createdAt)} />
         <OverviewRow label="Template" value={token.template} />

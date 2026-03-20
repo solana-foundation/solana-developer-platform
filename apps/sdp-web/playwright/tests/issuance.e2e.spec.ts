@@ -12,7 +12,7 @@ async function gotoIssuanceDashboard(page: Page): Promise<void> {
 
 async function gotoToken(page: Page, tokenId: string): Promise<void> {
   await page.goto(`/dashboard/issuance/${tokenId}`);
-  await expect(page.getByTestId("permission-row-mint-authority")).toBeVisible();
+  await expect(page.getByTestId("overview-row-token-address")).toBeVisible();
 }
 
 async function openTab(page: Page, name: string): Promise<void> {
@@ -35,6 +35,23 @@ async function openFundManagementAction(page: Page, action: string): Promise<voi
   const row = page.getByTestId(`fund-management-row-${action}`);
   await expect(row).toBeVisible();
   await row.getByRole("button").click();
+}
+
+async function waitForPermissionRowValue(
+  page: Page,
+  rowTestId: string,
+  expectedText: string
+): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        await page.reload();
+        await openTab(page, "Permissions");
+        return (await page.getByTestId(rowTestId).textContent()) ?? "";
+      },
+      { timeout: 120_000, intervals: [1_000, 2_000, 5_000] }
+    )
+    .toContain(expectedText);
 }
 
 test.describe
@@ -87,9 +104,11 @@ test.describe
       page,
     }) => {
       await gotoToken(page, fixtures.tokens.pending.id);
+      await openTab(page, "Fund Management");
 
-      await expect(page.getByRole("button", { name: "Deploy" })).toBeVisible();
-      await page.getByRole("button", { name: "Deploy" }).click();
+      const deployRow = page.getByTestId("fund-management-row-deploy");
+      await expect(deployRow.getByRole("button", { name: "Deploy" })).toBeVisible();
+      await deployRow.getByRole("button", { name: "Deploy" }).click();
       await expect(
         page.getByText(
           "This will deploy the token on-chain so fund management actions can be used."
@@ -141,27 +160,31 @@ test.describe
     test("5. user can update an authority including the None confirmation flow", async ({
       page,
     }) => {
-      await gotoToken(page, fixtures.tokens.allowlisted.id);
+      const rowTestId = "permission-row-permanent-delegate";
 
-      const row = page.getByTestId("permission-row-permanent-delegate");
+      await gotoToken(page, fixtures.tokens.allowlisted.id);
+      await openTab(page, "Permissions");
+
+      const row = page.getByTestId(rowTestId);
       await row.getByRole("button", { name: "Edit" }).click();
       await page.getByLabel("New authority").selectOption(fixtures.wallets.delegated.publicKey);
-      let successCount = await page.getByText("Permanent Delegate Authority updated.").count();
       await page.getByRole("button", { name: "Save authority" }).click();
-      await waitForToast(page, "Permanent Delegate Authority updated.", successCount);
-      await expect(row).toContainText(shortValue(fixtures.wallets.delegated.publicKey));
+      await waitForPermissionRowValue(
+        page,
+        rowTestId,
+        shortValue(fixtures.wallets.delegated.publicKey)
+      );
 
-      await row.getByRole("button", { name: "Edit" }).click();
+      const refreshedRow = page.getByTestId(rowTestId);
+      await refreshedRow.getByRole("button", { name: "Edit" }).click();
       await page.getByLabel("New authority").selectOption({ label: "None" });
       await page.getByRole("button", { name: "Save authority" }).click();
 
       await expect(
         page.getByRole("heading", { name: "Set Permanent Delegate Authority to None?" })
       ).toBeVisible();
-      successCount = await page.getByText("Permanent Delegate Authority updated.").count();
       await page.getByRole("button", { name: "Yes, set to None" }).click();
-      await waitForToast(page, "Permanent Delegate Authority updated.", successCount);
-      await expect(row).toContainText("None");
+      await waitForPermissionRowValue(page, rowTestId, "None");
     });
 
     test("6. user can add and remove allowlist entries on the allowlist-enabled token", async ({

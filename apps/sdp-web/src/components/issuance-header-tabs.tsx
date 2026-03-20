@@ -2,6 +2,7 @@
 
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { motion } from "framer-motion";
+import { useEffect, useState } from "react";
 
 const tabOptions = [
   { id: "tokens", label: "Overview" },
@@ -10,6 +11,27 @@ const tabOptions = [
 
 export function IssuanceHeaderTabs() {
   const { issuanceTab, setIssuanceTab } = useDashboardWorkspace();
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia("(max-width: 767px)");
+    const updateIsMobile = () => setIsMobile(mediaQuery.matches);
+
+    updateIsMobile();
+    mediaQuery.addEventListener("change", updateIsMobile);
+
+    return () => mediaQuery.removeEventListener("change", updateIsMobile);
+  }, []);
+
+  useEffect(() => {
+    if (isMobile && issuanceTab === "playground") {
+      setIssuanceTab("tokens");
+    }
+  }, [isMobile, issuanceTab, setIssuanceTab]);
+
+  if (isMobile) {
+    return null;
+  }
 
   return (
     <div className="inline-flex items-end gap-6">
