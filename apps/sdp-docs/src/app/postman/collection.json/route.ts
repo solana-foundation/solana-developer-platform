@@ -4,12 +4,7 @@ import path from "node:path";
 export const runtime = "nodejs";
 
 const POSTMAN_COLLECTION_FILENAME = "solana-developer-platform-public.postman_collection.json";
-const collectionPath = path.join(
-  process.cwd(),
-  "public",
-  "postman",
-  POSTMAN_COLLECTION_FILENAME
-);
+const collectionPath = path.join(process.cwd(), "public", "postman", POSTMAN_COLLECTION_FILENAME);
 
 export async function GET() {
   try {

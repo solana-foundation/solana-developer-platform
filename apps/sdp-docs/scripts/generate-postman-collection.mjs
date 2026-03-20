@@ -75,7 +75,7 @@ function buildExampleFromSchema(spec, schema) {
         typeof merged === "object" &&
         !Array.isArray(merged)
       ) {
-        return { ...merged, ...branchExample };
+        return Object.assign(merged, branchExample);
       }
       return branchExample ?? merged;
     }, {});
@@ -186,7 +186,8 @@ function createRequestItem(spec, baseUrl, routePath, method, operation) {
 function toPostmanCollection(spec) {
   const productionServer =
     spec.servers?.find((server) => server.description === "Production")?.url ||
-    spec.servers?.find((server) => typeof server.url === "string" && server.url.startsWith("https"))?.url ||
+    spec.servers?.find((server) => typeof server.url === "string" && server.url.startsWith("https"))
+      ?.url ||
     "https://api.solana.com";
 
   const folders = new Map();
@@ -211,7 +212,9 @@ function toPostmanCollection(spec) {
         folders.set(tagName, []);
       }
 
-      folders.get(tagName).push(createRequestItem(spec, "{{baseUrl}}", routePath, method, operation));
+      folders
+        .get(tagName)
+        .push(createRequestItem(spec, "{{baseUrl}}", routePath, method, operation));
     }
   }
 
@@ -224,8 +227,7 @@ function toPostmanCollection(spec) {
       name: "Solana Developer Platform Public API",
       description:
         "Public Postman collection generated from the SDP OpenAPI contract. Internal-only endpoint families are excluded.",
-      schema:
-        "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+      schema: "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
     },
     auth: {
       type: "bearer",
@@ -264,7 +266,9 @@ async function run() {
   await fs.mkdir(outputDir, { recursive: true });
   await fs.writeFile(outputPath, `${JSON.stringify(collection, null, 2)}\n`, "utf8");
 
-  console.log(`Generated Postman collection with ${collection.item.length} folders at ${outputPath}`);
+  console.log(
+    `Generated Postman collection with ${collection.item.length} folders at ${outputPath}`
+  );
 }
 
 run().catch((error) => {
