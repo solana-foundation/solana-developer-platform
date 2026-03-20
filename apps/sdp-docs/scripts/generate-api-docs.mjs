@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { getPrimaryTagName, isPublicTag, slugify } from "./lib/public-openapi.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -11,21 +12,6 @@ const rootMetaPath = path.resolve(__dirname, "../content/docs/meta.json");
 
 const HTTP_METHODS = new Set(["get", "post", "put", "patch", "delete", "head", "options"]);
 const SOURCE_PATH = "apps/sdp-api/generated/openapi.json";
-const HIDDEN_TAG_SLUGS = new Set([
-  "rpc",
-  "admin",
-  "onboarding",
-  "auth",
-  "organizations",
-  "members",
-]);
-
-const slugify = (value) =>
-  value
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-
 const escapeTableText = (value) => value.replace(/\|/g, "\\|");
 
 const parseJsonSpec = (spec) => {
@@ -131,6 +117,12 @@ title: API Reference
 description: Endpoint index from the repository OpenAPI spec.
 ---
 
+<div>
+  <a href="/postman/collection.json" download>Download Postman collection</a>
+  {" · "}
+  <a href="/postman/collection.json">Open raw JSON</a>
+</div>
+
 ${links}
 `;
 };
@@ -144,8 +136,8 @@ const run = async () => {
 
   const groupedOperations = new Map();
   for (const operation of operations) {
-    const primaryTag = operation.tags[0] || "Other";
-    if (HIDDEN_TAG_SLUGS.has(slugify(primaryTag))) {
+    const primaryTag = getPrimaryTagName(operation);
+    if (!primaryTag || !isPublicTag(primaryTag)) {
       continue;
     }
 

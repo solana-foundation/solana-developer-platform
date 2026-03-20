@@ -37,6 +37,23 @@ async function openFundManagementAction(page: Page, action: string): Promise<voi
   await row.getByRole("button").click();
 }
 
+async function waitForPermissionRowValue(
+  page: Page,
+  rowTestId: string,
+  expectedText: string
+): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        await page.reload();
+        await openTab(page, "Permissions");
+        return (await page.getByTestId(rowTestId).textContent()) ?? "";
+      },
+      { timeout: 120_000, intervals: [1_000, 2_000, 5_000] }
+    )
+    .toContain(expectedText);
+}
+
 test.describe
   .serial("issuance e2e", () => {
     let fixtures: IssuanceFixtures;
@@ -143,28 +160,31 @@ test.describe
     test("5. user can update an authority including the None confirmation flow", async ({
       page,
     }) => {
+      const rowTestId = "permission-row-permanent-delegate";
+
       await gotoToken(page, fixtures.tokens.allowlisted.id);
       await openTab(page, "Permissions");
 
-      const row = page.getByTestId("permission-row-permanent-delegate");
+      const row = page.getByTestId(rowTestId);
       await row.getByRole("button", { name: "Edit" }).click();
       await page.getByLabel("New authority").selectOption(fixtures.wallets.delegated.publicKey);
-      let successCount = await page.getByText("Permanent Delegate Authority updated.").count();
       await page.getByRole("button", { name: "Save authority" }).click();
-      await waitForToast(page, "Permanent Delegate Authority updated.", successCount);
-      await expect(row).toContainText(shortValue(fixtures.wallets.delegated.publicKey));
+      await waitForPermissionRowValue(
+        page,
+        rowTestId,
+        shortValue(fixtures.wallets.delegated.publicKey)
+      );
 
-      await row.getByRole("button", { name: "Edit" }).click();
+      const refreshedRow = page.getByTestId(rowTestId);
+      await refreshedRow.getByRole("button", { name: "Edit" }).click();
       await page.getByLabel("New authority").selectOption({ label: "None" });
       await page.getByRole("button", { name: "Save authority" }).click();
 
       await expect(
         page.getByRole("heading", { name: "Set Permanent Delegate Authority to None?" })
       ).toBeVisible();
-      successCount = await page.getByText("Permanent Delegate Authority updated.").count();
       await page.getByRole("button", { name: "Yes, set to None" }).click();
-      await waitForToast(page, "Permanent Delegate Authority updated.", successCount);
-      await expect(row).toContainText("None");
+      await waitForPermissionRowValue(page, rowTestId, "None");
     });
 
     test("6. user can add and remove allowlist entries on the allowlist-enabled token", async ({

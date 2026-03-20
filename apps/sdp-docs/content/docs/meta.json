@@ -19,6 +19,7 @@
     "tutorials/end-to-end-payment-flow",
     "---Reference---",
     "reference/issuance-token-types",
+    "reference/postman-collection",
     "reference/api/index",
     "reference/api/health",
     "reference/api/api-keys",
