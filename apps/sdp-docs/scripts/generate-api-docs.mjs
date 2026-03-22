@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { getPrimaryTagName, isPublicTag, slugify } from "./lib/public-openapi.mjs";
+import { PUBLIC_TAG_SLUGS, getPrimaryTagName, isPublicTag, slugify } from "./lib/public-openapi.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -146,7 +146,7 @@ const extractRenderedRows = (content) => {
 
 const validateGeneratedTagPages = async ({ outputDir, tagPages, groupedOperations }) => {
   const generatedSlugs = new Set(tagPages.map((tagPage) => tagPage.slug));
-  const missingPublicPages = [...REQUIRED_PUBLIC_TAG_SLUGS].filter((slug) => !generatedSlugs.has(slug));
+  const missingPublicPages = [...PUBLIC_TAG_SLUGS].filter((slug) => !generatedSlugs.has(slug));
 
   if (missingPublicPages.length > 0) {
     throw new Error(
