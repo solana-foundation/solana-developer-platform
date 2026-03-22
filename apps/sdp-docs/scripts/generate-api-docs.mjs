@@ -1,7 +1,12 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { getPrimaryTagName, isPublicTag, slugify } from "./lib/public-openapi.mjs";
+import {
+  PUBLIC_TAG_SLUGS,
+  getPrimaryTagName,
+  isPublicTag,
+  slugify,
+} from "./lib/public-openapi.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -13,6 +18,9 @@ const rootMetaPath = path.resolve(__dirname, "../content/docs/meta.json");
 const HTTP_METHODS = new Set(["get", "post", "put", "patch", "delete", "head", "options"]);
 const SOURCE_PATH = "apps/sdp-api/generated/openapi.json";
 const escapeTableText = (value) => value.replace(/\|/g, "\\|");
+
+const renderOperationRow = (operation) =>
+  `| \`${operation.method}\` | \`${operation.path}\` | ${escapeTableText(operation.summary || "-")} |`;
 
 const parseJsonSpec = (spec) => {
   const tagDescriptions = new Map();
@@ -89,12 +97,7 @@ const renderTagPage = ({ tagName, description, operations }) => {
     return left.path.localeCompare(right.path);
   });
 
-  const rows = sortedOperations
-    .map(
-      (operation) =>
-        `| \`${operation.method}\` | \`${operation.path}\` | ${escapeTableText(operation.summary || "-")} |`
-    )
-    .join("\n");
+  const rows = sortedOperations.map(renderOperationRow).join("\n");
 
   return `---
 title: ${tagName}
@@ -129,6 +132,53 @@ ${links}
 
 const writeJson = async (filePath, value) => {
   await fs.writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+};
+
+const extractRenderedRows = (content) => {
+  const body = content.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "");
+
+  return body
+    .split(/\r?\n/)
+    .filter(
+      (line) => line.startsWith("| ") && !line.startsWith("| Method") && !line.startsWith("| ---")
+    );
+};
+
+const validateGeneratedTagPages = async ({ outputDir, tagPages, groupedOperations }) => {
+  const generatedSlugs = new Set(tagPages.map((tagPage) => tagPage.slug));
+  const missingPublicPages = [...PUBLIC_TAG_SLUGS].filter((slug) => !generatedSlugs.has(slug));
+
+  if (missingPublicPages.length > 0) {
+    throw new Error(
+      `Generated API docs are missing required public sections: ${missingPublicPages.join(", ")}`
+    );
+  }
+
+  for (const tagPage of tagPages) {
+    const source = await fs.readFile(path.join(outputDir, `${tagPage.slug}.mdx`), "utf8");
+    const actualRows = extractRenderedRows(source);
+    const expectedRows = (groupedOperations.get(tagPage.title) || [])
+      .slice()
+      .sort((left, right) => {
+        if (left.path === right.path) {
+          return left.method.localeCompare(right.method);
+        }
+        return left.path.localeCompare(right.path);
+      })
+      .map(renderOperationRow);
+
+    if (actualRows.length !== expectedRows.length) {
+      throw new Error(
+        `Generated API docs for ${tagPage.title} document ${actualRows.length} operations, expected ${expectedRows.length}`
+      );
+    }
+
+    for (const row of expectedRows) {
+      if (!actualRows.includes(row)) {
+        throw new Error(`Generated API docs for ${tagPage.title} are missing row: ${row}`);
+      }
+    }
+  }
 };
 
 const run = async () => {
@@ -252,6 +302,12 @@ const run = async () => {
   await writeJson(rootMetaPath, {
     title: existingMeta?.title || "Solana Developer Platform Docs",
     pages: newPages,
+  });
+
+  await validateGeneratedTagPages({
+    outputDir,
+    tagPages,
+    groupedOperations,
   });
 
   console.log(

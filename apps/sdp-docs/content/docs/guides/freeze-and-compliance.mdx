@@ -1,11 +1,71 @@
 ---
 title: Freeze and Compliance
-description: Freeze accounts, pause transfers, and seize tokens for compliance operations.
+description: Freeze accounts, pause transfers, seize tokens, and screen addresses for compliance workflows.
 ---
 
-SDP provides compliance controls for tokens that have `isFreezable` enabled or the `pausable` extension. These let you freeze individual accounts, pause all transfers globally, or seize tokens from a specific account.
+SDP provides two public compliance workflows:
 
-These controls are available from the dashboard and the API. API key callers need `tokens:admin`.
+- Token controls for assets that have `isFreezable` enabled or the `pausable` extension. These let you freeze individual accounts, pause all transfers globally, or seize tokens from a specific account.
+- Address screening through configured providers before you approve a destination, allowlist a wallet, or execute a regulated flow.
+
+Token-control actions are available from the dashboard and the API. API key callers need `tokens:admin` for those onchain controls.
+
+## Screen an address
+
+Use the Compliance API to check a Solana address across configured providers before onboarding a wallet or allowing a transfer destination.
+
+<Tabs items={["curl", "TypeScript", "Java"]}>
+<Tab value="curl">
+```bash
+curl -X POST https://api.solana.com/v1/compliance/address-screenings \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "address": "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ",
+    "network": "solana",
+    "intent": "transfer_destination"
+  }'
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript
+const response = await fetch(
+  "https://api.solana.com/v1/compliance/address-screenings",
+  {
+    method: "POST",
+    headers: {
+      "Authorization": "Bearer sk_test_...",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      address: "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ",
+      network: "solana",
+      intent: "transfer_destination",
+    }),
+  }
+);
+const { data } = await response.json();
+// data.screening.providers[] => { provider, status, riskScore, riskLevel, message, evaluatedAt }
+```
+</Tab>
+<Tab value="Java">
+```java
+HttpRequest request = HttpRequest.newBuilder()
+    .uri(URI.create("https://api.solana.com/v1/compliance/address-screenings"))
+    .header("Authorization", "Bearer sk_test_...")
+    .header("Content-Type", "application/json")
+    .POST(HttpRequest.BodyPublishers.ofString("""
+        {
+          "address": "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ",
+          "network": "solana",
+          "intent": "transfer_destination"
+        }"""))
+    .build();
+```
+</Tab>
+</Tabs>
+
+The response aggregates provider-level results in `data.screening.providers`, including `status`, `riskScore`, `riskLevel`, and `evaluatedAt`. Use the [Compliance API reference](/docs/reference/api/compliance) for the full schema.
 
 ## Freeze an account
 

@@ -171,7 +171,7 @@ Prepare endpoints accept `options.simulate: true` to dry-run the transaction bef
 | Update authority | `POST .../authority` | `POST .../authority/prepare` |
 | Transfer | `POST /v1/payments/transfers` | `POST /v1/payments/transfers/prepare` |
 
-Issuance paths are prefixed with `/v1/issuance/tokens/{tokenId}`. Transfer paths use `/v1/payments`.
+Issuance paths are prefixed with `/v1/issuance/tokens/{tokenId}`. Transfer flows use the concrete payments mutation paths `POST /v1/payments/transfers` and `POST /v1/payments/transfers/prepare`.
 
 ## Idempotency
 

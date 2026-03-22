@@ -23,7 +23,7 @@
 - [Deploy a Token](https://platform.solana.com/docs/guides/deploy-a-token): Deploy a created token to the Solana blockchain.
 - [Mint and Burn Tokens](https://platform.solana.com/docs/guides/mint-and-burn): Increase or decrease token supply by minting and burning.
 - [Manage Allowlists](https://platform.solana.com/docs/guides/manage-allowlists): Control which addresses can hold your token using allowlists.
-- [Freeze and Compliance](https://platform.solana.com/docs/guides/freeze-and-compliance): Freeze accounts, pause transfers, and seize tokens for compliance operations.
+- [Freeze and Compliance](https://platform.solana.com/docs/guides/freeze-and-compliance): Freeze accounts, pause transfers, seize tokens, and screen addresses for compliance workflows.
 - [Transfer Tokens](https://platform.solana.com/docs/guides/transfer-tokens): Send tokens between accounts using SDP's payment orchestration.
 - [Prepare vs Execute](https://platform.solana.com/docs/guides/prepare-vs-execute): Understand SDP's two signing modes for onchain transactions.
 
