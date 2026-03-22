@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.6.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.5.3...v0.6.0) (2026-03-22)
+
+
+### Features
+
+* **custody:** streamline Fireblocks platform flow ([#112](https://github.com/solana-foundation/solana-developer-platform/issues/112)) ([60ae76f](https://github.com/solana-foundation/solana-developer-platform/commit/60ae76f266802ac3d37ef838cc462848649de1d0))
+* **docs:** add generated public Postman collection ([#111](https://github.com/solana-foundation/solana-developer-platform/issues/111)) ([7724d68](https://github.com/solana-foundation/solana-developer-platform/commit/7724d68c30e03f9b98192650b85ab09655004fa9))
+* **observability:** add page and request timing traces ([#109](https://github.com/solana-foundation/solana-developer-platform/issues/109)) ([1f4d26d](https://github.com/solana-foundation/solana-developer-platform/commit/1f4d26d79e36c9691c989125e28a85c0307ac2f7))
+* **payments:** improve dashboard balances and responsiveness ([#106](https://github.com/solana-foundation/solana-developer-platform/issues/106)) ([585af77](https://github.com/solana-foundation/solana-developer-platform/commit/585af775f5ff5e90e000ccb613e41a28acf9203b))
+* **payments:** move send and receive into full-page flows ([#105](https://github.com/solana-foundation/solana-developer-platform/issues/105)) ([dd24953](https://github.com/solana-foundation/solana-developer-platform/commit/dd2495397cf2d737c38ea8e97ee3a050fe876a45))
+* refine dashboard permissions, issuance UX, and wallet activity ([#113](https://github.com/solana-foundation/solana-developer-platform/issues/113)) ([a67019e](https://github.com/solana-foundation/solana-developer-platform/commit/a67019ec4d31c62d3e8423497f5b36a25d10e638))
+
+
+### Bug Fixes
+
+* **api:** prevent dev RPC config drift ([#101](https://github.com/solana-foundation/solana-developer-platform/issues/101)) ([f43ed93](https://github.com/solana-foundation/solana-developer-platform/commit/f43ed931dea99cd4531f1e1a9a76842d51dc23b8))
+* **web:** improve token status and api key actions ([#104](https://github.com/solana-foundation/solana-developer-platform/issues/104)) ([d435cf4](https://github.com/solana-foundation/solana-developer-platform/commit/d435cf484c234837377ab93f5600905b9af47a03))
+
+
+### Performance Improvements
+
+* **dashboard:** defer heavy wallet and activity loads ([#110](https://github.com/solana-foundation/solana-developer-platform/issues/110)) ([87605b8](https://github.com/solana-foundation/solana-developer-platform/commit/87605b810aa6dc4d7a0905c5cd0d4cc51039a218))
+
 ## [0.5.3](https://github.com/solana-foundation/solana-developer-platform/compare/v0.5.2...v0.5.3) (2026-03-17)
 
 
