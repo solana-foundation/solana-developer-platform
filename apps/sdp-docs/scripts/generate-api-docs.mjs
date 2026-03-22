@@ -1,7 +1,12 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { PUBLIC_TAG_SLUGS, getPrimaryTagName, isPublicTag, slugify } from "./lib/public-openapi.mjs";
+import {
+  PUBLIC_TAG_SLUGS,
+  getPrimaryTagName,
+  isPublicTag,
+  slugify,
+} from "./lib/public-openapi.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -92,9 +97,7 @@ const renderTagPage = ({ tagName, description, operations }) => {
     return left.path.localeCompare(right.path);
   });
 
-  const rows = sortedOperations
-    .map(renderOperationRow)
-    .join("\n");
+  const rows = sortedOperations.map(renderOperationRow).join("\n");
 
   return `---
 title: ${tagName}
@@ -137,10 +140,7 @@ const extractRenderedRows = (content) => {
   return body
     .split(/\r?\n/)
     .filter(
-      (line) =>
-        line.startsWith("| ") &&
-        !line.startsWith("| Method") &&
-        !line.startsWith("| ---")
+      (line) => line.startsWith("| ") && !line.startsWith("| Method") && !line.startsWith("| ---")
     );
 };
 
