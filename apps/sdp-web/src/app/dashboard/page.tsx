@@ -1,4 +1,3 @@
-import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createSdpApiClient } from "@/lib/sdp-api";
 import { auth } from "@clerk/nextjs/server";
@@ -8,7 +7,7 @@ import { resolveTotalBalance } from "./payments/payments-overview.utils";
 import { fetchPaymentsAggregate, fetchPaymentsWallets } from "./payments/payments-page.data";
 
 export default async function DashboardPage() {
-  const { userId, orgId, orgRole } = await auth();
+  const { userId, orgId } = await auth();
   if (!userId) {
     redirect("/sign-in");
   }
@@ -17,8 +16,6 @@ export default async function DashboardPage() {
   }
 
   const trace = createTimedTrace("dashboard.home.page");
-  const dashboardAccess = resolveDashboardAccess(orgRole);
-
   try {
     const apiClient = await trace.step("create_sdp_api_client", () =>
       createSdpApiClient(trace.childContext("dashboard.home.api"))
@@ -45,7 +42,6 @@ export default async function DashboardPage() {
 
     return (
       <HomeWorkspace
-        dashboardAccess={dashboardAccess}
         totalBalance={totalBalance}
         totalBalanceError={aggregateError}
         wallets={wallets}

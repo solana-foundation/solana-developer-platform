@@ -287,7 +287,7 @@ export function OrganizationRpcSettingsForm({
               size="sm"
               variant="secondary"
               className="w-full sm:w-[112px] sm:justify-center"
-              disabled={!canManageSettings || isTesting || isSaving}
+              disabled={isTesting || isSaving}
               onClick={() => {
                 void testProvider();
               }}
