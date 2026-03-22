@@ -16,7 +16,6 @@ export type TokenManagementTab =
   | "fund-management";
 export type AdminAction =
   | "update-metadata"
-  | "refresh-supply"
   | "mint"
   | "burn"
   | "seize"
@@ -127,6 +126,27 @@ export interface ForceBurnFormState {
   delegateAuthority: string;
   memo: string;
   signingWalletId: string;
+}
+
+export interface MintValidationErrors {
+  destination: string | null;
+  amount: string | null;
+}
+
+export interface BurnValidationErrors {
+  source: string | null;
+  amount: string | null;
+}
+
+export interface SeizeValidationErrors {
+  source: string | null;
+  destination: string | null;
+  amount: string | null;
+}
+
+export interface ForceBurnValidationErrors {
+  source: string | null;
+  amount: string | null;
 }
 
 export interface AuthorityFormState {

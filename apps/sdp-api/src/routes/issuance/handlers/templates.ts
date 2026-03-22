@@ -6,7 +6,7 @@
 
 import { notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
-import { getTemplateInfo, listTemplates } from "@/services/issuance/templates";
+import { getPublicTemplateInfo, listTemplates } from "@/services/issuance/templates";
 import type { Env } from "@/types/env";
 import type { ListTemplatesResponse, TokenTemplateResponse } from "@sdp/types";
 import type { Context } from "hono";
@@ -31,7 +31,7 @@ export const listTokenTemplates = async (c: AppContext) => {
 export const getTokenTemplate = async (c: AppContext) => {
   const { templateId } = c.req.param();
 
-  const template = getTemplateInfo(templateId);
+  const template = getPublicTemplateInfo(templateId);
 
   if (!template) {
     throw notFound("Template");

@@ -72,6 +72,7 @@ export default async function ApiKeysPage() {
               <GeneratedApiKeyModal
                 keyValue={flash.key ?? ""}
                 message={flash.message}
+                apiKeyId={flash.apiKeyId}
                 keyPrefix={flash.keyPrefix}
               />
             ) : (

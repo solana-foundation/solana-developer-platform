@@ -4,6 +4,7 @@ import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { fetchActiveApiKeys, resolvePlaygroundApiBaseUrl } from "../playground-api-data";
 import {
+  fetchDashboardPaymentTransfers,
   fetchPaymentTransfers,
   fetchPaymentsAggregate,
   fetchPaymentsIssuedTokenSymbols,
@@ -56,7 +57,11 @@ export default async function PaymentsPage({ searchParams }: PaymentsPageProps) 
       isPlaygroundTab
         ? Promise.resolve({ ok: true as const, data: null })
         : trace.step("fetch_payments_aggregate", () => fetchPaymentsAggregate(apiClient.request)),
-      trace.step("fetch_payment_transfers", () => fetchPaymentTransfers(apiClient.request)),
+      trace.step("fetch_payment_transfers", () =>
+        isPlaygroundTab
+          ? fetchPaymentTransfers(apiClient.request)
+          : fetchDashboardPaymentTransfers(apiClient.request)
+      ),
       isPlaygroundTab
         ? Promise.resolve({ ok: true as const, data: [] })
         : trace.step("fetch_payment_token_symbols", () =>

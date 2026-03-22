@@ -43,7 +43,7 @@ export function CreateIssuanceTokenModal({
   open,
   onOpenChange,
   hideTrigger = false,
-  triggerLabel = "Create token",
+  triggerLabel = "Create draft",
   triggerClassName,
 }: CreateIssuanceTokenModalProps = {}) {
   const router = useRouter();
@@ -180,7 +180,7 @@ export function CreateIssuanceTokenModal({
       setSubmitState(response);
 
       if (response.state === "success") {
-        toast.success(response.message ?? "Token created successfully.");
+        toast.success(response.message ?? "Draft created. Deploy it on-chain from the token page.");
         close();
         router.refresh();
       }
@@ -220,10 +220,12 @@ export function CreateIssuanceTokenModal({
               <div className="flex items-start justify-between border-b border-[rgba(28,28,29,0.1)] bg-[rgba(28,28,29,0.02)] px-8 py-7">
                 <div>
                   <p className="text-4xl leading-none font-semibold">
-                    {template ? getTemplateTitle(template) : "Create New Token"}
+                    {template ? getTemplateTitle(template) : "Create New Token Draft"}
                   </p>
                   <p className="mt-2 text-lg text-[rgba(28,28,29,0.62)]">
-                    {template ? "Configure your token parameters" : "Choose how you want to start."}
+                    {template
+                      ? "Configure the draft now, then deploy it on-chain from the token page."
+                      : "Choose a template to create a draft first, then deploy it on-chain."}
                   </p>
                 </div>
                 <button

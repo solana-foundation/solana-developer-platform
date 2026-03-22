@@ -203,10 +203,9 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Template D
 
     expect(body.data.templates).toBeDefined();
     expect(Array.isArray(body.data.templates)).toBe(true);
-    expect(body.data.templates.length).toBe(4);
+    expect(body.data.templates.length).toBe(3);
     const templateIds = body.data.templates.map((t) => t.id);
     expect(templateIds).toContain("stablecoin");
-    expect(templateIds).toContain("arcade");
     expect(templateIds).toContain("tokenized-security");
     expect(templateIds).toContain("custom");
   });

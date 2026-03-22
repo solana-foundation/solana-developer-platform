@@ -106,8 +106,8 @@ function getTokenTypeLabel(template: IssuanceTokenView["template"]): string {
   return template;
 }
 
-function getDeploymentStatus(token: IssuanceTokenView): "pending" | "active" {
-  return token.mintAddress || token.deployedAt ? "active" : "pending";
+function getDeploymentStatus(token: IssuanceTokenView): "draft" | "active" {
+  return token.mintAddress || token.deployedAt ? "active" : "draft";
 }
 
 export function IssuanceWorkspace({
@@ -220,7 +220,7 @@ export function IssuanceWorkspace({
                 className="h-10 rounded-[10px] bg-[#1c1c1d] px-4 text-white hover:bg-[rgba(28,28,29,0.92)]"
                 onClick={() => setIsCreateTokenModalOpen(true)}
               >
-                Create token
+                Create draft
               </Button>
             </div>
 

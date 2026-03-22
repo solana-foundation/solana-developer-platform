@@ -1792,6 +1792,148 @@ describe("Payments routes", () => {
       expect(statuses).toEqual(["confirmed", "pending"]);
     });
 
+    it("surfaces observed inbound transfers for wallet history even without a DB record", async () => {
+      const { getSignaturesForAddress } = await import("@/services/solana/rpc");
+      const observedSig =
+        // biome-ignore lint/nursery/noSecrets: Test transaction signature, not a secret.
+        "3o9XWnJ7CyD6be8xXh8hFXRrM9rPzGQhE1mQ4Z8VjYkU7LZtP4R3WnV5uA2sD1fG6hJ7kL8mN9pQ1rS2tU3v";
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            result: {
+              blockTime: 1700000100,
+              slot: 101,
+              meta: {
+                err: null,
+                fee: 5000,
+                preTokenBalances: [
+                  {
+                    accountIndex: 0,
+                    mint: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+                    owner: TEST_SOLANA_ADDRESSES.wallet2,
+                    uiTokenAmount: {
+                      amount: "10000000",
+                      decimals: 6,
+                      uiAmountString: "10",
+                    },
+                  },
+                  {
+                    accountIndex: 1,
+                    mint: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+                    owner: TEST_SOLANA_ADDRESSES.wallet1,
+                    uiTokenAmount: {
+                      amount: "0",
+                      decimals: 6,
+                      uiAmountString: "0",
+                    },
+                  },
+                ],
+                postTokenBalances: [
+                  {
+                    accountIndex: 0,
+                    mint: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+                    owner: TEST_SOLANA_ADDRESSES.wallet2,
+                    uiTokenAmount: {
+                      amount: "0",
+                      decimals: 6,
+                      uiAmountString: "0",
+                    },
+                  },
+                  {
+                    accountIndex: 1,
+                    mint: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+                    owner: TEST_SOLANA_ADDRESSES.wallet1,
+                    uiTokenAmount: {
+                      amount: "10000000",
+                      decimals: 6,
+                      uiAmountString: "10",
+                    },
+                  },
+                ],
+              },
+              transaction: {
+                message: {
+                  accountKeys: [
+                    "SrcTokenAcct111111111111111111111111111111",
+                    "DstTokenAcct111111111111111111111111111111",
+                  ],
+                  instructions: [
+                    {
+                      program: "spl-token",
+                      parsed: {
+                        type: "transferChecked",
+                        info: {
+                          source: "SrcTokenAcct111111111111111111111111111111",
+                          destination: "DstTokenAcct111111111111111111111111111111",
+                          mint: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+                          tokenAmount: {
+                            amount: "10000000",
+                            decimals: 6,
+                            uiAmountString: "10",
+                          },
+                        },
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          }),
+          {
+            status: 200,
+            headers: {
+              "Content-Type": "application/json",
+            },
+          }
+        )
+      );
+
+      vi.mocked(getSignaturesForAddress).mockResolvedValueOnce([
+        {
+          signature: observedSig as unknown as Signature,
+          slot: 101n,
+          blockTime: 1700000100n,
+          err: null,
+        },
+      ]);
+
+      try {
+        const res = await app.request(
+          `/v1/payments/transfers?wallet=${TEST_WALLET_ID}`,
+          {
+            method: "GET",
+            headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
+          },
+          env
+        );
+
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as {
+          data: Array<{
+            id: string;
+            amount: string;
+            direction: string;
+            signature: string | null;
+            status: string;
+            token: string;
+          }>;
+          meta: { total: number };
+        };
+        expect(body.meta.total).toBe(1);
+        expect(body.data).toHaveLength(1);
+        expect(body.data[0]).toMatchObject({
+          amount: "10",
+          direction: "inbound",
+          signature: observedSig,
+          status: "confirmed",
+          token: "USDC",
+        });
+        expect(body.data[0]?.id).toMatch(/^xfr_observed_/);
+      } finally {
+        fetchSpy.mockRestore();
+      }
+    });
+
     it("returns all transfers via DB-only path when no wallet filter is provided", async () => {
       const { getSignaturesForAddress } = await import("@/services/solana/rpc");
 

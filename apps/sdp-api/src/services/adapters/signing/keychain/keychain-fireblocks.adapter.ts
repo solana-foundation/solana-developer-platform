@@ -16,6 +16,11 @@ import type { Address } from "@solana/kit";
 import { BaseKeychainAdapter } from "./base-keychain.adapter";
 import type { KeychainFireblocksConfig } from "./types";
 
+type FireblocksSignerDebugHooks = {
+  __sdpDebugPatched__?: boolean;
+  request?: <T>(method: string, uri: string, body?: unknown) => Promise<T>;
+};
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Adapter Implementation
 // ═══════════════════════════════════════════════════════════════════════════
@@ -42,6 +47,7 @@ export class KeychainFireblocksAdapter extends BaseKeychainAdapter {
       // Always use RAW signing - we handle broadcast separately via Kora
       useProgramCall: false,
     });
+    this.attachDebugLogging();
 
     // Cast to SolanaSigner interface
     this.signer = this.fireblocksSigner as unknown as SolanaSigner;
@@ -98,5 +104,56 @@ export class KeychainFireblocksAdapter extends BaseKeychainAdapter {
     if (!this.initialized) {
       await this.init();
     }
+  }
+
+  private attachDebugLogging(): void {
+    const signer = this.fireblocksSigner as unknown as FireblocksSignerDebugHooks;
+
+    if (signer.__sdpDebugPatched__ || typeof signer.request !== "function") {
+      return;
+    }
+
+    const originalRequest = signer.request.bind(this.fireblocksSigner) as <T>(
+      method: string,
+      uri: string,
+      body?: unknown
+    ) => Promise<T>;
+
+    signer.request = (async <T>(method: string, uri: string, body?: unknown): Promise<T> => {
+      try {
+        console.info("sdp_fireblocks_api_request", {
+          method,
+          uri,
+          body,
+        });
+
+        const response = await originalRequest<T>(method, uri, body);
+
+        console.info("sdp_fireblocks_api_response", {
+          method,
+          uri,
+          body,
+          response,
+        });
+
+        return response;
+      } catch (error) {
+        console.error("sdp_fireblocks_api_error", {
+          method,
+          uri,
+          body,
+          error:
+            error instanceof Error
+              ? {
+                  message: error.message,
+                  stack: error.stack,
+                }
+              : String(error),
+        });
+        throw error;
+      }
+    }) as typeof signer.request;
+
+    signer.__sdpDebugPatched__ = true;
   }
 }

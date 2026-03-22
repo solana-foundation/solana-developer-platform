@@ -1,4 +1,4 @@
-import { parseDecimalAmount, toMosaicAmount } from "@/lib/amount";
+import { parseDecimalAmount } from "@/lib/amount";
 import { resolveApiKeySigningWalletId } from "@/lib/api-key-wallet-auth";
 import { getAuth } from "@/lib/auth";
 import { AppError, notFound } from "@/lib/errors";
@@ -13,6 +13,10 @@ import type { Env } from "@/types/env";
 import type { Context } from "hono";
 import { mintSchema } from "../schemas";
 import { buildIdempotencyMetadata } from "./idempotency";
+import {
+  assertTokenAllowsSupplyOperation,
+  parsePositiveTokenAmount,
+} from "./token-operation-validation";
 
 type AppContext = Context<{ Bindings: Env }>;
 
@@ -40,10 +44,7 @@ export const prepareMint = async (c: AppContext) => {
     throw notFound("Token");
   }
 
-  // Validation checks
-  if (token.status !== "active") {
-    throw new AppError("TOKEN_NOT_ACTIVE", "Token must be active to mint");
-  }
+  assertTokenAllowsSupplyOperation(token, "mint");
 
   if (!token.mintAddress) {
     throw new AppError("TOKEN_NOT_DEPLOYED", "Token has not been deployed to Solana");
@@ -52,6 +53,11 @@ export const prepareMint = async (c: AppContext) => {
   if (!token.isMintable) {
     throw new AppError("TOKEN_NOT_MINTABLE", "Token is not mintable");
   }
+
+  const { amountBaseUnits: mintAmount, mosaicAmount } = parsePositiveTokenAmount(
+    parsed.data.mint.amount,
+    token.decimals
+  );
 
   // Check allowlist if required
   if (token.requiresAllowlist) {
@@ -64,7 +70,6 @@ export const prepareMint = async (c: AppContext) => {
   // Check max supply
   if (token.maxSupply) {
     const currentSupply = parseDecimalAmount(token.totalSupply, token.decimals);
-    const mintAmount = parseDecimalAmount(parsed.data.mint.amount, token.decimals);
     const maxSupply = parseDecimalAmount(token.maxSupply, token.decimals);
 
     if (currentSupply + mintAmount > maxSupply) {
@@ -90,7 +95,7 @@ export const prepareMint = async (c: AppContext) => {
   const prepared = await mosaic.prepareMintTo({
     mint: mintAddress,
     destination,
-    amount: toMosaicAmount(parsed.data.mint.amount, token.decimals),
+    amount: mosaicAmount,
     mintAuthority,
     feePayer: signer.address,
   });
@@ -166,10 +171,7 @@ export const executeMint = async (c: AppContext) => {
     throw notFound("Token");
   }
 
-  // Validation checks (same as prepare)
-  if (token.status !== "active") {
-    throw new AppError("TOKEN_NOT_ACTIVE", "Token must be active to mint");
-  }
+  assertTokenAllowsSupplyOperation(token, "mint");
 
   if (!token.mintAddress) {
     throw new AppError("TOKEN_NOT_DEPLOYED", "Token has not been deployed to Solana");
@@ -178,6 +180,11 @@ export const executeMint = async (c: AppContext) => {
   if (!token.isMintable) {
     throw new AppError("TOKEN_NOT_MINTABLE", "Token is not mintable");
   }
+
+  const { amountBaseUnits: mintAmount, mosaicAmount } = parsePositiveTokenAmount(
+    parsed.data.mint.amount,
+    token.decimals
+  );
 
   if (token.requiresAllowlist) {
     const isAllowed = await tokenService.isAddressAllowed(tokenId, parsed.data.mint.destination);
@@ -188,7 +195,6 @@ export const executeMint = async (c: AppContext) => {
 
   if (token.maxSupply) {
     const currentSupply = parseDecimalAmount(token.totalSupply, token.decimals);
-    const mintAmount = parseDecimalAmount(parsed.data.mint.amount, token.decimals);
     const maxSupply = parseDecimalAmount(token.maxSupply, token.decimals);
 
     if (currentSupply + mintAmount > maxSupply) {
@@ -251,7 +257,7 @@ export const executeMint = async (c: AppContext) => {
     const result = await mosaic.mintTo({
       mint: mintAddress,
       destination,
-      amount: toMosaicAmount(parsed.data.mint.amount, token.decimals),
+      amount: mosaicAmount,
       mintAuthority: signer.address,
       feePayer: signer.address,
     });

@@ -14,6 +14,7 @@ interface ApiKeyFlash {
   level: FlashLevel;
   message: string;
   key?: string;
+  apiKeyId?: string;
   keyPrefix?: string;
 }
 
@@ -216,6 +217,7 @@ export async function createApiKeyAction(formData: FormData) {
       level: "success",
       message: `API key "${response.apiKey.name}" created. Save it now; it will not be shown again.`,
       key: response.apiKey.key,
+      apiKeyId: response.apiKey.id,
       keyPrefix: response.apiKey.keyPrefix,
     });
   } catch (error) {
@@ -262,6 +264,7 @@ export async function rotateApiKeyAction(formData: FormData) {
       level: "success",
       message: `API key rotated. Previous key remains valid until ${new Date(response.previousKey.rotationDeadline).toLocaleString()}.`,
       key: response.apiKey.key,
+      apiKeyId: response.apiKey.id,
       keyPrefix: response.apiKey.keyPrefix,
     });
   } catch (error) {

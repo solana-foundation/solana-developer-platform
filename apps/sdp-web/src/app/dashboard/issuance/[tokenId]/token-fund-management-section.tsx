@@ -3,13 +3,7 @@
 import { Button } from "@/components/ui/button";
 import { TokenDisabledActionTooltip } from "./token-disabled-action-tooltip";
 
-export type FundManagementModalAction =
-  | "deploy"
-  | "mint"
-  | "burn"
-  | "seize"
-  | "force-burn"
-  | "refresh-supply";
+export type FundManagementModalAction = "deploy" | "mint" | "burn";
 
 export interface FundManagementRow {
   id: FundManagementModalAction;

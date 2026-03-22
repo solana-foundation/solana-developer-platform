@@ -1,18 +1,121 @@
-import { toMosaicAmount } from "@/lib/amount";
 import { resolveApiKeySigningWalletId } from "@/lib/api-key-wallet-auth";
 import { getAuth } from "@/lib/auth";
 import { AppError, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
-import { assertValidAddress } from "@/lib/solana";
+import { type Address, assertValidAddress } from "@/lib/solana";
 import { AuditService } from "@/services/audit.service";
 import { createOrgSigner, createToken2022Service } from "@/services/solana";
+import { createRpc } from "@/services/solana/rpc";
 import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
+import type { Rpc, SolanaRpcApi } from "@solana/kit";
+import { resolveTokenAccount } from "@solana/mosaic-sdk";
 import type { Context } from "hono";
 import { burnSchema } from "../schemas";
 import { buildIdempotencyMetadata } from "./idempotency";
+import {
+  assertTokenAllowsSupplyOperation,
+  parsePositiveTokenAmount,
+} from "./token-operation-validation";
 
 type AppContext = Context<{ Bindings: Env }>;
+
+function toBurnOperationAppError(error: unknown): AppError | null {
+  if (!(error instanceof Error)) {
+    return null;
+  }
+
+  if (error.message.startsWith("Burn source must be the authority wallet")) {
+    return new AppError(
+      "INVALID_BURN_SOURCE",
+      "Standard burn only supports the selected signer wallet or its token account. Use force-burn for a different account.",
+      {
+        field: "source",
+        hint: "Choose the signer wallet as the source, or use force-burn for a different account.",
+      }
+    );
+  }
+
+  if (
+    error.message === "Token account not found" ||
+    error.message === "Failed to parse token account data" ||
+    error.message.startsWith("Unable to parse token account data") ||
+    error.message.includes("is not a valid account for mint") ||
+    error.message.includes("is not for mint")
+  ) {
+    return new AppError(
+      "TOKEN_ACCOUNT_NOT_FOUND",
+      "No token holding account was found for this mint. Provide the signer wallet or its token account.",
+      {
+        field: "source",
+        hint: "Use the selected signer wallet address, or provide its token account for this mint.",
+      }
+    );
+  }
+
+  return null;
+}
+
+async function resolveValidatedBurnSource(
+  env: Env,
+  authorityAddress: Address,
+  requestedSource: Address,
+  mintAddress: Address,
+  amountBaseUnits: bigint,
+  tokenSymbol: string
+): Promise<Address> {
+  const rpc = createRpc(env) as Rpc<SolanaRpcApi>;
+
+  let authorityAta: Awaited<ReturnType<typeof resolveTokenAccount>>;
+  try {
+    authorityAta = await resolveTokenAccount(rpc, authorityAddress, mintAddress);
+  } catch (error) {
+    const appError = toBurnOperationAppError(error);
+    if (appError) {
+      throw appError;
+    }
+    throw error;
+  }
+
+  if (!authorityAta.isInitialized) {
+    throw new AppError(
+      "TOKEN_ACCOUNT_NOT_FOUND",
+      "The selected signer wallet does not currently hold this token.",
+      {
+        field: "source",
+        hint: "Burn uses the signer wallet's token account. Mint or receive tokens into that wallet first, or use force-burn for a different account.",
+      }
+    );
+  }
+
+  const normalizedSource =
+    requestedSource === authorityAddress ? authorityAta.tokenAccount : requestedSource;
+
+  if (normalizedSource !== authorityAta.tokenAccount) {
+    throw new AppError(
+      "INVALID_BURN_SOURCE",
+      "Standard burn only supports the selected signer wallet or its token account. Use force-burn for a different account.",
+      {
+        field: "source",
+        hint: "Choose the signer wallet as the source, or use force-burn for another wallet or token account.",
+      }
+    );
+  }
+
+  if (authorityAta.balance < amountBaseUnits) {
+    throw new AppError(
+      "INSUFFICIENT_TOKEN_BALANCE",
+      `The selected signer wallet only holds ${authorityAta.uiBalance} ${tokenSymbol}.`,
+      {
+        field: "amount",
+        available: authorityAta.uiBalance.toString(),
+        hint: "Lower the burn amount, fund this wallet first, or use force-burn for a different account.",
+      }
+    );
+  }
+
+  return normalizedSource;
+}
 
 export const prepareBurn = async (c: AppContext) => {
   const { tokenId } = c.req.param();
@@ -38,9 +141,7 @@ export const prepareBurn = async (c: AppContext) => {
     throw notFound("Token");
   }
 
-  if (token.status !== "active") {
-    throw new AppError("TOKEN_NOT_ACTIVE", "Token must be active to burn");
-  }
+  assertTokenAllowsSupplyOperation(token, "burn");
 
   if (!token.mintAddress) {
     throw new AppError("TOKEN_NOT_DEPLOYED", "Token has not been deployed to Solana");
@@ -56,19 +157,40 @@ export const prepareBurn = async (c: AppContext) => {
   const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId, signingWalletId);
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
   const source = assertValidAddress(parsed.data.burn.source, "source");
-  const burnAmount = toMosaicAmount(parsed.data.burn.amount, token.decimals);
+  const { amountBaseUnits, mosaicAmount } = parsePositiveTokenAmount(
+    parsed.data.burn.amount,
+    token.decimals
+  );
+  const normalizedSource = await resolveValidatedBurnSource(
+    c.env,
+    signer.address,
+    source,
+    mintAddress,
+    amountBaseUnits,
+    token.symbol
+  );
 
   // Build unsigned transaction
   const token2022 = createToken2022Service(c.env, signer);
-  const prepared = await token2022.prepareBurn(
-    {
-      mint: mintAddress,
-      source,
-      amount: burnAmount,
-      authority: signer.address,
-    },
-    parsed.data.options?.simulate ?? false
-  );
+  const prepared = await (async () => {
+    try {
+      return await token2022.prepareBurn(
+        {
+          mint: mintAddress,
+          source: normalizedSource,
+          amount: mosaicAmount,
+          authority: signer.address,
+        },
+        parsed.data.options?.simulate ?? false
+      );
+    } catch (error) {
+      const appError = toBurnOperationAppError(error);
+      if (appError) {
+        throw appError;
+      }
+      throw error;
+    }
+  })();
 
   // Create transaction record with serialized tx
   const { transaction: tx } = await tokenService.createTransaction({
@@ -133,9 +255,7 @@ export const executeBurn = async (c: AppContext) => {
     throw notFound("Token");
   }
 
-  if (token.status !== "active") {
-    throw new AppError("TOKEN_NOT_ACTIVE", "Token must be active to burn");
-  }
+  assertTokenAllowsSupplyOperation(token, "burn");
 
   if (!token.mintAddress) {
     throw new AppError("TOKEN_NOT_DEPLOYED", "Token has not been deployed to Solana");
@@ -148,7 +268,10 @@ export const executeBurn = async (c: AppContext) => {
   );
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
   const source = assertValidAddress(parsed.data.burn.source, "source");
-  const burnAmount = toMosaicAmount(parsed.data.burn.amount, token.decimals);
+  const { amountBaseUnits, mosaicAmount } = parsePositiveTokenAmount(
+    parsed.data.burn.amount,
+    token.decimals
+  );
 
   const idempotencyMetadata = buildIdempotencyMetadata(c.req.header("Idempotency-Key"), {
     tokenId,
@@ -183,14 +306,22 @@ export const executeBurn = async (c: AppContext) => {
       auth.projectId,
       signingWalletId
     );
+    const normalizedSource = await resolveValidatedBurnSource(
+      c.env,
+      signer.address,
+      source,
+      mintAddress,
+      amountBaseUnits,
+      token.symbol
+    );
 
     // Execute burn on Solana
     const token2022 = createToken2022Service(c.env, signer);
 
     const result = await token2022.burn({
       mint: mintAddress,
-      source,
-      amount: burnAmount,
+      source: normalizedSource,
+      amount: mosaicAmount,
       authority: signer,
     });
 
@@ -225,8 +356,16 @@ export const executeBurn = async (c: AppContext) => {
     // Update transaction as failed
     await tokenService.updateTransaction(tx.id, {
       status: "failed",
-      error: error instanceof Error ? error.message : "Unknown error",
+      error:
+        toBurnOperationAppError(error)?.message ??
+        (error instanceof Error ? error.message : "Unknown error"),
     });
+
+    const appError = toBurnOperationAppError(error);
+    if (appError) {
+      throw appError;
+    }
+
     throw error;
   }
 };

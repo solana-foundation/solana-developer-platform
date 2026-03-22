@@ -134,9 +134,7 @@ export function CreateTokenIdentityStep({
                 ? "Stablecoin defaults to 6 decimals."
                 : template === "custom"
                   ? "Custom tokens default to 9 decimals."
-                  : template === "tokenized-security"
-                    ? "Tokenized Security uses 8 decimals."
-                    : "Arcade tokens commonly use 0 decimals."}
+                  : "Tokenized Security uses 8 decimals."}
             </p>
           </div>
         </div>

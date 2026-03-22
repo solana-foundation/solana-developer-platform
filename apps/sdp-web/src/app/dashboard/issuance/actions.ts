@@ -196,7 +196,7 @@ export async function createIssuanceTokenAction(
 
     return {
       state: "success",
-      message: `Token ${tokenName} created successfully.`,
+      message: `Draft ${tokenName} created. Deploy it on-chain from the token page.`,
       tokenId,
       tokenName,
     };

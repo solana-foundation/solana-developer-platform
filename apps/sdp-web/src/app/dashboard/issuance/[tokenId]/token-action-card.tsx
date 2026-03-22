@@ -12,9 +12,11 @@ interface TokenActionCardProps {
 export function TokenActionCard({ title, description, children }: TokenActionCardProps) {
   return (
     <Card className="gap-4">
-      <CardHeader>
-        <CardTitle>{title}</CardTitle>
-        {description ? <CardDescription>{description}</CardDescription> : null}
+      <CardHeader className="gap-1.5">
+        <CardTitle className="text-[17px] leading-6">{title}</CardTitle>
+        {description ? (
+          <CardDescription className="text-[13px] leading-5">{description}</CardDescription>
+        ) : null}
       </CardHeader>
       <CardContent className="space-y-4">{children}</CardContent>
     </Card>

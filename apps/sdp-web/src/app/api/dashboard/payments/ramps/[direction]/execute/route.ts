@@ -2,7 +2,7 @@ import { createSdpApiClient } from "@/lib/sdp-api";
 import { NextResponse } from "next/server";
 
 type RouteContext = {
-  params: Promise<{ direction: string }> | { direction: string };
+  params: Promise<{ direction: string }>;
 };
 
 async function readParams(context: RouteContext) {

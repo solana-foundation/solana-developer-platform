@@ -3,12 +3,11 @@ title: Issuance Token Types
 description: Supported issuance templates and default controls.
 ---
 
-The issuance service currently defines four token templates:
+The public issuance surface currently exposes three token templates:
 
 | Template | Defaults | Notes |
 | --- | --- | --- |
 | `stablecoin` | 6 decimals, permanent delegate + pausable extensions, default account state initialized | Intended for fiat-backed token patterns with compliance controls. |
-| `arcade` | 0 decimals, permanent delegate + pausable extensions, default account state initialized | Closed-loop gaming/points style tokens. |
 | `tokenized-security` | 8 decimals, allowlist required, permanent delegate + pausable + scaled UI amount extensions, default account state frozen | Regulated asset flows with stronger defaults. |
 | `custom` | 9 decimals default (up to 18 max), extension set is fully configurable | Use when your requirements do not match preset templates. |
 

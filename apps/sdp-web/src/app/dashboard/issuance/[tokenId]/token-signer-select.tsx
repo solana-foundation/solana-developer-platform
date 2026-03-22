@@ -24,8 +24,12 @@ export function TokenSignerSelect({
 }: TokenSignerSelectProps) {
   const fieldId = useId();
   const isUnavailable = Boolean(signerUnavailableReason) || signerWallets.length === 0;
-  const message =
-    signerUnavailableReason ?? "SDP will sign this transaction with the selected wallet.";
+  const isLocked = !isUnavailable && signerWallets.length === 1;
+  const message = signerUnavailableReason
+    ? signerUnavailableReason
+    : isLocked
+      ? "SDP will sign this action with the required authority wallet."
+      : "SDP will sign this transaction with the selected wallet.";
   const selectedWallet =
     signerWallets.find((wallet) => wallet.walletId === signerWalletId) ?? signerWallets[0] ?? null;
 
@@ -37,32 +41,36 @@ export function TokenSignerSelect({
       >
         {label}
       </label>
-      <select
-        id={fieldId}
-        value={signerWalletId}
-        required={!isUnavailable}
-        disabled={isUnavailable}
-        onChange={(event) => onSignerWalletIdChange(event.currentTarget.value)}
-        className="h-11 w-full rounded-[12px] border border-[rgba(28,28,29,0.12)] bg-white px-4 text-sm text-[#1c1c1d] shadow-none outline-none transition-[box-shadow,border-color] focus:border-[rgba(28,28,29,0.28)] focus:ring-2 focus:ring-[rgba(28,28,29,0.12)] disabled:cursor-not-allowed disabled:bg-[rgba(28,28,29,0.04)] disabled:text-[rgba(28,28,29,0.45)]"
-      >
-        <option value="" disabled>
-          Select a signer wallet
-        </option>
-        {signerWallets.map((wallet) => (
-          <option key={wallet.id} value={wallet.walletId}>
-            {getSignerWalletOptionLabel(wallet)}
+      {isLocked && selectedWallet ? (
+        <TokenWalletIdentityCard wallet={selectedWallet} />
+      ) : (
+        <select
+          id={fieldId}
+          value={signerWalletId}
+          required={!isUnavailable}
+          disabled={isUnavailable}
+          onChange={(event) => onSignerWalletIdChange(event.currentTarget.value)}
+          className="h-11 w-full rounded-[12px] border border-[rgba(28,28,29,0.12)] bg-white px-4 text-sm text-[#1c1c1d] shadow-none outline-none transition-[box-shadow,border-color] focus:border-[rgba(28,28,29,0.28)] focus:ring-2 focus:ring-[rgba(28,28,29,0.12)] disabled:cursor-not-allowed disabled:bg-[rgba(28,28,29,0.04)] disabled:text-[rgba(28,28,29,0.45)]"
+        >
+          <option value="" disabled>
+            Select a signer wallet
           </option>
-        ))}
-      </select>
+          {signerWallets.map((wallet) => (
+            <option key={wallet.id} value={wallet.walletId}>
+              {getSignerWalletOptionLabel(wallet)}
+            </option>
+          ))}
+        </select>
+      )}
       <p
         className={[
-          "text-sm",
-          isUnavailable ? "text-[#8a1f2a]" : "text-[rgba(28,28,29,0.68)]",
+          "text-sm leading-5",
+          isUnavailable ? "text-[#9e2b38]" : "text-[rgba(28,28,29,0.68)]",
         ].join(" ")}
       >
         {message}
       </p>
-      {showSelectionSummary && !isUnavailable && selectedWallet ? (
+      {showSelectionSummary && !isUnavailable && selectedWallet && !isLocked ? (
         <TokenWalletIdentityCard wallet={selectedWallet} />
       ) : null}
     </div>

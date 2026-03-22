@@ -8,11 +8,15 @@ import { TokenActionCard } from "./token-action-card";
 import type {
   AdminAction,
   BurnFormState,
+  BurnValidationErrors,
   MetadataFormState,
   MintFormState,
+  MintValidationErrors,
 } from "./token-management-workspace.types";
 import { NON_WHITESPACE_PATTERN, SOLANA_ADDRESS_PATTERN } from "./token-management-workspace.utils";
 import { TokenSignerSelect } from "./token-signer-select";
+import { TokenValidationMessage } from "./token-validation-message";
+import { TokenWalletAddressField } from "./token-wallet-address-field";
 
 interface TokenActionPrimaryFormsProps {
   activeAction: AdminAction | null;
@@ -24,10 +28,15 @@ interface TokenActionPrimaryFormsProps {
   burnForm: BurnFormState;
   setBurnForm: Dispatch<SetStateAction<BurnFormState>>;
   signerWallets: PaymentsDashboardWallet[];
+  walletOptions: PaymentsDashboardWallet[];
   signerUnavailableReason: string | null;
+  mintValidationErrors: MintValidationErrors;
+  mintValidationReason: string | null;
+  burnValidationErrors: BurnValidationErrors;
+  burnValidationReason: string | null;
+  submitAlignment?: "start" | "end";
   onSignerWalletIdChange: (value: string) => void;
   onUpdateMetadata: () => void;
-  onRefreshSupply: () => void;
   onMint: () => void;
   onBurn: () => void;
 }
@@ -42,10 +51,15 @@ export function TokenActionPrimaryForms({
   burnForm,
   setBurnForm,
   signerWallets,
+  walletOptions,
   signerUnavailableReason,
+  mintValidationErrors,
+  mintValidationReason,
+  burnValidationErrors,
+  burnValidationReason,
+  submitAlignment = "start",
   onSignerWalletIdChange,
   onUpdateMetadata,
-  onRefreshSupply,
   onMint,
   onBurn,
 }: TokenActionPrimaryFormsProps) {
@@ -107,21 +121,17 @@ export function TokenActionPrimaryForms({
                 }))
               }
             />
-            <Button type="submit" disabled={isPending}>
-              Save metadata
-            </Button>
+            <div
+              className={[
+                "flex flex-wrap gap-2",
+                submitAlignment === "end" ? "justify-end" : "",
+              ].join(" ")}
+            >
+              <Button type="submit" disabled={isPending}>
+                Save metadata
+              </Button>
+            </div>
           </form>
-        </TokenActionCard>
-      ) : null}
-
-      {activeAction === "refresh-supply" ? (
-        <TokenActionCard
-          title="Refresh Supply"
-          description="Fetch supply from RPC and update cache."
-        >
-          <Button type="button" variant="secondary" onClick={onRefreshSupply} disabled={isPending}>
-            Refresh supply
-          </Button>
         </TokenActionCard>
       ) : null}
 
@@ -143,12 +153,15 @@ export function TokenActionPrimaryForms({
               signerUnavailableReason={signerUnavailableReason}
               onSignerWalletIdChange={onSignerWalletIdChange}
             />
-            <ActionField
+            <TokenWalletAddressField
               label="Destination"
               value={mintForm.destination}
+              walletOptions={walletOptions}
               required
               pattern={SOLANA_ADDRESS_PATTERN}
               title="Enter a valid Solana address."
+              placeholder="Destination wallet or token account"
+              error={mintValidationErrors.destination}
               onChange={(value) =>
                 setMintForm((previous) => ({
                   ...previous,
@@ -164,6 +177,7 @@ export function TokenActionPrimaryForms({
               step="any"
               value={mintForm.amount}
               required
+              error={mintValidationErrors.amount}
               onChange={(value) =>
                 setMintForm((previous) => ({
                   ...previous,
@@ -181,9 +195,21 @@ export function TokenActionPrimaryForms({
                 }))
               }
             />
-            <Button type="submit" disabled={isPending || Boolean(signerUnavailableReason)}>
-              Mint tokens
-            </Button>
+            <div
+              className={[
+                "flex flex-wrap gap-2",
+                submitAlignment === "end" ? "justify-end" : "",
+              ].join(" ")}
+            >
+              <Button
+                type="submit"
+                disabled={
+                  isPending || Boolean(signerUnavailableReason) || Boolean(mintValidationReason)
+                }
+              >
+                Mint tokens
+              </Button>
+            </div>
           </form>
         </TokenActionCard>
       ) : null}
@@ -203,12 +229,15 @@ export function TokenActionPrimaryForms({
               signerUnavailableReason={signerUnavailableReason}
               onSignerWalletIdChange={onSignerWalletIdChange}
             />
-            <ActionField
+            <TokenWalletAddressField
               label="Source"
               value={burnForm.source}
+              walletOptions={walletOptions}
               required
               pattern={SOLANA_ADDRESS_PATTERN}
               title="Enter a valid Solana address."
+              placeholder="Signer wallet or its token account"
+              error={burnValidationErrors.source}
               onChange={(value) =>
                 setBurnForm((previous) => ({
                   ...previous,
@@ -224,6 +253,7 @@ export function TokenActionPrimaryForms({
               step="any"
               value={burnForm.amount}
               required
+              error={burnValidationErrors.amount}
               onChange={(value) =>
                 setBurnForm((previous) => ({
                   ...previous,
@@ -241,9 +271,21 @@ export function TokenActionPrimaryForms({
                 }))
               }
             />
-            <Button type="submit" disabled={isPending || Boolean(signerUnavailableReason)}>
-              Burn tokens
-            </Button>
+            <div
+              className={[
+                "flex flex-wrap gap-2",
+                submitAlignment === "end" ? "justify-end" : "",
+              ].join(" ")}
+            >
+              <Button
+                type="submit"
+                disabled={
+                  isPending || Boolean(signerUnavailableReason) || Boolean(burnValidationReason)
+                }
+              >
+                Burn tokens
+              </Button>
+            </div>
           </form>
         </TokenActionCard>
       ) : null}
@@ -263,6 +305,7 @@ function ActionField({
   step,
   placeholder,
   inputMode,
+  error,
 }: {
   label: string;
   value: string;
@@ -275,6 +318,7 @@ function ActionField({
   step?: string;
   placeholder?: string;
   inputMode?: ComponentProps<typeof Input>["inputMode"];
+  error?: string | null;
 }) {
   const fieldId = useId();
 
@@ -297,9 +341,11 @@ function ActionField({
         step={step}
         placeholder={placeholder}
         inputMode={inputMode}
+        aria-invalid={Boolean(error)}
         onChange={(event) => onChange(event.currentTarget.value)}
         className="h-11 rounded-[12px] border-[rgba(28,28,29,0.12)] bg-white px-4 shadow-none"
       />
+      <TokenValidationMessage message={error ?? null} />
     </div>
   );
 }

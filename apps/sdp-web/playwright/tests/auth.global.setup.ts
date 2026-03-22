@@ -76,7 +76,7 @@ setup("authenticate admin test user and save auth state", async ({ page }) => {
   });
 
   await page.goto("/dashboard/issuance");
-  await expect(page.getByRole("button", { name: "Create token" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Create draft" })).toBeVisible();
   fs.mkdirSync(path.dirname(authFile), { recursive: true });
   await page.context().storageState({ path: authFile });
 });

@@ -1,4 +1,4 @@
-import type { PaymentsDashboardWallet, Token } from "@sdp/types";
+import type { PaymentsDashboardWallet, Token, TokenAllowlistEntry } from "@sdp/types";
 import type {
   ActionExecutionInput,
   ActionExecutionResult,
@@ -6,14 +6,18 @@ import type {
   AllowlistFormState,
   AuthorityFormState,
   BurnFormState,
+  BurnValidationErrors,
   ExecuteRouteResponse,
   ExtensionRow,
   ForceBurnFormState,
+  ForceBurnValidationErrors,
   FreezeFormState,
   MetadataFormState,
   MintFormState,
+  MintValidationErrors,
   PermissionRow,
   SeizeFormState,
+  SeizeValidationErrors,
   TokenManagementTab,
 } from "./token-management-workspace.types";
 
@@ -123,6 +127,87 @@ export function asOptionalString(value: string): string | undefined {
 export function isPositiveAmount(value: string): boolean {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0;
+}
+
+function isDecimalCharacter(char: string): boolean {
+  return (char >= "0" && char <= "9") || char === ".";
+}
+
+function isDecimalAmountString(value: string): boolean {
+  const normalized = value.trim();
+  if (!normalized) {
+    return false;
+  }
+
+  let hasDigit = false;
+  let seenDot = false;
+
+  for (const char of normalized) {
+    if (!isDecimalCharacter(char)) {
+      return false;
+    }
+
+    if (char === ".") {
+      if (seenDot) {
+        return false;
+      }
+      seenDot = true;
+      continue;
+    }
+
+    hasDigit = true;
+  }
+
+  return hasDigit;
+}
+
+function parseTokenAmountToBaseUnits(value: string, decimals: number): bigint | null {
+  const normalized = value.trim();
+  if (!isDecimalAmountString(normalized) || !Number.isInteger(decimals) || decimals < 0) {
+    return null;
+  }
+
+  const [wholeRaw = "", fractionRaw = ""] = normalized.split(".");
+  const whole = wholeRaw.length ? wholeRaw : "0";
+  if (fractionRaw.length > decimals) {
+    return null;
+  }
+
+  const combined = `${whole}${fractionRaw.padEnd(decimals, "0")}`;
+  const sanitized = combined.replace(/^0+(?=\d)/, "");
+  return BigInt(sanitized || "0");
+}
+
+const ZERO_BIGINT = BigInt(0);
+
+function formatBaseUnitsAsTokenAmount(value: bigint, decimals: number): string {
+  const negative = value < ZERO_BIGINT;
+  const absolute = negative ? -value : value;
+  let digits = absolute.toString();
+
+  if (decimals === 0) {
+    return `${negative ? "-" : ""}${digits}`;
+  }
+
+  if (digits.length <= decimals) {
+    digits = digits.padStart(decimals + 1, "0");
+  }
+
+  const whole = digits.slice(0, -decimals);
+  const fraction = digits.slice(-decimals).replace(/0+$/, "");
+  return `${negative ? "-" : ""}${fraction ? `${whole}.${fraction}` : whole}`;
+}
+
+function getTokenDisplaySymbol(token: Token): string {
+  return token.symbol.trim() || token.name.trim() || "token";
+}
+
+function getWalletTokenBalanceRecord(wallet: PaymentsDashboardWallet, mintAddress: string | null) {
+  if (!mintAddress) {
+    return null;
+  }
+
+  return wallet.balances?.find((balance) => balance.mint === mintAddress) ?? null;
 }
 
 export function hasReachedMaxSupply(totalSupply: string, maxSupply: string | null): boolean {
@@ -378,7 +463,7 @@ function getPendingAuthoritySignerWallet(
     return null;
   }
 
-  return findSignerWalletById(availableWallets, token.signingWalletId) ?? availableWallets[0];
+  return findWalletByWalletId(availableWallets, token.signingWalletId) ?? availableWallets[0];
 }
 
 function pendingTokenRequiresPermanentDelegate(token: Token): boolean {
@@ -448,7 +533,7 @@ export function getSignerWalletOptionLabel(wallet: PaymentsDashboardWallet): str
   return `${primaryLabel} · ${formatValue(wallet.walletId)} · ${formatValue(wallet.publicKey)}`;
 }
 
-function findSignerWalletById(
+export function findWalletByWalletId(
   authorityWallets: PaymentsDashboardWallet[],
   walletId: string | null | undefined
 ): PaymentsDashboardWallet | null {
@@ -459,7 +544,7 @@ function findSignerWalletById(
   return authorityWallets.find((wallet) => wallet.walletId === walletId) ?? null;
 }
 
-function findSignerWalletByPublicKey(
+export function findWalletByPublicKey(
   authorityWallets: PaymentsDashboardWallet[],
   publicKey: string | null | undefined
 ): PaymentsDashboardWallet | null {
@@ -512,7 +597,7 @@ export function getSignerSelectionForAction({
 
   if (action === "deploy" || action === "burn") {
     const preferredWallet =
-      findSignerWalletById(availableWallets, token.signingWalletId) ?? availableWallets[0];
+      findWalletByWalletId(availableWallets, token.signingWalletId) ?? availableWallets[0];
 
     return {
       wallets: availableWallets,
@@ -558,7 +643,7 @@ export function getSignerSelectionForAction({
     };
   }
 
-  const matchedWallet = findSignerWalletByPublicKey(availableWallets, requiredAuthority);
+  const matchedWallet = findWalletByPublicKey(availableWallets, requiredAuthority);
   if (!matchedWallet) {
     return {
       wallets: [],
@@ -572,6 +657,314 @@ export function getSignerSelectionForAction({
     defaultWalletId: matchedWallet.walletId,
     unavailableReason: null,
   };
+}
+
+function getFirstValidationError(...messages: Array<string | null | undefined>): string | null {
+  return messages.find((message): message is string => Boolean(message)) ?? null;
+}
+
+export function getMintValidationErrors({
+  token,
+  destination,
+  amount,
+  allowlistEntries,
+}: {
+  token: Token;
+  destination: string;
+  amount: string;
+  allowlistEntries: TokenAllowlistEntry[];
+}): MintValidationErrors {
+  const normalizedAmount = amount.trim();
+  const normalizedDestination = destination.trim();
+  let amountError: string | null = null;
+  let destinationError: string | null = null;
+
+  if (normalizedAmount) {
+    const amountBaseUnits = parseTokenAmountToBaseUnits(normalizedAmount, token.decimals);
+    if (amountBaseUnits === null) {
+      amountError = "Enter a valid mint amount for this token.";
+    } else if (amountBaseUnits <= ZERO_BIGINT) {
+      amountError = "Mint amount must be greater than zero.";
+    } else if (token.maxSupply) {
+      const currentSupply = parseTokenAmountToBaseUnits(token.totalSupply, token.decimals);
+      const maxSupply = parseTokenAmountToBaseUnits(token.maxSupply, token.decimals);
+
+      if (
+        currentSupply !== null &&
+        maxSupply !== null &&
+        currentSupply + amountBaseUnits > maxSupply
+      ) {
+        const remaining = maxSupply > currentSupply ? maxSupply - currentSupply : ZERO_BIGINT;
+        amountError =
+          remaining > ZERO_BIGINT
+            ? `Mint amount exceeds the remaining supply cap of ${formatBaseUnitsAsTokenAmount(
+                remaining,
+                token.decimals
+              )} ${getTokenDisplaySymbol(token)}.`
+            : "Maximum supply has already been reached.";
+      }
+    }
+  }
+
+  if (
+    token.requiresAllowlist &&
+    normalizedDestination &&
+    allowlistEntries.length > 0 &&
+    !allowlistEntries.some((entry) => entry.address === normalizedDestination)
+  ) {
+    destinationError = "Destination is not on this token's allowlist.";
+  }
+
+  return {
+    destination: destinationError,
+    amount: amountError,
+  };
+}
+
+export function getMintValidationReason(args: {
+  token: Token;
+  destination: string;
+  amount: string;
+  allowlistEntries: TokenAllowlistEntry[];
+}): string | null {
+  const errors = getMintValidationErrors(args);
+  return getFirstValidationError(errors.destination, errors.amount);
+}
+
+export function getBurnValidationErrors({
+  token,
+  source,
+  amount,
+  signerWallet,
+  walletOptions,
+}: {
+  token: Token;
+  source: string;
+  amount: string;
+  signerWallet: PaymentsDashboardWallet | null;
+  walletOptions: PaymentsDashboardWallet[];
+}): BurnValidationErrors {
+  const normalizedAmount = amount.trim();
+  const normalizedSource = source.trim();
+  let amountError: string | null = null;
+  let sourceError: string | null = null;
+
+  if (normalizedAmount) {
+    const amountBaseUnits = parseTokenAmountToBaseUnits(normalizedAmount, token.decimals);
+    if (amountBaseUnits === null) {
+      amountError = "Enter a valid burn amount for this token.";
+    } else if (amountBaseUnits <= ZERO_BIGINT) {
+      amountError = "Burn amount must be greater than zero.";
+    } else if (!normalizedSource || !signerWallet) {
+      return {
+        source: sourceError,
+        amount: amountError,
+      };
+    } else {
+      const totalSupply = parseTokenAmountToBaseUnits(token.totalSupply, token.decimals);
+      if (totalSupply !== null && amountBaseUnits > totalSupply) {
+        amountError = `Burn amount exceeds the current supply of ${token.totalSupply} ${getTokenDisplaySymbol(token)}.`;
+      }
+    }
+  }
+
+  if (!normalizedSource || !signerWallet) {
+    return {
+      source: sourceError,
+      amount: amountError,
+    };
+  }
+
+  const sourceWallet = findWalletByPublicKey(walletOptions, normalizedSource);
+  if (sourceWallet && sourceWallet.publicKey !== signerWallet.publicKey) {
+    sourceError =
+      "Standard burn only works from the selected signer wallet. Use Force burn for a different wallet.";
+  }
+
+  const signerBalance = getWalletTokenBalanceRecord(signerWallet, token.mintAddress);
+  if (
+    !sourceError &&
+    normalizedSource === signerWallet.publicKey &&
+    Array.isArray(signerWallet.balances) &&
+    !signerBalance
+  ) {
+    sourceError = "The selected signer wallet does not currently hold this token.";
+    amountError = null;
+  }
+
+  if (normalizedAmount && normalizedSource === signerWallet.publicKey && signerBalance?.amount) {
+    const amountBaseUnits = parseTokenAmountToBaseUnits(normalizedAmount, token.decimals);
+    if (amountBaseUnits !== null && amountBaseUnits > BigInt(signerBalance.amount)) {
+      amountError = `The selected signer wallet only shows ${signerBalance.uiAmount} ${getTokenDisplaySymbol(
+        token
+      )}.`;
+    }
+  }
+
+  return {
+    source: sourceError,
+    amount: amountError,
+  };
+}
+
+export function getBurnValidationReason(args: {
+  token: Token;
+  source: string;
+  amount: string;
+  signerWallet: PaymentsDashboardWallet | null;
+  walletOptions: PaymentsDashboardWallet[];
+}): string | null {
+  const errors = getBurnValidationErrors(args);
+  return getFirstValidationError(errors.source, errors.amount);
+}
+
+export function getSeizeValidationErrors({
+  token,
+  source,
+  destination,
+  amount,
+  walletOptions,
+}: {
+  token: Token;
+  source: string;
+  destination: string;
+  amount: string;
+  walletOptions: PaymentsDashboardWallet[];
+}): SeizeValidationErrors {
+  const normalizedSource = source.trim();
+  const normalizedDestination = destination.trim();
+  const normalizedAmount = amount.trim();
+  let amountError: string | null = null;
+  let sourceError: string | null = null;
+  let destinationError: string | null = null;
+
+  if (normalizedSource && normalizedDestination && normalizedSource === normalizedDestination) {
+    destinationError = "Destination must be different from the source.";
+  }
+
+  if (!normalizedAmount) {
+    return {
+      source: sourceError,
+      destination: destinationError,
+      amount: amountError,
+    };
+  }
+
+  const amountBaseUnits = parseTokenAmountToBaseUnits(normalizedAmount, token.decimals);
+  if (amountBaseUnits === null) {
+    amountError = "Enter a valid transfer amount for this token.";
+  } else if (amountBaseUnits <= ZERO_BIGINT) {
+    amountError = "Transfer amount must be greater than zero.";
+  }
+
+  const sourceWallet = findWalletByPublicKey(walletOptions, normalizedSource);
+  const sourceBalance = sourceWallet
+    ? getWalletTokenBalanceRecord(sourceWallet, token.mintAddress)
+    : null;
+  if (sourceWallet && Array.isArray(sourceWallet.balances) && !sourceBalance) {
+    sourceError = "The selected source wallet does not currently hold this token.";
+    amountError = null;
+  }
+
+  if (
+    !sourceError &&
+    sourceBalance?.amount &&
+    amountBaseUnits !== null &&
+    amountBaseUnits > BigInt(sourceBalance.amount)
+  ) {
+    amountError = `The selected source wallet only shows ${sourceBalance.uiAmount} ${getTokenDisplaySymbol(
+      token
+    )}.`;
+  }
+
+  return {
+    source: sourceError,
+    destination: destinationError,
+    amount: amountError,
+  };
+}
+
+export function getSeizeValidationReason(args: {
+  token: Token;
+  source: string;
+  destination: string;
+  amount: string;
+  walletOptions: PaymentsDashboardWallet[];
+}): string | null {
+  const errors = getSeizeValidationErrors(args);
+  return getFirstValidationError(errors.source, errors.destination, errors.amount);
+}
+
+export function getForceBurnValidationErrors({
+  token,
+  source,
+  amount,
+  walletOptions,
+}: {
+  token: Token;
+  source: string;
+  amount: string;
+  walletOptions: PaymentsDashboardWallet[];
+}): ForceBurnValidationErrors {
+  const normalizedAmount = amount.trim();
+  let amountError: string | null = null;
+  if (!normalizedAmount) {
+    return {
+      source: null,
+      amount: amountError,
+    };
+  }
+
+  const amountBaseUnits = parseTokenAmountToBaseUnits(normalizedAmount, token.decimals);
+  if (amountBaseUnits === null) {
+    amountError = "Enter a valid burn amount for this token.";
+  } else if (amountBaseUnits <= ZERO_BIGINT) {
+    amountError = "Force-burn amount must be greater than zero.";
+  }
+
+  const sourceWallet = findWalletByPublicKey(walletOptions, source.trim());
+  const sourceBalance = sourceWallet
+    ? getWalletTokenBalanceRecord(sourceWallet, token.mintAddress)
+    : null;
+  const sourceError =
+    sourceWallet && Array.isArray(sourceWallet.balances) && !sourceBalance
+      ? "The selected source wallet does not currently hold this token."
+      : null;
+  if (sourceError) {
+    amountError = null;
+  }
+  if (
+    !sourceError &&
+    sourceBalance?.amount &&
+    amountBaseUnits !== null &&
+    amountBaseUnits > BigInt(sourceBalance.amount)
+  ) {
+    amountError = `The selected source wallet only shows ${sourceBalance.uiAmount} ${getTokenDisplaySymbol(
+      token
+    )}.`;
+  }
+
+  const totalSupply = parseTokenAmountToBaseUnits(token.totalSupply, token.decimals);
+  if (totalSupply !== null && amountBaseUnits !== null && amountBaseUnits > totalSupply) {
+    amountError = `Force-burn amount exceeds the current supply of ${token.totalSupply} ${getTokenDisplaySymbol(
+      token
+    )}.`;
+  }
+
+  return {
+    source: sourceError,
+    amount: amountError,
+  };
+}
+
+export function getForceBurnValidationReason(args: {
+  token: Token;
+  source: string;
+  amount: string;
+  walletOptions: PaymentsDashboardWallet[];
+}): string | null {
+  const errors = getForceBurnValidationErrors(args);
+  return getFirstValidationError(errors.source, errors.amount);
 }
 
 export function getExtensionRows(token: Token): ExtensionRow[] {
@@ -650,14 +1043,13 @@ export function getTabForAction(action: AdminAction): TokenManagementTab {
     case "allowlist":
     case "freeze":
     case "pause":
+    case "seize":
+    case "force-burn":
       return "compliance";
     case "update-metadata":
       return "metadata";
-    case "refresh-supply":
     case "mint":
     case "burn":
-    case "seize":
-    case "force-burn":
       return "fund-management";
   }
 }

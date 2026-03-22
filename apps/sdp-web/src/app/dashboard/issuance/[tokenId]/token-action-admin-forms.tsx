@@ -12,11 +12,15 @@ import type {
   AllowlistFormState,
   AuthorityFormState,
   ForceBurnFormState,
+  ForceBurnValidationErrors,
   FreezeFormState,
   SeizeFormState,
+  SeizeValidationErrors,
 } from "./token-management-workspace.types";
 import { NON_WHITESPACE_PATTERN, SOLANA_ADDRESS_PATTERN } from "./token-management-workspace.utils";
 import { TokenSignerSelect } from "./token-signer-select";
+import { TokenValidationMessage } from "./token-validation-message";
+import { TokenWalletAddressField } from "./token-wallet-address-field";
 
 interface TokenActionAdminFormsProps {
   activeAction: AdminAction | null;
@@ -34,7 +38,13 @@ interface TokenActionAdminFormsProps {
   allowlistEntries: TokenAllowlistEntry[];
   allowlistError: string | null;
   signerWallets: PaymentsDashboardWallet[];
+  walletOptions: PaymentsDashboardWallet[];
   signerUnavailableReason: string | null;
+  seizeValidationErrors: SeizeValidationErrors;
+  seizeValidationReason: string | null;
+  forceBurnValidationErrors: ForceBurnValidationErrors;
+  forceBurnValidationReason: string | null;
+  submitAlignment?: "start" | "end";
   tokenStatus: "pending" | "active" | "paused" | "revoked";
   onSignerWalletIdChange: (value: string) => void;
   onSeize: () => void;
@@ -62,7 +72,13 @@ export function TokenActionAdminForms({
   allowlistEntries,
   allowlistError,
   signerWallets,
+  walletOptions,
   signerUnavailableReason,
+  seizeValidationErrors,
+  seizeValidationReason,
+  forceBurnValidationErrors,
+  forceBurnValidationReason,
+  submitAlignment = "start",
   tokenStatus,
   onSignerWalletIdChange,
   onSeize,
@@ -93,12 +109,15 @@ export function TokenActionAdminForms({
               signerUnavailableReason={signerUnavailableReason}
               onSignerWalletIdChange={onSignerWalletIdChange}
             />
-            <ActionField
+            <TokenWalletAddressField
               label="Source"
               value={seizeForm.source}
+              walletOptions={walletOptions}
               required
               pattern={SOLANA_ADDRESS_PATTERN}
               title="Enter a valid Solana address."
+              placeholder="Source wallet or token account"
+              error={seizeValidationErrors.source}
               onChange={(value) =>
                 setSeizeForm((previous) => ({
                   ...previous,
@@ -106,12 +125,15 @@ export function TokenActionAdminForms({
                 }))
               }
             />
-            <ActionField
+            <TokenWalletAddressField
               label="Destination"
               value={seizeForm.destination}
+              walletOptions={walletOptions}
               required
               pattern={SOLANA_ADDRESS_PATTERN}
               title="Enter a valid Solana address."
+              placeholder="Destination wallet or token account"
+              error={seizeValidationErrors.destination}
               onChange={(value) =>
                 setSeizeForm((previous) => ({
                   ...previous,
@@ -127,6 +149,7 @@ export function TokenActionAdminForms({
               step="any"
               value={seizeForm.amount}
               required
+              error={seizeValidationErrors.amount}
               onChange={(value) =>
                 setSeizeForm((previous) => ({
                   ...previous,
@@ -144,9 +167,21 @@ export function TokenActionAdminForms({
                 }))
               }
             />
-            <Button type="submit" disabled={isPending || Boolean(signerUnavailableReason)}>
-              Force transfer
-            </Button>
+            <div
+              className={[
+                "flex flex-wrap gap-2",
+                submitAlignment === "end" ? "justify-end" : "",
+              ].join(" ")}
+            >
+              <Button
+                type="submit"
+                disabled={
+                  isPending || Boolean(signerUnavailableReason) || Boolean(seizeValidationReason)
+                }
+              >
+                Force transfer
+              </Button>
+            </div>
           </form>
         </TokenActionCard>
       ) : null}
@@ -169,12 +204,15 @@ export function TokenActionAdminForms({
               signerUnavailableReason={signerUnavailableReason}
               onSignerWalletIdChange={onSignerWalletIdChange}
             />
-            <ActionField
+            <TokenWalletAddressField
               label="Source"
               value={forceBurnForm.source}
+              walletOptions={walletOptions}
               required
               pattern={SOLANA_ADDRESS_PATTERN}
               title="Enter a valid Solana address."
+              placeholder="Source wallet or token account"
+              error={forceBurnValidationErrors.source}
               onChange={(value) =>
                 setForceBurnForm((previous) => ({
                   ...previous,
@@ -190,6 +228,7 @@ export function TokenActionAdminForms({
               step="any"
               value={forceBurnForm.amount}
               required
+              error={forceBurnValidationErrors.amount}
               onChange={(value) =>
                 setForceBurnForm((previous) => ({
                   ...previous,
@@ -207,9 +246,23 @@ export function TokenActionAdminForms({
                 }))
               }
             />
-            <Button type="submit" disabled={isPending || Boolean(signerUnavailableReason)}>
-              Force burn
-            </Button>
+            <div
+              className={[
+                "flex flex-wrap gap-2",
+                submitAlignment === "end" ? "justify-end" : "",
+              ].join(" ")}
+            >
+              <Button
+                type="submit"
+                disabled={
+                  isPending ||
+                  Boolean(signerUnavailableReason) ||
+                  Boolean(forceBurnValidationReason)
+                }
+              >
+                Force burn
+              </Button>
+            </div>
           </form>
         </TokenActionCard>
       ) : null}
@@ -263,9 +316,16 @@ export function TokenActionAdminForms({
                 }))
               }
             />
-            <Button type="submit" disabled={isPending}>
-              Update authority
-            </Button>
+            <div
+              className={[
+                "flex flex-wrap gap-2",
+                submitAlignment === "end" ? "justify-end" : "",
+              ].join(" ")}
+            >
+              <Button type="submit" disabled={isPending}>
+                Update authority
+              </Button>
+            </div>
           </form>
         </TokenActionCard>
       ) : null}
@@ -342,7 +402,12 @@ export function TokenActionAdminForms({
                 }))
               }
             />
-            <div className="flex flex-wrap gap-2">
+            <div
+              className={[
+                "flex flex-wrap gap-2",
+                submitAlignment === "end" ? "justify-end" : "",
+              ].join(" ")}
+            >
               <Button type="submit" variant="outline" value="freeze" disabled={isPending}>
                 Freeze account
               </Button>
@@ -391,12 +456,19 @@ export function TokenActionAdminForms({
                 }))
               }
             />
-            <Button type="submit" disabled={isPending}>
-              Add allowlist entry
-            </Button>
+            <div
+              className={[
+                "flex flex-wrap gap-2",
+                submitAlignment === "end" ? "justify-end" : "",
+              ].join(" ")}
+            >
+              <Button type="submit" disabled={isPending}>
+                Add allowlist entry
+              </Button>
+            </div>
 
             {allowlistError ? (
-              <p className="text-sm text-[#8a1f2a]">{allowlistError}</p>
+              <TokenValidationMessage message={allowlistError} reserveSpace={false} />
             ) : allowlistEntries.length === 0 ? (
               <p className="text-sm text-[rgba(28,28,29,0.68)]">No allowlist entries yet.</p>
             ) : (
@@ -444,6 +516,7 @@ function ActionField({
   step,
   placeholder,
   inputMode,
+  error,
 }: {
   label: string;
   value: string;
@@ -456,6 +529,7 @@ function ActionField({
   step?: string;
   placeholder?: string;
   inputMode?: ComponentProps<typeof Input>["inputMode"];
+  error?: string | null;
 }) {
   const fieldId = useId();
 
@@ -478,9 +552,11 @@ function ActionField({
         step={step}
         placeholder={placeholder}
         inputMode={inputMode}
+        aria-invalid={Boolean(error)}
         onChange={(event) => onChange(event.currentTarget.value)}
         className="h-11 rounded-[12px] border-[rgba(28,28,29,0.12)] bg-white px-4 shadow-none"
       />
+      <TokenValidationMessage message={error ?? null} />
     </div>
   );
 }
