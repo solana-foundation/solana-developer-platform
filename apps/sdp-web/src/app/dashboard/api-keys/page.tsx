@@ -6,6 +6,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createSdpApiClient } from "@/lib/sdp-api";
 import { auth } from "@clerk/nextjs/server";
@@ -21,7 +22,7 @@ import { GeneratedApiKeyModal } from "./generated-key-modal";
 export const dynamic = "force-dynamic";
 
 export default async function ApiKeysPage() {
-  const { userId, orgId } = await auth();
+  const { userId, orgId, orgRole } = await auth();
   if (!userId) {
     redirect("/sign-in");
   }
@@ -30,6 +31,7 @@ export default async function ApiKeysPage() {
   }
 
   const trace = createTimedTrace("dashboard.api_keys.page");
+  const dashboardAccess = resolveDashboardAccess(orgRole);
 
   try {
     const apiClient = await trace.step("create_sdp_api_client", () =>
@@ -40,9 +42,11 @@ export default async function ApiKeysPage() {
       trace.step("fetch_api_keys", () =>
         apiClient.fetch<{ apiKeys: ApiKeyRecord[] }>("/v1/api-keys")
       ),
-      trace.step("fetch_wallets", () =>
-        fetchPaymentsWallets(apiClient.request, { includeBalances: false })
-      ),
+      dashboardAccess.capabilities.canManageApiKeys
+        ? trace.step("fetch_wallets", () =>
+            fetchPaymentsWallets(apiClient.request, { includeBalances: false })
+          )
+        : Promise.resolve({ ok: true as const, data: [] }),
     ]);
 
     const apiKeys = apiKeysResponse.apiKeys;
@@ -68,6 +72,7 @@ export default async function ApiKeysPage() {
               <GeneratedApiKeyModal
                 keyValue={flash.key ?? ""}
                 message={flash.message}
+                apiKeyId={flash.apiKeyId}
                 keyPrefix={flash.keyPrefix}
               />
             ) : (
@@ -87,18 +92,28 @@ export default async function ApiKeysPage() {
           <CardHeader>
             <CardTitle>Existing API keys</CardTitle>
             <CardDescription>Active and historical keys for this workspace.</CardDescription>
-            <CardAction>
-              <CreateApiKeyModal triggerLabel="New API key" wallets={wallets} />
-            </CardAction>
+            {dashboardAccess.capabilities.canManageApiKeys ? (
+              <CardAction>
+                <CreateApiKeyModal triggerLabel="New API key" wallets={wallets} />
+              </CardAction>
+            ) : null}
           </CardHeader>
           <CardContent>
+            {!dashboardAccess.capabilities.canManageApiKeys ? (
+              <div className="mb-4 rounded-[10px] border border-[rgba(28,28,29,0.14)] bg-[rgba(28,28,29,0.03)] px-3 py-2 text-xs text-[rgba(28,28,29,0.72)]">
+                You can view API keys, but only admins can create, rotate, or delete them.
+              </div>
+            ) : null}
             <div className="mb-4 rounded-[10px] border border-[rgba(28,28,29,0.14)] bg-[rgba(28,28,29,0.03)] px-3 py-2 text-xs text-[rgba(28,28,29,0.72)]">
               <p className="text-xs text-[rgba(28,28,29,0.72)]">
                 Rotation hint: rotate active keys only. The dashboard uses a 24-hour grace period;
                 use the API for custom grace values (0-168h). New key secrets are shown once.
               </p>
             </div>
-            <ApiKeysTableClient initialApiKeys={apiKeys} />
+            <ApiKeysTableClient
+              initialApiKeys={apiKeys}
+              canManageApiKeys={dashboardAccess.capabilities.canManageApiKeys}
+            />
           </CardContent>
         </Card>
       </div>

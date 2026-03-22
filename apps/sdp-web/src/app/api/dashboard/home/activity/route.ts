@@ -4,7 +4,7 @@ import {
   fetchIssuanceTokens,
   fetchOrgIssuanceActivity,
 } from "@/app/dashboard/home-page.data";
-import { fetchPaymentTransfers } from "@/app/dashboard/payments/payments-page.data";
+import { fetchDashboardPaymentTransfers } from "@/app/dashboard/payments/payments-page.data";
 import { createTimedTrace, logRouteResult } from "@/lib/request-tracing";
 import { createSdpApiClient } from "@/lib/sdp-api";
 import { NextResponse } from "next/server";
@@ -17,7 +17,9 @@ export async function GET(request: Request) {
       trace.childContext("route.dashboard.home.activity.api")
     );
     const [transfersResult, issuanceTokensResult] = await Promise.all([
-      trace.step("fetch_payment_transfers", () => fetchPaymentTransfers(apiClient.request, 20)),
+      trace.step("fetch_payment_transfers", () =>
+        fetchDashboardPaymentTransfers(apiClient.request, 20)
+      ),
       trace.step("fetch_issuance_tokens", () => fetchIssuanceTokens(apiClient.request, 20)),
     ]);
 

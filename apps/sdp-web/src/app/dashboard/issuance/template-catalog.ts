@@ -1,4 +1,4 @@
-export type IssuanceTemplateId = "stablecoin" | "arcade" | "tokenized-security" | "custom";
+export type IssuanceTemplateId = "stablecoin" | "tokenized-security" | "custom";
 
 export interface IssuanceTemplateCatalogEntry {
   id: IssuanceTemplateId;
@@ -15,13 +15,6 @@ export const issuanceTemplateCatalog: IssuanceTemplateCatalogEntry[] = [
     description: "USD-backed stablecoins with compliance controls.",
     helper: "Best for fiat-pegged assets with transfer controls and admin freeze support.",
     defaultDecimals: 6,
-  },
-  {
-    id: "arcade",
-    name: "Arcade",
-    description: "Closed-loop gaming tokens with optional allowlists.",
-    helper: "Optimized for game economies and loyalty points with simpler defaults.",
-    defaultDecimals: 0,
   },
   {
     id: "tokenized-security",

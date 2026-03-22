@@ -22,7 +22,7 @@ export async function listMembers(): Promise<Member[]> {
 
 export async function inviteMember(formData: FormData) {
   const email = String(formData.get("email") ?? "").trim();
-  const role = String(formData.get("role") ?? "viewer").trim();
+  const role = String(formData.get("role") ?? "member").trim();
 
   if (!email) {
     throw new Error("Email is required");

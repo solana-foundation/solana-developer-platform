@@ -121,8 +121,11 @@ export const createApiKey = async (c: AppContext) => {
     walletPurpose,
   } = parsed.data;
 
-  if (permissions && !actor.permissions.includes("*")) {
-    throw new AppError("INSUFFICIENT_PERMISSIONS", "Custom permission sets require owner access");
+  const hasOrgAdminAccess =
+    actor.permissions.includes("*") || actor.permissions.includes("org:admin");
+
+  if (permissions && !hasOrgAdminAccess) {
+    throw new AppError("INSUFFICIENT_PERMISSIONS", "Custom permission sets require admin access");
   }
 
   const walletSelection = resolveCreateWalletScope({
@@ -186,7 +189,7 @@ export const createApiKey = async (c: AppContext) => {
     const orgOwner = await c.env.DB.prepare(
       `SELECT user_id
        FROM organization_members
-       WHERE organization_id = ? AND role IN ('owner', 'admin')
+       WHERE organization_id = ? AND role IN ('admin', 'owner')
        ORDER BY created_at ASC
        LIMIT 1`
     )
@@ -346,8 +349,11 @@ export const updateApiKey = async (c: AppContext) => {
   }
 
   if (parsed.data.permissions !== undefined) {
-    if (parsed.data.permissions && !actor.permissions.includes("*")) {
-      throw new AppError("INSUFFICIENT_PERMISSIONS", "Custom permission sets require owner access");
+    const hasOrgAdminAccess =
+      actor.permissions.includes("*") || actor.permissions.includes("org:admin");
+
+    if (parsed.data.permissions && !hasOrgAdminAccess) {
+      throw new AppError("INSUFFICIENT_PERMISSIONS", "Custom permission sets require admin access");
     }
 
     updates.push("permissions = ?");

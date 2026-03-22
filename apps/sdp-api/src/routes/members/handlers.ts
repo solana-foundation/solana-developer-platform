@@ -4,7 +4,7 @@ import { created, noContent, success } from "@/lib/response";
 import { AuditService } from "@/services/audit.service";
 import { ClerkOrganizationsService } from "@/services/clerk-organizations.service";
 import type { Env } from "@/types/env";
-import type { OrganizationRole } from "@sdp/types";
+import { type OrganizationRole, normalizeOrganizationRole } from "@sdp/types";
 import type { Context } from "hono";
 import { acceptSchema, inviteSchema } from "./schemas";
 
@@ -46,7 +46,7 @@ function resolveActor(c: AppContext): {
 }
 
 function mapRoleToClerkRole(role: OrganizationRole): string {
-  if (role === "owner" || role === "admin") {
+  if (role === "admin") {
     return "org:admin";
   }
   return "org:member";
@@ -115,7 +115,7 @@ export const listMembers = async (c: AppContext) => {
 
   const memberList = results.results.map((row) => ({
     id: row.id as string,
-    role: row.role as OrganizationRole,
+    role: normalizeOrganizationRole(row.role as string),
     status: row.status as string,
     createdAt: row.created_at as string,
     user: {
@@ -141,7 +141,8 @@ export const inviteMember = async (c: AppContext) => {
     });
   }
 
-  const { email, role } = parsed.data;
+  const { email } = parsed.data;
+  const role = normalizeOrganizationRole(parsed.data.role);
   const normalizedEmail = email.toLowerCase().trim();
   const clerkRole = mapRoleToClerkRole(role);
 
@@ -319,7 +320,7 @@ export const acceptInvitation = async (c: AppContext) => {
     `INSERT INTO organization_members (id, organization_id, user_id, role, status)
      VALUES (?, ?, ?, ?, 'active')`
   )
-    .bind(memberId, invitation.organization_id, user.id, invitation.role)
+    .bind(memberId, invitation.organization_id, user.id, normalizeOrganizationRole(invitation.role))
     .run();
 
   // Mark invitation as accepted

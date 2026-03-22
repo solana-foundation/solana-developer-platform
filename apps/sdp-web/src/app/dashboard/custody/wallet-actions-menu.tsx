@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useEscapeKey } from "@/lib/use-escape-key";
 import { cn } from "@/lib/utils";
 import { ChevronDown, Droplets, Ellipsis, ShieldCheck } from "lucide-react";
@@ -46,6 +47,7 @@ export function WalletActionsMenu({
   triggerMode = "icon",
   triggerClassName,
 }: WalletActionsMenuProps) {
+  const { dashboardAccess } = useDashboardWorkspace();
   const [isFaucetOpen, setIsFaucetOpen] = useState(false);
   const [isBusy, startTransition] = useTransition();
   const resolvedWalletLabel = formatWalletLabel(walletLabel, walletAddress);
@@ -160,9 +162,16 @@ export function WalletActionsMenu({
             <Droplets className="h-4 w-4" />
             Faucet
           </DropdownMenuItem>
-          <DropdownMenuItem onSelect={runSignerCheck} disabled={isBusy}>
+          <DropdownMenuItem
+            onSelect={runSignerCheck}
+            disabled={isBusy || !dashboardAccess.capabilities.canUseWalletSignerCheck}
+          >
             <ShieldCheck className="h-4 w-4" />
-            {isBusy ? "Proving..." : "Prove ownership"}
+            {isBusy
+              ? "Proving..."
+              : dashboardAccess.capabilities.canUseWalletSignerCheck
+                ? "Prove ownership"
+                : "Prove ownership (admin only)"}
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

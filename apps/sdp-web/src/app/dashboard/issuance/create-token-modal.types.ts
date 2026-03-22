@@ -1,4 +1,4 @@
-export type TemplateSelection = "stablecoin" | "custom" | "tokenized-security" | "arcade";
+export type TemplateSelection = "stablecoin" | "custom" | "tokenized-security";
 export type CreationStep = "identity" | "features";
 export type AccessControlMode = "allowlist" | "blocklist";
 

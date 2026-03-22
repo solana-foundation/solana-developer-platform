@@ -486,7 +486,7 @@ describe("Organizations routes", () => {
 
         env.DB.prepare(
           "INSERT INTO organization_members (id, organization_id, user_id, role, status) VALUES (?, ?, ?, ?, ?)"
-        ).bind(TEST_MEMBER.id, TEST_MEMBER.organizationId, TEST_MEMBER.userId, "owner", "active"),
+        ).bind(TEST_MEMBER.id, TEST_MEMBER.organizationId, TEST_MEMBER.userId, "admin", "active"),
 
         env.DB.prepare(
           "INSERT INTO api_keys (id, organization_id, created_by, name, key_prefix, key_hash, role, environment, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"

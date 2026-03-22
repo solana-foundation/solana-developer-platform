@@ -11,10 +11,16 @@ import { GeneratedApiKeyInput } from "./generated-key-input";
 interface GeneratedApiKeyModalProps {
   keyValue: string;
   message: string;
+  apiKeyId?: string;
   keyPrefix?: string;
 }
 
-function GeneratedApiKeyModal({ keyValue, message, keyPrefix }: GeneratedApiKeyModalProps) {
+function GeneratedApiKeyModal({
+  keyValue,
+  message,
+  apiKeyId,
+  keyPrefix,
+}: GeneratedApiKeyModalProps) {
   const [isOpen, setIsOpen] = useState(true);
   const [copyLabel, setCopyLabel] = useState("Copy");
   const clearedFlash = useRef(false);
@@ -26,9 +32,10 @@ function GeneratedApiKeyModal({ keyValue, message, keyPrefix }: GeneratedApiKeyM
 
     storeApiKeySecret({
       value: keyValue,
+      apiKeyId: apiKeyId ?? null,
       keyPrefix: keyPrefix ?? null,
     });
-  }, [keyValue, keyPrefix]);
+  }, [apiKeyId, keyValue, keyPrefix]);
 
   useEffect(() => {
     if (clearedFlash.current) {
@@ -92,6 +99,10 @@ function GeneratedApiKeyModal({ keyValue, message, keyPrefix }: GeneratedApiKeyM
         <div className="mt-4 space-y-2">
           <Label htmlFor="generated-key-value">Your full key (shown once)</Label>
           <GeneratedApiKeyInput value={keyValue} />
+          <p className="text-xs text-[rgba(28,28,29,0.58)]">
+            This browser session can now use this key in the API Playground without pasting it
+            again.
+          </p>
         </div>
 
         <div className="mt-5 flex items-center justify-end gap-2">

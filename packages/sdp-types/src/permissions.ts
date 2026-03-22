@@ -69,15 +69,12 @@ export type Permission = (typeof PERMISSIONS)[number];
 
 // Organization roles and their default permissions
 export const ORGANIZATION_ROLES = {
-  owner: {
-    description: "Full control, delete org, transfer ownership",
-    permissions: ["*"] as Permission[],
-  },
   admin: {
-    description: "Manage members, API keys, settings",
+    description: "Full organization control",
     permissions: [
       "org:read",
       "org:write",
+      "org:admin",
       "tokens:read",
       "tokens:write",
       "tokens:admin",
@@ -99,8 +96,8 @@ export const ORGANIZATION_ROLES = {
       "custody:admin",
     ] as Permission[],
   },
-  developer: {
-    description: "Use API, create readonly keys",
+  member: {
+    description: "Standard product access",
     permissions: [
       "org:read",
       "api-keys:read",
@@ -115,20 +112,20 @@ export const ORGANIZATION_ROLES = {
       "projects:read",
     ] as Permission[],
   },
-  viewer: {
-    description: "Read-only dashboard access",
-    permissions: [
-      "org:read",
-      "tokens:read",
-      "payments:read",
-      "wallets:read",
-      "projects:read",
-      "audit:read",
-    ] as Permission[],
-  },
 } as const;
 
 export type OrganizationRole = keyof typeof ORGANIZATION_ROLES;
+export type LegacyOrganizationRole = OrganizationRole | "owner" | "developer" | "viewer";
+
+export function normalizeOrganizationRole(
+  role: LegacyOrganizationRole | string | null | undefined
+): OrganizationRole {
+  if (role === "admin" || role === "owner" || role === "org:admin" || role === "org:owner") {
+    return "admin";
+  }
+
+  return "member";
+}
 
 // API key roles and their default permissions
 export const API_KEY_ROLES = {
@@ -198,8 +195,10 @@ export function hasAllPermissions(userPermissions: Permission[], required: Permi
 /**
  * Get default permissions for an organization role
  */
-export function getPermissionsForOrgRole(role: OrganizationRole): Permission[] {
-  return [...ORGANIZATION_ROLES[role].permissions];
+export function getPermissionsForOrgRole(
+  role: LegacyOrganizationRole | string | null | undefined
+): Permission[] {
+  return [...ORGANIZATION_ROLES[normalizeOrganizationRole(role)].permissions];
 }
 
 /**

@@ -9,11 +9,16 @@ import { toast } from "sonner";
 import { updateWalletLabelAction } from "./actions";
 
 interface WalletLabelInlineEditorProps {
+  canEdit?: boolean;
   walletId: string;
   label: string | null;
 }
 
-export function WalletLabelInlineEditor({ walletId, label }: WalletLabelInlineEditorProps) {
+export function WalletLabelInlineEditor({
+  canEdit = true,
+  walletId,
+  label,
+}: WalletLabelInlineEditorProps) {
   const router = useRouter();
   const [isEditing, setIsEditing] = useState(false);
   const [draft, setDraft] = useState(label ?? "");
@@ -98,17 +103,19 @@ export function WalletLabelInlineEditor({ walletId, label }: WalletLabelInlineEd
       <div className="min-w-0 truncate" title={label ?? "Untitled"}>
         {label ?? "Untitled"}
       </div>
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon-xs"
-        onClick={() => setIsEditing(true)}
-        aria-label="Edit wallet label"
-        title="Edit wallet label"
-        className="opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"
-      >
-        <Pencil className="h-3 w-3" />
-      </Button>
+      {canEdit ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-xs"
+          onClick={() => setIsEditing(true)}
+          aria-label="Edit wallet label"
+          title="Edit wallet label"
+          className="opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"
+        >
+          <Pencil className="h-3 w-3" />
+        </Button>
+      ) : null}
     </div>
   );
 }

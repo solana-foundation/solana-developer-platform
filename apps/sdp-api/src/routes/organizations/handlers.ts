@@ -193,10 +193,10 @@ export const createOrganization = async (c: AppContext) => {
        VALUES (?, ?, 0, 'active')`
     ).bind(userId, email.toLowerCase()),
 
-    // Organization member (owner)
+    // Organization member (admin)
     c.env.DB.prepare(
       `INSERT INTO organization_members (id, organization_id, user_id, role, status)
-       VALUES (?, ?, ?, 'owner', 'active')`
+       VALUES (?, ?, ?, 'admin', 'active')`
     ).bind(memberId, orgId, userId),
 
     // API key

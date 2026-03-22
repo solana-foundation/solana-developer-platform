@@ -10,6 +10,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { TokenTransaction } from "@sdp/types";
+import { Loader2 } from "lucide-react";
 import { formatDate } from "./token-management-workspace.utils";
 
 interface TokenTransactionsSectionProps {
@@ -17,6 +18,7 @@ interface TokenTransactionsSectionProps {
   transactionsError: string | null;
   transactionsTotal: number | null;
   transactionsHasMore: boolean;
+  isLoading?: boolean;
 }
 
 export function TokenTransactionsSection({
@@ -24,6 +26,7 @@ export function TokenTransactionsSection({
   transactionsError,
   transactionsTotal,
   transactionsHasMore,
+  isLoading = false,
 }: TokenTransactionsSectionProps) {
   return (
     <Card className="gap-4">
@@ -32,7 +35,14 @@ export function TokenTransactionsSection({
         <CardDescription>Recent token operations</CardDescription>
       </CardHeader>
       <CardContent>
-        {transactionsError ? (
+        {isLoading ? (
+          <div className="flex min-h-[180px] items-center justify-center rounded-2xl border border-[rgba(28,28,29,0.08)] bg-[rgba(28,28,29,0.02)] px-6 py-10">
+            <div className="flex items-center gap-3 text-sm text-[rgba(28,28,29,0.64)]">
+              <Loader2 className="size-4 animate-spin" />
+              <span>Loading operations history…</span>
+            </div>
+          </div>
+        ) : transactionsError ? (
           <p className="text-sm text-[#8a1f2a]">{transactionsError}</p>
         ) : transactions.length === 0 ? (
           <p className="text-sm text-[rgba(28,28,29,0.68)]">No transactions yet.</p>

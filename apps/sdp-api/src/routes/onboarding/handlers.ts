@@ -180,7 +180,7 @@ export const linkOrganization = async (c: AppContext) => {
     ).bind(orgId, orgName, slug, tier),
     c.env.DB.prepare(
       `INSERT INTO organization_members (id, organization_id, user_id, role, status)
-       VALUES (?, ?, ?, 'owner', 'active')`
+       VALUES (?, ?, ?, 'admin', 'active')`
     ).bind(memberId, orgId, userId),
     c.env.DB.prepare(
       `INSERT INTO auth_organization_identities (id, provider, provider_org_id, organization_id, slug)

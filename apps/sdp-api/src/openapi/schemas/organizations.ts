@@ -91,8 +91,8 @@ export const organizationMemberSchema = z
   .object({
     id: memberIdParamSchema,
     role: z
-      .enum(["owner", "admin", "developer", "viewer"])
-      .openapi({ description: "Organization member role.", example: "developer" }),
+      .enum(["admin", "member"])
+      .openapi({ description: "Organization member role.", example: "member" }),
     status: z
       .enum(["active", "suspended", "removed"])
       .openapi({ description: "Membership status.", example: "active" }),
@@ -112,8 +112,8 @@ export const invitationSchema = z
       .email()
       .openapi({ description: "Invitee email.", example: "dev@example.com" }),
     role: z
-      .enum(["owner", "admin", "developer", "viewer"])
-      .openapi({ description: "Role offered to the invitee.", example: "developer" }),
+      .enum(["admin", "member"])
+      .openapi({ description: "Role offered to the invitee.", example: "member" }),
     expiresAt: isoDateTimeSchema.openapi({
       description: "Invitation expiration timestamp.",
       example: "2025-02-01T00:00:00.000Z",
@@ -202,7 +202,7 @@ export const inviteMemberRequestSchema = inviteSchemaBase
     }),
     role: inviteSchemaBase.shape.role.openapi({
       description: "Role assigned to the invited member.",
-      example: "developer",
+      example: "member",
     }),
   })
   .openapi({ description: "Invite member request body." });

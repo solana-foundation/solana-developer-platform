@@ -16,7 +16,6 @@ export default async function DashboardPage() {
   }
 
   const trace = createTimedTrace("dashboard.home.page");
-
   try {
     const apiClient = await trace.step("create_sdp_api_client", () =>
       createSdpApiClient(trace.childContext("dashboard.home.api"))

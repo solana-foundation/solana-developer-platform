@@ -736,6 +736,60 @@ describe("Issuance Routes", () => {
       const body = await res.json();
       expect(body.error.code).toBe("MAX_SUPPLY_EXCEEDED");
     });
+
+    it("returns 400 for paused token", async () => {
+      const db = (env as { DB: D1Database }).DB;
+      await db
+        .prepare("UPDATE issued_tokens SET status = 'paused' WHERE id = ?")
+        .bind(activeTokenId)
+        .run();
+
+      const res = await app.request(
+        `/v1/issuance/tokens/${activeTokenId}/mint/prepare`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            mint: {
+              destination: TEST_SOLANA_ADDRESSES.wallet1,
+              amount: "1",
+            },
+          }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error.code).toBe("TOKEN_PAUSED");
+    });
+
+    it("returns 400 for zero mint amount", async () => {
+      const res = await app.request(
+        `/v1/issuance/tokens/${activeTokenId}/mint/prepare`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            mint: {
+              destination: TEST_SOLANA_ADDRESSES.wallet1,
+              amount: "0",
+            },
+          }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error.code).toBe("INVALID_TOKEN_AMOUNT");
+    });
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -1336,7 +1390,7 @@ describe("Issuance Routes", () => {
 
   describe("Templates API", () => {
     describe("GET /v1/issuance/templates", () => {
-      it("lists all templates", async () => {
+      it("lists publicly exposed templates", async () => {
         const res = await app.request(
           "/v1/issuance/templates",
           {
@@ -1348,7 +1402,7 @@ describe("Issuance Routes", () => {
         expect(res.status).toBe(200);
         const body = await res.json();
         expect(body.data.templates).toBeInstanceOf(Array);
-        expect(body.data.templates.length).toBe(4);
+        expect(body.data.templates.length).toBe(3);
 
         // Verify template structure
         const stablecoin = body.data.templates.find((t: { id: string }) => t.id === "stablecoin");
@@ -1360,6 +1414,8 @@ describe("Issuance Routes", () => {
         expect(tokenized).toBeDefined();
         const custom = body.data.templates.find((t: { id: string }) => t.id === "custom");
         expect(custom).toBeDefined();
+        const arcade = body.data.templates.find((t: { id: string }) => t.id === "arcade");
+        expect(arcade).toBeUndefined();
       });
     });
 
@@ -1379,7 +1435,7 @@ describe("Issuance Routes", () => {
         expect(body.data.template.name).toBe("Stablecoin");
       });
 
-      it("returns arcade template", async () => {
+      it("does not return arcade template", async () => {
         const res = await app.request(
           "/v1/issuance/templates/arcade",
           {
@@ -1388,10 +1444,7 @@ describe("Issuance Routes", () => {
           env
         );
 
-        expect(res.status).toBe(200);
-        const body = await res.json();
-        expect(body.data.template.id).toBe("arcade");
-        expect(body.data.template.name).toBe("Arcade");
+        expect(res.status).toBe(404);
       });
 
       it("returns 404 for unknown template", async () => {

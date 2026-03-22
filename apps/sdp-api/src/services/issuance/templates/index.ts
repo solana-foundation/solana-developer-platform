@@ -7,32 +7,12 @@
 import type { TokenTemplateInfo } from "@sdp/types";
 import { TEMPLATE_DEFINITIONS, normalizeTemplateId, resolveTemplateConfig } from "./definitions";
 
-const TEMPLATE_IDS = Object.keys(TEMPLATE_DEFINITIONS);
+const TEMPLATE_IDS = Object.keys(TEMPLATE_DEFINITIONS) as Array<keyof typeof TEMPLATE_DEFINITIONS>;
+const PUBLIC_TEMPLATE_IDS = TEMPLATE_IDS.filter((id) => id !== "arcade");
+const PUBLIC_TEMPLATE_ID_SET = new Set<string>(PUBLIC_TEMPLATE_IDS);
 
-export function listTemplates(): TokenTemplateInfo[] {
-  return TEMPLATE_IDS.map((id) => {
-    const template = TEMPLATE_DEFINITIONS[id as keyof typeof TEMPLATE_DEFINITIONS];
-    return {
-      id: template.id,
-      name: template.name,
-      description: template.description,
-      decimals: template.decimals,
-      maxDecimals: template.maxDecimals,
-      requiresAllowlist: template.requiresAllowlist,
-      allowlistOverridable: template.allowlistOverridable,
-      requiredExtensions: template.extensions.required,
-      availableExtensions: template.extensions.available,
-      defaultExtensions: template.defaultExtensions,
-    };
-  });
-}
-
-export function getTemplateInfo(id: string): TokenTemplateInfo | undefined {
-  const normalized = normalizeTemplateId(id);
-  const template = TEMPLATE_DEFINITIONS[normalized];
-  if (!template) {
-    return undefined;
-  }
+function buildTemplateInfo(templateId: keyof typeof TEMPLATE_DEFINITIONS): TokenTemplateInfo {
+  const template = TEMPLATE_DEFINITIONS[templateId];
   return {
     id: template.id,
     name: template.name,
@@ -45,6 +25,27 @@ export function getTemplateInfo(id: string): TokenTemplateInfo | undefined {
     availableExtensions: template.extensions.available,
     defaultExtensions: template.defaultExtensions,
   };
+}
+
+export function listTemplates(): TokenTemplateInfo[] {
+  return PUBLIC_TEMPLATE_IDS.map(buildTemplateInfo);
+}
+
+export function getTemplateInfo(id: string): TokenTemplateInfo | undefined {
+  const normalized = normalizeTemplateId(id);
+  const template = TEMPLATE_DEFINITIONS[normalized];
+  if (!template) {
+    return undefined;
+  }
+  return buildTemplateInfo(normalized);
+}
+
+export function getPublicTemplateInfo(id: string): TokenTemplateInfo | undefined {
+  const normalized = normalizeTemplateId(id);
+  if (!PUBLIC_TEMPLATE_ID_SET.has(normalized)) {
+    return undefined;
+  }
+  return buildTemplateInfo(normalized);
 }
 
 export { normalizeTemplateId, resolveTemplateConfig };

@@ -166,8 +166,10 @@ const RPC_PROVIDER_LABELS: Record<OrganizationRpcProvider, string> = {
 };
 
 export function OrganizationRpcSettingsForm({
+  canManageSettings,
   organization,
 }: {
+  canManageSettings: boolean;
   organization: SettingsOrganization;
 }) {
   const rpcProvider = organization.settings?.rpcProvider ?? "default";
@@ -253,6 +255,12 @@ export function OrganizationRpcSettingsForm({
           </div>
         </div>
 
+        {!canManageSettings ? (
+          <div className="rounded-xl border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.03)] px-3 py-2 text-sm text-[rgba(28,28,29,0.72)]">
+            You can view organization RPC settings, but only admins can change them.
+          </div>
+        ) : null}
+
         <div className="grid gap-2">
           <Label htmlFor="rpcProvider">RPC provider</Label>
           <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_112px] sm:items-center">
@@ -261,7 +269,7 @@ export function OrganizationRpcSettingsForm({
               name="rpcProvider"
               className="h-10 w-full min-w-0 rounded-lg border border-[rgba(28,28,29,0.16)] bg-white px-3 text-sm text-[#1c1c1d]"
               value={selectedProvider}
-              disabled={isSaving || isTesting}
+              disabled={!canManageSettings || isSaving || isTesting}
               onChange={(event) => {
                 const nextProvider = event.currentTarget.value as typeof selectedProvider;
                 setSelectedProvider(nextProvider);

@@ -1,8 +1,11 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
+import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
+import type { PaymentsDashboardWallet } from "@sdp/types";
 import { Loader2 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
 import { TokenActionConfirmationDialog } from "./token-action-confirmation-dialog";
@@ -40,11 +43,20 @@ import {
   createInitialMetadataForm,
   createInitialMintForm,
   createInitialSeizeForm,
+  findWalletByWalletId,
+  getBurnValidationErrors,
+  getBurnValidationReason,
   getDefaultActionForTab,
   getDisplayedAuthorityAddress,
   getExplorerHref,
   getExtensionRows,
+  getForceBurnValidationErrors,
+  getForceBurnValidationReason,
+  getMintValidationErrors,
+  getMintValidationReason,
   getPermissionRows,
+  getSeizeValidationErrors,
+  getSeizeValidationReason,
   getSignerSelectionForAction,
   getTabForAction,
   getTokenActionDisabledReasons,
@@ -63,8 +75,38 @@ const managementTabs: Array<{ id: TokenManagementTab; label: string }> = [
   { id: "extensions", label: "Extensions" },
   { id: "compliance", label: "Compliance" },
   { id: "metadata", label: "Metadata" },
-  { id: "fund-management", label: "Fund Management" },
+  { id: "fund-management", label: "Operations" },
 ];
+
+function isTokenManagementTab(value: string | null): value is TokenManagementTab {
+  return managementTabs.some((tab) => tab.id === value);
+}
+
+function getDefaultActionForActiveTab({
+  tab,
+  canDeployToken,
+  showAllowlistControls,
+  canManageTokenAdmin,
+}: {
+  tab: TokenManagementTab;
+  canDeployToken: boolean;
+  showAllowlistControls: boolean;
+  canManageTokenAdmin: boolean;
+}): AdminAction | null {
+  if (tab === "fund-management" && canDeployToken) {
+    return null;
+  }
+
+  if (tab === "compliance" && !showAllowlistControls && canManageTokenAdmin) {
+    return "freeze";
+  }
+
+  if (tab === "compliance" && (!showAllowlistControls || !canManageTokenAdmin)) {
+    return null;
+  }
+
+  return getDefaultActionForTab(tab);
+}
 
 const liveFundManagementRows: Array<{
   id: FundManagementModalAction;
@@ -84,25 +126,41 @@ const liveFundManagementRows: Array<{
     helper: "Remove supply from a source wallet or token account.",
     actionLabel: "Burn",
   },
-  {
-    id: "seize",
-    title: "Force Transfer",
-    helper: "Move tokens administratively between two accounts.",
-    actionLabel: "Transfer",
-  },
-  {
-    id: "force-burn",
-    title: "Force Burn",
-    helper: "Burn tokens administratively from a source account.",
-    actionLabel: "Burn",
-  },
-  {
-    id: "refresh-supply",
-    title: "Refresh Supply",
-    helper: "Sync the cached supply value from on-chain state.",
-    actionLabel: "Refresh",
-  },
 ];
+
+function mergeWalletsPreferBalances(
+  primaryWallets: PaymentsDashboardWallet[],
+  secondaryWallets: PaymentsDashboardWallet[]
+): PaymentsDashboardWallet[] {
+  if (primaryWallets.length === 0) {
+    return secondaryWallets;
+  }
+
+  if (secondaryWallets.length === 0) {
+    return primaryWallets;
+  }
+
+  const secondaryById = new Map(secondaryWallets.map((wallet) => [wallet.id, wallet]));
+  const merged = primaryWallets.map((wallet) => {
+    const richerWallet = secondaryById.get(wallet.id);
+    if (!richerWallet) {
+      return wallet;
+    }
+
+    return Array.isArray(richerWallet.balances)
+      ? { ...wallet, balances: richerWallet.balances }
+      : wallet;
+  });
+
+  const primaryIds = new Set(primaryWallets.map((wallet) => wallet.id));
+  for (const wallet of secondaryWallets) {
+    if (!primaryIds.has(wallet.id)) {
+      merged.push(wallet);
+    }
+  }
+
+  return merged;
+}
 
 function LoadingSection({ message }: { message: string }) {
   return (
@@ -141,6 +199,10 @@ export function TokenManagementWorkspace({
   frozenAccountsTotal: initialFrozenAccountsTotal,
   frozenAccountsHasMore: initialFrozenAccountsHasMore,
 }: TokenManagementWorkspaceProps) {
+  const { dashboardAccess } = useDashboardWorkspace();
+  const pathname = usePathname();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const {
     isPending,
     actionConfirmation,
@@ -149,7 +211,6 @@ export function TokenManagementWorkspace({
     dismissActionConfirmation,
     confirmAction,
   } = useTokenActionRunner();
-  const [activeTab, setActiveTab] = useState<TokenManagementTab>("overview");
   const [activeAction, setActiveAction] = useState<AdminAction | null>(null);
   const [authorityModalRow, setAuthorityModalRow] = useState<PermissionRow | null>(null);
   const [authorityModalCurrentAuthority, setAuthorityModalCurrentAuthority] = useState<
@@ -168,6 +229,21 @@ export function TokenManagementWorkspace({
   const [authorityForm, setAuthorityForm] = useState(createInitialAuthorityForm);
   const [freezeForm, setFreezeForm] = useState(createInitialFreezeForm);
   const [allowlistForm, setAllowlistForm] = useState(createInitialAllowlistForm);
+  const canManageTokenAdmin = dashboardAccess.capabilities.canManageTokenAdmin;
+  const showAllowlistControls = token.requiresAllowlist;
+  const visibleManagementTabs = useMemo(
+    () =>
+      managementTabs.filter(
+        (tab) => tab.id !== "compliance" || showAllowlistControls || canManageTokenAdmin
+      ),
+    [canManageTokenAdmin, showAllowlistControls]
+  );
+  const requestedTabParam = searchParams.get("tab");
+  const requestedTab = isTokenManagementTab(requestedTabParam) ? requestedTabParam : null;
+  const activeTab: TokenManagementTab =
+    requestedTab && visibleManagementTabs.some((tab) => tab.id === requestedTab)
+      ? requestedTab
+      : "overview";
   const shouldLoadSupportingData = activeTab !== "overview";
   const shouldLoadAuthorityWallets = canLoadAuthorityWallets(activeTab, token.status);
   const hasInitialSupportingData =
@@ -294,8 +370,10 @@ export function TokenManagementWorkspace({
         await revalidateSupportingDataAfterSuccess();
       },
     });
-  const authorityWallets =
-    authorityWalletsData?.authorityWallets ?? resolvedSupportingData.authorityWallets;
+  const authorityWallets = mergeWalletsPreferBalances(
+    authorityWalletsData?.authorityWallets ?? [],
+    resolvedSupportingData.authorityWallets
+  );
   const authorityWalletsError =
     authorityWalletsFetchError ??
     authorityWalletsData?.authorityWalletsError ??
@@ -391,15 +469,17 @@ export function TokenManagementWorkspace({
 
     return {
       ...rowWithDisplayedValue,
-      editDisabledReason: withWalletLoadError(
-        getSignerSelectionForAction({
-          action: "authority",
-          token,
-          authorityWallets,
-          metadataAuthority,
-          permissionRow: rowWithDisplayedValue,
-        })
-      ).unavailableReason,
+      editDisabledReason: canManageTokenAdmin
+        ? withWalletLoadError(
+            getSignerSelectionForAction({
+              action: "authority",
+              token,
+              authorityWallets,
+              metadataAuthority,
+              permissionRow: rowWithDisplayedValue,
+            })
+          ).unavailableReason
+        : "Only admins can edit token authorities.",
     };
   });
   const displayedMintAuthority = getDisplayedAuthorityAddress({
@@ -409,11 +489,16 @@ export function TokenManagementWorkspace({
     authorityWallets,
   });
   const extensionRows = getExtensionRows(token);
-  const showAllowlistControls = token.requiresAllowlist;
   const complianceActions: Array<{ id: AdminAction; label: string }> = [
     ...(showAllowlistControls ? [{ id: "allowlist" as const, label: "Allowlist" }] : []),
-    { id: "freeze", label: "Freeze" },
-    { id: "pause", label: "Pause" },
+    ...(canManageTokenAdmin
+      ? [
+          { id: "seize" as const, label: "Force transfer" },
+          { id: "force-burn" as const, label: "Force burn" },
+          { id: "freeze" as const, label: "Freeze" },
+          { id: "pause" as const, label: "Pause" },
+        ]
+      : []),
   ];
   const effectiveMintDisabledReason = mintDisabledReason ?? mintSignerSelection.unavailableReason;
   const effectiveBurnDisabledReason = burnDisabledReason ?? burnSignerSelection.unavailableReason;
@@ -421,15 +506,73 @@ export function TokenManagementWorkspace({
     seizeDisabledReason ?? seizeSignerSelection.unavailableReason;
   const effectiveForceBurnDisabledReason =
     forceBurnDisabledReason ?? forceBurnSignerSelection.unavailableReason;
+  const selectedBurnSignerWallet =
+    findWalletByWalletId(
+      burnSignerSelection.wallets,
+      burnForm.signingWalletId || burnSignerSelection.defaultWalletId
+    ) ??
+    burnSignerSelection.wallets[0] ??
+    null;
+  const mintValidationReason = getMintValidationReason({
+    token,
+    destination: mintForm.destination,
+    amount: mintForm.amount,
+    allowlistEntries,
+  });
+  const mintValidationErrors = getMintValidationErrors({
+    token,
+    destination: mintForm.destination,
+    amount: mintForm.amount,
+    allowlistEntries,
+  });
+  const burnValidationReason = getBurnValidationReason({
+    token,
+    source: burnForm.source,
+    amount: burnForm.amount,
+    signerWallet: selectedBurnSignerWallet,
+    walletOptions: authorityWallets,
+  });
+  const burnValidationErrors = getBurnValidationErrors({
+    token,
+    source: burnForm.source,
+    amount: burnForm.amount,
+    signerWallet: selectedBurnSignerWallet,
+    walletOptions: authorityWallets,
+  });
+  const seizeValidationReason = getSeizeValidationReason({
+    token,
+    source: seizeForm.source,
+    destination: seizeForm.destination,
+    amount: seizeForm.amount,
+    walletOptions: authorityWallets,
+  });
+  const seizeValidationErrors = getSeizeValidationErrors({
+    token,
+    source: seizeForm.source,
+    destination: seizeForm.destination,
+    amount: seizeForm.amount,
+    walletOptions: authorityWallets,
+  });
+  const forceBurnValidationReason = getForceBurnValidationReason({
+    token,
+    source: forceBurnForm.source,
+    amount: forceBurnForm.amount,
+    walletOptions: authorityWallets,
+  });
+  const forceBurnValidationErrors = getForceBurnValidationErrors({
+    token,
+    source: forceBurnForm.source,
+    amount: forceBurnForm.amount,
+    walletOptions: authorityWallets,
+  });
   const fundManagementDisabledReasons: Record<FundManagementModalAction, string | null> = {
     deploy: deploySignerSelection.unavailableReason,
-    mint: effectiveMintDisabledReason,
-    burn: effectiveBurnDisabledReason,
-    seize: effectiveSeizeDisabledReason,
-    "force-burn": effectiveForceBurnDisabledReason,
-    "refresh-supply": null,
+    mint: effectiveMintDisabledReason ?? mintValidationReason,
+    burn: effectiveBurnDisabledReason ?? burnValidationReason,
   };
   const complianceActionDisabledReasons: Partial<Record<AdminAction, string | null>> = {
+    seize: effectiveSeizeDisabledReason ?? seizeValidationReason,
+    "force-burn": effectiveForceBurnDisabledReason ?? forceBurnValidationReason,
     freeze: freezeDisabledReason,
     pause: pauseDisabledReason,
   };
@@ -449,6 +592,58 @@ export function TokenManagementWorkspace({
         disabled: Boolean(fundManagementDisabledReasons[row.id]),
         disabledReason: fundManagementDisabledReasons[row.id],
       }));
+
+  const syncActiveTabInUrl = useCallback(
+    (nextTab: TokenManagementTab, mode: "push" | "replace" = "push") => {
+      const nextSearchParams = new URLSearchParams(searchParams.toString());
+      if (nextTab === "overview") {
+        nextSearchParams.delete("tab");
+      } else {
+        nextSearchParams.set("tab", nextTab);
+      }
+
+      const nextQuery = nextSearchParams.toString();
+      const nextUrl = nextQuery ? `${pathname}?${nextQuery}` : pathname;
+      if (mode === "replace") {
+        router.replace(nextUrl, { scroll: false });
+        return;
+      }
+
+      router.push(nextUrl, { scroll: false });
+    },
+    [pathname, router, searchParams]
+  );
+
+  useEffect(() => {
+    if (!requestedTabParam) {
+      return;
+    }
+
+    if (requestedTabParam !== activeTab || activeTab === "overview") {
+      syncActiveTabInUrl(activeTab, "replace");
+    }
+  }, [activeTab, requestedTabParam, syncActiveTabInUrl]);
+
+  useEffect(() => {
+    const nextDefaultAction = getDefaultActionForActiveTab({
+      tab: activeTab,
+      canDeployToken,
+      showAllowlistControls,
+      canManageTokenAdmin,
+    });
+
+    setActiveAction((currentAction) =>
+      currentAction && getTabForAction(currentAction) === activeTab
+        ? currentAction
+        : nextDefaultAction
+    );
+  }, [activeTab, canDeployToken, showAllowlistControls, canManageTokenAdmin]);
+
+  useEffect(() => {
+    if (activeTab !== "fund-management" && fundManagementModalAction) {
+      setFundManagementModalAction(null);
+    }
+  }, [activeTab, fundManagementModalAction]);
 
   const handleCopy = async (value: string | null) => {
     if (!value) {
@@ -525,6 +720,10 @@ export function TokenManagementWorkspace({
       toast.error("Mint destination and amount are required.");
       return;
     }
+    if (mintValidationReason) {
+      toast.error(mintValidationReason);
+      return;
+    }
     if (!isPositiveAmount(amount)) {
       toast.error("Amount must be a positive number.");
       return;
@@ -565,6 +764,10 @@ export function TokenManagementWorkspace({
     const amount = burnForm.amount.trim();
     if (!source || !amount) {
       toast.error("Burn source and amount are required.");
+      return;
+    }
+    if (burnValidationReason) {
+      toast.error(burnValidationReason);
       return;
     }
     if (!isPositiveAmount(amount)) {
@@ -610,6 +813,10 @@ export function TokenManagementWorkspace({
       toast.error("Seize source, destination, and amount are required.");
       return;
     }
+    if (seizeValidationReason) {
+      toast.error(seizeValidationReason);
+      return;
+    }
     if (!isPositiveAmount(amount)) {
       toast.error("Amount must be a positive number.");
       return;
@@ -652,6 +859,10 @@ export function TokenManagementWorkspace({
     const amount = forceBurnForm.amount.trim();
     if (!source || !amount) {
       toast.error("Force-burn source and amount are required.");
+      return;
+    }
+    if (forceBurnValidationReason) {
+      toast.error(forceBurnValidationReason);
       return;
     }
     if (!isPositiveAmount(amount)) {
@@ -903,23 +1114,9 @@ export function TokenManagementWorkspace({
           signingWalletId: burnSignerSelection.defaultWalletId,
         }));
         break;
-      case "seize":
-        setSeizeForm((previous) => ({
-          ...previous,
-          signingWalletId: seizeSignerSelection.defaultWalletId,
-        }));
-        break;
-      case "force-burn":
-        setForceBurnForm((previous) => ({
-          ...previous,
-          signingWalletId: forceBurnSignerSelection.defaultWalletId,
-        }));
-        break;
-      case "refresh-supply":
-        break;
     }
 
-    setActiveTab("fund-management");
+    syncActiveTabInUrl("fund-management");
     setFundManagementModalAction(action);
   };
 
@@ -944,39 +1141,15 @@ export function TokenManagementWorkspace({
       case "burn":
         handleBurn();
         return;
-      case "seize":
-        handleSeize();
-        return;
-      case "force-burn":
-        handleForceBurn();
-        return;
-      case "refresh-supply":
-        handleRefreshSupply();
-        return;
     }
   };
 
   const handleTabChange = (tab: TokenManagementTab) => {
-    setActiveTab(tab);
-
-    const nextDefaultAction =
-      tab === "fund-management" && canDeployToken
-        ? null
-        : tab === "compliance" && !showAllowlistControls
-          ? "freeze"
-          : getDefaultActionForTab(tab);
-    if (nextDefaultAction) {
-      setActiveAction(nextDefaultAction);
-      return;
-    }
-
-    setActiveAction((currentAction) =>
-      currentAction && getTabForAction(currentAction) === tab ? currentAction : null
-    );
+    syncActiveTabInUrl(tab);
   };
 
   const selectAction = (action: AdminAction) => {
-    setActiveTab(getTabForAction(action));
+    syncActiveTabInUrl(getTabForAction(action));
     setActiveAction(action);
   };
 
@@ -1062,10 +1235,19 @@ export function TokenManagementWorkspace({
         allowlistEntries={allowlistEntries}
         allowlistError={allowlistError}
         signerWallets={visibleActionSignerProps.signerWallets}
+        walletOptions={authorityWallets}
         signerUnavailableReason={visibleActionSignerProps.signerUnavailableReason}
+        mintValidationErrors={mintValidationErrors}
+        mintValidationReason={mintValidationReason}
+        burnValidationErrors={burnValidationErrors}
+        burnValidationReason={burnValidationReason}
+        seizeValidationErrors={seizeValidationErrors}
+        seizeValidationReason={seizeValidationReason}
+        forceBurnValidationErrors={forceBurnValidationErrors}
+        forceBurnValidationReason={forceBurnValidationReason}
+        submitAlignment="start"
         onSignerWalletIdChange={visibleActionSignerProps.onSignerWalletIdChange}
         onUpdateMetadata={handleUpdateMetadata}
-        onRefreshSupply={handleRefreshSupply}
         onMint={handleMint}
         onBurn={handleBurn}
         onSeize={handleSeize}
@@ -1090,12 +1272,9 @@ export function TokenManagementWorkspace({
         canDeployToken={canDeployToken}
         isPending={isPending}
         deployDisabledReason={deploySignerSelection.unavailableReason}
-        mintDisabledReason={effectiveMintDisabledReason}
-        burnDisabledReason={effectiveBurnDisabledReason}
         pauseDisabledReason={pauseDisabledReason}
+        canManageTokenAdmin={canManageTokenAdmin}
         onCopyAddress={() => void handleCopy(token.mintAddress)}
-        onMintSelect={() => openFundManagementModal("mint")}
-        onBurnSelect={() => openFundManagementModal("burn")}
         onDeploy={() => {
           if (!canDeployToken) {
             return;
@@ -1107,7 +1286,7 @@ export function TokenManagementWorkspace({
 
       <div className="border-b border-[rgba(28,28,29,0.12)]">
         <div className="flex flex-wrap gap-8">
-          {managementTabs.map((tab) => (
+          {visibleManagementTabs.map((tab) => (
             <button
               key={tab.id}
               type="button"
@@ -1144,16 +1323,18 @@ export function TokenManagementWorkspace({
               unpaused.
             </p>
           </div>
-          <TokenDisabledActionTooltip reason={isPending ? null : pauseDisabledReason}>
-            <Button
-              type="button"
-              size="sm"
-              onClick={() => handlePause(false)}
-              disabled={isPending || Boolean(pauseDisabledReason)}
-            >
-              Unpause token
-            </Button>
-          </TokenDisabledActionTooltip>
+          {canManageTokenAdmin ? (
+            <TokenDisabledActionTooltip reason={isPending ? null : pauseDisabledReason}>
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => handlePause(false)}
+                disabled={isPending || Boolean(pauseDisabledReason)}
+              >
+                Unpause token
+              </Button>
+            </TokenDisabledActionTooltip>
+          ) : null}
         </div>
       ) : null}
 
@@ -1163,6 +1344,8 @@ export function TokenManagementWorkspace({
             token={token}
             showTitle={false}
             mintAuthorityValue={displayedMintAuthority}
+            onRefreshSupply={token.status !== "pending" ? handleRefreshSupply : undefined}
+            refreshDisabled={isPending}
           />
         </div>
       ) : null}
@@ -1177,7 +1360,7 @@ export function TokenManagementWorkspace({
               permissionRows={permissionRows}
               extensionRows={extensionRows}
               showTitle={false}
-              canEditAuthorities={!canDeployToken}
+              canEditAuthorities={!canDeployToken && canManageTokenAdmin}
               onCopy={handleCopy}
               onEditAuthority={handleAuthorityModalOpen}
             />
@@ -1192,7 +1375,7 @@ export function TokenManagementWorkspace({
             permissionRows={permissionRows}
             extensionRows={extensionRows}
             showTitle={false}
-            canEditAuthorities={!canDeployToken}
+            canEditAuthorities={!canDeployToken && canManageTokenAdmin}
             onCopy={handleCopy}
             onEditAuthority={handleAuthorityModalOpen}
           />
@@ -1240,22 +1423,19 @@ export function TokenManagementWorkspace({
       ) : null}
 
       {activeTab === "fund-management" ? (
-        supportingDataLoading ? (
-          <LoadingSection message="Loading fund management data…" />
-        ) : (
-          <div className="space-y-4">
-            <TokenFundManagementSection
-              rows={fundManagementRows}
-              onOpenAction={openFundManagementModal}
-            />
-            <TokenTransactionsSection
-              transactions={transactions}
-              transactionsError={transactionsError}
-              transactionsTotal={transactionsTotal}
-              transactionsHasMore={transactionsHasMore}
-            />
-          </div>
-        )
+        <div className="space-y-4">
+          <TokenFundManagementSection
+            rows={fundManagementRows}
+            onOpenAction={openFundManagementModal}
+          />
+          <TokenTransactionsSection
+            transactions={transactions}
+            transactionsError={transactionsError}
+            transactionsTotal={transactionsTotal}
+            transactionsHasMore={transactionsHasMore}
+            isLoading={supportingDataLoading}
+          />
+        </div>
       ) : null}
 
       <TokenAuthorityModal
@@ -1278,9 +1458,9 @@ export function TokenManagementWorkspace({
       >
         {fundManagementModalAction === "deploy" ? (
           <div className="rounded-2xl border border-[rgba(28,28,29,0.12)] bg-white p-5 shadow-[0_20px_40px_rgba(0,0,0,0.16)]">
-            <p className="text-[24px] leading-[1.15] font-medium text-[#1c1c1d]">Deploy token</p>
-            <p className="mt-2 text-[15px] leading-[1.45] text-[rgba(28,28,29,0.72)]">
-              This will deploy the token on-chain so fund management actions can be used.
+            <p className="text-[20px] leading-[1.2] font-medium text-[#1c1c1d]">Deploy token</p>
+            <p className="mt-2 text-[14px] leading-[1.45] text-[rgba(28,28,29,0.72)]">
+              This will deploy the token on-chain so operations can run.
             </p>
             <div className="mt-5 space-y-5">
               <TokenSignerSelect
@@ -1333,14 +1513,23 @@ export function TokenManagementWorkspace({
             allowlistEntries={allowlistEntries}
             allowlistError={allowlistError}
             signerWallets={fundManagementActionSignerProps.signerWallets}
+            walletOptions={authorityWallets}
             signerUnavailableReason={fundManagementActionSignerProps.signerUnavailableReason}
+            mintValidationErrors={mintValidationErrors}
+            mintValidationReason={mintValidationReason}
+            burnValidationErrors={burnValidationErrors}
+            burnValidationReason={burnValidationReason}
+            seizeValidationErrors={seizeValidationErrors}
+            seizeValidationReason={seizeValidationReason}
+            forceBurnValidationErrors={forceBurnValidationErrors}
+            forceBurnValidationReason={forceBurnValidationReason}
+            submitAlignment="end"
             onSignerWalletIdChange={fundManagementActionSignerProps.onSignerWalletIdChange}
             onUpdateMetadata={handleUpdateMetadata}
-            onRefreshSupply={() => submitFundManagementAction("refresh-supply")}
             onMint={() => submitFundManagementAction("mint")}
             onBurn={() => submitFundManagementAction("burn")}
-            onSeize={() => submitFundManagementAction("seize")}
-            onForceBurn={() => submitFundManagementAction("force-burn")}
+            onSeize={handleSeize}
+            onForceBurn={handleForceBurn}
             onAuthorityUpdate={handleAuthorityUpdate}
             onPause={handlePause}
             onFreeze={handleFreeze}

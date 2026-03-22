@@ -13,6 +13,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { PaymentsDashboardWallet } from "@sdp/types";
 import Link from "next/link";
 import useSWR from "swr";
@@ -95,6 +96,7 @@ function MetricCard({
 }
 
 export function HomeWorkspace({ totalBalance, totalBalanceError, wallets }: HomeWorkspaceProps) {
+  const { dashboardAccess } = useDashboardWorkspace();
   const { data: activitySnapshot, error: activityRequestError } = useSWR(
     HOME_ACTIVITY_KEY,
     () => fetchHomeActivity(),
@@ -139,14 +141,18 @@ export function HomeWorkspace({ totalBalance, totalBalanceError, wallets }: Home
     <div className="w-full space-y-8 py-2">
       <SectionEntry>
         <div className="flex flex-wrap items-center justify-end gap-3">
-          <CreateApiKeyModal
-            triggerLabel="Create API key"
-            triggerVariant="secondary"
-            wallets={wallets}
-          />
-          <Button asChild>
-            <Link href="/dashboard/wallets">Create Wallet</Link>
-          </Button>
+          {dashboardAccess.capabilities.canManageApiKeys ? (
+            <CreateApiKeyModal
+              triggerLabel="Create API key"
+              triggerVariant="secondary"
+              wallets={wallets}
+            />
+          ) : null}
+          {dashboardAccess.capabilities.canManageCustody ? (
+            <Button asChild>
+              <Link href="/dashboard/wallets">Create Wallet</Link>
+            </Button>
+          ) : null}
         </div>
       </SectionEntry>
 

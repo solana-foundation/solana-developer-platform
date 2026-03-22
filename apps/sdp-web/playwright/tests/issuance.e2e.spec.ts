@@ -7,7 +7,7 @@ function shortValue(value: string): string {
 
 async function gotoIssuanceDashboard(page: Page): Promise<void> {
   await page.goto("/dashboard/issuance");
-  await expect(page.getByRole("button", { name: "Create token" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Create draft" })).toBeVisible();
 }
 
 async function gotoToken(page: Page, tokenId: string): Promise<void> {
@@ -31,7 +31,7 @@ async function confirmAction(page: Page, confirmButtonLabel: string): Promise<vo
 }
 
 async function openFundManagementAction(page: Page, action: string): Promise<void> {
-  await openTab(page, "Fund Management");
+  await openTab(page, "Operations");
   const row = page.getByTestId(`fund-management-row-${action}`);
   await expect(row).toBeVisible();
   await row.getByRole("button").click();
@@ -76,7 +76,7 @@ test.describe
       const draftSymbol = `E2E${draftSuffix}`;
 
       await gotoIssuanceDashboard(page);
-      await page.getByRole("button", { name: "Create token" }).click();
+      await page.getByRole("button", { name: "Create draft" }).click();
       await page
         .getByRole("button", { name: /Stablecoin/i })
         .first()
@@ -94,9 +94,13 @@ test.describe
         .filter({ hasText: "This token will not use an allowlist." })
         .click();
       await page.getByLabel("Main Signer").selectOption(fixtures.wallets.treasury.walletId);
-      await page.getByRole("button", { name: "Create Stablecoin" }).click();
+      await page.getByRole("button", { name: "Create Stablecoin Draft" }).click();
 
-      await waitForToast(page, `Token ${draftName} created successfully.`);
+      await expect
+        .poll(async () => page.getByRole("heading", { name: draftName, exact: true }).count(), {
+          timeout: 120_000,
+        })
+        .toBeGreaterThan(0);
       await expect(page.getByRole("heading", { name: draftName, exact: true })).toBeVisible();
     });
 
@@ -104,15 +108,13 @@ test.describe
       page,
     }) => {
       await gotoToken(page, fixtures.tokens.pending.id);
-      await openTab(page, "Fund Management");
+      await openTab(page, "Operations");
 
       const deployRow = page.getByTestId("fund-management-row-deploy");
       await expect(deployRow.getByRole("button", { name: "Deploy" })).toBeVisible();
       await deployRow.getByRole("button", { name: "Deploy" }).click();
       await expect(
-        page.getByText(
-          "This will deploy the token on-chain so fund management actions can be used."
-        )
+        page.getByText("This will deploy the token on-chain so operations can run.")
       ).toBeVisible();
       await page.getByRole("button", { name: "Deploy now", exact: true }).click();
       await expect(page.getByRole("heading", { name: "Deploy token?" })).toBeVisible();
@@ -258,7 +260,7 @@ test.describe
       await openTab(page, "Overview");
       await expect(page.getByTestId("overview-row-supply")).toContainText("7");
 
-      await openTab(page, "Fund Management");
+      await openTab(page, "Operations");
       await expect(page.getByRole("cell", { name: "mint" })).toBeVisible();
       await expect(page.getByRole("cell", { name: "burn" })).toBeVisible();
     });

@@ -3,12 +3,17 @@ import {
   isKnownCustodyProvider,
 } from "@/app/dashboard/custody/provider-catalog";
 import { WalletActionsMenu } from "@/app/dashboard/custody/wallet-actions-menu";
+import { WalletActivitySection } from "@/app/dashboard/custody/wallet-activity-section";
 import { WalletAddressCopyButton } from "@/app/dashboard/custody/wallet-address-copy-button";
 import { formatPurpose, truncateMiddle } from "@/app/dashboard/custody/wallet-format-utils";
 import { WalletProviderMark } from "@/app/dashboard/custody/wallet-provider-mark";
 import { type SdpApiClient, createSdpApiClient } from "@/lib/sdp-api";
 import { auth } from "@clerk/nextjs/server";
-import type { CustodyWalletByIdResponse, CustodyWalletTokenBalance } from "@sdp/types";
+import type {
+  CustodyWalletByIdResponse,
+  CustodyWalletTokenBalance,
+  PaymentTransferSummary,
+} from "@sdp/types";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import type { ReactNode } from "react";
@@ -17,6 +22,7 @@ import {
   formatDisplayAmount,
   resolveTotalBalance,
 } from "../../payments/payments-overview.utils";
+import { fetchPaymentTransfers } from "../../payments/payments-page.data";
 
 interface WalletBalancesResponse {
   walletBalances?: {
@@ -97,6 +103,20 @@ async function getOwnedTokenRoutes(request: SdpApiClient["request"]): Promise<Ma
   }
 }
 
+async function getWalletTransfers(
+  request: SdpApiClient["request"],
+  walletId: string
+): Promise<{
+  transfers: PaymentTransferSummary[];
+  error: string | null;
+}> {
+  const result = await fetchPaymentTransfers(request, 20, { walletId });
+  return {
+    transfers: result.data ?? [],
+    error: result.ok ? null : (result.error ?? "Wallet activity is unavailable right now."),
+  };
+}
+
 export default async function WalletDetailPage({
   params,
 }: {
@@ -113,10 +133,11 @@ export default async function WalletDetailPage({
   const { walletId } = await params;
   const resolvedWalletId = decodeURIComponent(walletId);
   const apiClient = await createSdpApiClient();
-  const [wallet, trackedBalances, ownedTokensByMint] = await Promise.all([
+  const [wallet, trackedBalances, ownedTokensByMint, walletTransfersResult] = await Promise.all([
     getWalletDetail(apiClient.request, resolvedWalletId),
     getWalletTrackedBalances(apiClient.request, resolvedWalletId),
     getOwnedTokenRoutes(apiClient.request),
+    getWalletTransfers(apiClient.request, resolvedWalletId),
   ]);
 
   const provider =
@@ -228,6 +249,12 @@ export default async function WalletDetailPage({
           </div>
         )}
       </section>
+
+      <WalletActivitySection
+        walletId={resolvedWalletId}
+        initialTransfers={walletTransfersResult.transfers}
+        initialTransfersError={walletTransfersResult.error}
+      />
     </div>
   );
 }

@@ -1,5 +1,6 @@
 "use client";
 
+import type { DashboardAccess } from "@/lib/dashboard-access";
 import { useDashboardUrlState } from "@/lib/dashboard-url-state";
 import { type ReactNode, createContext, useCallback, useContext, useMemo, useState } from "react";
 
@@ -14,6 +15,7 @@ export interface DashboardPlaygroundApiKeyOption {
 }
 
 type DashboardWorkspaceContextValue = {
+  dashboardAccess: DashboardAccess;
   isSidebarOpen: boolean;
   selectedProject: string;
   issuanceTab: IssuanceWorkspaceTab;
@@ -33,12 +35,14 @@ const DashboardWorkspaceContext = createContext<DashboardWorkspaceContextValue |
 
 type DashboardWorkspaceProviderProps = {
   children: ReactNode;
+  dashboardAccess: DashboardAccess;
   defaultProject?: string;
   initialSidebarOpen?: boolean;
 };
 
 export function DashboardWorkspaceProvider({
   children,
+  dashboardAccess,
   defaultProject = "Default Project",
   initialSidebarOpen = true,
 }: DashboardWorkspaceProviderProps) {
@@ -87,6 +91,7 @@ export function DashboardWorkspaceProvider({
 
   const value = useMemo<DashboardWorkspaceContextValue>(
     () => ({
+      dashboardAccess,
       isSidebarOpen,
       selectedProject,
       issuanceTab,
@@ -100,6 +105,7 @@ export function DashboardWorkspaceProvider({
       toggleSidebar,
     }),
     [
+      dashboardAccess,
       isSidebarOpen,
       playgroundApiKeys,
       issuanceTab,

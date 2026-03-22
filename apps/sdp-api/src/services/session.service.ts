@@ -5,7 +5,7 @@
  * Sessions are stored in D1 and cached in KV for fast lookups.
  */
 
-import type { CachedSession, OrganizationRole, Permission, Session } from "@sdp/types";
+import type { CachedSession, Permission, Session } from "@sdp/types";
 import { getPermissionsForOrgRole } from "@sdp/types";
 
 // Session TTL: 7 days
@@ -128,7 +128,7 @@ export class SessionService {
     }
 
     // Get permissions for the user's role
-    const permissions = getPermissionsForOrgRole(row.role as OrganizationRole);
+    const permissions = getPermissionsForOrgRole(row.role);
 
     const cachedSession: CachedSession = {
       id: row.id,

@@ -9,11 +9,15 @@ import type {
   AllowlistFormState,
   AuthorityFormState,
   BurnFormState,
+  BurnValidationErrors,
   ForceBurnFormState,
+  ForceBurnValidationErrors,
   FreezeFormState,
   MetadataFormState,
   MintFormState,
+  MintValidationErrors,
   SeizeFormState,
+  SeizeValidationErrors,
 } from "./token-management-workspace.types";
 
 interface TokenActionFormsProps {
@@ -39,10 +43,19 @@ interface TokenActionFormsProps {
   allowlistEntries: TokenAllowlistEntry[];
   allowlistError: string | null;
   signerWallets: PaymentsDashboardWallet[];
+  walletOptions: PaymentsDashboardWallet[];
   signerUnavailableReason: string | null;
+  mintValidationErrors: MintValidationErrors;
+  mintValidationReason: string | null;
+  burnValidationErrors: BurnValidationErrors;
+  burnValidationReason: string | null;
+  seizeValidationErrors: SeizeValidationErrors;
+  seizeValidationReason: string | null;
+  forceBurnValidationErrors: ForceBurnValidationErrors;
+  forceBurnValidationReason: string | null;
+  submitAlignment?: "start" | "end";
   onSignerWalletIdChange: (value: string) => void;
   onUpdateMetadata: () => void;
-  onRefreshSupply: () => void;
   onMint: () => void;
   onBurn: () => void;
   onSeize: () => void;
@@ -67,10 +80,15 @@ export function TokenActionForms(props: TokenActionFormsProps) {
         burnForm={props.burnForm}
         setBurnForm={props.setBurnForm}
         signerWallets={props.signerWallets}
+        walletOptions={props.walletOptions}
         signerUnavailableReason={props.signerUnavailableReason}
+        mintValidationErrors={props.mintValidationErrors}
+        mintValidationReason={props.mintValidationReason}
+        burnValidationErrors={props.burnValidationErrors}
+        burnValidationReason={props.burnValidationReason}
+        submitAlignment={props.submitAlignment}
         onSignerWalletIdChange={props.onSignerWalletIdChange}
         onUpdateMetadata={props.onUpdateMetadata}
-        onRefreshSupply={props.onRefreshSupply}
         onMint={props.onMint}
         onBurn={props.onBurn}
       />
@@ -91,7 +109,13 @@ export function TokenActionForms(props: TokenActionFormsProps) {
         allowlistEntries={props.allowlistEntries}
         allowlistError={props.allowlistError}
         signerWallets={props.signerWallets}
+        walletOptions={props.walletOptions}
         signerUnavailableReason={props.signerUnavailableReason}
+        seizeValidationErrors={props.seizeValidationErrors}
+        seizeValidationReason={props.seizeValidationReason}
+        forceBurnValidationErrors={props.forceBurnValidationErrors}
+        forceBurnValidationReason={props.forceBurnValidationReason}
+        submitAlignment={props.submitAlignment}
         onSignerWalletIdChange={props.onSignerWalletIdChange}
         onSeize={props.onSeize}
         onForceBurn={props.onForceBurn}

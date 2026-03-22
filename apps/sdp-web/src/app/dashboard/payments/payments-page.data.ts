@@ -136,12 +136,16 @@ export async function fetchPaymentsAggregate(
 
 export async function fetchPaymentTransfers(
   request: SdpApiClient["request"],
-  pageSize = 20
+  pageSize = 20,
+  options: {
+    walletId?: string;
+  } = {}
 ): Promise<FetchResult<PaymentTransferSummary[]>> {
   try {
     const query = new URLSearchParams({
       page: "1",
       pageSize: String(pageSize),
+      ...(options.walletId ? { wallet: options.walletId } : {}),
     }).toString();
     const response = await request(`/v1/payments/transfers?${query}`);
     if (!response.ok) {
@@ -194,6 +198,77 @@ export async function fetchPaymentTransfers(
       error: error instanceof Error ? error.message : "Unable to load transfers",
     };
   }
+}
+
+function dedupeTransfers(transfers: PaymentTransferSummary[]): PaymentTransferSummary[] {
+  const seen = new Set<string>();
+
+  return transfers.filter((transfer) => {
+    const key = transfer.signature?.trim() || transfer.id;
+    if (!key || seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
+}
+
+export async function fetchDashboardPaymentTransfers(
+  request: SdpApiClient["request"],
+  pageSize = 20
+): Promise<FetchResult<PaymentTransferSummary[]>> {
+  const walletsResult = await fetchPaymentsWallets(request, { view: "summary" });
+
+  if (!walletsResult.ok || (walletsResult.data?.length ?? 0) === 0) {
+    return fetchPaymentTransfers(request, pageSize);
+  }
+
+  const settledTransfers = await Promise.allSettled(
+    (walletsResult.data ?? []).map((wallet) =>
+      fetchPaymentTransfers(request, pageSize, { walletId: wallet.walletId })
+    )
+  );
+
+  const mergedTransfers: PaymentTransferSummary[] = [];
+  let lastError: string | undefined;
+
+  for (const result of settledTransfers) {
+    if (result.status !== "fulfilled") {
+      lastError =
+        result.reason instanceof Error ? result.reason.message : "Unable to load transfers";
+      continue;
+    }
+
+    if (!result.value.ok) {
+      lastError = result.value.error;
+      continue;
+    }
+
+    mergedTransfers.push(...(result.value.data ?? []));
+  }
+
+  if (mergedTransfers.length === 0) {
+    const fallback = await fetchPaymentTransfers(request, pageSize);
+    if (fallback.ok || !lastError) {
+      return fallback;
+    }
+
+    return {
+      ok: false,
+      error: lastError,
+    };
+  }
+
+  return {
+    ok: true,
+    data: dedupeTransfers(mergedTransfers)
+      .sort((left, right) => {
+        const leftTimestamp = left.createdAt ? new Date(left.createdAt).getTime() : 0;
+        const rightTimestamp = right.createdAt ? new Date(right.createdAt).getTime() : 0;
+        return rightTimestamp - leftTimestamp;
+      })
+      .slice(0, pageSize),
+  };
 }
 
 export async function fetchPaymentsIssuedTokenSymbols(

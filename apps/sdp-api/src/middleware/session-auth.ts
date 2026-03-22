@@ -127,8 +127,7 @@ async function getSessionFromD1(
 
   // Get permissions for role
   const { getPermissionsForOrgRole } = await import("@sdp/types");
-  type OrganizationRole = "owner" | "admin" | "developer" | "viewer";
-  const permissions = getPermissionsForOrgRole(row.role as OrganizationRole);
+  const permissions = getPermissionsForOrgRole(row.role);
 
   const cachedSession: CachedSession = {
     id: row.id,

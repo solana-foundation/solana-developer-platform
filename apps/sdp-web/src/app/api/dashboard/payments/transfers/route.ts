@@ -1,3 +1,4 @@
+import { fetchDashboardPaymentTransfers } from "@/app/dashboard/payments/payments-page.data";
 import { createTimedTrace, logRouteResult } from "@/lib/request-tracing";
 import { createSdpApiClient } from "@/lib/sdp-api";
 import { NextResponse } from "next/server";
@@ -11,6 +12,36 @@ export async function GET(request: Request) {
     );
     const url = new URL(request.url);
     const search = url.searchParams.toString();
+    const hasWalletFilter = url.searchParams.has("wallet") || url.searchParams.has("walletAddress");
+    const pageSize = Number.parseInt(url.searchParams.get("pageSize") ?? "20", 10);
+
+    if (!hasWalletFilter) {
+      const result = await fetchDashboardPaymentTransfers(
+        apiClient.request,
+        Number.isFinite(pageSize) && pageSize > 0 ? pageSize : 20
+      );
+      const status = result.ok ? 200 : (result.status ?? 500);
+      const nextResponse = NextResponse.json(
+        result.ok
+          ? { data: result.data ?? [] }
+          : { error: { message: result.error ?? "Transfer list request failed" } },
+        {
+          status,
+          headers: {
+            "X-SDP-Trace-ID": trace.traceId,
+            "Server-Timing": trace.serverTiming(),
+          },
+        }
+      );
+
+      logRouteResult(trace, status, {
+        query: search,
+        source: "dashboard_aggregate",
+      });
+
+      return nextResponse;
+    }
+
     const response = await apiClient.request(
       `/v1/payments/transfers${search ? `?${search}` : ""}`,
       {

@@ -44,7 +44,13 @@ function formatRole(role: ApiKeyRole): string {
   return "Developer";
 }
 
-export function ApiKeysTableClient({ initialApiKeys }: { initialApiKeys: ApiKeyRecord[] }) {
+export function ApiKeysTableClient({
+  initialApiKeys,
+  canManageApiKeys,
+}: {
+  initialApiKeys: ApiKeyRecord[];
+  canManageApiKeys: boolean;
+}) {
   const [apiKeys, setApiKeys] = useState(initialApiKeys);
 
   useEffect(() => {
@@ -73,7 +79,7 @@ export function ApiKeysTableClient({ initialApiKeys }: { initialApiKeys: ApiKeyR
           <TableHead className="w-[11%]">Last used</TableHead>
           <TableHead className="w-[11%]">Expires</TableHead>
           <TableHead className="w-[11%]">Created</TableHead>
-          <TableHead className="w-[21%] text-right">Actions</TableHead>
+          <TableHead className="w-[21%] text-right">{canManageApiKeys ? "Actions" : ""}</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -107,14 +113,16 @@ export function ApiKeysTableClient({ initialApiKeys }: { initialApiKeys: ApiKeyR
                 {formatDate(key.createdAt)}
               </TableCell>
               <TableCell className="text-right">
-                <ApiKeyActionsMenu
-                  keyId={key.id}
-                  keyName={key.name}
-                  canRotate={canRotate}
-                  onDeleted={() => {
-                    setApiKeys((previous) => previous.filter((item) => item.id !== key.id));
-                  }}
-                />
+                {canManageApiKeys ? (
+                  <ApiKeyActionsMenu
+                    keyId={key.id}
+                    keyName={key.name}
+                    canRotate={canRotate}
+                    onDeleted={() => {
+                      setApiKeys((previous) => previous.filter((item) => item.id !== key.id));
+                    }}
+                  />
+                ) : null}
               </TableCell>
             </TableRow>
           );

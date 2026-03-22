@@ -13,14 +13,11 @@ interface TokenManagementHeaderProps {
   tokenImageUrl: string | null;
   explorerHref: string | null;
   canDeployToken: boolean;
+  canManageTokenAdmin: boolean;
   isPending: boolean;
   deployDisabledReason?: string | null;
-  mintDisabledReason?: string | null;
-  burnDisabledReason?: string | null;
   pauseDisabledReason?: string | null;
   onCopyAddress: () => void;
-  onMintSelect: () => void;
-  onBurnSelect: () => void;
   onDeploy: () => void;
   onUnpause: () => void;
 }
@@ -33,14 +30,11 @@ export function TokenManagementHeader({
   tokenImageUrl,
   explorerHref,
   canDeployToken,
+  canManageTokenAdmin,
   isPending,
   deployDisabledReason,
-  mintDisabledReason,
-  burnDisabledReason,
   pauseDisabledReason,
   onCopyAddress,
-  onMintSelect,
-  onBurnSelect,
   onDeploy,
   onUnpause,
 }: TokenManagementHeaderProps) {
@@ -109,7 +103,7 @@ export function TokenManagementHeader({
             </TokenDisabledActionTooltip>
           ) : (
             <>
-              {tokenStatus === "paused" ? (
+              {tokenStatus === "paused" && canManageTokenAdmin ? (
                 <TokenDisabledActionTooltip reason={isPending ? null : pauseDisabledReason}>
                   <Button
                     type="button"
@@ -120,25 +114,6 @@ export function TokenManagementHeader({
                   </Button>
                 </TokenDisabledActionTooltip>
               ) : null}
-              <TokenDisabledActionTooltip reason={isPending ? null : mintDisabledReason}>
-                <Button
-                  type="button"
-                  onClick={onMintSelect}
-                  disabled={isPending || Boolean(mintDisabledReason)}
-                >
-                  Mint
-                </Button>
-              </TokenDisabledActionTooltip>
-              <TokenDisabledActionTooltip reason={isPending ? null : burnDisabledReason}>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  onClick={onBurnSelect}
-                  disabled={isPending || Boolean(burnDisabledReason)}
-                >
-                  Burn
-                </Button>
-              </TokenDisabledActionTooltip>
             </>
           )}
         </div>

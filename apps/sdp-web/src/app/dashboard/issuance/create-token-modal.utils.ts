@@ -1,4 +1,4 @@
-import { BadgeDollarSign, CircleHelp, Gamepad2, ShieldCheck } from "lucide-react";
+import { BadgeDollarSign, CircleHelp, ShieldCheck } from "lucide-react";
 import type { CreateIssuanceTokenResult } from "./actions";
 import type {
   AccessControlMode,
@@ -29,15 +29,6 @@ export const templateCards: Array<
     iconClassName: "bg-[#d8f7e4] text-[#0f9b58]",
     enabled: true,
     template: "tokenized-security",
-  },
-  {
-    id: "arcade",
-    name: "Arcade Token",
-    description: "Deploy a gaming or utility token with custom extensions and features.",
-    icon: Gamepad2,
-    iconClassName: "bg-[#f7ead8] text-[#ff6b00]",
-    enabled: true,
-    template: "arcade",
   },
   {
     id: "custom",
@@ -72,30 +63,26 @@ export function createInitialDraft(): TokenDraft {
 export function getTemplateTitle(template: TemplateSelection): string {
   switch (template) {
     case "stablecoin":
-      return "Create a Stablecoin";
+      return "Create Stablecoin Draft";
     case "custom":
-      return "Create Custom Token";
+      return "Create Custom Token Draft";
     case "tokenized-security":
-      return "Create Tokenized Security";
-    case "arcade":
-      return "Create Arcade Token";
+      return "Create Tokenized Security Draft";
     default:
-      return "Create Token";
+      return "Create Token Draft";
   }
 }
 
 export function getCreateButtonLabel(template: TemplateSelection): string {
   switch (template) {
     case "stablecoin":
-      return "Create Stablecoin";
+      return "Create Stablecoin Draft";
     case "custom":
-      return "Create Custom Token";
+      return "Create Custom Token Draft";
     case "tokenized-security":
-      return "Create Tokenized Security";
-    case "arcade":
-      return "Create Arcade Token";
+      return "Create Tokenized Security Draft";
     default:
-      return "Create Token";
+      return "Create Token Draft";
   }
 }
 
@@ -107,8 +94,6 @@ export function getTemplateDefaultDecimals(template: TemplateSelection): TokenDr
       return "9";
     case "tokenized-security":
       return "8";
-    case "arcade":
-      return "0";
     default:
       return "6";
   }
@@ -123,8 +108,6 @@ export function getTemplateDecimalOptions(
       return ["6", "9"];
     case "tokenized-security":
       return ["8"];
-    case "arcade":
-      return ["0", "6"];
     default:
       return ["6", "9"];
   }

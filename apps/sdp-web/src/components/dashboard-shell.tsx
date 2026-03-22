@@ -56,11 +56,6 @@ const docsHref =
   process.env.NEXT_PUBLIC_SDP_DOCS_URL ||
   (process.env.NODE_ENV === "development" ? "http://localhost:3001/docs" : DEFAULT_SDP_DOCS_URL);
 
-const bottomNavItems: NavItem[] = [
-  { label: "API Docs", href: docsHref, icon: Library, external: true },
-  { label: "Settings", href: "/dashboard/settings", icon: Settings2 },
-];
-
 type DashboardPageConfig = {
   title: string;
   headerNav?: ReactNode;
@@ -382,10 +377,12 @@ function SidebarGroup({
 }
 
 function DashboardSidebarContent({
+  bottomNavItems,
   pathname,
   onNavigate,
   onClose,
 }: {
+  bottomNavItems: NavItem[];
   pathname: string;
   onNavigate?: () => void;
   onClose: () => void;
@@ -454,11 +451,17 @@ function DashboardSidebarContent({
 export function DashboardShell({ children }: { children: ReactNode }) {
   const { isLoaded, isSignedIn, orgId } = useAuth();
   const pathname = usePathname();
-  const { isSidebarOpen, issuanceTab, setSidebarOpen } = useDashboardWorkspace();
+  const { dashboardAccess, isSidebarOpen, issuanceTab, setSidebarOpen } = useDashboardWorkspace();
   const [isMobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const previousPathnameRef = useRef(pathname);
   const sidebarWidth = 296;
   const pageConfig = getDashboardPageConfig(pathname);
+  const bottomNavItems: NavItem[] = [
+    { label: "API Docs", href: docsHref, icon: Library, external: true },
+    ...(dashboardAccess.capabilities.canManageOrgSettings
+      ? [{ label: "Settings", href: "/dashboard/settings", icon: Settings2 }]
+      : []),
+  ];
   const contentWidthClass = pageConfig.contentWidthClass ?? "max-w-5xl";
   const backAction = pageConfig.backAction ? (
     <HeaderBackAction href={pageConfig.backAction.href} label={pageConfig.backAction.label} />
@@ -563,6 +566,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
           ].join(" ")}
         >
           <DashboardSidebarContent
+            bottomNavItems={bottomNavItems}
             pathname={pathname}
             onNavigate={undefined}
             onClose={() => setSidebarOpen(false)}
@@ -579,6 +583,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
             />
             <div className="relative z-10 flex h-full w-[296px] max-w-[85vw] flex-col justify-between border-r border-[rgba(28,28,29,0.10)] bg-[#e9e7de] shadow-[0_12px_40px_rgba(28,28,29,0.16)]">
               <DashboardSidebarContent
+                bottomNavItems={bottomNavItems}
                 pathname={pathname}
                 onNavigate={() => setMobileSidebarOpen(false)}
                 onClose={() => setMobileSidebarOpen(false)}
