@@ -81,10 +81,7 @@ export default function Home() {
               </SignedIn>
             </>
           ) : (
-            <div className="mt-[34px] flex flex-col items-start gap-3">
-              <div className="inline-flex h-10 items-center justify-center rounded-[10px] bg-[rgba(28,28,29,0.08)] px-[18px] text-[15px] font-semibold leading-[15px] text-[rgba(28,28,29,0.68)]">
-                Access opening soon
-              </div>
+            <div className="mt-[34px]">
               <Link
                 href={waitlistHref}
                 target="_blank"
