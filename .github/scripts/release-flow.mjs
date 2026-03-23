@@ -67,6 +67,22 @@ function writeJson(filePath, value) {
   fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`);
 }
 
+function updatePackageVersion(filePath, currentVersion, nextVersion) {
+  const current = fs.readFileSync(filePath, "utf8");
+  const updated = current.replace(
+    new RegExp(`(\"version\"\\s*:\\s*\")${escapeRegExp(currentVersion)}(\")`),
+    `$1${nextVersion}$2`
+  );
+
+  if (updated === current) {
+    throw new Error(
+      `Unable to update package.json version from ${currentVersion} to ${nextVersion}`
+    );
+  }
+
+  fs.writeFileSync(filePath, updated);
+}
+
 function latestReleaseTag() {
   const output = git(["tag", "--list", "v*.*.*", "--sort=-v:refname"]);
   return (
@@ -141,6 +157,10 @@ function incrementVersion(version, level) {
     default:
       return `${major}.${minor}.${patch + 1}`;
   }
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function compareUrl(fromTag, toTag) {
@@ -335,10 +355,9 @@ async function prepareRelease() {
 
   git(["checkout", "-B", releaseBranch], { capture: false });
 
-  packageJson.version = nextVersion;
   manifest["."] = nextVersion;
 
-  writeJson(packageJsonPath, packageJson);
+  updatePackageVersion(packageJsonPath, packageJson.version, nextVersion);
   writeJson(manifestPath, manifest);
   prependChangelog(sectionMarkdown);
 
