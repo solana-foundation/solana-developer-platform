@@ -3,8 +3,23 @@
 import type { DashboardAccess } from "@/lib/dashboard-access";
 import { useDashboardUrlState } from "@/lib/dashboard-url-state";
 import { type ReactNode, createContext, useCallback, useContext, useMemo, useState } from "react";
+import { SWRConfig } from "swr";
 
 export type IssuanceWorkspaceTab = "tokens" | "playground";
+
+export interface DashboardCacheScope {
+  userId: string | null;
+  orgId: string | null;
+}
+
+const DASHBOARD_SWR_CONFIG = {
+  dedupingInterval: 10_000,
+  errorRetryCount: 2,
+  focusThrottleInterval: 15_000,
+  keepPreviousData: true,
+  revalidateIfStale: true,
+  revalidateOnFocus: true,
+};
 
 export interface DashboardPlaygroundApiKeyOption {
   id: string;
@@ -16,6 +31,7 @@ export interface DashboardPlaygroundApiKeyOption {
 
 type DashboardWorkspaceContextValue = {
   dashboardAccess: DashboardAccess;
+  dashboardCacheScope: DashboardCacheScope;
   isSidebarOpen: boolean;
   selectedProject: string;
   issuanceTab: IssuanceWorkspaceTab;
@@ -36,6 +52,7 @@ const DashboardWorkspaceContext = createContext<DashboardWorkspaceContextValue |
 type DashboardWorkspaceProviderProps = {
   children: ReactNode;
   dashboardAccess: DashboardAccess;
+  dashboardCacheScope: DashboardCacheScope;
   defaultProject?: string;
   initialSidebarOpen?: boolean;
 };
@@ -43,6 +60,7 @@ type DashboardWorkspaceProviderProps = {
 export function DashboardWorkspaceProvider({
   children,
   dashboardAccess,
+  dashboardCacheScope,
   defaultProject = "Default Project",
   initialSidebarOpen = true,
 }: DashboardWorkspaceProviderProps) {
@@ -92,6 +110,7 @@ export function DashboardWorkspaceProvider({
   const value = useMemo<DashboardWorkspaceContextValue>(
     () => ({
       dashboardAccess,
+      dashboardCacheScope,
       isSidebarOpen,
       selectedProject,
       issuanceTab,
@@ -106,6 +125,7 @@ export function DashboardWorkspaceProvider({
     }),
     [
       dashboardAccess,
+      dashboardCacheScope,
       isSidebarOpen,
       playgroundApiKeys,
       issuanceTab,
@@ -120,7 +140,7 @@ export function DashboardWorkspaceProvider({
 
   return (
     <DashboardWorkspaceContext.Provider value={value}>
-      {children}
+      <SWRConfig value={DASHBOARD_SWR_CONFIG}>{children}</SWRConfig>
     </DashboardWorkspaceContext.Provider>
   );
 }

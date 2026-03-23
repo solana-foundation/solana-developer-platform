@@ -1,10 +1,11 @@
 "use client";
 
+import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
 import type { CustodyWalletTokenBalance } from "@sdp/types";
-import useSWR from "swr";
 import { formatCurrencyAmount, resolveTotalBalance } from "../payments/payments-overview.utils";
 
 const BALANCE_REFRESH_INTERVAL_MS = 30_000;
+const WALLET_BALANCE_CACHE_TTL_MS = 30_000;
 
 interface WalletBalancesEnvelope {
   data?: {
@@ -50,7 +51,7 @@ async function fetchWalletBalances(walletId: string): Promise<CustodyWalletToken
 }
 
 export function WalletCardBalanceValue({ walletId, initialBalances }: WalletCardBalanceValueProps) {
-  const { data, error } = useSWR<CustodyWalletTokenBalance[]>(
+  const { data, error } = usePersistedDashboardSWR<CustodyWalletTokenBalance[]>(
     walletId ? `wallet-card-balance:${walletId}` : null,
     () => fetchWalletBalances(walletId),
     {
@@ -59,6 +60,10 @@ export function WalletCardBalanceValue({ walletId, initialBalances }: WalletCard
       refreshInterval: BALANCE_REFRESH_INTERVAL_MS,
       dedupingInterval: 5_000,
       keepPreviousData: true,
+    },
+    {
+      key: `wallet-card-balance.${walletId}`,
+      ttlMs: WALLET_BALANCE_CACHE_TTL_MS,
     }
   );
 

@@ -1,5 +1,6 @@
 "use client";
 
+import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
 import type {
   PaymentTransferSummary as TransferRecord,
   PaymentWalletPolicy as WalletPolicy,
@@ -7,7 +8,6 @@ import type {
 } from "@sdp/types";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import useSWR from "swr";
 import {
   createTransfer,
   fetchTransfers,
@@ -21,6 +21,8 @@ import type { ComplianceSnapshot } from "./payments-workspace.types";
 
 const PAYMENTS_WORKSPACE_WALLETS_KEY = "payments-workspace-wallets";
 const PAYMENTS_WORKSPACE_TRANSFERS_KEY = "payments-workspace-transfers";
+const PAYMENTS_WORKSPACE_WALLETS_CACHE_TTL_MS = 30_000;
+const PAYMENTS_WORKSPACE_TRANSFERS_CACHE_TTL_MS = 20_000;
 
 export interface DestinationAllowlistSectionState {
   walletId: string;
@@ -82,16 +84,30 @@ export function usePaymentsWorkspace(): PaymentsWorkspaceState {
     error: walletsFetchError,
     isLoading: walletsLoading,
     mutate: mutateWallets,
-  } = useSWR<WalletRecord[]>(PAYMENTS_WORKSPACE_WALLETS_KEY, fetchWallets, {
-    revalidateOnFocus: true,
-    refreshInterval: 30_000,
-  });
-  const { data: recentTransfers = [], mutate: mutateTransfers } = useSWR<TransferRecord[]>(
+  } = usePersistedDashboardSWR<WalletRecord[]>(
+    PAYMENTS_WORKSPACE_WALLETS_KEY,
+    fetchWallets,
+    {
+      revalidateOnFocus: true,
+      refreshInterval: 30_000,
+    },
+    {
+      key: "payments.wallets.summary",
+      ttlMs: PAYMENTS_WORKSPACE_WALLETS_CACHE_TTL_MS,
+    }
+  );
+  const { data: recentTransfers = [], mutate: mutateTransfers } = usePersistedDashboardSWR<
+    TransferRecord[]
+  >(
     PAYMENTS_WORKSPACE_TRANSFERS_KEY,
     () => fetchTransfers(),
     {
       revalidateOnFocus: true,
       refreshInterval: 10_000,
+    },
+    {
+      key: "payments.transfers.recent",
+      ttlMs: PAYMENTS_WORKSPACE_TRANSFERS_CACHE_TTL_MS,
     }
   );
 

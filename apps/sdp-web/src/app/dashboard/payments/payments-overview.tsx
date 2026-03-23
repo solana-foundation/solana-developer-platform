@@ -12,11 +12,11 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
 import type { CustodyWalletAggregate, PaymentTransferSummary as TransferRecord } from "@sdp/types";
 import { ArrowDownLeft, ArrowUpRight, ExternalLink, RefreshCw } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMemo } from "react";
-import useSWR from "swr";
 import {
   formatCurrencyAmount,
   formatDirection,
@@ -44,6 +44,8 @@ interface PaymentsOverviewProps {
 
 const PAYMENTS_OVERVIEW_AGGREGATE_KEY = "payments-overview-aggregate";
 const PAYMENTS_OVERVIEW_TRANSFERS_KEY = "payments-overview-transfers";
+const PAYMENTS_OVERVIEW_AGGREGATE_CACHE_TTL_MS = 30_000;
+const PAYMENTS_OVERVIEW_TRANSFERS_CACHE_TTL_MS = 20_000;
 
 function statusClassName(status: string): string {
   switch (status.toLowerCase()) {
@@ -106,13 +108,17 @@ export function PaymentsOverview({
     error: aggregateFetchError,
     isValidating: aggregateRefreshing,
     mutate: mutateAggregate,
-  } = useSWR<CustodyWalletAggregate>(
+  } = usePersistedDashboardSWR<CustodyWalletAggregate>(
     [PAYMENTS_OVERVIEW_AGGREGATE_KEY, refreshSeed],
     () => fetchWalletAggregate(),
     {
       fallbackData: aggregateError || !aggregate ? undefined : aggregate,
       revalidateOnFocus: true,
       refreshInterval: 30_000,
+    },
+    {
+      key: "payments.aggregate",
+      ttlMs: PAYMENTS_OVERVIEW_AGGREGATE_CACHE_TTL_MS,
     }
   );
   const {
@@ -120,13 +126,17 @@ export function PaymentsOverview({
     error: transfersFetchError,
     isValidating: transfersRefreshing,
     mutate: mutateTransfers,
-  } = useSWR<TransferRecord[]>(
+  } = usePersistedDashboardSWR<TransferRecord[]>(
     [PAYMENTS_OVERVIEW_TRANSFERS_KEY, refreshSeed],
     () => fetchTransfers(),
     {
       fallbackData: transfersError ? undefined : transfers,
       revalidateOnFocus: true,
       refreshInterval: 10_000,
+    },
+    {
+      key: "payments.transfers.recent",
+      ttlMs: PAYMENTS_OVERVIEW_TRANSFERS_CACHE_TTL_MS,
     }
   );
 
