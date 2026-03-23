@@ -8,7 +8,7 @@ export const PUBLIC_TAG_SLUGS = new Set([
   "compliance",
 ]);
 
-export const POSTMAN_COLLECTION_ROUTE = "/postman/collection.json";
+export const POSTMAN_COLLECTION_ROUTE = "/docs/postman/collection.json";
 export const POSTMAN_COLLECTION_FILENAME =
   "solana-developer-platform-public.postman_collection.json";
 export const POSTMAN_COLLECTION_PUBLIC_PATH = `/postman/${POSTMAN_COLLECTION_FILENAME}`;

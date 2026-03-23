@@ -2,6 +2,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  POSTMAN_COLLECTION_ROUTE,
   PUBLIC_TAG_SLUGS,
   getPrimaryTagName,
   isPublicTag,
@@ -121,9 +122,9 @@ description: Endpoint index from the repository OpenAPI spec.
 ---
 
 <div>
-  <a href="/postman/collection.json" download>Download Postman collection</a>
+  <a href="${POSTMAN_COLLECTION_ROUTE}" download>Download Postman collection</a>
   {" · "}
-  <a href="/postman/collection.json">Open raw JSON</a>
+  <a href="${POSTMAN_COLLECTION_ROUTE}">Open raw JSON</a>
 </div>
 
 ${links}
