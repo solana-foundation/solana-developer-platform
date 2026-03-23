@@ -35,10 +35,16 @@ const changelogSections = [
 ];
 
 function git(args, options = {}) {
-  return execFileSync("git", args, {
+  const output = execFileSync("git", args, {
     encoding: "utf8",
     stdio: options.capture === false ? "inherit" : ["ignore", "pipe", "pipe"],
-  }).trim();
+  });
+
+  if (typeof output !== "string") {
+    return "";
+  }
+
+  return output.trim();
 }
 
 function detectRepositoryFromGit() {
