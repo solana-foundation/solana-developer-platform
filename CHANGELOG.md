@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.10.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.9.0...v0.10.0) (2026-03-23)
+
+
+### Features
+
+* refresh landing hero copy ([#124](https://github.com/solana-foundation/solana-developer-platform/issues/124)) ([0527fa9](https://github.com/solana-foundation/solana-developer-platform/commit/0527fa98f3ac2f544a886e16d4b2c9057ee2544c))
+
+
+### Bug Fixes
+
+* docs postman collection links ([#123](https://github.com/solana-foundation/solana-developer-platform/issues/123)) ([34805cc](https://github.com/solana-foundation/solana-developer-platform/commit/34805ccc8709c2a99ac2b4208a736c1b040cb283))
+
 ## [0.9.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.8.0...v0.9.0) (2026-03-23)
 
 
