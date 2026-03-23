@@ -1,4 +1,4 @@
-import { DEFAULT_SDP_API_URL, DEFAULT_SDP_DOCS_URL, SDP_AGENTS_URL } from "@sdp/types";
+import { DEFAULT_SDP_AI_GUIDE_URL, DEFAULT_SDP_API_URL, DEFAULT_SDP_DOCS_URL } from "@sdp/types";
 import { Hono } from "hono";
 
 import type { Env } from "@/types/env";
@@ -15,7 +15,7 @@ const body = [
   `- OpenAPI: ${DEFAULT_SDP_API_URL}/openapi.json`,
   `- Interactive API docs: ${DEFAULT_SDP_API_URL}/docs`,
   `- Product docs: ${DEFAULT_SDP_DOCS_URL}`,
-  `- Agent guide: ${SDP_AGENTS_URL}`,
+  `- AI guide: ${DEFAULT_SDP_AI_GUIDE_URL}`,
   "",
   "## Authentication",
   "- Use `Authorization: Bearer <api_key>`.",

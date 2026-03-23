@@ -10,7 +10,7 @@ import {
   type ClerkJwtPayload,
   extractBearerToken,
   resolveClerkEmail,
-  verifyClerkJwt,
+  verifyClerkJwtForRequest,
 } from "@/lib/clerk-token";
 import { AppError, unauthorized } from "@/lib/errors";
 import type { Env } from "@/types/env";
@@ -41,6 +41,50 @@ async function resolveClerkOrganization(db: D1Database, clerkOrgId: string) {
     )
     .bind(clerkOrgId)
     .first<{ organization_id: string; slug: string | null }>();
+}
+
+async function resolveExistingClerkContext(
+  db: D1Database,
+  params: {
+    clerkUserId: string;
+    clerkOrgId: string;
+    fallbackEmail: string;
+    fallbackOrgSlug: string | null;
+  }
+) {
+  return db
+    .prepare(
+      `SELECT
+         aui.user_id,
+         COALESCE(aui.email, u.email, ?) AS email,
+         aoi.organization_id,
+         COALESCE(aoi.slug, ?) AS org_slug,
+         om.role
+       FROM auth_organization_identities aoi
+       LEFT JOIN auth_user_identities aui
+         ON aui.provider = 'clerk' AND aui.provider_user_id = ?
+       LEFT JOIN users u
+         ON u.id = aui.user_id
+       LEFT JOIN organization_members om
+         ON om.user_id = aui.user_id
+        AND om.organization_id = aoi.organization_id
+        AND om.status = 'active'
+       WHERE aoi.provider = 'clerk' AND aoi.provider_org_id = ?
+       LIMIT 1`
+    )
+    .bind(
+      params.fallbackEmail.toLowerCase(),
+      params.fallbackOrgSlug,
+      params.clerkUserId,
+      params.clerkOrgId
+    )
+    .first<{
+      user_id: string | null;
+      email: string | null;
+      organization_id: string;
+      org_slug: string | null;
+      role: string | null;
+    }>();
 }
 
 async function resolveOrgRole(db: D1Database, userId: string, organizationId: string) {
@@ -190,6 +234,39 @@ async function buildClerkContext(c: Context<{ Bindings: Env }>, payload: ClerkJw
     throw new AppError("UNAUTHORIZED", "Clerk token missing email");
   }
 
+  const existingContext = await resolveExistingClerkContext(c.env.DB, {
+    clerkUserId: payload.sub as string,
+    clerkOrgId: payload.org_id as string,
+    fallbackEmail: email,
+    fallbackOrgSlug: payload.org_slug ?? null,
+  });
+
+  if (existingContext?.organization_id && existingContext.user_id && existingContext.role) {
+    const role = normalizeOrganizationRole(existingContext.role);
+
+    if (role !== existingContext.role) {
+      await c.env.DB.prepare(
+        `UPDATE organization_members
+           SET role = ?
+           WHERE user_id = ? AND organization_id = ? AND status = 'active'`
+      )
+        .bind(role, existingContext.user_id, existingContext.organization_id)
+        .run();
+    }
+
+    return {
+      userId: existingContext.user_id,
+      organizationId: existingContext.organization_id,
+      permissions: getPermissionsForOrgRole(role),
+      role,
+      clerkUserId: payload.sub as string,
+      clerkOrgId: payload.org_id as string,
+      email: existingContext.email ?? email,
+      orgSlug: payload.org_slug ?? existingContext.org_slug,
+      orgRole: payload.org_role ?? null,
+    };
+  }
+
   const [userIdentity, orgIdentity] = await Promise.all([
     ensureClerkUser(c.env.DB, payload.sub as string, email),
     resolveClerkOrganization(c.env.DB, payload.org_id as string),
@@ -231,7 +308,7 @@ export function clerkAuthMiddleware() {
 
     let payload: ClerkJwtPayload;
     try {
-      payload = await verifyClerkJwt(token, c.env);
+      payload = await verifyClerkJwtForRequest(c, token);
     } catch (error) {
       throw new AppError("UNAUTHORIZED", "Invalid Clerk token", {
         cause: error instanceof Error ? error.message : String(error),
@@ -263,7 +340,7 @@ export function optionalClerkAuth() {
     }
 
     try {
-      const payload = await verifyClerkJwt(token, c.env);
+      const payload = await verifyClerkJwtForRequest(c, token);
 
       if (payload.sub && payload.org_id) {
         const clerkContext = await buildClerkContext(c, payload);

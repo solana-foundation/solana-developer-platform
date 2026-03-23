@@ -5,6 +5,7 @@
  * configured via wrangler.toml.
  */
 
+import type { ClerkJwtPayload } from "@/lib/clerk-token";
 import type { CachedSession, OrganizationRpcProvider, Permission } from "@sdp/types";
 
 export interface Env {
@@ -198,6 +199,10 @@ declare module "hono" {
       orgSlug: string | null;
       orgRole: string | null;
       email: string;
+    };
+    verifiedClerkJwt?: {
+      token: string;
+      payload: ClerkJwtPayload;
     };
     requestId: string;
     traceId: string;

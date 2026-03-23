@@ -79,3 +79,17 @@ export async function verifyClerkJwt(token: string, env: Env): Promise<ClerkJwtP
 
   return payload as ClerkJwtPayload;
 }
+
+export async function verifyClerkJwtForRequest(
+  c: Context<{ Bindings: Env }>,
+  token: string
+): Promise<ClerkJwtPayload> {
+  const cached = c.get("verifiedClerkJwt");
+  if (cached?.token === token) {
+    return cached.payload;
+  }
+
+  const payload = await verifyClerkJwt(token, c.env);
+  c.set("verifiedClerkJwt", { token, payload });
+  return payload;
+}

@@ -1,4 +1,4 @@
-import { docsOrigin, getDocsPagePath } from "@/lib/site";
+import { aiLlmsFullUrl, aiLlmsUrl, docsOrigin, getDocsPagePath } from "@/lib/site";
 import { source } from "@/lib/source";
 import type { MetadataRoute } from "next";
 
@@ -20,12 +20,12 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 1,
     },
     {
-      url: `${docsOrigin}/llms.txt`,
+      url: aiLlmsUrl,
       changeFrequency: "weekly",
       priority: 0.6,
     },
     {
-      url: `${docsOrigin}/llms-full.txt`,
+      url: aiLlmsFullUrl,
       changeFrequency: "weekly",
       priority: 0.5,
     },
