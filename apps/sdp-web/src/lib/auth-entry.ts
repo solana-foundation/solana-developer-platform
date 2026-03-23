@@ -26,6 +26,8 @@ export function isAuthEntryEnabled(): boolean {
     return configured;
   }
 
+  // Vercel preview deployments stay open by default, but production stays closed
+  // until onboarding is intentionally enabled.
   return process.env.VERCEL_ENV !== "production";
 }
 

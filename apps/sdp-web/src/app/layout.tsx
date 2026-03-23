@@ -17,26 +17,24 @@ export default async function RootLayout({
 }>) {
   const pathname = (await headers()).get("x-sdp-pathname") ?? "/";
   const shouldLoadClerk = shouldLoadClerkForPath(pathname);
+  const content = shouldLoadClerk ? (
+    <ClerkProvider
+      signInUrl="/sign-in"
+      signUpUrl="/sign-up"
+      signInFallbackRedirectUrl="/dashboard"
+      signUpFallbackRedirectUrl="/dashboard"
+    >
+      {children}
+    </ClerkProvider>
+  ) : (
+    children
+  );
 
   return (
     <html lang="en">
       <body>
-        {shouldLoadClerk ? (
-          <ClerkProvider
-            signInUrl="/sign-in"
-            signUpUrl="/sign-up"
-            signInFallbackRedirectUrl="/dashboard"
-            signUpFallbackRedirectUrl="/dashboard"
-          >
-            {children}
-            <Toaster position="top-right" richColors closeButton />
-          </ClerkProvider>
-        ) : (
-          <>
-            {children}
-            <Toaster position="top-right" richColors closeButton />
-          </>
-        )}
+        {content}
+        <Toaster position="top-right" richColors closeButton />
       </body>
     </html>
   );
