@@ -1,4 +1,4 @@
-import { readPostmanCollectionResponse } from "../../../lib/postman-collection";
+import { readPostmanCollectionResponse } from "../../../../lib/postman-collection";
 
 export const runtime = "nodejs";
 

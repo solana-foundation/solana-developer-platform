@@ -13,6 +13,10 @@ const nextConfig: NextConfig = {
   async rewrites() {
     return [
       {
+        source: "/postman/collection.json",
+        destination: `${docsProxyOrigin}/postman/collection.json`,
+      },
+      {
         source: "/docs",
         destination: `${docsProxyOrigin}/docs`,
       },
