@@ -5,11 +5,14 @@ import { auth } from "@clerk/nextjs/server";
 import type { ReactNode } from "react";
 
 export default async function DashboardLayout({ children }: { children: ReactNode }) {
-  const { orgRole } = await auth();
+  const { orgRole, orgId, userId } = await auth();
   const dashboardAccess = resolveDashboardAccess(orgRole);
 
   return (
-    <DashboardWorkspaceProvider dashboardAccess={dashboardAccess}>
+    <DashboardWorkspaceProvider
+      dashboardAccess={dashboardAccess}
+      dashboardCacheScope={{ orgId: orgId ?? null, userId: userId ?? null }}
+    >
       <DashboardShell>{children}</DashboardShell>
     </DashboardWorkspaceProvider>
   );

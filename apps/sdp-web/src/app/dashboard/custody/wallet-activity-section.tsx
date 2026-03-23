@@ -13,10 +13,12 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
 import type { PaymentTransferSummary as TransferRecord } from "@sdp/types";
 import { ExternalLink, RefreshCw } from "lucide-react";
-import useSWR from "swr";
 import { formatDisplayAmount } from "../payments/payments-overview.utils";
+
+const WALLET_ACTIVITY_CACHE_TTL_MS = 20_000;
 
 interface WalletActivitySectionProps {
   walletId: string;
@@ -105,11 +107,19 @@ export function WalletActivitySection({
     error: requestError,
     isValidating,
     mutate,
-  } = useSWR(`wallet-activity-${walletId}`, () => fetchTransfers({ walletId }), {
-    fallbackData: initialTransfersError ? undefined : initialTransfers,
-    revalidateOnFocus: true,
-    refreshInterval: 20_000,
-  });
+  } = usePersistedDashboardSWR(
+    `wallet-activity-${walletId}`,
+    () => fetchTransfers({ walletId }),
+    {
+      fallbackData: initialTransfersError ? undefined : initialTransfers,
+      revalidateOnFocus: true,
+      refreshInterval: 20_000,
+    },
+    {
+      key: `wallet-activity.${walletId}`,
+      ttlMs: WALLET_ACTIVITY_CACHE_TTL_MS,
+    }
+  );
   const liveTransfers = swrTransfers ?? initialTransfers;
   const liveTransfersError = requestError
     ? requestError instanceof Error

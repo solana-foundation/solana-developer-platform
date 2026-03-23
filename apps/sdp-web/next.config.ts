@@ -1,8 +1,27 @@
 import { withSentryConfig } from "@sentry/nextjs";
 import type { NextConfig } from "next";
 
+const docsProxyOrigin = (
+  process.env.SDP_DOCS_PROXY_ORIGIN?.trim() ||
+  (process.env.NODE_ENV === "development"
+    ? "http://localhost:3001"
+    : "https://docs.platform.solana.com")
+).replace(/\/$/, "");
+
 const nextConfig: NextConfig = {
   distDir: process.env.PLAYWRIGHT_NEXT_DIST_DIR?.trim() || ".next",
+  async rewrites() {
+    return [
+      {
+        source: "/docs",
+        destination: `${docsProxyOrigin}/docs`,
+      },
+      {
+        source: "/docs/:path*",
+        destination: `${docsProxyOrigin}/docs/:path*`,
+      },
+    ];
+  },
 };
 
 export default withSentryConfig(nextConfig, {

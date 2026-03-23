@@ -261,8 +261,8 @@ test.describe
       await expect(page.getByTestId("overview-row-supply")).toContainText("7");
 
       await openTab(page, "Operations");
-      await expect(page.getByRole("cell", { name: "mint" })).toBeVisible();
-      await expect(page.getByRole("cell", { name: "burn" })).toBeVisible();
+      await expect(page.getByTestId("fund-management-row-mint")).toBeVisible();
+      await expect(page.getByTestId("fund-management-row-burn")).toBeVisible();
     });
 
     test("9. user can freeze and unfreeze using a wallet address in the UI", async ({ page }) => {

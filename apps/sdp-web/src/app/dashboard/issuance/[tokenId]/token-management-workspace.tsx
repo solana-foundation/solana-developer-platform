@@ -2,12 +2,12 @@
 
 import { Button } from "@/components/ui/button";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
+import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
 import type { PaymentsDashboardWallet } from "@sdp/types";
 import { Loader2 } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import useSWR from "swr";
 import { TokenActionConfirmationDialog } from "./token-action-confirmation-dialog";
 import { TokenActionForms } from "./token-action-forms";
 import { TokenAuthorityModal } from "./token-authority-modal";
@@ -77,6 +77,8 @@ const managementTabs: Array<{ id: TokenManagementTab; label: string }> = [
   { id: "metadata", label: "Metadata" },
   { id: "fund-management", label: "Operations" },
 ];
+const TOKEN_AUTHORITY_WALLETS_CACHE_TTL_MS = 60_000;
+const TOKEN_SUPPORTING_DATA_CACHE_TTL_MS = 60_000;
 
 function isTokenManagementTab(value: string | null): value is TokenManagementTab {
   return managementTabs.some((tab) => tab.id === value);
@@ -293,7 +295,7 @@ export function TokenManagementWorkspace({
     data: authorityWalletsData,
     error: authorityWalletsRequestError,
     mutate: mutateAuthorityWallets,
-  } = useSWR(
+  } = usePersistedDashboardSWR(
     shouldLoadAuthorityWallets ? ["token-management-authority-wallets", token.id] : null,
     ([, tokenId]: readonly [string, string]) => fetchTokenAuthorityWallets(tokenId),
     {
@@ -307,13 +309,17 @@ export function TokenManagementWorkspace({
       refreshInterval: 60_000,
       revalidateOnFocus: true,
       revalidateIfStale: false,
+    },
+    {
+      key: `token.${token.id}.authority-wallets`,
+      ttlMs: TOKEN_AUTHORITY_WALLETS_CACHE_TTL_MS,
     }
   );
   const {
     data: supportingData,
     error: supportingDataRequestError,
     mutate: mutateSupportingData,
-  } = useSWR(
+  } = usePersistedDashboardSWR(
     shouldLoadSupportingData ? ["token-management-supporting-data", token.id] : null,
     ([, tokenId]: readonly [string, string]) => fetchTokenManagementSupportingData(tokenId),
     {
@@ -321,6 +327,10 @@ export function TokenManagementWorkspace({
       refreshInterval: 60_000,
       revalidateOnFocus: true,
       revalidateIfStale: false,
+    },
+    {
+      key: `token.${token.id}.supporting-data`,
+      ttlMs: TOKEN_SUPPORTING_DATA_CACHE_TTL_MS,
     }
   );
   const supportingDataError = supportingDataRequestError

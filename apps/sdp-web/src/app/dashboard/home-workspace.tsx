@@ -14,9 +14,9 @@ import {
 } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
+import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
 import type { PaymentsDashboardWallet } from "@sdp/types";
 import Link from "next/link";
-import useSWR from "swr";
 import { fetchHomeActivity } from "./home-workspace.data";
 import { formatCurrencyAmount, formatDisplayAmount } from "./payments/payments-overview.utils";
 
@@ -27,6 +27,7 @@ interface HomeWorkspaceProps {
 }
 
 const HOME_ACTIVITY_KEY = "dashboard-home-activity";
+const HOME_ACTIVITY_CACHE_TTL_MS = 60_000;
 
 function formatRelativeTime(value: string): string {
   const date = new Date(value);
@@ -97,12 +98,16 @@ function MetricCard({
 
 export function HomeWorkspace({ totalBalance, totalBalanceError, wallets }: HomeWorkspaceProps) {
   const { dashboardAccess } = useDashboardWorkspace();
-  const { data: activitySnapshot, error: activityRequestError } = useSWR(
+  const { data: activitySnapshot, error: activityRequestError } = usePersistedDashboardSWR(
     HOME_ACTIVITY_KEY,
     () => fetchHomeActivity(),
     {
       revalidateOnFocus: true,
       refreshInterval: 20_000,
+    },
+    {
+      key: "home-activity",
+      ttlMs: HOME_ACTIVITY_CACHE_TTL_MS,
     }
   );
   const isWalletEmptyState = wallets.length === 0;
