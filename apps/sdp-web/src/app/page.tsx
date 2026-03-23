@@ -9,6 +9,7 @@ import { startSignIn, startSignUp } from "./auth/actions";
 const docsHref =
   process.env.NEXT_PUBLIC_SDP_DOCS_URL ||
   (process.env.NODE_ENV === "development" ? "http://localhost:3001/docs" : DEFAULT_SDP_DOCS_URL);
+const waitlistHref = "https://solanafoundation.typeform.com/to/PLfMTDQs";
 
 export default function Home() {
   const authEntryEnabled = isAuthEntryEnabled();
@@ -80,8 +81,18 @@ export default function Home() {
               </SignedIn>
             </>
           ) : (
-            <div className="mt-[34px] inline-flex h-10 items-center justify-center rounded-[10px] bg-[rgba(28,28,29,0.08)] px-[18px] text-[15px] font-semibold leading-[15px] text-[rgba(28,28,29,0.68)]">
-              Access opening soon
+            <div className="mt-[34px] flex flex-col items-start gap-3">
+              <div className="inline-flex h-10 items-center justify-center rounded-[10px] bg-[rgba(28,28,29,0.08)] px-[18px] text-[15px] font-semibold leading-[15px] text-[rgba(28,28,29,0.68)]">
+                Access opening soon
+              </div>
+              <Link
+                href={waitlistHref}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex h-10 items-center justify-center rounded-[10px] bg-[#0f0f10] px-[18px] text-[15px] font-semibold leading-[15px] text-white transition-colors hover:bg-black"
+              >
+                Join the waitlist
+              </Link>
             </div>
           )}
         </div>
