@@ -75,7 +75,9 @@ function updatePackageVersion(filePath, currentVersion, nextVersion) {
   );
 
   if (updated === current) {
-    throw new Error(`Unable to update package.json version from ${currentVersion} to ${nextVersion}`);
+    throw new Error(
+      `Unable to update package.json version from ${currentVersion} to ${nextVersion}`
+    );
   }
 
   fs.writeFileSync(filePath, updated);
