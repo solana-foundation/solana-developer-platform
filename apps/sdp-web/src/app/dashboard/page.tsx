@@ -1,3 +1,4 @@
+import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createSdpApiClient } from "@/lib/sdp-api";
 import { auth } from "@clerk/nextjs/server";
@@ -9,7 +10,7 @@ import { fetchPaymentsAggregate, fetchPaymentsWallets } from "./payments/payment
 export default async function DashboardPage() {
   const { userId, orgId } = await auth();
   if (!userId) {
-    redirect("/sign-in");
+    redirect(getAuthEntryPath());
   }
   if (!orgId) {
     return null;

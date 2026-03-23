@@ -7,6 +7,7 @@ import { WalletActivitySection } from "@/app/dashboard/custody/wallet-activity-s
 import { WalletAddressCopyButton } from "@/app/dashboard/custody/wallet-address-copy-button";
 import { formatPurpose, truncateMiddle } from "@/app/dashboard/custody/wallet-format-utils";
 import { WalletProviderMark } from "@/app/dashboard/custody/wallet-provider-mark";
+import { getAuthEntryPath } from "@/lib/auth-entry";
 import { type SdpApiClient, createSdpApiClient } from "@/lib/sdp-api";
 import { auth } from "@clerk/nextjs/server";
 import type {
@@ -124,7 +125,7 @@ export default async function WalletDetailPage({
 }) {
   const { userId, orgId } = await auth();
   if (!userId) {
-    redirect("/sign-in");
+    redirect(getAuthEntryPath());
   }
   if (!orgId) {
     redirect("/dashboard");

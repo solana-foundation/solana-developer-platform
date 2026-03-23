@@ -13,6 +13,7 @@ import {
 import { linkOrganization } from "@/app/onboarding/actions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { type SdpApiClient, createSdpApiClient } from "@/lib/sdp-api";
 import { auth, clerkClient } from "@clerk/nextjs/server";
@@ -132,7 +133,7 @@ async function OnboardingGateSection({ orgId }: { orgId: string }) {
 export default async function CustodyPage() {
   const { userId, orgId } = await auth();
   if (!userId) {
-    redirect("/sign-in");
+    redirect(getAuthEntryPath());
   }
   if (!orgId) {
     redirect("/dashboard");

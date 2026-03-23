@@ -1,3 +1,4 @@
+import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createSdpApiClient } from "@/lib/sdp-api";
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
@@ -7,7 +8,7 @@ import { fetchPaymentsIssuedTokenSymbols } from "../payments-page.data";
 export default async function PaymentsReceivePage() {
   const { userId, orgId } = await auth();
   if (!userId) {
-    redirect("/sign-in");
+    redirect(getAuthEntryPath());
   }
   if (!orgId) {
     redirect("/dashboard");

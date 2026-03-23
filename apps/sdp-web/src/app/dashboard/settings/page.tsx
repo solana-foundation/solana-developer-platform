@@ -1,4 +1,5 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createSdpApiClient } from "@/lib/sdp-api";
@@ -32,7 +33,7 @@ type ProjectListResponse = {
 export default async function SettingsPage() {
   const { userId, orgId, orgRole } = await auth();
   if (!userId) {
-    redirect("/sign-in");
+    redirect(getAuthEntryPath());
   }
   if (!orgId) {
     redirect("/dashboard");

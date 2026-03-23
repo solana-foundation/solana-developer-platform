@@ -1,4 +1,5 @@
 import { HomeSignedInCard } from "@/components/home-signed-in";
+import { isAuthEntryEnabled } from "@/lib/auth-entry";
 import { SignedIn, SignedOut, UserButton } from "@clerk/nextjs";
 import { DEFAULT_SDP_DOCS_URL } from "@sdp/types";
 import Image from "next/image";
@@ -10,6 +11,8 @@ const docsHref =
   (process.env.NODE_ENV === "development" ? "http://localhost:3001/docs" : DEFAULT_SDP_DOCS_URL);
 
 export default function Home() {
+  const authEntryEnabled = isAuthEntryEnabled();
+
   return (
     <main className="min-h-screen bg-gradient-to-b from-[#e9e7de] to-[#f5f4ef] text-[#1c1c1d]">
       <header className="border-b border-[rgba(28,28,29,0.08)]">
@@ -22,19 +25,23 @@ export default function Home() {
             >
               Docs
             </Link>
-            <SignedOut>
-              <form action={startSignIn}>
-                <button
-                  type="submit"
-                  className="inline-flex h-9 items-center justify-center rounded-lg bg-[rgba(28,28,29,0.08)] px-3 text-sm font-semibold text-[#1c1c1d] transition-colors hover:bg-[rgba(28,28,29,0.14)]"
-                >
-                  Sign in
-                </button>
-              </form>
-            </SignedOut>
-            <SignedIn>
-              <UserButton />
-            </SignedIn>
+            {authEntryEnabled ? (
+              <>
+                <SignedOut>
+                  <form action={startSignIn}>
+                    <button
+                      type="submit"
+                      className="inline-flex h-9 items-center justify-center rounded-lg bg-[rgba(28,28,29,0.08)] px-3 text-sm font-semibold text-[#1c1c1d] transition-colors hover:bg-[rgba(28,28,29,0.14)]"
+                    >
+                      Sign in
+                    </button>
+                  </form>
+                </SignedOut>
+                <SignedIn>
+                  <UserButton />
+                </SignedIn>
+              </>
+            ) : null}
           </div>
         </div>
       </header>
@@ -53,22 +60,30 @@ export default function Home() {
             team already uses.
           </p>
 
-          <SignedOut>
-            <form action={startSignUp} className="mt-[34px]">
-              <button
-                type="submit"
-                className="inline-flex h-10 items-center justify-center rounded-[10px] bg-[#0f0f10] px-[18px] text-[15px] font-semibold leading-[15px] text-white transition-colors hover:bg-black"
-              >
-                Join Waitlist
-              </button>
-            </form>
-          </SignedOut>
+          {authEntryEnabled ? (
+            <>
+              <SignedOut>
+                <form action={startSignUp} className="mt-[34px]">
+                  <button
+                    type="submit"
+                    className="inline-flex h-10 items-center justify-center rounded-[10px] bg-[#0f0f10] px-[18px] text-[15px] font-semibold leading-[15px] text-white transition-colors hover:bg-black"
+                  >
+                    Join Waitlist
+                  </button>
+                </form>
+              </SignedOut>
 
-          <SignedIn>
-            <div className="mt-[34px] max-w-[360px]">
-              <HomeSignedInCard />
+              <SignedIn>
+                <div className="mt-[34px] max-w-[360px]">
+                  <HomeSignedInCard />
+                </div>
+              </SignedIn>
+            </>
+          ) : (
+            <div className="mt-[34px] inline-flex h-10 items-center justify-center rounded-[10px] bg-[rgba(28,28,29,0.08)] px-[18px] text-[15px] font-semibold leading-[15px] text-[rgba(28,28,29,0.68)]">
+              Access opening soon
             </div>
-          </SignedIn>
+          )}
         </div>
 
         <div
