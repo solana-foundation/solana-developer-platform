@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.10.1](https://github.com/solana-foundation/solana-developer-platform/compare/v0.10.0...v0.10.1) (2026-03-23)
+
+### Bug Fixes
+
+* configure git identity before publishing release tag ([#130](https://github.com/solana-foundation/solana-developer-platform/pull/130)) ([732b398](https://github.com/solana-foundation/solana-developer-platform/commit/732b39896ab0b1a5fd3a7c69bfb043754e2e33de))
+
 ## [0.10.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.9.0...v0.10.0) (2026-03-23)
 
 ### Features
