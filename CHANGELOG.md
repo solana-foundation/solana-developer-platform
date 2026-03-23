@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.10.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.9.0...v0.10.0) (2026-03-23)
+
+### Features
+
+* refresh landing hero copy ([#124](https://github.com/solana-foundation/solana-developer-platform/pull/124)) ([0527fa9](https://github.com/solana-foundation/solana-developer-platform/commit/0527fa98f3ac2f544a886e16d4b2c9057ee2544c))
+
+### Bug Fixes
+
+* preserve package formatting in release flow ([#129](https://github.com/solana-foundation/solana-developer-platform/pull/129)) ([efb8c8f](https://github.com/solana-foundation/solana-developer-platform/commit/efb8c8f75b3be6c2cea43f808148f5de47cffee0))
+* handle non-captured git calls in release flow ([#127](https://github.com/solana-foundation/solana-developer-platform/pull/127)) ([7756c3a](https://github.com/solana-foundation/solana-developer-platform/commit/7756c3ac1d77c7a99ae5594e1db6f5c767ea3132))
+* quote release workflow conditions ([#126](https://github.com/solana-foundation/solana-developer-platform/pull/126)) ([8762727](https://github.com/solana-foundation/solana-developer-platform/commit/8762727c8bb5aa36475e07ced53db25714119e2b))
+* docs postman collection links ([#123](https://github.com/solana-foundation/solana-developer-platform/pull/123)) ([34805cc](https://github.com/solana-foundation/solana-developer-platform/commit/34805ccc8709c2a99ac2b4208a736c1b040cb283))
+
 ## [0.9.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.8.0...v0.9.0) (2026-03-23)
 
 
