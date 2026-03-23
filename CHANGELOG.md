@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.6.1...v0.7.0) (2026-03-23)
+
+
+### Features
+
+* add waitlist CTA to gated auth landing ([#117](https://github.com/solana-foundation/solana-developer-platform/issues/117)) ([78e0a3f](https://github.com/solana-foundation/solana-developer-platform/commit/78e0a3fc7a0413eb5fc8cd699e4304813935ced9))
+
 ## [0.6.1](https://github.com/solana-foundation/solana-developer-platform/compare/v0.6.0...v0.6.1) (2026-03-23)
 
 
