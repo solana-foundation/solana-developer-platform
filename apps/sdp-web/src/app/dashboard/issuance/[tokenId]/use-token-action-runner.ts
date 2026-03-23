@@ -32,9 +32,9 @@ export function useTokenActionRunner() {
 
       if (result.ok) {
         setActionConfirmation(null);
-        toast.success(successToast, { id: toastId });
         await options.onSuccess?.(result);
         router.refresh();
+        toast.success(successToast, { id: toastId });
         return result;
       }
 

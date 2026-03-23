@@ -106,6 +106,7 @@ export function usePaymentsWorkspace(): PaymentsWorkspaceState {
       refreshInterval: 10_000,
     },
     {
+      // Shared with payments-overview because both views read the same recent transfers endpoint.
       key: "payments.transfers.recent",
       ttlMs: PAYMENTS_WORKSPACE_TRANSFERS_CACHE_TTL_MS,
     }

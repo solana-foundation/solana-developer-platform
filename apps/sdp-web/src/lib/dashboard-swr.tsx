@@ -21,15 +21,6 @@ interface PersistedDashboardSnapshotEnvelope<Data> {
 const DASHBOARD_CACHE_STORAGE_PREFIX = "sdp.dashboard.cache";
 const DEFAULT_PERSISTED_SNAPSHOT_VERSION = 1;
 
-export const DASHBOARD_SWR_CONFIG: SWRConfiguration = {
-  dedupingInterval: 10_000,
-  errorRetryCount: 2,
-  focusThrottleInterval: 15_000,
-  keepPreviousData: true,
-  revalidateIfStale: true,
-  revalidateOnFocus: true,
-};
-
 function getStorage(storage: "local" | "session" = "local"): Storage | null {
   if (typeof window === "undefined") {
     return null;
@@ -112,14 +103,32 @@ export function usePersistedDashboardSWR<Data, Error = unknown>(
     dashboardCacheScope: { orgId, userId },
   } = useDashboardWorkspace();
   const scopeKey = useMemo(() => `${userId ?? "anonymous"}:${orgId ?? "no-org"}`, [orgId, userId]);
+  const persistedKey = persistedConfig?.key;
+  const persistedTtlMs = persistedConfig?.ttlMs;
+  const persistedVersion = persistedConfig?.version ?? DEFAULT_PERSISTED_SNAPSHOT_VERSION;
+  const persistedStorage = persistedConfig?.storage ?? "local";
+  const persistedShouldPersist = persistedConfig?.shouldPersist;
+  const normalizedPersistedConfig = useMemo<PersistedDashboardSnapshotConfig<Data> | undefined>(
+    () =>
+      persistedKey && typeof persistedTtlMs === "number"
+        ? {
+            key: persistedKey,
+            ttlMs: persistedTtlMs,
+            version: persistedVersion,
+            storage: persistedStorage,
+            shouldPersist: persistedShouldPersist,
+          }
+        : undefined,
+    [persistedKey, persistedShouldPersist, persistedStorage, persistedTtlMs, persistedVersion]
+  );
 
   const persistedFallbackData = useMemo(() => {
-    if (!persistedConfig || config.fallbackData !== undefined) {
+    if (!normalizedPersistedConfig || config.fallbackData !== undefined) {
       return undefined;
     }
 
-    return readPersistedDashboardSnapshot<Data>(scopeKey, persistedConfig);
-  }, [config.fallbackData, persistedConfig, scopeKey]);
+    return readPersistedDashboardSnapshot<Data>(scopeKey, normalizedPersistedConfig);
+  }, [config.fallbackData, normalizedPersistedConfig, scopeKey]);
 
   const response = useSWR<Data, Error>(key, fetcher, {
     ...config,
@@ -127,16 +136,16 @@ export function usePersistedDashboardSWR<Data, Error = unknown>(
   });
 
   useEffect(() => {
-    if (!persistedConfig || response.data === undefined || response.error) {
+    if (!normalizedPersistedConfig || response.data === undefined || response.error) {
       return;
     }
 
-    if (persistedConfig.shouldPersist && !persistedConfig.shouldPersist(response.data)) {
+    if (normalizedPersistedConfig.shouldPersist?.(response.data) === false) {
       return;
     }
 
-    writePersistedDashboardSnapshot(scopeKey, persistedConfig, response.data);
-  }, [persistedConfig, response.data, response.error, scopeKey]);
+    writePersistedDashboardSnapshot(scopeKey, normalizedPersistedConfig, response.data);
+  }, [normalizedPersistedConfig, response.data, response.error, scopeKey]);
 
   return response;
 }
