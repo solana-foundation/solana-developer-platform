@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.10.2](https://github.com/solana-foundation/solana-developer-platform/compare/v0.10.1...v0.10.2) (2026-03-23)
+
+### Bug Fixes
+
+* reuse Clerk auth work and move AI docs into /docs ([#132](https://github.com/solana-foundation/solana-developer-platform/pull/132)) ([0a8d4b1](https://github.com/solana-foundation/solana-developer-platform/commit/0a8d4b17dc94dcb471dea9cb10c6377feec16ef5))
+
 ## [0.10.1](https://github.com/solana-foundation/solana-developer-platform/compare/v0.10.0...v0.10.1) (2026-03-23)
 
 ### Bug Fixes
