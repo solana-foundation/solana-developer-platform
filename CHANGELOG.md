@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.7.0...v0.8.0) (2026-03-23)
+
+
+### Features
+
+* simplify waitlist gate on landing page ([#119](https://github.com/solana-foundation/solana-developer-platform/issues/119)) ([5c5b9df](https://github.com/solana-foundation/solana-developer-platform/commit/5c5b9df3e9e62a054215c87dbda525c7b83beda3))
+
 ## [0.7.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.6.1...v0.7.0) (2026-03-23)
 
 
