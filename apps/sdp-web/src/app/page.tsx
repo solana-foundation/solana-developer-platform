@@ -50,15 +50,13 @@ export default function Home() {
       <section className="mx-auto grid min-h-[calc(100vh-72px)] max-w-[1200px] gap-12 px-6 pb-28 pt-16 md:pt-20 lg:grid-cols-[568px_1fr] lg:items-center lg:gap-6 xl:px-0 xl:pt-24">
         <div>
           <h1 className="max-w-[560px] text-balance text-[42px] font-medium leading-[0.98] tracking-[-0.5px] md:text-[56px]">
-            Solana for enterprise.
-            <br />
-            One API.
+            Build any financial product, without worrying about the infrastructure
           </h1>
 
           <p className="mt-[26px] max-w-[510px] text-[16px] font-[450] leading-6 text-[rgba(28,28,29,0.72)]">
-            SDP brings issuance, payments, and trading workflows into a single API layer. Build,
-            test, and launch production-grade Solana products with the partners and controls your
-            team already uses.
+            Whether you&apos;re issuing a stablecoin, orchestrating cross-border payments, or
+            tokenizing real-world assets, SDP provides the most reliable APIs and infrastructure to
+            make it happen.
           </p>
 
           {authEntryEnabled ? (
