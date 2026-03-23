@@ -1,13 +1,20 @@
 import type { ClerkJwtPayload } from "@/lib/clerk-token";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import { rateLimitMiddleware } from "@/middleware/rate-limit";
-import { TEST_ORG } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/d1";
 import { clearKVNamespaces } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+
+const TEST_ORG = {
+  id: "org_clerk_cache_request_test",
+  name: "Clerk Cache Request Test Org",
+  slug: "clerk-cache-request-test-org",
+  tier: "free" as const,
+  status: "active" as const,
+};
 
 function encodeJwtPart(value: Record<string, unknown>): string {
   return Buffer.from(JSON.stringify(value)).toString("base64url");
