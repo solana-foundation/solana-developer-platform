@@ -422,6 +422,10 @@ async function publishRelease() {
     return;
   }
 
+  git(["config", "user.name", "github-actions[bot]"], { capture: false });
+  git(["config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com"], {
+    capture: false,
+  });
   git(["tag", "-a", tagName, "-m", tagName], { capture: false });
   git(["push", `https://x-access-token:${token}@github.com/${repo}.git`, tagName], {
     capture: false,
