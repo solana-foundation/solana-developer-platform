@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   prepare-release-pr:
-    if: ${{ !startsWith(github.event.head_commit.message, 'chore(main): release ') }}
+    if: "${{ !startsWith(github.event.head_commit.message, 'chore(main): release ') }}"
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -32,7 +32,7 @@ jobs:
         run: node .github/scripts/release-flow.mjs prepare
 
   publish-release:
-    if: ${{ startsWith(github.event.head_commit.message, 'chore(main): release ') }}
+    if: "${{ startsWith(github.event.head_commit.message, 'chore(main): release ') }}"
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
