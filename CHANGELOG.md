@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.1](https://github.com/solana-foundation/solana-developer-platform/compare/v0.6.0...v0.6.1) (2026-03-23)
+
+
+### Bug Fixes
+
+* gate production auth entry points ([#115](https://github.com/solana-foundation/solana-developer-platform/issues/115)) ([9473cb1](https://github.com/solana-foundation/solana-developer-platform/commit/9473cb134f7bbe441b5428fd134f33503bd899c0))
+
 ## [0.6.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.5.3...v0.6.0) (2026-03-22)
 
 
