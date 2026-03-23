@@ -1,3 +1,4 @@
+import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { type SdpApiClient, createSdpApiClient } from "@/lib/sdp-api";
 import { auth } from "@clerk/nextjs/server";
@@ -89,7 +90,7 @@ function mapToken(payload: unknown): Token | null {
 export default async function IssuanceTokenManagementPage({ params }: TokenManagementPageProps) {
   const { userId, orgId } = await auth();
   if (!userId) {
-    redirect("/sign-in");
+    redirect(getAuthEntryPath());
   }
   if (!orgId) {
     redirect("/dashboard");

@@ -1,5 +1,7 @@
+import { shouldLoadClerkForPath } from "@/lib/auth-entry";
 import { ClerkProvider } from "@clerk/nextjs";
 import type { Metadata } from "next";
+import { headers } from "next/headers";
 import { Toaster } from "sonner";
 import "./globals.css";
 
@@ -8,23 +10,31 @@ export const metadata: Metadata = {
   description: "SDP dashboard",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const pathname = (await headers()).get("x-sdp-pathname") ?? "/";
+  const shouldLoadClerk = shouldLoadClerkForPath(pathname);
+  const content = shouldLoadClerk ? (
+    <ClerkProvider
+      signInUrl="/sign-in"
+      signUpUrl="/sign-up"
+      signInFallbackRedirectUrl="/dashboard"
+      signUpFallbackRedirectUrl="/dashboard"
+    >
+      {children}
+    </ClerkProvider>
+  ) : (
+    children
+  );
+
   return (
     <html lang="en">
       <body>
-        <ClerkProvider
-          signInUrl="/sign-in"
-          signUpUrl="/sign-up"
-          signInFallbackRedirectUrl="/dashboard"
-          signUpFallbackRedirectUrl="/dashboard"
-        >
-          {children}
-          <Toaster position="top-right" richColors closeButton />
-        </ClerkProvider>
+        {content}
+        <Toaster position="top-right" richColors closeButton />
       </body>
     </html>
   );

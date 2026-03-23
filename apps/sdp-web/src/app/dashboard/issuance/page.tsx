@@ -1,3 +1,4 @@
+import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { type SdpApiClient, createSdpApiClient } from "@/lib/sdp-api";
 import { auth } from "@clerk/nextjs/server";
@@ -159,7 +160,7 @@ interface IssuancePageProps {
 export default async function IssuancePage({ searchParams }: IssuancePageProps) {
   const { userId, orgId } = await auth();
   if (!userId) {
-    redirect("/sign-in");
+    redirect(getAuthEntryPath());
   }
   if (!orgId) {
     redirect("/dashboard");

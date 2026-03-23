@@ -1,3 +1,4 @@
+import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createSdpApiClient } from "@/lib/sdp-api";
 import { auth } from "@clerk/nextjs/server";
@@ -19,7 +20,7 @@ interface PaymentsPageProps {
 export default async function PaymentsPage({ searchParams }: PaymentsPageProps) {
   const { userId, orgId } = await auth();
   if (!userId) {
-    redirect("/sign-in");
+    redirect(getAuthEntryPath());
   }
   if (!orgId) {
     redirect("/dashboard");
