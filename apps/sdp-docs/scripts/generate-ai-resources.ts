@@ -3,14 +3,14 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
-  agentsUrl,
+  aiGuideUrl,
+  aiLlmsFullUrl,
+  aiLlmsUrl,
   apiDocsUrl,
   apiOpenApiUrl,
   apiUrl,
-  docsOrigin,
   docsUrl,
   getDocsPageUrl,
-  repositoryUrl,
 } from "../src/lib/site";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -198,8 +198,7 @@ function renderLlms(keyPages: DocsPage[]): string {
     `- API: ${apiUrl}`,
     `- Interactive API docs: ${apiDocsUrl}`,
     `- OpenAPI: ${apiOpenApiUrl}`,
-    `- Repo: ${repositoryUrl}`,
-    `- Agent guide: ${agentsUrl}`,
+    `- AI guide: ${aiGuideUrl}`,
     "",
     "## Supported surfaces",
     ...FEATURE_SUMMARY.map((feature) => `- ${feature}`),
@@ -207,11 +206,12 @@ function renderLlms(keyPages: DocsPage[]): string {
     "## Start here",
     ...keyPages.map(renderLink),
     "",
-    "## Skills",
-    `- [Agent guide](${agentsUrl}): Canonical repo entry point for coding agents, including the repo-local \`sdp-tokenization\` skill.`,
+    "## AI guide",
+    `- [AI Consumption](${aiGuideUrl}): Human-readable landing page for machine-readable SDP docs resources, usage guidance, and public AI scope.`,
     "",
     "## Machine-readable resources",
-    `- [llms-full.txt](${docsOrigin}/llms-full.txt)`,
+    `- [llms.txt](${aiLlmsUrl})`,
+    `- [llms-full.txt](${aiLlmsFullUrl})`,
     `- [OpenAPI](${apiOpenApiUrl})`,
     `- [Swagger UI](${apiDocsUrl})`,
     "",
@@ -232,8 +232,7 @@ function renderLlmsFull(sections: Section[]): string {
     `- API: ${apiUrl}`,
     `- Interactive API docs: ${apiDocsUrl}`,
     `- OpenAPI: ${apiOpenApiUrl}`,
-    `- Repo: ${repositoryUrl}`,
-    `- Agent guide: ${agentsUrl}`,
+    `- AI guide: ${aiGuideUrl}`,
     "",
     sections.map(renderSection).join("\n\n"),
     "",

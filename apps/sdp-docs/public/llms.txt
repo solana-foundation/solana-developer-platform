@@ -7,8 +7,7 @@
 - API: https://api.solana.com
 - Interactive API docs: https://api.solana.com/docs
 - OpenAPI: https://api.solana.com/openapi.json
-- Repo: https://github.com/solana-foundation/solana-developer-platform
-- Agent guide: https://github.com/solana-foundation/solana-developer-platform/blob/main/AGENTS.md
+- AI guide: https://platform.solana.com/docs/reference/ai-consumption
 
 ## Supported surfaces
 - Wallets and custody
@@ -40,11 +39,12 @@
 - [Payments](https://platform.solana.com/docs/reference/api/payments): Wallet balances, transfer execution, policies, and ramps.
 - [Compliance](https://platform.solana.com/docs/reference/api/compliance): Risk and compliance screening endpoints.
 
-## Skills
-- [Agent guide](https://github.com/solana-foundation/solana-developer-platform/blob/main/AGENTS.md): Canonical repo entry point for coding agents, including the repo-local `sdp-tokenization` skill.
+## AI guide
+- [AI Consumption](https://platform.solana.com/docs/reference/ai-consumption): Human-readable landing page for machine-readable SDP docs resources, usage guidance, and public AI scope.
 
 ## Machine-readable resources
-- [llms-full.txt](https://platform.solana.com/llms-full.txt)
+- [llms.txt](https://platform.solana.com/docs/ai/llms.txt)
+- [llms-full.txt](https://platform.solana.com/docs/ai/llms-full.txt)
 - [OpenAPI](https://api.solana.com/openapi.json)
 - [Swagger UI](https://api.solana.com/docs)
 

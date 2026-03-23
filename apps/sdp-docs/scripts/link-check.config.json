@@ -1,4 +1,4 @@
 {
   "ignoredExternalHosts": [],
-  "ignoredExternalUrls": []
+  "ignoredExternalUrls": ["https://api.solana.com/openapi.json", "https://api.solana.com/llms.txt"]
 }

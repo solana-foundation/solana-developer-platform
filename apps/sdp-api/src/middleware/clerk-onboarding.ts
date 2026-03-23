@@ -2,7 +2,7 @@ import {
   type ClerkJwtPayload,
   extractBearerToken,
   resolveClerkEmail,
-  verifyClerkJwt,
+  verifyClerkJwtForRequest,
 } from "@/lib/clerk-token";
 import { AppError, unauthorized } from "@/lib/errors";
 import type { Env } from "@/types/env";
@@ -18,7 +18,7 @@ export function clerkOnboardingMiddleware() {
 
     let payload: ClerkJwtPayload;
     try {
-      payload = await verifyClerkJwt(token, c.env);
+      payload = await verifyClerkJwtForRequest(c, token);
     } catch (error) {
       throw new AppError("UNAUTHORIZED", "Invalid Clerk token", {
         cause: error instanceof Error ? error.message : String(error),

@@ -5,7 +5,7 @@
  * Different tiers have different limits.
  */
 
-import { verifyClerkJwt } from "@/lib/clerk-token";
+import { verifyClerkJwtForRequest } from "@/lib/clerk-token";
 import { AppError } from "@/lib/errors";
 import type { Env } from "@/types/env";
 import type { Context, Next } from "hono";
@@ -117,7 +117,7 @@ function looksLikeClerkJwt(token: string, env: Env): boolean {
 
 async function isVerifiedClerkJwt(c: Context<{ Bindings: Env }>, token: string): Promise<boolean> {
   try {
-    await verifyClerkJwt(token, c.env);
+    await verifyClerkJwtForRequest(c, token);
     return true;
   } catch {
     return false;

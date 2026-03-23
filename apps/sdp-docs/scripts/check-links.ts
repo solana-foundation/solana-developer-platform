@@ -114,6 +114,8 @@ async function loadDocPages(): Promise<Map<string, string>> {
 function createAllowedInternalPaths(docSlugs: Iterable<string>): Set<string> {
   const allowed = new Set<string>([
     "/docs",
+    "/docs/ai/llms.txt",
+    "/docs/ai/llms-full.txt",
     "/llms.txt",
     "/llms-full.txt",
     "/robots.txt",
