@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.10.3](https://github.com/solana-foundation/solana-developer-platform/compare/v0.10.2...v0.10.3) (2026-03-24)
+
+### Bug Fixes
+
+* point docs dashboard link to the SDP root ([#134](https://github.com/solana-foundation/solana-developer-platform/pull/134)) ([7427d38](https://github.com/solana-foundation/solana-developer-platform/commit/7427d38b1d70e48f1c4501d14fcb07e4100c59e7))
+
 ## [0.10.2](https://github.com/solana-foundation/solana-developer-platform/compare/v0.10.1...v0.10.2) (2026-03-23)
 
 ### Bug Fixes
