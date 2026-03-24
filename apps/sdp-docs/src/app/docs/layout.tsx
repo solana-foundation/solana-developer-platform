@@ -7,8 +7,10 @@ function resolveDashboardUrl() {
   if (configuredUrl) {
     try {
       const parsed = new URL(configuredUrl);
-      if (parsed.pathname === "/" || parsed.pathname === "") {
-        parsed.pathname = "/dashboard";
+      if (parsed.pathname === "" || parsed.pathname === "/" || parsed.pathname === "/dashboard") {
+        parsed.pathname = "/";
+        parsed.search = "";
+        parsed.hash = "";
       }
       return parsed.toString();
     } catch {
@@ -16,7 +18,7 @@ function resolveDashboardUrl() {
     }
   }
 
-  return process.env.NODE_ENV !== "production" ? "http://localhost:3000/dashboard" : null;
+  return process.env.NODE_ENV !== "production" ? "http://localhost:3000/" : null;
 }
 
 export default function Layout({ children }: { children: ReactNode }) {
