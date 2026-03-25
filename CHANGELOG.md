@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.11.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.10.3...v0.11.0) (2026-03-25)
+
+### Features
+
+* **web:** gate clerk auth entry with vercel flags ([#138](https://github.com/solana-foundation/solana-developer-platform/pull/138)) ([01527f4](https://github.com/solana-foundation/solana-developer-platform/commit/01527f4846c742dd1ec74840b04e2ba30973ba67))
+
+### Bug Fixes
+
+* **payments:** remove SOL from ramp asset options ([#136](https://github.com/solana-foundation/solana-developer-platform/pull/136)) ([9d8a948](https://github.com/solana-foundation/solana-developer-platform/commit/9d8a9481118e96ba4f003e6008361e6468e6adca))
+
 ## [0.10.3](https://github.com/solana-foundation/solana-developer-platform/compare/v0.10.2...v0.10.3) (2026-03-24)
 
 ### Bug Fixes
