@@ -25,7 +25,7 @@ export const dynamic = "force-dynamic";
 export default async function ApiKeysPage() {
   const { userId, orgId, orgRole } = await auth();
   if (!userId) {
-    redirect(getAuthEntryPath());
+    redirect(await getAuthEntryPath());
   }
   if (!orgId) {
     redirect("/dashboard");

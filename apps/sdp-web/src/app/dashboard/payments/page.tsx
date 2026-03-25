@@ -20,7 +20,7 @@ interface PaymentsPageProps {
 export default async function PaymentsPage({ searchParams }: PaymentsPageProps) {
   const { userId, orgId } = await auth();
   if (!userId) {
-    redirect(getAuthEntryPath());
+    redirect(await getAuthEntryPath());
   }
   if (!orgId) {
     redirect("/dashboard");

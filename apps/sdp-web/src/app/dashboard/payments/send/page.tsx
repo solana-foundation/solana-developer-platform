@@ -8,7 +8,7 @@ import { fetchPaymentsIssuedTokenSymbols } from "../payments-page.data";
 export default async function PaymentsSendPage() {
   const { userId, orgId } = await auth();
   if (!userId) {
-    redirect(getAuthEntryPath());
+    redirect(await getAuthEntryPath());
   }
   if (!orgId) {
     redirect("/dashboard");

@@ -1,42 +1,15 @@
-const ENABLED_VALUES = new Set(["1", "true", "yes", "on"]);
-const DISABLED_VALUES = new Set(["0", "false", "no", "off"]);
+import { clerkAuthEntry } from "@/flags";
 
-function parseBooleanEnv(value: string | undefined): boolean | null {
-  const normalized = value?.trim().toLowerCase();
-
-  if (!normalized) {
-    return null;
-  }
-
-  if (ENABLED_VALUES.has(normalized)) {
-    return true;
-  }
-
-  if (DISABLED_VALUES.has(normalized)) {
-    return false;
-  }
-
-  return null;
+export async function isAuthEntryEnabled(): Promise<boolean> {
+  return clerkAuthEntry();
 }
 
-export function isAuthEntryEnabled(): boolean {
-  const configured = parseBooleanEnv(process.env.SDP_AUTH_ENTRY_ENABLED);
-
-  if (configured !== null) {
-    return configured;
-  }
-
-  // Vercel preview deployments stay open by default, but production stays closed
-  // until onboarding is intentionally enabled.
-  return process.env.VERCEL_ENV !== "production";
+export async function getAuthEntryPath(): Promise<string> {
+  return (await isAuthEntryEnabled()) ? "/sign-in" : "/";
 }
 
-export function getAuthEntryPath(): string {
-  return isAuthEntryEnabled() ? "/sign-in" : "/";
-}
-
-export function shouldLoadClerkForPath(pathname: string): boolean {
-  if (isAuthEntryEnabled()) {
+export async function shouldLoadClerkForPath(pathname: string): Promise<boolean> {
+  if (await isAuthEntryEnabled()) {
     return true;
   }
 

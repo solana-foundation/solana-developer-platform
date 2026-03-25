@@ -13,10 +13,12 @@
   },
   "dependencies": {
     "@clerk/nextjs": "6.37.2",
+    "@flags-sdk/vercel": "1.2.1",
     "@sdp/types": "workspace:*",
     "@sentry/nextjs": "^10.42.0",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
+    "flags": "4.0.5",
     "framer-motion": "^11.18.2",
     "lucide-react": "0.562.0",
     "next": "16.1.6",

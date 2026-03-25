@@ -11,8 +11,8 @@ const docsHref =
   (process.env.NODE_ENV === "development" ? "http://localhost:3001/docs" : DEFAULT_SDP_DOCS_URL);
 const waitlistHref = "https://solanafoundation.typeform.com/to/PLfMTDQs";
 
-export default function Home() {
-  const authEntryEnabled = isAuthEntryEnabled();
+export default async function Home() {
+  const authEntryEnabled = await isAuthEntryEnabled();
 
   return (
     <main className="min-h-screen bg-gradient-to-b from-[#e9e7de] to-[#f5f4ef] text-[#1c1c1d]">

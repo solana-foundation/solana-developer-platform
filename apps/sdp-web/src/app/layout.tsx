@@ -16,7 +16,7 @@ export default async function RootLayout({
   children: React.ReactNode;
 }>) {
   const pathname = (await headers()).get("x-sdp-pathname") ?? "/";
-  const shouldLoadClerk = shouldLoadClerkForPath(pathname);
+  const shouldLoadClerk = await shouldLoadClerkForPath(pathname);
   const content = shouldLoadClerk ? (
     <ClerkProvider
       signInUrl="/sign-in"

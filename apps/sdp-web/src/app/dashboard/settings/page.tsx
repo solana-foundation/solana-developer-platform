@@ -33,7 +33,7 @@ type ProjectListResponse = {
 export default async function SettingsPage() {
   const { userId, orgId, orgRole } = await auth();
   if (!userId) {
-    redirect(getAuthEntryPath());
+    redirect(await getAuthEntryPath());
   }
   if (!orgId) {
     redirect("/dashboard");
