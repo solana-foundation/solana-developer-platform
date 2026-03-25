@@ -228,13 +228,19 @@ function getWalletActionLabel(
 
 function resolveWalletActionAssets(
   wallet: PaymentsDashboardWallet | null,
-  issuedTokenSymbolsByMint: Record<string, string>
+  issuedTokenSymbolsByMint: Record<string, string>,
+  options?: {
+    includeSol?: boolean;
+  }
 ): string[] {
-  const assetSet = new Set<string>(REQUIRED_ACTION_ASSETS);
+  const includeSol = options?.includeSol ?? true;
+  const assetSet = new Set<string>(
+    REQUIRED_ACTION_ASSETS.filter((asset) => includeSol || asset !== "SOL")
+  );
 
   for (const balance of wallet?.balances ?? []) {
     const token = resolveBalanceDisplayToken(balance, issuedTokenSymbolsByMint);
-    if (token) {
+    if (token && (includeSol || token !== "SOL")) {
       assetSet.add(token);
     }
   }
@@ -1035,9 +1041,14 @@ export function PaymentsActionPage({
       balances: selectedWalletBalancesSnapshot.balances,
     };
   }, [selectedWallet, selectedWalletBalancesSnapshot]);
+  const isOnrampBranch = branch === "onramp";
+  const isOfframpBranch = branch === "offramp";
   const assetOptions = useMemo(
-    () => resolveWalletActionAssets(selectedWalletWithBalances, issuedTokenSymbolsByMint),
-    [issuedTokenSymbolsByMint, selectedWalletWithBalances]
+    () =>
+      resolveWalletActionAssets(selectedWalletWithBalances, issuedTokenSymbolsByMint, {
+        includeSol: !(isOnrampBranch || isOfframpBranch),
+      }),
+    [isOfframpBranch, isOnrampBranch, issuedTokenSymbolsByMint, selectedWalletWithBalances]
   );
   const selectedAssetBalance = useMemo(
     () =>
@@ -1073,8 +1084,6 @@ export function PaymentsActionPage({
   const isSendAction = mode === "send";
   const isTransferBranch = branch === "wallet_transfer";
   const isDepositBranch = branch === "wallet_deposit";
-  const isOnrampBranch = branch === "onramp";
-  const isOfframpBranch = branch === "offramp";
   const providerOptions = isOnrampBranch ? ONRAMP_PROVIDER_OPTIONS : OFFRAMP_PROVIDER_OPTIONS;
   const providerLabel = providerOptions.find((option) => option.id === provider)?.title ?? null;
   const numericAmount = parseOptionalNumber(amount);
