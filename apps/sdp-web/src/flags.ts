@@ -1,6 +1,6 @@
+import { getDefaultAuthEntryEnabled } from "@/lib/auth-entry-config";
 import { createVercelAdapter } from "@flags-sdk/vercel";
 import { flag } from "flags/next";
-import { getDefaultAuthEntryEnabled } from "@/lib/auth-entry-config";
 
 const defaultValue = getDefaultAuthEntryEnabled();
 const flagsSdkKey = process.env.FLAGS?.trim();
