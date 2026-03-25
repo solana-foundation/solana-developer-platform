@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.11.1](https://github.com/solana-foundation/solana-developer-platform/compare/v0.11.0...v0.11.1) (2026-03-25)
+
+### Maintenance
+
+* **web:** add local vercel toolbar support ([#139](https://github.com/solana-foundation/solana-developer-platform/pull/139)) ([efe6dc9](https://github.com/solana-foundation/solana-developer-platform/commit/efe6dc96621257ca0072c30316fc0aa19dd05d98))
+
 ## [0.11.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.10.3...v0.11.0) (2026-03-25)
 
 ### Features
