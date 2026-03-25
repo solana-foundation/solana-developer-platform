@@ -10,7 +10,7 @@ import { fetchPaymentsAggregate, fetchPaymentsWallets } from "./payments/payment
 export default async function DashboardPage() {
   const { userId, orgId } = await auth();
   if (!userId) {
-    redirect(getAuthEntryPath());
+    redirect(await getAuthEntryPath());
   }
   if (!orgId) {
     return null;

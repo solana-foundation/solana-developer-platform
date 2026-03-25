@@ -125,7 +125,7 @@ export default async function WalletDetailPage({
 }) {
   const { userId, orgId } = await auth();
   if (!userId) {
-    redirect(getAuthEntryPath());
+    redirect(await getAuthEntryPath());
   }
   if (!orgId) {
     redirect("/dashboard");

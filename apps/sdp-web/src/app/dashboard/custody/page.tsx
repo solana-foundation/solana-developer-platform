@@ -133,7 +133,7 @@ async function OnboardingGateSection({ orgId }: { orgId: string }) {
 export default async function CustodyPage() {
   const { userId, orgId } = await auth();
   if (!userId) {
-    redirect(getAuthEntryPath());
+    redirect(await getAuthEntryPath());
   }
   if (!orgId) {
     redirect("/dashboard");

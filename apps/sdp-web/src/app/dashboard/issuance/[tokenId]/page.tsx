@@ -90,7 +90,7 @@ function mapToken(payload: unknown): Token | null {
 export default async function IssuanceTokenManagementPage({ params }: TokenManagementPageProps) {
   const { userId, orgId } = await auth();
   if (!userId) {
-    redirect(getAuthEntryPath());
+    redirect(await getAuthEntryPath());
   }
   if (!orgId) {
     redirect("/dashboard");

@@ -2,8 +2,8 @@ import { isAuthEntryEnabled } from "@/lib/auth-entry";
 import { SignUp } from "@clerk/nextjs";
 import { redirect } from "next/navigation";
 
-export default function SignUpPage() {
-  if (!isAuthEntryEnabled()) {
+export default async function SignUpPage() {
+  if (!(await isAuthEntryEnabled())) {
     redirect("/");
   }
 

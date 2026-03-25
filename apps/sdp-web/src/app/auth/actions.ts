@@ -5,7 +5,7 @@ import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 
 export async function startSignIn() {
-  if (!isAuthEntryEnabled()) {
+  if (!(await isAuthEntryEnabled())) {
     redirect("/");
   }
 
@@ -14,7 +14,7 @@ export async function startSignIn() {
 }
 
 export async function startSignUp() {
-  if (!isAuthEntryEnabled()) {
+  if (!(await isAuthEntryEnabled())) {
     redirect("/");
   }
 
