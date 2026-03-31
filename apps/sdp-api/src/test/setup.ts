@@ -1,5 +1,4 @@
 import { closeDatabasePools } from "@/db";
-import { env as providedEnv } from "cloudflare:test";
 import { afterAll } from "vitest";
 
 const globalWithSecureContext = globalThis as { isSecureContext?: boolean };

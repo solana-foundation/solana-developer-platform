@@ -1,8 +1,8 @@
+import { getDb } from "@/db";
 import { formatDecimalAmount } from "@/lib/amount";
 import { withHeliusApiKey } from "@/services/rpc-relay.service";
 import type { Env } from "@/types/env";
 import type { CustodyWalletTokenBalance } from "@sdp/types";
-import { getDb } from "@/db";
 
 // biome-ignore lint/nursery/noSecrets: Devnet USDC mint address constant, not a secret.
 const DEVNET_USDC_MINT = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
@@ -74,17 +74,19 @@ async function resolveTrackedAssets(env: Env): Promise<Map<string, TrackedAssetD
   const trackedAssetsByMint = new Map(trackedAssets.map((asset) => [asset.mint, asset]));
 
   try {
-    const result = await getDb(env).prepare(
-      `SELECT mint_address, symbol, decimals
+    const result = await getDb(env)
+      .prepare(
+        `SELECT mint_address, symbol, decimals
          FROM issued_tokens
         WHERE template = 'stablecoin'
           AND mint_address IS NOT NULL
           AND deployed_at IS NOT NULL`
-    ).all<{
-      decimals?: number | null;
-      mint_address?: string | null;
-      symbol?: string | null;
-    }>();
+      )
+      .all<{
+        decimals?: number | null;
+        mint_address?: string | null;
+        symbol?: string | null;
+      }>();
 
     for (const row of result.results ?? []) {
       const mint = row.mint_address?.trim();

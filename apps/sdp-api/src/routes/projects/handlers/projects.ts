@@ -1,3 +1,4 @@
+import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
 import { AppError, notFound } from "@/lib/errors";
 import { created, noContent, success } from "@/lib/response";
@@ -7,7 +8,6 @@ import type { Env } from "@/types/env";
 import type { ListProjectsResponse, ProjectResponse, UpdateProjectRequest } from "@sdp/types";
 import type { Context } from "hono";
 import { createProjectSchema, updateProjectSchema } from "../schemas";
-import { getDb } from "@/db";
 
 type AppContext = Context<{ Bindings: Env }>;
 
@@ -33,7 +33,8 @@ export const createProject = async (c: AppContext) => {
       return null;
     }
 
-    const creator = await getDb(c.env).prepare("SELECT created_by FROM api_keys WHERE id = ?")
+    const creator = await getDb(c.env)
+      .prepare("SELECT created_by FROM api_keys WHERE id = ?")
       .bind(auth.apiKeyId)
       .first<{ created_by: string }>();
 

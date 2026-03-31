@@ -103,6 +103,38 @@ export class MosaicService {
     this.rpc = createRpc(env) as Rpc<SolanaRpcApi>;
   }
 
+  private isRetryableRpcError(error: unknown): boolean {
+    if (!(error instanceof Error)) {
+      return false;
+    }
+
+    return (
+      /HTTP error \((429|5\d\d)\)/i.test(error.message) ||
+      /fetch failed/i.test(error.message) ||
+      /timed out/i.test(error.message)
+    );
+  }
+
+  private async withRpcRetry<T>(operation: () => Promise<T>): Promise<T> {
+    const retryDelaysMs = [250, 750];
+    let lastError: unknown;
+
+    for (let attempt = 0; attempt <= retryDelaysMs.length; attempt += 1) {
+      try {
+        return await operation();
+      } catch (error) {
+        lastError = error;
+        if (attempt === retryDelaysMs.length || !this.isRetryableRpcError(error)) {
+          throw error;
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, retryDelaysMs[attempt]));
+      }
+    }
+
+    throw lastError instanceof Error ? lastError : new Error("RPC operation failed");
+  }
+
   // ═════════════════════════════════════════════════════════════════════════
   // Token Creation (Templates)
   // ═════════════════════════════════════════════════════════════════════════
@@ -648,23 +680,24 @@ export class MosaicService {
     const payer = createNoopSigner(options.feePayer);
     const currentAuthority = createNoopSigner(options.currentAuthority);
 
-    const fullTx =
+    const fullTx = await this.withRpcRetry(() =>
       options.newAuthority === null
-        ? await getRemoveAuthorityTransaction({
+        ? getRemoveAuthorityTransaction({
             rpc: this.rpc,
             payer,
             mint: options.mint,
             role: options.role,
             currentAuthority,
           })
-        : await getUpdateAuthorityTransaction({
+        : getUpdateAuthorityTransaction({
             rpc: this.rpc,
             payer,
             mint: options.mint,
             role: options.role,
             currentAuthority,
             newAuthority: options.newAuthority,
-          });
+          })
+    );
 
     return this.toMosaicTransaction(fullTx);
   }
@@ -678,23 +711,24 @@ export class MosaicService {
   }): Promise<MosaicTransactionResult> {
     const feePayer = await this.resolveFeePayerSigner(options.feePayer);
 
-    const fullTx =
+    const fullTx = await this.withRpcRetry(() =>
       options.newAuthority === null
-        ? await getRemoveAuthorityTransaction({
+        ? getRemoveAuthorityTransaction({
             rpc: this.rpc,
             payer: feePayer,
             mint: options.mint,
             role: options.role,
             currentAuthority: options.currentAuthority,
           })
-        : await getUpdateAuthorityTransaction({
+        : getUpdateAuthorityTransaction({
             rpc: this.rpc,
             payer: feePayer,
             mint: options.mint,
             role: options.role,
             currentAuthority: options.currentAuthority,
             newAuthority: options.newAuthority,
-          });
+          })
+    );
 
     return this.signAndSubmit(fullTx);
   }

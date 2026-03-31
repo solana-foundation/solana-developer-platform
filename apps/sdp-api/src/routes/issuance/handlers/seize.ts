@@ -1,3 +1,4 @@
+import { getDb } from "@/db";
 import { toMosaicAmount } from "@/lib/amount";
 import { getAuth } from "@/lib/auth";
 import { AppError, notFound } from "@/lib/errors";
@@ -12,7 +13,6 @@ import type { Context } from "hono";
 import { seizeSchema } from "../schemas";
 import { resolveAuthoritySigner, resolvePermanentDelegateAuthority } from "./authority-resolution";
 import { buildIdempotencyMetadata } from "./idempotency";
-import { getDb } from "@/db";
 
 type AppContext = Context<{ Bindings: Env }>;
 

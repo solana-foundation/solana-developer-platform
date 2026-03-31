@@ -1,3 +1,4 @@
+import { getDb } from "@/db";
 import { resolveApiKeySigningWalletId } from "@/lib/api-key-wallet-auth";
 import { getAuth } from "@/lib/auth";
 import { AppError, notFound } from "@/lib/errors";
@@ -13,7 +14,6 @@ import { resolveTokenAccount } from "@solana/mosaic-sdk";
 import type { Context } from "hono";
 import { burnSchema } from "../schemas";
 import { buildIdempotencyMetadata } from "./idempotency";
-import { getDb } from "@/db";
 import {
   assertTokenAllowsSupplyOperation,
   parsePositiveTokenAmount,

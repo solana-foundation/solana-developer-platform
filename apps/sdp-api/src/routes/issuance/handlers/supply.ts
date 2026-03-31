@@ -1,3 +1,4 @@
+import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
 import { AppError, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
@@ -7,7 +8,6 @@ import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
 import type { TokenResponse } from "@sdp/types";
 import type { Context } from "hono";
-import { getDb } from "@/db";
 
 type AppContext = Context<{ Bindings: Env }>;
 

@@ -17,7 +17,7 @@ setup("authenticate admin test user and save auth state", async ({ page }) => {
   const env = getE2EEnv();
   clearIssuanceFixtures();
   const identity = await ensureClerkAdminUser();
-  seedLocalClerkOrganizationMapping(identity);
+  await seedLocalClerkOrganizationMapping(identity);
 
   await clerkSetup({
     publishableKey: env.clerkPublishableKey,

@@ -1,9 +1,6 @@
-import { spawnSync } from "node:child_process";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 import type { PaymentsDashboardWallet, Token } from "@sdp/types";
 import { generateKeyPairSigner } from "@solana/kit";
+import { Client } from "pg";
 import type { ClerkTestIdentity } from "./clerk-admin";
 import {
   type IssuanceFixtureToken,
@@ -17,7 +14,6 @@ const PLAYWRIGHT_LOCAL_ORG_ID = "org_e2e_issuance";
 const PLAYWRIGHT_LOCAL_ORG_NAME = "E2E Issuance Org";
 const PLAYWRIGHT_LOCAL_ORG_SLUG = "e2e-issuance";
 const DEFAULT_LOCAL_API_URL = "http://127.0.0.1:8788";
-const DEFAULT_API_PERSIST_PATH = ".wrangler/state-playwright";
 const DEFAULT_CLERK_JWT_TEMPLATE = "sdp-api";
 const DEFAULT_METADATA_IMAGE_URL = "https://example.com/assets/sdp-e2e-token.png";
 
@@ -29,11 +25,6 @@ interface BootstrapOptions {
 interface PlaywrightApiRuntimeEnv {
   clerkJwtTemplate: string;
   localApiBaseUrl: string;
-  persistPath: string;
-}
-
-interface PlaywrightLocalD1Env {
-  persistPath: string;
 }
 
 interface CreateWalletResponse {
@@ -58,29 +49,6 @@ interface ListProjectsResponse {
   projects: Array<{ id: string }>;
 }
 
-function getRepoRoot(): string {
-  return path.resolve(__dirname, "../../../..");
-}
-
-function getApiAppDir(): string {
-  return path.join(getRepoRoot(), "apps/sdp-api");
-}
-
-function getWranglerBin(): string {
-  const apiAppDir = getApiAppDir();
-  return path.join(
-    apiAppDir,
-    "node_modules/.bin",
-    process.platform === "win32" ? "wrangler.cmd" : "wrangler"
-  );
-}
-
-function getPlaywrightLocalD1Env(): PlaywrightLocalD1Env {
-  return {
-    persistPath: process.env.PLAYWRIGHT_API_PERSIST_PATH ?? DEFAULT_API_PERSIST_PATH,
-  };
-}
-
 function getPlaywrightApiRuntimeEnv(): PlaywrightApiRuntimeEnv {
   return {
     clerkJwtTemplate:
@@ -88,114 +56,99 @@ function getPlaywrightApiRuntimeEnv(): PlaywrightApiRuntimeEnv {
       process.env.NEXT_PUBLIC_CLERK_JWT_TEMPLATE ??
       DEFAULT_CLERK_JWT_TEMPLATE,
     localApiBaseUrl: process.env.PLAYWRIGHT_API_URL ?? DEFAULT_LOCAL_API_URL,
-    persistPath: process.env.PLAYWRIGHT_API_PERSIST_PATH ?? DEFAULT_API_PERSIST_PATH,
   };
 }
 
-function runLocalD1Sql(sql: string): void {
-  const apiAppDir = getApiAppDir();
-  const persistPath = getPlaywrightLocalD1Env().persistPath;
-  const tempFilePath = path.join(os.tmpdir(), `sdp-playwright-d1-${crypto.randomUUID()}.sql`);
-  fs.writeFileSync(tempFilePath, sql);
-
-  try {
-    const result = spawnSync(
-      getWranglerBin(),
-      ["d1", "execute", "DB", "--local", `--persist-to=${persistPath}`, `--file=${tempFilePath}`],
-      {
-        cwd: apiAppDir,
-        env: {
-          ...process.env,
-          CI: "1",
-        },
-        encoding: "utf8",
-      }
-    );
-
-    if (result.status !== 0) {
-      throw new Error(result.stderr || result.stdout || "Unknown wrangler D1 execution error");
-    }
-  } finally {
-    fs.rmSync(tempFilePath, { force: true });
+function getPlaywrightDatabaseUrl(): string {
+  const explicitDatabaseUrl = process.env.DATABASE_URL?.trim();
+  if (explicitDatabaseUrl) {
+    return explicitDatabaseUrl;
   }
+
+  const localDatabaseUrl = new URL("postgresql://127.0.0.1:5432/sdp");
+  localDatabaseUrl.username = "sdp";
+  localDatabaseUrl.password = "sdp";
+  return localDatabaseUrl.toString();
 }
 
-export function seedLocalClerkOrganizationMapping(identity: ClerkTestIdentity): void {
-  const clerkOrgId = escapeSql(identity.organizationId);
-  const clerkUserId = escapeSql(identity.userId);
-  const clerkEmail = escapeSql(identity.email.toLowerCase());
+export async function seedLocalClerkOrganizationMapping(
+  identity: ClerkTestIdentity
+): Promise<void> {
+  const client = new Client({
+    connectionString: getPlaywrightDatabaseUrl(),
+  });
+  const clerkEmail = identity.email.toLowerCase();
   const localUserId = "usr_e2e_issuance_admin";
   const localMemberId = "mem_e2e_issuance_admin";
   const localUserIdentityId = "aui_e2e_issuance_admin";
+  const now = new Date().toISOString().replace("T", " ").replace("Z", "");
 
-  runLocalD1Sql(`
-    INSERT OR REPLACE INTO organizations (id, name, slug, tier, status)
-    VALUES (
-      '${PLAYWRIGHT_LOCAL_ORG_ID}',
-      '${PLAYWRIGHT_LOCAL_ORG_NAME}',
-      '${PLAYWRIGHT_LOCAL_ORG_SLUG}',
-      'free',
-      'active'
+  await client.connect();
+
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      `INSERT INTO organizations (id, name, slug, tier, status)
+       VALUES ($1, $2, $3, 'free', 'active')
+       ON CONFLICT (id) DO UPDATE SET
+         name = EXCLUDED.name,
+         slug = EXCLUDED.slug,
+         tier = EXCLUDED.tier,
+         status = EXCLUDED.status,
+         updated_at = sdp_datetime_now()`,
+      [PLAYWRIGHT_LOCAL_ORG_ID, PLAYWRIGHT_LOCAL_ORG_NAME, PLAYWRIGHT_LOCAL_ORG_SLUG]
     );
-
-    INSERT OR REPLACE INTO auth_organization_identities (
-      id,
-      provider,
-      provider_org_id,
-      organization_id,
-      slug
-    )
-    VALUES (
-      'aoi_e2e_issuance',
-      'clerk',
-      '${clerkOrgId}',
-      '${PLAYWRIGHT_LOCAL_ORG_ID}',
-      '${PLAYWRIGHT_LOCAL_ORG_SLUG}'
+    await client.query(
+      `INSERT INTO auth_organization_identities (id, provider, provider_org_id, organization_id, slug)
+       VALUES ($1, 'clerk', $2, $3, $4)
+       ON CONFLICT (provider, provider_org_id) DO UPDATE SET
+         id = EXCLUDED.id,
+         organization_id = EXCLUDED.organization_id,
+         slug = EXCLUDED.slug,
+         updated_at = sdp_datetime_now()`,
+      [
+        "aoi_e2e_issuance",
+        identity.organizationId,
+        PLAYWRIGHT_LOCAL_ORG_ID,
+        PLAYWRIGHT_LOCAL_ORG_SLUG,
+      ]
     );
-
-    INSERT OR REPLACE INTO users (id, email, email_verified, name, status)
-    VALUES (
-      '${localUserId}',
-      '${clerkEmail}',
-      1,
-      'SDP E2E Admin',
-      'active'
+    await client.query(
+      `INSERT INTO users (id, email, email_verified, name, status)
+       VALUES ($1, $2, 1, 'SDP E2E Admin', 'active')
+       ON CONFLICT (id) DO UPDATE SET
+         email = EXCLUDED.email,
+         email_verified = EXCLUDED.email_verified,
+         name = EXCLUDED.name,
+         status = EXCLUDED.status`,
+      [localUserId, clerkEmail]
     );
-
-    INSERT OR REPLACE INTO auth_user_identities (
-      id,
-      provider,
-      provider_user_id,
-      user_id,
-      email
-    )
-    VALUES (
-      '${localUserIdentityId}',
-      'clerk',
-      '${clerkUserId}',
-      '${localUserId}',
-      '${clerkEmail}'
+    await client.query(
+      `INSERT INTO auth_user_identities (id, provider, provider_user_id, user_id, email)
+       VALUES ($1, 'clerk', $2, $3, $4)
+       ON CONFLICT (provider, provider_user_id) DO UPDATE SET
+         id = EXCLUDED.id,
+         user_id = EXCLUDED.user_id,
+         email = EXCLUDED.email,
+         updated_at = sdp_datetime_now()`,
+      [localUserIdentityId, identity.userId, localUserId, clerkEmail]
     );
-
-    INSERT OR REPLACE INTO organization_members (
-      id,
-      organization_id,
-      user_id,
-      role,
-      status
-    )
-    VALUES (
-      '${localMemberId}',
-      '${PLAYWRIGHT_LOCAL_ORG_ID}',
-      '${localUserId}',
-      'admin',
-      'active'
+    await client.query(
+      `INSERT INTO organization_members (id, organization_id, user_id, role, status, created_at)
+       VALUES ($1, $2, $3, 'admin', 'active', $4)
+       ON CONFLICT (organization_id, user_id) DO UPDATE SET
+         id = EXCLUDED.id,
+         role = EXCLUDED.role,
+         status = EXCLUDED.status`,
+      [localMemberId, PLAYWRIGHT_LOCAL_ORG_ID, localUserId, now]
     );
-  `);
-}
-
-function escapeSql(value: string): string {
-  return value.replaceAll("'", "''");
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    await client.end().catch(() => {});
+  }
 }
 
 function toFixtureWallet(wallet: PaymentsDashboardWallet): IssuanceFixtureWallet {

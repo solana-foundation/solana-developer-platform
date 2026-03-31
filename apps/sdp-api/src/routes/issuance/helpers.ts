@@ -1,8 +1,8 @@
+import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
 import { AppError } from "@/lib/errors";
 import type { Env } from "@/types/env";
 import type { Context } from "hono";
-import { getDb } from "@/db";
 
 type AppContext = Context<{ Bindings: Env }>;
 
@@ -11,14 +11,15 @@ async function ensureDefaultProject(
   organizationId: string,
   userId: string
 ): Promise<string> {
-  const existing = await getDb(c.env).prepare(
-    `SELECT p.id
+  const existing = await getDb(c.env)
+    .prepare(
+      `SELECT p.id
      FROM projects p
      JOIN project_members pm ON pm.project_id = p.id
      WHERE p.organization_id = ? AND p.status = 'active' AND pm.user_id = ?
      ORDER BY p.created_at ASC
      LIMIT 1`
-  )
+    )
     .bind(organizationId, userId)
     .first<{ id: string }>();
 
@@ -33,25 +34,30 @@ async function ensureDefaultProject(
 
   try {
     await getDb(c.env).batch([
-      getDb(c.env).prepare(
-        `INSERT INTO projects (
+      getDb(c.env)
+        .prepare(
+          `INSERT INTO projects (
            id, organization_id, name, slug, description, environment, settings, status, created_by, created_at, updated_at
          ) VALUES (?, ?, 'Default Project', ?, 'Auto-provisioned default project', 'sandbox', NULL, 'active', ?, ?, ?)`
-      ).bind(projectId, organizationId, defaultSlug, userId, now, now),
-      getDb(c.env).prepare(
-        `INSERT INTO project_members (id, project_id, user_id, role, created_at)
+        )
+        .bind(projectId, organizationId, defaultSlug, userId, now, now),
+      getDb(c.env)
+        .prepare(
+          `INSERT INTO project_members (id, project_id, user_id, role, created_at)
          VALUES (?, ?, ?, 'admin', ?)`
-      ).bind(membershipId, projectId, userId, now),
+        )
+        .bind(membershipId, projectId, userId, now),
     ]);
 
     return projectId;
   } catch {
-    const slugProject = await getDb(c.env).prepare(
-      `SELECT id, status
+    const slugProject = await getDb(c.env)
+      .prepare(
+        `SELECT id, status
        FROM projects
        WHERE organization_id = ? AND slug = ?
        LIMIT 1`
-    )
+      )
       .bind(organizationId, defaultSlug)
       .first<{ id: string; status: string }>();
 
@@ -60,20 +66,22 @@ async function ensureDefaultProject(
     }
 
     if (slugProject.status !== "active") {
-      await getDb(c.env).prepare(
-        `UPDATE projects
+      await getDb(c.env)
+        .prepare(
+          `UPDATE projects
          SET status = 'active', updated_at = datetime('now')
          WHERE id = ?`
-      )
+        )
         .bind(slugProject.id)
         .run();
     }
 
-    await getDb(c.env).prepare(
-      `INSERT INTO project_members (id, project_id, user_id, role, created_at)
+    await getDb(c.env)
+      .prepare(
+        `INSERT INTO project_members (id, project_id, user_id, role, created_at)
        VALUES (?, ?, ?, 'admin', ?)
        ON CONFLICT (project_id, user_id) DO NOTHING`
-    )
+      )
       .bind(`pm_${crypto.randomUUID()}`, slugProject.id, userId, now)
       .run();
 
@@ -95,21 +103,23 @@ export const requireProjectScope = async (c: AppContext) => {
 
   if (requestedProjectId) {
     const project = auth.userId
-      ? await getDb(c.env).prepare(
-          `SELECT p.id
+      ? await getDb(c.env)
+          .prepare(
+            `SELECT p.id
            FROM projects p
            JOIN project_members pm ON pm.project_id = p.id
            WHERE p.id = ? AND p.organization_id = ? AND p.status = 'active' AND pm.user_id = ?
            LIMIT 1`
-        )
+          )
           .bind(requestedProjectId, auth.organizationId, auth.userId)
           .first<{ id: string }>()
-      : await getDb(c.env).prepare(
-          `SELECT id
+      : await getDb(c.env)
+          .prepare(
+            `SELECT id
            FROM projects
            WHERE id = ? AND organization_id = ? AND status = 'active'
            LIMIT 1`
-        )
+          )
           .bind(requestedProjectId, auth.organizationId)
           .first<{ id: string }>();
 
@@ -121,23 +131,25 @@ export const requireProjectScope = async (c: AppContext) => {
   }
 
   const fallbackProject = auth.userId
-    ? await getDb(c.env).prepare(
-        `SELECT p.id
+    ? await getDb(c.env)
+        .prepare(
+          `SELECT p.id
          FROM projects p
          JOIN project_members pm ON pm.project_id = p.id
          WHERE p.organization_id = ? AND p.status = 'active' AND pm.user_id = ?
          ORDER BY p.created_at ASC
          LIMIT 1`
-      )
+        )
         .bind(auth.organizationId, auth.userId)
         .first<{ id: string }>()
-    : await getDb(c.env).prepare(
-        `SELECT id
+    : await getDb(c.env)
+        .prepare(
+          `SELECT id
          FROM projects
          WHERE organization_id = ? AND status = 'active'
          ORDER BY created_at ASC
          LIMIT 1`
-      )
+        )
         .bind(auth.organizationId)
         .first<{ id: string }>();
 

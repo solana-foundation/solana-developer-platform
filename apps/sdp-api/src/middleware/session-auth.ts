@@ -5,12 +5,12 @@
  * Sessions are cached in KV for fast lookups.
  */
 
+import { getDb } from "@/db";
 import { AppError } from "@/lib/errors";
 import type { Env } from "@/types/env";
 import type { CachedSession } from "@sdp/types";
 import type { Context, Next } from "hono";
 import { getCookie } from "hono/cookie";
-import { getDb } from "@/db";
 
 const SESSION_COOKIE_NAME = "sdp_session";
 

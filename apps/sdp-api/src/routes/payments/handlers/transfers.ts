@@ -1,3 +1,4 @@
+import { getDb } from "@/db";
 import type {
   PaymentTransferDirection as TransferDirection,
   PaymentTransferRow as TransferRow,
@@ -56,7 +57,6 @@ import {
   resolveSourceTokenAccount,
 } from "../token-accounts";
 import { resolveScope, resolveWallet } from "../wallets";
-import { getDb } from "@/db";
 
 // biome-ignore lint/nursery/noSecrets: Devnet USDC mint address constant, not a secret.
 const DEVNET_USDC_MINT = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
@@ -260,10 +260,7 @@ async function prepareSolTransfer(
   }
 
   const rpc = solanaRpc.createRpc(c.env);
-  const { blockhash, lastValidBlockHeight } = await solanaRpc.getRecentBlockhash(
-    rpc,
-    "confirmed"
-  );
+  const { blockhash, lastValidBlockHeight } = await solanaRpc.getRecentBlockhash(rpc, "confirmed");
   const feePayer = await getSponsoredFeePayer(c);
 
   const instruction = getTransferSolInstruction({
@@ -312,10 +309,7 @@ async function executeSolTransfer(
   }
 
   const rpc = solanaRpc.createRpc(c.env);
-  const { blockhash, lastValidBlockHeight } = await solanaRpc.getRecentBlockhash(
-    rpc,
-    "confirmed"
-  );
+  const { blockhash, lastValidBlockHeight } = await solanaRpc.getRecentBlockhash(rpc, "confirmed");
   const feePayment = getFeePayment(c);
   const feePayer = await feePayment.getFeePayer();
 
@@ -379,10 +373,7 @@ async function prepareSplTransfer(
     tokenProgram,
     mint: mintAddress,
   });
-  const { blockhash, lastValidBlockHeight } = await solanaRpc.getRecentBlockhash(
-    rpc,
-    "confirmed"
-  );
+  const { blockhash, lastValidBlockHeight } = await solanaRpc.getRecentBlockhash(rpc, "confirmed");
   const feePayer = await getSponsoredFeePayer(c);
   const feePayerSigner = createNoopSigner(feePayer);
 
@@ -463,10 +454,7 @@ async function executeSplTransfer(
     tokenProgram,
     mint: mintAddress,
   });
-  const { blockhash, lastValidBlockHeight } = await solanaRpc.getRecentBlockhash(
-    rpc,
-    "confirmed"
-  );
+  const { blockhash, lastValidBlockHeight } = await solanaRpc.getRecentBlockhash(rpc, "confirmed");
   const feePayment = getFeePayment(c);
   const feePayer = await feePayment.getFeePayer();
   const feePayerSigner = createNoopSigner(feePayer);
@@ -768,15 +756,17 @@ async function resolveObservedTokenSymbols(env: Env): Promise<Map<string, string
   ]);
 
   try {
-    const result = await getDb(env).prepare(
-      `SELECT mint_address, symbol
+    const result = await getDb(env)
+      .prepare(
+        `SELECT mint_address, symbol
          FROM issued_tokens
         WHERE mint_address IS NOT NULL
           AND deployed_at IS NOT NULL`
-    ).all<{
-      mint_address?: string | null;
-      symbol?: string | null;
-    }>();
+      )
+      .all<{
+        mint_address?: string | null;
+        symbol?: string | null;
+      }>();
 
     for (const row of result.results ?? []) {
       const mint = row.mint_address?.trim();
@@ -1213,8 +1203,8 @@ export async function listTransfers(c: AppContext) {
       heliusRpc,
       sourceAddress as Address,
       {
-      limit: Math.min(pageSize * 5, 200),
-      commitment: "confirmed",
+        limit: Math.min(pageSize * 5, 200),
+        commitment: "confirmed",
       }
     );
     const sigStrings = onChainSigs.map((s) => String(s.signature));

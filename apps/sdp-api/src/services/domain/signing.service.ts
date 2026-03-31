@@ -5,6 +5,7 @@
  * Handles DB-backed config resolution (project default → org default) and async signing flows.
  */
 
+import { getDb } from "@/db";
 import {
   KeychainFireblocksAdapter,
   KeychainMemoryAdapter,
@@ -59,7 +60,6 @@ import type { Env } from "@/types/env";
 import { getBase58Codec } from "@solana/codecs";
 import type { Address, KeyPairSigner, TransactionSigner } from "@solana/kit";
 import { createKeyPairSignerFromPrivateKeyBytes } from "@solana/signers";
-import { getDb } from "@/db";
 
 export { createAdapterFromEncryptedConfig };
 
@@ -1245,9 +1245,10 @@ export class SigningService {
 
     if (params.setDefault) {
       try {
-        await getDb(this.env).prepare(
-          `UPDATE custody_configs SET default_wallet_id = ?, updated_at = datetime('now') WHERE id = ?`
-        )
+        await getDb(this.env)
+          .prepare(
+            `UPDATE custody_configs SET default_wallet_id = ?, updated_at = datetime('now') WHERE id = ?`
+          )
           .bind(walletId, config.id)
           .run();
       } catch (error) {
@@ -1336,11 +1337,12 @@ export class SigningService {
       const remainingWallets = await this.configStore.getWallets(config.id);
       const nextDefaultWalletId = remainingWallets[0]?.walletId ?? null;
 
-      await getDb(this.env).prepare(
-        `UPDATE custody_configs
+      await getDb(this.env)
+        .prepare(
+          `UPDATE custody_configs
          SET default_wallet_id = ?, updated_at = datetime('now')
          WHERE id = ?`
-      )
+        )
         .bind(nextDefaultWalletId, config.id)
         .run();
 
@@ -1437,8 +1439,9 @@ export class SigningService {
     }
 
     const walletRow = projectId
-      ? await getDb(this.env).prepare(
-          `SELECT c.id as custody_config_id, c.project_id as project_id, w.public_key as wallet_public_key
+      ? await getDb(this.env)
+          .prepare(
+            `SELECT c.id as custody_config_id, c.project_id as project_id, w.public_key as wallet_public_key
              FROM custody_wallets w
              JOIN custody_configs c ON c.id = w.custody_config_id
              WHERE c.organization_id = ?
@@ -1448,15 +1451,16 @@ export class SigningService {
                AND (c.project_id = ? OR c.project_id IS NULL)
              ORDER BY CASE WHEN c.project_id = ? THEN 0 ELSE 1 END, c.updated_at DESC, c.id DESC
              LIMIT 1`
-        )
+          )
           .bind(orgId, walletId, projectId, projectId)
           .first<{
             custody_config_id: string;
             project_id: string | null;
             wallet_public_key: string;
           }>()
-      : await getDb(this.env).prepare(
-          `SELECT c.id as custody_config_id, c.project_id as project_id, w.public_key as wallet_public_key
+      : await getDb(this.env)
+          .prepare(
+            `SELECT c.id as custody_config_id, c.project_id as project_id, w.public_key as wallet_public_key
              FROM custody_wallets w
              JOIN custody_configs c ON c.id = w.custody_config_id
              WHERE c.organization_id = ?
@@ -1466,7 +1470,7 @@ export class SigningService {
                AND c.project_id IS NULL
              ORDER BY c.updated_at DESC, c.id DESC
              LIMIT 1`
-        )
+          )
           .bind(orgId, walletId)
           .first<{
             custody_config_id: string;

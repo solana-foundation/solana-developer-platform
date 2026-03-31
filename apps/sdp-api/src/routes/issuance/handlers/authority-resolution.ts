@@ -1,3 +1,4 @@
+import { getDb } from "@/db";
 import { assertApiKeyWalletAccess } from "@/lib/api-key-wallet-auth";
 import type { ApiKeyContext } from "@/lib/auth";
 import { AppError } from "@/lib/errors";
@@ -8,7 +9,6 @@ import { CustodyConfigStore } from "@/services/stores/custody-config.store";
 import type { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
 import type { Address, TransactionSigner } from "@solana/kit";
-import { getDb } from "@/db";
 
 export type AuthorityRole = "mint" | "freeze" | "permanentDelegate" | "metadata";
 type TokenRecord = Awaited<ReturnType<TokenService["getToken"]>>;

@@ -1,3 +1,4 @@
+import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
 import { AppError } from "@/lib/errors";
 import { success } from "@/lib/response";
@@ -9,7 +10,6 @@ import {
 import type { Env } from "@/types/env";
 import type { Context } from "hono";
 import { rpcProjectQuerySchema, rpcRelayPayloadSchema } from "./schemas";
-import { getDb } from "@/db";
 
 type AppContext = Context<{ Bindings: Env }>;
 

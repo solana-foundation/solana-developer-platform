@@ -5,6 +5,7 @@
  * and sets a Clerk auth context for downstream handlers.
  */
 
+import { getDb } from "@/db";
 import { mapClerkRoleToOrgRole } from "@/lib/clerk-role";
 import {
   type ClerkJwtPayload,
@@ -20,7 +21,6 @@ import {
   normalizeOrganizationRole,
 } from "@sdp/types";
 import type { Context, Next } from "hono";
-import { getDb } from "@/db";
 
 async function resolveClerkUser(db: DatabaseClient, clerkUserId: string) {
   return db
@@ -252,11 +252,12 @@ async function buildClerkContext(c: Context<{ Bindings: Env }>, payload: ClerkJw
     const role = normalizeOrganizationRole(existingContext.role);
 
     if (role !== existingContext.role) {
-      await getDb(c.env).prepare(
-        `UPDATE organization_members
+      await getDb(c.env)
+        .prepare(
+          `UPDATE organization_members
            SET role = ?
            WHERE user_id = ? AND organization_id = ? AND status = 'active'`
-      )
+        )
         .bind(role, existingContext.user_id, existingContext.organization_id)
         .run();
     }

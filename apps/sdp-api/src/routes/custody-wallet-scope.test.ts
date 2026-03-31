@@ -1,3 +1,4 @@
+import { getDb } from "@/db";
 import app from "@/index";
 import { hashString } from "@/lib/hash";
 import * as tokenAccounts from "@/routes/payments/token-accounts";
@@ -10,7 +11,6 @@ import { clearKVNamespaces, seedCachedApiKey } from "@/test/mocks/kv";
 import type { CachedApiKey } from "@sdp/types";
 import { address } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
 
 const actualCreateSigningService = signingServiceModule.createSigningService;
 const createRpcMock = vi.spyOn(solanaRpc, "createRpc");
@@ -57,101 +57,115 @@ async function seedAuthAndConfigs(): Promise<void> {
   await seedCachedApiKey(env, keyHash, TEST_CACHED_API_KEY);
 
   await getDb(env).batch([
-    getDb(env).prepare(
-      "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)"
-    ).bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, "free", "active"),
-    getDb(env).prepare(
-      "INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)"
-    ).bind(TEST_USER.id, TEST_USER.email, 1, "active"),
-    getDb(env).prepare(
-      `INSERT INTO api_keys
+    getDb(env)
+      .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
+      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, "free", "active"),
+    getDb(env)
+      .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
+      .bind(TEST_USER.id, TEST_USER.email, 1, "active"),
+    getDb(env)
+      .prepare(
+        `INSERT INTO api_keys
            (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, environment, status)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).bind(
-      TEST_API_KEY.id,
-      TEST_ORG.id,
-      null,
-      TEST_USER.id,
-      "Custody scope key",
-      TEST_API_KEY.prefix,
-      keyHash,
-      "api_admin",
-      JSON.stringify(["*"]),
-      "sandbox",
-      "active"
-    ),
-    getDb(env).prepare(
-      `INSERT INTO custody_configs
+      )
+      .bind(
+        TEST_API_KEY.id,
+        TEST_ORG.id,
+        null,
+        TEST_USER.id,
+        "Custody scope key",
+        TEST_API_KEY.prefix,
+        keyHash,
+        "api_admin",
+        JSON.stringify(["*"]),
+        "sandbox",
+        "active"
+      ),
+    getDb(env)
+      .prepare(
+        `INSERT INTO custody_configs
            (id, organization_id, project_id, provider, config_encrypted, encryption_version, default_wallet_id, status)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-    ).bind(
-      PRIVY_CONFIG_ID,
-      TEST_ORG.id,
-      null,
-      "privy",
-      "test-config",
-      "sdp-custody-encryption-v1",
-      "privy_wallet_a",
-      "active"
-    ),
-    getDb(env).prepare(
-      `INSERT INTO custody_configs
+      )
+      .bind(
+        PRIVY_CONFIG_ID,
+        TEST_ORG.id,
+        null,
+        "privy",
+        "test-config",
+        "sdp-custody-encryption-v1",
+        "privy_wallet_a",
+        "active"
+      ),
+    getDb(env)
+      .prepare(
+        `INSERT INTO custody_configs
            (id, organization_id, project_id, provider, config_encrypted, encryption_version, default_wallet_id, status)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-    ).bind(
-      PARA_CONFIG_ID,
-      TEST_ORG.id,
-      null,
-      "para",
-      "test-config",
-      "sdp-custody-encryption-v1",
-      "para_wallet_a",
-      "active"
-    ),
-    getDb(env).prepare(
-      `INSERT INTO custody_scope_defaults
+      )
+      .bind(
+        PARA_CONFIG_ID,
+        TEST_ORG.id,
+        null,
+        "para",
+        "test-config",
+        "sdp-custody-encryption-v1",
+        "para_wallet_a",
+        "active"
+      ),
+    getDb(env)
+      .prepare(
+        `INSERT INTO custody_scope_defaults
            (id, organization_id, project_id, default_custody_config_id)
          VALUES (?, ?, ?, ?)`
-    ).bind("csd_scope_org_default", TEST_ORG.id, null, PRIVY_CONFIG_ID),
-    getDb(env).prepare(
-      `INSERT INTO custody_wallets
+      )
+      .bind("csd_scope_org_default", TEST_ORG.id, null, PRIVY_CONFIG_ID),
+    getDb(env)
+      .prepare(
+        `INSERT INTO custody_wallets
            (id, custody_config_id, wallet_id, public_key, label, purpose, status)
          VALUES (?, ?, ?, ?, ?, ?, ?)`
-    ).bind(
-      "cwlt_scope_privy_a",
-      PRIVY_CONFIG_ID,
-      "privy_wallet_a",
-      "privy_pubkey_a",
-      "A",
-      "root",
-      "active"
-    ),
-    getDb(env).prepare(
-      `INSERT INTO custody_wallets
+      )
+      .bind(
+        "cwlt_scope_privy_a",
+        PRIVY_CONFIG_ID,
+        "privy_wallet_a",
+        "privy_pubkey_a",
+        "A",
+        "root",
+        "active"
+      ),
+    getDb(env)
+      .prepare(
+        `INSERT INTO custody_wallets
            (id, custody_config_id, wallet_id, public_key, label, purpose, status)
          VALUES (?, ?, ?, ?, ?, ?, ?)`
-    ).bind(
-      "cwlt_scope_privy_b",
-      PRIVY_CONFIG_ID,
-      "privy_wallet_b",
-      "privy_pubkey_b",
-      "B",
-      "transfer",
-      "active"
-    ),
-    getDb(env).prepare(
-      `INSERT INTO custody_wallets
+      )
+      .bind(
+        "cwlt_scope_privy_b",
+        PRIVY_CONFIG_ID,
+        "privy_wallet_b",
+        "privy_pubkey_b",
+        "B",
+        "transfer",
+        "active"
+      ),
+    getDb(env)
+      .prepare(
+        `INSERT INTO custody_wallets
            (id, custody_config_id, wallet_id, public_key, label, purpose, status)
          VALUES (?, ?, ?, ?, ?, ?, ?)`
-    ).bind(
-      "cwlt_scope_para_a",
-      PARA_CONFIG_ID,
-      "para_wallet_a",
-      "para_pubkey_a",
-      "C",
-      "root",
-      "active"
-    ),
+      )
+      .bind(
+        "cwlt_scope_para_a",
+        PARA_CONFIG_ID,
+        "para_wallet_a",
+        "para_pubkey_a",
+        "C",
+        "root",
+        "active"
+      ),
   ]);
 }
 
@@ -390,9 +404,8 @@ describe("Custody wallet scope routes", () => {
       label: "Operations",
     });
 
-    const updated = await getDb(env).prepare(
-      "SELECT label FROM custody_wallets WHERE wallet_id = ? LIMIT 1"
-    )
+    const updated = await getDb(env)
+      .prepare("SELECT label FROM custody_wallets WHERE wallet_id = ? LIMIT 1")
       .bind("para_wallet_a")
       .first<{ label: string | null }>();
 

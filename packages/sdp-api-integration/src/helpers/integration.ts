@@ -1,4 +1,3 @@
-import { getDb } from "@sdp/api/db";
 import { TEST_ORG, TEST_USER } from "@sdp/api-test/fixtures/organizations";
 import {
   TEST_PROJECT,
@@ -6,6 +5,7 @@ import {
   TEST_PROJECT_CACHED_KEY,
 } from "@sdp/api-test/fixtures/tokens";
 import { clearTestDatabase, seedTestDatabase } from "@sdp/api-test/mocks/db";
+import { getDb } from "@sdp/api/db";
 import app from "@sdp/api/index";
 import { hashString } from "@sdp/api/lib/hash";
 import { createFeePaymentAdapter } from "@sdp/api/services/adapters/fee-payment";
@@ -211,13 +211,14 @@ async function ensurePrivyCustodyAddress(): Promise<string> {
   }
 
   if (!config.defaultWalletId) {
-    const fallbackWallet = await db.prepare(
-      `SELECT wallet_id
+    const fallbackWallet = await db
+      .prepare(
+        `SELECT wallet_id
        FROM custody_wallets
        WHERE custody_config_id = ? AND status = 'active'
        ORDER BY created_at ASC
        LIMIT 1`
-    )
+      )
       .bind(config.id)
       .first<{ wallet_id: string }>();
 
@@ -225,22 +226,24 @@ async function ensurePrivyCustodyAddress(): Promise<string> {
       throw new Error("Integration precondition failed: Privy signer has no active wallets.");
     }
 
-    await db.prepare(
-      `UPDATE custody_configs
+    await db
+      .prepare(
+        `UPDATE custody_configs
        SET default_wallet_id = ?, updated_at = datetime('now')
        WHERE id = ?`
-    )
+      )
       .bind(fallbackWallet.wallet_id, config.id)
       .run();
   }
 
   const walletRows = (
-    await db.prepare(
-      `SELECT wallet_id, public_key
+    await db
+      .prepare(
+        `SELECT wallet_id, public_key
        FROM custody_wallets
        WHERE custody_config_id = ? AND status = 'active'
        ORDER BY created_at ASC`
-    )
+      )
       .bind(config.id)
       .all<{ wallet_id: string; public_key: string }>()
   ).results;
@@ -266,11 +269,12 @@ async function ensurePrivyCustodyAddress(): Promise<string> {
   }
 
   if (preferredWallet.wallet_id !== config.defaultWalletId) {
-    await db.prepare(
-      `UPDATE custody_configs
+    await db
+      .prepare(
+        `UPDATE custody_configs
        SET default_wallet_id = ?, updated_at = datetime('now')
        WHERE id = ?`
-    )
+      )
       .bind(preferredWallet.wallet_id, config.id)
       .run();
   }

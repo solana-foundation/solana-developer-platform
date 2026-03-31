@@ -1,3 +1,4 @@
+import { getDb } from "@/db";
 import {
   attachUsdValuesToBalances,
   getTrackedWalletBalancesByOwner,
@@ -5,7 +6,6 @@ import {
 import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
 
 const TEST_ORG_ID = "org_helius_das";
 const TEST_USER_ID = "usr_helius_das";
@@ -23,42 +23,46 @@ describe("helius-das service", () => {
     env.SOLANA_RPC_HELIUS_API_KEY = "helius_test_key";
 
     await getDb(env).batch([
-      getDb(env).prepare(
-        "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)"
-      ).bind(TEST_ORG_ID, "Helius DAS Org", "helius-das-org", "free", "active"),
-      getDb(env).prepare(
-        "INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)"
-      ).bind(TEST_USER_ID, "helius-das@example.com", 1, "active"),
-      getDb(env).prepare(
-        `INSERT INTO projects
+      getDb(env)
+        .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
+        .bind(TEST_ORG_ID, "Helius DAS Org", "helius-das-org", "free", "active"),
+      getDb(env)
+        .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
+        .bind(TEST_USER_ID, "helius-das@example.com", 1, "active"),
+      getDb(env)
+        .prepare(
+          `INSERT INTO projects
              (id, organization_id, name, slug, environment, status, created_by)
            VALUES (?, ?, ?, ?, ?, ?, ?)`
-      ).bind(
-        TEST_PROJECT_ID,
-        TEST_ORG_ID,
-        "Helius DAS Project",
-        "helius-das-project",
-        "sandbox",
-        "active",
-        TEST_USER_ID
-      ),
-      getDb(env).prepare(
-        `INSERT INTO issued_tokens
+        )
+        .bind(
+          TEST_PROJECT_ID,
+          TEST_ORG_ID,
+          "Helius DAS Project",
+          "helius-das-project",
+          "sandbox",
+          "active",
+          TEST_USER_ID
+        ),
+      getDb(env)
+        .prepare(
+          `INSERT INTO issued_tokens
              (id, project_id, organization_id, mint_address, name, symbol, decimals, template, status, deployed_at, created_by)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      ).bind(
-        "tok_helius_das_stable",
-        TEST_PROJECT_ID,
-        TEST_ORG_ID,
-        TEST_STABLE_MINT,
-        "Test Stable",
-        "TEST",
-        6,
-        "stablecoin",
-        "active",
-        "2026-03-19T00:00:00.000Z",
-        TEST_USER_ID
-      ),
+        )
+        .bind(
+          "tok_helius_das_stable",
+          TEST_PROJECT_ID,
+          TEST_ORG_ID,
+          TEST_STABLE_MINT,
+          "Test Stable",
+          "TEST",
+          6,
+          "stablecoin",
+          "active",
+          "2026-03-19T00:00:00.000Z",
+          TEST_USER_ID
+        ),
     ]);
   });
 

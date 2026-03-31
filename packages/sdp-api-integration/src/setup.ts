@@ -1,6 +1,6 @@
 import { closeDatabasePools } from "@sdp/api/db";
-import { ensureIntegrationPreflight } from "./helpers/preflight";
 import { afterAll } from "vitest";
+import { ensureIntegrationPreflight } from "./helpers/preflight";
 
 const globalWithSecureContext = globalThis as { isSecureContext?: boolean };
 

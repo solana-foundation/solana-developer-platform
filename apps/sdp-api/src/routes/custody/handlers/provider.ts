@@ -1,3 +1,4 @@
+import { getDb } from "@/db";
 import { AppError } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import { clearWalletCaches } from "@/routes/custody/handlers/wallets";
@@ -13,7 +14,6 @@ import {
 } from "@/services/domain/signing/provider-config";
 import { SigningError } from "@/services/ports";
 import { type AppContext, getPreferredWalletForConfig, resolveActor } from "../context";
-import { getDb } from "@/db";
 import {
   type InitializeSigningRequest,
   type InitializeSigningResponse,
@@ -315,17 +315,18 @@ async function findScopeConfigByProvider(
   projectId: string | undefined,
   provider: CustodyProvider
 ): Promise<{ id: string; status: "active" | "inactive"; default_wallet_id: string | null } | null> {
-  return getDb(c.env).prepare(
-    projectId
-      ? `SELECT id, status, default_wallet_id
+  return getDb(c.env)
+    .prepare(
+      projectId
+        ? `SELECT id, status, default_wallet_id
            FROM custody_configs
            WHERE organization_id = ? AND project_id = ? AND provider = ?
            LIMIT 1`
-      : `SELECT id, status, default_wallet_id
+        : `SELECT id, status, default_wallet_id
            FROM custody_configs
            WHERE organization_id = ? AND project_id IS NULL AND provider = ?
            LIMIT 1`
-  )
+    )
     .bind(...(projectId ? [organizationId, projectId, provider] : [organizationId, provider]))
     .first<{ id: string; status: "active" | "inactive"; default_wallet_id: string | null }>();
 }
@@ -336,9 +337,10 @@ async function findScopeProviderConfigRecord(
   projectId: string | undefined,
   provider: CustodyProvider
 ) {
-  return getDb(c.env).prepare(
-    projectId
-      ? `SELECT id,
+  return getDb(c.env)
+    .prepare(
+      projectId
+        ? `SELECT id,
                 organization_id,
                 project_id,
                 provider,
@@ -350,7 +352,7 @@ async function findScopeProviderConfigRecord(
            FROM custody_configs
            WHERE organization_id = ? AND project_id = ? AND provider = ?
            LIMIT 1`
-      : `SELECT id,
+        : `SELECT id,
                 organization_id,
                 project_id,
                 provider,
@@ -362,7 +364,7 @@ async function findScopeProviderConfigRecord(
            FROM custody_configs
            WHERE organization_id = ? AND project_id IS NULL AND provider = ?
            LIMIT 1`
-  )
+    )
     .bind(...(projectId ? [organizationId, projectId, provider] : [organizationId, provider]))
     .first<{
       id: string;
@@ -403,7 +405,8 @@ async function findScopeFireblocksConfig(
 }
 
 async function resolveOrganizationSlug(c: AppContext, organizationId: string): Promise<string> {
-  const row = await getDb(c.env).prepare("SELECT slug FROM organizations WHERE id = ? LIMIT 1")
+  const row = await getDb(c.env)
+    .prepare("SELECT slug FROM organizations WHERE id = ? LIMIT 1")
     .bind(organizationId)
     .first<{ slug: string | null }>();
 

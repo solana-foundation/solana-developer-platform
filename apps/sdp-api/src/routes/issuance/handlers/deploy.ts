@@ -1,3 +1,4 @@
+import { getDb } from "@/db";
 import { resolveApiKeySigningWalletId } from "@/lib/api-key-wallet-auth";
 import { getAuth } from "@/lib/auth";
 import { AppError, notFound } from "@/lib/errors";
@@ -15,7 +16,6 @@ import type { Context } from "hono";
 import { deployTokenSchema } from "../schemas";
 import { getInitialPermanentDelegateAuthority } from "./authority-resolution";
 import { buildIdempotencyMetadata } from "./idempotency";
-import { getDb } from "@/db";
 
 type AppContext = Context<{ Bindings: Env }>;
 

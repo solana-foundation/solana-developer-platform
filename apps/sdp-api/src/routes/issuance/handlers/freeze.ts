@@ -1,3 +1,4 @@
+import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
 import { AppError, notFound } from "@/lib/errors";
 import { created, paginated, success } from "@/lib/response";
@@ -14,7 +15,6 @@ import type { Context } from "hono";
 import { freezeSchema, unfreezeSchema } from "../schemas";
 import { resolveAuthoritySigner, resolveCurrentAuthorityForRole } from "./authority-resolution";
 import { buildIdempotencyMetadata } from "./idempotency";
-import { getDb } from "@/db";
 
 type AppContext = Context<{ Bindings: Env }>;
 

@@ -25,11 +25,11 @@ export interface PreparedStatement {
 
 export interface DatabaseExecutor {
   prepare(query: string): PreparedStatement;
-  queryOne<T = Record<string, unknown>>(query: string, params?: readonly unknown[]): Promise<T | null>;
-  queryMany<T = Record<string, unknown>>(
+  queryOne<T = Record<string, unknown>>(
     query: string,
     params?: readonly unknown[]
-  ): Promise<T[]>;
+  ): Promise<T | null>;
+  queryMany<T = Record<string, unknown>>(query: string, params?: readonly unknown[]): Promise<T[]>;
   execute(query: string, params?: readonly unknown[]): Promise<number>;
 }
 
@@ -236,19 +236,25 @@ class PostgresExecutor implements DatabaseExecutor {
     query: string,
     params: readonly unknown[] = []
   ): Promise<T | null> {
-    return this.prepare(query).bind(...params).first<T>();
+    return this.prepare(query)
+      .bind(...params)
+      .first<T>();
   }
 
   async queryMany<T = Record<string, unknown>>(
     query: string,
     params: readonly unknown[] = []
   ): Promise<T[]> {
-    const result = await this.prepare(query).bind(...params).all<T>();
+    const result = await this.prepare(query)
+      .bind(...params)
+      .all<T>();
     return result.rows;
   }
 
   async execute(query: string, params: readonly unknown[] = []): Promise<number> {
-    return this.prepare(query).bind(...params).run();
+    return this.prepare(query)
+      .bind(...params)
+      .run();
   }
 }
 

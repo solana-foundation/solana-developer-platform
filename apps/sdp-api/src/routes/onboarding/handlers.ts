@@ -1,9 +1,9 @@
+import { type PreparedStatement, getDb } from "@/db";
 import { AppError, conflict, notFound } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import { ClerkOrganizationsService } from "@/services/clerk-organizations.service";
 import type { Env } from "@/types/env";
 import type { Context } from "hono";
-import { type PreparedStatement, getDb } from "@/db";
 
 type AppContext = Context<{ Bindings: Env }>;
 
@@ -85,11 +85,12 @@ export const getOnboardingStatus = async (c: AppContext) => {
     throw new AppError("UNAUTHORIZED", "Clerk session required");
   }
 
-  const mapping = await getDb(c.env).prepare(
-    `SELECT organization_id
+  const mapping = await getDb(c.env)
+    .prepare(
+      `SELECT organization_id
      FROM auth_organization_identities
      WHERE provider = 'clerk' AND provider_org_id = ?`
-  )
+    )
     .bind(clerk.clerkOrgId)
     .first<{ organization_id: string }>();
 
@@ -107,11 +108,12 @@ export const linkOrganization = async (c: AppContext) => {
     throw new AppError("UNAUTHORIZED", "Clerk session required");
   }
 
-  const existingMapping = await getDb(c.env).prepare(
-    `SELECT organization_id
+  const existingMapping = await getDb(c.env)
+    .prepare(
+      `SELECT organization_id
      FROM auth_organization_identities
      WHERE provider = 'clerk' AND provider_org_id = ?`
-  )
+    )
     .bind(clerk.clerkOrgId)
     .first<{ organization_id: string }>();
 
@@ -135,23 +137,26 @@ export const linkOrganization = async (c: AppContext) => {
 
   const normalizedEmail = clerk.email.toLowerCase();
 
-  const existingIdentity = await getDb(c.env).prepare(
-    `SELECT user_id, email
+  const existingIdentity = await getDb(c.env)
+    .prepare(
+      `SELECT user_id, email
      FROM auth_user_identities
      WHERE provider = 'clerk' AND provider_user_id = ?`
-  )
+    )
     .bind(clerk.clerkUserId)
     .first<{ user_id: string; email: string | null }>();
 
   let userId = existingIdentity?.user_id;
   let user =
     userId &&
-    (await getDb(c.env).prepare("SELECT id FROM users WHERE id = ?")
+    (await getDb(c.env)
+      .prepare("SELECT id FROM users WHERE id = ?")
       .bind(userId)
       .first<{ id: string }>());
 
   if (!user) {
-    user = await getDb(c.env).prepare("SELECT id FROM users WHERE email = ?")
+    user = await getDb(c.env)
+      .prepare("SELECT id FROM users WHERE email = ?")
       .bind(normalizedEmail)
       .first<{ id: string }>();
     userId = user?.id;
@@ -167,34 +172,44 @@ export const linkOrganization = async (c: AppContext) => {
 
   if (!user) {
     batch.push(
-      getDb(c.env).prepare(
-        `INSERT INTO users (id, email, email_verified, status)
+      getDb(c.env)
+        .prepare(
+          `INSERT INTO users (id, email, email_verified, status)
          VALUES (?, ?, 1, 'active')`
-      ).bind(userId, normalizedEmail)
+        )
+        .bind(userId, normalizedEmail)
     );
   }
 
   batch.push(
-    getDb(c.env).prepare(
-      `INSERT INTO organizations (id, name, slug, tier, status)
+    getDb(c.env)
+      .prepare(
+        `INSERT INTO organizations (id, name, slug, tier, status)
        VALUES (?, ?, ?, ?, 'active')`
-    ).bind(orgId, orgName, slug, tier),
-    getDb(c.env).prepare(
-      `INSERT INTO organization_members (id, organization_id, user_id, role, status)
+      )
+      .bind(orgId, orgName, slug, tier),
+    getDb(c.env)
+      .prepare(
+        `INSERT INTO organization_members (id, organization_id, user_id, role, status)
        VALUES (?, ?, ?, 'admin', 'active')`
-    ).bind(memberId, orgId, userId),
-    getDb(c.env).prepare(
-      `INSERT INTO auth_organization_identities (id, provider, provider_org_id, organization_id, slug)
+      )
+      .bind(memberId, orgId, userId),
+    getDb(c.env)
+      .prepare(
+        `INSERT INTO auth_organization_identities (id, provider, provider_org_id, organization_id, slug)
        VALUES (?, 'clerk', ?, ?, ?)`
-    ).bind(authOrgId, clerk.clerkOrgId, orgId, slug),
+      )
+      .bind(authOrgId, clerk.clerkOrgId, orgId, slug),
     ...(existingIdentity
       ? []
       : [
-          getDb(c.env).prepare(
-            `INSERT INTO auth_user_identities (id, provider, provider_user_id, user_id, email)
+          getDb(c.env)
+            .prepare(
+              `INSERT INTO auth_user_identities (id, provider, provider_user_id, user_id, email)
              VALUES (?, 'clerk', ?, ?, ?)
              ON CONFLICT (provider, provider_user_id) DO NOTHING`
-          ).bind(authUserId, clerk.clerkUserId, userId, normalizedEmail),
+            )
+            .bind(authUserId, clerk.clerkUserId, userId, normalizedEmail),
         ])
   );
 

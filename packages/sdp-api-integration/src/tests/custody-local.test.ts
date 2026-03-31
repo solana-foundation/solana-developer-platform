@@ -1,6 +1,6 @@
+import { getDb } from "@sdp/api/db";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { TokenApiResponse } from "../helpers/api-types";
-import { getDb } from "@sdp/api/db";
 import {
   RUN_INTEGRATION_TESTS,
   SOLANA_CONFIGURED,
@@ -41,9 +41,8 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Custody Privy Sig
     expect(provider).toBe("privy");
     expect(publicKey).toMatch(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/);
 
-    const configRow = await getDb(env).prepare(
-      "SELECT config_encrypted FROM custody_configs WHERE id = ?"
-    )
+    const configRow = await getDb(env)
+      .prepare("SELECT config_encrypted FROM custody_configs WHERE id = ?")
       .bind(configId)
       .first<{ config_encrypted: string }>();
 

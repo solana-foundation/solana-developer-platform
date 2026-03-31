@@ -1,3 +1,4 @@
+import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
 import { AppError, notFound } from "@/lib/errors";
 import { created, noContent, success } from "@/lib/response";
@@ -7,7 +8,6 @@ import type { Env } from "@/types/env";
 import type { ListProjectMembersResponse, ProjectMemberResponse, ProjectRole } from "@sdp/types";
 import type { Context } from "hono";
 import { addMemberSchema, updateMemberSchema } from "../schemas";
-import { getDb } from "@/db";
 
 type AppContext = Context<{ Bindings: Env }>;
 
@@ -51,9 +51,10 @@ export const addProjectMember = async (c: AppContext) => {
   }
 
   // Verify user is a member of the organization
-  const orgMember = await getDb(c.env).prepare(
-    "SELECT id FROM organization_members WHERE user_id = ? AND organization_id = ? AND status = 'active'"
-  )
+  const orgMember = await getDb(c.env)
+    .prepare(
+      "SELECT id FROM organization_members WHERE user_id = ? AND organization_id = ? AND status = 'active'"
+    )
     .bind(parsed.data.userId, auth.organizationId)
     .first();
 
@@ -69,7 +70,8 @@ export const addProjectMember = async (c: AppContext) => {
     );
 
     // Get user details
-    const user = await getDb(c.env).prepare("SELECT id, email, name FROM users WHERE id = ?")
+    const user = await getDb(c.env)
+      .prepare("SELECT id, email, name FROM users WHERE id = ?")
       .bind(parsed.data.userId)
       .first<{ id: string; email: string; name: string | null }>();
 
@@ -119,9 +121,8 @@ export const updateProjectMember = async (c: AppContext) => {
   }
 
   // Get member to find userId
-  const memberRow = await getDb(c.env).prepare(
-    "SELECT user_id FROM project_members WHERE id = ? AND project_id = ?"
-  )
+  const memberRow = await getDb(c.env)
+    .prepare("SELECT user_id FROM project_members WHERE id = ? AND project_id = ?")
     .bind(memberId, projectId)
     .first<{ user_id: string }>();
 
@@ -160,9 +161,8 @@ export const removeProjectMember = async (c: AppContext) => {
   }
 
   // Get member to find userId
-  const memberRow = await getDb(c.env).prepare(
-    "SELECT user_id FROM project_members WHERE id = ? AND project_id = ?"
-  )
+  const memberRow = await getDb(c.env)
+    .prepare("SELECT user_id FROM project_members WHERE id = ? AND project_id = ?")
     .bind(memberId, projectId)
     .first<{ user_id: string }>();
 

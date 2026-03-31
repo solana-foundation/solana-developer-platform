@@ -1,3 +1,4 @@
+import { getDb } from "@/db";
 import { AppError, notFound } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import {
@@ -20,7 +21,6 @@ import type {
 } from "@sdp/types";
 import type { Context } from "hono";
 import { apiKeyCreateSchema, apiKeyRotateSchema, apiKeyUpdateSchema } from "./schemas";
-import { getDb } from "@/db";
 import {
   assertWalletBindingsInScope,
   resolveCreateWalletScope,
@@ -175,11 +175,12 @@ export const createApiKey = async (c: AppContext) => {
       return null;
     }
 
-    const creator = await getDb(c.env).prepare(
-      `SELECT created_by
+    const creator = await getDb(c.env)
+      .prepare(
+        `SELECT created_by
        FROM api_keys
        WHERE id = ? AND organization_id = ?`
-    )
+      )
       .bind(actor.apiKeyId, orgId)
       .first<{ created_by: string }>();
 
@@ -187,13 +188,14 @@ export const createApiKey = async (c: AppContext) => {
       return creator.created_by;
     }
 
-    const orgOwner = await getDb(c.env).prepare(
-      `SELECT user_id
+    const orgOwner = await getDb(c.env)
+      .prepare(
+        `SELECT user_id
        FROM organization_members
        WHERE organization_id = ? AND role IN ('admin', 'owner')
        ORDER BY created_at ASC
        LIMIT 1`
-    )
+      )
       .bind(orgId)
       .first<{ user_id: string }>();
 
@@ -309,9 +311,8 @@ export const updateApiKey = async (c: AppContext) => {
   }
 
   // Verify key belongs to this organization
-  const existing = await getDb(c.env).prepare(
-    "SELECT id, key_hash, project_id FROM api_keys WHERE id = ? AND organization_id = ?"
-  )
+  const existing = await getDb(c.env)
+    .prepare("SELECT id, key_hash, project_id FROM api_keys WHERE id = ? AND organization_id = ?")
     .bind(keyId, actor.organizationId)
     .first<{ id: string; key_hash: string; project_id: string | null }>();
 
@@ -377,7 +378,8 @@ export const updateApiKey = async (c: AppContext) => {
   }
 
   values.push(keyId);
-  await getDb(c.env).prepare(`UPDATE api_keys SET ${updates.join(", ")} WHERE id = ?`)
+  await getDb(c.env)
+    .prepare(`UPDATE api_keys SET ${updates.join(", ")} WHERE id = ?`)
     .bind(...values)
     .run();
 
@@ -477,9 +479,10 @@ export const revokeApiKey = async (c: AppContext) => {
       ? String((body as { confirmation: string }).confirmation).trim()
       : "";
 
-  const existing = await getDb(c.env).prepare(
-    "SELECT id, name, status, revoked_at FROM api_keys WHERE id = ? AND organization_id = ?"
-  )
+  const existing = await getDb(c.env)
+    .prepare(
+      "SELECT id, name, status, revoked_at FROM api_keys WHERE id = ? AND organization_id = ?"
+    )
     .bind(keyId, actor.organizationId)
     .first<{ id: string; name: string; status: string; revoked_at: string | null }>();
 

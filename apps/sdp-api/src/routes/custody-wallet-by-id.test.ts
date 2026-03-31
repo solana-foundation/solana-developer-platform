@@ -1,3 +1,4 @@
+import { getDb } from "@/db";
 import app from "@/index";
 import { hashString } from "@/lib/hash";
 import * as solanaRpc from "@/services/solana/rpc";
@@ -7,7 +8,6 @@ import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVNamespaces, seedCachedApiKey } from "@/test/mocks/kv";
 import type { CachedApiKey } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
 
 const createRpcMock = vi.spyOn(solanaRpc, "createRpc");
 const getAccountInfoMock = vi.spyOn(solanaRpc, "getAccountInfo");
@@ -50,88 +50,100 @@ async function seedAuthAndConfigs(): Promise<void> {
   await seedCachedApiKey(env, keyHash, TEST_CACHED_API_KEY);
 
   await getDb(env).batch([
-    getDb(env).prepare(
-      "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)"
-    ).bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, "free", "active"),
-    getDb(env).prepare(
-      "INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)"
-    ).bind(TEST_USER.id, TEST_USER.email, 1, "active"),
-    getDb(env).prepare(
-      `INSERT INTO api_keys
+    getDb(env)
+      .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
+      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, "free", "active"),
+    getDb(env)
+      .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
+      .bind(TEST_USER.id, TEST_USER.email, 1, "active"),
+    getDb(env)
+      .prepare(
+        `INSERT INTO api_keys
            (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, environment, status)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).bind(
-      TEST_API_KEY.id,
-      TEST_ORG.id,
-      null,
-      TEST_USER.id,
-      "Custody Wallet By ID Test Key",
-      TEST_API_KEY.prefix,
-      keyHash,
-      "api_admin",
-      JSON.stringify(["*"]),
-      "sandbox",
-      "active"
-    ),
-    getDb(env).prepare(
-      `INSERT INTO custody_configs
+      )
+      .bind(
+        TEST_API_KEY.id,
+        TEST_ORG.id,
+        null,
+        TEST_USER.id,
+        "Custody Wallet By ID Test Key",
+        TEST_API_KEY.prefix,
+        keyHash,
+        "api_admin",
+        JSON.stringify(["*"]),
+        "sandbox",
+        "active"
+      ),
+    getDb(env)
+      .prepare(
+        `INSERT INTO custody_configs
            (id, organization_id, project_id, provider, config_encrypted, encryption_version, default_wallet_id, status)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-    ).bind(
-      PRIVY_CONFIG_ID,
-      TEST_ORG.id,
-      null,
-      "privy",
-      "test-config",
-      "sdp-custody-encryption-v1",
-      "privy_wallet_a",
-      "active"
-    ),
-    getDb(env).prepare(
-      `INSERT INTO custody_configs
+      )
+      .bind(
+        PRIVY_CONFIG_ID,
+        TEST_ORG.id,
+        null,
+        "privy",
+        "test-config",
+        "sdp-custody-encryption-v1",
+        "privy_wallet_a",
+        "active"
+      ),
+    getDb(env)
+      .prepare(
+        `INSERT INTO custody_configs
            (id, organization_id, project_id, provider, config_encrypted, encryption_version, default_wallet_id, status)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-    ).bind(
-      PARA_CONFIG_ID,
-      TEST_ORG.id,
-      null,
-      "para",
-      "test-config",
-      "sdp-custody-encryption-v1",
-      "para_wallet_a",
-      "active"
-    ),
-    getDb(env).prepare(
-      `INSERT INTO custody_scope_defaults
+      )
+      .bind(
+        PARA_CONFIG_ID,
+        TEST_ORG.id,
+        null,
+        "para",
+        "test-config",
+        "sdp-custody-encryption-v1",
+        "para_wallet_a",
+        "active"
+      ),
+    getDb(env)
+      .prepare(
+        `INSERT INTO custody_scope_defaults
            (id, organization_id, project_id, default_custody_config_id)
          VALUES (?, ?, ?, ?)`
-    ).bind("csd_wallet_by_id_org_default", TEST_ORG.id, null, PRIVY_CONFIG_ID),
-    getDb(env).prepare(
-      `INSERT INTO custody_wallets
+      )
+      .bind("csd_wallet_by_id_org_default", TEST_ORG.id, null, PRIVY_CONFIG_ID),
+    getDb(env)
+      .prepare(
+        `INSERT INTO custody_wallets
            (id, custody_config_id, wallet_id, public_key, label, purpose, status)
          VALUES (?, ?, ?, ?, ?, ?, ?)`
-    ).bind(
-      "cwlt_wallet_by_id_privy_a",
-      PRIVY_CONFIG_ID,
-      "privy_wallet_a",
-      TEST_SOLANA_ADDRESSES.wallet1,
-      "Privy Wallet A",
-      "root",
-      "active"
-    ),
-    getDb(env).prepare(
-      `INSERT INTO custody_wallets
+      )
+      .bind(
+        "cwlt_wallet_by_id_privy_a",
+        PRIVY_CONFIG_ID,
+        "privy_wallet_a",
+        TEST_SOLANA_ADDRESSES.wallet1,
+        "Privy Wallet A",
+        "root",
+        "active"
+      ),
+    getDb(env)
+      .prepare(
+        `INSERT INTO custody_wallets
            (id, custody_config_id, wallet_id, public_key, label, purpose, status)
          VALUES (?, ?, ?, ?, ?, ?, ?)`
-    ).bind(
-      "cwlt_wallet_by_id_para_a",
-      PARA_CONFIG_ID,
-      "para_wallet_a",
-      TEST_SOLANA_ADDRESSES.wallet2,
-      "Para Wallet A",
-      "transfer",
-      "active"
-    ),
+      )
+      .bind(
+        "cwlt_wallet_by_id_para_a",
+        PARA_CONFIG_ID,
+        "para_wallet_a",
+        TEST_SOLANA_ADDRESSES.wallet2,
+        "Para Wallet A",
+        "transfer",
+        "active"
+      ),
   ]);
 }
 

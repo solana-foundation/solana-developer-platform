@@ -80,7 +80,10 @@ function buildTransferScopeWhere(params: {
   };
 }
 
-async function getTransferByIdInternal(db: AppDb, transferId: string): Promise<PaymentTransferRow | null> {
+async function getTransferByIdInternal(
+  db: AppDb,
+  transferId: string
+): Promise<PaymentTransferRow | null> {
   const row = await db
     .prepare("SELECT * FROM payment_transfers WHERE id = ?")
     .bind(transferId)

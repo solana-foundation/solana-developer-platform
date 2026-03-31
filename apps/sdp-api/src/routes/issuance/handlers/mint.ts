@@ -1,3 +1,4 @@
+import { getDb } from "@/db";
 import { parseDecimalAmount } from "@/lib/amount";
 import { resolveApiKeySigningWalletId } from "@/lib/api-key-wallet-auth";
 import { getAuth } from "@/lib/auth";
@@ -13,7 +14,6 @@ import type { Env } from "@/types/env";
 import type { Context } from "hono";
 import { mintSchema } from "../schemas";
 import { buildIdempotencyMetadata } from "./idempotency";
-import { getDb } from "@/db";
 import {
   assertTokenAllowsSupplyOperation,
   parsePositiveTokenAmount,
