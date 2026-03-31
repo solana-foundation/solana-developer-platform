@@ -57,7 +57,7 @@ export interface KeychainPrivyConfig {
    * Default wallet identifier. Used when the caller doesn't specify which wallet
    * to use (single-wallet mode / legacy env fallback).
    *
-   * For Privy, SDP stores wallet IDs as `privy_<id>` in D1.
+   * For Privy, SDP stores wallet IDs as `privy_<id>` in the database.
    */
   defaultWalletId?: string;
 }
@@ -86,7 +86,7 @@ export interface KeychainCoinbaseConfig {
    * Default wallet identifier. Used when the caller doesn't specify which wallet
    * to use (single-wallet mode / legacy env fallback).
    *
-   * For Coinbase CDP, SDP stores wallet IDs as `cdp_<address>` in D1.
+   * For Coinbase CDP, SDP stores wallet IDs as `cdp_<address>` in the database.
    */
   defaultWalletId?: string;
 }
@@ -109,7 +109,7 @@ export interface KeychainParaConfig {
    * Default wallet identifier. Used when the caller doesn't specify which wallet
    * to use (single-wallet mode / legacy env fallback).
    *
-   * For Para, SDP stores wallet IDs as `para_<walletId>` in D1.
+   * For Para, SDP stores wallet IDs as `para_<walletId>` in the database.
    */
   defaultWalletId?: string;
 }
@@ -138,7 +138,7 @@ export interface KeychainTurnkeyConfig {
    * Default wallet identifier. Used when the caller doesn't specify which wallet
    * to use (single-wallet mode / legacy env fallback).
    *
-   * For Turnkey, SDP stores wallet IDs as `turnkey_<privateKeyId>` in D1.
+   * For Turnkey, SDP stores wallet IDs as `turnkey_<privateKeyId>` in the database.
    */
   defaultWalletId?: string;
 
@@ -161,7 +161,7 @@ export interface KeychainDfnsConfig {
    * Default wallet identifier. Used when the caller doesn't specify which wallet
    * to use.
    *
-   * For DFNS, SDP stores wallet IDs as `dfns_<walletId>` in D1.
+   * For DFNS, SDP stores wallet IDs as `dfns_<walletId>` in the database.
    */
   defaultWalletId?: string;
 }

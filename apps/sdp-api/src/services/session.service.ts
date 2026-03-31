@@ -2,7 +2,7 @@
  * Session Service
  *
  * Manages user sessions for UI authentication.
- * Sessions are stored in D1 and cached in KV for fast lookups.
+ * Sessions are stored in Postgres and cached in KV for fast lookups.
  */
 
 import type { CachedSession, Permission, Session } from "@sdp/types";
@@ -22,7 +22,7 @@ export interface SessionMetadata {
 
 export class SessionService {
   constructor(
-    private db: D1Database,
+    private db: DatabaseClient,
     private sessionsKV: KVNamespace
   ) {}
 
@@ -52,7 +52,7 @@ export class SessionService {
       lastActivityAt: now.toISOString(),
     };
 
-    // Insert into D1
+    // Persist in Postgres
     await this.db
       .prepare(
         `INSERT INTO sessions (id, user_id, organization_id, auth_method, ip_address, user_agent, expires_at, created_at, last_activity_at)
@@ -85,7 +85,7 @@ export class SessionService {
   }
 
   /**
-   * Get session from cache or D1
+   * Get session from cache or Postgres
    */
   async getSession(sessionId: string): Promise<CachedSession | null> {
     // Try KV cache first
@@ -99,7 +99,7 @@ export class SessionService {
       return cached;
     }
 
-    // Fallback to D1
+    // Fallback to Postgres
     const row = await this.db
       .prepare(
         `SELECT s.id, s.user_id, s.organization_id, s.expires_at, s.revoked_at,
@@ -179,7 +179,7 @@ export class SessionService {
       .bind(userId)
       .all<{ id: string }>();
 
-    // Revoke in D1
+    // Revoke in Postgres
     await this.db
       .prepare("UPDATE sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL")
       .bind(now, userId)

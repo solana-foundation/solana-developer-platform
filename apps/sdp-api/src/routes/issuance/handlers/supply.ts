@@ -7,6 +7,7 @@ import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
 import type { TokenResponse } from "@sdp/types";
 import type { Context } from "hono";
+import { getDb } from "@/db";
 
 type AppContext = Context<{ Bindings: Env }>;
 
@@ -56,7 +57,7 @@ export const refreshTokenSupply = async (c: AppContext) => {
   const { tokenId } = c.req.param();
   const auth = getAuth(c);
 
-  const tokenService = new TokenService(c.env.DB);
+  const tokenService = new TokenService(getDb(c.env));
   const token = await tokenService.getToken(tokenId);
 
   if (!token || token.organizationId !== auth?.organizationId) {
@@ -84,7 +85,7 @@ export const refreshTokenSupply = async (c: AppContext) => {
 
   const refreshedToken = await tokenService.setSupplyFromBaseUnits(tokenId, supplyBaseUnits);
 
-  const auditService = new AuditService(c.env.DB);
+  const auditService = new AuditService(getDb(c.env));
   await auditService.log(c, {
     action: "update",
     resourceType: "token",

@@ -13,6 +13,7 @@ import { resolveTokenAccount } from "@solana/mosaic-sdk";
 import type { Context } from "hono";
 import { burnSchema } from "../schemas";
 import { buildIdempotencyMetadata } from "./idempotency";
+import { getDb } from "@/db";
 import {
   assertTokenAllowsSupplyOperation,
   parsePositiveTokenAmount,
@@ -130,7 +131,7 @@ export const prepareBurn = async (c: AppContext) => {
     });
   }
 
-  const tokenService = new TokenService(c.env.DB);
+  const tokenService = new TokenService(getDb(c.env));
   const token = await tokenService.getToken(tokenId);
 
   if (!token || token.organizationId !== auth?.organizationId) {
@@ -207,7 +208,7 @@ export const prepareBurn = async (c: AppContext) => {
   });
 
   // Audit log
-  const auditService = new AuditService(c.env.DB);
+  const auditService = new AuditService(getDb(c.env));
   await auditService.log(c, {
     action: "burn",
     resourceType: "token_transaction",
@@ -244,7 +245,7 @@ export const executeBurn = async (c: AppContext) => {
     });
   }
 
-  const tokenService = new TokenService(c.env.DB);
+  const tokenService = new TokenService(getDb(c.env));
   const token = await tokenService.getToken(tokenId);
 
   if (!token || token.organizationId !== auth?.organizationId) {
@@ -336,7 +337,7 @@ export const executeBurn = async (c: AppContext) => {
     await tokenService.updateSupply(tokenId, parsed.data.burn.amount, "burn");
 
     // Audit log
-    const auditService = new AuditService(c.env.DB);
+    const auditService = new AuditService(getDb(c.env));
     await auditService.log(c, {
       action: "burn",
       resourceType: "token_transaction",

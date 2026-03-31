@@ -3,8 +3,9 @@ import {
   getTrackedWalletBalancesByOwner,
 } from "@/services/helius-das.service";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/d1";
+import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { getDb } from "@/db";
 
 const TEST_ORG_ID = "org_helius_das";
 const TEST_USER_ID = "usr_helius_das";
@@ -21,14 +22,14 @@ describe("helius-das service", () => {
     env.SOLANA_RPC_HELIUS_URL = "https://helius.test/?api-key={API_KEY}";
     env.SOLANA_RPC_HELIUS_API_KEY = "helius_test_key";
 
-    await env.DB.batch([
-      env.DB.prepare(
+    await getDb(env).batch([
+      getDb(env).prepare(
         "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)"
       ).bind(TEST_ORG_ID, "Helius DAS Org", "helius-das-org", "free", "active"),
-      env.DB.prepare(
+      getDb(env).prepare(
         "INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)"
       ).bind(TEST_USER_ID, "helius-das@example.com", 1, "active"),
-      env.DB.prepare(
+      getDb(env).prepare(
         `INSERT INTO projects
              (id, organization_id, name, slug, environment, status, created_by)
            VALUES (?, ?, ?, ?, ?, ?, ?)`
@@ -41,7 +42,7 @@ describe("helius-das service", () => {
         "active",
         TEST_USER_ID
       ),
-      env.DB.prepare(
+      getDb(env).prepare(
         `INSERT INTO issued_tokens
              (id, project_id, organization_id, mint_address, name, symbol, decimals, template, status, deployed_at, created_by)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`

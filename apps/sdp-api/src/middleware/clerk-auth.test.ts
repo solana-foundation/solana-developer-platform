@@ -1,8 +1,9 @@
+import { getDb } from "@/db";
 import type { ClerkJwtPayload } from "@/lib/clerk-token";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import { rateLimitMiddleware } from "@/middleware/rate-limit";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/d1";
+import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVNamespaces } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
 import { Hono } from "hono";
@@ -28,8 +29,8 @@ describe("Clerk auth request cache", () => {
   beforeEach(async () => {
     await seedTestDatabase(env);
 
-    await env.DB.batch([
-      env.DB.prepare(
+    await getDb(env).batch([
+      getDb(env).prepare(
         `CREATE TABLE IF NOT EXISTS auth_user_identities (
            id TEXT PRIMARY KEY,
            provider TEXT NOT NULL,
@@ -38,7 +39,7 @@ describe("Clerk auth request cache", () => {
            email TEXT
          )`
       ),
-      env.DB.prepare(
+      getDb(env).prepare(
         `CREATE TABLE IF NOT EXISTS auth_organization_identities (
            id TEXT PRIMARY KEY,
            provider TEXT NOT NULL,
@@ -49,30 +50,36 @@ describe("Clerk auth request cache", () => {
       ),
     ]);
 
-    await env.DB.batch([
-      env.DB.prepare(
-        "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)"
-      ).bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, TEST_ORG.tier, TEST_ORG.status),
-      env.DB.prepare(
-        "INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')"
-      ).bind("usr_clerk_cached", "clerk-cache@example.com"),
-      env.DB.prepare(
-        `INSERT INTO auth_user_identities (id, provider, provider_user_id, user_id, email)
+    await getDb(env).batch([
+      getDb(env)
+        .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
+        .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, TEST_ORG.tier, TEST_ORG.status),
+      getDb(env)
+        .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
+        .bind("usr_clerk_cached", "clerk-cache@example.com"),
+      getDb(env)
+        .prepare(
+          `INSERT INTO auth_user_identities (id, provider, provider_user_id, user_id, email)
          VALUES (?, 'clerk', ?, ?, ?)`
-      ).bind(
-        "aui_clerk_cached",
-        "clerk_user_cached",
-        "usr_clerk_cached",
-        "clerk-cache@example.com"
-      ),
-      env.DB.prepare(
-        `INSERT INTO auth_organization_identities (id, provider, provider_org_id, organization_id, slug)
+        )
+        .bind(
+          "aui_clerk_cached",
+          "clerk_user_cached",
+          "usr_clerk_cached",
+          "clerk-cache@example.com"
+        ),
+      getDb(env)
+        .prepare(
+          `INSERT INTO auth_organization_identities (id, provider, provider_org_id, organization_id, slug)
          VALUES (?, 'clerk', ?, ?, ?)`
-      ).bind("aoi_clerk_cached", "clerk_org_cached", TEST_ORG.id, TEST_ORG.slug),
-      env.DB.prepare(
-        `INSERT INTO organization_members (id, organization_id, user_id, role, status)
+        )
+        .bind("aoi_clerk_cached", "clerk_org_cached", TEST_ORG.id, TEST_ORG.slug),
+      getDb(env)
+        .prepare(
+          `INSERT INTO organization_members (id, organization_id, user_id, role, status)
          VALUES (?, ?, ?, 'admin', 'active')`
-      ).bind("mem_clerk_cached", TEST_ORG.id, "usr_clerk_cached"),
+        )
+        .bind("mem_clerk_cached", TEST_ORG.id, "usr_clerk_cached"),
     ]);
   });
 

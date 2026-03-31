@@ -31,7 +31,7 @@ on:
         type: string
         required: false
       run_migrations:
-        description: "Run D1 migrations before deploy"
+        description: "Run Postgres migrations before deploy"
         type: boolean
         default: false
         required: false
@@ -98,14 +98,16 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
-      - name: Migrate D1
+      - name: Migrate Postgres
         if: ${{ github.event_name == 'push' || inputs.run_migrations }}
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          workingDirectory: apps/sdp-api
-          command: d1 migrations apply DB --env ${{ env.TARGET_ENV }} --remote
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          if [ -z "${DATABASE_URL}" ]; then
+            echo "DATABASE_URL is not configured for ${TARGET_ENV}; skipping Postgres migrations."
+            exit 0
+          fi
+          pnpm --filter @sdp/api db:migrate:${TARGET_ENV}
 
       - name: Deploy Worker
         uses: cloudflare/wrangler-action@v3

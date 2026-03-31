@@ -12,6 +12,7 @@ import type { Context } from "hono";
 import { forceBurnSchema } from "../schemas";
 import { resolveAuthoritySigner, resolvePermanentDelegateAuthority } from "./authority-resolution";
 import { buildIdempotencyMetadata } from "./idempotency";
+import { getDb } from "@/db";
 
 type AppContext = Context<{ Bindings: Env }>;
 
@@ -28,7 +29,7 @@ export const prepareForceBurn = async (c: AppContext) => {
     });
   }
 
-  const tokenService = new TokenService(c.env.DB);
+  const tokenService = new TokenService(getDb(c.env));
   const token = await tokenService.getToken(tokenId);
 
   if (!token || token.organizationId !== auth?.organizationId) {
@@ -96,7 +97,7 @@ export const prepareForceBurn = async (c: AppContext) => {
     initiatedByKeyId: auth.id,
   });
 
-  const auditService = new AuditService(c.env.DB);
+  const auditService = new AuditService(getDb(c.env));
   await auditService.log(c, {
     action: "force_burn",
     resourceType: "token_transaction",
@@ -134,7 +135,7 @@ export const executeForceBurn = async (c: AppContext) => {
     });
   }
 
-  const tokenService = new TokenService(c.env.DB);
+  const tokenService = new TokenService(getDb(c.env));
   const token = await tokenService.getToken(tokenId);
 
   if (!token || token.organizationId !== auth?.organizationId) {
@@ -216,7 +217,7 @@ export const executeForceBurn = async (c: AppContext) => {
 
     await tokenService.updateSupply(tokenId, parsed.data.forceBurn.amount, "burn");
 
-    const auditService = new AuditService(c.env.DB);
+    const auditService = new AuditService(getDb(c.env));
     await auditService.log(c, {
       action: "force_burn",
       resourceType: "token_transaction",

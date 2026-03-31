@@ -7,17 +7,17 @@ import {
 import { getAuth } from "@/lib/auth";
 import { AppError } from "@/lib/errors";
 import { created, success } from "@/lib/response";
-import { SOL_MINT, getSplTokenBalances } from "@/routes/payments/token-accounts";
+import * as tokenAccounts from "@/routes/payments/token-accounts";
 import { AuditService } from "@/services/audit.service";
 import { CUSTODY_PROVIDERS, type CustodyProvider } from "@/services/custody/providers";
-import { createSigningService } from "@/services/domain/signing.service";
+import * as signingServiceModule from "@/services/domain/signing.service";
 import {
   aggregateTrackedWalletBalances,
   attachUsdValuesToBalanceMap,
   attachUsdValuesToBalances,
 } from "@/services/helius-das.service";
 import { SigningError } from "@/services/ports";
-import { createRpc, getAccountInfo } from "@/services/solana/rpc";
+import * as solanaRpc from "@/services/solana/rpc";
 import type {
   CustodyWalletAggregate,
   CustodyWalletSummary,
@@ -25,6 +25,7 @@ import type {
 } from "@sdp/types";
 import type { Address } from "@solana/kit";
 import { type AppContext, parseBooleanQueryParam, resolveActor } from "../context";
+import { getDb } from "@/db";
 import {
   type CustodyWalletAggregateResponse,
   type CustodyWalletByIdResponse,
@@ -117,7 +118,7 @@ function logWalletStep(
 }
 
 async function resolveDefaultConfigId(
-  db: D1Database,
+  db: DatabaseClient,
   organizationId: string,
   projectId?: string
 ): Promise<string | null> {
@@ -156,7 +157,7 @@ async function resolveSummaryConfigIds(
 ): Promise<{ configIds: string[]; defaultConfigId: string | null }> {
   const actor = resolveActor(c);
   const defaultConfigId = await resolveDefaultConfigId(
-    c.env.DB,
+    getDb(c.env),
     actor.organizationId,
     filters.projectId
   );
@@ -178,7 +179,7 @@ async function resolveSummaryConfigIds(
            ${filters.provider ? "AND provider = ?" : ""}
          ORDER BY updated_at DESC, id DESC`;
 
-    const rows = await c.env.DB.prepare(includeAllProvidersQuery)
+    const rows = await getDb(c.env).prepare(includeAllProvidersQuery)
       .bind(
         ...(filters.projectId
           ? filters.provider
@@ -198,7 +199,7 @@ async function resolveSummaryConfigIds(
 
   if (filters.provider) {
     const providerRow = filters.projectId
-      ? await c.env.DB.prepare(
+      ? await getDb(c.env).prepare(
           `SELECT id
            FROM custody_configs
            WHERE organization_id = ?
@@ -210,7 +211,7 @@ async function resolveSummaryConfigIds(
         )
           .bind(actor.organizationId, filters.provider, filters.projectId, filters.projectId)
           .first<WalletSummaryConfigRow>()
-      : await c.env.DB.prepare(
+      : await getDb(c.env).prepare(
           `SELECT id
            FROM custody_configs
            WHERE organization_id = ?
@@ -254,7 +255,7 @@ async function queryWalletSummaries(
       ? `AND w.wallet_id IN (${allowedWalletIds.map(() => "?").join(", ")})`
       : "";
 
-  const rows = await c.env.DB.prepare(
+  const rows = await getDb(c.env).prepare(
     `SELECT
        w.id,
        w.custody_config_id,
@@ -371,7 +372,7 @@ async function getBalancesByWalletId(
   walletPublicKeys: Array<{ walletId: string; publicKey: string }>,
   options: { includeUsdValues?: boolean } = {}
 ) {
-  const rpc = createRpc(c.env);
+  const rpc = solanaRpc.createRpc(c.env);
   const balancesByWalletId = await Promise.all(
     walletPublicKeys.map(async (wallet) => {
       const cachedBalances = readCache(walletBalanceCache, wallet.publicKey);
@@ -380,8 +381,8 @@ async function getBalancesByWalletId(
       }
 
       const [solBalanceResult, splBalancesResult] = await Promise.allSettled([
-        getAccountInfo(rpc, wallet.publicKey as Address),
-        getSplTokenBalances(rpc, wallet.publicKey as Address),
+        solanaRpc.getAccountInfo(rpc, wallet.publicKey as Address),
+        tokenAccounts.getSplTokenBalances(rpc, wallet.publicKey as Address),
       ]);
       const lamports =
         solBalanceResult.status === "fulfilled" ? (solBalanceResult.value?.lamports ?? 0n) : 0n;
@@ -419,7 +420,7 @@ async function getBalancesByWalletId(
         [
           {
             token: "SOL",
-            mint: SOL_MINT,
+            mint: tokenAccounts.SOL_MINT,
             amount: lamports.toString(),
             uiAmount: formatDecimalAmount(lamports, 9),
             decimals: 9,
@@ -454,7 +455,7 @@ export const createWallet = async (c: AppContext) => {
     });
   }
 
-  const signingService = createSigningService(c.env);
+  const signingService = signingServiceModule.createSigningService(c.env);
 
   try {
     const wallet = await signingService.createWallet(actor.organizationId, parsed.data.projectId, {
@@ -503,7 +504,7 @@ export const deleteWallet = async (c: AppContext) => {
   }
 
   const projectId = parsed.data.projectId ?? actor.projectId;
-  const signingService = createSigningService(c.env);
+  const signingService = signingServiceModule.createSigningService(c.env);
 
   try {
     await signingService.deleteWallet(actor.organizationId, projectId, {
@@ -511,7 +512,7 @@ export const deleteWallet = async (c: AppContext) => {
       walletId: parsed.data.walletId,
     });
 
-    const auditService = new AuditService(c.env.DB);
+    const auditService = new AuditService(getDb(c.env));
     await auditService.log(c, {
       action: "delete",
       resourceType: "custody_wallet",
@@ -556,7 +557,7 @@ export const setDefaultWallet = async (c: AppContext) => {
   }
 
   const projectId = parsed.data.projectId ?? undefined;
-  const signingService = createSigningService(c.env);
+  const signingService = signingServiceModule.createSigningService(c.env);
   const config = parsed.data.provider
     ? await signingService.getConfigurationByProvider(
         actor.organizationId,
@@ -569,7 +570,7 @@ export const setDefaultWallet = async (c: AppContext) => {
     throw new AppError("CONFLICT", "Wallet signing is not initialized");
   }
 
-  const wallet = await c.env.DB.prepare(
+  const wallet = await getDb(c.env).prepare(
     `SELECT id
      FROM custody_wallets
      WHERE custody_config_id = ? AND wallet_id = ? AND status = 'active'
@@ -582,7 +583,7 @@ export const setDefaultWallet = async (c: AppContext) => {
     throw new AppError("BAD_REQUEST", "Unknown walletId for this wallet signing configuration");
   }
 
-  await c.env.DB.prepare(
+  await getDb(c.env).prepare(
     `UPDATE custody_configs
      SET default_wallet_id = ?, updated_at = datetime('now')
      WHERE id = ?`
@@ -590,7 +591,7 @@ export const setDefaultWallet = async (c: AppContext) => {
     .bind(parsed.data.walletId, config.id)
     .run();
 
-  const auditService = new AuditService(c.env.DB);
+  const auditService = new AuditService(getDb(c.env));
   await auditService.log(c, {
     action: "update",
     resourceType: "custody_config",
@@ -627,7 +628,7 @@ export const updateWallet = async (c: AppContext) => {
     });
   }
 
-  const signingService = createSigningService(c.env);
+  const signingService = signingServiceModule.createSigningService(c.env);
   const wallet = await signingService.getWalletById(actor.organizationId, projectId, walletId);
 
   if (!wallet) {
@@ -645,7 +646,7 @@ export const updateWallet = async (c: AppContext) => {
 
   const nextLabel = parsed.data.label?.trim() ? parsed.data.label.trim() : null;
 
-  await c.env.DB.prepare(
+  await getDb(c.env).prepare(
     `UPDATE custody_wallets
      SET label = ?, updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ','now')
      WHERE id = ?`
@@ -653,7 +654,7 @@ export const updateWallet = async (c: AppContext) => {
     .bind(nextLabel, wallet.id)
     .run();
 
-  const auditService = new AuditService(c.env.DB);
+  const auditService = new AuditService(getDb(c.env));
   await auditService.log(c, {
     action: "update",
     resourceType: "custody_wallet",
@@ -796,7 +797,7 @@ export const getWalletById = async (c: AppContext) => {
     throw new AppError("BAD_REQUEST", "Invalid wallet ID");
   }
 
-  const signingService = createSigningService(c.env);
+  const signingService = signingServiceModule.createSigningService(c.env);
   const wallet = await signingService.getWalletById(actor.organizationId, projectId, walletId);
 
   if (!wallet) {
@@ -815,8 +816,8 @@ export const getWalletById = async (c: AppContext) => {
   let lamports = 0n;
 
   try {
-    const rpc = createRpc(c.env);
-    const accountInfo = await getAccountInfo(rpc, wallet.publicKey as Address);
+    const rpc = solanaRpc.createRpc(c.env);
+    const accountInfo = await solanaRpc.getAccountInfo(rpc, wallet.publicKey as Address);
     lamports = accountInfo?.lamports ?? 0n;
   } catch (error) {
     console.error("getWalletById: failed to fetch wallet balance", {
@@ -829,7 +830,7 @@ export const getWalletById = async (c: AppContext) => {
 
   const solBalance = {
     token: "SOL" as const,
-    mint: SOL_MINT,
+    mint: tokenAccounts.SOL_MINT,
     amount: lamports.toString(),
     uiAmount: formatDecimalAmount(lamports, 9),
     decimals: 9 as const,
@@ -872,7 +873,7 @@ export const getPublicKey = async (c: AppContext) => {
   const projectId = c.req.query("projectId");
   const requestedWalletId = c.req.query("walletId");
 
-  const signingService = createSigningService(c.env);
+  const signingService = signingServiceModule.createSigningService(c.env);
 
   try {
     const walletId = resolveApiKeySigningWalletId(auth, requestedWalletId, ["wallets:read"]);

@@ -13,6 +13,7 @@ import type { Env } from "@/types/env";
 import type { Context } from "hono";
 import { mintSchema } from "../schemas";
 import { buildIdempotencyMetadata } from "./idempotency";
+import { getDb } from "@/db";
 import {
   assertTokenAllowsSupplyOperation,
   parsePositiveTokenAmount,
@@ -33,7 +34,7 @@ export const prepareMint = async (c: AppContext) => {
     });
   }
 
-  const tokenService = new TokenService(c.env.DB);
+  const tokenService = new TokenService(getDb(c.env));
   const token = await tokenService.getToken(tokenId);
 
   if (!token || token.organizationId !== auth?.organizationId) {
@@ -122,7 +123,7 @@ export const prepareMint = async (c: AppContext) => {
   });
 
   // Audit log
-  const auditService = new AuditService(c.env.DB);
+  const auditService = new AuditService(getDb(c.env));
   await auditService.log(c, {
     action: "mint",
     resourceType: "token_transaction",
@@ -160,7 +161,7 @@ export const executeMint = async (c: AppContext) => {
     });
   }
 
-  const tokenService = new TokenService(c.env.DB);
+  const tokenService = new TokenService(getDb(c.env));
   const token = await tokenService.getToken(tokenId);
 
   if (!token || token.organizationId !== auth?.organizationId) {
@@ -267,7 +268,7 @@ export const executeMint = async (c: AppContext) => {
     await tokenService.updateSupply(tokenId, parsed.data.mint.amount, "mint");
 
     // Audit log
-    const auditService = new AuditService(c.env.DB);
+    const auditService = new AuditService(getDb(c.env));
     await auditService.log(c, {
       action: "mint",
       resourceType: "token_transaction",

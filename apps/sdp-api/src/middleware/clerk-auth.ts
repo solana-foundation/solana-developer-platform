@@ -20,8 +20,9 @@ import {
   normalizeOrganizationRole,
 } from "@sdp/types";
 import type { Context, Next } from "hono";
+import { getDb } from "@/db";
 
-async function resolveClerkUser(db: D1Database, clerkUserId: string) {
+async function resolveClerkUser(db: DatabaseClient, clerkUserId: string) {
   return db
     .prepare(
       `SELECT user_id, email
@@ -32,7 +33,7 @@ async function resolveClerkUser(db: D1Database, clerkUserId: string) {
     .first<{ user_id: string; email: string | null }>();
 }
 
-async function resolveClerkOrganization(db: D1Database, clerkOrgId: string) {
+async function resolveClerkOrganization(db: DatabaseClient, clerkOrgId: string) {
   return db
     .prepare(
       `SELECT organization_id, slug
@@ -44,7 +45,7 @@ async function resolveClerkOrganization(db: D1Database, clerkOrgId: string) {
 }
 
 async function resolveExistingClerkContext(
-  db: D1Database,
+  db: DatabaseClient,
   params: {
     clerkUserId: string;
     clerkOrgId: string;
@@ -87,7 +88,7 @@ async function resolveExistingClerkContext(
     }>();
 }
 
-async function resolveOrgRole(db: D1Database, userId: string, organizationId: string) {
+async function resolveOrgRole(db: DatabaseClient, userId: string, organizationId: string) {
   return db
     .prepare(
       `SELECT role
@@ -99,7 +100,7 @@ async function resolveOrgRole(db: D1Database, userId: string, organizationId: st
 }
 
 async function ensureClerkUser(
-  db: D1Database,
+  db: DatabaseClient,
   clerkUserId: string,
   email: string
 ): Promise<{ userId: string; email: string }> {
@@ -119,30 +120,36 @@ async function ensureClerkUser(
     await db
       .prepare(
         `INSERT INTO users (id, email, email_verified, status)
-         VALUES (?, ?, 1, 'active')`
+         VALUES (?, ?, 1, 'active')
+         ON CONFLICT (email) DO NOTHING`
       )
       .bind(userId, normalizedEmail)
       .run();
-    user = { id: userId, email: normalizedEmail };
+    user = await db
+      .prepare("SELECT id, email FROM users WHERE email = ?")
+      .bind(normalizedEmail)
+      .first<{ id: string; email: string }>();
   }
 
-  try {
-    await db
-      .prepare(
-        `INSERT INTO auth_user_identities (id, provider, provider_user_id, user_id, email)
-         VALUES (?, 'clerk', ?, ?, ?)`
-      )
-      .bind(`aui_${crypto.randomUUID()}`, clerkUserId, user.id, normalizedEmail)
-      .run();
-  } catch {
-    // Ignore if another request created the mapping
+  if (!user) {
+    throw new AppError("INTERNAL_ERROR", "Unable to resolve Clerk user");
   }
+
+  await db
+    .prepare(
+      `INSERT INTO auth_user_identities (id, provider, provider_user_id, user_id, email)
+       VALUES (?, 'clerk', ?, ?, ?)
+       ON CONFLICT (provider, provider_user_id)
+       DO UPDATE SET user_id = EXCLUDED.user_id, email = EXCLUDED.email, updated_at = sdp_datetime_now()`
+    )
+    .bind(`aui_${crypto.randomUUID()}`, clerkUserId, user.id, normalizedEmail)
+    .run();
 
   return { userId: user.id, email: user.email };
 }
 
 async function ensureMembership(
-  db: D1Database,
+  db: DatabaseClient,
   params: {
     organizationId: string;
     userId: string;
@@ -234,7 +241,7 @@ async function buildClerkContext(c: Context<{ Bindings: Env }>, payload: ClerkJw
     throw new AppError("UNAUTHORIZED", "Clerk token missing email");
   }
 
-  const existingContext = await resolveExistingClerkContext(c.env.DB, {
+  const existingContext = await resolveExistingClerkContext(getDb(c.env), {
     clerkUserId: payload.sub as string,
     clerkOrgId: payload.org_id as string,
     fallbackEmail: email,
@@ -245,7 +252,7 @@ async function buildClerkContext(c: Context<{ Bindings: Env }>, payload: ClerkJw
     const role = normalizeOrganizationRole(existingContext.role);
 
     if (role !== existingContext.role) {
-      await c.env.DB.prepare(
+      await getDb(c.env).prepare(
         `UPDATE organization_members
            SET role = ?
            WHERE user_id = ? AND organization_id = ? AND status = 'active'`
@@ -268,15 +275,15 @@ async function buildClerkContext(c: Context<{ Bindings: Env }>, payload: ClerkJw
   }
 
   const [userIdentity, orgIdentity] = await Promise.all([
-    ensureClerkUser(c.env.DB, payload.sub as string, email),
-    resolveClerkOrganization(c.env.DB, payload.org_id as string),
+    ensureClerkUser(getDb(c.env), payload.sub as string, email),
+    resolveClerkOrganization(getDb(c.env), payload.org_id as string),
   ]);
 
   if (!orgIdentity) {
     throw new AppError("UNAUTHORIZED", "Clerk organization is not linked");
   }
 
-  const role = await ensureMembership(c.env.DB, {
+  const role = await ensureMembership(getDb(c.env), {
     organizationId: orgIdentity.organization_id,
     userId: userIdentity.userId,
     email,

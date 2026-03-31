@@ -18,6 +18,7 @@ import {
 } from "@/services/ports";
 import type { Env } from "@/types/env";
 import type { Address } from "@solana/kit";
+import { getDb } from "@/db";
 import {
   type ProviderConfigRecord,
   parseConfigRecord,
@@ -193,7 +194,7 @@ const providerAdapterFactories = {
 
     let defaultWalletPublicKey = parsed.defaultWalletPublicKey ?? env.TURNKEY_PUBLIC_KEY;
     if (!defaultWalletPublicKey && defaultWalletId) {
-      const wallet = await env.DB.prepare(
+      const wallet = await getDb(env).prepare(
         `SELECT public_key
          FROM custody_wallets
          WHERE custody_config_id = ? AND wallet_id = ? AND status = 'active'

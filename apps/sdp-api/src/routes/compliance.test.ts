@@ -2,10 +2,11 @@ import app from "@/index";
 import { hashString } from "@/lib/hash";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/d1";
+import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVNamespaces, seedCachedApiKey } from "@/test/mocks/kv";
 import type { CachedApiKey } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { getDb } from "@/db";
 
 const TEST_ORG = {
   id: "org_compliance_test",
@@ -50,14 +51,14 @@ async function seedAuth(): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
   await seedCachedApiKey(env, keyHash, TEST_CACHED_API_KEY);
 
-  await env.DB.batch([
-    env.DB.prepare(
+  await getDb(env).batch([
+    getDb(env).prepare(
       "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)"
     ).bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, "free", "active"),
-    env.DB.prepare(
+    getDb(env).prepare(
       "INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)"
     ).bind(TEST_USER.id, TEST_USER.email, 1, "active"),
-    env.DB.prepare(
+    getDb(env).prepare(
       `INSERT INTO api_keys
            (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, environment, status)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`

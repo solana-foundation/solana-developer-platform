@@ -1,3 +1,4 @@
+import { getDb } from "@/db";
 import { AppError } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { createSigningService } from "@/services/domain/signing.service";
@@ -15,7 +16,7 @@ export const getConfig = async (c: AppContext) => {
     throw new AppError("NOT_FOUND", "No wallet signing configuration found for this organization");
   }
 
-  const wallet = await getPreferredWalletForConfig(c.env.DB, config.id, config.defaultWalletId);
+  const wallet = await getPreferredWalletForConfig(getDb(c.env), config.id, config.defaultWalletId);
   if (!wallet) {
     throw new AppError("INTERNAL_ERROR", "Active provider is missing an active wallet");
   }
@@ -49,7 +50,7 @@ export const getConfigs = async (c: AppContext) => {
     await Promise.all(
       configs.map(async (config) => {
         const wallet = await getPreferredWalletForConfig(
-          c.env.DB,
+          getDb(c.env),
           config.id,
           config.defaultWalletId
         );

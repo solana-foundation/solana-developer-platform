@@ -33,6 +33,8 @@ const getEnv = (key: string, fallback?: string) => process.env[key] ?? fileEnv[k
 
 const custodyEncryptionKey =
   getEnv("CUSTODY_ENCRYPTION_KEY") ?? Buffer.alloc(32).toString("base64");
+// biome-ignore lint/nursery/noSecrets: Local Docker Postgres fallback for isolated integration tests.
+const databaseUrl = getEnv("DATABASE_URL", "postgresql://sdp:sdp@127.0.0.1:5432/sdp");
 const koraRpcUrl = getEnv("KORA_RPC_URL");
 const koraApiKey = getEnv("KORA_API_KEY");
 const koraTimeoutMs = getEnv("KORA_TIMEOUT_MS");
@@ -65,6 +67,7 @@ export default defineWorkersConfig({
   test: {
     globals: true,
     setupFiles: ["src/setup.ts"],
+    fileParallelism: false,
     poolOptions: {
       workers: {
         singleWorker: true,
@@ -76,6 +79,7 @@ export default defineWorkersConfig({
           bindings: {
             ENVIRONMENT: "development",
             API_VERSION: "v1",
+            HYPERDRIVE: { connectionString: databaseUrl },
             RUN_INTEGRATION_TESTS: "true",
             SOLANA_MOCK: "false",
             API_KEY_PEPPER: getEnv("API_KEY_PEPPER", "test-pepper-for-integration"),

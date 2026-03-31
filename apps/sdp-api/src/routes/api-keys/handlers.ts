@@ -20,6 +20,7 @@ import type {
 } from "@sdp/types";
 import type { Context } from "hono";
 import { apiKeyCreateSchema, apiKeyRotateSchema, apiKeyUpdateSchema } from "./schemas";
+import { getDb } from "@/db";
 import {
   assertWalletBindingsInScope,
   resolveCreateWalletScope,
@@ -71,7 +72,7 @@ export const listApiKeys = async (c: AppContext) => {
   const actor = resolveActor(c);
   const orgId = actor.organizationId;
 
-  const apiKeyService = new ApiKeyService(c.env.DB);
+  const apiKeyService = new ApiKeyService(getDb(c.env));
   const apiKeys = await apiKeyService.listForOrganization(orgId);
 
   const response: ListApiKeysResponse = {
@@ -162,7 +163,7 @@ export const createApiKey = async (c: AppContext) => {
       throw error;
     }
   } else {
-    await assertWalletBindingsInScope(c.env.DB, orgId, null, resolvedWalletBindings);
+    await assertWalletBindingsInScope(getDb(c.env), orgId, null, resolvedWalletBindings);
   }
 
   const resolveCreatorFallback = async (): Promise<string | null> => {
@@ -174,7 +175,7 @@ export const createApiKey = async (c: AppContext) => {
       return null;
     }
 
-    const creator = await c.env.DB.prepare(
+    const creator = await getDb(c.env).prepare(
       `SELECT created_by
        FROM api_keys
        WHERE id = ? AND organization_id = ?`
@@ -186,7 +187,7 @@ export const createApiKey = async (c: AppContext) => {
       return creator.created_by;
     }
 
-    const orgOwner = await c.env.DB.prepare(
+    const orgOwner = await getDb(c.env).prepare(
       `SELECT user_id
        FROM organization_members
        WHERE organization_id = ? AND role IN ('admin', 'owner')
@@ -205,7 +206,7 @@ export const createApiKey = async (c: AppContext) => {
     throw new AppError("UNAUTHORIZED", "Could not resolve authenticated user for API key creation");
   }
 
-  const apiKeyService = new ApiKeyService(c.env.DB);
+  const apiKeyService = new ApiKeyService(getDb(c.env));
   const createdKey = await apiKeyService.createApiKey({
     organizationId: orgId,
     createdByUserId: createdBy,
@@ -222,11 +223,11 @@ export const createApiKey = async (c: AppContext) => {
   });
 
   if (resolvedWalletBindings.length > 0) {
-    await replaceApiKeyWalletBindings(c.env.DB, createdKey.id, resolvedWalletBindings);
+    await replaceApiKeyWalletBindings(getDb(c.env), createdKey.id, resolvedWalletBindings);
   }
 
   // Audit log
-  const auditService = new AuditService(c.env.DB);
+  const auditService = new AuditService(getDb(c.env));
   await auditService.log(c, {
     action: "create",
     resourceType: "api_key",
@@ -262,14 +263,14 @@ export const getApiKey = async (c: AppContext) => {
   const { keyId } = c.req.param();
   const actor = resolveActor(c);
 
-  const apiKeyService = new ApiKeyService(c.env.DB);
+  const apiKeyService = new ApiKeyService(getDb(c.env));
   const key = await apiKeyService.getDetails(keyId, actor.organizationId);
 
   if (!key) {
     throw notFound("API key");
   }
 
-  const walletBindings = await listApiKeyWalletBindings(c.env.DB, key.id);
+  const walletBindings = await listApiKeyWalletBindings(getDb(c.env), key.id);
 
   return success(c, {
     id: key.id,
@@ -308,7 +309,7 @@ export const updateApiKey = async (c: AppContext) => {
   }
 
   // Verify key belongs to this organization
-  const existing = await c.env.DB.prepare(
+  const existing = await getDb(c.env).prepare(
     "SELECT id, key_hash, project_id FROM api_keys WHERE id = ? AND organization_id = ?"
   )
     .bind(keyId, actor.organizationId)
@@ -362,7 +363,7 @@ export const updateApiKey = async (c: AppContext) => {
 
   if (walletSelection.touched) {
     await assertWalletBindingsInScope(
-      c.env.DB,
+      getDb(c.env),
       actor.organizationId,
       existing.project_id,
       walletSelection.bindings
@@ -376,12 +377,12 @@ export const updateApiKey = async (c: AppContext) => {
   }
 
   values.push(keyId);
-  await c.env.DB.prepare(`UPDATE api_keys SET ${updates.join(", ")} WHERE id = ?`)
+  await getDb(c.env).prepare(`UPDATE api_keys SET ${updates.join(", ")} WHERE id = ?`)
     .bind(...values)
     .run();
 
   if (walletSelection.touched) {
-    await replaceApiKeyWalletBindings(c.env.DB, keyId, walletSelection.bindings);
+    await replaceApiKeyWalletBindings(getDb(c.env), keyId, walletSelection.bindings);
   }
 
   // Invalidate cache if auth-relevant fields changed
@@ -395,7 +396,7 @@ export const updateApiKey = async (c: AppContext) => {
   }
 
   // Audit log
-  const auditService = new AuditService(c.env.DB);
+  const auditService = new AuditService(getDb(c.env));
   await auditService.log(c, {
     action: "update",
     resourceType: "api_key",
@@ -426,7 +427,7 @@ export const rotateApiKey = async (c: AppContext) => {
 
   const gracePeriodHours = parsed.data.gracePeriodHours ?? 24;
 
-  const apiKeyService = new ApiKeyService(c.env.DB);
+  const apiKeyService = new ApiKeyService(getDb(c.env));
   const rotation = await apiKeyService.rotateApiKey(
     keyId,
     actor.organizationId,
@@ -443,7 +444,7 @@ export const rotateApiKey = async (c: AppContext) => {
   await kvService.deleteApiKey(rotation.previousKeyHash);
 
   // Audit log
-  const auditService = new AuditService(c.env.DB);
+  const auditService = new AuditService(getDb(c.env));
   await auditService.log(c, {
     action: "update",
     resourceType: "api_key",
@@ -476,7 +477,7 @@ export const revokeApiKey = async (c: AppContext) => {
       ? String((body as { confirmation: string }).confirmation).trim()
       : "";
 
-  const existing = await c.env.DB.prepare(
+  const existing = await getDb(c.env).prepare(
     "SELECT id, name, status, revoked_at FROM api_keys WHERE id = ? AND organization_id = ?"
   )
     .bind(keyId, actor.organizationId)
@@ -501,7 +502,7 @@ export const revokeApiKey = async (c: AppContext) => {
     throw new AppError("BAD_REQUEST", "Confirmation did not match the key name");
   }
 
-  const apiKeyService = new ApiKeyService(c.env.DB);
+  const apiKeyService = new ApiKeyService(getDb(c.env));
   const revokedKey = await apiKeyService.revokeApiKey(keyId, actor.organizationId);
 
   if (!revokedKey) {
@@ -513,7 +514,7 @@ export const revokeApiKey = async (c: AppContext) => {
   await kvService.deleteApiKey(revokedKey.keyHash);
 
   // Audit log
-  const auditService = new AuditService(c.env.DB);
+  const auditService = new AuditService(getDb(c.env));
   await auditService.log(c, {
     action: "delete",
     resourceType: "api_key",

@@ -1,3 +1,4 @@
+import { getDb } from "@/db";
 import { AppError, notFound } from "@/lib/errors";
 import { created, noContent, success } from "@/lib/response";
 import { createAllowlistService } from "@/services/allowlist.service";
@@ -30,7 +31,7 @@ export const addEntry = async (c: AppContext) => {
   }
 
   const allowlistService = createAllowlistService(c.env);
-  const auditService = new AuditService(c.env.DB);
+  const auditService = new AuditService(getDb(c.env));
 
   try {
     const entry = await allowlistService.addEntry({
@@ -61,7 +62,7 @@ export const removeEntry = async (c: AppContext) => {
   const { id } = c.req.param();
 
   const allowlistService = createAllowlistService(c.env);
-  const auditService = new AuditService(c.env.DB);
+  const auditService = new AuditService(getDb(c.env));
 
   const existing = await allowlistService.getEntry(id);
   if (!existing) {

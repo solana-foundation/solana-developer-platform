@@ -47,7 +47,7 @@ describe("anchorage wallet provisioning", () => {
 
 function createAnchorageEnv(overrides?: Partial<Env>): Env {
   return {
-    DB: {} as D1Database,
+    DB: {} as DatabaseClient,
     ENVIRONMENT: "development",
     API_VERSION: "v1",
     CUSTODY_ENCRYPTION_KEY: "unused",

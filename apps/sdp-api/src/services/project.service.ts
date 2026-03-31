@@ -44,7 +44,7 @@ export class ProjectServiceError extends Error {
 }
 
 export class ProjectService {
-  constructor(private db: D1Database) {}
+  constructor(private db: DatabaseClient) {}
 
   // ═══════════════════════════════════════════════════════════════════════════
   // Project CRUD

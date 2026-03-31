@@ -14,6 +14,7 @@ import type { Context } from "hono";
 import { requireProjectScope } from "../helpers";
 import { createTokenSchema, updateTokenSchema } from "../schemas";
 import { resolveAuthoritySigner, resolveCurrentAuthorityForRole } from "./authority-resolution";
+import { getDb } from "@/db";
 
 type AppContext = Context<{ Bindings: Env }>;
 
@@ -72,7 +73,7 @@ export const createToken = async (c: AppContext) => {
     });
   }
 
-  const tokenService = new TokenService(c.env.DB);
+  const tokenService = new TokenService(getDb(c.env));
   const signingWalletId = resolveApiKeySigningWalletId(auth, parsed.data.signingWalletId, [
     "tokens:write",
   ]);
@@ -101,7 +102,7 @@ export const createToken = async (c: AppContext) => {
   });
 
   // Audit log
-  const auditService = new AuditService(c.env.DB);
+  const auditService = new AuditService(getDb(c.env));
   await auditService.log(c, {
     action: "create",
     resourceType: "token",
@@ -125,7 +126,7 @@ export const listTokens = async (c: AppContext) => {
   const pageSize = Math.min(Number.parseInt(c.req.query("pageSize") ?? "50", 10), 100);
   const offset = (page - 1) * pageSize;
 
-  const tokenService = new TokenService(c.env.DB);
+  const tokenService = new TokenService(getDb(c.env));
   const { tokens, total } = await tokenService.listTokens(projectId, {
     status,
     limit: pageSize,
@@ -139,7 +140,7 @@ export const getToken = async (c: AppContext) => {
   const { tokenId } = c.req.param();
   const auth = getAuth(c);
 
-  const tokenService = new TokenService(c.env.DB);
+  const tokenService = new TokenService(getDb(c.env));
   const token = await tokenService.getToken(tokenId);
 
   if (!token || token.organizationId !== auth?.organizationId) {
@@ -168,7 +169,7 @@ export const updateToken = async (c: AppContext) => {
     });
   }
 
-  const tokenService = new TokenService(c.env.DB);
+  const tokenService = new TokenService(getDb(c.env));
 
   // Verify ownership
   const existing = await tokenService.getToken(tokenId);
@@ -224,7 +225,7 @@ export const updateToken = async (c: AppContext) => {
     const token = await tokenService.updateToken(tokenId, parsed.data);
 
     // Audit log
-    const auditService = new AuditService(c.env.DB);
+    const auditService = new AuditService(getDb(c.env));
     await auditService.log(c, {
       action: "update",
       resourceType: "token",

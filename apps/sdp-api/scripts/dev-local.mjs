@@ -11,9 +11,41 @@ const wranglerBin = path.join(
   ".bin",
   process.platform === "win32" ? "wrangler.cmd" : "wrangler"
 );
+
+function loadLocalEnvFile(filePath) {
+  if (!fs.existsSync(filePath)) {
+    return {};
+  }
+
+  const content = fs.readFileSync(filePath, "utf8");
+  const values = {};
+
+  for (const line of content.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) {
+      continue;
+    }
+
+    const [key, ...rest] = trimmed.split("=");
+    if (!key) {
+      continue;
+    }
+
+    values[key] = rest.join("=");
+  }
+
+  return values;
+}
+
+const localEnv = loadLocalEnvFile(path.resolve(appDir, ".dev.vars"));
 const persistTo = process.env.SDP_API_LOCAL_PERSIST_PATH ?? ".wrangler/state";
 const port = process.env.SDP_API_PORT ?? "8787";
 const shouldResetLocalState = process.env.SDP_API_RESET_LOCAL_STATE === "1";
+const localDatabaseUrl = new URL("postgresql://127.0.0.1:5432/sdp");
+localDatabaseUrl.username = "sdp";
+localDatabaseUrl.password = "sdp";
+const databaseUrl =
+  process.env.DATABASE_URL ?? localEnv.DATABASE_URL ?? localDatabaseUrl.toString();
 let activeChild = null;
 
 for (const signal of ["SIGINT", "SIGTERM"]) {
@@ -30,6 +62,7 @@ function run(command, args, options = {}) {
       cwd: appDir,
       stdio: "inherit",
       env: {
+        ...localEnv,
         ...process.env,
         ...options.env,
       },
@@ -60,15 +93,17 @@ try {
   if (shouldResetLocalState) {
     fs.rmSync(path.resolve(appDir, persistTo), { recursive: true, force: true });
   }
-  await run(
-    wranglerBin,
-    ["d1", "migrations", "apply", "DB", "--local", `--persist-to=${persistTo}`],
-    {
-      // Wrangler skips the confirmation prompt in non-interactive mode.
-      env: { CI: "1" },
-    }
-  );
-  await run(wranglerBin, devArgs);
+  await run("node", ["scripts/migrate-postgres.mjs"], {
+    env: {
+      DATABASE_URL: databaseUrl,
+    },
+  });
+  await run(wranglerBin, devArgs, {
+    env: {
+      DATABASE_URL: databaseUrl,
+      CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE: databaseUrl,
+    },
+  });
 } catch (error) {
   const message = error instanceof Error ? error.message : "Unknown local dev startup error";
   console.error(message);

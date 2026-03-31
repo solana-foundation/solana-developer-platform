@@ -2,7 +2,7 @@
  * SDP API - Cloudflare Workers Entry Point
  *
  * Solana Developer Platform API
- * Built with Hono, D1, and KV
+ * Built with Hono, Postgres, Hyperdrive, and KV
  */
 
 import * as Sentry from "@sentry/cloudflare";
@@ -355,7 +355,14 @@ const worker = {
       })
     );
   },
-  request: app.request.bind(app),
+  request(
+    input: RequestInfo | URL,
+    init?: RequestInit,
+    env?: Env | Record<string, unknown>,
+    executionCtx?: ExecutionContext
+  ) {
+    return app.request(input, init, env, executionCtx);
+  },
 } satisfies ExportedHandler<Env> & {
   request: typeof app.request;
 };

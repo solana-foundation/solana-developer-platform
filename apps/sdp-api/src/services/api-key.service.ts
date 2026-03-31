@@ -100,7 +100,7 @@ interface ApiKeyDetailsRow extends ApiKeyListRow {
 }
 
 export class ApiKeyService {
-  constructor(private db: D1Database) {}
+  constructor(private db: DatabaseClient) {}
 
   async listForOrganization(organizationId: string): Promise<ApiKeyListItem[]> {
     const result = await this.db
@@ -307,7 +307,7 @@ export class ApiKeyService {
         .prepare(
           `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
            SELECT
-             'akw_' || lower(hex(randomblob(16))),
+             'akw_' || md5(random()::text || clock_timestamp()::text),
              ?,
              wallet_id,
              permissions

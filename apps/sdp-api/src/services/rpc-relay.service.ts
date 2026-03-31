@@ -53,7 +53,7 @@ export interface RpcProviderStatus {
 
 export interface ResolveRpcTargetInput {
   env: Env;
-  db: D1Database;
+  db: DatabaseClient;
   organizationId: string;
   authProjectId: string | null;
   requestedProjectId: string | null;
@@ -269,7 +269,7 @@ function resolveManagedProviders(env: Env): ManagedRpcProvider[] {
 }
 
 async function getOrganizationSettings(
-  db: D1Database,
+  db: DatabaseClient,
   organizationId: string
 ): Promise<OrganizationSettings | null> {
   const row = await db
@@ -297,7 +297,7 @@ async function getOrganizationSettings(
 }
 
 async function getProjectSettings(
-  db: D1Database,
+  db: DatabaseClient,
   organizationId: string,
   projectId: string
 ): Promise<ProjectSettings | null> {
@@ -527,7 +527,7 @@ async function getProviderStats(
 
 export async function listRpcProviders(input: {
   env: Env;
-  db: D1Database;
+  db: DatabaseClient;
   organizationId: string;
   authProjectId: string | null;
   requestedProjectId: string | null;

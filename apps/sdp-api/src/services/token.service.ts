@@ -183,7 +183,7 @@ interface FrozenAccountRow {
 // ═══════════════════════════════════════════════════════════════════════════
 
 export class TokenService {
-  constructor(private db: D1Database) {}
+  constructor(private db: DatabaseClient) {}
 
   // ═══════════════════════════════════════════════════════════════════════════
   // Token CRUD

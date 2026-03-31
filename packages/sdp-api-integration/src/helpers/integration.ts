@@ -1,10 +1,11 @@
+import { getDb } from "@sdp/api/db";
 import { TEST_ORG, TEST_USER } from "@sdp/api-test/fixtures/organizations";
 import {
   TEST_PROJECT,
   TEST_PROJECT_API_KEY,
   TEST_PROJECT_CACHED_KEY,
 } from "@sdp/api-test/fixtures/tokens";
-import { clearTestDatabase, seedTestDatabase } from "@sdp/api-test/mocks/d1";
+import { clearTestDatabase, seedTestDatabase } from "@sdp/api-test/mocks/db";
 import app from "@sdp/api/index";
 import { hashString } from "@sdp/api/lib/hash";
 import { createFeePaymentAdapter } from "@sdp/api/services/adapters/fee-payment";
@@ -66,7 +67,7 @@ export async function initIntegrationSuite() {
 export async function resetIntegrationState(
   apiKeyHash: string
 ): Promise<{ custodyAddress: string }> {
-  const db = env.DB;
+  const db = getDb(env);
   const apiKeysKV = env.SDP_API_KEYS;
   const rateLimitKV = env.SDP_RATE_LIMITS;
 
@@ -192,6 +193,7 @@ async function ensurePrivyCustodyAddress(): Promise<string> {
     return "";
   }
 
+  const db = getDb(env);
   const signingService = createSigningService(env);
   const existing = await signingService.getConfigurationByProvider(TEST_ORG.id, undefined, "privy");
 
@@ -209,7 +211,7 @@ async function ensurePrivyCustodyAddress(): Promise<string> {
   }
 
   if (!config.defaultWalletId) {
-    const fallbackWallet = await env.DB.prepare(
+    const fallbackWallet = await db.prepare(
       `SELECT wallet_id
        FROM custody_wallets
        WHERE custody_config_id = ? AND status = 'active'
@@ -223,7 +225,7 @@ async function ensurePrivyCustodyAddress(): Promise<string> {
       throw new Error("Integration precondition failed: Privy signer has no active wallets.");
     }
 
-    await env.DB.prepare(
+    await db.prepare(
       `UPDATE custody_configs
        SET default_wallet_id = ?, updated_at = datetime('now')
        WHERE id = ?`
@@ -233,7 +235,7 @@ async function ensurePrivyCustodyAddress(): Promise<string> {
   }
 
   const walletRows = (
-    await env.DB.prepare(
+    await db.prepare(
       `SELECT wallet_id, public_key
        FROM custody_wallets
        WHERE custody_config_id = ? AND status = 'active'
@@ -264,7 +266,7 @@ async function ensurePrivyCustodyAddress(): Promise<string> {
   }
 
   if (preferredWallet.wallet_id !== config.defaultWalletId) {
-    await env.DB.prepare(
+    await db.prepare(
       `UPDATE custody_configs
        SET default_wallet_id = ?, updated_at = datetime('now')
        WHERE id = ?`

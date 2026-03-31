@@ -6,11 +6,12 @@ import { TokenService } from "@/services/token.service";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { TEST_PROJECT, TEST_PROJECT_API_KEY } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/d1";
+import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { getDb } from "@/db";
 
 describe("TokenService", () => {
-  let db: D1Database;
+  let db: DatabaseClient;
   let tokenService: TokenService;
 
   beforeAll(async () => {
@@ -22,7 +23,7 @@ describe("TokenService", () => {
   });
 
   beforeEach(async () => {
-    db = (env as { DB: D1Database }).DB;
+    db = getDb(env);
     tokenService = new TokenService(db);
 
     await db

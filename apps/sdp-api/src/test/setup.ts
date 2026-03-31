@@ -1,3 +1,7 @@
+import { closeDatabasePools } from "@/db";
+import { env as providedEnv } from "cloudflare:test";
+import { afterAll } from "vitest";
+
 const globalWithSecureContext = globalThis as { isSecureContext?: boolean };
 
 if (!globalWithSecureContext.isSecureContext) {
@@ -10,3 +14,7 @@ if (!globalWithSecureContext.isSecureContext) {
     globalWithSecureContext.isSecureContext = true;
   }
 }
+
+afterAll(async () => {
+  await closeDatabasePools();
+});

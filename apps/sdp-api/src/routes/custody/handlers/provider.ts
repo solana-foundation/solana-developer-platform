@@ -13,6 +13,7 @@ import {
 } from "@/services/domain/signing/provider-config";
 import { SigningError } from "@/services/ports";
 import { type AppContext, getPreferredWalletForConfig, resolveActor } from "../context";
+import { getDb } from "@/db";
 import {
   type InitializeSigningRequest,
   type InitializeSigningResponse,
@@ -52,7 +53,7 @@ export const initializeSigning = async (c: AppContext) => {
       parsed.data
     );
 
-    const auditService = new AuditService(c.env.DB);
+    const auditService = new AuditService(getDb(c.env));
     await auditService.log(c, {
       action: "create",
       resourceType: "custody_config",
@@ -85,7 +86,7 @@ export const switchSigning = async (c: AppContext) => {
   }
 
   const signingService = createSigningService(c.env);
-  const auditService = new AuditService(c.env.DB);
+  const auditService = new AuditService(getDb(c.env));
   const projectId = parsed.data.projectId;
   const targetProvider = parsed.data.provider;
 
@@ -107,7 +108,7 @@ export const switchSigning = async (c: AppContext) => {
       );
 
       const preferredWallet = await getPreferredWalletForConfig(
-        c.env.DB,
+        getDb(c.env),
         existingScopeConfig.id,
         existingScopeConfig.default_wallet_id
       );
@@ -314,7 +315,7 @@ async function findScopeConfigByProvider(
   projectId: string | undefined,
   provider: CustodyProvider
 ): Promise<{ id: string; status: "active" | "inactive"; default_wallet_id: string | null } | null> {
-  return c.env.DB.prepare(
+  return getDb(c.env).prepare(
     projectId
       ? `SELECT id, status, default_wallet_id
            FROM custody_configs
@@ -335,7 +336,7 @@ async function findScopeProviderConfigRecord(
   projectId: string | undefined,
   provider: CustodyProvider
 ) {
-  return c.env.DB.prepare(
+  return getDb(c.env).prepare(
     projectId
       ? `SELECT id,
                 organization_id,
@@ -402,7 +403,7 @@ async function findScopeFireblocksConfig(
 }
 
 async function resolveOrganizationSlug(c: AppContext, organizationId: string): Promise<string> {
-  const row = await c.env.DB.prepare("SELECT slug FROM organizations WHERE id = ? LIMIT 1")
+  const row = await getDb(c.env).prepare("SELECT slug FROM organizations WHERE id = ? LIMIT 1")
     .bind(organizationId)
     .first<{ slug: string | null }>();
 

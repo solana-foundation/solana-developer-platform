@@ -21,6 +21,7 @@ import {
 import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
 import type { AppContext } from "../context";
 import { type SignerCheckResponse, signerCheckSchema } from "../schemas";
+import { getDb } from "@/db";
 
 // biome-ignore lint/nursery/noSecrets: Solana Memo program id constant, not a secret.
 const MEMO_PROGRAM_ADDRESS = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr" as Address;
@@ -72,7 +73,7 @@ export const signerCheck = async (c: AppContext) => {
 
     const rpcTarget = await resolveRpcTarget({
       env: c.env,
-      db: c.env.DB,
+      db: getDb(c.env),
       organizationId: auth.organizationId,
       authProjectId: auth.projectId ?? null,
       requestedProjectId: null,

@@ -1,5 +1,9 @@
 # SDP API local dev vars (copy to .dev.vars)
 
+# DATABASE_URL=postgresql://sdp:sdp@127.0.0.1:5432/sdp
+# For the shared GCP dev database, use the Cloud SQL connection string issued
+# for the `sdp_api_dev` database instead of the local Docker URL above.
+
 # Sentry
 # SENTRY_DSN=https://examplePublicKey@o0.ingest.us.sentry.io/0
 # SENTRY_TRACES_SAMPLE_RATE=1.0

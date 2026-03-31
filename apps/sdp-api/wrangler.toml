@@ -1,14 +1,13 @@
 name = "sdp-api"
 main = "src/index.ts"
 compatibility_date = "2024-12-01"
-compatibility_flags = ["nodejs_compat"]
+compatibility_flags = ["nodejs_compat", "no_handle_cross_request_promise_resolution"]
 
-# D1 Database
-[[d1_databases]]
-binding = "DB"
-database_name = "sdp-db"
-database_id = "local"
-migrations_dir = "src/db/migrations"
+# Hyperdrive
+[[hyperdrive]]
+binding = "HYPERDRIVE"
+id = "00000000000000000000000000000000"
+localConnectionString = "postgresql://sdp:sdp@127.0.0.1:5432/sdp"
 
 # KV Namespaces
 [[kv_namespaces]]
@@ -47,11 +46,9 @@ KORA_RPC_URL = "https://kora-devnet-315956366746.us-central1.run.app"
 [env.dev]
 name = "sdp-api-dev"
 
-[[env.dev.d1_databases]]
-binding = "DB"
-database_name = "sdp-db-dev"
-database_id = "9e6d2e56-8e3d-47fc-8f8a-50db03d1cacc"
-migrations_dir = "src/db/migrations"
+[[env.dev.hyperdrive]]
+binding = "HYPERDRIVE"
+id = "08e63deab7554b60884a4ede11d799eb"
 
 [[env.dev.kv_namespaces]]
 binding = "SDP_API_KEYS"
@@ -87,11 +84,9 @@ KORA_RPC_URL = "https://kora-devnet-315956366746.us-central1.run.app"
 [env.production]
 name = "sdp-api-production"
 
-[[env.production.d1_databases]]
-binding = "DB"
-database_name = "sdp-db-production"
-database_id = "b2ea9846-4a2e-4b29-890c-89b40f88f756"
-migrations_dir = "src/db/migrations"
+[[env.production.hyperdrive]]
+binding = "HYPERDRIVE"
+id = "8da510cd6dfb47ba8a382ab8567d4fa1"
 
 [[env.production.kv_namespaces]]
 binding = "SDP_API_KEYS"
@@ -120,3 +115,5 @@ SOLANA_RPC_ALCHEMY_URL = "https://solana-devnet.g.alchemy.com/v2/{API_KEY}"
 SOLANA_RPC_TRITON_URL = "https://solanaf-sdp-7436.devnet.rpcpool.com/50cc5df4-1953-414c-b6fb-948aa7ffb0fb"
 SOLANA_RPC_HELIUS_URL = "https://devnet.helius-rpc.com/?api-key={API_KEY}"
 SOLANA_RPC_QUICKNODE_URL = "https://evocative-old-mansion.solana-devnet.quiknode.pro/{API_KEY}"
+FEE_PAYMENT_PROVIDER = "kora"
+KORA_RPC_URL = "https://kora-devnet-315956366746.us-central1.run.app"

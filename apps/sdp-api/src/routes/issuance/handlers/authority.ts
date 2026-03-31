@@ -16,6 +16,7 @@ import {
   resolveCurrentAuthorityForRole,
 } from "./authority-resolution";
 import { buildIdempotencyMetadata } from "./idempotency";
+import { getDb } from "@/db";
 
 type AppContext = Context<{ Bindings: Env }>;
 
@@ -53,7 +54,7 @@ export const prepareUpdateAuthority = async (c: AppContext) => {
     });
   }
 
-  const tokenService = new TokenService(c.env.DB);
+  const tokenService = new TokenService(getDb(c.env));
   const token = await tokenService.getToken(tokenId);
 
   if (!token || token.organizationId !== auth?.organizationId) {
@@ -124,7 +125,7 @@ export const prepareUpdateAuthority = async (c: AppContext) => {
     initiatedByKeyId: auth.id,
   });
 
-  const auditService = new AuditService(c.env.DB);
+  const auditService = new AuditService(getDb(c.env));
   await auditService.log(c, {
     action: "update_authority",
     resourceType: "token_transaction",
@@ -162,7 +163,7 @@ export const executeUpdateAuthority = async (c: AppContext) => {
     });
   }
 
-  const tokenService = new TokenService(c.env.DB);
+  const tokenService = new TokenService(getDb(c.env));
   const token = await tokenService.getToken(tokenId);
 
   if (!token || token.organizationId !== auth?.organizationId) {
@@ -262,7 +263,7 @@ export const executeUpdateAuthority = async (c: AppContext) => {
       await tokenService.updateTokenAuthorities(tokenId, updates);
     }
 
-    const auditService = new AuditService(c.env.DB);
+    const auditService = new AuditService(getDb(c.env));
     await auditService.log(c, {
       action: "update_authority",
       resourceType: "token_transaction",

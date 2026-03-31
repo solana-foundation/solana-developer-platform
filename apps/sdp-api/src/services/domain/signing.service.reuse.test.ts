@@ -189,12 +189,10 @@ function createService(params: {
     updateStatus: vi.fn(),
   };
 
-  const run = vi.fn().mockResolvedValue({ success: true });
-  const bind = vi.fn().mockReturnValue({ run });
-  const prepare = vi.fn().mockReturnValue({ bind });
-
   const env: Env = {
-    DB: { prepare } as unknown as D1Database,
+    HYPERDRIVE: {
+      connectionString: "postgresql://sdp:sdp@127.0.0.1:5432/sdp",
+    },
     CUSTODY_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString("base64"),
     ENVIRONMENT: "development",
     API_VERSION: "v1",

@@ -1,0 +1,1 @@
+import "./migrate-postgres.mjs";

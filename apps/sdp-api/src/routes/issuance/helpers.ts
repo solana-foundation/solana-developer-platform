@@ -2,6 +2,7 @@ import { getAuth } from "@/lib/auth";
 import { AppError } from "@/lib/errors";
 import type { Env } from "@/types/env";
 import type { Context } from "hono";
+import { getDb } from "@/db";
 
 type AppContext = Context<{ Bindings: Env }>;
 
@@ -10,7 +11,7 @@ async function ensureDefaultProject(
   organizationId: string,
   userId: string
 ): Promise<string> {
-  const existing = await c.env.DB.prepare(
+  const existing = await getDb(c.env).prepare(
     `SELECT p.id
      FROM projects p
      JOIN project_members pm ON pm.project_id = p.id
@@ -31,13 +32,13 @@ async function ensureDefaultProject(
   const defaultSlug = "default-project";
 
   try {
-    await c.env.DB.batch([
-      c.env.DB.prepare(
+    await getDb(c.env).batch([
+      getDb(c.env).prepare(
         `INSERT INTO projects (
            id, organization_id, name, slug, description, environment, settings, status, created_by, created_at, updated_at
          ) VALUES (?, ?, 'Default Project', ?, 'Auto-provisioned default project', 'sandbox', NULL, 'active', ?, ?, ?)`
       ).bind(projectId, organizationId, defaultSlug, userId, now, now),
-      c.env.DB.prepare(
+      getDb(c.env).prepare(
         `INSERT INTO project_members (id, project_id, user_id, role, created_at)
          VALUES (?, ?, ?, 'admin', ?)`
       ).bind(membershipId, projectId, userId, now),
@@ -45,7 +46,7 @@ async function ensureDefaultProject(
 
     return projectId;
   } catch {
-    const slugProject = await c.env.DB.prepare(
+    const slugProject = await getDb(c.env).prepare(
       `SELECT id, status
        FROM projects
        WHERE organization_id = ? AND slug = ?
@@ -59,7 +60,7 @@ async function ensureDefaultProject(
     }
 
     if (slugProject.status !== "active") {
-      await c.env.DB.prepare(
+      await getDb(c.env).prepare(
         `UPDATE projects
          SET status = 'active', updated_at = datetime('now')
          WHERE id = ?`
@@ -68,9 +69,10 @@ async function ensureDefaultProject(
         .run();
     }
 
-    await c.env.DB.prepare(
-      `INSERT OR IGNORE INTO project_members (id, project_id, user_id, role, created_at)
-       VALUES (?, ?, ?, 'admin', ?)`
+    await getDb(c.env).prepare(
+      `INSERT INTO project_members (id, project_id, user_id, role, created_at)
+       VALUES (?, ?, ?, 'admin', ?)
+       ON CONFLICT (project_id, user_id) DO NOTHING`
     )
       .bind(`pm_${crypto.randomUUID()}`, slugProject.id, userId, now)
       .run();
@@ -93,7 +95,7 @@ export const requireProjectScope = async (c: AppContext) => {
 
   if (requestedProjectId) {
     const project = auth.userId
-      ? await c.env.DB.prepare(
+      ? await getDb(c.env).prepare(
           `SELECT p.id
            FROM projects p
            JOIN project_members pm ON pm.project_id = p.id
@@ -102,7 +104,7 @@ export const requireProjectScope = async (c: AppContext) => {
         )
           .bind(requestedProjectId, auth.organizationId, auth.userId)
           .first<{ id: string }>()
-      : await c.env.DB.prepare(
+      : await getDb(c.env).prepare(
           `SELECT id
            FROM projects
            WHERE id = ? AND organization_id = ? AND status = 'active'
@@ -119,7 +121,7 @@ export const requireProjectScope = async (c: AppContext) => {
   }
 
   const fallbackProject = auth.userId
-    ? await c.env.DB.prepare(
+    ? await getDb(c.env).prepare(
         `SELECT p.id
          FROM projects p
          JOIN project_members pm ON pm.project_id = p.id
@@ -129,7 +131,7 @@ export const requireProjectScope = async (c: AppContext) => {
       )
         .bind(auth.organizationId, auth.userId)
         .first<{ id: string }>()
-    : await c.env.DB.prepare(
+    : await getDb(c.env).prepare(
         `SELECT id
          FROM projects
          WHERE organization_id = ? AND status = 'active'

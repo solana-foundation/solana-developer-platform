@@ -4,6 +4,7 @@
 
 import type { Env } from "@/types/env";
 import { Hono } from "hono";
+import { getDb } from "@/db";
 
 const health = new Hono<{ Bindings: Env }>();
 
@@ -22,9 +23,9 @@ health.get("/", async (c) => {
 });
 
 health.get("/ready", async (c) => {
-  // Readiness check - verify D1 connection
+  // Readiness check - verify Postgres connection
   try {
-    await c.env.DB.prepare("SELECT 1").first();
+    await getDb(c.env).prepare("SELECT 1").first();
 
     return c.json({
       status: "ready",

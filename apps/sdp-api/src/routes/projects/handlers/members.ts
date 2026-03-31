@@ -7,6 +7,7 @@ import type { Env } from "@/types/env";
 import type { ListProjectMembersResponse, ProjectMemberResponse, ProjectRole } from "@sdp/types";
 import type { Context } from "hono";
 import { addMemberSchema, updateMemberSchema } from "../schemas";
+import { getDb } from "@/db";
 
 type AppContext = Context<{ Bindings: Env }>;
 
@@ -14,7 +15,7 @@ export const listProjectMembers = async (c: AppContext) => {
   const { projectId } = c.req.param();
   const auth = getAuth(c);
 
-  const projectService = new ProjectService(c.env.DB);
+  const projectService = new ProjectService(getDb(c.env));
 
   // Verify project belongs to org
   const project = await projectService.getProject(projectId);
@@ -41,7 +42,7 @@ export const addProjectMember = async (c: AppContext) => {
     });
   }
 
-  const projectService = new ProjectService(c.env.DB);
+  const projectService = new ProjectService(getDb(c.env));
 
   // Verify project belongs to org
   const project = await projectService.getProject(projectId);
@@ -50,7 +51,7 @@ export const addProjectMember = async (c: AppContext) => {
   }
 
   // Verify user is a member of the organization
-  const orgMember = await c.env.DB.prepare(
+  const orgMember = await getDb(c.env).prepare(
     "SELECT id FROM organization_members WHERE user_id = ? AND organization_id = ? AND status = 'active'"
   )
     .bind(parsed.data.userId, auth.organizationId)
@@ -68,12 +69,12 @@ export const addProjectMember = async (c: AppContext) => {
     );
 
     // Get user details
-    const user = await c.env.DB.prepare("SELECT id, email, name FROM users WHERE id = ?")
+    const user = await getDb(c.env).prepare("SELECT id, email, name FROM users WHERE id = ?")
       .bind(parsed.data.userId)
       .first<{ id: string; email: string; name: string | null }>();
 
     // Audit log
-    const auditService = new AuditService(c.env.DB);
+    const auditService = new AuditService(getDb(c.env));
     await auditService.log(c, {
       action: "create",
       resourceType: "project_member",
@@ -109,7 +110,7 @@ export const updateProjectMember = async (c: AppContext) => {
     });
   }
 
-  const projectService = new ProjectService(c.env.DB);
+  const projectService = new ProjectService(getDb(c.env));
 
   // Verify project belongs to org
   const project = await projectService.getProject(projectId);
@@ -118,7 +119,7 @@ export const updateProjectMember = async (c: AppContext) => {
   }
 
   // Get member to find userId
-  const memberRow = await c.env.DB.prepare(
+  const memberRow = await getDb(c.env).prepare(
     "SELECT user_id FROM project_members WHERE id = ? AND project_id = ?"
   )
     .bind(memberId, projectId)
@@ -135,7 +136,7 @@ export const updateProjectMember = async (c: AppContext) => {
   );
 
   // Audit log
-  const auditService = new AuditService(c.env.DB);
+  const auditService = new AuditService(getDb(c.env));
   await auditService.log(c, {
     action: "update",
     resourceType: "project_member",
@@ -150,7 +151,7 @@ export const removeProjectMember = async (c: AppContext) => {
   const { projectId, memberId } = c.req.param();
   const auth = getAuth(c);
 
-  const projectService = new ProjectService(c.env.DB);
+  const projectService = new ProjectService(getDb(c.env));
 
   // Verify project belongs to org
   const project = await projectService.getProject(projectId);
@@ -159,7 +160,7 @@ export const removeProjectMember = async (c: AppContext) => {
   }
 
   // Get member to find userId
-  const memberRow = await c.env.DB.prepare(
+  const memberRow = await getDb(c.env).prepare(
     "SELECT user_id FROM project_members WHERE id = ? AND project_id = ?"
   )
     .bind(memberId, projectId)
@@ -172,7 +173,7 @@ export const removeProjectMember = async (c: AppContext) => {
   await projectService.removeMember(projectId, memberRow.user_id);
 
   // Audit log
-  const auditService = new AuditService(c.env.DB);
+  const auditService = new AuditService(getDb(c.env));
   await auditService.log(c, {
     action: "delete",
     resourceType: "project_member",

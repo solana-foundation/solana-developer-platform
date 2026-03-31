@@ -1,5 +1,39 @@
+import fs from "node:fs";
 import path from "node:path";
 import { defineWorkersConfig } from "@cloudflare/vitest-pool-workers/config";
+
+const DEV_VARS_PATH = path.resolve(__dirname, ".dev.vars");
+
+function loadEnvFile(filePath: string): Record<string, string> {
+  if (!fs.existsSync(filePath)) {
+    return {};
+  }
+
+  const content = fs.readFileSync(filePath, "utf8");
+  const vars: Record<string, string> = {};
+
+  for (const line of content.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) {
+      continue;
+    }
+
+    const [key, ...rest] = trimmed.split("=");
+    if (!key) {
+      continue;
+    }
+
+    vars[key] = rest.join("=");
+  }
+
+  return vars;
+}
+
+const fileEnv = loadEnvFile(DEV_VARS_PATH);
+const getEnv = (key: string, fallback?: string) => process.env[key] ?? fileEnv[key] ?? fallback;
+
+// biome-ignore lint/nursery/noSecrets: Local Docker Postgres fallback for isolated tests.
+const databaseUrl = getEnv("DATABASE_URL", "postgresql://sdp:sdp@127.0.0.1:5432/sdp");
 
 export default defineWorkersConfig({
   resolve: {
@@ -13,6 +47,7 @@ export default defineWorkersConfig({
   test: {
     globals: true,
     setupFiles: ["src/test/setup.ts"],
+    fileParallelism: false,
     poolOptions: {
       workers: {
         singleWorker: true,
@@ -24,6 +59,7 @@ export default defineWorkersConfig({
           bindings: {
             ENVIRONMENT: "development",
             API_VERSION: "v1",
+            HYPERDRIVE: { connectionString: databaseUrl },
             API_KEY_PEPPER: "test-pepper-for-unit-tests",
             SOLANA_MOCK: "true",
             RUN_INTEGRATION_TESTS: "false",

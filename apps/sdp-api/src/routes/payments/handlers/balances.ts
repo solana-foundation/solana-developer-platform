@@ -2,7 +2,7 @@ import { formatDecimalAmount } from "@/lib/amount";
 import { AppError } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { attachUsdValuesToBalances } from "@/services/helius-das.service";
-import { createRpc, getAccountInfo } from "@/services/solana/rpc";
+import * as solanaRpc from "@/services/solana/rpc";
 import type { Address } from "@solana/kit";
 import { type AppContext, getPaymentsRepository } from "../context";
 import {
@@ -12,18 +12,18 @@ import {
   buildWalletPolicyPayload,
 } from "../policy";
 import { updateWalletPolicySchema } from "../schemas";
-import { SOL_MINT, getSplTokenBalances } from "../token-accounts";
+import * as tokenAccounts from "../token-accounts";
 import { resolveWalletFromParams } from "./transfers";
 
 export async function getWalletBalances(c: AppContext) {
   const { wallet } = await resolveWalletFromParams(c, ["wallets:read"]);
 
-  const rpc = createRpc(c.env);
+  const rpc = solanaRpc.createRpc(c.env);
   let lamports = 0n;
-  let splBalances: Awaited<ReturnType<typeof getSplTokenBalances>> = [];
+  let splBalances: Awaited<ReturnType<typeof tokenAccounts.getSplTokenBalances>> = [];
 
   try {
-    const accountInfo = await getAccountInfo(rpc, wallet.publicKey as Address);
+    const accountInfo = await solanaRpc.getAccountInfo(rpc, wallet.publicKey as Address);
     lamports = accountInfo?.lamports ?? 0n;
   } catch (error) {
     console.error("getWalletBalances: failed to fetch SOL balance", {
@@ -35,7 +35,7 @@ export async function getWalletBalances(c: AppContext) {
   }
 
   try {
-    splBalances = await getSplTokenBalances(rpc, wallet.publicKey as Address);
+    splBalances = await tokenAccounts.getSplTokenBalances(rpc, wallet.publicKey as Address);
   } catch (error) {
     console.error("getWalletBalances: failed to fetch SPL balances", {
       requestId: c.get("requestId"),
@@ -48,7 +48,7 @@ export async function getWalletBalances(c: AppContext) {
   const balances = await attachUsdValuesToBalances(c.env, [
     {
       token: "SOL",
-      mint: SOL_MINT,
+      mint: tokenAccounts.SOL_MINT,
       amount: lamports.toString(),
       uiAmount: formatDecimalAmount(lamports, 9),
       decimals: 9,

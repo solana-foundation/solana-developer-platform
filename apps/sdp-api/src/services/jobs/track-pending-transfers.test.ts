@@ -1,18 +1,13 @@
+import { getDb } from "@/db";
+import * as solanaRpc from "@/services/solana/rpc";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/d1";
+import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
 import type { Signature } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { trackPendingTransfers } from "./track-pending-transfers";
 
-vi.mock("@/services/solana/rpc", async () => {
-  const actual =
-    await vi.importActual<typeof import("@/services/solana/rpc")>("@/services/solana/rpc");
-  return {
-    ...actual,
-    createRpc: vi.fn().mockReturnValue({}),
-    getSignatureStatuses: vi.fn().mockResolvedValue([]),
-  };
-});
+const createRpcMock = vi.spyOn(solanaRpc, "createRpc");
+const getSignatureStatusesMock = vi.spyOn(solanaRpc, "getSignatureStatuses");
 
 const TEST_SIG_1 =
   // biome-ignore lint/nursery/noSecrets: Test transaction signature fixture, not a real secret.
@@ -24,9 +19,8 @@ const TEST_SIG_2 =
 const TEST_ORG_ID = "org_job_test_001";
 
 async function seedOrg(): Promise<void> {
-  await env.DB.prepare(
-    "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)"
-  )
+  await getDb(env)
+    .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
     .bind(TEST_ORG_ID, "Job Test Org", "job-test-org", "free", "active")
     .run();
 }
@@ -38,12 +32,13 @@ async function insertTransfer(params: {
   createdAt: string;
   updatedAt: string;
 }): Promise<void> {
-  await env.DB.prepare(
-    `INSERT INTO payment_transfers
+  await getDb(env)
+    .prepare(
+      `INSERT INTO payment_transfers
        (id, organization_id, wallet_id, source_address, destination_address,
         token, amount, type, direction, status, signature, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  )
+    )
     .bind(
       params.id,
       TEST_ORG_ID,
@@ -65,7 +60,7 @@ async function insertTransfer(params: {
 }
 
 async function getTransfer(id: string) {
-  return env.DB.prepare("SELECT * FROM payment_transfers WHERE id = ?").bind(id).first<{
+  return getDb(env).prepare("SELECT * FROM payment_transfers WHERE id = ?").bind(id).first<{
     id: string;
     status: string;
     error: string | null;
@@ -84,6 +79,8 @@ describe("trackPendingTransfers", () => {
     await seedTestDatabase(env);
     await seedOrg();
     vi.clearAllMocks();
+    createRpcMock.mockReturnValue({} as ReturnType<typeof solanaRpc.createRpc>);
+    getSignatureStatusesMock.mockResolvedValue([]);
   });
 
   afterEach(async () => {
@@ -176,8 +173,7 @@ describe("trackPendingTransfers", () => {
   // biome-ignore lint/nursery/noSecrets: Test suite name, not a secret.
   describe("syncProcessingTransfersOnChain", () => {
     it("updates processing transfer to confirmed when signature is confirmed on-chain", async () => {
-      const { getSignatureStatuses } = await import("@/services/solana/rpc");
-      vi.mocked(getSignatureStatuses).mockResolvedValueOnce([
+      getSignatureStatusesMock.mockResolvedValueOnce([
         {
           slot: 12345n,
           confirmations: 10n,
@@ -202,8 +198,7 @@ describe("trackPendingTransfers", () => {
     });
 
     it("updates processing transfer to finalized when signature is finalized on-chain", async () => {
-      const { getSignatureStatuses } = await import("@/services/solana/rpc");
-      vi.mocked(getSignatureStatuses).mockResolvedValueOnce([
+      getSignatureStatusesMock.mockResolvedValueOnce([
         {
           slot: 99999n,
           confirmations: null,
@@ -228,8 +223,7 @@ describe("trackPendingTransfers", () => {
     });
 
     it("marks processing transfer as failed when on-chain status has an error", async () => {
-      const { getSignatureStatuses } = await import("@/services/solana/rpc");
-      vi.mocked(getSignatureStatuses).mockResolvedValueOnce([
+      getSignatureStatusesMock.mockResolvedValueOnce([
         {
           slot: 55555n,
           confirmations: 0n,
@@ -257,8 +251,7 @@ describe("trackPendingTransfers", () => {
     });
 
     it("marks old processing transfer as failed when signature is not found on chain", async () => {
-      const { getSignatureStatuses } = await import("@/services/solana/rpc");
-      vi.mocked(getSignatureStatuses).mockResolvedValueOnce([null]);
+      getSignatureStatusesMock.mockResolvedValueOnce([null]);
 
       await insertTransfer({
         id: "xfr_processing_not_found",
@@ -276,8 +269,7 @@ describe("trackPendingTransfers", () => {
     });
 
     it("leaves processing transfer alone when signature not found but transfer is recent", async () => {
-      const { getSignatureStatuses } = await import("@/services/solana/rpc");
-      vi.mocked(getSignatureStatuses).mockResolvedValueOnce([null]);
+      getSignatureStatusesMock.mockResolvedValueOnce([null]);
 
       await insertTransfer({
         id: "xfr_processing_recent_not_found",
@@ -294,8 +286,7 @@ describe("trackPendingTransfers", () => {
     });
 
     it("does not update processing transfers in 'processed' confirmation status", async () => {
-      const { getSignatureStatuses } = await import("@/services/solana/rpc");
-      vi.mocked(getSignatureStatuses).mockResolvedValueOnce([
+      getSignatureStatusesMock.mockResolvedValueOnce([
         {
           slot: 11111n,
           confirmations: 1n,
@@ -319,8 +310,6 @@ describe("trackPendingTransfers", () => {
     });
 
     it("does not call getSignatureStatuses when there are no processing transfers with signatures", async () => {
-      const { getSignatureStatuses } = await import("@/services/solana/rpc");
-
       // Only a pending transfer, no processing-with-signature
       await insertTransfer({
         id: "xfr_only_pending",
@@ -332,7 +321,7 @@ describe("trackPendingTransfers", () => {
 
       await trackPendingTransfers(env);
 
-      expect(vi.mocked(getSignatureStatuses)).not.toHaveBeenCalled();
+      expect(getSignatureStatusesMock).not.toHaveBeenCalled();
     });
   });
 });

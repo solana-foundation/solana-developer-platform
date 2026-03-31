@@ -12,6 +12,7 @@ import { MINT_ALREADY_PAUSED_ERROR, MINT_NOT_PAUSED_ERROR } from "@solana/mosaic
 import type { Context } from "hono";
 import { pauseTokenSchema } from "../schemas";
 import { buildIdempotencyMetadata } from "./idempotency";
+import { getDb } from "@/db";
 
 type AppContext = Context<{ Bindings: Env }>;
 type TokenRecord = Awaited<ReturnType<TokenService["getToken"]>>;
@@ -36,7 +37,7 @@ export const pauseToken = async (c: AppContext) => {
     });
   }
 
-  const tokenService = new TokenService(c.env.DB);
+  const tokenService = new TokenService(getDb(c.env));
   const token = await tokenService.getToken(tokenId);
 
   if (!token || token.organizationId !== auth?.organizationId) {
@@ -115,7 +116,7 @@ export const pauseToken = async (c: AppContext) => {
       slot: Number(result.slot),
     });
 
-    const auditService = new AuditService(c.env.DB);
+    const auditService = new AuditService(getDb(c.env));
     await auditService.log(c, {
       action: "pause",
       resourceType: "token_transaction",
@@ -157,7 +158,7 @@ export const unpauseToken = async (c: AppContext) => {
     });
   }
 
-  const tokenService = new TokenService(c.env.DB);
+  const tokenService = new TokenService(getDb(c.env));
   const token = await tokenService.getToken(tokenId);
 
   if (!token || token.organizationId !== auth?.organizationId) {
@@ -236,7 +237,7 @@ export const unpauseToken = async (c: AppContext) => {
       slot: Number(result.slot),
     });
 
-    const auditService = new AuditService(c.env.DB);
+    const auditService = new AuditService(getDb(c.env));
     await auditService.log(c, {
       action: "unpause",
       resourceType: "token_transaction",

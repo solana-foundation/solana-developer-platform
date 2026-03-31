@@ -8,6 +8,7 @@ import { createSigningService } from "@/services/domain/signing.service";
 import { SigningError } from "@/services/ports";
 import type { Env } from "@/types/env";
 import type { OrganizationCustodyRequest } from "@sdp/types";
+import { getDb } from "@/db";
 
 export class OrganizationOnboardingService {
   constructor(private readonly env: Env) {}
@@ -120,14 +121,14 @@ export class OrganizationOnboardingService {
   }
 
   async cleanupCustody(orgId: string): Promise<void> {
-    await this.env.DB.batch([
-      this.env.DB.prepare(
+    await getDb(this.env).batch([
+      getDb(this.env).prepare(
         `DELETE FROM custody_wallets
          WHERE custody_config_id IN (
            SELECT id FROM custody_configs WHERE organization_id = ?
          )`
       ).bind(orgId),
-      this.env.DB.prepare("DELETE FROM custody_configs WHERE organization_id = ?").bind(orgId),
+      getDb(this.env).prepare("DELETE FROM custody_configs WHERE organization_id = ?").bind(orgId),
     ]);
   }
 }

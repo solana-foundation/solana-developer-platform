@@ -3,6 +3,7 @@ import { created, success } from "@/lib/response";
 import { ClerkOrganizationsService } from "@/services/clerk-organizations.service";
 import type { Env } from "@/types/env";
 import type { Context } from "hono";
+import { type PreparedStatement, getDb } from "@/db";
 
 type AppContext = Context<{ Bindings: Env }>;
 
@@ -14,7 +15,7 @@ function slugify(input: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
-async function ensureUniqueSlug(db: D1Database, base: string): Promise<string> {
+async function ensureUniqueSlug(db: DatabaseClient, base: string): Promise<string> {
   const normalized = slugify(base) || `org-${crypto.randomUUID().slice(0, 8)}`;
   const existing = await db
     .prepare("SELECT id FROM organizations WHERE slug = ?")
@@ -44,7 +45,7 @@ async function ensureUniqueSlug(db: D1Database, base: string): Promise<string> {
   return candidate;
 }
 
-async function fetchOrganization(db: D1Database, orgId: string) {
+async function fetchOrganization(db: DatabaseClient, orgId: string) {
   const org = await db
     .prepare(
       `SELECT id, name, slug, tier, status, settings, created_at, updated_at
@@ -84,7 +85,7 @@ export const getOnboardingStatus = async (c: AppContext) => {
     throw new AppError("UNAUTHORIZED", "Clerk session required");
   }
 
-  const mapping = await c.env.DB.prepare(
+  const mapping = await getDb(c.env).prepare(
     `SELECT organization_id
      FROM auth_organization_identities
      WHERE provider = 'clerk' AND provider_org_id = ?`
@@ -96,7 +97,7 @@ export const getOnboardingStatus = async (c: AppContext) => {
     return success(c, { linked: false, organization: null });
   }
 
-  const organization = await fetchOrganization(c.env.DB, mapping.organization_id);
+  const organization = await fetchOrganization(getDb(c.env), mapping.organization_id);
   return success(c, { linked: true, organization });
 };
 
@@ -106,7 +107,7 @@ export const linkOrganization = async (c: AppContext) => {
     throw new AppError("UNAUTHORIZED", "Clerk session required");
   }
 
-  const existingMapping = await c.env.DB.prepare(
+  const existingMapping = await getDb(c.env).prepare(
     `SELECT organization_id
      FROM auth_organization_identities
      WHERE provider = 'clerk' AND provider_org_id = ?`
@@ -115,7 +116,7 @@ export const linkOrganization = async (c: AppContext) => {
     .first<{ organization_id: string }>();
 
   if (existingMapping) {
-    const organization = await fetchOrganization(c.env.DB, existingMapping.organization_id);
+    const organization = await fetchOrganization(getDb(c.env), existingMapping.organization_id);
     return success(c, { linked: true, organization, apiKey: null });
   }
 
@@ -130,11 +131,11 @@ export const linkOrganization = async (c: AppContext) => {
   const orgName = body.name?.trim() || clerkOrg.name?.trim() || "New Organization";
   const tier = "free";
   const slugBase = body.slug?.trim() || clerkOrg.slug?.trim() || clerk.orgSlug || slugify(orgName);
-  const slug = await ensureUniqueSlug(c.env.DB, slugBase);
+  const slug = await ensureUniqueSlug(getDb(c.env), slugBase);
 
   const normalizedEmail = clerk.email.toLowerCase();
 
-  const existingIdentity = await c.env.DB.prepare(
+  const existingIdentity = await getDb(c.env).prepare(
     `SELECT user_id, email
      FROM auth_user_identities
      WHERE provider = 'clerk' AND provider_user_id = ?`
@@ -145,12 +146,12 @@ export const linkOrganization = async (c: AppContext) => {
   let userId = existingIdentity?.user_id;
   let user =
     userId &&
-    (await c.env.DB.prepare("SELECT id FROM users WHERE id = ?")
+    (await getDb(c.env).prepare("SELECT id FROM users WHERE id = ?")
       .bind(userId)
       .first<{ id: string }>());
 
   if (!user) {
-    user = await c.env.DB.prepare("SELECT id FROM users WHERE email = ?")
+    user = await getDb(c.env).prepare("SELECT id FROM users WHERE email = ?")
       .bind(normalizedEmail)
       .first<{ id: string }>();
     userId = user?.id;
@@ -162,11 +163,11 @@ export const linkOrganization = async (c: AppContext) => {
   const authOrgId = `aoi_${crypto.randomUUID()}`;
   const authUserId = `aui_${crypto.randomUUID()}`;
 
-  const batch: D1PreparedStatement[] = [];
+  const batch: PreparedStatement[] = [];
 
   if (!user) {
     batch.push(
-      c.env.DB.prepare(
+      getDb(c.env).prepare(
         `INSERT INTO users (id, email, email_verified, status)
          VALUES (?, ?, 1, 'active')`
       ).bind(userId, normalizedEmail)
@@ -174,30 +175,31 @@ export const linkOrganization = async (c: AppContext) => {
   }
 
   batch.push(
-    c.env.DB.prepare(
+    getDb(c.env).prepare(
       `INSERT INTO organizations (id, name, slug, tier, status)
        VALUES (?, ?, ?, ?, 'active')`
     ).bind(orgId, orgName, slug, tier),
-    c.env.DB.prepare(
+    getDb(c.env).prepare(
       `INSERT INTO organization_members (id, organization_id, user_id, role, status)
        VALUES (?, ?, ?, 'admin', 'active')`
     ).bind(memberId, orgId, userId),
-    c.env.DB.prepare(
+    getDb(c.env).prepare(
       `INSERT INTO auth_organization_identities (id, provider, provider_org_id, organization_id, slug)
        VALUES (?, 'clerk', ?, ?, ?)`
     ).bind(authOrgId, clerk.clerkOrgId, orgId, slug),
     ...(existingIdentity
       ? []
       : [
-          c.env.DB.prepare(
-            `INSERT OR IGNORE INTO auth_user_identities (id, provider, provider_user_id, user_id, email)
-             VALUES (?, 'clerk', ?, ?, ?)`
+          getDb(c.env).prepare(
+            `INSERT INTO auth_user_identities (id, provider, provider_user_id, user_id, email)
+             VALUES (?, 'clerk', ?, ?, ?)
+             ON CONFLICT (provider, provider_user_id) DO NOTHING`
           ).bind(authUserId, clerk.clerkUserId, userId, normalizedEmail),
         ])
   );
 
   try {
-    await c.env.DB.batch(batch);
+    await getDb(c.env).batch(batch);
   } catch (err) {
     if (err instanceof Error && err.message?.includes("UNIQUE constraint")) {
       throw conflict("Organization already linked");
@@ -205,7 +207,7 @@ export const linkOrganization = async (c: AppContext) => {
     throw err;
   }
 
-  const organization = await fetchOrganization(c.env.DB, orgId);
+  const organization = await fetchOrganization(getDb(c.env), orgId);
 
   return created(c, {
     linked: true,

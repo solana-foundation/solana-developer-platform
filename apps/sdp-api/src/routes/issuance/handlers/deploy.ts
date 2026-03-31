@@ -15,6 +15,7 @@ import type { Context } from "hono";
 import { deployTokenSchema } from "../schemas";
 import { getInitialPermanentDelegateAuthority } from "./authority-resolution";
 import { buildIdempotencyMetadata } from "./idempotency";
+import { getDb } from "@/db";
 
 type AppContext = Context<{ Bindings: Env }>;
 
@@ -30,7 +31,7 @@ export const deployToken = async (c: AppContext) => {
     });
   }
 
-  const tokenService = new TokenService(c.env.DB);
+  const tokenService = new TokenService(getDb(c.env));
   const token = await tokenService.getToken(tokenId);
 
   if (!token || token.organizationId !== auth?.organizationId) {
@@ -163,7 +164,7 @@ export const deployToken = async (c: AppContext) => {
     });
 
     // Audit log
-    const auditService = new AuditService(c.env.DB);
+    const auditService = new AuditService(getDb(c.env));
     await auditService.log(c, {
       action: "deploy",
       resourceType: "token",
@@ -200,7 +201,7 @@ export const prepareDeploy = async (c: AppContext) => {
     });
   }
 
-  const tokenService = new TokenService(c.env.DB);
+  const tokenService = new TokenService(getDb(c.env));
   const token = await tokenService.getToken(tokenId);
 
   if (!token || token.organizationId !== auth?.organizationId) {
@@ -257,7 +258,7 @@ export const prepareDeploy = async (c: AppContext) => {
   const simulation = await simulateTransaction(rpc, txBytes);
 
   // Audit log
-  const auditService = new AuditService(c.env.DB);
+  const auditService = new AuditService(getDb(c.env));
   await auditService.log(c, {
     action: "deploy",
     resourceType: "token",

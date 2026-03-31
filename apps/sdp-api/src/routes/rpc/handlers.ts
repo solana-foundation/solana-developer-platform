@@ -9,6 +9,7 @@ import {
 import type { Env } from "@/types/env";
 import type { Context } from "hono";
 import { rpcProjectQuerySchema, rpcRelayPayloadSchema } from "./schemas";
+import { getDb } from "@/db";
 
 type AppContext = Context<{ Bindings: Env }>;
 
@@ -46,7 +47,7 @@ export const getRpcProviders = async (c: AppContext) => {
 
   const response = await listRpcProviders({
     env: c.env,
-    db: c.env.DB,
+    db: getDb(c.env),
     organizationId: auth.organizationId,
     authProjectId: auth.projectId,
     requestedProjectId: queryParse.data.projectId ?? null,
@@ -82,7 +83,7 @@ export const relayRpcRequest = async (c: AppContext) => {
   const methodNames = extractRpcMethodNames(payloadParse.data);
   const target = await resolveRpcTarget({
     env: c.env,
-    db: c.env.DB,
+    db: getDb(c.env),
     organizationId: auth.organizationId,
     authProjectId: auth.projectId,
     requestedProjectId: queryParse.data.projectId ?? null,
@@ -159,7 +160,7 @@ export const testRpcConnection = async (c: AppContext) => {
   const methodNames = ["getVersion"];
   const target = await resolveRpcTarget({
     env: c.env,
-    db: c.env.DB,
+    db: getDb(c.env),
     organizationId: auth.organizationId,
     authProjectId: auth.projectId,
     requestedProjectId: queryParse.data.projectId ?? null,

@@ -7,8 +7,9 @@ import { hashString } from "@/lib/hash";
 import { TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/d1";
+import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { getDb } from "@/db";
 
 describe("Projects Routes", () => {
   let apiKeyHash: string;
@@ -28,7 +29,7 @@ describe("Projects Routes", () => {
   });
 
   beforeEach(async () => {
-    const db = (env as { DB: D1Database }).DB;
+    const db = getDb(env);
     const apiKeysKV = (env as { SDP_API_KEYS: KVNamespace }).SDP_API_KEYS;
     const rateLimitKV = (env as { SDP_RATE_LIMITS: KVNamespace }).SDP_RATE_LIMITS;
 
@@ -209,7 +210,7 @@ describe("Projects Routes", () => {
     });
 
     it("excludes archived projects by default", async () => {
-      const db = (env as { DB: D1Database }).DB;
+      const db = getDb(env);
 
       // Create and archive a project directly
       await db
@@ -353,7 +354,7 @@ describe("Projects Routes", () => {
       expect(res.status).toBe(204);
 
       // Verify project is archived (not deleted)
-      const db = (env as { DB: D1Database }).DB;
+      const db = getDb(env);
       const project = await db
         .prepare("SELECT status FROM projects WHERE id = ?")
         .bind(projectId)
@@ -401,7 +402,7 @@ describe("Projects Routes", () => {
 
     it("adds a member to project", async () => {
       // Create another user
-      const db = (env as { DB: D1Database }).DB;
+      const db = getDb(env);
       await db
         .prepare(
           "INSERT OR REPLACE INTO users (id, email, email_verified, status) VALUES ('usr_member123', 'member@example.com', 1, 'active')"
@@ -438,7 +439,7 @@ describe("Projects Routes", () => {
 
     it("returns 400 for non-org member", async () => {
       // Create user not in org
-      const db = (env as { DB: D1Database }).DB;
+      const db = getDb(env);
       await db
         .prepare(
           "INSERT OR REPLACE INTO users (id, email, email_verified, status) VALUES ('usr_outside123', 'outside@example.com', 1, 'active')"

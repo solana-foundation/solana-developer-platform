@@ -5,12 +5,13 @@
  * configured via wrangler.toml.
  */
 
+import type { HyperdriveBinding } from "@/db";
 import type { ClerkJwtPayload } from "@/lib/clerk-token";
 import type { CachedSession, OrganizationRpcProvider, Permission } from "@sdp/types";
 
 export interface Env {
-  // D1 Database
-  DB: D1Database;
+  // Hyperdrive database binding
+  HYPERDRIVE: HyperdriveBinding;
 
   // KV Namespaces
   SDP_API_KEYS: KVNamespace;
@@ -208,4 +209,8 @@ declare module "hono" {
     traceId: string;
     requestSource: string;
   }
+}
+
+declare global {
+  type DatabaseClient = import("@/db").DatabaseClient;
 }
