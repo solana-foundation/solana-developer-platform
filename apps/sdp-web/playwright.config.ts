@@ -64,6 +64,13 @@ export default defineConfig({
   ],
   projects: [
     {
+      name: "public",
+      testMatch: /.*auth-entry.*\.e2e\.spec\.ts/,
+      use: {
+        ...devices["Desktop Chrome"],
+      },
+    },
+    {
       name: "auth-setup",
       testMatch: /auth\.global\.setup\.ts/,
       use: {
@@ -73,7 +80,7 @@ export default defineConfig({
     {
       name: "dashboard",
       testMatch: /.*\.e2e\.spec\.ts/,
-      testIgnore: /.*issuance.*\.e2e\.spec\.ts/,
+      testIgnore: /.*(issuance|auth-entry).*.e2e\.spec\.ts/,
       dependencies: ["auth-setup"],
       use: {
         ...devices["Desktop Chrome"],

@@ -1,10 +1,9 @@
 import { HomeSignedInCard } from "@/components/home-signed-in";
-import { isAuthEntryEnabled } from "@/lib/auth-entry";
+import { isAnyAuthEntryEnabled } from "@/lib/auth-entry";
 import { SignedIn, SignedOut, UserButton } from "@clerk/nextjs";
 import { DEFAULT_SDP_DOCS_URL } from "@sdp/types";
 import Image from "next/image";
 import Link from "next/link";
-import { startSignIn, startSignUp } from "./auth/actions";
 
 const docsHref =
   process.env.NEXT_PUBLIC_SDP_DOCS_URL ||
@@ -12,7 +11,7 @@ const docsHref =
 const waitlistHref = "https://solanafoundation.typeform.com/to/PLfMTDQs";
 
 export default async function Home() {
-  const authEntryEnabled = await isAuthEntryEnabled();
+  const authEntryEnabled = await isAnyAuthEntryEnabled();
 
   return (
     <main className="min-h-screen bg-gradient-to-b from-[#e9e7de] to-[#f5f4ef] text-[#1c1c1d]">
@@ -27,21 +26,9 @@ export default async function Home() {
               Docs
             </Link>
             {authEntryEnabled ? (
-              <>
-                <SignedOut>
-                  <form action={startSignIn}>
-                    <button
-                      type="submit"
-                      className="inline-flex h-9 items-center justify-center rounded-lg bg-[rgba(28,28,29,0.08)] px-3 text-sm font-semibold text-[#1c1c1d] transition-colors hover:bg-[rgba(28,28,29,0.14)]"
-                    >
-                      Sign in
-                    </button>
-                  </form>
-                </SignedOut>
-                <SignedIn>
-                  <UserButton />
-                </SignedIn>
-              </>
+              <SignedIn>
+                <UserButton />
+              </SignedIn>
             ) : null}
           </div>
         </div>
@@ -62,14 +49,16 @@ export default async function Home() {
           {authEntryEnabled ? (
             <>
               <SignedOut>
-                <form action={startSignUp} className="mt-[34px]">
-                  <button
-                    type="submit"
+                <div className="mt-[34px]">
+                  <Link
+                    href={waitlistHref}
+                    target="_blank"
+                    rel="noreferrer"
                     className="inline-flex h-10 items-center justify-center rounded-[10px] bg-[#0f0f10] px-[18px] text-[15px] font-semibold leading-[15px] text-white transition-colors hover:bg-black"
                   >
-                    Join Waitlist
-                  </button>
-                </form>
+                    Join the waitlist
+                  </Link>
+                </div>
               </SignedOut>
 
               <SignedIn>

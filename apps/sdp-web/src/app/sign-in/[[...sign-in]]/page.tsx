@@ -1,9 +1,9 @@
-import { isAuthEntryEnabled } from "@/lib/auth-entry";
+import { isSignInEntryEnabled } from "@/lib/auth-entry";
 import { SignIn } from "@clerk/nextjs";
 import { redirect } from "next/navigation";
 
 export default async function SignInPage() {
-  if (!(await isAuthEntryEnabled())) {
+  if (!(await isSignInEntryEnabled())) {
     redirect("/");
   }
 

@@ -21,8 +21,35 @@ async function gotoToken(page: Page, tokenId: string): Promise<void> {
   await expect(page.getByTestId("overview-row-token-address")).toBeVisible();
 }
 
+const tabQueryParamByName = {
+  Overview: null,
+  Permissions: "permissions",
+  Extensions: "extensions",
+  Compliance: "compliance",
+  Metadata: "metadata",
+  Operations: "fund-management",
+} as const satisfies Record<string, string | null>;
+
 async function openTab(page: Page, name: string): Promise<void> {
-  await page.getByRole("button", { name, exact: true }).click();
+  const expectedTab = tabQueryParamByName[name as keyof typeof tabQueryParamByName];
+  const url = new URL(page.url());
+  if (expectedTab === null) {
+    url.searchParams.delete("tab");
+  } else {
+    url.searchParams.set("tab", expectedTab);
+  }
+
+  await page.goto(url.toString());
+  await expect
+    .poll(() => {
+      const currentUrl = new URL(page.url());
+      return currentUrl.searchParams.get("tab");
+    })
+    .toBe(expectedTab);
+
+  if (name === "Overview") {
+    await expect(page.getByTestId("overview-row-token-address")).toBeVisible();
+  }
 }
 
 async function waitForToast(page: Page, text: string, previousCount = 0): Promise<void> {

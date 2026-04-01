@@ -1,4 +1,6 @@
+import { getDefaultSignInEntryEnabled } from "@/lib/auth-entry-config";
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
+import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 
 const isPublicRoute = createRouteMatcher([
@@ -6,12 +8,23 @@ const isPublicRoute = createRouteMatcher([
   "/sign-up(.*)",
   "/",
   "/docs(.*)",
-  "/dashboard(.*)",
 ]);
+
+function getUnauthenticatedUrl(req: NextRequest): string {
+  if (!getDefaultSignInEntryEnabled()) {
+    return new URL("/", req.url).toString();
+  }
+
+  const signInUrl = new URL("/sign-in", req.url);
+  signInUrl.searchParams.set("redirect_url", `${req.nextUrl.pathname}${req.nextUrl.search}`);
+  return signInUrl.toString();
+}
 
 export const proxy = clerkMiddleware(async (auth, req) => {
   if (!isPublicRoute(req)) {
-    await auth.protect();
+    await auth.protect({
+      unauthenticatedUrl: getUnauthenticatedUrl(req),
+    });
   }
 
   const requestHeaders = new Headers(req.headers);

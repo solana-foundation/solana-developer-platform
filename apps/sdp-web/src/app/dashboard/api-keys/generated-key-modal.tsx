@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { storeApiKeySecret } from "@/lib/playground-api-keys";
 import { useEscapeKey } from "@/lib/use-escape-key";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { GeneratedApiKeyInput } from "./generated-key-input";
 
 interface GeneratedApiKeyModalProps {
@@ -23,7 +23,6 @@ function GeneratedApiKeyModal({
 }: GeneratedApiKeyModalProps) {
   const [isOpen, setIsOpen] = useState(true);
   const [copyLabel, setCopyLabel] = useState("Copy");
-  const clearedFlash = useRef(false);
 
   useEffect(() => {
     if (!keyValue) {
@@ -36,18 +35,6 @@ function GeneratedApiKeyModal({
       keyPrefix: keyPrefix ?? null,
     });
   }, [apiKeyId, keyValue, keyPrefix]);
-
-  useEffect(() => {
-    if (clearedFlash.current) {
-      return;
-    }
-
-    clearedFlash.current = true;
-    void fetch("/api/dashboard/api-keys/flash", {
-      method: "DELETE",
-      credentials: "same-origin",
-    });
-  }, []);
 
   const close = async () => {
     setIsOpen(false);
