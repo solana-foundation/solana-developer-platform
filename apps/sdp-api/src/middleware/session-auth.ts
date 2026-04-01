@@ -5,6 +5,7 @@
  * Sessions are cached in KV for fast lookups.
  */
 
+import { getDb } from "@/db";
 import { AppError } from "@/lib/errors";
 import type { Env } from "@/types/env";
 import type { CachedSession } from "@sdp/types";
@@ -29,8 +30,8 @@ export function sessionAuthMiddleware() {
     let cachedSession = await getSessionFromKV(c.env.SDP_SESSIONS, sessionId);
 
     if (!cachedSession) {
-      // Fallback to D1
-      cachedSession = await getSessionFromD1(c.env.DB, c.env.SDP_SESSIONS, sessionId);
+      // Fallback to Postgres
+      cachedSession = await getSessionFromDatabase(getDb(c.env), c.env.SDP_SESSIONS, sessionId);
     }
 
     if (!cachedSession) {
@@ -48,7 +49,7 @@ export function sessionAuthMiddleware() {
     c.set("session", cachedSession);
 
     // Update last activity (fire and forget)
-    updateLastActivity(c.env.DB, sessionId);
+    updateLastActivity(getDb(c.env), sessionId);
 
     await next();
   };
@@ -66,12 +67,12 @@ export function optionalSessionAuth() {
         let cachedSession = await getSessionFromKV(c.env.SDP_SESSIONS, sessionId);
 
         if (!cachedSession) {
-          cachedSession = await getSessionFromD1(c.env.DB, c.env.SDP_SESSIONS, sessionId);
+          cachedSession = await getSessionFromDatabase(getDb(c.env), c.env.SDP_SESSIONS, sessionId);
         }
 
         if (cachedSession && new Date(cachedSession.expiresAt) >= new Date()) {
           c.set("session", cachedSession);
-          updateLastActivity(c.env.DB, sessionId);
+          updateLastActivity(getDb(c.env), sessionId);
         }
       } catch {
         // Ignore errors for optional auth
@@ -96,10 +97,10 @@ async function getSessionFromKV(
 }
 
 /**
- * Get session from D1 and cache to KV
+ * Get session from Postgres and cache to KV
  */
-async function getSessionFromD1(
-  db: D1Database,
+async function getSessionFromDatabase(
+  db: DatabaseClient,
   kv: KVNamespace | undefined,
   sessionId: string
 ): Promise<CachedSession | null> {
@@ -150,7 +151,7 @@ async function getSessionFromD1(
 /**
  * Update last activity timestamp (fire and forget)
  */
-function updateLastActivity(db: D1Database, sessionId: string) {
+function updateLastActivity(db: DatabaseClient, sessionId: string) {
   db.prepare("UPDATE sessions SET last_activity_at = datetime('now') WHERE id = ?")
     .bind(sessionId)
     .run()

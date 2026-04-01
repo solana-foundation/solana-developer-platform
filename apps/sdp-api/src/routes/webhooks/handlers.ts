@@ -1,3 +1,4 @@
+import { getDb } from "@/db";
 import { mapClerkRoleToOrgRole } from "@/lib/clerk-role";
 import { AppError, badRequest } from "@/lib/errors";
 import { success } from "@/lib/response";
@@ -49,7 +50,7 @@ function slugify(input: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
-async function ensureUniqueSlug(db: D1Database, base: string): Promise<string> {
+async function ensureUniqueSlug(db: DatabaseClient, base: string): Promise<string> {
   const normalized = slugify(base) || `org-${crypto.randomUUID().slice(0, 8)}`;
   const existing = await db
     .prepare("SELECT id FROM organizations WHERE slug = ?")
@@ -132,11 +133,12 @@ async function ensureOrganizationMapping(c: AppContext, org: ClerkOrgData): Prom
     throw badRequest("Clerk organization id missing");
   }
 
-  const existing = await c.env.DB.prepare(
-    `SELECT organization_id
+  const existing = await getDb(c.env)
+    .prepare(
+      `SELECT organization_id
      FROM auth_organization_identities
      WHERE provider = 'clerk' AND provider_org_id = ?`
-  )
+    )
     .bind(org.id)
     .first<{ organization_id: string }>();
 
@@ -156,31 +158,36 @@ async function ensureOrganizationMapping(c: AppContext, org: ClerkOrgData): Prom
 
   orgName = orgName || "New Organization";
   const slugBase = orgSlug || orgName || org.id;
-  const slug = await ensureUniqueSlug(c.env.DB, slugBase);
+  const slug = await ensureUniqueSlug(getDb(c.env), slugBase);
 
   const orgId = `org_${crypto.randomUUID()}`;
   const authOrgId = `aoi_${crypto.randomUUID()}`;
 
   const batch = [
-    c.env.DB.prepare(
-      `INSERT INTO organizations (id, name, slug, tier, status)
+    getDb(c.env)
+      .prepare(
+        `INSERT INTO organizations (id, name, slug, tier, status)
        VALUES (?, ?, ?, 'free', 'active')`
-    ).bind(orgId, orgName, slug),
-    c.env.DB.prepare(
-      `INSERT INTO auth_organization_identities (id, provider, provider_org_id, organization_id, slug)
+      )
+      .bind(orgId, orgName, slug),
+    getDb(c.env)
+      .prepare(
+        `INSERT INTO auth_organization_identities (id, provider, provider_org_id, organization_id, slug)
        VALUES (?, 'clerk', ?, ?, ?)`
-    ).bind(authOrgId, org.id, orgId, slug),
+      )
+      .bind(authOrgId, org.id, orgId, slug),
   ];
 
   try {
-    await c.env.DB.batch(batch);
+    await getDb(c.env).batch(batch);
   } catch (err) {
     if (err instanceof Error && err.message?.includes("UNIQUE constraint")) {
-      const retry = await c.env.DB.prepare(
-        `SELECT organization_id
+      const retry = await getDb(c.env)
+        .prepare(
+          `SELECT organization_id
          FROM auth_organization_identities
          WHERE provider = 'clerk' AND provider_org_id = ?`
-      )
+        )
         .bind(org.id)
         .first<{ organization_id: string }>();
       if (retry) {
@@ -197,11 +204,12 @@ async function ensureUserMapping(
   c: AppContext,
   params: { clerkUserId: string; email: string }
 ): Promise<string> {
-  const existing = await c.env.DB.prepare(
-    `SELECT user_id
+  const existing = await getDb(c.env)
+    .prepare(
+      `SELECT user_id
      FROM auth_user_identities
      WHERE provider = 'clerk' AND provider_user_id = ?`
-  )
+    )
     .bind(params.clerkUserId)
     .first<{ user_id: string }>();
 
@@ -210,25 +218,29 @@ async function ensureUserMapping(
   }
 
   const normalizedEmail = params.email.toLowerCase();
-  const user = await c.env.DB.prepare("SELECT id FROM users WHERE email = ?")
+  const user = await getDb(c.env)
+    .prepare("SELECT id FROM users WHERE email = ?")
     .bind(normalizedEmail)
     .first<{ id: string }>();
 
   const userId = user?.id ?? `usr_${crypto.randomUUID()}`;
 
   if (!user) {
-    await c.env.DB.prepare(
-      `INSERT INTO users (id, email, email_verified, status)
+    await getDb(c.env)
+      .prepare(
+        `INSERT INTO users (id, email, email_verified, status)
        VALUES (?, ?, 1, 'active')`
-    )
+      )
       .bind(userId, normalizedEmail)
       .run();
   }
 
-  await c.env.DB.prepare(
-    `INSERT OR IGNORE INTO auth_user_identities (id, provider, provider_user_id, user_id, email)
-     VALUES (?, 'clerk', ?, ?, ?)`
-  )
+  await getDb(c.env)
+    .prepare(
+      `INSERT INTO auth_user_identities (id, provider, provider_user_id, user_id, email)
+     VALUES (?, 'clerk', ?, ?, ?)
+     ON CONFLICT (provider, provider_user_id) DO NOTHING`
+    )
     .bind(`aui_${crypto.randomUUID()}`, params.clerkUserId, userId, normalizedEmail)
     .run();
 
@@ -242,14 +254,15 @@ async function ensureMembership(
   const role = mapClerkRoleToOrgRole(params.role);
 
   const memberId = `mem_${crypto.randomUUID()}`;
-  await c.env.DB.prepare(
-    `INSERT INTO organization_members (id, organization_id, user_id, role, status)
+  await getDb(c.env)
+    .prepare(
+      `INSERT INTO organization_members (id, organization_id, user_id, role, status)
      VALUES (?, ?, ?, ?, 'active')
      ON CONFLICT(organization_id, user_id)
      DO UPDATE SET
        role = excluded.role,
        status = 'active'`
-  )
+    )
     .bind(memberId, params.organizationId, params.userId, role)
     .run();
 }
@@ -258,11 +271,12 @@ async function deactivateMembership(
   c: AppContext,
   params: { organizationId: string; userId: string }
 ) {
-  await c.env.DB.prepare(
-    `UPDATE organization_members
+  await getDb(c.env)
+    .prepare(
+      `UPDATE organization_members
      SET status = 'inactive'
      WHERE organization_id = ? AND user_id = ?`
-  )
+    )
     .bind(params.organizationId, params.userId)
     .run();
 }
@@ -327,11 +341,12 @@ async function handleOrganizationMembershipDeleted(c: AppContext, data: Record<s
   }
 
   const organizationId = await ensureOrganizationMapping(c, org);
-  const identity = await c.env.DB.prepare(
-    `SELECT user_id
+  const identity = await getDb(c.env)
+    .prepare(
+      `SELECT user_id
      FROM auth_user_identities
      WHERE provider = 'clerk' AND provider_user_id = ?`
-  )
+    )
     .bind(member.userId)
     .first<{ user_id: string }>();
 

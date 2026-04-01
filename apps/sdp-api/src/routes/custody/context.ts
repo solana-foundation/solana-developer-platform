@@ -33,7 +33,7 @@ export function parseBooleanQueryParam(value: string | undefined): boolean {
 }
 
 export async function getPreferredWalletForConfig(
-  db: D1Database,
+  db: DatabaseClient,
   configId: string,
   defaultWalletId: string | null
 ): Promise<{ walletId: string; publicKey: string } | null> {

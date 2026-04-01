@@ -1,8 +1,9 @@
+import { getDb } from "@/db";
 import app from "@/index";
 import { hashString } from "@/lib/hash";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/d1";
+import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
 import type { OrganizationRpcProvider } from "@sdp/types";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -196,7 +197,7 @@ describe("RPC Relay Routes", () => {
   });
 
   beforeEach(async () => {
-    const db = (env as { DB: D1Database }).DB;
+    const db = getDb(env);
     const apiKeysKV = (env as { SDP_API_KEYS: KVNamespace }).SDP_API_KEYS;
     const rateLimitKV = (env as { SDP_RATE_LIMITS: KVNamespace }).SDP_RATE_LIMITS;
     const cacheKV = (env as { SDP_CACHE: KVNamespace }).SDP_CACHE;
@@ -296,7 +297,7 @@ describe("RPC Relay Routes", () => {
   });
 
   it("uses organization-selected managed provider when configured", async () => {
-    const db = (env as { DB: D1Database }).DB;
+    const db = getDb(env);
     await db
       .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
       .bind(JSON.stringify({ rpcProvider: "helius" }), TEST_ORG.id)
@@ -326,7 +327,7 @@ describe("RPC Relay Routes", () => {
   });
 
   it("supports quicknode as an organization-selected managed provider", async () => {
-    const db = (env as { DB: D1Database }).DB;
+    const db = getDb(env);
     await db
       .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
       .bind(JSON.stringify({ rpcProvider: "quicknode" }), TEST_ORG.id)
@@ -378,7 +379,7 @@ describe("RPC Relay Routes", () => {
       `connectivity check: proxies through ${provider} when org rpcProvider is set`,
       async () => {
         const [selectedProviderConfig] = getRequiredLiveProviderConfigs([provider]);
-        const db = (env as { DB: D1Database }).DB;
+        const db = getDb(env);
         await db
           .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
           .bind(JSON.stringify({ rpcProvider: provider }), TEST_ORG.id)
@@ -428,7 +429,7 @@ describe("RPC Relay Routes", () => {
         "alchemy",
       ]);
 
-      const db = (env as { DB: D1Database }).DB;
+      const db = getDb(env);
       await db
         .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
         .bind(JSON.stringify({ rpcProvider: initialProvider.provider }), TEST_ORG.id)
@@ -538,7 +539,7 @@ describe("RPC Relay Routes", () => {
   });
 
   it("tracks transaction telemetry and origins per provider", async () => {
-    const db = (env as { DB: D1Database }).DB;
+    const db = getDb(env);
     await db
       .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
       .bind(JSON.stringify({ rpcProvider: "triton" }), TEST_ORG.id)

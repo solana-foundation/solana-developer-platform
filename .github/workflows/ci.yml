@@ -77,6 +77,7 @@ jobs:
     name: Unit Tests
     runs-on: ubuntu-latest
     env:
+      DATABASE_URL: postgresql://sdp:sdp@127.0.0.1:5432/sdp
       SOLANA_RPC_URL: ${{ vars.SOLANA_RPC_URL || secrets.SOLANA_RPC_URL || 'https://api.devnet.solana.com' }}
       SOLANA_RPC_DEFAULT_PROVIDER: ${{ vars.SOLANA_RPC_DEFAULT_PROVIDER || secrets.SOLANA_RPC_DEFAULT_PROVIDER || 'default' }}
       SOLANA_RPC_TRITON_URL: ${{ vars.SOLANA_RPC_TRITON_URL || secrets.SOLANA_RPC_TRITON_URL }}
@@ -87,6 +88,20 @@ jobs:
       SOLANA_RPC_ALCHEMY_API_KEY: ${{ secrets.SOLANA_RPC_ALCHEMY_API_KEY }}
       SOLANA_RPC_QUICKNODE_URL: ${{ vars.SOLANA_RPC_QUICKNODE_URL || secrets.SOLANA_RPC_QUICKNODE_URL }}
       SOLANA_RPC_QUICKNODE_API_KEY: ${{ secrets.SOLANA_RPC_QUICKNODE_API_KEY }}
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: sdp
+          POSTGRES_USER: sdp
+          POSTGRES_PASSWORD: sdp
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sdp -d sdp"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -124,6 +139,44 @@ jobs:
 
       - name: Unit tests
         run: pnpm test
+
+  dev_database_verification:
+    name: Dev Database Smoke
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: ${{ secrets.DEV_DATABASE_URL }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.1
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate dev database secret
+        run: |
+          if [ -z "${DATABASE_URL}" ]; then
+            echo "DEV_DATABASE_URL must be set for remote database verification." >&2
+            exit 1
+          fi
+
+      - name: Migrate dev database
+        run: pnpm --filter @sdp/api db:migrate:dev
+
+      - name: Verify dev database schema
+        run: pnpm --filter @sdp/api db:verify
 
   build_api:
     name: Build API
@@ -213,6 +266,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
+      DATABASE_URL: postgresql://sdp:sdp@127.0.0.1:5432/sdp
       # Devnet configuration (override as needed via repository/organization secrets)
       SOLANA_NETWORK: devnet
       SOLANA_RPC_URL: ${{ vars.SOLANA_RPC_URL || secrets.SOLANA_RPC_URL || 'https://api.devnet.solana.com' }}
@@ -229,6 +283,20 @@ jobs:
 
       # Optional: tighten/loosen the fail-fast sponsor-funds check (lamports)
       KORA_MIN_BALANCE_LAMPORTS: ${{ secrets.KORA_MIN_BALANCE_LAMPORTS }}
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: sdp
+          POSTGRES_USER: sdp
+          POSTGRES_PASSWORD: sdp
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sdp -d sdp"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -268,6 +336,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
+      DATABASE_URL: postgresql://sdp:sdp@127.0.0.1:5432/sdp
       NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ vars.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}
       CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
       CLERK_JWT_TEMPLATE: ${{ vars.CLERK_JWT_TEMPLATE || 'sdp-api' }}
@@ -295,6 +364,20 @@ jobs:
       PLAYWRIGHT_API_URL: http://127.0.0.1:8787
       PLAYWRIGHT_API_PORT: "8787"
       PLAYWRIGHT_API_PERSIST_PATH: .wrangler/state-playwright
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: sdp
+          POSTGRES_USER: sdp
+          POSTGRES_PASSWORD: sdp
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sdp -d sdp"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -394,8 +477,8 @@ jobs:
       - name: Install Playwright browser
         run: pnpm --filter sdp-web exec playwright install --with-deps chromium
 
-      - name: Run issuance e2e suite
-        run: pnpm --filter sdp-web test:e2e:issuance
+      - name: Run browser e2e suite
+        run: pnpm --filter sdp-web test:e2e
 
       - name: Upload Playwright artifacts
         if: always()

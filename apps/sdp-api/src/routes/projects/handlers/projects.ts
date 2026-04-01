@@ -1,3 +1,4 @@
+import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
 import { AppError, notFound } from "@/lib/errors";
 import { created, noContent, success } from "@/lib/response";
@@ -32,7 +33,8 @@ export const createProject = async (c: AppContext) => {
       return null;
     }
 
-    const creator = await c.env.DB.prepare("SELECT created_by FROM api_keys WHERE id = ?")
+    const creator = await getDb(c.env)
+      .prepare("SELECT created_by FROM api_keys WHERE id = ?")
       .bind(auth.apiKeyId)
       .first<{ created_by: string }>();
 
@@ -45,7 +47,7 @@ export const createProject = async (c: AppContext) => {
     throw new AppError("UNAUTHORIZED", "Could not resolve authenticated user for project creation");
   }
 
-  const projectService = new ProjectService(c.env.DB);
+  const projectService = new ProjectService(getDb(c.env));
 
   try {
     const project = await projectService.createProject({
@@ -59,7 +61,7 @@ export const createProject = async (c: AppContext) => {
     });
 
     // Audit log
-    const auditService = new AuditService(c.env.DB);
+    const auditService = new AuditService(getDb(c.env));
     await auditService.log(c, {
       action: "create",
       resourceType: "project",
@@ -81,7 +83,7 @@ export const listProjects = async (c: AppContext) => {
   const auth = getAuth(c);
   const includeArchived = c.req.query("includeArchived") === "true";
 
-  const projectService = new ProjectService(c.env.DB);
+  const projectService = new ProjectService(getDb(c.env));
   const projectList = await projectService.listProjects(auth.organizationId, { includeArchived });
 
   const response: ListProjectsResponse = { projects: projectList };
@@ -92,7 +94,7 @@ export const getProject = async (c: AppContext) => {
   const { projectId } = c.req.param();
   const auth = getAuth(c);
 
-  const projectService = new ProjectService(c.env.DB);
+  const projectService = new ProjectService(getDb(c.env));
   const project = await projectService.getProject(projectId);
 
   if (!project || project.organizationId !== auth.organizationId) {
@@ -116,7 +118,7 @@ export const updateProject = async (c: AppContext) => {
     });
   }
 
-  const projectService = new ProjectService(c.env.DB);
+  const projectService = new ProjectService(getDb(c.env));
 
   // Verify ownership
   const existing = await projectService.getProject(projectId);
@@ -130,7 +132,7 @@ export const updateProject = async (c: AppContext) => {
   );
 
   // Audit log
-  const auditService = new AuditService(c.env.DB);
+  const auditService = new AuditService(getDb(c.env));
   await auditService.log(c, {
     action: "update",
     resourceType: "project",
@@ -146,7 +148,7 @@ export const archiveProject = async (c: AppContext) => {
   const { projectId } = c.req.param();
   const auth = getAuth(c);
 
-  const projectService = new ProjectService(c.env.DB);
+  const projectService = new ProjectService(getDb(c.env));
 
   // Verify ownership
   const existing = await projectService.getProject(projectId);
@@ -157,7 +159,7 @@ export const archiveProject = async (c: AppContext) => {
   await projectService.archiveProject(projectId);
 
   // Audit log
-  const auditService = new AuditService(c.env.DB);
+  const auditService = new AuditService(getDb(c.env));
   await auditService.log(c, {
     action: "delete",
     resourceType: "project",

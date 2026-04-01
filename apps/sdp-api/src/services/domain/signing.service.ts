@@ -5,6 +5,7 @@
  * Handles DB-backed config resolution (project default → org default) and async signing flows.
  */
 
+import { getDb } from "@/db";
 import {
   KeychainFireblocksAdapter,
   KeychainMemoryAdapter,
@@ -16,13 +17,7 @@ import {
   canProviderDeleteWallet,
   canProviderSign,
 } from "@/services/custody/providers";
-import {
-  provisionAnchorageWallet,
-  provisionCoinbaseCdpAccount,
-  provisionParaWallet,
-  provisionPrivyWallet,
-  provisionTurnkeyPrivateKey,
-} from "@/services/custody/provisioning";
+import * as custodyProvisioning from "@/services/custody/provisioning";
 import {
   createDfnsApiClient,
   normalizeDfnsWalletId,
@@ -58,7 +53,7 @@ import {
   CustodyConfigStore,
   type CustodyWallet,
   type CustodyWalletLookup,
-  SigningRequestD1Store,
+  SigningRequestStorePg,
   type WalletPurpose,
 } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
@@ -76,7 +71,7 @@ const base58 = getBase58Codec();
 
 /**
  * Store interface for signing configuration records.
- * Abstracted to decouple from D1 specifics.
+ * Abstracted to decouple from the underlying database implementation.
  */
 export interface SigningConfigStore {
   findActive(orgId: string, projectId?: string): Promise<SigningConfigRecord | null>;
@@ -666,7 +661,9 @@ export class SigningService {
     }
 
     // Provision a new Privy server wallet under the platform app.
-    const provisioned = await provisionPrivyWallet(this.env, { apiBaseUrl: options.apiBaseUrl });
+    const provisioned = await custodyProvisioning.provisionPrivyWallet(this.env, {
+      apiBaseUrl: options.apiBaseUrl,
+    });
     const publicKey = provisioned.address as Address;
     const walletId = normalizePrivyWalletId(provisioned.walletId);
 
@@ -747,7 +744,7 @@ export class SigningService {
       };
     }
 
-    const provisioned = await provisionCoinbaseCdpAccount(this.env, {
+    const provisioned = await custodyProvisioning.provisionCoinbaseCdpAccount(this.env, {
       orgId,
       orgSlug: orgId,
       apiBaseUrl: options.apiBaseUrl,
@@ -838,7 +835,7 @@ export class SigningService {
       };
     }
 
-    const provisioned = await provisionParaWallet(this.env, {
+    const provisioned = await custodyProvisioning.provisionParaWallet(this.env, {
       orgId,
       projectId,
       orgSlug: orgId,
@@ -937,7 +934,7 @@ export class SigningService {
       };
     }
 
-    const provisioned = await provisionTurnkeyPrivateKey(this.env, {
+    const provisioned = await custodyProvisioning.provisionTurnkeyPrivateKey(this.env, {
       orgId,
       orgSlug: orgId,
       privateKeyId: options.privateKeyId,
@@ -1073,7 +1070,7 @@ export class SigningService {
       );
     }
 
-    const provisioned = await provisionAnchorageWallet(this.env, {
+    const provisioned = await custodyProvisioning.provisionAnchorageWallet(this.env, {
       apiBaseUrl: options.apiBaseUrl,
       walletId: options.walletId,
       walletLabel: options.walletLabel,
@@ -1248,9 +1245,10 @@ export class SigningService {
 
     if (params.setDefault) {
       try {
-        await this.env.DB.prepare(
-          `UPDATE custody_configs SET default_wallet_id = ?, updated_at = datetime('now') WHERE id = ?`
-        )
+        await getDb(this.env)
+          .prepare(
+            `UPDATE custody_configs SET default_wallet_id = ?, updated_at = datetime('now') WHERE id = ?`
+          )
           .bind(walletId, config.id)
           .run();
       } catch (error) {
@@ -1339,11 +1337,12 @@ export class SigningService {
       const remainingWallets = await this.configStore.getWallets(config.id);
       const nextDefaultWalletId = remainingWallets[0]?.walletId ?? null;
 
-      await this.env.DB.prepare(
-        `UPDATE custody_configs
+      await getDb(this.env)
+        .prepare(
+          `UPDATE custody_configs
          SET default_wallet_id = ?, updated_at = datetime('now')
          WHERE id = ?`
-      )
+        )
         .bind(nextDefaultWalletId, config.id)
         .run();
 
@@ -1375,9 +1374,9 @@ export class SigningService {
       throw new SigningError("Config not found", "NOT_FOUND");
     }
 
-    // Direct D1 update for the config JSON
+    // Direct database update for the config JSON
     // This is safe because we're only updating our own config
-    const db = this.env.DB;
+    const db = getDb(this.env);
     const encryption = this.getEncryptionService();
     const encryptedConfig = await encryption.encrypt(
       existing.organizationId,
@@ -1440,8 +1439,9 @@ export class SigningService {
     }
 
     const walletRow = projectId
-      ? await this.env.DB.prepare(
-          `SELECT c.id as custody_config_id, c.project_id as project_id, w.public_key as wallet_public_key
+      ? await getDb(this.env)
+          .prepare(
+            `SELECT c.id as custody_config_id, c.project_id as project_id, w.public_key as wallet_public_key
              FROM custody_wallets w
              JOIN custody_configs c ON c.id = w.custody_config_id
              WHERE c.organization_id = ?
@@ -1451,15 +1451,16 @@ export class SigningService {
                AND (c.project_id = ? OR c.project_id IS NULL)
              ORDER BY CASE WHEN c.project_id = ? THEN 0 ELSE 1 END, c.updated_at DESC, c.id DESC
              LIMIT 1`
-        )
+          )
           .bind(orgId, walletId, projectId, projectId)
           .first<{
             custody_config_id: string;
             project_id: string | null;
             wallet_public_key: string;
           }>()
-      : await this.env.DB.prepare(
-          `SELECT c.id as custody_config_id, c.project_id as project_id, w.public_key as wallet_public_key
+      : await getDb(this.env)
+          .prepare(
+            `SELECT c.id as custody_config_id, c.project_id as project_id, w.public_key as wallet_public_key
              FROM custody_wallets w
              JOIN custody_configs c ON c.id = w.custody_config_id
              WHERE c.organization_id = ?
@@ -1469,7 +1470,7 @@ export class SigningService {
                AND c.project_id IS NULL
              ORDER BY c.updated_at DESC, c.id DESC
              LIMIT 1`
-        )
+          )
           .bind(orgId, walletId)
           .first<{
             custody_config_id: string;
@@ -1790,15 +1791,15 @@ function decodeBase64(base64: string): Uint8Array {
 /**
  * Create a SigningService instance from environment bindings.
  *
- * This factory wires up the D1-backed stores and creates a fully
+ * This factory wires up the Postgres-backed stores and creates a fully
  * functional SigningService ready for use in request handlers.
  *
  * @param env - Cloudflare Worker environment bindings
  * @returns Configured SigningService instance
  */
 export function createSigningService(env: Env): SigningService {
-  const configStore = new CustodyConfigStore(env.DB, env.CUSTODY_ENCRYPTION_KEY);
-  const signingStore = new SigningRequestD1Store(env.DB);
+  const configStore = new CustodyConfigStore(getDb(env), env.CUSTODY_ENCRYPTION_KEY);
+  const signingStore = new SigningRequestStorePg(getDb(env));
 
   return new SigningService(configStore, signingStore, env);
 }

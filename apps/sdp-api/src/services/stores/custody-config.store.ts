@@ -1,7 +1,7 @@
 /**
  * Custody Configuration Store
  *
- * D1 store for managing custody provider configurations and wallets.
+ * Store for managing custody provider configurations and wallets.
  * Supports DB-backed default resolution with project → organization fallback.
  */
 
@@ -52,7 +52,7 @@ export interface CreateWalletParams {
 
 export type DeactivateWalletResult = "deactivated" | "wallet_not_found" | "last_wallet";
 
-// D1 row types (snake_case)
+// Database row types (snake_case)
 interface CustodyConfigRow {
   id: string;
   organization_id: string;
@@ -114,7 +114,7 @@ export class CustodyConfigStore implements SigningConfigStore {
   private encryptionService: EncryptionService | null = null;
 
   constructor(
-    private db: D1Database,
+    private db: DatabaseClient,
     private encryptionKey?: string
   ) {}
 
@@ -661,7 +661,7 @@ export class CustodyConfigStore implements SigningConfigStore {
       .bind(configId, walletId, configId)
       .run();
 
-    if ((result.meta?.changes ?? 0) > 0) {
+    if (result > 0) {
       return "deactivated";
     }
 
@@ -798,8 +798,8 @@ export class CustodyConfigStore implements SigningConfigStore {
 // Signing Request Store Implementation
 // ═══════════════════════════════════════════════════════════════════════════
 
-export class SigningRequestD1Store implements SigningRequestStore {
-  constructor(private db: D1Database) {}
+export class SigningRequestStorePg implements SigningRequestStore {
+  constructor(private db: DatabaseClient) {}
 
   /**
    * Create a new signing request record.

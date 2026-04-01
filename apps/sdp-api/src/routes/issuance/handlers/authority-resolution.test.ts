@@ -1,5 +1,5 @@
 import type { ApiKeyContext } from "@/lib/auth";
-import { createOrgSigner } from "@/services/solana";
+import * as solanaServices from "@/services/solana";
 import { CustodyConfigStore } from "@/services/stores/custody-config.store";
 import type { Token } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -10,9 +10,7 @@ import {
   resolvePermanentDelegateAuthority,
 } from "./authority-resolution";
 
-vi.mock("@/services/solana", () => ({
-  createOrgSigner: vi.fn(),
-}));
+const createOrgSignerMock = vi.spyOn(solanaServices, "createOrgSigner");
 
 function createToken(overrides: Partial<Token> = {}): Token {
   return {
@@ -50,7 +48,7 @@ function createToken(overrides: Partial<Token> = {}): Token {
 
 describe("authority-resolution", () => {
   beforeEach(() => {
-    vi.restoreAllMocks();
+    vi.clearAllMocks();
   });
 
   afterEach(() => {
@@ -178,7 +176,7 @@ describe("authority-resolution", () => {
       apiKeyId: null,
     };
 
-    vi.mocked(createOrgSigner)
+    createOrgSignerMock
       .mockResolvedValueOnce({
         address: "73ScTjQ3uVNHGF36yoaseFCVUYEoLhZwxvJ9z7CVseod",
       } as never)
@@ -201,7 +199,9 @@ describe("authority-resolution", () => {
 
     const result = await resolveAuthoritySigner({
       env: {
-        DB: {} as D1Database,
+        HYPERDRIVE: {
+          connectionString: "postgresql://sdp:sdp@127.0.0.1:5432/sdp",
+        },
         CUSTODY_ENCRYPTION_KEY: "test",
       } as never,
       auth,
@@ -212,7 +212,7 @@ describe("authority-resolution", () => {
 
     expect(result.walletId).toBe("wal_root");
     expect(result.signer.address).toBe("AENLi9e2XHK7fnMmEqHbPCADPjRPV4n3DxuWbMcBbxK9");
-    expect(createOrgSigner).toHaveBeenCalledTimes(2);
+    expect(createOrgSignerMock).toHaveBeenCalledTimes(2);
   });
 
   it("persists the initial permanent delegate for template tokens on deploy", () => {

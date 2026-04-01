@@ -1,53 +1,24 @@
-import { spawnSync } from "node:child_process";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
-import type { PaymentsDashboardWallet, Token } from "@sdp/types";
+import type { Token } from "@sdp/types";
 import { generateKeyPairSigner } from "@solana/kit";
 import type { ClerkTestIdentity } from "./clerk-admin";
 import {
   type IssuanceFixtureToken,
-  type IssuanceFixtureWallet,
   type IssuanceFixtures,
   writeIssuanceFixtures,
 } from "./issuance-fixtures";
 import { type LocalApiClient, createLocalApiClient } from "./local-api-client";
-
-const PLAYWRIGHT_LOCAL_ORG_ID = "org_e2e_issuance";
-const PLAYWRIGHT_LOCAL_ORG_NAME = "E2E Issuance Org";
-const PLAYWRIGHT_LOCAL_ORG_SLUG = "e2e-issuance";
-const DEFAULT_LOCAL_API_URL = "http://127.0.0.1:8788";
-const DEFAULT_API_PERSIST_PATH = ".wrangler/state-playwright";
-const DEFAULT_CLERK_JWT_TEMPLATE = "sdp-api";
-const DEFAULT_METADATA_IMAGE_URL = "https://example.com/assets/sdp-e2e-token.png";
+import {
+  type PlaywrightWalletFixture,
+  bootstrapLocalWalletFixtures,
+  createExternalSolanaAddress,
+  getBootstrapApiBaseUrl,
+  getBootstrapClerkJwtTemplate,
+  seedLocalClerkOrganizationMapping,
+} from "./local-dashboard-bootstrap";
 
 interface BootstrapOptions {
   identity: ClerkTestIdentity;
   bearerToken: string;
-}
-
-interface PlaywrightApiRuntimeEnv {
-  clerkJwtTemplate: string;
-  localApiBaseUrl: string;
-  persistPath: string;
-}
-
-interface PlaywrightLocalD1Env {
-  persistPath: string;
-}
-
-interface CreateWalletResponse {
-  wallet: IssuanceFixtureWallet;
-}
-
-interface InitializeWalletResponse {
-  configId: string;
-  publicKey: string;
-  walletId: string;
-}
-
-interface ListWalletsResponse {
-  wallets: PaymentsDashboardWallet[];
 }
 
 interface TokenResponse {
@@ -58,155 +29,6 @@ interface ListProjectsResponse {
   projects: Array<{ id: string }>;
 }
 
-function getRepoRoot(): string {
-  return path.resolve(__dirname, "../../../..");
-}
-
-function getApiAppDir(): string {
-  return path.join(getRepoRoot(), "apps/sdp-api");
-}
-
-function getWranglerBin(): string {
-  const apiAppDir = getApiAppDir();
-  return path.join(
-    apiAppDir,
-    "node_modules/.bin",
-    process.platform === "win32" ? "wrangler.cmd" : "wrangler"
-  );
-}
-
-function getPlaywrightLocalD1Env(): PlaywrightLocalD1Env {
-  return {
-    persistPath: process.env.PLAYWRIGHT_API_PERSIST_PATH ?? DEFAULT_API_PERSIST_PATH,
-  };
-}
-
-function getPlaywrightApiRuntimeEnv(): PlaywrightApiRuntimeEnv {
-  return {
-    clerkJwtTemplate:
-      process.env.CLERK_JWT_TEMPLATE ??
-      process.env.NEXT_PUBLIC_CLERK_JWT_TEMPLATE ??
-      DEFAULT_CLERK_JWT_TEMPLATE,
-    localApiBaseUrl: process.env.PLAYWRIGHT_API_URL ?? DEFAULT_LOCAL_API_URL,
-    persistPath: process.env.PLAYWRIGHT_API_PERSIST_PATH ?? DEFAULT_API_PERSIST_PATH,
-  };
-}
-
-function runLocalD1Sql(sql: string): void {
-  const apiAppDir = getApiAppDir();
-  const persistPath = getPlaywrightLocalD1Env().persistPath;
-  const tempFilePath = path.join(os.tmpdir(), `sdp-playwright-d1-${crypto.randomUUID()}.sql`);
-  fs.writeFileSync(tempFilePath, sql);
-
-  try {
-    const result = spawnSync(
-      getWranglerBin(),
-      ["d1", "execute", "DB", "--local", `--persist-to=${persistPath}`, `--file=${tempFilePath}`],
-      {
-        cwd: apiAppDir,
-        env: {
-          ...process.env,
-          CI: "1",
-        },
-        encoding: "utf8",
-      }
-    );
-
-    if (result.status !== 0) {
-      throw new Error(result.stderr || result.stdout || "Unknown wrangler D1 execution error");
-    }
-  } finally {
-    fs.rmSync(tempFilePath, { force: true });
-  }
-}
-
-export function seedLocalClerkOrganizationMapping(identity: ClerkTestIdentity): void {
-  const clerkOrgId = escapeSql(identity.organizationId);
-  const clerkUserId = escapeSql(identity.userId);
-  const clerkEmail = escapeSql(identity.email.toLowerCase());
-  const localUserId = "usr_e2e_issuance_admin";
-  const localMemberId = "mem_e2e_issuance_admin";
-  const localUserIdentityId = "aui_e2e_issuance_admin";
-
-  runLocalD1Sql(`
-    INSERT OR REPLACE INTO organizations (id, name, slug, tier, status)
-    VALUES (
-      '${PLAYWRIGHT_LOCAL_ORG_ID}',
-      '${PLAYWRIGHT_LOCAL_ORG_NAME}',
-      '${PLAYWRIGHT_LOCAL_ORG_SLUG}',
-      'free',
-      'active'
-    );
-
-    INSERT OR REPLACE INTO auth_organization_identities (
-      id,
-      provider,
-      provider_org_id,
-      organization_id,
-      slug
-    )
-    VALUES (
-      'aoi_e2e_issuance',
-      'clerk',
-      '${clerkOrgId}',
-      '${PLAYWRIGHT_LOCAL_ORG_ID}',
-      '${PLAYWRIGHT_LOCAL_ORG_SLUG}'
-    );
-
-    INSERT OR REPLACE INTO users (id, email, email_verified, name, status)
-    VALUES (
-      '${localUserId}',
-      '${clerkEmail}',
-      1,
-      'SDP E2E Admin',
-      'active'
-    );
-
-    INSERT OR REPLACE INTO auth_user_identities (
-      id,
-      provider,
-      provider_user_id,
-      user_id,
-      email
-    )
-    VALUES (
-      '${localUserIdentityId}',
-      'clerk',
-      '${clerkUserId}',
-      '${localUserId}',
-      '${clerkEmail}'
-    );
-
-    INSERT OR REPLACE INTO organization_members (
-      id,
-      organization_id,
-      user_id,
-      role,
-      status
-    )
-    VALUES (
-      '${localMemberId}',
-      '${PLAYWRIGHT_LOCAL_ORG_ID}',
-      '${localUserId}',
-      'admin',
-      'active'
-    );
-  `);
-}
-
-function escapeSql(value: string): string {
-  return value.replaceAll("'", "''");
-}
-
-function toFixtureWallet(wallet: PaymentsDashboardWallet): IssuanceFixtureWallet {
-  return {
-    id: wallet.id,
-    walletId: wallet.walletId,
-    publicKey: wallet.publicKey,
-    label: wallet.label ?? null,
-  };
-}
-
 function toFixtureToken(token: Token): IssuanceFixtureToken {
   return {
     id: token.id,
@@ -215,12 +37,6 @@ function toFixtureToken(token: Token): IssuanceFixtureToken {
     mintAddress: token.mintAddress ?? null,
     status: token.status,
   };
-}
-
-async function listWallets(api: LocalApiClient): Promise<PaymentsDashboardWallet[]> {
-  // biome-ignore lint/nursery/noSecrets: This is a local API path, not a credential.
-  const data = await api.get<ListWalletsResponse>("/v1/wallets?includeAllProviders=true");
-  return data.wallets;
 }
 
 async function fetchToken(api: LocalApiClient, tokenId: string): Promise<Token> {
@@ -272,7 +88,7 @@ async function createFixtureToken(
     symbol: input.symbol,
     template: "stablecoin",
     uri: input.uri,
-    imageUrl: DEFAULT_METADATA_IMAGE_URL,
+    imageUrl: "https://example.com/assets/sdp-e2e-token.png",
     description: `${input.name} description`,
     signingWalletId: input.signingWalletId,
     requiresAllowlist: input.requiresAllowlist,
@@ -300,42 +116,56 @@ async function deployFixtureToken(
   );
 }
 
-function createExternalAddressSet(): Promise<{ allowlistWallet: string; freezeWallet: string }> {
-  return Promise.all([generateKeyPairSigner(), generateKeyPairSigner()]).then(
-    ([allowlistWallet, freezeWallet]) => ({
-      allowlistWallet: allowlistWallet.address,
-      freezeWallet: freezeWallet.address,
-    })
-  );
+async function createExternalAddressSet(): Promise<{
+  allowlistWallet: string;
+  freezeWallet: string;
+}> {
+  const freezeWallet = await generateKeyPairSigner();
+
+  return {
+    allowlistWallet: await createExternalSolanaAddress(),
+    freezeWallet: freezeWallet.address,
+  };
+}
+
+function requireWallet(
+  wallets: PlaywrightWalletFixture[],
+  walletId: string | undefined,
+  fallbackIndex: number
+): PlaywrightWalletFixture {
+  const resolved =
+    (walletId ? wallets.find((wallet) => wallet.walletId === walletId) : null) ??
+    wallets[fallbackIndex];
+
+  if (!resolved) {
+    throw new Error(`Failed to resolve Playwright wallet fixture at index ${fallbackIndex}`);
+  }
+
+  return resolved;
 }
 
 export async function bootstrapLocalIssuanceFixtures({
   identity,
   bearerToken,
 }: BootstrapOptions): Promise<IssuanceFixtures> {
-  const runtimeEnv = getPlaywrightApiRuntimeEnv();
-  const api = createLocalApiClient(runtimeEnv.localApiBaseUrl, bearerToken);
-
-  const initialized = await api.post<InitializeWalletResponse>("/v1/wallets/initialize", {
+  const walletBootstrap = await bootstrapLocalWalletFixtures({
+    identity,
+    bearerToken,
     provider: "privy",
-    walletLabel: "Treasury",
+    walletCount: 2,
   });
-  const delegated = await api.post<CreateWalletResponse>("/v1/wallets", {
-    provider: "privy",
-    label: "Delegated",
-  });
-  const wallets = await listWallets(api);
+  const api = createLocalApiClient(getBootstrapApiBaseUrl(), bearerToken);
 
-  const treasuryWallet =
-    wallets.find((wallet) => wallet.walletId === initialized.walletId) ??
-    wallets.find((wallet) => wallet.publicKey === initialized.publicKey);
-  const delegatedWallet =
-    wallets.find((wallet) => wallet.walletId === delegated.wallet.walletId) ??
-    wallets.find((wallet) => wallet.publicKey === delegated.wallet.publicKey);
-
-  if (!treasuryWallet || !delegatedWallet) {
-    throw new Error("Failed to resolve the seeded Privy wallets for Playwright issuance tests");
-  }
+  const treasuryWallet = requireWallet(
+    walletBootstrap.wallets,
+    walletBootstrap.wallets[0]?.walletId,
+    0
+  );
+  const delegatedWallet = requireWallet(
+    walletBootstrap.wallets,
+    walletBootstrap.wallets[1]?.walletId,
+    1
+  );
 
   const externalAddresses = await createExternalAddressSet();
 
@@ -370,16 +200,11 @@ export async function bootstrapLocalIssuanceFixtures({
   const projectId = await ensureProjectId(api);
 
   const fixtures: IssuanceFixtures = {
-    organization: {
-      clerkOrgId: identity.organizationId,
-      localOrgId: PLAYWRIGHT_LOCAL_ORG_ID,
-      slug: PLAYWRIGHT_LOCAL_ORG_SLUG,
-      name: PLAYWRIGHT_LOCAL_ORG_NAME,
-    },
+    organization: walletBootstrap.organization,
     projectId,
     wallets: {
-      treasury: toFixtureWallet(treasuryWallet),
-      delegated: toFixtureWallet(delegatedWallet),
+      treasury: treasuryWallet,
+      delegated: delegatedWallet,
     },
     tokens: {
       pending: toFixtureToken(pendingToken),
@@ -393,10 +218,4 @@ export async function bootstrapLocalIssuanceFixtures({
   return fixtures;
 }
 
-export function getBootstrapApiBaseUrl(): string {
-  return getPlaywrightApiRuntimeEnv().localApiBaseUrl;
-}
-
-export function getBootstrapClerkJwtTemplate(): string {
-  return getPlaywrightApiRuntimeEnv().clerkJwtTemplate;
-}
+export { getBootstrapApiBaseUrl, getBootstrapClerkJwtTemplate, seedLocalClerkOrganizationMapping };

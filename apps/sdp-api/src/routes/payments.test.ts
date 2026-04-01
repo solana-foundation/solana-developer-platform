@@ -1,83 +1,28 @@
 import { createHmac } from "node:crypto";
+import { getDb } from "@/db";
 import app from "@/index";
 import { hashString } from "@/lib/hash";
-import { SOL_MINT, getSplTokenBalances } from "@/routes/payments/token-accounts";
-import { getAccountInfo } from "@/services/solana/rpc";
+import * as tokenAccounts from "@/routes/payments/token-accounts";
+import * as feePaymentAdapters from "@/services/adapters/fee-payment";
+import * as solanaServices from "@/services/solana";
+import * as solanaRpc from "@/services/solana/rpc";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/d1";
+import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVNamespaces, seedCachedApiKey } from "@/test/mocks/kv";
 import type { CachedApiKey } from "@sdp/types";
+import { address, createNoopSigner } from "@solana/kit";
 import type { Signature } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/services/solana/rpc", async () => {
-  const actual =
-    await vi.importActual<typeof import("@/services/solana/rpc")>("@/services/solana/rpc");
-  return {
-    ...actual,
-    createRpc: vi.fn().mockReturnValue({}),
-    getAccountInfo: vi.fn().mockResolvedValue({
-      lamports: 4200000000n,
-      owner: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
-    }),
-    getRecentBlockhash: vi.fn().mockResolvedValue({
-      // biome-ignore lint/nursery/noSecrets: Test blockhash, not a secret.
-      blockhash: "EkSnNWid2cvwEVnVx9aBqawnmiCNiDgp3gUdkDPTKN1N",
-      lastValidBlockHeight: 1000n,
-    }),
-    confirmTransaction: vi.fn().mockResolvedValue({
-      signature:
-        // biome-ignore lint/nursery/noSecrets: Test transaction signature, not a secret.
-        "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy",
-      slot: 100n,
-      confirmationStatus: "confirmed",
-      err: null,
-    }),
-    getSignaturesForAddress: vi.fn().mockResolvedValue([]),
-  };
-});
-
-vi.mock("@/routes/payments/token-accounts", async () => {
-  const actual = await vi.importActual<typeof import("@/routes/payments/token-accounts")>(
-    "@/routes/payments/token-accounts"
-  );
-  return {
-    ...actual,
-    getSplTokenBalances: vi.fn().mockResolvedValue([]),
-  };
-});
-
-vi.mock("@/services/adapters/fee-payment", async () => {
-  const actual = await vi.importActual<typeof import("@/services/adapters/fee-payment")>(
-    "@/services/adapters/fee-payment"
-  );
-  return {
-    ...actual,
-    createFeePaymentAdapter: vi.fn().mockReturnValue({
-      providerId: "mock",
-      // biome-ignore lint/nursery/noSecrets: Test Solana address used as mock fee payer, not a secret.
-      getFeePayer: vi.fn().mockResolvedValue("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
-      signAsFeePayer: vi.fn(),
-      signAndSend: vi.fn().mockResolvedValue(
-        // biome-ignore lint/nursery/noSecrets: Test transaction signature, not a secret.
-        "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy"
-      ),
-    }),
-  };
-});
-
-vi.mock("@/services/solana", async () => {
-  const actual = await vi.importActual<typeof import("@/services/solana")>("@/services/solana");
-  const { address, createNoopSigner } = await import("@solana/kit");
-  return {
-    ...actual,
-    createOrgSigner: vi.fn().mockResolvedValue(
-      // biome-ignore lint/nursery/noSecrets: Test Solana address, not a secret.
-      createNoopSigner(address("8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ"))
-    ),
-  };
-});
+const createRpcMock = vi.spyOn(solanaRpc, "createRpc");
+const getAccountInfoMock = vi.spyOn(solanaRpc, "getAccountInfo");
+const getRecentBlockhashMock = vi.spyOn(solanaRpc, "getRecentBlockhash");
+const confirmTransactionMock = vi.spyOn(solanaRpc, "confirmTransaction");
+const getSignaturesForAddressMock = vi.spyOn(solanaRpc, "getSignaturesForAddress");
+const getSplTokenBalancesMock = vi.spyOn(tokenAccounts, "getSplTokenBalances");
+const createFeePaymentAdapterMock = vi.spyOn(feePaymentAdapters, "createFeePaymentAdapter");
+const createOrgSignerMock = vi.spyOn(solanaServices, "createOrgSigner");
 
 const TEST_CONFIG_ID = "cust_cfg_payments_test";
 const TEST_CUSTODY_WALLET_ID = "cwlt_payments_test";
@@ -144,8 +89,6 @@ let originalBvnkHawkAuthId: string | undefined;
 let originalBvnkHawkSecretKey: string | undefined;
 let originalBvnkWalletId: string | undefined;
 let originalBvnkApiBaseUrl: string | undefined;
-const mockedGetAccountInfo = vi.mocked(getAccountInfo);
-const mockedGetSplTokenBalances = vi.mocked(getSplTokenBalances);
 
 function assertMoonPaySignature(url: URL): void {
   const signature = url.searchParams.get("signature");
@@ -170,62 +113,70 @@ async function seedAuthAndWallet(): Promise<void> {
 
   await seedCachedApiKey(env, keyHash, TEST_CACHED_API_KEY);
 
-  await env.DB.batch([
-    env.DB.prepare(
-      "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)"
-    ).bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, "free", "active"),
-    env.DB.prepare(
-      "INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)"
-    ).bind(TEST_USER.id, TEST_USER.email, 1, "active"),
-    env.DB.prepare(
-      `INSERT INTO api_keys
+  await getDb(env).batch([
+    getDb(env)
+      .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
+      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, "free", "active"),
+    getDb(env)
+      .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
+      .bind(TEST_USER.id, TEST_USER.email, 1, "active"),
+    getDb(env)
+      .prepare(
+        `INSERT INTO api_keys
            (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, environment, status)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).bind(
-      TEST_API_KEY.id,
-      TEST_ORG.id,
-      null,
-      TEST_USER.id,
-      "Payments Test Key",
-      TEST_API_KEY.prefix,
-      keyHash,
-      "api_admin",
-      JSON.stringify(["*"]),
-      "sandbox",
-      "active"
-    ),
-    env.DB.prepare(
-      `INSERT INTO custody_configs
+      )
+      .bind(
+        TEST_API_KEY.id,
+        TEST_ORG.id,
+        null,
+        TEST_USER.id,
+        "Payments Test Key",
+        TEST_API_KEY.prefix,
+        keyHash,
+        "api_admin",
+        JSON.stringify(["*"]),
+        "sandbox",
+        "active"
+      ),
+    getDb(env)
+      .prepare(
+        `INSERT INTO custody_configs
            (id, organization_id, project_id, provider, config_encrypted, encryption_version, default_wallet_id, status)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-    ).bind(
-      TEST_CONFIG_ID,
-      TEST_ORG.id,
-      null,
-      "local",
-      "test-config",
-      "sdp-custody-encryption-v1",
-      TEST_WALLET_ID,
-      "active"
-    ),
-    env.DB.prepare(
-      `INSERT INTO custody_scope_defaults
+      )
+      .bind(
+        TEST_CONFIG_ID,
+        TEST_ORG.id,
+        null,
+        "local",
+        "test-config",
+        "sdp-custody-encryption-v1",
+        TEST_WALLET_ID,
+        "active"
+      ),
+    getDb(env)
+      .prepare(
+        `INSERT INTO custody_scope_defaults
            (id, organization_id, project_id, default_custody_config_id)
          VALUES (?, ?, ?, ?)`
-    ).bind(`csd_${TEST_CONFIG_ID}`, TEST_ORG.id, null, TEST_CONFIG_ID),
-    env.DB.prepare(
-      `INSERT INTO custody_wallets
+      )
+      .bind(`csd_${TEST_CONFIG_ID}`, TEST_ORG.id, null, TEST_CONFIG_ID),
+    getDb(env)
+      .prepare(
+        `INSERT INTO custody_wallets
            (id, custody_config_id, wallet_id, public_key, label, purpose, status)
          VALUES (?, ?, ?, ?, ?, ?, ?)`
-    ).bind(
-      TEST_CUSTODY_WALLET_ID,
-      TEST_CONFIG_ID,
-      TEST_WALLET_ID,
-      TEST_SOLANA_ADDRESSES.wallet1,
-      "Payments Wallet",
-      "transfer",
-      "active"
-    ),
+      )
+      .bind(
+        TEST_CUSTODY_WALLET_ID,
+        TEST_CONFIG_ID,
+        TEST_WALLET_ID,
+        TEST_SOLANA_ADDRESSES.wallet1,
+        "Payments Wallet",
+        "transfer",
+        "active"
+      ),
   ]);
 }
 
@@ -244,50 +195,87 @@ async function seedWalletPolicy(params: {
 }): Promise<void> {
   const now = new Date().toISOString();
 
-  await env.DB.batch([
-    env.DB.prepare(
-      `INSERT INTO payment_wallet_policies
+  await getDb(env).batch([
+    getDb(env)
+      .prepare(
+        `INSERT INTO payment_wallet_policies
            (id, custody_wallet_id, policy_type, policy, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?)`
-    ).bind(
-      "pwp_allowlist_test",
-      TEST_CUSTODY_WALLET_ID,
-      "destination_allowlist",
-      JSON.stringify({
-        version: 1,
-        destinationAllowlist: params.destinationAllowlist,
-      }),
-      now,
-      now
-    ),
-    env.DB.prepare(
-      `INSERT INTO payment_wallet_policies
+      )
+      .bind(
+        "pwp_allowlist_test",
+        TEST_CUSTODY_WALLET_ID,
+        "destination_allowlist",
+        JSON.stringify({
+          version: 1,
+          destinationAllowlist: params.destinationAllowlist,
+        }),
+        now,
+        now
+      ),
+    getDb(env)
+      .prepare(
+        `INSERT INTO payment_wallet_policies
            (id, custody_wallet_id, policy_type, policy, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?)`
-    ).bind(
-      "pwp_limits_test",
-      TEST_CUSTODY_WALLET_ID,
-      "transfer_limits",
-      JSON.stringify({
-        version: 1,
-        maxTransferAmount: params.maxTransferAmount ?? null,
-        maxDailyAmount: params.maxDailyAmount ?? null,
-      }),
-      now,
-      now
-    ),
+      )
+      .bind(
+        "pwp_limits_test",
+        TEST_CUSTODY_WALLET_ID,
+        "transfer_limits",
+        JSON.stringify({
+          version: 1,
+          maxTransferAmount: params.maxTransferAmount ?? null,
+          maxDailyAmount: params.maxDailyAmount ?? null,
+        }),
+        now,
+        now
+      ),
   ]);
 }
 
 describe("Payments routes", () => {
   beforeEach(async () => {
-    mockedGetAccountInfo.mockReset();
-    mockedGetAccountInfo.mockResolvedValue({
+    vi.clearAllMocks();
+
+    createRpcMock.mockReturnValue({} as ReturnType<typeof solanaRpc.createRpc>);
+    getAccountInfoMock.mockResolvedValue({
       lamports: 4200000000n,
       owner: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
-    } as Awaited<ReturnType<typeof getAccountInfo>>);
-    mockedGetSplTokenBalances.mockReset();
-    mockedGetSplTokenBalances.mockResolvedValue([]);
+    } as Awaited<ReturnType<typeof solanaRpc.getAccountInfo>>);
+    getRecentBlockhashMock.mockResolvedValue({
+      // biome-ignore lint/nursery/noSecrets: Test blockhash, not a secret.
+      blockhash: "EkSnNWid2cvwEVnVx9aBqawnmiCNiDgp3gUdkDPTKN1N" as Awaited<
+        ReturnType<typeof solanaRpc.getRecentBlockhash>
+      >["blockhash"],
+      lastValidBlockHeight: 1000n,
+    });
+    confirmTransactionMock.mockResolvedValue({
+      signature:
+        // biome-ignore lint/nursery/noSecrets: Test transaction signature, not a secret.
+        "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy" as Awaited<
+          ReturnType<typeof solanaRpc.confirmTransaction>
+        >["signature"],
+      slot: 100n,
+      confirmationStatus: "confirmed",
+      err: null,
+    });
+    getSignaturesForAddressMock.mockResolvedValue([]);
+    getSplTokenBalancesMock.mockResolvedValue([]);
+    createFeePaymentAdapterMock.mockReturnValue({
+      providerId: "mock",
+      // biome-ignore lint/nursery/noSecrets: Test Solana address used as mock fee payer, not a secret.
+      getFeePayer: vi.fn().mockResolvedValue("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
+      signAsFeePayer: vi.fn(),
+      signAndSend: vi.fn().mockResolvedValue(
+        // biome-ignore lint/nursery/noSecrets: Test transaction signature, not a secret.
+        "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy"
+      ),
+    } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+    createOrgSignerMock.mockResolvedValue(
+      // biome-ignore lint/nursery/noSecrets: Test Solana address, not a secret.
+      createNoopSigner(address("8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ"))
+    );
 
     originalMoonPayApiKey = env.MOONPAY_API_KEY;
     originalMoonPaySecretKey = env.MOONPAY_SECRET_KEY;
@@ -338,8 +326,8 @@ describe("Payments routes", () => {
   });
 
   it("falls back to a zero SOL balance when RPC balance lookups fail", async () => {
-    mockedGetAccountInfo.mockRejectedValueOnce(new Error("rpc unavailable"));
-    mockedGetSplTokenBalances.mockRejectedValueOnce(new Error("rpc unavailable"));
+    getAccountInfoMock.mockRejectedValueOnce(new Error("rpc unavailable"));
+    getSplTokenBalancesMock.mockRejectedValueOnce(new Error("rpc unavailable"));
 
     const res = await app.request(
       `/v1/payments/wallets/${TEST_WALLET_ID}/balances`,
@@ -375,7 +363,7 @@ describe("Payments routes", () => {
       balances: [
         {
           token: "SOL",
-          mint: SOL_MINT,
+          mint: tokenAccounts.SOL_MINT,
           amount: "0",
           uiAmount: "0",
           decimals: 9,
@@ -387,8 +375,8 @@ describe("Payments routes", () => {
   });
 
   it("keeps SPL balances when only the SOL lookup fails", async () => {
-    mockedGetAccountInfo.mockRejectedValueOnce(new Error("rpc unavailable"));
-    mockedGetSplTokenBalances.mockResolvedValueOnce([
+    getAccountInfoMock.mockRejectedValueOnce(new Error("rpc unavailable"));
+    getSplTokenBalancesMock.mockResolvedValueOnce([
       {
         token: "USDC",
         mint: "usdc_mint_test",
@@ -427,7 +415,7 @@ describe("Payments routes", () => {
     expect(body.data.walletBalances.balances).toMatchObject([
       {
         token: "SOL",
-        mint: SOL_MINT,
+        mint: tokenAccounts.SOL_MINT,
         amount: "0",
         uiAmount: "0",
         decimals: 9,
@@ -447,7 +435,7 @@ describe("Payments routes", () => {
   });
 
   it("keeps the SOL balance when only the SPL lookup fails", async () => {
-    mockedGetSplTokenBalances.mockRejectedValueOnce(new Error("rpc unavailable"));
+    getSplTokenBalancesMock.mockRejectedValueOnce(new Error("rpc unavailable"));
 
     const res = await app.request(
       `/v1/payments/wallets/${TEST_WALLET_ID}/balances`,
@@ -478,7 +466,7 @@ describe("Payments routes", () => {
     expect(body.data.walletBalances.balances).toMatchObject([
       {
         token: "SOL",
-        mint: SOL_MINT,
+        mint: tokenAccounts.SOL_MINT,
         amount: "4200000000",
         uiAmount: "4.2",
         decimals: 9,
@@ -1375,7 +1363,7 @@ describe("Payments routes", () => {
     const body = (await res.json()) as { error: { code: string } };
     expect(body.error.code).toBe("FORBIDDEN");
 
-    const transfers = await env.DB.prepare("SELECT id FROM payment_transfers").all<{
+    const transfers = await getDb(env).prepare("SELECT id FROM payment_transfers").all<{
       id: string;
     }>();
     expect(transfers.results).toHaveLength(0);
@@ -1409,7 +1397,7 @@ describe("Payments routes", () => {
     const body = (await res.json()) as { error: { code: string } };
     expect(body.error.code).toBe("FORBIDDEN");
 
-    const transfers = await env.DB.prepare("SELECT id FROM payment_transfers").all<{
+    const transfers = await getDb(env).prepare("SELECT id FROM payment_transfers").all<{
       id: string;
     }>();
     expect(transfers.results).toHaveLength(0);
@@ -1450,9 +1438,8 @@ describe("Payments routes", () => {
         "EkSnNWid2cvwEVnVx9aBqawnmiCNiDgp3gUdkDPTKN1N"
       );
 
-      const row = await env.DB.prepare(
-        "SELECT status, serialized_tx FROM payment_transfers WHERE id = ?"
-      )
+      const row = await getDb(env)
+        .prepare("SELECT status, serialized_tx FROM payment_transfers WHERE id = ?")
         .bind(body.data.transfer.id)
         .first<{ status: string; serialized_tx: string | null }>();
       expect(row?.status).toBe("pending");
@@ -1517,7 +1504,7 @@ describe("Payments routes", () => {
       const body = (await res.json()) as { error: { code: string } };
       expect(body.error.code).toBe("BAD_REQUEST");
 
-      const transfers = await env.DB.prepare("SELECT id FROM payment_transfers").all<{
+      const transfers = await getDb(env).prepare("SELECT id FROM payment_transfers").all<{
         id: string;
       }>();
       expect(transfers.results).toHaveLength(0);
@@ -1570,7 +1557,7 @@ describe("Payments routes", () => {
       const body = (await res.json()) as { error: { code: string } };
       expect(body.error.code).toBe("NOT_FOUND");
 
-      const transfers = await env.DB.prepare("SELECT id FROM payment_transfers").all<{
+      const transfers = await getDb(env).prepare("SELECT id FROM payment_transfers").all<{
         id: string;
       }>();
       expect(transfers.results).toHaveLength(0);
@@ -1584,11 +1571,12 @@ describe("Payments routes", () => {
     });
 
     const now = new Date().toISOString();
-    await env.DB.prepare(
-      `INSERT INTO payment_transfers
+    await getDb(env)
+      .prepare(
+        `INSERT INTO payment_transfers
            (id, organization_id, project_id, wallet_id, source_address, destination_address, token, amount, memo, type, direction, status, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    )
+      )
       .bind(
         "xfr_existing_daily_limit",
         TEST_ORG.id,
@@ -1629,9 +1617,11 @@ describe("Payments routes", () => {
     const body = (await res.json()) as { error: { code: string } };
     expect(body.error.code).toBe("FORBIDDEN");
 
-    const transfers = await env.DB.prepare("SELECT id FROM payment_transfers ORDER BY id ASC").all<{
-      id: string;
-    }>();
+    const transfers = await getDb(env)
+      .prepare("SELECT id FROM payment_transfers ORDER BY id ASC")
+      .all<{
+        id: string;
+      }>();
     expect(transfers.results).toHaveLength(1);
     expect(transfers.results[0]?.id).toBe("xfr_existing_daily_limit");
   });
@@ -1643,11 +1633,12 @@ describe("Payments routes", () => {
     walletId?: string;
   }): Promise<void> {
     const now = new Date().toISOString();
-    await env.DB.prepare(
-      `INSERT INTO payment_transfers
+    await getDb(env)
+      .prepare(
+        `INSERT INTO payment_transfers
            (id, organization_id, project_id, wallet_id, source_address, destination_address, token, amount, memo, type, direction, status, signature, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    )
+      )
       .bind(
         params.id,
         TEST_ORG.id,
@@ -1698,9 +1689,8 @@ describe("Payments routes", () => {
       expect(body.data.transfer.id).toMatch(/^xfr_/);
       expect(body.data.transfer.signature).toBeTruthy();
 
-      const row = await env.DB.prepare(
-        "SELECT status, signature FROM payment_transfers WHERE id = ?"
-      )
+      const row = await getDb(env)
+        .prepare("SELECT status, signature FROM payment_transfers WHERE id = ?")
         .bind(body.data.transfer.id)
         .first<{ status: string; signature: string | null }>();
       expect(row?.status).toBe("confirmed");
@@ -1708,14 +1698,13 @@ describe("Payments routes", () => {
     });
 
     it("marks the transfer as failed when execution throws and returns 502", async () => {
-      const { createFeePaymentAdapter } = await import("@/services/adapters/fee-payment");
-      vi.mocked(createFeePaymentAdapter).mockReturnValueOnce({
+      createFeePaymentAdapterMock.mockReturnValueOnce({
         providerId: "mock",
         // biome-ignore lint/nursery/noSecrets: Test Solana address used as mock fee payer, not a secret.
         getFeePayer: vi.fn().mockResolvedValue("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
         signAsFeePayer: vi.fn(),
         signAndSend: vi.fn().mockRejectedValue(new Error("RPC connection refused")),
-      });
+      } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
 
       const res = await app.request(
         "/v1/payments/transfers",
@@ -1739,10 +1728,12 @@ describe("Payments routes", () => {
       const body = (await res.json()) as { error: { code: string } };
       expect(body.error.code).toBe("SOLANA_RPC_ERROR");
 
-      const transfers = await env.DB.prepare("SELECT status, error FROM payment_transfers").all<{
-        status: string;
-        error: string | null;
-      }>();
+      const transfers = await getDb(env)
+        .prepare("SELECT status, error FROM payment_transfers")
+        .all<{
+          status: string;
+          error: string | null;
+        }>();
       expect(transfers.results).toHaveLength(1);
       expect(transfers.results[0]?.status).toBe("failed");
       expect(transfers.results[0]?.error).toBeTruthy();
@@ -1755,7 +1746,6 @@ describe("Payments routes", () => {
     });
 
     it("returns confirmed + pending transfers when wallet filter is provided", async () => {
-      const { getSignaturesForAddress } = await import("@/services/solana/rpc");
       const confirmedSig =
         // biome-ignore lint/nursery/noSecrets: Test transaction signature, not a secret.
         "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy";
@@ -1763,7 +1753,7 @@ describe("Payments routes", () => {
       await seedTransfer({ id: "xfr_confirmed_1", status: "confirmed", signature: confirmedSig });
       await seedTransfer({ id: "xfr_pending_1", status: "pending" });
 
-      vi.mocked(getSignaturesForAddress).mockResolvedValueOnce([
+      getSignaturesForAddressMock.mockResolvedValueOnce([
         {
           signature: confirmedSig as unknown as Signature,
           slot: 100n,
@@ -1793,7 +1783,6 @@ describe("Payments routes", () => {
     });
 
     it("surfaces observed inbound transfers for wallet history even without a DB record", async () => {
-      const { getSignaturesForAddress } = await import("@/services/solana/rpc");
       const observedSig =
         // biome-ignore lint/nursery/noSecrets: Test transaction signature, not a secret.
         "3o9XWnJ7CyD6be8xXh8hFXRrM9rPzGQhE1mQ4Z8VjYkU7LZtP4R3WnV5uA2sD1fG6hJ7kL8mN9pQ1rS2tU3v";
@@ -1888,7 +1877,7 @@ describe("Payments routes", () => {
         )
       );
 
-      vi.mocked(getSignaturesForAddress).mockResolvedValueOnce([
+      getSignaturesForAddressMock.mockResolvedValueOnce([
         {
           signature: observedSig as unknown as Signature,
           slot: 101n,
@@ -1935,8 +1924,6 @@ describe("Payments routes", () => {
     });
 
     it("returns all transfers via DB-only path when no wallet filter is provided", async () => {
-      const { getSignaturesForAddress } = await import("@/services/solana/rpc");
-
       await seedTransfer({ id: "xfr_db_1", status: "confirmed" });
       await seedTransfer({ id: "xfr_db_2", status: "pending" });
       await seedTransfer({ id: "xfr_db_3", status: "failed" });
@@ -1957,7 +1944,7 @@ describe("Payments routes", () => {
       };
       expect(body.data).toHaveLength(3);
       expect(body.meta.total).toBe(3);
-      expect(vi.mocked(getSignaturesForAddress)).not.toHaveBeenCalled();
+      expect(getSignaturesForAddressMock).not.toHaveBeenCalled();
     });
 
     it("filters by status when status query param is provided", async () => {

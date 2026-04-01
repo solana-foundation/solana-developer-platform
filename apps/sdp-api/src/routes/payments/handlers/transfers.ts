@@ -1,3 +1,4 @@
+import { getDb } from "@/db";
 import type {
   PaymentTransferDirection as TransferDirection,
   PaymentTransferRow as TransferRow,
@@ -11,14 +12,8 @@ import { AppError } from "@/lib/errors";
 import { paginated, success } from "@/lib/response";
 import { assertValidAddress, getSolanaConfig } from "@/lib/solana";
 import { withHeliusApiKey } from "@/services/rpc-relay.service";
-import { createOrgSigner } from "@/services/solana";
-import {
-  confirmTransaction,
-  createRpc,
-  getRecentBlockhash,
-  getSignaturesForAddress,
-  simulateTransaction,
-} from "@/services/solana/rpc";
+import * as solanaServices from "@/services/solana";
+import * as solanaRpc from "@/services/solana/rpc";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import type { Permission } from "@sdp/types";
@@ -264,8 +259,8 @@ async function prepareSolTransfer(
     throw new AppError("BAD_REQUEST", "Transfer amount must be greater than zero");
   }
 
-  const rpc = createRpc(c.env);
-  const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc, "confirmed");
+  const rpc = solanaRpc.createRpc(c.env);
+  const { blockhash, lastValidBlockHeight } = await solanaRpc.getRecentBlockhash(rpc, "confirmed");
   const feePayer = await getSponsoredFeePayer(c);
 
   const instruction = getTransferSolInstruction({
@@ -302,7 +297,7 @@ async function executeSolTransfer(
   }
 
   const auth = getAuth(c);
-  const signer = await createOrgSigner(
+  const signer = await solanaServices.createOrgSigner(
     c.env,
     auth.organizationId,
     auth.projectId ?? undefined,
@@ -313,8 +308,8 @@ async function executeSolTransfer(
     throw new AppError("BAD_REQUEST", "Resolved signing wallet does not match source wallet");
   }
 
-  const rpc = createRpc(c.env);
-  const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc, "confirmed");
+  const rpc = solanaRpc.createRpc(c.env);
+  const { blockhash, lastValidBlockHeight } = await solanaRpc.getRecentBlockhash(rpc, "confirmed");
   const feePayment = getFeePayment(c);
   const feePayer = await feePayment.getFeePayer();
 
@@ -337,7 +332,7 @@ async function executeSolTransfer(
   const txBytes = new Uint8Array(txEncoder.encode(partiallySigned));
   const signature = await feePayment.signAndSend(txBytes);
 
-  const confirmation = await confirmTransaction(rpc, signature, {
+  const confirmation = await solanaRpc.confirmTransaction(rpc, signature, {
     commitment: "confirmed",
   });
 
@@ -359,7 +354,7 @@ async function prepareSplTransfer(
   mintAddress: Address,
   amount: string
 ): Promise<{ serializedTx: string; blockhash: string; lastValidBlockHeight: string }> {
-  const rpc = createRpc(c.env);
+  const rpc = solanaRpc.createRpc(c.env);
   const tokenProgram = await resolveMintTokenProgram(rpc, mintAddress);
   const sourceTokenAccount = await resolveSourceTokenAccount(
     rpc,
@@ -378,7 +373,7 @@ async function prepareSplTransfer(
     tokenProgram,
     mint: mintAddress,
   });
-  const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc, "confirmed");
+  const { blockhash, lastValidBlockHeight } = await solanaRpc.getRecentBlockhash(rpc, "confirmed");
   const feePayer = await getSponsoredFeePayer(c);
   const feePayerSigner = createNoopSigner(feePayer);
 
@@ -429,7 +424,7 @@ async function executeSplTransfer(
   amount: string
 ): Promise<{ signature: string; slot: number | null; blockTime: string | null }> {
   const auth = getAuth(c);
-  const signer = await createOrgSigner(
+  const signer = await solanaServices.createOrgSigner(
     c.env,
     auth.organizationId,
     auth.projectId ?? undefined,
@@ -440,7 +435,7 @@ async function executeSplTransfer(
     throw new AppError("BAD_REQUEST", "Resolved signing wallet does not match source wallet");
   }
 
-  const rpc = createRpc(c.env);
+  const rpc = solanaRpc.createRpc(c.env);
   const tokenProgram = await resolveMintTokenProgram(rpc, mintAddress);
   const sourceTokenAccount = await resolveSourceTokenAccount(
     rpc,
@@ -459,7 +454,7 @@ async function executeSplTransfer(
     tokenProgram,
     mint: mintAddress,
   });
-  const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc, "confirmed");
+  const { blockhash, lastValidBlockHeight } = await solanaRpc.getRecentBlockhash(rpc, "confirmed");
   const feePayment = getFeePayment(c);
   const feePayer = await feePayment.getFeePayer();
   const feePayerSigner = createNoopSigner(feePayer);
@@ -500,7 +495,7 @@ async function executeSplTransfer(
   const txBytes = new Uint8Array(txEncoder.encode(partiallySigned));
   const signature = await feePayment.signAndSend(txBytes);
 
-  const confirmation = await confirmTransaction(rpc, signature, {
+  const confirmation = await solanaRpc.confirmTransaction(rpc, signature, {
     commitment: "confirmed",
   });
 
@@ -581,9 +576,9 @@ export async function prepareTransfer(c: AppContext) {
     | { success: boolean; logs: string[]; unitsConsumed: string | null; error: string | null }
     | undefined;
   if (parsed.data.options?.simulate) {
-    const rpc = createRpc(c.env);
+    const rpc = solanaRpc.createRpc(c.env);
     const txBytes = Buffer.from(prepared.serializedTx, "base64");
-    const simulated = await simulateTransaction(rpc, txBytes);
+    const simulated = await solanaRpc.simulateTransaction(rpc, txBytes);
     simulation = {
       success: simulated.success,
       logs: simulated.logs,
@@ -613,7 +608,7 @@ function createSignatureHistoryRpc(env: Env) {
   const url = env.SOLANA_RPC_HELIUS_URL
     ? withHeliusApiKey(env.SOLANA_RPC_HELIUS_URL, env.SOLANA_RPC_HELIUS_API_KEY)
     : getSolanaConfig(env).rpcUrl;
-  return createRpc(env, { rpcUrl: url });
+  return solanaRpc.createRpc(env, { rpcUrl: url });
 }
 
 function resolveSignatureHistoryRpcUrl(env: Env): string {
@@ -761,15 +756,17 @@ async function resolveObservedTokenSymbols(env: Env): Promise<Map<string, string
   ]);
 
   try {
-    const result = await env.DB.prepare(
-      `SELECT mint_address, symbol
+    const result = await getDb(env)
+      .prepare(
+        `SELECT mint_address, symbol
          FROM issued_tokens
         WHERE mint_address IS NOT NULL
           AND deployed_at IS NOT NULL`
-    ).all<{
-      mint_address?: string | null;
-      symbol?: string | null;
-    }>();
+      )
+      .all<{
+        mint_address?: string | null;
+        symbol?: string | null;
+      }>();
 
     for (const row of result.results ?? []) {
       const mint = row.mint_address?.trim();
@@ -1018,7 +1015,7 @@ function buildObservedTransferRows(
 
 async function buildObservedTransfersForSignatures(
   env: Env,
-  signatures: Array<Awaited<ReturnType<typeof getSignaturesForAddress>>[number]>,
+  signatures: Array<Awaited<ReturnType<typeof solanaRpc.getSignaturesForAddress>>[number]>,
   context: ObservedTransferContext
 ): Promise<TransferRow[]> {
   if (signatures.length === 0 || context.walletIdsByAddress.size === 0) {
@@ -1202,10 +1199,14 @@ export async function listTransfers(c: AppContext) {
 
     // 1. Fetch on-chain signature history via Helius (or fallback RPC)
     const heliusRpc = createSignatureHistoryRpc(c.env);
-    const onChainSigs = await getSignaturesForAddress(heliusRpc, sourceAddress as Address, {
-      limit: Math.min(pageSize * 5, 200),
-      commitment: "confirmed",
-    });
+    const onChainSigs = await solanaRpc.getSignaturesForAddress(
+      heliusRpc,
+      sourceAddress as Address,
+      {
+        limit: Math.min(pageSize * 5, 200),
+        commitment: "confirmed",
+      }
+    );
     const sigStrings = onChainSigs.map((s) => String(s.signature));
 
     // 2. Look up on-chain signatures in our DB

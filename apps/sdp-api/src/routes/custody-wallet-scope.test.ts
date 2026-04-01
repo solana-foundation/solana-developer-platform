@@ -1,70 +1,22 @@
+import { getDb } from "@/db";
 import app from "@/index";
 import { hashString } from "@/lib/hash";
-import { getSplTokenBalances } from "@/routes/payments/token-accounts";
-import { createSigningService } from "@/services/domain/signing.service";
-import { getAccountInfo } from "@/services/solana/rpc";
+import * as tokenAccounts from "@/routes/payments/token-accounts";
+import * as signingServiceModule from "@/services/domain/signing.service";
+import * as solanaRpc from "@/services/solana/rpc";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/d1";
+import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVNamespaces, seedCachedApiKey } from "@/test/mocks/kv";
 import type { CachedApiKey } from "@sdp/types";
 import { address } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/services/solana/rpc", async () => {
-  const actual =
-    await vi.importActual<typeof import("@/services/solana/rpc")>("@/services/solana/rpc");
-  return {
-    ...actual,
-    createRpc: vi.fn().mockReturnValue({}),
-    getAccountInfo: vi.fn().mockResolvedValue({
-      lamports: 0n,
-      owner: "11111111111111111111111111111111",
-    }),
-  };
-});
-
-vi.mock("@/routes/payments/token-accounts", async () => {
-  const actual = await vi.importActual<typeof import("@/routes/payments/token-accounts")>(
-    "@/routes/payments/token-accounts"
-  );
-
-  return {
-    ...actual,
-    getSplTokenBalances: vi.fn().mockResolvedValue([
-      {
-        token: "USDC",
-        mint: "usdc_mint",
-        amount: "1000000",
-        uiAmount: "1.0",
-        decimals: 6,
-      },
-    ]),
-  };
-});
-
-vi.mock("@/services/domain/signing.service", async () => {
-  const actual = await vi.importActual<typeof import("@/services/domain/signing.service")>(
-    "@/services/domain/signing.service"
-  );
-
-  return {
-    ...actual,
-    createSigningService: vi.fn((envArg) => {
-      const service = actual.createSigningService(envArg);
-      service.getPublicKey = vi.fn(async (_organizationId, _projectId, walletId) => {
-        if (walletId === "para_wallet_a") {
-          return address(TEST_SOLANA_ADDRESSES.wallet2);
-        }
-        if (walletId === "privy_wallet_a") {
-          return address(TEST_SOLANA_ADDRESSES.wallet1);
-        }
-        return address(TEST_SOLANA_ADDRESSES.wallet1);
-      });
-      return service;
-    }),
-  };
-});
+const actualCreateSigningService = signingServiceModule.createSigningService;
+const createRpcMock = vi.spyOn(solanaRpc, "createRpc");
+const getAccountInfoMock = vi.spyOn(solanaRpc, "getAccountInfo");
+const getSplTokenBalancesMock = vi.spyOn(tokenAccounts, "getSplTokenBalances");
+const createSigningServiceMock = vi.spyOn(signingServiceModule, "createSigningService");
 
 const TEST_ORG = {
   id: "org_custody_wallet_scope",
@@ -104,102 +56,116 @@ async function seedAuthAndConfigs(): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
   await seedCachedApiKey(env, keyHash, TEST_CACHED_API_KEY);
 
-  await env.DB.batch([
-    env.DB.prepare(
-      "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)"
-    ).bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, "free", "active"),
-    env.DB.prepare(
-      "INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)"
-    ).bind(TEST_USER.id, TEST_USER.email, 1, "active"),
-    env.DB.prepare(
-      `INSERT INTO api_keys
+  await getDb(env).batch([
+    getDb(env)
+      .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
+      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, "free", "active"),
+    getDb(env)
+      .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
+      .bind(TEST_USER.id, TEST_USER.email, 1, "active"),
+    getDb(env)
+      .prepare(
+        `INSERT INTO api_keys
            (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, environment, status)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).bind(
-      TEST_API_KEY.id,
-      TEST_ORG.id,
-      null,
-      TEST_USER.id,
-      "Custody scope key",
-      TEST_API_KEY.prefix,
-      keyHash,
-      "api_admin",
-      JSON.stringify(["*"]),
-      "sandbox",
-      "active"
-    ),
-    env.DB.prepare(
-      `INSERT INTO custody_configs
+      )
+      .bind(
+        TEST_API_KEY.id,
+        TEST_ORG.id,
+        null,
+        TEST_USER.id,
+        "Custody scope key",
+        TEST_API_KEY.prefix,
+        keyHash,
+        "api_admin",
+        JSON.stringify(["*"]),
+        "sandbox",
+        "active"
+      ),
+    getDb(env)
+      .prepare(
+        `INSERT INTO custody_configs
            (id, organization_id, project_id, provider, config_encrypted, encryption_version, default_wallet_id, status)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-    ).bind(
-      PRIVY_CONFIG_ID,
-      TEST_ORG.id,
-      null,
-      "privy",
-      "test-config",
-      "sdp-custody-encryption-v1",
-      "privy_wallet_a",
-      "active"
-    ),
-    env.DB.prepare(
-      `INSERT INTO custody_configs
+      )
+      .bind(
+        PRIVY_CONFIG_ID,
+        TEST_ORG.id,
+        null,
+        "privy",
+        "test-config",
+        "sdp-custody-encryption-v1",
+        "privy_wallet_a",
+        "active"
+      ),
+    getDb(env)
+      .prepare(
+        `INSERT INTO custody_configs
            (id, organization_id, project_id, provider, config_encrypted, encryption_version, default_wallet_id, status)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-    ).bind(
-      PARA_CONFIG_ID,
-      TEST_ORG.id,
-      null,
-      "para",
-      "test-config",
-      "sdp-custody-encryption-v1",
-      "para_wallet_a",
-      "active"
-    ),
-    env.DB.prepare(
-      `INSERT INTO custody_scope_defaults
+      )
+      .bind(
+        PARA_CONFIG_ID,
+        TEST_ORG.id,
+        null,
+        "para",
+        "test-config",
+        "sdp-custody-encryption-v1",
+        "para_wallet_a",
+        "active"
+      ),
+    getDb(env)
+      .prepare(
+        `INSERT INTO custody_scope_defaults
            (id, organization_id, project_id, default_custody_config_id)
          VALUES (?, ?, ?, ?)`
-    ).bind("csd_scope_org_default", TEST_ORG.id, null, PRIVY_CONFIG_ID),
-    env.DB.prepare(
-      `INSERT INTO custody_wallets
+      )
+      .bind("csd_scope_org_default", TEST_ORG.id, null, PRIVY_CONFIG_ID),
+    getDb(env)
+      .prepare(
+        `INSERT INTO custody_wallets
            (id, custody_config_id, wallet_id, public_key, label, purpose, status)
          VALUES (?, ?, ?, ?, ?, ?, ?)`
-    ).bind(
-      "cwlt_scope_privy_a",
-      PRIVY_CONFIG_ID,
-      "privy_wallet_a",
-      "privy_pubkey_a",
-      "A",
-      "root",
-      "active"
-    ),
-    env.DB.prepare(
-      `INSERT INTO custody_wallets
+      )
+      .bind(
+        "cwlt_scope_privy_a",
+        PRIVY_CONFIG_ID,
+        "privy_wallet_a",
+        "privy_pubkey_a",
+        "A",
+        "root",
+        "active"
+      ),
+    getDb(env)
+      .prepare(
+        `INSERT INTO custody_wallets
            (id, custody_config_id, wallet_id, public_key, label, purpose, status)
          VALUES (?, ?, ?, ?, ?, ?, ?)`
-    ).bind(
-      "cwlt_scope_privy_b",
-      PRIVY_CONFIG_ID,
-      "privy_wallet_b",
-      "privy_pubkey_b",
-      "B",
-      "transfer",
-      "active"
-    ),
-    env.DB.prepare(
-      `INSERT INTO custody_wallets
+      )
+      .bind(
+        "cwlt_scope_privy_b",
+        PRIVY_CONFIG_ID,
+        "privy_wallet_b",
+        "privy_pubkey_b",
+        "B",
+        "transfer",
+        "active"
+      ),
+    getDb(env)
+      .prepare(
+        `INSERT INTO custody_wallets
            (id, custody_config_id, wallet_id, public_key, label, purpose, status)
          VALUES (?, ?, ?, ?, ?, ?, ?)`
-    ).bind(
-      "cwlt_scope_para_a",
-      PARA_CONFIG_ID,
-      "para_wallet_a",
-      "para_pubkey_a",
-      "C",
-      "root",
-      "active"
-    ),
+      )
+      .bind(
+        "cwlt_scope_para_a",
+        PARA_CONFIG_ID,
+        "para_wallet_a",
+        "para_pubkey_a",
+        "C",
+        "root",
+        "active"
+      ),
   ]);
 }
 
@@ -213,13 +179,14 @@ async function seedCachedKey(override: Partial<CachedApiKey>): Promise<void> {
 
 describe("Custody wallet scope routes", () => {
   beforeEach(async () => {
-    await seedTestDatabase(env);
-    await seedAuthAndConfigs();
-    vi.mocked(getAccountInfo).mockResolvedValue({
+    vi.clearAllMocks();
+
+    createRpcMock.mockReturnValue({} as ReturnType<typeof solanaRpc.createRpc>);
+    getAccountInfoMock.mockResolvedValue({
       lamports: 0n,
       owner: "11111111111111111111111111111111",
-    } as Awaited<ReturnType<typeof getAccountInfo>>);
-    vi.mocked(getSplTokenBalances).mockResolvedValue([
+    } as Awaited<ReturnType<typeof solanaRpc.getAccountInfo>>);
+    getSplTokenBalancesMock.mockResolvedValue([
       {
         token: "USDC",
         mint: "usdc_mint",
@@ -228,14 +195,30 @@ describe("Custody wallet scope routes", () => {
         decimals: 6,
       },
     ]);
+    createSigningServiceMock.mockImplementation((envArg) => {
+      const service = actualCreateSigningService(envArg);
+      service.getPublicKey = vi.fn(async (_organizationId, _projectId, walletId) => {
+        if (walletId === "para_wallet_a") {
+          return address(TEST_SOLANA_ADDRESSES.wallet2);
+        }
+        if (walletId === "privy_wallet_a") {
+          return address(TEST_SOLANA_ADDRESSES.wallet1);
+        }
+        return address(TEST_SOLANA_ADDRESSES.wallet1);
+      });
+      return service;
+    });
+
+    await seedTestDatabase(env);
+    await seedAuthAndConfigs();
   });
 
   afterEach(async () => {
     await clearTestDatabase(env);
     await clearKVNamespaces(env);
-    vi.mocked(createSigningService).mockClear();
-    vi.mocked(getAccountInfo).mockClear();
-    vi.mocked(getSplTokenBalances).mockClear();
+    createSigningServiceMock.mockReset();
+    getAccountInfoMock.mockReset();
+    getSplTokenBalancesMock.mockReset();
   });
 
   it("filters listed wallets to the API key bindings", async () => {
@@ -309,8 +292,8 @@ describe("Custody wallet scope routes", () => {
 
     expect(body.data.wallets).toHaveLength(3);
     expect(body.data.wallets.every((wallet) => wallet.balances === undefined)).toBe(true);
-    expect(getAccountInfo).not.toHaveBeenCalled();
-    expect(getSplTokenBalances).not.toHaveBeenCalled();
+    expect(getAccountInfoMock).not.toHaveBeenCalled();
+    expect(getSplTokenBalancesMock).not.toHaveBeenCalled();
   });
 
   it("filters aggregate wallets to the API key bindings", async () => {
@@ -421,9 +404,8 @@ describe("Custody wallet scope routes", () => {
       label: "Operations",
     });
 
-    const updated = await env.DB.prepare(
-      "SELECT label FROM custody_wallets WHERE wallet_id = ? LIMIT 1"
-    )
+    const updated = await getDb(env)
+      .prepare("SELECT label FROM custody_wallets WHERE wallet_id = ? LIMIT 1")
       .bind("para_wallet_a")
       .first<{ label: string | null }>();
 

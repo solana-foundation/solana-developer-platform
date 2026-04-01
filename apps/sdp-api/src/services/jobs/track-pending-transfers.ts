@@ -17,10 +17,10 @@
  *    getSignatureStatuses and update DB accordingly.
  */
 
-import { createD1Drizzle } from "@/db/drizzle";
-import { createD1PaymentsRepository } from "@/db/repositories/payments.repository.d1";
+import { createPaymentsRepository } from "@/db/repositories";
+import type { PaymentsRepository } from "@/db/repositories";
 import type { SignatureStatusInfo } from "@/services/solana/rpc";
-import { createRpc, getSignatureStatuses } from "@/services/solana/rpc";
+import * as solanaRpc from "@/services/solana/rpc";
 import type { Env } from "@/types/env";
 import type { Signature } from "@solana/kit";
 
@@ -32,8 +32,7 @@ const STUCK_PROCESSING_AFTER_MS = 5 * 60 * 1000;
 const MAX_SIGNATURES_PER_BATCH = 256;
 
 export async function trackPendingTransfers(env: Env): Promise<void> {
-  const db = createD1Drizzle(env.DB);
-  const repo = createD1PaymentsRepository({ db });
+  const repo = createPaymentsRepository(env);
   const now = new Date();
   const nowIso = now.toISOString();
 
@@ -47,7 +46,7 @@ export async function trackPendingTransfers(env: Env): Promise<void> {
  * ago that their blockhash has surely expired.
  */
 async function expireStalePendingTransfers(
-  repo: ReturnType<typeof createD1PaymentsRepository>,
+  repo: PaymentsRepository,
   now: Date,
   nowIso: string
 ): Promise<void> {
@@ -84,7 +83,7 @@ async function expireStalePendingTransfers(
  * obtaining a signature.
  */
 async function recoverStuckProcessingTransfers(
-  repo: ReturnType<typeof createD1PaymentsRepository>,
+  repo: PaymentsRepository,
   now: Date,
   nowIso: string
 ): Promise<void> {
@@ -121,7 +120,7 @@ async function recoverStuckProcessingTransfers(
  */
 async function syncProcessingTransfersOnChain(
   env: Env,
-  repo: ReturnType<typeof createD1PaymentsRepository>,
+  repo: PaymentsRepository,
   nowIso: string
 ): Promise<void> {
   const processingWithSig = await repo.listTransfersByStatus({
@@ -141,8 +140,8 @@ async function syncProcessingTransfersOnChain(
   let statuses: Array<SignatureStatusInfo | null>;
 
   try {
-    const rpc = createRpc(env);
-    statuses = await getSignatureStatuses(rpc, signatures);
+    const rpc = solanaRpc.createRpc(env);
+    statuses = await solanaRpc.getSignatureStatuses(rpc, signatures);
   } catch (err) {
     // biome-ignore lint/nursery/noSecrets: Log message string, not a secret.
     console.error("trackPendingTransfers: getSignatureStatuses RPC call failed", {

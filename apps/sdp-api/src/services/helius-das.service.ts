@@ -1,3 +1,4 @@
+import { getDb } from "@/db";
 import { formatDecimalAmount } from "@/lib/amount";
 import { withHeliusApiKey } from "@/services/rpc-relay.service";
 import type { Env } from "@/types/env";
@@ -73,17 +74,19 @@ async function resolveTrackedAssets(env: Env): Promise<Map<string, TrackedAssetD
   const trackedAssetsByMint = new Map(trackedAssets.map((asset) => [asset.mint, asset]));
 
   try {
-    const result = await env.DB.prepare(
-      `SELECT mint_address, symbol, decimals
+    const result = await getDb(env)
+      .prepare(
+        `SELECT mint_address, symbol, decimals
          FROM issued_tokens
         WHERE template = 'stablecoin'
           AND mint_address IS NOT NULL
           AND deployed_at IS NOT NULL`
-    ).all<{
-      decimals?: number | null;
-      mint_address?: string | null;
-      symbol?: string | null;
-    }>();
+      )
+      .all<{
+        decimals?: number | null;
+        mint_address?: string | null;
+        symbol?: string | null;
+      }>();
 
     for (const row of result.results ?? []) {
       const mint = row.mint_address?.trim();
@@ -102,7 +105,7 @@ async function resolveTrackedAssets(env: Env): Promise<Map<string, TrackedAssetD
       });
     }
   } catch {
-    // Ignore D1 lookup failures and fall back to built-in tracked assets.
+    // Ignore database lookup failures and fall back to built-in tracked assets.
   }
 
   return trackedAssetsByMint;

@@ -1,5 +1,5 @@
 import type { Token } from "@sdp/types";
-import type { DrizzleDbClient } from "./base";
+import type { RepositoryDbClient } from "./base";
 
 export interface ListTokensOptions {
   status?: string;
@@ -8,7 +8,7 @@ export interface ListTokensOptions {
 }
 
 export interface TokenRepositoryContext {
-  db: DrizzleDbClient;
+  db: RepositoryDbClient;
 }
 
 export interface TokenRepository {

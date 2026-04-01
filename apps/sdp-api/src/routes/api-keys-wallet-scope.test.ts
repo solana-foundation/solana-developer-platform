@@ -1,7 +1,8 @@
+import { getDb } from "@/db";
 import app from "@/index";
 import { hashString } from "@/lib/hash";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/d1";
+import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVNamespaces, seedCachedApiKey } from "@/test/mocks/kv";
 import type { CachedApiKey } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -43,75 +44,85 @@ async function seedAuthAndWallets(): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
   await seedCachedApiKey(env, keyHash, TEST_CACHED_API_KEY);
 
-  await env.DB.batch([
-    env.DB.prepare(
-      "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)"
-    ).bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, "free", "active"),
-    env.DB.prepare(
-      "INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)"
-    ).bind(TEST_USER.id, TEST_USER.email, 1, "active"),
-    env.DB.prepare(
-      `INSERT INTO api_keys
+  await getDb(env).batch([
+    getDb(env)
+      .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
+      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, "free", "active"),
+    getDb(env)
+      .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
+      .bind(TEST_USER.id, TEST_USER.email, 1, "active"),
+    getDb(env)
+      .prepare(
+        `INSERT INTO api_keys
            (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, environment, status)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).bind(
-      TEST_API_KEY.id,
-      TEST_ORG.id,
-      null,
-      TEST_USER.id,
-      "Admin test key",
-      TEST_API_KEY.prefix,
-      keyHash,
-      "api_admin",
-      JSON.stringify(["*"]),
-      "sandbox",
-      "active"
-    ),
-    env.DB.prepare(
-      `INSERT INTO custody_configs
+      )
+      .bind(
+        TEST_API_KEY.id,
+        TEST_ORG.id,
+        null,
+        TEST_USER.id,
+        "Admin test key",
+        TEST_API_KEY.prefix,
+        keyHash,
+        "api_admin",
+        JSON.stringify(["*"]),
+        "sandbox",
+        "active"
+      ),
+    getDb(env)
+      .prepare(
+        `INSERT INTO custody_configs
            (id, organization_id, project_id, provider, config_encrypted, encryption_version, default_wallet_id, status)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-    ).bind(
-      TEST_CONFIG_ID,
-      TEST_ORG.id,
-      null,
-      "local",
-      "test-config",
-      "sdp-custody-encryption-v1",
-      "wal_scope_a",
-      "active"
-    ),
-    env.DB.prepare(
-      `INSERT INTO custody_scope_defaults
+      )
+      .bind(
+        TEST_CONFIG_ID,
+        TEST_ORG.id,
+        null,
+        "local",
+        "test-config",
+        "sdp-custody-encryption-v1",
+        "wal_scope_a",
+        "active"
+      ),
+    getDb(env)
+      .prepare(
+        `INSERT INTO custody_scope_defaults
            (id, organization_id, project_id, default_custody_config_id)
          VALUES (?, ?, ?, ?)`
-    ).bind("csd_api_key_wallet_scope", TEST_ORG.id, null, TEST_CONFIG_ID),
-    env.DB.prepare(
-      `INSERT INTO custody_wallets
+      )
+      .bind("csd_api_key_wallet_scope", TEST_ORG.id, null, TEST_CONFIG_ID),
+    getDb(env)
+      .prepare(
+        `INSERT INTO custody_wallets
            (id, custody_config_id, wallet_id, public_key, label, purpose, status)
          VALUES (?, ?, ?, ?, ?, ?, ?)`
-    ).bind(
-      "cwlt_scope_a",
-      TEST_CONFIG_ID,
-      "wal_scope_a",
-      "pub_scope_a",
-      "Wallet Scope A",
-      "transfer",
-      "active"
-    ),
-    env.DB.prepare(
-      `INSERT INTO custody_wallets
+      )
+      .bind(
+        "cwlt_scope_a",
+        TEST_CONFIG_ID,
+        "wal_scope_a",
+        "pub_scope_a",
+        "Wallet Scope A",
+        "transfer",
+        "active"
+      ),
+    getDb(env)
+      .prepare(
+        `INSERT INTO custody_wallets
            (id, custody_config_id, wallet_id, public_key, label, purpose, status)
          VALUES (?, ?, ?, ?, ?, ?, ?)`
-    ).bind(
-      "cwlt_scope_b",
-      TEST_CONFIG_ID,
-      "wal_scope_b",
-      "pub_scope_b",
-      "Wallet Scope B",
-      "transfer",
-      "active"
-    ),
+      )
+      .bind(
+        "cwlt_scope_b",
+        TEST_CONFIG_ID,
+        "wal_scope_b",
+        "pub_scope_b",
+        "Wallet Scope B",
+        "transfer",
+        "active"
+      ),
   ]);
 }
 
@@ -198,14 +209,16 @@ describe("API key wallet scope routes", () => {
       };
     };
 
-    const created = await env.DB.prepare("SELECT signing_wallet_id FROM api_keys WHERE id = ?")
+    const created = await getDb(env)
+      .prepare("SELECT signing_wallet_id FROM api_keys WHERE id = ?")
       .bind(body.data.apiKey.id)
       .first<{ signing_wallet_id: string | null }>();
     expect(created?.signing_wallet_id).toBe("wal_scope_b");
 
-    const bindings = await env.DB.prepare(
-      "SELECT wallet_id FROM api_key_wallet_permissions WHERE api_key_id = ? ORDER BY wallet_id"
-    )
+    const bindings = await getDb(env)
+      .prepare(
+        "SELECT wallet_id FROM api_key_wallet_permissions WHERE api_key_id = ? ORDER BY wallet_id"
+      )
       .bind(body.data.apiKey.id)
       .all<{ wallet_id: string }>();
     expect(bindings.results?.map((row) => row.wallet_id)).toEqual(["wal_scope_a", "wal_scope_b"]);
@@ -234,15 +247,16 @@ describe("API key wallet scope routes", () => {
   });
 
   it("clears wallet bindings when walletScope is updated to all", async () => {
-    await env.DB.batch([
-      env.DB.prepare("UPDATE api_keys SET signing_wallet_id = ? WHERE id = ?").bind(
-        "wal_scope_a",
-        TEST_API_KEY.id
-      ),
-      env.DB.prepare(
-        `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
+    await getDb(env).batch([
+      getDb(env)
+        .prepare("UPDATE api_keys SET signing_wallet_id = ? WHERE id = ?")
+        .bind("wal_scope_a", TEST_API_KEY.id),
+      getDb(env)
+        .prepare(
+          `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
          VALUES (?, ?, ?, ?)`
-      ).bind("akw_scope_a", TEST_API_KEY.id, "wal_scope_a", JSON.stringify(["*"])),
+        )
+        .bind("akw_scope_a", TEST_API_KEY.id, "wal_scope_a", JSON.stringify(["*"])),
     ]);
 
     const res = await app.request(
@@ -262,14 +276,14 @@ describe("API key wallet scope routes", () => {
 
     expect(res.status).toBe(200);
 
-    const updated = await env.DB.prepare("SELECT signing_wallet_id FROM api_keys WHERE id = ?")
+    const updated = await getDb(env)
+      .prepare("SELECT signing_wallet_id FROM api_keys WHERE id = ?")
       .bind(TEST_API_KEY.id)
       .first<{ signing_wallet_id: string | null }>();
     expect(updated?.signing_wallet_id).toBeNull();
 
-    const bindings = await env.DB.prepare(
-      "SELECT COUNT(*) as count FROM api_key_wallet_permissions WHERE api_key_id = ?"
-    )
+    const bindings = await getDb(env)
+      .prepare("SELECT COUNT(*) as count FROM api_key_wallet_permissions WHERE api_key_id = ?")
       .bind(TEST_API_KEY.id)
       .first<{ count: number }>();
     expect(bindings?.count).toBe(0);

@@ -5,11 +5,12 @@
  * 1. Extract API key from Authorization header
  * 2. Hash the key
  * 3. Look up in KV (fast path)
- * 4. If KV miss, look up in D1 and cache to KV
+ * 4. If KV misses, look up in Postgres and cache to KV
  * 5. Validate key status, expiration
  * 6. Set auth context for downstream handlers
  */
 
+import { getDb } from "@/db";
 import { AppError } from "@/lib/errors";
 import { hashString } from "@/lib/hash";
 import type { Env } from "@/types/env";
@@ -82,10 +83,10 @@ async function getFromKV(kv: KVNamespace, keyHash: string): Promise<CachedApiKey
 }
 
 /**
- * Look up API key in D1 and cache to KV
+ * Look up API key in Postgres and cache to KV
  */
-async function getFromD1AndCache(
-  db: D1Database,
+async function getFromDatabaseAndCache(
+  db: DatabaseClient,
   kv: KVNamespace,
   keyHash: string
 ): Promise<CachedApiKey | null> {
@@ -165,7 +166,7 @@ async function getFromD1AndCache(
 /**
  * Update last_used_at timestamp (fire and forget)
  */
-function updateLastUsed(db: D1Database, keyId: string) {
+function updateLastUsed(db: DatabaseClient, keyId: string) {
   db.prepare(`UPDATE api_keys SET last_used_at = datetime('now') WHERE id = ?`)
     .bind(keyId)
     .run()
@@ -243,10 +244,10 @@ export function authMiddleware() {
     const pepper = c.env.API_KEY_PEPPER;
     const keyHash = await hashString(apiKey, pepper);
 
-    // Try KV first, then D1
+    // Try KV first, then Postgres
     let cachedKey = await getFromKV(c.env.SDP_API_KEYS, keyHash);
     if (!cachedKey) {
-      cachedKey = await getFromD1AndCache(c.env.DB, c.env.SDP_API_KEYS, keyHash);
+      cachedKey = await getFromDatabaseAndCache(getDb(c.env), c.env.SDP_API_KEYS, keyHash);
     }
 
     if (!cachedKey) {
@@ -285,7 +286,7 @@ export function authMiddleware() {
     c.set("apiKey", authContext);
 
     // Update last used (fire and forget)
-    updateLastUsed(c.env.DB, cachedKey.id);
+    updateLastUsed(getDb(c.env), cachedKey.id);
 
     await next();
   };

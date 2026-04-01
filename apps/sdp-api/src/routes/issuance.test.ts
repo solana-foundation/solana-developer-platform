@@ -2,6 +2,7 @@
  * Issuance Routes E2E Tests
  */
 
+import { getDb } from "@/db";
 import app from "@/index";
 import { hashString } from "@/lib/hash";
 import * as AuthorityResolution from "@/routes/issuance/handlers/authority-resolution";
@@ -16,7 +17,7 @@ import {
   TEST_SOLANA_ADDRESSES,
 } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/d1";
+import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
 import * as MosaicSdk from "@solana/mosaic-sdk";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -41,7 +42,7 @@ describe("Issuance Routes", () => {
   });
 
   beforeEach(async () => {
-    const db = (env as { DB: D1Database }).DB;
+    const db = getDb(env);
     const apiKeysKV = (env as { SDP_API_KEYS: KVNamespace }).SDP_API_KEYS;
     const rateLimitKV = (env as { SDP_RATE_LIMITS: KVNamespace }).SDP_RATE_LIMITS;
 
@@ -384,7 +385,7 @@ describe("Issuance Routes", () => {
     });
 
     it("updates deployed token metadata on-chain before persisting local fields", async () => {
-      const db = (env as { DB: D1Database }).DB;
+      const db = getDb(env);
       const activeTokenId = "tok_metadataupdate1";
 
       await db
@@ -496,7 +497,7 @@ describe("Issuance Routes", () => {
         (env as { SOLANA_RPC_URL?: string }).SOLANA_RPC_URL = "https://rpc.invalid.test";
       }
 
-      const db = (env as { DB: D1Database }).DB;
+      const db = getDb(env);
 
       await db
         .prepare(
@@ -612,7 +613,7 @@ describe("Issuance Routes", () => {
     let activeTokenId: string;
 
     beforeEach(async () => {
-      const db = (env as { DB: D1Database }).DB;
+      const db = getDb(env);
 
       // Insert an active (deployed) token directly
       await db
@@ -704,7 +705,7 @@ describe("Issuance Routes", () => {
     });
 
     it("returns 400 when max supply would be exceeded", async () => {
-      const db = (env as { DB: D1Database }).DB;
+      const db = getDb(env);
 
       // Update token to have small max supply
       await db
@@ -738,7 +739,7 @@ describe("Issuance Routes", () => {
     });
 
     it("returns 400 for paused token", async () => {
-      const db = (env as { DB: D1Database }).DB;
+      const db = getDb(env);
       await db
         .prepare("UPDATE issued_tokens SET status = 'paused' WHERE id = ?")
         .bind(activeTokenId)
@@ -964,7 +965,7 @@ describe("Issuance Routes", () => {
 
   describe.skipIf(isMockMode)("Freeze/Unfreeze Operations", () => {
     const seedFreezableToken = async (): Promise<string> => {
-      const db = (env as { DB: D1Database }).DB;
+      const db = getDb(env);
 
       // Insert an active token with freeze capability
       await db
@@ -1139,7 +1140,7 @@ describe("Issuance Routes", () => {
 
       it("can freeze an account again after it was unfrozen", async () => {
         const activeTokenId = await seedFreezableToken();
-        const db = (env as { DB: D1Database }).DB;
+        const db = getDb(env);
         mockResolvedTokenAccount();
 
         const freezeSpy = vi.spyOn(MosaicService.prototype, "freezeAccount").mockResolvedValue({
@@ -1298,7 +1299,7 @@ describe("Issuance Routes", () => {
     let allowlistTokenId: string;
 
     beforeEach(async () => {
-      const db = (env as { DB: D1Database }).DB;
+      const db = getDb(env);
 
       // Insert an active token that requires allowlist
       await db

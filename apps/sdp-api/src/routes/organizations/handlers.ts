@@ -1,3 +1,4 @@
+import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
 import { AppError, conflict, notFound } from "@/lib/errors";
 import { hashString } from "@/lib/hash";
@@ -132,7 +133,7 @@ export const createOrganization = async (c: AppContext) => {
 
   // Initialize services
   const allowlistService = createAllowlistService(c.env);
-  const auditService = new AuditService(c.env.DB);
+  const auditService = new AuditService(getDb(c.env));
   const onboardingService = createOrganizationOnboardingService(c.env);
 
   // Organization self-registration is gated by a required pre-shared token.
@@ -152,7 +153,8 @@ export const createOrganization = async (c: AppContext) => {
   const resolvedTier = resolveOrganizationTierFromAllowlist(tier);
 
   // Check if slug is taken
-  const existing = await c.env.DB.prepare("SELECT id FROM organizations WHERE slug = ?")
+  const existing = await getDb(c.env)
+    .prepare("SELECT id FROM organizations WHERE slug = ?")
     .bind(slug)
     .first();
 
@@ -182,32 +184,40 @@ export const createOrganization = async (c: AppContext) => {
   // Insert all records in a batch
   const batch = [
     // Organization
-    c.env.DB.prepare(
-      `INSERT INTO organizations (id, name, slug, tier, status)
+    getDb(c.env)
+      .prepare(
+        `INSERT INTO organizations (id, name, slug, tier, status)
        VALUES (?, ?, ?, ?, 'active')`
-    ).bind(orgId, name, slug, resolvedTier),
+      )
+      .bind(orgId, name, slug, resolvedTier),
 
     // User
-    c.env.DB.prepare(
-      `INSERT INTO users (id, email, email_verified, status)
+    getDb(c.env)
+      .prepare(
+        `INSERT INTO users (id, email, email_verified, status)
        VALUES (?, ?, 0, 'active')`
-    ).bind(userId, email.toLowerCase()),
+      )
+      .bind(userId, email.toLowerCase()),
 
     // Organization member (admin)
-    c.env.DB.prepare(
-      `INSERT INTO organization_members (id, organization_id, user_id, role, status)
+    getDb(c.env)
+      .prepare(
+        `INSERT INTO organization_members (id, organization_id, user_id, role, status)
        VALUES (?, ?, ?, 'admin', 'active')`
-    ).bind(memberId, orgId, userId),
+      )
+      .bind(memberId, orgId, userId),
 
     // API key
-    c.env.DB.prepare(
-      `INSERT INTO api_keys (id, organization_id, created_by, name, key_prefix, key_hash, role, environment, status)
+    getDb(c.env)
+      .prepare(
+        `INSERT INTO api_keys (id, organization_id, created_by, name, key_prefix, key_hash, role, environment, status)
        VALUES (?, ?, ?, 'Default Key', ?, ?, 'api_admin', 'sandbox', 'active')`
-    ).bind(apiKeyId, orgId, userId, prefix, keyHash),
+      )
+      .bind(apiKeyId, orgId, userId, prefix, keyHash),
   ];
 
   try {
-    await c.env.DB.batch(batch);
+    await getDb(c.env).batch(batch);
   } catch (error) {
     if (custody) {
       await onboardingService.cleanupCustody(orgId);
@@ -255,10 +265,11 @@ export const getOrganization = async (c: AppContext) => {
     throw new AppError("FORBIDDEN", "Access denied to this organization");
   }
 
-  const org = await c.env.DB.prepare(
-    `SELECT id, name, slug, tier, status, settings, created_at, updated_at
+  const org = await getDb(c.env)
+    .prepare(
+      `SELECT id, name, slug, tier, status, settings, created_at, updated_at
      FROM organizations WHERE id = ?`
-  )
+    )
     .bind(orgId)
     .first<OrganizationRow>();
 
@@ -291,10 +302,11 @@ export const updateOrganization = async (c: AppContext) => {
   const updates: string[] = [];
   const params: (string | null)[] = [];
 
-  const existing = await c.env.DB.prepare(
-    `SELECT id, name, slug, tier, status, settings, created_at, updated_at
+  const existing = await getDb(c.env)
+    .prepare(
+      `SELECT id, name, slug, tier, status, settings, created_at, updated_at
      FROM organizations WHERE id = ?`
-  )
+    )
     .bind(orgId)
     .first<OrganizationRow>();
 
@@ -323,7 +335,8 @@ export const updateOrganization = async (c: AppContext) => {
   updates.push("updated_at = datetime('now')");
   params.push(orgId);
 
-  await c.env.DB.prepare(`UPDATE organizations SET ${updates.join(", ")} WHERE id = ?`)
+  await getDb(c.env)
+    .prepare(`UPDATE organizations SET ${updates.join(", ")} WHERE id = ?`)
     .bind(...params)
     .run();
 
@@ -332,15 +345,16 @@ export const updateOrganization = async (c: AppContext) => {
   await kvService.invalidateOrganization(orgId);
 
   // Fetch updated org
-  const org = await c.env.DB.prepare(
-    `SELECT id, name, slug, tier, status, settings, created_at, updated_at
+  const org = await getDb(c.env)
+    .prepare(
+      `SELECT id, name, slug, tier, status, settings, created_at, updated_at
      FROM organizations WHERE id = ?`
-  )
+    )
     .bind(orgId)
     .first<OrganizationRow>();
 
   // Audit log
-  const auditService = new AuditService(c.env.DB);
+  const auditService = new AuditService(getDb(c.env));
   await auditService.log(c, {
     action: "update",
     resourceType: "organization",
@@ -364,16 +378,18 @@ export const deleteOrganization = async (c: AppContext) => {
   }
 
   // Soft delete
-  await c.env.DB.prepare(
-    `UPDATE organizations SET status = 'deleted', updated_at = datetime('now') WHERE id = ?`
-  )
+  await getDb(c.env)
+    .prepare(
+      `UPDATE organizations SET status = 'deleted', updated_at = datetime('now') WHERE id = ?`
+    )
     .bind(orgId)
     .run();
 
   // Revoke all API keys
-  await c.env.DB.prepare(
-    `UPDATE api_keys SET status = 'revoked', revoked_at = datetime('now') WHERE organization_id = ?`
-  )
+  await getDb(c.env)
+    .prepare(
+      `UPDATE api_keys SET status = 'revoked', revoked_at = datetime('now') WHERE organization_id = ?`
+    )
     .bind(orgId)
     .run();
 
@@ -382,7 +398,7 @@ export const deleteOrganization = async (c: AppContext) => {
   await kvService.invalidateOrganization(orgId);
 
   // Audit log
-  const auditService = new AuditService(c.env.DB);
+  const auditService = new AuditService(getDb(c.env));
   await auditService.log(c, {
     action: "delete",
     resourceType: "organization",

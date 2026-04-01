@@ -1,3 +1,4 @@
+import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
 import { AppError, notFound } from "@/lib/errors";
 import { created, paginated, success } from "@/lib/response";
@@ -121,7 +122,7 @@ export const freezeAccount = async (c: AppContext) => {
     });
   }
 
-  const tokenService = new TokenService(c.env.DB);
+  const tokenService = new TokenService(getDb(c.env));
   const token = await tokenService.getToken(tokenId);
 
   if (!token || token.organizationId !== auth?.organizationId) {
@@ -235,7 +236,7 @@ export const freezeAccount = async (c: AppContext) => {
     });
 
     // Audit log
-    const auditService = new AuditService(c.env.DB);
+    const auditService = new AuditService(getDb(c.env));
     await auditService.log(c, {
       action: "freeze",
       resourceType: "frozen_account",
@@ -282,7 +283,7 @@ export const listFrozenAccounts = async (c: AppContext) => {
   const { tokenId } = c.req.param();
   const auth = getAuth(c);
 
-  const tokenService = new TokenService(c.env.DB);
+  const tokenService = new TokenService(getDb(c.env));
   const token = await tokenService.getToken(tokenId);
 
   if (!token || token.organizationId !== auth?.organizationId) {
@@ -318,7 +319,7 @@ export const unfreezeAccount = async (c: AppContext) => {
     });
   }
 
-  const tokenService = new TokenService(c.env.DB);
+  const tokenService = new TokenService(getDb(c.env));
   const token = await tokenService.getToken(tokenId);
 
   if (!token || token.organizationId !== auth?.organizationId) {
@@ -420,7 +421,7 @@ export const unfreezeAccount = async (c: AppContext) => {
     });
 
     // Audit log
-    const auditService = new AuditService(c.env.DB);
+    const auditService = new AuditService(getDb(c.env));
     await auditService.log(c, {
       action: "unfreeze",
       resourceType: "frozen_account",

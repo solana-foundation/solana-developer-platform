@@ -1,4 +1,4 @@
-export type { DrizzleDbClient } from "./base";
+export type { RepositoryDbClient } from "./base";
 export type {
   CreatePaymentTransferInput,
   PaymentTransferDirection,
@@ -17,5 +17,6 @@ export type {
   TokenRepository,
   TokenRepositoryContext,
 } from "./token.repository";
-export { createD1PaymentsRepository } from "./payments.repository.d1";
-export { createD1TokenRepository } from "./token.repository.d1";
+export { createPaymentsRepository, createTokenRepository } from "./repository-factory";
+export { createPostgresPaymentsRepository } from "./payments.repository.postgres";
+export { createPostgresTokenRepository } from "./token.repository.postgres";

@@ -1,3 +1,4 @@
+import { getDb } from "@/db";
 import { resolveApiKeySigningWalletId } from "@/lib/api-key-wallet-auth";
 import { getAuth } from "@/lib/auth";
 import { AppError } from "@/lib/errors";
@@ -72,7 +73,7 @@ export const signerCheck = async (c: AppContext) => {
 
     const rpcTarget = await resolveRpcTarget({
       env: c.env,
-      db: c.env.DB,
+      db: getDb(c.env),
       organizationId: auth.organizationId,
       authProjectId: auth.projectId ?? null,
       requestedProjectId: null,

@@ -1,3 +1,4 @@
+import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
 import { AppError, notFound } from "@/lib/errors";
 import { created, success } from "@/lib/response";
@@ -23,7 +24,7 @@ export const listProjectApiKeys = async (c: AppContext) => {
   const { projectId } = c.req.param();
   const auth = getAuth(c);
 
-  const projectService = new ProjectService(c.env.DB);
+  const projectService = new ProjectService(getDb(c.env));
 
   // Verify project belongs to org
   const project = await projectService.getProject(projectId);
@@ -31,7 +32,7 @@ export const listProjectApiKeys = async (c: AppContext) => {
     throw notFound("Project");
   }
 
-  const apiKeyService = new ApiKeyService(c.env.DB);
+  const apiKeyService = new ApiKeyService(getDb(c.env));
   const apiKeys = await apiKeyService.listForProject(projectId);
 
   return success(c, {
@@ -63,7 +64,7 @@ export const createProjectApiKey = async (c: AppContext) => {
     });
   }
 
-  const projectService = new ProjectService(c.env.DB);
+  const projectService = new ProjectService(getDb(c.env));
 
   // Verify project belongs to org
   const project = await projectService.getProject(projectId);
@@ -130,14 +131,14 @@ export const createProjectApiKey = async (c: AppContext) => {
     }
   } else {
     await assertWalletBindingsInScope(
-      c.env.DB,
+      getDb(c.env),
       auth.organizationId,
       projectId,
       resolvedWalletBindings
     );
   }
 
-  const apiKeyService = new ApiKeyService(c.env.DB);
+  const apiKeyService = new ApiKeyService(getDb(c.env));
   const createdKey = await apiKeyService.createApiKey({
     organizationId: auth.organizationId,
     projectId,
@@ -155,11 +156,11 @@ export const createProjectApiKey = async (c: AppContext) => {
   });
 
   if (resolvedWalletBindings.length > 0) {
-    await replaceApiKeyWalletBindings(c.env.DB, createdKey.id, resolvedWalletBindings);
+    await replaceApiKeyWalletBindings(getDb(c.env), createdKey.id, resolvedWalletBindings);
   }
 
   // Audit log
-  const auditService = new AuditService(c.env.DB);
+  const auditService = new AuditService(getDb(c.env));
   await auditService.log(c, {
     action: "create",
     resourceType: "api_key",

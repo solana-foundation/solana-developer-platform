@@ -1,3 +1,4 @@
+import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
 import { notFound } from "@/lib/errors";
 import { paginated } from "@/lib/response";
@@ -12,7 +13,7 @@ export const listTokenTransactions = async (c: AppContext) => {
   const { tokenId } = c.req.param();
   const auth = getAuth(c);
 
-  const tokenService = new TokenService(c.env.DB);
+  const tokenService = new TokenService(getDb(c.env));
   const token = await tokenService.getToken(tokenId);
 
   if (!token || token.organizationId !== auth?.organizationId) {

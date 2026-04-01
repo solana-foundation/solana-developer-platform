@@ -59,7 +59,9 @@ function createSdpApiRequest(token: string, traceContext?: TraceContext): SdpApi
     const requestId = createTraceRequestId(traceId, requestSequence);
     const source = traceContext?.source ?? "sdp-web";
     const headers = new Headers(options.headers);
-    headers.set("Authorization", `Bearer ${token}`);
+    if (!headers.has("Authorization")) {
+      headers.set("Authorization", `Bearer ${token}`);
+    }
     headers.set("Content-Type", "application/json");
     headers.set(TRACE_ID_HEADER, traceId);
     headers.set(TRACE_SOURCE_HEADER, source);

@@ -1,10 +1,11 @@
 /**
  * Allowlist Service
  *
- * D1-backed allowlist used for SDP org provisioning flows.
+ * Database-backed allowlist used for SDP org provisioning flows.
  * Clerk has its own allowlist for signups; this service is intentionally local and testable.
  */
 
+import { getDb } from "@/db";
 import type { Env } from "@/types/env";
 
 export interface AllowlistEntry {
@@ -33,8 +34,8 @@ export interface AllowlistProvider {
   isEmailAllowed(email: string): Promise<{ allowed: boolean; tier: string }>;
 }
 
-class D1AllowlistService implements AllowlistProvider {
-  constructor(private db: D1Database) {}
+class PostgresAllowlistService implements AllowlistProvider {
+  constructor(private db: DatabaseClient) {}
 
   async listEntries(
     options: { type?: "email" | "domain"; status?: "active" | "disabled" } = {}
@@ -172,5 +173,5 @@ class D1AllowlistService implements AllowlistProvider {
 }
 
 export function createAllowlistService(env: Env): AllowlistProvider {
-  return new D1AllowlistService(env.DB);
+  return new PostgresAllowlistService(getDb(env));
 }

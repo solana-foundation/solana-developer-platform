@@ -1,3 +1,6 @@
+import { closeDatabasePools } from "@/db";
+import { afterAll } from "vitest";
+
 const globalWithSecureContext = globalThis as { isSecureContext?: boolean };
 
 if (!globalWithSecureContext.isSecureContext) {
@@ -10,3 +13,7 @@ if (!globalWithSecureContext.isSecureContext) {
     globalWithSecureContext.isSecureContext = true;
   }
 }
+
+afterAll(async () => {
+  await closeDatabasePools();
+});

@@ -2,6 +2,7 @@
  * Authentication middleware tests
  */
 
+import { getDb } from "@/db";
 import app from "@/index";
 import { hashString } from "@/lib/hash";
 import {
@@ -12,7 +13,7 @@ import {
 } from "@/test/fixtures/api-keys";
 import { TEST_ORG } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/d1";
+import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVNamespaces, seedCachedApiKey } from "@/test/mocks/kv";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -24,9 +25,10 @@ describe("Auth Middleware", () => {
     await seedTestDatabase(env);
 
     // Seed organization for tests that need it
-    await env.DB.prepare(
-      "INSERT OR REPLACE INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)"
-    )
+    await getDb(env)
+      .prepare(
+        "INSERT OR REPLACE INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)"
+      )
       .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, TEST_ORG.tier, TEST_ORG.status)
       .run();
 

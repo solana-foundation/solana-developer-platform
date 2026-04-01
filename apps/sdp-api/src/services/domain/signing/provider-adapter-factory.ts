@@ -1,3 +1,4 @@
+import { getDb } from "@/db";
 import {
   KeychainCoinbaseAdapter,
   KeychainDfnsAdapter,
@@ -193,12 +194,13 @@ const providerAdapterFactories = {
 
     let defaultWalletPublicKey = parsed.defaultWalletPublicKey ?? env.TURNKEY_PUBLIC_KEY;
     if (!defaultWalletPublicKey && defaultWalletId) {
-      const wallet = await env.DB.prepare(
-        `SELECT public_key
+      const wallet = await getDb(env)
+        .prepare(
+          `SELECT public_key
          FROM custody_wallets
          WHERE custody_config_id = ? AND wallet_id = ? AND status = 'active'
          LIMIT 1`
-      )
+        )
         .bind(record.id, defaultWalletId)
         .first<{ public_key: string }>();
       defaultWalletPublicKey = wallet?.public_key;

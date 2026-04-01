@@ -1,3 +1,4 @@
+import { getDb } from "@/db";
 import {
   provisionCoinbaseCdpAccount,
   provisionFireblocksVaultAccount,
@@ -120,14 +121,16 @@ export class OrganizationOnboardingService {
   }
 
   async cleanupCustody(orgId: string): Promise<void> {
-    await this.env.DB.batch([
-      this.env.DB.prepare(
-        `DELETE FROM custody_wallets
+    await getDb(this.env).batch([
+      getDb(this.env)
+        .prepare(
+          `DELETE FROM custody_wallets
          WHERE custody_config_id IN (
            SELECT id FROM custody_configs WHERE organization_id = ?
          )`
-      ).bind(orgId),
-      this.env.DB.prepare("DELETE FROM custody_configs WHERE organization_id = ?").bind(orgId),
+        )
+        .bind(orgId),
+      getDb(this.env).prepare("DELETE FROM custody_configs WHERE organization_id = ?").bind(orgId),
     ]);
   }
 }

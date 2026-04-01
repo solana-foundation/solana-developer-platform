@@ -308,7 +308,7 @@ export function TokenManagementWorkspace({
           : undefined,
       refreshInterval: 60_000,
       revalidateOnFocus: true,
-      revalidateIfStale: false,
+      revalidateIfStale: true,
     },
     {
       key: `token.${token.id}.authority-wallets`,
@@ -326,7 +326,7 @@ export function TokenManagementWorkspace({
       fallbackData: hasInitialSupportingData ? initialSupportingData : undefined,
       refreshInterval: 60_000,
       revalidateOnFocus: true,
-      revalidateIfStale: false,
+      revalidateIfStale: true,
     },
     {
       key: `token.${token.id}.supporting-data`,

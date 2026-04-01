@@ -1,3 +1,4 @@
+import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
 import { AppError, notFound } from "@/lib/errors";
 import { created, noContent, paginated } from "@/lib/response";
@@ -14,7 +15,7 @@ export const listAllowlist = async (c: AppContext) => {
   const { tokenId } = c.req.param();
   const auth = getAuth(c);
 
-  const tokenService = new TokenService(c.env.DB);
+  const tokenService = new TokenService(getDb(c.env));
   const token = await tokenService.getToken(tokenId);
 
   if (!token || token.organizationId !== auth?.organizationId) {
@@ -50,7 +51,7 @@ export const addAllowlistEntry = async (c: AppContext) => {
     });
   }
 
-  const tokenService = new TokenService(c.env.DB);
+  const tokenService = new TokenService(getDb(c.env));
   const token = await tokenService.getToken(tokenId);
 
   if (!token || token.organizationId !== auth?.organizationId) {
@@ -70,7 +71,7 @@ export const addAllowlistEntry = async (c: AppContext) => {
     });
 
     // Audit log
-    const auditService = new AuditService(c.env.DB);
+    const auditService = new AuditService(getDb(c.env));
     await auditService.log(c, {
       action: "create",
       resourceType: "token_allowlist",
@@ -96,7 +97,7 @@ export const removeAllowlistEntry = async (c: AppContext) => {
   const { tokenId, entryId } = c.req.param();
   const auth = getAuth(c);
 
-  const tokenService = new TokenService(c.env.DB);
+  const tokenService = new TokenService(getDb(c.env));
   const token = await tokenService.getToken(tokenId);
 
   if (!token || token.organizationId !== auth?.organizationId) {
@@ -115,7 +116,7 @@ export const removeAllowlistEntry = async (c: AppContext) => {
   await tokenService.revokeAllowlistEntry(entryId);
 
   // Audit log
-  const auditService = new AuditService(c.env.DB);
+  const auditService = new AuditService(getDb(c.env));
   await auditService.log(c, {
     action: "revoke",
     resourceType: "token_allowlist",

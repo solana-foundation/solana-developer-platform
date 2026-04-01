@@ -1,3 +1,4 @@
+import type { PreparedStatement } from "@/db";
 import type { Permission } from "@sdp/types";
 
 export interface ApiKeyWalletBinding {
@@ -21,7 +22,7 @@ export function normalizeApiKeyWalletPermissions(permissions?: Permission[] | nu
 }
 
 export async function listApiKeyWalletBindings(
-  db: D1Database,
+  db: DatabaseClient,
   apiKeyId: string
 ): Promise<ApiKeyWalletBinding[]> {
   const result = await db
@@ -41,11 +42,11 @@ export async function listApiKeyWalletBindings(
 }
 
 export async function replaceApiKeyWalletBindings(
-  db: D1Database,
+  db: DatabaseClient,
   apiKeyId: string,
   bindings: ApiKeyWalletBinding[]
 ): Promise<void> {
-  const statements: D1PreparedStatement[] = [
+  const statements: PreparedStatement[] = [
     db.prepare("DELETE FROM api_key_wallet_permissions WHERE api_key_id = ?").bind(apiKeyId),
   ];
 
@@ -69,7 +70,7 @@ export async function replaceApiKeyWalletBindings(
 }
 
 export async function upsertApiKeyWalletBinding(
-  db: D1Database,
+  db: DatabaseClient,
   apiKeyId: string,
   binding: ApiKeyWalletBinding
 ): Promise<void> {
@@ -80,7 +81,7 @@ export async function upsertApiKeyWalletBinding(
        ON CONFLICT(api_key_id, wallet_id)
        DO UPDATE SET
          permissions = excluded.permissions,
-         updated_at = (STRFTIME('%Y-%m-%dT%H:%M:%fZ','now'))`
+         updated_at = sdp_iso_now()`
     )
     .bind(
       `akw_${crypto.randomUUID()}`,
@@ -92,15 +93,15 @@ export async function upsertApiKeyWalletBinding(
 }
 
 export async function cloneApiKeyWalletBindings(
-  db: D1Database,
+  db: DatabaseClient,
   sourceApiKeyId: string,
   targetApiKeyId: string
 ): Promise<void> {
   await db
     .prepare(
       `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
-       SELECT
-         'akw_' || lower(hex(randomblob(16))),
+        SELECT
+         'akw_' || md5(random()::text || clock_timestamp()::text),
          ?,
          wallet_id,
          permissions

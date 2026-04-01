@@ -1,9 +1,10 @@
+import { getDb } from "@/db";
 import { assertApiKeyWalletAccess } from "@/lib/api-key-wallet-auth";
 import type { ApiKeyContext } from "@/lib/auth";
 import { AppError } from "@/lib/errors";
 import { getSolanaConfig } from "@/lib/solana";
 import { getTemplateInfo } from "@/services/issuance/templates";
-import { createOrgSigner } from "@/services/solana";
+import * as solanaServices from "@/services/solana";
 import { CustodyConfigStore } from "@/services/stores/custody-config.store";
 import type { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
@@ -206,7 +207,7 @@ export async function resolveAuthoritySigner(params: {
 
   if (preferredWalletId) {
     assertApiKeyWalletAccess(auth, preferredWalletId, ["tokens:admin"]);
-    const signer = await createOrgSigner(
+    const signer = await solanaServices.createOrgSigner(
       env,
       auth.organizationId,
       auth.projectId,
@@ -218,7 +219,7 @@ export async function resolveAuthoritySigner(params: {
     }
   }
 
-  const custodyStore = new CustodyConfigStore(env.DB, env.CUSTODY_ENCRYPTION_KEY);
+  const custodyStore = new CustodyConfigStore(getDb(env), env.CUSTODY_ENCRYPTION_KEY);
   const authorityWallet = await custodyStore.findActiveWalletByPublicKey(
     auth.organizationId,
     auth.projectId ?? undefined,
@@ -230,7 +231,7 @@ export async function resolveAuthoritySigner(params: {
   }
 
   assertApiKeyWalletAccess(auth, authorityWallet.walletId, ["tokens:admin"]);
-  const signer = await createOrgSigner(
+  const signer = await solanaServices.createOrgSigner(
     env,
     auth.organizationId,
     auth.projectId,

@@ -2,15 +2,16 @@
  * Project Service Unit Tests
  */
 
+import { getDb } from "@/db";
 import { ProjectService } from "@/services/project.service";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/d1";
+import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 describe("ProjectService", () => {
   let projectService: ProjectService;
-  let db: D1Database;
+  let db: DatabaseClient;
 
   beforeAll(async () => {
     await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
@@ -21,7 +22,7 @@ describe("ProjectService", () => {
   });
 
   beforeEach(async () => {
-    db = (env as { DB: D1Database }).DB;
+    db = getDb(env);
     projectService = new ProjectService(db);
 
     // Clear projects tables

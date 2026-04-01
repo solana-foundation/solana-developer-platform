@@ -1,4 +1,4 @@
-import type { DrizzleDbClient } from "./base";
+import type { RepositoryDbClient } from "./base";
 
 export type PaymentTransferDirection = "inbound" | "outbound";
 export type PaymentTransferType = "transfer" | "transfer_confidential";
@@ -108,7 +108,7 @@ export interface ListTransfersResult {
 }
 
 export interface PaymentsRepositoryContext {
-  db: DrizzleDbClient;
+  db: RepositoryDbClient;
 }
 
 export interface PaymentsRepository {

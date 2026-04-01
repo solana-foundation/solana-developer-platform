@@ -1,7 +1,8 @@
+import { getDb } from "@/db";
 import app from "@/index";
 import { hashString } from "@/lib/hash";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/d1";
+import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVNamespaces, seedCachedApiKey } from "@/test/mocks/kv";
 import type { CachedApiKey } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -46,115 +47,131 @@ async function seedAuthAndConfigs(): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
   await seedCachedApiKey(env, keyHash, TEST_CACHED_API_KEY);
 
-  await env.DB.batch([
-    env.DB.prepare(
-      "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)"
-    ).bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, "free", "active"),
-    env.DB.prepare(
-      "INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)"
-    ).bind(TEST_USER.id, TEST_USER.email, 1, "active"),
-    env.DB.prepare(
-      `INSERT INTO api_keys
+  await getDb(env).batch([
+    getDb(env)
+      .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
+      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, "free", "active"),
+    getDb(env)
+      .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
+      .bind(TEST_USER.id, TEST_USER.email, 1, "active"),
+    getDb(env)
+      .prepare(
+        `INSERT INTO api_keys
            (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, environment, status)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).bind(
-      TEST_API_KEY.id,
-      TEST_ORG.id,
-      null,
-      TEST_USER.id,
-      "Custody Multi Provider Test Key",
-      TEST_API_KEY.prefix,
-      keyHash,
-      "api_admin",
-      JSON.stringify(["*"]),
-      "sandbox",
-      "active"
-    ),
-    env.DB.prepare(
-      `INSERT INTO custody_configs
+      )
+      .bind(
+        TEST_API_KEY.id,
+        TEST_ORG.id,
+        null,
+        TEST_USER.id,
+        "Custody Multi Provider Test Key",
+        TEST_API_KEY.prefix,
+        keyHash,
+        "api_admin",
+        JSON.stringify(["*"]),
+        "sandbox",
+        "active"
+      ),
+    getDb(env)
+      .prepare(
+        `INSERT INTO custody_configs
            (id, organization_id, project_id, provider, config_encrypted, encryption_version, default_wallet_id, status)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-    ).bind(
-      PRIVY_CONFIG_ID,
-      TEST_ORG.id,
-      null,
-      "privy",
-      "test-config",
-      "sdp-custody-encryption-v1",
-      "privy_wallet_a",
-      "active"
-    ),
-    env.DB.prepare(
-      `INSERT INTO custody_configs
+      )
+      .bind(
+        PRIVY_CONFIG_ID,
+        TEST_ORG.id,
+        null,
+        "privy",
+        "test-config",
+        "sdp-custody-encryption-v1",
+        "privy_wallet_a",
+        "active"
+      ),
+    getDb(env)
+      .prepare(
+        `INSERT INTO custody_configs
            (id, organization_id, project_id, provider, config_encrypted, encryption_version, default_wallet_id, status)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-    ).bind(
-      PARA_CONFIG_ID,
-      TEST_ORG.id,
-      null,
-      "para",
-      "test-config",
-      "sdp-custody-encryption-v1",
-      "para_wallet_a",
-      "active"
-    ),
-    env.DB.prepare(
-      `INSERT INTO custody_scope_defaults
+      )
+      .bind(
+        PARA_CONFIG_ID,
+        TEST_ORG.id,
+        null,
+        "para",
+        "test-config",
+        "sdp-custody-encryption-v1",
+        "para_wallet_a",
+        "active"
+      ),
+    getDb(env)
+      .prepare(
+        `INSERT INTO custody_scope_defaults
            (id, organization_id, project_id, default_custody_config_id)
          VALUES (?, ?, ?, ?)`
-    ).bind("csd_multi_org_default", TEST_ORG.id, null, PRIVY_CONFIG_ID),
-    env.DB.prepare(
-      `INSERT INTO custody_wallets
+      )
+      .bind("csd_multi_org_default", TEST_ORG.id, null, PRIVY_CONFIG_ID),
+    getDb(env)
+      .prepare(
+        `INSERT INTO custody_wallets
            (id, custody_config_id, wallet_id, public_key, label, purpose, status)
          VALUES (?, ?, ?, ?, ?, ?, ?)`
-    ).bind(
-      "cwlt_privy_a",
-      PRIVY_CONFIG_ID,
-      "privy_wallet_a",
-      "privy_pubkey_a",
-      "Privy Root A",
-      "root",
-      "active"
-    ),
-    env.DB.prepare(
-      `INSERT INTO custody_wallets
+      )
+      .bind(
+        "cwlt_privy_a",
+        PRIVY_CONFIG_ID,
+        "privy_wallet_a",
+        "privy_pubkey_a",
+        "Privy Root A",
+        "root",
+        "active"
+      ),
+    getDb(env)
+      .prepare(
+        `INSERT INTO custody_wallets
            (id, custody_config_id, wallet_id, public_key, label, purpose, status)
          VALUES (?, ?, ?, ?, ?, ?, ?)`
-    ).bind(
-      "cwlt_privy_b",
-      PRIVY_CONFIG_ID,
-      "privy_wallet_b",
-      "privy_pubkey_b",
-      "Privy Root B",
-      "transfer",
-      "active"
-    ),
-    env.DB.prepare(
-      `INSERT INTO custody_wallets
+      )
+      .bind(
+        "cwlt_privy_b",
+        PRIVY_CONFIG_ID,
+        "privy_wallet_b",
+        "privy_pubkey_b",
+        "Privy Root B",
+        "transfer",
+        "active"
+      ),
+    getDb(env)
+      .prepare(
+        `INSERT INTO custody_wallets
            (id, custody_config_id, wallet_id, public_key, label, purpose, status)
          VALUES (?, ?, ?, ?, ?, ?, ?)`
-    ).bind(
-      "cwlt_para_a",
-      PARA_CONFIG_ID,
-      "para_wallet_a",
-      "para_pubkey_a",
-      "Para Root A",
-      "root",
-      "active"
-    ),
-    env.DB.prepare(
-      `INSERT INTO custody_wallets
+      )
+      .bind(
+        "cwlt_para_a",
+        PARA_CONFIG_ID,
+        "para_wallet_a",
+        "para_pubkey_a",
+        "Para Root A",
+        "root",
+        "active"
+      ),
+    getDb(env)
+      .prepare(
+        `INSERT INTO custody_wallets
            (id, custody_config_id, wallet_id, public_key, label, purpose, status)
          VALUES (?, ?, ?, ?, ?, ?, ?)`
-    ).bind(
-      "cwlt_para_b",
-      PARA_CONFIG_ID,
-      "para_wallet_b",
-      "para_pubkey_b",
-      "Para Root B",
-      "transfer",
-      "active"
-    ),
+      )
+      .bind(
+        "cwlt_para_b",
+        PARA_CONFIG_ID,
+        "para_wallet_b",
+        "para_pubkey_b",
+        "Para Root B",
+        "transfer",
+        "active"
+      ),
   ]);
 }
 
@@ -187,12 +204,13 @@ describe("Custody multi-provider routes", () => {
 
     expect(res.status).toBe(201);
 
-    const activeConfigs = await env.DB.prepare(
-      `SELECT provider, status
+    const activeConfigs = await getDb(env)
+      .prepare(
+        `SELECT provider, status
          FROM custody_configs
          WHERE organization_id = ?
          ORDER BY provider`
-    )
+      )
       .bind(TEST_ORG.id)
       .all<{ provider: string; status: string }>();
 
@@ -201,12 +219,13 @@ describe("Custody multi-provider routes", () => {
       { provider: "privy", status: "active" },
     ]);
 
-    const defaultPointer = await env.DB.prepare(
-      `SELECT default_custody_config_id
+    const defaultPointer = await getDb(env)
+      .prepare(
+        `SELECT default_custody_config_id
          FROM custody_scope_defaults
          WHERE organization_id = ? AND project_id IS NULL
          LIMIT 1`
-    )
+      )
       .bind(TEST_ORG.id)
       .first<{ default_custody_config_id: string }>();
 
@@ -308,26 +327,30 @@ describe("Custody multi-provider routes", () => {
 
   it("skips active configs without wallets in /v1/wallets/configs instead of failing", async () => {
     const walletlessConfigId = "cust_cfg_walletless";
-    await env.DB.batch([
-      env.DB.prepare(
-        `INSERT INTO custody_configs
+    await getDb(env).batch([
+      getDb(env)
+        .prepare(
+          `INSERT INTO custody_configs
              (id, organization_id, project_id, provider, config_encrypted, encryption_version, default_wallet_id, status)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-      ).bind(
-        walletlessConfigId,
-        TEST_ORG.id,
-        null,
-        "turnkey",
-        "test-config",
-        "sdp-custody-encryption-v1",
-        null,
-        "active"
-      ),
-      env.DB.prepare(
-        `UPDATE custody_scope_defaults
+        )
+        .bind(
+          walletlessConfigId,
+          TEST_ORG.id,
+          null,
+          "turnkey",
+          "test-config",
+          "sdp-custody-encryption-v1",
+          null,
+          "active"
+        ),
+      getDb(env)
+        .prepare(
+          `UPDATE custody_scope_defaults
            SET default_custody_config_id = ?, updated_at = datetime('now')
            WHERE organization_id = ? AND project_id IS NULL`
-      ).bind(walletlessConfigId, TEST_ORG.id),
+        )
+        .bind(walletlessConfigId, TEST_ORG.id),
     ]);
 
     const res = await app.request(
@@ -358,39 +381,45 @@ describe("Custody multi-provider routes", () => {
   });
 
   it("returns config for legacy default providers without adapter resolution", async () => {
-    await env.DB.batch([
-      env.DB.prepare(
-        `INSERT INTO custody_configs
+    await getDb(env).batch([
+      getDb(env)
+        .prepare(
+          `INSERT INTO custody_configs
              (id, organization_id, project_id, provider, config_encrypted, encryption_version, default_wallet_id, status)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-      ).bind(
-        DFNS_CONFIG_ID,
-        TEST_ORG.id,
-        null,
-        "dfns",
-        "legacy-config",
-        "sdp-custody-encryption-v1",
-        "dfns_wallet_a",
-        "active"
-      ),
-      env.DB.prepare(
-        `INSERT INTO custody_wallets
+        )
+        .bind(
+          DFNS_CONFIG_ID,
+          TEST_ORG.id,
+          null,
+          "dfns",
+          "legacy-config",
+          "sdp-custody-encryption-v1",
+          "dfns_wallet_a",
+          "active"
+        ),
+      getDb(env)
+        .prepare(
+          `INSERT INTO custody_wallets
              (id, custody_config_id, wallet_id, public_key, label, purpose, status)
            VALUES (?, ?, ?, ?, ?, ?, ?)`
-      ).bind(
-        "cwlt_dfns_a",
-        DFNS_CONFIG_ID,
-        "dfns_wallet_a",
-        "dfns_pubkey_a",
-        "Dfns Root A",
-        "root",
-        "active"
-      ),
-      env.DB.prepare(
-        `UPDATE custody_scope_defaults
+        )
+        .bind(
+          "cwlt_dfns_a",
+          DFNS_CONFIG_ID,
+          "dfns_wallet_a",
+          "dfns_pubkey_a",
+          "Dfns Root A",
+          "root",
+          "active"
+        ),
+      getDb(env)
+        .prepare(
+          `UPDATE custody_scope_defaults
            SET default_custody_config_id = ?, updated_at = datetime('now')
            WHERE organization_id = ? AND project_id IS NULL`
-      ).bind(DFNS_CONFIG_ID, TEST_ORG.id),
+        )
+        .bind(DFNS_CONFIG_ID, TEST_ORG.id),
     ]);
 
     const res = await app.request(
@@ -435,23 +464,25 @@ describe("Custody multi-provider routes", () => {
 
     expect(res.status).toBe(200);
 
-    const paraConfig = await env.DB.prepare(
-      `SELECT default_wallet_id
+    const paraConfig = await getDb(env)
+      .prepare(
+        `SELECT default_wallet_id
          FROM custody_configs
          WHERE id = ?
          LIMIT 1`
-    )
+      )
       .bind(PARA_CONFIG_ID)
       .first<{ default_wallet_id: string | null }>();
 
     expect(paraConfig?.default_wallet_id).toBe("para_wallet_b");
 
-    const defaultPointer = await env.DB.prepare(
-      `SELECT default_custody_config_id
+    const defaultPointer = await getDb(env)
+      .prepare(
+        `SELECT default_custody_config_id
          FROM custody_scope_defaults
          WHERE organization_id = ? AND project_id IS NULL
          LIMIT 1`
-    )
+      )
       .bind(TEST_ORG.id)
       .first<{ default_custody_config_id: string }>();
 

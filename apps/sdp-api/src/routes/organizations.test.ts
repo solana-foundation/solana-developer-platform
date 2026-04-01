@@ -2,12 +2,13 @@
  * Organizations route tests
  */
 
+import { getDb } from "@/db";
 import app from "@/index";
 import { hashString } from "@/lib/hash";
 import { TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_MEMBER, TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/d1";
+import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVNamespaces, seedCachedApiKey } from "@/test/mocks/kv";
 import type { CreateOrganizationResponse, Organization } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -36,9 +37,8 @@ describe("Organizations routes", () => {
       env.ORGANIZATION_REGISTRATION_TOKEN = ORGANIZATION_REGISTRATION_TOKEN;
 
       // Add email to allowlist for org creation
-      await env.DB.prepare(
-        "INSERT INTO allowlist (id, type, value, tier, status) VALUES (?, ?, ?, ?, ?)"
-      )
+      await getDb(env)
+        .prepare("INSERT INTO allowlist (id, type, value, tier, status) VALUES (?, ?, ?, ?, ?)")
         .bind("allow_test1", "email", "new@example.com", "pro", "active")
         .run();
     });
@@ -228,9 +228,8 @@ describe("Organizations routes", () => {
       );
 
       // Add another allowlisted email
-      await env.DB.prepare(
-        "INSERT INTO allowlist (id, type, value, tier, status) VALUES (?, ?, ?, ?, ?)"
-      )
+      await getDb(env)
+        .prepare("INSERT INTO allowlist (id, type, value, tier, status) VALUES (?, ?, ?, ?, ?)")
         .bind("allow_test2", "email", "another@example.com", "free", "active")
         .run();
 
@@ -261,9 +260,8 @@ describe("Organizations routes", () => {
   describe("GET /v1/organizations/:orgId", () => {
     beforeEach(async () => {
       // Seed organization and auth
-      await env.DB.prepare(
-        "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)"
-      )
+      await getDb(env)
+        .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
         .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, TEST_ORG.tier, TEST_ORG.status)
         .run();
 
@@ -290,7 +288,8 @@ describe("Organizations routes", () => {
     });
 
     it("returns internal error when organization tier is invalid in storage", async () => {
-      await env.DB.prepare("UPDATE organizations SET tier = ? WHERE id = ?")
+      await getDb(env)
+        .prepare("UPDATE organizations SET tier = ? WHERE id = ?")
         .bind("standard", TEST_ORG.id)
         .run();
 
@@ -310,7 +309,8 @@ describe("Organizations routes", () => {
     });
 
     it("returns internal error when organization status is invalid in storage", async () => {
-      await env.DB.prepare("UPDATE organizations SET status = ? WHERE id = ?")
+      await getDb(env)
+        .prepare("UPDATE organizations SET status = ? WHERE id = ?")
         .bind("unknown", TEST_ORG.id)
         .run();
 
@@ -375,9 +375,8 @@ describe("Organizations routes", () => {
 
   describe("PATCH /v1/organizations/:orgId", () => {
     beforeEach(async () => {
-      await env.DB.prepare(
-        "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)"
-      )
+      await getDb(env)
+        .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
         .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, TEST_ORG.tier, TEST_ORG.status)
         .run();
 
@@ -475,32 +474,38 @@ describe("Organizations routes", () => {
   describe("DELETE /v1/organizations/:orgId", () => {
     beforeEach(async () => {
       // Create org with user and API key
-      await env.DB.batch([
-        env.DB.prepare(
-          "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)"
-        ).bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, TEST_ORG.tier, TEST_ORG.status),
+      await getDb(env).batch([
+        getDb(env)
+          .prepare(
+            "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)"
+          )
+          .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, TEST_ORG.tier, TEST_ORG.status),
 
-        env.DB.prepare(
-          "INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)"
-        ).bind(TEST_USER.id, TEST_USER.email, 0, TEST_USER.status),
+        getDb(env)
+          .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
+          .bind(TEST_USER.id, TEST_USER.email, 0, TEST_USER.status),
 
-        env.DB.prepare(
-          "INSERT INTO organization_members (id, organization_id, user_id, role, status) VALUES (?, ?, ?, ?, ?)"
-        ).bind(TEST_MEMBER.id, TEST_MEMBER.organizationId, TEST_MEMBER.userId, "admin", "active"),
+        getDb(env)
+          .prepare(
+            "INSERT INTO organization_members (id, organization_id, user_id, role, status) VALUES (?, ?, ?, ?, ?)"
+          )
+          .bind(TEST_MEMBER.id, TEST_MEMBER.organizationId, TEST_MEMBER.userId, "admin", "active"),
 
-        env.DB.prepare(
-          "INSERT INTO api_keys (id, organization_id, created_by, name, key_prefix, key_hash, role, environment, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
-        ).bind(
-          TEST_API_KEY.id,
-          TEST_ORG.id,
-          TEST_USER.id,
-          "Test Key",
-          TEST_API_KEY.prefix,
-          validKeyHash,
-          "api_admin",
-          "sandbox",
-          "active"
-        ),
+        getDb(env)
+          .prepare(
+            "INSERT INTO api_keys (id, organization_id, created_by, name, key_prefix, key_hash, role, environment, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+          )
+          .bind(
+            TEST_API_KEY.id,
+            TEST_ORG.id,
+            TEST_USER.id,
+            "Test Key",
+            TEST_API_KEY.prefix,
+            validKeyHash,
+            "api_admin",
+            "sandbox",
+            "active"
+          ),
       ]);
 
       await seedCachedApiKey(env, validKeyHash, {
@@ -524,7 +529,8 @@ describe("Organizations routes", () => {
       expect(res.status).toBe(204);
 
       // Verify org is soft deleted
-      const org = await env.DB.prepare("SELECT status FROM organizations WHERE id = ?")
+      const org = await getDb(env)
+        .prepare("SELECT status FROM organizations WHERE id = ?")
         .bind(TEST_ORG.id)
         .first<{ status: string }>();
 
@@ -543,7 +549,8 @@ describe("Organizations routes", () => {
         env
       );
 
-      const keys = await env.DB.prepare("SELECT status FROM api_keys WHERE organization_id = ?")
+      const keys = await getDb(env)
+        .prepare("SELECT status FROM api_keys WHERE organization_id = ?")
         .bind(TEST_ORG.id)
         .all<{ status: string }>();
 

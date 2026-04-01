@@ -242,7 +242,7 @@ export function resolveUpdateWalletScope(input: WalletScopeInput): {
 }
 
 export async function assertWalletBindingsInScope(
-  db: D1Database,
+  db: DatabaseClient,
   organizationId: string,
   keyProjectId: string | null,
   bindings: ApiKeyWalletBinding[]

@@ -1,3 +1,4 @@
+import { getDb } from "@/db";
 import { toMosaicAmount } from "@/lib/amount";
 import { getAuth } from "@/lib/auth";
 import { AppError, notFound } from "@/lib/errors";
@@ -28,7 +29,7 @@ export const prepareSeize = async (c: AppContext) => {
     });
   }
 
-  const tokenService = new TokenService(c.env.DB);
+  const tokenService = new TokenService(getDb(c.env));
   const token = await tokenService.getToken(tokenId);
 
   if (!token || token.organizationId !== auth?.organizationId) {
@@ -106,7 +107,7 @@ export const prepareSeize = async (c: AppContext) => {
     initiatedByKeyId: auth.id,
   });
 
-  const auditService = new AuditService(c.env.DB);
+  const auditService = new AuditService(getDb(c.env));
   await auditService.log(c, {
     action: "seize",
     resourceType: "token_transaction",
@@ -145,7 +146,7 @@ export const executeSeize = async (c: AppContext) => {
     });
   }
 
-  const tokenService = new TokenService(c.env.DB);
+  const tokenService = new TokenService(getDb(c.env));
   const token = await tokenService.getToken(tokenId);
 
   if (!token || token.organizationId !== auth?.organizationId) {
@@ -235,7 +236,7 @@ export const executeSeize = async (c: AppContext) => {
       slot: Number(result.slot),
     });
 
-    const auditService = new AuditService(c.env.DB);
+    const auditService = new AuditService(getDb(c.env));
     await auditService.log(c, {
       action: "seize",
       resourceType: "token_transaction",

@@ -66,7 +66,7 @@ export interface AuditLogEntry {
 }
 
 export class AuditService {
-  constructor(private db: D1Database) {}
+  constructor(private db: DatabaseClient) {}
 
   /**
    * Log an audit event

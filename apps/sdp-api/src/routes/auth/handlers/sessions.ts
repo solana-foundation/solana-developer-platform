@@ -1,3 +1,4 @@
+import { getDb } from "@/db";
 import { AppError, notFound } from "@/lib/errors";
 import { noContent, success } from "@/lib/response";
 import { sessionAuthMiddleware } from "@/middleware/session-auth";
@@ -16,7 +17,7 @@ export const logout = async (c: AppContext) => {
   const session = c.get("session");
 
   if (session) {
-    const sessionService = new SessionService(c.env.DB, c.env.SDP_SESSIONS);
+    const sessionService = new SessionService(getDb(c.env), c.env.SDP_SESSIONS);
     await sessionService.revokeSession(session.id);
   }
 
@@ -36,9 +37,8 @@ export const getCurrentUser = async (c: AppContext) => {
   }
 
   // Get user details
-  const user = await c.env.DB.prepare(
-    "SELECT id, email, name, last_login_at, login_count FROM users WHERE id = ?"
-  )
+  const user = await getDb(c.env)
+    .prepare("SELECT id, email, name, last_login_at, login_count FROM users WHERE id = ?")
     .bind(session.userId)
     .first<{
       id: string;
@@ -53,12 +53,13 @@ export const getCurrentUser = async (c: AppContext) => {
   }
 
   // Get organization with role
-  const orgMembership = await c.env.DB.prepare(
-    `SELECT o.id, o.name, o.slug, o.tier, om.role
+  const orgMembership = await getDb(c.env)
+    .prepare(
+      `SELECT o.id, o.name, o.slug, o.tier, om.role
      FROM organizations o
      JOIN organization_members om ON om.organization_id = o.id
      WHERE o.id = ? AND om.user_id = ?`
-  )
+    )
     .bind(session.organizationId, session.userId)
     .first<{
       id: string;
@@ -100,7 +101,7 @@ export const listSessions = async (c: AppContext) => {
     throw new AppError("UNAUTHORIZED");
   }
 
-  const sessionService = new SessionService(c.env.DB, c.env.SDP_SESSIONS);
+  const sessionService = new SessionService(getDb(c.env), c.env.SDP_SESSIONS);
   const sessions = await sessionService.listUserSessions(session.userId);
 
   const response: ListSessionsResponse = {
@@ -126,7 +127,7 @@ export const revokeSession = async (c: AppContext) => {
     throw new AppError("UNAUTHORIZED");
   }
 
-  const sessionService = new SessionService(c.env.DB, c.env.SDP_SESSIONS);
+  const sessionService = new SessionService(getDb(c.env), c.env.SDP_SESSIONS);
 
   // Verify the session belongs to this user
   const sessions = await sessionService.listUserSessions(currentSession.userId);

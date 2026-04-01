@@ -1,10 +1,11 @@
+import { getDb } from "@/db";
 import {
   includesTransactionMethod,
   listRpcProviders,
   resolveRpcTarget,
 } from "@/services/rpc-relay.service";
 import { env } from "@/test/helpers/env";
-import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/d1";
+import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
 import type { Env } from "@/types/env";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
@@ -15,7 +16,6 @@ const appEnv = env as unknown as Env;
 const SEND_RAW_TRANSACTION_METHOD = ["sendRaw", "Transaction"].join("");
 
 type MutableRpcEnv = {
-  DB: Env["DB"];
   SDP_CACHE: Env["SDP_CACHE"];
   SOLANA_RPC_URL?: string;
   SOLANA_RPC_DEFAULT_PROVIDER?: string;
@@ -30,6 +30,7 @@ type MutableRpcEnv = {
 };
 
 const rpcEnv = env as MutableRpcEnv;
+const db = getDb(env as unknown as Env);
 
 async function clearKvNamespace(namespace: KVNamespace) {
   const listed = await namespace.list();
@@ -50,8 +51,9 @@ describe("rpc-relay.service", () => {
   beforeEach(async () => {
     await clearKvNamespace(rpcEnv.SDP_CACHE);
 
-    await rpcEnv.DB.prepare(
-      `INSERT INTO organizations (id, name, slug, tier, status, settings)
+    await db
+      .prepare(
+        `INSERT INTO organizations (id, name, slug, tier, status, settings)
        VALUES (?, 'RPC Service Org', 'rpc-service-org', 'free', 'active', NULL)
        ON CONFLICT(id) DO UPDATE SET
          name = excluded.name,
@@ -59,23 +61,25 @@ describe("rpc-relay.service", () => {
          tier = excluded.tier,
          status = excluded.status,
          settings = excluded.settings`
-    )
+      )
       .bind(TEST_ORG_ID)
       .run();
 
-    await rpcEnv.DB.prepare(
-      `INSERT INTO users (id, email, email_verified, status)
+    await db
+      .prepare(
+        `INSERT INTO users (id, email, email_verified, status)
        VALUES (?, 'rpc-service@example.com', 1, 'active')
        ON CONFLICT(id) DO UPDATE SET
          email = excluded.email,
          email_verified = excluded.email_verified,
          status = excluded.status`
-    )
+      )
       .bind(TEST_USER_ID)
       .run();
 
-    await rpcEnv.DB.prepare(
-      `INSERT INTO projects (id, organization_id, name, slug, environment, settings, status, created_by)
+    await db
+      .prepare(
+        `INSERT INTO projects (id, organization_id, name, slug, environment, settings, status, created_by)
        VALUES (?, ?, 'RPC Service Project', 'rpc-service-project', 'sandbox', NULL, 'active', ?)
        ON CONFLICT(id) DO UPDATE SET
          organization_id = excluded.organization_id,
@@ -85,7 +89,7 @@ describe("rpc-relay.service", () => {
          settings = excluded.settings,
          status = excluded.status,
          created_by = excluded.created_by`
-    )
+      )
       .bind(TEST_PROJECT_ID, TEST_ORG_ID, TEST_USER_ID)
       .run();
 
@@ -108,7 +112,8 @@ describe("rpc-relay.service", () => {
   });
 
   it("resolves quicknode provider from organization settings with redacted endpoint labels", async () => {
-    await rpcEnv.DB.prepare("UPDATE organizations SET settings = ? WHERE id = ?")
+    await db
+      .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
       .bind(JSON.stringify({ rpcProvider: "quicknode" }), TEST_ORG_ID)
       .run();
 
@@ -117,7 +122,7 @@ describe("rpc-relay.service", () => {
 
     const target = await resolveRpcTarget({
       env: appEnv,
-      db: rpcEnv.DB,
+      db,
       organizationId: TEST_ORG_ID,
       authProjectId: null,
       requestedProjectId: null,
@@ -130,10 +135,12 @@ describe("rpc-relay.service", () => {
   });
 
   it("prefers project-managed provider over organization provider when project setting is set", async () => {
-    await rpcEnv.DB.prepare("UPDATE organizations SET settings = ? WHERE id = ?")
+    await db
+      .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
       .bind(JSON.stringify({ rpcProvider: "helius" }), TEST_ORG_ID)
       .run();
-    await rpcEnv.DB.prepare("UPDATE projects SET settings = ? WHERE id = ?")
+    await db
+      .prepare("UPDATE projects SET settings = ? WHERE id = ?")
       .bind(JSON.stringify({ rpcProvider: "triton" }), TEST_PROJECT_ID)
       .run();
 
@@ -142,7 +149,7 @@ describe("rpc-relay.service", () => {
 
     const target = await resolveRpcTarget({
       env: appEnv,
-      db: rpcEnv.DB,
+      db,
       organizationId: TEST_ORG_ID,
       authProjectId: TEST_PROJECT_ID,
       requestedProjectId: null,
@@ -153,7 +160,8 @@ describe("rpc-relay.service", () => {
   });
 
   it("uses project custom endpoint when project rpcProvider is custom", async () => {
-    await rpcEnv.DB.prepare("UPDATE projects SET settings = ? WHERE id = ?")
+    await db
+      .prepare("UPDATE projects SET settings = ? WHERE id = ?")
       .bind(
         JSON.stringify({
           rpcProvider: "custom",
@@ -165,7 +173,7 @@ describe("rpc-relay.service", () => {
 
     const target = await resolveRpcTarget({
       env: appEnv,
-      db: rpcEnv.DB,
+      db,
       organizationId: TEST_ORG_ID,
       authProjectId: TEST_PROJECT_ID,
       requestedProjectId: null,
@@ -183,7 +191,7 @@ describe("rpc-relay.service", () => {
 
     const first = await resolveRpcTarget({
       env: appEnv,
-      db: rpcEnv.DB,
+      db,
       organizationId: TEST_ORG_ID,
       authProjectId: null,
       requestedProjectId: null,
@@ -191,7 +199,7 @@ describe("rpc-relay.service", () => {
 
     const second = await resolveRpcTarget({
       env: appEnv,
-      db: rpcEnv.DB,
+      db,
       organizationId: TEST_ORG_ID,
       authProjectId: null,
       requestedProjectId: null,
@@ -213,7 +221,7 @@ describe("rpc-relay.service", () => {
 
     const providers = await listRpcProviders({
       env: appEnv,
-      db: rpcEnv.DB,
+      db,
       organizationId: TEST_ORG_ID,
       authProjectId: null,
       requestedProjectId: null,

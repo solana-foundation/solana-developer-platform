@@ -2,6 +2,7 @@
  * Custody test helpers
  */
 
+import { getDb } from "@/db";
 import type { SigningConfigRecord } from "@/services/adapters/signing";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
@@ -10,11 +11,12 @@ import type { Env } from "@/types/env";
  * Seed a custody config into the test database.
  */
 export async function seedTestCustodyConfig(env: Env, config: SigningConfigRecord): Promise<void> {
-  await env.DB.prepare(
-    `INSERT INTO custody_configs
+  await getDb(env)
+    .prepare(
+      `INSERT INTO custody_configs
      (id, organization_id, project_id, provider, config_encrypted, encryption_version, default_wallet_id, status, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  )
+    )
     .bind(
       config.id,
       config.organizationId,
@@ -30,35 +32,38 @@ export async function seedTestCustodyConfig(env: Env, config: SigningConfigRecor
     .run();
 
   if (config.status === "active") {
-    const existingDefault = await env.DB.prepare(
-      config.projectId
-        ? `SELECT id
+    const existingDefault = await getDb(env)
+      .prepare(
+        config.projectId
+          ? `SELECT id
            FROM custody_scope_defaults
            WHERE organization_id = ? AND project_id = ?
            LIMIT 1`
-        : `SELECT id
+          : `SELECT id
            FROM custody_scope_defaults
            WHERE organization_id = ? AND project_id IS NULL
            LIMIT 1`
-    )
+      )
       .bind(
         ...(config.projectId ? [config.organizationId, config.projectId] : [config.organizationId])
       )
       .first<{ id: string }>();
 
     if (existingDefault) {
-      await env.DB.prepare(
-        `UPDATE custody_scope_defaults
+      await getDb(env)
+        .prepare(
+          `UPDATE custody_scope_defaults
          SET default_custody_config_id = ?, updated_at = datetime('now')
          WHERE id = ?`
-      )
+        )
         .bind(config.id, existingDefault.id)
         .run();
     } else {
-      await env.DB.prepare(
-        `INSERT INTO custody_scope_defaults (id, organization_id, project_id, default_custody_config_id)
+      await getDb(env)
+        .prepare(
+          `INSERT INTO custody_scope_defaults (id, organization_id, project_id, default_custody_config_id)
          VALUES (?, ?, ?, ?)`
-      )
+        )
         .bind(`csd_${config.id}`, config.organizationId, config.projectId, config.id)
         .run();
     }
@@ -69,11 +74,12 @@ export async function seedTestCustodyConfig(env: Env, config: SigningConfigRecor
  * Seed a custody wallet into the test database.
  */
 export async function seedTestCustodyWallet(env: Env, wallet: CustodyWallet): Promise<void> {
-  await env.DB.prepare(
-    `INSERT INTO custody_wallets
+  await getDb(env)
+    .prepare(
+      `INSERT INTO custody_wallets
      (id, custody_config_id, wallet_id, public_key, label, purpose, status, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-  )
+    )
     .bind(
       wallet.id,
       wallet.custodyConfigId,
@@ -106,10 +112,11 @@ export async function getTestCustodyConfig(
   env: Env,
   configId: string
 ): Promise<SigningConfigRecord | null> {
-  const row = await env.DB.prepare(
-    `SELECT id, organization_id, project_id, provider, config_encrypted as config, default_wallet_id, status, created_at, updated_at
+  const row = await getDb(env)
+    .prepare(
+      `SELECT id, organization_id, project_id, provider, config_encrypted as config, default_wallet_id, status, created_at, updated_at
      FROM custody_configs WHERE id = ?`
-  )
+    )
     .bind(configId)
     .first<{
       id: string;
@@ -158,7 +165,8 @@ export async function getTestCustodyConfigByOrg(
     : `SELECT id, organization_id, project_id, provider, config_encrypted as config, default_wallet_id, status, created_at, updated_at
        FROM custody_configs WHERE organization_id = ? AND project_id IS NULL AND status = 'active'`;
 
-  const row = await env.DB.prepare(query)
+  const row = await getDb(env)
+    .prepare(query)
     .bind(...(projectId ? [orgId, projectId] : [orgId]))
     .first<{
       id: string;
@@ -197,7 +205,7 @@ export async function getTestCustodyConfigByOrg(
  * Count custody configs in test database.
  */
 export async function countTestCustodyConfigs(env: Env): Promise<number> {
-  const result = await env.DB.prepare("SELECT COUNT(*) as count FROM custody_configs").first<{
+  const result = await getDb(env).prepare("SELECT COUNT(*) as count FROM custody_configs").first<{
     count: number;
   }>();
   return result?.count ?? 0;
@@ -207,7 +215,7 @@ export async function countTestCustodyConfigs(env: Env): Promise<number> {
  * Count custody wallets in test database.
  */
 export async function countTestCustodyWallets(env: Env): Promise<number> {
-  const result = await env.DB.prepare("SELECT COUNT(*) as count FROM custody_wallets").first<{
+  const result = await getDb(env).prepare("SELECT COUNT(*) as count FROM custody_wallets").first<{
     count: number;
   }>();
   return result?.count ?? 0;

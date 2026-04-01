@@ -4,7 +4,8 @@ import {
   TEST_PROJECT_API_KEY,
   TEST_PROJECT_CACHED_KEY,
 } from "@sdp/api-test/fixtures/tokens";
-import { clearTestDatabase, seedTestDatabase } from "@sdp/api-test/mocks/d1";
+import { clearTestDatabase, seedTestDatabase } from "@sdp/api-test/mocks/db";
+import { getDb } from "@sdp/api/db";
 import app from "@sdp/api/index";
 import { hashString } from "@sdp/api/lib/hash";
 import { createFeePaymentAdapter } from "@sdp/api/services/adapters/fee-payment";
@@ -17,6 +18,7 @@ import {
   getMinimumBalanceForRentExemption,
   getRecentBlockhash,
 } from "@sdp/api/services/solana/rpc";
+import type { CustodyWallet } from "@sdp/api/services/stores/custody-config.store";
 import { getTransferSolInstruction } from "@solana-program/system";
 import {
   type Address,
@@ -39,6 +41,7 @@ const RUN_INTEGRATION_TESTS = env.RUN_INTEGRATION_TESTS === "true";
 let cachedKeyHash: string | null = null;
 let cachedCustodyAddress: string | null = null;
 const PRIVY_INTEGRATION_AIRDROP_LAMPORTS = 1_000_000;
+const KORA_MAX_TRANSFER_LAMPORTS = 10_000_000n;
 
 type SolanaRpcResponse<T> =
   | { jsonrpc: "2.0"; id: number; result: T }
@@ -66,7 +69,7 @@ export async function initIntegrationSuite() {
 export async function resetIntegrationState(
   apiKeyHash: string
 ): Promise<{ custodyAddress: string }> {
-  const db = env.DB;
+  const db = getDb(env);
   const apiKeysKV = env.SDP_API_KEYS;
   const rateLimitKV = env.SDP_RATE_LIMITS;
 
@@ -192,6 +195,7 @@ async function ensurePrivyCustodyAddress(): Promise<string> {
     return "";
   }
 
+  const db = getDb(env);
   const signingService = createSigningService(env);
   const existing = await signingService.getConfigurationByProvider(TEST_ORG.id, undefined, "privy");
 
@@ -209,13 +213,14 @@ async function ensurePrivyCustodyAddress(): Promise<string> {
   }
 
   if (!config.defaultWalletId) {
-    const fallbackWallet = await env.DB.prepare(
-      `SELECT wallet_id
+    const fallbackWallet = await db
+      .prepare(
+        `SELECT wallet_id
        FROM custody_wallets
        WHERE custody_config_id = ? AND status = 'active'
        ORDER BY created_at ASC
        LIMIT 1`
-    )
+      )
       .bind(config.id)
       .first<{ wallet_id: string }>();
 
@@ -223,22 +228,24 @@ async function ensurePrivyCustodyAddress(): Promise<string> {
       throw new Error("Integration precondition failed: Privy signer has no active wallets.");
     }
 
-    await env.DB.prepare(
-      `UPDATE custody_configs
+    await db
+      .prepare(
+        `UPDATE custody_configs
        SET default_wallet_id = ?, updated_at = datetime('now')
        WHERE id = ?`
-    )
+      )
       .bind(fallbackWallet.wallet_id, config.id)
       .run();
   }
 
   const walletRows = (
-    await env.DB.prepare(
-      `SELECT wallet_id, public_key
+    await db
+      .prepare(
+        `SELECT wallet_id, public_key
        FROM custody_wallets
        WHERE custody_config_id = ? AND status = 'active'
        ORDER BY created_at ASC`
-    )
+      )
       .bind(config.id)
       .all<{ wallet_id: string; public_key: string }>()
   ).results;
@@ -264,11 +271,12 @@ async function ensurePrivyCustodyAddress(): Promise<string> {
   }
 
   if (preferredWallet.wallet_id !== config.defaultWalletId) {
-    await env.DB.prepare(
-      `UPDATE custody_configs
+    await db
+      .prepare(
+        `UPDATE custody_configs
        SET default_wallet_id = ?, updated_at = datetime('now')
        WHERE id = ?`
-    )
+      )
       .bind(preferredWallet.wallet_id, config.id)
       .run();
   }
@@ -316,7 +324,25 @@ async function ensureAddressAccountExists(address: string): Promise<void> {
   }
 }
 
-async function fundAddressViaKoraFeePayer(address: string): Promise<boolean> {
+async function getAddressLamports(address: string): Promise<number> {
+  const rpcUrl = env.SOLANA_RPC_URL;
+  if (!rpcUrl) {
+    return 0;
+  }
+
+  type Balance = { value: number };
+  const response = await solanaRpc<Balance>(rpcUrl, "getBalance", [
+    address,
+    { commitment: "confirmed" },
+  ]);
+
+  return response.value ?? 0;
+}
+
+async function fundAddressViaKoraFeePayer(
+  address: string,
+  lamports: bigint = BigInt(PRIVY_INTEGRATION_AIRDROP_LAMPORTS)
+): Promise<boolean> {
   const rpcUrl = env.SOLANA_RPC_URL;
   if (!rpcUrl || !env.KORA_RPC_URL) {
     return false;
@@ -325,27 +351,83 @@ async function fundAddressViaKoraFeePayer(address: string): Promise<boolean> {
   const feePayment = createFeePaymentAdapter(env);
   const feePayer = await feePayment.getFeePayer();
   const rpc = createRpc(env);
-  const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc, "confirmed");
-  const minimumLamports = await getMinimumBalanceForRentExemption(rpc, 0);
+  let remainingLamports = lamports;
 
-  const instruction = getTransferSolInstruction({
-    source: createNoopSigner(feePayer),
-    destination: address as Address,
-    amount: minimumLamports + 1n,
-  });
+  while (remainingLamports > 0n) {
+    const requestedAmount =
+      remainingLamports > KORA_MAX_TRANSFER_LAMPORTS
+        ? KORA_MAX_TRANSFER_LAMPORTS
+        : remainingLamports;
+    const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc, "confirmed");
+    const minimumLamports = await getMinimumBalanceForRentExemption(rpc, 0);
+    const amount = requestedAmount > minimumLamports ? requestedAmount : minimumLamports + 1n;
 
-  const message = pipe(
-    createTransactionMessage({ version: 0 }),
-    (m) => setTransactionMessageFeePayer(feePayer, m),
-    (m) => setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, m),
-    (m) => appendTransactionMessageInstructions([instruction], m)
+    const instruction = getTransferSolInstruction({
+      source: createNoopSigner(feePayer),
+      destination: address as Address,
+      amount,
+    });
+
+    const message = pipe(
+      createTransactionMessage({ version: 0 }),
+      (m) => setTransactionMessageFeePayer(feePayer, m),
+      (m) => setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, m),
+      (m) => appendTransactionMessageInstructions([instruction], m)
+    );
+
+    const compiled = compileTransaction(message);
+    const txBytes = new Uint8Array(getTransactionEncoder().encode(compiled));
+    const signature = await feePayment.signAndSend(txBytes);
+    const confirmation = await confirmTransaction(rpc, signature, { commitment: "confirmed" });
+
+    if (confirmation.err) {
+      return false;
+    }
+
+    remainingLamports -= requestedAmount;
+  }
+
+  return true;
+}
+
+export async function fundAddressToLamports(
+  address: string,
+  minimumLamports: number
+): Promise<void> {
+  const currentLamports = await getAddressLamports(address);
+  if (currentLamports >= minimumLamports) {
+    return;
+  }
+
+  const requiredLamports = minimumLamports - currentLamports;
+  let koraFundingError: unknown = null;
+  const koraFunded = await fundAddressViaKoraFeePayer(address, BigInt(requiredLamports)).catch(
+    (error) => {
+      koraFundingError = error;
+      return false;
+    }
   );
 
-  const compiled = compileTransaction(message);
-  const txBytes = new Uint8Array(getTransactionEncoder().encode(compiled));
-  const signature = await feePayment.signAndSend(txBytes);
-  const confirmation = await confirmTransaction(rpc, signature, { commitment: "confirmed" });
-  return !confirmation.err;
+  if (koraFunded) {
+    await waitForLamports(address, minimumLamports, 30_000);
+    return;
+  }
+
+  try {
+    await solanaRequestAirdrop(env.SOLANA_RPC_URL as string, address, requiredLamports);
+    await waitForLamports(address, minimumLamports, 30_000);
+  } catch (airdropError) {
+    const koraMessage =
+      koraFundingError instanceof Error ? koraFundingError.message : String(koraFundingError);
+    const airdropMessage =
+      airdropError instanceof Error ? airdropError.message : String(airdropError);
+
+    throw new Error(
+      `Failed to fund wallet ${address} to ${minimumLamports} lamports. ` +
+        `Kora funding failed: ${koraMessage}. ` +
+        `Airdrop failed: ${airdropMessage}`
+    );
+  }
 }
 
 async function solanaAccountExists(rpcUrl: string, address: string): Promise<boolean> {
@@ -384,6 +466,21 @@ async function waitForAccountExistence(
   throw new Error(`Timed out waiting for Privy signer account ${address} to exist on-chain.`);
 }
 
+async function waitForLamports(address: string, minimumLamports: number, timeoutMs: number) {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    // eslint-disable-next-line no-await-in-loop
+    const lamports = await getAddressLamports(address);
+    if (lamports >= minimumLamports) {
+      return;
+    }
+    // eslint-disable-next-line no-await-in-loop
+    await sleep(1_000);
+  }
+
+  throw new Error(`Timed out waiting for ${address} to reach ${minimumLamports} lamports.`);
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -403,6 +500,27 @@ async function solanaRpc<T>(rpcUrl: string, method: string, params: unknown[]): 
   return payload.result;
 }
 
+export async function createFundedPrivyWallet(input: {
+  label: string;
+  fundLamports?: number;
+  setDefault?: boolean;
+}): Promise<CustodyWallet> {
+  const signingService = createSigningService(env);
+  const wallet = await signingService.createWallet(TEST_ORG.id, undefined, {
+    provider: "privy",
+    label: input.label,
+    setDefault: input.setDefault,
+  });
+
+  if (input.fundLamports && input.fundLamports > 0) {
+    await fundAddressToLamports(wallet.publicKey, input.fundLamports);
+  } else {
+    await ensureAddressAccountExists(wallet.publicKey);
+  }
+
+  return wallet;
+}
+
 export {
   app,
   env,
@@ -418,4 +536,5 @@ export {
   SOLANA_CONFIGURED,
   KORA_CONFIGURED,
   RUN_INTEGRATION_TESTS,
+  ensurePrivyCustodyAddress,
 };

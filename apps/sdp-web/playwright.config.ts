@@ -1,9 +1,9 @@
 import path from "node:path";
 import { defineConfig, devices } from "@playwright/test";
 import { getE2EEnv } from "./playwright/env";
+import { authStatePath } from "./playwright/support/auth-state";
 
 const env = getE2EEnv();
-const authStatePath = path.join(__dirname, "playwright/.clerk/user.json");
 const fixturesPath = path.join(__dirname, "playwright/.fixtures/issuance.json");
 const localApiPort = process.env.PLAYWRIGHT_API_PORT ?? "8788";
 const localApiUrl = process.env.PLAYWRIGHT_API_URL ?? `http://127.0.0.1:${localApiPort}`;
@@ -46,7 +46,7 @@ export default defineConfig({
       timeout: 180_000,
     },
     {
-      command: `pnpm exec next dev --hostname localhost --port ${webPort}`,
+      command: `corepack pnpm exec next dev --hostname localhost --port ${webPort}`,
       cwd: __dirname,
       url: env.baseURL,
       reuseExistingServer: false,
@@ -71,8 +71,18 @@ export default defineConfig({
       },
     },
     {
+      name: "dashboard",
+      testMatch: /.*\.e2e\.spec\.ts/,
+      testIgnore: /.*issuance.*\.e2e\.spec\.ts/,
+      dependencies: ["auth-setup"],
+      use: {
+        ...devices["Desktop Chrome"],
+        storageState: authStatePath,
+      },
+    },
+    {
       name: "issuance",
-      testMatch: /.*issuance.*\.spec\.ts/,
+      testMatch: /.*issuance.*\.e2e\.spec\.ts/,
       dependencies: ["auth-setup"],
       use: {
         ...devices["Desktop Chrome"],

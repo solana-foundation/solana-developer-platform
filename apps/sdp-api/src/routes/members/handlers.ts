@@ -1,3 +1,4 @@
+import { getDb } from "@/db";
 import { AppError, notFound } from "@/lib/errors";
 import { hashString } from "@/lib/hash";
 import { created, noContent, success } from "@/lib/response";
@@ -52,7 +53,7 @@ function mapRoleToClerkRole(role: OrganizationRole): string {
   return "org:member";
 }
 
-async function getClerkOrgId(db: D1Database, organizationId: string): Promise<string | null> {
+async function getClerkOrgId(db: DatabaseClient, organizationId: string): Promise<string | null> {
   const row = await db
     .prepare(
       `SELECT provider_org_id
@@ -102,14 +103,15 @@ function randomBase64Url(byteLength: number): string {
 export const listMembers = async (c: AppContext) => {
   const { organizationId } = resolveActor(c);
 
-  const results = await c.env.DB.prepare(
-    `SELECT om.id, om.role, om.status, om.created_at,
+  const results = await getDb(c.env)
+    .prepare(
+      `SELECT om.id, om.role, om.status, om.created_at,
             u.id as user_id, u.email, u.name
      FROM organization_members om
      JOIN users u ON om.user_id = u.id
      WHERE om.organization_id = ? AND om.status = 'active'
      ORDER BY om.created_at ASC`
-  )
+    )
     .bind(organizationId)
     .all();
 
@@ -147,11 +149,12 @@ export const inviteMember = async (c: AppContext) => {
   const clerkRole = mapRoleToClerkRole(role);
 
   // Check if user already exists and is a member
-  const existingMember = await c.env.DB.prepare(
-    `SELECT om.id FROM organization_members om
+  const existingMember = await getDb(c.env)
+    .prepare(
+      `SELECT om.id FROM organization_members om
      JOIN users u ON om.user_id = u.id
      WHERE om.organization_id = ? AND u.email = ? AND om.status = 'active'`
-  )
+    )
     .bind(organizationId, normalizedEmail)
     .first();
 
@@ -160,10 +163,11 @@ export const inviteMember = async (c: AppContext) => {
   }
 
   // Check for pending invitation
-  const existingInvite = await c.env.DB.prepare(
-    `SELECT id FROM invitations
+  const existingInvite = await getDb(c.env)
+    .prepare(
+      `SELECT id FROM invitations
      WHERE organization_id = ? AND email = ? AND status = 'pending'`
-  )
+    )
     .bind(organizationId, normalizedEmail)
     .first();
 
@@ -175,14 +179,15 @@ export const inviteMember = async (c: AppContext) => {
     throw new AppError("UNAUTHORIZED", "Clerk user required to send invites");
   }
 
-  const clerkOrgId = await getClerkOrgId(c.env.DB, organizationId);
+  const clerkOrgId = await getClerkOrgId(getDb(c.env), organizationId);
   if (!clerkOrgId) {
     throw new AppError("BAD_REQUEST", "Organization is not linked to Clerk");
   }
 
   const inviterKey =
     apiKeyId !== null
-      ? await c.env.DB.prepare("SELECT created_by FROM api_keys WHERE id = ?")
+      ? await getDb(c.env)
+          .prepare("SELECT created_by FROM api_keys WHERE id = ?")
           .bind(apiKeyId)
           .first<{ created_by: string }>()
       : null;
@@ -209,10 +214,11 @@ export const inviteMember = async (c: AppContext) => {
   const tokenHash = await hashString(token);
   const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(); // 7 days
 
-  await c.env.DB.prepare(
-    `INSERT INTO invitations (id, organization_id, email, role, invited_by, token_hash, expires_at, status)
+  await getDb(c.env)
+    .prepare(
+      `INSERT INTO invitations (id, organization_id, email, role, invited_by, token_hash, expires_at, status)
      VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')`
-  )
+    )
     .bind(
       invitationId,
       organizationId,
@@ -225,7 +231,7 @@ export const inviteMember = async (c: AppContext) => {
     .run();
 
   // Audit log
-  const auditService = new AuditService(c.env.DB);
+  const auditService = new AuditService(getDb(c.env));
   await auditService.log(c, {
     action: "invite",
     resourceType: "invitation",
@@ -269,11 +275,12 @@ export const acceptInvitation = async (c: AppContext) => {
   const tokenHash = await hashString(token);
 
   // Get invitation
-  const invitation = await c.env.DB.prepare(
-    `SELECT id, organization_id, email, role, expires_at, status
+  const invitation = await getDb(c.env)
+    .prepare(
+      `SELECT id, organization_id, email, role, expires_at, status
      FROM invitations
      WHERE token_hash = ?`
-  )
+    )
     .bind(tokenHash)
     .first<{
       id: string;
@@ -297,17 +304,19 @@ export const acceptInvitation = async (c: AppContext) => {
   }
 
   // Check if user exists
-  let user = await c.env.DB.prepare("SELECT id, email FROM users WHERE email = ?")
+  let user = await getDb(c.env)
+    .prepare("SELECT id, email FROM users WHERE email = ?")
     .bind(invitation.email)
     .first<{ id: string; email: string }>();
 
   if (!user) {
     // Create new user
     const userId = `usr_${crypto.randomUUID()}`;
-    await c.env.DB.prepare(
-      `INSERT INTO users (id, email, name, email_verified, status)
+    await getDb(c.env)
+      .prepare(
+        `INSERT INTO users (id, email, name, email_verified, status)
        VALUES (?, ?, ?, 1, 'active')`
-    )
+      )
       .bind(userId, invitation.email, name ?? null)
       .run();
 
@@ -316,22 +325,24 @@ export const acceptInvitation = async (c: AppContext) => {
 
   // Create membership
   const memberId = `mem_${crypto.randomUUID()}`;
-  await c.env.DB.prepare(
-    `INSERT INTO organization_members (id, organization_id, user_id, role, status)
+  await getDb(c.env)
+    .prepare(
+      `INSERT INTO organization_members (id, organization_id, user_id, role, status)
      VALUES (?, ?, ?, ?, 'active')`
-  )
+    )
     .bind(memberId, invitation.organization_id, user.id, normalizeOrganizationRole(invitation.role))
     .run();
 
   // Mark invitation as accepted
-  await c.env.DB.prepare(
-    "UPDATE invitations SET status = 'accepted', accepted_at = datetime('now') WHERE id = ?"
-  )
+  await getDb(c.env)
+    .prepare(
+      "UPDATE invitations SET status = 'accepted', accepted_at = datetime('now') WHERE id = ?"
+    )
     .bind(invitation.id)
     .run();
 
   // Audit log
-  const auditService = new AuditService(c.env.DB);
+  const auditService = new AuditService(getDb(c.env));
   await auditService.log(c, {
     action: "accept_invite",
     resourceType: "invitation",
@@ -347,9 +358,8 @@ export const removeMember = async (c: AppContext) => {
   const { organizationId, userId, apiKeyId } = resolveActor(c);
 
   // Ensure member belongs to same org
-  const member = await c.env.DB.prepare(
-    "SELECT id, user_id FROM organization_members WHERE id = ? AND organization_id = ?"
-  )
+  const member = await getDb(c.env)
+    .prepare("SELECT id, user_id FROM organization_members WHERE id = ? AND organization_id = ?")
     .bind(memberId, organizationId)
     .first<{ id: string; user_id: string }>();
 
@@ -357,12 +367,13 @@ export const removeMember = async (c: AppContext) => {
     throw notFound("Member");
   }
 
-  await c.env.DB.prepare("UPDATE organization_members SET status = 'removed' WHERE id = ?")
+  await getDb(c.env)
+    .prepare("UPDATE organization_members SET status = 'removed' WHERE id = ?")
     .bind(memberId)
     .run();
 
   // Audit log
-  const auditService = new AuditService(c.env.DB);
+  const auditService = new AuditService(getDb(c.env));
   await auditService.log(c, {
     action: "delete",
     resourceType: "member",

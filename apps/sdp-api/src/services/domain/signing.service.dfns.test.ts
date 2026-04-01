@@ -59,7 +59,7 @@ describe("signing.service dfns compatibility", () => {
 
 function createTestEnv(overrides?: Partial<Env>): Env {
   return {
-    DB: {} as D1Database,
+    DB: {} as DatabaseClient,
     CUSTODY_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString("base64"),
     DFNS_AUTH_TOKEN: "dfns-auth-token",
     DFNS_CREDENTIAL_ID: "dfns-credential-id",
