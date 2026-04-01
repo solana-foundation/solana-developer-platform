@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.12.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.11.1...v0.12.0) (2026-04-01)
+
+### Features
+
+* cut sdp-api over to Hyperdrive-backed Postgres ([#141](https://github.com/solana-foundation/solana-developer-platform/pull/141)) ([d78f50b](https://github.com/solana-foundation/solana-developer-platform/commit/d78f50b12afb1ca4b3c6789e71eb4386bf5d5a1c))
+
 ## [0.11.1](https://github.com/solana-foundation/solana-developer-platform/compare/v0.11.0...v0.11.1) (2026-03-25)
 
 ### Maintenance
