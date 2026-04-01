@@ -41,6 +41,7 @@ const RUN_INTEGRATION_TESTS = env.RUN_INTEGRATION_TESTS === "true";
 let cachedKeyHash: string | null = null;
 let cachedCustodyAddress: string | null = null;
 const PRIVY_INTEGRATION_AIRDROP_LAMPORTS = 1_000_000;
+const KORA_MAX_TRANSFER_LAMPORTS = 10_000_000n;
 
 type SolanaRpcResponse<T> =
   | { jsonrpc: "2.0"; id: number; result: T }
@@ -350,28 +351,43 @@ async function fundAddressViaKoraFeePayer(
   const feePayment = createFeePaymentAdapter(env);
   const feePayer = await feePayment.getFeePayer();
   const rpc = createRpc(env);
-  const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc, "confirmed");
-  const minimumLamports = await getMinimumBalanceForRentExemption(rpc, 0);
-  const amount = lamports > minimumLamports ? lamports : minimumLamports + 1n;
+  let remainingLamports = lamports;
 
-  const instruction = getTransferSolInstruction({
-    source: createNoopSigner(feePayer),
-    destination: address as Address,
-    amount,
-  });
+  while (remainingLamports > 0n) {
+    const requestedAmount =
+      remainingLamports > KORA_MAX_TRANSFER_LAMPORTS
+        ? KORA_MAX_TRANSFER_LAMPORTS
+        : remainingLamports;
+    const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc, "confirmed");
+    const minimumLamports = await getMinimumBalanceForRentExemption(rpc, 0);
+    const amount = requestedAmount > minimumLamports ? requestedAmount : minimumLamports + 1n;
 
-  const message = pipe(
-    createTransactionMessage({ version: 0 }),
-    (m) => setTransactionMessageFeePayer(feePayer, m),
-    (m) => setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, m),
-    (m) => appendTransactionMessageInstructions([instruction], m)
-  );
+    const instruction = getTransferSolInstruction({
+      source: createNoopSigner(feePayer),
+      destination: address as Address,
+      amount,
+    });
 
-  const compiled = compileTransaction(message);
-  const txBytes = new Uint8Array(getTransactionEncoder().encode(compiled));
-  const signature = await feePayment.signAndSend(txBytes);
-  const confirmation = await confirmTransaction(rpc, signature, { commitment: "confirmed" });
-  return !confirmation.err;
+    const message = pipe(
+      createTransactionMessage({ version: 0 }),
+      (m) => setTransactionMessageFeePayer(feePayer, m),
+      (m) => setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, m),
+      (m) => appendTransactionMessageInstructions([instruction], m)
+    );
+
+    const compiled = compileTransaction(message);
+    const txBytes = new Uint8Array(getTransactionEncoder().encode(compiled));
+    const signature = await feePayment.signAndSend(txBytes);
+    const confirmation = await confirmTransaction(rpc, signature, { commitment: "confirmed" });
+
+    if (confirmation.err) {
+      return false;
+    }
+
+    remainingLamports -= requestedAmount;
+  }
+
+  return true;
 }
 
 export async function fundAddressToLamports(

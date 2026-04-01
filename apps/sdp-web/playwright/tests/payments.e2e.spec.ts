@@ -1,23 +1,35 @@
 import { expect, test } from "@playwright/test";
 import { getPlaywrightAdminSession } from "../support/auth-session";
+import { createLocalApiClient } from "../support/local-api-client";
+import { createExternalSolanaAddress } from "../support/local-dashboard-bootstrap";
 import {
-  bootstrapLocalWalletFixtures,
-  createExternalSolanaAddress,
-} from "../support/local-dashboard-bootstrap";
+  bootstrapLocalIssuanceFixtures,
+  getBootstrapApiBaseUrl,
+} from "../support/local-issuance-bootstrap";
 
 test.describe
   .serial("dashboard payments e2e", () => {
     let destinationAddress = "";
+    let sourceWalletLabel = "";
+    let transferTokenSymbol = "";
 
     test.beforeAll(async ({ browser }) => {
       const session = await getPlaywrightAdminSession(browser);
-      await bootstrapLocalWalletFixtures({
+      const fixtures = await bootstrapLocalIssuanceFixtures({
         identity: session.identity,
         bearerToken: session.bearerToken,
-        walletCount: 1,
-        fundSourceWallet: true,
-        fundSourceAmountSol: 0.02,
       });
+      const api = createLocalApiClient(getBootstrapApiBaseUrl(), session.bearerToken);
+
+      await api.post(`/v1/issuance/tokens/${fixtures.tokens.open.id}/mint`, {
+        mint: {
+          destination: fixtures.wallets.treasury.publicKey,
+          amount: "25",
+        },
+      });
+
+      sourceWalletLabel = fixtures.wallets.treasury.label ?? fixtures.wallets.treasury.publicKey;
+      transferTokenSymbol = fixtures.tokens.open.symbol;
       destinationAddress = await createExternalSolanaAddress();
       await session.page.close();
     });
@@ -32,11 +44,16 @@ test.describe
 
       await expect(page).toHaveURL(/\/dashboard\/payments\/send/);
       await app.getByRole("button", { name: "Wallet transfer" }).click();
+
+      const walletSelect = app.getByRole("combobox", { name: "Source wallet" });
+      await walletSelect.click();
+      await page.getByRole("option").filter({ hasText: sourceWalletLabel }).first().click();
+
       const assetSelect = app.getByRole("combobox", { name: "Asset" });
       await assetSelect.click();
-      await page.getByRole("option", { name: "SOL", exact: true }).click();
-      await expect(assetSelect).toContainText("SOL");
-      await app.getByLabel("Amount").fill("0.01");
+      await page.getByRole("option", { name: transferTokenSymbol, exact: true }).click();
+      await expect(assetSelect).toContainText(transferTokenSymbol);
+      await app.getByLabel("Amount").fill("1");
       await app.getByLabel("Destination address").fill(destinationAddress);
       await app.getByRole("button", { name: "Run a risk check" }).click();
 
@@ -60,6 +77,6 @@ test.describe
 
       const transferRow = app.locator("tbody tr").filter({ hasText: destinationAddress }).first();
       await expect(transferRow).toBeVisible({ timeout: 120_000 });
-      await expect(transferRow.getByText("0.01 SOL")).toBeVisible();
+      await expect(transferRow).toContainText("1.00");
     });
   });

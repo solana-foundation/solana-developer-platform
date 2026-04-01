@@ -54,11 +54,11 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Payments Wallet S
     async () => {
       const walletA = await createFundedPrivyWallet({
         label: "Wallet A",
-        fundLamports: 25_000_000,
+        fundLamports: 12_000_000,
       });
       const walletB = await createFundedPrivyWallet({
         label: "Wallet B",
-        fundLamports: 25_000_000,
+        fundLamports: 12_000_000,
       });
 
       const createKeyRes = await adminRequest("/v1/api-keys", {
