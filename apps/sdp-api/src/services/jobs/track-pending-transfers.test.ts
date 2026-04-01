@@ -10,10 +10,8 @@ const createRpcMock = vi.spyOn(solanaRpc, "createRpc");
 const getSignatureStatusesMock = vi.spyOn(solanaRpc, "getSignatureStatuses");
 
 const TEST_SIG_1 =
-  // biome-ignore lint/nursery/noSecrets: Test transaction signature fixture, not a real secret.
   "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy" as unknown as Signature;
 const TEST_SIG_2 =
-  // biome-ignore lint/nursery/noSecrets: Test transaction signature fixture, not a real secret.
   "5hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy" as unknown as Signature;
 
 const TEST_ORG_ID = "org_job_test_001";
@@ -43,9 +41,7 @@ async function insertTransfer(params: {
       params.id,
       TEST_ORG_ID,
       "wal_test",
-      // biome-ignore lint/nursery/noSecrets: Test Solana address fixture, not a real secret.
       "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ",
-      // biome-ignore lint/nursery/noSecrets: Test Solana address fixture, not a real secret.
       "9dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ",
       "SOL",
       "1.0",
@@ -72,7 +68,6 @@ function minutesAgo(n: number): string {
   return new Date(Date.now() - n * 60 * 1000).toISOString();
 }
 
-// biome-ignore lint/nursery/noSecrets: Test suite name, not a secret.
 describe("trackPendingTransfers", () => {
   beforeEach(async () => {
     await clearTestDatabase(env);
@@ -87,7 +82,6 @@ describe("trackPendingTransfers", () => {
     await clearTestDatabase(env);
   });
 
-  // biome-ignore lint/nursery/noSecrets: Test suite name, not a secret.
   describe("expireStalePendingTransfers", () => {
     it("marks stale pending transfers (no signature, > 2 min old) as failed", async () => {
       await insertTransfer({
@@ -136,7 +130,6 @@ describe("trackPendingTransfers", () => {
     });
   });
 
-  // biome-ignore lint/nursery/noSecrets: Test suite name, not a secret.
   describe("recoverStuckProcessingTransfers", () => {
     it("marks stuck processing transfers (no signature, > 5 min stale) as failed", async () => {
       await insertTransfer({
@@ -170,7 +163,6 @@ describe("trackPendingTransfers", () => {
     });
   });
 
-  // biome-ignore lint/nursery/noSecrets: Test suite name, not a secret.
   describe("syncProcessingTransfersOnChain", () => {
     it("updates processing transfer to confirmed when signature is confirmed on-chain", async () => {
       getSignatureStatusesMock.mockResolvedValueOnce([
@@ -228,7 +220,6 @@ describe("trackPendingTransfers", () => {
           slot: 55555n,
           confirmations: 0n,
           confirmationStatus: "confirmed",
-          // biome-ignore lint/nursery/noSecrets: Solana on-chain error type fixture, not a secret.
           err: { InstructionError: [0, "InsufficientFunds"] },
         },
       ]);
@@ -246,7 +237,6 @@ describe("trackPendingTransfers", () => {
       const updated = await getTransfer("xfr_processing_errored");
       expect(updated?.status).toBe("failed");
       expect(updated?.slot).toBe(55555);
-      // biome-ignore lint/nursery/noSecrets: Solana error string in test assertion, not a secret.
       expect(updated?.error).toContain("InsufficientFunds");
     });
 
@@ -307,6 +297,54 @@ describe("trackPendingTransfers", () => {
 
       const unchanged = await getTransfer("xfr_processing_only_processed");
       expect(unchanged?.status).toBe("processing");
+    });
+
+    it("reconciles mixed pending and processing rows in one Postgres-backed run", async () => {
+      getSignatureStatusesMock.mockResolvedValueOnce([
+        {
+          slot: 22222n,
+          confirmations: 3n,
+          confirmationStatus: "confirmed",
+          err: null,
+        },
+      ]);
+
+      await insertTransfer({
+        id: "xfr_batch_pending_expired",
+        status: "pending",
+        signature: null,
+        createdAt: minutesAgo(4),
+        updatedAt: minutesAgo(4),
+      });
+      await insertTransfer({
+        id: "xfr_batch_processing_confirmed",
+        status: "processing",
+        signature: String(TEST_SIG_1),
+        createdAt: minutesAgo(2),
+        updatedAt: minutesAgo(2),
+      });
+      await insertTransfer({
+        id: "xfr_batch_processing_stuck",
+        status: "processing",
+        signature: null,
+        createdAt: minutesAgo(7),
+        updatedAt: minutesAgo(7),
+      });
+
+      await trackPendingTransfers(env);
+
+      const [expired, confirmed, stuck] = await Promise.all([
+        getTransfer("xfr_batch_pending_expired"),
+        getTransfer("xfr_batch_processing_confirmed"),
+        getTransfer("xfr_batch_processing_stuck"),
+      ]);
+
+      expect(expired?.status).toBe("failed");
+      expect(expired?.error).toBe("Transaction expired: blockhash no longer valid");
+      expect(confirmed?.status).toBe("confirmed");
+      expect(confirmed?.slot).toBe(22222);
+      expect(stuck?.status).toBe("failed");
+      expect(stuck?.error).toBe("Transfer processing timed out");
     });
 
     it("does not call getSignatureStatuses when there are no processing transfers with signatures", async () => {

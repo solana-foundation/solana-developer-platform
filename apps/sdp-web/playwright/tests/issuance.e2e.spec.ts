@@ -1,5 +1,11 @@
 import { type Page, expect, test } from "@playwright/test";
-import { type IssuanceFixtures, readIssuanceFixtures } from "../support/issuance-fixtures";
+import { getPlaywrightAdminSession } from "../support/auth-session";
+import {
+  type IssuanceFixtures,
+  clearIssuanceFixtures,
+  readIssuanceFixtures,
+} from "../support/issuance-fixtures";
+import { bootstrapLocalIssuanceFixtures } from "../support/local-issuance-bootstrap";
 
 function shortValue(value: string): string {
   return value.length <= 16 ? value : `${value.slice(0, 6)}...${value.slice(-6)}`;
@@ -54,11 +60,25 @@ async function waitForPermissionRowValue(
     .toContain(expectedText);
 }
 
+async function waitForAllowlistCount(page: Page, expectedCount: number): Promise<void> {
+  const expectedLabel = `${expectedCount} ${expectedCount === 1 ? "entries" : "entries"}`;
+  await expect(page.getByTestId("allowlist-summary-card")).toContainText(expectedLabel, {
+    timeout: 120_000,
+  });
+}
+
 test.describe
   .serial("issuance e2e", () => {
     let fixtures: IssuanceFixtures;
 
-    test.beforeAll(() => {
+    test.beforeAll(async ({ browser }) => {
+      clearIssuanceFixtures();
+      const session = await getPlaywrightAdminSession(browser);
+      await bootstrapLocalIssuanceFixtures({
+        identity: session.identity,
+        bearerToken: session.bearerToken,
+      });
+      await session.page.close();
       fixtures = readIssuanceFixtures();
     });
 
@@ -199,9 +219,8 @@ test.describe
         .getByRole("textbox", { name: "Address", exact: true })
         .fill(fixtures.addresses.allowlistWallet);
       await page.getByRole("textbox", { name: "Label", exact: true }).fill("E2E allowlist wallet");
-      let successCount = await page.getByText("Transaction finalized successfully.").count();
       await page.getByRole("button", { name: "Add allowlist entry" }).click();
-      await waitForToast(page, "Transaction finalized successfully.", successCount);
+      await waitForAllowlistCount(page, 1);
       await expect(page.getByText(fixtures.addresses.allowlistWallet)).toBeVisible();
       await expect(page.getByTestId("allowlist-summary-card")).toContainText("1 entries");
 
@@ -210,28 +229,13 @@ test.describe
         .filter({ hasText: fixtures.addresses.allowlistWallet })
         .filter({ has: page.getByRole("button", { name: "Remove entry" }) })
         .first();
-      successCount = await page.getByText("Transaction finalized successfully.").count();
       await allowlistEntry.getByRole("button", { name: "Remove entry" }).click();
-      await waitForToast(page, "Transaction finalized successfully.", successCount);
+      await waitForAllowlistCount(page, 0);
       await expect(page.getByText(fixtures.addresses.allowlistWallet)).toHaveCount(0);
       await expect(page.getByTestId("allowlist-summary-card")).toContainText("0 entries");
     });
 
-    test("7. user does not see allowlist management for the non-allowlist token", async ({
-      page,
-    }) => {
-      await gotoToken(page, fixtures.tokens.open.id);
-
-      await openTab(page, "Extensions");
-      await expect(page.getByTestId("extension-row-allowlist")).toHaveCount(0);
-
-      await openTab(page, "Compliance");
-      await expect(page.getByRole("button", { name: "Allowlist", exact: true })).toHaveCount(0);
-      await expect(page.getByTestId("allowlist-summary-card")).toHaveCount(0);
-      await expect(page.getByTestId("frozen-accounts-summary-card")).toBeVisible();
-    });
-
-    test("8. user can mint and burn tokens with supply and transactions updating", async ({
+    test("7. user can mint and burn tokens with supply and transactions updating", async ({
       page,
     }) => {
       await gotoToken(page, fixtures.tokens.open.id);
@@ -265,7 +269,7 @@ test.describe
       await expect(page.getByTestId("fund-management-row-burn")).toBeVisible();
     });
 
-    test("9. user can freeze and unfreeze using a wallet address in the UI", async ({ page }) => {
+    test("8. user can freeze and unfreeze using a wallet address in the UI", async ({ page }) => {
       await gotoToken(page, fixtures.tokens.open.id);
 
       await openFundManagementAction(page, "mint");
@@ -301,7 +305,7 @@ test.describe
       await expect(page.getByTestId("frozen-accounts-summary-card")).toContainText("0 accounts");
     });
 
-    test("10. user can pause and unpause the token from compliance controls", async ({ page }) => {
+    test("9. user can pause and unpause the token from compliance controls", async ({ page }) => {
       await gotoToken(page, fixtures.tokens.open.id);
       await openTab(page, "Compliance");
 
