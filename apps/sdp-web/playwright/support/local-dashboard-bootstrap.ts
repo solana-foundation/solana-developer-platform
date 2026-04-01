@@ -169,7 +169,9 @@ function parseSolAmountToLamports(amountSol: number): number {
   return lamports;
 }
 
-function buildPlaywrightOrganizationFixture(identity: ClerkTestIdentity): PlaywrightOrganizationFixture {
+function buildPlaywrightOrganizationFixture(
+  identity: ClerkTestIdentity
+): PlaywrightOrganizationFixture {
   const suffix = `${Date.now().toString(36)}-${identity.organizationId.slice(-6).toLowerCase()}`;
   return {
     id: `${PLAYWRIGHT_LOCAL_ORG_ID_PREFIX}_${suffix}`,
@@ -268,10 +270,7 @@ async function clearPlaywrightOrganizations(
     [`${PLAYWRIGHT_LOCAL_ORG_ID_PREFIX}%`]
   );
   const organizationIds = [
-    ...new Set([
-      ...mappedOrganizationIds,
-      ...prefixedOrganizations.rows.map((row) => row.id),
-    ]),
+    ...new Set([...mappedOrganizationIds, ...prefixedOrganizations.rows.map((row) => row.id)]),
   ];
 
   await client.query(
@@ -289,14 +288,6 @@ async function listWallets(api: LocalApiClient): Promise<PaymentsDashboardWallet
   // biome-ignore lint/nursery/noSecrets: Local API path with query params for wallet listing.
   const data = await api.get<ListWalletsResponse>("/v1/wallets?includeAllProviders=true");
   return data.wallets;
-}
-
-async function requestWalletAirdrop(
-  api: LocalApiClient,
-  walletAddress: string,
-  amountSol: number
-): Promise<void> {
-  await requestWalletAirdropLamports(api, walletAddress, parseSolAmountToLamports(amountSol));
 }
 
 async function requestWalletAirdropLamports(
@@ -351,6 +342,7 @@ async function getLatestBlockhash(api: LocalApiClient): Promise<{
   const response = await api.post<RpcRelayResponse>("/v1/rpc/proxy", {
     jsonrpc: "2.0",
     id: "wallet-latest-blockhash",
+    // biome-ignore lint/nursery/noSecrets: Solana RPC method name, not a credential.
     method: "getLatestBlockhash",
     params: [{ commitment: "confirmed" }],
   });
@@ -359,9 +351,11 @@ async function getLatestBlockhash(api: LocalApiClient): Promise<{
     throw new Error(response.response.error.message);
   }
 
-  const value = (response.response?.result as {
-    value?: { blockhash?: string; lastValidBlockHeight?: number };
-  })?.value;
+  const value = (
+    response.response?.result as {
+      value?: { blockhash?: string; lastValidBlockHeight?: number };
+    }
+  )?.value;
 
   if (!value?.blockhash || typeof value.lastValidBlockHeight !== "number") {
     throw new Error("RPC provider did not return a confirmed blockhash");
@@ -377,6 +371,7 @@ async function getMinimumBalanceForRentExemption(api: LocalApiClient): Promise<b
   const response = await api.post<RpcRelayResponse>("/v1/rpc/proxy", {
     jsonrpc: "2.0",
     id: "wallet-rent-exemption",
+    // biome-ignore lint/nursery/noSecrets: Solana RPC method name, not a credential.
     method: "getMinimumBalanceForRentExemption",
     params: [0],
   });
@@ -421,7 +416,8 @@ async function fundAddressViaKoraFeePayer(
         : remainingLamports;
     const { blockhash, lastValidBlockHeight } = await getLatestBlockhash(api);
     const minimumLamports = await getMinimumBalanceForRentExemption(api);
-    const amount = requestedAmount > minimumLamports ? requestedAmount : minimumLamports + ONE_LAMPORT;
+    const amount =
+      requestedAmount > minimumLamports ? requestedAmount : minimumLamports + ONE_LAMPORT;
     const instruction = getTransferSolInstruction({
       source: createNoopSigner(feePayer as Address),
       destination: address as Address,
@@ -576,12 +572,7 @@ export async function ensureLinkedOrg(
            organization_id = EXCLUDED.organization_id,
            slug = EXCLUDED.slug,
            updated_at = sdp_datetime_now()`,
-        [
-          PLAYWRIGHT_LOCAL_ORG_AUTH_ID,
-          identity.organizationId,
-          organization.id,
-          organization.slug,
-        ]
+        [PLAYWRIGHT_LOCAL_ORG_AUTH_ID, identity.organizationId, organization.id, organization.slug]
       );
 
       await client.query(
