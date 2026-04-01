@@ -477,8 +477,8 @@ jobs:
       - name: Install Playwright browser
         run: pnpm --filter sdp-web exec playwright install --with-deps chromium
 
-      - name: Run issuance e2e suite
-        run: pnpm --filter sdp-web test:e2e:issuance
+      - name: Run browser e2e suite
+        run: pnpm --filter sdp-web test:e2e
 
       - name: Upload Playwright artifacts
         if: always()
