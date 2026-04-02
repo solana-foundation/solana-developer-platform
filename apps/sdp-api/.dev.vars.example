@@ -8,13 +8,14 @@
 # SENTRY_DSN=https://examplePublicKey@o0.ingest.us.sentry.io/0
 # SENTRY_TRACES_SAMPLE_RATE=1.0
 
-# Solana RPC (devnet). Use your own provider key if possible.
+# Solana RPC (devnet). Keep provider URLs templated and put credentials in the
+# *_API_KEY vars below so deploys do not carry live keys in plain text.
 SOLANA_RPC_URL=https://api.devnet.solana.com
-SOLANA_RPC_DEFAULT_PROVIDER=default
+SOLANA_RPC_DEFAULT_PROVIDER=helius
 SOLANA_RPC_ALCHEMY_URL=https://solana-devnet.g.alchemy.com/v2/{API_KEY}
-SOLANA_RPC_TRITON_URL=https://solana.rpcpool.com/{API_KEY}
-SOLANA_RPC_HELIUS_URL=https://mainnet.helius-rpc.com/?api-key={API_KEY}
-SOLANA_RPC_QUICKNODE_URL=https://example.solana-mainnet.quiknode.pro/{API_KEY}
+SOLANA_RPC_TRITON_URL=https://solanaf-sdp-7436.devnet.rpcpool.com/{API_KEY}
+SOLANA_RPC_HELIUS_URL=https://devnet.helius-rpc.com/?api-key={API_KEY}
+SOLANA_RPC_QUICKNODE_URL=https://evocative-old-mansion.solana-devnet.quiknode.pro/{API_KEY}
 # Managed RPC providers for proxy round-robin.
 # For live connectivity tests, configure all provider URLs above.
 # SOLANA_RPC_TRITON_API_KEY=YOUR_TRITON_KEY
