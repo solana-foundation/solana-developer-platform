@@ -50,9 +50,7 @@ export default async function ApiKeysPage() {
     ]);
 
     apiKeys = apiKeysResponse.apiKeys;
-    wallets = walletsResponse.ok
-      ? (walletsResponse.data ?? [])
-      : [];
+    wallets = walletsResponse.ok ? (walletsResponse.data ?? []) : [];
 
     trace.log({
       ok: true,
@@ -89,8 +87,8 @@ export default async function ApiKeysPage() {
           ) : null}
           <div className="mb-4 rounded-[10px] border border-[rgba(28,28,29,0.14)] bg-[rgba(28,28,29,0.03)] px-3 py-2 text-xs text-[rgba(28,28,29,0.72)]">
             <p className="text-xs text-[rgba(28,28,29,0.72)]">
-              Rotation hint: rotate active keys only. The dashboard uses a 24-hour grace period;
-              use the API for custom grace values (0-168h). New key secrets are shown once.
+              Rotation hint: rotate active keys only. The dashboard uses a 24-hour grace period; use
+              the API for custom grace values (0-168h). New key secrets are shown once.
             </p>
           </div>
           <ApiKeysTableClient

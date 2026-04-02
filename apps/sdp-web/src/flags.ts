@@ -15,7 +15,7 @@ function createAuthEntryFlag(params: {
 }) {
   return flag<boolean>({
     key: params.key,
-    adapter: adapterFactory ? adapterFactory<boolean, any>() : undefined,
+    adapter: adapterFactory ? adapterFactory<boolean, unknown>() : undefined,
     decide: () => params.defaultValue,
     defaultValue: params.defaultValue,
     description: params.description,

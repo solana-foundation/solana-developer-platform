@@ -25,7 +25,9 @@ function getLegacyAuthEntryEnabled(): boolean | null {
   return configured;
 }
 
-function getDefaultEntryEnabled(envName: "SDP_SIGN_IN_ENTRY_ENABLED" | "SDP_SIGN_UP_ENTRY_ENABLED") {
+function getDefaultEntryEnabled(
+  envName: "SDP_SIGN_IN_ENTRY_ENABLED" | "SDP_SIGN_UP_ENTRY_ENABLED"
+) {
   const configured = parseBooleanEnv(process.env[envName]);
 
   if (configured !== null) {

@@ -8,7 +8,10 @@ function isClosedMode(): boolean {
 }
 
 test.describe("public auth entry e2e", () => {
-  test.skip(isClosedMode(), "This suite covers the direct-link auth rollout with auth entry enabled.");
+  test.skip(
+    isClosedMode(),
+    "This suite covers the direct-link auth rollout with auth entry enabled."
+  );
 
   test("signed-out homepage stays in waitlist mode even when auth entry routes are enabled", async ({
     page,
