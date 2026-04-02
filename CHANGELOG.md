@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.13.1](https://github.com/solana-foundation/solana-developer-platform/compare/v0.13.0...v0.13.1) (2026-04-02)
+
+### Maintenance
+
+* template devnet rpc provider config ([#145](https://github.com/solana-foundation/solana-developer-platform/pull/145)) ([c6c1ea1](https://github.com/solana-foundation/solana-developer-platform/commit/c6c1ea1817b4a9b6cafe7da583d2084e0373b6a3))
+
 ## [0.13.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.12.0...v0.13.0) (2026-04-02)
 
 ### Features
