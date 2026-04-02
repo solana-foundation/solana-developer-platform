@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.13.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.12.0...v0.13.0) (2026-04-02)
+
+### Features
+
+* cut SDP over to Postgres and stabilize hidden auth entry rollout ([#143](https://github.com/solana-foundation/solana-developer-platform/pull/143)) ([f033fec](https://github.com/solana-foundation/solana-developer-platform/commit/f033fec630425cb495cdeaf884065e1a211d0da8))
+
 ## [0.12.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.11.1...v0.12.0) (2026-04-01)
 
 ### Features
