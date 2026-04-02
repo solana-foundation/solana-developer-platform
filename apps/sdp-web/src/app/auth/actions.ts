@@ -1,11 +1,11 @@
 "use server";
 
-import { isAuthEntryEnabled } from "@/lib/auth-entry";
+import { isSignInEntryEnabled, isSignUpEntryEnabled } from "@/lib/auth-entry";
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 
 export async function startSignIn() {
-  if (!(await isAuthEntryEnabled())) {
+  if (!(await isSignInEntryEnabled())) {
     redirect("/");
   }
 
@@ -14,7 +14,7 @@ export async function startSignIn() {
 }
 
 export async function startSignUp() {
-  if (!(await isAuthEntryEnabled())) {
+  if (!(await isSignUpEntryEnabled())) {
     redirect("/");
   }
 

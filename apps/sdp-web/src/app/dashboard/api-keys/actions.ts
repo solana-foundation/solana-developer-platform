@@ -4,19 +4,7 @@ import { sdpApiFetch } from "@/lib/sdp-api";
 import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-
-const API_KEY_FLASH_COOKIE = "sdp_api_key_flash";
-const API_KEYS_PAGE_PATH = "/dashboard/api-keys";
-
-type FlashLevel = "success" | "error";
-
-interface ApiKeyFlash {
-  level: FlashLevel;
-  message: string;
-  key?: string;
-  apiKeyId?: string;
-  keyPrefix?: string;
-}
+import { API_KEYS_PAGE_PATH, API_KEY_FLASH_COOKIE, type ApiKeyFlash } from "./api-key-flash";
 
 function parsePositiveInt(value: FormDataEntryValue | null, fallback: number): number {
   if (typeof value !== "string" || value.trim() === "") return fallback;
@@ -110,23 +98,6 @@ async function deactivateApiKeyRequest(input: {
       message: `Delete failed: ${extractErrorMessage(error)}`,
     };
   }
-}
-
-export async function consumeApiKeyFlash(): Promise<ApiKeyFlash | null> {
-  const jar = await cookies();
-  const raw = jar.get(API_KEY_FLASH_COOKIE)?.value;
-  if (!raw) return null;
-
-  try {
-    return JSON.parse(raw) as ApiKeyFlash;
-  } catch {
-    return null;
-  }
-}
-
-export async function clearApiKeyFlashAction() {
-  const jar = await cookies();
-  jar.delete(API_KEY_FLASH_COOKIE);
 }
 
 export async function createApiKeyAction(formData: FormData) {

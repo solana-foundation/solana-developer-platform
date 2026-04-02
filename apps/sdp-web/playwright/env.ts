@@ -107,6 +107,18 @@ export function getE2EEnv(): E2EEnv {
     process.env.NEXT_PUBLIC_SDP_API_BASE_URL ??
     fallback.NEXT_PUBLIC_SDP_API_BASE_URL ??
     sdpApiBaseUrl;
+  const signInEntryEnabled =
+    process.env.PLAYWRIGHT_SDP_SIGN_IN_ENTRY_ENABLED ??
+    process.env.SDP_SIGN_IN_ENTRY_ENABLED ??
+    fallback.SDP_SIGN_IN_ENTRY_ENABLED ??
+    fallback.SDP_AUTH_ENTRY_ENABLED ??
+    "true";
+  const signUpEntryEnabled =
+    process.env.PLAYWRIGHT_SDP_SIGN_UP_ENTRY_ENABLED ??
+    process.env.SDP_SIGN_UP_ENTRY_ENABLED ??
+    fallback.SDP_SIGN_UP_ENTRY_ENABLED ??
+    fallback.SDP_AUTH_ENTRY_ENABLED ??
+    "true";
 
   cachedEnv = {
     baseURL: process.env.PLAYWRIGHT_BASE_URL ?? BASE_URL,
@@ -139,6 +151,8 @@ export function getE2EEnv(): E2EEnv {
         process.env.NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL ??
         fallback.NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL ??
         "/dashboard",
+      SDP_SIGN_IN_ENTRY_ENABLED: signInEntryEnabled,
+      SDP_SIGN_UP_ENTRY_ENABLED: signUpEntryEnabled,
       NODE_ENV: process.env.NODE_ENV ?? "development",
     },
   };
