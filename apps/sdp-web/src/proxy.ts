@@ -1,4 +1,4 @@
-import { getDefaultSignInEntryEnabled } from "@/lib/auth-entry-config";
+import { getDefaultAuthEntryPath } from "@/lib/auth-entry-config";
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
@@ -6,13 +6,18 @@ import { NextResponse } from "next/server";
 const isPublicRoute = createRouteMatcher(["/sign-in(.*)", "/sign-up(.*)", "/", "/docs(.*)"]);
 
 function getUnauthenticatedUrl(req: NextRequest): string {
-  if (!getDefaultSignInEntryEnabled()) {
+  // Edge middleware cannot consult the async Flags SDK adapter, so auth-entry
+  // redirects must use the environment-backed defaults. Keep any manual flag
+  // overrides aligned with these env values during rollout.
+  const defaultAuthEntryPath = getDefaultAuthEntryPath();
+
+  if (defaultAuthEntryPath === "/") {
     return new URL("/", req.url).toString();
   }
 
-  const signInUrl = new URL("/sign-in", req.url);
-  signInUrl.searchParams.set("redirect_url", `${req.nextUrl.pathname}${req.nextUrl.search}`);
-  return signInUrl.toString();
+  const authEntryUrl = new URL(defaultAuthEntryPath, req.url);
+  authEntryUrl.searchParams.set("redirect_url", `${req.nextUrl.pathname}${req.nextUrl.search}`);
+  return authEntryUrl.toString();
 }
 
 export const proxy = clerkMiddleware(async (auth, req) => {

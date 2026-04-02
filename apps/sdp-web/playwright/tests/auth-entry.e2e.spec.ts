@@ -1,15 +1,9 @@
 import { expect, test } from "@playwright/test";
-
-function isClosedMode(): boolean {
-  const signInEnabled = process.env.PLAYWRIGHT_SDP_SIGN_IN_ENTRY_ENABLED;
-  const signUpEnabled = process.env.PLAYWRIGHT_SDP_SIGN_UP_ENTRY_ENABLED;
-
-  return signInEnabled === "false" && signUpEnabled === "false";
-}
+import { isClosedAuthEntryMode } from "../support/auth-entry-mode";
 
 test.describe("public auth entry e2e", () => {
   test.skip(
-    isClosedMode(),
+    isClosedAuthEntryMode(),
     "This suite covers the direct-link auth rollout with auth entry enabled."
   );
 

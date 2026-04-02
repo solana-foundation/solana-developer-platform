@@ -51,3 +51,15 @@ export function getDefaultSignInEntryEnabled(): boolean {
 export function getDefaultSignUpEntryEnabled(): boolean {
   return getDefaultEntryEnabled("SDP_SIGN_UP_ENTRY_ENABLED");
 }
+
+export function getDefaultAuthEntryPath(): "/" | "/sign-in" | "/sign-up" {
+  if (getDefaultSignInEntryEnabled()) {
+    return "/sign-in";
+  }
+
+  if (getDefaultSignUpEntryEnabled()) {
+    return "/sign-up";
+  }
+
+  return "/";
+}

@@ -22,7 +22,15 @@ export async function isAnyAuthEntryEnabled(): Promise<boolean> {
 }
 
 export async function getAuthEntryPath(): Promise<string> {
-  return (await isSignInEntryEnabled()) ? "/sign-in" : "/";
+  if (await isSignInEntryEnabled()) {
+    return "/sign-in";
+  }
+
+  if (await isSignUpEntryEnabled()) {
+    return "/sign-up";
+  }
+
+  return "/";
 }
 
 export async function shouldLoadClerkForPath(pathname: string): Promise<boolean> {
