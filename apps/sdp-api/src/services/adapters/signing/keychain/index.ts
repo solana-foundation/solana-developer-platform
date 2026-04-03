@@ -9,7 +9,7 @@
  * - Fireblocks: Enterprise MPC custody (@solana/keychain-fireblocks)
  * - Privy: Hosted wallets via Privy API (@solana/keychain-privy)
  * - Coinbase CDP: Hosted wallets via Coinbase CDP API (@sdp/keychain-coinbase)
- * - Para: Hosted wallets via Para REST API (@sdp/keychain-para)
+ * - Para: Hosted wallets via Para REST API (@solana/keychain-para)
  * - Turnkey: Hosted wallets via Turnkey API (@solana/keychain-turnkey)
  * - DFNS: Hosted wallets via DFNS API
  */

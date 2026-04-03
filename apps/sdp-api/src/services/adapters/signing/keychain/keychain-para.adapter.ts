@@ -1,13 +1,13 @@
 /**
  * Keychain Para Adapter
  *
- * Wraps @sdp/keychain-para ParaSigner to implement SigningPort.
+ * Wraps @solana/keychain-para ParaSigner to implement SigningPort.
  * Para provides hosted wallets via the Para REST API.
  */
 
 import type { SignRequest, SignResult } from "@/services/ports";
-import { ParaSigner } from "@sdp/keychain-para";
 import type { SolanaSigner } from "@solana/keychain-core";
+import { ParaSigner } from "@solana/keychain-para";
 import type { Address } from "@solana/kit";
 import { BaseKeychainAdapter } from "./base-keychain.adapter";
 import type { KeychainParaConfig } from "./types";
