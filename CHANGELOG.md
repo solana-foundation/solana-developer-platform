@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.14.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.13.1...v0.14.0) (2026-04-03)
+
+### Features
+
+* add individual and enterprise provider tier gating ([#147](https://github.com/solana-foundation/solana-developer-platform/pull/147)) ([0c489a0](https://github.com/solana-foundation/solana-developer-platform/commit/0c489a00d0360a8025343b27489a52a3783a81d7))
+
 ## [0.13.1](https://github.com/solana-foundation/solana-developer-platform/compare/v0.13.0...v0.13.1) (2026-04-02)
 
 ### Maintenance
