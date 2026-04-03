@@ -14,9 +14,17 @@ describe("organization-provider-access.service", () => {
   const originalPrivyAppId = env.PRIVY_APP_ID;
   const originalPrivyAppSecret = env.PRIVY_APP_SECRET;
   const originalSolanaRpcUrl = env.SOLANA_RPC_URL;
+  const originalSolanaRpcHeliusUrl = env.SOLANA_RPC_HELIUS_URL;
+  const originalSolanaRpcTritonUrl = env.SOLANA_RPC_TRITON_URL;
   const originalRangeApiKey = env.RANGE_API_KEY;
   const originalMoonPayApiKey = env.MOONPAY_API_KEY;
   const originalMoonPaySecretKey = env.MOONPAY_SECRET_KEY;
+  const originalCoinbaseCdpApiKeyId = env.COINBASE_CDP_API_KEY_ID;
+  const originalCoinbaseCdpApiKeySecret = env.COINBASE_CDP_API_KEY_SECRET;
+  const originalCoinbaseCdpWalletSecret = env.COINBASE_CDP_WALLET_SECRET;
+  const originalTurnkeyApiPublicKey = env.TURNKEY_API_PUBLIC_KEY;
+  const originalTurnkeyApiPrivateKey = env.TURNKEY_API_PRIVATE_KEY;
+  const originalTurnkeyOrganizationId = env.TURNKEY_ORGANIZATION_ID;
   const originalCustodyPrivateKey = env.CUSTODY_PRIVATE_KEY;
 
   beforeEach(async () => {
@@ -36,9 +44,17 @@ describe("organization-provider-access.service", () => {
     env.PRIVY_APP_ID = "privy_test_app";
     env.PRIVY_APP_SECRET = "privy_test_secret";
     env.SOLANA_RPC_URL = "https://rpc.default.test";
+    env.SOLANA_RPC_HELIUS_URL = "https://rpc.helius.test";
+    env.SOLANA_RPC_TRITON_URL = "https://rpc.triton.test";
     env.RANGE_API_KEY = "range_test_key";
     env.MOONPAY_API_KEY = "moonpay_test_key";
     env.MOONPAY_SECRET_KEY = "moonpay_test_secret";
+    env.COINBASE_CDP_API_KEY_ID = "coinbase_test_key_id";
+    env.COINBASE_CDP_API_KEY_SECRET = "coinbase_test_key_secret";
+    env.COINBASE_CDP_WALLET_SECRET = "coinbase_test_wallet_secret";
+    env.TURNKEY_API_PUBLIC_KEY = "turnkey_test_public_key";
+    env.TURNKEY_API_PRIVATE_KEY = "turnkey_test_private_key";
+    env.TURNKEY_ORGANIZATION_ID = "turnkey_test_org";
     env.CUSTODY_PRIVATE_KEY = undefined;
   });
 
@@ -46,9 +62,17 @@ describe("organization-provider-access.service", () => {
     env.PRIVY_APP_ID = originalPrivyAppId;
     env.PRIVY_APP_SECRET = originalPrivyAppSecret;
     env.SOLANA_RPC_URL = originalSolanaRpcUrl;
+    env.SOLANA_RPC_HELIUS_URL = originalSolanaRpcHeliusUrl;
+    env.SOLANA_RPC_TRITON_URL = originalSolanaRpcTritonUrl;
     env.RANGE_API_KEY = originalRangeApiKey;
     env.MOONPAY_API_KEY = originalMoonPayApiKey;
     env.MOONPAY_SECRET_KEY = originalMoonPaySecretKey;
+    env.COINBASE_CDP_API_KEY_ID = originalCoinbaseCdpApiKeyId;
+    env.COINBASE_CDP_API_KEY_SECRET = originalCoinbaseCdpApiKeySecret;
+    env.COINBASE_CDP_WALLET_SECRET = originalCoinbaseCdpWalletSecret;
+    env.TURNKEY_API_PUBLIC_KEY = originalTurnkeyApiPublicKey;
+    env.TURNKEY_API_PRIVATE_KEY = originalTurnkeyApiPrivateKey;
+    env.TURNKEY_ORGANIZATION_ID = originalTurnkeyOrganizationId;
     env.CUSTODY_PRIVATE_KEY = originalCustodyPrivateKey;
 
     await clearTestDatabase(env);
@@ -75,12 +99,16 @@ describe("organization-provider-access.service", () => {
 
     expect(resolved.tier).toBe("individual");
     expect(resolved.providers.custody.privy).toBe(true);
+    expect(resolved.providers.custody.coinbase_cdp).toBe(true);
+    expect(resolved.providers.custody.turnkey).toBe(true);
     expect(resolved.providers.custody.local).toBe(true);
     expect(resolved.providers.custody.para).toBe(false);
     expect(resolved.providers.rpc.default).toBe(true);
     expect(resolved.providers.rpc.helius).toBe(true);
+    expect(resolved.providers.rpc.triton).toBe(true);
     expect(resolved.providers.compliance.range).toBe(true);
     expect(resolved.providers.ramps.moonpay).toBe(true);
+    expect(resolved.providers.ramps.lightspark).toBe(false);
   });
 
   it("marks providers as enabled only when both entitled and configured", async () => {
@@ -92,14 +120,19 @@ describe("organization-provider-access.service", () => {
       configured: true,
       enabled: true,
     });
+    expect(access.providers.custody.coinbase_cdp.enabled).toBe(true);
+    expect(access.providers.custody.turnkey.enabled).toBe(true);
     expect(access.providers.custody.para.enabled).toBe(false);
     expect(access.providers.rpc.default.enabled).toBe(true);
+    expect(access.providers.rpc.helius.enabled).toBe(true);
+    expect(access.providers.rpc.triton.enabled).toBe(true);
     expect(access.providers.compliance.range).toEqual({
       entitled: false,
       configured: true,
       enabled: false,
     });
-    expect(access.providers.ramps.moonpay.enabled).toBe(false);
+    expect(access.providers.ramps.moonpay.enabled).toBe(true);
+    expect(access.providers.ramps.lightspark.enabled).toBe(false);
   });
 
   it("treats local custody as override-only and only configured when a local key is present", async () => {

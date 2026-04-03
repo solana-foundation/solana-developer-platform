@@ -429,7 +429,10 @@ describe("Organizations routes", () => {
       expect(res.status).toBe(200);
     });
 
-    it("rejects managed RPC providers for individual-tier organizations", async () => {
+    it("allows Helius for individual-tier organizations when configured", async () => {
+      const originalHeliusUrl = env.SOLANA_RPC_HELIUS_URL;
+      env.SOLANA_RPC_HELIUS_URL = "https://rpc.helius.test";
+
       const res = await app.request(
         `/v1/organizations/${TEST_ORG.id}`,
         {
@@ -447,9 +450,11 @@ describe("Organizations routes", () => {
         env
       );
 
-      expect(res.status).toBe(403);
-      const body = (await res.json()) as { error: { message: string } };
-      expect(body.error.message).toContain("enterprise tier");
+      env.SOLANA_RPC_HELIUS_URL = originalHeliusUrl;
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { data: Organization };
+      expect(body.data.settings?.rpcProvider).toBe("helius");
     });
 
     it("rejects empty update", async () => {

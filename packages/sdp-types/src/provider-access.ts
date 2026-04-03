@@ -81,10 +81,10 @@ function applyOverrides<T extends string>(
 }
 
 const INDIVIDUAL_PROVIDER_DEFAULTS: OrganizationProviderEntitlements = {
-  custody: createBooleanRecord(CUSTODY_PROVIDERS, ["privy"]),
-  rpc: createBooleanRecord(ORGANIZATION_RPC_PROVIDERS, ["default"]),
+  custody: createBooleanRecord(CUSTODY_PROVIDERS, ["privy", "coinbase_cdp", "turnkey"]),
+  rpc: createBooleanRecord(ORGANIZATION_RPC_PROVIDERS, ["default", "helius", "triton"]),
   compliance: createBooleanRecord(COMPLIANCE_PROVIDERS, []),
-  ramps: createBooleanRecord(RAMP_PROVIDERS, []),
+  ramps: createBooleanRecord(RAMP_PROVIDERS, ["moonpay"]),
 };
 
 const ENTERPRISE_PROVIDER_DEFAULTS: OrganizationProviderEntitlements = {
