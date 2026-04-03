@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.14.1](https://github.com/solana-foundation/solana-developer-platform/compare/v0.14.0...v0.14.1) (2026-04-03)
+
+### Maintenance
+
+* speed up browser e2e pipeline ([#149](https://github.com/solana-foundation/solana-developer-platform/pull/149)) ([978ed3b](https://github.com/solana-foundation/solana-developer-platform/commit/978ed3be40747301a90405338894ac4f53922982))
+
 ## [0.14.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.13.1...v0.14.0) (2026-04-03)
 
 ### Features
