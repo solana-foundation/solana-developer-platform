@@ -57,7 +57,7 @@ export class KeychainCoinbaseAdapter extends BaseKeychainAdapter {
    */
   async sign(request: SignRequest): Promise<SignResult> {
     const signer = await this.getCoinbaseSigner();
-    this.signer = signer as unknown as SolanaSigner;
+    this.signer = signer;
     return super.sign(request);
   }
 
@@ -80,7 +80,7 @@ export class KeychainCoinbaseAdapter extends BaseKeychainAdapter {
       address: denormalizeCoinbaseWalletId(normalizedWalletId),
       baseUrl: this.config.apiBaseUrl,
       requestDelayMs: this.config.requestDelayMs,
-    }).then((signer) => signer as unknown as SolanaSigner);
+    });
     this.signerByWalletId.set(cacheKey, created);
     return created;
   }
