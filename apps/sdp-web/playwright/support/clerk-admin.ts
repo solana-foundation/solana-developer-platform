@@ -1,4 +1,5 @@
 import { createClerkClient } from "@clerk/backend";
+import type { OrganizationTier } from "@sdp/types";
 import { getE2EEnv } from "../env";
 
 export type ClerkTestIdentity = {
@@ -6,6 +7,36 @@ export type ClerkTestIdentity = {
   organizationId: string;
   userId: string;
 };
+
+type ClerkOrganizationRecord = {
+  private_metadata?: unknown;
+};
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  return value as Record<string, unknown>;
+}
+
+async function requestClerk<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const env = getE2EEnv();
+  const response = await fetch(`https://api.clerk.com/v1${path}`, {
+    ...options,
+    headers: {
+      Authorization: `Bearer ${env.clerkSecretKey}`,
+      "Content-Type": "application/json",
+      ...(options.headers ?? {}),
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Clerk request failed (${response.status}) for ${path}`);
+  }
+
+  return (await response.json()) as T;
+}
 
 async function resolveOrganizationId(
   client: ReturnType<typeof createClerkClient>,
@@ -126,4 +157,30 @@ export async function ensureClerkAdminUser(): Promise<ClerkTestIdentity> {
     organizationId,
     userId: user.id,
   };
+}
+
+export async function setClerkOrganizationTier(
+  organizationId: string,
+  tier: OrganizationTier
+): Promise<void> {
+  const organization = await requestClerk<ClerkOrganizationRecord>(
+    `/organizations/${organizationId}`
+  );
+  const privateMetadata = asRecord(organization.private_metadata) ?? {};
+  const sdpMetadata = asRecord(privateMetadata.sdp) ?? {};
+  const nextPrivateMetadata = {
+    ...privateMetadata,
+    sdp: {
+      ...sdpMetadata,
+      tier,
+      providerOverrides: undefined,
+    },
+  };
+
+  await requestClerk(`/organizations/${organizationId}`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      private_metadata: nextPrivateMetadata,
+    }),
+  });
 }

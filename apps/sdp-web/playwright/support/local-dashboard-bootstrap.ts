@@ -17,7 +17,7 @@ import {
 } from "@solana/kit";
 import { KoraClient } from "@solana/kora";
 import { Client } from "pg";
-import type { ClerkTestIdentity } from "./clerk-admin";
+import { type ClerkTestIdentity, setClerkOrganizationTier } from "./clerk-admin";
 import { type LocalApiClient, createLocalApiClient } from "./local-api-client";
 
 const PLAYWRIGHT_LOCAL_ORG_ID_PREFIX = "org_e2e_dashboard";
@@ -531,6 +531,8 @@ async function fundWalletToLamports(
 }
 
 export async function ensureUnlinkedOrg(identity: ClerkTestIdentity): Promise<void> {
+  await setClerkOrganizationTier(identity.organizationId, "individual");
+
   await withDatabaseClient(async (client) => {
     await client.query("BEGIN");
 
@@ -551,6 +553,8 @@ export async function ensureLinkedOrg(
 ): Promise<PlaywrightOrganizationFixture> {
   const organization = buildPlaywrightOrganizationFixture(identity);
   const tier = options?.tier ?? "individual";
+
+  await setClerkOrganizationTier(identity.organizationId, tier);
 
   await withDatabaseClient(async (client) => {
     await client.query("BEGIN");
