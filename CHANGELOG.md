@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.14.2](https://github.com/solana-foundation/solana-developer-platform/compare/v0.14.1...v0.14.2) (2026-04-03)
+
+### Bug Fixes
+
+* remove wallet faucet action from dashboard UI ([#151](https://github.com/solana-foundation/solana-developer-platform/pull/151)) ([bbc7013](https://github.com/solana-foundation/solana-developer-platform/commit/bbc7013999eec8257f5f7e96e00ae83f93587a32))
+
 ## [0.14.1](https://github.com/solana-foundation/solana-developer-platform/compare/v0.14.0...v0.14.1) (2026-04-03)
 
 ### Maintenance
