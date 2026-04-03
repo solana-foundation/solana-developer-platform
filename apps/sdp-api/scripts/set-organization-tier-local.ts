@@ -81,6 +81,13 @@ function parseOverrides(value: string | undefined) {
   return overrides;
 }
 
+function buildDefaultDatabaseUrl(): string {
+  const url = new URL("postgresql://127.0.0.1:5432/sdp");
+  url.username = "sdp";
+  url.password = "sdp";
+  return url.toString();
+}
+
 async function main() {
   const scriptDir = path.dirname(fileURLToPath(import.meta.url));
   const appDir = path.resolve(scriptDir, "..");
@@ -94,8 +101,7 @@ async function main() {
   const clerkOrgId = readArg("--clerk-org-id")?.trim();
   const tierArg = readArg("--tier")?.trim();
   const overridesArg = readArg("--overrides")?.trim();
-  const databaseUrl =
-    runtimeEnv.DATABASE_URL?.trim() ?? "postgresql://sdp:sdp@127.0.0.1:5432/sdp";
+  const databaseUrl = runtimeEnv.DATABASE_URL?.trim() ?? buildDefaultDatabaseUrl();
 
   const db = createDatabaseClient(databaseUrl);
 
@@ -163,7 +169,7 @@ async function main() {
   };
 
   if (!providerOverrides && "providerOverrides" in nextPrivateMetadata.sdp) {
-    delete nextPrivateMetadata.sdp.providerOverrides;
+    nextPrivateMetadata.sdp.providerOverrides = undefined;
   }
 
   const mapping = await db

@@ -22,7 +22,9 @@ export async function fetchOrganizationProviderAccess(
   request: SdpApiClient["request"],
   organizationId: string
 ): Promise<DashboardOrganizationProviderAccess> {
-  const response = await request(`/v1/organizations/${encodeURIComponent(organizationId)}/provider-access`);
+  const response = await request(
+    `/v1/organizations/${encodeURIComponent(organizationId)}/provider-access`
+  );
   if (!response.ok) {
     const body = await response.text();
     throw new Error(`SDP API request failed (${response.status}): ${body}`);

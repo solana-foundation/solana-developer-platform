@@ -1098,7 +1098,7 @@ export function PaymentsActionPage({
       (isOnrampBranch ? ONRAMP_PROVIDER_OPTIONS : OFFRAMP_PROVIDER_OPTIONS).filter((option) =>
         enabledRampProviders.includes(option.id)
       ),
-    [enabledRampProviders, isOfframpBranch, isOnrampBranch]
+    [enabledRampProviders, isOnrampBranch]
   );
   const providerLabel = providerOptions.find((option) => option.id === provider)?.title ?? null;
   const numericAmount = parseOptionalNumber(amount);
@@ -1371,6 +1371,7 @@ export function PaymentsActionPage({
       amount,
       destinationIsAllowlisted,
       destinationTrimmed,
+      hasEnabledComplianceProviders,
       hasTransferComplianceForDestination,
       memo,
       selectedAsset,

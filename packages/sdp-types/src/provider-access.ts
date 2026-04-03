@@ -12,12 +12,7 @@ export type ComplianceProviderId = (typeof COMPLIANCE_PROVIDERS)[number];
 export const RAMP_PROVIDERS = ["moonpay", "lightspark", "bvnk"] as const;
 export type RampProviderId = (typeof RAMP_PROVIDERS)[number];
 
-export const ORGANIZATION_PROVIDER_FAMILIES = [
-  "custody",
-  "rpc",
-  "compliance",
-  "ramps",
-] as const;
+export const ORGANIZATION_PROVIDER_FAMILIES = ["custody", "rpc", "compliance", "ramps"] as const;
 export type OrganizationProviderFamily = (typeof ORGANIZATION_PROVIDER_FAMILIES)[number];
 
 export interface OrganizationProviderOverrides {
@@ -58,9 +53,10 @@ function createBooleanRecord<const T extends readonly string[]>(
 ): Record<T[number], boolean> {
   const enabledSet = new Set<string>(enabledValues);
 
-  return Object.fromEntries(
-    values.map((value) => [value, enabledSet.has(value)])
-  ) as Record<T[number], boolean>;
+  return Object.fromEntries(values.map((value) => [value, enabledSet.has(value)])) as Record<
+    T[number],
+    boolean
+  >;
 }
 
 function applyOverrides<T extends string>(

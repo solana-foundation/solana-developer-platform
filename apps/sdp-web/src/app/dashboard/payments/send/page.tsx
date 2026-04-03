@@ -32,9 +32,10 @@ export default async function PaymentsSendPage() {
   );
   const providerAccess =
     onboardingStatus.organization &&
-    (await fetchOrganizationProviderAccess(apiClient.request, onboardingStatus.organization.id).catch(
-      () => null
-    ));
+    (await fetchOrganizationProviderAccess(
+      apiClient.request,
+      onboardingStatus.organization.id
+    ).catch(() => null));
 
   return (
     <PaymentsActionPage

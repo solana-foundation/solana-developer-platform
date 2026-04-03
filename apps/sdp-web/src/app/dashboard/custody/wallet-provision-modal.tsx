@@ -83,7 +83,9 @@ export function WalletProvisionModal({
       return;
     }
 
-    setSelectedProvider(resolveInitialProvider(preferredProvider, connectedProviders, enabledProviders));
+    setSelectedProvider(
+      resolveInitialProvider(preferredProvider, connectedProviders, enabledProviders)
+    );
   }, [connectedProviders, enabledProviders, isOpen, preferredProvider]);
 
   useEscapeKey(isOpen, onClose);
@@ -94,7 +96,9 @@ export function WalletProvisionModal({
     [enabledProviders]
   );
   const selectedProviderEntry = useMemo(
-    () => selectableProviders.find((provider) => provider.id === selectedProvider) ?? selectableProviders[0],
+    () =>
+      selectableProviders.find((provider) => provider.id === selectedProvider) ??
+      selectableProviders[0],
     [selectableProviders, selectedProvider]
   );
   const isConnected = connectedProviderSet.has(selectedProvider);

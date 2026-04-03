@@ -67,9 +67,10 @@ export function normalizeOrganizationTier(value: string | null | undefined): Org
     return value;
   }
 
-  return LEGACY_ORGANIZATION_TIER_ALIASES[
-    value as keyof typeof LEGACY_ORGANIZATION_TIER_ALIASES
-  ] ?? "individual";
+  return (
+    LEGACY_ORGANIZATION_TIER_ALIASES[value as keyof typeof LEGACY_ORGANIZATION_TIER_ALIASES] ??
+    "individual"
+  );
 }
 
 export interface User {

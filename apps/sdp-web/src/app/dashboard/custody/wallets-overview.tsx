@@ -68,7 +68,9 @@ export function WalletsOverview({
 
         {canManageCustody ? (
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            {CUSTODY_PROVIDER_CATALOG.filter((provider) => enabledProviders.includes(provider.id)).map((provider) => {
+            {CUSTODY_PROVIDER_CATALOG.filter((provider) =>
+              enabledProviders.includes(provider.id)
+            ).map((provider) => {
               const isConnected = connectedProviderSet.has(provider.id);
               const isDisabled = isConnected && !provider.supportsAdditionalWallets;
 
