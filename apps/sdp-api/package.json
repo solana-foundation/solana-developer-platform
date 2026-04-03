@@ -29,7 +29,6 @@
   "dependencies": {
     "@react-email/components": "1.0.6",
     "@react-email/render": "2.0.4",
-    "@sdp/keychain-coinbase": "workspace:*",
     "@sdp/keychain-para": "workspace:*",
     "@sdp/types": "workspace:*",
     "@sentry/cloudflare": "^10.42.0",
@@ -37,6 +36,7 @@
     "@solana-program/token-2022": "catalog:",
     "@solana/addresses": "catalog:",
     "@solana/codecs": "catalog:",
+    "@solana/keychain-cdp": "1.0.1",
     "@solana/keychain-core": "0.3.0",
     "@solana/keychain-fireblocks": "0.2.1",
     "@solana/keychain-privy": "0.3.0",

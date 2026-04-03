@@ -1,12 +1,12 @@
 /**
  * Keychain Coinbase CDP Adapter
  *
- * Wraps @sdp/keychain-coinbase CoinbaseCdpSigner to implement SigningPort.
+ * Wraps @solana/keychain-cdp to implement SigningPort.
  * Coinbase CDP provides hosted Solana wallets via CDP v2 APIs.
  */
 
 import type { SignRequest, SignResult } from "@/services/ports";
-import { CoinbaseCdpSigner } from "@sdp/keychain-coinbase";
+import { createCdpSigner } from "@solana/keychain-cdp";
 import type { SolanaSigner } from "@solana/keychain-core";
 import type { Address } from "@solana/kit";
 import { BaseKeychainAdapter } from "./base-keychain.adapter";
@@ -22,7 +22,7 @@ export class KeychainCoinbaseAdapter extends BaseKeychainAdapter {
   protected signer!: SolanaSigner;
 
   private readonly config: KeychainCoinbaseConfig;
-  private readonly signerByWalletId = new Map<string, Promise<CoinbaseCdpSigner>>();
+  private readonly signerByWalletId = new Map<string, Promise<SolanaSigner>>();
 
   constructor(config: KeychainCoinbaseConfig) {
     super();
@@ -32,10 +32,7 @@ export class KeychainCoinbaseAdapter extends BaseKeychainAdapter {
   /**
    * Get the underlying Coinbase signer for direct use with @solana/kit.
    */
-  async getTransactionSigner(
-    walletId?: string,
-    _walletPublicKey?: Address
-  ): Promise<CoinbaseCdpSigner> {
+  async getTransactionSigner(walletId?: string, _walletPublicKey?: Address): Promise<SolanaSigner> {
     return this.getCoinbaseSigner(walletId);
   }
 
@@ -64,7 +61,7 @@ export class KeychainCoinbaseAdapter extends BaseKeychainAdapter {
     return super.sign(request);
   }
 
-  private async getCoinbaseSigner(walletId?: string): Promise<CoinbaseCdpSigner> {
+  private async getCoinbaseSigner(walletId?: string): Promise<SolanaSigner> {
     const normalizedWalletId = walletId ?? this.config.defaultWalletId;
     if (!normalizedWalletId) {
       throw new Error("Coinbase CDP wallet ID is required");
@@ -76,14 +73,14 @@ export class KeychainCoinbaseAdapter extends BaseKeychainAdapter {
       return existing;
     }
 
-    const created = CoinbaseCdpSigner.create({
-      apiKeyId: this.config.apiKeyId,
-      apiKeySecret: this.config.apiKeySecret,
-      walletSecret: this.config.walletSecret,
-      walletId: denormalizeCoinbaseWalletId(normalizedWalletId),
-      apiBaseUrl: this.config.apiBaseUrl,
+    const created = createCdpSigner({
+      cdpApiKeyId: this.config.apiKeyId,
+      cdpApiKeySecret: this.config.apiKeySecret,
+      cdpWalletSecret: this.config.walletSecret,
+      address: denormalizeCoinbaseWalletId(normalizedWalletId),
+      baseUrl: this.config.apiBaseUrl,
       requestDelayMs: this.config.requestDelayMs,
-    });
+    }).then((signer) => signer as unknown as SolanaSigner);
     this.signerByWalletId.set(cacheKey, created);
     return created;
   }
