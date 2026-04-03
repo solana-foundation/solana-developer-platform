@@ -61,7 +61,9 @@ export const organizationSchema = z
     id: orgIdParamSchema,
     name: z.string().openapi({ description: "Organization name.", example: "Example Org" }),
     slug: z.string().openapi({ description: "URL-friendly slug.", example: "example-org" }),
-    tier: z.enum(ORGANIZATION_TIERS).openapi({ description: "Billing tier.", example: "pro" }),
+    tier: z
+      .enum(ORGANIZATION_TIERS)
+      .openapi({ description: "Organization tier.", example: "enterprise" }),
     status: z
       .enum(ORGANIZATION_STATUSES)
       .openapi({ description: "Organization status.", example: "active" }),

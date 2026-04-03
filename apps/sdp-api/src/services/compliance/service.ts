@@ -1,4 +1,5 @@
 import type { Env } from "@/types/env";
+import type { ComplianceProviderId } from "@sdp/types";
 import { ChainalysisComplianceProvider } from "./providers/chainalysis";
 import { EllipticComplianceProvider } from "./providers/elliptic";
 import { RangeComplianceProvider } from "./providers/range";
@@ -17,27 +18,37 @@ export class ComplianceService {
   }
 }
 
-export function createComplianceService(env: Env): ComplianceService {
-  const providers: ComplianceProvider[] = [
-    new RangeComplianceProvider({
+function createProviderMap(env: Env): Record<ComplianceProviderId, ComplianceProvider> {
+  return {
+    range: new RangeComplianceProvider({
       apiKey: env.RANGE_API_KEY,
       baseUrl: env.RANGE_API_BASE_URL,
     }),
-    new EllipticComplianceProvider({
+    elliptic: new EllipticComplianceProvider({
       apiToken: env.ELLIPTIC_API_TOKEN,
       apiKey: env.ELLIPTIC_API_KEY,
       apiSecret: env.ELLIPTIC_API_SECRET,
       baseUrl: env.ELLIPTIC_API_BASE_URL,
     }),
-    new TrmComplianceProvider({
+    trm: new TrmComplianceProvider({
       apiKey: env.TRM_API_KEY,
       baseUrl: env.TRM_API_BASE_URL,
     }),
-    new ChainalysisComplianceProvider({
+    chainalysis: new ChainalysisComplianceProvider({
       apiKey: env.CHAINALYSIS_API_KEY,
       baseUrl: env.CHAINALYSIS_API_BASE_URL,
     }),
-  ];
+  };
+}
 
-  return new ComplianceService(providers);
+export function createComplianceService(
+  env: Env,
+  enabledProviders?: readonly ComplianceProviderId[]
+): ComplianceService {
+  const providerMap = createProviderMap(env);
+  const providers = (enabledProviders ?? (Object.keys(providerMap) as ComplianceProviderId[])).map(
+    (providerId) => providerMap[providerId]
+  );
+
+  return new ComplianceService(providers.filter(Boolean));
 }

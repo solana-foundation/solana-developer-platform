@@ -54,7 +54,7 @@ describe("rpc-relay.service", () => {
     await db
       .prepare(
         `INSERT INTO organizations (id, name, slug, tier, status, settings)
-       VALUES (?, 'RPC Service Org', 'rpc-service-org', 'free', 'active', NULL)
+       VALUES (?, 'RPC Service Org', 'rpc-service-org', 'enterprise', 'active', NULL)
        ON CONFLICT(id) DO UPDATE SET
          name = excluded.name,
          slug = excluded.slug,

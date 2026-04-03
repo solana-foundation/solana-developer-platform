@@ -1,4 +1,5 @@
 import { AppError } from "@/lib/errors";
+import { getOrganizationProviderAvailability } from "@/services/organization-provider-access.service";
 import type { Env } from "@/types/env";
 import {
   ORGANIZATION_RPC_PROVIDERS,
@@ -409,6 +410,10 @@ export function includesTransactionMethod(methodNames: string[]): boolean {
 
 export async function resolveRpcTarget(input: ResolveRpcTargetInput): Promise<ResolvedRpcTarget> {
   const managedProviders = resolveManagedProviders(input.env);
+  const access = await getOrganizationProviderAvailability(input.env, input.db, input.organizationId);
+  const enabledManagedProviders = managedProviders.filter(
+    (provider) => access.providers.rpc[provider.id]?.enabled
+  );
   const projectId = getEffectiveProjectId(input.authProjectId, input.requestedProjectId);
 
   if (projectId) {
@@ -427,24 +432,20 @@ export async function resolveRpcTarget(input: ResolveRpcTargetInput): Promise<Re
     }
 
     if (projectPreference.providerType === "managed") {
-      const selectedProvider = managedProviders.find(
+      const selectedProvider = enabledManagedProviders.find(
         (provider) => provider.id === projectPreference.providerId
       );
-      if (!selectedProvider) {
-        throw new AppError(
-          "BAD_REQUEST",
-          `Project RPC provider '${projectPreference.providerId}' is not configured in this environment`
-        );
-      }
 
-      return {
-        providerId: selectedProvider.id,
-        projectId,
-        endpoint: selectedProvider.url,
-        endpointLabel: maskEndpoint(selectedProvider.url),
-        headers: selectedProvider.headers,
-        selectionMode: "project_provider",
-      };
+      if (selectedProvider) {
+        return {
+          providerId: selectedProvider.id,
+          projectId,
+          endpoint: selectedProvider.url,
+          endpointLabel: maskEndpoint(selectedProvider.url),
+          headers: selectedProvider.headers,
+          selectionMode: "project_provider",
+        };
+      }
     }
   }
 
@@ -452,25 +453,23 @@ export async function resolveRpcTarget(input: ResolveRpcTargetInput): Promise<Re
   const preferredProvider = organizationSettings?.rpcProvider;
 
   if (preferredProvider && preferredProvider !== "default") {
-    const selectedProvider = managedProviders.find((provider) => provider.id === preferredProvider);
-    if (!selectedProvider) {
-      throw new AppError(
-        "BAD_REQUEST",
-        `Organization RPC provider '${preferredProvider}' is not configured in this environment`
-      );
-    }
+    const selectedProvider = enabledManagedProviders.find(
+      (provider) => provider.id === preferredProvider
+    );
 
-    return {
-      providerId: selectedProvider.id,
-      projectId,
-      endpoint: selectedProvider.url,
-      endpointLabel: maskEndpoint(selectedProvider.url),
-      headers: selectedProvider.headers,
-      selectionMode: "organization_provider",
-    };
+    if (selectedProvider) {
+      return {
+        providerId: selectedProvider.id,
+        projectId,
+        endpoint: selectedProvider.url,
+        endpointLabel: maskEndpoint(selectedProvider.url),
+        headers: selectedProvider.headers,
+        selectionMode: "organization_provider",
+      };
+    }
   }
 
-  const selectedProvider = await pickRoundRobinProvider(input.env.SDP_CACHE, managedProviders);
+  const selectedProvider = await pickRoundRobinProvider(input.env.SDP_CACHE, enabledManagedProviders);
   return {
     providerId: selectedProvider.id,
     projectId,
@@ -533,9 +532,13 @@ export async function listRpcProviders(input: {
   requestedProjectId: string | null;
 }) {
   const managedProviders = resolveManagedProviders(input.env);
+  const access = await getOrganizationProviderAvailability(input.env, input.db, input.organizationId);
+  const enabledManagedProviders = managedProviders.filter(
+    (provider) => access.providers.rpc[provider.id]?.enabled
+  );
   const providerStatuses: RpcProviderStatus[] = [];
 
-  for (const provider of managedProviders) {
+  for (const provider of enabledManagedProviders) {
     providerStatuses.push({
       id: provider.id,
       endpoint: maskEndpoint(provider.url),
@@ -554,6 +557,6 @@ export async function listRpcProviders(input: {
       endpoint: resolvedTarget.endpointLabel,
       stats: await getProviderStats(input.env.SDP_CACHE, resolvedTarget.providerId),
     },
-    roundRobinOrder: managedProviders.map((provider) => provider.id),
+    roundRobinOrder: enabledManagedProviders.map((provider) => provider.id),
   };
 }

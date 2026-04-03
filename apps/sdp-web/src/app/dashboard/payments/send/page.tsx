@@ -1,9 +1,17 @@
 import { getAuthEntryPath } from "@/lib/auth-entry";
+import { fetchOrganizationProviderAccess } from "@/lib/organization-provider-access";
 import { createSdpApiClient } from "@/lib/sdp-api";
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { PaymentsActionPage } from "../payments-action-page";
 import { fetchPaymentsIssuedTokenSymbols } from "../payments-page.data";
+
+type OnboardingStatusResponse = {
+  linked: boolean;
+  organization: {
+    id: string;
+  } | null;
+};
 
 export default async function PaymentsSendPage() {
   const { userId, orgId } = await auth();
@@ -15,10 +23,24 @@ export default async function PaymentsSendPage() {
   }
 
   const apiClient = await createSdpApiClient();
-  const issuedTokenSymbolsResult = await fetchPaymentsIssuedTokenSymbols(apiClient.request);
+  const [issuedTokenSymbolsResult, onboardingStatus] = await Promise.all([
+    fetchPaymentsIssuedTokenSymbols(apiClient.request),
+    apiClient.fetch<OnboardingStatusResponse>("/v1/onboarding/status").catch(
+      () =>
+        ({
+          linked: false,
+          organization: null,
+        }) satisfies OnboardingStatusResponse
+    ),
+  ]);
   const issuedTokenSymbolsByMint = Object.fromEntries(
     (issuedTokenSymbolsResult.data ?? []).map((token) => [token.mintAddress, token.symbol])
   );
+  const providerAccess =
+    onboardingStatus.organization &&
+    (await fetchOrganizationProviderAccess(apiClient.request, onboardingStatus.organization.id).catch(
+      () => null
+    ));
 
   return (
     <PaymentsActionPage
@@ -26,6 +48,8 @@ export default async function PaymentsSendPage() {
       wallets={[]}
       walletsError={null}
       issuedTokenSymbolsByMint={issuedTokenSymbolsByMint}
+      enabledComplianceProviders={providerAccess?.enabledComplianceProviders ?? []}
+      enabledRampProviders={providerAccess?.enabledRampProviders ?? []}
     />
   );
 }

@@ -14,6 +14,7 @@ import { linkOrganization } from "@/app/onboarding/actions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getAuthEntryPath } from "@/lib/auth-entry";
+import { fetchOrganizationProviderAccess } from "@/lib/organization-provider-access";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { type SdpApiClient, createSdpApiClient } from "@/lib/sdp-api";
 import { auth, clerkClient } from "@clerk/nextjs/server";
@@ -29,6 +30,13 @@ interface ClerkOrganizationSummary {
 }
 
 type SettledResult<T> = { ok: true; value: T } | { ok: false; error: unknown };
+
+type OnboardingStatusResponse = {
+  linked: boolean;
+  organization: {
+    id: string;
+  } | null;
+};
 
 function settle<T>(promise: Promise<T>): Promise<SettledResult<T>> {
   return promise.then(
@@ -146,7 +154,7 @@ export default async function CustodyPage() {
       createSdpApiClient(trace.childContext("dashboard.custody.api"))
     );
     const onboarding = await trace.step("fetch_onboarding_status", () =>
-      apiClient.fetch<{ linked: boolean }>("/v1/onboarding/status")
+      apiClient.fetch<OnboardingStatusResponse>("/v1/onboarding/status")
     );
 
     if (!onboarding.linked) {
@@ -162,10 +170,18 @@ export default async function CustodyPage() {
       );
     }
 
-    const [configsResult, walletsResult, apiKeysResult] = await Promise.all([
+    const [configsResult, walletsResult, apiKeysResult, providerAccessResult] = await Promise.all([
       trace.step("fetch_custody_configs", () => settle(getCustodyConfigs(apiClient.request))),
       trace.step("fetch_custody_wallets", () => settle(getCustodyWallets(apiClient.request))),
       trace.step("fetch_active_api_keys", () => fetchActiveApiKeys(apiClient.request)),
+      trace.step("fetch_provider_access", () =>
+        onboarding.organization
+          ? settle(fetchOrganizationProviderAccess(apiClient.request, onboarding.organization.id))
+          : Promise.resolve({
+              ok: false as const,
+              error: new Error("Organization is not linked"),
+            })
+      ),
     ]);
 
     const connectedProviders: KnownCustodyProvider[] = configsResult.ok
@@ -186,11 +202,15 @@ export default async function CustodyPage() {
         ? walletsResult.error.message
         : "Unable to load wallets";
     const apiKeys = apiKeysResult.ok ? (apiKeysResult.data ?? []) : [];
+    const enabledProviders = providerAccessResult.ok
+      ? providerAccessResult.value.enabledCustodyProviders
+      : connectedProviders;
 
     trace.log({
       ok: true,
       linked: true,
       connectedProviderCount: connectedProviders.length,
+      enabledProviderCount: enabledProviders.length,
       walletCount: walletsResult.ok ? walletsResult.value.length : 0,
       apiKeyCount: apiKeys.length,
     });
@@ -201,6 +221,7 @@ export default async function CustodyPage() {
           apiBaseUrl={resolvePlaygroundApiBaseUrl()}
           apiKeys={apiKeys}
           connectedProviders={connectedProviders}
+          enabledProviders={enabledProviders}
           configsError={configsError}
           wallets={walletsResult.ok ? walletsResult.value : []}
           walletsError={walletsError}

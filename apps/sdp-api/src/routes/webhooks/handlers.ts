@@ -3,6 +3,7 @@ import { mapClerkRoleToOrgRole } from "@/lib/clerk-role";
 import { AppError, badRequest } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { ClerkOrganizationsService } from "@/services/clerk-organizations.service";
+import { syncOrganizationTierFromClerk } from "@/services/organization-provider-access.service";
 import { ClerkUsersService } from "@/services/clerk-users.service";
 import type { Env } from "@/types/env";
 import type { Context } from "hono";
@@ -146,15 +147,10 @@ async function ensureOrganizationMapping(c: AppContext, org: ClerkOrgData): Prom
     return existing.organization_id;
   }
 
-  let orgName = org.name?.trim();
-  let orgSlug = org.slug?.trim();
-
-  if (!orgName || !orgSlug) {
-    const clerkService = new ClerkOrganizationsService(c.env);
-    const clerkOrg = await clerkService.getOrganization(org.id);
-    orgName = orgName || clerkOrg.name?.trim() || "New Organization";
-    orgSlug = orgSlug || clerkOrg.slug?.trim() || undefined;
-  }
+  const clerkService = new ClerkOrganizationsService(c.env);
+  const clerkOrg = await clerkService.getOrganization(org.id);
+  let orgName = org.name?.trim() || clerkOrg.name?.trim();
+  let orgSlug = org.slug?.trim() || clerkOrg.slug?.trim() || undefined;
 
   orgName = orgName || "New Organization";
   const slugBase = orgSlug || orgName || org.id;
@@ -180,6 +176,10 @@ async function ensureOrganizationMapping(c: AppContext, org: ClerkOrgData): Prom
 
   try {
     await getDb(c.env).batch(batch);
+    await syncOrganizationTierFromClerk(getDb(c.env), {
+      organizationId: orgId,
+      clerkOrganization: clerkOrg,
+    });
   } catch (err) {
     if (err instanceof Error && err.message?.includes("UNIQUE constraint")) {
       const retry = await getDb(c.env)
@@ -284,6 +284,22 @@ async function deactivateMembership(
 async function handleOrganizationCreated(c: AppContext, data: Record<string, unknown>) {
   const org = extractOrganization(data);
   await ensureOrganizationMapping(c, org);
+}
+
+async function handleOrganizationUpdated(c: AppContext, data: Record<string, unknown>) {
+  const org = extractOrganization(data);
+  const organizationId = await ensureOrganizationMapping(c, org);
+
+  if (!org.id) {
+    return;
+  }
+
+  const clerkService = new ClerkOrganizationsService(c.env);
+  const clerkOrganization = await clerkService.getOrganization(org.id);
+  await syncOrganizationTierFromClerk(getDb(c.env), {
+    organizationId,
+    clerkOrganization,
+  });
 }
 
 async function handleOrganizationMembershipCreated(c: AppContext, data: Record<string, unknown>) {
@@ -396,6 +412,9 @@ export const handleClerkWebhook = async (c: AppContext) => {
   switch (event.type) {
     case "organization.created":
       await handleOrganizationCreated(c, data);
+      break;
+    case "organization.updated":
+      await handleOrganizationUpdated(c, data);
       break;
     // biome-ignore lint/nursery/noSecrets: Webhook event type literal, not a secret.
     case "organizationMembership.created":

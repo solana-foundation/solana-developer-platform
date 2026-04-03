@@ -47,14 +47,14 @@ let originalTrmBaseUrl: string | undefined;
 let originalChainalysisApiKey: string | undefined;
 let originalChainalysisBaseUrl: string | undefined;
 
-async function seedAuth(): Promise<void> {
+async function seedAuth(tier: "free" | "enterprise" = "enterprise"): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
   await seedCachedApiKey(env, keyHash, TEST_CACHED_API_KEY);
 
   await getDb(env).batch([
     getDb(env)
       .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, "free", "active"),
+      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, tier, "active"),
     getDb(env)
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
       .bind(TEST_USER.id, TEST_USER.email, 1, "active"),
@@ -125,7 +125,12 @@ describe("Compliance routes", () => {
     await clearKVNamespaces(env);
   });
 
-  it("returns all provider results with unavailable defaults", async () => {
+  it("returns forbidden when the organization has no enabled compliance providers", async () => {
+    await getDb(env)
+      .prepare("UPDATE organizations SET tier = ? WHERE id = ?")
+      .bind("free", TEST_ORG.id)
+      .run();
+
     const res = await app.request(
       "/v1/compliance/address-screenings",
       {
@@ -143,36 +148,9 @@ describe("Compliance routes", () => {
       env
     );
 
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as {
-      data: {
-        screening: {
-          providers: Array<{
-            provider: string;
-            status: string;
-            riskScore: number | null;
-          }>;
-        };
-      };
-    };
-
-    expect(body.data.screening.providers).toHaveLength(4);
-
-    const range = body.data.screening.providers.find((entry) => entry.provider === "range");
-    const elliptic = body.data.screening.providers.find((entry) => entry.provider === "elliptic");
-    const trm = body.data.screening.providers.find((entry) => entry.provider === "trm");
-    const chainalysis = body.data.screening.providers.find(
-      (entry) => entry.provider === "chainalysis"
-    );
-
-    expect(range?.status).toBe("unavailable");
-    expect(range?.riskScore).toBeNull();
-    expect(elliptic?.status).toBe("unavailable");
-    expect(elliptic?.riskScore).toBeNull();
-    expect(trm?.status).toBe("unavailable");
-    expect(trm?.riskScore).toBeNull();
-    expect(chainalysis?.status).toBe("unavailable");
-    expect(chainalysis?.riskScore).toBeNull();
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { error: { message: string } };
+    expect(body.error.message).toContain("Compliance screening is only available");
   });
 
   it("returns a Range risk score when Range API is configured", async () => {

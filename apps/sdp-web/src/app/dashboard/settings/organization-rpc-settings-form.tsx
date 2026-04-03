@@ -3,7 +3,7 @@
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { ORGANIZATION_RPC_PROVIDERS, type OrganizationRpcProvider } from "@sdp/types";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { updateOrganizationRpcSettingsAction } from "./actions";
 
@@ -167,16 +167,39 @@ const RPC_PROVIDER_LABELS: Record<OrganizationRpcProvider, string> = {
 
 export function OrganizationRpcSettingsForm({
   canManageSettings,
+  enabledProviders,
   organization,
 }: {
   canManageSettings: boolean;
+  enabledProviders: OrganizationRpcProvider[];
   organization: SettingsOrganization;
 }) {
   const rpcProvider = organization.settings?.rpcProvider ?? "default";
-  const [selectedProvider, setSelectedProvider] = useState<OrganizationRpcProvider>(rpcProvider);
+  const availableProviders = useMemo(
+    () =>
+      ORGANIZATION_RPC_PROVIDERS.filter((provider) =>
+        enabledProviders.includes(provider)
+      ) as OrganizationRpcProvider[],
+    [enabledProviders]
+  );
+  const hasEnabledProviders = availableProviders.length > 0;
+  const fallbackProvider =
+    availableProviders.find((provider) => provider === "default") ??
+    availableProviders[0] ??
+    "default";
+  const hasPersistedProviderEnabled =
+    hasEnabledProviders && availableProviders.includes(rpcProvider);
+  const [selectedProvider, setSelectedProvider] = useState<OrganizationRpcProvider>(
+    hasPersistedProviderEnabled ? rpcProvider : fallbackProvider
+  );
   const [isSaving, setIsSaving] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isApplyingFallback, setIsApplyingFallback] = useState(false);
+
+  useEffect(() => {
+    setSelectedProvider(hasPersistedProviderEnabled ? rpcProvider : fallbackProvider);
+  }, [fallbackProvider, hasPersistedProviderEnabled, rpcProvider]);
 
   const saveProvider = async (provider: OrganizationRpcProvider) => {
     setIsSaving(true);
@@ -195,6 +218,15 @@ export function OrganizationRpcSettingsForm({
       setSelectedProvider(result.savedRpcProvider ?? provider);
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const applyFallbackProvider = async () => {
+    setIsApplyingFallback(true);
+    try {
+      await saveProvider(fallbackProvider);
+    } finally {
+      setIsApplyingFallback(false);
     }
   };
 
@@ -261,6 +293,37 @@ export function OrganizationRpcSettingsForm({
           </div>
         ) : null}
 
+        {!hasEnabledProviders ? (
+          <div className="rounded-xl border border-[rgba(158,43,56,0.2)] bg-[rgba(158,43,56,0.06)] px-3 py-2 text-sm text-[#9e2b38]">
+            No RPC providers are enabled for this organization in the current environment.
+          </div>
+        ) : null}
+
+        {hasEnabledProviders && !hasPersistedProviderEnabled ? (
+          <div className="rounded-xl border border-[rgba(180,83,9,0.22)] bg-[rgba(245,158,11,0.12)] px-3 py-2 text-sm text-[#8a5a00]">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <p>
+                The saved RPC provider for this organization is no longer available on the current
+                tier. The form has fallen back to {RPC_PROVIDER_LABELS[fallbackProvider]} until you
+                save an enabled provider.
+              </p>
+              {canManageSettings ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  disabled={isSaving || isTesting || isApplyingFallback}
+                  onClick={() => {
+                    void applyFallbackProvider();
+                  }}
+                >
+                  {isApplyingFallback ? "Saving..." : "Save fallback"}
+                </Button>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+
         <div className="grid gap-2">
           <Label htmlFor="rpcProvider">RPC provider</Label>
           <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_112px] sm:items-center">
@@ -269,14 +332,14 @@ export function OrganizationRpcSettingsForm({
               name="rpcProvider"
               className="h-10 w-full min-w-0 rounded-lg border border-[rgba(28,28,29,0.16)] bg-white px-3 text-sm text-[#1c1c1d]"
               value={selectedProvider}
-              disabled={!canManageSettings || isSaving || isTesting}
+              disabled={!canManageSettings || !hasEnabledProviders || isSaving || isTesting}
               onChange={(event) => {
                 const nextProvider = event.currentTarget.value as typeof selectedProvider;
                 setSelectedProvider(nextProvider);
                 void saveProvider(nextProvider);
               }}
             >
-              {ORGANIZATION_RPC_PROVIDERS.map((provider) => (
+              {availableProviders.map((provider) => (
                 <option key={provider} value={provider}>
                   {RPC_PROVIDER_LABELS[provider]}
                 </option>
@@ -287,7 +350,7 @@ export function OrganizationRpcSettingsForm({
               size="sm"
               variant="secondary"
               className="w-full sm:w-[112px] sm:justify-center"
-              disabled={isTesting || isSaving}
+              disabled={!hasEnabledProviders || isTesting || isSaving}
               onClick={() => {
                 void testProvider();
               }}

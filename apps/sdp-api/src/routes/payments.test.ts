@@ -116,7 +116,7 @@ async function seedAuthAndWallet(): Promise<void> {
   await getDb(env).batch([
     getDb(env)
       .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, "free", "active"),
+      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, "enterprise", "active"),
     getDb(env)
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
       .bind(TEST_USER.id, TEST_USER.email, 1, "active"),
@@ -367,8 +367,6 @@ describe("Payments routes", () => {
           amount: "0",
           uiAmount: "0",
           decimals: 9,
-          usdPrice: expect.any(Number),
-          usdValue: 0,
         },
       ],
     });
@@ -419,8 +417,6 @@ describe("Payments routes", () => {
         amount: "0",
         uiAmount: "0",
         decimals: 9,
-        usdPrice: expect.any(Number),
-        usdValue: 0,
       },
       {
         token: "USDC",
@@ -470,8 +466,6 @@ describe("Payments routes", () => {
         amount: "4200000000",
         uiAmount: "4.2",
         decimals: 9,
-        usdPrice: expect.any(Number),
-        usdValue: expect.any(Number),
       },
     ]);
   });
@@ -1250,7 +1244,7 @@ describe("Payments routes", () => {
     expect(body.error.message).toContain("Invalid request body");
   });
 
-  it("returns internal error when MoonPay credentials are not configured", async () => {
+  it("returns forbidden when MoonPay is not configured in the environment", async () => {
     env.MOONPAY_API_KEY = undefined;
 
     const res = await app.request(
@@ -1272,13 +1266,13 @@ describe("Payments routes", () => {
       env
     );
 
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(403);
     const body = (await res.json()) as { error: { code: string; message: string } };
-    expect(body.error.code).toBe("INTERNAL_ERROR");
+    expect(body.error.code).toBe("FORBIDDEN");
     expect(body.error.message).toContain("MoonPay is not configured");
   });
 
-  it("returns internal error when Lightspark credentials are not configured", async () => {
+  it("returns forbidden when Lightspark is not configured in the environment", async () => {
     env.LIGHTSPARK_GRID_CLIENT_ID = undefined;
 
     const res = await app.request(
@@ -1301,13 +1295,13 @@ describe("Payments routes", () => {
       env
     );
 
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(403);
     const body = (await res.json()) as { error: { code: string; message: string } };
-    expect(body.error.code).toBe("INTERNAL_ERROR");
+    expect(body.error.code).toBe("FORBIDDEN");
     expect(body.error.message).toContain("Lightspark is not configured");
   });
 
-  it("returns internal error when BVNK credentials are not configured", async () => {
+  it("returns forbidden when BVNK is not configured in the environment", async () => {
     env.BVNK_API_TOKEN = undefined;
 
     const res = await app.request(
@@ -1330,9 +1324,9 @@ describe("Payments routes", () => {
       env
     );
 
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(403);
     const body = (await res.json()) as { error: { code: string; message: string } };
-    expect(body.error.code).toBe("INTERNAL_ERROR");
+    expect(body.error.code).toBe("FORBIDDEN");
     expect(body.error.message).toContain("BVNK is not configured");
   });
 

@@ -31,6 +31,7 @@ interface WalletsWorkspaceProps {
   apiBaseUrl: string | null;
   apiKeys: WalletsApiKeyOption[];
   connectedProviders: KnownCustodyProvider[];
+  enabledProviders: KnownCustodyProvider[];
   configsError: string | null;
   wallets: CustodyWalletSummary[];
   walletsError: string | null;
@@ -40,6 +41,7 @@ export function WalletsWorkspace({
   apiBaseUrl,
   apiKeys,
   connectedProviders,
+  enabledProviders,
   configsError,
   wallets,
   walletsError,
@@ -142,6 +144,7 @@ export function WalletsWorkspace({
 
             <WalletsOverview
               connectedProviders={connectedProviders}
+              enabledProviders={enabledProviders}
               configsError={configsError}
               wallets={wallets}
               walletsError={walletsError}
@@ -157,6 +160,7 @@ export function WalletsWorkspace({
           isOpen={isProvisionModalOpen}
           onClose={() => setIsProvisionModalOpen(false)}
           connectedProviders={connectedProviders}
+          enabledProviders={enabledProviders}
           preferredProvider={preferredProvider}
         />
       ) : null}

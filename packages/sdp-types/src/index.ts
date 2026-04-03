@@ -5,6 +5,7 @@
 export * from "./permissions";
 export * from "./custody";
 export * from "./organizations";
+export * from "./provider-access";
 export * from "./api-keys";
 export * from "./payments";
 export * from "./projects";

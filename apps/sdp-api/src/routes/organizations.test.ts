@@ -65,7 +65,7 @@ describe("Organizations routes", () => {
 
       const body = (await res.json()) as { data: CreateOrganizationResponse };
       expect(body.data.organization.name).toBe("New Org");
-      expect(body.data.organization.tier).toBe("pro");
+      expect(body.data.organization.tier).toBe("enterprise");
       expect(body.data.organization.status).toBe("active");
       expect(body.data.apiKey.key).toMatch(/^sk_test_/);
       expect(body.data.apiKey.keyPrefix).toMatch(/^sk_test_/);
@@ -290,7 +290,7 @@ describe("Organizations routes", () => {
     it("returns internal error when organization tier is invalid in storage", async () => {
       await getDb(env)
         .prepare("UPDATE organizations SET tier = ? WHERE id = ?")
-        .bind("standard", TEST_ORG.id)
+        .bind("totally-invalid-tier", TEST_ORG.id)
         .run();
 
       const res = await app.request(
@@ -427,6 +427,29 @@ describe("Organizations routes", () => {
       );
 
       expect(res.status).toBe(200);
+    });
+
+    it("rejects managed RPC providers for free-tier organizations", async () => {
+      const res = await app.request(
+        `/v1/organizations/${TEST_ORG.id}`,
+        {
+          method: "PATCH",
+          headers: {
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            settings: {
+              rpcProvider: "helius",
+            },
+          }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(403);
+      const body = (await res.json()) as { error: { message: string } };
+      expect(body.error.message).toContain("enterprise tier");
     });
 
     it("rejects empty update", async () => {

@@ -2,7 +2,9 @@ import { type PreparedStatement, getDb } from "@/db";
 import { AppError, conflict, notFound } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import { ClerkOrganizationsService } from "@/services/clerk-organizations.service";
+import { syncOrganizationTierFromClerk } from "@/services/organization-provider-access.service";
 import type { Env } from "@/types/env";
+import { normalizeOrganizationTier } from "@sdp/types";
 import type { Context } from "hono";
 
 type AppContext = Context<{ Bindings: Env }>;
@@ -71,7 +73,7 @@ async function fetchOrganization(db: DatabaseClient, orgId: string) {
     id: org.id,
     name: org.name,
     slug: org.slug,
-    tier: org.tier as "free" | "pro" | "enterprise",
+    tier: normalizeOrganizationTier(org.tier),
     status: org.status as "active" | "suspended" | "deleted",
     settings: org.settings ? JSON.parse(org.settings) : null,
     createdAt: org.created_at,
@@ -118,6 +120,12 @@ export const linkOrganization = async (c: AppContext) => {
     .first<{ organization_id: string }>();
 
   if (existingMapping) {
+    const clerkService = new ClerkOrganizationsService(c.env);
+    const clerkOrg = await clerkService.getOrganization(clerk.clerkOrgId);
+    await syncOrganizationTierFromClerk(getDb(c.env), {
+      organizationId: existingMapping.organization_id,
+      clerkOrganization: clerkOrg,
+    });
     const organization = await fetchOrganization(getDb(c.env), existingMapping.organization_id);
     return success(c, { linked: true, organization, apiKey: null });
   }
@@ -215,6 +223,10 @@ export const linkOrganization = async (c: AppContext) => {
 
   try {
     await getDb(c.env).batch(batch);
+    await syncOrganizationTierFromClerk(getDb(c.env), {
+      organizationId: orgId,
+      clerkOrganization: clerkOrg,
+    });
   } catch (err) {
     if (err instanceof Error && err.message?.includes("UNIQUE constraint")) {
       throw conflict("Organization already linked");

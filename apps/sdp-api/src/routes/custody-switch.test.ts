@@ -41,6 +41,8 @@ const TEST_CACHED_API_KEY: CachedApiKey = {
   expiresAt: null,
 };
 
+let originalParaApiKey: string | undefined;
+
 async function seedAuthAndActiveConfig(): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
   await seedCachedApiKey(env, keyHash, TEST_CACHED_API_KEY);
@@ -48,7 +50,7 @@ async function seedAuthAndActiveConfig(): Promise<void> {
   await getDb(env).batch([
     getDb(env)
       .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, "free", "active"),
+      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, "enterprise", "active"),
     getDb(env)
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
       .bind(TEST_USER.id, TEST_USER.email, 1, "active"),
@@ -99,6 +101,8 @@ async function seedAuthAndActiveConfig(): Promise<void> {
 
 describe("Custody switch rollback", () => {
   beforeEach(async () => {
+    originalParaApiKey = env.PARA_API_KEY;
+    env.PARA_API_KEY = "para_test_api_key";
     vi.clearAllMocks();
     provisionParaWalletMock.mockRejectedValue(
       new SigningError("Forced para provisioning failure for rollback test", "NETWORK_ERROR")
@@ -108,6 +112,7 @@ describe("Custody switch rollback", () => {
   });
 
   afterEach(async () => {
+    env.PARA_API_KEY = originalParaApiKey;
     await clearTestDatabase(env);
     await clearKVNamespaces(env);
   });

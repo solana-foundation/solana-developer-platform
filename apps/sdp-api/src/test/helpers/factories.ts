@@ -36,7 +36,7 @@ export interface OrganizationOverrides {
   id?: string;
   name?: string;
   slug?: string;
-  tier?: "free" | "starter" | "growth" | "enterprise";
+  tier?: "free" | "enterprise";
   status?: "active" | "suspended" | "deleted";
   createdAt?: string;
   updatedAt?: string;
@@ -46,7 +46,7 @@ export interface Organization {
   id: string;
   name: string;
   slug: string;
-  tier: "free" | "starter" | "growth" | "enterprise";
+  tier: "free" | "enterprise";
   status: "active" | "suspended" | "deleted";
   createdAt: string;
   updatedAt: string;
