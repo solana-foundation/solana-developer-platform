@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.14.4](https://github.com/solana-foundation/solana-developer-platform/compare/v0.14.3...v0.14.4) (2026-04-03)
+
+### Refactors
+
+* replace vendored cdp keychain with upstream package ([#154](https://github.com/solana-foundation/solana-developer-platform/pull/154)) ([f9b035e](https://github.com/solana-foundation/solana-developer-platform/commit/f9b035e24201c7122fe74c0bdf3d51517e148e4b))
+
 ## [0.14.3](https://github.com/solana-foundation/solana-developer-platform/compare/v0.14.2...v0.14.3) (2026-04-03)
 
 ### Refactors
