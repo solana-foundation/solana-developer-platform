@@ -331,10 +331,20 @@ jobs:
       - name: Integration tests
         run: pnpm test:integration
 
-  issuance_e2e:
-    name: Issuance E2E
+  browser_e2e:
+    name: ${{ matrix.name }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Dashboard E2E
+            test_script: test:e2e:dashboard
+            artifact_suffix: dashboard
+          - name: Issuance E2E
+            test_script: test:e2e:issuance
+            artifact_suffix: issuance
     env:
       DATABASE_URL: postgresql://sdp:sdp@127.0.0.1:5432/sdp
       NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ vars.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}
@@ -364,6 +374,8 @@ jobs:
       PLAYWRIGHT_API_URL: http://127.0.0.1:8787
       PLAYWRIGHT_API_PORT: "8787"
       PLAYWRIGHT_API_PERSIST_PATH: .wrangler/state-playwright
+      PLAYWRIGHT_USE_NEXT_START: "1"
+      PLAYWRIGHT_NEXT_DIST_DIR: .next-playwright
     services:
       postgres:
         image: postgres:16-alpine
@@ -398,18 +410,18 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
-      - name: Validate issuance e2e runtime secrets
+      - name: Validate browser e2e runtime secrets
         run: |
           if [ -z "${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY}" ] || [ -z "${CLERK_SECRET_KEY}" ]; then
-            echo "Clerk publishable and secret keys must be set for issuance e2e" >&2
+            echo "Clerk publishable and secret keys must be set for browser e2e" >&2
             exit 1
           fi
           if [ -z "${PRIVY_APP_ID}" ] || [ -z "${PRIVY_APP_SECRET}" ]; then
-            echo "PRIVY_APP_ID and PRIVY_APP_SECRET must be set for issuance e2e" >&2
+            echo "PRIVY_APP_ID and PRIVY_APP_SECRET must be set for browser e2e" >&2
             exit 1
           fi
           if [ -z "${KORA_RPC_URL}" ]; then
-            echo "KORA_RPC_URL must be set for issuance e2e" >&2
+            echo "KORA_RPC_URL must be set for browser e2e" >&2
             exit 1
           fi
 
@@ -477,14 +489,17 @@ jobs:
       - name: Install Playwright browser
         run: pnpm --filter sdp-web exec playwright install --with-deps chromium
 
+      - name: Build web app for Playwright
+        run: pnpm --filter sdp-web build
+
       - name: Run browser e2e suite
-        run: pnpm --filter sdp-web test:e2e
+        run: pnpm --filter sdp-web run ${{ matrix.test_script }}
 
       - name: Upload Playwright artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-artifacts
+          name: playwright-artifacts-${{ matrix.artifact_suffix }}
           path: |
             apps/sdp-web/playwright-report
             apps/sdp-web/test-results

@@ -10,6 +10,10 @@ const localApiUrl = process.env.PLAYWRIGHT_API_URL ?? `http://127.0.0.1:${localA
 const apiPersistPath = process.env.PLAYWRIGHT_API_PERSIST_PATH ?? ".wrangler/state-playwright";
 const webPort = new URL(env.baseURL).port || "3001";
 const nextDistDir = process.env.PLAYWRIGHT_NEXT_DIST_DIR ?? ".next-playwright";
+const useNextStart = process.env.PLAYWRIGHT_USE_NEXT_START === "1";
+const webCommand = useNextStart
+  ? `corepack pnpm exec next start --hostname localhost --port ${webPort}`
+  : `corepack pnpm exec next dev --hostname localhost --port ${webPort}`;
 
 function resolveProcessEnv(): Record<string, string> {
   return Object.fromEntries(
@@ -46,7 +50,7 @@ export default defineConfig({
       timeout: 180_000,
     },
     {
-      command: `corepack pnpm exec next dev --hostname localhost --port ${webPort}`,
+      command: webCommand,
       cwd: __dirname,
       url: env.baseURL,
       reuseExistingServer: false,
@@ -102,5 +106,6 @@ export default defineConfig({
     authStatePath,
     fixturesPath,
     localApiUrl,
+    webServerMode: useNextStart ? "start" : "dev",
   },
 });
