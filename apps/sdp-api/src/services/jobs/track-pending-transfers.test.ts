@@ -19,7 +19,7 @@ const TEST_ORG_ID = "org_job_test_001";
 async function seedOrg(): Promise<void> {
   await getDb(env)
     .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-    .bind(TEST_ORG_ID, "Job Test Org", "job-test-org", "free", "active")
+    .bind(TEST_ORG_ID, "Job Test Org", "job-test-org", "individual", "active")
     .run();
 }
 

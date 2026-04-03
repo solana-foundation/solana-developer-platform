@@ -18,6 +18,7 @@ test.describe
       const fixtures = await bootstrapLocalIssuanceFixtures({
         identity: session.identity,
         bearerToken: session.bearerToken,
+        tier: "enterprise",
       });
       const api = createLocalApiClient(getBootstrapApiBaseUrl(), session.bearerToken);
 

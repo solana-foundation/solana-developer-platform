@@ -84,7 +84,7 @@ function applyOverrides<T extends string>(
   return next;
 }
 
-const FREE_PROVIDER_DEFAULTS: OrganizationProviderEntitlements = {
+const INDIVIDUAL_PROVIDER_DEFAULTS: OrganizationProviderEntitlements = {
   custody: createBooleanRecord(CUSTODY_PROVIDERS, ["privy"]),
   rpc: createBooleanRecord(ORGANIZATION_RPC_PROVIDERS, ["default"]),
   compliance: createBooleanRecord(COMPLIANCE_PROVIDERS, []),
@@ -122,7 +122,8 @@ export function resolveOrganizationProviderEntitlements(input: {
   providerOverrides?: OrganizationProviderOverrides | null;
 }): { tier: OrganizationTier; providers: OrganizationProviderEntitlements } {
   const tier = normalizeOrganizationTier(input.tier);
-  const defaults = tier === "enterprise" ? ENTERPRISE_PROVIDER_DEFAULTS : FREE_PROVIDER_DEFAULTS;
+  const defaults =
+    tier === "enterprise" ? ENTERPRISE_PROVIDER_DEFAULTS : INDIVIDUAL_PROVIDER_DEFAULTS;
 
   return {
     tier,

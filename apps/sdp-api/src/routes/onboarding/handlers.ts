@@ -139,7 +139,7 @@ export const linkOrganization = async (c: AppContext) => {
   const clerkOrg = await clerkService.getOrganization(clerk.clerkOrgId);
 
   const orgName = body.name?.trim() || clerkOrg.name?.trim() || "New Organization";
-  const tier = "free";
+  const tier = "individual";
   const slugBase = body.slug?.trim() || clerkOrg.slug?.trim() || clerk.orgSlug || slugify(orgName);
   const slug = await ensureUniqueSlug(getDb(c.env), slugBase);
 

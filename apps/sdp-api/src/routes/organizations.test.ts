@@ -230,7 +230,7 @@ describe("Organizations routes", () => {
       // Add another allowlisted email
       await getDb(env)
         .prepare("INSERT INTO allowlist (id, type, value, tier, status) VALUES (?, ?, ?, ?, ?)")
-        .bind("allow_test2", "email", "another@example.com", "free", "active")
+        .bind("allow_test2", "email", "another@example.com", "individual", "active")
         .run();
 
       // Try to create org with same slug
@@ -429,7 +429,7 @@ describe("Organizations routes", () => {
       expect(res.status).toBe(200);
     });
 
-    it("rejects managed RPC providers for free-tier organizations", async () => {
+    it("rejects managed RPC providers for individual-tier organizations", async () => {
       const res = await app.request(
         `/v1/organizations/${TEST_ORG.id}`,
         {

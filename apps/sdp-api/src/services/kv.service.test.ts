@@ -131,7 +131,6 @@ describe("KVService", () => {
     });
   });
 
-  // biome-ignore lint/nursery/noSecrets: Test describe block name, not a secret
   describe("invalidateOrganization", () => {
     it("removes organization from cache", async () => {
       const testOrg: Organization = {

@@ -22,7 +22,11 @@ organizations.post("/", createOrganization);
 organizations.use("/:orgId/*", unifiedAuthMiddleware({ allowClerk: true, allowSession: true }));
 
 organizations.get("/:orgId", requirePermissions("org:read"), getOrganization);
-organizations.get("/:orgId/provider-access", requirePermissions("org:read"), getOrganizationProviderAccess);
+organizations.get(
+  "/:orgId/provider-access",
+  requirePermissions("org:read"),
+  getOrganizationProviderAccess
+);
 organizations.patch("/:orgId", requirePermissions("org:write"), updateOrganization);
 organizations.delete("/:orgId", requirePermissions("org:admin"), deleteOrganization);
 

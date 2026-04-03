@@ -54,7 +54,7 @@ function parseOrganizationTier(value: string): OrganizationTier {
     return value as OrganizationTier;
   }
   if (value === "standard" || value === "starter") {
-    return "free";
+    return "individual";
   }
   if (value === "pro" || value === "growth") {
     return "enterprise";

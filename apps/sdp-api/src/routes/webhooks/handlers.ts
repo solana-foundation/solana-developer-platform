@@ -3,8 +3,8 @@ import { mapClerkRoleToOrgRole } from "@/lib/clerk-role";
 import { AppError, badRequest } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { ClerkOrganizationsService } from "@/services/clerk-organizations.service";
-import { syncOrganizationTierFromClerk } from "@/services/organization-provider-access.service";
 import { ClerkUsersService } from "@/services/clerk-users.service";
+import { syncOrganizationTierFromClerk } from "@/services/organization-provider-access.service";
 import type { Env } from "@/types/env";
 import type { Context } from "hono";
 import { Webhook } from "svix";
@@ -20,6 +20,11 @@ type ClerkOrgData = {
   id: string | null;
   name: string | null;
   slug: string | null;
+};
+
+type ClerkOrganizationSyncPayload = {
+  id: string;
+  private_metadata?: unknown;
 };
 
 type ClerkMemberData = {
@@ -150,7 +155,7 @@ async function ensureOrganizationMapping(c: AppContext, org: ClerkOrgData): Prom
   const clerkService = new ClerkOrganizationsService(c.env);
   const clerkOrg = await clerkService.getOrganization(org.id);
   let orgName = org.name?.trim() || clerkOrg.name?.trim();
-  let orgSlug = org.slug?.trim() || clerkOrg.slug?.trim() || undefined;
+  const orgSlug = org.slug?.trim() || clerkOrg.slug?.trim() || undefined;
 
   orgName = orgName || "New Organization";
   const slugBase = orgSlug || orgName || org.id;
@@ -163,7 +168,7 @@ async function ensureOrganizationMapping(c: AppContext, org: ClerkOrgData): Prom
     getDb(c.env)
       .prepare(
         `INSERT INTO organizations (id, name, slug, tier, status)
-       VALUES (?, ?, ?, 'free', 'active')`
+       VALUES (?, ?, ?, 'individual', 'active')`
       )
       .bind(orgId, orgName, slug),
     getDb(c.env)
@@ -294,8 +299,15 @@ async function handleOrganizationUpdated(c: AppContext, data: Record<string, unk
     return;
   }
 
-  const clerkService = new ClerkOrganizationsService(c.env);
-  const clerkOrganization = await clerkService.getOrganization(org.id);
+  const payloadOrganization: ClerkOrganizationSyncPayload | null =
+    "private_metadata" in data
+      ? {
+          id: org.id,
+          private_metadata: data.private_metadata,
+        }
+      : null;
+  const clerkOrganization =
+    payloadOrganization ?? (await new ClerkOrganizationsService(c.env).getOrganization(org.id));
   await syncOrganizationTierFromClerk(getDb(c.env), {
     organizationId,
     clerkOrganization,

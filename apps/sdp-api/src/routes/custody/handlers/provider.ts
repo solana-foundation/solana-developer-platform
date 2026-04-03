@@ -9,13 +9,13 @@ import { provisionFireblocksVaultAccount } from "@/services/custody/provisioning
 import { normalizePem } from "@/services/custody/provisioning.common";
 import { createSigningService } from "@/services/domain/signing.service";
 import {
-  assertOrganizationProviderEnabled,
-  getEnabledOrganizationProviders,
-} from "@/services/organization-provider-access.service";
-import {
   type FireblocksProviderConfig,
   parseConfigRecord,
 } from "@/services/domain/signing/provider-config";
+import {
+  assertOrganizationProviderEnabled,
+  getEnabledOrganizationProviders,
+} from "@/services/organization-provider-access.service";
 import { SigningError } from "@/services/ports";
 import { type AppContext, getPreferredWalletForConfig, resolveActor } from "../context";
 import {
@@ -208,29 +208,31 @@ export const getSwitchProviderOptions = async (c: AppContext) => {
       ?.provider ?? null;
 
   const response: SwitchProviderOptionsResponse = {
-    providers: CUSTODY_PROVIDERS.filter((provider) => enabledProviders.includes(provider)).map((provider) => {
-      const hasReusableWallet =
-        provider === "privy"
-          ? reuseState.privy
-          : provider === "coinbase_cdp"
-            ? reuseState.coinbase_cdp
-            : provider === "para"
-              ? reuseState.para
-              : provider === "turnkey"
-                ? reuseState.turnkey
-                : false;
+    providers: CUSTODY_PROVIDERS.filter((provider) => enabledProviders.includes(provider)).map(
+      (provider) => {
+        const hasReusableWallet =
+          provider === "privy"
+            ? reuseState.privy
+            : provider === "coinbase_cdp"
+              ? reuseState.coinbase_cdp
+              : provider === "para"
+                ? reuseState.para
+                : provider === "turnkey"
+                  ? reuseState.turnkey
+                  : false;
 
-      const needsWalletLabel =
-        provider === "fireblocks" ? false : provider === "local" ? true : !hasReusableWallet;
+        const needsWalletLabel =
+          provider === "fireblocks" ? false : provider === "local" ? true : !hasReusableWallet;
 
-      return {
-        provider,
-        hasReusableWallet,
-        needsWalletLabel,
-        isActive: activeProviders.has(provider),
-        isDefault: defaultProvider === provider,
-      };
-    }),
+        return {
+          provider,
+          hasReusableWallet,
+          needsWalletLabel,
+          isActive: activeProviders.has(provider),
+          isDefault: defaultProvider === provider,
+        };
+      }
+    ),
   };
 
   return success(c, response);

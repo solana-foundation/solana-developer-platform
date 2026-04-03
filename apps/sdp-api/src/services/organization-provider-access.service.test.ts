@@ -17,13 +17,20 @@ describe("organization-provider-access.service", () => {
   const originalRangeApiKey = env.RANGE_API_KEY;
   const originalMoonPayApiKey = env.MOONPAY_API_KEY;
   const originalMoonPaySecretKey = env.MOONPAY_SECRET_KEY;
+  const originalCustodyPrivateKey = env.CUSTODY_PRIVATE_KEY;
 
   beforeEach(async () => {
     await seedTestDatabase(env);
 
     await getDb(env)
       .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-      .bind(TEST_ORG_ID, "Provider Access Test Org", "provider-access-test-org", "free", "active")
+      .bind(
+        TEST_ORG_ID,
+        "Provider Access Test Org",
+        "provider-access-test-org",
+        "individual",
+        "active"
+      )
       .run();
 
     env.PRIVY_APP_ID = "privy_test_app";
@@ -32,6 +39,7 @@ describe("organization-provider-access.service", () => {
     env.RANGE_API_KEY = "range_test_key";
     env.MOONPAY_API_KEY = "moonpay_test_key";
     env.MOONPAY_SECRET_KEY = "moonpay_test_secret";
+    env.CUSTODY_PRIVATE_KEY = undefined;
   });
 
   afterEach(async () => {
@@ -41,13 +49,14 @@ describe("organization-provider-access.service", () => {
     env.RANGE_API_KEY = originalRangeApiKey;
     env.MOONPAY_API_KEY = originalMoonPayApiKey;
     env.MOONPAY_SECRET_KEY = originalMoonPaySecretKey;
+    env.CUSTODY_PRIVATE_KEY = originalCustodyPrivateKey;
 
     await clearTestDatabase(env);
   });
 
-  it("resolves free defaults and applies provider overrides", () => {
+  it("resolves individual defaults and applies provider overrides", () => {
     const resolved = resolveOrganizationProviderEntitlements({
-      tier: "free",
+      tier: "individual",
       providerOverrides: {
         custody: {
           local: true,
@@ -64,7 +73,7 @@ describe("organization-provider-access.service", () => {
       },
     });
 
-    expect(resolved.tier).toBe("free");
+    expect(resolved.tier).toBe("individual");
     expect(resolved.providers.custody.privy).toBe(true);
     expect(resolved.providers.custody.local).toBe(true);
     expect(resolved.providers.custody.para).toBe(false);
@@ -77,7 +86,7 @@ describe("organization-provider-access.service", () => {
   it("marks providers as enabled only when both entitled and configured", async () => {
     const access = await getOrganizationProviderAvailability(env, getDb(env), TEST_ORG_ID);
 
-    expect(access.tier).toBe("free");
+    expect(access.tier).toBe("individual");
     expect(access.providers.custody.privy).toEqual({
       entitled: true,
       configured: true,
@@ -91,6 +100,42 @@ describe("organization-provider-access.service", () => {
       enabled: false,
     });
     expect(access.providers.ramps.moonpay.enabled).toBe(false);
+  });
+
+  it("treats local custody as override-only and only configured when a local key is present", async () => {
+    await syncOrganizationTierFromClerk(getDb(env), {
+      organizationId: TEST_ORG_ID,
+      clerkOrganization: {
+        id: "org_clerk_provider_access_local_test",
+        private_metadata: {
+          sdp: {
+            tier: "individual",
+            providerOverrides: {
+              custody: {
+                local: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const withoutKey = await getOrganizationProviderAvailability(env, getDb(env), TEST_ORG_ID);
+    expect(withoutKey.providers.custody.local).toEqual({
+      entitled: true,
+      configured: false,
+      enabled: false,
+    });
+
+    env.CUSTODY_PRIVATE_KEY =
+      "3QpWV8xk4hs7vmQhSLAQWNi2KskuSVSpmR75QGqSuxaKcdA9XJkq8VBihspJddBWVfEybTWLKqHJ19N64DNuwSNd";
+
+    const withKey = await getOrganizationProviderAvailability(env, getDb(env), TEST_ORG_ID);
+    expect(withKey.providers.custody.local).toEqual({
+      entitled: true,
+      configured: true,
+      enabled: true,
+    });
   });
 
   it("syncs normalized Clerk tier and provider overrides into the organization row", async () => {
@@ -134,7 +179,7 @@ describe("organization-provider-access.service", () => {
     });
   });
 
-  it("defaults to free and clears provider overrides when Clerk metadata is absent", async () => {
+  it("defaults to individual and clears provider overrides when Clerk metadata is absent", async () => {
     await getDb(env)
       .prepare("UPDATE organizations SET tier = ?, settings = ? WHERE id = ?")
       .bind(
@@ -163,7 +208,7 @@ describe("organization-provider-access.service", () => {
       .bind(TEST_ORG_ID)
       .first<{ tier: string; settings: string | null }>();
 
-    expect(organization?.tier).toBe("free");
+    expect(organization?.tier).toBe("individual");
     expect(organization?.settings ? JSON.parse(organization.settings) : null).toEqual({
       rpcProvider: "helius",
     });

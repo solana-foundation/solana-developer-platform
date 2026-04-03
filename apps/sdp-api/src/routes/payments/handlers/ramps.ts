@@ -1157,13 +1157,7 @@ async function resolveRampProvider(
   providerId: RampProviderId,
   organizationId: string
 ): Promise<RampProviderExecutor> {
-  await assertOrganizationProviderEnabled(
-    c.env,
-    getDb(c.env),
-    organizationId,
-    "ramps",
-    providerId
-  );
+  await assertOrganizationProviderEnabled(c.env, getDb(c.env), organizationId, "ramps", providerId);
 
   const provider = RAMP_PROVIDER_REGISTRY[providerId];
   if (!provider) {

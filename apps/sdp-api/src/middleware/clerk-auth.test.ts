@@ -13,7 +13,7 @@ const TEST_ORG = {
   id: "org_clerk_cache_request_test",
   name: "Clerk Cache Request Test Org",
   slug: "clerk-cache-request-test-org",
-  tier: "free" as const,
+  tier: "individual" as const,
   status: "active" as const,
 };
 

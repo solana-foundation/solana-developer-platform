@@ -19,7 +19,6 @@ export const TEST_PROJECT = {
 
 export const TEST_PROJECT_API_KEY = {
   id: "key_proj123456789",
-  // biome-ignore lint/nursery/noSecrets: Test fixture, not a real secret
   raw: "sk_test_projkey12345678901234567890123",
   prefix: "sk_test_pro",
 };
@@ -72,11 +71,8 @@ export const TEST_TOKEN: Token = {
 export const TEST_ACTIVE_TOKEN: Token = {
   ...TEST_TOKEN,
   id: "tok_active12345678",
-  // biome-ignore lint/nursery/noSecrets: Test Solana address, not a secret
   mintAddress: "7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv",
-  // biome-ignore lint/nursery/noSecrets: Test Solana address, not a secret
   mintAuthority: "9wVmMF2GpxZMsJLxCv2xXWjDWVv8HtqTmKqnZxNKkYTz",
-  // biome-ignore lint/nursery/noSecrets: Test Solana address, not a secret
   freezeAuthority: "9wVmMF2GpxZMsJLxCv2xXWjDWVv8HtqTmKqnZxNKkYTz",
   status: "active",
   deployedAt: "2024-01-02T00:00:00.000Z",
@@ -101,7 +97,6 @@ export const TEST_TOKEN_TRANSACTION: TokenTransaction = {
   signature: null,
   serializedTx: null,
   params: {
-    // biome-ignore lint/nursery/noSecrets: Test Solana address, not a secret
     destination: "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ",
     amount: "1",
   },
@@ -117,7 +112,6 @@ export const TEST_TOKEN_TRANSACTION: TokenTransaction = {
 export const TEST_ALLOWLIST_ENTRY: TokenAllowlistEntry = {
   id: "tal_test123456789",
   tokenId: TEST_ALLOWLIST_TOKEN.id,
-  // biome-ignore lint/nursery/noSecrets: Test Solana address, not a secret
   address: "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ",
   label: "Test Wallet",
   status: "active",
@@ -128,12 +122,8 @@ export const TEST_ALLOWLIST_ENTRY: TokenAllowlistEntry = {
 
 // Solana test addresses (valid Base58)
 export const TEST_SOLANA_ADDRESSES = {
-  // biome-ignore lint/nursery/noSecrets: Test Solana address, not a secret
   wallet1: "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ",
-  // biome-ignore lint/nursery/noSecrets: Test Solana address, not a secret
   wallet2: "7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv",
-  // biome-ignore lint/nursery/noSecrets: Test Solana address, not a secret
   wallet3: "9wVmMF2GpxZMsJLxCv2xXWjDWVv8HtqTmKqnZxNKkYTz",
-  // biome-ignore lint/nursery/noSecrets: Test Solana address, not a secret
   mint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
 };

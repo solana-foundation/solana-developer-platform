@@ -26,7 +26,7 @@ import {
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import QRCode from "qrcode";
-import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
 import {
@@ -1134,6 +1134,13 @@ export function PaymentsActionPage({
     availableSelectedAssetAmount !== null &&
     numericAmount > availableSelectedAssetAmount;
 
+  const resetExecution = useCallback(() => {
+    setExecutionState("idle");
+    setExecutionError(null);
+    setTransferResult(null);
+    setRampExecution(null);
+  }, []);
+
   useEffect(() => {
     if (!provider) {
       return;
@@ -1144,7 +1151,7 @@ export function PaymentsActionPage({
       setStepIndex(1);
       resetExecution();
     }
-  }, [provider, providerOptions]);
+  }, [provider, providerOptions, resetExecution]);
 
   useEffect(() => {
     if (!isTransferBranch || !selectedWalletId) {
@@ -1181,13 +1188,6 @@ export function PaymentsActionPage({
       cancelled = true;
     };
   }, [isTransferBranch, selectedWalletId]);
-
-  const resetExecution = () => {
-    setExecutionState("idle");
-    setExecutionError(null);
-    setTransferResult(null);
-    setRampExecution(null);
-  };
 
   const resetFlowFields = () => {
     setAmount("");

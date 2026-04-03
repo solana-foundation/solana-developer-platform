@@ -3,15 +3,9 @@ import { fetchOrganizationProviderAccess } from "@/lib/organization-provider-acc
 import { createSdpApiClient } from "@/lib/sdp-api";
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
+import type { OnboardingStatusResponse } from "../../onboarding-status";
 import { PaymentsActionPage } from "../payments-action-page";
 import { fetchPaymentsIssuedTokenSymbols } from "../payments-page.data";
-
-type OnboardingStatusResponse = {
-  linked: boolean;
-  organization: {
-    id: string;
-  } | null;
-};
 
 export default async function PaymentsReceivePage() {
   const { userId, orgId } = await auth();

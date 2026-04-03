@@ -21,6 +21,7 @@ import { auth, clerkClient } from "@clerk/nextjs/server";
 import type { CustodyConfigSummary, CustodyWalletSummary } from "@sdp/types";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
+import type { OnboardingStatusResponse } from "../onboarding-status";
 import { WalletsWorkspace } from "./wallets-workspace";
 
 interface ClerkOrganizationSummary {
@@ -30,13 +31,6 @@ interface ClerkOrganizationSummary {
 }
 
 type SettledResult<T> = { ok: true; value: T } | { ok: false; error: unknown };
-
-type OnboardingStatusResponse = {
-  linked: boolean;
-  organization: {
-    id: string;
-  } | null;
-};
 
 function settle<T>(promise: Promise<T>): Promise<SettledResult<T>> {
   return promise.then(

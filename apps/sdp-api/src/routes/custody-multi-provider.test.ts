@@ -20,7 +20,6 @@ const TEST_USER = {
 
 const TEST_API_KEY = {
   id: "key_custody_multi_provider",
-  // biome-ignore lint/nursery/noSecrets: Test fixture only.
   raw: "sk_test_custodymultiprovider1234567890",
   prefix: "sk_test_mul",
 };

@@ -290,7 +290,13 @@ export class SigningService {
     provider: SigningConfiguration["provider"]
   ): Promise<void> {
     try {
-      await assertOrganizationProviderEnabled(this.env, getDb(this.env), orgId, "custody", provider);
+      await assertOrganizationProviderEnabled(
+        this.env,
+        getDb(this.env),
+        orgId,
+        "custody",
+        provider
+      );
     } catch (error) {
       if (error instanceof AppError) {
         throw new SigningError(error.message, "INVALID_REQUEST", error);

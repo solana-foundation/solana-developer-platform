@@ -3,10 +3,9 @@ import type { Env } from "@/types/env";
 import {
   COMPLIANCE_PROVIDERS,
   CUSTODY_PROVIDERS,
-  ORGANIZATION_RPC_PROVIDERS,
-  RAMP_PROVIDERS,
   type ComplianceProviderId,
   type CustodyProvider,
+  ORGANIZATION_RPC_PROVIDERS,
   type OrganizationProviderAvailabilityResponse,
   type OrganizationProviderFamily,
   type OrganizationProviderOverrides,
@@ -14,6 +13,7 @@ import {
   type OrganizationSettings,
   type OrganizationTier,
   type ProviderAvailabilityEntry,
+  RAMP_PROVIDERS,
   type RampProviderId,
   normalizeOrganizationTier,
   resolveOrganizationProviderEntitlements,
@@ -148,9 +148,7 @@ export function parseProviderOverridesFromClerkMetadata(
   return hasOwnEntries(next as Record<string, unknown>) ? next : undefined;
 }
 
-export function parseClerkOrganizationTierMetadata(
-  organization: ClerkOrganizationWithMetadata
-): {
+export function parseClerkOrganizationTierMetadata(organization: ClerkOrganizationWithMetadata): {
   tier: OrganizationTier;
   providerOverrides?: OrganizationProviderOverrides;
 } {
@@ -189,7 +187,9 @@ export async function getOrganizationTierState(
 function getConfiguredProviders(env: Env) {
   return {
     custody: {
-      local: true,
+      // Local custody is only available for self-hosted installs that set a
+      // local signing key; hosted environments should not expose it by default.
+      local: Boolean(env.CUSTODY_PRIVATE_KEY?.trim()),
       fireblocks: Boolean(env.FIREBLOCKS_API_KEY?.trim() && env.FIREBLOCKS_API_SECRET?.trim()),
       privy: Boolean(env.PRIVY_APP_ID?.trim() && env.PRIVY_APP_SECRET?.trim()),
       coinbase_cdp: Boolean(
@@ -295,7 +295,7 @@ function getAvailabilityMessage(
     providerId;
 
   if (!entry.entitled) {
-    return tier === "free"
+    return tier === "individual"
       ? `${label} is only available on the enterprise tier.`
       : `${label} is not enabled for this organization.`;
   }
@@ -350,11 +350,16 @@ export async function assertOrganizationProviderEnabled(
   if (!entry?.enabled) {
     throw new AppError(
       "FORBIDDEN",
-      getAvailabilityMessage(access.tier, family, providerId, entry ?? {
-        entitled: false,
-        configured: false,
-        enabled: false,
-      })
+      getAvailabilityMessage(
+        access.tier,
+        family,
+        providerId,
+        entry ?? {
+          entitled: false,
+          configured: false,
+          enabled: false,
+        }
+      )
     );
   }
 }
@@ -394,7 +399,7 @@ export async function syncOrganizationTierFromClerk(
   if (clerkMetadata.providerOverrides) {
     nextSettings.providerOverrides = clerkMetadata.providerOverrides;
   } else {
-    delete nextSettings.providerOverrides;
+    nextSettings.providerOverrides = undefined;
   }
 
   const persistedSettings = hasOwnEntries(nextSettings as Record<string, unknown>)
@@ -407,7 +412,11 @@ export async function syncOrganizationTierFromClerk(
        SET tier = ?, settings = ?, updated_at = sdp_datetime_now()
        WHERE id = ?`
     )
-    .bind(clerkMetadata.tier, toStoredOrganizationSettings(persistedSettings), params.organizationId)
+    .bind(
+      clerkMetadata.tier,
+      toStoredOrganizationSettings(persistedSettings),
+      params.organizationId
+    )
     .run();
 
   return {

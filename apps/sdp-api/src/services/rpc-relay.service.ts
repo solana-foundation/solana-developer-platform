@@ -410,7 +410,11 @@ export function includesTransactionMethod(methodNames: string[]): boolean {
 
 export async function resolveRpcTarget(input: ResolveRpcTargetInput): Promise<ResolvedRpcTarget> {
   const managedProviders = resolveManagedProviders(input.env);
-  const access = await getOrganizationProviderAvailability(input.env, input.db, input.organizationId);
+  const access = await getOrganizationProviderAvailability(
+    input.env,
+    input.db,
+    input.organizationId
+  );
   const enabledManagedProviders = managedProviders.filter(
     (provider) => access.providers.rpc[provider.id]?.enabled
   );
@@ -469,7 +473,10 @@ export async function resolveRpcTarget(input: ResolveRpcTargetInput): Promise<Re
     }
   }
 
-  const selectedProvider = await pickRoundRobinProvider(input.env.SDP_CACHE, enabledManagedProviders);
+  const selectedProvider = await pickRoundRobinProvider(
+    input.env.SDP_CACHE,
+    enabledManagedProviders
+  );
   return {
     providerId: selectedProvider.id,
     projectId,
@@ -532,7 +539,11 @@ export async function listRpcProviders(input: {
   requestedProjectId: string | null;
 }) {
   const managedProviders = resolveManagedProviders(input.env);
-  const access = await getOrganizationProviderAvailability(input.env, input.db, input.organizationId);
+  const access = await getOrganizationProviderAvailability(
+    input.env,
+    input.db,
+    input.organizationId
+  );
   const enabledManagedProviders = managedProviders.filter(
     (provider) => access.providers.rpc[provider.id]?.enabled
   );

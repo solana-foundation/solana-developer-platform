@@ -9,7 +9,7 @@ import {
 } from "../src/services/organization-provider-access.service";
 import type { Env } from "../src/types/env";
 
-type Tier = "free" | "enterprise";
+type Tier = "individual" | "enterprise";
 
 function loadLocalEnvFile(filePath: string): Record<string, string> {
   if (!fs.existsSync(filePath)) {
@@ -50,11 +50,11 @@ function hasFlag(flag: string): boolean {
 }
 
 function parseTier(value: string | undefined): Tier {
-  if (value === "free" || value === "enterprise") {
+  if (value === "individual" || value === "enterprise") {
     return value;
   }
 
-  throw new Error("Missing or invalid --tier value. Use 'free' or 'enterprise'.");
+  throw new Error("Missing or invalid --tier value. Use 'individual' or 'enterprise'.");
 }
 
 function parseOverrides(value: string | undefined) {

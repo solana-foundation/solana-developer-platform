@@ -47,7 +47,7 @@ let originalTrmBaseUrl: string | undefined;
 let originalChainalysisApiKey: string | undefined;
 let originalChainalysisBaseUrl: string | undefined;
 
-async function seedAuth(tier: "free" | "enterprise" = "enterprise"): Promise<void> {
+async function seedAuth(tier: "individual" | "enterprise" = "enterprise"): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
   await seedCachedApiKey(env, keyHash, TEST_CACHED_API_KEY);
 
@@ -128,7 +128,7 @@ describe("Compliance routes", () => {
   it("returns forbidden when the organization has no enabled compliance providers", async () => {
     await getDb(env)
       .prepare("UPDATE organizations SET tier = ? WHERE id = ?")
-      .bind("free", TEST_ORG.id)
+      .bind("individual", TEST_ORG.id)
       .run();
 
     const res = await app.request(

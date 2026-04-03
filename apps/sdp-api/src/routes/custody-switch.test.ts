@@ -23,7 +23,6 @@ const TEST_USER = {
 };
 const TEST_API_KEY = {
   id: "key_custody_switch_test",
-  // biome-ignore lint/nursery/noSecrets: Test fixture, not a real secret.
   raw: "sk_test_custodyswitch12345678901234567890",
   prefix: "sk_test_cus",
 };
