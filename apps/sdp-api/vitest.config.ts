@@ -39,7 +39,6 @@ export default defineWorkersConfig({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
-      "@sdp/keychain-coinbase": path.resolve(__dirname, "../../packages/sdp-keychain-coinbase/src"),
       "@sdp/types": path.resolve(__dirname, "../../packages/sdp-types/src"),
     },
   },

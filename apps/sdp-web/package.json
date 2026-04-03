@@ -41,7 +41,7 @@
     "@playwright/test": "1.58.2",
     "@solana-program/system": "catalog:",
     "@solana/kit": "catalog:",
-    "@solana/kora": "0.1.2",
+    "@solana/kora": "0.2.1",
     "@tailwindcss/postcss": "^4",
     "@types/pg": "^8.15.6",
     "@types/node": "^20",
