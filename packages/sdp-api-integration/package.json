@@ -8,10 +8,10 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@sdp/keychain-para": "workspace:*",
     "@sdp/types": "workspace:*",
     "@solana-program/system": "catalog:",
     "@solana/keychain-cdp": "1.0.1",
+    "@solana/keychain-para": "1.0.1",
     "@solana/kit": "catalog:"
   },
   "devDependencies": {
