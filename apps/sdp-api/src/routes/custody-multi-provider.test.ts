@@ -20,7 +20,6 @@ const TEST_USER = {
 
 const TEST_API_KEY = {
   id: "key_custody_multi_provider",
-  // biome-ignore lint/nursery/noSecrets: Test fixture only.
   raw: "sk_test_custodymultiprovider1234567890",
   prefix: "sk_test_mul",
 };
@@ -43,6 +42,8 @@ const PRIVY_CONFIG_ID = "cust_cfg_privy_multi";
 const PARA_CONFIG_ID = "cust_cfg_para_multi";
 const DFNS_CONFIG_ID = "cust_cfg_dfns_legacy";
 
+let originalParaApiKey: string | undefined;
+
 async function seedAuthAndConfigs(): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
   await seedCachedApiKey(env, keyHash, TEST_CACHED_API_KEY);
@@ -50,7 +51,7 @@ async function seedAuthAndConfigs(): Promise<void> {
   await getDb(env).batch([
     getDb(env)
       .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, "free", "active"),
+      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, "enterprise", "active"),
     getDb(env)
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
       .bind(TEST_USER.id, TEST_USER.email, 1, "active"),
@@ -177,11 +178,14 @@ async function seedAuthAndConfigs(): Promise<void> {
 
 describe("Custody multi-provider routes", () => {
   beforeEach(async () => {
+    originalParaApiKey = env.PARA_API_KEY;
+    env.PARA_API_KEY = "para_test_api_key";
     await seedTestDatabase(env);
     await seedAuthAndConfigs();
   });
 
   afterEach(async () => {
+    env.PARA_API_KEY = originalParaApiKey;
     await clearTestDatabase(env);
     await clearKVNamespaces(env);
   });

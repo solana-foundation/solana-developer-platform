@@ -1,7 +1,10 @@
+import { getDb } from "@/db";
+import { getAuth } from "@/lib/auth";
 import { AppError } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { assertValidAddress } from "@/lib/solana";
 import { createComplianceService } from "@/services/compliance";
+import { getEnabledOrganizationProviders } from "@/services/organization-provider-access.service";
 import type { Env } from "@/types/env";
 import type { Context } from "hono";
 import { screenAddressSchema } from "./schemas";
@@ -29,7 +32,19 @@ export async function screenAddress(c: AppContext) {
     }
   }
 
-  const complianceService = createComplianceService(c.env);
+  const auth = getAuth(c);
+  const enabledComplianceProviders = (
+    await getEnabledOrganizationProviders(c.env, getDb(c.env), auth.organizationId)
+  ).compliance;
+
+  if (enabledComplianceProviders.length === 0) {
+    throw new AppError(
+      "FORBIDDEN",
+      "Compliance screening is only available on enterprise tier organizations with an enabled provider."
+    );
+  }
+
+  const complianceService = createComplianceService(c.env, enabledComplianceProviders);
   const providers = await complianceService.screenAddress({
     address,
     network,

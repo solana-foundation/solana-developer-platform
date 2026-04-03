@@ -122,7 +122,6 @@ describe("Auth Middleware", () => {
 
     it("rejects unknown API keys", async () => {
       // Don't seed anything - key won't be found
-      // biome-ignore lint/nursery/noSecrets: Test fixture, not a real key
       const unknownKey = "sk_test_unknownkey1234567890123456";
 
       const res = await app.request(

@@ -4,8 +4,9 @@
 
 import type { OrganizationCustodyRequest } from "./custody";
 import type { OrganizationRole } from "./permissions";
+import type { OrganizationProviderOverrides } from "./provider-access";
 
-export const ORGANIZATION_TIERS = ["free", "pro", "enterprise"] as const;
+export const ORGANIZATION_TIERS = ["individual", "enterprise"] as const;
 export type OrganizationTier = (typeof ORGANIZATION_TIERS)[number];
 
 export const ORGANIZATION_STATUSES = ["active", "suspended", "deleted"] as const;
@@ -39,10 +40,37 @@ export interface OrganizationSettings {
   defaultEnvironment?: "sandbox" | "production";
   webhookSecret?: string;
   allowedIpAddresses?: string[];
+  providerOverrides?: OrganizationProviderOverrides;
   customRateLimits?: {
     requestsPerMinute?: number;
     requestsPerDay?: number;
   };
+}
+
+const LEGACY_ORGANIZATION_TIER_ALIASES = {
+  standard: "individual",
+  starter: "individual",
+  pro: "enterprise",
+  growth: "enterprise",
+} as const;
+
+export function isOrganizationTier(value: string | null | undefined): value is OrganizationTier {
+  return ORGANIZATION_TIERS.includes(value as OrganizationTier);
+}
+
+export function normalizeOrganizationTier(value: string | null | undefined): OrganizationTier {
+  if (!value) {
+    return "individual";
+  }
+
+  if (isOrganizationTier(value)) {
+    return value;
+  }
+
+  return (
+    LEGACY_ORGANIZATION_TIER_ALIASES[value as keyof typeof LEGACY_ORGANIZATION_TIER_ALIASES] ??
+    "individual"
+  );
 }
 
 export interface User {

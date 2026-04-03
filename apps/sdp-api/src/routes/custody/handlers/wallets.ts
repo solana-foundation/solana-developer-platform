@@ -17,6 +17,7 @@ import {
   attachUsdValuesToBalanceMap,
   attachUsdValuesToBalances,
 } from "@/services/helius-das.service";
+import { assertOrganizationProviderEnabled } from "@/services/organization-provider-access.service";
 import { SigningError } from "@/services/ports";
 import * as solanaRpc from "@/services/solana/rpc";
 import type {
@@ -573,6 +574,14 @@ export const setDefaultWallet = async (c: AppContext) => {
   if (!config?.id) {
     throw new AppError("CONFLICT", "Wallet signing is not initialized");
   }
+
+  await assertOrganizationProviderEnabled(
+    c.env,
+    getDb(c.env),
+    actor.organizationId,
+    "custody",
+    config.provider
+  );
 
   const wallet = await getDb(c.env)
     .prepare(

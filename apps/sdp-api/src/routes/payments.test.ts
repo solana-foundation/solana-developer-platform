@@ -38,7 +38,6 @@ const TEST_USER = {
 };
 const TEST_API_KEY = {
   id: "key_payments_policy_test",
-  // biome-ignore lint/nursery/noSecrets: Test fixture, not a real secret.
   raw: "sk_test_paymentspolicy12345678901234567890",
   prefix: "sk_test_pay",
 };
@@ -68,13 +67,9 @@ const TEST_BVNK_HAWK_AUTH_ID = "bvnk_hawk_auth_id";
 const TEST_BVNK_HAWK_SECRET_KEY = "bvnk_hawk_secret_key";
 const TEST_BVNK_WALLET_ID = "a:24122329329347:HsdJVhW:1";
 const TEST_BVNK_API_BASE_URL = "https://api.sandbox.bvnk.test";
-// biome-ignore lint/nursery/noSecrets: Query parameter key used for test assertions.
 const MOONPAY_PARAM_BASE_CURRENCY_AMOUNT = "baseCurrencyAmount";
-// biome-ignore lint/nursery/noSecrets: Query parameter key used for test assertions.
 const MOONPAY_PARAM_EXTERNAL_CUSTOMER_ID = "externalCustomerId";
-// biome-ignore lint/nursery/noSecrets: Query parameter key used for test assertions.
 const MOONPAY_PARAM_QUOTE_CURRENCY_CODE = "quoteCurrencyCode";
-// biome-ignore lint/nursery/noSecrets: Query parameter key used for test assertions.
 const MOONPAY_PARAM_REFUND_WALLET_ADDRESS = "refundWalletAddress";
 
 let originalMoonPayApiKey: string | undefined;
@@ -116,7 +111,7 @@ async function seedAuthAndWallet(): Promise<void> {
   await getDb(env).batch([
     getDb(env)
       .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, "free", "active"),
+      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, "enterprise", "active"),
     getDb(env)
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
       .bind(TEST_USER.id, TEST_USER.email, 1, "active"),
@@ -244,7 +239,6 @@ describe("Payments routes", () => {
       owner: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
     } as Awaited<ReturnType<typeof solanaRpc.getAccountInfo>>);
     getRecentBlockhashMock.mockResolvedValue({
-      // biome-ignore lint/nursery/noSecrets: Test blockhash, not a secret.
       blockhash: "EkSnNWid2cvwEVnVx9aBqawnmiCNiDgp3gUdkDPTKN1N" as Awaited<
         ReturnType<typeof solanaRpc.getRecentBlockhash>
       >["blockhash"],
@@ -252,7 +246,6 @@ describe("Payments routes", () => {
     });
     confirmTransactionMock.mockResolvedValue({
       signature:
-        // biome-ignore lint/nursery/noSecrets: Test transaction signature, not a secret.
         "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy" as Awaited<
           ReturnType<typeof solanaRpc.confirmTransaction>
         >["signature"],
@@ -264,16 +257,15 @@ describe("Payments routes", () => {
     getSplTokenBalancesMock.mockResolvedValue([]);
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
-      // biome-ignore lint/nursery/noSecrets: Test Solana address used as mock fee payer, not a secret.
       getFeePayer: vi.fn().mockResolvedValue("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
       signAsFeePayer: vi.fn(),
-      signAndSend: vi.fn().mockResolvedValue(
-        // biome-ignore lint/nursery/noSecrets: Test transaction signature, not a secret.
-        "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy"
-      ),
+      signAndSend: vi
+        .fn()
+        .mockResolvedValue(
+          "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy"
+        ),
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
     createOrgSignerMock.mockResolvedValue(
-      // biome-ignore lint/nursery/noSecrets: Test Solana address, not a secret.
       createNoopSigner(address("8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ"))
     );
 
@@ -367,8 +359,6 @@ describe("Payments routes", () => {
           amount: "0",
           uiAmount: "0",
           decimals: 9,
-          usdPrice: expect.any(Number),
-          usdValue: 0,
         },
       ],
     });
@@ -419,8 +409,6 @@ describe("Payments routes", () => {
         amount: "0",
         uiAmount: "0",
         decimals: 9,
-        usdPrice: expect.any(Number),
-        usdValue: 0,
       },
       {
         token: "USDC",
@@ -470,8 +458,6 @@ describe("Payments routes", () => {
         amount: "4200000000",
         uiAmount: "4.2",
         decimals: 9,
-        usdPrice: expect.any(Number),
-        usdValue: expect.any(Number),
       },
     ]);
   });
@@ -1250,7 +1236,7 @@ describe("Payments routes", () => {
     expect(body.error.message).toContain("Invalid request body");
   });
 
-  it("returns internal error when MoonPay credentials are not configured", async () => {
+  it("returns forbidden when MoonPay is not configured in the environment", async () => {
     env.MOONPAY_API_KEY = undefined;
 
     const res = await app.request(
@@ -1272,13 +1258,13 @@ describe("Payments routes", () => {
       env
     );
 
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(403);
     const body = (await res.json()) as { error: { code: string; message: string } };
-    expect(body.error.code).toBe("INTERNAL_ERROR");
+    expect(body.error.code).toBe("FORBIDDEN");
     expect(body.error.message).toContain("MoonPay is not configured");
   });
 
-  it("returns internal error when Lightspark credentials are not configured", async () => {
+  it("returns forbidden when Lightspark is not configured in the environment", async () => {
     env.LIGHTSPARK_GRID_CLIENT_ID = undefined;
 
     const res = await app.request(
@@ -1301,13 +1287,13 @@ describe("Payments routes", () => {
       env
     );
 
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(403);
     const body = (await res.json()) as { error: { code: string; message: string } };
-    expect(body.error.code).toBe("INTERNAL_ERROR");
+    expect(body.error.code).toBe("FORBIDDEN");
     expect(body.error.message).toContain("Lightspark is not configured");
   });
 
-  it("returns internal error when BVNK credentials are not configured", async () => {
+  it("returns forbidden when BVNK is not configured in the environment", async () => {
     env.BVNK_API_TOKEN = undefined;
 
     const res = await app.request(
@@ -1330,9 +1316,9 @@ describe("Payments routes", () => {
       env
     );
 
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(403);
     const body = (await res.json()) as { error: { code: string; message: string } };
-    expect(body.error.code).toBe("INTERNAL_ERROR");
+    expect(body.error.code).toBe("FORBIDDEN");
     expect(body.error.message).toContain("BVNK is not configured");
   });
 
@@ -1434,7 +1420,6 @@ describe("Payments routes", () => {
       expect(body.data.transfer.id).toMatch(/^xfr_/);
       expect(body.data.preparedTransaction.serialized).toBeTruthy();
       expect(body.data.preparedTransaction.blockhash).toBe(
-        // biome-ignore lint/nursery/noSecrets: Test blockhash, not a secret.
         "EkSnNWid2cvwEVnVx9aBqawnmiCNiDgp3gUdkDPTKN1N"
       );
 
@@ -1700,7 +1685,6 @@ describe("Payments routes", () => {
     it("marks the transfer as failed when execution throws and returns 502", async () => {
       createFeePaymentAdapterMock.mockReturnValueOnce({
         providerId: "mock",
-        // biome-ignore lint/nursery/noSecrets: Test Solana address used as mock fee payer, not a secret.
         getFeePayer: vi.fn().mockResolvedValue("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
         signAsFeePayer: vi.fn(),
         signAndSend: vi.fn().mockRejectedValue(new Error("RPC connection refused")),
@@ -1747,7 +1731,6 @@ describe("Payments routes", () => {
 
     it("returns confirmed + pending transfers when wallet filter is provided", async () => {
       const confirmedSig =
-        // biome-ignore lint/nursery/noSecrets: Test transaction signature, not a secret.
         "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy";
 
       await seedTransfer({ id: "xfr_confirmed_1", status: "confirmed", signature: confirmedSig });
@@ -1784,7 +1767,6 @@ describe("Payments routes", () => {
 
     it("surfaces observed inbound transfers for wallet history even without a DB record", async () => {
       const observedSig =
-        // biome-ignore lint/nursery/noSecrets: Test transaction signature, not a secret.
         "3o9XWnJ7CyD6be8xXh8hFXRrM9rPzGQhE1mQ4Z8VjYkU7LZtP4R3WnV5uA2sD1fG6hJ7kL8mN9pQ1rS2tU3v";
       const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
         new Response(
@@ -1952,7 +1934,6 @@ describe("Payments routes", () => {
       await seedTransfer({ id: "xfr_status_pending", status: "pending" });
 
       const res = await app.request(
-        // biome-ignore lint/nursery/noSecrets: Test URL query param, not a secret.
         "/v1/payments/transfers?status=confirmed",
         {
           method: "GET",

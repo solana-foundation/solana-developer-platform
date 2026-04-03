@@ -19,6 +19,7 @@ import { WalletProviderMark } from "./wallet-provider-mark";
 interface WalletsOverviewProps {
   canManageCustody: boolean;
   connectedProviders: KnownCustodyProvider[];
+  enabledProviders: KnownCustodyProvider[];
   configsError: string | null;
   wallets: CustodyWalletSummary[];
   walletsError: string | null;
@@ -28,6 +29,7 @@ interface WalletsOverviewProps {
 export function WalletsOverview({
   canManageCustody,
   connectedProviders,
+  enabledProviders,
   configsError,
   wallets,
   walletsError,
@@ -57,11 +59,18 @@ export function WalletsOverview({
               : "Wallet creation is limited to admins. Once a wallet is created, you can still use it across the dashboard."}
           </p>
           {configsError ? <p className="text-sm text-[#9e2b38]">{configsError}</p> : null}
+          {canManageCustody && enabledProviders.length === 0 ? (
+            <p className="text-sm text-[rgba(28,28,29,0.62)]">
+              No custody providers are enabled for this organization tier right now.
+            </p>
+          ) : null}
         </div>
 
         {canManageCustody ? (
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            {CUSTODY_PROVIDER_CATALOG.map((provider) => {
+            {CUSTODY_PROVIDER_CATALOG.filter((provider) =>
+              enabledProviders.includes(provider.id)
+            ).map((provider) => {
               const isConnected = connectedProviderSet.has(provider.id);
               const isDisabled = isConnected && !provider.supportsAdditionalWallets;
 
@@ -206,7 +215,7 @@ export function WalletsOverview({
           );
         })}
 
-        {canManageCustody ? (
+        {canManageCustody && enabledProviders.length > 0 ? (
           <button
             type="button"
             onClick={() => onCreateWallet(null)}

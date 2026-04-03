@@ -6,6 +6,7 @@
  */
 
 import { getDb } from "@/db";
+import { AppError } from "@/lib/errors";
 import {
   KeychainFireblocksAdapter,
   KeychainMemoryAdapter,
@@ -47,6 +48,7 @@ import {
   deleteProviderWallet,
 } from "@/services/domain/signing/provider-wallet-lifecycle";
 import { type EncryptionService, createEncryptionService } from "@/services/encryption.service";
+import { assertOrganizationProviderEnabled } from "@/services/organization-provider-access.service";
 import { SigningError, isFullSigningPort } from "@/services/ports";
 import type { SignRequest, SignResult, SignStatus, SigningPort } from "@/services/ports";
 import {
@@ -283,6 +285,26 @@ export class SigningService {
     return this.encryptionService;
   }
 
+  private async assertProviderEnabled(
+    orgId: string,
+    provider: SigningConfiguration["provider"]
+  ): Promise<void> {
+    try {
+      await assertOrganizationProviderEnabled(
+        this.env,
+        getDb(this.env),
+        orgId,
+        "custody",
+        provider
+      );
+    } catch (error) {
+      if (error instanceof AppError) {
+        throw new SigningError(error.message, "INVALID_REQUEST", error);
+      }
+      throw error;
+    }
+  }
+
   private async ensureScopeDefaultConfig(
     orgId: string,
     projectId: string | undefined,
@@ -361,6 +383,12 @@ export class SigningService {
     projectId: string | undefined,
     configId: string
   ): Promise<void> {
+    const config = await this.configStore.getById(configId);
+    if (!config || config.organizationId !== orgId || config.status !== "active") {
+      throw new SigningError("Custody configuration not found", "NOT_FOUND");
+    }
+
+    await this.assertProviderEnabled(orgId, config.provider);
     await this.configStore.setDefaultConfig(orgId, projectId, configId);
     this.providerCache.clear();
   }
@@ -370,6 +398,8 @@ export class SigningService {
     projectId: string | undefined,
     provider: SigningConfiguration["provider"]
   ): Promise<SigningConfigRecord> {
+    await this.assertProviderEnabled(orgId, provider);
+
     const scopeConfig = await this.configStore.findActiveByProvider(orgId, projectId, provider);
     if (!scopeConfig) {
       throw new SigningError("Custody not initialized for provider", "NOT_FOUND");
@@ -1209,6 +1239,8 @@ export class SigningService {
       );
     }
 
+    await this.assertProviderEnabled(orgId, config.provider);
+
     if (!canProviderCreateWallet(config.provider)) {
       throw new SigningError(
         `Wallet provisioning not supported for provider: ${config.provider}`,
@@ -1290,6 +1322,8 @@ export class SigningService {
         "NOT_FOUND"
       );
     }
+
+    await this.assertProviderEnabled(orgId, config.provider);
 
     if (!canProviderDeleteWallet(config.provider)) {
       throw new SigningError(
@@ -1413,6 +1447,8 @@ export class SigningService {
     if (!config) {
       throw new SigningError("Custody not initialized", "NOT_FOUND");
     }
+
+    await this.assertProviderEnabled(orgId, config.provider);
 
     const cacheKey = config.id;
 

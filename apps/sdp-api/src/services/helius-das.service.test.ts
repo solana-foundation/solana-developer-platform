@@ -25,7 +25,7 @@ describe("helius-das service", () => {
     await getDb(env).batch([
       getDb(env)
         .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-        .bind(TEST_ORG_ID, "Helius DAS Org", "helius-das-org", "free", "active"),
+        .bind(TEST_ORG_ID, "Helius DAS Org", "helius-das-org", "individual", "active"),
       getDb(env)
         .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
         .bind(TEST_USER_ID, "helius-das@example.com", 1, "active"),

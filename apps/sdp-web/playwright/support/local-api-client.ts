@@ -1,6 +1,7 @@
 export interface LocalApiClient {
   get<T>(path: string): Promise<T>;
   post<T>(path: string, body?: unknown): Promise<T>;
+  put<T>(path: string, body?: unknown): Promise<T>;
   patch<T>(path: string, body?: unknown): Promise<T>;
   delete<T>(path: string): Promise<T>;
 }
@@ -62,6 +63,7 @@ export function createLocalApiClient(baseUrl: string, bearerToken: string): Loca
   return {
     get: (path) => request("GET", path),
     post: (path, body) => request("POST", path, body),
+    put: (path, body) => request("PUT", path, body),
     patch: (path, body) => request("PATCH", path, body),
     delete: (path) => request("DELETE", path),
   };

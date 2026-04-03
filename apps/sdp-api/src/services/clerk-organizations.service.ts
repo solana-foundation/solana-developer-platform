@@ -13,6 +13,7 @@ export interface ClerkOrganization {
   id: string;
   name?: string;
   slug?: string;
+  private_metadata?: Record<string, unknown> | null;
 }
 
 export class ClerkOrganizationsService {
@@ -79,5 +80,17 @@ export class ClerkOrganizationsService {
 
   async getOrganization(organizationId: string): Promise<ClerkOrganization> {
     return this.request<ClerkOrganization>(`/organizations/${organizationId}`);
+  }
+
+  async updateOrganizationPrivateMetadata(
+    organizationId: string,
+    privateMetadata: Record<string, unknown>
+  ): Promise<ClerkOrganization> {
+    return this.request<ClerkOrganization>(`/organizations/${organizationId}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        private_metadata: privateMetadata,
+      }),
+    });
   }
 }

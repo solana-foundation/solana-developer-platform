@@ -65,7 +65,7 @@ describe("Organizations routes", () => {
 
       const body = (await res.json()) as { data: CreateOrganizationResponse };
       expect(body.data.organization.name).toBe("New Org");
-      expect(body.data.organization.tier).toBe("pro");
+      expect(body.data.organization.tier).toBe("enterprise");
       expect(body.data.organization.status).toBe("active");
       expect(body.data.apiKey.key).toMatch(/^sk_test_/);
       expect(body.data.apiKey.keyPrefix).toMatch(/^sk_test_/);
@@ -230,7 +230,7 @@ describe("Organizations routes", () => {
       // Add another allowlisted email
       await getDb(env)
         .prepare("INSERT INTO allowlist (id, type, value, tier, status) VALUES (?, ?, ?, ?, ?)")
-        .bind("allow_test2", "email", "another@example.com", "free", "active")
+        .bind("allow_test2", "email", "another@example.com", "individual", "active")
         .run();
 
       // Try to create org with same slug
@@ -290,7 +290,7 @@ describe("Organizations routes", () => {
     it("returns internal error when organization tier is invalid in storage", async () => {
       await getDb(env)
         .prepare("UPDATE organizations SET tier = ? WHERE id = ?")
-        .bind("standard", TEST_ORG.id)
+        .bind("totally-invalid-tier", TEST_ORG.id)
         .run();
 
       const res = await app.request(
@@ -427,6 +427,34 @@ describe("Organizations routes", () => {
       );
 
       expect(res.status).toBe(200);
+    });
+
+    it("allows Helius for individual-tier organizations when configured", async () => {
+      const originalHeliusUrl = env.SOLANA_RPC_HELIUS_URL;
+      env.SOLANA_RPC_HELIUS_URL = "https://rpc.helius.test";
+
+      const res = await app.request(
+        `/v1/organizations/${TEST_ORG.id}`,
+        {
+          method: "PATCH",
+          headers: {
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            settings: {
+              rpcProvider: "helius",
+            },
+          }),
+        },
+        env
+      );
+
+      env.SOLANA_RPC_HELIUS_URL = originalHeliusUrl;
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { data: Organization };
+      expect(body.data.settings?.rpcProvider).toBe("helius");
     });
 
     it("rejects empty update", async () => {

@@ -1,4 +1,5 @@
 import type { Token } from "@sdp/types";
+import type { OrganizationTier } from "@sdp/types";
 import { generateKeyPairSigner } from "@solana/kit";
 import type { ClerkTestIdentity } from "./clerk-admin";
 import {
@@ -19,6 +20,7 @@ import {
 interface BootstrapOptions {
   identity: ClerkTestIdentity;
   bearerToken: string;
+  tier?: OrganizationTier;
 }
 
 interface TokenResponse {
@@ -147,12 +149,14 @@ function requireWallet(
 export async function bootstrapLocalIssuanceFixtures({
   identity,
   bearerToken,
+  tier,
 }: BootstrapOptions): Promise<IssuanceFixtures> {
   const walletBootstrap = await bootstrapLocalWalletFixtures({
     identity,
     bearerToken,
     provider: "privy",
     walletCount: 2,
+    tier,
   });
   const api = createLocalApiClient(getBootstrapApiBaseUrl(), bearerToken);
 

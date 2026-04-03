@@ -7,6 +7,10 @@ import { createAllowlistService } from "@/services/allowlist.service";
 import { AuditService } from "@/services/audit.service";
 import { KVService } from "@/services/kv.service";
 import { createOrganizationOnboardingService } from "@/services/organization-onboarding.service";
+import {
+  assertOrganizationProviderEnabled,
+  getOrganizationProviderAvailability,
+} from "@/services/organization-provider-access.service";
 import type { Env } from "@/types/env";
 import {
   type CreateOrganizationResponse,
@@ -49,6 +53,12 @@ function parseOrganizationTier(value: string): OrganizationTier {
   if (ORGANIZATION_TIERS.includes(value as OrganizationTier)) {
     return value as OrganizationTier;
   }
+  if (value === "standard" || value === "starter") {
+    return "individual";
+  }
+  if (value === "pro" || value === "growth") {
+    return "enterprise";
+  }
   throw new AppError("INTERNAL_ERROR", `Organization tier '${value}' is invalid`);
 }
 
@@ -60,9 +70,6 @@ function parseOrganizationStatus(value: string): OrganizationStatus {
 }
 
 function resolveOrganizationTierFromAllowlist(value: string): OrganizationTier {
-  if (value === "standard") {
-    return "free";
-  }
   return parseOrganizationTier(value);
 }
 
@@ -320,6 +327,16 @@ export const updateOrganization = async (c: AppContext) => {
   }
 
   if (parsed.data.settings !== undefined) {
+    if (parsed.data.settings.rpcProvider) {
+      await assertOrganizationProviderEnabled(
+        c.env,
+        getDb(c.env),
+        orgId,
+        "rpc",
+        parsed.data.settings.rpcProvider
+      );
+    }
+
     const mergedSettings: OrganizationSettings = {
       ...(parseOrganizationSettings(existing.settings) ?? {}),
       ...parsed.data.settings,
@@ -367,6 +384,18 @@ export const updateOrganization = async (c: AppContext) => {
   }
 
   return success(c, toOrganizationResponse(org));
+};
+
+export const getOrganizationProviderAccess = async (c: AppContext) => {
+  const { orgId } = c.req.param();
+  const auth = getAuth(c);
+
+  if (auth?.organizationId !== orgId) {
+    throw new AppError("FORBIDDEN", "Access denied to this organization");
+  }
+
+  const response = await getOrganizationProviderAvailability(c.env, getDb(c.env), orgId);
+  return success(c, response);
 };
 
 export const deleteOrganization = async (c: AppContext) => {

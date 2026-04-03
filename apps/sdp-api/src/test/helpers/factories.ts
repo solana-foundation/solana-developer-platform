@@ -36,7 +36,7 @@ export interface OrganizationOverrides {
   id?: string;
   name?: string;
   slug?: string;
-  tier?: "free" | "starter" | "growth" | "enterprise";
+  tier?: "individual" | "enterprise";
   status?: "active" | "suspended" | "deleted";
   createdAt?: string;
   updatedAt?: string;
@@ -46,7 +46,7 @@ export interface Organization {
   id: string;
   name: string;
   slug: string;
-  tier: "free" | "starter" | "growth" | "enterprise";
+  tier: "individual" | "enterprise";
   status: "active" | "suspended" | "deleted";
   createdAt: string;
   updatedAt: string;
@@ -58,7 +58,7 @@ export function createOrganization(overrides: OrganizationOverrides = {}): Organ
     id: `org_factory_${n.toString().padStart(8, "0")}`,
     name: `Factory Org ${n}`,
     slug: `factory-org-${n}`,
-    tier: "free",
+    tier: "individual",
     status: "active",
     createdAt: "2024-01-01T00:00:00.000Z",
     updatedAt: "2024-01-01T00:00:00.000Z",
@@ -276,11 +276,8 @@ export function createActiveToken(overrides: TokenOverrides = {}): Token {
   const base = createToken(overrides);
   return {
     ...base,
-    // biome-ignore lint/nursery/noSecrets: Test Solana address, not a secret
     mintAddress: "7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv",
-    // biome-ignore lint/nursery/noSecrets: Test Solana address, not a secret
     mintAuthority: "9wVmMF2GpxZMsJLxCv2xXWjDWVv8HtqTmKqnZxNKkYTz",
-    // biome-ignore lint/nursery/noSecrets: Test Solana address, not a secret
     freezeAuthority: "9wVmMF2GpxZMsJLxCv2xXWjDWVv8HtqTmKqnZxNKkYTz",
     status: "active",
     deployedAt: "2024-01-02T00:00:00.000Z",
@@ -327,7 +324,6 @@ export function createTokenTransaction(
     signature: null,
     serializedTx: null,
     params: {
-      // biome-ignore lint/nursery/noSecrets: Test Solana address
       destination: "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ",
       amount: "1",
     },
@@ -364,7 +360,6 @@ export function createAllowlistEntry(
   return {
     id: `tal_factory_${n.toString().padStart(8, "0")}`,
     tokenId: `tok_factory_${n.toString().padStart(8, "0")}`,
-    // biome-ignore lint/nursery/noSecrets: Test Solana address
     address: "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ",
     label: "Factory Wallet",
     status: "active",
@@ -383,12 +378,8 @@ export function createAllowlistEntry(
  * Valid Base58 Solana addresses for testing
  */
 export const SOLANA_ADDRESSES = {
-  // biome-ignore lint/nursery/noSecrets: Test Solana address
   wallet1: "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ" as const,
-  // biome-ignore lint/nursery/noSecrets: Test Solana address
   wallet2: "7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv" as const,
-  // biome-ignore lint/nursery/noSecrets: Test Solana address
   wallet3: "9wVmMF2GpxZMsJLxCv2xXWjDWVv8HtqTmKqnZxNKkYTz" as const,
-  // biome-ignore lint/nursery/noSecrets: Test Solana address - USDC mint
   mint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v" as const,
 };

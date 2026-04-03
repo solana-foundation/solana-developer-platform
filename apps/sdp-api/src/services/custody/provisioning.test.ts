@@ -2,9 +2,7 @@ import { provisionCoinbaseCdpAccount, provisionParaWallet } from "@/services/cus
 import type { Env } from "@/types/env";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
-// biome-ignore lint/nursery/noSecrets: deterministic non-secret Solana test address.
 const CREATED_ADDRESS = "11111111111111111111111111111111";
-// biome-ignore lint/nursery/noSecrets: deterministic non-secret Solana test address.
 const EXISTING_ADDRESS = "22222222222222222222222222222222";
 
 let keyMaterial: {

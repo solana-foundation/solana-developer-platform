@@ -1,7 +1,9 @@
+import { getDb } from "@/db";
 import { parseDecimalAmount } from "@/lib/amount";
 import { AppError } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { isAddress } from "@/lib/solana";
+import { assertOrganizationProviderEnabled } from "@/services/organization-provider-access.service";
 import type { AppContext } from "../context";
 import { assertWalletPolicyAllowsTransfer } from "../policy";
 import { executeOfframpSchema, executeOnrampSchema } from "../schemas";
@@ -1150,7 +1152,13 @@ const RAMP_PROVIDER_REGISTRY: Record<RampProviderId, RampProviderExecutor> = {
   bvnk: bvnkRampProvider,
 };
 
-function resolveRampProvider(c: AppContext, providerId: RampProviderId): RampProviderExecutor {
+async function resolveRampProvider(
+  c: AppContext,
+  providerId: RampProviderId,
+  organizationId: string
+): Promise<RampProviderExecutor> {
+  await assertOrganizationProviderEnabled(c.env, getDb(c.env), organizationId, "ramps", providerId);
+
   const provider = RAMP_PROVIDER_REGISTRY[providerId];
   if (!provider) {
     throw new AppError("BAD_REQUEST", `Unsupported ramp provider: ${providerId}`);
@@ -1183,7 +1191,7 @@ async function executeRampWithProvider(
   input: ExecuteRampInput
 ): Promise<RampExecutionResult> {
   const scope = await resolveScope(c);
-  const provider = resolveRampProvider(c, input.provider);
+  const provider = await resolveRampProvider(c, input.provider, scope.auth.organizationId);
 
   if (input.direction === "onramp") {
     return provider.executeOnramp(c, scope, input);

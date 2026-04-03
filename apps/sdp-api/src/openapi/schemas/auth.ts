@@ -29,7 +29,7 @@ export const currentUserResponseSchema = z
         id: orgIdParamSchema,
         name: z.string().openapi({ description: "Organization name.", example: "Example Org" }),
         slug: z.string().openapi({ description: "Organization slug.", example: "example-org" }),
-        tier: z.string().openapi({ description: "Organization tier.", example: "pro" }),
+        tier: z.string().openapi({ description: "Organization tier.", example: "enterprise" }),
         role: z
           .string()
           .openapi({ description: "User role within the organization.", example: "admin" }),

@@ -16,22 +16,29 @@ import { WalletProviderMark } from "./wallet-provider-mark";
 
 function resolveInitialProvider(
   preferredProvider: KnownCustodyProvider | null,
-  connectedProviders: KnownCustodyProvider[]
+  connectedProviders: KnownCustodyProvider[],
+  enabledProviders: KnownCustodyProvider[]
 ): KnownCustodyProvider {
-  if (preferredProvider) {
+  if (preferredProvider && enabledProviders.includes(preferredProvider)) {
     return preferredProvider;
   }
 
   const connectedProviderSet = new Set(connectedProviders);
   const connectedCreateable = CUSTODY_PROVIDER_CATALOG.find(
-    (provider) => connectedProviderSet.has(provider.id) && provider.supportsAdditionalWallets
+    (provider) =>
+      enabledProviders.includes(provider.id) &&
+      connectedProviderSet.has(provider.id) &&
+      provider.supportsAdditionalWallets
   );
 
   if (connectedCreateable) {
     return connectedCreateable.id;
   }
 
-  return CUSTODY_PROVIDER_CATALOG[0]?.id ?? "privy";
+  return (
+    CUSTODY_PROVIDER_CATALOG.find((provider) => enabledProviders.includes(provider.id))?.id ??
+    "privy"
+  );
 }
 
 function SubmitButton({
@@ -56,6 +63,7 @@ interface WalletProvisionModalProps {
   isOpen: boolean;
   onClose: () => void;
   connectedProviders: KnownCustodyProvider[];
+  enabledProviders: KnownCustodyProvider[];
   preferredProvider: KnownCustodyProvider | null;
 }
 
@@ -63,10 +71,11 @@ export function WalletProvisionModal({
   isOpen,
   onClose,
   connectedProviders,
+  enabledProviders,
   preferredProvider,
 }: WalletProvisionModalProps) {
   const [selectedProvider, setSelectedProvider] = useState<KnownCustodyProvider>(
-    resolveInitialProvider(preferredProvider, connectedProviders)
+    resolveInitialProvider(preferredProvider, connectedProviders, enabledProviders)
   );
 
   useEffect(() => {
@@ -74,17 +83,23 @@ export function WalletProvisionModal({
       return;
     }
 
-    setSelectedProvider(resolveInitialProvider(preferredProvider, connectedProviders));
-  }, [connectedProviders, isOpen, preferredProvider]);
+    setSelectedProvider(
+      resolveInitialProvider(preferredProvider, connectedProviders, enabledProviders)
+    );
+  }, [connectedProviders, enabledProviders, isOpen, preferredProvider]);
 
   useEscapeKey(isOpen, onClose);
 
   const connectedProviderSet = useMemo(() => new Set(connectedProviders), [connectedProviders]);
+  const selectableProviders = useMemo(
+    () => CUSTODY_PROVIDER_CATALOG.filter((provider) => enabledProviders.includes(provider.id)),
+    [enabledProviders]
+  );
   const selectedProviderEntry = useMemo(
     () =>
-      CUSTODY_PROVIDER_CATALOG.find((provider) => provider.id === selectedProvider) ??
-      CUSTODY_PROVIDER_CATALOG[0],
-    [selectedProvider]
+      selectableProviders.find((provider) => provider.id === selectedProvider) ??
+      selectableProviders[0],
+    [selectableProviders, selectedProvider]
   );
   const isConnected = connectedProviderSet.has(selectedProvider);
   const supportsAdditionalWallets = selectedProviderEntry?.supportsAdditionalWallets ?? false;
@@ -95,6 +110,10 @@ export function WalletProvisionModal({
     : "Connect this custody provider and create its first wallet in one step.";
 
   if (!isOpen) {
+    return null;
+  }
+
+  if (selectableProviders.length === 0) {
     return null;
   }
 
@@ -141,7 +160,7 @@ export function WalletProvisionModal({
                 }}
                 className="h-12 w-full appearance-none rounded-[14px] border border-[rgba(28,28,29,0.12)] bg-white pl-11 pr-10 text-sm font-medium text-[#1c1c1d]"
               >
-                {CUSTODY_PROVIDER_CATALOG.map((provider) => (
+                {selectableProviders.map((provider) => (
                   <option key={provider.id} value={provider.id}>
                     {provider.label}
                   </option>

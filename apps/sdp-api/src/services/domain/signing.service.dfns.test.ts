@@ -64,7 +64,6 @@ function createTestEnv(overrides?: Partial<Env>): Env {
     DFNS_AUTH_TOKEN: "dfns-auth-token",
     DFNS_CREDENTIAL_ID: "dfns-credential-id",
     DFNS_PRIVATE_KEY:
-      // biome-ignore lint/nursery/noSecrets: Test fixture key material placeholder.
       "-----BEGIN PRIVATE KEY-----\\nMIIBVwIBADANBgkqhkiG9w0BAQEFAASCAT8wggE7AgEAAkEA\\n-----END PRIVATE KEY-----",
     ENVIRONMENT: "development",
     API_VERSION: "v1",

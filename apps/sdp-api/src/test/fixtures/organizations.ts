@@ -6,7 +6,7 @@ export const TEST_ORG = {
   id: "org_test123456789",
   name: "Test Organization",
   slug: "test-org",
-  tier: "free" as const,
+  tier: "individual" as const,
   status: "active" as const,
   settings: null,
   createdAt: "2024-01-01T00:00:00.000Z",

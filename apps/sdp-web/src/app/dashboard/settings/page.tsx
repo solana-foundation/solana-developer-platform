@@ -1,6 +1,7 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
+import { fetchOrganizationProviderAccess } from "@/lib/organization-provider-access";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createSdpApiClient } from "@/lib/sdp-api";
 import { auth } from "@clerk/nextjs/server";
@@ -45,6 +46,7 @@ export default async function SettingsPage() {
   let organization: Organization | null = null;
   let isLinked = true;
   let loadError = false;
+  let enabledRpcProviders: OrganizationRpcProvider[] = [];
 
   try {
     const apiClient = await trace.step("create_sdp_api_client", () =>
@@ -88,10 +90,23 @@ export default async function SettingsPage() {
       loadError = true;
     }
 
+    if (organization) {
+      const resolvedOrganization = organization;
+      try {
+        const access = await trace.step("fetch_provider_access", () =>
+          fetchOrganizationProviderAccess(apiClient.request, resolvedOrganization.id)
+        );
+        enabledRpcProviders = access.enabledRpcProviders;
+      } catch {
+        enabledRpcProviders = ["default"];
+      }
+    }
+
     trace.log({
       ok: !loadError,
       isLinked,
       hasOrganization: Boolean(organization),
+      enabledRpcProviderCount: enabledRpcProviders.length,
       loadError,
     });
   } catch (error) {
@@ -129,6 +144,7 @@ export default async function SettingsPage() {
               <OrganizationRpcSettingsForm
                 organization={organization}
                 canManageSettings={dashboardAccess.capabilities.canManageOrgSettings}
+                enabledProviders={enabledRpcProviders}
               />
             ) : null}
 

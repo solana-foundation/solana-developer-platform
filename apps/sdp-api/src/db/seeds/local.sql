@@ -14,7 +14,7 @@ INSERT INTO users (id, email, email_verified, name, status) VALUES
 
 -- Create a test organization
 INSERT INTO organizations (id, name, slug, tier, status) VALUES
-    ('org_test123456789', 'Test Organization', 'test-org', 'free', 'active');
+    ('org_test123456789', 'Test Organization', 'test-org', 'individual', 'active');
 
 -- Link user to organization as admin
 INSERT INTO organization_members (id, organization_id, user_id, role, status) VALUES

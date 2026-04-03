@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { PaymentsDashboardWallet } from "@sdp/types";
+import type { OrganizationTier, PaymentsDashboardWallet } from "@sdp/types";
 import { getTransferSolInstruction } from "@solana-program/system";
 import {
   type Address,
@@ -17,7 +17,7 @@ import {
 } from "@solana/kit";
 import { KoraClient } from "@solana/kora";
 import { Client } from "pg";
-import type { ClerkTestIdentity } from "./clerk-admin";
+import { type ClerkTestIdentity, setClerkOrganizationTier } from "./clerk-admin";
 import { type LocalApiClient, createLocalApiClient } from "./local-api-client";
 
 const PLAYWRIGHT_LOCAL_ORG_ID_PREFIX = "org_e2e_dashboard";
@@ -92,6 +92,10 @@ interface PlaywrightOrganizationFixture {
   id: string;
   name: string;
   slug: string;
+}
+
+interface EnsureLinkedOrgOptions {
+  tier?: OrganizationTier;
 }
 
 function getPlaywrightApiRuntimeEnv(): PlaywrightApiRuntimeEnv {
@@ -527,6 +531,8 @@ async function fundWalletToLamports(
 }
 
 export async function ensureUnlinkedOrg(identity: ClerkTestIdentity): Promise<void> {
+  await setClerkOrganizationTier(identity.organizationId, "individual");
+
   await withDatabaseClient(async (client) => {
     await client.query("BEGIN");
 
@@ -542,9 +548,13 @@ export async function ensureUnlinkedOrg(identity: ClerkTestIdentity): Promise<vo
 }
 
 export async function ensureLinkedOrg(
-  identity: ClerkTestIdentity
+  identity: ClerkTestIdentity,
+  options?: EnsureLinkedOrgOptions
 ): Promise<PlaywrightOrganizationFixture> {
   const organization = buildPlaywrightOrganizationFixture(identity);
+  const tier = options?.tier ?? "individual";
+
+  await setClerkOrganizationTier(identity.organizationId, tier);
 
   await withDatabaseClient(async (client) => {
     await client.query("BEGIN");
@@ -555,14 +565,14 @@ export async function ensureLinkedOrg(
 
       await client.query(
         `INSERT INTO organizations (id, name, slug, tier, status)
-         VALUES ($1, $2, $3, 'free', 'active')
+         VALUES ($1, $2, $3, $4, 'active')
          ON CONFLICT (id) DO UPDATE SET
            name = EXCLUDED.name,
            slug = EXCLUDED.slug,
            tier = EXCLUDED.tier,
            status = EXCLUDED.status,
            updated_at = sdp_datetime_now()`,
-        [organization.id, organization.name, organization.slug]
+        [organization.id, organization.name, organization.slug, tier]
       );
 
       await client.query(
@@ -601,6 +611,7 @@ export async function bootstrapLocalWalletFixtures(input: {
   walletCount?: number;
   fundSourceWallet?: boolean;
   fundSourceAmountSol?: number;
+  tier?: OrganizationTier;
 }): Promise<WalletBootstrapResult> {
   const { identity, bearerToken } = input;
   const walletCount = Math.max(1, input.walletCount ?? 1);
@@ -610,7 +621,9 @@ export async function bootstrapLocalWalletFixtures(input: {
   const runtimeEnv = getPlaywrightApiRuntimeEnv();
   const api = createLocalApiClient(runtimeEnv.localApiBaseUrl, bearerToken);
 
-  const organization = await ensureLinkedOrg(identity);
+  const organization = await ensureLinkedOrg(identity, {
+    tier: input.tier,
+  });
 
   const initialized = await api.post<InitializeWalletResponse>("/v1/wallets/initialize", {
     provider,

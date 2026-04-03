@@ -36,7 +36,6 @@ describe("safeStringify", () => {
 
 describe("addressAsSigner", () => {
   it("creates a signer-like object from address", () => {
-    // biome-ignore lint/nursery/noSecrets: Test Solana address
     const address = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA" as Address;
     const signer = addressAsSigner(address);
 
@@ -44,7 +43,6 @@ describe("addressAsSigner", () => {
   });
 
   it("returns object that can be used as TransactionSigner", () => {
-    // biome-ignore lint/nursery/noSecrets: Test Solana address
     const address = "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ" as Address;
     const signer = addressAsSigner(address);
 
@@ -54,7 +52,6 @@ describe("addressAsSigner", () => {
   });
 });
 
-// biome-ignore lint/nursery/noSecrets: Function name triggers false positive
 describe("getExtensionTypes", () => {
   it("returns empty array for undefined extensions", () => {
     expect(getExtensionTypes(undefined)).toEqual([]);
@@ -67,9 +64,7 @@ describe("getExtensionTypes", () => {
   it("handles transferFee extension", () => {
     const extensions: TokenExtensionsConfig = {
       transferFee: {
-        // biome-ignore lint/nursery/noSecrets: Test Solana address
         transferFeeConfigAuthority: "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ",
-        // biome-ignore lint/nursery/noSecrets: Test Solana address
         withdrawWithheldAuthority: "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ",
         basisPoints: 100, // 1%
         maxFee: "1.5",
@@ -78,19 +73,16 @@ describe("getExtensionTypes", () => {
 
     const result = getExtensionTypes(extensions, 6);
     expect(result).toHaveLength(1);
-    // biome-ignore lint/nursery/noSecrets: Token-2022 extension type identifier
     expect(result[0].__kind).toBe("TransferFeeConfig");
   });
 
   it("handles permanentDelegate extension", () => {
     const extensions: TokenExtensionsConfig = {
-      // biome-ignore lint/nursery/noSecrets: Test Solana address
       permanentDelegate: "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ",
     };
 
     const result = getExtensionTypes(extensions);
     expect(result).toHaveLength(1);
-    // biome-ignore lint/nursery/noSecrets: Token-2022 extension type identifier
     expect(result[0].__kind).toBe("PermanentDelegate");
   });
 
@@ -101,7 +93,6 @@ describe("getExtensionTypes", () => {
 
     const result = getExtensionTypes(extensions);
     expect(result).toHaveLength(1);
-    // biome-ignore lint/nursery/noSecrets: Token-2022 extension type identifier
     expect(result[0].__kind).toBe("DefaultAccountState");
   });
 
@@ -112,7 +103,6 @@ describe("getExtensionTypes", () => {
 
     const result = getExtensionTypes(extensions);
     expect(result).toHaveLength(1);
-    // biome-ignore lint/nursery/noSecrets: Token-2022 extension type identifier
     expect(result[0].__kind).toBe("DefaultAccountState");
   });
 
@@ -128,7 +118,6 @@ describe("getExtensionTypes", () => {
 
   it("handles multiple extensions", () => {
     const extensions: TokenExtensionsConfig = {
-      // biome-ignore lint/nursery/noSecrets: Test Solana address
       permanentDelegate: "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ",
       defaultAccountState: "frozen",
       nonTransferable: true,
@@ -138,9 +127,7 @@ describe("getExtensionTypes", () => {
     expect(result).toHaveLength(3);
 
     const kinds = result.map((ext) => ext.__kind);
-    // biome-ignore lint/nursery/noSecrets: Token-2022 extension names, not secrets
     expect(kinds).toContain("PermanentDelegate");
-    // biome-ignore lint/nursery/noSecrets: Token-2022 extension names, not secrets
     expect(kinds).toContain("DefaultAccountState");
     expect(kinds).toContain("NonTransferable");
   });

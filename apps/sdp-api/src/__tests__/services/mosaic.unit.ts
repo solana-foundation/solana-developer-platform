@@ -70,7 +70,6 @@ describe("safeStringify", () => {
   });
 
   it("handles Solana-like RPC response", () => {
-    // biome-ignore lint/nursery/noSecrets: Test Solana program address, not a secret
     const tokenProgram = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
     const rpcResponse = {
       slot: 123456789n,

@@ -70,7 +70,6 @@ describe("randomBase64Url", () => {
   });
 });
 
-// biome-ignore lint/nursery/noSecrets: Function name triggers false positive
 describe("createApiKeyMaterial", () => {
   it("creates production key with live prefix", () => {
     const { key, prefix } = createApiKeyMaterial("production");

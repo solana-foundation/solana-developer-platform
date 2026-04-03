@@ -12,6 +12,10 @@ import {
   type FireblocksProviderConfig,
   parseConfigRecord,
 } from "@/services/domain/signing/provider-config";
+import {
+  assertOrganizationProviderEnabled,
+  getEnabledOrganizationProviders,
+} from "@/services/organization-provider-access.service";
 import { SigningError } from "@/services/ports";
 import { type AppContext, getPreferredWalletForConfig, resolveActor } from "../context";
 import {
@@ -44,6 +48,14 @@ export const initializeSigning = async (c: AppContext) => {
   const signingService = createSigningService(c.env);
 
   try {
+    await assertOrganizationProviderEnabled(
+      c.env,
+      getDb(c.env),
+      actor.organizationId,
+      "custody",
+      parsed.data.provider
+    );
+
     const result = await initializeProviderConnection(
       c,
       signingService,
@@ -89,6 +101,14 @@ export const switchSigning = async (c: AppContext) => {
   const auditService = new AuditService(getDb(c.env));
   const projectId = parsed.data.projectId;
   const targetProvider = parsed.data.provider;
+
+  await assertOrganizationProviderEnabled(
+    c.env,
+    getDb(c.env),
+    actor.organizationId,
+    "custody",
+    targetProvider
+  );
 
   const existingScopeConfig = await findScopeConfigByProvider(
     c,
@@ -174,6 +194,9 @@ export const getSwitchProviderOptions = async (c: AppContext) => {
   const actor = resolveActor(c);
   const projectId = c.req.query("projectId") ?? actor.projectId;
   const signingService = createSigningService(c.env);
+  const enabledProviders = (
+    await getEnabledOrganizationProviders(c.env, getDb(c.env), actor.organizationId)
+  ).custody;
   const [reuseState, configurations] = await Promise.all([
     signingService.getProviderReuseState(actor.organizationId, projectId),
     signingService.getConfigurations(actor.organizationId, projectId),
@@ -185,29 +208,31 @@ export const getSwitchProviderOptions = async (c: AppContext) => {
       ?.provider ?? null;
 
   const response: SwitchProviderOptionsResponse = {
-    providers: CUSTODY_PROVIDERS.map((provider) => {
-      const hasReusableWallet =
-        provider === "privy"
-          ? reuseState.privy
-          : provider === "coinbase_cdp"
-            ? reuseState.coinbase_cdp
-            : provider === "para"
-              ? reuseState.para
-              : provider === "turnkey"
-                ? reuseState.turnkey
-                : false;
+    providers: CUSTODY_PROVIDERS.filter((provider) => enabledProviders.includes(provider)).map(
+      (provider) => {
+        const hasReusableWallet =
+          provider === "privy"
+            ? reuseState.privy
+            : provider === "coinbase_cdp"
+              ? reuseState.coinbase_cdp
+              : provider === "para"
+                ? reuseState.para
+                : provider === "turnkey"
+                  ? reuseState.turnkey
+                  : false;
 
-      const needsWalletLabel =
-        provider === "fireblocks" ? false : provider === "local" ? true : !hasReusableWallet;
+        const needsWalletLabel =
+          provider === "fireblocks" ? false : provider === "local" ? true : !hasReusableWallet;
 
-      return {
-        provider,
-        hasReusableWallet,
-        needsWalletLabel,
-        isActive: activeProviders.has(provider),
-        isDefault: defaultProvider === provider,
-      };
-    }),
+        return {
+          provider,
+          hasReusableWallet,
+          needsWalletLabel,
+          isActive: activeProviders.has(provider),
+          isDefault: defaultProvider === provider,
+        };
+      }
+    ),
   };
 
   return success(c, response);

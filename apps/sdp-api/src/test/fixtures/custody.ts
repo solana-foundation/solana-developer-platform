@@ -8,7 +8,6 @@ import { TEST_ORG } from "./organizations";
 import { TEST_PROJECT } from "./tokens";
 
 // Test Solana addresses (valid Base58)
-// biome-ignore lint/nursery/noSecrets: Test Solana address, not a secret
 export const TEST_CUSTODY_PUBLIC_KEY = "9wVmMF2GpxZMsJLxCv2xXWjDWVv8HtqTmKqnZxNKkYTz";
 
 /**
@@ -43,7 +42,6 @@ export const TEST_PROJECT_CUSTODY_CONFIG: SigningConfigRecord = {
     provider: "local",
     encryptedPrivateKey: "test_project_encrypted_key_placeholder",
   }),
-  // biome-ignore lint/nursery/noSecrets: Test Solana address, not a secret
   defaultWalletId: "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ",
   status: "active",
   createdAt: "2024-01-02T00:00:00.000Z",
@@ -70,9 +68,7 @@ export const TEST_CUSTODY_WALLET: CustodyWallet = {
 export const TEST_PROJECT_CUSTODY_WALLET: CustodyWallet = {
   id: "cwlt_proj123456789",
   custodyConfigId: TEST_PROJECT_CUSTODY_CONFIG.id,
-  // biome-ignore lint/nursery/noSecrets: Test Solana address, not a secret
   walletId: "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ",
-  // biome-ignore lint/nursery/noSecrets: Test Solana address, not a secret
   publicKey: "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ",
   label: "Project Signing Wallet",
   purpose: "root",

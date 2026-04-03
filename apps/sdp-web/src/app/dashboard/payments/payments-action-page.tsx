@@ -10,7 +10,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import type { PaymentTransferSummary, PaymentsDashboardWallet } from "@sdp/types";
+import type {
+  ComplianceProviderId,
+  PaymentTransferSummary,
+  PaymentsDashboardWallet,
+  RampProviderId,
+} from "@sdp/types";
 import {
   ArrowDownLeft,
   ArrowUpRight,
@@ -21,7 +26,7 @@ import {
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import QRCode from "qrcode";
-import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
 import {
@@ -43,6 +48,8 @@ interface PaymentsActionPageProps {
   wallets: PaymentsDashboardWallet[];
   walletsError: string | null;
   issuedTokenSymbolsByMint: Record<string, string>;
+  enabledComplianceProviders: ComplianceProviderId[];
+  enabledRampProviders: RampProviderId[];
 }
 
 const REQUIRED_ACTION_ASSETS = ["SOL", "USDC"] as const;
@@ -62,7 +69,6 @@ const BVNK_COUNTRY_OPTIONS = [
 ] as const;
 
 type ActionBranch = "wallet_transfer" | "wallet_deposit" | "onramp" | "offramp";
-type RampProviderId = "moonpay" | "lightspark" | "bvnk";
 type StepId = "branch" | "provider" | "details" | "review" | "deposit";
 type ExecutionState = "idle" | "submitting" | "success";
 
@@ -948,6 +954,8 @@ export function PaymentsActionPage({
   wallets,
   walletsError,
   issuedTokenSymbolsByMint,
+  enabledComplianceProviders,
+  enabledRampProviders,
 }: PaymentsActionPageProps) {
   const router = useRouter();
 
@@ -1084,7 +1092,14 @@ export function PaymentsActionPage({
   const isSendAction = mode === "send";
   const isTransferBranch = branch === "wallet_transfer";
   const isDepositBranch = branch === "wallet_deposit";
-  const providerOptions = isOnrampBranch ? ONRAMP_PROVIDER_OPTIONS : OFFRAMP_PROVIDER_OPTIONS;
+  const hasEnabledComplianceProviders = enabledComplianceProviders.length > 0;
+  const providerOptions = useMemo(
+    () =>
+      (isOnrampBranch ? ONRAMP_PROVIDER_OPTIONS : OFFRAMP_PROVIDER_OPTIONS).filter((option) =>
+        enabledRampProviders.includes(option.id)
+      ),
+    [enabledRampProviders, isOnrampBranch]
+  );
   const providerLabel = providerOptions.find((option) => option.id === provider)?.title ?? null;
   const numericAmount = parseOptionalNumber(amount);
   const destinationTrimmed = destination.trim();
@@ -1118,6 +1133,25 @@ export function PaymentsActionPage({
     numericAmount !== null &&
     availableSelectedAssetAmount !== null &&
     numericAmount > availableSelectedAssetAmount;
+
+  const resetExecution = useCallback(() => {
+    setExecutionState("idle");
+    setExecutionError(null);
+    setTransferResult(null);
+    setRampExecution(null);
+  }, []);
+
+  useEffect(() => {
+    if (!provider) {
+      return;
+    }
+
+    if (!providerOptions.some((option) => option.id === provider)) {
+      setProvider(null);
+      setStepIndex(1);
+      resetExecution();
+    }
+  }, [provider, providerOptions, resetExecution]);
 
   useEffect(() => {
     if (!isTransferBranch || !selectedWalletId) {
@@ -1155,13 +1189,6 @@ export function PaymentsActionPage({
     };
   }, [isTransferBranch, selectedWalletId]);
 
-  const resetExecution = () => {
-    setExecutionState("idle");
-    setExecutionError(null);
-    setTransferResult(null);
-    setRampExecution(null);
-  };
-
   const resetFlowFields = () => {
     setAmount("");
     setAmountTouched(false);
@@ -1196,6 +1223,15 @@ export function PaymentsActionPage({
   };
 
   const checkTransferCompliance = async () => {
+    if (!hasEnabledComplianceProviders) {
+      toast.error("Compliance check unavailable.", {
+        description:
+          "Risk checks are only enabled for enterprise organizations with a configured provider.",
+        position: "bottom-right",
+      });
+      return;
+    }
+
     if (!destinationTrimmed) {
       return;
     }
@@ -1318,7 +1354,9 @@ export function PaymentsActionPage({
           ? "Source wallet allowlist"
           : hasTransferComplianceForDestination
             ? "Risk check completed"
-            : "Required",
+            : hasEnabledComplianceProviders
+              ? "Required"
+              : "Allowlist required",
       },
       ...(memo.trim()
         ? [
@@ -1333,6 +1371,7 @@ export function PaymentsActionPage({
       amount,
       destinationIsAllowlisted,
       destinationTrimmed,
+      hasEnabledComplianceProviders,
       hasTransferComplianceForDestination,
       memo,
       selectedAsset,
@@ -1625,13 +1664,20 @@ export function PaymentsActionPage({
             icon={<ArrowUpRight className="size-5" />}
             onClick={() => selectBranch("wallet_transfer")}
           />
-          <ActionChoiceCard
-            active={branch === "offramp"}
-            title="Off-ramp"
-            description="Move value out through a provider-specific off-ramp flow."
-            icon={<ArrowDownLeft className="size-5" />}
-            onClick={() => selectBranch("offramp")}
-          />
+          {enabledRampProviders.length > 0 ? (
+            <ActionChoiceCard
+              active={branch === "offramp"}
+              title="Off-ramp"
+              description="Move value out through a provider-specific off-ramp flow."
+              icon={<ArrowDownLeft className="size-5" />}
+              onClick={() => selectBranch("offramp")}
+            />
+          ) : (
+            <div className="rounded-[24px] border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.03)] px-5 py-5 text-sm text-[rgba(28,28,29,0.62)]">
+              Off-ramp providers are only available on enterprise organizations with an enabled
+              provider.
+            </div>
+          )}
         </>
       ) : (
         <>
@@ -1642,13 +1688,20 @@ export function PaymentsActionPage({
             icon={<ArrowDownLeft className="size-5" />}
             onClick={() => selectBranch("wallet_deposit")}
           />
-          <ActionChoiceCard
-            active={branch === "onramp"}
-            title="On-ramp"
-            description="Start a provider flow to move fiat into the selected wallet."
-            icon={<ArrowUpRight className="size-5" />}
-            onClick={() => selectBranch("onramp")}
-          />
+          {enabledRampProviders.length > 0 ? (
+            <ActionChoiceCard
+              active={branch === "onramp"}
+              title="On-ramp"
+              description="Start a provider flow to move fiat into the selected wallet."
+              icon={<ArrowUpRight className="size-5" />}
+              onClick={() => selectBranch("onramp")}
+            />
+          ) : (
+            <div className="rounded-[24px] border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.03)] px-5 py-5 text-sm text-[rgba(28,28,29,0.62)]">
+              On-ramp providers are only available on enterprise organizations with an enabled
+              provider.
+            </div>
+          )}
         </>
       )}
     </div>
@@ -1656,6 +1709,11 @@ export function PaymentsActionPage({
 
   const renderProviderStep = () => (
     <div className="grid gap-4">
+      {providerOptions.length === 0 ? (
+        <div className="rounded-[24px] border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.03)] px-5 py-5 text-sm text-[rgba(28,28,29,0.62)]">
+          No ramp providers are enabled for this organization.
+        </div>
+      ) : null}
       {providerOptions.map((option) => (
         <ActionChoiceCard
           key={option.id}
@@ -1813,6 +1871,11 @@ export function PaymentsActionPage({
         <div className="rounded-[18px] border border-[rgba(17,94,61,0.18)] bg-[rgba(16,185,129,0.08)] px-4 py-3 text-sm text-[#115e3d]">
           This destination is already on the source wallet allowlist. You can continue without a new
           risk check.
+        </div>
+      ) : !hasEnabledComplianceProviders ? (
+        <div className="rounded-[18px] border border-[rgba(180,83,9,0.22)] bg-[rgba(245,158,11,0.12)] px-4 py-3 text-sm text-[#8a5a00]">
+          Risk checks are not enabled for this organization. Add the destination to the source
+          wallet allowlist before submitting the transfer.
         </div>
       ) : (
         <div className="flex min-h-[44px] flex-wrap items-center gap-3">
