@@ -11,6 +11,7 @@ test.describe
   .serial("dashboard payments e2e", () => {
     let destinationAddress = "";
     let sourceWalletLabel = "";
+    let sourceWalletId = "";
     let transferTokenSymbol = "";
 
     test.beforeAll(async ({ browser }) => {
@@ -30,8 +31,12 @@ test.describe
       });
 
       sourceWalletLabel = fixtures.wallets.treasury.label ?? fixtures.wallets.treasury.publicKey;
+      sourceWalletId = fixtures.wallets.treasury.walletId;
       transferTokenSymbol = fixtures.tokens.open.symbol;
       destinationAddress = await createExternalSolanaAddress();
+      await api.put(`/v1/payments/wallets/${sourceWalletId}/policies`, {
+        destinationAllowlist: [destinationAddress],
+      });
       await session.page.close();
     });
 
@@ -56,12 +61,9 @@ test.describe
       await expect(assetSelect).toContainText(transferTokenSymbol);
       await app.getByLabel("Amount").fill("1");
       await app.getByLabel("Destination address").fill(destinationAddress);
-      await app.getByRole("button", { name: "Run a risk check" }).click();
-
-      const riskResultsDialog = page.getByText("Risk score results");
-      await expect(riskResultsDialog).toBeVisible({ timeout: 120_000 });
-      await page.getByRole("button", { name: "Dismiss" }).click();
-      await expect(riskResultsDialog).toHaveCount(0);
+      await expect(
+        app.getByText("This destination is already on the source wallet allowlist.")
+      ).toBeVisible({ timeout: 120_000 });
 
       const nextButton = app.getByRole("button", { name: "Next", exact: true });
       await expect(nextButton).toBeEnabled({ timeout: 120_000 });
