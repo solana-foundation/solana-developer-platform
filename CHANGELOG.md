@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.14.3](https://github.com/solana-foundation/solana-developer-platform/compare/v0.14.2...v0.14.3) (2026-04-03)
+
+### Refactors
+
+* replace vendored para keychain with upstream package ([#153](https://github.com/solana-foundation/solana-developer-platform/pull/153)) ([0b878b3](https://github.com/solana-foundation/solana-developer-platform/commit/0b878b3d3e0182d868fba4d7ca585d3f52d50e60))
+
 ## [0.14.2](https://github.com/solana-foundation/solana-developer-platform/compare/v0.14.1...v0.14.2) (2026-04-03)
 
 ### Bug Fixes
