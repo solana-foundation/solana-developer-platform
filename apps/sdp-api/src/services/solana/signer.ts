@@ -7,7 +7,7 @@
  * - fireblocks: Uses Fireblocks MPC via @solana/keychain-fireblocks (production)
  * - privy: Uses Privy hosted wallets via @solana/keychain-privy
  * - coinbase_cdp: Uses Coinbase CDP hosted wallets via @sdp/keychain-coinbase
- * - para: Uses Para hosted wallets via @sdp/keychain-para
+ * - para: Uses Para hosted wallets via @solana/keychain-para
  * - turnkey: Uses Turnkey hosted wallets via @solana/keychain-turnkey
  *
  * Resolution order for createOrgSigner:
