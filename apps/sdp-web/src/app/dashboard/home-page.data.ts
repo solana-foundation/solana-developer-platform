@@ -100,7 +100,6 @@ function resolvePaymentsAddress(transfer: PaymentTransferSummary): string {
 export function computeTodaysVolume(transfers: PaymentTransferSummary[]): number | null {
   const now = new Date();
   const startOfDay = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-  let hasNumericAmount = false;
 
   const total = transfers.reduce((sum, transfer) => {
     if (!transfer.createdAt) {
@@ -117,11 +116,10 @@ export function computeTodaysVolume(transfers: PaymentTransferSummary[]): number
       return sum;
     }
 
-    hasNumericAmount = true;
     return sum + amount;
   }, 0);
 
-  return hasNumericAmount ? total : null;
+  return total;
 }
 
 export function buildHomeActivityRows(

@@ -82,15 +82,19 @@ function MetricCard({
   error: string | null;
   hint?: string | null;
 }) {
+  const showUnavailableState = error !== null && value === null;
+
   return (
     <Card className="gap-0 rounded-[18px] border-[rgba(28,28,29,0.1)] py-0 shadow-none">
       <CardContent className="space-y-2 px-6 py-6">
         <p className="text-[15px] text-[rgba(28,28,29,0.56)]">{label}</p>
         <p className="text-[24px] leading-none font-medium tracking-[-0.03em] text-[#1c1c1d] sm:text-[30px]">
-          {error ? "Unavailable" : formatCurrencyAmount(value)}
+          {showUnavailableState ? "Unavailable" : formatCurrencyAmount(value)}
         </p>
-        {error ? <p className="text-sm text-[#9e2b38]">{error}</p> : null}
-        {!error && hint ? <p className="text-sm text-[rgba(28,28,29,0.56)]">{hint}</p> : null}
+        {showUnavailableState ? <p className="text-sm text-[#9e2b38]">{error}</p> : null}
+        {!showUnavailableState && hint ? (
+          <p className="text-sm text-[rgba(28,28,29,0.56)]">{hint}</p>
+        ) : null}
       </CardContent>
     </Card>
   );
@@ -117,17 +121,20 @@ export function HomeWorkspace({ totalBalance, totalBalanceError, wallets }: Home
       ? "No tracked balances found yet."
       : null;
   const todaysVolume = activitySnapshot?.todaysVolume ?? null;
-  const todaysVolumeError = activityRequestError
-    ? activityRequestError instanceof Error
-      ? activityRequestError.message
-      : "Activity is unavailable right now."
-    : (activitySnapshot?.activityError ?? null);
-  const activityRows = activitySnapshot?.activityRows ?? [];
+  const todaysVolumeError =
+    todaysVolume !== null
+      ? null
+      : activityRequestError
+        ? activityRequestError instanceof Error
+          ? activityRequestError.message
+          : "Activity is unavailable right now."
+        : (activitySnapshot?.activityError ?? null);
   const activityError = activityRequestError
     ? activityRequestError instanceof Error
       ? activityRequestError.message
       : "Activity is unavailable right now."
     : (activitySnapshot?.activityError ?? null);
+  const activityRows = activitySnapshot?.activityRows ?? [];
   const activityNotice = activitySnapshot?.activityNotice ?? null;
   const todaysVolumeHint = isWalletEmptyState
     ? "Payment activity will appear after you create a wallet."
@@ -135,6 +142,8 @@ export function HomeWorkspace({ totalBalance, totalBalanceError, wallets }: Home
       ? activitySnapshot
         ? "No payment volume recorded yet."
         : "Loading payment activity..."
+      : todaysVolume === 0
+        ? "No payment volume recorded yet."
       : null;
   const emptyActivityMessage = isWalletEmptyState
     ? "Create your first wallet to start tracking balances and activity."

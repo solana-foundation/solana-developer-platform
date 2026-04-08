@@ -133,7 +133,7 @@ export function resolveCounterparty(transfer: TransferRecord): string {
 
 export function resolveTotalBalance(balances: CustodyWalletTokenBalance[]): number | null {
   if (balances.length === 0) {
-    return null;
+    return 0;
   }
 
   let hasNumericBalance = false;

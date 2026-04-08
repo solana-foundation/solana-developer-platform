@@ -4,7 +4,10 @@ import { createSdpApiClient } from "@/lib/sdp-api";
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { HomeWorkspace } from "./home-workspace";
-import { resolveTotalBalance } from "./payments/payments-overview.utils";
+import {
+  aggregateBalancesFromWallets,
+  resolveTotalBalance,
+} from "./payments/payments-overview.utils";
 import { fetchPaymentsAggregate, fetchPaymentsWallets } from "./payments/payments-page.data";
 
 export default async function DashboardPage() {
@@ -24,16 +27,22 @@ export default async function DashboardPage() {
     const [aggregateResult, walletsResult] = await Promise.all([
       trace.step("fetch_payments_aggregate", () => fetchPaymentsAggregate(apiClient.request)),
       trace.step("fetch_wallet_summaries", () =>
-        fetchPaymentsWallets(apiClient.request, { view: "summary" })
+        fetchPaymentsWallets(apiClient.request, { view: "summary", includeBalances: true })
       ),
     ]);
 
     const wallets = walletsResult.data ?? [];
     const isWalletEmptyState = walletsResult.ok && wallets.length === 0;
-    const totalBalance = resolveTotalBalance(aggregateResult.data?.balances ?? []);
+    const fallbackAggregateBalances =
+      walletsResult.ok && wallets.length > 0 ? aggregateBalancesFromWallets(wallets) : [];
+    const totalBalance = resolveTotalBalance(
+      aggregateResult.data?.balances ?? fallbackAggregateBalances
+    );
 
     const aggregateError =
-      aggregateResult.ok || isWalletEmptyState ? null : "Balance data is unavailable right now.";
+      aggregateResult.ok || isWalletEmptyState || totalBalance !== null
+        ? null
+        : "Balance data is unavailable right now.";
 
     trace.log({
       ok: true,
