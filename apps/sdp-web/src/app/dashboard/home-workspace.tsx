@@ -17,6 +17,7 @@ import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
 import type { PaymentsDashboardWallet } from "@sdp/types";
 import Link from "next/link";
+import type { HomeActivityRow } from "./home-page.data";
 import { fetchHomeActivity } from "./home-workspace.data";
 import { formatCurrencyAmount, formatDisplayAmount } from "./payments/payments-overview.utils";
 
@@ -24,6 +25,18 @@ interface HomeWorkspaceProps {
   totalBalance: number | null;
   totalBalanceError: string | null;
   wallets: PaymentsDashboardWallet[];
+}
+
+interface HomeWorkspaceActivityState {
+  isWalletEmptyState: boolean;
+  totalBalanceHint: string | null;
+  todaysVolume: number | null;
+  todaysVolumeError: string | null;
+  todaysVolumeHint: string | null;
+  activityError: string | null;
+  activityRows: HomeActivityRow[];
+  activityNotice: string | null;
+  emptyActivityMessage: string;
 }
 
 const HOME_ACTIVITY_KEY = "dashboard-home-activity";
@@ -100,6 +113,59 @@ function MetricCard({
   );
 }
 
+function resolveActivityRequestError(error: unknown): string | null {
+  if (!error) {
+    return null;
+  }
+
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return "Activity is unavailable right now.";
+}
+
+function buildHomeWorkspaceActivityState(
+  wallets: PaymentsDashboardWallet[],
+  totalBalance: number | null,
+  activitySnapshot: Awaited<ReturnType<typeof fetchHomeActivity>> | undefined,
+  activityRequestError: unknown
+): HomeWorkspaceActivityState {
+  const isWalletEmptyState = wallets.length === 0;
+  const requestError = resolveActivityRequestError(activityRequestError);
+  const todaysVolume = activitySnapshot?.todaysVolume ?? null;
+  const activityError = requestError ?? activitySnapshot?.activityError ?? null;
+
+  return {
+    isWalletEmptyState,
+    totalBalanceHint: isWalletEmptyState
+      ? "Create your first wallet to start tracking balances."
+      : totalBalance === null
+        ? "No tracked balances found yet."
+        : null,
+    todaysVolume,
+    todaysVolumeError:
+      todaysVolume !== null ? null : (requestError ?? activitySnapshot?.activityError ?? null),
+    todaysVolumeHint: isWalletEmptyState
+      ? "Payment activity will appear after you create a wallet."
+      : todaysVolume === null
+        ? activitySnapshot
+          ? "No payment volume recorded yet."
+          : "Loading payment activity..."
+        : todaysVolume === 0
+          ? "No payment volume recorded yet."
+          : null,
+    activityError,
+    activityRows: activitySnapshot?.activityRows ?? [],
+    activityNotice: activitySnapshot?.activityNotice ?? null,
+    emptyActivityMessage: isWalletEmptyState
+      ? "Create your first wallet to start tracking balances and activity."
+      : activitySnapshot
+        ? "No recent activity found yet."
+        : "Loading recent activity...",
+  };
+}
+
 export function HomeWorkspace({ totalBalance, totalBalanceError, wallets }: HomeWorkspaceProps) {
   const { dashboardAccess } = useDashboardWorkspace();
   const { data: activitySnapshot, error: activityRequestError } = usePersistedDashboardSWR(
@@ -114,42 +180,21 @@ export function HomeWorkspace({ totalBalance, totalBalanceError, wallets }: Home
       ttlMs: HOME_ACTIVITY_CACHE_TTL_MS,
     }
   );
-  const isWalletEmptyState = wallets.length === 0;
-  const totalBalanceHint = isWalletEmptyState
-    ? "Create your first wallet to start tracking balances."
-    : totalBalance === null
-      ? "No tracked balances found yet."
-      : null;
-  const todaysVolume = activitySnapshot?.todaysVolume ?? null;
-  const todaysVolumeError =
-    todaysVolume !== null
-      ? null
-      : activityRequestError
-        ? activityRequestError instanceof Error
-          ? activityRequestError.message
-          : "Activity is unavailable right now."
-        : (activitySnapshot?.activityError ?? null);
-  const activityError = activityRequestError
-    ? activityRequestError instanceof Error
-      ? activityRequestError.message
-      : "Activity is unavailable right now."
-    : (activitySnapshot?.activityError ?? null);
-  const activityRows = activitySnapshot?.activityRows ?? [];
-  const activityNotice = activitySnapshot?.activityNotice ?? null;
-  const todaysVolumeHint = isWalletEmptyState
-    ? "Payment activity will appear after you create a wallet."
-    : todaysVolume === null
-      ? activitySnapshot
-        ? "No payment volume recorded yet."
-        : "Loading payment activity..."
-      : todaysVolume === 0
-        ? "No payment volume recorded yet."
-      : null;
-  const emptyActivityMessage = isWalletEmptyState
-    ? "Create your first wallet to start tracking balances and activity."
-    : activitySnapshot
-      ? "No recent activity found yet."
-      : "Loading recent activity...";
+  const {
+    totalBalanceHint,
+    todaysVolume,
+    todaysVolumeError,
+    todaysVolumeHint,
+    activityError,
+    activityRows,
+    activityNotice,
+    emptyActivityMessage,
+  } = buildHomeWorkspaceActivityState(
+    wallets,
+    totalBalance,
+    activitySnapshot,
+    activityRequestError
+  );
 
   return (
     <div className="w-full space-y-8 py-2">
