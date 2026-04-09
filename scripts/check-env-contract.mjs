@@ -1,6 +1,6 @@
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { API_LOCAL_ENV_KEYS } from "./secret-keys.mjs";
 
@@ -45,11 +45,10 @@ const API_ENV_IGNORE = new Set([
 ]);
 
 function runRg(pattern, targets) {
-  const output = execFileSync(
-    "rg",
-    ["-o", "--no-filename", pattern, ...targets],
-    { cwd: repoRoot, encoding: "utf8" }
-  );
+  const output = execFileSync("rg", ["-o", "--no-filename", pattern, ...targets], {
+    cwd: repoRoot,
+    encoding: "utf8",
+  });
 
   return output
     .split("\n")
@@ -63,17 +62,16 @@ function unique(values) {
 }
 
 function extractProcessEnvVars() {
-  const matches = runRg("process\\.env\\.([A-Z0-9_]+)", [
-    "apps",
-    "packages",
-    "scripts",
-    ".github",
-  ]);
+  const matches = runRg("process\\.env\\.([A-Z0-9_]+)", ["apps", "packages", "scripts", ".github"]);
   return unique(matches.map((value) => value.replace("process.env.", "")));
 }
 
 function extractApiBindingVars() {
-  const matches = runRg("env\\.([A-Z0-9_]+)", ["apps/sdp-api/src", "apps/sdp-api/scripts", "packages"]);
+  const matches = runRg("env\\.([A-Z0-9_]+)", [
+    "apps/sdp-api/src",
+    "apps/sdp-api/scripts",
+    "packages",
+  ]);
   return unique(matches.map((value) => value.replace("env.", "")));
 }
 

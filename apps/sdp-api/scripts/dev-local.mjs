@@ -104,14 +104,7 @@ function run(command, args, options = {}) {
   });
 }
 
-const devArgs = [
-  "dev",
-  "--local",
-  `--persist-to=${persistTo}`,
-  "--port",
-  port,
-  ...wranglerVarArgs,
-];
+const devArgs = ["dev", "--local", `--persist-to=${persistTo}`, "--port", port, ...wranglerVarArgs];
 
 try {
   if (isDopplerRun && fs.existsSync(localEnvPath)) {
