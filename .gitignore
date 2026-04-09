@@ -32,6 +32,7 @@ pnpm-debug.log*
 # Environment
 .env
 .env.local
+.env.preview
 .env.*.local
 
 # Kora keypairs and secrets (never commit)

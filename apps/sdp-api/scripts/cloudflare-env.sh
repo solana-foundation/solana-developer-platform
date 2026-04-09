@@ -2,7 +2,7 @@
 set -euo pipefail
 
 if [[ $# -lt 2 ]]; then
-  echo "Usage: $(basename "$0") <dev|qa|production> <pnpm-script>" >&2
+  echo "Usage: $(basename "$0") <dev|production> <pnpm-script>" >&2
   echo "Example: $(basename "$0") dev deploy:dev" >&2
   exit 1
 fi
@@ -12,19 +12,23 @@ shift
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 app_dir="$(cd "${script_dir}/.." && pwd)"
+repo_root="$(cd "${app_dir}/../.." && pwd)"
 
-env_file="${app_dir}/.cloudflare.${target}.env"
-example_file="${env_file}.example"
-
-if [[ ! -f "${env_file}" ]]; then
-  echo "Missing ${env_file}." >&2
-  echo "Create it from ${example_file} and add your Cloudflare credentials." >&2
+if ! command -v doppler >/dev/null 2>&1; then
+  echo "Doppler CLI is required. Install it first, then rerun this command." >&2
   exit 1
 fi
 
-set -a
-# shellcheck source=/dev/null
-source "${env_file}"
-set +a
+if [[ "${target}" != "dev" && "${target}" != "production" ]]; then
+  echo "Unsupported target '${target}'. Use dev or production, or override DOPPLER_CONFIG explicitly." >&2
+  exit 1
+fi
 
-pnpm --filter @sdp/api run "$@"
+default_config="${target}"
+if [[ "${target}" == "production" ]]; then
+  default_config="prd"
+fi
+
+config="${DOPPLER_CONFIG:-${default_config}}"
+
+exec doppler run --config "${config}" -- pnpm --dir "${repo_root}" --filter @sdp/api run "$@"

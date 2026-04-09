@@ -70,7 +70,9 @@ function resolveEnvValue(
 ): string {
   const value = process.env[name] ?? fallback[name] ?? defaultValue;
   if (!value) {
-    throw new Error(`Missing required E2E environment variable: ${name}`);
+    throw new Error(
+      `Missing required E2E environment variable: ${name}. Run the command under \`doppler run\`, or provide the value via process env. apps/sdp-web/.env.local remains available only as a local fallback.`
+    );
   }
   return value;
 }

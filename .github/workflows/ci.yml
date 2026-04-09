@@ -78,16 +78,6 @@ jobs:
     runs-on: ubuntu-latest
     env:
       DATABASE_URL: postgresql://sdp:sdp@127.0.0.1:5432/sdp
-      SOLANA_RPC_URL: ${{ vars.SOLANA_RPC_URL || secrets.SOLANA_RPC_URL || 'https://api.devnet.solana.com' }}
-      SOLANA_RPC_DEFAULT_PROVIDER: ${{ vars.SOLANA_RPC_DEFAULT_PROVIDER || secrets.SOLANA_RPC_DEFAULT_PROVIDER || 'default' }}
-      SOLANA_RPC_TRITON_URL: ${{ vars.SOLANA_RPC_TRITON_URL || secrets.SOLANA_RPC_TRITON_URL }}
-      SOLANA_RPC_TRITON_API_KEY: ${{ secrets.SOLANA_RPC_TRITON_API_KEY }}
-      SOLANA_RPC_HELIUS_URL: ${{ vars.SOLANA_RPC_HELIUS_URL || secrets.SOLANA_RPC_HELIUS_URL }}
-      SOLANA_RPC_HELIUS_API_KEY: ${{ secrets.SOLANA_RPC_HELIUS_API_KEY }}
-      SOLANA_RPC_ALCHEMY_URL: ${{ vars.SOLANA_RPC_ALCHEMY_URL || secrets.SOLANA_RPC_ALCHEMY_URL }}
-      SOLANA_RPC_ALCHEMY_API_KEY: ${{ secrets.SOLANA_RPC_ALCHEMY_API_KEY }}
-      SOLANA_RPC_QUICKNODE_URL: ${{ vars.SOLANA_RPC_QUICKNODE_URL || secrets.SOLANA_RPC_QUICKNODE_URL }}
-      SOLANA_RPC_QUICKNODE_API_KEY: ${{ secrets.SOLANA_RPC_QUICKNODE_API_KEY }}
     services:
       postgres:
         image: postgres:16-alpine
@@ -122,61 +112,23 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
-      - name: Prepare API test vars
+      - name: Validate Doppler bootstrap secret
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
         run: |
-          cat > apps/sdp-api/.dev.vars <<EOF
-          SOLANA_RPC_URL=${SOLANA_RPC_URL}
-          SOLANA_RPC_DEFAULT_PROVIDER=${SOLANA_RPC_DEFAULT_PROVIDER}
-          SOLANA_RPC_TRITON_URL=${SOLANA_RPC_TRITON_URL}
-          SOLANA_RPC_TRITON_API_KEY=${SOLANA_RPC_TRITON_API_KEY}
-          SOLANA_RPC_HELIUS_URL=${SOLANA_RPC_HELIUS_URL}
-          SOLANA_RPC_HELIUS_API_KEY=${SOLANA_RPC_HELIUS_API_KEY}
-          SOLANA_RPC_ALCHEMY_URL=${SOLANA_RPC_ALCHEMY_URL}
-          SOLANA_RPC_ALCHEMY_API_KEY=${SOLANA_RPC_ALCHEMY_API_KEY}
-          SOLANA_RPC_QUICKNODE_URL=${SOLANA_RPC_QUICKNODE_URL}
-          SOLANA_RPC_QUICKNODE_API_KEY=${SOLANA_RPC_QUICKNODE_API_KEY}
-          EOF
-
-      - name: Unit tests
-        run: pnpm test
-
-  dev_database_verification:
-    name: Dev Database Smoke
-    runs-on: ubuntu-latest
-    env:
-      DATABASE_URL: ${{ secrets.DEV_DATABASE_URL }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10.15.1
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: pnpm
-
-      - name: Install
-        run: pnpm install --frozen-lockfile
-
-      - name: Validate dev database secret
-        run: |
-          if [ -z "${DATABASE_URL}" ]; then
-            echo "DEV_DATABASE_URL must be set for remote database verification." >&2
+          if [ -z "${DOPPLER_TOKEN}" ]; then
+            echo "DOPPLER_TOKEN_CI must be configured for secret-aware CI jobs." >&2
             exit 1
           fi
 
-      - name: Migrate dev database
-        run: pnpm --filter @sdp/api db:migrate:dev
+      - name: Install Doppler CLI
+        run: scripts/doppler/install-cli.sh
 
-      - name: Verify dev database schema
-        run: pnpm --filter @sdp/api db:verify
+      - name: Unit tests
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
+          DOPPLER_CONFIG: dev_ci
+        run: pnpm test
 
   build_api:
     name: Build API
@@ -267,22 +219,7 @@ jobs:
     timeout-minutes: 30
     env:
       DATABASE_URL: postgresql://sdp:sdp@127.0.0.1:5432/sdp
-      # Devnet configuration (override as needed via repository/organization secrets)
       SOLANA_NETWORK: devnet
-      SOLANA_RPC_URL: ${{ vars.SOLANA_RPC_URL || secrets.SOLANA_RPC_URL || 'https://api.devnet.solana.com' }}
-
-      # Kora configuration (override as needed)
-      KORA_RPC_URL: ${{ secrets.KORA_RPC_URL }}
-      KORA_API_KEY: ${{ secrets.KORA_API_KEY }}
-
-      # Privy configuration for live wallet provisioning/signing integration checks
-      PRIVY_APP_ID: ${{ vars.PRIVY_APP_ID || secrets.PRIVY_APP_ID }}
-      PRIVY_APP_SECRET: ${{ secrets.PRIVY_APP_SECRET }}
-      PRIVY_API_BASE_URL: ${{ vars.PRIVY_API_BASE_URL || secrets.PRIVY_API_BASE_URL }}
-      PRIVY_REQUEST_DELAY_MS: ${{ vars.PRIVY_REQUEST_DELAY_MS || secrets.PRIVY_REQUEST_DELAY_MS }}
-
-      # Optional: tighten/loosen the fail-fast sponsor-funds check (lamports)
-      KORA_MIN_BALANCE_LAMPORTS: ${{ secrets.KORA_MIN_BALANCE_LAMPORTS }}
     services:
       postgres:
         image: postgres:16-alpine
@@ -317,19 +254,38 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
-      - name: Validate integration runtime secrets
+      - name: Validate Doppler bootstrap secret
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
         run: |
-          if [ -z "${KORA_RPC_URL}" ]; then
-            echo "KORA_RPC_URL must be set for integration tests" >&2
-            exit 1
-          fi
-          if [ -z "${PRIVY_APP_ID}" ] || [ -z "${PRIVY_APP_SECRET}" ]; then
-            echo "PRIVY_APP_ID and PRIVY_APP_SECRET must be set for integration tests" >&2
+          if [ -z "${DOPPLER_TOKEN}" ]; then
+            echo "DOPPLER_TOKEN_CI must be configured for secret-aware CI jobs." >&2
             exit 1
           fi
 
+      - name: Install Doppler CLI
+        run: scripts/doppler/install-cli.sh
+
+      - name: Validate integration runtime secrets
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
+        run: |
+          doppler run --config dev_ci -- bash <<'EOF'
+          set -euo pipefail
+          if [ -z "${KORA_RPC_URL:-}" ]; then
+            echo "KORA_RPC_URL must be set in the dev_ci Doppler config for integration tests." >&2
+            exit 1
+          fi
+          if [ -z "${PRIVY_APP_ID:-}" ] || [ -z "${PRIVY_APP_SECRET:-}" ]; then
+            echo "PRIVY_APP_ID and PRIVY_APP_SECRET must be set in the dev_ci Doppler config for integration tests." >&2
+            exit 1
+          fi
+          EOF
+
       - name: Integration tests
-        run: pnpm test:integration
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
+        run: doppler run --config dev_ci -- pnpm test:integration
 
   browser_e2e:
     name: ${{ matrix.name }}
@@ -347,30 +303,7 @@ jobs:
             artifact_suffix: issuance
     env:
       DATABASE_URL: postgresql://sdp:sdp@127.0.0.1:5432/sdp
-      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ vars.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}
-      CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
-      CLERK_JWT_TEMPLATE: ${{ vars.CLERK_JWT_TEMPLATE || 'sdp-api' }}
-      E2E_CLERK_ORG_NAME: ${{ vars.E2E_CLERK_ORG_NAME || 'Solana' }}
-      E2E_CLERK_TEST_EMAIL: ${{ vars.E2E_CLERK_TEST_EMAIL || 'e2e-smoke+sdp-web@example.com' }}
       SOLANA_NETWORK: devnet
-      SOLANA_RPC_URL: ${{ vars.SOLANA_RPC_URL || secrets.SOLANA_RPC_URL || 'https://api.devnet.solana.com' }}
-      SOLANA_RPC_DEFAULT_PROVIDER: ${{ vars.SOLANA_RPC_DEFAULT_PROVIDER || secrets.SOLANA_RPC_DEFAULT_PROVIDER || 'default' }}
-      SOLANA_RPC_TRITON_URL: ${{ vars.SOLANA_RPC_TRITON_URL || secrets.SOLANA_RPC_TRITON_URL }}
-      SOLANA_RPC_TRITON_API_KEY: ${{ secrets.SOLANA_RPC_TRITON_API_KEY }}
-      SOLANA_RPC_HELIUS_URL: ${{ vars.SOLANA_RPC_HELIUS_URL || secrets.SOLANA_RPC_HELIUS_URL }}
-      SOLANA_RPC_HELIUS_API_KEY: ${{ secrets.SOLANA_RPC_HELIUS_API_KEY }}
-      SOLANA_RPC_ALCHEMY_URL: ${{ vars.SOLANA_RPC_ALCHEMY_URL || secrets.SOLANA_RPC_ALCHEMY_URL }}
-      SOLANA_RPC_ALCHEMY_API_KEY: ${{ secrets.SOLANA_RPC_ALCHEMY_API_KEY }}
-      SOLANA_RPC_QUICKNODE_URL: ${{ vars.SOLANA_RPC_QUICKNODE_URL || secrets.SOLANA_RPC_QUICKNODE_URL }}
-      SOLANA_RPC_QUICKNODE_API_KEY: ${{ secrets.SOLANA_RPC_QUICKNODE_API_KEY }}
-      PRIVY_APP_ID: ${{ vars.PRIVY_APP_ID || secrets.PRIVY_APP_ID }}
-      PRIVY_APP_SECRET: ${{ secrets.PRIVY_APP_SECRET }}
-      PRIVY_API_BASE_URL: ${{ vars.PRIVY_API_BASE_URL || secrets.PRIVY_API_BASE_URL }}
-      PRIVY_REQUEST_DELAY_MS: ${{ vars.PRIVY_REQUEST_DELAY_MS || secrets.PRIVY_REQUEST_DELAY_MS }}
-      KORA_RPC_URL: ${{ secrets.KORA_RPC_URL }}
-      KORA_API_KEY: ${{ secrets.KORA_API_KEY }}
-      API_KEY_PEPPER: ${{ secrets.API_KEY_PEPPER || 'playwright-ci-pepper' }}
-      CUSTODY_ENCRYPTION_KEY: ${{ secrets.CUSTODY_ENCRYPTION_KEY }}
       PLAYWRIGHT_API_URL: http://127.0.0.1:8787
       PLAYWRIGHT_API_PORT: "8787"
       PLAYWRIGHT_API_PERSIST_PATH: .wrangler/state-playwright
@@ -410,24 +343,43 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
-      - name: Validate browser e2e runtime secrets
+      - name: Validate Doppler bootstrap secret
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
         run: |
-          if [ -z "${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY}" ] || [ -z "${CLERK_SECRET_KEY}" ]; then
-            echo "Clerk publishable and secret keys must be set for browser e2e" >&2
-            exit 1
-          fi
-          if [ -z "${PRIVY_APP_ID}" ] || [ -z "${PRIVY_APP_SECRET}" ]; then
-            echo "PRIVY_APP_ID and PRIVY_APP_SECRET must be set for browser e2e" >&2
-            exit 1
-          fi
-          if [ -z "${KORA_RPC_URL}" ]; then
-            echo "KORA_RPC_URL must be set for browser e2e" >&2
+          if [ -z "${DOPPLER_TOKEN}" ]; then
+            echo "DOPPLER_TOKEN_CI must be configured for secret-aware CI jobs." >&2
             exit 1
           fi
 
-      - name: Derive Clerk issuer for local API
+      - name: Install Doppler CLI
+        run: scripts/doppler/install-cli.sh
+
+      - name: Validate browser e2e runtime secrets
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
         run: |
-          CLERK_HOST=$(node - <<'NODE'
+          doppler run --config dev_ci -- bash <<'EOF'
+          set -euo pipefail
+          if [ -z "${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:-}" ] || [ -z "${CLERK_SECRET_KEY:-}" ]; then
+            echo "Clerk publishable and secret keys must be set in the dev_ci Doppler config for browser e2e." >&2
+            exit 1
+          fi
+          if [ -z "${PRIVY_APP_ID:-}" ] || [ -z "${PRIVY_APP_SECRET:-}" ]; then
+            echo "PRIVY_APP_ID and PRIVY_APP_SECRET must be set in the dev_ci Doppler config for browser e2e." >&2
+            exit 1
+          fi
+          if [ -z "${KORA_RPC_URL:-}" ]; then
+            echo "KORA_RPC_URL must be set in the dev_ci Doppler config for browser e2e." >&2
+            exit 1
+          fi
+          EOF
+
+      - name: Derive Clerk issuer for local API
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
+        run: |
+          CLERK_HOST=$(doppler run --config dev_ci -- node - <<'NODE'
           const key = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY || "";
           const encoded = key.split("_").slice(2).join("_");
           if (!encoded) {
@@ -444,56 +396,23 @@ jobs:
           )
           echo "CLERK_ISSUER=https://${CLERK_HOST}" >> "$GITHUB_ENV"
           echo "CLERK_JWKS_URL=https://${CLERK_HOST}/.well-known/jwks.json" >> "$GITHUB_ENV"
-          echo "SDP_API_BASE_URL=http://127.0.0.1:8787" >> "$GITHUB_ENV"
-          echo "NEXT_PUBLIC_SDP_API_BASE_URL=http://127.0.0.1:8787" >> "$GITHUB_ENV"
-
-      - name: Prepare local API runtime vars
-        run: |
-          DEFAULT_CUSTODY_ENCRYPTION_KEY=$(node -e 'process.stdout.write(Buffer.alloc(32, 7).toString("base64"))')
-
-          write_var() {
-            local key="$1"
-            local value="${2-}"
-            if [ -n "$value" ]; then
-              printf '%s=%s\n' "$key" "$value" >> apps/sdp-api/.dev.vars
-            fi
-          }
-
-          : > apps/sdp-api/.dev.vars
-          write_var CLERK_SECRET_KEY "${CLERK_SECRET_KEY}"
-          write_var CLERK_ISSUER "${CLERK_ISSUER}"
-          write_var CLERK_JWKS_URL "${CLERK_JWKS_URL}"
-          write_var CLERK_JWT_TEMPLATE "${CLERK_JWT_TEMPLATE}"
-          write_var FRONTEND_URL "http://localhost:3000"
-          write_var PRIVY_APP_ID "${PRIVY_APP_ID}"
-          write_var PRIVY_APP_SECRET "${PRIVY_APP_SECRET}"
-          write_var PRIVY_API_BASE_URL "${PRIVY_API_BASE_URL:-https://api.privy.io/v1}"
-          write_var PRIVY_REQUEST_DELAY_MS "${PRIVY_REQUEST_DELAY_MS}"
-          write_var CUSTODY_ENCRYPTION_KEY "${CUSTODY_ENCRYPTION_KEY:-$DEFAULT_CUSTODY_ENCRYPTION_KEY}"
-          write_var API_KEY_PEPPER "${API_KEY_PEPPER}"
-          write_var SOLANA_NETWORK "${SOLANA_NETWORK}"
-          write_var SOLANA_RPC_URL "${SOLANA_RPC_URL}"
-          write_var SOLANA_RPC_DEFAULT_PROVIDER "${SOLANA_RPC_DEFAULT_PROVIDER}"
-          write_var SOLANA_RPC_TRITON_URL "${SOLANA_RPC_TRITON_URL}"
-          write_var SOLANA_RPC_TRITON_API_KEY "${SOLANA_RPC_TRITON_API_KEY}"
-          write_var SOLANA_RPC_HELIUS_URL "${SOLANA_RPC_HELIUS_URL}"
-          write_var SOLANA_RPC_HELIUS_API_KEY "${SOLANA_RPC_HELIUS_API_KEY}"
-          write_var SOLANA_RPC_ALCHEMY_URL "${SOLANA_RPC_ALCHEMY_URL}"
-          write_var SOLANA_RPC_ALCHEMY_API_KEY "${SOLANA_RPC_ALCHEMY_API_KEY}"
-          write_var SOLANA_RPC_QUICKNODE_URL "${SOLANA_RPC_QUICKNODE_URL}"
-          write_var SOLANA_RPC_QUICKNODE_API_KEY "${SOLANA_RPC_QUICKNODE_API_KEY}"
-          write_var KORA_RPC_URL "${KORA_RPC_URL}"
-          write_var KORA_API_KEY "${KORA_API_KEY}"
-          write_var SIGNING_PROVIDER "privy"
 
       - name: Install Playwright browser
         run: pnpm --filter sdp-web exec playwright install --with-deps chromium
 
       - name: Build web app for Playwright
-        run: pnpm --filter sdp-web build
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
+          DOPPLER_CONFIG: dev_ci
+          SDP_API_BASE_URL: ${{ env.PLAYWRIGHT_API_URL }}
+          NEXT_PUBLIC_SDP_API_BASE_URL: ${{ env.PLAYWRIGHT_API_URL }}
+        run: scripts/doppler/run-with-config.sh pnpm --filter sdp-web build
 
       - name: Run browser e2e suite
-        run: pnpm --filter sdp-web run ${{ matrix.test_script }}
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
+          DOPPLER_CONFIG: dev_ci
+        run: scripts/doppler/run-with-config.sh pnpm --filter sdp-web run ${{ matrix.test_script }}
 
       - name: Upload Playwright artifacts
         if: always()
