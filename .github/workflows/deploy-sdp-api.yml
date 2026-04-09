@@ -50,6 +50,7 @@ jobs:
     environment: ${{ github.event_name == 'workflow_dispatch' && inputs.environment || (startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/tags/solana-developer-platform-v')) && 'production' || 'dev' }}
     env:
       TARGET_ENV: ${{ github.event_name == 'workflow_dispatch' && inputs.environment || (startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/tags/solana-developer-platform-v')) && 'production' || 'dev' }}
+      DOPPLER_CONFIG_NAME: ${{ ((github.event_name == 'workflow_dispatch' && inputs.environment) || ((startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/tags/solana-developer-platform-v')) && 'production') || 'dev') == 'production' && 'prd' || 'dev' }}
       DEPLOY_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || (startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/tags/solana-developer-platform-v')) && github.ref_name || github.sha }}
 
     steps:
@@ -98,21 +99,47 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
+      - name: Validate Doppler bootstrap secret
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN }}
+        run: |
+          if [ -z "${DOPPLER_TOKEN}" ]; then
+            echo "DOPPLER_TOKEN must be configured on the ${TARGET_ENV} GitHub environment." >&2
+            exit 1
+          fi
+
+      - name: Install Doppler CLI
+        uses: dopplerhq/cli-action@v4
+
       - name: Migrate Postgres
         if: ${{ github.event_name == 'push' || inputs.run_migrations }}
         env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN }}
         run: |
-          if [ -z "${DATABASE_URL}" ]; then
-            echo "DATABASE_URL is not configured for ${TARGET_ENV}; skipping Postgres migrations."
+          doppler run --config "${DOPPLER_CONFIG_NAME}" -- bash <<'EOF'
+          set -euo pipefail
+          if [ -z "${DATABASE_URL:-}" ]; then
+            echo "DATABASE_URL is not configured in Doppler config ${DOPPLER_CONFIG_NAME}; skipping Postgres migrations."
             exit 0
           fi
-          pnpm --filter @sdp/api db:migrate:${TARGET_ENV}
+          pnpm --filter @sdp/api "db:migrate:${TARGET_ENV}"
+          EOF
+
+      - name: Sync Worker secrets
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN }}
+        run: |
+          doppler run --config "${DOPPLER_CONFIG_NAME}" -- bash <<'EOF'
+          set -euo pipefail
+          if [ -z "${CLOUDFLARE_API_TOKEN:-}" ] || [ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
+            echo "CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID must be present in Doppler config ${DOPPLER_CONFIG_NAME}." >&2
+            exit 1
+          fi
+          node scripts/project-secrets.mjs cloudflare --out "${RUNNER_TEMP}/cloudflare-secrets.json"
+          pnpm --filter @sdp/api exec wrangler secret bulk "${RUNNER_TEMP}/cloudflare-secrets.json" --env "${TARGET_ENV}"
+          EOF
 
       - name: Deploy Worker
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          workingDirectory: apps/sdp-api
-          command: deploy --env ${{ env.TARGET_ENV }}
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN }}
+        run: doppler run --config "${DOPPLER_CONFIG_NAME}" -- pnpm --filter @sdp/api exec wrangler deploy --env "${TARGET_ENV}"

@@ -12,6 +12,7 @@ import { prettyJSON } from "hono/pretty-json";
 import { secureHeaders } from "hono/secure-headers";
 
 import { AppError } from "@/lib/errors";
+import { withProcessEnvFallback } from "@/lib/runtime-env";
 import { corsMiddleware } from "@/middleware/cors";
 import { skipRateLimitPaths } from "@/middleware/rate-limit";
 import { requestIdMiddleware } from "@/middleware/request-id";
@@ -333,15 +334,16 @@ app.notFound((c) => {
 // invoke it for cron triggers, while preserving app.request() for tests.
 const worker = {
   fetch(request: Request, env: Env, ctx: ExecutionContext): Response | Promise<Response> {
-    return app.fetch(request, env, ctx);
+    return app.fetch(request, withProcessEnvFallback(env), ctx);
   },
   async scheduled(
     _controller: ScheduledController,
     env: Env,
     ctx: ExecutionContext
   ): Promise<void> {
-    const runPendingTransferTracking = () => trackPendingTransfers(env);
-    if (!env.SENTRY_DSN) {
+    const runtimeEnv = withProcessEnvFallback(env);
+    const runPendingTransferTracking = () => trackPendingTransfers(runtimeEnv);
+    if (!runtimeEnv.SENTRY_DSN) {
       ctx.waitUntil(runPendingTransferTracking());
       return;
     }
@@ -361,7 +363,11 @@ const worker = {
     env?: Env | Record<string, unknown>,
     executionCtx?: ExecutionContext
   ) {
-    return app.request(input, init, env, executionCtx);
+    if (!env) {
+      return app.request(input, init, env, executionCtx);
+    }
+
+    return app.request(input, init, withProcessEnvFallback(env as Env), executionCtx);
   },
 } satisfies ExportedHandler<Env> & {
   request: typeof app.request;
