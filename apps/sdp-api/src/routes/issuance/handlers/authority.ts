@@ -4,7 +4,7 @@ import { AppError, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { assertValidAddress } from "@/lib/solana";
 import { AuditService } from "@/services/audit.service";
-import { createMosaicService } from "@/services/mosaic";
+import { type MosaicService, createMosaicService } from "@/services/mosaic";
 import { createRpc, simulateTransaction } from "@/services/solana/rpc";
 import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
@@ -19,6 +19,7 @@ import {
 import { buildIdempotencyMetadata } from "./idempotency";
 
 type AppContext = Context<{ Bindings: Env }>;
+type MosaicAuthorityRole = Parameters<MosaicService["prepareUpdateAuthority"]>[0]["role"];
 
 type AuthorityUpdate = {
   mintAuthority?: string | null;
@@ -28,16 +29,16 @@ type AuthorityUpdate = {
   permanentDelegate?: string | null;
 };
 
-const mapAuthorityRole = (role: AuthorityRole): AuthorityType | "Metadata" => {
+const mapAuthorityRole = (role: AuthorityRole): MosaicAuthorityRole => {
   switch (role) {
     case "mint":
-      return AuthorityType.MintTokens;
+      return AuthorityType.MintTokens as MosaicAuthorityRole;
     case "freeze":
-      return AuthorityType.FreezeAccount;
+      return AuthorityType.FreezeAccount as MosaicAuthorityRole;
     case "permanentDelegate":
-      return AuthorityType.PermanentDelegate;
+      return AuthorityType.PermanentDelegate as MosaicAuthorityRole;
     case "metadata":
-      return "Metadata";
+      return "Metadata" as MosaicAuthorityRole;
   }
 };
 

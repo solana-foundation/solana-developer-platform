@@ -5,11 +5,10 @@ import { created, paginated, success } from "@/lib/response";
 import { type Address, assertValidAddress } from "@/lib/solana";
 import { AuditService } from "@/services/audit.service";
 import { createMosaicService } from "@/services/mosaic";
-import { createRpc } from "@/services/solana/rpc";
+import { createRpcForSdk } from "@/services/solana/rpc";
 import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
 import type { FrozenAccountResponse } from "@sdp/types";
-import type { Rpc, SolanaRpcApi } from "@solana/kit";
 import { resolveTokenAccount } from "@solana/mosaic-sdk";
 import type { Context } from "hono";
 import { freezeSchema, unfreezeSchema } from "../schemas";
@@ -17,6 +16,7 @@ import { resolveAuthoritySigner, resolveCurrentAuthorityForRole } from "./author
 import { buildIdempotencyMetadata } from "./idempotency";
 
 type AppContext = Context<{ Bindings: Env }>;
+type MosaicSdkRpc = Parameters<typeof resolveTokenAccount>[0];
 
 function toFreezeOperationAppError(error: unknown): AppError | null {
   if (!(error instanceof Error)) {
@@ -66,7 +66,7 @@ async function resolveFreezeTarget(
   requestedAddress: Address,
   mintAddress: Address
 ): Promise<{ tokenAccount: Address }> {
-  const rpc = createRpc(env) as Rpc<SolanaRpcApi>;
+  const rpc = createRpcForSdk<MosaicSdkRpc>(env);
   const resolved = await resolveTokenAccount(rpc, requestedAddress, mintAddress);
 
   if (!resolved.isInitialized) {

@@ -6,10 +6,9 @@ import { success } from "@/lib/response";
 import { type Address, assertValidAddress } from "@/lib/solana";
 import { AuditService } from "@/services/audit.service";
 import { createOrgSigner, createToken2022Service } from "@/services/solana";
-import { createRpc } from "@/services/solana/rpc";
+import { createRpcForSdk } from "@/services/solana/rpc";
 import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
-import type { Rpc, SolanaRpcApi } from "@solana/kit";
 import { resolveTokenAccount } from "@solana/mosaic-sdk";
 import type { Context } from "hono";
 import { burnSchema } from "../schemas";
@@ -20,6 +19,7 @@ import {
 } from "./token-operation-validation";
 
 type AppContext = Context<{ Bindings: Env }>;
+type MosaicSdkRpc = Parameters<typeof resolveTokenAccount>[0];
 
 function toBurnOperationAppError(error: unknown): AppError | null {
   if (!(error instanceof Error)) {
@@ -65,7 +65,7 @@ async function resolveValidatedBurnSource(
   amountBaseUnits: bigint,
   tokenSymbol: string
 ): Promise<Address> {
-  const rpc = createRpc(env) as Rpc<SolanaRpcApi>;
+  const rpc = createRpcForSdk<MosaicSdkRpc>(env);
 
   let authorityAta: Awaited<ReturnType<typeof resolveTokenAccount>>;
   try {

@@ -88,7 +88,7 @@ function assertAllowedRpcHeaders(
 }
 
 // Type for RPC client
-type SolanaRpc = ReturnType<typeof createSolanaRpc>;
+export type SolanaRpc = ReturnType<typeof createSolanaRpc>;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // RPC Client Factory
@@ -107,6 +107,17 @@ export function createRpc(env: Env, options?: RpcClientOptions): SolanaRpc {
   }
 
   return createSolanaRpc(rpcUrl);
+}
+
+export type SolanaRpcSdkBridge<TSdkRpc> = SolanaRpc & TSdkRpc;
+
+export function createRpcForSdk<TSdkRpc>(
+  env: Env,
+  options?: RpcClientOptions
+): SolanaRpcSdkBridge<TSdkRpc> {
+  // Mosaic SDK still publishes Solana Kit v5 RPC types. The runtime client shape is
+  // compatible, so keep the cross-version cast at the boundary where SDK code is called.
+  return createRpc(env, options) as unknown as SolanaRpcSdkBridge<TSdkRpc>;
 }
 
 /**
@@ -512,4 +523,4 @@ export async function getSignatureStatuses(
 }
 
 // Re-export types
-export type { SolanaRpc, Commitment, Signature, Blockhash };
+export type { Commitment, Signature, Blockhash };
