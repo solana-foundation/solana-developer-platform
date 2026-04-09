@@ -17,7 +17,7 @@ export function SentryFeedbackWidget() {
     <button
       ref={ref}
       type="button"
-      className="flex h-10 items-center gap-3 rounded-[10px] px-3 text-[16px] leading-[24px] text-[rgba(28,28,29,0.76)] transition-colors hover:bg-[rgba(28,28,29,0.06)] hover:text-[#1c1c1d]"
+      className="flex h-10 w-full items-center gap-3 rounded-[10px] px-3 text-[16px] leading-[24px] font-[inherit] text-[rgba(28,28,29,0.76)] transition-colors hover:bg-[rgba(28,28,29,0.06)] hover:text-[#1c1c1d]"
     >
       <MessageSquarePlus className="h-5 w-5" strokeWidth={1.9} />
       <span>Feedback</span>
