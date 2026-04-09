@@ -13,6 +13,30 @@ Sentry.init({
       maskAllText: true,
       blockAllMedia: true,
     }),
+    Sentry.feedbackIntegration({
+      autoInject: false,
+      showBranding: false,
+      enableScreenshot: true,
+      colorScheme: "light",
+      themeLight: {
+        background: "#e9e7de",
+        foreground: "#1c1c1d",
+        accentBackground: "#0f0f10",
+        accentForeground: "#ffffff",
+        border: "rgba(28,28,29,0.16)",
+        inputBackground: "#ffffff",
+        inputForeground: "#1c1c1d",
+        inputBorder: "rgba(28,28,29,0.16)",
+        submitBackground: "#0f0f10",
+        submitForeground: "#ffffff",
+        submitBackgroundHover: "#000000",
+      },
+      formTitle: "Share feedback",
+      submitButtonLabel: "Send feedback",
+      messagePlaceholder:
+        "Describe what you expected and what happened instead.",
+      successMessageText: "Thanks for your feedback!",
+    }),
   ],
 
   // Define how likely traces are sampled. Adjust this value in production, or use tracesSampler for greater control.
