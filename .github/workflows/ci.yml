@@ -285,7 +285,8 @@ jobs:
       - name: Integration tests
         env:
           DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
-        run: doppler run --config dev_ci -- pnpm test:integration
+          DOPPLER_CONFIG: dev_ci
+        run: pnpm test:integration
 
   browser_e2e:
     name: ${{ matrix.name }}
