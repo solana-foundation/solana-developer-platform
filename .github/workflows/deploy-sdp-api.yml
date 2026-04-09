@@ -109,7 +109,7 @@ jobs:
           fi
 
       - name: Install Doppler CLI
-        run: scripts/doppler/install-cli.sh
+        uses: dopplerhq/cli-action@v4
 
       - name: Migrate Postgres
         if: ${{ github.event_name == 'push' || inputs.run_migrations }}

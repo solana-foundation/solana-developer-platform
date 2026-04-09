@@ -122,7 +122,7 @@ jobs:
           fi
 
       - name: Install Doppler CLI
-        run: scripts/doppler/install-cli.sh
+        uses: dopplerhq/cli-action@v4
 
       - name: Unit tests
         env:
@@ -264,7 +264,7 @@ jobs:
           fi
 
       - name: Install Doppler CLI
-        run: scripts/doppler/install-cli.sh
+        uses: dopplerhq/cli-action@v4
 
       - name: Validate integration runtime secrets
         env:
@@ -354,7 +354,7 @@ jobs:
           fi
 
       - name: Install Doppler CLI
-        run: scripts/doppler/install-cli.sh
+        uses: dopplerhq/cli-action@v4
 
       - name: Validate browser e2e runtime secrets
         env:
