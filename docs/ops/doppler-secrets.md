@@ -7,7 +7,7 @@ The runtime model does not change:
 - `wrangler.toml` remains the source of truth for Worker bindings and committed non-secret vars
 - Cloudflare remains the deployed runtime store for Worker secrets
 - Vercel remains the deployed runtime store for `sdp-web` and `sdp-docs`
-- GitHub Actions keeps only Doppler bootstrap tokens
+- GitHub Actions keeps only Doppler bootstrap tokens plus non-secret deploy metadata
 
 ## Doppler Shape
 
@@ -45,15 +45,19 @@ Before merging the PR:
    - repository secret `DOPPLER_TOKEN_CI`
    - `dev` environment secret `DOPPLER_TOKEN`
    - `production` environment secret `DOPPLER_TOKEN`
-4. Leave `RELEASE_PLEASE_TOKEN` unchanged in GitHub.
-5. Configure Doppler sync to Vercel for both apps:
+4. Set GitHub environment variables for API deploy migrations:
+   - `GCP_WORKLOAD_IDENTITY_PROVIDER`
+   - `GCP_SERVICE_ACCOUNT`
+   - `CLOUD_SQL_INSTANCE_CONNECTION_NAME`
+5. Leave `RELEASE_PLEASE_TOKEN` unchanged in GitHub.
+6. Configure Doppler sync to Vercel for both apps:
    - `apps/sdp-web`
    - `apps/sdp-docs`
-6. Map Doppler configs to Vercel environments:
+7. Map Doppler configs to Vercel environments:
    - `dev` -> Development
    - `stg` -> Preview
    - `prd` -> Production
-7. Keep old GitHub, Cloudflare, and Vercel secrets in place for one successful deploy cycle as rollback insurance, but do not let repo workflows read them anymore.
+8. Keep old GitHub, Cloudflare, and Vercel secrets in place for one successful deploy cycle as rollback insurance, but do not let repo workflows read them anymore.
 
 ## Required Doppler Coverage
 
@@ -105,7 +109,17 @@ Do not keep `apps/sdp-api/.dev.vars` in place while using `doppler run`. The loc
 
 - Secret-aware CI jobs fetch runtime env directly from Doppler with `DOPPLER_TOKEN_CI`.
 - The API deploy workflow fetches deploy-time env from the target Doppler config using the GitHub environment secret `DOPPLER_TOKEN`.
+- The API deploy workflow reads non-secret Cloud SQL identity metadata from GitHub environment variables.
+- Postgres migrations connect through Google Workload Identity and Cloud SQL Auth Proxy; the Doppler `DATABASE_URL` host is rewritten to the local proxy only for the migration process.
 - The deploy workflow syncs the allowlisted Worker secret set via `wrangler secret bulk` before `wrangler deploy`.
+
+Keep these deploy identity values in GitHub environment variables rather than Doppler:
+
+- `GCP_WORKLOAD_IDENTITY_PROVIDER`
+- `GCP_SERVICE_ACCOUNT`
+- `CLOUD_SQL_INSTANCE_CONNECTION_NAME`
+
+They are not application secrets, and the GitHub workflow needs them before it can authenticate to Google Cloud and fetch Doppler-backed runtime configuration.
 
 ## Rollback
 

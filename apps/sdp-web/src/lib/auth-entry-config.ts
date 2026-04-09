@@ -19,24 +19,11 @@ export function parseBooleanEnv(value: string | undefined): boolean | null {
   return null;
 }
 
-function getLegacyAuthEntryEnabled(): boolean | null {
+export function getDefaultAuthEntryEnabled(): boolean {
   const configured = parseBooleanEnv(process.env.SDP_AUTH_ENTRY_ENABLED);
-
-  return configured;
-}
-
-function getDefaultEntryEnabled(
-  envName: "SDP_SIGN_IN_ENTRY_ENABLED" | "SDP_SIGN_UP_ENTRY_ENABLED"
-) {
-  const configured = parseBooleanEnv(process.env[envName]);
 
   if (configured !== null) {
     return configured;
-  }
-
-  const legacyConfigured = getLegacyAuthEntryEnabled();
-  if (legacyConfigured !== null) {
-    return legacyConfigured;
   }
 
   // Vercel preview deployments stay open by default, but production stays closed
@@ -45,20 +32,16 @@ function getDefaultEntryEnabled(
 }
 
 export function getDefaultSignInEntryEnabled(): boolean {
-  return getDefaultEntryEnabled("SDP_SIGN_IN_ENTRY_ENABLED");
+  return getDefaultAuthEntryEnabled();
 }
 
 export function getDefaultSignUpEntryEnabled(): boolean {
-  return getDefaultEntryEnabled("SDP_SIGN_UP_ENTRY_ENABLED");
+  return getDefaultAuthEntryEnabled();
 }
 
 export function getDefaultAuthEntryPath(): "/" | "/sign-in" | "/sign-up" {
-  if (getDefaultSignInEntryEnabled()) {
+  if (getDefaultAuthEntryEnabled()) {
     return "/sign-in";
-  }
-
-  if (getDefaultSignUpEntryEnabled()) {
-    return "/sign-up";
   }
 
   return "/";

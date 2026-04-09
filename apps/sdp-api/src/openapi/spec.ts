@@ -91,7 +91,7 @@ export function createOpenApiDocument(): OpenAPIObject {
       },
       { name: "Compliance", description: "Risk and compliance screening endpoints." },
       { name: "Admin", description: "Administrative allowlist management." },
-      { name: "Onboarding", description: "Clerk organization onboarding and linking." },
+      { name: "Onboarding", description: "Clerk organization sync status." },
     ],
     servers: [
       {

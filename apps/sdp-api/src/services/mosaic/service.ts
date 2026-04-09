@@ -14,7 +14,7 @@
 
 import { parseDecimalAmount } from "@/lib/amount";
 import type { FeePaymentPort } from "@/services/ports/fee-payment.port";
-import { confirmTransaction, createRpc } from "@/services/solana/rpc";
+import { confirmTransaction, createRpcForSdk } from "@/services/solana/rpc";
 import type { Env } from "@/types/env";
 import { getTransferSolInstruction } from "@solana-program/system";
 import {
@@ -88,19 +88,19 @@ import { safeStringify } from "./utils";
 // Mosaic Service
 // ═══════════════════════════════════════════════════════════════════════════
 
+type MosaicSdkRpc = Parameters<typeof resolveTokenAccount>[0];
+
 export class MosaicService {
   private env: Env;
   private signer: TransactionSigner;
   private feePayment?: FeePaymentPort;
-  private rpc: Rpc<SolanaRpcApi>;
+  private rpc: Rpc<SolanaRpcApi> & MosaicSdkRpc;
 
   constructor(env: Env, signer: TransactionSigner, feePayment?: FeePaymentPort) {
     this.env = env;
     this.signer = signer;
     this.feePayment = feePayment;
-    // Cast is safe - createRpc returns a union of Rpc types that are all compatible
-    // with the SolanaRpcApi interface that Mosaic SDK expects
-    this.rpc = createRpc(env) as Rpc<SolanaRpcApi>;
+    this.rpc = createRpcForSdk<MosaicSdkRpc>(env);
   }
 
   private isRetryableRpcError(error: unknown): boolean {

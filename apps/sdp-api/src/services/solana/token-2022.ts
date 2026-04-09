@@ -33,12 +33,19 @@ import {
   resolveTokenAccount,
 } from "@solana/mosaic-sdk";
 import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
-import { type SimulationResult, confirmTransaction, createRpc, simulateTransaction } from "./rpc";
+import {
+  type SimulationResult,
+  confirmTransaction,
+  createRpcForSdk,
+  simulateTransaction,
+} from "./rpc";
 import { safeStringify } from "./token-2022.utils";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Types
 // ═══════════════════════════════════════════════════════════════════════════
+
+type MosaicSdkRpc = Parameters<typeof resolveTokenAccount>[0];
 
 export interface CreateMintOptions {
   /** Token metadata */
@@ -303,7 +310,7 @@ export class Token2022Service {
    * Create a new Token-2022 mint and deploy it to Solana
    */
   async createMint(options: CreateMintOptions): Promise<CreateMintResult> {
-    const rpc = createRpc(this.env) as Rpc<SolanaRpcApi>;
+    const rpc = createRpcForSdk<MosaicSdkRpc>(this.env);
     const mintKeypair = await generateKeyPairSigner();
     const feePayer = await this.resolveFeePayerSigner();
 
@@ -335,7 +342,7 @@ export class Token2022Service {
     options: CreateMintOptions,
     requestSimulation = false
   ): Promise<PreparedTransaction & { mint: Address }> {
-    const rpc = createRpc(this.env) as Rpc<SolanaRpcApi>;
+    const rpc = createRpcForSdk<MosaicSdkRpc>(this.env);
     const mintKeypair = await generateKeyPairSigner();
     const feePayer = await this.resolveFeePayerSigner();
 
@@ -384,7 +391,7 @@ export class Token2022Service {
    * Mint tokens to a destination address
    */
   async mintTo(options: MintToOptions): Promise<MintToResult> {
-    const rpc = createRpc(this.env) as Rpc<SolanaRpcApi>;
+    const rpc = createRpcForSdk<MosaicSdkRpc>(this.env);
     const feePayer = await this.resolveFeePayerSigner(options.mintAuthority);
 
     const fullTx = await createMintToTransaction(
@@ -413,7 +420,7 @@ export class Token2022Service {
     options: Omit<MintToOptions, "mintAuthority"> & { mintAuthority: Address },
     requestSimulation = false
   ): Promise<PreparedTransaction & { tokenAccount: Address }> {
-    const rpc = createRpc(this.env) as Rpc<SolanaRpcApi>;
+    const rpc = createRpcForSdk<MosaicSdkRpc>(this.env);
     const feePayer = await this.resolveFeePayerSigner();
 
     const fullTx = await createMintToTransaction(
@@ -460,7 +467,7 @@ export class Token2022Service {
    * Burn tokens from a token account
    */
   async burn(options: BurnOptions): Promise<BurnResult> {
-    const rpc = createRpc(this.env) as Rpc<SolanaRpcApi>;
+    const rpc = createRpcForSdk<MosaicSdkRpc>(this.env);
 
     const authorityAta = await resolveTokenAccount(rpc, options.authority.address, options.mint);
     const normalizedSource =
@@ -496,7 +503,7 @@ export class Token2022Service {
     options: Omit<BurnOptions, "authority"> & { authority: Address },
     requestSimulation = false
   ): Promise<PreparedTransaction> {
-    const rpc = createRpc(this.env) as Rpc<SolanaRpcApi>;
+    const rpc = createRpcForSdk<MosaicSdkRpc>(this.env);
     const feePayer = await this.resolveFeePayerSigner();
 
     const authorityAta = await resolveTokenAccount(rpc, options.authority, options.mint);
@@ -556,7 +563,7 @@ export class Token2022Service {
       };
     }
 
-    const rpc = createRpc(this.env) as Rpc<SolanaRpcApi>;
+    const rpc = createRpcForSdk<MosaicSdkRpc>(this.env);
     const feePayer = await this.resolveFeePayerSigner(options.freezeAuthority);
 
     const fullTx = await getFreezeTransaction({
@@ -585,7 +592,7 @@ export class Token2022Service {
       };
     }
 
-    const rpc = createRpc(this.env) as Rpc<SolanaRpcApi>;
+    const rpc = createRpcForSdk<MosaicSdkRpc>(this.env);
     const feePayer = await this.resolveFeePayerSigner(options.freezeAuthority);
 
     const fullTx = await getThawTransaction({
@@ -610,7 +617,7 @@ export class Token2022Service {
     options: Omit<FreezeOptions, "freezeAuthority"> & { freezeAuthority: Address },
     requestSimulation = false
   ): Promise<PreparedTransaction> {
-    const rpc = createRpc(this.env) as Rpc<SolanaRpcApi>;
+    const rpc = createRpcForSdk<MosaicSdkRpc>(this.env);
     const feePayer = await this.resolveFeePayerSigner();
     const authority = createNoopSigner(options.freezeAuthority);
 
@@ -652,7 +659,7 @@ export class Token2022Service {
     options: Omit<FreezeOptions, "freezeAuthority"> & { freezeAuthority: Address },
     requestSimulation = false
   ): Promise<PreparedTransaction> {
-    const rpc = createRpc(this.env) as Rpc<SolanaRpcApi>;
+    const rpc = createRpcForSdk<MosaicSdkRpc>(this.env);
     const feePayer = await this.resolveFeePayerSigner();
     const authority = createNoopSigner(options.freezeAuthority);
 

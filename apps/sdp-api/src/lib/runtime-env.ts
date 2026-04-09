@@ -19,7 +19,6 @@ const PROCESS_ENV_FALLBACK_KEYS = [
   "CLERK_WEBHOOK_SECRET",
   "ALLOWLIST_ADMIN_KEY",
   "ALLOWLIST_ADMIN_ORG_ID",
-  "ALLOWLIST_ADMIN_ORG_SLUG",
   "SOLANA_RPC_URL",
   "SOLANA_RPC_DEFAULT_PROVIDER",
   "SOLANA_RPC_TRITON_URL",
@@ -121,7 +120,7 @@ export function withProcessEnvFallback(bindings: Env): Env {
       merged = { ...bindings };
     }
 
-    merged[key] = fallback as Env[typeof key];
+    Object.assign(merged, { [key]: fallback });
   }
 
   return merged ?? bindings;

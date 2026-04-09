@@ -27,7 +27,6 @@ import {
   frozenAccountResponseSchema,
   frozenAccountSchema,
   inviteMemberResponseSchema,
-  linkOrganizationResponseSchema,
   listApiKeysResponseSchema,
   listMembersResponseSchema,
   listProjectApiKeysResponseSchema,
@@ -143,7 +142,6 @@ export const tokenTemplateResponse = successResponseSchema(tokenTemplateResponse
 export const listTemplatesResponse = successResponseSchema(listTemplatesResponseSchema);
 
 export const onboardingStatusResponse = successResponseSchema(onboardingStatusResponseSchema);
-export const linkOrganizationResponse = successResponseSchema(linkOrganizationResponseSchema);
 export const walletResponse = successResponseSchema(walletResponseSchema);
 export const walletListResponse = paginatedResponseSchema(walletSchema);
 export const walletBalancesResponse = successResponseSchema(walletBalancesResponseSchema);
