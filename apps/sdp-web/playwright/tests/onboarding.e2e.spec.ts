@@ -10,21 +10,23 @@ test.describe
       await session.page.close();
     });
 
-    test("user can link an unlinked Clerk organization from the wallets dashboard", async ({
+    test("unlinked Clerk organization waits for webhook sync on the wallets dashboard", async ({
       page,
     }) => {
       await page.goto("/dashboard/wallets");
 
-      await expect(page.getByText("Confirm organization details", { exact: true })).toBeVisible();
-      await page.getByRole("button", { name: "Confirm and link organization" }).click();
-
-      await expect(page.getByText("Create your first wallet", { exact: true })).toBeVisible({
-        timeout: 120_000,
-      });
+      await expect(page.getByText("Waiting for organization sync", { exact: true })).toBeVisible();
+      await expect(page.getByText("Confirm organization details")).toHaveCount(0);
+      await expect(page.getByRole("button", { name: "Confirm and link organization" })).toHaveCount(
+        0
+      );
 
       await page.reload();
 
-      await expect(page.getByText("Create your first wallet", { exact: true })).toBeVisible();
+      await expect(page.getByText("Waiting for organization sync", { exact: true })).toBeVisible();
       await expect(page.getByText("Confirm organization details")).toHaveCount(0);
+      await expect(page.getByRole("button", { name: "Confirm and link organization" })).toHaveCount(
+        0
+      );
     });
   });
