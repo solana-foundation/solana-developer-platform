@@ -5,7 +5,8 @@ import { fileURLToPath } from "node:url";
 import { safeHostname, selectHealthySolanaRpcUrl } from "./lib/solana-rpc-health.mjs";
 
 const mode = process.argv[2];
-const forwardedArgs = process.argv.slice(3);
+const rawForwardedArgs = process.argv.slice(3);
+const forwardedArgs = rawForwardedArgs[0] === "--" ? rawForwardedArgs.slice(1) : rawForwardedArgs;
 
 if (mode !== "unit" && mode !== "integration") {
   console.error("Usage: node scripts/run-workspace-tests.mjs <unit|integration> [test-files...]");
@@ -98,16 +99,27 @@ try {
 
   await run("pnpm", ["--filter", "@sdp/api", "db:postgres:bootstrap"]);
 
-  const filter =
-    mode === "integration" ? "--filter=@sdp/api-integration" : "--filter=!@sdp/api-integration";
-  await run("pnpm", [
-    "exec",
-    "turbo",
-    "run",
-    "test",
-    filter,
-    ...(forwardedArgs.length > 0 ? ["--", ...forwardedArgs] : []),
-  ]);
+  if (mode === "integration" && forwardedArgs.length > 0) {
+    await run("pnpm", [
+      "--filter",
+      "@sdp/api-integration",
+      "exec",
+      "vitest",
+      "run",
+      ...forwardedArgs,
+    ]);
+  } else {
+    const filter =
+      mode === "integration" ? "--filter=@sdp/api-integration" : "--filter=!@sdp/api-integration";
+    await run("pnpm", [
+      "exec",
+      "turbo",
+      "run",
+      "test",
+      filter,
+      ...(forwardedArgs.length > 0 ? ["--", ...forwardedArgs] : []),
+    ]);
+  }
 } catch (error) {
   console.error(error instanceof Error ? error.message : String(error));
   process.exit(1);

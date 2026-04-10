@@ -66,6 +66,10 @@ async function resolveFreezeTarget(
   requestedAddress: Address,
   mintAddress: Address
 ): Promise<{ tokenAccount: Address }> {
+  if (env.SOLANA_MOCK === "true") {
+    return { tokenAccount: requestedAddress };
+  }
+
   const rpc = createRpcForSdk<MosaicSdkRpc>(env);
   const resolved = await resolveTokenAccount(rpc, requestedAddress, mintAddress);
 

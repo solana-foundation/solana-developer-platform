@@ -149,6 +149,17 @@ export class Token2022Service {
     this.feePayment = feePayment;
   }
 
+  private isSolanaMockEnabled(): boolean {
+    return this.env.SOLANA_MOCK === "true";
+  }
+
+  private mockTransactionResult(): { signature: Signature; slot: bigint } {
+    return {
+      signature: `mock_${crypto.randomUUID()}` as Signature,
+      slot: BigInt(Date.now()),
+    };
+  }
+
   private buildCustomTokenOptions(options: CreateMintOptions): {
     enableDefaultAccountState?: boolean;
     defaultAccountStateInitialized?: boolean;
@@ -310,6 +321,14 @@ export class Token2022Service {
    * Create a new Token-2022 mint and deploy it to Solana
    */
   async createMint(options: CreateMintOptions): Promise<CreateMintResult> {
+    if (this.isSolanaMockEnabled()) {
+      const mintKeypair = await generateKeyPairSigner();
+      return {
+        mint: mintKeypair.address,
+        ...this.mockTransactionResult(),
+      };
+    }
+
     const rpc = createRpcForSdk<MosaicSdkRpc>(this.env);
     const mintKeypair = await generateKeyPairSigner();
     const feePayer = await this.resolveFeePayerSigner();
@@ -391,6 +410,13 @@ export class Token2022Service {
    * Mint tokens to a destination address
    */
   async mintTo(options: MintToOptions): Promise<MintToResult> {
+    if (this.isSolanaMockEnabled()) {
+      return {
+        ...this.mockTransactionResult(),
+        tokenAccount: options.destination,
+      };
+    }
+
     const rpc = createRpcForSdk<MosaicSdkRpc>(this.env);
     const feePayer = await this.resolveFeePayerSigner(options.mintAuthority);
 
@@ -467,6 +493,10 @@ export class Token2022Service {
    * Burn tokens from a token account
    */
   async burn(options: BurnOptions): Promise<BurnResult> {
+    if (this.isSolanaMockEnabled()) {
+      return this.mockTransactionResult();
+    }
+
     const rpc = createRpcForSdk<MosaicSdkRpc>(this.env);
 
     const authorityAta = await resolveTokenAccount(rpc, options.authority.address, options.mint);
@@ -556,11 +586,8 @@ export class Token2022Service {
    * Freeze a token account
    */
   async freezeAccount(options: FreezeOptions): Promise<FreezeResult> {
-    if (this.env.SOLANA_MOCK === "true") {
-      return {
-        signature: `mock_${crypto.randomUUID()}` as Signature,
-        slot: BigInt(Date.now()),
-      };
+    if (this.isSolanaMockEnabled()) {
+      return this.mockTransactionResult();
     }
 
     const rpc = createRpcForSdk<MosaicSdkRpc>(this.env);
@@ -585,11 +612,8 @@ export class Token2022Service {
    * Thaw (unfreeze) a token account
    */
   async thawAccount(options: FreezeOptions): Promise<FreezeResult> {
-    if (this.env.SOLANA_MOCK === "true") {
-      return {
-        signature: `mock_${crypto.randomUUID()}` as Signature,
-        slot: BigInt(Date.now()),
-      };
+    if (this.isSolanaMockEnabled()) {
+      return this.mockTransactionResult();
     }
 
     const rpc = createRpcForSdk<MosaicSdkRpc>(this.env);

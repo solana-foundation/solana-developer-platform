@@ -46,6 +46,12 @@ try {
     fail("Kora health check failed: invalid or missing fee payer address.");
   }
 
+  const koraBlockhashResponse = await koraRpc("getBlockhash");
+  const koraBlockhash = koraBlockhashResponse?.blockhash;
+  if (!koraBlockhash || !PUBLIC_KEY_REGEX.test(koraBlockhash)) {
+    fail("Kora health check failed: missing latest blockhash.");
+  }
+
   // biome-ignore lint/nursery/noSecrets: JSON-RPC method name, not a secret.
   const blockhashResponse = await solanaJsonRpc(solanaRpc.url, "getLatestBlockhash", [
     { commitment: "confirmed" },
