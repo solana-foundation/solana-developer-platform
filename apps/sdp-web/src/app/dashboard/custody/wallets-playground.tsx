@@ -41,20 +41,11 @@ export function WalletsPlayground({
       apiBaseUrl={apiBaseUrl}
       apiKeyValue={apiKeyValue}
       apiKeySelector={<PlaygroundApiKeySelector />}
+      requiresApiKey={!hasActiveApiKeys}
       leftMessages={[
         ...(configsError ? [{ text: configsError, tone: "critical" as const }] : []),
         ...(walletsError ? [{ text: walletsError, tone: "critical" as const }] : []),
       ]}
-      rightMessages={
-        hasActiveApiKeys
-          ? []
-          : [
-              {
-                text: "No active API keys found. Session auth will be used unless you attach a stored key.",
-                tone: "critical",
-              },
-            ]
-      }
     />
   );
 }

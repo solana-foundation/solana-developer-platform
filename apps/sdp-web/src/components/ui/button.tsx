@@ -3,7 +3,7 @@ import {
   type ButtonProps as SolanaButtonProps,
 } from "@solana/design-system/button";
 import { Slot } from "@solana/design-system/utils";
-import type { ComponentProps } from "react";
+import { Children, type ComponentProps, type ReactNode, isValidElement } from "react";
 
 import { cn } from "@/lib/utils";
 
@@ -16,7 +16,7 @@ type ButtonProps = Omit<SolanaButtonProps, "size" | "variant"> & {
 };
 
 const slotBaseClassName =
-  "relative inline-flex shrink-0 items-center justify-center whitespace-nowrap transition-colors duration-150 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--button-focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--gray-50)] disabled:pointer-events-none disabled:opacity-40";
+  "relative inline-flex shrink-0 items-center justify-center whitespace-nowrap font-medium no-underline transition-colors duration-150 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--button-focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--gray-50)] disabled:pointer-events-none disabled:opacity-40";
 
 const variantClassNames: Record<ButtonVariant, string | undefined> = {
   default: undefined,
@@ -51,13 +51,11 @@ const sizeClassNames: Record<ButtonSize, string | undefined> = {
 };
 
 const slotVariantClassNames: Record<ButtonVariant, string> = {
-  default:
-    "bg-[var(--button-primary-bg)] text-[var(--button-primary-text)] hover:bg-[var(--button-primary-bg-hover)]",
+  default: "bg-[#0f0f10] !text-white hover:bg-black hover:!text-white visited:!text-white",
   destructive:
     "bg-status-error-text text-white hover:bg-status-error-text focus-visible:ring-status-error-border",
   outline: "border border-border-light bg-white text-text-extra-high hover:bg-gray-100",
-  secondary:
-    "bg-[var(--button-secondary-bg)] text-[var(--button-secondary-text)] hover:bg-[var(--button-secondary-bg-hover)]",
+  secondary: "bg-[rgba(28,28,29,0.08)] text-[#1c1c1d] hover:bg-[rgba(28,28,29,0.14)]",
   ghost: "bg-transparent text-text-medium hover:bg-border-extra-light hover:text-text-extra-high",
   link: "h-auto bg-transparent px-0 text-text-extra-high underline-offset-4 hover:bg-transparent hover:underline",
 };
@@ -74,6 +72,43 @@ const slotSizeClassNames: Record<ButtonSize, string> = {
   "icon-lg": "size-10 rounded-[var(--button-radius-lg)] p-0",
 };
 
+function extractLeadingIcon(
+  children: ReactNode,
+  iconLeft: ReactNode
+): { contentChildren: ReactNode; leadingIcon: ReactNode } {
+  if (iconLeft) {
+    return { contentChildren: children, leadingIcon: iconLeft };
+  }
+
+  const childNodes = Children.toArray(children);
+  if (childNodes.length < 2) {
+    return { contentChildren: children, leadingIcon: undefined };
+  }
+
+  const [firstChild, ...restChildren] = childNodes;
+  if (!isValidElement(firstChild)) {
+    return { contentChildren: children, leadingIcon: undefined };
+  }
+
+  const className =
+    typeof firstChild.props === "object" &&
+    firstChild.props &&
+    "className" in firstChild.props &&
+    typeof firstChild.props.className === "string"
+      ? firstChild.props.className
+      : "";
+
+  const isLikelyIcon = className.includes("size-") || className.includes("lucide");
+  if (!isLikelyIcon) {
+    return { contentChildren: children, leadingIcon: undefined };
+  }
+
+  return {
+    contentChildren: restChildren.length === 1 ? restChildren[0] : restChildren,
+    leadingIcon: firstChild,
+  };
+}
+
 function Button({
   className,
   variant = "default",
@@ -84,6 +119,7 @@ function Button({
   ...props
 }: ButtonProps) {
   const isIconOnly = size.startsWith("icon");
+  const { contentChildren, leadingIcon } = extractLeadingIcon(children, iconLeft);
   const solanaVariant: SolanaButtonProps["variant"] =
     variant === "default" || variant === "destructive" ? "primary" : "secondary";
 
@@ -116,9 +152,9 @@ function Button({
       variant={solanaVariant}
       className={cn(variantClassNames[variant], sizeClassNames[size], className)}
       {...props}
-      iconLeft={isIconOnly ? children : iconLeft}
+      iconLeft={isIconOnly ? children : leadingIcon}
     >
-      {isIconOnly ? null : children}
+      {isIconOnly ? null : contentChildren}
     </SolanaButton>
   );
 }

@@ -601,7 +601,6 @@ export function DashboardShell({ children }: { children: ReactNode }) {
           <div
             className={[
               "min-w-0 w-full",
-              shouldClipHorizontalOverflow ? "overflow-x-hidden" : "",
               shouldLockViewportScroll ? "flex min-h-0 flex-1 flex-col gap-0" : "space-y-6",
             ].join(" ")}
           >

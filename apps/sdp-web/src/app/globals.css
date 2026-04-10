@@ -12,5 +12,13 @@
 
 html,
 body {
+  color-scheme: light;
   background-color: var(--sdp-shell-bg);
+}
+
+vercel-live-feedback {
+  color-scheme: light;
+  --font-sans: Inter, "SF Pro Text", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+  --geist-foreground: #1c1c1d;
 }

@@ -35,7 +35,6 @@ export default async function PaymentsPage({ searchParams }: PaymentsPageProps) 
       (Array.isArray(resolvedSearchParams?.tab) && resolvedSearchParams.tab[0] === "playground")
         ? "playground"
         : "overview";
-    const isPlaygroundTab = currentTab === "playground";
     const apiBaseUrl = resolvePlaygroundApiBaseUrl();
     const apiClient = await trace.step("create_sdp_api_client", () =>
       createSdpApiClient(trace.childContext("dashboard.payments.api"))
@@ -47,23 +46,19 @@ export default async function PaymentsPage({ searchParams }: PaymentsPageProps) 
       transfersResult,
       issuedTokenSymbolsResult,
     ] = await Promise.all([
-      isPlaygroundTab
-        ? trace.step("fetch_active_api_keys", () => fetchActiveApiKeys(apiClient.request))
-        : Promise.resolve({ ok: true as const, data: [] }),
-      isPlaygroundTab
-        ? trace.step("fetch_payments_wallet_summaries", () =>
-            fetchPaymentsWallets(apiClient.request, { view: "summary" })
-          )
-        : Promise.resolve({ ok: true as const, data: [] }),
-      isPlaygroundTab
+      trace.step("fetch_active_api_keys", () => fetchActiveApiKeys(apiClient.request)),
+      trace.step("fetch_payments_wallet_summaries", () =>
+        fetchPaymentsWallets(apiClient.request, { view: "summary" })
+      ),
+      currentTab === "playground"
         ? Promise.resolve({ ok: true as const, data: null })
         : trace.step("fetch_payments_aggregate", () => fetchPaymentsAggregate(apiClient.request)),
       trace.step("fetch_payment_transfers", () =>
-        isPlaygroundTab
+        currentTab === "playground"
           ? fetchPaymentTransfers(apiClient.request)
           : fetchDashboardPaymentTransfers(apiClient.request)
       ),
-      isPlaygroundTab
+      currentTab === "playground"
         ? Promise.resolve({ ok: true as const, data: [] })
         : trace.step("fetch_payment_token_symbols", () =>
             fetchPaymentsIssuedTokenSymbols(apiClient.request)

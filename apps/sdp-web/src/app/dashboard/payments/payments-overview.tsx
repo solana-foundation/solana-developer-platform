@@ -74,17 +74,38 @@ function resolveRequestError(error: unknown, fallback: string | null): string | 
   return fallback;
 }
 
+function truncateHash(value: string, prefix = 10, suffix = 8): string {
+  if (value.length <= prefix + suffix + 3) {
+    return value;
+  }
+
+  return `${value.slice(0, prefix)}...${value.slice(-suffix)}`;
+}
+
 function TruncatedTableText({
   value,
+  displayValue,
   className,
 }: {
   value: string;
+  displayValue?: string;
   className?: string;
 }) {
+  const renderedValue = displayValue ?? value;
+
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <div className={className ?? "truncate"}>{value}</div>
+        <div className={className ?? "block max-w-full truncate"}>
+          {renderedValue === value ? (
+            value
+          ) : (
+            <>
+              <span aria-hidden="true">{renderedValue}</span>
+              <span className="sr-only">{value}</span>
+            </>
+          )}
+        </div>
       </TooltipTrigger>
       <TooltipContent side="top" align="start" className="max-w-[32rem] break-all text-xs">
         {value}
@@ -172,20 +193,20 @@ export function PaymentsOverview({
         <div className="flex min-w-0 flex-wrap items-center gap-3">
           <Button
             type="button"
-            className="rounded-full px-5"
+            className="rounded-full px-5 whitespace-nowrap"
             disabled={!hasWallets}
+            iconLeft={<ArrowUpRight className="size-4" />}
             onClick={() => router.push("/dashboard/payments/send")}
           >
-            <ArrowUpRight className="size-4" />
             Send
           </Button>
           <Button
             type="button"
-            className="rounded-full px-5"
+            className="rounded-full px-5 whitespace-nowrap"
             disabled={!hasWallets}
+            iconLeft={<ArrowDownLeft className="size-4" />}
             onClick={() => router.push("/dashboard/payments/receive")}
           >
-            <ArrowDownLeft className="size-4" />
             Receive
           </Button>
         </div>
@@ -276,90 +297,97 @@ export function PaymentsOverview({
               <p className="text-sm text-[rgba(28,28,29,0.72)]">No transactions found yet.</p>
             ) : (
               <TooltipProvider>
-                <div className="min-w-0">
-                  <Table className="table-fixed">
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead className="w-[9rem]">Status</TableHead>
-                        <TableHead className="w-[calc(100%-9rem)] md:w-[22%]">
-                          <span className="md:hidden">Transfer</span>
-                          <span className="hidden md:inline">Asset</span>
-                        </TableHead>
-                        <TableHead className="hidden w-[8rem] md:table-cell">Direction</TableHead>
-                        <TableHead className="hidden w-[26%] md:table-cell">Counterparty</TableHead>
-                        <TableHead className="hidden w-[22%] md:table-cell">Signature</TableHead>
-                        <TableHead className="hidden w-[10rem] md:table-cell">Created</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {liveTransfers.map((transfer) => {
-                        const counterparty = resolveCounterparty(transfer);
-                        const assetLabel = formatDisplayAmount(transfer.amount, transfer.token);
-                        const directionLabel = formatDirection(transfer.direction);
-                        const createdLabel = formatTimestamp(transfer.createdAt);
+                <Table className="min-w-0 [&_table]:table-fixed">
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-[8.75rem]">Status</TableHead>
+                      <TableHead className="w-[calc(100%-8.75rem)] lg:w-[16rem] xl:w-[20%]">
+                        <span className="lg:hidden">Transfer</span>
+                        <span className="hidden lg:inline">Asset</span>
+                      </TableHead>
+                      <TableHead className="hidden w-[8rem] lg:table-cell">Direction</TableHead>
+                      <TableHead className="hidden xl:table-cell xl:w-[26%]">
+                        Counterparty
+                      </TableHead>
+                      <TableHead className="hidden 2xl:table-cell 2xl:w-[22%]">Signature</TableHead>
+                      <TableHead className="hidden w-[10rem] lg:table-cell">Created</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {liveTransfers.map((transfer) => {
+                      const counterparty = resolveCounterparty(transfer);
+                      const assetLabel = formatDisplayAmount(transfer.amount, transfer.token);
+                      const directionLabel = formatDirection(transfer.direction);
+                      const createdLabel = formatTimestamp(transfer.createdAt);
 
-                        return (
-                          <TableRow key={transfer.id}>
-                            <TableCell>
-                              <span
-                                className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${statusClassName(transfer.status)}`}
-                              >
-                                {transfer.status}
-                              </span>
-                            </TableCell>
-                            <TableCell className="min-w-0 font-medium">
-                              <div className="min-w-0">
-                                <TruncatedTableText value={assetLabel} className="truncate" />
-                                <div className="mt-1 text-xs font-normal text-[rgba(28,28,29,0.56)] md:hidden">
-                                  <span>{directionLabel}</span>
-                                  <span className="mx-1.5">·</span>
-                                  <span>{createdLabel}</span>
-                                </div>
+                      return (
+                        <TableRow key={transfer.id}>
+                          <TableCell>
+                            <span
+                              className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${statusClassName(transfer.status)}`}
+                            >
+                              {transfer.status}
+                            </span>
+                          </TableCell>
+                          <TableCell className="min-w-0 max-w-0 font-medium">
+                            <div className="min-w-0">
+                              <TruncatedTableText
+                                value={assetLabel}
+                                className="block max-w-full truncate"
+                              />
+                              <div className="mt-1 text-xs font-normal text-[rgba(28,28,29,0.56)] lg:hidden">
+                                <span>{directionLabel}</span>
+                                <span className="mx-1.5">·</span>
+                                <span>{createdLabel}</span>
                               </div>
-                            </TableCell>
-                            <TableCell className="hidden text-[rgba(28,28,29,0.72)] md:table-cell">
-                              {directionLabel}
-                            </TableCell>
-                            <TableCell className="hidden min-w-0 font-mono text-xs text-[rgba(28,28,29,0.72)] md:table-cell">
-                              <TruncatedTableText value={counterparty} className="truncate" />
-                            </TableCell>
-                            <TableCell className="hidden min-w-0 font-mono text-xs md:table-cell">
-                              {transfer.signature ? (
-                                <Tooltip>
-                                  <TooltipTrigger asChild>
-                                    <a
-                                      href={getDevnetExplorerUrl(transfer.signature)}
-                                      target="_blank"
-                                      rel="noreferrer"
-                                      className="flex min-w-0 items-center gap-1 text-[#1c1c1d] underline underline-offset-2"
-                                    >
-                                      <span className="block min-w-0 truncate">
-                                        {transfer.signature}
-                                      </span>
-                                      <ExternalLink className="size-3 shrink-0" />
-                                    </a>
-                                  </TooltipTrigger>
-                                  <TooltipContent
-                                    side="top"
-                                    align="start"
-                                    className="max-w-[32rem] break-all text-xs"
+                            </div>
+                          </TableCell>
+                          <TableCell className="hidden text-[rgba(28,28,29,0.72)] lg:table-cell">
+                            {directionLabel}
+                          </TableCell>
+                          <TableCell className="hidden min-w-0 max-w-0 font-mono text-xs text-[rgba(28,28,29,0.72)] xl:table-cell">
+                            <TruncatedTableText
+                              value={counterparty}
+                              displayValue={truncateHash(counterparty)}
+                              className="block max-w-full truncate"
+                            />
+                          </TableCell>
+                          <TableCell className="hidden min-w-0 max-w-0 font-mono text-xs 2xl:table-cell">
+                            {transfer.signature ? (
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <a
+                                    href={getDevnetExplorerUrl(transfer.signature)}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="flex min-w-0 max-w-full items-center gap-1 text-[#1c1c1d] underline underline-offset-2"
                                   >
-                                    {transfer.signature}
-                                  </TooltipContent>
-                                </Tooltip>
-                              ) : (
-                                <span className="text-[rgba(28,28,29,0.52)]">Pending</span>
-                              )}
-                            </TableCell>
-                            <TableCell className="hidden text-[rgba(28,28,29,0.72)] md:table-cell">
-                              {createdLabel}
-                            </TableCell>
-                          </TableRow>
-                        );
-                      })}
-                    </TableBody>
-                  </Table>
-                </div>
+                                    <span className="block min-w-0 max-w-full truncate">
+                                      {truncateHash(transfer.signature)}
+                                    </span>
+                                    <ExternalLink className="size-3 shrink-0" />
+                                  </a>
+                                </TooltipTrigger>
+                                <TooltipContent
+                                  side="top"
+                                  align="start"
+                                  className="max-w-[32rem] break-all text-xs"
+                                >
+                                  {transfer.signature}
+                                </TooltipContent>
+                              </Tooltip>
+                            ) : (
+                              <span className="text-[rgba(28,28,29,0.52)]">Pending</span>
+                            )}
+                          </TableCell>
+                          <TableCell className="hidden text-[rgba(28,28,29,0.72)] lg:table-cell">
+                            {createdLabel}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
               </TooltipProvider>
             )}
           </CardContent>
