@@ -3,6 +3,7 @@
 import type { DashboardAccess } from "@/lib/dashboard-access";
 import { DASHBOARD_SWR_CONFIG } from "@/lib/dashboard-swr-config";
 import { useDashboardUrlState } from "@/lib/dashboard-url-state";
+import { useRouter } from "next/navigation";
 import { type ReactNode, createContext, useCallback, useContext, useMemo, useState } from "react";
 import { SWRConfig } from "swr";
 
@@ -56,6 +57,7 @@ export function DashboardWorkspaceProvider({
   defaultProject = "Default Project",
   initialSidebarOpen = true,
 }: DashboardWorkspaceProviderProps) {
+  const router = useRouter();
   const { replaceSearchParams, searchParams } = useDashboardUrlState();
   const [isSidebarOpen, setSidebarOpenState] = useState(initialSidebarOpen);
   const [selectedProject, setSelectedProject] = useState(defaultProject);
@@ -95,8 +97,9 @@ export function DashboardWorkspaceProvider({
       replaceSearchParams({
         tab: tab === "playground" ? "playground" : "overview",
       });
+      router.refresh();
     },
-    [replaceSearchParams]
+    [replaceSearchParams, router]
   );
 
   const value = useMemo<DashboardWorkspaceContextValue>(
