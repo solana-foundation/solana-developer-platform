@@ -3,19 +3,13 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import type {
   ComplianceProviderId,
   PaymentTransferSummary,
   PaymentsDashboardWallet,
   RampProviderId,
 } from "@sdp/types";
+import { Select, SelectItem } from "@solana/design-system/select";
 import {
   ArrowDownLeft,
   ArrowUpRight,
@@ -496,19 +490,19 @@ function ActionChoiceCard({
       type="button"
       onClick={onClick}
       className={[
-        "w-full rounded-[24px] border px-5 py-5 text-left transition-colors",
+        "w-full rounded-2xl border px-5 py-5 text-left transition-colors",
         active
-          ? "border-[#1c1c1d] bg-[rgba(28,28,29,0.04)]"
-          : "border-[rgba(28,28,29,0.12)] bg-white hover:bg-[rgba(28,28,29,0.03)]",
+          ? "border-gray-1400 bg-border-extra-light"
+          : "border-border-light bg-white hover:bg-border-extra-light",
       ].join(" ")}
     >
       <div className="flex items-start gap-4">
-        <div className="flex h-11 w-11 items-center justify-center rounded-full bg-[rgba(28,28,29,0.06)] text-[#1c1c1d]">
+        <div className="flex h-11 w-11 items-center justify-center rounded-full bg-border-light text-text-extra-high">
           {icon}
         </div>
         <div className="space-y-1">
-          <p className="text-[22px] leading-none font-medium text-[#1c1c1d]">{title}</p>
-          <p className="text-sm text-[rgba(28,28,29,0.62)]">{description}</p>
+          <p className="text-[22px] leading-none font-medium text-text-extra-high">{title}</p>
+          <p className="text-sm text-text-low">{description}</p>
         </div>
       </div>
     </button>
@@ -521,15 +515,15 @@ function ReviewSummaryCard({
   rows: Array<{ label: string; value: ReactNode }>;
 }) {
   return (
-    <section className="rounded-[24px] border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.03)] p-5">
-      <div className="divide-y divide-[rgba(28,28,29,0.08)]">
+    <section className="rounded-2xl border border-border-light bg-border-extra-light p-5">
+      <div className="divide-y divide-border-extra-light">
         {rows.map((row) => (
           <div
             key={row.label}
             className="flex items-center justify-between gap-4 py-4 first:pt-0 last:pb-0"
           >
-            <p className="text-sm text-[rgba(28,28,29,0.62)]">{row.label}</p>
-            <div className="text-right text-base font-medium text-[#1c1c1d]">{row.value}</div>
+            <p className="text-sm text-text-low">{row.label}</p>
+            <div className="text-right text-base font-medium text-text-extra-high">{row.value}</div>
           </div>
         ))}
       </div>
@@ -577,21 +571,21 @@ function WalletAddressQrCode({ address }: { address: string }) {
   }
 
   return (
-    <section className="rounded-[24px] border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.03)] p-6">
+    <section className="rounded-2xl border border-border-light bg-border-extra-light p-6">
       <div className="flex flex-col items-center gap-5 sm:flex-row sm:items-start">
-        <div className="flex size-[180px] items-center justify-center rounded-[22px] bg-white p-4 shadow-[inset_0_0_0_1px_rgba(28,28,29,0.08)]">
+        <div className="flex size-[180px] items-center justify-center rounded-2xl bg-white p-4 ring-1 ring-border-extra-light">
           {qrCodeUrl ? (
             <img src={qrCodeUrl} alt="Wallet address QR code" className="size-full" />
           ) : (
-            <div className="size-full animate-pulse rounded-[14px] bg-[rgba(28,28,29,0.08)]" />
+            <div className="size-full animate-pulse rounded-xl bg-border-light" />
           )}
         </div>
         <div className="min-w-0 flex-1 space-y-3">
-          <p className="text-sm text-[rgba(28,28,29,0.62)]">
+          <p className="text-sm text-text-low">
             Scan this QR code or copy the address to receive funds into the selected wallet.
           </p>
-          <div className="rounded-[18px] border border-[rgba(28,28,29,0.08)] bg-white px-4 py-3">
-            <p className="break-all font-mono text-xs text-[rgba(28,28,29,0.78)]">{address}</p>
+          <div className="rounded-2xl border border-border-extra-light bg-white px-4 py-3">
+            <p className="break-all font-mono text-xs text-text-medium">{address}</p>
           </div>
           <div className="flex justify-end">
             <Button
@@ -628,9 +622,7 @@ function MoonpayRampFields({
       {isOnrampBranch ? (
         <p
           className={
-            isBelowMoonPayOnrampMinimum
-              ? "text-sm text-[#9e2b38]"
-              : "text-sm text-[rgba(28,28,29,0.56)]"
+            isBelowMoonPayOnrampMinimum ? "text-sm text-status-error-text" : "text-sm text-text-low"
           }
         >
           Minimum $20 USD for MoonPay on-ramp.
@@ -643,7 +635,7 @@ function MoonpayRampFields({
           <Input
             readOnly
             value={selectedWallet.publicKey}
-            className="h-12 rounded-[16px] border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.03)] px-4 font-mono text-sm shadow-none"
+            className="h-12 rounded-2xl border-border-light bg-border-extra-light px-4 font-mono text-sm shadow-none"
           />
         </div>
       ) : null}
@@ -687,7 +679,7 @@ function LightsparkRampFields({
               resetExecution();
             }}
             placeholder="Customer:cus_123"
-            className="h-12 rounded-[16px] border-[rgba(28,28,29,0.12)] bg-white px-4 shadow-none"
+            className="h-12 rounded-2xl border-border-light bg-white px-4 shadow-none"
           />
         </div>
         <div className="space-y-2">
@@ -695,7 +687,7 @@ function LightsparkRampFields({
           <Input
             readOnly
             value={selectedWallet?.publicKey ?? ""}
-            className="h-12 rounded-[16px] border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.03)] px-4 font-mono text-sm shadow-none"
+            className="h-12 rounded-2xl border-border-light bg-border-extra-light px-4 font-mono text-sm shadow-none"
           />
         </div>
       </>
@@ -714,7 +706,7 @@ function LightsparkRampFields({
             resetExecution();
           }}
           placeholder="InternalAccount:acc_source_123"
-          className="h-12 rounded-[16px] border-[rgba(28,28,29,0.12)] bg-white px-4 shadow-none"
+          className="h-12 rounded-2xl border-border-light bg-white px-4 shadow-none"
         />
       </div>
       <div className="space-y-2">
@@ -727,7 +719,7 @@ function LightsparkRampFields({
             resetExecution();
           }}
           placeholder="ExternalAccount:acc_destination_123"
-          className="h-12 rounded-[16px] border-[rgba(28,28,29,0.12)] bg-white px-4 shadow-none"
+          className="h-12 rounded-2xl border-border-light bg-white px-4 shadow-none"
         />
       </div>
     </div>
@@ -777,7 +769,7 @@ function BvnkRampFields({
             resetExecution();
           }}
           placeholder="customer_123"
-          className="h-12 rounded-[16px] border-[rgba(28,28,29,0.12)] bg-white px-4 shadow-none"
+          className="h-12 rounded-2xl border-border-light bg-white px-4 shadow-none"
         />
       </div>
 
@@ -787,7 +779,7 @@ function BvnkRampFields({
           <Input
             readOnly
             value={selectedWallet.publicKey}
-            className="h-12 rounded-[16px] border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.03)] px-4 font-mono text-sm shadow-none"
+            className="h-12 rounded-2xl border-border-light bg-border-extra-light px-4 font-mono text-sm shadow-none"
           />
         </div>
       ) : null}
@@ -804,7 +796,7 @@ function BvnkRampFields({
                 resetExecution();
               }}
               placeholder="Jane"
-              className="h-12 rounded-[16px] border-[rgba(28,28,29,0.12)] bg-white px-4 shadow-none"
+              className="h-12 rounded-2xl border-border-light bg-white px-4 shadow-none"
             />
           </div>
           <div className="space-y-2">
@@ -817,7 +809,7 @@ function BvnkRampFields({
                 resetExecution();
               }}
               placeholder="Doe"
-              className="h-12 rounded-[16px] border-[rgba(28,28,29,0.12)] bg-white px-4 shadow-none"
+              className="h-12 rounded-2xl border-border-light bg-white px-4 shadow-none"
             />
           </div>
           <div className="space-y-2">
@@ -830,7 +822,7 @@ function BvnkRampFields({
                 setBvnkDateOfBirth(event.currentTarget.value);
                 resetExecution();
               }}
-              className="h-12 rounded-[16px] border-[rgba(28,28,29,0.12)] bg-white px-4 shadow-none"
+              className="h-12 rounded-2xl border-border-light bg-white px-4 shadow-none"
             />
           </div>
           <div className="space-y-2">
@@ -842,7 +834,7 @@ function BvnkRampFields({
                 setBvnkCountryCode(event.currentTarget.value);
                 resetExecution();
               }}
-              className="h-12 w-full rounded-[16px] border border-[rgba(28,28,29,0.12)] bg-white px-4 text-sm text-[#1c1c1d]"
+              className="h-12 w-full rounded-2xl border border-border-light bg-white px-4 text-sm text-text-extra-high"
             >
               <option value="">Select country</option>
               {BVNK_COUNTRY_OPTIONS.map((country) => (
@@ -1673,7 +1665,7 @@ export function PaymentsActionPage({
               onClick={() => selectBranch("offramp")}
             />
           ) : (
-            <div className="rounded-[24px] border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.03)] px-5 py-5 text-sm text-[rgba(28,28,29,0.62)]">
+            <div className="rounded-2xl border border-border-light bg-border-extra-light px-5 py-5 text-sm text-text-low">
               Off-ramp providers are only available on enterprise organizations with an enabled
               provider.
             </div>
@@ -1697,7 +1689,7 @@ export function PaymentsActionPage({
               onClick={() => selectBranch("onramp")}
             />
           ) : (
-            <div className="rounded-[24px] border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.03)] px-5 py-5 text-sm text-[rgba(28,28,29,0.62)]">
+            <div className="rounded-2xl border border-border-light bg-border-extra-light px-5 py-5 text-sm text-text-low">
               On-ramp providers are only available on enterprise organizations with an enabled
               provider.
             </div>
@@ -1710,7 +1702,7 @@ export function PaymentsActionPage({
   const renderProviderStep = () => (
     <div className="grid gap-4">
       {providerOptions.length === 0 ? (
-        <div className="rounded-[24px] border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.03)] px-5 py-5 text-sm text-[rgba(28,28,29,0.62)]">
+        <div className="rounded-2xl border border-border-light bg-border-extra-light px-5 py-5 text-sm text-text-low">
           No ramp providers are enabled for this organization.
         </div>
       ) : null}
@@ -1740,32 +1732,31 @@ export function PaymentsActionPage({
       return (
         <div className="space-y-2">
           <Label>{label}</Label>
-          <div className="h-12 animate-pulse rounded-[16px] border border-[rgba(28,28,29,0.08)] bg-[rgba(28,28,29,0.05)]" />
+          <div className="h-12 animate-pulse rounded-2xl border border-border-extra-light bg-border-extra-light" />
         </div>
       );
     }
 
     return (
       <div className="space-y-2">
-        <Label htmlFor={`${mode}-wallet`}>{label}</Label>
-        <Select value={value} onValueChange={onChange} disabled={!hasWallets}>
-          <SelectTrigger
-            id={`${mode}-wallet`}
-            size="lg"
-            className="h-12 w-full rounded-[16px] border-[rgba(28,28,29,0.12)] bg-white px-4 shadow-none"
-          >
-            <SelectValue placeholder="Select wallet" />
-          </SelectTrigger>
-          <SelectContent
-            position="popper"
-            className="rounded-2xl border-[rgba(28,28,29,0.12)] bg-white"
-          >
-            {liveWallets.map((wallet) => (
-              <SelectItem key={wallet.walletId} value={wallet.walletId}>
-                {getWalletActionLabel(wallet, issuedTokenSymbolsByMint)}
-              </SelectItem>
-            ))}
-          </SelectContent>
+        <Select
+          className="w-full"
+          disabled={!hasWallets}
+          label={label}
+          onValueChange={(nextValue) => {
+            if (nextValue) {
+              onChange(nextValue);
+            }
+          }}
+          placeholder="Select wallet"
+          size="xl"
+          value={value || null}
+        >
+          {liveWallets.map((wallet) => (
+            <SelectItem key={wallet.walletId} value={wallet.walletId}>
+              {getWalletActionLabel(wallet, issuedTokenSymbolsByMint)}
+            </SelectItem>
+          ))}
         </Select>
       </div>
     );
@@ -1792,36 +1783,29 @@ export function PaymentsActionPage({
             }}
             onBlur={() => setAmountTouched(true)}
             placeholder="1.00"
-            className="h-12 rounded-[16px] border-[rgba(28,28,29,0.12)] bg-white px-4 shadow-none"
+            className="h-12 rounded-2xl border-border-light bg-white px-4 shadow-none"
           />
         </div>
         <div className="space-y-2">
-          <Label htmlFor={`${mode}-asset`}>Asset</Label>
           <Select
-            value={selectedAsset}
-            onValueChange={(value) => {
-              setSelectedAsset(value);
-              resetExecution();
-            }}
+            className="w-full"
             disabled={walletsLoading || assetOptions.length === 0}
+            label="Asset"
+            onValueChange={(value) => {
+              if (value) {
+                setSelectedAsset(value);
+                resetExecution();
+              }
+            }}
+            placeholder="Select asset"
+            size="xl"
+            value={selectedAsset || null}
           >
-            <SelectTrigger
-              id={`${mode}-asset`}
-              size="lg"
-              className="h-12 rounded-[16px] border-[rgba(28,28,29,0.12)] bg-white px-4 shadow-none"
-            >
-              <SelectValue placeholder="Select asset" />
-            </SelectTrigger>
-            <SelectContent
-              position="popper"
-              className="rounded-2xl border-[rgba(28,28,29,0.12)] bg-white"
-            >
-              {assetOptions.map((asset) => (
-                <SelectItem key={asset} value={asset}>
-                  {asset}
-                </SelectItem>
-              ))}
-            </SelectContent>
+            {assetOptions.map((asset) => (
+              <SelectItem key={asset} value={asset}>
+                {asset}
+              </SelectItem>
+            ))}
           </Select>
         </div>
       </div>
@@ -1829,7 +1813,7 @@ export function PaymentsActionPage({
         className={[
           "h-5 text-sm leading-5",
           amountTouched && exceedsSelectedAssetBalance
-            ? "text-[#9e2b38]"
+            ? "text-status-error-text"
             : "invisible text-transparent",
         ].join(" ")}
       >
@@ -1864,16 +1848,16 @@ export function PaymentsActionPage({
             resetExecution();
           }}
           placeholder="Destination Solana address"
-          className="h-12 rounded-[16px] border-[rgba(28,28,29,0.12)] bg-white px-4 shadow-none"
+          className="h-12 rounded-2xl border-border-light bg-white px-4 shadow-none"
         />
       </div>
       {destinationIsAllowlisted ? (
-        <div className="rounded-[18px] border border-[rgba(17,94,61,0.18)] bg-[rgba(16,185,129,0.08)] px-4 py-3 text-sm text-[#115e3d]">
+        <div className="rounded-2xl border border-status-success-border bg-status-success-bg px-4 py-3 text-sm text-status-success-text">
           This destination is already on the source wallet allowlist. You can continue without a new
           risk check.
         </div>
       ) : !hasEnabledComplianceProviders ? (
-        <div className="rounded-[18px] border border-[rgba(180,83,9,0.22)] bg-[rgba(245,158,11,0.12)] px-4 py-3 text-sm text-[#8a5a00]">
+        <div className="rounded-2xl border border-status-warning-border bg-status-warning-bg px-4 py-3 text-sm text-status-warning-text">
           Risk checks are not enabled for this organization. Add the destination to the source
           wallet allowlist before submitting the transfer.
         </div>
@@ -1893,7 +1877,7 @@ export function PaymentsActionPage({
           </Button>
         </div>
       )}
-      {policyError ? <p className="text-sm text-[#9e2b38]">{policyError}</p> : null}
+      {policyError ? <p className="text-sm text-status-error-text">{policyError}</p> : null}
       {transferCompliance && !transferComplianceDismissed ? (
         <ProviderRiskTable
           title="Risk score results"
@@ -1911,7 +1895,7 @@ export function PaymentsActionPage({
             resetExecution();
           }}
           placeholder="Invoice #1234"
-          className="h-12 rounded-[16px] border-[rgba(28,28,29,0.12)] bg-white px-4 shadow-none"
+          className="h-12 rounded-2xl border-border-light bg-white px-4 shadow-none"
         />
       </div>
     </div>
@@ -1935,33 +1919,28 @@ export function PaymentsActionPage({
             value={reference}
             onChange={(event) => setReference(event.currentTarget.value)}
             placeholder="Treasury top-up"
-            className="h-12 rounded-[16px] border-[rgba(28,28,29,0.12)] bg-white px-4 shadow-none"
+            className="h-12 rounded-2xl border-border-light bg-white px-4 shadow-none"
           />
         </div>
         <div className="space-y-2">
-          <Label htmlFor={`${mode}-deposit-asset`}>Asset</Label>
           <Select
-            value={selectedAsset}
-            onValueChange={setSelectedAsset}
+            className="w-full"
             disabled={assetOptions.length === 0}
+            label="Asset"
+            onValueChange={(value) => {
+              if (value) {
+                setSelectedAsset(value);
+              }
+            }}
+            placeholder="Select asset"
+            size="xl"
+            value={selectedAsset || null}
           >
-            <SelectTrigger
-              id={`${mode}-deposit-asset`}
-              size="lg"
-              className="h-12 rounded-[16px] border-[rgba(28,28,29,0.12)] bg-white px-4 shadow-none"
-            >
-              <SelectValue placeholder="Select asset" />
-            </SelectTrigger>
-            <SelectContent
-              position="popper"
-              className="rounded-2xl border-[rgba(28,28,29,0.12)] bg-white"
-            >
-              {assetOptions.map((asset) => (
-                <SelectItem key={asset} value={asset}>
-                  {asset}
-                </SelectItem>
-              ))}
-            </SelectContent>
+            {assetOptions.map((asset) => (
+              <SelectItem key={asset} value={asset}>
+                {asset}
+              </SelectItem>
+            ))}
           </Select>
         </div>
       </div>
@@ -2021,12 +2000,12 @@ export function PaymentsActionPage({
     if (executionState === "submitting") {
       return (
         <div className="space-y-6 text-center">
-          <div className="mx-auto flex size-16 items-center justify-center rounded-full border border-[rgba(28,28,29,0.14)]">
-            <RefreshCw className="size-7 animate-spin text-[rgba(28,28,29,0.68)]" />
+          <div className="mx-auto flex size-16 items-center justify-center rounded-full border border-border-medium">
+            <RefreshCw className="size-7 animate-spin text-text-medium" />
           </div>
           <div className="space-y-2">
-            <p className="text-[18px] font-medium text-[#1c1c1d]">Transfer in progress…</p>
-            <p className="text-sm text-[rgba(28,28,29,0.62)]">
+            <p className="text-[18px] font-medium text-text-extra-high">Transfer in progress…</p>
+            <p className="text-sm text-text-low">
               Submitting the transaction through the payments API.
             </p>
           </div>
@@ -2038,9 +2017,9 @@ export function PaymentsActionPage({
     if (executionState === "success" && transferResult) {
       return (
         <div className="space-y-6">
-          <div className="rounded-[24px] border border-[rgba(17,94,61,0.18)] bg-[rgba(16,185,129,0.08)] p-5">
-            <p className="text-[20px] font-medium text-[#115e3d]">Transfer submitted</p>
-            <p className="mt-2 text-sm text-[#115e3d]">
+          <div className="rounded-2xl border border-status-success-border bg-status-success-bg p-5">
+            <p className="text-[20px] font-medium text-status-success-text">Transfer submitted</p>
+            <p className="mt-2 text-sm text-status-success-text">
               {transferResult.signature
                 ? "The transfer was signed and broadcast successfully. It will appear in the transaction list when you return to Payments."
                 : `Current status: ${transferResult.status}`}
@@ -2060,7 +2039,7 @@ export function PaymentsActionPage({
                     href={getDevnetExplorerUrl(transferResult.signature)}
                     target="_blank"
                     rel="noreferrer"
-                    className="inline-flex items-center gap-1 text-[#1c1c1d] underline underline-offset-2"
+                    className="inline-flex items-center gap-1 text-text-extra-high underline underline-offset-2"
                   >
                     <span className="max-w-[12rem] truncate font-mono text-xs">
                       {transferResult.signature}
@@ -2084,14 +2063,14 @@ export function PaymentsActionPage({
     if (executionState === "submitting") {
       return (
         <div className="space-y-6 text-center">
-          <div className="mx-auto flex size-16 items-center justify-center rounded-full border border-[rgba(28,28,29,0.14)]">
-            <RefreshCw className="size-7 animate-spin text-[rgba(28,28,29,0.68)]" />
+          <div className="mx-auto flex size-16 items-center justify-center rounded-full border border-border-medium">
+            <RefreshCw className="size-7 animate-spin text-text-medium" />
           </div>
           <div className="space-y-2">
-            <p className="text-[18px] font-medium text-[#1c1c1d]">
+            <p className="text-[18px] font-medium text-text-extra-high">
               {providerLabel ?? "Provider"} request in progress…
             </p>
-            <p className="text-sm text-[rgba(28,28,29,0.62)]">
+            <p className="text-sm text-text-low">
               Preparing the {isOnrampBranch ? "on-ramp" : "off-ramp"} flow.
             </p>
           </div>
@@ -2103,11 +2082,11 @@ export function PaymentsActionPage({
     if (executionState === "success" && rampExecution) {
       return (
         <div className="space-y-6">
-          <div className="rounded-[24px] border border-[rgba(17,94,61,0.18)] bg-[rgba(16,185,129,0.08)] p-5">
-            <p className="text-[20px] font-medium text-[#115e3d]">
+          <div className="rounded-2xl border border-status-success-border bg-status-success-bg p-5">
+            <p className="text-[20px] font-medium text-status-success-text">
               {providerLabel ?? "Provider"} flow ready
             </p>
-            <p className="mt-2 text-sm text-[#115e3d]">
+            <p className="mt-2 text-sm text-status-success-text">
               Continue with the provider using the details below.
             </p>
           </div>
@@ -2129,9 +2108,9 @@ export function PaymentsActionPage({
             ]}
           />
           {rampExecution.redirectUrl ? (
-            <div className="rounded-[24px] border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.03)] p-5">
-              <p className="text-sm font-medium text-[#1c1c1d]">Redirect URL</p>
-              <p className="mt-3 break-all font-mono text-xs text-[rgba(28,28,29,0.78)]">
+            <div className="rounded-2xl border border-border-light bg-border-extra-light p-5">
+              <p className="text-sm font-medium text-text-extra-high">Redirect URL</p>
+              <p className="mt-3 break-all font-mono text-xs text-text-medium">
                 {rampExecution.redirectUrl}
               </p>
               <div className="mt-4 flex justify-end">
@@ -2220,13 +2199,15 @@ export function PaymentsActionPage({
     return (
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-8 py-8">
         <div className="space-y-3 text-center">
-          <p className="text-[44px] leading-none font-medium tracking-[-0.04em] text-[#1c1c1d]">
+          <p className="text-[44px] leading-none font-medium tracking-[-0.04em] text-text-extra-high">
             {isSendAction ? "Send" : "Receive"}
           </p>
-          <p className="text-base text-[rgba(28,28,29,0.62)]">
+          <p className="text-base text-text-low">
             You need at least one wallet before you can start this flow.
           </p>
-          {liveWalletsError ? <p className="text-sm text-[#9e2b38]">{liveWalletsError}</p> : null}
+          {liveWalletsError ? (
+            <p className="text-sm text-status-error-text">{liveWalletsError}</p>
+          ) : null}
         </div>
         <div className="mx-auto flex w-full max-w-md flex-col gap-3">
           <Button type="button" onClick={() => router.push("/dashboard/wallets")}>
@@ -2249,14 +2230,14 @@ export function PaymentsActionPage({
       <div className="mx-auto w-full max-w-3xl space-y-6">
         {currentStep.id === "branch" ? null : (
           <div className="text-center">
-            <p className="text-[28px] leading-tight font-medium text-[#1c1c1d]">
+            <p className="text-[28px] leading-tight font-medium text-text-extra-high">
               {currentStep.title}
             </p>
           </div>
         )}
 
         {executionError ? (
-          <div className="rounded-[18px] border border-[rgba(158,43,56,0.2)] bg-[rgba(158,43,56,0.08)] px-4 py-3 text-sm text-[#9e2b38]">
+          <div className="rounded-2xl border border-status-error-border bg-status-error-bg px-4 py-3 text-sm text-status-error-text">
             {executionError}
           </div>
         ) : null}

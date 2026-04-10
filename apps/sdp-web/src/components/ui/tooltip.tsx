@@ -1,51 +1,91 @@
 "use client";
 
-import { Tooltip as TooltipPrimitive } from "radix-ui";
-import type * as React from "react";
+import {
+  Tooltip as SolanaTooltip,
+  TooltipProvider as SolanaTooltipProvider,
+} from "@solana/design-system/tooltip";
+import { Children, type ReactElement, type ReactNode, isValidElement } from "react";
 
 import { cn } from "@/lib/utils";
 
-function TooltipProvider({
-  delayDuration = 120,
-  ...props
-}: React.ComponentProps<typeof TooltipPrimitive.Provider>) {
+type TooltipProviderProps = {
+  children: ReactNode;
+  delayDuration?: number;
+};
+
+type TooltipProps = {
+  children: ReactNode;
+};
+
+type TooltipTriggerProps = {
+  asChild?: boolean;
+  children: ReactNode;
+};
+
+type TooltipContentProps = {
+  align?: "start" | "center" | "end";
+  children: ReactNode;
+  className?: string;
+  side?: "top" | "bottom" | "left" | "right";
+  sideOffset?: number;
+};
+
+function getSingleTriggerElement(children: ReactNode): ReactElement | null {
+  const childElements = Children.toArray(children).filter(isValidElement);
+  return childElements.length === 1 ? childElements[0] : null;
+}
+
+function TooltipProvider({ children, delayDuration = 120 }: TooltipProviderProps) {
+  return <SolanaTooltipProvider delay={delayDuration}>{children}</SolanaTooltipProvider>;
+}
+
+function Tooltip({ children }: TooltipProps) {
+  const childElements = Children.toArray(children).filter(isValidElement);
+  const trigger = childElements.find(
+    (child): child is ReactElement<TooltipTriggerProps> => child.type === TooltipTrigger
+  );
+  const content = childElements.find(
+    (child): child is ReactElement<TooltipContentProps> => child.type === TooltipContent
+  );
+
+  if (!trigger || !content) {
+    return <>{children}</>;
+  }
+
+  const triggerElement = trigger.props.asChild ? (
+    getSingleTriggerElement(trigger.props.children)
+  ) : (
+    <button className="inline-flex" type="button">
+      {trigger.props.children}
+    </button>
+  );
+
+  if (!triggerElement) {
+    return <>{children}</>;
+  }
+
+  const contentNode = (
+    <span className={cn("block", content.props.className)}>{content.props.children}</span>
+  );
+
   return (
-    <TooltipPrimitive.Provider
-      data-slot="tooltip-provider"
-      delayDuration={delayDuration}
-      {...props}
-    />
+    <SolanaTooltip
+      align={content.props.align}
+      content={contentNode}
+      side={content.props.side}
+      sideOffset={content.props.sideOffset}
+    >
+      {triggerElement}
+    </SolanaTooltip>
   );
 }
 
-function Tooltip({ ...props }: React.ComponentProps<typeof TooltipPrimitive.Root>) {
-  return <TooltipPrimitive.Root data-slot="tooltip" {...props} />;
+function TooltipTrigger({ children }: TooltipTriggerProps) {
+  return <>{children}</>;
 }
 
-function TooltipTrigger({ ...props }: React.ComponentProps<typeof TooltipPrimitive.Trigger>) {
-  return <TooltipPrimitive.Trigger data-slot="tooltip-trigger" {...props} />;
-}
-
-function TooltipContent({
-  className,
-  sideOffset = 8,
-  ...props
-}: React.ComponentProps<typeof TooltipPrimitive.Content>) {
-  return (
-    <TooltipPrimitive.Portal>
-      <TooltipPrimitive.Content
-        data-slot="tooltip-content"
-        sideOffset={sideOffset}
-        className={cn(
-          "z-50 max-w-64 rounded-xl bg-[#0f0f10] px-3 py-2 text-sm leading-[1.35] font-medium text-white shadow-[0_12px_32px_rgba(0,0,0,0.2)]",
-          "data-[state=closed]:animate-out data-[state=open]:animate-in data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
-          "data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-1.5 data-[side=left]:slide-in-from-right-1.5 data-[side=right]:slide-in-from-left-1.5 data-[side=top]:slide-in-from-bottom-1.5",
-          className
-        )}
-        {...props}
-      />
-    </TooltipPrimitive.Portal>
-  );
+function TooltipContent(_props: TooltipContentProps) {
+  return null;
 }
 
 export { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger };

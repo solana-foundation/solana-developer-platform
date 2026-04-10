@@ -1,7 +1,7 @@
 "use client";
 
-import { motion } from "framer-motion";
 import { ChevronRight } from "lucide-react";
+import { motion } from "motion/react";
 import type { TemplateSelection } from "./create-token-modal.types";
 import { templateCards } from "./create-token-modal.utils";
 
