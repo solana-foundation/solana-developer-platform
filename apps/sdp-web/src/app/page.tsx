@@ -1,3 +1,4 @@
+import { auth } from "@clerk/nextjs/server";
 import { DEFAULT_SDP_DOCS_URL } from "@sdp/types";
 import Image from "next/image";
 import Link from "next/link";
@@ -7,7 +8,9 @@ const docsHref =
   (process.env.NODE_ENV === "development" ? "http://localhost:3001/docs" : DEFAULT_SDP_DOCS_URL);
 const waitlistHref = "https://solanafoundation.typeform.com/to/PLfMTDQs";
 
-export default function Home() {
+export default async function Home() {
+  const { userId } = await auth();
+
   return (
     <main className="min-h-screen bg-gradient-to-b from-[#e9e7de] to-[#f5f4ef] text-[#1c1c1d]">
       <header className="border-b border-[rgba(28,28,29,0.08)]">
@@ -19,6 +22,12 @@ export default function Home() {
               className="text-sm font-medium text-[rgba(28,28,29,0.72)] transition-colors hover:text-[#1c1c1d]"
             >
               Docs
+            </Link>
+            <Link
+              href={userId ? "/dashboard" : "/sign-in"}
+              className="inline-flex h-9 items-center justify-center rounded-lg bg-[rgba(28,28,29,0.08)] px-3 text-sm font-semibold text-[#1c1c1d] transition-colors hover:bg-[rgba(28,28,29,0.14)]"
+            >
+              {userId ? "Dashboard" : "Sign in"}
             </Link>
           </div>
         </div>
