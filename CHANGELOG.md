@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.14.6](https://github.com/solana-foundation/solana-developer-platform/compare/v0.14.5...v0.14.6) (2026-04-10)
+
+### Bug Fixes
+
+* remove auth entry feature gates ([#162](https://github.com/solana-foundation/solana-developer-platform/pull/162)) ([54ad74e](https://github.com/solana-foundation/solana-developer-platform/commit/54ad74e82e3b8f2607c1d5f9d4d05c0e9970ba3d))
+
 ## [0.14.5](https://github.com/solana-foundation/solana-developer-platform/compare/v0.14.4...v0.14.5) (2026-04-09)
 
 ### Maintenance
