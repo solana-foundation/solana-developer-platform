@@ -1,6 +1,8 @@
 "use client";
 
 import { IssuanceHeaderTabs } from "@/components/issuance-header-tabs";
+import { SentryFeedbackWidget } from "@/components/sentry-feedback-widget";
+import { SentryUserContext } from "@/components/sentry-user-context";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { OrganizationSwitcher, SignInButton, UserButton, useAuth } from "@clerk/nextjs";
 import { DEFAULT_SDP_DOCS_URL } from "@sdp/types";
@@ -423,7 +425,8 @@ function DashboardSidebarContent({
           />
         ))}
       </div>
-      <div className="space-y-2 pb-1">
+      <div className="space-y-0.5 pb-1">
+        <SentryFeedbackWidget />
         {bottomNavItems.map((item) => {
           const Icon = item.icon;
           return (
@@ -545,6 +548,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
         shouldLockShellViewport ? "h-screen overflow-hidden" : "",
       ].join(" ")}
     >
+      <SentryUserContext />
       <div
         className={[
           "mx-auto grid min-h-screen w-full max-w-none gap-0",
