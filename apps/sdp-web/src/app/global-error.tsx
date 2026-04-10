@@ -2,7 +2,7 @@
 
 import * as Sentry from "@sentry/nextjs";
 import NextError from "next/error";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 
 export default function GlobalError({
   error,
@@ -11,8 +11,11 @@ export default function GlobalError({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
+  const [eventId, setEventId] = useState<string | null>(null);
+
   useEffect(() => {
-    Sentry.captureException(error);
+    const id = Sentry.captureException(error);
+    setEventId(id);
   }, [error]);
 
   return (
@@ -26,6 +29,11 @@ export default function GlobalError({
         <button onClick={() => reset()} type="button">
           Try again
         </button>
+        {eventId ? (
+          <button onClick={() => Sentry.showReportDialog({ eventId })} type="button">
+            Report this issue
+          </button>
+        ) : null}
       </body>
     </html>
   );
