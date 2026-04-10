@@ -2,7 +2,6 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { safeHostname, selectHealthySolanaRpcUrl } from "./lib/solana-rpc-health.mjs";
 
 const mode = process.argv[2];
 const rawForwardedArgs = process.argv.slice(3);
@@ -93,10 +92,6 @@ function run(command, args, options = {}) {
 }
 
 try {
-  if (mode === "integration") {
-    await configureIntegrationSolanaRpc(resolvedEnv);
-  }
-
   await run("pnpm", ["--filter", "@sdp/api", "db:postgres:bootstrap"]);
 
   if (mode === "integration" && forwardedArgs.length > 0) {
@@ -123,15 +118,4 @@ try {
 } catch (error) {
   console.error(error instanceof Error ? error.message : String(error));
   process.exit(1);
-}
-
-async function configureIntegrationSolanaRpc(env) {
-  const selected = await selectHealthySolanaRpcUrl(env);
-  if (!selected) {
-    return;
-  }
-
-  env.SOLANA_RPC_URL = selected.url;
-  env.SOLANA_RPC_DEFAULT_PROVIDER = "default";
-  console.log(`Using ${selected.key} for integration Solana RPC (${safeHostname(selected.url)}).`);
 }

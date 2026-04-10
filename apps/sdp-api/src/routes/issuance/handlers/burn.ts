@@ -65,10 +65,6 @@ async function resolveValidatedBurnSource(
   amountBaseUnits: bigint,
   tokenSymbol: string
 ): Promise<Address> {
-  if (env.SOLANA_MOCK === "true") {
-    return requestedSource;
-  }
-
   const rpc = createRpcForSdk<MosaicSdkRpc>(env);
 
   let authorityAta: Awaited<ReturnType<typeof resolveTokenAccount>>;

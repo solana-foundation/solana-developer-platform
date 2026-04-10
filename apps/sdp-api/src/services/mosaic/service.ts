@@ -26,7 +26,6 @@ import {
 import {
   type Address,
   type Rpc,
-  type Signature,
   type SolanaRpcApi,
   type TransactionSigner,
   appendTransactionMessageInstructions,
@@ -136,17 +135,6 @@ export class MosaicService {
     throw lastError instanceof Error ? lastError : new Error("RPC operation failed");
   }
 
-  private isSolanaMockEnabled(): boolean {
-    return this.env.SOLANA_MOCK === "true";
-  }
-
-  private mockTransactionResult(): MosaicTransactionResult {
-    return {
-      signature: `mock_${crypto.randomUUID()}` as Signature,
-      slot: BigInt(Date.now()),
-    };
-  }
-
   // ═════════════════════════════════════════════════════════════════════════
   // Token Creation (Templates)
   // ═════════════════════════════════════════════════════════════════════════
@@ -165,13 +153,6 @@ export class MosaicService {
     // Generate a new mint keypair - Mosaic templates require a signer
     const mintKeypair = await generateKeyPairSigner();
     const mint = mintKeypair.address;
-
-    if (this.isSolanaMockEnabled()) {
-      return {
-        ...this.mockTransactionResult(),
-        mint,
-      };
-    }
 
     // Determine ACL mode and sRFC-37 enablement
     const aclMode = options.aclMode ?? DEFAULT_ACL_MODE[mosaicTemplate];
@@ -394,13 +375,6 @@ export class MosaicService {
    * - Decimal conversion (amount is decimal, e.g., 100 for 100 tokens)
    */
   async mintTo(options: MintToOptions): Promise<MosaicTransactionResult> {
-    if (this.isSolanaMockEnabled()) {
-      return {
-        ...this.mockTransactionResult(),
-        tokenAccount: options.destination,
-      };
-    }
-
     const fallbackFeePayer =
       options.feePayer === this.signer.address ? this.signer : options.feePayer;
     const feePayer = await this.resolveFeePayer(fallbackFeePayer);
@@ -476,10 +450,6 @@ export class MosaicService {
    * Execute a Token-2022 transfer transaction with custody signing.
    */
   async transfer(options: ExecuteTransferOptions): Promise<MosaicTransactionResult> {
-    if (this.isSolanaMockEnabled()) {
-      return this.mockTransactionResult();
-    }
-
     const feePayer = await this.resolveFeePayerSigner(options.feePayer);
 
     const fullTx = await createTransferTransaction({
@@ -507,10 +477,6 @@ export class MosaicService {
    * For blocklist tokens: blocks wallet from receiving/holding tokens
    */
   async addToList(options: AblWalletOptions): Promise<MosaicTransactionResult> {
-    if (this.isSolanaMockEnabled()) {
-      return this.mockTransactionResult();
-    }
-
     const payer = await this.resolveFeePayerSigner();
 
     // SDK uses object input pattern for ABL operations
@@ -529,10 +495,6 @@ export class MosaicService {
    * Remove a wallet from the token's ABL list.
    */
   async removeFromList(options: AblWalletOptions): Promise<MosaicTransactionResult> {
-    if (this.isSolanaMockEnabled()) {
-      return this.mockTransactionResult();
-    }
-
     const payer = await this.resolveFeePayerSigner();
 
     const fullTx = await getRemoveWalletTransaction({
@@ -558,10 +520,6 @@ export class MosaicService {
    * - Standard SPL Token-2022 freeze (if freeze authority is a wallet)
    */
   async freezeAccount(options: FreezeThawOptions): Promise<MosaicTransactionResult> {
-    if (this.isSolanaMockEnabled()) {
-      return this.mockTransactionResult();
-    }
-
     const payer = await this.resolveFeePayerSigner();
 
     // SDK uses object input pattern - note: NO mint parameter!
@@ -584,10 +542,6 @@ export class MosaicService {
    * - Standard SPL Token-2022 thaw (if freeze authority is a wallet)
    */
   async thawAccount(options: FreezeThawOptions): Promise<MosaicTransactionResult> {
-    if (this.isSolanaMockEnabled()) {
-      return this.mockTransactionResult();
-    }
-
     const payer = await this.resolveFeePayerSigner();
 
     const fullTx = await getThawTransaction({
@@ -614,10 +568,6 @@ export class MosaicService {
     tokenAccountOwner: Address,
     _feePayer: Address // TODO: Use when fee payment abstraction is complete
   ): Promise<MosaicTransactionResult> {
-    if (this.isSolanaMockEnabled()) {
-      return this.mockTransactionResult();
-    }
-
     const payer = await this.resolveFeePayerSigner();
 
     const fullTx = await getThawPermissionlessTransaction({
@@ -665,10 +615,6 @@ export class MosaicService {
     permanentDelegate: TransactionSigner;
     feePayer: TransactionSigner;
   }): Promise<MosaicTransactionResult> {
-    if (this.isSolanaMockEnabled()) {
-      return this.mockTransactionResult();
-    }
-
     const feePayer = await this.resolveFeePayerSigner(options.feePayer);
 
     const fullTx = await createForceTransferTransaction(
@@ -710,10 +656,6 @@ export class MosaicService {
     permanentDelegate: TransactionSigner;
     feePayer: TransactionSigner;
   }): Promise<MosaicTransactionResult> {
-    if (this.isSolanaMockEnabled()) {
-      return this.mockTransactionResult();
-    }
-
     const feePayer = await this.resolveFeePayerSigner(options.feePayer);
 
     const fullTx = await createForceBurnTransaction(
@@ -767,10 +709,6 @@ export class MosaicService {
     newAuthority: Address | null;
     feePayer: TransactionSigner;
   }): Promise<MosaicTransactionResult> {
-    if (this.isSolanaMockEnabled()) {
-      return this.mockTransactionResult();
-    }
-
     const feePayer = await this.resolveFeePayerSigner(options.feePayer);
 
     const fullTx = await this.withRpcRetry(() =>
@@ -796,10 +734,6 @@ export class MosaicService {
   }
 
   async updateMetadata(options: UpdateMetadataOptions): Promise<MosaicTransactionResult | null> {
-    if (this.isSolanaMockEnabled()) {
-      return this.mockTransactionResult();
-    }
-
     const feePayer = await this.resolveFeePayerSigner(options.feePayer);
     const encodedMint = await fetchEncodedAccount(this.rpc, options.mint, {
       commitment: "confirmed",
@@ -951,10 +885,6 @@ export class MosaicService {
     pauseAuthority: TransactionSigner;
     feePayer: TransactionSigner;
   }): Promise<MosaicTransactionResult> {
-    if (this.isSolanaMockEnabled()) {
-      return this.mockTransactionResult();
-    }
-
     const feePayer = await this.resolveFeePayerSigner(options.feePayer);
 
     const { transactionMessage } = await createPauseTransaction(this.rpc, {
@@ -985,10 +915,6 @@ export class MosaicService {
     pauseAuthority: TransactionSigner;
     feePayer: TransactionSigner;
   }): Promise<MosaicTransactionResult> {
-    if (this.isSolanaMockEnabled()) {
-      return this.mockTransactionResult();
-    }
-
     const feePayer = await this.resolveFeePayerSigner(options.feePayer);
 
     const { transactionMessage } = await createResumeTransaction(this.rpc, {
@@ -1009,14 +935,6 @@ export class MosaicService {
    * Falls back to Token2022Service for full control.
    */
   async createCustomToken(options: CreateTokenOptions): Promise<MosaicTransactionResult> {
-    if (this.isSolanaMockEnabled()) {
-      const mintKeypair = await generateKeyPairSigner();
-      return {
-        ...this.mockTransactionResult(),
-        mint: mintKeypair.address,
-      };
-    }
-
     const { Token2022Service } = await import("@/services/solana/token-2022");
     const legacyService = new Token2022Service(this.env, this.signer, this.feePayment);
 

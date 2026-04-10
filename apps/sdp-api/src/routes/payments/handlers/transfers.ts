@@ -63,14 +63,6 @@ const DEVNET_USDC_MINT = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
 // biome-ignore lint/nursery/noSecrets: Mainnet USDC mint address constant, not a secret.
 const MAINNET_USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 
-function createMockTransferResult(): { signature: string; slot: number; blockTime: string | null } {
-  return {
-    signature: `mock_${crypto.randomUUID()}`,
-    slot: Date.now(),
-    blockTime: null,
-  };
-}
-
 interface ParsedInstructionPayload {
   info?: Record<string, unknown>;
   type?: string;
@@ -316,10 +308,6 @@ async function executeSolTransfer(
     throw new AppError("BAD_REQUEST", "Resolved signing wallet does not match source wallet");
   }
 
-  if (c.env.SOLANA_MOCK === "true") {
-    return createMockTransferResult();
-  }
-
   const rpc = solanaRpc.createRpc(c.env);
   const { blockhash, lastValidBlockHeight } = await solanaRpc.getRecentBlockhash(rpc, "confirmed");
   const feePayment = getFeePayment(c);
@@ -445,10 +433,6 @@ async function executeSplTransfer(
 
   if (signer.address !== sourceWallet.publicKey) {
     throw new AppError("BAD_REQUEST", "Resolved signing wallet does not match source wallet");
-  }
-
-  if (c.env.SOLANA_MOCK === "true") {
-    return createMockTransferResult();
   }
 
   const rpc = solanaRpc.createRpc(c.env);
@@ -1211,29 +1195,6 @@ export async function listTransfers(c: AppContext) {
         resolvedWalletId = authorizedWallet.walletId;
         walletIdsByAddress = new Map([[authorizedWallet.publicKey, authorizedWallet.walletId]]);
       }
-    }
-
-    if (c.env.SOLANA_MOCK === "true") {
-      const result = await repo.listTransfers({
-        organizationId: auth.organizationId,
-        projectId: auth.projectId,
-        walletId: resolvedWalletId,
-        walletIds: resolvedWalletId ? undefined : (allowedWalletIds ?? undefined),
-        sourceAddress: resolvedWalletId ? undefined : walletAddress,
-        statuses: status ? [status] : undefined,
-        token,
-        direction,
-        createdAtFrom: from,
-        createdAtTo: to,
-        limit: pageSize,
-        offset,
-      });
-
-      return paginated(c, result.rows.map(mapTransferRow), {
-        total: result.total,
-        page,
-        pageSize,
-      });
     }
 
     // 1. Fetch on-chain signature history via Helius (or fallback RPC)
