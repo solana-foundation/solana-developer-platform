@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { safeHostname, selectHealthySolanaRpcUrl } from "./lib/solana-rpc-health.mjs";
 
 const mode = process.argv[2];
 const forwardedArgs = process.argv.slice(3);
@@ -120,97 +121,4 @@ async function configureIntegrationSolanaRpc(env) {
 
   env.SOLANA_RPC_URL = selected.url;
   console.log(`Using ${selected.key} for integration Solana RPC (${safeHostname(selected.url)}).`);
-}
-
-async function selectHealthySolanaRpcUrl(env) {
-  const candidates = getSolanaRpcCandidates(env);
-  if (candidates.length === 0) {
-    return undefined;
-  }
-
-  const failures = [];
-  for (const candidate of candidates) {
-    try {
-      await assertSolanaRpcHealthy(candidate.url);
-      return candidate;
-    } catch (error) {
-      failures.push(
-        `${candidate.key} (${safeHostname(candidate.url)}): ${
-          error instanceof Error ? error.message : String(error)
-        }`
-      );
-    }
-  }
-
-  throw new Error(
-    `No healthy Solana RPC URL found for integration tests. Checked: ${failures.join("; ")}`
-  );
-}
-
-function getSolanaRpcCandidates(env) {
-  const keys = [
-    "SOLANA_RPC_URL",
-    "SOLANA_RPC_ALCHEMY_URL",
-    "SOLANA_RPC_QUICKNODE_URL",
-    "SOLANA_RPC_TRITON_URL",
-    "SOLANA_RPC_HELIUS_URL",
-  ];
-  const seen = new Set();
-
-  return keys.flatMap((key) => {
-    const url = env[key];
-    if (!url || seen.has(url)) {
-      return [];
-    }
-
-    seen.add(url);
-    return [{ key, url }];
-  });
-}
-
-async function assertSolanaRpcHealthy(rpcUrl) {
-  const body = JSON.stringify({
-    jsonrpc: "2.0",
-    id: 1,
-    // biome-ignore lint/nursery/noSecrets: JSON-RPC method name, not a secret.
-    method: "getLatestBlockhash",
-    params: [{ commitment: "confirmed" }],
-  });
-  const response = await fetchWithTimeout(rpcUrl, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body,
-  });
-
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}`);
-  }
-
-  const payload = await response.json();
-  if (payload.error) {
-    throw new Error(payload.error.message ?? "unknown JSON-RPC error");
-  }
-
-  if (!payload.result?.value?.blockhash) {
-    throw new Error("missing latest blockhash");
-  }
-}
-
-async function fetchWithTimeout(url, init) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 10_000);
-
-  try {
-    return await fetch(url, { ...init, signal: controller.signal });
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-function safeHostname(rawUrl) {
-  try {
-    return new URL(rawUrl).hostname;
-  } catch {
-    return "invalid-url";
-  }
 }

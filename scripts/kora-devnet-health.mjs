@@ -1,3 +1,10 @@
+import {
+  safeHostname,
+  selectHealthySolanaRpcUrl,
+  solanaJsonRpc,
+  solanaRpcKeys,
+} from "./lib/solana-rpc-health.mjs";
+
 const KORA_RPC_URL = process.env.KORA_RPC_URL;
 const KORA_API_KEY = process.env.KORA_API_KEY;
 
@@ -5,14 +12,12 @@ const MIN_BALANCE_LAMPORTS = parseNonNegativeInt(process.env.KORA_MIN_BALANCE_LA
 const TIMEOUT_MS = parseNonNegativeInt(process.env.KORA_TIMEOUT_MS, 15_000);
 
 const PUBLIC_KEY_REGEX = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
-// biome-ignore lint/nursery/noSecrets: JSON-RPC method name, not a secret.
-const GET_LATEST_BLOCKHASH_METHOD = "getLatestBlockhash";
 
 if (!KORA_RPC_URL) {
   fail("Kora devnet health check requires KORA_RPC_URL.");
 }
 
-const solanaRpc = await selectHealthySolanaRpc();
+const solanaRpc = await selectHealthySolanaRpcUrl(process.env, { timeoutMs: TIMEOUT_MS });
 
 if (!solanaRpc) {
   const missing = [];
@@ -41,7 +46,8 @@ try {
     fail("Kora health check failed: invalid or missing fee payer address.");
   }
 
-  const blockhashResponse = await solanaJsonRpc(GET_LATEST_BLOCKHASH_METHOD, [
+  // biome-ignore lint/nursery/noSecrets: JSON-RPC method name, not a secret.
+  const blockhashResponse = await solanaJsonRpc(solanaRpc.url, "getLatestBlockhash", [
     { commitment: "confirmed" },
   ]);
   const blockhash = blockhashResponse?.value?.blockhash;
@@ -49,7 +55,7 @@ try {
     fail("Solana RPC health check failed: missing latest blockhash.");
   }
 
-  const balanceResponse = await solanaJsonRpc("getBalance", [
+  const balanceResponse = await solanaJsonRpc(solanaRpc.url, "getBalance", [
     feePayerAddress,
     { commitment: "confirmed" },
   ]);
@@ -83,10 +89,6 @@ async function koraRpc(method, params = []) {
   return jsonRpc(KORA_RPC_URL, method, params, requestHeaders());
 }
 
-async function solanaJsonRpc(method, params = []) {
-  return jsonRpc(solanaRpc.url, method, params, { "Content-Type": "application/json" });
-}
-
 async function jsonRpc(url, method, params, headers) {
   const response = await fetchWithTimeout(url, {
     method: "POST",
@@ -113,61 +115,6 @@ function requestHeaders() {
   };
 }
 
-async function selectHealthySolanaRpc() {
-  const candidates = getSolanaRpcCandidates();
-  if (candidates.length === 0) {
-    return undefined;
-  }
-
-  const failures = [];
-  for (const candidate of candidates) {
-    try {
-      const response = await jsonRpc(
-        candidate.url,
-        GET_LATEST_BLOCKHASH_METHOD,
-        [{ commitment: "confirmed" }],
-        { "Content-Type": "application/json" }
-      );
-      if (response?.value?.blockhash) {
-        return candidate;
-      }
-      throw new Error("missing latest blockhash");
-    } catch (error) {
-      failures.push(
-        `${candidate.key} (${safeHostname(candidate.url)}): ${
-          error instanceof Error ? error.message : String(error)
-        }`
-      );
-    }
-  }
-
-  fail(`No healthy Solana RPC URL found. Checked: ${failures.join("; ")}`);
-}
-
-function getSolanaRpcCandidates() {
-  const seen = new Set();
-
-  return solanaRpcKeys().flatMap((key) => {
-    const url = process.env[key];
-    if (!url || seen.has(url)) {
-      return [];
-    }
-
-    seen.add(url);
-    return [{ key, url }];
-  });
-}
-
-function solanaRpcKeys() {
-  return [
-    "SOLANA_RPC_URL",
-    "SOLANA_RPC_ALCHEMY_URL",
-    "SOLANA_RPC_QUICKNODE_URL",
-    "SOLANA_RPC_TRITON_URL",
-    "SOLANA_RPC_HELIUS_URL",
-  ];
-}
-
 async function fetchWithTimeout(url, init) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS);
@@ -184,14 +131,6 @@ function parseNonNegativeInt(raw, fallback) {
 
   const value = Number.parseInt(raw, 10);
   return Number.isFinite(value) && value >= 0 ? value : fallback;
-}
-
-function safeHostname(rawUrl) {
-  try {
-    return new URL(rawUrl).hostname;
-  } catch {
-    return "invalid-url";
-  }
 }
 
 function fail(message) {
