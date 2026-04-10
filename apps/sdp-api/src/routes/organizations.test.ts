@@ -380,6 +380,28 @@ describe("Organizations routes", () => {
       }
     });
 
+    it("marks organization members removed on delete", async () => {
+      await app.request(
+        `/v1/organizations/${TEST_ORG.id}`,
+        {
+          method: "DELETE",
+          headers: {
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+        },
+        env
+      );
+
+      const members = await getDb(env)
+        .prepare("SELECT status FROM organization_members WHERE organization_id = ?")
+        .bind(TEST_ORG.id)
+        .all<{ status: string }>();
+
+      for (const member of members.results) {
+        expect(member.status).toBe("removed");
+      }
+    });
+
     it("requires org:admin permission", async () => {
       await clearKVNamespaces(env);
       await seedCachedApiKey(env, validKeyHash, {

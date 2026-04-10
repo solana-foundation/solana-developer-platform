@@ -116,16 +116,76 @@ describe("Clerk webhooks", () => {
     expect(updated.status).toBe(200);
 
     const updatedOrg = await getDb(env)
-      .prepare("SELECT name, slug, tier, settings FROM organizations WHERE id = ?")
+      .prepare(
+        `SELECT o.name, o.slug, o.tier, o.settings, aoi.slug AS identity_slug
+         FROM organizations o
+         JOIN auth_organization_identities aoi ON aoi.organization_id = o.id
+         WHERE o.id = ?`
+      )
       .bind(createdOrg?.id)
-      .first<{ name: string; slug: string; tier: string; settings: string | null }>();
+      .first<{
+        name: string;
+        slug: string;
+        tier: string;
+        settings: string | null;
+        identity_slug: string;
+      }>();
 
     expect(updatedOrg).toMatchObject({
       name: "Bookface Labs",
       slug: "bookface-labs",
+      identity_slug: "bookface-labs",
       tier: "individual",
     });
     expect(updatedOrg?.settings ? JSON.parse(updatedOrg.settings) : null).toBeNull();
+  });
+
+  it("keeps Clerk identity email aligned with the local user when a new email is taken", async () => {
+    await getDb(env).batch([
+      getDb(env)
+        .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
+        .bind("usr_clerk_existing", "old@example.com"),
+      getDb(env)
+        .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
+        .bind("usr_email_owner", "taken@example.com"),
+      getDb(env)
+        .prepare(
+          `INSERT INTO auth_user_identities (id, provider, provider_user_id, user_id, email)
+           VALUES (?, 'clerk', ?, ?, ?)`
+        )
+        .bind("aui_existing", "user_clerk_existing", "usr_clerk_existing", "old@example.com"),
+    ]);
+
+    const updated = await sendClerkWebhook({
+      type: "user.updated",
+      data: {
+        id: "user_clerk_existing",
+        primary_email_address_id: "email_taken",
+        email_addresses: [
+          {
+            id: "email_taken",
+            email_address: "taken@example.com",
+          },
+        ],
+      },
+    });
+
+    expect(updated.status).toBe(200);
+
+    const identity = await getDb(env)
+      .prepare(
+        `SELECT u.email AS user_email, aui.email AS identity_email
+         FROM auth_user_identities aui
+         JOIN users u ON u.id = aui.user_id
+         WHERE aui.provider = 'clerk' AND aui.provider_user_id = ?`
+      )
+      .bind("user_clerk_existing")
+      .first<{ user_email: string; identity_email: string }>();
+
+    expect(identity).toEqual({
+      user_email: "old@example.com",
+      identity_email: "old@example.com",
+    });
   });
 
   it("syncs organization memberships without creating records on delete-only events", async () => {

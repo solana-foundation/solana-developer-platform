@@ -262,12 +262,14 @@ async function ensureOrganizationMapping(
 }
 
 async function syncOrganization(c: AppContext, data: Record<string, unknown>) {
+  const db = getDb(c.env);
   const org = extractOrganization(data);
   const organizationId = await ensureOrganizationMapping(c, org, data.private_metadata);
   const clerkOrg = await resolveClerkOrganization(c, org, data.private_metadata);
 
   const updates: string[] = [];
   const params: string[] = [];
+  let nextSlug: string | null = null;
 
   if (clerkOrg.name?.trim()) {
     updates.push("name = ?");
@@ -275,31 +277,37 @@ async function syncOrganization(c: AppContext, data: Record<string, unknown>) {
   }
 
   if (clerkOrg.slug?.trim()) {
-    const slug = await ensureUniqueSlug(getDb(c.env), clerkOrg.slug, organizationId);
+    const slug = await ensureUniqueSlug(db, clerkOrg.slug, organizationId);
+    nextSlug = slug;
     updates.push("slug = ?");
     params.push(slug);
-
-    await getDb(c.env)
-      .prepare(
-        `UPDATE auth_organization_identities
-         SET slug = ?, updated_at = datetime('now')
-         WHERE provider = 'clerk' AND provider_org_id = ?`
-      )
-      .bind(slug, clerkOrg.id)
-      .run();
   }
 
   if (updates.length > 0) {
     updates.push("updated_at = datetime('now')");
     params.push(organizationId);
 
-    await getDb(c.env)
+    const organizationUpdate = db
       .prepare(`UPDATE organizations SET ${updates.join(", ")} WHERE id = ?`)
-      .bind(...params)
-      .run();
+      .bind(...params);
+
+    if (nextSlug) {
+      await db.batch([
+        db
+          .prepare(
+            `UPDATE auth_organization_identities
+             SET slug = ?, updated_at = datetime('now')
+             WHERE provider = 'clerk' AND provider_org_id = ?`
+          )
+          .bind(nextSlug, clerkOrg.id),
+        organizationUpdate,
+      ]);
+    } else {
+      await organizationUpdate.run();
+    }
   }
 
-  await syncOrganizationTierFromClerk(getDb(c.env), {
+  await syncOrganizationTierFromClerk(db, {
     organizationId,
     clerkOrganization: clerkOrg,
   });
@@ -363,21 +371,24 @@ async function ensureUserMapping(c: AppContext, user: ClerkUserData): Promise<st
     throw badRequest("Clerk user id missing");
   }
 
+  const db = getDb(c.env);
   const email = await resolveUserEmail(c.env, user.id, user.email);
-  const existing = await getDb(c.env)
+  const existing = await db
     .prepare(
-      `SELECT user_id
-       FROM auth_user_identities
-       WHERE provider = 'clerk' AND provider_user_id = ?`
+      `SELECT aui.user_id, u.email
+       FROM auth_user_identities aui
+       JOIN users u ON u.id = aui.user_id
+       WHERE aui.provider = 'clerk' AND aui.provider_user_id = ?`
     )
     .bind(user.id)
-    .first<{ user_id: string }>();
+    .first<{ user_id: string; email: string }>();
 
   if (existing?.user_id) {
     const updates = ["status = 'active'"];
     const params: (string | null)[] = [];
+    let identityEmail = existing.email;
 
-    const owner = await getDb(c.env)
+    const owner = await db
       .prepare("SELECT id FROM users WHERE email = ?")
       .bind(email)
       .first<{ id: string }>();
@@ -385,6 +396,7 @@ async function ensureUserMapping(c: AppContext, user: ClerkUserData): Promise<st
     if (!owner || owner.id === existing.user_id) {
       updates.push("email = ?");
       params.push(email);
+      identityEmail = email;
     }
 
     if (user.name) {
@@ -393,31 +405,28 @@ async function ensureUserMapping(c: AppContext, user: ClerkUserData): Promise<st
     }
 
     params.push(existing.user_id);
-    await getDb(c.env)
-      .prepare(`UPDATE users SET ${updates.join(", ")} WHERE id = ?`)
-      .bind(...params)
-      .run();
-
-    await getDb(c.env)
-      .prepare(
-        `UPDATE auth_user_identities
-         SET email = ?, updated_at = datetime('now')
-         WHERE provider = 'clerk' AND provider_user_id = ?`
-      )
-      .bind(email, user.id)
-      .run();
+    await db.batch([
+      db.prepare(`UPDATE users SET ${updates.join(", ")} WHERE id = ?`).bind(...params),
+      db
+        .prepare(
+          `UPDATE auth_user_identities
+           SET email = ?, updated_at = datetime('now')
+           WHERE provider = 'clerk' AND provider_user_id = ?`
+        )
+        .bind(identityEmail, user.id),
+    ]);
 
     return existing.user_id;
   }
 
-  const localUser = await getDb(c.env)
+  const localUser = await db
     .prepare("SELECT id FROM users WHERE email = ?")
     .bind(email)
     .first<{ id: string }>();
   const userId = localUser?.id ?? `usr_${crypto.randomUUID()}`;
 
   if (!localUser) {
-    await getDb(c.env)
+    await db
       .prepare(
         `INSERT INTO users (id, email, name, email_verified, status)
          VALUES (?, ?, ?, 1, 'active')`
@@ -426,7 +435,7 @@ async function ensureUserMapping(c: AppContext, user: ClerkUserData): Promise<st
       .run();
   }
 
-  await getDb(c.env)
+  await db
     .prepare(
       `INSERT INTO auth_user_identities (id, provider, provider_user_id, user_id, email)
        VALUES (?, 'clerk', ?, ?, ?)

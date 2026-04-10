@@ -216,26 +216,27 @@ export const getOrganizationProviderAccess = async (c: AppContext) => {
 export const deleteOrganization = async (c: AppContext) => {
   const { orgId } = c.req.param();
   const auth = getAuth(c);
+  const db = getDb(c.env);
 
   if (auth?.organizationId !== orgId) {
     throw new AppError("FORBIDDEN", "Access denied to this organization");
   }
 
-  // Soft delete
-  await getDb(c.env)
-    .prepare(
-      `UPDATE organizations SET status = 'deleted', updated_at = datetime('now') WHERE id = ?`
-    )
-    .bind(orgId)
-    .run();
-
-  // Revoke all API keys
-  await getDb(c.env)
-    .prepare(
-      `UPDATE api_keys SET status = 'revoked', revoked_at = datetime('now') WHERE organization_id = ?`
-    )
-    .bind(orgId)
-    .run();
+  await db.batch([
+    db
+      .prepare(
+        `UPDATE organizations SET status = 'deleted', updated_at = datetime('now') WHERE id = ?`
+      )
+      .bind(orgId),
+    db
+      .prepare("UPDATE organization_members SET status = 'removed' WHERE organization_id = ?")
+      .bind(orgId),
+    db
+      .prepare(
+        `UPDATE api_keys SET status = 'revoked', revoked_at = datetime('now') WHERE organization_id = ?`
+      )
+      .bind(orgId),
+  ]);
 
   // Invalidate cache
   const kvService = new KVService(c.env.SDP_API_KEYS, c.env.SDP_CACHE);
