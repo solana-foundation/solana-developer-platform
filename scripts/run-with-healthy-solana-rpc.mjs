@@ -14,6 +14,7 @@ try {
 
   if (selected) {
     env.SOLANA_RPC_URL = selected.url;
+    env.SOLANA_RPC_DEFAULT_PROVIDER = "default";
     console.log(`Using ${selected.key} for Solana RPC (${safeHostname(selected.url)}).`);
   }
 
