@@ -233,7 +233,7 @@ jobs:
             rpc_provider: triton
           - name: Token Flows
             test_files: src/tests/deploy.test.ts src/tests/mint.test.ts src/tests/burn.test.ts src/tests/freeze.test.ts
-            rpc_provider: default
+            rpc_provider: quicknode
           - name: Access
             test_files: src/tests/payments-wallet-scope.test.ts src/tests/api-keys-flow.test.ts src/tests/api-keys-rotation.test.ts src/tests/custody-local.test.ts
             rpc_provider: alchemy
@@ -449,12 +449,14 @@ jobs:
           DOPPLER_CONFIG: dev_ci
           SDP_API_BASE_URL: ${{ env.PLAYWRIGHT_API_URL }}
           NEXT_PUBLIC_SDP_API_BASE_URL: ${{ env.PLAYWRIGHT_API_URL }}
+          SOLANA_RPC_CI_PREFERRED_PROVIDER: quicknode
         run: scripts/doppler/run-with-config.sh node scripts/run-with-healthy-solana-rpc.mjs pnpm --filter sdp-web build
 
       - name: Run browser e2e suite
         env:
           DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
           DOPPLER_CONFIG: dev_ci
+          SOLANA_RPC_CI_PREFERRED_PROVIDER: quicknode
         run: scripts/doppler/run-with-config.sh node scripts/run-with-healthy-solana-rpc.mjs pnpm --filter sdp-web run ${{ matrix.test_script }}
 
       - name: Upload Playwright artifacts

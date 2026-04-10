@@ -3,10 +3,6 @@ const GET_LATEST_BLOCKHASH_METHOD = "getLatestBlockhash";
 
 const PROVIDERS = [
   {
-    id: "default",
-    urlKey: "SOLANA_RPC_URL",
-  },
-  {
     id: "alchemy",
     urlKey: "SOLANA_RPC_ALCHEMY_URL",
     apiKey: "SOLANA_RPC_ALCHEMY_API_KEY",
@@ -20,6 +16,10 @@ const PROVIDERS = [
     id: "triton",
     urlKey: "SOLANA_RPC_TRITON_URL",
     apiKey: "SOLANA_RPC_TRITON_API_KEY",
+  },
+  {
+    id: "default",
+    urlKey: "SOLANA_RPC_URL",
   },
   {
     id: "helius",
