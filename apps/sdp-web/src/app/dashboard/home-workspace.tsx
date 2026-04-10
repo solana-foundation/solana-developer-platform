@@ -154,7 +154,7 @@ export function HomeWorkspace({ totalBalance, totalBalanceError, wallets }: Home
             />
           ) : null}
           {dashboardAccess.capabilities.canManageCustody ? (
-            <Button asChild>
+            <Button asChild className="!text-white hover:!text-white visited:!text-white">
               <Link href="/dashboard/wallets">Create Wallet</Link>
             </Button>
           ) : null}
@@ -203,8 +203,8 @@ export function HomeWorkspace({ totalBalance, totalBalanceError, wallets }: Home
                 <p className="text-sm text-[rgba(28,28,29,0.72)]">{emptyActivityMessage}</p>
               ) : (
                 <TooltipProvider>
-                  <div className="min-w-0">
-                    <Table className="table-fixed">
+                  <div className="min-w-0 overflow-x-auto">
+                    <Table className="min-w-full table-fixed md:min-w-[52rem]">
                       <TableHeader>
                         <TableRow>
                           <TableHead className="w-[8rem] pl-6">Time</TableHead>

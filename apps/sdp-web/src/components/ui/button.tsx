@@ -51,7 +51,7 @@ const sizeClassNames: Record<ButtonSize, string | undefined> = {
 };
 
 const slotVariantClassNames: Record<ButtonVariant, string> = {
-  default: "bg-[#0f0f10] text-white hover:bg-black",
+  default: "bg-[#0f0f10] !text-white hover:bg-black hover:!text-white visited:!text-white",
   destructive:
     "bg-status-error-text text-white hover:bg-status-error-text focus-visible:ring-status-error-border",
   outline: "border border-border-light bg-white text-text-extra-high hover:bg-gray-100",

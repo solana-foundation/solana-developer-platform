@@ -276,8 +276,8 @@ export function PaymentsOverview({
               <p className="text-sm text-[rgba(28,28,29,0.72)]">No transactions found yet.</p>
             ) : (
               <TooltipProvider>
-                <div className="min-w-0">
-                  <Table className="table-fixed">
+                <div className="min-w-0 overflow-x-auto">
+                  <Table className="min-w-full table-fixed md:min-w-[72rem]">
                     <TableHeader>
                       <TableRow>
                         <TableHead className="w-[9rem]">Status</TableHead>
