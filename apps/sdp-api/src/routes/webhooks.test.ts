@@ -3,7 +3,7 @@ import app from "@/index";
 import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
 import { Webhook } from "svix";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const WEBHOOK_SECRET = `whsec_${Buffer.from("test_clerk_webhook_secret_1234567890").toString(
   "base64"
@@ -42,7 +42,10 @@ describe("Clerk webhooks", () => {
   });
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     env.CLERK_WEBHOOK_SECRET = undefined;
+    env.CLERK_SECRET_KEY = undefined;
+    env.CLERK_API_URL = undefined;
     await clearTestDatabase(env);
   });
 
@@ -138,6 +141,67 @@ describe("Clerk webhooks", () => {
       tier: "individual",
     });
     expect(updatedOrg?.settings ? JSON.parse(updatedOrg.settings) : null).toBeNull();
+  });
+
+  it("reuses the resolved Clerk organization when creating from incomplete payloads", async () => {
+    env.CLERK_SECRET_KEY = "sk_test_clerk";
+    env.CLERK_API_URL = "https://clerk.test/v1";
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          id: "org_clerk_incomplete_payload",
+          name: "Fetched Bookface",
+          slug: "fetched-bookface",
+          private_metadata: {
+            sdp: {
+              tier: "pro",
+            },
+          },
+        }),
+        {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json",
+          },
+        }
+      )
+    );
+
+    const created = await sendClerkWebhook({
+      type: "organization.created",
+      data: {
+        id: "org_clerk_incomplete_payload",
+      },
+    });
+
+    expect(created.status).toBe(200);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "https://clerk.test/v1/organizations/org_clerk_incomplete_payload",
+      expect.any(Object)
+    );
+
+    const createdOrg = await getDb(env)
+      .prepare(
+        `SELECT o.name, o.slug, o.tier, aoi.slug AS identity_slug
+         FROM organizations o
+         JOIN auth_organization_identities aoi ON aoi.organization_id = o.id
+         WHERE aoi.provider = 'clerk' AND aoi.provider_org_id = ?`
+      )
+      .bind("org_clerk_incomplete_payload")
+      .first<{
+        name: string;
+        slug: string;
+        tier: string;
+        identity_slug: string;
+      }>();
+
+    expect(createdOrg).toEqual({
+      name: "Fetched Bookface",
+      slug: "fetched-bookface",
+      identity_slug: "fetched-bookface",
+      tier: "enterprise",
+    });
   });
 
   it("keeps Clerk identity email aligned with the local user when a new email is taken", async () => {

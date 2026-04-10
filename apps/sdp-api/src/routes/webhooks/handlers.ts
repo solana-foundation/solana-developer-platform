@@ -37,6 +37,11 @@ type ClerkUserData = {
   name: string | null;
 };
 
+type OrganizationMapping = {
+  organizationId: string;
+  clerkOrganization: ClerkOrganization | null;
+};
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object") {
     return null;
@@ -212,14 +217,17 @@ async function ensureOrganizationMapping(
   c: AppContext,
   org: ClerkOrgData,
   privateMetadata?: unknown
-): Promise<string> {
+): Promise<OrganizationMapping> {
   if (!org.id) {
     throw badRequest("Clerk organization id missing");
   }
 
   const existing = await findOrganizationMapping(c, org.id);
   if (existing) {
-    return existing.organization_id;
+    return {
+      organizationId: existing.organization_id,
+      clerkOrganization: null,
+    };
   }
 
   const clerkOrg = await resolveClerkOrganization(c, org, privateMetadata);
@@ -252,20 +260,28 @@ async function ensureOrganizationMapping(
     if (err instanceof Error && err.message?.includes("UNIQUE constraint")) {
       const retry = await findOrganizationMapping(c, org.id);
       if (retry) {
-        return retry.organization_id;
+        return {
+          organizationId: retry.organization_id,
+          clerkOrganization: clerkOrg,
+        };
       }
     }
     throw err;
   }
 
-  return orgId;
+  return {
+    organizationId: orgId,
+    clerkOrganization: clerkOrg,
+  };
 }
 
 async function syncOrganization(c: AppContext, data: Record<string, unknown>) {
   const db = getDb(c.env);
   const org = extractOrganization(data);
-  const organizationId = await ensureOrganizationMapping(c, org, data.private_metadata);
-  const clerkOrg = await resolveClerkOrganization(c, org, data.private_metadata);
+  const mapping = await ensureOrganizationMapping(c, org, data.private_metadata);
+  const { organizationId } = mapping;
+  const clerkOrg =
+    mapping.clerkOrganization ?? (await resolveClerkOrganization(c, org, data.private_metadata));
 
   const updates: string[] = [];
   const params: string[] = [];
@@ -490,7 +506,7 @@ async function upsertMembership(c: AppContext, data: Record<string, unknown>) {
     throw badRequest("Clerk member user id missing");
   }
 
-  const organizationId = await ensureOrganizationMapping(c, org);
+  const { organizationId } = await ensureOrganizationMapping(c, org);
   const userId = await ensureUserMapping(c, {
     id: member.userId,
     email: member.email,
