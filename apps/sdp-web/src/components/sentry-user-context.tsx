@@ -17,6 +17,7 @@ export function SentryUserContext() {
       Sentry.setTag("clerk.orgId", orgId ?? "none");
     } else {
       Sentry.setUser(null);
+      Sentry.setTag("clerk.orgId", null);
     }
   }, [userId, orgId, user]);
 
