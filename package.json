@@ -44,6 +44,7 @@
     "kora:down": "docker compose -f infra/kora/docker-compose.yml down",
     "kora:logs": "docker compose -f infra/kora/docker-compose.yml logs -f kora",
     "kora:devnet:check": "infra/kora/cloud-run/check.sh",
+    "kora:devnet:health": "scripts/doppler/run-with-config.sh node scripts/kora-devnet-health.mjs",
     "kora:devnet:test": "pnpm --filter @sdp/api-integration test -- src/tests/kora.test.ts"
   },
   "devDependencies": {
