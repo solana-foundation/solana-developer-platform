@@ -1,19 +1,15 @@
 import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
-import { AppError, conflict, notFound } from "@/lib/errors";
-import { hashString } from "@/lib/hash";
-import { created, noContent, success } from "@/lib/response";
-import { createAllowlistService } from "@/services/allowlist.service";
+import { AppError, notFound } from "@/lib/errors";
+import { noContent, success } from "@/lib/response";
 import { AuditService } from "@/services/audit.service";
 import { KVService } from "@/services/kv.service";
-import { createOrganizationOnboardingService } from "@/services/organization-onboarding.service";
 import {
   assertOrganizationProviderEnabled,
   getOrganizationProviderAvailability,
 } from "@/services/organization-provider-access.service";
 import type { Env } from "@/types/env";
 import {
-  type CreateOrganizationResponse,
   ORGANIZATION_STATUSES,
   ORGANIZATION_TIERS,
   type Organization,
@@ -22,7 +18,7 @@ import {
   type OrganizationTier,
 } from "@sdp/types";
 import type { Context } from "hono";
-import { createOrgSchema, updateOrgSchema } from "./schemas";
+import { updateOrgSchema } from "./schemas";
 
 type AppContext = Context<{ Bindings: Env }>;
 
@@ -69,10 +65,6 @@ function parseOrganizationStatus(value: string): OrganizationStatus {
   throw new AppError("INTERNAL_ERROR", `Organization status '${value}' is invalid`);
 }
 
-function resolveOrganizationTierFromAllowlist(value: string): OrganizationTier {
-  return parseOrganizationTier(value);
-}
-
 function toOrganizationResponse(row: OrganizationRow): Organization {
   return {
     id: row.id,
@@ -85,183 +77,6 @@ function toOrganizationResponse(row: OrganizationRow): Organization {
     updatedAt: row.updated_at,
   };
 }
-
-function randomBase64Url(byteLength: number): string {
-  const bytes = new Uint8Array(byteLength);
-  crypto.getRandomValues(bytes);
-
-  const globalWithBuffer = globalThis as {
-    Buffer?: {
-      from: (input: Uint8Array) => { toString: (encoding: "base64") => string };
-    };
-  };
-
-  if (globalWithBuffer.Buffer) {
-    return globalWithBuffer.Buffer.from(bytes)
-      .toString("base64")
-      .replace(/\+/g, "-")
-      .replace(/\//g, "_")
-      .replace(/=+$/g, "");
-  }
-
-  let binary = "";
-  for (const byte of bytes) {
-    binary += String.fromCharCode(byte);
-  }
-
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
-}
-
-function createApiKeyMaterial(environment: "sandbox" | "production"): {
-  key: string;
-  prefix: string;
-} {
-  const envPrefix = environment === "production" ? "live" : "test";
-  const randomPart = randomBase64Url(24);
-  const key = `sk_${envPrefix}_${randomPart}`;
-  const prefix = `sk_${envPrefix}_${randomPart.slice(0, 3)}`;
-  return { key, prefix };
-}
-
-export const createOrganization = async (c: AppContext) => {
-  const body = await c.req.json();
-  const parsed = createOrgSchema.safeParse(body);
-
-  if (!parsed.success) {
-    throw new AppError("BAD_REQUEST", "Invalid request body", {
-      errors: parsed.error.flatten().fieldErrors,
-    });
-  }
-
-  const { name, email, custody, returnFullApiKey } = parsed.data;
-  const registrationTokenHeader = c.req.header("x-organization-registration-token");
-  const registrationToken = c.env.ORGANIZATION_REGISTRATION_TOKEN;
-  const slug = parsed.data.slug || name.toLowerCase().replace(/[^a-z0-9]+/g, "-");
-
-  // Initialize services
-  const allowlistService = createAllowlistService(c.env);
-  const auditService = new AuditService(getDb(c.env));
-  const onboardingService = createOrganizationOnboardingService(c.env);
-
-  // Organization self-registration is gated by a required pre-shared token.
-  if (!registrationToken) {
-    throw new AppError("FORBIDDEN", "Organization self-registration is disabled");
-  }
-
-  if (!registrationTokenHeader || registrationTokenHeader !== registrationToken) {
-    throw new AppError("FORBIDDEN", "Invalid or missing registration token");
-  }
-
-  // Check allowlist
-  const { allowed, tier } = await allowlistService.isEmailAllowed(email);
-  if (!allowed) {
-    throw new AppError("NOT_ALLOWLISTED", "Email or domain not on allowlist");
-  }
-  const resolvedTier = resolveOrganizationTierFromAllowlist(tier);
-
-  // Check if slug is taken
-  const existing = await getDb(c.env)
-    .prepare("SELECT id FROM organizations WHERE slug = ?")
-    .bind(slug)
-    .first();
-
-  if (existing) {
-    throw conflict("Organization with this slug already exists");
-  }
-
-  // Create organization
-  const orgId = `org_${crypto.randomUUID()}`;
-  const userId = `usr_${crypto.randomUUID()}`;
-  const memberId = `mem_${crypto.randomUUID()}`;
-  const apiKeyId = `key_${crypto.randomUUID()}`;
-
-  if (custody) {
-    try {
-      await onboardingService.initializeCustody(orgId, slug, custody);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Custody initialization failed";
-      throw new AppError("BAD_REQUEST", message);
-    }
-  }
-
-  // Generate API key
-  const { key, prefix } = createApiKeyMaterial("sandbox");
-  const keyHash = await hashString(key, c.env.API_KEY_PEPPER);
-
-  // Insert all records in a batch
-  const batch = [
-    // Organization
-    getDb(c.env)
-      .prepare(
-        `INSERT INTO organizations (id, name, slug, tier, status)
-       VALUES (?, ?, ?, ?, 'active')`
-      )
-      .bind(orgId, name, slug, resolvedTier),
-
-    // User
-    getDb(c.env)
-      .prepare(
-        `INSERT INTO users (id, email, email_verified, status)
-       VALUES (?, ?, 0, 'active')`
-      )
-      .bind(userId, email.toLowerCase()),
-
-    // Organization member (admin)
-    getDb(c.env)
-      .prepare(
-        `INSERT INTO organization_members (id, organization_id, user_id, role, status)
-       VALUES (?, ?, ?, 'admin', 'active')`
-      )
-      .bind(memberId, orgId, userId),
-
-    // API key
-    getDb(c.env)
-      .prepare(
-        `INSERT INTO api_keys (id, organization_id, created_by, name, key_prefix, key_hash, role, environment, status)
-       VALUES (?, ?, ?, 'Default Key', ?, ?, 'api_admin', 'sandbox', 'active')`
-      )
-      .bind(apiKeyId, orgId, userId, prefix, keyHash),
-  ];
-
-  try {
-    await getDb(c.env).batch(batch);
-  } catch (error) {
-    if (custody) {
-      await onboardingService.cleanupCustody(orgId);
-    }
-    throw error;
-  }
-
-  // Audit log
-  await auditService.log(c, {
-    organizationId: orgId,
-    userId,
-    action: "create",
-    resourceType: "organization",
-    resourceId: orgId,
-    metadata: { name, slug, email },
-  });
-
-  const response: CreateOrganizationResponse = {
-    organization: {
-      id: orgId,
-      name,
-      slug,
-      tier: resolvedTier,
-      status: "active",
-      settings: null,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    },
-    apiKey: {
-      id: apiKeyId,
-      keyPrefix: prefix,
-      ...(returnFullApiKey ? { key } : {}),
-    },
-  };
-
-  return created(c, response);
-};
 
 export const getOrganization = async (c: AppContext) => {
   const { orgId } = c.req.param();
@@ -401,26 +216,27 @@ export const getOrganizationProviderAccess = async (c: AppContext) => {
 export const deleteOrganization = async (c: AppContext) => {
   const { orgId } = c.req.param();
   const auth = getAuth(c);
+  const db = getDb(c.env);
 
   if (auth?.organizationId !== orgId) {
     throw new AppError("FORBIDDEN", "Access denied to this organization");
   }
 
-  // Soft delete
-  await getDb(c.env)
-    .prepare(
-      `UPDATE organizations SET status = 'deleted', updated_at = datetime('now') WHERE id = ?`
-    )
-    .bind(orgId)
-    .run();
-
-  // Revoke all API keys
-  await getDb(c.env)
-    .prepare(
-      `UPDATE api_keys SET status = 'revoked', revoked_at = datetime('now') WHERE organization_id = ?`
-    )
-    .bind(orgId)
-    .run();
+  await db.batch([
+    db
+      .prepare(
+        `UPDATE organizations SET status = 'deleted', updated_at = datetime('now') WHERE id = ?`
+      )
+      .bind(orgId),
+    db
+      .prepare("UPDATE organization_members SET status = 'removed' WHERE organization_id = ?")
+      .bind(orgId),
+    db
+      .prepare(
+        `UPDATE api_keys SET status = 'revoked', revoked_at = datetime('now') WHERE organization_id = ?`
+      )
+      .bind(orgId),
+  ]);
 
   // Invalidate cache
   const kvService = new KVService(c.env.SDP_API_KEYS, c.env.SDP_CACHE);
