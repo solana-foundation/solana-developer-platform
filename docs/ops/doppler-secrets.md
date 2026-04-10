@@ -81,10 +81,13 @@ At minimum, the Doppler configs used by automation must include:
   - `NEXT_PUBLIC_SDP_API_URL`
   - `NEXT_PUBLIC_SDP_DOCS_URL`
   - `NEXT_PUBLIC_SDP_WEB_URL`
+  - `SDP_DOCS_PROXY_ORIGIN`
   - `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`
   - `CLERK_SECRET_KEY`
   - `CLERK_JWT_TEMPLATE`
   - `NEXT_PUBLIC_SENTRY_DSN`
+
+`SDP_DOCS_PROXY_ORIGIN` is the internal rewrite target for `sdp-web` `/docs` traffic. In production it must point at the docs project origin, `https://docs.platform.solana.com`, not the public canonical docs URL `https://platform.solana.com/docs`, otherwise the web app rewrites `/docs` back to itself.
 
 ## Local Development
 

@@ -1,12 +1,13 @@
-import { DEFAULT_SDP_DOCS_URL } from "@sdp/types";
 import { withSentryConfig } from "@sentry/nextjs";
 import createWithVercelToolbar from "@vercel/toolbar/plugins/next";
 import type { NextConfig } from "next";
 
-const docsUrl =
-  process.env.NEXT_PUBLIC_SDP_DOCS_URL?.trim() ||
-  (process.env.NODE_ENV === "development" ? "http://localhost:3001/docs" : DEFAULT_SDP_DOCS_URL);
-const docsProxyOrigin = new URL(docsUrl).origin.replace(/\/$/, "");
+const docsProxyOrigin = (
+  process.env.SDP_DOCS_PROXY_ORIGIN?.trim() ||
+  (process.env.NODE_ENV === "development"
+    ? "http://localhost:3001"
+    : "https://docs.platform.solana.com")
+).replace(/\/$/, "");
 
 const nextConfig: NextConfig = {
   distDir: process.env.PLAYWRIGHT_NEXT_DIST_DIR?.trim() || ".next",
