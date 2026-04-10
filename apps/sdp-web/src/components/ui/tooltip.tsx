@@ -30,6 +30,11 @@ type TooltipContentProps = {
   sideOffset?: number;
 };
 
+function getSingleTriggerElement(children: ReactNode): ReactElement | null {
+  const childElements = Children.toArray(children).filter(isValidElement);
+  return childElements.length === 1 ? childElements[0] : null;
+}
+
 function TooltipProvider({ children, delayDuration = 120 }: TooltipProviderProps) {
   return <SolanaTooltipProvider delay={delayDuration}>{children}</SolanaTooltipProvider>;
 }
@@ -48,14 +53,14 @@ function Tooltip({ children }: TooltipProps) {
   }
 
   const triggerElement = trigger.props.asChild ? (
-    Children.only(trigger.props.children)
+    getSingleTriggerElement(trigger.props.children)
   ) : (
     <button className="inline-flex" type="button">
       {trigger.props.children}
     </button>
   );
 
-  if (!isValidElement(triggerElement)) {
+  if (!triggerElement) {
     return <>{children}</>;
   }
 
