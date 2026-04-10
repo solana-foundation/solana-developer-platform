@@ -59,6 +59,7 @@ interface ApiPlaygroundShellProps {
   defaultEndpointId?: string;
   endpoints: ApiPlaygroundEndpointConfig[];
   leftMessages?: ApiPlaygroundMessage[];
+  requiresApiKey?: boolean;
   productName: string;
   rightMessages?: ApiPlaygroundMessage[];
 }
@@ -241,6 +242,64 @@ function buildAiInstructions(
     "",
     "Return the response body as formatted JSON and call out any validation or auth errors.",
   ].join("\n");
+}
+
+function buildResponseBody(executionResult: ExecutionResult | null, executeError: string | null) {
+  if (executionResult) {
+    return prettyJson(executionResult.body);
+  }
+
+  if (executeError) {
+    return prettyJson({ error: executeError });
+  }
+
+  return prettyJson({
+    message: "Run request to inspect the live API output for this endpoint.",
+  });
+}
+
+function resolvePanelContent(
+  activePanel: "code" | "response" | "example",
+  codeSnippet: string,
+  responseBody: string,
+  exampleBody: string
+) {
+  if (activePanel === "code") {
+    return codeSnippet;
+  }
+
+  if (activePanel === "response") {
+    return responseBody;
+  }
+
+  return exampleBody;
+}
+
+function getExecutionStatus(
+  executionResult: ExecutionResult | null,
+  executeError: string | null
+): {
+  statusToneVariant: ComponentProps<typeof Badge>["variant"];
+  statusLabel: string;
+} {
+  if (executionResult) {
+    return {
+      statusToneVariant: executionResult.ok ? "success" : "danger",
+      statusLabel: `${executionResult.status} ${executionResult.statusText}`,
+    };
+  }
+
+  if (executeError) {
+    return {
+      statusToneVariant: "danger",
+      statusLabel: "Request failed",
+    };
+  }
+
+  return {
+    statusToneVariant: "default",
+    statusLabel: "Ready",
+  };
 }
 
 function FieldLabel({ children, htmlFor }: { children: string; htmlFor: string }) {
@@ -470,6 +529,7 @@ export function ApiPlaygroundShell({
   defaultEndpointId,
   endpoints,
   leftMessages = [],
+  requiresApiKey = false,
   productName,
   rightMessages = [],
 }: ApiPlaygroundShellProps) {
@@ -556,19 +616,10 @@ export function ApiPlaygroundShell({
     () => (activeEndpoint ? prettyJson(activeEndpoint.expectedResponse) : "{}"),
     [activeEndpoint]
   );
-  const responseBody = useMemo(() => {
-    if (executionResult) {
-      return prettyJson(executionResult.body);
-    }
-
-    if (executeError) {
-      return prettyJson({ error: executeError });
-    }
-
-    return prettyJson({
-      message: "Run request to inspect the live API output for this endpoint.",
-    });
-  }, [executionResult, executeError]);
+  const responseBody = useMemo(
+    () => buildResponseBody(executionResult, executeError),
+    [executionResult, executeError]
+  );
   const aiInstructions = useMemo(
     () =>
       activeEndpoint
@@ -581,8 +632,7 @@ export function ApiPlaygroundShell({
     return null;
   }
 
-  const panelContent =
-    activePanel === "code" ? codeSnippet : activePanel === "response" ? responseBody : exampleBody;
+  const panelContent = resolvePanelContent(activePanel, codeSnippet, responseBody, exampleBody);
   const panelLanguage: HighlightLanguage = activePanel === "code" ? "javascript" : "json";
 
   const getFieldId = (fieldKey: string) =>
@@ -685,18 +735,7 @@ export function ApiPlaygroundShell({
     }
   };
 
-  const statusToneVariant = executionResult
-    ? executionResult.ok
-      ? "success"
-      : "danger"
-    : executeError
-      ? "danger"
-      : "default";
-  const statusLabel = executionResult
-    ? `${executionResult.status} ${executionResult.statusText}`
-    : executeError
-      ? "Request failed"
-      : "Ready";
+  const { statusToneVariant, statusLabel } = getExecutionStatus(executionResult, executeError);
 
   return (
     <div className="relative flex h-full min-h-0 w-full flex-col overflow-hidden">
@@ -935,30 +974,39 @@ export function ApiPlaygroundShell({
       </div>
 
       <div className="grid shrink-0 lg:grid-cols-2">
-        <div className="flex flex-wrap items-center gap-3 px-6 py-5">
-          <Button
-            type="button"
-            onClick={handleExecute}
-            disabled={isExecuting}
-            className="h-10 rounded-[var(--button-radius-lg)] bg-gray-1400 px-4 text-white hover:bg-black max-sm:flex-1 whitespace-nowrap"
-            iconLeft={
-              isExecuting ? (
-                <Loader2 className="size-4 animate-spin" />
-              ) : (
-                <Play className="size-4 fill-current" />
-              )
-            }
-          >
-            Run request
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            onClick={handleReset}
-            className="h-10 rounded-[var(--button-radius-lg)] px-2 text-text-medium hover:bg-transparent hover:text-text-extra-high"
-          >
-            Reset
-          </Button>
+        <div className="px-6 py-5">
+          <div className="flex flex-col gap-3">
+            {requiresApiKey ? (
+              <p className="text-sm leading-6 text-[rgba(28,28,29,0.62)]">
+                Create an API key first to enable live playground requests.
+              </p>
+            ) : null}
+            <div className="flex flex-wrap items-center gap-3">
+              <Button
+                type="button"
+                onClick={handleExecute}
+                disabled={isExecuting || requiresApiKey}
+                className="h-10 rounded-[var(--button-radius-lg)] bg-gray-1400 px-4 text-white hover:bg-black max-sm:flex-1 whitespace-nowrap"
+                iconLeft={
+                  isExecuting ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <Play className="size-4 fill-current" />
+                  )
+                }
+              >
+                Run request
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={handleReset}
+                className="h-10 rounded-[var(--button-radius-lg)] px-2 text-text-medium hover:bg-transparent hover:text-text-extra-high"
+              >
+                Reset
+              </Button>
+            </div>
+          </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-3 border-t border-border-light px-6 py-5 lg:border-t-0">

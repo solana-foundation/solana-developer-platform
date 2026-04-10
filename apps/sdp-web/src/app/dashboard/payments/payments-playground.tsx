@@ -41,20 +41,11 @@ export function PaymentsPlayground({
       apiBaseUrl={apiBaseUrl}
       apiKeyValue={apiKeyValue}
       apiKeySelector={<PlaygroundApiKeySelector />}
+      requiresApiKey={!hasActiveApiKeys}
       leftMessages={[
         ...(walletsError ? [{ text: walletsError, tone: "critical" as const }] : []),
         ...(transfersError ? [{ text: transfersError, tone: "critical" as const }] : []),
       ]}
-      rightMessages={
-        hasActiveApiKeys
-          ? []
-          : [
-              {
-                text: "No active API keys found. Session auth will be used unless you attach a stored key.",
-                tone: "critical",
-              },
-            ]
-      }
     />
   );
 }
