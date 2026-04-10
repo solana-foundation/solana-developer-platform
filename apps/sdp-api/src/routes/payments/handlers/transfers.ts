@@ -63,6 +63,7 @@ import { resolveScope, resolveWallet } from "../wallets";
 const DEVNET_USDC_MINT = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
 // biome-ignore lint/nursery/noSecrets: Mainnet USDC mint address constant, not a secret.
 const MAINNET_USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+const SIGNATURE_HISTORY_LOOKUP_CONCURRENCY = 5;
 
 interface ParsedInstructionPayload {
   info?: Record<string, unknown>;
@@ -783,6 +784,39 @@ function dedupeSignatureHistory(
   return Array.from(bySignature.values()).sort(compareSignatureHistoryDesc).slice(0, limit);
 }
 
+async function mapSettledWithConcurrency<T, U>(
+  items: T[],
+  concurrency: number,
+  mapper: (item: T) => Promise<U>
+): Promise<Array<PromiseSettledResult<U>>> {
+  const results = new Array<PromiseSettledResult<U>>(items.length);
+  let nextIndex = 0;
+  const workerCount = Math.min(concurrency, items.length);
+
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      while (nextIndex < items.length) {
+        const currentIndex = nextIndex;
+        nextIndex += 1;
+
+        try {
+          results[currentIndex] = {
+            status: "fulfilled",
+            value: await mapper(items[currentIndex] as T),
+          };
+        } catch (reason) {
+          results[currentIndex] = {
+            status: "rejected",
+            reason,
+          };
+        }
+      }
+    })
+  );
+
+  return results;
+}
+
 async function resolveWalletTokenAccountAddresses(
   c: AppContext,
   rpc: ReturnType<typeof solanaRpc.createRpc>,
@@ -1283,13 +1317,14 @@ export async function listTransfers(c: AppContext) {
       limit: historyLimit,
       commitment: "confirmed",
     });
-    const tokenAccountSignatureResults = await Promise.allSettled(
-      signatureSearchAddresses.slice(1).map((searchAddress) =>
+    const tokenAccountSignatureResults = await mapSettledWithConcurrency(
+      signatureSearchAddresses.slice(1),
+      SIGNATURE_HISTORY_LOOKUP_CONCURRENCY,
+      (searchAddress) =>
         solanaRpc.getSignaturesForAddress(heliusRpc, searchAddress, {
           limit: historyLimit,
           commitment: "confirmed",
         })
-      )
     );
     const tokenAccountSignatures = tokenAccountSignatureResults.flatMap((result) =>
       result.status === "fulfilled" ? result.value : []
