@@ -119,16 +119,53 @@ async function solanaGetBalance(rpcUrl: string, address: string): Promise<number
 
 async function solanaRpc<T>(rpcUrl: string, method: string, params: unknown[]): Promise<T> {
   const body = JSON.stringify({ jsonrpc: "2.0", id: 1, method, params });
-  const res = await withTimeout(
-    15_000,
-    fetch(rpcUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body })
-  );
+  const maxRetries = 2;
 
-  const json = (await res.json()) as SolanaRpcResponse<T>;
-  if ("error" in json) {
-    throw new Error(`Solana RPC error calling ${method}: ${json.error.message}`);
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const res = await withTimeout(
+        15_000,
+        fetch(rpcUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body })
+      );
+
+      const json = (await res.json()) as SolanaRpcResponse<T>;
+      if ("error" in json) {
+        throw new Error(`Solana RPC error calling ${method}: ${json.error.message}`);
+      }
+      return json.result;
+    } catch (error) {
+      if (attempt < maxRetries && isRetryableSolanaRpcError(error)) {
+        await sleep((attempt + 1) * 500);
+        continue;
+      }
+
+      throw error;
+    }
   }
-  return json.result;
+
+  throw new Error(`Solana RPC error calling ${method}`);
+}
+
+function isRetryableSolanaRpcError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const message = error.message.toLowerCase();
+  return (
+    message.includes("unable to complete request") ||
+    message.includes("request timed out") ||
+    message.includes("timed out") ||
+    message.includes("service unavailable") ||
+    message.includes("try again") ||
+    message.includes("too many requests") ||
+    message.includes("429") ||
+    message.includes("500") ||
+    message.includes("502") ||
+    message.includes("503") ||
+    message.includes("504")
+  );
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function withTimeout<T>(ms: number, promise: Promise<T>): Promise<T> {

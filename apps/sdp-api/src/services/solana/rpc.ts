@@ -72,6 +72,38 @@ const DISALLOWED_RPC_HEADERS = new Set([
   "via",
 ]);
 
+const TRANSIENT_RPC_RETRY_DELAYS_MS = [250, 750, 1500];
+
+async function withTransientRpcRetry<T>(operation: () => Promise<T>): Promise<T> {
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt <= TRANSIENT_RPC_RETRY_DELAYS_MS.length; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error;
+
+      if (attempt === TRANSIENT_RPC_RETRY_DELAYS_MS.length || !isTransientRpcError(error)) {
+        throw error;
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, TRANSIENT_RPC_RETRY_DELAYS_MS[attempt]));
+    }
+  }
+
+  throw lastError;
+}
+
+function isTransientRpcError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return (
+    /\b(429|500|502|503|504)\b/.test(message) ||
+    /service unavailable|too many requests|timed? out|unable to complete|fetch failed|econnreset/i.test(
+      message
+    )
+  );
+}
+
 function assertAllowedRpcHeaders(
   headers: Readonly<Record<string, string>>
 ): asserts headers is AllowedSolanaRpcHeaders {
@@ -468,14 +500,16 @@ export async function getSignaturesForAddress(
     commitment?: "confirmed" | "finalized";
   }
 ): Promise<SignatureInfo[]> {
-  const response = await rpc
-    .getSignaturesForAddress(address, {
-      limit: options?.limit ?? 100,
-      ...(options?.before ? { before: options.before } : {}),
-      ...(options?.until ? { until: options.until } : {}),
-      commitment: options?.commitment ?? "confirmed",
-    })
-    .send();
+  const response = await withTransientRpcRetry(() =>
+    rpc
+      .getSignaturesForAddress(address, {
+        limit: options?.limit ?? 100,
+        ...(options?.before ? { before: options.before } : {}),
+        ...(options?.until ? { until: options.until } : {}),
+        commitment: options?.commitment ?? "confirmed",
+      })
+      .send()
+  );
 
   return response.map((item) => ({
     signature: item.signature,
