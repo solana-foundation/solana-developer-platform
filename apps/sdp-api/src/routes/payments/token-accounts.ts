@@ -166,10 +166,13 @@ export async function getSplTokenAccountAddresses(
 ): Promise<Address[]> {
   const addresses: Address[] = [];
   const seen = new Set<string>();
+  const responses = await Promise.all(
+    SPL_TOKEN_PROGRAM_IDS.map((programId) =>
+      getTokenAccountsByOwnerJsonParsed(rpc, owner, programId)
+    )
+  );
 
-  for (const programId of SPL_TOKEN_PROGRAM_IDS) {
-    const response = await getTokenAccountsByOwnerJsonParsed(rpc, owner, programId);
-
+  for (const response of responses) {
     for (const account of response.value ?? []) {
       if (typeof account.pubkey !== "string" || seen.has(account.pubkey)) {
         continue;
