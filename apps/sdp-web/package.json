@@ -11,18 +11,15 @@
     "lint": "eslint",
     "test:e2e": "playwright test --config=playwright.config.ts --project=public --project=dashboard --project=issuance",
     "test:e2e:dashboard": "playwright test --config=playwright.config.ts --project=public --project=dashboard",
-    "test:e2e:issuance": "playwright test --config=playwright.config.ts --project=issuance",
-    "test:e2e:public:closed": "PLAYWRIGHT_SDP_SIGN_IN_ENTRY_ENABLED=false PLAYWRIGHT_SDP_SIGN_UP_ENTRY_ENABLED=false playwright test --config=playwright.config.ts --project=public"
+    "test:e2e:issuance": "playwright test --config=playwright.config.ts --project=issuance"
   },
   "dependencies": {
     "@clerk/nextjs": "6.37.2",
-    "@flags-sdk/vercel": "1.2.1",
     "@sdp/types": "workspace:*",
     "@sentry/nextjs": "^10.42.0",
     "@vercel/toolbar": "0.2.2",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
-    "flags": "4.0.5",
     "framer-motion": "^11.18.2",
     "lucide-react": "0.562.0",
     "next": "16.1.6",

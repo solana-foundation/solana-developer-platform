@@ -1,6 +1,3 @@
-import { HomeSignedInCard } from "@/components/home-signed-in";
-import { isAnyAuthEntryEnabled } from "@/lib/auth-entry";
-import { SignedIn, SignedOut, UserButton } from "@clerk/nextjs";
 import { DEFAULT_SDP_DOCS_URL } from "@sdp/types";
 import Image from "next/image";
 import Link from "next/link";
@@ -10,9 +7,7 @@ const docsHref =
   (process.env.NODE_ENV === "development" ? "http://localhost:3001/docs" : DEFAULT_SDP_DOCS_URL);
 const waitlistHref = "https://solanafoundation.typeform.com/to/PLfMTDQs";
 
-export default async function Home() {
-  const authEntryEnabled = await isAnyAuthEntryEnabled();
-
+export default function Home() {
   return (
     <main className="min-h-screen bg-gradient-to-b from-[#e9e7de] to-[#f5f4ef] text-[#1c1c1d]">
       <header className="border-b border-[rgba(28,28,29,0.08)]">
@@ -25,11 +20,6 @@ export default async function Home() {
             >
               Docs
             </Link>
-            {authEntryEnabled ? (
-              <SignedIn>
-                <UserButton />
-              </SignedIn>
-            ) : null}
           </div>
         </div>
       </header>
@@ -46,39 +36,16 @@ export default async function Home() {
             make it happen.
           </p>
 
-          {authEntryEnabled ? (
-            <>
-              <SignedOut>
-                <div className="mt-[34px]">
-                  <Link
-                    href={waitlistHref}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex h-10 items-center justify-center rounded-[10px] bg-[#0f0f10] px-[18px] text-[15px] font-semibold leading-[15px] text-white transition-colors hover:bg-black"
-                  >
-                    Join the waitlist
-                  </Link>
-                </div>
-              </SignedOut>
-
-              <SignedIn>
-                <div className="mt-[34px] max-w-[360px]">
-                  <HomeSignedInCard />
-                </div>
-              </SignedIn>
-            </>
-          ) : (
-            <div className="mt-[34px]">
-              <Link
-                href={waitlistHref}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex h-10 items-center justify-center rounded-[10px] bg-[#0f0f10] px-[18px] text-[15px] font-semibold leading-[15px] text-white transition-colors hover:bg-black"
-              >
-                Join the waitlist
-              </Link>
-            </div>
-          )}
+          <div className="mt-[34px]">
+            <Link
+              href={waitlistHref}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex h-10 items-center justify-center rounded-[10px] bg-[#0f0f10] px-[18px] text-[15px] font-semibold leading-[15px] text-white transition-colors hover:bg-black"
+            >
+              Join the waitlist
+            </Link>
+          </div>
         </div>
 
         <div

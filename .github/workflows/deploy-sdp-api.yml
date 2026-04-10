@@ -38,6 +38,7 @@ on:
 
 permissions:
   contents: read
+  id-token: write
 
 concurrency:
   group: deploy-sdp-api-${{ github.event_name == 'workflow_dispatch' && inputs.environment || (startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/tags/solana-developer-platform-v')) && 'production' || 'dev' }}
@@ -50,7 +51,9 @@ jobs:
     environment: ${{ github.event_name == 'workflow_dispatch' && inputs.environment || (startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/tags/solana-developer-platform-v')) && 'production' || 'dev' }}
     env:
       TARGET_ENV: ${{ github.event_name == 'workflow_dispatch' && inputs.environment || (startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/tags/solana-developer-platform-v')) && 'production' || 'dev' }}
+      DOPPLER_CONFIG_NAME: ${{ ((github.event_name == 'workflow_dispatch' && inputs.environment) || ((startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/tags/solana-developer-platform-v')) && 'production') || 'dev') == 'production' && 'prd' || 'dev' }}
       DEPLOY_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || (startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/tags/solana-developer-platform-v')) && github.ref_name || github.sha }}
+      CLOUD_SQL_INSTANCE_CONNECTION_NAME: ${{ vars.CLOUD_SQL_INSTANCE_CONNECTION_NAME }}
 
     steps:
       - name: Validate production tag input
@@ -98,21 +101,133 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
+      - name: Validate Doppler bootstrap secret
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN }}
+        run: |
+          if [ -z "${DOPPLER_TOKEN}" ]; then
+            echo "DOPPLER_TOKEN must be configured on the ${TARGET_ENV} GitHub environment." >&2
+            exit 1
+          fi
+
+      - name: Install Doppler CLI
+        uses: dopplerhq/cli-action@v4
+
+      - name: Validate Cloud SQL migration identity
+        if: ${{ github.event_name == 'push' || inputs.run_migrations }}
+        env:
+          GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          GCP_SERVICE_ACCOUNT: ${{ vars.GCP_SERVICE_ACCOUNT }}
+        run: |
+          set -euo pipefail
+
+          missing=0
+          for name in GCP_WORKLOAD_IDENTITY_PROVIDER GCP_SERVICE_ACCOUNT CLOUD_SQL_INSTANCE_CONNECTION_NAME; do
+            if [ -z "${!name:-}" ]; then
+              echo "${name} must be configured as a GitHub environment variable on ${TARGET_ENV}." >&2
+              missing=1
+            fi
+          done
+
+          if [ "${missing}" -ne 0 ]; then
+            exit 1
+          fi
+
+      - name: Authenticate to Google Cloud
+        if: ${{ github.event_name == 'push' || inputs.run_migrations }}
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - name: Start Cloud SQL Auth Proxy
+        if: ${{ github.event_name == 'push' || inputs.run_migrations }}
+        run: |
+          set -euo pipefail
+          cloud_sql_proxy_port=5432
+
+          curl -fsSL -o cloud-sql-proxy \
+            https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/v2.18.3/cloud-sql-proxy.linux.amd64
+          chmod +x cloud-sql-proxy
+
+          ./cloud-sql-proxy \
+            --address 127.0.0.1 \
+            --port "${cloud_sql_proxy_port}" \
+            "${CLOUD_SQL_INSTANCE_CONNECTION_NAME}" &
+
+          proxy_pid=$!
+          echo "CLOUD_SQL_PROXY_PID=${proxy_pid}" >> "${GITHUB_ENV}"
+
+          for _ in {1..30}; do
+            if nc -z 127.0.0.1 "${cloud_sql_proxy_port}"; then
+              exit 0
+            fi
+
+            if ! kill -0 "${proxy_pid}" 2>/dev/null; then
+              echo "Cloud SQL Auth Proxy exited before it became ready." >&2
+              wait "${proxy_pid}"
+              exit 1
+            fi
+
+            sleep 1
+          done
+
+          echo "Timed out waiting for Cloud SQL Auth Proxy on 127.0.0.1:${cloud_sql_proxy_port}." >&2
+          kill "${proxy_pid}" || true
+          exit 1
+
       - name: Migrate Postgres
         if: ${{ github.event_name == 'push' || inputs.run_migrations }}
         env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN }}
         run: |
-          if [ -z "${DATABASE_URL}" ]; then
-            echo "DATABASE_URL is not configured for ${TARGET_ENV}; skipping Postgres migrations."
+          doppler run --config "${DOPPLER_CONFIG_NAME}" -- bash <<'EOF'
+          set -euo pipefail
+          if [ -z "${DATABASE_URL:-}" ]; then
+            echo "DATABASE_URL is not configured in Doppler config ${DOPPLER_CONFIG_NAME}; skipping Postgres migrations."
             exit 0
           fi
-          pnpm --filter @sdp/api db:migrate:${TARGET_ENV}
+
+          export DATABASE_URL="$(node - <<'NODE'
+          const raw = process.env.DATABASE_URL;
+          const url = new URL(raw);
+
+          url.hostname = "127.0.0.1";
+          url.port = "5432";
+
+          for (const key of ["sslmode", "sslcert", "sslkey", "sslrootcert"]) {
+            url.searchParams.delete(key);
+          }
+
+          process.stdout.write(url.toString());
+          NODE
+          )"
+
+          pnpm --filter @sdp/api "db:migrate:${TARGET_ENV}"
+          EOF
+
+      - name: Stop Cloud SQL Auth Proxy
+        if: ${{ always() && (github.event_name == 'push' || inputs.run_migrations) }}
+        run: |
+          if [ -n "${CLOUD_SQL_PROXY_PID:-}" ]; then
+            kill "${CLOUD_SQL_PROXY_PID}" || true
+          fi
+
+      - name: Sync Worker secrets
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN }}
+        run: |
+          doppler run --config "${DOPPLER_CONFIG_NAME}" -- bash <<'EOF'
+          set -euo pipefail
+          if [ -z "${CLOUDFLARE_API_TOKEN:-}" ] || [ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
+            echo "CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID must be present in Doppler config ${DOPPLER_CONFIG_NAME}." >&2
+            exit 1
+          fi
+          node scripts/project-secrets.mjs cloudflare --out "${RUNNER_TEMP}/cloudflare-secrets.json"
+          pnpm --filter @sdp/api exec wrangler secret bulk "${RUNNER_TEMP}/cloudflare-secrets.json" --env "${TARGET_ENV}"
+          EOF
 
       - name: Deploy Worker
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          workingDirectory: apps/sdp-api
-          command: deploy --env ${{ env.TARGET_ENV }}
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN }}
+        run: doppler run --config "${DOPPLER_CONFIG_NAME}" -- pnpm --filter @sdp/api exec wrangler deploy --env "${TARGET_ENV}"

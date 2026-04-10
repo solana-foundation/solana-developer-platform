@@ -46,7 +46,6 @@ export interface Env {
   // Allowlist configuration
   ALLOWLIST_ADMIN_KEY?: string;
   ALLOWLIST_ADMIN_ORG_ID?: string;
-  ALLOWLIST_ADMIN_ORG_SLUG?: string;
 
   // Solana configuration
   SOLANA_RPC_URL?: string;

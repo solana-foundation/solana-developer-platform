@@ -10,8 +10,6 @@ import {
   WalletsOnboardingSkeleton,
   WalletsPageSkeleton,
 } from "@/app/dashboard/wallets/wallets-page-skeleton";
-import { linkOrganization } from "@/app/onboarding/actions";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { fetchOrganizationProviderAccess } from "@/lib/organization-provider-access";
@@ -98,9 +96,9 @@ async function OnboardingGateSection({ orgId }: { orgId: string }) {
   return (
     <Card className="rounded-[24px] border-[rgba(28,28,29,0.08)] shadow-none">
       <CardHeader>
-        <CardTitle>Confirm organization details</CardTitle>
+        <CardTitle>Waiting for organization sync</CardTitle>
         <CardDescription>
-          Link this Clerk organization in SDP before setting up wallet infrastructure.
+          SDP is waiting for the Clerk webhook to create this organization mapping.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -121,12 +119,9 @@ async function OnboardingGateSection({ orgId }: { orgId: string }) {
           </div>
         </div>
         <p className="text-sm text-[rgba(28,28,29,0.72)]">
-          Confirming will link this organization in SDP and unlock wallet creation.
+          Organization creation and membership sync now happen from Clerk webhooks only. Refresh in
+          a moment; if this keeps showing, check the Clerk webhook delivery for this organization.
         </p>
-        <form action={linkOrganization}>
-          <input type="hidden" name="returnTo" value="/dashboard/wallets" />
-          <Button type="submit">Confirm and link organization</Button>
-        </form>
       </CardContent>
     </Card>
   );

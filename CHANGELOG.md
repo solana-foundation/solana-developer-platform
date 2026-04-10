@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.14.7](https://github.com/solana-foundation/solana-developer-platform/compare/v0.14.6...v0.14.7) (2026-04-10)
+
+### Bug Fixes
+
+* restore docs proxy origin ([#164](https://github.com/solana-foundation/solana-developer-platform/pull/164)) ([8e681e5](https://github.com/solana-foundation/solana-developer-platform/commit/8e681e595b9c2e0782d9d607a9f97d1da194bb58))
+
+## [0.14.6](https://github.com/solana-foundation/solana-developer-platform/compare/v0.14.5...v0.14.6) (2026-04-10)
+
+### Bug Fixes
+
+* remove auth entry feature gates ([#162](https://github.com/solana-foundation/solana-developer-platform/pull/162)) ([54ad74e](https://github.com/solana-foundation/solana-developer-platform/commit/54ad74e82e3b8f2607c1d5f9d4d05c0e9970ba3d))
+
+## [0.14.5](https://github.com/solana-foundation/solana-developer-platform/compare/v0.14.4...v0.14.5) (2026-04-09)
+
+### Maintenance
+
+* prepare webhook-only onboarding deploy cleanup ([c83883d](https://github.com/solana-foundation/solana-developer-platform/commit/c83883d87c2fd20095fc33166d1216adc1ebbe9d))
+* adopt Doppler as SDP's secret source of truth ([58afe80](https://github.com/solana-foundation/solana-developer-platform/commit/58afe80fc0fab683f118cf767a2d20b53456fc1e))
+
 ## [0.14.4](https://github.com/solana-foundation/solana-developer-platform/compare/v0.14.3...v0.14.4) (2026-04-03)
 
 ### Refactors
