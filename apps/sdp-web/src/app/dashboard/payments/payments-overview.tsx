@@ -172,20 +172,20 @@ export function PaymentsOverview({
         <div className="flex min-w-0 flex-wrap items-center gap-3">
           <Button
             type="button"
-            className="rounded-full px-5"
+            className="rounded-full px-5 whitespace-nowrap"
             disabled={!hasWallets}
+            iconLeft={<ArrowUpRight className="size-4" />}
             onClick={() => router.push("/dashboard/payments/send")}
           >
-            <ArrowUpRight className="size-4" />
             Send
           </Button>
           <Button
             type="button"
-            className="rounded-full px-5"
+            className="rounded-full px-5 whitespace-nowrap"
             disabled={!hasWallets}
+            iconLeft={<ArrowDownLeft className="size-4" />}
             onClick={() => router.push("/dashboard/payments/receive")}
           >
-            <ArrowDownLeft className="size-4" />
             Receive
           </Button>
         </div>
