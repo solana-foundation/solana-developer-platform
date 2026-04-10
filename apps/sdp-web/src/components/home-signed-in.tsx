@@ -12,7 +12,7 @@ export function HomeSignedInCard() {
 
   if (!orgId) {
     return (
-      <div className="rounded-[var(--table-radius)] border border-border-light bg-white p-6 shadow-sm">
+      <div className="rounded-[var(--sdp-surface-radius)] border border-border-light bg-white p-6 shadow-sm">
         <h2 className="text-[19px] leading-6 font-medium text-text-extra-high">
           Select your organization
         </h2>
@@ -27,7 +27,7 @@ export function HomeSignedInCard() {
   }
 
   return (
-    <div className="rounded-[var(--table-radius)] border border-border-light bg-white p-6 shadow-sm">
+    <div className="rounded-[var(--sdp-surface-radius)] border border-border-light bg-white p-6 shadow-sm">
       <AutoDashboardRedirect />
       <p className="text-sm text-text-medium">Loading your dashboard...</p>
     </div>

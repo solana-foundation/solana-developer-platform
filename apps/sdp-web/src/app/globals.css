@@ -6,6 +6,8 @@
 
 :root {
   --sdp-shell-bg: #e9e7de;
+  --sdp-field-radius: var(--input-radius-xl, 12px);
+  --sdp-surface-radius: var(--radius-xl, 12px);
 }
 
 html,

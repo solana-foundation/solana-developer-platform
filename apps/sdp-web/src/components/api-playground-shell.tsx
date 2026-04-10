@@ -806,7 +806,7 @@ export function ApiPlaygroundShell({
                             updateFieldValue(field.key, event.currentTarget.value)
                           }
                           placeholder={field.placeholder}
-                          className="h-11 rounded-[var(--input-radius-xl)] border-border-light bg-white px-4 shadow-none"
+                          className="h-11 rounded-[var(--sdp-field-radius)] border-border-light bg-white px-4 shadow-none"
                         />
                       </div>
                     ))}
@@ -832,7 +832,7 @@ export function ApiPlaygroundShell({
                             onChange={(event) =>
                               updateFieldValue(field.key, event.currentTarget.value)
                             }
-                            className="h-11 w-full rounded-[var(--input-radius-xl)] border border-border-light bg-white px-4 text-sm text-text-extra-high outline-none transition-[box-shadow,border-color] focus:border-border-strong focus:ring-2 focus:ring-border-light"
+                            className="h-11 w-full rounded-[var(--sdp-field-radius)] border border-border-light bg-white px-4 text-sm text-text-extra-high outline-none transition-[box-shadow,border-color] focus:border-border-strong focus:ring-2 focus:ring-border-light"
                           >
                             <option value="">{field.placeholder ?? "Select value"}</option>
                             {(field.options ?? []).map((option) => (
@@ -849,7 +849,7 @@ export function ApiPlaygroundShell({
                               updateFieldValue(field.key, event.currentTarget.value)
                             }
                             placeholder={field.placeholder}
-                            className="h-11 rounded-[var(--input-radius-xl)] border-border-light bg-white px-4 shadow-none"
+                            className="h-11 rounded-[var(--sdp-field-radius)] border-border-light bg-white px-4 shadow-none"
                           />
                         )}
                       </div>
