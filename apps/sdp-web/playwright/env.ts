@@ -82,17 +82,6 @@ function resolveOptionalEnvValue(name: string, fallback: Record<string, string>)
   return value?.trim() ? value : null;
 }
 
-function resolvePlaywrightAuthEntryEnabled(fallback: Record<string, string>): string {
-  const configured =
-    process.env.PLAYWRIGHT_SDP_AUTH_ENTRY_ENABLED ?? fallback.SDP_AUTH_ENTRY_ENABLED;
-
-  if (configured?.trim()) {
-    return configured;
-  }
-
-  return "true";
-}
-
 let cachedEnv: E2EEnv | null = null;
 
 export function getE2EEnv(): E2EEnv {
@@ -120,8 +109,6 @@ export function getE2EEnv(): E2EEnv {
     process.env.NEXT_PUBLIC_SDP_API_BASE_URL ??
     fallback.NEXT_PUBLIC_SDP_API_BASE_URL ??
     sdpApiBaseUrl;
-  const authEntryEnabled = resolvePlaywrightAuthEntryEnabled(fallback);
-
   cachedEnv = {
     baseURL: process.env.PLAYWRIGHT_BASE_URL ?? BASE_URL,
     clerkSecretKey,
@@ -153,7 +140,6 @@ export function getE2EEnv(): E2EEnv {
         process.env.NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL ??
         fallback.NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL ??
         "/dashboard",
-      SDP_AUTH_ENTRY_ENABLED: authEntryEnabled,
       NODE_ENV: process.env.NODE_ENV ?? "development",
     },
   };

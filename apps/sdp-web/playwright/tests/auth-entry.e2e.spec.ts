@@ -1,15 +1,7 @@
 import { expect, test } from "@playwright/test";
-import { isClosedAuthEntryMode } from "../support/auth-entry-mode";
 
 test.describe("public auth entry e2e", () => {
-  test.skip(
-    isClosedAuthEntryMode(),
-    "This suite covers the direct-link auth rollout with auth entry enabled."
-  );
-
-  test("signed-out homepage stays in waitlist mode even when auth entry routes are enabled", async ({
-    page,
-  }) => {
+  test("signed-out homepage stays in waitlist mode", async ({ page }) => {
     await page.goto("/");
 
     await expect(page.getByRole("link", { name: "Join the waitlist" })).toBeVisible();

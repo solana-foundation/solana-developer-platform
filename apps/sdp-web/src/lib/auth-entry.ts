@@ -1,36 +1,11 @@
-import { clerkSignInEntry, clerkSignUpEntry } from "@/flags";
+export const AUTH_ENTRY_PATH = "/sign-in";
 
 function matchesRoute(pathname: string, route: string): boolean {
   return pathname === route || pathname.startsWith(`${route}/`);
 }
 
-export async function isSignInEntryEnabled(): Promise<boolean> {
-  return clerkSignInEntry();
-}
-
-export async function isSignUpEntryEnabled(): Promise<boolean> {
-  return clerkSignUpEntry();
-}
-
-export async function isAnyAuthEntryEnabled(): Promise<boolean> {
-  const [signInEnabled, signUpEnabled] = await Promise.all([
-    isSignInEntryEnabled(),
-    isSignUpEntryEnabled(),
-  ]);
-
-  return signInEnabled || signUpEnabled;
-}
-
 export async function getAuthEntryPath(): Promise<string> {
-  if (await isSignInEntryEnabled()) {
-    return "/sign-in";
-  }
-
-  if (await isSignUpEntryEnabled()) {
-    return "/sign-up";
-  }
-
-  return "/";
+  return AUTH_ENTRY_PATH;
 }
 
 export async function shouldLoadClerkForPath(pathname: string): Promise<boolean> {
@@ -41,8 +16,7 @@ export async function shouldLoadClerkForPath(pathname: string): Promise<boolean>
     pathname.startsWith("/allowlist/") ||
     pathname === "/members" ||
     pathname.startsWith("/members/") ||
-    (pathname === "/" && (await isAnyAuthEntryEnabled())) ||
-    (matchesRoute(pathname, "/sign-in") && (await isSignInEntryEnabled())) ||
-    (matchesRoute(pathname, "/sign-up") && (await isSignUpEntryEnabled()))
+    matchesRoute(pathname, "/sign-in") ||
+    matchesRoute(pathname, "/sign-up")
   );
 }
