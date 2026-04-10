@@ -1016,10 +1016,75 @@ function buildObservedTransferRows(
     }
 
     const normalizedProgram = (instruction.program ?? "").toLowerCase();
-    if (
-      !normalizedProgram.includes("token") ||
-      (parsedType !== "transfer" && parsedType !== "transferChecked")
-    ) {
+    if (!normalizedProgram.includes("token")) {
+      continue;
+    }
+
+    if (parsedType === "mintTo" || parsedType === "mintToChecked") {
+      const destinationTokenAccount = readInstructionInfoString(info, "account");
+      if (!destinationTokenAccount) {
+        continue;
+      }
+
+      const destinationTokenMetadata = tokenAccountMetadata.get(destinationTokenAccount);
+      const destinationOwner = destinationTokenMetadata?.owner ?? null;
+      const destinationWalletId =
+        (destinationOwner ? (context.walletIdsByAddress.get(destinationOwner) ?? null) : null) ??
+        context.walletIdsByAddress.get(destinationTokenAccount) ??
+        null;
+
+      if (!destinationWalletId) {
+        continue;
+      }
+
+      const tokenAmount = readTokenAmountInfo(info);
+      const decimals = tokenAmount?.decimals ?? destinationTokenMetadata?.decimals;
+      const rawAmount = tokenAmount?.amount ?? readInstructionInfoInteger(info, "amount");
+      const mint = readInstructionInfoString(info, "mint") ?? destinationTokenMetadata?.mint;
+      const resolvedDecimals =
+        typeof decimals === "number" && Number.isFinite(decimals) && Number.isInteger(decimals)
+          ? decimals
+          : null;
+
+      if (resolvedDecimals === null || rawAmount === null || !mint) {
+        continue;
+      }
+
+      const resolvedUiAmount =
+        tokenAmount?.uiAmount ?? formatDecimalAmount(rawAmount, resolvedDecimals);
+      const dedupeKey = `${destinationWalletId}:${signature}:${mint}:mint:${rawAmount.toString()}`;
+
+      if (observedRows.has(dedupeKey)) {
+        continue;
+      }
+
+      observedRows.set(dedupeKey, {
+        id: `xfr_observed_${destinationWalletId}_${signature}_${mint}_mint`,
+        organization_id: context.organizationId,
+        project_id: context.projectId,
+        wallet_id: destinationWalletId,
+        source_address: readInstructionInfoString(info, "mintAuthority") ?? mint,
+        destination_address: destinationOwner ?? destinationTokenAccount,
+        token: resolveObservedTokenSymbol(mint, context.tokenSymbolsByMint),
+        amount: resolvedUiAmount,
+        memo: null,
+        type: "transfer",
+        direction: "inbound",
+        status,
+        signature,
+        serialized_tx: null,
+        slot: parsedTransaction.slot ?? null,
+        block_time: timestamp,
+        fee: parsedTransaction.meta?.fee ?? null,
+        error: null,
+        initiated_by_key_id: null,
+        created_at: timestamp,
+        updated_at: timestamp,
+      });
+      continue;
+    }
+
+    if (parsedType !== "transfer" && parsedType !== "transferChecked") {
       continue;
     }
 

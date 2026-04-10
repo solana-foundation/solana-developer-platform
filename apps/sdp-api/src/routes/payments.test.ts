@@ -2061,6 +2061,116 @@ describe("Payments routes", () => {
       }
     });
 
+    it("surfaces observed token mints into owned token accounts", async () => {
+      const observedSig =
+        "4o9XWnJ7CyD6be8xXh8hFXRrM9rPzGQhE1mQ4Z8VjYkU7LZtP4R3WnV5uA2sD1fG6hJ7kL8mN9pQ1rS2tU3m";
+      const customMint = "MintedToken111111111111111111111111111111";
+      const destinationTokenAccount = "MintDstTokenAcct11111111111111111111111111";
+      const mintAuthority = "MintAuthority11111111111111111111111111111";
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            result: {
+              blockTime: 1700000300,
+              slot: 103,
+              meta: {
+                err: null,
+                fee: 5000,
+                preTokenBalances: [],
+                postTokenBalances: [
+                  {
+                    accountIndex: 2,
+                    mint: customMint,
+                    owner: TEST_SOLANA_ADDRESSES.wallet1,
+                    uiTokenAmount: {
+                      amount: "500000000",
+                      decimals: 6,
+                      uiAmountString: "500",
+                    },
+                  },
+                ],
+              },
+              transaction: {
+                message: {
+                  accountKeys: [mintAuthority, customMint, destinationTokenAccount],
+                  instructions: [
+                    {
+                      program: "spl-token",
+                      parsed: {
+                        type: "mintTo",
+                        info: {
+                          account: destinationTokenAccount,
+                          amount: "500000000",
+                          mint: customMint,
+                          mintAuthority,
+                        },
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          }),
+          {
+            status: 200,
+            headers: {
+              "Content-Type": "application/json",
+            },
+          }
+        )
+      );
+
+      getSplTokenAccountAddressesMock.mockResolvedValueOnce([
+        destinationTokenAccount as unknown as Address,
+      ]);
+      getSignaturesForAddressMock.mockResolvedValueOnce([]).mockResolvedValueOnce([
+        {
+          signature: observedSig as unknown as Signature,
+          slot: 103n,
+          blockTime: 1700000300n,
+          err: null,
+        },
+      ]);
+
+      try {
+        const res = await app.request(
+          `/v1/payments/transfers?wallet=${TEST_WALLET_ID}`,
+          {
+            method: "GET",
+            headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
+          },
+          env
+        );
+
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as {
+          data: Array<{
+            amount: string;
+            destination: string;
+            direction: string;
+            signature: string | null;
+            source: string;
+            status: string;
+            token: string;
+          }>;
+          meta: { total: number };
+        };
+        expect(body.meta.total).toBe(1);
+        expect(body.data).toHaveLength(1);
+        expect(body.data[0]).toMatchObject({
+          amount: "500",
+          destination: TEST_SOLANA_ADDRESSES.wallet1,
+          direction: "inbound",
+          signature: observedSig,
+          source: mintAuthority,
+          status: "confirmed",
+          token: customMint,
+        });
+      } finally {
+        fetchSpy.mockRestore();
+      }
+    });
+
     it("returns all transfers via DB-only path when no wallet filter is provided", async () => {
       await seedTransfer({ id: "xfr_db_1", status: "confirmed" });
       await seedTransfer({ id: "xfr_db_2", status: "pending" });
