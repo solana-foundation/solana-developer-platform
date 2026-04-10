@@ -10,10 +10,8 @@ import { TEST_MEMBER, TEST_ORG, TEST_USER } from "@/test/fixtures/organizations"
 import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVNamespaces, seedCachedApiKey } from "@/test/mocks/kv";
-import type { CreateOrganizationResponse, Organization } from "@sdp/types";
+import type { Organization } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-
-const ORGANIZATION_REGISTRATION_TOKEN = "test-org-registration-token";
 
 describe("Organizations routes", () => {
   let validKeyHash: string;
@@ -29,73 +27,10 @@ describe("Organizations routes", () => {
   afterEach(async () => {
     await clearTestDatabase(env);
     await clearKVNamespaces(env);
-    env.ORGANIZATION_REGISTRATION_TOKEN = undefined;
   });
 
   describe("POST /v1/organizations", () => {
-    beforeEach(async () => {
-      env.ORGANIZATION_REGISTRATION_TOKEN = ORGANIZATION_REGISTRATION_TOKEN;
-
-      // Add email to allowlist for org creation
-      await getDb(env)
-        .prepare("INSERT INTO allowlist (id, type, value, tier, status) VALUES (?, ?, ?, ?, ?)")
-        .bind("allow_test1", "email", "new@example.com", "pro", "active")
-        .run();
-    });
-
-    it("creates organization with allowlisted email", async () => {
-      const res = await app.request(
-        "/v1/organizations",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-organization-registration-token": ORGANIZATION_REGISTRATION_TOKEN,
-          },
-          body: JSON.stringify({
-            name: "New Org",
-            email: "new@example.com",
-            returnFullApiKey: true,
-          }),
-        },
-        env
-      );
-
-      expect(res.status).toBe(201);
-
-      const body = (await res.json()) as { data: CreateOrganizationResponse };
-      expect(body.data.organization.name).toBe("New Org");
-      expect(body.data.organization.tier).toBe("enterprise");
-      expect(body.data.organization.status).toBe("active");
-      expect(body.data.apiKey.key).toMatch(/^sk_test_/);
-      expect(body.data.apiKey.keyPrefix).toMatch(/^sk_test_/);
-    });
-
-    it("returns only key prefix by default", async () => {
-      const res = await app.request(
-        "/v1/organizations",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-organization-registration-token": ORGANIZATION_REGISTRATION_TOKEN,
-          },
-          body: JSON.stringify({
-            name: "New Org",
-            email: "new@example.com",
-          }),
-        },
-        env
-      );
-
-      expect(res.status).toBe(201);
-
-      const body = (await res.json()) as { data: CreateOrganizationResponse };
-      expect(body.data.apiKey.key).toBeUndefined();
-      expect(body.data.apiKey.keyPrefix).toMatch(/^sk_test_/);
-    });
-
-    it("rejects requests without registration token header", async () => {
+    it("does not expose local organization self-registration", async () => {
       const res = await app.request(
         "/v1/organizations",
         {
@@ -111,149 +46,7 @@ describe("Organizations routes", () => {
         env
       );
 
-      expect(res.status).toBe(403);
-      const body = (await res.json()) as { error: { code: string } };
-      expect(body.error.code).toBe("FORBIDDEN");
-    });
-
-    it("rejects self-registration when registration token is not configured", async () => {
-      env.ORGANIZATION_REGISTRATION_TOKEN = undefined;
-
-      const res = await app.request(
-        "/v1/organizations",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-organization-registration-token": ORGANIZATION_REGISTRATION_TOKEN,
-          },
-          body: JSON.stringify({
-            name: "New Org",
-            email: "new@example.com",
-          }),
-        },
-        env
-      );
-
-      expect(res.status).toBe(403);
-      const body = (await res.json()) as { error: { code: string } };
-      expect(body.error.code).toBe("FORBIDDEN");
-    });
-
-    it("creates organization with custom slug", async () => {
-      const res = await app.request(
-        "/v1/organizations",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-organization-registration-token": ORGANIZATION_REGISTRATION_TOKEN,
-          },
-          body: JSON.stringify({
-            name: "New Org",
-            slug: "custom-slug",
-            email: "new@example.com",
-          }),
-        },
-        env
-      );
-
-      expect(res.status).toBe(201);
-
-      const body = (await res.json()) as { data: CreateOrganizationResponse };
-      expect(body.data.organization.slug).toBe("custom-slug");
-    });
-
-    it("rejects non-allowlisted email", async () => {
-      const res = await app.request(
-        "/v1/organizations",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-organization-registration-token": ORGANIZATION_REGISTRATION_TOKEN,
-          },
-          body: JSON.stringify({
-            name: "New Org",
-            email: "notallowed@example.com",
-          }),
-        },
-        env
-      );
-
-      expect(res.status).toBe(403);
-      const body = (await res.json()) as { error: { code: string } };
-      expect(body.error.code).toBe("NOT_ALLOWLISTED");
-    });
-
-    it("rejects invalid request body", async () => {
-      const res = await app.request(
-        "/v1/organizations",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-organization-registration-token": ORGANIZATION_REGISTRATION_TOKEN,
-          },
-          body: JSON.stringify({
-            name: "",
-            email: "not-an-email",
-          }),
-        },
-        env
-      );
-
-      expect(res.status).toBe(400);
-      const body = (await res.json()) as { error: { code: string } };
-      expect(body.error.code).toBe("BAD_REQUEST");
-    });
-
-    it("rejects duplicate slug", async () => {
-      // Create first org
-      await app.request(
-        "/v1/organizations",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-organization-registration-token": ORGANIZATION_REGISTRATION_TOKEN,
-          },
-          body: JSON.stringify({
-            name: "First Org",
-            slug: "same-slug",
-            email: "new@example.com",
-          }),
-        },
-        env
-      );
-
-      // Add another allowlisted email
-      await getDb(env)
-        .prepare("INSERT INTO allowlist (id, type, value, tier, status) VALUES (?, ?, ?, ?, ?)")
-        .bind("allow_test2", "email", "another@example.com", "individual", "active")
-        .run();
-
-      // Try to create org with same slug
-      const res = await app.request(
-        "/v1/organizations",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-organization-registration-token": ORGANIZATION_REGISTRATION_TOKEN,
-          },
-          body: JSON.stringify({
-            name: "Second Org",
-            slug: "same-slug",
-            email: "another@example.com",
-          }),
-        },
-        env
-      );
-
-      expect(res.status).toBe(409);
-      const body = (await res.json()) as { error: { code: string } };
-      expect(body.error.code).toBe("CONFLICT");
+      expect(res.status).toBe(404);
     });
   });
 

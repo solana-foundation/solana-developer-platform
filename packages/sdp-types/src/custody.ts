@@ -70,15 +70,6 @@ export interface AnchorageCustodyOptions {
   network?: SolanaCustodyNetwork;
 }
 
-export type OrganizationCustodyRequest =
-  | FireblocksCustodyOptions
-  | PrivyCustodyOptions
-  | CoinbaseCdpCustodyOptions
-  | ParaCustodyOptions
-  | TurnkeyCustodyOptions
-  | DfnsCustodyOptions
-  | AnchorageCustodyOptions;
-
 export interface InitializeLocalSigningRequest {
   provider: "local";
   projectId?: string;
