@@ -156,6 +156,7 @@ export async function bootstrapLocalIssuanceFixtures({
     bearerToken,
     provider: "privy",
     walletCount: 2,
+    fundSourceWallet: process.env.PLAYWRIGHT_DISABLE_KORA_FEE_PAYMENT === "1",
     tier,
   });
   const api = createLocalApiClient(getBootstrapApiBaseUrl(), bearerToken);
