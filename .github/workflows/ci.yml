@@ -373,11 +373,9 @@ jobs:
           - name: Dashboard E2E
             test_script: test:e2e:dashboard
             artifact_suffix: dashboard
-            disable_kora_fee_payment: "0"
           - name: Issuance E2E
             test_script: test:e2e:issuance
             artifact_suffix: issuance
-            disable_kora_fee_payment: "1"
     env:
       DATABASE_URL: postgresql://sdp:sdp@127.0.0.1:5432/sdp
       SOLANA_NETWORK: devnet
@@ -489,7 +487,6 @@ jobs:
         env:
           DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
           DOPPLER_CONFIG: dev_ci
-          PLAYWRIGHT_DISABLE_KORA_FEE_PAYMENT: ${{ matrix.disable_kora_fee_payment }}
         run: scripts/doppler/run-with-config.sh node scripts/run-with-healthy-solana-rpc.mjs pnpm --filter sdp-web run ${{ matrix.test_script }}
 
       - name: Upload Playwright artifacts

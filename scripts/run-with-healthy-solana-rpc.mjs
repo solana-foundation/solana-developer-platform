@@ -18,12 +18,6 @@ try {
     console.log(`Using ${selected.key} for Solana RPC (${safeHostname(selected.url)}).`);
   }
 
-  if (env.PLAYWRIGHT_DISABLE_KORA_FEE_PAYMENT === "1") {
-    env.KORA_RPC_URL = "";
-    env.KORA_API_KEY = "";
-    console.log("Disabled Kora fee payment for this command.");
-  }
-
   const code = await run(command, args, env);
   process.exit(code);
 } catch (error) {
