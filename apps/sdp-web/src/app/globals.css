@@ -4,7 +4,11 @@
 /* Ensure Tailwind scans app source files */
 @source "../**/*.{ts,tsx}";
 
+:root {
+  --sdp-shell-bg: #e9e7de;
+}
+
 html,
 body {
-  background-color: var(--gray-100);
+  background-color: var(--sdp-shell-bg);
 }

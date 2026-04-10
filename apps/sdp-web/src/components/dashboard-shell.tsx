@@ -489,7 +489,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
 
   if (!isLoaded) {
     return (
-      <main className="min-h-screen bg-gray-100 p-0 text-text-extra-high">
+      <main className="min-h-screen bg-[var(--sdp-shell-bg)] p-0 text-text-extra-high">
         <div className="mx-auto max-w-5xl border border-border-extra-light bg-white/70 p-6">
           <p className="text-sm text-text-low">Loading dashboard...</p>
         </div>
@@ -499,7 +499,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
 
   if (!isSignedIn) {
     return (
-      <main className="min-h-screen bg-gray-100 p-0 text-text-extra-high">
+      <main className="min-h-screen bg-[var(--sdp-shell-bg)] p-0 text-text-extra-high">
         <div className="mx-auto max-w-3xl border border-border-extra-light bg-white/70 p-6">
           <h1 className="text-[34px] leading-[1.05] font-medium tracking-[-0.3px]">
             Sign in to continue
@@ -524,7 +524,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
 
   if (!orgId) {
     return (
-      <main className="min-h-screen bg-gray-100 p-0 text-text-extra-high">
+      <main className="min-h-screen bg-[var(--sdp-shell-bg)] p-0 text-text-extra-high">
         <div className="mx-auto max-w-3xl border border-border-extra-light bg-white/70 p-6">
           <h1 className="text-[34px] leading-[1.05] font-medium tracking-[-0.3px]">
             Select an organization
@@ -541,7 +541,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
   return (
     <main
       className={[
-        "min-h-screen bg-gray-100 p-0 text-text-extra-high",
+        "min-h-screen bg-[var(--sdp-shell-bg)] p-0 text-text-extra-high",
         shouldLockShellViewport ? "h-screen overflow-hidden" : "",
       ].join(" ")}
     >
@@ -558,7 +558,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
           transition={{ duration: 0.22, ease: "easeInOut" }}
           style={{ pointerEvents: isSidebarOpen ? "auto" : "none" }}
           className={[
-            "hidden overflow-hidden border border-border-light border-r-0 bg-gray-100 lg:sticky lg:top-0 lg:flex lg:h-screen lg:flex-col lg:justify-between",
+            "hidden overflow-hidden border border-border-light border-r-0 bg-[var(--sdp-shell-bg)] lg:sticky lg:top-0 lg:flex lg:h-screen lg:flex-col lg:justify-between",
           ].join(" ")}
         >
           <DashboardSidebarContent
@@ -577,7 +577,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
               className="absolute inset-0 bg-gray-1400/30"
               onClick={() => setMobileSidebarOpen(false)}
             />
-            <div className="relative z-10 flex h-full w-[296px] max-w-[85vw] flex-col justify-between border-r border-border-light bg-gray-100 shadow-lg">
+            <div className="relative z-10 flex h-full w-[296px] max-w-[85vw] flex-col justify-between border-r border-border-light bg-[var(--sdp-shell-bg)] shadow-lg">
               <DashboardSidebarContent
                 bottomNavItems={bottomNavItems}
                 pathname={pathname}
