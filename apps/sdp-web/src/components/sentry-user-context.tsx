@@ -1,7 +1,7 @@
 "use client";
 
-import * as Sentry from "@sentry/nextjs";
 import { useAuth, useUser } from "@clerk/nextjs";
+import * as Sentry from "@sentry/nextjs";
 import { useEffect } from "react";
 
 export function SentryUserContext() {

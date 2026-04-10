@@ -30,10 +30,7 @@ export default function GlobalError({
           Try again
         </button>
         {eventId ? (
-          <button
-            onClick={() => Sentry.showReportDialog({ eventId })}
-            type="button"
-          >
+          <button onClick={() => Sentry.showReportDialog({ eventId })} type="button">
             Report this issue
           </button>
         ) : null}

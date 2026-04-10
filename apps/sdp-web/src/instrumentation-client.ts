@@ -33,8 +33,7 @@ Sentry.init({
       },
       formTitle: "Share feedback",
       submitButtonLabel: "Send feedback",
-      messagePlaceholder:
-        "Describe what you expected and what happened instead.",
+      messagePlaceholder: "Describe what you expected and what happened instead.",
       successMessageText: "Thanks for your feedback!",
     }),
   ],
