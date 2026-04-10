@@ -1,40 +1,11 @@
 import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
 
 import { z } from "zod";
-import {
-  createOrganizationRequestSchema,
-  errorResponseSchema,
-  orgIdParamSchema,
-  updateOrganizationRequestSchema,
-} from "../schemas";
+import { errorResponseSchema, orgIdParamSchema, updateOrganizationRequestSchema } from "../schemas";
 import { errorResponses, jsonContent } from "./helpers";
-import { createOrganizationResponse, organizationResponse } from "./responses";
+import { organizationResponse } from "./responses";
 
 export function registerOrganizationPaths(registry: OpenAPIRegistry) {
-  registry.registerPath({
-    method: "post",
-    path: "/v1/organizations",
-    tags: ["Organizations"],
-    summary: "Create organization",
-    operationId: "createOrganization",
-    description:
-      "Creates an organization and returns an API key summary. Requires x-organization-registration-token. Set returnFullApiKey to true to return the full key once.",
-    security: [{ organizationRegistrationToken: [] }],
-    request: {
-      body: {
-        required: true,
-        content: jsonContent(createOrganizationRequestSchema),
-      },
-    },
-    responses: {
-      201: {
-        description: "Organization created",
-        content: jsonContent(createOrganizationResponse),
-      },
-      ...errorResponses(errorResponseSchema, [400, 403, 409, 500]),
-    },
-  });
-
   registry.registerPath({
     method: "get",
     path: "/v1/organizations/{orgId}",

@@ -41,13 +41,6 @@ export function createOpenApiDocument(): OpenAPIObject {
     description: "Admin key for internal allowlist management.",
   });
 
-  registry.registerComponent("securitySchemes", "organizationRegistrationToken", {
-    type: "apiKey",
-    in: "header",
-    name: "x-organization-registration-token",
-    description: "Pre-shared token required for organization self-registration.",
-  });
-
   registerHealthPaths(registry);
   registerOrganizationPaths(registry);
   registerApiKeyPaths(registry);

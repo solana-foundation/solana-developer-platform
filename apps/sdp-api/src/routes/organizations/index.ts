@@ -6,7 +6,6 @@ import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import type { Env } from "@/types/env";
 import { Hono } from "hono";
 import {
-  createOrganization,
   deleteOrganization,
   getOrganization,
   getOrganizationProviderAccess,
@@ -14,9 +13,6 @@ import {
 } from "./handlers";
 
 const organizations = new Hono<{ Bindings: Env }>();
-
-// Create org (public)
-organizations.post("/", createOrganization);
 
 // Protected routes below require authentication
 organizations.use("/:orgId/*", unifiedAuthMiddleware({ allowClerk: true, allowSession: true }));

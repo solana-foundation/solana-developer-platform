@@ -2,7 +2,6 @@
  * Organization Types
  */
 
-import type { OrganizationCustodyRequest } from "./custody";
 import type { OrganizationRole } from "./permissions";
 import type { OrganizationProviderOverrides } from "./provider-access";
 
@@ -105,24 +104,6 @@ export interface Invitation {
   expiresAt: string;
   status: InvitationStatus;
   createdAt: string;
-}
-
-// API Request/Response types
-export interface CreateOrganizationRequest {
-  name: string;
-  slug?: string;
-  email: string; // Creator's email (for allowlist check)
-  returnFullApiKey?: boolean;
-  custody?: OrganizationCustodyRequest;
-}
-
-export interface CreateOrganizationResponse {
-  organization: Organization;
-  apiKey: {
-    id: string;
-    key?: string; // Full key, only shown once when returnFullApiKey is true
-    keyPrefix: string;
-  };
 }
 
 export interface InviteMemberRequest {
