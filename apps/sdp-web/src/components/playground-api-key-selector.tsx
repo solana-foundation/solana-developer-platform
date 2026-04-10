@@ -1,5 +1,6 @@
 "use client";
 
+import { Button } from "@/components/ui/button";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { getStoredApiKeySecret } from "@/lib/playground-api-keys";
 import { KeyRound } from "lucide-react";
@@ -27,17 +28,28 @@ function formatApiKeyLabel(name: string, keyPrefix: string): string {
 }
 
 export function PlaygroundApiKeySelector() {
-  const { playgroundApiKeys, selectedPlaygroundApiKeyId, setSelectedPlaygroundApiKeyId } =
-    useDashboardWorkspace();
+  const {
+    dashboardAccess,
+    playgroundApiKeys,
+    selectedPlaygroundApiKeyId,
+    setSelectedPlaygroundApiKeyId,
+  } = useDashboardWorkspace();
   const selectedApiKey =
     playgroundApiKeys.find((apiKey) => apiKey.id === selectedPlaygroundApiKeyId) ??
     playgroundApiKeys[0];
 
   if (playgroundApiKeys.length === 0) {
     return (
-      <div className="inline-flex h-11 min-w-[260px] items-center gap-2 rounded-[14px] border border-[rgba(28,28,29,0.12)] bg-white px-4 text-sm text-[rgba(28,28,29,0.56)]">
-        <KeyRound className="h-4 w-4" />
-        <span>No API keys</span>
+      <div className="flex w-full flex-wrap items-center justify-end gap-3 lg:max-w-[420px]">
+        <div className="inline-flex h-11 min-w-[260px] flex-1 items-center gap-2 rounded-[14px] border border-[rgba(28,28,29,0.12)] bg-white px-4 text-sm text-[rgba(28,28,29,0.56)]">
+          <KeyRound className="h-4 w-4" />
+          <span>No API keys</span>
+        </div>
+        {dashboardAccess.capabilities.canManageApiKeys ? (
+          <Button asChild className="h-11 rounded-[14px] px-4 whitespace-nowrap">
+            <Link href="/dashboard/api-keys">Create API key</Link>
+          </Button>
+        ) : null}
       </div>
     );
   }
