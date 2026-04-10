@@ -85,7 +85,6 @@ At minimum, the Doppler configs used by automation must include:
   - `CLERK_SECRET_KEY`
   - `CLERK_JWT_TEMPLATE`
   - `NEXT_PUBLIC_SENTRY_DSN`
-  - `FLAGS`
 
 ## Local Development
 
