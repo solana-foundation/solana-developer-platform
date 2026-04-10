@@ -224,18 +224,24 @@ jobs:
         include:
           - name: Kora
             test_files: src/tests/kora.test.ts src/tests/kora-flow.test.ts
+            rpc_provider: alchemy
           - name: Issuance
             test_files: src/tests/issuance-endpoints.test.ts src/tests/token2022.test.ts
+            rpc_provider: quicknode
           - name: Mosaic
             test_files: src/tests/mosaic-token-acl.test.ts src/tests/mosaic-abl.test.ts src/tests/mosaic-templates.test.ts
+            rpc_provider: triton
           - name: Token Flows
             test_files: src/tests/deploy.test.ts src/tests/mint.test.ts src/tests/burn.test.ts src/tests/freeze.test.ts
+            rpc_provider: default
           - name: Access
             test_files: src/tests/payments-wallet-scope.test.ts src/tests/api-keys-flow.test.ts src/tests/api-keys-rotation.test.ts src/tests/custody-local.test.ts
+            rpc_provider: alchemy
     env:
       DATABASE_URL: postgresql://sdp:sdp@127.0.0.1:5432/sdp
       SOLANA_NETWORK: devnet
       INTEGRATION_TEST_FILES: ${{ matrix.test_files }}
+      SOLANA_RPC_CI_PREFERRED_PROVIDER: ${{ matrix.rpc_provider }}
     services:
       postgres:
         image: postgres:16-alpine
@@ -443,13 +449,13 @@ jobs:
           DOPPLER_CONFIG: dev_ci
           SDP_API_BASE_URL: ${{ env.PLAYWRIGHT_API_URL }}
           NEXT_PUBLIC_SDP_API_BASE_URL: ${{ env.PLAYWRIGHT_API_URL }}
-        run: scripts/doppler/run-with-config.sh pnpm --filter sdp-web build
+        run: scripts/doppler/run-with-config.sh node scripts/run-with-healthy-solana-rpc.mjs pnpm --filter sdp-web build
 
       - name: Run browser e2e suite
         env:
           DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
           DOPPLER_CONFIG: dev_ci
-        run: scripts/doppler/run-with-config.sh pnpm --filter sdp-web run ${{ matrix.test_script }}
+        run: scripts/doppler/run-with-config.sh node scripts/run-with-healthy-solana-rpc.mjs pnpm --filter sdp-web run ${{ matrix.test_script }}
 
       - name: Upload Playwright artifacts
         if: always()
