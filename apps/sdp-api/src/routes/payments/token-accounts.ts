@@ -160,6 +160,30 @@ export async function getSplTokenBalances(
     }));
 }
 
+export async function getSplTokenAccountAddresses(
+  rpc: ReturnType<typeof createRpc>,
+  owner: Address
+): Promise<Address[]> {
+  const addresses: Address[] = [];
+  const seen = new Set<string>();
+
+  for (const programId of SPL_TOKEN_PROGRAM_IDS) {
+    const response = await getTokenAccountsByOwnerJsonParsed(rpc, owner, programId);
+
+    for (const account of response.value ?? []) {
+      if (typeof account.pubkey !== "string" || seen.has(account.pubkey)) {
+        continue;
+      }
+
+      const tokenAccount = assertValidAddress(account.pubkey, "tokenAccount");
+      seen.add(tokenAccount);
+      addresses.push(tokenAccount);
+    }
+  }
+
+  return addresses;
+}
+
 function assertSupportedTokenProgram(program: string): Address {
   if (program === SPL_TOKEN_PROGRAM_ID || program === SPL_TOKEN_2022_PROGRAM_ID) {
     return program as Address;

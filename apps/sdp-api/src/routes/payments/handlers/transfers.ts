@@ -51,6 +51,7 @@ import {
   prepareTransferSchema,
   walletIdParamsSchema,
 } from "../schemas";
+import * as tokenAccounts from "../token-accounts";
 import {
   isNativeSolToken,
   resolveMintTokenProgram,
@@ -125,6 +126,8 @@ interface ObservedTransferContext {
   tokenSymbolsByMint: Map<string, string>;
   walletIdsByAddress: Map<string, string>;
 }
+
+type SignatureHistoryEntry = Awaited<ReturnType<typeof solanaRpc.getSignaturesForAddress>>[number];
 
 export async function resolveWalletFromParams(
   c: AppContext,
@@ -749,6 +752,56 @@ function readTokenAmountInfo(
   };
 }
 
+function compareSignatureHistoryDesc(
+  left: SignatureHistoryEntry,
+  right: SignatureHistoryEntry
+): number {
+  const leftBlockTime = left.blockTime ?? 0n;
+  const rightBlockTime = right.blockTime ?? 0n;
+
+  if (leftBlockTime !== rightBlockTime) {
+    return leftBlockTime > rightBlockTime ? -1 : 1;
+  }
+
+  if (left.slot !== right.slot) {
+    return left.slot > right.slot ? -1 : 1;
+  }
+
+  return String(left.signature).localeCompare(String(right.signature));
+}
+
+function dedupeSignatureHistory(
+  signatures: SignatureHistoryEntry[],
+  limit: number
+): SignatureHistoryEntry[] {
+  const bySignature = new Map<string, SignatureHistoryEntry>();
+
+  for (const signatureInfo of signatures) {
+    bySignature.set(String(signatureInfo.signature), signatureInfo);
+  }
+
+  return Array.from(bySignature.values()).sort(compareSignatureHistoryDesc).slice(0, limit);
+}
+
+async function resolveWalletTokenAccountAddresses(
+  c: AppContext,
+  rpc: ReturnType<typeof solanaRpc.createRpc>,
+  owner: Address,
+  walletId: string
+): Promise<Address[]> {
+  try {
+    return await tokenAccounts.getSplTokenAccountAddresses(rpc, owner);
+  } catch (error) {
+    console.error("listTransfers: failed to fetch token accounts for wallet history", {
+      requestId: c.get("requestId"),
+      walletId,
+      owner,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return [];
+  }
+}
+
 async function resolveObservedTokenSymbols(env: Env): Promise<Map<string, string>> {
   const symbolsByMint = new Map<string, string>([
     [DEVNET_USDC_MINT, "USDC"],
@@ -946,12 +999,14 @@ function buildObservedTransferRows(
     const destinationTokenMetadata = tokenAccountMetadata.get(destinationTokenAccount);
     const sourceOwner = sourceTokenMetadata?.owner ?? null;
     const destinationOwner = destinationTokenMetadata?.owner ?? null;
-    const sourceWalletId = sourceOwner
-      ? (context.walletIdsByAddress.get(sourceOwner) ?? null)
-      : null;
-    const destinationWalletId = destinationOwner
-      ? (context.walletIdsByAddress.get(destinationOwner) ?? null)
-      : null;
+    const sourceWalletId =
+      (sourceOwner ? (context.walletIdsByAddress.get(sourceOwner) ?? null) : null) ??
+      context.walletIdsByAddress.get(sourceTokenAccount) ??
+      null;
+    const destinationWalletId =
+      (destinationOwner ? (context.walletIdsByAddress.get(destinationOwner) ?? null) : null) ??
+      context.walletIdsByAddress.get(destinationTokenAccount) ??
+      null;
     const walletId = sourceWalletId ?? destinationWalletId;
 
     if (!walletId) {
@@ -1199,13 +1254,49 @@ export async function listTransfers(c: AppContext) {
 
     // 1. Fetch on-chain signature history via Helius (or fallback RPC)
     const heliusRpc = createSignatureHistoryRpc(c.env);
-    const onChainSigs = await solanaRpc.getSignaturesForAddress(
-      heliusRpc,
-      sourceAddress as Address,
-      {
-        limit: Math.min(pageSize * 5, 200),
-        commitment: "confirmed",
+    const ownerAddress = sourceAddress as Address;
+    const historyLimit = Math.min(pageSize * 5, 200);
+    const signatureSearchAddresses: Address[] = [ownerAddress];
+
+    if (resolvedWalletId) {
+      const tokenAccountAddresses = await resolveWalletTokenAccountAddresses(
+        c,
+        heliusRpc,
+        ownerAddress,
+        resolvedWalletId
+      );
+
+      for (const tokenAccountAddress of tokenAccountAddresses) {
+        walletIdsByAddress.set(tokenAccountAddress, resolvedWalletId);
+
+        if (
+          !signatureSearchAddresses.some(
+            (searchAddress) => String(searchAddress) === String(tokenAccountAddress)
+          )
+        ) {
+          signatureSearchAddresses.push(tokenAccountAddress);
+        }
       }
+    }
+
+    const ownerSignatures = await solanaRpc.getSignaturesForAddress(heliusRpc, ownerAddress, {
+      limit: historyLimit,
+      commitment: "confirmed",
+    });
+    const tokenAccountSignatureResults = await Promise.allSettled(
+      signatureSearchAddresses.slice(1).map((searchAddress) =>
+        solanaRpc.getSignaturesForAddress(heliusRpc, searchAddress, {
+          limit: historyLimit,
+          commitment: "confirmed",
+        })
+      )
+    );
+    const tokenAccountSignatures = tokenAccountSignatureResults.flatMap((result) =>
+      result.status === "fulfilled" ? result.value : []
+    );
+    const onChainSigs = dedupeSignatureHistory(
+      [...ownerSignatures, ...tokenAccountSignatures],
+      historyLimit
     );
     const sigStrings = onChainSigs.map((s) => String(s.signature));
 

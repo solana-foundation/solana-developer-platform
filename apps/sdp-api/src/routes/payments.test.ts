@@ -12,7 +12,7 @@ import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVNamespaces, seedCachedApiKey } from "@/test/mocks/kv";
 import type { CachedApiKey } from "@sdp/types";
 import { address, createNoopSigner } from "@solana/kit";
-import type { Signature } from "@solana/kit";
+import type { Address, Signature } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const createRpcMock = vi.spyOn(solanaRpc, "createRpc");
@@ -21,6 +21,7 @@ const getRecentBlockhashMock = vi.spyOn(solanaRpc, "getRecentBlockhash");
 const confirmTransactionMock = vi.spyOn(solanaRpc, "confirmTransaction");
 const getSignaturesForAddressMock = vi.spyOn(solanaRpc, "getSignaturesForAddress");
 const getSplTokenBalancesMock = vi.spyOn(tokenAccounts, "getSplTokenBalances");
+const getSplTokenAccountAddressesMock = vi.spyOn(tokenAccounts, "getSplTokenAccountAddresses");
 const createFeePaymentAdapterMock = vi.spyOn(feePaymentAdapters, "createFeePaymentAdapter");
 const createOrgSignerMock = vi.spyOn(solanaServices, "createOrgSigner");
 
@@ -255,6 +256,7 @@ describe("Payments routes", () => {
     });
     getSignaturesForAddressMock.mockResolvedValue([]);
     getSplTokenBalancesMock.mockResolvedValue([]);
+    getSplTokenAccountAddressesMock.mockResolvedValue([]);
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
       getFeePayer: vi.fn().mockResolvedValue("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
@@ -1900,6 +1902,160 @@ describe("Payments routes", () => {
           token: "USDC",
         });
         expect(body.data[0]?.id).toMatch(/^xfr_observed_/);
+      } finally {
+        fetchSpy.mockRestore();
+      }
+    });
+
+    it("discovers observed custom token deposits from owned token account history", async () => {
+      const observedSig =
+        "5o9XWnJ7CyD6be8xXh8hFXRrM9rPzGQhE1mQ4Z8VjYkU7LZtP4R3WnV5uA2sD1fG6hJ7kL8mN9pQ1rS2tU3w";
+      const customMint = "CustomMint1111111111111111111111111111111";
+      const destinationTokenAccount = "DstTokenAcct111111111111111111111111111111";
+      const sourceTokenAccount = "SrcTokenAcct111111111111111111111111111111";
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            result: {
+              blockTime: 1700000200,
+              slot: 102,
+              meta: {
+                err: null,
+                fee: 5000,
+                preTokenBalances: [
+                  {
+                    accountIndex: 0,
+                    mint: customMint,
+                    owner: TEST_SOLANA_ADDRESSES.wallet2,
+                    uiTokenAmount: {
+                      amount: "25000000",
+                      decimals: 6,
+                      uiAmountString: "25",
+                    },
+                  },
+                  {
+                    accountIndex: 1,
+                    mint: customMint,
+                    owner: TEST_SOLANA_ADDRESSES.wallet1,
+                    uiTokenAmount: {
+                      amount: "0",
+                      decimals: 6,
+                      uiAmountString: "0",
+                    },
+                  },
+                ],
+                postTokenBalances: [
+                  {
+                    accountIndex: 0,
+                    mint: customMint,
+                    owner: TEST_SOLANA_ADDRESSES.wallet2,
+                    uiTokenAmount: {
+                      amount: "0",
+                      decimals: 6,
+                      uiAmountString: "0",
+                    },
+                  },
+                  {
+                    accountIndex: 1,
+                    mint: customMint,
+                    owner: TEST_SOLANA_ADDRESSES.wallet1,
+                    uiTokenAmount: {
+                      amount: "25000000",
+                      decimals: 6,
+                      uiAmountString: "25",
+                    },
+                  },
+                ],
+              },
+              transaction: {
+                message: {
+                  accountKeys: [sourceTokenAccount, destinationTokenAccount],
+                  instructions: [
+                    {
+                      program: "spl-token",
+                      parsed: {
+                        type: "transferChecked",
+                        info: {
+                          source: sourceTokenAccount,
+                          destination: destinationTokenAccount,
+                          mint: customMint,
+                          tokenAmount: {
+                            amount: "25000000",
+                            decimals: 6,
+                            uiAmountString: "25",
+                          },
+                        },
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          }),
+          {
+            status: 200,
+            headers: {
+              "Content-Type": "application/json",
+            },
+          }
+        )
+      );
+
+      getSplTokenAccountAddressesMock.mockResolvedValueOnce([
+        destinationTokenAccount as unknown as Address,
+      ]);
+      getSignaturesForAddressMock.mockResolvedValueOnce([]).mockResolvedValueOnce([
+        {
+          signature: observedSig as unknown as Signature,
+          slot: 102n,
+          blockTime: 1700000200n,
+          err: null,
+        },
+      ]);
+
+      try {
+        const res = await app.request(
+          `/v1/payments/transfers?wallet=${TEST_WALLET_ID}`,
+          {
+            method: "GET",
+            headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
+          },
+          env
+        );
+
+        expect(res.status).toBe(200);
+        expect(getSignaturesForAddressMock).toHaveBeenNthCalledWith(
+          1,
+          expect.anything(),
+          TEST_SOLANA_ADDRESSES.wallet1,
+          expect.objectContaining({ commitment: "confirmed" })
+        );
+        expect(getSignaturesForAddressMock).toHaveBeenNthCalledWith(
+          2,
+          expect.anything(),
+          destinationTokenAccount,
+          expect.objectContaining({ commitment: "confirmed" })
+        );
+
+        const body = (await res.json()) as {
+          data: Array<{
+            amount: string;
+            direction: string;
+            signature: string | null;
+            status: string;
+            token: string;
+          }>;
+          meta: { total: number };
+        };
+        expect(body.meta.total).toBe(1);
+        expect(body.data).toHaveLength(1);
+        expect(body.data[0]).toMatchObject({
+          amount: "25",
+          direction: "inbound",
+          signature: observedSig,
+          status: "confirmed",
+          token: customMint,
+        });
       } finally {
         fetchSpy.mockRestore();
       }
