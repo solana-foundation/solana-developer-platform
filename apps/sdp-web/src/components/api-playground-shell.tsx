@@ -940,13 +940,15 @@ export function ApiPlaygroundShell({
             type="button"
             onClick={handleExecute}
             disabled={isExecuting}
-            className="h-10 rounded-[var(--button-radius-lg)] bg-gray-1400 px-4 text-white hover:bg-black max-sm:flex-1"
+            className="h-10 rounded-[var(--button-radius-lg)] bg-gray-1400 px-4 text-white hover:bg-black max-sm:flex-1 whitespace-nowrap"
+            iconLeft={
+              isExecuting ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <Play className="size-4 fill-current" />
+              )
+            }
           >
-            {isExecuting ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Play className="h-4 w-4 fill-current" />
-            )}
             Run request
           </Button>
           <Button
@@ -964,18 +966,18 @@ export function ApiPlaygroundShell({
             type="button"
             variant="outline"
             onClick={() => copyText(codeSnippet, "code")}
-            className="h-10 rounded-[var(--button-radius-lg)] border-border-light bg-white px-4 max-sm:flex-1"
+            className="h-10 rounded-[var(--button-radius-lg)] border-border-light bg-white px-4 max-sm:flex-1 whitespace-nowrap"
+            iconLeft={<Copy className="size-4" />}
           >
-            <Copy className="h-4 w-4" />
             {copiedAction === "code" ? "Copied" : "Copy Code"}
           </Button>
           <Button
             type="button"
             variant="outline"
             onClick={() => copyText(aiInstructions, "ai")}
-            className="h-10 rounded-[var(--button-radius-lg)] border-border-light bg-white px-4 max-sm:flex-1"
+            className="h-10 rounded-[var(--button-radius-lg)] border-border-light bg-white px-4 max-sm:flex-1 whitespace-nowrap"
+            iconLeft={<Sparkles className="size-4" />}
           >
-            <Sparkles className="h-4 w-4" />
             {copiedAction === "ai" ? "Copied" : "AI instructions"}
           </Button>
         </div>
