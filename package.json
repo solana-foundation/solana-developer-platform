@@ -12,6 +12,9 @@
       "allowedVersions": {
         "@solana/kit": "^6.5.0"
       }
+    },
+    "overrides": {
+      "@vercel/microfrontends@2.0.1>path-to-regexp@6.2.1": "6.3.0"
     }
   },
   "scripts": {
