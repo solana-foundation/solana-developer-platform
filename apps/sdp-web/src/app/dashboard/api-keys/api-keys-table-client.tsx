@@ -68,7 +68,7 @@ export function ApiKeysTableClient({
   }
 
   return (
-    <Table className="table-fixed">
+    <Table className="[&_table]:table-fixed">
       <TableHeader>
         <TableRow>
           <TableHead className="w-[14%]">Name</TableHead>

@@ -203,59 +203,57 @@ export function HomeWorkspace({ totalBalance, totalBalanceError, wallets }: Home
                 <p className="text-sm text-[rgba(28,28,29,0.72)]">{emptyActivityMessage}</p>
               ) : (
                 <TooltipProvider>
-                  <div className="min-w-0 overflow-x-auto">
-                    <Table className="min-w-full table-fixed md:min-w-[52rem]">
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead className="w-[8rem] pl-6">Time</TableHead>
-                          <TableHead className="w-[calc(100%-8rem)] md:hidden">Activity</TableHead>
-                          <TableHead className="hidden w-[10rem] md:table-cell">Type</TableHead>
-                          <TableHead className="hidden w-[8rem] md:table-cell">Token</TableHead>
-                          <TableHead className="hidden w-[10rem] md:table-cell">Amount</TableHead>
-                          <TableHead className="hidden pr-6 md:table-cell">Address</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {activityRows.map((row) => {
-                          const timeLabel = formatRelativeTime(row.createdAt);
-                          const amountLabel =
-                            row.amount === "—" ? "—" : formatDisplayAmount(row.amount, row.token);
+                  <Table className="min-w-0 [&_table]:table-fixed">
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-[8rem] pl-6">Time</TableHead>
+                        <TableHead className="w-[calc(100%-8rem)] md:hidden">Activity</TableHead>
+                        <TableHead className="hidden w-[10rem] md:table-cell">Type</TableHead>
+                        <TableHead className="hidden w-[8rem] md:table-cell">Token</TableHead>
+                        <TableHead className="hidden w-[10rem] md:table-cell">Amount</TableHead>
+                        <TableHead className="hidden pr-6 md:table-cell">Address</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {activityRows.map((row) => {
+                        const timeLabel = formatRelativeTime(row.createdAt);
+                        const amountLabel =
+                          row.amount === "—" ? "—" : formatDisplayAmount(row.amount, row.token);
 
-                          return (
-                            <TableRow key={row.id}>
-                              <TableCell className="pl-6 text-[rgba(28,28,29,0.72)]">
-                                {timeLabel}
-                              </TableCell>
-                              <TableCell className="min-w-0 md:hidden">
-                                <div className="min-w-0">
-                                  <div className="truncate font-medium">{row.type}</div>
-                                  <div className="mt-1 truncate text-xs text-[rgba(28,28,29,0.56)]">
-                                    {amountLabel}
-                                  </div>
-                                  <TruncatedTableText
-                                    value={row.address}
-                                    className="mt-1 truncate font-mono text-xs text-[rgba(28,28,29,0.56)]"
-                                  />
+                        return (
+                          <TableRow key={row.id}>
+                            <TableCell className="pl-6 text-[rgba(28,28,29,0.72)]">
+                              {timeLabel}
+                            </TableCell>
+                            <TableCell className="min-w-0 md:hidden">
+                              <div className="min-w-0">
+                                <div className="truncate font-medium">{row.type}</div>
+                                <div className="mt-1 truncate text-xs text-[rgba(28,28,29,0.56)]">
+                                  {amountLabel}
                                 </div>
-                              </TableCell>
-                              <TableCell className="hidden font-medium md:table-cell">
-                                {row.type}
-                              </TableCell>
-                              <TableCell className="hidden text-[rgba(28,28,29,0.78)] md:table-cell">
-                                <TruncatedTableText value={row.token} className="truncate" />
-                              </TableCell>
-                              <TableCell className="hidden text-[rgba(28,28,29,0.78)] md:table-cell">
-                                <TruncatedTableText value={amountLabel} className="truncate" />
-                              </TableCell>
-                              <TableCell className="hidden pr-6 font-mono text-xs text-[rgba(28,28,29,0.72)] md:table-cell">
-                                <TruncatedTableText value={row.address} className="truncate" />
-                              </TableCell>
-                            </TableRow>
-                          );
-                        })}
-                      </TableBody>
-                    </Table>
-                  </div>
+                                <TruncatedTableText
+                                  value={row.address}
+                                  className="mt-1 truncate font-mono text-xs text-[rgba(28,28,29,0.56)]"
+                                />
+                              </div>
+                            </TableCell>
+                            <TableCell className="hidden font-medium md:table-cell">
+                              {row.type}
+                            </TableCell>
+                            <TableCell className="hidden text-[rgba(28,28,29,0.78)] md:table-cell">
+                              <TruncatedTableText value={row.token} className="truncate" />
+                            </TableCell>
+                            <TableCell className="hidden text-[rgba(28,28,29,0.78)] md:table-cell">
+                              <TruncatedTableText value={amountLabel} className="truncate" />
+                            </TableCell>
+                            <TableCell className="hidden pr-6 font-mono text-xs text-[rgba(28,28,29,0.72)] md:table-cell">
+                              <TruncatedTableText value={row.address} className="truncate" />
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
                 </TooltipProvider>
               )}
             </CardContent>

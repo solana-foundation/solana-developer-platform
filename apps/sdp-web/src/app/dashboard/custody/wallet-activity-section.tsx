@@ -157,7 +157,7 @@ export function WalletActivitySection({
         ) : (
           <TooltipProvider>
             <div className="min-w-0">
-              <Table className="table-fixed">
+              <Table className="[&_table]:table-fixed">
                 <TableHeader>
                   <TableRow>
                     <TableHead className="w-[9rem]">Status</TableHead>
