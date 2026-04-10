@@ -91,10 +91,21 @@ function TruncatedTableText({
   displayValue?: string;
   className?: string;
 }) {
+  const renderedValue = displayValue ?? value;
+
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <div className={className ?? "block max-w-full truncate"}>{displayValue ?? value}</div>
+        <div className={className ?? "block max-w-full truncate"}>
+          {renderedValue === value ? (
+            value
+          ) : (
+            <>
+              <span aria-hidden="true">{renderedValue}</span>
+              <span className="sr-only">{value}</span>
+            </>
+          )}
+        </div>
       </TooltipTrigger>
       <TooltipContent side="top" align="start" className="max-w-[32rem] break-all text-xs">
         {value}
