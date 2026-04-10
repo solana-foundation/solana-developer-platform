@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.14.7](https://github.com/solana-foundation/solana-developer-platform/compare/v0.14.6...v0.14.7) (2026-04-10)
+
+### Bug Fixes
+
+* restore docs proxy origin ([#164](https://github.com/solana-foundation/solana-developer-platform/pull/164)) ([8e681e5](https://github.com/solana-foundation/solana-developer-platform/commit/8e681e595b9c2e0782d9d607a9f97d1da194bb58))
+
 ## [0.14.6](https://github.com/solana-foundation/solana-developer-platform/compare/v0.14.5...v0.14.6) (2026-04-10)
 
 ### Bug Fixes
