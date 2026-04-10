@@ -7,7 +7,6 @@ import {
   allowlistEntrySchema,
   apiKeyDetailSchema,
   apiKeyResponseSchema,
-  createOrganizationResponseSchema,
   currentUserResponseSchema,
   custodyConfigResponseSchema,
   custodyConfigsResponseSchema,
@@ -69,7 +68,6 @@ import {
   walletSchema,
 } from "../schemas";
 
-export const createOrganizationResponse = successResponseSchema(createOrganizationResponseSchema);
 export const organizationResponse = successResponseSchema(organizationSchema);
 
 export const listMembersResponse = successResponseSchema(listMembersResponseSchema);

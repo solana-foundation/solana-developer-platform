@@ -1,13 +1,16 @@
 import { AppError } from "@/lib/errors";
 import type { Env } from "@/types/env";
 
-interface ClerkEmailAddress {
+export interface ClerkEmailAddress {
   id: string;
   email_address: string;
 }
 
 export interface ClerkUser {
   id: string;
+  first_name?: string | null;
+  last_name?: string | null;
+  username?: string | null;
   primary_email_address_id?: string | null;
   email_addresses?: ClerkEmailAddress[];
 }

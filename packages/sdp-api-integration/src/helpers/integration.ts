@@ -486,18 +486,50 @@ function sleep(ms: number): Promise<void> {
 }
 
 async function solanaRpc<T>(rpcUrl: string, method: string, params: unknown[]): Promise<T> {
-  const response = await fetch(rpcUrl, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
-  });
+  const maxRetries = 2;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const response = await fetch(rpcUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+      });
 
-  const payload = (await response.json()) as SolanaRpcResponse<T>;
-  if ("error" in payload) {
-    throw new Error(payload.error.message ?? `Solana RPC error calling ${method}`);
+      const payload = (await response.json()) as SolanaRpcResponse<T>;
+      if ("error" in payload) {
+        throw new Error(payload.error.message ?? `Solana RPC error calling ${method}`);
+      }
+
+      return payload.result;
+    } catch (error) {
+      if (attempt < maxRetries && isRetryableSolanaRpcError(error)) {
+        await sleep((attempt + 1) * 500);
+        continue;
+      }
+
+      throw error;
+    }
   }
 
-  return payload.result;
+  throw new Error(`Solana RPC error calling ${method}`);
+}
+
+function isRetryableSolanaRpcError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const message = error.message.toLowerCase();
+  return (
+    message.includes("unable to complete request") ||
+    message.includes("request timed out") ||
+    message.includes("timed out") ||
+    message.includes("service unavailable") ||
+    message.includes("try again") ||
+    message.includes("too many requests") ||
+    message.includes("429") ||
+    message.includes("500") ||
+    message.includes("502") ||
+    message.includes("503") ||
+    message.includes("504")
+  );
 }
 
 export async function createFundedPrivyWallet(input: {

@@ -10,12 +10,11 @@ describe("OpenAPI spec", () => {
     expect(doc.info.description).toContain("/v1");
   });
 
-  it("documents organization registration token security for org creation", () => {
+  it("does not document local organization self-registration", () => {
     const doc = createOpenApiDocument();
 
-    expect(doc.components?.securitySchemes?.organizationRegistrationToken).toBeDefined();
-    const createOrgPath = doc.paths?.["/v1/organizations"]?.post;
-    expect(createOrgPath?.security).toEqual([{ organizationRegistrationToken: [] }]);
+    expect(doc.components?.securitySchemes?.organizationRegistrationToken).toBeUndefined();
+    expect(doc.paths?.["/v1/organizations"]?.post).toBeUndefined();
   });
 
   it("documents token supply refresh endpoint", () => {
