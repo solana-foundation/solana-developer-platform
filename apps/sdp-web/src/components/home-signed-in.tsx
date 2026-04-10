@@ -7,16 +7,16 @@ export function HomeSignedInCard() {
   const { isLoaded, orgId } = useAuth();
 
   if (!isLoaded) {
-    return <p className="text-sm text-[rgba(28,28,29,0.72)]">Loading...</p>;
+    return <p className="text-sm text-text-medium">Loading...</p>;
   }
 
   if (!orgId) {
     return (
-      <div className="rounded-3xl border border-[rgba(28,28,29,0.08)] bg-white p-6 shadow-[0_12px_32px_rgba(28,28,29,0.05)]">
-        <h2 className="text-[19px] leading-6 font-medium tracking-[0] text-[#1c1c1d]">
+      <div className="rounded-[var(--table-radius)] border border-border-light bg-white p-6 shadow-sm">
+        <h2 className="text-[19px] leading-6 font-medium text-text-extra-high">
           Select your organization
         </h2>
-        <p className="mt-3 text-sm text-[rgba(28,28,29,0.72)]">
+        <p className="mt-3 text-sm text-text-medium">
           Choose or create an organization to continue.
         </p>
         <div className="mt-6">
@@ -27,9 +27,9 @@ export function HomeSignedInCard() {
   }
 
   return (
-    <div className="rounded-3xl border border-[rgba(28,28,29,0.08)] bg-white p-6 shadow-[0_12px_32px_rgba(28,28,29,0.05)]">
+    <div className="rounded-[var(--table-radius)] border border-border-light bg-white p-6 shadow-sm">
       <AutoDashboardRedirect />
-      <p className="text-sm text-[rgba(28,28,29,0.72)]">Loading your dashboard...</p>
+      <p className="text-sm text-text-medium">Loading your dashboard...</p>
     </div>
   );
 }

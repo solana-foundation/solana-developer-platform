@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { getStoredApiKeySecret } from "@/lib/playground-api-keys";
 import type { CustodyWalletSummary } from "@sdp/types";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, motion } from "motion/react";
 import dynamic from "next/dynamic";
 import { useEffect, useMemo, useState } from "react";
 import type { KnownCustodyProvider } from "./provider-catalog";
