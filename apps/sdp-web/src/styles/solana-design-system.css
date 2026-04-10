@@ -741,11 +741,11 @@ body {
     @apply border-border outline-ring/50;
   }
 
-  a[href],
+  a[href]:not([aria-disabled="true"]),
   button:not(:disabled):not([aria-disabled="true"]),
   [role="button"]:not([aria-disabled="true"]),
   [role="link"]:not([aria-disabled="true"]),
-  select:not(:disabled) {
+  select:not(:disabled):not([aria-disabled="true"]) {
     cursor: pointer;
   }
 
