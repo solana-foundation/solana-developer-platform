@@ -299,6 +299,7 @@ test.describe
       await expect(
         page.getByText("Manage the blocked destination addresses for this token.")
       ).toBeVisible();
+      await page.getByRole("button", { name: "Freeze", exact: true }).click();
       await expect(
         page.getByText(
           "Need to restrict a wallet before it has a token account? Add it to the denylist first."

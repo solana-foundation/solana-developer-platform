@@ -1461,7 +1461,7 @@ describe("Issuance Routes", () => {
           blocklistTokenId,
           TEST_PROJECT.id,
           TEST_ORG.id,
-          TEST_ACTIVE_TOKEN.mintAddress,
+          TEST_SOLANA_ADDRESSES.wallet3,
           TEST_ACTIVE_TOKEN.mintAuthority,
           TEST_ACTIVE_TOKEN.freezeAuthority,
           TEST_PROJECT_API_KEY.id
