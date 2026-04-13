@@ -204,6 +204,39 @@ describe("Clerk webhooks", () => {
     });
   });
 
+  it("defaults new Clerk organizations to enterprise when SDP tier metadata is missing", async () => {
+    const created = await sendClerkWebhook({
+      type: "organization.created",
+      data: {
+        id: "org_clerk_enterprise_default",
+        name: "Enterprise By Default",
+        slug: "enterprise-by-default",
+      },
+    });
+
+    expect(created.status).toBe(200);
+
+    const createdOrg = await getDb(env)
+      .prepare(
+        `SELECT o.name, o.slug, o.tier
+         FROM organizations o
+         JOIN auth_organization_identities aoi ON aoi.organization_id = o.id
+         WHERE aoi.provider = 'clerk' AND aoi.provider_org_id = ?`
+      )
+      .bind("org_clerk_enterprise_default")
+      .first<{
+        name: string;
+        slug: string;
+        tier: string;
+      }>();
+
+    expect(createdOrg).toEqual({
+      name: "Enterprise By Default",
+      slug: "enterprise-by-default",
+      tier: "enterprise",
+    });
+  });
+
   it("keeps Clerk identity email aligned with the local user when a new email is taken", async () => {
     await getDb(env).batch([
       getDb(env)

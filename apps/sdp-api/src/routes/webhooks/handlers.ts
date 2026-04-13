@@ -241,7 +241,7 @@ async function ensureOrganizationMapping(
       getDb(c.env)
         .prepare(
           `INSERT INTO organizations (id, name, slug, tier, status)
-           VALUES (?, ?, ?, 'individual', 'active')`
+           VALUES (?, ?, ?, 'enterprise', 'active')`
         )
         .bind(orgId, orgName, slug),
       getDb(c.env)

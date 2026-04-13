@@ -59,17 +59,16 @@ export function isOrganizationTier(value: string | null | undefined): value is O
 
 export function normalizeOrganizationTier(value: string | null | undefined): OrganizationTier {
   if (!value) {
-    return "individual";
+    return "enterprise";
   }
 
   if (isOrganizationTier(value)) {
     return value;
   }
 
-  return (
-    LEGACY_ORGANIZATION_TIER_ALIASES[value as keyof typeof LEGACY_ORGANIZATION_TIER_ALIASES] ??
-    "individual"
-  );
+  const legacyTier =
+    LEGACY_ORGANIZATION_TIER_ALIASES[value as keyof typeof LEGACY_ORGANIZATION_TIER_ALIASES];
+  return legacyTier ?? "individual";
 }
 
 export interface User {
