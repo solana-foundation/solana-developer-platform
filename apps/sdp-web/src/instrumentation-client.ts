@@ -13,6 +13,22 @@ Sentry.init({
       maskAllText: true,
       blockAllMedia: true,
     }),
+    Sentry.feedbackIntegration({
+      autoInject: false,
+      showBranding: false,
+      enableScreenshot: true,
+      colorScheme: "light",
+      showName: false,
+      showEmail: false,
+      useSentryUser: {
+        name: "name",
+        email: "email",
+      },
+      formTitle: "Share feedback",
+      submitButtonLabel: "Send feedback",
+      messagePlaceholder: "Describe what you expected and what happened instead.",
+      successMessageText: "Thanks for your feedback!",
+    }),
   ],
 
   // Define how likely traces are sampled. Adjust this value in production, or use tracesSampler for greater control.

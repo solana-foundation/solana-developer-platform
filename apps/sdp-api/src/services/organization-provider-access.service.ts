@@ -88,6 +88,11 @@ function toStoredOrganizationSettings(settings: OrganizationSettings | null): st
   return JSON.stringify(settings);
 }
 
+function omitProviderOverrides(settings: OrganizationSettings): OrganizationSettings {
+  const { providerOverrides: _providerOverrides, ...rest } = settings;
+  return rest;
+}
+
 function hasOwnEntries(value: Record<string, unknown>): boolean {
   return Object.keys(value).length > 0;
 }
@@ -392,15 +397,12 @@ export async function syncOrganizationTierFromClerk(
   const existing = await getOrganizationTierState(db, params.organizationId);
   const clerkMetadata = parseClerkOrganizationTierMetadata(params.clerkOrganization);
 
-  const nextSettings: OrganizationSettings = {
-    ...(existing.settings ?? {}),
-  };
-
-  if (clerkMetadata.providerOverrides) {
-    nextSettings.providerOverrides = clerkMetadata.providerOverrides;
-  } else {
-    nextSettings.providerOverrides = undefined;
-  }
+  const nextSettings: OrganizationSettings = clerkMetadata.providerOverrides
+    ? {
+        ...(existing.settings ?? {}),
+        providerOverrides: clerkMetadata.providerOverrides,
+      }
+    : omitProviderOverrides(existing.settings ?? {});
 
   const persistedSettings = hasOwnEntries(nextSettings as Record<string, unknown>)
     ? nextSettings

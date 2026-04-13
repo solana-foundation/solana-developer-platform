@@ -3,8 +3,8 @@
 import { Button } from "@/components/ui/button";
 import { useEscapeKey } from "@/lib/use-escape-key";
 import type { PaymentsDashboardWallet } from "@sdp/types";
-import { AnimatePresence, motion } from "framer-motion";
 import { X } from "lucide-react";
+import { AnimatePresence, motion } from "motion/react";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useState, useTransition } from "react";
 import { toast } from "sonner";

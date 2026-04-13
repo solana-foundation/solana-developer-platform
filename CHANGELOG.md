@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.15.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.14.7...v0.15.0) (2026-04-10)
+
+### Features
+
+* PRO-1085 sentry user feedback ([#159](https://github.com/solana-foundation/solana-developer-platform/pull/159)) ([5a5ce55](https://github.com/solana-foundation/solana-developer-platform/commit/5a5ce55071ee2b89b0fd09d79db085affdc9bcd0))
+* **api:** sync Clerk organizations from webhooks ([#167](https://github.com/solana-foundation/solana-developer-platform/pull/167)) ([3932813](https://github.com/solana-foundation/solana-developer-platform/commit/3932813c2b79b63fd8e18eda812a4060e00ef14e))
+
+### Bug Fixes
+
+* **sdp-web:** restore dashboard button and feedback styling ([#172](https://github.com/solana-foundation/solana-developer-platform/pull/172)) ([c3babf8](https://github.com/solana-foundation/solana-developer-platform/commit/c3babf8a18f993b45cd5e0c881e776602666e1ee))
+* show wallet deposits in recent transactions ([#170](https://github.com/solana-foundation/solana-developer-platform/pull/170)) ([5e40be9](https://github.com/solana-foundation/solana-developer-platform/commit/5e40be926a7fcf9ac53aaa441236ea2bd55a84fa))
+* use pointer cursor for interactive controls ([#168](https://github.com/solana-foundation/solana-developer-platform/pull/168)) ([9a885c7](https://github.com/solana-foundation/solana-developer-platform/commit/9a885c7d7c0a9829942d4403172cd41e54bb7aff))
+
+### Refactors
+
+* **sdp-web:** migrate to Solana design system ([44b73c1](https://github.com/solana-foundation/solana-developer-platform/commit/44b73c18520dd373de21699c5cdd9cc663503015))
+
+### Maintenance
+
+* split integration tests ([a95bede](https://github.com/solana-foundation/solana-developer-platform/commit/a95bede09943f712f7c2c08d173dbe2c9f96a3df))
+
 ## [0.14.7](https://github.com/solana-foundation/solana-developer-platform/compare/v0.14.6...v0.14.7) (2026-04-10)
 
 ### Bug Fixes

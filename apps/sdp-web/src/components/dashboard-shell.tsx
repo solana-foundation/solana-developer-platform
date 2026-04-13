@@ -1,10 +1,11 @@
 "use client";
 
 import { IssuanceHeaderTabs } from "@/components/issuance-header-tabs";
+import { SentryFeedbackWidget } from "@/components/sentry-feedback-widget";
+import { SentryUserContext } from "@/components/sentry-user-context";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { OrganizationSwitcher, SignInButton, UserButton, useAuth } from "@clerk/nextjs";
 import { DEFAULT_SDP_DOCS_URL } from "@sdp/types";
-import { motion } from "framer-motion";
 import {
   ArrowLeft,
   ArrowLeftRight,
@@ -18,6 +19,7 @@ import {
   Wallet,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { motion } from "motion/react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { type ReactNode, useEffect, useRef, useState } from "react";
@@ -93,7 +95,7 @@ function HeaderBackAction({
   return (
     <Link
       href={href}
-      className="inline-flex h-7 items-center gap-1.5 rounded-[8px] text-[rgba(28,28,29,0.72)] transition-colors hover:text-[#1c1c1d]"
+      className="inline-flex h-7 items-center gap-1.5 rounded-[var(--button-radius-md)] text-text-medium transition-colors hover:text-text-extra-high"
     >
       <ArrowLeft className="h-4 w-4" />
       <span
@@ -126,7 +128,7 @@ function SidebarToggle({
         aria-label="Open navigation"
         onClick={() => setMobileSidebarOpen(true)}
         className={[
-          "inline-flex h-8 w-8 items-center justify-center rounded-lg text-[rgba(28,28,29,0.72)] transition-colors hover:bg-[rgba(28,28,29,0.08)] lg:hidden",
+          "inline-flex h-8 w-8 items-center justify-center rounded-lg text-text-medium transition-colors hover:bg-border-light lg:hidden",
           isMobileSidebarOpen ? "invisible" : "",
         ].join(" ")}
         whileHover={{ scale: 1.05 }}
@@ -145,7 +147,7 @@ function SidebarToggle({
           type="button"
           aria-label="Open navigation"
           onClick={() => setSidebarOpen(true)}
-          className="hidden h-8 w-8 items-center justify-center rounded-lg text-[rgba(28,28,29,0.72)] transition-colors hover:bg-[rgba(28,28,29,0.08)] lg:inline-flex"
+          className="hidden h-8 w-8 items-center justify-center rounded-lg text-text-medium transition-colors hover:bg-border-light lg:inline-flex"
           whileHover={{ scale: 1.05 }}
           whileTap={{ scale: 0.93, rotate: 8 }}
         >
@@ -185,7 +187,7 @@ function DashboardTopBar({
           {topBarLeadingContent}
         </div>
         <div className="flex items-start justify-center">
-          <h1 className="text-center text-[36px] leading-[40px] font-medium tracking-[-0.3px] text-[#1c1c1d]">
+          <h1 className="text-center text-[36px] leading-[40px] font-medium tracking-[-0.3px] text-text-extra-high">
             {centeredTitle}
           </h1>
         </div>
@@ -206,7 +208,7 @@ function DashboardTopBar({
           setMobileSidebarOpen={setMobileSidebarOpen}
         />
         {hideTitle ? null : (
-          <h1 className="text-[36px] leading-[40px] font-medium tracking-[-0.3px] text-[#1c1c1d]">
+          <h1 className="text-[36px] leading-[40px] font-medium tracking-[-0.3px] text-text-extra-high">
             {title}
           </h1>
         )}
@@ -346,9 +348,7 @@ function SidebarGroup({
 }) {
   return (
     <div className="space-y-2">
-      <p className="px-3 text-[12px] uppercase tracking-[0.4px] text-[rgba(28,28,29,0.48)]">
-        {title}
-      </p>
+      <p className="px-3 text-[12px] uppercase tracking-[0.4px] text-text-extra-low">{title}</p>
       <div className="space-y-0.5">
         {items.map((item) => {
           const Icon = item.icon;
@@ -360,10 +360,10 @@ function SidebarGroup({
               href={item.href}
               onClick={onNavigate}
               className={[
-                "flex h-10 items-center gap-3 rounded-[10px] px-3 text-[16px] leading-[24px] transition-colors",
+                "flex h-10 items-center gap-3 rounded-[var(--button-radius-lg)] px-3 text-[16px] leading-[24px] transition-colors",
                 active
-                  ? "border border-[rgba(28,28,29,0.08)] bg-white text-[#1c1c1d]"
-                  : "text-[rgba(28,28,29,0.76)] hover:bg-[rgba(28,28,29,0.06)] hover:text-[#1c1c1d]",
+                  ? "border border-border-extra-light bg-white text-text-extra-high"
+                  : "text-text-medium hover:bg-border-light hover:text-text-extra-high",
               ].join(" ")}
             >
               <Icon className="h-5 w-5" strokeWidth={1.9} />
@@ -401,7 +401,7 @@ function DashboardSidebarContent({
               type="button"
               aria-label="Close navigation"
               onClick={onClose}
-              className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-[rgba(28,28,29,0.72)] transition-colors hover:bg-[rgba(28,28,29,0.08)]"
+              className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-text-medium transition-colors hover:bg-border-light"
               whileHover={{ scale: 1.05, rotate: -3 }}
               whileTap={{ scale: 0.95, rotate: -10 }}
             >
@@ -425,7 +425,8 @@ function DashboardSidebarContent({
           />
         ))}
       </div>
-      <div className="space-y-2 pb-1">
+      <div className="space-y-0.5 pb-1">
+        <SentryFeedbackWidget />
         {bottomNavItems.map((item) => {
           const Icon = item.icon;
           return (
@@ -435,7 +436,7 @@ function DashboardSidebarContent({
               target={item.external ? "_blank" : undefined}
               rel={item.external ? "noopener noreferrer" : undefined}
               onClick={onNavigate}
-              className="flex h-10 items-center gap-3 rounded-[10px] px-3 text-[16px] leading-[24px] text-[rgba(28,28,29,0.76)] transition-colors hover:bg-[rgba(28,28,29,0.06)] hover:text-[#1c1c1d]"
+              className="flex h-10 items-center gap-3 rounded-[var(--button-radius-lg)] px-3 text-[16px] leading-[24px] text-text-medium transition-colors hover:bg-border-light hover:text-text-extra-high"
             >
               <Icon className="h-5 w-5" strokeWidth={1.9} />
               <span>{item.label}</span>
@@ -491,9 +492,9 @@ export function DashboardShell({ children }: { children: ReactNode }) {
 
   if (!isLoaded) {
     return (
-      <main className="min-h-screen bg-[#e9e7de] p-0 text-[#1c1c1d]">
-        <div className="mx-auto max-w-5xl border border-[rgba(28,28,29,0.08)] bg-white/70 p-6">
-          <p className="text-sm text-[rgba(28,28,29,0.56)]">Loading dashboard...</p>
+      <main className="min-h-screen bg-[var(--sdp-shell-bg)] p-0 text-text-extra-high">
+        <div className="mx-auto max-w-5xl border border-border-extra-light bg-white/70 p-6">
+          <p className="text-sm text-text-low">Loading dashboard...</p>
         </div>
       </main>
     );
@@ -501,19 +502,19 @@ export function DashboardShell({ children }: { children: ReactNode }) {
 
   if (!isSignedIn) {
     return (
-      <main className="min-h-screen bg-[#e9e7de] p-0 text-[#1c1c1d]">
-        <div className="mx-auto max-w-3xl border border-[rgba(28,28,29,0.08)] bg-white/70 p-6">
+      <main className="min-h-screen bg-[var(--sdp-shell-bg)] p-0 text-text-extra-high">
+        <div className="mx-auto max-w-3xl border border-border-extra-light bg-white/70 p-6">
           <h1 className="text-[34px] leading-[1.05] font-medium tracking-[-0.3px]">
             Sign in to continue
           </h1>
-          <p className="mt-3 text-sm text-[rgba(28,28,29,0.64)]">
+          <p className="mt-3 text-sm text-text-low">
             Access your organization workspace and wallet controls.
           </p>
           <div className="mt-6">
             <SignInButton mode="modal">
               <button
                 type="button"
-                className="inline-flex h-10 items-center justify-center rounded-[10px] bg-[#0f0f10] px-[18px] text-[15px] font-semibold leading-[15px] text-white transition-colors hover:bg-black"
+                className="inline-flex h-10 items-center justify-center rounded-[var(--button-radius-lg)] bg-gray-1400 px-[18px] text-[15px] font-semibold leading-[15px] text-white transition-colors hover:bg-black"
               >
                 Sign in
               </button>
@@ -526,14 +527,12 @@ export function DashboardShell({ children }: { children: ReactNode }) {
 
   if (!orgId) {
     return (
-      <main className="min-h-screen bg-[#e9e7de] p-0 text-[#1c1c1d]">
-        <div className="mx-auto max-w-3xl border border-[rgba(28,28,29,0.08)] bg-white/70 p-6">
+      <main className="min-h-screen bg-[var(--sdp-shell-bg)] p-0 text-text-extra-high">
+        <div className="mx-auto max-w-3xl border border-border-extra-light bg-white/70 p-6">
           <h1 className="text-[34px] leading-[1.05] font-medium tracking-[-0.3px]">
             Select an organization
           </h1>
-          <p className="mt-3 text-sm text-[rgba(28,28,29,0.64)]">
-            You need an organization to continue.
-          </p>
+          <p className="mt-3 text-sm text-text-low">You need an organization to continue.</p>
           <div className="mt-6">
             <OrganizationSwitcher hidePersonal />
           </div>
@@ -545,10 +544,11 @@ export function DashboardShell({ children }: { children: ReactNode }) {
   return (
     <main
       className={[
-        "min-h-screen bg-[#e9e7de] p-0 text-[#1c1c1d]",
+        "min-h-screen bg-[var(--sdp-shell-bg)] p-0 text-text-extra-high",
         shouldLockShellViewport ? "h-screen overflow-hidden" : "",
       ].join(" ")}
     >
+      <SentryUserContext />
       <div
         className={[
           "mx-auto grid min-h-screen w-full max-w-none gap-0",
@@ -562,7 +562,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
           transition={{ duration: 0.22, ease: "easeInOut" }}
           style={{ pointerEvents: isSidebarOpen ? "auto" : "none" }}
           className={[
-            "hidden overflow-hidden border border-[rgba(28,28,29,0.10)] border-r-0 bg-[#e9e7de] lg:sticky lg:top-0 lg:flex lg:h-screen lg:flex-col lg:justify-between",
+            "hidden overflow-hidden border border-border-light border-r-0 bg-[var(--sdp-shell-bg)] lg:sticky lg:top-0 lg:flex lg:h-screen lg:flex-col lg:justify-between",
           ].join(" ")}
         >
           <DashboardSidebarContent
@@ -578,10 +578,10 @@ export function DashboardShell({ children }: { children: ReactNode }) {
             <button
               type="button"
               aria-label="Close navigation overlay"
-              className="absolute inset-0 bg-[rgba(28,28,29,0.32)]"
+              className="absolute inset-0 bg-gray-1400/30"
               onClick={() => setMobileSidebarOpen(false)}
             />
-            <div className="relative z-10 flex h-full w-[296px] max-w-[85vw] flex-col justify-between border-r border-[rgba(28,28,29,0.10)] bg-[#e9e7de] shadow-[0_12px_40px_rgba(28,28,29,0.16)]">
+            <div className="relative z-10 flex h-full w-[296px] max-w-[85vw] flex-col justify-between border-r border-border-light bg-[var(--sdp-shell-bg)] shadow-lg">
               <DashboardSidebarContent
                 bottomNavItems={bottomNavItems}
                 pathname={pathname}
@@ -594,20 +594,19 @@ export function DashboardShell({ children }: { children: ReactNode }) {
 
         <section
           className={[
-            "relative min-w-0 rounded-[16px] border border-[rgba(28,28,29,0.08)] bg-[rgba(255,255,255,0.8)] px-3 py-5 md:p-6 lg:rounded-tl-[16px]",
+            "relative min-w-0 rounded-2xl border border-border-extra-light bg-white/80 px-3 py-5 md:p-6 lg:rounded-tl-[16px]",
             shouldLockViewportScroll ? "flex min-h-0 flex-col overflow-hidden" : "",
           ].join(" ")}
         >
           <div
             className={[
               "min-w-0 w-full",
-              shouldClipHorizontalOverflow ? "overflow-x-hidden" : "",
               shouldLockViewportScroll ? "flex min-h-0 flex-1 flex-col gap-0" : "space-y-6",
             ].join(" ")}
           >
             <div className="space-y-4">
               {shouldRenderTopBarBorder ? (
-                <div className="-mx-3 border-b border-[rgba(28,28,29,0.10)] px-3 pb-4 md:-mx-6 md:px-6">
+                <div className="-mx-3 border-b border-border-light px-3 pb-4 md:-mx-6 md:px-6">
                   <DashboardTopBar
                     isSidebarOpen={isSidebarOpen}
                     setSidebarOpen={setSidebarOpen}
@@ -633,7 +632,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
               )}
 
               {shouldRenderHeaderNavRow ? (
-                <div className="-mx-3 border-b border-[rgba(28,28,29,0.10)] md:-mx-6">
+                <div className="-mx-3 border-b border-border-light md:-mx-6">
                   <div
                     className={[
                       "px-3 md:px-6",

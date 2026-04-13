@@ -39,17 +39,8 @@ export function IssuancePlayground({
       apiBaseUrl={apiBaseUrl}
       apiKeyValue={apiKeyValue}
       apiKeySelector={<PlaygroundApiKeySelector />}
+      requiresApiKey={!hasActiveApiKeys}
       leftMessages={templatesError ? [{ text: templatesError, tone: "critical" }] : []}
-      rightMessages={
-        hasActiveApiKeys
-          ? []
-          : [
-              {
-                text: "No active API keys found. Session auth will be used unless you attach a stored key.",
-                tone: "critical",
-              },
-            ]
-      }
     />
   );
 }

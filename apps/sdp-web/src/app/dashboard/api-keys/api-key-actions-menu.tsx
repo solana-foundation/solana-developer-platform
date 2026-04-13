@@ -39,9 +39,14 @@ export function ApiKeyActionsMenu({
 
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button type="button" variant="secondary" size="sm">
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            className="rounded-full px-5 whitespace-nowrap"
+            iconRight={<ChevronDown className="size-4" />}
+          >
             Actions
-            <ChevronDown className="h-4 w-4" />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-[200px]">

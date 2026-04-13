@@ -3,14 +3,9 @@ import {
   acceptSchema as acceptSchemaBase,
   inviteSchema as inviteSchemaBase,
 } from "../../routes/members/schemas";
-import {
-  createOrgSchema as createOrgSchemaBase,
-  updateOrgSchema as updateOrgSchemaBase,
-} from "../../routes/organizations/schemas";
+import { updateOrgSchema as updateOrgSchemaBase } from "../../routes/organizations/schemas";
 import { z } from "./base";
 import {
-  apiKeyIdParamSchema,
-  apiKeyPrefixSchema,
   invitationIdSchema,
   isoDateTimeSchema,
   memberIdParamSchema,
@@ -123,22 +118,6 @@ export const invitationSchema = z
   })
   .openapi({ description: "Invitation summary." });
 
-export const createOrganizationResponseSchema = z
-  .object({
-    organization: organizationSchema.openapi({ description: "Created organization details." }),
-    apiKey: z
-      .object({
-        id: apiKeyIdParamSchema,
-        key: z.string().optional().openapi({
-          description: "Full API key. Only returned once.",
-          example: "sk_test_example",
-        }),
-        keyPrefix: apiKeyPrefixSchema,
-      })
-      .openapi({ description: "Initial API key for the organization." }),
-  })
-  .openapi({ description: "Create organization response payload." });
-
 export const listMembersResponseSchema = z
   .object({
     members: z.array(organizationMemberSchema).openapi({ description: "Organization members." }),
@@ -150,34 +129,6 @@ export const inviteMemberResponseSchema = z
     invitation: invitationSchema.openapi({ description: "Invitation details." }),
   })
   .openapi({ description: "Invitation details." });
-
-export const createOrganizationRequestSchema = createOrgSchemaBase
-  .extend({
-    name: createOrgSchemaBase.shape.name.openapi({
-      description: "Organization name.",
-      example: "Example Org",
-    }),
-    slug: createOrgSchemaBase.shape.slug.openapi({
-      description: "Optional URL-friendly slug. Generated from name if omitted.",
-      example: "example-org",
-    }),
-    email: createOrgSchemaBase.shape.email.openapi({
-      description: "Primary email for allowlist checks.",
-      example: "admin@example.com",
-    }),
-    returnFullApiKey: createOrgSchemaBase.shape.returnFullApiKey?.openapi({
-      description: "Whether to return the full API key. Defaults to false.",
-      example: false,
-    }),
-    custody: createOrgSchemaBase.shape.custody?.openapi({
-      description:
-        "Optional custody configuration to provision a signing wallet for the organization.",
-      example: {
-        provider: "privy",
-      },
-    }),
-  })
-  .openapi({ description: "Create organization request body." });
 
 export const updateOrganizationRequestSchema = updateOrgSchemaBase
   .extend({

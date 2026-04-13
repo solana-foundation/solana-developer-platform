@@ -175,24 +175,17 @@ export default async function IssuancePage({ searchParams }: IssuancePageProps) 
       (Array.isArray(resolvedSearchParams?.tab) && resolvedSearchParams.tab[0] === "playground")
         ? "playground"
         : "tokens";
-    const isPlaygroundTab = currentTab === "playground";
     const apiBaseUrl = resolvePlaygroundApiBaseUrl();
     const apiClient = await trace.step("create_sdp_api_client", () =>
       createSdpApiClient(trace.childContext("dashboard.issuance.api"))
     );
     const [templatesResult, tokensResult, apiKeysResult, signerWalletsResult] = await Promise.all([
-      isPlaygroundTab
-        ? trace.step("fetch_templates", () => fetchTemplates(apiClient.request))
-        : Promise.resolve({ ok: true as const, data: [] }),
+      trace.step("fetch_templates", () => fetchTemplates(apiClient.request)),
       trace.step("fetch_tokens", () => fetchTokens(apiClient.request)),
-      isPlaygroundTab
-        ? trace.step("fetch_active_api_keys", () => fetchActiveApiKeys(apiClient.request))
-        : Promise.resolve({ ok: true as const, data: [] }),
-      isPlaygroundTab
-        ? trace.step("fetch_signer_wallets", () =>
-            fetchPaymentsWallets(apiClient.request, { view: "summary" })
-          )
-        : Promise.resolve({ ok: true as const, data: [] }),
+      trace.step("fetch_active_api_keys", () => fetchActiveApiKeys(apiClient.request)),
+      trace.step("fetch_signer_wallets", () =>
+        fetchPaymentsWallets(apiClient.request, { view: "summary" })
+      ),
     ]);
 
     const tokens = tokensResult.data ?? [];
