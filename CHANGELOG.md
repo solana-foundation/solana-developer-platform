@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.16.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.15.2...v0.16.0) (2026-04-13)
+
+### Features
+
+* add issuance allowlist and denylist controls ([#179](https://github.com/solana-foundation/solana-developer-platform/pull/179)) ([8a8e16b](https://github.com/solana-foundation/solana-developer-platform/commit/8a8e16b2a539b7f22cb3ac6efac29057dc5a5f4b))
+
+### Bug Fixes
+
+* make homepage dashboard CTA sign in ([#181](https://github.com/solana-foundation/solana-developer-platform/pull/181)) ([8b61a97](https://github.com/solana-foundation/solana-developer-platform/commit/8b61a972e06696d0a204c22b79f9309f9f38dac0))
+* **sdp-web:** restore landing sign-in button ([#173](https://github.com/solana-foundation/solana-developer-platform/pull/173)) ([98f4b15](https://github.com/solana-foundation/solana-developer-platform/commit/98f4b151b8235c790f309d20a9becb20b2e76ad8))
+
 ## [0.15.2](https://github.com/solana-foundation/solana-developer-platform/compare/v0.15.1...v0.15.2) (2026-04-13)
 
 ### Bug Fixes
