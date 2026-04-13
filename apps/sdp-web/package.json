@@ -21,7 +21,6 @@
     "@solana/design-system": "1.0.0",
     "@vercel/toolbar": "0.2.2",
     "clsx": "2.1.1",
-    "framer-motion": "^11.18.2",
     "next": "16.2.3",
     "lucide-react": "0.575.0",
     "motion": "^12.38.0",

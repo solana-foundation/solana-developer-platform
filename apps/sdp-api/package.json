@@ -58,7 +58,7 @@
     "@types/react": "^19.2.10",
     "@types/pg": "^8.15.6",
     "@cloudflare/vitest-pool-workers": "^0.14.3",
-    "@cloudflare/workers-types": "^4.20260410.1",
+    "@cloudflare/workers-types": "^4.20260413.1",
     "@vitest/coverage-v8": "^4.1.2",
     "openapi3-ts": "4.5.0",
     "tsx": "4.21.0",
