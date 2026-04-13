@@ -42,6 +42,11 @@ interface TokenActionFormsProps {
   setAllowlistForm: Dispatch<SetStateAction<AllowlistFormState>>;
   allowlistEntries: TokenAllowlistEntry[];
   allowlistError: string | null;
+  controlListLabel: string | null;
+  controlListDescription: string | null;
+  controlListAddActionLabel: string;
+  controlListEmptyState: string;
+  freezeHint: string | null;
   signerWallets: PaymentsDashboardWallet[];
   walletOptions: PaymentsDashboardWallet[];
   signerUnavailableReason: string | null;
@@ -108,6 +113,11 @@ export function TokenActionForms(props: TokenActionFormsProps) {
         setAllowlistForm={props.setAllowlistForm}
         allowlistEntries={props.allowlistEntries}
         allowlistError={props.allowlistError}
+        controlListLabel={props.controlListLabel}
+        controlListDescription={props.controlListDescription}
+        controlListAddActionLabel={props.controlListAddActionLabel}
+        controlListEmptyState={props.controlListEmptyState}
+        freezeHint={props.freezeHint}
         signerWallets={props.signerWallets}
         walletOptions={props.walletOptions}
         signerUnavailableReason={props.signerUnavailableReason}

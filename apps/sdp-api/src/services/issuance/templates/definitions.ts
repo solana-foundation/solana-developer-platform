@@ -32,7 +32,7 @@ export const TEMPLATE_DEFINITIONS: Record<CanonicalTemplate, TokenTemplateDefini
   stablecoin: {
     id: "stablecoin",
     name: "Stablecoin",
-    description: "USD-backed stablecoins with compliance controls.",
+    description: "USD-backed stablecoins with configurable allowlist or denylist controls.",
     decimals: 6,
     maxDecimals: 18,
     requiresAllowlist: false,
@@ -68,11 +68,11 @@ export const TEMPLATE_DEFINITIONS: Record<CanonicalTemplate, TokenTemplateDefini
   "tokenized-security": {
     id: "tokenized-security",
     name: "Tokenized Security",
-    description: "Regulated assets with allowlist defaults and higher precision.",
+    description: "Regulated assets with configurable allowlist or denylist controls.",
     decimals: 8,
     maxDecimals: 18,
     requiresAllowlist: true,
-    allowlistOverridable: false,
+    allowlistOverridable: true,
     extensions: {
       required: ["permanentDelegate", "pausable", "scaledUiAmount"],
       defaultEnabled: ["defaultAccountState"],
@@ -177,6 +177,9 @@ export function resolveTemplateConfig(
   }
 
   const baseExtensions = cloneExtensions(definition.defaultExtensions);
+  if ("defaultAccountState" in baseExtensions) {
+    baseExtensions.defaultAccountState = requiresAllowlist ? "frozen" : "initialized";
+  }
   const allowedOverrides = new Set<TokenExtensionName>(definition.extensions.available);
   const incompatibleExtensions = new Set<TokenExtensionName>(definition.extensions.incompatible);
 

@@ -37,6 +37,11 @@ interface TokenActionAdminFormsProps {
   setAllowlistForm: Dispatch<SetStateAction<AllowlistFormState>>;
   allowlistEntries: TokenAllowlistEntry[];
   allowlistError: string | null;
+  controlListLabel: string | null;
+  controlListDescription: string | null;
+  controlListAddActionLabel: string;
+  controlListEmptyState: string;
+  freezeHint: string | null;
   signerWallets: PaymentsDashboardWallet[];
   walletOptions: PaymentsDashboardWallet[];
   signerUnavailableReason: string | null;
@@ -56,6 +61,7 @@ interface TokenActionAdminFormsProps {
   onRemoveAllowlist: (entryId: string) => void;
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: admin action forms intentionally centralize issuance control panels in one component.
 export function TokenActionAdminForms({
   activeAction,
   isPending,
@@ -71,6 +77,11 @@ export function TokenActionAdminForms({
   setAllowlistForm,
   allowlistEntries,
   allowlistError,
+  controlListLabel,
+  controlListDescription,
+  controlListAddActionLabel,
+  controlListEmptyState,
+  freezeHint,
   signerWallets,
   walletOptions,
   signerUnavailableReason,
@@ -392,6 +403,9 @@ export function TokenActionAdminForms({
               Enter the wallet address that holds this token. SDP derives the associated token
               account automatically for this mint.
             </p>
+            {freezeHint ? (
+              <p className="text-sm leading-6 text-[rgba(28,28,29,0.64)]">{freezeHint}</p>
+            ) : null}
             <ActionField
               label="Reason (freeze only)"
               value={freezeForm.reason}
@@ -419,10 +433,12 @@ export function TokenActionAdminForms({
         </TokenActionCard>
       ) : null}
 
-      {activeAction === "allowlist" ? (
+      {activeAction === "allowlist" && controlListLabel ? (
         <TokenActionCard
-          title="Allowlist"
-          description="Manage the approved destination addresses for this token."
+          title={controlListLabel}
+          description={
+            controlListDescription ?? "Manage the approved destination addresses for this token."
+          }
         >
           <form
             className="space-y-4"
@@ -463,14 +479,14 @@ export function TokenActionAdminForms({
               ].join(" ")}
             >
               <Button type="submit" disabled={isPending}>
-                Add allowlist entry
+                {controlListAddActionLabel}
               </Button>
             </div>
 
             {allowlistError ? (
               <TokenValidationMessage message={allowlistError} reserveSpace={false} />
             ) : allowlistEntries.length === 0 ? (
-              <p className="text-sm text-[rgba(28,28,29,0.68)]">No allowlist entries yet.</p>
+              <p className="text-sm text-[rgba(28,28,29,0.68)]">{controlListEmptyState}</p>
             ) : (
               <div className="space-y-2">
                 {allowlistEntries.map((entry) => (

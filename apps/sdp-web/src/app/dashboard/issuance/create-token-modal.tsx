@@ -17,10 +17,10 @@ import type { FlowState, TemplateSelection, TokenDraft } from "./create-token-mo
 import {
   INITIAL_CREATE_ISSUANCE_TOKEN_RESULT,
   createInitialDraft,
-  getAccessControlAvailability,
   getDefaultAccessControlMode,
   getTemplateDefaultDecimals,
   getTemplateTitle,
+  isAccessControlModeAvailable,
   isValidMetadataUri,
   isValidTokenDecimals,
   isValidTokenSymbol,
@@ -91,7 +91,7 @@ export function CreateIssuanceTokenModal({
       : null;
   const selectedAccessControlAvailable =
     template && flow.kind === "creation"
-      ? getAccessControlAvailability(template, draft.accessControlMode).available
+      ? isAccessControlModeAvailable(template, draft.accessControlMode)
       : false;
   const canContinueFromIdentity =
     identityValidation.uriValid &&

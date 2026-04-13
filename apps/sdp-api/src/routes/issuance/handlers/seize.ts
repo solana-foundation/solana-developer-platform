@@ -11,6 +11,7 @@ import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
 import type { Context } from "hono";
 import { seizeSchema } from "../schemas";
+import { assertDestinationAllowedByControlList } from "./access-control";
 import { resolveAuthoritySigner, resolvePermanentDelegateAuthority } from "./authority-resolution";
 import { buildIdempotencyMetadata } from "./idempotency";
 
@@ -48,12 +49,15 @@ export const prepareSeize = async (c: AppContext) => {
     throw new AppError("TOKEN_NOT_DEPLOYED", "Token has not been deployed to Solana");
   }
 
-  if (token.requiresAllowlist) {
-    const isAllowed = await tokenService.isAddressAllowed(tokenId, parsed.data.seize.destination);
-    if (!isAllowed) {
-      throw new AppError("NOT_ON_TOKEN_ALLOWLIST", "Destination address is not on the allowlist");
-    }
-  }
+  const isOnControlList = await tokenService.isAddressAllowed(
+    tokenId,
+    parsed.data.seize.destination
+  );
+  assertDestinationAllowedByControlList({
+    token,
+    destination: parsed.data.seize.destination,
+    isOnControlList,
+  });
 
   const permanentDelegateRaw =
     parsed.data.seize.delegateAuthority ??
@@ -165,12 +169,15 @@ export const executeSeize = async (c: AppContext) => {
     throw new AppError("TOKEN_NOT_DEPLOYED", "Token has not been deployed to Solana");
   }
 
-  if (token.requiresAllowlist) {
-    const isAllowed = await tokenService.isAddressAllowed(tokenId, parsed.data.seize.destination);
-    if (!isAllowed) {
-      throw new AppError("NOT_ON_TOKEN_ALLOWLIST", "Destination address is not on the allowlist");
-    }
-  }
+  const isOnControlList = await tokenService.isAddressAllowed(
+    tokenId,
+    parsed.data.seize.destination
+  );
+  assertDestinationAllowedByControlList({
+    token,
+    destination: parsed.data.seize.destination,
+    isOnControlList,
+  });
 
   const permanentDelegateRaw =
     parsed.data.seize.delegateAuthority ??

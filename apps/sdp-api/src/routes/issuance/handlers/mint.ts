@@ -13,6 +13,7 @@ import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
 import type { Context } from "hono";
 import { mintSchema } from "../schemas";
+import { assertDestinationAllowedByControlList } from "./access-control";
 import { buildIdempotencyMetadata } from "./idempotency";
 import {
   assertTokenAllowsSupplyOperation,
@@ -60,13 +61,15 @@ export const prepareMint = async (c: AppContext) => {
     token.decimals
   );
 
-  // Check allowlist if required
-  if (token.requiresAllowlist) {
-    const isAllowed = await tokenService.isAddressAllowed(tokenId, parsed.data.mint.destination);
-    if (!isAllowed) {
-      throw new AppError("NOT_ON_TOKEN_ALLOWLIST", "Destination address is not on the allowlist");
-    }
-  }
+  const isOnControlList = await tokenService.isAddressAllowed(
+    tokenId,
+    parsed.data.mint.destination
+  );
+  assertDestinationAllowedByControlList({
+    token,
+    destination: parsed.data.mint.destination,
+    isOnControlList,
+  });
 
   // Check max supply
   if (token.maxSupply) {
@@ -187,12 +190,15 @@ export const executeMint = async (c: AppContext) => {
     token.decimals
   );
 
-  if (token.requiresAllowlist) {
-    const isAllowed = await tokenService.isAddressAllowed(tokenId, parsed.data.mint.destination);
-    if (!isAllowed) {
-      throw new AppError("NOT_ON_TOKEN_ALLOWLIST", "Destination address is not on the allowlist");
-    }
-  }
+  const isOnControlList = await tokenService.isAddressAllowed(
+    tokenId,
+    parsed.data.mint.destination
+  );
+  assertDestinationAllowedByControlList({
+    token,
+    destination: parsed.data.mint.destination,
+    isOnControlList,
+  });
 
   if (token.maxSupply) {
     const currentSupply = parseDecimalAmount(token.totalSupply, token.decimals);

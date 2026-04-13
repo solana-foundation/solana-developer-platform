@@ -12,13 +12,25 @@ import type { FrozenAccountResponse } from "@sdp/types";
 import { resolveTokenAccount } from "@solana/mosaic-sdk";
 import type { Context } from "hono";
 import { freezeSchema, unfreezeSchema } from "../schemas";
+import { type TokenAccessControlMode, getTokenAccessControlMode } from "./access-control";
 import { resolveAuthoritySigner, resolveCurrentAuthorityForRole } from "./authority-resolution";
 import { buildIdempotencyMetadata } from "./idempotency";
 
 type AppContext = Context<{ Bindings: Env }>;
 type MosaicSdkRpc = Parameters<typeof resolveTokenAccount>[0];
 
-function toFreezeOperationAppError(error: unknown): AppError | null {
+function getMissingTokenAccountHint(accessControlMode: TokenAccessControlMode): string {
+  if (accessControlMode === "blocklist") {
+    return "Use a wallet that already holds this token, provide the matching token account address, or add the wallet to the token denylist first.";
+  }
+
+  return "Use a wallet that already holds this token, or provide the matching token account address.";
+}
+
+function toFreezeOperationAppError(
+  error: unknown,
+  accessControlMode: TokenAccessControlMode
+): AppError | null {
   if (!(error instanceof Error)) {
     return null;
   }
@@ -35,7 +47,7 @@ function toFreezeOperationAppError(error: unknown): AppError | null {
       "No token holding account was found for this mint. Provide a wallet address that holds this token or the matching token account.",
       {
         field: "accountAddress",
-        hint: "Use a wallet that already holds this token, or provide the matching token account address.",
+        hint: getMissingTokenAccountHint(accessControlMode),
       }
     );
   }
@@ -64,7 +76,8 @@ function readParsedTokenAccountOwner(data: unknown): string | null {
 async function resolveFreezeTarget(
   env: Env,
   requestedAddress: Address,
-  mintAddress: Address
+  mintAddress: Address,
+  accessControlMode: TokenAccessControlMode
 ): Promise<{ tokenAccount: Address }> {
   const rpc = createRpcForSdk<MosaicSdkRpc>(env);
   const resolved = await resolveTokenAccount(rpc, requestedAddress, mintAddress);
@@ -75,7 +88,7 @@ async function resolveFreezeTarget(
       "This wallet does not currently have a token account for this mint.",
       {
         field: "accountAddress",
-        hint: "Use a wallet that already holds this token, or provide the matching token account address.",
+        hint: getMissingTokenAccountHint(accessControlMode),
       }
     );
   }
@@ -97,7 +110,10 @@ async function resolveFreezeTarget(
       "Unable to determine the owner wallet for this token account.",
       {
         field: "accountAddress",
-        hint: "Provide a wallet that already holds this token, or verify that the token account address is correct for this mint.",
+        hint:
+          accessControlMode === "blocklist"
+            ? "Provide a wallet that already holds this token, verify that the token account address is correct for this mint, or use the denylist to block a wallet before it receives tokens."
+            : "Provide a wallet that already holds this token, or verify that the token account address is correct for this mint.",
       }
     );
   }
@@ -142,6 +158,7 @@ export const freezeAccount = async (c: AppContext) => {
   }
 
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
+  const accessControlMode = getTokenAccessControlMode(token);
   const currentAuthorityRaw = await resolveCurrentAuthorityForRole(
     c.env,
     tokenService,
@@ -161,7 +178,12 @@ export const freezeAccount = async (c: AppContext) => {
     currentAuthority: currentAuthorityRaw,
   });
   const requestedAddress = assertValidAddress(parsed.data.accountAddress, "accountAddress");
-  const { tokenAccount } = await resolveFreezeTarget(c.env, requestedAddress, mintAddress);
+  const { tokenAccount } = await resolveFreezeTarget(
+    c.env,
+    requestedAddress,
+    mintAddress,
+    accessControlMode
+  );
 
   const idempotencyMetadata = buildIdempotencyMetadata(c.req.header("Idempotency-Key"), {
     tokenId,
@@ -267,7 +289,7 @@ export const freezeAccount = async (c: AppContext) => {
       throw new AppError("ACCOUNT_FROZEN", "Account is already frozen");
     }
 
-    const mappedError = toFreezeOperationAppError(error);
+    const mappedError = toFreezeOperationAppError(error, accessControlMode);
     await tokenService.updateTransaction(tx.id, {
       status: "failed",
       error: mappedError?.message ?? (error instanceof Error ? error.message : "Unknown error"),
@@ -335,6 +357,7 @@ export const unfreezeAccount = async (c: AppContext) => {
   }
 
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
+  const accessControlMode = getTokenAccessControlMode(token);
   const currentAuthorityRaw = await resolveCurrentAuthorityForRole(
     c.env,
     tokenService,
@@ -347,7 +370,12 @@ export const unfreezeAccount = async (c: AppContext) => {
   }
 
   const requestedAddress = assertValidAddress(parsed.data.accountAddress, "accountAddress");
-  const { tokenAccount } = await resolveFreezeTarget(c.env, requestedAddress, mintAddress);
+  const { tokenAccount } = await resolveFreezeTarget(
+    c.env,
+    requestedAddress,
+    mintAddress,
+    accessControlMode
+  );
 
   const frozen = await tokenService.isAccountFrozen(tokenId, tokenAccount);
   if (!frozen) {
@@ -451,7 +479,7 @@ export const unfreezeAccount = async (c: AppContext) => {
       throw new AppError("ACCOUNT_NOT_FROZEN", "Account is not frozen");
     }
 
-    const mappedError = toFreezeOperationAppError(error);
+    const mappedError = toFreezeOperationAppError(error, accessControlMode);
     await tokenService.updateTransaction(tx.id, {
       status: "failed",
       error: mappedError?.message ?? (error instanceof Error ? error.message : "Unknown error"),
