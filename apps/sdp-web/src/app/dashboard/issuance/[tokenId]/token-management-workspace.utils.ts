@@ -1,8 +1,5 @@
 import type { PaymentsDashboardWallet, Token, TokenAllowlistEntry } from "@sdp/types";
-import {
-  type AccessControlMode,
-  getTokenAccessControlMode,
-} from "../access-control.utils";
+import { type AccessControlMode, getTokenAccessControlMode } from "../access-control.utils";
 import type {
   ActionExecutionInput,
   ActionExecutionResult,

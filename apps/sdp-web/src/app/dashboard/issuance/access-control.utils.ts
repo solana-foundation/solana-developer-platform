@@ -21,9 +21,7 @@ export function getDefaultAccessControlMode(template: TokenTemplate): AccessCont
   }
 }
 
-export function getTokenAccessControlMode(
-  token: AccessControlTokenShape
-): AccessControlMode {
+export function getTokenAccessControlMode(token: AccessControlTokenShape): AccessControlMode {
   if (token.requiresAllowlist) {
     return "allowlist";
   }

@@ -13,8 +13,8 @@ import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
 import type { Context } from "hono";
 import { mintSchema } from "../schemas";
-import { buildIdempotencyMetadata } from "./idempotency";
 import { assertDestinationAllowedByControlList } from "./access-control";
+import { buildIdempotencyMetadata } from "./idempotency";
 import {
   assertTokenAllowsSupplyOperation,
   parsePositiveTokenAmount,

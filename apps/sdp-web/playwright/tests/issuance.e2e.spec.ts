@@ -139,7 +139,9 @@ test.describe
 
       await page
         .locator("button", { hasText: "Denylist" })
-        .filter({ hasText: "Listed destinations are blocked before they can receive controlled actions." })
+        .filter({
+          hasText: "Listed destinations are blocked before they can receive controlled actions.",
+        })
         .click();
       await page.getByLabel("Main Signer").selectOption(fixtures.wallets.treasury.walletId);
       await page.getByRole("button", { name: "Create Stablecoin Draft" }).click();
@@ -294,7 +296,9 @@ test.describe
       await openTab(page, "Compliance");
 
       await expect(page.getByRole("button", { name: "Denylist", exact: true })).toBeVisible();
-      await expect(page.getByText("Manage the blocked destination addresses for this token.")).toBeVisible();
+      await expect(
+        page.getByText("Manage the blocked destination addresses for this token.")
+      ).toBeVisible();
       await expect(
         page.getByText(
           "Need to restrict a wallet before it has a token account? Add it to the denylist first."

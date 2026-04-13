@@ -12,7 +12,7 @@ import type { FrozenAccountResponse } from "@sdp/types";
 import { resolveTokenAccount } from "@solana/mosaic-sdk";
 import type { Context } from "hono";
 import { freezeSchema, unfreezeSchema } from "../schemas";
-import { getTokenAccessControlMode, type TokenAccessControlMode } from "./access-control";
+import { type TokenAccessControlMode, getTokenAccessControlMode } from "./access-control";
 import { resolveAuthoritySigner, resolveCurrentAuthorityForRole } from "./authority-resolution";
 import { buildIdempotencyMetadata } from "./idempotency";
 

@@ -61,6 +61,7 @@ interface TokenActionAdminFormsProps {
   onRemoveAllowlist: (entryId: string) => void;
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: admin action forms intentionally centralize issuance control panels in one component.
 export function TokenActionAdminForms({
   activeAction,
   isPending,

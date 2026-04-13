@@ -12,9 +12,7 @@ export function supportsBlocklistAccessControl(template: TokenTemplate): boolean
   return BLOCKLIST_TEMPLATES.has(template);
 }
 
-export function getTokenAccessControlMode(
-  token: TokenAccessControlShape
-): TokenAccessControlMode {
+export function getTokenAccessControlMode(token: TokenAccessControlShape): TokenAccessControlMode {
   if (token.requiresAllowlist) {
     return "allowlist";
   }
