@@ -1,6 +1,6 @@
 import type { Env } from "@sdp/api/types/env";
 
-declare module "cloudflare:test" {
+declare module "cloudflare:workers" {
   const env: Env;
   export { env };
 }

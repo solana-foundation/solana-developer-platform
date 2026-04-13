@@ -359,8 +359,10 @@ describe("para wallet provisioning", () => {
       orgSlug: "Acme Labs",
     });
 
+    const resultPromise = expect(provisionPromise).rejects.toThrowError(/Para API error: 500/i);
+
     await vi.runAllTimersAsync();
-    await expect(provisionPromise).rejects.toThrowError(/Para API error: 500/i);
+    await resultPromise;
     expect(fetchMock).toHaveBeenCalledTimes(9);
   });
 });
