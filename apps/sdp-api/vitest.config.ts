@@ -64,6 +64,7 @@ export default defineConfig({
     globals: true,
     setupFiles: ["src/test/setup.ts"],
     fileParallelism: false,
+    isolate: false,
     maxWorkers: 1,
     include: ["src/**/*.test.ts", "src/**/*.spec.ts", "src/__tests__/**/*.unit.ts"],
     exclude: ["node_modules", ".wrangler", "dist"],
