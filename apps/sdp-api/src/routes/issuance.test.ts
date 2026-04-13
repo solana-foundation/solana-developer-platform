@@ -1085,6 +1085,71 @@ describe("Issuance Routes", () => {
           removeFromListSpy.mockRestore();
         }
       });
+
+      it("restores the database entry if on-chain control-list removal fails", async () => {
+        await app.request(
+          `/v1/issuance/tokens/${tokenId}/allowlist`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+            },
+            body: JSON.stringify({ address: TEST_SOLANA_ADDRESSES.wallet1 }),
+          },
+          env
+        );
+
+        const db = getDb(env);
+        await db
+          .prepare("UPDATE issued_tokens SET abl_list_address = ? WHERE id = ?")
+          .bind(TEST_SOLANA_ADDRESSES.wallet3, tokenId)
+          .run();
+
+        const listRes = await app.request(
+          `/v1/issuance/tokens/${tokenId}/allowlist`,
+          {
+            headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
+          },
+          env
+        );
+        const listBody = await listRes.json();
+        const entryId = listBody.data[0].id;
+
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSigner")
+          .mockResolvedValueOnce({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
+        const removeFromListSpy = vi
+          .spyOn(MosaicService.prototype, "removeFromList")
+          .mockRejectedValueOnce(new Error("mosaic removal failed"));
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${tokenId}/allowlist/${entryId}`,
+            {
+              method: "DELETE",
+              headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
+            },
+            env
+          );
+
+          expect(res.status).toBe(500);
+
+          const restoredListRes = await app.request(
+            `/v1/issuance/tokens/${tokenId}/allowlist`,
+            {
+              headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
+            },
+            env
+          );
+          const restoredListBody = await restoredListRes.json();
+          expect(restoredListBody.data).toHaveLength(1);
+          expect(restoredListBody.data[0].id).toBe(entryId);
+        } finally {
+          createOrgSignerSpy.mockRestore();
+          removeFromListSpy.mockRestore();
+        }
+      });
     });
   });
 
@@ -1428,6 +1493,21 @@ describe("Issuance Routes", () => {
     let allowlistTokenId: string;
     const blocklistTokenId = "tok_blocklist_token";
 
+    const addBlocklistEntry = async (address: string) => {
+      await app.request(
+        `/v1/issuance/tokens/${blocklistTokenId}/allowlist`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({ address }),
+        },
+        env
+      );
+    };
+
     beforeEach(async () => {
       const db = getDb(env);
 
@@ -1532,18 +1612,7 @@ describe("Issuance Routes", () => {
     });
 
     it("rejects mint to denylisted address", async () => {
-      await app.request(
-        `/v1/issuance/tokens/${blocklistTokenId}/allowlist`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
-          },
-          body: JSON.stringify({ address: TEST_SOLANA_ADDRESSES.wallet2 }),
-        },
-        env
-      );
+      await addBlocklistEntry(TEST_SOLANA_ADDRESSES.wallet2);
 
       const res = await app.request(
         `/v1/issuance/tokens/${blocklistTokenId}/mint/prepare`,
@@ -1555,6 +1624,86 @@ describe("Issuance Routes", () => {
           },
           body: JSON.stringify({
             mint: {
+              destination: TEST_SOLANA_ADDRESSES.wallet2,
+              amount: "1",
+            },
+          }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(403);
+      const body = await res.json();
+      expect(body.error.code).toBe("ON_TOKEN_BLOCKLIST");
+    });
+
+    it("rejects execute mint to denylisted address", async () => {
+      await addBlocklistEntry(TEST_SOLANA_ADDRESSES.wallet2);
+
+      const res = await app.request(
+        `/v1/issuance/tokens/${blocklistTokenId}/mint`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            mint: {
+              destination: TEST_SOLANA_ADDRESSES.wallet2,
+              amount: "1",
+            },
+          }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(403);
+      const body = await res.json();
+      expect(body.error.code).toBe("ON_TOKEN_BLOCKLIST");
+    });
+
+    it("rejects prepare seize to denylisted destination", async () => {
+      await addBlocklistEntry(TEST_SOLANA_ADDRESSES.wallet2);
+
+      const res = await app.request(
+        `/v1/issuance/tokens/${blocklistTokenId}/seize/prepare`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            seize: {
+              source: TEST_SOLANA_ADDRESSES.wallet1,
+              destination: TEST_SOLANA_ADDRESSES.wallet2,
+              amount: "1",
+            },
+          }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(403);
+      const body = await res.json();
+      expect(body.error.code).toBe("ON_TOKEN_BLOCKLIST");
+    });
+
+    it("rejects execute seize to denylisted destination", async () => {
+      await addBlocklistEntry(TEST_SOLANA_ADDRESSES.wallet2);
+
+      const res = await app.request(
+        `/v1/issuance/tokens/${blocklistTokenId}/seize`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            seize: {
+              source: TEST_SOLANA_ADDRESSES.wallet1,
               destination: TEST_SOLANA_ADDRESSES.wallet2,
               amount: "1",
             },

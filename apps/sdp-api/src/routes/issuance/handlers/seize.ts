@@ -49,11 +49,14 @@ export const prepareSeize = async (c: AppContext) => {
     throw new AppError("TOKEN_NOT_DEPLOYED", "Token has not been deployed to Solana");
   }
 
-  const isListed = await tokenService.isAddressAllowed(tokenId, parsed.data.seize.destination);
+  const isOnControlList = await tokenService.isAddressAllowed(
+    tokenId,
+    parsed.data.seize.destination
+  );
   assertDestinationAllowedByControlList({
     token,
     destination: parsed.data.seize.destination,
-    isListed,
+    isOnControlList,
   });
 
   const permanentDelegateRaw =
@@ -166,11 +169,14 @@ export const executeSeize = async (c: AppContext) => {
     throw new AppError("TOKEN_NOT_DEPLOYED", "Token has not been deployed to Solana");
   }
 
-  const isListed = await tokenService.isAddressAllowed(tokenId, parsed.data.seize.destination);
+  const isOnControlList = await tokenService.isAddressAllowed(
+    tokenId,
+    parsed.data.seize.destination
+  );
   assertDestinationAllowedByControlList({
     token,
     destination: parsed.data.seize.destination,
-    isListed,
+    isOnControlList,
   });
 
   const permanentDelegateRaw =

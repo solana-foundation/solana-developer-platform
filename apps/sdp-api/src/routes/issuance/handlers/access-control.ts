@@ -39,15 +39,15 @@ export function shouldEnableOnChainAcl(
 export function assertDestinationAllowedByControlList(args: {
   token: TokenAccessControlShape;
   destination: string;
-  isListed: boolean;
+  isOnControlList: boolean;
 }): void {
   const mode = getTokenAccessControlMode(args.token);
 
-  if (mode === "allowlist" && !args.isListed) {
+  if (mode === "allowlist" && !args.isOnControlList) {
     throw new AppError("NOT_ON_TOKEN_ALLOWLIST", "Destination address is not on the allowlist");
   }
 
-  if (mode === "blocklist" && args.isListed) {
+  if (mode === "blocklist" && args.isOnControlList) {
     throw new AppError("ON_TOKEN_BLOCKLIST", "Destination address is on the denylist");
   }
 }

@@ -138,23 +138,33 @@ export const removeAllowlistEntry = async (c: AppContext) => {
     throw notFound("Allowlist entry");
   }
 
-  if (token.ablListAddress) {
-    const signer = await createOrgSigner(
-      c.env,
-      auth.organizationId,
-      auth.projectId,
-      token.signingWalletId ?? undefined
-    );
-    const mosaic = createMosaicService(c.env, signer);
-    await mosaic.removeFromList({
-      list: assertValidAddress(token.ablListAddress, "ablListAddress"),
-      authority: signer.address,
-      feePayer: signer.address,
-      wallet: assertValidAddress(entry.address, "address"),
-    });
-  }
-
   await tokenService.revokeAllowlistEntry(entryId);
+
+  try {
+    if (token.ablListAddress) {
+      const signer = await createOrgSigner(
+        c.env,
+        auth.organizationId,
+        auth.projectId,
+        token.signingWalletId ?? undefined
+      );
+      const mosaic = createMosaicService(c.env, signer);
+      await mosaic.removeFromList({
+        list: assertValidAddress(token.ablListAddress, "ablListAddress"),
+        authority: signer.address,
+        feePayer: signer.address,
+        wallet: assertValidAddress(entry.address, "address"),
+      });
+    }
+  } catch (error) {
+    await tokenService.addAllowlistEntry({
+      tokenId,
+      address: entry.address,
+      addedBy: entry.addedBy,
+      label: entry.label ?? undefined,
+    });
+    throw error;
+  }
 
   // Audit log
   const auditService = new AuditService(getDb(c.env));

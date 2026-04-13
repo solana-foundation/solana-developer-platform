@@ -61,11 +61,14 @@ export const prepareMint = async (c: AppContext) => {
     token.decimals
   );
 
-  const isListed = await tokenService.isAddressAllowed(tokenId, parsed.data.mint.destination);
+  const isOnControlList = await tokenService.isAddressAllowed(
+    tokenId,
+    parsed.data.mint.destination
+  );
   assertDestinationAllowedByControlList({
     token,
     destination: parsed.data.mint.destination,
-    isListed,
+    isOnControlList,
   });
 
   // Check max supply
@@ -187,11 +190,14 @@ export const executeMint = async (c: AppContext) => {
     token.decimals
   );
 
-  const isListed = await tokenService.isAddressAllowed(tokenId, parsed.data.mint.destination);
+  const isOnControlList = await tokenService.isAddressAllowed(
+    tokenId,
+    parsed.data.mint.destination
+  );
   assertDestinationAllowedByControlList({
     token,
     destination: parsed.data.mint.destination,
-    isListed,
+    isOnControlList,
   });
 
   if (token.maxSupply) {
