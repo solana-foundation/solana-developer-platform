@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.16.1](https://github.com/solana-foundation/solana-developer-platform/compare/v0.16.0...v0.16.1) (2026-04-13)
+
+### Other Changes
+
+* default new organizations to enterprise tier ([#182](https://github.com/solana-foundation/solana-developer-platform/pull/182)) ([41662a3](https://github.com/solana-foundation/solana-developer-platform/commit/41662a34a8c7d707e6d42cd37ee749b301a6b14d))
+
 ## [0.16.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.15.2...v0.16.0) (2026-04-13)
 
 ### Features
