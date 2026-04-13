@@ -34,6 +34,7 @@ import {
   getDevnetExplorerUrl,
   runComplianceCheck,
 } from "./payments-workspace.data";
+import { isSolBalance } from "./payments-overview.utils";
 import type { ComplianceSnapshot } from "./payments-workspace.types";
 import { ProviderRiskTable } from "./provider-risk-table";
 
@@ -46,7 +47,7 @@ interface PaymentsActionPageProps {
   enabledRampProviders: RampProviderId[];
 }
 
-const REQUIRED_ACTION_ASSETS = ["SOL", "USDC"] as const;
+const REQUIRED_ACTION_ASSETS = ["USDC"] as const;
 const MOONPAY_ONRAMP_MIN_USD = 20;
 const PAYMENTS_ACTION_WALLETS_KEY = "payments-action-wallets";
 const PAYMENTS_ACTION_WALLET_BALANCES_KEY = "payments-action-wallet-balances";
@@ -156,16 +157,18 @@ function parseOptionalNumber(value: string): number | null {
 }
 
 function resolvePrimaryWalletBalance(wallet: PaymentsDashboardWallet | null) {
-  if (!wallet?.balances || wallet.balances.length === 0) {
+  const supportedBalances = wallet?.balances?.filter((balance) => !isSolBalance(balance)) ?? [];
+
+  if (supportedBalances.length === 0) {
     return null;
   }
 
   return (
-    wallet.balances.find((balance) => {
+    supportedBalances.find((balance) => {
       const numericValue = Number(balance.uiAmount);
       return Number.isFinite(numericValue) && numericValue > 0;
     }) ??
-    wallet.balances[0] ??
+    supportedBalances[0] ??
     null
   );
 }
@@ -228,19 +231,17 @@ function getWalletActionLabel(
 
 function resolveWalletActionAssets(
   wallet: PaymentsDashboardWallet | null,
-  issuedTokenSymbolsByMint: Record<string, string>,
-  options?: {
-    includeSol?: boolean;
-  }
+  issuedTokenSymbolsByMint: Record<string, string>
 ): string[] {
-  const includeSol = options?.includeSol ?? true;
-  const assetSet = new Set<string>(
-    REQUIRED_ACTION_ASSETS.filter((asset) => includeSol || asset !== "SOL")
-  );
+  const assetSet = new Set<string>(REQUIRED_ACTION_ASSETS);
 
   for (const balance of wallet?.balances ?? []) {
+    if (isSolBalance(balance)) {
+      continue;
+    }
+
     const token = resolveBalanceDisplayToken(balance, issuedTokenSymbolsByMint);
-    if (token && (includeSol || token !== "SOL")) {
+    if (token) {
       assetSet.add(token);
     }
   }
@@ -1044,11 +1045,8 @@ export function PaymentsActionPage({
   const isOnrampBranch = branch === "onramp";
   const isOfframpBranch = branch === "offramp";
   const assetOptions = useMemo(
-    () =>
-      resolveWalletActionAssets(selectedWalletWithBalances, issuedTokenSymbolsByMint, {
-        includeSol: !(isOnrampBranch || isOfframpBranch),
-      }),
-    [isOfframpBranch, isOnrampBranch, issuedTokenSymbolsByMint, selectedWalletWithBalances]
+    () => resolveWalletActionAssets(selectedWalletWithBalances, issuedTokenSymbolsByMint),
+    [issuedTokenSymbolsByMint, selectedWalletWithBalances]
   );
   const selectedAssetBalance = useMemo(
     () =>
