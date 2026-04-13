@@ -62,9 +62,7 @@ export function resolveUsdBalanceValue(
   return resolveFallbackUsdValue(balance);
 }
 
-export function isSolBalance(
-  balance: Pick<CustodyWalletTokenBalance, "token" | "mint">
-): boolean {
+export function isSolBalance(balance: Pick<CustodyWalletTokenBalance, "token" | "mint">): boolean {
   return balance.token.trim().toUpperCase() === "SOL" || balance.mint.trim() === SOL_MINT;
 }
 

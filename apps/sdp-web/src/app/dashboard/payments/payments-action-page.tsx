@@ -23,6 +23,7 @@ import QRCode from "qrcode";
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
+import { isSolBalance } from "./payments-overview.utils";
 import {
   type PaymentRampExecution,
   type PaymentWalletBalance,
@@ -34,7 +35,6 @@ import {
   getDevnetExplorerUrl,
   runComplianceCheck,
 } from "./payments-workspace.data";
-import { isSolBalance } from "./payments-overview.utils";
 import type { ComplianceSnapshot } from "./payments-workspace.types";
 import { ProviderRiskTable } from "./provider-risk-table";
 
