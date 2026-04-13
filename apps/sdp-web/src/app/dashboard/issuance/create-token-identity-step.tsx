@@ -114,6 +114,11 @@ export function CreateTokenIdentityStep({
               aria-invalid={draft.decimals.length > 0 && !validation.decimalsValid}
               required
             />
+            {draft.decimals.length > 0 && !validation.decimalsValid ? (
+              <p className="text-sm text-[#c71f37]" role="alert">
+                Enter a whole number between 0 and 18.
+              </p>
+            ) : null}
             <p className="text-base text-[rgba(28,28,29,0.62)]">
               {getDecimalsHelperText(template)}
             </p>
