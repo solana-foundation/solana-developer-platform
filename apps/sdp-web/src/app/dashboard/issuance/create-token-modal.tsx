@@ -21,8 +21,8 @@ import {
   getDefaultAccessControlMode,
   getTemplateDefaultDecimals,
   getTemplateTitle,
-  isValidTokenDecimals,
   isValidMetadataUri,
+  isValidTokenDecimals,
   isValidTokenSymbol,
 } from "./create-token-modal.utils";
 import { TemplateSelectionStep } from "./create-token-template-selection-step";

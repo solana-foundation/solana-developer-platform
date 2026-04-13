@@ -154,9 +154,7 @@ export function isValidMetadataUri(value: string): boolean {
 }
 
 export function normalizeSymbol(symbol: string): string {
-  return symbol
-    .replace(/[^A-Za-z0-9.]/g, "")
-    .slice(0, 10);
+  return symbol.replace(/[^A-Za-z0-9.]/g, "").slice(0, 10);
 }
 
 export function isValidTokenSymbol(symbol: string): boolean {
