@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.15.2](https://github.com/solana-foundation/solana-developer-platform/compare/v0.15.1...v0.15.2) (2026-04-13)
+
+### Bug Fixes
+
+* support configurable issuance token setup ([#177](https://github.com/solana-foundation/solana-developer-platform/pull/177)) ([21cc4ad](https://github.com/solana-foundation/solana-developer-platform/commit/21cc4ad3371f8478385a3b1b8eb240882cacb01a))
+
+## [0.15.1](https://github.com/solana-foundation/solana-developer-platform/compare/v0.15.0...v0.15.1) (2026-04-13)
+
+### Bug Fixes
+
+* remove SOL balances from payments UI (PRO-1126) ([#175](https://github.com/solana-foundation/solana-developer-platform/pull/175)) ([93db592](https://github.com/solana-foundation/solana-developer-platform/commit/93db59259b7b909bb54c2ccf3cb314853445ac39))
+
 ## [0.15.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.14.7...v0.15.0) (2026-04-10)
 
 ### Features

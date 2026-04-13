@@ -5,12 +5,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { motion } from "motion/react";
 import type { IdentityValidation, TemplateSelection, TokenDraft } from "./create-token-modal.types";
-import { normalizeSymbol } from "./create-token-modal.utils";
+import { getDecimalsHelperText, normalizeSymbol } from "./create-token-modal.utils";
 
 interface CreateTokenIdentityStepProps {
   template: TemplateSelection;
   draft: TokenDraft;
-  decimalOptions: ReadonlyArray<TokenDraft["decimals"]>;
   validation: IdentityValidation;
   canContinue: boolean;
   onDraftChange: (patch: Partial<TokenDraft>) => void;
@@ -21,7 +20,6 @@ interface CreateTokenIdentityStepProps {
 export function CreateTokenIdentityStep({
   template,
   draft,
-  decimalOptions,
   validation,
   canContinue,
   onDraftChange,
@@ -96,45 +94,33 @@ export function CreateTokenIdentityStep({
           </div>
 
           <div className="grid gap-2">
-            <Label>
+            <Label htmlFor="issuance-token-decimals">
               Decimals{" "}
               <span aria-hidden className="text-[#c71f37]">
                 *
               </span>
               <span className="sr-only"> (required)</span>
             </Label>
-            <div
-              aria-required="true"
-              className={[
-                "grid gap-2",
-                decimalOptions.length > 1 ? "grid-cols-2" : "grid-cols-1",
-              ].join(" ")}
-            >
-              {decimalOptions.map((value) => {
-                const isSelected = draft.decimals === value;
-                return (
-                  <button
-                    key={value}
-                    type="button"
-                    onClick={() => onDraftChange({ decimals: value })}
-                    className={[
-                      "h-10 rounded-lg border px-3 text-sm font-medium transition-colors",
-                      isSelected
-                        ? "border-[#1c1c1d] bg-[rgba(28,28,29,0.05)] text-[#1c1c1d]"
-                        : "border-[rgba(28,28,29,0.16)] bg-white text-[rgba(28,28,29,0.72)] hover:bg-[rgba(28,28,29,0.03)]",
-                    ].join(" ")}
-                  >
-                    {value}
-                  </button>
-                );
-              })}
-            </div>
+            <Input
+              id="issuance-token-decimals"
+              type="number"
+              min="0"
+              max="18"
+              step="1"
+              inputMode="numeric"
+              value={draft.decimals}
+              onChange={(event) => onDraftChange({ decimals: event.currentTarget.value })}
+              placeholder="e.g., 6"
+              aria-invalid={draft.decimals.length > 0 && !validation.decimalsValid}
+              required
+            />
+            {draft.decimals.length > 0 && !validation.decimalsValid ? (
+              <p className="text-sm text-[#c71f37]" role="alert">
+                Enter a whole number between 0 and 18.
+              </p>
+            ) : null}
             <p className="text-base text-[rgba(28,28,29,0.62)]">
-              {template === "stablecoin"
-                ? "Stablecoin defaults to 6 decimals."
-                : template === "custom"
-                  ? "Custom tokens default to 9 decimals."
-                  : "Tokenized Security uses 8 decimals."}
+              {getDecimalsHelperText(template)}
             </p>
           </div>
         </div>
