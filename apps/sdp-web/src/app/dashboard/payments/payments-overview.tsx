@@ -22,6 +22,7 @@ import {
   formatDirection,
   formatDisplayAmount,
   formatTimestamp,
+  normalizeAggregateBalances,
   resolveAggregateBalanceDisplayToken,
   resolveCounterparty,
   resolveTotalBalance,
@@ -174,7 +175,10 @@ export function PaymentsOverview({
       ? transfersError
       : null;
   const isRefreshing = aggregateRefreshing || transfersRefreshing;
-  const aggregateBalances = useMemo(() => liveAggregate?.balances ?? [], [liveAggregate]);
+  const aggregateBalances = useMemo(
+    () => normalizeAggregateBalances(liveAggregate?.balances ?? []),
+    [liveAggregate]
+  );
   const topAggregateBalances = useMemo(
     () => selectTopAggregateBalanceRows(aggregateBalances, issuedTokenSymbolsByMint),
     [aggregateBalances, issuedTokenSymbolsByMint]
