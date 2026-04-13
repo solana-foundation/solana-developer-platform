@@ -970,7 +970,7 @@ export const tokenTemplateInfoSchema = z
     }),
     maxDecimals: z.number().int().openapi({
       description: "Maximum allowed decimals for this template.",
-      example: 9,
+      example: 18,
     }),
     requiresAllowlist: z.boolean().openapi({
       description: "Whether allowlists are required for this template by default.",

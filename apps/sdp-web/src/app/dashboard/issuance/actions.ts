@@ -2,6 +2,7 @@
 
 import { sdpApiRequest } from "@/lib/sdp-api";
 import { revalidatePath } from "next/cache";
+import { isValidTokenDecimals } from "./create-token-modal.utils";
 import { issuanceTemplateCatalog } from "./template-catalog";
 
 type ActionState = "idle" | "success" | "error";
@@ -50,9 +51,7 @@ export async function createIssuanceTokenAction(
 ): Promise<CreateIssuanceTokenResult> {
   const uri = String(formData.get("uri") ?? "").trim();
   const name = String(formData.get("name") ?? "").trim();
-  const symbol = String(formData.get("symbol") ?? "")
-    .trim()
-    .toUpperCase();
+  const symbol = String(formData.get("symbol") ?? "").trim();
   const template = String(formData.get("template") ?? "custom").trim();
   const description = String(formData.get("description") ?? "").trim();
   const signingWalletId = String(formData.get("signingWalletId") ?? "").trim();
@@ -99,10 +98,10 @@ export async function createIssuanceTokenAction(
     };
   }
 
-  if (!symbol || !/^[A-Z0-9.]{1,10}$/.test(symbol)) {
+  if (!symbol || !/^[A-Za-z0-9.]{1,10}$/.test(symbol)) {
     return {
       state: "error",
-      message: "Symbol must be 1-10 characters, uppercase letters, numbers, or periods.",
+      message: "Symbol must be 1-10 characters using letters, numbers, or periods.",
       tokenId: null,
       tokenName: null,
     };
@@ -148,8 +147,7 @@ export async function createIssuanceTokenAction(
   }
 
   if (decimalsRaw) {
-    const parsed = Number.parseInt(decimalsRaw, 10);
-    if (!Number.isFinite(parsed) || parsed < 0 || parsed > 18) {
+    if (!isValidTokenDecimals(decimalsRaw)) {
       return {
         state: "error",
         message: "Decimals must be between 0 and 18.",
@@ -157,6 +155,8 @@ export async function createIssuanceTokenAction(
         tokenName: null,
       };
     }
+
+    const parsed = Number.parseInt(decimalsRaw, 10);
     payload.decimals = parsed;
   }
 
