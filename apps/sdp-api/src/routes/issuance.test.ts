@@ -1573,6 +1573,30 @@ describe("Issuance Routes", () => {
       expect(body.error.code).toBe("NOT_ON_TOKEN_ALLOWLIST");
     });
 
+    it("rejects execute mint to non-allowlisted address", async () => {
+      const res = await app.request(
+        `/v1/issuance/tokens/${allowlistTokenId}/mint`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            mint: {
+              destination: TEST_SOLANA_ADDRESSES.wallet2,
+              amount: "1",
+            },
+          }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(403);
+      const body = await res.json();
+      expect(body.error.code).toBe("NOT_ON_TOKEN_ALLOWLIST");
+    });
+
     // Skip in mock mode - Mosaic SDK requires RPC to fetch mint details
     it.skipIf(isMockMode)("allows mint to allowlisted address", async () => {
       // Add to allowlist first
@@ -1715,6 +1739,56 @@ describe("Issuance Routes", () => {
       expect(res.status).toBe(403);
       const body = await res.json();
       expect(body.error.code).toBe("ON_TOKEN_BLOCKLIST");
+    });
+
+    it("rejects prepare seize to non-allowlisted destination", async () => {
+      const res = await app.request(
+        `/v1/issuance/tokens/${allowlistTokenId}/seize/prepare`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            seize: {
+              source: TEST_SOLANA_ADDRESSES.wallet1,
+              destination: TEST_SOLANA_ADDRESSES.wallet2,
+              amount: "1",
+            },
+          }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(403);
+      const body = await res.json();
+      expect(body.error.code).toBe("NOT_ON_TOKEN_ALLOWLIST");
+    });
+
+    it("rejects execute seize to non-allowlisted destination", async () => {
+      const res = await app.request(
+        `/v1/issuance/tokens/${allowlistTokenId}/seize`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            seize: {
+              source: TEST_SOLANA_ADDRESSES.wallet1,
+              destination: TEST_SOLANA_ADDRESSES.wallet2,
+              amount: "1",
+            },
+          }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(403);
+      const body = await res.json();
+      expect(body.error.code).toBe("NOT_ON_TOKEN_ALLOWLIST");
     });
   });
 

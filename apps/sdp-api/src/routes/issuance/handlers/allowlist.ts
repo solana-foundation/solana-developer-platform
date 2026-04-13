@@ -157,12 +157,25 @@ export const removeAllowlistEntry = async (c: AppContext) => {
       });
     }
   } catch (error) {
-    await tokenService.addAllowlistEntry({
-      tokenId,
-      address: entry.address,
-      addedBy: entry.addedBy,
-      label: entry.label ?? undefined,
-    });
+    try {
+      await tokenService.addAllowlistEntry({
+        tokenId,
+        address: entry.address,
+        addedBy: entry.addedBy,
+        label: entry.label ?? undefined,
+      });
+    } catch (restoreError) {
+      throw new AppError(
+        "INTERNAL_ERROR",
+        "Failed to restore control-list entry after sync error",
+        {
+          originalError: error instanceof Error ? error.message : "Unknown removal error",
+          restoreError:
+            restoreError instanceof Error ? restoreError.message : "Unknown restore error",
+        }
+      );
+    }
+
     throw error;
   }
 
