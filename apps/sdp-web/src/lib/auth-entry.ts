@@ -10,6 +10,7 @@ export async function getAuthEntryPath(): Promise<string> {
 
 export async function shouldLoadClerkForPath(pathname: string): Promise<boolean> {
   return (
+    pathname === "/" ||
     pathname === "/dashboard" ||
     pathname.startsWith("/dashboard/") ||
     pathname === "/allowlist" ||
