@@ -12,7 +12,7 @@ export function AuthTermsNotice() {
         rel="noreferrer"
         className="font-medium text-[#1c1c1d] underline underline-offset-2 transition-colors hover:text-black"
       >
-        Solana Terms of Service
+        Solana Foundation Term Of Services
       </Link>
       .
     </p>
