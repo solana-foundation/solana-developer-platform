@@ -208,6 +208,28 @@ describe("Issuance Routes", () => {
       expect(body.data.token.decimals).toBe(9);
     });
 
+    it("creates token with mixed-case symbol", async () => {
+      const res = await app.request(
+        "/v1/issuance/tokens",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            name: "Mixed Case Symbol Token",
+            symbol: "UsdX9",
+          }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(201);
+      const body = await res.json();
+      expect(body.data.token.symbol).toBe("UsdX9");
+    });
+
     it("returns 400 for invalid symbol", async () => {
       const res = await app.request(
         "/v1/issuance/tokens",
@@ -219,7 +241,7 @@ describe("Issuance Routes", () => {
           },
           body: JSON.stringify({
             name: "Invalid Symbol Token",
-            symbol: "invalid_symbol", // lowercase and underscore
+            symbol: "invalid_symbol",
           }),
         },
         env
@@ -1409,10 +1431,12 @@ describe("Issuance Routes", () => {
         const stablecoin = body.data.templates.find((t: { id: string }) => t.id === "stablecoin");
         expect(stablecoin).toBeDefined();
         expect(stablecoin.name).toBe("Stablecoin");
+        expect(stablecoin.maxDecimals).toBe(18);
         const tokenized = body.data.templates.find(
           (t: { id: string }) => t.id === "tokenized-security"
         );
         expect(tokenized).toBeDefined();
+        expect(tokenized.maxDecimals).toBe(18);
         const custom = body.data.templates.find((t: { id: string }) => t.id === "custom");
         expect(custom).toBeDefined();
         const arcade = body.data.templates.find((t: { id: string }) => t.id === "arcade");
@@ -1434,6 +1458,23 @@ describe("Issuance Routes", () => {
         const body = await res.json();
         expect(body.data.template.id).toBe("stablecoin");
         expect(body.data.template.name).toBe("Stablecoin");
+        expect(body.data.template.maxDecimals).toBe(18);
+      });
+
+      it("returns tokenized security template", async () => {
+        const res = await app.request(
+          "/v1/issuance/templates/tokenized-security",
+          {
+            headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
+          },
+          env
+        );
+
+        expect(res.status).toBe(200);
+        const body = await res.json();
+        expect(body.data.template.id).toBe("tokenized-security");
+        expect(body.data.template.name).toBe("Tokenized Security");
+        expect(body.data.template.maxDecimals).toBe(18);
       });
 
       it("does not return arcade template", async () => {
@@ -1539,6 +1580,58 @@ describe("Issuance Routes", () => {
       expect(res.status).toBe(201);
       const body = await res.json();
       expect(body.data.token.decimals).toBe(6);
+    });
+
+    it("creates stablecoin with mixed-case symbol and decimal override", async () => {
+      const res = await app.request(
+        "/v1/issuance/tokens",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            name: "Custom Stablecoin Decimals",
+            symbol: "Usd7",
+            template: "stablecoin",
+            decimals: 7,
+          }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(201);
+      const body = await res.json();
+      expect(body.data.token.template).toBe("stablecoin");
+      expect(body.data.token.symbol).toBe("Usd7");
+      expect(body.data.token.decimals).toBe(7);
+    });
+
+    it("creates tokenized security with decimal override", async () => {
+      const res = await app.request(
+        "/v1/issuance/tokens",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            name: "Custom Security Decimals",
+            symbol: "Sec12",
+            template: "tokenized-security",
+            decimals: 12,
+          }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(201);
+      const body = await res.json();
+      expect(body.data.token.template).toBe("tokenized-security");
+      expect(body.data.token.decimals).toBe(12);
+      expect(body.data.token.requiresAllowlist).toBe(true);
     });
 
     it("creates token with extension override", async () => {

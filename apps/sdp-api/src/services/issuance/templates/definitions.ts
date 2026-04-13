@@ -34,7 +34,7 @@ export const TEMPLATE_DEFINITIONS: Record<CanonicalTemplate, TokenTemplateDefini
     name: "Stablecoin",
     description: "USD-backed stablecoins with compliance controls.",
     decimals: 6,
-    maxDecimals: 9,
+    maxDecimals: 18,
     requiresAllowlist: false,
     allowlistOverridable: true,
     extensions: {
@@ -70,7 +70,7 @@ export const TEMPLATE_DEFINITIONS: Record<CanonicalTemplate, TokenTemplateDefini
     name: "Tokenized Security",
     description: "Regulated assets with allowlist defaults and higher precision.",
     decimals: 8,
-    maxDecimals: 8,
+    maxDecimals: 18,
     requiresAllowlist: true,
     allowlistOverridable: false,
     extensions: {

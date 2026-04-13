@@ -74,7 +74,7 @@ export function TokenManagementHeader({
                   <Copy className="h-4 w-4" />
                 </button>
               ) : null}
-              <span className="rounded-full border border-[rgba(28,28,29,0.1)] bg-white px-3 py-1 text-[13px] font-medium text-[rgba(28,28,29,0.62)] uppercase">
+              <span className="rounded-full border border-[rgba(28,28,29,0.1)] bg-white px-3 py-1 text-[13px] font-medium text-[rgba(28,28,29,0.62)]">
                 {tokenSymbol}
               </span>
             </div>

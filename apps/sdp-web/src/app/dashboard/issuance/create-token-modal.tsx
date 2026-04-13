@@ -19,10 +19,11 @@ import {
   createInitialDraft,
   getAccessControlAvailability,
   getDefaultAccessControlMode,
-  getTemplateDecimalOptions,
   getTemplateDefaultDecimals,
   getTemplateTitle,
+  isValidTokenDecimals,
   isValidMetadataUri,
+  isValidTokenSymbol,
 } from "./create-token-modal.utils";
 import { TemplateSelectionStep } from "./create-token-template-selection-step";
 
@@ -57,16 +58,14 @@ export function CreateIssuanceTokenModal({
   const isOpen = open ?? isOpenInternal;
 
   const template = flow.kind === "creation" ? flow.template : draft.template;
-  const decimalOptions = template ? getTemplateDecimalOptions(template) : [];
   const uri = draft.uri.trim();
   const name = draft.name.trim();
   const symbol = draft.symbol.trim();
   const identityValidation = {
     uriValid: isValidMetadataUri(uri),
     nameValid: name.length > 0 && name.length <= 100,
-    symbolValid: /^[A-Z0-9.]{1,10}$/.test(symbol),
-    decimalsValid:
-      template !== null && getTemplateDecimalOptions(template).includes(draft.decimals),
+    symbolValid: isValidTokenSymbol(symbol),
+    decimalsValid: template !== null && isValidTokenDecimals(draft.decimals),
   };
   const isIdentityStep = flow.kind === "creation" && flow.step === "identity";
   const isFeaturesStep = flow.kind === "creation" && flow.step === "features";
@@ -247,7 +246,6 @@ export function CreateIssuanceTokenModal({
                   <CreateTokenIdentityStep
                     template={template}
                     draft={draft}
-                    decimalOptions={decimalOptions}
                     validation={{
                       ...identityValidation,
                       isValid: canContinueFromIdentity,

@@ -99,20 +99,6 @@ export function getTemplateDefaultDecimals(template: TemplateSelection): TokenDr
   }
 }
 
-export function getTemplateDecimalOptions(
-  template: TemplateSelection
-): ReadonlyArray<TokenDraft["decimals"]> {
-  switch (template) {
-    case "stablecoin":
-    case "custom":
-      return ["6", "9"];
-    case "tokenized-security":
-      return ["8"];
-    default:
-      return ["6", "9"];
-  }
-}
-
 export function getDefaultAccessControlMode(template: TemplateSelection): AccessControlMode {
   return template === "tokenized-security" ? "allowlist" : "blocklist";
 }
@@ -169,7 +155,32 @@ export function isValidMetadataUri(value: string): boolean {
 
 export function normalizeSymbol(symbol: string): string {
   return symbol
-    .toUpperCase()
-    .replace(/[^A-Z0-9.]/g, "")
+    .replace(/[^A-Za-z0-9.]/g, "")
     .slice(0, 10);
+}
+
+export function isValidTokenSymbol(symbol: string): boolean {
+  return /^[A-Za-z0-9.]{1,10}$/.test(symbol);
+}
+
+export function isValidTokenDecimals(value: string): boolean {
+  if (!/^\d+$/.test(value)) {
+    return false;
+  }
+
+  const parsed = Number.parseInt(value, 10);
+  return Number.isInteger(parsed) && parsed >= 0 && parsed <= 18;
+}
+
+export function getDecimalsHelperText(template: TemplateSelection): string {
+  switch (template) {
+    case "stablecoin":
+      return "Stablecoin defaults to 6 decimals, but you can choose any value from 0 to 18.";
+    case "custom":
+      return "Custom tokens default to 9 decimals. Choose any value from 0 to 18.";
+    case "tokenized-security":
+      return "Tokenized Security defaults to 8 decimals, but you can choose any value from 0 to 18.";
+    default:
+      return "Choose any value from 0 to 18.";
+  }
 }

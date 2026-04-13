@@ -968,6 +968,62 @@ export function getForceBurnValidationReason(args: {
 }
 
 export function getExtensionRows(token: Token): ExtensionRow[] {
+  const configuredExtensionRows: ExtensionRow[] = [];
+
+  if (token.extensions?.defaultAccountState) {
+    configuredExtensionRows.push({
+      id: "default-account-state",
+      title: "Default Account State",
+      helper: "Default state for newly created token accounts.",
+      value: token.extensions.defaultAccountState,
+    });
+  }
+
+  if (token.extensions?.transferFee) {
+    configuredExtensionRows.push({
+      id: "transfer-fee",
+      title: "Transfer Fee",
+      helper: "Fee configuration for token transfers.",
+      value: "Configured",
+    });
+  }
+
+  if (token.extensions?.scaledUiAmount) {
+    configuredExtensionRows.push({
+      id: "scaled-ui",
+      title: "Scaled UI Amount",
+      helper: "UI supply multiplier controls.",
+      value: "Configured",
+    });
+  }
+
+  if (token.extensions?.transferHook) {
+    configuredExtensionRows.push({
+      id: "transfer-hook",
+      title: "Transfer Hook",
+      helper: "Custom transfer logic program hook.",
+      value: "Configured",
+    });
+  }
+
+  if (token.extensions?.interestBearing) {
+    configuredExtensionRows.push({
+      id: "interest-bearing",
+      title: "Interest Bearing",
+      helper: "Interest-rate based balance updates.",
+      value: "Configured",
+    });
+  }
+
+  if (token.extensions?.nonTransferable) {
+    configuredExtensionRows.push({
+      id: "non-transferable",
+      title: "Non-transferable",
+      helper: "Disables standard transfers between accounts.",
+      value: "Enabled",
+    });
+  }
+
   return [
     {
       id: "template",
@@ -997,42 +1053,7 @@ export function getExtensionRows(token: Token): ExtensionRow[] {
       helper: "Allows freeze/unfreeze account controls.",
       value: token.isFreezable ? "Enabled" : "Disabled",
     },
-    {
-      id: "default-account-state",
-      title: "Default Account State",
-      helper: "Default state for newly created token accounts.",
-      value: token.extensions?.defaultAccountState ?? "initialized",
-    },
-    {
-      id: "transfer-fee",
-      title: "Transfer Fee",
-      helper: "Fee configuration for token transfers.",
-      value: token.extensions?.transferFee ? "Configured" : "Not configured",
-    },
-    {
-      id: "scaled-ui",
-      title: "Scaled UI Amount",
-      helper: "UI supply multiplier controls.",
-      value: token.extensions?.scaledUiAmount ? "Configured" : "Not configured",
-    },
-    {
-      id: "transfer-hook",
-      title: "Transfer Hook",
-      helper: "Custom transfer logic program hook.",
-      value: token.extensions?.transferHook ? "Configured" : "Not configured",
-    },
-    {
-      id: "interest-bearing",
-      title: "Interest Bearing",
-      helper: "Interest-rate based balance updates.",
-      value: token.extensions?.interestBearing ? "Configured" : "Not configured",
-    },
-    {
-      id: "non-transferable",
-      title: "Non-transferable",
-      helper: "Disables standard transfers between accounts.",
-      value: token.extensions?.nonTransferable ? "Enabled" : "Disabled",
-    },
+    ...configuredExtensionRows,
   ];
 }
 
