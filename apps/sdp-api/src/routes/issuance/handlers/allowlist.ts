@@ -90,7 +90,20 @@ export const addAllowlistEntry = async (c: AppContext) => {
         });
       }
     } catch (error) {
-      await tokenService.revokeAllowlistEntry(entry.id);
+      try {
+        await tokenService.revokeAllowlistEntry(entry.id);
+      } catch (revokeError) {
+        throw new AppError(
+          "INTERNAL_ERROR",
+          "Failed to roll back control-list entry after sync error",
+          {
+            originalError: error instanceof Error ? error.message : "Unknown add error",
+            restoreError:
+              revokeError instanceof Error ? revokeError.message : "Unknown rollback error",
+          }
+        );
+      }
+
       throw error;
     }
 

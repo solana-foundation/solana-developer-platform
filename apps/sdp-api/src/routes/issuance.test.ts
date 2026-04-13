@@ -8,6 +8,7 @@ import { hashString } from "@/lib/hash";
 import * as AuthorityResolution from "@/routes/issuance/handlers/authority-resolution";
 import { MosaicService } from "@/services/mosaic";
 import * as SolanaServices from "@/services/solana";
+import { TokenService } from "@/services/token.service";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import {
   TEST_ACTIVE_TOKEN,
@@ -912,6 +913,52 @@ describe("Issuance Routes", () => {
         } finally {
           createOrgSignerSpy.mockRestore();
           addToListSpy.mockRestore();
+        }
+      });
+
+      it("surfaces both errors when add compensation fails", async () => {
+        const db = getDb(env);
+        await db
+          .prepare("UPDATE issued_tokens SET abl_list_address = ? WHERE id = ?")
+          .bind(TEST_SOLANA_ADDRESSES.wallet3, tokenId)
+          .run();
+
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSigner")
+          .mockResolvedValueOnce({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
+        const addToListSpy = vi
+          .spyOn(MosaicService.prototype, "addToList")
+          .mockRejectedValueOnce(new Error("on-chain add failed"));
+        const revokeAllowlistEntrySpy = vi
+          .spyOn(TokenService.prototype, "revokeAllowlistEntry")
+          .mockRejectedValueOnce(new Error("rollback failed"));
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${tokenId}/allowlist`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({
+                address: TEST_SOLANA_ADDRESSES.wallet1,
+                label: "On-chain Wallet",
+              }),
+            },
+            env
+          );
+
+          expect(res.status).toBe(500);
+          const body = await res.json();
+          expect(body.error.code).toBe("INTERNAL_ERROR");
+          expect(body.error.details.originalError).toBe("on-chain add failed");
+          expect(body.error.details.restoreError).toBe("rollback failed");
+        } finally {
+          createOrgSignerSpy.mockRestore();
+          addToListSpy.mockRestore();
+          revokeAllowlistEntrySpy.mockRestore();
         }
       });
 
