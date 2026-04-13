@@ -1,7 +1,11 @@
 import { BadgeDollarSign, CircleHelp, ShieldCheck } from "lucide-react";
+import {
+  type AccessControlMode,
+  getDefaultAccessControlMode as getDefaultModeForTemplate,
+  supportsBlocklistMode,
+} from "./access-control.utils";
 import type { CreateIssuanceTokenResult } from "./actions";
 import type {
-  AccessControlMode,
   TemplateCardDescriptor,
   TemplateSelection,
   TokenDraft,
@@ -56,7 +60,7 @@ export function createInitialDraft(): TokenDraft {
     symbol: "",
     signingWalletId: "",
     decimals: "",
-    accessControlMode: "blocklist",
+    accessControlMode: "disabled",
   };
 }
 
@@ -100,42 +104,81 @@ export function getTemplateDefaultDecimals(template: TemplateSelection): TokenDr
 }
 
 export function getDefaultAccessControlMode(template: TemplateSelection): AccessControlMode {
-  return template === "tokenized-security" ? "allowlist" : "blocklist";
+  return getDefaultModeForTemplate(template);
 }
 
-export function getAccessControlAvailability(
+export function isAccessControlModeAvailable(
   template: TemplateSelection,
   mode: AccessControlMode
-): {
-  available: boolean;
-  note: string;
-} {
-  if (template === "tokenized-security") {
-    if (mode === "allowlist") {
-      return {
-        available: true,
-        note: "Required for this template.",
-      };
-    }
-    return {
-      available: false,
-      note: "This template cannot be created without an allowlist.",
-    };
-  }
-
-  return {
-    available: true,
-    note:
-      mode === "allowlist"
-        ? "Require approved destinations before minting or controlled transfers."
-        : "Create the token without an allowlist.",
-  };
-}
-
-export function toRequiresAllowlist(template: TemplateSelection, mode: AccessControlMode): boolean {
-  if (template === "tokenized-security") {
+): boolean {
+  if (mode === "allowlist") {
     return true;
   }
+
+  if (mode === "blocklist") {
+    return supportsBlocklistMode(template);
+  }
+
+  return template === "custom";
+}
+
+export function getAccessControlOptions(template: TemplateSelection): Array<{
+  mode: AccessControlMode;
+  title: string;
+  description: string;
+  note: string;
+}> {
+  if (template === "stablecoin") {
+    return [
+      {
+        mode: "blocklist",
+        title: "Denylist",
+        description: "Listed destinations are blocked before they can receive controlled actions.",
+        note: "Recommended default for stablecoins.",
+      },
+      {
+        mode: "allowlist",
+        title: "Allowlist",
+        description: "Only approved destinations can receive controlled token actions.",
+        note: "Use when transfers must stay inside a known set of wallets.",
+      },
+    ];
+  }
+
+  if (template === "tokenized-security") {
+    return [
+      {
+        mode: "allowlist",
+        title: "Allowlist",
+        description: "Only approved destinations can receive controlled token actions.",
+        note: "Default for tokenized securities.",
+      },
+      {
+        mode: "blocklist",
+        title: "Denylist",
+        description: "Listed destinations are blocked before they can receive controlled actions.",
+        note: "Use when the token should remain open except for blocked wallets.",
+      },
+    ];
+  }
+
+  return [
+    {
+      mode: "disabled",
+      title: "Disabled",
+      description: "This token will not use a transfer control list.",
+      note: "Best for unrestricted custom tokens.",
+    },
+    {
+      mode: "allowlist",
+      title: "Allowlist",
+      description: "Only approved destinations can receive controlled token actions.",
+      note: "Enable this when the token needs restricted transfer access.",
+    },
+  ];
+}
+
+export function toRequiresAllowlist(mode: AccessControlMode): boolean {
   return mode === "allowlist";
 }
 

@@ -2,7 +2,10 @@ import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
 import { AppError, notFound } from "@/lib/errors";
 import { created, noContent, paginated } from "@/lib/response";
+import { assertValidAddress } from "@/lib/solana";
 import { AuditService } from "@/services/audit.service";
+import { createMosaicService } from "@/services/mosaic";
+import { createOrgSigner } from "@/services/solana";
 import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
 import type { TokenAllowlistResponse } from "@sdp/types";
@@ -70,6 +73,27 @@ export const addAllowlistEntry = async (c: AppContext) => {
       label: parsed.data.label,
     });
 
+    try {
+      if (token.ablListAddress) {
+        const signer = await createOrgSigner(
+          c.env,
+          auth.organizationId,
+          auth.projectId,
+          token.signingWalletId ?? undefined
+        );
+        const mosaic = createMosaicService(c.env, signer);
+        await mosaic.addToList({
+          list: assertValidAddress(token.ablListAddress, "ablListAddress"),
+          authority: signer.address,
+          feePayer: signer.address,
+          wallet: assertValidAddress(parsed.data.address, "address"),
+        });
+      }
+    } catch (error) {
+      await tokenService.revokeAllowlistEntry(entry.id);
+      throw error;
+    }
+
     // Audit log
     const auditService = new AuditService(getDb(c.env));
     await auditService.log(c, {
@@ -80,6 +104,7 @@ export const addAllowlistEntry = async (c: AppContext) => {
         tokenId,
         address: parsed.data.address,
         label: parsed.data.label,
+        mode: token.ablListAddress ? "on-chain" : "database",
       },
     });
 
@@ -87,7 +112,7 @@ export const addAllowlistEntry = async (c: AppContext) => {
     return created(c, response);
   } catch (error) {
     if (error instanceof Error && error.message === "ADDRESS_ALREADY_ALLOWLISTED") {
-      throw new AppError("CONFLICT", "Address is already on the allowlist");
+      throw new AppError("CONFLICT", "Address is already on the control list");
     }
     throw error;
   }
@@ -113,6 +138,22 @@ export const removeAllowlistEntry = async (c: AppContext) => {
     throw notFound("Allowlist entry");
   }
 
+  if (token.ablListAddress) {
+    const signer = await createOrgSigner(
+      c.env,
+      auth.organizationId,
+      auth.projectId,
+      token.signingWalletId ?? undefined
+    );
+    const mosaic = createMosaicService(c.env, signer);
+    await mosaic.removeFromList({
+      list: assertValidAddress(token.ablListAddress, "ablListAddress"),
+      authority: signer.address,
+      feePayer: signer.address,
+      wallet: assertValidAddress(entry.address, "address"),
+    });
+  }
+
   await tokenService.revokeAllowlistEntry(entryId);
 
   // Audit log
@@ -121,7 +162,11 @@ export const removeAllowlistEntry = async (c: AppContext) => {
     action: "revoke",
     resourceType: "token_allowlist",
     resourceId: entryId,
-    metadata: { tokenId, address: entry.address },
+    metadata: {
+      tokenId,
+      address: entry.address,
+      mode: token.ablListAddress ? "on-chain" : "database",
+    },
   });
 
   return noContent(c);

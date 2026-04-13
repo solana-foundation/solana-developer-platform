@@ -138,8 +138,8 @@ test.describe
       await page.getByRole("button", { name: "Continue" }).click();
 
       await page
-        .locator("button", { hasText: "Disabled" })
-        .filter({ hasText: "This token will not use an allowlist." })
+        .locator("button", { hasText: "Denylist" })
+        .filter({ hasText: "Listed destinations are blocked before they can receive controlled actions." })
         .click();
       await page.getByLabel("Main Signer").selectOption(fixtures.wallets.treasury.walletId);
       await page.getByRole("button", { name: "Create Stablecoin Draft" }).click();
@@ -166,12 +166,10 @@ test.describe
       await openTab(page, "Extensions");
 
       await expect(page.getByTestId("extension-row-template")).toContainText("stablecoin");
-      await expect(page.getByTestId("extension-row-allowlist")).toContainText("Enabled");
+      await expect(page.getByTestId("extension-row-control-list")).toContainText("Allowlist");
       await expect(page.getByTestId("extension-row-mintable")).toContainText("Enabled");
       await expect(page.getByTestId("extension-row-freezable")).toContainText("Enabled");
-      await expect(page.getByTestId("extension-row-default-account-state")).toContainText(
-        "initialized"
-      );
+      await expect(page.getByTestId("extension-row-default-account-state")).toContainText("frozen");
 
       await expect(page.getByTestId("extension-row-transfer-fee")).toHaveCount(0);
       await expect(page.getByTestId("extension-row-scaled-ui")).toHaveCount(0);
@@ -291,7 +289,21 @@ test.describe
       await expect(page.getByTestId("allowlist-summary-card")).toContainText("0 entries");
     });
 
-    test("8. user can mint and burn tokens with supply and transactions updating", async ({
+    test("8. user sees denylist controls on the open stablecoin token", async ({ page }) => {
+      await gotoToken(page, fixtures.tokens.open.id);
+      await openTab(page, "Compliance");
+
+      await expect(page.getByRole("button", { name: "Denylist", exact: true })).toBeVisible();
+      await expect(page.getByText("Manage the blocked destination addresses for this token.")).toBeVisible();
+      await expect(
+        page.getByText(
+          "Need to restrict a wallet before it has a token account? Add it to the denylist first."
+        )
+      ).toBeVisible();
+      await expect(page.getByTestId("allowlist-summary-card")).toContainText("Denylist Entries");
+    });
+
+    test("9. user can mint and burn tokens with supply and transactions updating", async ({
       page,
     }) => {
       await gotoToken(page, fixtures.tokens.open.id);
@@ -325,7 +337,7 @@ test.describe
       await expect(page.getByTestId("fund-management-row-burn")).toBeVisible();
     });
 
-    test("9. user can freeze and unfreeze using a wallet address in the UI", async ({ page }) => {
+    test("10. user can freeze and unfreeze using a wallet address in the UI", async ({ page }) => {
       await gotoToken(page, fixtures.tokens.open.id);
 
       await openFundManagementAction(page, "mint");
@@ -361,7 +373,7 @@ test.describe
       await expect(page.getByTestId("frozen-accounts-summary-card")).toContainText("0 accounts");
     });
 
-    test("10. user can pause and unpause the token from compliance controls", async ({ page }) => {
+    test("11. user can pause and unpause the token from compliance controls", async ({ page }) => {
       await gotoToken(page, fixtures.tokens.open.id);
       await openTab(page, "Compliance");
 

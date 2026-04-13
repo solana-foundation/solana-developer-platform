@@ -1,4 +1,8 @@
 import type { PaymentsDashboardWallet, Token, TokenAllowlistEntry } from "@sdp/types";
+import {
+  type AccessControlMode,
+  getTokenAccessControlMode,
+} from "../access-control.utils";
 import type {
   ActionExecutionInput,
   ActionExecutionResult,
@@ -23,6 +27,83 @@ import type {
 
 export const SOLANA_ADDRESS_PATTERN = "[1-9A-HJ-NP-Za-km-z]{32,44}";
 export const NON_WHITESPACE_PATTERN = ".*\\S.*";
+
+export interface ControlListCopy {
+  label: string;
+  description: string;
+  summaryDescription: string;
+  summaryTitle: string;
+  addActionLabel: string;
+  removeActionLabel: string;
+  emptyState: string;
+  addressRequiredMessage: string;
+  extensionHelper: string;
+  freezeHint: string | null;
+}
+
+export function getControlListCopy(mode: AccessControlMode): ControlListCopy | null {
+  switch (mode) {
+    case "allowlist":
+      return {
+        label: "Allowlist",
+        description: "Manage the approved destination addresses for this token.",
+        summaryDescription: "Allowlist entries and frozen account status",
+        summaryTitle: "Allowlist Entries",
+        addActionLabel: "Add allowlist entry",
+        removeActionLabel: "Remove entry",
+        emptyState: "No allowlist entries yet.",
+        addressRequiredMessage: "Allowlist address is required.",
+        extensionHelper:
+          "Mint and controlled transfer destinations must be on the token allowlist.",
+        freezeHint: null,
+      };
+    case "blocklist":
+      return {
+        label: "Denylist",
+        description: "Manage the blocked destination addresses for this token.",
+        summaryDescription: "Denylist entries and frozen account status",
+        summaryTitle: "Denylist Entries",
+        addActionLabel: "Add denylist entry",
+        removeActionLabel: "Remove entry",
+        emptyState: "No denylist entries yet.",
+        addressRequiredMessage: "Denylist address is required.",
+        extensionHelper:
+          "Listed destinations are blocked from mint and controlled transfer operations.",
+        freezeHint:
+          "Need to restrict a wallet before it has a token account? Add it to the denylist first.",
+      };
+    case "disabled":
+      return null;
+  }
+}
+
+function getDestinationAccessControlError({
+  token,
+  destination,
+  allowlistEntries,
+}: {
+  token: Token;
+  destination: string;
+  allowlistEntries: TokenAllowlistEntry[];
+}): string | null {
+  const normalizedDestination = destination.trim();
+  if (!normalizedDestination) {
+    return null;
+  }
+
+  const accessControlMode = getTokenAccessControlMode(token);
+  const isListed = allowlistEntries.some((entry) => entry.address === normalizedDestination);
+
+  if (accessControlMode === "allowlist" && !isListed) {
+    return "Destination is not on this token's allowlist.";
+  }
+
+  if (accessControlMode === "blocklist" && isListed) {
+    return "Destination is on this token's denylist.";
+  }
+
+  return null;
+}
 
 export function createInitialMetadataForm(token: Token): MetadataFormState {
   return {
@@ -706,13 +787,12 @@ export function getMintValidationErrors({
     }
   }
 
-  if (
-    token.requiresAllowlist &&
-    normalizedDestination &&
-    allowlistEntries.length > 0 &&
-    !allowlistEntries.some((entry) => entry.address === normalizedDestination)
-  ) {
-    destinationError = "Destination is not on this token's allowlist.";
+  if (normalizedDestination) {
+    destinationError = getDestinationAccessControlError({
+      token,
+      destination: normalizedDestination,
+      allowlistEntries,
+    });
   }
 
   return {
@@ -823,12 +903,14 @@ export function getSeizeValidationErrors({
   source,
   destination,
   amount,
+  allowlistEntries,
   walletOptions,
 }: {
   token: Token;
   source: string;
   destination: string;
   amount: string;
+  allowlistEntries: TokenAllowlistEntry[];
   walletOptions: PaymentsDashboardWallet[];
 }): SeizeValidationErrors {
   const normalizedSource = source.trim();
@@ -840,6 +922,14 @@ export function getSeizeValidationErrors({
 
   if (normalizedSource && normalizedDestination && normalizedSource === normalizedDestination) {
     destinationError = "Destination must be different from the source.";
+  }
+
+  if (!destinationError && normalizedDestination) {
+    destinationError = getDestinationAccessControlError({
+      token,
+      destination: normalizedDestination,
+      allowlistEntries,
+    });
   }
 
   if (!normalizedAmount) {
@@ -889,6 +979,7 @@ export function getSeizeValidationReason(args: {
   source: string;
   destination: string;
   amount: string;
+  allowlistEntries: TokenAllowlistEntry[];
   walletOptions: PaymentsDashboardWallet[];
 }): string | null {
   const errors = getSeizeValidationErrors(args);
@@ -969,6 +1060,7 @@ export function getForceBurnValidationReason(args: {
 
 export function getExtensionRows(token: Token): ExtensionRow[] {
   const configuredExtensionRows: ExtensionRow[] = [];
+  const controlListCopy = getControlListCopy(getTokenAccessControlMode(token));
 
   if (token.extensions?.defaultAccountState) {
     configuredExtensionRows.push({
@@ -1031,12 +1123,12 @@ export function getExtensionRows(token: Token): ExtensionRow[] {
       helper: "Base template applied to this token.",
       value: token.template,
     },
-    ...(token.requiresAllowlist
+    ...(controlListCopy
       ? [
           {
-            id: "allowlist",
-            title: "Allowlist",
-            helper: "Mint and controlled transfer destinations must be on the token allowlist.",
+            id: "control-list",
+            title: controlListCopy.label,
+            helper: controlListCopy.extensionHelper,
             value: "Enabled",
           } satisfies ExtensionRow,
         ]

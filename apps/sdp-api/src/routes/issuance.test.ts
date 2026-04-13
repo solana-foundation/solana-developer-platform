@@ -7,6 +7,7 @@ import app from "@/index";
 import { hashString } from "@/lib/hash";
 import * as AuthorityResolution from "@/routes/issuance/handlers/authority-resolution";
 import { MosaicService } from "@/services/mosaic";
+import * as SolanaServices from "@/services/solana";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import {
   TEST_ACTIVE_TOKEN,
@@ -869,6 +870,51 @@ describe("Issuance Routes", () => {
         expect(body.data.entry.status).toBe("active");
       });
 
+      it("syncs the control list on-chain when an ABL address is configured", async () => {
+        const db = getDb(env);
+        await db
+          .prepare("UPDATE issued_tokens SET abl_list_address = ? WHERE id = ?")
+          .bind(TEST_SOLANA_ADDRESSES.wallet3, tokenId)
+          .run();
+
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSigner")
+          .mockResolvedValueOnce({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
+        const addToListSpy = vi
+          .spyOn(MosaicService.prototype, "addToList")
+          .mockResolvedValueOnce(undefined as never);
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${tokenId}/allowlist`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({
+                address: TEST_SOLANA_ADDRESSES.wallet1,
+                label: "On-chain Wallet",
+              }),
+            },
+            env
+          );
+
+          expect(res.status).toBe(201);
+          expect(createOrgSignerSpy).toHaveBeenCalled();
+          expect(addToListSpy).toHaveBeenCalledWith({
+            list: TEST_SOLANA_ADDRESSES.wallet3,
+            authority: TEST_SOLANA_ADDRESSES.wallet2,
+            feePayer: TEST_SOLANA_ADDRESSES.wallet2,
+            wallet: TEST_SOLANA_ADDRESSES.wallet1,
+          });
+        } finally {
+          createOrgSignerSpy.mockRestore();
+          addToListSpy.mockRestore();
+        }
+      });
+
       it("returns 409 for duplicate address", async () => {
         // Add first entry
         await app.request(
@@ -977,6 +1023,67 @@ describe("Issuance Routes", () => {
         );
         const listBody = await listRes.json();
         expect(listBody.data.length).toBe(0);
+      });
+
+      it("syncs control-list removals on-chain when an ABL address is configured", async () => {
+        await app.request(
+          `/v1/issuance/tokens/${tokenId}/allowlist`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+            },
+            body: JSON.stringify({ address: TEST_SOLANA_ADDRESSES.wallet1 }),
+          },
+          env
+        );
+
+        const db = getDb(env);
+        await db
+          .prepare("UPDATE issued_tokens SET abl_list_address = ? WHERE id = ?")
+          .bind(TEST_SOLANA_ADDRESSES.wallet3, tokenId)
+          .run();
+
+        const listRes = await app.request(
+          `/v1/issuance/tokens/${tokenId}/allowlist`,
+          {
+            headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
+          },
+          env
+        );
+        const listBody = await listRes.json();
+        const entryId = listBody.data[0].id;
+
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSigner")
+          .mockResolvedValueOnce({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
+        const removeFromListSpy = vi
+          .spyOn(MosaicService.prototype, "removeFromList")
+          .mockResolvedValueOnce(undefined as never);
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${tokenId}/allowlist/${entryId}`,
+            {
+              method: "DELETE",
+              headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
+            },
+            env
+          );
+
+          expect(res.status).toBe(204);
+          expect(createOrgSignerSpy).toHaveBeenCalled();
+          expect(removeFromListSpy).toHaveBeenCalledWith({
+            list: TEST_SOLANA_ADDRESSES.wallet3,
+            authority: TEST_SOLANA_ADDRESSES.wallet2,
+            feePayer: TEST_SOLANA_ADDRESSES.wallet2,
+            wallet: TEST_SOLANA_ADDRESSES.wallet1,
+          });
+        } finally {
+          createOrgSignerSpy.mockRestore();
+          removeFromListSpy.mockRestore();
+        }
       });
     });
   });
@@ -1314,11 +1421,12 @@ describe("Issuance Routes", () => {
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // Mint with Allowlist Tests
+  // Mint with Control List Tests
   // ═══════════════════════════════════════════════════════════════════════════
 
-  describe("Mint with Allowlist Enforcement", () => {
+  describe("Mint with Control List Enforcement", () => {
     let allowlistTokenId: string;
+    const blocklistTokenId = "tok_blocklist_token";
 
     beforeEach(async () => {
       const db = getDb(env);
@@ -1342,6 +1450,23 @@ describe("Issuance Routes", () => {
         .run();
 
       allowlistTokenId = TEST_ALLOWLIST_TOKEN.id;
+
+      await db
+        .prepare(
+          `INSERT INTO issued_tokens (id, project_id, organization_id, mint_address, mint_authority, freeze_authority,
+           name, symbol, decimals, template, total_supply_cached, is_mintable, freeze_authority_enabled, allowlist_enabled, status, created_by)
+           VALUES (?, ?, ?, ?, ?, ?, 'Blocklist Token', 'BLT', 9, 'stablecoin', '0', 1, 1, 0, 'active', ?)`
+        )
+        .bind(
+          blocklistTokenId,
+          TEST_PROJECT.id,
+          TEST_ORG.id,
+          TEST_ACTIVE_TOKEN.mintAddress,
+          TEST_ACTIVE_TOKEN.mintAuthority,
+          TEST_ACTIVE_TOKEN.freezeAuthority,
+          TEST_PROJECT_API_KEY.id
+        )
+        .run();
     });
 
     it("rejects mint to non-allowlisted address", async () => {
@@ -1404,6 +1529,43 @@ describe("Issuance Routes", () => {
       );
 
       expect(res.status).toBe(200);
+    });
+
+    it("rejects mint to denylisted address", async () => {
+      await app.request(
+        `/v1/issuance/tokens/${blocklistTokenId}/allowlist`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({ address: TEST_SOLANA_ADDRESSES.wallet2 }),
+        },
+        env
+      );
+
+      const res = await app.request(
+        `/v1/issuance/tokens/${blocklistTokenId}/mint/prepare`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            mint: {
+              destination: TEST_SOLANA_ADDRESSES.wallet2,
+              amount: "1",
+            },
+          }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(403);
+      const body = await res.json();
+      expect(body.error.code).toBe("ON_TOKEN_BLOCKLIST");
     });
   });
 
@@ -1759,6 +1921,34 @@ describe("Issuance Routes", () => {
       expect(res.status).toBe(201);
       const body = await res.json();
       expect(body.data.token.requiresAllowlist).toBe(true);
+      expect(body.data.token.extensions?.defaultAccountState).toBe("frozen");
+    });
+
+    it("allows tokenized-security to switch to denylist mode", async () => {
+      const res = await app.request(
+        "/v1/issuance/tokens",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            name: "Security Denylist Token",
+            symbol: "SDLT",
+            template: "tokenized-security",
+            overrides: {
+              requiresAllowlist: false,
+            },
+          }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(201);
+      const body = await res.json();
+      expect(body.data.token.requiresAllowlist).toBe(false);
+      expect(body.data.token.extensions?.defaultAccountState).toBe("initialized");
     });
 
     it("rejects disabling required extension for template", async () => {
