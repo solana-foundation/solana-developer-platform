@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.16.2](https://github.com/solana-foundation/solana-developer-platform/compare/v0.16.1...v0.16.2) (2026-04-13)
+
+### Bug Fixes
+
+* add tos notice to auth pages ([#184](https://github.com/solana-foundation/solana-developer-platform/pull/184)) ([ff7d87f](https://github.com/solana-foundation/solana-developer-platform/commit/ff7d87f3e52b9a7483c626a3bb1696266fec3491))
+
 ## [0.16.1](https://github.com/solana-foundation/solana-developer-platform/compare/v0.16.0...v0.16.1) (2026-04-13)
 
 ### Other Changes
