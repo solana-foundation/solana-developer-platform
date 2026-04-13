@@ -531,7 +531,7 @@ async function fundWalletToLamports(
 }
 
 export async function ensureUnlinkedOrg(identity: ClerkTestIdentity): Promise<void> {
-  await setClerkOrganizationTier(identity.organizationId, "individual");
+  await setClerkOrganizationTier(identity.organizationId, "enterprise");
 
   await withDatabaseClient(async (client) => {
     await client.query("BEGIN");
@@ -552,7 +552,7 @@ export async function ensureLinkedOrg(
   options?: EnsureLinkedOrgOptions
 ): Promise<PlaywrightOrganizationFixture> {
   const organization = buildPlaywrightOrganizationFixture(identity);
-  const tier = options?.tier ?? "individual";
+  const tier = options?.tier ?? "enterprise";
 
   await setClerkOrganizationTier(identity.organizationId, tier);
 

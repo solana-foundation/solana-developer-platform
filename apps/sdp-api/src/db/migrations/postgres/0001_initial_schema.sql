@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS organizations (
     id TEXT PRIMARY KEY,                              
     name TEXT NOT NULL,
     slug TEXT NOT NULL UNIQUE,
-    tier TEXT NOT NULL DEFAULT 'individual',          
+    tier TEXT NOT NULL DEFAULT 'enterprise',          
     status TEXT NOT NULL DEFAULT 'active',            
     settings TEXT,                                    
     created_at TEXT NOT NULL DEFAULT sdp_datetime_now(),

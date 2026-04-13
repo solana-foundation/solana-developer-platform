@@ -212,7 +212,7 @@ describe("organization-provider-access.service", () => {
     });
   });
 
-  it("defaults to individual and clears provider overrides when Clerk metadata is absent", async () => {
+  it("defaults to enterprise and clears provider overrides when Clerk metadata is absent", async () => {
     await getDb(env)
       .prepare("UPDATE organizations SET tier = ?, settings = ? WHERE id = ?")
       .bind(
@@ -241,7 +241,7 @@ describe("organization-provider-access.service", () => {
       .bind(TEST_ORG_ID)
       .first<{ tier: string; settings: string | null }>();
 
-    expect(organization?.tier).toBe("individual");
+    expect(organization?.tier).toBe("enterprise");
     expect(organization?.settings ? JSON.parse(organization.settings) : null).toEqual({
       rpcProvider: "helius",
     });
