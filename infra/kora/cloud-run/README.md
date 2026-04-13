@@ -6,7 +6,7 @@ This folder contains the Cloud Run manifests and operator notes for the shared d
 
 - Service: `kora-devnet`
 - Region: `us-central1`
-- Image: `us-central1-docker.pkg.dev/analytics-324114/kora-remote/solana-foundation/kora:latest`
+- Image: `us-central1-docker.pkg.dev/YOUR_GCP_PROJECT_ID/kora-remote/solana-foundation/kora:latest`
 
 ## Required Secrets (Secret Manager)
 
@@ -35,7 +35,7 @@ gcloud run services add-iam-policy-binding kora-devnet \
 ## Health Check
 
 ```bash
-KORA_RPC_URL=https://kora-devnet-315956366746.us-central1.run.app \
+KORA_RPC_URL=https://your-kora-devnet-instance.us-central1.run.app \
 curl -s "${KORA_RPC_URL}/liveness"
 ```
 

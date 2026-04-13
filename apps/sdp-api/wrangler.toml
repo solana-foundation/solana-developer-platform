@@ -37,10 +37,10 @@ EMAIL_FROM = "noreply@mail.solana.org"
 SOLANA_NETWORK = "devnet"
 SOLANA_RPC_URL = "https://api.devnet.solana.com"
 SOLANA_RPC_DEFAULT_PROVIDER = "default"
-SOLANA_RPC_TRITON_URL = "https://solanaf-sdp-7436.devnet.rpcpool.com/50cc5df4-1953-414c-b6fb-948aa7ffb0fb"
+SOLANA_RPC_TRITON_URL = "https://your-triton-endpoint.devnet.rpcpool.com/{API_KEY}"
 # Local dev defaults. Can be overridden by apps/sdp-api/.dev.vars.
 FEE_PAYMENT_PROVIDER = "kora"
-KORA_RPC_URL = "https://kora-devnet-315956366746.us-central1.run.app"
+KORA_RPC_URL = "https://your-kora-devnet-instance.us-central1.run.app"
 
 # Dev environment
 [env.dev]
@@ -52,23 +52,23 @@ compatibility_flags = [
 
 [[env.dev.hyperdrive]]
 binding = "HYPERDRIVE"
-id = "08e63deab7554b60884a4ede11d799eb"
+id = "your_dev_hyperdrive_id"
 
 [[env.dev.kv_namespaces]]
 binding = "SDP_API_KEYS"
-id = "0aed6bde7a5a49589f1696ae719c1586"
+id = "your_dev_api_keys_kv_id"
 
 [[env.dev.kv_namespaces]]
 binding = "SDP_RATE_LIMITS"
-id = "261d95813340417380d9ba317403b6bd"
+id = "your_dev_rate_limits_kv_id"
 
 [[env.dev.kv_namespaces]]
 binding = "SDP_CACHE"
-id = "628af2da2be8447b81848ba26ea0977d"
+id = "your_dev_cache_kv_id"
 
 [[env.dev.kv_namespaces]]
 binding = "SDP_SESSIONS"
-id = "56172f4bd6484367af2eaf0039246802"
+id = "your_dev_sessions_kv_id"
 
 [env.dev.vars]
 ENVIRONMENT = "development"
@@ -78,11 +78,11 @@ SOLANA_NETWORK = "devnet"
 SOLANA_RPC_URL = "https://api.devnet.solana.com"
 SOLANA_RPC_DEFAULT_PROVIDER = "helius"
 SOLANA_RPC_ALCHEMY_URL = "https://solana-devnet.g.alchemy.com/v2/{API_KEY}"
-SOLANA_RPC_TRITON_URL = "https://solanaf-sdp-7436.devnet.rpcpool.com/{API_KEY}"
+SOLANA_RPC_TRITON_URL = "https://your-triton-endpoint.devnet.rpcpool.com/{API_KEY}"
 SOLANA_RPC_HELIUS_URL = "https://devnet.helius-rpc.com/?api-key={API_KEY}"
-SOLANA_RPC_QUICKNODE_URL = "https://evocative-old-mansion.solana-devnet.quiknode.pro/{API_KEY}"
+SOLANA_RPC_QUICKNODE_URL = "https://your-quicknode-endpoint.solana-devnet.quiknode.pro/{API_KEY}"
 FEE_PAYMENT_PROVIDER = "kora"
-KORA_RPC_URL = "https://kora-devnet-315956366746.us-central1.run.app"
+KORA_RPC_URL = "https://your-kora-devnet-instance.us-central1.run.app"
 
 # Production environment
 [env.production]
@@ -94,23 +94,23 @@ compatibility_flags = [
 
 [[env.production.hyperdrive]]
 binding = "HYPERDRIVE"
-id = "8da510cd6dfb47ba8a382ab8567d4fa1"
+id = "your_production_hyperdrive_id"
 
 [[env.production.kv_namespaces]]
 binding = "SDP_API_KEYS"
-id = "b03b0acc592c4f3ba0e0ba47dd275475"
+id = "your_production_api_keys_kv_id"
 
 [[env.production.kv_namespaces]]
 binding = "SDP_RATE_LIMITS"
-id = "9f1aa19f944947539fb8739426a4457f"
+id = "your_production_rate_limits_kv_id"
 
 [[env.production.kv_namespaces]]
 binding = "SDP_CACHE"
-id = "b82a4bf1c9a14609bfc69cfb6c7df17d"
+id = "your_production_cache_kv_id"
 
 [[env.production.kv_namespaces]]
 binding = "SDP_SESSIONS"
-id = "67fb59b197f84084b42d595cb058a722"
+id = "your_production_sessions_kv_id"
 
 [env.production.vars]
 ENVIRONMENT = "production"
@@ -120,8 +120,8 @@ SOLANA_NETWORK = "devnet"
 SOLANA_RPC_URL = "https://api.devnet.solana.com"
 SOLANA_RPC_DEFAULT_PROVIDER = "helius"
 SOLANA_RPC_ALCHEMY_URL = "https://solana-devnet.g.alchemy.com/v2/{API_KEY}"
-SOLANA_RPC_TRITON_URL = "https://solanaf-sdp-7436.devnet.rpcpool.com/{API_KEY}"
+SOLANA_RPC_TRITON_URL = "https://your-triton-endpoint.devnet.rpcpool.com/{API_KEY}"
 SOLANA_RPC_HELIUS_URL = "https://devnet.helius-rpc.com/?api-key={API_KEY}"
-SOLANA_RPC_QUICKNODE_URL = "https://evocative-old-mansion.solana-devnet.quiknode.pro/{API_KEY}"
+SOLANA_RPC_QUICKNODE_URL = "https://your-quicknode-endpoint.solana-devnet.quiknode.pro/{API_KEY}"
 FEE_PAYMENT_PROVIDER = "kora"
-KORA_RPC_URL = "https://kora-devnet-315956366746.us-central1.run.app"
+KORA_RPC_URL = "https://your-kora-devnet-instance.us-central1.run.app"
