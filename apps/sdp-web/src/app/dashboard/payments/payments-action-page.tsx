@@ -139,7 +139,6 @@ const OFFRAMP_PROVIDER_OPTIONS: ProviderOption[] = [
 ];
 
 const KNOWN_ASSET_MINTS: Record<string, string[]> = {
-  SOL: [SOL_MINT],
   USDC: [DEVNET_USDC_MINT, MAINNET_USDC_MINT],
 };
 
