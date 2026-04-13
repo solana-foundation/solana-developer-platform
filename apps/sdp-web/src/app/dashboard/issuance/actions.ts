@@ -2,6 +2,7 @@
 
 import { sdpApiRequest } from "@/lib/sdp-api";
 import { revalidatePath } from "next/cache";
+import { isValidTokenDecimals } from "./create-token-modal.utils";
 import { issuanceTemplateCatalog } from "./template-catalog";
 
 type ActionState = "idle" | "success" | "error";
@@ -146,8 +147,7 @@ export async function createIssuanceTokenAction(
   }
 
   if (decimalsRaw) {
-    const parsed = Number.parseInt(decimalsRaw, 10);
-    if (!Number.isFinite(parsed) || parsed < 0 || parsed > 18) {
+    if (!isValidTokenDecimals(decimalsRaw)) {
       return {
         state: "error",
         message: "Decimals must be between 0 and 18.",
@@ -155,6 +155,8 @@ export async function createIssuanceTokenAction(
         tokenName: null,
       };
     }
+
+    const parsed = Number.parseInt(decimalsRaw, 10);
     payload.decimals = parsed;
   }
 
