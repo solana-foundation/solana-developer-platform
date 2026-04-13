@@ -57,6 +57,7 @@ test.describe
 
       const assetSelect = app.getByRole("combobox", { name: "Asset" });
       await assetSelect.click();
+      await expect(page.getByRole("option", { name: "SOL", exact: true })).toHaveCount(0);
       await page.getByRole("option", { name: transferTokenSymbol, exact: true }).click();
       await expect(assetSelect).toContainText(transferTokenSymbol);
       await app.getByLabel("Amount").fill("1");

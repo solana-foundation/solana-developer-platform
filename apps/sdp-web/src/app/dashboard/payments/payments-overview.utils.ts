@@ -9,6 +9,8 @@ import type {
 const DEVNET_USDC_MINT = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
 // biome-ignore lint/nursery/noSecrets: Mainnet USDC mint address constant, not a secret.
 const MAINNET_USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+// biome-ignore lint/nursery/noSecrets: Solana native mint address constant, not a secret.
+const SOL_MINT = "So11111111111111111111111111111111111111112";
 
 function parseIntegerAmount(value: string): bigint | null {
   if (!/^\d+$/.test(value)) {
@@ -58,6 +60,10 @@ export function resolveUsdBalanceValue(
   }
 
   return resolveFallbackUsdValue(balance);
+}
+
+export function isSolBalance(balance: Pick<CustodyWalletTokenBalance, "token" | "mint">): boolean {
+  return balance.token.trim().toUpperCase() === "SOL" || balance.mint.trim() === SOL_MINT;
 }
 
 export function formatDisplayAmount(value?: string, token?: string): string {
@@ -198,7 +204,7 @@ export function normalizeAggregateBalances(
   balances: CustodyWalletTokenBalance[]
 ): CustodyWalletTokenBalance[] {
   return balances
-    .filter((balance) => balance.token.trim().toUpperCase() !== "SOL")
+    .filter((balance) => !isSolBalance(balance))
     .filter((balance) => resolveUsdBalanceValue(balance) !== null)
     .sort((left, right) => {
       const leftIsUsdc = left.token.trim().toUpperCase() === "USDC";
