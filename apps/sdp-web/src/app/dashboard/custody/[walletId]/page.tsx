@@ -19,6 +19,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import type { ReactNode } from "react";
 import {
+  filterNonSolBalances,
   formatCurrencyAmount,
   formatDisplayAmount,
   resolveTotalBalance,
@@ -143,7 +144,9 @@ export default async function WalletDetailPage({
 
   const provider =
     wallet.provider && isKnownCustodyProvider(wallet.provider) ? wallet.provider : null;
-  const balances = trackedBalances.length > 0 ? trackedBalances : [wallet.balance];
+  const balances = filterNonSolBalances(
+    trackedBalances.length > 0 ? trackedBalances : [wallet.balance]
+  );
   const totalBalance = resolveTotalBalance(balances);
   const purposeLabel = formatPurpose(wallet.purpose);
 

@@ -23,7 +23,7 @@ import QRCode from "qrcode";
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
-import { isSolBalance } from "./payments-overview.utils";
+import { filterNonSolBalances, isSolBalance } from "./payments-overview.utils";
 import {
   type PaymentRampExecution,
   type PaymentWalletBalance,
@@ -156,7 +156,7 @@ function parseOptionalNumber(value: string): number | null {
 }
 
 function resolvePrimaryWalletBalance(wallet: PaymentsDashboardWallet | null) {
-  const supportedBalances = wallet?.balances?.filter((balance) => !isSolBalance(balance)) ?? [];
+  const supportedBalances = filterNonSolBalances(wallet?.balances ?? []);
 
   if (supportedBalances.length === 0) {
     return null;

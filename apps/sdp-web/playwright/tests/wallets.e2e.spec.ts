@@ -32,6 +32,7 @@ test.describe
 
       await walletCard.getByRole("link", { name: "Manage" }).click();
       await expect(page).toHaveURL(/\/dashboard\/wallets\/.+/);
+      await expect(page.getByText("SOL", { exact: true })).toHaveCount(0);
 
       await page.getByRole("button", { name: "Actions" }).click();
       await page.getByRole("menuitem", { name: "Prove ownership" }).click();

@@ -66,6 +66,12 @@ export function isSolBalance(balance: Pick<CustodyWalletTokenBalance, "token" | 
   return balance.token.trim().toUpperCase() === "SOL" || balance.mint.trim() === SOL_MINT;
 }
 
+export function filterNonSolBalances<
+  TBalance extends Pick<CustodyWalletTokenBalance, "token" | "mint">,
+>(balances: TBalance[]): TBalance[] {
+  return balances.filter((balance) => !isSolBalance(balance));
+}
+
 export function formatDisplayAmount(value?: string, token?: string): string {
   if (!value) {
     return token ? `- ${token}` : "-";
@@ -138,12 +144,14 @@ export function resolveCounterparty(transfer: TransferRecord): string {
 }
 
 export function resolveTotalBalance(balances: CustodyWalletTokenBalance[]): number | null {
-  if (balances.length === 0) {
+  const supportedBalances = filterNonSolBalances(balances);
+
+  if (supportedBalances.length === 0) {
     return null;
   }
 
   let hasNumericBalance = false;
-  const total = balances.reduce((sum, balance) => {
+  const total = supportedBalances.reduce((sum, balance) => {
     const usdValue = resolveUsdBalanceValue(balance);
     if (usdValue === null) {
       return sum;
@@ -203,8 +211,7 @@ export function aggregateBalancesFromWallets(wallets: WalletRecord[]): CustodyWa
 export function normalizeAggregateBalances(
   balances: CustodyWalletTokenBalance[]
 ): CustodyWalletTokenBalance[] {
-  return balances
-    .filter((balance) => !isSolBalance(balance))
+  return filterNonSolBalances(balances)
     .filter((balance) => resolveUsdBalanceValue(balance) !== null)
     .sort((left, right) => {
       const leftIsUsdc = left.token.trim().toUpperCase() === "USDC";
