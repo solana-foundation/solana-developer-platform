@@ -119,7 +119,7 @@ describe.skipIf(!KORA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Kora Fee Payment", 
   describe("Error Handling", () => {
     it("handles invalid RPC URL gracefully", async () => {
       const badAdapter = new KoraAdapter({
-        rpcUrl: "http://localhost:99999",
+        rpcUrl: "http://localhost:1",
         timeoutMs: 5000,
       });
 

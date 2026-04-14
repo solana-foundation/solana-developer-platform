@@ -1,4 +1,4 @@
-import { env as providedEnv } from "cloudflare:test";
+import { env as providedEnv } from "cloudflare:workers";
 import { getDb } from "@/db";
 import type { Env } from "@/types/env";
 
