@@ -120,7 +120,7 @@ test.describe
     test("2. user can create a new pending token draft from the UI", async ({ page }) => {
       const draftSuffix = String(Date.now()).slice(-4);
       const draftName = `E2E UI Draft ${draftSuffix}`;
-      const draftSymbol = `E2E${draftSuffix}`;
+      const draftSymbol = `UsD${draftSuffix}`;
 
       await gotoIssuanceDashboard(page);
       await page.getByRole("button", { name: "Create draft" }).click();
@@ -134,11 +134,14 @@ test.describe
         .fill(`https://example.com/metadata/e2e-ui-draft-${draftSuffix}.json`);
       await page.getByLabel("Token Name").fill(draftName);
       await page.getByLabel("Symbol").fill(draftSymbol);
+      await page.getByLabel("Decimals").fill("7");
       await page.getByRole("button", { name: "Continue" }).click();
 
       await page
-        .locator("button", { hasText: "Disabled" })
-        .filter({ hasText: "This token will not use an allowlist." })
+        .locator("button", { hasText: "Denylist" })
+        .filter({
+          hasText: "Listed destinations are blocked before they can receive controlled actions.",
+        })
         .click();
       await page.getByLabel("Main Signer").selectOption(fixtures.wallets.treasury.walletId);
       await page.getByRole("button", { name: "Create Stablecoin Draft" }).click();
@@ -149,9 +152,35 @@ test.describe
         })
         .toBeGreaterThan(0);
       await expect(page.getByRole("heading", { name: draftName, exact: true })).toBeVisible();
+      await expect(page.getByText(draftSymbol, { exact: true })).toBeVisible();
+      const draftCard = page
+        .locator("article")
+        .filter({ has: page.getByRole("heading", { name: draftName, exact: true }) })
+        .first();
+      await draftCard.getByRole("link", { name: "Manage", exact: true }).click();
+      await expect(page.getByTestId("overview-row-decimals")).toContainText("7");
     });
 
-    test("3. user can deploy the seeded pending token and see it become active", async ({
+    test("3. user only sees configured extension rows on the allowlist-enabled token", async ({
+      page,
+    }) => {
+      await gotoToken(page, fixtures.tokens.allowlisted.id);
+      await openTab(page, "Extensions");
+
+      await expect(page.getByTestId("extension-row-template")).toContainText("stablecoin");
+      await expect(page.getByTestId("extension-row-control-list")).toContainText("Allowlist");
+      await expect(page.getByTestId("extension-row-mintable")).toContainText("Enabled");
+      await expect(page.getByTestId("extension-row-freezable")).toContainText("Enabled");
+      await expect(page.getByTestId("extension-row-default-account-state")).toContainText("frozen");
+
+      await expect(page.getByTestId("extension-row-transfer-fee")).toHaveCount(0);
+      await expect(page.getByTestId("extension-row-scaled-ui")).toHaveCount(0);
+      await expect(page.getByTestId("extension-row-transfer-hook")).toHaveCount(0);
+      await expect(page.getByTestId("extension-row-interest-bearing")).toHaveCount(0);
+      await expect(page.getByTestId("extension-row-non-transferable")).toHaveCount(0);
+    });
+
+    test("4. user can deploy the seeded pending token and see it become active", async ({
       page,
     }) => {
       await gotoToken(page, fixtures.tokens.pending.id);
@@ -181,7 +210,7 @@ test.describe
       await expect(page.getByRole("button", { name: "Deploy" })).toHaveCount(0);
     });
 
-    test("4. user can update metadata on the seeded active token", async ({ page }) => {
+    test("5. user can update metadata on the seeded active token", async ({ page }) => {
       const updatedName = "E2E Allowlist Stable Updated";
       const updatedDescription = "Updated by Playwright issuance e2e.";
       const updatedUri = "https://example.com/metadata/e2e-allowlisted-stable-updated.json";
@@ -206,7 +235,7 @@ test.describe
       await expect(page.getByLabel("Image URL")).toHaveValue(updatedImageUrl);
     });
 
-    test("5. user can update an authority including the None confirmation flow", async ({
+    test("6. user can update an authority including the None confirmation flow", async ({
       page,
     }) => {
       const rowTestId = "permission-row-permanent-delegate";
@@ -236,7 +265,7 @@ test.describe
       await waitForPermissionRowValue(page, rowTestId, "None");
     });
 
-    test("6. user can add and remove allowlist entries on the allowlist-enabled token", async ({
+    test("7. user can add and remove allowlist entries on the allowlist-enabled token", async ({
       page,
     }) => {
       await gotoToken(page, fixtures.tokens.allowlisted.id);
@@ -262,7 +291,24 @@ test.describe
       await expect(page.getByTestId("allowlist-summary-card")).toContainText("0 entries");
     });
 
-    test("7. user can mint and burn tokens with supply and transactions updating", async ({
+    test("8. user sees denylist controls on the open stablecoin token", async ({ page }) => {
+      await gotoToken(page, fixtures.tokens.open.id);
+      await openTab(page, "Compliance");
+
+      await expect(page.getByRole("button", { name: "Denylist", exact: true })).toBeVisible();
+      await expect(
+        page.getByText("Manage the blocked destination addresses for this token.")
+      ).toBeVisible();
+      await page.getByRole("button", { name: "Freeze", exact: true }).click();
+      await expect(
+        page.getByText(
+          "Need to restrict a wallet before it has a token account? Add it to the denylist first."
+        )
+      ).toBeVisible();
+      await expect(page.getByTestId("allowlist-summary-card")).toContainText("Denylist Entries");
+    });
+
+    test("9. user can mint and burn tokens with supply and transactions updating", async ({
       page,
     }) => {
       await gotoToken(page, fixtures.tokens.open.id);
@@ -296,7 +342,7 @@ test.describe
       await expect(page.getByTestId("fund-management-row-burn")).toBeVisible();
     });
 
-    test("8. user can freeze and unfreeze using a wallet address in the UI", async ({ page }) => {
+    test("10. user can freeze and unfreeze using a wallet address in the UI", async ({ page }) => {
       await gotoToken(page, fixtures.tokens.open.id);
 
       await openFundManagementAction(page, "mint");
@@ -332,7 +378,7 @@ test.describe
       await expect(page.getByTestId("frozen-accounts-summary-card")).toContainText("0 accounts");
     });
 
-    test("9. user can pause and unpause the token from compliance controls", async ({ page }) => {
+    test("11. user can pause and unpause the token from compliance controls", async ({ page }) => {
       await gotoToken(page, fixtures.tokens.open.id);
       await openTab(page, "Compliance");
 

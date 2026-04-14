@@ -8,6 +8,7 @@ import { Loader2 } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+import { getTokenAccessControlMode, hasAccessControlList } from "../access-control.utils";
 import { TokenActionConfirmationDialog } from "./token-action-confirmation-dialog";
 import { TokenActionForms } from "./token-action-forms";
 import { TokenAuthorityModal } from "./token-authority-modal";
@@ -46,6 +47,7 @@ import {
   findWalletByWalletId,
   getBurnValidationErrors,
   getBurnValidationReason,
+  getControlListCopy,
   getDefaultActionForTab,
   getDisplayedAuthorityAddress,
   getExplorerHref,
@@ -87,23 +89,23 @@ function isTokenManagementTab(value: string | null): value is TokenManagementTab
 function getDefaultActionForActiveTab({
   tab,
   canDeployToken,
-  showAllowlistControls,
+  showControlList,
   canManageTokenAdmin,
 }: {
   tab: TokenManagementTab;
   canDeployToken: boolean;
-  showAllowlistControls: boolean;
+  showControlList: boolean;
   canManageTokenAdmin: boolean;
 }): AdminAction | null {
   if (tab === "fund-management" && canDeployToken) {
     return null;
   }
 
-  if (tab === "compliance" && !showAllowlistControls && canManageTokenAdmin) {
+  if (tab === "compliance" && !showControlList && canManageTokenAdmin) {
     return "freeze";
   }
 
-  if (tab === "compliance" && (!showAllowlistControls || !canManageTokenAdmin)) {
+  if (tab === "compliance" && (!showControlList || !canManageTokenAdmin)) {
     return null;
   }
 
@@ -232,13 +234,15 @@ export function TokenManagementWorkspace({
   const [freezeForm, setFreezeForm] = useState(createInitialFreezeForm);
   const [allowlistForm, setAllowlistForm] = useState(createInitialAllowlistForm);
   const canManageTokenAdmin = dashboardAccess.capabilities.canManageTokenAdmin;
-  const showAllowlistControls = token.requiresAllowlist;
+  const accessControlMode = getTokenAccessControlMode(token);
+  const controlListCopy = getControlListCopy(accessControlMode);
+  const showControlList = hasAccessControlList(accessControlMode);
   const visibleManagementTabs = useMemo(
     () =>
       managementTabs.filter(
-        (tab) => tab.id !== "compliance" || showAllowlistControls || canManageTokenAdmin
+        (tab) => tab.id !== "compliance" || showControlList || canManageTokenAdmin
       ),
-    [canManageTokenAdmin, showAllowlistControls]
+    [canManageTokenAdmin, showControlList]
   );
   const requestedTabParam = searchParams.get("tab");
   const requestedTab = isTokenManagementTab(requestedTabParam) ? requestedTabParam : null;
@@ -500,7 +504,7 @@ export function TokenManagementWorkspace({
   });
   const extensionRows = getExtensionRows(token);
   const complianceActions: Array<{ id: AdminAction; label: string }> = [
-    ...(showAllowlistControls ? [{ id: "allowlist" as const, label: "Allowlist" }] : []),
+    ...(controlListCopy ? [{ id: "allowlist" as const, label: controlListCopy.label }] : []),
     ...(canManageTokenAdmin
       ? [
           { id: "seize" as const, label: "Force transfer" },
@@ -554,6 +558,7 @@ export function TokenManagementWorkspace({
     source: seizeForm.source,
     destination: seizeForm.destination,
     amount: seizeForm.amount,
+    allowlistEntries,
     walletOptions: authorityWallets,
   });
   const seizeValidationErrors = getSeizeValidationErrors({
@@ -561,6 +566,7 @@ export function TokenManagementWorkspace({
     source: seizeForm.source,
     destination: seizeForm.destination,
     amount: seizeForm.amount,
+    allowlistEntries,
     walletOptions: authorityWallets,
   });
   const forceBurnValidationReason = getForceBurnValidationReason({
@@ -638,7 +644,7 @@ export function TokenManagementWorkspace({
     const nextDefaultAction = getDefaultActionForActiveTab({
       tab: activeTab,
       canDeployToken,
-      showAllowlistControls,
+      showControlList,
       canManageTokenAdmin,
     });
 
@@ -647,7 +653,7 @@ export function TokenManagementWorkspace({
         ? currentAction
         : nextDefaultAction
     );
-  }, [activeTab, canDeployToken, showAllowlistControls, canManageTokenAdmin]);
+  }, [activeTab, canDeployToken, showControlList, canManageTokenAdmin]);
 
   useEffect(() => {
     if (activeTab !== "fund-management" && fundManagementModalAction) {
@@ -1017,12 +1023,12 @@ export function TokenManagementWorkspace({
   const handleAddAllowlist = () => {
     const address = allowlistForm.address.trim();
     if (!address) {
-      toast.error("Allowlist address is required.");
+      toast.error(controlListCopy?.addressRequiredMessage ?? "Allowlist address is required.");
       return;
     }
 
     runAction({
-      label: "Add allowlist entry",
+      label: controlListCopy?.addActionLabel ?? "Add allowlist entry",
       method: "POST",
       path: `${tokenBasePath}/allowlist`,
       body: {
@@ -1034,7 +1040,7 @@ export function TokenManagementWorkspace({
 
   const handleRemoveAllowlist = (entryId: string) => {
     runAction({
-      label: "Remove allowlist entry",
+      label: controlListCopy?.removeActionLabel ?? "Remove allowlist entry",
       method: "DELETE",
       path: `${tokenBasePath}/allowlist/${entryId}`,
     });
@@ -1244,6 +1250,11 @@ export function TokenManagementWorkspace({
         setAllowlistForm={setAllowlistForm}
         allowlistEntries={allowlistEntries}
         allowlistError={allowlistError}
+        controlListLabel={controlListCopy?.label ?? null}
+        controlListDescription={controlListCopy?.description ?? null}
+        controlListAddActionLabel={controlListCopy?.addActionLabel ?? "Add allowlist entry"}
+        controlListEmptyState={controlListCopy?.emptyState ?? "No allowlist entries yet."}
+        freezeHint={controlListCopy?.freezeHint ?? null}
         signerWallets={visibleActionSignerProps.signerWallets}
         walletOptions={authorityWallets}
         signerUnavailableReason={visibleActionSignerProps.signerUnavailableReason}
@@ -1406,7 +1417,8 @@ export function TokenManagementWorkspace({
             <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
               <div>{visibleActionForm}</div>
               <TokenControlListsSection
-                showAllowlist={showAllowlistControls}
+                showControlList={showControlList}
+                controlListLabel={controlListCopy?.label ?? null}
                 allowlistEntriesCount={allowlistEntries.length}
                 allowlistError={allowlistError}
                 allowlistTotal={allowlistTotal}
@@ -1522,6 +1534,11 @@ export function TokenManagementWorkspace({
             setAllowlistForm={setAllowlistForm}
             allowlistEntries={allowlistEntries}
             allowlistError={allowlistError}
+            controlListLabel={controlListCopy?.label ?? null}
+            controlListDescription={controlListCopy?.description ?? null}
+            controlListAddActionLabel={controlListCopy?.addActionLabel ?? "Add allowlist entry"}
+            controlListEmptyState={controlListCopy?.emptyState ?? "No allowlist entries yet."}
+            freezeHint={controlListCopy?.freezeHint ?? null}
             signerWallets={fundManagementActionSignerProps.signerWallets}
             walletOptions={authorityWallets}
             signerUnavailableReason={fundManagementActionSignerProps.signerUnavailableReason}

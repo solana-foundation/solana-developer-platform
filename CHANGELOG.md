@@ -1,5 +1,40 @@
 # Changelog
 
+## [0.16.2](https://github.com/solana-foundation/solana-developer-platform/compare/v0.16.1...v0.16.2) (2026-04-13)
+
+### Bug Fixes
+
+* add tos notice to auth pages ([#184](https://github.com/solana-foundation/solana-developer-platform/pull/184)) ([ff7d87f](https://github.com/solana-foundation/solana-developer-platform/commit/ff7d87f3e52b9a7483c626a3bb1696266fec3491))
+
+## [0.16.1](https://github.com/solana-foundation/solana-developer-platform/compare/v0.16.0...v0.16.1) (2026-04-13)
+
+### Other Changes
+
+* default new organizations to enterprise tier ([#182](https://github.com/solana-foundation/solana-developer-platform/pull/182)) ([41662a3](https://github.com/solana-foundation/solana-developer-platform/commit/41662a34a8c7d707e6d42cd37ee749b301a6b14d))
+
+## [0.16.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.15.2...v0.16.0) (2026-04-13)
+
+### Features
+
+* add issuance allowlist and denylist controls ([#179](https://github.com/solana-foundation/solana-developer-platform/pull/179)) ([8a8e16b](https://github.com/solana-foundation/solana-developer-platform/commit/8a8e16b2a539b7f22cb3ac6efac29057dc5a5f4b))
+
+### Bug Fixes
+
+* make homepage dashboard CTA sign in ([#181](https://github.com/solana-foundation/solana-developer-platform/pull/181)) ([8b61a97](https://github.com/solana-foundation/solana-developer-platform/commit/8b61a972e06696d0a204c22b79f9309f9f38dac0))
+* **sdp-web:** restore landing sign-in button ([#173](https://github.com/solana-foundation/solana-developer-platform/pull/173)) ([98f4b15](https://github.com/solana-foundation/solana-developer-platform/commit/98f4b151b8235c790f309d20a9becb20b2e76ad8))
+
+## [0.15.2](https://github.com/solana-foundation/solana-developer-platform/compare/v0.15.1...v0.15.2) (2026-04-13)
+
+### Bug Fixes
+
+* support configurable issuance token setup ([#177](https://github.com/solana-foundation/solana-developer-platform/pull/177)) ([21cc4ad](https://github.com/solana-foundation/solana-developer-platform/commit/21cc4ad3371f8478385a3b1b8eb240882cacb01a))
+
+## [0.15.1](https://github.com/solana-foundation/solana-developer-platform/compare/v0.15.0...v0.15.1) (2026-04-13)
+
+### Bug Fixes
+
+* remove SOL balances from payments UI (PRO-1126) ([#175](https://github.com/solana-foundation/solana-developer-platform/pull/175)) ([93db592](https://github.com/solana-foundation/solana-developer-platform/commit/93db59259b7b909bb54c2ccf3cb314853445ac39))
+
 ## [0.15.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.14.7...v0.15.0) (2026-04-10)
 
 ### Features

@@ -1,6 +1,8 @@
+import type { AccessControlMode } from "./access-control.utils";
+export type { AccessControlMode } from "./access-control.utils";
+
 export type TemplateSelection = "stablecoin" | "custom" | "tokenized-security";
 export type CreationStep = "identity" | "features";
-export type AccessControlMode = "allowlist" | "blocklist";
 
 export type FlowState =
   | {
@@ -18,7 +20,7 @@ export interface TokenDraft {
   name: string;
   symbol: string;
   signingWalletId: string;
-  decimals: "" | "0" | "6" | "8" | "9";
+  decimals: string;
   accessControlMode: AccessControlMode;
 }
 

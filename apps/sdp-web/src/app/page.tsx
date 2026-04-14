@@ -20,6 +20,12 @@ export default function Home() {
             >
               Docs
             </Link>
+            <Link
+              href="/sign-in"
+              className="inline-flex h-9 items-center justify-center rounded-lg bg-[#0f0f10] px-3 text-sm font-semibold text-white transition-colors hover:bg-black"
+            >
+              Dashboard
+            </Link>
           </div>
         </div>
       </header>

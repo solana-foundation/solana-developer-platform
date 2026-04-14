@@ -1,7 +1,11 @@
 import { BadgeDollarSign, CircleHelp, ShieldCheck } from "lucide-react";
+import {
+  type AccessControlMode,
+  getDefaultAccessControlMode as getDefaultModeForTemplate,
+  supportsBlocklistMode,
+} from "./access-control.utils";
 import type { CreateIssuanceTokenResult } from "./actions";
 import type {
-  AccessControlMode,
   TemplateCardDescriptor,
   TemplateSelection,
   TokenDraft,
@@ -56,7 +60,7 @@ export function createInitialDraft(): TokenDraft {
     symbol: "",
     signingWalletId: "",
     decimals: "",
-    accessControlMode: "blocklist",
+    accessControlMode: "disabled",
   };
 }
 
@@ -99,57 +103,82 @@ export function getTemplateDefaultDecimals(template: TemplateSelection): TokenDr
   }
 }
 
-export function getTemplateDecimalOptions(
-  template: TemplateSelection
-): ReadonlyArray<TokenDraft["decimals"]> {
-  switch (template) {
-    case "stablecoin":
-    case "custom":
-      return ["6", "9"];
-    case "tokenized-security":
-      return ["8"];
-    default:
-      return ["6", "9"];
-  }
-}
-
 export function getDefaultAccessControlMode(template: TemplateSelection): AccessControlMode {
-  return template === "tokenized-security" ? "allowlist" : "blocklist";
+  return getDefaultModeForTemplate(template);
 }
 
-export function getAccessControlAvailability(
+export function isAccessControlModeAvailable(
   template: TemplateSelection,
   mode: AccessControlMode
-): {
-  available: boolean;
-  note: string;
-} {
-  if (template === "tokenized-security") {
-    if (mode === "allowlist") {
-      return {
-        available: true,
-        note: "Required for this template.",
-      };
-    }
-    return {
-      available: false,
-      note: "This template cannot be created without an allowlist.",
-    };
-  }
-
-  return {
-    available: true,
-    note:
-      mode === "allowlist"
-        ? "Require approved destinations before minting or controlled transfers."
-        : "Create the token without an allowlist.",
-  };
-}
-
-export function toRequiresAllowlist(template: TemplateSelection, mode: AccessControlMode): boolean {
-  if (template === "tokenized-security") {
+): boolean {
+  if (mode === "allowlist") {
     return true;
   }
+
+  if (mode === "blocklist") {
+    return supportsBlocklistMode(template);
+  }
+
+  return template === "custom";
+}
+
+export function getAccessControlOptions(template: TemplateSelection): Array<{
+  mode: AccessControlMode;
+  title: string;
+  description: string;
+  note: string;
+}> {
+  if (template === "stablecoin") {
+    return [
+      {
+        mode: "blocklist",
+        title: "Denylist",
+        description: "Listed destinations are blocked before they can receive controlled actions.",
+        note: "Recommended default for stablecoins.",
+      },
+      {
+        mode: "allowlist",
+        title: "Allowlist",
+        description: "Only approved destinations can receive controlled token actions.",
+        note: "Use when transfers must stay inside a known set of wallets.",
+      },
+    ];
+  }
+
+  if (template === "tokenized-security") {
+    return [
+      {
+        mode: "allowlist",
+        title: "Allowlist",
+        description: "Only approved destinations can receive controlled token actions.",
+        note: "Default for tokenized securities.",
+      },
+      {
+        mode: "blocklist",
+        title: "Denylist",
+        description: "Listed destinations are blocked before they can receive controlled actions.",
+        note: "Use when the token should remain open except for blocked wallets.",
+      },
+    ];
+  }
+
+  return [
+    {
+      mode: "disabled",
+      title: "Disabled",
+      description: "This token will not use a transfer control list.",
+      note: "Best for unrestricted custom tokens.",
+    },
+    {
+      mode: "allowlist",
+      title: "Allowlist",
+      description: "Only approved destinations can receive controlled token actions.",
+      note: "Enable this when the token needs restricted transfer access.",
+    },
+  ];
+}
+
+export function toRequiresAllowlist(mode: AccessControlMode): boolean {
   return mode === "allowlist";
 }
 
@@ -168,8 +197,31 @@ export function isValidMetadataUri(value: string): boolean {
 }
 
 export function normalizeSymbol(symbol: string): string {
-  return symbol
-    .toUpperCase()
-    .replace(/[^A-Z0-9.]/g, "")
-    .slice(0, 10);
+  return symbol.replace(/[^A-Za-z0-9.]/g, "").slice(0, 10);
+}
+
+export function isValidTokenSymbol(symbol: string): boolean {
+  return /^[A-Za-z0-9.]{1,10}$/.test(symbol);
+}
+
+export function isValidTokenDecimals(value: string): boolean {
+  if (!/^\d+$/.test(value)) {
+    return false;
+  }
+
+  const parsed = Number.parseInt(value, 10);
+  return parsed >= 0 && parsed <= 18;
+}
+
+export function getDecimalsHelperText(template: TemplateSelection): string {
+  switch (template) {
+    case "stablecoin":
+      return "Stablecoin defaults to 6 decimals, but you can choose any value from 0 to 18.";
+    case "custom":
+      return "Custom tokens default to 9 decimals. Choose any value from 0 to 18.";
+    case "tokenized-security":
+      return "Tokenized Security defaults to 8 decimals, but you can choose any value from 0 to 18.";
+    default:
+      return "Choose any value from 0 to 18.";
+  }
 }

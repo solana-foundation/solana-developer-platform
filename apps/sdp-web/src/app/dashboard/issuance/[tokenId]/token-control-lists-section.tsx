@@ -3,7 +3,8 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 interface TokenControlListsSectionProps {
-  showAllowlist: boolean;
+  showControlList: boolean;
+  controlListLabel: string | null;
   allowlistEntriesCount: number;
   allowlistError: string | null;
   allowlistTotal: number | null;
@@ -15,7 +16,8 @@ interface TokenControlListsSectionProps {
 }
 
 export function TokenControlListsSection({
-  showAllowlist,
+  showControlList,
+  controlListLabel,
   allowlistEntriesCount,
   allowlistError,
   allowlistTotal,
@@ -25,21 +27,25 @@ export function TokenControlListsSection({
   frozenAccountsTotal,
   frozenAccountsHasMore,
 }: TokenControlListsSectionProps) {
+  const controlListSummaryTitle = controlListLabel ? `${controlListLabel} Entries` : "Control List";
+  const controlListDescription =
+    showControlList && controlListLabel
+      ? `${controlListLabel} entries and frozen account status`
+      : "Frozen account status";
+
   return (
     <Card className="gap-4">
       <CardHeader>
         <CardTitle>Control Lists</CardTitle>
-        <CardDescription>
-          {showAllowlist ? "Allowlist entries and frozen account status" : "Frozen account status"}
-        </CardDescription>
+        <CardDescription>{controlListDescription}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        {showAllowlist ? (
+        {showControlList ? (
           <div
             data-testid="allowlist-summary-card"
             className="rounded-xl border border-[rgba(28,28,29,0.12)] p-3"
           >
-            <p className="text-sm font-medium text-[#1c1c1d]">Allowlist Entries</p>
+            <p className="text-sm font-medium text-[#1c1c1d]">{controlListSummaryTitle}</p>
             {allowlistError ? (
               <p className="mt-1 text-sm text-[#8a1f2a]">{allowlistError}</p>
             ) : (

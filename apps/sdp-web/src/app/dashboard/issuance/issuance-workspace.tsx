@@ -272,7 +272,7 @@ export function IssuanceWorkspace({
                       </div>
                     );
                   })()}
-                  <p className="text-sm font-medium tracking-wide text-[rgba(28,28,29,0.58)] uppercase">
+                  <p className="text-sm font-medium tracking-wide text-[rgba(28,28,29,0.58)]">
                     {token.symbol}
                   </p>
                   <h3 className="mt-1 text-[30px] leading-[1.1] font-medium text-[#1c1c1d]">

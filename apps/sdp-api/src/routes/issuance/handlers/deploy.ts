@@ -14,6 +14,7 @@ import type { Address } from "@solana/kit";
 import { TOKEN_ACL_PROGRAM_ID } from "@solana/mosaic-sdk";
 import type { Context } from "hono";
 import { deployTokenSchema } from "../schemas";
+import { getMosaicAclMode, shouldEnableOnChainAcl } from "./access-control";
 import { getInitialPermanentDelegateAuthority } from "./authority-resolution";
 import { buildIdempotencyMetadata } from "./idempotency";
 
@@ -95,7 +96,8 @@ export const deployToken = async (c: AppContext) => {
   );
 
   // Deploy using Mosaic templates - handles ABL setup automatically
-  const enableAbl = token.requiresAllowlist && c.env.SOLANA_NETWORK === "mainnet-beta";
+  const enableAbl = shouldEnableOnChainAcl(token, c.env.SOLANA_NETWORK);
+  const aclMode = getMosaicAclMode(token);
 
   try {
     // Get custody signer (resolves via 3-tier: project → org → env fallback)
@@ -122,8 +124,8 @@ export const deployToken = async (c: AppContext) => {
       freezeAuthority: token.isFreezable ? custodyAddress : null,
       feePayer: signer,
       extensions: token.extensions ?? undefined,
-      // Enable on-chain ABL for templates that require allowlist
       enableAbl,
+      aclMode,
     });
 
     const enableSrfc37 = enableAbl && token.isFreezable;
@@ -160,6 +162,7 @@ export const deployToken = async (c: AppContext) => {
         mintAuthority: custodyAddress,
         freezeAuthority: token.isFreezable ? custodyAddress : null,
         ablListAddress: result.listAddress,
+        aclMode,
       },
     });
 
@@ -175,6 +178,7 @@ export const deployToken = async (c: AppContext) => {
         slot: result.slot.toString(),
         template: token.template,
         ablListAddress: result.listAddress,
+        aclMode,
       },
     });
 
@@ -236,7 +240,8 @@ export const prepareDeploy = async (c: AppContext) => {
   // Create Mosaic service and prepare transaction
   const mosaic = createMosaicService(c.env, signer);
 
-  const enableAbl = token.requiresAllowlist && c.env.SOLANA_NETWORK === "mainnet-beta";
+  const enableAbl = shouldEnableOnChainAcl(token, c.env.SOLANA_NETWORK);
+  const aclMode = getMosaicAclMode(token);
 
   const prepared = await mosaic.prepareCreateToken({
     template: token.template,
@@ -251,6 +256,7 @@ export const prepareDeploy = async (c: AppContext) => {
     feePayer: signer,
     extensions: token.extensions ?? undefined,
     enableAbl,
+    aclMode,
   });
 
   const rpc = createRpc(c.env);
@@ -267,6 +273,7 @@ export const prepareDeploy = async (c: AppContext) => {
       mode: "prepare",
       mint: prepared.mint,
       template: token.template,
+      aclMode,
     },
   });
 

@@ -125,6 +125,7 @@ export const errorCodeSchema = z
     "TOKEN_NOT_DEPLOYED",
     "TOKEN_PAUSED",
     "NOT_ON_TOKEN_ALLOWLIST",
+    "ON_TOKEN_BLOCKLIST",
     "ACCOUNT_FROZEN",
     "ACCOUNT_NOT_FROZEN",
     "MAX_SUPPLY_EXCEEDED",
