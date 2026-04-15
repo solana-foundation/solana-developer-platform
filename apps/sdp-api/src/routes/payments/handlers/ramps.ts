@@ -1194,7 +1194,7 @@ async function executeRampWithProvider(
   const provider = await resolveRampProvider(c, input.provider, scope.auth.organizationId);
 
   if (input.direction === "onramp") {
-    return provider.executeOnramp(c, scope, input);
+    return await provider.executeOnramp(c, scope, input);
   }
 
   const sourceWallet = scope.wallets.find(
@@ -1211,7 +1211,7 @@ async function executeRampWithProvider(
     });
   }
 
-  return provider.executeOfframp(c, scope, input);
+  return await provider.executeOfframp(c, scope, input);
 }
 
 export async function executeOnramp(c: AppContext) {

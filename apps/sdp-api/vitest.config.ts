@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
-import { defineWorkersConfig } from "@cloudflare/vitest-pool-workers/config";
+import { cloudflareTest } from "@cloudflare/vitest-pool-workers";
+import { defineConfig } from "vitest/config";
 
 const DEV_VARS_PATH = path.resolve(__dirname, ".dev.vars");
 
@@ -35,7 +36,24 @@ const getEnv = (key: string, fallback?: string) => process.env[key] ?? fileEnv[k
 // biome-ignore lint/nursery/noSecrets: Local Docker Postgres fallback for isolated tests.
 const databaseUrl = getEnv("DATABASE_URL", "postgresql://sdp:sdp@127.0.0.1:5432/sdp");
 
-export default defineWorkersConfig({
+export default defineConfig({
+  plugins: [
+    cloudflareTest({
+      wrangler: {
+        configPath: "./wrangler.toml",
+      },
+      miniflare: {
+        bindings: {
+          ENVIRONMENT: "development",
+          API_VERSION: "v1",
+          HYPERDRIVE: { connectionString: databaseUrl },
+          API_KEY_PEPPER: "test-pepper-for-unit-tests",
+          SOLANA_MOCK: "true",
+          RUN_INTEGRATION_TESTS: "false",
+        },
+      },
+    }),
+  ],
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
@@ -46,25 +64,8 @@ export default defineWorkersConfig({
     globals: true,
     setupFiles: ["src/test/setup.ts"],
     fileParallelism: false,
-    poolOptions: {
-      workers: {
-        singleWorker: true,
-        isolatedStorage: false,
-        wrangler: {
-          configPath: "./wrangler.toml",
-        },
-        miniflare: {
-          bindings: {
-            ENVIRONMENT: "development",
-            API_VERSION: "v1",
-            HYPERDRIVE: { connectionString: databaseUrl },
-            API_KEY_PEPPER: "test-pepper-for-unit-tests",
-            SOLANA_MOCK: "true",
-            RUN_INTEGRATION_TESTS: "false",
-          },
-        },
-      },
-    },
+    isolate: false,
+    maxWorkers: 1,
     include: ["src/**/*.test.ts", "src/**/*.spec.ts", "src/__tests__/**/*.unit.ts"],
     exclude: ["node_modules", ".wrangler", "dist"],
     coverage: {

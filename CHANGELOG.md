@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.16.3](https://github.com/solana-foundation/solana-developer-platform/compare/v0.16.2...v0.16.3) (2026-04-14)
+
+### Maintenance
+
+* Remediate high severity dependency advisories ([#174](https://github.com/solana-foundation/solana-developer-platform/pull/174)) ([d986a6b](https://github.com/solana-foundation/solana-developer-platform/commit/d986a6b5ba8fd4b76b31bffede9019e943aa75c8))
+
 ## [0.16.2](https://github.com/solana-foundation/solana-developer-platform/compare/v0.16.1...v0.16.2) (2026-04-13)
 
 ### Bug Fixes

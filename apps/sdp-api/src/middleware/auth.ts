@@ -359,7 +359,7 @@ export function unifiedAuthMiddleware(
     const apiKey = extractApiKey(c);
     if (apiKey && looksLikeApiKey(apiKey)) {
       const authMw = authMiddleware();
-      return authMw(c, next);
+      return await authMw(c, next);
     }
 
     const bearerToken = extractBearerToken(c);
@@ -369,14 +369,14 @@ export function unifiedAuthMiddleware(
       // so invalid formats return INVALID_API_KEY consistently.
       if (looksLikeApiKey(bearerToken) || !looksLikeJwt(bearerToken)) {
         const authMw = authMiddleware();
-        return authMw(c, next);
+        return await authMw(c, next);
       }
 
       // JWT bearer token path (Clerk)
       if (options.allowClerk) {
         const { clerkAuthMiddleware } = await import("./clerk-auth");
         const clerkMw = clerkAuthMiddleware();
-        return clerkMw(c, next);
+        return await clerkMw(c, next);
       }
     }
 
@@ -384,7 +384,7 @@ export function unifiedAuthMiddleware(
     if (options.allowSession) {
       const { sessionAuthMiddleware } = await import("./session-auth");
       const sessionMw = sessionAuthMiddleware();
-      return sessionMw(c, next);
+      return await sessionMw(c, next);
     }
 
     throw new AppError("UNAUTHORIZED", "API key required");
