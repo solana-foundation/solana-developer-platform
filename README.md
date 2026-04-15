@@ -2,6 +2,13 @@
 
 Maintainer guidance for Doppler-backed secrets and deploy setup lives in [docs/ops/doppler-secrets.md](docs/ops/doppler-secrets.md).
 
+## Community & Governance
+
+- [License](./LICENSE)
+- [Security policy](./SECURITY.md)
+- [Contributing guide](./CONTRIBUTING.md)
+- [Code owners](./.github/CODEOWNERS)
+
 ## Release Operations
 
 This repo uses a two-environment release model for the API:
