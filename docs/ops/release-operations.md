@@ -113,7 +113,7 @@ git merge feat/your-feature
 git push origin main
 ```
 
-The `main` branch automatically deploys to the **dev environment** via the [Deploy SDP API workflow](.github/workflows/deploy-sdp-api.yml).
+The `main` branch automatically deploys to the **dev environment** via the [Deploy SDP API workflow](../../.github/workflows/deploy-sdp-api.yml).
 
 ### 3. Release Please Opens a Release PR
 
@@ -135,7 +135,7 @@ Example release PR title: `chore(release): v1.2.0`
 When you merge the release PR:
 
 1. Release Please creates a Git tag (e.g., `v1.2.0`)
-2. The tag push triggers the [Deploy SDP API workflow](.github/workflows/deploy-sdp-api.yml)
+2. The tag push triggers the [Deploy SDP API workflow](../../.github/workflows/deploy-sdp-api.yml)
 3. The workflow:
    - Runs migrations (if applicable)
    - Deploys to **production environment**
@@ -209,7 +209,7 @@ The CI/CD pipeline automatically:
 4. **Syncs secrets to Cloudflare** (via Doppler)
 5. **Deploys to Cloudflare Workers** (via `wrangler deploy`)
 
-See [`.github/workflows/deploy-sdp-api.yml`](.github/workflows/deploy-sdp-api.yml) for implementation details.
+See [`.github/workflows/deploy-sdp-api.yml`](../../.github/workflows/deploy-sdp-api.yml) for implementation details.
 
 ---
 
@@ -253,4 +253,4 @@ See [`.github/workflows/deploy-sdp-api.yml`](.github/workflows/deploy-sdp-api.ym
 - **Release Please docs**: https://github.com/googleapis/release-please
 - **Doppler setup**: [`docs/ops/doppler-secrets.md`](doppler-secrets.md)
 - **Cloudflare resource IDs**: [`docs/ops/cloudflare-resource-ids.md`](cloudflare-resource-ids.md)
-- **Deploy workflow**: [`.github/workflows/deploy-sdp-api.yml`](.github/workflows/deploy-sdp-api.yml)
+- **Deploy workflow**: [`.github/workflows/deploy-sdp-api.yml`](../../.github/workflows/deploy-sdp-api.yml)
