@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-KORA_RPC_URL="${KORA_RPC_URL:-https://kora-devnet-315956366746.us-central1.run.app}"
+KORA_RPC_URL="${KORA_RPC_URL:-https://your-kora-devnet-instance.us-central1.run.app}"
 
 headers=(-H "Content-Type: application/json")
 if [[ -n "${KORA_API_KEY:-}" ]]; then
