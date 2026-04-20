@@ -50,7 +50,7 @@
     "kora:devnet:test": "pnpm --filter @sdp/api-integration test -- src/tests/kora.test.ts"
   },
   "devDependencies": {
-    "@biomejs/biome": "^1.9.0",
+    "@biomejs/biome": "^2.4.11",
     "turbo": "^2.4.0",
     "typescript": "^5.8.0"
   },
