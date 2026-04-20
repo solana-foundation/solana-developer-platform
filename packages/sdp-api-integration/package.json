@@ -10,12 +10,12 @@
   "dependencies": {
     "@sdp/types": "workspace:*",
     "@solana-program/system": "catalog:",
-    "@solana/keychain-cdp": "1.0.1",
-    "@solana/keychain-para": "1.0.1",
+    "@solana/keychain-cdp": "1.1.0",
+    "@solana/keychain-para": "1.1.0",
     "@solana/kit": "catalog:"
   },
   "devDependencies": {
-    "@cloudflare/vitest-pool-workers": "^0.14.3",
+    "@cloudflare/vitest-pool-workers": "^0.14.5",
     "@cloudflare/workers-types": "^4.20260413.1",
     "typescript": "^5.8.0",
     "vitest": "^4.1.4"
