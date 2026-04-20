@@ -52,7 +52,7 @@
   "devDependencies": {
     "@biomejs/biome": "^1.9.0",
     "turbo": "^2.4.0",
-    "typescript": "^5.8.0"
+    "typescript": "^6.0.2"
   },
   "overrides": {
     "@solana/rpc-spec": "6.5.0",
