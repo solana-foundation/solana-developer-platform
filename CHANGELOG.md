@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.6](https://github.com/solana-foundation/solana-developer-platform/compare/v0.16.5...v0.16.6) (2026-04-20)
+
+### Maintenance
+
+* **deps:** bundle toolchain updates ([#216](https://github.com/solana-foundation/solana-developer-platform/pull/216)) ([fc0a4fe](https://github.com/solana-foundation/solana-developer-platform/commit/fc0a4fe01ac12a7d16ab475c67f734aa1966cd47))
+* **deps:** bundle zod openapi updates ([#214](https://github.com/solana-foundation/solana-developer-platform/pull/214)) ([71e6b29](https://github.com/solana-foundation/solana-developer-platform/commit/71e6b297e9ef95fbba8578b984e5cb4872488ac0))
+
 ## [0.16.5](https://github.com/solana-foundation/solana-developer-platform/compare/v0.16.4...v0.16.5) (2026-04-20)
 
 ### Bug Fixes
