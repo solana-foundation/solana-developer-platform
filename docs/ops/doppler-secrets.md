@@ -4,7 +4,8 @@ SDP now treats Doppler as the single source of truth for secret and environment-
 
 The runtime model does not change:
 
-- `wrangler.toml` remains the source of truth for Worker bindings and committed non-secret vars
+- `wrangler.toml` remains the source of truth for Worker binding names and committed local defaults
+- environment-specific Cloudflare binding IDs live in Doppler and are rendered into a temporary Wrangler config during deploy
 - Cloudflare remains the deployed runtime store for Worker secrets
 - Vercel remains the deployed runtime store for `sdp-web` and `sdp-docs`
 - GitHub Actions keeps only Doppler bootstrap tokens plus non-secret deploy metadata
@@ -66,6 +67,12 @@ At minimum, the Doppler configs used by automation must include:
 - Cloudflare deploy credentials:
   - `CLOUDFLARE_API_TOKEN`
   - `CLOUDFLARE_ACCOUNT_ID`
+- Cloudflare deploy binding IDs:
+  - `CLOUDFLARE_HYPERDRIVE_ID`
+  - `CLOUDFLARE_KV_SDP_API_KEYS_ID`
+  - `CLOUDFLARE_KV_SDP_RATE_LIMITS_ID`
+  - `CLOUDFLARE_KV_SDP_CACHE_ID`
+  - `CLOUDFLARE_KV_SDP_SESSIONS_ID`
 - API deploy and migration values:
   - `DATABASE_URL`
   - `API_KEY_PEPPER`
@@ -110,10 +117,10 @@ Do not keep `apps/sdp-api/.dev.vars` in place while using `doppler run`. The loc
 ## CI and Deploy Behavior
 
 - Secret-aware CI jobs fetch runtime env directly from Doppler with `DOPPLER_TOKEN_CI`.
-- The API deploy workflow fetches deploy-time env from the target Doppler config using the GitHub environment secret `DOPPLER_TOKEN`.
+- The API deploy workflow fetches deploy-time env from the target Doppler config using the GitHub environment secret `DOPPLER_TOKEN` and the Doppler Secrets Fetch action.
 - The API deploy workflow reads non-secret Cloud SQL identity metadata from GitHub environment variables.
 - Postgres migrations connect through Google Workload Identity and Cloud SQL Auth Proxy; the Doppler `DATABASE_URL` host is rewritten to the local proxy only for the migration process.
-- The deploy workflow syncs the allowlisted Worker secret set via `wrangler secret bulk` before `wrangler deploy`.
+- The deploy workflow renders a temporary Wrangler config with Doppler-backed Cloudflare binding IDs, then syncs the allowlisted Worker secret set via `wrangler secret bulk` before `wrangler deploy`.
 
 Keep these deploy identity values in GitHub environment variables rather than Doppler:
 
