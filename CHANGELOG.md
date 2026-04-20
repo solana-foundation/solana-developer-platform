@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.16.4](https://github.com/solana-foundation/solana-developer-platform/compare/v0.16.3...v0.16.4) (2026-04-16)
+
+### Bug Fixes
+
+* **web:** make api key wallet modal scroll ([#191](https://github.com/solana-foundation/solana-developer-platform/pull/191)) ([e60ff1e](https://github.com/solana-foundation/solana-developer-platform/commit/e60ff1ee85e874f90b7b84ae19a3459ca274c448))
+
+### Maintenance
+
+* HOO-420 Sanitize tracked credentials and infra config ([#186](https://github.com/solana-foundation/solana-developer-platform/pull/186)) ([92dde21](https://github.com/solana-foundation/solana-developer-platform/commit/92dde21ef1a0a22f75ae873710f20aef7af9ee5f))
+
 ## [0.16.3](https://github.com/solana-foundation/solana-developer-platform/compare/v0.16.2...v0.16.3) (2026-04-14)
 
 ### Maintenance

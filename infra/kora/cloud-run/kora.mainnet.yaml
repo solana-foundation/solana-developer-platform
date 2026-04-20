@@ -16,9 +16,9 @@ spec:
     spec:
       # Replace with your runtime service account.
       # It should have Secret Manager access (secretAccessor) for the secrets below.
-      serviceAccountName: kora-runtime@analytics-324114.iam.gserviceaccount.com
+      serviceAccountName: kora-runtime@YOUR_GCP_PROJECT_ID.iam.gserviceaccount.com
       containers:
-        - image: us-central1-docker.pkg.dev/analytics-324114/kora-remote/solana-foundation/kora:latest
+        - image: us-central1-docker.pkg.dev/YOUR_GCP_PROJECT_ID/kora-remote/solana-foundation/kora:latest
           ports:
             - name: http1
               containerPort: 8080

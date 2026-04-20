@@ -72,12 +72,37 @@ The integration test suite runs against Solana **devnet** and signs real transac
 - Node `>=20`
 - `pnpm` (repo pins `pnpm@10.15.1`)
 
+### Required Environment Variables
+
+Integration tests require:
+
+- `SOLANA_RPC_URL`
+  - Example: `https://api.devnet.solana.com`
+- `KORA_RPC_URL`
+  - Example: `https://your-kora-devnet-instance.us-central1.run.app`
+- `PRIVY_APP_ID`
+- `PRIVY_APP_SECRET`
+
+Optional (recommended):
+
+- `KORA_API_KEY`
+  - Only required if your Kora endpoint needs it.
+- `KORA_MIN_BALANCE_LAMPORTS`
+  - Optional preflight threshold for the Kora fee payer balance.
+
 ### Run Integration Tests
 
 From the repo root:
 
 ```bash
 export DOPPLER_CONFIG=your-dev-config
+export SOLANA_RPC_URL="https://api.devnet.solana.com"
+export PRIVY_APP_ID="..."
+export PRIVY_APP_SECRET="..."
+
+export KORA_RPC_URL="https://your-kora-devnet-instance.us-central1.run.app"
+# export KORA_API_KEY="..."
+
 pnpm test:integration
 ```
 
