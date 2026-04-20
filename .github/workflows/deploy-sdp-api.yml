@@ -175,7 +175,8 @@ jobs:
 
       - name: Fetch Doppler config
         id: doppler
-        uses: dopplerhq/secrets-fetch-action@v2.0.0
+        # v2.0.0 pinned to an immutable commit because this action injects deploy secrets.
+        uses: dopplerhq/secrets-fetch-action@451892f16195f9ac360e1a5bcbf0b5fd0e957534
         with:
           doppler-token: ${{ secrets.DOPPLER_TOKEN }}
           inject-env-vars: true
