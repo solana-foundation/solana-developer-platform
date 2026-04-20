@@ -18,7 +18,7 @@ export const createProjectSchema = z.object({
       rpcProvider: projectRpcProviderSchema.optional(),
       rpcEndpoint: z.string().url().optional(),
       webhookUrl: z.string().url().optional(),
-      metadata: z.record(z.string()).optional(),
+      metadata: z.record(z.string(), z.string()).optional(),
     })
     .optional()
     .superRefine((value, ctx) => {
@@ -45,7 +45,7 @@ export const updateProjectSchema = z.object({
       rpcProvider: projectRpcProviderSchema.optional(),
       rpcEndpoint: z.string().url().optional(),
       webhookUrl: z.string().url().optional(),
-      metadata: z.record(z.string()).optional(),
+      metadata: z.record(z.string(), z.string()).optional(),
     })
     .nullable()
     .optional(),

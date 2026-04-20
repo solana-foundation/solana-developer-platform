@@ -11,7 +11,7 @@ import {
   updateAuthoritySchema as updateAuthoritySchemaBase,
   updateTokenSchema as updateTokenSchemaBase,
 } from "../../routes/issuance/schemas";
-import { z } from "./base";
+import { withOpenApi, z } from "./base";
 import {
   apiKeyIdParamSchema,
   base64Schema,
@@ -257,7 +257,7 @@ export const tokenTransactionSchema = z
       example: "AQID",
     }),
     params: z
-      .record(z.unknown())
+      .record(z.string(), z.unknown())
       .openapi({ description: "Operation parameters captured for audit." }),
     slot: z
       .number()
@@ -665,35 +665,35 @@ const templateOverridesOpenApiSchema = z
 
 export const createTokenRequestSchema = createTokenSchemaBase
   .extend({
-    name: createTokenSchemaBase.shape.name.openapi({
+    name: withOpenApi(createTokenSchemaBase.shape.name, {
       description: "Token name.",
       example: "Example Token",
     }),
-    symbol: createTokenSchemaBase.shape.symbol.openapi({
+    symbol: withOpenApi(createTokenSchemaBase.shape.symbol, {
       description: "Ticker symbol.",
       example: "EXM",
     }),
-    decimals: createTokenSchemaBase.shape.decimals.openapi({
+    decimals: withOpenApi(createTokenSchemaBase.shape.decimals, {
       description: "Token decimals.",
       example: 6,
     }),
-    description: createTokenSchemaBase.shape.description.openapi({
+    description: withOpenApi(createTokenSchemaBase.shape.description, {
       description: "Token description.",
       example: "Example token description.",
     }),
-    uri: createTokenSchemaBase.shape.uri.openapi({
+    uri: withOpenApi(createTokenSchemaBase.shape.uri, {
       description: "Metadata URI passed to on-chain token metadata (points to off-chain JSON).",
       example: "https://example.com/metadata.json",
     }),
-    imageUrl: createTokenSchemaBase.shape.imageUrl.openapi({
+    imageUrl: withOpenApi(createTokenSchemaBase.shape.imageUrl, {
       description: "Token image URL.",
       example: "https://example.com/token.png",
     }),
-    maxSupply: createTokenSchemaBase.shape.maxSupply.openapi({
+    maxSupply: withOpenApi(createTokenSchemaBase.shape.maxSupply, {
       description: "Maximum supply as a string (UI units).",
       example: "1000000",
     }),
-    template: createTokenSchemaBase.shape.template.openapi({
+    template: withOpenApi(createTokenSchemaBase.shape.template, {
       description: "Token template preset. Defaults to 'custom' if not specified.",
       example: "stablecoin",
     }),
@@ -709,15 +709,15 @@ export const createTokenRequestSchema = createTokenSchemaBase
         },
       },
     }),
-    requiresAllowlist: createTokenSchemaBase.shape.requiresAllowlist.openapi({
+    requiresAllowlist: withOpenApi(createTokenSchemaBase.shape.requiresAllowlist, {
       description: "Require allowlist checks for transfers.",
       example: true,
     }),
-    isMintable: createTokenSchemaBase.shape.isMintable.openapi({
+    isMintable: withOpenApi(createTokenSchemaBase.shape.isMintable, {
       description: "Allow minting after creation.",
       example: true,
     }),
-    isFreezable: createTokenSchemaBase.shape.isFreezable.openapi({
+    isFreezable: withOpenApi(createTokenSchemaBase.shape.isFreezable, {
       description: "Allow freezing token accounts.",
       example: true,
     }),
@@ -726,27 +726,27 @@ export const createTokenRequestSchema = createTokenSchemaBase
 
 export const updateTokenRequestSchema = updateTokenSchemaBase
   .extend({
-    name: updateTokenSchemaBase.shape.name.openapi({
+    name: withOpenApi(updateTokenSchemaBase.shape.name, {
       description:
         "Updated token name. For deployed tokens, this updates on-chain Token-2022 metadata using the current metadata authority.",
       example: "Example Token Updated",
     }),
-    description: updateTokenSchemaBase.shape.description.openapi({
+    description: withOpenApi(updateTokenSchemaBase.shape.description, {
       description:
         "Updated token description. For deployed tokens, this writes the on-chain `description` metadata field. Use null to clear the displayed value.",
       example: "Updated token description.",
     }),
-    uri: updateTokenSchemaBase.shape.uri.openapi({
+    uri: withOpenApi(updateTokenSchemaBase.shape.uri, {
       description:
         "Updated metadata URI. For deployed tokens, this updates the on-chain Token-2022 metadata URI using the current metadata authority. Use null to clear.",
       example: "https://example.com/metadata.json",
     }),
-    imageUrl: updateTokenSchemaBase.shape.imageUrl.openapi({
+    imageUrl: withOpenApi(updateTokenSchemaBase.shape.imageUrl, {
       description:
         "Updated image URL. For deployed tokens, this writes the on-chain `image` metadata field. Use null to clear the displayed value.",
       example: "https://example.com/token.png",
     }),
-    status: updateTokenSchemaBase.shape.status.openapi({
+    status: withOpenApi(updateTokenSchemaBase.shape.status, {
       description: "Token operational status.",
       example: "active",
     }),
@@ -755,11 +755,11 @@ export const updateTokenRequestSchema = updateTokenSchemaBase
 
 export const mintRequestSchema = mintSchemaBase
   .extend({
-    signingWalletId: mintSchemaBase.shape.signingWalletId.openapi({
+    signingWalletId: withOpenApi(mintSchemaBase.shape.signingWalletId, {
       description: "Optional custody wallet ID to use as the signer for this action.",
       example: "wal_example",
     }),
-    mint: mintSchemaBase.shape.mint.openapi({
+    mint: withOpenApi(mintSchemaBase.shape.mint, {
       description: "Mint operation details.",
       example: {
         destination: "So11111111111111111111111111111111111111112",
@@ -767,7 +767,7 @@ export const mintRequestSchema = mintSchemaBase
         memo: "Payout",
       },
     }),
-    options: mintSchemaBase.shape.options.openapi({
+    options: withOpenApi(mintSchemaBase.shape.options, {
       description: "Mint execution options.",
       example: { priorityFee: "low", simulate: true },
     }),
@@ -776,11 +776,11 @@ export const mintRequestSchema = mintSchemaBase
 
 export const burnRequestSchema = burnSchemaBase
   .extend({
-    signingWalletId: burnSchemaBase.shape.signingWalletId.openapi({
+    signingWalletId: withOpenApi(burnSchemaBase.shape.signingWalletId, {
       description: "Optional custody wallet ID to use as the signer for this action.",
       example: "wal_example",
     }),
-    burn: burnSchemaBase.shape.burn.openapi({
+    burn: withOpenApi(burnSchemaBase.shape.burn, {
       description: "Burn operation details.",
       example: {
         source: "So11111111111111111111111111111111111111112",
@@ -788,7 +788,7 @@ export const burnRequestSchema = burnSchemaBase
         memo: "Correction",
       },
     }),
-    options: burnSchemaBase.shape.options.openapi({
+    options: withOpenApi(burnSchemaBase.shape.options, {
       description: "Burn execution options.",
       example: { priorityFee: "low", simulate: true },
     }),
@@ -797,11 +797,11 @@ export const burnRequestSchema = burnSchemaBase
 
 export const seizeRequestSchema = seizeSchemaBase
   .extend({
-    signingWalletId: seizeSchemaBase.shape.signingWalletId.openapi({
+    signingWalletId: withOpenApi(seizeSchemaBase.shape.signingWalletId, {
       description: "Optional custody wallet ID to use as the signer for this action.",
       example: "wal_example",
     }),
-    seize: seizeSchemaBase.shape.seize.openapi({
+    seize: withOpenApi(seizeSchemaBase.shape.seize, {
       description: "Forced transfer details.",
       example: {
         source: "So11111111111111111111111111111111111111112",
@@ -811,7 +811,7 @@ export const seizeRequestSchema = seizeSchemaBase
         memo: "Compliance seizure",
       },
     }),
-    options: seizeSchemaBase.shape.options.openapi({
+    options: withOpenApi(seizeSchemaBase.shape.options, {
       description: "Seize execution options.",
       example: { priorityFee: "low", simulate: true },
     }),
@@ -820,11 +820,11 @@ export const seizeRequestSchema = seizeSchemaBase
 
 export const forceBurnRequestSchema = forceBurnSchemaBase
   .extend({
-    signingWalletId: forceBurnSchemaBase.shape.signingWalletId.openapi({
+    signingWalletId: withOpenApi(forceBurnSchemaBase.shape.signingWalletId, {
       description: "Optional custody wallet ID to use as the signer for this action.",
       example: "wal_example",
     }),
-    forceBurn: forceBurnSchemaBase.shape.forceBurn.openapi({
+    forceBurn: withOpenApi(forceBurnSchemaBase.shape.forceBurn, {
       description: "Forced burn details.",
       example: {
         source: "So11111111111111111111111111111111111111112",
@@ -833,7 +833,7 @@ export const forceBurnRequestSchema = forceBurnSchemaBase
         memo: "Compliance burn",
       },
     }),
-    options: forceBurnSchemaBase.shape.options.openapi({
+    options: withOpenApi(forceBurnSchemaBase.shape.options, {
       description: "Force burn execution options.",
       example: { priorityFee: "low", simulate: true },
     }),
@@ -842,18 +842,18 @@ export const forceBurnRequestSchema = forceBurnSchemaBase
 
 export const updateAuthorityRequestSchema = updateAuthoritySchemaBase
   .extend({
-    signingWalletId: updateAuthoritySchemaBase.shape.signingWalletId.openapi({
+    signingWalletId: withOpenApi(updateAuthoritySchemaBase.shape.signingWalletId, {
       description: "Optional custody wallet ID to use as the signer for this action.",
       example: "wal_example",
     }),
-    authority: updateAuthoritySchemaBase.shape.authority.openapi({
+    authority: withOpenApi(updateAuthoritySchemaBase.shape.authority, {
       description: "Authority update details.",
       example: {
         role: "mint",
         newAuthority: "So11111111111111111111111111111111111111112",
       },
     }),
-    options: updateAuthoritySchemaBase.shape.options.openapi({
+    options: withOpenApi(updateAuthoritySchemaBase.shape.options, {
       description: "Authority update options.",
       example: { priorityFee: "low", simulate: true },
     }),
@@ -862,7 +862,7 @@ export const updateAuthorityRequestSchema = updateAuthoritySchemaBase
 
 export const pauseTokenRequestSchema = pauseTokenSchemaBase
   .extend({
-    options: pauseTokenSchemaBase.shape.options.openapi({
+    options: withOpenApi(pauseTokenSchemaBase.shape.options, {
       description: "Pause/unpause options.",
       example: { priorityFee: "low", simulate: true },
     }),
@@ -871,16 +871,16 @@ export const pauseTokenRequestSchema = pauseTokenSchemaBase
 
 export const freezeAccountRequestSchema = freezeSchemaBase
   .extend({
-    accountAddress: freezeSchemaBase.shape.accountAddress.openapi({
+    accountAddress: withOpenApi(freezeSchemaBase.shape.accountAddress, {
       description:
         "Wallet or token account address to freeze. SDP resolves the associated token account automatically when a wallet address is provided.",
       example: "So11111111111111111111111111111111111111112",
     }),
-    reason: freezeSchemaBase.shape.reason.openapi({
+    reason: withOpenApi(freezeSchemaBase.shape.reason, {
       description: "Optional reason for freezing.",
       example: "Compliance hold",
     }),
-    signingWalletId: freezeSchemaBase.shape.signingWalletId.openapi({
+    signingWalletId: withOpenApi(freezeSchemaBase.shape.signingWalletId, {
       description: "Optional custody wallet ID to use as the signer for this request.",
       example: "privy_abcd1234",
     }),
@@ -889,12 +889,12 @@ export const freezeAccountRequestSchema = freezeSchemaBase
 
 export const unfreezeAccountRequestSchema = unfreezeSchemaBase
   .extend({
-    accountAddress: unfreezeSchemaBase.shape.accountAddress.openapi({
+    accountAddress: withOpenApi(unfreezeSchemaBase.shape.accountAddress, {
       description:
         "Wallet or token account address to unfreeze. SDP resolves the associated token account automatically when a wallet address is provided.",
       example: "So11111111111111111111111111111111111111112",
     }),
-    signingWalletId: unfreezeSchemaBase.shape.signingWalletId.openapi({
+    signingWalletId: withOpenApi(unfreezeSchemaBase.shape.signingWalletId, {
       description: "Optional custody wallet ID to use as the signer for this request.",
       example: "privy_abcd1234",
     }),
@@ -903,11 +903,11 @@ export const unfreezeAccountRequestSchema = unfreezeSchemaBase
 
 export const addTokenAllowlistRequestSchema = addTokenAllowlistSchemaBase
   .extend({
-    address: addTokenAllowlistSchemaBase.shape.address.openapi({
+    address: withOpenApi(addTokenAllowlistSchemaBase.shape.address, {
       description: "Wallet address to allowlist.",
       example: "So11111111111111111111111111111111111111112",
     }),
-    label: addTokenAllowlistSchemaBase.shape.label.openapi({
+    label: withOpenApi(addTokenAllowlistSchemaBase.shape.label, {
       description: "Optional label for the allowlist entry.",
       example: "Treasury",
     }),
@@ -988,7 +988,7 @@ export const tokenTemplateInfoSchema = z
       description: "Extensions that can be configured for this template.",
       example: ["scaledUiAmount", "interestBearing"],
     }),
-    defaultExtensions: z.record(z.unknown()).openapi({
+    defaultExtensions: z.record(z.string(), z.unknown()).openapi({
       description: "Default extension values used by this template.",
       example: {
         defaultAccountState: "initialized",

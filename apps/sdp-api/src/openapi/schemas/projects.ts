@@ -6,7 +6,7 @@ import {
   updateProjectSchema as updateProjectSchemaBase,
 } from "../../routes/projects/schemas";
 import { apiKeyListItemSchema } from "./api-keys";
-import { z } from "./base";
+import { withOpenApi, z } from "./base";
 import {
   isoDateTimeSchema,
   orgIdParamSchema,
@@ -32,7 +32,7 @@ export const projectSettingsSchema = z
       example: "https://example.com/webhook",
     }),
     metadata: z
-      .record(z.string())
+      .record(z.string(), z.string())
       .optional()
       .openapi({
         description: "Arbitrary metadata key/value pairs.",
@@ -143,23 +143,23 @@ export const listProjectApiKeysResponseSchema = z
 
 export const createProjectRequestSchema = createProjectSchemaBase
   .extend({
-    name: createProjectSchemaBase.shape.name.openapi({
+    name: withOpenApi(createProjectSchemaBase.shape.name, {
       description: "Project name.",
       example: "Payments",
     }),
-    slug: createProjectSchemaBase.shape.slug.openapi({
+    slug: withOpenApi(createProjectSchemaBase.shape.slug, {
       description: "Optional URL-friendly slug.",
       example: "payments",
     }),
-    description: createProjectSchemaBase.shape.description.openapi({
+    description: withOpenApi(createProjectSchemaBase.shape.description, {
       description: "Optional project description.",
       example: "Project for payments workflows.",
     }),
-    environment: createProjectSchemaBase.shape.environment.openapi({
+    environment: withOpenApi(createProjectSchemaBase.shape.environment, {
       description: "Project environment.",
       example: "sandbox",
     }),
-    settings: createProjectSchemaBase.shape.settings.openapi({
+    settings: withOpenApi(createProjectSchemaBase.shape.settings, {
       description: "Optional project settings.",
       example: {
         rpcProvider: "default",
@@ -172,19 +172,19 @@ export const createProjectRequestSchema = createProjectSchemaBase
 
 export const updateProjectRequestSchema = updateProjectSchemaBase
   .extend({
-    name: updateProjectSchemaBase.shape.name.openapi({
+    name: withOpenApi(updateProjectSchemaBase.shape.name, {
       description: "Updated project name.",
       example: "Payments Updated",
     }),
-    description: updateProjectSchemaBase.shape.description.openapi({
+    description: withOpenApi(updateProjectSchemaBase.shape.description, {
       description: "Updated description. Use null to clear.",
       example: "Updated project description.",
     }),
-    environment: updateProjectSchemaBase.shape.environment.openapi({
+    environment: withOpenApi(updateProjectSchemaBase.shape.environment, {
       description: "Updated project environment.",
       example: "production",
     }),
-    settings: updateProjectSchemaBase.shape.settings.openapi({
+    settings: withOpenApi(updateProjectSchemaBase.shape.settings, {
       description: "Updated project settings. Use null to clear.",
       example: {
         rpcProvider: "custom",
@@ -196,11 +196,11 @@ export const updateProjectRequestSchema = updateProjectSchemaBase
 
 export const addProjectMemberRequestSchema = addMemberSchemaBase
   .extend({
-    userId: addMemberSchemaBase.shape.userId.openapi({
+    userId: withOpenApi(addMemberSchemaBase.shape.userId, {
       description: "User identifier to add to the project.",
       example: "usr_example",
     }),
-    role: addMemberSchemaBase.shape.role.openapi({
+    role: withOpenApi(addMemberSchemaBase.shape.role, {
       description: "Role for the project member.",
       example: "developer",
     }),
@@ -209,7 +209,7 @@ export const addProjectMemberRequestSchema = addMemberSchemaBase
 
 export const updateProjectMemberRequestSchema = updateMemberSchemaBase
   .extend({
-    role: updateMemberSchemaBase.shape.role.openapi({
+    role: withOpenApi(updateMemberSchemaBase.shape.role, {
       description: "Updated project member role.",
       example: "admin",
     }),
