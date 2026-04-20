@@ -1,8 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
 const TARGETS = new Set(["dev", "production"]);
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const DEFAULT_CONFIG_PATH = path.join(REPO_ROOT, "apps/sdp-api/wrangler.toml");
 
 const BINDING_REPLACEMENTS = [
   {
@@ -107,7 +110,7 @@ function printUsage() {
 
 const { values } = parseArgs({
   options: {
-    config: { type: "string", default: "apps/sdp-api/wrangler.toml" },
+    config: { type: "string", default: DEFAULT_CONFIG_PATH },
     env: { type: "string" },
     out: { type: "string" },
   },
