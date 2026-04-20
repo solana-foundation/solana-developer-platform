@@ -41,7 +41,7 @@
     "@solana/kit": "catalog:",
     "@solana/kora": "0.2.1",
     "@tailwindcss/postcss": "^4",
-    "@types/node": "^20",
+    "@types/node": "^25",
     "@types/pg": "^8.15.6",
     "@types/qrcode": "1.5.6",
     "@types/react": "^19",
