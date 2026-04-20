@@ -24,7 +24,7 @@ SOLANA_RPC_QUICKNODE_URL=https://evocative-old-mansion.solana-devnet.quiknode.pr
 # SOLANA_RPC_QUICKNODE_API_KEY=YOUR_QUICKNODE_KEY
 
 # Use the shared devnet Kora instance
-KORA_RPC_URL=https://kora-devnet-315956366746.us-central1.run.app
+KORA_RPC_URL=https://your-kora-devnet-instance.us-central1.run.app
 # KORA_API_KEY=YOUR_KORA_API_KEY (only if API key auth is enabled)
 FEE_PAYMENT_PROVIDER=kora
 

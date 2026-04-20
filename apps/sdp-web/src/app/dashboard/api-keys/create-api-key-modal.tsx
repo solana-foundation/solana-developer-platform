@@ -140,7 +140,7 @@ function WalletAccessSection({
             </p>
           ) : (
             <div className="space-y-3">
-              <div className="space-y-2">
+              <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
                 {wallets.map((wallet) => {
                   const checked = draft.selectedWalletIds.includes(wallet.walletId);
 
@@ -458,41 +458,45 @@ export function CreateApiKeyModal({
       </Button>
 
       {isOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center px-4 py-8">
+        <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto overscroll-contain px-4 py-8">
           <button
             type="button"
             aria-label="Close API key creation modal"
             className="absolute inset-0 bg-black/35"
             onClick={close}
           />
-          <div className="relative z-10 w-full max-w-2xl rounded-2xl border border-[rgba(28,28,29,0.16)] bg-white p-6 shadow-lg">
-            <p className="text-sm font-semibold text-[#1c1c1d]">
-              {step === 1 ? "Create API key" : "Review API key"}
-            </p>
-            <p className="mt-1 text-sm text-[rgba(28,28,29,0.72)]">
-              {step === 1
-                ? "Define key details and wallet access, then confirm."
-                : "Review and confirm the request."}
-            </p>
+          <div className="relative z-10 flex max-h-[calc(100dvh-4rem)] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-[rgba(28,28,29,0.16)] bg-white p-6 shadow-lg">
+            <div className="shrink-0">
+              <p className="text-sm font-semibold text-[#1c1c1d]">
+                {step === 1 ? "Create API key" : "Review API key"}
+              </p>
+              <p className="mt-1 text-sm text-[rgba(28,28,29,0.72)]">
+                {step === 1
+                  ? "Define key details and wallet access, then confirm."
+                  : "Review and confirm the request."}
+              </p>
+            </div>
 
-            {step === 1 ? (
-              <CreateApiKeyDetailsStep
-                draft={draft}
-                wallets={wallets}
-                selectedWallets={selectedWallets}
-                canContinue={canContinue}
-                close={close}
-                nextStep={nextStep}
-                setDraft={setDraft}
-                toggleWallet={toggleWallet}
-              />
-            ) : (
-              <CreateApiKeyReviewStep
-                draft={draft}
-                selectedWallets={selectedWallets}
-                onBack={() => setStep(1)}
-              />
-            )}
+            <div className="min-h-0 overflow-y-auto pr-1">
+              {step === 1 ? (
+                <CreateApiKeyDetailsStep
+                  draft={draft}
+                  wallets={wallets}
+                  selectedWallets={selectedWallets}
+                  canContinue={canContinue}
+                  close={close}
+                  nextStep={nextStep}
+                  setDraft={setDraft}
+                  toggleWallet={toggleWallet}
+                />
+              ) : (
+                <CreateApiKeyReviewStep
+                  draft={draft}
+                  selectedWallets={selectedWallets}
+                  onBack={() => setStep(1)}
+                />
+              )}
+            </div>
           </div>
         </div>
       ) : null}
