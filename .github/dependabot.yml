@@ -1,0 +1,39 @@
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "UTC"
+    open-pull-requests-limit: 15
+    cooldown:
+      default-days: 7
+    groups:
+      solana:
+        patterns:
+          - "@solana/*"
+          - "@solana-program/*"
+        update-types: ["minor", "patch"]
+      minor-patch:
+        patterns: ["*"]
+        exclude-patterns:
+          - "@solana/*"
+          - "@solana-program/*"
+        update-types: ["minor", "patch"]
+    ignore:
+      - dependency-name: "@solana/*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@solana-program/*"
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    groups:
+      actions:
+        patterns: ["*"]
+    open-pull-requests-limit: 5
