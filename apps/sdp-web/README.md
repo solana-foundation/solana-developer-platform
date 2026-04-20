@@ -131,16 +131,10 @@ This allows:
 
 ## Running Tests
 
-### Unit & Component Tests
-
-```bash
-pnpm --filter @sdp/web test
-```
-
 ### E2E Tests (Playwright)
 
 ```bash
-pnpm --filter @sdp/web test:e2e
+pnpm --filter sdp-web test:e2e
 ```
 
 Requires:

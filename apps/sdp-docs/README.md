@@ -145,7 +145,7 @@ Already served by `pnpm dev:docs`
 ### Production Build
 
 ```bash
-pnpm --filter @sdp/docs build
+pnpm --filter sdp-docs build
 ```
 
 Output goes to `apps/sdp-docs/.next/`
@@ -176,7 +176,7 @@ The API reference is auto-generated from the SDP API's OpenAPI spec.
 
 3. To regenerate docs from the spec:
    ```bash
-   # (Regeneration script to be added)
+   pnpm -C apps/sdp-docs generate:api
    ```
 
 ## Testing
@@ -184,7 +184,7 @@ The API reference is auto-generated from the SDP API's OpenAPI spec.
 ### Link validation
 
 ```bash
-pnpm --filter @sdp/docs test:links
+pnpm --filter sdp-docs check:links
 ```
 
 Ensures all internal and external links are valid.
@@ -192,7 +192,7 @@ Ensures all internal and external links are valid.
 ### Build validation
 
 ```bash
-pnpm --filter @sdp/docs build
+pnpm --filter sdp-docs build
 ```
 
 Verifies the documentation builds without errors.
@@ -206,7 +206,7 @@ PORT=3002 pnpm dev:docs
 ```
 
 ### Changes not showing up
-- Clear `.next/` cache: `pnpm --filter @sdp/docs clean`
+- Clear `.next/` cache: `rm -rf apps/sdp-docs/.next`
 - Restart dev server: `Ctrl+C` and `pnpm dev:docs` again
 
 ### Markdown not rendering correctly
@@ -219,7 +219,7 @@ PORT=3002 pnpm dev:docs
 - Follow markdown conventions (see above)
 - Add your name to doc if creating new content
 - Request review from product team before merging
-- Test links locally: `pnpm --filter @sdp/docs test:links`
+- Test links locally: `pnpm --filter sdp-docs check:links`
 
 For full contribution guidelines, see [`CONTRIBUTING.md`](../../CONTRIBUTING.md) (forthcoming).
 
