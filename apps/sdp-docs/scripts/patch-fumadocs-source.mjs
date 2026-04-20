@@ -4,7 +4,10 @@ import { fileURLToPath } from "node:url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const sourceIndexPath = path.resolve(__dirname, "../.source/index.ts");
+const sourceFileCandidates = [
+  path.resolve(__dirname, "../.source/server.ts"),
+  path.resolve(__dirname, "../.source/index.ts"),
+];
 const sourceConfigShimPath = path.resolve(__dirname, "../.source/source.config.mjs");
 const sourceConfigShim = `import { defineDocs } from "fumadocs-mdx/config";
 
@@ -17,13 +20,22 @@ export default docs;
 
 const run = async () => {
   let content;
+  let sourceFilePath;
 
-  try {
-    content = await fs.readFile(sourceIndexPath, "utf8");
-  } catch (error) {
-    throw new Error("Missing .source/index.ts. Run fumadocs-mdx before patching.", {
-      cause: error,
-    });
+  for (const candidate of sourceFileCandidates) {
+    try {
+      content = await fs.readFile(candidate, "utf8");
+      sourceFilePath = candidate;
+      break;
+    } catch (error) {
+      if (error.code !== "ENOENT") {
+        throw error;
+      }
+    }
+  }
+
+  if (!content || !sourceFilePath) {
+    throw new Error("Missing Fumadocs source output. Run fumadocs-mdx before patching.");
   }
 
   const replaced = content
@@ -37,8 +49,10 @@ const run = async () => {
       : replaced;
 
   if (patched !== content) {
-    await fs.writeFile(sourceIndexPath, patched, "utf8");
-    console.log("Patched .source/index.ts for Next.js parser compatibility");
+    await fs.writeFile(sourceFilePath, patched, "utf8");
+    console.log(
+      `Patched ${path.relative(path.resolve(__dirname, ".."), sourceFilePath)} for Next.js parser compatibility`
+    );
   } else {
     console.log("No Fumadocs source patch required");
   }

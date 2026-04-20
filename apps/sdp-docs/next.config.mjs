@@ -4,15 +4,15 @@ import { createMDX } from "fumadocs-mdx/next";
 // Fumadocs' auto-watcher to avoid runtime rewrites that break Next's parser.
 process.env._FUMADOCS_MDX = "1";
 
-const withMDX = createMDX();
+const withMDX = createMDX({
+  configPath: "source.config.ts",
+  outDir: ".source",
+});
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
   assetPrefix: "/docs",
-  eslint: {
-    ignoreDuringBuilds: true,
-  },
 };
 
 export default withMDX(nextConfig);
