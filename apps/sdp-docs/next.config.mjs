@@ -1,7 +1,7 @@
 import { createMDX } from "fumadocs-mdx/next";
 
-// We generate .source ourselves in scripts/dev.mjs and scripts/build; disable
-// Fumadocs' auto-watcher to avoid runtime rewrites that break Next's parser.
+// Verified with fumadocs-mdx 14.3.1: this internal opt-out keeps Fumadocs from
+// rewriting .source after our scripts patch it for Next's parser.
 process.env._FUMADOCS_MDX = "1";
 
 const withMDX = createMDX({
