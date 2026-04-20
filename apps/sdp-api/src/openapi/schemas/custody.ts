@@ -7,7 +7,7 @@ import {
   switchSigningSchema as switchSigningSchemaBase,
   updateWalletSchema as updateWalletSchemaBase,
 } from "../../routes/custody/schemas";
-import { z } from "./base";
+import { withOpenApi, z } from "./base";
 import {
   isoDateTimeSchema,
   projectIdParamSchema,
@@ -15,15 +15,15 @@ import {
   walletIdParamSchema,
 } from "./base";
 
-export const initializeSigningRequestSchema = initializeSigningSchemaBase.openapi({
+export const initializeSigningRequestSchema = withOpenApi(initializeSigningSchemaBase, {
   description: "Initialize wallet signing provider for the organization or project.",
 });
 
-export const switchSigningRequestSchema = switchSigningSchemaBase.openapi({
+export const switchSigningRequestSchema = withOpenApi(switchSigningSchemaBase, {
   description: "Switch the active wallet signing provider for the organization or project.",
 });
 
-export const signerCheckRequestSchema = signerCheckSchemaBase.openapi({
+export const signerCheckRequestSchema = withOpenApi(signerCheckSchemaBase, {
   description:
     "Optional memo payload for signer check. Signing wallet is resolved from the API key binding.",
 });
@@ -40,15 +40,15 @@ export const createCustodyWalletRequestSchema = createWalletSchemaBase
         "Optional provider target. Defaults to the currently resolved default provider for the scope.",
       example: "privy",
     }),
-    label: createWalletSchemaBase.shape.label.openapi({
+    label: withOpenApi(createWalletSchemaBase.shape.label, {
       description: "Optional label for the new wallet.",
       example: "Mint authority wallet",
     }),
-    purpose: createWalletSchemaBase.shape.purpose.openapi({
+    purpose: withOpenApi(createWalletSchemaBase.shape.purpose, {
       description: "Optional semantic purpose for the wallet.",
       example: "mint_authority",
     }),
-    setDefault: createWalletSchemaBase.shape.setDefault.openapi({
+    setDefault: withOpenApi(createWalletSchemaBase.shape.setDefault, {
       description: "Set this wallet as the default signer for the active wallet signing config.",
       example: true,
     }),
@@ -87,7 +87,7 @@ export const deleteWalletRequestSchema = deleteWalletSchemaBase
 
 export const updateCustodyWalletRequestSchema = updateWalletSchemaBase
   .extend({
-    label: updateWalletSchemaBase.shape.label.openapi({
+    label: withOpenApi(updateWalletSchemaBase.shape.label, {
       description: "Optional wallet label. Set to null to clear the label.",
       example: "Treasury signer",
     }),

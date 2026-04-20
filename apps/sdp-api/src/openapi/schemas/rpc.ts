@@ -35,7 +35,7 @@ const rpcProviderStatsSchema = z
     }),
     lastStatusCode: z.number().int().nullable().openapi({ example: 200 }),
     lastMethod: z.string().nullable().openapi({ example: "sendTransaction" }),
-    origins: z.record(z.number().int().nonnegative()).openapi({
+    origins: z.record(z.string(), z.number().int().nonnegative()).openapi({
       description: "Best-effort per-origin request counters.",
       example: { "https://dashboard.example.com": 12 },
     }),
