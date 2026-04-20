@@ -38,14 +38,36 @@ const run = async () => {
     throw new Error("Missing Fumadocs source output. Run fumadocs-mdx before patching.");
   }
 
-  const replaced = content
-    .replace(/_runtime\.docs<[^>]+>\(/g, "_runtime.docs(")
-    .replace(/export const default =/g, "const _default =")
-    .replace(/export const defaultCollection =/g, "const _default =");
+  let replaced = content.replace(/_runtime\.docs<[^>]+>\(/g, "_runtime.docs(");
+  const exportAliases = [];
+  const defaultExports = [
+    {
+      pattern: /export const default =/g,
+      localName: "_default",
+      exportName: "default",
+    },
+    {
+      pattern: /export const defaultCollection =/g,
+      localName: "_defaultCollection",
+      // biome-ignore lint/nursery/noSecrets: Generated Fumadocs export identifier, not a secret.
+      exportName: "defaultCollection",
+    },
+  ];
 
+  for (const { pattern, localName, exportName } of defaultExports) {
+    if (!pattern.test(replaced)) {
+      continue;
+    }
+
+    pattern.lastIndex = 0;
+    replaced = replaced.replace(pattern, `const ${localName} =`);
+    exportAliases.push(`${localName} as ${exportName}`);
+  }
+
+  const exportStatement = exportAliases.length > 0 ? `export { ${exportAliases.join(", ")} };` : "";
   const patched =
-    replaced.includes("const _default =") && !replaced.includes("export { _default as default };")
-      ? `${replaced}\nexport { _default as default };\n`
+    exportStatement && !replaced.includes(exportStatement)
+      ? `${replaced}\n${exportStatement}\n`
       : replaced;
 
   if (patched !== content) {
