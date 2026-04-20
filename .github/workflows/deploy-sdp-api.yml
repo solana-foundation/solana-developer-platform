@@ -110,9 +110,6 @@ jobs:
             exit 1
           fi
 
-      - name: Install Doppler CLI
-        uses: dopplerhq/cli-action@v4
-
       - name: Validate Cloud SQL migration identity
         if: ${{ github.event_name == 'push' || inputs.run_migrations }}
         env:
@@ -176,12 +173,25 @@ jobs:
           kill "${proxy_pid}" || true
           exit 1
 
+      - name: Fetch Doppler config
+        id: doppler
+        # v2.0.0 pinned to an immutable commit because this action injects deploy secrets.
+        uses: dopplerhq/secrets-fetch-action@451892f16195f9ac360e1a5bcbf0b5fd0e957534
+        with:
+          doppler-token: ${{ secrets.DOPPLER_TOKEN }}
+          inject-env-vars: true
+
+      - name: Validate fetched Doppler config
+        run: |
+          set -euo pipefail
+          if [ "${DOPPLER_CONFIG:-}" != "${DOPPLER_CONFIG_NAME}" ]; then
+            echo "Fetched Doppler config '${DOPPLER_CONFIG:-<unset>}' does not match expected '${DOPPLER_CONFIG_NAME}'." >&2
+            exit 1
+          fi
+
       - name: Migrate Postgres
         if: ${{ github.event_name == 'push' || inputs.run_migrations }}
-        env:
-          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN }}
         run: |
-          doppler run --config "${DOPPLER_CONFIG_NAME}" -- bash <<'EOF'
           set -euo pipefail
           if [ -z "${DATABASE_URL:-}" ]; then
             echo "DATABASE_URL is not configured in Doppler config ${DOPPLER_CONFIG_NAME}; skipping Postgres migrations."
@@ -204,7 +214,6 @@ jobs:
           )"
 
           pnpm --filter @sdp/api "db:migrate:${TARGET_ENV}"
-          EOF
 
       - name: Stop Cloud SQL Auth Proxy
         if: ${{ always() && (github.event_name == 'push' || inputs.run_migrations) }}
@@ -213,21 +222,22 @@ jobs:
             kill "${CLOUD_SQL_PROXY_PID}" || true
           fi
 
-      - name: Sync Worker secrets
-        env:
-          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN }}
+      - name: Render Wrangler config
         run: |
-          doppler run --config "${DOPPLER_CONFIG_NAME}" -- bash <<'EOF'
+          set -euo pipefail
+          wrangler_config_path="${GITHUB_WORKSPACE}/apps/sdp-api/.wrangler.${TARGET_ENV}.generated.toml"
+          node scripts/render-wrangler-config.mjs --env "${TARGET_ENV}" --out "${wrangler_config_path}"
+          echo "WRANGLER_CONFIG_PATH=${wrangler_config_path}" >> "${GITHUB_ENV}"
+
+      - name: Sync Worker secrets
+        run: |
           set -euo pipefail
           if [ -z "${CLOUDFLARE_API_TOKEN:-}" ] || [ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
             echo "CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID must be present in Doppler config ${DOPPLER_CONFIG_NAME}." >&2
             exit 1
           fi
           node scripts/project-secrets.mjs cloudflare --out "${RUNNER_TEMP}/cloudflare-secrets.json"
-          pnpm --filter @sdp/api exec wrangler secret bulk "${RUNNER_TEMP}/cloudflare-secrets.json" --env "${TARGET_ENV}"
-          EOF
+          pnpm --filter @sdp/api exec wrangler secret bulk "${RUNNER_TEMP}/cloudflare-secrets.json" --env "${TARGET_ENV}" --config "${WRANGLER_CONFIG_PATH}"
 
       - name: Deploy Worker
-        env:
-          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN }}
-        run: doppler run --config "${DOPPLER_CONFIG_NAME}" -- pnpm --filter @sdp/api exec wrangler deploy --env "${TARGET_ENV}"
+        run: pnpm --filter @sdp/api exec wrangler deploy --env "${TARGET_ENV}" --config "${WRANGLER_CONFIG_PATH}"
