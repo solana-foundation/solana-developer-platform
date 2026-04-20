@@ -9,6 +9,9 @@
  * - SignatureDictionary (Record<Address, SignatureBytes>) → Map<Address, Uint8Array> for SignResult
  */
 
+import type { SolanaSigner } from "@solana/keychain-core";
+import type { Address, TransactionSigner } from "@solana/kit";
+import { createSignableMessage } from "@solana/signers";
 import type {
   FullSigningPort,
   GeneratedKeypair,
@@ -17,9 +20,6 @@ import type {
   SignStatus,
 } from "@/services/ports";
 import { SigningError } from "@/services/ports";
-import type { SolanaSigner } from "@solana/keychain-core";
-import type { Address, TransactionSigner } from "@solana/kit";
-import { createSignableMessage } from "@solana/signers";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Base Adapter

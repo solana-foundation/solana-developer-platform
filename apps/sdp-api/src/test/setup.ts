@@ -1,5 +1,5 @@
-import { closeDatabasePools } from "@/db";
 import { afterAll } from "vitest";
+import { closeDatabasePools } from "@/db";
 
 const globalWithSecureContext = globalThis as { isSecureContext?: boolean };
 

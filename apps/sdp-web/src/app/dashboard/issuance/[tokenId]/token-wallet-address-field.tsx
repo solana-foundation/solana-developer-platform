@@ -1,9 +1,9 @@
 "use client";
 
-import { Input } from "@/components/ui/input";
 import type { PaymentsDashboardWallet } from "@sdp/types";
 import { ChevronDown, X } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { Input } from "@/components/ui/input";
 import { TokenValidationMessage } from "./token-validation-message";
 
 interface TokenWalletAddressFieldProps {

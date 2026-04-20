@@ -1,5 +1,5 @@
-import type { Env } from "@/types/env";
 import { describe, expect, it } from "vitest";
+import type { Env } from "@/types/env";
 import { getSolanaConfig, resolveDefaultSolanaRpcUrl } from "./solana";
 
 describe("solana config resolution", () => {

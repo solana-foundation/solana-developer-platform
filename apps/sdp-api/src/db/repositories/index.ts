@@ -1,22 +1,22 @@
 export type { RepositoryDbClient } from "./base";
 export type {
   CreatePaymentTransferInput,
+  PaymentsRepository,
+  PaymentsRepositoryContext,
   PaymentTransferDirection,
   PaymentTransferRow,
   PaymentTransferStatus,
   PaymentTransferType,
-  PaymentWalletPolicyType,
   PaymentWalletPolicyRow,
-  PaymentsRepository,
-  PaymentsRepositoryContext,
+  PaymentWalletPolicyType,
   UpdatePaymentTransferInput,
   UpsertPaymentWalletPolicyInput,
 } from "./payments.repository";
+export { createPostgresPaymentsRepository } from "./payments.repository.postgres";
+export { createPaymentsRepository, createTokenRepository } from "./repository-factory";
 export type {
   ListTokensOptions,
   TokenRepository,
   TokenRepositoryContext,
 } from "./token.repository";
-export { createPaymentsRepository, createTokenRepository } from "./repository-factory";
-export { createPostgresPaymentsRepository } from "./payments.repository.postgres";
 export { createPostgresTokenRepository } from "./token.repository.postgres";

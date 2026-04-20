@@ -1,6 +1,6 @@
+import type { ApiKeyWalletBinding, ApiKeyWalletScope, Permission } from "@sdp/types";
 import { AppError } from "@/lib/errors";
 import { normalizeApiKeyWalletPermissions } from "@/services/api-key-wallets.service";
-import type { ApiKeyWalletBinding, ApiKeyWalletScope, Permission } from "@sdp/types";
 
 type WalletBindingInput = {
   walletId: string;

@@ -2,9 +2,9 @@
  * Health Check Route
  */
 
+import { Hono } from "hono";
 import { getDb } from "@/db";
 import type { Env } from "@/types/env";
-import { Hono } from "hono";
 
 const health = new Hono<{ Bindings: Env }>();
 

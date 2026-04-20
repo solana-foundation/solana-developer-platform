@@ -1,4 +1,4 @@
-import { type SourceConfig, type VirtualFile, loader } from "fumadocs-core/source";
+import { loader, type SourceConfig, type VirtualFile } from "fumadocs-core/source";
 import { docs } from "../../.source/server";
 
 type FumadocsSource = {

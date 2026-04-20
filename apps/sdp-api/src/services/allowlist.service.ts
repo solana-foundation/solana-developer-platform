@@ -19,9 +19,10 @@ export interface AllowlistEntry {
 }
 
 export interface AllowlistProvider {
-  listEntries(options?: { type?: "email" | "domain"; status?: "active" | "disabled" }): Promise<
-    AllowlistEntry[]
-  >;
+  listEntries(options?: {
+    type?: "email" | "domain";
+    status?: "active" | "disabled";
+  }): Promise<AllowlistEntry[]>;
   addEntry(entry: {
     id: string;
     type: "email" | "domain";

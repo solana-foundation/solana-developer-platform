@@ -2,9 +2,9 @@
  * Projects Routes
  */
 
+import { Hono } from "hono";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import type { Env } from "@/types/env";
-import { Hono } from "hono";
 import { createProjectApiKey, listProjectApiKeys } from "./handlers/api-keys";
 import {
   addProjectMember,

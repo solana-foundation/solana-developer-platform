@@ -1,15 +1,15 @@
 "use client";
 
-import { ApiPlaygroundShellSkeleton } from "@/components/api-playground-shell-skeleton";
-import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
-import { getStoredApiKeySecret } from "@/lib/playground-api-keys";
 import type {
   CustodyWalletAggregate,
-  PaymentTransferSummary,
   PaymentsDashboardWallet,
+  PaymentTransferSummary,
 } from "@sdp/types";
 import dynamic from "next/dynamic";
 import { useEffect, useMemo } from "react";
+import { ApiPlaygroundShellSkeleton } from "@/components/api-playground-shell-skeleton";
+import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
+import { getStoredApiKeySecret } from "@/lib/playground-api-keys";
 import { PaymentsOverview } from "./payments-overview";
 
 const PaymentsPlayground = dynamic(
@@ -66,7 +66,7 @@ export function PaymentsWorkspace({
       void import("./payments-playground");
     };
 
-    // biome-ignore lint/nursery/noSecrets: requestIdleCallback is a browser API, not a secret.
+    // biome-ignore lint/security/noSecrets: requestIdleCallback is a browser API, not a secret.
     if (typeof window !== "undefined" && "requestIdleCallback" in window) {
       const idleId = window.requestIdleCallback(preloadPlayground);
       return () => window.cancelIdleCallback(idleId);

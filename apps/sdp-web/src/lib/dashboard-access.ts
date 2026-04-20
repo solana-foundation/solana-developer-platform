@@ -1,9 +1,9 @@
 import {
-  type OrganizationRole,
-  type Permission,
   getPermissionsForOrgRole,
   hasPermission,
   normalizeOrganizationRole,
+  type OrganizationRole,
+  type Permission,
 } from "@sdp/types";
 
 export interface DashboardCapabilities {

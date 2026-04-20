@@ -1,7 +1,7 @@
 "use client";
 
-import { Button } from "@/components/ui/button";
 import { Copy } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { TokenDisabledActionTooltip } from "./token-disabled-action-tooltip";
 import type { ExtensionRow, PermissionRow } from "./token-management-workspace.types";
 import { formatValue } from "./token-management-workspace.utils";

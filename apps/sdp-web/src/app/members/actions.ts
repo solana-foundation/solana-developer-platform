@@ -1,7 +1,7 @@
 "use server";
 
-import { sdpApiFetch } from "@/lib/sdp-api";
 import { revalidatePath } from "next/cache";
+import { sdpApiFetch } from "@/lib/sdp-api";
 
 export interface Member {
   id: string;

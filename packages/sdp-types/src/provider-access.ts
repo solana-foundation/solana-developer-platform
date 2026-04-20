@@ -1,9 +1,9 @@
 import { CUSTODY_PROVIDERS, type CustodyProvider } from "./custody";
 import {
+  normalizeOrganizationTier,
   ORGANIZATION_RPC_PROVIDERS,
   type OrganizationRpcProvider,
   type OrganizationTier,
-  normalizeOrganizationTier,
 } from "./organizations";
 
 export const COMPLIANCE_PROVIDERS = ["range", "elliptic", "trm", "chainalysis"] as const;

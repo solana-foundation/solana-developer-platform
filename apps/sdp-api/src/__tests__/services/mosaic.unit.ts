@@ -5,8 +5,8 @@
  * No mocks needed - these are pure functions.
  */
 
-import { bigIntReplacer, safeStringify } from "@/services/mosaic/utils";
 import { describe, expect, it } from "vitest";
+import { bigIntReplacer, safeStringify } from "@/services/mosaic/utils";
 
 describe("bigIntReplacer", () => {
   it("converts bigint to string", () => {

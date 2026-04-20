@@ -1,5 +1,8 @@
 "use client";
 
+import { X } from "lucide-react";
+import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -10,9 +13,6 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useEscapeKey } from "@/lib/use-escape-key";
-import { X } from "lucide-react";
-import { useEffect, useState } from "react";
-import { createPortal } from "react-dom";
 import { formatRiskScore, riskToneClassName, toProviderLabel } from "./payments-workspace.data";
 import type { ComplianceSnapshot } from "./payments-workspace.types";
 

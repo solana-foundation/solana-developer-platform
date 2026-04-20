@@ -5,8 +5,8 @@
  * No mocks needed - these are pure functions.
  */
 
-import { createApiKeyMaterial, parseJsonArray, randomBase64Url } from "@/services/api-key.utils";
 import { describe, expect, it } from "vitest";
+import { createApiKeyMaterial, parseJsonArray, randomBase64Url } from "@/services/api-key.utils";
 
 describe("parseJsonArray", () => {
   it("returns null for null input", () => {

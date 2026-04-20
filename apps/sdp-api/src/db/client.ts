@@ -160,9 +160,12 @@ function normalizeInsertConflictSyntax(query: string): string {
 }
 
 function normalizeSql(query: string): string {
-  return normalizeInsertConflictSyntax(replacePositionalPlaceholders(query))
-    .replaceAll("datetime('now')", "sdp_datetime_now()")
-    .replaceAll("STRFTIME('%Y-%m-%dT%H:%M:%fZ','now')", "sdp_iso_now()");
+  return (
+    normalizeInsertConflictSyntax(replacePositionalPlaceholders(query))
+      // biome-ignore lint/security/noSecrets: SQL datetime literal, not a secret.
+      .replaceAll("datetime('now')", "sdp_datetime_now()")
+      .replaceAll("STRFTIME('%Y-%m-%dT%H:%M:%fZ','now')", "sdp_iso_now()")
+  );
 }
 
 class PostgresPreparedStatement implements PreparedStatement {

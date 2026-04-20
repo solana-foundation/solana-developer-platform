@@ -1,14 +1,14 @@
 "use client";
 
+import { Badge } from "@solana/design-system/badge";
+import { Clock3, Copy, Loader2, Play, Sparkles } from "lucide-react";
+import type { ComponentProps, CSSProperties, ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useDashboardUrlState } from "@/lib/dashboard-url-state";
 import { normalizeApiKeyInput } from "@/lib/playground-api-keys";
 import { cn } from "@/lib/utils";
-import { Badge } from "@solana/design-system/badge";
-import { Clock3, Copy, Loader2, Play, Sparkles } from "lucide-react";
-import type { CSSProperties, ComponentProps, ReactNode } from "react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 export type ApiPlaygroundMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
@@ -462,13 +462,7 @@ function getShikiModule() {
   return shikiModulePromise;
 }
 
-function CodeBlockContent({
-  content,
-  language,
-}: {
-  content: string;
-  language: HighlightLanguage;
-}) {
+function CodeBlockContent({ content, language }: { content: string; language: HighlightLanguage }) {
   const [renderedHtml, setRenderedHtml] = useState<string>("");
 
   useEffect(() => {

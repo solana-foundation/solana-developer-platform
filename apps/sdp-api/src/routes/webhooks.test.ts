@@ -1,9 +1,9 @@
+import { Webhook } from "svix";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
 import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
-import { Webhook } from "svix";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const WEBHOOK_SECRET = `whsec_${Buffer.from("test_clerk_webhook_secret_1234567890").toString(
   "base64"

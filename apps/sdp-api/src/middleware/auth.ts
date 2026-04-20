@@ -10,13 +10,13 @@
  * 6. Set auth context for downstream handlers
  */
 
+import type { ApiKeyRole, ApiKeyWalletBinding, CachedApiKey } from "@sdp/types";
+import { getPermissionsForApiKeyRole, type Permission } from "@sdp/types";
+import type { Context, Next } from "hono";
 import { getDb } from "@/db";
 import { AppError } from "@/lib/errors";
 import { hashString } from "@/lib/hash";
 import type { Env } from "@/types/env";
-import type { ApiKeyRole, ApiKeyWalletBinding, CachedApiKey } from "@sdp/types";
-import { type Permission, getPermissionsForApiKeyRole } from "@sdp/types";
-import type { Context, Next } from "hono";
 
 const KV_TTL_SECONDS = 3600; // 1 hour cache
 

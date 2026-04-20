@@ -6,15 +6,15 @@
  * so we test the logic, not the SDK integration.
  */
 
+import type { TokenExtensionsConfig } from "@sdp/types";
+import type { Address } from "@solana/kit";
+import { describe, expect, it } from "vitest";
 import {
   addressAsSigner,
   bigIntReplacer,
   getExtensionTypes,
   safeStringify,
 } from "@/services/solana/token-2022.utils";
-import type { TokenExtensionsConfig } from "@sdp/types";
-import type { Address } from "@solana/kit";
-import { describe, expect, it } from "vitest";
 
 describe("bigIntReplacer", () => {
   it("converts bigint to string", () => {

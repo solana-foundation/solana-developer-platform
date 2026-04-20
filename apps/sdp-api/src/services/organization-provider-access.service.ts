@@ -1,10 +1,9 @@
-import { AppError } from "@/lib/errors";
-import type { Env } from "@/types/env";
 import {
   COMPLIANCE_PROVIDERS,
-  CUSTODY_PROVIDERS,
   type ComplianceProviderId,
+  CUSTODY_PROVIDERS,
   type CustodyProvider,
+  normalizeOrganizationTier,
   ORGANIZATION_RPC_PROVIDERS,
   type OrganizationProviderAvailabilityResponse,
   type OrganizationProviderFamily,
@@ -15,9 +14,10 @@ import {
   type ProviderAvailabilityEntry,
   RAMP_PROVIDERS,
   type RampProviderId,
-  normalizeOrganizationTier,
   resolveOrganizationProviderEntitlements,
 } from "@sdp/types";
+import { AppError } from "@/lib/errors";
+import type { Env } from "@/types/env";
 
 type OrganizationProviderRow = {
   tier: string;

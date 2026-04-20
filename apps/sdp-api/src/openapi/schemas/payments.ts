@@ -1,4 +1,3 @@
-import { z } from "./base";
 import {
   base64Schema,
   isoDateTimeSchema,
@@ -7,6 +6,7 @@ import {
   solanaAddressSchema,
   transferIdParamSchema,
   walletIdParamSchema,
+  z,
 } from "./base";
 import { preparedTransactionSchema, simulationResultSchema } from "./issuance";
 

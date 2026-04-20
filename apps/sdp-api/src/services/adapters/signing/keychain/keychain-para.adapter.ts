@@ -5,10 +5,10 @@
  * Para provides hosted wallets via the Para REST API.
  */
 
-import type { SignRequest, SignResult } from "@/services/ports";
 import type { SolanaSigner } from "@solana/keychain-core";
 import { ParaSigner } from "@solana/keychain-para";
 import type { Address } from "@solana/kit";
+import type { SignRequest, SignResult } from "@/services/ports";
 import { BaseKeychainAdapter } from "./base-keychain.adapter";
 import type { KeychainParaConfig } from "./types";
 

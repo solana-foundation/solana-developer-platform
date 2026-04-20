@@ -1,6 +1,5 @@
 import { addEntrySchema as addEntrySchemaBase } from "../../routes/allowlist/schemas";
-import { withOpenApi, z } from "./base";
-import { allowlistEntryIdParamSchema, isoDateTimeSchema } from "./base";
+import { allowlistEntryIdParamSchema, isoDateTimeSchema, withOpenApi, z } from "./base";
 
 export const allowlistEntrySchema = z
   .object({

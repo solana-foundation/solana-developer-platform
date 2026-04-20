@@ -1,5 +1,14 @@
 import { SkeletonBlock } from "@/components/ui/skeleton-block";
 
+const ISSUANCE_SKELETON_IDS = [
+  "issuance-skeleton-1",
+  "issuance-skeleton-2",
+  "issuance-skeleton-3",
+  "issuance-skeleton-4",
+  "issuance-skeleton-5",
+  "issuance-skeleton-6",
+];
+
 function IssuanceTokenCardSkeleton() {
   return (
     <article className="flex min-h-[340px] flex-col rounded-2xl border border-[rgba(28,28,29,0.1)] bg-[#fcfcfa] p-5 shadow-[0_2px_10px_rgba(28,28,29,0.05)] animate-pulse">
@@ -27,8 +36,8 @@ export function IssuancePageSkeleton() {
       </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-        {Array.from({ length: 6 }, (_, index) => (
-          <IssuanceTokenCardSkeleton key={`issuance-skeleton-${index + 1}`} />
+        {ISSUANCE_SKELETON_IDS.map((id) => (
+          <IssuanceTokenCardSkeleton key={id} />
         ))}
       </div>
     </div>

@@ -1,12 +1,9 @@
 "use client";
 
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import type {
   ComplianceProviderId,
-  PaymentTransferSummary,
   PaymentsDashboardWallet,
+  PaymentTransferSummary,
   RampProviderId,
 } from "@sdp/types";
 import { Select, SelectItem } from "@solana/design-system/select";
@@ -23,16 +20,19 @@ import QRCode from "qrcode";
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { isSolBalance } from "./payments-overview.utils";
 import {
-  type PaymentRampExecution,
-  type PaymentWalletBalance,
   createTransfer,
   executeRampFlow,
   fetchWalletBalances,
   fetchWalletPolicy,
   fetchWallets,
   getDevnetExplorerUrl,
+  type PaymentRampExecution,
+  type PaymentWalletBalance,
   runComplianceCheck,
 } from "./payments-workspace.data";
 import type { ComplianceSnapshot } from "./payments-workspace.types";
@@ -51,11 +51,11 @@ const REQUIRED_ACTION_ASSETS = ["USDC"] as const;
 const MOONPAY_ONRAMP_MIN_USD = 20;
 const PAYMENTS_ACTION_WALLETS_KEY = "payments-action-wallets";
 const PAYMENTS_ACTION_WALLET_BALANCES_KEY = "payments-action-wallet-balances";
-// biome-ignore lint/nursery/noSecrets: Solana native mint address constant, not a secret.
+// biome-ignore lint/security/noSecrets: Solana native mint address constant, not a secret.
 const SOL_MINT = "So11111111111111111111111111111111111111112";
-// biome-ignore lint/nursery/noSecrets: Devnet USDC mint address constant, not a secret.
+// biome-ignore lint/security/noSecrets: Devnet USDC mint address constant, not a secret.
 const DEVNET_USDC_MINT = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
-// biome-ignore lint/nursery/noSecrets: Mainnet USDC mint address constant, not a secret.
+// biome-ignore lint/security/noSecrets: Mainnet USDC mint address constant, not a secret.
 const MAINNET_USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const BVNK_COUNTRY_OPTIONS = [
   { label: "United States", value: "US" },
@@ -509,11 +509,7 @@ function ActionChoiceCard({
   );
 }
 
-function ReviewSummaryCard({
-  rows,
-}: {
-  rows: Array<{ label: string; value: ReactNode }>;
-}) {
+function ReviewSummaryCard({ rows }: { rows: Array<{ label: string; value: ReactNode }> }) {
   return (
     <section className="rounded-2xl border border-border-light bg-border-extra-light p-5">
       <div className="divide-y divide-border-extra-light">

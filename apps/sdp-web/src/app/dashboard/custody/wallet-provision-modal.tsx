@@ -1,17 +1,17 @@
 "use client";
 
+import { useEffect, useMemo, useState } from "react";
+import { useFormStatus } from "react-dom";
 import { createCustodyWallet, initializeCustody } from "@/app/dashboard/custody/actions";
 import {
   CUSTODY_PROVIDER_CATALOG,
-  type KnownCustodyProvider,
   formatCustodyProviderName,
+  type KnownCustodyProvider,
 } from "@/app/dashboard/custody/provider-catalog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useEscapeKey } from "@/lib/use-escape-key";
-import { useEffect, useMemo, useState } from "react";
-import { useFormStatus } from "react-dom";
 import { WalletProviderMark } from "./wallet-provider-mark";
 
 function resolveInitialProvider(

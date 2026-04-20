@@ -1,17 +1,17 @@
 import { Buffer } from "node:buffer";
 import { type Address, assertIsAddress } from "@solana/addresses";
 import {
-  SignerErrorCode,
-  type SolanaSigner,
   createSignatureDictionary,
   extractSignatureFromWireTransaction,
+  SignerErrorCode,
+  type SolanaSigner,
   throwSignerError,
 } from "@solana/keychain-core";
 import type {
   Base64EncodedWireTransaction,
   Transaction,
-  TransactionWithLifetime,
   TransactionWithinSizeLimit,
+  TransactionWithLifetime,
 } from "@solana/kit";
 import { getBase64EncodedWireTransaction } from "@solana/kit";
 import type { SignableMessage, SignatureDictionary } from "@solana/signers";

@@ -4,11 +4,11 @@
  * Creates custody wallets for new organizations using provider APIs.
  */
 
-import { SigningError } from "@/services/ports";
-import type { Env } from "@/types/env";
 import type { VaultAddressesResponse } from "@solana/keychain-fireblocks";
 import { ApiKeyStamper } from "@solana/keychain-turnkey";
-import { SignJWT, importPKCS8 } from "jose";
+import { importPKCS8, SignJWT } from "jose";
+import { SigningError } from "@/services/ports";
+import type { Env } from "@/types/env";
 import {
   buildCoinbaseCdpAccountName,
   coinbaseCdpRequest,
@@ -26,18 +26,19 @@ import {
   sleep,
 } from "./provisioning.common";
 import {
-  type ParaWalletResponse,
   buildParaUserIdentifier,
+  type ParaWalletResponse,
   paraRequest,
   validateParaWallet,
   waitForParaWalletReady,
 } from "./provisioning.para";
+
 export {
-  deleteAnchorageWallet,
-  provisionAnchorageWallet,
   type DeleteAnchorageOptions,
+  deleteAnchorageWallet,
   type ProvisionAnchorageOptions,
   type ProvisionAnchorageResult,
+  provisionAnchorageWallet,
 } from "./provisioning.anchorage";
 
 const DEFAULT_FIREBLOCKS_API_BASE_URL = "https://api.fireblocks.io";

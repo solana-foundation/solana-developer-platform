@@ -13,7 +13,7 @@
 
 import { KoraAdapter, KoraClient } from "@sdp/api/services/adapters";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { KORA_CONFIGURED, RUN_INTEGRATION_TESTS, env } from "../helpers/integration";
+import { env, KORA_CONFIGURED, RUN_INTEGRATION_TESTS } from "../helpers/integration";
 
 describe.skipIf(!KORA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Kora Fee Payment", () => {
   let adapter: KoraAdapter;

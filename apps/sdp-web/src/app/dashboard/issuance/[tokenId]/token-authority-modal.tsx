@@ -1,15 +1,15 @@
 "use client";
 
+import type { PaymentsDashboardWallet } from "@sdp/types";
+import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useEscapeKey } from "@/lib/use-escape-key";
-import type { PaymentsDashboardWallet } from "@sdp/types";
-import { useEffect, useMemo, useState } from "react";
 import type { PermissionRow } from "./token-management-workspace.types";
 import {
-  SOLANA_ADDRESS_PATTERN,
   getSignerWalletOptionLabel,
+  SOLANA_ADDRESS_PATTERN,
 } from "./token-management-workspace.utils";
 import { TokenModalPortal } from "./token-modal-portal";
 import { TokenWalletIdentityCard } from "./token-wallet-identity-card";

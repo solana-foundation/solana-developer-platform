@@ -1,5 +1,5 @@
-import { docsOrigin } from "@/lib/site";
 import type { MetadataRoute } from "next";
+import { docsOrigin } from "@/lib/site";
 
 export default function robots(): MetadataRoute.Robots {
   return {

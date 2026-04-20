@@ -1,14 +1,14 @@
 "use client";
 
+import { useState } from "react";
 import {
-  type KnownCustodyProvider,
   formatCustodyProviderName,
+  type KnownCustodyProvider,
 } from "@/app/dashboard/custody/provider-catalog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useEscapeKey } from "@/lib/use-escape-key";
-import { useState } from "react";
 import { createCustodyWallet } from "./actions";
 
 interface CreateWalletModalProps {

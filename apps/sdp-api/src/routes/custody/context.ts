@@ -1,6 +1,6 @@
+import type { Context } from "hono";
 import { AppError } from "@/lib/errors";
 import type { Env } from "@/types/env";
-import type { Context } from "hono";
 
 export type AppContext = Context<{ Bindings: Env }>;
 

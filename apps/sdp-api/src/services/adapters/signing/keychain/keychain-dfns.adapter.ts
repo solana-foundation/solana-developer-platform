@@ -4,11 +4,11 @@
  * Wraps the internal DFNS signer to implement SigningPort.
  */
 
+import type { SolanaSigner } from "@solana/keychain-core";
+import type { Address } from "@solana/kit";
 import { DfnsSigner } from "@/services/dfns/signer";
 import type { SignRequest, SignResult } from "@/services/ports";
 import { SigningError } from "@/services/ports";
-import type { SolanaSigner } from "@solana/keychain-core";
-import type { Address } from "@solana/kit";
 import { BaseKeychainAdapter } from "./base-keychain.adapter";
 import type { KeychainDfnsConfig } from "./types";
 

@@ -5,10 +5,10 @@
  * Coinbase CDP provides hosted Solana wallets via CDP v2 APIs.
  */
 
-import type { SignRequest, SignResult } from "@/services/ports";
 import { createCdpSigner } from "@solana/keychain-cdp";
 import type { SolanaSigner } from "@solana/keychain-core";
 import type { Address } from "@solana/kit";
+import type { SignRequest, SignResult } from "@/services/ports";
 import { BaseKeychainAdapter } from "./base-keychain.adapter";
 import type { KeychainCoinbaseConfig } from "./types";
 

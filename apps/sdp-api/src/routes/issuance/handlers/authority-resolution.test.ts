@@ -1,8 +1,8 @@
+import type { Token } from "@sdp/types";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ApiKeyContext } from "@/lib/auth";
 import * as solanaServices from "@/services/solana";
 import { CustodyConfigStore } from "@/services/stores/custody-config.store";
-import type { Token } from "@sdp/types";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   getInitialPermanentDelegateAuthority,
   resolveAuthoritySigner,

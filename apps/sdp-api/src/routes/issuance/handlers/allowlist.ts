@@ -1,3 +1,5 @@
+import type { TokenAllowlistResponse } from "@sdp/types";
+import type { Context } from "hono";
 import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
 import { AppError, notFound } from "@/lib/errors";
@@ -8,8 +10,6 @@ import { createMosaicService } from "@/services/mosaic";
 import { createOrgSigner } from "@/services/solana";
 import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
-import type { TokenAllowlistResponse } from "@sdp/types";
-import type { Context } from "hono";
 import { addAllowlistSchema } from "../schemas";
 
 type AppContext = Context<{ Bindings: Env }>;

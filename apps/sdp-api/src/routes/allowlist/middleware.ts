@@ -1,6 +1,6 @@
+import type { Context, Next } from "hono";
 import { AppError } from "@/lib/errors";
 import type { Env } from "@/types/env";
-import type { Context, Next } from "hono";
 
 // Allowlist admin middleware.
 // In production, requires either a configured admin key or Clerk org ownership by stable org ID.

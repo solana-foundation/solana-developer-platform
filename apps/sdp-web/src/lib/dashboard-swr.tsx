@@ -1,8 +1,8 @@
 "use client";
 
-import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useEffect, useMemo } from "react";
 import useSWR, { type BareFetcher, type Key, type SWRConfiguration, type SWRResponse } from "swr";
+import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 
 export interface PersistedDashboardSnapshotConfig<Data> {
   key: string;

@@ -1,9 +1,9 @@
-import { getAuthEntryPath } from "@/lib/auth-entry";
-import { createTimedTrace } from "@/lib/request-tracing";
-import { type SdpApiClient, createSdpApiClient } from "@/lib/sdp-api";
 import { auth } from "@clerk/nextjs/server";
 import type { Token } from "@sdp/types";
 import { notFound, redirect } from "next/navigation";
+import { getAuthEntryPath } from "@/lib/auth-entry";
+import { createTimedTrace } from "@/lib/request-tracing";
+import { createSdpApiClient, type SdpApiClient } from "@/lib/sdp-api";
 import { TokenManagementWorkspace } from "./token-management-workspace";
 
 interface TokenManagementPageProps {

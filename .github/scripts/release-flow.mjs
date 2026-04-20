@@ -70,7 +70,7 @@ function writeJson(filePath, value) {
 function updatePackageVersion(filePath, currentVersion, nextVersion) {
   const current = fs.readFileSync(filePath, "utf8");
   const updated = current.replace(
-    new RegExp(`(\"version\"\\s*:\\s*\")${escapeRegExp(currentVersion)}(\")`),
+    new RegExp(`("version"\\s*:\\s*")${escapeRegExp(currentVersion)}(")`),
     `$1${nextVersion}$2`
   );
 
@@ -94,7 +94,7 @@ function latestReleaseTag() {
 }
 
 function commitRecords(range) {
-  // biome-ignore lint/nursery/noSecrets: git log delimiters use fixed hex markers, not credentials.
+  // biome-ignore lint/security/noSecrets: git log delimiters use fixed hex markers, not credentials.
   const output = git(["log", "--format=%H%x1f%s%x1f%b%x1e", range]);
 
   return output
@@ -375,6 +375,7 @@ async function prepareRelease() {
   }
 
   git(["config", "user.name", "github-actions[bot]"], { capture: false });
+  // biome-ignore lint/security/noSecrets: Public GitHub Actions bot noreply address, not a secret.
   git(["config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com"], {
     capture: false,
   });
@@ -423,6 +424,7 @@ async function publishRelease() {
   }
 
   git(["config", "user.name", "github-actions[bot]"], { capture: false });
+  // biome-ignore lint/security/noSecrets: Public GitHub Actions bot noreply address, not a secret.
   git(["config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com"], {
     capture: false,
   });
