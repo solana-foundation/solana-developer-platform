@@ -54,7 +54,7 @@
     "zod": "^3.24.0"
   },
   "devDependencies": {
-    "@asteasolutions/zod-to-openapi": "7.2.0",
+    "@asteasolutions/zod-to-openapi": "8.5.0",
     "@types/react": "^19.2.10",
     "@types/pg": "^8.15.6",
     "@cloudflare/vitest-pool-workers": "^0.14.3",
