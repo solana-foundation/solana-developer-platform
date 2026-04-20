@@ -1,12 +1,12 @@
+import { auth } from "@clerk/nextjs/server";
+import type { OrganizationRpcProvider } from "@sdp/types";
+import { redirect } from "next/navigation";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { fetchOrganizationProviderAccess } from "@/lib/organization-provider-access";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createSdpApiClient } from "@/lib/sdp-api";
-import { auth } from "@clerk/nextjs/server";
-import type { OrganizationRpcProvider } from "@sdp/types";
-import { redirect } from "next/navigation";
 import { OrganizationRpcSettingsForm } from "./organization-rpc-settings-form";
 
 type OrganizationSettings = {

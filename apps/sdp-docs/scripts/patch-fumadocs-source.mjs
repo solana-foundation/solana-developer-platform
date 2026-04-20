@@ -49,7 +49,7 @@ const run = async () => {
     {
       pattern: /export const defaultCollection =/g,
       localName: "_defaultCollection",
-      // biome-ignore lint/nursery/noSecrets: Generated Fumadocs export identifier, not a secret.
+      // biome-ignore lint/security/noSecrets: Generated Fumadocs export identifier, not a secret.
       exportName: "defaultCollection",
     },
   ];

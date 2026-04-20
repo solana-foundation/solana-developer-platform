@@ -17,9 +17,6 @@ import { corsMiddleware } from "@/middleware/cors";
 import { skipRateLimitPaths } from "@/middleware/rate-limit";
 import { requestIdMiddleware } from "@/middleware/request-id";
 import { requestTracingMiddleware } from "@/middleware/request-tracing";
-import { SigningError } from "@/services/ports";
-import type { Env } from "@/types/env";
-
 import allowlist from "@/routes/allowlist";
 import apiKeys from "@/routes/api-keys";
 import auth from "@/routes/auth";
@@ -39,6 +36,8 @@ import projects from "@/routes/projects";
 import rpc from "@/routes/rpc";
 import webhooks from "@/routes/webhooks";
 import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
+import { SigningError } from "@/services/ports";
+import type { Env } from "@/types/env";
 
 // Create app
 const app = new Hono<{ Bindings: Env }>();

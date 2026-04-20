@@ -2,14 +2,14 @@ import { getDb } from "@sdp/api/db";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { TokenApiResponse } from "../helpers/api-types";
 import {
-  RUN_INTEGRATION_TESTS,
-  SOLANA_CONFIGURED,
   cleanupIntegrationSuite,
   env,
   initIntegrationSuite,
+  RUN_INTEGRATION_TESTS,
   request as rawRequest,
   requestWithApiKey,
   resetIntegrationState,
+  SOLANA_CONFIGURED,
 } from "../helpers/integration";
 
 describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Custody Privy Signing", () => {

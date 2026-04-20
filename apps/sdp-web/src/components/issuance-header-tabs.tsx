@@ -1,8 +1,8 @@
 "use client";
 
-import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { Tab, TabList, Tabs } from "@solana/design-system/tabs";
 import { useEffect, useState } from "react";
+import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 
 const tabOptions = [
   { id: "tokens", label: "Overview" },

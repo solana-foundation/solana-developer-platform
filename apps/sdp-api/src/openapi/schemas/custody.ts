@@ -7,12 +7,13 @@ import {
   switchSigningSchema as switchSigningSchemaBase,
   updateWalletSchema as updateWalletSchemaBase,
 } from "../../routes/custody/schemas";
-import { withOpenApi, z } from "./base";
 import {
   isoDateTimeSchema,
   projectIdParamSchema,
   solanaAddressSchema,
   walletIdParamSchema,
+  withOpenApi,
+  z,
 } from "./base";
 
 export const initializeSigningRequestSchema = withOpenApi(initializeSigningSchemaBase, {

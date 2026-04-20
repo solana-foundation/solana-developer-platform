@@ -1,18 +1,18 @@
+import type { Address } from "@solana/kit";
 import { formatDecimalAmount } from "@/lib/amount";
 import { AppError } from "@/lib/errors";
 import { assertValidAddress } from "@/lib/solana";
 import { type createRpc, getAccountInfo } from "@/services/solana/rpc";
-import type { Address } from "@solana/kit";
 
-// biome-ignore lint/nursery/noSecrets: Solana native SOL mint address constant, not a secret.
+// biome-ignore lint/security/noSecrets: Solana native SOL mint address constant, not a secret.
 export const SOL_MINT = "So11111111111111111111111111111111111111112";
-// biome-ignore lint/nursery/noSecrets: Devnet USDC mint address constant, not a secret.
+// biome-ignore lint/security/noSecrets: Devnet USDC mint address constant, not a secret.
 const DEVNET_USDC_MINT = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
-// biome-ignore lint/nursery/noSecrets: Mainnet USDC mint address constant, not a secret.
+// biome-ignore lint/security/noSecrets: Mainnet USDC mint address constant, not a secret.
 const MAINNET_USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
-// biome-ignore lint/nursery/noSecrets: Solana SPL Token program ID, not a secret.
+// biome-ignore lint/security/noSecrets: Solana SPL Token program ID, not a secret.
 const SPL_TOKEN_PROGRAM_ID = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA" as Address;
-// biome-ignore lint/nursery/noSecrets: Solana Token-2022 program ID, not a secret.
+// biome-ignore lint/security/noSecrets: Solana Token-2022 program ID, not a secret.
 const SPL_TOKEN_2022_PROGRAM_ID = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb" as Address;
 const SPL_TOKEN_PROGRAM_IDS = [SPL_TOKEN_PROGRAM_ID, SPL_TOKEN_2022_PROGRAM_ID] as const;
 const KNOWN_TOKEN_LABELS_BY_MINT = new Map<string, string>([

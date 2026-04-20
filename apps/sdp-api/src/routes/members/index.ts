@@ -2,9 +2,9 @@
  * Organization Members Routes
  */
 
+import { Hono } from "hono";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import type { Env } from "@/types/env";
-import { Hono } from "hono";
 import { acceptInvitation, inviteMember, listMembers, removeMember } from "./handlers";
 
 const members = new Hono<{ Bindings: Env }>();

@@ -2,8 +2,8 @@
  * OpenAPI Docs UI Route
  */
 
-import type { Env } from "@/types/env";
 import { Hono } from "hono";
+import type { Env } from "@/types/env";
 
 const docs = new Hono<{ Bindings: Env }>();
 

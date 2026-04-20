@@ -1,18 +1,18 @@
 "use client";
 
-import { ApiPlaygroundShellSkeleton } from "@/components/api-playground-shell-skeleton";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
-import { getStoredApiKeySecret } from "@/lib/playground-api-keys";
 import type { PaymentsDashboardWallet } from "@sdp/types";
 import { Plus, Search } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import { ApiPlaygroundShellSkeleton } from "@/components/api-playground-shell-skeleton";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
+import { getStoredApiKeySecret } from "@/lib/playground-api-keys";
 import { CreateIssuanceTokenModal } from "./create-token-modal";
-import { type IssuanceTemplateId, getTemplateCatalogEntry } from "./template-catalog";
+import { getTemplateCatalogEntry, type IssuanceTemplateId } from "./template-catalog";
 
 const IssuancePlayground = dynamic(
   () => import("./issuance-playground").then((module) => module.IssuancePlayground),
@@ -138,7 +138,7 @@ export function IssuanceWorkspace({
       void import("./issuance-playground");
     };
 
-    // biome-ignore lint/nursery/noSecrets: requestIdleCallback is a browser API, not a secret.
+    // biome-ignore lint/security/noSecrets: requestIdleCallback is a browser API, not a secret.
     if (typeof window !== "undefined" && "requestIdleCallback" in window) {
       const idleId = window.requestIdleCallback(preloadPlayground);
       return () => window.cancelIdleCallback(idleId);

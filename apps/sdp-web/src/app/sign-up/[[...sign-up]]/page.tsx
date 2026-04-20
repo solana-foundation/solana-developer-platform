@@ -1,5 +1,5 @@
-import { AuthTermsNotice } from "@/components/auth-terms-notice";
 import { SignUp } from "@clerk/nextjs";
+import { AuthTermsNotice } from "@/components/auth-terms-notice";
 
 export default function SignUpPage() {
   return (

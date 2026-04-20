@@ -1,10 +1,5 @@
 "use client";
 
-import {
-  type ComplianceIntent,
-  type ComplianceProviderResult,
-  screenAddressCompliance,
-} from "@/lib/compliance";
 import type {
   CustodyWalletAggregate,
   PaymentsWalletAggregateEnvelope,
@@ -15,6 +10,11 @@ import type {
   PaymentsDashboardWallet as WalletRecord,
   PaymentsDashboardWalletsEnvelope as WalletsEnvelope,
 } from "@sdp/types";
+import {
+  type ComplianceIntent,
+  type ComplianceProviderResult,
+  screenAddressCompliance,
+} from "@/lib/compliance";
 import type { ComplianceSnapshot } from "./payments-workspace.types";
 
 type ApiErrorBody = {
@@ -170,9 +170,7 @@ export function riskToneClassName(result: ComplianceProviderResult): string {
 }
 
 export async function fetchWallets(
-  options: {
-    signal?: AbortSignal;
-  } = {}
+  options: { signal?: AbortSignal } = {}
 ): Promise<WalletRecord[]> {
   const query = new URLSearchParams({
     view: "summary",
@@ -310,10 +308,7 @@ function resolveWalletBalancesSnapshot(
 }
 
 export async function fetchTransfers(
-  options: {
-    walletId?: string;
-    signal?: AbortSignal;
-  } = {}
+  options: { walletId?: string; signal?: AbortSignal } = {}
 ): Promise<TransferRecord[]> {
   const transfersQuery = new URLSearchParams({
     page: "1",

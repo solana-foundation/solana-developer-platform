@@ -1,3 +1,4 @@
+import type { Context } from "hono";
 import { getDb } from "@/db";
 import { toMosaicAmount } from "@/lib/amount";
 import { getAuth } from "@/lib/auth";
@@ -9,7 +10,6 @@ import { createMosaicService } from "@/services/mosaic";
 import { createRpc, simulateTransaction } from "@/services/solana/rpc";
 import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
-import type { Context } from "hono";
 import { forceBurnSchema } from "../schemas";
 import { resolveAuthoritySigner, resolvePermanentDelegateAuthority } from "./authority-resolution";
 import { buildIdempotencyMetadata } from "./idempotency";
@@ -64,7 +64,7 @@ export const prepareForceBurn = async (c: AppContext) => {
   });
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
   const source = assertValidAddress(parsed.data.forceBurn.source, "source");
-  // biome-ignore lint/nursery/noSecrets: Field label used for error messages, not a secret.
+  // biome-ignore lint/security/noSecrets: Field label used for error messages, not a secret.
   const permanentDelegate = assertValidAddress(permanentDelegateRaw, "delegateAuthority");
 
   const mosaic = createMosaicService(c.env, signer);

@@ -1,7 +1,7 @@
-import { AUTH_ENTRY_PATH } from "@/lib/auth-entry";
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
+import { AUTH_ENTRY_PATH } from "@/lib/auth-entry";
 
 const isPublicRoute = createRouteMatcher(["/sign-in(.*)", "/sign-up(.*)", "/", "/docs(.*)"]);
 

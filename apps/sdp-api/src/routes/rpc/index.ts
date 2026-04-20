@@ -1,6 +1,6 @@
+import { Hono } from "hono";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import type { Env } from "@/types/env";
-import { Hono } from "hono";
 import { getRpcProviders, relayRpcRequest, testRpcConnection } from "./handlers";
 
 const rpc = new Hono<{ Bindings: Env }>();

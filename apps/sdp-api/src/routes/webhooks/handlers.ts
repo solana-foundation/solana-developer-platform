@@ -1,3 +1,5 @@
+import type { Context } from "hono";
+import { Webhook } from "svix";
 import { getDb } from "@/db";
 import { mapClerkRoleToOrgRole } from "@/lib/clerk-role";
 import { AppError, badRequest } from "@/lib/errors";
@@ -9,8 +11,6 @@ import {
 import { type ClerkUser, ClerkUsersService } from "@/services/clerk-users.service";
 import { syncOrganizationTierFromClerk } from "@/services/organization-provider-access.service";
 import type { Env } from "@/types/env";
-import type { Context } from "hono";
-import { Webhook } from "svix";
 
 type AppContext = Context<{ Bindings: Env }>;
 
@@ -615,13 +615,13 @@ export const handleClerkWebhook = async (c: AppContext) => {
     case "user.deleted":
       await deleteUser(c, data);
       break;
-    // biome-ignore lint/nursery/noSecrets: Webhook event type literal, not a secret.
+    // biome-ignore lint/security/noSecrets: Webhook event type literal, not a secret.
     case "organizationMembership.created":
-    // biome-ignore lint/nursery/noSecrets: Webhook event type literal, not a secret.
+    // biome-ignore lint/security/noSecrets: Webhook event type literal, not a secret.
     case "organizationMembership.updated":
       await upsertMembership(c, data);
       break;
-    // biome-ignore lint/nursery/noSecrets: Webhook event type literal, not a secret.
+    // biome-ignore lint/security/noSecrets: Webhook event type literal, not a secret.
     case "organizationMembership.deleted":
       await deleteMembership(c, data);
       break;

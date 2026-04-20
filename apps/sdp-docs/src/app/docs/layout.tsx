@@ -1,6 +1,6 @@
-import { source } from "@/lib/source";
 import { DocsLayout } from "fumadocs-ui/layouts/docs";
 import type { ReactNode } from "react";
+import { source } from "@/lib/source";
 
 function resolveDashboardUrl() {
   const configuredUrl = process.env.NEXT_PUBLIC_SDP_WEB_URL?.trim();

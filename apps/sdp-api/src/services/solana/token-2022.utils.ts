@@ -5,10 +5,10 @@
  * Extracted from Token2022Service for testability.
  */
 
-import { parseDecimalAmount } from "@/lib/amount";
 import type { TokenExtensionsConfig } from "@sdp/types";
+import { type Address, assertIsAddress, some, type TransactionSigner } from "@solana/kit";
 import { type ExtensionArgs, extension } from "@solana-program/token-2022";
-import { type Address, type TransactionSigner, assertIsAddress, some } from "@solana/kit";
+import { parseDecimalAmount } from "@/lib/amount";
 
 /**
  * JSON stringify replacer that handles BigInt values by converting them to strings.
@@ -72,16 +72,16 @@ export function getExtensionTypes(
     const maximumFee = parseDecimalAmount(extensions.transferFee.maxFee, decimals);
     const transferFeeConfigAuthority = toAddress(
       extensions.transferFee.transferFeeConfigAuthority,
-      // biome-ignore lint/nursery/noSecrets: Not a secret, used as an error path label.
+      // biome-ignore lint/security/noSecrets: Not a secret, used as an error path label.
       "extensions.transferFee.transferFeeConfigAuthority"
     );
     const withdrawWithheldAuthority = toAddress(
       extensions.transferFee.withdrawWithheldAuthority,
-      // biome-ignore lint/nursery/noSecrets: Not a secret, used as an error path label.
+      // biome-ignore lint/security/noSecrets: Not a secret, used as an error path label.
       "extensions.transferFee.withdrawWithheldAuthority"
     );
     types.push(
-      // biome-ignore lint/nursery/noSecrets: Token-2022 extension type identifier
+      // biome-ignore lint/security/noSecrets: Token-2022 extension type identifier
       extension("TransferFeeConfig", {
         transferFeeConfigAuthority,
         withdrawWithheldAuthority,
@@ -103,7 +103,7 @@ export function getExtensionTypes(
   if (extensions.permanentDelegate) {
     const delegate = toAddress(extensions.permanentDelegate, "extensions.permanentDelegate");
     types.push(
-      // biome-ignore lint/nursery/noSecrets: Token-2022 extension type identifier
+      // biome-ignore lint/security/noSecrets: Token-2022 extension type identifier
       extension("PermanentDelegate", {
         delegate,
       })
@@ -113,7 +113,7 @@ export function getExtensionTypes(
   if (extensions.defaultAccountState) {
     // 0 = Uninitialized, 1 = Initialized, 2 = Frozen
     const state = extensions.defaultAccountState === "frozen" ? 2 : 1;
-    // biome-ignore lint/nursery/noSecrets: Token-2022 extension type identifier
+    // biome-ignore lint/security/noSecrets: Token-2022 extension type identifier
     types.push(extension("DefaultAccountState", { state }));
   }
 
@@ -141,7 +141,7 @@ export function getExtensionTypes(
     const newMultiplierEffectiveTimestamp =
       extensions.scaledUiAmount.newMultiplierEffectiveTimestamp ?? 0;
     types.push(
-      // biome-ignore lint/nursery/noSecrets: Token-2022 extension type identifier
+      // biome-ignore lint/security/noSecrets: Token-2022 extension type identifier
       extension("ScaledUiAmountConfig", {
         authority,
         multiplier: extensions.scaledUiAmount.multiplier ?? 1,

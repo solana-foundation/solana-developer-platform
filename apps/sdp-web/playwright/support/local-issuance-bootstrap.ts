@@ -1,19 +1,18 @@
-import type { Token } from "@sdp/types";
-import type { OrganizationTier } from "@sdp/types";
+import type { OrganizationTier, Token } from "@sdp/types";
 import { generateKeyPairSigner } from "@solana/kit";
 import type { ClerkTestIdentity } from "./clerk-admin";
 import {
-  type IssuanceFixtureToken,
   type IssuanceFixtures,
+  type IssuanceFixtureToken,
   writeIssuanceFixtures,
 } from "./issuance-fixtures";
-import { type LocalApiClient, createLocalApiClient } from "./local-api-client";
+import { createLocalApiClient, type LocalApiClient } from "./local-api-client";
 import {
-  type PlaywrightWalletFixture,
   bootstrapLocalWalletFixtures,
   createExternalSolanaAddress,
   getBootstrapApiBaseUrl,
   getBootstrapClerkJwtTemplate,
+  type PlaywrightWalletFixture,
   seedLocalClerkOrganizationMapping,
 } from "./local-dashboard-bootstrap";
 

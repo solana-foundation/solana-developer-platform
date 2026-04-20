@@ -1,7 +1,7 @@
 "use server";
 
-import { sdpApiRequest } from "@/lib/sdp-api";
 import { revalidatePath } from "next/cache";
+import { sdpApiRequest } from "@/lib/sdp-api";
 import { isValidTokenDecimals } from "./create-token-modal.utils";
 import { issuanceTemplateCatalog } from "./template-catalog";
 

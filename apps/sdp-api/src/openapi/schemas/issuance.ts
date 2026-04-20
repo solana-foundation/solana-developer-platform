@@ -11,7 +11,6 @@ import {
   updateAuthoritySchema as updateAuthoritySchemaBase,
   updateTokenSchema as updateTokenSchemaBase,
 } from "../../routes/issuance/schemas";
-import { withOpenApi, z } from "./base";
 import {
   apiKeyIdParamSchema,
   base64Schema,
@@ -24,6 +23,8 @@ import {
   tokenIdParamSchema,
   tokenTransactionIdSchema,
   walletIdParamSchema,
+  withOpenApi,
+  z,
 } from "./base";
 
 export const tokenExtensionsConfigSchema = z

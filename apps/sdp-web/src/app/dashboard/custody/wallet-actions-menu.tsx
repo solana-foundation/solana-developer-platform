@@ -1,5 +1,8 @@
 "use client";
 
+import { ChevronDown, Ellipsis, ShieldCheck } from "lucide-react";
+import { useTransition } from "react";
+import { toast } from "sonner";
 import { checkWalletSignerMemoAction } from "@/app/dashboard/custody/actions";
 import { Button } from "@/components/ui/button";
 import {
@@ -10,9 +13,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { cn } from "@/lib/utils";
-import { ChevronDown, Ellipsis, ShieldCheck } from "lucide-react";
-import { useTransition } from "react";
-import { toast } from "sonner";
 
 interface WalletActionsMenuProps {
   walletAddress: string;

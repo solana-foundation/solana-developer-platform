@@ -1,10 +1,10 @@
+import type { Context } from "hono";
 import { getDb } from "@/db";
 import { AppError, notFound } from "@/lib/errors";
 import { created, noContent, success } from "@/lib/response";
 import { createAllowlistService } from "@/services/allowlist.service";
 import { AuditService } from "@/services/audit.service";
 import type { Env } from "@/types/env";
-import type { Context } from "hono";
 import { addEntrySchema } from "./schemas";
 
 type AppContext = Context<{ Bindings: Env }>;

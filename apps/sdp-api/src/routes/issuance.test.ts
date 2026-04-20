@@ -2,6 +2,8 @@
  * Issuance Routes E2E Tests
  */
 
+import * as MosaicSdk from "@solana/mosaic-sdk";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
 import { hashString } from "@/lib/hash";
@@ -20,8 +22,6 @@ import {
 } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
-import * as MosaicSdk from "@solana/mosaic-sdk";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Check if running in mock mode (no RPC access)
 const isMockMode = (env as { SOLANA_MOCK?: string }).SOLANA_MOCK === "true";

@@ -2,6 +2,7 @@
  * Projects Routes E2E Tests
  */
 
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
 import { hashString } from "@/lib/hash";
@@ -9,7 +10,6 @@ import { TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 describe("Projects Routes", () => {
   let apiKeyHash: string;

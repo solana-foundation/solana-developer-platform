@@ -2,10 +2,10 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  POSTMAN_COLLECTION_ROUTE,
-  PUBLIC_TAG_SLUGS,
   getPrimaryTagName,
   isPublicTag,
+  POSTMAN_COLLECTION_ROUTE,
+  PUBLIC_TAG_SLUGS,
   slugify,
 } from "./lib/public-openapi.mjs";
 
@@ -70,7 +70,7 @@ const loadSpecData = async () => {
     json = await fs.readFile(generatedSpecPath, "utf8");
   } catch (error) {
     throw new Error(
-      `Missing generated OpenAPI spec at ${SOURCE_PATH}. Run \"pnpm -C apps/sdp-api run openapi:generate\" first.`,
+      `Missing generated OpenAPI spec at ${SOURCE_PATH}. Run "pnpm -C apps/sdp-api run openapi:generate" first.`,
       { cause: error }
     );
   }

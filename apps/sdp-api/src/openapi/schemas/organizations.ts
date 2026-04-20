@@ -4,13 +4,14 @@ import {
   inviteSchema as inviteSchemaBase,
 } from "../../routes/members/schemas";
 import { updateOrgSchema as updateOrgSchemaBase } from "../../routes/organizations/schemas";
-import { withOpenApi, z } from "./base";
 import {
   invitationIdSchema,
   isoDateTimeSchema,
   memberIdParamSchema,
   orgIdParamSchema,
   userIdSchema,
+  withOpenApi,
+  z,
 } from "./base";
 
 export const organizationSettingsSchema = z

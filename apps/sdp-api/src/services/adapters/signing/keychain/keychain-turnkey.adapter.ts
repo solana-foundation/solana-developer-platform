@@ -5,16 +5,16 @@
  * Turnkey provides hosted wallet custody via the Turnkey API.
  */
 
-import type { SignRequest, SignResult } from "@/services/ports";
 import type { SolanaSigner } from "@solana/keychain-core";
 import { TurnkeySigner } from "@solana/keychain-turnkey";
 import type {
   Address,
   Transaction,
-  TransactionWithLifetime,
   TransactionWithinSizeLimit,
+  TransactionWithLifetime,
 } from "@solana/kit";
-import { type SignatureDictionary, createSignableMessage } from "@solana/signers";
+import { createSignableMessage, type SignatureDictionary } from "@solana/signers";
+import type { SignRequest, SignResult } from "@/services/ports";
 import { BaseKeychainAdapter } from "./base-keychain.adapter";
 import type { KeychainTurnkeyConfig } from "./types";
 

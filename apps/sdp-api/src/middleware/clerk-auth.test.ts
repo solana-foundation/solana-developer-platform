@@ -1,3 +1,5 @@
+import { Hono } from "hono";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import type { ClerkJwtPayload } from "@/lib/clerk-token";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
@@ -6,8 +8,6 @@ import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVNamespaces } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
-import { Hono } from "hono";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 const TEST_ORG = {
   id: "org_clerk_cache_request_test",

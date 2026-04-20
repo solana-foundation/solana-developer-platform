@@ -1,5 +1,5 @@
-import type { Env } from "@/types/env";
 import type { Context, Next } from "hono";
+import type { Env } from "@/types/env";
 
 const TRACE_ID_HEADER = "X-SDP-Trace-ID";
 const TRACE_SOURCE_HEADER = "X-SDP-Trace-Source";

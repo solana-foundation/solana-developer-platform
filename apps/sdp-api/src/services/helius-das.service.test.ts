@@ -1,3 +1,4 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import {
   attachUsdValuesToBalances,
@@ -5,7 +6,6 @@ import {
 } from "@/services/helius-das.service";
 import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const TEST_ORG_ID = "org_helius_das";
 const TEST_USER_ID = "usr_helius_das";

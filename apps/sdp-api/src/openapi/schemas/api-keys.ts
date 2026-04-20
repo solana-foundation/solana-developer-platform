@@ -4,12 +4,13 @@ import {
   apiKeyRotateSchema as apiKeyRotateSchemaBase,
   apiKeyUpdateSchema as apiKeyUpdateSchemaBase,
 } from "../../routes/api-keys/schemas";
-import { withOpenApi, z } from "./base";
 import {
   apiKeyIdParamSchema,
   apiKeyPrefixSchema,
   isoDateTimeSchema,
   projectIdParamSchema,
+  withOpenApi,
+  z,
 } from "./base";
 
 export const apiKeyRoleSchema = z

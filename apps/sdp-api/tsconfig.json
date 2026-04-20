@@ -6,7 +6,6 @@
       "@/*": ["./src/*"],
       "@sdp/types": ["../../packages/sdp-types/src/index.ts"]
     },
-    "baseUrl": ".",
     "jsx": "react-jsx"
   },
   "include": ["src/**/*.ts", "src/**/*.tsx"],

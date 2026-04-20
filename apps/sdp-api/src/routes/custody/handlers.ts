@@ -1,12 +1,13 @@
 export {
+  getConfig,
+  getConfigs,
+} from "./handlers/configs";
+export {
   getSwitchProviderOptions,
   initializeSigning,
   switchSigning,
 } from "./handlers/provider";
-export {
-  getConfig,
-  getConfigs,
-} from "./handlers/configs";
+export { signerCheck } from "./handlers/signer-check";
 export {
   createWallet,
   deleteWallet,
@@ -17,4 +18,3 @@ export {
   setDefaultWallet,
   updateWallet,
 } from "./handlers/wallets";
-export { signerCheck } from "./handlers/signer-check";

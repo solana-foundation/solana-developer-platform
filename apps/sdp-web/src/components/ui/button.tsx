@@ -3,7 +3,7 @@ import {
   type ButtonProps as SolanaButtonProps,
 } from "@solana/design-system/button";
 import { Slot } from "@solana/design-system/utils";
-import { Children, type ComponentProps, type ReactNode, isValidElement } from "react";
+import { Children, type ComponentProps, isValidElement, type ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
 
@@ -41,10 +41,12 @@ const sizeMap: Record<ButtonSize, NonNullable<SolanaButtonProps["size"]>> = {
 
 const sizeClassNames: Record<ButtonSize, string | undefined> = {
   default: undefined,
+  // biome-ignore lint/security/noSecrets: Tailwind arbitrary selector utility, not a secret.
   xs: "h-6 rounded-md px-2 text-xs [&_svg:not([class*='size-'])]:size-3",
   sm: undefined,
   lg: undefined,
   icon: "size-9",
+  // biome-ignore lint/security/noSecrets: Tailwind arbitrary selector utility, not a secret.
   "icon-xs": "size-6 rounded-md [&_svg:not([class*='size-'])]:size-3",
   "icon-sm": "size-8",
   "icon-lg": "size-10",
@@ -63,10 +65,12 @@ const slotVariantClassNames: Record<ButtonVariant, string> = {
 const slotSizeClassNames: Record<ButtonSize, string> = {
   default:
     "h-[var(--button-height-lg)] gap-[var(--button-gap-lg)] rounded-[var(--button-radius-lg)] px-[var(--button-padding-x-lg)] text-button-lg",
+  // biome-ignore lint/security/noSecrets: Tailwind arbitrary selector utility, not a secret.
   xs: "h-6 gap-1 rounded-md px-2 text-xs [&_svg:not([class*='size-'])]:size-3",
   sm: "h-[var(--button-height-md)] gap-[var(--button-gap-md)] rounded-[var(--button-radius-md)] px-[var(--button-padding-x-md)] text-button-md",
   lg: "h-[var(--button-height-lg)] gap-[var(--button-gap-lg)] rounded-[var(--button-radius-lg)] px-[var(--button-padding-x-lg)] text-button-lg",
   icon: "size-9 rounded-[var(--button-radius-md)] p-0",
+  // biome-ignore lint/security/noSecrets: Tailwind arbitrary selector utility, not a secret.
   "icon-xs": "size-6 rounded-md p-0 [&_svg:not([class*='size-'])]:size-3",
   "icon-sm": "size-8 rounded-[var(--button-radius-sm)] p-0",
   "icon-lg": "size-10 rounded-[var(--button-radius-lg)] p-0",

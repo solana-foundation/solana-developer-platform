@@ -1,9 +1,9 @@
-import { shouldLoadClerkForPath } from "@/lib/auth-entry";
 import { ClerkProvider } from "@clerk/nextjs";
 import { VercelToolbar } from "@vercel/toolbar/next";
 import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { Toaster } from "sonner";
+import { shouldLoadClerkForPath } from "@/lib/auth-entry";
 import "./globals.css";
 
 export const metadata: Metadata = {

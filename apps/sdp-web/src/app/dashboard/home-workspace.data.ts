@@ -30,9 +30,7 @@ function getApiError(body: HomeActivityResponseEnvelope, fallback: string): stri
 }
 
 export async function fetchHomeActivity(
-  options: {
-    signal?: AbortSignal;
-  } = {}
+  options: { signal?: AbortSignal } = {}
 ): Promise<HomeActivitySnapshot> {
   const response = await fetch("/api/dashboard/home/activity", {
     method: "GET",

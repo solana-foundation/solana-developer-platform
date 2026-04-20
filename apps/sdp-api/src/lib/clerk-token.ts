@@ -1,7 +1,7 @@
+import type { Context } from "hono";
+import { createRemoteJWKSet, type JWTPayload, jwtVerify } from "jose";
 import { internalError } from "@/lib/errors";
 import type { Env } from "@/types/env";
-import type { Context } from "hono";
-import { type JWTPayload, createRemoteJWKSet, jwtVerify } from "jose";
 
 export interface ClerkJwtPayload extends JWTPayload {
   sub?: string;

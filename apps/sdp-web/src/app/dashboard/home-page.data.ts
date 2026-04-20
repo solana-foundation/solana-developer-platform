@@ -1,5 +1,5 @@
-import type { SdpApiClient } from "@/lib/sdp-api";
 import type { PaymentTransferSummary, TokenTransaction } from "@sdp/types";
+import type { SdpApiClient } from "@/lib/sdp-api";
 import type { FetchResult } from "./payments/payments-page.data";
 
 interface HomeIssuanceToken {

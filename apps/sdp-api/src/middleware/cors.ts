@@ -2,9 +2,9 @@
  * CORS Middleware Configuration
  */
 
-import type { Env } from "@/types/env";
 import { getSdpDocsOrigin } from "@sdp/types";
 import { cors } from "hono/cors";
+import type { Env } from "@/types/env";
 
 /**
  * CORS middleware with environment-aware configuration

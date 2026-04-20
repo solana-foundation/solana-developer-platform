@@ -1,13 +1,13 @@
 "use client";
 
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { useEscapeKey } from "@/lib/use-escape-key";
 import type { PaymentsDashboardWallet } from "@sdp/types";
 import { Plus } from "lucide-react";
 import { type Dispatch, type SetStateAction, useState } from "react";
 import { useFormStatus } from "react-dom";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { useEscapeKey } from "@/lib/use-escape-key";
 import { createApiKeyAction } from "./actions";
 
 type ApiKeyRole = "api_admin" | "api_developer" | "api_readonly";

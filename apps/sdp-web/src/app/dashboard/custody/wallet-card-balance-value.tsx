@@ -1,7 +1,7 @@
 "use client";
 
-import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
 import type { CustodyWalletTokenBalance } from "@sdp/types";
+import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
 import { formatCurrencyAmount, resolveTotalBalance } from "../payments/payments-overview.utils";
 
 const BALANCE_REFRESH_INTERVAL_MS = 30_000;

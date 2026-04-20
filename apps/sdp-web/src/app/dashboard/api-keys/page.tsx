@@ -1,3 +1,6 @@
+import { auth } from "@clerk/nextjs/server";
+import type { PaymentsDashboardWallet } from "@sdp/types";
+import { redirect } from "next/navigation";
 import {
   Card,
   CardAction,
@@ -10,9 +13,6 @@ import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createSdpApiClient } from "@/lib/sdp-api";
-import { auth } from "@clerk/nextjs/server";
-import type { PaymentsDashboardWallet } from "@sdp/types";
-import { redirect } from "next/navigation";
 import { fetchPaymentsWallets } from "../payments/payments-page.data";
 import { ApiKeyFlashSurface } from "./api-key-flash-surface";
 import { type ApiKeyRecord, ApiKeysTableClient } from "./api-keys-table-client";

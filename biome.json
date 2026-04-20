@@ -1,8 +1,6 @@
 {
-  "$schema": "https://biomejs.dev/schemas/1.9.0/schema.json",
-  "organizeImports": {
-    "enabled": true
-  },
+  "$schema": "https://biomejs.dev/schemas/2.4.11/schema.json",
+  "assist": { "actions": { "source": { "organizeImports": "on" } } },
   "formatter": {
     "enabled": true,
     "indentStyle": "space",
@@ -14,6 +12,11 @@
       "semicolons": "always",
       "quoteStyle": "double",
       "trailingCommas": "es5"
+    }
+  },
+  "css": {
+    "parser": {
+      "tailwindDirectives": true
     }
   },
   "linter": {
@@ -31,12 +34,12 @@
         "noDoubleEquals": "error",
         "noConfusingVoidType": "error",
         "noAsyncPromiseExecutor": "error",
-        "noUnsafeDeclarationMerging": "error"
+        "noUnsafeDeclarationMerging": "error",
+        "noVar": "error"
       },
       "style": {
         "noNonNullAssertion": "warn",
-        "useConst": "error",
-        "noVar": "error"
+        "useConst": "error"
       },
       "complexity": {
         "noExcessiveCognitiveComplexity": {
@@ -49,58 +52,60 @@
         "noUselessTypeConstraint": "error"
       },
       "security": {
-        "noDangerouslySetInnerHtml": "error"
-      },
-      "nursery": {
+        "noDangerouslySetInnerHtml": "error",
         "noSecrets": "error"
-      }
+      },
+      "nursery": {}
     }
   },
   "overrides": [
     {
-      "include": ["src/openapi/**/*.ts", "apps/sdp-api/src/openapi/**/*.ts"],
+      "includes": ["**/src/openapi/**/*.ts", "**/apps/sdp-api/src/openapi/**/*.ts"],
       "linter": {
         "rules": {
           "complexity": {
             "noExcessiveCognitiveComplexity": "off"
           },
-          "nursery": {
+          "nursery": {},
+          "security": {
             "noSecrets": "off"
           }
         }
       }
     },
     {
-      "include": [
-        "apps/sdp-docs/scripts/generate-postman-collection.mjs",
-        "scripts/generate-postman-collection.mjs"
+      "includes": [
+        "**/apps/sdp-docs/scripts/generate-postman-collection.mjs",
+        "**/scripts/generate-postman-collection.mjs"
       ],
       "linter": {
         "rules": {
           "complexity": {
             "noExcessiveCognitiveComplexity": "off"
           },
-          "nursery": {
+          "nursery": {},
+          "security": {
             "noSecrets": "off"
           }
         }
       }
     },
     {
-      "include": ["**/issuance/templates/**/*.ts"],
+      "includes": ["**/issuance/templates/**/*.ts"],
       "linter": {
         "rules": {
           "complexity": {
             "noExcessiveCognitiveComplexity": "off"
           },
-          "nursery": {
+          "nursery": {},
+          "security": {
             "noSecrets": "off"
           }
         }
       }
     },
     {
-      "include": [
+      "includes": [
         "**/*.test.ts",
         "**/*.test.tsx",
         "**/*.test.js",
@@ -119,7 +124,8 @@
           "complexity": {
             "noExcessiveCognitiveComplexity": "off"
           },
-          "nursery": {
+          "nursery": {},
+          "security": {
             "noSecrets": "off"
           }
         }
@@ -127,14 +133,15 @@
     }
   ],
   "files": {
-    "ignore": [
-      "node_modules",
-      ".wrangler",
-      ".next",
-      "dist",
-      "*.d.ts",
-      "pnpm-lock.yaml",
-      "**/.source/**"
+    "includes": [
+      "**",
+      "!**/node_modules",
+      "!**/.wrangler",
+      "!**/.next",
+      "!**/dist",
+      "!**/*.d.ts",
+      "!**/pnpm-lock.yaml",
+      "!**/.source"
     ]
   },
   "vcs": {

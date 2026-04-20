@@ -2,13 +2,13 @@
  * Token Service Unit Tests
  */
 
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { TokenService } from "@/services/token.service";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { TEST_PROJECT, TEST_PROJECT_API_KEY } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 describe("TokenService", () => {
   let db: DatabaseClient;

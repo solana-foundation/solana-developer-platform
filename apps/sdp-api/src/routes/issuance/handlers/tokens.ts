@@ -1,3 +1,5 @@
+import type { TokenResponse } from "@sdp/types";
+import type { Context } from "hono";
 import { getDb } from "@/db";
 import { resolveApiKeySigningWalletId } from "@/lib/api-key-wallet-auth";
 import { getAuth } from "@/lib/auth";
@@ -10,8 +12,6 @@ import { createMosaicService } from "@/services/mosaic";
 import { createOrgSigner } from "@/services/solana";
 import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
-import type { TokenResponse } from "@sdp/types";
-import type { Context } from "hono";
 import { requireProjectScope } from "../helpers";
 import { createTokenSchema, updateTokenSchema } from "../schemas";
 import { resolveAuthoritySigner, resolveCurrentAuthorityForRole } from "./authority-resolution";

@@ -1,7 +1,5 @@
 "use client";
 
-import { Button } from "@/components/ui/button";
-import { useEscapeKey } from "@/lib/use-escape-key";
 import type { PaymentsDashboardWallet } from "@sdp/types";
 import { X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
@@ -9,17 +7,19 @@ import { useRouter } from "next/navigation";
 import { type FormEvent, useState, useTransition } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
+import { Button } from "@/components/ui/button";
+import { useEscapeKey } from "@/lib/use-escape-key";
 import { fetchWallets } from "../payments/payments-workspace.data";
 import { type CreateIssuanceTokenResult, createIssuanceTokenAction } from "./actions";
 import { CreateTokenFeaturesStep } from "./create-token-features-step";
 import { CreateTokenIdentityStep } from "./create-token-identity-step";
 import type { FlowState, TemplateSelection, TokenDraft } from "./create-token-modal.types";
 import {
-  INITIAL_CREATE_ISSUANCE_TOKEN_RESULT,
   createInitialDraft,
   getDefaultAccessControlMode,
   getTemplateDefaultDecimals,
   getTemplateTitle,
+  INITIAL_CREATE_ISSUANCE_TOKEN_RESULT,
   isAccessControlModeAvailable,
   isValidMetadataUri,
   isValidTokenDecimals,

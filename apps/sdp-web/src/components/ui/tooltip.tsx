@@ -4,7 +4,7 @@ import {
   Tooltip as SolanaTooltip,
   TooltipProvider as SolanaTooltipProvider,
 } from "@solana/design-system/tooltip";
-import { Children, type ReactElement, type ReactNode, isValidElement } from "react";
+import { Children, isValidElement, type ReactElement, type ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
 

@@ -1,3 +1,5 @@
+import { normalizeOrganizationRole, type OrganizationRole } from "@sdp/types";
+import type { Context } from "hono";
 import { getDb } from "@/db";
 import { AppError, notFound } from "@/lib/errors";
 import { hashString } from "@/lib/hash";
@@ -5,8 +7,6 @@ import { created, noContent, success } from "@/lib/response";
 import { AuditService } from "@/services/audit.service";
 import { ClerkOrganizationsService } from "@/services/clerk-organizations.service";
 import type { Env } from "@/types/env";
-import { type OrganizationRole, normalizeOrganizationRole } from "@sdp/types";
-import type { Context } from "hono";
 import { acceptSchema, inviteSchema } from "./schemas";
 
 type AppContext = Context<{ Bindings: Env }>;

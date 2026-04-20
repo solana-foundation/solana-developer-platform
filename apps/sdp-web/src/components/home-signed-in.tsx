@@ -1,7 +1,7 @@
 "use client";
 
-import { AutoDashboardRedirect } from "@/components/redirects";
 import { OrganizationSwitcher, useAuth } from "@clerk/nextjs";
+import { AutoDashboardRedirect } from "@/components/redirects";
 
 export function HomeSignedInCard() {
   const { isLoaded, orgId } = useAuth();

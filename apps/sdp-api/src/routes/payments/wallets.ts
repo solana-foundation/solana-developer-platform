@@ -1,10 +1,10 @@
+import type { Permission } from "@sdp/types";
 import { assertApiKeyWalletAccess } from "@/lib/api-key-wallet-auth";
 import { getAuth } from "@/lib/auth";
 import { AppError } from "@/lib/errors";
 import { assertValidAddress } from "@/lib/solana";
 import { createSigningService } from "@/services/domain/signing.service";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
-import type { Permission } from "@sdp/types";
 import type { AppContext } from "./context";
 
 export async function resolveScope(c: AppContext) {

@@ -33,7 +33,7 @@ function loadEnvFile(filePath: string): Record<string, string> {
 const fileEnv = loadEnvFile(DEV_VARS_PATH);
 const getEnv = (key: string, fallback?: string) => process.env[key] ?? fileEnv[key] ?? fallback;
 
-// biome-ignore lint/nursery/noSecrets: Local Docker Postgres fallback for isolated tests.
+// biome-ignore lint/security/noSecrets: Local Docker Postgres fallback for isolated tests.
 const databaseUrl = getEnv("DATABASE_URL", "postgresql://sdp:sdp@127.0.0.1:5432/sdp");
 
 export default defineConfig({

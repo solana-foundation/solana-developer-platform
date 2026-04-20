@@ -1,6 +1,6 @@
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { provisionCoinbaseCdpAccount, provisionParaWallet } from "@/services/custody/provisioning";
 import type { Env } from "@/types/env";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 const CREATED_ADDRESS = "11111111111111111111111111111111";
 const EXISTING_ADDRESS = "22222222222222222222222222222222";

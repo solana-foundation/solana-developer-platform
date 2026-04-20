@@ -1,7 +1,7 @@
+import { describe, expect, it } from "vitest";
 import custodyRoutes from "@/routes/custody";
 import issuanceRoutes from "@/routes/issuance";
 import paymentsRoutes from "@/routes/payments";
-import { describe, expect, it } from "vitest";
 
 function extractRoutes(router: unknown): string[] {
   const routes = ((router as { routes?: Array<{ method: string; path: string }> }).routes ?? [])

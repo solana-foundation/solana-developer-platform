@@ -1,5 +1,7 @@
 "use client";
 
+import type { PaymentsDashboardWallet } from "@sdp/types";
+import Link from "next/link";
 import { CreateApiKeyModal } from "@/app/dashboard/api-keys/create-api-key-modal";
 import { SectionEntry } from "@/app/dashboard/wallets/section-entry";
 import { Button } from "@/components/ui/button";
@@ -15,8 +17,6 @@ import {
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
-import type { PaymentsDashboardWallet } from "@sdp/types";
-import Link from "next/link";
 import { fetchHomeActivity } from "./home-workspace.data";
 import { formatCurrencyAmount, formatDisplayAmount } from "./payments/payments-overview.utils";
 
@@ -52,13 +52,7 @@ function formatRelativeTime(value: string): string {
   return formatter.format(diffDays, "day");
 }
 
-function TruncatedTableText({
-  value,
-  className,
-}: {
-  value: string;
-  className?: string;
-}) {
+function TruncatedTableText({ value, className }: { value: string; className?: string }) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>

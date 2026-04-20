@@ -2,9 +2,9 @@
  * Issuance Routes
  */
 
+import { Hono } from "hono";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import type { Env } from "@/types/env";
-import { Hono } from "hono";
 import { addAllowlistEntry, listAllowlist, removeAllowlistEntry } from "./handlers/allowlist";
 import { executeUpdateAuthority, prepareUpdateAuthority } from "./handlers/authority";
 import { executeBurn, prepareBurn } from "./handlers/burn";

@@ -15,7 +15,7 @@ import {
   resetIntegrationState,
 } from "../helpers/integration";
 
-// biome-ignore lint/nursery/noSecrets: Solana Memo program id constant, not a secret.
+// biome-ignore lint/security/noSecrets: Solana Memo program id constant, not a secret.
 const MEMO_PROGRAM_ADDRESS = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr";
 
 type SolanaRpcResponse<T> =
@@ -188,120 +188,118 @@ describe("Kora Fee Payment (Devnet)", () => {
     expect(burned.data.transaction.signature).toBeTruthy();
   });
 
-  it(
-    "submits signer-check memo with Privy wallet-bound API key via Kora",
-    { timeout: 120000 },
-    async () => {
-      const createWalletRes = await request("/v1/wallets", {
+  it("submits signer-check memo with Privy wallet-bound API key via Kora", {
+    timeout: 120000,
+  }, async () => {
+    const createWalletRes = await request("/v1/wallets", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        provider: "privy",
+        label: "Kora signer-check Privy integration wallet",
+      }),
+    });
+
+    const createWalletPayload = await createWalletRes.text();
+    if (createWalletRes.status !== 201) {
+      throw new Error(
+        `Privy wallet creation failed (${createWalletRes.status}): ${createWalletPayload}`
+      );
+    }
+
+    const createWalletBody = JSON.parse(createWalletPayload) as {
+      data: { wallet: { walletId: string; publicKey: string } };
+    };
+
+    const walletId = createWalletBody.data.wallet.walletId;
+    const walletAddress = createWalletBody.data.wallet.publicKey;
+
+    const createKeyRes = await request("/v1/api-keys", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        name: "Signer check integration key",
+        permissions: ["wallets:write"],
+        walletScope: "selected",
+        signingWalletId: walletId,
+      }),
+    });
+
+    expect(createKeyRes.status).toBe(201);
+    const createdKeyBody = (await createKeyRes.json()) as {
+      data: { apiKey: { id: string; key: string; name: string } };
+    };
+
+    const scopedApiKeyId = createdKeyBody.data.apiKey.id;
+    const scopedApiKey = createdKeyBody.data.apiKey.key;
+    const scopedApiKeyName = createdKeyBody.data.apiKey.name;
+    const requestWithScopedKey = requestWithApiKey(scopedApiKey);
+    const memo = `kora signer check ${Date.now()}`;
+    let signerCheckPassed = false;
+
+    try {
+      const signerCheckRes = await requestWithScopedKey("/v1/wallets/signer-check", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          provider: "privy",
-          label: "Kora signer-check Privy integration wallet",
-        }),
+        body: JSON.stringify({ memo }),
       });
 
-      const createWalletPayload = await createWalletRes.text();
-      if (createWalletRes.status !== 201) {
-        throw new Error(
-          `Privy wallet creation failed (${createWalletRes.status}): ${createWalletPayload}`
-        );
+      expect(signerCheckRes.status).toBe(200);
+      const signerCheckBody = (await signerCheckRes.json()) as SignerCheckApiResponse;
+      const signerCheck = signerCheckBody.data;
+
+      expect(signerCheck.walletId).toBe(walletId);
+      expect(signerCheck.walletAddress).toBe(walletAddress);
+      expect(signerCheck.memo).toBe(memo);
+      expect(signerCheck.signature).toMatch(/^[1-9A-HJ-NP-Za-km-z]{32,88}$/);
+      expect(signerCheck.feePayer).toMatch(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/);
+      expect(signerCheck.feePayer).not.toBe(signerCheck.walletAddress);
+
+      const tx = await callSolanaRpc<ParsedTransactionResponse | null>("getTransaction", [
+        signerCheck.signature,
+        {
+          commitment: "confirmed",
+          encoding: "jsonParsed",
+          maxSupportedTransactionVersion: 0,
+        },
+      ]);
+
+      expect(tx).toBeTruthy();
+      if (!tx) {
+        return;
       }
 
-      const createWalletBody = JSON.parse(createWalletPayload) as {
-        data: { wallet: { walletId: string; publicKey: string } };
-      };
+      expect(tx.meta?.err).toBeNull();
+      const accountKeys = tx.transaction.message.accountKeys.map(normalizePubkey);
+      expect(accountKeys[0]).toBe(signerCheck.feePayer);
+      expect(accountKeys).toContain(signerCheck.walletAddress);
 
-      const walletId = createWalletBody.data.wallet.walletId;
-      const walletAddress = createWalletBody.data.wallet.publicKey;
+      const memoInstruction = tx.transaction.message.instructions.find(
+        (instruction) => instruction.programId === MEMO_PROGRAM_ADDRESS
+      );
+      expect(memoInstruction).toBeTruthy();
 
-      const createKeyRes = await request("/v1/api-keys", {
-        method: "POST",
+      const memoText = memoInstruction?.parsed;
+      expect(typeof memoText).toBe("string");
+      expect(memoText).toBe(memo);
+      signerCheckPassed = true;
+    } finally {
+      const deleteScopedKeyRes = await request(`/v1/api-keys/${scopedApiKeyId}`, {
+        method: "DELETE",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          name: "Signer check integration key",
-          permissions: ["wallets:write"],
-          walletScope: "selected",
-          signingWalletId: walletId,
-        }),
+        body: JSON.stringify({ confirmation: scopedApiKeyName }),
       });
-
-      expect(createKeyRes.status).toBe(201);
-      const createdKeyBody = (await createKeyRes.json()) as {
-        data: { apiKey: { id: string; key: string; name: string } };
-      };
-
-      const scopedApiKeyId = createdKeyBody.data.apiKey.id;
-      const scopedApiKey = createdKeyBody.data.apiKey.key;
-      const scopedApiKeyName = createdKeyBody.data.apiKey.name;
-      const requestWithScopedKey = requestWithApiKey(scopedApiKey);
-      const memo = `kora signer check ${Date.now()}`;
-      let signerCheckPassed = false;
-
-      try {
-        const signerCheckRes = await requestWithScopedKey("/v1/wallets/signer-check", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ memo }),
-        });
-
-        expect(signerCheckRes.status).toBe(200);
-        const signerCheckBody = (await signerCheckRes.json()) as SignerCheckApiResponse;
-        const signerCheck = signerCheckBody.data;
-
-        expect(signerCheck.walletId).toBe(walletId);
-        expect(signerCheck.walletAddress).toBe(walletAddress);
-        expect(signerCheck.memo).toBe(memo);
-        expect(signerCheck.signature).toMatch(/^[1-9A-HJ-NP-Za-km-z]{32,88}$/);
-        expect(signerCheck.feePayer).toMatch(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/);
-        expect(signerCheck.feePayer).not.toBe(signerCheck.walletAddress);
-
-        const tx = await callSolanaRpc<ParsedTransactionResponse | null>("getTransaction", [
-          signerCheck.signature,
-          {
-            commitment: "confirmed",
-            encoding: "jsonParsed",
-            maxSupportedTransactionVersion: 0,
-          },
-        ]);
-
-        expect(tx).toBeTruthy();
-        if (!tx) {
-          return;
-        }
-
-        expect(tx.meta?.err).toBeNull();
-        const accountKeys = tx.transaction.message.accountKeys.map(normalizePubkey);
-        expect(accountKeys[0]).toBe(signerCheck.feePayer);
-        expect(accountKeys).toContain(signerCheck.walletAddress);
-
-        const memoInstruction = tx.transaction.message.instructions.find(
-          (instruction) => instruction.programId === MEMO_PROGRAM_ADDRESS
-        );
-        expect(memoInstruction).toBeTruthy();
-
-        const memoText = memoInstruction?.parsed;
-        expect(typeof memoText).toBe("string");
-        expect(memoText).toBe(memo);
-        signerCheckPassed = true;
-      } finally {
-        const deleteScopedKeyRes = await request(`/v1/api-keys/${scopedApiKeyId}`, {
-          method: "DELETE",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ confirmation: scopedApiKeyName }),
-        });
-        if (signerCheckPassed) {
-          expect(deleteScopedKeyRes.status).toBe(200);
-        }
+      if (signerCheckPassed) {
+        expect(deleteScopedKeyRes.status).toBe(200);
       }
     }
-  );
+  });
 });

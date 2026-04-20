@@ -1,6 +1,6 @@
+import { describe, expect, it } from "vitest";
 import app from "@/index";
 import { env } from "@/test/helpers/env";
-import { describe, expect, it } from "vitest";
 
 describe("GET /llms.txt", () => {
   it("returns the public API discovery document", async () => {

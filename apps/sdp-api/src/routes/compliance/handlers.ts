@@ -1,3 +1,4 @@
+import type { Context } from "hono";
 import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
 import { AppError } from "@/lib/errors";
@@ -6,7 +7,6 @@ import { assertValidAddress } from "@/lib/solana";
 import { createComplianceService } from "@/services/compliance";
 import { getEnabledOrganizationProviders } from "@/services/organization-provider-access.service";
 import type { Env } from "@/types/env";
-import type { Context } from "hono";
 import { screenAddressSchema } from "./schemas";
 
 type AppContext = Context<{ Bindings: Env }>;

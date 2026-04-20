@@ -1,13 +1,3 @@
-import { getDb } from "@/db";
-import { resolveApiKeySigningWalletId } from "@/lib/api-key-wallet-auth";
-import { getAuth } from "@/lib/auth";
-import { AppError } from "@/lib/errors";
-import { success } from "@/lib/response";
-import { createFeePaymentAdapter } from "@/services/adapters/fee-payment";
-import { FeePaymentError, SigningError } from "@/services/ports";
-import { resolveRpcTarget } from "@/services/rpc-relay.service";
-import { createOrgSigner } from "@/services/solana";
-import { confirmTransaction, createRpc, getRecentBlockhash } from "@/services/solana/rpc";
 import type { Address } from "@solana/kit";
 import {
   AccountRole,
@@ -20,10 +10,20 @@ import {
   setTransactionMessageLifetimeUsingBlockhash,
 } from "@solana/kit";
 import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
+import { getDb } from "@/db";
+import { resolveApiKeySigningWalletId } from "@/lib/api-key-wallet-auth";
+import { getAuth } from "@/lib/auth";
+import { AppError } from "@/lib/errors";
+import { success } from "@/lib/response";
+import { createFeePaymentAdapter } from "@/services/adapters/fee-payment";
+import { FeePaymentError, SigningError } from "@/services/ports";
+import { resolveRpcTarget } from "@/services/rpc-relay.service";
+import { createOrgSigner } from "@/services/solana";
+import { confirmTransaction, createRpc, getRecentBlockhash } from "@/services/solana/rpc";
 import type { AppContext } from "../context";
 import { type SignerCheckResponse, signerCheckSchema } from "../schemas";
 
-// biome-ignore lint/nursery/noSecrets: Solana Memo program id constant, not a secret.
+// biome-ignore lint/security/noSecrets: Solana Memo program id constant, not a secret.
 const MEMO_PROGRAM_ADDRESS = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr" as Address;
 const KORA_MEMO_ALLOWED_PROGRAM_HINT =
   "Add MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr to Kora validation.allowed_programs.";

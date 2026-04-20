@@ -5,10 +5,10 @@
  * Different tiers have different limits.
  */
 
+import type { Context, Next } from "hono";
 import { verifyClerkJwtForRequest } from "@/lib/clerk-token";
 import { AppError } from "@/lib/errors";
 import type { Env } from "@/types/env";
-import type { Context, Next } from "hono";
 
 interface RateLimitConfig {
   windowMs: number;

@@ -1,7 +1,7 @@
+import { NextResponse } from "next/server";
 import { fetchDashboardPaymentTransfers } from "@/app/dashboard/payments/payments-page.data";
 import { createTimedTrace, logRouteResult } from "@/lib/request-tracing";
 import { createSdpApiClient } from "@/lib/sdp-api";
-import { NextResponse } from "next/server";
 
 export async function GET(request: Request) {
   const trace = createTimedTrace("route.dashboard.payments.transfers.get", request);

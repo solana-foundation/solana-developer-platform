@@ -15,17 +15,17 @@
  * 2. Organization-level config
  */
 
-import { createSigningAdapterFromEnv } from "@/services/adapters";
-import { createSigningService } from "@/services/domain/signing.service";
-import { SigningError, isFullSigningPort } from "@/services/ports";
-import type { Env } from "@/types/env";
 import { getBase58Codec } from "@solana/codecs";
 import {
   type Address,
+  createKeyPairSignerFromBytes,
   type KeyPairSigner,
   type TransactionSigner,
-  createKeyPairSignerFromBytes,
 } from "@solana/kit";
+import { createSigningAdapterFromEnv } from "@/services/adapters";
+import { createSigningService } from "@/services/domain/signing.service";
+import { isFullSigningPort, SigningError } from "@/services/ports";
+import type { Env } from "@/types/env";
 
 const base58 = getBase58Codec();
 

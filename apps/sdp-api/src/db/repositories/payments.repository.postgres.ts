@@ -4,9 +4,9 @@ import type {
   ListTransfersByStatusInput,
   ListTransfersInput,
   ListTransfersResult,
+  PaymentsRepository,
   PaymentTransferRow,
   PaymentWalletPolicyRow,
-  PaymentsRepository,
   UpdatePaymentTransferInput,
   UpsertPaymentWalletPolicyInput,
 } from "./payments.repository";

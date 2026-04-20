@@ -1,3 +1,9 @@
+import type {
+  CustodyWalletAggregate,
+  CustodyWalletSummary,
+  CustodyWalletTokenBalance,
+} from "@sdp/types";
+import type { Address } from "@solana/kit";
 import { getDb } from "@/db";
 import { formatDecimalAmount } from "@/lib/amount";
 import {
@@ -20,20 +26,14 @@ import {
 import { assertOrganizationProviderEnabled } from "@/services/organization-provider-access.service";
 import { SigningError } from "@/services/ports";
 import * as solanaRpc from "@/services/solana/rpc";
-import type {
-  CustodyWalletAggregate,
-  CustodyWalletSummary,
-  CustodyWalletTokenBalance,
-} from "@sdp/types";
-import type { Address } from "@solana/kit";
 import { type AppContext, parseBooleanQueryParam, resolveActor } from "../context";
 import {
   type CustodyWalletAggregateResponse,
   type CustodyWalletByIdResponse,
   type CustodyWalletResponse,
   type CustodyWalletsResponse,
-  type DeleteWalletResponse,
   createWalletSchema,
+  type DeleteWalletResponse,
   deleteWalletSchema,
   setDefaultWalletSchema,
   updateWalletSchema,
@@ -346,7 +346,7 @@ function resolveWalletFilters(
 ) {
   const projectId = c.req.query("projectId") ?? undefined;
   const providerQuery = c.req.query("provider");
-  // biome-ignore lint/nursery/noSecrets: Query parameter name, not a secret.
+  // biome-ignore lint/security/noSecrets: Query parameter name, not a secret.
   const includeAllProviders = c.req.query("includeAllProviders");
   const includeBalances = parseBooleanQueryParam(c.req.query("includeBalances"));
   const view = c.req.query("view") === "summary" ? "summary" : "default";
@@ -394,7 +394,7 @@ async function getBalancesByWalletId(
       const splBalances = splBalancesResult.status === "fulfilled" ? splBalancesResult.value : [];
 
       if (solBalanceResult.status === "rejected") {
-        // biome-ignore lint/nursery/noSecrets: Operational log message, not a secret.
+        // biome-ignore lint/security/noSecrets: Operational log message, not a secret.
         console.error("getBalancesByWalletId: failed to fetch SOL balance", {
           requestId: c.get("requestId"),
           walletId: wallet.walletId,
@@ -407,7 +407,7 @@ async function getBalancesByWalletId(
       }
 
       if (splBalancesResult.status === "rejected") {
-        // biome-ignore lint/nursery/noSecrets: Operational log message, not a secret.
+        // biome-ignore lint/security/noSecrets: Operational log message, not a secret.
         console.error("getBalancesByWalletId: failed to fetch SPL balances", {
           requestId: c.get("requestId"),
           walletId: wallet.walletId,
@@ -836,6 +836,7 @@ export const getWalletById = async (c: AppContext) => {
     const accountInfo = await solanaRpc.getAccountInfo(rpc, wallet.publicKey as Address);
     lamports = accountInfo?.lamports ?? 0n;
   } catch (error) {
+    // biome-ignore lint/security/noSecrets: Operational log message, not a secret.
     console.error("getWalletById: failed to fetch wallet balance", {
       requestId: c.get("requestId"),
       walletId: wallet.walletId,

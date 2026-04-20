@@ -12,21 +12,21 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { TokenAllowlistResponse, TokenApiResponse } from "../helpers/api-types";
 import {
-  RUN_INTEGRATION_TESTS,
-  SOLANA_CONFIGURED,
   cleanupIntegrationSuite,
   initIntegrationSuite,
+  RUN_INTEGRATION_TESTS,
   requestWithApiKey,
   resetIntegrationState,
+  SOLANA_CONFIGURED,
 } from "../helpers/integration";
 
 // Test wallet addresses (valid Base58)
 const TEST_WALLETS = {
-  // biome-ignore lint/nursery/noSecrets: Test Solana address
+  // biome-ignore lint/security/noSecrets: Test Solana address
   wallet1: "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ",
-  // biome-ignore lint/nursery/noSecrets: Test Solana address
+  // biome-ignore lint/security/noSecrets: Test Solana address
   wallet2: "7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv",
-  // biome-ignore lint/nursery/noSecrets: Test Solana address
+  // biome-ignore lint/security/noSecrets: Test Solana address
   wallet3: "9wVmMF2GpxZMsJLxCv2xXWjDWVv8HtqTmKqnZxNKkYTz",
 };
 

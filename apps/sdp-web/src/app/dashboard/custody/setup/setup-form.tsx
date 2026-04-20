@@ -1,18 +1,18 @@
 "use client";
 
-import {
-  CUSTODY_PROVIDER_CATALOG,
-  type KnownCustodyProvider,
-  formatCustodyProviderName,
-  isKnownCustodyProvider,
-} from "@/app/dashboard/custody/provider-catalog";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { CheckCircle2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
+import {
+  CUSTODY_PROVIDER_CATALOG,
+  formatCustodyProviderName,
+  isKnownCustodyProvider,
+  type KnownCustodyProvider,
+} from "@/app/dashboard/custody/provider-catalog";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 type SetupProvider = KnownCustodyProvider;
 
