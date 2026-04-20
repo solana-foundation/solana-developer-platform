@@ -1502,6 +1502,8 @@ export async function getTransfer(c: AppContext) {
   const transferId = c.req.param("transferId");
   const repo = getPaymentsRepository(c);
 
+  if (!transferId) throw new AppError("BAD_REQUEST", "Transfer ID is required");
+
   const row = await repo.getTransferById({
     transferId,
     organizationId: auth.organizationId,

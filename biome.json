@@ -71,7 +71,10 @@
       }
     },
     {
-      "include": ["apps/sdp-docs/scripts/generate-postman-collection.mjs"],
+      "include": [
+        "apps/sdp-docs/scripts/generate-postman-collection.mjs",
+        "scripts/generate-postman-collection.mjs"
+      ],
       "linter": {
         "rules": {
           "complexity": {
