@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.17.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.16.6...v0.17.0) (2026-04-21)
+
+### Features
+
+* **deps:** upgrade Clerk to v7 ([#219](https://github.com/solana-foundation/solana-developer-platform/pull/219)) ([b8d4913](https://github.com/solana-foundation/solana-developer-platform/commit/b8d4913c9d62d2ca2a2f54f25b43b14f26732517))
+
+### Maintenance
+
+* **deps:** bump the actions group with 4 updates ([#198](https://github.com/solana-foundation/solana-developer-platform/pull/198)) ([d531b70](https://github.com/solana-foundation/solana-developer-platform/commit/d531b70e45f2393cc53c6a77109d96988a96212e))
+
+### Other Changes
+
+* Remove vulnerable Vercel Toolbar dependency ([#220](https://github.com/solana-foundation/solana-developer-platform/pull/220)) ([2604490](https://github.com/solana-foundation/solana-developer-platform/commit/26044902ee5050c4c7baee4f3f58c13ea91eacef))
+
 ## [0.16.6](https://github.com/solana-foundation/solana-developer-platform/compare/v0.16.5...v0.16.6) (2026-04-20)
 
 ### Maintenance
