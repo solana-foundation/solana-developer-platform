@@ -16,45 +16,55 @@ import { registerPaymentsPaths } from "./paths/payments";
 import { registerProjectPaths } from "./paths/projects";
 import { registerRpcPaths } from "./paths/rpc";
 
-const PUBLIC_OPENAPI_TAGS = [
-  { name: "Health", description: "Service health and readiness endpoints." },
-  { name: "API Keys", description: "API key management endpoints." },
-  {
+const OPENAPI_TAG = {
+  HEALTH: { name: "Health", description: "Service health and readiness endpoints." },
+  ORGANIZATIONS: { name: "Organizations", description: "Organization provisioning and settings." },
+  API_KEYS: { name: "API Keys", description: "API key management endpoints." },
+  MEMBERS: { name: "Members", description: "Organization membership invitations and roles." },
+  AUTH: { name: "Auth", description: "Session authentication and management." },
+  WALLETS: {
     name: "Wallets",
     description: "Wallet signing provider configuration and wallet management.",
   },
-  { name: "Projects", description: "Project and project member management." },
-  { name: "Issuance", description: "Token issuance, allowlists, and lifecycle operations." },
-  {
+  PROJECTS: { name: "Projects", description: "Project and project member management." },
+  RPC: { name: "RPC", description: "Managed Solana RPC relay and provider telemetry." },
+  ISSUANCE: {
+    name: "Issuance",
+    description: "Token issuance, allowlists, and lifecycle operations.",
+  },
+  PAYMENTS: {
     name: "Payments",
     description: "Wallet balances, transfer execution, policies, and ramps.",
   },
-  { name: "Compliance", description: "Risk and compliance screening endpoints." },
-];
+  COMPLIANCE: { name: "Compliance", description: "Risk and compliance screening endpoints." },
+  ADMIN: { name: "Admin", description: "Administrative allowlist management." },
+  ONBOARDING: { name: "Onboarding", description: "Clerk organization sync status." },
+} as const;
 
-const INTERNAL_OPENAPI_TAGS = [
-  { name: "Organizations", description: "Organization provisioning and settings." },
-  { name: "Members", description: "Organization membership invitations and roles." },
-  { name: "Auth", description: "Session authentication and management." },
-  { name: "RPC", description: "Managed Solana RPC relay and provider telemetry." },
-  { name: "Admin", description: "Administrative allowlist management." },
-  { name: "Onboarding", description: "Clerk organization sync status." },
+const PUBLIC_OPENAPI_TAGS = [
+  OPENAPI_TAG.HEALTH,
+  OPENAPI_TAG.API_KEYS,
+  OPENAPI_TAG.WALLETS,
+  OPENAPI_TAG.PROJECTS,
+  OPENAPI_TAG.ISSUANCE,
+  OPENAPI_TAG.PAYMENTS,
+  OPENAPI_TAG.COMPLIANCE,
 ];
 
 const OPENAPI_TAGS = [
-  PUBLIC_OPENAPI_TAGS[0],
-  INTERNAL_OPENAPI_TAGS[0],
-  PUBLIC_OPENAPI_TAGS[1],
-  INTERNAL_OPENAPI_TAGS[1],
-  INTERNAL_OPENAPI_TAGS[2],
-  PUBLIC_OPENAPI_TAGS[2],
-  PUBLIC_OPENAPI_TAGS[3],
-  INTERNAL_OPENAPI_TAGS[3],
-  PUBLIC_OPENAPI_TAGS[4],
-  PUBLIC_OPENAPI_TAGS[5],
-  PUBLIC_OPENAPI_TAGS[6],
-  INTERNAL_OPENAPI_TAGS[4],
-  INTERNAL_OPENAPI_TAGS[5],
+  OPENAPI_TAG.HEALTH,
+  OPENAPI_TAG.ORGANIZATIONS,
+  OPENAPI_TAG.API_KEYS,
+  OPENAPI_TAG.MEMBERS,
+  OPENAPI_TAG.AUTH,
+  OPENAPI_TAG.WALLETS,
+  OPENAPI_TAG.PROJECTS,
+  OPENAPI_TAG.RPC,
+  OPENAPI_TAG.ISSUANCE,
+  OPENAPI_TAG.PAYMENTS,
+  OPENAPI_TAG.COMPLIANCE,
+  OPENAPI_TAG.ADMIN,
+  OPENAPI_TAG.ONBOARDING,
 ];
 
 function registerApiKeyAuth(registry: OpenAPIRegistry) {
