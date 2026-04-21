@@ -1,10 +1,10 @@
 "use client";
 
-import { Button } from "@/components/ui/button";
 import type { PaymentsDashboardWallet } from "@sdp/types";
 import { ShieldAlert, ShieldCheck } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import type { FormEvent } from "react";
+import { Button } from "@/components/ui/button";
 import type { CreateIssuanceTokenResult } from "./actions";
 import type { AccessControlMode, TemplateSelection, TokenDraft } from "./create-token-modal.types";
 import {

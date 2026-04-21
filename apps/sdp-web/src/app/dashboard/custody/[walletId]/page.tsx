@@ -1,3 +1,12 @@
+import { auth } from "@clerk/nextjs/server";
+import type {
+  CustodyWalletByIdResponse,
+  CustodyWalletTokenBalance,
+  PaymentTransferSummary,
+} from "@sdp/types";
+import Link from "next/link";
+import { notFound, redirect } from "next/navigation";
+import type { ReactNode } from "react";
 import {
   formatCustodyProviderName,
   isKnownCustodyProvider,
@@ -8,16 +17,7 @@ import { WalletAddressCopyButton } from "@/app/dashboard/custody/wallet-address-
 import { formatPurpose, truncateMiddle } from "@/app/dashboard/custody/wallet-format-utils";
 import { WalletProviderMark } from "@/app/dashboard/custody/wallet-provider-mark";
 import { getAuthEntryPath } from "@/lib/auth-entry";
-import { type SdpApiClient, createSdpApiClient } from "@/lib/sdp-api";
-import { auth } from "@clerk/nextjs/server";
-import type {
-  CustodyWalletByIdResponse,
-  CustodyWalletTokenBalance,
-  PaymentTransferSummary,
-} from "@sdp/types";
-import Link from "next/link";
-import { notFound, redirect } from "next/navigation";
-import type { ReactNode } from "react";
+import { createSdpApiClient, type SdpApiClient } from "@/lib/sdp-api";
 import {
   formatCurrencyAmount,
   formatDisplayAmount,
@@ -79,7 +79,7 @@ async function getWalletTrackedBalances(
 
 async function getOwnedTokenRoutes(request: SdpApiClient["request"]): Promise<Map<string, string>> {
   try {
-    // biome-ignore lint/nursery/noSecrets: Public API path with pagination query parameters.
+    // biome-ignore lint/security/noSecrets: Public API path with pagination query parameters.
     const response = await request("/v1/issuance/tokens?page=1&pageSize=100");
     if (!response.ok) {
       return new Map();

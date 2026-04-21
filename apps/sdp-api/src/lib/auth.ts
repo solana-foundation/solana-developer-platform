@@ -5,9 +5,9 @@
  * avoiding non-null assertions while adding defensive runtime checks.
  */
 
-import type { Env } from "@/types/env";
 import type { ApiKeyWalletBinding, Permission } from "@sdp/types";
 import type { Context } from "hono";
+import type { Env } from "@/types/env";
 import { AppError } from "./errors";
 
 export type AuthType = "api_key" | "clerk" | "session";

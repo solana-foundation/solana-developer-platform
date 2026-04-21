@@ -5,6 +5,17 @@ extendZodWithOpenApi(z);
 
 export { z };
 
+type OpenApiArgs = [unknown, unknown?, unknown?];
+type OpenApiMethod = (this: z.ZodType, ...args: OpenApiArgs) => z.ZodType;
+
+export function withOpenApi<T extends z.ZodType>(schema: T, ...args: OpenApiArgs): T {
+  const openapi =
+    (schema as { openapi?: OpenApiMethod }).openapi ??
+    (z.ZodType as unknown as { prototype: { openapi: OpenApiMethod } }).prototype.openapi;
+
+  return openapi.apply(schema, args) as T;
+}
+
 export const isoDateTimeSchema = z.string().datetime().openapi({
   description: "ISO 8601 timestamp.",
   example: "2025-01-01T00:00:00.000Z",
@@ -142,7 +153,7 @@ export const errorSchema = z
     code: errorCodeSchema,
     message: z.string().openapi({ description: "Human-readable error message." }),
     details: z
-      .record(z.unknown())
+      .record(z.string(), z.unknown())
       .optional()
       .openapi({ description: "Optional error details for debugging." }),
   })

@@ -1,12 +1,12 @@
 "use client";
 
+import type { ReactNode } from "react";
+import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useEscapeKey } from "@/lib/use-escape-key";
-import type { ReactNode } from "react";
-import { useEffect, useState } from "react";
-import { toast } from "sonner";
 import { deactivateApiKeyInlineAction } from "./actions";
 
 interface DeleteApiKeyModalProps {

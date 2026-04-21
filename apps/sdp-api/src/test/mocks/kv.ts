@@ -2,8 +2,8 @@
  * KV Namespace test helpers
  */
 
-import type { Env } from "@/types/env";
 import type { CachedApiKey } from "@sdp/types";
+import type { Env } from "@/types/env";
 
 /**
  * Seeds a cached API key into KV for testing auth

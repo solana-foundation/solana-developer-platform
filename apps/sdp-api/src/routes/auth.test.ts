@@ -2,11 +2,11 @@
  * Auth Routes E2E Tests
  */
 
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
 import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 describe("Auth Routes", () => {
   beforeAll(async () => {

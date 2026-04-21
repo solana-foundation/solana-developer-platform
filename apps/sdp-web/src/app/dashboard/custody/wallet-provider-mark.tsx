@@ -1,8 +1,8 @@
 "use client";
 
+import Image from "next/image";
 import type { KnownCustodyProvider } from "@/app/dashboard/custody/provider-catalog";
 import { formatCustodyProviderName } from "@/app/dashboard/custody/provider-catalog";
-import Image from "next/image";
 
 const PROVIDER_LOGOS: Record<
   KnownCustodyProvider,

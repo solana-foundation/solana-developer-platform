@@ -4,8 +4,7 @@
  * Manages caching for API keys, organizations, and allowlist entries.
  */
 
-import type { CachedApiKey, CachedSession } from "@sdp/types";
-import type { Organization } from "@sdp/types";
+import type { CachedApiKey, CachedSession, Organization } from "@sdp/types";
 
 // TTL constants (in seconds)
 const TTL = {

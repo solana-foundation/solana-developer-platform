@@ -1,12 +1,12 @@
 "use client";
 
+import { useMemo } from "react";
 import type { KnownCustodyProvider } from "@/app/dashboard/custody/provider-catalog";
 import { ApiPlaygroundShell } from "@/components/api-playground-shell";
 import { PlaygroundApiKeySelector } from "@/components/playground-api-key-selector";
-import { useMemo } from "react";
 import {
-  type WalletsPlaygroundWalletView,
   buildWalletsPlaygroundEndpointConfigs,
+  type WalletsPlaygroundWalletView,
 } from "./wallets-playground-config";
 
 interface WalletsPlaygroundProps {

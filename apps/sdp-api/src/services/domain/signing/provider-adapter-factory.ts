@@ -1,3 +1,4 @@
+import type { Address } from "@solana/kit";
 import { getDb } from "@/db";
 import {
   KeychainCoinbaseAdapter,
@@ -12,13 +13,12 @@ import {
 import { createDfnsApiClient, normalizeDfnsWalletId } from "@/services/dfns/client";
 import { createEncryptionService } from "@/services/encryption.service";
 import {
-  type SignRequest,
-  type SignResult,
   SigningError,
   type SigningPort,
+  type SignRequest,
+  type SignResult,
 } from "@/services/ports";
 import type { Env } from "@/types/env";
-import type { Address } from "@solana/kit";
 import {
   type ProviderConfigRecord,
   parseConfigRecord,
@@ -65,7 +65,7 @@ class LifecycleOnlyAdapter implements SigningPort {
 
 const providerAdapterFactories = {
   local: async ({ env, orgId, parsed }) => {
-    // biome-ignore lint/nursery/noSecrets: Config field name check, not a secret value.
+    // biome-ignore lint/security/noSecrets: Config field name check, not a secret value.
     if (!("encryptedPrivateKey" in parsed) || !parsed.encryptedPrivateKey) {
       throw new SigningError(
         "Local custody config missing encrypted private key",
@@ -78,7 +78,7 @@ const providerAdapterFactories = {
     return KeychainMemoryAdapter.fromBase58(privateKeyBase58);
   },
   fireblocks: async ({ env, orgId, parsed }) => {
-    // biome-ignore lint/nursery/noSecrets: Config field name check, not a secret value.
+    // biome-ignore lint/security/noSecrets: Config field name check, not a secret value.
     if (!("apiSecretEncrypted" in parsed) || !parsed.apiSecretEncrypted) {
       throw new SigningError(
         "Fireblocks config missing encrypted API secret",

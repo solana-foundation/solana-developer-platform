@@ -4,6 +4,14 @@
  * Implements RpcPort using @solana/kit RPC client.
  */
 
+import {
+  type Address,
+  type Base64EncodedWireTransaction,
+  type Blockhash,
+  type Commitment,
+  createSolanaRpc,
+  type Signature,
+} from "@solana/kit";
 import { getSolanaConfig } from "@/lib/solana";
 import type {
   AccountInfo,
@@ -17,14 +25,6 @@ import type {
 } from "@/services/ports";
 import { RpcError } from "@/services/ports";
 import type { Env } from "@/types/env";
-import {
-  type Address,
-  type Base64EncodedWireTransaction,
-  type Blockhash,
-  type Commitment,
-  type Signature,
-  createSolanaRpc,
-} from "@solana/kit";
 
 // Type for RPC client
 type SolanaRpc = ReturnType<typeof createSolanaRpc>;

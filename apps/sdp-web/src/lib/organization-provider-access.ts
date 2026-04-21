@@ -1,14 +1,14 @@
-import {
-  type KnownCustodyProvider,
-  isKnownCustodyProvider,
-} from "@/app/dashboard/custody/provider-catalog";
-import type { SdpApiClient } from "@/lib/sdp-api";
 import type {
   ComplianceProviderId,
   OrganizationProviderAvailabilityResponse,
   OrganizationRpcProvider,
   RampProviderId,
 } from "@sdp/types";
+import {
+  isKnownCustodyProvider,
+  type KnownCustodyProvider,
+} from "@/app/dashboard/custody/provider-catalog";
+import type { SdpApiClient } from "@/lib/sdp-api";
 
 export interface DashboardOrganizationProviderAccess
   extends OrganizationProviderAvailabilityResponse {

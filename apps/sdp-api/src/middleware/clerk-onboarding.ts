@@ -1,3 +1,4 @@
+import type { Context, Next } from "hono";
 import {
   type ClerkJwtPayload,
   extractBearerToken,
@@ -6,7 +7,6 @@ import {
 } from "@/lib/clerk-token";
 import { AppError, unauthorized } from "@/lib/errors";
 import type { Env } from "@/types/env";
-import type { Context, Next } from "hono";
 
 export function clerkOnboardingMiddleware() {
   return async (c: Context<{ Bindings: Env }>, next: Next) => {

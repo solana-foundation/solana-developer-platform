@@ -2,9 +2,9 @@
  * OpenAPI Spec Route
  */
 
+import { Hono } from "hono";
 import { createOpenApiDocument } from "@/openapi/spec";
 import type { Env } from "@/types/env";
-import { Hono } from "hono";
 
 const openapi = new Hono<{ Bindings: Env }>();
 

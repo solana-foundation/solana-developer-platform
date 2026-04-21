@@ -1,3 +1,12 @@
+import {
+  ORGANIZATION_STATUSES,
+  ORGANIZATION_TIERS,
+  type Organization,
+  type OrganizationSettings,
+  type OrganizationStatus,
+  type OrganizationTier,
+} from "@sdp/types";
+import type { Context } from "hono";
 import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
 import { AppError, notFound } from "@/lib/errors";
@@ -9,15 +18,6 @@ import {
   getOrganizationProviderAvailability,
 } from "@/services/organization-provider-access.service";
 import type { Env } from "@/types/env";
-import {
-  ORGANIZATION_STATUSES,
-  ORGANIZATION_TIERS,
-  type Organization,
-  type OrganizationSettings,
-  type OrganizationStatus,
-  type OrganizationTier,
-} from "@sdp/types";
-import type { Context } from "hono";
 import { updateOrgSchema } from "./schemas";
 
 type AppContext = Context<{ Bindings: Env }>;

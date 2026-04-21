@@ -1,11 +1,11 @@
+import { NextResponse } from "next/server";
 import {
   CUSTODY_PROVIDER_CATALOG,
-  type KnownCustodyProvider,
   isKnownCustodyProvider,
+  type KnownCustodyProvider,
 } from "@/app/dashboard/custody/provider-catalog";
 import { createTimedTrace, logRouteResult } from "@/lib/request-tracing";
 import { createSdpApiClient } from "@/lib/sdp-api";
-import { NextResponse } from "next/server";
 
 interface OnboardingStatusResponse {
   linked: boolean;

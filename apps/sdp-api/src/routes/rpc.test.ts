@@ -1,11 +1,11 @@
+import type { OrganizationRpcProvider } from "@sdp/types";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
 import { hashString } from "@/lib/hash";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
-import type { OrganizationRpcProvider } from "@sdp/types";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const TEST_PROJECT_ID = "prj_rpc_relay";
 const TEST_API_KEY_ID = "key_rpc_relay";

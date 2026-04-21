@@ -2,8 +2,8 @@
  * Auth Routes
  */
 
-import type { Env } from "@/types/env";
 import { Hono } from "hono";
+import type { Env } from "@/types/env";
 import {
   getCurrentUser,
   listSessions,

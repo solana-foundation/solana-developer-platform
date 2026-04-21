@@ -34,7 +34,7 @@ const getEnv = (key: string, fallback?: string) => process.env[key] ?? fileEnv[k
 
 const custodyEncryptionKey =
   getEnv("CUSTODY_ENCRYPTION_KEY") ?? Buffer.alloc(32).toString("base64");
-// biome-ignore lint/nursery/noSecrets: Local Docker Postgres fallback for isolated integration tests.
+// biome-ignore lint/security/noSecrets: Local Docker Postgres fallback for isolated integration tests.
 const databaseUrl = getEnv("DATABASE_URL", "postgresql://sdp:sdp@127.0.0.1:5432/sdp");
 const koraRpcUrl = getEnv("KORA_RPC_URL");
 const koraApiKey = getEnv("KORA_API_KEY");

@@ -1,4 +1,3 @@
-import { z } from "./base";
 import {
   base64Schema,
   isoDateTimeSchema,
@@ -7,6 +6,7 @@ import {
   solanaAddressSchema,
   transferIdParamSchema,
   walletIdParamSchema,
+  z,
 } from "./base";
 import { preparedTransactionSchema, simulationResultSchema } from "./issuance";
 
@@ -27,7 +27,7 @@ export const custodyConfigSchema = z
   .object({
     provider: custodyProviderSchema,
     config: z
-      .record(z.unknown())
+      .record(z.string(), z.unknown())
       .optional()
       .openapi({ description: "Provider-specific configuration payload." }),
   })
@@ -367,7 +367,7 @@ const rampProviderSchema = z.enum(["moonpay", "lightspark", "bvnk"]).openapi({
 const bvnkComplianceSchema = z
   .object({
     partyDetails: z
-      .array(z.record(z.unknown()))
+      .array(z.record(z.string(), z.unknown()))
       .min(1)
       .openapi({ description: "BVNK party details payload. Required for BVNK off-ramp flows." }),
   })

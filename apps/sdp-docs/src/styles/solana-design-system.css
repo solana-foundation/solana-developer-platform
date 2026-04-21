@@ -762,7 +762,8 @@ body {
 
 /* Custom wide-spaced dashed borders using background gradients */
 .border-l-dashed-wide {
-  background: repeating-linear-gradient(
+  background:
+    repeating-linear-gradient(
       to bottom,
       oklch(0.927 0.005 286.25) 0px,
       oklch(0.927 0.005 286.25) 12px,
@@ -773,7 +774,8 @@ body {
 }
 
 .border-r-dashed-wide {
-  background: repeating-linear-gradient(
+  background:
+    repeating-linear-gradient(
       to bottom,
       oklch(0.927 0.005 286.25) 0px,
       oklch(0.927 0.005 286.25) 12px,
@@ -784,7 +786,8 @@ body {
 }
 
 .border-lr-dashed-wide {
-  background: repeating-linear-gradient(
+  background:
+    repeating-linear-gradient(
       to bottom,
       oklch(0.927 0.005 286.25) 0px,
       oklch(0.927 0.005 286.25) 12px,
@@ -803,7 +806,8 @@ body {
 }
 
 .border-horizontal-dashed-wide {
-  background: repeating-linear-gradient(
+  background:
+    repeating-linear-gradient(
       to right,
       oklch(0.927 0.005 286.25) 0px,
       oklch(0.927 0.005 286.25) 12px,
@@ -822,7 +826,8 @@ body {
 }
 
 .border-vertical-dashed-wide {
-  background: repeating-linear-gradient(
+  background:
+    repeating-linear-gradient(
       to bottom,
       oklch(0.927 0.005 286.25) 0px,
       oklch(0.927 0.005 286.25) 12px,
@@ -870,7 +875,8 @@ body {
 }
 
 .border-lr-dashed-medium {
-  background: repeating-linear-gradient(
+  background:
+    repeating-linear-gradient(
       to bottom,
       oklch(0.884 0.007 286.25) 0px,
       oklch(0.884 0.007 286.25) 6px,

@@ -1,7 +1,7 @@
 "use client";
 
-import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useEffect, useState } from "react";
+import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { API_KEYS_FLASH_PATH, type ApiKeyFlash } from "./api-key-flash";
 import { GeneratedApiKeyModal } from "./generated-key-modal";
 

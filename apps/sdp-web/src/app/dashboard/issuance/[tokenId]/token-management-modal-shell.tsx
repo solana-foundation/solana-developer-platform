@@ -1,7 +1,7 @@
 "use client";
 
-import { useEscapeKey } from "@/lib/use-escape-key";
 import type { ReactNode } from "react";
+import { useEscapeKey } from "@/lib/use-escape-key";
 import { TokenModalPortal } from "./token-modal-portal";
 
 interface TokenManagementModalShellProps {

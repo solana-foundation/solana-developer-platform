@@ -1,8 +1,8 @@
-import { type Page, expect, test } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
 import { getPlaywrightAdminSession } from "../support/auth-session";
 import {
-  type IssuanceFixtures,
   clearIssuanceFixtures,
+  type IssuanceFixtures,
   readIssuanceFixtures,
 } from "../support/issuance-fixtures";
 import { bootstrapLocalIssuanceFixtures } from "../support/local-issuance-bootstrap";

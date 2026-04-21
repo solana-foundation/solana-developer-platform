@@ -1,19 +1,19 @@
 "use client";
 
+import type { CustodyWalletSummary } from "@sdp/types";
+import { Plus } from "lucide-react";
+import Link from "next/link";
 import {
   CUSTODY_PROVIDER_CATALOG,
-  type KnownCustodyProvider,
   formatCustodyProviderName,
   isKnownCustodyProvider,
+  type KnownCustodyProvider,
 } from "@/app/dashboard/custody/provider-catalog";
 import { WalletAddressCopyButton } from "@/app/dashboard/custody/wallet-address-copy-button";
 import { WalletCardBalanceValue } from "@/app/dashboard/custody/wallet-card-balance-value";
 import { formatPurpose, formatWalletMeta } from "@/app/dashboard/custody/wallet-format-utils";
 import { WalletLabelInlineEditor } from "@/app/dashboard/custody/wallet-label-inline-editor";
 import { Button } from "@/components/ui/button";
-import type { CustodyWalletSummary } from "@sdp/types";
-import { Plus } from "lucide-react";
-import Link from "next/link";
 import { WalletProviderMark } from "./wallet-provider-mark";
 
 interface WalletsOverviewProps {

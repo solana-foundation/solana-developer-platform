@@ -10,9 +10,9 @@ export { MosaicService } from "./service";
 export * from "./types";
 export { bigIntReplacer, safeStringify } from "./utils";
 
+import type { TransactionSigner } from "@solana/kit";
 import { createFeePaymentAdapter } from "@/services/adapters/fee-payment";
 import type { Env } from "@/types/env";
-import type { TransactionSigner } from "@solana/kit";
 import { MosaicService } from "./service";
 
 /**

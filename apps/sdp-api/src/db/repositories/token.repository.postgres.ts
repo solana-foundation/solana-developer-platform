@@ -1,6 +1,6 @@
+import type { Token, TokenExtensionsConfig, TokenStatus, TokenTemplate } from "@sdp/types";
 import type { AppDb } from "@/db";
 import { formatDecimalAmount } from "@/lib/amount";
-import type { Token, TokenExtensionsConfig, TokenStatus, TokenTemplate } from "@sdp/types";
 import type { ListTokensOptions, TokenRepository } from "./token.repository";
 
 function buildInClause(length: number): string {

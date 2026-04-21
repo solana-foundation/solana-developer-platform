@@ -38,7 +38,7 @@ export class ProjectServiceError extends Error {
     message?: string
   ) {
     super(message ?? code);
-    // biome-ignore lint/nursery/noSecrets: error name constant
+    // biome-ignore lint/security/noSecrets: error name constant
     this.name = "ProjectServiceError";
   }
 }

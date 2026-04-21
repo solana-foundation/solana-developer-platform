@@ -1,7 +1,11 @@
 "use client";
 
-import { fetchTransfers } from "@/app/dashboard/payments/payments-workspace.data";
-import { getDevnetExplorerUrl } from "@/app/dashboard/payments/payments-workspace.data";
+import type { PaymentTransferSummary as TransferRecord } from "@sdp/types";
+import { ExternalLink, RefreshCw } from "lucide-react";
+import {
+  fetchTransfers,
+  getDevnetExplorerUrl,
+} from "@/app/dashboard/payments/payments-workspace.data";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -14,8 +18,6 @@ import {
 } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
-import type { PaymentTransferSummary as TransferRecord } from "@sdp/types";
-import { ExternalLink, RefreshCw } from "lucide-react";
 import { formatDisplayAmount } from "../payments/payments-overview.utils";
 
 const WALLET_ACTIVITY_CACHE_TTL_MS = 20_000;
@@ -78,13 +80,7 @@ function statusClassName(status: string): string {
   return "border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.04)] text-[rgba(28,28,29,0.72)]";
 }
 
-function TruncatedText({
-  value,
-  className,
-}: {
-  value: string;
-  className?: string;
-}) {
+function TruncatedText({ value, className }: { value: string; className?: string }) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>

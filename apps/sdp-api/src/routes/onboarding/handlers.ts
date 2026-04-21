@@ -1,9 +1,9 @@
+import { normalizeOrganizationTier } from "@sdp/types";
+import type { Context } from "hono";
 import { getDb } from "@/db";
 import { AppError, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import type { Env } from "@/types/env";
-import { normalizeOrganizationTier } from "@sdp/types";
-import type { Context } from "hono";
 
 type AppContext = Context<{ Bindings: Env }>;
 

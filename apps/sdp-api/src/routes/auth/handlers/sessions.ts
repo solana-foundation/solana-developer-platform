@@ -1,12 +1,12 @@
+import type { CurrentUserResponse, ListSessionsResponse } from "@sdp/types";
+import type { Context } from "hono";
+import { deleteCookie } from "hono/cookie";
 import { getDb } from "@/db";
 import { AppError, notFound } from "@/lib/errors";
 import { noContent, success } from "@/lib/response";
 import { sessionAuthMiddleware } from "@/middleware/session-auth";
 import { SessionService } from "@/services/session.service";
 import type { Env } from "@/types/env";
-import type { CurrentUserResponse, ListSessionsResponse } from "@sdp/types";
-import type { Context } from "hono";
-import { deleteCookie } from "hono/cookie";
 import { SESSION_COOKIE_NAME } from "../constants";
 
 type AppContext = Context<{ Bindings: Env }>;

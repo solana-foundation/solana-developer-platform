@@ -1,8 +1,8 @@
+import { auth } from "@clerk/nextjs/server";
+import { redirect } from "next/navigation";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createSdpApiClient } from "@/lib/sdp-api";
-import { auth } from "@clerk/nextjs/server";
-import { redirect } from "next/navigation";
 import { HomeWorkspace } from "./home-workspace";
 import { resolveTotalBalance } from "./payments/payments-overview.utils";
 import { fetchPaymentsAggregate, fetchPaymentsWallets } from "./payments/payments-page.data";

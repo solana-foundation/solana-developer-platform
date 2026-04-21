@@ -5,12 +5,12 @@ import type {
   TokenApiResponse,
 } from "../helpers/api-types";
 import {
-  RUN_INTEGRATION_TESTS,
-  SOLANA_CONFIGURED,
   cleanupIntegrationSuite,
   initIntegrationSuite,
+  RUN_INTEGRATION_TESTS,
   requestWithApiKey,
   resetIntegrationState,
+  SOLANA_CONFIGURED,
 } from "../helpers/integration";
 
 describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mint Operations", () => {

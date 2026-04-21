@@ -1,14 +1,13 @@
+export type { DatabaseBindings as AppDbBindings, DatabaseClient as AppDb } from "./client";
 export {
   closeDatabasePools,
   createDatabaseClient,
-  getConnectionString,
-  getDb,
   type DatabaseBindings,
   type DatabaseClient,
   type DatabaseExecutor,
+  getConnectionString,
+  getDb,
   type HyperdriveBinding,
   type PreparedStatement,
   type QueryManyResult,
 } from "./client";
-
-export type { DatabaseClient as AppDb, DatabaseBindings as AppDbBindings } from "./client";

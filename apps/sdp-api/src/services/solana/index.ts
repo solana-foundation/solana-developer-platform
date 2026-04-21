@@ -4,47 +4,44 @@
  * Re-exports all Solana-related services for convenient importing.
  */
 
-// RPC client and utilities
-export {
-  createRpc,
-  createRpcSubscriptions,
-  getRecentBlockhash,
-  isBlockhashValid,
-  sendTransaction,
-  sendAndConfirmTransaction,
-  confirmTransaction,
-  simulateTransaction,
-  getAccountInfo,
-  accountExists,
-  getMinimumBalanceForRentExemption,
-  type BlockhashWithExpiry,
-  type TransactionConfirmation,
-  type SimulationResult,
-} from "./rpc";
-
-// Signer service
-export {
-  type KeyPairSigner,
-  createSigner,
-  createOrgSigner,
-  createSignerFromBase58,
-  signerControlsAddress,
-  getSignerAddress,
-} from "./signer";
-
-// Token-2022 operations
-export {
-  Token2022Service,
-  type CreateMintOptions,
-  type CreateMintResult,
-  type PreparedTransaction,
-  type MintToOptions,
-  type MintToResult,
-  type BurnOptions,
-  type BurnResult,
-  type FreezeOptions,
-  type FreezeResult,
-} from "./token-2022";
-
 // Service factory (wires up Kora integration when configured)
 export { createToken2022Service } from "./factory";
+// RPC client and utilities
+export {
+  accountExists,
+  type BlockhashWithExpiry,
+  confirmTransaction,
+  createRpc,
+  createRpcSubscriptions,
+  getAccountInfo,
+  getMinimumBalanceForRentExemption,
+  getRecentBlockhash,
+  isBlockhashValid,
+  type SimulationResult,
+  sendAndConfirmTransaction,
+  sendTransaction,
+  simulateTransaction,
+  type TransactionConfirmation,
+} from "./rpc";
+// Signer service
+export {
+  createOrgSigner,
+  createSigner,
+  createSignerFromBase58,
+  getSignerAddress,
+  type KeyPairSigner,
+  signerControlsAddress,
+} from "./signer";
+// Token-2022 operations
+export {
+  type BurnOptions,
+  type BurnResult,
+  type CreateMintOptions,
+  type CreateMintResult,
+  type FreezeOptions,
+  type FreezeResult,
+  type MintToOptions,
+  type MintToResult,
+  type PreparedTransaction,
+  Token2022Service,
+} from "./token-2022";

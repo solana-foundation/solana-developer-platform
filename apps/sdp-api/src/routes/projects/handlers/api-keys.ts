@@ -1,3 +1,5 @@
+import type { ApiKeyRole, CreateApiKeyResponse } from "@sdp/types";
+import type { Context } from "hono";
 import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
 import { AppError, notFound } from "@/lib/errors";
@@ -7,16 +9,14 @@ import {
   assertWalletBindingsInScope,
   resolveCreateWalletScope,
 } from "@/routes/api-keys/wallet-bindings";
-import { replaceApiKeyWalletBindings } from "@/services/api-key-wallets.service";
 import { ApiKeyService } from "@/services/api-key.service";
+import { replaceApiKeyWalletBindings } from "@/services/api-key-wallets.service";
 import { AuditService } from "@/services/audit.service";
 import { createSigningService } from "@/services/domain/signing.service";
 import { SigningError } from "@/services/ports";
 import { ProjectService } from "@/services/project.service";
 import type { WalletPurpose } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
-import type { ApiKeyRole, CreateApiKeyResponse } from "@sdp/types";
-import type { Context } from "hono";
 
 type AppContext = Context<{ Bindings: Env }>;
 

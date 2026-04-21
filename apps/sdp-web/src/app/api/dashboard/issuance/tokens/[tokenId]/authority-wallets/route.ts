@@ -1,7 +1,7 @@
+import { NextResponse } from "next/server";
 import { fetchPaymentsWallets } from "@/app/dashboard/payments/payments-page.data";
 import { createTimedTrace, logRouteResult } from "@/lib/request-tracing";
 import { createSdpApiClient } from "@/lib/sdp-api";
-import { NextResponse } from "next/server";
 
 export async function GET(request: Request, { params }: { params: Promise<{ tokenId: string }> }) {
   const trace = createTimedTrace("route.dashboard.issuance.token.authority_wallets", request);

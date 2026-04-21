@@ -1,3 +1,24 @@
+import type { Permission } from "@sdp/types";
+import type { Address } from "@solana/kit";
+import {
+  addSignersToTransactionMessage,
+  appendTransactionMessageInstructions,
+  compileTransaction,
+  createNoopSigner,
+  createTransactionMessage,
+  getBase64EncodedWireTransaction,
+  getTransactionEncoder,
+  pipe,
+  setTransactionMessageFeePayer,
+  setTransactionMessageLifetimeUsingBlockhash,
+} from "@solana/kit";
+import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
+import { getTransferSolInstruction } from "@solana-program/system";
+import {
+  findAssociatedTokenPda,
+  getCreateAssociatedTokenIdempotentInstruction,
+  getTransferCheckedInstruction,
+} from "@solana-program/token-2022";
 import { getDb } from "@/db";
 import type {
   PaymentTransferDirection as TransferDirection,
@@ -16,27 +37,6 @@ import * as solanaServices from "@/services/solana";
 import * as solanaRpc from "@/services/solana/rpc";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
-import type { Permission } from "@sdp/types";
-import { getTransferSolInstruction } from "@solana-program/system";
-import {
-  findAssociatedTokenPda,
-  getCreateAssociatedTokenIdempotentInstruction,
-  getTransferCheckedInstruction,
-} from "@solana-program/token-2022";
-import type { Address } from "@solana/kit";
-import {
-  addSignersToTransactionMessage,
-  appendTransactionMessageInstructions,
-  compileTransaction,
-  createNoopSigner,
-  createTransactionMessage,
-  getBase64EncodedWireTransaction,
-  getTransactionEncoder,
-  pipe,
-  setTransactionMessageFeePayer,
-  setTransactionMessageLifetimeUsingBlockhash,
-} from "@solana/kit";
-import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
 import {
   type AppContext,
   getFeePayment,
@@ -59,9 +59,9 @@ import {
 } from "../token-accounts";
 import { resolveScope, resolveWallet } from "../wallets";
 
-// biome-ignore lint/nursery/noSecrets: Devnet USDC mint address constant, not a secret.
+// biome-ignore lint/security/noSecrets: Devnet USDC mint address constant, not a secret.
 const DEVNET_USDC_MINT = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
-// biome-ignore lint/nursery/noSecrets: Mainnet USDC mint address constant, not a secret.
+// biome-ignore lint/security/noSecrets: Mainnet USDC mint address constant, not a secret.
 const MAINNET_USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const SIGNATURE_HISTORY_LOOKUP_CONCURRENCY = 5;
 
@@ -129,6 +129,19 @@ interface ObservedTransferContext {
 }
 
 type SignatureHistoryEntry = Awaited<ReturnType<typeof solanaRpc.getSignaturesForAddress>>[number];
+
+function resolveWalletIdForTokenAccount(
+  context: ObservedTransferContext,
+  tokenAccountAddress: string,
+  ownerAddress: string | null
+): string | null {
+  if (ownerAddress) {
+    const ownerWalletId = context.walletIdsByAddress.get(ownerAddress);
+    if (ownerWalletId) return ownerWalletId;
+  }
+
+  return context.walletIdsByAddress.get(tokenAccountAddress) ?? null;
+}
 
 export async function resolveWalletFromParams(
   c: AppContext,
@@ -1028,10 +1041,11 @@ function buildObservedTransferRows(
 
       const destinationTokenMetadata = tokenAccountMetadata.get(destinationTokenAccount);
       const destinationOwner = destinationTokenMetadata?.owner ?? null;
-      const destinationWalletId =
-        (destinationOwner ? (context.walletIdsByAddress.get(destinationOwner) ?? null) : null) ??
-        context.walletIdsByAddress.get(destinationTokenAccount) ??
-        null;
+      const destinationWalletId = resolveWalletIdForTokenAccount(
+        context,
+        destinationTokenAccount,
+        destinationOwner
+      );
 
       if (!destinationWalletId) {
         continue;
@@ -1098,14 +1112,12 @@ function buildObservedTransferRows(
     const destinationTokenMetadata = tokenAccountMetadata.get(destinationTokenAccount);
     const sourceOwner = sourceTokenMetadata?.owner ?? null;
     const destinationOwner = destinationTokenMetadata?.owner ?? null;
-    const sourceWalletId =
-      (sourceOwner ? (context.walletIdsByAddress.get(sourceOwner) ?? null) : null) ??
-      context.walletIdsByAddress.get(sourceTokenAccount) ??
-      null;
-    const destinationWalletId =
-      (destinationOwner ? (context.walletIdsByAddress.get(destinationOwner) ?? null) : null) ??
-      context.walletIdsByAddress.get(destinationTokenAccount) ??
-      null;
+    const sourceWalletId = resolveWalletIdForTokenAccount(context, sourceTokenAccount, sourceOwner);
+    const destinationWalletId = resolveWalletIdForTokenAccount(
+      context,
+      destinationTokenAccount,
+      destinationOwner
+    );
     const walletId = sourceWalletId ?? destinationWalletId;
 
     if (!walletId) {

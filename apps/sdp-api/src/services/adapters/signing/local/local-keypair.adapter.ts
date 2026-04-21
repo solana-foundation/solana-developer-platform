@@ -7,22 +7,22 @@
  * For production deployments, use KeychainFireblocksAdapter, KeychainPrivyAdapter, or KeychainAwsKmsAdapter.
  */
 
-import type {
-  GeneratedKeypair,
-  SignRequest,
-  SignResult,
-  SignStatus,
-  SigningPort,
-} from "@/services/ports";
-import { SigningError } from "@/services/ports";
-import type { Env } from "@/types/env";
 import { getBase58Codec } from "@solana/codecs";
 import {
   type Address,
-  type KeyPairSigner,
   createKeyPairSignerFromBytes,
   generateKeyPairSigner,
+  type KeyPairSigner,
 } from "@solana/kit";
+import type {
+  GeneratedKeypair,
+  SigningPort,
+  SignRequest,
+  SignResult,
+  SignStatus,
+} from "@/services/ports";
+import { SigningError } from "@/services/ports";
+import type { Env } from "@/types/env";
 
 const base58 = getBase58Codec();
 
@@ -92,7 +92,7 @@ export class LocalKeypairAdapter implements SigningPort {
    */
   getSignStatus(_requestId: string): Promise<SignStatus> {
     throw new SigningError(
-      // biome-ignore lint/nursery/noSecrets: Error message, not a secret
+      // biome-ignore lint/security/noSecrets: Error message, not a secret
       "LocalKeypairAdapter: async signing not supported, signing is always synchronous",
       "INVALID_REQUEST"
     );

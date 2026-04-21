@@ -4,8 +4,8 @@
  * Generates or propagates a unique request ID for tracing.
  */
 
-import type { Env } from "@/types/env";
 import type { Context, Next } from "hono";
+import type { Env } from "@/types/env";
 
 const REQUEST_ID_HEADER = "X-Request-ID";
 const MAX_REQUEST_ID_LENGTH = 128;

@@ -5,10 +5,10 @@
  * Privy provides hosted wallet custody via the Privy Wallet API.
  */
 
-import type { SignRequest, SignResult } from "@/services/ports";
 import type { SolanaSigner } from "@solana/keychain-core";
 import { PrivySigner } from "@solana/keychain-privy";
 import type { Address } from "@solana/kit";
+import type { SignRequest, SignResult } from "@/services/ports";
 import { BaseKeychainAdapter } from "./base-keychain.adapter";
 import type { KeychainPrivyConfig } from "./types";
 

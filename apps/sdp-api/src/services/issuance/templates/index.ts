@@ -5,7 +5,7 @@
  */
 
 import type { TokenTemplateInfo } from "@sdp/types";
-import { TEMPLATE_DEFINITIONS, normalizeTemplateId, resolveTemplateConfig } from "./definitions";
+import { normalizeTemplateId, resolveTemplateConfig, TEMPLATE_DEFINITIONS } from "./definitions";
 
 const TEMPLATE_IDS = Object.keys(TEMPLATE_DEFINITIONS) as Array<keyof typeof TEMPLATE_DEFINITIONS>;
 const PUBLIC_TEMPLATE_IDS = TEMPLATE_IDS.filter((id) => id !== "arcade");

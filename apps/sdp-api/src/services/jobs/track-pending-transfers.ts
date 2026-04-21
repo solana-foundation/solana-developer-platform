@@ -17,12 +17,12 @@
  *    getSignatureStatuses and update DB accordingly.
  */
 
-import { createPaymentsRepository } from "@/db/repositories";
+import type { Signature } from "@solana/kit";
 import type { PaymentsRepository } from "@/db/repositories";
+import { createPaymentsRepository } from "@/db/repositories";
 import type { SignatureStatusInfo } from "@/services/solana/rpc";
 import * as solanaRpc from "@/services/solana/rpc";
 import type { Env } from "@/types/env";
-import type { Signature } from "@solana/kit";
 
 // Solana blockhashes expire after ~150 slots (~80 s). 2 minutes is a safe margin.
 const PENDING_EXPIRE_AFTER_MS = 2 * 60 * 1000;
@@ -68,7 +68,7 @@ async function expireStalePendingTransfers(
         updatedAt: nowIso,
       });
     } catch (err) {
-      // biome-ignore lint/nursery/noSecrets: Log message string, not a secret.
+      // biome-ignore lint/security/noSecrets: Log message string, not a secret.
       console.error("trackPendingTransfers: failed to expire pending transfer", {
         transferId: transfer.id,
         error: err instanceof Error ? err.message : String(err),
@@ -105,7 +105,7 @@ async function recoverStuckProcessingTransfers(
         updatedAt: nowIso,
       });
     } catch (err) {
-      // biome-ignore lint/nursery/noSecrets: Log message string, not a secret.
+      // biome-ignore lint/security/noSecrets: Log message string, not a secret.
       console.error("trackPendingTransfers: failed to recover stuck processing transfer", {
         transferId: transfer.id,
         error: err instanceof Error ? err.message : String(err),
@@ -143,7 +143,7 @@ async function syncProcessingTransfersOnChain(
     const rpc = solanaRpc.createRpc(env);
     statuses = await solanaRpc.getSignatureStatuses(rpc, signatures);
   } catch (err) {
-    // biome-ignore lint/nursery/noSecrets: Log message string, not a secret.
+    // biome-ignore lint/security/noSecrets: Log message string, not a secret.
     console.error("trackPendingTransfers: getSignatureStatuses RPC call failed", {
       error: err instanceof Error ? err.message : String(err),
     });
@@ -200,7 +200,7 @@ async function syncProcessingTransfersOnChain(
       }
       // "processed" confirmation is too weak to record as confirmed — skip.
     } catch (err) {
-      // biome-ignore lint/nursery/noSecrets: Log message string, not a secret.
+      // biome-ignore lint/security/noSecrets: Log message string, not a secret.
       console.error("trackPendingTransfers: failed to update transfer", {
         transferId: transfer.id,
         error: err instanceof Error ? err.message : String(err),

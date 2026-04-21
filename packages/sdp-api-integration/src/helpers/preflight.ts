@@ -98,7 +98,7 @@ async function assertSolanaRpcHealthy(rpcUrl: string): Promise<void> {
   type LatestBlockhash = {
     value: { blockhash: string; lastValidBlockHeight: number };
   };
-  // biome-ignore lint/nursery/noSecrets: JSON-RPC method name (false positive).
+  // biome-ignore lint/security/noSecrets: JSON-RPC method name (false positive).
   const resp = await solanaRpc<LatestBlockhash>(rpcUrl, "getLatestBlockhash", [
     { commitment: "confirmed" },
   ]);

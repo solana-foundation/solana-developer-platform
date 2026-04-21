@@ -1,12 +1,12 @@
+import type { CustodyWalletTokenBalance } from "@sdp/types";
 import { getDb } from "@/db";
 import { formatDecimalAmount } from "@/lib/amount";
 import { withHeliusApiKey } from "@/services/rpc-relay.service";
 import type { Env } from "@/types/env";
-import type { CustodyWalletTokenBalance } from "@sdp/types";
 
-// biome-ignore lint/nursery/noSecrets: Devnet USDC mint address constant, not a secret.
+// biome-ignore lint/security/noSecrets: Devnet USDC mint address constant, not a secret.
 const DEVNET_USDC_MINT = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
-// biome-ignore lint/nursery/noSecrets: Mainnet USDC mint address constant, not a secret.
+// biome-ignore lint/security/noSecrets: Mainnet USDC mint address constant, not a secret.
 const MAINNET_USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 
 interface TrackedAssetDefinition {

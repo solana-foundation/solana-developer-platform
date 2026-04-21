@@ -71,7 +71,7 @@ export function buildWalletsPlaygroundEndpointConfigs({
   const firstWallet = wallets[0];
   const exampleWalletId = firstWallet?.walletId ?? "privy_wallet_123";
   const exampleWalletLabel = firstWallet?.label?.trim() || "Main wallet";
-  // biome-ignore lint/nursery/noSecrets: Playground sample public key for example responses only.
+  // biome-ignore lint/security/noSecrets: Playground sample public key for example responses only.
   const examplePublicKey = firstWallet?.publicKey ?? "11111111111111111111111111111111";
 
   return [
@@ -79,7 +79,7 @@ export function buildWalletsPlaygroundEndpointConfigs({
       id: "list-wallets",
       title: "List Wallets",
       method: "GET",
-      // biome-ignore lint/nursery/noSecrets: Public API path with static query flags.
+      // biome-ignore lint/security/noSecrets: Public API path with static query flags.
       path: "/v1/wallets?includeAllProviders=true",
       pathFields: [],
       bodyFields: [],
@@ -144,7 +144,7 @@ export function buildWalletsPlaygroundEndpointConfigs({
       id: "get-wallet-public-key",
       title: "Get Wallet Public Key",
       method: "GET",
-      // biome-ignore lint/nursery/noSecrets: Public API path with a documented query parameter.
+      // biome-ignore lint/security/noSecrets: Public API path with a documented query parameter.
       path: "/v1/wallets/public-key?walletId={walletId}",
       pathFields: [buildSelectOrTextField("walletId", "walletId", "Wallet ID", walletOptions)],
       bodyFields: [],
@@ -158,7 +158,7 @@ export function buildWalletsPlaygroundEndpointConfigs({
       id: "aggregate-balances",
       title: "Aggregate Wallet Balances",
       method: "GET",
-      // biome-ignore lint/nursery/noSecrets: Public API path with static query flags.
+      // biome-ignore lint/security/noSecrets: Public API path with static query flags.
       path: "/v1/wallets/aggregate?includeAllProviders=true",
       pathFields: [],
       bodyFields: [],
@@ -227,7 +227,7 @@ export function buildWalletsPlaygroundEndpointConfigs({
       expectedResponse: {
         data: {
           transaction: {
-            // biome-ignore lint/nursery/noSecrets: Example signature for playground response preview.
+            // biome-ignore lint/security/noSecrets: Example signature for playground response preview.
             signature: "5n2ExampleSignature",
           },
         },

@@ -1,5 +1,5 @@
-import { AppError } from "@/lib/errors";
 import { describe, expect, it } from "vitest";
+import { AppError } from "@/lib/errors";
 import {
   assertTokenAllowsSupplyOperation,
   parsePositiveTokenAmount,

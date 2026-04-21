@@ -1,5 +1,5 @@
-import type { Env } from "@/types/env";
 import type { ComplianceProviderId } from "@sdp/types";
+import type { Env } from "@/types/env";
 import { ChainalysisComplianceProvider } from "./providers/chainalysis";
 import { EllipticComplianceProvider } from "./providers/elliptic";
 import { RangeComplianceProvider } from "./providers/range";

@@ -1,8 +1,8 @@
+import { auth } from "@clerk/nextjs/server";
+import { redirect } from "next/navigation";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { fetchOrganizationProviderAccess } from "@/lib/organization-provider-access";
 import { createSdpApiClient } from "@/lib/sdp-api";
-import { auth } from "@clerk/nextjs/server";
-import { redirect } from "next/navigation";
 import type { OnboardingStatusResponse } from "../../onboarding-status";
 import { PaymentsActionPage } from "../payments-action-page";
 import { fetchPaymentsIssuedTokenSymbols } from "../payments-page.data";

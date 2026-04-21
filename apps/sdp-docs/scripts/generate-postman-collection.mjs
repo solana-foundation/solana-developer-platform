@@ -2,9 +2,9 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  POSTMAN_COLLECTION_FILENAME,
   getPrimaryTagName,
   isPublicOperation,
+  POSTMAN_COLLECTION_FILENAME,
 } from "./lib/public-openapi.mjs";
 
 const __filename = fileURLToPath(import.meta.url);

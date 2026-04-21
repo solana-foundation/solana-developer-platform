@@ -1,17 +1,3 @@
-import { getDb } from "@/db";
-import { AppError, notFound } from "@/lib/errors";
-import { created, success } from "@/lib/response";
-import {
-  listApiKeyWalletBindings,
-  replaceApiKeyWalletBindings,
-} from "@/services/api-key-wallets.service";
-import { ApiKeyService } from "@/services/api-key.service";
-import { AuditService } from "@/services/audit.service";
-import { createSigningService } from "@/services/domain/signing.service";
-import { KVService } from "@/services/kv.service";
-import { SigningError } from "@/services/ports";
-import type { WalletPurpose } from "@/services/stores/custody-config.store";
-import type { Env } from "@/types/env";
 import type {
   ApiKeyRole,
   CreateApiKeyResponse,
@@ -20,6 +6,20 @@ import type {
   RotateApiKeyResponse,
 } from "@sdp/types";
 import type { Context } from "hono";
+import { getDb } from "@/db";
+import { AppError, notFound } from "@/lib/errors";
+import { created, success } from "@/lib/response";
+import { ApiKeyService } from "@/services/api-key.service";
+import {
+  listApiKeyWalletBindings,
+  replaceApiKeyWalletBindings,
+} from "@/services/api-key-wallets.service";
+import { AuditService } from "@/services/audit.service";
+import { createSigningService } from "@/services/domain/signing.service";
+import { KVService } from "@/services/kv.service";
+import { SigningError } from "@/services/ports";
+import type { WalletPurpose } from "@/services/stores/custody-config.store";
+import type { Env } from "@/types/env";
 import { apiKeyCreateSchema, apiKeyRotateSchema, apiKeyUpdateSchema } from "./schemas";
 import {
   assertWalletBindingsInScope,

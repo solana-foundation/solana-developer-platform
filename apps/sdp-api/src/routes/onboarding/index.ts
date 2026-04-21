@@ -6,9 +6,9 @@
  * completed for the active Clerk organization.
  */
 
+import { Hono } from "hono";
 import { clerkOnboardingMiddleware } from "@/middleware/clerk-onboarding";
 import type { Env } from "@/types/env";
-import { Hono } from "hono";
 import { getOnboardingStatus } from "./handlers";
 
 const onboarding = new Hono<{ Bindings: Env }>();
