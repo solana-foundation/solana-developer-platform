@@ -83,14 +83,26 @@ COINBASE_CDP_API_KEY_SECRET=...
 ### Test Structure
 
 ```
-src/tests/
-├── wallets.test.ts        # Wallet creation/management
-├── issuance.test.ts       # Token minting and operations
-├── payments.test.ts       # Fund transfers
-├── compliance.test.ts     # AML/KYC screening
-└── support/
-    ├── fixtures.ts        # Test data factories
-    └── helpers.ts         # Test utilities
+src/
+├── helpers/
+│   ├── api-types.ts       # API response type helpers
+│   ├── env.ts             # Environment variable loading
+│   ├── integration.ts     # Shared test utilities
+│   └── preflight.ts       # Kora/env preflight checks
+├── tests/
+│   ├── api-keys-flow.test.ts
+│   ├── api-keys-rotation.test.ts
+│   ├── burn.test.ts
+│   ├── custody-local.test.ts
+│   ├── deploy.test.ts
+│   ├── freeze.test.ts
+│   ├── issuance-endpoints.test.ts
+│   ├── kora-flow.test.ts
+│   ├── kora.test.ts
+│   ├── mint.test.ts
+│   ├── payments-wallet-scope.test.ts
+│   └── token2022.test.ts
+└── setup.ts
 ```
 
 ### Writing Integration Tests
@@ -98,23 +110,12 @@ src/tests/
 ```typescript
 // src/tests/example.test.ts
 import { describe, it, expect } from "vitest";
-import { createWallet, fundAccount } from "../support/helpers";
+import { getEnv } from "../helpers/env";
 
-describe("Wallet Operations", () => {
-  it("creates a wallet with Privy", async () => {
-    const wallet = await createWallet("privy");
-    
-    expect(wallet.id).toMatch(/^wal_/);
-    expect(wallet.address).toBeDefined();
-    expect(wallet.provider).toBe("privy");
-  });
-
-  it("funds a wallet via Kora", async () => {
-    const wallet = await createWallet("privy");
-    
-    const txid = await fundAccount(wallet.address, 1_000_000); // 0.001 SOL
-    
-    expect(txid).toBeDefined();
+describe("Example", () => {
+  it("reads env", () => {
+    const env = getEnv();
+    expect(env.SOLANA_RPC_URL).toBeDefined();
   });
 });
 ```
