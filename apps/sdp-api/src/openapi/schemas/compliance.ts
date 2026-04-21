@@ -42,7 +42,7 @@ export const complianceProviderResultSchema = z
       example: "High risk",
     }),
     message: z.string().optional().openapi({
-      description: "Optional provider message (errors, TODO notices, etc).",
+      description: "Optional provider message, such as warnings or error details.",
     }),
     evaluatedAt: isoDateTimeSchema.openapi({
       description: "Timestamp when the provider result was produced.",
