@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.17.1](https://github.com/solana-foundation/solana-developer-platform/compare/v0.17.0...v0.17.1) (2026-04-21)
+
+### Other Changes
+
+* Align API playground status badges ([#221](https://github.com/solana-foundation/solana-developer-platform/pull/221)) ([9c35c4e](https://github.com/solana-foundation/solana-developer-platform/commit/9c35c4ed247b978bb848aa1fedc2fcf70fcff114))
+
 ## [0.17.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.16.6...v0.17.0) (2026-04-21)
 
 ### Features
