@@ -16,9 +16,48 @@ import { registerPaymentsPaths } from "./paths/payments";
 import { registerProjectPaths } from "./paths/projects";
 import { registerRpcPaths } from "./paths/rpc";
 
-export function createOpenApiDocument(): OpenAPIObject {
-  const registry = new OpenAPIRegistry();
+const PUBLIC_OPENAPI_TAGS = [
+  { name: "Health", description: "Service health and readiness endpoints." },
+  { name: "API Keys", description: "API key management endpoints." },
+  {
+    name: "Wallets",
+    description: "Wallet signing provider configuration and wallet management.",
+  },
+  { name: "Projects", description: "Project and project member management." },
+  { name: "Issuance", description: "Token issuance, allowlists, and lifecycle operations." },
+  {
+    name: "Payments",
+    description: "Wallet balances, transfer execution, policies, and ramps.",
+  },
+  { name: "Compliance", description: "Risk and compliance screening endpoints." },
+];
 
+const INTERNAL_OPENAPI_TAGS = [
+  { name: "Organizations", description: "Organization provisioning and settings." },
+  { name: "Members", description: "Organization membership invitations and roles." },
+  { name: "Auth", description: "Session authentication and management." },
+  { name: "RPC", description: "Managed Solana RPC relay and provider telemetry." },
+  { name: "Admin", description: "Administrative allowlist management." },
+  { name: "Onboarding", description: "Clerk organization sync status." },
+];
+
+const OPENAPI_TAGS = [
+  PUBLIC_OPENAPI_TAGS[0],
+  INTERNAL_OPENAPI_TAGS[0],
+  PUBLIC_OPENAPI_TAGS[1],
+  INTERNAL_OPENAPI_TAGS[1],
+  INTERNAL_OPENAPI_TAGS[2],
+  PUBLIC_OPENAPI_TAGS[2],
+  PUBLIC_OPENAPI_TAGS[3],
+  INTERNAL_OPENAPI_TAGS[3],
+  PUBLIC_OPENAPI_TAGS[4],
+  PUBLIC_OPENAPI_TAGS[5],
+  PUBLIC_OPENAPI_TAGS[6],
+  INTERNAL_OPENAPI_TAGS[4],
+  INTERNAL_OPENAPI_TAGS[5],
+];
+
+function registerApiKeyAuth(registry: OpenAPIRegistry) {
   registry.registerComponent("securitySchemes", "apiKeyAuth", {
     type: "http",
     scheme: "bearer",
@@ -26,7 +65,9 @@ export function createOpenApiDocument(): OpenAPIObject {
     description:
       "Use Authorization: Bearer sk_test_... or sk_live_... with a base64url-encoded suffix.",
   });
+}
 
+function registerInternalSecuritySchemes(registry: OpenAPIRegistry) {
   registry.registerComponent("securitySchemes", "sessionCookie", {
     type: "apiKey",
     in: "cookie",
@@ -40,7 +81,19 @@ export function createOpenApiDocument(): OpenAPIObject {
     name: "X-Admin-Key",
     description: "Admin key for internal allowlist management.",
   });
+}
 
+function registerPublicPaths(registry: OpenAPIRegistry) {
+  registerHealthPaths(registry);
+  registerApiKeyPaths(registry);
+  registerCustodyPaths(registry);
+  registerProjectPaths(registry);
+  registerIssuancePaths(registry);
+  registerPaymentsPaths(registry);
+  registerCompliancePaths(registry);
+}
+
+function registerAllPaths(registry: OpenAPIRegistry) {
   registerHealthPaths(registry);
   registerOrganizationPaths(registry);
   registerApiKeyPaths(registry);
@@ -54,6 +107,19 @@ export function createOpenApiDocument(): OpenAPIObject {
   registerCompliancePaths(registry);
   registerAdminPaths(registry);
   registerOnboardingPaths(registry);
+}
+
+function createDocument({ publicOnly }: { publicOnly: boolean }): OpenAPIObject {
+  const registry = new OpenAPIRegistry();
+
+  registerApiKeyAuth(registry);
+
+  if (publicOnly) {
+    registerPublicPaths(registry);
+  } else {
+    registerInternalSecuritySchemes(registry);
+    registerAllPaths(registry);
+  }
 
   const generator = new OpenApiGeneratorV3(registry.definitions);
 
@@ -62,30 +128,11 @@ export function createOpenApiDocument(): OpenAPIObject {
     info: {
       title: "Solana Developer Platform API",
       version: "0.1.0",
-      description:
-        "Production-only OpenAPI spec generated from API schemas and routes. API versioning is path-based: /v1 is the current contract, and breaking changes are introduced under a new path major (for example /v2). The OpenAPI info.version tracks spec/document revision for the current path contract.",
+      description: publicOnly
+        ? "Public OpenAPI spec generated from supported API schemas and routes. API versioning is path-based: /v1 is the current contract, and breaking changes are introduced under a new path major (for example /v2). The OpenAPI info.version tracks spec/document revision for the current path contract."
+        : "Production-only OpenAPI spec generated from API schemas and routes. API versioning is path-based: /v1 is the current contract, and breaking changes are introduced under a new path major (for example /v2). The OpenAPI info.version tracks spec/document revision for the current path contract.",
     },
-    tags: [
-      { name: "Health", description: "Service health and readiness endpoints." },
-      { name: "Organizations", description: "Organization provisioning and settings." },
-      { name: "API Keys", description: "API key management endpoints." },
-      { name: "Members", description: "Organization membership invitations and roles." },
-      { name: "Auth", description: "Session authentication and management." },
-      {
-        name: "Wallets",
-        description: "Wallet signing provider configuration and wallet management.",
-      },
-      { name: "Projects", description: "Project and project member management." },
-      { name: "RPC", description: "Managed Solana RPC relay and provider telemetry." },
-      { name: "Issuance", description: "Token issuance, allowlists, and lifecycle operations." },
-      {
-        name: "Payments",
-        description: "Wallet balances, transfer execution, policies, and ramps.",
-      },
-      { name: "Compliance", description: "Risk and compliance screening endpoints." },
-      { name: "Admin", description: "Administrative allowlist management." },
-      { name: "Onboarding", description: "Clerk organization sync status." },
-    ],
+    tags: publicOnly ? PUBLIC_OPENAPI_TAGS : OPENAPI_TAGS,
     servers: [
       {
         url: "http://localhost:8787",
@@ -97,4 +144,12 @@ export function createOpenApiDocument(): OpenAPIObject {
       },
     ],
   });
+}
+
+export function createOpenApiDocument(): OpenAPIObject {
+  return createDocument({ publicOnly: false });
+}
+
+export function createPublicOpenApiDocument(): OpenAPIObject {
+  return createDocument({ publicOnly: true });
 }
