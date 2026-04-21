@@ -148,7 +148,7 @@ No external dependencies required.
 ### Integration Tests
 
 ```bash
-pnpm --filter @sdp/api-integration test:integration
+pnpm --filter @sdp/api-integration test
 ```
 
 **Requires:**
