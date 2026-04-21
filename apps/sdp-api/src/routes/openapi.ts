@@ -3,12 +3,12 @@
  */
 
 import { Hono } from "hono";
-import { createOpenApiDocument } from "@/openapi/spec";
+import { createPublicOpenApiDocument } from "@/openapi/spec";
 import type { Env } from "@/types/env";
 
 const openapi = new Hono<{ Bindings: Env }>();
 
-const document = createOpenApiDocument();
+const document = createPublicOpenApiDocument();
 
 openapi.get("/", (c) => {
   c.header("Cache-Control", "public, max-age=300");
