@@ -25,6 +25,7 @@ export default async function RootLayout({
       signUpUrl="/sign-up"
       signInFallbackRedirectUrl="/dashboard"
       signUpFallbackRedirectUrl="/dashboard"
+      afterSignOutUrl="/sign-in"
     >
       {children}
     </ClerkProvider>

@@ -192,7 +192,7 @@ function DashboardTopBar({
           </h1>
         </div>
         <div className="flex items-center justify-end gap-2">
-          <UserButton afterSignOutUrl="/sign-in" />
+          <UserButton />
         </div>
       </div>
     );
@@ -215,7 +215,7 @@ function DashboardTopBar({
       </div>
 
       <div className="flex items-center gap-2">
-        <UserButton afterSignOutUrl="/sign-in" />
+        <UserButton />
       </div>
     </div>
   );
