@@ -24,10 +24,8 @@ The API exposes these public REST endpoints (all require API key or session toke
 | **Issuance** | `POST/GET /v1/issuance/*` | Mint and manage tokens |
 | **Payments** | `POST/GET /v1/payments/*` | Transfer funds |
 | **Compliance** | `POST /v1/compliance/*` | Screen addresses/transactions |
-| **Organizations** | `POST/GET /v1/organizations/*` | Manage orgs |
 | **Projects** | `POST/GET /v1/projects/*` | Manage API projects |
 | **API Keys** | `POST/GET /v1/api-keys/*` | Create and manage API keys |
-| **Members** | `POST/GET /v1/members/*` | Manage team members |
 | **RPC Proxy** | `POST /v1/rpc/*` | Proxy Solana RPC calls |
 
 ## Internal Routes (Maintainers Only)
@@ -35,6 +33,8 @@ The API exposes these public REST endpoints (all require API key or session toke
 - `/allowlist/*` — Admin allowlist management
 - `/webhooks/clerk/link-orgs` — Clerk org sync webhook
 - `/auth/*` — Session/token auth flows
+- `/v1/organizations/*` — Multi-tenant org management (internal)
+- `/v1/members/*` — Team member management (internal)
 - `/onboarding/*` — Internal onboarding status
 
 ## Local Development

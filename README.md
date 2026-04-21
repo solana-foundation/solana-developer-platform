@@ -124,10 +124,8 @@ The REST API provides these public endpoints (all require API key or session tok
 | **Issuance** | Mint and manage SPL tokens | `/v1/issuance/tokens/mint`, `/v1/issuance/tokens/freeze` |
 | **Payments** | Send SOL and tokens | `/v1/payments/transfer`, `/v1/payments/batch` |
 | **Compliance** | Screen addresses and transactions | `/v1/compliance/screen-address` |
-| **Organizations** | Manage multi-tenant orgs | `/v1/organizations/*` |
 | **Projects** | API project management | `/v1/projects/*` |
 | **API Keys** | Manage access tokens | `/v1/api-keys/*` |
-| **Members** | Team member management | `/v1/members/*` |
 | **Health** | Service status | `GET /health` |
 
 **Full API Reference**: https://platform.solana.com/docs
