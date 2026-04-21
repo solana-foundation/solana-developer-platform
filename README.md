@@ -39,6 +39,7 @@ Want to contribute to the SDP codebase? Start here:
 - **Node.js 20+**
 - **pnpm 10.15.1+** — Install: `npm install -g pnpm`
 - **Git**
+- **Doppler CLI** — Install: `brew install dopplerhq/cli/doppler` (or see [doppler.com/docs/cli](https://docs.doppler.com/docs/cli)). Required to run `pnpm dev` and `pnpm test`.
 
 #### Quick Setup (No Private Accounts)
 

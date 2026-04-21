@@ -43,8 +43,7 @@ The API exposes these public REST endpoints (all require API key or session toke
 
 - **Node.js 20+**
 - **pnpm 10.15.1+**
-- **Wrangler CLI**: `npm install -g wrangler`
-- **Cloudflare account** (free tier works for local dev)
+- **Doppler CLI** — Required to run dev and test commands. Install: `brew install dopplerhq/cli/doppler`
 - **Local Postgres 16** or Cloud SQL connection (for D1)
 
 ### Setup
@@ -66,7 +65,7 @@ The API exposes these public REST endpoints (all require API key or session toke
    ```bash
    cp apps/sdp-api/.dev.vars.example apps/sdp-api/.dev.vars
    # Edit .dev.vars with your values (see below)
-   pnpm dev
+   pnpm -C apps/sdp-api dev:local
    ```
 
 3. **Start local infrastructure:**
