@@ -102,16 +102,15 @@ See `apps/sdp-web/.env.local.example` for all available options.
 
 ```
 apps/sdp-web/
-├── app/               # Next.js App Router
-│   ├── (auth)/        # Clerk authentication pages
-│   ├── (marketing)/   # Public landing pages
-│   └── dashboard/     # Protected dashboard routes
-├── components/        # Reusable React components
-├── lib/              # Utilities, hooks, types
-├── api/              # Next.js API routes (BFF)
-│   ├── dashboard/    # Proxies to sdp-api
-│   └── playground/   # Interactive API explorer
-└── public/           # Static assets
+├── src/
+│   └── app/               # Next.js App Router
+│       ├── sign-in/       # Clerk sign-in page
+│       ├── sign-up/       # Clerk sign-up page
+│       ├── allowlist/     # Request access form
+│       ├── members/       # Token-gated invite acceptance
+│       ├── dashboard/     # Protected dashboard routes
+│       └── api/           # Next.js API routes (BFF)
+└── public/                # Static assets
 ```
 
 ### Backend-for-Frontend (BFF)
