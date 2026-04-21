@@ -199,12 +199,6 @@ Requires environment variables set in Vercel project settings:
 - `NEXT_PUBLIC_SDP_API_BASE_URL`
 - `SENTRY_DSN` (optional)
 
-### Docker
-
-```bash
-docker build -t sdp-web .
-docker run -p 3000:3000 -e NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=... sdp-web
-```
 
 ## Troubleshooting
 
