@@ -1,5 +1,4 @@
 import { ClerkProvider } from "@clerk/nextjs";
-import { VercelToolbar } from "@vercel/toolbar/next";
 import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { Toaster } from "sonner";
@@ -16,7 +15,6 @@ export default async function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const shouldInjectToolbar = process.env.NODE_ENV === "development";
   const pathname = (await headers()).get("x-sdp-pathname") ?? "/";
   const shouldLoadClerk = await shouldLoadClerkForPath(pathname);
   const content = shouldLoadClerk ? (
@@ -38,7 +36,6 @@ export default async function RootLayout({
       <body>
         {content}
         <Toaster position="top-right" richColors closeButton />
-        {shouldInjectToolbar ? <VercelToolbar /> : null}
       </body>
     </html>
   );
