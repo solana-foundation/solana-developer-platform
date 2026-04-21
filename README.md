@@ -63,7 +63,7 @@ Want to contribute to the SDP codebase? Start here:
    ```bash
    # Terminal 1: Database
    pnpm db:postgres:up
-   pnpm db:postgres:bootstrap
+   pnpm --filter @sdp/api db:postgres:bootstrap
 
    # Terminal 2: Kora (fee-payer service) — optional
    pnpm kora:up
