@@ -19,7 +19,6 @@
     "@sdp/types": "workspace:*",
     "@sentry/nextjs": "^10.42.0",
     "@solana/design-system": "1.0.1",
-    "@vercel/toolbar": "0.2.2",
     "clsx": "2.1.1",
     "lucide-react": "0.575.0",
     "motion": "^12.38.0",
