@@ -29,6 +29,9 @@ This package contains integration tests that:
 # All integration tests
 pnpm test:integration
 
+# Kora smoke test only
+pnpm kora:devnet:test
+
 # Specific test file
 pnpm --filter @sdp/api-integration test src/tests/wallets.test.ts
 
@@ -39,20 +42,35 @@ SIGNING_PROVIDER=privy pnpm test:integration
 pnpm test:integration -- --verbose
 ```
 
+**Notes:**
+- Kora connectivity and fee payer balance are validated up-front — the suite fails fast if Kora is unreachable or underfunded.
+- The suite initializes a Privy signer for the integration org and uses DB-backed default signer resolution.
+
 ### Environment Variables
 
-Create `.env.local` or use Doppler:
+Use Doppler (team members) or export manually:
+
+**Required:**
+
+- `SOLANA_RPC_URL` — Example: `https://api.devnet.solana.com`
+- `KORA_RPC_URL` — Example: `https://your-kora-devnet-instance.us-central1.run.app`
+- `PRIVY_APP_ID`
+- `PRIVY_APP_SECRET`
+
+**Optional:**
+
+- `KORA_API_KEY` — Only required if your Kora endpoint requires API key auth.
+- `KORA_MIN_BALANCE_LAMPORTS` — Preflight threshold for the Kora fee payer balance check.
 
 ```bash
 # Solana RPC
 SOLANA_RPC_URL=https://api.devnet.solana.com
 
-# Fee-payer service
-KORA_RPC_URL=http://127.0.0.1:8080
-SIGNER_PRIVATE_KEY=<base58-devnet-keypair>
+# Fee-payer service (devnet)
+KORA_RPC_URL=https://your-kora-devnet-instance.us-central1.run.app
+# KORA_API_KEY=...
 
 # Privy signer (default)
-SIGNING_PROVIDER=privy
 PRIVY_APP_ID=<your-privy-app-id>
 PRIVY_APP_SECRET=<your-privy-secret>
 

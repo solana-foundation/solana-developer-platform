@@ -155,6 +155,9 @@ pnpm test
 ### Integration Tests (Requires Privy + Kora)
 
 ```bash
+export SOLANA_RPC_URL="https://api.devnet.solana.com"
+export KORA_RPC_URL="https://your-kora-devnet-instance.us-central1.run.app"
+# export KORA_API_KEY="..."  # only if your Kora endpoint requires it
 export PRIVY_APP_ID=your_app_id
 export PRIVY_APP_SECRET=your_secret
 pnpm test:integration
