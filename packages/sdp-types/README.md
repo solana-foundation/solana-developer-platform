@@ -66,5 +66,4 @@ Types use plain TypeScript — no Zod schemas in this package. For validated inp
 
 ## Support
 
-- Internal questions: Slack (team channel)
 - Type issues: GitHub Issues (tag with `types`)

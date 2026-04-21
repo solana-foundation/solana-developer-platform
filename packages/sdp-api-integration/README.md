@@ -181,4 +181,3 @@ curl http://127.0.0.1:8080/health
 
 - **Test failures**: Check logs and Solana devnet status
 - **Custody provider issues**: Refer to provider's devnet docs
-- **Questions**: Internal Slack (team channel)

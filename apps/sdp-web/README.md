@@ -228,4 +228,3 @@ For full contribution guidelines, see [`CONTRIBUTING.md`](../../CONTRIBUTING.md)
 
 - **Public docs**: https://platform.solana.com/docs
 - **GitHub Issues**: https://github.com/solana-foundation/solana-developer-platform/issues
-- **Slack**: Internal team channel (maintainers only)

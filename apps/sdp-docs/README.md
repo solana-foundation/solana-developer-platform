@@ -217,7 +217,6 @@ PORT=3002 pnpm dev:docs
 ## Contributing
 
 - Follow markdown conventions (see above)
-- Add your name to doc if creating new content
 - Request review from product team before merging
 - Test links locally: `pnpm --filter sdp-docs check:links`
 
@@ -241,4 +240,3 @@ The docs are published to https://platform.solana.com/docs
 ## Support
 
 - **Report issues**: GitHub Issues (tag with `docs`)
-- **Slack**: Internal team channel for content questions
