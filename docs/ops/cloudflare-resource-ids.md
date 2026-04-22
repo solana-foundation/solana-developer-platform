@@ -83,13 +83,13 @@ WRANGLER_SDP_SESSIONS_ID=<prd-sessions-id>
 During CI/CD deployment, the `.github/workflows/deploy-sdp-api.yml` workflow:
 
 1. **Validates** that all required `WRANGLER_*` variables exist in Doppler
-2. **Calls** `scripts/inject-wrangler-config.mjs`
+2. **Calls** `scripts/render-wrangler-config.mjs`
 3. **Replaces** placeholders in `wrangler.toml` with real values from Doppler
 4. **Deploys** with `wrangler deploy --env <dev|production>`
 
 ### The Injection Script
 
-**Location**: `scripts/inject-wrangler-config.mjs`
+**Location**: `scripts/render-wrangler-config.mjs`
 
 **Input**: Environment variables from Doppler
 **Output**: Modified `wrangler.toml` (in-memory, not committed)
@@ -127,7 +127,7 @@ In the `deploy-sdp-api.yml` workflow:
     DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN }}
   run: |
     doppler run --config ${DOPPLER_CONFIG_NAME} -- \
-      node scripts/inject-wrangler-config.mjs
+      node scripts/render-wrangler-config.mjs
 ```
 
 This step:
@@ -228,7 +228,7 @@ When running `pnpm dev`, Wrangler uses `localConnectionString` (for Hyperdrive) 
 **Solution**:
 1. Run the script manually with debug output:
    ```bash
-   node scripts/inject-wrangler-config.mjs
+   node scripts/render-wrangler-config.mjs
    ```
 2. Check for errors in the output
 3. Verify all `WRANGLER_*` variables are exported:
@@ -249,6 +249,6 @@ When running `pnpm dev`, Wrangler uses `localConnectionString` (for Hyperdrive) 
 - **Cloudflare Hyperdrive**: https://developers.cloudflare.com/hyperdrive/
 - **Cloudflare KV**: https://developers.cloudflare.com/kv/
 - **Wrangler CLI**: https://developers.cloudflare.com/workers/wrangler/
-- **Injection script**: `scripts/inject-wrangler-config.mjs`
+- **Injection script**: `scripts/render-wrangler-config.mjs`
 - **Deploy workflow**: `.github/workflows/deploy-sdp-api.yml`
 - **Doppler setup**: [`docs/ops/doppler-secrets.md`](doppler-secrets.md)

@@ -33,7 +33,7 @@ pnpm test:integration
 pnpm kora:devnet:test
 
 # Specific test file
-pnpm --filter @sdp/api-integration test src/tests/wallets.test.ts
+pnpm --filter @sdp/api-integration test src/tests/mint.test.ts
 
 # With specific custody provider
 SIGNING_PROVIDER=privy pnpm test:integration
@@ -100,6 +100,9 @@ src/
 │   ├── kora-flow.test.ts
 │   ├── kora.test.ts
 │   ├── mint.test.ts
+│   ├── mosaic-abl.test.ts
+│   ├── mosaic-templates.test.ts
+│   ├── mosaic-token-acl.test.ts
 │   ├── payments-wallet-scope.test.ts
 │   └── token2022.test.ts
 └── setup.ts

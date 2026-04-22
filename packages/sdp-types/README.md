@@ -54,15 +54,13 @@ packages/sdp-types/
 ### Validation
 
 Types use plain TypeScript — no Zod schemas in this package. For validated input parsing, see the API route handlers in `apps/sdp-api`.
-```
 
 ## Contributing
 
 - Keep types focused and specific
 - Add JSDoc comments for complex types
-- Include Zod schemas for validated types
 - Update this README if adding new modules
-- Run `pnpm --filter @sdp/types test` before committing
+- Run `pnpm --filter @sdp/types typecheck` before committing
 
 ## Support
 

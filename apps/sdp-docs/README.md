@@ -46,19 +46,16 @@ SDP Docs is the comprehensive external-facing documentation for the SDP platform
 
 ```
 apps/sdp-docs/
-├── app/                  # Next.js App Router
-│   └── docs/             # Fumadocs documentation root
-├── content/              # Markdown documentation files
-│   ├── getting-started/  # Quickstart guides
-│   ├── guides/           # Detailed how-to guides
-│   ├── api/              # API reference
-│   ├── wallets/          # Wallet & custody docs
-│   ├── issuance/         # Token issuance docs
-│   ├── payments/         # Payment & transfer docs
-│   ├── compliance/       # AML/KYC docs
-│   ├── ramps/            # On/off-ramp docs
-│   └── reference/        # General reference
-├── components/           # Reusable doc components
+├── src/
+│   ├── app/              # Next.js App Router
+│   │   └── docs/         # Fumadocs documentation root
+│   └── lib/              # Fumadocs source config
+├── content/
+│   └── docs/             # Markdown documentation files
+│       ├── guides/       # How-to guides
+│       ├── reference/    # API and concept reference
+│       └── tutorials/    # Step-by-step tutorials
+├── scripts/              # Doc generation scripts
 └── public/               # Static assets (logos, images)
 ```
 

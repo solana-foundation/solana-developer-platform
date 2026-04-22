@@ -126,7 +126,7 @@ How Cloudflare resource IDs (Hyperdrive, KV namespaces) are managed.
 - **Questions about deployment?** — Check [Release Operations](./release-operations.md)
 - **Questions about secrets?** — Check [Doppler Secrets Operations](./doppler-secrets.md)
 - **Questions about Cloudflare?** — Check [Cloudflare Resource IDs](./cloudflare-resource-ids.md)
-- **Still stuck?** — Ask in the internal Slack channel
+- **Still stuck?** — Open a GitHub issue or reach out to the maintainers listed above
 
 ---
 

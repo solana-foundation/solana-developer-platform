@@ -26,13 +26,13 @@ The API exposes these public REST endpoints (all require API key or session toke
 | **Compliance** | `POST /v1/compliance/*` | Screen addresses/transactions |
 | **Projects** | `POST/GET /v1/projects/*` | Manage API projects |
 | **API Keys** | `POST/GET /v1/api-keys/*` | Create and manage API keys |
-| **RPC Proxy** | `POST /v1/rpc/*` | Proxy Solana RPC calls |
 
 ## Internal Routes (Maintainers Only)
 
 - `/allowlist/*` — Admin allowlist management
 - `/webhooks/clerk/link-orgs` — Clerk org sync webhook
 - `/auth/*` — Session/token auth flows
+- `/v1/rpc/*` — Solana RPC proxy (internal)
 - `/v1/organizations/*` — Multi-tenant org management (internal)
 - `/v1/members/*` — Team member management (internal)
 - `/onboarding/*` — Internal onboarding status
@@ -72,7 +72,7 @@ The API exposes these public REST endpoints (all require API key or session toke
    ```bash
    # Terminal 1: Postgres
    pnpm db:postgres:up
-   pnpm db:postgres:bootstrap
+   pnpm --filter @sdp/api db:postgres:bootstrap
 
    # Terminal 2: Kora (fee-payer service)
    pnpm kora:up
