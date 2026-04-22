@@ -2,6 +2,22 @@ function SkeletonBlock({ className }: { className: string }) {
   return <div className={`animate-pulse rounded-[16px] bg-[rgba(28,28,29,0.1)] ${className}`} />;
 }
 
+const PROVIDER_SKELETON_IDS = [
+  "provider-skeleton-1",
+  "provider-skeleton-2",
+  "provider-skeleton-3",
+  "provider-skeleton-4",
+  "provider-skeleton-5",
+  "provider-skeleton-6",
+];
+const WALLET_CARD_SKELETON_IDS = [
+  "wallet-card-skeleton-1",
+  "wallet-card-skeleton-2",
+  "wallet-card-skeleton-3",
+  "wallet-card-skeleton-4",
+  "wallet-card-skeleton-5",
+];
+
 function WalletCardSkeleton() {
   return (
     <div className="animate-pulse rounded-2xl border border-[rgba(28,28,29,0.08)] bg-[#fcfcfa] p-5">
@@ -49,8 +65,8 @@ export function WalletsOnboardingSkeleton() {
         <SkeletonBlock className="h-4 w-[52%]" />
       </div>
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-        {Array.from({ length: 6 }, (_, index) => (
-          <ProviderCardSkeleton key={`provider-skeleton-${index + 1}`} />
+        {PROVIDER_SKELETON_IDS.map((id) => (
+          <ProviderCardSkeleton key={id} />
         ))}
       </div>
     </div>
@@ -64,8 +80,8 @@ export function WalletsPageSkeleton() {
         <SkeletonBlock className="h-10 w-32 rounded-[10px]" />
       </div>
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-        {Array.from({ length: 5 }, (_, index) => (
-          <WalletCardSkeleton key={`wallet-card-skeleton-${index + 1}`} />
+        {WALLET_CARD_SKELETON_IDS.map((id) => (
+          <WalletCardSkeleton key={id} />
         ))}
       </div>
     </div>

@@ -4,13 +4,14 @@ import {
   inviteSchema as inviteSchemaBase,
 } from "../../routes/members/schemas";
 import { updateOrgSchema as updateOrgSchemaBase } from "../../routes/organizations/schemas";
-import { z } from "./base";
 import {
   invitationIdSchema,
   isoDateTimeSchema,
   memberIdParamSchema,
   orgIdParamSchema,
   userIdSchema,
+  withOpenApi,
+  z,
 } from "./base";
 
 export const organizationSettingsSchema = z
@@ -132,11 +133,11 @@ export const inviteMemberResponseSchema = z
 
 export const updateOrganizationRequestSchema = updateOrgSchemaBase
   .extend({
-    name: updateOrgSchemaBase.shape.name.openapi({
+    name: withOpenApi(updateOrgSchemaBase.shape.name, {
       description: "Updated organization name.",
       example: "Example Org Updated",
     }),
-    settings: updateOrgSchemaBase.shape.settings.openapi({
+    settings: withOpenApi(updateOrgSchemaBase.shape.settings, {
       description: "Organization settings to update.",
       example: {
         rpcProvider: "default",
@@ -149,11 +150,11 @@ export const updateOrganizationRequestSchema = updateOrgSchemaBase
 
 export const inviteMemberRequestSchema = inviteSchemaBase
   .extend({
-    email: inviteSchemaBase.shape.email.openapi({
+    email: withOpenApi(inviteSchemaBase.shape.email, {
       description: "Invitee email address.",
       example: "dev@example.com",
     }),
-    role: inviteSchemaBase.shape.role.openapi({
+    role: withOpenApi(inviteSchemaBase.shape.role, {
       description: "Role assigned to the invited member.",
       example: "member",
     }),
@@ -162,11 +163,11 @@ export const inviteMemberRequestSchema = inviteSchemaBase
 
 export const acceptInvitationRequestSchema = acceptSchemaBase
   .extend({
-    token: acceptSchemaBase.shape.token.openapi({
+    token: withOpenApi(acceptSchemaBase.shape.token, {
       description: "Invitation token from email.",
       example: "invitation_token",
     }),
-    name: acceptSchemaBase.shape.name.openapi({
+    name: withOpenApi(acceptSchemaBase.shape.name, {
       description: "Optional name to set for the user.",
       example: "Example User",
     }),

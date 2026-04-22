@@ -1,8 +1,8 @@
+import type { Context } from "hono";
 import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
 import { AppError } from "@/lib/errors";
 import type { Env } from "@/types/env";
-import type { Context } from "hono";
 
 type AppContext = Context<{ Bindings: Env }>;
 

@@ -1,6 +1,5 @@
 import { addEntrySchema as addEntrySchemaBase } from "../../routes/allowlist/schemas";
-import { z } from "./base";
-import { allowlistEntryIdParamSchema, isoDateTimeSchema } from "./base";
+import { allowlistEntryIdParamSchema, isoDateTimeSchema, withOpenApi, z } from "./base";
 
 export const allowlistEntrySchema = z
   .object({
@@ -34,19 +33,19 @@ export const allowlistEntriesResponseSchema = z
 
 export const addAdminAllowlistEntryRequestSchema = addEntrySchemaBase
   .extend({
-    type: addEntrySchemaBase.shape.type.openapi({
+    type: withOpenApi(addEntrySchemaBase.shape.type, {
       description: "Allowlist entry type.",
       example: "email",
     }),
-    value: addEntrySchemaBase.shape.value.openapi({
+    value: withOpenApi(addEntrySchemaBase.shape.value, {
       description: "Email or domain to allowlist.",
       example: "example.com",
     }),
-    tier: addEntrySchemaBase.shape.tier.openapi({
+    tier: withOpenApi(addEntrySchemaBase.shape.tier, {
       description: "Optional allowlist tier.",
       example: "standard",
     }),
-    notes: addEntrySchemaBase.shape.notes.openapi({
+    notes: withOpenApi(addEntrySchemaBase.shape.notes, {
       description: "Optional notes.",
       example: "Approved partner",
     }),

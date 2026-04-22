@@ -1,5 +1,5 @@
-import { createSdpApiClient } from "@/lib/sdp-api";
 import { NextResponse } from "next/server";
+import { createSdpApiClient } from "@/lib/sdp-api";
 
 type RouteContext = {
   params: Promise<{ direction: string }>;

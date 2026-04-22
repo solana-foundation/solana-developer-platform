@@ -1,5 +1,5 @@
-import { isDecimalString } from "@/lib/amount";
 import { z } from "zod";
+import { isDecimalString } from "@/lib/amount";
 
 export const walletIdParamsSchema = z.object({
   walletId: z.string().min(1),

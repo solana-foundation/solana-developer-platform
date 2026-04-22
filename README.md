@@ -2,6 +2,8 @@
 
 The unified API and dashboard for building blockchain applications on Solana. Create wallets, issue tokens, process payments, and manage custody — all with a single integration.
 
+> **Note:** SDP is devnet-only for now. Mainnet support is not part of the public getting-started path yet.
+
 ## What is SDP?
 
 The Solana Developer Platform (SDP) provides a comprehensive set of APIs and tools for developers to:
@@ -193,17 +195,18 @@ We welcome contributions! Before starting, please:
 4. **Write tests** — Cover new functionality
 5. **Submit a PR** — Link related issues
 
-Contributing guidelines: [`CONTRIBUTING.md`](CONTRIBUTING.md) (forthcoming)
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for full guidelines.
 
 ## License
 
-This project is licensed under the Solana Labs Free Software License.
+This project is licensed under the [MIT License](LICENSE).
 
 ## Support
 
 - **Issues & Feature Requests**: [GitHub Issues](https://github.com/solana-foundation/solana-developer-platform/issues)
 - **Documentation**: https://platform.solana.com/docs
 - **Community**: [Solana Developer Discord](https://discord.gg/solana)
+- **Security**: [SECURITY.md](SECURITY.md)
 
 ## Project Status
 

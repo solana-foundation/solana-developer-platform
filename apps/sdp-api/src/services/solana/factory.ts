@@ -5,9 +5,9 @@
  * fee payment provider integration (Kora for gasless transactions).
  */
 
+import type { TransactionSigner } from "@solana/kit";
 import { createFeePaymentAdapter } from "@/services/adapters/fee-payment";
 import type { Env } from "@/types/env";
-import type { TransactionSigner } from "@solana/kit";
 import { Token2022Service } from "./token-2022";
 
 /**

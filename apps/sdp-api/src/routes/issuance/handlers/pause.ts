@@ -1,3 +1,5 @@
+import { MINT_ALREADY_PAUSED_ERROR, MINT_NOT_PAUSED_ERROR } from "@solana/mosaic-sdk";
+import type { Context } from "hono";
 import { getDb } from "@/db";
 import { resolveApiKeySigningWalletId } from "@/lib/api-key-wallet-auth";
 import { getAuth } from "@/lib/auth";
@@ -9,8 +11,6 @@ import { createMosaicService } from "@/services/mosaic";
 import { createOrgSigner } from "@/services/solana";
 import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
-import { MINT_ALREADY_PAUSED_ERROR, MINT_NOT_PAUSED_ERROR } from "@solana/mosaic-sdk";
-import type { Context } from "hono";
 import { pauseTokenSchema } from "../schemas";
 import { buildIdempotencyMetadata } from "./idempotency";
 

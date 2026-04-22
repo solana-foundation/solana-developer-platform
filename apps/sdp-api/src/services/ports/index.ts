@@ -5,38 +5,36 @@
  * Ports define the boundaries between domain and infrastructure.
  */
 
+// Fee payment port - gasless transaction sponsorship
+export type {
+  ExtendedFeePaymentPort,
+  FeePaymentErrorCode,
+  FeePaymentPort,
+} from "./fee-payment.port";
+export { FeePaymentError } from "./fee-payment.port";
+// RPC port - Solana blockchain interaction
+export type {
+  AccountInfo,
+  BlockhashWithExpiry,
+  ConfirmTransactionOptions,
+  RpcErrorCode,
+  RpcPort,
+  SendTransactionOptions,
+  SimulateTransactionOptions,
+  SimulationResult,
+  TransactionConfirmation,
+} from "./rpc.port";
+export { RpcError } from "./rpc.port";
 // Signing port - custody provider abstraction
 export type {
   FullSigningPort,
+  GeneratedKeypair,
+  SigningErrorCode,
+  SigningMetadata,
   SigningPort,
   SignRequest,
   SignResult,
   SignResultStatus,
   SignStatus,
-  SigningMetadata,
-  GeneratedKeypair,
-  SigningErrorCode,
 } from "./signing.port";
-export { SigningError, isFullSigningPort } from "./signing.port";
-
-// Fee payment port - gasless transaction sponsorship
-export type {
-  FeePaymentPort,
-  ExtendedFeePaymentPort,
-  FeePaymentErrorCode,
-} from "./fee-payment.port";
-export { FeePaymentError } from "./fee-payment.port";
-
-// RPC port - Solana blockchain interaction
-export type {
-  RpcPort,
-  BlockhashWithExpiry,
-  SendTransactionOptions,
-  ConfirmTransactionOptions,
-  SimulateTransactionOptions,
-  TransactionConfirmation,
-  SimulationResult,
-  AccountInfo,
-  RpcErrorCode,
-} from "./rpc.port";
-export { RpcError } from "./rpc.port";
+export { isFullSigningPort, SigningError } from "./signing.port";

@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { start } from "fumadocs-mdx/next";
+import { postInstall } from "fumadocs-mdx/next";
 
 const run = (command, args) =>
   new Promise((resolvePromise, rejectPromise) => {
@@ -19,7 +19,7 @@ const run = (command, args) =>
   });
 
 const runSourceGeneration = async () => {
-  await start(false, "source.config.ts", ".source");
+  await postInstall({ configPath: "source.config.ts", outDir: ".source" });
   await run("node", ["scripts/patch-fumadocs-source.mjs"]);
 };
 

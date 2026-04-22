@@ -1,3 +1,5 @@
+import type { CachedApiKey } from "@sdp/types";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
 import { hashString } from "@/lib/hash";
@@ -6,8 +8,6 @@ import { SigningError } from "@/services/ports";
 import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVNamespaces, seedCachedApiKey } from "@/test/mocks/kv";
-import type { CachedApiKey } from "@sdp/types";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const provisionParaWalletMock = vi.spyOn(custodyProvisioning, "provisionParaWallet");
 

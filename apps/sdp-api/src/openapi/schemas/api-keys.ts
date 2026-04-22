@@ -4,12 +4,13 @@ import {
   apiKeyRotateSchema as apiKeyRotateSchemaBase,
   apiKeyUpdateSchema as apiKeyUpdateSchemaBase,
 } from "../../routes/api-keys/schemas";
-import { z } from "./base";
 import {
   apiKeyIdParamSchema,
   apiKeyPrefixSchema,
   isoDateTimeSchema,
   projectIdParamSchema,
+  withOpenApi,
+  z,
 } from "./base";
 
 export const apiKeyRoleSchema = z
@@ -212,61 +213,61 @@ export const revokeApiKeyResponseSchema = z
 
 export const createApiKeyRequestSchema = apiKeyCreateSchemaBase
   .extend({
-    name: apiKeyCreateSchemaBase.shape.name.openapi({
+    name: withOpenApi(apiKeyCreateSchemaBase.shape.name, {
       description: "Friendly name for the API key.",
       example: "Primary Key",
     }),
-    description: apiKeyCreateSchemaBase.shape.description.openapi({
+    description: withOpenApi(apiKeyCreateSchemaBase.shape.description, {
       description: "Optional key description.",
       example: "Used by backend service.",
     }),
-    role: apiKeyCreateSchemaBase.shape.role.openapi({
+    role: withOpenApi(apiKeyCreateSchemaBase.shape.role, {
       description: "Role assigned to this API key.",
       example: "api_developer",
     }),
-    environment: apiKeyCreateSchemaBase.shape.environment.openapi({
+    environment: withOpenApi(apiKeyCreateSchemaBase.shape.environment, {
       description: "Target environment for the key.",
       example: "sandbox",
     }),
-    walletScope: apiKeyCreateSchemaBase.shape.walletScope.openapi({
+    walletScope: withOpenApi(apiKeyCreateSchemaBase.shape.walletScope, {
       description:
         "Explicit wallet access mode. Use 'all' to allow every wallet in scope or 'selected' to bind specific wallets.",
       example: "selected",
     }),
-    allowedIps: apiKeyCreateSchemaBase.shape.allowedIps.openapi({
+    allowedIps: withOpenApi(apiKeyCreateSchemaBase.shape.allowedIps, {
       description: "Optional list of CIDR ranges allowed to use the key.",
       example: ["203.0.113.0/24"],
     }),
-    expiresAt: apiKeyCreateSchemaBase.shape.expiresAt.openapi({
+    expiresAt: withOpenApi(apiKeyCreateSchemaBase.shape.expiresAt, {
       description: "Optional expiration timestamp.",
       example: "2025-12-31T00:00:00.000Z",
     }),
-    permissions: apiKeyCreateSchemaBase.shape.permissions.openapi({
+    permissions: withOpenApi(apiKeyCreateSchemaBase.shape.permissions, {
       description: "Optional explicit permission set. Requires admin access.",
       example: ["tokens:read", "tokens:write"],
     }),
-    signingWalletId: apiKeyCreateSchemaBase.shape.signingWalletId.openapi({
+    signingWalletId: withOpenApi(apiKeyCreateSchemaBase.shape.signingWalletId, {
       description: "Optional default custody wallet ID to bind this key to.",
       example: "privy_wallet_123",
     }),
-    signingWalletIds: apiKeyCreateSchemaBase.shape.signingWalletIds.openapi({
+    signingWalletIds: withOpenApi(apiKeyCreateSchemaBase.shape.signingWalletIds, {
       description:
         "Optional list of custody wallet IDs to bind to this key. The first wallet becomes default unless signingWalletId is explicitly set.",
       example: ["privy_wallet_123", "dfns_wallet_456"],
     }),
-    walletBindings: apiKeyCreateSchemaBase.shape.walletBindings.openapi({
+    walletBindings: withOpenApi(apiKeyCreateSchemaBase.shape.walletBindings, {
       description:
         "Optional wallet-level permission bindings. Use this to attach multiple wallets with scoped permissions.",
     }),
-    provisionWallet: apiKeyCreateSchemaBase.shape.provisionWallet.openapi({
+    provisionWallet: withOpenApi(apiKeyCreateSchemaBase.shape.provisionWallet, {
       description: "If true, provisions a new custody wallet and binds it to the key.",
       example: false,
     }),
-    walletLabel: apiKeyCreateSchemaBase.shape.walletLabel.openapi({
+    walletLabel: withOpenApi(apiKeyCreateSchemaBase.shape.walletLabel, {
       description: "Optional label for a provisioned wallet.",
       example: "Mint authority wallet",
     }),
-    walletPurpose: apiKeyCreateSchemaBase.shape.walletPurpose.openapi({
+    walletPurpose: withOpenApi(apiKeyCreateSchemaBase.shape.walletPurpose, {
       description: "Optional purpose for a provisioned wallet.",
       example: "mint_authority",
     }),
@@ -275,41 +276,41 @@ export const createApiKeyRequestSchema = apiKeyCreateSchemaBase
 
 export const updateApiKeyRequestSchema = apiKeyUpdateSchemaBase
   .extend({
-    name: apiKeyUpdateSchemaBase.shape.name.openapi({
+    name: withOpenApi(apiKeyUpdateSchemaBase.shape.name, {
       description: "Updated key name.",
       example: "Primary Key Updated",
     }),
-    description: apiKeyUpdateSchemaBase.shape.description.openapi({
+    description: withOpenApi(apiKeyUpdateSchemaBase.shape.description, {
       description: "Updated description. Use null to clear.",
       example: "Rotated key for new service.",
     }),
-    walletScope: apiKeyUpdateSchemaBase.shape.walletScope.openapi({
+    walletScope: withOpenApi(apiKeyUpdateSchemaBase.shape.walletScope, {
       description:
         "Updated wallet access mode. Provide this when changing wallet bindings, or by itself to reset the key to all wallets.",
       example: "all",
     }),
-    allowedIps: apiKeyUpdateSchemaBase.shape.allowedIps.openapi({
+    allowedIps: withOpenApi(apiKeyUpdateSchemaBase.shape.allowedIps, {
       description: "Updated IP allowlist. Use null to clear.",
       example: ["203.0.113.0/24"],
     }),
-    expiresAt: apiKeyUpdateSchemaBase.shape.expiresAt.openapi({
+    expiresAt: withOpenApi(apiKeyUpdateSchemaBase.shape.expiresAt, {
       description: "Updated expiration. Use null to clear.",
       example: "2026-01-01T00:00:00.000Z",
     }),
-    permissions: apiKeyUpdateSchemaBase.shape.permissions.openapi({
+    permissions: withOpenApi(apiKeyUpdateSchemaBase.shape.permissions, {
       description: "Updated explicit permission set. Use null to revert to role defaults.",
       example: ["tokens:read", "tokens:write"],
     }),
-    signingWalletId: apiKeyUpdateSchemaBase.shape.signingWalletId.openapi({
+    signingWalletId: withOpenApi(apiKeyUpdateSchemaBase.shape.signingWalletId, {
       description: "Updated default signing wallet binding. Use null to clear all wallet bindings.",
       example: "privy_wallet_123",
     }),
-    signingWalletIds: apiKeyUpdateSchemaBase.shape.signingWalletIds.openapi({
+    signingWalletIds: withOpenApi(apiKeyUpdateSchemaBase.shape.signingWalletIds, {
       description:
         "Updated list of wallet IDs bound to this key. Use null to clear all wallet bindings.",
       example: ["privy_wallet_123", "dfns_wallet_456"],
     }),
-    walletBindings: apiKeyUpdateSchemaBase.shape.walletBindings.openapi({
+    walletBindings: withOpenApi(apiKeyUpdateSchemaBase.shape.walletBindings, {
       description:
         "Updated wallet-level permission bindings. Use null to clear all wallet bindings.",
     }),
@@ -318,7 +319,7 @@ export const updateApiKeyRequestSchema = apiKeyUpdateSchemaBase
 
 export const rotateApiKeyRequestSchema = apiKeyRotateSchemaBase
   .extend({
-    gracePeriodHours: apiKeyRotateSchemaBase.shape.gracePeriodHours.openapi({
+    gracePeriodHours: withOpenApi(apiKeyRotateSchemaBase.shape.gracePeriodHours, {
       description: "Grace period for the old key before revocation.",
       example: 24,
     }),

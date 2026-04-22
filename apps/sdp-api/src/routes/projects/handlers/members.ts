@@ -1,3 +1,5 @@
+import type { ListProjectMembersResponse, ProjectMemberResponse, ProjectRole } from "@sdp/types";
+import type { Context } from "hono";
 import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
 import { AppError, notFound } from "@/lib/errors";
@@ -5,8 +7,6 @@ import { created, noContent, success } from "@/lib/response";
 import { AuditService } from "@/services/audit.service";
 import { ProjectService, ProjectServiceError } from "@/services/project.service";
 import type { Env } from "@/types/env";
-import type { ListProjectMembersResponse, ProjectMemberResponse, ProjectRole } from "@sdp/types";
-import type { Context } from "hono";
 import { addMemberSchema, updateMemberSchema } from "../schemas";
 
 type AppContext = Context<{ Bindings: Env }>;

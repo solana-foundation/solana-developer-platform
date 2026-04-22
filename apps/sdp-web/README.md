@@ -84,6 +84,9 @@ SENTRY_AUTH_TOKEN=...
 
 # Analytics (if configured)
 NEXT_PUBLIC_ANALYTICS_ID=...
+
+# Docs proxy origin — overrides where /docs traffic is proxied to (default: local sdp-docs)
+SDP_DOCS_PROXY_ORIGIN=https://docs.platform.solana.com
 ```
 
 See `apps/sdp-web/.env.local.example` for all available options.
@@ -222,7 +225,7 @@ Requires environment variables set in Vercel project settings:
 - Keep BFF routes thin — business logic goes in `sdp-api`
 - Update styles using Tailwind classes, not custom CSS
 
-For full contribution guidelines, see [`CONTRIBUTING.md`](../../CONTRIBUTING.md) (forthcoming).
+For full contribution guidelines, see [`CONTRIBUTING.md`](../../CONTRIBUTING.md).
 
 ## Support
 

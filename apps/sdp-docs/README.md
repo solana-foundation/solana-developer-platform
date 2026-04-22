@@ -220,7 +220,7 @@ PORT=3002 pnpm dev:docs
 - Request review from product team before merging
 - Test links locally: `pnpm --filter sdp-docs check:links`
 
-For full contribution guidelines, see [`CONTRIBUTING.md`](../../CONTRIBUTING.md) (forthcoming).
+For full contribution guidelines, see [`CONTRIBUTING.md`](../../CONTRIBUTING.md).
 
 ## Tech Stack
 

@@ -1,5 +1,7 @@
 "use client";
 
+import type { TokenTransaction } from "@sdp/types";
+import { Loader2 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Table,
@@ -9,8 +11,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import type { TokenTransaction } from "@sdp/types";
-import { Loader2 } from "lucide-react";
 import { formatDate } from "./token-management-workspace.utils";
 
 interface TokenTransactionsSectionProps {

@@ -1,6 +1,6 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { provisionAnchorageWallet } from "@/services/custody/provisioning.anchorage";
 import type { Env } from "@/types/env";
-import { afterEach, describe, expect, it, vi } from "vitest";
 
 describe("anchorage wallet provisioning", () => {
   afterEach(() => {

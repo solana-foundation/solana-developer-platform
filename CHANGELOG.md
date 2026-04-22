@@ -1,5 +1,48 @@
 # Changelog
 
+## [0.17.1](https://github.com/solana-foundation/solana-developer-platform/compare/v0.17.0...v0.17.1) (2026-04-21)
+
+### Other Changes
+
+* Align API playground status badges ([#221](https://github.com/solana-foundation/solana-developer-platform/pull/221)) ([9c35c4e](https://github.com/solana-foundation/solana-developer-platform/commit/9c35c4ed247b978bb848aa1fedc2fcf70fcff114))
+
+## [0.17.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.16.6...v0.17.0) (2026-04-21)
+
+### Features
+
+* **deps:** upgrade Clerk to v7 ([#219](https://github.com/solana-foundation/solana-developer-platform/pull/219)) ([b8d4913](https://github.com/solana-foundation/solana-developer-platform/commit/b8d4913c9d62d2ca2a2f54f25b43b14f26732517))
+
+### Maintenance
+
+* **deps:** bump the actions group with 4 updates ([#198](https://github.com/solana-foundation/solana-developer-platform/pull/198)) ([d531b70](https://github.com/solana-foundation/solana-developer-platform/commit/d531b70e45f2393cc53c6a77109d96988a96212e))
+
+### Other Changes
+
+* Remove vulnerable Vercel Toolbar dependency ([#220](https://github.com/solana-foundation/solana-developer-platform/pull/220)) ([2604490](https://github.com/solana-foundation/solana-developer-platform/commit/26044902ee5050c4c7baee4f3f58c13ea91eacef))
+
+## [0.16.6](https://github.com/solana-foundation/solana-developer-platform/compare/v0.16.5...v0.16.6) (2026-04-20)
+
+### Maintenance
+
+* **deps:** bundle toolchain updates ([#216](https://github.com/solana-foundation/solana-developer-platform/pull/216)) ([fc0a4fe](https://github.com/solana-foundation/solana-developer-platform/commit/fc0a4fe01ac12a7d16ab475c67f734aa1966cd47))
+* **deps:** bundle zod openapi updates ([#214](https://github.com/solana-foundation/solana-developer-platform/pull/214)) ([71e6b29](https://github.com/solana-foundation/solana-developer-platform/commit/71e6b297e9ef95fbba8578b984e5cb4872488ac0))
+
+## [0.16.5](https://github.com/solana-foundation/solana-developer-platform/compare/v0.16.4...v0.16.5) (2026-04-20)
+
+### Bug Fixes
+
+* render Wrangler config from Doppler for API deploys ([#195](https://github.com/solana-foundation/solana-developer-platform/pull/195)) ([f0859b7](https://github.com/solana-foundation/solana-developer-platform/commit/f0859b7e4212b2ec809c316925a6ee07735dad45))
+
+### Maintenance
+
+* **deps:** bundle docs framework updates ([18df8a7](https://github.com/solana-foundation/solana-developer-platform/commit/18df8a71fb24d485112df800a41b3abdb993ac1f))
+* **deps:** bundle easy dependabot updates ([#212](https://github.com/solana-foundation/solana-developer-platform/pull/212)) ([9b708eb](https://github.com/solana-foundation/solana-developer-platform/commit/9b708eb80e4e3e680575cd60eb25f50aa8b75cd0))
+* HOO-421 add initial versions ([#190](https://github.com/solana-foundation/solana-developer-platform/pull/190)) ([0351e4a](https://github.com/solana-foundation/solana-developer-platform/commit/0351e4ae41d575b33cbd3c32081370ee7b64f2e5))
+
+### Other Changes
+
+* Add config for dependabot and separate actions for codeql and dependency review ([#187](https://github.com/solana-foundation/solana-developer-platform/pull/187)) ([a6f29f9](https://github.com/solana-foundation/solana-developer-platform/commit/a6f29f95f99d6c9f38677b0e2591b0fd7a878ba8))
+
 ## [0.16.4](https://github.com/solana-foundation/solana-developer-platform/compare/v0.16.3...v0.16.4) (2026-04-16)
 
 ### Bug Fixes

@@ -227,7 +227,7 @@ See [`docs/ops/release-operations.md`](../../docs/ops/release-operations.md) for
 - Update OpenAPI comments in route handlers
 - Test locally before pushing
 
-For full contribution guidelines, see [`CONTRIBUTING.md`](../../CONTRIBUTING.md) (forthcoming).
+For full contribution guidelines, see [`CONTRIBUTING.md`](../../CONTRIBUTING.md).
 
 ## Support
 

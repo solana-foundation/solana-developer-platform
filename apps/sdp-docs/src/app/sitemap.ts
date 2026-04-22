@@ -1,6 +1,6 @@
+import type { MetadataRoute } from "next";
 import { aiLlmsFullUrl, aiLlmsUrl, docsOrigin, getDocsPagePath } from "@/lib/site";
 import { source } from "@/lib/source";
-import type { MetadataRoute } from "next";
 
 export default function sitemap(): MetadataRoute.Sitemap {
   const docEntries = source.generateParams().map(({ slug }) => {

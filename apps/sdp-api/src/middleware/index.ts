@@ -2,7 +2,7 @@
  * Middleware exports
  */
 
-export { authMiddleware, requirePermissions, optionalAuth } from "./auth";
+export { authMiddleware, optionalAuth, requirePermissions } from "./auth";
 export { clerkAuthMiddleware, optionalClerkAuth } from "./clerk-auth";
 export { corsMiddleware } from "./cors";
 export { rateLimitMiddleware, skipRateLimitPaths } from "./rate-limit";

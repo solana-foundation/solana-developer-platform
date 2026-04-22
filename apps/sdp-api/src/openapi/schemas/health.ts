@@ -1,5 +1,4 @@
-import { z } from "./base";
-import { isoDateTimeSchema } from "./base";
+import { isoDateTimeSchema, z } from "./base";
 
 export const healthResponseSchema = z
   .object({

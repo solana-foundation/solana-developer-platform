@@ -1,6 +1,6 @@
+import { NextResponse } from "next/server";
 import { createTimedTrace, logRouteResult } from "@/lib/request-tracing";
 import { createSdpApiClient } from "@/lib/sdp-api";
-import { NextResponse } from "next/server";
 
 export async function GET(request: Request) {
   const trace = createTimedTrace("route.dashboard.wallets.aggregate", request);
@@ -12,9 +12,9 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const query = new URLSearchParams(url.searchParams);
 
-    // biome-ignore lint/nursery/noSecrets: Query parameter name, not a secret.
+    // biome-ignore lint/security/noSecrets: Query parameter name, not a secret.
     if (!query.has("includeAllProviders")) {
-      // biome-ignore lint/nursery/noSecrets: Query parameter name, not a secret.
+      // biome-ignore lint/security/noSecrets: Query parameter name, not a secret.
       query.set("includeAllProviders", "true");
     }
 

@@ -1,5 +1,22 @@
 import { SkeletonBlock } from "@/components/ui/skeleton-block";
 
+const FIELD_SKELETON_IDS = [
+  "playground-field-skeleton-1",
+  "playground-field-skeleton-2",
+  "playground-field-skeleton-3",
+  "playground-field-skeleton-4",
+];
+const CODE_SKELETONS = [
+  { id: "playground-code-skeleton-1", className: "h-4 w-[92%]" },
+  { id: "playground-code-skeleton-2", className: "h-4 w-[68%]" },
+  { id: "playground-code-skeleton-3", className: "h-4 w-[92%]" },
+  { id: "playground-code-skeleton-4", className: "h-4 w-[68%]" },
+  { id: "playground-code-skeleton-5", className: "h-4 w-[92%]" },
+  { id: "playground-code-skeleton-6", className: "h-4 w-[68%]" },
+  { id: "playground-code-skeleton-7", className: "h-4 w-[92%]" },
+  { id: "playground-code-skeleton-8", className: "h-4 w-[68%]" },
+];
+
 export function ApiPlaygroundShellSkeleton() {
   return (
     <div className="flex h-full min-h-0 w-full flex-col overflow-hidden">
@@ -35,8 +52,8 @@ export function ApiPlaygroundShellSkeleton() {
               <div className="space-y-3">
                 <SkeletonBlock className="h-6 w-32" />
                 <div className="space-y-4">
-                  {Array.from({ length: 4 }, (_, index) => (
-                    <div key={`playground-field-skeleton-${index + 1}`} className="space-y-2">
+                  {FIELD_SKELETON_IDS.map((id) => (
+                    <div key={id} className="space-y-2">
                       <SkeletonBlock className="h-4 w-28" />
                       <SkeletonBlock className="h-11 w-full" />
                     </div>
@@ -52,11 +69,8 @@ export function ApiPlaygroundShellSkeleton() {
             <SkeletonBlock className="mb-4 h-11 w-full rounded-full" />
             <div className="flex min-h-[360px] flex-1 flex-col overflow-hidden rounded-[8px] border border-[rgba(28,28,29,0.1)] bg-[rgba(28,28,29,0.03)]">
               <div className="flex-1 space-y-4 px-4 py-5">
-                {Array.from({ length: 8 }, (_, index) => (
-                  <SkeletonBlock
-                    key={`playground-code-skeleton-${index + 1}`}
-                    className={index % 2 === 0 ? "h-4 w-[92%]" : "h-4 w-[68%]"}
-                  />
+                {CODE_SKELETONS.map((skeleton) => (
+                  <SkeletonBlock key={skeleton.id} className={skeleton.className} />
                 ))}
               </div>
               <div className="border-t border-[rgba(28,28,29,0.1)] px-4 py-3">

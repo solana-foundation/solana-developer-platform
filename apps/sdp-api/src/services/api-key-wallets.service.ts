@@ -1,5 +1,5 @@
-import type { PreparedStatement } from "@/db";
 import type { Permission } from "@sdp/types";
+import type { PreparedStatement } from "@/db";
 
 export interface ApiKeyWalletBinding {
   walletId: string;

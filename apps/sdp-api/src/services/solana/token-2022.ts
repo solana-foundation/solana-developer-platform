@@ -5,23 +5,20 @@
  * Uses Mosaic SDK transaction builders for mint creation and management.
  */
 
-import { parseDecimalAmount } from "@/lib/amount";
-import type { FeePaymentPort } from "@/services/ports";
-import type { Env } from "@/types/env";
 import type { TokenExtensionsConfig } from "@sdp/types";
 import {
   type Address,
-  type Rpc,
-  type Signature,
-  type SolanaRpcApi,
-  type TransactionSigner,
   assertIsAddress,
   compileTransaction,
   createNoopSigner,
   generateKeyPairSigner,
   getBase64EncodedWireTransaction,
   getTransactionEncoder,
+  type Rpc,
+  type Signature,
+  type SolanaRpcApi,
   signTransactionMessageWithSigners,
+  type TransactionSigner,
 } from "@solana/kit";
 import type { FullTransaction } from "@solana/mosaic-sdk";
 import {
@@ -33,10 +30,13 @@ import {
   resolveTokenAccount,
 } from "@solana/mosaic-sdk";
 import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
+import { parseDecimalAmount } from "@/lib/amount";
+import type { FeePaymentPort } from "@/services/ports";
+import type { Env } from "@/types/env";
 import {
-  type SimulationResult,
   confirmTransaction,
   createRpcForSdk,
+  type SimulationResult,
   simulateTransaction,
 } from "./rpc";
 import { safeStringify } from "./token-2022.utils";
@@ -210,14 +210,14 @@ export class Token2022Service {
       transferFeeAuthority: transferFee
         ? toAddress(
             transferFee.transferFeeConfigAuthority,
-            // biome-ignore lint/nursery/noSecrets: Not a secret, used as an error path label.
+            // biome-ignore lint/security/noSecrets: Not a secret, used as an error path label.
             "extensions.transferFee.transferFeeConfigAuthority"
           )
         : undefined,
       withdrawWithheldAuthority: transferFee
         ? toAddress(
             transferFee.withdrawWithheldAuthority,
-            // biome-ignore lint/nursery/noSecrets: Not a secret, used as an error path label.
+            // biome-ignore lint/security/noSecrets: Not a secret, used as an error path label.
             "extensions.transferFee.withdrawWithheldAuthority"
           )
         : undefined,

@@ -1,4 +1,4 @@
-// biome-ignore lint/nursery/noSecrets: JSON-RPC method name, not a secret.
+// biome-ignore lint/security/noSecrets: JSON-RPC method name, not a secret.
 const GET_LATEST_BLOCKHASH_METHOD = "getLatestBlockhash";
 
 const PROVIDERS = [

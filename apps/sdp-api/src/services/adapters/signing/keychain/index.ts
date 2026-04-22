@@ -14,16 +14,6 @@
  * - DFNS: Hosted wallets via DFNS API
  */
 
-// Types
-export type {
-  KeychainCoinbaseConfig,
-  KeychainDfnsConfig,
-  KeychainFireblocksConfig,
-  KeychainParaConfig,
-  KeychainPrivyConfig,
-  KeychainTurnkeyConfig,
-} from "./types";
-
 // Adapters
 export { BaseKeychainAdapter } from "./base-keychain.adapter";
 export { KeychainCoinbaseAdapter } from "./keychain-coinbase.adapter";
@@ -33,3 +23,12 @@ export { KeychainMemoryAdapter } from "./keychain-memory.adapter";
 export { KeychainParaAdapter } from "./keychain-para.adapter";
 export { KeychainPrivyAdapter } from "./keychain-privy.adapter";
 export { KeychainTurnkeyAdapter } from "./keychain-turnkey.adapter";
+// Types
+export type {
+  KeychainCoinbaseConfig,
+  KeychainDfnsConfig,
+  KeychainFireblocksConfig,
+  KeychainParaConfig,
+  KeychainPrivyConfig,
+  KeychainTurnkeyConfig,
+} from "./types";

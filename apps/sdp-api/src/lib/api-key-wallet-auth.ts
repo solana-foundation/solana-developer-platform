@@ -1,6 +1,6 @@
+import type { ApiKeyWalletBinding, Permission } from "@sdp/types";
 import type { ApiKeyContext } from "@/lib/auth";
 import { AppError } from "@/lib/errors";
-import type { ApiKeyWalletBinding, Permission } from "@sdp/types";
 
 function normalizeBindings(auth: ApiKeyContext): ApiKeyWalletBinding[] {
   if (auth.walletBindings.length > 0) {

@@ -1,14 +1,14 @@
 "use client";
 
+import { Badge } from "@solana/design-system/badge";
+import { Clock3, Copy, Loader2, Play, Sparkles } from "lucide-react";
+import type { ComponentProps, CSSProperties, ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useDashboardUrlState } from "@/lib/dashboard-url-state";
 import { normalizeApiKeyInput } from "@/lib/playground-api-keys";
 import { cn } from "@/lib/utils";
-import { Badge } from "@solana/design-system/badge";
-import { Clock3, Copy, Loader2, Play, Sparkles } from "lucide-react";
-import type { CSSProperties, ComponentProps, ReactNode } from "react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 export type ApiPlaygroundMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
@@ -462,13 +462,7 @@ function getShikiModule() {
   return shikiModulePromise;
 }
 
-function CodeBlockContent({
-  content,
-  language,
-}: {
-  content: string;
-  language: HighlightLanguage;
-}) {
+function CodeBlockContent({ content, language }: { content: string; language: HighlightLanguage }) {
   const [renderedHtml, setRenderedHtml] = useState<string>("");
 
   useEffect(() => {
@@ -959,12 +953,17 @@ export function ApiPlaygroundShell({
                   boxShadow: "inset 0 1px 0 var(--code-block-header-border)",
                 }}
               >
-                <span className="text-text-low">Status:</span>
-                <Badge variant={statusToneVariant}>{statusLabel}</Badge>
+                <span className="leading-none text-text-low">Status:</span>
+                <Badge
+                  className="h-6 whitespace-nowrap px-2.5 leading-none"
+                  variant={statusToneVariant}
+                >
+                  {statusLabel}
+                </Badge>
                 {executionResult ? (
-                  <Badge className="gap-1">
-                    <Clock3 className="h-3 w-3" />
-                    {executionResult.durationMs}ms
+                  <Badge className="h-6 whitespace-nowrap px-2.5 leading-none [&>span]:inline-flex [&>span]:items-center [&>span]:gap-1.5 [&>span]:leading-none">
+                    <Clock3 className="inline-block size-3 shrink-0" aria-hidden="true" />
+                    <span className="tabular-nums">{executionResult.durationMs}ms</span>
                   </Badge>
                 ) : null}
               </div>

@@ -1,6 +1,10 @@
+import { auth, clerkClient } from "@clerk/nextjs/server";
+import type { CustodyConfigSummary, CustodyWalletSummary } from "@sdp/types";
+import { redirect } from "next/navigation";
+import { Suspense } from "react";
 import {
-  type KnownCustodyProvider,
   isKnownCustodyProvider,
+  type KnownCustodyProvider,
 } from "@/app/dashboard/custody/provider-catalog";
 import {
   fetchActiveApiKeys,
@@ -14,11 +18,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { fetchOrganizationProviderAccess } from "@/lib/organization-provider-access";
 import { createTimedTrace } from "@/lib/request-tracing";
-import { type SdpApiClient, createSdpApiClient } from "@/lib/sdp-api";
-import { auth, clerkClient } from "@clerk/nextjs/server";
-import type { CustodyConfigSummary, CustodyWalletSummary } from "@sdp/types";
-import { redirect } from "next/navigation";
-import { Suspense } from "react";
+import { createSdpApiClient, type SdpApiClient } from "@/lib/sdp-api";
 import type { OnboardingStatusResponse } from "../onboarding-status";
 import { WalletsWorkspace } from "./wallets-workspace";
 
@@ -55,7 +55,7 @@ async function getCustodyConfigs(
 async function getCustodyWallets(
   request: SdpApiClient["request"]
 ): Promise<CustodyWalletSummary[]> {
-  // biome-ignore lint/nursery/noSecrets: Public API path with query flags for wallet listing.
+  // biome-ignore lint/security/noSecrets: Public API path with query flags for wallet listing.
   const res = await request("/v1/wallets?includeAllProviders=true&includeBalances=true");
   if (!res.ok) {
     const body = await res.text();

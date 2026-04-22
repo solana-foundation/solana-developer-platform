@@ -1,10 +1,10 @@
 "use client";
 
+import { createContext, type ReactNode, useCallback, useContext, useMemo, useState } from "react";
+import { SWRConfig } from "swr";
 import type { DashboardAccess } from "@/lib/dashboard-access";
 import { DASHBOARD_SWR_CONFIG } from "@/lib/dashboard-swr-config";
 import { useDashboardUrlState } from "@/lib/dashboard-url-state";
-import { type ReactNode, createContext, useCallback, useContext, useMemo, useState } from "react";
-import { SWRConfig } from "swr";
 
 export type IssuanceWorkspaceTab = "tokens" | "playground";
 
@@ -141,7 +141,7 @@ export function useDashboardWorkspace() {
   const context = useContext(DashboardWorkspaceContext);
 
   if (!context) {
-    // biome-ignore lint/nursery/noSecrets: This is a React hook guard message, not a secret.
+    // biome-ignore lint/security/noSecrets: This is a React hook guard message, not a secret.
     throw new Error("useDashboardWorkspace must be used within a DashboardWorkspaceProvider");
   }
 

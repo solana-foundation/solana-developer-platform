@@ -10,21 +10,21 @@
  * and SolanaSigner extends TransactionPartialSigner.
  */
 
-import type { GeneratedKeypair } from "@/services/ports";
-import { SigningError } from "@/services/ports";
 import { getBase58Codec } from "@solana/codecs";
 import type { SolanaSigner } from "@solana/keychain-core";
 import {
   type Address,
+  createKeyPairSignerFromBytes,
+  generateKeyPairSigner,
   type KeyPairSigner,
   type SignableMessage,
   type SignatureDictionary,
   type Transaction,
-  type TransactionWithLifetime,
   type TransactionWithinSizeLimit,
-  createKeyPairSignerFromBytes,
-  generateKeyPairSigner,
+  type TransactionWithLifetime,
 } from "@solana/kit";
+import type { GeneratedKeypair } from "@/services/ports";
+import { SigningError } from "@/services/ports";
 import { BaseKeychainAdapter } from "./base-keychain.adapter";
 
 const base58 = getBase58Codec();

@@ -1,12 +1,12 @@
 "use client";
 
+import { useMemo } from "react";
 import { ApiPlaygroundShell } from "@/components/api-playground-shell";
 import { PlaygroundApiKeySelector } from "@/components/playground-api-key-selector";
-import { useMemo } from "react";
 import {
+  buildPaymentsPlaygroundEndpointConfigs,
   type PaymentsPlaygroundTransferView,
   type PaymentsPlaygroundWalletView,
-  buildPaymentsPlaygroundEndpointConfigs,
 } from "./payments-playground-config";
 
 interface PaymentsPlaygroundProps {

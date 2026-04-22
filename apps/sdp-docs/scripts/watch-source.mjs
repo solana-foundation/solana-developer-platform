@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { watch } from "node:fs";
 import { resolve } from "node:path";
-import { start } from "fumadocs-mdx/next";
+import { postInstall } from "fumadocs-mdx/next";
 
 const run = (command, args) =>
   new Promise((resolvePromise, rejectPromise) => {
@@ -20,58 +20,68 @@ const run = (command, args) =>
     });
   });
 
-let isPatching = false;
-let patchQueued = false;
-let patchTimer;
+let isRegenerating = false;
+let regenerateQueued = false;
+let regenerateTimer;
 
-const schedulePatch = () => {
-  patchQueued = true;
-  clearTimeout(patchTimer);
-  patchTimer = setTimeout(() => {
-    void flushPatch();
+const scheduleRegenerate = () => {
+  regenerateQueued = true;
+  clearTimeout(regenerateTimer);
+  regenerateTimer = setTimeout(() => {
+    void flushRegenerate();
   }, 40);
 };
 
-const flushPatch = async () => {
-  if (!patchQueued || isPatching) {
+const flushRegenerate = async () => {
+  if (!regenerateQueued || isRegenerating) {
     return;
   }
 
-  patchQueued = false;
-  isPatching = true;
+  regenerateQueued = false;
+  isRegenerating = true;
 
   try {
+    await postInstall({ configPath: "source.config.ts", outDir: ".source" });
     await run("node", ["scripts/patch-fumadocs-source.mjs"]);
     await run("pnpm", ["generate:ai"]);
   } catch (error) {
-    console.error("[MDX] failed to patch generated source");
+    console.error("[MDX] failed to regenerate source");
     console.error(error);
   } finally {
-    isPatching = false;
-    if (patchQueued) {
-      void flushPatch();
+    isRegenerating = false;
+    if (regenerateQueued) {
+      void flushRegenerate();
     }
   }
 };
 
-await start(true, "source.config.ts", ".source");
-await run("node", ["scripts/patch-fumadocs-source.mjs"]);
+regenerateQueued = true;
+await flushRegenerate();
 
-const sourceDirWatcher = watch(resolve(".source"), (eventType, fileName) => {
-  if (eventType !== "change" && eventType !== "rename") {
-    return;
-  }
-  if (fileName && fileName !== "index.ts") {
-    return;
-  }
-  schedulePatch();
+const sourceConfigWatcher = watch(resolve("source.config.ts"), () => {
+  scheduleRegenerate();
 });
+
+const contentWatcher = watch(
+  resolve("content/docs"),
+  { recursive: true },
+  (eventType, fileName) => {
+    if (eventType !== "change" && eventType !== "rename") {
+      return;
+    }
+    if (fileName && !/\.(md|mdx|json|ya?ml)$/.test(fileName)) {
+      return;
+    }
+    scheduleRegenerate();
+  }
+);
 
 console.log("[MDX] source watcher active");
 
 const shutdown = () => {
-  clearTimeout(patchTimer);
-  sourceDirWatcher.close();
+  clearTimeout(regenerateTimer);
+  sourceConfigWatcher.close();
+  contentWatcher.close();
   process.exit(0);
 };
 

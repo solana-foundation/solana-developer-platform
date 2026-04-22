@@ -5,17 +5,17 @@
  * using the modern @solana/kit.
  */
 
-import { getSolanaConfig } from "@/lib/solana";
-import type { Env } from "@/types/env";
 import {
   type Address,
   type Base64EncodedWireTransaction,
   type Blockhash,
   type Commitment,
-  type Signature,
   createSolanaRpc,
   createSolanaRpcSubscriptions,
+  type Signature,
 } from "@solana/kit";
+import { getSolanaConfig } from "@/lib/solana";
+import type { Env } from "@/types/env";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Types
@@ -557,4 +557,4 @@ export async function getSignatureStatuses(
 }
 
 // Re-export types
-export type { Commitment, Signature, Blockhash };
+export type { Blockhash, Commitment, Signature };

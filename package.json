@@ -1,6 +1,6 @@
 {
   "name": "solana-developer-platform",
-  "version": "0.16.4",
+  "version": "0.17.1",
   "private": true,
   "packageManager": "pnpm@10.15.1",
   "engines": {
@@ -12,9 +12,6 @@
       "allowedVersions": {
         "@solana/kit": "^6.5.0"
       }
-    },
-    "overrides": {
-      "@vercel/microfrontends@2.0.1>path-to-regexp@6.2.1": "6.3.0"
     }
   },
   "scripts": {
@@ -50,16 +47,19 @@
     "kora:devnet:test": "pnpm --filter @sdp/api-integration test -- src/tests/kora.test.ts"
   },
   "devDependencies": {
-    "@biomejs/biome": "^1.9.0",
+    "@biomejs/biome": "^2.4.11",
     "turbo": "^2.4.0",
-    "typescript": "^5.8.0"
+    "typescript": "^6.0.2"
   },
   "overrides": {
     "@solana/rpc-spec": "6.5.0",
     "@solana/kit": "6.5.0"
   },
   "workspaces": {
-    "packages": ["apps/*", "packages/*"],
+    "packages": [
+      "apps/*",
+      "packages/*"
+    ],
     "catalog": {
       "@solana-program/system": "^0.12.0",
       "@solana-program/token-2022": "^0.9.0",

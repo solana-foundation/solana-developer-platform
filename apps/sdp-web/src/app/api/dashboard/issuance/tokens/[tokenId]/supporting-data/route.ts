@@ -1,8 +1,8 @@
+import type { FrozenAccount, TokenAllowlistEntry, TokenTransaction } from "@sdp/types";
+import { NextResponse } from "next/server";
 import { fetchPaymentsWallets } from "@/app/dashboard/payments/payments-page.data";
 import { createTimedTrace, logRouteResult } from "@/lib/request-tracing";
 import { createSdpApiClient } from "@/lib/sdp-api";
-import type { FrozenAccount, TokenAllowlistEntry, TokenTransaction } from "@sdp/types";
-import { NextResponse } from "next/server";
 
 interface PaginatedMeta {
   total?: number;

@@ -1,6 +1,5 @@
 "use client";
 
-import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
 import type {
   PaymentTransferSummary as TransferRecord,
   PaymentWalletPolicy as WalletPolicy,
@@ -8,6 +7,7 @@ import type {
 } from "@sdp/types";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
 import {
   createTransfer,
   fetchTransfers,

@@ -1,13 +1,13 @@
 "use client";
 
-import { ApiPlaygroundShellSkeleton } from "@/components/api-playground-shell-skeleton";
-import { Button } from "@/components/ui/button";
-import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
-import { getStoredApiKeySecret } from "@/lib/playground-api-keys";
 import type { CustodyWalletSummary } from "@sdp/types";
 import { AnimatePresence, motion } from "motion/react";
 import dynamic from "next/dynamic";
 import { useEffect, useMemo, useState } from "react";
+import { ApiPlaygroundShellSkeleton } from "@/components/api-playground-shell-skeleton";
+import { Button } from "@/components/ui/button";
+import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
+import { getStoredApiKeySecret } from "@/lib/playground-api-keys";
 import type { KnownCustodyProvider } from "./provider-catalog";
 import { WalletProvisionModal } from "./wallet-provision-modal";
 import { WalletsOverview } from "./wallets-overview";
@@ -65,7 +65,7 @@ export function WalletsWorkspace({
       void import("./wallets-playground");
     };
 
-    // biome-ignore lint/nursery/noSecrets: requestIdleCallback is a browser API, not a secret.
+    // biome-ignore lint/security/noSecrets: requestIdleCallback is a browser API, not a secret.
     if (typeof window !== "undefined" && "requestIdleCallback" in window) {
       const idleId = window.requestIdleCallback(preloadPlayground);
       return () => window.cancelIdleCallback(idleId);

@@ -1,11 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { OrganizationTier, PaymentsDashboardWallet } from "@sdp/types";
-import { getTransferSolInstruction } from "@solana-program/system";
 import {
   type Address,
-  type Blockhash,
   appendTransactionMessageInstructions,
+  type Blockhash,
   compileTransaction,
   createNoopSigner,
   createTransactionMessage,
@@ -16,9 +15,10 @@ import {
   setTransactionMessageLifetimeUsingBlockhash,
 } from "@solana/kit";
 import { KoraClient } from "@solana/kora";
+import { getTransferSolInstruction } from "@solana-program/system";
 import { Client } from "pg";
 import { type ClerkTestIdentity, setClerkOrganizationTier } from "./clerk-admin";
-import { type LocalApiClient, createLocalApiClient } from "./local-api-client";
+import { createLocalApiClient, type LocalApiClient } from "./local-api-client";
 
 const PLAYWRIGHT_LOCAL_ORG_ID_PREFIX = "org_e2e_dashboard";
 const PLAYWRIGHT_LOCAL_ORG_NAME_PREFIX = "E2E Dashboard Org";
@@ -289,7 +289,7 @@ async function clearPlaywrightOrganizations(
 }
 
 async function listWallets(api: LocalApiClient): Promise<PaymentsDashboardWallet[]> {
-  // biome-ignore lint/nursery/noSecrets: Local API path with query params for wallet listing.
+  // biome-ignore lint/security/noSecrets: Local API path with query params for wallet listing.
   const data = await api.get<ListWalletsResponse>("/v1/wallets?includeAllProviders=true");
   return data.wallets;
 }
@@ -346,7 +346,7 @@ async function getLatestBlockhash(api: LocalApiClient): Promise<{
   const response = await api.post<RpcRelayResponse>("/v1/rpc/proxy", {
     jsonrpc: "2.0",
     id: "wallet-latest-blockhash",
-    // biome-ignore lint/nursery/noSecrets: Solana RPC method name, not a credential.
+    // biome-ignore lint/security/noSecrets: Solana RPC method name, not a credential.
     method: "getLatestBlockhash",
     params: [{ commitment: "confirmed" }],
   });
@@ -375,7 +375,7 @@ async function getMinimumBalanceForRentExemption(api: LocalApiClient): Promise<b
   const response = await api.post<RpcRelayResponse>("/v1/rpc/proxy", {
     jsonrpc: "2.0",
     id: "wallet-rent-exemption",
-    // biome-ignore lint/nursery/noSecrets: Solana RPC method name, not a credential.
+    // biome-ignore lint/security/noSecrets: Solana RPC method name, not a credential.
     method: "getMinimumBalanceForRentExemption",
     params: [0],
   });

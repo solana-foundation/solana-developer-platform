@@ -2,13 +2,13 @@
  * OpenAPI Spec Route
  */
 
-import { createOpenApiDocument } from "@/openapi/spec";
-import type { Env } from "@/types/env";
 import { Hono } from "hono";
+import { createPublicOpenApiDocument } from "@/openapi/spec";
+import type { Env } from "@/types/env";
 
 const openapi = new Hono<{ Bindings: Env }>();
 
-const document = createOpenApiDocument();
+const document = createPublicOpenApiDocument();
 
 openapi.get("/", (c) => {
   c.header("Cache-Control", "public, max-age=300");

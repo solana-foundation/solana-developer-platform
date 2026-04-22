@@ -1,9 +1,9 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SigningConfigRecord } from "@/services/adapters";
 import { provisionCoinbaseCdpAccount, provisionPrivyWallet } from "@/services/custody/provisioning";
 import { type SigningRequestStore, SigningService } from "@/services/domain/signing.service";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
-import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/services/custody/provisioning", () => ({
   provisionCoinbaseCdpAccount: vi.fn(),

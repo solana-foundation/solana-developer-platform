@@ -5,6 +5,9 @@
  * Handles DB-backed config resolution (project default → org default) and async signing flows.
  */
 
+import { getBase58Codec } from "@solana/codecs";
+import type { Address, KeyPairSigner, TransactionSigner } from "@solana/kit";
+import { createKeyPairSignerFromPrivateKeyBytes } from "@solana/signers";
 import { getDb } from "@/db";
 import { AppError } from "@/lib/errors";
 import {
@@ -33,8 +36,8 @@ import {
   type LocalProviderConfig,
   type ParaProviderConfig,
   type PrivyProviderConfig,
-  type TurnkeyProviderConfig,
   parseConfigRecord,
+  type TurnkeyProviderConfig,
 } from "@/services/domain/signing/provider-config";
 import {
   normalizeAnchorageWalletId,
@@ -47,10 +50,10 @@ import {
   createProviderWallet,
   deleteProviderWallet,
 } from "@/services/domain/signing/provider-wallet-lifecycle";
-import { type EncryptionService, createEncryptionService } from "@/services/encryption.service";
+import { createEncryptionService, type EncryptionService } from "@/services/encryption.service";
 import { assertOrganizationProviderEnabled } from "@/services/organization-provider-access.service";
-import { SigningError, isFullSigningPort } from "@/services/ports";
-import type { SignRequest, SignResult, SignStatus, SigningPort } from "@/services/ports";
+import type { SigningPort, SignRequest, SignResult, SignStatus } from "@/services/ports";
+import { isFullSigningPort, SigningError } from "@/services/ports";
 import {
   CustodyConfigStore,
   type CustodyWallet,
@@ -59,9 +62,6 @@ import {
   type WalletPurpose,
 } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
-import { getBase58Codec } from "@solana/codecs";
-import type { Address, KeyPairSigner, TransactionSigner } from "@solana/kit";
-import { createKeyPairSignerFromPrivateKeyBytes } from "@solana/signers";
 
 export { createAdapterFromEncryptedConfig };
 

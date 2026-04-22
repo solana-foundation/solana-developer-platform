@@ -3,15 +3,15 @@ import { AppError } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import { clearWalletCaches } from "@/routes/custody/handlers/wallets";
 import { AuditService } from "@/services/audit.service";
-import { CUSTODY_PROVIDERS } from "@/services/custody/providers";
 import type { CustodyProvider } from "@/services/custody/providers";
+import { CUSTODY_PROVIDERS } from "@/services/custody/providers";
 import { provisionFireblocksVaultAccount } from "@/services/custody/provisioning";
 import { normalizePem } from "@/services/custody/provisioning.common";
-import { createSigningService } from "@/services/domain/signing.service";
 import {
   type FireblocksProviderConfig,
   parseConfigRecord,
 } from "@/services/domain/signing/provider-config";
+import { createSigningService } from "@/services/domain/signing.service";
 import {
   assertOrganizationProviderEnabled,
   getEnabledOrganizationProviders,
@@ -21,9 +21,9 @@ import { type AppContext, getPreferredWalletForConfig, resolveActor } from "../c
 import {
   type InitializeSigningRequest,
   type InitializeSigningResponse,
+  initializeSigningSchema,
   type SwitchProviderOptionsResponse,
   type SwitchSigningRequest,
-  initializeSigningSchema,
   switchSigningSchema,
 } from "../schemas";
 

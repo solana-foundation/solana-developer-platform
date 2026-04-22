@@ -1,6 +1,3 @@
-import { AppError } from "@/lib/errors";
-import { getOrganizationProviderAvailability } from "@/services/organization-provider-access.service";
-import type { Env } from "@/types/env";
 import {
   ORGANIZATION_RPC_PROVIDERS,
   type OrganizationRpcProvider,
@@ -9,6 +6,9 @@ import {
   type ProjectRpcProvider,
   type ProjectSettings,
 } from "@sdp/types";
+import { AppError } from "@/lib/errors";
+import { getOrganizationProviderAvailability } from "@/services/organization-provider-access.service";
+import type { Env } from "@/types/env";
 
 export type ManagedRpcProviderId = OrganizationRpcProvider;
 export type ResolvedRpcProviderId = ManagedRpcProviderId | "custom";

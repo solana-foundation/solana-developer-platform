@@ -1,11 +1,8 @@
 "use client";
 
-import { IssuanceHeaderTabs } from "@/components/issuance-header-tabs";
-import { SentryFeedbackWidget } from "@/components/sentry-feedback-widget";
-import { SentryUserContext } from "@/components/sentry-user-context";
-import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { OrganizationSwitcher, SignInButton, UserButton, useAuth } from "@clerk/nextjs";
 import { DEFAULT_SDP_DOCS_URL } from "@sdp/types";
+import type { LucideIcon } from "lucide-react";
 import {
   ArrowLeft,
   ArrowLeftRight,
@@ -18,11 +15,14 @@ import {
   Settings2,
   Wallet,
 } from "lucide-react";
-import type { LucideIcon } from "lucide-react";
 import { motion } from "motion/react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { type ReactNode, useEffect, useRef, useState } from "react";
+import { IssuanceHeaderTabs } from "@/components/issuance-header-tabs";
+import { SentryFeedbackWidget } from "@/components/sentry-feedback-widget";
+import { SentryUserContext } from "@/components/sentry-user-context";
+import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 
 type NavItem = {
   label: string;
@@ -192,7 +192,7 @@ function DashboardTopBar({
           </h1>
         </div>
         <div className="flex items-center justify-end gap-2">
-          <UserButton afterSignOutUrl="/sign-in" />
+          <UserButton />
         </div>
       </div>
     );
@@ -215,7 +215,7 @@ function DashboardTopBar({
       </div>
 
       <div className="flex items-center gap-2">
-        <UserButton afterSignOutUrl="/sign-in" />
+        <UserButton />
       </div>
     </div>
   );

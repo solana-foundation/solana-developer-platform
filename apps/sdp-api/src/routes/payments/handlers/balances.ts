@@ -1,15 +1,15 @@
+import type { Address } from "@solana/kit";
 import { formatDecimalAmount } from "@/lib/amount";
 import { AppError } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { attachUsdValuesToBalances } from "@/services/helius-das.service";
 import * as solanaRpc from "@/services/solana/rpc";
-import type { Address } from "@solana/kit";
 import { type AppContext, getPaymentsRepository } from "../context";
 import {
+  buildWalletPolicyPayload,
   DESTINATION_ALLOWLIST_POLICY_TYPE,
   PAYMENT_POLICY_VERSION,
   TRANSFER_LIMITS_POLICY_TYPE,
-  buildWalletPolicyPayload,
 } from "../policy";
 import { updateWalletPolicySchema } from "../schemas";
 import * as tokenAccounts from "../token-accounts";

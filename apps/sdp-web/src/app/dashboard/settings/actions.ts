@@ -1,7 +1,7 @@
 "use server";
 
-import { sdpApiFetch } from "@/lib/sdp-api";
 import { ORGANIZATION_RPC_PROVIDERS, type OrganizationRpcProvider } from "@sdp/types";
+import { sdpApiFetch } from "@/lib/sdp-api";
 
 type OrganizationSettings = {
   rpcProvider?: OrganizationRpcProvider;

@@ -1,15 +1,15 @@
+import { AuthorityType } from "@solana-program/token-2022";
+import type { Context } from "hono";
 import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
 import { AppError, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { assertValidAddress } from "@/lib/solana";
 import { AuditService } from "@/services/audit.service";
-import { type MosaicService, createMosaicService } from "@/services/mosaic";
+import { createMosaicService, type MosaicService } from "@/services/mosaic";
 import { createRpc, simulateTransaction } from "@/services/solana/rpc";
 import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
-import { AuthorityType } from "@solana-program/token-2022";
-import type { Context } from "hono";
 import { updateAuthoritySchema } from "../schemas";
 import {
   type AuthorityRole,

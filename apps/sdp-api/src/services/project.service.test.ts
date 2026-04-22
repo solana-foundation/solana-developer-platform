@@ -2,12 +2,12 @@
  * Project Service Unit Tests
  */
 
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { ProjectService } from "@/services/project.service";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 describe("ProjectService", () => {
   let projectService: ProjectService;

@@ -1,6 +1,6 @@
+import { describe, expect, it } from "vitest";
 import type { ApiKeyContext } from "@/lib/auth";
 import { AppError } from "@/lib/errors";
-import { describe, expect, it } from "vitest";
 import {
   assertApiKeyWalletAccess,
   filterApiKeyWallets,

@@ -5,6 +5,12 @@
  * and sets a Clerk auth context for downstream handlers.
  */
 
+import {
+  getPermissionsForOrgRole,
+  normalizeOrganizationRole,
+  type OrganizationRole,
+} from "@sdp/types";
+import type { Context, Next } from "hono";
 import { getDb } from "@/db";
 import { mapClerkRoleToOrgRole } from "@/lib/clerk-role";
 import {
@@ -15,12 +21,6 @@ import {
 } from "@/lib/clerk-token";
 import { AppError, unauthorized } from "@/lib/errors";
 import type { Env } from "@/types/env";
-import {
-  type OrganizationRole,
-  getPermissionsForOrgRole,
-  normalizeOrganizationRole,
-} from "@sdp/types";
-import type { Context, Next } from "hono";
 
 async function resolveClerkUser(db: DatabaseClient, clerkUserId: string) {
   return db

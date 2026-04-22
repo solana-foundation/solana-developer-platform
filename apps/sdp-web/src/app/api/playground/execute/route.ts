@@ -1,6 +1,6 @@
+import { NextResponse } from "next/server";
 import { createTimedTrace, logRouteResult } from "@/lib/request-tracing";
 import { sdpApiRequest } from "@/lib/sdp-api";
-import { NextResponse } from "next/server";
 
 type PlaygroundMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 

@@ -1,9 +1,9 @@
-import type { SdpApiClient } from "@/lib/sdp-api";
 import type {
   CustodyWalletAggregate,
-  PaymentTransferSummary,
   PaymentsDashboardWallet,
+  PaymentTransferSummary,
 } from "@sdp/types";
+import type { SdpApiClient } from "@/lib/sdp-api";
 
 export interface FetchResult<T> {
   ok: boolean;
