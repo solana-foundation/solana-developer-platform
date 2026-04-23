@@ -1,5 +1,9 @@
 # Doppler Secrets Operations
 
+⚠️ **Maintainers Only** — This guide covers secret management and CI/CD configuration.
+
+---
+
 SDP now treats Doppler as the single source of truth for secret and environment-owned string configuration.
 
 The runtime model does not change:
