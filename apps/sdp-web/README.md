@@ -160,6 +160,7 @@ Example:
 
 ```typescript
 // app/dashboard/users/page.tsx
+"use client";
 import { useAuth } from "@clerk/nextjs";
 
 export default function UsersPage() {
@@ -168,12 +169,9 @@ export default function UsersPage() {
   if (!isLoaded) return <div>Loading...</div>;
   if (!isSignedIn) return <div>Not authenticated</div>;
 
-  // Fetch from BFF
-  const response = await fetch("/api/dashboard/users", {
-    headers: { Authorization: "Bearer <clerk-token>" }
-  });
-
-  // Render page
+  // Use SWR or useEffect to fetch from the BFF:
+  // const { data } = useSWR("/api/dashboard/users", fetcher);
+  return <div>{/* render page content */}</div>;
 }
 ```
 

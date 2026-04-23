@@ -57,8 +57,7 @@ Want to contribute to the SDP codebase? Start here:
    # Copy environment template
    cp apps/sdp-api/.dev.vars.example apps/sdp-api/.dev.vars
 
-   # Edit with your Solana devnet RPC (free option)
-   SOLANA_RPC_URL=https://api.devnet.solana.com
+   # Open apps/sdp-api/.dev.vars and set SOLANA_RPC_URL=https://api.devnet.solana.com
    ```
 
 3. **Start local infrastructure**:
