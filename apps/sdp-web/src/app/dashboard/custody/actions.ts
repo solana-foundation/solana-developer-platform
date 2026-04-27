@@ -108,6 +108,12 @@ async function sdpApiFetchWithApiKey<T>(
 }
 
 export async function initializeCustody(formData: FormData) {
+  await initializeCustodyWallet(formData);
+  revalidateWalletPaths();
+  redirect("/dashboard/wallets");
+}
+
+async function initializeCustodyWallet(formData: FormData) {
   const provider = (getString(formData, "provider") || "privy") as
     | "privy"
     | "local"
@@ -168,13 +174,20 @@ export async function initializeCustody(formData: FormData) {
       throw error;
     }
   }
+}
 
+function revalidateWalletPaths() {
   revalidatePath("/dashboard/custody");
   revalidatePath("/dashboard/wallets");
-  redirect("/dashboard/wallets");
 }
 
 export async function createCustodyWallet(formData: FormData) {
+  await createCustodyWalletForProvider(formData);
+  revalidateWalletPaths();
+  redirect("/dashboard/wallets");
+}
+
+async function createCustodyWalletForProvider(formData: FormData) {
   const provider = getOptionalString(formData, "provider") as
     | "privy"
     | "local"
@@ -191,10 +204,45 @@ export async function createCustodyWallet(formData: FormData) {
     method: "POST",
     body: JSON.stringify({ provider, label }),
   });
+}
 
-  revalidatePath("/dashboard/custody");
-  revalidatePath("/dashboard/wallets");
-  redirect("/dashboard/wallets");
+export type WalletProvisionActionResult =
+  | {
+      status: "success";
+    }
+  | {
+      status: "error";
+      message: string;
+    };
+
+export async function initializeCustodyModalAction(
+  formData: FormData
+): Promise<WalletProvisionActionResult> {
+  try {
+    await initializeCustodyWallet(formData);
+    revalidateWalletPaths();
+    return { status: "success" };
+  } catch (error) {
+    return {
+      status: "error",
+      message: toApiActionErrorMessage(error),
+    };
+  }
+}
+
+export async function createCustodyWalletModalAction(
+  formData: FormData
+): Promise<WalletProvisionActionResult> {
+  try {
+    await createCustodyWalletForProvider(formData);
+    revalidateWalletPaths();
+    return { status: "success" };
+  } catch (error) {
+    return {
+      status: "error",
+      message: toApiActionErrorMessage(error),
+    };
+  }
 }
 
 export type UpdateWalletLabelActionResult =
