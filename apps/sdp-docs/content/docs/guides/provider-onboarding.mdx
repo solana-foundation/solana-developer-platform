@@ -1,0 +1,76 @@
+---
+title: Provider Onboarding
+description: Add a provider integration to SDP through the self-service contribution process.
+---
+
+SDP supports provider integrations across custody, RPC, compliance, payments, ramps, and related infrastructure. The onboarding process is self-service for the initial contribution: prepare your integration, give the Solana Foundation team access to validate it, and submit the work for review.
+
+## Onboarding steps
+
+1. Review the SDP contribution guidelines.
+2. Complete the [provider intake form](https://solana.typeform.com/to/provider-intake-placeholder). This is a placeholder link for the future Typeform intake.
+3. Provide sandbox or playground API access for the Solana Foundation team.
+4. Share provider documentation, test credentials, supported networks, rate limits, and any known sandbox limitations.
+5. Build the SDP integration with tests and docs.
+6. Open a pull request that links to the intake submission or tracking issue.
+
+The SDP maintainers target a three to five business day evaluation period after the intake is complete and enough sandbox access is available to test the provider.
+
+## Custody provider path
+
+Custody providers need to be compatible with the Solana keychain repository before they are integrated into SDP. Start by confirming your provider can support the keychain interface and Solana signing requirements. After that compatibility exists, wire the provider into SDP.
+
+An SDP custody integration usually needs:
+
+- Provider metadata and capability registration.
+- API support for initialization, wallet creation, signing, and provider-specific configuration.
+- Dashboard support for setup, wallet creation, and provider status.
+- Tests for successful setup, failure states, and disabled or missing configuration.
+- Documentation for setup requirements, sandbox behavior, and any provider-specific limits.
+
+## Access requirements
+
+Providers must give the Solana Foundation team API access to a sandbox or playground environment. Access should be suitable for repeatable testing and validation, including local development and automated checks where possible.
+
+At minimum, include:
+
+- Sandbox API keys or equivalent credentials.
+- Test accounts, wallets, or organization IDs when required.
+- Supported networks, such as Solana devnet or mainnet-beta.
+- Known rate limits, account limits, and feature flags.
+- Contact information for technical support during review.
+
+## Evaluation criteria
+
+The provider should meet the baseline criteria before it is listed, integrated, or supported in SDP.
+
+- [RPC provider criteria](#rpc-provider-criteria)
+- [Custody provider criteria](#custody-provider-criteria)
+- [Ramp provider criteria](#ramp-provider-criteria)
+- [Compliance provider criteria](#compliance-provider-criteria)
+
+- The provider has clear public or shared API documentation.
+- The provider offers stable sandbox or playground access for the Solana Foundation team.
+- The provider supports the Solana networks and transaction flows required by the integration.
+- The provider has predictable errors for invalid credentials, unsupported networks, rate limits, and unavailable services.
+- The integration can be tested without relying on production-only credentials.
+- The provider can support bug fixes, breaking-change notices, and operational incidents.
+- The SDP contribution includes tests, user-facing docs, and clear setup instructions.
+
+Providers that do not meet these criteria may still be tracked for future support, but they should not be presented as generally available in SDP until the gaps are resolved.
+
+### RPC provider criteria
+
+RPC providers should document supported Solana networks, request limits, failover behavior, archival support, and any feature gaps that affect transaction simulation, submission, confirmation, or account reads. The provider should give the Solana Foundation team sandbox or development API access that can be used for repeatable validation.
+
+### Custody provider criteria
+
+Custody providers must first be compatible with the Solana keychain repository. The provider should support Solana signing flows required by SDP, including wallet creation or wallet import where applicable, transaction signing, message signing when needed, clear approval states, and deterministic error handling for missing credentials, rejected approvals, and unsupported networks.
+
+### Ramp provider criteria
+
+Ramp providers should document supported assets, regions, KYC requirements, sandbox identity behavior, quote lifecycle, redirect or hosted-flow behavior, webhook requirements, and failure states. The provider must give the Solana Foundation team playground access that can exercise onramp and offramp flows without production funds.
+
+### Compliance provider criteria
+
+Compliance providers should document supported screening inputs, risk levels, response schema, provider-specific statuses, retry behavior, and auditability requirements. The provider should support sandbox address-screening tests and make it clear when results are simulated, incomplete, or production-only.
