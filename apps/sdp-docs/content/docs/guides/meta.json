@@ -3,6 +3,7 @@
   "pages": [
     "setup-organization",
     "setup-wallets",
+    "provider-onboarding",
     "manage-api-keys",
     "tokenize-an-asset",
     "create-a-token",

@@ -16,6 +16,7 @@
 ## Guides
 - [Set Up Your Organization](https://platform.solana.com/docs/guides/setup-organization): Create and configure your SDP organization through the dashboard.
 - [Set Up Wallets](https://platform.solana.com/docs/guides/setup-wallets): Initialize a custody provider and create wallets for signing transactions.
+- [Provider Onboarding](https://platform.solana.com/docs/guides/provider-onboarding): Add a provider integration to SDP through the self-service contribution process.
 - [Manage API Keys](https://platform.solana.com/docs/guides/manage-api-keys): Create, rotate, and revoke API keys with role-based access and environment scoping.
 - [Tokenize an Asset](https://platform.solana.com/docs/guides/tokenize-an-asset): Map a real-world tokenization use case to the right SDP template, authorities, and API flow.
 - [Create a Token](https://platform.solana.com/docs/guides/create-a-token): Define a new token using templates or custom configuration.

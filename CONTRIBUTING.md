@@ -13,6 +13,22 @@
 - Keep PRs small and focused. Link to an issue when one exists.
 - Run `pnpm check`, `pnpm test` and `pnpm test:integration` locally before pushing.
 
+## Provider Contributions
+
+SDP is designed to support provider integrations across custody, RPC, compliance, payments, ramps, and related infrastructure. Provider onboarding is self-service for the initial contribution: providers can prepare the integration, open the required access, and submit a PR for review. See the [Provider Onboarding docs](./apps/sdp-docs/content/docs/guides/provider-onboarding.mdx) for provider-type criteria covering RPC, custody, ramps, and compliance.
+
+Before opening an SDP integration PR:
+
+- Complete the [provider intake form](https://solanafoundation.typeform.com/to/gkJC0ZKq).
+- Give the Solana Foundation team API access to your sandbox or playground environment so we can test and validate the integration.
+- Share enough sandbox credentials, test accounts, supported networks, rate limits, and provider documentation for maintainers to reproduce the integration locally and in CI.
+- Confirm that the provider service is suitable for devnet or sandbox testing, and document any mainnet-only behavior.
+- Confirm support expectations for integration review, bug fixes, incidents, and breaking API changes.
+
+Custody providers have one additional prerequisite: first make sure your provider is compatible with the Solana keychain repository. After keychain compatibility exists, integrate the provider into SDP by wiring the custody provider registry, dashboard setup flow, API routes, generated docs, and tests.
+
+After intake is submitted, the SDP maintainers target a three to five business day evaluation period. Evaluation includes fit for SDP, sandbox access, API quality, Solana compatibility, security posture, operational readiness, and whether the contribution has enough tests and docs to support users.
+
 ## Security
 
 For security vulnerabilities related to code on `main`, please do NOT open an issue — follow [SECURITY.md](./SECURITY.md).

@@ -53,6 +53,7 @@ const KEY_PAGE_SLUGS = [
   "getting-started",
   "guides/setup-organization",
   "guides/setup-wallets",
+  "guides/provider-onboarding",
   "guides/manage-api-keys",
   "guides/tokenize-an-asset",
   "guides/create-a-token",
