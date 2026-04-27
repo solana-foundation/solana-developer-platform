@@ -107,16 +107,7 @@ async function sdpApiFetchWithApiKey<T>(
   return json as T;
 }
 
-export type CustodyWalletMutationResult =
-  | {
-      status: "success";
-    }
-  | {
-      status: "error";
-      message: string;
-    };
-
-async function initializeCustodyFromFormData(formData: FormData) {
+export async function initializeCustody(formData: FormData) {
   const provider = (getString(formData, "provider") || "privy") as
     | "privy"
     | "local"
@@ -178,34 +169,12 @@ async function initializeCustodyFromFormData(formData: FormData) {
     }
   }
 
-  return provider;
-}
-
-export async function initializeCustody(formData: FormData) {
-  await initializeCustodyFromFormData(formData);
-
   revalidatePath("/dashboard/custody");
   revalidatePath("/dashboard/wallets");
   redirect("/dashboard/wallets");
 }
 
-export async function initializeCustodyForModal(
-  formData: FormData
-): Promise<CustodyWalletMutationResult> {
-  try {
-    await initializeCustodyFromFormData(formData);
-    revalidatePath("/dashboard/custody");
-    revalidatePath("/dashboard/wallets");
-    return { status: "success" };
-  } catch (error) {
-    return {
-      status: "error",
-      message: toApiActionErrorMessage(error),
-    };
-  }
-}
-
-async function createCustodyWalletFromFormData(formData: FormData) {
+export async function createCustodyWallet(formData: FormData) {
   const provider = getOptionalString(formData, "provider") as
     | "privy"
     | "local"
@@ -222,30 +191,10 @@ async function createCustodyWalletFromFormData(formData: FormData) {
     method: "POST",
     body: JSON.stringify({ provider, label }),
   });
-}
-
-export async function createCustodyWallet(formData: FormData) {
-  await createCustodyWalletFromFormData(formData);
 
   revalidatePath("/dashboard/custody");
   revalidatePath("/dashboard/wallets");
   redirect("/dashboard/wallets");
-}
-
-export async function createCustodyWalletForModal(
-  formData: FormData
-): Promise<CustodyWalletMutationResult> {
-  try {
-    await createCustodyWalletFromFormData(formData);
-    revalidatePath("/dashboard/custody");
-    revalidatePath("/dashboard/wallets");
-    return { status: "success" };
-  } catch (error) {
-    return {
-      status: "error",
-      message: toApiActionErrorMessage(error),
-    };
-  }
 }
 
 export type UpdateWalletLabelActionResult =
