@@ -1,8 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { useFormStatus } from "react-dom";
-import { createCustodyWallet, initializeCustody } from "@/app/dashboard/custody/actions";
+import { useRouter } from "next/navigation";
+import { type FormEvent, useEffect, useMemo, useState, useTransition } from "react";
+import {
+  createCustodyWalletModalAction,
+  initializeCustodyModalAction,
+} from "@/app/dashboard/custody/actions";
 import {
   CUSTODY_PROVIDER_CATALOG,
   formatCustodyProviderName,
@@ -44,14 +47,14 @@ function resolveInitialProvider(
 function SubmitButton({
   disabled,
   idleLabel,
+  pending,
   pendingLabel,
 }: {
   disabled: boolean;
   idleLabel: string;
+  pending: boolean;
   pendingLabel: string;
 }) {
-  const { pending } = useFormStatus();
-
   return (
     <Button type="submit" disabled={disabled || pending}>
       {pending ? pendingLabel : idleLabel}
@@ -74,6 +77,9 @@ export function WalletProvisionModal({
   enabledProviders,
   preferredProvider,
 }: WalletProvisionModalProps) {
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [selectedProvider, setSelectedProvider] = useState<KnownCustodyProvider>(
     resolveInitialProvider(preferredProvider, connectedProviders, enabledProviders)
   );
@@ -86,6 +92,7 @@ export function WalletProvisionModal({
     setSelectedProvider(
       resolveInitialProvider(preferredProvider, connectedProviders, enabledProviders)
     );
+    setErrorMessage(null);
   }, [connectedProviders, enabledProviders, isOpen, preferredProvider]);
 
   useEscapeKey(isOpen, onClose);
@@ -104,10 +111,33 @@ export function WalletProvisionModal({
   const isConnected = connectedProviderSet.has(selectedProvider);
   const supportsAdditionalWallets = selectedProviderEntry?.supportsAdditionalWallets ?? false;
   const canProvisionWallet = !isConnected || supportsAdditionalWallets;
-  const formAction = isConnected ? createCustodyWallet : initializeCustody;
+  const formAction = isConnected ? createCustodyWalletModalAction : initializeCustodyModalAction;
   const helperText = isConnected
     ? "Create an additional wallet for this active custody provider."
     : "Connect this custody provider and create its first wallet in one step.";
+
+  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    if (!canProvisionWallet || isPending) {
+      return;
+    }
+
+    const formData = new FormData(event.currentTarget);
+    setErrorMessage(null);
+
+    startTransition(async () => {
+      const result = await formAction(formData);
+
+      if (result.status === "error") {
+        setErrorMessage(result.message);
+        return;
+      }
+
+      router.refresh();
+      onClose();
+    });
+  };
 
   if (!isOpen) {
     return null;
@@ -147,7 +177,7 @@ export function WalletProvisionModal({
           </div>
         </div>
 
-        <form action={formAction} className="grid gap-5 px-6 py-6">
+        <form onSubmit={handleSubmit} className="grid gap-5 px-6 py-6">
           <div className="grid gap-2">
             <Label htmlFor="wallet-provider">Provider</Label>
             <input type="hidden" name="provider" value={selectedProvider} />
@@ -157,6 +187,7 @@ export function WalletProvisionModal({
                 value={selectedProvider}
                 onChange={(event) => {
                   setSelectedProvider(event.currentTarget.value as KnownCustodyProvider);
+                  setErrorMessage(null);
                 }}
                 className="h-12 w-full appearance-none rounded-[14px] border border-[rgba(28,28,29,0.12)] bg-white pl-11 pr-10 text-sm font-medium text-[#1c1c1d]"
               >
@@ -201,6 +232,15 @@ export function WalletProvisionModal({
             </div>
           ) : null}
 
+          {errorMessage ? (
+            <div
+              role="alert"
+              className="rounded-[16px] border border-[#c71f37]/15 bg-[#c71f37]/[0.04] px-4 py-3 text-sm text-[#8a1f2a]"
+            >
+              {errorMessage}
+            </div>
+          ) : null}
+
           <div className="flex items-center justify-end gap-2 border-t border-[rgba(28,28,29,0.08)] pt-4">
             <Button type="button" variant="secondary" onClick={onClose}>
               Cancel
@@ -208,6 +248,7 @@ export function WalletProvisionModal({
             <SubmitButton
               disabled={!canProvisionWallet}
               idleLabel="Create wallet"
+              pending={isPending}
               pendingLabel="Creating..."
             />
           </div>
