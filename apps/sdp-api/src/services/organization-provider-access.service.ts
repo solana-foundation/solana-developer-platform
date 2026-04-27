@@ -17,6 +17,7 @@ import {
   resolveOrganizationProviderEntitlements,
 } from "@sdp/types";
 import { AppError } from "@/lib/errors";
+import { isSelfHostedDeployment } from "@/lib/runtime-env";
 import type { Env } from "@/types/env";
 
 type OrganizationProviderRow = {
@@ -245,6 +246,24 @@ function getConfiguredProviders(env: Env) {
   };
 }
 
+function applySelfHostedEntitlements<T extends string>(
+  shape: Record<T, boolean>,
+  overrides?: Partial<Record<T, boolean>>
+): Record<T, boolean> {
+  const next: Record<T, boolean> = { ...shape };
+  for (const key of Object.keys(next) as T[]) {
+    next[key] = true;
+  }
+  if (overrides) {
+    for (const [key, value] of Object.entries(overrides)) {
+      if (value === false && key in next) {
+        next[key as T] = false;
+      }
+    }
+  }
+  return next;
+}
+
 function buildAvailabilityEntries<T extends string>(
   entitled: Record<T, boolean>,
   configured: Record<T, boolean>
@@ -278,18 +297,30 @@ export async function getOrganizationProviderAvailability(
   });
   const configured = getConfiguredProviders(env);
 
+  let entitled = resolved.providers;
+  if (isSelfHostedDeployment(env)) {
+    const overrides = organization.settings?.providerOverrides;
+    entitled = {
+      custody: applySelfHostedEntitlements(entitled.custody, overrides?.custody),
+      rpc: applySelfHostedEntitlements(entitled.rpc, overrides?.rpc),
+      compliance: applySelfHostedEntitlements(entitled.compliance, overrides?.compliance),
+      ramps: applySelfHostedEntitlements(entitled.ramps, overrides?.ramps),
+    };
+  }
+
   return {
     tier: resolved.tier,
     providers: {
-      custody: buildAvailabilityEntries(resolved.providers.custody, configured.custody),
-      rpc: buildAvailabilityEntries(resolved.providers.rpc, configured.rpc),
-      compliance: buildAvailabilityEntries(resolved.providers.compliance, configured.compliance),
-      ramps: buildAvailabilityEntries(resolved.providers.ramps, configured.ramps),
+      custody: buildAvailabilityEntries(entitled.custody, configured.custody),
+      rpc: buildAvailabilityEntries(entitled.rpc, configured.rpc),
+      compliance: buildAvailabilityEntries(entitled.compliance, configured.compliance),
+      ramps: buildAvailabilityEntries(entitled.ramps, configured.ramps),
     },
   };
 }
 
 function getAvailabilityMessage(
+  env: Env,
   tier: OrganizationTier,
   family: OrganizationProviderFamily,
   providerId: string,
@@ -300,6 +331,9 @@ function getAvailabilityMessage(
     providerId;
 
   if (!entry.entitled) {
+    if (isSelfHostedDeployment(env)) {
+      return `${label} is disabled for this organization.`;
+    }
     return tier === "individual"
       ? `${label} is only available on the enterprise tier.`
       : `${label} is not enabled for this organization.`;
@@ -356,6 +390,7 @@ export async function assertOrganizationProviderEnabled(
     throw new AppError(
       "FORBIDDEN",
       getAvailabilityMessage(
+        env,
         access.tier,
         family,
         providerId,

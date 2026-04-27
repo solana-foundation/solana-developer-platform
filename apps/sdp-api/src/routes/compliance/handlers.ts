@@ -3,6 +3,7 @@ import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
 import { AppError } from "@/lib/errors";
 import { success } from "@/lib/response";
+import { isSelfHostedDeployment } from "@/lib/runtime-env";
 import { assertValidAddress } from "@/lib/solana";
 import { createComplianceService } from "@/services/compliance";
 import { getEnabledOrganizationProviders } from "@/services/organization-provider-access.service";
@@ -40,7 +41,9 @@ export async function screenAddress(c: AppContext) {
   if (enabledComplianceProviders.length === 0) {
     throw new AppError(
       "FORBIDDEN",
-      "Compliance screening is only available on enterprise tier organizations with an enabled provider."
+      isSelfHostedDeployment(c.env)
+        ? "Compliance screening requires at least one configured compliance provider (set RANGE_API_KEY, ELLIPTIC_API_TOKEN, TRM_API_KEY, or CHAINALYSIS_API_KEY)."
+        : "Compliance screening is only available on enterprise tier organizations with an enabled provider."
     );
   }
 

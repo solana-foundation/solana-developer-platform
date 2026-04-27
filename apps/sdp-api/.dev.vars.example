@@ -4,6 +4,28 @@
 # For the shared GCP dev database, use the Cloud SQL connection string issued
 # for the `sdp_api_dev` database instead of the local Docker URL above.
 
+# Deployment mode: "managed" (default; uses Clerk-synced org tier entitlements)
+# or "self_hosted" (every configured provider is automatically entitled
+# regardless of tier). Per-org providerOverrides still apply as a disable-only
+# mechanism.
+# SDP_DEPLOYMENT_MODE=self_hosted
+
+# --- Minimum self-hosted set (no third-party provider dependencies) ---
+# Uncomment these alongside SDP_DEPLOYMENT_MODE=self_hosted to run with
+# only the local signer + native fee payment + a single RPC endpoint.
+#
+# Custody: local signer
+# SIGNING_PROVIDER=local
+# CUSTODY_PRIVATE_KEY=<base58-encoded keypair>
+#
+# Fee payment: native (do NOT default to "kora" — that points at the
+# Solana Foundation's public Kora endpoint and adds an external dependency)
+# FEE_PAYMENT_PROVIDER=native
+# FEE_PAYER_PRIVATE_KEY=<base58-encoded keypair>
+#
+# RPC: any single public or private endpoint
+# SOLANA_RPC_URL=https://api.devnet.solana.com
+
 # Sentry
 # SENTRY_DSN=https://examplePublicKey@o0.ingest.us.sentry.io/0
 # SENTRY_TRACES_SAMPLE_RATE=1.0
