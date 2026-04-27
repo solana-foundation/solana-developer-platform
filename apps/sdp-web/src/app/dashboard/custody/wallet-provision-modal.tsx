@@ -1,8 +1,12 @@
 "use client";
 
+import type { FormEvent } from "react";
 import { useEffect, useMemo, useState } from "react";
-import { useFormStatus } from "react-dom";
-import { createCustodyWallet, initializeCustody } from "@/app/dashboard/custody/actions";
+import { useRouter } from "next/navigation";
+import {
+  createCustodyWalletForModal,
+  initializeCustodyForModal,
+} from "@/app/dashboard/custody/actions";
 import {
   CUSTODY_PROVIDER_CATALOG,
   formatCustodyProviderName,
@@ -43,15 +47,15 @@ function resolveInitialProvider(
 
 function SubmitButton({
   disabled,
+  pending,
   idleLabel,
   pendingLabel,
 }: {
   disabled: boolean;
+  pending: boolean;
   idleLabel: string;
   pendingLabel: string;
 }) {
-  const { pending } = useFormStatus();
-
   return (
     <Button type="submit" disabled={disabled || pending}>
       {pending ? pendingLabel : idleLabel}
@@ -74,6 +78,9 @@ export function WalletProvisionModal({
   enabledProviders,
   preferredProvider,
 }: WalletProvisionModalProps) {
+  const router = useRouter();
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const [selectedProvider, setSelectedProvider] = useState<KnownCustodyProvider>(
     resolveInitialProvider(preferredProvider, connectedProviders, enabledProviders)
   );
@@ -86,6 +93,8 @@ export function WalletProvisionModal({
     setSelectedProvider(
       resolveInitialProvider(preferredProvider, connectedProviders, enabledProviders)
     );
+    setSubmitError(null);
+    setIsSubmitting(false);
   }, [connectedProviders, enabledProviders, isOpen, preferredProvider]);
 
   useEscapeKey(isOpen, onClose);
@@ -104,10 +113,36 @@ export function WalletProvisionModal({
   const isConnected = connectedProviderSet.has(selectedProvider);
   const supportsAdditionalWallets = selectedProviderEntry?.supportsAdditionalWallets ?? false;
   const canProvisionWallet = !isConnected || supportsAdditionalWallets;
-  const formAction = isConnected ? createCustodyWallet : initializeCustody;
   const helperText = isConnected
     ? "Create an additional wallet for this active custody provider."
     : "Connect this custody provider and create its first wallet in one step.";
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!canProvisionWallet || isSubmitting) {
+      return;
+    }
+
+    const formData = new FormData(event.currentTarget);
+    const action = isConnected ? createCustodyWalletForModal : initializeCustodyForModal;
+    setIsSubmitting(true);
+    setSubmitError(null);
+
+    void (async () => {
+      const result = await action(formData);
+
+      if (result.status === "error") {
+        setSubmitError(result.message);
+        setIsSubmitting(false);
+        return;
+      }
+
+      router.refresh();
+      onClose();
+      setIsSubmitting(false);
+    });
+  }
 
   if (!isOpen) {
     return null;
@@ -147,7 +182,7 @@ export function WalletProvisionModal({
           </div>
         </div>
 
-        <form action={formAction} className="grid gap-5 px-6 py-6">
+        <form onSubmit={handleSubmit} className="grid gap-5 px-6 py-6">
           <div className="grid gap-2">
             <Label htmlFor="wallet-provider">Provider</Label>
             <input type="hidden" name="provider" value={selectedProvider} />
@@ -157,6 +192,7 @@ export function WalletProvisionModal({
                 value={selectedProvider}
                 onChange={(event) => {
                   setSelectedProvider(event.currentTarget.value as KnownCustodyProvider);
+                  setSubmitError(null);
                 }}
                 className="h-12 w-full appearance-none rounded-[14px] border border-[rgba(28,28,29,0.12)] bg-white pl-11 pr-10 text-sm font-medium text-[#1c1c1d]"
               >
@@ -201,12 +237,19 @@ export function WalletProvisionModal({
             </div>
           ) : null}
 
+          {submitError ? (
+            <div className="rounded-[16px] border border-[#c71f37]/15 bg-[#c71f37]/[0.04] px-4 py-3 text-sm text-[#8a1f2a]">
+              {submitError}
+            </div>
+          ) : null}
+
           <div className="flex items-center justify-end gap-2 border-t border-[rgba(28,28,29,0.08)] pt-4">
             <Button type="button" variant="secondary" onClick={onClose}>
               Cancel
             </Button>
             <SubmitButton
               disabled={!canProvisionWallet}
+              pending={isSubmitting}
               idleLabel="Create wallet"
               pendingLabel="Creating..."
             />

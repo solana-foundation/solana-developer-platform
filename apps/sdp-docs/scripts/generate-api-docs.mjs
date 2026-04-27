@@ -284,6 +284,7 @@ const run = async () => {
       "---Guides---",
       "guides/setup-organization",
       "guides/setup-wallets",
+      "guides/provider-onboarding",
       "guides/manage-api-keys",
       "guides/create-a-token",
       "guides/deploy-a-token",
