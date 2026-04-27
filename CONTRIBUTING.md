@@ -19,7 +19,7 @@ SDP is designed to support provider integrations across custody, RPC, compliance
 
 Before opening an SDP integration PR:
 
-- Complete the [provider intake form](https://solana.typeform.com/to/provider-intake-placeholder). This is a placeholder link for the future Typeform intake.
+- Complete the [provider intake form](https://solana.typeform.com/). The dedicated SDP provider intake Typeform will be published at this link when intake opens.
 - Give the Solana Foundation team API access to your sandbox or playground environment so we can test and validate the integration.
 - Share enough sandbox credentials, test accounts, supported networks, rate limits, and provider documentation for maintainers to reproduce the integration locally and in CI.
 - Confirm that the provider service is suitable for devnet or sandbox testing, and document any mainnet-only behavior.
