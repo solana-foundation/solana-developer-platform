@@ -120,6 +120,47 @@ PRIVY_APP_SECRET=your_app_secret
 
 See `.dev.vars.example` for all available options.
 
+### Self-Hosted Mode (no third-party providers)
+
+Run SDP with only the local signer + native fee-payment + a single RPC
+endpoint — no DFNS / Privy / Fireblocks / Coinbase / Para / etc. accounts
+required. In `apps/sdp-api/.dev.vars`:
+
+```bash
+SDP_DEPLOYMENT_MODE=self_hosted
+
+# Custody — generate values with the command below
+SIGNING_PROVIDER=local
+CUSTODY_PRIVATE_KEY=<base58-encoded keypair>
+CUSTODY_ENCRYPTION_KEY=<base64-encoded 256-bit key>  # required by EncryptionService
+
+# Fee payment — native avoids the public Kora dependency
+FEE_PAYMENT_PROVIDER=native
+FEE_PAYER_PRIVATE_KEY=<base58-encoded keypair>
+
+# RPC — any single endpoint. The public devnet endpoint
+# (https://api.devnet.solana.com) returns 403 for getTokenAccountsByOwner,
+# so wallet-balance queries will log "failed to fetch SPL balances" on every
+# refresh. Use a free Helius / Triton / QuickNode key or a local
+# solana-test-validator instead.
+SOLANA_RPC_URL=https://devnet.helius-rpc.com/?api-key=<your-key>
+```
+
+Generate `CUSTODY_PRIVATE_KEY` and `FEE_PAYER_PRIVATE_KEY` values:
+
+```bash
+pnpm --filter @sdp/api keygen:local
+```
+
+The script prints `PUBLIC_KEY=…` and `CUSTODY_PRIVATE_KEY=…` lines you can
+paste straight into `.dev.vars`. Add `--quiet` to print only the secret
+(useful for piping into `pbcopy`). The same keypair can serve both vars in
+local dev; use distinct keys for any non-dev deployment.
+
+In self-hosted mode every configured provider is automatically entitled
+regardless of organization tier. Per-org `providerOverrides` still apply as
+a disable-only mechanism.
+
 ### Optional: Compliance & Ramp Integrations
 
 ```bash

@@ -1,6 +1,7 @@
 const DEFAULT_CUSTODY_CAPABILITIES = ["Issuance", "Transfers", "Compliance"] as const;
 
 export type KnownCustodyProvider =
+  | "local"
   | "privy"
   | "fireblocks"
   | "coinbase_cdp"
@@ -18,6 +19,13 @@ export interface CustodyProviderCatalogEntry {
 }
 
 export const CUSTODY_PROVIDER_CATALOG: CustodyProviderCatalogEntry[] = [
+  {
+    id: "local",
+    label: "Local Signer",
+    description: "Self-hosted Ed25519 keypair signer from CUSTODY_PRIVATE_KEY.",
+    supportsAdditionalWallets: false,
+    capabilities: ["Issuance", "Transfers"],
+  },
   {
     id: "privy",
     label: "Privy",
