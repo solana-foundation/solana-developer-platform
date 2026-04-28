@@ -152,10 +152,12 @@ Generate `CUSTODY_PRIVATE_KEY` and `FEE_PAYER_PRIVATE_KEY` values:
 pnpm --filter @sdp/api keygen:local
 ```
 
-The script prints `PUBLIC_KEY=…` and `CUSTODY_PRIVATE_KEY=…` lines you can
-paste straight into `.dev.vars`. Add `--quiet` to print only the secret
-(useful for piping into `pbcopy`). The same keypair can serve both vars in
-local dev; use distinct keys for any non-dev deployment.
+The script prints `PUBLIC_KEY=…`, `CUSTODY_PRIVATE_KEY=…`, and
+`CUSTODY_ENCRYPTION_KEY=…` lines you can paste straight into `.dev.vars`,
+plus a commented `# FEE_PAYER_PRIVATE_KEY=…` hint. Uncomment the hint to
+reuse the custody keypair as the fee payer in local dev (the same keypair
+can serve both roles); use distinct keys for any non-dev deployment. Add
+`--quiet` to print only the custody secret (useful for piping into `pbcopy`).
 
 In self-hosted mode every configured provider is automatically entitled
 regardless of organization tier. Per-org `providerOverrides` still apply as

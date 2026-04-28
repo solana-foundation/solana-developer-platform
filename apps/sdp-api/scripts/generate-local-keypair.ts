@@ -4,6 +4,10 @@
  *   - CUSTODY_PRIVATE_KEY    (Solana 64-byte keypair, base58-encoded)
  *   - CUSTODY_ENCRYPTION_KEY (256-bit AES key, base64-encoded)
  *
+ * Verbose output also includes a commented FEE_PAYER_PRIVATE_KEY hint:
+ * the same keypair can serve both roles in local dev (uncomment to use it),
+ * but distinct keys are recommended for any non-dev deployment.
+ *
  * The keypair format matches what KeychainMemoryAdapter (the runtime
  * adapter for SIGNING_PROVIDER=local) and NativeFeePaymentAdapter expect
  * (32B seed + 32B public key, base58-encoded).
@@ -57,5 +61,8 @@ if (quiet) {
 } else {
   console.log(`PUBLIC_KEY=${pubBase58}`);
   console.log(`CUSTODY_PRIVATE_KEY=${secretBase58}`);
+  console.log(
+    `# FEE_PAYER_PRIVATE_KEY=${secretBase58}  # uncomment for local dev; use a distinct keypair in production`
+  );
   console.log(`CUSTODY_ENCRYPTION_KEY=${encryptionKey}`);
 }
