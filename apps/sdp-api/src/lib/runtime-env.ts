@@ -106,21 +106,32 @@ const VALID_DEPLOYMENT_MODES: ReadonlySet<string> = new Set<SdpDeploymentMode>([
   "self_hosted",
 ]);
 
-export function getDeploymentMode(env: Pick<Env, "SDP_DEPLOYMENT_MODE">): SdpDeploymentMode {
-  const value = env.SDP_DEPLOYMENT_MODE;
+const validatedDeploymentModes = new Map<string, SdpDeploymentMode>();
+
+function resolveDeploymentMode(value: string | undefined): SdpDeploymentMode {
   if (value === undefined) {
     return "managed";
+  }
+  const cached = validatedDeploymentModes.get(value);
+  if (cached !== undefined) {
+    return cached;
   }
   if (!VALID_DEPLOYMENT_MODES.has(value)) {
     throw new Error(
       `Invalid SDP_DEPLOYMENT_MODE: "${value}". Expected "managed" or "self_hosted".`
     );
   }
-  return value;
+  const resolved = value as SdpDeploymentMode;
+  validatedDeploymentModes.set(value, resolved);
+  return resolved;
+}
+
+export function getDeploymentMode(env: Pick<Env, "SDP_DEPLOYMENT_MODE">): SdpDeploymentMode {
+  return resolveDeploymentMode(env.SDP_DEPLOYMENT_MODE);
 }
 
 export function isSelfHostedDeployment(env: Pick<Env, "SDP_DEPLOYMENT_MODE">): boolean {
-  return getDeploymentMode(env) === "self_hosted";
+  return resolveDeploymentMode(env.SDP_DEPLOYMENT_MODE) === "self_hosted";
 }
 
 export function withProcessEnvFallback(bindings: Env): Env {

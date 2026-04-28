@@ -246,20 +246,20 @@ function getConfiguredProviders(env: Env) {
   };
 }
 
+/**
+ * Self-hosted entitlement: every key in `shape` is entitled by default,
+ * minus any explicit `false` overrides (disable-only).
+ *
+ * `shape` is used only as a key set — its values are ignored, since
+ * self-hosted bypasses tier-based entitlement.
+ */
 function applySelfHostedEntitlements<T extends string>(
   shape: Record<T, boolean>,
   overrides?: Partial<Record<T, boolean>>
 ): Record<T, boolean> {
-  const next: Record<T, boolean> = { ...shape };
-  for (const key of Object.keys(next) as T[]) {
-    next[key] = true;
-  }
-  if (overrides) {
-    for (const [key, value] of Object.entries(overrides)) {
-      if (value === false && key in next) {
-        next[key as T] = false;
-      }
-    }
+  const next = {} as Record<T, boolean>;
+  for (const key of Object.keys(shape) as T[]) {
+    next[key] = overrides?.[key] !== false;
   }
   return next;
 }

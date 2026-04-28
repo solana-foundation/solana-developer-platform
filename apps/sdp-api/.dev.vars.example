@@ -37,6 +37,13 @@
 # SENTRY_DSN=https://examplePublicKey@o0.ingest.us.sentry.io/0
 # SENTRY_TRACES_SAMPLE_RATE=1.0
 
+# --- Managed-mode defaults ---
+# These are the defaults for the hosted Solana Foundation deployment.
+# If you are running self-hosted (SDP_DEPLOYMENT_MODE=self_hosted), comment
+# every var in this section out — otherwise SOLANA_RPC_URL and
+# FEE_PAYMENT_PROVIDER below will silently override the self-hosted block above
+# and re-introduce the external dependencies that mode is meant to avoid.
+
 # Solana RPC (devnet). Keep provider URLs templated and put credentials in the
 # *_API_KEY vars below so deploys do not carry live keys in plain text.
 SOLANA_RPC_URL=https://api.devnet.solana.com
@@ -52,10 +59,11 @@ SOLANA_RPC_QUICKNODE_URL=https://evocative-old-mansion.solana-devnet.quiknode.pr
 # SOLANA_RPC_ALCHEMY_API_KEY=YOUR_ALCHEMY_KEY
 # SOLANA_RPC_QUICKNODE_API_KEY=YOUR_QUICKNODE_KEY
 
-# Use the shared devnet Kora instance
+# Shared devnet Kora instance for managed-mode fee payment.
 KORA_RPC_URL=https://your-kora-devnet-instance.us-central1.run.app
 # KORA_API_KEY=YOUR_KORA_API_KEY (only if API key auth is enabled)
 FEE_PAYMENT_PROVIDER=kora
+# --- end managed-mode defaults ---
 
 # Coinbase CDP platform signer (required for coinbase_cdp custody provider)
 # SIGNING_PROVIDER=coinbase_cdp
