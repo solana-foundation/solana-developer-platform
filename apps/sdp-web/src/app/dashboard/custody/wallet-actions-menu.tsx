@@ -1,14 +1,18 @@
 "use client";
 
-import { ChevronDown, Ellipsis, ShieldCheck } from "lucide-react";
+import { ChevronDown, Droplets, Ellipsis, ShieldCheck } from "lucide-react";
 import { useTransition } from "react";
 import { toast } from "sonner";
-import { checkWalletSignerMemoAction } from "@/app/dashboard/custody/actions";
+import {
+  checkWalletSignerMemoAction,
+  requestDevnetSolanaFaucetAction,
+} from "@/app/dashboard/custody/actions";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
@@ -80,6 +84,47 @@ export function WalletActionsMenu({
     });
   };
 
+  const requestDevnetSol = () => {
+    const toastId = toast.loading("Requesting devnet SOL.", {
+      position: "bottom-right",
+    });
+
+    startTransition(() => {
+      void (async () => {
+        const result = await requestDevnetSolanaFaucetAction(walletId, walletAddress);
+
+        if (result.status === "success") {
+          const explorerUrl = getDevnetExplorerUrl(result.signature);
+
+          toast.success(`${result.amountSol} devnet SOL requested.`, {
+            id: toastId,
+            description: (
+              <span>
+                Faucet transaction submitted.{" "}
+                <a
+                  href={explorerUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="underline underline-offset-2"
+                >
+                  View on Solana Explorer
+                </a>
+              </span>
+            ),
+            position: "bottom-right",
+          });
+          return;
+        }
+
+        toast.error("Devnet faucet failed.", {
+          id: toastId,
+          description: result.message,
+          position: "bottom-right",
+        });
+      })();
+    });
+  };
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -108,7 +153,7 @@ export function WalletActionsMenu({
           </Button>
         )}
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-44">
+      <DropdownMenuContent align="end" className="w-52">
         <DropdownMenuItem
           onSelect={runSignerCheck}
           disabled={isBusy || !dashboardAccess.capabilities.canUseWalletSignerCheck}
@@ -119,6 +164,11 @@ export function WalletActionsMenu({
             : dashboardAccess.capabilities.canUseWalletSignerCheck
               ? "Prove ownership"
               : "Prove ownership (admin only)"}
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onSelect={requestDevnetSol} disabled={isBusy}>
+          <Droplets className="h-4 w-4" />
+          {isBusy ? "Requesting..." : "Request devnet SOL"}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
