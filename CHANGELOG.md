@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.17.3](https://github.com/solana-foundation/solana-developer-platform/compare/v0.17.2...v0.17.3) (2026-04-29)
+
+### Documentation
+
+* align docs with SDP launch styling ([#231](https://github.com/solana-foundation/solana-developer-platform/pull/231)) ([1030b4f](https://github.com/solana-foundation/solana-developer-platform/commit/1030b4f1c883ba71c1b849a07e19d813b6da7106))
+
 ## [0.17.2](https://github.com/solana-foundation/solana-developer-platform/compare/v0.17.1...v0.17.2) (2026-04-29)
 
 ### Bug Fixes
