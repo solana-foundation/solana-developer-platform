@@ -85,7 +85,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Update wallet policy",
     operationId: "updatePaymentWalletPolicy",
     description:
-      "Updates payment policy rules for a custody wallet. Wallet provisioning and default selection remain in /v1/custody.",
+      "Updates payment policy rules for a custody wallet. Wallet provisioning and default selection remain in /v1/wallets.",
     security: [{ apiKeyAuth: [] }],
     request: {
       params: z.object({

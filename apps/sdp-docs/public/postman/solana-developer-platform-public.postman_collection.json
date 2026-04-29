@@ -1129,7 +1129,7 @@
               }
             ],
             "url": "{{baseUrl}}/v1/payments/wallets/{{walletId}}/policies",
-            "description": "Updates payment policy rules for a custody wallet. Wallet provisioning and default selection remain in /v1/custody.",
+            "description": "Updates payment policy rules for a custody wallet. Wallet provisioning and default selection remain in /v1/wallets.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"destinationAllowlist\": [\n    \"So11111111111111111111111111111111111111112\"\n  ],\n  \"maxTransferAmount\": \"100.00\",\n  \"maxDailyAmount\": \"100.00\"\n}",

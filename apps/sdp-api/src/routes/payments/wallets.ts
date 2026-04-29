@@ -31,7 +31,7 @@ export function resolveWallet(wallets: CustodyWallet[], walletId: string): Custo
   if (!wallet) {
     throw new AppError(
       "NOT_FOUND",
-      "Wallet not found. Provision wallets through /v1/custody/wallets"
+      "Wallet not found. Provision wallets through /v1/wallets"
     );
   }
   return wallet;
