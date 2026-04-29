@@ -4,9 +4,45 @@
 # For the shared GCP dev database, use the Cloud SQL connection string issued
 # for the `sdp_api_dev` database instead of the local Docker URL above.
 
+# Deployment mode: "managed" (default; uses Clerk-synced org tier entitlements)
+# or "self_hosted" (every configured provider is automatically entitled
+# regardless of tier). Per-org providerOverrides still apply as a disable-only
+# mechanism.
+# SDP_DEPLOYMENT_MODE=self_hosted
+
+# --- Minimum self-hosted set (no third-party provider dependencies) ---
+# Uncomment these alongside SDP_DEPLOYMENT_MODE=self_hosted to run with
+# only the local signer + native fee payment + a single RPC endpoint.
+#
+# Custody: local signer
+# Generate keypair + encryption key values with: pnpm --filter @sdp/api keygen:local
+# SIGNING_PROVIDER=local
+# CUSTODY_PRIVATE_KEY=<base58-encoded keypair>
+# CUSTODY_ENCRYPTION_KEY=<base64-encoded 256-bit key>  # required for any custody provider — encrypts stored wallet secrets
+#
+# Fee payment: native (do NOT default to "kora" — that points at the
+# Solana Foundation's public Kora endpoint and adds an external dependency)
+# FEE_PAYMENT_PROVIDER=native
+# FEE_PAYER_PRIVATE_KEY=<base58-encoded keypair>
+#
+# RPC: any single endpoint. NOTE: the public Solana endpoint
+# (https://api.devnet.solana.com) heavily rate-limits / blocks
+# getTokenAccountsByOwner with 403, so wallet balance queries will log
+# "failed to fetch SPL balances" on every request. Use a free Helius / Triton /
+# QuickNode key or a local solana-test-validator for any real dashboard
+# walkthrough.
+# SOLANA_RPC_URL=https://devnet.helius-rpc.com/?api-key=<your-key>
+
 # Sentry
 # SENTRY_DSN=https://examplePublicKey@o0.ingest.us.sentry.io/0
 # SENTRY_TRACES_SAMPLE_RATE=1.0
+
+# --- Managed-mode defaults ---
+# These are the defaults for the hosted Solana Foundation deployment.
+# If you are running self-hosted (SDP_DEPLOYMENT_MODE=self_hosted), comment
+# every var in this section out — otherwise SOLANA_RPC_URL and
+# FEE_PAYMENT_PROVIDER below will silently override the self-hosted block above
+# and re-introduce the external dependencies that mode is meant to avoid.
 
 # Solana RPC (devnet). Keep provider URLs templated and put credentials in the
 # *_API_KEY vars below so deploys do not carry live keys in plain text.
@@ -23,10 +59,11 @@ SOLANA_RPC_QUICKNODE_URL=https://evocative-old-mansion.solana-devnet.quiknode.pr
 # SOLANA_RPC_ALCHEMY_API_KEY=YOUR_ALCHEMY_KEY
 # SOLANA_RPC_QUICKNODE_API_KEY=YOUR_QUICKNODE_KEY
 
-# Use the shared devnet Kora instance
+# Shared devnet Kora instance for managed-mode fee payment.
 KORA_RPC_URL=https://your-kora-devnet-instance.us-central1.run.app
 # KORA_API_KEY=YOUR_KORA_API_KEY (only if API key auth is enabled)
 FEE_PAYMENT_PROVIDER=kora
+# --- end managed-mode defaults ---
 
 # Coinbase CDP platform signer (required for coinbase_cdp custody provider)
 # SIGNING_PROVIDER=coinbase_cdp
@@ -54,7 +91,17 @@ FEE_PAYMENT_PROVIDER=kora
 # TURNKEY_PRIVATE_KEY_ID=YOUR_DEFAULT_TURNKEY_PRIVATE_KEY_ID
 # TURNKEY_PUBLIC_KEY=YOUR_DEFAULT_TURNKEY_SOLANA_PUBLIC_KEY
 
-# Clerk webhook (required for Clerk org linking)
+# Clerk auth + webhook
+# See docs/self-hosting/clerk-setup.md for the end-to-end walkthrough
+# (account creation, JWT template, webhook relay via Svix CLI).
+#
+# Issuer URL — find in Clerk dashboard → API Keys (e.g. https://<slug>.clerk.accounts.dev)
+CLERK_ISSUER=
+# Optional: only set if you configure an `aud` claim in the JWT template
+# CLERK_AUDIENCE=
+# Optional: defaults to ${CLERK_ISSUER}/.well-known/jwks.json
+# CLERK_JWKS_URL=
+# Webhook signing secret from the Clerk endpoint that points at /webhooks/clerk/link-orgs
 CLERK_WEBHOOK_SECRET=whsec_...
 
 # Compliance providers

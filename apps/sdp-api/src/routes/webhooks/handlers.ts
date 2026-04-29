@@ -4,6 +4,7 @@ import { getDb } from "@/db";
 import { mapClerkRoleToOrgRole } from "@/lib/clerk-role";
 import { AppError, badRequest } from "@/lib/errors";
 import { success } from "@/lib/response";
+import { isSelfHostedDeployment } from "@/lib/runtime-env";
 import {
   type ClerkOrganization,
   ClerkOrganizationsService,
@@ -252,10 +253,12 @@ async function ensureOrganizationMapping(
         .bind(authOrgId, org.id, orgId, slug),
     ]);
 
-    await syncOrganizationTierFromClerk(getDb(c.env), {
-      organizationId: orgId,
-      clerkOrganization: clerkOrg,
-    });
+    if (!isSelfHostedDeployment(c.env)) {
+      await syncOrganizationTierFromClerk(getDb(c.env), {
+        organizationId: orgId,
+        clerkOrganization: clerkOrg,
+      });
+    }
   } catch (err) {
     if (err instanceof Error && err.message?.includes("UNIQUE constraint")) {
       const retry = await findOrganizationMapping(c, org.id);
@@ -323,10 +326,12 @@ async function syncOrganization(c: AppContext, data: Record<string, unknown>) {
     }
   }
 
-  await syncOrganizationTierFromClerk(db, {
-    organizationId,
-    clerkOrganization: clerkOrg,
-  });
+  if (!isSelfHostedDeployment(c.env)) {
+    await syncOrganizationTierFromClerk(db, {
+      organizationId,
+      clerkOrganization: clerkOrg,
+    });
+  }
 }
 
 async function deleteOrganization(c: AppContext, data: Record<string, unknown>) {

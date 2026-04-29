@@ -114,12 +114,13 @@ export abstract class BaseKeychainAdapter implements FullSigningPort {
 
   /**
    * Generate a new keypair in custody.
-   * Not supported by Keychain signers - they work with pre-existing keys.
-   * Use LocalKeypairAdapter for ephemeral keypair generation.
+   * Not supported by hosted Keychain signers - they work with pre-existing keys.
+   * KeychainMemoryAdapter overrides this to support ephemeral keypair generation
+   * (used for mint account creation in local/self-hosted deployments).
    */
   generateKeypair(): Promise<GeneratedKeypair> {
     throw new SigningError(
-      `${this.providerId}: keypair generation not supported. Use LocalKeypairAdapter for ephemeral keys.`,
+      `${this.providerId}: keypair generation not supported. Use KeychainMemoryAdapter for ephemeral keys.`,
       "INVALID_REQUEST"
     );
   }
