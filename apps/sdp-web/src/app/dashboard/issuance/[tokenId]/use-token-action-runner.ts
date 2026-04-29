@@ -24,7 +24,9 @@ export function useTokenActionRunner() {
   ): Promise<ActionExecutionResult> => {
     const submitToast = options.submitToast ?? `Submitting ${input.label.toLowerCase()}...`;
     const successToast = options.successToast ?? "Transaction finalized successfully.";
-    const toastId = toast.loading(submitToast);
+    const toastId = toast.loading(submitToast, {
+      position: "bottom-right",
+    });
 
     setIsPending(true);
     try {
@@ -34,12 +36,21 @@ export function useTokenActionRunner() {
         setActionConfirmation(null);
         await options.onSuccess?.(result);
         router.refresh();
-        toast.success(successToast, { id: toastId });
+        toast.success(successToast, { id: toastId, position: "bottom-right" });
         return result;
       }
 
-      toast.error(result.message, { id: toastId });
+      toast.error(result.message, { id: toastId, position: "bottom-right" });
       return result;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Transaction failed.";
+      toast.error(message, { id: toastId, position: "bottom-right" });
+      return {
+        ok: false,
+        message,
+        status: null,
+        body: null,
+      };
     } finally {
       setIsPending(false);
     }

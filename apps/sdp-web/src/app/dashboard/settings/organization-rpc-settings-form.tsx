@@ -240,6 +240,9 @@ export function OrganizationRpcSettingsForm({
     }
 
     setIsTesting(true);
+    const toastId = toast.loading("Checking RPC provider.", {
+      position: "bottom-right",
+    });
 
     try {
       const result = await runRpcProviderTest(selectedProvider);
@@ -253,6 +256,7 @@ export function OrganizationRpcSettingsForm({
 
       if (result.status === "success") {
         toast.success("RPC check passed.", {
+          id: toastId,
           description: [requestedLabel, latency].filter(Boolean).join(" • "),
           position: "bottom-right",
         });
@@ -263,6 +267,7 @@ export function OrganizationRpcSettingsForm({
           result.resolvedProvider !== result.requestedProvider;
 
         toast.error(isProviderMismatch ? "Provider mismatch." : "RPC check failed.", {
+          id: toastId,
           description: isProviderMismatch
             ? `${requestedLabel} requested, ${resolvedLabel ?? "another provider"} resolved.`
             : [resolvedLabel ?? requestedLabel, result.upstreamStatus, latency]
@@ -271,6 +276,12 @@ export function OrganizationRpcSettingsForm({
           position: "bottom-right",
         });
       }
+    } catch (error) {
+      toast.error("RPC check failed.", {
+        id: toastId,
+        description: error instanceof Error ? error.message : "RPC check failed.",
+        position: "bottom-right",
+      });
     } finally {
       setIsTesting(false);
     }

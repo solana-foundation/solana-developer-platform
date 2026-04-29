@@ -173,16 +173,36 @@ export function CreateIssuanceTokenModal({
     }
 
     const formData = new FormData(event.currentTarget);
+    const toastId = toast.loading("Creating draft token.", {
+      position: "bottom-right",
+    });
 
     startTransition(async () => {
-      const response = await createIssuanceTokenAction(formData);
+      const response = await createIssuanceTokenAction(formData).catch((error) => ({
+        state: "error" as const,
+        message: error instanceof Error ? error.message : "Unable to create draft token.",
+        tokenId: null,
+        tokenName: null,
+      }));
       setSubmitState(response);
 
       if (response.state === "success") {
-        toast.success(response.message ?? "Draft created. Deploy it on-chain from the token page.");
+        toast.success(
+          response.message ?? "Draft created. Deploy it on-chain from the token page.",
+          {
+            id: toastId,
+            position: "bottom-right",
+          }
+        );
         close();
         router.refresh();
+        return;
       }
+
+      toast.error(response.message ?? "Unable to create draft token.", {
+        id: toastId,
+        position: "bottom-right",
+      });
     });
   };
 

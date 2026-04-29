@@ -336,6 +336,9 @@ export function usePaymentsWorkspace(): PaymentsWorkspaceState {
     }
 
     setIsSubmittingTransfer(true);
+    const toastId = toast.loading("Submitting transfer.", {
+      position: "bottom-right",
+    });
     try {
       const transfer = await createTransfer({
         source: transferSource,
@@ -356,6 +359,7 @@ export function usePaymentsWorkspace(): PaymentsWorkspaceState {
 
       if (transfer.signature) {
         toast.success("Transfer submitted.", {
+          id: toastId,
           description: (
             <span>
               Transaction sent.{" "}
@@ -373,12 +377,14 @@ export function usePaymentsWorkspace(): PaymentsWorkspaceState {
         });
       } else {
         toast.success("Transfer submitted.", {
+          id: toastId,
           description: `Status: ${transfer.status}`,
           position: "bottom-right",
         });
       }
     } catch (error) {
       toast.error("Transfer failed.", {
+        id: toastId,
         description: error instanceof Error ? error.message : "Transfer failed.",
         position: "bottom-right",
       });

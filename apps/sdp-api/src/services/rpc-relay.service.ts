@@ -380,6 +380,19 @@ async function pickRoundRobinProvider(
   return providers[index];
 }
 
+async function pickRoundRobinProviderOrder(
+  cache: KVNamespace,
+  providers: ManagedRpcProvider[]
+): Promise<ManagedRpcProvider[]> {
+  const selectedProvider = await pickRoundRobinProvider(cache, providers);
+  const selectedIndex = providers.findIndex((provider) => provider.id === selectedProvider.id);
+  if (selectedIndex <= 0) {
+    return providers;
+  }
+
+  return [...providers.slice(selectedIndex), ...providers.slice(0, selectedIndex)];
+}
+
 function validateRequestedProjectScope(
   authProjectId: string | null,
   requestedProjectId: string | null
@@ -485,6 +498,34 @@ export async function resolveRpcTarget(input: ResolveRpcTargetInput): Promise<Re
     headers: selectedProvider.headers,
     selectionMode: "round_robin_default",
   };
+}
+
+export async function resolveRoundRobinRpcTargets(
+  input: ResolveRpcTargetInput
+): Promise<ResolvedRpcTarget[]> {
+  const managedProviders = resolveManagedProviders(input.env);
+  const access = await getOrganizationProviderAvailability(
+    input.env,
+    input.db,
+    input.organizationId
+  );
+  const enabledManagedProviders = managedProviders.filter(
+    (provider) => access.providers.rpc[provider.id]?.enabled
+  );
+  const projectId = getEffectiveProjectId(input.authProjectId, input.requestedProjectId);
+  const orderedProviders = await pickRoundRobinProviderOrder(
+    input.env.SDP_CACHE,
+    enabledManagedProviders
+  );
+
+  return orderedProviders.map((provider) => ({
+    providerId: provider.id,
+    projectId,
+    endpoint: provider.url,
+    endpointLabel: maskEndpoint(provider.url),
+    headers: provider.headers,
+    selectionMode: "round_robin_default",
+  }));
 }
 
 export async function recordRpcRelayTelemetry(cache: KVNamespace, telemetry: RelayTelemetryInput) {
