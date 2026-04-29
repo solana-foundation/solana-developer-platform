@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.18.2](https://github.com/solana-foundation/solana-developer-platform/compare/v0.18.1...v0.18.2) (2026-04-29)
+
+### Bug Fixes
+
+* **web:** keep wallet actions button on one line ([#238](https://github.com/solana-foundation/solana-developer-platform/pull/238)) ([18c9109](https://github.com/solana-foundation/solana-developer-platform/commit/18c9109ca73fa88d3073dabd5153680825d4fd44))
+
 ## [0.18.1](https://github.com/solana-foundation/solana-developer-platform/compare/v0.18.0...v0.18.1) (2026-04-29)
 
 ### Other Changes
