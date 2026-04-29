@@ -133,12 +133,12 @@ export function WalletActionsMenu({
             type="button"
             variant="secondary"
             size="sm"
-            className={cn("min-w-[132px] justify-between", triggerClassName)}
+            className={cn("min-w-[132px] whitespace-nowrap", triggerClassName)}
+            iconRight={<ChevronDown className="size-4" />}
             aria-label={`Wallet actions for ${resolvedWalletLabel}`}
             disabled={isBusy}
           >
-            <span>{triggerLabel}</span>
-            <ChevronDown className="h-4 w-4" />
+            {triggerLabel}
           </Button>
         ) : (
           <Button
