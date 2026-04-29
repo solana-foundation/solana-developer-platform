@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.18.4](https://github.com/solana-foundation/solana-developer-platform/compare/v0.18.3...v0.18.4) (2026-04-29)
+
+### Bug Fixes
+
+* round robin faucet and align action toasts ([#243](https://github.com/solana-foundation/solana-developer-platform/pull/243)) ([f320d66](https://github.com/solana-foundation/solana-developer-platform/commit/f320d6632cf34de2afb64b3213882e358bcb936d))
+
 ## [0.18.3](https://github.com/solana-foundation/solana-developer-platform/compare/v0.18.2...v0.18.3) (2026-04-29)
 
 ### Bug Fixes
