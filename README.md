@@ -122,12 +122,12 @@ The REST API provides these public endpoints (all require API key or session tok
 
 | Family | Purpose | Examples |
 |---|---|---|
-| **Wallets** | Create and manage blockchain accounts | `/v1/wallets/create`, `/v1/wallets/list` |
-| **Issuance** | Mint and manage SPL tokens | `/v1/issuance/tokens/mint`, `/v1/issuance/tokens/freeze` |
-| **Payments** | Send SOL and tokens | `/v1/payments/transfer`, `/v1/payments/batch` |
-| **Compliance** | Screen addresses and transactions | `/v1/compliance/screen-address` |
-| **Projects** | API project management | `/v1/projects/*` |
-| **API Keys** | Manage access tokens | `/v1/api-keys/*` |
+| **Wallets** | Create and manage blockchain accounts | `/v1/wallets`, `/v1/wallets/initialize` |
+| **Issuance** | Mint and manage SPL tokens | `/v1/issuance/tokens`, `/v1/issuance/tokens/{tokenId}/mint` |
+| **Payments** | Send SOL and tokens | `/v1/payments/transfers`, `/v1/payments/transfers/prepare` |
+| **Compliance** | Screen addresses and transactions | `/v1/compliance/address-screenings` |
+| **Projects** | API project management | `/v1/projects` |
+| **API Keys** | Manage access tokens | `/v1/api-keys` |
 | **Health** | Service status | `GET /health` |
 
 **Full API Reference**: https://platform.solana.com/docs

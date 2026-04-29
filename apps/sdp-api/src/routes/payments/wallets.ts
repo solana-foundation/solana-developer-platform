@@ -29,10 +29,7 @@ export type ResolvedScope = Awaited<ReturnType<typeof resolveScope>>;
 export function resolveWallet(wallets: CustodyWallet[], walletId: string): CustodyWallet {
   const wallet = wallets.find((entry) => entry.walletId === walletId);
   if (!wallet) {
-    throw new AppError(
-      "NOT_FOUND",
-      "Wallet not found. Provision wallets through /v1/custody/wallets"
-    );
+    throw new AppError("NOT_FOUND", "Wallet not found. Provision wallets through /v1/wallets");
   }
   return wallet;
 }

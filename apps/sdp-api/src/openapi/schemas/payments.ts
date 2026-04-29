@@ -89,7 +89,7 @@ export const walletPolicySchema = z
   })
   .openapi({
     description:
-      "Payment policy configuration for a custody-managed wallet. Wallet lifecycle belongs to /v1/custody, while payment controls are internally stored as typed policy records.",
+      "Payment policy configuration for a custody-managed wallet. Wallet lifecycle belongs to /v1/wallets, while payment controls are internally stored as typed policy records.",
   });
 
 export const updateWalletPolicyRequestSchema = z
@@ -214,7 +214,7 @@ export const prepareTransferRequestSchema = z
   })
   .openapi({
     description:
-      "Prepare transfer request payload for a custody-managed source wallet. Wallet provisioning is handled by /v1/custody.",
+      "Prepare transfer request payload for a custody-managed source wallet. Wallet provisioning is handled by /v1/wallets.",
   });
 
 export const transferTypeSchema = z
