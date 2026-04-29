@@ -434,18 +434,15 @@ export async function requestDevnetSolanaFaucetAction(
       return { status: "error", message: "Sign in to request devnet SOL." };
     }
 
-    const relay = await sdpApiFetch<RpcRelayResponse<SolanaRpcAirdropResponse>>(
-      "/v1/rpc/proxy",
-      {
-        method: "POST",
-        body: JSON.stringify({
-          jsonrpc: "2.0",
-          id: `wallet-faucet-${resolvedWalletId}`,
-          method: "requestAirdrop",
-          params: [resolvedWalletAddress, DEVNET_FAUCET_LAMPORTS],
-        }),
-      }
-    );
+    const relay = await sdpApiFetch<RpcRelayResponse<SolanaRpcAirdropResponse>>("/v1/rpc/proxy", {
+      method: "POST",
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: `wallet-faucet-${resolvedWalletId}`,
+        method: "requestAirdrop",
+        params: [resolvedWalletAddress, DEVNET_FAUCET_LAMPORTS],
+      }),
+    });
 
     if (!relay.upstream.ok) {
       return {
