@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.17.2](https://github.com/solana-foundation/solana-developer-platform/compare/v0.17.1...v0.17.2) (2026-04-29)
+
+### Bug Fixes
+
+* refresh wallet provisioning modal ([#230](https://github.com/solana-foundation/solana-developer-platform/pull/230)) ([5913aea](https://github.com/solana-foundation/solana-developer-platform/commit/5913aeaa53f8c7508dfbe5b01f1be0aa3cb069a1))
+
+### Documentation
+
+* add provider onboarding guidelines ([#229](https://github.com/solana-foundation/solana-developer-platform/pull/229)) ([926fe02](https://github.com/solana-foundation/solana-developer-platform/commit/926fe02e45077bcfc91274fe16cf32a4ba6aa2d2))
+* remove unfinished public wording ([#225](https://github.com/solana-foundation/solana-developer-platform/pull/225)) ([c3b1ea1](https://github.com/solana-foundation/solana-developer-platform/commit/c3b1ea1d7d7ea28db1fb2b28a6d95f2a3bfadd32))
+* simplify README and public OpenAPI ([#223](https://github.com/solana-foundation/solana-developer-platform/pull/223)) ([2bc0bb9](https://github.com/solana-foundation/solana-developer-platform/commit/2bc0bb95532782e0b0bbad9bba2eb7779ac3c17b))
+
+### Maintenance
+
+* remove stale kv service wrapper ([#226](https://github.com/solana-foundation/solana-developer-platform/pull/226)) ([8e6e0bb](https://github.com/solana-foundation/solana-developer-platform/commit/8e6e0bbbf8319c3ca8cf0d0566d9a96e3e35dd5a))
+* HOO-444 make providers optional for self hosted ([#228](https://github.com/solana-foundation/solana-developer-platform/pull/228)) ([e1af00f](https://github.com/solana-foundation/solana-developer-platform/commit/e1af00f3ec01fd2244e06b238988b6acd586d213))
+* HOO-424 rewrite repo docs for open source launch ([#193](https://github.com/solana-foundation/solana-developer-platform/pull/193)) ([87c452a](https://github.com/solana-foundation/solana-developer-platform/commit/87c452a91faf5a1923fefd4525f675c0d4645042))
+* remove stale web infra scaffolding ([a214f62](https://github.com/solana-foundation/solana-developer-platform/commit/a214f62cd027b99254d8e7ad49e2f5234d563d41))
+
 ## [0.17.1](https://github.com/solana-foundation/solana-developer-platform/compare/v0.17.0...v0.17.1) (2026-04-21)
 
 ### Other Changes
