@@ -65,7 +65,7 @@ export const walletSchema = z
 export const walletPolicySchema = z
   .object({
     walletId: walletIdParamSchema.openapi({
-      description: "Custody wallet ID from /v1/custody/wallets.",
+      description: "Custody wallet ID from /v1/wallets.",
       example: "wal_example",
     }),
     destinationAllowlist: z.array(solanaAddressSchema).openapi({
@@ -141,7 +141,7 @@ export const tokenBalanceSchema = z
 export const walletBalancesSchema = z
   .object({
     walletId: walletIdParamSchema.openapi({
-      description: "Custody wallet ID from /v1/custody/wallets.",
+      description: "Custody wallet ID from /v1/wallets.",
       example: "wal_example",
     }),
     address: solanaAddressSchema.openapi({ description: "Wallet address." }),
@@ -149,7 +149,7 @@ export const walletBalancesSchema = z
   })
   .openapi({
     description:
-      "Balance payload for a custody-managed wallet. Use /v1/custody/wallets for wallet provisioning and listing.",
+      "Balance payload for a custody-managed wallet. Use /v1/wallets for wallet provisioning and listing.",
   });
 
 export const createTransferRequestSchema = z
@@ -158,7 +158,7 @@ export const createTransferRequestSchema = z
       .optional()
       .openapi({ description: "Project identifier for the transfer context." }),
     source: z.string().openapi({
-      description: "Source custody wallet ID from /v1/custody/wallets.",
+      description: "Source custody wallet ID from /v1/wallets.",
       example: "wal_example",
     }),
     destination: solanaAddressSchema.openapi({ description: "Destination wallet address." }),
@@ -185,7 +185,7 @@ export const prepareTransferRequestSchema = z
       .optional()
       .openapi({ description: "Project identifier for the transfer context." }),
     source: z.string().openapi({
-      description: "Source custody wallet ID from /v1/custody/wallets.",
+      description: "Source custody wallet ID from /v1/wallets.",
       example: "wal_example",
     }),
     destination: solanaAddressSchema.openapi({ description: "Destination wallet address." }),

@@ -19,7 +19,7 @@ These operations are available from the dashboard and the API.
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
 ```bash
-curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/mint \
+curl -X POST /v1/issuance/tokens/tok_abc123/mint \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: mint-001" \
@@ -35,7 +35,7 @@ curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/mint \
 <Tab value="TypeScript">
 ```typescript
 const response = await fetch(
-  "https://api.solana.com/v1/issuance/tokens/tok_abc123/mint",
+  "/v1/issuance/tokens/tok_abc123/mint",
   {
     method: "POST",
     headers: {
@@ -58,7 +58,7 @@ const { data } = await response.json();
 <Tab value="Java">
 ```java
 HttpRequest request = HttpRequest.newBuilder()
-    .uri(URI.create("https://api.solana.com/v1/issuance/tokens/tok_abc123/mint"))
+    .uri(URI.create("/v1/issuance/tokens/tok_abc123/mint"))
     .header("Authorization", "Bearer sk_test_...")
     .header("Content-Type", "application/json")
     .header("Idempotency-Key", "mint-001")
@@ -84,7 +84,7 @@ Add `/prepare` to simulate before signing:
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
 ```bash
-curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/mint/prepare \
+curl -X POST /v1/issuance/tokens/tok_abc123/mint/prepare \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
   -d '{
@@ -99,7 +99,7 @@ curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/mint/prepare \
 <Tab value="TypeScript">
 ```typescript
 const response = await fetch(
-  "https://api.solana.com/v1/issuance/tokens/tok_abc123/mint/prepare",
+  "/v1/issuance/tokens/tok_abc123/mint/prepare",
   {
     method: "POST",
     headers: {
@@ -120,7 +120,7 @@ const { data } = await response.json();
 <Tab value="Java">
 ```java
 HttpRequest request = HttpRequest.newBuilder()
-    .uri(URI.create("https://api.solana.com/v1/issuance/tokens/tok_abc123/mint/prepare"))
+    .uri(URI.create("/v1/issuance/tokens/tok_abc123/mint/prepare"))
     .header("Authorization", "Bearer sk_test_...")
     .header("Content-Type", "application/json")
     .POST(HttpRequest.BodyPublishers.ofString("""
@@ -149,7 +149,7 @@ Burn tokens from an account your wallet controls:
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
 ```bash
-curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/burn \
+curl -X POST /v1/issuance/tokens/tok_abc123/burn \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: burn-001" \
@@ -165,7 +165,7 @@ curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/burn \
 <Tab value="TypeScript">
 ```typescript
 await fetch(
-  "https://api.solana.com/v1/issuance/tokens/tok_abc123/burn",
+  "/v1/issuance/tokens/tok_abc123/burn",
   {
     method: "POST",
     headers: {
@@ -187,7 +187,7 @@ await fetch(
 <Tab value="Java">
 ```java
 HttpRequest request = HttpRequest.newBuilder()
-    .uri(URI.create("https://api.solana.com/v1/issuance/tokens/tok_abc123/burn"))
+    .uri(URI.create("/v1/issuance/tokens/tok_abc123/burn"))
     .header("Authorization", "Bearer sk_test_...")
     .header("Content-Type", "application/json")
     .header("Idempotency-Key", "burn-001")
@@ -213,7 +213,7 @@ Burn tokens from any account without the holder's signature. Requires `tokens:ad
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
 ```bash
-curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/force-burn \
+curl -X POST /v1/issuance/tokens/tok_abc123/force-burn \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: force-burn-001" \
@@ -229,7 +229,7 @@ curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/force-burn \
 <Tab value="TypeScript">
 ```typescript
 await fetch(
-  "https://api.solana.com/v1/issuance/tokens/tok_abc123/force-burn",
+  "/v1/issuance/tokens/tok_abc123/force-burn",
   {
     method: "POST",
     headers: {
@@ -251,7 +251,7 @@ await fetch(
 <Tab value="Java">
 ```java
 HttpRequest request = HttpRequest.newBuilder()
-    .uri(URI.create("https://api.solana.com/v1/issuance/tokens/tok_abc123/force-burn"))
+    .uri(URI.create("/v1/issuance/tokens/tok_abc123/force-burn"))
     .header("Authorization", "Bearer sk_test_...")
     .header("Content-Type", "application/json")
     .header("Idempotency-Key", "force-burn-001")
@@ -277,14 +277,14 @@ After minting or burning, refresh the cached supply:
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
 ```bash
-curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/supply/refresh \
+curl -X POST /v1/issuance/tokens/tok_abc123/supply/refresh \
   -H "Authorization: Bearer sk_test_..."
 ```
 </Tab>
 <Tab value="TypeScript">
 ```typescript
 await fetch(
-  "https://api.solana.com/v1/issuance/tokens/tok_abc123/supply/refresh",
+  "/v1/issuance/tokens/tok_abc123/supply/refresh",
   {
     method: "POST",
     headers: { "Authorization": "Bearer sk_test_..." },
@@ -295,7 +295,7 @@ await fetch(
 <Tab value="Java">
 ```java
 HttpRequest request = HttpRequest.newBuilder()
-    .uri(URI.create("https://api.solana.com/v1/issuance/tokens/tok_abc123/supply/refresh"))
+    .uri(URI.create("/v1/issuance/tokens/tok_abc123/supply/refresh"))
     .header("Authorization", "Bearer sk_test_...")
     .POST(HttpRequest.BodyPublishers.noBody())
     .build();

@@ -17,7 +17,7 @@ When a token is created without an allowlist, the dashboard hides allowlist mana
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
 ```bash
-curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/allowlist \
+curl -X POST /v1/issuance/tokens/tok_abc123/allowlist \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
   -d '{
@@ -29,7 +29,7 @@ curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/allowlist \
 <Tab value="TypeScript">
 ```typescript
 const response = await fetch(
-  "https://api.solana.com/v1/issuance/tokens/tok_abc123/allowlist",
+  "/v1/issuance/tokens/tok_abc123/allowlist",
   {
     method: "POST",
     headers: {
@@ -47,7 +47,7 @@ const response = await fetch(
 <Tab value="Java">
 ```java
 HttpRequest request = HttpRequest.newBuilder()
-    .uri(URI.create("https://api.solana.com/v1/issuance/tokens/tok_abc123/allowlist"))
+    .uri(URI.create("/v1/issuance/tokens/tok_abc123/allowlist"))
     .header("Authorization", "Bearer sk_test_...")
     .header("Content-Type", "application/json")
     .POST(HttpRequest.BodyPublishers.ofString("""
@@ -67,14 +67,14 @@ The `label` field is optional but recommended for identifying entries.
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
 ```bash
-curl https://api.solana.com/v1/issuance/tokens/tok_abc123/allowlist \
+curl /v1/issuance/tokens/tok_abc123/allowlist \
   -H "Authorization: Bearer sk_test_..."
 ```
 </Tab>
 <Tab value="TypeScript">
 ```typescript
 const response = await fetch(
-  "https://api.solana.com/v1/issuance/tokens/tok_abc123/allowlist",
+  "/v1/issuance/tokens/tok_abc123/allowlist",
   { headers: { "Authorization": "Bearer sk_test_..." } }
 );
 const { data, meta } = await response.json();
@@ -84,7 +84,7 @@ const { data, meta } = await response.json();
 <Tab value="Java">
 ```java
 HttpRequest request = HttpRequest.newBuilder()
-    .uri(URI.create("https://api.solana.com/v1/issuance/tokens/tok_abc123/allowlist"))
+    .uri(URI.create("/v1/issuance/tokens/tok_abc123/allowlist"))
     .header("Authorization", "Bearer sk_test_...")
     .GET()
     .build();
@@ -100,14 +100,14 @@ Supports `page` and `pageSize` query parameters for pagination.
 <Tab value="curl">
 ```bash
 curl -X DELETE \
-  https://api.solana.com/v1/issuance/tokens/tok_abc123/allowlist/alw_abc123 \
+  /v1/issuance/tokens/tok_abc123/allowlist/alw_abc123 \
   -H "Authorization: Bearer sk_test_..."
 ```
 </Tab>
 <Tab value="TypeScript">
 ```typescript
 await fetch(
-  "https://api.solana.com/v1/issuance/tokens/tok_abc123/allowlist/alw_abc123",
+  "/v1/issuance/tokens/tok_abc123/allowlist/alw_abc123",
   {
     method: "DELETE",
     headers: { "Authorization": "Bearer sk_test_..." },
@@ -118,7 +118,7 @@ await fetch(
 <Tab value="Java">
 ```java
 HttpRequest request = HttpRequest.newBuilder()
-    .uri(URI.create("https://api.solana.com/v1/issuance/tokens/tok_abc123/allowlist/alw_abc123"))
+    .uri(URI.create("/v1/issuance/tokens/tok_abc123/allowlist/alw_abc123"))
     .header("Authorization", "Bearer sk_test_...")
     .DELETE()
     .build();

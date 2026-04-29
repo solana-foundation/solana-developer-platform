@@ -1,17 +1,16 @@
 import { Tab, Tabs } from "fumadocs-ui/components/tabs";
-import defaultMdxComponents from "fumadocs-ui/mdx";
-import { DocsBody, DocsDescription, DocsPage, DocsTitle } from "fumadocs-ui/page";
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import type { ComponentType } from "react";
+import { DocsBody, DocsDescription, DocsPage, DocsTitle } from "@/components/docs-shell/page";
 import { getDocsPagePath } from "@/lib/site";
 import { source } from "@/lib/source";
+import { getMDXComponents } from "../../../../mdx-components";
 
-const mdxComponents = {
-  ...defaultMdxComponents,
+const mdxComponents = getMDXComponents({
   Tabs,
   Tab,
-};
+});
 
 type DocsData = {
   title: string;

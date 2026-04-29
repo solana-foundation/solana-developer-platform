@@ -15,7 +15,7 @@
 
 ## Provider Contributions
 
-SDP is designed to support provider integrations across custody, RPC, compliance, payments, ramps, and related infrastructure. Provider onboarding is self-service for the initial contribution: providers can prepare the integration, open the required access, and submit a PR for review. See the [Provider Onboarding docs](./apps/sdp-docs/content/docs/guides/provider-onboarding.mdx) for provider-type criteria covering RPC, custody, ramps, and compliance.
+SDP is designed to support provider integrations across custody, RPC, compliance, payments, ramps, and related infrastructure. Provider onboarding is self-service for the initial contribution: providers can prepare the integration, open the required access, and submit a PR for review. See the [Provider Onboarding docs](./apps/sdp-docs/content/docs/reference/provider-onboarding.mdx) for provider-type criteria covering RPC, custody, ramps, and compliance.
 
 Before opening an SDP integration PR:
 
