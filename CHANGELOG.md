@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.18.3](https://github.com/solana-foundation/solana-developer-platform/compare/v0.18.2...v0.18.3) (2026-04-29)
+
+### Bug Fixes
+
+* **api:** render Worker vars from Doppler ([#242](https://github.com/solana-foundation/solana-developer-platform/pull/242)) ([0b94ef0](https://github.com/solana-foundation/solana-developer-platform/commit/0b94ef028d14c76d59301da29a4396f6ad1e1c07))
+
 ## [0.18.2](https://github.com/solana-foundation/solana-developer-platform/compare/v0.18.1...v0.18.2) (2026-04-29)
 
 ### Bug Fixes
