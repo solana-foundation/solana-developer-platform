@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
+import { COMMITTED_WORKER_VAR_KEYS } from "./secret-keys.mjs";
 
 const TARGETS = new Set(["dev", "production"]);
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -55,6 +56,10 @@ function isPlaceholderLike(value) {
   );
 }
 
+function isWorkerVarPlaceholderLike(value) {
+  return value === "0".repeat(32) || value.startsWith("your_") || value.includes("your-");
+}
+
 function requireBindingValue(envVar) {
   const value = process.env[envVar]?.trim();
 
@@ -67,6 +72,69 @@ function requireBindingValue(envVar) {
   }
 
   return value;
+}
+
+function tomlString(value) {
+  return JSON.stringify(value);
+}
+
+function getTargetVarsSectionPattern(target) {
+  return new RegExp(`(\\[env\\.${target}\\.vars\\]\\n)([\\s\\S]*?)(?=\\n\\[[^\\n]+\\]|$)`);
+}
+
+function renderWorkerVars(contents, target) {
+  const sectionPattern = getTargetVarsSectionPattern(target);
+  const match = sectionPattern.exec(contents);
+
+  if (!match) {
+    throw new Error(`Expected [env.${target}.vars] section was not found in Wrangler config.`);
+  }
+
+  const [, heading, sectionBody] = match;
+  let renderedBody = sectionBody;
+
+  for (const key of COMMITTED_WORKER_VAR_KEYS) {
+    const value = process.env[key]?.trim();
+    if (!value) {
+      continue;
+    }
+
+    const keyPattern = new RegExp(`^${key}\\s*=\\s*.*$`, "m");
+    if (!keyPattern.test(renderedBody)) {
+      renderedBody = `${renderedBody.replace(/\n?$/, "\n")}${key} = ${tomlString(value)}\n`;
+      continue;
+    }
+
+    renderedBody = renderedBody.replace(keyPattern, `${key} = ${tomlString(value)}`);
+  }
+
+  return contents.replace(sectionPattern, `${heading}${renderedBody}`);
+}
+
+function validateWorkerVars(contents, target) {
+  const sectionPattern = getTargetVarsSectionPattern(target);
+  const match = sectionPattern.exec(contents);
+  if (!match) {
+    throw new Error(`Expected [env.${target}.vars] section was not found in rendered config.`);
+  }
+
+  const sectionBody = match[2];
+  const invalidVars = [];
+
+  for (const key of COMMITTED_WORKER_VAR_KEYS) {
+    const keyPattern = new RegExp(`^${key}\\s*=\\s*"([^"]*)"`, "m");
+    const keyMatch = keyPattern.exec(sectionBody);
+    const value = keyMatch?.[1]?.trim();
+    if (value && isWorkerVarPlaceholderLike(value)) {
+      invalidVars.push(key);
+    }
+  }
+
+  if (invalidVars.length > 0) {
+    throw new Error(
+      `Wrangler config still contains placeholder values for ${target}: ${invalidVars.join(", ")}`
+    );
+  }
 }
 
 function renderWranglerConfig({ configPath, outPath, target }) {
@@ -83,6 +151,8 @@ function renderWranglerConfig({ configPath, outPath, target }) {
     contents = contents.replaceAll(placeholder, value);
   }
 
+  contents = renderWorkerVars(contents, target);
+
   const remainingTargetPlaceholders = BINDING_REPLACEMENTS.map(
     (replacement) => replacement.placeholders[target]
   ).filter((placeholder) => contents.includes(placeholder));
@@ -92,6 +162,8 @@ function renderWranglerConfig({ configPath, outPath, target }) {
       `Wrangler config still contains unresolved ${target} placeholders: ${remainingTargetPlaceholders.join(", ")}`
     );
   }
+
+  validateWorkerVars(contents, target);
 
   fs.mkdirSync(path.dirname(outPath), { recursive: true });
   fs.writeFileSync(outPath, contents, "utf8");
