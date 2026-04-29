@@ -91,7 +91,17 @@ FEE_PAYMENT_PROVIDER=kora
 # TURNKEY_PRIVATE_KEY_ID=YOUR_DEFAULT_TURNKEY_PRIVATE_KEY_ID
 # TURNKEY_PUBLIC_KEY=YOUR_DEFAULT_TURNKEY_SOLANA_PUBLIC_KEY
 
-# Clerk webhook (required for Clerk org linking)
+# Clerk auth + webhook
+# See docs/self-hosting/clerk-setup.md for the end-to-end walkthrough
+# (account creation, JWT template, webhook relay via Svix CLI).
+#
+# Issuer URL — find in Clerk dashboard → API Keys (e.g. https://<slug>.clerk.accounts.dev)
+CLERK_ISSUER=
+# Optional: only set if you configure an `aud` claim in the JWT template
+# CLERK_AUDIENCE=
+# Optional: defaults to ${CLERK_ISSUER}/.well-known/jwks.json
+# CLERK_JWKS_URL=
+# Webhook signing secret from the Clerk endpoint that points at /webhooks/clerk/link-orgs
 CLERK_WEBHOOK_SECRET=whsec_...
 
 # Compliance providers
