@@ -1,8 +1,13 @@
 "use server";
 
+import { auth } from "@clerk/nextjs/server";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { sdpApiFetch, sdpApiRequest } from "@/lib/sdp-api";
+
+const DEVNET_FAUCET_RPC_URL = "https://api.devnet.solana.com";
+const DEVNET_FAUCET_LAMPORTS = 1_000_000_000;
+const SOLANA_ADDRESS_PATTERN = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
 function getString(formData: FormData, key: string): string {
   return String(formData.get(key) ?? "").trim();
@@ -302,11 +307,32 @@ interface WalletSignerCheckResponse {
   signature: string;
 }
 
+interface SolanaRpcAirdropResponse {
+  result?: string;
+  error?: {
+    code?: number;
+    message?: string;
+    data?: unknown;
+  };
+}
+
 export type WalletSignerCheckActionResult =
   | {
       status: "success";
       walletId: string;
       signature: string;
+    }
+  | {
+      status: "error";
+      message: string;
+    };
+
+export type WalletFaucetActionResult =
+  | {
+      status: "success";
+      walletId: string;
+      signature: string;
+      amountSol: number;
     }
   | {
       status: "error";
@@ -373,5 +399,75 @@ export async function checkWalletSignerMemoAction(
         // Best-effort cleanup of short-lived key.
       }
     }
+  }
+}
+
+export async function requestDevnetSolanaFaucetAction(
+  walletId: string,
+  walletAddress: string
+): Promise<WalletFaucetActionResult> {
+  const resolvedWalletId = walletId.trim();
+  const resolvedWalletAddress = walletAddress.trim();
+  if (!resolvedWalletId) {
+    return { status: "error", message: "walletId is required" };
+  }
+  if (!SOLANA_ADDRESS_PATTERN.test(resolvedWalletAddress)) {
+    return { status: "error", message: "A valid wallet address is required" };
+  }
+
+  const { orgId, userId } = await auth();
+  if (!userId || !orgId) {
+    return { status: "error", message: "Sign in to request devnet SOL." };
+  }
+
+  try {
+    const response = await fetch(DEVNET_FAUCET_RPC_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: crypto.randomUUID(),
+        method: "requestAirdrop",
+        params: [resolvedWalletAddress, DEVNET_FAUCET_LAMPORTS],
+      }),
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      return {
+        status: "error",
+        message: `Devnet faucet request failed with HTTP ${response.status}.`,
+      };
+    }
+
+    const payload = (await response.json()) as SolanaRpcAirdropResponse;
+    if (payload.error) {
+      return {
+        status: "error",
+        message: payload.error.message ?? "Devnet faucet request failed.",
+      };
+    }
+    if (!payload.result) {
+      return { status: "error", message: "Devnet faucet returned no transaction signature." };
+    }
+
+    revalidatePath("/dashboard/custody");
+    revalidatePath("/dashboard/wallets");
+    revalidatePath(`/dashboard/custody/${encodeURIComponent(resolvedWalletId)}`);
+    revalidatePath(`/dashboard/wallets/${encodeURIComponent(resolvedWalletId)}`);
+
+    return {
+      status: "success",
+      walletId: resolvedWalletId,
+      signature: payload.result,
+      amountSol: DEVNET_FAUCET_LAMPORTS / 1_000_000_000,
+    };
+  } catch (error) {
+    return {
+      status: "error",
+      message: extractErrorMessage(error),
+    };
   }
 }
