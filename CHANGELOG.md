@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.18.1](https://github.com/solana-foundation/solana-developer-platform/compare/v0.18.0...v0.18.1) (2026-04-29)
+
+### Other Changes
+
+* Fix docs dark mode tokens ([#236](https://github.com/solana-foundation/solana-developer-platform/pull/236)) ([40d23c7](https://github.com/solana-foundation/solana-developer-platform/commit/40d23c7c23d6ecd992ac2dea7831a00484dfb584))
+
 ## [0.18.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.17.3...v0.18.0) (2026-04-29)
 
 ### Features
