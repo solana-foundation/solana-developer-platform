@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.18.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.17.3...v0.18.0) (2026-04-29)
+
+### Features
+
+* add devnet faucet wallet action ([#235](https://github.com/solana-foundation/solana-developer-platform/pull/235)) ([c23f5fe](https://github.com/solana-foundation/solana-developer-platform/commit/c23f5feda038e45bc69acc7dab345db6765edbd3))
+
+### Documentation
+
+* fix public API readiness references ([#233](https://github.com/solana-foundation/solana-developer-platform/pull/233)) ([e5b514c](https://github.com/solana-foundation/solana-developer-platform/commit/e5b514cf11cfb3e2c6b4e81b62cb1ff177721631))
+
 ## [0.17.3](https://github.com/solana-foundation/solana-developer-platform/compare/v0.17.2...v0.17.3) (2026-04-29)
 
 ### Documentation
