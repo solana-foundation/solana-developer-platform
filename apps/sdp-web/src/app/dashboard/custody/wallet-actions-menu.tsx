@@ -50,14 +50,22 @@ export function WalletActionsMenu({
   const resolvedWalletLabel = formatWalletLabel(walletLabel, walletAddress);
 
   const runSignerCheck = () => {
+    const toastId = toast.loading("Sending signer check.", {
+      position: "bottom-right",
+    });
+
     startTransition(() => {
       void (async () => {
-        const result = await checkWalletSignerMemoAction(walletId);
+        const result = await checkWalletSignerMemoAction(walletId).catch((error) => ({
+          status: "error" as const,
+          message: error instanceof Error ? error.message : "Signer check failed.",
+        }));
 
         if (result.status === "success") {
           const explorerUrl = getDevnetExplorerUrl(result.signature);
 
           toast.success("Signer check sent.", {
+            id: toastId,
             description: (
               <span>
                 Memo transaction submitted.{" "}
@@ -77,6 +85,7 @@ export function WalletActionsMenu({
         }
 
         toast.error("Signer check failed.", {
+          id: toastId,
           description: result.message,
           position: "bottom-right",
         });
@@ -91,7 +100,12 @@ export function WalletActionsMenu({
 
     startTransition(() => {
       void (async () => {
-        const result = await requestDevnetSolanaFaucetAction(walletId, walletAddress);
+        const result = await requestDevnetSolanaFaucetAction(walletId, walletAddress).catch(
+          (error) => ({
+            status: "error" as const,
+            message: error instanceof Error ? error.message : "Devnet faucet failed.",
+          })
+        );
 
         if (result.status === "success") {
           const explorerUrl = getDevnetExplorerUrl(result.signature);

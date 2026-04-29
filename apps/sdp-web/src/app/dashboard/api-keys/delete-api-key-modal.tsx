@@ -68,22 +68,28 @@ export function DeleteApiKeyModal({
     }
 
     setIsSubmitting(true);
+    const toastId = toast.loading("Deleting API key.", {
+      position: "bottom-right",
+    });
 
     const result = await deactivateApiKeyInlineAction({
       keyId,
       keyName,
       confirmation,
-    });
+    }).catch((error) => ({
+      ok: false,
+      message: error instanceof Error ? error.message : "Unable to delete API key.",
+    }));
 
     if (result.ok) {
       close();
-      toast.success(result.message);
+      toast.success(result.message, { id: toastId, position: "bottom-right" });
       onDeleted?.();
       return;
     }
 
     setIsSubmitting(false);
-    toast.error(result.message);
+    toast.error(result.message, { id: toastId, position: "bottom-right" });
   };
 
   return (

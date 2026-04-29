@@ -34,18 +34,27 @@ export function WalletLabelInlineEditor({
   };
 
   const handleSubmit = () => {
+    const toastId = toast.loading("Updating wallet label.", {
+      position: "bottom-right",
+    });
+
     startTransition(async () => {
-      const result = await updateWalletLabelAction(walletId, draft);
+      const result = await updateWalletLabelAction(walletId, draft).catch((error) => ({
+        status: "error" as const,
+        message: error instanceof Error ? error.message : "Unable to update wallet label.",
+      }));
 
       if (result.status === "success") {
-        toast.success("Wallet label updated.");
+        toast.success("Wallet label updated.", { id: toastId, position: "bottom-right" });
         setIsEditing(false);
         router.refresh();
         return;
       }
 
       toast.error("Unable to update wallet label.", {
+        id: toastId,
         description: result.message,
+        position: "bottom-right",
       });
     });
   };

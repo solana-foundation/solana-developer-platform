@@ -538,6 +538,76 @@ describe("RPC Relay Routes", () => {
     expect(secondBody.data.selected.providerId).toBe("helius");
   });
 
+  it("round-robins faucet airdrops and falls back after provider rate limits", async () => {
+    const db = getDb(env);
+    const cacheKV = (env as { SDP_CACHE: KVNamespace }).SDP_CACHE;
+    await db
+      .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
+      .bind(JSON.stringify({ rpcProvider: "triton" }), TEST_ORG.id)
+      .run();
+    await cacheKV.put("rpc:relay:round-robin-cursor", "1");
+
+    rpcEnv.SOLANA_RPC_TRITON_URL = "https://rpc.triton.test";
+    rpcEnv.SOLANA_RPC_HELIUS_URL = "https://rpc.helius.test";
+
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes("rpc.helius.test")) {
+        return new Response(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: "faucet-test",
+            error: { code: -32429, message: "Too many airdrop requests" },
+          }),
+          {
+            status: 429,
+            headers: { "Content-Type": "application/json" },
+          }
+        );
+      }
+
+      return new Response(
+        JSON.stringify({ jsonrpc: "2.0", id: "faucet-test", result: "triton_airdrop_sig" }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }
+      );
+    });
+
+    try {
+      const relayResponse = await app.request(
+        "/v1/rpc/proxy",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY_RAW}`,
+          },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: "faucet-test",
+            method: "requestAirdrop",
+            params: ["6bh8QhvDDd4rWRXggYpYwwCCkdaqSpkBg77vK39Tvujg", 1],
+          }),
+        },
+        env
+      );
+
+      expect(relayResponse.status).toBe(200);
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+      expect(String(fetchSpy.mock.calls[0][0])).toContain("rpc.helius.test");
+      expect(String(fetchSpy.mock.calls[1][0])).toContain("rpc.triton.test");
+
+      const body = await relayResponse.json();
+      expect(body.data.provider.id).toBe("triton");
+      expect(body.data.provider.selectionMode).toBe("round_robin_default");
+      expect(body.data.response.result).toBe("triton_airdrop_sig");
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
   it("tracks transaction telemetry and origins per provider", async () => {
     const db = getDb(env);
     await db

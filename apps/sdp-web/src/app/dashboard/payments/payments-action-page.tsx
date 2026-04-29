@@ -1408,6 +1408,9 @@ export function PaymentsActionPage({
 
     setExecutionState("submitting");
     setExecutionError(null);
+    const toastId = toast.loading("Submitting transfer.", {
+      position: "bottom-right",
+    });
 
     try {
       const transfer = await createTransfer({
@@ -1424,6 +1427,7 @@ export function PaymentsActionPage({
       setExecutionState("success");
 
       toast.success("Transfer submitted.", {
+        id: toastId,
         description: transfer.signature
           ? "Transaction sent successfully."
           : `Status: ${transfer.status}`,
@@ -1433,6 +1437,7 @@ export function PaymentsActionPage({
       setExecutionState("idle");
       setExecutionError(error instanceof Error ? error.message : "Transfer failed.");
       toast.error("Transfer failed.", {
+        id: toastId,
         description: error instanceof Error ? error.message : "Transfer failed.",
         position: "bottom-right",
       });
@@ -1521,6 +1526,9 @@ export function PaymentsActionPage({
 
     setExecutionState("submitting");
     setExecutionError(null);
+    const toastId = toast.loading(`Preparing ${providerLabel ?? "provider"} flow.`, {
+      position: "bottom-right",
+    });
 
     try {
       const execution = await executeRampFlow(
@@ -1530,12 +1538,14 @@ export function PaymentsActionPage({
       setRampExecution(execution);
       setExecutionState("success");
       toast.success(`${providerLabel ?? "Provider"} flow ready.`, {
+        id: toastId,
         position: "bottom-right",
       });
     } catch (error) {
       setExecutionState("idle");
       setExecutionError(error instanceof Error ? error.message : "Ramp request failed.");
       toast.error(`${providerLabel ?? "Provider"} flow failed to initialize.`, {
+        id: toastId,
         description: error instanceof Error ? error.message : "Ramp request failed.",
         position: "bottom-right",
       });
