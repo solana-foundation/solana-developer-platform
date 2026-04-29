@@ -5,7 +5,6 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { sdpApiFetch, sdpApiRequest } from "@/lib/sdp-api";
 
-const DEVNET_FAUCET_RPC_URL = "https://api.devnet.solana.com";
 const DEVNET_FAUCET_LAMPORTS = 1_000_000_000;
 const SOLANA_ADDRESS_PATTERN = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
@@ -316,6 +315,20 @@ interface SolanaRpcAirdropResponse {
   };
 }
 
+interface RpcRelayResponse<TResponse> {
+  provider: {
+    id: string;
+    selectionMode: string;
+    endpoint: string;
+  };
+  upstream: {
+    ok: boolean;
+    status: number;
+    statusText: string;
+  };
+  response: TResponse | null;
+}
+
 export type WalletSignerCheckActionResult =
   | {
       status: "success";
@@ -415,38 +428,42 @@ export async function requestDevnetSolanaFaucetAction(
     return { status: "error", message: "A valid wallet address is required" };
   }
 
-  const { orgId, userId } = await auth();
-  if (!userId || !orgId) {
-    return { status: "error", message: "Sign in to request devnet SOL." };
-  }
-
   try {
-    const response = await fetch(DEVNET_FAUCET_RPC_URL, {
+    const { orgId, userId } = await auth();
+    if (!userId || !orgId) {
+      return { status: "error", message: "Sign in to request devnet SOL." };
+    }
+
+    const relay = await sdpApiFetch<RpcRelayResponse<SolanaRpcAirdropResponse>>("/v1/rpc/proxy", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
       body: JSON.stringify({
         jsonrpc: "2.0",
-        id: crypto.randomUUID(),
+        id: `wallet-faucet-${resolvedWalletId}`,
         method: "requestAirdrop",
         params: [resolvedWalletAddress, DEVNET_FAUCET_LAMPORTS],
       }),
-      cache: "no-store",
     });
 
-    if (!response.ok) {
+    if (!relay.upstream.ok) {
       return {
         status: "error",
-        message: `Devnet faucet request failed with HTTP ${response.status}.`,
+        message: `Devnet faucet RPC provider ${relay.provider.id} returned HTTP ${relay.upstream.status}.`,
       };
     }
 
-    const payload = (await response.json()) as SolanaRpcAirdropResponse;
+    const payload = relay.response;
+    if (!payload) {
+      return { status: "error", message: "Devnet faucet returned an empty RPC response." };
+    }
+
     if (payload.error) {
+      const rpcMessage = payload.error.message?.trim();
       return {
         status: "error",
-        message: payload.error.message ?? "Devnet faucet request failed.",
+        message:
+          rpcMessage && rpcMessage.length > 0
+            ? `Devnet faucet RPC provider ${relay.provider.id} returned: ${rpcMessage}`
+            : `Devnet faucet RPC provider ${relay.provider.id} returned an error.`,
       };
     }
     if (!payload.result) {
@@ -467,7 +484,7 @@ export async function requestDevnetSolanaFaucetAction(
   } catch (error) {
     return {
       status: "error",
-      message: extractErrorMessage(error),
+      message: toApiActionErrorMessage(error),
     };
   }
 }
