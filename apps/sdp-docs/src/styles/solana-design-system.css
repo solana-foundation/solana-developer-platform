@@ -112,12 +112,12 @@
 .prose li code,
 .prose td code,
 .prose th code {
-  background-color: oklch(0.927 0.005 286.25) !important; /* sand-200 */
-  color: oklch(0.2269 0.002 286.25) !important; /* sand-1500 */
+  background-color: var(--launch-inline-code-bg) !important;
+  color: var(--launch-inline-code-text) !important;
   padding: 0.125rem 0.375rem !important;
   border-radius: 0.375rem !important;
   font-size: 0.75rem !important; /* text-xs */
-  border: 1px solid oklch(0.839 0.009 286.25) !important; /* sand-400 */
+  border: 1px solid var(--launch-inline-code-border) !important;
   font-family: var(--font-berkeley-mono), ui-monospace, monospace !important;
 }
 
