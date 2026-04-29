@@ -18,7 +18,7 @@ Transfers are available through the Payments dashboard and the API.
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
 ```bash
-curl -X POST /v1/payments/transfers \
+curl -X POST https://api.solana.com/v1/payments/transfers \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: transfer-001" \
@@ -34,7 +34,7 @@ curl -X POST /v1/payments/transfers \
 <Tab value="TypeScript">
 ```typescript
 const response = await fetch(
-  "/v1/payments/transfers",
+  "https://api.solana.com/v1/payments/transfers",
   {
     method: "POST",
     headers: {
@@ -57,7 +57,7 @@ const { data } = await response.json();
 <Tab value="Java">
 ```java
 HttpRequest request = HttpRequest.newBuilder()
-    .uri(URI.create("/v1/payments/transfers"))
+    .uri(URI.create("https://api.solana.com/v1/payments/transfers"))
     .header("Authorization", "Bearer sk_test_...")
     .header("Content-Type", "application/json")
     .header("Idempotency-Key", "transfer-001")
@@ -79,7 +79,7 @@ HttpRequest request = HttpRequest.newBuilder()
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
 ```bash
-curl -X POST /v1/payments/transfers/prepare \
+curl -X POST https://api.solana.com/v1/payments/transfers/prepare \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
   -d '{
@@ -95,7 +95,7 @@ curl -X POST /v1/payments/transfers/prepare \
 <Tab value="TypeScript">
 ```typescript
 const response = await fetch(
-  "/v1/payments/transfers/prepare",
+  "https://api.solana.com/v1/payments/transfers/prepare",
   {
     method: "POST",
     headers: {
@@ -119,7 +119,7 @@ const { data } = await response.json();
 <Tab value="Java">
 ```java
 HttpRequest request = HttpRequest.newBuilder()
-    .uri(URI.create("/v1/payments/transfers/prepare"))
+    .uri(URI.create("https://api.solana.com/v1/payments/transfers/prepare"))
     .header("Authorization", "Bearer sk_test_...")
     .header("Content-Type", "application/json")
     .POST(HttpRequest.BodyPublishers.ofString("""

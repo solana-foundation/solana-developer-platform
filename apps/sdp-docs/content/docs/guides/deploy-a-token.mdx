@@ -17,7 +17,7 @@ You can deploy from the dashboard or through the API. In the dashboard, open the
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
 ```bash
-curl -X POST /v1/issuance/tokens/tok_abc123/deploy \
+curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/deploy \
   -H "Authorization: Bearer sk_test_..." \
   -H "Idempotency-Key: deploy-acme-001"
 ```
@@ -25,7 +25,7 @@ curl -X POST /v1/issuance/tokens/tok_abc123/deploy \
 <Tab value="TypeScript">
 ```typescript
 const response = await fetch(
-  "/v1/issuance/tokens/tok_abc123/deploy",
+  "https://api.solana.com/v1/issuance/tokens/tok_abc123/deploy",
   {
     method: "POST",
     headers: {
@@ -41,7 +41,7 @@ const { data } = await response.json();
 <Tab value="Java">
 ```java
 HttpRequest request = HttpRequest.newBuilder()
-    .uri(URI.create("/v1/issuance/tokens/tok_abc123/deploy"))
+    .uri(URI.create("https://api.solana.com/v1/issuance/tokens/tok_abc123/deploy"))
     .header("Authorization", "Bearer sk_test_...")
     .header("Idempotency-Key", "deploy-acme-001")
     .POST(HttpRequest.BodyPublishers.noBody())
@@ -57,14 +57,14 @@ The token status changes from `pending` to `active`, and `mintAddress` is popula
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
 ```bash
-curl -X POST /v1/issuance/tokens/tok_abc123/deploy/prepare \
+curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/deploy/prepare \
   -H "Authorization: Bearer sk_test_..."
 ```
 </Tab>
 <Tab value="TypeScript">
 ```typescript
 const response = await fetch(
-  "/v1/issuance/tokens/tok_abc123/deploy/prepare",
+  "https://api.solana.com/v1/issuance/tokens/tok_abc123/deploy/prepare",
   {
     method: "POST",
     headers: { "Authorization": "Bearer sk_test_..." },
@@ -77,7 +77,7 @@ const { data } = await response.json();
 <Tab value="Java">
 ```java
 HttpRequest request = HttpRequest.newBuilder()
-    .uri(URI.create("/v1/issuance/tokens/tok_abc123/deploy/prepare"))
+    .uri(URI.create("https://api.solana.com/v1/issuance/tokens/tok_abc123/deploy/prepare"))
     .header("Authorization", "Bearer sk_test_...")
     .POST(HttpRequest.BodyPublishers.noBody())
     .build();

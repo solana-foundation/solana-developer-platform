@@ -64,13 +64,13 @@ A success toast confirms creation. The token is now in `pending` status, ready t
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
 ```bash
-curl /v1/issuance/templates \
+curl https://api.solana.com/v1/issuance/templates \
   -H "Authorization: Bearer sk_test_..."
 ```
 </Tab>
 <Tab value="TypeScript">
 ```typescript
-const response = await fetch("/v1/issuance/templates", {
+const response = await fetch("https://api.solana.com/v1/issuance/templates", {
   headers: { "Authorization": "Bearer sk_test_..." },
 });
 const { data } = await response.json();
@@ -79,7 +79,7 @@ const { data } = await response.json();
 <Tab value="Java">
 ```java
 HttpRequest request = HttpRequest.newBuilder()
-    .uri(URI.create("/v1/issuance/templates"))
+    .uri(URI.create("https://api.solana.com/v1/issuance/templates"))
     .header("Authorization", "Bearer sk_test_...")
     .GET()
     .build();
@@ -92,7 +92,7 @@ HttpRequest request = HttpRequest.newBuilder()
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
 ```bash
-curl -X POST /v1/issuance/tokens \
+curl -X POST https://api.solana.com/v1/issuance/tokens \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
   -d '{
@@ -109,7 +109,7 @@ curl -X POST /v1/issuance/tokens \
 </Tab>
 <Tab value="TypeScript">
 ```typescript
-const response = await fetch("/v1/issuance/tokens", {
+const response = await fetch("https://api.solana.com/v1/issuance/tokens", {
   method: "POST",
   headers: {
     "Authorization": "Bearer sk_test_...",
@@ -133,7 +133,7 @@ const { data } = await response.json();
 <Tab value="Java">
 ```java
 HttpRequest request = HttpRequest.newBuilder()
-    .uri(URI.create("/v1/issuance/tokens"))
+    .uri(URI.create("https://api.solana.com/v1/issuance/tokens"))
     .header("Authorization", "Bearer sk_test_...")
     .header("Content-Type", "application/json")
     .POST(HttpRequest.BodyPublishers.ofString("""
@@ -161,7 +161,7 @@ Omit the `template` field or set it to `"custom"` and configure extensions via `
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
 ```bash
-curl -X POST /v1/issuance/tokens \
+curl -X POST https://api.solana.com/v1/issuance/tokens \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
   -d '{
@@ -185,7 +185,7 @@ curl -X POST /v1/issuance/tokens \
 </Tab>
 <Tab value="TypeScript">
 ```typescript
-const response = await fetch("/v1/issuance/tokens", {
+const response = await fetch("https://api.solana.com/v1/issuance/tokens", {
   method: "POST",
   headers: {
     "Authorization": "Bearer sk_test_...",
@@ -211,7 +211,7 @@ const response = await fetch("/v1/issuance/tokens", {
 <Tab value="Java">
 ```java
 HttpRequest request = HttpRequest.newBuilder()
-    .uri(URI.create("/v1/issuance/tokens"))
+    .uri(URI.create("https://api.solana.com/v1/issuance/tokens"))
     .header("Authorization", "Bearer sk_test_...")
     .header("Content-Type", "application/json")
     .POST(HttpRequest.BodyPublishers.ofString("""
