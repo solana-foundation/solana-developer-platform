@@ -17,6 +17,7 @@
     "db:seed:local": "DATABASE_URL=${DATABASE_URL:-postgresql://sdp:sdp@127.0.0.1:5432/sdp} psql \"$DATABASE_URL\" -f src/db/seeds/local.sql",
     "db:postgres:bootstrap": "DATABASE_URL=${DATABASE_URL:-postgresql://sdp:sdp@127.0.0.1:5432/sdp} node scripts/migrate-postgres.mjs",
     "org:tier:local": "tsx scripts/set-organization-tier-local.ts",
+    "keygen:local": "tsx scripts/generate-local-keypair.ts",
     "typecheck": "tsc --noEmit",
     "lint": "biome check src/",
     "lint:fix": "biome check --write src/",

@@ -36,9 +36,16 @@ async function sendClerkWebhook(event: { type: string; data: Record<string, unkn
 }
 
 describe("Clerk webhooks", () => {
+  let originalDeploymentMode: "managed" | "self_hosted" | undefined;
+
   beforeEach(async () => {
     await seedTestDatabase(env);
     env.CLERK_WEBHOOK_SECRET = WEBHOOK_SECRET;
+    // Webhook tier sync is gated by deployment mode — these tests verify the
+    // managed-mode behavior (sync runs), so explicitly clear any leaked
+    // self-hosted setting from .dev.vars / process env.
+    originalDeploymentMode = env.SDP_DEPLOYMENT_MODE;
+    env.SDP_DEPLOYMENT_MODE = undefined;
   });
 
   afterEach(async () => {
@@ -46,6 +53,7 @@ describe("Clerk webhooks", () => {
     env.CLERK_WEBHOOK_SECRET = undefined;
     env.CLERK_SECRET_KEY = undefined;
     env.CLERK_API_URL = undefined;
+    env.SDP_DEPLOYMENT_MODE = originalDeploymentMode;
     await clearTestDatabase(env);
   });
 

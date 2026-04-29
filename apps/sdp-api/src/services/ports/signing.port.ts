@@ -9,7 +9,7 @@
  * Implementations:
  * - KeychainFireblocksAdapter: Fireblocks MPC custody (production)
  * - KeychainPrivyAdapter: Privy hosted wallets (production)
- * - LocalKeypairAdapter: Sync signing using env keypair (development)
+ * - KeychainMemoryAdapter: Sync signing from CUSTODY_PRIVATE_KEY env (SIGNING_PROVIDER=local)
  */
 
 import type { Address, TransactionSigner } from "@solana/kit";

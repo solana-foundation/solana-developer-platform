@@ -46,6 +46,7 @@ let originalTrmApiKey: string | undefined;
 let originalTrmBaseUrl: string | undefined;
 let originalChainalysisApiKey: string | undefined;
 let originalChainalysisBaseUrl: string | undefined;
+let originalDeploymentMode: "managed" | "self_hosted" | undefined;
 
 async function seedAuth(tier: "individual" | "enterprise" = "enterprise"): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
@@ -92,6 +93,7 @@ describe("Compliance routes", () => {
     originalTrmBaseUrl = env.TRM_API_BASE_URL;
     originalChainalysisApiKey = env.CHAINALYSIS_API_KEY;
     originalChainalysisBaseUrl = env.CHAINALYSIS_API_BASE_URL;
+    originalDeploymentMode = env.SDP_DEPLOYMENT_MODE;
 
     env.RANGE_API_KEY = undefined;
     env.RANGE_API_BASE_URL = undefined;
@@ -103,6 +105,7 @@ describe("Compliance routes", () => {
     env.TRM_API_BASE_URL = undefined;
     env.CHAINALYSIS_API_KEY = undefined;
     env.CHAINALYSIS_API_BASE_URL = undefined;
+    env.SDP_DEPLOYMENT_MODE = undefined;
 
     await seedTestDatabase(env);
     await seedAuth();
@@ -119,6 +122,7 @@ describe("Compliance routes", () => {
     env.TRM_API_BASE_URL = originalTrmBaseUrl;
     env.CHAINALYSIS_API_KEY = originalChainalysisApiKey;
     env.CHAINALYSIS_API_BASE_URL = originalChainalysisBaseUrl;
+    env.SDP_DEPLOYMENT_MODE = originalDeploymentMode;
 
     vi.restoreAllMocks();
     await clearTestDatabase(env);
@@ -151,6 +155,38 @@ describe("Compliance routes", () => {
     expect(res.status).toBe(403);
     const body = (await res.json()) as { error: { message: string } };
     expect(body.error.message).toContain("Compliance screening is only available");
+  });
+
+  it("returns a self-hosted-flavored 403 when no compliance providers are configured in self-hosted mode", async () => {
+    env.SDP_DEPLOYMENT_MODE = "self_hosted";
+    // tier doesn't matter in self-hosted mode, but keep it as the seed default
+    await getDb(env)
+      .prepare("UPDATE organizations SET tier = ? WHERE id = ?")
+      .bind("individual", TEST_ORG.id)
+      .run();
+
+    const res = await app.request(
+      "/v1/compliance/address-screenings",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          address: TEST_SOLANA_ADDRESSES.wallet1,
+          network: "solana",
+          intent: "transfer_destination",
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { error: { message: string } };
+    expect(body.error.message).toContain("at least one configured compliance provider");
+    // Importantly, must NOT mention "enterprise tier" — that wording is wrong in self-hosted mode
+    expect(body.error.message).not.toContain("enterprise tier");
   });
 
   it("returns a Range risk score when Range API is configured", async () => {

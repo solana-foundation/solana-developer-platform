@@ -23,6 +23,13 @@ export interface Env {
   ENVIRONMENT: "development" | "production";
   API_VERSION: string;
 
+  // Deployment mode. "managed" (default) uses tier-based provider entitlements
+  // synced from Clerk. "self_hosted" treats every configured provider as
+  // entitled regardless of org tier, so the platform runs with whatever
+  // provider env vars are present. Per-org providerOverrides still apply as
+  // a disable-only mechanism.
+  SDP_DEPLOYMENT_MODE?: "managed" | "self_hosted";
+
   // Secrets (set via wrangler secret)
   API_KEY_PEPPER?: string;
   CUSTODY_ENCRYPTION_KEY?: string; // For encrypting org private keys in DB

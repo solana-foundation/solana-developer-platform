@@ -3,6 +3,7 @@ import type { Env } from "@/types/env";
 const PROCESS_ENV_FALLBACK_KEYS = [
   "ENVIRONMENT",
   "API_VERSION",
+  "SDP_DEPLOYMENT_MODE",
   "API_KEY_PEPPER",
   "CUSTODY_ENCRYPTION_KEY",
   "SENTRY_DSN",
@@ -97,6 +98,41 @@ const PROCESS_ENV_FALLBACK_KEYS = [
   "BVNK_WALLET_ID",
   "BVNK_API_BASE_URL",
 ] as const satisfies readonly (keyof Env)[];
+
+export type SdpDeploymentMode = "managed" | "self_hosted";
+
+const VALID_DEPLOYMENT_MODES: ReadonlySet<string> = new Set<SdpDeploymentMode>([
+  "managed",
+  "self_hosted",
+]);
+
+const validatedDeploymentModes = new Map<string, SdpDeploymentMode>();
+
+function resolveDeploymentMode(value: string | undefined): SdpDeploymentMode {
+  if (value === undefined) {
+    return "managed";
+  }
+  const cached = validatedDeploymentModes.get(value);
+  if (cached !== undefined) {
+    return cached;
+  }
+  if (!VALID_DEPLOYMENT_MODES.has(value)) {
+    throw new Error(
+      `Invalid SDP_DEPLOYMENT_MODE: "${value}". Expected "managed" or "self_hosted".`
+    );
+  }
+  const resolved = value as SdpDeploymentMode;
+  validatedDeploymentModes.set(value, resolved);
+  return resolved;
+}
+
+export function getDeploymentMode(env: Pick<Env, "SDP_DEPLOYMENT_MODE">): SdpDeploymentMode {
+  return resolveDeploymentMode(env.SDP_DEPLOYMENT_MODE);
+}
+
+export function isSelfHostedDeployment(env: Pick<Env, "SDP_DEPLOYMENT_MODE">): boolean {
+  return resolveDeploymentMode(env.SDP_DEPLOYMENT_MODE) === "self_hosted";
+}
 
 export function withProcessEnvFallback(bindings: Env): Env {
   if (typeof process === "undefined" || !process.env) {

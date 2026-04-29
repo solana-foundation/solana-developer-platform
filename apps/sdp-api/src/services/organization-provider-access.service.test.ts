@@ -26,6 +26,7 @@ describe("organization-provider-access.service", () => {
   const originalTurnkeyApiPrivateKey = env.TURNKEY_API_PRIVATE_KEY;
   const originalTurnkeyOrganizationId = env.TURNKEY_ORGANIZATION_ID;
   const originalCustodyPrivateKey = env.CUSTODY_PRIVATE_KEY;
+  const originalDeploymentMode = env.SDP_DEPLOYMENT_MODE;
 
   beforeEach(async () => {
     await seedTestDatabase(env);
@@ -56,6 +57,7 @@ describe("organization-provider-access.service", () => {
     env.TURNKEY_API_PRIVATE_KEY = "turnkey_test_private_key";
     env.TURNKEY_ORGANIZATION_ID = "turnkey_test_org";
     env.CUSTODY_PRIVATE_KEY = undefined;
+    env.SDP_DEPLOYMENT_MODE = undefined;
   });
 
   afterEach(async () => {
@@ -74,6 +76,7 @@ describe("organization-provider-access.service", () => {
     env.TURNKEY_API_PRIVATE_KEY = originalTurnkeyApiPrivateKey;
     env.TURNKEY_ORGANIZATION_ID = originalTurnkeyOrganizationId;
     env.CUSTODY_PRIVATE_KEY = originalCustodyPrivateKey;
+    env.SDP_DEPLOYMENT_MODE = originalDeploymentMode;
 
     await clearTestDatabase(env);
   });
@@ -210,6 +213,79 @@ describe("organization-provider-access.service", () => {
         },
       },
     });
+  });
+
+  it("entitles every provider in self-hosted mode regardless of tier", async () => {
+    env.SDP_DEPLOYMENT_MODE = "self_hosted";
+    env.CUSTODY_PRIVATE_KEY =
+      "3QpWV8xk4hs7vmQhSLAQWNi2KskuSVSpmR75QGqSuxaKcdA9XJkq8VBihspJddBWVfEybTWLKqHJ19N64DNuwSNd";
+
+    const access = await getOrganizationProviderAvailability(env, getDb(env), TEST_ORG_ID);
+
+    expect(access.tier).toBe("individual");
+    // local custody is absent from individual tier defaults — the bypass entitles it
+    expect(access.providers.custody.local).toEqual({
+      entitled: true,
+      configured: true,
+      enabled: true,
+    });
+    // dfns is absent from individual defaults AND not configured — entitled but not enabled
+    expect(access.providers.custody.dfns).toEqual({
+      entitled: true,
+      configured: false,
+      enabled: false,
+    });
+    // compliance is empty for individual tier — bypass entitles every provider
+    expect(access.providers.compliance.range.entitled).toBe(true);
+    // ramps not in individual defaults beyond moonpay — bypass entitles them all
+    expect(access.providers.ramps.lightspark.entitled).toBe(true);
+    expect(access.providers.ramps.bvnk.entitled).toBe(true);
+  });
+
+  it("respects providerOverrides[id] === false in self-hosted mode (disable-only override)", async () => {
+    env.SDP_DEPLOYMENT_MODE = "self_hosted";
+    env.CUSTODY_PRIVATE_KEY =
+      "3QpWV8xk4hs7vmQhSLAQWNi2KskuSVSpmR75QGqSuxaKcdA9XJkq8VBihspJddBWVfEybTWLKqHJ19N64DNuwSNd";
+
+    await getDb(env)
+      .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
+      .bind(
+        JSON.stringify({
+          providerOverrides: {
+            custody: { local: false },
+          },
+        }),
+        TEST_ORG_ID
+      )
+      .run();
+
+    const access = await getOrganizationProviderAvailability(env, getDb(env), TEST_ORG_ID);
+
+    expect(access.providers.custody.local).toEqual({
+      entitled: false,
+      configured: true,
+      enabled: false,
+    });
+    // Other providers stay entitled
+    expect(access.providers.custody.privy.entitled).toBe(true);
+  });
+
+  it("does NOT bypass entitlements when SDP_DEPLOYMENT_MODE is unset (managed-mode regression)", async () => {
+    env.SDP_DEPLOYMENT_MODE = undefined;
+    env.CUSTODY_PRIVATE_KEY =
+      "3QpWV8xk4hs7vmQhSLAQWNi2KskuSVSpmR75QGqSuxaKcdA9XJkq8VBihspJddBWVfEybTWLKqHJ19N64DNuwSNd";
+
+    const access = await getOrganizationProviderAvailability(env, getDb(env), TEST_ORG_ID);
+
+    expect(access.tier).toBe("individual");
+    // local is configured but NOT entitled in managed individual tier — must stay disabled
+    expect(access.providers.custody.local).toEqual({
+      entitled: false,
+      configured: true,
+      enabled: false,
+    });
+    // compliance is still empty for individual tier in managed mode
+    expect(access.providers.compliance.range.entitled).toBe(false);
   });
 
   it("defaults to enterprise and clears provider overrides when Clerk metadata is absent", async () => {
