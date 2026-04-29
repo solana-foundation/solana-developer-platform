@@ -30,7 +30,7 @@
 - [Transfer Tokens](https://platform.solana.com/docs/guides/transfer-tokens): Send tokens between accounts using SDP's payment orchestration.
 - [Issuance Token Types](https://platform.solana.com/docs/reference/issuance-token-types): Supported issuance templates and default controls.
 - [End-to-end Payment Flow](https://platform.solana.com/docs/tutorials/end-to-end-payment-flow): A high-level payment flow from quote to settlement.
-- [Provider Onboarding](https://platform.solana.com/docs/reference/provider-onboarding): Add a provider integration to SDP through the self-service contribution process.
+- [Infrastructure Provider Onboarding](https://platform.solana.com/docs/reference/provider-onboarding): Add an infrastructure provider integration to SDP through the self-service contribution process.
 - [AI Consumption](https://platform.solana.com/docs/reference/ai-consumption): Public machine-readable entry points and guidance for agents and AI systems consuming SDP docs and APIs.
 - [Postman Collection](https://platform.solana.com/docs/reference/postman-collection): Download the public SDP API Postman collection generated from the OpenAPI contract.
 - [API Reference](https://platform.solana.com/docs/reference/api): Endpoint index from the repository OpenAPI spec.
