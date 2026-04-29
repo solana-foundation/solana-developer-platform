@@ -22,15 +22,17 @@
 - [Getting Started](https://platform.solana.com/docs/getting-started): Get up and running with SDP through the dashboard.
 - [Set Up Your Organization](https://platform.solana.com/docs/guides/setup-organization): Create and configure your SDP organization through the dashboard.
 - [Set Up Wallets](https://platform.solana.com/docs/guides/setup-wallets): Initialize a custody provider and create wallets for signing transactions.
-- [Provider Onboarding](https://platform.solana.com/docs/guides/provider-onboarding): Add a provider integration to SDP through the self-service contribution process.
 - [Manage API Keys](https://platform.solana.com/docs/guides/manage-api-keys): Create, rotate, and revoke API keys with role-based access and environment scoping.
 - [Tokenize an Asset](https://platform.solana.com/docs/guides/tokenize-an-asset): Map a real-world tokenization use case to the right SDP template, authorities, and API flow.
 - [Create a Token](https://platform.solana.com/docs/guides/create-a-token): Define a new token using templates or custom configuration.
 - [Deploy a Token](https://platform.solana.com/docs/guides/deploy-a-token): Deploy a created token to the Solana blockchain.
 - [Mint and Burn Tokens](https://platform.solana.com/docs/guides/mint-and-burn): Increase or decrease token supply by minting and burning.
 - [Transfer Tokens](https://platform.solana.com/docs/guides/transfer-tokens): Send tokens between accounts using SDP's payment orchestration.
-- [End-to-end Payment Flow](https://platform.solana.com/docs/tutorials/end-to-end-payment-flow): A high-level payment flow from quote to settlement.
 - [Issuance Token Types](https://platform.solana.com/docs/reference/issuance-token-types): Supported issuance templates and default controls.
+- [End-to-end Payment Flow](https://platform.solana.com/docs/tutorials/end-to-end-payment-flow): A high-level payment flow from quote to settlement.
+- [Provider Onboarding](https://platform.solana.com/docs/reference/provider-onboarding): Add a provider integration to SDP through the self-service contribution process.
+- [AI Consumption](https://platform.solana.com/docs/reference/ai-consumption): Public machine-readable entry points and guidance for agents and AI systems consuming SDP docs and APIs.
+- [Postman Collection](https://platform.solana.com/docs/reference/postman-collection): Download the public SDP API Postman collection generated from the OpenAPI contract.
 - [API Reference](https://platform.solana.com/docs/reference/api): Endpoint index from the repository OpenAPI spec.
 - [Health](https://platform.solana.com/docs/reference/api/health): Service health and readiness endpoints.
 - [API Keys](https://platform.solana.com/docs/reference/api/api-keys): API key management endpoints.

@@ -1,5 +1,6 @@
-import { DocsLayout } from "fumadocs-ui/layouts/docs";
 import type { ReactNode } from "react";
+import { DocsBreadcrumb } from "@/components/docs-shell/breadcrumb";
+import { DocsSidebar } from "@/components/docs-shell/sidebar";
 import { source } from "@/lib/source";
 
 function resolveDashboardUrl() {
@@ -26,22 +27,13 @@ export default function Layout({ children }: { children: ReactNode }) {
 
   return (
     <div className="sdp-docs-shell">
-      <DocsLayout
-        tree={source.pageTree}
-        links={[
-          ...(dashboardUrl
-            ? [
-                {
-                  text: "Dashboard",
-                  url: dashboardUrl,
-                  external: dashboardUrl.startsWith("http"),
-                },
-              ]
-            : []),
-        ]}
-      >
-        {children}
-      </DocsLayout>
+      <DocsSidebar tree={source.pageTree} dashboardUrl={dashboardUrl} />
+      <main className="launch-docs-main">
+        <div className="launch-docs-main-inner">
+          <DocsBreadcrumb tree={source.pageTree} />
+          {children}
+        </div>
+      </main>
     </div>
   );
 }
