@@ -4,7 +4,7 @@ This file is the canonical agent guide for this repository.
 
 ## Repo layout
 
-- `apps/sdp-api`: Cloudflare Workers API, OpenAPI source, route handlers, D1/KV integrations
+- `apps/sdp-api`: Cloudflare Workers API, OpenAPI source, route handlers, Postgres/KV integrations
 - `apps/sdp-web`: dashboard application
 - `apps/sdp-docs`: public documentation site and generated API reference
 - `packages/sdp-types`: shared runtime types and shared product constants

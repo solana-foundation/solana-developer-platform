@@ -12,7 +12,6 @@ import { getAuth } from "@/lib/auth";
 import { AppError, notFound } from "@/lib/errors";
 import { noContent, success } from "@/lib/response";
 import { AuditService } from "@/services/audit.service";
-import { KVService } from "@/services/kv.service";
 import {
   assertOrganizationProviderEnabled,
   getOrganizationProviderAvailability,
@@ -172,10 +171,6 @@ export const updateOrganization = async (c: AppContext) => {
     .bind(...params)
     .run();
 
-  // Invalidate cache
-  const kvService = new KVService(c.env.SDP_API_KEYS, c.env.SDP_CACHE);
-  await kvService.invalidateOrganization(orgId);
-
   // Fetch updated org
   const org = await getDb(c.env)
     .prepare(
@@ -237,10 +232,6 @@ export const deleteOrganization = async (c: AppContext) => {
       )
       .bind(orgId),
   ]);
-
-  // Invalidate cache
-  const kvService = new KVService(c.env.SDP_API_KEYS, c.env.SDP_CACHE);
-  await kvService.invalidateOrganization(orgId);
 
   // Audit log
   const auditService = new AuditService(getDb(c.env));

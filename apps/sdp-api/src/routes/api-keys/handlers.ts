@@ -16,7 +16,6 @@ import {
 } from "@/services/api-key-wallets.service";
 import { AuditService } from "@/services/audit.service";
 import { createSigningService } from "@/services/domain/signing.service";
-import { KVService } from "@/services/kv.service";
 import { SigningError } from "@/services/ports";
 import type { WalletPurpose } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
@@ -393,8 +392,7 @@ export const updateApiKey = async (c: AppContext) => {
     parsed.data.permissions !== undefined ||
     walletSelection.touched
   ) {
-    const kvService = new KVService(c.env.SDP_API_KEYS, c.env.SDP_CACHE);
-    await kvService.deleteApiKey(existing.key_hash);
+    await c.env.SDP_API_KEYS.delete(`key:${existing.key_hash}`);
   }
 
   // Audit log
@@ -442,8 +440,7 @@ export const rotateApiKey = async (c: AppContext) => {
   }
 
   // Invalidate old key cache
-  const kvService = new KVService(c.env.SDP_API_KEYS, c.env.SDP_CACHE);
-  await kvService.deleteApiKey(rotation.previousKeyHash);
+  await c.env.SDP_API_KEYS.delete(`key:${rotation.previousKeyHash}`);
 
   // Audit log
   const auditService = new AuditService(getDb(c.env));
@@ -513,8 +510,7 @@ export const revokeApiKey = async (c: AppContext) => {
   }
 
   // Invalidate KV cache
-  const kvService = new KVService(c.env.SDP_API_KEYS, c.env.SDP_CACHE);
-  await kvService.deleteApiKey(revokedKey.keyHash);
+  await c.env.SDP_API_KEYS.delete(`key:${revokedKey.keyHash}`);
 
   // Audit log
   const auditService = new AuditService(getDb(c.env));
