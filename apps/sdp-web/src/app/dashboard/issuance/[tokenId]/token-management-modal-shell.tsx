@@ -36,7 +36,7 @@ export function TokenManagementModalShell({
           disabled={isPending}
         />
         <div className="pointer-events-none relative flex min-h-full items-center justify-center p-4">
-          <div className="pointer-events-auto relative z-10 w-full max-w-2xl">
+          <div className="pointer-events-auto relative z-10 flex w-full max-w-2xl flex-col items-end gap-2">
             <Button
               type="button"
               variant="ghost"
@@ -44,11 +44,11 @@ export function TokenManagementModalShell({
               onClick={onClose}
               disabled={isPending}
               aria-label="Close modal"
-              className="absolute top-3 right-3 z-20 rounded-full bg-white/90 text-[rgba(28,28,29,0.72)] shadow-sm hover:bg-[rgba(28,28,29,0.08)] hover:text-[#1c1c1d]"
+              className="rounded-full bg-white/90 text-[rgba(28,28,29,0.72)] shadow-sm hover:bg-[rgba(28,28,29,0.08)] hover:text-[#1c1c1d]"
             >
               <X className="h-4 w-4" />
             </Button>
-            {children}
+            <div className="w-full">{children}</div>
           </div>
         </div>
       </div>
