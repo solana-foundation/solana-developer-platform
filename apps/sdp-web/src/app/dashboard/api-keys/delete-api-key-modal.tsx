@@ -1,12 +1,12 @@
 "use client";
 
-import { X } from "lucide-react";
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { ModalCloseButton } from "@/components/ui/modal-close-button";
 import { useEscapeKey } from "@/lib/use-escape-key";
 import { deactivateApiKeyInlineAction } from "./actions";
 
@@ -119,16 +119,11 @@ export function DeleteApiKeyModal({
             tabIndex={-1}
           />
           <div className="relative z-10 w-full max-w-md rounded-xl border border-[rgba(28,28,29,0.16)] bg-white p-5 text-left shadow-lg">
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
+            <ModalCloseButton
               onClick={close}
-              aria-label="Close confirmation modal"
-              className="absolute top-3 right-3 rounded-full text-[rgba(28,28,29,0.72)] hover:bg-[rgba(28,28,29,0.08)] hover:text-[#1c1c1d]"
-            >
-              <X className="h-4 w-4" />
-            </Button>
+              label="Close confirmation modal"
+              className="top-3 right-3"
+            />
             <p className="pr-10 text-sm font-medium text-[#1c1c1d]">Delete API key</p>
             <p className="mt-2 text-sm text-[rgba(28,28,29,0.72)]">
               This removes the key without deleting the row.

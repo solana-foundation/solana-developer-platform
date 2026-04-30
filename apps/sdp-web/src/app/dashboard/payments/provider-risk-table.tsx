@@ -1,9 +1,9 @@
 "use client";
 
-import { X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { Button } from "@/components/ui/button";
+import { ModalCloseButton } from "@/components/ui/modal-close-button";
 import {
   Table,
   TableBody,
@@ -56,7 +56,8 @@ export function ProviderRiskTable({ title, snapshot, onClose }: ProviderRiskTabl
         tabIndex={-1}
       />
       <div className="relative z-10 w-full max-w-2xl rounded-[24px] border border-[rgba(28,28,29,0.12)] bg-white p-6 shadow-lg">
-        <div className="mb-5 flex items-start justify-between gap-4">
+        {onClose ? <ModalCloseButton onClick={() => onClose()} label={`Close ${title}`} /> : null}
+        <div className="mb-5 pr-14">
           <div className="space-y-1">
             <p className="text-[22px] font-medium text-[#1c1c1d]">{title}</p>
             <p className="text-sm text-[rgba(28,28,29,0.56)]">
@@ -67,16 +68,6 @@ export function ProviderRiskTable({ title, snapshot, onClose }: ProviderRiskTabl
               compliance signals from the connected providers.
             </p>
           </div>
-          {onClose ? (
-            <button
-              type="button"
-              onClick={() => onClose()}
-              aria-label={`Close ${title}`}
-              className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-[rgba(28,28,29,0.12)] text-[rgba(28,28,29,0.66)] transition-colors hover:bg-[rgba(28,28,29,0.06)]"
-            >
-              <X className="size-4" />
-            </button>
-          ) : null}
         </div>
         <Table>
           <TableHeader>

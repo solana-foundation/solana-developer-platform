@@ -1,11 +1,11 @@
 "use client";
 
 import type { PaymentsDashboardWallet } from "@sdp/types";
-import { X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { ModalCloseButton } from "@/components/ui/modal-close-button";
 import { useEscapeKey } from "@/lib/use-escape-key";
 import type { PermissionRow } from "./token-management-workspace.types";
 import {
@@ -88,17 +88,12 @@ export function TokenAuthorityModal({
         />
         <div className="pointer-events-none relative flex min-h-full items-center justify-center p-4">
           <div className="pointer-events-auto relative w-full max-w-lg rounded-2xl border border-[rgba(28,28,29,0.12)] bg-white p-5 shadow-[0_20px_40px_rgba(0,0,0,0.16)]">
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
+            <ModalCloseButton
               onClick={dismissModal}
               disabled={isPending}
-              aria-label="Close authority modal"
-              className="absolute top-3 right-3 rounded-full text-[rgba(28,28,29,0.72)] hover:bg-[rgba(28,28,29,0.08)] hover:text-[#1c1c1d]"
-            >
-              <X className="h-4 w-4" />
-            </Button>
+              label="Close authority modal"
+              className="top-3 right-3"
+            />
             {isConfirmingNone ? (
               <NoneConfirmationPanel
                 currentAuthority={currentAuthority}

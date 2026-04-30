@@ -1,6 +1,5 @@
 "use client";
 
-import { X } from "lucide-react";
 import { useState } from "react";
 import {
   formatCustodyProviderName,
@@ -9,6 +8,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { ModalCloseButton } from "@/components/ui/modal-close-button";
 import { useEscapeKey } from "@/lib/use-escape-key";
 import { createCustodyWallet } from "./actions";
 
@@ -56,16 +56,7 @@ export function CreateWalletModal({
           />
 
           <div className="relative z-10 w-full max-w-lg rounded-2xl border border-[rgba(28,28,29,0.16)] bg-white p-6 shadow-lg">
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              onClick={close}
-              aria-label="Close new wallet modal"
-              className="absolute top-4 right-4 rounded-full text-[rgba(28,28,29,0.72)] hover:bg-[rgba(28,28,29,0.08)] hover:text-[#1c1c1d]"
-            >
-              <X className="h-4 w-4" />
-            </Button>
+            <ModalCloseButton onClick={close} label="Close new wallet modal" />
             <p className="pr-12 text-sm font-semibold text-[#1c1c1d]">Create wallet</p>
             <p className="mt-1 text-sm text-[rgba(28,28,29,0.72)]">
               Provision an additional signing wallet for your organization.

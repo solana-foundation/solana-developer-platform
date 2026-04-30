@@ -1,6 +1,5 @@
 "use client";
 
-import { X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useEffect, useMemo, useState, useTransition } from "react";
 import {
@@ -15,6 +14,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { ModalCloseButton } from "@/components/ui/modal-close-button";
 import { useEscapeKey } from "@/lib/use-escape-key";
 import { WalletProviderMark } from "./wallet-provider-mark";
 
@@ -159,23 +159,15 @@ export function WalletProvisionModal({
       />
 
       <div className="relative z-10 w-full max-w-xl overflow-hidden rounded-[24px] border border-[rgba(28,28,29,0.12)] bg-white shadow-[0_24px_80px_rgba(0,0,0,0.14)]">
+        <ModalCloseButton onClick={onClose} label="Close wallet modal" />
         <div className="border-b border-[rgba(28,28,29,0.08)] px-6 py-5">
-          <div className="flex items-start justify-between gap-4">
+          <div className="pr-14">
             <div className="space-y-1">
               <p className="text-[28px] leading-[1.05] font-medium tracking-[-0.03em] text-[#1c1c1d]">
                 New wallet
               </p>
               <p className="text-sm text-[rgba(28,28,29,0.62)]">{helperText}</p>
             </div>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              onClick={onClose}
-              aria-label="Close wallet modal"
-            >
-              <X className="h-4 w-4" />
-            </Button>
           </div>
         </div>
 

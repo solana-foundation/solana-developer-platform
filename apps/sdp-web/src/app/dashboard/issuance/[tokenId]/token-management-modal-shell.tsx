@@ -1,8 +1,7 @@
 "use client";
 
-import { X } from "lucide-react";
 import type { ReactNode } from "react";
-import { Button } from "@/components/ui/button";
+import { ModalCloseButton } from "@/components/ui/modal-close-button";
 import { useEscapeKey } from "@/lib/use-escape-key";
 import { TokenModalPortal } from "./token-modal-portal";
 
@@ -38,17 +37,7 @@ export function TokenManagementModalShell({
         />
         <div className="pointer-events-none relative flex min-h-full items-center justify-center p-4">
           <div className="pointer-events-auto relative z-10 w-full max-w-2xl [&_[data-slot=card-header]]:pr-16">
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              onClick={onClose}
-              disabled={isPending}
-              aria-label="Close modal"
-              className="absolute top-4 right-4 z-20 rounded-full bg-white/90 text-[rgba(28,28,29,0.72)] shadow-sm hover:bg-[rgba(28,28,29,0.08)] hover:text-[#1c1c1d]"
-            >
-              <X className="h-4 w-4" />
-            </Button>
+            <ModalCloseButton onClick={onClose} disabled={isPending} label="Close modal" />
             {children}
           </div>
         </div>

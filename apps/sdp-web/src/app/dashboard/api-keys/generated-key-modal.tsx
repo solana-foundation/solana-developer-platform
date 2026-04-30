@@ -1,10 +1,10 @@
 "use client";
 
-import { X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { ModalCloseButton } from "@/components/ui/modal-close-button";
 import { storeApiKeySecret } from "@/lib/playground-api-keys";
 import { useEscapeKey } from "@/lib/use-escape-key";
 import { GeneratedApiKeyInput } from "./generated-key-input";
@@ -70,16 +70,7 @@ function GeneratedApiKeyModal({
         tabIndex={-1}
       />
       <div className="relative z-10 w-full max-w-lg rounded-2xl border border-[rgba(28,28,29,0.16)] bg-white p-6 text-left shadow-lg">
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-sm"
-          onClick={close}
-          aria-label="Close generated key modal"
-          className="absolute top-4 right-4 rounded-full text-[rgba(28,28,29,0.72)] hover:bg-[rgba(28,28,29,0.08)] hover:text-[#1c1c1d]"
-        >
-          <X className="h-4 w-4" />
-        </Button>
+        <ModalCloseButton onClick={close} label="Close generated key modal" />
         <p className="pr-12 text-sm font-semibold text-[#1c1c1d]">API key generated</p>
         <p className="mt-2 text-sm text-[rgba(28,28,29,0.72)]">{message}</p>
 

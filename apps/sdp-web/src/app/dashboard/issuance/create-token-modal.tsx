@@ -1,13 +1,13 @@
 "use client";
 
 import type { PaymentsDashboardWallet } from "@sdp/types";
-import { X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useState, useTransition } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
 import { Button } from "@/components/ui/button";
+import { ModalCloseButton } from "@/components/ui/modal-close-button";
 import { useEscapeKey } from "@/lib/use-escape-key";
 import { fetchWallets } from "../payments/payments-workspace.data";
 import { type CreateIssuanceTokenResult, createIssuanceTokenAction } from "./actions";
@@ -237,7 +237,12 @@ export function CreateIssuanceTokenModal({
               transition={{ duration: 0.2, ease: "easeOut" }}
               className="relative z-10 w-full max-w-2xl overflow-hidden rounded-3xl border border-[rgba(28,28,29,0.16)] bg-white text-[#1c1c1d] shadow-[0_24px_64px_rgba(28,28,29,0.28)]"
             >
-              <div className="flex items-start justify-between border-b border-[rgba(28,28,29,0.1)] bg-[rgba(28,28,29,0.02)] px-8 py-7">
+              <ModalCloseButton
+                onClick={close}
+                label="Close token creation modal"
+                className="top-6 right-6"
+              />
+              <div className="border-b border-[rgba(28,28,29,0.1)] bg-[rgba(28,28,29,0.02)] px-8 py-7 pr-20">
                 <div>
                   <p className="text-4xl leading-none font-semibold">
                     {template ? getTemplateTitle(template) : "Create New Token Draft"}
@@ -248,14 +253,6 @@ export function CreateIssuanceTokenModal({
                       : "Choose a template to create a draft first, then deploy it on-chain."}
                   </p>
                 </div>
-                <button
-                  type="button"
-                  aria-label="Close token creation modal"
-                  onClick={close}
-                  className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-[rgba(28,28,29,0.08)] text-[rgba(28,28,29,0.72)] transition-colors hover:bg-[rgba(28,28,29,0.14)]"
-                >
-                  <X className="h-5 w-5" />
-                </button>
               </div>
 
               <AnimatePresence mode="wait">
