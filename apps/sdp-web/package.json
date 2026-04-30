@@ -33,7 +33,7 @@
     "tailwind-merge": "3.5.0"
   },
   "devDependencies": {
-    "@clerk/backend": "3.2.13",
+    "@clerk/backend": "3.2.14",
     "@clerk/testing": "2.0.17",
     "@playwright/test": "1.59.1",
     "@solana-program/system": "catalog:",
