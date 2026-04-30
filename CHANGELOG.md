@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.18.6](https://github.com/solana-foundation/solana-developer-platform/compare/v0.18.5...v0.18.6) (2026-04-30)
+
+### Bug Fixes
+
+* improve Mint/Burn modal dismissal ([#251](https://github.com/solana-foundation/solana-developer-platform/pull/251)) ([bfd9cd7](https://github.com/solana-foundation/solana-developer-platform/commit/bfd9cd73388589393e73196b7314ad2d61120e51))
+* allow ecosystem clerk redirects ([#252](https://github.com/solana-foundation/solana-developer-platform/pull/252)) ([2fd3b76](https://github.com/solana-foundation/solana-developer-platform/commit/2fd3b762ff4c3bed92a226bd38dbd3a15ce79acc))
+
+### Maintenance
+
+* **deps:** bump @clerk/nextjs from 7.2.3 to 7.2.4 in /apps/sdp-web ([#247](https://github.com/solana-foundation/solana-developer-platform/pull/247)) ([eb7a405](https://github.com/solana-foundation/solana-developer-platform/commit/eb7a40529b5f4edeebadd42468f02ab38ab7272b))
+* **deps-dev:** bump @clerk/backend from 3.2.13 to 3.2.14 ([#250](https://github.com/solana-foundation/solana-developer-platform/pull/250)) ([765b6e8](https://github.com/solana-foundation/solana-developer-platform/commit/765b6e89bc0ab0a997603951bcfc8ada1966d83a))
+
 ## [0.18.5](https://github.com/solana-foundation/solana-developer-platform/compare/v0.18.4...v0.18.5) (2026-04-30)
 
 ### Documentation
