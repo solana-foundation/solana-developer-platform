@@ -5,6 +5,11 @@ import { Toaster } from "sonner";
 import { shouldLoadClerkForPath } from "@/lib/auth-entry";
 import "./globals.css";
 
+const ALLOWED_SATELLITE_REDIRECT_ORIGINS = [
+  "https://ecosystem.solana.com",
+  "https://bookface-git-main-solana-foundation.vercel.app",
+];
+
 export const metadata: Metadata = {
   title: "Solana Developer Platform",
   description: "SDP dashboard",
@@ -23,6 +28,7 @@ export default async function RootLayout({
       signUpUrl="/sign-up"
       signInFallbackRedirectUrl="/dashboard"
       signUpFallbackRedirectUrl="/dashboard"
+      allowedRedirectOrigins={ALLOWED_SATELLITE_REDIRECT_ORIGINS}
       afterSignOutUrl="/sign-in"
     >
       {children}
