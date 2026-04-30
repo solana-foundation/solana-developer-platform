@@ -1,71 +1,68 @@
 ---
-title: Provider Onboarding
-description: Add a provider integration to SDP through the self-service contribution process.
+title: Infrastructure Provider Onboarding
+description: Add an infrastructure provider integration to SDP through the self-service contribution process.
 ---
 
-SDP supports provider integrations across custody, RPC, compliance, payments, ramps, and related infrastructure. The onboarding process is self-service for the initial contribution: prepare your integration, give the Solana Foundation team access to validate it, and submit the work for review.
+SDP currently supports infrastructure provider integrations across custody, RPC, compliance, and ramps. We will add future integration categories as SDP expands.
+
+Onboarded providers are presented as available integrations, not endorsed or recommended partners. Institutions using SDP are responsible for their own provider due diligence.
+
+## Start here
+
+Select the category that matches your integration, complete the intake form, and review the criteria before opening a pull request.
+
+| Category | Intake form | Criteria |
+| --- | --- | --- |
+| Custodial enterprise wallet | [Complete custody intake](https://solanafoundation.typeform.com/to/wShiq9SN) | [Download custody criteria PDF](/provider-onboarding/custodial-wallet-vendor.pdf) |
+| RPC infrastructure | [Complete RPC intake](https://solanafoundation.typeform.com/to/cq5m65jI) | [Download RPC criteria PDF](/provider-onboarding/rpc-providers.pdf) |
+| Ramp | [Complete ramp intake](https://solanafoundation.typeform.com/to/sxTGbwXt) | [Download ramp criteria PDF](/provider-onboarding/ramp-criteria.pdf) |
+
+If your integration is for compliance or another infrastructure category without a published intake, contact the SDP team before opening a pull request.
 
 ## Onboarding steps
 
-1. Review the SDP contribution guidelines.
-2. Complete the [provider intake form](https://solanafoundation.typeform.com/to/gkJC0ZKq).
-3. Provide sandbox or playground API access for the Solana Foundation team.
-4. Share provider documentation, test credentials, supported networks, rate limits, and any known sandbox limitations.
+1. Review the criteria PDF for your category.
+2. Complete the matching intake form.
+3. Provide sandbox or playground API access.
+4. Share documentation, test credentials, supported networks, rate limits, and sandbox limitations.
 5. Build the SDP integration with tests and docs.
 6. Open a pull request that links to the intake submission or tracking issue.
 
-The SDP maintainers target a three to five business day evaluation period after the intake is complete and enough sandbox access is available to test the provider.
+The SDP team reviews intake completeness within five business days. Gate evaluation usually takes one to three weeks depending on category, documentation completeness, and required technical validation.
 
-## Custody provider path
+## Evaluation
 
-Custody providers need to be compatible with the Solana keychain repository before they are integrated into SDP. Start by confirming your provider can support the keychain interface and Solana signing requirements. After that compatibility exists, wire the provider into SDP.
+Each category uses the finalized criteria linked above. Every review starts with hard gates, followed by scored evaluation when applicable.
 
-An SDP custody integration usually needs:
+At a high level, SDP evaluates:
 
-- Provider metadata and capability registration.
-- API support for initialization, wallet creation, signing, and provider-specific configuration.
-- Dashboard support for setup, wallet creation, and provider status.
-- Tests for successful setup, failure states, and disabled or missing configuration.
-- Documentation for setup requirements, sandbox behavior, and any provider-specific limits.
+- Solana compatibility for the category.
+- Stable sandbox or playground access.
+- Clear API and integration documentation.
+- Predictable error handling and testability.
+- Operational readiness and support.
+- Required regulatory, compliance, or security posture for the category.
+
+Providers that do not clear the required gates may be tracked for future support, but should not be presented as generally available in SDP until gaps are resolved.
 
 ## Access requirements
 
-Providers must give the Solana Foundation team API access to a sandbox or playground environment. Access should be suitable for repeatable testing and validation, including local development and automated checks where possible.
-
-At minimum, include:
+Provide access suitable for repeatable validation, including:
 
 - Sandbox API keys or equivalent credentials.
-- Test accounts, wallets, or organization IDs when required.
-- Supported networks, such as Solana devnet or mainnet-beta.
-- Known rate limits, account limits, and feature flags.
-- Contact information for technical support during review.
+- Test accounts, wallets, endpoints, or settlement rails when required.
+- Supported Solana networks.
+- Known rate limits, feature flags, and sandbox limitations.
+- Technical support contact for review.
 
-## Evaluation criteria
+## Pull request expectations
 
-The provider should meet the baseline criteria before it is listed, integrated, or supported in SDP. Review the criteria for the relevant provider type: [RPC](#rpc-provider-criteria), [custody](#custody-provider-criteria), [ramps](#ramp-provider-criteria), and [compliance](#compliance-provider-criteria).
+An SDP infrastructure provider contribution usually includes:
 
-- The provider has clear public or shared API documentation.
-- The provider offers stable sandbox or playground access for the Solana Foundation team.
-- The provider supports the Solana networks and transaction flows required by the integration.
-- The provider has predictable errors for invalid credentials, unsupported networks, rate limits, and unavailable services.
-- The integration can be tested without relying on production-only credentials.
-- The provider can support bug fixes, breaking-change notices, and operational incidents.
-- The SDP contribution includes tests, user-facing docs, and clear setup instructions.
+- Provider metadata and capability registration.
+- API support for setup, configuration, and category-specific runtime operations.
+- Dashboard support where applicable.
+- Tests for setup, success paths, failure states, disabled configuration, and missing credentials.
+- User-facing docs for setup, sandbox behavior, and provider limits.
 
-Providers that do not meet these criteria may still be tracked for future support, but they should not be presented as generally available in SDP until the gaps are resolved.
-
-### RPC provider criteria
-
-RPC providers should document supported Solana networks, request limits, failover behavior, archival support, and any feature gaps that affect transaction simulation, submission, confirmation, or account reads. The provider should give the Solana Foundation team sandbox or development API access that can be used for repeatable validation.
-
-### Custody provider criteria
-
-Custody providers must first be compatible with the Solana keychain repository. The provider should support Solana signing flows required by SDP, including wallet creation or wallet import where applicable, transaction signing, message signing when needed, clear approval states, and deterministic error handling for missing credentials, rejected approvals, and unsupported networks.
-
-### Ramp provider criteria
-
-Ramp providers should document supported assets, regions, KYC requirements, sandbox identity behavior, quote lifecycle, redirect or hosted-flow behavior, webhook requirements, and failure states. The provider must give the Solana Foundation team playground access that can exercise onramp and offramp flows without production funds.
-
-### Compliance provider criteria
-
-Compliance providers should document supported screening inputs, risk levels, response schema, provider-specific statuses, retry behavior, and auditability requirements. The provider should support sandbox address-screening tests and make it clear when results are simulated, incomplete, or production-only.
+Open the pull request after intake is complete, or after the SDP team has created a tracking issue while intake is being finalized.

@@ -8,6 +8,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const docsContentDir = path.resolve(__dirname, "../content/docs");
+const docsPublicDir = path.resolve(__dirname, "../public");
 const docsMetaPath = path.resolve(docsContentDir, "meta.json");
 const configPath = path.resolve(__dirname, "link-check.config.json");
 const EXTERNAL_URL_TIMEOUT_MS = 10_000;
@@ -109,6 +110,18 @@ async function loadDocPages(): Promise<Map<string, string>> {
   }
 
   return pages;
+}
+
+async function loadPublicAssetPaths(): Promise<Set<string>> {
+  const files = await listFiles(docsPublicDir).catch(() => []);
+  const paths = new Set<string>();
+
+  for (const filePath of files) {
+    const relativePath = path.relative(docsPublicDir, filePath).replace(/\\/g, "/");
+    paths.add(`/${relativePath}`);
+  }
+
+  return paths;
 }
 
 function createAllowedInternalPaths(docSlugs: Iterable<string>): Set<string> {
@@ -220,8 +233,16 @@ async function collectLinks(pages: Map<string, string>): Promise<LinkReference[]
 }
 
 async function run(): Promise<void> {
-  const [meta, config, pages] = await Promise.all([loadDocsMeta(), loadConfig(), loadDocPages()]);
+  const [meta, config, pages, publicAssetPaths] = await Promise.all([
+    loadDocsMeta(),
+    loadConfig(),
+    loadDocPages(),
+    loadPublicAssetPaths(),
+  ]);
   const allowedInternalPaths = createAllowedInternalPaths(pages.keys());
+  for (const assetPath of publicAssetPaths) {
+    allowedInternalPaths.add(normalizePathname(assetPath));
+  }
   const findings: string[] = [];
 
   for (const entry of meta.pages ?? []) {
