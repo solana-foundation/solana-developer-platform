@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.18.5](https://github.com/solana-foundation/solana-developer-platform/compare/v0.18.4...v0.18.5) (2026-04-30)
+
+### Documentation
+
+* update infrastructure provider onboarding ([#244](https://github.com/solana-foundation/solana-developer-platform/pull/244)) ([39dd66d](https://github.com/solana-foundation/solana-developer-platform/commit/39dd66d37a650ea4c022294b80518090f07f2acb))
+
 ## [0.18.4](https://github.com/solana-foundation/solana-developer-platform/compare/v0.18.3...v0.18.4) (2026-04-29)
 
 ### Bug Fixes
