@@ -1,7 +1,7 @@
 "use client";
 
 import type { PaymentsDashboardWallet } from "@sdp/types";
-import { Plus } from "lucide-react";
+import { Plus, X } from "lucide-react";
 import { type Dispatch, type SetStateAction, useState } from "react";
 import { useFormStatus } from "react-dom";
 import { Button } from "@/components/ui/button";
@@ -466,7 +466,17 @@ export function CreateApiKeyModal({
             onClick={close}
           />
           <div className="relative z-10 flex max-h-[calc(100dvh-4rem)] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-[rgba(28,28,29,0.16)] bg-white p-6 shadow-lg">
-            <div className="shrink-0">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              onClick={close}
+              aria-label="Close API key creation modal"
+              className="absolute top-4 right-4 z-20 rounded-full bg-white/90 text-[rgba(28,28,29,0.72)] shadow-sm hover:bg-[rgba(28,28,29,0.08)] hover:text-[#1c1c1d]"
+            >
+              <X className="h-4 w-4" />
+            </Button>
+            <div className="shrink-0 pr-12">
               <p className="text-sm font-semibold text-[#1c1c1d]">
                 {step === 1 ? "Create API key" : "Review API key"}
               </p>

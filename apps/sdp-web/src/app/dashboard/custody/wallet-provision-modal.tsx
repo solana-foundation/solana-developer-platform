@@ -1,5 +1,6 @@
 "use client";
 
+import { X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useEffect, useMemo, useState, useTransition } from "react";
 import {
@@ -172,7 +173,7 @@ export function WalletProvisionModal({
               onClick={onClose}
               aria-label="Close wallet modal"
             >
-              <span className="text-lg leading-none">×</span>
+              <X className="h-4 w-4" />
             </Button>
           </div>
         </div>

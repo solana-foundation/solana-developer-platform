@@ -1,5 +1,6 @@
 "use client";
 
+import { X } from "lucide-react";
 import { useState } from "react";
 import {
   formatCustodyProviderName,
@@ -54,7 +55,17 @@ export function CreateWalletModal({
           />
 
           <div className="relative z-10 w-full max-w-lg rounded-2xl border border-[rgba(28,28,29,0.16)] bg-white p-6 shadow-lg">
-            <p className="text-sm font-semibold text-[#1c1c1d]">Create wallet</p>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              onClick={close}
+              aria-label="Close new wallet modal"
+              className="absolute top-4 right-4 rounded-full text-[rgba(28,28,29,0.72)] hover:bg-[rgba(28,28,29,0.08)] hover:text-[#1c1c1d]"
+            >
+              <X className="h-4 w-4" />
+            </Button>
+            <p className="pr-12 text-sm font-semibold text-[#1c1c1d]">Create wallet</p>
             <p className="mt-1 text-sm text-[rgba(28,28,29,0.72)]">
               Provision an additional signing wallet for your organization.
             </p>
