@@ -34,6 +34,7 @@ export function TokenManagementModalShell({
           className="absolute inset-0 cursor-default"
           onClick={onClose}
           disabled={isPending}
+          tabIndex={-1}
         />
         <div className="pointer-events-none relative flex min-h-full items-center justify-center p-4">
           <div className="pointer-events-auto relative z-10 w-full max-w-2xl [&_[data-slot=card-header]]:pr-16">

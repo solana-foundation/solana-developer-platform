@@ -155,6 +155,7 @@ export function WalletProvisionModal({
         aria-label="Close wallet modal"
         className="absolute inset-0 bg-black/35"
         onClick={onClose}
+        tabIndex={-1}
       />
 
       <div className="relative z-10 w-full max-w-xl overflow-hidden rounded-[24px] border border-[rgba(28,28,29,0.12)] bg-white shadow-[0_24px_80px_rgba(0,0,0,0.14)]">

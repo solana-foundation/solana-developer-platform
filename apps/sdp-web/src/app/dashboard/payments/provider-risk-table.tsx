@@ -53,6 +53,7 @@ export function ProviderRiskTable({ title, snapshot, onClose }: ProviderRiskTabl
         className="absolute inset-0 bg-[rgba(18,18,19,0.44)]"
         aria-label={`Close ${title}`}
         onClick={() => onClose?.()}
+        tabIndex={-1}
       />
       <div className="relative z-10 w-full max-w-2xl rounded-[24px] border border-[rgba(28,28,29,0.12)] bg-white p-6 shadow-lg">
         <div className="mb-5 flex items-start justify-between gap-4">

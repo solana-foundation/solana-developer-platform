@@ -52,6 +52,7 @@ export function CreateWalletModal({
             aria-label="Close new wallet modal"
             className="absolute inset-0 bg-black/35"
             onClick={close}
+            tabIndex={-1}
           />
 
           <div className="relative z-10 w-full max-w-lg rounded-2xl border border-[rgba(28,28,29,0.16)] bg-white p-6 shadow-lg">

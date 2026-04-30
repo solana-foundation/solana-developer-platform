@@ -34,6 +34,7 @@ export function TokenActionConfirmationDialog({
           className="absolute inset-0 cursor-default"
           onClick={onCancel}
           disabled={isPending}
+          tabIndex={-1}
         />
         <div className="pointer-events-none relative flex min-h-full items-center justify-center p-4">
           <div className="pointer-events-auto relative w-full max-w-md rounded-2xl border border-[rgba(28,28,29,0.12)] bg-white p-5 shadow-[0_20px_40px_rgba(0,0,0,0.16)]">

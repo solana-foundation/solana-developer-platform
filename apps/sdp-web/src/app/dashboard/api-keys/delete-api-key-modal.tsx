@@ -116,6 +116,7 @@ export function DeleteApiKeyModal({
             className="absolute inset-0 bg-black/30"
             aria-label="Close confirmation modal"
             onClick={close}
+            tabIndex={-1}
           />
           <div className="relative z-10 w-full max-w-md rounded-xl border border-[rgba(28,28,29,0.16)] bg-white p-5 text-left shadow-lg">
             <Button

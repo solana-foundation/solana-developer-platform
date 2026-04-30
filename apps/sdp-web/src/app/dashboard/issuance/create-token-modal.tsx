@@ -227,6 +227,7 @@ export function CreateIssuanceTokenModal({
               aria-label="Close token creation modal"
               className="absolute inset-0 bg-black/35"
               onClick={close}
+              tabIndex={-1}
             />
 
             <motion.div

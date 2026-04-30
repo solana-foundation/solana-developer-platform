@@ -464,6 +464,7 @@ export function CreateApiKeyModal({
             aria-label="Close API key creation modal"
             className="absolute inset-0 bg-black/35"
             onClick={close}
+            tabIndex={-1}
           />
           <div className="relative z-10 flex max-h-[calc(100dvh-4rem)] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-[rgba(28,28,29,0.16)] bg-white p-6 shadow-lg">
             <Button
