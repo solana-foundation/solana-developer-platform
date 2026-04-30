@@ -1,14 +1,13 @@
 "use client";
 
 import type { PaymentsDashboardWallet } from "@sdp/types";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence } from "motion/react";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useState, useTransition } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
 import { Button } from "@/components/ui/button";
-import { ModalCloseButton } from "@/components/ui/modal-close-button";
-import { useEscapeKey } from "@/lib/use-escape-key";
+import { Modal } from "@/components/ui/modal";
 import { fetchWallets } from "../payments/payments-workspace.data";
 import { type CreateIssuanceTokenResult, createIssuanceTokenAction } from "./actions";
 import { CreateTokenFeaturesStep } from "./create-token-features-step";
@@ -37,7 +36,6 @@ interface CreateIssuanceTokenModalProps {
   triggerClassName?: string;
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: modal flow intentionally coordinates multi-step issuance creation in one component.
 export function CreateIssuanceTokenModal({
   signerWallets = [],
   signerWalletsError = null,
@@ -131,8 +129,6 @@ export function CreateIssuanceTokenModal({
     reset();
   };
 
-  useEscapeKey(isOpen, close);
-
   const handleTemplateSelect = (selectedTemplate: TemplateSelection) => {
     setDraft((previous) => ({
       ...previous,
@@ -214,96 +210,74 @@ export function CreateIssuanceTokenModal({
         </Button>
       )}
 
-      <AnimatePresence>
-        {isOpen ? (
-          <motion.div
-            className="fixed inset-0 z-50 flex items-center justify-center px-4 py-8"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-          >
-            <button
-              type="button"
-              aria-label="Close token creation modal"
-              className="absolute inset-0 bg-black/35"
-              onClick={close}
-              tabIndex={-1}
+      <Modal
+        isOpen={isOpen}
+        onClose={close}
+        closeDisabled={isPending}
+        ariaLabel={template ? getTemplateTitle(template) : "Create New Token Draft"}
+        closeLabel="Close token creation modal"
+        contentClassName="overflow-hidden rounded-3xl shadow-[0_24px_64px_rgba(28,28,29,0.28)]"
+        size="xl"
+      >
+        <div className="border-b border-[rgba(28,28,29,0.1)] bg-[rgba(28,28,29,0.02)] px-8 py-7 pr-20">
+          <div>
+            <p className="text-4xl leading-none font-semibold">
+              {template ? getTemplateTitle(template) : "Create New Token Draft"}
+            </p>
+            <p className="mt-2 text-lg text-[rgba(28,28,29,0.62)]">
+              {template
+                ? "Configure the draft now, then deploy it on-chain from the token page."
+                : "Choose a template to create a draft first, then deploy it on-chain."}
+            </p>
+          </div>
+        </div>
+
+        <AnimatePresence mode="wait">
+          {flow.kind === "templateSelection" ? (
+            <TemplateSelectionStep onSelect={handleTemplateSelect} />
+          ) : null}
+
+          {isIdentityStep && template ? (
+            <CreateTokenIdentityStep
+              template={template}
+              draft={draft}
+              validation={{
+                ...identityValidation,
+                isValid: canContinueFromIdentity,
+              }}
+              canContinue={canContinueFromIdentity}
+              onDraftChange={updateDraft}
+              onBack={handleBackFromIdentity}
+              onContinue={handleContinueFromIdentity}
             />
+          ) : null}
 
-            <motion.div
-              initial={{ y: 24, opacity: 0, scale: 0.98 }}
-              animate={{ y: 0, opacity: 1, scale: 1 }}
-              exit={{ y: 18, opacity: 0, scale: 0.98 }}
-              transition={{ duration: 0.2, ease: "easeOut" }}
-              className="relative z-10 w-full max-w-2xl overflow-hidden rounded-3xl border border-[rgba(28,28,29,0.16)] bg-white text-[#1c1c1d] shadow-[0_24px_64px_rgba(28,28,29,0.28)]"
-            >
-              <ModalCloseButton
-                onClick={close}
-                label="Close token creation modal"
-                className="top-6 right-6"
-              />
-              <div className="border-b border-[rgba(28,28,29,0.1)] bg-[rgba(28,28,29,0.02)] px-8 py-7 pr-20">
-                <div>
-                  <p className="text-4xl leading-none font-semibold">
-                    {template ? getTemplateTitle(template) : "Create New Token Draft"}
-                  </p>
-                  <p className="mt-2 text-lg text-[rgba(28,28,29,0.62)]">
-                    {template
-                      ? "Configure the draft now, then deploy it on-chain from the token page."
-                      : "Choose a template to create a draft first, then deploy it on-chain."}
-                  </p>
-                </div>
-              </div>
-
-              <AnimatePresence mode="wait">
-                {flow.kind === "templateSelection" ? (
-                  <TemplateSelectionStep onSelect={handleTemplateSelect} />
-                ) : null}
-
-                {isIdentityStep && template ? (
-                  <CreateTokenIdentityStep
-                    template={template}
-                    draft={draft}
-                    validation={{
-                      ...identityValidation,
-                      isValid: canContinueFromIdentity,
-                    }}
-                    canContinue={canContinueFromIdentity}
-                    onDraftChange={updateDraft}
-                    onBack={handleBackFromIdentity}
-                    onContinue={handleContinueFromIdentity}
-                  />
-                ) : null}
-
-                {isFeaturesStep && template ? (
-                  <CreateTokenFeaturesStep
-                    template={template}
-                    draft={draft}
-                    signerWallets={liveSignerWallets}
-                    signerWalletsLoading={signerWalletsLoading}
-                    signerWalletsError={resolvedSignerWalletsError}
-                    submitState={submitState}
-                    isPending={isPending}
-                    canSubmit={canSubmit}
-                    onAccessControlModeChange={(mode) =>
-                      updateDraft({
-                        accessControlMode: mode,
-                      })
-                    }
-                    onSigningWalletChange={(signingWalletId) =>
-                      updateDraft({
-                        signingWalletId,
-                      })
-                    }
-                    onBack={handleBackFromFeatures}
-                    onSubmit={handleCreateToken}
-                  />
-                ) : null}
-              </AnimatePresence>
-            </motion.div>
-          </motion.div>
-        ) : null}
-      </AnimatePresence>
+          {isFeaturesStep && template ? (
+            <CreateTokenFeaturesStep
+              template={template}
+              draft={draft}
+              signerWallets={liveSignerWallets}
+              signerWalletsLoading={signerWalletsLoading}
+              signerWalletsError={resolvedSignerWalletsError}
+              submitState={submitState}
+              isPending={isPending}
+              canSubmit={canSubmit}
+              onAccessControlModeChange={(mode) =>
+                updateDraft({
+                  accessControlMode: mode,
+                })
+              }
+              onSigningWalletChange={(signingWalletId) =>
+                updateDraft({
+                  signingWalletId,
+                })
+              }
+              onBack={handleBackFromFeatures}
+              onSubmit={handleCreateToken}
+            />
+          ) : null}
+        </AnimatePresence>
+      </Modal>
     </>
   );
 }

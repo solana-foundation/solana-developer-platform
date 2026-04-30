@@ -7,8 +7,7 @@ import { useFormStatus } from "react-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ModalCloseButton } from "@/components/ui/modal-close-button";
-import { useEscapeKey } from "@/lib/use-escape-key";
+import { Modal } from "@/components/ui/modal";
 import { createApiKeyAction } from "./actions";
 
 type ApiKeyRole = "api_admin" | "api_developer" | "api_readonly";
@@ -414,8 +413,6 @@ export function CreateApiKeyModal({
     setDraft(normalizeDraft());
   };
 
-  useEscapeKey(isOpen, close);
-
   const nextStep = () => {
     if (!canContinue) return;
     setStep(2);
@@ -458,51 +455,46 @@ export function CreateApiKeyModal({
         )}
       </Button>
 
-      {isOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto overscroll-contain px-4 py-8">
-          <button
-            type="button"
-            aria-label="Close API key creation modal"
-            className="absolute inset-0 bg-black/35"
-            onClick={close}
-            tabIndex={-1}
-          />
-          <div className="relative z-10 flex max-h-[calc(100dvh-4rem)] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-[rgba(28,28,29,0.16)] bg-white p-6 shadow-lg">
-            <ModalCloseButton onClick={close} label="Close API key creation modal" />
-            <div className="shrink-0 pr-12">
-              <p className="text-sm font-semibold text-[#1c1c1d]">
-                {step === 1 ? "Create API key" : "Review API key"}
-              </p>
-              <p className="mt-1 text-sm text-[rgba(28,28,29,0.72)]">
-                {step === 1
-                  ? "Define key details and wallet access, then confirm."
-                  : "Review and confirm the request."}
-              </p>
-            </div>
-
-            <div className="min-h-0 overflow-y-auto pr-1">
-              {step === 1 ? (
-                <CreateApiKeyDetailsStep
-                  draft={draft}
-                  wallets={wallets}
-                  selectedWallets={selectedWallets}
-                  canContinue={canContinue}
-                  close={close}
-                  nextStep={nextStep}
-                  setDraft={setDraft}
-                  toggleWallet={toggleWallet}
-                />
-              ) : (
-                <CreateApiKeyReviewStep
-                  draft={draft}
-                  selectedWallets={selectedWallets}
-                  onBack={() => setStep(1)}
-                />
-              )}
-            </div>
-          </div>
+      <Modal
+        isOpen={isOpen}
+        onClose={close}
+        ariaLabel={step === 1 ? "Create API key" : "Review API key"}
+        closeLabel="Close API key creation modal"
+        contentClassName="flex max-h-[calc(100dvh-4rem)] flex-col overflow-hidden p-6"
+        size="xl"
+      >
+        <div className="shrink-0 pr-12">
+          <p className="text-sm font-semibold text-[#1c1c1d]">
+            {step === 1 ? "Create API key" : "Review API key"}
+          </p>
+          <p className="mt-1 text-sm text-[rgba(28,28,29,0.72)]">
+            {step === 1
+              ? "Define key details and wallet access, then confirm."
+              : "Review and confirm the request."}
+          </p>
         </div>
-      ) : null}
+
+        <div className="min-h-0 overflow-y-auto pr-1">
+          {step === 1 ? (
+            <CreateApiKeyDetailsStep
+              draft={draft}
+              wallets={wallets}
+              selectedWallets={selectedWallets}
+              canContinue={canContinue}
+              close={close}
+              nextStep={nextStep}
+              setDraft={setDraft}
+              toggleWallet={toggleWallet}
+            />
+          ) : (
+            <CreateApiKeyReviewStep
+              draft={draft}
+              selectedWallets={selectedWallets}
+              onBack={() => setStep(1)}
+            />
+          )}
+        </div>
+      </Modal>
     </>
   );
 }

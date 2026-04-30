@@ -6,8 +6,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ModalCloseButton } from "@/components/ui/modal-close-button";
-import { useEscapeKey } from "@/lib/use-escape-key";
+import { Modal } from "@/components/ui/modal";
 import { deactivateApiKeyInlineAction } from "./actions";
 
 interface DeleteApiKeyModalProps {
@@ -58,8 +57,6 @@ export function DeleteApiKeyModal({
     setUncontrolledOpen(false);
   };
 
-  useEscapeKey(isOpen, close);
-
   const canSubmit = confirmation.trim() === keyName.trim();
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -109,55 +106,47 @@ export function DeleteApiKeyModal({
         </Button>
       )}
 
-      {isOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center px-4 py-6">
-          <button
-            type="button"
-            className="absolute inset-0 bg-black/30"
-            aria-label="Close confirmation modal"
-            onClick={close}
-            tabIndex={-1}
+      <Modal
+        isOpen={isOpen}
+        onClose={close}
+        ariaLabel="Delete API key"
+        closeLabel="Close confirmation modal"
+        closeDisabled={isSubmitting}
+        contentClassName="rounded-xl p-5 text-left"
+        size="sm"
+      >
+        <p className="pr-10 text-sm font-medium text-[#1c1c1d]">Delete API key</p>
+        <p className="mt-2 text-sm text-[rgba(28,28,29,0.72)]">
+          This removes the key without deleting the row.
+        </p>
+        <p className="mt-2 text-sm">
+          Type <span className="font-mono font-medium">{keyName}</span> to confirm.
+        </p>
+
+        <form onSubmit={handleSubmit} className="mt-4 space-y-3">
+          <input type="hidden" name="keyId" value={keyId} />
+          <input type="hidden" name="keyName" value={keyName} />
+          <Label htmlFor={`confirm-${keyId}`} className="text-sm">
+            Confirm key name
+          </Label>
+          <Input
+            id={`confirm-${keyId}`}
+            name="confirmation"
+            value={confirmation}
+            onChange={(event) => setConfirmation(event.currentTarget.value)}
+            placeholder="Paste exact key name"
+            autoFocus
+            autoComplete="off"
+            disabled={isSubmitting}
           />
-          <div className="relative z-10 w-full max-w-md rounded-xl border border-[rgba(28,28,29,0.16)] bg-white p-5 text-left shadow-lg">
-            <ModalCloseButton
-              onClick={close}
-              label="Close confirmation modal"
-              className="top-3 right-3"
-            />
-            <p className="pr-10 text-sm font-medium text-[#1c1c1d]">Delete API key</p>
-            <p className="mt-2 text-sm text-[rgba(28,28,29,0.72)]">
-              This removes the key without deleting the row.
-            </p>
-            <p className="mt-2 text-sm">
-              Type <span className="font-mono font-medium">{keyName}</span> to confirm.
-            </p>
 
-            <form onSubmit={handleSubmit} className="mt-4 space-y-3">
-              <input type="hidden" name="keyId" value={keyId} />
-              <input type="hidden" name="keyName" value={keyName} />
-              <Label htmlFor={`confirm-${keyId}`} className="text-sm">
-                Confirm key name
-              </Label>
-              <Input
-                id={`confirm-${keyId}`}
-                name="confirmation"
-                value={confirmation}
-                onChange={(event) => setConfirmation(event.currentTarget.value)}
-                placeholder="Paste exact key name"
-                autoFocus
-                autoComplete="off"
-                disabled={isSubmitting}
-              />
-
-              <DeleteApiKeyFormActions
-                canSubmit={canSubmit}
-                onCancel={close}
-                isSubmitting={isSubmitting}
-              />
-            </form>
-          </div>
-        </div>
-      ) : null}
+          <DeleteApiKeyFormActions
+            canSubmit={canSubmit}
+            onCancel={close}
+            isSubmitting={isSubmitting}
+          />
+        </form>
+      </Modal>
     </>
   );
 }
