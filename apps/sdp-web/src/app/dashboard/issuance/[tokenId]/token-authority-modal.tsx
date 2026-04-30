@@ -5,13 +5,12 @@ import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { useEscapeKey } from "@/lib/use-escape-key";
+import { Modal } from "@/components/ui/modal";
 import type { PermissionRow } from "./token-management-workspace.types";
 import {
   getSignerWalletOptionLabel,
   SOLANA_ADDRESS_PATTERN,
 } from "./token-management-workspace.utils";
-import { TokenModalPortal } from "./token-modal-portal";
 import { TokenWalletIdentityCard } from "./token-wallet-identity-card";
 
 const NONE_AUTHORITY_VALUE = "__none_authority__";
@@ -46,8 +45,6 @@ export function TokenAuthorityModal({
     onCancel();
   };
 
-  useEscapeKey(Boolean(row) && !isPending, dismissModal);
-
   const availableWallets = useMemo(
     () => authorityWallets.filter((wallet) => wallet.publicKey.trim()),
     [authorityWallets]
@@ -75,95 +72,90 @@ export function TokenAuthorityModal({
     availableWallets.find((wallet) => wallet.publicKey === newAuthority.trim()) ?? null;
 
   return (
-    <TokenModalPortal>
-      <div className="fixed inset-0 z-40 overflow-y-auto bg-[rgba(18,18,19,0.44)]">
-        <div className="flex min-h-full items-center justify-center p-4">
-          <div className="w-full max-w-lg rounded-2xl border border-[rgba(28,28,29,0.12)] bg-white p-5 shadow-[0_20px_40px_rgba(0,0,0,0.16)]">
-            {isConfirmingNone ? (
-              <NoneConfirmationPanel
-                currentAuthority={currentAuthority}
-                currentAuthorityValue={currentAuthorityValue}
-                currentAuthorityWallet={currentAuthorityWallet}
-                copy={noneConfirmationCopy}
-                isPending={isPending}
-                signerUnavailableReason={signerUnavailableReason}
-                onBack={() => setNoneConfirmationRowId(null)}
-                onConfirm={() => {
-                  setNoneConfirmationRowId(null);
-                  onConfirm();
-                }}
-              />
-            ) : (
-              <>
-                <h4 className="text-[24px] leading-[1.15] font-medium text-[#1c1c1d]">
-                  {row.title}
-                </h4>
-                <p className="mt-2 text-[15px] leading-[1.45] text-[rgba(28,28,29,0.72)]">
-                  {row.helper}
-                </p>
+    <Modal
+      isOpen={Boolean(row)}
+      onClose={dismissModal}
+      closeDisabled={isPending}
+      ariaLabel={isConfirmingNone ? noneConfirmationCopy.title : row.title}
+      closeLabel="Close authority modal"
+      contentClassName="border-[rgba(28,28,29,0.12)] p-5 shadow-[0_20px_40px_rgba(0,0,0,0.16)]"
+      size="md"
+    >
+      {isConfirmingNone ? (
+        <NoneConfirmationPanel
+          currentAuthority={currentAuthority}
+          currentAuthorityValue={currentAuthorityValue}
+          currentAuthorityWallet={currentAuthorityWallet}
+          copy={noneConfirmationCopy}
+          isPending={isPending}
+          signerUnavailableReason={signerUnavailableReason}
+          onBack={() => setNoneConfirmationRowId(null)}
+          onConfirm={() => {
+            setNoneConfirmationRowId(null);
+            onConfirm();
+          }}
+        />
+      ) : (
+        <>
+          <h4 className="pr-10 text-[24px] leading-[1.15] font-medium text-[#1c1c1d]">
+            {row.title}
+          </h4>
+          <p className="mt-2 text-[15px] leading-[1.45] text-[rgba(28,28,29,0.72)]">{row.helper}</p>
 
-                <form
-                  className="mt-5 space-y-4"
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    if (isSettingNone) {
-                      setNoneConfirmationRowId(row.id);
-                      return;
-                    }
-                    onConfirm();
-                  }}
-                >
-                  <CurrentAuthoritySection
-                    currentAuthority={currentAuthority}
-                    currentAuthorityValue={currentAuthorityValue}
-                    currentAuthorityWallet={currentAuthorityWallet}
-                  />
+          <form
+            className="mt-5 space-y-4"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (isSettingNone) {
+                setNoneConfirmationRowId(row.id);
+                return;
+              }
+              onConfirm();
+            }}
+          >
+            <CurrentAuthoritySection
+              currentAuthority={currentAuthority}
+              currentAuthorityValue={currentAuthorityValue}
+              currentAuthorityWallet={currentAuthorityWallet}
+            />
 
-                  <AuthorityTargetSection
-                    authorityWalletsError={authorityWalletsError}
-                    availableWallets={availableWallets}
-                    isPending={isPending}
-                    isSettingNone={isSettingNone}
-                    mode={mode}
-                    newAuthority={newAuthority}
-                    onNewAuthorityChange={onNewAuthorityChange}
-                    onToggleMode={() => {
-                      if (mode === "wallet") {
-                        setMode("custom");
-                        return;
-                      }
+            <AuthorityTargetSection
+              authorityWalletsError={authorityWalletsError}
+              availableWallets={availableWallets}
+              isPending={isPending}
+              isSettingNone={isSettingNone}
+              mode={mode}
+              newAuthority={newAuthority}
+              onNewAuthorityChange={onNewAuthorityChange}
+              onToggleMode={() => {
+                if (mode === "wallet") {
+                  setMode("custom");
+                  return;
+                }
 
-                      setMode("wallet");
-                      onNewAuthorityChange(
-                        selectedWalletValue === NONE_AUTHORITY_VALUE ? "" : selectedWalletValue
-                      );
-                    }}
-                    selectedAuthorityWallet={selectedAuthorityWallet}
-                    selectedWalletValue={selectedWalletValue}
-                    setSelectedWalletValue={setSelectedWalletValue}
-                    walletModeAvailable={walletModeAvailable}
-                  />
+                setMode("wallet");
+                onNewAuthorityChange(
+                  selectedWalletValue === NONE_AUTHORITY_VALUE ? "" : selectedWalletValue
+                );
+              }}
+              selectedAuthorityWallet={selectedAuthorityWallet}
+              selectedWalletValue={selectedWalletValue}
+              setSelectedWalletValue={setSelectedWalletValue}
+              walletModeAvailable={walletModeAvailable}
+            />
 
-                  <div className="flex items-center justify-end gap-2">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={dismissModal}
-                      disabled={isPending}
-                    >
-                      Cancel
-                    </Button>
-                    <Button type="submit" disabled={isPending || Boolean(signerUnavailableReason)}>
-                      Save authority
-                    </Button>
-                  </div>
-                </form>
-              </>
-            )}
-          </div>
-        </div>
-      </div>
-    </TokenModalPortal>
+            <div className="flex items-center justify-end gap-2">
+              <Button type="button" variant="outline" onClick={dismissModal} disabled={isPending}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={isPending || Boolean(signerUnavailableReason)}>
+                Save authority
+              </Button>
+            </div>
+          </form>
+        </>
+      )}
+    </Modal>
   );
 }
 
@@ -269,7 +261,9 @@ function NoneConfirmationPanel({
   return (
     <div className="space-y-5">
       <div>
-        <h4 className="text-[24px] leading-[1.15] font-medium text-[#1c1c1d]">{copy.title}</h4>
+        <h4 className="pr-10 text-[24px] leading-[1.15] font-medium text-[#1c1c1d]">
+          {copy.title}
+        </h4>
         <p className="mt-2 text-[15px] leading-[1.45] text-[rgba(28,28,29,0.72)]">
           {copy.description}
         </p>
