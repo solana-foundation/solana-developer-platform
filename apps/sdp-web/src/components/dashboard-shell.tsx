@@ -95,7 +95,6 @@ function HeaderBackAction({
   return (
     <Link
       href={href}
-      prefetch={false}
       className="inline-flex h-7 items-center gap-1.5 rounded-[var(--button-radius-md)] text-text-medium transition-colors hover:text-text-extra-high"
     >
       <ArrowLeft className="h-4 w-4" />
@@ -359,7 +358,6 @@ function SidebarGroup({
             <Link
               key={item.label}
               href={item.href}
-              prefetch={false}
               onClick={onNavigate}
               className={[
                 "flex h-10 items-center gap-3 rounded-[var(--button-radius-lg)] px-3 text-[16px] leading-[24px] transition-colors",
@@ -435,7 +433,6 @@ function DashboardSidebarContent({
             <Link
               key={item.label}
               href={item.href}
-              prefetch={item.external ? undefined : false}
               target={item.external ? "_blank" : undefined}
               rel={item.external ? "noopener noreferrer" : undefined}
               onClick={onNavigate}
