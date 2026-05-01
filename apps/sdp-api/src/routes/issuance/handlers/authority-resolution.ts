@@ -1,9 +1,9 @@
 import type { Address, TransactionSigner } from "@solana/kit";
 import { getDb } from "@/db";
-import { assertApiKeyWalletAccess } from "@/lib/api-key-wallet-auth";
 import type { ApiKeyContext } from "@/lib/auth";
 import { AppError } from "@/lib/errors";
 import { getSolanaConfig } from "@/lib/solana";
+import { assertApiKeyWalletAccess } from "@/services/api-key-scope.service";
 import { getTemplateInfo } from "@/services/issuance/templates";
 import * as solanaServices from "@/services/solana";
 import { CustodyConfigStore } from "@/services/stores/custody-config.store";

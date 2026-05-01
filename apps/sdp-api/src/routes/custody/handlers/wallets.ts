@@ -6,15 +6,15 @@ import type {
 import type { Address } from "@solana/kit";
 import { getDb } from "@/db";
 import { formatDecimalAmount } from "@/lib/amount";
-import {
-  assertApiKeyWalletAccess,
-  getAllowedApiKeyWalletIdsForPermissions,
-  resolveApiKeySigningWalletId,
-} from "@/lib/api-key-wallet-auth";
 import { getAuth } from "@/lib/auth";
 import { AppError } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import * as tokenAccounts from "@/routes/payments/token-accounts";
+import {
+  assertApiKeyWalletAccess,
+  getAllowedApiKeyWalletIdsForPermissions,
+  resolveApiKeySigningWalletId,
+} from "@/services/api-key-scope.service";
 import { AuditService } from "@/services/audit.service";
 import { CUSTODY_PROVIDERS, type CustodyProvider } from "@/services/custody/providers";
 import * as signingServiceModule from "@/services/domain/signing.service";
@@ -346,7 +346,6 @@ function resolveWalletFilters(
 ) {
   const projectId = c.req.query("projectId") ?? undefined;
   const providerQuery = c.req.query("provider");
-  // biome-ignore lint/security/noSecrets: Query parameter name, not a secret.
   const includeAllProviders = c.req.query("includeAllProviders");
   const includeBalances = parseBooleanQueryParam(c.req.query("includeBalances"));
   const view = c.req.query("view") === "summary" ? "summary" : "default";
@@ -394,7 +393,6 @@ async function getBalancesByWalletId(
       const splBalances = splBalancesResult.status === "fulfilled" ? splBalancesResult.value : [];
 
       if (solBalanceResult.status === "rejected") {
-        // biome-ignore lint/security/noSecrets: Operational log message, not a secret.
         console.error("getBalancesByWalletId: failed to fetch SOL balance", {
           requestId: c.get("requestId"),
           walletId: wallet.walletId,
@@ -407,7 +405,6 @@ async function getBalancesByWalletId(
       }
 
       if (splBalancesResult.status === "rejected") {
-        // biome-ignore lint/security/noSecrets: Operational log message, not a secret.
         console.error("getBalancesByWalletId: failed to fetch SPL balances", {
           requestId: c.get("requestId"),
           walletId: wallet.walletId,

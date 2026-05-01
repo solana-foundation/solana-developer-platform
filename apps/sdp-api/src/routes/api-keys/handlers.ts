@@ -11,6 +11,11 @@ import { AppError, notFound } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import { ApiKeyService } from "@/services/api-key.service";
 import {
+  assertWalletBindingsInScope,
+  resolveCreateWalletScope,
+  resolveUpdateWalletScope,
+} from "@/services/api-key-scope.service";
+import {
   listApiKeyWalletBindings,
   replaceApiKeyWalletBindings,
 } from "@/services/api-key-wallets.service";
@@ -20,11 +25,6 @@ import { SigningError } from "@/services/ports";
 import type { WalletPurpose } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import { apiKeyCreateSchema, apiKeyRotateSchema, apiKeyUpdateSchema } from "./schemas";
-import {
-  assertWalletBindingsInScope,
-  resolveCreateWalletScope,
-  resolveUpdateWalletScope,
-} from "./wallet-bindings";
 
 type AppContext = Context<{ Bindings: Env }>;
 

@@ -27,11 +27,18 @@ import type {
   PaymentTransferType as TransferType,
 } from "@/db/repositories/payments.repository";
 import { formatDecimalAmount, parseDecimalAmount } from "@/lib/amount";
-import { assertApiKeyWalletAccess, getAllowedApiKeyWalletIds } from "@/lib/api-key-wallet-auth";
 import { getAuth } from "@/lib/auth";
 import { AppError } from "@/lib/errors";
 import { paginated, success } from "@/lib/response";
 import { assertValidAddress, getSolanaConfig } from "@/lib/solana";
+import {
+  assertApiKeyWalletAccess,
+  getAllowedApiKeyWalletIds,
+} from "@/services/api-key-scope.service";
+import {
+  assertPaymentProjectScope,
+  resolveOutboundPaymentOperation,
+} from "@/services/payment-operation.service";
 import { withHeliusApiKey } from "@/services/rpc-relay.service";
 import * as solanaServices from "@/services/solana";
 import * as solanaRpc from "@/services/solana/rpc";
@@ -52,11 +59,7 @@ import {
   walletIdParamsSchema,
 } from "../schemas";
 import * as tokenAccounts from "../token-accounts";
-import {
-  isNativeSolToken,
-  resolveMintTokenProgram,
-  resolveSourceTokenAccount,
-} from "../token-accounts";
+import { resolveMintTokenProgram, resolveSourceTokenAccount } from "../token-accounts";
 import { resolveScope, resolveWallet } from "../wallets";
 
 // biome-ignore lint/security/noSecrets: Devnet USDC mint address constant, not a secret.
@@ -160,26 +163,6 @@ export async function resolveWalletFromParams(
     ...scope,
     wallet,
   };
-}
-
-function assertProjectContext(
-  bodyProjectId: string | undefined,
-  authProjectId: string | null
-): void {
-  if (!bodyProjectId) {
-    return;
-  }
-
-  if (!authProjectId) {
-    throw new AppError(
-      "BAD_REQUEST",
-      "projectId overrides are not supported for org-scoped keys in payments endpoints"
-    );
-  }
-
-  if (bodyProjectId !== authProjectId) {
-    throw new AppError("BAD_REQUEST", "projectId does not match the authenticated API key scope");
-  }
 }
 
 async function createTransferRecord(
@@ -538,13 +521,16 @@ export async function prepareTransfer(c: AppContext) {
   }
 
   const scope = await resolveScope(c);
-  assertProjectContext(parsed.data.projectId, scope.auth.projectId);
-
-  const sourceWallet = resolveWallet(scope.wallets, parsed.data.source);
-  assertApiKeyWalletAccess(scope.auth, sourceWallet.walletId, ["payments:write"]);
-  const sourceAddress = assertValidAddress(sourceWallet.publicKey, "source");
-  const destinationAddress = assertValidAddress(parsed.data.destination, "destination");
-  const transferToken = isNativeSolToken(parsed.data.token) ? "SOL" : parsed.data.token;
+  assertPaymentProjectScope(parsed.data.projectId, scope.auth.projectId);
+  const operation = resolveOutboundPaymentOperation({
+    auth: scope.auth,
+    wallets: scope.wallets,
+    source: parsed.data.source,
+    destination: parsed.data.destination,
+    token: parsed.data.token,
+    amount: parsed.data.amount,
+    requiredWalletPermissions: ["payments:write"],
+  });
 
   // TODO: parsed.data.referenceAddress — attach as a memo/reference key to the transaction
   //       for Solana Pay compatibility and client-side correlation. Not yet implemented.
@@ -554,22 +540,27 @@ export async function prepareTransfer(c: AppContext) {
   await assertWalletPolicyAllowsTransfer(c, {
     organizationId: scope.auth.organizationId,
     projectId: scope.auth.projectId,
-    wallet: sourceWallet,
-    destinationAddress,
-    token: transferToken,
+    wallet: operation.sourceWallet,
+    destinationAddress: operation.destinationAddress,
+    token: operation.token,
     amount: parsed.data.amount,
   });
 
   let prepared: { serializedTx: string; blockhash: string; lastValidBlockHeight: string };
 
-  if (transferToken === "SOL") {
-    prepared = await prepareSolTransfer(c, sourceAddress, destinationAddress, parsed.data.amount);
+  if (operation.token === "SOL") {
+    prepared = await prepareSolTransfer(
+      c,
+      operation.sourceAddress,
+      operation.destinationAddress,
+      parsed.data.amount
+    );
   } else {
     const mintAddress = assertValidAddress(parsed.data.token, "token");
     prepared = await prepareSplTransfer(
       c,
-      sourceAddress,
-      destinationAddress,
+      operation.sourceAddress,
+      operation.destinationAddress,
       mintAddress,
       parsed.data.amount
     );
@@ -578,10 +569,10 @@ export async function prepareTransfer(c: AppContext) {
   const transfer = await createTransferRecord(c, {
     organizationId: scope.auth.organizationId,
     projectId: scope.auth.projectId,
-    walletId: sourceWallet.walletId,
-    sourceAddress: sourceWallet.publicKey,
+    walletId: operation.sourceWallet.walletId,
+    sourceAddress: operation.sourceWallet.publicKey,
     destinationAddress: parsed.data.destination,
-    token: transferToken,
+    token: operation.token,
     amount: parsed.data.amount,
     memo: parsed.data.memo,
     status: "pending",
@@ -1214,29 +1205,33 @@ export async function createTransfer(c: AppContext) {
   }
 
   const scope = await resolveScope(c);
-  assertProjectContext(parsed.data.projectId, scope.auth.projectId);
-
-  const sourceWallet = resolveWallet(scope.wallets, parsed.data.source);
-  assertApiKeyWalletAccess(scope.auth, sourceWallet.walletId, ["payments:write"]);
-  const destinationAddress = assertValidAddress(parsed.data.destination, "destination");
-  const transferToken = isNativeSolToken(parsed.data.token) ? "SOL" : parsed.data.token;
+  assertPaymentProjectScope(parsed.data.projectId, scope.auth.projectId);
+  const operation = resolveOutboundPaymentOperation({
+    auth: scope.auth,
+    wallets: scope.wallets,
+    source: parsed.data.source,
+    destination: parsed.data.destination,
+    token: parsed.data.token,
+    amount: parsed.data.amount,
+    requiredWalletPermissions: ["payments:write"],
+  });
 
   await assertWalletPolicyAllowsTransfer(c, {
     organizationId: scope.auth.organizationId,
     projectId: scope.auth.projectId,
-    wallet: sourceWallet,
-    destinationAddress,
-    token: transferToken,
+    wallet: operation.sourceWallet,
+    destinationAddress: operation.destinationAddress,
+    token: operation.token,
     amount: parsed.data.amount,
   });
 
   const transfer = await createTransferRecord(c, {
     organizationId: scope.auth.organizationId,
     projectId: scope.auth.projectId,
-    walletId: sourceWallet.walletId,
-    sourceAddress: sourceWallet.publicKey,
+    walletId: operation.sourceWallet.walletId,
+    sourceAddress: operation.sourceWallet.publicKey,
     destinationAddress: parsed.data.destination,
-    token: transferToken,
+    token: operation.token,
     amount: parsed.data.amount,
     memo: parsed.data.memo,
     status: "processing",
@@ -1244,11 +1239,11 @@ export async function createTransfer(c: AppContext) {
   });
 
   try {
-    if (transferToken === "SOL") {
+    if (operation.token === "SOL") {
       const solResult = await executeSolTransfer(
         c,
-        sourceWallet,
-        destinationAddress,
+        operation.sourceWallet,
+        operation.destinationAddress,
         parsed.data.amount
       );
       const updated = await updateTransferRecord(c, transfer.id, {
@@ -1264,8 +1259,8 @@ export async function createTransfer(c: AppContext) {
     const mintAddress = assertValidAddress(parsed.data.token, "token");
     const result = await executeSplTransfer(
       c,
-      sourceWallet,
-      destinationAddress,
+      operation.sourceWallet,
+      operation.destinationAddress,
       mintAddress,
       parsed.data.amount
     );

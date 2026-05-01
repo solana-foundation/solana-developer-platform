@@ -15,13 +15,15 @@ import {
   KeychainMemoryAdapter,
   type SigningConfigRecord,
 } from "@/services/adapters";
-import {
-  type CustodyProvider,
-  canProviderCreateWallet,
-  canProviderDeleteWallet,
-  canProviderSign,
-} from "@/services/custody/providers";
+import type { CustodyProvider } from "@/services/custody/providers";
 import * as custodyProvisioning from "@/services/custody/provisioning";
+import {
+  assertCustodyProviderCanCreateWallet,
+  assertCustodyProviderCanDeleteWallet,
+  assertCustodyProviderCanSign,
+  custodyProviderCanSign,
+  shouldSetCustodyScopeDefault,
+} from "@/services/custody-provider-lifecycle.service";
 import {
   createDfnsApiClient,
   normalizeDfnsWalletId,
@@ -305,14 +307,14 @@ export class SigningService {
     configId: string,
     provider: SigningConfiguration["provider"]
   ): Promise<void> {
-    // Lifecycle-only providers should never become the implicit default signer.
-    if (!canProviderSign(provider)) {
-      return;
-    }
-
     const scopeDefault = await this.configStore.getDefaultConfig(orgId, projectId);
 
-    if (scopeDefault && canProviderSign(scopeDefault.provider)) {
+    if (
+      !shouldSetCustodyScopeDefault({
+        candidateProvider: provider,
+        currentDefaultProvider: scopeDefault?.provider ?? null,
+      })
+    ) {
       return;
     }
 
@@ -328,17 +330,14 @@ export class SigningService {
     if (!config) {
       return;
     }
-    if (!canProviderSign(config.provider)) {
-      return;
-    }
 
     const scopeDefault = await this.configStore.getDefaultConfig(orgId, projectId);
-    if (!scopeDefault) {
-      await this.configStore.setDefaultConfig(orgId, projectId, configId);
-      return;
-    }
-
-    if (!canProviderSign(scopeDefault.provider) && canProviderSign(config.provider)) {
+    if (
+      shouldSetCustodyScopeDefault({
+        candidateProvider: config.provider,
+        currentDefaultProvider: scopeDefault?.provider ?? null,
+      })
+    ) {
       await this.configStore.setDefaultConfig(orgId, projectId, configId);
     }
   }
@@ -1234,13 +1233,7 @@ export class SigningService {
     }
 
     await this.assertProviderEnabled(orgId, config.provider);
-
-    if (!canProviderCreateWallet(config.provider)) {
-      throw new SigningError(
-        `Wallet provisioning not supported for provider: ${config.provider}`,
-        "INVALID_REQUEST"
-      );
-    }
+    assertCustodyProviderCanCreateWallet(config.provider);
 
     const parsed = await parseConfigRecord(this.env, orgId, config);
     const { walletId, publicKey } = await createProviderWallet({
@@ -1318,13 +1311,7 @@ export class SigningService {
     }
 
     await this.assertProviderEnabled(orgId, config.provider);
-
-    if (!canProviderDeleteWallet(config.provider)) {
-      throw new SigningError(
-        `Wallet deletion not supported for provider: ${config.provider}`,
-        "INVALID_REQUEST"
-      );
-    }
+    assertCustodyProviderCanDeleteWallet(config.provider);
 
     const wallets = await this.configStore.getWallets(config.id);
     const targetWallet = wallets.find((wallet) => wallet.walletId === params.walletId);
@@ -1630,12 +1617,7 @@ export class SigningService {
       throw new SigningError("Custody not initialized", "NOT_FOUND");
     }
 
-    if (!canProviderSign(config.provider)) {
-      throw new SigningError(
-        `Provider does not support transaction signing: ${config.provider}`,
-        "INVALID_REQUEST"
-      );
-    }
+    assertCustodyProviderCanSign(config.provider);
 
     const adapter = await this.getAdapterForConfig(orgId, config);
     const result = await adapter.sign(request);
@@ -1757,7 +1739,7 @@ export class SigningService {
       throw new SigningError("Custody not initialized", "NOT_FOUND");
     }
 
-    if (!canProviderSign(config.provider)) {
+    if (!custodyProviderCanSign(config.provider)) {
       return false;
     }
 

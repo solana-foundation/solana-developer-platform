@@ -1613,6 +1613,36 @@ describe("Payments routes", () => {
     expect(transfers.results[0]?.id).toBe("xfr_existing_daily_limit");
   });
 
+  it("blocks create transfer with zero amount before creating a transfer record", async () => {
+    const res = await app.request(
+      "/v1/payments/transfers",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          source: TEST_WALLET_ID,
+          destination: TEST_SOLANA_ADDRESSES.wallet2,
+          token: "SOL",
+          amount: "0",
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { code: string; message: string } };
+    expect(body.error.code).toBe("BAD_REQUEST");
+    expect(body.error.message).toContain("Transfer amount must be greater than zero");
+
+    const transfers = await getDb(env).prepare("SELECT id FROM payment_transfers").all<{
+      id: string;
+    }>();
+    expect(transfers.results).toHaveLength(0);
+  });
+
   async function seedTransfer(params: {
     id: string;
     status: string;
