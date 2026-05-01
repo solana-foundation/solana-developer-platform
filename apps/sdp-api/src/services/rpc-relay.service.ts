@@ -7,7 +7,7 @@ import {
   type ProjectSettings,
 } from "@sdp/types";
 import { AppError } from "@/lib/errors";
-import { getOrganizationProviderAvailability } from "@/services/organization-provider-access.service";
+import { getProviderAvailability } from "@/services/provider-availability.service";
 import type { Env } from "@/types/env";
 
 export type ManagedRpcProviderId = OrganizationRpcProvider;
@@ -423,11 +423,7 @@ export function includesTransactionMethod(methodNames: string[]): boolean {
 
 export async function resolveRpcTarget(input: ResolveRpcTargetInput): Promise<ResolvedRpcTarget> {
   const managedProviders = resolveManagedProviders(input.env);
-  const access = await getOrganizationProviderAvailability(
-    input.env,
-    input.db,
-    input.organizationId
-  );
+  const access = await getProviderAvailability(input.env, input.db, input.organizationId);
   const enabledManagedProviders = managedProviders.filter(
     (provider) => access.providers.rpc[provider.id]?.enabled
   );
@@ -504,11 +500,7 @@ export async function resolveRoundRobinRpcTargets(
   input: ResolveRpcTargetInput
 ): Promise<ResolvedRpcTarget[]> {
   const managedProviders = resolveManagedProviders(input.env);
-  const access = await getOrganizationProviderAvailability(
-    input.env,
-    input.db,
-    input.organizationId
-  );
+  const access = await getProviderAvailability(input.env, input.db, input.organizationId);
   const enabledManagedProviders = managedProviders.filter(
     (provider) => access.providers.rpc[provider.id]?.enabled
   );
@@ -580,11 +572,7 @@ export async function listRpcProviders(input: {
   requestedProjectId: string | null;
 }) {
   const managedProviders = resolveManagedProviders(input.env);
-  const access = await getOrganizationProviderAvailability(
-    input.env,
-    input.db,
-    input.organizationId
-  );
+  const access = await getProviderAvailability(input.env, input.db, input.organizationId);
   const enabledManagedProviders = managedProviders.filter(
     (provider) => access.providers.rpc[provider.id]?.enabled
   );

@@ -12,11 +12,11 @@ import {
   parseConfigRecord,
 } from "@/services/domain/signing/provider-config";
 import { createSigningService } from "@/services/domain/signing.service";
-import {
-  assertOrganizationProviderEnabled,
-  getEnabledOrganizationProviders,
-} from "@/services/organization-provider-access.service";
 import { SigningError } from "@/services/ports";
+import {
+  assertProviderAvailable,
+  getEnabledProviders,
+} from "@/services/provider-availability.service";
 import { type AppContext, getPreferredWalletForConfig, resolveActor } from "../context";
 import {
   type InitializeSigningRequest,
@@ -48,7 +48,7 @@ export const initializeSigning = async (c: AppContext) => {
   const signingService = createSigningService(c.env);
 
   try {
-    await assertOrganizationProviderEnabled(
+    await assertProviderAvailable(
       c.env,
       getDb(c.env),
       actor.organizationId,
@@ -102,7 +102,7 @@ export const switchSigning = async (c: AppContext) => {
   const projectId = parsed.data.projectId;
   const targetProvider = parsed.data.provider;
 
-  await assertOrganizationProviderEnabled(
+  await assertProviderAvailable(
     c.env,
     getDb(c.env),
     actor.organizationId,
@@ -194,9 +194,8 @@ export const getSwitchProviderOptions = async (c: AppContext) => {
   const actor = resolveActor(c);
   const projectId = c.req.query("projectId") ?? actor.projectId;
   const signingService = createSigningService(c.env);
-  const enabledProviders = (
-    await getEnabledOrganizationProviders(c.env, getDb(c.env), actor.organizationId)
-  ).custody;
+  const enabledProviders = (await getEnabledProviders(c.env, getDb(c.env), actor.organizationId))
+    .custody;
   const [reuseState, configurations] = await Promise.all([
     signingService.getProviderReuseState(actor.organizationId, projectId),
     signingService.getConfigurations(actor.organizationId, projectId),

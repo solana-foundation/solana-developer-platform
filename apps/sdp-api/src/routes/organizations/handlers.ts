@@ -13,9 +13,9 @@ import { AppError, notFound } from "@/lib/errors";
 import { noContent, success } from "@/lib/response";
 import { AuditService } from "@/services/audit.service";
 import {
-  assertOrganizationProviderEnabled,
-  getOrganizationProviderAvailability,
-} from "@/services/organization-provider-access.service";
+  assertProviderAvailable,
+  getProviderAvailability,
+} from "@/services/provider-availability.service";
 import type { Env } from "@/types/env";
 import { updateOrgSchema } from "./schemas";
 
@@ -142,7 +142,7 @@ export const updateOrganization = async (c: AppContext) => {
 
   if (parsed.data.settings !== undefined) {
     if (parsed.data.settings.rpcProvider) {
-      await assertOrganizationProviderEnabled(
+      await assertProviderAvailable(
         c.env,
         getDb(c.env),
         orgId,
@@ -204,7 +204,7 @@ export const getOrganizationProviderAccess = async (c: AppContext) => {
     throw new AppError("FORBIDDEN", "Access denied to this organization");
   }
 
-  const response = await getOrganizationProviderAvailability(c.env, getDb(c.env), orgId);
+  const response = await getProviderAvailability(c.env, getDb(c.env), orgId);
   return success(c, response);
 };
 

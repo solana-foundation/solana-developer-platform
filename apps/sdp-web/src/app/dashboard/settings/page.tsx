@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
-import { fetchOrganizationProviderAccess } from "@/lib/organization-provider-access";
+import { fetchProviderAvailability } from "@/lib/provider-availability";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createSdpApiClient } from "@/lib/sdp-api";
 import { OrganizationRpcSettingsForm } from "./organization-rpc-settings-form";
@@ -94,7 +94,7 @@ export default async function SettingsPage() {
       const resolvedOrganization = organization;
       try {
         const access = await trace.step("fetch_provider_access", () =>
-          fetchOrganizationProviderAccess(apiClient.request, resolvedOrganization.id)
+          fetchProviderAvailability(apiClient.request, resolvedOrganization.id)
         );
         enabledRpcProviders = access.enabledRpcProviders;
       } catch {

@@ -51,9 +51,9 @@ import {
   deleteProviderWallet,
 } from "@/services/domain/signing/provider-wallet-lifecycle";
 import { createEncryptionService, type EncryptionService } from "@/services/encryption.service";
-import { assertOrganizationProviderEnabled } from "@/services/organization-provider-access.service";
 import type { SigningPort, SignRequest, SignResult, SignStatus } from "@/services/ports";
 import { isFullSigningPort, SigningError } from "@/services/ports";
+import { assertProviderAvailable } from "@/services/provider-availability.service";
 import {
   CustodyConfigStore,
   type CustodyWallet,
@@ -290,13 +290,7 @@ export class SigningService {
     provider: SigningConfiguration["provider"]
   ): Promise<void> {
     try {
-      await assertOrganizationProviderEnabled(
-        this.env,
-        getDb(this.env),
-        orgId,
-        "custody",
-        provider
-      );
+      await assertProviderAvailable(this.env, getDb(this.env), orgId, "custody", provider);
     } catch (error) {
       if (error instanceof AppError) {
         throw new SigningError(error.message, "INVALID_REQUEST", error);
