@@ -1,19 +1,18 @@
 import { describe, expect, it } from "vitest";
 import { AppError } from "@/lib/errors";
-import {
-  assertTokenAllowsSupplyOperation,
-  parsePositiveTokenAmount,
-} from "./token-operation-validation";
+import { assertTokenAllowsOperation, parsePositiveTokenAmount } from "./token-operation.service";
 
-describe("token-operation-validation", () => {
-  describe("assertTokenAllowsSupplyOperation", () => {
+describe("token-operation.service", () => {
+  describe("assertTokenAllowsOperation", () => {
     it("allows active tokens", () => {
-      expect(() => assertTokenAllowsSupplyOperation({ status: "active" }, "mint")).not.toThrow();
+      expect(() =>
+        assertTokenAllowsOperation({ status: "active", decimals: 9 }, "mint")
+      ).not.toThrow();
     });
 
     it("returns TOKEN_PAUSED for paused tokens", () => {
       try {
-        assertTokenAllowsSupplyOperation({ status: "paused" }, "burn");
+        assertTokenAllowsOperation({ status: "paused", decimals: 9 }, "burn");
         throw new Error("Expected burn validation to throw");
       } catch (error) {
         expect(error).toBeInstanceOf(AppError);
@@ -23,7 +22,7 @@ describe("token-operation-validation", () => {
 
     it("returns TOKEN_NOT_ACTIVE for pending tokens", () => {
       try {
-        assertTokenAllowsSupplyOperation({ status: "pending" }, "mint");
+        assertTokenAllowsOperation({ status: "pending", decimals: 9 }, "mint");
         throw new Error("Expected mint validation to throw");
       } catch (error) {
         expect(error).toBeInstanceOf(AppError);

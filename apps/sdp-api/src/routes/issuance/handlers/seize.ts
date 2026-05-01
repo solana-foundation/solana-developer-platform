@@ -1,6 +1,5 @@
 import type { Context } from "hono";
 import { getDb } from "@/db";
-import { toMosaicAmount } from "@/lib/amount";
 import { getAuth } from "@/lib/auth";
 import { AppError, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
@@ -9,6 +8,11 @@ import { AuditService } from "@/services/audit.service";
 import { createMosaicService } from "@/services/mosaic";
 import { createRpc, simulateTransaction } from "@/services/solana/rpc";
 import { TokenService } from "@/services/token.service";
+import {
+  assertTokenAllowsOperation,
+  assertTokenIsDeployed,
+  parsePositiveTokenAmount,
+} from "@/services/token-operation.service";
 import type { Env } from "@/types/env";
 import { seizeSchema } from "../schemas";
 import { assertDestinationAllowedByControlList } from "./access-control";
@@ -41,13 +45,10 @@ export const prepareSeize = async (c: AppContext) => {
     throw notFound("Token");
   }
 
-  if (token.status !== "active") {
-    throw new AppError("TOKEN_NOT_ACTIVE", "Token must be active to seize");
-  }
+  assertTokenAllowsOperation(token, "seize");
+  assertTokenIsDeployed(token);
 
-  if (!token.mintAddress) {
-    throw new AppError("TOKEN_NOT_DEPLOYED", "Token has not been deployed to Solana");
-  }
+  const { mosaicAmount } = parsePositiveTokenAmount(parsed.data.seize.amount, token.decimals);
 
   const isOnControlList = await tokenService.isAddressAllowed(
     tokenId,
@@ -76,7 +77,6 @@ export const prepareSeize = async (c: AppContext) => {
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
   const source = assertValidAddress(parsed.data.seize.source, "source");
   const destination = assertValidAddress(parsed.data.seize.destination, "destination");
-  // biome-ignore lint/security/noSecrets: Field label used for error messages, not a secret.
   const permanentDelegate = assertValidAddress(permanentDelegateRaw, "delegateAuthority");
 
   const mosaic = createMosaicService(c.env, signer);
@@ -84,7 +84,7 @@ export const prepareSeize = async (c: AppContext) => {
     mint: mintAddress,
     source,
     destination,
-    amount: toMosaicAmount(parsed.data.seize.amount, token.decimals),
+    amount: mosaicAmount,
     permanentDelegate,
     feePayer: signer.address,
   });
@@ -161,13 +161,10 @@ export const executeSeize = async (c: AppContext) => {
     throw notFound("Token");
   }
 
-  if (token.status !== "active") {
-    throw new AppError("TOKEN_NOT_ACTIVE", "Token must be active to seize");
-  }
+  assertTokenAllowsOperation(token, "seize");
+  assertTokenIsDeployed(token);
 
-  if (!token.mintAddress) {
-    throw new AppError("TOKEN_NOT_DEPLOYED", "Token has not been deployed to Solana");
-  }
+  const { mosaicAmount } = parsePositiveTokenAmount(parsed.data.seize.amount, token.decimals);
 
   const isOnControlList = await tokenService.isAddressAllowed(
     tokenId,
@@ -232,7 +229,7 @@ export const executeSeize = async (c: AppContext) => {
       mint: mintAddress,
       source,
       destination,
-      amount: toMosaicAmount(parsed.data.seize.amount, token.decimals),
+      amount: mosaicAmount,
       permanentDelegate: signer,
       feePayer: signer,
     });
