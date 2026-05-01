@@ -16,8 +16,9 @@ import {
   Wallet,
 } from "lucide-react";
 import { motion } from "motion/react";
-import { usePathname, useRouter } from "next/navigation";
-import { type MouseEvent, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { IssuanceHeaderTabs } from "@/components/issuance-header-tabs";
 import { SentryFeedbackWidget } from "@/components/sentry-feedback-widget";
 import { SentryUserContext } from "@/components/sentry-user-context";
@@ -71,77 +72,6 @@ type DashboardPageConfig = {
   };
 };
 
-function isModifiedAnchorClick(event: MouseEvent<HTMLAnchorElement>) {
-  return event.metaKey || event.altKey || event.ctrlKey || event.shiftKey || event.button !== 0;
-}
-
-function useDashboardRouteClick(href: string, onNavigate?: () => void) {
-  const router = useRouter();
-
-  return useCallback(
-    (event: MouseEvent<HTMLAnchorElement>) => {
-      if (event.defaultPrevented || isModifiedAnchorClick(event)) {
-        return;
-      }
-
-      const targetUrl = new URL(href, window.location.origin);
-      const currentUrl = new URL(window.location.href);
-      const isCurrentRoute =
-        currentUrl.pathname === targetUrl.pathname &&
-        currentUrl.search === targetUrl.search &&
-        currentUrl.hash === targetUrl.hash;
-
-      if (isCurrentRoute) {
-        onNavigate?.();
-        return;
-      }
-
-      event.preventDefault();
-      onNavigate?.();
-
-      try {
-        router.push(`${targetUrl.pathname}${targetUrl.search}${targetUrl.hash}`);
-      } catch {
-        window.location.assign(targetUrl.toString());
-        return;
-      }
-
-      window.setTimeout(() => {
-        const latestUrl = new URL(window.location.href);
-        const reachedTarget =
-          latestUrl.pathname === targetUrl.pathname &&
-          latestUrl.search === targetUrl.search &&
-          latestUrl.hash === targetUrl.hash;
-
-        if (!reachedTarget) {
-          window.location.assign(targetUrl.toString());
-        }
-      }, 1_000);
-    },
-    [href, onNavigate, router]
-  );
-}
-
-function DashboardRouteAnchor({
-  children,
-  className,
-  href,
-  onNavigate,
-}: {
-  children: ReactNode;
-  className: string;
-  href: string;
-  onNavigate?: () => void;
-}) {
-  const handleClick = useDashboardRouteClick(href, onNavigate);
-
-  return (
-    <a href={href} onClick={handleClick} className={className}>
-      {children}
-    </a>
-  );
-}
-
 type DashboardTopBarProps = {
   isSidebarOpen: boolean;
   setSidebarOpen: (value: boolean) => void;
@@ -163,8 +93,9 @@ function HeaderBackAction({
   compactOnMobile?: boolean;
 }) {
   return (
-    <DashboardRouteAnchor
+    <Link
       href={href}
+      prefetch={false}
       className="inline-flex h-7 items-center gap-1.5 rounded-[var(--button-radius-md)] text-text-medium transition-colors hover:text-text-extra-high"
     >
       <ArrowLeft className="h-4 w-4" />
@@ -176,7 +107,7 @@ function HeaderBackAction({
       >
         {label}
       </span>
-    </DashboardRouteAnchor>
+    </Link>
   );
 }
 
@@ -425,10 +356,11 @@ function SidebarGroup({
           const active = isItemActive(pathname, item.href);
 
           return (
-            <DashboardRouteAnchor
+            <Link
               key={item.label}
               href={item.href}
-              onNavigate={onNavigate}
+              prefetch={false}
+              onClick={onNavigate}
               className={[
                 "flex h-10 items-center gap-3 rounded-[var(--button-radius-lg)] px-3 text-[16px] leading-[24px] transition-colors",
                 active
@@ -438,7 +370,7 @@ function SidebarGroup({
             >
               <Icon className="h-5 w-5" strokeWidth={1.9} />
               <span>{item.label}</span>
-            </DashboardRouteAnchor>
+            </Link>
           );
         })}
       </div>
@@ -499,35 +431,19 @@ function DashboardSidebarContent({
         <SentryFeedbackWidget />
         {bottomNavItems.map((item) => {
           const Icon = item.icon;
-          const className =
-            "flex h-10 items-center gap-3 rounded-[var(--button-radius-lg)] px-3 text-[16px] leading-[24px] text-text-medium transition-colors hover:bg-border-light hover:text-text-extra-high";
-
-          if (item.external) {
-            return (
-              <a
-                key={item.label}
-                href={item.href}
-                target="_blank"
-                rel="noopener noreferrer"
-                onClick={onNavigate}
-                className={className}
-              >
-                <Icon className="h-5 w-5" strokeWidth={1.9} />
-                <span>{item.label}</span>
-              </a>
-            );
-          }
-
           return (
-            <DashboardRouteAnchor
+            <Link
               key={item.label}
               href={item.href}
-              onNavigate={onNavigate}
-              className={className}
+              prefetch={item.external ? undefined : false}
+              target={item.external ? "_blank" : undefined}
+              rel={item.external ? "noopener noreferrer" : undefined}
+              onClick={onNavigate}
+              className="flex h-10 items-center gap-3 rounded-[var(--button-radius-lg)] px-3 text-[16px] leading-[24px] text-text-medium transition-colors hover:bg-border-light hover:text-text-extra-high"
             >
               <Icon className="h-5 w-5" strokeWidth={1.9} />
               <span>{item.label}</span>
-            </DashboardRouteAnchor>
+            </Link>
           );
         })}
       </div>
