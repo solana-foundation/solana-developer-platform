@@ -10,7 +10,7 @@ import {
   ClerkOrganizationsService,
 } from "@/services/clerk-organizations.service";
 import { type ClerkUser, ClerkUsersService } from "@/services/clerk-users.service";
-import { syncOrganizationTierFromClerk } from "@/services/organization-provider-access.service";
+import { syncProviderAccessFromClerk } from "@/services/provider-availability.service";
 import type { Env } from "@/types/env";
 
 type AppContext = Context<{ Bindings: Env }>;
@@ -254,7 +254,7 @@ async function ensureOrganizationMapping(
     ]);
 
     if (!isSelfHostedDeployment(c.env)) {
-      await syncOrganizationTierFromClerk(getDb(c.env), {
+      await syncProviderAccessFromClerk(getDb(c.env), {
         organizationId: orgId,
         clerkOrganization: clerkOrg,
       });
@@ -327,7 +327,7 @@ async function syncOrganization(c: AppContext, data: Record<string, unknown>) {
   }
 
   if (!isSelfHostedDeployment(c.env)) {
-    await syncOrganizationTierFromClerk(db, {
+    await syncProviderAccessFromClerk(db, {
       organizationId,
       clerkOrganization: clerkOrg,
     });

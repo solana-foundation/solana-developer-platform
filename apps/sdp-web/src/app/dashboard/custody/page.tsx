@@ -16,7 +16,7 @@ import {
 } from "@/app/dashboard/wallets/wallets-page-skeleton";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getAuthEntryPath } from "@/lib/auth-entry";
-import { fetchOrganizationProviderAccess } from "@/lib/organization-provider-access";
+import { fetchProviderAvailability } from "@/lib/provider-availability";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createSdpApiClient, type SdpApiClient } from "@/lib/sdp-api";
 import type { OnboardingStatusResponse } from "../onboarding-status";
@@ -165,7 +165,7 @@ export default async function CustodyPage() {
       trace.step("fetch_active_api_keys", () => fetchActiveApiKeys(apiClient.request)),
       trace.step("fetch_provider_access", () =>
         onboarding.organization
-          ? settle(fetchOrganizationProviderAccess(apiClient.request, onboarding.organization.id))
+          ? settle(fetchProviderAvailability(apiClient.request, onboarding.organization.id))
           : Promise.resolve({
               ok: false as const,
               error: new Error("Organization is not linked"),

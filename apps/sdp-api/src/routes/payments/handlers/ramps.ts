@@ -3,7 +3,7 @@ import { parseDecimalAmount } from "@/lib/amount";
 import { AppError } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { isAddress } from "@/lib/solana";
-import { assertOrganizationProviderEnabled } from "@/services/organization-provider-access.service";
+import { assertProviderAvailable } from "@/services/provider-availability.service";
 import type { AppContext } from "../context";
 import { assertWalletPolicyAllowsTransfer } from "../policy";
 import { executeOfframpSchema, executeOnrampSchema } from "../schemas";
@@ -1157,7 +1157,7 @@ async function resolveRampProvider(
   providerId: RampProviderId,
   organizationId: string
 ): Promise<RampProviderExecutor> {
-  await assertOrganizationProviderEnabled(c.env, getDb(c.env), organizationId, "ramps", providerId);
+  await assertProviderAvailable(c.env, getDb(c.env), organizationId, "ramps", providerId);
 
   const provider = RAMP_PROVIDER_REGISTRY[providerId];
   if (!provider) {

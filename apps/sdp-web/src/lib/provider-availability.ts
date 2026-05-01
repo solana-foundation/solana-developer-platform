@@ -10,18 +10,17 @@ import {
 } from "@/app/dashboard/custody/provider-catalog";
 import type { SdpApiClient } from "@/lib/sdp-api";
 
-export interface DashboardOrganizationProviderAccess
-  extends OrganizationProviderAvailabilityResponse {
+export interface DashboardProviderAvailability extends OrganizationProviderAvailabilityResponse {
   enabledCustodyProviders: KnownCustodyProvider[];
   enabledRpcProviders: OrganizationRpcProvider[];
   enabledComplianceProviders: ComplianceProviderId[];
   enabledRampProviders: RampProviderId[];
 }
 
-export async function fetchOrganizationProviderAccess(
+export async function fetchProviderAvailability(
   request: SdpApiClient["request"],
   organizationId: string
-): Promise<DashboardOrganizationProviderAccess> {
+): Promise<DashboardProviderAvailability> {
   const response = await request(
     `/v1/organizations/${encodeURIComponent(organizationId)}/provider-access`
   );
