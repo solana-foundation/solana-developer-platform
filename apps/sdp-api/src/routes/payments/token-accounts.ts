@@ -2,10 +2,11 @@ import type { Address } from "@solana/kit";
 import { formatDecimalAmount } from "@/lib/amount";
 import { AppError } from "@/lib/errors";
 import { assertValidAddress } from "@/lib/solana";
+import { SOL_MINT } from "@/services/payment-operation.service";
 import { type createRpc, getAccountInfo } from "@/services/solana/rpc";
 
-// biome-ignore lint/security/noSecrets: Solana native SOL mint address constant, not a secret.
-export const SOL_MINT = "So11111111111111111111111111111111111111112";
+export { SOL_MINT } from "@/services/payment-operation.service";
+
 // biome-ignore lint/security/noSecrets: Devnet USDC mint address constant, not a secret.
 const DEVNET_USDC_MINT = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
 // biome-ignore lint/security/noSecrets: Mainnet USDC mint address constant, not a secret.
@@ -20,11 +21,6 @@ const KNOWN_TOKEN_LABELS_BY_MINT = new Map<string, string>([
   [DEVNET_USDC_MINT, "USDC"],
   [MAINNET_USDC_MINT, "USDC"],
 ]);
-
-export function isNativeSolToken(token: string): boolean {
-  const normalized = token.trim();
-  return normalized.toUpperCase() === "SOL" || normalized === SOL_MINT;
-}
 
 function resolveTokenLabel(mint: string): string {
   return KNOWN_TOKEN_LABELS_BY_MINT.get(mint) ?? mint;

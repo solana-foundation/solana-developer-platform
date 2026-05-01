@@ -5,11 +5,11 @@ import { getAuth } from "@/lib/auth";
 import { AppError, notFound } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import { apiKeyCreateSchema } from "@/routes/api-keys/schemas";
+import { ApiKeyService } from "@/services/api-key.service";
 import {
   assertWalletBindingsInScope,
   resolveCreateWalletScope,
-} from "@/routes/api-keys/wallet-bindings";
-import { ApiKeyService } from "@/services/api-key.service";
+} from "@/services/api-key-scope.service";
 import { replaceApiKeyWalletBindings } from "@/services/api-key-wallets.service";
 import { AuditService } from "@/services/audit.service";
 import { createSigningService } from "@/services/domain/signing.service";

@@ -1,11 +1,11 @@
 import type { TokenResponse } from "@sdp/types";
 import type { Context } from "hono";
 import { getDb } from "@/db";
-import { resolveApiKeySigningWalletId } from "@/lib/api-key-wallet-auth";
 import { getAuth } from "@/lib/auth";
 import { AppError, notFound } from "@/lib/errors";
 import { created, paginated, success } from "@/lib/response";
 import { assertValidAddress } from "@/lib/solana";
+import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
 import { AuditService } from "@/services/audit.service";
 import { normalizeTemplateId, resolveTemplateConfig } from "@/services/issuance/templates";
 import { createMosaicService } from "@/services/mosaic";
