@@ -17,6 +17,10 @@ const nextConfig: NextConfig = {
         destination: `${docsProxyOrigin}/docs/postman/collection.json`,
       },
       {
+        source: "/provider-onboarding/:path*",
+        destination: `${docsProxyOrigin}/provider-onboarding/:path*`,
+      },
+      {
         source: "/docs",
         destination: `${docsProxyOrigin}/docs`,
       },
