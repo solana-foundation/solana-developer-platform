@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.18.8](https://github.com/solana-foundation/solana-developer-platform/compare/v0.18.7...v0.18.8) (2026-05-01)
+
+### Other Changes
+
+* Refactor provider availability module ([#257](https://github.com/solana-foundation/solana-developer-platform/pull/257)) ([ae99963](https://github.com/solana-foundation/solana-developer-platform/commit/ae99963342d8bf3cf769d75aa47ea17e5aaae09c))
+
 ## [0.18.7](https://github.com/solana-foundation/solana-developer-platform/compare/v0.18.6...v0.18.7) (2026-05-01)
 
 ### Other Changes
