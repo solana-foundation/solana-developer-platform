@@ -2,6 +2,7 @@
 
 import { createContext, type ReactNode, useCallback, useContext, useMemo, useState } from "react";
 import { SWRConfig } from "swr";
+import { DashboardWarmSnapshotPreloader } from "@/components/dashboard-warm-snapshot-preloader";
 import type { DashboardAccess } from "@/lib/dashboard-access";
 import { DASHBOARD_SWR_CONFIG } from "@/lib/dashboard-swr-config";
 import { useDashboardUrlState } from "@/lib/dashboard-url-state";
@@ -132,7 +133,13 @@ export function DashboardWorkspaceProvider({
 
   return (
     <DashboardWorkspaceContext.Provider value={value}>
-      <SWRConfig value={DASHBOARD_SWR_CONFIG}>{children}</SWRConfig>
+      <SWRConfig value={DASHBOARD_SWR_CONFIG}>
+        <DashboardWarmSnapshotPreloader
+          orgId={dashboardCacheScope.orgId}
+          userId={dashboardCacheScope.userId}
+        />
+        {children}
+      </SWRConfig>
     </DashboardWorkspaceContext.Provider>
   );
 }
@@ -141,7 +148,6 @@ export function useDashboardWorkspace() {
   const context = useContext(DashboardWorkspaceContext);
 
   if (!context) {
-    // biome-ignore lint/security/noSecrets: This is a React hook guard message, not a secret.
     throw new Error("useDashboardWorkspace must be used within a DashboardWorkspaceProvider");
   }
 

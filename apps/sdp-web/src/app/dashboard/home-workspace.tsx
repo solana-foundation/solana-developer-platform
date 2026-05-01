@@ -24,6 +24,7 @@ interface HomeWorkspaceProps {
   totalBalance: number | null;
   totalBalanceError: string | null;
   wallets: PaymentsDashboardWallet[];
+  isWarmSnapshotLoading?: boolean;
 }
 
 const HOME_ACTIVITY_KEY = "dashboard-home-activity";
@@ -90,7 +91,32 @@ function MetricCard({
   );
 }
 
-export function HomeWorkspace({ totalBalance, totalBalanceError, wallets }: HomeWorkspaceProps) {
+function resolveTotalBalanceHint({
+  isWalletEmptyState,
+  isWarmSnapshotLoading,
+  totalBalance,
+}: {
+  isWalletEmptyState: boolean;
+  isWarmSnapshotLoading: boolean;
+  totalBalance: number | null;
+}): string | null {
+  if (isWalletEmptyState) {
+    return "Create your first wallet to start tracking balances.";
+  }
+
+  if (totalBalance !== null) {
+    return null;
+  }
+
+  return isWarmSnapshotLoading ? "Loading balance snapshot..." : "No tracked balances found yet.";
+}
+
+export function HomeWorkspace({
+  totalBalance,
+  totalBalanceError,
+  wallets,
+  isWarmSnapshotLoading = false,
+}: HomeWorkspaceProps) {
   const { dashboardAccess } = useDashboardWorkspace();
   const { data: activitySnapshot, error: activityRequestError } = usePersistedDashboardSWR(
     HOME_ACTIVITY_KEY,
@@ -104,12 +130,12 @@ export function HomeWorkspace({ totalBalance, totalBalanceError, wallets }: Home
       ttlMs: HOME_ACTIVITY_CACHE_TTL_MS,
     }
   );
-  const isWalletEmptyState = wallets.length === 0;
-  const totalBalanceHint = isWalletEmptyState
-    ? "Create your first wallet to start tracking balances."
-    : totalBalance === null
-      ? "No tracked balances found yet."
-      : null;
+  const isWalletEmptyState = !isWarmSnapshotLoading && wallets.length === 0;
+  const totalBalanceHint = resolveTotalBalanceHint({
+    isWalletEmptyState,
+    isWarmSnapshotLoading,
+    totalBalance,
+  });
   const todaysVolume = activitySnapshot?.todaysVolume ?? null;
   const todaysVolumeError = activityRequestError
     ? activityRequestError instanceof Error
