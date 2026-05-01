@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.18.7](https://github.com/solana-foundation/solana-developer-platform/compare/v0.18.6...v0.18.7) (2026-05-01)
+
+### Other Changes
+
+* fix provider onboarding pdf rewrites ([#255](https://github.com/solana-foundation/solana-developer-platform/pull/255)) ([79d6eae](https://github.com/solana-foundation/solana-developer-platform/commit/79d6eaea4d4ffe739272eb2a928078291526b99f))
+
 ## [0.18.6](https://github.com/solana-foundation/solana-developer-platform/compare/v0.18.5...v0.18.6) (2026-04-30)
 
 ### Bug Fixes
