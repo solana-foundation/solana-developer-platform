@@ -543,7 +543,7 @@ export async function prepareTransfer(c: AppContext) {
     wallet: operation.sourceWallet,
     destinationAddress: operation.destinationAddress,
     token: operation.token,
-    amount: parsed.data.amount,
+    amount: operation.amount,
   });
 
   let prepared: { serializedTx: string; blockhash: string; lastValidBlockHeight: string };
@@ -553,7 +553,7 @@ export async function prepareTransfer(c: AppContext) {
       c,
       operation.sourceAddress,
       operation.destinationAddress,
-      parsed.data.amount
+      operation.amount
     );
   } else {
     const mintAddress = assertValidAddress(parsed.data.token, "token");
@@ -562,7 +562,7 @@ export async function prepareTransfer(c: AppContext) {
       operation.sourceAddress,
       operation.destinationAddress,
       mintAddress,
-      parsed.data.amount
+      operation.amount
     );
   }
 
@@ -573,7 +573,7 @@ export async function prepareTransfer(c: AppContext) {
     sourceAddress: operation.sourceWallet.publicKey,
     destinationAddress: parsed.data.destination,
     token: operation.token,
-    amount: parsed.data.amount,
+    amount: operation.amount,
     memo: parsed.data.memo,
     status: "pending",
     serializedTx: prepared.serializedTx,
@@ -1222,7 +1222,7 @@ export async function createTransfer(c: AppContext) {
     wallet: operation.sourceWallet,
     destinationAddress: operation.destinationAddress,
     token: operation.token,
-    amount: parsed.data.amount,
+    amount: operation.amount,
   });
 
   const transfer = await createTransferRecord(c, {
@@ -1232,7 +1232,7 @@ export async function createTransfer(c: AppContext) {
     sourceAddress: operation.sourceWallet.publicKey,
     destinationAddress: parsed.data.destination,
     token: operation.token,
-    amount: parsed.data.amount,
+    amount: operation.amount,
     memo: parsed.data.memo,
     status: "processing",
     initiatedByKeyId: scope.auth.id,
@@ -1244,7 +1244,7 @@ export async function createTransfer(c: AppContext) {
         c,
         operation.sourceWallet,
         operation.destinationAddress,
-        parsed.data.amount
+        operation.amount
       );
       const updated = await updateTransferRecord(c, transfer.id, {
         status: "confirmed",
@@ -1262,7 +1262,7 @@ export async function createTransfer(c: AppContext) {
       operation.sourceWallet,
       operation.destinationAddress,
       mintAddress,
-      parsed.data.amount
+      operation.amount
     );
 
     const updated = await updateTransferRecord(c, transfer.id, {

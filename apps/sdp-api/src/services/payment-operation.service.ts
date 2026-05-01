@@ -15,6 +15,7 @@ export interface OutboundPaymentOperation {
   sourceAddress: Address;
   destinationAddress: Address;
   token: string;
+  amount: string;
 }
 
 export function assertPaymentProjectScope(
@@ -37,16 +38,18 @@ export function assertPaymentProjectScope(
   }
 }
 
-export function assertPositivePaymentAmount(amount: string): void {
+export function assertPositivePaymentAmount(amount: string): string {
   const normalized = amount.trim();
 
   if (!isDecimalString(normalized)) {
     throw new AppError("BAD_REQUEST", "Invalid amount format");
   }
 
+  // isDecimalString guarantees only digits and "." are present, so any non-zero digit
+  // proves the decimal value is positive without converting to a floating point number.
   for (const char of normalized) {
     if (char !== "." && char !== "0") {
-      return;
+      return normalized;
     }
   }
 
@@ -79,7 +82,7 @@ export function resolveOutboundPaymentOperation(input: {
   amount: string;
   requiredWalletPermissions?: Permission[];
 }): OutboundPaymentOperation {
-  assertPositivePaymentAmount(input.amount);
+  const amount = assertPositivePaymentAmount(input.amount);
 
   const sourceWallet = resolvePaymentWallet(input.wallets, input.source);
   assertApiKeyWalletAccess(
@@ -93,5 +96,6 @@ export function resolveOutboundPaymentOperation(input: {
     sourceAddress: assertValidAddress(sourceWallet.publicKey, "source"),
     destinationAddress: assertValidAddress(input.destination, "destination"),
     token: normalizePaymentToken(input.token),
+    amount,
   };
 }
