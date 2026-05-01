@@ -75,6 +75,45 @@ function resolveRequestError(error: unknown, fallback: string | null): string | 
   return fallback;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function normalizeAggregateSnapshot(value: unknown): CustodyWalletAggregate | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  return {
+    ...(value as unknown as CustodyWalletAggregate),
+    balances: Array.isArray(value.balances) ? value.balances : [],
+    walletCount: typeof value.walletCount === "number" ? value.walletCount : 0,
+  };
+}
+
+function normalizeTransferSnapshot(value: unknown): TransferRecord[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .filter((transfer): transfer is Record<string, unknown> => isRecord(transfer))
+    .map((transfer, index) => ({
+      id: typeof transfer.id === "string" && transfer.id ? transfer.id : `transfer-${index}`,
+      status: typeof transfer.status === "string" && transfer.status ? transfer.status : "pending",
+      signature: typeof transfer.signature === "string" ? transfer.signature : null,
+      ...(typeof transfer.type === "string" ? { type: transfer.type } : {}),
+      ...(typeof transfer.direction === "string" ? { direction: transfer.direction } : {}),
+      ...(typeof transfer.source === "string" ? { source: transfer.source } : {}),
+      ...(typeof transfer.destination === "string" ? { destination: transfer.destination } : {}),
+      ...(typeof transfer.token === "string" ? { token: transfer.token } : {}),
+      ...(typeof transfer.amount === "string" ? { amount: transfer.amount } : {}),
+      ...(typeof transfer.memo === "string" ? { memo: transfer.memo } : {}),
+      ...(typeof transfer.createdAt === "string" ? { createdAt: transfer.createdAt } : {}),
+      ...(typeof transfer.updatedAt === "string" ? { updatedAt: transfer.updatedAt } : {}),
+    }));
+}
+
 function truncateHash(value: string, prefix = 10, suffix = 8): string {
   if (value.length <= prefix + suffix + 3) {
     return value;
@@ -162,8 +201,8 @@ export function PaymentsOverview({
     }
   );
 
-  const liveAggregate = swrAggregate ?? aggregate;
-  const liveTransfers = swrTransfers ?? transfers;
+  const liveAggregate = normalizeAggregateSnapshot(swrAggregate ?? aggregate);
+  const liveTransfers = normalizeTransferSnapshot(swrTransfers ?? transfers);
   const liveAggregateError = aggregateFetchError
     ? resolveRequestError(aggregateFetchError, aggregateError)
     : swrAggregate === undefined

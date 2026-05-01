@@ -325,7 +325,9 @@ export async function fetchTransfers(
     throw new Error(getApiError(body, `Transfer list request failed (${response.status}).`));
   }
 
-  return (body.data ?? [])
+  const rawTransfers = Array.isArray(body.data) ? body.data : [];
+
+  return rawTransfers
     .filter((transfer): transfer is NonNullable<typeof transfer> => Boolean(transfer?.id))
     .map((transfer) => ({
       id: transfer.id ?? "",
