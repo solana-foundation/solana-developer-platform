@@ -40,6 +40,41 @@ const LOCAL_CUSTODY_PRIVATE_KEY =
 
 let originalDeploymentMode: "managed" | "self_hosted" | undefined;
 let originalCustodyPrivateKey: string | undefined;
+let originalManagedProviderEnv: Record<string, string | undefined>;
+
+const managedCustodyProviderEnvKeys = [
+  "FIREBLOCKS_API_KEY",
+  "FIREBLOCKS_API_SECRET",
+  "PRIVY_APP_ID",
+  "PRIVY_APP_SECRET",
+  "COINBASE_CDP_API_KEY_ID",
+  "COINBASE_CDP_API_KEY_SECRET",
+  "COINBASE_CDP_WALLET_SECRET",
+  "PARA_API_KEY",
+  "TURNKEY_API_PUBLIC_KEY",
+  "TURNKEY_API_PRIVATE_KEY",
+  "TURNKEY_ORGANIZATION_ID",
+  "DFNS_AUTH_TOKEN",
+  "DFNS_CREDENTIAL_ID",
+  "DFNS_PRIVATE_KEY",
+  "ANCHORAGE_API_KEY",
+] as const;
+
+function readManagedProviderEnv(): Record<string, string | undefined> {
+  const record = env as unknown as Record<string, string | undefined>;
+  return Object.fromEntries(managedCustodyProviderEnvKeys.map((key) => [key, record[key]]));
+}
+
+function writeManagedProviderEnv(values: Record<string, string | undefined>): void {
+  const record = env as unknown as Record<string, string | undefined>;
+  for (const key of managedCustodyProviderEnvKeys) {
+    record[key] = values[key];
+  }
+}
+
+function clearManagedProviderEnv(): void {
+  writeManagedProviderEnv({});
+}
 
 async function seedAuth(tier: "individual" | "enterprise" = "individual"): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
@@ -78,14 +113,17 @@ describe("Custody routes — self-hosted deployment mode", () => {
   beforeEach(async () => {
     originalDeploymentMode = env.SDP_DEPLOYMENT_MODE;
     originalCustodyPrivateKey = env.CUSTODY_PRIVATE_KEY;
+    originalManagedProviderEnv = readManagedProviderEnv();
     env.SDP_DEPLOYMENT_MODE = "self_hosted";
     env.CUSTODY_PRIVATE_KEY = LOCAL_CUSTODY_PRIVATE_KEY;
+    clearManagedProviderEnv();
     await seedTestDatabase(env);
   });
 
   afterEach(async () => {
     env.SDP_DEPLOYMENT_MODE = originalDeploymentMode;
     env.CUSTODY_PRIVATE_KEY = originalCustodyPrivateKey;
+    writeManagedProviderEnv(originalManagedProviderEnv);
     await clearTestDatabase(env);
     await clearKVNamespaces(env);
   });
@@ -138,15 +176,18 @@ describe("Custody routes — managed-mode regression", () => {
   beforeEach(async () => {
     originalDeploymentMode = env.SDP_DEPLOYMENT_MODE;
     originalCustodyPrivateKey = env.CUSTODY_PRIVATE_KEY;
+    originalManagedProviderEnv = readManagedProviderEnv();
     // Explicitly NOT self-hosted — verifies the bypass is gated by the flag
     env.SDP_DEPLOYMENT_MODE = undefined;
     env.CUSTODY_PRIVATE_KEY = LOCAL_CUSTODY_PRIVATE_KEY;
+    clearManagedProviderEnv();
     await seedTestDatabase(env);
   });
 
   afterEach(async () => {
     env.SDP_DEPLOYMENT_MODE = originalDeploymentMode;
     env.CUSTODY_PRIVATE_KEY = originalCustodyPrivateKey;
+    writeManagedProviderEnv(originalManagedProviderEnv);
     await clearTestDatabase(env);
     await clearKVNamespaces(env);
   });

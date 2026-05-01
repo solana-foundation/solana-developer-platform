@@ -6,7 +6,7 @@ import { success } from "@/lib/response";
 import { isSelfHostedDeployment } from "@/lib/runtime-env";
 import { assertValidAddress } from "@/lib/solana";
 import { createComplianceService } from "@/services/compliance";
-import { getEnabledOrganizationProviders } from "@/services/organization-provider-access.service";
+import { getEnabledProviders } from "@/services/provider-availability.service";
 import type { Env } from "@/types/env";
 import { screenAddressSchema } from "./schemas";
 
@@ -35,7 +35,7 @@ export async function screenAddress(c: AppContext) {
 
   const auth = getAuth(c);
   const enabledComplianceProviders = (
-    await getEnabledOrganizationProviders(c.env, getDb(c.env), auth.organizationId)
+    await getEnabledProviders(c.env, getDb(c.env), auth.organizationId)
   ).compliance;
 
   if (enabledComplianceProviders.length === 0) {

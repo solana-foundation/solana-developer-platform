@@ -30,36 +30,134 @@ type ClerkOrganizationWithMetadata = {
   private_metadata?: unknown;
 };
 
-const PROVIDER_LABELS = {
+type ProviderAvailabilityDefinition = {
+  label: string;
+  isConfigured: (env: Env) => boolean;
+};
+
+type ProviderAvailabilityDefinitions = {
+  custody: Record<CustodyProvider, ProviderAvailabilityDefinition>;
+  rpc: Record<OrganizationRpcProvider, ProviderAvailabilityDefinition>;
+  compliance: Record<ComplianceProviderId, ProviderAvailabilityDefinition>;
+  ramps: Record<RampProviderId, ProviderAvailabilityDefinition>;
+};
+
+function hasEnv(env: Env, key: keyof Env): boolean {
+  const value = env[key];
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function hasAllEnv(env: Env, keys: readonly (keyof Env)[]): boolean {
+  return keys.every((key) => hasEnv(env, key));
+}
+
+const PROVIDER_AVAILABILITY_DEFINITIONS = {
   custody: {
-    local: "Local",
-    fireblocks: "Fireblocks",
-    privy: "Privy",
-    coinbase_cdp: "Coinbase CDP",
-    para: "Para",
-    turnkey: "Turnkey",
-    dfns: "DFNS",
-    anchorage: "Anchorage",
+    local: {
+      label: "Local",
+      isConfigured: (env) => hasEnv(env, "CUSTODY_PRIVATE_KEY"),
+    },
+    fireblocks: {
+      label: "Fireblocks",
+      isConfigured: (env) => hasAllEnv(env, ["FIREBLOCKS_API_KEY", "FIREBLOCKS_API_SECRET"]),
+    },
+    privy: {
+      label: "Privy",
+      isConfigured: (env) => hasAllEnv(env, ["PRIVY_APP_ID", "PRIVY_APP_SECRET"]),
+    },
+    coinbase_cdp: {
+      label: "Coinbase CDP",
+      isConfigured: (env) =>
+        hasAllEnv(env, [
+          "COINBASE_CDP_API_KEY_ID",
+          "COINBASE_CDP_API_KEY_SECRET",
+          "COINBASE_CDP_WALLET_SECRET",
+        ]),
+    },
+    para: {
+      label: "Para",
+      isConfigured: (env) => hasEnv(env, "PARA_API_KEY"),
+    },
+    turnkey: {
+      label: "Turnkey",
+      isConfigured: (env) =>
+        hasAllEnv(env, [
+          "TURNKEY_API_PUBLIC_KEY",
+          "TURNKEY_API_PRIVATE_KEY",
+          "TURNKEY_ORGANIZATION_ID",
+        ]),
+    },
+    dfns: {
+      label: "DFNS",
+      isConfigured: (env) =>
+        hasAllEnv(env, ["DFNS_AUTH_TOKEN", "DFNS_CREDENTIAL_ID", "DFNS_PRIVATE_KEY"]),
+    },
+    anchorage: {
+      label: "Anchorage",
+      isConfigured: (env) => hasEnv(env, "ANCHORAGE_API_KEY"),
+    },
   },
   rpc: {
-    default: "SDP/default",
-    alchemy: "Alchemy",
-    helius: "Helius",
-    quicknode: "QuickNode",
-    triton: "Triton",
+    default: {
+      label: "SDP/default",
+      isConfigured: (env) => hasEnv(env, "SOLANA_RPC_URL"),
+    },
+    alchemy: {
+      label: "Alchemy",
+      isConfigured: (env) => hasEnv(env, "SOLANA_RPC_ALCHEMY_URL"),
+    },
+    helius: {
+      label: "Helius",
+      isConfigured: (env) => hasEnv(env, "SOLANA_RPC_HELIUS_URL"),
+    },
+    quicknode: {
+      label: "QuickNode",
+      isConfigured: (env) => hasEnv(env, "SOLANA_RPC_QUICKNODE_URL"),
+    },
+    triton: {
+      label: "Triton",
+      isConfigured: (env) => hasEnv(env, "SOLANA_RPC_TRITON_URL"),
+    },
   },
   compliance: {
-    range: "Range",
-    elliptic: "Elliptic",
-    trm: "TRM",
-    chainalysis: "Chainalysis",
+    range: {
+      label: "Range",
+      isConfigured: (env) => hasEnv(env, "RANGE_API_KEY"),
+    },
+    elliptic: {
+      label: "Elliptic",
+      isConfigured: (env) =>
+        hasEnv(env, "ELLIPTIC_API_TOKEN") ||
+        hasAllEnv(env, ["ELLIPTIC_API_KEY", "ELLIPTIC_API_SECRET"]),
+    },
+    trm: {
+      label: "TRM",
+      isConfigured: (env) => hasEnv(env, "TRM_API_KEY"),
+    },
+    chainalysis: {
+      label: "Chainalysis",
+      isConfigured: (env) => hasEnv(env, "CHAINALYSIS_API_KEY"),
+    },
   },
   ramps: {
-    moonpay: "MoonPay",
-    lightspark: "Lightspark",
-    bvnk: "BVNK",
+    moonpay: {
+      label: "MoonPay",
+      isConfigured: (env) => hasAllEnv(env, ["MOONPAY_API_KEY", "MOONPAY_SECRET_KEY"]),
+    },
+    lightspark: {
+      label: "Lightspark",
+      isConfigured: (env) =>
+        hasAllEnv(env, ["LIGHTSPARK_GRID_CLIENT_ID", "LIGHTSPARK_GRID_CLIENT_SECRET"]),
+    },
+    bvnk: {
+      label: "BVNK",
+      isConfigured: (env) =>
+        hasEnv(env, "BVNK_WALLET_ID") &&
+        (hasEnv(env, "BVNK_API_TOKEN") ||
+          hasAllEnv(env, ["BVNK_HAWK_AUTH_ID", "BVNK_HAWK_SECRET_KEY"])),
+    },
   },
-} as const;
+} as const satisfies ProviderAvailabilityDefinitions;
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object") {
@@ -190,59 +288,24 @@ export async function getOrganizationTierState(
   };
 }
 
+function buildConfiguredProviderEntries<T extends string>(
+  definitions: Record<T, ProviderAvailabilityDefinition>,
+  env: Env
+): Record<T, boolean> {
+  return Object.fromEntries(
+    Object.entries(definitions).map(([providerId, definition]) => [
+      providerId,
+      (definition as ProviderAvailabilityDefinition).isConfigured(env),
+    ])
+  ) as Record<T, boolean>;
+}
+
 function getConfiguredProviders(env: Env) {
   return {
-    custody: {
-      // Local custody is only available for self-hosted installs that set a
-      // local signing key; hosted environments should not expose it by default.
-      local: Boolean(env.CUSTODY_PRIVATE_KEY?.trim()),
-      fireblocks: Boolean(env.FIREBLOCKS_API_KEY?.trim() && env.FIREBLOCKS_API_SECRET?.trim()),
-      privy: Boolean(env.PRIVY_APP_ID?.trim() && env.PRIVY_APP_SECRET?.trim()),
-      coinbase_cdp: Boolean(
-        env.COINBASE_CDP_API_KEY_ID?.trim() &&
-          env.COINBASE_CDP_API_KEY_SECRET?.trim() &&
-          env.COINBASE_CDP_WALLET_SECRET?.trim()
-      ),
-      para: Boolean(env.PARA_API_KEY?.trim()),
-      turnkey: Boolean(
-        env.TURNKEY_API_PUBLIC_KEY?.trim() &&
-          env.TURNKEY_API_PRIVATE_KEY?.trim() &&
-          env.TURNKEY_ORGANIZATION_ID?.trim()
-      ),
-      dfns: Boolean(
-        env.DFNS_AUTH_TOKEN?.trim() &&
-          env.DFNS_CREDENTIAL_ID?.trim() &&
-          env.DFNS_PRIVATE_KEY?.trim()
-      ),
-      anchorage: Boolean(env.ANCHORAGE_API_KEY?.trim()),
-    },
-    rpc: {
-      default: Boolean(env.SOLANA_RPC_URL?.trim()),
-      alchemy: Boolean(env.SOLANA_RPC_ALCHEMY_URL?.trim()),
-      helius: Boolean(env.SOLANA_RPC_HELIUS_URL?.trim()),
-      quicknode: Boolean(env.SOLANA_RPC_QUICKNODE_URL?.trim()),
-      triton: Boolean(env.SOLANA_RPC_TRITON_URL?.trim()),
-    },
-    compliance: {
-      range: Boolean(env.RANGE_API_KEY?.trim()),
-      elliptic: Boolean(
-        env.ELLIPTIC_API_TOKEN?.trim() ||
-          (env.ELLIPTIC_API_KEY?.trim() && env.ELLIPTIC_API_SECRET?.trim())
-      ),
-      trm: Boolean(env.TRM_API_KEY?.trim()),
-      chainalysis: Boolean(env.CHAINALYSIS_API_KEY?.trim()),
-    },
-    ramps: {
-      moonpay: Boolean(env.MOONPAY_API_KEY?.trim() && env.MOONPAY_SECRET_KEY?.trim()),
-      lightspark: Boolean(
-        env.LIGHTSPARK_GRID_CLIENT_ID?.trim() && env.LIGHTSPARK_GRID_CLIENT_SECRET?.trim()
-      ),
-      bvnk: Boolean(
-        env.BVNK_WALLET_ID?.trim() &&
-          (env.BVNK_API_TOKEN?.trim() ||
-            (env.BVNK_HAWK_AUTH_ID?.trim() && env.BVNK_HAWK_SECRET_KEY?.trim()))
-      ),
-    },
+    custody: buildConfiguredProviderEntries(PROVIDER_AVAILABILITY_DEFINITIONS.custody, env),
+    rpc: buildConfiguredProviderEntries(PROVIDER_AVAILABILITY_DEFINITIONS.rpc, env),
+    compliance: buildConfiguredProviderEntries(PROVIDER_AVAILABILITY_DEFINITIONS.compliance, env),
+    ramps: buildConfiguredProviderEntries(PROVIDER_AVAILABILITY_DEFINITIONS.ramps, env),
   };
 }
 
@@ -285,7 +348,15 @@ function buildAvailabilityEntries<T extends string>(
   ) as Record<T, ProviderAvailabilityEntry>;
 }
 
-export async function getOrganizationProviderAvailability(
+function getProviderLabel(family: OrganizationProviderFamily, providerId: string): string {
+  const familyDefinitions = PROVIDER_AVAILABILITY_DEFINITIONS[family] as Record<
+    string,
+    ProviderAvailabilityDefinition
+  >;
+  return familyDefinitions[providerId]?.label ?? providerId;
+}
+
+export async function getProviderAvailability(
   env: Env,
   db: DatabaseClient,
   organizationId: string
@@ -326,9 +397,7 @@ function getAvailabilityMessage(
   providerId: string,
   entry: ProviderAvailabilityEntry
 ): string {
-  const label =
-    PROVIDER_LABELS[family][providerId as keyof (typeof PROVIDER_LABELS)[typeof family]] ??
-    providerId;
+  const label = getProviderLabel(family, providerId);
 
   if (!entry.entitled) {
     if (isSelfHostedDeployment(env)) {
@@ -346,42 +415,42 @@ function getAvailabilityMessage(
   return `${label} is unavailable for this organization.`;
 }
 
-export async function assertOrganizationProviderEnabled(
+export async function assertProviderAvailable(
   env: Env,
   db: DatabaseClient,
   organizationId: string,
   family: "custody",
   providerId: CustodyProvider
 ): Promise<void>;
-export async function assertOrganizationProviderEnabled(
+export async function assertProviderAvailable(
   env: Env,
   db: DatabaseClient,
   organizationId: string,
   family: "rpc",
   providerId: OrganizationRpcProvider
 ): Promise<void>;
-export async function assertOrganizationProviderEnabled(
+export async function assertProviderAvailable(
   env: Env,
   db: DatabaseClient,
   organizationId: string,
   family: "compliance",
   providerId: ComplianceProviderId
 ): Promise<void>;
-export async function assertOrganizationProviderEnabled(
+export async function assertProviderAvailable(
   env: Env,
   db: DatabaseClient,
   organizationId: string,
   family: "ramps",
   providerId: RampProviderId
 ): Promise<void>;
-export async function assertOrganizationProviderEnabled(
+export async function assertProviderAvailable(
   env: Env,
   db: DatabaseClient,
   organizationId: string,
   family: OrganizationProviderFamily,
   providerId: string
 ): Promise<void> {
-  const access = await getOrganizationProviderAvailability(env, db, organizationId);
+  const access = await getProviderAvailability(env, db, organizationId);
   const entry = access.providers[family][
     providerId as keyof (typeof access.providers)[typeof family]
   ] as ProviderAvailabilityEntry | undefined;
@@ -404,12 +473,8 @@ export async function assertOrganizationProviderEnabled(
   }
 }
 
-export async function getEnabledOrganizationProviders(
-  env: Env,
-  db: DatabaseClient,
-  organizationId: string
-) {
-  const access = await getOrganizationProviderAvailability(env, db, organizationId);
+export async function getEnabledProviders(env: Env, db: DatabaseClient, organizationId: string) {
+  const access = await getProviderAvailability(env, db, organizationId);
 
   return {
     tier: access.tier,
@@ -422,7 +487,7 @@ export async function getEnabledOrganizationProviders(
   };
 }
 
-export async function syncOrganizationTierFromClerk(
+export async function syncProviderAccessFromClerk(
   db: DatabaseClient,
   params: {
     organizationId: string;

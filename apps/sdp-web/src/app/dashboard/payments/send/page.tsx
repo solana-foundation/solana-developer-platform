@@ -1,7 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { getAuthEntryPath } from "@/lib/auth-entry";
-import { fetchOrganizationProviderAccess } from "@/lib/organization-provider-access";
+import { fetchProviderAvailability } from "@/lib/provider-availability";
 import { createSdpApiClient } from "@/lib/sdp-api";
 import type { OnboardingStatusResponse } from "../../onboarding-status";
 import { PaymentsActionPage } from "../payments-action-page";
@@ -32,10 +32,9 @@ export default async function PaymentsSendPage() {
   );
   const providerAccess =
     onboardingStatus.organization &&
-    (await fetchOrganizationProviderAccess(
-      apiClient.request,
-      onboardingStatus.organization.id
-    ).catch(() => null));
+    (await fetchProviderAvailability(apiClient.request, onboardingStatus.organization.id).catch(
+      () => null
+    ));
 
   return (
     <PaymentsActionPage

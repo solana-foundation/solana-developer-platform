@@ -5,8 +5,8 @@ import { createDatabaseClient } from "../src/db";
 import { ClerkOrganizationsService } from "../src/services/clerk-organizations.service";
 import {
   parseProviderOverridesFromClerkMetadata,
-  syncOrganizationTierFromClerk,
-} from "../src/services/organization-provider-access.service";
+  syncProviderAccessFromClerk,
+} from "../src/services/provider-availability.service";
 import type { Env } from "../src/types/env";
 
 type Tier = "individual" | "enterprise";
@@ -191,7 +191,7 @@ async function main() {
     clerkOrgId,
     nextPrivateMetadata
   );
-  const synced = await syncOrganizationTierFromClerk(db, {
+  const synced = await syncProviderAccessFromClerk(db, {
     organizationId: mapping.organization_id,
     clerkOrganization: updatedClerkOrganization,
   });
