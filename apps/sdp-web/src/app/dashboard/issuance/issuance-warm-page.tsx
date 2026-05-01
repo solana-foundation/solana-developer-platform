@@ -9,7 +9,7 @@ interface IssuanceWarmPageProps {
 }
 
 export function IssuanceWarmPage({ apiBaseUrl }: IssuanceWarmPageProps) {
-  const { data: snapshot } = useDashboardWarmSnapshot();
+  const { data: snapshot } = useDashboardWarmSnapshot({ revalidate: false });
   const tokens = snapshot?.issuedTokens.data ?? [];
   const apiKeys = getActiveWarmSnapshotApiKeys(snapshot?.apiKeys.data ?? []);
   const signerWallets = snapshot?.wallets.data ?? [];

@@ -16,7 +16,7 @@ import { CreateApiKeyModal } from "./create-api-key-modal";
 
 export function ApiKeysWarmPage() {
   const { dashboardAccess } = useDashboardWorkspace();
-  const { data: snapshot } = useDashboardWarmSnapshot();
+  const { data: snapshot } = useDashboardWarmSnapshot({ revalidate: false });
   const apiKeys = snapshot?.apiKeys.data ?? [];
   const wallets = snapshot?.wallets.data ?? [];
 

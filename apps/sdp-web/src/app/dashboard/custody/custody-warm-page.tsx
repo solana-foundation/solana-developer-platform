@@ -22,7 +22,7 @@ function deriveWalletProviders(wallets: Array<{ provider?: string | null }>) {
 }
 
 export function CustodyWarmPage({ apiBaseUrl }: CustodyWarmPageProps) {
-  const { data: snapshot, isLoading } = useDashboardWarmSnapshot();
+  const { data: snapshot, isLoading } = useDashboardWarmSnapshot({ revalidate: false });
   const wallets = snapshot?.wallets.data ?? [];
 
   if (!snapshot && isLoading) {

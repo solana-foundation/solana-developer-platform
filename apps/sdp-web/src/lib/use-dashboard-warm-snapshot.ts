@@ -18,6 +18,11 @@ interface DashboardWarmSnapshotEnvelope {
   };
 }
 
+interface UseDashboardWarmSnapshotOptions {
+  fallbackData?: DashboardWarmSnapshot;
+  revalidate?: boolean;
+}
+
 function getApiError(body: DashboardWarmSnapshotEnvelope, fallback: string): string {
   if (body.error?.message) {
     return body.error.message;
@@ -44,15 +49,18 @@ export async function fetchDashboardWarmSnapshot(): Promise<DashboardWarmSnapsho
   return body.data.snapshot;
 }
 
-export function useDashboardWarmSnapshot(fallbackData?: DashboardWarmSnapshot) {
+export function useDashboardWarmSnapshot({
+  fallbackData,
+  revalidate = true,
+}: UseDashboardWarmSnapshotOptions = {}) {
   return usePersistedDashboardSWR<DashboardWarmSnapshot>(
     DASHBOARD_WARM_SNAPSHOT_KEY,
-    () => fetchDashboardWarmSnapshot(),
+    revalidate ? () => fetchDashboardWarmSnapshot() : null,
     {
       dedupingInterval: 10_000,
       fallbackData,
-      refreshInterval: DASHBOARD_WARM_SNAPSHOT_REFRESH_MS,
-      revalidateOnFocus: true,
+      refreshInterval: revalidate ? DASHBOARD_WARM_SNAPSHOT_REFRESH_MS : 0,
+      revalidateOnFocus: revalidate,
     },
     {
       key: "warm-snapshot",

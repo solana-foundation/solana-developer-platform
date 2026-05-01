@@ -6,7 +6,7 @@ import { HomeWorkspace } from "./home-workspace";
 import { resolveTotalBalance } from "./payments/payments-overview.utils";
 
 export function HomeWarmPage() {
-  const { data: snapshot, isLoading } = useDashboardWarmSnapshot();
+  const { data: snapshot, isLoading } = useDashboardWarmSnapshot({ revalidate: false });
   const wallets = snapshot?.wallets.data ?? [];
   const aggregate = snapshot?.aggregateBalance.data ?? null;
   const totalBalance = useMemo(

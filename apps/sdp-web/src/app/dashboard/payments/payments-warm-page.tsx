@@ -10,7 +10,7 @@ interface PaymentsWarmPageProps {
 }
 
 export function PaymentsWarmPage({ apiBaseUrl }: PaymentsWarmPageProps) {
-  const { data: snapshot } = useDashboardWarmSnapshot();
+  const { data: snapshot } = useDashboardWarmSnapshot({ revalidate: false });
   const apiKeys = getActiveWarmSnapshotApiKeys(snapshot?.apiKeys.data ?? []);
   const wallets = snapshot?.wallets.data ?? [];
   const issuedTokenSymbolsByMint = useMemo(
