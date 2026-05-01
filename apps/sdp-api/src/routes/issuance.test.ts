@@ -817,6 +817,78 @@ describe("Issuance Routes", () => {
     });
   });
 
+  describe("Token Operation Policy", () => {
+    const policyTokenId = "tok_operationpolicy";
+
+    beforeEach(async () => {
+      await getDb(env)
+        .prepare(
+          `INSERT INTO issued_tokens (id, project_id, organization_id, mint_address, mint_authority, freeze_authority,
+           name, symbol, decimals, total_supply_cached, is_mintable, freeze_authority_enabled, allowlist_enabled, status, created_by)
+           VALUES (?, ?, ?, ?, ?, ?, 'Operation Policy Token', 'OPP', 9, '0', 1, 1, 0, 'active', ?)`
+        )
+        .bind(
+          policyTokenId,
+          TEST_PROJECT.id,
+          TEST_ORG.id,
+          TEST_ACTIVE_TOKEN.mintAddress,
+          TEST_ACTIVE_TOKEN.mintAuthority,
+          TEST_ACTIVE_TOKEN.freezeAuthority,
+          TEST_PROJECT_API_KEY.id
+        )
+        .run();
+    });
+
+    it("rejects zero force-burn amount before authority resolution", async () => {
+      const res = await app.request(
+        `/v1/issuance/tokens/${policyTokenId}/force-burn/prepare`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            forceBurn: {
+              source: TEST_SOLANA_ADDRESSES.wallet1,
+              amount: "0",
+            },
+          }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error.code).toBe("INVALID_TOKEN_AMOUNT");
+    });
+
+    it("rejects zero seize amount before authority resolution", async () => {
+      const res = await app.request(
+        `/v1/issuance/tokens/${policyTokenId}/seize/prepare`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            seize: {
+              source: TEST_SOLANA_ADDRESSES.wallet1,
+              destination: TEST_SOLANA_ADDRESSES.wallet2,
+              amount: "0",
+            },
+          }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error.code).toBe("INVALID_TOKEN_AMOUNT");
+    });
+  });
+
   // ═══════════════════════════════════════════════════════════════════════════
   // Allowlist Tests
   // ═══════════════════════════════════════════════════════════════════════════

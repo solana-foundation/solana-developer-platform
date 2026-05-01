@@ -10,13 +10,14 @@ import { AuditService } from "@/services/audit.service";
 import { createOrgSigner, createToken2022Service } from "@/services/solana";
 import { createRpcForSdk } from "@/services/solana/rpc";
 import { TokenService } from "@/services/token.service";
+import {
+  assertTokenAllowsOperation,
+  assertTokenIsDeployed,
+  parsePositiveTokenAmount,
+} from "@/services/token-operation.service";
 import type { Env } from "@/types/env";
 import { burnSchema } from "../schemas";
 import { buildIdempotencyMetadata } from "./idempotency";
-import {
-  assertTokenAllowsSupplyOperation,
-  parsePositiveTokenAmount,
-} from "./token-operation-validation";
 
 type AppContext = Context<{ Bindings: Env }>;
 type MosaicSdkRpc = Parameters<typeof resolveTokenAccount>[0];
@@ -142,11 +143,8 @@ export const prepareBurn = async (c: AppContext) => {
     throw notFound("Token");
   }
 
-  assertTokenAllowsSupplyOperation(token, "burn");
-
-  if (!token.mintAddress) {
-    throw new AppError("TOKEN_NOT_DEPLOYED", "Token has not been deployed to Solana");
-  }
+  assertTokenAllowsOperation(token, "burn");
+  assertTokenIsDeployed(token);
 
   const signingWalletId = resolveApiKeySigningWalletId(
     auth,
@@ -256,11 +254,8 @@ export const executeBurn = async (c: AppContext) => {
     throw notFound("Token");
   }
 
-  assertTokenAllowsSupplyOperation(token, "burn");
-
-  if (!token.mintAddress) {
-    throw new AppError("TOKEN_NOT_DEPLOYED", "Token has not been deployed to Solana");
-  }
+  assertTokenAllowsOperation(token, "burn");
+  assertTokenIsDeployed(token);
 
   const signingWalletId = resolveApiKeySigningWalletId(
     auth,

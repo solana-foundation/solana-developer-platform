@@ -1,6 +1,5 @@
 import type { Context } from "hono";
 import { getDb } from "@/db";
-import { parseDecimalAmount } from "@/lib/amount";
 import { getAuth } from "@/lib/auth";
 import { AppError, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
@@ -11,14 +10,11 @@ import { createMosaicService } from "@/services/mosaic";
 import { createOrgSigner } from "@/services/solana";
 import { createRpc, simulateTransaction } from "@/services/solana/rpc";
 import { TokenService } from "@/services/token.service";
+import { resolveMintOperationAmount } from "@/services/token-operation.service";
 import type { Env } from "@/types/env";
 import { mintSchema } from "../schemas";
 import { assertDestinationAllowedByControlList } from "./access-control";
 import { buildIdempotencyMetadata } from "./idempotency";
-import {
-  assertTokenAllowsSupplyOperation,
-  parsePositiveTokenAmount,
-} from "./token-operation-validation";
 
 type AppContext = Context<{ Bindings: Env }>;
 
@@ -46,19 +42,9 @@ export const prepareMint = async (c: AppContext) => {
     throw notFound("Token");
   }
 
-  assertTokenAllowsSupplyOperation(token, "mint");
-
-  if (!token.mintAddress) {
-    throw new AppError("TOKEN_NOT_DEPLOYED", "Token has not been deployed to Solana");
-  }
-
-  if (!token.isMintable) {
-    throw new AppError("TOKEN_NOT_MINTABLE", "Token is not mintable");
-  }
-
-  const { amountBaseUnits: mintAmount, mosaicAmount } = parsePositiveTokenAmount(
-    parsed.data.mint.amount,
-    token.decimals
+  const { mintAddress: mintAddressRaw, mosaicAmount } = resolveMintOperationAmount(
+    token,
+    parsed.data.mint.amount
   );
 
   const isOnControlList = await tokenService.isAddressAllowed(
@@ -71,16 +57,6 @@ export const prepareMint = async (c: AppContext) => {
     isOnControlList,
   });
 
-  // Check max supply
-  if (token.maxSupply) {
-    const currentSupply = parseDecimalAmount(token.totalSupply, token.decimals);
-    const maxSupply = parseDecimalAmount(token.maxSupply, token.decimals);
-
-    if (currentSupply + mintAmount > maxSupply) {
-      throw new AppError("MAX_SUPPLY_EXCEEDED", "Mint amount would exceed maximum supply");
-    }
-  }
-
   const signingWalletId = resolveApiKeySigningWalletId(
     auth,
     parsed.data.signingWalletId ?? token.signingWalletId,
@@ -90,7 +66,7 @@ export const prepareMint = async (c: AppContext) => {
   // Get mint authority (custody signer via 3-tier resolution)
   const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId, signingWalletId);
   const mintAuthority = assertValidAddress(token.mintAuthority ?? "", "mintAuthority");
-  const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
+  const mintAddress = assertValidAddress(mintAddressRaw, "mintAddress");
   const destination = assertValidAddress(parsed.data.mint.destination, "destination");
 
   // Build unsigned transaction using Mosaic
@@ -175,19 +151,9 @@ export const executeMint = async (c: AppContext) => {
     throw notFound("Token");
   }
 
-  assertTokenAllowsSupplyOperation(token, "mint");
-
-  if (!token.mintAddress) {
-    throw new AppError("TOKEN_NOT_DEPLOYED", "Token has not been deployed to Solana");
-  }
-
-  if (!token.isMintable) {
-    throw new AppError("TOKEN_NOT_MINTABLE", "Token is not mintable");
-  }
-
-  const { amountBaseUnits: mintAmount, mosaicAmount } = parsePositiveTokenAmount(
-    parsed.data.mint.amount,
-    token.decimals
+  const { mintAddress: mintAddressRaw, mosaicAmount } = resolveMintOperationAmount(
+    token,
+    parsed.data.mint.amount
   );
 
   const isOnControlList = await tokenService.isAddressAllowed(
@@ -200,21 +166,12 @@ export const executeMint = async (c: AppContext) => {
     isOnControlList,
   });
 
-  if (token.maxSupply) {
-    const currentSupply = parseDecimalAmount(token.totalSupply, token.decimals);
-    const maxSupply = parseDecimalAmount(token.maxSupply, token.decimals);
-
-    if (currentSupply + mintAmount > maxSupply) {
-      throw new AppError("MAX_SUPPLY_EXCEEDED", "Mint amount would exceed maximum supply");
-    }
-  }
-
   const signingWalletId = resolveApiKeySigningWalletId(
     auth,
     parsed.data.signingWalletId ?? token.signingWalletId,
     ["tokens:write"]
   );
-  const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
+  const mintAddress = assertValidAddress(mintAddressRaw, "mintAddress");
   const destination = assertValidAddress(parsed.data.mint.destination, "destination");
 
   const idempotencyMetadata = buildIdempotencyMetadata(c.req.header("Idempotency-Key"), {
