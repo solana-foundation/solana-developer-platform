@@ -449,7 +449,15 @@ function DashboardSidebarContent({
 }
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: this shell intentionally coordinates route-specific dashboard layout behavior in one place.
-export function DashboardShell({ children }: { children: ReactNode }) {
+export function DashboardShell({
+  children,
+  initialIsSignedIn,
+  initialOrgId,
+}: {
+  children: ReactNode;
+  initialIsSignedIn: boolean;
+  initialOrgId: string | null;
+}) {
   const { isLoaded, isSignedIn, orgId } = useAuth();
   const pathname = usePathname();
   const { dashboardAccess, isSidebarOpen, issuanceTab, setSidebarOpen } = useDashboardWorkspace();
@@ -482,6 +490,8 @@ export function DashboardShell({ children }: { children: ReactNode }) {
       pathname === "/dashboard/wallets" ||
       pathname === "/dashboard/custody");
   const shouldLockShellViewport = shouldLockViewportScroll || isMobileSidebarOpen;
+  const effectiveIsSignedIn = isLoaded ? isSignedIn : initialIsSignedIn;
+  const effectiveOrgId = isLoaded ? orgId : initialOrgId;
 
   useEffect(() => {
     if (previousPathnameRef.current !== pathname) {
@@ -490,7 +500,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
     }
   }, [pathname]);
 
-  if (!isLoaded) {
+  if (!isLoaded && !initialIsSignedIn) {
     return (
       <main className="min-h-screen bg-[var(--sdp-shell-bg)] p-0 text-text-extra-high">
         <div className="mx-auto max-w-5xl border border-border-extra-light bg-white/70 p-6">
@@ -500,7 +510,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
     );
   }
 
-  if (!isSignedIn) {
+  if (!effectiveIsSignedIn) {
     return (
       <main className="min-h-screen bg-[var(--sdp-shell-bg)] p-0 text-text-extra-high">
         <div className="mx-auto max-w-3xl border border-border-extra-light bg-white/70 p-6">
@@ -525,7 +535,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
     );
   }
 
-  if (!orgId) {
+  if (!effectiveOrgId) {
     return (
       <main className="min-h-screen bg-[var(--sdp-shell-bg)] p-0 text-text-extra-high">
         <div className="mx-auto max-w-3xl border border-border-extra-light bg-white/70 p-6">

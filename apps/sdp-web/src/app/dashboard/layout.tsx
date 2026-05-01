@@ -20,7 +20,9 @@ export default async function DashboardLayout({ children }: { children: ReactNod
       dashboardAccess={dashboardAccess}
       dashboardCacheScope={{ orgId: orgId ?? null, userId: userId ?? null }}
     >
-      <DashboardShell>{children}</DashboardShell>
+      <DashboardShell initialIsSignedIn={true} initialOrgId={orgId ?? null}>
+        {children}
+      </DashboardShell>
     </DashboardWorkspaceProvider>
   );
 }
