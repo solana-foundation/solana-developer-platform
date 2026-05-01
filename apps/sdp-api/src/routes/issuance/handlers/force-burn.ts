@@ -1,6 +1,5 @@
 import type { Context } from "hono";
 import { getDb } from "@/db";
-import { toMosaicAmount } from "@/lib/amount";
 import { getAuth } from "@/lib/auth";
 import { AppError, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
@@ -9,6 +8,11 @@ import { AuditService } from "@/services/audit.service";
 import { createMosaicService } from "@/services/mosaic";
 import { createRpc, simulateTransaction } from "@/services/solana/rpc";
 import { TokenService } from "@/services/token.service";
+import {
+  assertTokenAllowsOperation,
+  assertTokenIsDeployed,
+  parsePositiveTokenAmount,
+} from "@/services/token-operation.service";
 import type { Env } from "@/types/env";
 import { forceBurnSchema } from "../schemas";
 import { resolveAuthoritySigner, resolvePermanentDelegateAuthority } from "./authority-resolution";
@@ -40,13 +44,10 @@ export const prepareForceBurn = async (c: AppContext) => {
     throw notFound("Token");
   }
 
-  if (token.status !== "active") {
-    throw new AppError("TOKEN_NOT_ACTIVE", "Token must be active to force burn");
-  }
+  assertTokenAllowsOperation(token, "force_burn");
+  assertTokenIsDeployed(token);
 
-  if (!token.mintAddress) {
-    throw new AppError("TOKEN_NOT_DEPLOYED", "Token has not been deployed to Solana");
-  }
+  const { mosaicAmount } = parsePositiveTokenAmount(parsed.data.forceBurn.amount, token.decimals);
 
   const permanentDelegateRaw =
     parsed.data.forceBurn.delegateAuthority ??
@@ -64,14 +65,13 @@ export const prepareForceBurn = async (c: AppContext) => {
   });
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
   const source = assertValidAddress(parsed.data.forceBurn.source, "source");
-  // biome-ignore lint/security/noSecrets: Field label used for error messages, not a secret.
   const permanentDelegate = assertValidAddress(permanentDelegateRaw, "delegateAuthority");
 
   const mosaic = createMosaicService(c.env, signer);
   const prepared = await mosaic.prepareForceBurn({
     mint: mintAddress,
     source,
-    amount: toMosaicAmount(parsed.data.forceBurn.amount, token.decimals),
+    amount: mosaicAmount,
     permanentDelegate,
     feePayer: signer.address,
   });
@@ -146,13 +146,10 @@ export const executeForceBurn = async (c: AppContext) => {
     throw notFound("Token");
   }
 
-  if (token.status !== "active") {
-    throw new AppError("TOKEN_NOT_ACTIVE", "Token must be active to force burn");
-  }
+  assertTokenAllowsOperation(token, "force_burn");
+  assertTokenIsDeployed(token);
 
-  if (!token.mintAddress) {
-    throw new AppError("TOKEN_NOT_DEPLOYED", "Token has not been deployed to Solana");
-  }
+  const { mosaicAmount } = parsePositiveTokenAmount(parsed.data.forceBurn.amount, token.decimals);
 
   const permanentDelegateRaw =
     parsed.data.forceBurn.delegateAuthority ??
@@ -204,7 +201,7 @@ export const executeForceBurn = async (c: AppContext) => {
     const result = await mosaic.forceBurn({
       mint: mintAddress,
       source,
-      amount: toMosaicAmount(parsed.data.forceBurn.amount, token.decimals),
+      amount: mosaicAmount,
       permanentDelegate: signer,
       feePayer: signer,
     });
