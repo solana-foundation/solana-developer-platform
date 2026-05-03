@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import type { ReactNode } from "react";
 import { DashboardShell } from "@/components/dashboard-shell";
 import { DashboardWorkspaceProvider } from "@/contexts/dashboard-workspace-context";
+import { NetworkDebugProvider } from "@/contexts/network-debug-context";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 
@@ -20,7 +21,9 @@ export default async function DashboardLayout({ children }: { children: ReactNod
       dashboardAccess={dashboardAccess}
       dashboardCacheScope={{ orgId: orgId ?? null, userId: userId ?? null }}
     >
-      <DashboardShell>{children}</DashboardShell>
+      <NetworkDebugProvider>
+        <DashboardShell>{children}</DashboardShell>
+      </NetworkDebugProvider>
     </DashboardWorkspaceProvider>
   );
 }
