@@ -20,6 +20,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { IssuanceHeaderTabs } from "@/components/issuance-header-tabs";
+import { NetworkDebugPanel, NetworkDebugToggle } from "@/components/network-debug-panel";
 import { SentryFeedbackWidget } from "@/components/sentry-feedback-widget";
 import { SentryUserContext } from "@/components/sentry-user-context";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
@@ -443,6 +444,7 @@ function DashboardSidebarContent({
             </Link>
           );
         })}
+        <NetworkDebugToggle />
       </div>
     </>
   );
@@ -549,6 +551,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
       ].join(" ")}
     >
       <SentryUserContext />
+      <NetworkDebugPanel />
       <div
         className={[
           "mx-auto grid min-h-screen w-full max-w-none gap-0",
