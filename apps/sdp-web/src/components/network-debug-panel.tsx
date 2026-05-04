@@ -1,12 +1,24 @@
 "use client";
 
-import { BanIcon, CheckIcon, CopyIcon, EraserIcon, InfoIcon, PauseIcon, PlayIcon } from "lucide-react";
+import {
+  BanIcon,
+  CheckIcon,
+  CopyIcon,
+  EraserIcon,
+  InfoIcon,
+  PauseIcon,
+  PlayIcon,
+} from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useState } from "react";
-import { useNetworkDebug, type NetworkDebugEntry } from "@/contexts/network-debug-context";
-import { getNetworkDebugStatusClassName } from "@/lib/network-debug";
-import { cn } from "@/lib/utils";
+import { type NetworkDebugEntry, useNetworkDebug } from "@/contexts/network-debug-context";
+import {
+  formatNetworkDebugMetaSummary,
+  formatNetworkDebugPayloadValue,
+  getNetworkDebugStatusClassName,
+} from "@/lib/network-debug";
 import { useCopy } from "@/lib/use-copy";
+import { cn } from "@/lib/utils";
 import { Button } from "./ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
 
@@ -29,10 +41,8 @@ const COLLAPSED_CONTENT_FADE_PROPS = {
 } as const;
 const PANEL_RADIUS = 16;
 
-const INTERPUNCT = "\u00B7";
-
 const NETWORK_DEBUG_META_ROW_CLASS =
-  "mt-1 flex min-w-0 flex-wrap items-center gap-x-1 gap-y-1 text-[11px] text-text-low";
+  "mt-1 flex min-w-0 flex-wrap items-center gap-x-1 gap-y-1 border-0 p-0 text-[11px] text-text-low";
 
 const NETWORK_DEBUG_META_COPY_CLASS =
   "shrink-0 text-text-low underline decoration-text-low/60 underline-offset-2 hover:text-text-extra-high hover:decoration-text-extra-high";
@@ -40,25 +50,10 @@ const NETWORK_DEBUG_META_COPY_CLASS =
 const NETWORK_DEBUG_PAYLOAD_COPY_BUTTON_CLASS =
   "absolute top-2 right-2 z-10 inline-flex w-fit shrink-0 items-center gap-1 rounded-md border border-border-light bg-white px-2 py-0.5 text-xs font-medium text-text-extra-high shadow-sm hover:bg-gray-100";
 
-function formatPayloadValue(value: string): string {
-  try {
-    return JSON.stringify(JSON.parse(value), null, 2);
-  } catch {
-    return value;
-  }
-}
-
-function formatNetworkDebugMetaSummary(entry: NetworkDebugEntry): string {
-  const sep = ` ${INTERPUNCT} `;
-  const duration =
-    entry.durationMs === undefined ? "pending" : `${entry.durationMs}ms`;
-  return `${entry.method}${sep}${duration}`;
-}
-
 function NetworkDebugMetaInterpunct() {
   return (
     <span aria-hidden="true" className="pointer-events-none shrink-0 select-none text-text-low">
-      {INTERPUNCT}
+      &middot;
     </span>
   );
 }
@@ -78,21 +73,16 @@ function NetworkDebugPayloadBlock({
     return null;
   }
 
-  const formattedValue = formatPayloadValue(value);
+  const formattedValue = formatNetworkDebugPayloadValue(value);
 
   return (
-    <div
-      className={cn(
-        "gap-1",
-        fill ? "flex min-h-0 min-w-0 flex-1 flex-col" : "grid min-w-0",
-      )}
-    >
+    <div className={cn("gap-1", fill ? "flex min-h-0 min-w-0 flex-1 flex-col" : "grid min-w-0")}>
       <p className="text-[11px] font-medium text-text-medium">{label}</p>
       <div className={cn("min-w-0", fill && "flex min-h-0 flex-1 flex-col")}>
         <div
           className={cn(
             "relative min-w-0 overflow-hidden rounded-lg bg-border-extra-light",
-            fill && "flex min-h-0 flex-1 flex-col",
+            fill && "flex min-h-0 flex-1 flex-col"
           )}
         >
           <button
@@ -100,7 +90,11 @@ function NetworkDebugPayloadBlock({
             onClick={() => void copy(formattedValue)}
             className={NETWORK_DEBUG_PAYLOAD_COPY_BUTTON_CLASS}
           >
-            {copied ? <CheckIcon className="size-3 shrink-0" /> : <CopyIcon className="size-3 shrink-0" />}
+            {copied ? (
+              <CheckIcon className="size-3 shrink-0" />
+            ) : (
+              <CopyIcon className="size-3 shrink-0" />
+            )}
             {copied ? "Copied" : "Copy"}
           </button>
           <pre
@@ -108,7 +102,7 @@ function NetworkDebugPayloadBlock({
               "max-w-full min-h-0 wrap-break-word p-3 pr-14 font-mono text-[11px] whitespace-pre-wrap text-text-extra-high",
               fill
                 ? "min-h-0 flex-1 overflow-y-auto overscroll-contain"
-                : "max-h-40 shrink-0 overflow-y-auto overscroll-contain",
+                : "max-h-40 shrink-0 overflow-y-auto overscroll-contain"
             )}
           >
             {formattedValue}
@@ -144,14 +138,14 @@ function NetworkDebugSwitch({
       <span
         className={cn(
           "relative inline-flex h-5 w-9 rounded-full border transition-colors",
-          enabled ? "border-text-extra-high bg-text-extra-high" : "border-border-light bg-white",
+          enabled ? "border-text-extra-high bg-text-extra-high" : "border-border-light bg-white"
         )}
         aria-hidden="true"
       >
         <span
           className={cn(
             "absolute top-1/2 size-3.5 -translate-y-1/2 rounded-full bg-white shadow-sm transition-transform",
-            enabled ? "translate-x-4.5" : "translate-x-0.5",
+            enabled ? "translate-x-4.5" : "translate-x-0.5"
           )}
         />
       </span>
@@ -175,7 +169,7 @@ function NetworkDebugEntryRow({
       transition={{ duration: 0.16 }}
       className={cn(
         "grid cursor-pointer gap-1 border-b border-border-light px-3 py-2 transition-colors last:border-b-0 hover:bg-border-extra-light",
-        isSelected && "bg-border-extra-light",
+        isSelected && "bg-border-extra-light"
       )}
     >
       <button type="button" onClick={onSelect} className="grid min-w-0 gap-1 text-left">
@@ -189,7 +183,7 @@ function NetworkDebugEntryRow({
           <span
             className={cn(
               "rounded-full px-2 py-0.5 text-[11px]",
-              getNetworkDebugStatusClassName(entry),
+              getNetworkDebugStatusClassName(entry)
             )}
           >
             {entry.state === "pending" ? "pending" : (entry.status ?? entry.state)}
@@ -220,36 +214,41 @@ export function NetworkDebugToggle() {
         "mx-3 mb-2 flex w-[calc(100%-1.5rem)] items-center justify-between gap-3 rounded-xl border px-3 py-2 transition-colors",
         enabled
           ? "border-border-light bg-white text-text-extra-high"
-          : "border-border-light bg-white/70 text-text-medium hover:bg-white hover:text-text-extra-high",
+          : "border-border-light bg-white/70 text-text-medium hover:bg-white hover:text-text-extra-high"
       )}
     >
-      <button
-        type="button"
-        onClick={() => setEnabled(!enabled)}
-        className="min-w-0 flex-1 text-left"
-        aria-pressed={enabled}
-      >
+      <div className="min-w-0 flex-1">
         <span className="flex items-center gap-1 text-[11px] leading-4 text-text-low">
-          Development mode
+          <button type="button" onClick={() => setEnabled(!enabled)} aria-pressed={enabled}>
+            Development mode
+          </button>
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
-                <span
+                <button
+                  type="button"
+                  aria-label="About API debug logs"
                   className="inline-flex rounded-sm text-text-low hover:text-text-extra-high"
-                  onClick={(event) => event.stopPropagation()}
                 >
                   <InfoIcon className="size-3" aria-hidden="true" />
-                </span>
+                </button>
               </TooltipTrigger>
               <TooltipContent side="top" align="center" className="max-w-80 text-xs">
-                API Debug Logs capture same-origin browser fetches in this tab. Available locally, or in
-                preview/staging with NEXT_PUBLIC_ENABLE_NETWORK_DEBUG.
+                API Debug Logs capture same-origin browser fetches in this tab. Available locally,
+                or in preview/staging with NEXT_PUBLIC_ENABLE_NETWORK_DEBUG.
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
         </span>
-        <span className="block truncate text-[13px] leading-5 font-medium">API Debug Logs</span>
-      </button>
+        <button
+          type="button"
+          onClick={() => setEnabled(!enabled)}
+          className="block truncate text-left text-[13px] leading-5 font-medium"
+          aria-pressed={enabled}
+        >
+          API Debug Logs
+        </button>
+      </div>
       <NetworkDebugSwitch enabled={enabled} pendingCount={pendingCount} setEnabled={setEnabled} />
     </div>
   );
@@ -302,12 +301,7 @@ function NetworkDebugExpandedPanel({
           </button>
         </div>
         <div className="flex flex-wrap items-center gap-2 border-b border-border-light px-4 py-2">
-          <Button
-            type="button"
-            onClick={() => setPaused(!paused)}
-            variant="outline"
-            size="xs"
-          >
+          <Button type="button" onClick={() => setPaused(!paused)} variant="outline" size="xs">
             {paused ? <PlayIcon className="size-3" /> : <PauseIcon className="size-3" />}
             {paused ? "Resume" : "Pause"}
           </Button>
@@ -315,12 +309,7 @@ function NetworkDebugExpandedPanel({
             <EraserIcon className="size-3" />
             Clear
           </Button>
-          <Button
-            type="button"
-            onClick={() => setEnabled(false)}
-            variant="destructive"
-            size="xs"
-          >
+          <Button type="button" onClick={() => setEnabled(false)} variant="destructive" size="xs">
             <BanIcon className="size-3" />
             Disable
           </Button>
@@ -365,8 +354,7 @@ function NetworkDebugEntryDetails({
 }) {
   const { copied: copiedMeta, copy: copyMeta } = useCopy(1200);
   const metaSummary = formatNetworkDebugMetaSummary(entry);
-  const durationPart =
-    entry.durationMs === undefined ? "pending" : `${entry.durationMs}ms`;
+  const durationPart = entry.durationMs === undefined ? "pending" : `${entry.durationMs}ms`;
 
   return (
     <aside className="flex h-full min-h-0 w-[320px] shrink-0 flex-col overflow-hidden border-l border-border-light p-3">
@@ -374,8 +362,7 @@ function NetworkDebugEntryDetails({
         <div className="flex shrink-0 min-w-0 items-start gap-2">
           <div className="relative min-w-0 flex-1">
             <p className="line-clamp-4 font-mono text-xs text-text-extra-high">{entry.path}</p>
-            <div
-              role="group"
+            <fieldset
               aria-label="Request method, duration, copy summary"
               className={NETWORK_DEBUG_META_ROW_CLASS}
             >
@@ -390,7 +377,7 @@ function NetworkDebugEntryDetails({
               >
                 {copiedMeta ? "Copied" : "Copy"}
               </button>
-            </div>
+            </fieldset>
           </div>
           <button
             type="button"
@@ -454,8 +441,7 @@ export function NetworkDebugPanel() {
     useNetworkDebug();
   const [isOpen, setIsOpen] = useState(false);
   const [selectedEntryId, setSelectedEntryId] = useState<string | null>(null);
-  const selectedEntry =
-    entries.find((entry) => entry.debug_request_id === selectedEntryId) ?? null;
+  const selectedEntry = entries.find((entry) => entry.debug_request_id === selectedEntryId) ?? null;
 
   if (!available || !enabled) {
     return null;
@@ -465,7 +451,7 @@ export function NetworkDebugPanel() {
     <div
       className={cn(
         "pointer-events-none fixed right-4 bottom-4 z-50 h-[min(calc(100vh-2rem),460px)] transition-[width]",
-        selectedEntry ? "w-[min(calc(100vw-2rem),742px)]" : "w-[min(calc(100vw-2rem),422px)]",
+        selectedEntry ? "w-[min(calc(100vw-2rem),742px)]" : "w-[min(calc(100vw-2rem),422px)]"
       )}
     >
       <AnimatePresence>

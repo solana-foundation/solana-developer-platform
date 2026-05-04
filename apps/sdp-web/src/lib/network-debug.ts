@@ -42,6 +42,10 @@ export function getStoredNetworkDebugEnabled(): boolean {
 }
 
 export function setStoredNetworkDebugEnabled(enabled: boolean) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
   window.localStorage.setItem(NETWORK_DEBUG_STORAGE_KEY, enabled ? "true" : "false");
 }
 
@@ -84,7 +88,7 @@ export function matchNetworkDebugFetch(
   }
 
   return {
-    path: `${url.pathname}${url.search}`,
+    path: url.pathname,
     query: url.search ? url.search.slice(1) : undefined,
   };
 }
@@ -179,10 +183,26 @@ export async function readNetworkDebugRequestBody(
   return undefined;
 }
 
-export async function readNetworkDebugResponseBody(response: Response): Promise<string | undefined> {
+export async function readNetworkDebugResponseBody(
+  response: Response
+): Promise<string | undefined> {
   try {
     return truncateNetworkDebugBody(await response.clone().text());
   } catch {
     return "[unavailable]";
   }
+}
+
+export function formatNetworkDebugPayloadValue(value: string): string {
+  try {
+    return JSON.stringify(JSON.parse(value), null, 2);
+  } catch {
+    return value;
+  }
+}
+
+export function formatNetworkDebugMetaSummary(entry: NetworkDebugEntry): string {
+  const sep = " \u00B7 ";
+  const duration = entry.durationMs === undefined ? "pending" : `${entry.durationMs}ms`;
+  return `${entry.method}${sep}${duration}`;
 }
