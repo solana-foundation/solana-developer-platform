@@ -31,9 +31,16 @@ export function getMosaicAclMode(token: TokenAccessControlShape): AclMode | unde
 
 export function shouldEnableOnChainAcl(
   token: TokenAccessControlShape,
-  _network: string | undefined
+  network: string | undefined
 ): boolean {
-  return getTokenAccessControlMode(token) !== "disabled";
+  const mode = getTokenAccessControlMode(token);
+  if (mode === "disabled") return false;
+  // Denylist enforcement always runs on-chain when supported. Allowlist enforcement
+  // is mainnet-only because the mint flow does not yet add destinations to the
+  // on-chain allowlist; minting to a non-allowlisted wallet otherwise fails at the
+  // permissionless-thaw step (Token-2022 0x11 / AccountFrozen).
+  if (mode === "blocklist") return true;
+  return network === "mainnet-beta";
 }
 
 export function assertDestinationAllowedByControlList(args: {

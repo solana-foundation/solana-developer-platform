@@ -34,3 +34,29 @@ index 69309f50eb78941e665f30dae90d85209d842cce..e4e22270eb955ad4995a31fc36e3237e
          listConfig: input.list,
          wallet: input.wallet,
          walletEntry: abWallet[0],
+diff --git a/dist/templates/stablecoin.js b/dist/templates/stablecoin.js
+index 75f4df1d01f2f941b0c86f27bcf3cc561af8307e..14a8d1d9c836c1495272ef0f17d4405a9a442eec 100644
+--- a/dist/templates/stablecoin.js
++++ b/dist/templates/stablecoin.js
+@@ -48,7 +48,7 @@ export const createStablecoinInitTransaction = async (rpc, name, symbol, decimal
+         additionalMetadata: new Map(),
+     })
+         .withPausable(pausableAuthority || mintAuthorityAddress)
+-        .withDefaultAccountState(!useSrfc37)
++        .withDefaultAccountState(aclMode === 'blocklist' || !useSrfc37)
+         .withConfidentialBalances(confidentialBalancesAuthority || mintAuthorityAddress)
+         .withPermanentDelegate(permanentDelegateAuthority || mintAuthorityAddress)
+         .buildInstructions({
+diff --git a/dist/templates/tokenized-security.js b/dist/templates/tokenized-security.js
+index fc5d20f649cc63ae635cc33d6ad0fac69949a544..c6ba3dc01f86c2fb311800e3e4345a3a6e3f0f57 100644
+--- a/dist/templates/tokenized-security.js
++++ b/dist/templates/tokenized-security.js
+@@ -34,7 +34,7 @@ export const createTokenizedSecurityInitTransaction = async (rpc, name, symbol,
+         additionalMetadata: new Map(),
+     })
+         .withPausable(pausableAuthority)
+-        .withDefaultAccountState(!useSrfc37)
++        .withDefaultAccountState(aclMode === 'blocklist' || !useSrfc37)
+         .withConfidentialBalances(confidentialBalancesAuthority)
+         .withPermanentDelegate(permanentDelegateAuthority);
+     // Add Scaled UI Amount extension
