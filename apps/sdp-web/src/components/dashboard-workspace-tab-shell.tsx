@@ -2,6 +2,7 @@
 
 import { AnimatePresence, motion } from "motion/react";
 import type { ReactNode } from "react";
+import { dashboardWorkspaceOverviewPanelClassName } from "@/components/dashboard-workspace-panel";
 import { cn } from "@/lib/utils";
 
 interface DashboardWorkspaceTabShellProps {
@@ -35,10 +36,7 @@ export function DashboardWorkspaceTabShell({
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -8 }}
             transition={tabTransition}
-            className={cn(
-              "absolute -inset-x-3 -top-6 -bottom-5 flex min-h-0 flex-col md:-inset-x-6 md:-bottom-6",
-              playgroundClassName
-            )}
+            className={cn("absolute inset-0 flex min-h-0 flex-col", playgroundClassName)}
           >
             {playground}
           </motion.div>
@@ -49,7 +47,7 @@ export function DashboardWorkspaceTabShell({
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -8 }}
             transition={tabTransition}
-            className={cn("h-full min-h-0 w-full overflow-y-auto", overviewClassName)}
+            className={cn(dashboardWorkspaceOverviewPanelClassName, overviewClassName)}
           >
             {overview}
           </motion.div>

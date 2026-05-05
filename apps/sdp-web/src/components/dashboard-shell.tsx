@@ -479,7 +479,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
     pathname === "/dashboard/payments" || pathname.startsWith("/dashboard/payments/");
   const shouldUseWorkspaceViewport =
     pathname === "/dashboard/issuance" ||
-    pathname.startsWith("/dashboard/payments") ||
+    pathname === "/dashboard/payments" ||
     pathname === "/dashboard/wallets" ||
     pathname === "/dashboard/custody";
   const shouldLockViewportScroll = shouldUseWorkspaceViewport;
@@ -597,19 +597,26 @@ export function DashboardShell({ children }: { children: ReactNode }) {
 
         <section
           className={[
-            "relative min-w-0 rounded-2xl border border-border-extra-light bg-white/80 px-3 py-5 md:p-6 lg:rounded-tl-[16px]",
-            shouldLockViewportScroll ? "flex min-h-0 flex-col overflow-hidden" : "",
+            "relative min-w-0 rounded-2xl border border-border-extra-light bg-white/80 lg:rounded-tl-[16px]",
+            shouldLockViewportScroll ? "flex min-h-0 flex-col overflow-hidden" : "px-3 py-5 md:p-6",
           ].join(" ")}
         >
           <div
             className={[
               "min-w-0 w-full",
-              shouldLockViewportScroll ? "flex min-h-0 flex-1 flex-col gap-6" : "space-y-6",
+              shouldLockViewportScroll ? "flex min-h-0 flex-1 flex-col" : "space-y-6",
             ].join(" ")}
           >
-            <div className="space-y-4">
+            <div className="shrink-0 space-y-4">
               {shouldRenderTopBarBorder ? (
-                <div className="-mx-3 border-b border-border-light px-3 pb-4 md:-mx-6 md:px-6">
+                <div
+                  className={[
+                    "border-b border-border-light pb-4",
+                    shouldLockViewportScroll
+                      ? "px-3 pt-5 md:px-6 md:pt-6"
+                      : "-mx-3 px-3 md:-mx-6 md:px-6",
+                  ].join(" ")}
+                >
                   <DashboardTopBar
                     isSidebarOpen={isSidebarOpen}
                     setSidebarOpen={setSidebarOpen}
@@ -622,20 +629,27 @@ export function DashboardShell({ children }: { children: ReactNode }) {
                   />
                 </div>
               ) : (
-                <DashboardTopBar
-                  isSidebarOpen={isSidebarOpen}
-                  setSidebarOpen={setSidebarOpen}
-                  isMobileSidebarOpen={isMobileSidebarOpen}
-                  setMobileSidebarOpen={setMobileSidebarOpen}
-                  hideTitle={pageConfig.hideTitle}
-                  title={pageConfig.title}
-                  centeredTitle={centeredTitle}
-                  topBarLeadingContent={topBarLeadingContent}
-                />
+                <div className={shouldLockViewportScroll ? "px-3 pt-5 md:px-6 md:pt-6" : ""}>
+                  <DashboardTopBar
+                    isSidebarOpen={isSidebarOpen}
+                    setSidebarOpen={setSidebarOpen}
+                    isMobileSidebarOpen={isMobileSidebarOpen}
+                    setMobileSidebarOpen={setMobileSidebarOpen}
+                    hideTitle={pageConfig.hideTitle}
+                    title={pageConfig.title}
+                    centeredTitle={centeredTitle}
+                    topBarLeadingContent={topBarLeadingContent}
+                  />
+                </div>
               )}
 
               {shouldRenderHeaderNavRow ? (
-                <div className="-mx-3 border-b border-border-light md:-mx-6">
+                <div
+                  className={[
+                    "border-b border-border-light",
+                    shouldLockViewportScroll ? "" : "-mx-3 md:-mx-6",
+                  ].join(" ")}
+                >
                   <div
                     className={[
                       "px-3 md:px-6",
@@ -663,8 +677,10 @@ export function DashboardShell({ children }: { children: ReactNode }) {
               className={[
                 "mx-auto min-w-0 w-full",
                 contentWidthClass,
-                shouldClipHorizontalOverflow && !shouldLockViewportScroll ? "overflow-x-hidden" : "",
-                shouldLockViewportScroll ? "min-h-0 flex-1" : "",
+                shouldClipHorizontalOverflow && !shouldLockViewportScroll
+                  ? "overflow-x-hidden"
+                  : "",
+                shouldLockViewportScroll ? "min-h-0 flex-1 overflow-hidden" : "",
               ].join(" ")}
             >
               {children}
