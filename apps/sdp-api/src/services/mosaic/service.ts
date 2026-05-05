@@ -218,7 +218,7 @@ export class MosaicService {
         ? (options.mintAuthority as Address)
         : (options.mintAuthority.address as Address);
 
-    const freezeAuthority = enableSrfc37 ? undefined : (options.freezeAuthority ?? undefined);
+    const freezeAuthority = options.freezeAuthority ?? undefined;
     const permanentDelegateAuthority =
       typeof options.extensions?.permanentDelegate === "string"
         ? (options.extensions.permanentDelegate as Address)

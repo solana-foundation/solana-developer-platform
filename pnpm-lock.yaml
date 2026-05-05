@@ -28,6 +28,14 @@ catalogs:
       specifier: ^6.5.0
       version: 6.8.0
 
+overrides:
+  '@token-acl/abl-sdk': npm:@solana/token-acl-gate-sdk@0.2.0
+
+patchedDependencies:
+  '@solana/mosaic-sdk@0.1.1':
+    hash: 0ec19ae7af5bf24ea4c7523fc344995eea85645a8840c17bf3d09b0fc4bfcb22
+    path: patches/@solana__mosaic-sdk@0.1.1.patch
+
 importers:
 
   .:
@@ -94,7 +102,7 @@ importers:
         version: 0.2.1(@solana-program/compute-budget@0.14.0(@solana/kit@6.8.0(typescript@6.0.2)))(@solana-program/token@0.12.0(@solana/kit@6.8.0(typescript@6.0.2)))(@solana/kit-plugin-instruction-plan@0.6.0(@solana/kit@6.8.0(typescript@6.0.2)))(@solana/kit-plugin-payer@0.6.0(@solana/kit@6.8.0(typescript@6.0.2)))(@solana/kit-plugin-rpc@0.6.0(@solana/kit@6.8.0(typescript@6.0.2)))(@solana/kit@6.8.0(typescript@6.0.2))
       '@solana/mosaic-sdk':
         specifier: 'catalog:'
-        version: 0.1.1(typescript@6.0.2)
+        version: 0.1.1(patch_hash=0ec19ae7af5bf24ea4c7523fc344995eea85645a8840c17bf3d09b0fc4bfcb22)(typescript@6.0.2)
       '@solana/signers':
         specifier: 'catalog:'
         version: 6.8.0(typescript@6.0.2)
@@ -3724,6 +3732,11 @@ packages:
       typescript:
         optional: true
 
+  '@solana/token-acl-gate-sdk@0.2.0':
+    resolution: {integrity: sha512-jCbt1J8SI+jPdi8DLajKpN9V3x2B9FXbDRltXcM4jrIVuWsNQ6W6/yn8N65uwUUw4wrTD6MJUT2sMD+QDbY7Gg==}
+    peerDependencies:
+      typescript: ^5.0.0
+
   '@solana/transaction-confirmation@5.5.1':
     resolution: {integrity: sha512-j4mKlYPHEyu+OD7MBt3jRoX4ScFgkhZC6H65on4Fux6LMScgivPJlwnKoZMnsgxFgWds0pl+BYzSiALDsXlYtw==}
     engines: {node: '>=20.18.0'}
@@ -3883,9 +3896,6 @@ packages:
 
   '@tanstack/query-core@5.90.16':
     resolution: {integrity: sha512-MvtWckSVufs/ja463/K4PyJeqT+HMlJWtw6PrCpywznd2NSgO3m4KwO9RqbFqGg6iDE8vVMFWMeQI4Io3eEYww==}
-
-  '@token-acl/abl-sdk@0.2.0':
-    resolution: {integrity: sha512-uMBtNkBhRq4mXRQaIN90bluuQoBPfL3NDTYCqiQ8NBqyLShVehLqohqFxG2BUU8zUWwBxrFqBGNn8gElbLIUmg==}
 
   '@token-acl/sdk@0.2.7':
     resolution: {integrity: sha512-vNl4Ed9Y7Uw1jdyT+Nyb900E5/CTdwsechJ8a70PRyc5icDoIdVeOH3yqzx3iV6Y6r1QoHCwZgL48YsrzVi2sA==}
@@ -6533,11 +6543,6 @@ packages:
         optional: true
       uglify-js:
         optional: true
-
-  terser@5.46.1:
-    resolution: {integrity: sha512-vzCjQO/rgUuK9sf8VJZvjqiqiHFaZLnOiimmUuOKODxWL8mm/xua7viT7aqX7dgPY60otQjUotzFMmCB4VdmqQ==}
-    engines: {node: '>=10'}
-    hasBin: true
 
   terser@5.46.2:
     resolution: {integrity: sha512-uxfo9fPcSgLDYob/w1FuL0c99MWiJDnv+5qXSQc5+Ki5NjVNsYi66INnMFBjf6uFz6OnX12piJQPF4IpjJTNTw==}
@@ -9775,14 +9780,14 @@ snapshots:
       '@solana/kit-plugin-payer': 0.6.0(@solana/kit@6.8.0(typescript@6.0.2))
       '@solana/kit-plugin-rpc': 0.6.0(@solana/kit@6.8.0(typescript@6.0.2))
 
-  '@solana/mosaic-sdk@0.1.1(typescript@6.0.2)':
+  '@solana/mosaic-sdk@0.1.1(patch_hash=0ec19ae7af5bf24ea4c7523fc344995eea85645a8840c17bf3d09b0fc4bfcb22)(typescript@6.0.2)':
     dependencies:
       '@solana-program/memo': 0.10.0(@solana/kit@5.5.1(typescript@6.0.2))
       '@solana-program/system': 0.10.0(@solana/kit@5.5.1(typescript@6.0.2))
       '@solana-program/token-2022': 0.6.1(@solana/kit@5.5.1(typescript@6.0.2))(@solana/sysvars@5.5.1(typescript@6.0.2))
       '@solana/kit': 5.5.1(typescript@6.0.2)
       '@solana/sysvars': 5.5.1(typescript@6.0.2)
-      '@token-acl/abl-sdk': 0.2.0(typescript@6.0.2)
+      '@token-acl/abl-sdk': '@solana/token-acl-gate-sdk@0.2.0(typescript@6.0.2)'
       '@token-acl/sdk': 0.2.7(@solana/sysvars@5.5.1(typescript@6.0.2))(typescript@6.0.2)
       typescript: 6.0.2
     transitivePeerDependencies:
@@ -10262,6 +10267,15 @@ snapshots:
     transitivePeerDependencies:
       - fastestsmallesttextencoderdecoder
 
+  '@solana/token-acl-gate-sdk@0.2.0(typescript@6.0.2)':
+    dependencies:
+      '@solana/kit': 5.5.1(typescript@6.0.2)
+      typescript: 6.0.2
+    transitivePeerDependencies:
+      - bufferutil
+      - fastestsmallesttextencoderdecoder
+      - utf-8-validate
+
   '@solana/transaction-confirmation@5.5.1(typescript@6.0.2)':
     dependencies:
       '@solana/addresses': 5.5.1(typescript@6.0.2)
@@ -10452,15 +10466,6 @@ snapshots:
   '@tanstack/query-core@5.100.6': {}
 
   '@tanstack/query-core@5.90.16': {}
-
-  '@token-acl/abl-sdk@0.2.0(typescript@6.0.2)':
-    dependencies:
-      '@solana/kit': 5.5.1(typescript@6.0.2)
-    transitivePeerDependencies:
-      - bufferutil
-      - fastestsmallesttextencoderdecoder
-      - typescript
-      - utf-8-validate
 
   '@token-acl/sdk@0.2.7(@solana/sysvars@5.5.1(typescript@6.0.2))(typescript@6.0.2)':
     dependencies:
@@ -11480,7 +11485,7 @@ snapshots:
       '@next/eslint-plugin-next': 16.2.3
       eslint: 10.1.0(jiti@2.6.1)
       eslint-import-resolver-node: 0.3.10
-      eslint-import-resolver-typescript: 3.10.1(eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.58.1(eslint@10.1.0(jiti@2.6.1))(typescript@6.0.2))(eslint@10.1.0(jiti@2.6.1)))(eslint@10.1.0(jiti@2.6.1))
+      eslint-import-resolver-typescript: 3.10.1(eslint-plugin-import@2.32.0)(eslint@10.1.0(jiti@2.6.1))
       eslint-plugin-import: 2.32.0(@typescript-eslint/parser@8.58.1(eslint@10.1.0(jiti@2.6.1))(typescript@6.0.2))(eslint-import-resolver-typescript@3.10.1)(eslint@10.1.0(jiti@2.6.1))
       eslint-plugin-jsx-a11y: 6.10.2(eslint@10.1.0(jiti@2.6.1))
       eslint-plugin-react: 7.37.5(eslint@10.1.0(jiti@2.6.1))
@@ -11503,7 +11508,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  eslint-import-resolver-typescript@3.10.1(eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.58.1(eslint@10.1.0(jiti@2.6.1))(typescript@6.0.2))(eslint@10.1.0(jiti@2.6.1)))(eslint@10.1.0(jiti@2.6.1)):
+  eslint-import-resolver-typescript@3.10.1(eslint-plugin-import@2.32.0)(eslint@10.1.0(jiti@2.6.1)):
     dependencies:
       '@nolyfill/is-core-module': 1.0.39
       debug: 4.4.3
@@ -11518,14 +11523,14 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  eslint-module-utils@2.12.1(@typescript-eslint/parser@8.58.1(eslint@10.1.0(jiti@2.6.1))(typescript@6.0.2))(eslint-import-resolver-node@0.3.10)(eslint-import-resolver-typescript@3.10.1(eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.58.1(eslint@10.1.0(jiti@2.6.1))(typescript@6.0.2))(eslint@10.1.0(jiti@2.6.1)))(eslint@10.1.0(jiti@2.6.1)))(eslint@10.1.0(jiti@2.6.1)):
+  eslint-module-utils@2.12.1(@typescript-eslint/parser@8.58.1(eslint@10.1.0(jiti@2.6.1))(typescript@6.0.2))(eslint-import-resolver-node@0.3.10)(eslint-import-resolver-typescript@3.10.1)(eslint@10.1.0(jiti@2.6.1)):
     dependencies:
       debug: 3.2.7
     optionalDependencies:
       '@typescript-eslint/parser': 8.58.1(eslint@10.1.0(jiti@2.6.1))(typescript@6.0.2)
       eslint: 10.1.0(jiti@2.6.1)
       eslint-import-resolver-node: 0.3.10
-      eslint-import-resolver-typescript: 3.10.1(eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.58.1(eslint@10.1.0(jiti@2.6.1))(typescript@6.0.2))(eslint@10.1.0(jiti@2.6.1)))(eslint@10.1.0(jiti@2.6.1))
+      eslint-import-resolver-typescript: 3.10.1(eslint-plugin-import@2.32.0)(eslint@10.1.0(jiti@2.6.1))
     transitivePeerDependencies:
       - supports-color
 
@@ -11540,7 +11545,7 @@ snapshots:
       doctrine: 2.1.0
       eslint: 10.1.0(jiti@2.6.1)
       eslint-import-resolver-node: 0.3.10
-      eslint-module-utils: 2.12.1(@typescript-eslint/parser@8.58.1(eslint@10.1.0(jiti@2.6.1))(typescript@6.0.2))(eslint-import-resolver-node@0.3.10)(eslint-import-resolver-typescript@3.10.1(eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.58.1(eslint@10.1.0(jiti@2.6.1))(typescript@6.0.2))(eslint@10.1.0(jiti@2.6.1)))(eslint@10.1.0(jiti@2.6.1)))(eslint@10.1.0(jiti@2.6.1))
+      eslint-module-utils: 2.12.1(@typescript-eslint/parser@8.58.1(eslint@10.1.0(jiti@2.6.1))(typescript@6.0.2))(eslint-import-resolver-node@0.3.10)(eslint-import-resolver-typescript@3.10.1)(eslint@10.1.0(jiti@2.6.1))
       hasown: 2.0.2
       is-core-module: 2.16.1
       is-glob: 4.0.3
@@ -13863,15 +13868,8 @@ snapshots:
       '@jridgewell/trace-mapping': 0.3.31
       jest-worker: 27.5.1
       schema-utils: 4.3.3
-      terser: 5.46.1
+      terser: 5.46.2
       webpack: 5.106.1
-
-  terser@5.46.1:
-    dependencies:
-      '@jridgewell/source-map': 0.3.11
-      acorn: 8.16.0
-      commander: 2.20.3
-      source-map-support: 0.5.21
 
   terser@5.46.2:
     dependencies:
@@ -13879,7 +13877,6 @@ snapshots:
       acorn: 8.16.0
       commander: 2.20.3
       source-map-support: 0.5.21
-    optional: true
 
   tinybench@2.9.0: {}
 

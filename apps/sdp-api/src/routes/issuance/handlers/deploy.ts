@@ -128,12 +128,7 @@ export const deployToken = async (c: AppContext) => {
       aclMode,
     });
 
-    const enableSrfc37 = enableAbl && token.isFreezable;
-    const freezeAuthority = token.isFreezable
-      ? enableSrfc37
-        ? TOKEN_ACL_PROGRAM_ID
-        : custodyAddress
-      : null;
+    const freezeAuthority = token.isFreezable ? custodyAddress : null;
 
     // Update token with deployment info (including ABL list if created)
     const deployedToken = await tokenService.setTokenDeployed(

@@ -1,0 +1,36 @@
+diff --git a/dist/abl/list.js b/dist/abl/list.js
+index da29473e7a5de8c3a1dfc545009061c383ecf6f1..1987e4f65429ff22cd9ec4fc579a85a84eb6535f 100644
+--- a/dist/abl/list.js
++++ b/dist/abl/list.js
+@@ -16,6 +16,7 @@ export const getCreateListInstructions = async (input) => {
+     const listConfigPda = await findListConfigPda({ authority: input.authority.address, seed: input.mint }, { programAddress: ABL_PROGRAM_ID });
+     const createListInstruction = getCreateListInstruction({
+         authority: input.authority,
++        payer: input.payer ?? input.authority,
+         listConfig: listConfigPda[0],
+         mode: input.mode || Mode.Allow,
+         seed: input.mint,
+diff --git a/dist/abl/set-extra-metas.js b/dist/abl/set-extra-metas.js
+index afcc26a083012adac3bec7d23019fb6bd6fdb16a..10b40e138f19d2a7066ea654f68decbd5d930616 100644
+--- a/dist/abl/set-extra-metas.js
++++ b/dist/abl/set-extra-metas.js
+@@ -21,6 +21,7 @@ export const getSetExtraMetasInstructions = async (input) => {
+     const extraMetasThaw = await findThawExtraMetasAccountPda({ mint: input.mint }, { programAddress: ABL_PROGRAM_ID });
+     const createListInstruction = getSetupExtraMetasInstruction({
+         authority: input.authority,
++        payer: input.payer ?? input.authority,
+         mint: input.mint,
+         tokenAclMintConfig: mintConfigPda[0],
+         extraMetas: extraMetasThaw[0],
+diff --git a/dist/abl/wallet.js b/dist/abl/wallet.js
+index 69309f50eb78941e665f30dae90d85209d842cce..e4e22270eb955ad4995a31fc36e3237ecb48e8fb 100644
+--- a/dist/abl/wallet.js
++++ b/dist/abl/wallet.js
+@@ -18,6 +18,7 @@ export const getAddWalletInstructions = async (input) => {
+     const abWallet = await findWalletEntryPda({ walletAddress: input.wallet, listConfig: input.list }, { programAddress: ABL_PROGRAM_ID });
+     const addWalletToListInstruction = getAddWalletInstruction({
+         authority: input.authority,
++        payer: input.payer ?? input.authority,
+         listConfig: input.list,
+         wallet: input.wallet,
+         walletEntry: abWallet[0],

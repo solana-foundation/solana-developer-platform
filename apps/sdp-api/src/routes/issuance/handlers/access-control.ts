@@ -31,9 +31,9 @@ export function getMosaicAclMode(token: TokenAccessControlShape): AclMode | unde
 
 export function shouldEnableOnChainAcl(
   token: TokenAccessControlShape,
-  network: string | undefined
+  _network: string | undefined
 ): boolean {
-  return network === "mainnet-beta" && getTokenAccessControlMode(token) !== "disabled";
+  return getTokenAccessControlMode(token) !== "disabled";
 }
 
 export function assertDestinationAllowedByControlList(args: {

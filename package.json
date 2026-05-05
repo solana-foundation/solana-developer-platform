@@ -12,6 +12,12 @@
       "allowedVersions": {
         "@solana/kit": "^6.5.0"
       }
+    },
+    "overrides": {
+      "@token-acl/abl-sdk": "npm:@solana/token-acl-gate-sdk@0.2.0"
+    },
+    "patchedDependencies": {
+      "@solana/mosaic-sdk@0.1.1": "patches/@solana__mosaic-sdk@0.1.1.patch"
     }
   },
   "scripts": {
