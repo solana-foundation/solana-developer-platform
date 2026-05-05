@@ -34,9 +34,9 @@ const fileEnv = loadEnvFile(DEV_VARS_PATH);
 const getEnv = (key: string, fallback?: string) => process.env[key] ?? fileEnv[key] ?? fallback;
 
 // biome-ignore lint/security/noSecrets: Local Docker Postgres fallback for isolated tests.
+const DATABASE_URL_FALLBACK = "postgresql://sdp:sdp@127.0.0.1:5432/sdp";
 const testDatabaseUrl =
-  getEnv("TEST_DATABASE_URL") ??
-  getEnv("DATABASE_URL", "postgresql://sdp:sdp@127.0.0.1:5432/sdp");
+  getEnv("TEST_DATABASE_URL") ?? getEnv("DATABASE_URL", DATABASE_URL_FALLBACK);
 
 export default defineConfig({
   plugins: [

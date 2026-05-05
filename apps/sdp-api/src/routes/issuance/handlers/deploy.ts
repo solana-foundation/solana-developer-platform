@@ -1,6 +1,5 @@
 import type { TokenResponse } from "@sdp/types";
 import type { Address } from "@solana/kit";
-import { TOKEN_ACL_PROGRAM_ID } from "@solana/mosaic-sdk";
 import type { Context } from "hono";
 import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
