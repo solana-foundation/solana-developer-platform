@@ -1,3 +1,4 @@
+import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { SkeletonBlock } from "@/components/ui/skeleton-block";
 
 const BALANCE_SKELETON_IDS = [
@@ -49,13 +50,13 @@ function PaymentsTransactionsSkeleton() {
 
 export function PaymentsPageSkeleton() {
   return (
-    <div className="grid gap-6">
+    <DashboardWorkspaceOverviewPanel className="grid gap-6">
       <div className="flex flex-wrap gap-3">
         <SkeletonBlock className="h-10 w-24 rounded-full" />
         <SkeletonBlock className="h-10 w-28 rounded-full" />
       </div>
       <PaymentsOverviewSkeleton />
       <PaymentsTransactionsSkeleton />
-    </div>
+    </DashboardWorkspaceOverviewPanel>
   );
 }

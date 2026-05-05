@@ -1,10 +1,10 @@
 "use client";
 
 import type { CustodyWalletSummary } from "@sdp/types";
-import { AnimatePresence, motion } from "motion/react";
 import dynamic from "next/dynamic";
 import { useEffect, useMemo, useState } from "react";
 import { ApiPlaygroundShellSkeleton } from "@/components/api-playground-shell-skeleton";
+import { DashboardWorkspaceTabShell } from "@/components/dashboard-workspace-tab-shell";
 import { Button } from "@/components/ui/button";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { getStoredApiKeySecret } from "@/lib/playground-api-keys";
@@ -99,41 +99,12 @@ export function WalletsWorkspace({
   };
 
   return (
-    <div className={isPlaygroundTab ? "flex h-full min-h-0 w-full flex-col" : "w-full"}>
-      <AnimatePresence mode="wait">
-        {isPlaygroundTab ? (
-          <motion.div
-            key="playground-tab"
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }}
-            transition={{ duration: 0.2, ease: "easeOut" }}
-            className="flex h-full min-h-0 w-full flex-col"
-          >
-            <WalletsPlayground
-              apiBaseUrl={apiBaseUrl}
-              apiKeyValue={playgroundApiKeyValue}
-              connectedProviders={connectedProviders}
-              configsError={configsError}
-              hasActiveApiKeys={apiKeys.length > 0}
-              wallets={wallets.map((wallet) => ({
-                walletId: wallet.walletId,
-                label: wallet.label,
-                provider: wallet.provider ?? null,
-                publicKey: wallet.publicKey,
-              }))}
-              walletsError={walletsError}
-            />
-          </motion.div>
-        ) : (
-          <motion.div
-            key="overview-tab"
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }}
-            transition={{ duration: 0.2, ease: "easeOut" }}
-            className="w-full space-y-6"
-          >
+    <div className="h-full min-h-0 w-full">
+      <DashboardWorkspaceTabShell
+        isPlaygroundTab={isPlaygroundTab}
+        overviewClassName="space-y-6"
+        overview={
+          <>
             {wallets.length > 0 && dashboardAccess.capabilities.canManageCustody ? (
               <div className="flex items-center justify-end">
                 <Button type="button" onClick={() => openProvisionModal(null)}>
@@ -151,9 +122,25 @@ export function WalletsWorkspace({
               canManageCustody={dashboardAccess.capabilities.canManageCustody}
               onCreateWallet={openProvisionModal}
             />
-          </motion.div>
-        )}
-      </AnimatePresence>
+          </>
+        }
+        playground={
+          <WalletsPlayground
+            apiBaseUrl={apiBaseUrl}
+            apiKeyValue={playgroundApiKeyValue}
+            connectedProviders={connectedProviders}
+            configsError={configsError}
+            hasActiveApiKeys={apiKeys.length > 0}
+            wallets={wallets.map((wallet) => ({
+              walletId: wallet.walletId,
+              label: wallet.label,
+              provider: wallet.provider ?? null,
+              publicKey: wallet.publicKey,
+            }))}
+            walletsError={walletsError}
+          />
+        }
+      />
 
       {dashboardAccess.capabilities.canManageCustody ? (
         <WalletProvisionModal
