@@ -2,11 +2,11 @@
 
 import type { PaymentsDashboardWallet } from "@sdp/types";
 import { Plus, Search } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { ApiPlaygroundShellSkeleton } from "@/components/api-playground-shell-skeleton";
+import { DashboardWorkspaceTabShell } from "@/components/dashboard-workspace-tab-shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
@@ -184,17 +184,12 @@ export function IssuanceWorkspace({
   const hasTokens = tokens.length > 0;
 
   return (
-    <div className={isPlaygroundTab ? "flex h-full min-h-0 w-full flex-col" : "w-full space-y-6"}>
-      <AnimatePresence mode="wait">
-        {issuanceTab === "tokens" ? (
-          <motion.div
-            key="tokens-tab"
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }}
-            transition={{ duration: 0.2, ease: "easeOut" }}
-            className="space-y-6"
-          >
+    <DashboardWorkspaceTabShell
+      isPlaygroundTab={isPlaygroundTab}
+      overviewClassName="space-y-6"
+      overviewKey="tokens-tab"
+      overview={
+        <>
             {tokensNotice && tokens.length > 0 ? (
               <div className="rounded-xl border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.03)] px-4 py-3">
                 <p className="text-sm font-medium text-[#1c1c1d]">Token list unavailable</p>
@@ -331,27 +326,18 @@ export function IssuanceWorkspace({
               signerWalletsError={signerWalletsError}
               hideTrigger
             />
-          </motion.div>
-        ) : (
-          <motion.div
-            key="playground-tab"
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }}
-            transition={{ duration: 0.2, ease: "easeOut" }}
-            className="h-full min-h-0 w-full"
-          >
-            <IssuancePlayground
-              apiBaseUrl={apiBaseUrl}
-              apiKeyValue={playgroundApiKeyValue}
-              hasActiveApiKeys={apiKeys.length > 0}
-              templates={templates}
-              templatesError={templatesError}
-              tokens={tokens}
-            />
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
+        </>
+      }
+      playground={
+        <IssuancePlayground
+          apiBaseUrl={apiBaseUrl}
+          apiKeyValue={playgroundApiKeyValue}
+          hasActiveApiKeys={apiKeys.length > 0}
+          templates={templates}
+          templatesError={templatesError}
+          tokens={tokens}
+        />
+      }
+    />
   );
 }

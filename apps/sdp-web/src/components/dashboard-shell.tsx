@@ -454,7 +454,7 @@ function DashboardSidebarContent({
 export function DashboardShell({ children }: { children: ReactNode }) {
   const { isLoaded, isSignedIn, orgId } = useAuth();
   const pathname = usePathname();
-  const { dashboardAccess, isSidebarOpen, issuanceTab, setSidebarOpen } = useDashboardWorkspace();
+  const { dashboardAccess, isSidebarOpen, setSidebarOpen } = useDashboardWorkspace();
   const [isMobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const previousPathnameRef = useRef(pathname);
   const sidebarWidth = 296;
@@ -477,12 +477,12 @@ export function DashboardShell({ children }: { children: ReactNode }) {
   const shouldRenderTopBarBorder = Boolean(centeredTitle) && !shouldRenderHeaderNavRow;
   const shouldClipHorizontalOverflow =
     pathname === "/dashboard/payments" || pathname.startsWith("/dashboard/payments/");
-  const shouldLockViewportScroll =
-    issuanceTab === "playground" &&
-    (pathname === "/dashboard/issuance" ||
-      pathname.startsWith("/dashboard/payments") ||
-      pathname === "/dashboard/wallets" ||
-      pathname === "/dashboard/custody");
+  const shouldUseWorkspaceViewport =
+    pathname === "/dashboard/issuance" ||
+    pathname.startsWith("/dashboard/payments") ||
+    pathname === "/dashboard/wallets" ||
+    pathname === "/dashboard/custody";
+  const shouldLockViewportScroll = shouldUseWorkspaceViewport;
   const shouldLockShellViewport = shouldLockViewportScroll || isMobileSidebarOpen;
 
   useEffect(() => {
@@ -604,7 +604,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
           <div
             className={[
               "min-w-0 w-full",
-              shouldLockViewportScroll ? "flex min-h-0 flex-1 flex-col gap-0" : "space-y-6",
+              shouldLockViewportScroll ? "flex min-h-0 flex-1 flex-col gap-6" : "space-y-6",
             ].join(" ")}
           >
             <div className="space-y-4">
@@ -663,10 +663,8 @@ export function DashboardShell({ children }: { children: ReactNode }) {
               className={[
                 "mx-auto min-w-0 w-full",
                 contentWidthClass,
-                shouldClipHorizontalOverflow ? "overflow-x-hidden" : "",
-                shouldLockViewportScroll
-                  ? "min-h-0 flex-1 overflow-hidden -mx-3 md:-mx-6 -mb-5 md:-mb-6"
-                  : "",
+                shouldClipHorizontalOverflow && !shouldLockViewportScroll ? "overflow-x-hidden" : "",
+                shouldLockViewportScroll ? "min-h-0 flex-1" : "",
               ].join(" ")}
             >
               {children}
