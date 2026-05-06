@@ -1,3 +1,5 @@
+import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
+
 function SkeletonBlock({ className }: { className: string }) {
   return <div className={`animate-pulse rounded-[16px] bg-[rgba(28,28,29,0.1)] ${className}`} />;
 }
@@ -75,7 +77,7 @@ export function WalletsOnboardingSkeleton() {
 
 export function WalletsPageSkeleton() {
   return (
-    <div className="w-full space-y-6 py-2">
+    <DashboardWorkspaceOverviewPanel className="space-y-6">
       <div className="flex justify-end">
         <SkeletonBlock className="h-10 w-32 rounded-[10px]" />
       </div>
@@ -84,6 +86,6 @@ export function WalletsPageSkeleton() {
           <WalletCardSkeleton key={id} />
         ))}
       </div>
-    </div>
+    </DashboardWorkspaceOverviewPanel>
   );
 }

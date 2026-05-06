@@ -8,6 +8,7 @@ import type {
 import dynamic from "next/dynamic";
 import { useEffect, useMemo } from "react";
 import { ApiPlaygroundShellSkeleton } from "@/components/api-playground-shell-skeleton";
+import { DashboardWorkspaceTabShell } from "@/components/dashboard-workspace-tab-shell";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { getStoredApiKeySecret } from "@/lib/playground-api-keys";
 import { PaymentsOverview } from "./payments-overview";
@@ -94,9 +95,19 @@ export function PaymentsWorkspace({
     return stored ?? "";
   }, [selectedPlaygroundApiKey, selectedPlaygroundApiKeyPrefix]);
 
-  if (isPlaygroundTab) {
-    return (
-      <div className="flex h-full min-h-0 w-full flex-col">
+  return (
+    <DashboardWorkspaceTabShell
+      isPlaygroundTab={isPlaygroundTab}
+      overview={
+        <PaymentsOverview
+          aggregate={aggregate}
+          aggregateError={aggregateError}
+          issuedTokenSymbolsByMint={issuedTokenSymbolsByMint}
+          transfers={transfers}
+          transfersError={transfersError}
+        />
+      }
+      playground={
         <PaymentsPlayground
           apiBaseUrl={apiBaseUrl}
           apiKeyValue={playgroundApiKeyValue}
@@ -106,17 +117,7 @@ export function PaymentsWorkspace({
           wallets={wallets}
           walletsError={walletsError}
         />
-      </div>
-    );
-  }
-
-  return (
-    <PaymentsOverview
-      aggregate={aggregate}
-      aggregateError={aggregateError}
-      issuedTokenSymbolsByMint={issuedTokenSymbolsByMint}
-      transfers={transfers}
-      transfersError={transfersError}
+      }
     />
   );
 }
