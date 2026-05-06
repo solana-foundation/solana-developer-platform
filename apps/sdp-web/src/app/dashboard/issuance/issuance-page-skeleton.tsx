@@ -1,3 +1,4 @@
+import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { SkeletonBlock } from "@/components/ui/skeleton-block";
 
 const ISSUANCE_SKELETON_IDS = [
@@ -29,7 +30,7 @@ function IssuanceTokenCardSkeleton() {
 
 export function IssuancePageSkeleton() {
   return (
-    <div className="w-full space-y-6">
+    <DashboardWorkspaceOverviewPanel className="space-y-6">
       <div className="flex items-center gap-3">
         <SkeletonBlock className="h-10 flex-1 rounded-[10px]" />
         <SkeletonBlock className="h-10 w-32 rounded-[10px]" />
@@ -40,6 +41,6 @@ export function IssuancePageSkeleton() {
           <IssuanceTokenCardSkeleton key={id} />
         ))}
       </div>
-    </div>
+    </DashboardWorkspaceOverviewPanel>
   );
 }

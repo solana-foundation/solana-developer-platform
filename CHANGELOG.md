@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.19.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.18.8...v0.19.0) (2026-05-05)
+
+### Features
+
+* use stable layout when transitioning ([#268](https://github.com/solana-foundation/solana-developer-platform/pull/268)) ([4140375](https://github.com/solana-foundation/solana-developer-platform/commit/41403752ade9d9378f7908409e8d5b5388cd3b23))
+* API Debug Mode for local/staging development ([#263](https://github.com/solana-foundation/solana-developer-platform/pull/263)) ([4806df7](https://github.com/solana-foundation/solana-developer-platform/commit/4806df746a9f742be8f2a40fbfec8be5aae91951))
+
+### Refactors
+
+* add domain operation modules ([#261](https://github.com/solana-foundation/solana-developer-platform/pull/261)) ([c6c7e9d](https://github.com/solana-foundation/solana-developer-platform/commit/c6c7e9dd9fc19388c931a1150f0a93a764ef7ddb))
+* add token operation module ([#258](https://github.com/solana-foundation/solana-developer-platform/pull/258)) ([1607bf8](https://github.com/solana-foundation/solana-developer-platform/commit/1607bf8d9987c13fdf349bf10fb5639225d2d58d))
+
 ## [0.18.8](https://github.com/solana-foundation/solana-developer-platform/compare/v0.18.7...v0.18.8) (2026-05-01)
 
 ### Other Changes
