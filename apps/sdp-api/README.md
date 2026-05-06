@@ -191,7 +191,10 @@ MOONPAY_SECRET_KEY=sk_...
 pnpm --filter @sdp/api test
 ```
 
-No external dependencies required.
+No external dependencies required. The suite runs against an isolated test
+database (`<dbname>_test`, e.g. `sdp_test`) so it never touches your dev data.
+Override the connection with `TEST_DATABASE_URL` if you need to point at a
+different host. See `db:migrate:test` under [Database Migrations](#database-migrations).
 
 ### Integration Tests
 
@@ -213,6 +216,21 @@ The API uses D1 (Cloudflare's SQLite) in production and Postgres locally.
 ```bash
 pnpm --filter @sdp/api db:migrate:local
 ```
+
+### Test database (Postgres)
+
+The unit-test suite uses a separate Postgres database so tests never share
+state with your dev data. By default it is the dev DB name with a `_test`
+suffix (e.g. `DATABASE_URL=…/sdp` → tests use `sdp_test`). Override with
+`TEST_DATABASE_URL` if you need a different host.
+
+```bash
+pnpm --filter @sdp/api db:migrate:test
+```
+
+This creates the test database if it does not exist and applies all pending
+migrations. Re-run it after pulling new migrations or running
+`pnpm db:postgres:reset`. CI runs this automatically before unit tests.
 
 ### Production migrations (D1)
 

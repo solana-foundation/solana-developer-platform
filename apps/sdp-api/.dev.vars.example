@@ -4,6 +4,11 @@
 # For the shared GCP dev database, use the Cloud SQL connection string issued
 # for the `sdp_api_dev` database instead of the local Docker URL above.
 
+# Optional: explicit test-database URL used by `pnpm test` and
+# `pnpm --filter @sdp/api db:migrate:test`. If unset, both derive a `_test`
+# suffix from DATABASE_URL (e.g. `…/sdp` → `…/sdp_test`).
+# TEST_DATABASE_URL=postgresql://sdp:sdp@127.0.0.1:5432/sdp_test
+
 # Deployment mode: "managed" (default; uses Clerk-synced org tier entitlements)
 # or "self_hosted" (every configured provider is automatically entitled
 # regardless of tier). Per-org providerOverrides still apply as a disable-only
