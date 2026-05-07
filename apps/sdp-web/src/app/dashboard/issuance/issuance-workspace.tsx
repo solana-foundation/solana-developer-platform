@@ -2,11 +2,11 @@
 
 import type { PaymentsDashboardWallet } from "@sdp/types";
 import { Plus, Search } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { ApiPlaygroundShellSkeleton } from "@/components/api-playground-shell-skeleton";
+import { DashboardWorkspaceTabShell } from "@/components/dashboard-workspace-tab-shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
@@ -184,174 +184,160 @@ export function IssuanceWorkspace({
   const hasTokens = tokens.length > 0;
 
   return (
-    <div className={isPlaygroundTab ? "flex h-full min-h-0 w-full flex-col" : "w-full space-y-6"}>
-      <AnimatePresence mode="wait">
-        {issuanceTab === "tokens" ? (
-          <motion.div
-            key="tokens-tab"
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }}
-            transition={{ duration: 0.2, ease: "easeOut" }}
-            className="space-y-6"
-          >
-            {tokensNotice && tokens.length > 0 ? (
-              <div className="rounded-xl border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.03)] px-4 py-3">
-                <p className="text-sm font-medium text-[#1c1c1d]">Token list unavailable</p>
-                <p className="mt-1 text-sm text-[rgba(28,28,29,0.72)]">{tokensNotice}</p>
-              </div>
-            ) : null}
-
-            <div className="flex items-center gap-3">
-              <div className="relative flex-1">
-                <Search className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-[rgba(28,28,29,0.52)]" />
-                <Input
-                  value={search}
-                  onChange={(event) => {
-                    const value = event.currentTarget.value;
-                    setSearch(value);
-                  }}
-                  className="h-10 rounded-[10px] border-[rgba(28,28,29,0.16)] bg-white pl-9"
-                  placeholder="Search"
-                />
-              </div>
-              <Button
-                type="button"
-                className="h-10 rounded-[10px] bg-[#1c1c1d] px-4 text-white hover:bg-[rgba(28,28,29,0.92)]"
-                onClick={() => setIsCreateTokenModalOpen(true)}
-              >
-                Create draft
-              </Button>
+    <DashboardWorkspaceTabShell
+      isPlaygroundTab={isPlaygroundTab}
+      overviewClassName="space-y-6"
+      overviewKey="tokens-tab"
+      overview={
+        <>
+          {tokensNotice && tokens.length > 0 ? (
+            <div className="rounded-xl border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.03)] px-4 py-3">
+              <p className="text-sm font-medium text-[#1c1c1d]">Token list unavailable</p>
+              <p className="mt-1 text-sm text-[rgba(28,28,29,0.72)]">{tokensNotice}</p>
             </div>
+          ) : null}
 
-            {hasTokens && filteredTokens.length === 0 ? (
-              <p className="text-sm text-[rgba(28,28,29,0.64)]">
-                No tokens match your current search.
-              </p>
-            ) : null}
+          <div className="flex items-center gap-3">
+            <div className="relative flex-1">
+              <Search className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-[rgba(28,28,29,0.52)]" />
+              <Input
+                value={search}
+                onChange={(event) => {
+                  const value = event.currentTarget.value;
+                  setSearch(value);
+                }}
+                className="h-10 rounded-[10px] border-[rgba(28,28,29,0.16)] bg-white pl-9"
+                placeholder="Search"
+              />
+            </div>
+            <Button
+              type="button"
+              className="h-10 rounded-[10px] bg-[#1c1c1d] px-4 text-white hover:bg-[rgba(28,28,29,0.92)]"
+              onClick={() => setIsCreateTokenModalOpen(true)}
+            >
+              Create draft
+            </Button>
+          </div>
 
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-              {filteredTokens.map((token) => (
-                <article
-                  key={token.id}
-                  data-testid={`token-card-${token.id}`}
-                  className="flex min-h-[340px] flex-col rounded-2xl border border-[rgba(28,28,29,0.1)] bg-[#fcfcfa] p-5 shadow-[0_2px_10px_rgba(28,28,29,0.05)]"
-                >
-                  {(() => {
-                    const deploymentStatus = getDeploymentStatus(token);
+          {hasTokens && filteredTokens.length === 0 ? (
+            <p className="text-sm text-[rgba(28,28,29,0.64)]">
+              No tokens match your current search.
+            </p>
+          ) : null}
 
-                    return (
-                      <div className="mb-4 flex items-start justify-between gap-3">
-                        <div className="h-14 w-14 overflow-hidden rounded-full border border-[rgba(28,28,29,0.1)] bg-white">
-                          {token.imageUrl ? (
-                            // Token logos are dynamic external assets from API data.
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img
-                              src={token.imageUrl}
-                              alt={`${token.name} logo`}
-                              className="h-full w-full object-cover"
-                            />
-                          ) : (
-                            <div className="flex h-full w-full items-center justify-center text-lg font-semibold text-[rgba(28,28,29,0.58)]">
-                              {token.symbol.slice(0, 1) || "?"}
-                            </div>
-                          )}
-                        </div>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            {filteredTokens.map((token) => (
+              <article
+                key={token.id}
+                data-testid={`token-card-${token.id}`}
+                className="flex min-h-[340px] flex-col rounded-2xl border border-[rgba(28,28,29,0.1)] bg-[#fcfcfa] p-5 shadow-[0_2px_10px_rgba(28,28,29,0.05)]"
+              >
+                {(() => {
+                  const deploymentStatus = getDeploymentStatus(token);
 
-                        <span
-                          data-testid={`token-card-status-${token.id}`}
-                          className={[
-                            "inline-flex items-center rounded-full px-3 py-1 text-xs font-medium tracking-[0.02em] capitalize",
-                            deploymentStatus === "active"
-                              ? "bg-[rgba(12,128,76,0.10)] text-[#0c804c]"
-                              : "bg-[rgba(28,28,29,0.08)] text-[rgba(28,28,29,0.72)]",
-                          ].join(" ")}
-                        >
-                          {deploymentStatus}
-                        </span>
+                  return (
+                    <div className="mb-4 flex items-start justify-between gap-3">
+                      <div className="h-14 w-14 overflow-hidden rounded-full border border-[rgba(28,28,29,0.1)] bg-white">
+                        {token.imageUrl ? (
+                          // Token logos are dynamic external assets from API data.
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={token.imageUrl}
+                            alt={`${token.name} logo`}
+                            className="h-full w-full object-cover"
+                          />
+                        ) : (
+                          <div className="flex h-full w-full items-center justify-center text-lg font-semibold text-[rgba(28,28,29,0.58)]">
+                            {token.symbol.slice(0, 1) || "?"}
+                          </div>
+                        )}
                       </div>
-                    );
-                  })()}
-                  <p className="text-sm font-medium tracking-wide text-[rgba(28,28,29,0.58)]">
-                    {token.symbol}
-                  </p>
-                  <h3 className="mt-1 text-[30px] leading-[1.1] font-medium text-[#1c1c1d]">
-                    {token.name}
-                  </h3>
 
-                  <div className="mt-6 space-y-2 rounded-xl border border-[rgba(28,28,29,0.08)] bg-[rgba(28,28,29,0.03)] p-3">
-                    <div className="flex items-center justify-between text-sm">
-                      <span className="text-[rgba(28,28,29,0.58)]">Type</span>
-                      <span className="font-medium text-[#1c1c1d]">
-                        {getTokenTypeLabel(token.template)}
+                      <span
+                        data-testid={`token-card-status-${token.id}`}
+                        className={[
+                          "inline-flex items-center rounded-full px-3 py-1 text-xs font-medium tracking-[0.02em] capitalize",
+                          deploymentStatus === "active"
+                            ? "bg-[rgba(12,128,76,0.10)] text-[#0c804c]"
+                            : "bg-[rgba(28,28,29,0.08)] text-[rgba(28,28,29,0.72)]",
+                        ].join(" ")}
+                      >
+                        {deploymentStatus}
                       </span>
                     </div>
-                    <div className="flex items-center justify-between text-sm">
-                      <span className="text-[rgba(28,28,29,0.58)]">Supply</span>
-                      <span className="font-medium text-[#1c1c1d]">
-                        {formatSupply(token.totalSupply)}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between text-sm">
-                      <span className="text-[rgba(28,28,29,0.58)]">Created</span>
-                      <span className="font-medium text-[#1c1c1d]">
-                        {formatDate(token.createdAt)}
-                      </span>
-                    </div>
+                  );
+                })()}
+                <p className="text-sm font-medium tracking-wide text-[rgba(28,28,29,0.58)]">
+                  {token.symbol}
+                </p>
+                <h3 className="mt-1 text-[30px] leading-[1.1] font-medium text-[#1c1c1d]">
+                  {token.name}
+                </h3>
+
+                <div className="mt-6 space-y-2 rounded-xl border border-[rgba(28,28,29,0.08)] bg-[rgba(28,28,29,0.03)] p-3">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-[rgba(28,28,29,0.58)]">Type</span>
+                    <span className="font-medium text-[#1c1c1d]">
+                      {getTokenTypeLabel(token.template)}
+                    </span>
                   </div>
-
-                  <div className="mt-auto pt-3">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="h-11 w-full rounded-[10px]"
-                      asChild
-                    >
-                      <Link href={`/dashboard/issuance/${token.id}`}>Manage</Link>
-                    </Button>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-[rgba(28,28,29,0.58)]">Supply</span>
+                    <span className="font-medium text-[#1c1c1d]">
+                      {formatSupply(token.totalSupply)}
+                    </span>
                   </div>
-                </article>
-              ))}
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-[rgba(28,28,29,0.58)]">Created</span>
+                    <span className="font-medium text-[#1c1c1d]">
+                      {formatDate(token.createdAt)}
+                    </span>
+                  </div>
+                </div>
 
-              <button
-                type="button"
-                onClick={() => setIsCreateTokenModalOpen(true)}
-                data-testid="token-add-card"
-                className="flex min-h-[340px] items-center justify-center rounded-2xl border border-dashed border-[rgba(28,28,29,0.2)] bg-[#fcfcfa] text-[rgba(28,28,29,0.5)] transition-colors hover:border-[rgba(28,28,29,0.35)] hover:text-[rgba(28,28,29,0.75)]"
-                aria-label="Add new token"
-              >
-                <Plus className="h-6 w-6" />
-              </button>
-            </div>
+                <div className="mt-auto pt-3">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-11 w-full rounded-[10px]"
+                    asChild
+                  >
+                    <Link href={`/dashboard/issuance/${token.id}`}>Manage</Link>
+                  </Button>
+                </div>
+              </article>
+            ))}
 
-            <CreateIssuanceTokenModal
-              open={isCreateTokenModalOpen}
-              onOpenChange={setIsCreateTokenModalOpen}
-              signerWallets={signerWallets}
-              signerWalletsError={signerWalletsError}
-              hideTrigger
-            />
-          </motion.div>
-        ) : (
-          <motion.div
-            key="playground-tab"
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }}
-            transition={{ duration: 0.2, ease: "easeOut" }}
-            className="h-full min-h-0 w-full"
-          >
-            <IssuancePlayground
-              apiBaseUrl={apiBaseUrl}
-              apiKeyValue={playgroundApiKeyValue}
-              hasActiveApiKeys={apiKeys.length > 0}
-              templates={templates}
-              templatesError={templatesError}
-              tokens={tokens}
-            />
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
+            <button
+              type="button"
+              onClick={() => setIsCreateTokenModalOpen(true)}
+              data-testid="token-add-card"
+              className="flex min-h-[340px] items-center justify-center rounded-2xl border border-dashed border-[rgba(28,28,29,0.2)] bg-[#fcfcfa] text-[rgba(28,28,29,0.5)] transition-colors hover:border-[rgba(28,28,29,0.35)] hover:text-[rgba(28,28,29,0.75)]"
+              aria-label="Add new token"
+            >
+              <Plus className="h-6 w-6" />
+            </button>
+          </div>
+
+          <CreateIssuanceTokenModal
+            open={isCreateTokenModalOpen}
+            onOpenChange={setIsCreateTokenModalOpen}
+            signerWallets={signerWallets}
+            signerWalletsError={signerWalletsError}
+            hideTrigger
+          />
+        </>
+      }
+      playground={
+        <IssuancePlayground
+          apiBaseUrl={apiBaseUrl}
+          apiKeyValue={playgroundApiKeyValue}
+          hasActiveApiKeys={apiKeys.length > 0}
+          templates={templates}
+          templatesError={templatesError}
+          tokens={tokens}
+        />
+      }
+    />
   );
 }
