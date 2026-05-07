@@ -5,7 +5,7 @@ import type {
 } from "@sdp/types";
 import type { SdpApiClient } from "@/lib/sdp-api";
 import { readTransactionParam, toTitleCase } from "../activity-format-utils";
-import { fetchPaymentTransfers, type FetchResult } from "../payments/payments-page.data";
+import { type FetchResult, fetchPaymentTransfers } from "../payments/payments-page.data";
 
 export type WalletActivitySourceKind = "payments" | "issuance";
 
@@ -228,14 +228,11 @@ export async function fetchWalletActivity(
   walletId: string,
   options: { signal?: AbortSignal } = {}
 ): Promise<WalletActivityPayload> {
-  const response = await fetch(
-    `/api/dashboard/wallets/${encodeURIComponent(walletId)}/activity`,
-    {
-      method: "GET",
-      cache: "no-store",
-      signal: options.signal,
-    }
-  );
+  const response = await fetch(`/api/dashboard/wallets/${encodeURIComponent(walletId)}/activity`, {
+    method: "GET",
+    cache: "no-store",
+    signal: options.signal,
+  });
   const body = (await response.json().catch(() => ({}))) as DashboardWalletActivityEnvelope;
   if (!response.ok) {
     throw new Error(body.error?.message ?? `Wallet activity request failed (${response.status}).`);

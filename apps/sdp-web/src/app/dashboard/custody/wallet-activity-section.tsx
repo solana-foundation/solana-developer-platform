@@ -69,24 +69,17 @@ function TruncatedText({ value, className }: { value: string; className?: string
   );
 }
 
-export function WalletActivitySection({
-  walletId,
-  initialActivity,
-}: WalletActivitySectionProps) {
+export function WalletActivitySection({ walletId, initialActivity }: WalletActivitySectionProps) {
   const {
     data: swrActivity,
     error: requestError,
     isValidating,
     mutate,
-  } = useSWR(
-    `wallet-activity-${walletId}`,
-    () => fetchWalletActivity(walletId),
-    {
-      fallbackData: initialActivity,
-      revalidateOnFocus: true,
-      refreshInterval: 20_000,
-    }
-  );
+  } = useSWR(`wallet-activity-${walletId}`, () => fetchWalletActivity(walletId), {
+    fallbackData: initialActivity,
+    revalidateOnFocus: true,
+    refreshInterval: 20_000,
+  });
   const liveActivity = swrActivity ?? initialActivity;
   const liveRows = Array.isArray(liveActivity.activityRows) ? liveActivity.activityRows : [];
   const requestErrorMessage = requestError
@@ -104,9 +97,7 @@ export function WalletActivitySection({
       <CardHeader className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0 space-y-1">
           <CardTitle>Recent activity</CardTitle>
-          <CardDescription>
-            Transfer and token operation activity for this wallet.
-          </CardDescription>
+          <CardDescription>Transfer and token operation activity for this wallet.</CardDescription>
         </div>
         <Button
           type="button"
@@ -193,9 +184,7 @@ export function WalletActivitySection({
                                   rel="noreferrer"
                                   className="flex min-w-0 items-center gap-1 text-[#1c1c1d] underline underline-offset-2"
                                 >
-                                  <span className="block min-w-0 truncate">
-                                    {row.signature}
-                                  </span>
+                                  <span className="block min-w-0 truncate">{row.signature}</span>
                                   <ExternalLink className="size-3 shrink-0" />
                                 </a>
                               </TooltipTrigger>

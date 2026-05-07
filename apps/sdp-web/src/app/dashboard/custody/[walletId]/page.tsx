@@ -8,11 +8,11 @@ import {
   isKnownCustodyProvider,
 } from "@/app/dashboard/custody/provider-catalog";
 import { WalletActionsMenu } from "@/app/dashboard/custody/wallet-actions-menu";
-import { WalletActivitySection } from "@/app/dashboard/custody/wallet-activity-section";
 import {
   loadWalletActivity,
   type WalletActivityPayload,
 } from "@/app/dashboard/custody/wallet-activity.data";
+import { WalletActivitySection } from "@/app/dashboard/custody/wallet-activity-section";
 import { WalletAddressCopyButton } from "@/app/dashboard/custody/wallet-address-copy-button";
 import { formatPurpose, truncateMiddle } from "@/app/dashboard/custody/wallet-format-utils";
 import { WalletProviderMark } from "@/app/dashboard/custody/wallet-provider-mark";
@@ -268,10 +268,7 @@ export default async function WalletDetailPage({
         )}
       </section>
 
-      <WalletActivitySection
-        walletId={resolvedWalletId}
-        initialActivity={walletActivity}
-      />
+      <WalletActivitySection walletId={resolvedWalletId} initialActivity={walletActivity} />
     </div>
   );
 }

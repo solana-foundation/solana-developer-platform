@@ -111,11 +111,11 @@ async function resolveWalletFilter(
   );
   const wallet = wallets.find((entry) => entry.walletId === walletId);
 
+  assertApiKeyWalletAccess(auth, walletId, ["tokens:read"]);
+
   if (!wallet) {
     throw notFound("Wallet");
   }
-
-  assertApiKeyWalletAccess(auth, walletId, ["tokens:read"]);
 
   return { publicKey: wallet.publicKey };
 }

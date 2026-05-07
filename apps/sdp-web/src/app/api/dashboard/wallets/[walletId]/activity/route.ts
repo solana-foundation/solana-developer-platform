@@ -46,10 +46,7 @@ async function verifyWalletVisibility(
   }
 }
 
-export async function GET(
-  request: Request,
-  context: { params: Promise<{ walletId: string }> }
-) {
+export async function GET(request: Request, context: { params: Promise<{ walletId: string }> }) {
   const trace = createTimedTrace("route.dashboard.wallets.activity", request);
   let resolvedWalletId = "";
 
