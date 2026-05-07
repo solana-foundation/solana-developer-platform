@@ -30,11 +30,7 @@ if (response.error) {
   process.exit(1);
 }
 
-const allowedPrograms =
-  response.result?.validation_config?.allowed_programs ??
-  response.result?.validation?.allowed_programs ??
-  response.validation_config?.allowed_programs ??
-  [];
+const allowedPrograms = response.result?.validation_config?.allowed_programs ?? [];
 
 const missingPrograms = requiredPrograms.filter((program) => !allowedPrograms.includes(program));
 if (missingPrograms.length > 0) {
