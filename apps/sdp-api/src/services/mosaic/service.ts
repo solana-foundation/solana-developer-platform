@@ -47,9 +47,9 @@ import {
   type FullTransaction,
   // ABL wallet management (object input pattern)
   getAddWalletTransaction,
-  getListConfigPda,
   // Token ACL freeze/thaw (object input pattern)
   getFreezeTransaction,
+  getListConfigPda,
   getRemoveAuthorityTransaction,
   getRemoveWalletTransaction,
   getThawPermissionlessTransaction,
@@ -173,9 +173,7 @@ export class MosaicService {
 
     let listAddress: Address | undefined;
     if (enableSrfc37) {
-      const authority = this.feePayment
-        ? await this.feePayment.getFeePayer()
-        : this.signer.address;
+      const authority = this.feePayment ? await this.feePayment.getFeePayer() : this.signer.address;
       listAddress = await getListConfigPda({ authority, mint });
     }
 
