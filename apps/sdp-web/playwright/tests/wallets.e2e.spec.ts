@@ -86,7 +86,7 @@ test.describe
                   sourceKind: "issuance",
                   operationLabel: "Burn",
                   status: "confirmed",
-                  signature: null,
+                  signature: "burn_signature_e2e_111111111111111111111111111111111111",
                   token: "E2E",
                   amount: "3",
                   address: wallet.publicKey,
@@ -118,6 +118,11 @@ test.describe
         timeout: 120_000,
       });
       await expect(page.getByText("Force Burn", { exact: true })).toBeVisible();
+      const burnRow = page.locator("tr").filter({ hasText: "3 E2E" });
+      await expect(burnRow.getByRole("link")).toHaveCount(1);
+      const forceBurnRow = page.locator("tr").filter({ hasText: "Force Burn" });
+      await expect(forceBurnRow.getByText("Pending")).toBeVisible();
+      await expect(forceBurnRow.getByRole("link")).toHaveCount(0);
       await expect(
         page.getByText("Historical burns from non-associated token accounts may be unavailable.")
       ).toHaveCount(0);

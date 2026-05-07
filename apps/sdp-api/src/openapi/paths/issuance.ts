@@ -170,13 +170,14 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     summary: "List issuance transactions",
     operationId: "listIssuanceTransactions",
     description:
-      "Lists issuance transactions across tokens for the current organization or project. Use repeated type query parameters, for example type=burn&type=force_burn, to request multiple transaction types.",
+      "Lists issuance transactions across tokens for the current organization or project. Selected-wallet API keys are scoped to their token-readable wallet bindings when walletId is omitted. Use repeated type query parameters, for example type=burn&type=force_burn, to request multiple transaction types.",
     security: [{ apiKeyAuth: [] }],
     request: {
       query: z.object({
-        walletId: walletIdParamSchema
-          .optional()
-          .openapi({ description: "Filter to transactions associated with a wallet." }),
+        walletId: walletIdParamSchema.optional().openapi({
+          description:
+            "Filter to transactions associated with a wallet. Selected-wallet API keys must have wallet-level tokens:read for the requested wallet.",
+        }),
         type: z
           .array(tokenTransactionTypeQuerySchema)
           .optional()

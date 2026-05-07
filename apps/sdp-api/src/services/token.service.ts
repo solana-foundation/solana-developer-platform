@@ -238,6 +238,11 @@ interface TokenAccountMatch {
   tokenAccount: string;
 }
 
+interface WalletTransactionScope {
+  publicKeys: readonly string[];
+  tokenAccounts?: readonly TokenAccountMatch[];
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Token Service
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1005,10 +1010,7 @@ export class TokenService {
     projectId?: string | null;
     types?: TokenTransactionType[];
     status?: TokenTransactionStatus;
-    wallet?: {
-      publicKey: string;
-      tokenAccounts?: TokenAccountMatch[];
-    };
+    walletScope?: WalletTransactionScope;
     limit?: number;
     offset?: number;
   }): Promise<{ transactions: TokenTransactionListItem[]; total: number }> {
@@ -1017,14 +1019,15 @@ export class TokenService {
       projectId,
       types = [],
       status,
-      wallet,
+      walletScope,
       limit = 50,
       offset = 0,
     } = options;
     const distinctTypes = Array.from(new Set(types));
     const params: (string | number)[] = [organizationId];
     const conditions = ["tx.organization_id = ?"];
-    const tokenAccounts = wallet?.tokenAccounts ?? [];
+    const publicKeys = Array.from(new Set(walletScope?.publicKeys ?? []));
+    const tokenAccounts = walletScope?.tokenAccounts ?? [];
 
     let cte = "";
     const cteParams: string[] = [];
@@ -1053,7 +1056,7 @@ export class TokenService {
       params.push(...distinctTypes);
     }
 
-    if (wallet) {
+    if (walletScope) {
       const candidateTypes =
         distinctTypes.length > 0
           ? distinctTypes
@@ -1062,9 +1065,13 @@ export class TokenService {
 
       for (const type of candidateTypes) {
         const config = WALLET_TRANSACTION_MATCH_CONFIG[type];
-        const publicKeyConditions = config.publicKeyFields.map(
-          (key) => `tx.operation_params::jsonb ->> '${key}' = ?`
-        );
+        const publicKeyConditions =
+          publicKeys.length > 0
+            ? config.publicKeyFields.map(
+                (key) =>
+                  `tx.operation_params::jsonb ->> '${key}' IN (${publicKeys.map(() => "?").join(", ")})`
+              )
+            : [];
         const tokenAccountConditions =
           tokenAccounts.length > 0
             ? config.tokenAccountFields.map(
@@ -1084,7 +1091,9 @@ export class TokenService {
 
         walletTypeConditions.push(`(tx.type = ? AND (${matchConditions.join(" OR ")}))`);
         params.push(type);
-        params.push(...config.publicKeyFields.map(() => wallet.publicKey));
+        for (const _field of config.publicKeyFields) {
+          params.push(...publicKeys);
+        }
       }
 
       conditions.push(
@@ -1121,7 +1130,7 @@ export class TokenService {
         t.mint_address AS token_mint_address
       ${fromClause}
       ${whereClause}
-      ORDER BY tx.created_at DESC
+      ORDER BY tx.created_at DESC, tx.id DESC
       LIMIT ? OFFSET ?`;
 
     const countResult = await this.db

@@ -55,7 +55,6 @@ describe("wallet-scoped route coverage inventory", () => {
       "DELETE /tokens/:tokenId/allowlist/:entryId",
       "GET /templates",
       "GET /templates/:templateId",
-      "GET /transactions",
       "GET /tokens",
       "GET /tokens/:tokenId",
       "GET /tokens/:tokenId/allowlist",
@@ -68,6 +67,7 @@ describe("wallet-scoped route coverage inventory", () => {
     ]);
 
     expect(allRoutes.filter((route) => !nonWalletScopedRoutes.has(route))).toEqual([
+      "GET /transactions",
       "POST /tokens/:tokenId/authority",
       "POST /tokens/:tokenId/authority/prepare",
       "POST /tokens/:tokenId/burn",
