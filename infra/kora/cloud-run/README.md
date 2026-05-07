@@ -26,11 +26,10 @@ Every Kora instance used by SDP must allow the sRFC-37 programs in addition to t
 - `TACLkU6CiCdkQN2MjoyDkVg2yAH9zkxiHDsiztQ52TP` — Token-ACL
 - `GATEzzqxhJnsWF6vHRsgtixxSB8PaQdcqGEVTEHWiULz` — ABL / GATE
 
-This applies to:
+This applies to the active devnet Kora surfaces:
 
 - `dev_ci` Kora used by integration tests
 - shared dev/staging Kora used by local and staging environments
-- production Kora before denylist token operations run on mainnet
 
 The Cloud Run services mount Kora config from Secret Manager, so a checked-in TOML change must also be uploaded to the matching secret and rolled out to the running service. For the shared devnet service:
 
@@ -44,8 +43,6 @@ gcloud run services update kora-sdp \
   --region us-central1 \
   --update-env-vars KORA_CONFIG_VERSION=$(date +%s)
 ```
-
-For mainnet, mirror the same `allowed_programs` entries in the config payload backing `kora-mainnet-config`, then roll out `kora-mainnet`.
 
 ## Deploy
 
@@ -69,10 +66,6 @@ gcloud run services add-iam-policy-binding kora-sdp \
 KORA_RPC_URL=https://kora-sdp-p3bno75vpa-uc.a.run.app \
 curl -s "${KORA_RPC_URL}/liveness"
 ```
-
-## Mainnet (later)
-
-`kora.mainnet.yaml` mirrors the devnet manifest and expects the same secret names with `kora-mainnet-*`.
 
 ## Optional API Key
 

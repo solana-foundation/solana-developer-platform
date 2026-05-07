@@ -70,7 +70,7 @@ async function runPreflight(): Promise<void> {
   );
   if (missingAllowedPrograms.length > 0) {
     throw new Error(
-      `Kora preflight failed: missing required sRFC-37 allowed programs: ${missingAllowedPrograms.join(", ")}. Update Kora validation.allowed_programs.`
+      `Kora preflight failed: missing required sRFC-37 allowed programs: ${missingAllowedPrograms.join(", ")}. Update Kora validation_config.allowed_programs.`
     );
   }
 
