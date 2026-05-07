@@ -4,18 +4,20 @@ This folder contains the Cloud Run manifests and operator notes for the shared d
 
 ## Devnet Service
 
-- Service: `kora-devnet`
+- Project: `solana-developer-platform`
+- Service: `kora-sdp`
 - Region: `us-central1`
-- Image: `us-central1-docker.pkg.dev/YOUR_GCP_PROJECT_ID/kora-remote/solana-foundation/kora:latest`
+- URL: `https://kora-sdp-p3bno75vpa-uc.a.run.app`
+- Image: `us-central1-docker.pkg.dev/analytics-324114/kora-remote/solana-foundation/kora@sha256:bb6a1a11cdf5edcd34060619ebefbe9ea54419d7bb84de5667f36b31f1489f3d`
 
 ## Required Secrets (Secret Manager)
 
 Create these secrets before deploy:
 
-- `kora-devnet-config` → `kora.devnet.toml`
-- `kora-devnet-signers` → `signers.devnet.toml`
-- `kora-devnet-signer-private-key` → base58 keypair
-- `kora-devnet-rpc-url` → devnet RPC URL (Helius or equivalent)
+- `kora-sdp-config` → `kora.devnet.toml`
+- `kora-sdp-signers` → `signers.devnet.toml`
+- `kora-sdp-signer-private-key` → base58 keypair
+- `kora-sdp-rpc-url` → devnet RPC URL (Helius or equivalent)
 
 ## Required Allowed Programs
 
@@ -33,11 +35,14 @@ This applies to:
 The Cloud Run services mount Kora config from Secret Manager, so a checked-in TOML change must also be uploaded to the matching secret and rolled out to the running service. For the shared devnet service:
 
 ```bash
-gcloud secrets versions add kora-devnet-config \
+gcloud config set project solana-developer-platform
+
+gcloud secrets versions add kora-sdp-config \
   --data-file=infra/kora/cloud-run/kora.devnet.toml
 
-gcloud run services replace infra/kora/cloud-run/kora.devnet.yaml \
-  --region us-central1
+gcloud run services update kora-sdp \
+  --region us-central1 \
+  --update-env-vars KORA_CONFIG_VERSION=$(date +%s)
 ```
 
 For mainnet, mirror the same `allowed_programs` entries in the config payload backing `kora-mainnet-config`, then roll out `kora-mainnet`.
@@ -45,13 +50,14 @@ For mainnet, mirror the same `allowed_programs` entries in the config payload ba
 ## Deploy
 
 ```bash
-gcloud run services replace infra/kora/cloud-run/kora.devnet.yaml --region us-central1
+gcloud config set project solana-developer-platform
+gcloud run services update kora-sdp --region us-central1
 ```
 
 If the service should be publicly reachable, allow unauthenticated invoker:
 
 ```bash
-gcloud run services add-iam-policy-binding kora-devnet \
+gcloud run services add-iam-policy-binding kora-sdp \
   --region us-central1 \
   --member=allUsers \
   --role=roles/run.invoker
@@ -60,7 +66,7 @@ gcloud run services add-iam-policy-binding kora-devnet \
 ## Health Check
 
 ```bash
-KORA_RPC_URL=https://your-kora-devnet-instance.us-central1.run.app \
+KORA_RPC_URL=https://kora-sdp-p3bno75vpa-uc.a.run.app \
 curl -s "${KORA_RPC_URL}/liveness"
 ```
 
