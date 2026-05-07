@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.19.1](https://github.com/solana-foundation/solana-developer-platform/compare/v0.19.0...v0.19.1) (2026-05-06)
+
+### Maintenance
+
+* **sdp-api:** isolate test DB via TEST_DATABASE_URL and miniflare hyperdrives ([#270](https://github.com/solana-foundation/solana-developer-platform/pull/270)) ([4a4434a](https://github.com/solana-foundation/solana-developer-platform/commit/4a4434a6dae88db2ad501ec094ff97e1324bd51c))
+
 ## [0.19.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.18.8...v0.19.0) (2026-05-05)
 
 ### Features
