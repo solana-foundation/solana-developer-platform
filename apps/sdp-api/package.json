@@ -11,6 +11,7 @@
     "deploy:dev": "wrangler deploy --env dev",
     "deploy:production": "wrangler deploy --env production",
     "db:migrate:local": "DATABASE_URL=${DATABASE_URL:-postgresql://sdp:sdp@127.0.0.1:5432/sdp} node scripts/migrate-postgres.mjs",
+    "db:migrate:test": "node scripts/migrate-postgres-test.mjs",
     "db:migrate:dev": "node scripts/migrate-postgres.mjs",
     "db:migrate:production": "node scripts/migrate-postgres.mjs",
     "db:verify": "node scripts/verify-postgres.mjs",

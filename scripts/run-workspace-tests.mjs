@@ -99,6 +99,10 @@ try {
 
   await run("pnpm", ["--filter", "@sdp/api", "db:postgres:bootstrap"]);
 
+  if (mode === "unit") {
+    await run("pnpm", ["--filter", "@sdp/api", "db:migrate:test"]);
+  }
+
   if (mode === "integration" && forwardedArgs.length > 0) {
     await run("pnpm", [
       "--filter",
