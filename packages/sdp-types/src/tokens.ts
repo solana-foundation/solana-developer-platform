@@ -270,6 +270,16 @@ export interface TokenTransaction {
   updatedAt: string;
 }
 
+export interface TokenTransactionListItem {
+  token: {
+    id: string;
+    name: string;
+    symbol: string;
+    mintAddress: string | null;
+  };
+  transaction: TokenTransaction;
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Allowlist Types
 // ═══════════════════════════════════════════════════════════════════════════

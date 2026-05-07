@@ -55,6 +55,7 @@ describe("wallet-scoped route coverage inventory", () => {
       "DELETE /tokens/:tokenId/allowlist/:entryId",
       "GET /templates",
       "GET /templates/:templateId",
+      "GET /transactions",
       "GET /tokens",
       "GET /tokens/:tokenId",
       "GET /tokens/:tokenId/allowlist",
