@@ -16,10 +16,12 @@ describe("shouldEnableOnChainAcl", () => {
   });
 
   it("enables on-chain ABL for denylist tokens on every network", () => {
-    const token = denylist("tokenized-security");
-    expect(shouldEnableOnChainAcl(token, "devnet")).toBe(true);
-    expect(shouldEnableOnChainAcl(token, "mainnet-beta")).toBe(true);
-    expect(shouldEnableOnChainAcl(token, undefined)).toBe(true);
+    for (const template of ["stablecoin", "tokenized-security"] as const) {
+      const token = denylist(template);
+      expect(shouldEnableOnChainAcl(token, "devnet")).toBe(true);
+      expect(shouldEnableOnChainAcl(token, "mainnet-beta")).toBe(true);
+      expect(shouldEnableOnChainAcl(token, undefined)).toBe(true);
+    }
   });
 
   it("enables on-chain ABL for allowlist tokens only on mainnet", () => {
