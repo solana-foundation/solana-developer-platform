@@ -224,9 +224,7 @@ export class MosaicService {
     // ABL/TACL setup instructions when mintAuthority === feePayer, so we must
     // pay with custody for that path or the list silently never gets created.
     const feePayer =
-      this.feePayment && !enableSrfc37
-        ? await this.feePayment.getFeePayer()
-        : options.feePayer;
+      this.feePayment && !enableSrfc37 ? await this.feePayment.getFeePayer() : options.feePayer;
     const mintAuthority =
       typeof options.mintAuthority === "string" && options.mintAuthority === this.signer.address
         ? this.signer
@@ -994,8 +992,11 @@ export class MosaicService {
     };
   }
 
-  private async signAndSubmit(fullTx: FullTransaction): Promise<MosaicTransactionResult> {
-    if (this.feePayment) {
+  private async signAndSubmit(
+    fullTx: FullTransaction,
+    options: { bypassFeePayment?: boolean } = {}
+  ): Promise<MosaicTransactionResult> {
+    if (this.feePayment && !options.bypassFeePayment) {
       // Two-signer flow: custody signs locally, Kora adds fee payer + submits
       const partiallySignedTx = await partiallySignTransactionMessageWithSigners(fullTx);
       const txEncoder = getTransactionEncoder();
@@ -1062,7 +1063,7 @@ export class MosaicService {
     }
 
     // Direct signing flow - signers are already attached to the transaction
-    return this.signAndSubmit(fullTx);
+    return this.signAndSubmit(fullTx, options);
   }
 
   private async resolveFeePayer(
