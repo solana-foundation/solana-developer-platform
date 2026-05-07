@@ -17,6 +17,31 @@ Create these secrets before deploy:
 - `kora-devnet-signer-private-key` → base58 keypair
 - `kora-devnet-rpc-url` → devnet RPC URL (Helius or equivalent)
 
+## Required Allowed Programs
+
+Every Kora instance used by SDP must allow the sRFC-37 programs in addition to the standard System, Token, Token-2022, Associated Token, Memo, Address Lookup Table, and Compute Budget programs:
+
+- `TACLkU6CiCdkQN2MjoyDkVg2yAH9zkxiHDsiztQ52TP` — Token-ACL
+- `GATEzzqxhJnsWF6vHRsgtixxSB8PaQdcqGEVTEHWiULz` — ABL / GATE
+
+This applies to:
+
+- `dev_ci` Kora used by integration tests
+- shared dev/staging Kora used by local and staging environments
+- production Kora before denylist token operations run on mainnet
+
+The Cloud Run services mount Kora config from Secret Manager, so a checked-in TOML change must also be uploaded to the matching secret and rolled out to the running service. For the shared devnet service:
+
+```bash
+gcloud secrets versions add kora-devnet-config \
+  --data-file=infra/kora/cloud-run/kora.devnet.toml
+
+gcloud run services replace infra/kora/cloud-run/kora.devnet.yaml \
+  --region us-central1
+```
+
+For mainnet, mirror the same `allowed_programs` entries in the config payload backing `kora-mainnet-config`, then roll out `kora-mainnet`.
+
 ## Deploy
 
 ```bash

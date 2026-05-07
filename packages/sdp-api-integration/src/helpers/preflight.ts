@@ -6,6 +6,12 @@ type SolanaRpcResponse<T> =
   | { jsonrpc: "2.0"; id: number; error: { code: number; message: string; data?: unknown } };
 
 const PRECHECK_CACHE_KEY = "__sdp_integration_preflight__";
+const REQUIRED_KORA_ALLOWED_PROGRAMS = [
+  // biome-ignore lint/security/noSecrets: Public Solana program ID, not a secret.
+  "TACLkU6CiCdkQN2MjoyDkVg2yAH9zkxiHDsiztQ52TP",
+  // biome-ignore lint/security/noSecrets: Public Solana program ID, not a secret.
+  "GATEzzqxhJnsWF6vHRsgtixxSB8PaQdcqGEVTEHWiULz",
+] as const;
 
 type PreflightState = {
   promise: Promise<void>;
@@ -59,6 +65,14 @@ async function runPreflight(): Promise<void> {
   if (!config?.validation_config?.allowed_programs) {
     throw new Error("Kora preflight failed: missing validation_config.allowed_programs");
   }
+  const missingAllowedPrograms = REQUIRED_KORA_ALLOWED_PROGRAMS.filter(
+    (program) => !config.validation_config.allowed_programs.includes(program)
+  );
+  if (missingAllowedPrograms.length > 0) {
+    throw new Error(
+      `Kora preflight failed: missing required sRFC-37 allowed programs: ${missingAllowedPrograms.join(", ")}. Update Kora validation.allowed_programs.`
+    );
+  }
 
   const payerSignerResp = await withLabel("Kora.getPayerSigner", () => koraClient.getPayerSigner());
   const feePayerAddress =
@@ -98,7 +112,6 @@ async function assertSolanaRpcHealthy(rpcUrl: string): Promise<void> {
   type LatestBlockhash = {
     value: { blockhash: string; lastValidBlockHeight: number };
   };
-  // biome-ignore lint/security/noSecrets: JSON-RPC method name (false positive).
   const resp = await solanaRpc<LatestBlockhash>(rpcUrl, "getLatestBlockhash", [
     { commitment: "confirmed" },
   ]);
