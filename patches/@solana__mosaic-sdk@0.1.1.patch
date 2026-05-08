@@ -1,8 +1,7 @@
 diff --git a/dist/abl/list.js b/dist/abl/list.js
-index da29473e7a5de8c3a1dfc545009061c383ecf6f1..1987e4f65429ff22cd9ec4fc579a85a84eb6535f 100644
 --- a/dist/abl/list.js
 +++ b/dist/abl/list.js
-@@ -16,6 +16,7 @@ export const getCreateListInstructions = async (input) => {
+@@ -16,6 +16,7 @@
      const listConfigPda = await findListConfigPda({ authority: input.authority.address, seed: input.mint }, { programAddress: ABL_PROGRAM_ID });
      const createListInstruction = getCreateListInstruction({
          authority: input.authority,
@@ -11,10 +10,9 @@ index da29473e7a5de8c3a1dfc545009061c383ecf6f1..1987e4f65429ff22cd9ec4fc579a85a8
          mode: input.mode || Mode.Allow,
          seed: input.mint,
 diff --git a/dist/abl/set-extra-metas.js b/dist/abl/set-extra-metas.js
-index afcc26a083012adac3bec7d23019fb6bd6fdb16a..10b40e138f19d2a7066ea654f68decbd5d930616 100644
 --- a/dist/abl/set-extra-metas.js
 +++ b/dist/abl/set-extra-metas.js
-@@ -21,6 +21,7 @@ export const getSetExtraMetasInstructions = async (input) => {
+@@ -21,6 +21,7 @@
      const extraMetasThaw = await findThawExtraMetasAccountPda({ mint: input.mint }, { programAddress: ABL_PROGRAM_ID });
      const createListInstruction = getSetupExtraMetasInstruction({
          authority: input.authority,
@@ -23,10 +21,9 @@ index afcc26a083012adac3bec7d23019fb6bd6fdb16a..10b40e138f19d2a7066ea654f68decbd
          tokenAclMintConfig: mintConfigPda[0],
          extraMetas: extraMetasThaw[0],
 diff --git a/dist/abl/wallet.js b/dist/abl/wallet.js
-index 69309f50eb78941e665f30dae90d85209d842cce..e4e22270eb955ad4995a31fc36e3237ecb48e8fb 100644
 --- a/dist/abl/wallet.js
 +++ b/dist/abl/wallet.js
-@@ -18,6 +18,7 @@ export const getAddWalletInstructions = async (input) => {
+@@ -18,6 +18,7 @@
      const abWallet = await findWalletEntryPda({ walletAddress: input.wallet, listConfig: input.list }, { programAddress: ABL_PROGRAM_ID });
      const addWalletToListInstruction = getAddWalletInstruction({
          authority: input.authority,
@@ -34,11 +31,57 @@ index 69309f50eb78941e665f30dae90d85209d842cce..e4e22270eb955ad4995a31fc36e3237e
          listConfig: input.list,
          wallet: input.wallet,
          walletEntry: abWallet[0],
+diff --git a/dist/inspection/inspect-token.js b/dist/inspection/inspect-token.js
+--- a/dist/inspection/inspect-token.js
++++ b/dist/inspection/inspect-token.js
+@@ -191,7 +191,14 @@
+                     });
+             }
+         }
+-        enableSrfc37 = authorities.freezeAuthority === TOKEN_ACL_PROGRAM_ID;
++        if (authorities.freezeAuthority) {
++            // Token ACL transfers freeze authority to a mintConfig PDA owned by the
++            // Token ACL program, so detect via account owner rather than literal program ID.
++            const freezeAuthorityAccount = await rpc
++                .getAccountInfo(authorities.freezeAuthority, { commitment })
++                .send();
++            enableSrfc37 = freezeAuthorityAccount.value?.owner === TOKEN_ACL_PROGRAM_ID;
++        }
+     }
+     const detectedPatterns = detectTokenPatterns(extensions);
+     return {
+diff --git a/dist/management/force-burn.js b/dist/management/force-burn.js
+--- a/dist/management/force-burn.js
++++ b/dist/management/force-burn.js
+@@ -18,8 +18,8 @@
+     const feePayerSigner = typeof feePayer === 'string' ? createNoopSigner(feePayer) : feePayer;
+     const permanentDelegateSigner = typeof permanentDelegate === 'string' ? createNoopSigner(permanentDelegate) : permanentDelegate;
+     // Get mint info to determine decimals
+-    const { decimals, freezeAuthority, extensions } = await getMintDetails(rpc, mint);
+-    const enableSrfc37 = freezeAuthority === TOKEN_ACL_PROGRAM_ID && isDefaultAccountStateSetFrozen(extensions);
++    const { decimals, extensions, usesTokenAcl } = await getMintDetails(rpc, mint);
++    const enableSrfc37 = usesTokenAcl && isDefaultAccountStateSetFrozen(extensions);
+     // Convert decimal amount to raw amount
+     const rawAmount = decimalAmountToRaw(decimalAmount, decimals);
+     // Resolve source token account
+diff --git a/dist/management/force-transfer.js b/dist/management/force-transfer.js
+--- a/dist/management/force-transfer.js
++++ b/dist/management/force-transfer.js
+@@ -19,8 +19,8 @@
+     const feePayerSigner = typeof feePayer === 'string' ? createNoopSigner(feePayer) : feePayer;
+     const permanentDelegateSigner = typeof permanentDelegate === 'string' ? createNoopSigner(permanentDelegate) : permanentDelegate;
+     // Get mint info to determine decimals
+-    const { decimals, freezeAuthority, extensions } = await getMintDetails(rpc, mint);
+-    const enableSrfc37 = freezeAuthority === TOKEN_ACL_PROGRAM_ID && isDefaultAccountStateSetFrozen(extensions);
++    const { decimals, extensions, usesTokenAcl } = await getMintDetails(rpc, mint);
++    const enableSrfc37 = usesTokenAcl && isDefaultAccountStateSetFrozen(extensions);
+     // Convert decimal amount to raw amount
+     const rawAmount = decimalAmountToRaw(decimalAmount, decimals);
+     // Resolve source and destination token accounts
 diff --git a/dist/templates/stablecoin.js b/dist/templates/stablecoin.js
-index 75f4df1d01f2f941b0c86f27bcf3cc561af8307e..14a8d1d9c836c1495272ef0f17d4405a9a442eec 100644
 --- a/dist/templates/stablecoin.js
 +++ b/dist/templates/stablecoin.js
-@@ -48,7 +48,7 @@ export const createStablecoinInitTransaction = async (rpc, name, symbol, decimal
+@@ -48,7 +48,7 @@
          additionalMetadata: new Map(),
      })
          .withPausable(pausableAuthority || mintAuthorityAddress)
@@ -48,10 +91,9 @@ index 75f4df1d01f2f941b0c86f27bcf3cc561af8307e..14a8d1d9c836c1495272ef0f17d4405a
          .withPermanentDelegate(permanentDelegateAuthority || mintAuthorityAddress)
          .buildInstructions({
 diff --git a/dist/templates/tokenized-security.js b/dist/templates/tokenized-security.js
-index fc5d20f649cc63ae635cc33d6ad0fac69949a544..c6ba3dc01f86c2fb311800e3e4345a3a6e3f0f57 100644
 --- a/dist/templates/tokenized-security.js
 +++ b/dist/templates/tokenized-security.js
-@@ -34,7 +34,7 @@ export const createTokenizedSecurityInitTransaction = async (rpc, name, symbol,
+@@ -34,7 +34,7 @@
          additionalMetadata: new Map(),
      })
          .withPausable(pausableAuthority)
@@ -60,3 +102,51 @@ index fc5d20f649cc63ae635cc33d6ad0fac69949a544..c6ba3dc01f86c2fb311800e3e4345a3a
          .withConfidentialBalances(confidentialBalancesAuthority)
          .withPermanentDelegate(permanentDelegateAuthority);
      // Add Scaled UI Amount extension
+diff --git a/dist/token-acl/freeze.js b/dist/token-acl/freeze.js
+--- a/dist/token-acl/freeze.js
++++ b/dist/token-acl/freeze.js
+@@ -34,9 +34,10 @@
+         state: tokenInfo.state,
+     };
+     // Get mint details to determine if this token uses Token ACL
+-    const { freezeAuthority, programAddress } = await getMintDetails(input.rpc, token.mint);
+-    // Check if freeze authority is the Token ACL program
+-    if (freezeAuthority === TOKEN_ACL_PROGRAM_ID) {
++    const { programAddress, usesTokenAcl } = await getMintDetails(input.rpc, token.mint);
++    // Token ACL transfers freeze authority to a mintConfig PDA owned by the
++    // Token ACL program, so detect via account owner rather than literal program ID.
++    if (usesTokenAcl) {
+         // Use Token ACL instruction
+         const mintConfigPda = await findMintConfigPda({ mint: token.mint }, { programAddress: TOKEN_ACL_PROGRAM_ID });
+         const freezeInstruction = getFreezeInstruction({
+diff --git a/dist/token-acl/thaw.js b/dist/token-acl/thaw.js
+--- a/dist/token-acl/thaw.js
++++ b/dist/token-acl/thaw.js
+@@ -34,9 +34,10 @@
+         state: tokenInfo.state,
+     };
+     // Get mint details to determine if this token uses Token ACL
+-    const { freezeAuthority, programAddress } = await getMintDetails(input.rpc, token.mint);
+-    // Check if freeze authority is the Token ACL program
+-    if (freezeAuthority === TOKEN_ACL_PROGRAM_ID) {
++    const { programAddress, usesTokenAcl } = await getMintDetails(input.rpc, token.mint);
++    // Token ACL transfers freeze authority to a mintConfig PDA owned by the
++    // Token ACL program, so detect via account owner rather than literal program ID.
++    if (usesTokenAcl) {
+         // Use Token ACL instruction
+         const mintConfigPda = await findMintConfigPda({ mint: token.mint }, { programAddress: TOKEN_ACL_PROGRAM_ID });
+         const thawInstruction = getThawInstruction({
+diff --git a/dist/transfer/index.js b/dist/transfer/index.js
+--- a/dist/transfer/index.js
++++ b/dist/transfer/index.js
+@@ -33,8 +33,8 @@
+         throw new Error('Amount must be a positive number');
+     }
+     // Get mint info to determine decimals
+-    const { decimals, freezeAuthority, extensions } = await getMintDetails(rpc, mint);
+-    const enableSrfc37 = freezeAuthority === TOKEN_ACL_PROGRAM_ID && isDefaultAccountStateSetFrozen(extensions);
++    const { decimals, extensions, usesTokenAcl } = await getMintDetails(rpc, mint);
++    const enableSrfc37 = usesTokenAcl && isDefaultAccountStateSetFrozen(extensions);
+     // Convert decimal amount to raw amount
+     const rawAmount = decimalAmountToRaw(decimalAmount, decimals);
+     // Resolve sender's token account
