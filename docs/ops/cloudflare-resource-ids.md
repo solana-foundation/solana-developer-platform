@@ -182,7 +182,7 @@ pnpm dev
 
 ### Wrangler Local Bindings
 
-Wrangler provides local D1 (SQLite) and KV (in-memory) bindings during `wrangler dev`. These use the configuration in `wrangler.toml`:
+Wrangler provides local Hyperdrive and KV bindings during `wrangler dev`. These use the configuration in `wrangler.toml`:
 
 ```toml
 # Local (development) bindings
