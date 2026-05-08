@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.19.2](https://github.com/solana-foundation/solana-developer-platform/compare/v0.19.1...v0.19.2) (2026-05-08)
+
+### Bug Fixes
+
+* HOO-460 support denylist for security tokens ([#267](https://github.com/solana-foundation/solana-developer-platform/pull/267)) ([5facd5c](https://github.com/solana-foundation/solana-developer-platform/commit/5facd5c25e2b4bca455face40b3f073840abf321))
+
+### Other Changes
+
+* Remove stale D1 mentions ([#273](https://github.com/solana-foundation/solana-developer-platform/pull/273)) ([7ee81e8](https://github.com/solana-foundation/solana-developer-platform/commit/7ee81e83c935049c01207cebddf3de084eed8c0a))
+
 ## [0.19.1](https://github.com/solana-foundation/solana-developer-platform/compare/v0.19.0...v0.19.1) (2026-05-06)
 
 ### Maintenance
