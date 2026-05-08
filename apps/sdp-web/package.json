@@ -20,7 +20,7 @@
     "@sentry/nextjs": "^10.42.0",
     "@solana/design-system": "1.0.1",
     "clsx": "2.1.1",
-    "lucide-react": "0.575.0",
+    "lucide-react": "1.14.0",
     "motion": "^12.38.0",
     "next": "16.2.3",
     "qrcode": "1.5.4",
