@@ -40,7 +40,9 @@ const RUN_INTEGRATION_TESTS = env.RUN_INTEGRATION_TESTS === "true";
 
 let cachedKeyHash: string | null = null;
 let cachedCustodyAddress: string | null = null;
-const PRIVY_INTEGRATION_AIRDROP_LAMPORTS = 1_000_000;
+// 0.01 SOL — enough to cover sRFC-37 deploy paths where custody pays directly
+// (~0.0043 SOL for mint + listConfig + walletEntry rent), with margin for follow-up ops.
+const PRIVY_INTEGRATION_AIRDROP_LAMPORTS = 10_000_000;
 const KORA_MAX_TRANSFER_LAMPORTS = 10_000_000n;
 
 type SolanaRpcResponse<T> =
@@ -283,6 +285,9 @@ async function ensurePrivyCustodyAddress(): Promise<string> {
 
   const address = preferredWallet.public_key;
   await ensureAddressAccountExists(address);
+  // Top up existing wallets too — sRFC-37 deploy paths now have custody pay
+  // directly, so a 1M-lamport bootstrap left over from older runs isn't enough.
+  await fundAddressToLamports(address, PRIVY_INTEGRATION_AIRDROP_LAMPORTS);
   return address;
 }
 

@@ -49,6 +49,7 @@ import {
   getAddWalletTransaction,
   // Token ACL freeze/thaw (object input pattern)
   getFreezeTransaction,
+  getListConfigPda,
   getRemoveAuthorityTransaction,
   getRemoveWalletTransaction,
   getThawPermissionlessTransaction,
@@ -167,12 +168,23 @@ export class MosaicService {
       enableSrfc37
     );
 
-    // Sign and submit with mint keypair
-    const result = await this.signAndSubmitWithMintKeypair(fullTx, mintKeypair);
+    // sRFC-37 setup must be in the same tx as mint creation, and mosaic-sdk
+    // only emits those instructions when mintAuthority === feePayer. Custody is
+    // the mint authority, so for sRFC-37 deploys we skip Kora and have custody
+    // pay directly. Plain (non-sRFC-37) deploys still use Kora when configured.
+    const result = await this.signAndSubmitWithMintKeypair(fullTx, mintKeypair, {
+      bypassFeePayment: enableSrfc37,
+    });
+
+    let listAddress: Address | undefined;
+    if (enableSrfc37) {
+      listAddress = await getListConfigPda({ authority: this.signer.address, mint });
+    }
 
     return {
       ...result,
       mint,
+      listAddress,
     };
   }
 
@@ -207,8 +219,12 @@ export class MosaicService {
     aclMode: "allowlist" | "blocklist",
     enableSrfc37: boolean
   ): Promise<FullTransaction> {
-    // Resolve fee payer - use Kora if available, otherwise from options
-    const feePayer = this.feePayment ? await this.feePayment.getFeePayer() : options.feePayer;
+    // Resolve fee payer - use Kora if available, otherwise from options.
+    // sRFC-37 is the exception: the mosaic-sdk template only emits the on-chain
+    // ABL/TACL setup instructions when mintAuthority === feePayer, so we must
+    // pay with custody for that path or the list silently never gets created.
+    const feePayer =
+      this.feePayment && !enableSrfc37 ? await this.feePayment.getFeePayer() : options.feePayer;
     const mintAuthority =
       typeof options.mintAuthority === "string" && options.mintAuthority === this.signer.address
         ? this.signer
@@ -218,7 +234,7 @@ export class MosaicService {
         ? (options.mintAuthority as Address)
         : (options.mintAuthority.address as Address);
 
-    const freezeAuthority = enableSrfc37 ? undefined : (options.freezeAuthority ?? undefined);
+    const freezeAuthority = options.freezeAuthority ?? undefined;
     const permanentDelegateAuthority =
       typeof options.extensions?.permanentDelegate === "string"
         ? (options.extensions.permanentDelegate as Address)
@@ -976,8 +992,11 @@ export class MosaicService {
     };
   }
 
-  private async signAndSubmit(fullTx: FullTransaction): Promise<MosaicTransactionResult> {
-    if (this.feePayment) {
+  private async signAndSubmit(
+    fullTx: FullTransaction,
+    options: { bypassFeePayment?: boolean } = {}
+  ): Promise<MosaicTransactionResult> {
+    if (this.feePayment && !options.bypassFeePayment) {
       // Two-signer flow: custody signs locally, Kora adds fee payer + submits
       const partiallySignedTx = await partiallySignTransactionMessageWithSigners(fullTx);
       const txEncoder = getTransactionEncoder();
@@ -1021,9 +1040,10 @@ export class MosaicService {
 
   private async signAndSubmitWithMintKeypair(
     fullTx: FullTransaction,
-    _mintKeypair: TransactionSigner
+    _mintKeypair: TransactionSigner,
+    options: { bypassFeePayment?: boolean } = {}
   ): Promise<MosaicTransactionResult> {
-    if (this.feePayment) {
+    if (this.feePayment && !options.bypassFeePayment) {
       // Two-signer flow: transaction has signers attached, Kora adds fee payer
       const partiallySignedTx = await partiallySignTransactionMessageWithSigners(fullTx);
       const txEncoder = getTransactionEncoder();
@@ -1043,7 +1063,7 @@ export class MosaicService {
     }
 
     // Direct signing flow - signers are already attached to the transaction
-    return this.signAndSubmit(fullTx);
+    return this.signAndSubmit(fullTx, options);
   }
 
   private async resolveFeePayer(

@@ -1,6 +1,5 @@
 import type { TokenResponse } from "@sdp/types";
 import type { Address } from "@solana/kit";
-import { TOKEN_ACL_PROGRAM_ID } from "@solana/mosaic-sdk";
 import type { Context } from "hono";
 import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
@@ -128,12 +127,7 @@ export const deployToken = async (c: AppContext) => {
       aclMode,
     });
 
-    const enableSrfc37 = enableAbl && token.isFreezable;
-    const freezeAuthority = token.isFreezable
-      ? enableSrfc37
-        ? TOKEN_ACL_PROGRAM_ID
-        : custodyAddress
-      : null;
+    const freezeAuthority = token.isFreezable ? custodyAddress : null;
 
     // Update token with deployment info (including ABL list if created)
     const deployedToken = await tokenService.setTokenDeployed(
