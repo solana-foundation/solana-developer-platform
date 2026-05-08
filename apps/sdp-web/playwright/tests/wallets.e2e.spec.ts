@@ -114,13 +114,11 @@ test.describe
       });
 
       await page.goto(`/dashboard/wallets/${wallet.walletId}`);
-      await expect(page.getByText("Burn", { exact: true })).toBeVisible({
-        timeout: 120_000,
-      });
-      await expect(page.getByText("Force Burn", { exact: true })).toBeVisible();
-      const burnRow = page.locator("tr").filter({ hasText: "3 E2E" });
+      const burnRow = page.locator("tr").filter({ hasText: "3.00 E2E" });
+      await expect(burnRow).toBeVisible({ timeout: 120_000 });
       await expect(burnRow.getByRole("link")).toHaveCount(1);
       const forceBurnRow = page.locator("tr").filter({ hasText: "Force Burn" });
+      await expect(forceBurnRow).toBeVisible();
       await expect(forceBurnRow.getByText("Pending")).toBeVisible();
       await expect(forceBurnRow.getByRole("link")).toHaveCount(0);
       await expect(
@@ -131,7 +129,7 @@ test.describe
       await page.getByRole("button", { name: "Refresh" }).click();
 
       await expect(page.getByText("Activity refresh failed")).toBeVisible();
-      await expect(page.getByText("Burn", { exact: true })).toBeVisible();
-      await expect(page.getByText("Force Burn", { exact: true })).toBeVisible();
+      await expect(burnRow).toBeVisible();
+      await expect(forceBurnRow).toBeVisible();
     });
   });

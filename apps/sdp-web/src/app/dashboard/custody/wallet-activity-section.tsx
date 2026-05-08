@@ -134,8 +134,8 @@ export function WalletActivitySection({ walletId, initialActivity }: WalletActiv
                       <span className="md:hidden">Activity</span>
                       <span className="hidden md:inline">Asset</span>
                     </TableHead>
-                    <TableHead className="hidden w-[8rem] md:table-cell">Operation</TableHead>
-                    <TableHead className="hidden w-[26%] md:table-cell">Address</TableHead>
+                    <TableHead className="hidden w-[8rem] md:table-cell">Direction</TableHead>
+                    <TableHead className="hidden w-[26%] md:table-cell">Counterparty</TableHead>
                     <TableHead className="hidden w-[22%] md:table-cell">Signature</TableHead>
                     <TableHead className="hidden w-[10rem] md:table-cell">Created</TableHead>
                   </TableRow>
