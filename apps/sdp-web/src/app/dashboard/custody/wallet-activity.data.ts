@@ -69,16 +69,6 @@ function resolvePaymentAddress(transfer: PaymentTransferSummary): string | undef
   return transfer.destination ?? transfer.source;
 }
 
-function resolveIssuanceOperation(transaction: TokenTransaction): string {
-  if (transaction.type === "burn") {
-    return "Burn";
-  }
-  if (transaction.type === "force_burn") {
-    return "Force Burn";
-  }
-  return toTitleCase(transaction.type);
-}
-
 function resolveIssuanceAddress(transaction: TokenTransaction): string | undefined {
   for (const key of [
     "source",
@@ -123,7 +113,7 @@ export function buildWalletActivityRows(
   const issuanceRows = issuanceTransactions.map(({ token, transaction }) => ({
     id: `issuance-${transaction.id}`,
     sourceKind: "issuance" as const,
-    operationLabel: resolveIssuanceOperation(transaction),
+    operationLabel: toTitleCase(transaction.type),
     status: transaction.status,
     signature: transaction.signature,
     token: token.symbol || token.name,
@@ -153,8 +143,6 @@ export async function fetchWalletIssuanceActivity(
       page: "1",
       pageSize: String(pageSize),
     });
-    query.append("type", "burn");
-    query.append("type", "force_burn");
 
     const response = await request(`/v1/issuance/transactions?${query.toString()}`);
     if (!response.ok) {
@@ -204,7 +192,7 @@ export async function loadWalletActivity(
       noticeParts.push("Payments activity is unavailable right now.");
     }
     if (!issuanceResult.ok) {
-      noticeParts.push("Issuance burn activity is unavailable right now.");
+      noticeParts.push("Issuance activity is unavailable right now.");
     }
   }
 
