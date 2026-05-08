@@ -53,9 +53,9 @@
     "kora:devnet:test": "pnpm --filter @sdp/api-integration test -- src/tests/kora.test.ts"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.4.11",
-    "turbo": "^2.4.0",
-    "typescript": "^6.0.2"
+    "@biomejs/biome": "^2.4.13",
+    "turbo": "^2.9.7",
+    "typescript": "^6.0.3"
   },
   "overrides": {
     "@solana/rpc-spec": "6.5.0",
