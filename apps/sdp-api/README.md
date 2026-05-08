@@ -1,6 +1,6 @@
 # SDP API
 
-The core Solana Developer Platform API, built with Cloudflare Workers and D1/Hyperdrive database bindings.
+The core Solana Developer Platform API, built with Cloudflare Workers, Postgres/Hyperdrive, and KV bindings.
 
 ## What is SDP API?
 
@@ -44,7 +44,7 @@ The API exposes these public REST endpoints (all require API key or session toke
 - **Node.js 20+**
 - **pnpm 10.15.1+**
 - **Doppler CLI** — Required to run dev and test commands. Install: `brew install dopplerhq/cli/doppler`
-- **Local Postgres 16** (production uses Cloudflare D1/SQLite — no local setup needed)
+- **Local Postgres 16** (deployed environments use managed Postgres via Hyperdrive)
 
 ### Setup
 
@@ -209,7 +209,7 @@ pnpm --filter @sdp/api-integration test
 
 ## Database Migrations
 
-The API uses D1 (Cloudflare's SQLite) in production and Postgres locally.
+The API uses Postgres for local, test, and deployed environments.
 
 ### Local migrations (Postgres)
 
@@ -232,7 +232,7 @@ This creates the test database if it does not exist and applies all pending
 migrations. Re-run it after pulling new migrations or running
 `pnpm db:postgres:reset`. CI runs this automatically before unit tests.
 
-### Production migrations (D1)
+### Deployed migrations (Postgres)
 
 ```bash
 # Dev environment
@@ -280,10 +280,9 @@ See [`docs/ops/release-operations.md`](../../docs/ops/release-operations.md) for
 ## Architecture
 
 - **Cloudflare Workers** — Serverless compute
-- **D1** — SQLite database (production)
 - **Hyperdrive** — PostgreSQL connection pooling
 - **KV** — Key-value store for API keys, rate limits, cache
-- **Postgres 16** — Local development database
+- **Postgres 16** — Application database
 - **Kora** — Local fee-payer service (devnet signing)
 
 ## Contributing
