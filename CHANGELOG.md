@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.19.3](https://github.com/solana-foundation/solana-developer-platform/compare/v0.19.2...v0.19.3) (2026-05-09)
+
+### Bug Fixes
+
+* **kora:** allow sRFC-37 programs ([#277](https://github.com/solana-foundation/solana-developer-platform/pull/277)) ([fd354c4](https://github.com/solana-foundation/solana-developer-platform/commit/fd354c4f4def9c77acbe5e9070a8e2deff50dd48))
+
+### Maintenance
+
+* **deps:** bump fast-uri from 3.1.0 to 3.1.2 ([#285](https://github.com/solana-foundation/solana-developer-platform/pull/285)) ([508d90d](https://github.com/solana-foundation/solana-developer-platform/commit/508d90db850a3ced6b8008cc2de5a1d04872e1b1))
+* **deps:** bundle Dependabot updates ([#282](https://github.com/solana-foundation/solana-developer-platform/pull/282)) ([1e0e6c4](https://github.com/solana-foundation/solana-developer-platform/commit/1e0e6c49a9cae1484ae56a48564130262462c062))
+
 ## [0.19.2](https://github.com/solana-foundation/solana-developer-platform/compare/v0.19.1...v0.19.2) (2026-05-08)
 
 ### Bug Fixes
