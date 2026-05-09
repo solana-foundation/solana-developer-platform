@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.19.4](https://github.com/solana-foundation/solana-developer-platform/compare/v0.19.3...v0.19.4) (2026-05-09)
+
+### Maintenance
+
+* **deps:** bump the minor-patch group across 1 directory with 8 updates ([#286](https://github.com/solana-foundation/solana-developer-platform/pull/286)) ([c2a2c15](https://github.com/solana-foundation/solana-developer-platform/commit/c2a2c15690d2270ea84968bdd94b26422318cd0b))
+
 ## [0.19.3](https://github.com/solana-foundation/solana-developer-platform/compare/v0.19.2...v0.19.3) (2026-05-09)
 
 ### Bug Fixes
