@@ -15,7 +15,7 @@
   },
   "dependencies": {
     "@base-ui/react": "^1.4.1",
-    "@clerk/nextjs": "7.2.8",
+    "@clerk/nextjs": "7.3.0",
     "@sdp/types": "workspace:*",
     "@sentry/nextjs": "^10.51.0",
     "@solana/design-system": "1.0.1",
@@ -33,8 +33,8 @@
     "tailwind-merge": "3.5.0"
   },
   "devDependencies": {
-    "@clerk/backend": "3.4.2",
-    "@clerk/testing": "2.0.22",
+    "@clerk/backend": "3.4.4",
+    "@clerk/testing": "2.0.24",
     "@playwright/test": "1.59.1",
     "@solana-program/system": "catalog:",
     "@solana/kit": "catalog:",
