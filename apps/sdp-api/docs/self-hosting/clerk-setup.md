@@ -137,10 +137,10 @@ In production self-hosted deployments, point Clerk directly at the deployment's 
 
 1. Open the dashboard (`pnpm --filter sdp-web dev`, `http://localhost:3000`).
 2. Sign up via Clerk's hosted UI; create an organization when prompted.
-3. Confirm the webhook landed by querying D1:
+3. Confirm the webhook landed by querying Postgres:
 
    ```bash
-   pnpm --filter @sdp/api wrangler d1 execute sdp_api --command "SELECT id, clerk_organization_id, name, tier FROM organizations;"
+   psql "${DATABASE_URL:-postgresql://sdp:sdp@127.0.0.1:5432/sdp}" -c "SELECT id, clerk_organization_id, name, tier FROM organizations;"
    ```
 
    You should see one row with `clerk_organization_id` matching the org you just created.

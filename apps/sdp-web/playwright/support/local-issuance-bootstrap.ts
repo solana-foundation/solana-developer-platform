@@ -156,6 +156,11 @@ export async function bootstrapLocalIssuanceFixtures({
     provider: "privy",
     walletCount: 2,
     tier,
+    // sRFC-37 deploys (denylist tokens) bypass Kora and have custody pay
+    // directly, so the treasury wallet needs SOL up front. 0.05 SOL covers
+    // multiple deploys + downstream rent with comfortable margin.
+    fundSourceWallet: true,
+    fundSourceAmountSol: 0.05,
   });
   const api = createLocalApiClient(getBootstrapApiBaseUrl(), bearerToken);
 

@@ -1,10 +1,10 @@
 {
   "name": "solana-developer-platform",
-  "version": "0.19.1",
+  "version": "0.19.2",
   "private": true,
   "packageManager": "pnpm@10.15.1",
   "engines": {
-    "node": ">=20.0.0",
+    "node": ">=22.0.0",
     "pnpm": ">=10.0.0"
   },
   "pnpm": {
@@ -12,6 +12,12 @@
       "allowedVersions": {
         "@solana/kit": "^6.5.0"
       }
+    },
+    "overrides": {
+      "@token-acl/abl-sdk": "npm:@solana/token-acl-gate-sdk@0.2.0"
+    },
+    "patchedDependencies": {
+      "@solana/mosaic-sdk@0.1.1": "patches/@solana__mosaic-sdk@0.1.1.patch"
     }
   },
   "scripts": {
@@ -47,9 +53,9 @@
     "kora:devnet:test": "pnpm --filter @sdp/api-integration test -- src/tests/kora.test.ts"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.4.11",
+    "@biomejs/biome": "^2.4.13",
     "turbo": "^2.4.0",
-    "typescript": "^6.0.2"
+    "typescript": "^6.0.3"
   },
   "overrides": {
     "@solana/rpc-spec": "6.5.0",
