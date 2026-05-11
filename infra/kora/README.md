@@ -2,6 +2,8 @@
 
 We use a shared devnet Kora instance on Cloud Run so developers do **not** need a fee‑payer private key locally.
 
+Shared service: `kora-sdp` in the `solana-developer-platform` GCP project.
+
 ## Developer Quick Start
 
 1) Copy the example env file and fill in your keys:
