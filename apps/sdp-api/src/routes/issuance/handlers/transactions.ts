@@ -103,6 +103,9 @@ async function resolveWalletFilter(
   walletId: string
 ): Promise<{ publicKey: string }> {
   const auth = getAuth(c);
+
+  assertApiKeyWalletAccess(auth, walletId, ["tokens:read"]);
+
   const signingService = createSigningService(c.env);
   const wallets = await signingService.getWalletsWithProviders(
     auth.organizationId,
@@ -110,8 +113,6 @@ async function resolveWalletFilter(
     { includeAllProviders: true }
   );
   const wallet = wallets.find((entry) => entry.walletId === walletId);
-
-  assertApiKeyWalletAccess(auth, walletId, ["tokens:read"]);
 
   if (!wallet) {
     throw notFound("Wallet");
