@@ -125,9 +125,9 @@ export function buildWalletActivityRows(
 
   return [...paymentRows, ...issuanceRows]
     .sort((left, right) => {
-      const leftTimestamp = left.createdAt ? new Date(left.createdAt).getTime() : 0;
-      const rightTimestamp = right.createdAt ? new Date(right.createdAt).getTime() : 0;
-      return rightTimestamp - leftTimestamp;
+      const leftTimestamp = Date.parse(left.createdAt ?? "") || 0;
+      const rightTimestamp = Date.parse(right.createdAt ?? "") || 0;
+      return rightTimestamp - leftTimestamp || right.id.localeCompare(left.id);
     })
     .slice(0, limit);
 }
