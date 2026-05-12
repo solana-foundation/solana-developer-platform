@@ -378,7 +378,48 @@ test.describe
       await expect(page.getByTestId("frozen-accounts-summary-card")).toContainText("0 accounts");
     });
 
-    test("11. user can pause and unpause the token from compliance controls", async ({ page }) => {
+    test("11. user sees the token ID row on the detail header and can copy it", async ({
+      page,
+    }) => {
+      await gotoToken(page, fixtures.tokens.open.id);
+
+      const tokenIdRow = page.getByTestId("token-id-row");
+      await expect(tokenIdRow).toBeVisible();
+      await expect(tokenIdRow).toContainText("Token ID:");
+      await expect(tokenIdRow).toContainText(fixtures.tokens.open.id);
+
+      const successCount = await page.getByText("Token ID copied").count();
+      await tokenIdRow.getByRole("button", { name: "Copy token ID" }).click();
+      await waitForToast(page, "Token ID copied", successCount);
+    });
+
+    test("12. user sees a populated tokenId dropdown in the API playground", async ({ page }) => {
+      await page.goto("/dashboard/issuance?tab=playground&endpoint=get-token");
+
+      const tokenIdSelect = page.getByLabel("{tokenId}");
+      await expect(tokenIdSelect).toBeVisible();
+      await expect(tokenIdSelect).toHaveJSProperty("tagName", "SELECT");
+
+      const optionValues = await tokenIdSelect
+        .locator("option")
+        .evaluateAll((options) => options.map((option) => (option as HTMLOptionElement).value));
+      expect(optionValues).toContain(fixtures.tokens.pending.id);
+      expect(optionValues).toContain(fixtures.tokens.allowlisted.id);
+      expect(optionValues).toContain(fixtures.tokens.open.id);
+
+      const seededTokenIds = [
+        fixtures.tokens.pending.id,
+        fixtures.tokens.allowlisted.id,
+        fixtures.tokens.open.id,
+      ];
+      const initialValue = await tokenIdSelect.inputValue();
+      expect(seededTokenIds).toContain(initialValue);
+
+      await tokenIdSelect.selectOption(fixtures.tokens.open.id);
+      await expect(tokenIdSelect).toHaveValue(fixtures.tokens.open.id);
+    });
+
+    test("13. user can pause and unpause the token from compliance controls", async ({ page }) => {
       await gotoToken(page, fixtures.tokens.open.id);
       await openTab(page, "Compliance");
 

@@ -832,15 +832,33 @@ export function ApiPlaygroundShell({
                     {activeEndpoint.pathFields.map((field) => (
                       <div key={field.key} className="space-y-2">
                         <FieldLabel htmlFor={getFieldId(field.key)}>{field.label}</FieldLabel>
-                        <Input
-                          id={getFieldId(field.key)}
-                          value={fieldValues[field.key] ?? ""}
-                          onChange={(event) =>
-                            updateFieldValue(field.key, event.currentTarget.value)
-                          }
-                          placeholder={field.placeholder}
-                          className="h-11 rounded-[var(--sdp-field-radius)] border-border-light bg-white px-4 shadow-none"
-                        />
+                        {field.kind === "select" ? (
+                          <select
+                            id={getFieldId(field.key)}
+                            value={fieldValues[field.key] ?? ""}
+                            onChange={(event) =>
+                              updateFieldValue(field.key, event.currentTarget.value)
+                            }
+                            className="h-11 w-full rounded-[var(--sdp-field-radius)] border border-border-light bg-white px-4 text-sm text-text-extra-high outline-none transition-[box-shadow,border-color] focus:border-border-strong focus:ring-2 focus:ring-border-light"
+                          >
+                            <option value="">{field.placeholder ?? "Select value"}</option>
+                            {(field.options ?? []).map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <Input
+                            id={getFieldId(field.key)}
+                            value={fieldValues[field.key] ?? ""}
+                            onChange={(event) =>
+                              updateFieldValue(field.key, event.currentTarget.value)
+                            }
+                            placeholder={field.placeholder}
+                            className="h-11 rounded-[var(--sdp-field-radius)] border-border-light bg-white px-4 shadow-none"
+                          />
+                        )}
                       </div>
                     ))}
                   </div>

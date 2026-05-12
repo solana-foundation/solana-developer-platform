@@ -674,6 +674,15 @@ export function TokenManagementWorkspace({
     }
   };
 
+  const handleCopyTokenId = async () => {
+    try {
+      await navigator.clipboard.writeText(token.id);
+      toast.success("Token ID copied");
+    } catch {
+      toast.error("Unable to copy");
+    }
+  };
+
   const handleUpdateMetadata = () => {
     const nextName = metadataForm.name.trim();
     if (!nextName) {
@@ -1284,6 +1293,7 @@ export function TokenManagementWorkspace({
   return (
     <div className="space-y-8 pb-8">
       <TokenManagementHeader
+        tokenId={token.id}
         tokenName={token.name}
         tokenSymbol={token.symbol}
         tokenStatus={token.status}
@@ -1296,6 +1306,7 @@ export function TokenManagementWorkspace({
         pauseDisabledReason={pauseDisabledReason}
         canManageTokenAdmin={canManageTokenAdmin}
         onCopyAddress={() => void handleCopy(token.mintAddress)}
+        onCopyTokenId={() => void handleCopyTokenId()}
         onDeploy={() => {
           if (!canDeployToken) {
             return;
