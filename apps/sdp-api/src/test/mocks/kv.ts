@@ -13,7 +13,7 @@ export async function seedCachedApiKey(
   keyHash: string,
   data: CachedApiKey
 ): Promise<void> {
-  await env.SDP_API_KEYS.put(`key:${keyHash}`, JSON.stringify(data), {
+  await env.SDP_API_KEYS!.put(`key:${keyHash}`, JSON.stringify(data), {
     expirationTtl: 3600,
   });
 }
@@ -22,7 +22,7 @@ export async function seedCachedApiKey(
  * Clears all KV data
  */
 export async function clearKVNamespaces(env: Env): Promise<void> {
-  const namespaces = [env.SDP_API_KEYS, env.SDP_RATE_LIMITS, env.SDP_CACHE];
+  const namespaces = [env.SDP_API_KEYS!, env.SDP_RATE_LIMITS!, env.SDP_CACHE!];
 
   for (const ns of namespaces) {
     const list = await ns.list();
@@ -40,7 +40,7 @@ export async function seedRateLimit(env: Env, identifier: string, count: number)
   const windowStart = Math.floor(Date.now() / windowMs) * windowMs;
   const key = `ratelimit:${identifier}:${windowStart}`;
 
-  await env.SDP_RATE_LIMITS.put(key, JSON.stringify({ count, windowStart }), {
+  await env.SDP_RATE_LIMITS!.put(key, JSON.stringify({ count, windowStart }), {
     expirationTtl: 120,
   });
 }

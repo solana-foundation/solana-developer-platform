@@ -245,9 +245,9 @@ export function authMiddleware() {
     const keyHash = await hashString(apiKey, pepper);
 
     // Try KV first, then Postgres
-    let cachedKey = await getFromKV(c.env.SDP_API_KEYS, keyHash);
+    let cachedKey = await getFromKV(c.env.SDP_API_KEYS!, keyHash);
     if (!cachedKey) {
-      cachedKey = await getFromDatabaseAndCache(getDb(c.env), c.env.SDP_API_KEYS, keyHash);
+      cachedKey = await getFromDatabaseAndCache(getDb(c.env), c.env.SDP_API_KEYS!, keyHash);
     }
 
     if (!cachedKey) {

@@ -49,7 +49,7 @@ describe("rpc-relay.service", () => {
   });
 
   beforeEach(async () => {
-    await clearKvNamespace(rpcEnv.SDP_CACHE);
+    await clearKvNamespace(rpcEnv.SDP_CACHE!);
 
     await db
       .prepare(

@@ -33,6 +33,7 @@ crons = ["* * * * *"]
 [vars]
 ENVIRONMENT = "development"
 API_VERSION = "v1"
+SDP_RUNTIME = "cloudflare"
 EMAIL_FROM = "noreply@mail.solana.org"
 SOLANA_NETWORK = "devnet"
 SOLANA_RPC_URL = "https://api.devnet.solana.com"
@@ -73,6 +74,7 @@ id = "your_dev_sessions_kv_id"
 [env.dev.vars]
 ENVIRONMENT = "development"
 API_VERSION = "v1"
+SDP_RUNTIME = "cloudflare"
 EMAIL_FROM = "noreply@mail.solana.org"
 SOLANA_NETWORK = "devnet"
 SOLANA_RPC_URL = "https://api.devnet.solana.com"
@@ -115,6 +117,7 @@ id = "your_production_sessions_kv_id"
 [env.production.vars]
 ENVIRONMENT = "production"
 API_VERSION = "v1"
+SDP_RUNTIME = "cloudflare"
 EMAIL_FROM = "noreply@mail.solana.org"
 SOLANA_NETWORK = "devnet"
 SOLANA_RPC_URL = "https://api.devnet.solana.com"

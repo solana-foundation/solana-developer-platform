@@ -129,7 +129,7 @@ async function isVerifiedClerkJwt(c: Context<{ Bindings: Env }>, token: string):
  */
 export function rateLimitMiddleware() {
   return async (c: Context<{ Bindings: Env }>, next: Next) => {
-    const kv = c.env.SDP_RATE_LIMITS;
+    const kv = c.env.SDP_RATE_LIMITS!;
     const auth = c.get("apiKey");
     const bearerToken = extractBearerToken(c);
 
