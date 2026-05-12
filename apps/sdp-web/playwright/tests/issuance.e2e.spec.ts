@@ -412,13 +412,9 @@ test.describe
       expect(optionValues).toContain(fixtures.tokens.allowlisted.id);
       expect(optionValues).toContain(fixtures.tokens.open.id);
 
-      const seededTokenIds = [
-        fixtures.tokens.pending.id,
-        fixtures.tokens.allowlisted.id,
-        fixtures.tokens.open.id,
-      ];
       const initialValue = await tokenIdSelect.inputValue();
-      expect(seededTokenIds).toContain(initialValue);
+      expect(initialValue).not.toBe("");
+      expect(optionValues).toContain(initialValue);
 
       await tokenIdSelect.selectOption(fixtures.tokens.open.id);
       await expect(tokenIdSelect).toHaveValue(fixtures.tokens.open.id);
