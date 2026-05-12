@@ -134,6 +134,35 @@ export function isSelfHostedDeployment(env: Pick<Env, "SDP_DEPLOYMENT_MODE">): b
   return resolveDeploymentMode(env.SDP_DEPLOYMENT_MODE) === "self_hosted";
 }
 
+export type SdpRuntime = "cloudflare" | "node";
+
+const VALID_RUNTIMES: ReadonlySet<string> = new Set<SdpRuntime>(["cloudflare", "node"]);
+
+const validatedRuntimes = new Map<string, SdpRuntime>();
+
+function resolveRuntime(value: string | undefined): SdpRuntime {
+  if (value === undefined) {
+    return "cloudflare";
+  }
+  const cached = validatedRuntimes.get(value);
+  if (cached !== undefined) {
+    return cached;
+  }
+  if (!VALID_RUNTIMES.has(value)) {
+    throw new Error(`Invalid SDP_RUNTIME: "${value}". Expected "cloudflare" or "node".`);
+  }
+  const resolved = value as SdpRuntime;
+  validatedRuntimes.set(value, resolved);
+  return resolved;
+}
+
+// Single read point for SDP_RUNTIME. Direct access to env.SDP_RUNTIME elsewhere
+// risks a silent fallthrough when the value is undefined or misspelled — route
+// every runtime branch through this helper.
+export function getRuntime(env: Pick<Env, "SDP_RUNTIME">): SdpRuntime {
+  return resolveRuntime(env.SDP_RUNTIME);
+}
+
 export function withProcessEnvFallback(bindings: Env): Env {
   if (typeof process === "undefined" || !process.env) {
     return bindings;
