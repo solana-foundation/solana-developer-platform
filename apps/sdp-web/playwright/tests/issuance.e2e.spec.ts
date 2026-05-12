@@ -381,6 +381,7 @@ test.describe
     test("11. user sees the token ID row on the detail header and can copy it", async ({
       page,
     }) => {
+      await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
       await gotoToken(page, fixtures.tokens.open.id);
 
       const tokenIdRow = page.getByTestId("token-id-row");
@@ -391,9 +392,13 @@ test.describe
       const successCount = await page.getByText("Token ID copied").count();
       await tokenIdRow.getByRole("button", { name: "Copy token ID" }).click();
       await waitForToast(page, "Token ID copied", successCount);
+
+      const clipboardValue = await page.evaluate(() => navigator.clipboard.readText());
+      expect(clipboardValue).toBe(fixtures.tokens.open.id);
     });
 
     test("12. user sees a populated tokenId dropdown in the API playground", async ({ page }) => {
+      // biome-ignore lint/security/noSecrets: dashboard URL with playground query params, not a secret
       await page.goto("/dashboard/issuance?tab=playground&endpoint=get-token");
 
       const tokenIdSelect = page.getByLabel("{tokenId}");
