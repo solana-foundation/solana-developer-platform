@@ -2,10 +2,10 @@
   "name": "solana-developer-platform",
   "version": "0.19.4",
   "private": true,
-  "packageManager": "pnpm@10.15.1",
+  "packageManager": "pnpm@10.16.0",
   "engines": {
     "node": ">=22.0.0",
-    "pnpm": ">=10.0.0"
+    "pnpm": ">=10.16.0"
   },
   "pnpm": {
     "peerDependencyRules": {
