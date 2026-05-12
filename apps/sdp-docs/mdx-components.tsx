@@ -1,6 +1,7 @@
 import { Tab, Tabs } from "fumadocs-ui/components/tabs";
 import defaultMdxComponents from "fumadocs-ui/mdx";
 import type React from "react";
+import { DocsHome } from "@/components/docs-shell/home";
 import { cn } from "@/lib/utils";
 
 type MDXComponents = Record<string, unknown>;
@@ -90,6 +91,7 @@ function createMDXComponents(components?: MDXComponents): MDXComponents {
     strong: MDXStrong,
     Tabs,
     Tab,
+    DocsHome,
     ...components,
   };
 }

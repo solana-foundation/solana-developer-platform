@@ -10,6 +10,7 @@
 - AI guide: https://platform.solana.com/docs/reference/ai-consumption
 
 ## Docs
+- [Home](https://platform.solana.com/docs/home): Explore guides, references, and examples for the Solana Developer Platform.
 - [What is Solana Developer Platform?](https://platform.solana.com/docs/what-is-solana-developer-platform): A dashboard and API for issuing, transferring, and managing Solana tokens with built-in compliance controls.
 - [Getting Started](https://platform.solana.com/docs/getting-started): Get up and running with SDP through the dashboard.
 

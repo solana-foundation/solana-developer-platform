@@ -701,6 +701,198 @@ body {
   font-size: 0.875em;
 }
 
+/* ── Docs Home page ── */
+
+.launch-home-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 48px;
+}
+
+.launch-home-cta-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 42px;
+  padding: 0 20px;
+  border-radius: 10px;
+  background: var(--launch-ink);
+  color: var(--launch-cream);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: opacity 160ms ease;
+}
+
+.launch-home-cta-primary:hover {
+  opacity: 0.8;
+}
+
+.launch-home-cta-primary svg {
+  width: 15px;
+  height: 15px;
+}
+
+.launch-home-cta-secondary {
+  display: inline-flex;
+  align-items: center;
+  height: 42px;
+  padding: 0 20px;
+  border: 1px solid var(--launch-border-strong);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--launch-text);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  font-weight: 550;
+  text-decoration: none;
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    color 160ms ease;
+}
+
+.launch-home-cta-secondary:hover {
+  background: var(--launch-hover-bg);
+  border-color: var(--launch-border-strong);
+  color: var(--launch-ink);
+}
+
+.launch-home-quicklinks {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  padding: 36px 0;
+  border-top: 1px solid var(--launch-border);
+  border-bottom: 1px solid var(--launch-border);
+  margin-bottom: 56px;
+}
+
+.launch-home-ql-section {
+  padding-right: 36px;
+}
+
+.launch-home-ql-section:not(:first-child) {
+  padding-left: 36px;
+  padding-right: 0;
+  border-left: 1px solid var(--launch-border);
+}
+
+.launch-home-ql-heading {
+  margin: 0 0 14px;
+  color: var(--launch-ink);
+  font-family: var(--font-abc-diatype);
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+.launch-home-ql-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.launch-home-ql-link {
+  color: var(--launch-text);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  text-decoration: none;
+  transition: color 140ms ease;
+}
+
+.launch-home-ql-link:hover {
+  color: var(--launch-ink);
+  text-decoration: underline;
+  text-decoration-color: var(--launch-icon-muted);
+  text-underline-offset: 3px;
+}
+
+.launch-home-browse-heading {
+  margin: 0 0 28px;
+  color: var(--launch-ink);
+  font-family: var(--font-abc-diatype);
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+.launch-home-browse-group {
+  margin-bottom: 36px;
+}
+
+.launch-home-browse-category {
+  margin-bottom: 0;
+  padding-bottom: 10px;
+  color: var(--launch-muted);
+  font-family: var(--font-berkeley-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--launch-border);
+}
+
+.launch-home-browse-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.launch-home-browse-item {
+  padding: 16px 20px 16px 0;
+  border-bottom: 1px solid var(--launch-border);
+}
+
+.launch-home-browse-link {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--launch-ink);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: opacity 140ms ease;
+}
+
+.launch-home-browse-link:hover {
+  opacity: 0.65;
+}
+
+.launch-home-browse-desc {
+  margin: 0;
+  color: var(--launch-muted);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+@media (max-width: 767px) {
+  .launch-home-quicklinks {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+
+  .launch-home-ql-section {
+    padding-right: 0;
+    padding-bottom: 28px;
+  }
+
+  .launch-home-ql-section:not(:first-child) {
+    padding-left: 0;
+    border-left: 0;
+    border-top: 1px solid var(--launch-border);
+    padding-top: 28px;
+  }
+
+  .launch-home-browse-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* ── Hide descriptions on next/prev footer nav buttons ── */
 a.rounded-lg.border.p-4 > p.truncate {
   display: none;

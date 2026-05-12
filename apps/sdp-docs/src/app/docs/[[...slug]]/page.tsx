@@ -53,7 +53,7 @@ export default async function Page({ params }: DocsPageProps) {
   const { slug } = await params;
 
   if (!slug || slug.length === 0) {
-    redirect("/docs/what-is-solana-developer-platform");
+    redirect("/docs/home");
   }
 
   const resolvedPage = resolvePage(slug);

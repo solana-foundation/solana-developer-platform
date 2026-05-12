@@ -1,6 +1,7 @@
 {
   "title": "Solana Developer Platform Docs",
   "pages": [
+    "home",
     "what-is-solana-developer-platform",
     "getting-started",
     "---Platform Setup---",
