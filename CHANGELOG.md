@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.19.5](https://github.com/solana-foundation/solana-developer-platform/compare/v0.19.4...v0.19.5) (2026-05-12)
+
+### Maintenance
+
+* initial open source snapshot ([ec00280](https://github.com/solana-foundation/solana-developer-platform/commit/ec00280bdbec28f2947dcebf771dd44f4afdb559))
+
 ## [0.19.4](https://github.com/solana-foundation/solana-developer-platform/compare/v0.19.3...v0.19.4) (2026-05-09)
 
 ### Maintenance
