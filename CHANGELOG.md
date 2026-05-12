@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.19.5](https://github.com/solana-foundation/solana-developer-platform/releases/tag/v0.19.5) (2026-05-12)
+
+### Documentation
+
+* add concise oss onboarding ([1070078](https://github.com/solana-foundation/solana-developer-platform/commit/107007870f93c05d0e34c224b97adf338abe73e9))
+* simplify public readme ([3a65cfc](https://github.com/solana-foundation/solana-developer-platform/commit/3a65cfc0271287200107e9ae8c7a7a69d9148a1e))
+
+### Maintenance
+
+* initial open source snapshot ([ec00280](https://github.com/solana-foundation/solana-developer-platform/commit/ec00280bdbec28f2947dcebf771dd44f4afdb559))
+
 ## [0.19.4](https://github.com/solana-foundation/solana-developer-platform/compare/v0.19.3...v0.19.4) (2026-05-09)
 
 ### Maintenance
