@@ -35,6 +35,7 @@ import payments from "@/routes/payments";
 import projects from "@/routes/projects";
 import rpc from "@/routes/rpc";
 import webhooks from "@/routes/webhooks";
+import { WorkersBackgroundRunner } from "@/runtime/background-cf";
 import { getSentryOptions, isSentryEnabled } from "@/runtime/observability";
 import { cloudflareObservability, withSentry } from "@/runtime/observability-cf";
 import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
@@ -329,13 +330,14 @@ const worker = {
     ctx: ExecutionContext
   ): Promise<void> {
     const runtimeEnv = withProcessEnvFallback(env);
+    const bg = new WorkersBackgroundRunner(ctx);
     const runPendingTransferTracking = () => trackPendingTransfers(runtimeEnv);
     if (!isSentryEnabled(runtimeEnv)) {
-      ctx.waitUntil(runPendingTransferTracking());
+      bg.run(runPendingTransferTracking());
       return;
     }
 
-    ctx.waitUntil(
+    bg.run(
       cloudflareObservability.withMonitor(
         SENTRY_PENDING_TRANSFERS_MONITOR,
         runPendingTransferTracking,
