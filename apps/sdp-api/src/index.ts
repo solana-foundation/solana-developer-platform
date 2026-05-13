@@ -197,8 +197,22 @@ app.use("*", async (c, next) => {
 });
 
 // KV store — populates c.var.kv. Must precede rate-limit / auth / session
-// middleware (all of which read from c.var.kv).
-app.use("*", kvStoreMiddleware());
+// middleware (all of which read from c.var.kv). KV-free routes (health
+// probes, openapi spec, static docs, root redirect, webhooks) are skipped
+// so partial KV configs don't 500-cascade health probes or webhook
+// pre-validation.
+app.use(
+  "*",
+  kvStoreMiddleware(
+    "/",
+    "/health",
+    "/health/ready",
+    "/openapi.json",
+    "/docs",
+    "/llms.txt",
+    "/webhooks"
+  )
+);
 
 // Rate limiting (skip health check paths)
 app.use(
