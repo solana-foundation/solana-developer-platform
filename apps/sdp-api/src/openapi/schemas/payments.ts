@@ -1,4 +1,18 @@
 import {
+  createTransferSchema as createTransferSchemaBase,
+  executeOfframpSchema as executeOfframpSchemaBase,
+  executeOnrampSchema as executeOnrampSchemaBase,
+  listTransfersQuerySchema as listTransfersQuerySchemaBase,
+  prepareTransferOptionsSchema as prepareTransferOptionsSchemaBase,
+  prepareTransferSchema as prepareTransferSchemaBase,
+  priorityFeeSchema as priorityFeeSchemaBase,
+  transferDirectionSchema as transferDirectionSchemaBase,
+  transferIdParamsSchema as transferIdParamsSchemaBase,
+  transferStatusSchema as transferStatusSchemaBase,
+  updateWalletPolicySchema as updateWalletPolicySchemaBase,
+  walletIdParamsSchema as walletIdParamsSchemaBase,
+} from "../../routes/payments/schemas";
+import {
   base64Schema,
   isoDateTimeSchema,
   orgIdParamSchema,
@@ -6,6 +20,7 @@ import {
   solanaAddressSchema,
   transferIdParamSchema,
   walletIdParamSchema,
+  withOpenApi,
   z,
 } from "./base";
 import { preparedTransactionSchema, simulationResultSchema } from "./issuance";
@@ -14,53 +29,6 @@ export const tokenAmountSchema = z.string().openapi({
   description: "Token amount in UI units (decimal string).",
   example: "100.00",
 });
-
-export const walletTypeSchema = z
-  .enum(["treasury", "operations", "user"])
-  .openapi({ description: "Wallet type.", example: "treasury" });
-
-export const custodyProviderSchema = z
-  .enum(["turnkey", "privy", "aws-kms", "fireblocks", "vault"])
-  .openapi({ description: "Custody provider.", example: "fireblocks" });
-
-export const custodyConfigSchema = z
-  .object({
-    provider: custodyProviderSchema,
-    config: z
-      .record(z.string(), z.unknown())
-      .optional()
-      .openapi({ description: "Provider-specific configuration payload." }),
-  })
-  .openapi({ description: "Custody configuration." });
-
-export const createWalletRequestSchema = z
-  .object({
-    name: z.string().max(64).openapi({ description: "Wallet name.", example: "Ops Wallet" }),
-    type: walletTypeSchema,
-    custody: custodyConfigSchema,
-  })
-  .openapi({ description: "Create wallet request payload." });
-
-export const walletSchema = z
-  .object({
-    id: walletIdParamSchema,
-    address: solanaAddressSchema.openapi({
-      description: "Wallet address.",
-      example: "So11111111111111111111111111111111111111112",
-    }),
-    name: z.string().openapi({ description: "Wallet name.", example: "Treasury Wallet" }),
-    type: walletTypeSchema,
-    custody: z
-      .object({
-        provider: custodyProviderSchema,
-      })
-      .openapi({ description: "Custody provider metadata." }),
-    createdAt: isoDateTimeSchema.openapi({
-      description: "Timestamp when the wallet was created.",
-      example: "2025-01-01T00:00:00.000Z",
-    }),
-  })
-  .openapi({ description: "Managed wallet." });
 
 export const walletPolicySchema = z
   .object({
@@ -92,18 +60,38 @@ export const walletPolicySchema = z
       "Payment policy configuration for a custody-managed wallet. Wallet lifecycle belongs to /v1/wallets, while payment controls are internally stored as typed policy records.",
   });
 
-export const updateWalletPolicyRequestSchema = z
-  .object({
-    destinationAllowlist: z.array(solanaAddressSchema).openapi({
+export const paymentWalletIdParamsSchema = walletIdParamsSchemaBase
+  .extend({
+    walletId: withOpenApi(walletIdParamsSchemaBase.shape.walletId, {
+      description: "Custody wallet ID from /v1/wallets.",
+      example: "wal_example",
+    }),
+  })
+  .openapi({ description: "Payment wallet path parameters." });
+
+export const paymentTransferIdParamsSchema = transferIdParamsSchemaBase
+  .extend({
+    transferId: withOpenApi(transferIdParamsSchemaBase.shape.transferId, {
+      description: "Transfer identifier (SDP record ID, not the on-chain signature).",
+      example: "xfr_example",
+    }),
+  })
+  .openapi({ description: "Payment transfer path parameters." });
+
+export const updateWalletPolicyRequestSchema = updateWalletPolicySchemaBase
+  .extend({
+    destinationAllowlist: withOpenApi(updateWalletPolicySchemaBase.shape.destinationAllowlist, {
       description:
         "Allowed destination addresses. An empty array means no destination restrictions.",
     }),
-    maxTransferAmount: tokenAmountSchema
-      .optional()
-      .openapi({ description: "Maximum amount allowed per transfer." }),
-    maxDailyAmount: tokenAmountSchema
-      .optional()
-      .openapi({ description: "Maximum total amount allowed per day." }),
+    maxTransferAmount: withOpenApi(updateWalletPolicySchemaBase.shape.maxTransferAmount, {
+      description: "Maximum amount allowed per transfer.",
+      example: "100.00",
+    }),
+    maxDailyAmount: withOpenApi(updateWalletPolicySchemaBase.shape.maxDailyAmount, {
+      description: "Maximum total amount allowed per day.",
+      example: "1000.00",
+    }),
   })
   .openapi({
     description:
@@ -152,65 +140,88 @@ export const walletBalancesSchema = z
       "Balance payload for a custody-managed wallet. Use /v1/wallets for wallet provisioning and listing.",
   });
 
-export const createTransferRequestSchema = z
-  .object({
-    projectId: projectIdParamSchema
-      .optional()
-      .openapi({ description: "Project identifier for the transfer context." }),
-    source: z.string().openapi({
+export const createTransferRequestSchema = createTransferSchemaBase
+  .extend({
+    projectId: withOpenApi(createTransferSchemaBase.shape.projectId, {
+      description: "Project identifier for the transfer context.",
+      example: "prj_example",
+    }),
+    source: withOpenApi(createTransferSchemaBase.shape.source, {
       description: "Source custody wallet ID from /v1/wallets.",
       example: "wal_example",
     }),
-    destination: solanaAddressSchema.openapi({ description: "Destination wallet address." }),
-    token: z.string().openapi({ description: "Token symbol or mint address." }),
-    amount: tokenAmountSchema,
-    memo: z
-      .string()
-      .max(256)
-      .optional()
-      .openapi({ description: "Optional memo for the transfer." }),
+    destination: withOpenApi(createTransferSchemaBase.shape.destination, {
+      description: "Destination wallet address.",
+      example: "So11111111111111111111111111111111111111112",
+    }),
+    token: withOpenApi(createTransferSchemaBase.shape.token, {
+      description: "Token symbol or mint address.",
+      example: "USDC",
+    }),
+    amount: withOpenApi(createTransferSchemaBase.shape.amount, {
+      description: "Token amount in UI units (decimal string).",
+      example: "100.00",
+    }),
+    memo: withOpenApi(createTransferSchemaBase.shape.memo, {
+      description: "Optional memo for the transfer.",
+    }),
   })
   .openapi({
     description:
       "Create transfer request payload for a custody-managed source wallet. This endpoint does not provision wallets.",
   });
 
-export const priorityFeeSchema = z
-  .enum(["none", "low", "medium", "high", "auto"])
-  .openapi({ description: "Priority fee level.", example: "auto" });
+export const priorityFeeSchema = withOpenApi(priorityFeeSchemaBase, {
+  description: "Priority fee level.",
+  example: "auto",
+});
 
-export const prepareTransferRequestSchema = z
-  .object({
-    projectId: projectIdParamSchema
-      .optional()
-      .openapi({ description: "Project identifier for the transfer context." }),
-    source: z.string().openapi({
+export const prepareTransferOptionsSchema = prepareTransferOptionsSchemaBase
+  .extend({
+    priorityFee: withOpenApi(priorityFeeSchemaBase.optional(), {
+      description: "Priority fee level (default: auto).",
+      example: "auto",
+    }),
+    simulate: withOpenApi(prepareTransferOptionsSchemaBase.shape.simulate, {
+      description: "Include simulation results in the response.",
+      example: true,
+    }),
+  })
+  .openapi({ description: "Transaction preparation options." });
+
+export const prepareTransferRequestSchema = prepareTransferSchemaBase
+  .extend({
+    projectId: withOpenApi(prepareTransferSchemaBase.shape.projectId, {
+      description: "Project identifier for the transfer context.",
+      example: "prj_example",
+    }),
+    source: withOpenApi(prepareTransferSchemaBase.shape.source, {
       description: "Source custody wallet ID from /v1/wallets.",
       example: "wal_example",
     }),
-    destination: solanaAddressSchema.openapi({ description: "Destination wallet address." }),
-    token: z.string().openapi({ description: "Token symbol or mint address." }),
-    amount: tokenAmountSchema,
-    memo: z
-      .string()
-      .max(256)
-      .optional()
-      .openapi({ description: "Optional memo for the transfer." }),
-    referenceAddress: solanaAddressSchema.optional().openapi({
-      description: "Optional reference address for tracking (Solana Pay reference account).",
+    destination: withOpenApi(prepareTransferSchemaBase.shape.destination, {
+      description: "Destination wallet address.",
+      example: "So11111111111111111111111111111111111111112",
     }),
-    options: z
-      .object({
-        priorityFee: priorityFeeSchema
-          .optional()
-          .openapi({ description: "Priority fee level (default: auto)." }),
-        simulate: z.boolean().optional().openapi({
-          description: "Include simulation results in the response.",
-          example: true,
-        }),
-      })
-      .optional()
-      .openapi({ description: "Transaction preparation options." }),
+    token: withOpenApi(prepareTransferSchemaBase.shape.token, {
+      description: "Token symbol or mint address.",
+      example: "USDC",
+    }),
+    amount: withOpenApi(prepareTransferSchemaBase.shape.amount, {
+      description: "Token amount in UI units (decimal string).",
+      example: "100.00",
+    }),
+    memo: withOpenApi(prepareTransferSchemaBase.shape.memo, {
+      description: "Optional memo for the transfer.",
+    }),
+    referenceAddress: withOpenApi(prepareTransferSchemaBase.shape.referenceAddress, {
+      description: "Optional reference address for tracking (Solana Pay reference account).",
+      example: "So11111111111111111111111111111111111111112",
+    }),
+    options: prepareTransferOptionsSchema.optional().openapi({
+      description: "Transaction preparation options.",
+      example: { priorityFee: "auto", simulate: true },
+    }),
   })
   .openapi({
     description:
@@ -221,13 +232,15 @@ export const transferTypeSchema = z
   .enum(["transfer", "transfer_confidential"])
   .openapi({ description: "Transfer type.", example: "transfer" });
 
-export const transferDirectionSchema = z
-  .enum(["inbound", "outbound"])
-  .openapi({ description: "Transfer direction.", example: "outbound" });
+export const transferDirectionSchema = withOpenApi(transferDirectionSchemaBase, {
+  description: "Transfer direction.",
+  example: "outbound",
+});
 
-export const transferStatusSchema = z
-  .enum(["pending", "processing", "confirmed", "finalized", "failed"])
-  .openapi({ description: "Transfer status.", example: "confirmed" });
+export const transferStatusSchema = withOpenApi(transferStatusSchemaBase, {
+  description: "Transfer status.",
+  example: "confirmed",
+});
 
 export const transferRiskLevelSchema = z
   .enum(["low", "medium", "high", "unknown"])
@@ -333,105 +346,124 @@ export const prepareTransferResponseSchema = z
   })
   .openapi({ description: "Prepare transfer response payload." });
 
-export const createConfidentialTransferRequestSchema = z
-  .object({
-    source: z.string().openapi({ description: "Source wallet ID." }),
-    destination: z.string().openapi({ description: "Destination wallet ID." }),
-    token: z.string().openapi({ description: "Token symbol or mint address." }),
-    amount: tokenAmountSchema,
-  })
-  .openapi({ description: "Create confidential transfer request payload." });
-
-export const feeQuoteSchema = z
-  .object({
-    feeToken: z.string().openapi({ description: "Fee token symbol.", example: "USDC" }),
-    feeAmount: tokenAmountSchema,
-  })
-  .openapi({ description: "Fee quote details." });
-
-const moonpayCurrencyCodeSchema = z
-  .string()
-  .regex(/^[a-zA-Z0-9_]+$/)
-  .openapi({
-    description:
-      "Crypto token symbol or provider currency code. Simple symbols like `USDC` and `SOL` are normalized server-side for supported providers.",
-    example: "USDC",
-  });
-
-const rampProviderSchema = z.enum(["moonpay", "lightspark", "bvnk"]).openapi({
-  description:
-    "Ramp provider identifier. Explicit provider selection is required because each provider has different flow requirements.",
-  example: "moonpay",
-});
-
-const bvnkComplianceSchema = z
-  .object({
-    partyDetails: z
-      .array(z.record(z.string(), z.unknown()))
-      .min(1)
-      .openapi({ description: "BVNK party details payload. Required for BVNK off-ramp flows." }),
-  })
-  .openapi({ description: "Optional BVNK compliance details." });
-
-export const executeOnrampRequestSchema = z
-  .object({
-    provider: rampProviderSchema,
-    destinationWallet: z.string().openapi({
-      description: "Destination wallet ID or Solana address for purchased crypto.",
+export const executeOnrampRequestSchema = executeOnrampSchemaBase
+  .extend({
+    provider: withOpenApi(executeOnrampSchemaBase.shape.provider, {
+      description:
+        "Ramp provider identifier. Explicit provider selection is required because each provider has different flow requirements.",
+      example: "moonpay",
     }),
-    cryptoToken: moonpayCurrencyCodeSchema,
-    fiatCurrency: z.literal("USD").optional().openapi({
+    destinationWallet: withOpenApi(executeOnrampSchemaBase.shape.destinationWallet, {
+      description: "Destination wallet ID or Solana address for purchased crypto.",
+      example: "wal_example",
+    }),
+    cryptoToken: withOpenApi(executeOnrampSchemaBase.shape.cryptoToken, {
+      description:
+        "Crypto token symbol or provider currency code. Simple symbols like `USDC` and `SOL` are normalized server-side for supported providers.",
+      example: "USDC",
+    }),
+    fiatCurrency: withOpenApi(executeOnrampSchemaBase.shape.fiatCurrency, {
       description: "Fiat currency for on-ramp. USD only.",
       example: "USD",
     }),
-    fiatAmount: tokenAmountSchema.openapi({
+    fiatAmount: withOpenApi(executeOnrampSchemaBase.shape.fiatAmount, {
       description:
         "Fiat amount in USD to purchase crypto with. MoonPay on-ramp requires at least 20 USD.",
       example: "100.00",
     }),
-    kycReference: z
-      .string()
-      .optional()
-      .openapi({ description: "Optional KYC reference identifier." }),
-    redirectUrl: z
-      .string()
-      .url()
-      .optional()
-      .openapi({ description: "Optional redirect URL after provider flow completes." }),
-    bvnkCompliance: bvnkComplianceSchema.optional(),
+    kycReference: withOpenApi(executeOnrampSchemaBase.shape.kycReference, {
+      description: "Optional KYC reference identifier.",
+    }),
+    redirectUrl: withOpenApi(executeOnrampSchemaBase.shape.redirectUrl, {
+      description: "Optional redirect URL after provider flow completes.",
+    }),
+    bvnkCompliance: withOpenApi(executeOnrampSchemaBase.shape.bvnkCompliance, {
+      description: "Optional BVNK compliance details.",
+      example: { partyDetails: [{ type: "individual" }] },
+    }),
   })
   .openapi({
     description:
       "Execute on-ramp request payload. Note: BVNK on-ramp requires additional provider-side account enablement and compliance setup beyond API credentials.",
   });
 
-export const executeOfframpRequestSchema = z
-  .object({
-    provider: rampProviderSchema,
-    sourceWallet: z.string().openapi({
-      description: "Source wallet ID or Solana address for crypto-to-fiat off-ramp.",
+export const executeOfframpRequestSchema = executeOfframpSchemaBase
+  .extend({
+    provider: withOpenApi(executeOfframpSchemaBase.shape.provider, {
+      description:
+        "Ramp provider identifier. Explicit provider selection is required because each provider has different flow requirements.",
+      example: "moonpay",
     }),
-    cryptoToken: moonpayCurrencyCodeSchema,
-    fiatCurrency: z.literal("USD").optional().openapi({
+    sourceWallet: withOpenApi(executeOfframpSchemaBase.shape.sourceWallet, {
+      description: "Source wallet ID or Solana address for crypto-to-fiat off-ramp.",
+      example: "wal_example",
+    }),
+    cryptoToken: withOpenApi(executeOfframpSchemaBase.shape.cryptoToken, {
+      description:
+        "Crypto token symbol or provider currency code. Simple symbols like `USDC` and `SOL` are normalized server-side for supported providers.",
+      example: "USDC",
+    }),
+    fiatCurrency: withOpenApi(executeOfframpSchemaBase.shape.fiatCurrency, {
       description: "Fiat payout currency. USD only.",
       example: "USD",
     }),
-    cryptoAmount: tokenAmountSchema.openapi({
+    cryptoAmount: withOpenApi(executeOfframpSchemaBase.shape.cryptoAmount, {
       description: "Crypto amount to sell for fiat.",
       example: "50.00",
     }),
-    kycReference: z
-      .string()
-      .optional()
-      .openapi({ description: "Optional KYC reference identifier." }),
-    redirectUrl: z
-      .string()
-      .url()
-      .optional()
-      .openapi({ description: "Optional redirect URL after provider flow completes." }),
-    bvnkCompliance: bvnkComplianceSchema.optional(),
+    kycReference: withOpenApi(executeOfframpSchemaBase.shape.kycReference, {
+      description: "Optional KYC reference identifier.",
+    }),
+    redirectUrl: withOpenApi(executeOfframpSchemaBase.shape.redirectUrl, {
+      description: "Optional redirect URL after provider flow completes.",
+    }),
+    bvnkCompliance: withOpenApi(executeOfframpSchemaBase.shape.bvnkCompliance, {
+      description: "Optional BVNK compliance details.",
+      example: { partyDetails: [{ type: "individual" }] },
+    }),
   })
   .openapi({ description: "Execute off-ramp request payload." });
+
+export const paymentListTransfersQuerySchema = listTransfersQuerySchemaBase
+  .extend({
+    wallet: withOpenApi(listTransfersQuerySchemaBase.shape.wallet, {
+      description: "Filter by wallet ID.",
+      example: "wal_example",
+    }),
+    walletAddress: withOpenApi(listTransfersQuerySchemaBase.shape.walletAddress, {
+      description: "Filter by wallet address.",
+      example: "So11111111111111111111111111111111111111112",
+    }),
+    token: withOpenApi(listTransfersQuerySchemaBase.shape.token, {
+      description: "Filter by token symbol or mint.",
+      example: "USDC",
+    }),
+    direction: withOpenApi(listTransfersQuerySchemaBase.shape.direction, {
+      description: "Filter by transfer direction.",
+      example: "outbound",
+    }),
+    status: withOpenApi(listTransfersQuerySchemaBase.shape.status, {
+      description: "Filter by transfer status.",
+      example: "confirmed",
+    }),
+    from: withOpenApi(listTransfersQuerySchemaBase.shape.from, {
+      description: "Filter from timestamp.",
+      example: "2025-01-01T00:00:00.000Z",
+    }),
+    to: withOpenApi(listTransfersQuerySchemaBase.shape.to, {
+      description: "Filter to timestamp.",
+      example: "2025-01-02T00:00:00.000Z",
+    }),
+    page: withOpenApi(listTransfersQuerySchemaBase.shape.page, {
+      description: "Page number (1-based).",
+      example: 1,
+    }),
+    pageSize: withOpenApi(listTransfersQuerySchemaBase.shape.pageSize, {
+      description: "Items per page.",
+      example: 20,
+    }),
+  })
+  .openapi({ description: "List transfers query parameters." });
 
 export const onrampExecutionSchema = z
   .object({
@@ -472,12 +504,6 @@ export const offrampExecutionSchema = z
   })
   .openapi({ description: "Off-ramp execution status." });
 
-export const walletResponseSchema = z
-  .object({
-    wallet: walletSchema.openapi({ description: "Wallet details." }),
-  })
-  .openapi({ description: "Wallet response payload." });
-
 export const walletPolicyResponseSchema = z
   .object({
     policy: walletPolicySchema.openapi({ description: "Wallet policy configuration." }),
@@ -495,12 +521,6 @@ export const transferResponseSchema = z
     transfer: transferSchema.openapi({ description: "Transfer details." }),
   })
   .openapi({ description: "Transfer response payload." });
-
-export const feeQuoteResponseSchema = z
-  .object({
-    feeQuote: feeQuoteSchema.openapi({ description: "Fee quote details." }),
-  })
-  .openapi({ description: "Fee quote response payload." });
 
 export const onrampExecutionResponseSchema = z
   .object({
