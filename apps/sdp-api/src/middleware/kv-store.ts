@@ -8,11 +8,13 @@
  * Accepts skip paths so KV-free routes (health probes, openapi spec, static
  * docs, webhooks) don't trip the missing-binding throw in createKVStoreSet
  * when a runtime is partially configured. Matching is exact OR segment-prefix
- * (`p` matches `p` and `p/...` but NOT `p<anything-else>`). Segment-prefix
- * is intentionally stricter than skipRateLimitPaths' bare `startsWith`: a
- * loose match here would leave `c.var.kv` undefined on look-alike routes
- * (e.g. `/healthz`) and the failure would surface as a deep handler NPE
- * instead of a clean middleware throw.
+ * (`p` matches `p` and `p/...` but NOT `p<anything-else>`).
+ *
+ * Every path skipped here MUST also be skipped by skipRateLimitPaths in the
+ * same wiring — rateLimitMiddleware dereferences c.var.kv without a guard,
+ * so a kv-skipped path that reaches rate-limit blows up as a TypeError. The
+ * call site in index.ts shares a single KV_FREE_PATHS constant for both
+ * middlewares to enforce this by construction.
  */
 
 import type { Context, Next } from "hono";

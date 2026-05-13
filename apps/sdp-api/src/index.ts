@@ -196,29 +196,27 @@ app.use("*", async (c, next) => {
   return next();
 });
 
-// KV store — populates c.var.kv. Must precede rate-limit / auth / session
-// middleware (all of which read from c.var.kv). KV-free routes (health
-// probes, openapi spec, static docs, root redirect, webhooks) are skipped
-// so partial KV configs don't 500-cascade health probes or webhook
-// pre-validation.
-app.use(
-  "*",
-  kvStoreMiddleware(
-    "/",
-    "/health",
-    "/health/ready",
-    "/openapi.json",
-    "/docs",
-    "/llms.txt",
-    "/webhooks"
-  )
-);
+// Routes that need no KV bindings. Shared by kvStoreMiddleware (skip the
+// throw-on-missing-binding) and skipRateLimitPaths (skip rate-limit's
+// c.var.kv deref). Both middlewares use exact-or-segment-prefix matching,
+// so listing `/` here only skips the root redirect, not the whole API.
+const KV_FREE_PATHS = [
+  "/",
+  "/health",
+  "/health/ready",
+  "/openapi.json",
+  "/docs",
+  "/llms.txt",
+  "/webhooks",
+];
 
-// Rate limiting (skip health check paths)
-app.use(
-  "*",
-  skipRateLimitPaths("/health", "/health/ready", "/openapi.json", "/docs", "/llms.txt", "/webhooks")
-);
+// KV store — populates c.var.kv. Must precede rate-limit / auth / session
+// middleware (all of which read from c.var.kv).
+app.use("*", kvStoreMiddleware(...KV_FREE_PATHS));
+
+// Rate limiting (skip everything kvStoreMiddleware skipped, since rate-limit
+// dereferences c.var.kv without a guard).
+app.use("*", skipRateLimitPaths(...KV_FREE_PATHS));
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Routes

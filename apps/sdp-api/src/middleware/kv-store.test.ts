@@ -4,6 +4,7 @@ import type { KVStoreSet } from "@/runtime/kv";
 import { env } from "@/test/helpers/env";
 import type { Env } from "@/types/env";
 import { kvStoreMiddleware } from "./kv-store";
+import { skipRateLimitPaths } from "./rate-limit";
 
 type Vars = { kv?: KVStoreSet };
 
@@ -57,9 +58,8 @@ describe("kvStoreMiddleware", () => {
   });
 
   it("does NOT skip look-alike paths that share a name prefix without a / boundary", async () => {
-    // Stricter than skipRateLimitPaths on purpose: /healthz must not match /health.
-    // Leaving c.var.kv undefined on a real route would surface as a deep NPE in a
-    // handler, which is worse than the regression this skip list was added to fix.
+    // Segment-prefix matching: `/healthz` must not match `/health`. Leaving
+    // c.var.kv undefined on a real route would surface as a deep handler NPE.
     const app = buildApp("/health", "/docs", "/llms.txt");
     for (const path of ["/healthz", "/docsy", "/llms.txt.backup"]) {
       const res = await app.request(path, {}, env);
@@ -96,5 +96,45 @@ describe("kvStoreMiddleware", () => {
     const res = await app.request("/health", {}, env);
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ kvSet: true });
+  });
+
+  // When kvStoreMiddleware and skipRateLimitPaths share the same skip list,
+  // a KV-free root redirect must flow through both middlewares to its
+  // handler. Locks in the contract that an aligned skip list = the handler
+  // is reachable without c.var.kv being set.
+  it("with aligned skip lists, GET / reaches its handler", async () => {
+    const SKIP = ["/", "/health"];
+    const app = new Hono<{ Bindings: Env; Variables: Vars }>();
+    let handlerCalled = false;
+    app.use("*", kvStoreMiddleware(...SKIP));
+    app.use("*", skipRateLimitPaths(...SKIP));
+    app.get("/", (c) => {
+      handlerCalled = true;
+      return c.redirect("/health");
+    });
+    const res = await app.request("/", {}, env);
+    expect(handlerCalled).toBe(true);
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe("/health");
+  });
+
+  // Bare `startsWith` would mis-skip the whole API when `/` is listed (every
+  // pathname starts with `/`). Segment-prefix limits `/` to the exact root.
+  // Detect whether rate-limit actually ran via the X-RateLimit-* headers it
+  // sets — absence proves it was skipped.
+  it("`/` in skipRateLimitPaths skips exact root only — rate-limit still runs on /api/foo", async () => {
+    const app = new Hono<{ Bindings: Env; Variables: Vars }>();
+    app.use("*", kvStoreMiddleware());
+    app.use("*", skipRateLimitPaths("/"));
+    app.get("/", (c) => c.json({ where: "root" }));
+    app.get("/api/foo", (c) => c.json({ where: "api" }));
+
+    const root = await app.request("/", {}, env);
+    expect(root.status).toBe(200);
+    expect(root.headers.get("X-RateLimit-Limit")).toBeNull();
+
+    const api = await app.request("/api/foo", {}, env);
+    expect(api.status).toBe(200);
+    expect(api.headers.get("X-RateLimit-Limit")).not.toBeNull();
   });
 });
