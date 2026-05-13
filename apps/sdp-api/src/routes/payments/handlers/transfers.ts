@@ -56,6 +56,7 @@ import {
   createTransferSchema,
   listTransfersQuerySchema,
   prepareTransferSchema,
+  transferIdParamsSchema,
   walletIdParamsSchema,
 } from "../schemas";
 import * as tokenAccounts from "../token-accounts";
@@ -1506,13 +1507,13 @@ export async function listTransfers(c: AppContext) {
 export async function getTransfer(c: AppContext) {
   const auth = getAuth(c);
   const allowedWalletIds = getAllowedApiKeyWalletIds(auth);
-  const transferId = c.req.param("transferId");
+  const params = transferIdParamsSchema.safeParse(c.req.param());
   const repo = getPaymentsRepository(c);
 
-  if (!transferId) throw new AppError("BAD_REQUEST", "Transfer ID is required");
+  if (!params.success) throw new AppError("BAD_REQUEST", "Transfer ID is required");
 
   const row = await repo.getTransferById({
-    transferId,
+    transferId: params.data.transferId,
     organizationId: auth.organizationId,
     projectId: auth.projectId,
   });
