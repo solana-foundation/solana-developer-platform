@@ -24,6 +24,7 @@ export const updateWalletPolicySchema = z.object({
 const paymentAmountSchema = z
   .string()
   .refine((value) => isDecimalString(value), { message: "Invalid amount format" })
+  // Avoid adding a second error when the decimal-format check already failed.
   .refine((value) => !isDecimalString(value) || /[1-9]/.test(value), {
     message: "Amount must be greater than zero",
   });
