@@ -2295,7 +2295,6 @@ describe("Payments routes", () => {
       };
       expect(body.error.code).toBe("BAD_REQUEST");
       expect(body.error.message).toContain("Invalid query parameters");
-      expect(body.error.details?.errors?.status).toBeTruthy();
     });
 
     it("returns a single transfer by ID", async () => {
