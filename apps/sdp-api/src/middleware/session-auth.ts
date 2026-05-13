@@ -89,10 +89,7 @@ export function optionalSessionAuth() {
 /**
  * Get session from KV cache
  */
-async function getSessionFromKV(
-  kv: KVStore,
-  sessionId: string
-): Promise<CachedSession | null> {
+async function getSessionFromKV(kv: KVStore, sessionId: string): Promise<CachedSession | null> {
   return kv.get<CachedSession>(`session:${sessionId}`, "json");
 }
 

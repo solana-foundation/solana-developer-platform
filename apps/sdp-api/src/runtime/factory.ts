@@ -1,4 +1,3 @@
-
 /**
  * Runtime factory — single dispatch point for runtime-specific implementations.
  *

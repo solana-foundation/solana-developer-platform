@@ -484,10 +484,7 @@ export async function resolveRpcTarget(input: ResolveRpcTargetInput): Promise<Re
     }
   }
 
-  const selectedProvider = await pickRoundRobinProvider(
-    input.kv.cache,
-    enabledManagedProviders
-  );
+  const selectedProvider = await pickRoundRobinProvider(input.kv.cache, enabledManagedProviders);
   return {
     providerId: selectedProvider.id,
     projectId,
