@@ -22,7 +22,6 @@ import {
   executeSeizeResponseSchema,
   executeUnpauseResponseSchema,
   executeUpdateAuthorityResponseSchema,
-  feeQuoteResponseSchema,
   frozenAccountResponseSchema,
   frozenAccountSchema,
   inviteMemberResponseSchema,
@@ -64,8 +63,6 @@ import {
   transferSchema,
   walletBalancesResponseSchema,
   walletPolicyResponseSchema,
-  walletResponseSchema,
-  walletSchema,
 } from "../schemas";
 
 export const organizationResponse = successResponseSchema(organizationSchema);
@@ -140,13 +137,10 @@ export const tokenTemplateResponse = successResponseSchema(tokenTemplateResponse
 export const listTemplatesResponse = successResponseSchema(listTemplatesResponseSchema);
 
 export const onboardingStatusResponse = successResponseSchema(onboardingStatusResponseSchema);
-export const walletResponse = successResponseSchema(walletResponseSchema);
-export const walletListResponse = paginatedResponseSchema(walletSchema);
 export const walletBalancesResponse = successResponseSchema(walletBalancesResponseSchema);
 export const walletPolicyResponse = successResponseSchema(walletPolicyResponseSchema);
 export const prepareTransferResponse = successResponseSchema(prepareTransferResponseSchema);
 export const transferResponse = successResponseSchema(transferResponseSchema);
 export const transferListResponse = paginatedResponseSchema(transferSchema);
-export const feeQuoteResponse = successResponseSchema(feeQuoteResponseSchema);
 export const onrampExecutionResponse = successResponseSchema(onrampExecutionResponseSchema);
 export const offrampExecutionResponse = successResponseSchema(offrampExecutionResponseSchema);

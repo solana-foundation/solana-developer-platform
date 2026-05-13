@@ -1,20 +1,15 @@
 import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
-import { z } from "zod";
 
 import {
   createTransferRequestSchema,
   errorResponseSchema,
   executeOfframpRequestSchema,
   executeOnrampRequestSchema,
-  isoDateTimeSchema,
-  pageQuerySchema,
-  pageSizeQuerySchema,
+  paymentListTransfersQuerySchema,
+  paymentTransferIdParamsSchema,
+  paymentWalletIdParamsSchema,
   prepareTransferRequestSchema,
-  transferDirectionSchema,
-  transferIdParamSchema,
-  transferStatusSchema,
   updateWalletPolicyRequestSchema,
-  walletIdParamSchema,
 } from "../schemas";
 import { errorResponses, jsonContent } from "./helpers";
 import {
@@ -42,9 +37,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
       "Retrieves balances for a custody wallet. Wallet lifecycle and provisioning are managed through /v1/wallets.",
     security: [{ apiKeyAuth: [] }],
     request: {
-      params: z.object({
-        walletId: walletIdParamSchema,
-      }),
+      params: paymentWalletIdParamsSchema,
     },
     responses: {
       200: {
@@ -65,9 +58,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
       "Retrieves payment policy rules for a custody wallet. Policies are payment controls layered on top of custody-managed wallets.",
     security: [{ apiKeyAuth: [] }],
     request: {
-      params: z.object({
-        walletId: walletIdParamSchema,
-      }),
+      params: paymentWalletIdParamsSchema,
     },
     responses: {
       200: {
@@ -88,9 +79,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
       "Updates payment policy rules for a custody wallet. Wallet provisioning and default selection remain in /v1/wallets.",
     security: [{ apiKeyAuth: [] }],
     request: {
-      params: z.object({
-        walletId: walletIdParamSchema,
-      }),
+      params: paymentWalletIdParamsSchema,
       body: {
         required: true,
         content: jsonContent(updateWalletPolicyRequestSchema),
@@ -166,19 +155,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     description: "Lists payment transfers for the authenticated organization or project scope.",
     security: [{ apiKeyAuth: [] }],
     request: {
-      query: z.object({
-        wallet: z.string().optional().openapi({ description: "Filter by wallet ID." }),
-        walletAddress: z.string().optional().openapi({ description: "Filter by wallet address." }),
-        token: z.string().optional().openapi({ description: "Filter by token symbol or mint." }),
-        direction: transferDirectionSchema
-          .optional()
-          .openapi({ description: "Filter by transfer direction." }),
-        status: transferStatusSchema.optional(),
-        from: isoDateTimeSchema.optional().openapi({ description: "Filter from timestamp." }),
-        to: isoDateTimeSchema.optional().openapi({ description: "Filter to timestamp." }),
-        page: pageQuerySchema.optional(),
-        pageSize: pageSizeQuerySchema.optional(),
-      }),
+      query: paymentListTransfersQuerySchema,
     },
     responses: {
       200: {
@@ -198,9 +175,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     description: "Retrieves details for a specific transfer.",
     security: [{ apiKeyAuth: [] }],
     request: {
-      params: z.object({
-        transferId: transferIdParamSchema,
-      }),
+      params: paymentTransferIdParamsSchema,
     },
     responses: {
       200: {

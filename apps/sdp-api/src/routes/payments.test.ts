@@ -1238,6 +1238,35 @@ describe("Payments routes", () => {
     expect(body.error.message).toContain("Invalid request body");
   });
 
+  it("returns bad request when on-ramp amount is zero", async () => {
+    const res = await app.request(
+      "/v1/payments/ramps/onramp/execute",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          provider: "moonpay",
+          destinationWallet: TEST_WALLET_ID,
+          cryptoToken: "USDC",
+          fiatCurrency: "USD",
+          fiatAmount: "0",
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as {
+      error: { code: string; message: string; details?: { errors?: Record<string, string[]> } };
+    };
+    expect(body.error.code).toBe("BAD_REQUEST");
+    expect(body.error.message).toContain("Invalid request body");
+    expect(body.error.details?.errors?.fiatAmount).toContain("Amount must be greater than zero");
+  });
+
   it("returns forbidden when MoonPay is not configured in the environment", async () => {
     env.MOONPAY_API_KEY = undefined;
 
@@ -1633,9 +1662,12 @@ describe("Payments routes", () => {
     );
 
     expect(res.status).toBe(400);
-    const body = (await res.json()) as { error: { code: string; message: string } };
+    const body = (await res.json()) as {
+      error: { code: string; message: string; details?: { errors?: Record<string, string[]> } };
+    };
     expect(body.error.code).toBe("BAD_REQUEST");
-    expect(body.error.message).toContain("Transfer amount must be greater than zero");
+    expect(body.error.message).toContain("Invalid request body");
+    expect(body.error.details?.errors?.amount).toContain("Amount must be greater than zero");
 
     const transfers = await getDb(env).prepare("SELECT id FROM payment_transfers").all<{
       id: string;
@@ -2245,6 +2277,24 @@ describe("Payments routes", () => {
       };
       expect(body.data).toHaveLength(1);
       expect(body.data[0]?.status).toBe("confirmed");
+    });
+
+    it("returns bad request for invalid transfer status query param", async () => {
+      const res = await app.request(
+        "/v1/payments/transfers?status=settled",
+        {
+          method: "GET",
+          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
+        },
+        env
+      );
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as {
+        error: { code: string; message: string; details?: { errors?: Record<string, string[]> } };
+      };
+      expect(body.error.code).toBe("BAD_REQUEST");
+      expect(body.error.message).toContain("Invalid query parameters");
     });
 
     it("returns a single transfer by ID", async () => {
