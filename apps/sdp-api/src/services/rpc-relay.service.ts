@@ -483,7 +483,7 @@ export async function resolveRpcTarget(input: ResolveRpcTargetInput): Promise<Re
   }
 
   const selectedProvider = await pickRoundRobinProvider(
-    input.env.SDP_CACHE,
+    input.env.SDP_CACHE!,
     enabledManagedProviders
   );
   return {
@@ -506,7 +506,7 @@ export async function resolveRoundRobinRpcTargets(
   );
   const projectId = getEffectiveProjectId(input.authProjectId, input.requestedProjectId);
   const orderedProviders = await pickRoundRobinProviderOrder(
-    input.env.SDP_CACHE,
+    input.env.SDP_CACHE!,
     enabledManagedProviders
   );
 
@@ -582,7 +582,7 @@ export async function listRpcProviders(input: {
     providerStatuses.push({
       id: provider.id,
       endpoint: maskEndpoint(provider.url),
-      stats: await getProviderStats(input.env.SDP_CACHE, provider.id),
+      stats: await getProviderStats(input.env.SDP_CACHE!, provider.id),
     });
   }
 
@@ -595,7 +595,7 @@ export async function listRpcProviders(input: {
       projectId: resolvedTarget.projectId,
       selectionMode: resolvedTarget.selectionMode,
       endpoint: resolvedTarget.endpointLabel,
-      stats: await getProviderStats(input.env.SDP_CACHE, resolvedTarget.providerId),
+      stats: await getProviderStats(input.env.SDP_CACHE!, resolvedTarget.providerId),
     },
     roundRobinOrder: enabledManagedProviders.map((provider) => provider.id),
   };

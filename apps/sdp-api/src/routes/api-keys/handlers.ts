@@ -392,7 +392,7 @@ export const updateApiKey = async (c: AppContext) => {
     parsed.data.permissions !== undefined ||
     walletSelection.touched
   ) {
-    await c.env.SDP_API_KEYS.delete(`key:${existing.key_hash}`);
+    await c.env.SDP_API_KEYS!.delete(`key:${existing.key_hash}`);
   }
 
   // Audit log
@@ -440,7 +440,7 @@ export const rotateApiKey = async (c: AppContext) => {
   }
 
   // Invalidate old key cache
-  await c.env.SDP_API_KEYS.delete(`key:${rotation.previousKeyHash}`);
+  await c.env.SDP_API_KEYS!.delete(`key:${rotation.previousKeyHash}`);
 
   // Audit log
   const auditService = new AuditService(getDb(c.env));
@@ -510,7 +510,7 @@ export const revokeApiKey = async (c: AppContext) => {
   }
 
   // Invalidate KV cache
-  await c.env.SDP_API_KEYS.delete(`key:${revokedKey.keyHash}`);
+  await c.env.SDP_API_KEYS!.delete(`key:${revokedKey.keyHash}`);
 
   // Audit log
   const auditService = new AuditService(getDb(c.env));

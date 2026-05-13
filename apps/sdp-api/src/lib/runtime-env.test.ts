@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { Env } from "@/types/env";
-import { getDeploymentMode, isSelfHostedDeployment } from "./runtime-env";
+import { getDeploymentMode, getRuntime, isSelfHostedDeployment } from "./runtime-env";
 
 const envWith = (mode: string | undefined): Pick<Env, "SDP_DEPLOYMENT_MODE"> =>
   ({ SDP_DEPLOYMENT_MODE: mode }) as Pick<Env, "SDP_DEPLOYMENT_MODE">;
+
+const envWithRuntime = (runtime: string | undefined): Pick<Env, "SDP_RUNTIME"> =>
+  ({ SDP_RUNTIME: runtime }) as Pick<Env, "SDP_RUNTIME">;
 
 describe("getDeploymentMode", () => {
   it("defaults to managed when SDP_DEPLOYMENT_MODE is unset", () => {
@@ -41,5 +44,25 @@ describe("isSelfHostedDeployment", () => {
     expect(() => isSelfHostedDeployment(envWith("selfhosted"))).toThrow(
       /Invalid SDP_DEPLOYMENT_MODE/
     );
+  });
+});
+
+describe("getRuntime", () => {
+  it("defaults to cloudflare when SDP_RUNTIME is unset", () => {
+    expect(getRuntime(envWithRuntime(undefined))).toBe("cloudflare");
+  });
+
+  it("accepts the documented values", () => {
+    expect(getRuntime(envWithRuntime("cloudflare"))).toBe("cloudflare");
+    expect(getRuntime(envWithRuntime("node"))).toBe("node");
+  });
+
+  it("throws on a typo'd value (Node, capitalized)", () => {
+    expect(() => getRuntime(envWithRuntime("Node"))).toThrow(/Invalid SDP_RUNTIME.*Node/);
+  });
+
+  it("throws on any other unknown value", () => {
+    expect(() => getRuntime(envWithRuntime("nodejs"))).toThrow(/Invalid SDP_RUNTIME/);
+    expect(() => getRuntime(envWithRuntime(""))).toThrow(/Invalid SDP_RUNTIME/);
   });
 });
