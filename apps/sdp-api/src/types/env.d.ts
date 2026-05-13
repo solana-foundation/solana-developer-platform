@@ -7,6 +7,7 @@
 
 import type { HyperdriveBinding } from "@/db";
 import type { ClerkJwtPayload } from "@/lib/clerk-token";
+import type { KVStoreSet } from "@/runtime/kv";
 import type { CachedSession, OrganizationRpcProvider, Permission } from "@sdp/types";
 
 export interface Env {
@@ -222,6 +223,8 @@ declare module "hono" {
     requestId: string;
     traceId: string;
     requestSource: string;
+    // Runtime-neutral KV bundle, populated by kvStoreMiddleware.
+    kv: KVStoreSet;
   }
 }
 

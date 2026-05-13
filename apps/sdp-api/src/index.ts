@@ -14,6 +14,7 @@ import { secureHeaders } from "hono/secure-headers";
 import { AppError } from "@/lib/errors";
 import { withProcessEnvFallback } from "@/lib/runtime-env";
 import { corsMiddleware } from "@/middleware/cors";
+import { kvStoreMiddleware } from "@/middleware/kv-store";
 import { skipRateLimitPaths } from "@/middleware/rate-limit";
 import { requestIdMiddleware } from "@/middleware/request-id";
 import { requestTracingMiddleware } from "@/middleware/request-tracing";
@@ -194,6 +195,10 @@ app.use("*", async (c, next) => {
   }
   return next();
 });
+
+// KV store — populates c.var.kv. Must precede rate-limit / auth / session
+// middleware (all of which read from c.var.kv).
+app.use("*", kvStoreMiddleware());
 
 // Rate limiting (skip health check paths)
 app.use(

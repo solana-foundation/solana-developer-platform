@@ -5,6 +5,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
+import { createKVStoreSet } from "@/runtime/factory";
 import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
 
@@ -26,10 +27,10 @@ describe("Auth Routes", () => {
       .catch(() => {});
 
     // Clear rate limit KV to prevent 429 errors between tests
-    const rateLimitKV = (env as { SDP_RATE_LIMITS: KVNamespace }).SDP_RATE_LIMITS;
-    const keys = await rateLimitKV.list();
+    const rateLimits = createKVStoreSet(env).rateLimits;
+    const keys = await rateLimits.list();
     for (const key of keys.keys) {
-      await rateLimitKV.delete(key.name);
+      await rateLimits.delete(key.name);
     }
   });
 
