@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { parseErrorMessage } from "@/app/dashboard/activity-format-utils";
 import { loadWalletActivity } from "@/app/dashboard/custody/wallet-activity.data";
 import { createTimedTrace, logRouteResult } from "@/lib/request-tracing";
 import { createSdpApiClient, type SdpApiClient } from "@/lib/sdp-api";
@@ -7,18 +8,6 @@ interface VisibilityResult {
   ok: boolean;
   status?: number;
   error?: string;
-}
-
-function parseErrorMessage(body: string): string {
-  try {
-    const parsed = JSON.parse(body) as {
-      error?: { message?: string };
-      message?: string;
-    };
-    return parsed?.error?.message ?? parsed?.message ?? body;
-  } catch {
-    return body || "Unknown error";
-  }
 }
 
 async function verifyWalletVisibility(

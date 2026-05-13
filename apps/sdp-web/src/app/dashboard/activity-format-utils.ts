@@ -14,3 +14,15 @@ export function readTransactionParam(
   const value = params[key];
   return typeof value === "string" || typeof value === "number" ? value : null;
 }
+
+export function parseErrorMessage(body: string): string {
+  try {
+    const parsed = JSON.parse(body) as {
+      error?: { message?: string };
+      message?: string;
+    };
+    return parsed?.error?.message ?? parsed?.message ?? body;
+  } catch {
+    return body || "Unknown error";
+  }
+}
