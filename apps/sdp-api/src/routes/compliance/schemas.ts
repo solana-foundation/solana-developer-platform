@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-const complianceIntentSchema = z.enum([
+export const complianceIntentSchema = z.enum([
   "transfer_destination",
   "wallet_address_addition",
   "unknown",

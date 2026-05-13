@@ -1,11 +1,13 @@
-import { isoDateTimeSchema, z } from "./base";
+import {
+  complianceIntentSchema as complianceIntentSchemaBase,
+  screenAddressSchema as screenAddressSchemaBase,
+} from "../../routes/compliance/schemas";
+import { isoDateTimeSchema, withOpenApi, z } from "./base";
 
-export const complianceIntentSchema = z
-  .enum(["transfer_destination", "wallet_address_addition", "unknown"])
-  .openapi({
-    description: "Business intent for address screening.",
-    example: "transfer_destination",
-  });
+export const complianceIntentSchema = withOpenApi(complianceIntentSchemaBase, {
+  description: "Business intent for address screening.",
+  example: "transfer_destination",
+});
 
 export const complianceProviderNameSchema = z
   .enum(["range", "elliptic", "trm", "chainalysis"])
@@ -15,17 +17,20 @@ export const complianceProviderStatusSchema = z
   .enum(["ok", "unavailable", "error"])
   .openapi({ description: "Provider response status.", example: "ok" });
 
-export const addressScreeningRequestSchema = z
-  .object({
-    address: z.string().min(1).openapi({
+export const addressScreeningRequestSchema = screenAddressSchemaBase
+  .extend({
+    address: withOpenApi(screenAddressSchemaBase.shape.address, {
       description: "Address to screen.",
       example: "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ",
     }),
-    network: z.string().min(1).max(64).default("solana").openapi({
+    network: withOpenApi(screenAddressSchemaBase.shape.network, {
       description: "Network identifier expected by the compliance provider.",
       example: "solana",
     }),
-    intent: complianceIntentSchema.default("unknown"),
+    intent: withOpenApi(screenAddressSchemaBase.shape.intent, {
+      description: "Business intent for address screening.",
+      example: "transfer_destination",
+    }),
   })
   .openapi({ description: "Address compliance screening request payload." });
 
