@@ -39,8 +39,10 @@ export class WorkersKVStore implements KVStore {
 /**
  * Build a KVStoreSet from Cloudflare KV bindings.
  *
- * All four bindings are required on the Cloudflare runtime; we throw at boot
- * rather than let a `!` non-null assertion blow up deep in a request handler.
+ * All four bindings are required on the Cloudflare runtime. Called per-request
+ * from kvStoreMiddleware, so a missing binding throws on the first request
+ * rather than at worker startup — but still up-front, before any handler runs,
+ * instead of deep inside one via a `!` non-null assertion.
  */
 export function createWorkersKVStoreSet(env: Env): KVStoreSet {
   const apiKeys = env.SDP_API_KEYS;
