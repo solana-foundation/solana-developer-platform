@@ -14,6 +14,7 @@ import type {
   TokenStatus,
   TokenTemplate,
   TokenTransaction,
+  TokenTransactionListItem,
   TokenTransactionStatus,
   TokenTransactionType,
 } from "@sdp/types";
@@ -156,6 +157,12 @@ interface TokenTransactionRow {
   updated_at: string;
 }
 
+interface TokenTransactionListRow extends TokenTransactionRow {
+  token_name: string;
+  token_symbol: string;
+  token_mint_address: string | null;
+}
+
 interface AllowlistRow {
   id: string;
   token_id: string;
@@ -176,6 +183,64 @@ interface FrozenAccountRow {
   frozen_by: string;
   unfrozen_at: string | null;
   unfrozen_by: string | null;
+}
+
+interface WalletTransactionMatchConfig {
+  publicKeyFields: readonly string[];
+  tokenAccountFields: readonly string[];
+}
+
+const WALLET_TRANSACTION_MATCH_CONFIG = {
+  mint: {
+    publicKeyFields: ["destination"],
+    tokenAccountFields: ["destination", "tokenAccount"],
+  },
+  burn: {
+    publicKeyFields: ["source"],
+    tokenAccountFields: ["source"],
+  },
+  freeze: {
+    publicKeyFields: ["accountAddress"],
+    tokenAccountFields: ["accountAddress"],
+  },
+  unfreeze: {
+    publicKeyFields: ["accountAddress"],
+    tokenAccountFields: ["accountAddress"],
+  },
+  seize: {
+    publicKeyFields: ["source", "destination"],
+    tokenAccountFields: ["source", "destination"],
+  },
+  force_burn: {
+    publicKeyFields: ["source"],
+    tokenAccountFields: ["source"],
+  },
+  update_authority: {
+    publicKeyFields: ["currentAuthority", "newAuthority"],
+    tokenAccountFields: [],
+  },
+  pause: {
+    publicKeyFields: [],
+    tokenAccountFields: [],
+  },
+  unpause: {
+    publicKeyFields: [],
+    tokenAccountFields: [],
+  },
+  deploy: {
+    publicKeyFields: [],
+    tokenAccountFields: [],
+  },
+} satisfies Record<TokenTransactionType, WalletTransactionMatchConfig>;
+
+interface TokenAccountMatch {
+  tokenId: string;
+  tokenAccount: string;
+}
+
+interface WalletTransactionScope {
+  publicKeys: readonly string[];
+  tokenAccounts?: readonly TokenAccountMatch[];
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -906,6 +971,188 @@ export class TokenService {
 
     return {
       transactions: result.results.map((row) => this.mapRowToTransaction(row)),
+      total: countResult?.count ?? 0,
+    };
+  }
+
+  async listTransactionTokenCandidates(options: {
+    organizationId: string;
+    projectId?: string | null;
+  }): Promise<Array<{ tokenId: string; mintAddress: string }>> {
+    const params: string[] = [options.organizationId];
+    let query = `
+      SELECT id, mint_address
+      FROM issued_tokens
+      WHERE organization_id = ?
+        AND mint_address IS NOT NULL
+    `;
+
+    if (options.projectId) {
+      query += " AND project_id = ?";
+      params.push(options.projectId);
+    }
+
+    const result = await this.db
+      .prepare(query)
+      .bind(...params)
+      .all<{ id: string; mint_address: string | null }>();
+
+    return result.results
+      .filter(
+        (row): row is { id: string; mint_address: string } =>
+          typeof row.mint_address === "string" && row.mint_address.length > 0
+      )
+      .map((row) => ({ tokenId: row.id, mintAddress: row.mint_address }));
+  }
+
+  async listTransactions(options: {
+    organizationId: string;
+    projectId?: string | null;
+    types?: TokenTransactionType[];
+    status?: TokenTransactionStatus;
+    walletScope?: WalletTransactionScope;
+    limit?: number;
+    offset?: number;
+  }): Promise<{ transactions: TokenTransactionListItem[]; total: number }> {
+    const {
+      organizationId,
+      projectId,
+      types = [],
+      status,
+      walletScope,
+      limit = 50,
+      offset = 0,
+    } = options;
+    const distinctTypes = Array.from(new Set(types));
+    const params: (string | number)[] = [organizationId];
+    const conditions = ["tx.organization_id = ?"];
+    const publicKeys = Array.from(new Set(walletScope?.publicKeys ?? []));
+    const tokenAccounts = walletScope?.tokenAccounts ?? [];
+
+    let cte = "";
+    const cteParams: string[] = [];
+    if (tokenAccounts.length > 0) {
+      const values = tokenAccounts.map(() => "(?, ?)").join(", ");
+
+      for (const match of tokenAccounts) {
+        cteParams.push(match.tokenId, match.tokenAccount);
+      }
+
+      cte = `WITH wallet_token_accounts(token_id, token_account) AS (VALUES ${values}) `;
+    }
+
+    if (projectId) {
+      conditions.push("t.project_id = ?");
+      params.push(projectId);
+    }
+
+    if (status) {
+      conditions.push("tx.status = ?");
+      params.push(status);
+    }
+
+    if (distinctTypes.length > 0) {
+      conditions.push(`tx.type IN (${distinctTypes.map(() => "?").join(", ")})`);
+      params.push(...distinctTypes);
+    }
+
+    if (walletScope) {
+      const candidateTypes =
+        distinctTypes.length > 0
+          ? distinctTypes
+          : (Object.keys(WALLET_TRANSACTION_MATCH_CONFIG) as TokenTransactionType[]);
+      const walletTypeConditions: string[] = [];
+
+      for (const type of candidateTypes) {
+        const config = WALLET_TRANSACTION_MATCH_CONFIG[type];
+        const publicKeyConditions =
+          publicKeys.length > 0
+            ? config.publicKeyFields.map(
+                (key) =>
+                  `tx.operation_params::jsonb ->> '${key}' IN (${publicKeys.map(() => "?").join(", ")})`
+              )
+            : [];
+        const tokenAccountConditions =
+          tokenAccounts.length > 0
+            ? config.tokenAccountFields.map(
+                (key) => `EXISTS (
+                  SELECT 1
+                  FROM wallet_token_accounts wta
+                  WHERE wta.token_id = tx.token_id
+                    AND wta.token_account = (tx.operation_params::jsonb ->> '${key}')
+                )`
+              )
+            : [];
+        const matchConditions = [...publicKeyConditions, ...tokenAccountConditions];
+
+        if (matchConditions.length === 0) {
+          continue;
+        }
+
+        walletTypeConditions.push(`(tx.type = ? AND (${matchConditions.join(" OR ")}))`);
+        params.push(type);
+        for (const _field of config.publicKeyFields) {
+          params.push(...publicKeys);
+        }
+      }
+
+      conditions.push(
+        walletTypeConditions.length > 0 ? `(${walletTypeConditions.join(" OR ")})` : "FALSE"
+      );
+    }
+
+    const fromClause = `
+      FROM issuance_transactions tx
+      JOIN issued_tokens t ON t.id = tx.token_id
+    `;
+    const whereClause = `WHERE ${conditions.join(" AND ")}`;
+    const countQuery = `${cte}SELECT COUNT(*) as count ${fromClause} ${whereClause}`;
+    const selectQuery = `${cte}SELECT
+        tx.id,
+        tx.token_id,
+        tx.organization_id,
+        tx.type,
+        tx.status,
+        tx.idempotency_key,
+        tx.idempotency_fingerprint,
+        tx.signature,
+        tx.serialized_tx,
+        tx.operation_params,
+        tx.slot,
+        tx.block_time,
+        tx.fee,
+        tx.error,
+        tx.initiated_by_key_id,
+        tx.created_at,
+        tx.updated_at,
+        t.name AS token_name,
+        t.symbol AS token_symbol,
+        t.mint_address AS token_mint_address
+      ${fromClause}
+      ${whereClause}
+      ORDER BY tx.created_at DESC, tx.id DESC
+      LIMIT ? OFFSET ?`;
+
+    const countResult = await this.db
+      .prepare(countQuery)
+      .bind(...cteParams, ...params)
+      .first<{ count: number }>();
+
+    const result = await this.db
+      .prepare(selectQuery)
+      .bind(...cteParams, ...params, limit, offset)
+      .all<TokenTransactionListRow>();
+
+    return {
+      transactions: result.results.map((row) => ({
+        token: {
+          id: row.token_id,
+          name: row.token_name,
+          symbol: row.token_symbol,
+          mintAddress: row.token_mint_address,
+        },
+        transaction: this.mapRowToTransaction(row),
+      })),
       total: countResult?.count ?? 0,
     };
   }

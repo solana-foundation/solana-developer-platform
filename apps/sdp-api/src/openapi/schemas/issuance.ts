@@ -291,6 +291,22 @@ export const tokenTransactionSchema = z
   })
   .openapi({ description: "Token transaction record." });
 
+export const tokenTransactionListItemSchema = z
+  .object({
+    token: z
+      .object({
+        id: tokenIdParamSchema,
+        name: z.string().openapi({ description: "Token name.", example: "Example Token" }),
+        symbol: z.string().openapi({ description: "Token symbol.", example: "EXM" }),
+        mintAddress: solanaAddressSchema
+          .nullable()
+          .openapi({ description: "Mint address once deployed.", example: null }),
+      })
+      .openapi({ description: "Token metadata for this transaction." }),
+    transaction: tokenTransactionSchema.openapi({ description: "Token transaction record." }),
+  })
+  .openapi({ description: "Cross-token transaction list item." });
+
 export const tokenAllowlistEntrySchema = z
   .object({
     id: tokenAllowlistEntryIdSchema,
