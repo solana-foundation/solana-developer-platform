@@ -17,7 +17,7 @@ export const logout = async (c: AppContext) => {
   const session = c.get("session");
 
   if (session) {
-    const sessionService = new SessionService(getDb(c.env), c.env.SDP_SESSIONS!);
+    const sessionService = new SessionService(getDb(c.env), c.var.kv.sessions);
     await sessionService.revokeSession(session.id);
   }
 
@@ -101,7 +101,7 @@ export const listSessions = async (c: AppContext) => {
     throw new AppError("UNAUTHORIZED");
   }
 
-  const sessionService = new SessionService(getDb(c.env), c.env.SDP_SESSIONS!);
+  const sessionService = new SessionService(getDb(c.env), c.var.kv.sessions);
   const sessions = await sessionService.listUserSessions(session.userId);
 
   const response: ListSessionsResponse = {
@@ -127,7 +127,7 @@ export const revokeSession = async (c: AppContext) => {
     throw new AppError("UNAUTHORIZED");
   }
 
-  const sessionService = new SessionService(getDb(c.env), c.env.SDP_SESSIONS!);
+  const sessionService = new SessionService(getDb(c.env), c.var.kv.sessions);
 
   // Verify the session belongs to this user
   const sessions = await sessionService.listUserSessions(currentSession.userId);

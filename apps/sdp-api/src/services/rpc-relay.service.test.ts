@@ -1,5 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
+import { createKVStoreSet } from "@/runtime/factory";
+import type { KVStore, KVStoreSet } from "@/runtime/kv";
 import {
   includesTransactionMethod,
   listRpcProviders,
@@ -16,7 +18,6 @@ const appEnv = env as unknown as Env;
 const SEND_RAW_TRANSACTION_METHOD = ["sendRaw", "Transaction"].join("");
 
 type MutableRpcEnv = {
-  SDP_CACHE: Env["SDP_CACHE"];
   SOLANA_RPC_URL?: string;
   SOLANA_RPC_DEFAULT_PROVIDER?: string;
   SOLANA_RPC_TRITON_URL?: string;
@@ -31,11 +32,12 @@ type MutableRpcEnv = {
 
 const rpcEnv = env as MutableRpcEnv;
 const db = getDb(env as unknown as Env);
+const kv: KVStoreSet = createKVStoreSet(appEnv);
 
-async function clearKvNamespace(namespace: KVNamespace) {
-  const listed = await namespace.list();
+async function clearKvStore(store: KVStore) {
+  const listed = await store.list();
   for (const key of listed.keys) {
-    await namespace.delete(key.name);
+    await store.delete(key.name);
   }
 }
 
@@ -49,7 +51,7 @@ describe("rpc-relay.service", () => {
   });
 
   beforeEach(async () => {
-    await clearKvNamespace(rpcEnv.SDP_CACHE!);
+    await clearKvStore(kv.cache);
 
     await db
       .prepare(
@@ -122,6 +124,7 @@ describe("rpc-relay.service", () => {
 
     const target = await resolveRpcTarget({
       env: appEnv,
+      kv,
       db,
       organizationId: TEST_ORG_ID,
       authProjectId: null,
@@ -149,6 +152,7 @@ describe("rpc-relay.service", () => {
 
     const target = await resolveRpcTarget({
       env: appEnv,
+      kv,
       db,
       organizationId: TEST_ORG_ID,
       authProjectId: TEST_PROJECT_ID,
@@ -173,6 +177,7 @@ describe("rpc-relay.service", () => {
 
     const target = await resolveRpcTarget({
       env: appEnv,
+      kv,
       db,
       organizationId: TEST_ORG_ID,
       authProjectId: TEST_PROJECT_ID,
@@ -191,6 +196,7 @@ describe("rpc-relay.service", () => {
 
     const first = await resolveRpcTarget({
       env: appEnv,
+      kv,
       db,
       organizationId: TEST_ORG_ID,
       authProjectId: null,
@@ -199,6 +205,7 @@ describe("rpc-relay.service", () => {
 
     const second = await resolveRpcTarget({
       env: appEnv,
+      kv,
       db,
       organizationId: TEST_ORG_ID,
       authProjectId: null,
@@ -221,6 +228,7 @@ describe("rpc-relay.service", () => {
 
     const providers = await listRpcProviders({
       env: appEnv,
+      kv,
       db,
       organizationId: TEST_ORG_ID,
       authProjectId: null,

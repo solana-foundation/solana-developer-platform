@@ -73,6 +73,7 @@ export const signerCheck = async (c: AppContext) => {
 
     const rpcTarget = await resolveRpcTarget({
       env: c.env,
+      kv: c.var.kv,
       db: getDb(c.env),
       organizationId: auth.organizationId,
       authProjectId: auth.projectId ?? null,

@@ -72,7 +72,7 @@ async function relayToTarget(
   const upstreamBody = rawBody ? tryParseJson(rawBody) : null;
   const elapsedMs = Date.now() - startedAt;
 
-  await recordRpcRelayTelemetry(c.env.SDP_CACHE!, {
+  await recordRpcRelayTelemetry(c.var.kv.cache, {
     providerId: target.providerId,
     methodNames,
     statusCode: upstream.status,
@@ -121,6 +121,7 @@ export const getRpcProviders = async (c: AppContext) => {
 
   const response = await listRpcProviders({
     env: c.env,
+    kv: c.var.kv,
     db: getDb(c.env),
     organizationId: auth.organizationId,
     authProjectId: auth.projectId,
@@ -159,6 +160,7 @@ export const relayRpcRequest = async (c: AppContext) => {
   if (shouldRoundRobinFaucetRequest(payloadParse.data, methodNames)) {
     const targets = await resolveRoundRobinRpcTargets({
       env: c.env,
+      kv: c.var.kv,
       db: getDb(c.env),
       organizationId: auth.organizationId,
       authProjectId: auth.projectId,
@@ -185,7 +187,7 @@ export const relayRpcRequest = async (c: AppContext) => {
         lastResponse = relayResponse;
       } catch (error) {
         lastError = error;
-        await recordRpcRelayTelemetry(c.env.SDP_CACHE!, {
+        await recordRpcRelayTelemetry(c.var.kv.cache, {
           providerId: target.providerId,
           methodNames,
           statusCode: 0,
@@ -208,6 +210,7 @@ export const relayRpcRequest = async (c: AppContext) => {
 
   const target = await resolveRpcTarget({
     env: c.env,
+    kv: c.var.kv,
     db: getDb(c.env),
     organizationId: auth.organizationId,
     authProjectId: auth.projectId,
@@ -224,7 +227,7 @@ export const relayRpcRequest = async (c: AppContext) => {
     );
     return success(c, buildRelayResponse(target, upstream, upstreamBody, methodNames));
   } catch (error) {
-    await recordRpcRelayTelemetry(c.env.SDP_CACHE!, {
+    await recordRpcRelayTelemetry(c.var.kv.cache, {
       providerId: target.providerId,
       methodNames,
       statusCode: 0,
@@ -253,6 +256,7 @@ export const testRpcConnection = async (c: AppContext) => {
   const methodNames = ["getVersion"];
   const target = await resolveRpcTarget({
     env: c.env,
+    kv: c.var.kv,
     db: getDb(c.env),
     organizationId: auth.organizationId,
     authProjectId: auth.projectId,
@@ -281,7 +285,7 @@ export const testRpcConnection = async (c: AppContext) => {
     const upstreamBody = rawBody ? tryParseJson(rawBody) : null;
     const elapsedMs = Date.now() - startedAt;
 
-    await recordRpcRelayTelemetry(c.env.SDP_CACHE!, {
+    await recordRpcRelayTelemetry(c.var.kv.cache, {
       providerId: target.providerId,
       methodNames,
       statusCode: upstream.status,
@@ -306,7 +310,7 @@ export const testRpcConnection = async (c: AppContext) => {
       response: upstreamBody,
     });
   } catch (error) {
-    await recordRpcRelayTelemetry(c.env.SDP_CACHE!, {
+    await recordRpcRelayTelemetry(c.var.kv.cache, {
       providerId: target.providerId,
       methodNames,
       statusCode: 0,

@@ -16,6 +16,7 @@ import type { Context, Next } from "hono";
 import { getDb } from "@/db";
 import { AppError } from "@/lib/errors";
 import { hashString } from "@/lib/hash";
+import type { KVStore } from "@/runtime/kv";
 import type { Env } from "@/types/env";
 
 const KV_TTL_SECONDS = 3600; // 1 hour cache
@@ -77,9 +78,9 @@ function looksLikeJwt(token: string): boolean {
 /**
  * Look up API key in KV cache
  */
-async function getFromKV(kv: KVNamespace, keyHash: string): Promise<CachedApiKey | null> {
-  const cached = await kv.get(`key:${keyHash}`, "json");
-  return cached as CachedApiKey | null;
+async function getFromKV(kv: KVStore, keyHash: string): Promise<CachedApiKey | null> {
+  const cached = await kv.get<CachedApiKey>(`key:${keyHash}`, "json");
+  return cached;
 }
 
 /**
@@ -87,7 +88,7 @@ async function getFromKV(kv: KVNamespace, keyHash: string): Promise<CachedApiKey
  */
 async function getFromDatabaseAndCache(
   db: DatabaseClient,
-  kv: KVNamespace,
+  kv: KVStore,
   keyHash: string
 ): Promise<CachedApiKey | null> {
   const result = await db
@@ -245,9 +246,10 @@ export function authMiddleware() {
     const keyHash = await hashString(apiKey, pepper);
 
     // Try KV first, then Postgres
-    let cachedKey = await getFromKV(c.env.SDP_API_KEYS!, keyHash);
+    const apiKeysKV = c.var.kv.apiKeys;
+    let cachedKey = await getFromKV(apiKeysKV, keyHash);
     if (!cachedKey) {
-      cachedKey = await getFromDatabaseAndCache(getDb(c.env), c.env.SDP_API_KEYS!, keyHash);
+      cachedKey = await getFromDatabaseAndCache(getDb(c.env), apiKeysKV, keyHash);
     }
 
     if (!cachedKey) {

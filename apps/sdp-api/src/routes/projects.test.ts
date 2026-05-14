@@ -6,6 +6,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
 import { hashString } from "@/lib/hash";
+import { createKVStoreSet } from "@/runtime/factory";
 import { TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
@@ -30,13 +31,12 @@ describe("Projects Routes", () => {
 
   beforeEach(async () => {
     const db = getDb(env);
-    const apiKeysKV = (env as { SDP_API_KEYS: KVNamespace }).SDP_API_KEYS;
-    const rateLimitKV = (env as { SDP_RATE_LIMITS: KVNamespace }).SDP_RATE_LIMITS;
+    const kv = createKVStoreSet(env);
 
     // Clear rate limit KV to prevent 429 errors between tests
-    const keys = await rateLimitKV.list();
+    const keys = await kv.rateLimits.list();
     for (const key of keys.keys) {
-      await rateLimitKV.delete(key.name);
+      await kv.rateLimits.delete(key.name);
     }
 
     // Clear projects tables
@@ -76,7 +76,7 @@ describe("Projects Routes", () => {
       .run();
 
     // Cache API key in KV
-    await apiKeysKV.put(`key:${apiKeyHash}`, JSON.stringify(TEST_CACHED_API_KEY));
+    await kv.apiKeys.put(`key:${apiKeyHash}`, JSON.stringify(TEST_CACHED_API_KEY));
   });
 
   describe("POST /v1/projects", () => {

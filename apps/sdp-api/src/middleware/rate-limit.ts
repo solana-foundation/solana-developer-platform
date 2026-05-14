@@ -126,10 +126,14 @@ async function isVerifiedClerkJwt(c: Context<{ Bindings: Env }>, token: string):
 
 /**
  * Rate limiting middleware
+ *
+ * Requires c.var.kv to be populated (by kvStoreMiddleware). Any path that
+ * kv-store skips must also be skipped here via skipRateLimitPaths — the
+ * `c.var.kv.rateLimits` deref below has no guard.
  */
 export function rateLimitMiddleware() {
   return async (c: Context<{ Bindings: Env }>, next: Next) => {
-    const kv = c.env.SDP_RATE_LIMITS!;
+    const kv = c.var.kv.rateLimits;
     const auth = c.get("apiKey");
     const bearerToken = extractBearerToken(c);
 
@@ -217,13 +221,17 @@ export function rateLimitMiddleware() {
 }
 
 /**
- * Skip rate limiting for specific paths (e.g., health check)
+ * Skip rate limiting for specific paths (e.g., health check).
+ *
+ * Matching is exact OR segment-prefix (`p` matches `p` and `p/...` but NOT
+ * `p<anything-else>`). Bare `startsWith` would mis-skip the whole API when
+ * `/` is listed, since every pathname starts with `/`.
  */
 export function skipRateLimitPaths(...paths: string[]) {
   return async (c: Context<{ Bindings: Env }>, next: Next) => {
-    const path = new URL(c.req.url).pathname;
+    const path = c.req.path;
 
-    if (paths.some((p) => path === p || path.startsWith(p))) {
+    if (paths.some((p) => path === p || path.startsWith(`${p}/`))) {
       await next();
       return;
     }

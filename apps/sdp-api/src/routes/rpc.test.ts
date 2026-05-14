@@ -3,6 +3,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 import { getDb } from "@/db";
 import app from "@/index";
 import { hashString } from "@/lib/hash";
+import { createKVStoreSet } from "@/runtime/factory";
+import type { KVStore } from "@/runtime/kv";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
@@ -174,10 +176,10 @@ function getRequiredLiveProviderConfigs(
   });
 }
 
-async function clearKvNamespace(namespace: KVNamespace) {
-  const listed = await namespace.list();
+async function clearKvStore(store: KVStore) {
+  const listed = await store.list();
   for (const key of listed.keys) {
-    await namespace.delete(key.name);
+    await store.delete(key.name);
   }
 }
 
@@ -198,13 +200,11 @@ describe("RPC Relay Routes", () => {
 
   beforeEach(async () => {
     const db = getDb(env);
-    const apiKeysKV = (env as { SDP_API_KEYS: KVNamespace }).SDP_API_KEYS;
-    const rateLimitKV = (env as { SDP_RATE_LIMITS: KVNamespace }).SDP_RATE_LIMITS;
-    const cacheKV = (env as { SDP_CACHE: KVNamespace }).SDP_CACHE;
+    const kv = createKVStoreSet(env);
 
-    await clearKvNamespace(rateLimitKV);
-    await clearKvNamespace(cacheKV);
-    await clearKvNamespace(apiKeysKV);
+    await clearKvStore(kv.rateLimits);
+    await clearKvStore(kv.cache);
+    await clearKvStore(kv.apiKeys);
 
     await db
       .prepare("DELETE FROM api_keys")
@@ -267,7 +267,7 @@ describe("RPC Relay Routes", () => {
       )
       .run();
 
-    await apiKeysKV.put(
+    await kv.apiKeys.put(
       `key:${apiKeyHash}`,
       JSON.stringify({
         id: TEST_API_KEY_ID,
@@ -540,12 +540,12 @@ describe("RPC Relay Routes", () => {
 
   it("round-robins faucet airdrops and falls back after provider rate limits", async () => {
     const db = getDb(env);
-    const cacheKV = (env as { SDP_CACHE: KVNamespace }).SDP_CACHE;
+    const kv = createKVStoreSet(env);
     await db
       .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
       .bind(JSON.stringify({ rpcProvider: "triton" }), TEST_ORG.id)
       .run();
-    await cacheKV.put("rpc:relay:round-robin-cursor", "1");
+    await kv.cache.put("rpc:relay:round-robin-cursor", "1");
 
     rpcEnv.SOLANA_RPC_TRITON_URL = "https://rpc.triton.test";
     rpcEnv.SOLANA_RPC_HELIUS_URL = "https://rpc.helius.test";

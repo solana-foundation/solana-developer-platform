@@ -7,6 +7,7 @@ import {
   type ProjectSettings,
 } from "@sdp/types";
 import { AppError } from "@/lib/errors";
+import type { KVStore, KVStoreSet } from "@/runtime/kv";
 import { getProviderAvailability } from "@/services/provider-availability.service";
 import type { Env } from "@/types/env";
 
@@ -54,6 +55,7 @@ export interface RpcProviderStatus {
 
 export interface ResolveRpcTargetInput {
   env: Env;
+  kv: KVStoreSet;
   db: DatabaseClient;
   organizationId: string;
   authProjectId: string | null;
@@ -359,7 +361,7 @@ function resolveProjectRpcPreference(
 }
 
 async function pickRoundRobinProvider(
-  cache: KVNamespace,
+  cache: KVStore,
   providers: ManagedRpcProvider[]
 ): Promise<ManagedRpcProvider> {
   if (providers.length === 0) {
@@ -381,7 +383,7 @@ async function pickRoundRobinProvider(
 }
 
 async function pickRoundRobinProviderOrder(
-  cache: KVNamespace,
+  cache: KVStore,
   providers: ManagedRpcProvider[]
 ): Promise<ManagedRpcProvider[]> {
   const selectedProvider = await pickRoundRobinProvider(cache, providers);
@@ -482,10 +484,7 @@ export async function resolveRpcTarget(input: ResolveRpcTargetInput): Promise<Re
     }
   }
 
-  const selectedProvider = await pickRoundRobinProvider(
-    input.env.SDP_CACHE!,
-    enabledManagedProviders
-  );
+  const selectedProvider = await pickRoundRobinProvider(input.kv.cache, enabledManagedProviders);
   return {
     providerId: selectedProvider.id,
     projectId,
@@ -506,7 +505,7 @@ export async function resolveRoundRobinRpcTargets(
   );
   const projectId = getEffectiveProjectId(input.authProjectId, input.requestedProjectId);
   const orderedProviders = await pickRoundRobinProviderOrder(
-    input.env.SDP_CACHE!,
+    input.kv.cache,
     enabledManagedProviders
   );
 
@@ -520,7 +519,7 @@ export async function resolveRoundRobinRpcTargets(
   }));
 }
 
-export async function recordRpcRelayTelemetry(cache: KVNamespace, telemetry: RelayTelemetryInput) {
+export async function recordRpcRelayTelemetry(cache: KVStore, telemetry: RelayTelemetryInput) {
   const key = `${STATS_KEY_PREFIX}${telemetry.providerId}`;
   const existing = (await cache.get(key, "json")) as Partial<RpcProviderStatsRecord> | null;
   const stats: RpcProviderStatsRecord = {
@@ -556,7 +555,7 @@ export async function recordRpcRelayTelemetry(cache: KVNamespace, telemetry: Rel
 }
 
 async function getProviderStats(
-  cache: KVNamespace,
+  cache: KVStore,
   providerId: ResolvedRpcProviderId
 ): Promise<RpcProviderStatsSummary> {
   const key = `${STATS_KEY_PREFIX}${providerId}`;
@@ -564,13 +563,7 @@ async function getProviderStats(
   return toStatsSummary(existing ?? emptyStats());
 }
 
-export async function listRpcProviders(input: {
-  env: Env;
-  db: DatabaseClient;
-  organizationId: string;
-  authProjectId: string | null;
-  requestedProjectId: string | null;
-}) {
+export async function listRpcProviders(input: ResolveRpcTargetInput) {
   const managedProviders = resolveManagedProviders(input.env);
   const access = await getProviderAvailability(input.env, input.db, input.organizationId);
   const enabledManagedProviders = managedProviders.filter(
@@ -582,7 +575,7 @@ export async function listRpcProviders(input: {
     providerStatuses.push({
       id: provider.id,
       endpoint: maskEndpoint(provider.url),
-      stats: await getProviderStats(input.env.SDP_CACHE!, provider.id),
+      stats: await getProviderStats(input.kv.cache, provider.id),
     });
   }
 
@@ -595,7 +588,7 @@ export async function listRpcProviders(input: {
       projectId: resolvedTarget.projectId,
       selectionMode: resolvedTarget.selectionMode,
       endpoint: resolvedTarget.endpointLabel,
-      stats: await getProviderStats(input.env.SDP_CACHE!, resolvedTarget.providerId),
+      stats: await getProviderStats(input.kv.cache, resolvedTarget.providerId),
     },
     roundRobinOrder: enabledManagedProviders.map((provider) => provider.id),
   };
