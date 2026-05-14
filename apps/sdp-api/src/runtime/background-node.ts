@@ -23,24 +23,31 @@ export class NodeBackgroundRunner implements BackgroundRunner {
   // any drain is in flight. A boolean would be cleared by the first drain's
   // finally even if a second drain were still running.
   private drainCount = 0;
+  // Once any drain has completed, the runner is sealed: run() will refuse new
+  // work the same way it does during a drain. SIGTERM is a one-way event in
+  // production — the runner is built for that, not for reuse — and sealing
+  // closes the silent-tracking window between `await bg.awaitAll()` returning
+  // and `process.exit()` being called by the SIGTERM handler.
+  private sealed = false;
 
   get draining(): boolean {
     return this.drainCount > 0;
   }
 
   run(promise: Promise<unknown>): void {
-    if (this.drainCount > 0) {
-      // awaitAll() is in flight. The promise was already started by the caller;
-      // we can't undo its side effects, only choose not to track it. The
-      // current drain's snapshot is closed, so this task is not awaited and
-      // may be cut off if the process exits before it settles. Warn so the
-      // leak is visible, and surface any rejection separately — `.catch()` here
-      // both attaches the handler that logs and prevents an unhandledRejection.
+    if (this.drainCount > 0 || this.sealed) {
+      // The promise was already started by the caller; we can't undo its side
+      // effects, only choose not to track it. Either the current drain's
+      // snapshot is closed (drainCount > 0), or all drains have completed and
+      // the runner is sealed (sealed). Warn so the leak is visible, and surface
+      // any rejection separately — `.catch()` here both attaches the handler
+      // that logs and prevents an unhandledRejection.
+      const state = this.drainCount > 0 ? "during awaitAll() drain" : "after awaitAll() completed";
       console.warn(
-        "[NodeBackgroundRunner] run() called during awaitAll() drain — task not tracked (side effects already in flight)"
+        `[NodeBackgroundRunner] run() called ${state} — task not tracked (side effects already in flight)`
       );
       promise.catch((err) => {
-        console.warn("[NodeBackgroundRunner] untracked post-drain task rejected:", err);
+        console.warn("[NodeBackgroundRunner] untracked task rejected:", err);
       });
       return;
     }
@@ -63,6 +70,9 @@ export class NodeBackgroundRunner implements BackgroundRunner {
     try {
       await Promise.allSettled([...this.pending]);
     } finally {
+      // Seal before decrementing the refcount so the guard never sees a
+      // moment where both `drainCount === 0` and `sealed === false`.
+      this.sealed = true;
       this.drainCount--;
     }
   }

@@ -3,31 +3,38 @@ import { NodeBackgroundRunner } from "./background-node";
 
 describe("NodeBackgroundRunner", () => {
   it("awaitAll resolves once all tracked promises settle", async () => {
-    const bg = new NodeBackgroundRunner();
-    let aResolved = false;
-    let bResolved = false;
+    vi.useFakeTimers();
+    try {
+      const bg = new NodeBackgroundRunner();
+      let aResolved = false;
+      let bResolved = false;
 
-    bg.run(
-      new Promise<void>((resolve) =>
-        setTimeout(() => {
-          aResolved = true;
-          resolve();
-        }, 5)
-      )
-    );
-    bg.run(
-      new Promise<void>((resolve) =>
-        setTimeout(() => {
-          bResolved = true;
-          resolve();
-        }, 10)
-      )
-    );
+      bg.run(
+        new Promise<void>((resolve) =>
+          setTimeout(() => {
+            aResolved = true;
+            resolve();
+          }, 5)
+        )
+      );
+      bg.run(
+        new Promise<void>((resolve) =>
+          setTimeout(() => {
+            bResolved = true;
+            resolve();
+          }, 10)
+        )
+      );
 
-    await bg.awaitAll();
+      const drain = bg.awaitAll();
+      await vi.advanceTimersByTimeAsync(10);
+      await drain;
 
-    expect(aResolved).toBe(true);
-    expect(bResolved).toBe(true);
+      expect(aResolved).toBe(true);
+      expect(bResolved).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("awaitAll swallows rejections without throwing (matches CF waitUntil)", async () => {
@@ -37,33 +44,33 @@ describe("NodeBackgroundRunner", () => {
     await expect(bg.awaitAll()).resolves.toBeUndefined();
   });
 
-  it("settled promises are released from tracking", async () => {
+  it("after awaitAll() the runner is sealed — further run() calls are warned and not tracked", async () => {
     const bg = new NodeBackgroundRunner();
     bg.run(Promise.resolve());
-    bg.run(Promise.resolve());
     await bg.awaitAll();
-    // No good direct way to assert empty Set without exposing internals;
-    // a second awaitAll should be instantaneous and the runner should be
-    // reusable for new work.
-    let secondRoundDone = false;
-    bg.run(
-      new Promise<void>((resolve) =>
-        setTimeout(() => {
-          secondRoundDone = true;
-          resolve();
-        }, 1)
-      )
-    );
-    await bg.awaitAll();
-    expect(secondRoundDone).toBe(true);
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      bg.run(Promise.resolve());
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(warnSpy.mock.calls[0]?.[0]).toContain("after awaitAll() completed");
+      expect(warnSpy.mock.calls[0]?.[0]).toContain("not tracked");
+
+      // Second awaitAll() on a sealed runner is a no-op — the new task wasn't
+      // tracked, and the original pending set was cleared by the first drain.
+      await bg.awaitAll();
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
   it("run() during awaitAll() drain warns and does not track the late task", async () => {
-    const bg = new NodeBackgroundRunner();
-    let lateTaskDone = false;
+    vi.useFakeTimers();
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-
     try {
+      const bg = new NodeBackgroundRunner();
+      let lateTaskDone = false;
+
       bg.run(new Promise<void>((resolve) => setTimeout(resolve, 1)));
       const draining = bg.awaitAll();
       expect(bg.draining).toBe(true);
@@ -78,46 +85,61 @@ describe("NodeBackgroundRunner", () => {
         )
       );
       expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(warnSpy.mock.calls[0]?.[0]).toContain("during awaitAll() drain");
       expect(warnSpy.mock.calls[0]?.[0]).toContain("not tracked");
 
+      // Advance just enough for the first task to fire — the late task's 20ms
+      // timer stays pending, proving it isn't awaited by the drain.
+      await vi.advanceTimersByTimeAsync(1);
       await draining;
       expect(bg.draining).toBe(false);
       expect(lateTaskDone).toBe(false);
     } finally {
       warnSpy.mockRestore();
+      vi.useRealTimers();
     }
   });
 
-  it("untracked post-drain task rejection is surfaced via console.warn", async () => {
-    const bg = new NodeBackgroundRunner();
+  it("untracked task rejection is surfaced via console.warn", async () => {
+    vi.useFakeTimers();
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-
     try {
+      const bg = new NodeBackgroundRunner();
+
       bg.run(new Promise<void>((resolve) => setTimeout(resolve, 1)));
       const draining = bg.awaitAll();
       bg.run(Promise.reject(new Error("late boom")));
+
+      // Advance the first task's 1ms timer; advanceTimersByTimeAsync flushes
+      // microtasks too, so the rejection-logging .catch handler fires.
+      await vi.advanceTimersByTimeAsync(1);
       await draining;
-      // Give the rejection-logging .catch handler a tick to fire.
-      await new Promise((resolve) => setTimeout(resolve, 5));
 
       // Two warns: one at registration (drain guard), one for the rejection.
       expect(warnSpy).toHaveBeenCalledTimes(2);
-      expect(warnSpy.mock.calls[1]?.[0]).toContain("untracked post-drain task rejected");
+      expect(warnSpy.mock.calls[1]?.[0]).toContain("untracked task rejected");
     } finally {
       warnSpy.mockRestore();
+      vi.useRealTimers();
     }
   });
 
   it("concurrent awaitAll() calls refcount so draining stays true until the last", async () => {
-    const bg = new NodeBackgroundRunner();
-    bg.run(new Promise<void>((resolve) => setTimeout(resolve, 10)));
+    vi.useFakeTimers();
+    try {
+      const bg = new NodeBackgroundRunner();
+      bg.run(new Promise<void>((resolve) => setTimeout(resolve, 10)));
 
-    const drain1 = bg.awaitAll();
-    const drain2 = bg.awaitAll();
-    expect(bg.draining).toBe(true);
+      const drain1 = bg.awaitAll();
+      const drain2 = bg.awaitAll();
+      expect(bg.draining).toBe(true);
 
-    await Promise.all([drain1, drain2]);
-    expect(bg.draining).toBe(false);
+      await vi.advanceTimersByTimeAsync(10);
+      await Promise.all([drain1, drain2]);
+      expect(bg.draining).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("rejecting task fired during normal runtime does not emit unhandledRejection", async () => {
