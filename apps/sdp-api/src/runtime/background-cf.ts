@@ -11,6 +11,10 @@
 import type { BackgroundRunner } from "./background";
 
 export class WorkersBackgroundRunner implements BackgroundRunner {
+  // Drain is platform-managed on Workers; this flag is part of the interface
+  // contract but never flips here.
+  readonly draining = false;
+
   constructor(private readonly ctx: ExecutionContext) {}
 
   run(promise: Promise<unknown>): void {

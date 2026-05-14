@@ -28,4 +28,11 @@ export interface BackgroundRunner {
    * may return immediately.
    */
   awaitAll(): Promise<void>;
+
+  /**
+   * True while awaitAll() is in flight. Useful for diagnostics and for callers
+   * that want to refuse new work once shutdown has started. CF runtimes hand
+   * drain back to the platform and always report false.
+   */
+  readonly draining: boolean;
 }

@@ -18,17 +18,52 @@ import type { BackgroundRunner } from "./background";
 
 export class NodeBackgroundRunner implements BackgroundRunner {
   private readonly pending = new Set<Promise<unknown>>();
+  // Refcount, not boolean: concurrent awaitAll() calls each increment on entry
+  // and decrement on exit, so `draining` reports true for the entire window
+  // any drain is in flight. A boolean would be cleared by the first drain's
+  // finally even if a second drain were still running.
+  private drainCount = 0;
+
+  get draining(): boolean {
+    return this.drainCount > 0;
+  }
 
   run(promise: Promise<unknown>): void {
-    const tracked = promise.finally(() => {
-      this.pending.delete(tracked);
-    });
+    if (this.drainCount > 0) {
+      // awaitAll() is in flight. The promise was already started by the caller;
+      // we can't undo its side effects, only choose not to track it. The
+      // current drain's snapshot is closed, so this task is not awaited and
+      // may be cut off if the process exits before it settles. Warn so the
+      // leak is visible, and surface any rejection separately — `.catch()` here
+      // both attaches the handler that logs and prevents an unhandledRejection.
+      console.warn(
+        "[NodeBackgroundRunner] run() called during awaitAll() drain — task not tracked (side effects already in flight)"
+      );
+      promise.catch((err) => {
+        console.warn("[NodeBackgroundRunner] untracked post-drain task rejected:", err);
+      });
+      return;
+    }
+    // .catch(() => undefined) before .finally absorbs rejections at registration
+    // time, matching CF waitUntil's swallow-and-forget semantics. Without it, a
+    // rejecting task stays unhandled until awaitAll's Promise.allSettled picks
+    // it up — which never happens if the process exits before drain.
+    const tracked = promise
+      .catch(() => undefined)
+      .finally(() => {
+        this.pending.delete(tracked);
+      });
     this.pending.add(tracked);
   }
 
   async awaitAll(): Promise<void> {
-    // Snapshot — drain reflects in-flight work at call time; new tasks
-    // added after this point are not awaited.
-    await Promise.allSettled([...this.pending]);
+    // Snapshot — drain reflects in-flight work at call time. Late tasks are
+    // refused by the draining guard above, not silently lost.
+    this.drainCount++;
+    try {
+      await Promise.allSettled([...this.pending]);
+    } finally {
+      this.drainCount--;
+    }
   }
 }
