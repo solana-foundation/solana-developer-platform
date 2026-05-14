@@ -1,0 +1,28 @@
+---
+title: How payments work on SDP
+description: Wallets, tokens, signing modes, fees, and the data model that backs SDP payments.
+---
+
+This page introduces the building blocks behind SDP payments — wallets, tokens, signing modes, fees, and the underlying transfer model — so the rest of this section reads against a shared mental model.
+
+_This page is being authored as part of HOO-439. Sections below will cover:_
+
+## Custody wallets
+
+Where payment funds sit, how they're scoped to projects, and how SDP signs on their behalf.
+
+## Tokens and token accounts
+
+Stablecoins as the unit of value on Solana; token accounts as the per-wallet ledger entries.
+
+## Signing modes
+
+Execute (server-signs via custody) vs Prepare (your client signs). See [Prepare vs Execute](/docs/guides/prepare-vs-execute) for the full guide.
+
+## Fees and sponsorship
+
+How transaction fees work on Solana and how SDP can sponsor them.
+
+## The transfer data model
+
+SDP's flat `Transfer` record: states (`pending` → `processing` → `confirmed` → `finalized` → `failed`), direction (inbound / outbound), idempotency, signature linkage.

@@ -1,0 +1,32 @@
+---
+title: Ramp providers
+description: MoonPay, Lightspark, and BVNK — configuration, environment variables, and capability matrix.
+---
+
+SDP currently supports three ramp providers. This page documents the configuration each one needs and which environments / currencies they cover.
+
+_This page is being authored as part of HOO-439. Sections below will cover:_
+
+## Capability matrix
+
+| Provider | Onramp | Offramp | Sandbox | Compliance metadata |
+| --- | --- | --- | --- | --- |
+| MoonPay | ✓ | ✓ | ✓ | — |
+| Lightspark | ✓ | ✓ | — | — |
+| BVNK | ✓ | ✓ | ✓ | ✓ |
+
+## MoonPay
+
+Required env: `MOONPAY_API_KEY`, `MOONPAY_SECRET_KEY`. Optional: custom onramp / offramp URLs. Sandbox/production switch via `ENVIRONMENT`.
+
+## Lightspark
+
+Required env: `LIGHTSPARK_GRID_CLIENT_ID`, `LIGHTSPARK_GRID_CLIENT_SECRET`. Grid API base: `https://api.lightspark.com/grid/2025-10-13`.
+
+## BVNK
+
+Required env: `BVNK_AUTH_TYPE` (`bearer` | `hawk`), associated auth credentials, `BVNK_WALLET_ID`. Supports compliance metadata (`bvnkCompliance` on the request body).
+
+## Provider gating
+
+How `assertProviderAvailable` controls which providers an org sees.

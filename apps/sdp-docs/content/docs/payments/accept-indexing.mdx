@@ -1,0 +1,24 @@
+---
+title: Indexing and reconciliation
+description: List inbound transfers, paginate, and reconcile against your product ledger.
+---
+
+Use `GET /v1/payments/transfers` with filters to maintain your own ledger of inbound payments. The endpoint supports filtering by direction, status, token, wallet, and date range, with pagination via `page` and `pageSize`.
+
+_This page is being authored as part of HOO-439. Sections below will cover:_
+
+## Listing inbound transfers
+
+`GET /v1/payments/transfers?direction=inbound` with filters; pagination contract.
+
+## Deduplication
+
+Why `signature` is the right idempotency anchor (UNIQUE in SDP's data model).
+
+## Filtering for reconciliation
+
+Common patterns: by wallet, by token, by date window.
+
+## Building a delta-poll worker
+
+Last-seen timestamp pattern, handling resyncs, gap detection.

@@ -1,0 +1,26 @@
+---
+title: Ramps
+description: Fiat on-ramps and off-ramps — let users buy crypto with fiat or cash out from a wallet.
+---
+
+SDP wraps several ramp providers behind two endpoints: `POST /v1/payments/ramps/onramp/execute` (fiat → crypto) and `POST /v1/payments/ramps/offramp/execute` (crypto → fiat). Each call returns a provider-hosted redirect URL that you hand the end-user; your backend tracks status by polling the returned reference.
+
+_This page is being authored as part of HOO-439. Sections below will cover:_
+
+## Onramp flow
+
+Request shape, KYC handoff, redirect URL, callback / polling.
+
+## Offramp flow
+
+Source wallet, fiat destination, compliance metadata.
+
+## Status states
+
+`pending` → `processing` → `completed` / `failed` on the ramp execution record.
+
+## Provider selection
+
+When SDP picks a provider for you vs. when you specify one explicitly.
+
+See [Ramp providers](/docs/payments/ramps-providers) for the per-provider configuration matrix.

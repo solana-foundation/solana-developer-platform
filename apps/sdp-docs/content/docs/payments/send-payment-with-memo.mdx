@@ -1,0 +1,24 @@
+---
+title: Payment with memo
+description: Attach an order ID, invoice number, or customer reference to an SDP transfer.
+---
+
+Memos let you carry an order ID, invoice number, or customer reference alongside a payment so your indexer can reconcile each on-chain transfer back to your product database. The `memo` field on `POST /v1/payments/transfers` (and its `/prepare` variant) accepts an arbitrary UTF-8 string and is preserved on the transfer record.
+
+_This page is being authored as part of HOO-439. Sections below will cover:_
+
+## When to use a memo
+
+Common patterns: order IDs, invoice numbers, end-customer references.
+
+## API usage
+
+`memo` field on `POST /v1/payments/transfers` — see the [API reference](/docs/reference/api/payments).
+
+## Trade-offs vs. reference accounts
+
+When a memo is enough and when you'd reach for Solana Pay's reference-account pattern instead.
+
+## Indexing implications
+
+How memos surface in `GET /v1/payments/transfers` results and in your reconciliation pipeline.

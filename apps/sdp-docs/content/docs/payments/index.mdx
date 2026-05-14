@@ -1,0 +1,33 @@
+---
+title: Payments
+description: Build payments on Solana with SDP — concepts, send, accept, and payment operations.
+---
+
+SDP provides a Solana-native payments stack: stablecoin transfers, fiat on-ramps and off-ramps, wallet policies, and reconciliation primitives. This section mirrors the structure of the [public Solana payments documentation](https://solana.com/docs/payments) and maps each workflow to the SDP APIs you use to ship it.
+
+## What's in this section
+
+- **[How payments work on SDP](/docs/payments/concepts)** — wallets, tokens, signing modes, fees, and the data model behind transfers.
+- **Send payments** — outbound flows.
+  - [Basic payment](/docs/payments/send-basic-payment) — single transfer, both Execute and Prepare signing modes.
+  - [Payment with memo](/docs/payments/send-payment-with-memo) — attach order/customer references to a transfer.
+  - [Payouts and disbursements](/docs/payments/send-payouts) — batched outbound transfers with idempotency.
+- **Accept payments** — inbound flows.
+  - [Accept overview](/docs/payments/accept-overview) — receiving-address convention and integration options.
+  - [Verification](/docs/payments/accept-verification) — transfer-status semantics and finality guidance.
+  - [Indexing and reconciliation](/docs/payments/accept-indexing) — listing inbound transfers for your ledger.
+- **Ramps** — fiat on-ramps and off-ramps.
+  - [Ramps overview](/docs/payments/ramps) — onramp and offramp endpoints, KYC handoff, provider redirect.
+  - [Ramp providers](/docs/payments/ramps-providers) — MoonPay, Lightspark, and BVNK configuration.
+- **Wallet operations**
+  - [Wallet policies](/docs/payments/wallet-policies) — destination allowlist and transfer limits.
+  - [Wallet balances](/docs/payments/wallet-balances) — per-wallet token balances with optional USD valuation.
+
+## API reference
+
+Every page above links to the relevant endpoints in the auto-generated [Payments API reference](/docs/reference/api/payments).
+
+## Related
+
+- [End-to-end payment flow](/docs/tutorials/end-to-end-payment-flow) — high-level tutorial covering quote → settle.
+- [Prepare vs Execute](/docs/guides/prepare-vs-execute) — SDP's two signing modes (used throughout payments).

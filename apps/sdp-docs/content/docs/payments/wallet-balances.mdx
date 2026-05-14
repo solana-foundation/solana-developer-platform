@@ -1,0 +1,24 @@
+---
+title: Wallet balances
+description: Per-wallet token balances with optional USD valuation via SDP.
+---
+
+`GET /v1/payments/wallets/{walletId}/balances` returns every SPL token balance held by a custody wallet, along with optional USD valuation if a price source is configured.
+
+_This page is being authored as part of HOO-439. Sections below will cover:_
+
+## Response shape
+
+`balances` array — each entry has token symbol, mint, raw amount, decimals, and optional `usdPrice` / `usdValue`.
+
+## Use cases
+
+Account dashboards, pre-transfer balance checks, treasury accounting.
+
+## Pricing and freshness
+
+When USD values are populated, how often they refresh, and how to fall back when they're not available.
+
+## Differences from on-chain RPC
+
+Why use this endpoint vs. calling `getTokenAccountsByOwner` directly.

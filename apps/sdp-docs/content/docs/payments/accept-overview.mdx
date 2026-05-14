@@ -1,0 +1,29 @@
+---
+title: Accept payments
+description: Receiving-address convention, integration options, and how to track inbound payments with SDP.
+---
+
+SDP does not ship a hosted checkout primitive. To accept payments today, you publish a receiving address (typically a custody wallet you control) and track inbound transfers via `GET /v1/payments/transfers?direction=inbound`. This page is the entry point for that flow.
+
+_This page is being authored as part of HOO-439. Sections below will cover:_
+
+## Receiving-address convention
+
+Per-merchant custody wallets, address rotation, and address-vs-token-account semantics.
+
+## Integration options
+
+Direct address-monitoring (this section) vs. building on Solana Pay (out of scope for SDP today; tracked as a follow-up).
+
+## What SDP gives you today
+
+`GET /v1/payments/transfers?direction=inbound` for the indexed view; `GET /v1/payments/transfers/{id}` for a single payment's status.
+
+## What SDP does **not** give you yet
+
+No payment-intent / checkout-session object, no settlement webhooks. Status is polled.
+
+## Next steps
+
+- [Verification](/docs/payments/accept-verification) — confirming a payment landed and reached finality.
+- [Indexing and reconciliation](/docs/payments/accept-indexing) — building a ledger from inbound transfers.

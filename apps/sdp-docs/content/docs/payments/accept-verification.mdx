@@ -1,0 +1,24 @@
+---
+title: Verifying a payment
+description: Transfer-status semantics, finality on Solana, and recommended polling cadence.
+---
+
+When a customer pays into a wallet you control, the inbound transfer moves through SDP's status states (`pending` → `processing` → `confirmed` → `finalized`). This page covers how to use those states to decide when a payment is safe to act on.
+
+_This page is being authored as part of HOO-439. Sections below will cover:_
+
+## Status lifecycle
+
+Definitions of `pending`, `processing`, `confirmed`, `finalized`, `failed` on the `Transfer` record.
+
+## Finality on Solana
+
+Why `finalized` is the safest signal, and when `confirmed` is acceptable.
+
+## Polling cadence
+
+Recommended interval for `GET /v1/payments/transfers/{id}` (TBD — confirm with backend before publish).
+
+## Signature, slot, blockTime
+
+Fields you can hand to a block explorer or your indexer for independent verification.

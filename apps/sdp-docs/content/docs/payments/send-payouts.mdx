@@ -1,0 +1,24 @@
+---
+title: Payouts and disbursements
+description: Batched outbound transfers, idempotency, and reconciling payout runs with SDP.
+---
+
+Payouts are batches of outbound transfers — marketplace seller payouts, payroll, affiliate disbursements. SDP handles each payment as an individual `POST /v1/payments/transfers` call with an idempotency key, and `GET /v1/payments/transfers?direction=outbound` gives you the reconciliation view.
+
+_This page is being authored as part of HOO-439. Sections below will cover:_
+
+## Designing a payout run
+
+One transfer per recipient; idempotency-key strategy; rate-limit considerations.
+
+## Idempotency
+
+Why every payout transfer needs an `Idempotency-Key` and how SDP guarantees at-most-once execution.
+
+## Reconciling a run
+
+Using `GET /v1/payments/transfers?direction=outbound&from=…&to=…` to roll up a payout batch.
+
+## Failure modes
+
+Partial-success handling, retry strategy, status transitions.

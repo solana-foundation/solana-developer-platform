@@ -1,0 +1,28 @@
+---
+title: Wallet policies
+description: Destination allowlist and transfer limits per custody wallet.
+---
+
+Wallet policies let you constrain how a custody wallet can send funds: a destination allowlist (only these addresses), a maximum per-transfer amount, and a maximum daily amount. Policies are managed via `GET` and `PUT` on `/v1/payments/wallets/{walletId}/policies`.
+
+_This page is being authored as part of HOO-439. Sections below will cover:_
+
+## When to use policies
+
+Treasury operations, automated payout wallets, compliance-required limits.
+
+## Destination allowlist
+
+Adding / removing approved destinations; enforcement at transfer time.
+
+## Transfer limits
+
+`maxTransferAmount` (per-tx) and `maxDailyAmount` (rolling 24h) semantics.
+
+## Updating policies
+
+`PUT /v1/payments/wallets/{walletId}/policies` — full-replace semantics, audit trail.
+
+## Interaction with compliance
+
+How wallet policies compose with org-level compliance screening.
