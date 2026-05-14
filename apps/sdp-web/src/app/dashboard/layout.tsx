@@ -18,8 +18,9 @@ export default async function DashboardLayout({ children }: { children: ReactNod
 
   return (
     <DashboardWorkspaceProvider
+      key={`${userId ?? "anonymous"}:${orgId ?? "no-org"}`}
       dashboardAccess={dashboardAccess}
-      dashboardCacheScope={{ orgId: orgId ?? null, userId: userId ?? null }}
+      serverDashboardCacheScope={{ orgId: orgId ?? null, userId: userId ?? null }}
     >
       <NetworkDebugProvider>
         <DashboardShell>{children}</DashboardShell>
