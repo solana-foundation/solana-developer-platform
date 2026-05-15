@@ -10,6 +10,7 @@ import type { Context, Next } from "hono";
 import { getCookie } from "hono/cookie";
 import { getDb } from "@/db";
 import { AppError } from "@/lib/errors";
+import type { KVStore } from "@/runtime/kv";
 import type { Env } from "@/types/env";
 
 const SESSION_COOKIE_NAME = "sdp_session";
@@ -27,11 +28,12 @@ export function sessionAuthMiddleware() {
     }
 
     // Try KV cache first
-    let cachedSession = await getSessionFromKV(c.env.SDP_SESSIONS, sessionId);
+    const sessionsKV = c.var.kv.sessions;
+    let cachedSession = await getSessionFromKV(sessionsKV, sessionId);
 
     if (!cachedSession) {
       // Fallback to Postgres
-      cachedSession = await getSessionFromDatabase(getDb(c.env), c.env.SDP_SESSIONS, sessionId);
+      cachedSession = await getSessionFromDatabase(getDb(c.env), sessionsKV, sessionId);
     }
 
     if (!cachedSession) {
@@ -41,7 +43,7 @@ export function sessionAuthMiddleware() {
     // Check expiration
     if (new Date(cachedSession.expiresAt) < new Date()) {
       // Clean up expired session
-      await c.env.SDP_SESSIONS?.delete(`session:${sessionId}`);
+      await sessionsKV.delete(`session:${sessionId}`);
       throw new AppError("UNAUTHORIZED", "Session expired");
     }
 
@@ -64,10 +66,11 @@ export function optionalSessionAuth() {
 
     if (sessionId) {
       try {
-        let cachedSession = await getSessionFromKV(c.env.SDP_SESSIONS, sessionId);
+        const sessionsKV = c.var.kv.sessions;
+        let cachedSession = await getSessionFromKV(sessionsKV, sessionId);
 
         if (!cachedSession) {
-          cachedSession = await getSessionFromDatabase(getDb(c.env), c.env.SDP_SESSIONS, sessionId);
+          cachedSession = await getSessionFromDatabase(getDb(c.env), sessionsKV, sessionId);
         }
 
         if (cachedSession && new Date(cachedSession.expiresAt) >= new Date()) {
@@ -86,14 +89,8 @@ export function optionalSessionAuth() {
 /**
  * Get session from KV cache
  */
-async function getSessionFromKV(
-  kv: KVNamespace | undefined,
-  sessionId: string
-): Promise<CachedSession | null> {
-  if (!kv) {
-    return null;
-  }
-  return kv.get(`session:${sessionId}`, "json");
+async function getSessionFromKV(kv: KVStore, sessionId: string): Promise<CachedSession | null> {
+  return kv.get<CachedSession>(`session:${sessionId}`, "json");
 }
 
 /**
@@ -101,7 +98,7 @@ async function getSessionFromKV(
  */
 async function getSessionFromDatabase(
   db: DatabaseClient,
-  kv: KVNamespace | undefined,
+  kv: KVStore,
   sessionId: string
 ): Promise<CachedSession | null> {
   const row = await db
@@ -139,11 +136,9 @@ async function getSessionFromDatabase(
   };
 
   // Cache to KV
-  if (kv) {
-    await kv.put(`session:${sessionId}`, JSON.stringify(cachedSession), {
-      expirationTtl: 3600, // 1 hour
-    });
-  }
+  await kv.put(`session:${sessionId}`, JSON.stringify(cachedSession), {
+    expirationTtl: 3600, // 1 hour
+  });
 
   return cachedSession;
 }

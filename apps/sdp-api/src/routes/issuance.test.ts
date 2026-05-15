@@ -10,6 +10,7 @@ import app from "@/index";
 import { hashString } from "@/lib/hash";
 import type { Address } from "@/lib/solana";
 import * as AuthorityResolution from "@/routes/issuance/handlers/authority-resolution";
+import { createKVStoreSet } from "@/runtime/factory";
 import { MosaicService } from "@/services/mosaic";
 import * as SolanaServices from "@/services/solana";
 import { TokenService } from "@/services/token.service";
@@ -221,13 +222,12 @@ describe("Issuance Routes", () => {
 
   beforeEach(async () => {
     const db = getDb(env);
-    const apiKeysKV = (env as { SDP_API_KEYS: KVNamespace }).SDP_API_KEYS;
-    const rateLimitKV = (env as { SDP_RATE_LIMITS: KVNamespace }).SDP_RATE_LIMITS;
+    const kv = createKVStoreSet(env);
 
     // Clear rate limit KV to prevent 429 errors between tests
-    const keys = await rateLimitKV.list();
+    const keys = await kv.rateLimits.list();
     for (const key of keys.keys) {
-      await rateLimitKV.delete(key.name);
+      await kv.rateLimits.delete(key.name);
     }
 
     // Clear token-related tables
@@ -323,7 +323,7 @@ describe("Issuance Routes", () => {
       .run();
 
     // Cache API key in KV
-    await apiKeysKV.put(`key:${apiKeyHash}`, JSON.stringify(TEST_PROJECT_CACHED_KEY));
+    await kv.apiKeys.put(`key:${apiKeyHash}`, JSON.stringify(TEST_PROJECT_CACHED_KEY));
   });
 
   describe("GET /v1/issuance/transactions", () => {

@@ -661,14 +661,14 @@ export function TokenManagementWorkspace({
     }
   }, [activeTab, fundManagementModalAction]);
 
-  const handleCopy = async (value: string | null) => {
+  const handleCopy = async (value: string | null, successMessage = "Copied") => {
     if (!value) {
       return;
     }
 
     try {
       await navigator.clipboard.writeText(value);
-      toast.success("Copied");
+      toast.success(successMessage);
     } catch {
       toast.error("Unable to copy");
     }
@@ -1284,6 +1284,7 @@ export function TokenManagementWorkspace({
   return (
     <div className="space-y-8 pb-8">
       <TokenManagementHeader
+        tokenId={token.id}
         tokenName={token.name}
         tokenSymbol={token.symbol}
         tokenStatus={token.status}
@@ -1296,6 +1297,7 @@ export function TokenManagementWorkspace({
         pauseDisabledReason={pauseDisabledReason}
         canManageTokenAdmin={canManageTokenAdmin}
         onCopyAddress={() => void handleCopy(token.mintAddress)}
+        onCopyTokenId={() => void handleCopy(token.id, "Token ID copied")}
         onDeploy={() => {
           if (!canDeployToken) {
             return;

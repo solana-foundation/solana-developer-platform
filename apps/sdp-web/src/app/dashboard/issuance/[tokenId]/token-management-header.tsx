@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { TokenDisabledActionTooltip } from "./token-disabled-action-tooltip";
 
 interface TokenManagementHeaderProps {
+  tokenId: string;
   tokenName: string;
   tokenSymbol: string;
   tokenStatus: "pending" | "active" | "paused" | "revoked";
@@ -18,11 +19,13 @@ interface TokenManagementHeaderProps {
   deployDisabledReason?: string | null;
   pauseDisabledReason?: string | null;
   onCopyAddress: () => void;
+  onCopyTokenId: () => void;
   onDeploy: () => void;
   onUnpause: () => void;
 }
 
 export function TokenManagementHeader({
+  tokenId,
   tokenName,
   tokenSymbol,
   tokenStatus,
@@ -35,6 +38,7 @@ export function TokenManagementHeader({
   deployDisabledReason,
   pauseDisabledReason,
   onCopyAddress,
+  onCopyTokenId,
   onDeploy,
   onUnpause,
 }: TokenManagementHeaderProps) {
@@ -77,6 +81,23 @@ export function TokenManagementHeader({
               <span className="rounded-full border border-[rgba(28,28,29,0.1)] bg-white px-3 py-1 text-[13px] font-medium text-[rgba(28,28,29,0.62)]">
                 {tokenSymbol}
               </span>
+            </div>
+            <div
+              className="mt-2 flex flex-wrap items-center gap-2 text-[14px] text-[rgba(28,28,29,0.68)]"
+              data-testid="token-id-row"
+            >
+              <span className="text-[13px] font-medium tracking-[-0.1px] text-[rgba(28,28,29,0.54)]">
+                Token ID:
+              </span>
+              <span className="font-mono text-[13px] tracking-[-0.1px]">{tokenId}</span>
+              <button
+                type="button"
+                onClick={onCopyTokenId}
+                className="inline-flex h-7 w-7 items-center justify-center rounded-[10px] border border-[rgba(28,28,29,0.12)] bg-white text-[rgba(28,28,29,0.62)] transition-colors hover:text-[#1c1c1d]"
+                aria-label="Copy token ID"
+              >
+                <Copy className="h-3.5 w-3.5" />
+              </button>
             </div>
           </div>
         </div>

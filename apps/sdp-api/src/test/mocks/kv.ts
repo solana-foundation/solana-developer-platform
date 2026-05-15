@@ -1,8 +1,12 @@
 /**
- * KV Namespace test helpers
+ * KV store test helpers
+ *
+ * Operate through the runtime-neutral KVStore abstraction so the helpers stay
+ * valid once a Redis-backed implementation lands (HOO-510).
  */
 
 import type { CachedApiKey } from "@sdp/types";
+import { createKVStoreSet } from "@/runtime/factory";
 import type { Env } from "@/types/env";
 
 /**
@@ -13,7 +17,8 @@ export async function seedCachedApiKey(
   keyHash: string,
   data: CachedApiKey
 ): Promise<void> {
-  await env.SDP_API_KEYS!.put(`key:${keyHash}`, JSON.stringify(data), {
+  const kv = createKVStoreSet(env);
+  await kv.apiKeys.put(`key:${keyHash}`, JSON.stringify(data), {
     expirationTtl: 3600,
   });
 }
@@ -22,12 +27,13 @@ export async function seedCachedApiKey(
  * Clears all KV data
  */
 export async function clearKVNamespaces(env: Env): Promise<void> {
-  const namespaces = [env.SDP_API_KEYS!, env.SDP_RATE_LIMITS!, env.SDP_CACHE!];
+  const kv = createKVStoreSet(env);
+  const stores = [kv.apiKeys, kv.rateLimits, kv.cache];
 
-  for (const ns of namespaces) {
-    const list = await ns.list();
+  for (const store of stores) {
+    const list = await store.list();
     for (const key of list.keys) {
-      await ns.delete(key.name);
+      await store.delete(key.name);
     }
   }
 }
@@ -40,7 +46,8 @@ export async function seedRateLimit(env: Env, identifier: string, count: number)
   const windowStart = Math.floor(Date.now() / windowMs) * windowMs;
   const key = `ratelimit:${identifier}:${windowStart}`;
 
-  await env.SDP_RATE_LIMITS!.put(key, JSON.stringify({ count, windowStart }), {
+  const kv = createKVStoreSet(env);
+  await kv.rateLimits.put(key, JSON.stringify({ count, windowStart }), {
     expirationTtl: 120,
   });
 }

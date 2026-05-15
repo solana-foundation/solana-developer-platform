@@ -7,6 +7,7 @@
 
 import type { CachedSession, Permission, Session } from "@sdp/types";
 import { getPermissionsForOrgRole } from "@sdp/types";
+import type { KVStore } from "@/runtime/kv";
 
 // Session TTL: 7 days
 const SESSION_TTL_SECONDS = 7 * 24 * 60 * 60;
@@ -23,7 +24,7 @@ export interface SessionMetadata {
 export class SessionService {
   constructor(
     private db: DatabaseClient,
-    private sessionsKV: KVNamespace
+    private sessionsKV: KVStore
   ) {}
 
   /**
@@ -236,7 +237,7 @@ export class SessionService {
   // ═══════════════════════════════════════════════════════════════════════════
 
   private async getSessionCache(sessionId: string): Promise<CachedSession | null> {
-    return this.sessionsKV.get(`session:${sessionId}`, "json");
+    return this.sessionsKV.get<CachedSession>(`session:${sessionId}`, "json");
   }
 
   private async setSessionCache(sessionId: string, data: CachedSession): Promise<void> {

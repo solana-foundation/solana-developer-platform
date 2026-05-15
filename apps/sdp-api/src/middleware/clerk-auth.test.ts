@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import type { ClerkJwtPayload } from "@/lib/clerk-token";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
+import { kvStoreMiddleware } from "@/middleware/kv-store";
 import { rateLimitMiddleware } from "@/middleware/rate-limit";
 import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
@@ -106,6 +107,7 @@ describe("Clerk auth request cache", () => {
 
     const app = new Hono<{ Bindings: Env }>();
 
+    app.use("*", kvStoreMiddleware());
     app.use("*", async (c, next) => {
       c.set("verifiedClerkJwt", { token, payload });
       await next();
