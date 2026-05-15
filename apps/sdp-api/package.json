@@ -33,6 +33,7 @@
     "@react-email/render": "2.0.8",
     "@sdp/types": "workspace:*",
     "@sentry/cloudflare": "^10.51.0",
+    "@sentry/node": "^10.51.0",
     "@solana-program/system": "catalog:",
     "@solana-program/token-2022": "catalog:",
     "@solana/addresses": "catalog:",
