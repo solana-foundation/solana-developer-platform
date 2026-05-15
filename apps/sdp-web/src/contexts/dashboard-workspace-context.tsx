@@ -12,6 +12,7 @@ import {
   useState,
 } from "react";
 import { SWRConfig } from "swr";
+import { Button } from "@/components/ui/button";
 import type { DashboardAccess } from "@/lib/dashboard-access";
 import { DASHBOARD_SWR_CONFIG } from "@/lib/dashboard-swr-config";
 import { useDashboardUrlState } from "@/lib/dashboard-url-state";
@@ -56,10 +57,15 @@ export function getDashboardCacheScopeKey(scope: DashboardCacheScope): string {
 }
 
 function DashboardScopeRefreshFallback() {
+  const router = useRouter();
+
   return (
     <main className="min-h-screen bg-[var(--sdp-shell-bg)] p-0 text-text-extra-high">
-      <div className="mx-auto max-w-5xl border border-border-extra-light bg-white/70 p-6">
+      <div className="mx-auto max-w-5xl space-y-4 border border-border-extra-light bg-white/70 p-6">
         <p className="text-sm text-text-low">Loading dashboard...</p>
+        <Button type="button" variant="ghost" size="sm" onClick={() => router.refresh()}>
+          Retry
+        </Button>
       </div>
     </main>
   );
@@ -110,7 +116,7 @@ export function DashboardWorkspaceProvider({
   );
   const serverDashboardCacheScopeKey = useMemo(
     () => getDashboardCacheScopeKey(serverDashboardCacheScope),
-    [serverDashboardCacheScope]
+    [serverDashboardCacheScope.orgId, serverDashboardCacheScope.userId]
   );
   const dashboardScopeIsFresh = liveDashboardCacheScopeKey === serverDashboardCacheScopeKey;
   const shouldRenderScopeRefreshFallback = auth.isLoaded && !dashboardScopeIsFresh;
