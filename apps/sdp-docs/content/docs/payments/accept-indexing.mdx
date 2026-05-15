@@ -1,24 +1,124 @@
 ---
 title: Indexing and reconciliation
-description: List inbound transfers, paginate, and reconcile against your product ledger.
+description: List inbound transfers, paginate, dedupe, and reconcile against your product ledger.
 ---
 
-Use `GET /v1/payments/transfers` with filters to maintain your own ledger of inbound payments. The endpoint supports filtering by direction, status, token, wallet, and date range, with pagination via `page` and `pageSize`.
-
-_This page is being authored as part of HOO-439. Sections below will cover:_
+`GET /v1/payments/transfers` is the workhorse for reconciliation. It returns transfers across your organization's custody wallets with filters for direction, status, token, wallet, and date range, paginated. Use it to maintain a local mirror of SDP transfers, to match inbound payments to orders, and to drive your delta-polling worker.
 
 ## Listing inbound transfers
 
-`GET /v1/payments/transfers?direction=inbound` with filters; pagination contract.
+The minimal inbound-only request:
+
+<Tabs items={["curl", "TypeScript"]}>
+<Tab value="curl">
+```bash
+curl "https://api.solana.com/v1/payments/transfers?direction=inbound&pageSize=50" \
+  -H "Authorization: Bearer sk_test_..."
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript
+const url = new URL("https://api.solana.com/v1/payments/transfers");
+url.searchParams.set("direction", "inbound");
+url.searchParams.set("pageSize", "50");
+
+const res = await fetch(url, {
+  headers: { Authorization: "Bearer sk_test_..." },
+});
+const { data } = await res.json();
+// data.items: Transfer[]
+// data.page, data.pageSize, data.total
+```
+</Tab>
+</Tabs>
+
+### Query parameters
+
+| Parameter | Type | Notes |
+| --- | --- | --- |
+| `direction` | `inbound` \| `outbound` | Common filter. Inbound = payments to wallets you control. |
+| `status` | `pending` \| `processing` \| `confirmed` \| `finalized` \| `failed` | Scope to a single state. |
+| `wallet` | string | SDP custody wallet ID. |
+| `walletAddress` | string | Solana address (alternative to `wallet`). |
+| `token` | string | SDP token ID or on-chain mint. |
+| `from`, `to` | ISO 8601 datetime | Time-window filter on `createdAt`. Use with offset (`2026-05-14T00:00:00Z`). |
+| `page` | integer | Default `1`. |
+| `pageSize` | integer | Default `20`, max `100`. |
 
 ## Deduplication
 
-Why `signature` is the right idempotency anchor (UNIQUE in SDP's data model).
+Two natural dedup keys:
 
-## Filtering for reconciliation
+1. **`Transfer.id`** — SDP-internal, immutable, present on every transfer (including `pending` ones with no signature yet). Use this as your local primary key.
+2. **`Transfer.signature`** — the on-chain signature, populated from `processing` onwards. **`UNIQUE` across SDP's transfers table.** Two records cannot share a signature. Use this if you need to dedupe across multiple data sources (SDP + a parallel chain indexer, say).
 
-Common patterns: by wallet, by token, by date window.
+In practice: store transfers in your reconciliation table keyed by SDP `Transfer.id`, and assert `signature` uniqueness once it is populated.
 
-## Building a delta-poll worker
+## Reconciling an order
 
-Last-seen timestamp pattern, handling resyncs, gap detection.
+The typical inbound match cycle:
+
+1. **Read** the recent inbound transfers for the relevant token and merchant wallet:
+   ```
+   GET /v1/payments/transfers
+     ?direction=inbound
+     &token=<mint or token id>
+     &wallet=<merchant custody wallet id>
+     &from=<since last reconciled>
+     &pageSize=100
+   ```
+2. **For each transfer**, check whether its `memo` or `referenceAddress` matches an unpaid order in your `orders` table.
+3. **If matched**, mark the order paid, record the SDP `Transfer.id`, and dispatch downstream side effects (email, shipment, ledger entry).
+4. **If unmatched**, leave the transfer for the next pass (it may be an early-arrival for an order you haven't staged yet) or flag it for manual review after a grace window.
+
+Per-order amount-and-token assertions are also worth running — your `orders` row should know what it expects to receive, and the inbound transfer should match exactly.
+
+## Solana Pay reference accounts
+
+If you constructed a Solana Pay URL or used the `Prepare` transfer endpoint with `referenceAddress`, the on-chain transaction carries the reference pubkey as an account meta. SDP exposes the same field in the inbound transfer record (under the transfer's references / addresses metadata depending on how the transaction was built). Matching by reference is stronger than matching by memo because it requires no trust in the sender's metadata — anyone can verify the link by inspecting the transaction.
+
+## A delta-poll worker
+
+A reconciliation worker that wakes on a tick and asks "what is new since last time":
+
+<Tabs items={["TypeScript"]}>
+<Tab value="TypeScript">
+```typescript
+async function reconcileTick(state: WorkerState) {
+  const from = state.lastSeenIso;
+  const to = new Date().toISOString();
+
+  for await (const tr of listInbound({ from, to })) {
+    if (await alreadySeen(tr.id)) continue;
+
+    const order = await findOrderByMemoOrReference(tr.memo, tr.referenceAddress);
+    if (!order) {
+      await persistUnmatched(tr);
+      continue;
+    }
+
+    if (tr.status === "finalized") {
+      await markOrderPaid(order, tr);
+    }
+    await persistSeen(tr.id, tr.status);
+  }
+
+  state.lastSeenIso = to;
+}
+```
+</Tab>
+</Tabs>
+
+Notes:
+
+- Persist the high-water mark (`lastSeenIso`) after the pass completes so re-tries pick up at the same window.
+- Allow a small overlap (re-query the last few seconds on each tick) to avoid missing transfers that arrive at the boundary.
+- Always re-fetch a transfer to upgrade its status — a transfer seen as `confirmed` in one tick will appear as `finalized` in a later tick.
+- Use `pageSize=100` and the async iterator pattern (see [Payouts and disbursements](/docs/payments/send-payouts)) to handle large windows.
+
+## Related
+
+- [Verifying a payment](/docs/payments/accept-verification) — single-transfer status reads.
+- [Accept overview](/docs/payments/accept-overview) — the broader inbound flow.
+- [Payouts and disbursements](/docs/payments/send-payouts) — the same list endpoint used outbound.
+- [Payments API reference](/docs/reference/api/payments) — full endpoint reference.

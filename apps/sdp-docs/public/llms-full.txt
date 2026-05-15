@@ -29,22 +29,22 @@
 - [Issuance Token Types](https://platform.solana.com/docs/reference/issuance-token-types): Supported issuance templates and default controls.
 
 ## Payments
-- [Payments](https://platform.solana.com/docs/payments): Build payments on Solana with SDP — concepts, send, accept, and payment operations.
+- [Payments](https://platform.solana.com/docs/payments): Build payments on Solana with SDP — concepts, send, accept, ramps, and wallet operations.
 - [How payments work on SDP](https://platform.solana.com/docs/payments/concepts): Wallets, tokens, signing modes, fees, and the data model that backs SDP payments.
 
 ## Send Payments
 - [Basic payment](https://platform.solana.com/docs/payments/send-basic-payment): Send a single token transfer with SDP, using either Execute or Prepare mode.
 - [Payment with memo](https://platform.solana.com/docs/payments/send-payment-with-memo): Attach an order ID, invoice number, or customer reference to an SDP transfer.
-- [Payouts and disbursements](https://platform.solana.com/docs/payments/send-payouts): Batched outbound transfers, idempotency, and reconciling payout runs with SDP.
+- [Payouts and disbursements](https://platform.solana.com/docs/payments/send-payouts): Run batched outbound transfers, deduplicate retries, and reconcile a payout batch with SDP.
 
 ## Accept Payments
 - [Accept payments](https://platform.solana.com/docs/payments/accept-overview): Receiving-address convention, integration options, and how to track inbound payments with SDP.
-- [Verifying a payment](https://platform.solana.com/docs/payments/accept-verification): Transfer-status semantics, finality on Solana, and recommended polling cadence.
-- [Indexing and reconciliation](https://platform.solana.com/docs/payments/accept-indexing): List inbound transfers, paginate, and reconcile against your product ledger.
+- [Verifying a payment](https://platform.solana.com/docs/payments/accept-verification): Transfer-status semantics, finality on Solana, and recommended polling cadence for SDP transfers.
+- [Indexing and reconciliation](https://platform.solana.com/docs/payments/accept-indexing): List inbound transfers, paginate, dedupe, and reconcile against your product ledger.
 
 ## Ramps
-- [Ramps](https://platform.solana.com/docs/payments/ramps): Fiat on-ramps and off-ramps — let users buy crypto with fiat or cash out from a wallet.
-- [Ramp providers](https://platform.solana.com/docs/payments/ramps-providers): MoonPay, Lightspark, and BVNK — configuration, environment variables, and capability matrix.
+- [Ramps](https://platform.solana.com/docs/payments/ramps): Fiat on-ramps and off-ramps — let users buy crypto with fiat or cash out from a wallet through SDP.
+- [Ramp providers](https://platform.solana.com/docs/payments/ramps-providers): MoonPay, Lightspark, and BVNK — capability matrix, configuration, and per-provider notes.
 
 ## Wallet Operations
 - [Wallet policies](https://platform.solana.com/docs/payments/wallet-policies): Destination allowlist and transfer limits per custody wallet.

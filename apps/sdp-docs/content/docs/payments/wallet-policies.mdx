@@ -3,26 +3,118 @@ title: Wallet policies
 description: Destination allowlist and transfer limits per custody wallet.
 ---
 
-Wallet policies let you constrain how a custody wallet can send funds: a destination allowlist (only these addresses), a maximum per-transfer amount, and a maximum daily amount. Policies are managed via `GET` and `PUT` on `/v1/payments/wallets/{walletId}/policies`.
+Wallet policies constrain how a custody wallet can move funds. You set a destination allowlist (only these addresses can receive transfers from this wallet) and transfer limits (a per-transfer cap and a rolling daily cap). Policies are managed via `GET` and `PUT` on `/v1/payments/wallets/{walletId}/policies` and enforced at transfer time.
 
-_This page is being authored as part of HOO-439. Sections below will cover:_
+Use policies for treasury wallets, automated payout wallets, or any custody wallet where unbounded outbound flow would be a liability.
 
-## When to use policies
+## Reading a wallet's policies
 
-Treasury operations, automated payout wallets, compliance-required limits.
+<Tabs items={["curl", "TypeScript"]}>
+<Tab value="curl">
+```bash
+curl https://api.solana.com/v1/payments/wallets/wal_abc123/policies \
+  -H "Authorization: Bearer sk_test_..."
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript
+const response = await fetch(
+  "https://api.solana.com/v1/payments/wallets/wal_abc123/policies",
+  { headers: { Authorization: "Bearer sk_test_..." } }
+);
+const { data } = await response.json();
+// data.destinationAllowlist: string[]
+// data.maxTransferAmount?: string
+// data.maxDailyAmount?: string
+```
+</Tab>
+</Tabs>
+
+Response shape:
+
+```json
+{
+  "walletId": "wal_abc123",
+  "destinationAllowlist": ["7xKXz...9fGh", "5aBCd...2eFg"],
+  "maxTransferAmount": "10000000",
+  "maxDailyAmount": "50000000",
+  "createdAt": "2026-05-14T08:00:00Z",
+  "updatedAt": "2026-05-14T10:15:00Z"
+}
+```
+
+Amount fields are decimal strings in the **smallest unit** of whatever token the limit applies to. Today the limit is single-currency per wallet — if you need multi-token limits, partition into separate wallets.
 
 ## Destination allowlist
 
-Adding / removing approved destinations; enforcement at transfer time.
+The allowlist is a list of on-chain destination addresses (32-44 character base-58 Solana pubkeys). When set, `POST /v1/payments/transfers` rejects any destination not in the list.
+
+- Maximum entries: **500 addresses per wallet**.
+- Each entry is a single on-chain address — no patterns, ranges, or address books.
+- Empty allowlist (`[]`) means no destination restriction. To enable enforcement, populate at least one entry.
+
+The allowlist exists to bound risk on automated wallets (a hot wallet that should only ever pay a known counterparties set) and to enforce treasury controls (only the corporate cold-storage address can drain the operating wallet).
 
 ## Transfer limits
 
-`maxTransferAmount` (per-tx) and `maxDailyAmount` (rolling 24h) semantics.
+Two limits, both optional:
+
+- **`maxTransferAmount`** — per-transfer cap. Any single `POST /v1/payments/transfers` exceeding this amount is rejected.
+- **`maxDailyAmount`** — rolling 24-hour cap. Transfers that would push the trailing-24h sum past this value are rejected.
+
+Set both for defense in depth: a per-transaction cap that catches obvious mistakes, plus a daily cap that bounds blast radius if many small transfers are submitted in a coordinated attack.
 
 ## Updating policies
 
-`PUT /v1/payments/wallets/{walletId}/policies` — full-replace semantics, audit trail.
+`PUT /v1/payments/wallets/{walletId}/policies` has **full-replace** semantics — the request body becomes the new policy state in its entirety. To remove the allowlist, send `destinationAllowlist: []`. To drop a transfer limit, omit the field on the next PUT.
+
+<Tabs items={["curl", "TypeScript"]}>
+<Tab value="curl">
+```bash
+curl -X PUT https://api.solana.com/v1/payments/wallets/wal_abc123/policies \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "destinationAllowlist": [
+      "7xKXz...9fGh",
+      "5aBCd...2eFg"
+    ],
+    "maxTransferAmount": "10000000",
+    "maxDailyAmount": "50000000"
+  }'
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript
+await fetch(
+  "https://api.solana.com/v1/payments/wallets/wal_abc123/policies",
+  {
+    method: "PUT",
+    headers: {
+      "Authorization": "Bearer sk_test_...",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      destinationAllowlist: ["7xKXz...9fGh", "5aBCd...2eFg"],
+      maxTransferAmount: "10000000",
+      maxDailyAmount: "50000000",
+    }),
+  }
+);
+```
+</Tab>
+</Tabs>
+
+Because PUT is full-replace, treat policy edits like ordinary form submissions: read the current state, present it for editing, and PUT the complete updated object. Don't construct partial patches.
 
 ## Interaction with compliance
 
-How wallet policies compose with org-level compliance screening.
+Wallet policies enforce **structural** constraints (where funds can go, how much, how fast). They do not replace compliance screening. If your organization has compliance screening enabled, screening happens on the destination address as a separate check, in addition to the allowlist match. A transfer can be rejected by either layer; both must pass to reach the network.
+
+See the [Compliance API reference](/docs/reference/api/compliance) for address-screening flows that complement policies.
+
+## Related
+
+- [Payouts and disbursements](/docs/payments/send-payouts) — running an outbound batch from a policy-constrained wallet.
+- [Basic payment](/docs/payments/send-basic-payment) — the underlying transfer endpoint subject to policy enforcement.
+- [Wallet balances](/docs/payments/wallet-balances) — current balance, useful to size transfer limits.

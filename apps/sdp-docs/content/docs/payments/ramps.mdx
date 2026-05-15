@@ -1,26 +1,170 @@
 ---
 title: Ramps
-description: Fiat on-ramps and off-ramps — let users buy crypto with fiat or cash out from a wallet.
+description: Fiat on-ramps and off-ramps — let users buy crypto with fiat or cash out from a wallet through SDP.
 ---
 
-SDP wraps several ramp providers behind two endpoints: `POST /v1/payments/ramps/onramp/execute` (fiat → crypto) and `POST /v1/payments/ramps/offramp/execute` (crypto → fiat). Each call returns a provider-hosted redirect URL that you hand the end-user; your backend tracks status by polling the returned reference.
+SDP wraps several ramp providers behind two endpoints: `POST /v1/payments/ramps/onramp/execute` (fiat → crypto) and `POST /v1/payments/ramps/offramp/execute` (crypto → fiat). Each call returns a provider-hosted redirect URL that you hand the end-user; the provider handles KYC, payment-method capture, and settlement. SDP records a ramp execution row that your backend can poll for status.
 
-_This page is being authored as part of HOO-439. Sections below will cover:_
+For per-provider configuration (credentials, sandbox vs production), see [Ramp providers](/docs/payments/ramps-providers).
 
 ## Onramp flow
 
-Request shape, KYC handoff, redirect URL, callback / polling.
+The end-user journey:
+
+1. Your backend calls `POST /v1/payments/ramps/onramp/execute` with the destination wallet, crypto token, and fiat amount.
+2. SDP returns a `redirectUrl` from the chosen provider.
+3. You redirect the user (or open the URL in an in-app browser).
+4. The provider runs KYC and accepts the user's payment instrument.
+5. The provider settles the resulting crypto to the destination wallet on Solana.
+6. Your backend polls the ramp execution by its `id` or detects the inbound transfer via [`GET /v1/payments/transfers?direction=inbound`](/docs/payments/accept-indexing).
+
+<Tabs items={["curl", "TypeScript", "Java"]}>
+<Tab value="curl">
+```bash
+curl -X POST https://api.solana.com/v1/payments/ramps/onramp/execute \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "provider": "moonpay",
+    "destinationWallet": "wal_...",
+    "cryptoToken": "USDC",
+    "fiatAmount": "100.00",
+    "kycReference": "user_4837",
+    "redirectUrl": "https://app.example.com/onramp/complete"
+  }'
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript
+const response = await fetch(
+  "https://api.solana.com/v1/payments/ramps/onramp/execute",
+  {
+    method: "POST",
+    headers: {
+      "Authorization": "Bearer sk_test_...",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      provider: "moonpay",
+      destinationWallet: "wal_...",
+      cryptoToken: "USDC",
+      fiatAmount: "100.00",
+      kycReference: "user_4837",
+      redirectUrl: "https://app.example.com/onramp/complete",
+    }),
+  }
+);
+const { data } = await response.json();
+// data.redirectUrl — open this in the user's browser
+// data.id — store this to poll status later
+```
+</Tab>
+<Tab value="Java">
+```java
+HttpRequest request = HttpRequest.newBuilder()
+    .uri(URI.create("https://api.solana.com/v1/payments/ramps/onramp/execute"))
+    .header("Authorization", "Bearer sk_test_...")
+    .header("Content-Type", "application/json")
+    .POST(HttpRequest.BodyPublishers.ofString("""
+        {
+          "provider": "moonpay",
+          "destinationWallet": "wal_...",
+          "cryptoToken": "USDC",
+          "fiatAmount": "100.00",
+          "kycReference": "user_4837",
+          "redirectUrl": "https://app.example.com/onramp/complete"
+        }"""))
+    .build();
+```
+</Tab>
+</Tabs>
+
+### Request fields
+
+| Field | Required | Notes |
+| --- | --- | --- |
+| `provider` | yes | One of `moonpay`, `lightspark`, `bvnk`. |
+| `destinationWallet` | yes | SDP wallet ID or on-chain Solana address. |
+| `cryptoToken` | yes | Token symbol (`USDC`, `USDT`, etc.). Alphanumeric and underscore. |
+| `fiatAmount` | yes | Decimal string greater than zero (e.g. `"100.00"`). |
+| `fiatCurrency` | no | Currently `USD` only. |
+| `kycReference` | no | Up to 128 chars; identifies the end-user across your KYC system. Some providers use this to short-circuit re-verification. |
+| `redirectUrl` | no | Valid URL the provider sends the user to on completion. |
+| `bvnkCompliance` | no | BVNK-only: party-detail array required for compliance. See [Ramp providers](/docs/payments/ramps-providers#bvnk). |
 
 ## Offramp flow
 
-Source wallet, fiat destination, compliance metadata.
+The mirror image — convert from crypto to fiat from a wallet you control:
+
+<Tabs items={["curl", "TypeScript"]}>
+<Tab value="curl">
+```bash
+curl -X POST https://api.solana.com/v1/payments/ramps/offramp/execute \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "provider": "moonpay",
+    "sourceWallet": "wal_...",
+    "cryptoToken": "USDC",
+    "cryptoAmount": "100.00",
+    "redirectUrl": "https://app.example.com/offramp/complete"
+  }'
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript
+const response = await fetch(
+  "https://api.solana.com/v1/payments/ramps/offramp/execute",
+  {
+    method: "POST",
+    headers: {
+      "Authorization": "Bearer sk_test_...",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      provider: "moonpay",
+      sourceWallet: "wal_...",
+      cryptoToken: "USDC",
+      cryptoAmount: "100.00",
+      redirectUrl: "https://app.example.com/offramp/complete",
+    }),
+  }
+);
+const { data } = await response.json();
+```
+</Tab>
+</Tabs>
+
+Offramp uses `sourceWallet` (the wallet you're cashing out from) and `cryptoAmount` (the crypto amount to convert). All other fields mirror the onramp request.
 
 ## Status states
 
-`pending` → `processing` → `completed` / `failed` on the ramp execution record.
+Ramp executions have their own status enum, distinct from transfers:
+
+| Status | Meaning |
+| --- | --- |
+| `pending` | SDP has created the ramp execution; user has not started or completed the provider flow. |
+| `processing` | Provider has the user's funds (onramp) or crypto (offramp) and is settling. |
+| `completed` | Funds delivered to the destination. |
+| `failed` | The execution did not complete; the user may need to retry or reach out to support. |
+
+A successful onramp execution typically results in an **inbound transfer** record on the destination custody wallet once the provider settles on Solana — that transfer is observable via the [Accept payments](/docs/payments/accept-overview) flow.
 
 ## Provider selection
 
-When SDP picks a provider for you vs. when you specify one explicitly.
+You always pass `provider` explicitly today; SDP does not auto-select. Choose based on:
 
-See [Ramp providers](/docs/payments/ramps-providers) for the per-provider configuration matrix.
+- **Coverage** — which providers your org has configured (see [Ramp providers](/docs/payments/ramps-providers#provider-gating)).
+- **Region** — providers have different country / payment-method support.
+- **Sandbox needs** — MoonPay and BVNK ship sandboxes; Lightspark currently does not.
+- **Compliance attachment** — only BVNK accepts the `bvnkCompliance` party-detail field today.
+
+## Fiat currency support
+
+SDP currently accepts `USD` only on the `fiatCurrency` field. Multi-currency support depends on individual provider capabilities and is not exposed via this endpoint today.
+
+## Related
+
+- [Ramp providers](/docs/payments/ramps-providers) — per-provider configuration and capability matrix.
+- [Accept overview](/docs/payments/accept-overview) — how onramp deliveries show up as inbound transfers.
+- [Provider onboarding](/docs/reference/provider-onboarding) — how providers are activated for an organization.

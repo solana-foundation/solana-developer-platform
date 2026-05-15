@@ -1,24 +1,72 @@
 ---
 title: Verifying a payment
-description: Transfer-status semantics, finality on Solana, and recommended polling cadence.
+description: Transfer-status semantics, finality on Solana, and recommended polling cadence for SDP transfers.
 ---
 
-When a customer pays into a wallet you control, the inbound transfer moves through SDP's status states (`pending` → `processing` → `confirmed` → `finalized`). This page covers how to use those states to decide when a payment is safe to act on.
-
-_This page is being authored as part of HOO-439. Sections below will cover:_
+When a payment lands on a wallet you control, the inbound transfer moves through a handful of status states. This page describes those states, what each one means about on-chain finality, and how to decide when it is safe to ship goods or release funds.
 
 ## Status lifecycle
 
-Definitions of `pending`, `processing`, `confirmed`, `finalized`, `failed` on the `Transfer` record.
+The `status` field on the `Transfer` record takes one of five values:
+
+| Status | Meaning |
+| --- | --- |
+| `pending` | SDP has accepted the request (or detected an inbound) but has not yet observed the transaction on the network. No `signature` yet. |
+| `processing` | The transaction has been submitted; SDP is waiting for cluster confirmation. `signature` is now set. |
+| `confirmed` | A supermajority of the cluster has voted on the transaction. The transfer is durable but not yet at maximum finality. `slot` and `blockTime` are populated. |
+| `finalized` | The slot containing the transaction is locked in by the network — finality at the Solana cluster's strongest guarantee. Safe to treat as irreversible. |
+| `failed` | The transaction was built and submitted but rejected by the network (insufficient funds, frozen account, expired blockhash, etc.). The `error` field describes what reached the chain. |
+
+A transfer moves forward through `pending → processing → confirmed → finalized`. Any of those can transition to `failed` instead; `failed` is terminal.
 
 ## Finality on Solana
 
-Why `finalized` is the safest signal, and when `confirmed` is acceptable.
+For real-money flows, treat `finalized` as the safe-to-act-on signal. `confirmed` is durable enough for most non-adversarial workflows (think: showing a "paid" badge in your dashboard) but a sufficiently motivated cluster reorganization can theoretically roll back a `confirmed` transaction; this does not happen for `finalized` transactions.
+
+Use `confirmed` to release low-stakes side effects (status emails, UI updates) and `finalized` for irreversible side effects (releasing custody, shipping high-value goods, posting to your general ledger).
 
 ## Polling cadence
 
-Recommended interval for `GET /v1/payments/transfers/{id}` (TBD — confirm with backend before publish).
+SDP does not currently emit settlement webhooks. Status is observed by polling:
 
-## Signature, slot, blockTime
+- `GET /v1/payments/transfers/{id}` for a single transfer's current state.
+- `GET /v1/payments/transfers?direction=inbound&from=…` for a windowed list — see [Indexing and reconciliation](/docs/payments/accept-indexing).
 
-Fields you can hand to a block explorer or your indexer for independent verification.
+Cadence depends on how quickly you need to see state transitions and how aggressive your retry budget is. A reasonable starting range:
+
+- **Active checkout** (customer is staring at a payment screen): every 2–5 seconds for up to a minute, then back off.
+- **Background reconciliation** (no one is waiting): every 15–30 seconds, or whenever a worker tick fires.
+- **Long-tail catch-up** (status reads after the fact): single one-shot reads when your application needs to act, no polling loop at all.
+
+The exact recommended cadence will be tightened in a follow-up once the backend confirms a target; treat the ranges above as defensible defaults today.
+
+## Independent verification
+
+Every transfer that reaches `processing` or beyond carries enough information to verify against the network directly:
+
+- **`signature`** — the Solana transaction signature; paste into [Solscan](https://solscan.io/) or [Solana Explorer](https://explorer.solana.com/) to see the on-chain record.
+- **`slot`** — the slot the transaction landed in.
+- **`blockTime`** — ISO 8601 timestamp of slot finality.
+- **`fee`** — fee paid, in lamports.
+
+If you maintain your own indexer (`getSignatureStatuses` against a Solana RPC), cross-reference SDP's `signature` to your indexer's view to confirm SDP's status reflects what your nodes see.
+
+## Risk metadata
+
+When a risk-screening provider is configured on the organization, transfers may carry a `risk` field with `provider`, `score`, `level` (`low | medium | high | unknown`), and `evaluatedAt`. Use this to gate downstream side effects on a risk threshold; the field is absent when no risk provider is wired up.
+
+Risk evaluation is not blocking by default — a transfer can complete with a high-risk score. If you want a transfer to halt on risk threshold, enforce that in your application logic on top of the `risk.level` value.
+
+## Failure handling
+
+When `status` settles to `failed`:
+
+- Read the `error` field. SDP returns the chain-level error message; common causes are insufficient source funds, account frozen by token authority, or stale blockhash.
+- Decide whether to retry. The original transfer record is terminal; a retry creates a new transfer with a new ID and (eventually) a new signature.
+- Surface the failure to whoever needs to know — the merchant, the customer, your operations team.
+
+## Related
+
+- [Accept overview](/docs/payments/accept-overview) — the broader inbound-payment flow.
+- [Indexing and reconciliation](/docs/payments/accept-indexing) — list-based status checking across many transfers.
+- [Concepts: the transfer data model](/docs/payments/concepts#the-transfer-data-model) — full field reference.
