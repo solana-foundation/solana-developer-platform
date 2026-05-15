@@ -2,10 +2,8 @@
 
 import { useEffect, useMemo } from "react";
 import useSWR, { type BareFetcher, type Key, type SWRConfiguration, type SWRResponse } from "swr";
-import {
-  getDashboardCacheScopeKey,
-  useDashboardWorkspace,
-} from "@/contexts/dashboard-workspace-context";
+import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
+import { getDashboardCacheScopeKey } from "@/lib/dashboard-cache-scope";
 
 export interface PersistedDashboardSnapshotConfig<Data> {
   key: string;

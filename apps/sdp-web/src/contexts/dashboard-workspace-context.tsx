@@ -14,15 +14,11 @@ import {
 import { SWRConfig } from "swr";
 import { Button } from "@/components/ui/button";
 import type { DashboardAccess } from "@/lib/dashboard-access";
+import { type DashboardCacheScope, getDashboardCacheScopeKey } from "@/lib/dashboard-cache-scope";
 import { DASHBOARD_SWR_CONFIG } from "@/lib/dashboard-swr-config";
 import { useDashboardUrlState } from "@/lib/dashboard-url-state";
 
 export type IssuanceWorkspaceTab = "tokens" | "playground";
-
-export interface DashboardCacheScope {
-  userId: string | null;
-  orgId: string | null;
-}
 
 export interface DashboardPlaygroundApiKeyOption {
   id: string;
@@ -51,10 +47,6 @@ type DashboardWorkspaceContextValue = {
 const DashboardWorkspaceContext = createContext<DashboardWorkspaceContextValue | undefined>(
   undefined
 );
-
-export function getDashboardCacheScopeKey(scope: DashboardCacheScope): string {
-  return `${scope.userId ?? "anonymous"}:${scope.orgId ?? "no-org"}`;
-}
 
 function DashboardScopeRefreshFallback() {
   const router = useRouter();
