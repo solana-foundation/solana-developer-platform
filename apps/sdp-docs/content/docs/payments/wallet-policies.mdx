@@ -36,14 +36,14 @@ Response shape:
 {
   "walletId": "wal_abc123",
   "destinationAllowlist": ["7xKXz...9fGh", "5aBCd...2eFg"],
-  "maxTransferAmount": "10000000",
-  "maxDailyAmount": "50000000",
+  "maxTransferAmount": "100.00",
+  "maxDailyAmount": "1000.00",
   "createdAt": "2026-05-14T08:00:00Z",
   "updatedAt": "2026-05-14T10:15:00Z"
 }
 ```
 
-Amount fields are decimal strings in the **smallest unit** of whatever token the limit applies to. Today the limit is single-currency per wallet — if you need multi-token limits, partition into separate wallets.
+Amount fields are **UI-unit decimal strings** (`"100.00"` means 100 tokens, regardless of the mint's decimals — matching the transfer-request convention). Today the limit is single-currency per wallet — if you need multi-token limits, partition into separate wallets.
 
 ## Destination allowlist
 
@@ -79,8 +79,8 @@ curl -X PUT https://api.solana.com/v1/payments/wallets/wal_abc123/policies \
       "7xKXz...9fGh",
       "5aBCd...2eFg"
     ],
-    "maxTransferAmount": "10000000",
-    "maxDailyAmount": "50000000"
+    "maxTransferAmount": "100.00",
+    "maxDailyAmount": "1000.00"
   }'
 ```
 </Tab>
@@ -96,8 +96,8 @@ await fetch(
     },
     body: JSON.stringify({
       destinationAllowlist: ["7xKXz...9fGh", "5aBCd...2eFg"],
-      maxTransferAmount: "10000000",
-      maxDailyAmount: "50000000",
+      maxTransferAmount: "100.00",
+      maxDailyAmount: "1000.00",
     }),
   }
 );

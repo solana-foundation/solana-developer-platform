@@ -25,9 +25,9 @@ url.searchParams.set("pageSize", "50");
 const res = await fetch(url, {
   headers: { Authorization: "Bearer sk_test_..." },
 });
-const { data } = await res.json();
-// data.items: Transfer[]
-// data.page, data.pageSize, data.total
+const { data, meta } = await res.json();
+// data: Transfer[]
+// meta: { total, page, pageSize, hasMore, requestId }
 ```
 </Tab>
 </Tabs>
@@ -84,8 +84,16 @@ A reconciliation worker that wakes on a tick and asks "what is new since last ti
 <Tabs items={["TypeScript"]}>
 <Tab value="TypeScript">
 ```typescript
+const OVERLAP_MS = 5_000; // re-query the last 5s on each tick to catch boundary arrivals
+
 async function reconcileTick(state: WorkerState) {
-  const from = state.lastSeenIso;
+  // Nudge `from` backwards by the overlap window; `alreadySeen` dedupes the
+  // resulting duplicates. Always advance the high-water mark to `to` regardless,
+  // otherwise the window grows without bound.
+  const fromMs = state.lastSeenIso
+    ? Date.parse(state.lastSeenIso) - OVERLAP_MS
+    : Date.now() - 60_000;
+  const from = new Date(fromMs).toISOString();
   const to = new Date().toISOString();
 
   for await (const tr of listInbound({ from, to })) {
@@ -111,9 +119,9 @@ async function reconcileTick(state: WorkerState) {
 
 Notes:
 
-- Persist the high-water mark (`lastSeenIso`) after the pass completes so re-tries pick up at the same window.
-- Allow a small overlap (re-query the last few seconds on each tick) to avoid missing transfers that arrive at the boundary.
-- Always re-fetch a transfer to upgrade its status — a transfer seen as `confirmed` in one tick will appear as `finalized` in a later tick.
+- The overlap window (5s above) re-queries the trailing edge of the last tick to catch transfers that arrive at the boundary; `alreadySeen` collapses the resulting duplicates.
+- The high-water mark advances to `to` on every pass even though `from` is rolled back — otherwise the query window grows unbounded.
+- Always re-fetch a transfer to upgrade its status: a transfer seen as `confirmed` in one tick will appear as `finalized` in a later tick.
 - Use `pageSize=100` and the async iterator pattern (see [Payouts and disbursements](/docs/payments/send-payouts)) to handle large windows.
 
 ## Related

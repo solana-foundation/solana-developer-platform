@@ -15,9 +15,9 @@ You provision custody wallets up front (see [Set Up Wallets](/docs/guides/setup-
 
 ## Tokens and token accounts
 
-Payments transfer **SPL tokens** — stablecoins, tokenized assets, or any mint your project supports. Amounts are always expressed in the **smallest unit**: for a token with 6 decimals, `"1000000"` means 1.0 token. Decimal handling is the caller's responsibility on the way in, and SDP returns both raw `amount` and human-readable `uiAmount` on balance and transfer reads.
+Payments transfer **SPL tokens** — stablecoins, tokenized assets, or any mint your project supports. The `token` field on a transfer accepts either the SDP-internal token identifier or the on-chain mint address.
 
-The `token` field on a transfer accepts either the SDP-internal token identifier or the on-chain mint address.
+**Amounts on the wire are UI-unit decimal strings** — `"100.00"` means 100 tokens, regardless of the mint's decimal count. SDP handles the smallest-unit conversion when it builds the on-chain transaction. The one exception is wallet-balance responses, which return both a raw `amount` (smallest unit) **and** a `uiAmount` (decimal string) so balance consumers can pick whichever fits.
 
 ## Signing modes
 
@@ -44,7 +44,7 @@ Every successful or attempted transfer creates a `Transfer` record. The fields t
 | `status` | One of `pending`, `processing`, `confirmed`, `finalized`, `failed`. See [Verifying a payment](/docs/payments/accept-verification). |
 | `direction` | `inbound` (someone paid you) or `outbound` (you paid someone). |
 | `source`, `destination` | On-chain addresses. |
-| `token`, `amount` | What moved and how much (raw smallest unit). |
+| `token`, `amount` | What moved and how much. `amount` is a UI-unit decimal string (e.g. `"100.00"`). |
 | `memo` | Optional UTF-8 string, up to 256 chars. See [Payment with memo](/docs/payments/send-payment-with-memo). |
 | `signature` | Solana transaction signature once confirmed. **Unique across SDP** — the natural dedup key. |
 | `slot`, `blockTime`, `fee` | On-chain settlement details, populated as the transaction lands. |

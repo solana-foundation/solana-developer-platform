@@ -38,7 +38,7 @@ curl -X POST https://api.solana.com/v1/payments/transfers \
     "source": "3xYZa...2aBc",
     "destination": "7xKXz...9fGh",
     "token": "9aBCd...4eEf",
-    "amount": "1500000",
+    "amount": "150.00",
     "memo": "payout_2026-05-14_marketplace_sellers/row_4837"
   }'
 ```
@@ -117,9 +117,9 @@ async function* listOutboundTransfers(from: string, to: string) {
     const res = await fetch(url, {
       headers: { Authorization: "Bearer sk_test_..." },
     });
-    const { data } = await res.json();
-    yield* data.items;
-    if (data.items.length < 100) return;
+    const { data, meta } = await res.json();
+    yield* data;
+    if (!meta.hasMore) return;
     page += 1;
   }
 }

@@ -27,7 +27,7 @@ curl -X POST https://api.solana.com/v1/payments/transfers \
     "source": "3xYZa...2aBc",
     "destination": "7xKXz...9fGh",
     "token": "9aBCd...4eEf",
-    "amount": "500000",
+    "amount": "100.00",
     "memo": "order_2026-05-14_4837"
   }'
 ```
@@ -46,7 +46,7 @@ const response = await fetch(
       source: "3xYZa...2aBc",
       destination: "7xKXz...9fGh",
       token: "9aBCd...4eEf",
-      amount: "500000",
+      amount: "100.00",
       memo: "order_2026-05-14_4837",
     }),
   }
@@ -65,7 +65,7 @@ HttpRequest request = HttpRequest.newBuilder()
           "source": "3xYZa...2aBc",
           "destination": "7xKXz...9fGh",
           "token": "9aBCd...4eEf",
-          "amount": "500000",
+          "amount": "100.00",
           "memo": "order_2026-05-14_4837"
         }"""))
     .build();

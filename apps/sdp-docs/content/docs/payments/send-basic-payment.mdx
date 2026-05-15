@@ -26,7 +26,7 @@ curl -X POST https://api.solana.com/v1/payments/transfers \
     "source": "3xYZa...2aBc",
     "destination": "7xKXz...9fGh",
     "token": "9aBCd...4eEf",
-    "amount": "500000",
+    "amount": "100.00",
     "memo": "Payment for invoice #1234"
   }'
 ```
@@ -46,7 +46,7 @@ const response = await fetch(
       source: "3xYZa...2aBc",
       destination: "7xKXz...9fGh",
       token: "9aBCd...4eEf",
-      amount: "500000",
+      amount: "100.00",
       memo: "Payment for invoice #1234",
     }),
   }
@@ -66,7 +66,7 @@ HttpRequest request = HttpRequest.newBuilder()
           "source": "3xYZa...2aBc",
           "destination": "7xKXz...9fGh",
           "token": "9aBCd...4eEf",
-          "amount": "500000",
+          "amount": "100.00",
           "memo": "Payment for invoice #1234"
         }"""))
     .build();
@@ -86,7 +86,7 @@ curl -X POST https://api.solana.com/v1/payments/transfers/prepare \
     "source": "3xYZa...2aBc",
     "destination": "7xKXz...9fGh",
     "token": "9aBCd...4eEf",
-    "amount": "500000",
+    "amount": "100.00",
     "memo": "Payment for invoice #1234",
     "options": { "simulate": true }
   }'
@@ -106,7 +106,7 @@ const response = await fetch(
       source: "3xYZa...2aBc",
       destination: "7xKXz...9fGh",
       token: "9aBCd...4eEf",
-      amount: "500000",
+      amount: "100.00",
       memo: "Payment for invoice #1234",
       options: { simulate: true },
     }),
@@ -127,7 +127,7 @@ HttpRequest request = HttpRequest.newBuilder()
           "source": "3xYZa...2aBc",
           "destination": "7xKXz...9fGh",
           "token": "9aBCd...4eEf",
-          "amount": "500000",
+          "amount": "100.00",
           "memo": "Payment for invoice #1234",
           "options": { "simulate": true }
         }"""))
