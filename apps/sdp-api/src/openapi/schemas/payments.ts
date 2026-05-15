@@ -39,6 +39,7 @@ export const walletPolicySchema = z
     destinationAllowlist: z.array(solanaAddressSchema).openapi({
       description:
         "Allowed destination addresses. An empty array means no destination restrictions.",
+      example: ["So11111111111111111111111111111111111111112"],
     }),
     maxTransferAmount: tokenAmountSchema
       .optional()
@@ -83,6 +84,7 @@ export const updateWalletPolicyRequestSchema = updateWalletPolicySchemaBase
     destinationAllowlist: withOpenApi(updateWalletPolicySchemaBase.shape.destinationAllowlist, {
       description:
         "Allowed destination addresses. An empty array means no destination restrictions.",
+      example: ["So11111111111111111111111111111111111111112"],
     }),
     maxTransferAmount: withOpenApi(updateWalletPolicySchemaBase.shape.maxTransferAmount, {
       description: "Maximum amount allowed per transfer.",
@@ -378,7 +380,8 @@ export const executeOnrampRequestSchema = executeOnrampSchemaBase
       description: "Optional redirect URL after provider flow completes.",
     }),
     bvnkCompliance: withOpenApi(executeOnrampSchemaBase.shape.bvnkCompliance, {
-      description: "Optional BVNK compliance details.",
+      description:
+        "BVNK compliance details. Required only when `provider` is `bvnk`; omit (or send `null`) for `moonpay` and `lightspark`.",
       example: { partyDetails: [{ type: "individual" }] },
     }),
   })
@@ -418,7 +421,8 @@ export const executeOfframpRequestSchema = executeOfframpSchemaBase
       description: "Optional redirect URL after provider flow completes.",
     }),
     bvnkCompliance: withOpenApi(executeOfframpSchemaBase.shape.bvnkCompliance, {
-      description: "Optional BVNK compliance details.",
+      description:
+        "BVNK compliance details. Required only when `provider` is `bvnk`; omit (or send `null`) for `moonpay` and `lightspark`.",
       example: { partyDetails: [{ type: "individual" }] },
     }),
   })
