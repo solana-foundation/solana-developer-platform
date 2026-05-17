@@ -150,7 +150,10 @@ const PROVIDER_AVAILABILITY_DEFINITIONS = {
       label: "Lightspark",
       isConfigured: (env) =>
         hasAllEnv(env, ["LIGHTSPARK_GRID_CLIENT_ID", "LIGHTSPARK_GRID_CLIENT_SECRET"]) ||
-        hasAllEnv(env, ["LIGHTSPARK_GRID_SANDBOX_CLIENT_ID", "LIGHTSPARK_GRID_SANDBOX_CLIENT_SECRET"]),
+        hasAllEnv(env, [
+          "LIGHTSPARK_GRID_SANDBOX_CLIENT_ID",
+          "LIGHTSPARK_GRID_SANDBOX_CLIENT_SECRET",
+        ]),
     },
     bvnk: {
       label: "BVNK",

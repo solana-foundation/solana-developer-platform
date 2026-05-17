@@ -209,12 +209,17 @@ function getMoonPayConfig(c: AppContext): MoonPayConfig {
   };
 }
 
-
 function getLightsparkConfig(c: AppContext): LightsparkConfig {
   const testMode = isTestMode(c);
   const { tokenId, clientSecret } = configForMode(testMode, {
-    tokenId: { sandbox: c.env.LIGHTSPARK_GRID_SANDBOX_CLIENT_ID, production: c.env.LIGHTSPARK_GRID_CLIENT_ID },
-    clientSecret: { sandbox: c.env.LIGHTSPARK_GRID_SANDBOX_CLIENT_SECRET, production: c.env.LIGHTSPARK_GRID_CLIENT_SECRET },
+    tokenId: {
+      sandbox: c.env.LIGHTSPARK_GRID_SANDBOX_CLIENT_ID,
+      production: c.env.LIGHTSPARK_GRID_CLIENT_ID,
+    },
+    clientSecret: {
+      sandbox: c.env.LIGHTSPARK_GRID_SANDBOX_CLIENT_SECRET,
+      production: c.env.LIGHTSPARK_GRID_CLIENT_SECRET,
+    },
   });
 
   if (!tokenId || !clientSecret) {
@@ -226,7 +231,11 @@ function getLightsparkConfig(c: AppContext): LightsparkConfig {
   }
 
   // Lightspark Grid uses the same base URL for sandbox and production; credentials determine the environment.
-  const apiBaseUrlRaw = envForMode(testMode, { sandbox: c.env.LIGHTSPARK_GRID_SANDBOX_API_BASE_URL, production: c.env.LIGHTSPARK_GRID_API_BASE_URL }) ?? LIGHTSPARK_DEFAULT_GRID_API_URL;
+  const apiBaseUrlRaw =
+    envForMode(testMode, {
+      sandbox: c.env.LIGHTSPARK_GRID_SANDBOX_API_BASE_URL,
+      production: c.env.LIGHTSPARK_GRID_API_BASE_URL,
+    }) ?? LIGHTSPARK_DEFAULT_GRID_API_URL;
   try {
     new URL(apiBaseUrlRaw);
   } catch {
@@ -240,12 +249,14 @@ function getLightsparkConfig(c: AppContext): LightsparkConfig {
   };
 }
 
-
 function getBvnkConfig(c: AppContext): BvnkConfig {
   const testMode = isTestMode(c);
   const { hawkAuthId, hawkSecretKey, apiToken, walletId } = configForMode(testMode, {
     hawkAuthId: { sandbox: c.env.BVNK_SANDBOX_HAWK_AUTH_ID, production: c.env.BVNK_HAWK_AUTH_ID },
-    hawkSecretKey: { sandbox: c.env.BVNK_SANDBOX_HAWK_SECRET_KEY, production: c.env.BVNK_HAWK_SECRET_KEY },
+    hawkSecretKey: {
+      sandbox: c.env.BVNK_SANDBOX_HAWK_SECRET_KEY,
+      production: c.env.BVNK_HAWK_SECRET_KEY,
+    },
     apiToken: { sandbox: c.env.BVNK_SANDBOX_API_TOKEN, production: c.env.BVNK_API_TOKEN },
     walletId: { sandbox: c.env.BVNK_SANDBOX_WALLET_ID, production: c.env.BVNK_WALLET_ID },
   });
@@ -295,7 +306,6 @@ function getBvnkConfig(c: AppContext): BvnkConfig {
     apiBaseUrl,
   };
 }
-
 
 function encodeBasicAuth(value: string): string {
   return Buffer.from(value, "utf8").toString("base64");
@@ -842,7 +852,6 @@ async function buildSignedMoonPayWidgetUrl(
 }
 
 const bvnkRampProvider: RampProviderExecutor = {
-
   async executeOnramp(c, scope, input) {
     const customerId = input.kycReference?.trim();
     if (!customerId) {
@@ -976,7 +985,6 @@ const bvnkRampProvider: RampProviderExecutor = {
 };
 
 const moonPayRampProvider: RampProviderExecutor = {
-
   async executeOnramp(c, scope, input) {
     const destinationWalletAddress = resolveWalletAddress(
       scope.wallets,
@@ -1046,7 +1054,6 @@ const moonPayRampProvider: RampProviderExecutor = {
 };
 
 const lightsparkRampProvider: RampProviderExecutor = {
-
   async executeOnramp(c, _scope, input) {
     const customerId = input.kycReference?.trim();
     if (!customerId) {
