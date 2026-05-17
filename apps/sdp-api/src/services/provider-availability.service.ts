@@ -142,19 +142,29 @@ const PROVIDER_AVAILABILITY_DEFINITIONS = {
   ramps: {
     moonpay: {
       label: "MoonPay",
-      isConfigured: (env) => hasAllEnv(env, ["MOONPAY_API_KEY", "MOONPAY_SECRET_KEY"]),
+      isConfigured: (env) =>
+        hasAllEnv(env, ["MOONPAY_API_KEY", "MOONPAY_SECRET_KEY"]) ||
+        hasAllEnv(env, ["MOONPAY_SANDBOX_API_KEY", "MOONPAY_SANDBOX_SECRET_KEY"]),
     },
     lightspark: {
       label: "Lightspark",
       isConfigured: (env) =>
-        hasAllEnv(env, ["LIGHTSPARK_GRID_CLIENT_ID", "LIGHTSPARK_GRID_CLIENT_SECRET"]),
+        hasAllEnv(env, ["LIGHTSPARK_GRID_CLIENT_ID", "LIGHTSPARK_GRID_CLIENT_SECRET"]) ||
+        hasAllEnv(env, ["LIGHTSPARK_GRID_SANDBOX_CLIENT_ID", "LIGHTSPARK_GRID_SANDBOX_CLIENT_SECRET"]),
     },
     bvnk: {
       label: "BVNK",
-      isConfigured: (env) =>
-        hasEnv(env, "BVNK_WALLET_ID") &&
-        (hasEnv(env, "BVNK_API_TOKEN") ||
-          hasAllEnv(env, ["BVNK_HAWK_AUTH_ID", "BVNK_HAWK_SECRET_KEY"])),
+      isConfigured: (env) => {
+        const prodConfigured =
+          hasEnv(env, "BVNK_WALLET_ID") &&
+          (hasEnv(env, "BVNK_API_TOKEN") ||
+            hasAllEnv(env, ["BVNK_HAWK_AUTH_ID", "BVNK_HAWK_SECRET_KEY"]));
+        const sandboxConfigured =
+          hasEnv(env, "BVNK_SANDBOX_WALLET_ID") &&
+          (hasEnv(env, "BVNK_SANDBOX_API_TOKEN") ||
+            hasAllEnv(env, ["BVNK_SANDBOX_HAWK_AUTH_ID", "BVNK_SANDBOX_HAWK_SECRET_KEY"]));
+        return prodConfigured || sandboxConfigured;
+      },
     },
   },
 } as const satisfies ProviderAvailabilityDefinitions;
