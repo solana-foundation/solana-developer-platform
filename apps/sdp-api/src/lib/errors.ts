@@ -39,7 +39,8 @@ export type ErrorCode =
   // Transaction errors
   | "TRANSACTION_FAILED"
   | "SIGNING_FAILED"
-  | "SIGNING_PENDING";
+  | "SIGNING_PENDING"
+  | "PROVIDER_NOT_CONFIGURED";
 
 export interface ApiError {
   code: ErrorCode;
@@ -89,6 +90,7 @@ const ERROR_STATUS_CODES: Record<ErrorCode, number> = {
   TRANSACTION_FAILED: 400,
   SIGNING_FAILED: 400,
   SIGNING_PENDING: 202,
+  PROVIDER_NOT_CONFIGURED: 503,
 };
 
 const DEFAULT_ERROR_MESSAGES: Record<ErrorCode, string> = {
@@ -129,6 +131,7 @@ const DEFAULT_ERROR_MESSAGES: Record<ErrorCode, string> = {
   TRANSACTION_FAILED: "Transaction failed",
   SIGNING_FAILED: "Transaction signing failed",
   SIGNING_PENDING: "Signing request pending approval",
+  PROVIDER_NOT_CONFIGURED: "Payment provider is not configured for this environment",
 };
 
 export class AppError extends Error {
@@ -181,4 +184,8 @@ export function rateLimited(message?: string): AppError {
 
 export function internalError(message?: string): AppError {
   return new AppError("INTERNAL_ERROR", message);
+}
+
+export function providerNotConfigured(message?: string): AppError {
+  return new AppError("PROVIDER_NOT_CONFIGURED", message);
 }

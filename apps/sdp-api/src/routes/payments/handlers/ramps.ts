@@ -1,6 +1,6 @@
 import { getDb } from "@/db";
 import { parseDecimalAmount } from "@/lib/amount";
-import { AppError } from "@/lib/errors";
+import { AppError, providerNotConfigured } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { isAddress } from "@/lib/solana";
 import { assertProviderAvailable } from "@/services/provider-availability.service";
@@ -60,7 +60,6 @@ type ExecuteRampInput =
   | ({ direction: "offramp" } & ExecuteOfframpInput);
 
 type RampProviderExecutor = {
-  isConfigured: (c: AppContext) => boolean;
   executeOnramp: (
     c: AppContext,
     scope: ResolvedScope,
@@ -97,6 +96,44 @@ function normalizeMoonPayCurrencyCode(value: string): string {
   return normalized.toLowerCase();
 }
 
+type ApiMode = "sandbox" | "production";
+
+/**
+ * Resolves the API mode for the current request:
+ * - Non-production deployments (ENVIRONMENT !== "production") always use sandbox.
+ * - Clerk JWT requests (no apiKey on context) default to production.
+ * - API key requests derive mode from the key's environment field
+ *   (sk_test_ → sandbox, sk_live_ → production).
+ */
+function resolveApiMode(c: AppContext): ApiMode {
+  if (c.env.ENVIRONMENT !== "production") {
+    return "sandbox";
+  }
+  const apiKey = c.get("apiKey");
+  if (apiKey === undefined) {
+    return "production";
+  }
+  return apiKey.environment === "sandbox" ? "sandbox" : "production";
+}
+
+interface RampsProviderEnvironment {
+  sandbox: string | undefined;
+  production: string | undefined;
+}
+
+function envForMode(mode: ApiMode, env: RampsProviderEnvironment): string | undefined {
+  return env[mode]?.trim();
+}
+
+function configForMode<T extends Record<string, RampsProviderEnvironment>>(
+  mode: ApiMode,
+  envs: T
+): Record<keyof T, string | undefined> {
+  return Object.fromEntries(
+    Object.entries(envs).map(([key, env]) => [key, envForMode(mode, env)])
+  ) as Record<keyof T, string | undefined>;
+}
+
 type MoonPayConfig = {
   apiKey: string;
   secretKey: string;
@@ -110,9 +147,7 @@ type LightsparkConfig = {
   apiBaseUrl: string;
 };
 
-type BvnkAuthConfig =
-  | { type: "bearer"; apiToken: string }
-  | { type: "hawk"; authId: string; secretKey: string };
+type BvnkAuthConfig = { type: "hawk"; authId: string; secretKey: string };
 
 type BvnkConfig = {
   auth: BvnkAuthConfig;
@@ -153,19 +188,22 @@ type BvnkPaymentSummary = {
 const LIGHTSPARK_DEFAULT_GRID_API_URL = "https://api.lightspark.com/grid/2025-10-13";
 
 function getMoonPayConfig(c: AppContext): MoonPayConfig {
-  const apiKey = c.env.MOONPAY_API_KEY?.trim();
-  const secretKey = c.env.MOONPAY_SECRET_KEY?.trim();
+  const mode = resolveApiMode(c);
+  const { apiKey, secretKey } = configForMode(mode, {
+    apiKey: { sandbox: c.env.MOONPAY_SANDBOX_API_KEY, production: c.env.MOONPAY_API_KEY },
+    secretKey: { sandbox: c.env.MOONPAY_SANDBOX_SECRET_KEY, production: c.env.MOONPAY_SECRET_KEY },
+  });
 
   if (!apiKey || !secretKey) {
-    throw new AppError(
-      "INTERNAL_ERROR",
-      "MoonPay is not configured. Set MOONPAY_API_KEY and MOONPAY_SECRET_KEY."
+    throw providerNotConfigured(
+      mode === "sandbox"
+        ? "MoonPay sandbox is not configured. Set MOONPAY_SANDBOX_API_KEY and MOONPAY_SANDBOX_SECRET_KEY."
+        : "MoonPay is not configured. Set MOONPAY_API_KEY and MOONPAY_SECRET_KEY."
     );
   }
 
-  const useProduction = c.env.ENVIRONMENT === "production";
-  const defaultOnrampUrl = useProduction ? MOONPAY_ONRAMP_URL : MOONPAY_SANDBOX_ONRAMP_URL;
-  const defaultOfframpUrl = useProduction ? MOONPAY_OFFRAMP_URL : MOONPAY_SANDBOX_OFFRAMP_URL;
+  const defaultOnrampUrl = mode === "sandbox" ? MOONPAY_SANDBOX_ONRAMP_URL : MOONPAY_ONRAMP_URL;
+  const defaultOfframpUrl = mode === "sandbox" ? MOONPAY_SANDBOX_OFFRAMP_URL : MOONPAY_OFFRAMP_URL;
 
   const onrampUrlRaw = c.env.MOONPAY_ONRAMP_URL ?? defaultOnrampUrl;
   const offrampUrlRaw = c.env.MOONPAY_OFFRAMP_URL ?? defaultOfframpUrl;
@@ -185,65 +223,55 @@ function getMoonPayConfig(c: AppContext): MoonPayConfig {
   };
 }
 
-function isMoonPayConfigured(c: AppContext): boolean {
-  const apiKey = c.env.MOONPAY_API_KEY?.trim();
-  const secretKey = c.env.MOONPAY_SECRET_KEY?.trim();
-  return Boolean(apiKey && secretKey);
-}
-
 function getLightsparkConfig(c: AppContext): LightsparkConfig {
-  const tokenId = c.env.LIGHTSPARK_GRID_CLIENT_ID?.trim();
-  const clientSecret = c.env.LIGHTSPARK_GRID_CLIENT_SECRET?.trim();
+  const mode = resolveApiMode(c);
+  const { tokenId, clientSecret } = configForMode(mode, {
+    tokenId: {
+      sandbox: c.env.LIGHTSPARK_GRID_SANDBOX_CLIENT_ID,
+      production: c.env.LIGHTSPARK_GRID_CLIENT_ID,
+    },
+    clientSecret: {
+      sandbox: c.env.LIGHTSPARK_GRID_SANDBOX_CLIENT_SECRET,
+      production: c.env.LIGHTSPARK_GRID_CLIENT_SECRET,
+    },
+  });
 
   if (!tokenId || !clientSecret) {
-    throw new AppError(
-      "INTERNAL_ERROR",
-      "Lightspark is not configured. Set LIGHTSPARK_GRID_CLIENT_ID and LIGHTSPARK_GRID_CLIENT_SECRET."
+    throw providerNotConfigured(
+      mode === "sandbox"
+        ? "Lightspark sandbox is not configured. Set LIGHTSPARK_GRID_SANDBOX_CLIENT_ID and LIGHTSPARK_GRID_SANDBOX_CLIENT_SECRET."
+        : "Lightspark is not configured. Set LIGHTSPARK_GRID_CLIENT_ID and LIGHTSPARK_GRID_CLIENT_SECRET."
     );
-  }
-
-  const apiBaseUrlRaw =
-    c.env.LIGHTSPARK_GRID_API_BASE_URL?.trim() || LIGHTSPARK_DEFAULT_GRID_API_URL;
-  try {
-    new URL(apiBaseUrlRaw);
-  } catch {
-    throw new AppError("INTERNAL_ERROR", "Lightspark API URL configuration is invalid.");
   }
 
   return {
     tokenId,
     clientSecret,
-    apiBaseUrl: apiBaseUrlRaw,
+    apiBaseUrl: LIGHTSPARK_DEFAULT_GRID_API_URL,
   };
 }
 
-function isLightsparkConfigured(c: AppContext): boolean {
-  const tokenId = c.env.LIGHTSPARK_GRID_CLIENT_ID?.trim();
-  const clientSecret = c.env.LIGHTSPARK_GRID_CLIENT_SECRET?.trim();
-  return Boolean(tokenId && clientSecret);
-}
-
 function getBvnkConfig(c: AppContext): BvnkConfig {
-  const hawkAuthId = c.env.BVNK_HAWK_AUTH_ID?.trim();
-  const hawkSecretKey = c.env.BVNK_HAWK_SECRET_KEY?.trim();
-  const apiToken = c.env.BVNK_API_TOKEN?.trim();
-  const walletId = c.env.BVNK_WALLET_ID?.trim();
-  if (!walletId) {
-    throw new AppError(
-      "INTERNAL_ERROR",
-      "BVNK is not configured. Set BVNK_WALLET_ID and either BVNK_API_TOKEN or BVNK_HAWK_AUTH_ID/BVNK_HAWK_SECRET_KEY."
-    );
+  const mode = resolveApiMode(c);
+  const { hawkAuthId, hawkSecretKey, walletId } = configForMode(mode, {
+    hawkAuthId: { sandbox: c.env.BVNK_SANDBOX_HAWK_AUTH_ID, production: c.env.BVNK_HAWK_AUTH_ID },
+    hawkSecretKey: {
+      sandbox: c.env.BVNK_SANDBOX_HAWK_SECRET_KEY,
+      production: c.env.BVNK_HAWK_SECRET_KEY,
+    },
+    walletId: { sandbox: c.env.BVNK_SANDBOX_WALLET_ID, production: c.env.BVNK_WALLET_ID },
+  });
+
+  const missingMsg =
+    mode === "sandbox"
+      ? "BVNK sandbox is not configured. Set BVNK_SANDBOX_WALLET_ID, BVNK_SANDBOX_HAWK_AUTH_ID, and BVNK_SANDBOX_HAWK_SECRET_KEY."
+      : "BVNK is not configured. Set BVNK_WALLET_ID, BVNK_HAWK_AUTH_ID, and BVNK_HAWK_SECRET_KEY.";
+
+  if (!walletId || !hawkAuthId || !hawkSecretKey) {
+    throw providerNotConfigured(missingMsg);
   }
 
-  if ((hawkAuthId && !hawkSecretKey) || (!hawkAuthId && hawkSecretKey)) {
-    throw new AppError(
-      "INTERNAL_ERROR",
-      "BVNK Hawk auth is incomplete. Set both BVNK_HAWK_AUTH_ID and BVNK_HAWK_SECRET_KEY."
-    );
-  }
-
-  const defaultApiBaseUrl =
-    c.env.ENVIRONMENT === "production" ? BVNK_PRODUCTION_API_URL : BVNK_SANDBOX_API_URL;
+  const defaultApiBaseUrl = mode === "sandbox" ? BVNK_SANDBOX_API_URL : BVNK_PRODUCTION_API_URL;
   const apiBaseUrl = c.env.BVNK_API_BASE_URL?.trim() || defaultApiBaseUrl;
   try {
     new URL(apiBaseUrl);
@@ -251,39 +279,17 @@ function getBvnkConfig(c: AppContext): BvnkConfig {
     throw new AppError("INTERNAL_ERROR", "BVNK API URL configuration is invalid.");
   }
 
-  let auth: BvnkAuthConfig;
-  if (hawkAuthId && hawkSecretKey) {
-    auth = {
-      type: "hawk",
-      authId: hawkAuthId,
-      secretKey: hawkSecretKey,
-    };
-  } else if (apiToken) {
-    auth = {
-      type: "bearer",
-      apiToken,
-    };
-  } else {
-    throw new AppError(
-      "INTERNAL_ERROR",
-      "BVNK is not configured. Set BVNK_WALLET_ID and either BVNK_API_TOKEN or BVNK_HAWK_AUTH_ID/BVNK_HAWK_SECRET_KEY."
-    );
-  }
+  const auth: BvnkAuthConfig = {
+    type: "hawk",
+    authId: hawkAuthId,
+    secretKey: hawkSecretKey,
+  };
 
   return {
     auth,
     walletId,
     apiBaseUrl,
   };
-}
-
-function isBvnkConfigured(c: AppContext): boolean {
-  const hawkAuthId = c.env.BVNK_HAWK_AUTH_ID?.trim();
-  const hawkSecretKey = c.env.BVNK_HAWK_SECRET_KEY?.trim();
-  const apiToken = c.env.BVNK_API_TOKEN?.trim();
-  const walletId = c.env.BVNK_WALLET_ID?.trim();
-  const hawkConfigured = Boolean(hawkAuthId && hawkSecretKey);
-  return Boolean(walletId && (apiToken || hawkConfigured));
 }
 
 function encodeBasicAuth(value: string): string {
@@ -488,15 +494,12 @@ async function bvnkRequest(
 ): Promise<unknown> {
   const apiBaseUrl = config.apiBaseUrl.endsWith("/") ? config.apiBaseUrl : `${config.apiBaseUrl}/`;
   const url = new URL(path.replace(/^\//, ""), apiBaseUrl);
-  const authorization =
-    config.auth.type === "hawk"
-      ? await buildBvnkHawkAuthorizationHeader(
-          url,
-          init.method,
-          config.auth.authId,
-          config.auth.secretKey
-        )
-      : `Bearer ${config.auth.apiToken}`;
+  const authorization = await buildBvnkHawkAuthorizationHeader(
+    url,
+    init.method,
+    config.auth.authId,
+    config.auth.secretKey
+  );
   const response = await fetch(url.toString(), {
     method: init.method,
     headers: {
@@ -831,8 +834,6 @@ async function buildSignedMoonPayWidgetUrl(
 }
 
 const bvnkRampProvider: RampProviderExecutor = {
-  isConfigured: isBvnkConfigured,
-
   async executeOnramp(c, scope, input) {
     const customerId = input.kycReference?.trim();
     if (!customerId) {
@@ -966,8 +967,6 @@ const bvnkRampProvider: RampProviderExecutor = {
 };
 
 const moonPayRampProvider: RampProviderExecutor = {
-  isConfigured: isMoonPayConfigured,
-
   async executeOnramp(c, scope, input) {
     const destinationWalletAddress = resolveWalletAddress(
       scope.wallets,
@@ -1037,8 +1036,6 @@ const moonPayRampProvider: RampProviderExecutor = {
 };
 
 const lightsparkRampProvider: RampProviderExecutor = {
-  isConfigured: isLightsparkConfigured,
-
   async executeOnramp(c, _scope, input) {
     const customerId = input.kycReference?.trim();
     if (!customerId) {
@@ -1157,30 +1154,18 @@ async function resolveRampProvider(
   providerId: RampProviderId,
   organizationId: string
 ): Promise<RampProviderExecutor> {
-  await assertProviderAvailable(c.env, getDb(c.env), organizationId, "ramps", providerId);
+  await assertProviderAvailable(
+    c.env,
+    getDb(c.env),
+    organizationId,
+    "ramps",
+    providerId,
+    resolveApiMode(c) === "sandbox"
+  );
 
   const provider = RAMP_PROVIDER_REGISTRY[providerId];
   if (!provider) {
     throw new AppError("BAD_REQUEST", `Unsupported ramp provider: ${providerId}`);
-  }
-
-  if (!provider.isConfigured(c)) {
-    if (providerId === "moonpay") {
-      throw new AppError(
-        "INTERNAL_ERROR",
-        "MoonPay is not configured. Set MOONPAY_API_KEY and MOONPAY_SECRET_KEY."
-      );
-    }
-    if (providerId === "lightspark") {
-      throw new AppError(
-        "INTERNAL_ERROR",
-        "Lightspark is not configured. Set LIGHTSPARK_GRID_CLIENT_ID and LIGHTSPARK_GRID_CLIENT_SECRET."
-      );
-    }
-    throw new AppError(
-      "INTERNAL_ERROR",
-      "BVNK is not configured. Set BVNK_WALLET_ID and either BVNK_API_TOKEN or BVNK_HAWK_AUTH_ID/BVNK_HAWK_SECRET_KEY."
-    );
   }
 
   return provider;
