@@ -62,8 +62,7 @@ const TEST_MOONPAY_ONRAMP_URL = "https://buy-sandbox.moonpay.com";
 const TEST_MOONPAY_OFFRAMP_URL = "https://sell-sandbox.moonpay.com";
 const TEST_LIGHTSPARK_GRID_CLIENT_ID = "lightspark_token_id";
 const TEST_LIGHTSPARK_GRID_CLIENT_SECRET = "lightspark_client_secret";
-const TEST_LIGHTSPARK_GRID_API_BASE_URL = "https://api.lightspark.test/grid/2025-10-13";
-const TEST_BVNK_API_TOKEN = "bvnk_bearer_token";
+const LIGHTSPARK_GRID_API_BASE_URL = "https://api.lightspark.com/grid/2025-10-13";
 const TEST_BVNK_HAWK_AUTH_ID = "bvnk_hawk_auth_id";
 const TEST_BVNK_HAWK_SECRET_KEY = "bvnk_hawk_secret_key";
 const TEST_BVNK_WALLET_ID = "a:24122329329347:HsdJVhW:1";
@@ -73,17 +72,15 @@ const MOONPAY_PARAM_EXTERNAL_CUSTOMER_ID = "externalCustomerId";
 const MOONPAY_PARAM_QUOTE_CURRENCY_CODE = "quoteCurrencyCode";
 const MOONPAY_PARAM_REFUND_WALLET_ADDRESS = "refundWalletAddress";
 
-let originalMoonPayApiKey: string | undefined;
-let originalMoonPaySecretKey: string | undefined;
+let originalMoonPaySandboxApiKey: string | undefined;
+let originalMoonPaySandboxSecretKey: string | undefined;
 let originalMoonPayOnrampUrl: string | undefined;
 let originalMoonPayOfframpUrl: string | undefined;
-let originalLightsparkGridClientId: string | undefined;
-let originalLightsparkGridClientSecret: string | undefined;
-let originalLightsparkGridApiBaseUrl: string | undefined;
-let originalBvnkApiToken: string | undefined;
-let originalBvnkHawkAuthId: string | undefined;
-let originalBvnkHawkSecretKey: string | undefined;
-let originalBvnkWalletId: string | undefined;
+let originalLightsparkGridSandboxClientId: string | undefined;
+let originalLightsparkGridSandboxClientSecret: string | undefined;
+let originalBvnkSandboxHawkAuthId: string | undefined;
+let originalBvnkSandboxHawkSecretKey: string | undefined;
+let originalBvnkSandboxWalletId: string | undefined;
 let originalBvnkApiBaseUrl: string | undefined;
 
 function assertMoonPaySignature(url: URL): void {
@@ -271,30 +268,26 @@ describe("Payments routes", () => {
       createNoopSigner(address("8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ"))
     );
 
-    originalMoonPayApiKey = env.MOONPAY_API_KEY;
-    originalMoonPaySecretKey = env.MOONPAY_SECRET_KEY;
+    originalMoonPaySandboxApiKey = env.MOONPAY_SANDBOX_API_KEY;
+    originalMoonPaySandboxSecretKey = env.MOONPAY_SANDBOX_SECRET_KEY;
     originalMoonPayOnrampUrl = env.MOONPAY_ONRAMP_URL;
     originalMoonPayOfframpUrl = env.MOONPAY_OFFRAMP_URL;
-    originalLightsparkGridClientId = env.LIGHTSPARK_GRID_CLIENT_ID;
-    originalLightsparkGridClientSecret = env.LIGHTSPARK_GRID_CLIENT_SECRET;
-    originalLightsparkGridApiBaseUrl = env.LIGHTSPARK_GRID_API_BASE_URL;
-    originalBvnkApiToken = env.BVNK_API_TOKEN;
-    originalBvnkHawkAuthId = env.BVNK_HAWK_AUTH_ID;
-    originalBvnkHawkSecretKey = env.BVNK_HAWK_SECRET_KEY;
-    originalBvnkWalletId = env.BVNK_WALLET_ID;
+    originalLightsparkGridSandboxClientId = env.LIGHTSPARK_GRID_SANDBOX_CLIENT_ID;
+    originalLightsparkGridSandboxClientSecret = env.LIGHTSPARK_GRID_SANDBOX_CLIENT_SECRET;
+    originalBvnkSandboxHawkAuthId = env.BVNK_SANDBOX_HAWK_AUTH_ID;
+    originalBvnkSandboxHawkSecretKey = env.BVNK_SANDBOX_HAWK_SECRET_KEY;
+    originalBvnkSandboxWalletId = env.BVNK_SANDBOX_WALLET_ID;
     originalBvnkApiBaseUrl = env.BVNK_API_BASE_URL;
 
-    env.MOONPAY_API_KEY = TEST_MOONPAY_API_KEY;
-    env.MOONPAY_SECRET_KEY = TEST_MOONPAY_SECRET_KEY;
+    env.MOONPAY_SANDBOX_API_KEY = TEST_MOONPAY_API_KEY;
+    env.MOONPAY_SANDBOX_SECRET_KEY = TEST_MOONPAY_SECRET_KEY;
     env.MOONPAY_ONRAMP_URL = TEST_MOONPAY_ONRAMP_URL;
     env.MOONPAY_OFFRAMP_URL = TEST_MOONPAY_OFFRAMP_URL;
-    env.LIGHTSPARK_GRID_CLIENT_ID = TEST_LIGHTSPARK_GRID_CLIENT_ID;
-    env.LIGHTSPARK_GRID_CLIENT_SECRET = TEST_LIGHTSPARK_GRID_CLIENT_SECRET;
-    env.LIGHTSPARK_GRID_API_BASE_URL = TEST_LIGHTSPARK_GRID_API_BASE_URL;
-    env.BVNK_API_TOKEN = TEST_BVNK_API_TOKEN;
-    env.BVNK_HAWK_AUTH_ID = undefined;
-    env.BVNK_HAWK_SECRET_KEY = undefined;
-    env.BVNK_WALLET_ID = TEST_BVNK_WALLET_ID;
+    env.LIGHTSPARK_GRID_SANDBOX_CLIENT_ID = TEST_LIGHTSPARK_GRID_CLIENT_ID;
+    env.LIGHTSPARK_GRID_SANDBOX_CLIENT_SECRET = TEST_LIGHTSPARK_GRID_CLIENT_SECRET;
+    env.BVNK_SANDBOX_HAWK_AUTH_ID = TEST_BVNK_HAWK_AUTH_ID;
+    env.BVNK_SANDBOX_HAWK_SECRET_KEY = TEST_BVNK_HAWK_SECRET_KEY;
+    env.BVNK_SANDBOX_WALLET_ID = TEST_BVNK_WALLET_ID;
     env.BVNK_API_BASE_URL = TEST_BVNK_API_BASE_URL;
 
     await seedTestDatabase(env);
@@ -302,17 +295,15 @@ describe("Payments routes", () => {
   });
 
   afterEach(async () => {
-    env.MOONPAY_API_KEY = originalMoonPayApiKey;
-    env.MOONPAY_SECRET_KEY = originalMoonPaySecretKey;
+    env.MOONPAY_SANDBOX_API_KEY = originalMoonPaySandboxApiKey;
+    env.MOONPAY_SANDBOX_SECRET_KEY = originalMoonPaySandboxSecretKey;
     env.MOONPAY_ONRAMP_URL = originalMoonPayOnrampUrl;
     env.MOONPAY_OFFRAMP_URL = originalMoonPayOfframpUrl;
-    env.LIGHTSPARK_GRID_CLIENT_ID = originalLightsparkGridClientId;
-    env.LIGHTSPARK_GRID_CLIENT_SECRET = originalLightsparkGridClientSecret;
-    env.LIGHTSPARK_GRID_API_BASE_URL = originalLightsparkGridApiBaseUrl;
-    env.BVNK_API_TOKEN = originalBvnkApiToken;
-    env.BVNK_HAWK_AUTH_ID = originalBvnkHawkAuthId;
-    env.BVNK_HAWK_SECRET_KEY = originalBvnkHawkSecretKey;
-    env.BVNK_WALLET_ID = originalBvnkWalletId;
+    env.LIGHTSPARK_GRID_SANDBOX_CLIENT_ID = originalLightsparkGridSandboxClientId;
+    env.LIGHTSPARK_GRID_SANDBOX_CLIENT_SECRET = originalLightsparkGridSandboxClientSecret;
+    env.BVNK_SANDBOX_HAWK_AUTH_ID = originalBvnkSandboxHawkAuthId;
+    env.BVNK_SANDBOX_HAWK_SECRET_KEY = originalBvnkSandboxHawkSecretKey;
+    env.BVNK_SANDBOX_WALLET_ID = originalBvnkSandboxWalletId;
     env.BVNK_API_BASE_URL = originalBvnkApiBaseUrl;
 
     await clearTestDatabase(env);
@@ -710,7 +701,7 @@ describe("Payments routes", () => {
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     const requestUrl = fetchSpy.mock.calls[0]?.[0];
     const requestInit = fetchSpy.mock.calls[0]?.[1];
-    expect(String(requestUrl)).toBe(`${TEST_LIGHTSPARK_GRID_API_BASE_URL}/quotes`);
+    expect(String(requestUrl)).toBe(`${LIGHTSPARK_GRID_API_BASE_URL}/quotes`);
     expect(requestInit?.method).toBe("POST");
 
     const headers = requestInit?.headers as Record<string, string>;
@@ -882,7 +873,7 @@ describe("Payments routes", () => {
 
     expect(fetchSpy).toHaveBeenCalledTimes(3);
     const createUrl = String(fetchSpy.mock.calls[1]?.[0]);
-    expect(createUrl).toBe(`${TEST_LIGHTSPARK_GRID_API_BASE_URL}/customers/external-accounts`);
+    expect(createUrl).toBe(`${LIGHTSPARK_GRID_API_BASE_URL}/customers/external-accounts`);
     const createPayload = JSON.parse(String(fetchSpy.mock.calls[1]?.[1]?.body)) as {
       customerId: string;
       currency: string;
@@ -961,9 +952,9 @@ describe("Payments routes", () => {
     expect(fetchSpy).toHaveBeenCalledTimes(2);
     const quoteCallUrl = String(fetchSpy.mock.calls[0]?.[0]);
     const executeCallUrl = String(fetchSpy.mock.calls[1]?.[0]);
-    expect(quoteCallUrl).toBe(`${TEST_LIGHTSPARK_GRID_API_BASE_URL}/quotes`);
+    expect(quoteCallUrl).toBe(`${LIGHTSPARK_GRID_API_BASE_URL}/quotes`);
     expect(executeCallUrl).toBe(
-      `${TEST_LIGHTSPARK_GRID_API_BASE_URL}/quotes/Quote%3Als_offramp_123/execute`
+      `${LIGHTSPARK_GRID_API_BASE_URL}/quotes/Quote%3Als_offramp_123/execute`
     );
 
     const quoteCallPayload = JSON.parse(String(fetchSpy.mock.calls[0]?.[1]?.body)) as {
@@ -1042,7 +1033,7 @@ describe("Payments routes", () => {
     expect(requestUrl).toBe(`${TEST_BVNK_API_BASE_URL}/api/v1/pay/summary`);
 
     const headers = requestInit?.headers as Record<string, string>;
-    expect(headers.Authorization).toBe(`Bearer ${TEST_BVNK_API_TOKEN}`);
+    expect(headers.Authorization).toMatch(/^Hawk /);
 
     const payload = JSON.parse(String(requestInit?.body)) as {
       walletId: string;
@@ -1067,10 +1058,6 @@ describe("Payments routes", () => {
   });
 
   it("creates and accepts a BVNK off-ramp estimate through the execute endpoint", async () => {
-    env.BVNK_API_TOKEN = undefined;
-    env.BVNK_HAWK_AUTH_ID = TEST_BVNK_HAWK_AUTH_ID;
-    env.BVNK_HAWK_SECRET_KEY = TEST_BVNK_HAWK_SECRET_KEY;
-
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(
@@ -1268,7 +1255,7 @@ describe("Payments routes", () => {
   });
 
   it("returns forbidden when MoonPay is not configured in the environment", async () => {
-    env.MOONPAY_API_KEY = undefined;
+    env.MOONPAY_SANDBOX_API_KEY = undefined;
 
     const res = await app.request(
       "/v1/payments/ramps/onramp/execute",
@@ -1296,7 +1283,7 @@ describe("Payments routes", () => {
   });
 
   it("returns forbidden when Lightspark is not configured in the environment", async () => {
-    env.LIGHTSPARK_GRID_CLIENT_ID = undefined;
+    env.LIGHTSPARK_GRID_SANDBOX_CLIENT_ID = undefined;
 
     const res = await app.request(
       "/v1/payments/ramps/onramp/execute",
@@ -1325,7 +1312,8 @@ describe("Payments routes", () => {
   });
 
   it("returns forbidden when BVNK is not configured in the environment", async () => {
-    env.BVNK_API_TOKEN = undefined;
+    env.BVNK_SANDBOX_HAWK_AUTH_ID = undefined;
+    env.BVNK_SANDBOX_HAWK_SECRET_KEY = undefined;
 
     const res = await app.request(
       "/v1/payments/ramps/onramp/execute",

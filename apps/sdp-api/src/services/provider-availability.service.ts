@@ -32,7 +32,7 @@ type ClerkOrganizationWithMetadata = {
 
 type ProviderAvailabilityDefinition = {
   label: string;
-  isConfigured: (env: Env) => boolean;
+  isConfigured: (env: Env, testMode?: boolean) => boolean;
 };
 
 type ProviderAvailabilityDefinitions = {
@@ -142,19 +142,44 @@ const PROVIDER_AVAILABILITY_DEFINITIONS = {
   ramps: {
     moonpay: {
       label: "MoonPay",
-      isConfigured: (env) => hasAllEnv(env, ["MOONPAY_API_KEY", "MOONPAY_SECRET_KEY"]),
+      isConfigured: (env, testMode) => {
+        const prod = hasAllEnv(env, ["MOONPAY_API_KEY", "MOONPAY_SECRET_KEY"]);
+        const sandbox = hasAllEnv(env, ["MOONPAY_SANDBOX_API_KEY", "MOONPAY_SANDBOX_SECRET_KEY"]);
+        if (testMode === true) return sandbox;
+        if (testMode === false) return prod;
+        return prod || sandbox;
+      },
     },
     lightspark: {
       label: "Lightspark",
-      isConfigured: (env) =>
-        hasAllEnv(env, ["LIGHTSPARK_GRID_CLIENT_ID", "LIGHTSPARK_GRID_CLIENT_SECRET"]),
+      isConfigured: (env, testMode) => {
+        const prod = hasAllEnv(env, ["LIGHTSPARK_GRID_CLIENT_ID", "LIGHTSPARK_GRID_CLIENT_SECRET"]);
+        const sandbox = hasAllEnv(env, [
+          "LIGHTSPARK_GRID_SANDBOX_CLIENT_ID",
+          "LIGHTSPARK_GRID_SANDBOX_CLIENT_SECRET",
+        ]);
+        if (testMode === true) return sandbox;
+        if (testMode === false) return prod;
+        return prod || sandbox;
+      },
     },
     bvnk: {
       label: "BVNK",
-      isConfigured: (env) =>
-        hasEnv(env, "BVNK_WALLET_ID") &&
-        (hasEnv(env, "BVNK_API_TOKEN") ||
-          hasAllEnv(env, ["BVNK_HAWK_AUTH_ID", "BVNK_HAWK_SECRET_KEY"])),
+      isConfigured: (env, testMode) => {
+        const prod = hasAllEnv(env, [
+          "BVNK_WALLET_ID",
+          "BVNK_HAWK_AUTH_ID",
+          "BVNK_HAWK_SECRET_KEY",
+        ]);
+        const sandbox = hasAllEnv(env, [
+          "BVNK_SANDBOX_WALLET_ID",
+          "BVNK_SANDBOX_HAWK_AUTH_ID",
+          "BVNK_SANDBOX_HAWK_SECRET_KEY",
+        ]);
+        if (testMode === true) return sandbox;
+        if (testMode === false) return prod;
+        return prod || sandbox;
+      },
     },
   },
 } as const satisfies ProviderAvailabilityDefinitions;
@@ -441,14 +466,16 @@ export async function assertProviderAvailable(
   db: DatabaseClient,
   organizationId: string,
   family: "ramps",
-  providerId: RampProviderId
+  providerId: RampProviderId,
+  testMode: boolean
 ): Promise<void>;
 export async function assertProviderAvailable(
   env: Env,
   db: DatabaseClient,
   organizationId: string,
   family: OrganizationProviderFamily,
-  providerId: string
+  providerId: string,
+  testMode?: boolean
 ): Promise<void> {
   const access = await getProviderAvailability(env, db, organizationId);
   const entry = access.providers[family][
@@ -470,6 +497,21 @@ export async function assertProviderAvailable(
         }
       )
     );
+  }
+
+  // Secondary mode-specific check for ramps: the general availability check uses
+  // a union of sandbox + production credentials, but the runtime handler only uses
+  // credentials for the requested mode. Re-check with the specific mode so callers
+  // get a clear PROVIDER_NOT_CONFIGURED (503) instead of a silent runtime failure.
+  if (family === "ramps" && testMode !== undefined) {
+    const def = PROVIDER_AVAILABILITY_DEFINITIONS.ramps[providerId as RampProviderId];
+    if (def && !def.isConfigured(env, testMode)) {
+      const mode = testMode ? "sandbox" : "production";
+      throw new AppError(
+        "PROVIDER_NOT_CONFIGURED",
+        `${def.label} is not configured for ${mode} mode.`
+      );
+    }
   }
 }
 
