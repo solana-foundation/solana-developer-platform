@@ -11,13 +11,13 @@ The `status` field on the `Transfer` record takes one of five values:
 
 | Status | Meaning |
 | --- | --- |
-| `pending` | SDP has accepted the request (or detected an inbound) but has not yet observed the transaction on the network. No `signature` yet. |
-| `processing` | The transaction has been submitted; SDP is waiting for cluster confirmation. `signature` is now set. |
-| `confirmed` | A supermajority of the cluster has voted on the transaction. The transfer is durable but not yet at maximum finality. `slot` and `blockTime` are populated. |
-| `finalized` | The slot containing the transaction is locked in by the network — finality at the Solana cluster's strongest guarantee. Safe to treat as irreversible. |
+| `pending` | Used for transfers SDP knows about but has not yet submitted or observed on the network — primarily the inbound watcher's initial state. No `signature` yet. |
+| `processing` | The transfer is in flight. For Execute-mode this is the **initial state** at record creation: the request has been accepted and the transaction is being built and submitted; the `signature` field is not yet populated when the record is first written. |
+| `confirmed` | The cluster has confirmed the transaction. `signature` and `slot` are populated. `blockTime` may also be set, but is not guaranteed at this stage — treat it as optional until `finalized`. |
+| `finalized` | The slot containing the transaction is locked in by the network — finality at the Solana cluster's strongest guarantee. `signature`, `slot`, and `blockTime` are all populated. Safe to treat as irreversible. |
 | `failed` | The transaction was built and submitted but rejected by the network (insufficient funds, frozen account, expired blockhash, etc.). The `error` field describes what reached the chain. |
 
-A transfer moves forward through `pending → processing → confirmed → finalized`. Any of those can transition to `failed` instead; `failed` is terminal.
+A transfer moves forward through `processing → confirmed → finalized` for Execute-mode flows, or `pending → processing → confirmed → finalized` when SDP first detects an inbound transfer before observing it on-chain. Any state can transition to `failed`; `failed` is terminal.
 
 ## Finality on Solana
 

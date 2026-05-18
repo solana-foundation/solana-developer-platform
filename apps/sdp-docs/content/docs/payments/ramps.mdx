@@ -84,13 +84,13 @@ HttpRequest request = HttpRequest.newBuilder()
 | Field | Required | Notes |
 | --- | --- | --- |
 | `provider` | yes | One of `moonpay`, `lightspark`, `bvnk`. |
-| `destinationWallet` | yes | SDP wallet ID or on-chain Solana address. |
+| `destinationWallet` | yes | Provider-dependent: **MoonPay** accepts an SDP wallet ID or a Solana address; **Lightspark** expects a Lightspark account identifier (`ExternalAccount:…`) or a Solana address (a fresh external account is created when a Solana address is passed); **BVNK** uses the customer's BVNK-side wallet — the BVNK wallet ID is set at deploy time via `BVNK_WALLET_ID`. |
 | `cryptoToken` | yes | Token symbol (`USDC`, `USDT`, etc.). Alphanumeric and underscore. |
 | `fiatAmount` | yes | Decimal string greater than zero (e.g. `"100.00"`). |
 | `fiatCurrency` | no | Currently `USD` only. |
-| `kycReference` | no | Up to 128 chars; identifies the end-user across your KYC system. Some providers use this to short-circuit re-verification. |
+| `kycReference` | conditional | Up to 128 chars; identifies the end-user across your KYC system. **Required for `lightspark` and `bvnk` on-ramp** (carries the Lightspark or BVNK customer id); optional for `moonpay`. |
 | `redirectUrl` | no | Valid URL the provider sends the user to on completion. |
-| `bvnkCompliance` | no | BVNK-only: object of the form `{ "partyDetails": [...] }` carrying compliance party records. Omit the field entirely for `moonpay` and `lightspark`. See [Ramp providers](/docs/payments/ramps-providers#bvnk). |
+| `bvnkCompliance` | no | BVNK-only on the on-ramp side: object of the form `{ "partyDetails": [...] }` carrying compliance party records. Optional for BVNK on-ramp, **required for BVNK off-ramp** (see the offramp table below). Omit the field entirely for `moonpay` and `lightspark`. See [Ramp providers](/docs/payments/ramps-providers#bvnk). |
 
 ## Offramp flow
 
@@ -135,7 +135,10 @@ const { data } = await response.json();
 </Tab>
 </Tabs>
 
-Offramp uses `sourceWallet` (the wallet you're cashing out from) and `cryptoAmount` (the crypto amount to convert). All other fields mirror the onramp request.
+Offramp uses `sourceWallet` (the wallet you're cashing out from) and `cryptoAmount` (the crypto amount to convert). Other fields mirror the onramp request, with two provider-specific differences:
+
+- **`kycReference`** is required for `bvnk` off-ramp (carries the BVNK customer id) and optional for the others.
+- **`bvnkCompliance`** is **required** for BVNK off-ramp: the server validates that `partyDetails` contains at least one entry and rejects the request otherwise. Omit it for `moonpay` and `lightspark`.
 
 ## Status states
 

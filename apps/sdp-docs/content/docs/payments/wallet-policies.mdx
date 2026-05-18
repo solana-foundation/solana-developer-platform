@@ -3,7 +3,7 @@ title: Wallet policies
 description: Destination allowlist and transfer limits per custody wallet.
 ---
 
-Wallet policies constrain how a custody wallet can move funds. You set a destination allowlist (only these addresses can receive transfers from this wallet) and transfer limits (a per-transfer cap and a rolling daily cap). Policies are managed via `GET` and `PUT` on `/v1/payments/wallets/{walletId}/policies` and enforced at transfer time.
+Wallet policies constrain how a custody wallet can move funds. You set a destination allowlist (only these addresses can receive transfers from this wallet) and transfer limits (a per-transfer cap and a UTC-calendar-day cap). Policies are managed via `GET` and `PUT` on `/v1/payments/wallets/{walletId}/policies` and enforced at transfer time.
 
 Use policies for treasury wallets, automated payout wallets, or any custody wallet where unbounded outbound flow would be a liability.
 
@@ -60,7 +60,7 @@ The allowlist exists to bound risk on automated wallets (a hot wallet that shoul
 Two limits, both optional:
 
 - **`maxTransferAmount`** — per-transfer cap. Any single `POST /v1/payments/transfers` exceeding this amount is rejected.
-- **`maxDailyAmount`** — rolling 24-hour cap. Transfers that would push the trailing-24h sum past this value are rejected.
+- **`maxDailyAmount`** — UTC-calendar-day cap. The day window resets at 00:00 UTC; transfers that would push the day's running total past this value are rejected.
 
 Set both for defense in depth: a per-transaction cap that catches obvious mistakes, plus a daily cap that bounds blast radius if many small transfers are submitted in a coordinated attack.
 

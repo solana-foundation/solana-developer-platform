@@ -383,7 +383,7 @@ export const executeOnrampRequestSchema = executeOnrampSchemaBase
     }),
     bvnkCompliance: withOpenApi(executeOnrampSchemaBase.shape.bvnkCompliance, {
       description:
-        "BVNK compliance details. Required only when `provider` is `bvnk`; omit the field entirely for `moonpay` and `lightspark`.",
+        "BVNK-only compliance details. Optional on BVNK on-ramp; required on BVNK off-ramp (which validates that `partyDetails` has at least one entry). Omit the field entirely for `moonpay` and `lightspark`.",
       example: { partyDetails: [{ type: "individual" }] },
     }),
   })
@@ -424,7 +424,7 @@ export const executeOfframpRequestSchema = executeOfframpSchemaBase
     }),
     bvnkCompliance: withOpenApi(executeOfframpSchemaBase.shape.bvnkCompliance, {
       description:
-        "BVNK compliance details. Required only when `provider` is `bvnk`; omit the field entirely for `moonpay` and `lightspark`.",
+        "BVNK-only compliance details. Required on BVNK off-ramp (`partyDetails` must contain at least one entry). Omit the field entirely for `moonpay` and `lightspark`.",
       example: { partyDetails: [{ type: "individual" }] },
     }),
   })
