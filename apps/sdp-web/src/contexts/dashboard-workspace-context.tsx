@@ -1,17 +1,24 @@
 "use client";
 
-import { createContext, type ReactNode, useCallback, useContext, useMemo, useState } from "react";
+import { useAuth } from "@clerk/nextjs";
+import { useRouter } from "next/navigation";
+import {
+  createContext,
+  type ReactNode,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import { SWRConfig } from "swr";
+import { Button } from "@/components/ui/button";
 import type { DashboardAccess } from "@/lib/dashboard-access";
+import { type DashboardCacheScope, getDashboardCacheScopeKey } from "@/lib/dashboard-cache-scope";
 import { DASHBOARD_SWR_CONFIG } from "@/lib/dashboard-swr-config";
 import { useDashboardUrlState } from "@/lib/dashboard-url-state";
 
 export type IssuanceWorkspaceTab = "tokens" | "playground";
-
-export interface DashboardCacheScope {
-  userId: string | null;
-  orgId: string | null;
-}
 
 export interface DashboardPlaygroundApiKeyOption {
   id: string;
@@ -41,10 +48,30 @@ const DashboardWorkspaceContext = createContext<DashboardWorkspaceContextValue |
   undefined
 );
 
+function DashboardScopeRefreshFallback() {
+  const router = useRouter();
+
+  return (
+    <main className="min-h-screen bg-[var(--sdp-shell-bg)] p-0 text-text-extra-high">
+      <div className="mx-auto max-w-5xl space-y-4 border border-border-extra-light bg-white/70 p-6">
+        <p className="text-sm text-text-low">Loading dashboard...</p>
+        <Button type="button" variant="ghost" size="sm" onClick={() => router.refresh()}>
+          Retry
+        </Button>
+      </div>
+    </main>
+  );
+}
+
+const DASHBOARD_SCOPED_SWR_CONFIG = {
+  ...DASHBOARD_SWR_CONFIG,
+  provider: () => new Map(),
+};
+
 type DashboardWorkspaceProviderProps = {
   children: ReactNode;
   dashboardAccess: DashboardAccess;
-  dashboardCacheScope: DashboardCacheScope;
+  serverDashboardCacheScope: DashboardCacheScope;
   defaultProject?: string;
   initialSidebarOpen?: boolean;
 };
@@ -52,10 +79,12 @@ type DashboardWorkspaceProviderProps = {
 export function DashboardWorkspaceProvider({
   children,
   dashboardAccess,
-  dashboardCacheScope,
+  serverDashboardCacheScope,
   defaultProject = "Default Project",
   initialSidebarOpen = true,
 }: DashboardWorkspaceProviderProps) {
+  const auth = useAuth();
+  const router = useRouter();
   const { replaceSearchParams, searchParams } = useDashboardUrlState();
   const [isSidebarOpen, setSidebarOpenState] = useState(initialSidebarOpen);
   const [selectedProject, setSelectedProject] = useState(defaultProject);
@@ -63,6 +92,34 @@ export function DashboardWorkspaceProvider({
     DashboardPlaygroundApiKeyOption[]
   >([]);
   const [selectedPlaygroundApiKeyId, setSelectedPlaygroundApiKeyId] = useState<string | null>(null);
+  const liveDashboardCacheScope = useMemo<DashboardCacheScope>(
+    () =>
+      auth.isLoaded
+        ? {
+            orgId: auth.orgId ?? null,
+            userId: auth.userId ?? null,
+          }
+        : serverDashboardCacheScope,
+    [auth.isLoaded, auth.orgId, auth.userId, serverDashboardCacheScope]
+  );
+  const liveDashboardCacheScopeKey = useMemo(
+    () => getDashboardCacheScopeKey(liveDashboardCacheScope),
+    [liveDashboardCacheScope]
+  );
+  const serverDashboardCacheScopeKey = useMemo(
+    () => getDashboardCacheScopeKey(serverDashboardCacheScope),
+    [serverDashboardCacheScope.orgId, serverDashboardCacheScope.userId]
+  );
+  const dashboardScopeIsFresh = liveDashboardCacheScopeKey === serverDashboardCacheScopeKey;
+  const shouldRenderScopeRefreshFallback = auth.isLoaded && !dashboardScopeIsFresh;
+
+  useEffect(() => {
+    if (!auth.isLoaded || liveDashboardCacheScopeKey === serverDashboardCacheScopeKey) {
+      return;
+    }
+
+    router.refresh();
+  }, [auth.isLoaded, liveDashboardCacheScopeKey, router, serverDashboardCacheScopeKey]);
 
   const issuanceTab: IssuanceWorkspaceTab = useMemo(() => {
     const tab = searchParams.get("tab");
@@ -102,7 +159,7 @@ export function DashboardWorkspaceProvider({
   const value = useMemo<DashboardWorkspaceContextValue>(
     () => ({
       dashboardAccess,
-      dashboardCacheScope,
+      dashboardCacheScope: liveDashboardCacheScope,
       isSidebarOpen,
       selectedProject,
       issuanceTab,
@@ -117,7 +174,7 @@ export function DashboardWorkspaceProvider({
     }),
     [
       dashboardAccess,
-      dashboardCacheScope,
+      liveDashboardCacheScope,
       isSidebarOpen,
       playgroundApiKeys,
       issuanceTab,
@@ -132,7 +189,9 @@ export function DashboardWorkspaceProvider({
 
   return (
     <DashboardWorkspaceContext.Provider value={value}>
-      <SWRConfig value={DASHBOARD_SWR_CONFIG}>{children}</SWRConfig>
+      <SWRConfig key={liveDashboardCacheScopeKey} value={DASHBOARD_SCOPED_SWR_CONFIG}>
+        {shouldRenderScopeRefreshFallback ? <DashboardScopeRefreshFallback /> : children}
+      </SWRConfig>
     </DashboardWorkspaceContext.Provider>
   );
 }
@@ -141,7 +200,6 @@ export function useDashboardWorkspace() {
   const context = useContext(DashboardWorkspaceContext);
 
   if (!context) {
-    // biome-ignore lint/security/noSecrets: This is a React hook guard message, not a secret.
     throw new Error("useDashboardWorkspace must be used within a DashboardWorkspaceProvider");
   }
 

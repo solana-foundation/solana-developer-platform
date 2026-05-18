@@ -6,6 +6,7 @@ import { DashboardWorkspaceProvider } from "@/contexts/dashboard-workspace-conte
 import { NetworkDebugProvider } from "@/contexts/network-debug-context";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
+import { type DashboardCacheScope, getDashboardCacheScopeKey } from "@/lib/dashboard-cache-scope";
 
 export default async function DashboardLayout({ children }: { children: ReactNode }) {
   const { orgRole, orgId, userId } = await auth();
@@ -15,11 +16,16 @@ export default async function DashboardLayout({ children }: { children: ReactNod
   }
 
   const dashboardAccess = resolveDashboardAccess(orgRole);
+  const dashboardCacheScope = {
+    orgId: orgId ?? null,
+    userId: userId ?? null,
+  } satisfies DashboardCacheScope;
 
   return (
     <DashboardWorkspaceProvider
+      key={getDashboardCacheScopeKey(dashboardCacheScope)}
       dashboardAccess={dashboardAccess}
-      dashboardCacheScope={{ orgId: orgId ?? null, userId: userId ?? null }}
+      serverDashboardCacheScope={dashboardCacheScope}
     >
       <NetworkDebugProvider>
         <DashboardShell>{children}</DashboardShell>

@@ -3,6 +3,7 @@
 import { useEffect, useMemo } from "react";
 import useSWR, { type BareFetcher, type Key, type SWRConfiguration, type SWRResponse } from "swr";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
+import { getDashboardCacheScopeKey } from "@/lib/dashboard-cache-scope";
 
 export interface PersistedDashboardSnapshotConfig<Data> {
   key: string;
@@ -99,10 +100,11 @@ export function usePersistedDashboardSWR<Data, Error = unknown>(
   config: SWRConfiguration<Data, Error> = {},
   persistedConfig?: PersistedDashboardSnapshotConfig<Data>
 ): SWRResponse<Data, Error> {
-  const {
-    dashboardCacheScope: { orgId, userId },
-  } = useDashboardWorkspace();
-  const scopeKey = useMemo(() => `${userId ?? "anonymous"}:${orgId ?? "no-org"}`, [orgId, userId]);
+  const { dashboardCacheScope } = useDashboardWorkspace();
+  const scopeKey = useMemo(
+    () => getDashboardCacheScopeKey(dashboardCacheScope),
+    [dashboardCacheScope]
+  );
   const persistedKey = persistedConfig?.key;
   const persistedTtlMs = persistedConfig?.ttlMs;
   const persistedVersion = persistedConfig?.version ?? DEFAULT_PERSISTED_SNAPSHOT_VERSION;
@@ -130,9 +132,12 @@ export function usePersistedDashboardSWR<Data, Error = unknown>(
     return readPersistedDashboardSnapshot<Data>(scopeKey, normalizedPersistedConfig);
   }, [config.fallbackData, normalizedPersistedConfig, scopeKey]);
 
+  const fallbackData =
+    config.fallbackData !== undefined ? config.fallbackData : persistedFallbackData;
+
   const response = useSWR<Data, Error>(key, fetcher, {
     ...config,
-    fallbackData: config.fallbackData !== undefined ? config.fallbackData : persistedFallbackData,
+    fallbackData,
   });
 
   useEffect(() => {

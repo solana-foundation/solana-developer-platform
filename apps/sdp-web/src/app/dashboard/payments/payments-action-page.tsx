@@ -976,11 +976,7 @@ export function PaymentsActionPage({
   const [rampExecution, setRampExecution] = useState<PaymentRampExecution | null>(null);
   const shouldLoadWallets = branch !== null;
   const hasServerWalletSnapshot = wallets.length > 0 || walletsError !== null;
-  const {
-    data: swrWallets,
-    error: walletsFetchError,
-    isValidating: walletsRefreshing,
-  } = useSWR<PaymentsDashboardWallet[]>(
+  const { data: swrWallets, error: walletsFetchError } = useSWR<PaymentsDashboardWallet[]>(
     shouldLoadWallets ? PAYMENTS_ACTION_WALLETS_KEY : null,
     () => fetchWallets(),
     {
@@ -998,7 +994,7 @@ export function PaymentsActionPage({
       ? walletsError
       : null;
   const hasWallets = liveWallets.length > 0;
-  const walletsLoading = shouldLoadWallets && walletsRefreshing && swrWallets === undefined;
+  const walletsLoading = shouldLoadWallets && swrWallets === undefined && !liveWalletsError;
 
   useEffect(() => {
     if (!hasWallets) {
@@ -1016,7 +1012,7 @@ export function PaymentsActionPage({
     [liveWallets, selectedWalletId]
   );
   const { data: selectedWalletBalancesSnapshot } = useSWR(
-    selectedWalletId ? [PAYMENTS_ACTION_WALLET_BALANCES_KEY, selectedWalletId] : null,
+    selectedWallet ? [PAYMENTS_ACTION_WALLET_BALANCES_KEY, selectedWallet.walletId] : null,
     ([, walletId]: readonly [string, string]) => fetchWalletBalances(walletId),
     {
       revalidateOnFocus: false,
