@@ -1,3 +1,4 @@
+import path from "node:path";
 import { withSentryConfig } from "@sentry/nextjs";
 import type { NextConfig } from "next";
 
@@ -10,6 +11,12 @@ const docsProxyOrigin = (
 
 const nextConfig: NextConfig = {
   distDir: process.env.PLAYWRIGHT_NEXT_DIST_DIR?.trim() || ".next",
+  // Standalone output ships a minimal node_modules + server.js for the slim
+  // Docker runtime (HOO-513). outputFileTracingRoot walks file tracing up to
+  // the monorepo root so workspace deps (@sdp/types, patches) are bundled —
+  // without it standalone misses pnpm-workspace symlinks.
+  output: "standalone",
+  outputFileTracingRoot: path.resolve(import.meta.dirname, "../.."),
   async rewrites() {
     return [
       {

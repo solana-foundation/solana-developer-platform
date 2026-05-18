@@ -1,0 +1,31 @@
+# Build/runtime artifacts that must come from the image build, not the host
+node_modules
+.next
+.turbo
+dist
+coverage
+
+# Test infrastructure unrelated to the runtime image
+playwright
+playwright-report
+test-results
+
+# Docs are served separately (sdp-docs) and only proxied at runtime
+docs
+
+# Local env files — host-only; container envs come from build-args / -e
+.env
+.env.*
+!.env.example
+!.env.local.example
+
+# Editor / OS / VCS noise
+.git
+.gitignore
+.vscode
+.idea
+.DS_Store
+
+# This file and the Dockerfile itself shouldn't end up in the image
+Dockerfile
+.dockerignore
