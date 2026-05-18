@@ -25,14 +25,16 @@ export interface PendingTransfersReconciliationDeps {
 export function runPendingTransfersReconciliation(deps: PendingTransfersReconciliationDeps): void {
   const work = () => trackPendingTransfers(deps.env);
 
-  if (!deps.observability) {
-    deps.bg.run(work());
-    return;
-  }
+  // Both branches must hand bg.run() a promise — never invoke `work` eagerly,
+  // since a sync throw before the first await inside trackPendingTransfers
+  // (e.g. createPaymentsRepository construction) would otherwise propagate to
+  // the runtime entrypoint instead of becoming a rejected promise the
+  // BackgroundRunner can track and the platform can log.
+  const promise = deps.observability
+    ? deps.observability.withMonitor(PENDING_TRANSFERS_MONITOR, work, {
+        schedule: { type: "crontab", value: PENDING_TRANSFERS_CRON },
+      })
+    : Promise.resolve().then(work);
 
-  deps.bg.run(
-    deps.observability.withMonitor(PENDING_TRANSFERS_MONITOR, work, {
-      schedule: { type: "crontab", value: PENDING_TRANSFERS_CRON },
-    })
-  );
+  deps.bg.run(promise);
 }

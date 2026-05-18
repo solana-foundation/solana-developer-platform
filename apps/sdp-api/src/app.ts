@@ -104,10 +104,6 @@ function captureUnexpectedError(
   err: Error,
   c: Context<{ Bindings: Env }>
 ): void {
-  if (!isSentryEnabled(c.env)) {
-    return;
-  }
-
   const requestId = c.get("requestId");
   const traceId = c.get("traceId");
   const requestSource = c.get("requestSource");
@@ -289,7 +285,13 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
       error: err.message,
       stack: err.stack,
     });
-    captureUnexpectedError(deps.observability, err, c);
+    // SENTRY_DSN gate is the runtime-wiring decision: app-level error handling
+    // shouldn't pay the cost of building a scope when no observability backend
+    // is wired up. Kept at this seam (rather than inside captureUnexpectedError)
+    // so the helper stays a pure scope-builder against the injected Observability.
+    if (isSentryEnabled(c.env)) {
+      captureUnexpectedError(deps.observability, err, c);
+    }
 
     c.header("X-SDP-Trace-ID", traceId);
     return c.json(
