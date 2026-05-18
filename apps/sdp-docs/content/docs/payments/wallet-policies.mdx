@@ -23,23 +23,28 @@ const response = await fetch(
   { headers: { Authorization: "Bearer sk_test_..." } }
 );
 const { data } = await response.json();
-// data.destinationAllowlist: string[]
-// data.maxTransferAmount?: string
-// data.maxDailyAmount?: string
+// data.policy.destinationAllowlist: string[]
+// data.policy.maxTransferAmount?: string
+// data.policy.maxDailyAmount?: string
 ```
 </Tab>
 </Tabs>
 
-Response shape:
+The payload is wrapped in the standard `data` / `meta` envelope, with the policy under a `policy` key:
 
 ```json
 {
-  "walletId": "wal_abc123",
-  "destinationAllowlist": ["7xKXz...9fGh", "5aBCd...2eFg"],
-  "maxTransferAmount": "100.00",
-  "maxDailyAmount": "1000.00",
-  "createdAt": "2026-05-14T08:00:00Z",
-  "updatedAt": "2026-05-14T10:15:00Z"
+  "data": {
+    "policy": {
+      "walletId": "wal_abc123",
+      "destinationAllowlist": ["7xKXz...9fGh", "5aBCd...2eFg"],
+      "maxTransferAmount": "100.00",
+      "maxDailyAmount": "1000.00",
+      "createdAt": "2026-05-14T08:00:00Z",
+      "updatedAt": "2026-05-14T10:15:00Z"
+    }
+  },
+  "meta": { "requestId": "req_...", "timestamp": "2026-05-18T00:00:00.000Z" }
 }
 ```
 

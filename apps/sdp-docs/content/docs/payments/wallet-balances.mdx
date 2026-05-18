@@ -21,6 +21,7 @@ const response = await fetch(
   { headers: { Authorization: "Bearer sk_test_..." } }
 );
 const { data } = await response.json();
+// data.walletBalances.balances: TokenBalance[]
 ```
 </Tab>
 <Tab value="Java">
@@ -36,28 +37,35 @@ HttpRequest request = HttpRequest.newBuilder()
 
 ## Response shape
 
+The payload is wrapped in the standard `data` / `meta` envelope, with the balances under a `walletBalances` key:
+
 ```json
 {
-  "walletId": "wal_abc123",
-  "address": "3xYZa...2aBc",
-  "balances": [
-    {
-      "token": "USDC",
-      "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
-      "amount": "1500000000",
-      "uiAmount": "1500.00",
-      "decimals": 6,
-      "usdPrice": 1.0,
-      "usdValue": 1500.0
-    },
-    {
-      "token": "SOL",
-      "mint": "So11111111111111111111111111111111111111112",
-      "amount": "2500000000",
-      "uiAmount": "2.5",
-      "decimals": 9
+  "data": {
+    "walletBalances": {
+      "walletId": "wal_abc123",
+      "address": "3xYZa...2aBc",
+      "balances": [
+        {
+          "token": "SOL",
+          "mint": "So11111111111111111111111111111111111111112",
+          "amount": "2500000000",
+          "uiAmount": "2.5",
+          "decimals": 9
+        },
+        {
+          "token": "USDC",
+          "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "amount": "1500000000",
+          "uiAmount": "1500.00",
+          "decimals": 6,
+          "usdPrice": 1.0,
+          "usdValue": 1500.0
+        }
+      ]
     }
-  ]
+  },
+  "meta": { "requestId": "req_...", "timestamp": "2026-05-18T00:00:00.000Z" }
 }
 ```
 

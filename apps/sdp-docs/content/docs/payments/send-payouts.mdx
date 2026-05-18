@@ -67,8 +67,9 @@ async function payoutRecipient(row: PayoutRow): Promise<string> {
   );
 
   const { data } = await response.json();
-  await row.persistTransferId(data.id); // persist BEFORE returning
-  return data.id;
+  // The transfer record is under data.transfer (standard SDP success envelope).
+  await row.persistTransferId(data.transfer.id); // persist BEFORE returning
+  return data.transfer.id;
 }
 ```
 </Tab>
