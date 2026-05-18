@@ -11,7 +11,7 @@ This page introduces the building blocks the rest of the section assumes.
 
 Every SDP payment is anchored to a **custody wallet** — a Solana keypair whose private key SDP holds, scoped to an organization and (optionally) a project. Wallets sign on your behalf in Execute mode and contribute to balances and policies for the addresses you control.
 
-You provision custody wallets up front (see [Set Up Wallets](/docs/guides/setup-wallets)) and reference them in payment requests by their SDP `wallet_id` or by their on-chain `address`. Both forms are accepted on transfer endpoints.
+You provision custody wallets up front (see [Set Up Wallets](/docs/guides/setup-wallets)) and reference them by their SDP `wallet_id` (`wal_…`). Transfer endpoints expect the **source** as a custody wallet ID — the wallet is resolved server-side from the caller's custody-wallet list — and the **destination** as the on-chain Solana address of the recipient. Ramp endpoints are looser: their `sourceWallet` / `destinationWallet` fields accept either a wallet ID or a Solana address.
 
 ## Tokens and token accounts
 
@@ -57,7 +57,7 @@ A transfer can move from `pending` to `failed` without ever producing a `signatu
 
 ## What SDP does and does not give you
 
-SDP exposes everything you need to **send**, **track**, and **reconcile** payments at the transfer level: idempotency-keyed mutations, polling for status, filtered lists, and wallet-level balances. It does **not** ship higher-level commerce primitives — there is no checkout session, payment intent, or invoice object in the API today, and there are no webhooks for settlement events. The [Accept payments](/docs/payments/accept-overview) section shows how to build those abstractions on top of the transfer model.
+SDP exposes everything you need to **send**, **track**, and **reconcile** payments at the transfer level: status polling, filtered lists, wallet-level balances, and a UNIQUE `signature` on the transfer record for client-side dedup (see [Basic payment → Deduplication](/docs/payments/send-basic-payment#deduplication)). It does **not** ship higher-level commerce primitives — there is no checkout session, payment intent, or invoice object in the API today, no webhooks for settlement events, and payment endpoints do not honor an `Idempotency-Key` header (unlike issuance endpoints). The [Accept payments](/docs/payments/accept-overview) section shows how to build those abstractions on top of the transfer model.
 
 ## Related
 

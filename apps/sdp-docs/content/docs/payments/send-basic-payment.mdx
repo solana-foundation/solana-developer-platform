@@ -3,7 +3,7 @@ title: Basic payment
 description: Send a single token transfer with SDP, using either Execute or Prepare mode.
 ---
 
-SDP handles token transfers through its payments API. A basic payment moves tokens from a source account to a destination address — Solana addresses on the recipient side, and either an SDP-custody wallet or an externally-controlled key on the sender side.
+SDP handles token transfers through its payments API. A basic payment moves tokens **from a custody wallet you control to any Solana address**. The `source` field on the request is an SDP custody wallet ID (`wal_…`), resolved server-side from the caller's wallet list; `destination` is an on-chain Solana address.
 
 Transfers are available through the Payments dashboard and the API.
 
@@ -22,7 +22,7 @@ curl -X POST https://api.solana.com/v1/payments/transfers \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
   -d '{
-    "source": "3xYZa...2aBc",
+    "source": "wal_example",
     "destination": "7xKXz...9fGh",
     "token": "9aBCd...4eEf",
     "amount": "100.00",
@@ -41,7 +41,7 @@ const response = await fetch(
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      source: "3xYZa...2aBc",
+      source: "wal_example",
       destination: "7xKXz...9fGh",
       token: "9aBCd...4eEf",
       amount: "100.00",
@@ -60,7 +60,7 @@ HttpRequest request = HttpRequest.newBuilder()
     .header("Content-Type", "application/json")
     .POST(HttpRequest.BodyPublishers.ofString("""
         {
-          "source": "3xYZa...2aBc",
+          "source": "wal_example",
           "destination": "7xKXz...9fGh",
           "token": "9aBCd...4eEf",
           "amount": "100.00",
@@ -80,7 +80,7 @@ curl -X POST https://api.solana.com/v1/payments/transfers/prepare \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
   -d '{
-    "source": "3xYZa...2aBc",
+    "source": "wal_example",
     "destination": "7xKXz...9fGh",
     "token": "9aBCd...4eEf",
     "amount": "100.00",
@@ -100,7 +100,7 @@ const response = await fetch(
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      source: "3xYZa...2aBc",
+      source: "wal_example",
       destination: "7xKXz...9fGh",
       token: "9aBCd...4eEf",
       amount: "100.00",
@@ -121,7 +121,7 @@ HttpRequest request = HttpRequest.newBuilder()
     .header("Content-Type", "application/json")
     .POST(HttpRequest.BodyPublishers.ofString("""
         {
-          "source": "3xYZa...2aBc",
+          "source": "wal_example",
           "destination": "7xKXz...9fGh",
           "token": "9aBCd...4eEf",
           "amount": "100.00",
