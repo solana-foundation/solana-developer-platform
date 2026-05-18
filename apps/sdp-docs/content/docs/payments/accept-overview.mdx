@@ -43,7 +43,7 @@ A minimum-viable accept flow built on the per-order-address pattern:
 1. At checkout, provision (or claim from a warm pool) a **fresh custody wallet** for the order and stage an `orders` row with that wallet's on-chain address, the expected amount, and the token.
 2. Display the per-order custody-wallet address, the token, and the amount to the customer. Build a Solana Pay URL from those fields if you want a QR code; no SDP-specific endpoint required.
 3. The customer's wallet submits the transfer.
-4. Your reconciliation worker (see [Indexing and reconciliation](/docs/payments/accept-indexing)) periodically lists recent inbound transfers — **without** a `wallet`/`walletAddress` filter (the wallet-scoped path uses recent signature history and does not honor `from`/`to`) — and matches each transfer's `destination` to an open order in your `orders` table.
+4. Your reconciliation worker (see [Indexing and reconciliation](/docs/payments/accept-indexing)) periodically lists recent inbound transfers — **without** a `wallet`/`walletAddress` filter (on the wallet-scoped path, `from`/`to` are only honored for the DB-side branch covering `pending`/`processing`/`failed`; the on-chain observed branch that surfaces `confirmed`/`finalized` transfers replays the last ~200 signatures and ignores the window) — and matches each transfer's `destination` to an open order in your `orders` table.
 5. When a match lands, mark the order paid and ship the goods. Use the transfer's `signature` (UNIQUE on the transfer record once present) to dedup if the worker is re-run.
 
 This is intentionally low-level — there is no SDP-provided session object. Treat the `orders` table as your checkout state machine and SDP as the settlement and status backend.

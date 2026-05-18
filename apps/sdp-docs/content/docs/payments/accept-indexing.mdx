@@ -41,7 +41,7 @@ const { data, meta } = await res.json();
 | `wallet` | string | SDP custody wallet ID. |
 | `walletAddress` | string | Solana address (alternative to `wallet`). |
 | `token` | string | Filter by token symbol or on-chain mint (exact match against the stored transfer's `token` value). |
-| `from`, `to` | ISO 8601 datetime | Time-window filter on `createdAt`. **Honored only on the org-scoped path (no `wallet`/`walletAddress` filter).** On the wallet-scoped path the server replays the most recent on-chain signature history (~200 entries) and ignores `from`/`to` for the observed/confirmed branch. Use with offset (`2026-05-14T00:00:00Z`). |
+| `from`, `to` | ISO 8601 datetime | Time-window filter on `createdAt`. **Fully honored only on the org-scoped path (no `wallet`/`walletAddress` filter).** On the wallet-scoped path the window is honored for the DB-side branch (`pending`/`processing`/`failed`), but the on-chain observed branch that surfaces `confirmed`/`finalized` transfers replays the last ~200 signatures and ignores the window — so for time-windowed reconciliation, prefer org-scoped. Use with offset (`2026-05-14T00:00:00Z`). |
 | `page` | integer | Default `1`. |
 | `pageSize` | integer | Default `20`, max `100`. |
 
