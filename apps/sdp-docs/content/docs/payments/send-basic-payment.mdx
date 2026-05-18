@@ -21,7 +21,6 @@ Transfers are available through the Payments dashboard and the API.
 curl -X POST https://api.solana.com/v1/payments/transfers \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
-  -H "Idempotency-Key: transfer-001" \
   -d '{
     "source": "3xYZa...2aBc",
     "destination": "7xKXz...9fGh",
@@ -40,7 +39,6 @@ const response = await fetch(
     headers: {
       "Authorization": "Bearer sk_test_...",
       "Content-Type": "application/json",
-      "Idempotency-Key": "transfer-001",
     },
     body: JSON.stringify({
       source: "3xYZa...2aBc",
@@ -60,7 +58,6 @@ HttpRequest request = HttpRequest.newBuilder()
     .uri(URI.create("https://api.solana.com/v1/payments/transfers"))
     .header("Authorization", "Bearer sk_test_...")
     .header("Content-Type", "application/json")
-    .header("Idempotency-Key", "transfer-001")
     .POST(HttpRequest.BodyPublishers.ofString("""
         {
           "source": "3xYZa...2aBc",
@@ -138,9 +135,14 @@ HttpRequest request = HttpRequest.newBuilder()
 
 See [Prepare vs Execute](/docs/guides/prepare-vs-execute) for guidance on which mode to use.
 
-## Idempotency
+## Deduplication
 
-Always include an `Idempotency-Key` header on transfer requests. If a network error occurs, retrying with the same key ensures the transfer is only executed once.
+Unlike the issuance endpoints, payments transfer endpoints do not currently honor an `Idempotency-Key` header — retrying a failed transfer request will produce a new `Transfer` record. To guarantee at-most-once execution from the client side:
+
+1. Persist the SDP `Transfer.id` returned by the first successful response **before** retrying. On retry, skip submission if you already have a transfer ID for that logical payment.
+2. Rely on the on-chain `signature` (UNIQUE across SDP's transfers table) as the cross-source dedup key once the transfer reaches `processing` or beyond.
+
+See [Payouts and disbursements](/docs/payments/send-payouts#dedup-and-retries) for the same pattern applied to batched outbound flows.
 
 ## Related
 

@@ -67,15 +67,15 @@ The typical inbound match cycle:
      &from=<since last reconciled>
      &pageSize=100
    ```
-2. **For each transfer**, check whether its `memo` or `referenceAddress` matches an unpaid order in your `orders` table.
+2. **For each transfer**, check whether its `memo` matches an unpaid order in your `orders` table.
 3. **If matched**, mark the order paid, record the SDP `Transfer.id`, and dispatch downstream side effects (email, shipment, ledger entry).
 4. **If unmatched**, leave the transfer for the next pass (it may be an early-arrival for an order you haven't staged yet) or flag it for manual review after a grace window.
 
 Per-order amount-and-token assertions are also worth running — your `orders` row should know what it expects to receive, and the inbound transfer should match exactly.
 
-## Solana Pay reference accounts
+## Solana Pay reference accounts (roadmap)
 
-If you constructed a Solana Pay URL or used the `Prepare` transfer endpoint with `referenceAddress`, the on-chain transaction carries the reference pubkey as an account meta. SDP exposes the same field in the inbound transfer record (under the transfer's references / addresses metadata depending on how the transaction was built). Matching by reference is stronger than matching by memo because it requires no trust in the sender's metadata — anyone can verify the link by inspecting the transaction.
+The `Prepare` transfer endpoint accepts a `referenceAddress` field — the intent is that you pass a Solana Pay reference pubkey and SDP attaches it on-chain as an account meta, then surfaces it back on the inbound transfer record so you can match payments to orders without trusting the sender's metadata. **This is not wired up today**: the prepare handler accepts the field but does not yet attach it to the transaction, and inbound transfer records do not expose a reference. Use `memo` for correlation in the meantime; the field is preserved as a roadmap hook.
 
 ## A delta-poll worker
 
@@ -99,7 +99,7 @@ async function reconcileTick(state: WorkerState) {
   for await (const tr of listInbound({ from, to })) {
     if (await alreadySeen(tr.id)) continue;
 
-    const order = await findOrderByMemoOrReference(tr.memo, tr.referenceAddress);
+    const order = await findOrderByMemo(tr.memo);
     if (!order) {
       await persistUnmatched(tr);
       continue;

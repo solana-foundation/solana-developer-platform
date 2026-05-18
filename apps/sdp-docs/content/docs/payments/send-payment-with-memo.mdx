@@ -91,7 +91,7 @@ Memo limits: `z.string().max(256)`. UTF-8 is accepted; trim or sanitize on the w
 
 For accept flows, **Solana Pay reference accounts** are an alternative correlation mechanism: you generate a unique pubkey per order and include it in the on-chain transfer as a reference. The advantage is on-chain provenance — anyone can verify the link without trusting SDP's database — and the ability for the payer to construct the transfer themselves from a Solana Pay URL.
 
-SDP's `Prepare` endpoint accepts a `referenceAddress` field so you can attach a Solana Pay reference when building a transfer client-side. Use [Accept overview](/docs/payments/accept-overview) and [Indexing and reconciliation](/docs/payments/accept-indexing) for the inbound side.
+SDP's `Prepare` endpoint accepts a `referenceAddress` field as a roadmap hook for Solana Pay-style correlation, but **does not yet attach it on-chain or expose it on inbound transfer records** — for now use `memo` for SDP-side correlation, or read the reference directly from the transaction via Solana RPC. Use [Accept overview](/docs/payments/accept-overview) and [Indexing and reconciliation](/docs/payments/accept-indexing) for the inbound side.
 
 Rule of thumb: memos are simpler when **you** initiate the transfer (server-side payouts, internal moves), references are stronger when **a third party** initiates the transfer (customer checkout, donations).
 

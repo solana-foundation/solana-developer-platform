@@ -157,8 +157,9 @@ export const createTransferRequestSchema = createTransferSchemaBase
       example: "So11111111111111111111111111111111111111112",
     }),
     token: withOpenApi(createTransferSchemaBase.shape.token, {
-      description: "Token symbol or mint address.",
-      example: "USDC",
+      description:
+        "Token mint address. Use `SOL` for the native token; SPL tokens must be specified by their on-chain mint (symbols are not resolved at request time).",
+      example: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
     }),
     amount: withOpenApi(createTransferSchemaBase.shape.amount, {
       description: "Token amount in UI units (decimal string).",
@@ -206,8 +207,9 @@ export const prepareTransferRequestSchema = prepareTransferSchemaBase
       example: "So11111111111111111111111111111111111111112",
     }),
     token: withOpenApi(prepareTransferSchemaBase.shape.token, {
-      description: "Token symbol or mint address.",
-      example: "USDC",
+      description:
+        "Token mint address. Use `SOL` for the native token; SPL tokens must be specified by their on-chain mint (symbols are not resolved at request time).",
+      example: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
     }),
     amount: withOpenApi(prepareTransferSchemaBase.shape.amount, {
       description: "Token amount in UI units (decimal string).",
@@ -381,7 +383,7 @@ export const executeOnrampRequestSchema = executeOnrampSchemaBase
     }),
     bvnkCompliance: withOpenApi(executeOnrampSchemaBase.shape.bvnkCompliance, {
       description:
-        "BVNK compliance details. Required only when `provider` is `bvnk`; omit (or send `null`) for `moonpay` and `lightspark`.",
+        "BVNK compliance details. Required only when `provider` is `bvnk`; omit the field entirely for `moonpay` and `lightspark`.",
       example: { partyDetails: [{ type: "individual" }] },
     }),
   })
@@ -422,7 +424,7 @@ export const executeOfframpRequestSchema = executeOfframpSchemaBase
     }),
     bvnkCompliance: withOpenApi(executeOfframpSchemaBase.shape.bvnkCompliance, {
       description:
-        "BVNK compliance details. Required only when `provider` is `bvnk`; omit (or send `null`) for `moonpay` and `lightspark`.",
+        "BVNK compliance details. Required only when `provider` is `bvnk`; omit the field entirely for `moonpay` and `lightspark`.",
       example: { partyDetails: [{ type: "individual" }] },
     }),
   })

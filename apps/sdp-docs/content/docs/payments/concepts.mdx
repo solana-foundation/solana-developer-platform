@@ -15,7 +15,7 @@ You provision custody wallets up front (see [Set Up Wallets](/docs/guides/setup-
 
 ## Tokens and token accounts
 
-Payments transfer **SPL tokens** — stablecoins, tokenized assets, or any mint your project supports. The `token` field on a transfer accepts either the SDP-internal token identifier or the on-chain mint address.
+Payments transfer **SPL tokens** — stablecoins, tokenized assets, or any mint your project supports. The `token` field on `POST /v1/payments/transfers` (and its `/prepare` variant) requires the on-chain **mint address** for SPL tokens; the literal string `SOL` is accepted as the native-SOL shorthand. Symbols like `USDC` are not resolved at request time. The `token` filter on `GET /v1/payments/transfers` is more flexible — it accepts either a symbol or a mint — and balance responses surface a symbol whenever SDP can resolve one.
 
 **Amounts on the wire are UI-unit decimal strings** — `"100.00"` means 100 tokens, regardless of the mint's decimal count. SDP handles the smallest-unit conversion when it builds the on-chain transaction. The one exception is wallet-balance responses, which return both a raw `amount` (smallest unit) **and** a `uiAmount` (decimal string) so balance consumers can pick whichever fits.
 
@@ -30,9 +30,11 @@ See [Prepare vs Execute](/docs/guides/prepare-vs-execute) for the full guide on 
 
 ## Fees and sponsorship
 
-Solana fees are paid in SOL by the transaction's fee payer. On Execute-mode transfers, the source custody wallet is the fee payer by default; SDP can be configured to sponsor fees so end-user wallets do not need a SOL balance. Set `options.priorityFee` to nudge transaction priority — accepted values are `"none"`, `"low"`, `"medium"`, `"high"`, or `"auto"`.
+Solana fees are paid in SOL by the transaction's fee payer. On Execute-mode transfers, the source custody wallet is the fee payer by default; SDP can be configured to sponsor fees so end-user wallets do not need a SOL balance.
 
 In Prepare mode, the serialized transaction already includes the fee-payer assignment; sign it as-is or rebuild with a different fee payer of your own.
+
+The `Prepare` endpoint also accepts an `options.priorityFee` field (`"none" | "low" | "medium" | "high" | "auto"`) as a roadmap hook. The value is validated but **not yet applied** to the built transaction — priority fees ship as a separate piece of work.
 
 ## The transfer data model
 

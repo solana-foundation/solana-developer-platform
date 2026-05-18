@@ -1156,7 +1156,7 @@
             "description": "Builds an unsigned transfer transaction for a custody wallet. The source walletId must reference a wallet from /v1/wallets.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"projectId\": \"prj_example\",\n  \"source\": \"wal_example\",\n  \"destination\": \"So11111111111111111111111111111111111111112\",\n  \"token\": \"USDC\",\n  \"amount\": \"100.00\",\n  \"memo\": \"\",\n  \"referenceAddress\": \"So11111111111111111111111111111111111111112\",\n  \"options\": {\n    \"priorityFee\": \"auto\",\n    \"simulate\": true\n  }\n}",
+              "raw": "{\n  \"projectId\": \"prj_example\",\n  \"source\": \"wal_example\",\n  \"destination\": \"So11111111111111111111111111111111111111112\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"100.00\",\n  \"memo\": \"\",\n  \"referenceAddress\": \"So11111111111111111111111111111111111111112\",\n  \"options\": {\n    \"priorityFee\": \"auto\",\n    \"simulate\": true\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1189,7 +1189,7 @@
             "description": "Executes a transfer using server-side custody signing. The source walletId must reference a wallet from /v1/wallets.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"projectId\": \"prj_example\",\n  \"source\": \"wal_example\",\n  \"destination\": \"So11111111111111111111111111111111111111112\",\n  \"token\": \"USDC\",\n  \"amount\": \"100.00\",\n  \"memo\": \"\"\n}",
+              "raw": "{\n  \"projectId\": \"prj_example\",\n  \"source\": \"wal_example\",\n  \"destination\": \"So11111111111111111111111111111111111111112\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"100.00\",\n  \"memo\": \"\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
