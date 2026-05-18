@@ -77,7 +77,7 @@ If you need memo- or Solana-Pay-`reference`-based correlation (e.g., a single-wa
 
 ## Solana Pay reference accounts (roadmap)
 
-The `Prepare` transfer endpoint accepts a `referenceAddress` field — the intent is that you pass a Solana Pay reference pubkey and SDP attaches it on-chain as an account meta, then surfaces it back on the inbound transfer record so you can match payments to orders without trusting the sender's metadata. **This is not wired up today**: the prepare handler accepts the field but does not yet attach it to the transaction, and inbound transfer records do not expose a reference. Use `memo` for correlation in the meantime; the field is preserved as a roadmap hook.
+The `Prepare` transfer endpoint accepts a `referenceAddress` field — the intent is that you pass a Solana Pay reference pubkey and SDP attaches it on-chain as an account meta, then surfaces it back on the inbound transfer record so you can match payments to orders without trusting the sender's metadata. **This is not wired up today**: the prepare handler accepts the field but does not yet attach it to the transaction, and inbound transfer records do not expose a reference. Until it ships, the realistic correlation options are: (a) **per-order destination addresses** — pre-issue a fresh receiving wallet per order and match by `Transfer.destination` (the recommended pattern; see [Reconciling an order](#reconciling-an-order) above); (b) **on-chain reads via Solana RPC** keyed off the transfer's `signature`, used to recover the memo-program instruction or Solana Pay `reference` that SDP itself doesn't surface for inbound transfers.
 
 ## A delta-poll worker
 

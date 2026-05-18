@@ -39,7 +39,7 @@ export const walletPolicySchema = z
     destinationAllowlist: z.array(solanaAddressSchema).openapi({
       description:
         "Allowed destination addresses. An empty array means no destination restrictions.",
-      example: ["So11111111111111111111111111111111111111112"],
+      example: ["7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU"],
     }),
     maxTransferAmount: tokenAmountSchema
       .optional()
@@ -84,7 +84,7 @@ export const updateWalletPolicyRequestSchema = updateWalletPolicySchemaBase
     destinationAllowlist: withOpenApi(updateWalletPolicySchemaBase.shape.destinationAllowlist, {
       description:
         "Allowed destination addresses. An empty array means no destination restrictions.",
-      example: ["So11111111111111111111111111111111111111112"],
+      example: ["7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU"],
     }),
     maxTransferAmount: withOpenApi(updateWalletPolicySchemaBase.shape.maxTransferAmount, {
       description: "Maximum amount allowed per transfer.",
