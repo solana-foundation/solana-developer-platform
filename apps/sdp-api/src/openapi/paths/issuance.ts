@@ -1,4 +1,5 @@
 import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
+import { TOKEN_TRANSACTION_TYPES } from "@sdp/types";
 import { z } from "zod";
 
 import {
@@ -52,18 +53,7 @@ import {
 } from "./responses";
 
 const tokenTransactionTypeQuerySchema = z
-  .enum([
-    "mint",
-    "burn",
-    "freeze",
-    "unfreeze",
-    "seize",
-    "force_burn",
-    "update_authority",
-    "pause",
-    "unpause",
-    "deploy",
-  ])
+  .enum(TOKEN_TRANSACTION_TYPES)
   .openapi({ description: "Filter by token transaction type.", example: "burn" });
 
 export function registerIssuancePaths(registry: OpenAPIRegistry) {

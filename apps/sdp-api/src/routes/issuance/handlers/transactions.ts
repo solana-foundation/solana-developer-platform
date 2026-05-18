@@ -1,8 +1,10 @@
-import type {
-  TokenTransaction,
-  TokenTransactionListItem,
-  TokenTransactionStatus,
-  TokenTransactionType,
+import {
+  TOKEN_TRANSACTION_STATUSES,
+  TOKEN_TRANSACTION_TYPES,
+  type TokenTransaction,
+  type TokenTransactionListItem,
+  type TokenTransactionStatus,
+  type TokenTransactionType,
 } from "@sdp/types";
 import { findAssociatedTokenPda, TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
 import type { Context } from "hono";
@@ -25,27 +27,6 @@ interface WalletTransactionScope {
   publicKeys: string[];
   tokenAccounts: Array<{ tokenId: string; tokenAccount: string }>;
 }
-
-const TOKEN_TRANSACTION_TYPES: TokenTransactionType[] = [
-  "mint",
-  "burn",
-  "freeze",
-  "unfreeze",
-  "seize",
-  "force_burn",
-  "update_authority",
-  "pause",
-  "unpause",
-  "deploy",
-];
-
-const TOKEN_TRANSACTION_STATUSES: TokenTransactionStatus[] = [
-  "pending",
-  "processing",
-  "confirmed",
-  "finalized",
-  "failed",
-];
 
 function parsePositiveInteger(value: string | undefined, fallback: number, name: string): number {
   if (value === undefined) {
