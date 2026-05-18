@@ -36,11 +36,14 @@ export const walletPolicySchema = z
       description: "Custody wallet ID from /v1/wallets.",
       example: "wal_example",
     }),
-    destinationAllowlist: z.array(solanaAddressSchema).max(500).openapi({
-      description:
-        "Allowed destination addresses. An empty array means no destination restrictions. Maximum 500 entries per wallet.",
-      example: ["7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU"],
-    }),
+    destinationAllowlist: z
+      .array(solanaAddressSchema)
+      .max(500)
+      .openapi({
+        description:
+          "Allowed destination addresses. An empty array means no destination restrictions. Maximum 500 entries per wallet.",
+        example: ["7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU"],
+      }),
     maxTransferAmount: tokenAmountSchema
       .optional()
       .openapi({ description: "Maximum amount allowed per transfer." }),
@@ -83,7 +86,7 @@ export const updateWalletPolicyRequestSchema = updateWalletPolicySchemaBase
   .extend({
     destinationAllowlist: withOpenApi(updateWalletPolicySchemaBase.shape.destinationAllowlist, {
       description:
-        "Allowed destination addresses. An empty array means no destination restrictions.",
+        "Allowed destination addresses. An empty array means no destination restrictions. Maximum 500 entries per wallet.",
       example: ["7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU"],
     }),
     maxTransferAmount: withOpenApi(updateWalletPolicySchemaBase.shape.maxTransferAmount, {

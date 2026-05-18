@@ -24,7 +24,7 @@ Send transfers sequentially or in modest concurrency (4–8 in flight); high con
 Two layers protect you against double-spends if a worker dies mid-run:
 
 1. **Application-level keys** — persist the SDP transfer ID for each recipient row *before* moving to the next row. On retry, skip rows that already have an associated `Transfer.id`. This is the dedup mechanism you should rely on most.
-2. **Transfer-record uniqueness** — the on-chain `signature` is `UNIQUE` across the SDP transfers table. Two requests that produce the same signed transaction collapse to one transfer row.
+2. **Transfer-record uniqueness** — the on-chain `signature` column is `UNIQUE` across the SDP `payment_transfers` table. Each transfer request inserts its own row first and the signature is recorded once the transaction is built/submitted, so a duplicate signature is blocked at the DB layer (the second write errors out) rather than silently merged. Use this as a backstop integrity check, not as your primary dedup — the application-level keys above are what you actually rely on.
 
 If your retry path replays a transfer with identical inputs but a fresh request, SDP builds a new transaction with a new recent blockhash, which means a new signature. The application-level key — persisted recipient → transfer ID mapping — is what prevents the recipient from being paid twice in that case.
 
