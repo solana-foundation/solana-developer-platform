@@ -98,9 +98,17 @@ function normalizeMoonPayCurrencyCode(value: string): string {
 
 type ApiMode = "sandbox" | "production";
 
-// Clerk JWT requests have no apiKey on context and always resolve to production.
-// API key requests derive mode from the key's environment field (sk_test_ → sandbox, sk_live_ → production).
+/**
+ * Resolves the API mode for the current request:
+ * - Non-production deployments (ENVIRONMENT !== "production") always use sandbox.
+ * - Clerk JWT requests (no apiKey on context) default to production.
+ * - API key requests derive mode from the key's environment field
+ *   (sk_test_ → sandbox, sk_live_ → production).
+ */
 function resolveApiMode(c: AppContext): ApiMode {
+  if (c.env.ENVIRONMENT !== "production") {
+    return "sandbox";
+  }
   const apiKey = c.get("apiKey");
   if (apiKey === undefined) {
     return "production";
