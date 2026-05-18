@@ -96,8 +96,16 @@ function normalizeMoonPayCurrencyCode(value: string): string {
   return normalized.toLowerCase();
 }
 
-function isTestMode(c: AppContext): boolean {
-  return c.get("apiKey")?.environment === "sandbox";
+type ApiMode = "sandbox" | "production";
+
+// Clerk JWT requests have no apiKey on context and always resolve to production.
+// API key requests derive mode from the key's environment field (sk_test_ → sandbox, sk_live_ → production).
+function resolveApiMode(c: AppContext): ApiMode {
+  const apiKey = c.get("apiKey");
+  if (apiKey === undefined) {
+    return "production";
+  }
+  return apiKey.environment === "sandbox" ? "sandbox" : "production";
 }
 
 interface RampsProviderEnvironment {
@@ -105,16 +113,16 @@ interface RampsProviderEnvironment {
   production: string | undefined;
 }
 
-function envForMode(testMode: boolean, env: RampsProviderEnvironment): string | undefined {
-  return (testMode ? env.sandbox : env.production)?.trim();
+function envForMode(mode: ApiMode, env: RampsProviderEnvironment): string | undefined {
+  return env[mode]?.trim();
 }
 
 function configForMode<T extends Record<string, RampsProviderEnvironment>>(
-  testMode: boolean,
+  mode: ApiMode,
   envs: T
 ): Record<keyof T, string | undefined> {
   return Object.fromEntries(
-    Object.entries(envs).map(([key, env]) => [key, envForMode(testMode, env)])
+    Object.entries(envs).map(([key, env]) => [key, envForMode(mode, env)])
   ) as Record<keyof T, string | undefined>;
 }
 
@@ -172,22 +180,22 @@ type BvnkPaymentSummary = {
 const LIGHTSPARK_DEFAULT_GRID_API_URL = "https://api.lightspark.com/grid/2025-10-13";
 
 function getMoonPayConfig(c: AppContext): MoonPayConfig {
-  const testMode = isTestMode(c);
-  const { apiKey, secretKey } = configForMode(testMode, {
+  const mode = resolveApiMode(c);
+  const { apiKey, secretKey } = configForMode(mode, {
     apiKey: { sandbox: c.env.MOONPAY_SANDBOX_API_KEY, production: c.env.MOONPAY_API_KEY },
     secretKey: { sandbox: c.env.MOONPAY_SANDBOX_SECRET_KEY, production: c.env.MOONPAY_SECRET_KEY },
   });
 
   if (!apiKey || !secretKey) {
     throw providerNotConfigured(
-      testMode
+      mode === "sandbox"
         ? "MoonPay sandbox is not configured. Set MOONPAY_SANDBOX_API_KEY and MOONPAY_SANDBOX_SECRET_KEY."
         : "MoonPay is not configured. Set MOONPAY_API_KEY and MOONPAY_SECRET_KEY."
     );
   }
 
-  const defaultOnrampUrl = testMode ? MOONPAY_SANDBOX_ONRAMP_URL : MOONPAY_ONRAMP_URL;
-  const defaultOfframpUrl = testMode ? MOONPAY_SANDBOX_OFFRAMP_URL : MOONPAY_OFFRAMP_URL;
+  const defaultOnrampUrl = mode === "sandbox" ? MOONPAY_SANDBOX_ONRAMP_URL : MOONPAY_ONRAMP_URL;
+  const defaultOfframpUrl = mode === "sandbox" ? MOONPAY_SANDBOX_OFFRAMP_URL : MOONPAY_OFFRAMP_URL;
 
   const onrampUrlRaw = c.env.MOONPAY_ONRAMP_URL ?? defaultOnrampUrl;
   const offrampUrlRaw = c.env.MOONPAY_OFFRAMP_URL ?? defaultOfframpUrl;
@@ -208,8 +216,8 @@ function getMoonPayConfig(c: AppContext): MoonPayConfig {
 }
 
 function getLightsparkConfig(c: AppContext): LightsparkConfig {
-  const testMode = isTestMode(c);
-  const { tokenId, clientSecret } = configForMode(testMode, {
+  const mode = resolveApiMode(c);
+  const { tokenId, clientSecret } = configForMode(mode, {
     tokenId: {
       sandbox: c.env.LIGHTSPARK_GRID_SANDBOX_CLIENT_ID,
       production: c.env.LIGHTSPARK_GRID_CLIENT_ID,
@@ -222,7 +230,7 @@ function getLightsparkConfig(c: AppContext): LightsparkConfig {
 
   if (!tokenId || !clientSecret) {
     throw providerNotConfigured(
-      testMode
+      mode === "sandbox"
         ? "Lightspark sandbox is not configured. Set LIGHTSPARK_GRID_SANDBOX_CLIENT_ID and LIGHTSPARK_GRID_SANDBOX_CLIENT_SECRET."
         : "Lightspark is not configured. Set LIGHTSPARK_GRID_CLIENT_ID and LIGHTSPARK_GRID_CLIENT_SECRET."
     );
@@ -236,8 +244,8 @@ function getLightsparkConfig(c: AppContext): LightsparkConfig {
 }
 
 function getBvnkConfig(c: AppContext): BvnkConfig {
-  const testMode = isTestMode(c);
-  const { hawkAuthId, hawkSecretKey, walletId } = configForMode(testMode, {
+  const mode = resolveApiMode(c);
+  const { hawkAuthId, hawkSecretKey, walletId } = configForMode(mode, {
     hawkAuthId: { sandbox: c.env.BVNK_SANDBOX_HAWK_AUTH_ID, production: c.env.BVNK_HAWK_AUTH_ID },
     hawkSecretKey: {
       sandbox: c.env.BVNK_SANDBOX_HAWK_SECRET_KEY,
@@ -246,15 +254,16 @@ function getBvnkConfig(c: AppContext): BvnkConfig {
     walletId: { sandbox: c.env.BVNK_SANDBOX_WALLET_ID, production: c.env.BVNK_WALLET_ID },
   });
 
-  const missingMsg = testMode
-    ? "BVNK sandbox is not configured. Set BVNK_SANDBOX_WALLET_ID, BVNK_SANDBOX_HAWK_AUTH_ID, and BVNK_SANDBOX_HAWK_SECRET_KEY."
-    : "BVNK is not configured. Set BVNK_WALLET_ID, BVNK_HAWK_AUTH_ID, and BVNK_HAWK_SECRET_KEY.";
+  const missingMsg =
+    mode === "sandbox"
+      ? "BVNK sandbox is not configured. Set BVNK_SANDBOX_WALLET_ID, BVNK_SANDBOX_HAWK_AUTH_ID, and BVNK_SANDBOX_HAWK_SECRET_KEY."
+      : "BVNK is not configured. Set BVNK_WALLET_ID, BVNK_HAWK_AUTH_ID, and BVNK_HAWK_SECRET_KEY.";
 
   if (!walletId || !hawkAuthId || !hawkSecretKey) {
     throw providerNotConfigured(missingMsg);
   }
 
-  const defaultApiBaseUrl = testMode ? BVNK_SANDBOX_API_URL : BVNK_PRODUCTION_API_URL;
+  const defaultApiBaseUrl = mode === "sandbox" ? BVNK_SANDBOX_API_URL : BVNK_PRODUCTION_API_URL;
   const apiBaseUrl = c.env.BVNK_API_BASE_URL?.trim() || defaultApiBaseUrl;
   try {
     new URL(apiBaseUrl);
@@ -1143,7 +1152,7 @@ async function resolveRampProvider(
     organizationId,
     "ramps",
     providerId,
-    isTestMode(c)
+    resolveApiMode(c) === "sandbox"
   );
 
   const provider = RAMP_PROVIDER_REGISTRY[providerId];
