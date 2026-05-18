@@ -84,7 +84,7 @@ HttpRequest request = HttpRequest.newBuilder()
 | Field | Required | Notes |
 | --- | --- | --- |
 | `provider` | yes | One of `moonpay`, `lightspark`, `bvnk`. |
-| `destinationWallet` | yes | Provider-dependent: **MoonPay** accepts an SDP wallet ID or a Solana address; **Lightspark** expects a Lightspark account identifier (`ExternalAccount:…`) or a Solana address (a fresh external account is created when a Solana address is passed); **BVNK** uses the customer's BVNK-side wallet — the BVNK wallet ID is set at deploy time via `BVNK_WALLET_ID`. |
+| `destinationWallet` | yes | All providers require it. Provider-dependent format: **MoonPay** accepts an SDP wallet ID or a Solana address; **Lightspark** expects a Lightspark account identifier (`ExternalAccount:…`) or a Solana address (a fresh external account is created when a Solana address is passed); **BVNK** resolves the value to a Solana on-chain address and uses it as the payout destination (`payOutDetails.address`). The separate `BVNK_WALLET_ID` env var configures BVNK's *settlement* wallet on the provider side and is unrelated to this field. |
 | `cryptoToken` | yes | Token symbol (`USDC`, `USDT`, etc.). Alphanumeric and underscore. |
 | `fiatAmount` | yes | Decimal string greater than zero (e.g. `"100.00"`). |
 | `fiatCurrency` | no | Currently `USD` only. |
