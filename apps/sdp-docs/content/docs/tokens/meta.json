@@ -1,0 +1,14 @@
+{
+  "title": "Tokens",
+  "pages": [
+    "tokenize-an-asset",
+    "create-a-token",
+    "deploy-a-token",
+    "mint-and-burn",
+    "allowlists",
+    "transfer-tokens",
+    "freeze-and-compliance",
+    "manage-token-settings",
+    "prepare-vs-execute"
+  ]
+}

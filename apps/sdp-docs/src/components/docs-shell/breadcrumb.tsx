@@ -15,7 +15,7 @@ export function DocsBreadcrumb({ tree }: DocsBreadcrumbProps) {
   const pathname = usePathname();
   const items = useBreadcrumb(pathname, tree);
 
-  if (items.length === 0) {
+  if (items.length === 0 || pathname === "/docs/home") {
     return null;
   }
 

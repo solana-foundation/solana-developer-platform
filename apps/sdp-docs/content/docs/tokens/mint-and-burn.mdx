@@ -1,0 +1,190 @@
+---
+title: Mint and Burn
+description: Increase or decrease token supply by minting to an address or burning from an account you control.
+---
+
+After [deploying a token](/docs/tokens/deploy-a-token), you can mint new tokens to any address and burn tokens from accounts you control. Force-burn lets admins burn from any account without the holder's signature.
+
+## Prerequisites
+
+- A deployed token with status `active`
+- `tokens:write` permission — or `tokens:admin` for force-burn
+
+## How it works
+
+<HowItWorks>
+
+<Step number={1} title="Select the token and action">
+
+Open the token you want to manage. Mint and burn are both available from the token detail page.
+
+<StepPanel>
+<Tabs items={["UI", "API"]} groupId="how-it-works">
+<Tab value="UI">
+
+In the **Issuance** list, click an active token to open its detail page.
+
+The **Fund management** panel shows the current supply with two primary actions: **Mint** and **Burn**.
+
+</Tab>
+<Tab value="API">
+
+All supply operations share this URL pattern:
+
+```
+POST /v1/issuance/tokens/{tokenId}/mint
+POST /v1/issuance/tokens/{tokenId}/burn
+POST /v1/issuance/tokens/{tokenId}/force-burn
+```
+
+The `amount` field is always in the token's smallest unit. For a 6-decimal token, `"1000000"` = 1.0 token.
+
+</Tab>
+</Tabs>
+</StepPanel>
+
+</Step>
+
+<Step number={2} title="Mint tokens">
+
+Issue new tokens to a destination address. SDP derives the associated token account automatically.
+
+<StepPanel>
+<Tabs items={["UI", "API"]} groupId="how-it-works">
+<Tab value="UI">
+
+In the **Mint** form:
+
+- **Destination** — wallet address to receive the new tokens
+- **Amount** — in human-readable units (e.g., `1.0`)
+- **Memo** — optional, recorded onchain
+
+Click **Mint** and confirm. The supply counter updates once the transaction is confirmed.
+
+</Tab>
+<Tab value="API">
+
+```bash
+curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/mint \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: mint-001" \
+  -d '{
+    "mint": {
+      "destination": "7xKXz...9fGh",
+      "amount": "1000000",
+      "memo": "Initial distribution"
+    }
+  }'
+```
+
+```typescript
+const res = await fetch(
+  "https://api.solana.com/v1/issuance/tokens/tok_abc123/mint",
+  {
+    method: "POST",
+    headers: {
+      Authorization: "Bearer sk_test_...",
+      "Content-Type": "application/json",
+      "Idempotency-Key": "mint-001",
+    },
+    body: JSON.stringify({
+      mint: {
+        destination: "7xKXz...9fGh",
+        amount: "1000000",
+        memo: "Initial distribution",
+      },
+    }),
+  }
+);
+```
+
+Add `/prepare` to the path to simulate before signing. Control priority with `options.priorityFee`: `"none"`, `"low"`, `"medium"`, `"high"`, or a micro-lamport value.
+
+</Tab>
+</Tabs>
+</StepPanel>
+
+</Step>
+
+<Step number={3} title="Burn tokens">
+
+Reduce supply by burning from an account your wallet controls. Use force-burn to burn from any holder account without their signature.
+
+<StepPanel>
+<Tabs items={["UI", "API"]} groupId="how-it-works">
+<Tab value="UI">
+
+In the **Burn** form, enter the source account, amount, and optional memo. For **Force burn** (requires `tokens:admin`), use the admin panel on the token detail page.
+
+</Tab>
+<Tab value="API">
+
+**Burn from a controlled account:**
+
+```typescript
+await fetch("https://api.solana.com/v1/issuance/tokens/tok_abc123/burn", {
+  method: "POST",
+  headers: {
+    Authorization: "Bearer sk_test_...",
+    "Content-Type": "application/json",
+    "Idempotency-Key": "burn-001",
+  },
+  body: JSON.stringify({
+    burn: { source: "3xYZa...2aBc", amount: "500000", memo: "Redemption" },
+  }),
+});
+```
+
+**Force-burn from any holder** (requires `tokens:admin`):
+
+```typescript
+await fetch("https://api.solana.com/v1/issuance/tokens/tok_abc123/force-burn", {
+  method: "POST",
+  headers: {
+    Authorization: "Bearer sk_test_...",
+    "Content-Type": "application/json",
+    "Idempotency-Key": "force-burn-001",
+  },
+  body: JSON.stringify({
+    forceBurn: { source: "3xYZa...2aBc", amount: "500000", memo: "Compliance action" },
+  }),
+});
+```
+
+Both endpoints support `/prepare` for client-side signing.
+
+</Tab>
+</Tabs>
+</StepPanel>
+
+</Step>
+
+<Step number={4} title="Refresh supply">
+
+After minting or burning, refresh the cached supply total.
+
+<StepPanel>
+<Tabs items={["UI", "API"]} groupId="how-it-works">
+<Tab value="UI">
+
+The dashboard refreshes supply automatically after a confirmed operation. Reload the token detail page if the displayed value appears stale.
+
+</Tab>
+<Tab value="API">
+
+```bash
+curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/supply/refresh \
+  -H "Authorization: Bearer sk_test_..."
+```
+
+Safe to include in automated post-mint workflows.
+
+</Tab>
+</Tabs>
+</StepPanel>
+
+</Step>
+
+</HowItWorks>
+

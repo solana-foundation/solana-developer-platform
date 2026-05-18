@@ -1,4 +1,8 @@
 import type { ReactNode } from "react";
+import { PageFeedback } from "./page-feedback";
+import { PageNav } from "./page-nav";
+
+type NavPage = { name: string; url: string };
 
 type TocItem = {
   title: ReactNode;
@@ -49,6 +53,19 @@ export function DocsDescription({ children }: { children?: ReactNode }) {
   return <p className="launch-docs-description">{children}</p>;
 }
 
-export function DocsBody({ children }: { children: ReactNode }) {
-  return <div className="launch-docs-body">{children}</div>;
+type DocsBodyProps = {
+  children: ReactNode;
+  prev?: NavPage;
+  next?: NavPage;
+  bare?: boolean;
+};
+
+export function DocsBody({ children, prev, next, bare }: DocsBodyProps) {
+  return (
+    <div className="launch-docs-body">
+      {children}
+      {!bare && <PageFeedback />}
+      {!bare && <PageNav prev={prev} next={next} />}
+    </div>
+  );
 }

@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { cn } from "@/lib/utils";
 
 function getPageIcon(name: string) {
@@ -43,20 +43,6 @@ function getPageIcon(name: string) {
   return Activity;
 }
 
-function nodeContainsPath(node: PageTreeNode, pathname: string): boolean {
-  if (node.type === "page") {
-    return node.url === pathname;
-  }
-
-  if (node.type === "folder") {
-    return (
-      node.index?.url === pathname ||
-      node.children.some((child) => nodeContainsPath(child, pathname))
-    );
-  }
-
-  return false;
-}
 
 function getNodeKey(node: PageTreeNode) {
   if (node.type === "page") {
@@ -77,8 +63,7 @@ type NavigationNodeProps = {
 
 export function NavigationNode({ node, depth = 0 }: NavigationNodeProps) {
   const pathname = usePathname();
-  const initiallyOpen = useMemo(() => nodeContainsPath(node, pathname), [node, pathname]);
-  const [isOpen, setIsOpen] = useState(initiallyOpen);
+  const [isOpen, setIsOpen] = useState(true);
 
   if (node.type === "separator") {
     return node.name ? (

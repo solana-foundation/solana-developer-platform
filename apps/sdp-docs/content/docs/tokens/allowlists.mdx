@@ -1,0 +1,169 @@
+---
+title: Allowlists
+description: Control which addresses can receive your token by maintaining an approved list.
+---
+
+Tokens created with `requiresAllowlist: true` enforce a list of approved destination addresses on allowlist-aware issuance flows such as minting and administrative transfers. Required for `tokenized-security` tokens. Payment transfers use wallet-level destination allowlists instead.
+
+## Prerequisites
+
+- A token created with `requiresAllowlist` enabled
+- `tokens:write` permission on the API key
+
+## How it works
+
+<HowItWorks>
+
+<Step number={1} title="Enable the allowlist">
+
+The allowlist is configured at token creation time. Decide before creating whether your token requires one — it cannot be changed after deployment.
+
+<StepPanel>
+<Tabs items={["UI", "API"]} groupId="how-it-works">
+<Tab value="UI">
+
+In the **Create token** flow, step 3 of 3, toggle **Allowlist** on.
+
+For `tokenized-security` tokens, the allowlist toggle is pre-enabled and locked.
+
+</Tab>
+<Tab value="API">
+
+Set `requiresAllowlist: true` when creating the token:
+
+```typescript
+body: JSON.stringify({
+  name: "Acme Security",
+  symbol: "ACMES",
+  decimals: 8,
+  template: "tokenized-security",
+  requiresAllowlist: true,
+  isMintable: true,
+  isFreezable: true,
+}),
+```
+
+Once deployed, the allowlist is enforced automatically on issuance flows.
+
+</Tab>
+</Tabs>
+</StepPanel>
+
+</Step>
+
+<Step number={2} title="Add an address">
+
+Add a wallet address to the allowlist before minting to it or using it as an administrative transfer destination.
+
+<StepPanel>
+<Tabs items={["UI", "API"]} groupId="how-it-works">
+<Tab value="UI">
+
+Open the token detail page and go to the **Allowlist** tab.
+
+Click **Add address**, enter the wallet address and an optional label, then click **Add**. The address is enforced on the next allowlist-checked operation.
+
+</Tab>
+<Tab value="API">
+
+```bash
+curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/allowlist \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "address": "7xKXz...9fGh",
+    "label": "Treasury wallet"
+  }'
+```
+
+```typescript
+const res = await fetch(
+  "https://api.solana.com/v1/issuance/tokens/tok_abc123/allowlist",
+  {
+    method: "POST",
+    headers: {
+      Authorization: "Bearer sk_test_...",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ address: "7xKXz...9fGh", label: "Treasury wallet" }),
+  }
+);
+// res.data.entry.id — save this to remove the entry later
+```
+
+</Tab>
+</Tabs>
+</StepPanel>
+
+</Step>
+
+<Step number={3} title="Review the list">
+
+Check which addresses are currently approved. Useful before minting to a new destination or during a compliance audit.
+
+<StepPanel>
+<Tabs items={["UI", "API"]} groupId="how-it-works">
+<Tab value="UI">
+
+The **Allowlist** tab shows all approved addresses, their labels, and when they were added.
+
+Use the search field to find a specific address by label or public key.
+
+</Tab>
+<Tab value="API">
+
+```bash
+curl https://api.solana.com/v1/issuance/tokens/tok_abc123/allowlist \
+  -H "Authorization: Bearer sk_test_..."
+```
+
+```typescript
+const { data, meta } = await res.json();
+// meta: { total, page, pageSize, hasMore }
+```
+
+Supports `page` and `pageSize` query parameters.
+
+</Tab>
+</Tabs>
+</StepPanel>
+
+</Step>
+
+<Step number={4} title="Remove an address">
+
+Remove an address when a holder's compliance status changes. Existing token holdings are unaffected — only future allowlist-enforced flows are blocked.
+
+<StepPanel>
+<Tabs items={["UI", "API"]} groupId="how-it-works">
+<Tab value="UI">
+
+In the **Allowlist** tab, click **Remove** next to the address and confirm the removal.
+
+</Tab>
+<Tab value="API">
+
+```bash
+curl -X DELETE \
+  https://api.solana.com/v1/issuance/tokens/tok_abc123/allowlist/alw_abc123 \
+  -H "Authorization: Bearer sk_test_..."
+```
+
+Use the `entry.id` returned when the address was added.
+
+</Tab>
+</Tabs>
+</StepPanel>
+
+</Step>
+
+</HowItWorks>
+
+## Typical workflow for a tokenized security
+
+1. Create the token with `requiresAllowlist: true` and template `tokenized-security`
+2. [Deploy the token](/docs/tokens/deploy-a-token)
+3. Collect wallet addresses from KYC-verified investors
+4. Add each verified address to the allowlist
+5. [Mint tokens](/docs/tokens/mint-and-burn) to allowlisted addresses
+6. Remove addresses when compliance status changes

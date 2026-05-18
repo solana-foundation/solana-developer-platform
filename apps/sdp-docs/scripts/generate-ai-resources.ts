@@ -167,9 +167,7 @@ function buildSections(meta: DocsMeta, pages: Map<string, DocsPage>): Section[] 
     }
 
     const page = pages.get(entry);
-    if (!page) {
-      throw new Error(`Missing docs page for meta entry "${entry}"`);
-    }
+    if (!page) continue;
     currentSection.pages.push(page);
   }
 

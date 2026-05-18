@@ -1,0 +1,185 @@
+---
+title: Freeze and Compliance
+description: Freeze accounts, pause transfers, seize tokens, and screen addresses for compliance workflows.
+---
+
+SDP provides two categories of compliance tooling:
+
+- **Token controls** — freeze individual accounts, pause all transfers, or seize tokens. Available for tokens with `isFreezable` enabled or the `pausable` extension.
+- **Address screening** — check a wallet against configured compliance providers before approving a destination or allowlisting it.
+
+Token-control actions require `tokens:admin` permission on the API key.
+
+## How it works
+
+<HowItWorks>
+
+<Step number={1} title="Screen an address">
+
+Check a Solana address against configured compliance providers before onboarding a wallet or approving it as a transfer destination.
+
+<StepPanel>
+<Tabs items={["UI", "API"]} groupId="how-it-works">
+<Tab value="UI">
+
+Use the **Screen address** action in the Compliance section of the dashboard.
+
+Enter the wallet address and select the intent (e.g., transfer destination or allowlist candidate). Results appear per provider — each showing risk level, score, and flags.
+
+</Tab>
+<Tab value="API">
+
+```bash
+curl -X POST https://api.solana.com/v1/compliance/address-screenings \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "address": "8dHEsGLp...hQWRGZ",
+    "network": "solana",
+    "intent": "transfer_destination"
+  }'
+```
+
+```typescript
+const { data } = await res.json();
+// data.screening.providers[]
+// → { provider, status, riskScore, riskLevel, message, evaluatedAt }
+```
+
+See the [Compliance API reference](/docs/reference/api/compliance) for the full schema.
+
+</Tab>
+</Tabs>
+</StepPanel>
+
+</Step>
+
+<Step number={2} title="Freeze and unfreeze an account">
+
+Prevent a specific holder from sending or receiving this token. The freeze targets one associated token account — other accounts are unaffected.
+
+<StepPanel>
+<Tabs items={["UI", "API"]} groupId="how-it-works">
+<Tab value="UI">
+
+On the token detail page, go to the **Compliance** tab. Click **Freeze account**, enter the holder's wallet address and an optional reason, then confirm.
+
+To lift the freeze, find the account in the frozen list and click **Unfreeze**.
+
+</Tab>
+<Tab value="API">
+
+**Freeze:**
+
+```bash
+curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/freeze \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "accountAddress": "3xYZa...2aBc",
+    "reason": "Suspicious activity investigation"
+  }'
+```
+
+`accountAddress` accepts a holder wallet or its token account — SDP derives the associated token account when needed.
+
+**Unfreeze:**
+
+```typescript
+await fetch("https://api.solana.com/v1/issuance/tokens/tok_abc123/unfreeze", {
+  method: "POST",
+  headers: { Authorization: "Bearer sk_test_...", "Content-Type": "application/json" },
+  body: JSON.stringify({ accountAddress: "3xYZa...2aBc" }),
+});
+```
+
+**List frozen accounts:**
+
+```bash
+curl https://api.solana.com/v1/issuance/tokens/tok_abc123/frozen \
+  -H "Authorization: Bearer sk_test_..."
+```
+
+</Tab>
+</Tabs>
+</StepPanel>
+
+</Step>
+
+<Step number={3} title="Pause and unpause the token">
+
+Halt all minting and transfer activity globally. Requires the `pausable` extension on the token.
+
+<StepPanel>
+<Tabs items={["UI", "API"]} groupId="how-it-works">
+<Tab value="UI">
+
+On the token detail page, click **Pause token** in the admin controls panel and confirm.
+
+While paused, the token header shows a `Paused` badge and all supply and transfer operations are blocked. Click **Unpause** to resume.
+
+</Tab>
+<Tab value="API">
+
+```bash
+# Pause
+curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/pause \
+  -H "Authorization: Bearer sk_test_..."
+
+# Unpause
+curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/unpause \
+  -H "Authorization: Bearer sk_test_..."
+```
+
+While paused, all transfer-related and supply-management operations are rejected until unpause.
+
+</Tab>
+</Tabs>
+</StepPanel>
+
+</Step>
+
+<Step number={4} title="Seize tokens">
+
+Force-transfer tokens from a holder to a recovery address without the holder's signature. For court orders and regulatory enforcement. Requires `tokens:admin`.
+
+<StepPanel>
+<Tabs items={["UI", "API"]} groupId="how-it-works">
+<Tab value="UI">
+
+In the **Compliance** tab, click **Seize tokens**. Provide the source, destination, amount, and a memo (strongly recommended for audit records). Confirm to submit.
+
+</Tab>
+<Tab value="API">
+
+```bash
+curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/seize \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: seize-001" \
+  -d '{
+    "seize": {
+      "source": "3xYZa...2aBc",
+      "destination": "9aBCd...4eEf",
+      "amount": "1000000",
+      "memo": "Court order #12345"
+    }
+  }'
+```
+
+Seize also supports `/prepare` for client-side signing.
+
+</Tab>
+</Tabs>
+</StepPanel>
+
+</Step>
+
+</HowItWorks>
+
+## Compliance response workflow
+
+1. **Screen** the address via the Compliance API
+2. **Freeze** the affected account while investigating
+3. Based on findings — **Unfreeze** if cleared, **Seize** tokens to a recovery address, or **Force-burn** (see [Mint and Burn](/docs/tokens/mint-and-burn))
+4. Record all actions with `memo` fields for the audit trail
