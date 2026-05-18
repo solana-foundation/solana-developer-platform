@@ -41,7 +41,7 @@ const { data, meta } = await res.json();
 | `wallet` | string | SDP custody wallet ID. |
 | `walletAddress` | string | Solana address (alternative to `wallet`). |
 | `token` | string | Filter by token symbol or on-chain mint (exact match against the stored transfer's `token` value). |
-| `from`, `to` | ISO 8601 datetime | Time-window filter on `createdAt`. Use with offset (`2026-05-14T00:00:00Z`). |
+| `from`, `to` | ISO 8601 datetime | Time-window filter on `createdAt`. **Honored only on the org-scoped path (no `wallet`/`walletAddress` filter).** On the wallet-scoped path the server replays the most recent on-chain signature history (~200 entries) and ignores `from`/`to` for the observed/confirmed branch. Use with offset (`2026-05-14T00:00:00Z`). |
 | `page` | integer | Default `1`. |
 | `pageSize` | integer | Default `20`, max `100`. |
 
@@ -56,22 +56,24 @@ In practice: store transfers in your reconciliation table keyed by SDP `Transfer
 
 ## Reconciling an order
 
+Customer-initiated inbound transfers do **not** populate `Transfer.memo` (memo-program instructions aren't extracted into the field), and the inbound record doesn't expose a reference. The reliable on-record correlation key is the inbound transfer's `destination` — match it against an order whose pre-issued receiving address is that same `destination`.
+
 The typical inbound match cycle:
 
-1. **Read** the recent inbound transfers for the relevant token and merchant wallet:
+1. **Read** the recent inbound transfers for the relevant token, using the **org-scoped path** (no `wallet`/`walletAddress` filter) so `from`/`to` are honored:
    ```
    GET /v1/payments/transfers
      ?direction=inbound
-     &token=<mint or token id>
-     &wallet=<merchant custody wallet id>
+     &token=<mint or SOL>
      &from=<since last reconciled>
+     &to=<now>
      &pageSize=100
    ```
-2. **For each transfer**, check whether its `memo` matches an unpaid order in your `orders` table.
-3. **If matched**, mark the order paid, record the SDP `Transfer.id`, and dispatch downstream side effects (email, shipment, ledger entry).
+2. **For each transfer**, look up an open order keyed by the transfer's `destination` (`findOrderByDestination(tr.destination)`).
+3. **If matched**, assert the amount and token match the expected values on the order row, then mark the order paid, record the SDP `Transfer.id`, and dispatch downstream side effects (email, shipment, ledger entry).
 4. **If unmatched**, leave the transfer for the next pass (it may be an early-arrival for an order you haven't staged yet) or flag it for manual review after a grace window.
 
-Per-order amount-and-token assertions are also worth running — your `orders` row should know what it expects to receive, and the inbound transfer should match exactly.
+If you need memo- or Solana-Pay-`reference`-based correlation (e.g., a single-wallet flow where the destination address is shared across orders), read the on-chain transaction directly via Solana RPC using the transfer's `signature`. SDP does not surface either field on inbound transfer records today.
 
 ## Solana Pay reference accounts (roadmap)
 
@@ -96,10 +98,14 @@ async function reconcileTick(state: WorkerState) {
   const from = new Date(fromMs).toISOString();
   const to = new Date().toISOString();
 
+  // Use the org-scoped listing (no wallet filter) so `from`/`to` are honored;
+  // see the Query parameters table above.
   for await (const tr of listInbound({ from, to })) {
     if (await alreadySeen(tr.id)) continue;
 
-    const order = await findOrderByMemo(tr.memo);
+    // Match by destination — the on-record correlation key for inbound transfers.
+    // `tr.memo` is null for customer-initiated inbound payments.
+    const order = await findOrderByDestination(tr.destination);
     if (!order) {
       await persistUnmatched(tr);
       continue;
