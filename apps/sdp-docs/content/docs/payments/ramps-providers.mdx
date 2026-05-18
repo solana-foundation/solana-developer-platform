@@ -44,7 +44,7 @@ Lightspark is integrated against the Grid API (`https://api.lightspark.com/grid/
 | `BVNK_WALLET_ID` | yes | The BVNK-side wallet to use for settlement. |
 | `BVNK_BASE_URL` | no | Override the default BVNK host. Defaults to `https://api.bvnk.com` for production and `https://api.sandbox.bvnk.com` for sandbox; switched by `ENVIRONMENT`. |
 
-BVNK is the only provider that currently accepts the `bvnkCompliance` field on the ramp request — a `partyDetails` array of compliance party records used to satisfy travel-rule and KYC sharing requirements. The exact shape of each party record is provider-defined; see BVNK's compliance docs for the field schema.
+BVNK is the only provider that currently accepts the `bvnkCompliance` field on the ramp request — an object of the form `{ "partyDetails": [...] }` carrying compliance party records used to satisfy travel-rule and KYC sharing requirements. The exact shape of each party record is provider-defined; see BVNK's compliance docs for the field schema.
 
 ```json
 {

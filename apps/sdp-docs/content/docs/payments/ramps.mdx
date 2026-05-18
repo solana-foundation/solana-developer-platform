@@ -90,7 +90,7 @@ HttpRequest request = HttpRequest.newBuilder()
 | `fiatCurrency` | no | Currently `USD` only. |
 | `kycReference` | no | Up to 128 chars; identifies the end-user across your KYC system. Some providers use this to short-circuit re-verification. |
 | `redirectUrl` | no | Valid URL the provider sends the user to on completion. |
-| `bvnkCompliance` | no | BVNK-only: party-detail array required for compliance. See [Ramp providers](/docs/payments/ramps-providers#bvnk). |
+| `bvnkCompliance` | no | BVNK-only: object of the form `{ "partyDetails": [...] }` carrying compliance party records. Omit the field entirely for `moonpay` and `lightspark`. See [Ramp providers](/docs/payments/ramps-providers#bvnk). |
 
 ## Offramp flow
 
@@ -157,7 +157,7 @@ You always pass `provider` explicitly today; SDP does not auto-select. Choose ba
 - **Coverage** — which providers your org has configured (see [Ramp providers](/docs/payments/ramps-providers#provider-gating)).
 - **Region** — providers have different country / payment-method support.
 - **Sandbox needs** — MoonPay and BVNK ship sandboxes; Lightspark currently does not.
-- **Compliance attachment** — only BVNK accepts the `bvnkCompliance` party-detail field today.
+- **Compliance attachment** — only BVNK accepts the `bvnkCompliance` field (a `{ "partyDetails": [...] }` object) today.
 
 ## Fiat currency support
 
