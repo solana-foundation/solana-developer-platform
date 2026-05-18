@@ -131,9 +131,7 @@ type LightsparkConfig = {
   apiBaseUrl: string;
 };
 
-type BvnkAuthConfig =
-  | { type: "bearer"; apiToken: string }
-  | { type: "hawk"; authId: string; secretKey: string };
+type BvnkAuthConfig = { type: "hawk"; authId: string; secretKey: string };
 
 type BvnkConfig = {
   auth: BvnkAuthConfig;
@@ -230,50 +228,30 @@ function getLightsparkConfig(c: AppContext): LightsparkConfig {
     );
   }
 
-  // Lightspark Grid uses the same base URL for sandbox and production; credentials determine the environment.
-  const apiBaseUrlRaw =
-    envForMode(testMode, {
-      sandbox: c.env.LIGHTSPARK_GRID_SANDBOX_API_BASE_URL,
-      production: c.env.LIGHTSPARK_GRID_API_BASE_URL,
-    }) ?? LIGHTSPARK_DEFAULT_GRID_API_URL;
-  try {
-    new URL(apiBaseUrlRaw);
-  } catch {
-    throw new AppError("INTERNAL_ERROR", "Lightspark API URL configuration is invalid.");
-  }
-
   return {
     tokenId,
     clientSecret,
-    apiBaseUrl: apiBaseUrlRaw,
+    apiBaseUrl: LIGHTSPARK_DEFAULT_GRID_API_URL,
   };
 }
 
 function getBvnkConfig(c: AppContext): BvnkConfig {
   const testMode = isTestMode(c);
-  const { hawkAuthId, hawkSecretKey, apiToken, walletId } = configForMode(testMode, {
+  const { hawkAuthId, hawkSecretKey, walletId } = configForMode(testMode, {
     hawkAuthId: { sandbox: c.env.BVNK_SANDBOX_HAWK_AUTH_ID, production: c.env.BVNK_HAWK_AUTH_ID },
     hawkSecretKey: {
       sandbox: c.env.BVNK_SANDBOX_HAWK_SECRET_KEY,
       production: c.env.BVNK_HAWK_SECRET_KEY,
     },
-    apiToken: { sandbox: c.env.BVNK_SANDBOX_API_TOKEN, production: c.env.BVNK_API_TOKEN },
     walletId: { sandbox: c.env.BVNK_SANDBOX_WALLET_ID, production: c.env.BVNK_WALLET_ID },
   });
 
   const missingMsg = testMode
-    ? "BVNK sandbox is not configured. Set BVNK_SANDBOX_WALLET_ID and either BVNK_SANDBOX_API_TOKEN or BVNK_SANDBOX_HAWK_AUTH_ID/BVNK_SANDBOX_HAWK_SECRET_KEY."
-    : "BVNK is not configured. Set BVNK_WALLET_ID and either BVNK_API_TOKEN or BVNK_HAWK_AUTH_ID/BVNK_HAWK_SECRET_KEY.";
+    ? "BVNK sandbox is not configured. Set BVNK_SANDBOX_WALLET_ID, BVNK_SANDBOX_HAWK_AUTH_ID, and BVNK_SANDBOX_HAWK_SECRET_KEY."
+    : "BVNK is not configured. Set BVNK_WALLET_ID, BVNK_HAWK_AUTH_ID, and BVNK_HAWK_SECRET_KEY.";
 
-  if (!walletId) {
+  if (!walletId || !hawkAuthId || !hawkSecretKey) {
     throw providerNotConfigured(missingMsg);
-  }
-
-  if ((hawkAuthId && !hawkSecretKey) || (!hawkAuthId && hawkSecretKey)) {
-    throw new AppError(
-      "INTERNAL_ERROR",
-      "BVNK Hawk auth is incomplete. Set both auth ID and secret key."
-    );
   }
 
   const defaultApiBaseUrl = testMode ? BVNK_SANDBOX_API_URL : BVNK_PRODUCTION_API_URL;
@@ -284,21 +262,11 @@ function getBvnkConfig(c: AppContext): BvnkConfig {
     throw new AppError("INTERNAL_ERROR", "BVNK API URL configuration is invalid.");
   }
 
-  let auth: BvnkAuthConfig;
-  if (hawkAuthId && hawkSecretKey) {
-    auth = {
-      type: "hawk",
-      authId: hawkAuthId,
-      secretKey: hawkSecretKey,
-    };
-  } else if (apiToken) {
-    auth = {
-      type: "bearer",
-      apiToken,
-    };
-  } else {
-    throw providerNotConfigured(missingMsg);
-  }
+  const auth: BvnkAuthConfig = {
+    type: "hawk",
+    authId: hawkAuthId,
+    secretKey: hawkSecretKey,
+  };
 
   return {
     auth,
@@ -509,15 +477,12 @@ async function bvnkRequest(
 ): Promise<unknown> {
   const apiBaseUrl = config.apiBaseUrl.endsWith("/") ? config.apiBaseUrl : `${config.apiBaseUrl}/`;
   const url = new URL(path.replace(/^\//, ""), apiBaseUrl);
-  const authorization =
-    config.auth.type === "hawk"
-      ? await buildBvnkHawkAuthorizationHeader(
-          url,
-          init.method,
-          config.auth.authId,
-          config.auth.secretKey
-        )
-      : `Bearer ${config.auth.apiToken}`;
+  const authorization = await buildBvnkHawkAuthorizationHeader(
+    url,
+    init.method,
+    config.auth.authId,
+    config.auth.secretKey
+  );
   const response = await fetch(url.toString(), {
     method: init.method,
     headers: {

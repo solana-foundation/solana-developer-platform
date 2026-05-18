@@ -170,18 +170,14 @@ export interface Env {
   // Lightspark Grid ramps configuration
   LIGHTSPARK_GRID_CLIENT_ID?: string;
   LIGHTSPARK_GRID_CLIENT_SECRET?: string;
-  LIGHTSPARK_GRID_API_BASE_URL?: string;
   LIGHTSPARK_GRID_SANDBOX_CLIENT_ID?: string;
   LIGHTSPARK_GRID_SANDBOX_CLIENT_SECRET?: string;
-  LIGHTSPARK_GRID_SANDBOX_API_BASE_URL?: string;
 
   // BVNK ramps configuration
-  BVNK_API_TOKEN?: string;
   BVNK_HAWK_AUTH_ID?: string;
   BVNK_HAWK_SECRET_KEY?: string;
   BVNK_WALLET_ID?: string;
   BVNK_API_BASE_URL?: string;
-  BVNK_SANDBOX_API_TOKEN?: string;
   BVNK_SANDBOX_HAWK_AUTH_ID?: string;
   BVNK_SANDBOX_HAWK_SECRET_KEY?: string;
   BVNK_SANDBOX_WALLET_ID?: string;

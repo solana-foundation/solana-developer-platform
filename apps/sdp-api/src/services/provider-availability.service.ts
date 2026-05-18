@@ -166,14 +166,16 @@ const PROVIDER_AVAILABILITY_DEFINITIONS = {
     bvnk: {
       label: "BVNK",
       isConfigured: (env, testMode) => {
-        const prod =
-          hasEnv(env, "BVNK_WALLET_ID") &&
-          (hasEnv(env, "BVNK_API_TOKEN") ||
-            hasAllEnv(env, ["BVNK_HAWK_AUTH_ID", "BVNK_HAWK_SECRET_KEY"]));
-        const sandbox =
-          hasEnv(env, "BVNK_SANDBOX_WALLET_ID") &&
-          (hasEnv(env, "BVNK_SANDBOX_API_TOKEN") ||
-            hasAllEnv(env, ["BVNK_SANDBOX_HAWK_AUTH_ID", "BVNK_SANDBOX_HAWK_SECRET_KEY"]));
+        const prod = hasAllEnv(env, [
+          "BVNK_WALLET_ID",
+          "BVNK_HAWK_AUTH_ID",
+          "BVNK_HAWK_SECRET_KEY",
+        ]);
+        const sandbox = hasAllEnv(env, [
+          "BVNK_SANDBOX_WALLET_ID",
+          "BVNK_SANDBOX_HAWK_AUTH_ID",
+          "BVNK_SANDBOX_HAWK_SECRET_KEY",
+        ]);
         if (testMode === true) return sandbox;
         if (testMode === false) return prod;
         return prod || sandbox;
