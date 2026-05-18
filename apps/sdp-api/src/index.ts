@@ -5,7 +5,6 @@
  * Built with Hono, Postgres, Hyperdrive, and KV
  */
 
-import * as Sentry from "@sentry/cloudflare";
 import { type Context, Hono } from "hono";
 import { logger } from "hono/logger";
 import { prettyJSON } from "hono/pretty-json";
@@ -36,6 +35,8 @@ import payments from "@/routes/payments";
 import projects from "@/routes/projects";
 import rpc from "@/routes/rpc";
 import webhooks from "@/routes/webhooks";
+import { getSentryOptions, isSentryEnabled } from "@/runtime/observability";
+import { cloudflareObservability, withSentry } from "@/runtime/observability-cf";
 import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
 import { SigningError } from "@/services/ports";
 import type { Env } from "@/types/env";
@@ -46,38 +47,8 @@ const app = new Hono<{ Bindings: Env }>();
 const SENTRY_PENDING_TRANSFERS_MONITOR = "sdp-api-track-pending-transfers";
 const PENDING_TRANSFERS_CRON = "* * * * *";
 
-function parseSentryTraceSampleRate(value: string | undefined, fallback: number): number {
-  if (!value) {
-    return fallback;
-  }
-
-  const parsed = Number.parseFloat(value);
-  if (!Number.isFinite(parsed) || parsed < 0 || parsed > 1) {
-    return fallback;
-  }
-
-  return parsed;
-}
-
-function getSentryOptions(env: Env) {
-  const dsn = env.SENTRY_DSN?.trim();
-  const defaultTraceSampleRate = env.ENVIRONMENT === "production" ? 0.1 : 1;
-  const tracesSampleRate = parseSentryTraceSampleRate(
-    env.SENTRY_TRACES_SAMPLE_RATE,
-    defaultTraceSampleRate
-  );
-
-  return {
-    ...(dsn ? { dsn } : {}),
-    enabled: Boolean(dsn),
-    environment: env.ENVIRONMENT,
-    tracesSampleRate,
-    sendDefaultPii: false,
-  };
-}
-
 function captureUnexpectedError(err: Error, c: Context<{ Bindings: Env }>): void {
-  if (!c.env.SENTRY_DSN?.trim()) {
+  if (!isSentryEnabled(c.env)) {
     return;
   }
 
@@ -86,7 +57,7 @@ function captureUnexpectedError(err: Error, c: Context<{ Bindings: Env }>): void
   const requestSource = c.get("requestSource");
   const path = new URL(c.req.url).pathname;
 
-  Sentry.withScope((scope) => {
+  cloudflareObservability.withScope((scope) => {
     scope.setTag("request_id", requestId);
     scope.setTag("trace_id", traceId);
     scope.setTag("request_source", requestSource);
@@ -117,7 +88,7 @@ function captureUnexpectedError(err: Error, c: Context<{ Bindings: Env }>): void
       scope.setUser({ id: clerk.userId });
     }
 
-    Sentry.captureException(err);
+    cloudflareObservability.captureException(err);
   });
 }
 
@@ -359,18 +330,22 @@ const worker = {
   ): Promise<void> {
     const runtimeEnv = withProcessEnvFallback(env);
     const runPendingTransferTracking = () => trackPendingTransfers(runtimeEnv);
-    if (!runtimeEnv.SENTRY_DSN) {
+    if (!isSentryEnabled(runtimeEnv)) {
       ctx.waitUntil(runPendingTransferTracking());
       return;
     }
 
     ctx.waitUntil(
-      Sentry.withMonitor(SENTRY_PENDING_TRANSFERS_MONITOR, runPendingTransferTracking, {
-        schedule: {
-          type: "crontab",
-          value: PENDING_TRANSFERS_CRON,
-        },
-      })
+      cloudflareObservability.withMonitor(
+        SENTRY_PENDING_TRANSFERS_MONITOR,
+        runPendingTransferTracking,
+        {
+          schedule: {
+            type: "crontab",
+            value: PENDING_TRANSFERS_CRON,
+          },
+        }
+      )
     );
   },
   request(
@@ -389,4 +364,4 @@ const worker = {
   request: typeof app.request;
 };
 
-export default Sentry.withSentry(getSentryOptions, worker);
+export default withSentry(getSentryOptions, worker);
