@@ -40,7 +40,7 @@ const { data, meta } = await res.json();
 | `status` | `pending` \| `processing` \| `confirmed` \| `finalized` \| `failed` | Scope to a single state. |
 | `wallet` | string | SDP custody wallet ID. |
 | `walletAddress` | string | Solana address (alternative to `wallet`). |
-| `token` | string | SDP token ID or on-chain mint. |
+| `token` | string | Filter by token symbol or on-chain mint (exact match against the stored transfer's `token` value). |
 | `from`, `to` | ISO 8601 datetime | Time-window filter on `createdAt`. Use with offset (`2026-05-14T00:00:00Z`). |
 | `page` | integer | Default `1`. |
 | `pageSize` | integer | Default `20`, max `100`. |
