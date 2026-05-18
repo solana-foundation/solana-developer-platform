@@ -37,12 +37,11 @@ Lightspark is integrated against the Grid API (`https://api.lightspark.com/grid/
 
 | Variable | Required | Notes |
 | --- | --- | --- |
-| `BVNK_AUTH_TYPE` | yes | Either `bearer` or `hawk`. Determines which credential set is required below. |
-| `BVNK_BEARER_TOKEN` | conditional | Required when `BVNK_AUTH_TYPE=bearer`. |
-| `BVNK_HAWK_ID` | conditional | Required when `BVNK_AUTH_TYPE=hawk`. |
-| `BVNK_HAWK_KEY` | conditional | Required when `BVNK_AUTH_TYPE=hawk`. |
 | `BVNK_WALLET_ID` | yes | The BVNK-side wallet to use for settlement. |
-| `BVNK_BASE_URL` | no | Override the default BVNK host. Defaults to `https://api.bvnk.com` for production and `https://api.sandbox.bvnk.com` for sandbox; switched by `ENVIRONMENT`. |
+| `BVNK_API_TOKEN` | conditional | Bearer token. Provide this *or* the Hawk pair below — auth method is inferred from which credentials are present. |
+| `BVNK_HAWK_AUTH_ID` | conditional | Hawk auth id. Required together with `BVNK_HAWK_SECRET_KEY` if you're using Hawk auth instead of bearer. |
+| `BVNK_HAWK_SECRET_KEY` | conditional | Hawk secret key, paired with `BVNK_HAWK_AUTH_ID`. |
+| `BVNK_API_BASE_URL` | no | Override the default BVNK host. Defaults to `https://api.bvnk.com` for production and `https://api.sandbox.bvnk.com` for sandbox; switched by `ENVIRONMENT`. |
 
 BVNK is the only provider that currently accepts the `bvnkCompliance` field on the ramp request — an object of the form `{ "partyDetails": [...] }` carrying compliance party records used to satisfy travel-rule and KYC sharing requirements. The exact shape of each party record is provider-defined; see BVNK's compliance docs for the field schema.
 

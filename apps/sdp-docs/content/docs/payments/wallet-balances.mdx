@@ -3,7 +3,7 @@ title: Wallet balances
 description: Per-wallet token balances with optional USD valuation via SDP.
 ---
 
-`GET /v1/payments/wallets/{walletId}/balances` returns every SPL token balance held by a custody wallet — raw amount, human-readable amount, decimals, and optional USD valuation when a price source is configured.
+`GET /v1/payments/wallets/{walletId}/balances` returns the wallet's native **SOL** balance plus every **SPL token** balance held by a custody wallet — raw amount, human-readable amount, decimals, and optional USD valuation when a price source is configured. SOL is always prepended as the first entry and is represented with `token: "SOL"` and `mint: "So11111111111111111111111111111111111111112"`.
 
 ## Request
 
