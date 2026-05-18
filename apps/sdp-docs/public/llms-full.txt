@@ -25,9 +25,30 @@
 - [Mint and Burn Tokens](https://platform.solana.com/docs/guides/mint-and-burn): Increase or decrease token supply by minting and burning.
 - [Manage Allowlists](https://platform.solana.com/docs/guides/manage-allowlists): Control which addresses can hold your token using allowlists.
 - [Freeze and Compliance](https://platform.solana.com/docs/guides/freeze-and-compliance): Freeze accounts, pause transfers, seize tokens, and screen addresses for compliance workflows.
-- [Transfer Tokens](https://platform.solana.com/docs/guides/transfer-tokens): Send tokens between accounts using SDP's payment orchestration.
 - [Prepare vs Execute](https://platform.solana.com/docs/guides/prepare-vs-execute): Understand SDP's two signing modes for onchain transactions.
 - [Issuance Token Types](https://platform.solana.com/docs/reference/issuance-token-types): Supported issuance templates and default controls.
+
+## Payments
+- [Payments](https://platform.solana.com/docs/payments): Build payments on Solana with SDP — concepts, send, accept, ramps, and wallet operations.
+- [How payments work on SDP](https://platform.solana.com/docs/payments/concepts): Wallets, tokens, signing modes, fees, and the data model that backs SDP payments.
+
+## Send Payments
+- [Basic payment](https://platform.solana.com/docs/payments/send-basic-payment): Send a single token transfer with SDP, using either Execute or Prepare mode.
+- [Payment with memo](https://platform.solana.com/docs/payments/send-payment-with-memo): Attach an order ID, invoice number, or customer reference to an SDP transfer.
+- [Payouts and disbursements](https://platform.solana.com/docs/payments/send-payouts): Run batched outbound transfers, deduplicate retries, and reconcile a payout batch with SDP.
+
+## Accept Payments
+- [Accept payments](https://platform.solana.com/docs/payments/accept-overview): Receiving-address convention, integration options, and how to track inbound payments with SDP.
+- [Verifying a payment](https://platform.solana.com/docs/payments/accept-verification): Transfer-status semantics, finality on Solana, and recommended polling cadence for SDP transfers.
+- [Indexing and reconciliation](https://platform.solana.com/docs/payments/accept-indexing): List inbound transfers, paginate, dedupe, and reconcile against your product ledger.
+
+## Ramps
+- [Ramps](https://platform.solana.com/docs/payments/ramps): Fiat on-ramps and off-ramps — let users buy crypto with fiat or cash out from a wallet through SDP.
+- [Ramp providers](https://platform.solana.com/docs/payments/ramps-providers): MoonPay, Lightspark, and BVNK — capability matrix, configuration, and per-provider notes.
+
+## Wallet Operations
+- [Wallet policies](https://platform.solana.com/docs/payments/wallet-policies): Destination allowlist and transfer limits per custody wallet.
+- [Wallet balances](https://platform.solana.com/docs/payments/wallet-balances): Per-wallet token balances with optional USD valuation via SDP.
 
 ## Tutorials
 - [End-to-end Payment Flow](https://platform.solana.com/docs/tutorials/end-to-end-payment-flow): A high-level payment flow from quote to settlement.

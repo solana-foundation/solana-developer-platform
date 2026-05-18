@@ -36,10 +36,14 @@ export const walletPolicySchema = z
       description: "Custody wallet ID from /v1/wallets.",
       example: "wal_example",
     }),
-    destinationAllowlist: z.array(solanaAddressSchema).openapi({
-      description:
-        "Allowed destination addresses. An empty array means no destination restrictions.",
-    }),
+    destinationAllowlist: z
+      .array(solanaAddressSchema)
+      .max(500)
+      .openapi({
+        description:
+          "Allowed destination addresses. An empty array means no destination restrictions. Maximum 500 entries per wallet.",
+        example: ["7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU"],
+      }),
     maxTransferAmount: tokenAmountSchema
       .optional()
       .openapi({ description: "Maximum amount allowed per transfer." }),
@@ -82,7 +86,8 @@ export const updateWalletPolicyRequestSchema = updateWalletPolicySchemaBase
   .extend({
     destinationAllowlist: withOpenApi(updateWalletPolicySchemaBase.shape.destinationAllowlist, {
       description:
-        "Allowed destination addresses. An empty array means no destination restrictions.",
+        "Allowed destination addresses. An empty array means no destination restrictions. Maximum 500 entries per wallet.",
+      example: ["7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU"],
     }),
     maxTransferAmount: withOpenApi(updateWalletPolicySchemaBase.shape.maxTransferAmount, {
       description: "Maximum amount allowed per transfer.",
@@ -152,11 +157,12 @@ export const createTransferRequestSchema = createTransferSchemaBase
     }),
     destination: withOpenApi(createTransferSchemaBase.shape.destination, {
       description: "Destination wallet address.",
-      example: "So11111111111111111111111111111111111111112",
+      example: "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
     }),
     token: withOpenApi(createTransferSchemaBase.shape.token, {
-      description: "Token symbol or mint address.",
-      example: "USDC",
+      description:
+        "Token mint address. Use `SOL` for the native token; SPL tokens must be specified by their on-chain mint (symbols are not resolved at request time).",
+      example: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
     }),
     amount: withOpenApi(createTransferSchemaBase.shape.amount, {
       description: "Token amount in UI units (decimal string).",
@@ -201,11 +207,12 @@ export const prepareTransferRequestSchema = prepareTransferSchemaBase
     }),
     destination: withOpenApi(prepareTransferSchemaBase.shape.destination, {
       description: "Destination wallet address.",
-      example: "So11111111111111111111111111111111111111112",
+      example: "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
     }),
     token: withOpenApi(prepareTransferSchemaBase.shape.token, {
-      description: "Token symbol or mint address.",
-      example: "USDC",
+      description:
+        "Token mint address. Use `SOL` for the native token; SPL tokens must be specified by their on-chain mint (symbols are not resolved at request time).",
+      example: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
     }),
     amount: withOpenApi(prepareTransferSchemaBase.shape.amount, {
       description: "Token amount in UI units (decimal string).",
@@ -216,7 +223,7 @@ export const prepareTransferRequestSchema = prepareTransferSchemaBase
     }),
     referenceAddress: withOpenApi(prepareTransferSchemaBase.shape.referenceAddress, {
       description: "Optional reference address for tracking (Solana Pay reference account).",
-      example: "So11111111111111111111111111111111111111112",
+      example: "RefAccount11111111111111111111111111111111111",
     }),
     options: prepareTransferOptionsSchema.optional().openapi({
       description: "Transaction preparation options.",
@@ -378,7 +385,8 @@ export const executeOnrampRequestSchema = executeOnrampSchemaBase
       description: "Optional redirect URL after provider flow completes.",
     }),
     bvnkCompliance: withOpenApi(executeOnrampSchemaBase.shape.bvnkCompliance, {
-      description: "Optional BVNK compliance details.",
+      description:
+        "BVNK-only compliance details. Optional on BVNK on-ramp; required on BVNK off-ramp (which validates that `partyDetails` has at least one entry). Omit the field entirely for `moonpay` and `lightspark`.",
       example: { partyDetails: [{ type: "individual" }] },
     }),
   })
@@ -418,7 +426,8 @@ export const executeOfframpRequestSchema = executeOfframpSchemaBase
       description: "Optional redirect URL after provider flow completes.",
     }),
     bvnkCompliance: withOpenApi(executeOfframpSchemaBase.shape.bvnkCompliance, {
-      description: "Optional BVNK compliance details.",
+      description:
+        "BVNK-only compliance details. Required on BVNK off-ramp (`partyDetails` must contain at least one entry). Omit the field entirely for `moonpay` and `lightspark`.",
       example: { partyDetails: [{ type: "individual" }] },
     }),
   })
@@ -432,7 +441,7 @@ export const paymentListTransfersQuerySchema = listTransfersQuerySchemaBase
     }),
     walletAddress: withOpenApi(listTransfersQuerySchemaBase.shape.walletAddress, {
       description: "Filter by wallet address.",
-      example: "So11111111111111111111111111111111111111112",
+      example: "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
     }),
     token: withOpenApi(listTransfersQuerySchemaBase.shape.token, {
       description: "Filter by token symbol or mint.",
