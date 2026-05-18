@@ -958,6 +958,24 @@ describe("Issuance Routes", () => {
       expect(body.data[0].transaction.id).toBe("ttx_explicit_wallet_bound");
     });
 
+    it("returns 404 when the requested wallet does not exist", async () => {
+      const res = await app.request(
+        "/v1/issuance/transactions?walletId=wal_missing_issuance_transactions&type=burn",
+        {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+        },
+        env
+      );
+
+      expect(res.status).toBe(404);
+      const body = await res.json();
+      expect(body.error.code).toBe("NOT_FOUND");
+      expect(body.error.message).toBe("Wallet not found");
+    });
+
     it("enforces wallet-level tokens:read for wallet filters", async () => {
       const wallet = await seedIssuanceActivityWallet();
       await cacheProjectApiKey({
