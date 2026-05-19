@@ -161,7 +161,7 @@ export const createTransferRequestSchema = createTransferSchemaBase
     }),
     token: withOpenApi(createTransferSchemaBase.shape.token, {
       description:
-        "Token mint address. Use `SOL` for the native token; SPL tokens must be specified by their on-chain mint (symbols are not resolved at request time).",
+        "Token mint address. For the native token, pass `SOL` (recommended) or the canonical SOL mint `So11111111111111111111111111111111111111112` — the server normalizes both to `SOL`. SPL tokens must be specified by their on-chain mint (symbols are not resolved at request time).",
       example: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
     }),
     amount: withOpenApi(createTransferSchemaBase.shape.amount, {
@@ -211,7 +211,7 @@ export const prepareTransferRequestSchema = prepareTransferSchemaBase
     }),
     token: withOpenApi(prepareTransferSchemaBase.shape.token, {
       description:
-        "Token mint address. Use `SOL` for the native token; SPL tokens must be specified by their on-chain mint (symbols are not resolved at request time).",
+        "Token mint address. For the native token, pass `SOL` (recommended) or the canonical SOL mint `So11111111111111111111111111111111111111112` — the server normalizes both to `SOL`. SPL tokens must be specified by their on-chain mint (symbols are not resolved at request time).",
       example: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
     }),
     amount: withOpenApi(prepareTransferSchemaBase.shape.amount, {

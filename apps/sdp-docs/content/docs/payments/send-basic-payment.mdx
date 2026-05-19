@@ -11,7 +11,7 @@ Transfers are available through the Payments dashboard and the API.
 
 - A deployed token with minted supply
 - A custody wallet to use as the `source`. Execute mode additionally requires the wallet to have a custody signer configured so SDP can sign and submit; Prepare mode doesn't (you'll sign client-side).
-- An API key with both `payments:write` and `wallets:read` permissions on the source wallet — both endpoints (`POST /v1/payments/transfers` and `POST /v1/payments/transfers/prepare`) are gated by that pair.
+- An API key with both `payments:write` and `wallets:read` permissions, where the key's `payments:write` scope includes the source wallet — both endpoints (`POST /v1/payments/transfers` and `POST /v1/payments/transfers/prepare`) are gated by that pair at the route layer, and the source wallet is then re-checked against the key's `payments:write` wallet scope.
 
 ## Execute mode
 

@@ -50,7 +50,7 @@ const { data, meta } = await res.json();
 Two natural dedup keys:
 
 1. **`Transfer.id`** — SDP-internal, immutable, present on every transfer (including `pending` ones with no signature yet). Use this as your local primary key.
-2. **`Transfer.signature`** — the on-chain signature, populated from `processing` onwards. **`UNIQUE` across SDP's transfers table.** Two records cannot share a signature. Use this if you need to dedupe across multiple data sources (SDP + a parallel chain indexer, say).
+2. **`Transfer.signature`** — the on-chain signature, populated once the transaction has been built and observed on-chain (typically at `confirmed`/`finalized`, but treat its presence rather than the status enum as the trigger — `processing` and even `pending` records can still have a null signature). **`UNIQUE` across SDP's transfers table** wherever it is set; two records cannot share a signature. Use this if you need to dedupe across multiple data sources (SDP + a parallel chain indexer, say) — only once `signature` is present.
 
 In practice: store transfers in your reconciliation table keyed by SDP `Transfer.id`, and assert `signature` uniqueness once it is populated.
 
@@ -104,7 +104,7 @@ async function reconcileTick(state: WorkerState) {
     if (await alreadySeen(tr.id)) continue;
 
     // Match by destination — the on-record correlation key for inbound transfers.
-    // `tr.memo` is null for customer-initiated inbound payments.
+    // `tr.memo` is omitted (undefined) for customer-initiated inbound payments.
     const order = await findOrderByDestination(tr.destination);
     if (!order) {
       await persistUnmatched(tr);

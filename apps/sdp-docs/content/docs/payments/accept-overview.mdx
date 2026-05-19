@@ -28,7 +28,7 @@ There are two ways customers can land a payment on the address you control:
 - **Indexed inbound transfers** — `GET /v1/payments/transfers?direction=inbound` returns all received transfers across your custody wallets, with filters for token, status, wallet, and date range. See [Indexing and reconciliation](/docs/payments/accept-indexing).
 - **Per-transfer status reads** — `GET /v1/payments/transfers/{id}` for a single payment's lifecycle. See [Verifying a payment](/docs/payments/accept-verification).
 - **Wallet balances** — `GET /v1/payments/wallets/{walletId}/balances` for the current per-token balance on a receiving wallet. See [Wallet balances](/docs/payments/wallet-balances).
-- **Address-based correlation** — the inbound transfer's `destination` is the on-record correlation key for accept flows. Pair with per-order receiving addresses (see above) to map inbound transfers to orders without depending on memo. `Transfer.memo` is populated only for SDP-initiated transfers (outbound or internal); customer-initiated inbound transfers have `memo: null`. Read the on-chain transaction via Solana RPC if you need memo or Solana Pay reference correlation.
+- **Address-based correlation** — the inbound transfer's `destination` is the on-record correlation key for accept flows. Pair with per-order receiving addresses (see above) to map inbound transfers to orders without depending on memo. `Transfer.memo` is populated only for SDP-initiated transfers (outbound or internal); for customer-initiated inbound transfers the field is **omitted** from the response (it's optional in the schema, not nullable). Read the on-chain transaction via Solana RPC if you need memo or Solana Pay reference correlation.
 
 ## What SDP does not give you yet
 
