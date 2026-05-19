@@ -828,7 +828,7 @@ async function buildSignedMoonPayWidgetUrl(
 }
 
 const bvnkRampProvider: RampProviderExecutor = {
-  async executeOnramp(c, _scope, input) {
+  async executeOnramp(c, scope, input) {
     const customerId = input.kycReference?.trim();
     if (!customerId) {
       throw new AppError(
@@ -961,7 +961,7 @@ const bvnkRampProvider: RampProviderExecutor = {
 };
 
 const moonPayRampProvider: RampProviderExecutor = {
-  async executeOnramp(c, _scope, input) {
+  async executeOnramp(c, scope, input) {
     const destinationWalletAddress = resolveWalletAddress(
       scope.wallets,
       input.destinationWallet,

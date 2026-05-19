@@ -1,7 +1,7 @@
 "use client";
 
-import type { SdpEnvironment } from "@sdp/types";
 import { useAuth } from "@clerk/nextjs";
+import type { SdpEnvironment } from "@sdp/types";
 import { useRouter } from "next/navigation";
 import {
   createContext,
@@ -112,7 +112,7 @@ export function DashboardWorkspaceProvider({
   );
   const serverDashboardCacheScopeKey = useMemo(
     () => getDashboardCacheScopeKey(serverDashboardCacheScope),
-    [serverDashboardCacheScope.orgId, serverDashboardCacheScope.userId]
+    [serverDashboardCacheScope]
   );
   const dashboardScopeIsFresh = liveDashboardCacheScopeKey === serverDashboardCacheScopeKey;
   const shouldRenderScopeRefreshFallback = auth.isLoaded && !dashboardScopeIsFresh;
