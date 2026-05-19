@@ -18,6 +18,7 @@
     "guides/prepare-vs-execute",
     "reference/issuance-token-types",
     "---Tutorials---",
+    "tutorials/issue-a-regulated-stablecoin",
     "tutorials/end-to-end-payment-flow",
     "---Integrations---",
     "reference/provider-onboarding",
