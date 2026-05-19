@@ -3,10 +3,12 @@
  */
 
 import * as MosaicSdk from "@solana/mosaic-sdk";
+import { findAssociatedTokenPda, TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
 import { hashString } from "@/lib/hash";
+import type { Address } from "@/lib/solana";
 import * as AuthorityResolution from "@/routes/issuance/handlers/authority-resolution";
 import { createKVStoreSet } from "@/runtime/factory";
 import { MosaicService } from "@/services/mosaic";
@@ -26,6 +28,180 @@ import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
 
 // Check if running in mock mode (no RPC access)
 const isMockMode = (env as { SOLANA_MOCK?: string }).SOLANA_MOCK === "true";
+
+async function seedIssuedToken(
+  overrides: Partial<typeof TEST_ACTIVE_TOKEN> = {}
+): Promise<typeof TEST_ACTIVE_TOKEN> {
+  const token = {
+    ...TEST_ACTIVE_TOKEN,
+    ...overrides,
+  };
+
+  await getDb(env)
+    .prepare(
+      `INSERT INTO issued_tokens (
+        id, project_id, organization_id, signing_wallet_id, mint_address, mint_authority,
+        metadata_authority, freeze_authority, abl_list_address, name, symbol, decimals,
+        description, uri, image_url, template, total_supply_cached, total_supply_updated_at,
+        max_supply, is_mintable, freeze_authority_enabled, allowlist_enabled, status,
+        deployed_at, created_by, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .bind(
+      token.id,
+      token.projectId,
+      token.organizationId,
+      token.signingWalletId,
+      token.mintAddress,
+      token.mintAuthority,
+      token.metadataAuthority ?? null,
+      token.freezeAuthority,
+      token.ablListAddress,
+      token.name,
+      token.symbol,
+      token.decimals,
+      token.description,
+      token.uri,
+      token.imageUrl,
+      token.template,
+      "0",
+      token.totalSupplyUpdatedAt ?? token.updatedAt,
+      null,
+      token.isMintable ? 1 : 0,
+      token.isFreezable ? 1 : 0,
+      token.requiresAllowlist ? 1 : 0,
+      token.status,
+      token.deployedAt,
+      token.createdBy,
+      token.createdAt,
+      token.updatedAt
+    )
+    .run();
+
+  return token;
+}
+
+async function seedIssuanceTransaction(input: {
+  id: string;
+  tokenId?: string;
+  organizationId?: string;
+  type: string;
+  status?: string;
+  params: Record<string, unknown>;
+  createdAt?: string;
+}) {
+  const createdAt = input.createdAt ?? "2024-01-03T00:00:00.000Z";
+
+  await getDb(env)
+    .prepare(
+      `INSERT INTO issuance_transactions (
+        id, token_id, organization_id, type, status, idempotency_key, idempotency_fingerprint,
+        signature, serialized_tx, operation_params, slot, block_time, fee, error,
+        initiated_by_key_id, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .bind(
+      input.id,
+      input.tokenId ?? TEST_ACTIVE_TOKEN.id,
+      input.organizationId ?? TEST_ORG.id,
+      input.type,
+      input.status ?? "confirmed",
+      null,
+      null,
+      null,
+      null,
+      JSON.stringify(input.params),
+      null,
+      null,
+      null,
+      null,
+      TEST_PROJECT_API_KEY.id,
+      createdAt,
+      createdAt
+    )
+    .run();
+}
+
+async function seedOrganization(input: { id: string; name: string; slug: string }) {
+  await getDb(env)
+    .prepare(
+      "INSERT OR REPLACE INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, 'individual', 'active')"
+    )
+    .bind(input.id, input.name, input.slug)
+    .run();
+}
+
+async function seedProject(input: {
+  id: string;
+  organizationId: string;
+  name: string;
+  slug: string;
+}) {
+  await getDb(env)
+    .prepare(
+      `INSERT OR REPLACE INTO projects (id, organization_id, name, slug, environment, status, created_by)
+       VALUES (?, ?, ?, ?, 'sandbox', 'active', ?)`
+    )
+    .bind(input.id, input.organizationId, input.name, input.slug, TEST_USER.id)
+    .run();
+}
+
+function toTestIdPart(value: string): string {
+  return value.replace(/[^A-Za-z0-9_]/g, "_").slice(0, 64);
+}
+
+async function seedIssuanceActivityWallet(
+  walletId = "wal_issuance_activity",
+  publicKey = TEST_SOLANA_ADDRESSES.wallet1
+) {
+  const walletRowId = `cwlt_issuance_activity_${toTestIdPart(walletId)}`;
+
+  await getDb(env).batch([
+    getDb(env)
+      .prepare(
+        `INSERT INTO custody_configs
+           (id, organization_id, project_id, provider, config_encrypted, encryption_version, default_wallet_id, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT DO NOTHING`
+      )
+      .bind(
+        "cust_cfg_issuance_activity",
+        TEST_ORG.id,
+        TEST_PROJECT.id,
+        "local",
+        "test-config",
+        "sdp-custody-encryption-v1",
+        walletId,
+        "active"
+      ),
+    getDb(env)
+      .prepare(
+        `INSERT INTO custody_wallets
+           (id, custody_config_id, wallet_id, public_key, label, purpose, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(
+        walletRowId,
+        "cust_cfg_issuance_activity",
+        walletId,
+        publicKey,
+        "Issuance Activity Wallet",
+        "transfer",
+        "active"
+      ),
+  ]);
+
+  return { walletId, publicKey };
+}
+
+async function deriveAssociatedTokenAccount(owner: string, mint: string): Promise<string> {
+  const [tokenAccount] = await findAssociatedTokenPda({
+    owner: owner as Address,
+    mint: mint as Address,
+    tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
+  });
+  return tokenAccount;
+}
 
 describe("Issuance Routes", () => {
   let apiKeyHash: string;
@@ -148,6 +324,706 @@ describe("Issuance Routes", () => {
 
     // Cache API key in KV
     await kv.apiKeys.put(`key:${apiKeyHash}`, JSON.stringify(TEST_PROJECT_CACHED_KEY));
+  });
+
+  describe("GET /v1/issuance/transactions", () => {
+    async function cacheProjectApiKey(overrides: Record<string, unknown>) {
+      const apiKeysKV = (env as { SDP_API_KEYS: KVNamespace }).SDP_API_KEYS;
+      await apiKeysKV.put(
+        `key:${apiKeyHash}`,
+        JSON.stringify({
+          ...TEST_PROJECT_CACHED_KEY,
+          ...overrides,
+        })
+      );
+    }
+
+    it("returns matching wallet transactions across all types when type is omitted", async () => {
+      const token = await seedIssuedToken();
+      const wallet = await seedIssuanceActivityWallet();
+      const tokenAccount = await deriveAssociatedTokenAccount(
+        wallet.publicKey,
+        token.mintAddress ?? TEST_SOLANA_ADDRESSES.mint
+      );
+
+      await seedIssuanceTransaction({
+        id: "ttx_wallet_mint",
+        type: "mint",
+        params: { destination: wallet.publicKey, amount: "12" },
+        createdAt: "2024-01-05T00:00:00.000Z",
+      });
+      await seedIssuanceTransaction({
+        id: "ttx_wallet_burn_ata",
+        type: "burn",
+        params: { source: tokenAccount, amount: "2" },
+        createdAt: "2024-01-04T00:00:00.000Z",
+      });
+      await seedIssuanceTransaction({
+        id: "ttx_wallet_force_burn",
+        type: "force_burn",
+        params: { source: wallet.publicKey, amount: "1" },
+        createdAt: "2024-01-03T00:00:00.000Z",
+      });
+      await seedIssuanceTransaction({
+        id: "ttx_wallet_update_authority",
+        type: "update_authority",
+        params: {
+          role: "mint",
+          currentAuthority: wallet.publicKey,
+          newAuthority: TEST_SOLANA_ADDRESSES.wallet3,
+        },
+        createdAt: "2024-01-02T00:00:00.000Z",
+      });
+      await seedIssuanceTransaction({
+        id: "ttx_unrelated_burn",
+        type: "burn",
+        params: { source: TEST_SOLANA_ADDRESSES.wallet2, amount: "1" },
+        createdAt: "2024-01-06T00:00:00.000Z",
+      });
+
+      const res = await app.request(
+        `/v1/issuance/transactions?walletId=${wallet.walletId}&page=1&pageSize=10`,
+        {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+        },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.meta.total).toBe(4);
+      const transactionIds = body.data.map(
+        (entry: { transaction: { id: string } }) => entry.transaction.id
+      );
+      expect(transactionIds).toEqual([
+        "ttx_wallet_mint",
+        "ttx_wallet_burn_ata",
+        "ttx_wallet_force_burn",
+        "ttx_wallet_update_authority",
+      ]);
+      expect(body.data[0].token).toMatchObject({
+        id: token.id,
+        symbol: token.symbol,
+        mintAddress: token.mintAddress,
+      });
+    });
+
+    it("scopes omitted wallet filters to all token-readable selected-wallet bindings", async () => {
+      const token = await seedIssuedToken();
+      const walletA = await seedIssuanceActivityWallet(
+        "wal_selected_tokens_a",
+        TEST_SOLANA_ADDRESSES.wallet1
+      );
+      const walletB = await seedIssuanceActivityWallet(
+        "wal_selected_tokens_b",
+        TEST_SOLANA_ADDRESSES.wallet2
+      );
+      const walletC = await seedIssuanceActivityWallet(
+        "wal_selected_tokens_c",
+        TEST_SOLANA_ADDRESSES.wallet3
+      );
+      const walletATokenAccount = await deriveAssociatedTokenAccount(
+        walletA.publicKey,
+        token.mintAddress ?? TEST_SOLANA_ADDRESSES.mint
+      );
+
+      await seedIssuanceTransaction({
+        id: "ttx_selected_wallet_a",
+        type: "burn",
+        params: { source: walletATokenAccount, amount: "1" },
+        createdAt: "2024-01-05T00:00:00.000Z",
+      });
+      await seedIssuanceTransaction({
+        id: "ttx_selected_wallet_b",
+        type: "burn",
+        params: { source: walletB.publicKey, amount: "2" },
+        createdAt: "2024-01-04T00:00:00.000Z",
+      });
+      await seedIssuanceTransaction({
+        id: "ttx_selected_wallet_c",
+        type: "burn",
+        params: { source: walletC.publicKey, amount: "3" },
+        createdAt: "2024-01-06T00:00:00.000Z",
+      });
+      await cacheProjectApiKey({
+        permissions: ["tokens:read"],
+        walletBindings: [
+          { walletId: walletA.walletId, permissions: ["tokens:read"] },
+          { walletId: walletB.walletId, permissions: ["tokens:read"] },
+        ],
+      });
+
+      const res = await app.request(
+        "/v1/issuance/transactions?type=burn&page=1&pageSize=10",
+        {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+        },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.meta.total).toBe(2);
+      expect(
+        body.data.map((entry: { transaction: { id: string } }) => entry.transaction.id)
+      ).toEqual(["ttx_selected_wallet_a", "ttx_selected_wallet_b"]);
+    });
+
+    it("omits selected-wallet bindings that lack wallet-level tokens:read", async () => {
+      await seedIssuedToken();
+      const walletA = await seedIssuanceActivityWallet(
+        "wal_mixed_tokens_a",
+        TEST_SOLANA_ADDRESSES.wallet1
+      );
+      const walletB = await seedIssuanceActivityWallet(
+        "wal_mixed_tokens_b",
+        TEST_SOLANA_ADDRESSES.wallet2
+      );
+
+      await seedIssuanceTransaction({
+        id: "ttx_mixed_tokens_read",
+        type: "burn",
+        params: { source: walletA.publicKey, amount: "1" },
+        createdAt: "2024-01-05T00:00:00.000Z",
+      });
+      await seedIssuanceTransaction({
+        id: "ttx_mixed_payments_only",
+        type: "burn",
+        params: { source: walletB.publicKey, amount: "2" },
+        createdAt: "2024-01-06T00:00:00.000Z",
+      });
+      await cacheProjectApiKey({
+        permissions: ["tokens:read"],
+        walletBindings: [
+          { walletId: walletA.walletId, permissions: ["tokens:read"] },
+          { walletId: walletB.walletId, permissions: ["payments:read"] },
+        ],
+      });
+
+      const res = await app.request(
+        "/v1/issuance/transactions?type=burn&page=1&pageSize=10",
+        {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+        },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.meta.total).toBe(1);
+      expect(body.data[0].transaction.id).toBe("ttx_mixed_tokens_read");
+    });
+
+    it("returns an empty page for selected-wallet keys with no token-readable bindings", async () => {
+      await seedIssuedToken();
+      const wallet = await seedIssuanceActivityWallet();
+      await seedIssuanceTransaction({
+        id: "ttx_no_token_binding",
+        type: "burn",
+        params: { source: wallet.publicKey, amount: "1" },
+      });
+      await cacheProjectApiKey({
+        permissions: ["tokens:read"],
+        walletBindings: [{ walletId: wallet.walletId, permissions: ["payments:read"] }],
+      });
+
+      const res = await app.request(
+        "/v1/issuance/transactions?type=burn&page=1&pageSize=10",
+        {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+        },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.meta.total).toBe(0);
+      expect(body.data).toEqual([]);
+    });
+
+    it("keeps unrestricted project keys org/project scoped when walletId is omitted", async () => {
+      const token = await seedIssuedToken();
+      await seedOrganization({
+        id: "org_issuance_other",
+        name: "Other Org",
+        slug: "issuance-other-org",
+      });
+      await seedProject({
+        id: "prj_issuance_other_project",
+        organizationId: TEST_ORG.id,
+        name: "Other Project",
+        slug: "issuance-other-project",
+      });
+      await seedProject({
+        id: "prj_issuance_other_org",
+        organizationId: "org_issuance_other",
+        name: "Other Org Project",
+        slug: "issuance-other-org-project",
+      });
+      const sameOrgOtherProjectToken = await seedIssuedToken({
+        id: "tok_other_project_transactions",
+        projectId: "prj_issuance_other_project",
+        mintAddress: null,
+      });
+      const otherOrgToken = await seedIssuedToken({
+        id: "tok_other_org_transactions",
+        organizationId: "org_issuance_other",
+        projectId: "prj_issuance_other_org",
+        mintAddress: null,
+      });
+
+      await seedIssuanceTransaction({
+        id: "ttx_current_project",
+        tokenId: token.id,
+        type: "burn",
+        params: { source: TEST_SOLANA_ADDRESSES.wallet1, amount: "1" },
+        createdAt: "2024-01-05T00:00:00.000Z",
+      });
+      await seedIssuanceTransaction({
+        id: "ttx_same_org_other_project",
+        tokenId: sameOrgOtherProjectToken.id,
+        type: "burn",
+        params: { source: TEST_SOLANA_ADDRESSES.wallet1, amount: "2" },
+        createdAt: "2024-01-06T00:00:00.000Z",
+      });
+      await seedIssuanceTransaction({
+        id: "ttx_other_org",
+        tokenId: otherOrgToken.id,
+        organizationId: "org_issuance_other",
+        type: "burn",
+        params: { source: TEST_SOLANA_ADDRESSES.wallet1, amount: "3" },
+        createdAt: "2024-01-07T00:00:00.000Z",
+      });
+
+      const res = await app.request(
+        "/v1/issuance/transactions?type=burn&page=1&pageSize=10",
+        {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+        },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.meta.total).toBe(1);
+      expect(body.data[0].transaction.id).toBe("ttx_current_project");
+    });
+
+    it("does not match force-burn rows by delegate authority", async () => {
+      const token = await seedIssuedToken();
+      const authorityWallet = await seedIssuanceActivityWallet(
+        "wal_force_burn_authority",
+        TEST_SOLANA_ADDRESSES.wallet1
+      );
+      const sourceWallet = await seedIssuanceActivityWallet(
+        "wal_force_burn_source",
+        TEST_SOLANA_ADDRESSES.wallet2
+      );
+      const sourceTokenAccount = await deriveAssociatedTokenAccount(
+        sourceWallet.publicKey,
+        token.mintAddress ?? TEST_SOLANA_ADDRESSES.mint
+      );
+
+      await seedIssuanceTransaction({
+        id: "ttx_delegate_authority_force_burn",
+        type: "force_burn",
+        params: {
+          source: sourceTokenAccount,
+          amount: "1",
+          delegateAuthority: authorityWallet.publicKey,
+        },
+      });
+
+      const authorityRes = await app.request(
+        `/v1/issuance/transactions?walletId=${authorityWallet.walletId}&type=force_burn&page=1&pageSize=10`,
+        {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+        },
+        env
+      );
+
+      expect(authorityRes.status).toBe(200);
+      const authorityBody = await authorityRes.json();
+      expect(authorityBody.meta.total).toBe(0);
+      expect(authorityBody.data).toEqual([]);
+
+      const sourceRes = await app.request(
+        `/v1/issuance/transactions?walletId=${sourceWallet.walletId}&type=force_burn&page=1&pageSize=10`,
+        {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+        },
+        env
+      );
+
+      expect(sourceRes.status).toBe(200);
+      const sourceBody = await sourceRes.json();
+      expect(sourceBody.meta.total).toBe(1);
+      expect(sourceBody.data[0].transaction.id).toBe("ttx_delegate_authority_force_burn");
+    });
+
+    it("does not duplicate wallet-filtered transactions when multiple token accounts match one row", async () => {
+      const token = await seedIssuedToken();
+      const tokenAccountA = await deriveAssociatedTokenAccount(
+        TEST_SOLANA_ADDRESSES.wallet1,
+        token.mintAddress ?? TEST_SOLANA_ADDRESSES.mint
+      );
+      const tokenAccountB = await deriveAssociatedTokenAccount(
+        TEST_SOLANA_ADDRESSES.wallet2,
+        token.mintAddress ?? TEST_SOLANA_ADDRESSES.mint
+      );
+
+      await seedIssuanceTransaction({
+        id: "ttx_multi_token_account_match",
+        type: "seize",
+        params: {
+          source: tokenAccountA,
+          destination: tokenAccountB,
+          amount: "1",
+        },
+      });
+
+      const service = new TokenService(getDb(env));
+      const result = await service.listTransactions({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        types: ["seize"],
+        walletScope: {
+          publicKeys: [TEST_SOLANA_ADDRESSES.wallet1],
+          tokenAccounts: [
+            { tokenId: token.id, tokenAccount: tokenAccountA },
+            { tokenId: token.id, tokenAccount: tokenAccountB },
+          ],
+        },
+      });
+
+      expect(result.total).toBe(1);
+      expect(result.transactions.map((entry) => entry.transaction.id)).toEqual([
+        "ttx_multi_token_account_match",
+      ]);
+    });
+
+    it("paginates wallet-filtered transactions with stable totals and no duplicate rows", async () => {
+      await seedIssuedToken();
+      const wallet = await seedIssuanceActivityWallet();
+
+      for (let index = 1; index <= 12; index += 1) {
+        await seedIssuanceTransaction({
+          id: `ttx_wallet_page_${index.toString().padStart(2, "0")}`,
+          type: "burn",
+          params: { source: wallet.publicKey, amount: String(index) },
+          createdAt: `2024-01-${index.toString().padStart(2, "0")}T00:00:00.000Z`,
+        });
+      }
+
+      const fetchPage = async (page: number) => {
+        const res = await app.request(
+          `/v1/issuance/transactions?walletId=${wallet.walletId}&type=burn&page=${page}&pageSize=5`,
+          {
+            method: "GET",
+            headers: {
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+            },
+          },
+          env
+        );
+        expect(res.status).toBe(200);
+        return res.json();
+      };
+
+      const [pageOne, pageTwo, pageThree] = await Promise.all([
+        fetchPage(1),
+        fetchPage(2),
+        fetchPage(3),
+      ]);
+      expect([pageOne.meta.total, pageTwo.meta.total, pageThree.meta.total]).toEqual([12, 12, 12]);
+
+      const transactionIds = [pageOne, pageTwo, pageThree].flatMap((body) =>
+        body.data.map((entry: { transaction: { id: string } }) => entry.transaction.id)
+      );
+      expect(transactionIds).toEqual([
+        "ttx_wallet_page_12",
+        "ttx_wallet_page_11",
+        "ttx_wallet_page_10",
+        "ttx_wallet_page_09",
+        "ttx_wallet_page_08",
+        "ttx_wallet_page_07",
+        "ttx_wallet_page_06",
+        "ttx_wallet_page_05",
+        "ttx_wallet_page_04",
+        "ttx_wallet_page_03",
+        "ttx_wallet_page_02",
+        "ttx_wallet_page_01",
+      ]);
+      expect(new Set(transactionIds).size).toBe(12);
+    });
+
+    it("uses transaction id as a deterministic pagination tiebreaker", async () => {
+      await seedIssuedToken();
+      const wallet = await seedIssuanceActivityWallet();
+
+      for (let index = 1; index <= 7; index += 1) {
+        await seedIssuanceTransaction({
+          id: `ttx_same_time_${index.toString().padStart(2, "0")}`,
+          type: "burn",
+          params: { source: wallet.publicKey, amount: String(index) },
+          createdAt: "2024-01-01T00:00:00.000Z",
+        });
+      }
+
+      const fetchPage = async (page: number) => {
+        const res = await app.request(
+          `/v1/issuance/transactions?walletId=${wallet.walletId}&type=burn&page=${page}&pageSize=3`,
+          {
+            method: "GET",
+            headers: {
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+            },
+          },
+          env
+        );
+        expect(res.status).toBe(200);
+        return res.json();
+      };
+
+      const [pageOne, pageTwo, pageThree] = await Promise.all([
+        fetchPage(1),
+        fetchPage(2),
+        fetchPage(3),
+      ]);
+      expect([pageOne.meta.total, pageTwo.meta.total, pageThree.meta.total]).toEqual([7, 7, 7]);
+
+      const transactionIds = [pageOne, pageTwo, pageThree].flatMap((body) =>
+        body.data.map((entry: { transaction: { id: string } }) => entry.transaction.id)
+      );
+      expect(transactionIds).toEqual([
+        "ttx_same_time_07",
+        "ttx_same_time_06",
+        "ttx_same_time_05",
+        "ttx_same_time_04",
+        "ttx_same_time_03",
+        "ttx_same_time_02",
+        "ttx_same_time_01",
+      ]);
+      expect(new Set(transactionIds).size).toBe(7);
+    });
+
+    it("matches wallet public keys when no token-account candidates are derived", async () => {
+      const token = await seedIssuedToken({
+        id: "tok_no_mint_candidates",
+        mintAddress: null,
+      });
+      const wallet = await seedIssuanceActivityWallet();
+
+      await seedIssuanceTransaction({
+        id: "ttx_public_key_only_force_burn",
+        tokenId: token.id,
+        type: "force_burn",
+        params: { source: wallet.publicKey, amount: "1" },
+      });
+
+      const res = await app.request(
+        `/v1/issuance/transactions?walletId=${wallet.walletId}&type=force_burn&page=1&pageSize=10`,
+        {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+        },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.meta.total).toBe(1);
+      expect(body.data[0].transaction.id).toBe("ttx_public_key_only_force_burn");
+    });
+
+    it("supports repeated type filters with status", async () => {
+      const token = await seedIssuedToken();
+      await seedIssuanceTransaction({
+        id: "ttx_filter_burn",
+        type: "burn",
+        status: "confirmed",
+        params: { source: TEST_SOLANA_ADDRESSES.wallet1, amount: "1" },
+        createdAt: "2024-01-05T00:00:00.000Z",
+      });
+      await seedIssuanceTransaction({
+        id: "ttx_filter_force_burn",
+        type: "force_burn",
+        status: "confirmed",
+        params: { source: TEST_SOLANA_ADDRESSES.wallet1, amount: "1" },
+        createdAt: "2024-01-04T00:00:00.000Z",
+      });
+      await seedIssuanceTransaction({
+        id: "ttx_filter_pending_force_burn",
+        type: "force_burn",
+        status: "pending",
+        params: { source: TEST_SOLANA_ADDRESSES.wallet1, amount: "1" },
+        createdAt: "2024-01-06T00:00:00.000Z",
+      });
+      await seedIssuanceTransaction({
+        id: "ttx_filter_mint",
+        type: "mint",
+        status: "confirmed",
+        params: { destination: TEST_SOLANA_ADDRESSES.wallet1, amount: "1" },
+        createdAt: "2024-01-07T00:00:00.000Z",
+      });
+
+      const res = await app.request(
+        "/v1/issuance/transactions?type=burn&type=force_burn&status=confirmed&page=1&pageSize=10",
+        {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+        },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.meta.total).toBe(2);
+      const transactionIds = body.data.map(
+        (entry: { transaction: { id: string } }) => entry.transaction.id
+      );
+      expect(transactionIds).toEqual(["ttx_filter_burn", "ttx_filter_force_burn"]);
+      expect(body.data[0].token.id).toBe(token.id);
+    });
+
+    it("returns 400 for invalid transaction type filters", async () => {
+      const res = await app.request(
+        "/v1/issuance/transactions?type=burn&type=unknown",
+        {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+        },
+        env
+      );
+
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error.message).toBe("Invalid type query parameter");
+    });
+
+    it("allows explicit wallet filters for selected-wallet keys with wallet-level tokens:read", async () => {
+      await seedIssuedToken();
+      const wallet = await seedIssuanceActivityWallet();
+      await seedIssuanceTransaction({
+        id: "ttx_explicit_wallet_bound",
+        type: "burn",
+        params: { source: wallet.publicKey, amount: "1" },
+      });
+      await cacheProjectApiKey({
+        permissions: ["tokens:read"],
+        walletBindings: [{ walletId: wallet.walletId, permissions: ["tokens:read"] }],
+      });
+
+      const res = await app.request(
+        `/v1/issuance/transactions?walletId=${wallet.walletId}&type=burn&page=1&pageSize=10`,
+        {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+        },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.meta.total).toBe(1);
+      expect(body.data[0].transaction.id).toBe("ttx_explicit_wallet_bound");
+    });
+
+    it("returns 404 when the requested wallet does not exist", async () => {
+      const res = await app.request(
+        "/v1/issuance/transactions?walletId=wal_missing_issuance_transactions&type=burn",
+        {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+        },
+        env
+      );
+
+      expect(res.status).toBe(404);
+      const body = await res.json();
+      expect(body.error.code).toBe("NOT_FOUND");
+      expect(body.error.message).toBe("Wallet not found");
+    });
+
+    it("enforces wallet-level tokens:read for wallet filters", async () => {
+      const wallet = await seedIssuanceActivityWallet();
+      await cacheProjectApiKey({
+        permissions: ["tokens:read"],
+        walletBindings: [{ walletId: wallet.walletId, permissions: ["payments:read"] }],
+      });
+
+      const res = await app.request(
+        `/v1/issuance/transactions?walletId=${wallet.walletId}&type=burn`,
+        {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+        },
+        env
+      );
+
+      expect(res.status).toBe(403);
+    });
+
+    it("rejects explicit wallet filters for unbound selected-wallet keys", async () => {
+      const boundWallet = await seedIssuanceActivityWallet(
+        "wal_bound_tokens_read",
+        TEST_SOLANA_ADDRESSES.wallet1
+      );
+      const requestedWallet = await seedIssuanceActivityWallet(
+        "wal_unbound_tokens_read",
+        TEST_SOLANA_ADDRESSES.wallet2
+      );
+      await cacheProjectApiKey({
+        permissions: ["tokens:read"],
+        walletBindings: [{ walletId: boundWallet.walletId, permissions: ["tokens:read"] }],
+      });
+
+      const res = await app.request(
+        `/v1/issuance/transactions?walletId=${requestedWallet.walletId}&type=burn`,
+        {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+        },
+        env
+      );
+
+      expect(res.status).toBe(403);
+    });
   });
 
   // ═══════════════════════════════════════════════════════════════════════════

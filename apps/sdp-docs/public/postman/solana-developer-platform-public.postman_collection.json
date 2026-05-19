@@ -639,6 +639,15 @@
           }
         },
         {
+          "name": "List issuance transactions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/issuance/transactions",
+            "description": "Lists issuance transactions across tokens for the current organization or project. Selected-wallet API keys are scoped to their token-readable wallet bindings when walletId is omitted. Use repeated type query parameters, for example type=burn&type=force_burn, to request multiple transaction types."
+          }
+        },
+        {
           "name": "Get token",
           "request": {
             "method": "GET",

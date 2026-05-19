@@ -1,4 +1,5 @@
 import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
+import { TOKEN_TRANSACTION_TYPES } from "@sdp/types";
 import { z } from "zod";
 
 import {
@@ -22,6 +23,7 @@ import {
   unfreezeAccountRequestSchema,
   updateAuthorityRequestSchema,
   updateTokenRequestSchema,
+  walletIdParamSchema,
 } from "../schemas";
 import { errorResponses, jsonContent } from "./helpers";
 import {
@@ -34,6 +36,7 @@ import {
   executeUpdateAuthorityResponse,
   frozenAccountListResponse,
   frozenAccountResponse,
+  issuanceTransactionsResponse,
   listTemplatesResponse,
   prepareBurnResponse,
   prepareDeployResponse,
@@ -48,6 +51,10 @@ import {
   tokenTemplateResponse,
   tokenTransactionsResponse,
 } from "./responses";
+
+const tokenTransactionTypeQuerySchema = z
+  .enum(TOKEN_TRANSACTION_TYPES)
+  .openapi({ description: "Filter by token transaction type.", example: "burn" });
 
 export function registerIssuancePaths(registry: OpenAPIRegistry) {
   // ═══════════════════════════════════════════════════════════════════════════
@@ -143,6 +150,43 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
         content: jsonContent(tokenListResponse),
       },
       ...errorResponses(errorResponseSchema, [401, 403, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/issuance/transactions",
+    tags: ["Issuance"],
+    summary: "List issuance transactions",
+    operationId: "listIssuanceTransactions",
+    description:
+      "Lists issuance transactions across tokens for the current organization or project. Selected-wallet API keys are scoped to their token-readable wallet bindings when walletId is omitted. Use repeated type query parameters, for example type=burn&type=force_burn, to request multiple transaction types.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      query: z.object({
+        walletId: walletIdParamSchema.optional().openapi({
+          description:
+            "Filter to transactions associated with a wallet. Selected-wallet API keys must have wallet-level tokens:read for the requested wallet.",
+        }),
+        type: z
+          .array(tokenTransactionTypeQuerySchema)
+          .optional()
+          .openapi({
+            description:
+              "Filter by transaction type. Repeat this query parameter for multiple values, for example type=burn&type=force_burn.",
+            example: ["burn", "force_burn"],
+          }),
+        status: tokenTransactionStatusQuerySchema.optional(),
+        page: pageQuerySchema.optional(),
+        pageSize: pageSizeQuerySchema.optional(),
+      }),
+    },
+    responses: {
+      200: {
+        description: "Issuance transaction list",
+        content: jsonContent(issuanceTransactionsResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
     },
   });
 

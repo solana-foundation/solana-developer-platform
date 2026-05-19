@@ -1,3 +1,5 @@
+import { TOKEN_TRANSACTION_STATUSES, TOKEN_TRANSACTION_TYPES } from "@sdp/types";
+
 import {
   addAllowlistSchema as addTokenAllowlistSchemaBase,
   burnSchema as burnSchemaBase,
@@ -225,21 +227,10 @@ export const tokenTransactionSchema = z
     tokenId: tokenIdParamSchema,
     organizationId: orgIdParamSchema,
     type: z
-      .enum([
-        "mint",
-        "burn",
-        "freeze",
-        "unfreeze",
-        "seize",
-        "force_burn",
-        "update_authority",
-        "pause",
-        "unpause",
-        "deploy",
-      ])
+      .enum(TOKEN_TRANSACTION_TYPES)
       .openapi({ description: "Transaction type.", example: "mint" }),
     status: z
-      .enum(["pending", "processing", "confirmed", "finalized", "failed"])
+      .enum(TOKEN_TRANSACTION_STATUSES)
       .openapi({ description: "Transaction status.", example: "confirmed" }),
     signature: z
       .string()
@@ -290,6 +281,22 @@ export const tokenTransactionSchema = z
     }),
   })
   .openapi({ description: "Token transaction record." });
+
+export const tokenTransactionListItemSchema = z
+  .object({
+    token: z
+      .object({
+        id: tokenIdParamSchema,
+        name: z.string().openapi({ description: "Token name.", example: "Example Token" }),
+        symbol: z.string().openapi({ description: "Token symbol.", example: "EXM" }),
+        mintAddress: solanaAddressSchema
+          .nullable()
+          .openapi({ description: "Mint address once deployed.", example: null }),
+      })
+      .openapi({ description: "Token metadata for this transaction." }),
+    transaction: tokenTransactionSchema.openapi({ description: "Token transaction record." }),
+  })
+  .openapi({ description: "Cross-token transaction list item." });
 
 export const tokenAllowlistEntrySchema = z
   .object({

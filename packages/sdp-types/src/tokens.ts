@@ -19,24 +19,28 @@
 
 export type TokenStatus = "pending" | "active" | "paused" | "revoked";
 
-export type TokenTransactionType =
-  | "mint"
-  | "burn"
-  | "freeze"
-  | "unfreeze"
-  | "seize"
-  | "force_burn"
-  | "update_authority"
-  | "pause"
-  | "unpause"
-  | "deploy";
+export const TOKEN_TRANSACTION_TYPES = [
+  "mint",
+  "burn",
+  "freeze",
+  "unfreeze",
+  "seize",
+  "force_burn",
+  "update_authority",
+  "pause",
+  "unpause",
+  "deploy",
+] as const;
+export type TokenTransactionType = (typeof TOKEN_TRANSACTION_TYPES)[number];
 
-export type TokenTransactionStatus =
-  | "pending"
-  | "processing"
-  | "confirmed"
-  | "finalized"
-  | "failed";
+export const TOKEN_TRANSACTION_STATUSES = [
+  "pending",
+  "processing",
+  "confirmed",
+  "finalized",
+  "failed",
+] as const;
+export type TokenTransactionStatus = (typeof TOKEN_TRANSACTION_STATUSES)[number];
 
 export type AllowlistEntryStatus = "active" | "revoked";
 
@@ -268,6 +272,16 @@ export interface TokenTransaction {
   initiatedByKeyId: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface TokenTransactionListItem {
+  token: {
+    id: string;
+    name: string;
+    symbol: string;
+    mintAddress: string | null;
+  };
+  transaction: TokenTransaction;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
