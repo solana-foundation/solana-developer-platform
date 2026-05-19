@@ -48,7 +48,7 @@ The payload is wrapped in the standard `data` / `meta` envelope, with the policy
 }
 ```
 
-Amount fields are **UI-unit decimal strings** (`"100.00"` means 100 tokens, regardless of the mint's decimals — matching the transfer-request convention). Today the limit is single-currency per wallet — if you need multi-token limits, partition into separate wallets.
+Amount fields are **UI-unit decimal strings** (`"100.00"` means 100 tokens, regardless of the mint's decimals — matching the transfer-request convention). The configured value is a **single threshold**, but enforcement is **per token**: `maxDailyAmount` sums each token's outbound transfers separately within the day window, so a wallet with `maxDailyAmount: "1000"` can send up to 1000 USDC *and* 1000 SOL in the same UTC day — there is no aggregate cap across mints. If you need different per-token thresholds (e.g., 10,000 USDC daily but 50 SOL daily), partition into separate wallets.
 
 ## Destination allowlist
 
@@ -64,8 +64,8 @@ The allowlist exists to bound risk on automated wallets (a hot wallet that shoul
 
 Two limits, both optional:
 
-- **`maxTransferAmount`** — per-transfer cap. Any single `POST /v1/payments/transfers` exceeding this amount is rejected.
-- **`maxDailyAmount`** — UTC-calendar-day cap. The day window resets at 00:00 UTC; transfers that would push the day's running total past this value are rejected.
+- **`maxTransferAmount`** — per-transfer cap. Any single `POST /v1/payments/transfers` exceeding this amount is rejected. Compared against the request's `amount` directly, so it is naturally per-token.
+- **`maxDailyAmount`** — UTC-calendar-day cap, **enforced per token**. The day window resets at 00:00 UTC; the projected total is the sum of that wallet's outbound transfers for the **same token** in the current day (`pending`/`processing`/`confirmed`/`finalized`) plus the new request's `amount`. Different tokens are summed independently — see the per-token note under [Reading a wallet's policies](#reading-a-wallets-policies).
 
 Set both for defense in depth: a per-transaction cap that catches obvious mistakes, plus a daily cap that bounds blast radius if many small transfers are submitted in a coordinated attack.
 
