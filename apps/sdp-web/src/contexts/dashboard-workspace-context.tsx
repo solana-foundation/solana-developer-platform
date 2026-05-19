@@ -31,11 +31,13 @@ export interface DashboardPlaygroundApiKeyOption {
 type DashboardWorkspaceContextValue = {
   dashboardAccess: DashboardAccess;
   dashboardCacheScope: DashboardCacheScope;
+  isSandbox: boolean;
   isSidebarOpen: boolean;
   selectedProject: string;
   issuanceTab: IssuanceWorkspaceTab;
   playgroundApiKeys: DashboardPlaygroundApiKeyOption[];
   selectedPlaygroundApiKeyId: string | null;
+  setIsSandbox: (value: boolean) => void;
   setPlaygroundApiKeys: (keys: DashboardPlaygroundApiKeyOption[]) => void;
   setSelectedPlaygroundApiKeyId: (id: string | null) => void;
   setSelectedProject: (project: string) => void;
@@ -87,6 +89,7 @@ export function DashboardWorkspaceProvider({
   const router = useRouter();
   const { replaceSearchParams, searchParams } = useDashboardUrlState();
   const [isSidebarOpen, setSidebarOpenState] = useState(initialSidebarOpen);
+  const [isSandbox, setIsSandbox] = useState(true);
   const [selectedProject, setSelectedProject] = useState(defaultProject);
   const [playgroundApiKeys, setPlaygroundApiKeysState] = useState<
     DashboardPlaygroundApiKeyOption[]
@@ -160,11 +163,13 @@ export function DashboardWorkspaceProvider({
     () => ({
       dashboardAccess,
       dashboardCacheScope: liveDashboardCacheScope,
+      isSandbox,
       isSidebarOpen,
       selectedProject,
       issuanceTab,
       playgroundApiKeys,
       selectedPlaygroundApiKeyId,
+      setIsSandbox,
       setPlaygroundApiKeys,
       setSelectedPlaygroundApiKeyId,
       setSelectedProject,
@@ -175,6 +180,7 @@ export function DashboardWorkspaceProvider({
     [
       dashboardAccess,
       liveDashboardCacheScope,
+      isSandbox,
       isSidebarOpen,
       playgroundApiKeys,
       issuanceTab,
