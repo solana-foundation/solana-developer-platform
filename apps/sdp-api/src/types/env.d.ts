@@ -8,7 +8,7 @@
 import type { HyperdriveBinding } from "@/db";
 import type { ClerkJwtPayload } from "@/lib/clerk-token";
 import type { KVStoreSet } from "@/runtime/kv";
-import type { CachedSession, OrganizationRpcProvider, Permission } from "@sdp/types";
+import type { ApiKeyEnvironment, CachedSession, OrganizationRpcProvider, Permission } from "@sdp/types";
 
 export interface Env {
   // Hyperdrive database binding (Cloudflare runtime only)
@@ -193,7 +193,7 @@ declare module "hono" {
       projectId?: string | null;
       role: string;
       permissions: Permission[];
-      environment: string;
+      environment: ApiKeyEnvironment;
       signingWalletId: string | null;
       signingWalletIds?: string[];
       walletBindings?: Array<{

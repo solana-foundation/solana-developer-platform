@@ -16,7 +16,7 @@ const variantClassNames: Record<BadgeVariant, string> = {
   success: "bg-status-success-bg text-status-success-text",
   warning: "bg-status-warning-bg text-status-warning-text",
   danger: "bg-status-error-bg text-status-error-text",
-  info: "bg-[rgba(33,99,182,0.12)] text-[#2163b6]",
+  info: "bg-[var(--sdp-color-info-bg)] text-[color:var(--sdp-color-info-text)]",
 };
 
 function Badge({ className, variant = "default", ...props }: BadgeProps) {

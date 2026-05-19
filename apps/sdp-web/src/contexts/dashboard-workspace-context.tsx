@@ -1,5 +1,6 @@
 "use client";
 
+import type { SdpEnvironment } from "@sdp/types";
 import { useAuth } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
 import {
@@ -31,13 +32,13 @@ export interface DashboardPlaygroundApiKeyOption {
 type DashboardWorkspaceContextValue = {
   dashboardAccess: DashboardAccess;
   dashboardCacheScope: DashboardCacheScope;
-  isSandbox: boolean;
+  sdpEnvironment: SdpEnvironment;
   isSidebarOpen: boolean;
   selectedProject: string;
   issuanceTab: IssuanceWorkspaceTab;
   playgroundApiKeys: DashboardPlaygroundApiKeyOption[];
   selectedPlaygroundApiKeyId: string | null;
-  setIsSandbox: (value: boolean) => void;
+  setSdpEnvironment: (value: SdpEnvironment) => void;
   setPlaygroundApiKeys: (keys: DashboardPlaygroundApiKeyOption[]) => void;
   setSelectedPlaygroundApiKeyId: (id: string | null) => void;
   setSelectedProject: (project: string) => void;
@@ -89,7 +90,7 @@ export function DashboardWorkspaceProvider({
   const router = useRouter();
   const { replaceSearchParams, searchParams } = useDashboardUrlState();
   const [isSidebarOpen, setSidebarOpenState] = useState(initialSidebarOpen);
-  const [isSandbox, setIsSandbox] = useState(true);
+  const [sdpEnvironment, setSdpEnvironment] = useState<SdpEnvironment>("sandbox");
   const [selectedProject, setSelectedProject] = useState(defaultProject);
   const [playgroundApiKeys, setPlaygroundApiKeysState] = useState<
     DashboardPlaygroundApiKeyOption[]
@@ -115,6 +116,9 @@ export function DashboardWorkspaceProvider({
   );
   const dashboardScopeIsFresh = liveDashboardCacheScopeKey === serverDashboardCacheScopeKey;
   const shouldRenderScopeRefreshFallback = auth.isLoaded && !dashboardScopeIsFresh;
+  const swrScopeKey = getDashboardCacheScopeKey(liveDashboardCacheScope, {
+    environment: sdpEnvironment,
+  });
 
   useEffect(() => {
     if (!auth.isLoaded || liveDashboardCacheScopeKey === serverDashboardCacheScopeKey) {
@@ -163,13 +167,13 @@ export function DashboardWorkspaceProvider({
     () => ({
       dashboardAccess,
       dashboardCacheScope: liveDashboardCacheScope,
-      isSandbox,
+      sdpEnvironment,
       isSidebarOpen,
       selectedProject,
       issuanceTab,
       playgroundApiKeys,
       selectedPlaygroundApiKeyId,
-      setIsSandbox,
+      setSdpEnvironment,
       setPlaygroundApiKeys,
       setSelectedPlaygroundApiKeyId,
       setSelectedProject,
@@ -180,7 +184,7 @@ export function DashboardWorkspaceProvider({
     [
       dashboardAccess,
       liveDashboardCacheScope,
-      isSandbox,
+      sdpEnvironment,
       isSidebarOpen,
       playgroundApiKeys,
       issuanceTab,
@@ -195,7 +199,7 @@ export function DashboardWorkspaceProvider({
 
   return (
     <DashboardWorkspaceContext.Provider value={value}>
-      <SWRConfig key={liveDashboardCacheScopeKey} value={DASHBOARD_SCOPED_SWR_CONFIG}>
+      <SWRConfig key={swrScopeKey} value={DASHBOARD_SCOPED_SWR_CONFIG}>
         {shouldRenderScopeRefreshFallback ? <DashboardScopeRefreshFallback /> : children}
       </SWRConfig>
     </DashboardWorkspaceContext.Provider>
