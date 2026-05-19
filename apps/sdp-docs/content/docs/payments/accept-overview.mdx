@@ -32,7 +32,7 @@ There are two ways customers can land a payment on the address you control:
 
 ## What SDP does not give you yet
 
-- **No checkout session / payment intent object** — you do not pre-register an expected payment with the API. Inbound transfers are recognized after the fact, by matching memo / reference / amount.
+- **No checkout session / payment intent object** — you do not pre-register an expected payment with the API. Inbound transfers are recognized after the fact by matching the on-record `destination` (token and amount are available for additional sanity checks). Memo and Solana Pay reference aren't on the transfer record for customer-initiated inbound transfers — see the [correlation caveats](#receiving-address-convention) above; read those from the on-chain transaction via Solana RPC if you need them.
 - **No webhooks on settlement** — status changes are observed by polling `GET /v1/payments/transfers/{id}` or by re-listing with date filters. See the [polling cadence guidance](/docs/payments/accept-verification#polling-cadence).
 - **No hosted Solana Pay URL endpoint** — if you want to ship a Solana Pay URL or QR, build it client-side from the destination address, token mint, amount, and reference pubkey.
 

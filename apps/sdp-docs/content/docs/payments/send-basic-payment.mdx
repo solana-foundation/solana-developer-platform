@@ -141,7 +141,7 @@ See [Prepare vs Execute](/docs/guides/prepare-vs-execute) for guidance on which 
 Unlike the issuance endpoints, payments transfer endpoints do not currently honor an `Idempotency-Key` header — retrying a failed transfer request will produce a new `Transfer` record. To guarantee at-most-once execution from the client side:
 
 1. Persist the SDP `Transfer.id` returned by the first successful response **before** retrying. On retry, skip submission if you already have a transfer ID for that logical payment.
-2. Rely on the on-chain `signature` (UNIQUE across SDP's transfers table) as the cross-source dedup key once the transfer reaches `processing` or beyond.
+2. Rely on the on-chain `signature` (UNIQUE across SDP's transfers table) as the cross-source dedup key **once it is populated** on the record. `signature` is filled in when the transaction is submitted to the network, which can lag behind the initial `processing` status — treat its presence (not the `status` value) as the trigger for signature-based dedup.
 
 See [Payouts and disbursements](/docs/payments/send-payouts#dedup-and-retries) for the same pattern applied to batched outbound flows.
 
