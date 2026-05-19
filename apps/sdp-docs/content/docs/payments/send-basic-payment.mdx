@@ -10,8 +10,8 @@ Transfers are available through the Payments dashboard and the API.
 ## Prerequisites
 
 - A deployed token with minted supply
-- A wallet with signing configured
-- The `payments:write` permission
+- A custody wallet to use as the `source`. Execute mode additionally requires the wallet to have a custody signer configured so SDP can sign and submit; Prepare mode doesn't (you'll sign client-side).
+- An API key with both `payments:write` and `wallets:read` permissions on the source wallet — both endpoints (`POST /v1/payments/transfers` and `POST /v1/payments/transfers/prepare`) are gated by that pair.
 
 ## Execute mode
 
