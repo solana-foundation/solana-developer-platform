@@ -26,7 +26,8 @@
     "test": "vitest run",
     "test:serial": "vitest run --no-file-parallelism --maxWorkers=1",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "test:node": "vitest run --config vitest.node.config.ts"
   },
   "dependencies": {
     "@react-email/components": "1.0.12",
@@ -49,6 +50,7 @@
     "@solana/mosaic-sdk": "catalog:",
     "@solana/signers": "catalog:",
     "hono": "^4.12.16",
+    "ioredis": "^5.4.1",
     "jose": "^6.2.3",
     "nanoid": "^5.1.11",
     "pg": "^8.16.3",
