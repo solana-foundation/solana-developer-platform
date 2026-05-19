@@ -10,9 +10,9 @@
  */
 
 import Redis from "ioredis";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { Env } from "@/types/env";
-import { createRedisKVStoreSet, RedisKVStore } from "./kv-redis";
+import { closeAllRedisClients, createRedisKVStoreSet, RedisKVStore } from "./kv-redis";
 
 const REDIS_URL = process.env.REDIS_URL ?? "redis://127.0.0.1:6379";
 
@@ -111,28 +111,37 @@ describe("RedisKVStore (HOO-510)", () => {
     });
   });
 
-  describe("prefix isolation across the full store set", () => {
-    it("createRedisKVStoreSet wires four prefixed stores from one connection", async () => {
-      const set = createRedisKVStoreSet({ REDIS_URL } as Env);
-      try {
-        await set.apiKeys.put("same-key", "from-apiKeys");
-        await set.rateLimits.put("same-key", "from-rateLimits");
-        await set.cache.put("same-key", "from-cache");
-        await set.sessions.put("same-key", "from-sessions");
-
-        expect(await set.apiKeys.get("same-key")).toBe("from-apiKeys");
-        expect(await set.rateLimits.get("same-key")).toBe("from-rateLimits");
-        expect(await set.cache.get("same-key")).toBe("from-cache");
-        expect(await set.sessions.get("same-key")).toBe("from-sessions");
-      } finally {
-        // The set internally owns a Redis client; close it so vitest exits
-        // cleanly. In production HOO-511 will own this lifecycle.
-        await (set.apiKeys as unknown as { client: Redis }).client.quit();
-      }
-    });
-  });
-
   describe("createRedisKVStoreSet", () => {
+    afterEach(async () => {
+      // Each test in this block uses the factory's cached client; close
+      // between tests so we observe reuse behavior cleanly.
+      await closeAllRedisClients();
+    });
+
+    it("wires four prefixed stores sharing one connection", async () => {
+      const set = createRedisKVStoreSet({ REDIS_URL } as Env);
+      await set.apiKeys.put("same-key", "from-apiKeys");
+      await set.rateLimits.put("same-key", "from-rateLimits");
+      await set.cache.put("same-key", "from-cache");
+      await set.sessions.put("same-key", "from-sessions");
+
+      expect(await set.apiKeys.get("same-key")).toBe("from-apiKeys");
+      expect(await set.rateLimits.get("same-key")).toBe("from-rateLimits");
+      expect(await set.cache.get("same-key")).toBe("from-cache");
+      expect(await set.sessions.get("same-key")).toBe("from-sessions");
+    });
+
+    it("reuses the same Redis client across repeated calls (no connection leak)", () => {
+      // kvStoreMiddleware invokes the factory per-request; if each invocation
+      // opened a new TCP connection, the process would exhaust Redis's
+      // maxclients under load. Pin behavior with reference equality.
+      const set1 = createRedisKVStoreSet({ REDIS_URL } as Env);
+      const set2 = createRedisKVStoreSet({ REDIS_URL } as Env);
+      const client1 = (set1.apiKeys as unknown as { client: Redis }).client;
+      const client2 = (set2.apiKeys as unknown as { client: Redis }).client;
+      expect(client1).toBe(client2);
+    });
+
     it("throws a clear error when REDIS_URL is missing", () => {
       expect(() => createRedisKVStoreSet({} as Env)).toThrow(/REDIS_URL missing/);
     });

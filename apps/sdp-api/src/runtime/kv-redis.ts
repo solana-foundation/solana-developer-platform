@@ -88,13 +88,46 @@ const STORE_PREFIXES = {
   sessions: "sessions",
 } as const;
 
+// kvStoreMiddleware calls createKVStoreSet(c.env) on every authenticated
+// request, so this factory MUST return the same ioredis client across calls
+// for a given URL — otherwise each request opens a fresh TCP connection and
+// nothing ever closes them, exhausting Redis's maxclients under load.
+//
+// Keyed by URL (not just a single `let`) so test runs that point at different
+// instances don't accidentally share a client, and so a previously-quit
+// client (status === "end") is detected and replaced instead of returning a
+// dead handle.
+const clientsByUrl = new Map<string, Redis>();
+
+function getOrCreateClient(url: string): Redis {
+  const existing = clientsByUrl.get(url);
+  if (existing && existing.status !== "end") {
+    return existing;
+  }
+  const client = new Redis(url, {
+    // Start the TCP handshake immediately rather than on the first command.
+    // Note: ioredis does this asynchronously — an unreachable host will not
+    // throw from `new Redis(...)`; only a structurally malformed URL does.
+    // Real connectivity failures surface on the first command (or via the
+    // "error" event); maxRetriesPerRequest below caps how long they queue.
+    lazyConnect: false,
+    // Cap retry attempts per command (default is 20). With the connection
+    // down, the third retry fails the command instead of trying ~20 times —
+    // better signal for upstream error handling.
+    maxRetriesPerRequest: 3,
+  });
+  clientsByUrl.set(url, client);
+  return client;
+}
+
 /**
- * Build a KVStoreSet backed by a single shared Redis connection.
+ * Build a KVStoreSet backed by a process-wide ioredis client (one per URL).
  *
- * Fails fast at factory time if REDIS_URL is missing — the alternative is a
- * deep "ECONNREFUSED" on the first request, which is harder to map back to a
- * missing env. Graceful shutdown (client.quit() on SIGTERM) lives in the Node
- * entrypoint (HOO-511); this factory only owns construction.
+ * Fails fast at factory time if REDIS_URL is missing/whitespace — the
+ * alternative is a deep "ECONNREFUSED" on the first request, which is harder
+ * to map back to a missing env. Graceful shutdown belongs to the Node
+ * entrypoint (HOO-511); call `closeAllRedisClients()` from the SIGTERM
+ * handler there.
  */
 export function createRedisKVStoreSet(env: Env): KVStoreSet {
   const url = env.REDIS_URL?.trim();
@@ -103,18 +136,22 @@ export function createRedisKVStoreSet(env: Env): KVStoreSet {
       "REDIS_URL missing for runtime=node. Set it in the environment (e.g. redis://localhost:6379)."
     );
   }
-  const client = new Redis(url, {
-    // Match the eager-connect semantics of Cloudflare KV bindings: a bad URL
-    // throws now instead of on the first request.
-    lazyConnect: false,
-    // Fail individual commands rather than queue them indefinitely when the
-    // connection drops — better signal for upstream error handling.
-    maxRetriesPerRequest: 3,
-  });
+  const client = getOrCreateClient(url);
   return {
     apiKeys: new RedisKVStore(client, STORE_PREFIXES.apiKeys),
     rateLimits: new RedisKVStore(client, STORE_PREFIXES.rateLimits),
     cache: new RedisKVStore(client, STORE_PREFIXES.cache),
     sessions: new RedisKVStore(client, STORE_PREFIXES.sessions),
   };
+}
+
+/**
+ * Close every cached Redis client. Intended for the Node entrypoint's
+ * shutdown handler (HOO-511) and for test teardown — calling it makes the
+ * next createRedisKVStoreSet() open a fresh connection.
+ */
+export async function closeAllRedisClients(): Promise<void> {
+  const clients = [...clientsByUrl.values()];
+  clientsByUrl.clear();
+  await Promise.allSettled(clients.map((c) => c.quit()));
 }

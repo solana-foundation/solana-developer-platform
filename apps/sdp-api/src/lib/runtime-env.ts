@@ -4,6 +4,12 @@ const PROCESS_ENV_FALLBACK_KEYS = [
   "ENVIRONMENT",
   "API_VERSION",
   "SDP_DEPLOYMENT_MODE",
+  // Node-runtime connection strings — paired with HOO-510 (Redis) and the
+  // pg/Hyperdrive split. The Node entrypoint (HOO-511) relies on process.env
+  // for both; without these in the fallback list withProcessEnvFallback can't
+  // populate them and the factory throws on the first request.
+  "DATABASE_URL",
+  "REDIS_URL",
   "API_KEY_PEPPER",
   "CUSTODY_ENCRYPTION_KEY",
   "SENTRY_DSN",
