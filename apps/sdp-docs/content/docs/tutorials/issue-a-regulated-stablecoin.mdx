@@ -409,7 +409,7 @@ Section 4(a)(5) of the GENIUS Act treats a permitted payment stablecoin issuer a
 Every transfer destination and every allowlist entry gets screened before your application acts on it. One API call, one response.
 
 ```javascript
-const response = await sdp.post("/v1/compliance/address-screenings", {
+const response = await sdpAdmin.post("/v1/compliance/address-screenings", {
   address: destinationAddress,
   network: "solana",
   intent: "transfer_destination",
@@ -431,10 +431,14 @@ On the sandbox response this tutorial cites, Range and Elliptic return numeric s
 Freezing halts one holder's account without touching any other holder. The freeze is on-chain, enforced by the Token-2022 program. SDP signs the freeze instruction with the freeze authority that was set at deploy; the on-chain program does the enforcement.
 
 ```javascript
-await sdpAdmin.post(`/v1/issuance/tokens/${tokenId}/freeze`, {
-  accountAddress: holderAddress,
-  reason: "Court order #2026-IL-0142",
-});
+await sdpAdmin.post(
+  `/v1/issuance/tokens/${tokenId}/freeze`,
+  {
+    accountAddress: holderAddress,
+    reason: "Court order #2026-IL-0142",
+  },
+  { idempotencyKey: idempotencyKey("freeze") }
+);
 ```
 
 You pass the holder's wallet address; SDP derives the [Associated Token Account](https://solana.com/docs/tokens/basics/create-token-account) (the on-chain account that holds that holder's TPUSD balance) and freezes it. Once frozen, transfers to or from that account fail at the program level, not at SDP's gateway.
@@ -448,14 +452,18 @@ Section 7 demonstrates the resulting error: an HTTP 502 `SOLANA_RPC_ERROR` from 
 Seize moves tokens out of a holder's account without their signature, via the **permanent delegate** authority set at deploy. The permanent delegate is a Token-2022 extension that grants a named authority the right to transfer or burn any holder's tokens regardless of holder signature. This is the technological capability the GENIUS Act requires you to have ready for lawful orders. The institutional use case is a court-ordered transfer or a sanctions matter where you must recover specific tokens to a controlled wallet.
 
 ```javascript
-await sdpAdmin.post(`/v1/issuance/tokens/${tokenId}/seize`, {
-  seize: {
-    source: holderAddress,
-    destination: custodyAddress,
-    amount: "50000.00",
-    memo: "OFAC matter 2026-04-018",
+await sdpAdmin.post(
+  `/v1/issuance/tokens/${tokenId}/seize`,
+  {
+    seize: {
+      source: holderAddress,
+      destination: custodyAddress,
+      amount: "50000.00",
+      memo: "OFAC matter 2026-04-018",
+    },
   },
-});
+  { idempotencyKey: idempotencyKey("seize") }
+);
 ```
 
 The memo persists on the transaction record. It's the audit attribution your compliance officer reads months later when she reconciles the action against the court order or sanctions notice that authorized it.
@@ -465,9 +473,17 @@ The memo persists on the transaction record. It's the audit attribution your com
 Force-burn destroys tokens at a holder's account. Same authority as seize, different effect. Reach for it only when the tokens cannot be recovered to a controlled wallet, for example a self-custodied address whose key you cannot obtain.
 
 ```javascript
-await sdpAdmin.post(`/v1/issuance/tokens/${tokenId}/force-burn`, {
-  forceBurn: { source: holderAddress, amount: "12000.00", memo: "regulator-ordered burn 2026-04-021" },
-});
+await sdpAdmin.post(
+  `/v1/issuance/tokens/${tokenId}/force-burn`,
+  {
+    forceBurn: {
+      source: holderAddress,
+      amount: "12000.00",
+      memo: "regulator-ordered burn 2026-04-021",
+    },
+  },
+  { idempotencyKey: idempotencyKey("force-burn") }
+);
 ```
 
 ### The institutional pattern that holds this together
@@ -570,6 +586,9 @@ Section 5's compliance controls only matter if they enforce. This section moves 
 Transfers run on the `/v1/payments/transfers` endpoint family, separate from the issuance family that Section 4 used. The required permissions are `payments:write` and `wallets:read`, both of which the Developer key (`sdp`) carries:
 
 ```javascript
+const { data } = await sdp.get("/v1/wallets");
+const sourceWalletId = data.wallets[0].walletId;
+
 const transfer = await sdp.post("/v1/payments/transfers", {
   source: sourceWalletId,
   destination: destinationAddress,
@@ -611,10 +630,14 @@ A successful response includes the on-chain signature once the transaction confi
 To demonstrate the on-chain block, freeze the destination's TPUSD account using the Admin key. Freeze requires `tokens:admin`, which the Developer key does not carry:
 
 ```javascript
-await sdpAdmin.post(`/v1/issuance/tokens/${tokenId}/freeze`, {
-  accountAddress: destinationAddress,
-  reason: "Compliance hold pending OFAC review 2026-04-019",
-});
+await sdpAdmin.post(
+  `/v1/issuance/tokens/${tokenId}/freeze`,
+  {
+    accountAddress: destinationAddress,
+    reason: "Compliance hold pending OFAC review 2026-04-019",
+  },
+  { idempotencyKey: idempotencyKey("freeze") }
+);
 ```
 
 The freeze records a frozen account in SDP's audit trail and applies the Token-2022 freeze instruction to the destination's Associated Token Account on-chain. The on-chain side is verifiable on Solana Explorer:
