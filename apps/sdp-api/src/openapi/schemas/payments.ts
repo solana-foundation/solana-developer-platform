@@ -223,7 +223,7 @@ export const prepareTransferRequestSchema = prepareTransferSchemaBase
     }),
     referenceAddress: withOpenApi(prepareTransferSchemaBase.shape.referenceAddress, {
       description: "Optional reference address for tracking (Solana Pay reference account).",
-      example: "RefAccount11111111111111111111111111111111111",
+      example: "RefY2HwGmCKvJsXJzhRkc7m9D4N6pQ5tT3aB8fE1uV2W",
     }),
     options: prepareTransferOptionsSchema.optional().openapi({
       description: "Transaction preparation options.",

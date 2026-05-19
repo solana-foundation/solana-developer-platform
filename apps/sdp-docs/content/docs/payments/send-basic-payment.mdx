@@ -3,7 +3,7 @@ title: Basic payment
 description: Send a single token transfer with SDP, using either Execute or Prepare mode.
 ---
 
-SDP handles token transfers through its payments API. A basic payment moves tokens **from a custody wallet you control to any Solana address**. The `source` field on the request is an SDP custody wallet ID (`wal_…`), resolved server-side from the caller's wallet list; `destination` is an on-chain Solana address.
+SDP handles token transfers through its payments API. A basic payment moves tokens **from a custody wallet you control to any Solana wallet address**. The `source` field on the request is an SDP custody wallet ID (`wal_…`), resolved server-side from the caller's wallet list; `destination` is the recipient's on-chain **wallet (owner) address** — for SPL transfers, SDP derives the associated token account (ATA) from this address and creates it if needed, so pass the wallet pubkey, **not** a token-account address.
 
 Transfers are available through the Payments dashboard and the API.
 
