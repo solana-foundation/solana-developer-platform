@@ -76,6 +76,11 @@ ENV NEXT_PUBLIC_API_BASE_URL=$NEXT_PUBLIC_API_BASE_URL \
     NEXT_PUBLIC_CLERK_SIGN_UP_URL=$NEXT_PUBLIC_CLERK_SIGN_UP_URL \
     NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL=$NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL
 
+# Opt into the Next.js standalone output tree. Gated in next.config.ts so
+# non-Docker `next build` runs (Vercel preview, Playwright, local dev)
+# don't pay for an unused .next/standalone artifact.
+ENV NEXT_BUILD_STANDALONE=1
+
 # Fail fast on missing NEXT_PUBLIC_* that are required for the app to function.
 # These are baked into the client bundle at build time, so a missing value
 # silently ships an empty string and the container starts "healthy" but every

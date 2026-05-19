@@ -15,9 +15,10 @@ test-results
 apps/sdp-docs
 docs
 
-# Sibling apps that this Dockerfile never copies — keep them out of the
-# build context so remote builders don't ship ~17M of unrelated source.
+# Workspace siblings this Dockerfile never copies — keep them out of the
+# build context so remote builders don't ship unrelated source.
 apps/sdp-api
+packages/sdp-api-integration
 
 # Local env files — host-only; container envs come from build-args / -e
 .env
