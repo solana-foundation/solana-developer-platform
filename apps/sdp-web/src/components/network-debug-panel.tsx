@@ -1,13 +1,6 @@
 "use client";
 
-import {
-  BanIcon,
-  CheckIcon,
-  CopyIcon,
-  EraserIcon,
-  PauseIcon,
-  PlayIcon,
-} from "lucide-react";
+import { BanIcon, CheckIcon, CopyIcon, EraserIcon, PauseIcon, PlayIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useState } from "react";
 import { type NetworkDebugEntry, useNetworkDebug } from "@/contexts/network-debug-context";
