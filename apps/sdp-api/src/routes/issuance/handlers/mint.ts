@@ -13,7 +13,10 @@ import { TokenService } from "@/services/token.service";
 import { resolveMintOperationAmount } from "@/services/token-operation.service";
 import type { Env } from "@/types/env";
 import { mintSchema } from "../schemas";
-import { assertDestinationAllowedByControlList } from "./access-control";
+import {
+  assertDestinationAllowedByControlList,
+  getOnChainAllowlistMutationForMint,
+} from "./access-control";
 import { buildIdempotencyMetadata } from "./idempotency";
 
 type AppContext = Context<{ Bindings: Env }>;
@@ -51,11 +54,14 @@ export const prepareMint = async (c: AppContext) => {
     tokenId,
     parsed.data.mint.destination
   );
-  assertDestinationAllowedByControlList({
-    token,
-    destination: parsed.data.mint.destination,
-    isOnControlList,
-  });
+  const ablListAddress = getOnChainAllowlistMutationForMint(token, c.env.SOLANA_NETWORK);
+  if (!ablListAddress) {
+    assertDestinationAllowedByControlList({
+      token,
+      destination: parsed.data.mint.destination,
+      isOnControlList,
+    });
+  }
 
   const signingWalletId = resolveApiKeySigningWalletId(
     auth,
@@ -72,6 +78,32 @@ export const prepareMint = async (c: AppContext) => {
   // Build unsigned transaction using Mosaic
   // Note: amount is decimal (e.g., 100 for 100 tokens), SDK converts to raw
   const mosaic = createMosaicService(c.env, signer);
+
+  // For allowlist tokens with on-chain ABL, sync the destination wallet to the
+  // on-chain list (and DB mirror) before preparing the mint tx so the SDK's
+  // permissionless-thaw can succeed when the client submits.
+  let addedToAllowlist = false;
+  if (ablListAddress && !isOnControlList) {
+    await mosaic.addToList({
+      list: assertValidAddress(ablListAddress, "ablListAddress"),
+      authority: signer.address,
+      feePayer: signer.address,
+      wallet: destination,
+    });
+    try {
+      await tokenService.addAllowlistEntry({
+        tokenId,
+        address: parsed.data.mint.destination,
+        addedBy: auth.id,
+      });
+      addedToAllowlist = true;
+    } catch (error) {
+      if (!(error instanceof Error && error.message === "ADDRESS_ALREADY_ALLOWLISTED")) {
+        throw error;
+      }
+    }
+  }
+
   const prepared = await mosaic.prepareMintTo({
     mint: mintAddress,
     destination,
@@ -112,6 +144,7 @@ export const prepareMint = async (c: AppContext) => {
       destination: parsed.data.mint.destination,
       amount: parsed.data.mint.amount,
       mode: "prepare",
+      addedToAllowlist,
     },
   });
 
@@ -160,11 +193,14 @@ export const executeMint = async (c: AppContext) => {
     tokenId,
     parsed.data.mint.destination
   );
-  assertDestinationAllowedByControlList({
-    token,
-    destination: parsed.data.mint.destination,
-    isOnControlList,
-  });
+  const ablListAddress = getOnChainAllowlistMutationForMint(token, c.env.SOLANA_NETWORK);
+  if (!ablListAddress) {
+    assertDestinationAllowedByControlList({
+      token,
+      destination: parsed.data.mint.destination,
+      isOnControlList,
+    });
+  }
 
   const signingWalletId = resolveApiKeySigningWalletId(
     auth,
@@ -218,6 +254,31 @@ export const executeMint = async (c: AppContext) => {
     // Note: amount is decimal (e.g., 100 for 100 tokens), SDK converts to raw
     const mosaic = createMosaicService(c.env, signer);
 
+    // For allowlist tokens with on-chain ABL, sync the destination wallet to the
+    // on-chain list before minting so the SDK's permissionless-thaw can succeed
+    // for a fresh ATA. Idempotent: skipped when already present in either layer.
+    let addedToAllowlist = false;
+    if (ablListAddress && !isOnControlList) {
+      await mosaic.addToList({
+        list: assertValidAddress(ablListAddress, "ablListAddress"),
+        authority: signer.address,
+        feePayer: signer.address,
+        wallet: destination,
+      });
+      try {
+        await tokenService.addAllowlistEntry({
+          tokenId,
+          address: parsed.data.mint.destination,
+          addedBy: auth.id,
+        });
+        addedToAllowlist = true;
+      } catch (error) {
+        if (!(error instanceof Error && error.message === "ADDRESS_ALREADY_ALLOWLISTED")) {
+          throw error;
+        }
+      }
+    }
+
     const result = await mosaic.mintTo({
       mint: mintAddress,
       destination,
@@ -243,6 +304,7 @@ export const executeMint = async (c: AppContext) => {
         signature: result.signature,
         slot: result.slot.toString(),
         mode: "execute",
+        addedToAllowlist,
       },
     });
 

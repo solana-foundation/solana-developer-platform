@@ -3,6 +3,7 @@ import { AppError } from "@/lib/errors";
 import type { AclMode } from "@/services/mosaic/types";
 
 type TokenAccessControlShape = Pick<Token, "template" | "requiresAllowlist">;
+type TokenWithAblList = TokenAccessControlShape & Pick<Token, "ablListAddress">;
 
 const BLOCKLIST_TEMPLATES = new Set<TokenTemplate>(["stablecoin", "tokenized-security"]);
 
@@ -31,16 +32,29 @@ export function getMosaicAclMode(token: TokenAccessControlShape): AclMode | unde
 
 export function shouldEnableOnChainAcl(
   token: TokenAccessControlShape,
-  network: string | undefined
+  _network: string | undefined
 ): boolean {
-  const mode = getTokenAccessControlMode(token);
-  if (mode === "disabled") return false;
-  // Denylist enforcement always runs on-chain when supported. Allowlist enforcement
-  // is mainnet-only because the mint flow does not yet add destinations to the
-  // on-chain allowlist; minting to a non-allowlisted wallet otherwise fails at the
-  // permissionless-thaw step (Token-2022 0x11 / AccountFrozen).
-  if (mode === "blocklist") return true;
-  return network === "mainnet-beta";
+  return getTokenAccessControlMode(token) !== "disabled";
+}
+
+/**
+ * Resolve the on-chain ABL list address that a mint destination must be added to
+ * before MintTo can succeed.
+ *
+ * Returns the list address when the token is allowlist-mode + has on-chain ABL active
+ * + has an `ablListAddress` populated. Returns null in any other case (blocklist,
+ * disabled, or a token whose deploy never created an on-chain list).
+ *
+ * Callers prepend an `addWallet` sync to the on-chain list before invoking the mint
+ * flow so the SDK's permissionless-thaw can succeed for a fresh destination.
+ */
+export function getOnChainAllowlistMutationForMint(
+  token: TokenWithAblList,
+  network: string | undefined
+): string | null {
+  if (getTokenAccessControlMode(token) !== "allowlist") return null;
+  if (!shouldEnableOnChainAcl(token, network)) return null;
+  return token.ablListAddress ?? null;
 }
 
 export function assertDestinationAllowedByControlList(args: {
