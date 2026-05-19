@@ -3,6 +3,10 @@
  *
  * Cloudflare branch returns the Workers KV bindings (HOO-506). Node branch
  * returns the Redis-backed set (HOO-510). Switch is driven by SDP_RUNTIME.
+ *
+ * The Redis branch holds a Promise<Redis> internally (created lazily in
+ * kv-redis), so this factory stays synchronous and ioredis stays out of the
+ * Cloudflare bundle / Workers test pool's module graph.
  */
 
 import { getRuntime } from "@/lib/runtime-env";
@@ -12,8 +16,7 @@ import { createRedisKVStoreSet } from "./kv-redis";
 import { createWorkersKVStoreSet } from "./kv-workers";
 
 export function createKVStoreSet(env: Env): KVStoreSet {
-  const runtime = getRuntime(env);
-  if (runtime === "node") {
+  if (getRuntime(env) === "node") {
     return createRedisKVStoreSet(env);
   }
   return createWorkersKVStoreSet(env);

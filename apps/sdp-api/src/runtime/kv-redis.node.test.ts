@@ -134,12 +134,14 @@ describe("RedisKVStore (HOO-510)", () => {
     it("reuses the same Redis client across repeated calls (no connection leak)", () => {
       // kvStoreMiddleware invokes the factory per-request; if each invocation
       // opened a new TCP connection, the process would exhaust Redis's
-      // maxclients under load. Pin behavior with reference equality.
+      // maxclients under load. Both calls should land on the same cached
+      // Promise<Redis>, so reference equality on the internal field is the
+      // right pin.
       const set1 = createRedisKVStoreSet({ REDIS_URL } as Env);
       const set2 = createRedisKVStoreSet({ REDIS_URL } as Env);
-      const client1 = (set1.apiKeys as unknown as { client: Redis }).client;
-      const client2 = (set2.apiKeys as unknown as { client: Redis }).client;
-      expect(client1).toBe(client2);
+      const p1 = (set1.apiKeys as unknown as { clientPromise: Promise<Redis> }).clientPromise;
+      const p2 = (set2.apiKeys as unknown as { clientPromise: Promise<Redis> }).clientPromise;
+      expect(p1).toBe(p2);
     });
 
     it("throws a clear error when REDIS_URL is missing", () => {
