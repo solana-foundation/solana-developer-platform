@@ -93,9 +93,6 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 20
-      # HOO-510: Redis backs the node-runtime KVStore. Node-pool tests
-      # (*.node.test.ts) connect via REDIS_URL above. Workers-pool tests
-      # don't touch it.
       redis:
         image: redis:7-alpine
         ports:

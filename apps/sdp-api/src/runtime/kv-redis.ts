@@ -1,22 +1,18 @@
 /**
- * Redis-backed implementation of KVStore for the Node runtime (HOO-510).
+ * Redis-backed KVStore implementation. Matches WorkersKVStore's surface
+ * with a different backend. One ioredis client per REDIS_URL is shared
+ * across the four logical stores (apiKeys / rateLimits / cache / sessions);
+ * each store prefixes its keys so list() doesn't bleed across domains.
  *
- * Sister of WorkersKVStore — same surface, different backend. A single
- * ioredis client per REDIS_URL is shared across the four logical stores
- * (apiKeys / rateLimits / cache / sessions); each store namespaces its keys
- * with a prefix so list() doesn't bleed across domains.
+ * ioredis is loaded lazily — the top-level `import type` is erased at emit
+ * time, and the real module is fetched via `await import("ioredis")` inside
+ * ensureClient on first use. That keeps ioredis out of the static module
+ * graph; otherwise the Cloudflare Workers test pool (miniflare) trips on
+ * ioredis's debug.js with "Maximum call stack size exceeded" during
+ * transformation.
  *
- * ioredis is loaded lazily — the top-level `import type` is erased at
- * compile time, and the real module is fetched via `await import("ioredis")`
- * inside ensureClient on first use. That keeps ioredis out of the static
- * module graph so the Cloudflare Workers test pool (miniflare) never tries
- * to transform it; otherwise miniflare's transformer chokes on ioredis's
- * debug.js with "Maximum call stack size exceeded" even when the CF branch
- * is the one that actually runs.
- *
- * Semantics note: Cloudflare KV serves stale reads for up to 60s after a key
- * expires. Redis doesn't — GET on an expired key returns null immediately.
- * Anything that accidentally relies on stale reads will surface here.
+ * Cloudflare KV serves stale reads for up to 60s after a key expires; Redis
+ * doesn't. Anything that accidentally relied on that grace will surface.
  */
 
 import type { Redis } from "ioredis";
@@ -25,10 +21,10 @@ import type { KVListResult, KVPutOptions, KVStore, KVStoreSet } from "./kv";
 
 const SCAN_COUNT = 100;
 
-// One Promise<Redis> per URL, shared by every RedisKVStore that points at
-// that backend. Storing the Promise (not the resolved client) means that two
-// concurrent first-callers wire up to the same in-flight dynamic import +
-// `new Redis(...)` instead of opening parallel TCP connections.
+// One Promise<Redis> per URL, shared by every RedisKVStore at that backend.
+// Storing the Promise (not the resolved client) means concurrent first-
+// callers share one in-flight import + `new Redis(...)` instead of opening
+// parallel sockets.
 const clientPromisesByUrl = new Map<string, Promise<Redis>>();
 
 function ensureClient(url: string): Promise<Redis> {
@@ -37,23 +33,21 @@ function ensureClient(url: string): Promise<Redis> {
   const promise = (async (): Promise<Redis> => {
     const { default: IORedis } = await import("ioredis");
     return new IORedis(url, {
-      // Start the TCP handshake immediately rather than on the first command.
-      // Note: ioredis does this asynchronously — an unreachable host will not
-      // throw from `new IORedis(...)`; only a structurally malformed URL does.
-      // Real connectivity failures surface on the first command (or via the
-      // "error" event); maxRetriesPerRequest below caps the retry burst.
+      // Eager TCP handshake — but ioredis does it asynchronously, so
+      // unreachable hosts surface on the first command (or via the "error"
+      // event), not from `new IORedis(...)`. Only a structurally malformed
+      // URL throws here.
       lazyConnect: false,
-      // Cap retry attempts per command (default is 20). With the connection
-      // down, the third retry fails the command instead of trying ~20 times —
-      // better signal for upstream error handling.
+      // Cap retries per command (default is 20). With the connection down,
+      // the third retry fails fast — better signal for upstream error
+      // handling.
       maxRetriesPerRequest: 3,
     });
   })();
   clientPromisesByUrl.set(url, promise);
   // Evict on rejection so a transient malformed-URL or module-load failure
-  // doesn't permanently poison the cache for the rest of the process. The
-  // `===` guard avoids racing with a successful re-creation that already
-  // replaced this entry.
+  // doesn't permanently poison the cache. `===` guard avoids racing with a
+  // successful re-creation that already replaced this entry.
   promise.catch(() => {
     if (clientPromisesByUrl.get(url) === promise) {
       clientPromisesByUrl.delete(url);
@@ -63,10 +57,8 @@ function ensureClient(url: string): Promise<Redis> {
 }
 
 export class RedisKVStore implements KVStore {
-  // Internal handle is always a Promise<Redis>. Constructor accepts a raw
-  // connected client too (tests pass one for fixture-level control) and the
-  // constructor normalises it via Promise.resolve — production callers go
-  // through the factory and pass the cached promise from ensureClient.
+  // Union accepts a raw connected client for test fixtures; Promise.resolve
+  // normalizes both shapes so the rest of the class can just `await`.
   private readonly clientPromise: Promise<Redis>;
   constructor(
     client: Redis | Promise<Redis>,
@@ -94,13 +86,12 @@ export class RedisKVStore implements KVStore {
   async put(key: string, value: string, options?: KVPutOptions): Promise<void> {
     const client = await this.clientPromise;
     const namespacedKey = this.namespaced(key);
-    // Ticket spec: TTL via `SET PX`. expirationTtl is seconds (parity with
-    // Cloudflare KV's KVNamespacePutOptions); Redis PX expects milliseconds.
+    // expirationTtl is seconds (parity with CF KV's KVNamespacePutOptions);
+    // PX expects milliseconds.
     if (options?.expirationTtl !== undefined) {
       await client.set(namespacedKey, value, "PX", options.expirationTtl * 1000);
     } else {
-      // No TTL: e.g. rpc:relay:stats:* and round-robin cursor — match CF KV
-      // behavior where omitting expirationTtl persists indefinitely.
+      // Match CF KV: omitting expirationTtl persists indefinitely.
       await client.set(namespacedKey, value);
     }
   }
@@ -116,10 +107,9 @@ export class RedisKVStore implements KVStore {
     const stripFrom = this.prefix.length + 1; // include the trailing ":"
     const keys: { name: string }[] = [];
     let cursor = "0";
-    // SCAN is non-blocking and cursor-based; iterate until the server signals
-    // completion by returning "0". Callers see only unprefixed names so the
-    // surface matches WorkersKVStore (test helpers clearKVNamespaces() round-
-    // trip name → delete(name)).
+    // SCAN is cursor-based and non-blocking; loop until cursor returns "0".
+    // Strip the prefix on the way out so callers can round-trip list()
+    // output through delete(name), matching WorkersKVStore.
     do {
       const [nextCursor, batch] = await client.scan(cursor, "MATCH", pattern, "COUNT", SCAN_COUNT);
       for (const namespaced of batch) {
@@ -139,15 +129,9 @@ const STORE_PREFIXES = {
 } as const;
 
 /**
- * Build a KVStoreSet pointing at a shared (per-URL) ioredis client.
- *
- * Synchronous: the four returned KVStore instances hold a Promise<Redis>,
- * not a resolved client. The actual `await import("ioredis")` and `new
- * Redis(...)` happen lazily inside the first method call on any store.
- *
- * Fails fast on a missing/whitespace REDIS_URL. Graceful shutdown belongs to
- * the Node entrypoint (HOO-511); call closeAllRedisClients() from the
- * SIGTERM handler there.
+ * Build a KVStoreSet from a shared (per-URL) ioredis client. Synchronous —
+ * the stores hold a Promise<Redis>; the import and connection happen lazily
+ * on the first method call. Fails fast on missing/whitespace REDIS_URL.
  */
 export function createRedisKVStoreSet(env: Env): KVStoreSet {
   const url = env.REDIS_URL?.trim();
@@ -166,9 +150,8 @@ export function createRedisKVStoreSet(env: Env): KVStoreSet {
 }
 
 /**
- * Close every cached Redis client. Intended for the Node entrypoint's
- * shutdown handler (HOO-511) and for test teardown — calling it makes the
- * next createRedisKVStoreSet() open a fresh connection.
+ * Close every cached Redis client. Subsequent factory calls open fresh
+ * connections.
  */
 export async function closeAllRedisClients(): Promise<void> {
   const promises = [...clientPromisesByUrl.values()];

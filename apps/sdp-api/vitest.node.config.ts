@@ -1,11 +1,7 @@
 /**
- * Vitest config for Node-runtime tests (HOO-510).
- *
- * Sibling of `vitest.config.ts` (Cloudflare Workers pool). Some code paths
- * require real Node APIs that Workers don't expose — notably `ioredis`, which
- * opens raw TCP sockets via `node:net`. Tests targeting those paths live in
- * `**\/*.node.test.ts` files and run here in plain Node, isolated from the CF
- * pool so neither config has to dance around the other's restrictions.
+ * Vitest config for Node-runtime tests. Sibling of vitest.config.ts (CF
+ * Workers pool). Tests in `**\/*.node.test.ts` run here in plain Node
+ * because they need APIs Workers don't expose (e.g. ioredis → node:net).
  */
 
 import path from "node:path";

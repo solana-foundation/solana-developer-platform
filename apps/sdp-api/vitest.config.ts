@@ -84,9 +84,8 @@ export default defineConfig({
     isolate: false,
     maxWorkers: 1,
     include: ["src/**/*.test.ts", "src/**/*.spec.ts", "src/__tests__/**/*.unit.ts"],
-    // `**\/*.node.test.ts` runs under vitest.node.config.ts (plain Node pool)
-    // because those tests need APIs the Cloudflare Workers pool doesn't
-    // expose (e.g. ioredis → node:net sockets).
+    // `**\/*.node.test.ts` runs in vitest.node.config.ts (plain Node pool)
+    // because ioredis needs Node socket APIs the Workers pool doesn't expose.
     exclude: ["node_modules", ".wrangler", "dist", "src/**/*.node.test.ts"],
     coverage: {
       provider: "v8",

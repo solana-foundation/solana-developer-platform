@@ -1,12 +1,8 @@
 /**
- * Integration tests for RedisKVStore against a real Redis (HOO-510).
- *
- * Runs in plain Node via vitest.node.config.ts so ioredis can open real TCP
- * sockets. Requires Redis listening on REDIS_URL (defaults to localhost:6379).
- * CI provides a redis:7-alpine service container alongside the Postgres one.
- *
- * Each test FLUSHALLs first so runs are isolated. We don't share fixtures
- * across tests.
+ * Integration tests for RedisKVStore against a real Redis. Runs in plain
+ * Node via vitest.node.config.ts so ioredis can open real TCP sockets.
+ * Requires REDIS_URL (defaults to localhost:6379); each test FLUSHALLs
+ * first so runs are isolated.
  */
 
 import Redis from "ioredis";
@@ -67,8 +63,8 @@ describe("RedisKVStore (HOO-510)", () => {
     it("sets the millisecond TTL on the underlying key", async () => {
       const store = new RedisKVStore(raw, "test");
       await store.put("k", "v", { expirationTtl: 30 });
-      // PTTL returns -1 if no TTL, -2 if missing. With expirationTtl=30s we
-      // expect roughly 30_000ms remaining, allowing for execution time.
+      // expirationTtl=30s → PTTL should report ~30_000ms, allowing for
+      // elapsed time between put and the inspection.
       const pttl = await raw.pttl("test:k");
       expect(pttl).toBeGreaterThan(28_000);
       expect(pttl).toBeLessThanOrEqual(30_000);
@@ -113,8 +109,7 @@ describe("RedisKVStore (HOO-510)", () => {
 
   describe("createRedisKVStoreSet", () => {
     afterEach(async () => {
-      // Each test in this block uses the factory's cached client; close
-      // between tests so we observe reuse behavior cleanly.
+      // Factory uses a cached client; close between tests so reuse is observable.
       await closeAllRedisClients();
     });
 
@@ -132,11 +127,8 @@ describe("RedisKVStore (HOO-510)", () => {
     });
 
     it("reuses the same Redis client across repeated calls (no connection leak)", () => {
-      // kvStoreMiddleware invokes the factory per-request; if each invocation
-      // opened a new TCP connection, the process would exhaust Redis's
-      // maxclients under load. Both calls should land on the same cached
-      // Promise<Redis>, so reference equality on the internal field is the
-      // right pin.
+      // Pin reference equality on the cached promise. If the factory ever
+      // regresses to per-call construction, the connection-leak comes back.
       const set1 = createRedisKVStoreSet({ REDIS_URL } as Env);
       const set2 = createRedisKVStoreSet({ REDIS_URL } as Env);
       const p1 = (set1.apiKeys as unknown as { clientPromise: Promise<Redis> }).clientPromise;

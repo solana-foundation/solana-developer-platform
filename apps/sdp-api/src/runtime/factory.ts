@@ -1,11 +1,6 @@
 /**
- * Runtime factory — single dispatch point for runtime-specific implementations.
- *
- * Cloudflare branch returns the Workers KV bindings (HOO-506). Node branch
- * returns the Redis-backed set (HOO-510). Switch is driven by SDP_RUNTIME.
- *
- * The Redis branch holds a Promise<Redis> internally (created lazily in
- * kv-redis), so this factory stays synchronous and ioredis stays out of the
+ * Runtime factory — dispatch to the runtime-specific KVStore. The Redis
+ * branch is lazily loaded inside kv-redis so ioredis stays out of the
  * Cloudflare bundle / Workers test pool's module graph.
  */
 
