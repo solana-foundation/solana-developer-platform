@@ -82,14 +82,14 @@ export interface Env {
 
   // Signing provider (custody backend via @solana/keychain)
   SIGNING_PROVIDER?:
-    | "local"
-    | "fireblocks"
-    | "privy"
-    | "coinbase_cdp"
-    | "para"
-    | "turnkey"
-    | "dfns"
-    | "anchorage";
+  | "local"
+  | "fireblocks"
+  | "privy"
+  | "coinbase_cdp"
+  | "para"
+  | "turnkey"
+  | "dfns"
+  | "anchorage";
   FEE_PAYER_PRIVATE_KEY?: string;
 
   // Fireblocks configuration (@solana/keychain-fireblocks)
@@ -147,12 +147,6 @@ export interface Env {
   KORA_API_KEY?: string;
   KORA_TIMEOUT_MS?: string;
 
-  // MoonPay ramps configuration
-  MOONPAY_API_KEY?: string;
-  MOONPAY_SECRET_KEY?: string;
-  MOONPAY_ONRAMP_URL?: string;
-  MOONPAY_OFFRAMP_URL?: string;
-
   // Compliance providers
   RANGE_API_KEY?: string;
   RANGE_API_BASE_URL?: string;
@@ -164,17 +158,29 @@ export interface Env {
   TRM_API_BASE_URL?: string;
   CHAINALYSIS_API_KEY?: string;
   CHAINALYSIS_API_BASE_URL?: string;
+
+  // MoonPay ramps configuration
+  MOONPAY_API_KEY?: string;
+  MOONPAY_SECRET_KEY?: string;
+  MOONPAY_ONRAMP_URL?: string;
+  MOONPAY_OFFRAMP_URL?: string;
+  MOONPAY_SANDBOX_API_KEY?: string;
+  MOONPAY_SANDBOX_SECRET_KEY?: string;
+
   // Lightspark Grid ramps configuration
   LIGHTSPARK_GRID_CLIENT_ID?: string;
   LIGHTSPARK_GRID_CLIENT_SECRET?: string;
-  LIGHTSPARK_GRID_API_BASE_URL?: string;
+  LIGHTSPARK_GRID_SANDBOX_CLIENT_ID?: string;
+  LIGHTSPARK_GRID_SANDBOX_CLIENT_SECRET?: string;
 
   // BVNK ramps configuration
-  BVNK_API_TOKEN?: string;
   BVNK_HAWK_AUTH_ID?: string;
   BVNK_HAWK_SECRET_KEY?: string;
   BVNK_WALLET_ID?: string;
   BVNK_API_BASE_URL?: string;
+  BVNK_SANDBOX_HAWK_AUTH_ID?: string;
+  BVNK_SANDBOX_HAWK_SECRET_KEY?: string;
+  BVNK_SANDBOX_WALLET_ID?: string;
 }
 
 // Extend Hono's context with our bindings

@@ -1,9 +1,5 @@
 import { auth } from "@clerk/nextjs/server";
-import type {
-  CustodyWalletByIdResponse,
-  CustodyWalletTokenBalance,
-  PaymentTransferSummary,
-} from "@sdp/types";
+import type { CustodyWalletByIdResponse, CustodyWalletTokenBalance } from "@sdp/types";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import type { ReactNode } from "react";
@@ -12,6 +8,10 @@ import {
   isKnownCustodyProvider,
 } from "@/app/dashboard/custody/provider-catalog";
 import { WalletActionsMenu } from "@/app/dashboard/custody/wallet-actions-menu";
+import {
+  loadWalletActivity,
+  type WalletActivityPayload,
+} from "@/app/dashboard/custody/wallet-activity.data";
 import { WalletActivitySection } from "@/app/dashboard/custody/wallet-activity-section";
 import { WalletAddressCopyButton } from "@/app/dashboard/custody/wallet-address-copy-button";
 import { formatPurpose, truncateMiddle } from "@/app/dashboard/custody/wallet-format-utils";
@@ -23,7 +23,6 @@ import {
   formatDisplayAmount,
   resolveTotalBalance,
 } from "../../payments/payments-overview.utils";
-import { fetchPaymentTransfers } from "../../payments/payments-page.data";
 
 interface WalletBalancesResponse {
   walletBalances?: {
@@ -31,6 +30,11 @@ interface WalletBalancesResponse {
     address: string;
     balances: CustodyWalletTokenBalance[];
   };
+}
+
+interface WalletTrackedBalancesResult {
+  balances: CustodyWalletTokenBalance[];
+  error: string | null;
 }
 
 interface OwnedTokenRoute {
@@ -63,18 +67,27 @@ async function getWalletDetail(
 async function getWalletTrackedBalances(
   request: SdpApiClient["request"],
   walletId: string
-): Promise<CustodyWalletTokenBalance[]> {
-  const response = await request(`/v1/payments/wallets/${encodeURIComponent(walletId)}/balances`);
-  if (response.status === 404) {
-    return [];
-  }
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`SDP API request failed (${response.status}): ${body}`);
-  }
+): Promise<WalletTrackedBalancesResult> {
+  try {
+    const response = await request(`/v1/payments/wallets/${encodeURIComponent(walletId)}/balances`);
+    if (response.status === 404) {
+      return { balances: [], error: null };
+    }
+    if (!response.ok) {
+      return {
+        balances: [],
+        error: "Tracked balances are unavailable right now. Showing wallet-reported balance.",
+      };
+    }
 
-  const json = (await response.json()) as { data?: WalletBalancesResponse };
-  return json.data?.walletBalances?.balances ?? [];
+    const json = (await response.json()) as { data?: WalletBalancesResponse };
+    return { balances: json.data?.walletBalances?.balances ?? [], error: null };
+  } catch {
+    return {
+      balances: [],
+      error: "Tracked balances are unavailable right now. Showing wallet-reported balance.",
+    };
+  }
 }
 
 async function getOwnedTokenRoutes(request: SdpApiClient["request"]): Promise<Map<string, string>> {
@@ -104,18 +117,18 @@ async function getOwnedTokenRoutes(request: SdpApiClient["request"]): Promise<Ma
   }
 }
 
-async function getWalletTransfers(
+async function getWalletActivity(
   request: SdpApiClient["request"],
   walletId: string
-): Promise<{
-  transfers: PaymentTransferSummary[];
-  error: string | null;
-}> {
-  const result = await fetchPaymentTransfers(request, 20, { walletId });
-  return {
-    transfers: result.data ?? [],
-    error: result.ok ? null : (result.error ?? "Wallet activity is unavailable right now."),
-  };
+): Promise<WalletActivityPayload> {
+  const result = await loadWalletActivity(request, walletId);
+  return (
+    result.data ?? {
+      activityRows: [],
+      activityError: result.error ?? "Wallet activity is unavailable right now.",
+      activityNotice: null,
+    }
+  );
 }
 
 export default async function WalletDetailPage({
@@ -134,16 +147,17 @@ export default async function WalletDetailPage({
   const { walletId } = await params;
   const resolvedWalletId = decodeURIComponent(walletId);
   const apiClient = await createSdpApiClient();
-  const [wallet, trackedBalances, ownedTokensByMint, walletTransfersResult] = await Promise.all([
+  const [wallet, trackedBalancesResult, ownedTokensByMint, walletActivity] = await Promise.all([
     getWalletDetail(apiClient.request, resolvedWalletId),
     getWalletTrackedBalances(apiClient.request, resolvedWalletId),
     getOwnedTokenRoutes(apiClient.request),
-    getWalletTransfers(apiClient.request, resolvedWalletId),
+    getWalletActivity(apiClient.request, resolvedWalletId),
   ]);
 
   const provider =
     wallet.provider && isKnownCustodyProvider(wallet.provider) ? wallet.provider : null;
-  const balances = trackedBalances.length > 0 ? trackedBalances : [wallet.balance];
+  const balances =
+    trackedBalancesResult.balances.length > 0 ? trackedBalancesResult.balances : [wallet.balance];
   const totalBalance = resolveTotalBalance(balances);
   const purposeLabel = formatPurpose(wallet.purpose);
 
@@ -226,6 +240,9 @@ export default async function WalletDetailPage({
         <h3 className="text-[36px] leading-[40px] font-medium tracking-[-0.3px] text-[#1c1c1d]">
           Balances
         </h3>
+        {trackedBalancesResult.error ? (
+          <p className="text-sm text-[rgba(28,28,29,0.58)]">{trackedBalancesResult.error}</p>
+        ) : null}
 
         {balances.length > 0 ? (
           <div className="overflow-hidden rounded-2xl border border-[rgba(28,28,29,0.12)] bg-white">
@@ -251,11 +268,7 @@ export default async function WalletDetailPage({
         )}
       </section>
 
-      <WalletActivitySection
-        walletId={resolvedWalletId}
-        initialTransfers={walletTransfersResult.transfers}
-        initialTransfersError={walletTransfersResult.error}
-      />
+      <WalletActivitySection walletId={resolvedWalletId} initialActivity={walletActivity} />
     </div>
   );
 }

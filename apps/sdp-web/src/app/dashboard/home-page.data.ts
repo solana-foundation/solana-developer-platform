@@ -1,5 +1,6 @@
 import type { PaymentTransferSummary, TokenTransaction } from "@sdp/types";
 import type { SdpApiClient } from "@/lib/sdp-api";
+import { parseErrorMessage, readTransactionParam, toTitleCase } from "./activity-format-utils";
 import type { FetchResult } from "./payments/payments-page.data";
 
 interface HomeIssuanceToken {
@@ -16,35 +17,6 @@ export interface HomeActivityRow {
   amount: string;
   address: string;
   sourceKind: "payments" | "issuance";
-}
-
-function parseErrorMessage(body: string): string {
-  try {
-    const parsed = JSON.parse(body) as {
-      error?: { message?: string };
-      message?: string;
-    };
-    return parsed?.error?.message ?? parsed?.message ?? body;
-  } catch {
-    return body || "Unknown error";
-  }
-}
-
-function toTitleCase(value: string): string {
-  return value
-    .replace(/_/g, " ")
-    .split(" ")
-    .filter(Boolean)
-    .map((segment) => segment[0]?.toUpperCase() + segment.slice(1))
-    .join(" ");
-}
-
-function readTransactionParam(
-  params: Record<string, unknown>,
-  key: string
-): string | number | null {
-  const value = params[key];
-  return typeof value === "string" || typeof value === "number" ? value : null;
 }
 
 function resolveIssuanceAmount(transaction: TokenTransaction): string {
