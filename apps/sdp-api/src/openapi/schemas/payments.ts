@@ -392,7 +392,16 @@ export const executeOnrampRequestSchema = executeOnrampSchemaBase
   })
   .openapi({
     description:
-      "Execute on-ramp request payload. Note: BVNK on-ramp requires additional provider-side account enablement and compliance setup beyond API credentials.",
+      "Execute on-ramp request payload. Note: BVNK on-ramp requires additional provider-side account enablement and compliance setup beyond API credentials. The default example is shaped for `provider: \"moonpay\"`; switch `provider` to `bvnk` to attach `bvnkCompliance.partyDetails`.",
+    example: {
+      provider: "moonpay",
+      destinationWallet: "wal_example",
+      cryptoToken: "USDC",
+      fiatCurrency: "USD",
+      fiatAmount: "100.00",
+      kycReference: "",
+      redirectUrl: "https://example.com",
+    },
   });
 
 export const executeOfframpRequestSchema = executeOfframpSchemaBase
@@ -431,7 +440,19 @@ export const executeOfframpRequestSchema = executeOfframpSchemaBase
       example: { partyDetails: [{ type: "individual" }] },
     }),
   })
-  .openapi({ description: "Execute off-ramp request payload." });
+  .openapi({
+    description:
+      "Execute off-ramp request payload. The default example is shaped for `provider: \"moonpay\"`; switch `provider` to `bvnk` to attach `bvnkCompliance.partyDetails`.",
+    example: {
+      provider: "moonpay",
+      sourceWallet: "wal_example",
+      cryptoToken: "USDC",
+      fiatCurrency: "USD",
+      cryptoAmount: "50.00",
+      kycReference: "",
+      redirectUrl: "https://example.com",
+    },
+  });
 
 export const paymentListTransfersQuerySchema = listTransfersQuerySchemaBase
   .extend({
