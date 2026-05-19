@@ -19,7 +19,9 @@
 # ──────────────────────────────────────────────────────────────────────────────
 
 # ── Base: pin Node + pnpm to the repo's packageManager ─────────────────────
-FROM node:22-slim AS base
+# Digest pinned so rebuilds don't silently float onto a new node:22-slim.
+# Refresh with: docker pull node:22-slim && docker inspect --format='{{index .RepoDigests 0}}' node:22-slim
+FROM node:22-slim@sha256:689c11043dad91472750cd824c97dd5e2318e9dd6f954e492fe7af0135d33ceb AS base
 ENV PNPM_HOME=/pnpm \
     PATH=/pnpm:$PATH \
     NEXT_TELEMETRY_DISABLED=1
@@ -74,6 +76,28 @@ ENV NEXT_PUBLIC_API_BASE_URL=$NEXT_PUBLIC_API_BASE_URL \
     NEXT_PUBLIC_CLERK_SIGN_UP_URL=$NEXT_PUBLIC_CLERK_SIGN_UP_URL \
     NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL=$NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL
 
+# Fail fast on missing NEXT_PUBLIC_* that are required for the app to function.
+# These are baked into the client bundle at build time, so a missing value
+# silently ships an empty string and the container starts "healthy" but every
+# request fails — a debugging nightmare for self-hosted operators.
+#
+#  - SDP_API_BASE_URL / API_BASE_URL: api-playground + sdp-api client
+#  - CLERK_PUBLISHABLE_KEY:           Clerk middleware throws 500 on every hit
+#
+# Whitespace is stripped before the empty check so callers can't slip a
+# "   " value past validation and bake it into the bundle.
+RUN sdp_api="$(printf %s "$NEXT_PUBLIC_SDP_API_BASE_URL" | tr -d '[:space:]')"; \
+    legacy_api="$(printf %s "$NEXT_PUBLIC_API_BASE_URL" | tr -d '[:space:]')"; \
+    clerk_key="$(printf %s "$NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY" | tr -d '[:space:]')"; \
+    if [ -z "$sdp_api" ] && [ -z "$legacy_api" ]; then \
+      echo "ERROR: pass --build-arg NEXT_PUBLIC_SDP_API_BASE_URL=<url> (or NEXT_PUBLIC_API_BASE_URL) — required for the API playground and sdp-api client." >&2; \
+      exit 1; \
+    fi; \
+    if [ -z "$clerk_key" ]; then \
+      echo "ERROR: pass --build-arg NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_... — Clerk SDK throws on missing publishableKey and the app becomes unreachable." >&2; \
+      exit 1; \
+    fi
+
 # Sentry sourcemap upload is gated on SENTRY_AUTH_TOKEN. The secret is mounted
 # only for the duration of this RUN and never written to a layer. If the
 # secret is not provided the build still succeeds; sourcemaps just aren't
@@ -83,7 +107,7 @@ RUN --mount=type=secret,id=sentry_auth_token \
     pnpm --filter sdp-web build
 
 # ── Runtime: slim image with only the standalone output ────────────────────
-FROM node:22-slim AS runner
+FROM node:22-slim@sha256:689c11043dad91472750cd824c97dd5e2318e9dd6f954e492fe7af0135d33ceb AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production \
@@ -103,7 +127,28 @@ COPY --from=builder --chown=nextjs:nodejs /repo/apps/sdp-web/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /repo/apps/sdp-web/.next/static ./apps/sdp-web/.next/static
 COPY --from=builder --chown=nextjs:nodejs /repo/apps/sdp-web/public ./apps/sdp-web/public
 
+# Provenance metadata for image registries / `docker image inspect`. Pass
+# GIT_SHA at build time (e.g. --build-arg GIT_SHA=$(git rev-parse HEAD)) so
+# published images carry the exact source revision. IMAGE_SOURCE is
+# overridable so forks/redistributors can point at their own repository.
+ARG GIT_SHA=""
+ARG IMAGE_SOURCE="https://github.com/solana-foundation/solana-developer-platform"
+LABEL org.opencontainers.image.title="sdp-web" \
+      org.opencontainers.image.description="Solana Developer Platform — web (dashboard, API playground, docs proxy)" \
+      org.opencontainers.image.source="$IMAGE_SOURCE" \
+      org.opencontainers.image.revision="$GIT_SHA" \
+      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.vendor="Solana Foundation"
+
 USER nextjs
 EXPOSE 3000
+
+# Liveness for plain `docker run`/compose. k8s ignores HEALTHCHECK and uses
+# pod-level probes, so this is harmless there. `status<500` (not `r.ok`)
+# because liveness means "the HTTP layer is up" — any 2xx/3xx/4xx response
+# proves the Node process is alive and serving, even if a specific route
+# returns 4xx for config reasons. 5xx is the only signal of a dead app.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+    CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/').then(r=>process.exit(r.status<500?0:1)).catch(()=>process.exit(1))"
 
 CMD ["node", "apps/sdp-web/server.js"]

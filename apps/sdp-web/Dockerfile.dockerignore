@@ -10,8 +10,14 @@ playwright
 playwright-report
 test-results
 
-# Docs are served separately (sdp-docs) and only proxied at runtime
+# Docs are served separately (sdp-docs) and only proxied at runtime.
+# Top-level `docs/` (notes, plans) is also unrelated to the runtime image.
+apps/sdp-docs
 docs
+
+# Sibling apps that this Dockerfile never copies — keep them out of the
+# build context so remote builders don't ship ~17M of unrelated source.
+apps/sdp-api
 
 # Local env files — host-only; container envs come from build-args / -e
 .env
@@ -26,6 +32,9 @@ docs
 .idea
 .DS_Store
 
-# This file and the Dockerfile itself shouldn't end up in the image
-Dockerfile
-.dockerignore
+# This Dockerfile and its sidecar .dockerignore are context hygiene only —
+# the runtime stage copies only standalone/static/public, so they never end
+# up in the image regardless. Patterns are relative to the build context
+# (monorepo root), so the bare names don't match the actual files.
+apps/sdp-web/Dockerfile
+apps/sdp-web/Dockerfile.dockerignore
