@@ -480,18 +480,18 @@ const lightsparkRampPaymentInstructionSchema = z.object({
   accountOrWalletInfo: z
     .object({
       accountType: z.string().openapi({ example: "USD_ACCOUNT" }),
-      accountNumber: z.string().optional().openapi({ example: "1111222233331111" }),
-      routingNumber: z.string().optional().openapi({ example: "021000021" }),
+      accountNumber: z.string().optional().openapi({ example: "0000000000000000" }),
+      routingNumber: z.string().optional().openapi({ example: "000000000" }),
       paymentRails: z
         .array(z.string())
         .optional()
         .openapi({ example: ["ACH", "WIRE"] }),
-      reference: z.string().optional().openapi({ example: "71057fde-67b5-4484-93de-860add037c6b" }),
-      bankName: z.string().optional().openapi({ example: "Grid Settlement Bank" }),
+      reference: z.string().optional().openapi({ example: "quote-reference-example" }),
+      bankName: z.string().optional().openapi({ example: "Example Bank" }),
       address: z
         .string()
         .optional()
-        .openapi({ example: "4Nd1m6Qkq7RfKuE5vQ9qP9Tn6H94Ueqb4xXHzsAbd8Wg" }),
+        .openapi({ example: "ExampleSolanaWalletAddress11111111111111111" }),
       assetType: z.string().optional().openapi({ example: "USDC" }),
     })
     .openapi({
