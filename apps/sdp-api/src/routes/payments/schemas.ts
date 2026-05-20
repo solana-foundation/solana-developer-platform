@@ -4,21 +4,31 @@ import { isAddress } from "@/lib/solana";
 import { SOL_MINT } from "@/services/payment-operation.service";
 
 // Payments token field: native SOL keyword, the canonical SOL mint, or a base58
-// Solana mint address. Validating the base58 shape here returns 400 BAD_REQUEST
-// instead of letting `assertValidAddress` throw a plain Error downstream (500),
-// or — on Execute mode — letting the bad mint reach the RPC and surface as
-// 502 SOLANA_RPC_ERROR after creating a stuck transfer record.
-const paymentTokenSchema = z.union([
-  z.literal("SOL"),
-  z.literal(SOL_MINT),
-  z
-    .string()
-    .min(32)
-    .max(44)
-    .refine((value) => isAddress(value), {
-      message: "token must be a base58 Solana mint address",
-    }),
-]);
+// Solana mint address. Trim and case-fold the native keyword in a preprocess so
+// validation matches `normalizePaymentToken`/`isNativePaymentToken` (which both
+// accept case-insensitive "SOL" with surrounding whitespace). Validating the
+// base58 shape here returns 400 BAD_REQUEST instead of letting
+// `assertValidAddress` throw a plain Error downstream (500), or — on Execute
+// mode — letting the bad mint reach the RPC and surface as 502
+// SOLANA_RPC_ERROR after creating a stuck transfer record.
+const paymentTokenSchema = z.preprocess(
+  (value) => {
+    if (typeof value !== "string") return value;
+    const trimmed = value.trim();
+    return trimmed.toUpperCase() === "SOL" ? "SOL" : trimmed;
+  },
+  z.union([
+    z.literal("SOL"),
+    z.literal(SOL_MINT),
+    z
+      .string()
+      .min(32)
+      .max(44)
+      .refine((value) => isAddress(value), {
+        message: "token must be a base58 Solana mint address",
+      }),
+  ])
+);
 
 export const walletIdParamsSchema = z.object({
   walletId: z.string().min(1),
