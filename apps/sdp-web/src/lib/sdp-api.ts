@@ -39,6 +39,10 @@ async function getClerkToken(): Promise<string> {
 
 type SdpApiRequestFn = (path: string, options?: RequestInit) => Promise<Response>;
 
+function roundDuration(durationMs: number): number {
+  return Math.round(durationMs * 10) / 10;
+}
+
 function createTraceRequestId(traceId: string, sequence: number): string {
   const suffix = sequence.toString().padStart(2, "0");
   return `${traceId}:${suffix}`.slice(0, 128);
@@ -62,12 +66,30 @@ function createSdpApiRequest(token: string, traceContext?: TraceContext): SdpApi
     headers.set(TRACE_ID_HEADER, traceId);
     headers.set(TRACE_SOURCE_HEADER, source);
     headers.set("X-Request-ID", requestId);
+    const startedAt = performance.now();
+    const method = options.method ?? "GET";
 
     const response = await fetch(url, {
       ...options,
       headers,
       cache: "no-store",
     });
+
+    console.info(
+      JSON.stringify({
+        event: "sdp_web_api_request",
+        timestamp: new Date().toISOString(),
+        traceId,
+        source,
+        requestId,
+        method,
+        path,
+        status: response.status,
+        durationMs: roundDuration(performance.now() - startedAt),
+        upstreamRequestId: response.headers.get("X-Request-ID"),
+        upstreamServerTiming: response.headers.get("Server-Timing"),
+      })
+    );
 
     return response;
   };
