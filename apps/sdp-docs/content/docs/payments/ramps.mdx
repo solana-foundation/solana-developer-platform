@@ -151,7 +151,7 @@ You always pass `provider` explicitly today; SDP does not auto-select. Choose ba
 
 - **Coverage** — which providers your org has configured (see [Ramp providers](/docs/payments/ramps-providers#provider-gating)).
 - **Region** — providers have different country / payment-method support.
-- **Sandbox needs** — MoonPay and BVNK ship sandboxes; Lightspark currently does not.
+- **Sandbox needs** — all three providers ship sandboxes; sandbox vs production is chosen per request from the calling API key's environment (see [Sandbox vs production](/docs/payments/ramps-providers#sandbox-vs-production-selection)).
 - **Compliance attachment** — only BVNK accepts the `bvnkCompliance` field (a `{ "partyDetails": [...] }` object) today.
 
 ## Fiat currency support

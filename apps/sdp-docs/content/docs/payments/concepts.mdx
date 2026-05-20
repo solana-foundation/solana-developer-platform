@@ -53,7 +53,7 @@ Every successful or attempted transfer creates a `Transfer` record. The fields t
 | `error` | Set if the transfer failed; the rest of the record explains what reached the network. |
 | `risk` | Optional risk-score metadata, when a risk provider is configured. |
 
-A transfer can move from `pending` to `failed` without ever producing a `signature`; or from `pending` through `processing` / `confirmed` to `finalized` once the network finalizes the slot.
+The status path depends on how the transfer was created. Execute-mode starts at `processing` and moves to `confirmed` → `finalized`. Prepare-mode starts at `pending` (serialized tx saved but not submitted) and moves to `processing` once the signed tx is submitted; if the blockhash expires before submission it transitions to `failed` without ever producing a `signature`. Inbound transfers discovered on-chain surface directly at `confirmed`. See [Verifying a payment](/docs/payments/accept-verification#status-lifecycle) for the full state table.
 
 ## What SDP does and does not give you
 

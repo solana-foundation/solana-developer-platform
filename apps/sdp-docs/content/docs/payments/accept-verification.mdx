@@ -11,13 +11,13 @@ The `status` field on the `Transfer` record takes one of five values:
 
 | Status | Meaning |
 | --- | --- |
-| `pending` | Used for transfers SDP knows about but has not yet submitted or observed on the network — primarily the inbound watcher's initial state. No `signature` yet. |
-| `processing` | The transfer is in flight. For Execute-mode this is the **initial state** at record creation: the request has been accepted and the transaction is being built and submitted; the `signature` field is not yet populated when the record is first written. |
+| `pending` | Prepare-mode outbound transfers — `POST /v1/payments/transfers/prepare` saves the serialized transaction and the record stays `pending` until the client submits the signed tx (then it moves to `processing`) or the blockhash expires (then the `track-pending-transfers` job marks it `failed`). No `signature` yet. |
+| `processing` | The transfer is in flight. For Execute-mode this is the **initial state** at record creation: the request has been accepted and the transaction is being built and submitted; the `signature` field is not yet populated when the record is first written. Prepare-mode transfers also enter `processing` once the signed transaction is submitted. |
 | `confirmed` | The cluster has confirmed the transaction. `signature` and `slot` are populated. `blockTime` may also be set, but is not guaranteed at this stage — treat it as optional until `finalized`. |
 | `finalized` | The slot containing the transaction is locked in by the network — finality at the Solana cluster's strongest guarantee. `signature` and `slot` are populated; `blockTime` is best-effort and may remain `null` for Execute-mode transfers whose finalization is observed by the `track-pending-transfers` job (which updates status and slot but does not backfill block time). When you need a definitive timestamp, resolve it from the on-chain `signature` via Solana RPC. Safe to treat as irreversible. |
 | `failed` | The transaction was built and submitted but rejected by the network (insufficient funds, frozen account, expired blockhash, etc.). The `error` field describes what reached the chain. |
 
-A transfer moves forward through `processing → confirmed → finalized` for Execute-mode flows, or `pending → processing → confirmed → finalized` when SDP first detects an inbound transfer before observing it on-chain. Any state can transition to `failed`; `failed` is terminal.
+A transfer moves forward through `processing → confirmed → finalized` for Execute-mode, or `pending → processing → confirmed → finalized` for Prepare-mode (with `pending → failed` if the blockhash expires before submission). **Inbound transfers** discovered via on-chain signature history surface directly at `confirmed` (or `failed` if the on-chain transaction errored) — they never appear as `pending`. Any state can transition to `failed`; `failed` is terminal.
 
 ## Finality on Solana
 
