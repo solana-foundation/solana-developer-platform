@@ -1,0 +1,41 @@
+# Build/runtime artifacts that must come from the image build, not the host
+node_modules
+.next
+.turbo
+dist
+coverage
+
+# Test infrastructure unrelated to the runtime image
+playwright
+playwright-report
+test-results
+
+# Docs are served separately (sdp-docs) and only proxied at runtime.
+# Top-level `docs/` (notes, plans) is also unrelated to the runtime image.
+apps/sdp-docs
+docs
+
+# Workspace siblings this Dockerfile never copies — keep them out of the
+# build context so remote builders don't ship unrelated source.
+apps/sdp-api
+packages/sdp-api-integration
+
+# Local env files — host-only; container envs come from build-args / -e
+.env
+.env.*
+!.env.example
+!.env.local.example
+
+# Editor / OS / VCS noise
+.git
+.gitignore
+.vscode
+.idea
+.DS_Store
+
+# This Dockerfile and its sidecar .dockerignore are context hygiene only —
+# the runtime stage copies only standalone/static/public, so they never end
+# up in the image regardless. Patterns are relative to the build context
+# (monorepo root), so the bare names don't match the actual files.
+apps/sdp-web/Dockerfile
+apps/sdp-web/Dockerfile.dockerignore

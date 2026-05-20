@@ -4,6 +4,10 @@ const PROCESS_ENV_FALLBACK_KEYS = [
   "ENVIRONMENT",
   "API_VERSION",
   "SDP_DEPLOYMENT_MODE",
+  // Connection strings populated from process.env when bindings aren't set
+  // — pg uses DATABASE_URL, RedisKVStore uses REDIS_URL.
+  "DATABASE_URL",
+  "REDIS_URL",
   "API_KEY_PEPPER",
   "CUSTODY_ENCRYPTION_KEY",
   "SENTRY_DSN",

@@ -23,6 +23,8 @@ import { IssuanceHeaderTabs } from "@/components/issuance-header-tabs";
 import { NetworkDebugPanel, NetworkDebugToggle } from "@/components/network-debug-panel";
 import { SentryFeedbackWidget } from "@/components/sentry-feedback-widget";
 import { SentryUserContext } from "@/components/sentry-user-context";
+import { Badge } from "@/components/ui/badge";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 
 type NavItem = {
@@ -175,6 +177,15 @@ function DashboardTopBar({
   centeredTitle,
   topBarLeadingContent,
 }: DashboardTopBarProps) {
+  const { sdpEnvironment } = useDashboardWorkspace();
+  const isSandbox = sdpEnvironment === "sandbox";
+  const sandboxBadge = isSandbox ? (
+    <>
+      <span aria-hidden="true" className="h-4 w-px bg-border-light" />
+      <Badge>Sandbox</Badge>
+    </>
+  ) : null;
+
   if (centeredTitle) {
     return (
       <div className="grid min-h-[40px] grid-cols-[1fr_auto_1fr] items-start gap-3">
@@ -194,6 +205,7 @@ function DashboardTopBar({
         </div>
         <div className="flex items-center justify-end gap-2">
           <UserButton />
+          {sandboxBadge}
         </div>
       </div>
     );
@@ -217,8 +229,52 @@ function DashboardTopBar({
 
       <div className="flex items-center gap-2">
         <UserButton />
+        {sandboxBadge}
       </div>
     </div>
+  );
+}
+
+function SandboxToggle() {
+  const { sdpEnvironment } = useDashboardWorkspace();
+  const isSandbox = sdpEnvironment === "sandbox";
+
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className="block w-full">
+            <button
+              type="button"
+              disabled
+              aria-pressed={isSandbox}
+              className="flex h-10 w-full cursor-not-allowed items-center gap-3 rounded-[var(--button-radius-lg)] px-3 text-[16px] leading-[24px] text-text-medium"
+            >
+              <span
+                className={[
+                  "relative inline-flex h-5 w-9 shrink-0 rounded-full border transition-colors",
+                  isSandbox
+                    ? "border-text-extra-high bg-text-extra-high"
+                    : "border-border-medium bg-border-medium",
+                ].join(" ")}
+                aria-hidden="true"
+              >
+                <span
+                  className={[
+                    "absolute top-1/2 size-3.5 -translate-y-1/2 rounded-full bg-white shadow-sm transition-transform",
+                    isSandbox ? "translate-x-4.5" : "translate-x-0.5",
+                  ].join(" ")}
+                />
+              </span>
+              <span className="min-w-0 truncate text-left">Sandbox mode</span>
+            </button>
+          </span>
+        </TooltipTrigger>
+        <TooltipContent side="right" align="center" sideOffset={28} className="text-xs">
+          Only Sandbox mode supported at the moment
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   );
 }
 
@@ -425,6 +481,13 @@ function DashboardSidebarContent({
             onNavigate={onNavigate}
           />
         ))}
+        <div className="space-y-2">
+          <p className="px-3 text-[12px] uppercase tracking-[0.4px] text-text-extra-low">Mode</p>
+          <div className="space-y-0.5">
+            <SandboxToggle />
+            <NetworkDebugToggle />
+          </div>
+        </div>
       </div>
       <div className="space-y-0.5 pb-1">
         <SentryFeedbackWidget />
@@ -444,7 +507,6 @@ function DashboardSidebarContent({
             </Link>
           );
         })}
-        <NetworkDebugToggle />
       </div>
     </>
   );
