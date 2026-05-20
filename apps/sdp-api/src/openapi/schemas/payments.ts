@@ -426,7 +426,7 @@ export const executeOfframpRequestSchema = executeOfframpSchemaBase
   })
   .openapi({ description: "Execute off-ramp request payload." });
 
-export const simulateSandboxTransferRequestSchema = simulateSandboxTransferSchemaBase.openapi({
+export const simulateSandboxTransferRequestSchema = withOpenApi(simulateSandboxTransferSchemaBase, {
   description:
     "Sandbox-only helper to simulate provider-specific transfer completion flows. The payload is discriminated by provider.",
 });
