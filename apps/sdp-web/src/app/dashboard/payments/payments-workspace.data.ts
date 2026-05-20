@@ -2,6 +2,8 @@
 
 import type {
   CustodyWalletAggregate,
+  PaymentRampExecution,
+  PaymentRampInstruction,
   PaymentsWalletAggregateEnvelope,
   PaymentTransferEnvelope as TransferEnvelope,
   PaymentTransferSummary as TransferRecord,
@@ -16,6 +18,8 @@ import {
   screenAddressCompliance,
 } from "@/lib/compliance";
 import type { ComplianceSnapshot } from "./payments-workspace.types";
+
+export type { PaymentRampExecution, PaymentRampInstruction } from "@sdp/types";
 
 type ApiErrorBody = {
   error?: {
@@ -261,17 +265,22 @@ interface WalletBalancesEnvelope {
   };
 }
 
-export interface PaymentRampExecution {
-  id: string;
-  provider: string;
-  status: string;
-  redirectUrl?: string;
-  reference?: string;
-}
-
 interface RampExecutionEnvelope {
   data?: {
     ramp?: PaymentRampExecution;
+  };
+  error?: {
+    message?: string;
+  };
+}
+
+interface SandboxTransferSimulationEnvelope {
+  data?: {
+    transaction?: {
+      id?: string;
+      status?: string;
+      quoteId?: string;
+    };
   };
   error?: {
     message?: string;
@@ -452,6 +461,32 @@ export async function executeRampFlow(
   }
 
   return body.data.ramp;
+}
+
+type SandboxTransferSimulationInput = {
+  provider: "lightspark";
+  payload: {
+    quoteId: string;
+    currencyCode?: "USD";
+    currencyAmount?: number;
+  };
+};
+
+export async function simulateSandboxTransfer(input: SandboxTransferSimulationInput) {
+  const response = await fetch("/api/dashboard/payments/ramps/sandbox/simulate", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(input),
+  });
+  const body = (await response.json().catch(() => ({}))) as SandboxTransferSimulationEnvelope;
+
+  if (!response.ok) {
+    throw new Error(getApiError(body, `Sandbox simulation failed (${response.status}).`));
+  }
+
+  return body.data?.transaction ?? null;
 }
 
 export async function runComplianceCheck(

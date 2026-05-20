@@ -655,18 +655,51 @@ describe("Payments routes", () => {
   });
 
   it("creates a Lightspark on-ramp quote through the execute endpoint", async () => {
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          id: "Quote:ls_onramp_123",
-          quoteStatus: "PENDING",
-        }),
-        {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        }
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            data: [
+              {
+                id: "ExternalAccount:acc_destination_123",
+                accountInfo: {
+                  accountType: "SOLANA_WALLET",
+                  address: TEST_SOLANA_ADDRESSES.wallet1,
+                },
+              },
+            ],
+            hasMore: false,
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }
+        )
       )
-    );
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            id: "Quote:ls_onramp_123",
+            quoteStatus: "PENDING",
+            paymentInstructions: [
+              {
+                accountOrWalletInfo: {
+                  accountType: "USD_ACCOUNT",
+                  paymentRails: ["ACH"],
+                  accountNumber: "1234567890",
+                  routingNumber: "021000021",
+                  reference: "ref_123",
+                },
+              },
+            ],
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }
+        )
+      );
 
     const res = await app.request(
       "/v1/payments/ramps/onramp/execute",
@@ -678,8 +711,8 @@ describe("Payments routes", () => {
         },
         body: JSON.stringify({
           provider: "lightspark",
-          destinationWallet: "ExternalAccount:acc_destination_123",
-          cryptoToken: "BTC",
+          destinationWallet: TEST_WALLET_ID,
+          cryptoToken: "USDC",
           fiatCurrency: "USD",
           fiatAmount: "12.34",
           kycReference: "Customer:cus_123",
@@ -690,17 +723,30 @@ describe("Payments routes", () => {
 
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
-      data: { ramp: { id: string; provider: string; status: string; reference: string } };
+      data: {
+        ramp: {
+          id: string;
+          provider: string;
+          status: string;
+          paymentInstructions: Array<{
+            provider: "lightspark";
+            accountOrWalletInfo: { paymentRails: string[] };
+          }>;
+          reference: string;
+        };
+      };
     };
 
     expect(body.data.ramp.id.startsWith("ramp_")).toBe(true);
     expect(body.data.ramp.provider).toBe("lightspark");
     expect(body.data.ramp.status).toBe("pending");
     expect(body.data.ramp.reference).toBe("Quote:ls_onramp_123");
+    expect(body.data.ramp.paymentInstructions[0]?.provider).toBe("lightspark");
+    expect(body.data.ramp.paymentInstructions[0]?.accountOrWalletInfo.paymentRails[0]).toBe("ACH");
 
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
-    const requestUrl = fetchSpy.mock.calls[0]?.[0];
-    const requestInit = fetchSpy.mock.calls[0]?.[1];
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    const requestUrl = fetchSpy.mock.calls[1]?.[0];
+    const requestInit = fetchSpy.mock.calls[1]?.[1];
     expect(String(requestUrl)).toBe(`${LIGHTSPARK_GRID_API_BASE_URL}/quotes`);
     expect(requestInit?.method).toBe("POST");
 
@@ -718,7 +764,7 @@ describe("Payments routes", () => {
     expect(payload.source.currency).toBe("USD");
     expect(payload.destination.destinationType).toBe("ACCOUNT");
     expect(payload.destination.accountId).toBe("ExternalAccount:acc_destination_123");
-    expect(payload.destination.currency).toBe("BTC");
+    expect(payload.destination.currency).toBe("USDC");
     fetchSpy.mockRestore();
   });
 
@@ -797,6 +843,77 @@ describe("Payments routes", () => {
       destination: { accountId: string };
     };
     expect(quotePayload.destination.accountId).toBe("ExternalAccount:acc_existing_123");
+    fetchSpy.mockRestore();
+  });
+
+  it("resolves SDP wallet ids for Lightspark on-ramp destinations", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            data: [
+              {
+                id: "ExternalAccount:acc_wallet_123",
+                accountInfo: {
+                  accountType: "SOLANA_WALLET",
+                  address: TEST_SOLANA_ADDRESSES.wallet1,
+                },
+              },
+            ],
+            hasMore: false,
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            id: "Quote:ls_onramp_wallet_123",
+            quoteStatus: "PENDING",
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }
+        )
+      );
+
+    const res = await app.request(
+      "/v1/payments/ramps/onramp/execute",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          provider: "lightspark",
+          destinationWallet: TEST_WALLET_ID,
+          cryptoToken: "USDC",
+          fiatCurrency: "USD",
+          fiatAmount: "5.00",
+          kycReference: "Customer:cus_123",
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      data: { ramp: { provider: string; reference: string } };
+    };
+    expect(body.data.ramp.provider).toBe("lightspark");
+    expect(body.data.ramp.reference).toBe("Quote:ls_onramp_wallet_123");
+
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    const quotePayload = JSON.parse(String(fetchSpy.mock.calls[1]?.[1]?.body)) as {
+      destination: { accountId: string };
+    };
+    expect(quotePayload.destination.accountId).toBe("ExternalAccount:acc_wallet_123");
     fetchSpy.mockRestore();
   });
 
