@@ -17,6 +17,7 @@ import {
   ExternalLink,
   RefreshCw,
 } from "lucide-react";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import QRCode from "qrcode";
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
@@ -577,7 +578,14 @@ function WalletAddressQrCode({ address }: { address: string }) {
       <div className="flex flex-col items-center gap-5 sm:flex-row sm:items-start">
         <div className="flex size-[180px] items-center justify-center rounded-2xl bg-white p-4 ring-1 ring-border-extra-light">
           {qrCodeUrl ? (
-            <img src={qrCodeUrl} alt="Wallet address QR code" className="size-full" />
+            <Image
+              src={qrCodeUrl}
+              alt="Wallet address QR code"
+              width={148}
+              height={148}
+              unoptimized
+              className="size-full"
+            />
           ) : (
             <div className="size-full animate-pulse rounded-xl bg-border-light" />
           )}
@@ -722,9 +730,7 @@ function PaymentInstructionsCard({
                 <p className="text-xs font-medium uppercase tracking-[0.08em] text-text-low">
                   Supported rails
                 </p>
-                <p className="mt-1 text-sm text-text-extra-high">
-                  {info.paymentRails.join(", ")}
-                </p>
+                <p className="mt-1 text-sm text-text-extra-high">{info.paymentRails.join(", ")}</p>
               </div>
             ) : null}
             {instruction.instructionsNotes ? (
@@ -732,9 +738,7 @@ function PaymentInstructionsCard({
                 <p className="text-xs font-medium uppercase tracking-[0.08em] text-text-low">
                   Notes
                 </p>
-                <p className="mt-1 text-sm text-text-extra-high">
-                  {instruction.instructionsNotes}
-                </p>
+                <p className="mt-1 text-sm text-text-extra-high">{instruction.instructionsNotes}</p>
               </div>
             ) : null}
           </div>
@@ -744,6 +748,122 @@ function PaymentInstructionsCard({
         <p className="text-xs font-medium text-status-success-text">
           Sandbox funding completed. Visit the wallet to review the updated balance.
         </p>
+      ) : null}
+    </div>
+  );
+}
+
+function RampSuccessView({
+  amount,
+  canSimulateLightsparkSandbox,
+  isOnrampBranch,
+  onOpenRedirect,
+  onResultTabChange,
+  onSimulateSandboxFunding,
+  providerLabel,
+  rampExecution,
+  rampResultTab,
+  rampReviewRows,
+  sandboxSimulationLoading,
+  sandboxSimulationSucceeded,
+}: {
+  amount: string;
+  canSimulateLightsparkSandbox: boolean;
+  isOnrampBranch: boolean;
+  onOpenRedirect: (url: string) => void;
+  onResultTabChange: (value: RampResultTab) => void;
+  onSimulateSandboxFunding: () => void;
+  providerLabel: string | null;
+  rampExecution: PaymentRampExecution;
+  rampResultTab: RampResultTab;
+  rampReviewRows: SummaryRow[];
+  sandboxSimulationLoading: boolean;
+  sandboxSimulationSucceeded: boolean;
+}) {
+  const hasPaymentInstructions = Boolean(rampExecution.paymentInstructions?.length);
+  const showSummary = rampResultTab === "summary" || !hasPaymentInstructions;
+  const summaryRows = [
+    ...rampReviewRows,
+    {
+      label: "Status",
+      value: rampExecution.status,
+    },
+    ...(rampExecution.reference
+      ? [
+          {
+            label: "Reference",
+            value: <span className="font-mono text-xs">{rampExecution.reference}</span>,
+          },
+        ]
+      : []),
+  ];
+
+  return (
+    <div className="space-y-6">
+      <div className="rounded-2xl border border-status-success-border bg-status-success-bg p-5">
+        <p className="text-[20px] font-medium text-status-success-text">
+          {providerLabel ?? "Provider"} flow ready
+        </p>
+        <p className="mt-2 text-sm text-status-success-text">
+          Continue with the provider using the details below.
+        </p>
+      </div>
+
+      {hasPaymentInstructions ? (
+        <Tabs
+          value={rampResultTab}
+          onValueChange={(value) => {
+            if (value === "summary" || value === "instructions") {
+              onResultTabChange(value);
+            }
+          }}
+        >
+          <TabList>
+            <Tab value="summary">Summary</Tab>
+            <Tab value="instructions">Payment Instructions</Tab>
+          </TabList>
+        </Tabs>
+      ) : null}
+
+      {showSummary ? (
+        <>
+          <ReviewSummaryCard rows={summaryRows} />
+          {rampExecution.redirectUrl ? (
+            <div className="rounded-2xl border border-border-light bg-border-extra-light p-5">
+              <p className="text-sm font-medium text-text-extra-high">Redirect URL</p>
+              <p className="mt-3 break-all font-mono text-xs text-text-medium">
+                {rampExecution.redirectUrl}
+              </p>
+              <div className="mt-4 flex justify-end">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => onOpenRedirect(rampExecution.redirectUrl ?? "")}
+                >
+                  Open {providerLabel ?? "provider"}
+                </Button>
+              </div>
+            </div>
+          ) : null}
+        </>
+      ) : null}
+
+      {rampResultTab === "instructions" && rampExecution.paymentInstructions ? (
+        <div className="space-y-4">
+          <PaymentInstructionsCard
+            amount={isOnrampBranch ? amount.trim() : ""}
+            instructions={rampExecution.paymentInstructions}
+            sandboxFundingSimulation={
+              canSimulateLightsparkSandbox
+                ? {
+                    loading: sandboxSimulationLoading,
+                    succeeded: sandboxSimulationSucceeded,
+                    onSimulate: onSimulateSandboxFunding,
+                  }
+                : undefined
+            }
+          />
+        </div>
       ) : null}
     </div>
   );
@@ -1747,6 +1867,15 @@ export function PaymentsActionPage({
     }
   };
 
+  const handleSuccessfulReviewAction = () => {
+    if (sandboxSimulationSucceeded && selectedWalletId) {
+      router.push(`/dashboard/custody/${encodeURIComponent(selectedWalletId)}`);
+      return;
+    }
+
+    router.push(buildPaymentsReturnUrl(transferResult?.id ?? rampExecution?.id ?? null));
+  };
+
   const handlePrimaryAction = async () => {
     if (currentStep.id === "branch") {
       if (branch) {
@@ -1776,11 +1905,7 @@ export function PaymentsActionPage({
 
     if (currentStep.id === "review") {
       if (executionState === "success") {
-        if (sandboxSimulationSucceeded && selectedWalletId) {
-          router.push(`/dashboard/custody/${encodeURIComponent(selectedWalletId)}`);
-          return;
-        }
-        router.push(buildPaymentsReturnUrl(transferResult?.id ?? rampExecution?.id ?? null));
+        handleSuccessfulReviewAction();
         return;
       }
 
@@ -2285,7 +2410,6 @@ export function PaymentsActionPage({
     }
 
     if (executionState === "success" && rampExecution) {
-      const hasPaymentInstructions = Boolean(rampExecution.paymentInstructions?.length);
       const canSimulateLightsparkSandbox =
         sdpEnvironment === "sandbox" &&
         provider === "lightspark" &&
@@ -2293,90 +2417,20 @@ export function PaymentsActionPage({
         Boolean(rampExecution.reference);
 
       return (
-        <div className="space-y-6">
-          <div className="rounded-2xl border border-status-success-border bg-status-success-bg p-5">
-            <p className="text-[20px] font-medium text-status-success-text">
-              {providerLabel ?? "Provider"} flow ready
-            </p>
-            <p className="mt-2 text-sm text-status-success-text">
-              Continue with the provider using the details below.
-            </p>
-          </div>
-          {hasPaymentInstructions ? (
-            <Tabs
-              value={rampResultTab}
-              onValueChange={(value) => {
-                if (value === "summary" || value === "instructions") {
-                  setRampResultTab(value);
-                }
-              }}
-            >
-              <TabList>
-                <Tab value="summary">Summary</Tab>
-                <Tab value="instructions">Payment Instructions</Tab>
-              </TabList>
-            </Tabs>
-          ) : null}
-
-          {rampResultTab === "summary" || !hasPaymentInstructions ? (
-            <>
-              <ReviewSummaryCard
-                rows={[
-                  ...rampReviewRows,
-                  {
-                    label: "Status",
-                    value: rampExecution.status,
-                  },
-                  ...(rampExecution.reference
-                    ? [
-                        {
-                          label: "Reference",
-                          value: <span className="font-mono text-xs">{rampExecution.reference}</span>,
-                        },
-                      ]
-                    : []),
-                ]}
-              />
-              {rampExecution.redirectUrl ? (
-                <div className="rounded-2xl border border-border-light bg-border-extra-light p-5">
-                  <p className="text-sm font-medium text-text-extra-high">Redirect URL</p>
-                  <p className="mt-3 break-all font-mono text-xs text-text-medium">
-                    {rampExecution.redirectUrl}
-                  </p>
-                  <div className="mt-4 flex justify-end">
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      onClick={() =>
-                        window.open(rampExecution.redirectUrl, "_blank", "noopener,noreferrer")
-                      }
-                    >
-                      Open {providerLabel ?? "provider"}
-                    </Button>
-                  </div>
-                </div>
-              ) : null}
-            </>
-          ) : null}
-
-          {rampResultTab === "instructions" && rampExecution.paymentInstructions ? (
-            <div className="space-y-4">
-              <PaymentInstructionsCard
-                amount={isOnrampBranch ? amount.trim() : ""}
-                instructions={rampExecution.paymentInstructions}
-                sandboxFundingSimulation={
-                  canSimulateLightsparkSandbox
-                    ? {
-                        loading: sandboxSimulationLoading,
-                        succeeded: sandboxSimulationSucceeded,
-                        onSimulate: () => void simulateCurrentLightsparkQuote(),
-                      }
-                    : undefined
-                }
-              />
-            </div>
-          ) : null}
-        </div>
+        <RampSuccessView
+          amount={amount}
+          canSimulateLightsparkSandbox={canSimulateLightsparkSandbox}
+          isOnrampBranch={isOnrampBranch}
+          onOpenRedirect={(url) => window.open(url, "_blank", "noopener,noreferrer")}
+          onResultTabChange={setRampResultTab}
+          onSimulateSandboxFunding={() => void simulateCurrentLightsparkQuote()}
+          providerLabel={providerLabel}
+          rampExecution={rampExecution}
+          rampResultTab={rampResultTab}
+          rampReviewRows={rampReviewRows}
+          sandboxSimulationLoading={sandboxSimulationLoading}
+          sandboxSimulationSucceeded={sandboxSimulationSucceeded}
+        />
       );
     }
 

@@ -3,7 +3,7 @@ import {
   type ButtonProps as SolanaButtonProps,
 } from "@solana/design-system/button";
 import { Slot } from "@solana/design-system/utils";
-import { type ComponentProps } from "react";
+import type { ComponentProps } from "react";
 
 import { cn } from "@/lib/utils";
 

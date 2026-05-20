@@ -1,3 +1,4 @@
+import { RAMP_PROVIDERS } from "@sdp/types";
 import {
   createTransferSchema as createTransferSchemaBase,
   executeOfframpSchema as executeOfframpSchemaBase,
@@ -13,7 +14,6 @@ import {
   updateWalletPolicySchema as updateWalletPolicySchemaBase,
   walletIdParamsSchema as walletIdParamsSchemaBase,
 } from "../../routes/payments/schemas";
-import { RAMP_PROVIDERS } from "@sdp/types";
 import {
   base64Schema,
   isoDateTimeSchema,
@@ -482,16 +482,21 @@ const lightsparkRampPaymentInstructionSchema = z.object({
       accountType: z.string().openapi({ example: "USD_ACCOUNT" }),
       accountNumber: z.string().optional().openapi({ example: "1111222233331111" }),
       routingNumber: z.string().optional().openapi({ example: "021000021" }),
-      paymentRails: z.array(z.string()).optional().openapi({ example: ["ACH", "WIRE"] }),
-      reference: z
+      paymentRails: z
+        .array(z.string())
+        .optional()
+        .openapi({ example: ["ACH", "WIRE"] }),
+      reference: z.string().optional().openapi({ example: "71057fde-67b5-4484-93de-860add037c6b" }),
+      bankName: z.string().optional().openapi({ example: "Grid Settlement Bank" }),
+      address: z
         .string()
         .optional()
-        .openapi({ example: "71057fde-67b5-4484-93de-860add037c6b" }),
-      bankName: z.string().optional().openapi({ example: "Grid Settlement Bank" }),
-      address: z.string().optional().openapi({ example: "4Nd1m6Qkq7RfKuE5vQ9qP9Tn6H94Ueqb4xXHzsAbd8Wg" }),
+        .openapi({ example: "4Nd1m6Qkq7RfKuE5vQ9qP9Tn6H94Ueqb4xXHzsAbd8Wg" }),
       assetType: z.string().optional().openapi({ example: "USDC" }),
     })
-    .openapi({ description: "Lightspark bank account or crypto wallet details for funding the ramp." }),
+    .openapi({
+      description: "Lightspark bank account or crypto wallet details for funding the ramp.",
+    }),
   instructionsNotes: z
     .string()
     .optional()
@@ -520,10 +525,9 @@ export const onrampExecutionSchema = z
       .url()
       .optional()
       .openapi({ description: "Redirect URL for the ramp provider." }),
-    paymentInstructions: z
-      .array(rampPaymentInstructionSchema)
-      .optional()
-      .openapi({ description: "Provider payment instructions for funding or completing the ramp." }),
+    paymentInstructions: z.array(rampPaymentInstructionSchema).optional().openapi({
+      description: "Provider payment instructions for funding or completing the ramp.",
+    }),
     reference: z
       .string()
       .optional()
@@ -545,10 +549,9 @@ export const offrampExecutionSchema = z
       .url()
       .optional()
       .openapi({ description: "Redirect URL for the ramp provider." }),
-    paymentInstructions: z
-      .array(rampPaymentInstructionSchema)
-      .optional()
-      .openapi({ description: "Provider payment instructions for funding or completing the ramp." }),
+    paymentInstructions: z.array(rampPaymentInstructionSchema).optional().openapi({
+      description: "Provider payment instructions for funding or completing the ramp.",
+    }),
     reference: z.string().optional().openapi({ description: "Provider reference for the payout." }),
   })
   .openapi({ description: "Off-ramp execution status." });

@@ -240,8 +240,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     tags: ["Payments"],
     summary: "Simulate sandbox transfer",
     operationId: "simulateSandboxTransfer",
-    description:
-      "Sandbox-only helper that simulates provider-specific transfer completion flows.",
+    description: "Sandbox-only helper that simulates provider-specific transfer completion flows.",
     security: [{ apiKeyAuth: [] }],
     request: {
       body: {

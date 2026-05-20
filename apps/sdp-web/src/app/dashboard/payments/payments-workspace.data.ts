@@ -3,7 +3,6 @@
 import type {
   CustodyWalletAggregate,
   PaymentRampExecution,
-  PaymentRampInstruction,
   PaymentsWalletAggregateEnvelope,
   PaymentTransferEnvelope as TransferEnvelope,
   PaymentTransferSummary as TransferRecord,
@@ -79,7 +78,7 @@ export function formatRiskScore(result: ComplianceProviderResult): string {
     result.provider === "trm" &&
     result.status === "ok" &&
     result.riskScore === null &&
-    (!result.riskLevel || !result.riskLevel.trim())
+    !result.riskLevel?.trim()
   ) {
     return "No TRM attribution";
   }
@@ -107,11 +106,7 @@ function resolveRiskTone(result: ComplianceProviderResult): RiskTone {
     return "green";
   }
 
-  if (
-    result.provider === "trm" &&
-    result.riskScore === null &&
-    (!result.riskLevel || !result.riskLevel.trim())
-  ) {
+  if (result.provider === "trm" && result.riskScore === null && !result.riskLevel?.trim()) {
     return "green";
   }
 

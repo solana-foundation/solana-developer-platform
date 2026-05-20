@@ -427,9 +427,9 @@ function buildBvnkComplianceDetails(
   const requesterIpAddressRaw = c.req.header("cf-connecting-ip") || c.req.header("x-forwarded-for");
   const partyDetails = Array.isArray(input?.partyDetails)
     ? input.partyDetails.filter(
-      (entry): entry is Record<string, unknown> =>
-        entry !== null && typeof entry === "object" && !Array.isArray(entry)
-    )
+        (entry): entry is Record<string, unknown> =>
+          entry !== null && typeof entry === "object" && !Array.isArray(entry)
+      )
     : [];
 
   if (options?.requirePartyDetails && partyDetails.length === 0) {
@@ -651,13 +651,13 @@ function parseLightsparkExternalAccount(payload: unknown): LightsparkExternalAcc
     accountInfo:
       raw.accountInfo && typeof raw.accountInfo === "object"
         ? {
-          accountType:
-            typeof raw.accountInfo.accountType === "string"
-              ? raw.accountInfo.accountType
-              : undefined,
-          address:
-            typeof raw.accountInfo.address === "string" ? raw.accountInfo.address : undefined,
-        }
+            accountType:
+              typeof raw.accountInfo.accountType === "string"
+                ? raw.accountInfo.accountType
+                : undefined,
+            address:
+              typeof raw.accountInfo.address === "string" ? raw.accountInfo.address : undefined,
+          }
         : undefined,
   };
 }
@@ -1253,7 +1253,10 @@ export async function executeOfframp(c: AppContext) {
 
 export async function simulateSandboxTransfer(c: AppContext) {
   if (resolveSdpEnvironment(c) !== "sandbox") {
-    throw new AppError("FORBIDDEN", "Sandbox transfer simulation is only available in sandbox mode");
+    throw new AppError(
+      "FORBIDDEN",
+      "Sandbox transfer simulation is only available in sandbox mode"
+    );
   }
 
   const body = await c.req.json();
