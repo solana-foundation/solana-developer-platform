@@ -29,6 +29,13 @@ export interface Env {
   // "node" uses DATABASE_URL + REDIS_URL.
   SDP_RUNTIME?: "cloudflare" | "node";
 
+  // When the Node entrypoint runs with multiple replicas, scheduling the
+  // reconciliation cron on every replica would fire the job N times per
+  // tick. Setting this to "true" or "1" makes startCron a no-op so only
+  // one designated replica drives the job. Ignored on Cloudflare (CF uses
+  // a single scheduled handler per deployment).
+  DISABLE_CRON?: string;
+
   // Environment variables
   ENVIRONMENT: "development" | "production";
   API_VERSION: string;
