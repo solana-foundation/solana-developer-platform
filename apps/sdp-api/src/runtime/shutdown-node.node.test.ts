@@ -13,11 +13,18 @@ vi.mock("@/db/client", async (importOriginal) => {
   return { ...actual, closeDatabasePools: vi.fn(async () => {}) };
 });
 
-type Closable = { close: (cb: (err?: Error) => void) => void };
+type Closable = {
+  close: (cb: (err?: Error) => void) => void;
+  closeIdleConnections?: () => void;
+};
 
-function makeServer(closeImpl?: (cb: (err?: Error) => void) => void): Closable {
+function makeServer(
+  closeImpl?: (cb: (err?: Error) => void) => void,
+  closeIdleConnections?: () => void
+): Closable {
   return {
     close: vi.fn(closeImpl ?? ((cb: (err?: Error) => void) => cb())),
+    ...(closeIdleConnections ? { closeIdleConnections: vi.fn(closeIdleConnections) } : {}),
   };
 }
 
@@ -95,5 +102,35 @@ describe("shutdown", () => {
     await expect(shutdown({ server, cron: null, bg: makeBg(), log: () => {} })).rejects.toThrow(
       "boom"
     );
+  });
+
+  it("invokes closeIdleConnections (when available) after starting close() so idle keep-alive sockets drop immediately", async () => {
+    let closeStartedAt: number | null = null;
+    let idleDroppedAt: number | null = null;
+    let counter = 0;
+    const server = makeServer(
+      (cb) => {
+        closeStartedAt = ++counter;
+        // Resolve close() asynchronously so we can observe whether
+        // closeIdleConnections was invoked synchronously before the await.
+        setImmediate(cb);
+      },
+      () => {
+        idleDroppedAt = ++counter;
+      }
+    );
+    await shutdown({ server, cron: null, bg: makeBg(), log: () => {} });
+    expect(server.closeIdleConnections).toHaveBeenCalledTimes(1);
+    expect(closeStartedAt).not.toBeNull();
+    expect(idleDroppedAt).not.toBeNull();
+    expect(idleDroppedAt).toBeGreaterThan(closeStartedAt as unknown as number);
+  });
+
+  it("tolerates a Closable without closeIdleConnections (older http.Server polyfills, mocks)", async () => {
+    const server = makeServer();
+    await expect(
+      shutdown({ server, cron: null, bg: makeBg(), log: () => {} })
+    ).resolves.toBeUndefined();
+    expect(server.closeIdleConnections).toBeUndefined();
   });
 });

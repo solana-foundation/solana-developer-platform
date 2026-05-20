@@ -27,6 +27,13 @@ import { closeAllRedisClients } from "./kv-redis";
 
 export interface Closable {
   close(callback: (err?: Error) => void): void;
+  // http.Server.close() stops accepting new connections but lets existing
+  // idle keep-alive sockets time out on their own — minutes by default
+  // behind a typical load balancer. closeIdleConnections() (Node >= 18.2)
+  // drops idle sockets immediately so close() resolves on in-flight work
+  // alone. Optional so test mocks and older runtimes still satisfy the
+  // contract.
+  closeIdleConnections?(): void;
 }
 
 export interface ShutdownDeps {
@@ -46,6 +53,10 @@ export async function shutdown(deps: ShutdownDeps): Promise<void> {
       }
       resolve();
     });
+    // Drop idle keep-alive sockets right after the close() request so the
+    // server-side socket count drains immediately; in-flight requests run
+    // to completion before close() resolves.
+    deps.server.closeIdleConnections?.();
   });
   if (deps.cron) {
     deps.log("stopping cron scheduler");
