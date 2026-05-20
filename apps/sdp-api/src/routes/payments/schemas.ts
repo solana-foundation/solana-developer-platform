@@ -1,14 +1,23 @@
 import { z } from "zod";
 import { isDecimalString } from "@/lib/amount";
+import { isAddress } from "@/lib/solana";
 import { SOL_MINT } from "@/services/payment-operation.service";
 
-// Payments token field: native SOL keyword, the canonical SOL mint, or any 32–44 char
-// base58 mint address. Validating here returns 400 BAD_REQUEST on bad input instead of
-// letting `assertValidAddress` throw a plain Error downstream (500).
+// Payments token field: native SOL keyword, the canonical SOL mint, or a base58
+// Solana mint address. Validating the base58 shape here returns 400 BAD_REQUEST
+// instead of letting `assertValidAddress` throw a plain Error downstream (500),
+// or — on Execute mode — letting the bad mint reach the RPC and surface as
+// 502 SOLANA_RPC_ERROR after creating a stuck transfer record.
 const paymentTokenSchema = z.union([
   z.literal("SOL"),
   z.literal(SOL_MINT),
-  z.string().min(32).max(44),
+  z
+    .string()
+    .min(32)
+    .max(44)
+    .refine((value) => isAddress(value), {
+      message: "token must be a base58 Solana mint address",
+    }),
 ]);
 
 export const walletIdParamsSchema = z.object({
