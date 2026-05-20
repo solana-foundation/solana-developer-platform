@@ -7,27 +7,28 @@ import { SOL_MINT } from "@/services/payment-operation.service";
 // Solana mint address. Trim and case-fold the native keyword in a preprocess so
 // validation matches `normalizePaymentToken`/`isNativePaymentToken` (which both
 // accept case-insensitive "SOL" with surrounding whitespace). Validating the
-// base58 shape here returns 400 BAD_REQUEST instead of letting
-// `assertValidAddress` throw a plain Error downstream (500), or — on Execute
-// mode — letting the bad mint reach the RPC and surface as 502
-// SOLANA_RPC_ERROR after creating a stuck transfer record.
+// base58 shape here returns 400 BAD_REQUEST with one actionable message instead
+// of letting `assertValidAddress` throw a plain Error downstream (500), or — on
+// Execute mode — letting the bad mint reach the RPC and surface as 502
+// SOLANA_RPC_ERROR after creating a stuck transfer record. A single refine
+// (rather than a union with `.min(32)`) avoids generic "String must contain at
+// least 32 character(s)" errors for short inputs like `"USDC"`.
+export const PAYMENT_TOKEN_VALIDATION_MESSAGE =
+  "token must be 'SOL' or a base58 Solana mint address";
+
 const paymentTokenSchema = z.preprocess(
   (value) => {
     if (typeof value !== "string") return value;
     const trimmed = value.trim();
     return trimmed.toUpperCase() === "SOL" ? "SOL" : trimmed;
   },
-  z.union([
-    z.literal("SOL"),
-    z.literal(SOL_MINT),
-    z
-      .string()
-      .min(32)
-      .max(44)
-      .refine((value) => isAddress(value), {
-        message: "token must be a base58 Solana mint address",
-      }),
-  ])
+  z.string().refine(
+    (value) => {
+      if (value === "SOL" || value === SOL_MINT) return true;
+      return value.length >= 32 && value.length <= 44 && isAddress(value);
+    },
+    { message: PAYMENT_TOKEN_VALIDATION_MESSAGE }
+  )
 );
 
 export const walletIdParamsSchema = z.object({
