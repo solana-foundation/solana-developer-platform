@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
+import type { z } from "zod";
 import {
   createTransferSchema,
   PAYMENT_TOKEN_VALIDATION_MESSAGE,
@@ -14,6 +15,18 @@ const tokenSchema = createTransferSchema.shape.token;
 const destinationSchema = createTransferSchema.shape.destination;
 const referenceAddressSchema = prepareTransferSchema.shape.referenceAddress;
 const destinationAllowlistSchema = updateWalletPolicySchema.shape.destinationAllowlist;
+
+describe("payments schema inferred types", () => {
+  it("destination, referenceAddress, and allowlist entries infer as string", () => {
+    type CreateTransfer = z.infer<typeof createTransferSchema>;
+    type PrepareTransfer = z.infer<typeof prepareTransferSchema>;
+    type UpdateWalletPolicy = z.infer<typeof updateWalletPolicySchema>;
+
+    expectTypeOf<CreateTransfer["destination"]>().toEqualTypeOf<string>();
+    expectTypeOf<PrepareTransfer["referenceAddress"]>().toEqualTypeOf<string | undefined>();
+    expectTypeOf<UpdateWalletPolicy["destinationAllowlist"]>().toEqualTypeOf<string[]>();
+  });
+});
 
 describe("payments token schema", () => {
   describe("accepts native SOL keyword", () => {

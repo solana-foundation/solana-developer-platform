@@ -8,7 +8,7 @@ import { SOL_MINT } from "@/services/payment-operation.service";
 // preprocess and require both the 32–44 length window and `isAddress` to pass.
 // Validating here returns 400 BAD_REQUEST with an actionable per-field message
 // instead of letting `assertValidAddress` throw a plain Error downstream (500).
-function solanaAddressSchema(fieldName: string): z.ZodTypeAny {
+function solanaAddressSchema(fieldName: string) {
   return z.preprocess(
     (value) => (typeof value === "string" ? value.trim() : value),
     z.string().refine((value) => value.length >= 32 && value.length <= 44 && isAddress(value), {
