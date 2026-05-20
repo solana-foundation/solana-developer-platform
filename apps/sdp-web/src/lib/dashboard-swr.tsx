@@ -100,10 +100,13 @@ export function usePersistedDashboardSWR<Data, Error = unknown>(
   config: SWRConfiguration<Data, Error> = {},
   persistedConfig?: PersistedDashboardSnapshotConfig<Data>
 ): SWRResponse<Data, Error> {
-  const { dashboardCacheScope } = useDashboardWorkspace();
+  const { dashboardCacheScope, sdpEnvironment } = useDashboardWorkspace();
   const scopeKey = useMemo(
-    () => getDashboardCacheScopeKey(dashboardCacheScope),
-    [dashboardCacheScope]
+    () =>
+      getDashboardCacheScopeKey(dashboardCacheScope, {
+        environment: sdpEnvironment,
+      }),
+    [dashboardCacheScope, sdpEnvironment]
   );
   const persistedKey = persistedConfig?.key;
   const persistedTtlMs = persistedConfig?.ttlMs;

@@ -4,7 +4,9 @@
 
 import type { ApiKeyRole, Permission } from "./permissions";
 
-export type ApiKeyEnvironment = "sandbox" | "production";
+export type SdpEnvironment = "sandbox" | "production";
+
+export type ApiKeyEnvironment = SdpEnvironment;
 
 export type ApiKeyStatus = "active" | "revoked" | "expired" | "deactivated";
 
