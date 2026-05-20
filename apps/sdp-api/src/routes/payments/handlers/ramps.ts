@@ -1,3 +1,4 @@
+import type { SdpEnvironment } from "@sdp/types";
 import { getDb } from "@/db";
 import { parseDecimalAmount } from "@/lib/amount";
 import { AppError, providerNotConfigured } from "@/lib/errors";
@@ -96,24 +97,17 @@ function normalizeMoonPayCurrencyCode(value: string): string {
   return normalized.toLowerCase();
 }
 
-type ApiMode = "sandbox" | "production";
-
 /**
- * Resolves the API mode for the current request:
- * - Non-production deployments (ENVIRONMENT !== "production") always use sandbox.
- * - Clerk JWT requests (no apiKey on context) default to production.
- * - API key requests derive mode from the key's environment field
- *   (sk_test_ → sandbox, sk_live_ → production).
+ * Resolves the product environment for provider credentials.
+ * API-key callers are scoped by the key. Dashboard/session callers default to
+ * sandbox while that is the only supported dashboard mode.
  */
-function resolveApiMode(c: AppContext): ApiMode {
-  if (c.env.ENVIRONMENT !== "production") {
-    return "sandbox";
-  }
+function resolveSdpEnvironment(c: AppContext): SdpEnvironment {
   const apiKey = c.get("apiKey");
-  if (apiKey === undefined) {
-    return "production";
+  if (apiKey) {
+    return apiKey.environment;
   }
-  return apiKey.environment === "sandbox" ? "sandbox" : "production";
+  return "sandbox";
 }
 
 interface RampsProviderEnvironment {
@@ -121,12 +115,12 @@ interface RampsProviderEnvironment {
   production: string | undefined;
 }
 
-function envForMode(mode: ApiMode, env: RampsProviderEnvironment): string | undefined {
+function envForMode(mode: SdpEnvironment, env: RampsProviderEnvironment): string | undefined {
   return env[mode]?.trim();
 }
 
 function configForMode<T extends Record<string, RampsProviderEnvironment>>(
-  mode: ApiMode,
+  mode: SdpEnvironment,
   envs: T
 ): Record<keyof T, string | undefined> {
   return Object.fromEntries(
@@ -188,7 +182,7 @@ type BvnkPaymentSummary = {
 const LIGHTSPARK_DEFAULT_GRID_API_URL = "https://api.lightspark.com/grid/2025-10-13";
 
 function getMoonPayConfig(c: AppContext): MoonPayConfig {
-  const mode = resolveApiMode(c);
+  const mode = resolveSdpEnvironment(c);
   const { apiKey, secretKey } = configForMode(mode, {
     apiKey: { sandbox: c.env.MOONPAY_SANDBOX_API_KEY, production: c.env.MOONPAY_API_KEY },
     secretKey: { sandbox: c.env.MOONPAY_SANDBOX_SECRET_KEY, production: c.env.MOONPAY_SECRET_KEY },
@@ -224,7 +218,7 @@ function getMoonPayConfig(c: AppContext): MoonPayConfig {
 }
 
 function getLightsparkConfig(c: AppContext): LightsparkConfig {
-  const mode = resolveApiMode(c);
+  const mode = resolveSdpEnvironment(c);
   const { tokenId, clientSecret } = configForMode(mode, {
     tokenId: {
       sandbox: c.env.LIGHTSPARK_GRID_SANDBOX_CLIENT_ID,
@@ -252,7 +246,7 @@ function getLightsparkConfig(c: AppContext): LightsparkConfig {
 }
 
 function getBvnkConfig(c: AppContext): BvnkConfig {
-  const mode = resolveApiMode(c);
+  const mode = resolveSdpEnvironment(c);
   const { hawkAuthId, hawkSecretKey, walletId } = configForMode(mode, {
     hawkAuthId: { sandbox: c.env.BVNK_SANDBOX_HAWK_AUTH_ID, production: c.env.BVNK_HAWK_AUTH_ID },
     hawkSecretKey: {
@@ -1160,7 +1154,7 @@ async function resolveRampProvider(
     organizationId,
     "ramps",
     providerId,
-    resolveApiMode(c) === "sandbox"
+    resolveSdpEnvironment(c) === "sandbox"
   );
 
   const provider = RAMP_PROVIDER_REGISTRY[providerId];

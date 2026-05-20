@@ -1,3 +1,4 @@
+import path from "node:path";
 import { withSentryConfig } from "@sentry/nextjs";
 import type { NextConfig } from "next";
 
@@ -31,6 +32,18 @@ const nextConfig: NextConfig = {
     ];
   },
 };
+
+// Standalone output ships a minimal node_modules + server.js for the slim
+// Docker runtime (HOO-513). Gated on NEXT_BUILD_STANDALONE so Vercel,
+// Playwright, and local `next build` runs don't generate an unused
+// .next/standalone tree. The Dockerfile sets the env in the builder stage.
+// outputFileTracingRoot walks file tracing up to the monorepo root so
+// workspace deps (@sdp/types, patches) are bundled — without it standalone
+// misses pnpm-workspace symlinks.
+if (process.env.NEXT_BUILD_STANDALONE === "1") {
+  nextConfig.output = "standalone";
+  nextConfig.outputFileTracingRoot = path.resolve(import.meta.dirname, "../..");
+}
 
 export default withSentryConfig(nextConfig, {
   // For all available options, see:
