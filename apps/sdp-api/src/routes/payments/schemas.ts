@@ -1,5 +1,15 @@
 import { z } from "zod";
 import { isDecimalString } from "@/lib/amount";
+import { SOL_MINT } from "@/services/payment-operation.service";
+
+// Payments token field: native SOL keyword, the canonical SOL mint, or any 32–44 char
+// base58 mint address. Validating here returns 400 BAD_REQUEST on bad input instead of
+// letting `assertValidAddress` throw a plain Error downstream (500).
+const paymentTokenSchema = z.union([
+  z.literal("SOL"),
+  z.literal(SOL_MINT),
+  z.string().min(32).max(44),
+]);
 
 export const walletIdParamsSchema = z.object({
   walletId: z.string().min(1),
@@ -45,7 +55,7 @@ export const createTransferSchema = z.object({
   projectId: z.string().min(1).optional(),
   source: z.string().min(1),
   destination: z.string().min(32).max(44),
-  token: z.string().min(1),
+  token: paymentTokenSchema,
   amount: paymentAmountSchema,
   memo: z.string().max(256).optional(),
 });
