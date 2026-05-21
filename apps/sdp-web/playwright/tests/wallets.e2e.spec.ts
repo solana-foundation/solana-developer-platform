@@ -187,6 +187,7 @@ test.describe
       await page.getByRole("button", { name: "Set up Server" }).click();
 
       await expect(page.getByText("Server", { exact: true }).first()).toBeVisible();
+      await expect(page.getByLabel("Provider")).toHaveValue("privy");
       await page.getByLabel("Provider").selectOption("privy");
       await page.getByLabel("Wallet label").fill("Treasury");
       await page.getByRole("button", { name: "Create wallet" }).click();

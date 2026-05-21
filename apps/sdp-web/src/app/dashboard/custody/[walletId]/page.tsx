@@ -6,6 +6,7 @@ import type { ReactNode } from "react";
 import {
   formatCustodyProviderName,
   getCustodyProviderCategory,
+  getCustodyProviderEntry,
   isKnownCustodyProvider,
 } from "@/app/dashboard/custody/provider-catalog";
 import { WalletActionsMenu } from "@/app/dashboard/custody/wallet-actions-menu";
@@ -159,6 +160,7 @@ export default async function WalletDetailPage({
   const provider =
     wallet.provider && isKnownCustodyProvider(wallet.provider) ? wallet.provider : null;
   const category = provider ? getCustodyProviderCategory(provider) : null;
+  const supportsSignerCheck = provider ? getCustodyProviderEntry(provider).supportsSigning : true;
   const balances =
     trackedBalancesResult.balances.length > 0 ? trackedBalancesResult.balances : [wallet.balance];
   const totalBalance = resolveTotalBalance(balances);
@@ -171,6 +173,7 @@ export default async function WalletDetailPage({
           walletAddress={wallet.publicKey}
           walletId={wallet.walletId}
           walletLabel={wallet.label}
+          supportsSignerCheck={supportsSignerCheck}
           triggerMode="button"
           triggerLabel="Actions"
           triggerClassName="w-auto"

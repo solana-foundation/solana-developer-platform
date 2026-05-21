@@ -79,8 +79,9 @@ function resolveInitialProviderForCategory(
   const connectedCreateable = providers.find(
     (provider) => connectedProviderSet.has(provider.id) && provider.supportsAdditionalWallets
   );
+  const unconnectedProvider = providers.find((provider) => !connectedProviderSet.has(provider.id));
 
-  return connectedCreateable?.id ?? providers[0]?.id ?? null;
+  return connectedCreateable?.id ?? unconnectedProvider?.id ?? providers[0]?.id ?? null;
 }
 
 function resolveInitialSelection(
