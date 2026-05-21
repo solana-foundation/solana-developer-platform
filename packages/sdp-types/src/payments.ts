@@ -1,4 +1,5 @@
 import type { CustodyWalletAggregate, CustodyWalletTokenBalance } from "./custody";
+import type { RampProviderId } from "./provider-access";
 
 export interface PaymentsDashboardWallet {
   id: string;
@@ -65,3 +66,40 @@ export interface PaymentTransferEnvelope {
     message?: string;
   };
 }
+
+export type PaymentRampExecutionStatus = "pending" | "processing" | "completed" | "failed";
+
+export interface LightsparkPaymentRampInstruction {
+  provider: "lightspark";
+  accountOrWalletInfo: {
+    accountType: string;
+    accountNumber?: string;
+    routingNumber?: string;
+    paymentRails?: string[];
+    reference?: string;
+    bankName?: string;
+    address?: string;
+    assetType?: string;
+  };
+  instructionsNotes?: string;
+  isPlatformAccount?: boolean;
+}
+
+export type PaymentRampInstruction = LightsparkPaymentRampInstruction;
+
+interface BasePaymentRampExecution {
+  id: string;
+  status: PaymentRampExecutionStatus;
+  redirectUrl?: string;
+  reference?: string;
+}
+
+export type PaymentRampExecution =
+  | (BasePaymentRampExecution & {
+      provider: "lightspark";
+      paymentInstructions?: LightsparkPaymentRampInstruction[];
+    })
+  | (BasePaymentRampExecution & {
+      provider: Exclude<RampProviderId, "lightspark">;
+      paymentInstructions?: never;
+    });
