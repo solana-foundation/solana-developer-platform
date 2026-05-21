@@ -28,10 +28,25 @@ export interface CronHandle {
 }
 
 const TRUTHY_DISABLE_CRON: ReadonlySet<string> = new Set(["true", "1"]);
+const FALSY_DISABLE_CRON: ReadonlySet<string> = new Set(["false", "0"]);
 
+// Strict whitelist so a typo (`DISABLE_CRON=treu`) fails loudly instead of
+// silently enabling cron and double-firing across replicas.
 function isCronDisabled(env: Env): boolean {
-  const raw = env.DISABLE_CRON?.trim().toLowerCase();
-  return raw !== undefined && TRUTHY_DISABLE_CRON.has(raw);
+  const raw = env.DISABLE_CRON;
+  if (raw === undefined) {
+    return false;
+  }
+  const normalised = raw.trim().toLowerCase();
+  if (TRUTHY_DISABLE_CRON.has(normalised)) {
+    return true;
+  }
+  if (FALSY_DISABLE_CRON.has(normalised)) {
+    return false;
+  }
+  throw new Error(
+    `Invalid DISABLE_CRON: ${JSON.stringify(raw)} (expected 'true', 'false', '1', or '0')`
+  );
 }
 
 export function startCron(deps: CronDeps): CronHandle | null {

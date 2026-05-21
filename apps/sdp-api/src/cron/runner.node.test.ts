@@ -70,9 +70,33 @@ describe("startCron", () => {
     expect(scheduleMock.mock.calls[0][0]).toBe(PENDING_TRANSFERS_CRON);
   });
 
-  it("schedules when DISABLE_CRON is set to any non-truthy value (e.g. 'false')", () => {
+  it("schedules when DISABLE_CRON is set to a recognised falsy value ('false' / '0')", () => {
     startCron({ env: { DISABLE_CRON: "false" } as Env, bg: makeBg() });
-    expect(scheduleMock).toHaveBeenCalledTimes(1);
+    startCron({ env: { DISABLE_CRON: "0" } as Env, bg: makeBg() });
+    expect(scheduleMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("throws on an unrecognised DISABLE_CRON value to surface env typos", () => {
+    expect(() => startCron({ env: { DISABLE_CRON: "treu" } as Env, bg: makeBg() })).toThrow(
+      /Invalid DISABLE_CRON/
+    );
+    expect(() => startCron({ env: { DISABLE_CRON: "yes" } as Env, bg: makeBg() })).toThrow(
+      /Invalid DISABLE_CRON/
+    );
+    expect(scheduleMock).not.toHaveBeenCalled();
+  });
+
+  it("normalises DISABLE_CRON case and surrounding whitespace", () => {
+    const result = startCron({ env: { DISABLE_CRON: "  TRUE  " } as Env, bg: makeBg() });
+    expect(result).toBeNull();
+    expect(scheduleMock).not.toHaveBeenCalled();
+  });
+
+  it("throws on a blank DISABLE_CRON value rather than defaulting silently", () => {
+    expect(() => startCron({ env: { DISABLE_CRON: "   " } as Env, bg: makeBg() })).toThrow(
+      /Invalid DISABLE_CRON/
+    );
+    expect(scheduleMock).not.toHaveBeenCalled();
   });
 
   it("tick invokes runPendingTransfersReconciliation with the supplied deps", () => {

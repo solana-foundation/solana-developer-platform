@@ -76,9 +76,18 @@ function shouldShutdownOnUnhandledRejection(): boolean {
   throw new Error(`Invalid FATAL_ON_UNHANDLED_REJECTION: ${JSON.stringify(raw)}`);
 }
 
+// Runtime whitelist so a typo (`ENVIRONMENT=prod`) can't slip past the type
+// and reach branches that gate dev-only behaviour on `ENVIRONMENT === "production"`.
+const ALLOWED_ENVIRONMENTS: ReadonlySet<string> = new Set(["development", "production"]);
+
 function assertRequiredEnv(env: Env): void {
   if (!env.ENVIRONMENT) {
     throw new Error("ENVIRONMENT is required (set to 'development' or 'production')");
+  }
+  if (!ALLOWED_ENVIRONMENTS.has(env.ENVIRONMENT)) {
+    throw new Error(
+      `Invalid ENVIRONMENT: ${JSON.stringify(env.ENVIRONMENT)} (expected 'development' or 'production')`
+    );
   }
   if (!env.API_VERSION) {
     throw new Error("API_VERSION is required");
