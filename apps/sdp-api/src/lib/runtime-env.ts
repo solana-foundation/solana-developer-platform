@@ -4,6 +4,14 @@ const PROCESS_ENV_FALLBACK_KEYS = [
   "ENVIRONMENT",
   "API_VERSION",
   "SDP_DEPLOYMENT_MODE",
+  // Selects the KV / DB runtime branch. Without this, code outside the
+  // server.ts hardcode (scripts, tests) sees SDP_RUNTIME undefined and
+  // defaults to Cloudflare mode even when the process is plainly Node.
+  "SDP_RUNTIME",
+  // Connection strings populated from process.env when bindings aren't set
+  // — pg uses DATABASE_URL, RedisKVStore uses REDIS_URL.
+  "DATABASE_URL",
+  "REDIS_URL",
   "API_KEY_PEPPER",
   "CUSTODY_ENCRYPTION_KEY",
   "SENTRY_DSN",
@@ -97,6 +105,7 @@ const PROCESS_ENV_FALLBACK_KEYS = [
   "BVNK_HAWK_SECRET_KEY",
   "BVNK_WALLET_ID",
   "BVNK_API_BASE_URL",
+  "DISABLE_CRON",
 ] as const satisfies readonly (keyof Env)[];
 
 export type SdpDeploymentMode = "managed" | "self_hosted";

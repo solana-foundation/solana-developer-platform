@@ -1,14 +1,18 @@
 /**
- * Runtime factory — single dispatch point for runtime-specific implementations.
- *
- * HOO-506 lands only the Cloudflare branch. HOO-510 (#9) adds the Node/Redis
- * branch and switches on SDP_RUNTIME via getRuntime().
+ * Runtime factory — dispatch to the runtime-specific KVStore. The Redis
+ * branch is lazily loaded inside kv-redis so ioredis stays out of the
+ * Cloudflare bundle / Workers test pool's module graph.
  */
 
+import { getRuntime } from "@/lib/runtime-env";
 import type { Env } from "@/types/env";
 import type { KVStoreSet } from "./kv";
+import { createRedisKVStoreSet } from "./kv-redis";
 import { createWorkersKVStoreSet } from "./kv-workers";
 
 export function createKVStoreSet(env: Env): KVStoreSet {
+  if (getRuntime(env) === "node") {
+    return createRedisKVStoreSet(env);
+  }
   return createWorkersKVStoreSet(env);
 }

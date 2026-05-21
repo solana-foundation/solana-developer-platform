@@ -10,7 +10,7 @@
  * 6. Set auth context for downstream handlers
  */
 
-import type { ApiKeyRole, ApiKeyWalletBinding, CachedApiKey } from "@sdp/types";
+import type { ApiKeyEnvironment, ApiKeyRole, ApiKeyWalletBinding, CachedApiKey } from "@sdp/types";
 import { getPermissionsForApiKeyRole, type Permission } from "@sdp/types";
 import type { Context, Next } from "hono";
 import { getDb } from "@/db";
@@ -27,7 +27,7 @@ interface ApiKeyContext {
   projectId: string | null;
   role: ApiKeyRole;
   permissions: Permission[];
-  environment: string;
+  environment: ApiKeyEnvironment;
   signingWalletId: string | null;
   signingWalletIds: string[];
   walletBindings: ApiKeyWalletBinding[];

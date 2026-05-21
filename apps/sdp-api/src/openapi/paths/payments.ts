@@ -9,6 +9,7 @@ import {
   paymentTransferIdParamsSchema,
   paymentWalletIdParamsSchema,
   prepareTransferRequestSchema,
+  simulateSandboxTransferRequestSchema,
   updateWalletPolicyRequestSchema,
 } from "../schemas";
 import { errorResponses, jsonContent } from "./helpers";
@@ -16,6 +17,7 @@ import {
   offrampExecutionResponse,
   onrampExecutionResponse,
   prepareTransferResponse,
+  sandboxTransferSimulationResponse,
   transferListResponse,
   transferResponse,
   walletBalancesResponse,
@@ -227,6 +229,29 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
       200: {
         description: "Off-ramp execution initiated",
         content: jsonContent(offrampExecutionResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/payments/ramps/sandbox/simulate",
+    tags: ["Payments"],
+    summary: "Simulate sandbox transfer",
+    operationId: "simulateSandboxTransfer",
+    description: "Sandbox-only helper that simulates provider-specific transfer completion flows.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      body: {
+        required: true,
+        content: jsonContent(simulateSandboxTransferRequestSchema),
+      },
+    },
+    responses: {
+      200: {
+        description: "Sandbox transfer simulated",
+        content: jsonContent(sandboxTransferSimulationResponse),
       },
       ...errorResponses(errorResponseSchema, [400, 401, 403, 500]),
     },

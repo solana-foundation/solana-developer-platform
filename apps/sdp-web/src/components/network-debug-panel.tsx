@@ -1,14 +1,6 @@
 "use client";
 
-import {
-  BanIcon,
-  CheckIcon,
-  CopyIcon,
-  EraserIcon,
-  InfoIcon,
-  PauseIcon,
-  PlayIcon,
-} from "lucide-react";
+import { BanIcon, CheckIcon, CopyIcon, EraserIcon, PauseIcon, PlayIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useState } from "react";
 import { type NetworkDebugEntry, useNetworkDebug } from "@/contexts/network-debug-context";
@@ -20,7 +12,6 @@ import {
 import { useCopy } from "@/lib/use-copy";
 import { cn } from "@/lib/utils";
 import { Button } from "./ui/button";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
 
 const PANEL_TRANSITION = { type: "spring", duration: 0.38, bounce: 0 } as const;
 const CONTENT_FADE_PROPS = {
@@ -113,46 +104,6 @@ function NetworkDebugPayloadBlock({
   );
 }
 
-function NetworkDebugSwitch({
-  enabled,
-  pendingCount,
-  setEnabled,
-}: {
-  enabled: boolean;
-  pendingCount: number;
-  setEnabled: (enabled: boolean) => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={() => setEnabled(!enabled)}
-      className="flex items-center gap-2"
-      aria-label={enabled ? "Disable API debug" : "Enable API debug"}
-      aria-pressed={enabled}
-    >
-      {pendingCount > 0 ? (
-        <span className="rounded-full bg-border-extra-light px-1.5 py-0.5 text-[10px] text-text-medium">
-          {pendingCount}
-        </span>
-      ) : null}
-      <span
-        className={cn(
-          "relative inline-flex h-5 w-9 rounded-full border transition-colors",
-          enabled ? "border-text-extra-high bg-text-extra-high" : "border-border-light bg-white"
-        )}
-        aria-hidden="true"
-      >
-        <span
-          className={cn(
-            "absolute top-1/2 size-3.5 -translate-y-1/2 rounded-full bg-white shadow-sm transition-transform",
-            enabled ? "translate-x-4.5" : "translate-x-0.5"
-          )}
-        />
-      </span>
-    </button>
-  );
-}
-
 function NetworkDebugEntryRow({
   entry,
   isSelected,
@@ -209,48 +160,35 @@ export function NetworkDebugToggle() {
   }
 
   return (
-    <div
-      className={cn(
-        "mx-3 mb-2 flex w-[calc(100%-1.5rem)] items-center justify-between gap-3 rounded-xl border px-3 py-2 transition-colors",
-        enabled
-          ? "border-border-light bg-white text-text-extra-high"
-          : "border-border-light bg-white/70 text-text-medium hover:bg-white hover:text-text-extra-high"
-      )}
+    <button
+      type="button"
+      onClick={() => setEnabled(!enabled)}
+      aria-pressed={enabled}
+      className="flex h-10 w-full items-center gap-3 rounded-[var(--button-radius-lg)] px-3 text-[16px] leading-[24px] text-text-medium transition-colors hover:bg-border-light hover:text-text-extra-high"
     >
-      <div className="min-w-0 flex-1">
-        <span className="flex items-center gap-1 text-[11px] leading-4 text-text-low">
-          <button type="button" onClick={() => setEnabled(!enabled)} aria-pressed={enabled}>
-            Development mode
-          </button>
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  aria-label="About API debug logs"
-                  className="inline-flex rounded-sm text-text-low hover:text-text-extra-high"
-                >
-                  <InfoIcon className="size-3" aria-hidden="true" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="top" align="center" className="max-w-80 text-xs">
-                API Debug Logs capture same-origin browser fetches in this tab. Available locally,
-                or in preview/staging with NEXT_PUBLIC_ENABLE_NETWORK_DEBUG.
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
+      <span
+        className={cn(
+          "relative inline-flex h-5 w-9 shrink-0 rounded-full border transition-colors",
+          enabled
+            ? "border-text-extra-high bg-text-extra-high"
+            : "border-border-light bg-border-extra-light"
+        )}
+        aria-hidden="true"
+      >
+        <span
+          className={cn(
+            "absolute top-1/2 size-3.5 -translate-y-1/2 rounded-full bg-white shadow-sm transition-transform",
+            enabled ? "translate-x-4.5" : "translate-x-0.5"
+          )}
+        />
+      </span>
+      <span className="min-w-0 flex-1 truncate text-left">API Debug Logs</span>
+      {pendingCount > 0 ? (
+        <span className="shrink-0 rounded-full bg-border-extra-light px-1.5 py-0.5 text-[10px] text-text-medium">
+          {pendingCount}
         </span>
-        <button
-          type="button"
-          onClick={() => setEnabled(!enabled)}
-          className="block truncate text-left text-[13px] leading-5 font-medium"
-          aria-pressed={enabled}
-        >
-          API Debug Logs
-        </button>
-      </div>
-      <NetworkDebugSwitch enabled={enabled} pendingCount={pendingCount} setEnabled={setEnabled} />
-    </div>
+      ) : null}
+    </button>
   );
 }
 
@@ -301,16 +239,31 @@ function NetworkDebugExpandedPanel({
           </button>
         </div>
         <div className="flex flex-wrap items-center gap-2 border-b border-border-light px-4 py-2">
-          <Button type="button" onClick={() => setPaused(!paused)} variant="outline" size="xs">
-            {paused ? <PlayIcon className="size-3" /> : <PauseIcon className="size-3" />}
+          <Button
+            type="button"
+            onClick={() => setPaused(!paused)}
+            variant="outline"
+            size="xs"
+            iconLeft={paused ? <PlayIcon /> : <PauseIcon />}
+          >
             {paused ? "Resume" : "Pause"}
           </Button>
-          <Button type="button" onClick={clear} variant="outline" size="xs">
-            <EraserIcon className="size-3" />
+          <Button
+            type="button"
+            onClick={clear}
+            variant="outline"
+            size="xs"
+            iconLeft={<EraserIcon />}
+          >
             Clear
           </Button>
-          <Button type="button" onClick={() => setEnabled(false)} variant="destructive" size="xs">
-            <BanIcon className="size-3" />
+          <Button
+            type="button"
+            onClick={() => setEnabled(false)}
+            variant="destructive"
+            size="xs"
+            iconLeft={<BanIcon />}
+          >
             Disable
           </Button>
         </div>

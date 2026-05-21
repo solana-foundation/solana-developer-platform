@@ -1,3 +1,4 @@
+import { RAMP_PROVIDERS } from "@sdp/types";
 import { z } from "zod";
 import { isDecimalString } from "@/lib/amount";
 
@@ -29,7 +30,7 @@ const paymentAmountSchema = z
     message: "Amount must be greater than zero",
   });
 
-const rampProviderSchema = z.enum(["moonpay", "lightspark", "bvnk"]);
+const rampProviderSchema = z.enum(RAMP_PROVIDERS);
 
 const rampCurrencyCodeSchema = z
   .string()
@@ -105,3 +106,16 @@ export const executeOfframpSchema = z.object({
   redirectUrl: z.string().url().optional(),
   bvnkCompliance: bvnkComplianceSchema.optional(),
 });
+
+const simulateLightsparkSandboxTransferPayloadSchema = z.object({
+  quoteId: z.string().min(1),
+  currencyCode: z.literal("USD").default("USD"),
+  currencyAmount: z.number().int().positive().optional(),
+});
+
+export const simulateSandboxTransferSchema = z.discriminatedUnion("provider", [
+  z.object({
+    provider: z.literal("lightspark"),
+    payload: simulateLightsparkSandboxTransferPayloadSchema,
+  }),
+]);

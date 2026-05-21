@@ -8,7 +8,7 @@
 import type { HyperdriveBinding } from "@/db";
 import type { ClerkJwtPayload } from "@/lib/clerk-token";
 import type { KVStoreSet } from "@/runtime/kv";
-import type { CachedSession, OrganizationRpcProvider, Permission } from "@sdp/types";
+import type { ApiKeyEnvironment, CachedSession, OrganizationRpcProvider, Permission } from "@sdp/types";
 
 export interface Env {
   // Hyperdrive database binding (Cloudflare runtime only)
@@ -28,6 +28,13 @@ export interface Env {
   // "cloudflare" uses HYPERDRIVE + KVNamespace bindings above;
   // "node" uses DATABASE_URL + REDIS_URL.
   SDP_RUNTIME?: "cloudflare" | "node";
+
+  // When the Node entrypoint runs with multiple replicas, scheduling the
+  // reconciliation cron on every replica would fire the job N times per
+  // tick. Setting this to "true" or "1" makes startCron a no-op so only
+  // one designated replica drives the job. Ignored on Cloudflare (CF uses
+  // a single scheduled handler per deployment).
+  DISABLE_CRON?: string;
 
   // Environment variables
   ENVIRONMENT: "development" | "production";
@@ -170,10 +177,12 @@ export interface Env {
   // Lightspark Grid ramps configuration
   LIGHTSPARK_GRID_CLIENT_ID?: string;
   LIGHTSPARK_GRID_CLIENT_SECRET?: string;
+  LIGHTSPARK_GRID_API_BASE_URL?: string;
   LIGHTSPARK_GRID_SANDBOX_CLIENT_ID?: string;
   LIGHTSPARK_GRID_SANDBOX_CLIENT_SECRET?: string;
 
   // BVNK ramps configuration
+  BVNK_API_TOKEN?: string;
   BVNK_HAWK_AUTH_ID?: string;
   BVNK_HAWK_SECRET_KEY?: string;
   BVNK_WALLET_ID?: string;
@@ -193,7 +202,7 @@ declare module "hono" {
       projectId?: string | null;
       role: string;
       permissions: Permission[];
-      environment: string;
+      environment: ApiKeyEnvironment;
       signingWalletId: string | null;
       signingWalletIds?: string[];
       walletBindings?: Array<{

@@ -8,6 +8,8 @@
   --sdp-shell-bg: #e9e7de;
   --sdp-field-radius: var(--input-radius-xl, 12px);
   --sdp-surface-radius: var(--radius-xl, 12px);
+  --sdp-color-info-bg: rgba(33, 99, 182, 0.12);
+  --sdp-color-info-text: #2163b6;
 }
 
 html,

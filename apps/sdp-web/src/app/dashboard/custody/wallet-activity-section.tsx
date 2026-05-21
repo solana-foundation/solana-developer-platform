@@ -1,6 +1,6 @@
 "use client";
 
-import { ExternalLink, RefreshCw } from "lucide-react";
+import { ExternalLink, RefreshCwIcon } from "lucide-react";
 import useSWR from "swr";
 import {
   fetchWalletActivity,
@@ -103,10 +103,10 @@ export function WalletActivitySection({ walletId, initialActivity }: WalletActiv
           type="button"
           variant="secondary"
           size="sm"
+          iconLeft={<RefreshCwIcon className={isValidating ? "animate-spin" : undefined} />}
           onClick={() => void mutate()}
           disabled={isValidating}
         >
-          <RefreshCw className={`size-4 ${isValidating ? "animate-spin" : ""}`} />
           {isValidating ? "Refreshing..." : "Refresh"}
         </Button>
       </CardHeader>

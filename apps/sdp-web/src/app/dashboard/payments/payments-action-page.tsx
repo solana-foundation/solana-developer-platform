@@ -7,14 +7,17 @@ import type {
   RampProviderId,
 } from "@sdp/types";
 import { Select, SelectItem } from "@solana/design-system/select";
+import { Tab, TabList, Tabs } from "@solana/design-system/tabs";
 import {
   ArrowDownLeft,
   ArrowUpRight,
-  CheckCircle2,
-  Copy,
+  CheckCircle2Icon,
+  CopyIcon,
+  DollarSignIcon,
   ExternalLink,
   RefreshCw,
 } from "lucide-react";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import QRCode from "qrcode";
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
@@ -23,6 +26,7 @@ import useSWR from "swr";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { isSolBalance } from "./payments-overview.utils";
 import {
   createTransfer,
@@ -32,8 +36,10 @@ import {
   fetchWallets,
   getDevnetExplorerUrl,
   type PaymentRampExecution,
+  type PaymentRampInstruction,
   type PaymentWalletBalance,
   runComplianceCheck,
+  simulateSandboxTransfer,
 } from "./payments-workspace.data";
 import type { ComplianceSnapshot } from "./payments-workspace.types";
 import { ProviderRiskTable } from "./provider-risk-table";
@@ -66,6 +72,7 @@ const BVNK_COUNTRY_OPTIONS = [
 type ActionBranch = "wallet_transfer" | "wallet_deposit" | "onramp" | "offramp";
 type StepId = "branch" | "provider" | "details" | "review" | "deposit";
 type ExecutionState = "idle" | "submitting" | "success";
+type RampResultTab = "summary" | "instructions";
 
 type ProviderOption = {
   id: RampProviderId;
@@ -571,7 +578,14 @@ function WalletAddressQrCode({ address }: { address: string }) {
       <div className="flex flex-col items-center gap-5 sm:flex-row sm:items-start">
         <div className="flex size-[180px] items-center justify-center rounded-2xl bg-white p-4 ring-1 ring-border-extra-light">
           {qrCodeUrl ? (
-            <img src={qrCodeUrl} alt="Wallet address QR code" className="size-full" />
+            <Image
+              src={qrCodeUrl}
+              alt="Wallet address QR code"
+              width={148}
+              height={148}
+              unoptimized
+              className="size-full"
+            />
           ) : (
             <div className="size-full animate-pulse rounded-xl bg-border-light" />
           )}
@@ -587,6 +601,7 @@ function WalletAddressQrCode({ address }: { address: string }) {
             <Button
               type="button"
               variant="secondary"
+              iconLeft={<CopyIcon />}
               onClick={() => {
                 void navigator.clipboard.writeText(address);
                 toast.success("Address copied.", {
@@ -594,13 +609,263 @@ function WalletAddressQrCode({ address }: { address: string }) {
                 });
               }}
             >
-              <Copy className="size-4" />
               Copy address
             </Button>
           </div>
         </div>
       </div>
     </section>
+  );
+}
+
+async function copyPaymentInstruction(label: string, value: string) {
+  try {
+    await navigator.clipboard.writeText(value);
+    toast.success(`${label} copied.`, {
+      position: "bottom-right",
+    });
+  } catch {
+    toast.error(`Failed to copy ${label.toLowerCase()}.`, {
+      position: "bottom-right",
+    });
+  }
+}
+
+function PaymentInstructionField({ label, value }: { label: string; value?: string }) {
+  if (!value) {
+    return null;
+  }
+
+  return (
+    <div className="rounded-2xl border border-border-extra-light bg-white px-4 py-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <p className="text-xs font-medium uppercase tracking-[0.08em] text-text-low">{label}</p>
+          <p className="mt-1 break-all font-mono text-sm text-text-extra-high">{value}</p>
+        </div>
+        <Button
+          type="button"
+          variant="secondary"
+          size="xs"
+          iconLeft={<CopyIcon />}
+          onClick={() => void copyPaymentInstruction(label, value)}
+        >
+          Copy
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+type SandboxFundingSimulationProps = {
+  loading: boolean;
+  succeeded: boolean;
+  onSimulate: () => void;
+};
+
+function PaymentInstructionsCard({
+  amount,
+  instructions,
+  sandboxFundingSimulation,
+}: {
+  amount: string;
+  instructions: PaymentRampInstruction[];
+  sandboxFundingSimulation?: SandboxFundingSimulationProps;
+}) {
+  return (
+    <div className="space-y-4 rounded-2xl border border-border-light bg-border-extra-light p-5">
+      <div>
+        <p className="text-sm font-medium text-text-extra-high">Manual Funding Instructions</p>
+        <p className="mt-2 text-sm text-text-low">
+          Send {amount ? `$${amount}` : "the quoted USD amount"} using one of the supported rails.
+          Include the reference exactly so Grid can match the deposit to this quote.
+        </p>
+      </div>
+      {instructions.map((instruction, index) => {
+        const info = instruction.accountOrWalletInfo;
+        return (
+          <div
+            key={`${info.reference ?? info.accountNumber ?? info.address ?? index}`}
+            className="space-y-3"
+          >
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="rounded-full bg-white px-3 py-1 text-xs font-medium text-text-medium ring-1 ring-border-extra-light">
+                  {info.accountType.replaceAll("_", " ")}
+                </span>
+                {info.assetType ? (
+                  <span className="rounded-full bg-white px-3 py-1 text-xs font-medium text-text-medium ring-1 ring-border-extra-light">
+                    {info.assetType}
+                  </span>
+                ) : null}
+              </div>
+              {index === 0 && sandboxFundingSimulation ? (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="xs"
+                  iconLeft={
+                    sandboxFundingSimulation.succeeded ? <CheckCircle2Icon /> : <DollarSignIcon />
+                  }
+                  onClick={sandboxFundingSimulation.onSimulate}
+                  disabled={sandboxFundingSimulation.loading || sandboxFundingSimulation.succeeded}
+                >
+                  {sandboxFundingSimulation.succeeded
+                    ? "Transaction Success"
+                    : sandboxFundingSimulation.loading
+                      ? "Simulating..."
+                      : "Simulate Sandbox Funding"}
+                </Button>
+              ) : null}
+            </div>
+            <div className="grid gap-3 lg:grid-cols-2">
+              <PaymentInstructionField label="Bank name" value={info.bankName} />
+              <PaymentInstructionField label="Routing number" value={info.routingNumber} />
+              <PaymentInstructionField label="Account number" value={info.accountNumber} />
+              <PaymentInstructionField label="Wallet address" value={info.address} />
+            </div>
+            <PaymentInstructionField label="Reference" value={info.reference} />
+            {info.paymentRails?.length ? (
+              <div className="rounded-2xl border border-border-extra-light bg-white px-4 py-3">
+                <p className="text-xs font-medium uppercase tracking-[0.08em] text-text-low">
+                  Supported rails
+                </p>
+                <p className="mt-1 text-sm text-text-extra-high">{info.paymentRails.join(", ")}</p>
+              </div>
+            ) : null}
+            {instruction.instructionsNotes ? (
+              <div className="rounded-2xl border border-border-extra-light bg-white px-4 py-3">
+                <p className="text-xs font-medium uppercase tracking-[0.08em] text-text-low">
+                  Notes
+                </p>
+                <p className="mt-1 text-sm text-text-extra-high">{instruction.instructionsNotes}</p>
+              </div>
+            ) : null}
+          </div>
+        );
+      })}
+      {sandboxFundingSimulation?.succeeded ? (
+        <p className="text-xs font-medium text-status-success-text">
+          Sandbox funding completed. Visit the wallet to review the updated balance.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function RampSuccessView({
+  amount,
+  canSimulateLightsparkSandbox,
+  isOnrampBranch,
+  onOpenRedirect,
+  onResultTabChange,
+  onSimulateSandboxFunding,
+  providerLabel,
+  rampExecution,
+  rampResultTab,
+  rampReviewRows,
+  sandboxSimulationLoading,
+  sandboxSimulationSucceeded,
+}: {
+  amount: string;
+  canSimulateLightsparkSandbox: boolean;
+  isOnrampBranch: boolean;
+  onOpenRedirect: (url: string) => void;
+  onResultTabChange: (value: RampResultTab) => void;
+  onSimulateSandboxFunding: () => void;
+  providerLabel: string | null;
+  rampExecution: PaymentRampExecution;
+  rampResultTab: RampResultTab;
+  rampReviewRows: SummaryRow[];
+  sandboxSimulationLoading: boolean;
+  sandboxSimulationSucceeded: boolean;
+}) {
+  const hasPaymentInstructions = Boolean(rampExecution.paymentInstructions?.length);
+  const showSummary = rampResultTab === "summary" || !hasPaymentInstructions;
+  const summaryRows = [
+    ...rampReviewRows,
+    {
+      label: "Status",
+      value: rampExecution.status,
+    },
+    ...(rampExecution.reference
+      ? [
+          {
+            label: "Reference",
+            value: <span className="font-mono text-xs">{rampExecution.reference}</span>,
+          },
+        ]
+      : []),
+  ];
+
+  return (
+    <div className="space-y-6">
+      <div className="rounded-2xl border border-status-success-border bg-status-success-bg p-5">
+        <p className="text-[20px] font-medium text-status-success-text">
+          {providerLabel ?? "Provider"} flow ready
+        </p>
+        <p className="mt-2 text-sm text-status-success-text">
+          Continue with the provider using the details below.
+        </p>
+      </div>
+
+      {hasPaymentInstructions ? (
+        <Tabs
+          value={rampResultTab}
+          onValueChange={(value) => {
+            if (value === "summary" || value === "instructions") {
+              onResultTabChange(value);
+            }
+          }}
+        >
+          <TabList>
+            <Tab value="summary">Summary</Tab>
+            <Tab value="instructions">Payment Instructions</Tab>
+          </TabList>
+        </Tabs>
+      ) : null}
+
+      {showSummary ? (
+        <>
+          <ReviewSummaryCard rows={summaryRows} />
+          {rampExecution.redirectUrl ? (
+            <div className="rounded-2xl border border-border-light bg-border-extra-light p-5">
+              <p className="text-sm font-medium text-text-extra-high">Redirect URL</p>
+              <p className="mt-3 break-all font-mono text-xs text-text-medium">
+                {rampExecution.redirectUrl}
+              </p>
+              <div className="mt-4 flex justify-end">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => onOpenRedirect(rampExecution.redirectUrl ?? "")}
+                >
+                  Open {providerLabel ?? "provider"}
+                </Button>
+              </div>
+            </div>
+          ) : null}
+        </>
+      ) : null}
+
+      {rampResultTab === "instructions" && rampExecution.paymentInstructions ? (
+        <div className="space-y-4">
+          <PaymentInstructionsCard
+            amount={isOnrampBranch ? amount.trim() : ""}
+            instructions={rampExecution.paymentInstructions}
+            sandboxFundingSimulation={
+              canSimulateLightsparkSandbox
+                ? {
+                    loading: sandboxSimulationLoading,
+                    succeeded: sandboxSimulationSucceeded,
+                    onSimulate: onSimulateSandboxFunding,
+                  }
+                : undefined
+            }
+          />
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -945,6 +1210,7 @@ export function PaymentsActionPage({
   enabledComplianceProviders,
   enabledRampProviders,
 }: PaymentsActionPageProps) {
+  const { sdpEnvironment } = useDashboardWorkspace();
   const router = useRouter();
 
   const [branch, setBranch] = useState<ActionBranch | null>(null);
@@ -974,6 +1240,9 @@ export function PaymentsActionPage({
   const [executionError, setExecutionError] = useState<string | null>(null);
   const [transferResult, setTransferResult] = useState<PaymentTransferSummary | null>(null);
   const [rampExecution, setRampExecution] = useState<PaymentRampExecution | null>(null);
+  const [rampResultTab, setRampResultTab] = useState<RampResultTab>("summary");
+  const [sandboxSimulationLoading, setSandboxSimulationLoading] = useState(false);
+  const [sandboxSimulationSucceeded, setSandboxSimulationSucceeded] = useState(false);
   const shouldLoadWallets = branch !== null;
   const hasServerWalletSnapshot = wallets.length > 0 || walletsError !== null;
   const { data: swrWallets, error: walletsFetchError } = useSWR<PaymentsDashboardWallet[]>(
@@ -1120,6 +1389,9 @@ export function PaymentsActionPage({
     setExecutionError(null);
     setTransferResult(null);
     setRampExecution(null);
+    setRampResultTab("summary");
+    setSandboxSimulationLoading(false);
+    setSandboxSimulationSucceeded(false);
   }, []);
 
   useEffect(() => {
@@ -1532,6 +1804,7 @@ export function PaymentsActionPage({
         buildRampPayload()
       );
       setRampExecution(execution);
+      setRampResultTab(execution.paymentInstructions?.length ? "instructions" : "summary");
       setExecutionState("success");
       toast.success(`${providerLabel ?? "Provider"} flow ready.`, {
         id: toastId,
@@ -1546,6 +1819,61 @@ export function PaymentsActionPage({
         position: "bottom-right",
       });
     }
+  };
+
+  const simulateCurrentLightsparkQuote = async () => {
+    const quoteId = rampExecution?.reference;
+    if (!quoteId) {
+      return;
+    }
+
+    setSandboxSimulationLoading(true);
+    const toastId = toast.loading("Simulating sandbox funding.", {
+      position: "bottom-right",
+    });
+
+    try {
+      const transaction = await simulateSandboxTransfer({
+        provider: "lightspark",
+        payload: {
+          quoteId,
+          currencyCode: "USD",
+        },
+      });
+      setSandboxSimulationSucceeded(true);
+      setRampExecution((current) =>
+        current
+          ? {
+              ...current,
+              status: "completed",
+              reference: transaction?.quoteId ?? current.reference,
+            }
+          : current
+      );
+
+      toast.success("Sandbox funding simulated.", {
+        id: toastId,
+        description: transaction?.id ? `Transaction ${transaction.id}` : undefined,
+        position: "bottom-right",
+      });
+    } catch (error) {
+      toast.error("Sandbox simulation failed.", {
+        id: toastId,
+        description: error instanceof Error ? error.message : "Request failed.",
+        position: "bottom-right",
+      });
+    } finally {
+      setSandboxSimulationLoading(false);
+    }
+  };
+
+  const handleSuccessfulReviewAction = () => {
+    if (sandboxSimulationSucceeded && selectedWalletId) {
+      router.push(`/dashboard/custody/${encodeURIComponent(selectedWalletId)}`);
+      return;
+    }
+
+    router.push(buildPaymentsReturnUrl(transferResult?.id ?? rampExecution?.id ?? null));
   };
 
   const handlePrimaryAction = async () => {
@@ -1577,7 +1905,7 @@ export function PaymentsActionPage({
 
     if (currentStep.id === "review") {
       if (executionState === "success") {
-        router.push(buildPaymentsReturnUrl(transferResult?.id ?? rampExecution?.id ?? null));
+        handleSuccessfulReviewAction();
         return;
       }
 
@@ -1621,11 +1949,14 @@ export function PaymentsActionPage({
     }
 
     if (executionState === "success") {
+      if (sandboxSimulationSucceeded) {
+        return "Visit wallet";
+      }
       return "Back to payments";
     }
 
     return "Confirm";
-  }, [currentStep.id, executionState, isTransferBranch]);
+  }, [currentStep.id, executionState, isTransferBranch, sandboxSimulationSucceeded]);
 
   const secondaryLabel = useMemo(() => {
     if (currentStep.id === "branch") {
@@ -1711,7 +2042,7 @@ export function PaymentsActionPage({
           active={provider === option.id}
           title={option.title}
           description={option.description}
-          icon={<CheckCircle2 className="size-5" />}
+          icon={<CheckCircle2Icon className="size-5" />}
           onClick={() => selectProvider(option.id)}
         />
       ))}
@@ -2079,53 +2410,27 @@ export function PaymentsActionPage({
     }
 
     if (executionState === "success" && rampExecution) {
+      const canSimulateLightsparkSandbox =
+        sdpEnvironment === "sandbox" &&
+        provider === "lightspark" &&
+        isOnrampBranch &&
+        Boolean(rampExecution.reference);
+
       return (
-        <div className="space-y-6">
-          <div className="rounded-2xl border border-status-success-border bg-status-success-bg p-5">
-            <p className="text-[20px] font-medium text-status-success-text">
-              {providerLabel ?? "Provider"} flow ready
-            </p>
-            <p className="mt-2 text-sm text-status-success-text">
-              Continue with the provider using the details below.
-            </p>
-          </div>
-          <ReviewSummaryCard
-            rows={[
-              ...rampReviewRows,
-              {
-                label: "Status",
-                value: rampExecution.status,
-              },
-              ...(rampExecution.reference
-                ? [
-                    {
-                      label: "Reference",
-                      value: <span className="font-mono text-xs">{rampExecution.reference}</span>,
-                    },
-                  ]
-                : []),
-            ]}
-          />
-          {rampExecution.redirectUrl ? (
-            <div className="rounded-2xl border border-border-light bg-border-extra-light p-5">
-              <p className="text-sm font-medium text-text-extra-high">Redirect URL</p>
-              <p className="mt-3 break-all font-mono text-xs text-text-medium">
-                {rampExecution.redirectUrl}
-              </p>
-              <div className="mt-4 flex justify-end">
-                <Button
-                  type="button"
-                  variant="secondary"
-                  onClick={() =>
-                    window.open(rampExecution.redirectUrl, "_blank", "noopener,noreferrer")
-                  }
-                >
-                  Open {providerLabel ?? "provider"}
-                </Button>
-              </div>
-            </div>
-          ) : null}
-        </div>
+        <RampSuccessView
+          amount={amount}
+          canSimulateLightsparkSandbox={canSimulateLightsparkSandbox}
+          isOnrampBranch={isOnrampBranch}
+          onOpenRedirect={(url) => window.open(url, "_blank", "noopener,noreferrer")}
+          onResultTabChange={setRampResultTab}
+          onSimulateSandboxFunding={() => void simulateCurrentLightsparkQuote()}
+          providerLabel={providerLabel}
+          rampExecution={rampExecution}
+          rampResultTab={rampResultTab}
+          rampReviewRows={rampReviewRows}
+          sandboxSimulationLoading={sandboxSimulationLoading}
+          sandboxSimulationSucceeded={sandboxSimulationSucceeded}
+        />
       );
     }
 
