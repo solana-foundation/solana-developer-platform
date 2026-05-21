@@ -163,12 +163,10 @@ export function CustodySetupForm({
           ) : null}
         </>
       ) : (
-        <>
-          <div className="grid gap-2">
-            <Label htmlFor="walletLabel">Wallet label</Label>
-            <Input id="walletLabel" name="walletLabel" placeholder="Primary wallet" />
-          </div>
-        </>
+        <div className="grid gap-2">
+          <Label htmlFor="walletLabel">Wallet label</Label>
+          <Input id="walletLabel" name="walletLabel" placeholder="Primary wallet" />
+        </div>
       )}
 
       <div className="flex flex-wrap items-center gap-3">

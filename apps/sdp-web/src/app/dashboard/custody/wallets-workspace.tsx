@@ -5,10 +5,9 @@ import dynamic from "next/dynamic";
 import { useEffect, useMemo, useState } from "react";
 import { ApiPlaygroundShellSkeleton } from "@/components/api-playground-shell-skeleton";
 import { DashboardWorkspaceTabShell } from "@/components/dashboard-workspace-tab-shell";
-import { Button } from "@/components/ui/button";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { getStoredApiKeySecret } from "@/lib/playground-api-keys";
-import type { KnownCustodyProvider } from "./provider-catalog";
+import type { KnownCustodyProvider, WalletProviderCategory } from "./provider-catalog";
 import { WalletProvisionModal } from "./wallet-provision-modal";
 import { WalletsOverview } from "./wallets-overview";
 
@@ -50,6 +49,7 @@ export function WalletsWorkspace({
     useDashboardWorkspace();
   const [isProvisionModalOpen, setIsProvisionModalOpen] = useState(false);
   const [preferredProvider, setPreferredProvider] = useState<KnownCustodyProvider | null>(null);
+  const [preferredCategory, setPreferredCategory] = useState<WalletProviderCategory | null>(null);
   const isPlaygroundTab = issuanceTab === "playground";
 
   useEffect(() => {
@@ -65,7 +65,6 @@ export function WalletsWorkspace({
       void import("./wallets-playground");
     };
 
-    // biome-ignore lint/security/noSecrets: requestIdleCallback is a browser API, not a secret.
     if (typeof window !== "undefined" && "requestIdleCallback" in window) {
       const idleId = window.requestIdleCallback(preloadPlayground);
       return () => window.cancelIdleCallback(idleId);
@@ -93,8 +92,12 @@ export function WalletsWorkspace({
     return stored ?? "";
   }, [selectedPlaygroundApiKey, selectedPlaygroundApiKeyPrefix]);
 
-  const openProvisionModal = (provider: KnownCustodyProvider | null) => {
+  const openProvisionModal = (
+    provider: KnownCustodyProvider | null,
+    category: WalletProviderCategory | null = null
+  ) => {
     setPreferredProvider(provider);
+    setPreferredCategory(category);
     setIsProvisionModalOpen(true);
   };
 
@@ -104,25 +107,14 @@ export function WalletsWorkspace({
         isPlaygroundTab={isPlaygroundTab}
         overviewClassName="space-y-6"
         overview={
-          <>
-            {wallets.length > 0 && dashboardAccess.capabilities.canManageCustody ? (
-              <div className="flex items-center justify-end">
-                <Button type="button" onClick={() => openProvisionModal(null)}>
-                  Create Wallet
-                </Button>
-              </div>
-            ) : null}
-
-            <WalletsOverview
-              connectedProviders={connectedProviders}
-              enabledProviders={enabledProviders}
-              configsError={configsError}
-              wallets={wallets}
-              walletsError={walletsError}
-              canManageCustody={dashboardAccess.capabilities.canManageCustody}
-              onCreateWallet={openProvisionModal}
-            />
-          </>
+          <WalletsOverview
+            enabledProviders={enabledProviders}
+            configsError={configsError}
+            wallets={wallets}
+            walletsError={walletsError}
+            canManageCustody={dashboardAccess.capabilities.canManageCustody}
+            onCreateWallet={openProvisionModal}
+          />
         }
         playground={
           <WalletsPlayground
@@ -149,6 +141,7 @@ export function WalletsWorkspace({
           connectedProviders={connectedProviders}
           enabledProviders={enabledProviders}
           preferredProvider={preferredProvider}
+          preferredCategory={preferredCategory}
         />
       ) : null}
     </div>

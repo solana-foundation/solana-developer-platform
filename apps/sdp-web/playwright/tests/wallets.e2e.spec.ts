@@ -183,18 +183,25 @@ test.describe
 
       await expect(page.getByText("Create your first wallet", { exact: true })).toBeVisible();
 
-      const privyCard = page.locator("article").filter({
-        has: page.getByRole("heading", { name: "Privy" }),
-      });
-      await privyCard.getByRole("button", { name: "New wallet" }).click();
+      await expect(page.getByText("Server", { exact: true }).first()).toBeVisible();
+      await page.getByRole("button", { name: "Set up Server" }).click();
 
-      await page.getByLabel("Primary wallet label").fill("Treasury");
+      await expect(page.getByText("Server", { exact: true }).first()).toBeVisible();
+      await page.getByLabel("Provider").selectOption("privy");
+      await page.getByLabel("Wallet label").fill("Treasury");
       await page.getByRole("button", { name: "Create wallet" }).click();
 
       const walletCard = page.locator("article").filter({
         has: page.getByText("Treasury"),
       });
       await expect(walletCard).toBeVisible({ timeout: 120_000 });
+      await expect(walletCard.getByText("Server", { exact: true })).toBeVisible();
+
+      await page.getByRole("button", { name: "Institutional" }).click();
+      await expect(page.getByText("No Institutional wallets yet.")).toHaveCount(0);
+      await expect(page.locator('button[aria-label="Create wallet"]').first()).toBeVisible();
+      await page.getByRole("button", { name: "Server" }).click();
+      await expect(walletCard).toBeVisible();
 
       await walletCard.getByRole("link", { name: "Manage" }).click();
       await expect(page).toHaveURL(/\/dashboard\/wallets\/.+/);
