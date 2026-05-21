@@ -10,10 +10,12 @@ apps/sdp-api/src/test
 apps/sdp-api/vitest.config.ts
 apps/sdp-api/vitest.node.config.ts
 
-# Workspace siblings the runner never copies.
+# Workspace siblings the runner never copies. sdp-types is the only
+# workspace dep of @sdp/api, hence the re-include.
 apps/sdp-web
 apps/sdp-docs
-packages/sdp-api-integration
+packages/*
+!packages/sdp-types
 docs
 
 .env
