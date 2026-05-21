@@ -172,6 +172,33 @@ jobs:
       - name: Build API (Wrangler dry-run)
         run: pnpm --filter ./apps/sdp-api build
 
+  docker_build_api:
+    name: Docker Build API
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build sdp-api image (no push)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: apps/sdp-api/Dockerfile
+          push: false
+          load: false
+          provenance: false
+          sbom: false
+          tags: sdp-api:ci-${{ github.sha }}
+          build-args: |
+            GIT_SHA=${{ github.sha }}
+          cache-from: type=gha,scope=sdp-api
+          cache-to: type=gha,scope=sdp-api,mode=max
+
   build_docs:
     name: Build Docs
     runs-on: ubuntu-latest

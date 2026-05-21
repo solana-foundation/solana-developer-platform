@@ -1,0 +1,32 @@
+node_modules
+dist
+coverage
+.wrangler
+.turbo
+
+apps/sdp-api/src/**/*.test.ts
+apps/sdp-api/src/**/*.spec.ts
+apps/sdp-api/src/test
+apps/sdp-api/vitest.config.ts
+apps/sdp-api/vitest.node.config.ts
+
+# Workspace siblings the runner never copies.
+apps/sdp-web
+apps/sdp-docs
+packages/sdp-api-integration
+docs
+
+.env
+.env.*
+!.env.example
+!.env.local.example
+
+.git
+.gitignore
+.vscode
+.idea
+.DS_Store
+
+# Context hygiene — the runner stage only copies dist/.
+apps/sdp-api/Dockerfile
+apps/sdp-api/Dockerfile.dockerignore
