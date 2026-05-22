@@ -2544,7 +2544,10 @@ describe("Issuance Routes", () => {
         .run();
     });
 
-    it("rejects mint to non-allowlisted address", async () => {
+    // Legacy fallback path for allowlist tokens with no ablListAddress: the handler
+    // still asserts against the DB allowlist. The on-chain auto-add path is covered
+    // by the "on-chain allowlist auto-add on mint" describe below.
+    it("rejects mint to non-allowlisted address (legacy tokens with no ablListAddress)", async () => {
       const res = await app.request(
         `/v1/issuance/tokens/${allowlistTokenId}/mint/prepare`,
         {
@@ -2568,7 +2571,7 @@ describe("Issuance Routes", () => {
       expect(body.error.code).toBe("NOT_ON_TOKEN_ALLOWLIST");
     });
 
-    it("rejects execute mint to non-allowlisted address", async () => {
+    it("rejects execute mint to non-allowlisted address (legacy tokens with no ablListAddress)", async () => {
       const res = await app.request(
         `/v1/issuance/tokens/${allowlistTokenId}/mint`,
         {
@@ -2628,6 +2631,311 @@ describe("Issuance Routes", () => {
       );
 
       expect(res.status).toBe(200);
+    });
+
+    // When an allowlist token has on-chain ABL active (ablListAddress populated),
+    // mint to a fresh destination auto-adds the wallet to the on-chain list and
+    // mirrors it into token_allowlists, instead of rejecting with
+    // NOT_ON_TOKEN_ALLOWLIST. Without this, the SDK's permissionless-thaw step
+    // fails because the destination ATA is frozen and not on the on-chain list.
+    describe("on-chain allowlist auto-add on mint", () => {
+      const ablList = TEST_SOLANA_ADDRESSES.wallet3;
+      const signerAddress = TEST_SOLANA_ADDRESSES.wallet2;
+      const freshDestination = TEST_SOLANA_ADDRESSES.wallet1;
+
+      const mockPreparedMint = {
+        serializedTx: "ZmFrZS1zZXJpYWxpemVkLXR4",
+        blockhash: "11111111111111111111111111111111",
+        lastValidBlockHeight: 0n,
+        requiredSigners: [],
+        tokenAccount: freshDestination,
+      };
+
+      const mockMintResult = {
+        signature: "5testSigHOO469AutoAddOnMint",
+        slot: 100n,
+        tokenAccount: freshDestination,
+      };
+
+      const seedAblListAddress = async () => {
+        await getDb(env)
+          .prepare("UPDATE issued_tokens SET abl_list_address = ? WHERE id = ?")
+          .bind(ablList, allowlistTokenId)
+          .run();
+      };
+
+      it("auto-adds destination to on-chain allowlist on prepare mint", async () => {
+        await seedAblListAddress();
+
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSigner")
+          .mockResolvedValueOnce({ address: signerAddress } as never);
+        const addToListSpy = vi
+          .spyOn(MosaicService.prototype, "addToList")
+          .mockResolvedValueOnce(undefined as never);
+        const prepareMintToSpy = vi
+          .spyOn(MosaicService.prototype, "prepareMintTo")
+          .mockResolvedValueOnce(mockPreparedMint as never);
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${allowlistTokenId}/mint/prepare`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({
+                mint: { destination: freshDestination, amount: "1" },
+              }),
+            },
+            env
+          );
+
+          expect(res.status).toBe(200);
+          expect(addToListSpy).toHaveBeenCalledTimes(1);
+          expect(addToListSpy).toHaveBeenCalledWith({
+            list: ablList,
+            authority: signerAddress,
+            feePayer: signerAddress,
+            wallet: freshDestination,
+          });
+          expect(prepareMintToSpy).toHaveBeenCalledTimes(1);
+
+          const entry = await getDb(env)
+            .prepare(
+              "SELECT id FROM token_allowlists WHERE token_id = ? AND address = ? AND status = 'active'"
+            )
+            .bind(allowlistTokenId, freshDestination)
+            .first<{ id: string }>();
+          expect(entry?.id).toMatch(/^tal_/);
+
+          const body = (await res.json()) as { data: { transaction: { id: string } } };
+          const transactionId = body.data.transaction.id;
+          const audit = await getDb(env)
+            .prepare(
+              `SELECT metadata FROM audit_logs
+               WHERE action = 'mint' AND resource_type = 'token_transaction'
+                 AND resource_id = ?
+               LIMIT 1`
+            )
+            .bind(transactionId)
+            .first<{ metadata: string }>();
+          expect(audit).not.toBeNull();
+          const meta = JSON.parse(audit?.metadata ?? "{}") as {
+            mode: string;
+            addedToAllowlist: boolean;
+          };
+          expect(meta.mode).toBe("prepare");
+          expect(meta.addedToAllowlist).toBe(true);
+        } finally {
+          createOrgSignerSpy.mockRestore();
+          addToListSpy.mockRestore();
+          prepareMintToSpy.mockRestore();
+        }
+      });
+
+      it("auto-adds destination to on-chain allowlist on execute mint", async () => {
+        await seedAblListAddress();
+
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSigner")
+          .mockResolvedValueOnce({ address: signerAddress } as never);
+        const addToListSpy = vi
+          .spyOn(MosaicService.prototype, "addToList")
+          .mockResolvedValueOnce(undefined as never);
+        const mintToSpy = vi
+          .spyOn(MosaicService.prototype, "mintTo")
+          .mockResolvedValueOnce(mockMintResult as never);
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${allowlistTokenId}/mint`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({
+                mint: { destination: freshDestination, amount: "1" },
+              }),
+            },
+            env
+          );
+
+          expect(res.status).toBe(200);
+          expect(addToListSpy).toHaveBeenCalledTimes(1);
+          expect(addToListSpy).toHaveBeenCalledWith({
+            list: ablList,
+            authority: signerAddress,
+            feePayer: signerAddress,
+            wallet: freshDestination,
+          });
+          expect(mintToSpy).toHaveBeenCalledTimes(1);
+
+          const entry = await getDb(env)
+            .prepare(
+              "SELECT id FROM token_allowlists WHERE token_id = ? AND address = ? AND status = 'active'"
+            )
+            .bind(allowlistTokenId, freshDestination)
+            .first<{ id: string }>();
+          expect(entry?.id).toMatch(/^tal_/);
+
+          const body = (await res.json()) as { data: { transaction: { id: string } } };
+          const transactionId = body.data.transaction.id;
+          const audit = await getDb(env)
+            .prepare(
+              `SELECT metadata FROM audit_logs
+               WHERE action = 'mint' AND resource_type = 'token_transaction'
+                 AND resource_id = ?
+               LIMIT 1`
+            )
+            .bind(transactionId)
+            .first<{ metadata: string }>();
+          const meta = JSON.parse(audit?.metadata ?? "{}") as {
+            mode: string;
+            addedToAllowlist: boolean;
+          };
+          expect(meta.mode).toBe("execute");
+          expect(meta.addedToAllowlist).toBe(true);
+        } finally {
+          createOrgSignerSpy.mockRestore();
+          addToListSpy.mockRestore();
+          mintToSpy.mockRestore();
+        }
+      });
+
+      it("skips on-chain allowlist sync on prepare mint when destination already on list", async () => {
+        await seedAblListAddress();
+
+        // Pre-insert the destination directly into token_allowlists so the handler
+        // sees isOnControlList=true and short-circuits the on-chain add.
+        const tokenService = new TokenService(getDb(env));
+        await tokenService.addAllowlistEntry({
+          tokenId: allowlistTokenId,
+          address: freshDestination,
+          addedBy: TEST_PROJECT_API_KEY.id,
+        });
+
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSigner")
+          .mockResolvedValueOnce({ address: signerAddress } as never);
+        const addToListSpy = vi
+          .spyOn(MosaicService.prototype, "addToList")
+          .mockResolvedValueOnce(undefined as never);
+        const prepareMintToSpy = vi
+          .spyOn(MosaicService.prototype, "prepareMintTo")
+          .mockResolvedValueOnce(mockPreparedMint as never);
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${allowlistTokenId}/mint/prepare`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({
+                mint: { destination: freshDestination, amount: "1" },
+              }),
+            },
+            env
+          );
+
+          expect(res.status).toBe(200);
+          expect(addToListSpy).not.toHaveBeenCalled();
+          expect(prepareMintToSpy).toHaveBeenCalledTimes(1);
+
+          const body = (await res.json()) as { data: { transaction: { id: string } } };
+          const transactionId = body.data.transaction.id;
+          const audit = await getDb(env)
+            .prepare(
+              `SELECT metadata FROM audit_logs
+               WHERE action = 'mint' AND resource_type = 'token_transaction'
+                 AND resource_id = ?
+               LIMIT 1`
+            )
+            .bind(transactionId)
+            .first<{ metadata: string }>();
+          const meta = JSON.parse(audit?.metadata ?? "{}") as {
+            mode: string;
+            addedToAllowlist: boolean;
+          };
+          expect(meta.mode).toBe("prepare");
+          expect(meta.addedToAllowlist).toBe(false);
+        } finally {
+          createOrgSignerSpy.mockRestore();
+          addToListSpy.mockRestore();
+          prepareMintToSpy.mockRestore();
+        }
+      });
+
+      it("skips on-chain allowlist sync on execute mint when destination already on list", async () => {
+        await seedAblListAddress();
+
+        const tokenService = new TokenService(getDb(env));
+        await tokenService.addAllowlistEntry({
+          tokenId: allowlistTokenId,
+          address: freshDestination,
+          addedBy: TEST_PROJECT_API_KEY.id,
+        });
+
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSigner")
+          .mockResolvedValueOnce({ address: signerAddress } as never);
+        const addToListSpy = vi
+          .spyOn(MosaicService.prototype, "addToList")
+          .mockResolvedValueOnce(undefined as never);
+        const mintToSpy = vi
+          .spyOn(MosaicService.prototype, "mintTo")
+          .mockResolvedValueOnce(mockMintResult as never);
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${allowlistTokenId}/mint`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({
+                mint: { destination: freshDestination, amount: "1" },
+              }),
+            },
+            env
+          );
+
+          expect(res.status).toBe(200);
+          expect(addToListSpy).not.toHaveBeenCalled();
+          expect(mintToSpy).toHaveBeenCalledTimes(1);
+
+          const body = (await res.json()) as { data: { transaction: { id: string } } };
+          const transactionId = body.data.transaction.id;
+          const audit = await getDb(env)
+            .prepare(
+              `SELECT metadata FROM audit_logs
+               WHERE action = 'mint' AND resource_type = 'token_transaction'
+                 AND resource_id = ?
+               LIMIT 1`
+            )
+            .bind(transactionId)
+            .first<{ metadata: string }>();
+          const meta = JSON.parse(audit?.metadata ?? "{}") as {
+            mode: string;
+            addedToAllowlist: boolean;
+          };
+          expect(meta.mode).toBe("execute");
+          expect(meta.addedToAllowlist).toBe(false);
+        } finally {
+          createOrgSignerSpy.mockRestore();
+          addToListSpy.mockRestore();
+          mintToSpy.mockRestore();
+        }
+      });
     });
 
     it("rejects mint to denylisted address", async () => {
