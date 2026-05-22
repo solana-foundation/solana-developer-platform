@@ -1,0 +1,38 @@
+node_modules
+dist
+coverage
+.wrangler
+.turbo
+apps/sdp-api/generated
+
+apps/sdp-api/src/**/*.test.ts
+apps/sdp-api/src/**/*.spec.ts
+apps/sdp-api/src/test
+apps/sdp-api/vitest.config.ts
+apps/sdp-api/vitest.node.config.ts
+
+# Workspace siblings the runner never copies. sdp-types is the only
+# workspace dep of @sdp/api, hence the re-include.
+apps/sdp-web
+apps/sdp-docs
+packages/*
+!packages/sdp-types
+docs
+
+.env
+.env.*
+!.env.example
+!.env.local.example
+apps/sdp-api/.dev.vars
+apps/sdp-api/.dev.vars.*
+!apps/sdp-api/.dev.vars.example
+
+.git
+.gitignore
+.vscode
+.idea
+.DS_Store
+
+# Context hygiene — the runner stage only copies dist/.
+apps/sdp-api/Dockerfile
+apps/sdp-api/Dockerfile.dockerignore

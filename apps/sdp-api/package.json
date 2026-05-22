@@ -68,6 +68,7 @@
     "@types/pg": "^8.15.6",
     "@types/react": "^19.2.10",
     "@vitest/coverage-v8": "^4.1.5",
+    "esbuild": "0.27.3",
     "openapi3-ts": "4.5.0",
     "tsx": "4.21.0",
     "typescript": "^6.0.3",
