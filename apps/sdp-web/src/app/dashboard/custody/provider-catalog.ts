@@ -18,8 +18,7 @@ export const WALLET_PROVIDER_CATEGORY_DETAILS: Record<
 > = {
   server: {
     label: "Server",
-    description:
-      "Simple wallet infrastructure for product, operations, and automated flows.",
+    description: "Simple wallet infrastructure for product, operations, and automated flows.",
   },
   institutional: {
     label: "Institutional",

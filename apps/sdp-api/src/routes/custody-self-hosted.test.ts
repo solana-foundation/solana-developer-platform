@@ -35,8 +35,7 @@ const TEST_CACHED_API_KEY: CachedApiKey = {
   expiresAt: null,
 };
 
-const LOCAL_CUSTODY_PRIVATE_KEY =
-  "local-custody-test-private-key";
+const LOCAL_CUSTODY_PRIVATE_KEY = "local-custody-test-private-key";
 
 let originalDeploymentMode: "managed" | "self_hosted" | undefined;
 let originalCustodyPrivateKey: string | undefined;
