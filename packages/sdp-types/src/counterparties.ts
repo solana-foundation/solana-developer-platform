@@ -53,7 +53,7 @@ export interface Counterparty {
 export interface CreateCounterpartyRequest {
   projectId?: string;
   externalId?: string;
-  entityType?: CounterpartyEntityType;
+  entityType: CounterpartyEntityType;
   displayName: string;
   email: string;
   identity?: CounterpartyIdentity;
