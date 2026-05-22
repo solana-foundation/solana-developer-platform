@@ -358,32 +358,20 @@ export function WalletProvisionModal({
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [step, setStep] = useState<ProvisionStep>(
-    () =>
-      resolveInitialSelection(
-        preferredProvider,
-        preferredCategory,
-        connectedProviders,
-        enabledProviders
-      ).step
+  const [initialSelection] = useState<ModalSelection>(() =>
+    resolveInitialSelection(
+      preferredProvider,
+      preferredCategory,
+      connectedProviders,
+      enabledProviders
+    )
   );
+  const [step, setStep] = useState<ProvisionStep>(initialSelection.step);
   const [selectedCategory, setSelectedCategory] = useState<WalletProviderCategory | null>(
-    () =>
-      resolveInitialSelection(
-        preferredProvider,
-        preferredCategory,
-        connectedProviders,
-        enabledProviders
-      ).category
+    initialSelection.category
   );
   const [selectedProvider, setSelectedProvider] = useState<KnownCustodyProvider | null>(
-    () =>
-      resolveInitialSelection(
-        preferredProvider,
-        preferredCategory,
-        connectedProviders,
-        enabledProviders
-      ).provider
+    initialSelection.provider
   );
 
   useEffect(() => {
@@ -391,15 +379,15 @@ export function WalletProvisionModal({
       return;
     }
 
-    const selection = resolveInitialSelection(
+    const nextSelection = resolveInitialSelection(
       preferredProvider,
       preferredCategory,
       connectedProviders,
       enabledProviders
     );
-    setStep(selection.step);
-    setSelectedCategory(selection.category);
-    setSelectedProvider(selection.provider);
+    setStep(nextSelection.step);
+    setSelectedCategory(nextSelection.category);
+    setSelectedProvider(nextSelection.provider);
     setErrorMessage(null);
   }, [connectedProviders, enabledProviders, isOpen, preferredCategory, preferredProvider]);
 
