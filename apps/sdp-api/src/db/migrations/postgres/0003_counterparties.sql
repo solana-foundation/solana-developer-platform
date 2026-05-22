@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS counterparties (
     organization_id TEXT NOT NULL,
     project_id TEXT NOT NULL,
     external_id TEXT,
-    entity_type TEXT NOT NULL DEFAULT 'individual',
+    entity_type TEXT NOT NULL,
     display_name TEXT NOT NULL,
     email TEXT NOT NULL,
     identity JSONB NOT NULL DEFAULT '{}'::jsonb,
