@@ -27,9 +27,11 @@
     "test:serial": "vitest run --no-file-parallelism --maxWorkers=1",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "test:node": "vitest run --config vitest.node.config.ts"
+    "test:node": "vitest run --config vitest.node.config.ts",
+    "dev:node": "tsx watch src/server.ts"
   },
   "dependencies": {
+    "@hono/node-server": "^1.19.6",
     "@react-email/components": "1.0.12",
     "@react-email/render": "2.0.8",
     "@sdp/types": "workspace:*",
@@ -53,6 +55,7 @@
     "ioredis": "^5.4.1",
     "jose": "^6.2.3",
     "nanoid": "^5.1.11",
+    "node-cron": "^4.2.1",
     "pg": "^8.16.3",
     "react": "19.2.5",
     "svix": "1.92.2",

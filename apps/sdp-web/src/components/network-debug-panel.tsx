@@ -239,16 +239,31 @@ function NetworkDebugExpandedPanel({
           </button>
         </div>
         <div className="flex flex-wrap items-center gap-2 border-b border-border-light px-4 py-2">
-          <Button type="button" onClick={() => setPaused(!paused)} variant="outline" size="xs">
-            {paused ? <PlayIcon className="size-3" /> : <PauseIcon className="size-3" />}
+          <Button
+            type="button"
+            onClick={() => setPaused(!paused)}
+            variant="outline"
+            size="xs"
+            iconLeft={paused ? <PlayIcon /> : <PauseIcon />}
+          >
             {paused ? "Resume" : "Pause"}
           </Button>
-          <Button type="button" onClick={clear} variant="outline" size="xs">
-            <EraserIcon className="size-3" />
+          <Button
+            type="button"
+            onClick={clear}
+            variant="outline"
+            size="xs"
+            iconLeft={<EraserIcon />}
+          >
             Clear
           </Button>
-          <Button type="button" onClick={() => setEnabled(false)} variant="destructive" size="xs">
-            <BanIcon className="size-3" />
+          <Button
+            type="button"
+            onClick={() => setEnabled(false)}
+            variant="destructive"
+            size="xs"
+            iconLeft={<BanIcon />}
+          >
             Disable
           </Button>
         </div>
