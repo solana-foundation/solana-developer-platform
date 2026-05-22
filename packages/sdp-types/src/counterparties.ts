@@ -73,4 +73,7 @@ export interface CounterpartyResponse {
 
 export interface ListCounterpartiesResponse {
   counterparties: Counterparty[];
+  total: number;
+  page: number;
+  pageSize: number;
 }

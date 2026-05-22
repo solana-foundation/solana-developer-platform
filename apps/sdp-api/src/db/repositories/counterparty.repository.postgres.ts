@@ -29,11 +29,16 @@ function mapCounterpartyRow(row: Record<string, unknown>): CounterpartyRow {
 
 async function getCounterpartyByIdInternal(
   db: AppDb,
-  counterpartyId: string
+  params: { counterpartyId: string; organizationId: string; projectId: string }
 ): Promise<CounterpartyRow | null> {
   const row = await db
-    .prepare("SELECT * FROM counterparties WHERE id = ?")
-    .bind(counterpartyId)
+    .prepare(
+      `SELECT * FROM counterparties
+         WHERE id = ?
+           AND organization_id = ?
+           AND project_id = ?`
+    )
+    .bind(params.counterpartyId, params.organizationId, params.projectId)
     .first<Record<string, unknown>>();
   return row ? mapCounterpartyRow(row) : null;
 }
@@ -74,7 +79,11 @@ export function createPostgresCounterpartiesRepository(db: AppDb): Counterpartie
         )
         .run();
 
-      return getCounterpartyByIdInternal(db, input.id);
+      return getCounterpartyByIdInternal(db, {
+        counterpartyId: input.id,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+      });
     },
 
     async updateCounterparty(input: UpdateCounterpartyInput) {
@@ -110,7 +119,11 @@ export function createPostgresCounterpartiesRepository(db: AppDb): Counterpartie
         return null;
       }
 
-      return getCounterpartyByIdInternal(db, input.counterpartyId);
+      return getCounterpartyByIdInternal(db, {
+        counterpartyId: input.counterpartyId,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+      });
     },
 
     async archiveCounterparty(input: ArchiveCounterpartyInput) {
@@ -131,7 +144,11 @@ export function createPostgresCounterpartiesRepository(db: AppDb): Counterpartie
         return null;
       }
 
-      return getCounterpartyByIdInternal(db, input.counterpartyId);
+      return getCounterpartyByIdInternal(db, {
+        counterpartyId: input.counterpartyId,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+      });
     },
 
     async getCounterpartyById(params) {
