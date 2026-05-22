@@ -9,6 +9,7 @@ coverage
 playwright
 playwright-report
 test-results
+apps/sdp-web/.next-playwright
 
 # Docs are served separately (sdp-docs) and only proxied at runtime.
 # Top-level `docs/` (notes, plans) is also unrelated to the runtime image.

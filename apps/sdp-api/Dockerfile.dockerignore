@@ -3,6 +3,7 @@ dist
 coverage
 .wrangler
 .turbo
+apps/sdp-api/generated
 
 apps/sdp-api/src/**/*.test.ts
 apps/sdp-api/src/**/*.spec.ts
@@ -22,6 +23,9 @@ docs
 .env.*
 !.env.example
 !.env.local.example
+apps/sdp-api/.dev.vars
+apps/sdp-api/.dev.vars.*
+!apps/sdp-api/.dev.vars.example
 
 .git
 .gitignore
