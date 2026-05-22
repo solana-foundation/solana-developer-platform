@@ -39,8 +39,12 @@ export interface CustodyProviderCatalogEntry {
   capabilities: readonly string[];
 }
 
-export const CUSTODY_PROVIDER_CATALOG: CustodyProviderCatalogEntry[] = [
-  {
+type CustodyProviderCatalogById = {
+  [Provider in KnownCustodyProvider]: CustodyProviderCatalogEntry & { id: Provider };
+};
+
+const CUSTODY_PROVIDER_CATALOG_BY_ID = {
+  local: {
     id: "local",
     label: "Local Signer",
     description: "Self-hosted Ed25519 keypair signer from CUSTODY_PRIVATE_KEY.",
@@ -49,7 +53,7 @@ export const CUSTODY_PROVIDER_CATALOG: CustodyProviderCatalogEntry[] = [
     supportsSigning: providerSupportsSigning("local"),
     capabilities: ["Issuance", "Transfers"],
   },
-  {
+  privy: {
     id: "privy",
     label: "Privy",
     description: "Hosted wallet infrastructure for API signing.",
@@ -58,7 +62,7 @@ export const CUSTODY_PROVIDER_CATALOG: CustodyProviderCatalogEntry[] = [
     supportsSigning: providerSupportsSigning("privy"),
     capabilities: DEFAULT_CUSTODY_CAPABILITIES,
   },
-  {
+  fireblocks: {
     id: "fireblocks",
     label: "Fireblocks",
     description: "MPC custody with vault-based wallet controls.",
@@ -67,7 +71,7 @@ export const CUSTODY_PROVIDER_CATALOG: CustodyProviderCatalogEntry[] = [
     supportsSigning: providerSupportsSigning("fireblocks"),
     capabilities: DEFAULT_CUSTODY_CAPABILITIES,
   },
-  {
+  coinbase_cdp: {
     id: "coinbase_cdp",
     label: "Coinbase CDP",
     description: "Programmatic wallet provisioning through Coinbase CDP.",
@@ -76,7 +80,7 @@ export const CUSTODY_PROVIDER_CATALOG: CustodyProviderCatalogEntry[] = [
     supportsSigning: providerSupportsSigning("coinbase_cdp"),
     capabilities: DEFAULT_CUSTODY_CAPABILITIES,
   },
-  {
+  para: {
     id: "para",
     label: "Para",
     description: "Embedded wallet custody for organization-level operations.",
@@ -85,7 +89,7 @@ export const CUSTODY_PROVIDER_CATALOG: CustodyProviderCatalogEntry[] = [
     supportsSigning: providerSupportsSigning("para"),
     capabilities: DEFAULT_CUSTODY_CAPABILITIES,
   },
-  {
+  turnkey: {
     id: "turnkey",
     label: "Turnkey",
     description: "Policy-based key custody for production signing workloads.",
@@ -94,7 +98,7 @@ export const CUSTODY_PROVIDER_CATALOG: CustodyProviderCatalogEntry[] = [
     supportsSigning: providerSupportsSigning("turnkey"),
     capabilities: DEFAULT_CUSTODY_CAPABILITIES,
   },
-  {
+  dfns: {
     id: "dfns",
     label: "DFNS",
     description: "MPC wallet orchestration with secure API-driven signing.",
@@ -103,7 +107,7 @@ export const CUSTODY_PROVIDER_CATALOG: CustodyProviderCatalogEntry[] = [
     supportsSigning: providerSupportsSigning("dfns"),
     capabilities: DEFAULT_CUSTODY_CAPABILITIES,
   },
-  {
+  anchorage: {
     id: "anchorage",
     label: "Anchorage",
     description: "Institutional custody with wallet lifecycle management.",
@@ -112,7 +116,11 @@ export const CUSTODY_PROVIDER_CATALOG: CustodyProviderCatalogEntry[] = [
     supportsAdditionalWallets: providerSupportsAdditionalWallets("anchorage"),
     supportsSigning: providerSupportsSigning("anchorage"),
   },
-];
+} satisfies CustodyProviderCatalogById;
+
+export const CUSTODY_PROVIDER_CATALOG: CustodyProviderCatalogEntry[] = Object.values(
+  CUSTODY_PROVIDER_CATALOG_BY_ID
+);
 
 function getSharedProviderCapabilities(
   provider: KnownCustodyProvider
@@ -147,9 +155,7 @@ export function formatCustodyProviderName(provider: string): string {
 export function getCustodyProviderEntry(
   provider: KnownCustodyProvider
 ): CustodyProviderCatalogEntry {
-  return (
-    CUSTODY_PROVIDER_CATALOG.find((entry) => entry.id === provider) ?? CUSTODY_PROVIDER_CATALOG[0]
-  );
+  return CUSTODY_PROVIDER_CATALOG_BY_ID[provider];
 }
 
 export function getCustodyProviderCategory(provider: KnownCustodyProvider): WalletProviderCategory {

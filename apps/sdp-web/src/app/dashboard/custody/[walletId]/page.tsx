@@ -160,7 +160,9 @@ export default async function WalletDetailPage({
   const provider =
     wallet.provider && isKnownCustodyProvider(wallet.provider) ? wallet.provider : null;
   const category = provider ? getCustodyProviderCategory(provider) : null;
-  const supportsSignerCheck = provider ? getCustodyProviderEntry(provider).supportsSigning : true;
+  const supportsSignerCheck = provider
+    ? getCustodyProviderEntry(provider).supportsSigning
+    : !wallet.provider;
   const balances =
     trackedBalancesResult.balances.length > 0 ? trackedBalancesResult.balances : [wallet.balance];
   const totalBalance = resolveTotalBalance(balances);
