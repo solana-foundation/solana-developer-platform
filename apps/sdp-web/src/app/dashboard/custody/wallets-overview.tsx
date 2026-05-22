@@ -330,6 +330,30 @@ function WalletCardsGrid({
   );
 }
 
+function CategoryEmptyState({
+  canManageCustody,
+  category,
+  providers,
+}: {
+  canManageCustody: boolean;
+  category: WalletProviderCategory;
+  providers: CustodyProviderCatalogEntry[];
+}) {
+  const details = WALLET_PROVIDER_CATEGORY_DETAILS[category];
+  const categoryLabel = details.label.toLowerCase();
+
+  return (
+    <div className="rounded-2xl border border-[rgba(28,28,29,0.1)] bg-[#fcfcfa] px-5 py-6 text-sm text-[rgba(28,28,29,0.68)]">
+      <p className="font-medium text-[#1c1c1d]">No {categoryLabel} wallets yet</p>
+      <p className="mt-1">
+        {canManageCustody && providers.length === 0
+          ? `No ${categoryLabel} wallet providers are enabled for this organization tier right now.`
+          : `Wallet creation is limited to admins. Once a ${categoryLabel} wallet is created, it will appear here.`}
+      </p>
+    </div>
+  );
+}
+
 function CategoryFilteredWalletGrid({
   canManageCustody,
   category,
@@ -351,7 +375,13 @@ function CategoryFilteredWalletGrid({
   if (wallets.length === 0) {
     return createTile ? (
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">{createTile}</div>
-    ) : null;
+    ) : (
+      <CategoryEmptyState
+        canManageCustody={canManageCustody}
+        category={category}
+        providers={providers}
+      />
+    );
   }
 
   return (

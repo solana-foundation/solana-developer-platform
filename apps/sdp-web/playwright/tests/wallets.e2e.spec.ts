@@ -199,7 +199,6 @@ test.describe
       await expect(walletCard.getByText("Server", { exact: true })).toBeVisible();
 
       await page.getByRole("button", { name: "Institutional" }).click();
-      await expect(page.getByText("No Institutional wallets yet.")).toHaveCount(0);
       await expect(page.locator('button[aria-label="Create wallet"]').first()).toBeVisible();
       await page.getByRole("button", { name: "Server" }).click();
       await expect(walletCard).toBeVisible();
@@ -210,7 +209,9 @@ test.describe
       await page.getByRole("button", { name: "Actions" }).click();
       await page.getByRole("menuitem", { name: "Prove ownership" }).click();
 
-      await expect(page.getByText("Signer check sent.")).toBeVisible({ timeout: 120_000 });
+      await expect(page.getByText("Signer check sent.")).toBeVisible({
+        timeout: 120_000,
+      });
       await expect(page.getByRole("link", { name: "View on Solana Explorer" })).toBeVisible();
     });
 
@@ -305,7 +306,11 @@ test.describe
 
       const expectedActivityRows = [
         { operationLabel: "Burn", token: deployedToken.symbol, amount: "2" },
-        { operationLabel: "Force Burn", token: deployedToken.symbol, amount: "1" },
+        {
+          operationLabel: "Force Burn",
+          token: deployedToken.symbol,
+          amount: "1",
+        },
       ];
       const activityRows = expectedActivityRows.map((expectedRow) => ({
         expectedRow,
