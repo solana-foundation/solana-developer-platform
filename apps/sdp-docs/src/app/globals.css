@@ -674,14 +674,15 @@ body {
   padding: 0.875rem 1rem;
   border: 1px solid var(--launch-border-strong);
   border-radius: 10px;
-  background: var(--launch-bg);
+  background: var(--launch-white);
+  box-shadow: 0 1px 3px oklch(0 0 0 / 0.07), 0 1px 2px oklch(0 0 0 / 0.04);
   text-decoration: none;
-  transition: border-color 0.15s, background 0.15s;
+  transition: border-color 0.15s, box-shadow 0.15s;
 }
 
 .page-nav-link:hover {
   border-color: var(--launch-ink);
-  background: var(--launch-bg);
+  box-shadow: 0 2px 6px oklch(0 0 0 / 0.1), 0 1px 2px oklch(0 0 0 / 0.06);
 }
 
 .page-nav-direction {
