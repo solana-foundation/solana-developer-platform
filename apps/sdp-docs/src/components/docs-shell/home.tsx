@@ -40,20 +40,20 @@ const modelSteps = [
 
 const outcomes = [
   {
-    title: "Launch a regulated stablecoin",
-    desc: "Stablecoin template with pausable transfers, permanent delegate, and compliance controls baked in.",
+    title: "Issuance — bring RWAs onchain",
+    desc: "Deploy tokenized securities, stablecoins, or funds using pre-built templates with compliance controls baked in.",
     href: "/docs/tokens/create-a-token",
     Icon: CircleDollarSign,
   },
   {
-    title: "Tokenize a real-world asset",
-    desc: "Map securities, funds, or loyalty programs to the right model, authorities, and onchain flow.",
-    href: "/docs/tokens/tokenize-an-asset",
+    title: "Payments — move assets between wallets",
+    desc: "Orchestrate transfers, manage wallet custody, and integrate payment rails into your existing systems.",
+    href: "/docs/tokens/transfer-tokens",
     Icon: Building2,
   },
   {
-    title: "Plug into existing custody",
-    desc: "Sign through Privy, Fireblocks, Coinbase CDP, Turnkey — or sign from your own backend.",
+    title: "Markets — connect to liquidity",
+    desc: "Enable secondary market activity for your issued assets through SDP's markets infrastructure.",
     href: "/docs/guides/setup-wallets",
     Icon: Lock,
   },
@@ -87,10 +87,10 @@ export function DocsHome() {
           For fintechs, asset issuers &amp; regulated platforms
         </p>
         <h1 className="launch-home-hero-headline">
-          Issue Solana tokens without the infrastructure
+          Real-world asset issuance, payments, and markets on Solana
         </h1>
         <p className="launch-home-hero-sub">
-          A dashboard and REST API for token issuance, custody, and compliance — skip key management, Token-2022 boilerplate, and validator wiring.
+          A dashboard and REST API for RWA issuance, payment rails, and market infrastructure — skip key management, Token-2022 boilerplate, and Solana environment setup.
         </p>
         <div className="launch-home-actions">
           <Link href="/docs/getting-started" className="launch-home-cta-primary">
