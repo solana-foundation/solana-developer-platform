@@ -416,7 +416,7 @@ body {
   gap: 8px;
   min-height: 32px;
   margin: 0 0 28px;
-  color: var(--launch-muted);
+  color: var(--launch-text);
   font-family: var(--font-berkeley-mono);
   font-size: 12px;
 }
@@ -442,14 +442,14 @@ body {
 
 .launch-docs-breadcrumb span {
   background: var(--launch-active-bg);
-  color: var(--launch-text);
+  color: var(--launch-ink);
 }
 
 .launch-docs-breadcrumb svg {
   width: 14px;
   height: 14px;
   flex: 0 0 auto;
-  color: var(--launch-icon-muted);
+  color: var(--launch-muted);
 }
 
 .launch-docs-breadcrumb-home {
