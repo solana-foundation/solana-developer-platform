@@ -27,15 +27,27 @@ Specify the source, destination, token, and amount. Always include an idempotenc
 <Tabs items={["UI", "API"]} groupId="how-it-works">
 <Tab value="UI">
 
-Go to **Payments** in the sidebar and click **New transfer**.
+Go to **Payments** in the sidebar. The overview shows your total SDP balance, recent transactions, and **Send** / **Receive** actions.
+
+![Payments overview showing balance, Send and Receive buttons, and recent transactions](/images/tokens/transfer-confirmed.png)
+
+Click **Send** and select **Wallet transfer** to send from an SDP wallet to a Solana address.
+
+![Send page showing Wallet transfer and Off-ramp options](/images/tokens/transfer-send-options.png)
+
+On the **Enter transfer details** form, select a source wallet from the dropdown.
+
+![Transfer details form with source wallet dropdown open](/images/tokens/transfer-form-source.png)
 
 Fill in:
 
 - **Source** — a wallet you control in SDP
-- **Destination** — any valid Solana wallet address
-- **Token** — select from your deployed tokens
 - **Amount** — human-readable units (e.g., `0.5`)
+- **Asset** — select from your deployed tokens
+- **Destination address** — any valid Solana wallet address
 - **Memo** — optional note recorded onchain
+
+![Transfer details form with all fields filled in](/images/tokens/transfer-form-filled.png)
 
 </Tab>
 <Tab value="API">
@@ -124,7 +136,9 @@ Confirm the transfer completed and balances updated as expected.
 <Tabs items={["UI", "API"]} groupId="how-it-works">
 <Tab value="UI">
 
-The transfer appears in **Payments** history with a `Confirmed` status and an onchain transaction signature.
+The transfer appears in **Payments** history with a `confirmed` status and an onchain transaction signature.
+
+![Payments overview showing confirmed 1,000 TFDT inbound transaction](/images/tokens/transfer-confirmed.png)
 
 Click the record to see full details including the Solana Explorer link.
 

@@ -67,9 +67,29 @@ Prevent a specific holder from sending or receiving this token. The freeze targe
 <Tabs items={["UI", "API"]} groupId="how-it-works">
 <Tab value="UI">
 
-On the token detail page, go to the **Compliance** tab. Click **Freeze account**, enter the holder's wallet address and an optional reason, then confirm.
+On the token detail page, go to the **Compliance** tab and select **Freeze Controls**.
 
-To lift the freeze, find the account in the frozen list and click **Unfreeze**.
+![Freeze Controls tab with empty wallet address and reason fields](/images/tokens/freeze-controls-empty.png)
+
+Enter the holder's wallet address and an optional reason, then click **Freeze account**.
+
+![Freeze Controls tab with wallet address and reason filled in](/images/tokens/freeze-controls-filled.png)
+
+Confirm the on-chain submission in the confirmation prompt.
+
+![Freeze account confirmation dialog](/images/tokens/freeze-confirm.png)
+
+The "Freeze transaction finalized." toast appears and the Frozen Accounts count updates to 1.
+
+![Compliance tab showing Freeze transaction finalized toast and Frozen Accounts count updated to 1](/images/tokens/freeze-confirmed.png)
+
+To lift the freeze, find the account in the frozen list and click **Unfreeze**. Confirm the on-chain submission.
+
+![Unfreeze account confirmation dialog](/images/tokens/unfreeze-confirm.png)
+
+The "Unfreeze transaction finalized." toast appears and the Frozen Accounts count returns to 0.
+
+![Compliance tab showing Unfreeze transaction finalized toast and Frozen Accounts count back to 0](/images/tokens/unfreeze-confirmed.png)
 
 </Tab>
 <Tab value="API">
@@ -119,9 +139,21 @@ Halt all minting and transfer activity globally. Requires the `pausable` extensi
 <Tabs items={["UI", "API"]} groupId="how-it-works">
 <Tab value="UI">
 
-On the token detail page, click **Pause token** in the admin controls panel and confirm.
+On the token detail page, go to the **Compliance** tab and select **Pause Controls**. Click **Pause token**.
 
-While paused, the token header shows a `Paused` badge and all supply and transfer operations are blocked. Click **Unpause** to resume.
+![Pause Controls tab showing Pause token and Unpause token buttons](/images/tokens/pause-controls.png)
+
+Confirm the on-chain submission in the confirmation prompt.
+
+![Pause token confirmation dialog](/images/tokens/pause-confirm.png)
+
+The "Pause transaction finalized." toast appears and an orange **Token is paused** banner displays across the page. All supply and transfer operations are now blocked.
+
+![Compliance tab showing Token is paused banner and Pause transaction finalized toast](/images/tokens/pause-confirmed.png)
+
+To resume, click **Unpause token** and confirm.
+
+![Unpause token confirmation dialog](/images/tokens/unpause-confirm.png)
 
 </Tab>
 <Tab value="API">

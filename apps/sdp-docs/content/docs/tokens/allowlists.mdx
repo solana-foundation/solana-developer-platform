@@ -31,6 +31,10 @@ In the **Create token** flow, step 3 of 3, toggle **Allowlist** on.
 
 For `tokenized-security` tokens, the allowlist toggle is pre-enabled and locked.
 
+The Compliance tab on the token detail page shows the allowlist management interface, with an Address and Label field and a Control Lists sidebar tracking entry and frozen account counts.
+
+![Operational settings form showing the Allowlist toggle during token creation](/images/tokens/token-create-settings.png)
+
 </Tab>
 <Tab value="API">
 
@@ -64,9 +68,15 @@ Add a wallet address to the allowlist before minting to it or using it as an adm
 <Tabs items={["UI", "API"]} groupId="how-it-works">
 <Tab value="UI">
 
-Open the token detail page and go to the **Allowlist** tab.
+Open the token detail page and go to the **Compliance** tab, then select **Allowlist**.
 
-Click **Add address**, enter the wallet address and an optional label, then click **Add**. The address is enforced on the next allowlist-checked operation.
+Enter the wallet address and an optional label, then click **Add allowlist entry**. The address is enforced on the next allowlist-checked operation.
+
+![Compliance Allowlist tab with empty address and label fields, ready to add a new entry](/images/tokens/allowlist-empty.png)
+
+After adding, the entry appears below the form with a **Remove entry** button.
+
+![Allowlist entry added and visible in the list](/images/tokens/allowlist-entry-added.png)
 
 </Tab>
 <Tab value="API">
@@ -143,7 +153,7 @@ Remove an address when a holder's compliance status changes. Existing token hold
 <Tabs items={["UI", "API"]} groupId="how-it-works">
 <Tab value="UI">
 
-In the **Allowlist** tab, click **Remove** next to the address and confirm the removal.
+In the **Compliance → Allowlist** tab, click **Remove entry** next to the address. The entry is removed immediately and the Control Lists sidebar updates to 0 entries.
 
 </Tab>
 <Tab value="API">

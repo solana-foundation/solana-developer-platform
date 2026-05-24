@@ -31,6 +31,8 @@ In the **Issuance** list, click an active token to open its detail page.
 
 The **Fund management** panel shows the current supply with two primary actions: **Mint** and **Burn**.
 
+![Token Operations tab showing Mint and Burn actions](/images/tokens/token-deployed.png)
+
 </Tab>
 <Tab value="API">
 
@@ -64,7 +66,19 @@ In the **Mint** form:
 - **Amount** — in human-readable units (e.g., `1.0`)
 - **Memo** — optional, recorded onchain
 
-Click **Mint** and confirm. The supply counter updates once the transaction is confirmed.
+Click **Mint**. A modal shows the signer wallet and a destination picker — select or paste the destination address.
+
+Fill in the amount and optional memo, then click **Mint tokens**.
+
+![Mint Tokens modal with amount and memo filled in](/images/tokens/mint-modal-filled.png)
+
+Confirm the on-chain submission in the confirmation prompt.
+
+![Mint tokens confirmation dialog — click Mint now to submit the transaction on-chain](/images/tokens/mint-confirm.png)
+
+Once confirmed, the mint appears in the Transactions table with a `confirmed` status and a "Mint transaction finalized." toast appears.
+
+![Operations tab showing confirmed mint entry and Mint transaction finalized toast](/images/tokens/mint-confirmed.png)
 
 </Tab>
 <Tab value="API">
@@ -120,7 +134,27 @@ Reduce supply by burning from an account your wallet controls. Use force-burn to
 <Tabs items={["UI", "API"]} groupId="how-it-works">
 <Tab value="UI">
 
-In the **Burn** form, enter the source account, amount, and optional memo. For **Force burn** (requires `tokens:admin`), use the admin panel on the token detail page.
+Click **Burn**. A modal shows the signer and a source field — select the wallet holding the tokens you want to remove.
+
+![Burn Tokens modal with empty source field](/images/tokens/burn-modal-empty.png)
+
+Select the source wallet from the dropdown.
+
+![Burn Tokens modal with source wallet dropdown open](/images/tokens/burn-modal-source.png)
+
+Fill in the amount and optional memo, then click **Burn tokens**.
+
+![Burn Tokens modal filled with source, amount, and memo](/images/tokens/burn-modal-filled.png)
+
+Confirm the on-chain submission in the confirmation prompt.
+
+![Burn tokens confirmation dialog](/images/tokens/burn-confirm.png)
+
+The "Burn transaction finalized." toast appears and the burn shows as confirmed in the Transactions table.
+
+![Operations tab showing confirmed burn transaction and finalized toast](/images/tokens/burn-confirmed.png)
+
+For **Force burn** (requires `tokens:admin`), use the Compliance tab instead of the Operations tab — force-burn lets admins remove tokens from any holder account without their signature.
 
 </Tab>
 <Tab value="API">
@@ -173,7 +207,11 @@ After minting or burning, refresh the cached supply total.
 <Tabs items={["UI", "API"]} groupId="how-it-works">
 <Tab value="UI">
 
-The dashboard refreshes supply automatically after a confirmed operation. Reload the token detail page if the displayed value appears stale.
+The dashboard refreshes supply automatically after a confirmed operation. The Transactions table shows all completed operations — deploy, mint, and burn — each with a `confirmed` status.
+
+![Operations tab showing confirmed burn, mint, and deploy transactions](/images/tokens/operations-history.png)
+
+Reload the token detail page if the displayed supply value appears stale.
 
 </Tab>
 <Tab value="API">
