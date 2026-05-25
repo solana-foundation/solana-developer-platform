@@ -32,7 +32,7 @@ function mapToCounterparty(row: CounterpartyRow): Counterparty {
     displayName: row.display_name,
     email: row.email,
     identity: row.identity,
-    isActive: row.is_active,
+    status: row.status,
     createdBy: row.created_by,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -47,12 +47,12 @@ export const listCounterparties = async (c: AppContext) => {
     throw badRequestQuery({ errors: z.treeifyError(parsed.error) });
   }
 
-  const { page, pageSize, includeInactive } = parsed.data;
+  const { page, pageSize, includeArchived } = parsed.data;
 
   const repo = getCounterpartiesRepository(c);
   const { rows, total } = await repo.listCounterparties({
     organizationId: auth.organizationId,
-    includeInactive,
+    includeArchived,
     limit: pageSize,
     offset: (page - 1) * pageSize,
   });

@@ -108,7 +108,7 @@ describe("Counterparties Routes", () => {
       expect(body.data.counterparty.entityType).toBe("individual");
       expect(body.data.counterparty.displayName).toBe("Alice");
       expect(body.data.counterparty.externalId).toBe("ext_001");
-      expect(body.data.counterparty.isActive).toBe(true);
+      expect(body.data.counterparty.status).toBe("active");
       expect(body.data.counterparty.createdBy).toBe(TEST_USER.id);
     });
 

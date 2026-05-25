@@ -4,6 +4,7 @@ import type {
   ArchiveCounterpartyInput,
   CounterpartiesRepository,
   CounterpartyRow,
+  CounterpartyStatus,
   CreateCounterpartyInput,
   ListCounterpartiesInput,
   ListCounterpartiesResult,
@@ -21,7 +22,7 @@ function mapCounterpartyRow(row: Record<string, unknown>): CounterpartyRow {
     display_name: row.display_name as string,
     email: row.email as string,
     identity: row.identity as CounterpartyIdentity,
-    is_active: row.is_active as boolean,
+    status: row.status as CounterpartyStatus,
     created_by: row.created_by as string | null,
     created_at: row.created_at as string,
     updated_at: row.updated_at as string,
@@ -59,9 +60,9 @@ export function createPostgresCounterpartiesRepository(db: AppDb): Counterpartie
              display_name,
              email,
              identity,
-             is_active,
+             status,
              created_by
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)`
         )
         .bind(
           id,
@@ -72,7 +73,6 @@ export function createPostgresCounterpartiesRepository(db: AppDb): Counterpartie
           input.displayName,
           input.email,
           input.identity,
-          true,
           input.createdBy
         )
         .run();
@@ -95,7 +95,7 @@ export function createPostgresCounterpartiesRepository(db: AppDb): Counterpartie
                  updated_at = sdp_iso_now()
            WHERE id = ?
              AND organization_id = ?
-             AND is_active = TRUE`
+             AND status = 'active'`
         )
         .bind(
           input.externalId !== undefined,
@@ -123,11 +123,11 @@ export function createPostgresCounterpartiesRepository(db: AppDb): Counterpartie
       const result = await db
         .prepare(
           `UPDATE counterparties
-             SET is_active = FALSE,
+             SET status = 'archived',
                  updated_at = sdp_iso_now()
            WHERE id = ?
              AND organization_id = ?
-             AND is_active = TRUE`
+             AND status = 'active'`
         )
         .bind(input.counterpartyId, input.organizationId)
         .run();
@@ -148,7 +148,7 @@ export function createPostgresCounterpartiesRepository(db: AppDb): Counterpartie
           `SELECT * FROM counterparties
              WHERE id = ?
                AND organization_id = ?
-               AND is_active = TRUE`
+               AND status = 'active'`
         )
         .bind(params.counterpartyId, params.organizationId)
         .first<Record<string, unknown>>();
@@ -161,7 +161,7 @@ export function createPostgresCounterpartiesRepository(db: AppDb): Counterpartie
           `SELECT * FROM counterparties
              WHERE organization_id = ?
                AND external_id = ?
-               AND is_active = TRUE`
+               AND status = 'active'`
         )
         .bind(params.organizationId, params.externalId)
         .first<Record<string, unknown>>();
@@ -175,20 +175,20 @@ export function createPostgresCounterpartiesRepository(db: AppDb): Counterpartie
             `SELECT *
                FROM counterparties
               WHERE organization_id = ?
-                AND (?::boolean OR is_active = TRUE)
+                AND (?::boolean OR status = 'active')
               ORDER BY created_at DESC
               LIMIT ? OFFSET ?`
           )
-          .bind(params.organizationId, params.includeInactive ?? false, params.limit, params.offset)
+          .bind(params.organizationId, params.includeArchived ?? false, params.limit, params.offset)
           .all<Record<string, unknown>>(),
         db
           .prepare(
             `SELECT COUNT(*)::int AS total
                FROM counterparties
               WHERE organization_id = ?
-                AND (?::boolean OR is_active = TRUE)`
+                AND (?::boolean OR status = 'active')`
           )
-          .bind(params.organizationId, params.includeInactive ?? false)
+          .bind(params.organizationId, params.includeArchived ?? false)
           .first<{ total: number }>(),
       ]);
 

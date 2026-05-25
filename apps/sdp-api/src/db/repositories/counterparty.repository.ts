@@ -5,6 +5,8 @@ export function generateCounterpartyId(): string {
   return `counterparty_${crypto.randomUUID()}`;
 }
 
+export type CounterpartyStatus = "active" | "archived";
+
 export interface CounterpartyRow {
   id: string;
   organization_id: string;
@@ -14,7 +16,7 @@ export interface CounterpartyRow {
   display_name: string;
   email: string;
   identity: CounterpartyIdentity;
-  is_active: boolean;
+  status: CounterpartyStatus;
   created_by: string | null;
   created_at: string;
   updated_at: string;
@@ -48,7 +50,7 @@ export interface ArchiveCounterpartyInput {
 
 export interface ListCounterpartiesInput {
   organizationId: string;
-  includeInactive?: boolean;
+  includeArchived?: boolean;
   limit: number;
   offset: number;
 }

@@ -67,5 +67,5 @@ export const updateCounterpartySchema = z
 export const listCounterpartiesQuerySchema = z.object({
   page: z.coerce.number().int().positive().default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
-  includeInactive: z.coerce.boolean().default(false),
+  includeArchived: z.coerce.boolean().default(false),
 });

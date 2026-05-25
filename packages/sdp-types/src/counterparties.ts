@@ -35,6 +35,8 @@ export interface CounterpartyIdentity {
   [extension: string]: unknown;
 }
 
+export type CounterpartyStatus = "active" | "archived";
+
 export interface Counterparty {
   id: string;
   organizationId: string;
@@ -44,7 +46,7 @@ export interface Counterparty {
   displayName: string;
   email: string;
   identity: CounterpartyIdentity;
-  isActive: boolean;
+  status: CounterpartyStatus;
   createdBy: string | null;
   createdAt: string;
   updatedAt: string;
