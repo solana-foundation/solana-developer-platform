@@ -3,14 +3,8 @@ import { z } from "zod";
 import { getDb } from "@/db";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
 import { getAuth } from "@/lib/auth";
-import {
-  AppError,
-  badRequest,
-  badRequestParams,
-  badRequestQuery,
-  conflict,
-  notFound,
-} from "@/lib/errors";
+import { resolveCreatorUserId } from "@/lib/creator";
+import { badRequest, badRequestParams, badRequestQuery, conflict, notFound } from "@/lib/errors";
 import { created, noContent, success } from "@/lib/response";
 import { AuditService } from "@/services/audit.service";
 import { type AppContext, getCounterpartiesRepository } from "./context";
@@ -109,6 +103,8 @@ export const createCounterparty = async (c: AppContext) => {
     }
   }
 
+  const createdBy = await resolveCreatorUserId(c);
+
   const counterparty = await repo.createCounterparty({
     organizationId: auth.organizationId,
     projectId: auth.projectId,
@@ -117,11 +113,11 @@ export const createCounterparty = async (c: AppContext) => {
     displayName: parsed.data.displayName,
     email: parsed.data.email,
     identity: parsed.data.identity ?? {},
-    createdBy: auth.userId,
+    createdBy,
   });
 
   if (!counterparty) {
-    throw new AppError("INTERNAL_ERROR", "Failed to create counterparty");
+    throw notFound("Counterparty");
   }
 
   const auditService = new AuditService(getDb(c.env));
