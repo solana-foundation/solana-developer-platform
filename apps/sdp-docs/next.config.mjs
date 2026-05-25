@@ -23,7 +23,7 @@ if (process.env.NEXT_BUILD_STANDALONE === "1") {
   nextConfig.output = "standalone";
   nextConfig.outputFileTracingRoot = path.resolve(
     path.dirname(fileURLToPath(import.meta.url)),
-    "../..",
+    "../.."
   );
 }
 
