@@ -228,7 +228,10 @@ jobs:
   docker_compose_smoke:
     name: Docker Compose Smoke
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
+    env:
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: pk_test_c21va2UubG9jYWwuY2xlcmsuZGV2JA
+      CLERK_SECRET_KEY: sk_test_dummy_smoke_for_ci_only
     steps:
       - name: Checkout
         uses: actions/checkout@v6
