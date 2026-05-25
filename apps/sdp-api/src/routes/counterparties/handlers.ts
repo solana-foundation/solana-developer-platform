@@ -4,7 +4,14 @@ import { getDb } from "@/db";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
 import { getAuth } from "@/lib/auth";
 import { resolveCreatorUserId } from "@/lib/creator";
-import { badRequest, badRequestParams, badRequestQuery, conflict, notFound } from "@/lib/errors";
+import {
+  badRequest,
+  badRequestParams,
+  badRequestQuery,
+  conflict,
+  internalError,
+  notFound,
+} from "@/lib/errors";
 import { created, noContent, success } from "@/lib/response";
 import { AuditService } from "@/services/audit.service";
 import { type AppContext, getCounterpartiesRepository } from "./context";
@@ -117,7 +124,7 @@ export const createCounterparty = async (c: AppContext) => {
   });
 
   if (!counterparty) {
-    throw notFound("Counterparty");
+    throw internalError("Failed to create counterparty");
   }
 
   const auditService = new AuditService(getDb(c.env));
@@ -178,7 +185,7 @@ export const updateCounterparty = async (c: AppContext) => {
     action: "update",
     resourceType: "counterparty",
     resourceId: counterpartyId,
-    metadata: parsed.data as Record<string, unknown>,
+    metadata: { changedFields: Object.keys(parsed.data) },
   });
 
   const response: CounterpartyResponse = { counterparty: mapToCounterparty(updated) };
