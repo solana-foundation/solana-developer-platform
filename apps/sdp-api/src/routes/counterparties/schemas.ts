@@ -25,19 +25,18 @@ const counterpartyGovernmentIdSchema = z.object({
   expiryDate: z.iso.date().optional(),
 });
 
-export const counterpartyIdentitySchema = z
-  .looseObject({
-    firstName: z.string().min(1).max(256).optional(),
-    middleName: z.string().max(256).optional(),
-    lastName: z.string().min(1).max(256).optional(),
-    secondLastName: z.string().max(256).optional(),
-    dateOfBirth: z.iso.date().optional(),
-    phone: z.string().min(1).max(64).optional(),
-    address: counterpartyAddressSchema.optional(),
-    birthCountryCode: countryCodeSchema.optional(),
-    citizenshipCountryCode: countryCodeSchema.optional(),
-    governmentId: counterpartyGovernmentIdSchema.optional(),
-  });
+export const counterpartyIdentitySchema = z.looseObject({
+  firstName: z.string().min(1).max(256).optional(),
+  middleName: z.string().max(256).optional(),
+  lastName: z.string().min(1).max(256).optional(),
+  secondLastName: z.string().max(256).optional(),
+  dateOfBirth: z.iso.date().optional(),
+  phone: z.string().min(1).max(64).optional(),
+  address: counterpartyAddressSchema.optional(),
+  birthCountryCode: countryCodeSchema.optional(),
+  citizenshipCountryCode: countryCodeSchema.optional(),
+  governmentId: counterpartyGovernmentIdSchema.optional(),
+});
 
 export const counterpartyEntityTypeSchema = z.enum(["individual", "business"]);
 

@@ -179,12 +179,7 @@ export function createPostgresCounterpartiesRepository(db: AppDb): Counterpartie
               ORDER BY created_at DESC
               LIMIT ? OFFSET ?`
           )
-          .bind(
-            params.organizationId,
-            params.includeInactive ?? false,
-            params.limit,
-            params.offset
-          )
+          .bind(params.organizationId, params.includeInactive ?? false, params.limit, params.offset)
           .all<Record<string, unknown>>(),
         db
           .prepare(

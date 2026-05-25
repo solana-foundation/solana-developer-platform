@@ -3,7 +3,14 @@ import { z } from "zod";
 import { getDb } from "@/db";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
 import { getAuth } from "@/lib/auth";
-import { AppError, badRequest, badRequestParams, badRequestQuery, conflict, notFound } from "@/lib/errors";
+import {
+  AppError,
+  badRequest,
+  badRequestParams,
+  badRequestQuery,
+  conflict,
+  notFound,
+} from "@/lib/errors";
 import { created, noContent, success } from "@/lib/response";
 import { AuditService } from "@/services/audit.service";
 import { type AppContext, getCounterpartiesRepository } from "./context";

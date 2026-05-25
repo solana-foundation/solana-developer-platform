@@ -16,7 +16,15 @@ counterparties.use("*", unifiedAuthMiddleware({ allowClerk: true, allowSession: 
 counterparties.get("/", requirePermissions("counterparties:read"), listCounterparties);
 counterparties.post("/", requirePermissions("counterparties:write"), createCounterparty);
 counterparties.get("/:counterpartyId", requirePermissions("counterparties:read"), getCounterparty);
-counterparties.patch("/:counterpartyId", requirePermissions("counterparties:write"), updateCounterparty);
-counterparties.delete("/:counterpartyId", requirePermissions("counterparties:write"), archiveCounterparty);
+counterparties.patch(
+  "/:counterpartyId",
+  requirePermissions("counterparties:write"),
+  updateCounterparty
+);
+counterparties.delete(
+  "/:counterpartyId",
+  requirePermissions("counterparties:write"),
+  archiveCounterparty
+);
 
 export default counterparties;
