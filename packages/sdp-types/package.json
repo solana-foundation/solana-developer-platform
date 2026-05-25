@@ -14,6 +14,11 @@
       "import": "./src/organizations.ts",
       "default": "./src/organizations.ts"
     },
+    "./counterparties": {
+      "types": "./src/counterparties.ts",
+      "import": "./src/counterparties.ts",
+      "default": "./src/counterparties.ts"
+    },
     "./custody": {
       "types": "./src/custody.ts",
       "import": "./src/custody.ts",

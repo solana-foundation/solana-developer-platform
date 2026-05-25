@@ -1,5 +1,45 @@
 # Changelog
 
+## [0.20.0](https://github.com/solana-foundation/solana-developer-platform/releases/tag/v0.20.0) (2026-05-22)
+
+### Features
+
+* **pro-1218:** counterparty model migration on database ([#331](https://github.com/solana-foundation/solana-developer-platform/pull/331)) ([8f99178](https://github.com/solana-foundation/solana-developer-platform/commit/8f99178d34119a5d4f87d5a4919b4d94a86700d9))
+* **sdp-api:** HOO-512 Node Dockerfile + CI smoke build ([#329](https://github.com/solana-foundation/solana-developer-platform/pull/329)) ([7f32be8](https://github.com/solana-foundation/solana-developer-platform/commit/7f32be8bc4f9390ef6853e82fa9690cc42111527))
+* **sdp-api:** HOO-511 Node.js entrypoint (server.ts) ([#327](https://github.com/solana-foundation/solana-developer-platform/pull/327)) ([b75f7a1](https://github.com/solana-foundation/solana-developer-platform/commit/b75f7a1a4fb681c161e5f606f77e376d9f012f09))
+* **sdp-api:** HOO-510 RedisKVStore for Node runtime ([#318](https://github.com/solana-foundation/solana-developer-platform/pull/318)) ([2154ae2](https://github.com/solana-foundation/solana-developer-platform/commit/2154ae2702b1c092459041c02754f650985ba0b0))
+* **pro-1202:** add test mode indicator and toggle ([#315](https://github.com/solana-foundation/solana-developer-platform/pull/315)) ([6b41f01](https://github.com/solana-foundation/solana-developer-platform/commit/6b41f017541e869dfb5b021fccb3a07ea7a6bb60))
+* **sdp-web:** HOO-513 Dockerfile + Next.js standalone output ([#316](https://github.com/solana-foundation/solana-developer-platform/pull/316)) ([9f41f80](https://github.com/solana-foundation/solana-developer-platform/commit/9f41f80fdaf4bb75be522340c31cb56363ed7aa1))
+* HOO-486 Add issuance transactions to wallet activity ([#302](https://github.com/solana-foundation/solana-developer-platform/pull/302)) ([bbe2cd1](https://github.com/solana-foundation/solana-developer-platform/commit/bbe2cd1cf3603a97ed07583d45030aab54a97b87))
+* **sdp-web:** HOO-490 expose tokenId and token selector in issuance API playground ([#295](https://github.com/solana-foundation/solana-developer-platform/pull/295)) ([2994b5d](https://github.com/solana-foundation/solana-developer-platform/commit/2994b5ddd4cacbb15337314555c30a22aa7a9895))
+
+### Bug Fixes
+
+* onramp flow for lightspark ([#321](https://github.com/solana-foundation/solana-developer-platform/pull/321)) ([a2e8a83](https://github.com/solana-foundation/solana-developer-platform/commit/a2e8a8383c0ceb50adf11fe3003c446ff9110f0e))
+* allow sandbox configuration for all ramps providers ([#308](https://github.com/solana-foundation/solana-developer-platform/pull/308)) ([fa440d5](https://github.com/solana-foundation/solana-developer-platform/commit/fa440d539c1de2c299412d47f67a76dc98068a28))
+* **sdp-api:** HOO-507 harden NodeBackgroundRunner for SIGTERM drain ([#304](https://github.com/solana-foundation/solana-developer-platform/pull/304)) ([18e503b](https://github.com/solana-foundation/solana-developer-platform/commit/18e503bc96528e52a450f166bf759b805bbdd95d))
+* Clear and refetch wallet data when switching organizations ([#306](https://github.com/solana-foundation/solana-developer-platform/pull/306)) ([76ead79](https://github.com/solana-foundation/solana-developer-platform/commit/76ead7922ef9ad67546949db0e535f5f6cc007b9))
+
+### Documentation
+
+* add concise oss onboarding ([1070078](https://github.com/solana-foundation/solana-developer-platform/commit/107007870f93c05d0e34c224b97adf338abe73e9))
+* simplify public readme ([3a65cfc](https://github.com/solana-foundation/solana-developer-platform/commit/3a65cfc0271287200107e9ae8c7a7a69d9148a1e))
+
+### Refactors
+
+* **sdp-api:** HOO-509 split index.ts → app.ts + extract cron function ([#312](https://github.com/solana-foundation/solana-developer-platform/pull/312)) ([8c1c165](https://github.com/solana-foundation/solana-developer-platform/commit/8c1c16559761169a0fc0e53c483bfa0cd6926c21))
+* **sdp-api:** HOO-508 unify Sentry across runtimes via observability module ([#307](https://github.com/solana-foundation/solana-developer-platform/pull/307)) ([88110ea](https://github.com/solana-foundation/solana-developer-platform/commit/88110ea291cc6c578a9a2c501eea870d2474acc1))
+* **sdp-api:** HOO-506 KVStore interface + WorkersKVStore implementation ([#300](https://github.com/solana-foundation/solana-developer-platform/pull/300)) ([e84cf7e](https://github.com/solana-foundation/solana-developer-platform/commit/e84cf7ea9c8c39f573e7d9e732582df8c26a60e4))
+* **sdp-api:** HOO-505 make CF bindings optional in TypeScript ([#296](https://github.com/solana-foundation/solana-developer-platform/pull/296)) ([305f2a9](https://github.com/solana-foundation/solana-developer-platform/commit/305f2a919578e4de8948a58b9db6b25dd151383d))
+
+### Maintenance
+
+* **compliance:** clean up compliance schemas ([#303](https://github.com/solana-foundation/solana-developer-platform/pull/303)) ([6d7cd0f](https://github.com/solana-foundation/solana-developer-platform/commit/6d7cd0f7e6b4a75b457332ef7a748522bec45d2b))
+* **sdp-api:** clean up openapi types for payments ([#301](https://github.com/solana-foundation/solana-developer-platform/pull/301)) ([14ade4c](https://github.com/solana-foundation/solana-developer-platform/commit/14ade4ca7a3f9b71cb19c5b0f0a1fa0b956aae9a))
+* **main:** upgrade Next to 16.2.6 ([#299](https://github.com/solana-foundation/solana-developer-platform/pull/299)) ([e905650](https://github.com/solana-foundation/solana-developer-platform/commit/e905650defc4c7244abb9d296bdb8287d0c18cce))
+* enforce pnpm release age gate ([#297](https://github.com/solana-foundation/solana-developer-platform/pull/297)) ([fb6b462](https://github.com/solana-foundation/solana-developer-platform/commit/fb6b462d667517372123c2a2518d1a5f8a8af71d))
+* initial open source snapshot ([ec00280](https://github.com/solana-foundation/solana-developer-platform/commit/ec00280bdbec28f2947dcebf771dd44f4afdb559))
+
 ## [0.19.4](https://github.com/solana-foundation/solana-developer-platform/compare/v0.19.3...v0.19.4) (2026-05-09)
 
 ### Maintenance
