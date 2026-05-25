@@ -1,11 +1,9 @@
-import type { CounterpartyEntityType, CounterpartyIdentity } from "@sdp/types";
+import type { CounterpartyEntityType, CounterpartyIdentity, CounterpartyStatus } from "@sdp/types";
 import type { RepositoryDbClient } from "./base";
 
 export function generateCounterpartyId(): string {
   return `counterparty_${crypto.randomUUID()}`;
 }
-
-export type CounterpartyStatus = "active" | "archived";
 
 export interface CounterpartyRow {
   id: string;

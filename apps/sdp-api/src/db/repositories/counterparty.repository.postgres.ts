@@ -1,10 +1,9 @@
-import type { CounterpartyEntityType, CounterpartyIdentity } from "@sdp/types";
+import type { CounterpartyEntityType, CounterpartyIdentity, CounterpartyStatus } from "@sdp/types";
 import type { AppDb } from "@/db";
 import type {
   ArchiveCounterpartyInput,
   CounterpartiesRepository,
   CounterpartyRow,
-  CounterpartyStatus,
   CreateCounterpartyInput,
   ListCounterpartiesInput,
   ListCounterpartiesResult,
