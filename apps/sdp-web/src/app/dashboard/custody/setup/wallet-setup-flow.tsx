@@ -259,7 +259,7 @@ export function WalletSetupFlow({
   const [selectedProvider, setSelectedProvider] = useState<KnownCustodyProvider | null>(
     initialSelection.provider
   );
-  const [walletLabel, setWalletLabel] = useState("Treasury");
+  const [walletLabel, setWalletLabel] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const enabledProviderEntries = useMemo(
