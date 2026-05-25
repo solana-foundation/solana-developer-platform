@@ -11,6 +11,7 @@ import {
   updateCounterpartyObjectSchema as updateCounterpartyObjectSchemaBase,
 } from "../../routes/counterparties/schemas";
 import {
+  isoDateSchema,
   isoDateTimeSchema,
   orgIdParamSchema,
   projectIdParamSchema,
@@ -18,11 +19,6 @@ import {
   withOpenApi,
   z,
 } from "./base";
-
-const isoDateSchema = withOpenApi(z.string(), {
-  description: "ISO 8601 calendar date (YYYY-MM-DD).",
-  example: "1990-01-15",
-});
 
 export const counterpartyIdParamSchema = withOpenApi(counterpartyIdSchemaBase, {
   description: "Counterparty identifier.",
@@ -275,5 +271,8 @@ export const updateCounterpartyRequestSchema = withOpenApi(
       description: "Updated identity details. Replaces the existing identity object.",
     }),
   }),
-  { description: "Update counterparty request body. At least one field must be provided." }
+  {
+    description: "Update counterparty request body. At least one field must be provided.",
+    minProperties: 1,
+  }
 );
