@@ -58,7 +58,10 @@ export interface MagicBlockPrivateTransferOptions {
    */
   maxDelayMs?: string;
 
-  /** Numeric client reference encrypted by MagicBlock for payment correlation. */
+  /**
+   * Client reference encrypted by MagicBlock for payment correlation. Kept as
+   * a string to preserve MagicBlock's pass-through request shape.
+   */
   clientRefId?: string;
 
   /** Number of queue entries to split the transfer across. MagicBlock supports 1 through 15. */
