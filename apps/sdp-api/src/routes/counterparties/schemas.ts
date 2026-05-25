@@ -26,7 +26,7 @@ const counterpartyGovernmentIdSchema = z.object({
 });
 
 export const counterpartyIdentitySchema = z
-  .object({
+  .looseObject({
     firstName: z.string().min(1).max(256).optional(),
     middleName: z.string().max(256).optional(),
     lastName: z.string().min(1).max(256).optional(),
@@ -37,8 +37,7 @@ export const counterpartyIdentitySchema = z
     birthCountryCode: countryCodeSchema.optional(),
     citizenshipCountryCode: countryCodeSchema.optional(),
     governmentId: counterpartyGovernmentIdSchema.optional(),
-  })
-  .passthrough();
+  });
 
 export const counterpartyEntityTypeSchema = z.enum(["individual", "business"]);
 
@@ -50,8 +49,7 @@ export const createCounterpartySchema = z.object({
   externalId: z.string().min(1).max(256).optional(),
   entityType: counterpartyEntityTypeSchema,
   displayName: z.string().min(1).max(512),
-  email: z.string().email().max(512),
-  projectId: z.string().min(1).optional(),
+  email: z.email().max(512),
   identity: counterpartyIdentitySchema.optional(),
 });
 
@@ -60,7 +58,7 @@ export const updateCounterpartySchema = z
     externalId: z.string().min(1).max(256).nullable().optional(),
     entityType: counterpartyEntityTypeSchema.optional(),
     displayName: z.string().min(1).max(512).optional(),
-    email: z.string().email().max(512).optional(),
+    email: z.email().max(512).optional(),
     identity: counterpartyIdentitySchema.optional(),
   })
   .refine((value) => Object.keys(value).length > 0, {
@@ -70,6 +68,5 @@ export const updateCounterpartySchema = z
 export const listCounterpartiesQuerySchema = z.object({
   page: z.coerce.number().int().positive().default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
-  projectId: z.string().min(1).optional(),
   includeInactive: z.coerce.boolean().default(false),
 });

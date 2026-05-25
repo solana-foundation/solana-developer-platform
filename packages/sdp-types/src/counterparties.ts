@@ -38,7 +38,7 @@ export interface CounterpartyIdentity {
 export interface Counterparty {
   id: string;
   organizationId: string;
-  projectId: string;
+  projectId: string | null;
   externalId: string | null;
   entityType: CounterpartyEntityType;
   displayName: string;
@@ -51,7 +51,6 @@ export interface Counterparty {
 }
 
 export interface CreateCounterpartyRequest {
-  projectId?: string;
   externalId?: string;
   entityType: CounterpartyEntityType;
   displayName: string;
