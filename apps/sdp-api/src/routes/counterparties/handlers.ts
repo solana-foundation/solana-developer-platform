@@ -129,6 +129,9 @@ export const createCounterparty = async (c: AppContext) => {
 
   const auditService = new AuditService(getDb(c.env));
   await auditService.log(c, {
+    organizationId: auth.organizationId,
+    userId: auth.userId ?? undefined,
+    apiKeyId: auth.apiKeyId ?? undefined,
     action: "create",
     resourceType: "counterparty",
     resourceId: counterparty.id,
@@ -182,6 +185,9 @@ export const updateCounterparty = async (c: AppContext) => {
 
   const auditService = new AuditService(getDb(c.env));
   await auditService.log(c, {
+    organizationId: auth.organizationId,
+    userId: auth.userId ?? undefined,
+    apiKeyId: auth.apiKeyId ?? undefined,
     action: "update",
     resourceType: "counterparty",
     resourceId: counterpartyId,
@@ -214,6 +220,9 @@ export const archiveCounterparty = async (c: AppContext) => {
 
   const auditService = new AuditService(getDb(c.env));
   await auditService.log(c, {
+    organizationId: auth.organizationId,
+    userId: auth.userId ?? undefined,
+    apiKeyId: auth.apiKeyId ?? undefined,
     action: "delete",
     resourceType: "counterparty",
     resourceId: counterpartyId,

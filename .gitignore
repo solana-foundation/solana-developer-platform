@@ -2,6 +2,8 @@
 node_modules/
 .pnpm-store/
 
+docs/_*
+
 # Build outputs
 dist/
 .turbo/
