@@ -20,6 +20,10 @@ docs
 # build context so remote builders don't ship unrelated source.
 apps/sdp-api
 packages/sdp-api-integration
+infra
+scripts
+skills
+bun.lock
 
 # Local env files — host-only; container envs come from build-args / -e
 .env
