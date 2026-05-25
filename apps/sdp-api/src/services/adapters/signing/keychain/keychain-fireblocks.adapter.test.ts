@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { KeychainFireblocksAdapter } from "@/services/adapters/signing/keychain/keychain-fireblocks.adapter";
 
 const fireblocksSignerMock = vi.hoisted(() => ({
   constructorConfigs: [] as unknown[],
@@ -22,11 +21,15 @@ vi.mock("@solana/keychain-fireblocks", () => ({
 
 describe("fireblocks adapter", () => {
   beforeEach(() => {
+    vi.resetModules();
     fireblocksSignerMock.constructorConfigs.length = 0;
     fireblocksSignerMock.init.mockReset();
   });
 
   it("evicts failed signer initialization so subsequent calls can retry", async () => {
+    const { KeychainFireblocksAdapter } = await import(
+      "@/services/adapters/signing/keychain/keychain-fireblocks.adapter"
+    );
     const adapter = new KeychainFireblocksAdapter({
       apiKey: "api-key",
       apiSecretPem: "api-secret",
