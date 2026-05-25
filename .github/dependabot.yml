@@ -8,6 +8,10 @@ updates:
       time: "06:00"
       timezone: "UTC"
     open-pull-requests-limit: 15
+    # Keep routine version updates behind the same 7-day supply-chain
+    # cooling period enforced locally by pnpm's minimum-release-age=10080.
+    # GitHub does not apply cooldown to Dependabot security updates, so
+    # vulnerability PRs can still bypass this delay.
     cooldown:
       default-days: 7
     groups:
@@ -37,3 +41,7 @@ updates:
       actions:
         patterns: ["*"]
     open-pull-requests-limit: 5
+    # Match the npm age guard for routine action version updates.
+    # Dependabot security updates are not subject to cooldown.
+    cooldown:
+      default-days: 7
