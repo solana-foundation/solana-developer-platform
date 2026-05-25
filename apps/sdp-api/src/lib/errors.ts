@@ -162,6 +162,14 @@ export function badRequest(message?: string, details?: Record<string, unknown>):
   return new AppError("BAD_REQUEST", message, details);
 }
 
+export function badRequestQuery(details?: Record<string, unknown>): AppError {
+  return new AppError("BAD_REQUEST", "Invalid query parameters", details);
+}
+
+export function badRequestParams(details?: Record<string, unknown>): AppError {
+  return new AppError("BAD_REQUEST", "Invalid path parameters", details);
+}
+
 export function unauthorized(message?: string): AppError {
   return new AppError("UNAUTHORIZED", message);
 }
