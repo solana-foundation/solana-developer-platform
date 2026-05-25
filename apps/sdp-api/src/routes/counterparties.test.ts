@@ -34,9 +34,18 @@ describe("Counterparties Routes", () => {
       await kv.rateLimits.delete(key.name);
     }
 
-    await db.prepare("DELETE FROM counterparties").run().catch(() => {});
-    await db.prepare("DELETE FROM project_members").run().catch(() => {});
-    await db.prepare("DELETE FROM projects").run().catch(() => {});
+    await db
+      .prepare("DELETE FROM counterparties")
+      .run()
+      .catch(() => {});
+    await db
+      .prepare("DELETE FROM project_members")
+      .run()
+      .catch(() => {});
+    await db
+      .prepare("DELETE FROM projects")
+      .run()
+      .catch(() => {});
 
     await db
       .prepare(
