@@ -53,7 +53,6 @@ services:
       SDP_RUNTIME: node
       DATABASE_URL: postgresql://sdp:sdp@postgres:5432/sdp
       REDIS_URL: redis://redis:6379
-      DISABLE_CRON: ${DISABLE_CRON:-}
     depends_on:
       postgres:
         condition: service_healthy
