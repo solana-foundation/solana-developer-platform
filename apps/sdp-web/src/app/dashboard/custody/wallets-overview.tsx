@@ -1,7 +1,7 @@
 "use client";
 
 import type { CustodyWalletSummary } from "@sdp/types";
-import { Plus, Shield, Zap } from "lucide-react";
+import { FileCode2, Plus, Shield, WalletMinimal } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { useMemo, useState } from "react";
@@ -18,10 +18,10 @@ import {
 } from "@/app/dashboard/custody/provider-catalog";
 import { WalletAddressCopyButton } from "@/app/dashboard/custody/wallet-address-copy-button";
 import { WalletCardBalanceValue } from "@/app/dashboard/custody/wallet-card-balance-value";
-import { WalletCategoryBadge } from "@/app/dashboard/custody/wallet-category-badge";
 import { formatPurpose, formatWalletMeta } from "@/app/dashboard/custody/wallet-format-utils";
 import { WalletLabelInlineEditor } from "@/app/dashboard/custody/wallet-label-inline-editor";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { WalletProviderMark } from "./wallet-provider-mark";
 
@@ -54,14 +54,16 @@ const filterOptions: Array<{ id: WalletFilter; label: string }> = [
   })),
 ];
 
+const filterTooltips: Partial<Record<WalletProviderCategory, string>> = {
+  server:
+    "API-driven wallet infrastructure for products and automated operations. Create wallets, sign transactions, and run payment flows programmatically.",
+  institutional:
+    "Governed custody for treasury and settlement. Use provider controls, policies, and multi-party approvals for sensitive operations.",
+};
+
 function CategoryIcon({ category }: { category: WalletProviderCategory }) {
-  const Icon = category === "server" ? Zap : Shield;
-  return (
-    <Icon
-      className={cn("h-3.5 w-3.5", category === "server" ? "text-[#0b6fb8]" : "text-[#a45113]")}
-      aria-hidden="true"
-    />
-  );
+  const Icon = category === "server" ? WalletMinimal : Shield;
+  return <Icon className="h-3.5 w-3.5 text-[#1c1c1d]" aria-hidden="true" />;
 }
 
 function getWalletProvider(wallet: CustodyWalletSummary): KnownCustodyProvider | null {
@@ -87,73 +89,83 @@ function WalletFilterControl({
   onChange: (filter: WalletFilter) => void;
 }) {
   return (
-    <div className="inline-flex max-w-full items-center overflow-x-auto rounded-xl border border-[rgba(28,28,29,0.1)] bg-[rgba(28,28,29,0.03)] p-1">
-      {filterOptions.map((option) => {
-        const isActive = filter === option.id;
+    <TooltipProvider>
+      <div className="inline-flex max-w-full items-center overflow-x-auto rounded-xl border border-[rgba(28,28,29,0.1)] bg-[rgba(28,28,29,0.03)] p-1">
+        {filterOptions.map((option) => {
+          const isActive = filter === option.id;
+          const tooltip = option.id === "all" ? null : filterTooltips[option.id];
+          const button = (
+            <button
+              key={option.id}
+              type="button"
+              onClick={() => onChange(option.id)}
+              className={cn(
+                "inline-flex h-9 shrink-0 items-center gap-2 rounded-lg px-3 text-sm font-medium transition-colors",
+                isActive
+                  ? "bg-white text-[#1c1c1d] shadow-[0_1px_2px_rgba(28,28,29,0.08)]"
+                  : "text-[rgba(28,28,29,0.62)] hover:text-[#1c1c1d]"
+              )}
+              aria-pressed={isActive}
+            >
+              {option.id !== "all" ? <CategoryIcon category={option.id} /> : null}
+              <span>{option.label}</span>
+            </button>
+          );
 
-        return (
-          <button
-            key={option.id}
-            type="button"
-            onClick={() => onChange(option.id)}
-            className={cn(
-              "inline-flex h-9 shrink-0 items-center gap-2 rounded-lg px-3 text-sm font-medium transition-colors",
-              isActive
-                ? "bg-white text-[#1c1c1d] shadow-[0_1px_2px_rgba(28,28,29,0.08)]"
-                : "text-[rgba(28,28,29,0.62)] hover:text-[#1c1c1d]"
-            )}
-            aria-pressed={isActive}
-          >
-            {option.id !== "all" ? <CategoryIcon category={option.id} /> : null}
-            <span>{option.label}</span>
-          </button>
-        );
-      })}
-    </div>
+          if (!tooltip) {
+            return button;
+          }
+
+          return (
+            <Tooltip key={option.id}>
+              <TooltipTrigger asChild>{button}</TooltipTrigger>
+              <TooltipContent
+                side="top"
+                align="center"
+                sideOffset={8}
+                className="w-[18.75rem] max-w-full whitespace-normal break-words text-left text-xs leading-5 text-white"
+              >
+                <span className="block font-medium text-white">{option.label} wallets</span>
+                <span className="mt-1 block whitespace-normal text-white/75">{tooltip}</span>
+              </TooltipContent>
+            </Tooltip>
+          );
+        })}
+      </div>
+    </TooltipProvider>
   );
 }
 
-function ProviderChip({ provider }: { provider: CustodyProviderCatalogEntry }) {
+function EndpointChip({ endpoint }: { endpoint: string }) {
+  const [method, ...pathParts] = endpoint.split(" ");
+
   return (
-    <span className="inline-flex h-8 items-center gap-2 rounded-full border border-[rgba(28,28,29,0.1)] bg-white px-2.5 text-sm font-medium text-[rgba(28,28,29,0.68)]">
-      <WalletProviderMark provider={provider.id} size="xs" />
-      {provider.label}
+    <span className="inline-flex max-w-full items-center gap-1.5 rounded-md border border-[rgba(28,28,29,0.1)] bg-white px-2 py-1 font-mono text-[11px] text-[rgba(28,28,29,0.68)]">
+      <span className="font-semibold text-[#1c1c1d]">{method}</span>
+      <span className="truncate">{pathParts.join(" ")}</span>
     </span>
   );
 }
 
-function CategoryIntro({
-  category,
-  enabledProviders,
-}: {
-  category: WalletProviderCategory;
-  enabledProviders: CustodyProviderCatalogEntry[];
-}) {
-  const details = WALLET_PROVIDER_CATEGORY_DETAILS[category];
-
+function WalletOnboardingCapabilityPanel() {
   return (
-    <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-      <p className="max-w-[480px] text-[15px] leading-6 text-[rgba(28,28,29,0.62)] lg:basis-[480px]">
-        {details.description}
+    <section className="rounded-lg border border-[rgba(28,28,29,0.1)] bg-[#fcfbf8] p-5">
+      <div className="flex items-center gap-2">
+        <span className="inline-flex h-8 w-8 items-center justify-center rounded-md bg-[#f4f1ea] text-[#1c1c1d] ring-1 ring-[rgba(28,28,29,0.08)]">
+          <FileCode2 className="h-4 w-4" aria-hidden="true" />
+        </span>
+        <p className="text-sm font-medium text-[#1c1c1d]">API capability</p>
+      </div>
+      <p className="mt-3 text-sm leading-6 text-[rgba(28,28,29,0.62)]">
+        Create provider-backed wallets, run signer checks, and use those wallets for payment
+        transfer flows.
       </p>
-      {enabledProviders.length > 0 ? (
-        <div className="flex flex-wrap gap-2 lg:min-w-[460px] lg:flex-1 lg:justify-end">
-          {enabledProviders.map((provider) => (
-            <ProviderChip key={provider.id} provider={provider} />
-          ))}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function CategoryProviderMarks({ providers }: { providers: CustodyProviderCatalogEntry[] }) {
-  return (
-    <div className="flex flex-wrap gap-2">
-      {providers.map((provider) => (
-        <WalletProviderMark key={provider.id} provider={provider.id} size="sm" />
-      ))}
-    </div>
+      <div className="mt-4 flex flex-wrap gap-2">
+        <EndpointChip endpoint="POST /v1/wallets/initialize" />
+        <EndpointChip endpoint="POST /v1/wallets" />
+        <EndpointChip endpoint="POST /v1/wallets/signer-check" />
+      </div>
+    </section>
   );
 }
 
@@ -167,52 +179,44 @@ function OnboardingCategoryCard({
   onCreateWallet: OpenCreateWallet;
 }) {
   const details = WALLET_PROVIDER_CATEGORY_DETAILS[category];
-  const Icon = category === "server" ? Zap : Shield;
   const isDisabled = providers.length === 0;
 
   return (
-    <article
+    <button
+      type="button"
+      onClick={() => onCreateWallet(null, category)}
+      disabled={isDisabled}
       className={cn(
-        "flex min-h-[420px] flex-col rounded-[24px] border border-[rgba(28,28,29,0.12)] bg-white p-6 shadow-[0_2px_12px_rgba(28,28,29,0.04)]",
-        isDisabled ? "opacity-60" : ""
+        "w-full rounded-lg border border-[rgba(28,28,29,0.1)] bg-white px-4 py-4 text-left transition-colors hover:bg-[#f8f6f1]",
+        isDisabled ? "cursor-not-allowed opacity-50 hover:bg-white" : ""
       )}
+      aria-label={`Set up ${details.label} wallet`}
     >
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div
-          className={cn(
-            "flex h-12 w-12 items-center justify-center rounded-xl",
-            category === "server" ? "bg-[#d9efff] text-[#0b6fb8]" : "bg-[#ffe3b8] text-[#a45113]"
-          )}
-        >
-          <Icon className="h-6 w-6" aria-hidden="true" />
-        </div>
+      <div className="flex items-start gap-3">
+        <span className="mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-[#f4f1ea] ring-1 ring-[rgba(28,28,29,0.08)]">
+          <CategoryIcon category={category} />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-lg leading-6 font-medium text-[#1c1c1d]">
+            {details.label} wallet
+          </span>
+          <span className="mt-1 block text-sm leading-6 text-[rgba(28,28,29,0.62)]">
+            {details.description}
+          </span>
+          <span className="mt-3 block">
+            {providers.length > 0 ? (
+              <span className="text-sm text-[rgba(28,28,29,0.58)]">
+                {providers.length} {providers.length === 1 ? "provider" : "providers"} available
+              </span>
+            ) : (
+              <span className="text-sm text-[rgba(28,28,29,0.58)]">
+                No enabled providers in this category.
+              </span>
+            )}
+          </span>
+        </span>
       </div>
-
-      <div className="mt-8 space-y-4">
-        <h3 className="text-[34px] leading-[1.05] font-medium tracking-[-0.04em] text-[#1c1c1d]">
-          {details.label}
-        </h3>
-        <p className="text-[17px] leading-7 text-[rgba(28,28,29,0.62)]">{details.description}</p>
-      </div>
-
-      <div className="mt-auto space-y-6 pt-8">
-        {providers.length > 0 ? (
-          <CategoryProviderMarks providers={providers} />
-        ) : (
-          <p className="text-sm text-[rgba(28,28,29,0.58)]">
-            No enabled providers in this category.
-          </p>
-        )}
-        <Button
-          type="button"
-          className="h-12 w-full rounded-[12px] focus-visible:!ring-0 focus-visible:!ring-offset-0"
-          onClick={() => onCreateWallet(null, category)}
-          disabled={isDisabled}
-        >
-          Set up {details.label} wallet
-        </Button>
-      </div>
-    </article>
+    </button>
   );
 }
 
@@ -236,7 +240,7 @@ function WalletCard({
   canManageCustody: boolean;
   item: WalletWithCategory;
 }) {
-  const { wallet, provider, category } = item;
+  const { wallet, provider } = item;
   const purposeLabel = formatPurpose(wallet.purpose);
 
   return (
@@ -249,7 +253,6 @@ function WalletCard({
             {(wallet.label?.trim() || "W").slice(0, 1).toUpperCase()}
           </div>
         )}
-        {category ? <WalletCategoryBadge category={category} compact /> : null}
       </div>
 
       <p className="text-sm font-medium tracking-wide text-[rgba(28,28,29,0.58)] uppercase">
@@ -354,43 +357,6 @@ function CategoryEmptyState({
   );
 }
 
-function CategoryFilteredWalletGrid({
-  canManageCustody,
-  category,
-  onCreateWallet,
-  providers,
-  wallets,
-}: {
-  canManageCustody: boolean;
-  category: WalletProviderCategory;
-  onCreateWallet: OpenCreateWallet;
-  providers: CustodyProviderCatalogEntry[];
-  wallets: WalletWithCategory[];
-}) {
-  const createTile =
-    canManageCustody && providers.length > 0 ? (
-      <CreateWalletTile onClick={() => onCreateWallet(null, category)} />
-    ) : null;
-
-  if (wallets.length === 0) {
-    return createTile ? (
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">{createTile}</div>
-    ) : (
-      <CategoryEmptyState
-        canManageCustody={canManageCustody}
-        category={category}
-        providers={providers}
-      />
-    );
-  }
-
-  return (
-    <WalletCardsGrid wallets={wallets} canManageCustody={canManageCustody}>
-      {createTile}
-    </WalletCardsGrid>
-  );
-}
-
 export function WalletsOverview({
   canManageCustody,
   enabledProviders,
@@ -429,40 +395,45 @@ export function WalletsOverview({
     const enabledProviderCount = enabledProviderEntries.length;
 
     return (
-      <div className="mx-auto flex min-h-[560px] max-w-6xl flex-col justify-center gap-10 py-12 lg:py-20">
-        <div className="mx-auto max-w-3xl space-y-4 text-center">
-          <h2 className="text-[48px] leading-[1.02] font-medium tracking-[-0.05em] text-[#1c1c1d]">
-            {canManageCustody ? "Create your first wallet" : "No wallets available"}
-          </h2>
-          <p className="text-[20px] leading-8 text-[rgba(28,28,29,0.62)]">
-            {canManageCustody
-              ? "Choose how this wallet will be governed. You can mix both types later."
-              : "Wallet creation is limited to admins. Once a wallet is created, you can still use it across the dashboard."}
-          </p>
-          {configsError ? <p className="text-sm text-[#9e2b38]">{configsError}</p> : null}
-          {canManageCustody && enabledProviderCount === 0 ? (
-            <p className="text-sm text-[rgba(28,28,29,0.62)]">
-              No wallet providers are enabled for this organization tier right now.
+      <div className="mx-auto flex max-w-6xl flex-col gap-6 py-8">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+          <div className="max-w-2xl space-y-2">
+            <h2 className="text-[32px] leading-[1.08] font-medium tracking-[-0.04em] text-[#1c1c1d]">
+              {canManageCustody ? "Create your first wallet" : "No wallets available"}
+            </h2>
+            <p className="text-sm leading-6 text-[rgba(28,28,29,0.62)]">
+              {canManageCustody
+                ? "Start with a custody model, then pick the provider that will create and sign for the wallet."
+                : "Wallet creation is limited to admins. Once a wallet is created, you can still use it across the dashboard."}
             </p>
-          ) : null}
+            {configsError ? <p className="text-sm text-[#9e2b38]">{configsError}</p> : null}
+            {canManageCustody && enabledProviderCount === 0 ? (
+              <p className="text-sm text-[rgba(28,28,29,0.62)]">
+                No wallet providers are enabled for this organization tier right now.
+              </p>
+            ) : null}
+          </div>
         </div>
 
         {canManageCustody && enabledProviderCount > 0 ? (
-          <div className="grid gap-6 lg:grid-cols-2">
-            {WALLET_PROVIDER_CATEGORIES.map((category) => {
-              const providers = enabledProviderEntries.filter(
-                (provider) => provider.category === category
-              );
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
+            <div className="space-y-3">
+              {WALLET_PROVIDER_CATEGORIES.map((category) => {
+                const providers = enabledProviderEntries.filter(
+                  (provider) => provider.category === category
+                );
 
-              return (
-                <OnboardingCategoryCard
-                  key={category}
-                  category={category}
-                  providers={providers}
-                  onCreateWallet={onCreateWallet}
-                />
-              );
-            })}
+                return (
+                  <OnboardingCategoryCard
+                    key={category}
+                    category={category}
+                    providers={providers}
+                    onCreateWallet={onCreateWallet}
+                  />
+                );
+              })}
+            </div>
+            <WalletOnboardingCapabilityPanel />
           </div>
         ) : null}
       </div>
@@ -476,6 +447,17 @@ export function WalletsOverview({
   const selectedCategoryWallets = selectedCategory
     ? walletsWithCategory.filter((item) => item.category === selectedCategory)
     : [];
+  const visibleWallets = selectedCategory ? selectedCategoryWallets : walletsWithCategory;
+  const visibleCreateWalletCategory = selectedCategory ?? null;
+  const canCreateVisibleWallet =
+    canManageCustody &&
+    (selectedCategory ? selectedCategoryProviders.length > 0 : enabledProviderEntries.length > 0);
+  const createWalletTile = canCreateVisibleWallet ? (
+    <CreateWalletTile
+      key={`create-wallet-${filter}`}
+      onClick={() => onCreateWallet(null, visibleCreateWalletCategory)}
+    />
+  ) : null;
 
   return (
     <div className="space-y-6">
@@ -494,26 +476,18 @@ export function WalletsOverview({
           </Button>
         ) : null}
       </div>
-      {selectedCategory ? (
-        <CategoryIntro category={selectedCategory} enabledProviders={selectedCategoryProviders} />
-      ) : null}
-
       <div className="space-y-8">
-        {filter === "all" ? (
-          <WalletCardsGrid wallets={walletsWithCategory} canManageCustody={canManageCustody}>
-            {canManageCustody && enabledProviderEntries.length > 0 ? (
-              <CreateWalletTile onClick={() => onCreateWallet(null)} />
-            ) : null}
+        {visibleWallets.length > 0 || createWalletTile ? (
+          <WalletCardsGrid wallets={visibleWallets} canManageCustody={canManageCustody}>
+            {createWalletTile}
           </WalletCardsGrid>
-        ) : (
-          <CategoryFilteredWalletGrid
-            category={filter}
-            wallets={selectedCategoryWallets}
-            providers={selectedCategoryProviders}
+        ) : selectedCategory ? (
+          <CategoryEmptyState
             canManageCustody={canManageCustody}
-            onCreateWallet={onCreateWallet}
+            category={selectedCategory}
+            providers={selectedCategoryProviders}
           />
-        )}
+        ) : null}
       </div>
     </div>
   );

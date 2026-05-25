@@ -2,13 +2,13 @@
 
 import type { CustodyWalletSummary } from "@sdp/types";
 import dynamic from "next/dynamic";
-import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useEffect, useMemo } from "react";
 import { ApiPlaygroundShellSkeleton } from "@/components/api-playground-shell-skeleton";
 import { DashboardWorkspaceTabShell } from "@/components/dashboard-workspace-tab-shell";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { getStoredApiKeySecret } from "@/lib/playground-api-keys";
 import type { KnownCustodyProvider, WalletProviderCategory } from "./provider-catalog";
-import { WalletProvisionModal } from "./wallet-provision-modal";
 import { WalletsOverview } from "./wallets-overview";
 
 const WalletsPlayground = dynamic(
@@ -45,11 +45,9 @@ export function WalletsWorkspace({
   wallets,
   walletsError,
 }: WalletsWorkspaceProps) {
+  const router = useRouter();
   const { dashboardAccess, issuanceTab, selectedPlaygroundApiKeyId, setPlaygroundApiKeys } =
     useDashboardWorkspace();
-  const [isProvisionModalOpen, setIsProvisionModalOpen] = useState(false);
-  const [preferredProvider, setPreferredProvider] = useState<KnownCustodyProvider | null>(null);
-  const [preferredCategory, setPreferredCategory] = useState<WalletProviderCategory | null>(null);
   const isPlaygroundTab = issuanceTab === "playground";
 
   useEffect(() => {
@@ -92,18 +90,26 @@ export function WalletsWorkspace({
     return stored ?? "";
   }, [selectedPlaygroundApiKey, selectedPlaygroundApiKeyPrefix]);
 
-  const openProvisionModal = (
+  const openWalletSetup = (
     provider: KnownCustodyProvider | null,
     category: WalletProviderCategory | null = null
   ) => {
-    setPreferredProvider(provider);
-    setPreferredCategory(category);
-    setIsProvisionModalOpen(true);
+    const params = new URLSearchParams();
+    if (category) {
+      params.set("category", category);
+    }
+    if (provider) {
+      params.set("provider", provider);
+    }
+
+    const query = params.toString();
+    router.push(`/dashboard/wallets/setup${query ? `?${query}` : ""}`);
   };
 
   return (
     <div className="h-full min-h-0 w-full">
       <DashboardWorkspaceTabShell
+        disableOverviewInitialAnimation
         isPlaygroundTab={isPlaygroundTab}
         overviewClassName="space-y-6"
         overview={
@@ -113,7 +119,7 @@ export function WalletsWorkspace({
             wallets={wallets}
             walletsError={walletsError}
             canManageCustody={dashboardAccess.capabilities.canManageCustody}
-            onCreateWallet={openProvisionModal}
+            onCreateWallet={openWalletSetup}
           />
         }
         playground={
@@ -133,17 +139,6 @@ export function WalletsWorkspace({
           />
         }
       />
-
-      {dashboardAccess.capabilities.canManageCustody ? (
-        <WalletProvisionModal
-          isOpen={isProvisionModalOpen}
-          onClose={() => setIsProvisionModalOpen(false)}
-          connectedProviders={connectedProviders}
-          enabledProviders={enabledProviders}
-          preferredProvider={preferredProvider}
-          preferredCategory={preferredCategory}
-        />
-      ) : null}
     </div>
   );
 }

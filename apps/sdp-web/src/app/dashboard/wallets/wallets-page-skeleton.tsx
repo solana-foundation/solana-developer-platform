@@ -1,4 +1,6 @@
+import { Shield, WalletMinimal } from "lucide-react";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
+import { Button } from "@/components/ui/button";
 
 function SkeletonBlock({ className }: { className: string }) {
   return <div className={`animate-pulse rounded-[16px] bg-[rgba(28,28,29,0.1)] ${className}`} />;
@@ -34,6 +36,43 @@ function WalletCardSkeleton() {
         <SkeletonBlock className="h-4 w-full" />
       </div>
       <SkeletonBlock className="mt-3 h-11 w-full rounded-[10px]" />
+    </div>
+  );
+}
+
+function WalletsFilterSkeletonControl() {
+  const options = [
+    { id: "all", label: "All", icon: null },
+    { id: "api", label: "API", icon: <WalletMinimal className="h-3.5 w-3.5" aria-hidden="true" /> },
+    {
+      id: "institutional",
+      label: "Institutional",
+      icon: <Shield className="h-3.5 w-3.5" aria-hidden="true" />,
+    },
+  ];
+
+  return (
+    <div className="inline-flex max-w-full items-center overflow-x-auto rounded-xl border border-[rgba(28,28,29,0.1)] bg-[rgba(28,28,29,0.03)] p-1">
+      {options.map((option) => {
+        const isActive = option.id === "all";
+
+        return (
+          <button
+            key={option.id}
+            type="button"
+            disabled
+            className={`inline-flex h-9 shrink-0 items-center gap-2 rounded-lg px-3 text-sm font-medium ${
+              isActive
+                ? "bg-white text-[#1c1c1d] shadow-[0_1px_2px_rgba(28,28,29,0.08)]"
+                : "text-[rgba(28,28,29,0.62)]"
+            }`}
+            aria-pressed={isActive}
+          >
+            {option.icon}
+            <span>{option.label}</span>
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -78,8 +117,11 @@ export function WalletsOnboardingSkeleton() {
 export function WalletsPageSkeleton() {
   return (
     <DashboardWorkspaceOverviewPanel className="space-y-6">
-      <div className="flex justify-end">
-        <SkeletonBlock className="h-10 w-32 rounded-[10px]" />
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <WalletsFilterSkeletonControl />
+        <Button type="button" disabled className="w-full lg:w-auto">
+          Create Wallet
+        </Button>
       </div>
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         {WALLET_CARD_SKELETON_IDS.map((id) => (

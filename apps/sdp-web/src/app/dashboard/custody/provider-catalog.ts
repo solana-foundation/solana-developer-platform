@@ -17,13 +17,12 @@ export const WALLET_PROVIDER_CATEGORY_DETAILS: Record<
   }
 > = {
   server: {
-    label: "Server",
-    description: "Simple wallet infrastructure for product, operations, and automated flows.",
+    label: "API",
+    description: "Wallet infrastructure for API-driven product, operations, and automated flows.",
   },
   institutional: {
     label: "Institutional",
-    description:
-      "Governed custody and wallet infrastructure for treasury, settlement, and regulated operations.",
+    description: "Policy-based custody for treasury, settlement, and multi-party approval flows.",
   },
 };
 

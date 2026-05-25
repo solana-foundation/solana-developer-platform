@@ -1,4 +1,4 @@
-import { Shield, Zap } from "lucide-react";
+import { Shield, WalletMinimal } from "lucide-react";
 import {
   WALLET_PROVIDER_CATEGORY_DETAILS,
   type WalletProviderCategory,
@@ -12,13 +12,13 @@ interface WalletCategoryBadgeProps {
 }
 
 const categoryTextClassNames: Record<WalletProviderCategory, string> = {
-  server: "text-[#0b6fb8]",
-  institutional: "text-[#a45113]",
+  server: "text-[#1c1c1d]",
+  institutional: "text-[#1c1c1d]",
 };
 
 const compactCategoryBackgroundClassNames: Record<WalletProviderCategory, string> = {
-  server: "bg-[#d9efff]",
-  institutional: "bg-[#ffe3b8]",
+  server: "bg-[#f4f1ea]",
+  institutional: "bg-[#f4f1ea]",
 };
 
 export function WalletCategoryBadge({
@@ -26,7 +26,7 @@ export function WalletCategoryBadge({
   compact = false,
   className,
 }: WalletCategoryBadgeProps) {
-  const Icon = category === "server" ? Zap : Shield;
+  const Icon = category === "server" ? WalletMinimal : Shield;
   const label = WALLET_PROVIDER_CATEGORY_DETAILS[category].label;
 
   return (

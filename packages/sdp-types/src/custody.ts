@@ -35,7 +35,7 @@ export const CUSTODY_PROVIDER_CAPABILITIES: Record<CustodyProvider, CustodyProvi
   },
   fireblocks: {
     supportsSigning: true,
-    supportsAdditionalWalletCreation: false,
+    supportsAdditionalWalletCreation: true,
     supportsWalletDeletion: false,
   },
   privy: {

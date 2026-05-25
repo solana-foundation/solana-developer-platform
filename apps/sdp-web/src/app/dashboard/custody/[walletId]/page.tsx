@@ -19,6 +19,7 @@ import { WalletAddressCopyButton } from "@/app/dashboard/custody/wallet-address-
 import { WalletCategoryBadge } from "@/app/dashboard/custody/wallet-category-badge";
 import { formatPurpose, truncateMiddle } from "@/app/dashboard/custody/wallet-format-utils";
 import { WalletProviderMark } from "@/app/dashboard/custody/wallet-provider-mark";
+import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createSdpApiClient, type SdpApiClient } from "@/lib/sdp-api";
 import {
@@ -169,7 +170,7 @@ export default async function WalletDetailPage({
   const purposeLabel = formatPurpose(wallet.purpose);
 
   return (
-    <div className="w-full space-y-6 py-2">
+    <DashboardWorkspaceOverviewPanel className="space-y-6">
       <div className="flex justify-end">
         <WalletActionsMenu
           walletAddress={wallet.publicKey}
@@ -280,7 +281,7 @@ export default async function WalletDetailPage({
       </section>
 
       <WalletActivitySection walletId={resolvedWalletId} initialActivity={walletActivity} />
-    </div>
+    </DashboardWorkspaceOverviewPanel>
   );
 }
 

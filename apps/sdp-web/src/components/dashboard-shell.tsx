@@ -294,8 +294,8 @@ function getDashboardPageConfig(pathname: string): DashboardPageConfig {
   }
   if (pathname === "/dashboard/wallets/setup" || pathname === "/dashboard/custody/setup") {
     return {
-      title: "Activate provider",
-      contentWidthClass: "max-w-3xl",
+      title: "Create wallet",
+      contentWidthClass: "max-w-none",
       backAction: {
         href: "/dashboard/wallets",
         label: "Back to wallets",
@@ -539,11 +539,19 @@ export function DashboardShell({ children }: { children: ReactNode }) {
   const shouldRenderTopBarBorder = Boolean(centeredTitle) && !shouldRenderHeaderNavRow;
   const shouldClipHorizontalOverflow =
     pathname === "/dashboard/payments" || pathname.startsWith("/dashboard/payments/");
+  const isWalletDetailRoute =
+    (pathname.startsWith("/dashboard/wallets/") &&
+      pathname !== "/dashboard/wallets/setup" &&
+      pathname !== "/dashboard/wallets/switch") ||
+    (pathname.startsWith("/dashboard/custody/") &&
+      pathname !== "/dashboard/custody/setup" &&
+      pathname !== "/dashboard/custody/switch");
   const shouldUseWorkspaceViewport =
     pathname === "/dashboard/issuance" ||
     pathname === "/dashboard/payments" ||
     pathname === "/dashboard/wallets" ||
-    pathname === "/dashboard/custody";
+    pathname === "/dashboard/custody" ||
+    isWalletDetailRoute;
   const shouldLockViewportScroll = shouldUseWorkspaceViewport;
   const shouldLockShellViewport = shouldLockViewportScroll || isMobileSidebarOpen;
 

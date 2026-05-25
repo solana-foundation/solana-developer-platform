@@ -6,6 +6,14 @@ export function normalizeCoinbaseCdpWalletId(walletAddress: string): string {
   return walletAddress.startsWith("cdp_") ? walletAddress : `cdp_${walletAddress}`;
 }
 
+export function normalizeFireblocksWalletId(vaultAccountId: string): string {
+  return vaultAccountId.startsWith("fb_") ? vaultAccountId : `fb_${vaultAccountId}`;
+}
+
+export function denormalizeFireblocksWalletId(walletId: string): string {
+  return walletId.startsWith("fb_") ? walletId.slice("fb_".length) : walletId;
+}
+
 export function normalizeParaWalletId(walletId: string): string {
   return walletId.startsWith("para_") ? walletId : `para_${walletId}`;
 }
