@@ -22,6 +22,7 @@ import { requestIdMiddleware } from "@/middleware/request-id";
 import { requestTracingMiddleware } from "@/middleware/request-tracing";
 import allowlist from "@/routes/allowlist";
 import apiKeys from "@/routes/api-keys";
+import counterparties from "@/routes/counterparties";
 import auth from "@/routes/auth";
 import compliance from "@/routes/compliance";
 import wallets from "@/routes/custody";
@@ -205,6 +206,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   const v1 = new Hono<{ Bindings: Env }>();
   v1.route("/organizations", organizations);
   v1.route("/api-keys", apiKeys);
+  v1.route("/counterparties", counterparties);
   v1.route("/members", members);
   v1.route("/auth", auth);
   v1.route("/projects", projects);
