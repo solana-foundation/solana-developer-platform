@@ -3,6 +3,7 @@
  */
 
 export * from "./api-keys";
+export * from "./counterparties";
 export * from "./custody";
 export * from "./organizations";
 export * from "./payments";

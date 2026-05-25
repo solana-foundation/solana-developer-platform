@@ -3,7 +3,7 @@ import {
   type ButtonProps as SolanaButtonProps,
 } from "@solana/design-system/button";
 import { Slot } from "@solana/design-system/utils";
-import { Children, type ComponentProps, isValidElement, type ReactNode } from "react";
+import type { ComponentProps } from "react";
 
 import { cn } from "@/lib/utils";
 
@@ -76,54 +76,17 @@ const slotSizeClassNames: Record<ButtonSize, string> = {
   "icon-lg": "size-10 rounded-[var(--button-radius-lg)] p-0",
 };
 
-function extractLeadingIcon(
-  children: ReactNode,
-  iconLeft: ReactNode
-): { contentChildren: ReactNode; leadingIcon: ReactNode } {
-  if (iconLeft) {
-    return { contentChildren: children, leadingIcon: iconLeft };
-  }
-
-  const childNodes = Children.toArray(children);
-  if (childNodes.length < 2) {
-    return { contentChildren: children, leadingIcon: undefined };
-  }
-
-  const [firstChild, ...restChildren] = childNodes;
-  if (!isValidElement(firstChild)) {
-    return { contentChildren: children, leadingIcon: undefined };
-  }
-
-  const className =
-    typeof firstChild.props === "object" &&
-    firstChild.props &&
-    "className" in firstChild.props &&
-    typeof firstChild.props.className === "string"
-      ? firstChild.props.className
-      : "";
-
-  const isLikelyIcon = className.includes("size-") || className.includes("lucide");
-  if (!isLikelyIcon) {
-    return { contentChildren: children, leadingIcon: undefined };
-  }
-
-  return {
-    contentChildren: restChildren.length === 1 ? restChildren[0] : restChildren,
-    leadingIcon: firstChild,
-  };
-}
-
 function Button({
   className,
   variant = "default",
   size = "default",
   children,
   iconLeft,
+  iconRight,
   asChild,
   ...props
 }: ButtonProps) {
   const isIconOnly = size.startsWith("icon");
-  const { contentChildren, leadingIcon } = extractLeadingIcon(children, iconLeft);
   const solanaVariant: SolanaButtonProps["variant"] =
     variant === "default" || variant === "destructive" ? "primary" : "secondary";
 
@@ -156,9 +119,10 @@ function Button({
       variant={solanaVariant}
       className={cn(variantClassNames[variant], sizeClassNames[size], className)}
       {...props}
-      iconLeft={isIconOnly ? children : leadingIcon}
+      iconLeft={isIconOnly ? children : iconLeft}
+      iconRight={isIconOnly ? undefined : iconRight}
     >
-      {isIconOnly ? null : contentChildren}
+      {isIconOnly ? null : children}
     </SolanaButton>
   );
 }

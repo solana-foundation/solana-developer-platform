@@ -50,6 +50,7 @@ import {
   rotateApiKeyResponseSchema,
   rpcProvidersResponseSchema,
   rpcRelayResponseSchema,
+  sandboxTransferSimulationResponseSchema,
   signerCheckResponseSchema,
   successResponseSchema,
   switchProviderOptionsResponseSchema,
@@ -146,3 +147,6 @@ export const transferResponse = successResponseSchema(transferResponseSchema);
 export const transferListResponse = paginatedResponseSchema(transferSchema);
 export const onrampExecutionResponse = successResponseSchema(onrampExecutionResponseSchema);
 export const offrampExecutionResponse = successResponseSchema(offrampExecutionResponseSchema);
+export const sandboxTransferSimulationResponse = successResponseSchema(
+  sandboxTransferSimulationResponseSchema
+);

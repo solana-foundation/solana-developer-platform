@@ -1,7 +1,7 @@
 "use client";
 
 import type { CustodyWalletAggregate, PaymentTransferSummary as TransferRecord } from "@sdp/types";
-import { ArrowDownLeft, ArrowUpRight, ExternalLink, RefreshCw } from "lucide-react";
+import { ArrowDownLeft, ArrowUpRight, ExternalLink, RefreshCwIcon } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMemo } from "react";
 import { SectionEntry } from "@/app/dashboard/wallets/section-entry";
@@ -287,10 +287,10 @@ export function PaymentsOverview({
               type="button"
               variant="secondary"
               className="hidden sm:inline-flex"
+              iconLeft={<RefreshCwIcon className={isRefreshing ? "animate-spin" : undefined} />}
               onClick={handleRefresh}
               disabled={isRefreshing}
             >
-              <RefreshCw className={`size-4 ${isRefreshing ? "animate-spin" : ""}`} />
               {isRefreshing ? "Refreshing..." : "Refresh"}
             </Button>
           </CardHeader>
