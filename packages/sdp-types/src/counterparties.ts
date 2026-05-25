@@ -35,23 +35,24 @@ export interface CounterpartyIdentity {
   [extension: string]: unknown;
 }
 
+export type CounterpartyStatus = "active" | "archived";
+
 export interface Counterparty {
   id: string;
   organizationId: string;
-  projectId: string;
+  projectId: string | null;
   externalId: string | null;
   entityType: CounterpartyEntityType;
   displayName: string;
   email: string;
   identity: CounterpartyIdentity;
-  isActive: boolean;
+  status: CounterpartyStatus;
   createdBy: string | null;
   createdAt: string;
   updatedAt: string;
 }
 
 export interface CreateCounterpartyRequest {
-  projectId?: string;
   externalId?: string;
   entityType: CounterpartyEntityType;
   displayName: string;
