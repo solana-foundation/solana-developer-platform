@@ -14,7 +14,6 @@ export type PrivateTransferBalanceLocation = "base" | "ephemeral";
  * `public` leaves the transfer transparent on base Solana when the provider supports it.
  */
 export type PrivateTransferVisibility = "public" | "private";
-export type PrivateTransferTransactionVersion = "legacy" | "v0";
 
 /**
  * MagicBlock-specific pass-through options for building a private SPL transfer.
@@ -46,10 +45,17 @@ export interface MagicBlockPrivateTransferOptions {
   /** Initialize the MagicBlock vault when it does not exist. */
   initVaultIfMissing?: boolean;
 
-  /** Earliest settlement delay in milliseconds for a queued private transfer. */
+  /**
+   * Earliest settlement delay in milliseconds for a queued private transfer.
+   * Kept as a string to preserve MagicBlock's pass-through request shape.
+   */
   minDelayMs?: string;
 
-  /** Latest settlement delay in milliseconds. Must be greater than or equal to `minDelayMs`. */
+  /**
+   * Latest settlement delay in milliseconds. Must be greater than or equal to
+   * `minDelayMs`. Kept as a string to preserve MagicBlock's pass-through
+   * request shape.
+   */
   maxDelayMs?: string;
 
   /** Numeric client reference encrypted by MagicBlock for payment correlation. */
@@ -61,7 +67,7 @@ export interface MagicBlockPrivateTransferOptions {
   /** Request MagicBlock sponsor fee-payer behavior when supported by the route. */
   gasless?: boolean;
 
-  /** Request a legacy transaction instead of a v0 transaction. */
+  /** Request MagicBlock's legacy transaction mode instead of its default v0 transaction mode. */
   legacy?: boolean;
 }
 
@@ -77,16 +83,3 @@ export interface MagicBlockPrivateTransferRequest {
 }
 
 export type PrivateTransferRequest = MagicBlockPrivateTransferRequest;
-
-/**
- * Provider metadata returned alongside a prepared transaction once an API
- * endpoint supports private-transfer preparation.
- */
-export interface PrivateTransferPreparedMetadata {
-  provider: PrivateTransferProviderId;
-  sendTo?: PrivateTransferBalanceLocation;
-  version?: PrivateTransferTransactionVersion;
-  instructionCount?: number;
-  requiredSigners?: string[];
-  validator?: string;
-}

@@ -59,8 +59,6 @@ export interface PaymentTransferSummary {
   updatedAt?: string;
 }
 
-export type PaymentPrivateTransferRequest = PrivateTransferRequest;
-
 export interface PaymentTransferRequest {
   projectId?: string;
   source: string;
@@ -73,7 +71,7 @@ export interface PaymentTransferRequest {
    * Optional private-transfer routing. When omitted, the transfer should use
    * the normal public on-chain transfer path.
    */
-  privateTransfer?: PaymentPrivateTransferRequest;
+  privateTransfer?: PrivateTransferRequest;
 }
 
 export interface PaymentTransferEnvelope {
