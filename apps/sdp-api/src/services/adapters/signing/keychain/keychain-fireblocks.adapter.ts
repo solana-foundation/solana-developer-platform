@@ -96,7 +96,12 @@ export class KeychainFireblocksAdapter extends BaseKeychainAdapter {
       return existing;
     }
 
-    const created = this.createInitializedSigner(vaultAccountId);
+    const created = this.createInitializedSigner(vaultAccountId).catch((error: unknown) => {
+      if (this.signerByVaultAccountId.get(vaultAccountId) === created) {
+        this.signerByVaultAccountId.delete(vaultAccountId);
+      }
+      throw error;
+    });
     this.signerByVaultAccountId.set(vaultAccountId, created);
     return created;
   }
