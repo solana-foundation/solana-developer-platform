@@ -52,7 +52,8 @@ export type ResourceType =
   | "custody_wallet"
   // Transaction resources
   | "transaction"
-  | "signing_request";
+  | "signing_request"
+  | "counterparty";
 
 export interface AuditLogEntry {
   organizationId?: string;
