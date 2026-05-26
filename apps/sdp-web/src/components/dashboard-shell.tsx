@@ -4,21 +4,23 @@ import { OrganizationSwitcher, SignInButton, UserButton, useAuth } from "@clerk/
 import { DEFAULT_SDP_DOCS_URL } from "@sdp/types";
 import type { LucideIcon } from "lucide-react";
 import {
-  ArrowLeft,
-  ArrowLeftRight,
-  Coins,
-  KeyRound,
-  LayoutDashboard,
-  Library,
-  PanelLeft,
-  PanelRight,
-  Settings2,
-  Wallet,
+  ArrowLeftIcon,
+  ArrowLeftRightIcon,
+  CoinsIcon,
+  KeyRoundIcon,
+  LayoutDashboardIcon,
+  LibraryIcon,
+  PanelLeftIcon,
+  PanelRightIcon,
+  Settings2Icon,
+  UsersIcon,
+  WalletIcon,
 } from "lucide-react";
 import { motion } from "motion/react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { type ReactNode, useEffect, useRef, useState } from "react";
+import { CounterpartyHeaderTabs } from "@/components/counterparty-header-tabs";
 import { IssuanceHeaderTabs } from "@/components/issuance-header-tabs";
 import { NetworkDebugPanel, NetworkDebugToggle } from "@/components/network-debug-panel";
 import { SentryFeedbackWidget } from "@/components/sentry-feedback-widget";
@@ -43,16 +45,17 @@ const navSections: NavSection[] = [
   {
     title: "Create",
     items: [
-      { label: "Home", href: "/dashboard", icon: LayoutDashboard },
-      { label: "Wallets", href: "/dashboard/wallets", icon: Wallet },
+      { label: "Home", href: "/dashboard", icon: LayoutDashboardIcon },
+      { label: "Wallets", href: "/dashboard/wallets", icon: WalletIcon },
     ],
   },
   {
     title: "Manage",
     items: [
-      { label: "Issuance", href: "/dashboard/issuance", icon: Coins },
-      { label: "Payments", href: "/dashboard/payments", icon: ArrowLeftRight },
-      { label: "API keys", href: "/dashboard/api-keys", icon: KeyRound },
+      { label: "Issuance", href: "/dashboard/issuance", icon: CoinsIcon },
+      { label: "Payments", href: "/dashboard/payments", icon: ArrowLeftRightIcon },
+      { label: "Counterparty", href: "/dashboard/counterparty", icon: UsersIcon },
+      { label: "API keys", href: "/dashboard/api-keys", icon: KeyRoundIcon },
     ],
   },
 ];
@@ -100,7 +103,7 @@ function HeaderBackAction({
       href={href}
       className="inline-flex h-7 items-center gap-1.5 rounded-[var(--button-radius-md)] text-text-medium transition-colors hover:text-text-extra-high"
     >
-      <ArrowLeft className="h-4 w-4" />
+      <ArrowLeftIcon className="h-4 w-4" />
       <span
         className={[
           "text-[13px] leading-[18px] font-medium",
@@ -142,7 +145,7 @@ function SidebarToggle({
           animate={{ rotate: 0 }}
           transition={{ duration: 0.18 }}
         >
-          <PanelRight className="h-4 w-4" />
+          <PanelRightIcon className="h-4 w-4" />
         </motion.div>
       </motion.button>
       {!isSidebarOpen ? (
@@ -159,7 +162,7 @@ function SidebarToggle({
             animate={{ rotate: 0 }}
             transition={{ duration: 0.18 }}
           >
-            <PanelRight className="h-4 w-4" />
+            <PanelRightIcon className="h-4 w-4" />
           </motion.div>
         </motion.button>
       ) : null}
@@ -379,6 +382,29 @@ function getDashboardPageConfig(pathname: string): DashboardPageConfig {
   if (pathname.startsWith("/dashboard/allowlist")) {
     return { title: "Allowlist" };
   }
+  if (pathname === "/dashboard/counterparty") {
+    return {
+      title: "Counterparty",
+      headerNav: <CounterpartyHeaderTabs />,
+      contentWidthClass: "max-w-none",
+    };
+  }
+  if (pathname.startsWith("/dashboard/counterparty/")) {
+    return {
+      title: "",
+      hideTitle: true,
+      showHeaderNavRow: true,
+      centeredTitle: "New Counterparty",
+      topBarLeadingContent: (
+        <HeaderBackAction
+          href="/dashboard/counterparty"
+          label="Back to Counterparty"
+          compactOnMobile
+        />
+      ),
+      contentWidthClass: "max-w-xl",
+    };
+  }
   return { title: "Home" };
 }
 
@@ -467,7 +493,7 @@ function DashboardSidebarContent({
                 animate={{ rotate: 0 }}
                 transition={{ duration: 0.18 }}
               >
-                <PanelLeft className="h-5 w-5" />
+                <PanelLeftIcon className="h-5 w-5" />
               </motion.div>
             </motion.button>
           </div>
@@ -522,9 +548,9 @@ export function DashboardShell({ children }: { children: ReactNode }) {
   const sidebarWidth = 296;
   const pageConfig = getDashboardPageConfig(pathname);
   const bottomNavItems: NavItem[] = [
-    { label: "API Docs", href: docsHref, icon: Library, external: true },
+    { label: "API Docs", href: docsHref, icon: LibraryIcon, external: true },
     ...(dashboardAccess.capabilities.canManageOrgSettings
-      ? [{ label: "Settings", href: "/dashboard/settings", icon: Settings2 }]
+      ? [{ label: "Settings", href: "/dashboard/settings", icon: Settings2Icon }]
       : []),
   ];
   const contentWidthClass = pageConfig.contentWidthClass ?? "max-w-5xl";
@@ -543,7 +569,8 @@ export function DashboardShell({ children }: { children: ReactNode }) {
     pathname === "/dashboard/issuance" ||
     pathname === "/dashboard/payments" ||
     pathname === "/dashboard/wallets" ||
-    pathname === "/dashboard/custody";
+    pathname === "/dashboard/custody" ||
+    pathname === "/dashboard/counterparty";
   const shouldLockViewportScroll = shouldUseWorkspaceViewport;
   const shouldLockShellViewport = shouldLockViewportScroll || isMobileSidebarOpen;
 
