@@ -3,6 +3,13 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "imports": {
+    "#env-impl": {
+      "workerd": "./src/helpers/env.workers.ts",
+      "worker": "./src/helpers/env.workers.ts",
+      "default": "./src/helpers/env.node.ts"
+    }
+  },
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest"

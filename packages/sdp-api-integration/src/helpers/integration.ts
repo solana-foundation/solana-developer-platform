@@ -31,7 +31,7 @@ import {
   setTransactionMessageLifetimeUsingBlockhash,
 } from "@solana/kit";
 import { getTransferSolInstruction } from "@solana-program/system";
-import { env } from "./env";
+import { env } from "#env-impl";
 
 const PRIVY_CONFIGURED = !!env.PRIVY_APP_ID && !!env.PRIVY_APP_SECRET;
 const SOLANA_CONFIGURED = !!env.SOLANA_RPC_URL && PRIVY_CONFIGURED;
