@@ -2,7 +2,7 @@
 
 import { useAuth } from "@clerk/nextjs";
 import type { SdpEnvironment } from "@sdp/types";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   createContext,
   type ReactNode,
@@ -10,6 +10,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import { SWRConfig } from "swr";
@@ -20,6 +21,7 @@ import { DASHBOARD_SWR_CONFIG } from "@/lib/dashboard-swr-config";
 import { useDashboardUrlState } from "@/lib/dashboard-url-state";
 
 export type IssuanceWorkspaceTab = "tokens" | "playground";
+export type CounterpartyWorkspaceTab = "overview" | "playground";
 
 export interface DashboardPlaygroundApiKeyOption {
   id: string;
@@ -36,6 +38,7 @@ type DashboardWorkspaceContextValue = {
   isSidebarOpen: boolean;
   selectedProject: string;
   issuanceTab: IssuanceWorkspaceTab;
+  counterpartyTab: CounterpartyWorkspaceTab;
   playgroundApiKeys: DashboardPlaygroundApiKeyOption[];
   selectedPlaygroundApiKeyId: string | null;
   setSdpEnvironment: (value: SdpEnvironment) => void;
@@ -43,6 +46,7 @@ type DashboardWorkspaceContextValue = {
   setSelectedPlaygroundApiKeyId: (id: string | null) => void;
   setSelectedProject: (project: string) => void;
   setIssuanceTab: (tab: IssuanceWorkspaceTab) => void;
+  setCounterpartyTab: (tab: CounterpartyWorkspaceTab) => void;
   setSidebarOpen: (open: boolean) => void;
   toggleSidebar: () => void;
 };
@@ -88,6 +92,7 @@ export function DashboardWorkspaceProvider({
 }: DashboardWorkspaceProviderProps) {
   const auth = useAuth();
   const router = useRouter();
+  const pathname = usePathname();
   const { replaceSearchParams, searchParams } = useDashboardUrlState();
   const [isSidebarOpen, setSidebarOpenState] = useState(initialSidebarOpen);
   const [sdpEnvironment, setSdpEnvironment] = useState<SdpEnvironment>("sandbox");
@@ -128,9 +133,23 @@ export function DashboardWorkspaceProvider({
     router.refresh();
   }, [auth.isLoaded, liveDashboardCacheScopeKey, router, serverDashboardCacheScopeKey]);
 
+  const previousPathnameRef = useRef(pathname);
+  useEffect(() => {
+    if (previousPathnameRef.current === pathname) return;
+    previousPathnameRef.current = pathname;
+    if (searchParams.has("tab")) {
+      replaceSearchParams({ tab: null });
+    }
+  }, [pathname, searchParams, replaceSearchParams]);
+
   const issuanceTab: IssuanceWorkspaceTab = useMemo(() => {
     const tab = searchParams.get("tab");
     return tab === "playground" ? "playground" : "tokens";
+  }, [searchParams]);
+
+  const counterpartyTab: CounterpartyWorkspaceTab = useMemo(() => {
+    const tab = searchParams.get("tab");
+    return tab === "playground" ? "playground" : "overview";
   }, [searchParams]);
 
   const setSidebarOpen = useCallback((open: boolean) => {
@@ -163,6 +182,15 @@ export function DashboardWorkspaceProvider({
     [replaceSearchParams]
   );
 
+  const setCounterpartyTab = useCallback(
+    (tab: CounterpartyWorkspaceTab) => {
+      replaceSearchParams({
+        tab: tab === "playground" ? "playground" : "overview",
+      });
+    },
+    [replaceSearchParams]
+  );
+
   const value = useMemo<DashboardWorkspaceContextValue>(
     () => ({
       dashboardAccess,
@@ -171,6 +199,7 @@ export function DashboardWorkspaceProvider({
       isSidebarOpen,
       selectedProject,
       issuanceTab,
+      counterpartyTab,
       playgroundApiKeys,
       selectedPlaygroundApiKeyId,
       setSdpEnvironment,
@@ -178,6 +207,7 @@ export function DashboardWorkspaceProvider({
       setSelectedPlaygroundApiKeyId,
       setSelectedProject,
       setIssuanceTab,
+      setCounterpartyTab,
       setSidebarOpen,
       toggleSidebar,
     }),
@@ -188,10 +218,12 @@ export function DashboardWorkspaceProvider({
       isSidebarOpen,
       playgroundApiKeys,
       issuanceTab,
+      counterpartyTab,
       selectedPlaygroundApiKeyId,
       selectedProject,
       setPlaygroundApiKeys,
       setIssuanceTab,
+      setCounterpartyTab,
       setSidebarOpen,
       toggleSidebar,
     ]

@@ -21,10 +21,11 @@ Create these secrets before deploy:
 
 ## Required Allowed Programs
 
-Every Kora instance used by SDP must allow the sRFC-37 programs in addition to the standard System, Token, Token-2022, Associated Token, Memo, Address Lookup Table, and Compute Budget programs:
+Every Kora instance used by SDP must allow the sRFC-37 and MagicBlock private transfer programs in addition to the standard System, Token, Token-2022, Associated Token, Memo, Address Lookup Table, and Compute Budget programs:
 
 - `TACLkU6CiCdkQN2MjoyDkVg2yAH9zkxiHDsiztQ52TP` — Token-ACL
 - `GATEzzqxhJnsWF6vHRsgtixxSB8PaQdcqGEVTEHWiULz` — ABL / GATE
+- `SPLxh1LVZzEkX99H6rqYizhytLWPZVV296zyYDPagv2` — MagicBlock private transfer program
 
 This applies to the active devnet Kora surfaces:
 
