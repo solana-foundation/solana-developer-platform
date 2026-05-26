@@ -1,4 +1,5 @@
-export type CounterpartyEntityType = "individual" | "business";
+export const COUNTERPARTY_ENTITY_TYPES = ["individual", "business"] as const;
+export type CounterpartyEntityType = (typeof COUNTERPARTY_ENTITY_TYPES)[number];
 
 export const COUNTERPARTY_ID_TYPES = ["PAS", "DRV", "STA", "GOV"] as const;
 export type CounterpartyIdType = (typeof COUNTERPARTY_ID_TYPES)[number];
