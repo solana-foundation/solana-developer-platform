@@ -1,0 +1,96 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: sdp
+      POSTGRES_USER: sdp
+      POSTGRES_PASSWORD: sdp
+    ports:
+      - "${SDP_POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - sdp-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sdp -d sdp"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "${SDP_REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  sdp-migrate:
+    build:
+      context: .
+      dockerfile: apps/sdp-api/Dockerfile
+      target: builder
+    working_dir: /repo/apps/sdp-api
+    command: ["node", "scripts/migrate-postgres.mjs"]
+    environment:
+      DATABASE_URL: postgresql://sdp:sdp@postgres:5432/sdp
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  sdp-api:
+    build:
+      context: .
+      dockerfile: apps/sdp-api/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "${SDP_API_PORT:-8787}:8787"
+    environment:
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      API_VERSION: ${API_VERSION:-local-compose}
+      SDP_RUNTIME: node
+      DATABASE_URL: postgresql://sdp:sdp@postgres:5432/sdp
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      sdp-migrate:
+        condition: service_completed_successfully
+
+  sdp-web:
+    build:
+      context: .
+      dockerfile: apps/sdp-web/Dockerfile
+      args:
+        NEXT_PUBLIC_SDP_API_BASE_URL: ${NEXT_PUBLIC_SDP_API_BASE_URL:-http://localhost:8787}
+        NEXT_PUBLIC_SDP_DOCS_URL: ${NEXT_PUBLIC_SDP_DOCS_URL:-http://localhost:3001}
+        NEXT_PUBLIC_SOLANA_NETWORK: ${NEXT_PUBLIC_SOLANA_NETWORK:-devnet}
+        NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY}
+    restart: unless-stopped
+    ports:
+      - "${SDP_WEB_PORT:-3000}:3000"
+    environment:
+      SDP_API_BASE_URL: http://sdp-api:8787
+      CLERK_SECRET_KEY: ${CLERK_SECRET_KEY}
+    depends_on:
+      sdp-api:
+        condition: service_healthy
+
+  sdp-docs:
+    build:
+      context: .
+      dockerfile: apps/sdp-docs/Dockerfile
+      args:
+        NEXT_PUBLIC_SDP_WEB_URL: ${NEXT_PUBLIC_SDP_WEB_URL:-http://localhost:3000}
+        NEXT_PUBLIC_SDP_DOCS_URL: ${NEXT_PUBLIC_SDP_DOCS_URL:-http://localhost:3001}
+        NEXT_PUBLIC_SDP_API_URL: ${NEXT_PUBLIC_SDP_API_URL:-http://localhost:8787}
+    restart: unless-stopped
+    ports:
+      - "${SDP_DOCS_PORT:-3001}:3001"
+
+volumes:
+  sdp-postgres-data:
