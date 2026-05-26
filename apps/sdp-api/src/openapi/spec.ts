@@ -6,6 +6,7 @@ import { registerAdminPaths } from "./paths/admin";
 import { registerApiKeyPaths } from "./paths/api-keys";
 import { registerAuthPaths } from "./paths/auth";
 import { registerCompliancePaths } from "./paths/compliance";
+import { registerCounterpartyPaths } from "./paths/counterparties";
 import { registerCustodyPaths } from "./paths/custody";
 import { registerHealthPaths } from "./paths/health";
 import { registerIssuancePaths } from "./paths/issuance";
@@ -37,6 +38,10 @@ const OPENAPI_TAG = {
     description: "Wallet balances, transfer execution, policies, and ramps.",
   },
   COMPLIANCE: { name: "Compliance", description: "Risk and compliance screening endpoints." },
+  COUNTERPARTIES: {
+    name: "Counterparties",
+    description: "Counterparty (customer/beneficiary) identity records.",
+  },
   ADMIN: { name: "Admin", description: "Administrative allowlist management." },
   ONBOARDING: { name: "Onboarding", description: "Clerk organization sync status." },
 } as const;
@@ -49,6 +54,7 @@ const PUBLIC_OPENAPI_TAGS = [
   OPENAPI_TAG.ISSUANCE,
   OPENAPI_TAG.PAYMENTS,
   OPENAPI_TAG.COMPLIANCE,
+  OPENAPI_TAG.COUNTERPARTIES,
 ];
 
 const OPENAPI_TAGS = [
@@ -63,6 +69,7 @@ const OPENAPI_TAGS = [
   OPENAPI_TAG.ISSUANCE,
   OPENAPI_TAG.PAYMENTS,
   OPENAPI_TAG.COMPLIANCE,
+  OPENAPI_TAG.COUNTERPARTIES,
   OPENAPI_TAG.ADMIN,
   OPENAPI_TAG.ONBOARDING,
 ];
@@ -101,6 +108,7 @@ function registerPublicPaths(registry: OpenAPIRegistry) {
   registerIssuancePaths(registry);
   registerPaymentsPaths(registry);
   registerCompliancePaths(registry);
+  registerCounterpartyPaths(registry);
 }
 
 function registerAllPaths(registry: OpenAPIRegistry) {
@@ -115,6 +123,7 @@ function registerAllPaths(registry: OpenAPIRegistry) {
   registerIssuancePaths(registry);
   registerPaymentsPaths(registry);
   registerCompliancePaths(registry);
+  registerCounterpartyPaths(registry);
   registerAdminPaths(registry);
   registerOnboardingPaths(registry);
 }
