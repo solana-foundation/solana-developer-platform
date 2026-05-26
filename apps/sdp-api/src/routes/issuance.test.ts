@@ -2670,6 +2670,9 @@ describe("Issuance Routes", () => {
         const createOrgSignerSpy = vi
           .spyOn(SolanaServices, "createOrgSigner")
           .mockResolvedValueOnce({ address: signerAddress } as never);
+        const isWalletOnListSpy = vi
+          .spyOn(MosaicService.prototype, "isWalletOnList")
+          .mockResolvedValueOnce(false);
         const addToListSpy = vi
           .spyOn(MosaicService.prototype, "addToList")
           .mockResolvedValueOnce(undefined as never);
@@ -2731,6 +2734,7 @@ describe("Issuance Routes", () => {
           expect(meta.addedToAllowlist).toBe(true);
         } finally {
           createOrgSignerSpy.mockRestore();
+          isWalletOnListSpy.mockRestore();
           addToListSpy.mockRestore();
           prepareMintToSpy.mockRestore();
         }
@@ -2742,6 +2746,9 @@ describe("Issuance Routes", () => {
         const createOrgSignerSpy = vi
           .spyOn(SolanaServices, "createOrgSigner")
           .mockResolvedValueOnce({ address: signerAddress } as never);
+        const isWalletOnListSpy = vi
+          .spyOn(MosaicService.prototype, "isWalletOnList")
+          .mockResolvedValueOnce(false);
         const addToListSpy = vi
           .spyOn(MosaicService.prototype, "addToList")
           .mockResolvedValueOnce(undefined as never);
@@ -2802,6 +2809,7 @@ describe("Issuance Routes", () => {
           expect(meta.addedToAllowlist).toBe(true);
         } finally {
           createOrgSignerSpy.mockRestore();
+          isWalletOnListSpy.mockRestore();
           addToListSpy.mockRestore();
           mintToSpy.mockRestore();
         }

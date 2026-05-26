@@ -139,12 +139,12 @@ export const prepareMint = async (c: AppContext) => {
     parsed.data.mint.amount
   );
 
-  const isOnControlList = await tokenService.isAddressAllowed(
-    tokenId,
-    parsed.data.mint.destination
-  );
   const ablListAddress = getOnChainAllowlistMutationForMint(token, c.env.SOLANA_NETWORK);
   if (!ablListAddress) {
+    const isOnControlList = await tokenService.isAddressAllowed(
+      tokenId,
+      parsed.data.mint.destination
+    );
     assertDestinationAllowedByControlList({
       token,
       destination: parsed.data.mint.destination,
@@ -269,12 +269,12 @@ export const executeMint = async (c: AppContext) => {
     parsed.data.mint.amount
   );
 
-  const isOnControlList = await tokenService.isAddressAllowed(
-    tokenId,
-    parsed.data.mint.destination
-  );
   const ablListAddress = getOnChainAllowlistMutationForMint(token, c.env.SOLANA_NETWORK);
   if (!ablListAddress) {
+    const isOnControlList = await tokenService.isAddressAllowed(
+      tokenId,
+      parsed.data.mint.destination
+    );
     assertDestinationAllowedByControlList({
       token,
       destination: parsed.data.mint.destination,
