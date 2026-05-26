@@ -589,15 +589,16 @@ async function executePreparedPrivateTransfer(
   const auth = getAuth(c);
   const walletsByAddress = new Map(wallets.map((wallet) => [wallet.publicKey, wallet]));
   const signerWallets = new Map<string, CustodyWallet>();
+  const requiredSigners = [...new Set(metadata.magicBlock.requiredSigners)];
 
-  for (const requiredSigner of metadata.magicBlock.requiredSigners) {
+  for (const requiredSigner of requiredSigners) {
     const wallet = walletsByAddress.get(requiredSigner);
     if (wallet) {
       signerWallets.set(wallet.publicKey, wallet);
     }
   }
 
-  const missingSignerCount = metadata.magicBlock.requiredSigners.length - signerWallets.size;
+  const missingSignerCount = requiredSigners.length - signerWallets.size;
   if (missingSignerCount > 0) {
     throw new AppError(
       "BAD_REQUEST",

@@ -2038,7 +2038,7 @@ describe("Payments routes", () => {
             recentBlockhash: "EkSnNWid2cvwEVnVx9aBqawnmiCNiDgp3gUdkDPTKN1N",
             lastValidBlockHeight: 123456,
             instructionCount: 3,
-            requiredSigners: [sourceSigner.address],
+            requiredSigners: [sourceSigner.address, sourceSigner.address],
           }),
           {
             status: 200,
