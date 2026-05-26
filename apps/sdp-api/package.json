@@ -31,7 +31,7 @@
     "dev:node": "tsx watch src/server.ts"
   },
   "dependencies": {
-    "@hono/node-server": "^1.19.6",
+    "@hono/node-server": "^2.0.2",
     "@react-email/components": "1.0.12",
     "@react-email/render": "2.0.8",
     "@sdp/types": "workspace:*",
