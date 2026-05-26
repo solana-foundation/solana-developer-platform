@@ -1,4 +1,4 @@
-import { COUNTERPARTY_ID_TYPES } from "@sdp/types";
+import { COUNTERPARTY_ENTITY_TYPES, COUNTERPARTY_ID_TYPES } from "@sdp/types";
 import { z } from "zod";
 
 // TODO: strict country / subdivision validation deferred — see follow-up ticket
@@ -40,7 +40,7 @@ export const counterpartyIdentitySchema = z.looseObject({
   governmentId: counterpartyGovernmentIdSchema.optional(),
 });
 
-export const counterpartyEntityTypeSchema = z.enum(["individual", "business"]);
+export const counterpartyEntityTypeSchema = z.enum(COUNTERPARTY_ENTITY_TYPES);
 
 export const counterpartyStatusSchema = z.enum(["active", "archived"]);
 
