@@ -24,7 +24,12 @@ export async function dashboardFetch<T = unknown>(
     return { ok: false, error: err instanceof Error ? err.message : "Network error" };
   }
 
-  const text = await response.text();
+  let text: string;
+  try {
+    text = await response.text();
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "Network error" };
+  }
 
   if (!response.ok) {
     let message = `Request failed (${response.status})`;
