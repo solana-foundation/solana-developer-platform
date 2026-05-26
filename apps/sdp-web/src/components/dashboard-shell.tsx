@@ -4,21 +4,23 @@ import { OrganizationSwitcher, SignInButton, UserButton, useAuth } from "@clerk/
 import { DEFAULT_SDP_DOCS_URL } from "@sdp/types";
 import type { LucideIcon } from "lucide-react";
 import {
-  ArrowLeft,
-  ArrowLeftRight,
-  Coins,
-  KeyRound,
-  LayoutDashboard,
-  Library,
-  PanelLeft,
-  PanelRight,
-  Settings2,
-  Wallet,
+  ArrowLeftIcon,
+  ArrowLeftRightIcon,
+  CoinsIcon,
+  KeyRoundIcon,
+  LayoutDashboardIcon,
+  LibraryIcon,
+  LockIcon,
+  PanelLeftIcon,
+  PanelRightIcon,
+  Settings2Icon,
+  WalletIcon,
 } from "lucide-react";
 import { motion } from "motion/react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { type ReactNode, useEffect, useRef, useState } from "react";
+import { CounterpartyHeaderTabs } from "@/components/counterparty-header-tabs";
 import { IssuanceHeaderTabs } from "@/components/issuance-header-tabs";
 import { NetworkDebugPanel, NetworkDebugToggle } from "@/components/network-debug-panel";
 import { SentryFeedbackWidget } from "@/components/sentry-feedback-widget";
@@ -26,12 +28,20 @@ import { SentryUserContext } from "@/components/sentry-user-context";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
+import { cn } from "@/lib/utils";
+
+type SubNavItem = {
+  label: string;
+  href: string;
+  disabled?: boolean;
+};
 
 type NavItem = {
   label: string;
   href: string;
   icon: LucideIcon;
   external?: boolean;
+  children?: SubNavItem[];
 };
 
 type NavSection = {
@@ -43,16 +53,25 @@ const navSections: NavSection[] = [
   {
     title: "Create",
     items: [
-      { label: "Home", href: "/dashboard", icon: LayoutDashboard },
-      { label: "Wallets", href: "/dashboard/wallets", icon: Wallet },
+      { label: "Home", href: "/dashboard", icon: LayoutDashboardIcon },
+      { label: "Wallets", href: "/dashboard/wallets", icon: WalletIcon },
     ],
   },
   {
     title: "Manage",
     items: [
-      { label: "Issuance", href: "/dashboard/issuance", icon: Coins },
-      { label: "Payments", href: "/dashboard/payments", icon: ArrowLeftRight },
-      { label: "API keys", href: "/dashboard/api-keys", icon: KeyRound },
+      { label: "Issuance", href: "/dashboard/issuance", icon: CoinsIcon },
+      {
+        label: "Payments",
+        href: "/dashboard/payments",
+        icon: ArrowLeftRightIcon,
+        children: [
+          { label: "Counterparty", href: "/dashboard/payments/counterparty" },
+          { label: "Pay", href: "/dashboard/pay", disabled: true },
+          { label: "Deposit", href: "/dashboard/deposit", disabled: true },
+        ],
+      },
+      { label: "API keys", href: "/dashboard/api-keys", icon: KeyRoundIcon },
     ],
   },
 ];
@@ -100,7 +119,7 @@ function HeaderBackAction({
       href={href}
       className="inline-flex h-7 items-center gap-1.5 rounded-[var(--button-radius-md)] text-text-medium transition-colors hover:text-text-extra-high"
     >
-      <ArrowLeft className="h-4 w-4" />
+      <ArrowLeftIcon className="h-4 w-4" />
       <span
         className={[
           "text-[13px] leading-[18px] font-medium",
@@ -142,7 +161,7 @@ function SidebarToggle({
           animate={{ rotate: 0 }}
           transition={{ duration: 0.18 }}
         >
-          <PanelRight className="h-4 w-4" />
+          <PanelRightIcon className="h-4 w-4" />
         </motion.div>
       </motion.button>
       {!isSidebarOpen ? (
@@ -159,7 +178,7 @@ function SidebarToggle({
             animate={{ rotate: 0 }}
             transition={{ duration: 0.18 }}
           >
-            <PanelRight className="h-4 w-4" />
+            <PanelRightIcon className="h-4 w-4" />
           </motion.div>
         </motion.button>
       ) : null}
@@ -349,6 +368,29 @@ function getDashboardPageConfig(pathname: string): DashboardPageConfig {
       },
     };
   }
+  if (pathname === "/dashboard/payments/counterparty") {
+    return {
+      title: "Counterparty",
+      headerNav: <CounterpartyHeaderTabs />,
+      contentWidthClass: "max-w-none",
+    };
+  }
+  if (pathname.startsWith("/dashboard/payments/counterparty/")) {
+    return {
+      title: "",
+      hideTitle: true,
+      showHeaderNavRow: true,
+      centeredTitle: "New Counterparty",
+      topBarLeadingContent: (
+        <HeaderBackAction
+          href="/dashboard/payments/counterparty"
+          label="Back to Counterparty"
+          compactOnMobile
+        />
+      ),
+      contentWidthClass: "max-w-xl",
+    };
+  }
   if (pathname === "/dashboard/payments") {
     return {
       title: "Payments",
@@ -389,8 +431,19 @@ function isItemActive(pathname: string, href: string): boolean {
   if (href === "/dashboard/wallets") {
     return pathname.startsWith("/dashboard/wallets") || pathname.startsWith("/dashboard/custody");
   }
-  return pathname.startsWith(href);
+  if (href === "/dashboard/payments") {
+    return (
+      pathname.startsWith("/dashboard/payments") &&
+      !pathname.startsWith("/dashboard/payments/counterparty")
+    );
+  }
+  return pathname === href || pathname.startsWith(`${href}/`);
 }
+
+const navItemBase =
+  "flex items-center gap-3 rounded-[var(--button-radius-lg)] px-3 text-[16px] leading-[24px] transition-colors";
+const navItemActive = "border border-border-extra-light bg-white text-text-extra-high";
+const navItemInactive = "text-text-medium hover:bg-border-light hover:text-text-extra-high";
 
 function SidebarGroup({
   title,
@@ -412,20 +465,54 @@ function SidebarGroup({
           const active = isItemActive(pathname, item.href);
 
           return (
-            <Link
-              key={item.label}
-              href={item.href}
-              onClick={onNavigate}
-              className={[
-                "flex h-10 items-center gap-3 rounded-[var(--button-radius-lg)] px-3 text-[16px] leading-[24px] transition-colors",
-                active
-                  ? "border border-border-extra-light bg-white text-text-extra-high"
-                  : "text-text-medium hover:bg-border-light hover:text-text-extra-high",
-              ].join(" ")}
-            >
-              <Icon className="h-5 w-5" strokeWidth={1.9} />
-              <span>{item.label}</span>
-            </Link>
+            <div key={item.label}>
+              <Link
+                href={item.href}
+                onClick={onNavigate}
+                className={cn(navItemBase, "h-10", active ? navItemActive : navItemInactive)}
+              >
+                <Icon className="h-5 w-5" strokeWidth={1.9} />
+                <span>{item.label}</span>
+              </Link>
+              {item.children && item.children.length > 0 && (
+                <div className="ml-5 mt-2">
+                  {item.children.map((child, i, siblings) => {
+                    const childActive = isItemActive(pathname, child.href);
+                    const isFirst = i === 0;
+                    const isLast = i === siblings.length - 1;
+                    return (
+                      <div key={child.href} className="flex gap-2">
+                        <div
+                          className={cn(
+                            "w-0.5 shrink-0 self-stretch transition-colors",
+                            isFirst && "mt-1",
+                            isLast && "mb-1",
+                            childActive ? "bg-text-medium" : "bg-border-light"
+                          )}
+                        />
+                        {child.disabled ? (
+                          <span className="flex h-9 flex-1 cursor-not-allowed items-center rounded-lg px-3 text-sm text-text-low">
+                            {child.label}
+                            <LockIcon className="ml-auto h-3 w-3" />
+                          </span>
+                        ) : (
+                          <Link
+                            href={child.href}
+                            onClick={onNavigate}
+                            className={cn(
+                              "flex h-9 flex-1 items-center rounded-lg px-3 text-sm transition-colors",
+                              childActive ? navItemActive : navItemInactive
+                            )}
+                          >
+                            {child.label}
+                          </Link>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           );
         })}
       </div>
@@ -467,7 +554,7 @@ function DashboardSidebarContent({
                 animate={{ rotate: 0 }}
                 transition={{ duration: 0.18 }}
               >
-                <PanelLeft className="h-5 w-5" />
+                <PanelLeftIcon className="h-5 w-5" />
               </motion.div>
             </motion.button>
           </div>
@@ -522,9 +609,9 @@ export function DashboardShell({ children }: { children: ReactNode }) {
   const sidebarWidth = 296;
   const pageConfig = getDashboardPageConfig(pathname);
   const bottomNavItems: NavItem[] = [
-    { label: "API Docs", href: docsHref, icon: Library, external: true },
+    { label: "API Docs", href: docsHref, icon: LibraryIcon, external: true },
     ...(dashboardAccess.capabilities.canManageOrgSettings
-      ? [{ label: "Settings", href: "/dashboard/settings", icon: Settings2 }]
+      ? [{ label: "Settings", href: "/dashboard/settings", icon: Settings2Icon }]
       : []),
   ];
   const contentWidthClass = pageConfig.contentWidthClass ?? "max-w-5xl";
@@ -538,12 +625,15 @@ export function DashboardShell({ children }: { children: ReactNode }) {
     pageConfig.showHeaderNavRow || Boolean(backAction) || Boolean(headerNav);
   const shouldRenderTopBarBorder = Boolean(centeredTitle) && !shouldRenderHeaderNavRow;
   const shouldClipHorizontalOverflow =
-    pathname === "/dashboard/payments" || pathname.startsWith("/dashboard/payments/");
+    pathname === "/dashboard/payments" ||
+    (pathname.startsWith("/dashboard/payments/") &&
+      !pathname.startsWith("/dashboard/payments/counterparty"));
   const shouldUseWorkspaceViewport =
     pathname === "/dashboard/issuance" ||
     pathname === "/dashboard/payments" ||
     pathname === "/dashboard/wallets" ||
-    pathname === "/dashboard/custody";
+    pathname === "/dashboard/custody" ||
+    pathname === "/dashboard/payments/counterparty";
   const shouldLockViewportScroll = shouldUseWorkspaceViewport;
   const shouldLockShellViewport = shouldLockViewportScroll || isMobileSidebarOpen;
 
