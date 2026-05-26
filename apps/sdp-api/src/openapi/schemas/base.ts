@@ -21,6 +21,11 @@ export const isoDateTimeSchema = z.string().datetime().openapi({
   example: "2025-01-01T00:00:00.000Z",
 });
 
+export const isoDateSchema = z.iso.date().openapi({
+  description: "ISO 8601 calendar date (YYYY-MM-DD).",
+  example: "1990-01-15",
+});
+
 export const idempotencyKeyHeaderSchema = z.string().min(1).openapi({
   description: "Idempotency key for safely retrying mutating requests.",
   example: "idempotency_example_12345",

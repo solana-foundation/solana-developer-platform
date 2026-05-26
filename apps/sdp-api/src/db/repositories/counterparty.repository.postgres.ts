@@ -1,4 +1,4 @@
-import type { CounterpartyEntityType, CounterpartyIdentity } from "@sdp/types";
+import type { CounterpartyEntityType, CounterpartyIdentity, CounterpartyStatus } from "@sdp/types";
 import type { AppDb } from "@/db";
 import type {
   ArchiveCounterpartyInput,
@@ -9,18 +9,19 @@ import type {
   ListCounterpartiesResult,
   UpdateCounterpartyInput,
 } from "./counterparty.repository";
+import { generateCounterpartyId } from "./counterparty.repository";
 
 function mapCounterpartyRow(row: Record<string, unknown>): CounterpartyRow {
   return {
     id: row.id as string,
     organization_id: row.organization_id as string,
-    project_id: row.project_id as string,
+    project_id: row.project_id as string | null,
     external_id: row.external_id as string | null,
     entity_type: row.entity_type as CounterpartyEntityType,
     display_name: row.display_name as string,
     email: row.email as string,
     identity: row.identity as CounterpartyIdentity,
-    is_active: row.is_active as boolean,
+    status: row.status as CounterpartyStatus,
     created_by: row.created_by as string | null,
     created_at: row.created_at as string,
     updated_at: row.updated_at as string,
@@ -29,16 +30,15 @@ function mapCounterpartyRow(row: Record<string, unknown>): CounterpartyRow {
 
 async function getCounterpartyByIdInternal(
   db: AppDb,
-  params: { counterpartyId: string; organizationId: string; projectId: string }
+  params: { counterpartyId: string; organizationId: string }
 ): Promise<CounterpartyRow | null> {
   const row = await db
     .prepare(
       `SELECT * FROM counterparties
          WHERE id = ?
-           AND organization_id = ?
-           AND project_id = ?`
+           AND organization_id = ?`
     )
-    .bind(params.counterpartyId, params.organizationId, params.projectId)
+    .bind(params.counterpartyId, params.organizationId)
     .first<Record<string, unknown>>();
   return row ? mapCounterpartyRow(row) : null;
 }
@@ -46,6 +46,8 @@ async function getCounterpartyByIdInternal(
 export function createPostgresCounterpartiesRepository(db: AppDb): CounterpartiesRepository {
   return {
     async createCounterparty(input: CreateCounterpartyInput) {
+      const id = generateCounterpartyId();
+
       await db
         .prepare(
           `INSERT INTO counterparties (
@@ -57,14 +59,12 @@ export function createPostgresCounterpartiesRepository(db: AppDb): Counterpartie
              display_name,
              email,
              identity,
-             is_active,
-             created_by,
-             created_at,
-             updated_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+             status,
+             created_by
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)`
         )
         .bind(
-          input.id,
+          id,
           input.organizationId,
           input.projectId,
           input.externalId,
@@ -72,17 +72,13 @@ export function createPostgresCounterpartiesRepository(db: AppDb): Counterpartie
           input.displayName,
           input.email,
           input.identity,
-          true,
-          input.createdBy,
-          input.createdAt,
-          input.updatedAt
+          input.createdBy
         )
         .run();
 
       return getCounterpartyByIdInternal(db, {
-        counterpartyId: input.id,
+        counterpartyId: id,
         organizationId: input.organizationId,
-        projectId: input.projectId,
       });
     },
 
@@ -95,11 +91,10 @@ export function createPostgresCounterpartiesRepository(db: AppDb): Counterpartie
                  display_name = COALESCE(?, display_name),
                  email = COALESCE(?, email),
                  identity = COALESCE(?, identity),
-                 updated_at = ?
+                 updated_at = sdp_iso_now()
            WHERE id = ?
              AND organization_id = ?
-             AND project_id = ?
-             AND is_active = TRUE`
+             AND status = 'active'`
         )
         .bind(
           input.externalId !== undefined,
@@ -108,10 +103,8 @@ export function createPostgresCounterpartiesRepository(db: AppDb): Counterpartie
           input.displayName ?? null,
           input.email ?? null,
           input.identity ?? null,
-          input.updatedAt,
           input.counterpartyId,
-          input.organizationId,
-          input.projectId
+          input.organizationId
         )
         .run();
 
@@ -122,7 +115,6 @@ export function createPostgresCounterpartiesRepository(db: AppDb): Counterpartie
       return getCounterpartyByIdInternal(db, {
         counterpartyId: input.counterpartyId,
         organizationId: input.organizationId,
-        projectId: input.projectId,
       });
     },
 
@@ -130,14 +122,13 @@ export function createPostgresCounterpartiesRepository(db: AppDb): Counterpartie
       const result = await db
         .prepare(
           `UPDATE counterparties
-             SET is_active = FALSE,
-                 updated_at = ?
+             SET status = 'archived',
+                 updated_at = sdp_iso_now()
            WHERE id = ?
              AND organization_id = ?
-             AND project_id = ?
-             AND is_active = TRUE`
+             AND status = 'active'`
         )
-        .bind(input.updatedAt, input.counterpartyId, input.organizationId, input.projectId)
+        .bind(input.counterpartyId, input.organizationId)
         .run();
 
       if (result === 0) {
@@ -147,7 +138,6 @@ export function createPostgresCounterpartiesRepository(db: AppDb): Counterpartie
       return getCounterpartyByIdInternal(db, {
         counterpartyId: input.counterpartyId,
         organizationId: input.organizationId,
-        projectId: input.projectId,
       });
     },
 
@@ -157,15 +147,9 @@ export function createPostgresCounterpartiesRepository(db: AppDb): Counterpartie
           `SELECT * FROM counterparties
              WHERE id = ?
                AND organization_id = ?
-               AND project_id = ?
-               AND is_active = ?`
+               AND status = 'active'`
         )
-        .bind(
-          params.counterpartyId,
-          params.organizationId,
-          params.projectId,
-          params.isActive ?? true
-        )
+        .bind(params.counterpartyId, params.organizationId)
         .first<Record<string, unknown>>();
       return row ? mapCounterpartyRow(row) : null;
     },
@@ -175,11 +159,10 @@ export function createPostgresCounterpartiesRepository(db: AppDb): Counterpartie
         .prepare(
           `SELECT * FROM counterparties
              WHERE organization_id = ?
-               AND project_id = ?
                AND external_id = ?
-               AND is_active = ?`
+               AND status = 'active'`
         )
-        .bind(params.organizationId, params.projectId, params.externalId, params.isActive ?? true)
+        .bind(params.organizationId, params.externalId)
         .first<Record<string, unknown>>();
       return row ? mapCounterpartyRow(row) : null;
     },
@@ -191,28 +174,20 @@ export function createPostgresCounterpartiesRepository(db: AppDb): Counterpartie
             `SELECT *
                FROM counterparties
               WHERE organization_id = ?
-                AND project_id = ?
-                AND (?::boolean OR is_active = TRUE)
+                AND (?::boolean OR status = 'active')
               ORDER BY created_at DESC
               LIMIT ? OFFSET ?`
           )
-          .bind(
-            params.organizationId,
-            params.projectId,
-            params.includeInactive ?? false,
-            params.limit,
-            params.offset
-          )
+          .bind(params.organizationId, params.includeArchived ?? false, params.limit, params.offset)
           .all<Record<string, unknown>>(),
         db
           .prepare(
             `SELECT COUNT(*)::int AS total
                FROM counterparties
               WHERE organization_id = ?
-                AND project_id = ?
-                AND (?::boolean OR is_active = TRUE)`
+                AND (?::boolean OR status = 'active')`
           )
-          .bind(params.organizationId, params.projectId, params.includeInactive ?? false)
+          .bind(params.organizationId, params.includeArchived ?? false)
           .first<{ total: number }>(),
       ]);
 

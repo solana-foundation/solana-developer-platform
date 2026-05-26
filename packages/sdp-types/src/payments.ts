@@ -1,4 +1,5 @@
 import type { CustodyWalletAggregate, CustodyWalletTokenBalance } from "./custody";
+import type { PrivateTransferRequest } from "./private-transfers";
 import type { RampProviderId } from "./provider-access";
 
 export interface PaymentsDashboardWallet {
@@ -56,6 +57,21 @@ export interface PaymentTransferSummary {
   memo?: string;
   createdAt?: string;
   updatedAt?: string;
+}
+
+export interface PaymentTransferRequest {
+  projectId?: string;
+  source: string;
+  destination: string;
+  token: string;
+  amount: string;
+  memo?: string;
+
+  /**
+   * Optional private-transfer routing. When omitted, the transfer should use
+   * the normal public on-chain transfer path.
+   */
+  privateTransfer?: PrivateTransferRequest;
 }
 
 export interface PaymentTransferEnvelope {
