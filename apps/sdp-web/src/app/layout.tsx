@@ -4,7 +4,6 @@ import { headers } from "next/headers";
 import { Toaster } from "sonner";
 import { shouldLoadClerkForPath } from "@/lib/auth-entry";
 import "./globals.css";
-import Script from "next/script";
 
 const ALLOWED_SATELLITE_REDIRECT_ORIGINS = [
   "https://ecosystem.solana.com",
