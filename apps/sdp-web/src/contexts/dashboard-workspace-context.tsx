@@ -2,7 +2,7 @@
 
 import { useAuth } from "@clerk/nextjs";
 import type { SdpEnvironment } from "@sdp/types";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   createContext,
   type ReactNode,
@@ -10,6 +10,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import { SWRConfig } from "swr";
@@ -91,6 +92,7 @@ export function DashboardWorkspaceProvider({
 }: DashboardWorkspaceProviderProps) {
   const auth = useAuth();
   const router = useRouter();
+  const pathname = usePathname();
   const { replaceSearchParams, searchParams } = useDashboardUrlState();
   const [isSidebarOpen, setSidebarOpenState] = useState(initialSidebarOpen);
   const [sdpEnvironment, setSdpEnvironment] = useState<SdpEnvironment>("sandbox");
@@ -130,6 +132,15 @@ export function DashboardWorkspaceProvider({
 
     router.refresh();
   }, [auth.isLoaded, liveDashboardCacheScopeKey, router, serverDashboardCacheScopeKey]);
+
+  const previousPathnameRef = useRef(pathname);
+  useEffect(() => {
+    if (previousPathnameRef.current === pathname) return;
+    previousPathnameRef.current = pathname;
+    if (searchParams.has("tab")) {
+      replaceSearchParams({ tab: null });
+    }
+  }, [pathname, searchParams, replaceSearchParams]);
 
   const issuanceTab: IssuanceWorkspaceTab = useMemo(() => {
     const tab = searchParams.get("tab");
