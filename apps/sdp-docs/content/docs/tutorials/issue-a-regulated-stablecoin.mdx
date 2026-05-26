@@ -33,7 +33,7 @@ An institutional issuer in the US pipeline configures [Anchorage Digital Bank](h
 
 ### 3. API keys: the two-key institutional pattern
 
-The hardest cliff in setup is that the dashboard's "Create API key" dialog only mints **org-scoped** keys. The issuance API requires **project-scoped** keys. The dashboard does not currently expose a project picker or a project-management page; the workaround is a short sequence of API calls.
+The hardest cliff in setup is that the dashboard's "Create API key" dialog only mints **org-scoped** keys. The issuance API requires **project-scoped** keys. Project management in the dashboard is on the SDP roadmap; until it lands, the workaround is a short sequence of API calls.
 
 The bootstrap path:
 
@@ -345,7 +345,7 @@ The `mintAuthority`, `freezeAuthority`, and `metadataAuthority` all resolve to t
 ### 4. When deploy fails opaquely, fall back to /prepare
 
 <Callout type="warn">
-Deploy can return a bare `500 INTERNAL_ERROR` with no `details` field. The most common cause on devnet is an unfunded custody wallet (Section 2 covered the airdrop fix), but any downstream Solana RPC failure surfaces this way. The diagnostic move is to call the `/prepare` variant of the same endpoint.
+Deploy can return a bare `500 INTERNAL_ERROR` with no `details` field. The most common cause on devnet is an unfunded custody wallet (Section 2 covered the airdrop fix), but any downstream Solana RPC failure surfaces this way. The SDP team is closing this gap so deploy will return the underlying Solana error directly; until that ships, the diagnostic move is to call the `/prepare` variant of the same endpoint.
 </Callout>
 
 
@@ -402,7 +402,7 @@ With the token deployed, Section 5 configures the compliance controls the GENIUS
 
 Every other section of this tutorial is engineering. This one is the regulatory backbone.
 
-Section 4(a)(5) of the GENIUS Act treats a permitted payment stablecoin issuer as a financial institution for purposes of the Bank Secrecy Act. That single sentence is what makes everything below load-bearing. The Act also requires you to have ["the technological capability to comply with all lawful orders to seize, freeze, burn or prevent the transfer of outstanding stablecoins."](https://www.skadden.com/insights/publications/2025/07/us-establishes-first-federal-regulatory-framework) The endpoints in this section map directly onto that statutory phrase, in the order you'll encounter them: screening first, freeze for per-account blocks, seize for compliance recovery, force-burn as the final remedy.
+Section 4(a)(5) of the GENIUS Act treats a permitted payment stablecoin issuer as a financial institution for purposes of the Bank Secrecy Act. That single sentence is what makes everything below load-bearing. The Act also requires you to have "[the technological capability to comply with all lawful orders to seize, freeze, burn or prevent the transfer of outstanding stablecoins](https://www.skadden.com/insights/publications/2025/07/us-establishes-first-federal-regulatory-framework)." The endpoints in this section map directly onto that statutory phrase, in the order you'll encounter them: screening first, freeze for per-account blocks, seize for compliance recovery, force-burn as the final remedy.
 
 ### Screen before you move
 
