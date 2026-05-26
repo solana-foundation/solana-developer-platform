@@ -3,6 +3,7 @@ export * from "./api-keys";
 export * from "./auth";
 export * from "./base";
 export * from "./compliance";
+export * from "./counterparties";
 export * from "./custody";
 export * from "./health";
 export * from "./issuance";
