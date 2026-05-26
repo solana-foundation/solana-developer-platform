@@ -42,6 +42,7 @@ import {
 } from "@/services/api-key-scope.service";
 import {
   assertPaymentProjectScope,
+  type OutboundPaymentOperation,
   resolveOutboundPaymentOperation,
 } from "@/services/payment-operation.service";
 import {
@@ -513,6 +514,53 @@ function mapMagicBlockPreparedTransfer(
   };
 }
 
+async function prepareMagicBlockPrivateTransferForOperation(params: {
+  c: AppContext;
+  operation: OutboundPaymentOperation;
+  privateTransfer: PrivateTransferRequest;
+  memo?: string;
+}): Promise<{
+  prepared: PreparedTransferPayload;
+  metadata: PreparedPrivateTransferMetadata;
+}> {
+  const { c, operation, privateTransfer, memo } = params;
+
+  if (operation.token === "SOL") {
+    throw new AppError(
+      "BAD_REQUEST",
+      "MagicBlock private transfers support SPL tokens only. Provide a token mint address."
+    );
+  }
+
+  const mintAddress = assertValidAddress(operation.token, "token");
+  const rpc = solanaRpc.createRpc(c.env);
+  await resolveMintTokenProgram(rpc, mintAddress);
+  const decimals = await resolveMintDecimals(rpc, mintAddress);
+  const amountBaseUnits = parseDecimalAmount(operation.amount, decimals);
+
+  if (amountBaseUnits <= 0n) {
+    throw new AppError("BAD_REQUEST", "Transfer amount must be greater than zero");
+  }
+
+  if (amountBaseUnits > MAX_SAFE_BASE_UNITS) {
+    throw new AppError(
+      "BAD_REQUEST",
+      "MagicBlock transfer amount is too large to send as a JSON integer."
+    );
+  }
+
+  const magicBlockPrepared = await prepareMagicBlockPrivateTransfer(c.env, {
+    from: operation.sourceAddress,
+    to: operation.destinationAddress,
+    mint: mintAddress,
+    amount: Number(amountBaseUnits),
+    memo,
+    options: buildMagicBlockProviderTransferOptions(privateTransfer.magicBlock),
+  });
+
+  return mapMagicBlockPreparedTransfer(magicBlockPrepared, privateTransfer.magicBlock);
+}
+
 function createMagicBlockSubmissionRpc(
   c: AppContext,
   sendTo: MagicBlockUnsignedTransaction["sendTo"]
@@ -740,39 +788,12 @@ export async function prepareTransfer(c: AppContext) {
   const privateTransfer = parsed.data.privateTransfer as PrivateTransferRequest | undefined;
 
   if (privateTransfer) {
-    if (operation.token === "SOL") {
-      throw new AppError(
-        "BAD_REQUEST",
-        "MagicBlock private transfers support SPL tokens only. Provide a token mint address."
-      );
-    }
-
-    const mintAddress = assertValidAddress(operation.token, "token");
-    const rpc = solanaRpc.createRpc(c.env);
-    await resolveMintTokenProgram(rpc, mintAddress);
-    const decimals = await resolveMintDecimals(rpc, mintAddress);
-    const amountBaseUnits = parseDecimalAmount(operation.amount, decimals);
-
-    if (amountBaseUnits <= 0n) {
-      throw new AppError("BAD_REQUEST", "Transfer amount must be greater than zero");
-    }
-
-    if (amountBaseUnits > MAX_SAFE_BASE_UNITS) {
-      throw new AppError(
-        "BAD_REQUEST",
-        "MagicBlock transfer amount is too large to send as a JSON integer."
-      );
-    }
-
-    const magicBlockPrepared = await prepareMagicBlockPrivateTransfer(c.env, {
-      from: operation.sourceAddress,
-      to: operation.destinationAddress,
-      mint: mintAddress,
-      amount: Number(amountBaseUnits),
+    const mapped = await prepareMagicBlockPrivateTransferForOperation({
+      c,
+      operation,
+      privateTransfer,
       memo: parsed.data.memo,
-      options: buildMagicBlockProviderTransferOptions(privateTransfer.magicBlock),
     });
-    const mapped = mapMagicBlockPreparedTransfer(magicBlockPrepared, privateTransfer.magicBlock);
     prepared = mapped.prepared;
     privateTransferMetadata = mapped.metadata;
     transferType = "transfer_confidential";
@@ -1457,39 +1478,12 @@ export async function createTransfer(c: AppContext) {
 
   const privateTransfer = parsed.data.privateTransfer as PrivateTransferRequest | undefined;
   if (privateTransfer) {
-    if (operation.token === "SOL") {
-      throw new AppError(
-        "BAD_REQUEST",
-        "MagicBlock private transfers support SPL tokens only. Provide a token mint address."
-      );
-    }
-
-    const mintAddress = assertValidAddress(operation.token, "token");
-    const rpc = solanaRpc.createRpc(c.env);
-    await resolveMintTokenProgram(rpc, mintAddress);
-    const decimals = await resolveMintDecimals(rpc, mintAddress);
-    const amountBaseUnits = parseDecimalAmount(operation.amount, decimals);
-
-    if (amountBaseUnits <= 0n) {
-      throw new AppError("BAD_REQUEST", "Transfer amount must be greater than zero");
-    }
-
-    if (amountBaseUnits > MAX_SAFE_BASE_UNITS) {
-      throw new AppError(
-        "BAD_REQUEST",
-        "MagicBlock transfer amount is too large to send as a JSON integer."
-      );
-    }
-
-    const magicBlockPrepared = await prepareMagicBlockPrivateTransfer(c.env, {
-      from: operation.sourceAddress,
-      to: operation.destinationAddress,
-      mint: mintAddress,
-      amount: Number(amountBaseUnits),
+    const mapped = await prepareMagicBlockPrivateTransferForOperation({
+      c,
+      operation,
+      privateTransfer,
       memo: parsed.data.memo,
-      options: buildMagicBlockProviderTransferOptions(privateTransfer.magicBlock),
     });
-    const mapped = mapMagicBlockPreparedTransfer(magicBlockPrepared, privateTransfer.magicBlock);
     const transferType: TransferType = "transfer_confidential";
     const transfer = await createTransferRecord(c, {
       organizationId: scope.auth.organizationId,
