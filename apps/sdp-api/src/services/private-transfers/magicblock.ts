@@ -153,9 +153,15 @@ function magicBlockProviderError(status: number, payload: unknown): AppError {
   );
 }
 
+function invalidMagicBlockTransferResponse(): AppError {
+  return providerUnavailable("MagicBlock transfer response payload is invalid.", {
+    provider: "magicblock",
+  });
+}
+
 function parseUnsignedTransaction(payload: unknown): MagicBlockUnsignedTransaction {
   if (typeof payload !== "object" || payload === null) {
-    throw new AppError("BAD_REQUEST", "MagicBlock transfer response payload is invalid.");
+    throw invalidMagicBlockTransferResponse();
   }
 
   const record = payload as Partial<MagicBlockUnsignedTransaction>;
@@ -173,7 +179,7 @@ function parseUnsignedTransaction(payload: unknown): MagicBlockUnsignedTransacti
     !Array.isArray(record.requiredSigners) ||
     !record.requiredSigners.every((signer) => typeof signer === "string")
   ) {
-    throw new AppError("BAD_REQUEST", "MagicBlock transfer response payload is invalid.");
+    throw invalidMagicBlockTransferResponse();
   }
 
   return {

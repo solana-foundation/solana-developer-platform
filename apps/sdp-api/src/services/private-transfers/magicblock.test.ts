@@ -83,6 +83,24 @@ describe("MagicBlock private transfers", () => {
     });
   });
 
+  it("maps malformed MagicBlock success responses to PROVIDER_UNAVAILABLE", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify({ transactionBase64: "not enough fields" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })
+    );
+
+    await expect(prepareTransfer()).rejects.toMatchObject({
+      code: "PROVIDER_UNAVAILABLE",
+      statusCode: 503,
+      message: "MagicBlock transfer response payload is invalid.",
+      details: {
+        provider: "magicblock",
+      },
+    });
+  });
+
   it("maps MagicBlock timeouts to PROVIDER_UNAVAILABLE", async () => {
     vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(
       new DOMException("The operation timed out.", "TimeoutError")
