@@ -25,7 +25,13 @@ export default async function CounterpartyPage() {
       trace.step("fetch_active_api_keys", () => fetchActiveApiKeys(apiClient.request)),
     ]);
 
-    trace.log({ ok: true, counterpartiesResult, apiKeysResult });
+    trace.log({
+      ok: true,
+      counterpartiesOk: counterpartiesResult.ok,
+      counterpartiesCount: counterpartiesResult.data.length,
+      apiKeysOk: apiKeysResult.ok,
+      apiKeysCount: apiKeysResult.data?.length ?? 0,
+    });
 
     return (
       <div className="flex h-full min-h-0 w-full flex-col">
