@@ -154,6 +154,11 @@ export interface Env {
   KORA_API_KEY?: string;
   KORA_TIMEOUT_MS?: string;
 
+  // MagicBlock private payments configuration
+  MAGICBLOCK_PRIVATE_PAYMENTS_API_BASE_URL?: string;
+  MAGICBLOCK_PRIVATE_PAYMENTS_AUTH_TOKEN?: string;
+  MAGICBLOCK_PRIVATE_PAYMENTS_EPHEMERAL_RPC_URL?: string;
+
   // Compliance providers
   RANGE_API_KEY?: string;
   RANGE_API_BASE_URL?: string;

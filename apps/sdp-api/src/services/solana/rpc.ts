@@ -217,6 +217,7 @@ export async function sendTransaction(
   const signature = await rpc
     .sendTransaction(encodedTx, {
       skipPreflight: options?.skipPreflight ?? false,
+      encoding: "base64",
       maxRetries: options?.maxRetries,
     })
     .send();
