@@ -1,0 +1,154 @@
+---
+title: Basic payment
+description: Send a single token transfer with SDP, using either Execute or Prepare mode.
+---
+
+SDP handles token transfers through its payments API. A basic payment moves tokens **from a custody wallet you control to any Solana wallet address**. The `source` field on the request is an SDP custody wallet ID (`wal_…`), resolved server-side from the caller's wallet list; `destination` is the recipient's on-chain **wallet (owner) address** — for SPL transfers, SDP derives the associated token account (ATA) from this address and creates it if needed, so pass the wallet pubkey, **not** a token-account address.
+
+Transfers are available through the Payments dashboard and the API.
+
+## Prerequisites
+
+- A deployed token with minted supply
+- A custody wallet to use as the `source`. Execute mode additionally requires the wallet to have a custody signer configured so SDP can sign and submit; Prepare mode doesn't (you'll sign client-side).
+- An API key with both `payments:write` and `wallets:read` permissions, where the key's `payments:write` scope includes the source wallet — both endpoints (`POST /v1/payments/transfers` and `POST /v1/payments/transfers/prepare`) are gated by that pair at the route layer, and the source wallet is then re-checked against the key's `payments:write` wallet scope.
+
+## Execute mode
+
+<Tabs items={["curl", "TypeScript", "Java"]}>
+<Tab value="curl">
+```bash
+curl -X POST https://api.solana.com/v1/payments/transfers \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "source": "wal_example",
+    "destination": "7xKXz...9fGh",
+    "token": "9aBCd...4eEf",
+    "amount": "100.00",
+    "memo": "Payment for invoice #1234"
+  }'
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript
+const response = await fetch(
+  "https://api.solana.com/v1/payments/transfers",
+  {
+    method: "POST",
+    headers: {
+      "Authorization": "Bearer sk_test_...",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      source: "wal_example",
+      destination: "7xKXz...9fGh",
+      token: "9aBCd...4eEf",
+      amount: "100.00",
+      memo: "Payment for invoice #1234",
+    }),
+  }
+);
+const { data } = await response.json();
+// data.transfer.id, data.transfer.status — transfer record under the `transfer` envelope key
+```
+</Tab>
+<Tab value="Java">
+```java
+HttpRequest request = HttpRequest.newBuilder()
+    .uri(URI.create("https://api.solana.com/v1/payments/transfers"))
+    .header("Authorization", "Bearer sk_test_...")
+    .header("Content-Type", "application/json")
+    .POST(HttpRequest.BodyPublishers.ofString("""
+        {
+          "source": "wal_example",
+          "destination": "7xKXz...9fGh",
+          "token": "9aBCd...4eEf",
+          "amount": "100.00",
+          "memo": "Payment for invoice #1234"
+        }"""))
+    .build();
+```
+</Tab>
+</Tabs>
+
+## Prepare mode
+
+<Tabs items={["curl", "TypeScript", "Java"]}>
+<Tab value="curl">
+```bash
+curl -X POST https://api.solana.com/v1/payments/transfers/prepare \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "source": "wal_example",
+    "destination": "7xKXz...9fGh",
+    "token": "9aBCd...4eEf",
+    "amount": "100.00",
+    "memo": "Payment for invoice #1234",
+    "options": { "simulate": true }
+  }'
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript
+const response = await fetch(
+  "https://api.solana.com/v1/payments/transfers/prepare",
+  {
+    method: "POST",
+    headers: {
+      "Authorization": "Bearer sk_test_...",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      source: "wal_example",
+      destination: "7xKXz...9fGh",
+      token: "9aBCd...4eEf",
+      amount: "100.00",
+      memo: "Payment for invoice #1234",
+      options: { simulate: true },
+    }),
+  }
+);
+const { data } = await response.json();
+// data.preparedTransaction.serialized — sign and submit
+```
+</Tab>
+<Tab value="Java">
+```java
+HttpRequest request = HttpRequest.newBuilder()
+    .uri(URI.create("https://api.solana.com/v1/payments/transfers/prepare"))
+    .header("Authorization", "Bearer sk_test_...")
+    .header("Content-Type", "application/json")
+    .POST(HttpRequest.BodyPublishers.ofString("""
+        {
+          "source": "wal_example",
+          "destination": "7xKXz...9fGh",
+          "token": "9aBCd...4eEf",
+          "amount": "100.00",
+          "memo": "Payment for invoice #1234",
+          "options": { "simulate": true }
+        }"""))
+    .build();
+```
+</Tab>
+</Tabs>
+
+See [Prepare vs Execute](/docs/guides/prepare-vs-execute) for guidance on which mode to use.
+
+## Deduplication
+
+Unlike the issuance endpoints, payments transfer endpoints do not currently honor an `Idempotency-Key` header — retrying a failed transfer request will produce a new `Transfer` record. To guarantee at-most-once execution from the client side:
+
+1. Persist the SDP `Transfer.id` returned by the first successful response **before** retrying. On retry, skip submission if you already have a transfer ID for that logical payment.
+2. Rely on the on-chain `signature` (UNIQUE across SDP's transfers table) as the cross-source dedup key **once it is populated** on the record. `signature` is filled in when the transaction is submitted to the network, which can lag behind the initial `processing` status — treat its presence (not the `status` value) as the trigger for signature-based dedup.
+
+See [Payouts and disbursements](/docs/payments/send-payouts#dedup-and-retries) for the same pattern applied to batched outbound flows.
+
+## Related
+
+- [Payment with memo](/docs/payments/send-payment-with-memo) — using the `memo` field to carry order references
+- [Payouts and disbursements](/docs/payments/send-payouts) — batched outbound flows
+- [Mint and Burn](/docs/guides/mint-and-burn) — create or destroy token supply
+- [Manage Allowlists](/docs/guides/manage-allowlists) — define approved destinations for allowlist-enabled issuance flows
+- [Freeze and Compliance](/docs/guides/freeze-and-compliance) — halt transfers for compliance

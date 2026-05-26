@@ -1,0 +1,147 @@
+---
+title: Payouts and disbursements
+description: Run batched outbound transfers, deduplicate retries, and reconcile a payout batch with SDP.
+---
+
+A payout run is a batch of outbound transfers — marketplace seller payouts, payroll, affiliate disbursements, royalty distributions. SDP does not expose a "batch" object; you call `POST /v1/payments/transfers` once per recipient, tag each transfer with a shared batch identifier, and use `GET /v1/payments/transfers?direction=outbound` to reconcile the run.
+
+This page covers the recommended pattern: how to structure the loop, how to deduplicate on retries, and how to confirm every recipient was paid.
+
+## Designing a payout run
+
+A typical pattern:
+
+1. **Resolve recipients** in your application — list (or stream) the rows to be paid, with destination address and amount per row.
+2. **Pick a batch identifier** you control (`payout_2026-05-14_marketplace_sellers`).
+3. **Iterate** — for each recipient, call `POST /v1/payments/transfers` with the destination, amount, token, and a memo that encodes the batch ID and a per-row identifier (`payout_2026-05-14_marketplace_sellers/row_4837`).
+4. **Capture** the returned `Transfer.id` and `Transfer.status`. Persist the SDP transfer ID alongside the recipient row so you can re-poll status later.
+5. **Reconcile** — once the batch is fully submitted, run `GET /v1/payments/transfers?direction=outbound&from=…&to=…` and confirm every row in your application has a matching `finalized` transfer.
+
+Send transfers sequentially or in modest concurrency (4–8 in flight); high concurrency increases the chance of priority-fee contention and blockhash expiry without much throughput gain.
+
+## Dedup and retries
+
+Two layers protect you against double-spends if a worker dies mid-run:
+
+1. **Application-level keys** — persist the SDP transfer ID for each recipient row *before* moving to the next row. On retry, skip rows that already have an associated `Transfer.id`. This is the dedup mechanism you should rely on most.
+2. **Transfer-record uniqueness** — the on-chain `signature` column is `UNIQUE` across the SDP `payment_transfers` table. Each transfer request inserts its own row first and the signature is recorded once the transaction is built/submitted, so a duplicate signature is blocked at the DB layer (the second write errors out) rather than silently merged. Use this as a backstop integrity check, not as your primary dedup — the application-level keys above are what you actually rely on.
+
+If your retry path replays a transfer with identical inputs but a fresh request, SDP builds a new transaction with a new recent blockhash, which means a new signature. The application-level key — persisted recipient → transfer ID mapping — is what prevents the recipient from being paid twice in that case.
+
+<Tabs items={["curl", "TypeScript", "Java"]}>
+<Tab value="curl">
+```bash
+curl -X POST https://api.solana.com/v1/payments/transfers \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "source": "wal_example",
+    "destination": "7xKXz...9fGh",
+    "token": "9aBCd...4eEf",
+    "amount": "150.00",
+    "memo": "payout_2026-05-14_marketplace_sellers/row_4837"
+  }'
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript
+async function payoutRecipient(row: PayoutRow): Promise<string> {
+  if (row.transferId) return row.transferId; // already submitted
+
+  const response = await fetch(
+    "https://api.solana.com/v1/payments/transfers",
+    {
+      method: "POST",
+      headers: {
+        "Authorization": "Bearer sk_test_...",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        source: row.sourceWallet,
+        destination: row.destination,
+        token: row.token,
+        amount: row.amount,
+        memo: `${row.batchId}/row_${row.id}`,
+      }),
+    }
+  );
+
+  const { data } = await response.json();
+  // The transfer record is under data.transfer (standard SDP success envelope).
+  await row.persistTransferId(data.transfer.id); // persist BEFORE returning
+  return data.transfer.id;
+}
+```
+</Tab>
+<Tab value="Java">
+```java
+HttpRequest request = HttpRequest.newBuilder()
+    .uri(URI.create("https://api.solana.com/v1/payments/transfers"))
+    .header("Authorization", "Bearer sk_test_...")
+    .header("Content-Type", "application/json")
+    .POST(HttpRequest.BodyPublishers.ofString("""
+        {
+          "source": "%s",
+          "destination": "%s",
+          "token": "%s",
+          "amount": "%s",
+          "memo": "%s/row_%s"
+        }""".formatted(sourceWallet, destination, token, amount, batchId, rowId)))
+    .build();
+```
+</Tab>
+</Tabs>
+
+## Reconciling a run
+
+After the loop finishes, list all outbound transfers in the run's time window and tally against your recipient table:
+
+<Tabs items={["curl", "TypeScript"]}>
+<Tab value="curl">
+```bash
+curl "https://api.solana.com/v1/payments/transfers?direction=outbound&from=2026-05-14T00:00:00Z&to=2026-05-14T23:59:59Z&pageSize=100" \
+  -H "Authorization: Bearer sk_test_..."
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript
+async function* listOutboundTransfers(from: string, to: string) {
+  let page = 1;
+  while (true) {
+    const url = new URL("https://api.solana.com/v1/payments/transfers");
+    url.searchParams.set("direction", "outbound");
+    url.searchParams.set("from", from);
+    url.searchParams.set("to", to);
+    url.searchParams.set("page", String(page));
+    url.searchParams.set("pageSize", "100");
+
+    const res = await fetch(url, {
+      headers: { Authorization: "Bearer sk_test_..." },
+    });
+    const { data, meta } = await res.json();
+    yield* data;
+    if (!meta.hasMore) return;
+    page += 1;
+  }
+}
+```
+</Tab>
+</Tabs>
+
+Filter the returned transfers on `memo.startsWith(batchId)` (or whatever convention you chose) to scope to the batch. Cross-reference each recipient row by SDP `Transfer.id`.
+
+## Failure modes
+
+Per-transfer outcomes you should expect to handle:
+
+- **`failed`** — the transaction was built and submitted but the network rejected it (insufficient funds, frozen account, expired blockhash). The `error` field on the transfer record explains what reached the chain. The recipient was not paid; you can retry by submitting a new transfer.
+- **`pending` past the expected confirmation window** — usually a backend or RPC hiccup. Re-poll with `GET /v1/payments/transfers/{id}` rather than re-submitting; you only want a new transfer if `status` settles to `failed`.
+- **Mid-run worker crash** — application-level keys (persisted recipient → transfer ID) are how you resume safely. Skip rows that already have a `Transfer.id` and resume the loop.
+- **Source wallet runs out of SOL for fees** — submissions start failing with fee-related errors. If SDP is configured to sponsor fees this won't happen; otherwise top up the source wallet's SOL balance before continuing.
+
+## Related
+
+- [Basic payment](/docs/payments/send-basic-payment) — the underlying transfer endpoint.
+- [Payment with memo](/docs/payments/send-payment-with-memo) — the memo field used above to tag a batch.
+- [Indexing and reconciliation](/docs/payments/accept-indexing) — the same list endpoint, used inbound.
+- [Wallet policies](/docs/payments/wallet-policies) — destination allowlist and daily-limit guardrails for payout wallets.

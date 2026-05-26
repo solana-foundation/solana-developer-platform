@@ -1,0 +1,125 @@
+---
+title: Wallet policies
+description: Destination allowlist and transfer limits per custody wallet.
+---
+
+Wallet policies constrain how a custody wallet can move funds. You set a destination allowlist (only these addresses can receive transfers from this wallet) and transfer limits (a per-transfer cap and a UTC-calendar-day cap). Policies are managed via `GET` and `PUT` on `/v1/payments/wallets/{walletId}/policies` and enforced at transfer time.
+
+Use policies for treasury wallets, automated payout wallets, or any custody wallet where unbounded outbound flow would be a liability.
+
+## Reading a wallet's policies
+
+<Tabs items={["curl", "TypeScript"]}>
+<Tab value="curl">
+```bash
+curl https://api.solana.com/v1/payments/wallets/wal_abc123/policies \
+  -H "Authorization: Bearer sk_test_..."
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript
+const response = await fetch(
+  "https://api.solana.com/v1/payments/wallets/wal_abc123/policies",
+  { headers: { Authorization: "Bearer sk_test_..." } }
+);
+const { data } = await response.json();
+// data.policy.destinationAllowlist: string[]
+// data.policy.maxTransferAmount?: string
+// data.policy.maxDailyAmount?: string
+```
+</Tab>
+</Tabs>
+
+The payload is wrapped in the standard `data` / `meta` envelope, with the policy under a `policy` key:
+
+```json
+{
+  "data": {
+    "policy": {
+      "walletId": "wal_abc123",
+      "destinationAllowlist": ["7xKXz...9fGh", "5aBCd...2eFg"],
+      "maxTransferAmount": "100.00",
+      "maxDailyAmount": "1000.00",
+      "createdAt": "2026-05-14T08:00:00Z",
+      "updatedAt": "2026-05-14T10:15:00Z"
+    }
+  },
+  "meta": { "requestId": "req_...", "timestamp": "2026-05-18T00:00:00.000Z" }
+}
+```
+
+Amount fields are **UI-unit decimal strings** (`"100.00"` means 100 tokens, regardless of the mint's decimals — matching the transfer-request convention). The configured value is a **single threshold**, but enforcement is **per token**: `maxDailyAmount` sums each token's outbound transfers separately within the day window, so a wallet with `maxDailyAmount: "1000"` can send up to 1000 USDC *and* 1000 SOL in the same UTC day — there is no aggregate cap across mints. If you need different per-token thresholds (e.g., 10,000 USDC daily but 50 SOL daily), partition into separate wallets.
+
+## Destination allowlist
+
+The allowlist is a list of on-chain destination addresses (32-44 character base-58 Solana pubkeys). When set, `POST /v1/payments/transfers` rejects any destination not in the list.
+
+- Maximum entries: **500 addresses per wallet**.
+- Each entry is a single on-chain address — no patterns, ranges, or address books.
+- Empty allowlist (`[]`) means no destination restriction. To enable enforcement, populate at least one entry.
+
+The allowlist exists to bound risk on automated wallets (a hot wallet that should only ever pay a known set of counterparties) and to enforce treasury controls (only the corporate cold-storage address can drain the operating wallet).
+
+## Transfer limits
+
+Two limits, both optional:
+
+- **`maxTransferAmount`** — per-transfer cap. Any single `POST /v1/payments/transfers` exceeding this amount is rejected. Compared against the request's `amount` directly, so it is naturally per-token.
+- **`maxDailyAmount`** — UTC-calendar-day cap, **enforced per token**. The day window resets at 00:00 UTC; the projected total is the sum of that wallet's outbound transfers for the **same token** in the current day (`pending`/`processing`/`confirmed`/`finalized`) plus the new request's `amount`. Different tokens are summed independently — see the per-token note under [Reading a wallet's policies](#reading-a-wallets-policies).
+
+Set both for defense in depth: a per-transaction cap that catches obvious mistakes, plus a daily cap that bounds blast radius if many small transfers are submitted in a coordinated attack.
+
+## Updating policies
+
+`PUT /v1/payments/wallets/{walletId}/policies` has **full-replace** semantics — the request body becomes the new policy state in its entirety. To remove the allowlist, send `destinationAllowlist: []`. To drop a transfer limit, omit the field on the next PUT.
+
+<Tabs items={["curl", "TypeScript"]}>
+<Tab value="curl">
+```bash
+curl -X PUT https://api.solana.com/v1/payments/wallets/wal_abc123/policies \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "destinationAllowlist": [
+      "7xKXz...9fGh",
+      "5aBCd...2eFg"
+    ],
+    "maxTransferAmount": "100.00",
+    "maxDailyAmount": "1000.00"
+  }'
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript
+await fetch(
+  "https://api.solana.com/v1/payments/wallets/wal_abc123/policies",
+  {
+    method: "PUT",
+    headers: {
+      "Authorization": "Bearer sk_test_...",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      destinationAllowlist: ["7xKXz...9fGh", "5aBCd...2eFg"],
+      maxTransferAmount: "100.00",
+      maxDailyAmount: "1000.00",
+    }),
+  }
+);
+```
+</Tab>
+</Tabs>
+
+Because PUT is full-replace, treat policy edits like ordinary form submissions: read the current state, present it for editing, and PUT the complete updated object. Don't construct partial patches.
+
+## Interaction with compliance
+
+Wallet policies enforce **structural** constraints (where funds can go, how much, how fast). They do not replace compliance screening. If your organization has compliance screening enabled, screening happens on the destination address as a separate check, in addition to the allowlist match. A transfer can be rejected by either layer; both must pass to reach the network.
+
+See the [Compliance API reference](/docs/reference/api/compliance) for address-screening flows that complement policies.
+
+## Related
+
+- [Payouts and disbursements](/docs/payments/send-payouts) — running an outbound batch from a policy-constrained wallet.
+- [Basic payment](/docs/payments/send-basic-payment) — the underlying transfer endpoint subject to policy enforcement.
+- [Wallet balances](/docs/payments/wallet-balances) — current balance, useful to size transfer limits.

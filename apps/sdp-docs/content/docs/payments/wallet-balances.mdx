@@ -1,0 +1,115 @@
+---
+title: Wallet balances
+description: Per-wallet token balances with optional USD valuation via SDP.
+---
+
+`GET /v1/payments/wallets/{walletId}/balances` returns the wallet's native **SOL** balance plus every **SPL token** balance held by a custody wallet — raw amount, human-readable amount, decimals, and optional USD valuation when a price source is configured. SOL is always prepended as the first entry and is represented with `token: "SOL"` and `mint: "So11111111111111111111111111111111111111112"`.
+
+## Request
+
+<Tabs items={["curl", "TypeScript", "Java"]}>
+<Tab value="curl">
+```bash
+curl https://api.solana.com/v1/payments/wallets/wal_abc123/balances \
+  -H "Authorization: Bearer sk_test_..."
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript
+const response = await fetch(
+  "https://api.solana.com/v1/payments/wallets/wal_abc123/balances",
+  { headers: { Authorization: "Bearer sk_test_..." } }
+);
+const { data } = await response.json();
+// data.walletBalances.balances: TokenBalance[]
+```
+</Tab>
+<Tab value="Java">
+```java
+HttpRequest request = HttpRequest.newBuilder()
+    .uri(URI.create("https://api.solana.com/v1/payments/wallets/wal_abc123/balances"))
+    .header("Authorization", "Bearer sk_test_...")
+    .GET()
+    .build();
+```
+</Tab>
+</Tabs>
+
+## Response shape
+
+The payload is wrapped in the standard `data` / `meta` envelope, with the balances under a `walletBalances` key:
+
+```json
+{
+  "data": {
+    "walletBalances": {
+      "walletId": "wal_abc123",
+      "address": "3xYZa...2aBc",
+      "balances": [
+        {
+          "token": "SOL",
+          "mint": "So11111111111111111111111111111111111111112",
+          "amount": "2500000000",
+          "uiAmount": "2.5",
+          "decimals": 9
+        },
+        {
+          "token": "USDC",
+          "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "amount": "1500000000",
+          "uiAmount": "1500.00",
+          "decimals": 6,
+          "usdPrice": 1.0,
+          "usdValue": 1500.0
+        }
+      ]
+    }
+  },
+  "meta": { "requestId": "req_...", "timestamp": "2026-05-18T00:00:00.000Z" }
+}
+```
+
+Per-balance fields:
+
+| Field | Notes |
+| --- | --- |
+| `token` | Token symbol if known, otherwise the on-chain mint. |
+| `mint` | On-chain mint address. |
+| `amount` | Raw amount in the smallest unit (string to preserve precision). |
+| `uiAmount` | Human-readable decimal string — `amount / 10^decimals`. |
+| `decimals` | Token's decimal count. |
+| `usdPrice` | Per-token USD price; omitted when no pricing data is available. |
+| `usdValue` | Total USD value (= `usdPrice * uiAmount`); omitted when pricing is unavailable. |
+| `confidential` | Reserved for confidential transfer balances; absent for standard balances. |
+
+## Use cases
+
+- **Account dashboards** — display the contents of a custody wallet to its operator.
+- **Pre-transfer balance checks** — validate that a wallet has enough of a specific token before kicking off a payout batch.
+- **Treasury accounting** — periodic snapshots into an internal ledger.
+
+## Pricing freshness
+
+When USD valuation is populated, the price comes from SDP's configured price source and reflects the most recent quote available. The cadence and source depend on deployment configuration — do not rely on `usdValue` for downstream balance-sheet decisions without confirming the price source's freshness with your operations team. When in doubt, treat `amount` / `uiAmount` as authoritative and convert with your own price feed.
+
+If no price source is configured, the `usdPrice` and `usdValue` fields are simply absent rather than zero — falling back to "I don't know" rather than "$0.00" so downstream consumers can decide how to handle the gap.
+
+## Comparison to on-chain RPC
+
+You can also enumerate SPL token balances by calling `getTokenAccountsByOwner` against a Solana RPC and decoding the returned token-account data. Reasons to use SDP's `balances` endpoint instead:
+
+- **Token resolution** — SDP resolves the mint to a symbol when it knows one; raw RPC returns mints only.
+- **USD pricing** — RPC has no concept of price.
+- **No RPC dependency in your stack** — one fewer external integration when you are already calling SDP.
+
+Reasons to skip SDP and go to RPC directly:
+
+- **Cluster-of-truth** — you want the wallet's state at a specific slot for an audit.
+- **Confidential transfer balances** — full extension support is RPC-side.
+- **Latency-sensitive paths** — RPC is one hop closer to the cluster.
+
+## Related
+
+- [Wallet policies](/docs/payments/wallet-policies) — set transfer caps based on balance bounds.
+- [Payouts and disbursements](/docs/payments/send-payouts) — balance-check before running a batch.
+- [Set Up Wallets](/docs/guides/setup-wallets) — provision the wallets whose balances this endpoint reports.
