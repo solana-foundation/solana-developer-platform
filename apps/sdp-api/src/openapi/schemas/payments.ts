@@ -325,8 +325,9 @@ export const prepareTransferRequestSchema = prepareTransferSchemaBase
       example: "RefY2HwGmCKvJsXJzhRkc7m9D4N6pQ5tT3aB8fE1uV2W",
     }),
     options: prepareTransferOptionsSchema.optional().openapi({
-      description: "Transaction preparation options.",
-      example: { priorityFee: "auto", simulate: true },
+      description:
+        "Transaction preparation options. Simulation is not supported when `privateTransfer` is present.",
+      example: { priorityFee: "auto" },
     }),
     privateTransfer: privateTransferRequestSchema.optional().openapi({
       description:

@@ -1,5 +1,5 @@
 import type { Address } from "@solana/kit";
-import { AppError } from "@/lib/errors";
+import { AppError, type ErrorCode, providerUnavailable } from "@/lib/errors";
 import { getSolanaConfig } from "@/lib/solana";
 import type { Env } from "@/types/env";
 
@@ -130,6 +130,29 @@ function readProviderErrorMessage(payload: unknown, fallback: string): string {
   return typeof message === "string" && message.trim() ? message : fallback;
 }
 
+function classifyMagicBlockErrorStatus(status: number): ErrorCode {
+  if (status === 429) {
+    return "RATE_LIMITED";
+  }
+
+  if (status >= 500) {
+    return "PROVIDER_UNAVAILABLE";
+  }
+
+  return "BAD_REQUEST";
+}
+
+function magicBlockProviderError(status: number, payload: unknown): AppError {
+  return new AppError(
+    classifyMagicBlockErrorStatus(status),
+    readProviderErrorMessage(payload, `MagicBlock request failed with status ${status}`),
+    {
+      provider: "magicblock",
+      providerStatus: status,
+    }
+  );
+}
+
 function parseUnsignedTransaction(payload: unknown): MagicBlockUnsignedTransaction {
   if (typeof payload !== "object" || payload === null) {
     throw new AppError("BAD_REQUEST", "MagicBlock transfer response payload is invalid.");
@@ -191,20 +214,22 @@ export async function prepareMagicBlockPrivateTransfer(
     });
   } catch (error) {
     if (error instanceof DOMException && error.name === "TimeoutError") {
-      throw new AppError("BAD_REQUEST", "MagicBlock request timed out.");
+      throw providerUnavailable("MagicBlock request timed out.", {
+        provider: "magicblock",
+        timeoutMs: MAGICBLOCK_PRIVATE_PAYMENTS_TIMEOUT_MS,
+      });
     }
 
-    throw error;
+    throw providerUnavailable("MagicBlock request failed before receiving a response.", {
+      provider: "magicblock",
+    });
   }
 
   const raw = await response.text();
   const parsed = safeParseJson(raw);
 
   if (!response.ok) {
-    throw new AppError(
-      "BAD_REQUEST",
-      readProviderErrorMessage(parsed, `MagicBlock request failed with status ${response.status}`)
-    );
+    throw magicBlockProviderError(response.status, parsed);
   }
 
   return parseUnsignedTransaction(parsed);
