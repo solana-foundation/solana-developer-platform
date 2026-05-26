@@ -22,13 +22,19 @@ import { buildIdempotencyMetadata } from "./idempotency";
 type AppContext = Context<{ Bindings: Env }>;
 
 /**
- * Sync a destination wallet to the on-chain ABL list with DB-first ordering:
- * insert the DB mirror, then write on-chain. If the on-chain call throws,
- * revoke the DB row before re-throwing so the two layers stay in sync.
+ * Sync a destination wallet to the on-chain ABL list.
  *
- * Returns whether a new entry was created (false when the DB insert lost a
- * race to `ADDRESS_ALREADY_ALLOWLISTED`, in which case we treat the wallet
- * as already-synced and skip the on-chain write).
+ * Uses the on-chain ABL list as the source of truth, since the DB mirror can
+ * lag behind a pending on-chain tx (concurrent requests can see a fresh DB
+ * row before the matching on-chain tx confirms). Steps:
+ *
+ *  1. Check if the wallet is already on-chain. If yes, just ensure the DB
+ *     mirror exists (idempotent) and return — no new on-chain write needed.
+ *  2. Otherwise, run a DB-first / on-chain-second sync: insert the DB row,
+ *     then write on-chain. If the on-chain write fails and we created the DB
+ *     row, roll it back so the two layers stay in sync.
+ *
+ * Returns whether a new wallet entry was created on-chain by this call.
  */
 async function syncDestinationToOnChainAllowlist(opts: {
   tokenService: TokenService;
@@ -40,6 +46,23 @@ async function syncDestinationToOnChainAllowlist(opts: {
   signerAddress: ReturnType<typeof assertValidAddress>;
   addedBy: string;
 }): Promise<boolean> {
+  const listAddress = assertValidAddress(opts.ablListAddress, "ablListAddress");
+
+  if (await opts.mosaic.isWalletOnList(listAddress, opts.destination)) {
+    try {
+      await opts.tokenService.addAllowlistEntry({
+        tokenId: opts.tokenId,
+        address: opts.destinationRaw,
+        addedBy: opts.addedBy,
+      });
+    } catch (error) {
+      if (!(error instanceof Error && error.message === "ADDRESS_ALREADY_ALLOWLISTED")) {
+        throw error;
+      }
+    }
+    return false;
+  }
+
   let createdEntryId: string | null = null;
   try {
     const entry = await opts.tokenService.addAllowlistEntry({
@@ -52,29 +75,34 @@ async function syncDestinationToOnChainAllowlist(opts: {
     if (!(error instanceof Error && error.message === "ADDRESS_ALREADY_ALLOWLISTED")) {
       throw error;
     }
-    return false;
+    // Race: a parallel request inserted the DB row between our on-chain
+    // check above and this insert. We already verified on-chain was empty,
+    // so still attempt the on-chain add — but don't roll back the DB row
+    // since we don't own it.
   }
 
   try {
     await opts.mosaic.addToList({
-      list: assertValidAddress(opts.ablListAddress, "ablListAddress"),
+      list: listAddress,
       authority: opts.signerAddress,
       feePayer: opts.signerAddress,
       wallet: opts.destination,
     });
   } catch (error) {
-    try {
-      await opts.tokenService.revokeAllowlistEntry(createdEntryId);
-    } catch (revokeError) {
-      throw new AppError(
-        "INTERNAL_ERROR",
-        "Failed to roll back control-list entry after mint sync error",
-        {
-          originalError: error instanceof Error ? error.message : "Unknown add error",
-          restoreError:
-            revokeError instanceof Error ? revokeError.message : "Unknown rollback error",
-        }
-      );
+    if (createdEntryId) {
+      try {
+        await opts.tokenService.revokeAllowlistEntry(createdEntryId);
+      } catch (revokeError) {
+        throw new AppError(
+          "INTERNAL_ERROR",
+          "Failed to roll back control-list entry after mint sync error",
+          {
+            originalError: error instanceof Error ? error.message : "Unknown add error",
+            restoreError:
+              revokeError instanceof Error ? revokeError.message : "Unknown rollback error",
+          }
+        );
+      }
     }
     throw error;
   }
@@ -143,19 +171,18 @@ export const prepareMint = async (c: AppContext) => {
   // For allowlist tokens with on-chain ABL, sync the destination wallet to
   // the on-chain list (and DB mirror) before preparing the mint tx so the
   // SDK's permissionless-thaw can succeed when the client submits.
-  const addedToAllowlist =
-    ablListAddress && !isOnControlList
-      ? await syncDestinationToOnChainAllowlist({
-          tokenService,
-          mosaic,
-          tokenId,
-          ablListAddress,
-          destinationRaw: parsed.data.mint.destination,
-          destination,
-          signerAddress: signer.address,
-          addedBy: auth.id,
-        })
-      : false;
+  const addedToAllowlist = ablListAddress
+    ? await syncDestinationToOnChainAllowlist({
+        tokenService,
+        mosaic,
+        tokenId,
+        ablListAddress,
+        destinationRaw: parsed.data.mint.destination,
+        destination,
+        signerAddress: signer.address,
+        addedBy: auth.id,
+      })
+    : false;
 
   const prepared = await mosaic.prepareMintTo({
     mint: mintAddress,
@@ -310,19 +337,18 @@ export const executeMint = async (c: AppContext) => {
     // For allowlist tokens with on-chain ABL, sync the destination wallet to
     // the on-chain list before minting so the SDK's permissionless-thaw can
     // succeed for a fresh ATA.
-    const addedToAllowlist =
-      ablListAddress && !isOnControlList
-        ? await syncDestinationToOnChainAllowlist({
-            tokenService,
-            mosaic,
-            tokenId,
-            ablListAddress,
-            destinationRaw: parsed.data.mint.destination,
-            destination,
-            signerAddress: signer.address,
-            addedBy: auth.id,
-          })
-        : false;
+    const addedToAllowlist = ablListAddress
+      ? await syncDestinationToOnChainAllowlist({
+          tokenService,
+          mosaic,
+          tokenId,
+          ablListAddress,
+          destinationRaw: parsed.data.mint.destination,
+          destination,
+          signerAddress: signer.address,
+          addedBy: auth.id,
+        })
+      : false;
 
     const result = await mosaic.mintTo({
       mint: mintAddress,

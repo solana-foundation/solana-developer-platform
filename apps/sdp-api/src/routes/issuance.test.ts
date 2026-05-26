@@ -2810,8 +2810,10 @@ describe("Issuance Routes", () => {
       it("skips on-chain allowlist sync on prepare mint when destination already on list", async () => {
         await seedAblListAddress();
 
-        // Pre-insert the destination directly into token_allowlists so the handler
-        // sees isOnControlList=true and short-circuits the on-chain add.
+        // Pre-insert the destination directly into token_allowlists and mock
+        // the on-chain ABL membership check to return true — the helper treats
+        // the on-chain list as the source of truth and only skips when both
+        // sides agree.
         const tokenService = new TokenService(getDb(env));
         await tokenService.addAllowlistEntry({
           tokenId: allowlistTokenId,
@@ -2822,6 +2824,9 @@ describe("Issuance Routes", () => {
         const createOrgSignerSpy = vi
           .spyOn(SolanaServices, "createOrgSigner")
           .mockResolvedValueOnce({ address: signerAddress } as never);
+        const isWalletOnListSpy = vi
+          .spyOn(MosaicService.prototype, "isWalletOnList")
+          .mockResolvedValueOnce(true);
         const addToListSpy = vi
           .spyOn(MosaicService.prototype, "addToList")
           .mockResolvedValueOnce(undefined as never);
@@ -2868,6 +2873,7 @@ describe("Issuance Routes", () => {
           expect(meta.addedToAllowlist).toBe(false);
         } finally {
           createOrgSignerSpy.mockRestore();
+          isWalletOnListSpy.mockRestore();
           addToListSpy.mockRestore();
           prepareMintToSpy.mockRestore();
         }
@@ -2886,6 +2892,9 @@ describe("Issuance Routes", () => {
         const createOrgSignerSpy = vi
           .spyOn(SolanaServices, "createOrgSigner")
           .mockResolvedValueOnce({ address: signerAddress } as never);
+        const isWalletOnListSpy = vi
+          .spyOn(MosaicService.prototype, "isWalletOnList")
+          .mockResolvedValueOnce(true);
         const addToListSpy = vi
           .spyOn(MosaicService.prototype, "addToList")
           .mockResolvedValueOnce(undefined as never);
@@ -2932,6 +2941,7 @@ describe("Issuance Routes", () => {
           expect(meta.addedToAllowlist).toBe(false);
         } finally {
           createOrgSignerSpy.mockRestore();
+          isWalletOnListSpy.mockRestore();
           addToListSpy.mockRestore();
           mintToSpy.mockRestore();
         }

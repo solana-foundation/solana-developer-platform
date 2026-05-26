@@ -59,6 +59,7 @@ import {
   resolveTokenAccount,
 } from "@solana/mosaic-sdk";
 import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
+import { findWalletEntryPda } from "@solana/token-acl-gate-sdk";
 import { getTransferSolInstruction } from "@solana-program/system";
 import {
   decodeMint,
@@ -505,6 +506,18 @@ export class MosaicService {
     });
 
     return this.signAndSubmit(fullTx);
+  }
+
+  /**
+   * Check whether a wallet is present on a token's on-chain ABL list.
+   *
+   * Returns the on-chain truth — useful when DB mirrors may lag behind a
+   * pending on-chain confirmation (e.g. concurrent mint requests). One RPC.
+   */
+  async isWalletOnList(list: Address, wallet: Address): Promise<boolean> {
+    const [walletEntryPda] = await findWalletEntryPda({ listConfig: list, wallet });
+    const info = await this.rpc.getAccountInfo(walletEntryPda).send();
+    return info.value !== null;
   }
 
   /**
