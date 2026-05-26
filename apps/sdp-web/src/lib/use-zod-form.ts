@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import type { z } from "zod";
 
 export type FieldErrors<T> = Partial<Record<keyof T, string>>;
@@ -20,7 +20,8 @@ export function useZodForm<TSchema extends z.ZodTypeAny>(
   type TInput = z.input<TSchema>;
   type TOutput = z.output<TSchema>;
 
-  const [values, setValues] = useState<TInput>(initialValues);
+  const initialValuesRef = useRef(initialValues);
+  const [values, setValues] = useState<TInput>(initialValuesRef.current);
   const [errors, setErrors] = useState<FieldErrors<TInput>>({});
 
   const setField = useCallback(<K extends keyof TInput>(key: K, value: TInput[K]) => {
@@ -49,9 +50,9 @@ export function useZodForm<TSchema extends z.ZodTypeAny>(
   }, [values, schema]);
 
   const reset = useCallback(() => {
-    setValues(initialValues);
+    setValues(initialValuesRef.current);
     setErrors({});
-  }, [initialValues]);
+  }, []);
 
   return { values, errors, setField, validate, reset };
 }
