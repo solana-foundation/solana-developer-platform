@@ -116,7 +116,7 @@ export function CounterpartyCreateProvider({ children }: { children: ReactNode }
 
       toast.success("Counterparty created", { position: "bottom-right" });
       router.refresh();
-      router.push("/dashboard/counterparty");
+      router.push("/dashboard/payments/counterparty");
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : "Something went wrong");
     } finally {

@@ -26,7 +26,7 @@ import {
 } from "@/components/ui/table";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { getStoredApiKeySecret } from "@/lib/playground-api-keys";
-import { toTitleCase } from "../activity-format-utils";
+import { toTitleCase } from "../../activity-format-utils";
 import type { CounterpartyPlaygroundView } from "./counterparty-playground-config";
 
 const CounterpartyPlayground = dynamic(
@@ -121,7 +121,7 @@ export function CounterpartyWorkspace({
                 <Button
                   type="button"
                   iconLeft={<PlusIcon />}
-                  onClick={() => router.push("/dashboard/counterparty/create")}
+                  onClick={() => router.push("/dashboard/payments/counterparty/create")}
                 >
                   Create
                 </Button>
@@ -141,7 +141,7 @@ export function CounterpartyWorkspace({
                 <Button
                   type="button"
                   iconLeft={<PlusIcon />}
-                  onClick={() => router.push("/dashboard/counterparty/create")}
+                  onClick={() => router.push("/dashboard/payments/counterparty/create")}
                 >
                   Create
                 </Button>

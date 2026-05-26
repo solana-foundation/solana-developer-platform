@@ -2,7 +2,7 @@ import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
-import { fetchActiveApiKeys, resolvePlaygroundApiBaseUrl } from "../playground-api-data";
+import { fetchActiveApiKeys, resolvePlaygroundApiBaseUrl } from "../../playground-api-data";
 import { fetchCounterparties } from "./counterparty-page.data";
 import { CounterpartyWorkspace } from "./counterparty-workspace";
 

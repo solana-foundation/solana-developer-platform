@@ -3,7 +3,7 @@ import type {
   ApiPlaygroundEndpointConfig,
   ApiPlaygroundFieldConfig,
 } from "@/components/api-playground-shell";
-import { toTitleCase } from "../activity-format-utils";
+import { toTitleCase } from "../../activity-format-utils";
 
 export interface CounterpartyPlaygroundView {
   id: string;
