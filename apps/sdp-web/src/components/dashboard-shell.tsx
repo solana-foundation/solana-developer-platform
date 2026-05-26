@@ -476,10 +476,10 @@ function SidebarGroup({
               </Link>
               {item.children && item.children.length > 0 && (
                 <div className="ml-5 mt-2">
-                  {item.children.map((child, i) => {
+                  {item.children.map((child, i, siblings) => {
                     const childActive = isItemActive(pathname, child.href);
                     const isFirst = i === 0;
-                    const isLast = i === item.children.length - 1;
+                    const isLast = i === siblings.length - 1;
                     return (
                       <div key={child.href} className="flex gap-2">
                         <div
