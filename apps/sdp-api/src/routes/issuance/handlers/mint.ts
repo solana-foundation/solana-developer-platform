@@ -80,25 +80,48 @@ export const prepareMint = async (c: AppContext) => {
   const mosaic = createMosaicService(c.env, signer);
 
   // For allowlist tokens with on-chain ABL, sync the destination wallet to the
-  // on-chain list (and DB mirror) before preparing the mint tx so the SDK's
-  // permissionless-thaw can succeed when the client submits.
+  // DB mirror first, then the on-chain list, so a failure on either side cannot
+  // leave the two layers out of sync. The SDK's permissionless-thaw needs the
+  // wallet on-chain when the client submits.
   let addedToAllowlist = false;
   if (ablListAddress && !isOnControlList) {
-    await mosaic.addToList({
-      list: assertValidAddress(ablListAddress, "ablListAddress"),
-      authority: signer.address,
-      feePayer: signer.address,
-      wallet: destination,
-    });
+    let createdEntryId: string | null = null;
     try {
-      await tokenService.addAllowlistEntry({
+      const entry = await tokenService.addAllowlistEntry({
         tokenId,
         address: parsed.data.mint.destination,
         addedBy: auth.id,
       });
+      createdEntryId = entry.id;
       addedToAllowlist = true;
     } catch (error) {
       if (!(error instanceof Error && error.message === "ADDRESS_ALREADY_ALLOWLISTED")) {
+        throw error;
+      }
+    }
+
+    if (createdEntryId) {
+      try {
+        await mosaic.addToList({
+          list: assertValidAddress(ablListAddress, "ablListAddress"),
+          authority: signer.address,
+          feePayer: signer.address,
+          wallet: destination,
+        });
+      } catch (error) {
+        try {
+          await tokenService.revokeAllowlistEntry(createdEntryId);
+        } catch (revokeError) {
+          throw new AppError(
+            "INTERNAL_ERROR",
+            "Failed to roll back control-list entry after mint sync error",
+            {
+              originalError: error instanceof Error ? error.message : "Unknown add error",
+              restoreError:
+                revokeError instanceof Error ? revokeError.message : "Unknown rollback error",
+            }
+          );
+        }
         throw error;
       }
     }
@@ -255,25 +278,48 @@ export const executeMint = async (c: AppContext) => {
     const mosaic = createMosaicService(c.env, signer);
 
     // For allowlist tokens with on-chain ABL, sync the destination wallet to the
-    // on-chain list before minting so the SDK's permissionless-thaw can succeed
-    // for a fresh ATA. Idempotent: skipped when already present in either layer.
+    // DB mirror first, then the on-chain list, so a failure on either side
+    // cannot leave the two layers out of sync. Idempotent: skipped when already
+    // present in either layer.
     let addedToAllowlist = false;
     if (ablListAddress && !isOnControlList) {
-      await mosaic.addToList({
-        list: assertValidAddress(ablListAddress, "ablListAddress"),
-        authority: signer.address,
-        feePayer: signer.address,
-        wallet: destination,
-      });
+      let createdEntryId: string | null = null;
       try {
-        await tokenService.addAllowlistEntry({
+        const entry = await tokenService.addAllowlistEntry({
           tokenId,
           address: parsed.data.mint.destination,
           addedBy: auth.id,
         });
+        createdEntryId = entry.id;
         addedToAllowlist = true;
       } catch (error) {
         if (!(error instanceof Error && error.message === "ADDRESS_ALREADY_ALLOWLISTED")) {
+          throw error;
+        }
+      }
+
+      if (createdEntryId) {
+        try {
+          await mosaic.addToList({
+            list: assertValidAddress(ablListAddress, "ablListAddress"),
+            authority: signer.address,
+            feePayer: signer.address,
+            wallet: destination,
+          });
+        } catch (error) {
+          try {
+            await tokenService.revokeAllowlistEntry(createdEntryId);
+          } catch (revokeError) {
+            throw new AppError(
+              "INTERNAL_ERROR",
+              "Failed to roll back control-list entry after mint sync error",
+              {
+                originalError: error instanceof Error ? error.message : "Unknown add error",
+                restoreError:
+                  revokeError instanceof Error ? revokeError.message : "Unknown rollback error",
+              }
+            );
+          }
           throw error;
         }
       }
