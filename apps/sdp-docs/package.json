@@ -18,22 +18,22 @@
   },
   "dependencies": {
     "@sdp/types": "workspace:*",
-    "fumadocs-core": "^16.8.5",
+    "fumadocs-core": "^16.8.11",
     "fumadocs-mdx": "^15.0.6",
-    "fumadocs-ui": "^16.8.5",
-    "lucide-react": "1.14.0",
+    "fumadocs-ui": "^16.8.11",
+    "lucide-react": "1.16.0",
     "next": "16.2.6",
-    "react": "19.2.5",
-    "react-dom": "19.2.5"
+    "react": "19.2.6",
+    "react-dom": "19.2.6"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
     "@types/mdx": "^2.0.13",
-    "@types/node": "^25.6.0",
+    "@types/node": "^25.9.0",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "tailwindcss": "^4",
-    "tsx": "4.21.0",
+    "tsx": "4.22.2",
     "typescript": "^6.0.3"
   }
 }
