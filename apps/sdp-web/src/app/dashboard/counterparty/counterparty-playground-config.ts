@@ -22,6 +22,7 @@ const exampleEmail = "contact@acme.com";
 function buildCounterpartyIdField(): ApiPlaygroundFieldConfig {
   return {
     key: "counterpartyId",
+    // biome-ignore lint/security/noSecrets: URL path placeholder, not a secret.
     label: "{counterpartyId}",
     placeholder: "Counterparty ID (e.g. cpty_abc123)",
     required: true,
@@ -40,6 +41,7 @@ export function buildCounterpartyPlaygroundEndpointConfigs(
     counterpartyOptions.length > 0
       ? {
           key: "counterpartyId",
+          // biome-ignore lint/security/noSecrets: URL path placeholder, not a secret.
           label: "{counterpartyId}",
           placeholder: "Counterparty ID (e.g. cpty_abc123)",
           kind: "select",
@@ -74,6 +76,7 @@ export function buildCounterpartyPlaygroundEndpointConfigs(
       id: "get-counterparty",
       title: "Get Counterparty",
       method: "GET",
+      // biome-ignore lint/security/noSecrets: URL path placeholder, not a secret.
       path: "/v1/counterparties/{counterpartyId}",
       pathFields: [counterpartyIdField],
       bodyFields: [],
@@ -138,6 +141,7 @@ export function buildCounterpartyPlaygroundEndpointConfigs(
       id: "update-counterparty",
       title: "Update Counterparty",
       method: "PATCH",
+      // biome-ignore lint/security/noSecrets: URL path placeholder, not a secret.
       path: "/v1/counterparties/{counterpartyId}",
       pathFields: [counterpartyIdField],
       bodyFields: [
@@ -178,6 +182,7 @@ export function buildCounterpartyPlaygroundEndpointConfigs(
       id: "delete-counterparty",
       title: "Delete Counterparty",
       method: "DELETE",
+      // biome-ignore lint/security/noSecrets: URL path placeholder, not a secret.
       path: "/v1/counterparties/{counterpartyId}",
       pathFields: [counterpartyIdField],
       bodyFields: [],
