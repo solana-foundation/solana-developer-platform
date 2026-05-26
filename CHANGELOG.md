@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.21.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.20.0...v0.21.0) (2026-05-26)
+
+### Features
+
+* **pro-1222:** counterparty management page ([#354](https://github.com/solana-foundation/solana-developer-platform/pull/354)) ([aff317c](https://github.com/solana-foundation/solana-developer-platform/commit/aff317c34559e9a3f39018932dcdd90ff49f315f))
+* **pro-1250:** add in counterparty openapi schema ([#348](https://github.com/solana-foundation/solana-developer-platform/pull/348)) ([0524ec4](https://github.com/solana-foundation/solana-developer-platform/commit/0524ec43e95cfef5aec960315efd9649538c355e))
+* HOO-515 docker compose for local dev + CI smoke ([#349](https://github.com/solana-foundation/solana-developer-platform/pull/349)) ([d0a8a08](https://github.com/solana-foundation/solana-developer-platform/commit/d0a8a08003a5e16fac24bd3b6212b29d87745024))
+* **types:** model MagicBlock private transfer routing ([#347](https://github.com/solana-foundation/solana-developer-platform/pull/347)) ([f9bde8b](https://github.com/solana-foundation/solana-developer-platform/commit/f9bde8bc84c51fa5924f0ce54d255b6ccc70d399))
+* **pro-1219:** adding crud endpoints for counterparty ([#338](https://github.com/solana-foundation/solana-developer-platform/pull/338)) ([81c64b4](https://github.com/solana-foundation/solana-developer-platform/commit/81c64b49b18d6f8e660f1dfe41c75b7196bdf991))
+* **sdp-docs:** HOO-514 Dockerfile + CI smoke build ([#346](https://github.com/solana-foundation/solana-developer-platform/pull/346)) ([07c579b](https://github.com/solana-foundation/solana-developer-platform/commit/07c579b6247fcd54fe79ac4ea7414d2597f68203))
+
+### Documentation
+
+* HOO-439 update solana payment docs ([#305](https://github.com/solana-foundation/solana-developer-platform/pull/305)) ([dc2c997](https://github.com/solana-foundation/solana-developer-platform/commit/dc2c9971dc7ccbeafa025409656a77f311e5215b))
+
+### Maintenance
+
+* **deps:** bump the minor-patch group across 1 directory with 31 updates ([#353](https://github.com/solana-foundation/solana-developer-platform/pull/353)) ([eaf4543](https://github.com/solana-foundation/solana-developer-platform/commit/eaf4543623233f8929868bb128ff6c546017d4a2))
+* **deps:** bump @hono/node-server from 1.19.14 to 2.0.2 ([d6aa61f](https://github.com/solana-foundation/solana-developer-platform/commit/d6aa61f17440f8379b7573ccfe37861e571c6ec0))
+* **deps:** bump fumadocs-mdx from 14.3.2 to 15.0.6 ([134576c](https://github.com/solana-foundation/solana-developer-platform/commit/134576ce3e10b4953a8442a3d3d8f66e331fd991))
+* **deps:** bump the actions group with 2 updates ([7b9f5cb](https://github.com/solana-foundation/solana-developer-platform/commit/7b9f5cb97507cfecb69e3171720861637e4f6986))
+* **deps:** align Dependabot cooldown with pnpm age guard ([#337](https://github.com/solana-foundation/solana-developer-platform/pull/337)) ([4520cec](https://github.com/solana-foundation/solana-developer-platform/commit/4520cecac0de13ae81b38d4aaa858c378505e882))
+
+### Other Changes
+
+* Allow MagicBlock program in Kora config ([#355](https://github.com/solana-foundation/solana-developer-platform/pull/355)) ([bb29c33](https://github.com/solana-foundation/solana-developer-platform/commit/bb29c331d681e91b4deaa598640de040430364cf))
+
 ## [0.20.0](https://github.com/solana-foundation/solana-developer-platform/releases/tag/v0.20.0) (2026-05-22)
 
 ### Features
