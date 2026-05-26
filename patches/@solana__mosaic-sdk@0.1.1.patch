@@ -39,7 +39,7 @@ diff --git a/dist/abl/wallet.js b/dist/abl/wallet.js
      return [addWalletToListInstruction];
  };
  /**
-@@ -58,7 +59,7 @@
+@@ -58,8 +59,8 @@
   * @param input.wallet - The wallet address to remove from the list
   * @returns Promise containing the instructions for removing the wallet from the list
   */
