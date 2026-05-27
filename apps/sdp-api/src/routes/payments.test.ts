@@ -55,6 +55,7 @@ const TEST_API_KEY = {
   raw: "sk_test_payments_policy",
   prefix: "sk_test_pay",
 };
+const TEST_KORA_FEE_PAYER = "4YhMUz8xDgHMPAevvfMpnJX9TJmw9DTNDA1sNWPRZG9q";
 const TEST_CACHED_API_KEY: CachedApiKey = {
   id: TEST_API_KEY.id,
   organizationId: TEST_ORG.id,
@@ -2025,6 +2026,17 @@ describe("Payments routes", () => {
         }),
       } as unknown as ReturnType<typeof solanaRpc.createRpc>);
       createOrgSignerMock.mockResolvedValueOnce(sourceSigner);
+      const signAndSendMock = vi
+        .fn()
+        .mockResolvedValue(
+          "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy"
+        );
+      createFeePaymentAdapterMock.mockReturnValueOnce({
+        providerId: "mock",
+        getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+        signAsFeePayer: vi.fn(),
+        signAndSend: signAndSendMock,
+      } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
 
       const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
         new Response(
@@ -2095,7 +2107,8 @@ describe("Payments routes", () => {
           settlement: "base",
           sendTo: "base",
         });
-        expect(sendAndConfirmTransactionMock).toHaveBeenCalledTimes(1);
+        expect(signAndSendMock).toHaveBeenCalledTimes(1);
+        expect(sendAndConfirmTransactionMock).not.toHaveBeenCalled();
         const [, init] = fetchSpy.mock.calls[0] ?? [];
         const providerPayload = JSON.parse(String(init?.body)) as Record<string, unknown>;
         expect(providerPayload).toMatchObject({

@@ -7,6 +7,8 @@ import {
   createNoopSigner,
   createTransactionMessage,
   getBase64EncodedWireTransaction,
+  getCompiledTransactionMessageDecoder,
+  getCompiledTransactionMessageEncoder,
   getTransactionDecoder,
   getTransactionEncoder,
   pipe,
@@ -16,6 +18,7 @@ import {
 import {
   assertIsTransactionPartialSigner,
   partiallySignTransactionMessageWithSigners,
+  partiallySignTransactionWithSigners,
   signTransactionWithSigners,
 } from "@solana/signers";
 import { getTransferSolInstruction } from "@solana-program/system";
@@ -580,6 +583,118 @@ function createMagicBlockSubmissionRpc(
   return solanaRpc.createRpc(c.env, { rpcUrl });
 }
 
+function addSponsoredFeePayerToPreparedTransaction(
+  serializedTx: string,
+  feePayer: Address,
+  requiredSigners: string[]
+) {
+  const txBytes = Buffer.from(serializedTx, "base64");
+  const transaction = getTransactionDecoder().decode(txBytes);
+  const compiledMessage = getCompiledTransactionMessageDecoder().decode(transaction.messageBytes);
+
+  if (!("instructions" in compiledMessage) || !("staticAccounts" in compiledMessage)) {
+    throw new AppError(
+      "PROVIDER_UNAVAILABLE",
+      "MagicBlock transaction version is not supported for Kora fee sponsorship."
+    );
+  }
+
+  const existingFeePayer = compiledMessage.staticAccounts[0];
+
+  if (!existingFeePayer) {
+    throw new AppError("PROVIDER_UNAVAILABLE", "MagicBlock transaction has no fee payer.");
+  }
+
+  if (existingFeePayer === feePayer) {
+    return transaction;
+  }
+
+  if (compiledMessage.staticAccounts.includes(feePayer)) {
+    throw new AppError(
+      "PROVIDER_UNAVAILABLE",
+      "MagicBlock transaction already includes the Kora fee payer in a non-fee-payer position."
+    );
+  }
+
+  const signerCount = compiledMessage.header.numSignerAccounts;
+  const existingFeePayerMustSign = requiredSigners.includes(existingFeePayer);
+
+  if (existingFeePayerMustSign) {
+    const remapAccountIndex = (accountIndex: number) => accountIndex + 1;
+    const sponsoredMessage = {
+      ...compiledMessage,
+      header: {
+        ...compiledMessage.header,
+        numSignerAccounts: signerCount + 1,
+      },
+      staticAccounts: [feePayer, ...compiledMessage.staticAccounts],
+      instructions: compiledMessage.instructions.map((instruction) => ({
+        ...instruction,
+        programAddressIndex: remapAccountIndex(instruction.programAddressIndex),
+        accountIndices: instruction.accountIndices?.map(remapAccountIndex) ?? [],
+      })),
+    };
+
+    const messageBytes = getCompiledTransactionMessageEncoder().encode(
+      sponsoredMessage
+    ) as typeof transaction.messageBytes;
+    const signatures = {
+      [feePayer]: null,
+      ...transaction.signatures,
+    } as typeof transaction.signatures;
+
+    return {
+      messageBytes,
+      signatures: {
+        ...signatures,
+      },
+    };
+  }
+
+  const remapAccountIndex = (accountIndex: number) => {
+    if (accountIndex === 0) {
+      return signerCount;
+    }
+
+    if (accountIndex < signerCount) {
+      return accountIndex;
+    }
+
+    return accountIndex + 1;
+  };
+  const { [existingFeePayer]: _existingFeePayerSignature, ...remainingSignatures } =
+    transaction.signatures;
+  const sponsoredMessage = {
+    ...compiledMessage,
+    staticAccounts: [
+      feePayer,
+      ...compiledMessage.staticAccounts.slice(1, signerCount),
+      existingFeePayer,
+      ...compiledMessage.staticAccounts.slice(signerCount),
+    ],
+    instructions: compiledMessage.instructions.map((instruction) => ({
+      ...instruction,
+      programAddressIndex: remapAccountIndex(instruction.programAddressIndex),
+      accountIndices: instruction.accountIndices?.map(remapAccountIndex) ?? [],
+    })),
+  };
+
+  const messageBytes = getCompiledTransactionMessageEncoder().encode(
+    sponsoredMessage
+  ) as typeof transaction.messageBytes;
+  const signatures = {
+    [feePayer]: null,
+    ...remainingSignatures,
+  } as typeof transaction.signatures;
+
+  return {
+    messageBytes,
+    signatures: {
+      ...signatures,
+    },
+  };
+}
+
 async function executePreparedPrivateTransfer(
   c: AppContext,
   wallets: CustodyWallet[],
@@ -623,13 +738,40 @@ async function executePreparedPrivateTransfer(
     })
   );
 
-  const txBytes = Buffer.from(serializedTx, "base64");
-  const transaction = getTransactionDecoder().decode(txBytes);
+  const feePayment = getFeePayment(c);
+  const feePayer = await feePayment.getFeePayer();
+  const transaction =
+    metadata.magicBlock.sendTo === "base"
+      ? addSponsoredFeePayerToPreparedTransaction(serializedTx, feePayer, requiredSigners)
+      : getTransactionDecoder().decode(Buffer.from(serializedTx, "base64"));
   const signedTransaction =
-    signers.length > 0 ? await signTransactionWithSigners(signers, transaction) : transaction;
+    signers.length > 0
+      ? metadata.magicBlock.sendTo === "base"
+        ? await partiallySignTransactionWithSigners(signers, transaction)
+        : await signTransactionWithSigners(signers, transaction)
+      : transaction;
   const encodedSignedTransaction = new Uint8Array(
     getTransactionEncoder().encode(signedTransaction)
   );
+
+  if (metadata.magicBlock.sendTo === "base") {
+    const signature = await feePayment.signAndSend(encodedSignedTransaction);
+    const rpc = solanaRpc.createRpc(c.env);
+    const confirmation = await solanaRpc.confirmTransaction(rpc, signature, {
+      commitment: "confirmed",
+    });
+
+    if (confirmation.err) {
+      throw new AppError("TRANSACTION_FAILED", "MagicBlock private transfer failed on-chain");
+    }
+
+    return {
+      signature,
+      slot: Number(confirmation.slot),
+      blockTime: null,
+    };
+  }
+
   const rpc = createMagicBlockSubmissionRpc(c, metadata.magicBlock.sendTo);
   const confirmation = await solanaRpc.sendAndConfirmTransaction(rpc, encodedSignedTransaction, {
     commitment: "confirmed",
