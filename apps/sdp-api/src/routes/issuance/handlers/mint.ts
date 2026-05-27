@@ -34,7 +34,13 @@ type AppContext = Context<{ Bindings: Env }>;
  *     then write on-chain. If the on-chain write fails and we created the DB
  *     row, roll it back so the two layers stay in sync.
  *
- * Returns whether a new wallet entry was created on-chain by this call.
+ * Returns `true` when the destination was absent from the on-chain list at the
+ * start of the call and this call drove it onto the list with the DB mirror
+ * consistent — including the TOCTOU/transient-error recovery where the
+ * on-chain write reports an error but membership is confirmed afterward (the DB
+ * row already exists at that point, so both layers agree). Returns `false` only
+ * when the destination was already on the list at the start of the call.
+ * Throws when the on-chain write fails and membership cannot be confirmed.
  */
 async function syncDestinationToOnChainAllowlist(opts: {
   tokenService: TokenService;
@@ -92,10 +98,11 @@ async function syncDestinationToOnChainAllowlist(opts: {
     // TOCTOU: a parallel request may have added the wallet on-chain between
     // our initial isWalletOnList check and this add (or the add raced a
     // transient RPC/confirmation error but the wallet is in fact on-chain).
-    // If on-chain membership now holds, the DB mirror is correct — keep it and
-    // treat this as a successful sync rather than rolling back into drift.
+    // If on-chain membership now holds, both layers are consistent — the DB row
+    // already exists at this point (we created it or a parallel request did),
+    // so treat this as a successful sync rather than rolling back into drift.
     if (await opts.mosaic.isWalletOnList(listAddress, opts.destination)) {
-      return false;
+      return true;
     }
     if (createdEntryId) {
       try {

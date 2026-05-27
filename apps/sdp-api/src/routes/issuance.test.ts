@@ -2740,6 +2740,78 @@ describe("Issuance Routes", () => {
         }
       });
 
+      it("reports addedToAllowlist when the on-chain add errors but membership is confirmed", async () => {
+        await seedAblListAddress();
+
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSigner")
+          .mockResolvedValueOnce({ address: signerAddress } as never);
+        // First check (before add) sees the wallet absent; the recheck after the
+        // add error sees it present — the transient-error / TOCTOU recovery path.
+        const isWalletOnListSpy = vi
+          .spyOn(MosaicService.prototype, "isWalletOnList")
+          .mockResolvedValueOnce(false)
+          .mockResolvedValueOnce(true);
+        const addToListSpy = vi
+          .spyOn(MosaicService.prototype, "addToList")
+          .mockRejectedValueOnce(new Error("RPC confirmation timeout"));
+        const prepareMintToSpy = vi
+          .spyOn(MosaicService.prototype, "prepareMintTo")
+          .mockResolvedValueOnce(mockPreparedMint as never);
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${allowlistTokenId}/mint/prepare`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({
+                mint: { destination: freshDestination, amount: "1" },
+              }),
+            },
+            env
+          );
+
+          expect(res.status).toBe(200);
+          expect(addToListSpy).toHaveBeenCalledTimes(1);
+          expect(prepareMintToSpy).toHaveBeenCalledTimes(1);
+
+          const entry = await getDb(env)
+            .prepare(
+              "SELECT id FROM token_allowlists WHERE token_id = ? AND address = ? AND status = 'active'"
+            )
+            .bind(allowlistTokenId, freshDestination)
+            .first<{ id: string }>();
+          expect(entry?.id).toMatch(/^tal_/);
+
+          const body = (await res.json()) as { data: { transaction: { id: string } } };
+          const transactionId = body.data.transaction.id;
+          const audit = await getDb(env)
+            .prepare(
+              `SELECT metadata FROM audit_logs
+               WHERE action = 'mint' AND resource_type = 'token_transaction'
+                 AND resource_id = ?
+               LIMIT 1`
+            )
+            .bind(transactionId)
+            .first<{ metadata: string }>();
+          const meta = JSON.parse(audit?.metadata ?? "{}") as {
+            mode: string;
+            addedToAllowlist: boolean;
+          };
+          expect(meta.mode).toBe("prepare");
+          expect(meta.addedToAllowlist).toBe(true);
+        } finally {
+          createOrgSignerSpy.mockRestore();
+          isWalletOnListSpy.mockRestore();
+          addToListSpy.mockRestore();
+          prepareMintToSpy.mockRestore();
+        }
+      });
+
       it("auto-adds destination to on-chain allowlist on execute mint", async () => {
         await seedAblListAddress();
 
