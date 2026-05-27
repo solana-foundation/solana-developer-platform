@@ -1,3 +1,9 @@
+import type {
+  LightsparkPaymentRampInstruction,
+  PaymentRampExecution,
+  PaymentRampExecutionStatus,
+  SdpEnvironment,
+} from "@sdp/types";
 import { getDb } from "@/db";
 import { parseDecimalAmount } from "@/lib/amount";
 import { AppError, providerNotConfigured } from "@/lib/errors";
@@ -6,7 +12,11 @@ import { isAddress } from "@/lib/solana";
 import { assertProviderAvailable } from "@/services/provider-availability.service";
 import type { AppContext } from "../context";
 import { assertWalletPolicyAllowsTransfer } from "../policy";
-import { executeOfframpSchema, executeOnrampSchema } from "../schemas";
+import {
+  executeOfframpSchema,
+  executeOnrampSchema,
+  simulateSandboxTransferSchema,
+} from "../schemas";
 import { type ResolvedScope, resolveScope, resolveWalletAddress } from "../wallets";
 
 const MOONPAY_ONRAMP_URL = "https://buy.moonpay.com";
@@ -17,15 +27,7 @@ const MOONPAY_ONRAMP_MIN_USD = 20;
 const BVNK_PRODUCTION_API_URL = "https://api.bvnk.com";
 const BVNK_SANDBOX_API_URL = "https://api.sandbox.bvnk.com";
 
-type RampExecutionStatus = "pending" | "processing" | "completed" | "failed";
-
-type RampExecutionResult = {
-  id: string;
-  provider: string;
-  status: RampExecutionStatus;
-  redirectUrl?: string;
-  reference?: string;
-};
+type RampExecutionResult = PaymentRampExecution;
 
 type BvnkComplianceInput = {
   partyDetails?: Record<string, unknown>[];
@@ -96,24 +98,17 @@ function normalizeMoonPayCurrencyCode(value: string): string {
   return normalized.toLowerCase();
 }
 
-type ApiMode = "sandbox" | "production";
-
 /**
- * Resolves the API mode for the current request:
- * - Non-production deployments (ENVIRONMENT !== "production") always use sandbox.
- * - Clerk JWT requests (no apiKey on context) default to production.
- * - API key requests derive mode from the key's environment field
- *   (sk_test_ → sandbox, sk_live_ → production).
+ * Resolves the product environment for provider credentials.
+ * API-key callers are scoped by the key. Dashboard/session callers default to
+ * sandbox while that is the only supported dashboard mode.
  */
-function resolveApiMode(c: AppContext): ApiMode {
-  if (c.env.ENVIRONMENT !== "production") {
-    return "sandbox";
-  }
+function resolveSdpEnvironment(c: AppContext): SdpEnvironment {
   const apiKey = c.get("apiKey");
-  if (apiKey === undefined) {
-    return "production";
+  if (apiKey) {
+    return apiKey.environment;
   }
-  return apiKey.environment === "sandbox" ? "sandbox" : "production";
+  return "sandbox";
 }
 
 interface RampsProviderEnvironment {
@@ -121,12 +116,12 @@ interface RampsProviderEnvironment {
   production: string | undefined;
 }
 
-function envForMode(mode: ApiMode, env: RampsProviderEnvironment): string | undefined {
+function envForMode(mode: SdpEnvironment, env: RampsProviderEnvironment): string | undefined {
   return env[mode]?.trim();
 }
 
 function configForMode<T extends Record<string, RampsProviderEnvironment>>(
-  mode: ApiMode,
+  mode: SdpEnvironment,
   envs: T
 ): Record<keyof T, string | undefined> {
   return Object.fromEntries(
@@ -157,14 +152,23 @@ type BvnkConfig = {
 
 type LightsparkQuoteStatus = "PENDING" | "PROCESSING" | "COMPLETED" | "FAILED" | "EXPIRED";
 
+type LightsparkPaymentInstruction = Omit<LightsparkPaymentRampInstruction, "provider">;
+
 type LightsparkQuote = {
   id?: string;
   quoteStatus?: LightsparkQuoteStatus;
   status?: LightsparkQuoteStatus;
-  paymentInstructions?: {
-    url?: string;
-  };
+  paymentInstructions?: LightsparkPaymentInstruction[];
 };
+
+function toLightsparkRampPaymentInstructions(
+  instructions: LightsparkPaymentInstruction[] | undefined
+): LightsparkPaymentRampInstruction[] | undefined {
+  return instructions?.map((instruction) => ({
+    provider: "lightspark",
+    ...instruction,
+  }));
+}
 
 type LightsparkExternalAccount = {
   id?: string;
@@ -188,7 +192,7 @@ type BvnkPaymentSummary = {
 const LIGHTSPARK_DEFAULT_GRID_API_URL = "https://api.lightspark.com/grid/2025-10-13";
 
 function getMoonPayConfig(c: AppContext): MoonPayConfig {
-  const mode = resolveApiMode(c);
+  const mode = resolveSdpEnvironment(c);
   const { apiKey, secretKey } = configForMode(mode, {
     apiKey: { sandbox: c.env.MOONPAY_SANDBOX_API_KEY, production: c.env.MOONPAY_API_KEY },
     secretKey: { sandbox: c.env.MOONPAY_SANDBOX_SECRET_KEY, production: c.env.MOONPAY_SECRET_KEY },
@@ -224,7 +228,7 @@ function getMoonPayConfig(c: AppContext): MoonPayConfig {
 }
 
 function getLightsparkConfig(c: AppContext): LightsparkConfig {
-  const mode = resolveApiMode(c);
+  const mode = resolveSdpEnvironment(c);
   const { tokenId, clientSecret } = configForMode(mode, {
     tokenId: {
       sandbox: c.env.LIGHTSPARK_GRID_SANDBOX_CLIENT_ID,
@@ -252,7 +256,7 @@ function getLightsparkConfig(c: AppContext): LightsparkConfig {
 }
 
 function getBvnkConfig(c: AppContext): BvnkConfig {
-  const mode = resolveApiMode(c);
+  const mode = resolveSdpEnvironment(c);
   const { hawkAuthId, hawkSecretKey, walletId } = configForMode(mode, {
     hawkAuthId: { sandbox: c.env.BVNK_SANDBOX_HAWK_AUTH_ID, production: c.env.BVNK_HAWK_AUTH_ID },
     hawkSecretKey: {
@@ -385,7 +389,7 @@ function normalizeBvnkCurrencyAndNetwork(value: string): BvnkCurrencyNetwork {
   );
 }
 
-function mapBvnkPaymentStatus(status: string | undefined): RampExecutionStatus {
+function mapBvnkPaymentStatus(status: string | undefined): PaymentRampExecutionStatus {
   if (!status) {
     return "pending";
   }
@@ -658,12 +662,12 @@ function parseLightsparkExternalAccount(payload: unknown): LightsparkExternalAcc
   };
 }
 
-async function listLightsparkCustomerExternalAccounts(
+async function findLightsparkCustomerExternalAccount(
   config: LightsparkConfig,
   customerId: string,
-  currency: string
-): Promise<LightsparkExternalAccount[]> {
-  const externalAccounts: LightsparkExternalAccount[] = [];
+  currency: string,
+  predicate: (account: LightsparkExternalAccount) => boolean
+): Promise<LightsparkExternalAccount | null> {
   let cursor: string | undefined;
 
   for (let page = 0; page < 10; page += 1) {
@@ -690,7 +694,12 @@ async function listLightsparkCustomerExternalAccounts(
     };
 
     const accounts = Array.isArray(payload.data) ? payload.data : [];
-    externalAccounts.push(...accounts.map(parseLightsparkExternalAccount));
+    for (const accountPayload of accounts) {
+      const account = parseLightsparkExternalAccount(accountPayload);
+      if (predicate(account)) {
+        return account;
+      }
+    }
 
     const hasMore = payload.hasMore === true;
     cursor =
@@ -703,7 +712,7 @@ async function listLightsparkCustomerExternalAccounts(
     }
   }
 
-  return externalAccounts;
+  return null;
 }
 
 async function resolveLightsparkOnrampDestinationAccountId(
@@ -728,19 +737,19 @@ async function resolveLightsparkOnrampDestinationAccountId(
     );
   }
 
-  const externalAccounts = await listLightsparkCustomerExternalAccounts(
+  const existing = await findLightsparkCustomerExternalAccount(
     config,
     customerId,
-    currency
-  );
-  const existing = externalAccounts.find((account) => {
-    if (!account.id) {
-      return false;
+    currency,
+    (account) => {
+      if (!account.id) {
+        return false;
+      }
+      const accountType = account.accountInfo?.accountType?.toUpperCase();
+      const address = account.accountInfo?.address;
+      return accountType === "SOLANA_WALLET" && address === normalized;
     }
-    const accountType = account.accountInfo?.accountType?.toUpperCase();
-    const address = account.accountInfo?.address;
-    return accountType === "SOLANA_WALLET" && address === normalized;
-  });
+  );
 
   if (existing?.id) {
     return existing.id;
@@ -774,7 +783,7 @@ function toLightsparkMinorUnitsInteger(value: bigint, fieldName: string): number
   return Number(value);
 }
 
-function mapLightsparkQuoteStatus(status: string | undefined): RampExecutionStatus {
+function mapLightsparkQuoteStatus(status: string | undefined): PaymentRampExecutionStatus {
   if (!status) {
     return "pending";
   }
@@ -1036,7 +1045,7 @@ const moonPayRampProvider: RampProviderExecutor = {
 };
 
 const lightsparkRampProvider: RampProviderExecutor = {
-  async executeOnramp(c, _scope, input) {
+  async executeOnramp(c, scope, input) {
     const customerId = input.kycReference?.trim();
     if (!customerId) {
       throw new AppError(
@@ -1051,10 +1060,17 @@ const lightsparkRampProvider: RampProviderExecutor = {
       "fiatAmount"
     );
     const config = getLightsparkConfig(c);
+    const destinationWalletAddress = resolveWalletAddress(
+      scope.wallets,
+      input.destinationWallet,
+      "destinationWallet",
+      scope.auth,
+      ["payments:write"]
+    );
     const destinationAccountId = await resolveLightsparkOnrampDestinationAccountId(
       config,
       customerId,
-      input.destinationWallet,
+      destinationWalletAddress,
       cryptoCurrency
     );
 
@@ -1082,7 +1098,7 @@ const lightsparkRampProvider: RampProviderExecutor = {
       id: `ramp_${crypto.randomUUID()}`,
       provider: "lightspark",
       status: mapLightsparkQuoteStatus(quote.quoteStatus ?? quote.status),
-      redirectUrl: quote.paymentInstructions?.url,
+      paymentInstructions: toLightsparkRampPaymentInstructions(quote.paymentInstructions),
       reference: quote.id,
     };
   },
@@ -1137,7 +1153,7 @@ const lightsparkRampProvider: RampProviderExecutor = {
       id: `ramp_${crypto.randomUUID()}`,
       provider: "lightspark",
       status: mapLightsparkQuoteStatus(executedQuote.quoteStatus ?? executedQuote.status),
-      redirectUrl: executedQuote.paymentInstructions?.url,
+      paymentInstructions: toLightsparkRampPaymentInstructions(executedQuote.paymentInstructions),
       reference: quote.id,
     };
   },
@@ -1160,7 +1176,7 @@ async function resolveRampProvider(
     organizationId,
     "ramps",
     providerId,
-    resolveApiMode(c) === "sandbox"
+    resolveSdpEnvironment(c) === "sandbox"
   );
 
   const provider = RAMP_PROVIDER_REGISTRY[providerId];
@@ -1233,4 +1249,34 @@ export async function executeOfframp(c: AppContext) {
   });
 
   return success(c, { ramp });
+}
+
+export async function simulateSandboxTransfer(c: AppContext) {
+  if (resolveSdpEnvironment(c) !== "sandbox") {
+    throw new AppError(
+      "FORBIDDEN",
+      "Sandbox transfer simulation is only available in sandbox mode"
+    );
+  }
+
+  const body = await c.req.json();
+  const parsed = simulateSandboxTransferSchema.safeParse(body);
+
+  if (!parsed.success) {
+    throw new AppError("BAD_REQUEST", "Invalid request body", {
+      errors: parsed.error.flatten().fieldErrors,
+    });
+  }
+
+  let transaction: unknown;
+  switch (parsed.data.provider) {
+    case "lightspark":
+      transaction = await lightsparkRequest(getLightsparkConfig(c), "sandbox/send", {
+        method: "POST",
+        body: parsed.data.payload,
+      });
+      break;
+  }
+
+  return success(c, { transaction });
 }

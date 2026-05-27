@@ -7,6 +7,7 @@ import {
   allowlistEntrySchema,
   apiKeyDetailSchema,
   apiKeyResponseSchema,
+  counterpartyResponseSchema,
   currentUserResponseSchema,
   custodyConfigResponseSchema,
   custodyConfigsResponseSchema,
@@ -26,6 +27,7 @@ import {
   frozenAccountSchema,
   inviteMemberResponseSchema,
   listApiKeysResponseSchema,
+  listCounterpartiesResponseSchema,
   listMembersResponseSchema,
   listProjectApiKeysResponseSchema,
   listProjectMembersResponseSchema,
@@ -50,6 +52,7 @@ import {
   rotateApiKeyResponseSchema,
   rpcProvidersResponseSchema,
   rpcRelayResponseSchema,
+  sandboxTransferSimulationResponseSchema,
   signerCheckResponseSchema,
   successResponseSchema,
   switchProviderOptionsResponseSchema,
@@ -77,6 +80,9 @@ export const apiKeyDetailResponse = successResponseSchema(apiKeyDetailSchema);
 export const apiKeyCreateResponse = successResponseSchema(apiKeyResponseSchema);
 export const apiKeyRotateResponse = successResponseSchema(rotateApiKeyResponseSchema);
 export const apiKeyRevokeResponse = successResponseSchema(revokeApiKeyResponseSchema);
+
+export const counterpartyResponse = successResponseSchema(counterpartyResponseSchema);
+export const listCounterpartiesResponse = successResponseSchema(listCounterpartiesResponseSchema);
 
 export const projectResponse = successResponseSchema(projectResponseSchema);
 export const listProjectsResponse = successResponseSchema(listProjectsResponseSchema);
@@ -146,3 +152,6 @@ export const transferResponse = successResponseSchema(transferResponseSchema);
 export const transferListResponse = paginatedResponseSchema(transferSchema);
 export const onrampExecutionResponse = successResponseSchema(onrampExecutionResponseSchema);
 export const offrampExecutionResponse = successResponseSchema(offrampExecutionResponseSchema);
+export const sandboxTransferSimulationResponse = successResponseSchema(
+  sandboxTransferSimulationResponseSchema
+);

@@ -1,0 +1,54 @@
+---
+title: Accept payments
+description: Receiving-address convention, integration options, and how to track inbound payments with SDP.
+---
+
+SDP does not ship a hosted checkout primitive. To accept payments today, you publish a Solana address you control and detect inbound transfers via the SDP transfer list. This page explains the pattern; the two pages that follow cover [verification](/docs/payments/accept-verification) and [indexing](/docs/payments/accept-indexing) in detail.
+
+## Receiving-address convention
+
+The receiving address is a custody wallet you control. Two scopings to choose between:
+
+- **One wallet per order** *(recommended for accept flows)* — provision a fresh custody wallet (or sub-account) per order or per customer and use the destination address itself as the correlation key. The inbound transfer's `destination` field maps 1:1 to your order row, so you do not depend on memo or reference fields that SDP does not surface for inbound payments.
+- **One wallet per merchant scope** — for marketplaces, one custody wallet per seller; for treasury operations, one per ledger account. Reasonable when correlation isn't required (treasury, settlement) or when you accept a single fixed-amount payment per merchant.
+
+The address you publish is the on-chain `address` of the custody wallet (you can fetch it from [`GET /v1/wallets/{walletId}`](/docs/reference/api/wallets)). You publish that address; senders use it as the destination of a normal SPL token transfer. SDP indexes the inbound transfer and exposes it in [`GET /v1/payments/transfers`](/docs/payments/accept-indexing) with `direction=inbound`.
+
+**Correlation caveats.** For *customer-initiated* inbound transfers, SDP today does **not** populate `Transfer.memo` (Solana memo-program instructions aren't extracted into the record) and does **not** expose a reference field on the inbound record. The reliable on-record correlation key is the inbound transfer's `destination` — hence the per-order receiving-address recommendation. If you need memo- or reference-based correlation (e.g., for a Solana Pay URL that carries an order pubkey), read the on-chain transaction directly via Solana RPC using the transfer's `signature`.
+
+## Integration options
+
+There are two ways customers can land a payment on the address you control:
+
+1. **Direct address share** — you display the address (and the expected token + amount) in your UI. The customer's wallet sends a transfer. This works with any Solana wallet and any client; SDP picks the transfer up purely from the on-chain side. Best for B2B settlement, treasury operations, and crypto-native flows.
+2. **Solana Pay request** — for consumer checkout, you give the customer a [Solana Pay](https://solana.com/docs/payments/accept-payments/solana-pay) URL or QR code with the destination, amount, and a per-order `reference` pubkey. The customer's wallet builds the transfer and attaches the `reference` account on-chain, so you can match the transfer back to the order by reading the transaction directly via Solana RPC (the `reference` won't be on the SDP `Transfer` record — neither will any memo the wallet sets, since SDP doesn't extract memo-program instructions for inbound transfers). SDP does not ship a hosted Solana Pay endpoint today. The [`Prepare`](/docs/guides/prepare-vs-execute) transfer endpoint accepts a `referenceAddress` field as a roadmap hook, but **does not yet attach it on-chain or echo it on the inbound transfer record** (see [Indexing and reconciliation → Solana Pay reference accounts](/docs/payments/accept-indexing#solana-pay-reference-accounts-roadmap)). For SDP-side correlation today, use **per-order destination addresses** (covered above); use the on-chain transaction (via RPC) when you need to read memo or `reference`.
+
+## What SDP gives you today
+
+- **Indexed inbound transfers** — `GET /v1/payments/transfers?direction=inbound` returns all received transfers across your custody wallets, with filters for token, status, wallet, and date range. See [Indexing and reconciliation](/docs/payments/accept-indexing).
+- **Per-transfer status reads** — `GET /v1/payments/transfers/{id}` for a single payment's lifecycle. See [Verifying a payment](/docs/payments/accept-verification).
+- **Wallet balances** — `GET /v1/payments/wallets/{walletId}/balances` for the current per-token balance on a receiving wallet. See [Wallet balances](/docs/payments/wallet-balances).
+- **Address-based correlation** — the inbound transfer's `destination` is the on-record correlation key for accept flows. Pair with per-order receiving addresses (see above) to map inbound transfers to orders without depending on memo. `Transfer.memo` is populated only for SDP-initiated transfers (outbound or internal); for customer-initiated inbound transfers the field is **omitted** from the response (it's optional in the schema, not nullable). Read the on-chain transaction via Solana RPC if you need memo or Solana Pay reference correlation.
+
+## What SDP does not give you yet
+
+- **No checkout session / payment intent object** — you do not pre-register an expected payment with the API. Inbound transfers are recognized after the fact by matching the on-record `destination` (token and amount are available for additional sanity checks). Memo and Solana Pay reference aren't on the transfer record for customer-initiated inbound transfers — see the [correlation caveats](#receiving-address-convention) above; read those from the on-chain transaction via Solana RPC if you need them.
+- **No webhooks on settlement** — status changes are observed by polling `GET /v1/payments/transfers/{id}` or by re-listing with date filters. See the [polling cadence guidance](/docs/payments/accept-verification#polling-cadence).
+- **No hosted Solana Pay URL endpoint** — if you want to ship a Solana Pay URL or QR, build it client-side from the destination address, token mint, amount, and reference pubkey.
+
+## Worked example: a marketplace checkout
+
+A minimum-viable accept flow built on the per-order-address pattern:
+
+1. At checkout, provision (or claim from a warm pool) a **fresh custody wallet** for the order and stage an `orders` row with that wallet's on-chain address, the expected amount, and the token.
+2. Display the per-order custody-wallet address, the token, and the amount to the customer. Build a Solana Pay URL from those fields if you want a QR code; no SDP-specific endpoint required.
+3. The customer's wallet submits the transfer.
+4. Your reconciliation worker (see [Indexing and reconciliation](/docs/payments/accept-indexing)) periodically lists recent inbound transfers — **without** a `wallet`/`walletAddress` filter (the wallet-scoped path's signature-history branch ignores the `from`/`to` window; see [Indexing → Query parameters](/docs/payments/accept-indexing#query-parameters)) — and matches each transfer's `destination` to an open order in your `orders` table.
+5. When a match lands, mark the order paid and ship the goods. Use the transfer's `signature` (UNIQUE on the transfer record once present) to dedup if the worker is re-run.
+
+This is intentionally low-level — there is no SDP-provided session object. Treat the `orders` table as your checkout state machine and SDP as the settlement and status backend.
+
+## Next steps
+
+- [Verifying a payment](/docs/payments/accept-verification) — status semantics and how to know when a payment is safe to act on.
+- [Indexing and reconciliation](/docs/payments/accept-indexing) — listing inbound transfers, deduping, and building a delta-poll worker.

@@ -1,4 +1,6 @@
 import type { CustodyWalletAggregate, CustodyWalletTokenBalance } from "./custody";
+import type { PrivateTransferRequest } from "./private-transfers";
+import type { RampProviderId } from "./provider-access";
 
 export interface PaymentsDashboardWallet {
   id: string;
@@ -57,6 +59,21 @@ export interface PaymentTransferSummary {
   updatedAt?: string;
 }
 
+export interface PaymentTransferRequest {
+  projectId?: string;
+  source: string;
+  destination: string;
+  token: string;
+  amount: string;
+  memo?: string;
+
+  /**
+   * Optional private-transfer routing. When omitted, the transfer should use
+   * the normal public on-chain transfer path.
+   */
+  privateTransfer?: PrivateTransferRequest;
+}
+
 export interface PaymentTransferEnvelope {
   data?: {
     transfer?: PaymentTransferSummary;
@@ -65,3 +82,40 @@ export interface PaymentTransferEnvelope {
     message?: string;
   };
 }
+
+export type PaymentRampExecutionStatus = "pending" | "processing" | "completed" | "failed";
+
+export interface LightsparkPaymentRampInstruction {
+  provider: "lightspark";
+  accountOrWalletInfo: {
+    accountType: string;
+    accountNumber?: string;
+    routingNumber?: string;
+    paymentRails?: string[];
+    reference?: string;
+    bankName?: string;
+    address?: string;
+    assetType?: string;
+  };
+  instructionsNotes?: string;
+  isPlatformAccount?: boolean;
+}
+
+export type PaymentRampInstruction = LightsparkPaymentRampInstruction;
+
+interface BasePaymentRampExecution {
+  id: string;
+  status: PaymentRampExecutionStatus;
+  redirectUrl?: string;
+  reference?: string;
+}
+
+export type PaymentRampExecution =
+  | (BasePaymentRampExecution & {
+      provider: "lightspark";
+      paymentInstructions?: LightsparkPaymentRampInstruction[];
+    })
+  | (BasePaymentRampExecution & {
+      provider: Exclude<RampProviderId, "lightspark">;
+      paymentInstructions?: never;
+    });

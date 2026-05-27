@@ -1,3 +1,4 @@
+import { RAMP_PROVIDERS } from "@sdp/types";
 import {
   createTransferSchema as createTransferSchemaBase,
   executeOfframpSchema as executeOfframpSchemaBase,
@@ -6,6 +7,7 @@ import {
   prepareTransferOptionsSchema as prepareTransferOptionsSchemaBase,
   prepareTransferSchema as prepareTransferSchemaBase,
   priorityFeeSchema as priorityFeeSchemaBase,
+  simulateSandboxTransferSchema as simulateSandboxTransferSchemaBase,
   transferDirectionSchema as transferDirectionSchemaBase,
   transferIdParamsSchema as transferIdParamsSchemaBase,
   transferStatusSchema as transferStatusSchemaBase,
@@ -36,10 +38,14 @@ export const walletPolicySchema = z
       description: "Custody wallet ID from /v1/wallets.",
       example: "wal_example",
     }),
-    destinationAllowlist: z.array(solanaAddressSchema).openapi({
-      description:
-        "Allowed destination addresses. An empty array means no destination restrictions.",
-    }),
+    destinationAllowlist: z
+      .array(solanaAddressSchema)
+      .max(500)
+      .openapi({
+        description:
+          "Allowed destination addresses. An empty array means no destination restrictions. Maximum 500 entries per wallet.",
+        example: ["7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU"],
+      }),
     maxTransferAmount: tokenAmountSchema
       .optional()
       .openapi({ description: "Maximum amount allowed per transfer." }),
@@ -82,7 +88,8 @@ export const updateWalletPolicyRequestSchema = updateWalletPolicySchemaBase
   .extend({
     destinationAllowlist: withOpenApi(updateWalletPolicySchemaBase.shape.destinationAllowlist, {
       description:
-        "Allowed destination addresses. An empty array means no destination restrictions.",
+        "Allowed destination addresses. An empty array means no destination restrictions. Maximum 500 entries per wallet.",
+      example: ["7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU"],
     }),
     maxTransferAmount: withOpenApi(updateWalletPolicySchemaBase.shape.maxTransferAmount, {
       description: "Maximum amount allowed per transfer.",
@@ -152,11 +159,12 @@ export const createTransferRequestSchema = createTransferSchemaBase
     }),
     destination: withOpenApi(createTransferSchemaBase.shape.destination, {
       description: "Destination wallet address.",
-      example: "So11111111111111111111111111111111111111112",
+      example: "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
     }),
     token: withOpenApi(createTransferSchemaBase.shape.token, {
-      description: "Token symbol or mint address.",
-      example: "USDC",
+      description:
+        "Token mint address. For the native token, pass `SOL` (recommended) or the canonical SOL mint `So11111111111111111111111111111111111111112` — the server normalizes both to `SOL`. SPL tokens must be specified by their on-chain mint (symbols are not resolved at request time).",
+      example: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
     }),
     amount: withOpenApi(createTransferSchemaBase.shape.amount, {
       description: "Token amount in UI units (decimal string).",
@@ -201,11 +209,12 @@ export const prepareTransferRequestSchema = prepareTransferSchemaBase
     }),
     destination: withOpenApi(prepareTransferSchemaBase.shape.destination, {
       description: "Destination wallet address.",
-      example: "So11111111111111111111111111111111111111112",
+      example: "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
     }),
     token: withOpenApi(prepareTransferSchemaBase.shape.token, {
-      description: "Token symbol or mint address.",
-      example: "USDC",
+      description:
+        "Token mint address. For the native token, pass `SOL` (recommended) or the canonical SOL mint `So11111111111111111111111111111111111111112` — the server normalizes both to `SOL`. SPL tokens must be specified by their on-chain mint (symbols are not resolved at request time).",
+      example: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
     }),
     amount: withOpenApi(prepareTransferSchemaBase.shape.amount, {
       description: "Token amount in UI units (decimal string).",
@@ -216,7 +225,7 @@ export const prepareTransferRequestSchema = prepareTransferSchemaBase
     }),
     referenceAddress: withOpenApi(prepareTransferSchemaBase.shape.referenceAddress, {
       description: "Optional reference address for tracking (Solana Pay reference account).",
-      example: "So11111111111111111111111111111111111111112",
+      example: "RefY2HwGmCKvJsXJzhRkc7m9D4N6pQ5tT3aB8fE1uV2W",
     }),
     options: prepareTransferOptionsSchema.optional().openapi({
       description: "Transaction preparation options.",
@@ -378,13 +387,23 @@ export const executeOnrampRequestSchema = executeOnrampSchemaBase
       description: "Optional redirect URL after provider flow completes.",
     }),
     bvnkCompliance: withOpenApi(executeOnrampSchemaBase.shape.bvnkCompliance, {
-      description: "Optional BVNK compliance details.",
+      description:
+        "BVNK-only compliance details. Optional on BVNK on-ramp; required on BVNK off-ramp (which validates that `partyDetails` has at least one entry). Omit the field entirely for `moonpay` and `lightspark`.",
       example: { partyDetails: [{ type: "individual" }] },
     }),
   })
   .openapi({
     description:
-      "Execute on-ramp request payload. Note: BVNK on-ramp requires additional provider-side account enablement and compliance setup beyond API credentials.",
+      'Execute on-ramp request payload. Note: BVNK on-ramp requires additional provider-side account enablement and compliance setup beyond API credentials. The default example is shaped for `provider: "moonpay"`; switch `provider` to `bvnk` to attach `bvnkCompliance.partyDetails`.',
+    example: {
+      provider: "moonpay",
+      destinationWallet: "wal_example",
+      cryptoToken: "USDC",
+      fiatCurrency: "USD",
+      fiatAmount: "100.00",
+      kycReference: "",
+      redirectUrl: "https://example.com",
+    },
   });
 
 export const executeOfframpRequestSchema = executeOfframpSchemaBase
@@ -418,11 +437,29 @@ export const executeOfframpRequestSchema = executeOfframpSchemaBase
       description: "Optional redirect URL after provider flow completes.",
     }),
     bvnkCompliance: withOpenApi(executeOfframpSchemaBase.shape.bvnkCompliance, {
-      description: "Optional BVNK compliance details.",
+      description:
+        "BVNK-only compliance details. Required on BVNK off-ramp (`partyDetails` must contain at least one entry). Omit the field entirely for `moonpay` and `lightspark`.",
       example: { partyDetails: [{ type: "individual" }] },
     }),
   })
-  .openapi({ description: "Execute off-ramp request payload." });
+  .openapi({
+    description:
+      'Execute off-ramp request payload. The default example is shaped for `provider: "moonpay"`; switch `provider` to `bvnk` to attach `bvnkCompliance.partyDetails`.',
+    example: {
+      provider: "moonpay",
+      sourceWallet: "wal_example",
+      cryptoToken: "USDC",
+      fiatCurrency: "USD",
+      cryptoAmount: "50.00",
+      kycReference: "",
+      redirectUrl: "https://example.com",
+    },
+  });
+
+export const simulateSandboxTransferRequestSchema = withOpenApi(simulateSandboxTransferSchemaBase, {
+  description:
+    "Sandbox-only helper to simulate provider-specific transfer completion flows. The payload is discriminated by provider.",
+});
 
 export const paymentListTransfersQuerySchema = listTransfersQuerySchemaBase
   .extend({
@@ -432,7 +469,7 @@ export const paymentListTransfersQuerySchema = listTransfersQuerySchemaBase
     }),
     walletAddress: withOpenApi(listTransfersQuerySchemaBase.shape.walletAddress, {
       description: "Filter by wallet address.",
-      example: "So11111111111111111111111111111111111111112",
+      example: "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
     }),
     token: withOpenApi(listTransfersQuerySchemaBase.shape.token, {
       description: "Filter by token symbol or mint.",
@@ -465,11 +502,50 @@ export const paymentListTransfersQuerySchema = listTransfersQuerySchemaBase
   })
   .openapi({ description: "List transfers query parameters." });
 
+const lightsparkRampPaymentInstructionSchema = z.object({
+  provider: z.literal("lightspark").openapi({
+    description: "Provider that produced this instruction.",
+    example: "lightspark",
+  }),
+  accountOrWalletInfo: z
+    .object({
+      accountType: z.string().openapi({ example: "USD_ACCOUNT" }),
+      accountNumber: z.string().optional().openapi({ example: "0000000000000000" }),
+      routingNumber: z.string().optional().openapi({ example: "000000000" }),
+      paymentRails: z
+        .array(z.string())
+        .optional()
+        .openapi({ example: ["ACH", "WIRE"] }),
+      reference: z.string().optional().openapi({ example: "quote-reference-example" }),
+      bankName: z.string().optional().openapi({ example: "Example Bank" }),
+      address: z
+        .string()
+        .optional()
+        .openapi({ example: "ExampleSolanaWalletAddress11111111111111111" }),
+      assetType: z.string().optional().openapi({ example: "USDC" }),
+    })
+    .openapi({
+      description: "Lightspark bank account or crypto wallet details for funding the ramp.",
+    }),
+  instructionsNotes: z
+    .string()
+    .optional()
+    .openapi({ description: "Additional human-readable funding instructions." }),
+  isPlatformAccount: z
+    .boolean()
+    .optional()
+    .openapi({ description: "Whether the payment instruction belongs to a platform account." }),
+});
+
+const rampPaymentInstructionSchema = z.discriminatedUnion("provider", [
+  lightsparkRampPaymentInstructionSchema,
+]);
+
 export const onrampExecutionSchema = z
   .object({
     id: z.string().openapi({ description: "Ramp execution identifier.", example: "ramp_example" }),
     provider: z
-      .string()
+      .enum(RAMP_PROVIDERS)
       .openapi({ description: "Selected provider used for execution.", example: "moonpay" }),
     status: z
       .enum(["pending", "processing", "completed", "failed"])
@@ -479,6 +555,9 @@ export const onrampExecutionSchema = z
       .url()
       .optional()
       .openapi({ description: "Redirect URL for the ramp provider." }),
+    paymentInstructions: z.array(rampPaymentInstructionSchema).optional().openapi({
+      description: "Provider payment instructions for funding or completing the ramp.",
+    }),
     reference: z
       .string()
       .optional()
@@ -490,7 +569,7 @@ export const offrampExecutionSchema = z
   .object({
     id: z.string().openapi({ description: "Ramp execution identifier.", example: "ramp_example" }),
     provider: z
-      .string()
+      .enum(RAMP_PROVIDERS)
       .openapi({ description: "Selected provider used for execution.", example: "moonpay" }),
     status: z
       .enum(["pending", "processing", "completed", "failed"])
@@ -500,6 +579,9 @@ export const offrampExecutionSchema = z
       .url()
       .optional()
       .openapi({ description: "Redirect URL for the ramp provider." }),
+    paymentInstructions: z.array(rampPaymentInstructionSchema).optional().openapi({
+      description: "Provider payment instructions for funding or completing the ramp.",
+    }),
     reference: z.string().optional().openapi({ description: "Provider reference for the payout." }),
   })
   .openapi({ description: "Off-ramp execution status." });
@@ -533,3 +615,11 @@ export const offrampExecutionResponseSchema = z
     ramp: offrampExecutionSchema.openapi({ description: "Off-ramp execution details." }),
   })
   .openapi({ description: "Off-ramp execution response payload." });
+
+export const sandboxTransferSimulationResponseSchema = z
+  .object({
+    transaction: z
+      .record(z.string(), z.unknown())
+      .openapi({ description: "Provider sandbox transaction response." }),
+  })
+  .openapi({ description: "Sandbox transfer simulation response payload." });

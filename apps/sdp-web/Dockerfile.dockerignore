@@ -6,9 +6,11 @@ dist
 coverage
 
 # Test infrastructure unrelated to the runtime image
-playwright
-playwright-report
-test-results
+apps/sdp-web/playwright
+apps/sdp-web/playwright.config.ts
+apps/sdp-web/playwright-report
+apps/sdp-web/test-results
+apps/sdp-web/.next-playwright
 
 # Docs are served separately (sdp-docs) and only proxied at runtime.
 # Top-level `docs/` (notes, plans) is also unrelated to the runtime image.
@@ -19,6 +21,10 @@ docs
 # build context so remote builders don't ship unrelated source.
 apps/sdp-api
 packages/sdp-api-integration
+infra
+scripts
+skills
+bun.lock
 
 # Local env files — host-only; container envs come from build-args / -e
 .env
@@ -29,6 +35,7 @@ packages/sdp-api-integration
 # Editor / OS / VCS noise
 .git
 .gitignore
+.claude
 .vscode
 .idea
 .DS_Store

@@ -66,7 +66,6 @@ function createSdpApiRequest(token: string, traceContext?: TraceContext): SdpApi
     headers.set(TRACE_ID_HEADER, traceId);
     headers.set(TRACE_SOURCE_HEADER, source);
     headers.set("X-Request-ID", requestId);
-
     const startedAt = performance.now();
     const method = options.method ?? "GET";
 

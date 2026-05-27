@@ -10,6 +10,7 @@ import {
   getWalletPolicy,
   listTransfers,
   prepareTransfer,
+  simulateSandboxTransfer,
   updateWalletPolicy,
 } from "./handlers";
 
@@ -49,6 +50,11 @@ payments.post(
   "/ramps/offramp/execute",
   requirePermissions("payments:write", "wallets:read"),
   executeOfframp
+);
+payments.post(
+  "/ramps/sandbox/simulate",
+  requirePermissions("payments:write"),
+  simulateSandboxTransfer
 );
 
 export default payments;

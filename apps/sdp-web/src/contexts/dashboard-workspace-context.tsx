@@ -1,7 +1,8 @@
 "use client";
 
 import { useAuth } from "@clerk/nextjs";
-import { useRouter } from "next/navigation";
+import type { SdpEnvironment } from "@sdp/types";
+import { usePathname, useRouter } from "next/navigation";
 import {
   createContext,
   type ReactNode,
@@ -9,6 +10,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import { SWRConfig } from "swr";
@@ -19,6 +21,7 @@ import { DASHBOARD_SWR_CONFIG } from "@/lib/dashboard-swr-config";
 import { useDashboardUrlState } from "@/lib/dashboard-url-state";
 
 export type IssuanceWorkspaceTab = "tokens" | "playground";
+export type CounterpartyWorkspaceTab = "overview" | "playground";
 
 export interface DashboardPlaygroundApiKeyOption {
   id: string;
@@ -31,15 +34,19 @@ export interface DashboardPlaygroundApiKeyOption {
 type DashboardWorkspaceContextValue = {
   dashboardAccess: DashboardAccess;
   dashboardCacheScope: DashboardCacheScope;
+  sdpEnvironment: SdpEnvironment;
   isSidebarOpen: boolean;
   selectedProject: string;
   issuanceTab: IssuanceWorkspaceTab;
+  counterpartyTab: CounterpartyWorkspaceTab;
   playgroundApiKeys: DashboardPlaygroundApiKeyOption[];
   selectedPlaygroundApiKeyId: string | null;
+  setSdpEnvironment: (value: SdpEnvironment) => void;
   setPlaygroundApiKeys: (keys: DashboardPlaygroundApiKeyOption[]) => void;
   setSelectedPlaygroundApiKeyId: (id: string | null) => void;
   setSelectedProject: (project: string) => void;
   setIssuanceTab: (tab: IssuanceWorkspaceTab) => void;
+  setCounterpartyTab: (tab: CounterpartyWorkspaceTab) => void;
   setSidebarOpen: (open: boolean) => void;
   toggleSidebar: () => void;
 };
@@ -85,8 +92,10 @@ export function DashboardWorkspaceProvider({
 }: DashboardWorkspaceProviderProps) {
   const auth = useAuth();
   const router = useRouter();
+  const pathname = usePathname();
   const { replaceSearchParams, searchParams } = useDashboardUrlState();
   const [isSidebarOpen, setSidebarOpenState] = useState(initialSidebarOpen);
+  const [sdpEnvironment, setSdpEnvironment] = useState<SdpEnvironment>("sandbox");
   const [selectedProject, setSelectedProject] = useState(defaultProject);
   const [playgroundApiKeys, setPlaygroundApiKeysState] = useState<
     DashboardPlaygroundApiKeyOption[]
@@ -108,10 +117,13 @@ export function DashboardWorkspaceProvider({
   );
   const serverDashboardCacheScopeKey = useMemo(
     () => getDashboardCacheScopeKey(serverDashboardCacheScope),
-    [serverDashboardCacheScope.orgId, serverDashboardCacheScope.userId]
+    [serverDashboardCacheScope]
   );
   const dashboardScopeIsFresh = liveDashboardCacheScopeKey === serverDashboardCacheScopeKey;
   const shouldRenderScopeRefreshFallback = auth.isLoaded && !dashboardScopeIsFresh;
+  const swrScopeKey = getDashboardCacheScopeKey(liveDashboardCacheScope, {
+    environment: sdpEnvironment,
+  });
 
   useEffect(() => {
     if (!auth.isLoaded || liveDashboardCacheScopeKey === serverDashboardCacheScopeKey) {
@@ -121,9 +133,23 @@ export function DashboardWorkspaceProvider({
     router.refresh();
   }, [auth.isLoaded, liveDashboardCacheScopeKey, router, serverDashboardCacheScopeKey]);
 
+  const previousPathnameRef = useRef(pathname);
+  useEffect(() => {
+    if (previousPathnameRef.current === pathname) return;
+    previousPathnameRef.current = pathname;
+    if (searchParams.has("tab")) {
+      replaceSearchParams({ tab: null });
+    }
+  }, [pathname, searchParams, replaceSearchParams]);
+
   const issuanceTab: IssuanceWorkspaceTab = useMemo(() => {
     const tab = searchParams.get("tab");
     return tab === "playground" ? "playground" : "tokens";
+  }, [searchParams]);
+
+  const counterpartyTab: CounterpartyWorkspaceTab = useMemo(() => {
+    const tab = searchParams.get("tab");
+    return tab === "playground" ? "playground" : "overview";
   }, [searchParams]);
 
   const setSidebarOpen = useCallback((open: boolean) => {
@@ -156,32 +182,48 @@ export function DashboardWorkspaceProvider({
     [replaceSearchParams]
   );
 
+  const setCounterpartyTab = useCallback(
+    (tab: CounterpartyWorkspaceTab) => {
+      replaceSearchParams({
+        tab: tab === "playground" ? "playground" : "overview",
+      });
+    },
+    [replaceSearchParams]
+  );
+
   const value = useMemo<DashboardWorkspaceContextValue>(
     () => ({
       dashboardAccess,
       dashboardCacheScope: liveDashboardCacheScope,
+      sdpEnvironment,
       isSidebarOpen,
       selectedProject,
       issuanceTab,
+      counterpartyTab,
       playgroundApiKeys,
       selectedPlaygroundApiKeyId,
+      setSdpEnvironment,
       setPlaygroundApiKeys,
       setSelectedPlaygroundApiKeyId,
       setSelectedProject,
       setIssuanceTab,
+      setCounterpartyTab,
       setSidebarOpen,
       toggleSidebar,
     }),
     [
       dashboardAccess,
       liveDashboardCacheScope,
+      sdpEnvironment,
       isSidebarOpen,
       playgroundApiKeys,
       issuanceTab,
+      counterpartyTab,
       selectedPlaygroundApiKeyId,
       selectedProject,
       setPlaygroundApiKeys,
       setIssuanceTab,
+      setCounterpartyTab,
       setSidebarOpen,
       toggleSidebar,
     ]
@@ -189,7 +231,7 @@ export function DashboardWorkspaceProvider({
 
   return (
     <DashboardWorkspaceContext.Provider value={value}>
-      <SWRConfig key={liveDashboardCacheScopeKey} value={DASHBOARD_SCOPED_SWR_CONFIG}>
+      <SWRConfig key={swrScopeKey} value={DASHBOARD_SCOPED_SWR_CONFIG}>
         {shouldRenderScopeRefreshFallback ? <DashboardScopeRefreshFallback /> : children}
       </SWRConfig>
     </DashboardWorkspaceContext.Provider>

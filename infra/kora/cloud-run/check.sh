@@ -16,12 +16,13 @@ echo "Checking Kora payer signer..."
 curl -fsS "${headers[@]}" -X POST "${KORA_RPC_URL}" --data '{"jsonrpc":"2.0","id":1,"method":"getPayerSigner","params":[]}'
 echo
 
-echo "Checking Kora sRFC-37 allowed programs..."
+echo "Checking Kora required allowed programs..."
 config_response="$(curl -fsS "${headers[@]}" -X POST "${KORA_RPC_URL}" --data '{"jsonrpc":"2.0","id":2,"method":"getConfig","params":[]}')"
 KORA_CONFIG_RESPONSE="${config_response}" node <<'NODE'
 const requiredPrograms = [
-  "TACLkU6CiCdkQN2MjoyDkVg2yAH9zkxiHDsiztQ52TP",
-  "GATEzzqxhJnsWF6vHRsgtixxSB8PaQdcqGEVTEHWiULz",
+  ["TACLkU6CiCdkQN2MjoyDkVg2yAH9zkxiHDsiztQ52TP", "Token-ACL (sRFC-37)"],
+  ["GATEzzqxhJnsWF6vHRsgtixxSB8PaQdcqGEVTEHWiULz", "ABL / GATE"],
+  ["SPLxh1LVZzEkX99H6rqYizhytLWPZVV296zyYDPagv2", "MagicBlock private transfer"],
 ];
 
 const response = JSON.parse(process.env.KORA_CONFIG_RESPONSE ?? "{}");
@@ -32,11 +33,19 @@ if (response.error) {
 
 const allowedPrograms = response.result?.validation_config?.allowed_programs ?? [];
 
-const missingPrograms = requiredPrograms.filter((program) => !allowedPrograms.includes(program));
+const missingPrograms = requiredPrograms.filter(([program]) => !allowedPrograms.includes(program));
 if (missingPrograms.length > 0) {
-  console.error(`Missing Kora allowed programs: ${missingPrograms.join(", ")}`);
+  console.error(
+    `Missing Kora allowed programs: ${missingPrograms
+      .map(([program, label]) => `${program} (${label})`)
+      .join(", ")}`
+  );
   process.exit(1);
 }
 
-console.log(`Kora allows required sRFC-37 programs: ${requiredPrograms.join(", ")}`);
+console.log(
+  `Kora allows required programs: ${requiredPrograms
+    .map(([program, label]) => `${program} (${label})`)
+    .join(", ")}`
+);
 NODE

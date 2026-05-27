@@ -206,6 +206,7 @@ Source: https://platform.solana.com/docs/reference/api/payments
 | --- | --- | --- |
 | `POST` | `/v1/payments/ramps/offramp/execute` | Execute off-ramp |
 | `POST` | `/v1/payments/ramps/onramp/execute` | Execute on-ramp |
+| `POST` | `/v1/payments/ramps/sandbox/simulate` | Simulate sandbox transfer |
 | `GET` | `/v1/payments/transfers` | List transfers |
 | `POST` | `/v1/payments/transfers` | Execute transfer (custody) |
 | `GET` | `/v1/payments/transfers/{transferId}` | Get transfer |
