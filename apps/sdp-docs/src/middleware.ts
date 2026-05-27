@@ -1,5 +1,5 @@
-import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { NextResponse } from "next/server";
 
 type AcceptEntry = { type: string; q: number };
 
@@ -10,7 +10,7 @@ function parseAccept(accept: string): AcceptEntry[] {
       const [typeRaw, ...params] = part.trim().split(";");
       const qParam = params.find((p) => p.trim().startsWith("q="));
       const q = qParam ? parseFloat(qParam.trim().slice(2)) : 1;
-      return { type: typeRaw.trim(), q: isNaN(q) ? 1 : q };
+      return { type: typeRaw.trim(), q: Number.isNaN(q) ? 1 : q };
     })
     .sort((a, b) => b.q - a.q);
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import { AlignLeft } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 
 type TocItem = {
   title: ReactNode;
@@ -29,10 +29,12 @@ export function TableOfContents({ items }: { items: TocItem[] }) {
           }
         }
       },
-      { rootMargin: "0px 0px -60% 0px", threshold: 0 },
+      { rootMargin: "0px 0px -60% 0px", threshold: 0 }
     );
 
-    elements.forEach((el) => observer.observe(el));
+    elements.forEach((el) => {
+      observer.observe(el);
+    });
     return () => observer.disconnect();
   }, [items]);
 
@@ -48,9 +50,7 @@ export function TableOfContents({ items }: { items: TocItem[] }) {
             key={item.url}
             href={item.url}
             className={
-              activeId === item.url
-                ? "launch-docs-toc-link is-active"
-                : "launch-docs-toc-link"
+              activeId === item.url ? "launch-docs-toc-link is-active" : "launch-docs-toc-link"
             }
             style={{
               paddingLeft: `${Math.max((item.depth ?? 2) - 2, 0) * 10 + 12}px`,

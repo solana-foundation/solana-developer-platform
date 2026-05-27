@@ -12,15 +12,12 @@ function stripMdxShell(source: string): string {
   return content.replace(/\n{3,}/g, "\n\n").trim();
 }
 
-export async function GET(
-  _req: Request,
-  { params }: { params: Promise<{ slug: string[] }> }
-) {
+export async function GET(_req: Request, { params }: { params: Promise<{ slug: string[] }> }) {
   const { slug } = await params;
   const contentDir = path.join(process.cwd(), "content/docs");
 
   const candidates = [
-    path.join(contentDir, ...slug) + ".mdx",
+    `${path.join(contentDir, ...slug)}.mdx`,
     path.join(contentDir, ...slug, "index.mdx"),
   ];
 
@@ -35,13 +32,11 @@ export async function GET(
         headers: {
           "Content-Type": "text/markdown; charset=utf-8",
           "Cache-Control": "public, max-age=300",
-          "Vary": "Accept",
-          "Link": `<${pageUrl}>; rel="alternate"; type="text/html", <${mdUrl}>; rel="canonical"`,
+          Vary: "Accept",
+          Link: `<${pageUrl}>; rel="alternate"; type="text/html", <${mdUrl}>; rel="canonical"`,
         },
       });
-    } catch {
-      continue;
-    }
+    } catch {}
   }
 
   return new Response("Not Found", { status: 404 });

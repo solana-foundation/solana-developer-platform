@@ -1,4 +1,14 @@
-import { ArrowRight, Building2, CircleDollarSign, Lock, KeyRound, Coins, Zap, Shield, FolderOpen } from "lucide-react";
+import {
+  ArrowRight,
+  Building2,
+  CircleDollarSign,
+  Coins,
+  FolderOpen,
+  KeyRound,
+  Lock,
+  Shield,
+  Zap,
+} from "lucide-react";
 import Link from "next/link";
 import { HomePageClass } from "./home-page-class";
 
@@ -104,7 +114,8 @@ export function DocsHome() {
           Real-world asset issuance, payments, and markets on Solana
         </h1>
         <p className="launch-home-hero-sub">
-          A dashboard and REST API for real-world asset issuance, payments, and markets on Solana — with built-in compliance controls.
+          A dashboard and REST API for real-world asset issuance, payments, and markets on Solana —
+          with built-in compliance controls.
         </p>
         <div className="launch-home-actions">
           <Link href="/docs/getting-started" className="launch-home-cta-primary">
@@ -121,7 +132,11 @@ export function DocsHome() {
         <h2 className="launch-home-section-label">Platform model</h2>
         <div className="launch-home-outcomes launch-home-model-cards">
           {modelSteps.map((step) => (
-            <Link key={step.name} href={step.href} className="launch-home-outcome launch-home-outcome--h">
+            <Link
+              key={step.name}
+              href={step.href}
+              className="launch-home-outcome launch-home-outcome--h"
+            >
               <div className="launch-home-outcome-icon-wrap">
                 <step.Icon size={16} aria-hidden="true" />
               </div>
@@ -140,7 +155,9 @@ export function DocsHome() {
           <span className="launch-home-strip-label">Custody</span>
           <div className="launch-home-strip-pills">
             {CUSTODY_PROVIDERS.map((p) => (
-              <span key={p} className="launch-home-strip-pill">{p}</span>
+              <span key={p} className="launch-home-strip-pill">
+                {p}
+              </span>
             ))}
           </div>
         </div>
@@ -181,7 +198,9 @@ export function DocsHome() {
           {quickstart.map((step, i) => (
             <li key={step.href} className="launch-home-quick-step">
               <Link href={step.href} className="launch-home-quick-link">
-                <span className="launch-home-quick-num" aria-hidden="true">{i + 1}</span>
+                <span className="launch-home-quick-num" aria-hidden="true">
+                  {i + 1}
+                </span>
                 <div className="launch-home-quick-content">
                   <h3 className="launch-home-quick-title">{step.title}</h3>
                   <p className="launch-home-quick-desc">{step.desc}</p>
@@ -212,7 +231,8 @@ export function DocsHome() {
           <div className="launch-home-concept">
             <dt className="launch-home-concept-term">Idempotency</dt>
             <dd className="launch-home-concept-def">
-              Include an <code>Idempotency-Key</code> header on mutation requests to prevent duplicates
+              Include an <code>Idempotency-Key</code> header on mutation requests to prevent
+              duplicates
             </dd>
           </div>
           <div className="launch-home-concept">
@@ -231,7 +251,6 @@ export function DocsHome() {
       <p className="launch-home-footer-note">
         Full API reference, endpoint pages, and provider onboarding live in the docs sidebar.
       </p>
-
     </div>
   );
 }

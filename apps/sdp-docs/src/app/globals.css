@@ -126,7 +126,7 @@ body {
 }
 
 .docs-is-home .launch-docs-main {
-  background-image: url('/images/hero-pattern.png');
+  background-image: url("/images/hero-pattern.png");
   background-repeat: no-repeat;
   background-position: top center;
   background-size: 100% auto;
@@ -260,7 +260,9 @@ body {
   font-weight: 450;
   line-height: 1.3;
   text-decoration: none;
-  transition: background-color 120ms ease, color 120ms ease;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
 }
 
 .launch-docs-nav-item {
@@ -306,7 +308,9 @@ body {
   line-height: 1.3;
   cursor: pointer;
   text-align: left;
-  transition: background-color 120ms ease, color 120ms ease;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
 }
 
 .launch-docs-nav-folder-btn:hover {
@@ -339,7 +343,9 @@ body {
   background: transparent;
   color: var(--launch-muted);
   cursor: pointer;
-  transition: background-color 120ms ease, color 120ms ease;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
 }
 
 .launch-docs-nav-toggle:hover {
@@ -507,7 +513,9 @@ body {
   font-size: 13px;
   line-height: 1.35;
   text-decoration: none;
-  transition: color 120ms ease, border-color 120ms ease;
+  transition:
+    color 120ms ease,
+    border-color 120ms ease;
 }
 
 .launch-docs-toc-link:hover {
@@ -593,7 +601,10 @@ body {
   background: transparent;
   color: var(--launch-muted);
   cursor: pointer;
-  transition: border-color 0.15s, color 0.15s, background 0.15s;
+  transition:
+    border-color 0.15s,
+    color 0.15s,
+    background 0.15s;
 }
 
 .page-feedback-btn:hover {
@@ -648,7 +659,9 @@ body {
   font-family: var(--font-sans);
   font-size: 0.875rem;
   cursor: pointer;
-  transition: border-color 0.15s, color 0.15s;
+  transition:
+    border-color 0.15s,
+    color 0.15s;
 }
 
 .page-feedback-submit:hover:not(:disabled) {
@@ -681,14 +694,20 @@ body {
   border: 1px solid var(--launch-border-strong);
   border-radius: 10px;
   background: var(--launch-white);
-  box-shadow: 0 1px 3px oklch(0 0 0 / 0.07), 0 1px 2px oklch(0 0 0 / 0.04);
+  box-shadow:
+    0 1px 3px oklch(0 0 0 / 0.07),
+    0 1px 2px oklch(0 0 0 / 0.04);
   text-decoration: none;
-  transition: border-color 0.15s, box-shadow 0.15s;
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
 }
 
 .page-nav-link:hover {
   border-color: var(--launch-ink);
-  box-shadow: 0 2px 6px oklch(0 0 0 / 0.1), 0 1px 2px oklch(0 0 0 / 0.06);
+  box-shadow:
+    0 2px 6px oklch(0 0 0 / 0.1),
+    0 1px 2px oklch(0 0 0 / 0.06);
 }
 
 .page-nav-direction {
@@ -1110,7 +1129,9 @@ body {
   font-weight: 550;
   color: var(--launch-text);
   text-decoration: none;
-  transition: border-color 140ms ease, color 140ms ease;
+  transition:
+    border-color 140ms ease,
+    color 140ms ease;
   white-space: nowrap;
 }
 
@@ -1186,6 +1207,35 @@ body {
   gap: 10px;
 }
 
+.launch-home-outcome {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 18px 20px;
+  border: 1px solid var(--launch-border);
+  border-radius: 12px;
+  background: var(--launch-white);
+  text-decoration: none;
+  transition:
+    border-color 150ms ease,
+    background 150ms ease,
+    transform 150ms ease;
+}
+
+.launch-home-outcome:hover {
+  border-color: var(--launch-border-strong);
+  background: var(--launch-hover-bg);
+  transform: translateY(-1px);
+}
+
+.launch-home-outcome-icon-wrap {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  color: var(--launch-ink);
+}
+
 /* 3-column horizontal layout for platform model cards */
 .launch-home-model-cards {
   grid-template-columns: repeat(3, 1fr);
@@ -1214,32 +1264,6 @@ body {
 
 .launch-home-outcome--h h3.launch-home-outcome-title {
   text-wrap: pretty;
-}
-
-.launch-home-outcome {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 18px 20px;
-  border: 1px solid var(--launch-border);
-  border-radius: 12px;
-  background: var(--launch-white);
-  text-decoration: none;
-  transition: border-color 150ms ease, background 150ms ease, transform 150ms ease;
-}
-
-.launch-home-outcome:hover {
-  border-color: var(--launch-border-strong);
-  background: var(--launch-hover-bg);
-  transform: translateY(-1px);
-}
-
-.launch-home-outcome-icon-wrap {
-  display: grid;
-  width: 32px;
-  height: 32px;
-  place-items: center;
-  color: var(--launch-ink);
 }
 
 .launch-home h3.launch-home-outcome-title {
@@ -1324,7 +1348,10 @@ body {
   font-size: 12px;
   font-weight: 600;
   line-height: 1;
-  transition: border-color 140ms ease, background 140ms ease, color 140ms ease;
+  transition:
+    border-color 140ms ease,
+    background 140ms ease,
+    color 140ms ease;
 }
 
 .launch-home-quick-link:hover .launch-home-quick-num {
@@ -1359,7 +1386,9 @@ body {
 .launch-home-quick-arrow {
   flex-shrink: 0;
   color: var(--launch-icon-muted);
-  transition: transform 150ms ease, color 150ms ease;
+  transition:
+    transform 150ms ease,
+    color 150ms ease;
 }
 
 .launch-home-quick-link:hover .launch-home-quick-arrow {
@@ -1450,7 +1479,9 @@ body {
   border-radius: 12px;
   background: var(--launch-white);
   text-decoration: none;
-  transition: border-color 140ms ease, background 140ms ease;
+  transition:
+    border-color 140ms ease,
+    background 140ms ease;
 }
 
 .launch-home-path-card:hover {
@@ -1570,7 +1601,9 @@ body {
   border-radius: 10px;
   background: var(--launch-white);
   text-decoration: none;
-  transition: border-color 140ms ease, background 140ms ease;
+  transition:
+    border-color 140ms ease,
+    background 140ms ease;
 }
 
 .launch-home-resource:hover {
@@ -1614,7 +1647,9 @@ body {
   font-size: 14px;
   font-weight: 600;
   text-decoration: none;
-  transition: opacity 160ms ease, transform 100ms ease;
+  transition:
+    opacity 160ms ease,
+    transform 100ms ease;
 }
 
 .launch-home-cta-primary:hover {
@@ -1765,7 +1800,6 @@ a.rounded-lg.border.p-4 > p.truncate {
   padding: 2rem 0;
   border-top: 1px solid var(--launch-border);
 }
-
 
 .hiw-step-header {
   display: flex;

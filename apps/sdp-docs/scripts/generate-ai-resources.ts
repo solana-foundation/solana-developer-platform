@@ -153,11 +153,6 @@ function renderLink(page: DocsPage): string {
   return `- [${page.title}](${page.url})${description}`;
 }
 
-function renderSection(section: Section): string {
-  const rows = section.pages.map(renderLink).join("\n");
-  return `## ${section.title}\n${rows}`;
-}
-
 function buildSections(meta: DocsMeta, pages: Map<string, DocsPage>): Section[] {
   const sections: Section[] = [];
   let currentSection: Section = { title: "Docs", pages: [] };
