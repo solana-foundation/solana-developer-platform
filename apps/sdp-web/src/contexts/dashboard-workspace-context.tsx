@@ -176,8 +176,11 @@ export function DashboardWorkspaceProvider({
     if (selectionIsValid && initialSelectedProjectId === selectedProjectId) return;
 
     const target = selectionIsValid ? selectedProjectId : (sandboxProject?.id ?? null);
-    if (target === selectedProjectId) return;
-    selectProject(target);
+    if (target !== selectedProjectId) {
+      selectProject(target);
+    } else if (target !== null) {
+      void selectProjectAction(target);
+    }
   }, [selectedProjectId, projects, sandboxProject, selectProject, initialSelectedProjectId]);
 
   useEffect(() => {
