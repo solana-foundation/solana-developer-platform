@@ -84,8 +84,6 @@ export const addAllowlistEntry = async (c: AppContext) => {
         const mosaic = createMosaicService(c.env, signer);
         await mosaic.addToList({
           list: assertValidAddress(token.ablListAddress, "ablListAddress"),
-          authority: signer.address,
-          feePayer: signer.address,
           wallet: assertValidAddress(parsed.data.address, "address"),
         });
       }
@@ -164,8 +162,6 @@ export const removeAllowlistEntry = async (c: AppContext) => {
       const mosaic = createMosaicService(c.env, signer);
       await mosaic.removeFromList({
         list: assertValidAddress(token.ablListAddress, "ablListAddress"),
-        authority: signer.address,
-        feePayer: signer.address,
         wallet: assertValidAddress(entry.address, "address"),
       });
     }

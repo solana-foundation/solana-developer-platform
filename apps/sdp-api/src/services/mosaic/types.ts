@@ -209,15 +209,15 @@ export interface UpdateMetadataOptions {
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
- * Options for ABL list operations
+ * Options for ABL list operations.
+ *
+ * Note: the on-chain authority and fee payer are not part of this shape — the
+ * service derives both from its configured signer (`this.signer` /
+ * `resolveFeePayerSigner()`), so callers cannot override them.
  */
 export interface AblListOptions {
   /** List address */
   list: Address;
-  /** List authority */
-  authority: Address;
-  /** Fee payer */
-  feePayer: Address;
 }
 
 /**

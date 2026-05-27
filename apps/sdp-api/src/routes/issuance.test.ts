@@ -1854,8 +1854,6 @@ describe("Issuance Routes", () => {
           expect(createOrgSignerSpy).toHaveBeenCalled();
           expect(addToListSpy).toHaveBeenCalledWith({
             list: TEST_SOLANA_ADDRESSES.wallet3,
-            authority: TEST_SOLANA_ADDRESSES.wallet2,
-            feePayer: TEST_SOLANA_ADDRESSES.wallet2,
             wallet: TEST_SOLANA_ADDRESSES.wallet1,
           });
         } finally {
@@ -2071,8 +2069,6 @@ describe("Issuance Routes", () => {
           expect(createOrgSignerSpy).toHaveBeenCalled();
           expect(removeFromListSpy).toHaveBeenCalledWith({
             list: TEST_SOLANA_ADDRESSES.wallet3,
-            authority: TEST_SOLANA_ADDRESSES.wallet2,
-            feePayer: TEST_SOLANA_ADDRESSES.wallet2,
             wallet: TEST_SOLANA_ADDRESSES.wallet1,
           });
         } finally {
@@ -2700,8 +2696,6 @@ describe("Issuance Routes", () => {
           expect(addToListSpy).toHaveBeenCalledTimes(1);
           expect(addToListSpy).toHaveBeenCalledWith({
             list: ablList,
-            authority: signerAddress,
-            feePayer: signerAddress,
             wallet: freshDestination,
           });
           expect(prepareMintToSpy).toHaveBeenCalledTimes(1);
@@ -2848,8 +2842,6 @@ describe("Issuance Routes", () => {
           expect(addToListSpy).toHaveBeenCalledTimes(1);
           expect(addToListSpy).toHaveBeenCalledWith({
             list: ablList,
-            authority: signerAddress,
-            feePayer: signerAddress,
             wallet: freshDestination,
           });
           expect(mintToSpy).toHaveBeenCalledTimes(1);

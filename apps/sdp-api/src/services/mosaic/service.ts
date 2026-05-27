@@ -511,8 +511,11 @@ export class MosaicService {
   /**
    * Check whether a wallet is present on a token's on-chain ABL list.
    *
-   * Returns the on-chain truth — useful when DB mirrors may lag behind a
-   * pending on-chain confirmation (e.g. concurrent mint requests). One RPC.
+   * Best-effort/optimistic view at `processed` commitment (which can be rolled
+   * back) — not a durable membership check. This is deliberate: it lets a
+   * just-submitted add-to-list tx be seen before it confirms, which is what we
+   * need when DB mirrors lag behind a pending on-chain tx (e.g. concurrent mint
+   * requests). Do not use it where durable membership matters. One RPC.
    */
   async isWalletOnList(list: Address, wallet: Address): Promise<boolean> {
     const [walletEntryPda] = await findWalletEntryPda({ listConfig: list, wallet });

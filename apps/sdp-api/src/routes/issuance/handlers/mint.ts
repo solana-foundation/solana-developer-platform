@@ -49,7 +49,6 @@ async function syncDestinationToOnChainAllowlist(opts: {
   ablListAddress: string;
   destinationRaw: string;
   destination: ReturnType<typeof assertValidAddress>;
-  signerAddress: ReturnType<typeof assertValidAddress>;
   addedBy: string;
 }): Promise<boolean> {
   const listAddress = assertValidAddress(opts.ablListAddress, "ablListAddress");
@@ -90,8 +89,6 @@ async function syncDestinationToOnChainAllowlist(opts: {
   try {
     await opts.mosaic.addToList({
       list: listAddress,
-      authority: opts.signerAddress,
-      feePayer: opts.signerAddress,
       wallet: opts.destination,
     });
   } catch (error) {
@@ -194,7 +191,6 @@ export const prepareMint = async (c: AppContext) => {
         ablListAddress,
         destinationRaw: parsed.data.mint.destination,
         destination,
-        signerAddress: signer.address,
         addedBy: auth.id,
       })
     : false;
@@ -360,7 +356,6 @@ export const executeMint = async (c: AppContext) => {
           ablListAddress,
           destinationRaw: parsed.data.mint.destination,
           destination,
-          signerAddress: signer.address,
           addedBy: auth.id,
         })
       : false;
