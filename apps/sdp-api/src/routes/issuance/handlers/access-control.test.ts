@@ -54,6 +54,11 @@ describe("getOnChainAllowlistMutationForMint", () => {
     expect(getOnChainAllowlistMutationForMint(token, "devnet")).toBeNull();
   });
 
+  it("treats an empty-string ablListAddress as unset and returns null", () => {
+    const token = withAblList(allowlist("stablecoin"), "");
+    expect(getOnChainAllowlistMutationForMint(token, "devnet")).toBeNull();
+  });
+
   it("returns null for blocklist tokens regardless of on-chain ABL state", () => {
     for (const template of ["stablecoin", "tokenized-security"] as const) {
       const token = withAblList(denylist(template));

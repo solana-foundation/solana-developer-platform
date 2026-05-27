@@ -54,7 +54,9 @@ export function getOnChainAllowlistMutationForMint(
 ): string | null {
   if (getTokenAccessControlMode(token) !== "allowlist") return null;
   if (!shouldEnableOnChainAcl(token, network)) return null;
-  return token.ablListAddress ?? null;
+  // Truthy check (not `??`) so an empty-string DB value is treated as "unset"
+  // and we honor the documented null-when-no-list contract.
+  return token.ablListAddress || null;
 }
 
 export function assertDestinationAllowedByControlList(args: {
