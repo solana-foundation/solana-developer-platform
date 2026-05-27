@@ -45,11 +45,18 @@ export function WalletActionsMenu({
   triggerMode = "icon",
   triggerClassName,
 }: WalletActionsMenuProps) {
-  const { dashboardAccess } = useDashboardWorkspace();
+  const { dashboardAccess, sandboxProject } = useDashboardWorkspace();
   const [isBusy, startTransition] = useTransition();
   const resolvedWalletLabel = formatWalletLabel(walletLabel, walletAddress);
 
   const runSignerCheck = () => {
+    if (!sandboxProject) {
+      toast.error("Sandbox project unavailable. Reload the dashboard and try again.", {
+        position: "bottom-right",
+      });
+      return;
+    }
+
     const toastId = toast.loading("Sending signer check.", {
       position: "bottom-right",
     });

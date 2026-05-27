@@ -11,7 +11,6 @@ export const apiKeyCreateSchema = z.object({
   description: z.string().max(500).optional(),
   role: z.enum(["api_admin", "api_developer", "api_readonly"]).optional(),
   permissions: z.array(z.enum(PERMISSIONS)).optional(),
-  environment: z.enum(["sandbox", "production"]).optional(),
   walletScope: z.enum(["all", "selected"]),
   allowedIps: z.array(z.string()).optional(),
   expiresAt: z.string().datetime().optional(),

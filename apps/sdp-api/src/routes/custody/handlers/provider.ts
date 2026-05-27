@@ -35,6 +35,7 @@ type SigningInitializationResult = {
 
 export const initializeSigning = async (c: AppContext) => {
   const actor = resolveActor(c);
+  const projectId = c.get("projectId");
 
   const body = await c.req.json();
   const parsed = initializeSigningSchema.safeParse(body);
@@ -62,6 +63,7 @@ export const initializeSigning = async (c: AppContext) => {
       c.env,
       actor.organizationId,
       await resolveOrganizationSlug(c, actor.organizationId),
+      projectId,
       parsed.data
     );
 
@@ -73,7 +75,7 @@ export const initializeSigning = async (c: AppContext) => {
       metadata: {
         event: "provider_connected",
         provider: parsed.data.provider,
-        projectId: parsed.data.projectId ?? null,
+        projectId: projectId ?? null,
       },
     });
 
@@ -99,7 +101,7 @@ export const switchSigning = async (c: AppContext) => {
 
   const signingService = createSigningService(c.env);
   const auditService = new AuditService(getDb(c.env));
-  const projectId = parsed.data.projectId;
+  const projectId = c.get("projectId");
   const targetProvider = parsed.data.provider;
 
   await assertProviderAvailable(
@@ -153,6 +155,7 @@ export const switchSigning = async (c: AppContext) => {
         c.env,
         actor.organizationId,
         await resolveOrganizationSlug(c, actor.organizationId),
+        projectId,
         parsed.data
       );
 
@@ -192,7 +195,7 @@ export const switchSigning = async (c: AppContext) => {
 
 export const getSwitchProviderOptions = async (c: AppContext) => {
   const actor = resolveActor(c);
-  const projectId = c.req.query("projectId") ?? actor.projectId;
+  const projectId = c.get("projectId");
   const signingService = createSigningService(c.env);
   const enabledProviders = (await getEnabledProviders(c.env, getDb(c.env), actor.organizationId))
     .custody;
@@ -243,11 +246,12 @@ async function initializeProviderConnection(
   env: AppContext["env"],
   organizationId: string,
   organizationSlug: string,
+  projectId: string | undefined,
   request: InitializeSigningRequest | SwitchSigningRequest
 ): Promise<SigningInitializationResult> {
   switch (request.provider) {
     case "local":
-      return signingService.initializeLocalSigning(organizationId, request.projectId, {
+      return signingService.initializeLocalSigning(organizationId, projectId, {
         walletLabel: request.walletLabel,
       });
     case "fireblocks": {
@@ -260,7 +264,7 @@ async function initializeProviderConnection(
       const existingFireblocksConfig = await findScopeFireblocksConfig(
         c,
         organizationId,
-        request.projectId
+        projectId
       );
 
       const { vaultAccountId, assetId, apiBaseUrl } = existingFireblocksConfig
@@ -276,7 +280,7 @@ async function initializeProviderConnection(
             apiSecretPem: env.FIREBLOCKS_API_SECRET,
           });
 
-      return signingService.initializeFireblocksSigning(organizationId, request.projectId, {
+      return signingService.initializeFireblocksSigning(organizationId, projectId, {
         apiKey: resolvedApiKey,
         apiSecretPem: resolvedApiSecretPem,
         vaultAccountId,
@@ -286,13 +290,13 @@ async function initializeProviderConnection(
       });
     }
     case "privy":
-      return signingService.initializePrivySigning(organizationId, request.projectId, {
+      return signingService.initializePrivySigning(organizationId, projectId, {
         apiBaseUrl: request.apiBaseUrl,
         requestDelayMs: request.requestDelayMs,
         walletLabel: request.walletLabel,
       });
     case "coinbase_cdp":
-      return signingService.initializeCoinbaseCdpSigning(organizationId, request.projectId, {
+      return signingService.initializeCoinbaseCdpSigning(organizationId, projectId, {
         apiBaseUrl: request.apiBaseUrl,
         network: request.network,
         walletAddress: request.walletAddress,
@@ -300,21 +304,21 @@ async function initializeProviderConnection(
         walletLabel: request.walletLabel,
       });
     case "para":
-      return signingService.initializeParaSigning(organizationId, request.projectId, {
+      return signingService.initializeParaSigning(organizationId, projectId, {
         apiBaseUrl: request.apiBaseUrl,
         requestDelayMs: request.requestDelayMs,
         walletId: request.walletId,
         walletLabel: request.walletLabel,
       });
     case "turnkey":
-      return signingService.initializeTurnkeySigning(organizationId, request.projectId, {
+      return signingService.initializeTurnkeySigning(organizationId, projectId, {
         apiBaseUrl: request.apiBaseUrl,
         requestDelayMs: request.requestDelayMs,
         privateKeyId: request.privateKeyId,
         walletLabel: request.walletLabel,
       });
     case "dfns":
-      return signingService.initializeDfnsSigning(organizationId, request.projectId, {
+      return signingService.initializeDfnsSigning(organizationId, projectId, {
         apiBaseUrl: request.apiBaseUrl,
         network: request.network,
         walletId: request.walletId,
@@ -322,7 +326,7 @@ async function initializeProviderConnection(
         walletLabel: request.walletLabel,
       });
     case "anchorage":
-      return signingService.initializeAnchorageWalletLifecycle(organizationId, request.projectId, {
+      return signingService.initializeAnchorageWalletLifecycle(organizationId, projectId, {
         apiBaseUrl: request.apiBaseUrl,
         walletId: request.walletId,
         walletLabel: request.walletLabel,

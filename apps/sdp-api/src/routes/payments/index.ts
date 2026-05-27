@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
+import { projectContextMiddleware } from "@/middleware/project-context";
 import type { Env } from "@/types/env";
 import {
   createTransfer,
@@ -17,6 +18,7 @@ import {
 const payments = new Hono<{ Bindings: Env }>();
 
 payments.use("*", unifiedAuthMiddleware({ allowClerk: true, allowSession: true }));
+payments.use("*", projectContextMiddleware());
 
 payments.get(
   "/wallets/:walletId/balances",

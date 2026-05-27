@@ -39,6 +39,10 @@ describe("Counterparties Routes", () => {
       .run()
       .catch(() => {});
     await db
+      .prepare("DELETE FROM api_keys")
+      .run()
+      .catch(() => {});
+    await db
       .prepare("DELETE FROM project_members")
       .run()
       .catch(() => {});
@@ -80,13 +84,23 @@ describe("Counterparties Routes", () => {
     await db
       .prepare(
         `INSERT OR REPLACE INTO api_keys
-         (id, organization_id, created_by, name, key_prefix, key_hash, role, permissions, environment, status)
-         VALUES (?, ?, ?, 'Test Key', ?, ?, 'api_admin', '["*"]', 'sandbox', 'active')`
+         (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
+         VALUES (?, ?, ?, ?, 'Test Key', ?, ?, 'api_admin', '["*"]', 'active')`
       )
-      .bind(TEST_API_KEY.id, TEST_ORG.id, TEST_USER.id, TEST_API_KEY.prefix, apiKeyHash)
+      .bind(
+        TEST_API_KEY.id,
+        TEST_ORG.id,
+        TEST_PROJECT_ID,
+        TEST_USER.id,
+        TEST_API_KEY.prefix,
+        apiKeyHash
+      )
       .run();
 
-    await kv.apiKeys.put(`key:${apiKeyHash}`, JSON.stringify(TEST_CACHED_API_KEY));
+    await kv.apiKeys.put(
+      `key:${apiKeyHash}`,
+      JSON.stringify({ ...TEST_CACHED_API_KEY, projectId: TEST_PROJECT_ID })
+    );
   });
 
   const authHeader = `Bearer ${TEST_API_KEY.raw}`;

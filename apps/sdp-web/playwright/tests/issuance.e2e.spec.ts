@@ -5,6 +5,7 @@ import {
   type IssuanceFixtures,
   readIssuanceFixtures,
 } from "../support/issuance-fixtures";
+import { seedProjectCookie } from "../support/local-dashboard-bootstrap";
 import { bootstrapLocalIssuanceFixtures } from "../support/local-issuance-bootstrap";
 
 function shortValue(value: string): string {
@@ -105,8 +106,12 @@ test.describe
         identity: session.identity,
         bearerToken: session.bearerToken,
       });
-      await session.page.close();
       fixtures = readIssuanceFixtures();
+      await session.page.close();
+    });
+
+    test.beforeEach(async ({ page }) => {
+      await seedProjectCookie(page, fixtures.projectId);
     });
 
     test("1. user can sign in and load the issuance dashboard", async ({ page }) => {

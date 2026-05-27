@@ -17,11 +17,13 @@ import {
 } from "./base";
 
 export const initializeSigningRequestSchema = withOpenApi(initializeSigningSchemaBase, {
-  description: "Initialize wallet signing provider for the organization or project.",
+  description:
+    "Initialize wallet signing provider for the project resolved from the request context.",
 });
 
 export const switchSigningRequestSchema = withOpenApi(switchSigningSchemaBase, {
-  description: "Switch the active wallet signing provider for the organization or project.",
+  description:
+    "Switch the active wallet signing provider for the project resolved from the request context.",
 });
 
 export const signerCheckRequestSchema = withOpenApi(signerCheckSchemaBase, {
@@ -35,7 +37,6 @@ export const orgCustodyProviderSchema = z
 
 export const createCustodyWalletRequestSchema = createWalletSchemaBase
   .extend({
-    projectId: projectIdParamSchema.optional(),
     provider: orgCustodyProviderSchema.optional().openapi({
       description:
         "Optional provider target. Defaults to the currently resolved default provider for the scope.",
@@ -58,7 +59,6 @@ export const createCustodyWalletRequestSchema = createWalletSchemaBase
 
 export const setDefaultWalletRequestSchema = setDefaultWalletSchemaBase
   .extend({
-    projectId: projectIdParamSchema.optional(),
     provider: orgCustodyProviderSchema.optional().openapi({
       description:
         "Optional provider target. Defaults to the currently resolved default provider for the scope.",
@@ -73,7 +73,6 @@ export const setDefaultWalletRequestSchema = setDefaultWalletSchemaBase
 
 export const deleteWalletRequestSchema = deleteWalletSchemaBase
   .extend({
-    projectId: projectIdParamSchema.optional(),
     provider: orgCustodyProviderSchema.optional().openapi({
       description:
         "Optional provider target. Defaults to the currently resolved default provider for the scope.",

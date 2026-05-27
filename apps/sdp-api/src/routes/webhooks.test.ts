@@ -436,22 +436,40 @@ describe("Clerk webhooks", () => {
     expect(userId).toBeTruthy();
 
     const apiKeyHash = "webhook_lifecycle_key_hash";
+    const lifecycleProjectId = "prj_webhook_lifecycle";
+    await getDb(env)
+      .prepare(
+        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
+         SELECT ?, aoi.organization_id, ?, ?, ?, ?, ?
+         FROM auth_organization_identities aoi
+         WHERE aoi.provider = 'clerk' AND aoi.provider_org_id = ?`
+      )
+      .bind(
+        lifecycleProjectId,
+        "Lifecycle Project",
+        "lifecycle-project",
+        "sandbox",
+        "active",
+        userId,
+        "org_clerk_lifecycle"
+      )
+      .run();
     await getDb(env)
       .prepare(
         `INSERT INTO api_keys
-         (id, organization_id, created_by, name, key_prefix, key_hash, role, environment, status)
+         (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, status)
          SELECT ?, aoi.organization_id, ?, ?, ?, ?, ?, ?, ?
          FROM auth_organization_identities aoi
          WHERE aoi.provider = 'clerk' AND aoi.provider_org_id = ?`
       )
       .bind(
         "key_webhook_lifecycle",
+        lifecycleProjectId,
         userId,
         "Lifecycle Key",
         "sk_test_web",
         apiKeyHash,
         "api_admin",
-        "sandbox",
         "active",
         "org_clerk_lifecycle"
       )

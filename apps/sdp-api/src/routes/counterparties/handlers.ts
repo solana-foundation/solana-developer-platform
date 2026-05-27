@@ -2,7 +2,7 @@ import type { Counterparty, CounterpartyResponse, ListCounterpartiesResponse } f
 import { z } from "zod";
 import { getDb } from "@/db";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
-import { getAuth } from "@/lib/auth";
+import { getAuth, requireProjectId } from "@/lib/auth";
 import { resolveCreatorUserId } from "@/lib/creator";
 import {
   badRequest,
@@ -41,6 +41,7 @@ function mapToCounterparty(row: CounterpartyRow): Counterparty {
 
 export const listCounterparties = async (c: AppContext) => {
   const auth = getAuth(c);
+  const projectId = requireProjectId(c);
   const parsed = listCounterpartiesQuerySchema.safeParse(c.req.query());
 
   if (!parsed.success) {
@@ -52,6 +53,7 @@ export const listCounterparties = async (c: AppContext) => {
   const repo = getCounterpartiesRepository(c);
   const { rows, total } = await repo.listCounterparties({
     organizationId: auth.organizationId,
+    projectId,
     includeArchived,
     limit: pageSize,
     offset: (page - 1) * pageSize,
@@ -69,6 +71,7 @@ export const listCounterparties = async (c: AppContext) => {
 
 export const getCounterparty = async (c: AppContext) => {
   const auth = getAuth(c);
+  const projectId = requireProjectId(c);
   const params = counterpartyIdParamsSchema.safeParse(c.req.param());
 
   if (!params.success) {
@@ -79,6 +82,7 @@ export const getCounterparty = async (c: AppContext) => {
   const counterparty = await repo.getCounterpartyById({
     counterpartyId: params.data.counterpartyId,
     organizationId: auth.organizationId,
+    projectId,
   });
 
   if (!counterparty) {
@@ -91,6 +95,7 @@ export const getCounterparty = async (c: AppContext) => {
 
 export const createCounterparty = async (c: AppContext) => {
   const auth = getAuth(c);
+  const projectId = requireProjectId(c);
   const body = await c.req.json();
   const parsed = createCounterpartySchema.safeParse(body);
 
@@ -104,6 +109,7 @@ export const createCounterparty = async (c: AppContext) => {
     const existing = await repo.getCounterpartyByExternalId({
       externalId: parsed.data.externalId,
       organizationId: auth.organizationId,
+      projectId,
     });
     if (existing) {
       throw conflict("A counterparty with this external ID already exists");
@@ -114,7 +120,7 @@ export const createCounterparty = async (c: AppContext) => {
 
   const counterparty = await repo.createCounterparty({
     organizationId: auth.organizationId,
-    projectId: auth.projectId,
+    projectId,
     externalId: parsed.data.externalId ?? null,
     entityType: parsed.data.entityType,
     displayName: parsed.data.displayName,
@@ -147,6 +153,7 @@ export const createCounterparty = async (c: AppContext) => {
 
 export const updateCounterparty = async (c: AppContext) => {
   const auth = getAuth(c);
+  const projectId = requireProjectId(c);
   const params = counterpartyIdParamsSchema.safeParse(c.req.param());
 
   if (!params.success) {
@@ -167,6 +174,7 @@ export const updateCounterparty = async (c: AppContext) => {
     const existing = await repo.getCounterpartyByExternalId({
       externalId: parsed.data.externalId,
       organizationId: auth.organizationId,
+      projectId,
     });
     if (existing && existing.id !== counterpartyId) {
       throw conflict("A counterparty with this external ID already exists");
@@ -176,6 +184,7 @@ export const updateCounterparty = async (c: AppContext) => {
   const updated = await repo.updateCounterparty({
     counterpartyId,
     organizationId: auth.organizationId,
+    projectId,
     ...parsed.data,
   });
 
@@ -200,6 +209,7 @@ export const updateCounterparty = async (c: AppContext) => {
 
 export const archiveCounterparty = async (c: AppContext) => {
   const auth = getAuth(c);
+  const projectId = requireProjectId(c);
   const params = counterpartyIdParamsSchema.safeParse(c.req.param());
 
   if (!params.success) {
@@ -212,6 +222,7 @@ export const archiveCounterparty = async (c: AppContext) => {
   const archived = await repo.archiveCounterparty({
     counterpartyId,
     organizationId: auth.organizationId,
+    projectId,
   });
 
   if (!archived) {

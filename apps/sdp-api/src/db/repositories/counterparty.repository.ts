@@ -22,7 +22,7 @@ export interface CounterpartyRow {
 
 export interface CreateCounterpartyInput {
   organizationId: string;
-  projectId: string | null;
+  projectId: string;
   externalId: string | null;
   entityType: CounterpartyEntityType;
   displayName: string;
@@ -34,6 +34,7 @@ export interface CreateCounterpartyInput {
 export interface UpdateCounterpartyInput {
   counterpartyId: string;
   organizationId: string;
+  projectId: string;
   externalId?: string | null;
   entityType?: CounterpartyEntityType;
   displayName?: string;
@@ -44,10 +45,12 @@ export interface UpdateCounterpartyInput {
 export interface ArchiveCounterpartyInput {
   counterpartyId: string;
   organizationId: string;
+  projectId: string;
 }
 
 export interface ListCounterpartiesInput {
   organizationId: string;
+  projectId: string;
   includeArchived?: boolean;
   limit: number;
   offset: number;
@@ -69,10 +72,12 @@ export interface CounterpartiesRepository {
   getCounterpartyById(params: {
     counterpartyId: string;
     organizationId: string;
+    projectId: string;
   }): Promise<CounterpartyRow | null>;
   getCounterpartyByExternalId(params: {
     externalId: string;
     organizationId: string;
+    projectId: string;
   }): Promise<CounterpartyRow | null>;
   listCounterparties(params: ListCounterpartiesInput): Promise<ListCounterpartiesResult>;
 }

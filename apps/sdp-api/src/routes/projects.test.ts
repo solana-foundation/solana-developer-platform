@@ -12,6 +12,11 @@ import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
 
+const TEST_PROJECT = {
+  id: "prj_test_projects",
+  slug: "test-test-org-projects",
+};
+
 describe("Projects Routes", () => {
   let apiKeyHash: string;
 
@@ -39,15 +44,12 @@ describe("Projects Routes", () => {
       await kv.rateLimits.delete(key.name);
     }
 
-    // Clear projects tables
-    await db
-      .prepare("DELETE FROM project_members")
-      .run()
-      .catch(() => {});
-    await db
-      .prepare("DELETE FROM projects")
-      .run()
-      .catch(() => {});
+    // Delete in FK-safe order: api_keys → project_members → projects.
+    // The migration added ON DELETE RESTRICT from api_keys.project_id, so
+    // projects can't be wiped until referring keys are gone.
+    await db.prepare("DELETE FROM api_keys").run();
+    await db.prepare("DELETE FROM project_members").run();
+    await db.prepare("DELETE FROM projects").run();
 
     // Seed organization
     await db
@@ -65,18 +67,38 @@ describe("Projects Routes", () => {
       .bind(TEST_USER.id, TEST_USER.email)
       .run();
 
+    // Seed a default project so the API key has a parent project
+    await db
+      .prepare(
+        `INSERT OR REPLACE INTO projects (id, organization_id, name, slug, environment, status, created_by)
+         VALUES (?, ?, 'Test Project', ?, 'sandbox', 'active', ?)`
+      )
+      .bind(TEST_PROJECT.id, TEST_ORG.id, TEST_PROJECT.slug, TEST_USER.id)
+      .run();
+
     // Seed API key with projects:write permission
     await db
       .prepare(
         `INSERT OR REPLACE INTO api_keys
-         (id, organization_id, created_by, name, key_prefix, key_hash, role, permissions, environment, status)
-         VALUES (?, ?, ?, 'Test Key', ?, ?, 'api_admin', '["*"]', 'sandbox', 'active')`
+         (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
+         VALUES (?, ?, ?, ?, 'Test Key', ?, ?, 'api_admin', '["*"]', 'active')`
       )
-      .bind(TEST_API_KEY.id, TEST_ORG.id, TEST_USER.id, TEST_API_KEY.prefix, apiKeyHash)
+      .bind(
+        TEST_API_KEY.id,
+        TEST_ORG.id,
+        TEST_PROJECT.id,
+        TEST_USER.id,
+        TEST_API_KEY.prefix,
+        apiKeyHash
+      )
       .run();
 
-    // Cache API key in KV
-    await kv.apiKeys.put(`key:${apiKeyHash}`, JSON.stringify(TEST_CACHED_API_KEY));
+    // Cache API key in KV — override projectId so the cached actor scope
+    // matches the project row we just seeded for this test suite.
+    await kv.apiKeys.put(
+      `key:${apiKeyHash}`,
+      JSON.stringify({ ...TEST_CACHED_API_KEY, projectId: TEST_PROJECT.id })
+    );
   });
 
   describe("POST /v1/projects", () => {
@@ -466,27 +488,9 @@ describe("Projects Routes", () => {
   });
 
   describe("Project API Keys", () => {
-    let projectId: string;
-
-    beforeEach(async () => {
-      // Use unique slug per test run
-      const uniqueSlug = `api-key-proj-${Date.now()}`;
-      const createRes = await app.request(
-        "/v1/projects",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${TEST_API_KEY.raw}`,
-          },
-          body: JSON.stringify({ name: "API Key Project", slug: uniqueSlug }),
-        },
-        env
-      );
-      expect(createRes.status).toBe(201);
-      const created = await createRes.json();
-      projectId = created.data.project.id;
-    });
+    // API keys are bound to a single project; use the same project the test key
+    // belongs to so that assertProjectAccess passes.
+    const projectId = TEST_PROJECT.id;
 
     it("creates API key for project", async () => {
       const res = await app.request(
@@ -499,7 +503,6 @@ describe("Projects Routes", () => {
           },
           body: JSON.stringify({
             name: "Project Key",
-            environment: "sandbox",
             walletScope: "all",
           }),
         },
