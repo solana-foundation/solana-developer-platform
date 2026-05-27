@@ -516,7 +516,10 @@ export class MosaicService {
    */
   async isWalletOnList(list: Address, wallet: Address): Promise<boolean> {
     const [walletEntryPda] = await findWalletEntryPda({ listConfig: list, wallet });
-    const info = await this.rpc.getAccountInfo(walletEntryPda).send();
+    // `processed` so a just-submitted add-to-list tx is visible before it
+    // confirms — this method's whole point is to reflect pending on-chain
+    // state during concurrent mints, where `confirmed` returns false negatives.
+    const info = await this.rpc.getAccountInfo(walletEntryPda, { commitment: "processed" }).send();
     return info.value !== null;
   }
 

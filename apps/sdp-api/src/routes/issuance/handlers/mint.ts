@@ -89,6 +89,14 @@ async function syncDestinationToOnChainAllowlist(opts: {
       wallet: opts.destination,
     });
   } catch (error) {
+    // TOCTOU: a parallel request may have added the wallet on-chain between
+    // our initial isWalletOnList check and this add (or the add raced a
+    // transient RPC/confirmation error but the wallet is in fact on-chain).
+    // If on-chain membership now holds, the DB mirror is correct — keep it and
+    // treat this as a successful sync rather than rolling back into drift.
+    if (await opts.mosaic.isWalletOnList(listAddress, opts.destination)) {
+      return false;
+    }
     if (createdEntryId) {
       try {
         await opts.tokenService.revokeAllowlistEntry(createdEntryId);
