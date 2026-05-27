@@ -2,21 +2,13 @@
 
 import type { ListProjectsResponse } from "@sdp/types";
 import { cookies } from "next/headers";
-import { PROJECT_COOKIE_NAME } from "./project-cookie";
+import { PROJECT_COOKIE_NAME, PROJECT_COOKIE_OPTIONS } from "./project-cookie";
 import { sdpApiFetch } from "./sdp-api";
-
-const COOKIE_OPTIONS = {
-  path: "/" as const,
-  maxAge: 31_536_000,
-  sameSite: "lax" as const,
-  secure: process.env.NODE_ENV === "production",
-  httpOnly: true,
-};
 
 export async function selectProjectAction(projectId: string | null): Promise<void> {
   const store = await cookies();
   if (projectId) {
-    store.set(PROJECT_COOKIE_NAME, projectId, COOKIE_OPTIONS);
+    store.set(PROJECT_COOKIE_NAME, projectId, PROJECT_COOKIE_OPTIONS);
   } else {
     store.delete(PROJECT_COOKIE_NAME);
   }
@@ -48,7 +40,7 @@ export async function reconcileProjectCookieAction(): Promise<boolean> {
 
   const next = projects.find((p) => p.slug === "default-sandbox") ?? projects[0] ?? null;
   if (next) {
-    store.set(PROJECT_COOKIE_NAME, next.id, COOKIE_OPTIONS);
+    store.set(PROJECT_COOKIE_NAME, next.id, PROJECT_COOKIE_OPTIONS);
   } else if (current) {
     store.delete(PROJECT_COOKIE_NAME);
   }

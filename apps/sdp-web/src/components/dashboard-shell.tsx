@@ -19,6 +19,11 @@ import {
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { type ReactNode, useEffect, useRef, useState } from "react";
+import IssuanceLoading from "@/app/dashboard/issuance/loading";
+import DashboardLoading from "@/app/dashboard/loading";
+import CounterpartyLoading from "@/app/dashboard/payments/counterparty/loading";
+import PaymentsLoading from "@/app/dashboard/payments/loading";
+import WalletsLoading from "@/app/dashboard/wallets/loading";
 import { CounterpartyHeaderTabs } from "@/components/counterparty-header-tabs";
 import { IssuanceHeaderTabs } from "@/components/issuance-header-tabs";
 import { NetworkDebugPanel, NetworkDebugToggle } from "@/components/network-debug-panel";
@@ -340,6 +345,15 @@ function getDashboardPageConfig(pathname: string): DashboardPageConfig {
   return { title: "Home" };
 }
 
+function resolvePageLoadingComponent(pathname: string): React.ComponentType {
+  if (pathname.startsWith("/dashboard/payments/counterparty")) return CounterpartyLoading;
+  if (pathname.startsWith("/dashboard/payments")) return PaymentsLoading;
+  if (pathname.startsWith("/dashboard/wallets") || pathname.startsWith("/dashboard/custody"))
+    return WalletsLoading;
+  if (pathname.startsWith("/dashboard/issuance")) return IssuanceLoading;
+  return DashboardLoading;
+}
+
 function isItemActive(pathname: string, href: string): boolean {
   if (href === "/dashboard") {
     return pathname === "/dashboard";
@@ -558,7 +572,9 @@ function DashboardSidebarContent({
 export function DashboardShell({ children }: { children: ReactNode }) {
   const { isLoaded, isSignedIn, orgId } = useAuth();
   const pathname = usePathname();
-  const { dashboardAccess, isSidebarOpen, setSidebarOpen } = useDashboardWorkspace();
+  const { dashboardAccess, isSidebarOpen, setSidebarOpen, isProjectSwitching } =
+    useDashboardWorkspace();
+  const PageLoadingComponent = resolvePageLoadingComponent(pathname);
   const [isMobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const previousPathnameRef = useRef(pathname);
   const sidebarExpandedWidth = 296;
@@ -794,7 +810,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
                 shouldLockViewportScroll ? "min-h-0 flex-1 overflow-hidden" : "",
               ].join(" ")}
             >
-              {children}
+              {isProjectSwitching ? <PageLoadingComponent /> : children}
             </div>
           </div>
         </section>
