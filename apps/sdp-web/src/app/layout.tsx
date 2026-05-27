@@ -40,15 +40,6 @@ export default async function RootLayout({
 
   return (
     <html lang="en">
-      <head>
-        {process.env.NODE_ENV === "development" && (
-          <Script
-            src="//unpkg.com/react-grab/dist/index.global.js"
-            crossOrigin="anonymous"
-            strategy="beforeInteractive"
-          />
-        )}
-      </head>
       <body>
         {content}
         <Toaster position="bottom-right" richColors closeButton />
