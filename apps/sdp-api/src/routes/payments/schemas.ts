@@ -1,4 +1,4 @@
-import { RAMP_PROVIDERS } from "@sdp/types";
+import { type PrivateTransferRequest, RAMP_PROVIDERS } from "@sdp/types";
 import { z } from "zod";
 import { isDecimalString } from "@/lib/amount";
 import { isAddress } from "@/lib/solana";
@@ -70,6 +70,35 @@ const paymentAmountSchema = z
     message: "Amount must be greater than zero",
   });
 
+const magicBlockPrivateTransferOptionsSchema = z
+  .object({
+    validator: z.string().min(32).max(44).optional(),
+    initIfMissing: z.boolean().optional(),
+    initAtasIfMissing: z.boolean().optional(),
+    initVaultIfMissing: z.boolean().optional(),
+    minDelayMs: z
+      .string()
+      .regex(/^\d+$/, { message: "minDelayMs must be an integer string" })
+      .optional(),
+    maxDelayMs: z
+      .string()
+      .regex(/^\d+$/, { message: "maxDelayMs must be an integer string" })
+      .optional(),
+    clientRefId: z
+      .string()
+      .regex(/^\d+$/, { message: "clientRefId must be an integer string" })
+      .optional(),
+    split: z.number().int().min(1).max(15).optional(),
+    gasless: z.boolean().optional(),
+    legacy: z.boolean().optional(),
+  })
+  .strict();
+
+export const privateTransferSchema: z.ZodType<PrivateTransferRequest> = z.object({
+  provider: z.literal("magicblock"),
+  magicBlock: magicBlockPrivateTransferOptionsSchema,
+});
+
 const rampProviderSchema = z.enum(RAMP_PROVIDERS);
 
 const rampCurrencyCodeSchema = z
@@ -89,6 +118,7 @@ export const createTransferSchema = z.object({
   token: paymentTokenSchema,
   amount: paymentAmountSchema,
   memo: z.string().max(256).optional(),
+  privateTransfer: privateTransferSchema.optional(),
 });
 
 export const transferDirectionSchema = z.enum(["inbound", "outbound"]);

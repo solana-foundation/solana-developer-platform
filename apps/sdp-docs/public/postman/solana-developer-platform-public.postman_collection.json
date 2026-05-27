@@ -1162,10 +1162,10 @@
               }
             ],
             "url": "{{baseUrl}}/v1/payments/transfers/prepare",
-            "description": "Builds an unsigned transfer transaction for a custody wallet. The source walletId must reference a wallet from /v1/wallets.",
+            "description": "Builds an unsigned transfer transaction for a custody wallet. The source walletId must reference a wallet from /v1/wallets. Private-transfer requests are provider-built here and returned for client review and signing.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"projectId\": \"prj_example\",\n  \"source\": \"wal_example\",\n  \"destination\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"100.00\",\n  \"memo\": \"\",\n  \"referenceAddress\": \"RefY2HwGmCKvJsXJzhRkc7m9D4N6pQ5tT3aB8fE1uV2W\",\n  \"options\": {\n    \"priorityFee\": \"auto\",\n    \"simulate\": true\n  }\n}",
+              "raw": "{\n  \"projectId\": \"prj_example\",\n  \"source\": \"wal_example\",\n  \"destination\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"100.00\",\n  \"memo\": \"\",\n  \"privateTransfer\": {\n    \"provider\": \"magicblock\",\n    \"magicBlock\": {\n      \"initIfMissing\": true,\n      \"initAtasIfMissing\": true,\n      \"maxDelayMs\": \"1000\"\n    }\n  },\n  \"referenceAddress\": \"RefY2HwGmCKvJsXJzhRkc7m9D4N6pQ5tT3aB8fE1uV2W\",\n  \"options\": {\n    \"priorityFee\": \"auto\"\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1195,10 +1195,10 @@
               }
             ],
             "url": "{{baseUrl}}/v1/payments/transfers",
-            "description": "Executes a transfer using server-side custody signing. The source walletId must reference a wallet from /v1/wallets.",
+            "description": "Executes a transfer using server-side custody signing. The source walletId must reference a wallet from /v1/wallets. Private-transfer requests are provider-built, signed by SDP-controlled wallets when required, and submitted on the configured Solana cluster.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"projectId\": \"prj_example\",\n  \"source\": \"wal_example\",\n  \"destination\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"100.00\",\n  \"memo\": \"\"\n}",
+              "raw": "{\n  \"projectId\": \"prj_example\",\n  \"source\": \"wal_example\",\n  \"destination\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"100.00\",\n  \"memo\": \"\",\n  \"privateTransfer\": {\n    \"provider\": \"magicblock\",\n    \"magicBlock\": {\n      \"initIfMissing\": true,\n      \"initAtasIfMissing\": true,\n      \"maxDelayMs\": \"1000\"\n    }\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1256,6 +1256,30 @@
             "body": {
               "mode": "raw",
               "raw": "{\n  \"provider\": \"moonpay\",\n  \"sourceWallet\": \"wal_example\",\n  \"cryptoToken\": \"USDC\",\n  \"fiatCurrency\": \"USD\",\n  \"cryptoAmount\": \"50.00\",\n  \"kycReference\": \"\",\n  \"redirectUrl\": \"https://example.com\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Simulate sandbox transfer",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/payments/ramps/sandbox/simulate",
+            "description": "Sandbox-only helper that simulates provider-specific transfer completion flows.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"provider\": \"lightspark\",\n  \"payload\": {\n    \"quoteId\": \"\",\n    \"currencyCode\": \"USD\",\n    \"currencyAmount\": 0\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"

@@ -147,6 +147,76 @@ export const walletBalancesSchema = z
       "Balance payload for a custody-managed wallet. Use /v1/wallets for wallet provisioning and listing.",
   });
 
+export const magicBlockPrivateTransferOptionsSchema = z
+  .object({
+    validator: solanaAddressSchema.optional().openapi({
+      description:
+        "Optional MagicBlock validator pubkey. MagicBlock can resolve this when omitted.",
+    }),
+    initIfMissing: z
+      .boolean()
+      .optional()
+      .openapi({ description: "Initialize the MagicBlock transfer queue when missing." }),
+    initAtasIfMissing: z
+      .boolean()
+      .optional()
+      .openapi({ description: "Initialize required associated token accounts when missing." }),
+    initVaultIfMissing: z
+      .boolean()
+      .optional()
+      .openapi({ description: "Initialize the MagicBlock vault when missing." }),
+    minDelayMs: z.string().regex(/^\d+$/).optional().openapi({
+      description:
+        "Earliest settlement delay in milliseconds, preserved as MagicBlock's integer-string field.",
+      example: "0",
+    }),
+    maxDelayMs: z.string().regex(/^\d+$/).optional().openapi({
+      description:
+        "Latest settlement delay in milliseconds, preserved as MagicBlock's integer-string field.",
+      example: "1000",
+    }),
+    clientRefId: z.string().regex(/^\d+$/).optional().openapi({
+      description:
+        "Client reference encrypted by MagicBlock for payment correlation, preserved as an integer string.",
+      example: "1042",
+    }),
+    split: z.number().int().min(1).max(15).optional().openapi({
+      description: "Number of queue entries to split the transfer across.",
+      example: 2,
+    }),
+    gasless: z
+      .boolean()
+      .optional()
+      .openapi({ description: "Request MagicBlock fee sponsorship when supported." }),
+    legacy: z
+      .boolean()
+      .optional()
+      .openapi({ description: "Request MagicBlock legacy transaction mode instead of v0." }),
+  })
+  .strict()
+  .openapi({
+    description:
+      "MagicBlock-specific options for private SPL transfer preparation. SDP currently supports base-balance private transfers only: funds are spent from the sender's normal Solana token balance and settle to the recipient's normal Solana token balance through MagicBlock's private routing.",
+    example: {
+      initIfMissing: true,
+      initAtasIfMissing: true,
+      maxDelayMs: "1000",
+    },
+  });
+
+export const privateTransferRequestSchema = z
+  .object({
+    provider: z.literal("magicblock").openapi({
+      description: "Private-transfer provider identifier.",
+      example: "magicblock",
+    }),
+    magicBlock: magicBlockPrivateTransferOptionsSchema,
+  })
+  .openapi({
+    description:
+      "Optional private-transfer routing. MagicBlock can prepare an unsigned transaction for client review or execute through server-side custody when all required signers are SDP-controlled.",
+  });
+
 export const createTransferRequestSchema = createTransferSchemaBase
   .extend({
     projectId: withOpenApi(createTransferSchemaBase.shape.projectId, {
@@ -172,6 +242,10 @@ export const createTransferRequestSchema = createTransferSchemaBase
     }),
     memo: withOpenApi(createTransferSchemaBase.shape.memo, {
       description: "Optional memo for the transfer.",
+    }),
+    privateTransfer: privateTransferRequestSchema.optional().openapi({
+      description:
+        "Private-transfer routing. SDP asks the provider to build a base-balance private transfer, signs it with the custody wallet when required, and submits it on the configured Solana cluster.",
     }),
   })
   .openapi({
@@ -228,13 +302,18 @@ export const prepareTransferRequestSchema = prepareTransferSchemaBase
       example: "RefY2HwGmCKvJsXJzhRkc7m9D4N6pQ5tT3aB8fE1uV2W",
     }),
     options: prepareTransferOptionsSchema.optional().openapi({
-      description: "Transaction preparation options.",
-      example: { priorityFee: "auto", simulate: true },
+      description:
+        "Transaction preparation options. Simulation is not supported when `privateTransfer` is present.",
+      example: { priorityFee: "auto" },
+    }),
+    privateTransfer: privateTransferRequestSchema.optional().openapi({
+      description:
+        "Private-transfer routing for provider-built transaction preparation. MagicBlock private transfers are base-balance transfers routed privately by the provider.",
     }),
   })
   .openapi({
     description:
-      "Prepare transfer request payload for a custody-managed source wallet. Wallet provisioning is handled by /v1/wallets.",
+      "Prepare transfer request payload for a custody-managed source wallet. When privateTransfer is present, SDP asks the provider to build the unsigned transaction and returns it for client review/signing.",
   });
 
 export const transferTypeSchema = z
@@ -343,11 +422,44 @@ export const transferSchema = z
   })
   .openapi({ description: "Transfer transaction record." });
 
+export const preparedPrivateTransferSchema = z
+  .object({
+    provider: z.literal("magicblock").openapi({
+      description: "Private-transfer provider that built the transaction.",
+      example: "magicblock",
+    }),
+    magicBlock: z
+      .object({
+        kind: z
+          .string()
+          .openapi({ description: "MagicBlock transaction kind.", example: "transfer" }),
+        version: z
+          .string()
+          .openapi({ description: "MagicBlock transaction version.", example: "v0" }),
+        instructionCount: z.number().int().openapi({
+          description: "Instruction count in the prepared transaction.",
+          example: 4,
+        }),
+        requiredSigners: z.array(solanaAddressSchema).openapi({
+          description: "Signers required by the MagicBlock-prepared transaction.",
+        }),
+        validator: solanaAddressSchema.optional().openapi({
+          description: "MagicBlock validator pubkey returned by the provider, when present.",
+        }),
+      })
+      .openapi({ description: "MagicBlock prepared-transfer metadata." }),
+  })
+  .openapi({ description: "Provider metadata returned for private-transfer preparation." });
+
 export const prepareTransferResponseSchema = z
   .object({
     transfer: transferSchema.openapi({ description: "Transfer transaction record." }),
     preparedTransaction: preparedTransactionSchema.openapi({
       description: "Prepared transaction for client-side signing.",
+    }),
+    privateTransfer: preparedPrivateTransferSchema.optional().openapi({
+      description:
+        "Provider metadata returned for private-transfer preparation. The serialized transaction remains in preparedTransaction.",
     }),
     simulation: simulationResultSchema
       .optional()
@@ -601,6 +713,9 @@ export const walletBalancesResponseSchema = z
 export const transferResponseSchema = z
   .object({
     transfer: transferSchema.openapi({ description: "Transfer details." }),
+    privateTransfer: preparedPrivateTransferSchema
+      .optional()
+      .openapi({ description: "Provider metadata returned for private-transfer execution." }),
   })
   .openapi({ description: "Transfer response payload." });
 
