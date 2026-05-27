@@ -1,9 +1,3 @@
-/**
- * Vitest config for Node-runtime tests. Sibling of vitest.config.ts (CF
- * Workers pool). Tests in `**\/*.node.test.ts` run here in plain Node
- * because they need APIs Workers don't expose (e.g. ioredis → node:net).
- */
-
 import path from "node:path";
 import { defineConfig } from "vitest/config";
 
@@ -16,9 +10,20 @@ export default defineConfig({
   },
   test: {
     globals: true,
+    globalSetup: ["src/test/node-global-setup.ts"],
+    fileParallelism: false,
+    isolate: false,
+    maxWorkers: 1,
     include: ["src/**/*.node.test.ts"],
     exclude: ["node_modules", ".wrangler", "dist"],
-    testTimeout: 15000,
-    hookTimeout: 15000,
+    coverage: {
+      provider: "istanbul",
+      reporter: ["text", "json", "html"],
+      reportsDirectory: "./coverage/node",
+      include: ["src/**/*.ts"],
+      exclude: ["src/**/*.test.ts", "src/**/*.spec.ts", "src/types/**", "src/db/migrations/**"],
+    },
+    testTimeout: 30000,
+    hookTimeout: 60000,
   },
 });

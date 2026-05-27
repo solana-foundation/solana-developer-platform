@@ -24,7 +24,9 @@ function loadEnvFile(filePath: string): Record<string, string> {
       continue;
     }
 
-    vars[key] = rest.join("=");
+    const raw = rest.join("=");
+    const quoted = raw.match(/^(['"])(.*)\1$/);
+    vars[key] = quoted ? quoted[2] : raw;
   }
 
   return vars;
@@ -88,8 +90,9 @@ export default defineConfig({
     // because ioredis needs Node socket APIs the Workers pool doesn't expose.
     exclude: ["node_modules", ".wrangler", "dist", "src/**/*.node.test.ts"],
     coverage: {
-      provider: "v8",
+      provider: "istanbul",
       reporter: ["text", "json", "html"],
+      reportsDirectory: "./coverage/workers",
       include: ["src/**/*.ts"],
       exclude: ["src/**/*.test.ts", "src/**/*.spec.ts", "src/types/**", "src/db/migrations/**"],
       thresholds: {

@@ -23,7 +23,9 @@ function loadEnvFile(filePath: string): Record<string, string> {
     if (!key) {
       continue;
     }
-    vars[key] = rest.join("=");
+    const raw = rest.join("=");
+    const quoted = raw.match(/^(['"])(.*)\1$/);
+    vars[key] = quoted ? quoted[2] : raw;
   }
 
   return vars;
