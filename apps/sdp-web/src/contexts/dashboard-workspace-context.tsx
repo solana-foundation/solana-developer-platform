@@ -174,8 +174,7 @@ export function DashboardWorkspaceProvider({
       return;
     }
 
-    startProjectSwitchTransition(async () => {
-      await selectProjectAction(null);
+    startProjectSwitchTransition(() => {
       router.refresh();
     });
   }, [auth.isLoaded, liveDashboardCacheScopeKey, serverDashboardCacheScopeKey, router]);
