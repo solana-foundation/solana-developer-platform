@@ -226,7 +226,7 @@
             "method": "GET",
             "header": [],
             "url": "{{baseUrl}}/v1/wallets",
-            "description": "Lists wallets for the resolved default signing provider by default. Use provider/includeAllProviders to query across active providers."
+            "description": "Lists wallets across all active providers for the requested scope. Use provider to filter to a specific provider."
           }
         },
         {
