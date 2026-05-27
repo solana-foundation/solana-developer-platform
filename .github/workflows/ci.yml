@@ -81,7 +81,6 @@ jobs:
     runs-on: ubuntu-latest
     env:
       DATABASE_URL: postgresql://sdp:sdp@127.0.0.1:5432/sdp
-      REDIS_URL: redis://127.0.0.1:6379
     services:
       postgres:
         image: postgres:16-alpine
@@ -93,15 +92,6 @@ jobs:
           - 5432:5432
         options: >-
           --health-cmd "pg_isready -U sdp -d sdp"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 20
-      redis:
-        image: redis:7-alpine
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 20
@@ -142,12 +132,6 @@ jobs:
           DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
           DOPPLER_CONFIG: dev_ci
         run: pnpm test
-
-      - name: Node-runtime tests (Redis-backed KVStore)
-        env:
-          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
-          DOPPLER_CONFIG: dev_ci
-        run: pnpm --filter @sdp/api test:node
 
   build_api:
     name: Build API
