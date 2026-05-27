@@ -19,9 +19,9 @@ import {
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { type ReactNode, useEffect, useRef, useState } from "react";
-import CounterpartyLoading from "@/app/dashboard/payments/counterparty/loading";
 import IssuanceLoading from "@/app/dashboard/issuance/loading";
 import DashboardLoading from "@/app/dashboard/loading";
+import CounterpartyLoading from "@/app/dashboard/payments/counterparty/loading";
 import PaymentsLoading from "@/app/dashboard/payments/loading";
 import WalletsLoading from "@/app/dashboard/wallets/loading";
 import { CounterpartyHeaderTabs } from "@/components/counterparty-header-tabs";
