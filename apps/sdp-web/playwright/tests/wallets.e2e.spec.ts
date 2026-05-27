@@ -7,6 +7,7 @@ import {
   ensureLinkedOrg,
   getBootstrapApiBaseUrl,
   resolvePlaywrightProjectId,
+  seedProjectCookie,
 } from "../support/local-dashboard-bootstrap";
 
 interface TokenResponse {
@@ -171,10 +172,20 @@ function getActivityRow(
 
 test.describe
   .serial("dashboard wallets e2e", () => {
+    let walletsProjectId = "";
+
     test.beforeAll(async ({ browser }) => {
       const session = await getPlaywrightAdminSession(browser);
       await ensureLinkedOrg(session.identity);
+      walletsProjectId = await resolvePlaywrightProjectId(
+        getBootstrapApiBaseUrl(),
+        session.bearerToken
+      );
       await session.page.close();
+    });
+
+    test.beforeEach(async ({ page }) => {
+      await seedProjectCookie(page, walletsProjectId);
     });
 
     test("user can initialize Privy and run signer check from the wallet detail page", async ({
@@ -229,6 +240,7 @@ test.describe
       );
       const api = createLocalApiClient(getBootstrapApiBaseUrl(), session.bearerToken, projectId);
       await session.page.close();
+      await seedProjectCookie(page, projectId);
 
       const wallet = fixtures.wallets[0];
       if (!wallet) {
@@ -349,7 +361,12 @@ test.describe
         walletCount: 1,
         tier: "enterprise",
       });
+      const projectId = await resolvePlaywrightProjectId(
+        getBootstrapApiBaseUrl(),
+        session.bearerToken
+      );
       await session.page.close();
+      await seedProjectCookie(page, projectId);
 
       const wallet = fixtures.wallets[0];
       if (!wallet) {

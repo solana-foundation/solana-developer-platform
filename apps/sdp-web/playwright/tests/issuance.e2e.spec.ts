@@ -5,6 +5,7 @@ import {
   type IssuanceFixtures,
   readIssuanceFixtures,
 } from "../support/issuance-fixtures";
+import { seedProjectCookie } from "../support/local-dashboard-bootstrap";
 import { bootstrapLocalIssuanceFixtures } from "../support/local-issuance-bootstrap";
 
 function shortValue(value: string): string {
@@ -105,8 +106,16 @@ test.describe
         identity: session.identity,
         bearerToken: session.bearerToken,
       });
-      await session.page.close();
       fixtures = readIssuanceFixtures();
+      await session.page.close();
+    });
+
+    // Plant the project cookie on every test page so the first SSR sees a
+    // valid x-project-id (workspace context only persists the cookie
+    // post-hydration). Each test gets its own browser context, so the cookie
+    // can't be stored once in a shared storageState file.
+    test.beforeEach(async ({ page }) => {
+      await seedProjectCookie(page, fixtures.projectId);
     });
 
     test("1. user can sign in and load the issuance dashboard", async ({ page }) => {
