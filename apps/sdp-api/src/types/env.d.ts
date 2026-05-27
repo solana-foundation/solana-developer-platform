@@ -157,7 +157,6 @@ export interface Env {
   // MagicBlock private payments configuration
   MAGICBLOCK_PRIVATE_PAYMENTS_API_BASE_URL?: string;
   MAGICBLOCK_PRIVATE_PAYMENTS_AUTH_TOKEN?: string;
-  MAGICBLOCK_PRIVATE_PAYMENTS_EPHEMERAL_RPC_URL?: string;
 
   // Compliance providers
   RANGE_API_KEY?: string;

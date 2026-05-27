@@ -108,7 +108,6 @@ let originalBvnkWalletId: string | undefined;
 let originalBvnkApiBaseUrl: string | undefined;
 let originalMagicBlockApiBaseUrl: string | undefined;
 let originalMagicBlockAuthToken: string | undefined;
-let originalMagicBlockEphemeralRpcUrl: string | undefined;
 
 function assertMoonPaySignature(url: URL): void {
   const signature = url.searchParams.get("signature");
@@ -259,29 +258,6 @@ async function seedCachedKey(override: Partial<CachedApiKey>): Promise<void> {
   });
 }
 
-async function seedAdditionalWallet(params: {
-  custodyWalletId: string;
-  walletId: string;
-  publicKey: string;
-}): Promise<void> {
-  await getDb(env)
-    .prepare(
-      `INSERT INTO custody_wallets
-         (id, custody_config_id, wallet_id, public_key, label, purpose, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
-    )
-    .bind(
-      params.custodyWalletId,
-      TEST_CONFIG_ID,
-      params.walletId,
-      params.publicKey,
-      "Additional Payments Wallet",
-      "transfer",
-      "active"
-    )
-    .run();
-}
-
 async function seedWalletPolicy(params: {
   destinationAllowlist: string[];
   maxTransferAmount?: string;
@@ -397,7 +373,6 @@ describe("Payments routes", () => {
     originalBvnkApiBaseUrl = env.BVNK_API_BASE_URL;
     originalMagicBlockApiBaseUrl = env.MAGICBLOCK_PRIVATE_PAYMENTS_API_BASE_URL;
     originalMagicBlockAuthToken = env.MAGICBLOCK_PRIVATE_PAYMENTS_AUTH_TOKEN;
-    originalMagicBlockEphemeralRpcUrl = env.MAGICBLOCK_PRIVATE_PAYMENTS_EPHEMERAL_RPC_URL;
 
     env.MOONPAY_SANDBOX_API_KEY = TEST_MOONPAY_API_KEY;
     env.MOONPAY_SANDBOX_SECRET_KEY = TEST_MOONPAY_SECRET_KEY;
@@ -418,7 +393,6 @@ describe("Payments routes", () => {
     env.BVNK_API_BASE_URL = TEST_BVNK_API_BASE_URL;
     env.MAGICBLOCK_PRIVATE_PAYMENTS_API_BASE_URL = undefined;
     env.MAGICBLOCK_PRIVATE_PAYMENTS_AUTH_TOKEN = undefined;
-    env.MAGICBLOCK_PRIVATE_PAYMENTS_EPHEMERAL_RPC_URL = undefined;
 
     await seedTestDatabase(env);
     await seedAuthAndWallet();
@@ -444,7 +418,6 @@ describe("Payments routes", () => {
     env.BVNK_API_BASE_URL = originalBvnkApiBaseUrl;
     env.MAGICBLOCK_PRIVATE_PAYMENTS_API_BASE_URL = originalMagicBlockApiBaseUrl;
     env.MAGICBLOCK_PRIVATE_PAYMENTS_AUTH_TOKEN = originalMagicBlockAuthToken;
-    env.MAGICBLOCK_PRIVATE_PAYMENTS_EPHEMERAL_RPC_URL = originalMagicBlockEphemeralRpcUrl;
 
     await clearTestDatabase(env);
     await clearKVNamespaces(env);
@@ -1757,7 +1730,7 @@ describe("Payments routes", () => {
             kind: "transfer",
             version: "v0",
             transactionBase64: "AQID",
-            sendTo: "ephemeral",
+            sendTo: "base",
             recentBlockhash: "EkSnNWid2cvwEVnVx9aBqawnmiCNiDgp3gUdkDPTKN1N",
             lastValidBlockHeight: 123456,
             instructionCount: 4,
@@ -1789,8 +1762,6 @@ describe("Payments routes", () => {
               privateTransfer: {
                 provider: "magicblock",
                 magicBlock: {
-                  sourceBalance: "base",
-                  settlement: "base",
                   initIfMissing: true,
                   initAtasIfMissing: true,
                   minDelayMs: "0",
@@ -1817,9 +1788,6 @@ describe("Payments routes", () => {
               magicBlock: {
                 kind: string;
                 version: string;
-                sourceBalance: string;
-                settlement: string;
-                sendTo: string;
                 instructionCount: number;
                 requiredSigners: string[];
                 validator?: string;
@@ -1840,9 +1808,6 @@ describe("Payments routes", () => {
           magicBlock: {
             kind: "transfer",
             version: "v0",
-            sourceBalance: "base",
-            settlement: "base",
-            sendTo: "ephemeral",
             instructionCount: 4,
             requiredSigners: [TEST_SOLANA_ADDRESSES.wallet1],
             validator: TEST_SOLANA_ADDRESSES.wallet3,
@@ -1887,32 +1852,8 @@ describe("Payments routes", () => {
       }
     });
 
-    it("prepares a MagicBlock private SPL transfer that settles to shielded balance", async () => {
-      env.MAGICBLOCK_PRIVATE_PAYMENTS_API_BASE_URL = TEST_MAGICBLOCK_API_BASE_URL;
-      createRpcMock.mockReturnValueOnce({
-        getTokenSupply: () => ({
-          send: async () => ({ value: { decimals: 6 } }),
-        }),
-      } as unknown as ReturnType<typeof solanaRpc.createRpc>);
-
-      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            kind: "transfer",
-            version: "v0",
-            transactionBase64: "AQID",
-            sendTo: "base",
-            recentBlockhash: "EkSnNWid2cvwEVnVx9aBqawnmiCNiDgp3gUdkDPTKN1N",
-            lastValidBlockHeight: 123456,
-            instructionCount: 3,
-            requiredSigners: [TEST_SOLANA_ADDRESSES.wallet1],
-          }),
-          {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          }
-        )
-      );
+    it("rejects unsupported MagicBlock balance routing options", async () => {
+      const fetchSpy = vi.spyOn(globalThis, "fetch");
 
       try {
         const res = await app.request(
@@ -1931,6 +1872,7 @@ describe("Payments routes", () => {
               privateTransfer: {
                 provider: "magicblock",
                 magicBlock: {
+                  sourceBalance: "base",
                   settlement: "shielded",
                 },
               },
@@ -1939,34 +1881,11 @@ describe("Payments routes", () => {
           env
         );
 
-        expect(res.status).toBe(200);
-        const body = (await res.json()) as {
-          data: {
-            privateTransfer: {
-              magicBlock: {
-                sourceBalance: string;
-                settlement: string;
-              };
-            };
-          };
-        };
-        expect(body.data.privateTransfer.magicBlock).toMatchObject({
-          sourceBalance: "base",
-          settlement: "shielded",
-        });
-
-        const [, init] = fetchSpy.mock.calls[0] ?? [];
-        const providerPayload = JSON.parse(String(init?.body)) as Record<string, unknown>;
-        expect(providerPayload).toMatchObject({
-          from: TEST_SOLANA_ADDRESSES.wallet1,
-          to: TEST_SOLANA_ADDRESSES.wallet2,
-          cluster: "devnet",
-          mint: DEVNET_USDC_MINT,
-          amount: 1_000_000,
-          visibility: "private",
-          fromBalance: "base",
-          toBalance: "ephemeral",
-        });
+        expect(res.status).toBe(400);
+        const body = (await res.json()) as { error: { code: string; message: string } };
+        expect(body.error.code).toBe("BAD_REQUEST");
+        expect(body.error.message).toBe("Invalid request body");
+        expect(fetchSpy).not.toHaveBeenCalled();
       } finally {
         fetchSpy.mockRestore();
       }
@@ -1992,9 +1911,7 @@ describe("Payments routes", () => {
               options: { simulate: true },
               privateTransfer: {
                 provider: "magicblock",
-                magicBlock: {
-                  settlement: "shielded",
-                },
+                magicBlock: {},
               },
             }),
           },
@@ -2076,7 +1993,6 @@ describe("Payments routes", () => {
               privateTransfer: {
                 provider: "magicblock",
                 magicBlock: {
-                  settlement: "base",
                   split: 2,
                   minDelayMs: "0",
                   maxDelayMs: "1000",
@@ -2091,9 +2007,7 @@ describe("Payments routes", () => {
         const body = (await res.json()) as {
           data: {
             transfer: { status: string; signature: string | null; type: string };
-            privateTransfer: {
-              magicBlock: { sourceBalance: string; settlement: string; sendTo: string };
-            };
+            privateTransfer: { magicBlock: { kind: string; version: string } };
           };
         };
         expect(body.data.transfer).toMatchObject({
@@ -2103,9 +2017,8 @@ describe("Payments routes", () => {
           type: "transfer_confidential",
         });
         expect(body.data.privateTransfer.magicBlock).toMatchObject({
-          sourceBalance: "base",
-          settlement: "base",
-          sendTo: "base",
+          kind: "transfer",
+          version: "v0",
         });
         expect(signAndSendMock).toHaveBeenCalledTimes(1);
         expect(sendAndConfirmTransactionMock).not.toHaveBeenCalled();
@@ -2125,28 +2038,15 @@ describe("Payments routes", () => {
       }
     });
 
-    it("executes a MagicBlock private transfer that settles to shielded balance on the ephemeral RPC", async () => {
+    it("rejects MagicBlock execution responses routed outside base balance", async () => {
       env.MAGICBLOCK_PRIVATE_PAYMENTS_API_BASE_URL = TEST_MAGICBLOCK_API_BASE_URL;
-      env.MAGICBLOCK_PRIVATE_PAYMENTS_EPHEMERAL_RPC_URL = "https://ephemeral.magicblock.test";
       const sourceSigner = await generateKeyPairSigner();
-      const destinationSigner = await generateKeyPairSigner();
       await updateSeededWalletPublicKey(sourceSigner.address);
-      await seedAdditionalWallet({
-        custodyWalletId: "cwlt_payments_destination_test",
-        walletId: "wal_payments_destination_test",
-        publicKey: destinationSigner.address,
-      });
       createRpcMock.mockReturnValueOnce({
         getTokenSupply: () => ({
           send: async () => ({ value: { decimals: 6 } }),
         }),
       } as unknown as ReturnType<typeof solanaRpc.createRpc>);
-      createOrgSignerMock.mockImplementation(async (_env, _orgId, _projectId, walletId) => {
-        if (walletId === "wal_payments_destination_test") {
-          return destinationSigner;
-        }
-        return sourceSigner;
-      });
 
       const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
         new Response(
@@ -2155,14 +2055,12 @@ describe("Payments routes", () => {
             version: "v0",
             transactionBase64: buildMagicBlockTestTransactionBase64({
               source: sourceSigner.address,
-              destination: destinationSigner.address,
-              additionalSigner: destinationSigner.address,
             }),
             sendTo: "ephemeral",
             recentBlockhash: "EkSnNWid2cvwEVnVx9aBqawnmiCNiDgp3gUdkDPTKN1N",
             lastValidBlockHeight: 123456,
             instructionCount: 3,
-            requiredSigners: [sourceSigner.address, destinationSigner.address],
+            requiredSigners: [sourceSigner.address],
           }),
           {
             status: 200,
@@ -2182,56 +2080,32 @@ describe("Payments routes", () => {
             },
             body: JSON.stringify({
               source: TEST_WALLET_ID,
-              destination: destinationSigner.address,
+              destination: TEST_SOLANA_ADDRESSES.wallet2,
               token: DEVNET_USDC_MINT,
               amount: "1",
               privateTransfer: {
                 provider: "magicblock",
-                magicBlock: {
-                  settlement: "shielded",
-                },
+                magicBlock: {},
               },
             }),
           },
           env
         );
 
-        expect(res.status).toBe(200);
-        const body = (await res.json()) as {
-          data: {
-            privateTransfer: {
-              magicBlock: { sourceBalance: string; settlement: string; sendTo: string };
-            };
-          };
-        };
-        expect(body.data.privateTransfer.magicBlock).toMatchObject({
-          sourceBalance: "base",
-          settlement: "shielded",
-          sendTo: "ephemeral",
-        });
-        expect(createOrgSignerMock).toHaveBeenCalledWith(
-          env,
-          TEST_ORG.id,
-          undefined,
-          TEST_WALLET_ID
+        expect(res.status).toBe(503);
+        const body = (await res.json()) as { error: { code: string; message: string } };
+        expect(body.error.code).toBe("PROVIDER_UNAVAILABLE");
+        expect(body.error.message).toBe(
+          "MagicBlock returned a non-base submission target, which this SDP route does not support."
         );
-        expect(createOrgSignerMock).toHaveBeenCalledWith(
-          env,
-          TEST_ORG.id,
-          undefined,
-          "wal_payments_destination_test"
-        );
-        expect(createRpcMock).toHaveBeenCalledWith(env, {
-          rpcUrl: "https://ephemeral.magicblock.test",
-        });
         const [, init] = fetchSpy.mock.calls[0] ?? [];
         const providerPayload = JSON.parse(String(init?.body)) as Record<string, unknown>;
         expect(providerPayload).toMatchObject({
           from: sourceSigner.address,
-          to: destinationSigner.address,
+          to: TEST_SOLANA_ADDRESSES.wallet2,
           visibility: "private",
           fromBalance: "base",
-          toBalance: "ephemeral",
+          toBalance: "base",
         });
       } finally {
         fetchSpy.mockRestore();

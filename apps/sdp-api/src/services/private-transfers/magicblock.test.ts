@@ -1,6 +1,9 @@
 import { address } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { prepareMagicBlockPrivateTransfer } from "@/services/private-transfers/magicblock";
+import {
+  type MagicBlockPrivateTransferOptions,
+  prepareMagicBlockPrivateTransfer,
+} from "@/services/private-transfers/magicblock";
 import { env } from "@/test/helpers/env";
 
 const TEST_MAGICBLOCK_API_BASE_URL = "https://payments.magicblock.test";
@@ -12,17 +15,13 @@ let originalMagicBlockApiBaseUrl: string | undefined;
 let originalSolanaNetwork: "devnet" | "mainnet-beta" | undefined;
 let originalSolanaRpcUrl: string | undefined;
 
-function prepareTransfer() {
+function prepareTransfer(options: MagicBlockPrivateTransferOptions = {}) {
   return prepareMagicBlockPrivateTransfer(env, {
     from: TEST_SOURCE,
     to: TEST_DESTINATION,
     mint: DEVNET_USDC_MINT,
     amount: 1,
-    options: {
-      visibility: "private",
-      fromBalance: "base",
-      toBalance: "base",
-    },
+    options,
   });
 }
 
@@ -43,6 +42,84 @@ describe("MagicBlock private transfers", () => {
     env.MAGICBLOCK_PRIVATE_PAYMENTS_API_BASE_URL = originalMagicBlockApiBaseUrl;
     env.SOLANA_NETWORK = originalSolanaNetwork;
     env.SOLANA_RPC_URL = originalSolanaRpcUrl;
+  });
+
+  it("sends a base-balance private transfer request to MagicBlock", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          kind: "transfer",
+          version: "v0",
+          transactionBase64: "AQID",
+          sendTo: "base",
+          recentBlockhash: "EkSnNWid2cvwEVnVx9aBqawnmiCNiDgp3gUdkDPTKN1N",
+          lastValidBlockHeight: 123456,
+          instructionCount: 4,
+          requiredSigners: [TEST_SOURCE],
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }
+      )
+    );
+
+    const prepared = await prepareTransfer({
+      initIfMissing: true,
+      initAtasIfMissing: true,
+      maxDelayMs: "1000",
+      split: 2,
+    });
+
+    expect(prepared.sendTo).toBe("base");
+    const [url, init] = fetchSpy.mock.calls[0] ?? [];
+    expect(String(url)).toBe(`${TEST_MAGICBLOCK_API_BASE_URL}/v1/spl/transfer`);
+    expect(JSON.parse(String(init?.body))).toMatchObject({
+      from: TEST_SOURCE,
+      to: TEST_DESTINATION,
+      cluster: "devnet",
+      mint: DEVNET_USDC_MINT,
+      amount: 1,
+      visibility: "private",
+      fromBalance: "base",
+      toBalance: "base",
+      initIfMissing: true,
+      initAtasIfMissing: true,
+      maxDelayMs: "1000",
+      split: 2,
+    });
+  });
+
+  it("rejects MagicBlock responses that require non-base submission", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          kind: "transfer",
+          version: "v0",
+          transactionBase64: "AQID",
+          sendTo: "ephemeral",
+          recentBlockhash: "EkSnNWid2cvwEVnVx9aBqawnmiCNiDgp3gUdkDPTKN1N",
+          lastValidBlockHeight: 123456,
+          instructionCount: 4,
+          requiredSigners: [TEST_SOURCE],
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }
+      )
+    );
+
+    await expect(prepareTransfer()).rejects.toMatchObject({
+      code: "PROVIDER_UNAVAILABLE",
+      statusCode: 503,
+      message:
+        "MagicBlock returned a non-base submission target, which this SDP route does not support.",
+      details: {
+        provider: "magicblock",
+        sendTo: "ephemeral",
+      },
+    });
   });
 
   it("maps MagicBlock rate limits to RATE_LIMITED", async () => {

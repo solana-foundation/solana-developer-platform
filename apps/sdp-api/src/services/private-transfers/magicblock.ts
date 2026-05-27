@@ -6,13 +6,7 @@ import type { Env } from "@/types/env";
 const MAGICBLOCK_PRIVATE_PAYMENTS_API_BASE_URL = "https://payments.magicblock.app";
 const MAGICBLOCK_PRIVATE_PAYMENTS_TIMEOUT_MS = 15_000;
 
-export type MagicBlockBalanceLocation = "base" | "ephemeral";
-export type MagicBlockTransferVisibility = "public" | "private";
-
 export interface MagicBlockPrivateTransferOptions {
-  visibility: MagicBlockTransferVisibility;
-  fromBalance: MagicBlockBalanceLocation;
-  toBalance: MagicBlockBalanceLocation;
   validator?: string;
   initIfMissing?: boolean;
   initAtasIfMissing?: boolean;
@@ -38,7 +32,7 @@ export interface MagicBlockUnsignedTransaction {
   kind: "deposit" | "withdraw" | "transfer" | string;
   version: "legacy" | "v0" | string;
   transactionBase64: string;
-  sendTo: MagicBlockBalanceLocation;
+  sendTo: "base";
   recentBlockhash: string;
   lastValidBlockHeight: number;
   instructionCount: number;
@@ -94,9 +88,9 @@ function buildMagicBlockTransferPayload(input: MagicBlockPrepareTransferInput, c
     cluster,
     mint: input.mint,
     amount: input.amount,
-    visibility: options.visibility,
-    fromBalance: options.fromBalance,
-    toBalance: options.toBalance,
+    visibility: "private",
+    fromBalance: "base",
+    toBalance: "base",
     ...(input.memo ? { memo: input.memo } : {}),
     ...(options.validator ? { validator: options.validator } : {}),
     ...(options.initIfMissing !== undefined ? { initIfMissing: options.initIfMissing } : {}),
@@ -159,6 +153,16 @@ function invalidMagicBlockTransferResponse(): AppError {
   });
 }
 
+function unsupportedMagicBlockSubmissionTarget(sendTo: unknown): AppError {
+  return providerUnavailable(
+    "MagicBlock returned a non-base submission target, which this SDP route does not support.",
+    {
+      provider: "magicblock",
+      sendTo,
+    }
+  );
+}
+
 function parseUnsignedTransaction(payload: unknown): MagicBlockUnsignedTransaction {
   if (typeof payload !== "object" || payload === null) {
     throw invalidMagicBlockTransferResponse();
@@ -170,7 +174,6 @@ function parseUnsignedTransaction(payload: unknown): MagicBlockUnsignedTransacti
     typeof record.kind !== "string" ||
     typeof record.version !== "string" ||
     typeof record.transactionBase64 !== "string" ||
-    (record.sendTo !== "base" && record.sendTo !== "ephemeral") ||
     typeof record.recentBlockhash !== "string" ||
     typeof record.lastValidBlockHeight !== "number" ||
     !Number.isInteger(record.lastValidBlockHeight) ||
@@ -180,6 +183,14 @@ function parseUnsignedTransaction(payload: unknown): MagicBlockUnsignedTransacti
     !record.requiredSigners.every((signer) => typeof signer === "string")
   ) {
     throw invalidMagicBlockTransferResponse();
+  }
+
+  if (record.sendTo === undefined) {
+    throw invalidMagicBlockTransferResponse();
+  }
+
+  if (record.sendTo !== "base") {
+    throw unsupportedMagicBlockSubmissionTarget(record.sendTo);
   }
 
   return {

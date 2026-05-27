@@ -70,9 +70,6 @@ export interface MagicBlockPreparedPrivateTransfer {
   magicBlock: {
     kind: string;
     version: string;
-    sourceBalance: "base" | "shielded";
-    settlement: "base" | "shielded";
-    sendTo: "base" | "ephemeral";
     instructionCount: number;
     requiredSigners: string[];
     validator?: string;

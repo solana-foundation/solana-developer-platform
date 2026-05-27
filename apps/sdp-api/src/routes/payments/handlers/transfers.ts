@@ -19,7 +19,6 @@ import {
   assertIsTransactionPartialSigner,
   partiallySignTransactionMessageWithSigners,
   partiallySignTransactionWithSigners,
-  signTransactionWithSigners,
 } from "@solana/signers";
 import { getTransferSolInstruction } from "@solana-program/system";
 import {
@@ -163,9 +162,6 @@ type PreparedPrivateTransferMetadata = {
   magicBlock: {
     kind: MagicBlockUnsignedTransaction["kind"];
     version: MagicBlockUnsignedTransaction["version"];
-    sourceBalance: "base" | "shielded";
-    settlement: "base" | "shielded";
-    sendTo: MagicBlockUnsignedTransaction["sendTo"];
     instructionCount: number;
     requiredSigners: string[];
     validator?: string;
@@ -460,17 +456,10 @@ type MagicBlockProductOptions = Extract<
   { provider: "magicblock" }
 >["magicBlock"];
 
-function mapMagicBlockProductBalance(balance: "base" | "shielded" | undefined) {
-  return balance === "shielded" ? "ephemeral" : "base";
-}
-
 function buildMagicBlockProviderTransferOptions(
   options: MagicBlockProductOptions
 ): MagicBlockProviderTransferOptions {
   return {
-    visibility: "private",
-    fromBalance: mapMagicBlockProductBalance(options.sourceBalance),
-    toBalance: mapMagicBlockProductBalance(options.settlement),
     ...(options.validator ? { validator: options.validator } : {}),
     ...(options.initIfMissing !== undefined ? { initIfMissing: options.initIfMissing } : {}),
     ...(options.initAtasIfMissing !== undefined
@@ -488,10 +477,7 @@ function buildMagicBlockProviderTransferOptions(
   };
 }
 
-function mapMagicBlockPreparedTransfer(
-  unsignedTransaction: MagicBlockUnsignedTransaction,
-  options: MagicBlockProductOptions
-): {
+function mapMagicBlockPreparedTransfer(unsignedTransaction: MagicBlockUnsignedTransaction): {
   prepared: PreparedTransferPayload;
   metadata: PreparedPrivateTransferMetadata;
 } {
@@ -506,9 +492,6 @@ function mapMagicBlockPreparedTransfer(
       magicBlock: {
         kind: unsignedTransaction.kind,
         version: unsignedTransaction.version,
-        sourceBalance: options.sourceBalance ?? "base",
-        settlement: options.settlement,
-        sendTo: unsignedTransaction.sendTo,
         instructionCount: unsignedTransaction.instructionCount,
         requiredSigners: unsignedTransaction.requiredSigners,
         ...(unsignedTransaction.validator ? { validator: unsignedTransaction.validator } : {}),
@@ -561,26 +544,7 @@ async function prepareMagicBlockPrivateTransferForOperation(params: {
     options: buildMagicBlockProviderTransferOptions(privateTransfer.magicBlock),
   });
 
-  return mapMagicBlockPreparedTransfer(magicBlockPrepared, privateTransfer.magicBlock);
-}
-
-function createMagicBlockSubmissionRpc(
-  c: AppContext,
-  sendTo: MagicBlockUnsignedTransaction["sendTo"]
-): ReturnType<typeof solanaRpc.createRpc> {
-  if (sendTo === "base") {
-    return solanaRpc.createRpc(c.env);
-  }
-
-  const rpcUrl = c.env.MAGICBLOCK_PRIVATE_PAYMENTS_EPHEMERAL_RPC_URL?.trim();
-  if (!rpcUrl) {
-    throw new AppError(
-      "PROVIDER_NOT_CONFIGURED",
-      "MagicBlock ephemeral RPC URL is required to submit private transfers routed to MagicBlock's ephemeral rollup."
-    );
-  }
-
-  return solanaRpc.createRpc(c.env, { rpcUrl });
+  return mapMagicBlockPreparedTransfer(magicBlockPrepared);
 }
 
 function addSponsoredFeePayerToPreparedTransaction(
@@ -740,40 +704,22 @@ async function executePreparedPrivateTransfer(
 
   const feePayment = getFeePayment(c);
   const feePayer = await feePayment.getFeePayer();
-  const transaction =
-    metadata.magicBlock.sendTo === "base"
-      ? addSponsoredFeePayerToPreparedTransaction(serializedTx, feePayer, requiredSigners)
-      : getTransactionDecoder().decode(Buffer.from(serializedTx, "base64"));
+  const transaction = addSponsoredFeePayerToPreparedTransaction(
+    serializedTx,
+    feePayer,
+    requiredSigners
+  );
   const signedTransaction =
     signers.length > 0
-      ? metadata.magicBlock.sendTo === "base"
-        ? await partiallySignTransactionWithSigners(signers, transaction)
-        : await signTransactionWithSigners(signers, transaction)
+      ? await partiallySignTransactionWithSigners(signers, transaction)
       : transaction;
   const encodedSignedTransaction = new Uint8Array(
     getTransactionEncoder().encode(signedTransaction)
   );
 
-  if (metadata.magicBlock.sendTo === "base") {
-    const signature = await feePayment.signAndSend(encodedSignedTransaction);
-    const rpc = solanaRpc.createRpc(c.env);
-    const confirmation = await solanaRpc.confirmTransaction(rpc, signature, {
-      commitment: "confirmed",
-    });
-
-    if (confirmation.err) {
-      throw new AppError("TRANSACTION_FAILED", "MagicBlock private transfer failed on-chain");
-    }
-
-    return {
-      signature,
-      slot: Number(confirmation.slot),
-      blockTime: null,
-    };
-  }
-
-  const rpc = createMagicBlockSubmissionRpc(c, metadata.magicBlock.sendTo);
-  const confirmation = await solanaRpc.sendAndConfirmTransaction(rpc, encodedSignedTransaction, {
+  const signature = await feePayment.signAndSend(encodedSignedTransaction);
+  const rpc = solanaRpc.createRpc(c.env);
+  const confirmation = await solanaRpc.confirmTransaction(rpc, signature, {
     commitment: "confirmed",
   });
 
@@ -782,7 +728,7 @@ async function executePreparedPrivateTransfer(
   }
 
   return {
-    signature: confirmation.signature,
+    signature,
     slot: Number(confirmation.slot),
     blockTime: null,
   };

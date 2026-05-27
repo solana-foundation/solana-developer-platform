@@ -147,30 +147,8 @@ export const walletBalancesSchema = z
       "Balance payload for a custody-managed wallet. Use /v1/wallets for wallet provisioning and listing.",
   });
 
-export const privateTransferBalanceLocationSchema = z.enum(["base", "ephemeral"]).openapi({
-  description:
-    "MagicBlock balance location. `base` is base Solana; `ephemeral` is MagicBlock's Private Ephemeral Rollup balance.",
-  example: "base",
-});
-
-export const magicBlockPrivateTransferBalanceSchema = z.enum(["base", "shielded"]).openapi({
-  description:
-    "`base` is the normal Solana token balance. `shielded` is MagicBlock's private ephemeral-rollup balance.",
-  example: "base",
-});
-
 export const magicBlockPrivateTransferOptionsSchema = z
   .object({
-    sourceBalance: magicBlockPrivateTransferBalanceSchema.optional().openapi({
-      description:
-        "Where sender funds come from. Defaults to `base`; use `shielded` when spending an existing MagicBlock private balance.",
-      example: "base",
-    }),
-    settlement: magicBlockPrivateTransferBalanceSchema.openapi({
-      description:
-        "`base` privately routes the transfer and settles to the recipient's normal Solana balance. `shielded` leaves the received funds inside MagicBlock's private balance.",
-      example: "base",
-    }),
     validator: solanaAddressSchema.optional().openapi({
       description:
         "Optional MagicBlock validator pubkey. MagicBlock can resolve this when omitted.",
@@ -215,12 +193,11 @@ export const magicBlockPrivateTransferOptionsSchema = z
       .optional()
       .openapi({ description: "Request MagicBlock legacy transaction mode instead of v0." }),
   })
+  .strict()
   .openapi({
     description:
-      "MagicBlock-specific options for private SPL transfer preparation. SDP exposes product-level balance terms and maps them to MagicBlock's base/ephemeral request fields.",
+      "MagicBlock-specific options for private SPL transfer preparation. SDP currently supports base-balance private transfers only: funds are spent from the sender's normal Solana token balance and settle to the recipient's normal Solana token balance through MagicBlock's private routing.",
     example: {
-      settlement: "base",
-      sourceBalance: "base",
       initIfMissing: true,
       initAtasIfMissing: true,
       maxDelayMs: "1000",
@@ -268,7 +245,7 @@ export const createTransferRequestSchema = createTransferSchemaBase
     }),
     privateTransfer: privateTransferRequestSchema.optional().openapi({
       description:
-        "Private-transfer routing. SDP asks the provider to build the transaction, signs it with the custody wallet when required, and submits it according to provider routing metadata.",
+        "Private-transfer routing. SDP asks the provider to build a base-balance private transfer, signs it with the custody wallet when required, and submits it on the configured Solana cluster.",
     }),
   })
   .openapi({
@@ -331,7 +308,7 @@ export const prepareTransferRequestSchema = prepareTransferSchemaBase
     }),
     privateTransfer: privateTransferRequestSchema.optional().openapi({
       description:
-        "Private-transfer routing for provider-built transaction preparation. MagicBlock options use SDP product-level balance terms and are mapped to provider fields by the API.",
+        "Private-transfer routing for provider-built transaction preparation. MagicBlock private transfers are base-balance transfers routed privately by the provider.",
     }),
   })
   .openapi({
@@ -459,18 +436,6 @@ export const preparedPrivateTransferSchema = z
         version: z
           .string()
           .openapi({ description: "MagicBlock transaction version.", example: "v0" }),
-        sourceBalance: magicBlockPrivateTransferBalanceSchema.openapi({
-          description: "Product-level source balance selected for the private transfer.",
-          example: "base",
-        }),
-        settlement: magicBlockPrivateTransferBalanceSchema.openapi({
-          description: "Product-level recipient settlement selected for the private transfer.",
-          example: "base",
-        }),
-        sendTo: privateTransferBalanceLocationSchema.openapi({
-          description: "Network where the signed transaction should be submitted.",
-          example: "ephemeral",
-        }),
         instructionCount: z.number().int().openapi({
           description: "Instruction count in the prepared transaction.",
           example: 4,

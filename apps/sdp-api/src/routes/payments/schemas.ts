@@ -70,29 +70,29 @@ const paymentAmountSchema = z
     message: "Amount must be greater than zero",
   });
 
-const magicBlockPrivateTransferOptionsSchema = z.object({
-  sourceBalance: z.enum(["base", "shielded"]).optional(),
-  settlement: z.enum(["base", "shielded"]),
-  validator: z.string().min(32).max(44).optional(),
-  initIfMissing: z.boolean().optional(),
-  initAtasIfMissing: z.boolean().optional(),
-  initVaultIfMissing: z.boolean().optional(),
-  minDelayMs: z
-    .string()
-    .regex(/^\d+$/, { message: "minDelayMs must be an integer string" })
-    .optional(),
-  maxDelayMs: z
-    .string()
-    .regex(/^\d+$/, { message: "maxDelayMs must be an integer string" })
-    .optional(),
-  clientRefId: z
-    .string()
-    .regex(/^\d+$/, { message: "clientRefId must be an integer string" })
-    .optional(),
-  split: z.number().int().min(1).max(15).optional(),
-  gasless: z.boolean().optional(),
-  legacy: z.boolean().optional(),
-});
+const magicBlockPrivateTransferOptionsSchema = z
+  .object({
+    validator: z.string().min(32).max(44).optional(),
+    initIfMissing: z.boolean().optional(),
+    initAtasIfMissing: z.boolean().optional(),
+    initVaultIfMissing: z.boolean().optional(),
+    minDelayMs: z
+      .string()
+      .regex(/^\d+$/, { message: "minDelayMs must be an integer string" })
+      .optional(),
+    maxDelayMs: z
+      .string()
+      .regex(/^\d+$/, { message: "maxDelayMs must be an integer string" })
+      .optional(),
+    clientRefId: z
+      .string()
+      .regex(/^\d+$/, { message: "clientRefId must be an integer string" })
+      .optional(),
+    split: z.number().int().min(1).max(15).optional(),
+    gasless: z.boolean().optional(),
+    legacy: z.boolean().optional(),
+  })
+  .strict();
 
 export const privateTransferSchema: z.ZodType<PrivateTransferRequest> = z.object({
   provider: z.literal("magicblock"),

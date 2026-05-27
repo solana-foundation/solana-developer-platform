@@ -1,30 +1,14 @@
 export const PRIVATE_TRANSFER_PROVIDERS = ["magicblock"] as const;
 export type PrivateTransferProviderId = (typeof PRIVATE_TRANSFER_PROVIDERS)[number];
 
-export type MagicBlockPrivateTransferBalance = "base" | "shielded";
-export type MagicBlockPrivateTransferSettlement = "base" | "shielded";
-
 /**
  * MagicBlock options for building a private SPL transfer.
  *
- * The public API uses SDP product terminology for base and shielded balances;
- * the API adapter maps those fields to MagicBlock's provider-facing request
- * shape.
+ * SDP currently supports base-balance private transfers only: funds are spent
+ * from the sender's normal Solana token balance and settle to the recipient's
+ * normal Solana token balance through MagicBlock's private routing.
  */
 export interface MagicBlockPrivateTransferOptions {
-  /**
-   * Where the sender funds come from. Defaults to `base`, the normal Solana
-   * token balance. `shielded` means the sender is spending from MagicBlock's
-   * private ephemeral-rollup balance.
-   */
-  sourceBalance?: MagicBlockPrivateTransferBalance;
-
-  /**
-   * Where the recipient receives funds. `base` settles to the normal Solana
-   * token balance; `shielded` leaves the funds in MagicBlock's private balance.
-   */
-  settlement: MagicBlockPrivateTransferSettlement;
-
   /** Optional MagicBlock validator pubkey. MagicBlock can resolve this when omitted. */
   validator?: string;
 
