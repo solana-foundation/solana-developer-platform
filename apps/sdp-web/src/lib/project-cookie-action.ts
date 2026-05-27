@@ -10,6 +10,7 @@ const COOKIE_OPTIONS = {
   maxAge: 31_536_000,
   sameSite: "lax" as const,
   secure: process.env.NODE_ENV === "production",
+  httpOnly: true,
 };
 
 export async function selectProjectAction(projectId: string | null): Promise<void> {
