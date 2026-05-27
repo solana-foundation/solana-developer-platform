@@ -75,11 +75,6 @@ function DashboardScopeRefreshFallback() {
   );
 }
 
-const DASHBOARD_SCOPED_SWR_CONFIG = {
-  ...DASHBOARD_SWR_CONFIG,
-  provider: () => new Map(),
-};
-
 type DashboardWorkspaceProviderProps = {
   children: ReactNode;
   dashboardAccess: DashboardAccess;
@@ -142,12 +137,28 @@ export function DashboardWorkspaceProvider({
 
   const [isProjectSwitching, startProjectSwitchTransition] = useTransition();
 
+  const isProjectSwitchingRef = useRef(false);
+  isProjectSwitchingRef.current = isProjectSwitching;
+
+  const pathnameRef = useRef(pathname);
+  pathnameRef.current = pathname;
+
+  const scopedSwrConfig = useMemo(
+    () => ({
+      ...DASHBOARD_SWR_CONFIG,
+      provider: () => new Map(),
+      isPaused: () => isProjectSwitchingRef.current,
+    }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    []
+  );
+
   const selectProject = useCallback(
     (projectId: string | null) => {
       startProjectSwitchTransition(async () => {
         await selectProjectAction(projectId);
         setSelectedProjectId(projectId);
-        router.refresh();
+        router.replace(pathnameRef.current);
       });
     },
     [router]
@@ -165,6 +176,7 @@ export function DashboardWorkspaceProvider({
     if (selectionIsValid && initialSelectedProjectId === selectedProjectId) return;
 
     const target = selectionIsValid ? selectedProjectId : (sandboxProject?.id ?? null);
+    if (target === selectedProjectId) return;
     selectProject(target);
   }, [selectedProjectId, projects, sandboxProject, selectProject, initialSelectedProjectId]);
 
@@ -285,7 +297,7 @@ export function DashboardWorkspaceProvider({
 
   return (
     <DashboardWorkspaceContext.Provider value={value}>
-      <SWRConfig key={swrScopeKey} value={DASHBOARD_SCOPED_SWR_CONFIG}>
+      <SWRConfig key={swrScopeKey} value={scopedSwrConfig}>
         {shouldRenderScopeRefreshFallback ? <DashboardScopeRefreshFallback /> : children}
       </SWRConfig>
     </DashboardWorkspaceContext.Provider>
