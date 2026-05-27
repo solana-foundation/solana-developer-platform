@@ -18,6 +18,7 @@ import {
 import { KoraClient } from "@solana/kora";
 import { getTransferSolInstruction } from "@solana-program/system";
 import { Client } from "pg";
+import { getE2EEnv } from "../env";
 import { type ClerkTestIdentity, setClerkOrganizationTier } from "./clerk-admin";
 import { createLocalApiClient, type LocalApiClient } from "./local-api-client";
 
@@ -297,21 +298,12 @@ async function listWallets(api: LocalApiClient): Promise<PaymentsDashboardWallet
   return data.wallets;
 }
 
-/**
- * Plant the project cookie in the Playwright browser context so the very
- * first dashboard SSR sees a valid x-project-id. Without this, the first
- * page load fetches project-scoped data with no cookie (the workspace
- * context only persists the cookie post-hydration via a Server Function),
- * leaving server-rendered props like `signerWallets` empty.
- */
 export async function seedProjectCookie(page: Page, projectId: string): Promise<void> {
-  const baseUrl = page.url() || process.env.PLAYWRIGHT_BASE_URL || "http://localhost:3000";
   await page.context().addCookies([
     {
       name: PROJECT_COOKIE_NAME,
       value: projectId,
-      url: baseUrl,
-      path: "/",
+      url: getE2EEnv().baseURL,
       sameSite: "Lax",
     },
   ]);

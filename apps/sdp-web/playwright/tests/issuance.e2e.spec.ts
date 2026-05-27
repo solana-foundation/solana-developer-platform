@@ -110,10 +110,6 @@ test.describe
       await session.page.close();
     });
 
-    // Plant the project cookie on every test page so the first SSR sees a
-    // valid x-project-id (workspace context only persists the cookie
-    // post-hydration). Each test gets its own browser context, so the cookie
-    // can't be stored once in a shared storageState file.
     test.beforeEach(async ({ page }) => {
       await seedProjectCookie(page, fixtures.projectId);
     });
