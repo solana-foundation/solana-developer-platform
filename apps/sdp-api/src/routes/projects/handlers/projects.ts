@@ -1,6 +1,5 @@
 import type {
   ListProjectsResponse,
-  ProjectEnvironment,
   ProjectResponse,
   UpdateProjectRequest,
 } from "@sdp/types";
