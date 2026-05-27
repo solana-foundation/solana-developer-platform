@@ -174,9 +174,10 @@ export function DashboardWorkspaceProvider({
     }
 
     startProjectSwitchTransition(async () => {
-      await reconcileProjectCookieAction();
+      const ok = await reconcileProjectCookieAction();
+      if (!ok) router.refresh();
     });
-  }, [auth.isLoaded, liveDashboardCacheScopeKey, serverDashboardCacheScopeKey]);
+  }, [auth.isLoaded, liveDashboardCacheScopeKey, serverDashboardCacheScopeKey, router]);
 
   const previousPathnameRef = useRef(pathname);
   useEffect(() => {

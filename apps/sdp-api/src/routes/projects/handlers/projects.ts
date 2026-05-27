@@ -56,7 +56,10 @@ export const createProject = async (c: AppContext) => {
   // through them must inherit that same environment.
   let resolvedEnvironment = parsed.data.environment;
   if (auth.authType === "api_key") {
-    const keyEnv = auth.environment as ProjectEnvironment;
+    const keyEnv = auth.environment;
+    if (keyEnv !== "sandbox" && keyEnv !== "production") {
+      throw forbidden("API key has an unrecognised environment");
+    }
     if (resolvedEnvironment && resolvedEnvironment !== keyEnv) {
       throw forbidden(`A ${keyEnv} API key can only create ${keyEnv} projects`);
     }
