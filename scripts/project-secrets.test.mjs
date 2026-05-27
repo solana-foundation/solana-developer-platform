@@ -13,6 +13,7 @@ function run(command, env = {}, extraArgs = []) {
   const result = spawnSync(process.execPath, [script, command, ...extraArgs], {
     env,
     encoding: "utf8",
+    timeout: 10_000,
   });
   return { status: result.status, stdout: result.stdout, stderr: result.stderr };
 }
@@ -104,11 +105,26 @@ test("docker fails on value with leading whitespace", () => {
   assert.match(result.stderr, /leading whitespace/);
 });
 
-test("docker fails on value starting with '#'", () => {
-  const result = run("docker", { CLERK_SECRET_KEY: "#looks_like_comment" });
+test("docker preserves value starting with '#' verbatim", () => {
+  // godotenv treats `#` as an inline-comment trigger only when preceded by
+  // whitespace, so a value starting with `#` is safe.
+  const result = run("docker", { CLERK_SECRET_KEY: "#literal_hash_prefix" });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^CLERK_SECRET_KEY=#literal_hash_prefix$/m);
+});
+
+test("docker fails on value containing space + '#' inline-comment trigger", () => {
+  const result = run("docker", { CLERK_SECRET_KEY: "secret_value #anything" });
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /CLERK_SECRET_KEY/);
-  assert.match(result.stderr, /comment/);
+  assert.match(result.stderr, /inline comment/);
+});
+
+test("docker fails on value containing tab + '#' inline-comment trigger", () => {
+  const result = run("docker", { CLERK_SECRET_KEY: "secret_value\t#anything" });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /CLERK_SECRET_KEY/);
+  assert.match(result.stderr, /inline comment/);
 });
 
 test("--out writes docker env file to disk", () => {

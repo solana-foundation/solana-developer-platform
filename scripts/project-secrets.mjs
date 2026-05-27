@@ -24,17 +24,18 @@ function writeCloudflareSecretPayload(outPath) {
 }
 
 function ensureDockerSafe(key, value) {
-  // docker compose --env-file uses each line verbatim after the first `=`,
-  // with godotenv-style quote stripping. These two value shapes silently
-  // corrupt parsing instead of failing loudly, so we surface them here.
+  // godotenv (used by docker compose --env-file) strips leading whitespace
+  // from unquoted values and truncates them at any inline comment marker —
+  // any whitespace character followed by `#`, not just a literal space.
+  // Both shapes corrupt silently, so surface them at export time.
   if (/^\s/.test(value)) {
     throw new Error(
-      `Value for ${key} has leading whitespace; docker compose --env-file preserves it verbatim. Trim it in the upstream secret store.`
+      `Value for ${key} has leading whitespace; docker compose --env-file silently strips it, so the container sees a different value than the upstream secret. Trim it in the upstream secret store.`
     );
   }
-  if (value.startsWith("#")) {
+  if (/\s#/.test(value)) {
     throw new Error(
-      `Value for ${key} starts with '#'; docker compose --env-file would treat that line as a comment and drop the key. Adjust the upstream secret.`
+      `Value for ${key} contains whitespace immediately followed by '#'; docker compose --env-file treats that as an inline comment and silently truncates the value. Rewrite the upstream secret to avoid that sequence.`
     );
   }
 }
