@@ -639,10 +639,7 @@ export async function bootstrapLocalWalletFixtures(input: {
     tier: input.tier,
   });
 
-  const projectId = await resolvePlaywrightProjectId(
-    runtimeEnv.localApiBaseUrl,
-    bearerToken
-  );
+  const projectId = await resolvePlaywrightProjectId(runtimeEnv.localApiBaseUrl, bearerToken);
   const api = createLocalApiClient(runtimeEnv.localApiBaseUrl, bearerToken, projectId);
 
   const initialized = await api.post<InitializeWalletResponse>("/v1/wallets/initialize", {

@@ -484,27 +484,9 @@ describe("Projects Routes", () => {
   });
 
   describe("Project API Keys", () => {
-    let projectId: string;
-
-    beforeEach(async () => {
-      // Use unique slug per test run
-      const uniqueSlug = `api-key-proj-${Date.now()}`;
-      const createRes = await app.request(
-        "/v1/projects",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${TEST_API_KEY.raw}`,
-          },
-          body: JSON.stringify({ name: "API Key Project", slug: uniqueSlug }),
-        },
-        env
-      );
-      expect(createRes.status).toBe(201);
-      const created = await createRes.json();
-      projectId = created.data.project.id;
-    });
+    // API keys are bound to a single project; use the same project the test key
+    // belongs to so that assertProjectAccess passes.
+    const projectId = TEST_PROJECT.id;
 
     it("creates API key for project", async () => {
       const res = await app.request(
@@ -517,7 +499,6 @@ describe("Projects Routes", () => {
           },
           body: JSON.stringify({
             name: "Project Key",
-            environment: "sandbox",
             walletScope: "all",
           }),
         },

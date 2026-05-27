@@ -63,12 +63,10 @@ export function WalletActionsMenu({
 
     startTransition(() => {
       void (async () => {
-        const result = await checkWalletSignerMemoAction(walletId).catch(
-          (error) => ({
-            status: "error" as const,
-            message: error instanceof Error ? error.message : "Signer check failed.",
-          })
-        );
+        const result = await checkWalletSignerMemoAction(walletId).catch((error) => ({
+          status: "error" as const,
+          message: error instanceof Error ? error.message : "Signer check failed.",
+        }));
 
         if (result.status === "success") {
           const explorerUrl = getDevnetExplorerUrl(result.signature);

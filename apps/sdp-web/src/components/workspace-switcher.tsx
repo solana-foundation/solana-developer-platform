@@ -2,7 +2,6 @@
 
 import { useClerk, useOrganization, useOrganizationList } from "@clerk/nextjs";
 import { ChevronsUpDownIcon, PlusIcon, Settings2Icon } from "lucide-react";
-import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -11,6 +10,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { cn } from "@/lib/utils";
 
 function OrgAvatar({ name, imageUrl }: { name: string; imageUrl: string | null }) {
@@ -42,8 +42,7 @@ export function WorkspaceSwitcher({ collapsed = false }: { collapsed?: boolean }
   const { projects, selectedProjectId, selectProject } = useDashboardWorkspace();
 
   const memberships = userMemberships.data ?? [];
-  const activeProject =
-    projects.find((project) => project.id === selectedProjectId) ?? null;
+  const activeProject = projects.find((project) => project.id === selectedProjectId) ?? null;
 
   return (
     <DropdownMenu>
@@ -124,10 +123,10 @@ export function WorkspaceSwitcher({ collapsed = false }: { collapsed?: boolean }
                   >
                     <span className="min-w-0 flex-1 truncate">{project.name}</span>
                     {isActive ? (
-                <span className="shrink-0 rounded-full bg-border-extra-light px-1.5 py-0.5 text-[10px] font-medium text-text-medium">
-                  Current
-                </span>
-              ) : null}
+                      <span className="shrink-0 rounded-full bg-border-extra-light px-1.5 py-0.5 text-[10px] font-medium text-text-medium">
+                        Current
+                      </span>
+                    ) : null}
                   </DropdownMenuItem>
                 );
               })
@@ -155,4 +154,3 @@ export function WorkspaceSwitcher({ collapsed = false }: { collapsed?: boolean }
     </DropdownMenu>
   );
 }
-

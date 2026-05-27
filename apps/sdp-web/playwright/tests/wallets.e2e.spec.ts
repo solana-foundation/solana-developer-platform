@@ -227,11 +227,7 @@ test.describe
         getBootstrapApiBaseUrl(),
         session.bearerToken
       );
-      const api = createLocalApiClient(
-        getBootstrapApiBaseUrl(),
-        session.bearerToken,
-        projectId
-      );
+      const api = createLocalApiClient(getBootstrapApiBaseUrl(), session.bearerToken, projectId);
       await session.page.close();
 
       const wallet = fixtures.wallets[0];
