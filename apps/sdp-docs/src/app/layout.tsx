@@ -72,6 +72,11 @@ export default function RootLayout({
     >
       <body className="antialiased">
         <RootProvider>{children}</RootProvider>
+        <div className="visually-hidden" aria-hidden="true">
+          Markdown versions of documentation pages are available by appending .md to any page URL
+          (e.g. /docs/introduction.md). Machine-readable resources: /docs/ai/llms.txt and
+          /docs/ai/llms-full.txt.
+        </div>
       </body>
     </html>
   );

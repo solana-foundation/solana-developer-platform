@@ -1,6 +1,6 @@
 # Solana Developer Platform
 
-> Full public docs map for Solana Developer Platform, generated from the docs navigation and public API reference.
+> Full public documentation for Solana Developer Platform — all page content for AI and agent ingestion.
 
 ## Canonical URLs
 - Docs: https://platform.solana.com/docs
@@ -10,17 +10,221 @@
 - AI guide: https://platform.solana.com/docs/reference/ai-consumption
 
 ## Docs
-- [Solana Developer Platform Docs](https://platform.solana.com/docs/home): A dashboard and REST API for real-world asset issuance, payments, and markets on Solana — with built-in compliance controls.
-- [Introduction](https://platform.solana.com/docs/introduction): What SDP is, what it provides, and how it works.
-- [API Reference](https://platform.solana.com/docs/reference/api): Endpoint index from the repository OpenAPI spec.
-- [Health](https://platform.solana.com/docs/reference/api/health): Service health and readiness endpoints.
-- [API Keys](https://platform.solana.com/docs/reference/api/api-keys): API key management endpoints.
-- [Wallets](https://platform.solana.com/docs/reference/api/wallets): Wallet signing provider configuration and wallet management.
-- [Projects](https://platform.solana.com/docs/reference/api/projects): Project and project member management.
-- [Issuance](https://platform.solana.com/docs/reference/api/issuance): Token issuance, allowlists, and lifecycle operations.
-- [Payments](https://platform.solana.com/docs/reference/api/payments): Wallet balances, transfer execution, policies, and ramps.
-- [Compliance](https://platform.solana.com/docs/reference/api/compliance): Risk and compliance screening endpoints.
+
+### Solana Developer Platform Docs
+Source: https://platform.solana.com/docs/home
+
+> A dashboard and REST API for real-world asset issuance, payments, and markets on Solana — with built-in compliance controls.
+
+<DocsHome />
+
+---
+
+### Introduction
+Source: https://platform.solana.com/docs/introduction
+
+> What SDP is, what it provides, and how it works.
+
+Solana Developer Platform (SDP) is a dashboard and REST API for real-world asset (RWA) issuance, payments, and markets on Solana. It handles wallet custody, onchain transaction construction, and compliance operations so your team can bring regulated assets onchain without managing keys or setting up Solana infrastructure.
+
+## What you get
+
+**Token lifecycle management** — Create tokens from pre-built templates (stablecoin, tokenized security) or configure your own using Token-2022 extensions. Deploy, mint, burn, and manage supply through the dashboard or API.
+
+**Wallet custody** — Provision signing wallets through integrated custody providers. SDP manages the signing infrastructure so your team never handles private keys directly.
+
+**Projects and scoped access** — Organize integrations by project, assign members, and issue project-scoped API keys so teams or environments do not share the same wallet and token surface.
+
+**Compliance operations** — Freeze individual accounts, pause token activity, seize tokens, and manage allowlists for regulated issuance flows. Selected compliance actions accept reason or memo fields for audit trails.
+
+**Two signing modes** — SDP supports both modes for transaction-building flows such as issuance, payments, and compliance actions:
+
+- **Execute** — SDP builds, signs, and submits the transaction in one API call
+- **Prepare** — SDP builds the transaction and returns it unsigned. You sign with your own infrastructure (hardware wallet, multisig, internal HSM) and submit it yourself.
+
+**Transaction simulation** — Prepare endpoints accept a `simulate: true` option that dry-runs the transaction before you sign, returning compute units consumed, program logs, and any errors.
+
+**Scoped API keys** — Generate keys with specific permission sets (`tokens:read`, `tokens:write`, `tokens:admin`, etc.) and rotate them without downtime.
+
+## Architecture
+
+SDP exposes two interfaces that connect to the same backend:
+
+- **Dashboard** — browser-based UI for setup, token management, and compliance operations. Sign in with email, Google, or GitHub.
+- **REST API** — programmatic access for backend integrations. Authenticate with an API key in the `Authorization` header.
+
+## Environments
+
+| Environment | API key prefix | Solana network | Purpose                                     |
+| ----------- | -------------- | -------------- | ------------------------------------------- |
+| Sandbox     | `sk_test_`     | devnet         | Development and testing with no real assets |
+| Production  | `sk_live_`     | mainnet-beta   | Live operations with real assets            |
+
+Both environments expose identical APIs. Develop and test against sandbox, then switch to production by swapping your API key.
+
+---
+
+### API Reference
+Source: https://platform.solana.com/docs/reference/api
+
+> Endpoint index from the repository OpenAPI spec.
+
+<div>
+  <a href="/docs/postman/collection.json" download>Download Postman collection</a>
+  {" · "}
+  <a href="/docs/postman/collection.json">Open raw JSON</a>
+</div>
+
+- [Health](/docs/reference/api/health)
+- [API Keys](/docs/reference/api/api-keys)
+- [Wallets](/docs/reference/api/wallets)
+- [Projects](/docs/reference/api/projects)
+- [Issuance](/docs/reference/api/issuance)
+- [Payments](/docs/reference/api/payments)
+- [Compliance](/docs/reference/api/compliance)
+
+---
+
+### Health
+Source: https://platform.solana.com/docs/reference/api/health
+
+> Service health and readiness endpoints.
+
+| Method | Endpoint | Summary |
+| --- | --- | --- |
+| `GET` | `/health` | Health check |
+| `GET` | `/health/ready` | Readiness check |
+
+---
+
+### API Keys
+Source: https://platform.solana.com/docs/reference/api/api-keys
+
+> API key management endpoints.
+
+| Method | Endpoint | Summary |
+| --- | --- | --- |
+| `GET` | `/v1/api-keys` | List API keys |
+| `POST` | `/v1/api-keys` | Create API key |
+| `DELETE` | `/v1/api-keys/{keyId}` | Deactivate API key |
+| `GET` | `/v1/api-keys/{keyId}` | Get API key |
+| `PATCH` | `/v1/api-keys/{keyId}` | Update API key |
+| `POST` | `/v1/api-keys/{keyId}/rotate` | Rotate API key |
+
+---
+
+### Wallets
+Source: https://platform.solana.com/docs/reference/api/wallets
+
+> Wallet signing provider configuration and wallet management.
+
+| Method | Endpoint | Summary |
+| --- | --- | --- |
+| `DELETE` | `/v1/wallets` | Delete wallet |
+| `GET` | `/v1/wallets` | List wallets |
+| `POST` | `/v1/wallets` | Create wallet |
+| `GET` | `/v1/wallets/{walletId}` | Get wallet by ID |
+| `PATCH` | `/v1/wallets/{walletId}` | Update wallet |
+| `GET` | `/v1/wallets/aggregate` | Aggregate wallet balances |
+| `GET` | `/v1/wallets/config` | Get wallet signing config |
+| `GET` | `/v1/wallets/configs` | List wallet signing configs |
+| `POST` | `/v1/wallets/default-wallet` | Set default wallet |
+| `POST` | `/v1/wallets/initialize` | Initialize wallet signing |
+| `GET` | `/v1/wallets/public-key` | Get wallet public key |
+| `POST` | `/v1/wallets/signer-check` | Check signer via memo transaction |
+| `POST` | `/v1/wallets/switch` | Switch wallet signing provider |
+| `GET` | `/v1/wallets/switch-options` | List switch provider options |
+
+---
+
+### Projects
+Source: https://platform.solana.com/docs/reference/api/projects
+
+> Project and project member management.
+
+| Method | Endpoint | Summary |
+| --- | --- | --- |
+| `GET` | `/v1/projects` | List projects |
+| `POST` | `/v1/projects` | Create project |
+| `DELETE` | `/v1/projects/{projectId}` | Archive project |
+| `GET` | `/v1/projects/{projectId}` | Get project |
+| `PATCH` | `/v1/projects/{projectId}` | Update project |
+| `GET` | `/v1/projects/{projectId}/api-keys` | List project API keys |
+| `POST` | `/v1/projects/{projectId}/api-keys` | Create project API key |
+| `GET` | `/v1/projects/{projectId}/members` | List project members |
+| `POST` | `/v1/projects/{projectId}/members` | Add project member |
+| `DELETE` | `/v1/projects/{projectId}/members/{memberId}` | Remove project member |
+| `PATCH` | `/v1/projects/{projectId}/members/{memberId}` | Update project member |
+
+---
+
+### Issuance
+Source: https://platform.solana.com/docs/reference/api/issuance
+
+> Token issuance, allowlists, and lifecycle operations.
+
+| Method | Endpoint | Summary |
+| --- | --- | --- |
+| `GET` | `/v1/issuance/templates` | List token templates |
+| `GET` | `/v1/issuance/templates/{templateId}` | Get token template |
+| `GET` | `/v1/issuance/tokens` | List tokens |
+| `POST` | `/v1/issuance/tokens` | Create token |
+| `GET` | `/v1/issuance/tokens/{tokenId}` | Get token |
+| `PATCH` | `/v1/issuance/tokens/{tokenId}` | Update token |
+| `GET` | `/v1/issuance/tokens/{tokenId}/allowlist` | List token allowlist |
+| `POST` | `/v1/issuance/tokens/{tokenId}/allowlist` | Add token allowlist entry |
+| `DELETE` | `/v1/issuance/tokens/{tokenId}/allowlist/{entryId}` | Remove token allowlist entry |
+| `POST` | `/v1/issuance/tokens/{tokenId}/authority` | Execute authority update |
+| `POST` | `/v1/issuance/tokens/{tokenId}/authority/prepare` | Prepare authority update |
+| `POST` | `/v1/issuance/tokens/{tokenId}/burn` | Execute burn |
+| `POST` | `/v1/issuance/tokens/{tokenId}/burn/prepare` | Prepare burn transaction |
+| `POST` | `/v1/issuance/tokens/{tokenId}/deploy` | Deploy token |
+| `POST` | `/v1/issuance/tokens/{tokenId}/deploy/prepare` | Prepare token deploy transaction |
+| `POST` | `/v1/issuance/tokens/{tokenId}/force-burn` | Execute force burn |
+| `POST` | `/v1/issuance/tokens/{tokenId}/force-burn/prepare` | Prepare force burn transaction |
+| `POST` | `/v1/issuance/tokens/{tokenId}/freeze` | Freeze account |
+| `GET` | `/v1/issuance/tokens/{tokenId}/frozen` | List frozen accounts |
+| `POST` | `/v1/issuance/tokens/{tokenId}/mint` | Execute mint |
+| `POST` | `/v1/issuance/tokens/{tokenId}/mint/prepare` | Prepare mint transaction |
+| `POST` | `/v1/issuance/tokens/{tokenId}/pause` | Pause token transfers |
+| `POST` | `/v1/issuance/tokens/{tokenId}/seize` | Execute seize |
+| `POST` | `/v1/issuance/tokens/{tokenId}/seize/prepare` | Prepare seize transaction |
+| `POST` | `/v1/issuance/tokens/{tokenId}/supply/refresh` | Refresh cached token supply |
+| `GET` | `/v1/issuance/tokens/{tokenId}/transactions` | List token transactions |
+| `POST` | `/v1/issuance/tokens/{tokenId}/unfreeze` | Unfreeze account |
+| `POST` | `/v1/issuance/tokens/{tokenId}/unpause` | Unpause token transfers |
+| `GET` | `/v1/issuance/transactions` | List issuance transactions |
+
+---
+
+### Payments
+Source: https://platform.solana.com/docs/reference/api/payments
+
+> Wallet balances, transfer execution, policies, and ramps.
+
+| Method | Endpoint | Summary |
+| --- | --- | --- |
+| `POST` | `/v1/payments/ramps/offramp/execute` | Execute off-ramp |
+| `POST` | `/v1/payments/ramps/onramp/execute` | Execute on-ramp |
+| `POST` | `/v1/payments/ramps/sandbox/simulate` | Simulate sandbox transfer |
+| `GET` | `/v1/payments/transfers` | List transfers |
+| `POST` | `/v1/payments/transfers` | Execute transfer (custody) |
+| `GET` | `/v1/payments/transfers/{transferId}` | Get transfer |
+| `POST` | `/v1/payments/transfers/prepare` | Prepare transfer (unsigned) |
+| `GET` | `/v1/payments/wallets/{walletId}/balances` | Get wallet balances |
+| `GET` | `/v1/payments/wallets/{walletId}/policies` | Get wallet policy |
+| `PUT` | `/v1/payments/wallets/{walletId}/policies` | Update wallet policy |
+
+---
+
+### Compliance
+Source: https://platform.solana.com/docs/reference/api/compliance
+
+> Risk and compliance screening endpoints.
+
+| Method | Endpoint | Summary |
+| --- | --- | --- |
+| `POST` | `/v1/compliance/address-screenings` | Screen an address across configured compliance providers |
 
 ## Notes
-- Generated from docs navigation and public API reference pages.
-- Hidden or internal-only APIs are intentionally excluded.
+- Generated from docs source. Hidden or internal-only APIs are intentionally excluded.

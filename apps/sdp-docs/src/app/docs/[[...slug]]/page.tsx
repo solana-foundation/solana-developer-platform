@@ -1,12 +1,12 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { findNeighbour } from "fumadocs-core/page-tree";
 import { Tab, Tabs } from "fumadocs-ui/components/tabs";
-import { readFileSync } from "fs";
-import { join } from "path";
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import type { ComponentType } from "react";
-import { DocsBody, DocsDescription, DocsPage, DocsTitle } from "@/components/docs-shell/page";
 import { HOME_TOC } from "@/components/docs-shell/home";
+import { DocsBody, DocsDescription, DocsPage, DocsTitle } from "@/components/docs-shell/page";
 import { getDocsPagePath } from "@/lib/site";
 import { source } from "@/lib/source";
 import { getMDXComponents } from "../../../../mdx-components";
@@ -39,7 +39,7 @@ type ResolvedPage = {
 function readStepsFromFrontmatter(pageSlug: string[]): string[] {
   try {
     const slug = pageSlug.filter((s) => s !== "index");
-    const filePath = join(process.cwd(), "content/docs", ...slug) + ".mdx";
+    const filePath = `${join(process.cwd(), "content/docs", ...slug)}.mdx`;
     const content = readFileSync(filePath, "utf-8");
     const match = content.match(/^steps:\s*\n((?:[ \t]+-[ \t]+[^\n]*\n?)+)/m);
     if (!match) return [];
@@ -106,9 +106,14 @@ export default async function Page({ params }: DocsPageProps) {
   if (steps.length > 0) {
     const stepItems = steps.map((title, i) => ({ title, url: `#step-${i + 1}`, depth: 3 }));
     const howItWorksIdx = baseToc.findIndex((item) => item.url === "#how-it-works");
-    toc = howItWorksIdx >= 0
-      ? [...baseToc.slice(0, howItWorksIdx + 1), ...stepItems, ...baseToc.slice(howItWorksIdx + 1)]
-      : [...baseToc, ...stepItems];
+    toc =
+      howItWorksIdx >= 0
+        ? [
+            ...baseToc.slice(0, howItWorksIdx + 1),
+            ...stepItems,
+            ...baseToc.slice(howItWorksIdx + 1),
+          ]
+        : [...baseToc, ...stepItems];
   }
 
   return (
@@ -136,11 +141,15 @@ export async function generateMetadata({ params }: DocsPageProps): Promise<Metad
 
   const data = resolvedPage.page.data as DocsData;
 
+  const pagePath = getDocsPagePath(Array.isArray(slug) ? slug.join("/") : "");
   return {
     title: data.title,
     description: data.description,
     alternates: {
-      canonical: getDocsPagePath(Array.isArray(slug) ? slug.join("/") : ""),
+      canonical: pagePath,
+      types: {
+        "text/markdown": `${pagePath}.md`,
+      },
     },
   };
 }

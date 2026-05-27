@@ -1,8 +1,4 @@
 {
   "title": "Getting Started",
-  "pages": [
-    "setup-organization",
-    "setup-wallets",
-    "manage-api-keys"
-  ]
+  "pages": ["setup-organization", "setup-wallets", "manage-api-keys"]
 }

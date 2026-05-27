@@ -32,6 +32,7 @@ type DocsPage = {
   title: string;
   description: string;
   url: string;
+  content: string;
 };
 
 type Section = {
@@ -82,6 +83,12 @@ function normalizeLine(value: string): string {
   return value.replace(/\s+/g, " ").trim();
 }
 
+function stripMdxContent(source: string): string {
+  let content = source.replace(/^---\n[\s\S]*?\n---\n?/, "");
+  content = content.replace(/^import\s+[^\n]*\n?/gm, "");
+  return content.replace(/\n{3,}/g, "\n\n").trim();
+}
+
 function parseFrontmatter(source: string): { title: string; description: string } {
   const match = source.match(/^---\n([\s\S]*?)\n---\n?/);
   const frontmatter = match?.[1] ?? "";
@@ -129,6 +136,7 @@ async function loadPages(): Promise<Map<string, DocsPage>> {
       title: title || slug.split("/").at(-1)?.replace(/-/g, " ") || slug,
       description,
       url: getDocsPageUrl(slug),
+      content: stripMdxContent(source),
     });
   }
 
@@ -143,11 +151,6 @@ async function loadMeta(): Promise<DocsMeta> {
 function renderLink(page: DocsPage): string {
   const description = page.description ? `: ${normalizeLine(page.description)}` : "";
   return `- [${page.title}](${page.url})${description}`;
-}
-
-function renderSection(section: Section): string {
-  const rows = section.pages.map(renderLink).join("\n");
-  return `## ${section.title}\n${rows}`;
 }
 
 function buildSections(meta: DocsMeta, pages: Map<string, DocsPage>): Section[] {
@@ -222,11 +225,23 @@ function renderLlms(keyPages: DocsPage[]): string {
   ].join("\n");
 }
 
+function renderPageFull(page: DocsPage): string {
+  const parts: string[] = [`### ${page.title}`, `Source: ${page.url}`];
+  if (page.description) parts.push(``, `> ${page.description}`);
+  if (page.content) parts.push(``, page.content);
+  return parts.join("\n");
+}
+
+function renderSectionFull(section: Section): string {
+  const pages = section.pages.map(renderPageFull).join("\n\n---\n\n");
+  return `## ${section.title}\n\n${pages}`;
+}
+
 function renderLlmsFull(sections: Section[]): string {
   return [
     "# Solana Developer Platform",
     "",
-    "> Full public docs map for Solana Developer Platform, generated from the docs navigation and public API reference.",
+    "> Full public documentation for Solana Developer Platform — all page content for AI and agent ingestion.",
     "",
     "## Canonical URLs",
     `- Docs: ${docsUrl}`,
@@ -235,11 +250,10 @@ function renderLlmsFull(sections: Section[]): string {
     `- OpenAPI: ${apiOpenApiUrl}`,
     `- AI guide: ${aiGuideUrl}`,
     "",
-    sections.map(renderSection).join("\n\n"),
+    sections.map(renderSectionFull).join("\n\n---\n\n"),
     "",
     "## Notes",
-    "- Generated from docs navigation and public API reference pages.",
-    "- Hidden or internal-only APIs are intentionally excluded.",
+    "- Generated from docs source. Hidden or internal-only APIs are intentionally excluded.",
     "",
   ].join("\n");
 }

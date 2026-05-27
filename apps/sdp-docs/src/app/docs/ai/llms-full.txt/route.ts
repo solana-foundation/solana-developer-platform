@@ -2,6 +2,6 @@ import { readAiResourceResponse } from "@/lib/ai-resources";
 
 export const runtime = "nodejs";
 
-export async function GET() {
-  return readAiResourceResponse("llmsFull");
+export async function GET(req: Request) {
+  return readAiResourceResponse("llmsFull", req);
 }

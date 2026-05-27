@@ -29,7 +29,9 @@ export function Step({
   return (
     <div className="hiw-step" id={`step-${number}`}>
       <div className="hiw-step-header">
-        <span className="hiw-step-num" aria-hidden="true">{number}</span>
+        <span className="hiw-step-num" aria-hidden="true">
+          {number}
+        </span>
         <h3 className="hiw-step-title">{title}</h3>
       </div>
       {body.length > 0 && <div className="hiw-step-body">{body}</div>}
