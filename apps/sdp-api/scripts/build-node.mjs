@@ -1,8 +1,8 @@
+/* biome-ignore-all lint/security/noSecrets: file contains the esbuild banner template, which trips the high-entropy heuristic */
 import esbuild from "esbuild";
 
 // CJS interop banner for ESM output: pg and other native-backed deps still
 // reach for require/__filename/__dirname even when bundled as ESM.
-// biome-ignore lint/security/noSecrets: esbuild banner template, not a secret
 const banner =
   "import{createRequire as __cr}from'module';" +
   "import{fileURLToPath as __furl}from'url';" +
