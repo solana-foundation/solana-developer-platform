@@ -132,3 +132,9 @@ export const COMMITTED_WORKER_VAR_KEYS = new Set([
 export const CLOUDFLARE_SECRET_KEYS = API_LOCAL_ENV_KEYS.filter(
   (key) => !LOCAL_ONLY_API_ENV_KEYS.has(key) && !COMMITTED_WORKER_VAR_KEYS.has(key)
 );
+
+// Docker has no wrangler.toml, so COMMITTED_WORKER_VAR_KEYS must ship inside
+// the env file alongside true secrets.
+export const DOCKER_ENV_KEYS = API_LOCAL_ENV_KEYS.filter(
+  (key) => !LOCAL_ONLY_API_ENV_KEYS.has(key)
+);

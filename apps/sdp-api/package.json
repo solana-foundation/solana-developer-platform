@@ -31,7 +31,9 @@
     "test:coverage": "pnpm test:coverage:workers && pnpm test:coverage:node",
     "test:coverage:workers": "vitest run --config vitest.workers.config.ts --coverage",
     "test:coverage:node": "vitest run --config vitest.node.config.ts --coverage",
-    "dev:node": "tsx watch src/server.ts"
+    "dev:node": "tsx watch src/server.ts",
+    "build:node": "node scripts/build-node.mjs",
+    "start:node": "node dist/server.js"
   },
   "dependencies": {
     "@hono/node-server": "^2.0.3",
