@@ -65,7 +65,7 @@ export function getAuth(c: Context<{ Bindings: Env }>): ApiKeyContext {
     return {
       id: apiKey.id,
       organizationId: apiKey.organizationId,
-      projectId: apiKey.projectId ?? null,
+      projectId: apiKey.projectId,
       role: apiKey.role,
       permissions: apiKey.permissions,
       environment: apiKey.environment,
@@ -78,12 +78,14 @@ export function getAuth(c: Context<{ Bindings: Env }>): ApiKeyContext {
     };
   }
 
+  const projectId = c.get("projectId") ?? null;
+
   const clerk = c.get("clerk");
   if (clerk) {
     return {
       id: clerk.userId,
       organizationId: clerk.organizationId,
-      projectId: null,
+      projectId,
       role: clerk.role,
       permissions: clerk.permissions,
       environment: "dashboard",
@@ -101,7 +103,7 @@ export function getAuth(c: Context<{ Bindings: Env }>): ApiKeyContext {
     return {
       id: session.userId,
       organizationId: session.organizationId,
-      projectId: null,
+      projectId,
       role: "session",
       permissions: session.permissions,
       environment: "dashboard",
@@ -115,6 +117,22 @@ export function getAuth(c: Context<{ Bindings: Env }>): ApiKeyContext {
   }
 
   throw new AppError("UNAUTHORIZED", "Authentication required");
+}
+
+/**
+ * Get the resolved project ID from request context.
+ * The projectContextMiddleware guarantees this is set for any route it gates;
+ * the runtime check here is defense-in-depth for handlers that may be reused
+ * outside that middleware.
+ *
+ * @throws AppError BAD_REQUEST if no project scope is available.
+ */
+export function requireProjectId(c: Context<{ Bindings: Env }>): string {
+  const projectId = c.get("projectId");
+  if (!projectId) {
+    throw new AppError("BAD_REQUEST", "Project scope is required");
+  }
+  return projectId;
 }
 
 export function getClerkAuth(c: Context<{ Bindings: Env }>): ClerkAuthContext {

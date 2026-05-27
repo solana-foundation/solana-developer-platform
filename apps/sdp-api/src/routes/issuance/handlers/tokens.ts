@@ -148,7 +148,7 @@ export const getToken = async (c: AppContext) => {
   }
 
   // If using project-scoped key, verify token belongs to that project
-  if (auth?.projectId && token.projectId !== auth.projectId) {
+  if (token.projectId !== auth.projectId) {
     throw notFound("Token");
   }
 
@@ -177,7 +177,7 @@ export const updateToken = async (c: AppContext) => {
     throw notFound("Token");
   }
 
-  if (auth?.projectId && existing.projectId !== auth.projectId) {
+  if (existing.projectId !== auth.projectId) {
     throw notFound("Token");
   }
 

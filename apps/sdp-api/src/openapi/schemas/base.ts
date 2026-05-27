@@ -150,6 +150,8 @@ export const errorCodeSchema = z
     "TRANSACTION_FAILED",
     "SIGNING_FAILED",
     "SIGNING_PENDING",
+    "PROVIDER_NOT_CONFIGURED",
+    "PROVIDER_UNAVAILABLE",
   ])
   .openapi({ description: "Machine-readable error code." });
 

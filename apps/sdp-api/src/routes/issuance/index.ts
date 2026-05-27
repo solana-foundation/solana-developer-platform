@@ -4,6 +4,7 @@
 
 import { Hono } from "hono";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
+import { projectContextMiddleware } from "@/middleware/project-context";
 import type { Env } from "@/types/env";
 import { addAllowlistEntry, listAllowlist, removeAllowlistEntry } from "./handlers/allowlist";
 import { executeUpdateAuthority, prepareUpdateAuthority } from "./handlers/authority";
@@ -23,6 +24,7 @@ const issuance = new Hono<{ Bindings: Env }>();
 
 // All routes require authentication
 issuance.use("*", unifiedAuthMiddleware({ allowClerk: true, allowSession: true }));
+issuance.use("*", projectContextMiddleware());
 
 // Templates (read-only, any authenticated user can view)
 issuance.get("/templates", requirePermissions("tokens:read"), listTokenTemplates);

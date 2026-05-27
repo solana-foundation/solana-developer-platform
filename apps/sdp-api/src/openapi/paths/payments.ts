@@ -107,7 +107,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Prepare transfer (unsigned)",
     operationId: "preparePaymentTransfer",
     description:
-      "Builds an unsigned transfer transaction for a custody wallet. The source walletId must reference a wallet from /v1/wallets.",
+      "Builds an unsigned transfer transaction for a custody wallet. The source walletId must reference a wallet from /v1/wallets. Private-transfer requests are provider-built here and returned for client review and signing.",
     security: [{ apiKeyAuth: [] }],
     request: {
       body: {
@@ -131,7 +131,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Execute transfer (custody)",
     operationId: "createPaymentTransfer",
     description:
-      "Executes a transfer using server-side custody signing. The source walletId must reference a wallet from /v1/wallets.",
+      "Executes a transfer using server-side custody signing. The source walletId must reference a wallet from /v1/wallets. Private-transfer requests are provider-built, signed by SDP-controlled wallets when required, and submitted on the configured Solana cluster.",
     security: [{ apiKeyAuth: [] }],
     request: {
       body: {

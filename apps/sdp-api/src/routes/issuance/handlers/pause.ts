@@ -44,7 +44,7 @@ export const pauseToken = async (c: AppContext) => {
     throw notFound("Token");
   }
 
-  if (auth?.projectId && token.projectId !== auth.projectId) {
+  if (token.projectId !== auth.projectId) {
     throw notFound("Token");
   }
 
@@ -165,7 +165,7 @@ export const unpauseToken = async (c: AppContext) => {
     throw notFound("Token");
   }
 
-  if (auth?.projectId && token.projectId !== auth.projectId) {
+  if (token.projectId !== auth.projectId) {
     throw notFound("Token");
   }
 

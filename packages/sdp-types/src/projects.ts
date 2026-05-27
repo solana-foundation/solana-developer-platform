@@ -7,7 +7,7 @@
 import { ORGANIZATION_RPC_PROVIDERS } from "./organizations";
 import type { ProjectRole } from "./permissions";
 
-export type ProjectEnvironment = "sandbox" | "beta" | "production";
+export type ProjectEnvironment = "sandbox" | "production";
 
 export type ProjectStatus = "active" | "archived";
 
@@ -58,7 +58,6 @@ export interface CreateProjectRequest {
 export interface UpdateProjectRequest {
   name?: string;
   description?: string;
-  environment?: ProjectEnvironment;
   settings?: ProjectSettings;
 }
 

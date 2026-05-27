@@ -40,6 +40,7 @@ allowed_programs = [
     "TACLkU6CiCdkQN2MjoyDkVg2yAH9zkxiHDsiztQ52TP",   # Token-ACL (sRFC-37)
     "GATEzzqxhJnsWF6vHRsgtixxSB8PaQdcqGEVTEHWiULz",  # ABL / GATE Program
     "SPLxh1LVZzEkX99H6rqYizhytLWPZVV296zyYDPagv2",   # MagicBlock private transfer program
+    "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh",   # MagicBlock delegation program
     "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr",   # Memo Program
     "AddressLookupTab1e1111111111111111111111111",   # Address Lookup Table
     "ComputeBudget111111111111111111111111111111",   # Compute Budget

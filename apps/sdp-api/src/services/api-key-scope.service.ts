@@ -73,13 +73,9 @@ function hasBindingPermission(
 }
 
 function isProjectWalletAllowedForScope(
-  keyProjectId: string | null,
+  keyProjectId: string,
   walletProjectId: string | null
 ): boolean {
-  if (!keyProjectId) {
-    return walletProjectId === null;
-  }
-
   // Project keys can use org wallets (null) and same-project wallets.
   return walletProjectId === null || walletProjectId === keyProjectId;
 }
@@ -284,7 +280,7 @@ export function resolveUpdateWalletScope(input: WalletScopeInput): {
 export async function assertWalletBindingsInScope(
   db: DatabaseClient,
   organizationId: string,
-  keyProjectId: string | null,
+  keyProjectId: string,
   bindings: ApiKeyWalletBinding[]
 ): Promise<void> {
   if (bindings.length === 0) {
@@ -322,10 +318,6 @@ export async function assertWalletBindingsInScope(
   for (const walletId of walletIds) {
     const walletProjectId = walletScope.get(walletId) ?? null;
     if (!isProjectWalletAllowedForScope(keyProjectId, walletProjectId)) {
-      if (!keyProjectId) {
-        throw new AppError("BAD_REQUEST", "Org-level API keys cannot bind to project wallets");
-      }
-
       throw new AppError(
         "BAD_REQUEST",
         "Project API keys cannot bind to wallets from other projects"

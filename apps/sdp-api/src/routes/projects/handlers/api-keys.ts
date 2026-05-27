@@ -14,23 +14,48 @@ import { replaceApiKeyWalletBindings } from "@/services/api-key-wallets.service"
 import { AuditService } from "@/services/audit.service";
 import { createSigningService } from "@/services/domain/signing.service";
 import { SigningError } from "@/services/ports";
-import { ProjectService } from "@/services/project.service";
 import type { WalletPurpose } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 
 type AppContext = Context<{ Bindings: Env }>;
 
+async function assertProjectAccess(
+  c: AppContext,
+  auth: ReturnType<typeof getAuth>,
+  projectId: string
+): Promise<void> {
+  // API key actors are bound to a single project; the path projectId must match.
+  if (auth.apiKeyId) {
+    if (auth.projectId !== projectId) {
+      throw notFound("Project");
+    }
+    return;
+  }
+
+  if (!auth.userId) {
+    throw notFound("Project");
+  }
+
+  const row = await getDb(c.env)
+    .prepare(
+      `SELECT 1 FROM project_members pm
+       JOIN projects p ON p.id = pm.project_id
+       WHERE pm.project_id = ? AND pm.user_id = ? AND p.organization_id = ? AND p.status = 'active'
+       LIMIT 1`
+    )
+    .bind(projectId, auth.userId, auth.organizationId)
+    .first();
+
+  if (!row) {
+    throw notFound("Project");
+  }
+}
+
 export const listProjectApiKeys = async (c: AppContext) => {
   const { projectId } = c.req.param();
   const auth = getAuth(c);
 
-  const projectService = new ProjectService(getDb(c.env));
-
-  // Verify project belongs to org
-  const project = await projectService.getProject(projectId);
-  if (!project || project.organizationId !== auth.organizationId) {
-    throw notFound("Project");
-  }
+  await assertProjectAccess(c, auth, projectId);
 
   const apiKeyService = new ApiKeyService(getDb(c.env));
   const apiKeys = await apiKeyService.listForProject(projectId);
@@ -64,19 +89,12 @@ export const createProjectApiKey = async (c: AppContext) => {
     });
   }
 
-  const projectService = new ProjectService(getDb(c.env));
-
-  // Verify project belongs to org
-  const project = await projectService.getProject(projectId);
-  if (!project || project.organizationId !== auth.organizationId) {
-    throw notFound("Project");
-  }
+  await assertProjectAccess(c, auth, projectId);
 
   const {
     name,
     description,
     role = "api_developer",
-    environment = "sandbox",
     permissions,
     walletScope,
     allowedIps,
@@ -148,7 +166,6 @@ export const createProjectApiKey = async (c: AppContext) => {
     description,
     role,
     permissions,
-    environment,
     allowedIps,
     expiresAt,
     signingWalletId: resolvedSigningWalletId,
@@ -169,7 +186,7 @@ export const createProjectApiKey = async (c: AppContext) => {
       projectId,
       name,
       role,
-      environment,
+      environment: createdKey.environment,
       walletScope: resolvedWalletBindings.length > 0 ? "selected" : "all",
       signingWalletId: resolvedSigningWalletId,
       signingWalletIds: resolvedWalletBindings.map((binding) => binding.walletId),

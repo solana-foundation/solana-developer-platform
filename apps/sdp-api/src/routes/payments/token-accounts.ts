@@ -51,6 +51,15 @@ type TokenAccountsByOwnerRpc = {
   };
 };
 
+type TokenSupplyRpc = {
+  getTokenSupply: (
+    mint: Address,
+    config: { commitment: "confirmed" }
+  ) => {
+    send: () => Promise<{ value?: { decimals?: number } }>;
+  };
+};
+
 async function getTokenAccountsByOwnerJsonParsed(
   rpc: ReturnType<typeof createRpc>,
   owner: Address,
@@ -63,6 +72,22 @@ async function getTokenAccountsByOwnerJsonParsed(
       { encoding: "jsonParsed", commitment: "confirmed" }
     )
     .send();
+}
+
+export async function resolveMintDecimals(
+  rpc: ReturnType<typeof createRpc>,
+  mint: Address
+): Promise<number> {
+  const response = await (rpc as unknown as TokenSupplyRpc)
+    .getTokenSupply(mint, { commitment: "confirmed" })
+    .send();
+  const decimals = response.value?.decimals;
+
+  if (typeof decimals !== "number" || !Number.isInteger(decimals) || decimals < 0) {
+    throw new AppError("BAD_REQUEST", "Token mint decimals could not be resolved");
+  }
+
+  return decimals;
 }
 
 function parseTokenAmountInfo(

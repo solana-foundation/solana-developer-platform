@@ -16,7 +16,6 @@ import {
   Settings2Icon,
   WalletIcon,
 } from "lucide-react";
-import { motion } from "motion/react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { type ReactNode, useEffect, useRef, useState } from "react";
@@ -26,7 +25,7 @@ import { NetworkDebugPanel, NetworkDebugToggle } from "@/components/network-debu
 import { SentryFeedbackWidget } from "@/components/sentry-feedback-widget";
 import { SentryUserContext } from "@/components/sentry-user-context";
 import { Badge } from "@/components/ui/badge";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { cn } from "@/lib/utils";
 
@@ -95,8 +94,6 @@ type DashboardPageConfig = {
 };
 
 type DashboardTopBarProps = {
-  isSidebarOpen: boolean;
-  setSidebarOpen: (value: boolean) => void;
   isMobileSidebarOpen: boolean;
   setMobileSidebarOpen: (value: boolean) => void;
   hideTitle?: boolean;
@@ -133,62 +130,28 @@ function HeaderBackAction({
 }
 
 function SidebarToggle({
-  isSidebarOpen,
-  setSidebarOpen,
   isMobileSidebarOpen,
   setMobileSidebarOpen,
 }: {
-  isSidebarOpen: boolean;
-  setSidebarOpen: (value: boolean) => void;
   isMobileSidebarOpen: boolean;
   setMobileSidebarOpen: (value: boolean) => void;
 }) {
   return (
-    <>
-      <motion.button
-        type="button"
-        aria-label="Open navigation"
-        onClick={() => setMobileSidebarOpen(true)}
-        className={[
-          "inline-flex h-8 w-8 items-center justify-center rounded-lg text-text-medium transition-colors hover:bg-border-light lg:hidden",
-          isMobileSidebarOpen ? "invisible" : "",
-        ].join(" ")}
-        whileHover={{ scale: 1.05 }}
-        whileTap={{ scale: 0.93, rotate: 8 }}
-      >
-        <motion.div
-          initial={{ rotate: 10 }}
-          animate={{ rotate: 0 }}
-          transition={{ duration: 0.18 }}
-        >
-          <PanelRightIcon className="h-4 w-4" />
-        </motion.div>
-      </motion.button>
-      {!isSidebarOpen ? (
-        <motion.button
-          type="button"
-          aria-label="Open navigation"
-          onClick={() => setSidebarOpen(true)}
-          className="hidden h-8 w-8 items-center justify-center rounded-lg text-text-medium transition-colors hover:bg-border-light lg:inline-flex"
-          whileHover={{ scale: 1.05 }}
-          whileTap={{ scale: 0.93, rotate: 8 }}
-        >
-          <motion.div
-            initial={{ rotate: 10 }}
-            animate={{ rotate: 0 }}
-            transition={{ duration: 0.18 }}
-          >
-            <PanelRightIcon className="h-4 w-4" />
-          </motion.div>
-        </motion.button>
-      ) : null}
-    </>
+    <button
+      type="button"
+      aria-label="Open navigation"
+      onClick={() => setMobileSidebarOpen(true)}
+      className={[
+        "inline-flex h-8 w-8 items-center justify-center rounded-lg text-text-medium transition-colors hover:bg-border-light lg:hidden",
+        isMobileSidebarOpen ? "invisible" : "",
+      ].join(" ")}
+    >
+      <PanelRightIcon className="h-4 w-4" />
+    </button>
   );
 }
 
 function DashboardTopBar({
-  isSidebarOpen,
-  setSidebarOpen,
   isMobileSidebarOpen,
   setMobileSidebarOpen,
   hideTitle,
@@ -210,8 +173,6 @@ function DashboardTopBar({
       <div className="grid min-h-[40px] grid-cols-[1fr_auto_1fr] items-start gap-3">
         <div className="flex min-w-0 items-center gap-3">
           <SidebarToggle
-            isSidebarOpen={isSidebarOpen}
-            setSidebarOpen={setSidebarOpen}
             isMobileSidebarOpen={isMobileSidebarOpen}
             setMobileSidebarOpen={setMobileSidebarOpen}
           />
@@ -234,8 +195,6 @@ function DashboardTopBar({
     <div className="flex items-start justify-between gap-3">
       <div className="flex min-w-0 items-center gap-3">
         <SidebarToggle
-          isSidebarOpen={isSidebarOpen}
-          setSidebarOpen={setSidebarOpen}
           isMobileSidebarOpen={isMobileSidebarOpen}
           setMobileSidebarOpen={setMobileSidebarOpen}
         />
@@ -251,49 +210,6 @@ function DashboardTopBar({
         {sandboxBadge}
       </div>
     </div>
-  );
-}
-
-function SandboxToggle() {
-  const { sdpEnvironment } = useDashboardWorkspace();
-  const isSandbox = sdpEnvironment === "sandbox";
-
-  return (
-    <TooltipProvider>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <span className="block w-full">
-            <button
-              type="button"
-              disabled
-              aria-pressed={isSandbox}
-              className="flex h-10 w-full cursor-not-allowed items-center gap-3 rounded-[var(--button-radius-lg)] px-3 text-[16px] leading-[24px] text-text-medium"
-            >
-              <span
-                className={[
-                  "relative inline-flex h-5 w-9 shrink-0 rounded-full border transition-colors",
-                  isSandbox
-                    ? "border-text-extra-high bg-text-extra-high"
-                    : "border-border-medium bg-border-medium",
-                ].join(" ")}
-                aria-hidden="true"
-              >
-                <span
-                  className={[
-                    "absolute top-1/2 size-3.5 -translate-y-1/2 rounded-full bg-white shadow-sm transition-transform",
-                    isSandbox ? "translate-x-4.5" : "translate-x-0.5",
-                  ].join(" ")}
-                />
-              </span>
-              <span className="min-w-0 truncate text-left">Sandbox mode</span>
-            </button>
-          </span>
-        </TooltipTrigger>
-        <TooltipContent side="right" align="center" sideOffset={28} className="text-xs">
-          Only Sandbox mode supported at the moment
-        </TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
   );
 }
 
@@ -441,7 +357,7 @@ function isItemActive(pathname: string, href: string): boolean {
 }
 
 const navItemBase =
-  "flex items-center gap-3 rounded-[var(--button-radius-lg)] px-3 text-[16px] leading-[24px] transition-colors";
+  "flex h-10 items-center gap-3 rounded-[var(--button-radius-lg)] px-3 text-base transition-colors";
 const navItemActive = "border border-border-extra-light bg-white text-text-extra-high";
 const navItemInactive = "text-text-medium hover:bg-border-light hover:text-text-extra-high";
 
@@ -450,15 +366,32 @@ function SidebarGroup({
   items,
   pathname,
   onNavigate,
+  isCollapsed,
+  showTopSeparator,
 }: {
   title: string;
   items: NavItem[];
   pathname: string;
   onNavigate?: () => void;
+  isCollapsed: boolean;
+  showTopSeparator: boolean;
 }) {
   return (
     <div className="space-y-2">
-      <p className="px-3 text-[12px] uppercase tracking-[0.4px] text-text-extra-low">{title}</p>
+      <p
+        className={cn(
+          "relative px-3 text-xs uppercase leading-normal tracking-wide",
+          isCollapsed ? "text-transparent" : "text-text-extra-low"
+        )}
+      >
+        {title}
+        {isCollapsed && showTopSeparator ? (
+          <span
+            aria-hidden="true"
+            className="pointer-events-none absolute top-1/2 right-3 left-3 h-px -translate-y-1/2 bg-border-medium"
+          />
+        ) : null}
+      </p>
       <div className="space-y-0.5">
         {items.map((item) => {
           const Icon = item.icon;
@@ -469,12 +402,18 @@ function SidebarGroup({
               <Link
                 href={item.href}
                 onClick={onNavigate}
-                className={cn(navItemBase, "h-10", active ? navItemActive : navItemInactive)}
+                title={isCollapsed ? item.label : undefined}
+                aria-label={isCollapsed ? item.label : undefined}
+                className={cn(
+                  navItemBase,
+                  active ? navItemActive : navItemInactive,
+                  isCollapsed && "justify-center"
+                )}
               >
-                <Icon className="h-5 w-5" strokeWidth={1.9} />
-                <span>{item.label}</span>
+                <Icon className="h-5 w-5 shrink-0" strokeWidth={1.9} />
+                {isCollapsed ? null : <span className="whitespace-nowrap">{item.label}</span>}
               </Link>
-              {item.children && item.children.length > 0 && (
+              {!isCollapsed && item.children && item.children.length > 0 && (
                 <div className="ml-5 mt-2">
                   {item.children.map((child, i, siblings) => {
                     const childActive = isItemActive(pathname, child.href);
@@ -525,59 +464,70 @@ function DashboardSidebarContent({
   pathname,
   onNavigate,
   onClose,
+  isCollapsed,
+  variant,
 }: {
   bottomNavItems: NavItem[];
   pathname: string;
   onNavigate?: () => void;
   onClose: () => void;
+  isCollapsed: boolean;
+  variant: "desktop" | "mobile";
 }) {
+  const showMobileClose = variant === "mobile";
   return (
     <>
-      <div className="w-[296px] space-y-6 p-3">
-        <div className="relative px-2 py-3">
-          <div className="mb-2 flex items-center justify-between pl-1 pr-2">
-            <div className="flex min-w-0 items-center gap-2">
-              <div className="min-w-0 flex-1">
-                <OrganizationSwitcher hidePersonal />
-              </div>
-            </div>
-            <motion.button
-              type="button"
-              aria-label="Close navigation"
-              onClick={onClose}
-              className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-text-medium transition-colors hover:bg-border-light"
-              whileHover={{ scale: 1.05, rotate: -3 }}
-              whileTap={{ scale: 0.95, rotate: -10 }}
-            >
-              <motion.div
-                initial={{ rotate: -10 }}
-                animate={{ rotate: 0 }}
-                transition={{ duration: 0.18 }}
+      <div className="space-y-6 p-3">
+        <div className="py-3">
+          {showMobileClose ? (
+            <div className="flex items-center justify-between gap-2">
+              <WorkspaceSwitcher collapsed={false} />
+              <button
+                type="button"
+                aria-label="Close navigation"
+                onClick={onClose}
+                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-text-medium transition-colors hover:bg-border-light"
               >
                 <PanelLeftIcon className="h-5 w-5" />
-              </motion.div>
-            </motion.button>
-          </div>
+              </button>
+            </div>
+          ) : (
+            <WorkspaceSwitcher collapsed={isCollapsed} />
+          )}
         </div>
-        {navSections.map((section) => (
+        {navSections.map((section, idx) => (
           <SidebarGroup
             key={section.title}
             title={section.title}
             items={section.items}
             pathname={pathname}
             onNavigate={onNavigate}
+            isCollapsed={isCollapsed}
+            showTopSeparator={idx > 0}
           />
         ))}
         <div className="space-y-2">
-          <p className="px-3 text-[12px] uppercase tracking-[0.4px] text-text-extra-low">Mode</p>
+          <p
+            className={cn(
+              "relative px-3 text-xs uppercase leading-normal tracking-wide",
+              isCollapsed ? "text-transparent" : "text-text-extra-low"
+            )}
+          >
+            Mode
+            {isCollapsed ? (
+              <span
+                aria-hidden="true"
+                className="pointer-events-none absolute top-1/2 right-3 left-3 h-px -translate-y-1/2 bg-border-medium"
+              />
+            ) : null}
+          </p>
           <div className="space-y-0.5">
-            <SandboxToggle />
-            <NetworkDebugToggle />
+            <NetworkDebugToggle collapsed={isCollapsed} />
           </div>
         </div>
       </div>
-      <div className="space-y-0.5 pb-1">
-        <SentryFeedbackWidget />
+      <div className="space-y-0.5 px-3 pb-1">
+        <SentryFeedbackWidget collapsed={isCollapsed} />
         {bottomNavItems.map((item) => {
           const Icon = item.icon;
           return (
@@ -587,10 +537,15 @@ function DashboardSidebarContent({
               target={item.external ? "_blank" : undefined}
               rel={item.external ? "noopener noreferrer" : undefined}
               onClick={onNavigate}
-              className="flex h-10 items-center gap-3 rounded-[var(--button-radius-lg)] px-3 text-[16px] leading-[24px] text-text-medium transition-colors hover:bg-border-light hover:text-text-extra-high"
+              title={isCollapsed ? item.label : undefined}
+              aria-label={isCollapsed ? item.label : undefined}
+              className={cn(
+                "flex h-10 items-center gap-3 rounded-[var(--button-radius-lg)] px-3 text-base text-text-medium transition-colors hover:bg-border-light hover:text-text-extra-high",
+                isCollapsed && "justify-center"
+              )}
             >
-              <Icon className="h-5 w-5" strokeWidth={1.9} />
-              <span>{item.label}</span>
+              <Icon className="h-5 w-5 shrink-0" strokeWidth={1.9} />
+              {isCollapsed ? null : <span className="whitespace-nowrap">{item.label}</span>}
             </Link>
           );
         })}
@@ -606,7 +561,8 @@ export function DashboardShell({ children }: { children: ReactNode }) {
   const { dashboardAccess, isSidebarOpen, setSidebarOpen } = useDashboardWorkspace();
   const [isMobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const previousPathnameRef = useRef(pathname);
-  const sidebarWidth = 296;
+  const sidebarExpandedWidth = 296;
+  const sidebarCollapsedWidth = 64;
   const pageConfig = getDashboardPageConfig(pathname);
   const bottomNavItems: NavItem[] = [
     { label: "API Docs", href: docsHref, icon: LibraryIcon, external: true },
@@ -711,22 +667,27 @@ export function DashboardShell({ children }: { children: ReactNode }) {
           "lg:grid-cols-[auto_1fr]",
         ].join(" ")}
       >
-        <motion.aside
-          initial={false}
-          animate={{ width: isSidebarOpen ? sidebarWidth : 0 }}
-          transition={{ duration: 0.22, ease: "easeInOut" }}
-          style={{ pointerEvents: isSidebarOpen ? "auto" : "none" }}
-          className={[
-            "hidden overflow-hidden border border-border-light border-r-0 bg-[var(--sdp-shell-bg)] lg:sticky lg:top-0 lg:flex lg:h-screen lg:flex-col lg:justify-between",
-          ].join(" ")}
+        <aside
+          style={{ width: isSidebarOpen ? sidebarExpandedWidth : sidebarCollapsedWidth }}
+          className="relative z-10 hidden bg-[var(--sdp-shell-bg)] lg:sticky lg:top-0 lg:flex lg:h-screen lg:flex-col lg:justify-between"
         >
           <DashboardSidebarContent
             bottomNavItems={bottomNavItems}
             pathname={pathname}
             onNavigate={undefined}
             onClose={() => setSidebarOpen(false)}
+            isCollapsed={!isSidebarOpen}
+            variant="desktop"
           />
-        </motion.aside>
+          <button
+            type="button"
+            onClick={() => setSidebarOpen(!isSidebarOpen)}
+            aria-label={isSidebarOpen ? "Collapse sidebar" : "Expand sidebar"}
+            className="group absolute top-1/2 right-0 z-10 flex h-24 w-5 -translate-y-1/2 translate-x-3/4 cursor-pointer items-center justify-center"
+          >
+            <span className="block h-8 w-0.5 rounded-full bg-border-medium group-hover:bg-text-low" />
+          </button>
+        </aside>
 
         {isMobileSidebarOpen ? (
           <div className="fixed inset-0 z-50 flex lg:hidden">
@@ -736,12 +697,14 @@ export function DashboardShell({ children }: { children: ReactNode }) {
               className="absolute inset-0 bg-gray-1400/30"
               onClick={() => setMobileSidebarOpen(false)}
             />
-            <div className="relative z-10 flex h-full w-[296px] max-w-[85vw] flex-col justify-between border-r border-border-light bg-[var(--sdp-shell-bg)] shadow-lg">
+            <div className="relative z-10 flex h-full w-72 max-w-[85vw] flex-col justify-between border-r border-border-light bg-[var(--sdp-shell-bg)] shadow-lg">
               <DashboardSidebarContent
                 bottomNavItems={bottomNavItems}
                 pathname={pathname}
                 onNavigate={() => setMobileSidebarOpen(false)}
                 onClose={() => setMobileSidebarOpen(false)}
+                isCollapsed={false}
+                variant="mobile"
               />
             </div>
           </div>
@@ -770,8 +733,6 @@ export function DashboardShell({ children }: { children: ReactNode }) {
                   ].join(" ")}
                 >
                   <DashboardTopBar
-                    isSidebarOpen={isSidebarOpen}
-                    setSidebarOpen={setSidebarOpen}
                     isMobileSidebarOpen={isMobileSidebarOpen}
                     setMobileSidebarOpen={setMobileSidebarOpen}
                     hideTitle={pageConfig.hideTitle}
@@ -783,8 +744,6 @@ export function DashboardShell({ children }: { children: ReactNode }) {
               ) : (
                 <div className={shouldLockViewportScroll ? "px-3 pt-5 md:px-6 md:pt-6" : ""}>
                   <DashboardTopBar
-                    isSidebarOpen={isSidebarOpen}
-                    setSidebarOpen={setSidebarOpen}
                     isMobileSidebarOpen={isMobileSidebarOpen}
                     setMobileSidebarOpen={setMobileSidebarOpen}
                     hideTitle={pageConfig.hideTitle}

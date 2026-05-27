@@ -59,6 +59,25 @@ export interface PaymentTransferSummary {
   updatedAt?: string;
 }
 
+export interface PreparedPaymentTransaction {
+  serialized: string;
+  blockhash: string;
+  lastValidBlockHeight?: string;
+}
+
+export interface MagicBlockPreparedPrivateTransfer {
+  provider: "magicblock";
+  magicBlock: {
+    kind: string;
+    version: string;
+    instructionCount: number;
+    requiredSigners: string[];
+    validator?: string;
+  };
+}
+
+export type PreparedPrivateTransfer = MagicBlockPreparedPrivateTransfer;
+
 export interface PaymentTransferRequest {
   projectId?: string;
   source: string;
@@ -77,6 +96,24 @@ export interface PaymentTransferRequest {
 export interface PaymentTransferEnvelope {
   data?: {
     transfer?: PaymentTransferSummary;
+    privateTransfer?: PreparedPrivateTransfer;
+  };
+  error?: {
+    message?: string;
+  };
+}
+
+export interface PaymentTransferPrepareEnvelope {
+  data?: {
+    transfer?: PaymentTransferSummary;
+    preparedTransaction?: PreparedPaymentTransaction;
+    privateTransfer?: PreparedPrivateTransfer;
+    simulation?: {
+      success: boolean;
+      logs: string[];
+      unitsConsumed: string | null;
+      error: string | null;
+    };
   };
   error?: {
     message?: string;
