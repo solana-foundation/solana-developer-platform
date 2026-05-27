@@ -1,8 +1,4 @@
-import type {
-  ListProjectsResponse,
-  ProjectResponse,
-  UpdateProjectRequest,
-} from "@sdp/types";
+import type { ListProjectsResponse, ProjectResponse, UpdateProjectRequest } from "@sdp/types";
 import type { Context } from "hono";
 import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
