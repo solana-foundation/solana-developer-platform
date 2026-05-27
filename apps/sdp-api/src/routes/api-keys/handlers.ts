@@ -107,8 +107,8 @@ export const createApiKey = async (c: AppContext) => {
   const {
     name,
     description,
+    projectId,
     role = "api_developer",
-    environment = "sandbox",
     permissions,
     walletScope,
     allowedIps,
@@ -162,7 +162,7 @@ export const createApiKey = async (c: AppContext) => {
       throw error;
     }
   } else {
-    await assertWalletBindingsInScope(getDb(c.env), orgId, null, resolvedWalletBindings);
+    await assertWalletBindingsInScope(getDb(c.env), orgId, projectId, resolvedWalletBindings);
   }
 
   const resolveCreatorFallback = async (): Promise<string | null> => {
@@ -210,13 +210,13 @@ export const createApiKey = async (c: AppContext) => {
   const apiKeyService = new ApiKeyService(getDb(c.env));
   const createdKey = await apiKeyService.createApiKey({
     organizationId: orgId,
+    projectId,
     createdByUserId: createdBy,
     createdByKeyId: actor.apiKeyId ?? undefined,
     name,
     description,
     role,
     permissions,
-    environment,
     allowedIps,
     expiresAt,
     signingWalletId: resolvedSigningWalletId,
@@ -236,7 +236,7 @@ export const createApiKey = async (c: AppContext) => {
     metadata: {
       name,
       role,
-      environment,
+      environment: createdKey.environment,
       walletScope: resolvedWalletBindings.length > 0 ? "selected" : "all",
       signingWalletId: resolvedSigningWalletId,
       signingWalletIds: resolvedWalletBindings.map((binding) => binding.walletId),
@@ -313,7 +313,7 @@ export const updateApiKey = async (c: AppContext) => {
   const existing = await getDb(c.env)
     .prepare("SELECT id, key_hash, project_id FROM api_keys WHERE id = ? AND organization_id = ?")
     .bind(keyId, actor.organizationId)
-    .first<{ id: string; key_hash: string; project_id: string | null }>();
+    .first<{ id: string; key_hash: string; project_id: string }>();
 
   if (!existing) {
     throw notFound("API key");

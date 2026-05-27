@@ -65,7 +65,7 @@ export function getAuth(c: Context<{ Bindings: Env }>): ApiKeyContext {
     return {
       id: apiKey.id,
       organizationId: apiKey.organizationId,
-      projectId: apiKey.projectId ?? null,
+      projectId: apiKey.projectId,
       role: apiKey.role,
       permissions: apiKey.permissions,
       environment: apiKey.environment,

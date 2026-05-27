@@ -199,7 +199,7 @@ declare module "hono" {
     apiKey?: {
       id: string;
       organizationId: string;
-      projectId?: string | null;
+      projectId: string;
       role: string;
       permissions: Permission[];
       environment: ApiKeyEnvironment;
