@@ -40,7 +40,9 @@ export function Step({
   );
 }
 
-export function StepPanel({ children }: { children: React.ReactNode }) {
-  return <div className="hiw-step-panel">{children}</div>;
-}
-StepPanel.isStepPanel = true;
+export const StepPanel = Object.assign(
+  function StepPanel({ children }: { children: React.ReactNode }) {
+    return <div className="hiw-step-panel">{children}</div>;
+  },
+  { isStepPanel: true as const }
+);

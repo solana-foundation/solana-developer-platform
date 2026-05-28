@@ -33,7 +33,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ slug: s
           "Content-Type": "text/markdown; charset=utf-8",
           "Cache-Control": "public, max-age=300",
           Vary: "Accept",
-          Link: `<${pageUrl}>; rel="alternate"; type="text/html", <${mdUrl}>; rel="canonical"`,
+          Link: `<${pageUrl}>; rel="canonical", <${mdUrl}>; rel="alternate"; type="text/markdown"`,
         },
       });
     } catch {}

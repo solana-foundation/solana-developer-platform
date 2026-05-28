@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { findNeighbour } from "fumadocs-core/page-tree";
 import { Tab, Tabs } from "fumadocs-ui/components/tabs";
 import type { Metadata } from "next";
@@ -35,22 +33,6 @@ type ResolvedPage = {
   page: NonNullable<ReturnType<typeof source.getPage>>;
   pageSlug: string[];
 };
-
-function readStepsFromFrontmatter(pageSlug: string[]): string[] {
-  try {
-    const slug = pageSlug.filter((s) => s !== "index");
-    const filePath = `${join(process.cwd(), "content/docs", ...slug)}.mdx`;
-    const content = readFileSync(filePath, "utf-8");
-    const match = content.match(/^steps:\s*\n((?:[ \t]+-[ \t]+[^\n]*\n?)+)/m);
-    if (!match) return [];
-    return match[1]
-      .split("\n")
-      .map((line) => line.replace(/^[ \t]+-[ \t]+/, "").trim())
-      .filter(Boolean);
-  } catch {
-    return [];
-  }
-}
 
 function resolvePage(slug?: string[]): ResolvedPage | null {
   if (!slug || slug.length === 0) {
@@ -101,7 +83,7 @@ export default async function Page({ params }: DocsPageProps) {
 
   const isHome = resolvedPage.pageSlug.join("/") === "home";
   const baseToc = isHome ? HOME_TOC : (data.toc ?? []);
-  const steps = readStepsFromFrontmatter(resolvedPage.pageSlug);
+  const steps = data.steps ?? [];
   let toc = baseToc;
   if (steps.length > 0) {
     const stepItems = steps.map((title, i) => ({ title, url: `#step-${i + 1}`, depth: 3 }));

@@ -27,14 +27,8 @@ function getAiResourcePath(resourceName: AiResourceName): string {
   return path.join(process.cwd(), "public", aiResourceMap[resourceName].fileName);
 }
 
-export async function readAiResourceResponse(resourceName: AiResourceName, req?: Request) {
+export async function readAiResourceResponse(resourceName: AiResourceName) {
   const resource = aiResourceMap[resourceName];
-
-  if (req) {
-    const ua = req.headers.get("user-agent") ?? "unknown";
-    const referer = req.headers.get("referer") ?? "-";
-    console.log(`[ai-resource] ${resource.fileName} ua="${ua}" referer="${referer}"`);
-  }
 
   try {
     const body = await readFile(getAiResourcePath(resourceName), "utf8");
