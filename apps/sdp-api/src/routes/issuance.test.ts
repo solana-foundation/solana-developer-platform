@@ -3202,9 +3202,7 @@ describe("Issuance Routes", () => {
           expect(addToListSpy).toHaveBeenCalledTimes(2);
 
           const rowAfterRetry = await getDb(env)
-            .prepare(
-              "SELECT id, status FROM token_allowlists WHERE token_id = ? AND address = ?"
-            )
+            .prepare("SELECT id, status FROM token_allowlists WHERE token_id = ? AND address = ?")
             .bind(allowlistTokenId, freshDestination)
             .first<{ id: string; status: string }>();
           expect(rowAfterRetry?.status).toBe("active");

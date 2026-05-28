@@ -1342,10 +1342,7 @@ export class TokenService {
    * `ON DELETE CASCADE`, so status history rows are removed by the database.
    */
   async deleteAllowlistEntry(entryId: string): Promise<void> {
-    await this.db
-      .prepare("DELETE FROM token_allowlists WHERE id = ?")
-      .bind(entryId)
-      .run();
+    await this.db.prepare("DELETE FROM token_allowlists WHERE id = ?").bind(entryId).run();
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
