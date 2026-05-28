@@ -704,7 +704,7 @@ export const updateWallet = async (c: AppContext) => {
 };
 
 export const listWallets = async (c: AppContext) => {
-  const filters = resolveWalletFilters(c);
+  const filters = resolveWalletFilters(c, { defaultIncludeAllProviders: true });
   const wallets = await getCachedWalletSummaries(c, filters, "list_wallets");
   const balancesStartedAt = performance.now();
   const balancesByWalletId = filters.includeBalances

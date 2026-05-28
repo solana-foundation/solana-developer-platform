@@ -254,7 +254,7 @@ describe("Custody multi-provider routes", () => {
     expect(defaultPointer?.default_custody_config_id).toBe(PARA_CONFIG_ID);
   });
 
-  it("lists default-provider wallets by default and all wallets when includeAllProviders is enabled", async () => {
+  it("lists all provider wallets by default and can opt into default-provider-only results", async () => {
     const defaultRes = await app.request(
       "/v1/wallets",
       {
@@ -273,18 +273,22 @@ describe("Custody multi-provider routes", () => {
       };
     };
 
-    expect(defaultBody.data.wallets).toHaveLength(2);
-    expect(defaultBody.data.wallets.every((wallet) => wallet.provider === "privy")).toBe(true);
-    expect(defaultBody.data.wallets.every((wallet) => wallet.isDefaultProvider === true)).toBe(
-      true
+    expect(defaultBody.data.wallets).toHaveLength(4);
+    expect(new Set(defaultBody.data.wallets.map((wallet) => wallet.provider))).toEqual(
+      new Set(["privy", "para"])
     );
+    expect(
+      defaultBody.data.wallets
+        .filter((wallet) => wallet.isDefaultProvider)
+        .map((wallet) => wallet.provider)
+    ).toEqual(["privy", "privy"]);
 
-    const includeAllProvidersQuery = new URLSearchParams({
-      includeAllProviders: "true",
+    const defaultProviderOnlyQuery = new URLSearchParams({
+      includeAllProviders: "false",
     }).toString();
 
-    const allRes = await app.request(
-      `/v1/wallets?${includeAllProvidersQuery}`,
+    const defaultProviderOnlyRes = await app.request(
+      `/v1/wallets?${defaultProviderOnlyQuery}`,
       {
         method: "GET",
         headers: {
@@ -294,22 +298,20 @@ describe("Custody multi-provider routes", () => {
       env
     );
 
-    expect(allRes.status).toBe(200);
-    const allBody = (await allRes.json()) as {
+    expect(defaultProviderOnlyRes.status).toBe(200);
+    const defaultProviderOnlyBody = (await defaultProviderOnlyRes.json()) as {
       data: {
         wallets: Array<{ provider?: string; isDefaultProvider?: boolean; walletId: string }>;
       };
     };
 
-    expect(allBody.data.wallets).toHaveLength(4);
-    expect(new Set(allBody.data.wallets.map((wallet) => wallet.provider))).toEqual(
-      new Set(["privy", "para"])
-    );
+    expect(defaultProviderOnlyBody.data.wallets).toHaveLength(2);
     expect(
-      allBody.data.wallets
-        .filter((wallet) => wallet.isDefaultProvider)
-        .map((wallet) => wallet.provider)
-    ).toEqual(["privy", "privy"]);
+      defaultProviderOnlyBody.data.wallets.every((wallet) => wallet.provider === "privy")
+    ).toBe(true);
+    expect(
+      defaultProviderOnlyBody.data.wallets.every((wallet) => wallet.isDefaultProvider === true)
+    ).toBe(true);
   });
 
   it("returns active configs and defaultConfigId from /v1/wallets/configs", async () => {
