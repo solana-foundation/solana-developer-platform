@@ -70,7 +70,7 @@ const outcomes = [
   {
     title: "Payments — move assets between wallets",
     desc: "Orchestrate transfers, manage wallet custody, and integrate payment rails into your existing systems.",
-    href: "/docs/tokens/transfer-tokens",
+    href: "/docs/payments/send-basic-payment",
     Icon: Building2,
   },
   {

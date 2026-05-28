@@ -1,6 +1,10 @@
 ---
 title: Basic payment
 description: Send a single token transfer with SDP, using either Execute or Prepare mode.
+steps:
+  - Set up the transfer
+  - Execute the transfer
+  - Verify the transfer
 ---
 
 SDP handles token transfers through its payments API. A basic payment moves tokens **from a custody wallet you control to any Solana wallet address**. The `source` field on the request is an SDP custody wallet ID (`wal_…`), resolved server-side from the caller's wallet list; `destination` is the recipient's on-chain **wallet (owner) address** — for SPL transfers, SDP derives the associated token account (ATA) from this address and creates it if needed, so pass the wallet pubkey, **not** a token-account address.
@@ -13,7 +17,79 @@ Transfers are available through the Payments dashboard and the API.
 - A custody wallet to use as the `source`. Execute mode additionally requires the wallet to have a custody signer configured so SDP can sign and submit; Prepare mode doesn't (you'll sign client-side).
 - An API key with both `payments:write` and `wallets:read` permissions, where the key's `payments:write` scope includes the source wallet — both endpoints (`POST /v1/payments/transfers` and `POST /v1/payments/transfers/prepare`) are gated by that pair at the route layer, and the source wallet is then re-checked against the key's `payments:write` wallet scope.
 
-## Execute mode
+## How it works
+
+<HowItWorks>
+
+<Step number={1} title="Set up the transfer">
+
+Specify the source, destination, token, and amount.
+
+<StepPanel>
+<Tabs items={["UI", "API"]} groupId="how-it-works">
+<Tab value="UI">
+
+Go to **Payments** in the sidebar. The overview shows your total SDP balance, recent transactions, and **Send** / **Receive** actions.
+
+![Payments overview showing balance, Send and Receive buttons, and recent transactions](/images/tokens/transfer-confirmed.png)
+
+Click **Send** and select **Wallet transfer** to send from an SDP wallet to a Solana address.
+
+![Send page showing Wallet transfer and Off-ramp options](/images/tokens/transfer-send-options.png)
+
+On the **Enter transfer details** form, select a source wallet from the dropdown.
+
+![Transfer details form with source wallet dropdown open](/images/tokens/transfer-form-source.png)
+
+Fill in:
+
+- **Source** — a wallet you control in SDP
+- **Amount** — human-readable units (e.g., `0.5`)
+- **Asset** — select from your deployed tokens
+- **Destination address** — any valid Solana wallet address
+- **Memo** — optional note recorded onchain
+
+![Transfer details form with all fields filled in](/images/tokens/transfer-form-filled.png)
+
+</Tab>
+<Tab value="API">
+
+Prepare the request body:
+
+```typescript
+const body = {
+  source: "wal_example",              // SDP custody wallet ID
+  destination: "7xKXz...9fGh",         // recipient wallet (owner) address
+  token: "9aBCd...4eEf",               // onchain mint address
+  amount: "100.00",                    // human-readable units
+  memo: "Payment for invoice #1234",
+};
+```
+
+`token` is the mint address returned by the deploy step, not the SDP token ID. `destination` is the wallet pubkey — SDP derives the associated token account from it.
+
+</Tab>
+</Tabs>
+</StepPanel>
+
+</Step>
+
+<Step number={2} title="Execute the transfer">
+
+Submit the transfer. In Execute mode SDP signs and submits. In Prepare mode you receive an unsigned transaction to sign client-side. See [Prepare vs Execute](/docs/guides/prepare-vs-execute) for guidance.
+
+<StepPanel>
+<Tabs items={["UI", "API"]} groupId="how-it-works">
+<Tab value="UI">
+
+Click **Review** to see the transfer summary, then **Confirm** to submit.
+
+The transfer status updates to `Confirmed` once the transaction is finalized.
+
+</Tab>
+<Tab value="API">
+
+**Execute mode**
 
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
@@ -72,7 +148,7 @@ HttpRequest request = HttpRequest.newBuilder()
 </Tab>
 </Tabs>
 
-## Prepare mode
+**Prepare mode** — append `/prepare` and add `"options": { "simulate": true }` for a dry-run.
 
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
@@ -134,7 +210,48 @@ HttpRequest request = HttpRequest.newBuilder()
 </Tab>
 </Tabs>
 
-See [Prepare vs Execute](/docs/guides/prepare-vs-execute) for guidance on which mode to use.
+</Tab>
+</Tabs>
+</StepPanel>
+
+</Step>
+
+<Step number={3} title="Verify the transfer">
+
+Confirm the transfer completed and balances updated.
+
+<StepPanel>
+<Tabs items={["UI", "API"]} groupId="how-it-works">
+<Tab value="UI">
+
+The transfer appears in **Payments** history with a `confirmed` status and an onchain transaction signature.
+
+![Payments overview showing confirmed inbound transaction](/images/tokens/transfer-confirmed.png)
+
+Click the record to see full details including the Solana Explorer link.
+
+</Tab>
+<Tab value="API">
+
+```typescript
+// data.transfer.status    — "confirmed"
+// data.transfer.signature — onchain tx signature
+```
+
+Poll status for async confirmations:
+
+```bash
+curl https://api.solana.com/v1/payments/transfers/txn_abc123 \
+  -H "Authorization: Bearer sk_test_..."
+```
+
+</Tab>
+</Tabs>
+</StepPanel>
+
+</Step>
+
+</HowItWorks>
 
 ## Deduplication
 

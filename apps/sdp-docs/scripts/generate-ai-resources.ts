@@ -148,36 +148,93 @@ async function loadMeta(): Promise<DocsMeta> {
   return JSON.parse(json) as DocsMeta;
 }
 
+async function loadFolderMetas(): Promise<Map<string, DocsMeta>> {
+  const result = new Map<string, DocsMeta>();
+
+  async function walk(dirPath: string): Promise<void> {
+    const entries = await fs.readdir(dirPath, { withFileTypes: true });
+    await Promise.all(
+      entries.map(async (entry) => {
+        if (!entry.isDirectory()) return;
+        const subDir = path.join(dirPath, entry.name);
+        try {
+          const json = await fs.readFile(path.join(subDir, "meta.json"), "utf8");
+          const rel = path.relative(docsContentDir, subDir).replace(/\\/g, "/");
+          result.set(rel, JSON.parse(json) as DocsMeta);
+        } catch {
+          // folder without meta.json — skip
+        }
+        await walk(subDir);
+      })
+    );
+  }
+
+  await walk(docsContentDir);
+  return result;
+}
+
 function renderLink(page: DocsPage): string {
   const description = page.description ? `: ${normalizeLine(page.description)}` : "";
   return `- [${page.title}](${page.url})${description}`;
 }
 
-function buildSections(meta: DocsMeta, pages: Map<string, DocsPage>): Section[] {
+function buildSections(
+  meta: DocsMeta,
+  pages: Map<string, DocsPage>,
+  folderMetas: Map<string, DocsMeta>
+): Section[] {
   const sections: Section[] = [];
+  const emitted = new Set<string>();
   let currentSection: Section = { title: "Docs", pages: [] };
 
-  for (const entry of meta.pages || []) {
-    if (entry.startsWith("---") && entry.endsWith("---")) {
-      if (currentSection.pages.length > 0) {
-        sections.push(currentSection);
-      }
+  const flush = () => {
+    if (currentSection.pages.length > 0) {
+      sections.push(currentSection);
+    }
+  };
+
+  const isSeparator = (entry: string): boolean => entry.startsWith("---") && entry.endsWith("---");
+
+  const visit = (entry: string, slugPrefix: string, parentLabel: string | null): void => {
+    if (isSeparator(entry)) {
+      flush();
+      const label = entry.replace(/---/g, "").trim();
       currentSection = {
-        title: entry.replace(/---/g, "").trim(),
+        title: parentLabel ? `${parentLabel} — ${label}` : label,
         pages: [],
       };
-      continue;
+      return;
     }
 
-    const page = pages.get(entry);
-    if (!page) continue;
-    currentSection.pages.push(page);
+    const fullSlug = slugPrefix ? `${slugPrefix}/${entry}` : entry;
+
+    const page = pages.get(fullSlug);
+    if (page) {
+      if (!emitted.has(fullSlug)) {
+        currentSection.pages.push(page);
+        emitted.add(fullSlug);
+      }
+      return;
+    }
+
+    const folderMeta = folderMetas.get(fullSlug);
+    if (!folderMeta) return;
+
+    flush();
+    const sectionTitle = folderMeta.title || entry;
+    currentSection = { title: sectionTitle, pages: [] };
+    for (const subEntry of folderMeta.pages || []) {
+      visit(subEntry, fullSlug, sectionTitle);
+    }
+    flush();
+    currentSection = { title: "Docs", pages: [] };
+  };
+
+  for (const entry of meta.pages || []) {
+    visit(entry, "", null);
   }
 
-  if (currentSection.pages.length > 0) {
-    sections.push(currentSection);
-  }
-
+  flush();
   return sections;
 }
 
@@ -268,8 +325,12 @@ async function writeFileIfChanged(filePath: string, content: string): Promise<vo
 }
 
 async function run(): Promise<void> {
-  const [meta, pages] = await Promise.all([loadMeta(), loadPages()]);
-  const sections = buildSections(meta, pages);
+  const [meta, pages, folderMetas] = await Promise.all([
+    loadMeta(),
+    loadPages(),
+    loadFolderMetas(),
+  ]);
+  const sections = buildSections(meta, pages, folderMetas);
   const keyPages = buildKeyPages(pages);
 
   await fs.mkdir(publicDir, { recursive: true });
