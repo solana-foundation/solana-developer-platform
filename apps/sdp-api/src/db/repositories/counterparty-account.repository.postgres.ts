@@ -151,12 +151,18 @@ export function createPostgresCounterpartyAccountsRepository(
       const row = await db
         .prepare(
           `SELECT * FROM counterparty_accounts
-             WHERE id = ?
+             WHERE counterparty_id = ?
+               AND id = ?
                AND organization_id = ?
                AND project_id = ?
                AND status = 'active'`
         )
-        .bind(params.counterpartyAccountId, params.organizationId, params.projectId)
+        .bind(
+          params.counterpartyId,
+          params.counterpartyAccountId,
+          params.organizationId,
+          params.projectId
+        )
         .first<Record<string, unknown>>();
       return row ? mapCounterpartyAccountRow(row) : null;
     },
