@@ -3307,6 +3307,76 @@ describe("Issuance Routes", () => {
           prepareMintToSpy.mockRestore();
         }
       });
+
+      // Race window: the top-level status check returns 'active' (stale read),
+      // but the actual DB row is 'revoked' by the time the insert runs. Without
+      // the strict insert variant, addAllowlistEntry would silently reactivate
+      // the row, undoing the operator's KYC/compliance revocation.
+      it("does not reactivate a concurrently-revoked entry when the top-level status read is stale", async () => {
+        await seedAblListAddress();
+
+        const tokenService = new TokenService(getDb(env));
+        const entry = await tokenService.addAllowlistEntry({
+          tokenId: allowlistTokenId,
+          address: freshDestination,
+          addedBy: TEST_PROJECT_API_KEY.id,
+        });
+        await tokenService.revokeAllowlistEntry(entry.id);
+
+        // Simulate the race: top-level check sees stale 'active' status, but
+        // by the time the insert path runs, the row is actually 'revoked'.
+        const statusSpy = vi
+          .spyOn(TokenService.prototype, "getAllowlistEntryStatusByAddress")
+          .mockResolvedValueOnce("active");
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSigner")
+          .mockResolvedValueOnce({ address: signerAddress } as never);
+        // Force the not-on-chain branch so we exercise the strict insert path.
+        const isWalletOnListSpy = vi
+          .spyOn(MosaicService.prototype, "isWalletOnList")
+          .mockResolvedValueOnce(false);
+        const addToListSpy = vi.spyOn(MosaicService.prototype, "addToList");
+        const prepareMintToSpy = vi.spyOn(MosaicService.prototype, "prepareMintTo");
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${allowlistTokenId}/mint/prepare`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({
+                mint: { destination: freshDestination, amount: "1" },
+              }),
+            },
+            env
+          );
+
+          expect(res.status).toBe(403);
+          const body = (await res.json()) as { error: { code: string } };
+          expect(body.error.code).toBe("DESTINATION_REVOKED");
+
+          // The DB row stays 'revoked' — not silently flipped to 'active' by
+          // a reactivating insert. This is the regression guard.
+          const row = await getDb(env)
+            .prepare("SELECT status FROM token_allowlists WHERE id = ?")
+            .bind(entry.id)
+            .first<{ status: string }>();
+          expect(row?.status).toBe("revoked");
+
+          // The mint must not have proceeded any further on-chain.
+          expect(addToListSpy).not.toHaveBeenCalled();
+          expect(prepareMintToSpy).not.toHaveBeenCalled();
+        } finally {
+          statusSpy.mockRestore();
+          createOrgSignerSpy.mockRestore();
+          isWalletOnListSpy.mockRestore();
+          addToListSpy.mockRestore();
+          prepareMintToSpy.mockRestore();
+        }
+      });
     });
 
     it("rejects mint to denylisted address", async () => {

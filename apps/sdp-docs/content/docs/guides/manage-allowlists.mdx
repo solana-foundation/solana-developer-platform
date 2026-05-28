@@ -12,6 +12,8 @@ When a token is created without an allowlist, the dashboard hides allowlist mana
 - A token with `requiresAllowlist` enabled
 - The `tokens:write` permission for API key callers
 
+The mint endpoints also auto-add fresh destination wallets to the allowlist on first mint (both on-chain and in the DB mirror). If you want every entry to come through explicit operator review, use `POST /allowlist` ahead of mint and avoid handing out `tokens:write` to keys that should not be able to grow the allowlist. Revoked entries are never auto-reactivated by mint — they return `403 DESTINATION_REVOKED` until re-added explicitly here.
+
 ## Add an address
 
 <Tabs items={["curl", "TypeScript", "Java"]}>

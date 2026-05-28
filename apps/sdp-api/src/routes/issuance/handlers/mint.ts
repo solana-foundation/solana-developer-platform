@@ -53,10 +53,11 @@ async function syncDestinationToOnChainAllowlist(opts: {
 }): Promise<boolean> {
   const listAddress = assertValidAddress(opts.ablListAddress, "ablListAddress");
 
-  // Refuse to silently reactivate a revoked entry. `addAllowlistEntry` (called
-  // below in both code paths) reactivates any non-active row, which would let
-  // a mint undo an operator's explicit revocation (KYC/compliance). The
-  // operator must re-add the address via the allowlist endpoint first.
+  // Fast-path bail when the destination is already in the `revoked` state —
+  // saves one RPC (`isWalletOnList`) on the common case. Race-safety against a
+  // revoke that lands AFTER this check is delegated to `addAllowlistEntryStrict`
+  // below, which refuses to reactivate any existing row (active or revoked) and
+  // throws `DESTINATION_REVOKED` if the row is revoked at insert time.
   const existingStatus = await opts.tokenService.getAllowlistEntryStatusByAddress(
     opts.tokenId,
     opts.destinationRaw
@@ -67,7 +68,7 @@ async function syncDestinationToOnChainAllowlist(opts: {
 
   if (await opts.mosaic.isWalletOnList(listAddress, opts.destination)) {
     try {
-      await opts.tokenService.addAllowlistEntry({
+      await opts.tokenService.addAllowlistEntryStrict({
         tokenId: opts.tokenId,
         address: opts.destinationRaw,
         addedBy: opts.addedBy,
@@ -82,7 +83,7 @@ async function syncDestinationToOnChainAllowlist(opts: {
 
   let createdEntryId: string | null = null;
   try {
-    const entry = await opts.tokenService.addAllowlistEntry({
+    const entry = await opts.tokenService.addAllowlistEntryStrict({
       tokenId: opts.tokenId,
       address: opts.destinationRaw,
       addedBy: opts.addedBy,

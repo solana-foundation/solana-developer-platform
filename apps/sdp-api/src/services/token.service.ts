@@ -1167,7 +1167,6 @@ export class TokenService {
    * Add an address to the token allowlist
    */
   async addAllowlistEntry(input: AddAllowlistInput): Promise<TokenAllowlistEntry> {
-    // Check for existing entry
     const existing = await this.db
       .prepare("SELECT id, status FROM token_allowlists WHERE token_id = ? AND address = ?")
       .bind(input.tokenId, input.address)
@@ -1177,7 +1176,7 @@ export class TokenService {
       if (existing.status === "active") {
         throw new Error("ADDRESS_ALREADY_ALLOWLISTED");
       }
-      // Reactivate revoked entry
+      // Reactivate revoked entry — operator-initiated re-add.
       await this.db
         .prepare(
           "UPDATE token_allowlists SET status = 'active', revoked_at = NULL, label = ?, added_by = ? WHERE id = ?"
@@ -1194,6 +1193,39 @@ export class TokenService {
       return entry;
     }
 
+    return this.insertNewAllowlistEntry(input);
+  }
+
+  /**
+   * Insert a fresh allowlist entry, refusing to touch existing rows.
+   *
+   * Unlike `addAllowlistEntry`, this never reactivates a `revoked` row.
+   * Used by the mint auto-add sync, where reactivation would silently undo an
+   * operator's KYC/compliance revocation if it landed between the top-level
+   * status check and the insert (race window in `syncDestinationToOnChainAllowlist`).
+   *
+   * - Existing `active` row → throws `Error("ADDRESS_ALREADY_ALLOWLISTED")`
+   *   (same as `addAllowlistEntry`, so caller race-handling stays uniform).
+   * - Existing `revoked` row → throws `AppError("DESTINATION_REVOKED")`,
+   *   so the mint short-circuits to 403 instead of silently un-revoking.
+   */
+  async addAllowlistEntryStrict(input: AddAllowlistInput): Promise<TokenAllowlistEntry> {
+    const existing = await this.db
+      .prepare("SELECT id, status FROM token_allowlists WHERE token_id = ? AND address = ?")
+      .bind(input.tokenId, input.address)
+      .first<{ id: string; status: string }>();
+
+    if (existing) {
+      if (existing.status === "revoked") {
+        throw new AppError("DESTINATION_REVOKED");
+      }
+      throw new Error("ADDRESS_ALREADY_ALLOWLISTED");
+    }
+
+    return this.insertNewAllowlistEntry(input);
+  }
+
+  private async insertNewAllowlistEntry(input: AddAllowlistInput): Promise<TokenAllowlistEntry> {
     const id = `tal_${crypto.randomUUID()}`;
     const now = new Date().toISOString();
 
