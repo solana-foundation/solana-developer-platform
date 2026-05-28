@@ -1955,6 +1955,44 @@ describe("Payments routes", () => {
       }
     });
 
+    it("rejects MagicBlock execution when gasless sponsorship is explicitly disabled", async () => {
+      const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+      try {
+        const res = await app.request(
+          "/v1/payments/transfers",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_API_KEY.raw}`,
+            },
+            body: JSON.stringify({
+              source: TEST_WALLET_ID,
+              destination: TEST_SOLANA_ADDRESSES.wallet2,
+              token: DEVNET_USDC_MINT,
+              amount: "1",
+              privateTransfer: {
+                provider: "magicblock",
+                magicBlock: {
+                  gasless: false,
+                },
+              },
+            }),
+          },
+          env
+        );
+
+        expect(res.status).toBe(400);
+        const body = (await res.json()) as { error: { code: string; message: string } };
+        expect(body.error.code).toBe("BAD_REQUEST");
+        expect(body.error.message).toContain("requires gasless transactions");
+        expect(fetchSpy).not.toHaveBeenCalled();
+      } finally {
+        fetchSpy.mockRestore();
+      }
+    });
+
     it("executes a MagicBlock private transfer that settles to base balance", async () => {
       env.MAGICBLOCK_PRIVATE_PAYMENTS_API_BASE_URL = TEST_MAGICBLOCK_API_BASE_URL;
       const sourceSigner = await generateKeyPairSigner();

@@ -458,9 +458,9 @@ type MagicBlockProductOptions = Extract<
 
 function buildMagicBlockProviderTransferOptions(
   options: MagicBlockProductOptions,
-  overrides?: { gasless?: boolean }
+  context?: { koraSponsoredExecution?: boolean }
 ): MagicBlockProviderTransferOptions {
-  const gasless = overrides?.gasless ?? options.gasless;
+  const gasless = context?.koraSponsoredExecution ? true : options.gasless;
 
   return {
     ...(options.validator ? { validator: options.validator } : {}),
@@ -508,7 +508,7 @@ async function prepareMagicBlockPrivateTransferForOperation(params: {
   operation: OutboundPaymentOperation;
   privateTransfer: PrivateTransferRequest;
   memo?: string;
-  forceGasless?: boolean;
+  koraSponsoredExecution?: boolean;
 }): Promise<{
   prepared: PreparedTransferPayload;
   metadata: PreparedPrivateTransferMetadata;
@@ -546,11 +546,20 @@ async function prepareMagicBlockPrivateTransferForOperation(params: {
     amount: Number(amountBaseUnits),
     memo,
     options: buildMagicBlockProviderTransferOptions(privateTransfer.magicBlock, {
-      gasless: params.forceGasless ? true : undefined,
+      koraSponsoredExecution: params.koraSponsoredExecution,
     }),
   });
 
   return mapMagicBlockPreparedTransfer(magicBlockPrepared);
+}
+
+function assertMagicBlockKoraSponsoredExecutionOptions(options: MagicBlockProductOptions): void {
+  if (options.gasless === false) {
+    throw new AppError(
+      "BAD_REQUEST",
+      "MagicBlock private transfer execution is sponsored by Kora and requires gasless transactions. Remove gasless or set it to true."
+    );
+  }
 }
 
 function decodeMagicBlockPreparedTransaction(serializedTx: string) {
@@ -574,14 +583,15 @@ function decodeMagicBlockPreparedTransaction(serializedTx: string) {
   return { transaction, compiledMessage, existingFeePayer };
 }
 
+type DecodedMagicBlockPreparedTransaction = ReturnType<typeof decodeMagicBlockPreparedTransaction>;
+
 function addSponsoredFeePayerToPreparedTransaction(
-  serializedTx: string,
+  decoded: DecodedMagicBlockPreparedTransaction,
   feePayer: Address,
   requiredSigners: string[],
   options?: { replaceExistingFeePayer?: boolean }
 ) {
-  const { transaction, compiledMessage, existingFeePayer } =
-    decodeMagicBlockPreparedTransaction(serializedTx);
+  const { transaction, compiledMessage, existingFeePayer } = decoded;
 
   if (existingFeePayer === feePayer) {
     return transaction;
@@ -707,7 +717,8 @@ async function executePreparedPrivateTransfer(
   const walletsByAddress = new Map(wallets.map((wallet) => [wallet.publicKey, wallet]));
   const signerWallets = new Map<string, CustodyWallet>();
   const requiredSigners = [...new Set(metadata.magicBlock.requiredSigners)];
-  const existingFeePayer = decodeMagicBlockPreparedTransaction(serializedTx).existingFeePayer;
+  const decodedTransaction = decodeMagicBlockPreparedTransaction(serializedTx);
+  const existingFeePayer = decodedTransaction.existingFeePayer;
   const shouldReplaceProviderFeePayer =
     requiredSigners.includes(existingFeePayer) && !walletsByAddress.has(existingFeePayer);
   const custodyRequiredSigners = shouldReplaceProviderFeePayer
@@ -749,7 +760,7 @@ async function executePreparedPrivateTransfer(
   const feePayment = getFeePayment(c);
   const feePayer = await feePayment.getFeePayer();
   const transaction = addSponsoredFeePayerToPreparedTransaction(
-    serializedTx,
+    decodedTransaction,
     feePayer,
     custodyRequiredSigners,
     { replaceExistingFeePayer: shouldReplaceProviderFeePayer }
@@ -1612,12 +1623,15 @@ export async function createTransfer(c: AppContext) {
 
   const privateTransfer = parsed.data.privateTransfer as PrivateTransferRequest | undefined;
   if (privateTransfer) {
+    assertMagicBlockKoraSponsoredExecutionOptions(privateTransfer.magicBlock);
     const mapped = await prepareMagicBlockPrivateTransferForOperation({
       c,
       operation,
       privateTransfer,
       memo: parsed.data.memo,
-      forceGasless: true,
+      // MagicBlock's gasless response separates the source signer from the provider sponsor.
+      // SDP swaps that sponsor slot for Kora before signing and submission.
+      koraSponsoredExecution: true,
     });
     const transferType: TransferType = "transfer_confidential";
     const transfer = await createTransferRecord(c, {
