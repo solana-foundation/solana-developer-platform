@@ -1,5 +1,16 @@
 export type { RepositoryDbClient } from "./base";
 export type {
+  ArchiveCounterpartyAccountInput,
+  CounterpartyAccountRow,
+  CounterpartyAccountsRepository,
+  CounterpartyAccountsRepositoryContext,
+  CreateCounterpartyAccountInput,
+  ListCounterpartyAccountsByCounterpartyInput,
+  ListCounterpartyAccountsResult,
+  UpdateCounterpartyAccountInput,
+} from "./counterparty-account.repository";
+export { createPostgresCounterpartyAccountsRepository } from "./counterparty-account.repository.postgres";
+export type {
   ArchiveCounterpartyInput,
   CounterpartiesRepository,
   CounterpartiesRepositoryContext,
@@ -26,6 +37,7 @@ export type {
 export { createPostgresPaymentsRepository } from "./payments.repository.postgres";
 export {
   createCounterpartiesRepository,
+  createCounterpartyAccountsRepository,
   createPaymentsRepository,
   createTokenRepository,
 } from "./repository-factory";

@@ -1,5 +1,7 @@
 import { getDb } from "@/db";
 import type { Env } from "@/types/env";
+import type { CounterpartyAccountsRepository } from "./counterparty-account.repository";
+import { createPostgresCounterpartyAccountsRepository } from "./counterparty-account.repository.postgres";
 import type { CounterpartiesRepository } from "./counterparty.repository";
 import { createPostgresCounterpartiesRepository } from "./counterparty.repository.postgres";
 import type { PaymentsRepository } from "./payments.repository";
@@ -13,6 +15,10 @@ export function createPaymentsRepository(env: Env): PaymentsRepository {
 
 export function createCounterpartiesRepository(env: Env): CounterpartiesRepository {
   return createPostgresCounterpartiesRepository(getDb(env));
+}
+
+export function createCounterpartyAccountsRepository(env: Env): CounterpartyAccountsRepository {
+  return createPostgresCounterpartyAccountsRepository(getDb(env));
 }
 
 export function createTokenRepository(env: Env): TokenRepository {
