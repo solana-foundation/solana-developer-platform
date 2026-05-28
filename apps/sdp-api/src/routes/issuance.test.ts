@@ -1875,8 +1875,8 @@ describe("Issuance Routes", () => {
         const addToListSpy = vi
           .spyOn(MosaicService.prototype, "addToList")
           .mockRejectedValueOnce(new Error("on-chain add failed"));
-        const revokeAllowlistEntrySpy = vi
-          .spyOn(TokenService.prototype, "revokeAllowlistEntry")
+        const deleteAllowlistEntrySpy = vi
+          .spyOn(TokenService.prototype, "deleteAllowlistEntry")
           .mockRejectedValueOnce(new Error("rollback failed"));
 
         try {
@@ -1904,7 +1904,7 @@ describe("Issuance Routes", () => {
         } finally {
           createOrgSignerSpy.mockRestore();
           addToListSpy.mockRestore();
-          revokeAllowlistEntrySpy.mockRestore();
+          deleteAllowlistEntrySpy.mockRestore();
         }
       });
 

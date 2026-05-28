@@ -89,15 +89,19 @@ export const addAllowlistEntry = async (c: AppContext) => {
       }
     } catch (error) {
       try {
-        await tokenService.revokeAllowlistEntry(entry.id);
-      } catch (revokeError) {
+        // Hard-delete (not revoke) so a transient on-chain failure doesn't leave
+        // behind a `revoked` row — that would trip the operator-revoked guard
+        // in `syncDestinationToOnChainAllowlist` and permanently block mint
+        // auto-add for this address.
+        await tokenService.deleteAllowlistEntry(entry.id);
+      } catch (rollbackError) {
         throw new AppError(
           "INTERNAL_ERROR",
           "Failed to roll back control-list entry after sync error",
           {
             originalError: error instanceof Error ? error.message : "Unknown add error",
             restoreError:
-              revokeError instanceof Error ? revokeError.message : "Unknown rollback error",
+              rollbackError instanceof Error ? rollbackError.message : "Unknown rollback error",
           }
         );
       }
