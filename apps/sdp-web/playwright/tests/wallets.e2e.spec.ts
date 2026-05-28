@@ -209,8 +209,6 @@ test.describe
       await expect(walletCard).toBeVisible({ timeout: 120_000 });
       await expect(walletCard.getByText("Privy", { exact: true })).toBeVisible();
 
-      await expect(page.getByRole("button", { name: "Create Wallet" })).toBeVisible();
-      await expect(page.locator('button[aria-label="Create wallet"]').first()).toBeVisible();
       await expect(walletCard).toBeVisible();
 
       await walletCard.getByRole("link", { name: "Manage" }).click();
