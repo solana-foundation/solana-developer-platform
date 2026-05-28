@@ -218,7 +218,10 @@ function buildSections(
     }
 
     const folderMeta = folderMetas.get(fullSlug);
-    if (!folderMeta) return;
+    if (!folderMeta) {
+      console.warn(`generate-ai-resources: no page or folder for entry "${fullSlug}" — skipping`);
+      return;
+    }
 
     flush();
     const sectionTitle = folderMeta.title || entry;

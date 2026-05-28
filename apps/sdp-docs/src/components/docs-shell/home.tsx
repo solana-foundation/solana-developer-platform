@@ -76,7 +76,8 @@ const outcomes = [
   {
     title: "Markets — connect to liquidity",
     desc: "Enable secondary market activity for your issued assets through SDP's markets infrastructure.",
-    href: "/docs/guides/setup-wallets",
+    // TODO: replace with a dedicated markets page when available
+    href: "/docs/introduction",
     Icon: Lock,
   },
 ];

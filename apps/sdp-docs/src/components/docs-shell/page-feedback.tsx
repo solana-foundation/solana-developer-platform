@@ -21,8 +21,12 @@ export function PageFeedback() {
 
   async function handleSubmit() {
     setSubmitting(true);
-    // Submit payload — wire up to your analytics/backend here
-    await Promise.resolve({ vote, comment, path: window.location.pathname });
+    // TODO: wire to analytics/backend. No endpoint exists yet — submissions are intentionally
+    // dropped so the UI can ship while the backend is built.
+    const payload = { vote, comment, path: window.location.pathname };
+    if (process.env.NODE_ENV !== "production") {
+      console.warn("[PageFeedback] no backend wired — dropping payload", payload);
+    }
     setSubmitting(false);
     setStep("done");
   }

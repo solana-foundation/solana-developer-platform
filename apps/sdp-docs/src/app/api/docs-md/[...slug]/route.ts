@@ -12,16 +12,27 @@ function stripMdxShell(source: string): string {
   return content.replace(/\n{3,}/g, "\n\n").trim();
 }
 
+function isSafeSlugSegment(segment: string): boolean {
+  return segment.length > 0 && segment !== ".." && segment !== "." && !/[/\\]/.test(segment);
+}
+
 export async function GET(_req: Request, { params }: { params: Promise<{ slug: string[] }> }) {
   const { slug } = await params;
-  const contentDir = path.join(process.cwd(), "content/docs");
+
+  if (!slug.every(isSafeSlugSegment)) {
+    return new Response("Not Found", { status: 404 });
+  }
+
+  const contentDir = path.resolve(process.cwd(), "content/docs");
+  const contentDirPrefix = contentDir + path.sep;
 
   const candidates = [
-    `${path.join(contentDir, ...slug)}.mdx`,
-    path.join(contentDir, ...slug, "index.mdx"),
+    path.resolve(contentDir, `${path.join(...slug)}.mdx`),
+    path.resolve(contentDir, ...slug, "index.mdx"),
   ];
 
   for (const filePath of candidates) {
+    if (!filePath.startsWith(contentDirPrefix)) continue;
     try {
       const raw = await readFile(filePath, "utf8");
       const body = stripMdxShell(raw);
