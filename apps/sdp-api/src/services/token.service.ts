@@ -243,6 +243,19 @@ interface WalletTransactionScope {
   tokenAccounts?: readonly TokenAccountMatch[];
 }
 
+// Postgres SQLSTATE for unique_violation. Used to translate races on
+// `UNIQUE(...)` constraints into our domain error codes.
+const POSTGRES_UNIQUE_VIOLATION = "23505";
+
+function isPostgresUniqueViolation(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: unknown }).code === POSTGRES_UNIQUE_VIOLATION
+  );
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Token Service
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1240,24 +1253,36 @@ export class TokenService {
       revokedAt: null,
     };
 
-    await this.db
-      .prepare(
-        `INSERT INTO token_allowlists (
-          id, token_id, address, label,
-          status, added_by, created_at, revoked_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        entry.id,
-        entry.tokenId,
-        entry.address,
-        entry.label,
-        entry.status,
-        entry.addedBy,
-        entry.createdAt,
-        entry.revokedAt
-      )
-      .run();
+    try {
+      await this.db
+        .prepare(
+          `INSERT INTO token_allowlists (
+            id, token_id, address, label,
+            status, added_by, created_at, revoked_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .bind(
+          entry.id,
+          entry.tokenId,
+          entry.address,
+          entry.label,
+          entry.status,
+          entry.addedBy,
+          entry.createdAt,
+          entry.revokedAt
+        )
+        .run();
+    } catch (error) {
+      // SELECT-then-INSERT is non-atomic on `UNIQUE(token_id, address)`: a
+      // parallel caller can win the INSERT between our caller's SELECT and
+      // this one. Map the Postgres unique-violation (SQLSTATE 23505) to the
+      // same idempotent signal callers already handle for the "row was there
+      // when we looked" case, instead of bubbling a raw DB error.
+      if (isPostgresUniqueViolation(error)) {
+        throw new Error("ADDRESS_ALREADY_ALLOWLISTED");
+      }
+      throw error;
+    }
 
     await this.insertAllowlistStatus(entry.id, entry.status, entry.createdAt);
 
