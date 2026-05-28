@@ -3132,6 +3132,100 @@ describe("Issuance Routes", () => {
         }
       });
 
+      it("rejects execute mint to revoked destination without poisoning the idempotency slot", async () => {
+        await seedAblListAddress();
+
+        const tokenService = new TokenService(getDb(env));
+        const entry = await tokenService.addAllowlistEntry({
+          tokenId: allowlistTokenId,
+          address: freshDestination,
+          addedBy: TEST_PROJECT_API_KEY.id,
+        });
+        await tokenService.revokeAllowlistEntry(entry.id);
+
+        const idempotencyKey = `idem_${crypto.randomUUID()}`;
+
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSigner")
+          .mockResolvedValue({ address: signerAddress } as never);
+        const mintToSpy = vi
+          .spyOn(MosaicService.prototype, "mintTo")
+          .mockResolvedValue(mockMintResult as never);
+
+        try {
+          const firstRes = await app.request(
+            `/v1/issuance/tokens/${allowlistTokenId}/mint`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+                "Idempotency-Key": idempotencyKey,
+              },
+              body: JSON.stringify({
+                mint: { destination: freshDestination, amount: "1" },
+              }),
+            },
+            env
+          );
+
+          expect(firstRes.status).toBe(403);
+          const firstBody = (await firstRes.json()) as { error: { code: string } };
+          expect(firstBody.error.code).toBe("DESTINATION_REVOKED");
+
+          // The revoke check must run BEFORE createTransaction, so no
+          // token_transactions row should exist under this idempotency key.
+          // Otherwise the next retry replays a stale failed row instead of
+          // re-evaluating the (now possibly re-added) destination.
+          const poisonedRow = await getDb(env)
+            .prepare("SELECT id, status FROM issuance_transactions WHERE idempotency_key = ?")
+            .bind(idempotencyKey)
+            .first<{ id: string; status: string }>();
+          expect(poisonedRow).toBeNull();
+
+          // Operator re-adds the destination; a retry with the same idempotency
+          // key should now succeed instead of replaying the prior failure.
+          await tokenService.addAllowlistEntry({
+            tokenId: allowlistTokenId,
+            address: freshDestination,
+            addedBy: TEST_PROJECT_API_KEY.id,
+          });
+
+          const isWalletOnListSpy = vi
+            .spyOn(MosaicService.prototype, "isWalletOnList")
+            .mockResolvedValueOnce(true);
+          const addToListSpy = vi.spyOn(MosaicService.prototype, "addToList");
+
+          try {
+            const retryRes = await app.request(
+              `/v1/issuance/tokens/${allowlistTokenId}/mint`,
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+                  "Idempotency-Key": idempotencyKey,
+                },
+                body: JSON.stringify({
+                  mint: { destination: freshDestination, amount: "1" },
+                }),
+              },
+              env
+            );
+
+            expect(retryRes.status).toBe(200);
+            expect(addToListSpy).not.toHaveBeenCalled();
+            expect(mintToSpy).toHaveBeenCalledTimes(1);
+          } finally {
+            isWalletOnListSpy.mockRestore();
+            addToListSpy.mockRestore();
+          }
+        } finally {
+          createOrgSignerSpy.mockRestore();
+          mintToSpy.mockRestore();
+        }
+      });
+
       it("rolls back the DB row when on-chain add fails and membership is not confirmed, leaving the address mintable on retry", async () => {
         await seedAblListAddress();
 

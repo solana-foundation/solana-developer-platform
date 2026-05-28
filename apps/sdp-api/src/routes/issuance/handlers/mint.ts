@@ -306,6 +306,21 @@ export const executeMint = async (c: AppContext) => {
       destination: parsed.data.mint.destination,
       isOnControlList,
     });
+  } else {
+    // Refuse operator-revoked destinations BEFORE createTransaction. If the
+    // revoke check ran inside the try below, the DESTINATION_REVOKED throw
+    // would mark the idempotency-keyed transaction as failed, and every
+    // retry under the same key would replay that failed row (200 with
+    // status="failed") instead of re-evaluating the revoke after the
+    // operator re-adds the address. syncDestinationToOnChainAllowlist still
+    // re-checks on its own for defense-in-depth against races.
+    const existingStatus = await tokenService.getAllowlistEntryStatusByAddress(
+      tokenId,
+      parsed.data.mint.destination
+    );
+    if (existingStatus === "revoked") {
+      throw new AppError("DESTINATION_REVOKED");
+    }
   }
 
   const signingWalletId = resolveApiKeySigningWalletId(
