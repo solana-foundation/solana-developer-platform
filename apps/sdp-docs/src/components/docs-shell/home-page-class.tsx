@@ -22,7 +22,7 @@ function drawPattern(canvas: HTMLCanvasElement) {
 
   const isDark = document.documentElement.classList.contains("dark");
   const dotRGB = isDark ? "255,255,255" : "0,0,0";
-  const maxAlpha = isDark ? 0.10 : 0.14;
+  const maxAlpha = isDark ? 0.1 : 0.14;
 
   const spacing = 16;
   const cols = Math.ceil(W / spacing) + 1;
@@ -36,11 +36,11 @@ function drawPattern(canvas: HTMLCanvasElement) {
       const ny = y / H;
 
       // Vertical: full at top, fades to zero at 65% height
-      const vFade = Math.max(0, Math.pow(1 - ny / 0.65, 2.4));
+      const vFade = Math.max(0, (1 - ny / 0.65) ** 2.4);
 
       // Horizontal: dense at edges, open center
       const centerDist = Math.abs(2 * nx - 1); // 0 = center, 1 = edges
-      const hFade = Math.pow(centerDist, 0.7);
+      const hFade = centerDist ** 0.7;
 
       let strength = vFade * hFade;
 
