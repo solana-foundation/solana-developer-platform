@@ -108,31 +108,49 @@ async function syncDestinationToOnChainAllowlist(opts: {
     // TOCTOU: a parallel request may have added the wallet on-chain between
     // our initial isWalletOnList check and this add (or the add raced a
     // transient RPC/confirmation error but the wallet is in fact on-chain).
-    // If on-chain membership now holds, both layers are consistent — the DB row
-    // already exists at this point (we created it or a parallel request did),
-    // so treat this as a successful sync rather than rolling back into drift.
-    if (await opts.mosaic.isWalletOnList(listAddress, opts.destination)) {
-      return true;
+    // If on-chain membership now holds, both layers are consistent — fall
+    // through to the DB re-assert below.
+    if (!(await opts.mosaic.isWalletOnList(listAddress, opts.destination))) {
+      if (createdEntryId) {
+        // Hard-delete (not revoke) so a transient on-chain failure doesn't leave
+        // behind a `revoked` row — that would trip the operator-revoked guard
+        // above on every retry and permanently block this destination.
+        try {
+          await opts.tokenService.deleteAllowlistEntry(createdEntryId);
+        } catch (rollbackError) {
+          throw new AppError(
+            "INTERNAL_ERROR",
+            "Failed to roll back control-list entry after mint sync error",
+            {
+              originalError: error instanceof Error ? error.message : "Unknown add error",
+              restoreError:
+                rollbackError instanceof Error ? rollbackError.message : "Unknown rollback error",
+            }
+          );
+        }
+      }
+      throw error;
     }
-    if (createdEntryId) {
-      // Hard-delete (not revoke) so a transient on-chain failure doesn't leave
-      // behind a `revoked` row — that would trip the operator-revoked guard
-      // above on every retry and permanently block this destination.
-      try {
-        await opts.tokenService.deleteAllowlistEntry(createdEntryId);
-      } catch (rollbackError) {
-        throw new AppError(
-          "INTERNAL_ERROR",
-          "Failed to roll back control-list entry after mint sync error",
-          {
-            originalError: error instanceof Error ? error.message : "Unknown add error",
-            restoreError:
-              rollbackError instanceof Error ? rollbackError.message : "Unknown rollback error",
-          }
-        );
+  }
+
+  // Re-assert the DB row when we didn't own the original insert. Closes a
+  // race: a parallel request that did own the row may have hard-deleted it
+  // during its own rollback after our `addAllowlistEntryStrict` returned
+  // ADDRESS_ALREADY_ALLOWLISTED. Without this re-assert, we'd end with the
+  // wallet on-chain but no DB mirror. Idempotent — ADDRESS_ALREADY_ALLOWLISTED
+  // here means the row is still present and both layers agree.
+  if (createdEntryId === null) {
+    try {
+      await opts.tokenService.addAllowlistEntryStrict({
+        tokenId: opts.tokenId,
+        address: opts.destinationRaw,
+        addedBy: opts.addedBy,
+      });
+    } catch (error) {
+      if (!(error instanceof Error && error.message === "ADDRESS_ALREADY_ALLOWLISTED")) {
+        throw error;
       }
     }
-    throw error;
   }
 
   return true;

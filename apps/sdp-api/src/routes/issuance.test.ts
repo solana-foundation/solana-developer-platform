@@ -2806,6 +2806,69 @@ describe("Issuance Routes", () => {
         }
       });
 
+      it("re-asserts the DB row after a successful on-chain add when the original insert was not ours", async () => {
+        await seedAblListAddress();
+
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSigner")
+          .mockResolvedValueOnce({ address: signerAddress } as never);
+        const isWalletOnListSpy = vi
+          .spyOn(MosaicService.prototype, "isWalletOnList")
+          .mockResolvedValueOnce(false);
+        const addToListSpy = vi
+          .spyOn(MosaicService.prototype, "addToList")
+          .mockResolvedValueOnce(undefined as never);
+        const prepareMintToSpy = vi
+          .spyOn(MosaicService.prototype, "prepareMintTo")
+          .mockResolvedValueOnce(mockPreparedMint as never);
+
+        // First call: simulate a parallel request having beaten us to the INSERT
+        // — we don't own the row. Second call (the re-assert) succeeds, modeling
+        // the race where the parallel owner hard-deleted its row between our
+        // insert attempt and now.
+        const addAllowlistEntryStrictSpy = vi
+          .spyOn(TokenService.prototype, "addAllowlistEntryStrict")
+          .mockRejectedValueOnce(new Error("ADDRESS_ALREADY_ALLOWLISTED"))
+          .mockResolvedValueOnce({
+            id: "tal_reasserted_race",
+            tokenId: allowlistTokenId,
+            address: freshDestination,
+            label: null,
+            status: "active",
+            addedBy: "tester",
+            createdAt: new Date().toISOString(),
+            revokedAt: null,
+          } as never);
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${allowlistTokenId}/mint/prepare`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({
+                mint: { destination: freshDestination, amount: "1" },
+              }),
+            },
+            env
+          );
+
+          expect(res.status).toBe(200);
+          expect(addToListSpy).toHaveBeenCalledTimes(1);
+          expect(addAllowlistEntryStrictSpy).toHaveBeenCalledTimes(2);
+          expect(prepareMintToSpy).toHaveBeenCalledTimes(1);
+        } finally {
+          createOrgSignerSpy.mockRestore();
+          isWalletOnListSpy.mockRestore();
+          addToListSpy.mockRestore();
+          prepareMintToSpy.mockRestore();
+          addAllowlistEntryStrictSpy.mockRestore();
+        }
+      });
+
       it("auto-adds destination to on-chain allowlist on execute mint", async () => {
         await seedAblListAddress();
 

@@ -14,7 +14,7 @@ These operations are available from the dashboard and the API.
 
 ### Allowlist tokens
 
-For tokens with `requiresAllowlist: true`, the mint endpoints auto-add a fresh destination wallet to the on-chain allowlist (and mirror it into the DB allowlist) when needed. This means `tokens:write` implicitly grants allowlist-write capability via mint. If you need stricter separation — for example a key that can mint but never grow the allowlist — do not give that key `tokens:write` on allowlist tokens; gate mint actions through a separate workflow that pre-approves destinations via `POST /allowlist`.
+For tokens with `requiresAllowlist: true`, the mint endpoints auto-add a fresh destination wallet to the on-chain allowlist (and mirror it into the DB allowlist) when needed. Both `POST /mint` and `POST /allowlist` require `tokens:write`, so any key that can mint can implicitly grow the allowlist. If you want every destination operator-approved before minting, gate `POST /mint` behind your own workflow that pre-calls `POST /allowlist` first, rather than relying on the auto-add behavior.
 
 Operator-revoked destinations are never auto-reactivated: minting to a revoked address returns `403 DESTINATION_REVOKED` and the operator must re-add the address via `POST /allowlist` first.
 
