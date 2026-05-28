@@ -38,6 +38,8 @@ export interface CounterpartyIdentity {
 
 export type CounterpartyStatus = "active" | "archived";
 
+export type CounterpartyProviderData = Record<string, unknown>;
+
 export interface Counterparty {
   id: string;
   organizationId: string;
@@ -78,4 +80,27 @@ export interface ListCounterpartiesResponse {
   total: number;
   page: number;
   pageSize: number;
+}
+
+export const COUNTERPARTY_ACCOUNT_KINDS = ["bank_account", "crypto_wallet"] as const;
+export type CounterpartyAccountKind = (typeof COUNTERPARTY_ACCOUNT_KINDS)[number];
+
+export type CounterpartyAccountStatus = "active" | "archived";
+
+export type CounterpartyAccountDetails = Record<string, unknown>;
+
+export type CounterpartyAccountProviderData = Record<string, unknown>;
+
+export interface CounterpartyAccount {
+  id: string;
+  organizationId: string;
+  projectId: string;
+  counterpartyId: string;
+  accountKind: CounterpartyAccountKind;
+  label: string | null;
+  details: CounterpartyAccountDetails;
+  providerAccountData: CounterpartyAccountProviderData;
+  status: CounterpartyAccountStatus;
+  createdAt: string;
+  updatedAt: string;
 }
