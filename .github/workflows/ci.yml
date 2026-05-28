@@ -133,6 +133,9 @@ jobs:
           DOPPLER_CONFIG: dev_ci
         run: pnpm test
 
+      - name: Scripts tests
+        run: pnpm test:scripts
+
   build_api:
     name: Build API
     runs-on: ubuntu-latest
