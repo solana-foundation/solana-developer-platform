@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.22.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.21.0...v0.22.0) (2026-05-28)
+
+### Features
+
+* hide payments submenu behind flag ([#367](https://github.com/solana-foundation/solana-developer-platform/pull/367)) ([42a7703](https://github.com/solana-foundation/solana-developer-platform/commit/42a77031829c90999c5e91fc637c174bc70f56c5))
+* HOO-554 Simplify wallet provider selection ([#330](https://github.com/solana-foundation/solana-developer-platform/pull/330)) ([bf00393](https://github.com/solana-foundation/solana-developer-platform/commit/bf00393fe6b60fbf1aea5059dd788c651a5cb6d6))
+* HOO-517 node-mode scripts + docker secrets export ([#363](https://github.com/solana-foundation/solana-developer-platform/pull/363)) ([cc8fc84](https://github.com/solana-foundation/solana-developer-platform/commit/cc8fc841101452b627a3a88047c95444e2bcefc4))
+* model counterparty accounts ([#365](https://github.com/solana-foundation/solana-developer-platform/pull/365)) ([8a35b15](https://github.com/solana-foundation/solana-developer-platform/commit/8a35b150eb5a685b912d7275ab6e3f60b5eabea0))
+* add base MagicBlock private transfers API ([#357](https://github.com/solana-foundation/solana-developer-platform/pull/357)) ([6939e75](https://github.com/solana-foundation/solana-developer-platform/commit/6939e75ad19c24c4857c4c1ab9117b581e364b3e))
+* **ci:** HOO-518 docker_build_web smoke + GHA layer cache ([#361](https://github.com/solana-foundation/solana-developer-platform/pull/361)) ([d5ef0de](https://github.com/solana-foundation/solana-developer-platform/commit/d5ef0de058fa49b7d2a5a5c36b59b255907d06a8))
+* **sdp-api:** HOO-516 vitest pool split + integration env decoupling ([#356](https://github.com/solana-foundation/solana-developer-platform/pull/356)) ([550a698](https://github.com/solana-foundation/solana-developer-platform/commit/550a69818ff2d270bfc982e6bc0c66b6c53552d3))
+
+### Bug Fixes
+
+* sponsor MagicBlock gasless transfers with Kora ([#366](https://github.com/solana-foundation/solana-developer-platform/pull/366)) ([58f52ca](https://github.com/solana-foundation/solana-developer-platform/commit/58f52cac6c48dce04859edbc1e6caf89493a3315))
+* dashboard loading boundary to use suspense component ([#364](https://github.com/solana-foundation/solana-developer-platform/pull/364)) ([e62e162](https://github.com/solana-foundation/solana-developer-platform/commit/e62e1620d0d783bb3039227cc37b75bc156267be))
+* environment and project boundary ([#362](https://github.com/solana-foundation/solana-developer-platform/pull/362)) ([0b668d5](https://github.com/solana-foundation/solana-developer-platform/commit/0b668d5b65a24161360a9c6f282cee9074d0d5d0))
+
+### Other Changes
+
+* Update wallet listing and card metadata UX ([#360](https://github.com/solana-foundation/solana-developer-platform/pull/360)) ([2e57806](https://github.com/solana-foundation/solana-developer-platform/commit/2e5780630d437ea61b2f79cdd757fbce4df22569))
+
 ## [0.21.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.20.0...v0.21.0) (2026-05-26)
 
 ### Features
