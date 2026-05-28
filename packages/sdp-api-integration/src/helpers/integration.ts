@@ -158,8 +158,8 @@ export async function resetIntegrationState(
   await db
     .prepare(
       `INSERT OR REPLACE INTO api_keys
-       (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, environment, status)
-       VALUES (?, ?, ?, ?, 'Project Test Key', ?, ?, 'api_admin', '["*"]', 'sandbox', 'active')`
+       (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
+       VALUES (?, ?, ?, ?, 'Project Test Key', ?, ?, 'api_admin', '["*"]', 'active')`
     )
     .bind(
       TEST_PROJECT_API_KEY.id,

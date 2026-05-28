@@ -23,6 +23,7 @@ const POSTGRES_TEST_TABLES = [
   "issuance_transactions",
   "issued_token_extensions",
   "issued_tokens",
+  "counterparty_accounts",
   "counterparties",
   "magic_links",
   "sessions",

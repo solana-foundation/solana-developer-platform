@@ -1,4 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
+import { cookies } from "next/headers";
+import { PROJECT_COOKIE_NAME, PROJECT_HEADER_NAME } from "./project-cookie";
 import { TRACE_ID_HEADER, TRACE_SOURCE_HEADER, type TraceContext } from "./request-tracing";
 
 function getApiBaseUrl(): string {
@@ -48,7 +50,11 @@ function createTraceRequestId(traceId: string, sequence: number): string {
   return `${traceId}:${suffix}`.slice(0, 128);
 }
 
-function createSdpApiRequest(token: string, traceContext?: TraceContext): SdpApiRequestFn {
+function createSdpApiRequest(
+  token: string,
+  projectId: string | null,
+  traceContext?: TraceContext
+): SdpApiRequestFn {
   let requestSequence = 0;
 
   return async (path: string, options: RequestInit = {}): Promise<Response> => {
@@ -66,6 +72,9 @@ function createSdpApiRequest(token: string, traceContext?: TraceContext): SdpApi
     headers.set(TRACE_ID_HEADER, traceId);
     headers.set(TRACE_SOURCE_HEADER, source);
     headers.set("X-Request-ID", requestId);
+    if (projectId && !headers.has(PROJECT_HEADER_NAME)) {
+      headers.set(PROJECT_HEADER_NAME, projectId);
+    }
     const startedAt = performance.now();
     const method = options.method ?? "GET";
 
@@ -119,9 +128,15 @@ export interface SdpApiClient {
   fetch: <T>(path: string, options?: RequestInit) => Promise<T>;
 }
 
+async function getSelectedProjectId(): Promise<string | null> {
+  const jar = await cookies();
+  return jar.get(PROJECT_COOKIE_NAME)?.value ?? null;
+}
+
 export async function createSdpApiClient(traceContext?: TraceContext): Promise<SdpApiClient> {
   const token = await getClerkToken();
-  const request = createSdpApiRequest(token, traceContext);
+  const projectId = await getSelectedProjectId();
+  const request = createSdpApiRequest(token, projectId, traceContext);
 
   return {
     request,

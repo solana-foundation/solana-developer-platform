@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import type { Page } from "@playwright/test";
 import type { OrganizationTier, PaymentsDashboardWallet } from "@sdp/types";
 import {
   type Address,
@@ -17,8 +18,11 @@ import {
 import { KoraClient } from "@solana/kora";
 import { getTransferSolInstruction } from "@solana-program/system";
 import { Client } from "pg";
+import { getE2EEnv } from "../env";
 import { type ClerkTestIdentity, setClerkOrganizationTier } from "./clerk-admin";
 import { createLocalApiClient, type LocalApiClient } from "./local-api-client";
+
+const PROJECT_COOKIE_NAME = "sdp_selected_project_id";
 
 const PLAYWRIGHT_LOCAL_ORG_ID_PREFIX = "org_e2e_dashboard";
 const PLAYWRIGHT_LOCAL_ORG_NAME_PREFIX = "E2E Dashboard Org";
@@ -292,6 +296,32 @@ async function listWallets(api: LocalApiClient): Promise<PaymentsDashboardWallet
   // biome-ignore lint/security/noSecrets: Local API path with query params for wallet listing.
   const data = await api.get<ListWalletsResponse>("/v1/wallets?includeAllProviders=true");
   return data.wallets;
+}
+
+export async function seedProjectCookie(page: Page, projectId: string): Promise<void> {
+  await page.context().addCookies([
+    {
+      name: PROJECT_COOKIE_NAME,
+      value: projectId,
+      url: getE2EEnv().baseURL,
+      sameSite: "Lax",
+    },
+  ]);
+}
+
+export async function resolvePlaywrightProjectId(
+  localApiBaseUrl: string,
+  bearerToken: string
+): Promise<string> {
+  const projectsApi = createLocalApiClient(localApiBaseUrl, bearerToken);
+  const { projects } = await projectsApi.get<{ projects: Array<{ id: string; slug: string }> }>(
+    "/v1/projects"
+  );
+  const sandbox = projects.find((project) => project.slug === "default-sandbox") ?? projects[0];
+  if (!sandbox) {
+    throw new Error("No project available for Playwright bootstrap");
+  }
+  return sandbox.id;
 }
 
 async function requestWalletAirdropLamports(
@@ -594,6 +624,34 @@ export async function ensureLinkedOrg(
         [PLAYWRIGHT_LOCAL_MEMBER_ID, organization.id, userId]
       );
 
+      // Production provisions default projects via the Clerk webhook
+      // (see apps/sdp-api/src/routes/webhooks/handlers.ts). Tests don't fire
+      // the webhook, so mirror its behavior here so subsequent project-scoped
+      // API calls have a sandbox project to attach to.
+      const projectResult = await client.query<{ id: string }>(
+        `INSERT INTO projects
+           (id, organization_id, name, slug, description, environment, status, created_by)
+         VALUES (
+           'prj_' || gen_random_uuid(), $1, 'Default Sandbox Project', 'default-sandbox',
+           'Default sandbox project', 'sandbox', 'active', $2
+         )
+         ON CONFLICT (organization_id, slug) DO UPDATE
+           SET status = 'active'
+         RETURNING id`,
+        [organization.id, userId]
+      );
+      const sandboxProjectId = projectResult.rows[0]?.id;
+      if (!sandboxProjectId) {
+        throw new Error("Failed to provision default sandbox project for Playwright bootstrap");
+      }
+
+      await client.query(
+        `INSERT INTO project_members (id, project_id, user_id, role)
+         VALUES ('pm_' || gen_random_uuid(), $1, $2, 'admin')
+         ON CONFLICT (project_id, user_id) DO NOTHING`,
+        [sandboxProjectId, userId]
+      );
+
       await client.query("COMMIT");
     } catch (error) {
       await client.query("ROLLBACK").catch(() => {});
@@ -619,11 +677,13 @@ export async function bootstrapLocalWalletFixtures(input: {
   const fundSourceWallet = input.fundSourceWallet ?? false;
   const fundSourceAmountSol = input.fundSourceAmountSol ?? 1;
   const runtimeEnv = getPlaywrightApiRuntimeEnv();
-  const api = createLocalApiClient(runtimeEnv.localApiBaseUrl, bearerToken);
 
   const organization = await ensureLinkedOrg(identity, {
     tier: input.tier,
   });
+
+  const projectId = await resolvePlaywrightProjectId(runtimeEnv.localApiBaseUrl, bearerToken);
+  const api = createLocalApiClient(runtimeEnv.localApiBaseUrl, bearerToken, projectId);
 
   const initialized = await api.post<InitializeWalletResponse>("/v1/wallets/initialize", {
     provider,

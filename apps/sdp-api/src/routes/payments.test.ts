@@ -46,6 +46,10 @@ const TEST_ORG = {
   name: "Payments Policy Test Org",
   slug: "payments-policy-test-org",
 };
+const TEST_PROJECT = {
+  id: "prj_test_payments_policy",
+  slug: "test-payments-policy-project",
+};
 const TEST_USER = {
   id: "usr_payments_policy_test",
   email: "payments-policy-test@example.com",
@@ -59,7 +63,7 @@ const TEST_KORA_FEE_PAYER = "4YhMUz8xDgHMPAevvfMpnJX9TJmw9DTNDA1sNWPRZG9q";
 const TEST_CACHED_API_KEY: CachedApiKey = {
   id: TEST_API_KEY.id,
   organizationId: TEST_ORG.id,
-  projectId: null,
+  projectId: TEST_PROJECT.id,
   role: "api_admin",
   permissions: ["*"],
   environment: "sandbox",
@@ -141,21 +145,34 @@ async function seedAuthAndWallet(): Promise<void> {
       .bind(TEST_USER.id, TEST_USER.email, 1, "active"),
     getDb(env)
       .prepare(
+        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(
+        TEST_PROJECT.id,
+        TEST_ORG.id,
+        "Test Project",
+        TEST_PROJECT.slug,
+        "sandbox",
+        "active",
+        TEST_USER.id
+      ),
+    getDb(env)
+      .prepare(
         `INSERT INTO api_keys
-           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, environment, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         TEST_API_KEY.id,
         TEST_ORG.id,
-        null,
+        TEST_PROJECT.id,
         TEST_USER.id,
         "Payments Test Key",
         TEST_API_KEY.prefix,
         keyHash,
         "api_admin",
         JSON.stringify(["*"]),
-        "sandbox",
         "active"
       ),
     getDb(env)
@@ -2211,7 +2228,7 @@ describe("Payments routes", () => {
       .bind(
         "xfr_existing_daily_limit",
         TEST_ORG.id,
-        null,
+        TEST_PROJECT.id,
         TEST_WALLET_ID,
         TEST_SOLANA_ADDRESSES.wallet1,
         TEST_SOLANA_ADDRESSES.wallet2,
@@ -2306,7 +2323,7 @@ describe("Payments routes", () => {
       .bind(
         params.id,
         TEST_ORG.id,
-        null,
+        TEST_PROJECT.id,
         params.walletId ?? TEST_WALLET_ID,
         TEST_SOLANA_ADDRESSES.wallet1,
         TEST_SOLANA_ADDRESSES.wallet2,

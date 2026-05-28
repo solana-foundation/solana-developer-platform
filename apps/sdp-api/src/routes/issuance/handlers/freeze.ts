@@ -145,7 +145,7 @@ export const freezeAccount = async (c: AppContext) => {
     throw notFound("Token");
   }
 
-  if (auth?.projectId && token.projectId !== auth.projectId) {
+  if (token.projectId !== auth.projectId) {
     throw notFound("Token");
   }
 
@@ -312,7 +312,7 @@ export const listFrozenAccounts = async (c: AppContext) => {
     throw notFound("Token");
   }
 
-  if (auth?.projectId && token.projectId !== auth.projectId) {
+  if (token.projectId !== auth.projectId) {
     throw notFound("Token");
   }
 
@@ -348,7 +348,7 @@ export const unfreezeAccount = async (c: AppContext) => {
     throw notFound("Token");
   }
 
-  if (auth?.projectId && token.projectId !== auth.projectId) {
+  if (token.projectId !== auth.projectId) {
     throw notFound("Token");
   }
 

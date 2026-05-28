@@ -1,18 +1,16 @@
-import type { SdpEnvironment } from "@sdp/types";
-
 export interface DashboardCacheScope {
-  userId: string | null;
-  orgId: string | null;
+  userId: string;
+  orgId: string;
 }
 
 interface DashboardCacheScopeKeyOptions {
-  environment?: SdpEnvironment;
+  projectId?: string | null;
 }
 
 export function getDashboardCacheScopeKey(
   scope: DashboardCacheScope,
   options: DashboardCacheScopeKeyOptions = {}
 ): string {
-  const baseKey = `${scope.userId ?? "anonymous"}:${scope.orgId ?? "no-org"}`;
-  return options.environment ? `${baseKey}:${options.environment}` : baseKey;
+  const baseKey = `${scope.userId}:${scope.orgId}`;
+  return options.projectId ? `${baseKey}:${options.projectId}` : baseKey;
 }

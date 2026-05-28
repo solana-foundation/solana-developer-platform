@@ -6,6 +6,7 @@
 
 import { Hono } from "hono";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
+import { projectContextMiddleware } from "@/middleware/project-context";
 import type { Env } from "@/types/env";
 import {
   createWallet,
@@ -28,6 +29,7 @@ const wallets = new Hono<{ Bindings: Env }>();
 
 // All routes require authentication
 wallets.use("*", unifiedAuthMiddleware({ allowClerk: true, allowSession: true }));
+wallets.use("*", projectContextMiddleware());
 
 // Initialize signing (requires admin)
 wallets.post("/initialize", requirePermissions("custody:admin"), initializeSigning);

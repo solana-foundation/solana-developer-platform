@@ -1,7 +1,10 @@
 import { expect, test } from "@playwright/test";
 import { getPlaywrightAdminSession } from "../support/auth-session";
 import { createLocalApiClient } from "../support/local-api-client";
-import { createExternalSolanaAddress } from "../support/local-dashboard-bootstrap";
+import {
+  createExternalSolanaAddress,
+  seedProjectCookie,
+} from "../support/local-dashboard-bootstrap";
 import {
   bootstrapLocalIssuanceFixtures,
   getBootstrapApiBaseUrl,
@@ -13,6 +16,7 @@ test.describe
     let sourceWalletLabel = "";
     let sourceWalletId = "";
     let transferTokenSymbol = "";
+    let bootstrapProjectId = "";
 
     test.beforeAll(async ({ browser }) => {
       const session = await getPlaywrightAdminSession(browser);
@@ -21,7 +25,11 @@ test.describe
         bearerToken: session.bearerToken,
         tier: "enterprise",
       });
-      const api = createLocalApiClient(getBootstrapApiBaseUrl(), session.bearerToken);
+      const api = createLocalApiClient(
+        getBootstrapApiBaseUrl(),
+        session.bearerToken,
+        fixtures.projectId
+      );
 
       await api.post(`/v1/issuance/tokens/${fixtures.tokens.open.id}/mint`, {
         mint: {
@@ -33,11 +41,16 @@ test.describe
       sourceWalletLabel = fixtures.wallets.treasury.label ?? fixtures.wallets.treasury.publicKey;
       sourceWalletId = fixtures.wallets.treasury.walletId;
       transferTokenSymbol = fixtures.tokens.open.symbol;
+      bootstrapProjectId = fixtures.projectId;
       destinationAddress = await createExternalSolanaAddress();
       await api.put(`/v1/payments/wallets/${sourceWalletId}/policies`, {
         destinationAllowlist: [destinationAddress],
       });
       await session.page.close();
+    });
+
+    test.beforeEach(async ({ page }) => {
+      await seedProjectCookie(page, bootstrapProjectId);
     });
 
     test("user can submit a wallet transfer and see it in recent transactions", async ({

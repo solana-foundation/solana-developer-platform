@@ -1,6 +1,6 @@
 "use client";
 
-import type { PaymentsDashboardWallet } from "@sdp/types";
+import type { PaymentsDashboardWallet, SdpEnvironment } from "@sdp/types";
 import { Plus } from "lucide-react";
 import { type Dispatch, type SetStateAction, useState } from "react";
 import { useFormStatus } from "react-dom";
@@ -8,16 +8,15 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/ui/modal";
+import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { createApiKeyAction } from "./actions";
 
 type ApiKeyRole = "api_admin" | "api_developer" | "api_readonly";
-type ApiKeyEnvironment = "sandbox" | "production";
 type WalletScope = "all" | "selected";
 
 interface ApiKeyDraft {
   name: string;
   role: ApiKeyRole;
-  environment: ApiKeyEnvironment;
   expiresAt: string;
   walletScope: WalletScope;
   selectedWalletIds: string[];
@@ -28,12 +27,15 @@ function normalizeDraft(): ApiKeyDraft {
   return {
     name: "",
     role: "api_developer",
-    environment: "sandbox",
     expiresAt: "",
     walletScope: "all",
     selectedWalletIds: [],
     defaultWalletId: "",
   };
+}
+
+function formatEnvironmentLabel(environment: SdpEnvironment): string {
+  return environment === "production" ? "Production" : "Sandbox";
 }
 
 function formatDisplayDate(value: string): string {
@@ -201,6 +203,7 @@ function CreateApiKeyDetailsStep({
   wallets,
   selectedWallets,
   canContinue,
+  environment,
   close,
   nextStep,
   setDraft,
@@ -210,6 +213,7 @@ function CreateApiKeyDetailsStep({
   wallets: PaymentsDashboardWallet[];
   selectedWallets: PaymentsDashboardWallet[];
   canContinue: boolean;
+  environment: SdpEnvironment;
   close: () => void;
   nextStep: () => void;
   setDraft: Dispatch<SetStateAction<ApiKeyDraft>>;
@@ -252,19 +256,13 @@ function CreateApiKeyDetailsStep({
       </div>
 
       <div className="grid gap-2">
-        <Label htmlFor="create-key-environment">Environment</Label>
-        <select
-          id="create-key-environment"
-          value={draft.environment}
-          onChange={(event) => {
-            const environment = event.currentTarget.value as ApiKeyEnvironment;
-            setDraft((previous) => ({ ...previous, environment }));
-          }}
-          className="h-10 w-full rounded-lg border border-[rgba(28,28,29,0.16)] bg-white px-3 text-sm text-[#1c1c1d]"
-        >
-          <option value="sandbox">Sandbox</option>
-          <option value="production">Production</option>
-        </select>
+        <Label>Environment</Label>
+        <div className="flex h-10 items-center rounded-lg border border-[rgba(28,28,29,0.16)] bg-[rgba(28,28,29,0.02)] px-3 text-sm text-[#1c1c1d]">
+          {formatEnvironmentLabel(environment)}
+        </div>
+        <p className="text-xs text-[rgba(28,28,29,0.65)]">
+          Switch the workspace environment in the sidebar to create a key in the other environment.
+        </p>
       </div>
 
       <div className="grid gap-2">
@@ -304,10 +302,12 @@ function CreateApiKeyDetailsStep({
 function CreateApiKeyReviewStep({
   draft,
   selectedWallets,
+  environment,
   onBack,
 }: {
   draft: ApiKeyDraft;
   selectedWallets: PaymentsDashboardWallet[];
+  environment: SdpEnvironment;
   onBack: () => void;
 }) {
   const defaultSelectedWallet = resolveDefaultSelectedWallet(
@@ -319,7 +319,6 @@ function CreateApiKeyReviewStep({
     <form action={createApiKeyAction} className="mt-4 space-y-3">
       <input type="hidden" name="name" value={draft.name} />
       <input type="hidden" name="role" value={draft.role} />
-      <input type="hidden" name="environment" value={draft.environment} />
       <input type="hidden" name="expiresAt" value={draft.expiresAt} />
       <input type="hidden" name="walletScope" value={draft.walletScope} />
       {draft.walletScope === "selected"
@@ -344,7 +343,8 @@ function CreateApiKeyReviewStep({
           <span className="font-medium text-[#1c1c1d]">Role:</span> {formatRoleLabel(draft.role)}
         </div>
         <div>
-          <span className="font-medium text-[#1c1c1d]">Environment:</span> {draft.environment}
+          <span className="font-medium text-[#1c1c1d]">Environment:</span>{" "}
+          {formatEnvironmentLabel(environment)}
         </div>
         <div>
           <span className="font-medium text-[#1c1c1d]">Expires:</span>{" "}
@@ -396,6 +396,7 @@ export function CreateApiKeyModal({
   triggerLabel = "Create API key",
   triggerVariant = "default",
 }: CreateApiKeyModalProps) {
+  const { selectedProjectId, sdpEnvironment } = useDashboardWorkspace();
   const [isOpen, setIsOpen] = useState(false);
   const [step, setStep] = useState<1 | 2>(1);
   const [draft, setDraft] = useState<ApiKeyDraft>(normalizeDraft());
@@ -405,6 +406,7 @@ export function CreateApiKeyModal({
   );
   const canContinue =
     draft.name.trim().length > 0 &&
+    Boolean(selectedProjectId) &&
     (draft.walletScope === "all" || draft.selectedWalletIds.length > 0);
 
   const close = () => {
@@ -481,18 +483,20 @@ export function CreateApiKeyModal({
               wallets={wallets}
               selectedWallets={selectedWallets}
               canContinue={canContinue}
+              environment={sdpEnvironment}
               close={close}
               nextStep={nextStep}
               setDraft={setDraft}
               toggleWallet={toggleWallet}
             />
-          ) : (
+          ) : selectedProjectId ? (
             <CreateApiKeyReviewStep
               draft={draft}
               selectedWallets={selectedWallets}
+              environment={sdpEnvironment}
               onBack={() => setStep(1)}
             />
-          )}
+          ) : null}
         </div>
       </Modal>
     </>

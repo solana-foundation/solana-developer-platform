@@ -26,7 +26,6 @@ export interface CreateProjectInput {
 export interface UpdateProjectInput {
   name?: string;
   description?: string | null;
-  environment?: ProjectEnvironment;
   settings?: ProjectSettings | null;
 }
 
@@ -266,11 +265,6 @@ export class ProjectService {
       values.push(input.description);
     }
 
-    if (input.environment !== undefined) {
-      updates.push("environment = ?");
-      values.push(input.environment);
-    }
-
     if (input.settings !== undefined) {
       updates.push("settings = ?");
       const normalizedSettings =
@@ -312,6 +306,60 @@ export class ProjectService {
       .prepare("UPDATE projects SET status = 'archived', updated_at = ? WHERE id = ?")
       .bind(now, projectId)
       .run();
+  }
+
+  /**
+   * Ensure a default project exists for the given environment and that the user
+   * is a member. Idempotent — safe to call on every authenticated request.
+   *
+   * @param organizationId - Organization to provision under
+   * @param environment - "sandbox" or "production"
+   * @param createdBy - User ID used as creator and initial member
+   * @returns The project ID (existing or newly created)
+   */
+  async findOrCreateDefault(
+    organizationId: string,
+    environment: ProjectEnvironment,
+    createdBy: string
+  ): Promise<string> {
+    const slug = environment === "sandbox" ? "default-sandbox" : "default-production";
+    const name =
+      environment === "sandbox" ? "Default Sandbox Project" : "Default Production Project";
+    const description =
+      environment === "sandbox" ? "Default sandbox project" : "Default production project";
+
+    await this.db
+      .prepare(
+        `INSERT INTO projects
+           (id, organization_id, name, slug, description, environment, settings, status, created_by, created_at, updated_at)
+         VALUES ('prj_' || gen_random_uuid(), ?, ?, ?, ?, ?, NULL, 'active', ?, sdp_datetime_now(), sdp_datetime_now())
+         ON CONFLICT (organization_id, slug) DO NOTHING`
+      )
+      .bind(organizationId, name, slug, description, environment, createdBy)
+      .run();
+
+    const project = await this.db
+      .prepare(`SELECT id FROM projects WHERE organization_id = ? AND slug = ?`)
+      .bind(organizationId, slug)
+      .first<{ id: string }>();
+
+    if (!project) {
+      throw new ProjectServiceError(
+        "NOT_FOUND",
+        `Failed to provision default ${environment} project`
+      );
+    }
+
+    await this.db
+      .prepare(
+        `INSERT INTO project_members (id, project_id, user_id, role, created_at)
+         VALUES ('pm_' || gen_random_uuid(), ?, ?, 'admin', sdp_datetime_now())
+         ON CONFLICT (project_id, user_id) DO NOTHING`
+      )
+      .bind(project.id, createdBy)
+      .run();
+
+    return project.id;
   }
 
   // ═══════════════════════════════════════════════════════════════════════════

@@ -44,16 +44,25 @@ async function parseResponse<T>(response: Response): Promise<T> {
   return payload as T;
 }
 
-export function createLocalApiClient(baseUrl: string, bearerToken: string): LocalApiClient {
+export function createLocalApiClient(
+  baseUrl: string,
+  bearerToken: string,
+  projectId?: string
+): LocalApiClient {
   const normalizedBaseUrl = baseUrl.replace(/\/$/, "");
 
   const request = async <T>(method: string, path: string, body?: unknown): Promise<T> => {
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${bearerToken}`,
+      "Content-Type": "application/json",
+    };
+    if (projectId) {
+      headers["x-project-id"] = projectId;
+    }
+
     const response = await fetch(`${normalizedBaseUrl}${path}`, {
       method,
-      headers: {
-        Authorization: `Bearer ${bearerToken}`,
-        "Content-Type": "application/json",
-      },
+      headers,
       body: body === undefined ? undefined : JSON.stringify(body),
     });
 

@@ -13,6 +13,11 @@ import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVNamespaces, seedCachedApiKey } from "@/test/mocks/kv";
 
+const TEST_PROJECT = {
+  id: "prj_test_organizations",
+  slug: "test-test-org-project",
+};
+
 describe("Organizations routes", () => {
   let validKeyHash: string;
 
@@ -308,23 +313,38 @@ describe("Organizations routes", () => {
 
         getDb(env)
           .prepare(
+            `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`
+          )
+          .bind(
+            TEST_PROJECT.id,
+            TEST_ORG.id,
+            "Test Project",
+            TEST_PROJECT.slug,
+            "sandbox",
+            "active",
+            TEST_USER.id
+          ),
+
+        getDb(env)
+          .prepare(
             "INSERT INTO organization_members (id, organization_id, user_id, role, status) VALUES (?, ?, ?, ?, ?)"
           )
           .bind(TEST_MEMBER.id, TEST_MEMBER.organizationId, TEST_MEMBER.userId, "admin", "active"),
 
         getDb(env)
           .prepare(
-            "INSERT INTO api_keys (id, organization_id, created_by, name, key_prefix, key_hash, role, environment, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            "INSERT INTO api_keys (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
           )
           .bind(
             TEST_API_KEY.id,
             TEST_ORG.id,
+            TEST_PROJECT.id,
             TEST_USER.id,
             "Test Key",
             TEST_API_KEY.prefix,
             validKeyHash,
             "api_admin",
-            "sandbox",
             "active"
           ),
       ]);
