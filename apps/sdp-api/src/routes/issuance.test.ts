@@ -3131,6 +3131,90 @@ describe("Issuance Routes", () => {
           mintToSpy.mockRestore();
         }
       });
+
+      it("rolls back the DB row when on-chain add fails and membership is not confirmed, leaving the address mintable on retry", async () => {
+        await seedAblListAddress();
+
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSigner")
+          .mockResolvedValue({ address: signerAddress } as never);
+        // Initial check (no wallet on-chain) and recheck after the failure
+        // (still not on-chain) → true rollback branch, not TOCTOU recovery.
+        const isWalletOnListSpy = vi
+          .spyOn(MosaicService.prototype, "isWalletOnList")
+          .mockResolvedValueOnce(false)
+          .mockResolvedValueOnce(false)
+          // Retry: initial check on the second attempt also sees the wallet absent.
+          .mockResolvedValueOnce(false);
+        const addToListSpy = vi
+          .spyOn(MosaicService.prototype, "addToList")
+          .mockRejectedValueOnce(new Error("RPC confirmation timeout"))
+          .mockResolvedValueOnce(undefined as never);
+        const prepareMintToSpy = vi
+          .spyOn(MosaicService.prototype, "prepareMintTo")
+          .mockResolvedValueOnce(mockPreparedMint as never);
+
+        try {
+          const failedRes = await app.request(
+            `/v1/issuance/tokens/${allowlistTokenId}/mint/prepare`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({
+                mint: { destination: freshDestination, amount: "1" },
+              }),
+            },
+            env
+          );
+
+          expect(failedRes.status).toBeGreaterThanOrEqual(500);
+
+          // Rollback must hard-delete the row, not soft-revoke it — otherwise
+          // the revoked-status guard blocks every subsequent mint to the same
+          // address with DESTINATION_REVOKED even though no operator revoked.
+          const rowAfterFailure = await getDb(env)
+            .prepare("SELECT id, status FROM token_allowlists WHERE token_id = ? AND address = ?")
+            .bind(allowlistTokenId, freshDestination)
+            .first<{ id: string; status: string }>();
+          expect(rowAfterFailure).toBeNull();
+
+          // Retry on the same address with the on-chain add succeeding must
+          // not be blocked by a stale "revoked" row from the prior rollback.
+          const retryRes = await app.request(
+            `/v1/issuance/tokens/${allowlistTokenId}/mint/prepare`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({
+                mint: { destination: freshDestination, amount: "1" },
+              }),
+            },
+            env
+          );
+
+          expect(retryRes.status).toBe(200);
+          expect(addToListSpy).toHaveBeenCalledTimes(2);
+
+          const rowAfterRetry = await getDb(env)
+            .prepare(
+              "SELECT id, status FROM token_allowlists WHERE token_id = ? AND address = ?"
+            )
+            .bind(allowlistTokenId, freshDestination)
+            .first<{ id: string; status: string }>();
+          expect(rowAfterRetry?.status).toBe("active");
+        } finally {
+          createOrgSignerSpy.mockRestore();
+          isWalletOnListSpy.mockRestore();
+          addToListSpy.mockRestore();
+          prepareMintToSpy.mockRestore();
+        }
+      });
     });
 
     it("rejects mint to denylisted address", async () => {

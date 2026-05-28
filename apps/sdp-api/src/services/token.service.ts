@@ -1331,6 +1331,23 @@ export class TokenService {
     await this.insertAllowlistStatus(entryId, "revoked", now);
   }
 
+  /**
+   * Hard-delete an allowlist entry.
+   *
+   * For system-driven rollback of an entry this request just created — e.g. a
+   * mint sync that inserted the DB row, then failed to write the on-chain ABL.
+   * Distinct from `revokeAllowlistEntry`: the row is removed entirely so a
+   * subsequent retry doesn't trip the revoked-entry guard with a status the
+   * operator never set. The FK on `token_allowlist_statuses.allowlist_id` is
+   * `ON DELETE CASCADE`, so status history rows are removed by the database.
+   */
+  async deleteAllowlistEntry(entryId: string): Promise<void> {
+    await this.db
+      .prepare("DELETE FROM token_allowlists WHERE id = ?")
+      .bind(entryId)
+      .run();
+  }
+
   // ═══════════════════════════════════════════════════════════════════════════
   // Freeze Management
   // ═══════════════════════════════════════════════════════════════════════════

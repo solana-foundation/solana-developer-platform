@@ -114,16 +114,19 @@ async function syncDestinationToOnChainAllowlist(opts: {
       return true;
     }
     if (createdEntryId) {
+      // Hard-delete (not revoke) so a transient on-chain failure doesn't leave
+      // behind a `revoked` row — that would trip the operator-revoked guard
+      // above on every retry and permanently block this destination.
       try {
-        await opts.tokenService.revokeAllowlistEntry(createdEntryId);
-      } catch (revokeError) {
+        await opts.tokenService.deleteAllowlistEntry(createdEntryId);
+      } catch (rollbackError) {
         throw new AppError(
           "INTERNAL_ERROR",
           "Failed to roll back control-list entry after mint sync error",
           {
             originalError: error instanceof Error ? error.message : "Unknown add error",
             restoreError:
-              revokeError instanceof Error ? revokeError.message : "Unknown rollback error",
+              rollbackError instanceof Error ? rollbackError.message : "Unknown rollback error",
           }
         );
       }
