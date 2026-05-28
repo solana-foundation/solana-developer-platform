@@ -6,6 +6,8 @@ import {
   bootstrapLocalWalletFixtures,
   ensureLinkedOrg,
   getBootstrapApiBaseUrl,
+  resolvePlaywrightProjectId,
+  seedProjectCookie,
 } from "../support/local-dashboard-bootstrap";
 
 interface TokenResponse {
@@ -170,10 +172,20 @@ function getActivityRow(
 
 test.describe
   .serial("dashboard wallets e2e", () => {
+    let walletsProjectId = "";
+
     test.beforeAll(async ({ browser }) => {
       const session = await getPlaywrightAdminSession(browser);
       await ensureLinkedOrg(session.identity);
+      walletsProjectId = await resolvePlaywrightProjectId(
+        getBootstrapApiBaseUrl(),
+        session.bearerToken
+      );
       await session.page.close();
+    });
+
+    test.beforeEach(async ({ page }) => {
+      await seedProjectCookie(page, walletsProjectId);
     });
 
     test("user can initialize Privy and run signer check from the wallet detail page", async ({
@@ -183,15 +195,9 @@ test.describe
 
       await expect(page.getByText("Create your first wallet", { exact: true })).toBeVisible();
 
-      await expect(page.getByText("API wallet", { exact: true }).first()).toBeVisible();
-      await page.getByRole("button", { name: "Set up API wallet" }).click();
-
-      await expect(page.getByText("Choose provider", { exact: true })).toBeVisible();
-      await expect(page.getByRole("button", { name: /Privy/ })).toHaveAttribute(
-        "aria-pressed",
-        "true"
-      );
-      await page.getByRole("button", { name: "Continue" }).click();
+      const privyProviderCard = page.locator("article").filter({ hasText: "Privy" }).first();
+      await expect(privyProviderCard).toBeVisible();
+      await privyProviderCard.getByRole("button", { name: "New wallet" }).click();
 
       await expect(page.getByText("Wallet details", { exact: true })).toBeVisible();
       await page.getByLabel("Wallet label").fill("Treasury");
@@ -203,9 +209,8 @@ test.describe
       await expect(walletCard).toBeVisible({ timeout: 120_000 });
       await expect(walletCard.getByText("Privy", { exact: true })).toBeVisible();
 
-      await page.getByRole("button", { name: "Institutional" }).click();
+      await expect(page.getByRole("button", { name: "Create Wallet" })).toBeVisible();
       await expect(page.locator('button[aria-label="Create wallet"]').first()).toBeVisible();
-      await page.getByRole("button", { name: "API", exact: true }).click();
       await expect(walletCard).toBeVisible();
 
       await walletCard.getByRole("link", { name: "Manage" }).click();
@@ -236,8 +241,13 @@ test.describe
         fundSourceAmountSol: 0.05,
         tier: "enterprise",
       });
-      const api = createLocalApiClient(getBootstrapApiBaseUrl(), session.bearerToken);
+      const projectId = await resolvePlaywrightProjectId(
+        getBootstrapApiBaseUrl(),
+        session.bearerToken
+      );
+      const api = createLocalApiClient(getBootstrapApiBaseUrl(), session.bearerToken, projectId);
       await session.page.close();
+      await seedProjectCookie(page, projectId);
 
       const wallet = fixtures.wallets[0];
       if (!wallet) {
@@ -362,7 +372,12 @@ test.describe
         walletCount: 1,
         tier: "enterprise",
       });
+      const projectId = await resolvePlaywrightProjectId(
+        getBootstrapApiBaseUrl(),
+        session.bearerToken
+      );
       await session.page.close();
+      await seedProjectCookie(page, projectId);
 
       const wallet = fixtures.wallets[0];
       if (!wallet) {

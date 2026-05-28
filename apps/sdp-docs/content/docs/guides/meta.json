@@ -10,7 +10,6 @@
     "mint-and-burn",
     "manage-allowlists",
     "freeze-and-compliance",
-    "transfer-tokens",
     "prepare-vs-execute"
   ]
 }

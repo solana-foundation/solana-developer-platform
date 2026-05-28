@@ -1,5 +1,5 @@
 import { KoraClient } from "@sdp/api/services/adapters";
-import { env } from "./env";
+import { env } from "#env-impl";
 
 type SolanaRpcResponse<T> =
   | { jsonrpc: "2.0"; id: number; result: T }

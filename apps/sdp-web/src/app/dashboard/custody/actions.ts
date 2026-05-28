@@ -372,7 +372,6 @@ export async function checkWalletSignerMemoAction(
       body: JSON.stringify({
         name: keyName,
         role: "api_developer",
-        environment: "sandbox",
         walletScope: "selected",
         signingWalletId: resolvedWalletId,
         signingWalletIds: [resolvedWalletId],

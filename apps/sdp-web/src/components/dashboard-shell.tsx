@@ -4,34 +4,48 @@ import { OrganizationSwitcher, SignInButton, UserButton, useAuth } from "@clerk/
 import { DEFAULT_SDP_DOCS_URL } from "@sdp/types";
 import type { LucideIcon } from "lucide-react";
 import {
-  ArrowLeft,
-  ArrowLeftRight,
-  Coins,
-  KeyRound,
-  LayoutDashboard,
-  Library,
-  PanelLeft,
-  PanelRight,
-  Settings2,
-  Wallet,
+  ArrowLeftIcon,
+  ArrowLeftRightIcon,
+  CoinsIcon,
+  KeyRoundIcon,
+  LayoutDashboardIcon,
+  LibraryIcon,
+  LockIcon,
+  PanelLeftIcon,
+  PanelRightIcon,
+  Settings2Icon,
+  WalletIcon,
 } from "lucide-react";
-import { motion } from "motion/react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { type ReactNode, useEffect, useRef, useState } from "react";
+import IssuanceLoading from "@/app/dashboard/issuance/loading";
+import DashboardLoading from "@/app/dashboard/loading";
+import CounterpartyLoading from "@/app/dashboard/payments/counterparty/loading";
+import PaymentsLoading from "@/app/dashboard/payments/loading";
+import WalletsLoading from "@/app/dashboard/wallets/loading";
+import { CounterpartyHeaderTabs } from "@/components/counterparty-header-tabs";
 import { IssuanceHeaderTabs } from "@/components/issuance-header-tabs";
 import { NetworkDebugPanel, NetworkDebugToggle } from "@/components/network-debug-panel";
 import { SentryFeedbackWidget } from "@/components/sentry-feedback-widget";
 import { SentryUserContext } from "@/components/sentry-user-context";
 import { Badge } from "@/components/ui/badge";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
+import { cn } from "@/lib/utils";
+
+type SubNavItem = {
+  label: string;
+  href: string;
+  disabled?: boolean;
+};
 
 type NavItem = {
   label: string;
   href: string;
   icon: LucideIcon;
   external?: boolean;
+  children?: SubNavItem[];
 };
 
 type NavSection = {
@@ -43,16 +57,25 @@ const navSections: NavSection[] = [
   {
     title: "Create",
     items: [
-      { label: "Home", href: "/dashboard", icon: LayoutDashboard },
-      { label: "Wallets", href: "/dashboard/wallets", icon: Wallet },
+      { label: "Home", href: "/dashboard", icon: LayoutDashboardIcon },
+      { label: "Wallets", href: "/dashboard/wallets", icon: WalletIcon },
     ],
   },
   {
     title: "Manage",
     items: [
-      { label: "Issuance", href: "/dashboard/issuance", icon: Coins },
-      { label: "Payments", href: "/dashboard/payments", icon: ArrowLeftRight },
-      { label: "API keys", href: "/dashboard/api-keys", icon: KeyRound },
+      { label: "Issuance", href: "/dashboard/issuance", icon: CoinsIcon },
+      {
+        label: "Payments",
+        href: "/dashboard/payments",
+        icon: ArrowLeftRightIcon,
+        children: [
+          { label: "Counterparty", href: "/dashboard/payments/counterparty" },
+          { label: "Pay", href: "/dashboard/pay", disabled: true },
+          { label: "Deposit", href: "/dashboard/deposit", disabled: true },
+        ],
+      },
+      { label: "API keys", href: "/dashboard/api-keys", icon: KeyRoundIcon },
     ],
   },
 ];
@@ -76,8 +99,6 @@ type DashboardPageConfig = {
 };
 
 type DashboardTopBarProps = {
-  isSidebarOpen: boolean;
-  setSidebarOpen: (value: boolean) => void;
   isMobileSidebarOpen: boolean;
   setMobileSidebarOpen: (value: boolean) => void;
   hideTitle?: boolean;
@@ -100,7 +121,7 @@ function HeaderBackAction({
       href={href}
       className="inline-flex h-7 items-center gap-1.5 rounded-[var(--button-radius-md)] text-text-medium transition-colors hover:text-text-extra-high"
     >
-      <ArrowLeft className="h-4 w-4" />
+      <ArrowLeftIcon className="h-4 w-4" />
       <span
         className={[
           "text-[13px] leading-[18px] font-medium",
@@ -114,62 +135,28 @@ function HeaderBackAction({
 }
 
 function SidebarToggle({
-  isSidebarOpen,
-  setSidebarOpen,
   isMobileSidebarOpen,
   setMobileSidebarOpen,
 }: {
-  isSidebarOpen: boolean;
-  setSidebarOpen: (value: boolean) => void;
   isMobileSidebarOpen: boolean;
   setMobileSidebarOpen: (value: boolean) => void;
 }) {
   return (
-    <>
-      <motion.button
-        type="button"
-        aria-label="Open navigation"
-        onClick={() => setMobileSidebarOpen(true)}
-        className={[
-          "inline-flex h-8 w-8 items-center justify-center rounded-lg text-text-medium transition-colors hover:bg-border-light lg:hidden",
-          isMobileSidebarOpen ? "invisible" : "",
-        ].join(" ")}
-        whileHover={{ scale: 1.05 }}
-        whileTap={{ scale: 0.93, rotate: 8 }}
-      >
-        <motion.div
-          initial={{ rotate: 10 }}
-          animate={{ rotate: 0 }}
-          transition={{ duration: 0.18 }}
-        >
-          <PanelRight className="h-4 w-4" />
-        </motion.div>
-      </motion.button>
-      {!isSidebarOpen ? (
-        <motion.button
-          type="button"
-          aria-label="Open navigation"
-          onClick={() => setSidebarOpen(true)}
-          className="hidden h-8 w-8 items-center justify-center rounded-lg text-text-medium transition-colors hover:bg-border-light lg:inline-flex"
-          whileHover={{ scale: 1.05 }}
-          whileTap={{ scale: 0.93, rotate: 8 }}
-        >
-          <motion.div
-            initial={{ rotate: 10 }}
-            animate={{ rotate: 0 }}
-            transition={{ duration: 0.18 }}
-          >
-            <PanelRight className="h-4 w-4" />
-          </motion.div>
-        </motion.button>
-      ) : null}
-    </>
+    <button
+      type="button"
+      aria-label="Open navigation"
+      onClick={() => setMobileSidebarOpen(true)}
+      className={[
+        "inline-flex h-8 w-8 items-center justify-center rounded-lg text-text-medium transition-colors hover:bg-border-light lg:hidden",
+        isMobileSidebarOpen ? "invisible" : "",
+      ].join(" ")}
+    >
+      <PanelRightIcon className="h-4 w-4" />
+    </button>
   );
 }
 
 function DashboardTopBar({
-  isSidebarOpen,
-  setSidebarOpen,
   isMobileSidebarOpen,
   setMobileSidebarOpen,
   hideTitle,
@@ -191,8 +178,6 @@ function DashboardTopBar({
       <div className="grid min-h-[40px] grid-cols-[1fr_auto_1fr] items-start gap-3">
         <div className="flex min-w-0 items-center gap-3">
           <SidebarToggle
-            isSidebarOpen={isSidebarOpen}
-            setSidebarOpen={setSidebarOpen}
             isMobileSidebarOpen={isMobileSidebarOpen}
             setMobileSidebarOpen={setMobileSidebarOpen}
           />
@@ -215,8 +200,6 @@ function DashboardTopBar({
     <div className="flex items-start justify-between gap-3">
       <div className="flex min-w-0 items-center gap-3">
         <SidebarToggle
-          isSidebarOpen={isSidebarOpen}
-          setSidebarOpen={setSidebarOpen}
           isMobileSidebarOpen={isMobileSidebarOpen}
           setMobileSidebarOpen={setMobileSidebarOpen}
         />
@@ -232,49 +215,6 @@ function DashboardTopBar({
         {sandboxBadge}
       </div>
     </div>
-  );
-}
-
-function SandboxToggle() {
-  const { sdpEnvironment } = useDashboardWorkspace();
-  const isSandbox = sdpEnvironment === "sandbox";
-
-  return (
-    <TooltipProvider>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <span className="block w-full">
-            <button
-              type="button"
-              disabled
-              aria-pressed={isSandbox}
-              className="flex h-10 w-full cursor-not-allowed items-center gap-3 rounded-[var(--button-radius-lg)] px-3 text-[16px] leading-[24px] text-text-medium"
-            >
-              <span
-                className={[
-                  "relative inline-flex h-5 w-9 shrink-0 rounded-full border transition-colors",
-                  isSandbox
-                    ? "border-text-extra-high bg-text-extra-high"
-                    : "border-border-medium bg-border-medium",
-                ].join(" ")}
-                aria-hidden="true"
-              >
-                <span
-                  className={[
-                    "absolute top-1/2 size-3.5 -translate-y-1/2 rounded-full bg-white shadow-sm transition-transform",
-                    isSandbox ? "translate-x-4.5" : "translate-x-0.5",
-                  ].join(" ")}
-                />
-              </span>
-              <span className="min-w-0 truncate text-left">Sandbox mode</span>
-            </button>
-          </span>
-        </TooltipTrigger>
-        <TooltipContent side="right" align="center" sideOffset={28} className="text-xs">
-          Only Sandbox mode supported at the moment
-        </TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
   );
 }
 
@@ -349,6 +289,29 @@ function getDashboardPageConfig(pathname: string): DashboardPageConfig {
       },
     };
   }
+  if (pathname === "/dashboard/payments/counterparty") {
+    return {
+      title: "Counterparty",
+      headerNav: <CounterpartyHeaderTabs />,
+      contentWidthClass: "max-w-none",
+    };
+  }
+  if (pathname.startsWith("/dashboard/payments/counterparty/")) {
+    return {
+      title: "",
+      hideTitle: true,
+      showHeaderNavRow: true,
+      centeredTitle: "New Counterparty",
+      topBarLeadingContent: (
+        <HeaderBackAction
+          href="/dashboard/payments/counterparty"
+          label="Back to Counterparty"
+          compactOnMobile
+        />
+      ),
+      contentWidthClass: "max-w-xl",
+    };
+  }
   if (pathname === "/dashboard/payments") {
     return {
       title: "Payments",
@@ -382,6 +345,15 @@ function getDashboardPageConfig(pathname: string): DashboardPageConfig {
   return { title: "Home" };
 }
 
+function resolvePageLoadingComponent(pathname: string): React.ComponentType {
+  if (pathname.startsWith("/dashboard/payments/counterparty")) return CounterpartyLoading;
+  if (pathname.startsWith("/dashboard/payments")) return PaymentsLoading;
+  if (pathname.startsWith("/dashboard/wallets") || pathname.startsWith("/dashboard/custody"))
+    return WalletsLoading;
+  if (pathname.startsWith("/dashboard/issuance")) return IssuanceLoading;
+  return DashboardLoading;
+}
+
 function isItemActive(pathname: string, href: string): boolean {
   if (href === "/dashboard") {
     return pathname === "/dashboard";
@@ -389,43 +361,111 @@ function isItemActive(pathname: string, href: string): boolean {
   if (href === "/dashboard/wallets") {
     return pathname.startsWith("/dashboard/wallets") || pathname.startsWith("/dashboard/custody");
   }
-  return pathname.startsWith(href);
+  if (href === "/dashboard/payments") {
+    return (
+      pathname.startsWith("/dashboard/payments") &&
+      !pathname.startsWith("/dashboard/payments/counterparty")
+    );
+  }
+  return pathname === href || pathname.startsWith(`${href}/`);
 }
+
+const navItemBase =
+  "flex h-10 items-center gap-3 rounded-[var(--button-radius-lg)] px-3 text-base transition-colors";
+const navItemActive = "border border-border-extra-light bg-white text-text-extra-high";
+const navItemInactive = "text-text-medium hover:bg-border-light hover:text-text-extra-high";
 
 function SidebarGroup({
   title,
   items,
   pathname,
   onNavigate,
+  isCollapsed,
+  showTopSeparator,
 }: {
   title: string;
   items: NavItem[];
   pathname: string;
   onNavigate?: () => void;
+  isCollapsed: boolean;
+  showTopSeparator: boolean;
 }) {
   return (
     <div className="space-y-2">
-      <p className="px-3 text-[12px] uppercase tracking-[0.4px] text-text-extra-low">{title}</p>
+      <p
+        className={cn(
+          "relative px-3 text-xs uppercase leading-normal tracking-wide",
+          isCollapsed ? "text-transparent" : "text-text-extra-low"
+        )}
+      >
+        {title}
+        {isCollapsed && showTopSeparator ? (
+          <span
+            aria-hidden="true"
+            className="pointer-events-none absolute top-1/2 right-3 left-3 h-px -translate-y-1/2 bg-border-medium"
+          />
+        ) : null}
+      </p>
       <div className="space-y-0.5">
         {items.map((item) => {
           const Icon = item.icon;
           const active = isItemActive(pathname, item.href);
 
           return (
-            <Link
-              key={item.label}
-              href={item.href}
-              onClick={onNavigate}
-              className={[
-                "flex h-10 items-center gap-3 rounded-[var(--button-radius-lg)] px-3 text-[16px] leading-[24px] transition-colors",
-                active
-                  ? "border border-border-extra-light bg-white text-text-extra-high"
-                  : "text-text-medium hover:bg-border-light hover:text-text-extra-high",
-              ].join(" ")}
-            >
-              <Icon className="h-5 w-5" strokeWidth={1.9} />
-              <span>{item.label}</span>
-            </Link>
+            <div key={item.label}>
+              <Link
+                href={item.href}
+                onClick={onNavigate}
+                title={isCollapsed ? item.label : undefined}
+                aria-label={isCollapsed ? item.label : undefined}
+                className={cn(
+                  navItemBase,
+                  active ? navItemActive : navItemInactive,
+                  isCollapsed && "justify-center"
+                )}
+              >
+                <Icon className="h-5 w-5 shrink-0" strokeWidth={1.9} />
+                {isCollapsed ? null : <span className="whitespace-nowrap">{item.label}</span>}
+              </Link>
+              {!isCollapsed && item.children && item.children.length > 0 && (
+                <div className="ml-5 mt-2">
+                  {item.children.map((child, i, siblings) => {
+                    const childActive = isItemActive(pathname, child.href);
+                    const isFirst = i === 0;
+                    const isLast = i === siblings.length - 1;
+                    return (
+                      <div key={child.href} className="flex gap-2">
+                        <div
+                          className={cn(
+                            "w-0.5 shrink-0 self-stretch transition-colors",
+                            isFirst && "mt-1",
+                            isLast && "mb-1",
+                            childActive ? "bg-text-medium" : "bg-border-light"
+                          )}
+                        />
+                        {child.disabled ? (
+                          <span className="flex h-9 flex-1 cursor-not-allowed items-center rounded-lg px-3 text-sm text-text-low">
+                            {child.label}
+                            <LockIcon className="ml-auto h-3 w-3" />
+                          </span>
+                        ) : (
+                          <Link
+                            href={child.href}
+                            onClick={onNavigate}
+                            className={cn(
+                              "flex h-9 flex-1 items-center rounded-lg px-3 text-sm transition-colors",
+                              childActive ? navItemActive : navItemInactive
+                            )}
+                          >
+                            {child.label}
+                          </Link>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           );
         })}
       </div>
@@ -438,59 +478,70 @@ function DashboardSidebarContent({
   pathname,
   onNavigate,
   onClose,
+  isCollapsed,
+  variant,
 }: {
   bottomNavItems: NavItem[];
   pathname: string;
   onNavigate?: () => void;
   onClose: () => void;
+  isCollapsed: boolean;
+  variant: "desktop" | "mobile";
 }) {
+  const showMobileClose = variant === "mobile";
   return (
     <>
-      <div className="w-[296px] space-y-6 p-3">
-        <div className="relative px-2 py-3">
-          <div className="mb-2 flex items-center justify-between pl-1 pr-2">
-            <div className="flex min-w-0 items-center gap-2">
-              <div className="min-w-0 flex-1">
-                <OrganizationSwitcher hidePersonal />
-              </div>
-            </div>
-            <motion.button
-              type="button"
-              aria-label="Close navigation"
-              onClick={onClose}
-              className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-text-medium transition-colors hover:bg-border-light"
-              whileHover={{ scale: 1.05, rotate: -3 }}
-              whileTap={{ scale: 0.95, rotate: -10 }}
-            >
-              <motion.div
-                initial={{ rotate: -10 }}
-                animate={{ rotate: 0 }}
-                transition={{ duration: 0.18 }}
+      <div className="space-y-6 p-3">
+        <div className="py-3">
+          {showMobileClose ? (
+            <div className="flex items-center justify-between gap-2">
+              <WorkspaceSwitcher collapsed={false} />
+              <button
+                type="button"
+                aria-label="Close navigation"
+                onClick={onClose}
+                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-text-medium transition-colors hover:bg-border-light"
               >
-                <PanelLeft className="h-5 w-5" />
-              </motion.div>
-            </motion.button>
-          </div>
+                <PanelLeftIcon className="h-5 w-5" />
+              </button>
+            </div>
+          ) : (
+            <WorkspaceSwitcher collapsed={isCollapsed} />
+          )}
         </div>
-        {navSections.map((section) => (
+        {navSections.map((section, idx) => (
           <SidebarGroup
             key={section.title}
             title={section.title}
             items={section.items}
             pathname={pathname}
             onNavigate={onNavigate}
+            isCollapsed={isCollapsed}
+            showTopSeparator={idx > 0}
           />
         ))}
         <div className="space-y-2">
-          <p className="px-3 text-[12px] uppercase tracking-[0.4px] text-text-extra-low">Mode</p>
+          <p
+            className={cn(
+              "relative px-3 text-xs uppercase leading-normal tracking-wide",
+              isCollapsed ? "text-transparent" : "text-text-extra-low"
+            )}
+          >
+            Mode
+            {isCollapsed ? (
+              <span
+                aria-hidden="true"
+                className="pointer-events-none absolute top-1/2 right-3 left-3 h-px -translate-y-1/2 bg-border-medium"
+              />
+            ) : null}
+          </p>
           <div className="space-y-0.5">
-            <SandboxToggle />
-            <NetworkDebugToggle />
+            <NetworkDebugToggle collapsed={isCollapsed} />
           </div>
         </div>
       </div>
-      <div className="space-y-0.5 pb-1">
-        <SentryFeedbackWidget />
+      <div className="space-y-0.5 px-3 pb-1">
+        <SentryFeedbackWidget collapsed={isCollapsed} />
         {bottomNavItems.map((item) => {
           const Icon = item.icon;
           return (
@@ -500,10 +551,15 @@ function DashboardSidebarContent({
               target={item.external ? "_blank" : undefined}
               rel={item.external ? "noopener noreferrer" : undefined}
               onClick={onNavigate}
-              className="flex h-10 items-center gap-3 rounded-[var(--button-radius-lg)] px-3 text-[16px] leading-[24px] text-text-medium transition-colors hover:bg-border-light hover:text-text-extra-high"
+              title={isCollapsed ? item.label : undefined}
+              aria-label={isCollapsed ? item.label : undefined}
+              className={cn(
+                "flex h-10 items-center gap-3 rounded-[var(--button-radius-lg)] px-3 text-base text-text-medium transition-colors hover:bg-border-light hover:text-text-extra-high",
+                isCollapsed && "justify-center"
+              )}
             >
-              <Icon className="h-5 w-5" strokeWidth={1.9} />
-              <span>{item.label}</span>
+              <Icon className="h-5 w-5 shrink-0" strokeWidth={1.9} />
+              {isCollapsed ? null : <span className="whitespace-nowrap">{item.label}</span>}
             </Link>
           );
         })}
@@ -516,15 +572,18 @@ function DashboardSidebarContent({
 export function DashboardShell({ children }: { children: ReactNode }) {
   const { isLoaded, isSignedIn, orgId } = useAuth();
   const pathname = usePathname();
-  const { dashboardAccess, isSidebarOpen, setSidebarOpen } = useDashboardWorkspace();
+  const { dashboardAccess, isSidebarOpen, setSidebarOpen, isProjectSwitching } =
+    useDashboardWorkspace();
+  const PageLoadingComponent = resolvePageLoadingComponent(pathname);
   const [isMobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const previousPathnameRef = useRef(pathname);
-  const sidebarWidth = 296;
+  const sidebarExpandedWidth = 296;
+  const sidebarCollapsedWidth = 64;
   const pageConfig = getDashboardPageConfig(pathname);
   const bottomNavItems: NavItem[] = [
-    { label: "API Docs", href: docsHref, icon: Library, external: true },
+    { label: "API Docs", href: docsHref, icon: LibraryIcon, external: true },
     ...(dashboardAccess.capabilities.canManageOrgSettings
-      ? [{ label: "Settings", href: "/dashboard/settings", icon: Settings2 }]
+      ? [{ label: "Settings", href: "/dashboard/settings", icon: Settings2Icon }]
       : []),
   ];
   const contentWidthClass = pageConfig.contentWidthClass ?? "max-w-5xl";
@@ -538,7 +597,9 @@ export function DashboardShell({ children }: { children: ReactNode }) {
     pageConfig.showHeaderNavRow || Boolean(backAction) || Boolean(headerNav);
   const shouldRenderTopBarBorder = Boolean(centeredTitle) && !shouldRenderHeaderNavRow;
   const shouldClipHorizontalOverflow =
-    pathname === "/dashboard/payments" || pathname.startsWith("/dashboard/payments/");
+    pathname === "/dashboard/payments" ||
+    (pathname.startsWith("/dashboard/payments/") &&
+      !pathname.startsWith("/dashboard/payments/counterparty"));
   const isWalletDetailRoute =
     (pathname.startsWith("/dashboard/wallets/") &&
       pathname !== "/dashboard/wallets/setup" &&
@@ -551,6 +612,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
     pathname === "/dashboard/payments" ||
     pathname === "/dashboard/wallets" ||
     pathname === "/dashboard/custody" ||
+    pathname === "/dashboard/payments/counterparty" ||
     isWalletDetailRoute;
   const shouldLockViewportScroll = shouldUseWorkspaceViewport;
   const shouldLockShellViewport = shouldLockViewportScroll || isMobileSidebarOpen;
@@ -629,22 +691,27 @@ export function DashboardShell({ children }: { children: ReactNode }) {
           "lg:grid-cols-[auto_1fr]",
         ].join(" ")}
       >
-        <motion.aside
-          initial={false}
-          animate={{ width: isSidebarOpen ? sidebarWidth : 0 }}
-          transition={{ duration: 0.22, ease: "easeInOut" }}
-          style={{ pointerEvents: isSidebarOpen ? "auto" : "none" }}
-          className={[
-            "hidden overflow-hidden border border-border-light border-r-0 bg-[var(--sdp-shell-bg)] lg:sticky lg:top-0 lg:flex lg:h-screen lg:flex-col lg:justify-between",
-          ].join(" ")}
+        <aside
+          style={{ width: isSidebarOpen ? sidebarExpandedWidth : sidebarCollapsedWidth }}
+          className="relative z-10 hidden bg-[var(--sdp-shell-bg)] lg:sticky lg:top-0 lg:flex lg:h-screen lg:flex-col lg:justify-between"
         >
           <DashboardSidebarContent
             bottomNavItems={bottomNavItems}
             pathname={pathname}
             onNavigate={undefined}
             onClose={() => setSidebarOpen(false)}
+            isCollapsed={!isSidebarOpen}
+            variant="desktop"
           />
-        </motion.aside>
+          <button
+            type="button"
+            onClick={() => setSidebarOpen(!isSidebarOpen)}
+            aria-label={isSidebarOpen ? "Collapse sidebar" : "Expand sidebar"}
+            className="group absolute top-1/2 right-0 z-10 flex h-24 w-5 -translate-y-1/2 translate-x-3/4 cursor-pointer items-center justify-center"
+          >
+            <span className="block h-8 w-0.5 rounded-full bg-border-medium group-hover:bg-text-low" />
+          </button>
+        </aside>
 
         {isMobileSidebarOpen ? (
           <div className="fixed inset-0 z-50 flex lg:hidden">
@@ -654,12 +721,14 @@ export function DashboardShell({ children }: { children: ReactNode }) {
               className="absolute inset-0 bg-gray-1400/30"
               onClick={() => setMobileSidebarOpen(false)}
             />
-            <div className="relative z-10 flex h-full w-[296px] max-w-[85vw] flex-col justify-between border-r border-border-light bg-[var(--sdp-shell-bg)] shadow-lg">
+            <div className="relative z-10 flex h-full w-72 max-w-[85vw] flex-col justify-between border-r border-border-light bg-[var(--sdp-shell-bg)] shadow-lg">
               <DashboardSidebarContent
                 bottomNavItems={bottomNavItems}
                 pathname={pathname}
                 onNavigate={() => setMobileSidebarOpen(false)}
                 onClose={() => setMobileSidebarOpen(false)}
+                isCollapsed={false}
+                variant="mobile"
               />
             </div>
           </div>
@@ -688,8 +757,6 @@ export function DashboardShell({ children }: { children: ReactNode }) {
                   ].join(" ")}
                 >
                   <DashboardTopBar
-                    isSidebarOpen={isSidebarOpen}
-                    setSidebarOpen={setSidebarOpen}
                     isMobileSidebarOpen={isMobileSidebarOpen}
                     setMobileSidebarOpen={setMobileSidebarOpen}
                     hideTitle={pageConfig.hideTitle}
@@ -701,8 +768,6 @@ export function DashboardShell({ children }: { children: ReactNode }) {
               ) : (
                 <div className={shouldLockViewportScroll ? "px-3 pt-5 md:px-6 md:pt-6" : ""}>
                   <DashboardTopBar
-                    isSidebarOpen={isSidebarOpen}
-                    setSidebarOpen={setSidebarOpen}
                     isMobileSidebarOpen={isMobileSidebarOpen}
                     setMobileSidebarOpen={setMobileSidebarOpen}
                     hideTitle={pageConfig.hideTitle}
@@ -753,7 +818,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
                 shouldLockViewportScroll ? "min-h-0 flex-1 overflow-hidden" : "",
               ].join(" ")}
             >
-              {children}
+              {isProjectSwitching ? <PageLoadingComponent /> : children}
             </div>
           </div>
         </section>

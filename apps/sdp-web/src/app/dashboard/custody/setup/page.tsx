@@ -6,12 +6,7 @@ import { fetchProviderAvailability } from "@/lib/provider-availability";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createSdpApiClient, type SdpApiClient } from "@/lib/sdp-api";
 import type { OnboardingStatusResponse } from "../../onboarding-status";
-import {
-  isKnownCustodyProvider,
-  type KnownCustodyProvider,
-  WALLET_PROVIDER_CATEGORIES,
-  type WalletProviderCategory,
-} from "../provider-catalog";
+import { isKnownCustodyProvider, type KnownCustodyProvider } from "../provider-catalog";
 import { WalletSetupFlow } from "./wallet-setup-flow";
 
 type SettledResult<T> = { ok: true; value: T } | { ok: false; error: unknown };
@@ -36,12 +31,6 @@ function getSearchParamValue(
     return value[0] ?? null;
   }
   return value ?? null;
-}
-
-function parseCategory(value: string | null): WalletProviderCategory | null {
-  return value && WALLET_PROVIDER_CATEGORIES.includes(value as WalletProviderCategory)
-    ? (value as WalletProviderCategory)
-    : null;
 }
 
 function parseProvider(value: string | null): KnownCustodyProvider | null {
@@ -78,7 +67,6 @@ export default async function CustodySetupPage({ searchParams }: CustodySetupPag
 
   const trace = createTimedTrace("dashboard.custody.setup.page");
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
-  const initialCategory = parseCategory(getSearchParamValue(resolvedSearchParams, "category"));
   const initialProvider = parseProvider(getSearchParamValue(resolvedSearchParams, "provider"));
 
   const apiClient = await trace.step("create_sdp_api_client", () =>
@@ -117,7 +105,6 @@ export default async function CustodySetupPage({ searchParams }: CustodySetupPag
     <WalletSetupFlow
       connectedProviders={connectedProviders}
       enabledProviders={enabledProviders}
-      initialCategory={initialCategory}
       initialProvider={initialProvider}
     />
   );

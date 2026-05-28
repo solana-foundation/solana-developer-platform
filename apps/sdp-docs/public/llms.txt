@@ -27,7 +27,8 @@
 - [Create a Token](https://platform.solana.com/docs/guides/create-a-token): Define a new token using templates or custom configuration.
 - [Deploy a Token](https://platform.solana.com/docs/guides/deploy-a-token): Deploy a created token to the Solana blockchain.
 - [Mint and Burn Tokens](https://platform.solana.com/docs/guides/mint-and-burn): Increase or decrease token supply by minting and burning.
-- [Transfer Tokens](https://platform.solana.com/docs/guides/transfer-tokens): Send tokens between accounts using SDP's payment orchestration.
+- [Payments](https://platform.solana.com/docs/payments): Build payments on Solana with SDP — concepts, send, accept, ramps, and wallet operations.
+- [Basic payment](https://platform.solana.com/docs/payments/send-basic-payment): Send a single token transfer with SDP, using either Execute or Prepare mode.
 - [Issuance Token Types](https://platform.solana.com/docs/reference/issuance-token-types): Supported issuance templates and default controls.
 - [End-to-end Payment Flow](https://platform.solana.com/docs/tutorials/end-to-end-payment-flow): A high-level payment flow from quote to settlement.
 - [Infrastructure Provider Onboarding](https://platform.solana.com/docs/reference/provider-onboarding): Add an infrastructure provider integration to SDP through the self-service contribution process.

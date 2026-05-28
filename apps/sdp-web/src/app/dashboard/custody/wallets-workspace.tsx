@@ -8,7 +8,7 @@ import { ApiPlaygroundShellSkeleton } from "@/components/api-playground-shell-sk
 import { DashboardWorkspaceTabShell } from "@/components/dashboard-workspace-tab-shell";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { getStoredApiKeySecret } from "@/lib/playground-api-keys";
-import type { KnownCustodyProvider, WalletProviderCategory } from "./provider-catalog";
+import type { KnownCustodyProvider } from "./provider-catalog";
 import { WalletsOverview } from "./wallets-overview";
 
 const WalletsPlayground = dynamic(
@@ -90,14 +90,8 @@ export function WalletsWorkspace({
     return stored ?? "";
   }, [selectedPlaygroundApiKey, selectedPlaygroundApiKeyPrefix]);
 
-  const openWalletSetup = (
-    provider: KnownCustodyProvider | null,
-    category: WalletProviderCategory | null = null
-  ) => {
+  const openWalletSetup = (provider: KnownCustodyProvider | null) => {
     const params = new URLSearchParams();
-    if (category) {
-      params.set("category", category);
-    }
     if (provider) {
       params.set("provider", provider);
     }

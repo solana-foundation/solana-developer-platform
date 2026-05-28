@@ -13,6 +13,7 @@ import {
   getBootstrapApiBaseUrl,
   getBootstrapClerkJwtTemplate,
   type PlaywrightWalletFixture,
+  resolvePlaywrightProjectId,
   seedLocalClerkOrganizationMapping,
 } from "./local-dashboard-bootstrap";
 
@@ -24,10 +25,6 @@ interface BootstrapOptions {
 
 interface TokenResponse {
   token: Token;
-}
-
-interface ListProjectsResponse {
-  projects: Array<{ id: string }>;
 }
 
 function toFixtureToken(token: Token): IssuanceFixtureToken {
@@ -63,15 +60,6 @@ async function waitForTokenStatus(
   }
 
   throw new Error(`Timed out waiting for token ${tokenId} to ${description}`);
-}
-
-async function ensureProjectId(api: LocalApiClient): Promise<string> {
-  const data = await api.get<ListProjectsResponse>("/v1/projects");
-  const projectId = data.projects[0]?.id;
-  if (!projectId) {
-    throw new Error("Failed to resolve a project for Playwright issuance fixtures");
-  }
-  return projectId;
 }
 
 async function createFixtureToken(
@@ -162,7 +150,8 @@ export async function bootstrapLocalIssuanceFixtures({
     fundSourceWallet: true,
     fundSourceAmountSol: 0.05,
   });
-  const api = createLocalApiClient(getBootstrapApiBaseUrl(), bearerToken);
+  const projectId = await resolvePlaywrightProjectId(getBootstrapApiBaseUrl(), bearerToken);
+  const api = createLocalApiClient(getBootstrapApiBaseUrl(), bearerToken, projectId);
 
   const treasuryWallet = requireWallet(
     walletBootstrap.wallets,
@@ -205,7 +194,6 @@ export async function bootstrapLocalIssuanceFixtures({
     treasuryWallet.walletId
   );
   const openToken = await deployFixtureToken(api, openDraft.id, treasuryWallet.walletId);
-  const projectId = await ensureProjectId(api);
 
   const fixtures: IssuanceFixtures = {
     organization: walletBootstrap.organization,

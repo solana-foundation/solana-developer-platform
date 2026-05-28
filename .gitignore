@@ -35,6 +35,7 @@ pnpm-debug.log*
 .env.local
 .env.preview
 .env.*.local
+.env.docker
 
 # Kora keypairs and secrets (never commit)
 infra/kora/.keypair.json

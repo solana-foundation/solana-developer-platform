@@ -152,7 +152,7 @@ function NetworkDebugEntryRow({
   );
 }
 
-export function NetworkDebugToggle() {
+export function NetworkDebugToggle({ collapsed = false }: { collapsed?: boolean }) {
   const { available, enabled, pendingCount, setEnabled } = useNetworkDebug();
 
   if (!available) {
@@ -164,7 +164,12 @@ export function NetworkDebugToggle() {
       type="button"
       onClick={() => setEnabled(!enabled)}
       aria-pressed={enabled}
-      className="flex h-10 w-full items-center gap-3 rounded-[var(--button-radius-lg)] px-3 text-[16px] leading-[24px] text-text-medium transition-colors hover:bg-border-light hover:text-text-extra-high"
+      aria-label={collapsed ? "API Debug Logs" : undefined}
+      title={collapsed ? "API Debug Logs" : undefined}
+      className={cn(
+        "flex h-10 w-full items-center gap-3 rounded-[var(--button-radius-lg)] px-3 text-base text-text-medium transition-colors hover:bg-border-light hover:text-text-extra-high",
+        collapsed && "justify-center"
+      )}
     >
       <span
         className={cn(
@@ -182,12 +187,16 @@ export function NetworkDebugToggle() {
           )}
         />
       </span>
-      <span className="min-w-0 flex-1 truncate text-left">API Debug Logs</span>
-      {pendingCount > 0 ? (
-        <span className="shrink-0 rounded-full bg-border-extra-light px-1.5 py-0.5 text-[10px] text-text-medium">
-          {pendingCount}
-        </span>
-      ) : null}
+      {collapsed ? null : (
+        <>
+          <span className="min-w-0 flex-1 truncate text-left">API Debug Logs</span>
+          {pendingCount > 0 ? (
+            <span className="shrink-0 rounded-full bg-border-extra-light px-1.5 py-0.5 text-[10px] text-text-medium">
+              {pendingCount}
+            </span>
+          ) : null}
+        </>
+      )}
     </button>
   );
 }

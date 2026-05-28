@@ -1,0 +1,106 @@
+---
+title: Payment with memo
+description: Attach an order ID, invoice number, or customer reference to an SDP transfer.
+---
+
+The `memo` field on `POST /v1/payments/transfers` carries an arbitrary UTF-8 string (up to 256 characters) alongside the on-chain transfer. Memos are persisted on the SDP `Transfer` record and surface in list and read responses, so your indexer can map each transfer back to a row in your product database.
+
+## When to use a memo
+
+Use a memo when you need a free-form correlation token that your backend already knows at request time:
+
+- **Order or invoice IDs** — `order_2026-05-14_4837` so the inbound transfer ties to a checkout row.
+- **Customer references** — internal customer or account identifiers for support and reconciliation.
+- **Run identifiers** — a payout-batch ID shared across many outbound transfers in the same disbursement.
+
+Memos are stored by SDP. They are **not** automatically attached as a Solana memo-program instruction; if you need an on-chain memo that block explorers display, that has to be handled at the transaction level (see the trade-offs section below).
+
+## API usage
+
+<Tabs items={["curl", "TypeScript", "Java"]}>
+<Tab value="curl">
+```bash
+curl -X POST https://api.solana.com/v1/payments/transfers \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "source": "wal_example",
+    "destination": "7xKXz...9fGh",
+    "token": "9aBCd...4eEf",
+    "amount": "100.00",
+    "memo": "order_2026-05-14_4837"
+  }'
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript
+const response = await fetch(
+  "https://api.solana.com/v1/payments/transfers",
+  {
+    method: "POST",
+    headers: {
+      "Authorization": "Bearer sk_test_...",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      source: "wal_example",
+      destination: "7xKXz...9fGh",
+      token: "9aBCd...4eEf",
+      amount: "100.00",
+      memo: "order_2026-05-14_4837",
+    }),
+  }
+);
+const { data } = await response.json();
+```
+</Tab>
+<Tab value="Java">
+```java
+HttpRequest request = HttpRequest.newBuilder()
+    .uri(URI.create("https://api.solana.com/v1/payments/transfers"))
+    .header("Authorization", "Bearer sk_test_...")
+    .header("Content-Type", "application/json")
+    .POST(HttpRequest.BodyPublishers.ofString("""
+        {
+          "source": "wal_example",
+          "destination": "7xKXz...9fGh",
+          "token": "9aBCd...4eEf",
+          "amount": "100.00",
+          "memo": "order_2026-05-14_4837"
+        }"""))
+    .build();
+```
+</Tab>
+</Tabs>
+
+The memo is preserved on the transfer record:
+
+```json
+{
+  "id": "xfr_...",
+  "memo": "order_2026-05-14_4837",
+  "status": "finalized",
+  "signature": "5xR1...",
+  ...
+}
+```
+
+Memo limits: `z.string().max(256)`. UTF-8 is accepted; trim or sanitize on the way in if your downstream systems are stricter.
+
+## Trade-offs vs. Solana Pay reference accounts
+
+For accept flows, **Solana Pay reference accounts** are an alternative correlation mechanism: you generate a unique pubkey per order and include it in the on-chain transfer as a reference. The advantage is on-chain provenance — anyone can verify the link without trusting SDP's database — and the ability for the payer to construct the transfer themselves from a Solana Pay URL.
+
+SDP's `Prepare` endpoint accepts a `referenceAddress` field as a roadmap hook for Solana Pay-style correlation, but **does not yet attach it on-chain or expose it on inbound transfer records** — for now use `memo` for SDP-side correlation, or read the reference directly from the transaction via Solana RPC. Use [Accept overview](/docs/payments/accept-overview) and [Indexing and reconciliation](/docs/payments/accept-indexing) for the inbound side.
+
+Rule of thumb: memos are simpler when **you** initiate the transfer (server-side payouts, internal moves), references are stronger when **a third party** initiates the transfer (customer checkout, donations).
+
+## Indexing implications
+
+Memos are returned by `GET /v1/payments/transfers` and `GET /v1/payments/transfers/{id}`, so your reconciliation worker can filter by date / direction / token and then match each row to your order table by memo. See [Indexing and reconciliation](/docs/payments/accept-indexing) for query patterns.
+
+## Related
+
+- [Basic payment](/docs/payments/send-basic-payment) — the underlying transfer endpoint.
+- [Payouts and disbursements](/docs/payments/send-payouts) — using memos to tag a batch.
+- [Accept overview](/docs/payments/accept-overview) — when to reach for reference accounts instead.

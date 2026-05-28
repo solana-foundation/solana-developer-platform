@@ -204,7 +204,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
     summary: "List wallets",
     operationId: "listWallets",
     description:
-      "Lists wallets for the resolved default signing provider by default. Use provider/includeAllProviders to query across active providers.",
+      "Lists wallets across all active providers for the requested scope. Use provider to filter to a specific provider.",
     security: [{ apiKeyAuth: [] }],
     request: {
       query: z.object({

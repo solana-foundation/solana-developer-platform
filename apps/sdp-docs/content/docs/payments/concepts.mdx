@@ -1,0 +1,66 @@
+---
+title: How payments work on SDP
+description: Wallets, tokens, signing modes, fees, and the data model that backs SDP payments.
+---
+
+SDP payments move value between Solana accounts: a custody wallet sends tokens to a destination address, SDP records the transfer, and the rest of the section describes how to send those, accept incoming ones, ramp into and out of fiat, and reconcile activity against your product database.
+
+This page introduces the building blocks the rest of the section assumes.
+
+## Custody wallets
+
+Every SDP payment is anchored to a **custody wallet** — a Solana keypair whose private key SDP holds, scoped to an organization and (optionally) a project. Wallets sign on your behalf in Execute mode and contribute to balances and policies for the addresses you control.
+
+You provision custody wallets up front (see [Set Up Wallets](/docs/guides/setup-wallets)) and reference them by their SDP `wallet_id` (`wal_…`). Transfer endpoints expect the **source** as a custody wallet ID — the wallet is resolved server-side from the caller's custody-wallet list — and the **destination** as the on-chain Solana address of the recipient. Ramp endpoints vary by provider: MoonPay and BVNK accept either a wallet ID or a Solana address for `sourceWallet` / `destinationWallet`; Lightspark uses its own `ExternalAccount:…` identifiers (onramp `destinationWallet` also accepts a Solana address, offramp `sourceWallet` does not).
+
+## Tokens and token accounts
+
+Payments transfer **SPL tokens** — stablecoins, tokenized assets, or any mint your project supports. The `token` field on `POST /v1/payments/transfers` (and its `/prepare` variant) requires the on-chain **mint address** for SPL tokens; the literal string `SOL` is accepted as the native-SOL shorthand. Symbols like `USDC` are not resolved at request time. The `token` filter on `GET /v1/payments/transfers` does an **exact match** against the `Transfer.token` value as stored — API-created transfers store the mint you supplied (or `SOL`), while indexed/observed transfers run mint-to-symbol resolution and may store a resolved symbol (e.g. `USDC`). Filter using the same label you see on the response, or query without `token` and filter client-side. **Balance responses always attempt symbol resolution** and return the symbol whenever the mint is known — so a wallet holding USDC reports `USDC` rather than the mint string.
+
+**Amounts on the wire are UI-unit decimal strings** — `"100.00"` means 100 tokens, regardless of the mint's decimal count. SDP handles the smallest-unit conversion when it builds the on-chain transaction. The one exception is wallet-balance responses, which return both a raw `amount` (smallest unit) **and** a `uiAmount` (decimal string) so balance consumers can pick whichever fits.
+
+## Signing modes
+
+Every payments mutation supports two signing modes:
+
+- **Execute** — `POST /v1/payments/transfers`. SDP signs with the source wallet's custody key and submits the transaction.
+- **Prepare** — `POST /v1/payments/transfers/prepare`. SDP builds and serializes the transaction but does not sign or submit it; you sign client-side (hardware wallet, multisig, user prompt) and submit the result yourself.
+
+See [Prepare vs Execute](/docs/guides/prepare-vs-execute) for the full guide on choosing between them. The rest of this section shows both modes side by side wherever the choice matters.
+
+## Fees and sponsorship
+
+Solana fees are paid in SOL by the transaction's fee payer. On Execute-mode transfers, the source custody wallet is the fee payer by default; SDP can be configured to sponsor fees so end-user wallets do not need a SOL balance.
+
+In Prepare mode, the serialized transaction already includes the fee-payer assignment; sign it as-is or rebuild with a different fee payer of your own.
+
+The `Prepare` endpoint also accepts an `options.priorityFee` field (`"none" | "low" | "medium" | "high" | "auto"`) as a roadmap hook. The value is validated but **not yet applied** to the built transaction — priority fees ship as a separate piece of work.
+
+## The transfer data model
+
+Every successful or attempted transfer creates a `Transfer` record. The fields that matter for most flows:
+
+| Field | Meaning |
+| --- | --- |
+| `id` | SDP-internal transfer identifier (use this in API URLs). |
+| `status` | One of `pending`, `processing`, `confirmed`, `finalized`, `failed`. See [Verifying a payment](/docs/payments/accept-verification). |
+| `direction` | `inbound` (someone paid you) or `outbound` (you paid someone). |
+| `source`, `destination` | On-chain addresses. |
+| `token`, `amount` | What moved and how much. `amount` is a UI-unit decimal string (e.g. `"100.00"`). |
+| `memo` | Optional UTF-8 string, up to 256 chars. See [Payment with memo](/docs/payments/send-payment-with-memo). |
+| `signature` | Solana transaction signature once confirmed. **Unique across SDP** — the natural dedup key. |
+| `slot`, `blockTime`, `fee` | On-chain settlement details, populated as the transaction lands. |
+| `error` | Set if the transfer failed; the rest of the record explains what reached the network. |
+| `risk` | Optional risk-score metadata, when a risk provider is configured. |
+
+The status path depends on how the transfer was created. Execute-mode starts at `processing` and moves to `confirmed` → `finalized`. Prepare-mode starts at `pending` (serialized tx saved but not submitted) and moves to `processing` once the signed tx is submitted; if the blockhash expires before submission it transitions to `failed` without ever producing a `signature`. Inbound transfers discovered on-chain surface directly at `confirmed`. See [Verifying a payment](/docs/payments/accept-verification#status-lifecycle) for the full state table.
+
+## What SDP does and does not give you
+
+SDP exposes everything you need to **send**, **track**, and **reconcile** payments at the transfer level: status polling, filtered lists, wallet-level balances, and a UNIQUE `signature` on the transfer record for client-side dedup (see [Basic payment → Deduplication](/docs/payments/send-basic-payment#deduplication)). It does **not** ship higher-level commerce primitives — there is no checkout session, payment intent, or invoice object in the API today, no webhooks for settlement events, and payment endpoints do not honor an `Idempotency-Key` header (unlike issuance endpoints). The [Accept payments](/docs/payments/accept-overview) section shows how to build those abstractions on top of the transfer model.
+
+## Related
+
+- [Prepare vs Execute](/docs/guides/prepare-vs-execute) — SDP's two signing modes in depth.
+- [Payments API reference](/docs/reference/api/payments) — auto-generated endpoint reference.
+- [End-to-end payment flow](/docs/tutorials/end-to-end-payment-flow) — a step-by-step tutorial through the same lifecycle from a different angle.

@@ -13,6 +13,11 @@ const TEST_ORG = {
   slug: "custody-multi-provider-org",
 };
 
+const TEST_PROJECT = {
+  id: "prj_test_custody_multi_provider",
+  slug: "test-custody-multi-provider-project",
+};
+
 const TEST_USER = {
   id: "usr_custody_multi_provider",
   email: "custody-multi-provider@example.com",
@@ -27,7 +32,7 @@ const TEST_API_KEY = {
 const TEST_CACHED_API_KEY: CachedApiKey = {
   id: TEST_API_KEY.id,
   organizationId: TEST_ORG.id,
-  projectId: null,
+  projectId: TEST_PROJECT.id,
   role: "api_admin",
   permissions: ["*"],
   environment: "sandbox",
@@ -57,21 +62,34 @@ async function seedAuthAndConfigs(): Promise<void> {
       .bind(TEST_USER.id, TEST_USER.email, 1, "active"),
     getDb(env)
       .prepare(
+        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(
+        TEST_PROJECT.id,
+        TEST_ORG.id,
+        "Test Project",
+        TEST_PROJECT.slug,
+        "sandbox",
+        "active",
+        TEST_USER.id
+      ),
+    getDb(env)
+      .prepare(
         `INSERT INTO api_keys
-           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, environment, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         TEST_API_KEY.id,
         TEST_ORG.id,
-        null,
+        TEST_PROJECT.id,
         TEST_USER.id,
         "Custody Multi Provider Test Key",
         TEST_API_KEY.prefix,
         keyHash,
         "api_admin",
         JSON.stringify(["*"]),
-        "sandbox",
         "active"
       ),
     getDb(env)
@@ -83,7 +101,7 @@ async function seedAuthAndConfigs(): Promise<void> {
       .bind(
         PRIVY_CONFIG_ID,
         TEST_ORG.id,
-        null,
+        TEST_PROJECT.id,
         "privy",
         "test-config",
         "sdp-custody-encryption-v1",
@@ -99,7 +117,7 @@ async function seedAuthAndConfigs(): Promise<void> {
       .bind(
         PARA_CONFIG_ID,
         TEST_ORG.id,
-        null,
+        TEST_PROJECT.id,
         "para",
         "test-config",
         "sdp-custody-encryption-v1",
@@ -112,7 +130,7 @@ async function seedAuthAndConfigs(): Promise<void> {
            (id, organization_id, project_id, default_custody_config_id)
          VALUES (?, ?, ?, ?)`
       )
-      .bind("csd_multi_org_default", TEST_ORG.id, null, PRIVY_CONFIG_ID),
+      .bind("csd_multi_org_default", TEST_ORG.id, TEST_PROJECT.id, PRIVY_CONFIG_ID),
     getDb(env)
       .prepare(
         `INSERT INTO custody_wallets
@@ -227,16 +245,16 @@ describe("Custody multi-provider routes", () => {
       .prepare(
         `SELECT default_custody_config_id
          FROM custody_scope_defaults
-         WHERE organization_id = ? AND project_id IS NULL
+         WHERE organization_id = ? AND project_id = ?
          LIMIT 1`
       )
-      .bind(TEST_ORG.id)
+      .bind(TEST_ORG.id, TEST_PROJECT.id)
       .first<{ default_custody_config_id: string }>();
 
     expect(defaultPointer?.default_custody_config_id).toBe(PARA_CONFIG_ID);
   });
 
-  it("lists default-provider wallets by default and all wallets when includeAllProviders is enabled", async () => {
+  it("lists all provider wallets by default and can opt into default-provider-only results", async () => {
     const defaultRes = await app.request(
       "/v1/wallets",
       {
@@ -255,18 +273,22 @@ describe("Custody multi-provider routes", () => {
       };
     };
 
-    expect(defaultBody.data.wallets).toHaveLength(2);
-    expect(defaultBody.data.wallets.every((wallet) => wallet.provider === "privy")).toBe(true);
-    expect(defaultBody.data.wallets.every((wallet) => wallet.isDefaultProvider === true)).toBe(
-      true
+    expect(defaultBody.data.wallets).toHaveLength(4);
+    expect(new Set(defaultBody.data.wallets.map((wallet) => wallet.provider))).toEqual(
+      new Set(["privy", "para"])
     );
+    expect(
+      defaultBody.data.wallets
+        .filter((wallet) => wallet.isDefaultProvider)
+        .map((wallet) => wallet.provider)
+    ).toEqual(["privy", "privy"]);
 
-    const includeAllProvidersQuery = new URLSearchParams({
-      includeAllProviders: "true",
+    const defaultProviderOnlyQuery = new URLSearchParams({
+      includeAllProviders: "false",
     }).toString();
 
-    const allRes = await app.request(
-      `/v1/wallets?${includeAllProvidersQuery}`,
+    const defaultProviderOnlyRes = await app.request(
+      `/v1/wallets?${defaultProviderOnlyQuery}`,
       {
         method: "GET",
         headers: {
@@ -276,22 +298,20 @@ describe("Custody multi-provider routes", () => {
       env
     );
 
-    expect(allRes.status).toBe(200);
-    const allBody = (await allRes.json()) as {
+    expect(defaultProviderOnlyRes.status).toBe(200);
+    const defaultProviderOnlyBody = (await defaultProviderOnlyRes.json()) as {
       data: {
         wallets: Array<{ provider?: string; isDefaultProvider?: boolean; walletId: string }>;
       };
     };
 
-    expect(allBody.data.wallets).toHaveLength(4);
-    expect(new Set(allBody.data.wallets.map((wallet) => wallet.provider))).toEqual(
-      new Set(["privy", "para"])
-    );
+    expect(defaultProviderOnlyBody.data.wallets).toHaveLength(2);
     expect(
-      allBody.data.wallets
-        .filter((wallet) => wallet.isDefaultProvider)
-        .map((wallet) => wallet.provider)
-    ).toEqual(["privy", "privy"]);
+      defaultProviderOnlyBody.data.wallets.every((wallet) => wallet.provider === "privy")
+    ).toBe(true);
+    expect(
+      defaultProviderOnlyBody.data.wallets.every((wallet) => wallet.isDefaultProvider === true)
+    ).toBe(true);
   });
 
   it("returns active configs and defaultConfigId from /v1/wallets/configs", async () => {
@@ -341,7 +361,7 @@ describe("Custody multi-provider routes", () => {
         .bind(
           walletlessConfigId,
           TEST_ORG.id,
-          null,
+          TEST_PROJECT.id,
           "turnkey",
           "test-config",
           "sdp-custody-encryption-v1",
@@ -352,9 +372,9 @@ describe("Custody multi-provider routes", () => {
         .prepare(
           `UPDATE custody_scope_defaults
            SET default_custody_config_id = ?, updated_at = datetime('now')
-           WHERE organization_id = ? AND project_id IS NULL`
+           WHERE organization_id = ? AND project_id = ?`
         )
-        .bind(walletlessConfigId, TEST_ORG.id),
+        .bind(walletlessConfigId, TEST_ORG.id, TEST_PROJECT.id),
     ]);
 
     const res = await app.request(
@@ -395,7 +415,7 @@ describe("Custody multi-provider routes", () => {
         .bind(
           DFNS_CONFIG_ID,
           TEST_ORG.id,
-          null,
+          TEST_PROJECT.id,
           "dfns",
           "legacy-config",
           "sdp-custody-encryption-v1",
@@ -421,9 +441,9 @@ describe("Custody multi-provider routes", () => {
         .prepare(
           `UPDATE custody_scope_defaults
            SET default_custody_config_id = ?, updated_at = datetime('now')
-           WHERE organization_id = ? AND project_id IS NULL`
+           WHERE organization_id = ? AND project_id = ?`
         )
-        .bind(DFNS_CONFIG_ID, TEST_ORG.id),
+        .bind(DFNS_CONFIG_ID, TEST_ORG.id, TEST_PROJECT.id),
     ]);
 
     const res = await app.request(
@@ -484,10 +504,10 @@ describe("Custody multi-provider routes", () => {
       .prepare(
         `SELECT default_custody_config_id
          FROM custody_scope_defaults
-         WHERE organization_id = ? AND project_id IS NULL
+         WHERE organization_id = ? AND project_id = ?
          LIMIT 1`
       )
-      .bind(TEST_ORG.id)
+      .bind(TEST_ORG.id, TEST_PROJECT.id)
       .first<{ default_custody_config_id: string }>();
 
     expect(defaultPointer?.default_custody_config_id).toBe(PRIVY_CONFIG_ID);

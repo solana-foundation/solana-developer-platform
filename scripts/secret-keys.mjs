@@ -75,6 +75,9 @@ export const API_LOCAL_ENV_KEYS = [
   "KORA_RPC_URL",
   "KORA_API_KEY",
   "KORA_TIMEOUT_MS",
+  "MAGICBLOCK_PRIVATE_PAYMENTS_API_BASE_URL",
+  "MAGICBLOCK_PRIVATE_PAYMENTS_AUTH_TOKEN",
+  "MAGICBLOCK_PRIVATE_PAYMENTS_EPHEMERAL_RPC_URL",
   "MOONPAY_API_KEY",
   "MOONPAY_SECRET_KEY",
   "MOONPAY_ONRAMP_URL",
@@ -128,4 +131,10 @@ export const COMMITTED_WORKER_VAR_KEYS = new Set([
 
 export const CLOUDFLARE_SECRET_KEYS = API_LOCAL_ENV_KEYS.filter(
   (key) => !LOCAL_ONLY_API_ENV_KEYS.has(key) && !COMMITTED_WORKER_VAR_KEYS.has(key)
+);
+
+// Docker has no wrangler.toml, so COMMITTED_WORKER_VAR_KEYS must ship inside
+// the env file alongside true secrets.
+export const DOCKER_ENV_KEYS = API_LOCAL_ENV_KEYS.filter(
+  (key) => !LOCAL_ONLY_API_ENV_KEYS.has(key)
 );

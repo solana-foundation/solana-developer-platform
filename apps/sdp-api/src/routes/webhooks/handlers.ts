@@ -10,6 +10,7 @@ import {
   ClerkOrganizationsService,
 } from "@/services/clerk-organizations.service";
 import { type ClerkUser, ClerkUsersService } from "@/services/clerk-users.service";
+import { ProjectService } from "@/services/project.service";
 import { syncProviderAccessFromClerk } from "@/services/provider-availability.service";
 import type { Env } from "@/types/env";
 
@@ -531,6 +532,12 @@ async function upsertMembership(c: AppContext, data: Record<string, unknown>) {
     )
     .bind(memberId, organizationId, userId, role)
     .run();
+
+  const projectService = new ProjectService(getDb(c.env));
+  await Promise.all([
+    projectService.findOrCreateDefault(organizationId, "sandbox", userId),
+    projectService.findOrCreateDefault(organizationId, "production", userId),
+  ]);
 }
 
 async function deleteMembership(c: AppContext, data: Record<string, unknown>) {

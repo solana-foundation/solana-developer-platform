@@ -12,7 +12,7 @@ export const createProjectSchema = z.object({
     .regex(/^[a-z0-9-]+$/)
     .optional(),
   description: z.string().max(500).optional(),
-  environment: z.enum(["sandbox", "beta", "production"]).optional(),
+  environment: z.enum(["sandbox", "production"]).optional(),
   settings: z
     .object({
       rpcProvider: projectRpcProviderSchema.optional(),
@@ -39,7 +39,6 @@ export const createProjectSchema = z.object({
 export const updateProjectSchema = z.object({
   name: z.string().min(1).max(100).optional(),
   description: z.string().max(500).nullable().optional(),
-  environment: z.enum(["sandbox", "beta", "production"]).optional(),
   settings: z
     .object({
       rpcProvider: projectRpcProviderSchema.optional(),
