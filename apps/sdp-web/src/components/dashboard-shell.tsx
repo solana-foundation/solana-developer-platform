@@ -26,12 +26,13 @@ import PaymentsLoading from "@/app/dashboard/payments/loading";
 import WalletsLoading from "@/app/dashboard/wallets/loading";
 import { CounterpartyHeaderTabs } from "@/components/counterparty-header-tabs";
 import { IssuanceHeaderTabs } from "@/components/issuance-header-tabs";
-import { NetworkDebugPanel, NetworkDebugToggle } from "@/components/network-debug-panel";
+import { NetworkDebugPanel } from "@/components/network-debug-panel";
 import { SentryFeedbackWidget } from "@/components/sentry-feedback-widget";
 import { SentryUserContext } from "@/components/sentry-user-context";
 import { Badge } from "@/components/ui/badge";
 import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
+import { DASHBOARD_FEATURE_FLAGS } from "@/lib/dashboard-feature-flags";
 import { cn } from "@/lib/utils";
 
 type SubNavItem = {
@@ -69,11 +70,13 @@ const navSections: NavSection[] = [
         label: "Payments",
         href: "/dashboard/payments",
         icon: ArrowLeftRightIcon,
-        children: [
-          { label: "Counterparty", href: "/dashboard/payments/counterparty" },
-          { label: "Pay", href: "/dashboard/pay", disabled: true },
-          { label: "Deposit", href: "/dashboard/deposit", disabled: true },
-        ],
+        children: DASHBOARD_FEATURE_FLAGS.paymentsSubmenu
+          ? [
+              { label: "Counterparty", href: "/dashboard/payments/counterparty" },
+              { label: "Pay", href: "/dashboard/pay", disabled: true },
+              { label: "Deposit", href: "/dashboard/deposit", disabled: true },
+            ]
+          : [],
       },
       { label: "API keys", href: "/dashboard/api-keys", icon: KeyRoundIcon },
     ],
@@ -520,25 +523,6 @@ function DashboardSidebarContent({
             showTopSeparator={idx > 0}
           />
         ))}
-        <div className="space-y-2">
-          <p
-            className={cn(
-              "relative px-3 text-xs uppercase leading-normal tracking-wide",
-              isCollapsed ? "text-transparent" : "text-text-extra-low"
-            )}
-          >
-            Mode
-            {isCollapsed ? (
-              <span
-                aria-hidden="true"
-                className="pointer-events-none absolute top-1/2 right-3 left-3 h-px -translate-y-1/2 bg-border-medium"
-              />
-            ) : null}
-          </p>
-          <div className="space-y-0.5">
-            <NetworkDebugToggle collapsed={isCollapsed} />
-          </div>
-        </div>
       </div>
       <div className="space-y-0.5 px-3 pb-1">
         <SentryFeedbackWidget collapsed={isCollapsed} />
