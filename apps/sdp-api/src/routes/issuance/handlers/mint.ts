@@ -53,6 +53,18 @@ async function syncDestinationToOnChainAllowlist(opts: {
 }): Promise<boolean> {
   const listAddress = assertValidAddress(opts.ablListAddress, "ablListAddress");
 
+  // Refuse to silently reactivate a revoked entry. `addAllowlistEntry` (called
+  // below in both code paths) reactivates any non-active row, which would let
+  // a mint undo an operator's explicit revocation (KYC/compliance). The
+  // operator must re-add the address via the allowlist endpoint first.
+  const existingStatus = await opts.tokenService.getAllowlistEntryStatusByAddress(
+    opts.tokenId,
+    opts.destinationRaw
+  );
+  if (existingStatus === "revoked") {
+    throw new AppError("DESTINATION_REVOKED");
+  }
+
   if (await opts.mosaic.isWalletOnList(listAddress, opts.destination)) {
     try {
       await opts.tokenService.addAllowlistEntry({
@@ -151,7 +163,7 @@ export const prepareMint = async (c: AppContext) => {
     parsed.data.mint.amount
   );
 
-  const ablListAddress = getOnChainAllowlistMutationForMint(token, c.env.SOLANA_NETWORK);
+  const ablListAddress = getOnChainAllowlistMutationForMint(token);
   if (!ablListAddress) {
     const isOnControlList = await tokenService.isAddressAllowed(
       tokenId,
@@ -280,7 +292,7 @@ export const executeMint = async (c: AppContext) => {
     parsed.data.mint.amount
   );
 
-  const ablListAddress = getOnChainAllowlistMutationForMint(token, c.env.SOLANA_NETWORK);
+  const ablListAddress = getOnChainAllowlistMutationForMint(token);
   if (!ablListAddress) {
     const isOnControlList = await tokenService.isAddressAllowed(
       tokenId,

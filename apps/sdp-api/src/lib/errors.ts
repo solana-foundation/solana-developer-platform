@@ -27,6 +27,7 @@ export type ErrorCode =
   | "TOKEN_PAUSED"
   | "INVALID_TOKEN_AMOUNT"
   | "NOT_ON_TOKEN_ALLOWLIST"
+  | "DESTINATION_REVOKED"
   | "ON_TOKEN_BLOCKLIST"
   | "TOKEN_ACCOUNT_NOT_FOUND"
   | "INVALID_BURN_SOURCE"
@@ -78,6 +79,7 @@ const ERROR_STATUS_CODES: Record<ErrorCode, number> = {
   TOKEN_PAUSED: 400,
   INVALID_TOKEN_AMOUNT: 400,
   NOT_ON_TOKEN_ALLOWLIST: 403,
+  DESTINATION_REVOKED: 403,
   ON_TOKEN_BLOCKLIST: 403,
   TOKEN_ACCOUNT_NOT_FOUND: 400,
   INVALID_BURN_SOURCE: 400,
@@ -120,6 +122,8 @@ const DEFAULT_ERROR_MESSAGES: Record<ErrorCode, string> = {
   TOKEN_PAUSED: "Token operations are paused",
   INVALID_TOKEN_AMOUNT: "Token amount is invalid",
   NOT_ON_TOKEN_ALLOWLIST: "Address is not on the token allowlist",
+  DESTINATION_REVOKED:
+    "Destination address was revoked from the allowlist; re-add it explicitly before minting",
   ON_TOKEN_BLOCKLIST: "Address is on the token denylist",
   TOKEN_ACCOUNT_NOT_FOUND: "Token account not found for this mint",
   INVALID_BURN_SOURCE: "Burn source is not valid for this signer",

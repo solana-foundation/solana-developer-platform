@@ -30,10 +30,7 @@ export function getMosaicAclMode(token: TokenAccessControlShape): AclMode | unde
   return mode === "disabled" ? undefined : mode;
 }
 
-export function shouldEnableOnChainAcl(
-  token: TokenAccessControlShape,
-  _network: string | undefined
-): boolean {
+export function shouldEnableOnChainAcl(token: TokenAccessControlShape): boolean {
   return getTokenAccessControlMode(token) !== "disabled";
 }
 
@@ -48,12 +45,9 @@ export function shouldEnableOnChainAcl(
  * Callers prepend an `addWallet` sync to the on-chain list before invoking the mint
  * flow so the SDK's permissionless-thaw can succeed for a fresh destination.
  */
-export function getOnChainAllowlistMutationForMint(
-  token: TokenWithAblList,
-  network: string | undefined
-): string | null {
+export function getOnChainAllowlistMutationForMint(token: TokenWithAblList): string | null {
   if (getTokenAccessControlMode(token) !== "allowlist") return null;
-  if (!shouldEnableOnChainAcl(token, network)) return null;
+  if (!shouldEnableOnChainAcl(token)) return null;
   // Truthy check (not `??`) so an empty-string DB value is treated as "unset"
   // and we honor the documented null-when-no-list contract.
   return token.ablListAddress || null;

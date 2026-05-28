@@ -95,7 +95,7 @@ export const deployToken = async (c: AppContext) => {
   );
 
   // Deploy using Mosaic templates - handles ABL setup automatically
-  const enableAbl = shouldEnableOnChainAcl(token, c.env.SOLANA_NETWORK);
+  const enableAbl = shouldEnableOnChainAcl(token);
   const aclMode = getMosaicAclMode(token);
 
   try {
@@ -234,7 +234,7 @@ export const prepareDeploy = async (c: AppContext) => {
   // Create Mosaic service and prepare transaction
   const mosaic = createMosaicService(c.env, signer);
 
-  const enableAbl = shouldEnableOnChainAcl(token, c.env.SOLANA_NETWORK);
+  const enableAbl = shouldEnableOnChainAcl(token);
   const aclMode = getMosaicAclMode(token);
 
   const prepared = await mosaic.prepareCreateToken({

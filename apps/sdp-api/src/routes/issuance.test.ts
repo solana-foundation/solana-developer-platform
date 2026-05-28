@@ -3018,6 +3018,119 @@ describe("Issuance Routes", () => {
           mintToSpy.mockRestore();
         }
       });
+
+      it("rejects prepare mint when destination is a revoked allowlist entry", async () => {
+        await seedAblListAddress();
+
+        // Operator previously allowlisted and then revoked this address.
+        const tokenService = new TokenService(getDb(env));
+        const entry = await tokenService.addAllowlistEntry({
+          tokenId: allowlistTokenId,
+          address: freshDestination,
+          addedBy: TEST_PROJECT_API_KEY.id,
+        });
+        await tokenService.revokeAllowlistEntry(entry.id);
+
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSigner")
+          .mockResolvedValueOnce({ address: signerAddress } as never);
+        const isWalletOnListSpy = vi.spyOn(MosaicService.prototype, "isWalletOnList");
+        const addToListSpy = vi.spyOn(MosaicService.prototype, "addToList");
+        const prepareMintToSpy = vi.spyOn(MosaicService.prototype, "prepareMintTo");
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${allowlistTokenId}/mint/prepare`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({
+                mint: { destination: freshDestination, amount: "1" },
+              }),
+            },
+            env
+          );
+
+          expect(res.status).toBe(403);
+          const body = (await res.json()) as { error: { code: string } };
+          expect(body.error.code).toBe("DESTINATION_REVOKED");
+
+          // No on-chain or DB mutation happens — entry stays revoked, no
+          // sync attempts to silently reactivate it.
+          expect(isWalletOnListSpy).not.toHaveBeenCalled();
+          expect(addToListSpy).not.toHaveBeenCalled();
+          expect(prepareMintToSpy).not.toHaveBeenCalled();
+
+          const row = await getDb(env)
+            .prepare("SELECT status FROM token_allowlists WHERE id = ?")
+            .bind(entry.id)
+            .first<{ status: string }>();
+          expect(row?.status).toBe("revoked");
+        } finally {
+          createOrgSignerSpy.mockRestore();
+          isWalletOnListSpy.mockRestore();
+          addToListSpy.mockRestore();
+          prepareMintToSpy.mockRestore();
+        }
+      });
+
+      it("rejects execute mint when destination is a revoked allowlist entry", async () => {
+        await seedAblListAddress();
+
+        const tokenService = new TokenService(getDb(env));
+        const entry = await tokenService.addAllowlistEntry({
+          tokenId: allowlistTokenId,
+          address: freshDestination,
+          addedBy: TEST_PROJECT_API_KEY.id,
+        });
+        await tokenService.revokeAllowlistEntry(entry.id);
+
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSigner")
+          .mockResolvedValueOnce({ address: signerAddress } as never);
+        const isWalletOnListSpy = vi.spyOn(MosaicService.prototype, "isWalletOnList");
+        const addToListSpy = vi.spyOn(MosaicService.prototype, "addToList");
+        const mintToSpy = vi.spyOn(MosaicService.prototype, "mintTo");
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${allowlistTokenId}/mint`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({
+                mint: { destination: freshDestination, amount: "1" },
+              }),
+            },
+            env
+          );
+
+          expect(res.status).toBe(403);
+          const body = (await res.json()) as { error: { code: string } };
+          expect(body.error.code).toBe("DESTINATION_REVOKED");
+
+          expect(isWalletOnListSpy).not.toHaveBeenCalled();
+          expect(addToListSpy).not.toHaveBeenCalled();
+          expect(mintToSpy).not.toHaveBeenCalled();
+
+          const row = await getDb(env)
+            .prepare("SELECT status FROM token_allowlists WHERE id = ?")
+            .bind(entry.id)
+            .first<{ status: string }>();
+          expect(row?.status).toBe("revoked");
+        } finally {
+          createOrgSignerSpy.mockRestore();
+          isWalletOnListSpy.mockRestore();
+          addToListSpy.mockRestore();
+          mintToSpy.mockRestore();
+        }
+      });
     });
 
     it("rejects mint to denylisted address", async () => {

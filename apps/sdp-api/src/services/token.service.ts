@@ -1299,6 +1299,26 @@ export class TokenService {
   }
 
   /**
+   * Look up an allowlist entry's status by address, regardless of state.
+   * Returns `null` when no entry has ever existed (vs `"revoked"` when an
+   * operator has explicitly removed the address).
+   *
+   * Used by the mint sync to distinguish a fresh address (auto-add) from one
+   * the operator has revoked (must be re-added explicitly).
+   */
+  async getAllowlistEntryStatusByAddress(
+    tokenId: string,
+    address: string
+  ): Promise<"active" | "revoked" | null> {
+    const row = await this.db
+      .prepare("SELECT status FROM token_allowlists WHERE token_id = ? AND address = ?")
+      .bind(tokenId, address)
+      .first<{ status: "active" | "revoked" }>();
+
+    return row?.status ?? null;
+  }
+
+  /**
    * Revoke an allowlist entry
    */
   async revokeAllowlistEntry(entryId: string): Promise<void> {
