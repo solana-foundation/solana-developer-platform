@@ -36,6 +36,7 @@ export interface CreateCounterpartyAccountInput {
 
 export interface UpdateCounterpartyAccountInput {
   counterpartyAccountId: string;
+  counterpartyId: string;
   organizationId: string;
   projectId: string;
   label?: string | null;
@@ -45,6 +46,7 @@ export interface UpdateCounterpartyAccountInput {
 
 export interface ArchiveCounterpartyAccountInput {
   counterpartyAccountId: string;
+  counterpartyId: string;
   organizationId: string;
   projectId: string;
 }
@@ -80,6 +82,7 @@ export interface CounterpartyAccountsRepository {
   ): Promise<CounterpartyAccountRow | null>;
   getCounterpartyAccountById(params: {
     counterpartyAccountId: string;
+    counterpartyId: string;
     organizationId: string;
     projectId: string;
   }): Promise<CounterpartyAccountRow | null>;

@@ -95,7 +95,8 @@ export function createPostgresCounterpartyAccountsRepository(
                  details = COALESCE(?, details),
                  provider_account_data = COALESCE(?, provider_account_data),
                  updated_at = sdp_iso_now()
-           WHERE id = ?
+           WHERE counterparty_id = ?
+             AND id = ?
              AND organization_id = ?
              AND project_id = ?
              AND status = 'active'`
@@ -105,6 +106,7 @@ export function createPostgresCounterpartyAccountsRepository(
           input.label ?? null,
           input.details ?? null,
           input.providerAccountData ?? null,
+          input.counterpartyId,
           input.counterpartyAccountId,
           input.organizationId,
           input.projectId
@@ -128,12 +130,18 @@ export function createPostgresCounterpartyAccountsRepository(
           `UPDATE counterparty_accounts
              SET status = 'archived',
                  updated_at = sdp_iso_now()
-           WHERE id = ?
+           WHERE counterparty_id = ?
+             AND id = ?
              AND organization_id = ?
              AND project_id = ?
              AND status = 'active'`
         )
-        .bind(input.counterpartyAccountId, input.organizationId, input.projectId)
+        .bind(
+          input.counterpartyId,
+          input.counterpartyAccountId,
+          input.organizationId,
+          input.projectId
+        )
         .run();
 
       if (result === 0) {
@@ -151,12 +159,18 @@ export function createPostgresCounterpartyAccountsRepository(
       const row = await db
         .prepare(
           `SELECT * FROM counterparty_accounts
-             WHERE id = ?
+             WHERE counterparty_id = ?
+               AND id = ?
                AND organization_id = ?
                AND project_id = ?
                AND status = 'active'`
         )
-        .bind(params.counterpartyAccountId, params.organizationId, params.projectId)
+        .bind(
+          params.counterpartyId,
+          params.counterpartyAccountId,
+          params.organizationId,
+          params.projectId
+        )
         .first<Record<string, unknown>>();
       return row ? mapCounterpartyAccountRow(row) : null;
     },

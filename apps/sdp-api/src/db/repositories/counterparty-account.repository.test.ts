@@ -110,7 +110,7 @@ describe("CounterpartyAccountsRepository (postgres)", () => {
   });
 
   describe("getCounterpartyAccountById", () => {
-    it("returns the row when active", async () => {
+    it("returns the row when active and counterparty matches", async () => {
       const counterparty = await seedCounterparty();
       const account = await repo.createCounterpartyAccount({
         organizationId: TEST_ORG.id,
@@ -122,11 +122,31 @@ describe("CounterpartyAccountsRepository (postgres)", () => {
 
       const row = await repo.getCounterpartyAccountById({
         counterpartyAccountId: account?.id ?? "",
+        counterpartyId: counterparty.id,
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT_ID,
       });
       expect(row?.id).toBe(account?.id);
       expect(row?.label).toBe("Alice's Solana");
+    });
+
+    it("returns null when counterpartyId does not own the account (cross-counterparty defense)", async () => {
+      const cptyA = await seedCounterparty("ext_A");
+      const cptyB = await seedCounterparty("ext_B");
+      const account = await repo.createCounterpartyAccount({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: cptyA.id,
+        accountKind: "crypto_wallet",
+      });
+
+      const result = await repo.getCounterpartyAccountById({
+        counterpartyAccountId: account?.id ?? "",
+        counterpartyId: cptyB.id,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+      });
+      expect(result).toBeNull();
     });
 
     it("returns null for archived rows", async () => {
@@ -140,12 +160,14 @@ describe("CounterpartyAccountsRepository (postgres)", () => {
 
       await repo.archiveCounterpartyAccount({
         counterpartyAccountId: account?.id ?? "",
+        counterpartyId: counterparty.id,
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT_ID,
       });
 
       const result = await repo.getCounterpartyAccountById({
         counterpartyAccountId: account?.id ?? "",
+        counterpartyId: counterparty.id,
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT_ID,
       });
@@ -163,6 +185,7 @@ describe("CounterpartyAccountsRepository (postgres)", () => {
 
       const wrongProject = await repo.getCounterpartyAccountById({
         counterpartyAccountId: account?.id ?? "",
+        counterpartyId: counterparty.id,
         organizationId: TEST_ORG.id,
         projectId: "prj_does_not_exist",
       });
@@ -190,6 +213,7 @@ describe("CounterpartyAccountsRepository (postgres)", () => {
       });
       await repo.archiveCounterpartyAccount({
         counterpartyAccountId: first?.id ?? "",
+        counterpartyId: counterparty.id,
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT_ID,
       });
@@ -217,6 +241,7 @@ describe("CounterpartyAccountsRepository (postgres)", () => {
       });
       await repo.archiveCounterpartyAccount({
         counterpartyAccountId: first?.id ?? "",
+        counterpartyId: counterparty.id,
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT_ID,
       });
@@ -302,6 +327,7 @@ describe("CounterpartyAccountsRepository (postgres)", () => {
 
       const updated = await repo.updateCounterpartyAccount({
         counterpartyAccountId: account?.id ?? "",
+        counterpartyId: counterparty.id,
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT_ID,
         label: "new",
@@ -326,6 +352,7 @@ describe("CounterpartyAccountsRepository (postgres)", () => {
 
       const updated = await repo.updateCounterpartyAccount({
         counterpartyAccountId: account?.id ?? "",
+        counterpartyId: counterparty.id,
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT_ID,
         label: null,
@@ -345,6 +372,7 @@ describe("CounterpartyAccountsRepository (postgres)", () => {
 
       const updated = await repo.updateCounterpartyAccount({
         counterpartyAccountId: account?.id ?? "",
+        counterpartyId: counterparty.id,
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT_ID,
         details: { currency: "USD" },
@@ -362,17 +390,48 @@ describe("CounterpartyAccountsRepository (postgres)", () => {
       });
       await repo.archiveCounterpartyAccount({
         counterpartyAccountId: account?.id ?? "",
+        counterpartyId: counterparty.id,
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT_ID,
       });
 
       const result = await repo.updateCounterpartyAccount({
         counterpartyAccountId: account?.id ?? "",
+        counterpartyId: counterparty.id,
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT_ID,
         label: "should not stick",
       });
       expect(result).toBeNull();
+    });
+
+    it("returns null when counterpartyId doesn't own the account (cross-counterparty defense)", async () => {
+      const cptyA = await seedCounterparty("ext_A");
+      const cptyB = await seedCounterparty("ext_B");
+      const account = await repo.createCounterpartyAccount({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: cptyA.id,
+        accountKind: "bank_account",
+        label: "owned by A",
+      });
+
+      const result = await repo.updateCounterpartyAccount({
+        counterpartyAccountId: account?.id ?? "",
+        counterpartyId: cptyB.id,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        label: "spoofed by B",
+      });
+      expect(result).toBeNull();
+
+      const untouched = await repo.getCounterpartyAccountById({
+        counterpartyAccountId: account?.id ?? "",
+        counterpartyId: cptyA.id,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+      });
+      expect(untouched?.label).toBe("owned by A");
     });
   });
 
@@ -388,6 +447,7 @@ describe("CounterpartyAccountsRepository (postgres)", () => {
 
       const archived = await repo.archiveCounterpartyAccount({
         counterpartyAccountId: account?.id ?? "",
+        counterpartyId: counterparty.id,
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT_ID,
       });
@@ -404,15 +464,44 @@ describe("CounterpartyAccountsRepository (postgres)", () => {
       });
       await repo.archiveCounterpartyAccount({
         counterpartyAccountId: account?.id ?? "",
+        counterpartyId: counterparty.id,
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT_ID,
       });
       const second = await repo.archiveCounterpartyAccount({
         counterpartyAccountId: account?.id ?? "",
+        counterpartyId: counterparty.id,
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT_ID,
       });
       expect(second).toBeNull();
+    });
+
+    it("returns null when counterpartyId doesn't own the account (cross-counterparty defense)", async () => {
+      const cptyA = await seedCounterparty("ext_A");
+      const cptyB = await seedCounterparty("ext_B");
+      const account = await repo.createCounterpartyAccount({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: cptyA.id,
+        accountKind: "bank_account",
+      });
+
+      const spoofed = await repo.archiveCounterpartyAccount({
+        counterpartyAccountId: account?.id ?? "",
+        counterpartyId: cptyB.id,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+      });
+      expect(spoofed).toBeNull();
+
+      const stillActive = await repo.getCounterpartyAccountById({
+        counterpartyAccountId: account?.id ?? "",
+        counterpartyId: cptyA.id,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+      });
+      expect(stillActive?.status).toBe("active");
     });
   });
 });
