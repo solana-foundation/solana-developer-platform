@@ -7,6 +7,7 @@ import type {
 } from "@sdp/types";
 import type { Context } from "hono";
 import { getDb } from "@/db";
+import { requireProjectId } from "@/lib/auth";
 import { AppError, notFound } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import { ApiKeyService } from "@/services/api-key.service";
@@ -68,11 +69,11 @@ function resolveActor(c: AppContext): {
 }
 
 export const listApiKeys = async (c: AppContext) => {
-  const actor = resolveActor(c);
-  const orgId = actor.organizationId;
+  resolveActor(c);
+  const projectId = requireProjectId(c);
 
   const apiKeyService = new ApiKeyService(getDb(c.env));
-  const apiKeys = await apiKeyService.listForOrganization(orgId);
+  const apiKeys = await apiKeyService.listForProject(projectId);
 
   const response: ListApiKeysResponse = {
     apiKeys: apiKeys.map((key) => ({
@@ -108,7 +109,6 @@ export const createApiKey = async (c: AppContext) => {
     name,
     description,
     role = "api_developer",
-    environment = "sandbox",
     permissions,
     walletScope,
     allowedIps,
@@ -120,6 +120,8 @@ export const createApiKey = async (c: AppContext) => {
     walletLabel,
     walletPurpose,
   } = parsed.data;
+
+  const projectId = requireProjectId(c);
 
   const hasOrgAdminAccess =
     actor.permissions.includes("*") || actor.permissions.includes("org:admin");
@@ -162,7 +164,7 @@ export const createApiKey = async (c: AppContext) => {
       throw error;
     }
   } else {
-    await assertWalletBindingsInScope(getDb(c.env), orgId, null, resolvedWalletBindings);
+    await assertWalletBindingsInScope(getDb(c.env), orgId, projectId, resolvedWalletBindings);
   }
 
   const resolveCreatorFallback = async (): Promise<string | null> => {
@@ -210,13 +212,13 @@ export const createApiKey = async (c: AppContext) => {
   const apiKeyService = new ApiKeyService(getDb(c.env));
   const createdKey = await apiKeyService.createApiKey({
     organizationId: orgId,
+    projectId,
     createdByUserId: createdBy,
     createdByKeyId: actor.apiKeyId ?? undefined,
     name,
     description,
     role,
     permissions,
-    environment,
     allowedIps,
     expiresAt,
     signingWalletId: resolvedSigningWalletId,
@@ -236,7 +238,7 @@ export const createApiKey = async (c: AppContext) => {
     metadata: {
       name,
       role,
-      environment,
+      environment: createdKey.environment,
       walletScope: resolvedWalletBindings.length > 0 ? "selected" : "all",
       signingWalletId: resolvedSigningWalletId,
       signingWalletIds: resolvedWalletBindings.map((binding) => binding.walletId),
@@ -263,9 +265,10 @@ export const createApiKey = async (c: AppContext) => {
 export const getApiKey = async (c: AppContext) => {
   const { keyId } = c.req.param();
   const actor = resolveActor(c);
+  const projectId = requireProjectId(c);
 
   const apiKeyService = new ApiKeyService(getDb(c.env));
-  const key = await apiKeyService.getDetails(keyId, actor.organizationId);
+  const key = await apiKeyService.getDetails(keyId, actor.organizationId, projectId);
 
   if (!key) {
     throw notFound("API key");
@@ -299,6 +302,7 @@ export const getApiKey = async (c: AppContext) => {
 export const updateApiKey = async (c: AppContext) => {
   const { keyId } = c.req.param();
   const actor = resolveActor(c);
+  const projectId = requireProjectId(c);
 
   const body = await c.req.json();
   const parsed = apiKeyUpdateSchema.safeParse(body);
@@ -309,11 +313,13 @@ export const updateApiKey = async (c: AppContext) => {
     });
   }
 
-  // Verify key belongs to this organization
+  // Verify key belongs to this organization and the current project scope
   const existing = await getDb(c.env)
-    .prepare("SELECT id, key_hash, project_id FROM api_keys WHERE id = ? AND organization_id = ?")
-    .bind(keyId, actor.organizationId)
-    .first<{ id: string; key_hash: string; project_id: string | null }>();
+    .prepare(
+      "SELECT id, key_hash, project_id FROM api_keys WHERE id = ? AND organization_id = ? AND project_id = ?"
+    )
+    .bind(keyId, actor.organizationId, projectId)
+    .first<{ id: string; key_hash: string; project_id: string }>();
 
   if (!existing) {
     throw notFound("API key");
@@ -410,6 +416,7 @@ export const updateApiKey = async (c: AppContext) => {
 export const rotateApiKey = async (c: AppContext) => {
   const { keyId } = c.req.param();
   const actor = resolveActor(c);
+  const projectId = requireProjectId(c);
 
   // Prevent rotating the key being used
   if (actor.apiKeyId && keyId === actor.apiKeyId) {
@@ -431,6 +438,7 @@ export const rotateApiKey = async (c: AppContext) => {
   const rotation = await apiKeyService.rotateApiKey(
     keyId,
     actor.organizationId,
+    projectId,
     gracePeriodHours,
     c.env.API_KEY_PEPPER
   );
@@ -462,6 +470,7 @@ export const rotateApiKey = async (c: AppContext) => {
 export const revokeApiKey = async (c: AppContext) => {
   const { keyId } = c.req.param();
   const actor = resolveActor(c);
+  const projectId = requireProjectId(c);
 
   // Prevent revoking your own key
   if (actor.apiKeyId && keyId === actor.apiKeyId) {
@@ -478,9 +487,9 @@ export const revokeApiKey = async (c: AppContext) => {
 
   const existing = await getDb(c.env)
     .prepare(
-      "SELECT id, name, status, revoked_at FROM api_keys WHERE id = ? AND organization_id = ?"
+      "SELECT id, name, status, revoked_at FROM api_keys WHERE id = ? AND organization_id = ? AND project_id = ?"
     )
-    .bind(keyId, actor.organizationId)
+    .bind(keyId, actor.organizationId, projectId)
     .first<{ id: string; name: string; status: string; revoked_at: string | null }>();
 
   if (!existing) {
@@ -503,7 +512,7 @@ export const revokeApiKey = async (c: AppContext) => {
   }
 
   const apiKeyService = new ApiKeyService(getDb(c.env));
-  const revokedKey = await apiKeyService.revokeApiKey(keyId, actor.organizationId);
+  const revokedKey = await apiKeyService.revokeApiKey(keyId, actor.organizationId, projectId);
 
   if (!revokedKey) {
     throw notFound("API key");

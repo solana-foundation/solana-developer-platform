@@ -7,6 +7,7 @@ import {
   requestWithApiKey,
   resetIntegrationState,
   SOLANA_CONFIGURED,
+  TEST_PROJECT,
 } from "../helpers/integration";
 
 type CreateApiKeyResponse = {
@@ -68,7 +69,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Payments Wallet S
       body: JSON.stringify({
         name: `Wallet scope key ${Date.now()}`,
         role: "api_admin",
-        environment: "sandbox",
+        projectId: TEST_PROJECT.id,
         walletScope: "selected",
         signingWalletId: walletA.walletId,
         signingWalletIds: [walletA.walletId],

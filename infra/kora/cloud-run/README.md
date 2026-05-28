@@ -26,6 +26,7 @@ Every Kora instance used by SDP must allow the sRFC-37 and MagicBlock private tr
 - `TACLkU6CiCdkQN2MjoyDkVg2yAH9zkxiHDsiztQ52TP` — Token-ACL
 - `GATEzzqxhJnsWF6vHRsgtixxSB8PaQdcqGEVTEHWiULz` — ABL / GATE
 - `SPLxh1LVZzEkX99H6rqYizhytLWPZVV296zyYDPagv2` — MagicBlock private transfer program
+- `DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh` — MagicBlock delegation program
 
 This applies to the active devnet Kora surfaces:
 

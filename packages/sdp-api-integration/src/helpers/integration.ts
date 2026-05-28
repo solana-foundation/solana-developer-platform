@@ -31,7 +31,7 @@ import {
   setTransactionMessageLifetimeUsingBlockhash,
 } from "@solana/kit";
 import { getTransferSolInstruction } from "@solana-program/system";
-import { env } from "./env";
+import { env } from "#env-impl";
 
 const PRIVY_CONFIGURED = !!env.PRIVY_APP_ID && !!env.PRIVY_APP_SECRET;
 const SOLANA_CONFIGURED = !!env.SOLANA_RPC_URL && PRIVY_CONFIGURED;
@@ -158,8 +158,8 @@ export async function resetIntegrationState(
   await db
     .prepare(
       `INSERT OR REPLACE INTO api_keys
-       (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, environment, status)
-       VALUES (?, ?, ?, ?, 'Project Test Key', ?, ?, 'api_admin', '["*"]', 'sandbox', 'active')`
+       (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
+       VALUES (?, ?, ?, ?, 'Project Test Key', ?, ?, 'api_admin', '["*"]', 'active')`
     )
     .bind(
       TEST_PROJECT_API_KEY.id,

@@ -23,7 +23,7 @@ export interface ApiKeyListItem {
 }
 
 export interface ApiKeyDetails extends ApiKeyListItem {
-  projectId: string | null;
+  projectId: string;
   allowedIps: string[] | null;
   permissions: Permission[] | null;
   signingWalletId: string | null;
@@ -33,14 +33,13 @@ export interface ApiKeyDetails extends ApiKeyListItem {
 
 export interface CreateApiKeyInput {
   organizationId: string;
-  projectId?: string | null;
+  projectId: string;
   createdByKeyId?: string;
   createdByUserId?: string;
   name: string;
   description?: string | null;
   role: ApiKeyRole;
   permissions?: Permission[] | null;
-  environment: ApiKeyEnvironment;
   allowedIps?: string[] | null;
   expiresAt?: string | null;
   signingWalletId?: string | null;
@@ -91,7 +90,7 @@ interface ApiKeyListRow {
 }
 
 interface ApiKeyDetailsRow extends ApiKeyListRow {
-  project_id: string | null;
+  project_id: string;
   allowed_ips: string | null;
   permissions: string | null;
   signing_wallet_id: string | null;
@@ -102,29 +101,15 @@ interface ApiKeyDetailsRow extends ApiKeyListRow {
 export class ApiKeyService {
   constructor(private db: DatabaseClient) {}
 
-  async listForOrganization(organizationId: string): Promise<ApiKeyListItem[]> {
-    const result = await this.db
-      .prepare(
-        `SELECT id, name, description, key_prefix, role, environment, status,
-                last_used_at, expires_at, created_at
-         FROM api_keys
-         WHERE organization_id = ? AND status NOT IN ('revoked', 'deactivated')
-         ORDER BY created_at DESC`
-      )
-      .bind(organizationId)
-      .all<ApiKeyListRow>();
-
-    return result.results.map((row) => this.mapListRow(row));
-  }
-
   async listForProject(projectId: string): Promise<ApiKeyListItem[]> {
     const result = await this.db
       .prepare(
-        `SELECT id, name, description, key_prefix, role, environment, status,
-                last_used_at, expires_at, created_at
-         FROM api_keys
-         WHERE project_id = ? AND status NOT IN ('revoked', 'deactivated')
-         ORDER BY created_at DESC`
+        `SELECT ak.id, ak.name, ak.description, ak.key_prefix, ak.role, p.environment, ak.status,
+                ak.last_used_at, ak.expires_at, ak.created_at
+         FROM api_keys ak
+         JOIN projects p ON p.id = ak.project_id
+         WHERE ak.project_id = ? AND ak.status NOT IN ('revoked', 'deactivated')
+         ORDER BY ak.created_at DESC`
       )
       .bind(projectId)
       .all<ApiKeyListRow>();
@@ -132,16 +117,21 @@ export class ApiKeyService {
     return result.results.map((row) => this.mapListRow(row));
   }
 
-  async getDetails(keyId: string, organizationId: string): Promise<ApiKeyDetails | null> {
+  async getDetails(
+    keyId: string,
+    organizationId: string,
+    projectId: string
+  ): Promise<ApiKeyDetails | null> {
     const row = await this.db
       .prepare(
-        `SELECT id, name, description, key_prefix, role, environment, status,
-                project_id, allowed_ips, permissions, signing_wallet_id,
-                last_used_at, expires_at, rotated_from, rotation_deadline, created_at
-         FROM api_keys
-         WHERE id = ? AND organization_id = ?`
+        `SELECT ak.id, ak.name, ak.description, ak.key_prefix, ak.role, p.environment, ak.status,
+                ak.project_id, ak.allowed_ips, ak.permissions, ak.signing_wallet_id,
+                ak.last_used_at, ak.expires_at, ak.rotated_from, ak.rotation_deadline, ak.created_at
+         FROM api_keys ak
+         JOIN projects p ON p.id = ak.project_id
+         WHERE ak.id = ? AND ak.organization_id = ? AND ak.project_id = ?`
       )
-      .bind(keyId, organizationId)
+      .bind(keyId, organizationId, projectId)
       .first<ApiKeyDetailsRow>();
 
     if (!row) {
@@ -160,8 +150,17 @@ export class ApiKeyService {
   }
 
   async createApiKey(input: CreateApiKeyInput): Promise<CreateApiKeyResult> {
+    const project = await this.db
+      .prepare(`SELECT environment FROM projects WHERE id = ? AND organization_id = ?`)
+      .bind(input.projectId, input.organizationId)
+      .first<{ environment: ApiKeyEnvironment }>();
+
+    if (!project) {
+      throw new AppError("NOT_FOUND", "Project not found");
+    }
+
     const keyId = `key_${crypto.randomUUID()}`;
-    const { key, prefix } = createApiKeyMaterial(input.environment);
+    const { key, prefix } = createApiKeyMaterial(project.environment);
     const keyHash = await hashString(key, input.pepper);
 
     let createdBy = input.createdByUserId?.trim() || "";
@@ -187,14 +186,14 @@ export class ApiKeyService {
       await this.db
         .prepare(
           `INSERT INTO api_keys (
-          id, organization_id, project_id, created_by, name, description, key_prefix, key_hash,
-          role, permissions, environment, allowed_ips, signing_wallet_id, expires_at, status
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')`
+            id, organization_id, project_id, created_by, name, description, key_prefix, key_hash,
+            role, permissions, allowed_ips, signing_wallet_id, expires_at, status
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')`
         )
         .bind(
           keyId,
           input.organizationId,
-          input.projectId ?? null,
+          input.projectId,
           createdBy,
           input.name,
           input.description ?? null,
@@ -202,7 +201,6 @@ export class ApiKeyService {
           keyHash,
           input.role,
           input.permissions ? JSON.stringify(input.permissions) : null,
-          input.environment,
           input.allowedIps ? JSON.stringify(input.allowedIps) : null,
           input.signingWalletId ?? null,
           input.expiresAt ?? null
@@ -232,7 +230,7 @@ export class ApiKeyService {
       key,
       keyPrefix: prefix,
       role: input.role,
-      environment: input.environment,
+      environment: project.environment,
       expiresAt: input.expiresAt ?? null,
       createdAt: new Date().toISOString(),
       keyHash,
@@ -242,16 +240,19 @@ export class ApiKeyService {
   async rotateApiKey(
     keyId: string,
     organizationId: string,
+    projectId: string,
     gracePeriodHours: number,
     pepper?: string
   ): Promise<RotateApiKeyResult | null> {
     const existing = await this.db
       .prepare(
-        `SELECT id, name, description, key_hash, role, permissions, environment, project_id, allowed_ips, signing_wallet_id, created_by
-         FROM api_keys
-         WHERE id = ? AND organization_id = ? AND status = 'active'`
+        `SELECT ak.id, ak.name, ak.description, ak.key_hash, ak.role, ak.permissions,
+                p.environment, ak.project_id, ak.allowed_ips, ak.signing_wallet_id, ak.created_by
+         FROM api_keys ak
+         JOIN projects p ON p.id = ak.project_id
+         WHERE ak.id = ? AND ak.organization_id = ? AND ak.project_id = ? AND ak.status = 'active'`
       )
-      .bind(keyId, organizationId)
+      .bind(keyId, organizationId, projectId)
       .first<{
         id: string;
         name: string;
@@ -260,7 +261,7 @@ export class ApiKeyService {
         role: ApiKeyRole;
         permissions: string | null;
         environment: ApiKeyEnvironment;
-        project_id: string | null;
+        project_id: string;
         allowed_ips: string | null;
         signing_wallet_id: string | null;
         created_by: string;
@@ -281,8 +282,8 @@ export class ApiKeyService {
         .prepare(
           `INSERT INTO api_keys (
             id, organization_id, project_id, created_by, name, description, key_prefix, key_hash,
-            role, permissions, environment, allowed_ips, signing_wallet_id, rotated_from, status
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')`
+            role, permissions, allowed_ips, signing_wallet_id, rotated_from, status
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')`
         )
         .bind(
           newKeyId,
@@ -295,7 +296,6 @@ export class ApiKeyService {
           newKeyHash,
           existing.role,
           existing.permissions,
-          existing.environment,
           existing.allowed_ips,
           existing.signing_wallet_id,
           keyId
@@ -338,14 +338,17 @@ export class ApiKeyService {
 
   async revokeApiKey(
     keyId: string,
-    organizationId: string
+    organizationId: string,
+    projectId: string
   ): Promise<{
     keyHash: string;
     revokedAt: string;
   } | null> {
     const key = await this.db
-      .prepare("SELECT id, key_hash FROM api_keys WHERE id = ? AND organization_id = ?")
-      .bind(keyId, organizationId)
+      .prepare(
+        "SELECT id, key_hash FROM api_keys WHERE id = ? AND organization_id = ? AND project_id = ?"
+      )
+      .bind(keyId, organizationId, projectId)
       .first<{ id: string; key_hash: string }>();
 
     if (!key) {

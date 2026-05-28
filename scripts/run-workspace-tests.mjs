@@ -38,7 +38,9 @@ function loadLocalEnvFile(filePath) {
       continue;
     }
 
-    values[key] = rest.join("=");
+    const raw = rest.join("=");
+    const quoted = raw.match(/^(['"])(.*)\1$/);
+    values[key] = quoted ? quoted[2] : raw;
   }
 
   return values;

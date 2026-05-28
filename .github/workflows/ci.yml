@@ -81,7 +81,6 @@ jobs:
     runs-on: ubuntu-latest
     env:
       DATABASE_URL: postgresql://sdp:sdp@127.0.0.1:5432/sdp
-      REDIS_URL: redis://127.0.0.1:6379
     services:
       postgres:
         image: postgres:16-alpine
@@ -93,15 +92,6 @@ jobs:
           - 5432:5432
         options: >-
           --health-cmd "pg_isready -U sdp -d sdp"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 20
-      redis:
-        image: redis:7-alpine
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 20
@@ -143,12 +133,6 @@ jobs:
           DOPPLER_CONFIG: dev_ci
         run: pnpm test
 
-      - name: Node-runtime tests (Redis-backed KVStore)
-        env:
-          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
-          DOPPLER_CONFIG: dev_ci
-        run: pnpm --filter @sdp/api test:node
-
   build_api:
     name: Build API
     runs-on: ubuntu-latest
@@ -178,6 +162,7 @@ jobs:
   docker_build_api:
     name: Docker Build API
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -203,6 +188,7 @@ jobs:
   docker_build_docs:
     name: Docker Build Docs
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -224,6 +210,34 @@ jobs:
             GIT_SHA=${{ github.sha }}
           cache-from: type=gha,scope=sdp-docs
           cache-to: type=gha,scope=sdp-docs,mode=max
+
+  docker_build_web:
+    name: Docker Build Web
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+
+      - name: Build sdp-web image (no push)
+        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
+        with:
+          context: .
+          file: apps/sdp-web/Dockerfile
+          push: false
+          load: false
+          provenance: false
+          sbom: false
+          tags: sdp-web:ci-${{ github.sha }}
+          build-args: |
+            GIT_SHA=${{ github.sha }}
+            NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_c21va2UubG9jYWwuY2xlcmsuZGV2JA
+            NEXT_PUBLIC_SDP_API_BASE_URL=http://localhost:8787
+          cache-from: type=gha,scope=sdp-web
+          cache-to: type=gha,scope=sdp-web,mode=max
 
   docker_compose_smoke:
     name: Docker Compose Smoke

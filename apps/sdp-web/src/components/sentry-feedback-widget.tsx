@@ -3,8 +3,9 @@
 import * as Sentry from "@sentry/nextjs";
 import { MessageSquarePlus } from "lucide-react";
 import { useEffect, useRef } from "react";
+import { cn } from "@/lib/utils";
 
-export function SentryFeedbackWidget() {
+export function SentryFeedbackWidget({ collapsed = false }: { collapsed?: boolean }) {
   const ref = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -17,10 +18,15 @@ export function SentryFeedbackWidget() {
     <button
       ref={ref}
       type="button"
-      className="flex h-10 w-full items-center gap-3 rounded-[10px] px-3 text-[16px] leading-[24px] font-[inherit] text-[rgba(28,28,29,0.76)] transition-colors hover:bg-[rgba(28,28,29,0.06)] hover:text-[#1c1c1d]"
+      title={collapsed ? "Feedback" : undefined}
+      aria-label={collapsed ? "Feedback" : undefined}
+      className={cn(
+        "flex h-10 w-full items-center gap-3 rounded-[var(--button-radius-lg)] px-3 text-base text-text-medium transition-colors hover:bg-border-light hover:text-text-extra-high",
+        collapsed && "justify-center"
+      )}
     >
-      <MessageSquarePlus className="h-5 w-5" strokeWidth={1.9} />
-      <span>Feedback</span>
+      <MessageSquarePlus className="h-5 w-5 shrink-0" strokeWidth={1.9} />
+      {collapsed ? null : <span className="whitespace-nowrap">Feedback</span>}
     </button>
   );
 }

@@ -4,6 +4,7 @@
 
 import type { CachedApiKey } from "@sdp/types";
 import { TEST_ORG } from "./organizations";
+import { TEST_PROJECT } from "./tokens";
 
 export const TEST_API_KEY = {
   id: "key_test123456789",
@@ -14,7 +15,7 @@ export const TEST_API_KEY = {
 export const TEST_CACHED_API_KEY: CachedApiKey = {
   id: TEST_API_KEY.id,
   organizationId: TEST_ORG.id,
-  projectId: null,
+  projectId: TEST_PROJECT.id,
   role: "api_admin",
   permissions: ["*"],
   environment: "sandbox",

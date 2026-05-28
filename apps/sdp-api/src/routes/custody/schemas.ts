@@ -25,19 +25,16 @@ const custodyProviderSchema = z.enum(CUSTODY_PROVIDERS);
 
 export const initializeLocalSchema = z.object({
   provider: z.literal("local"),
-  projectId: z.string().optional(),
   walletLabel: z.string().max(100).optional(),
 });
 
 export const initializeFireblocksSchema = z.object({
   provider: z.literal("fireblocks"),
-  projectId: z.string().optional(),
   walletLabel: z.string().max(100).optional(),
 });
 
 export const initializePrivySchema = z.object({
   provider: z.literal("privy"),
-  projectId: z.string().optional(),
   apiBaseUrl: z.string().url().optional(),
   requestDelayMs: z.number().int().min(0).max(3000).optional(),
   walletLabel: z.string().max(100).optional(),
@@ -45,7 +42,6 @@ export const initializePrivySchema = z.object({
 
 export const initializeCoinbaseCdpSchema = z.object({
   provider: z.literal("coinbase_cdp"),
-  projectId: z.string().optional(),
   apiBaseUrl: z.string().url().optional(),
   network: z.enum(["solana", "solana-devnet"]).optional(),
   walletAddress: z.string().min(32).max(44).optional(),
@@ -58,7 +54,6 @@ export const initializeCoinbaseCdpSchema = z.object({
 
 export const initializeParaSchema = z.object({
   provider: z.literal("para"),
-  projectId: z.string().optional(),
   apiBaseUrl: z.string().url().optional(),
   requestDelayMs: z.number().int().min(0).max(3000).optional(),
   walletId: z.string().min(1).optional(),
@@ -67,7 +62,6 @@ export const initializeParaSchema = z.object({
 
 export const initializeTurnkeySchema = z.object({
   provider: z.literal("turnkey"),
-  projectId: z.string().optional(),
   apiBaseUrl: z.string().url().optional(),
   requestDelayMs: z.number().int().min(0).max(3000).optional(),
   privateKeyId: z.string().min(1).optional(),
@@ -76,7 +70,6 @@ export const initializeTurnkeySchema = z.object({
 
 export const initializeDfnsSchema = z.object({
   provider: z.literal("dfns"),
-  projectId: z.string().optional(),
   apiBaseUrl: z.string().url().optional(),
   network: z.enum(["Solana", "SolanaDevnet"]).optional(),
   walletId: z.string().min(1).optional(),
@@ -86,7 +79,6 @@ export const initializeDfnsSchema = z.object({
 
 export const initializeAnchorageSchema = z.object({
   provider: z.literal("anchorage"),
-  projectId: z.string().optional(),
   apiBaseUrl: z.string().url().optional(),
   walletId: z.string().min(1).optional(),
   walletLabel: z.string().max(100).optional(),
@@ -111,7 +103,6 @@ export type InitializeSigningRequest = z.infer<typeof initializeSigningSchema>;
 // ═══════════════════════════════════════════════════════════════════════════
 
 export const createWalletSchema = z.object({
-  projectId: z.string().optional(),
   provider: custodyProviderSchema.optional(),
   label: z.string().max(100).optional(),
   purpose: z
@@ -150,7 +141,6 @@ export type SwitchSigningRequest = z.infer<typeof switchSigningSchema>;
 // ═══════════════════════════════════════════════════════════════════════════
 
 export const setDefaultWalletSchema = z.object({
-  projectId: z.string().optional(),
   provider: custodyProviderSchema.optional(),
   walletId: z.string().min(1),
 });
@@ -162,7 +152,6 @@ export type SetDefaultWalletRequest = z.infer<typeof setDefaultWalletSchema>;
 // ═══════════════════════════════════════════════════════════════════════════
 
 export const deleteWalletSchema = z.object({
-  projectId: z.string().optional(),
   provider: custodyProviderSchema.optional(),
   walletId: z.string().min(1),
 });

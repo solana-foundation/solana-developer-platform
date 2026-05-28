@@ -23,6 +23,7 @@ const requiredPrograms = [
   ["TACLkU6CiCdkQN2MjoyDkVg2yAH9zkxiHDsiztQ52TP", "Token-ACL (sRFC-37)"],
   ["GATEzzqxhJnsWF6vHRsgtixxSB8PaQdcqGEVTEHWiULz", "ABL / GATE"],
   ["SPLxh1LVZzEkX99H6rqYizhytLWPZVV296zyYDPagv2", "MagicBlock private transfer"],
+  ["DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh", "MagicBlock delegation"],
 ];
 
 const response = JSON.parse(process.env.KORA_CONFIG_RESPONSE ?? "{}");

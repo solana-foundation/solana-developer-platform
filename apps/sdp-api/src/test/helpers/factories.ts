@@ -173,7 +173,7 @@ export function createApiKey(overrides: ApiKeyOverrides = {}): ApiKey {
 export interface CachedApiKeyOverrides {
   id?: string;
   organizationId?: string;
-  projectId?: string | null;
+  projectId?: string;
   role?: "api_admin" | "api_developer" | "api_readonly";
   permissions?: CachedApiKey["permissions"];
   environment?: "sandbox" | "production";
@@ -189,7 +189,7 @@ export function createCachedApiKey(overrides: CachedApiKeyOverrides = {}): Cache
   return {
     id: `key_factory_${n.toString().padStart(8, "0")}`,
     organizationId: `org_factory_${n.toString().padStart(8, "0")}`,
-    projectId: null,
+    projectId: `prj_factory_${n.toString().padStart(8, "0")}`,
     role: "api_admin",
     permissions: ["*"],
     environment: "sandbox",

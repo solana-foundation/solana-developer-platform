@@ -25,7 +25,7 @@ export const listAllowlist = async (c: AppContext) => {
     throw notFound("Token");
   }
 
-  if (auth?.projectId && token.projectId !== auth.projectId) {
+  if (token.projectId !== auth.projectId) {
     throw notFound("Token");
   }
 
@@ -61,7 +61,7 @@ export const addAllowlistEntry = async (c: AppContext) => {
     throw notFound("Token");
   }
 
-  if (auth?.projectId && token.projectId !== auth.projectId) {
+  if (token.projectId !== auth.projectId) {
     throw notFound("Token");
   }
 
@@ -142,7 +142,7 @@ export const removeAllowlistEntry = async (c: AppContext) => {
     throw notFound("Token");
   }
 
-  if (auth?.projectId && token.projectId !== auth.projectId) {
+  if (token.projectId !== auth.projectId) {
     throw notFound("Token");
   }
 
