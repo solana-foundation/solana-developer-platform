@@ -9,6 +9,8 @@ import {
   createTransactionMessage,
   generateKeyPairSigner,
   getBase64EncodedWireTransaction,
+  getCompiledTransactionMessageDecoder,
+  getTransactionDecoder,
   pipe,
   setTransactionMessageFeePayer,
   setTransactionMessageLifetimeUsingBlockhash,
@@ -87,6 +89,7 @@ const TEST_BVNK_WALLET_ID = "a:24122329329347:HsdJVhW:1";
 const TEST_BVNK_API_BASE_URL = "https://api.sandbox.bvnk.test";
 const TEST_MAGICBLOCK_API_BASE_URL = "https://payments.magicblock.test";
 const TEST_MAGICBLOCK_AUTH_TOKEN = "magicblock_auth_token";
+const TEST_MAGICBLOCK_SPONSOR_FEE_PAYER = "CrankS2fXgMGvQJ3VBrZmRfGrfogDY6pq5YcgkPEpSNf";
 const DEVNET_USDC_MINT = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
 const MOONPAY_PARAM_BASE_CURRENCY_AMOUNT = "baseCurrencyAmount";
 const MOONPAY_PARAM_EXTERNAL_CUSTOMER_ID = "externalCustomerId";
@@ -217,10 +220,12 @@ async function seedAuthAndWallet(): Promise<void> {
 }
 
 function buildMagicBlockTestTransactionBase64(params?: {
+  feePayer?: string;
   source?: string;
   destination?: string;
   additionalSigner?: string;
 }): string {
+  const feePayer = address(params?.feePayer ?? params?.source ?? TEST_SOLANA_ADDRESSES.wallet1);
   const source = address(params?.source ?? TEST_SOLANA_ADDRESSES.wallet1);
   const destination = address(params?.destination ?? TEST_SOLANA_ADDRESSES.wallet2);
   const instructions = [
@@ -243,7 +248,7 @@ function buildMagicBlockTestTransactionBase64(params?: {
 
   const message = pipe(
     createTransactionMessage({ version: 0 }),
-    (m) => setTransactionMessageFeePayer(source, m),
+    (m) => setTransactionMessageFeePayer(feePayer, m),
     (m) =>
       setTransactionMessageLifetimeUsingBlockhash(
         {
@@ -1950,6 +1955,44 @@ describe("Payments routes", () => {
       }
     });
 
+    it("rejects MagicBlock execution when gasless sponsorship is explicitly disabled", async () => {
+      const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+      try {
+        const res = await app.request(
+          "/v1/payments/transfers",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_API_KEY.raw}`,
+            },
+            body: JSON.stringify({
+              source: TEST_WALLET_ID,
+              destination: TEST_SOLANA_ADDRESSES.wallet2,
+              token: DEVNET_USDC_MINT,
+              amount: "1",
+              privateTransfer: {
+                provider: "magicblock",
+                magicBlock: {
+                  gasless: false,
+                },
+              },
+            }),
+          },
+          env
+        );
+
+        expect(res.status).toBe(400);
+        const body = (await res.json()) as { error: { code: string; message: string } };
+        expect(body.error.code).toBe("BAD_REQUEST");
+        expect(body.error.message).toContain("requires gasless transactions");
+        expect(fetchSpy).not.toHaveBeenCalled();
+      } finally {
+        fetchSpy.mockRestore();
+      }
+    });
+
     it("executes a MagicBlock private transfer that settles to base balance", async () => {
       env.MAGICBLOCK_PRIVATE_PAYMENTS_API_BASE_URL = TEST_MAGICBLOCK_API_BASE_URL;
       const sourceSigner = await generateKeyPairSigner();
@@ -2049,6 +2092,101 @@ describe("Payments routes", () => {
           split: 2,
           minDelayMs: "0",
           maxDelayMs: "1000",
+          gasless: true,
+        });
+      } finally {
+        fetchSpy.mockRestore();
+      }
+    });
+
+    it("replaces a MagicBlock gasless sponsor signer with Kora during execution", async () => {
+      env.MAGICBLOCK_PRIVATE_PAYMENTS_API_BASE_URL = TEST_MAGICBLOCK_API_BASE_URL;
+      const sourceSigner = await generateKeyPairSigner();
+      await updateSeededWalletPublicKey(sourceSigner.address);
+      createRpcMock.mockReturnValueOnce({
+        getTokenSupply: () => ({
+          send: async () => ({ value: { decimals: 6 } }),
+        }),
+      } as unknown as ReturnType<typeof solanaRpc.createRpc>);
+      createOrgSignerMock.mockResolvedValueOnce(sourceSigner);
+      const signAndSendMock = vi
+        .fn()
+        .mockResolvedValue(
+          "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy"
+        );
+      createFeePaymentAdapterMock.mockReturnValueOnce({
+        providerId: "mock",
+        getFeePayer: vi.fn().mockResolvedValue(TEST_KORA_FEE_PAYER),
+        signAsFeePayer: vi.fn(),
+        signAndSend: signAndSendMock,
+      } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            kind: "transfer",
+            version: "v0",
+            transactionBase64: buildMagicBlockTestTransactionBase64({
+              feePayer: TEST_MAGICBLOCK_SPONSOR_FEE_PAYER,
+              source: sourceSigner.address,
+            }),
+            sendTo: "base",
+            recentBlockhash: "EkSnNWid2cvwEVnVx9aBqawnmiCNiDgp3gUdkDPTKN1N",
+            lastValidBlockHeight: 123456,
+            instructionCount: 5,
+            requiredSigners: [TEST_MAGICBLOCK_SPONSOR_FEE_PAYER, sourceSigner.address],
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }
+        )
+      );
+
+      try {
+        const res = await app.request(
+          "/v1/payments/transfers",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_API_KEY.raw}`,
+            },
+            body: JSON.stringify({
+              source: TEST_WALLET_ID,
+              destination: TEST_SOLANA_ADDRESSES.wallet2,
+              token: DEVNET_USDC_MINT,
+              amount: "5",
+              privateTransfer: {
+                provider: "magicblock",
+                magicBlock: {},
+              },
+            }),
+          },
+          env
+        );
+
+        expect(res.status).toBe(200);
+        expect(signAndSendMock).toHaveBeenCalledTimes(1);
+        const [encodedTransaction] = signAndSendMock.mock.calls[0] ?? [];
+        const transaction = getTransactionDecoder().decode(encodedTransaction as Uint8Array);
+        const message = getCompiledTransactionMessageDecoder().decode(transaction.messageBytes);
+        expect(message.staticAccounts[0]).toBe(TEST_KORA_FEE_PAYER);
+        expect(message.staticAccounts[1]).toBe(sourceSigner.address);
+        expect(message.staticAccounts).not.toContain(TEST_MAGICBLOCK_SPONSOR_FEE_PAYER);
+        expect(Object.keys(transaction.signatures)).toContain(TEST_KORA_FEE_PAYER);
+        expect(Object.keys(transaction.signatures)).toContain(sourceSigner.address);
+        expect(Object.keys(transaction.signatures)).not.toContain(
+          TEST_MAGICBLOCK_SPONSOR_FEE_PAYER
+        );
+        const [, init] = fetchSpy.mock.calls[0] ?? [];
+        const providerPayload = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        expect(providerPayload).toMatchObject({
+          from: sourceSigner.address,
+          visibility: "private",
+          fromBalance: "base",
+          toBalance: "base",
+          gasless: true,
         });
       } finally {
         fetchSpy.mockRestore();
