@@ -1,4 +1,9 @@
-import type { CounterpartyEntityType, CounterpartyIdentity, CounterpartyStatus } from "@sdp/types";
+import type {
+  CounterpartyEntityType,
+  CounterpartyIdentity,
+  CounterpartyProviderData,
+  CounterpartyStatus,
+} from "@sdp/types";
 import type { RepositoryDbClient } from "./base";
 
 export function generateCounterpartyId(): string {
@@ -14,6 +19,7 @@ export interface CounterpartyRow {
   display_name: string;
   email: string;
   identity: CounterpartyIdentity;
+  provider_data: CounterpartyProviderData;
   status: CounterpartyStatus;
   created_by: string | null;
   created_at: string;
@@ -28,6 +34,7 @@ export interface CreateCounterpartyInput {
   displayName: string;
   email: string;
   identity: CounterpartyIdentity;
+  providerData?: CounterpartyProviderData;
   createdBy: string | null;
 }
 
@@ -40,6 +47,7 @@ export interface UpdateCounterpartyInput {
   displayName?: string;
   email?: string;
   identity?: CounterpartyIdentity;
+  providerData?: CounterpartyProviderData;
 }
 
 export interface ArchiveCounterpartyInput {

@@ -1,4 +1,9 @@
-import type { CounterpartyEntityType, CounterpartyIdentity, CounterpartyStatus } from "@sdp/types";
+import type {
+  CounterpartyEntityType,
+  CounterpartyIdentity,
+  CounterpartyProviderData,
+  CounterpartyStatus,
+} from "@sdp/types";
 import type { AppDb } from "@/db";
 import type {
   ArchiveCounterpartyInput,
@@ -21,6 +26,7 @@ function mapCounterpartyRow(row: Record<string, unknown>): CounterpartyRow {
     display_name: row.display_name as string,
     email: row.email as string,
     identity: row.identity as CounterpartyIdentity,
+    provider_data: row.provider_data as CounterpartyProviderData,
     status: row.status as CounterpartyStatus,
     created_by: row.created_by as string | null,
     created_at: row.created_at as string,
@@ -60,9 +66,10 @@ export function createPostgresCounterpartiesRepository(db: AppDb): Counterpartie
              display_name,
              email,
              identity,
+             provider_data,
              status,
              created_by
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)`
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, '{}'::jsonb), 'active', ?)`
         )
         .bind(
           id,
@@ -73,6 +80,7 @@ export function createPostgresCounterpartiesRepository(db: AppDb): Counterpartie
           input.displayName,
           input.email,
           input.identity,
+          input.providerData ?? null,
           input.createdBy
         )
         .run();
@@ -93,6 +101,7 @@ export function createPostgresCounterpartiesRepository(db: AppDb): Counterpartie
                  display_name = COALESCE(?, display_name),
                  email = COALESCE(?, email),
                  identity = COALESCE(?, identity),
+                 provider_data = COALESCE(?, provider_data),
                  updated_at = sdp_iso_now()
            WHERE id = ?
              AND organization_id = ?
@@ -106,6 +115,7 @@ export function createPostgresCounterpartiesRepository(db: AppDb): Counterpartie
           input.displayName ?? null,
           input.email ?? null,
           input.identity ?? null,
+          input.providerData ?? null,
           input.counterpartyId,
           input.organizationId,
           input.projectId
