@@ -21,6 +21,64 @@ import { buildIdempotencyMetadata } from "./idempotency";
 
 type AppContext = Context<{ Bindings: Env }>;
 
+type AllowlistInsertArgs = {
+  tokenId: string;
+  address: string;
+  addedBy: string;
+};
+
+/**
+ * Idempotently ensure a DB allowlist row exists for the destination.
+ *
+ * Used both when the wallet is already on-chain (just need the mirror) and
+ * after a successful on-chain add when we didn't own the original insert
+ * (closes the race where a parallel owner hard-deleted its row between our
+ * insert attempt and now). Swallows ADDRESS_ALREADY_ALLOWLISTED — anything
+ * else (including DESTINATION_REVOKED from a mid-flight operator revoke)
+ * bubbles up.
+ */
+async function ensureDbAllowlistRow(
+  tokenService: TokenService,
+  args: AllowlistInsertArgs
+): Promise<void> {
+  try {
+    await tokenService.addAllowlistEntryStrict(args);
+  } catch (error) {
+    if (!(error instanceof Error && error.message === "ADDRESS_ALREADY_ALLOWLISTED")) {
+      throw error;
+    }
+  }
+}
+
+/**
+ * Hard-delete a DB row we just created in this call after the on-chain add
+ * fails and on-chain membership is not confirmed. Hard-delete (not revoke)
+ * so a transient on-chain failure doesn't leave behind a `revoked` row that
+ * would trip the operator-revoked guard on every retry. Always throws —
+ * either the wrapped INTERNAL_ERROR on rollback failure or the original
+ * add-error otherwise.
+ */
+async function rollbackCreatedAllowlistEntry(
+  tokenService: TokenService,
+  entryId: string,
+  originalError: unknown
+): Promise<never> {
+  try {
+    await tokenService.deleteAllowlistEntry(entryId);
+  } catch (rollbackError) {
+    throw new AppError(
+      "INTERNAL_ERROR",
+      "Failed to roll back control-list entry after mint sync error",
+      {
+        originalError: originalError instanceof Error ? originalError.message : "Unknown add error",
+        restoreError:
+          rollbackError instanceof Error ? rollbackError.message : "Unknown rollback error",
+      }
+    );
+  }
+  throw originalError;
+}
+
 /**
  * Sync a destination wallet to the on-chain ABL list.
  *
@@ -52,6 +110,11 @@ async function syncDestinationToOnChainAllowlist(opts: {
   addedBy: string;
 }): Promise<boolean> {
   const listAddress = assertValidAddress(opts.ablListAddress, "ablListAddress");
+  const dbArgs: AllowlistInsertArgs = {
+    tokenId: opts.tokenId,
+    address: opts.destinationRaw,
+    addedBy: opts.addedBy,
+  };
 
   // Fast-path bail when the destination is already in the `revoked` state —
   // saves one RPC (`isWalletOnList`) on the common case. Race-safety against a
@@ -67,27 +130,13 @@ async function syncDestinationToOnChainAllowlist(opts: {
   }
 
   if (await opts.mosaic.isWalletOnList(listAddress, opts.destination)) {
-    try {
-      await opts.tokenService.addAllowlistEntryStrict({
-        tokenId: opts.tokenId,
-        address: opts.destinationRaw,
-        addedBy: opts.addedBy,
-      });
-    } catch (error) {
-      if (!(error instanceof Error && error.message === "ADDRESS_ALREADY_ALLOWLISTED")) {
-        throw error;
-      }
-    }
+    await ensureDbAllowlistRow(opts.tokenService, dbArgs);
     return false;
   }
 
   let createdEntryId: string | null = null;
   try {
-    const entry = await opts.tokenService.addAllowlistEntryStrict({
-      tokenId: opts.tokenId,
-      address: opts.destinationRaw,
-      addedBy: opts.addedBy,
-    });
+    const entry = await opts.tokenService.addAllowlistEntryStrict(dbArgs);
     createdEntryId = entry.id;
   } catch (error) {
     if (!(error instanceof Error && error.message === "ADDRESS_ALREADY_ALLOWLISTED")) {
@@ -110,25 +159,11 @@ async function syncDestinationToOnChainAllowlist(opts: {
     // transient RPC/confirmation error but the wallet is in fact on-chain).
     // If on-chain membership now holds, both layers are consistent — fall
     // through to the DB re-assert below.
-    if (!(await opts.mosaic.isWalletOnList(listAddress, opts.destination))) {
-      if (createdEntryId) {
-        // Hard-delete (not revoke) so a transient on-chain failure doesn't leave
-        // behind a `revoked` row — that would trip the operator-revoked guard
-        // above on every retry and permanently block this destination.
-        try {
-          await opts.tokenService.deleteAllowlistEntry(createdEntryId);
-        } catch (rollbackError) {
-          throw new AppError(
-            "INTERNAL_ERROR",
-            "Failed to roll back control-list entry after mint sync error",
-            {
-              originalError: error instanceof Error ? error.message : "Unknown add error",
-              restoreError:
-                rollbackError instanceof Error ? rollbackError.message : "Unknown rollback error",
-            }
-          );
-        }
-      }
+    if (await opts.mosaic.isWalletOnList(listAddress, opts.destination)) {
+      // fall through
+    } else if (createdEntryId) {
+      await rollbackCreatedAllowlistEntry(opts.tokenService, createdEntryId, error);
+    } else {
       throw error;
     }
   }
@@ -137,20 +172,9 @@ async function syncDestinationToOnChainAllowlist(opts: {
   // race: a parallel request that did own the row may have hard-deleted it
   // during its own rollback after our `addAllowlistEntryStrict` returned
   // ADDRESS_ALREADY_ALLOWLISTED. Without this re-assert, we'd end with the
-  // wallet on-chain but no DB mirror. Idempotent — ADDRESS_ALREADY_ALLOWLISTED
-  // here means the row is still present and both layers agree.
+  // wallet on-chain but no DB mirror.
   if (createdEntryId === null) {
-    try {
-      await opts.tokenService.addAllowlistEntryStrict({
-        tokenId: opts.tokenId,
-        address: opts.destinationRaw,
-        addedBy: opts.addedBy,
-      });
-    } catch (error) {
-      if (!(error instanceof Error && error.message === "ADDRESS_ALREADY_ALLOWLISTED")) {
-        throw error;
-      }
-    }
+    await ensureDbAllowlistRow(opts.tokenService, dbArgs);
   }
 
   return true;
