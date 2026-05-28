@@ -457,8 +457,11 @@ type MagicBlockProductOptions = Extract<
 >["magicBlock"];
 
 function buildMagicBlockProviderTransferOptions(
-  options: MagicBlockProductOptions
+  options: MagicBlockProductOptions,
+  overrides?: { gasless?: boolean }
 ): MagicBlockProviderTransferOptions {
+  const gasless = overrides?.gasless ?? options.gasless;
+
   return {
     ...(options.validator ? { validator: options.validator } : {}),
     ...(options.initIfMissing !== undefined ? { initIfMissing: options.initIfMissing } : {}),
@@ -472,7 +475,7 @@ function buildMagicBlockProviderTransferOptions(
     ...(options.maxDelayMs !== undefined ? { maxDelayMs: options.maxDelayMs } : {}),
     ...(options.clientRefId !== undefined ? { clientRefId: options.clientRefId } : {}),
     ...(options.split !== undefined ? { split: options.split } : {}),
-    ...(options.gasless !== undefined ? { gasless: options.gasless } : {}),
+    ...(gasless !== undefined ? { gasless } : {}),
     ...(options.legacy !== undefined ? { legacy: options.legacy } : {}),
   };
 }
@@ -505,6 +508,7 @@ async function prepareMagicBlockPrivateTransferForOperation(params: {
   operation: OutboundPaymentOperation;
   privateTransfer: PrivateTransferRequest;
   memo?: string;
+  forceGasless?: boolean;
 }): Promise<{
   prepared: PreparedTransferPayload;
   metadata: PreparedPrivateTransferMetadata;
@@ -541,17 +545,15 @@ async function prepareMagicBlockPrivateTransferForOperation(params: {
     mint: mintAddress,
     amount: Number(amountBaseUnits),
     memo,
-    options: buildMagicBlockProviderTransferOptions(privateTransfer.magicBlock),
+    options: buildMagicBlockProviderTransferOptions(privateTransfer.magicBlock, {
+      gasless: params.forceGasless ? true : undefined,
+    }),
   });
 
   return mapMagicBlockPreparedTransfer(magicBlockPrepared);
 }
 
-function addSponsoredFeePayerToPreparedTransaction(
-  serializedTx: string,
-  feePayer: Address,
-  requiredSigners: string[]
-) {
+function decodeMagicBlockPreparedTransaction(serializedTx: string) {
   const txBytes = Buffer.from(serializedTx, "base64");
   const transaction = getTransactionDecoder().decode(txBytes);
   const compiledMessage = getCompiledTransactionMessageDecoder().decode(transaction.messageBytes);
@@ -569,6 +571,18 @@ function addSponsoredFeePayerToPreparedTransaction(
     throw new AppError("PROVIDER_UNAVAILABLE", "MagicBlock transaction has no fee payer.");
   }
 
+  return { transaction, compiledMessage, existingFeePayer };
+}
+
+function addSponsoredFeePayerToPreparedTransaction(
+  serializedTx: string,
+  feePayer: Address,
+  requiredSigners: string[],
+  options?: { replaceExistingFeePayer?: boolean }
+) {
+  const { transaction, compiledMessage, existingFeePayer } =
+    decodeMagicBlockPreparedTransaction(serializedTx);
+
   if (existingFeePayer === feePayer) {
     return transaction;
   }
@@ -578,6 +592,30 @@ function addSponsoredFeePayerToPreparedTransaction(
       "PROVIDER_UNAVAILABLE",
       "MagicBlock transaction already includes the Kora fee payer in a non-fee-payer position."
     );
+  }
+
+  if (options?.replaceExistingFeePayer) {
+    const { [existingFeePayer]: _existingFeePayerSignature, ...remainingSignatures } =
+      transaction.signatures;
+    const sponsoredMessage = {
+      ...compiledMessage,
+      staticAccounts: [feePayer, ...compiledMessage.staticAccounts.slice(1)],
+    };
+
+    const messageBytes = getCompiledTransactionMessageEncoder().encode(
+      sponsoredMessage
+    ) as typeof transaction.messageBytes;
+    const signatures = {
+      [feePayer]: null,
+      ...remainingSignatures,
+    } as typeof transaction.signatures;
+
+    return {
+      messageBytes,
+      signatures: {
+        ...signatures,
+      },
+    };
   }
 
   const signerCount = compiledMessage.header.numSignerAccounts;
@@ -669,15 +707,21 @@ async function executePreparedPrivateTransfer(
   const walletsByAddress = new Map(wallets.map((wallet) => [wallet.publicKey, wallet]));
   const signerWallets = new Map<string, CustodyWallet>();
   const requiredSigners = [...new Set(metadata.magicBlock.requiredSigners)];
+  const existingFeePayer = decodeMagicBlockPreparedTransaction(serializedTx).existingFeePayer;
+  const shouldReplaceProviderFeePayer =
+    requiredSigners.includes(existingFeePayer) && !walletsByAddress.has(existingFeePayer);
+  const custodyRequiredSigners = shouldReplaceProviderFeePayer
+    ? requiredSigners.filter((signer) => signer !== existingFeePayer)
+    : requiredSigners;
 
-  for (const requiredSigner of requiredSigners) {
+  for (const requiredSigner of custodyRequiredSigners) {
     const wallet = walletsByAddress.get(requiredSigner);
     if (wallet) {
       signerWallets.set(wallet.publicKey, wallet);
     }
   }
 
-  const missingSignerCount = requiredSigners.length - signerWallets.size;
+  const missingSignerCount = custodyRequiredSigners.length - signerWallets.size;
   if (missingSignerCount > 0) {
     throw new AppError(
       "BAD_REQUEST",
@@ -707,7 +751,8 @@ async function executePreparedPrivateTransfer(
   const transaction = addSponsoredFeePayerToPreparedTransaction(
     serializedTx,
     feePayer,
-    requiredSigners
+    custodyRequiredSigners,
+    { replaceExistingFeePayer: shouldReplaceProviderFeePayer }
   );
   const signedTransaction =
     signers.length > 0
@@ -1572,6 +1617,7 @@ export async function createTransfer(c: AppContext) {
       operation,
       privateTransfer,
       memo: parsed.data.memo,
+      forceGasless: true,
     });
     const transferType: TransferType = "transfer_confidential";
     const transfer = await createTransferRecord(c, {
