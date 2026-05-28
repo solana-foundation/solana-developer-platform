@@ -110,32 +110,23 @@ describe("CounterpartyAccountsRepository (postgres)", () => {
   });
 
   describe("getCounterpartyAccountById", () => {
-    it("requires matching counterpartyId — returns null for wrong counterparty", async () => {
-      const cptyA = await seedCounterparty("ext_A");
-      const cptyB = await seedCounterparty("ext_B");
-
+    it("returns the row when active", async () => {
+      const counterparty = await seedCounterparty();
       const account = await repo.createCounterpartyAccount({
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT_ID,
-        counterpartyId: cptyA.id,
+        counterpartyId: counterparty.id,
         accountKind: "crypto_wallet",
+        label: "Alice's Solana",
       });
 
-      const wrong = await repo.getCounterpartyAccountById({
+      const row = await repo.getCounterpartyAccountById({
         counterpartyAccountId: account?.id ?? "",
-        counterpartyId: cptyB.id,
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT_ID,
       });
-      expect(wrong).toBeNull();
-
-      const right = await repo.getCounterpartyAccountById({
-        counterpartyAccountId: account?.id ?? "",
-        counterpartyId: cptyA.id,
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT_ID,
-      });
-      expect(right?.id).toBe(account?.id);
+      expect(row?.id).toBe(account?.id);
+      expect(row?.label).toBe("Alice's Solana");
     });
 
     it("returns null for archived rows", async () => {
@@ -155,11 +146,27 @@ describe("CounterpartyAccountsRepository (postgres)", () => {
 
       const result = await repo.getCounterpartyAccountById({
         counterpartyAccountId: account?.id ?? "",
-        counterpartyId: counterparty.id,
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT_ID,
       });
       expect(result).toBeNull();
+    });
+
+    it("returns null when org or project doesn't match (tenancy guard)", async () => {
+      const counterparty = await seedCounterparty();
+      const account = await repo.createCounterpartyAccount({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+        accountKind: "bank_account",
+      });
+
+      const wrongProject = await repo.getCounterpartyAccountById({
+        counterpartyAccountId: account?.id ?? "",
+        organizationId: TEST_ORG.id,
+        projectId: "prj_does_not_exist",
+      });
+      expect(wrongProject).toBeNull();
     });
   });
 

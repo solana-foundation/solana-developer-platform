@@ -80,7 +80,6 @@ export interface CounterpartyAccountsRepository {
   ): Promise<CounterpartyAccountRow | null>;
   getCounterpartyAccountById(params: {
     counterpartyAccountId: string;
-    counterpartyId: string;
     organizationId: string;
     projectId: string;
   }): Promise<CounterpartyAccountRow | null>;
