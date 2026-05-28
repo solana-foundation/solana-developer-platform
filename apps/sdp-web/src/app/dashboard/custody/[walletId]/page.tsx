@@ -5,6 +5,8 @@ import { notFound, redirect } from "next/navigation";
 import type { ReactNode } from "react";
 import {
   formatCustodyProviderName,
+  getCustodyProviderCategory,
+  getCustodyProviderEntry,
   isKnownCustodyProvider,
 } from "@/app/dashboard/custody/provider-catalog";
 import { WalletActionsMenu } from "@/app/dashboard/custody/wallet-actions-menu";
@@ -14,8 +16,10 @@ import {
 } from "@/app/dashboard/custody/wallet-activity.data";
 import { WalletActivitySection } from "@/app/dashboard/custody/wallet-activity-section";
 import { WalletAddressCopyButton } from "@/app/dashboard/custody/wallet-address-copy-button";
+import { WalletCategoryBadge } from "@/app/dashboard/custody/wallet-category-badge";
 import { formatPurpose, truncateMiddle } from "@/app/dashboard/custody/wallet-format-utils";
 import { WalletProviderMark } from "@/app/dashboard/custody/wallet-provider-mark";
+import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createSdpApiClient, type SdpApiClient } from "@/lib/sdp-api";
 import {
@@ -156,18 +160,23 @@ export default async function WalletDetailPage({
 
   const provider =
     wallet.provider && isKnownCustodyProvider(wallet.provider) ? wallet.provider : null;
+  const category = provider ? getCustodyProviderCategory(provider) : null;
+  const supportsSignerCheck = provider
+    ? getCustodyProviderEntry(provider).supportsSigning
+    : !wallet.provider;
   const balances =
     trackedBalancesResult.balances.length > 0 ? trackedBalancesResult.balances : [wallet.balance];
   const totalBalance = resolveTotalBalance(balances);
   const purposeLabel = formatPurpose(wallet.purpose);
 
   return (
-    <div className="w-full space-y-6 py-2">
+    <DashboardWorkspaceOverviewPanel className="space-y-6">
       <div className="flex justify-end">
         <WalletActionsMenu
           walletAddress={wallet.publicKey}
           walletId={wallet.walletId}
           walletLabel={wallet.label}
+          supportsSignerCheck={supportsSignerCheck}
           triggerMode="button"
           triggerLabel="Actions"
           triggerClassName="w-auto"
@@ -189,11 +198,14 @@ export default async function WalletDetailPage({
                   </p>
                 </div>
               </div>
-              {purposeLabel ? (
-                <span className="rounded-full bg-[rgba(28,28,29,0.08)] px-3 py-1.5 text-xs font-medium text-[#1c1c1d]">
-                  {purposeLabel}
-                </span>
-              ) : null}
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                {category ? <WalletCategoryBadge category={category} compact /> : null}
+                {purposeLabel ? (
+                  <span className="rounded-full bg-[rgba(28,28,29,0.08)] px-3 py-1.5 text-xs font-medium text-[#1c1c1d]">
+                    {purposeLabel}
+                  </span>
+                ) : null}
+              </div>
             </div>
 
             <div className="overflow-hidden rounded-2xl border border-[rgba(28,28,29,0.08)] bg-[rgba(28,28,29,0.03)]">
@@ -269,7 +281,7 @@ export default async function WalletDetailPage({
       </section>
 
       <WalletActivitySection walletId={resolvedWalletId} initialActivity={walletActivity} />
-    </div>
+    </DashboardWorkspaceOverviewPanel>
   );
 }
 

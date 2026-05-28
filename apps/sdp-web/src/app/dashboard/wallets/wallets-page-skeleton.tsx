@@ -1,4 +1,5 @@
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
+import { Button } from "@/components/ui/button";
 
 function SkeletonBlock({ className }: { className: string }) {
   return <div className={`animate-pulse rounded-[16px] bg-[rgba(28,28,29,0.1)] ${className}`} />;
@@ -79,7 +80,9 @@ export function WalletsPageSkeleton() {
   return (
     <DashboardWorkspaceOverviewPanel className="space-y-6">
       <div className="flex justify-end">
-        <SkeletonBlock className="h-10 w-32 rounded-[10px]" />
+        <Button type="button" disabled className="w-full lg:w-auto">
+          Create Wallet
+        </Button>
       </div>
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         {WALLET_CARD_SKELETON_IDS.map((id) => (

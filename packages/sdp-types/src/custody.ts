@@ -11,6 +11,65 @@ export const CUSTODY_PROVIDERS = [
 
 export type CustodyProvider = (typeof CUSTODY_PROVIDERS)[number];
 export type ManagedCustodyProvider = Exclude<CustodyProvider, "local">;
+export const FULL_SIGNING_CUSTODY_PROVIDERS = [
+  "fireblocks",
+  "privy",
+  "coinbase_cdp",
+  "para",
+  "turnkey",
+  "dfns",
+] as const;
+export type FullSigningCustodyProvider = (typeof FULL_SIGNING_CUSTODY_PROVIDERS)[number];
+
+export interface CustodyProviderCapabilities {
+  supportsSigning: boolean;
+  supportsAdditionalWalletCreation: boolean;
+  supportsWalletDeletion: boolean;
+}
+
+export const CUSTODY_PROVIDER_CAPABILITIES: Record<CustodyProvider, CustodyProviderCapabilities> = {
+  local: {
+    supportsSigning: true,
+    supportsAdditionalWalletCreation: false,
+    supportsWalletDeletion: false,
+  },
+  fireblocks: {
+    supportsSigning: true,
+    supportsAdditionalWalletCreation: true,
+    supportsWalletDeletion: false,
+  },
+  privy: {
+    supportsSigning: true,
+    supportsAdditionalWalletCreation: true,
+    supportsWalletDeletion: false,
+  },
+  coinbase_cdp: {
+    supportsSigning: true,
+    supportsAdditionalWalletCreation: true,
+    supportsWalletDeletion: false,
+  },
+  para: {
+    supportsSigning: true,
+    supportsAdditionalWalletCreation: true,
+    supportsWalletDeletion: false,
+  },
+  turnkey: {
+    supportsSigning: true,
+    supportsAdditionalWalletCreation: true,
+    supportsWalletDeletion: false,
+  },
+  dfns: {
+    supportsSigning: true,
+    supportsAdditionalWalletCreation: true,
+    supportsWalletDeletion: false,
+  },
+  anchorage: {
+    supportsSigning: false,
+    supportsAdditionalWalletCreation: true,
+    supportsWalletDeletion: true,
+  },
+};
+
 export type SolanaCustodyNetwork = "solana" | "solana-devnet";
 export type DfnsCustodyNetwork = "Solana" | "SolanaDevnet";
 export type CustodyWalletPurpose =

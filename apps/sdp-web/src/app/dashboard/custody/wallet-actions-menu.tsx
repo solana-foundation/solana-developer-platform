@@ -22,6 +22,7 @@ interface WalletActionsMenuProps {
   walletAddress: string;
   walletId: string;
   walletLabel: string | null;
+  supportsSignerCheck?: boolean;
   triggerLabel?: string;
   triggerMode?: "button" | "icon";
   triggerClassName?: string;
@@ -41,6 +42,7 @@ export function WalletActionsMenu({
   walletAddress,
   walletId,
   walletLabel,
+  supportsSignerCheck = true,
   triggerLabel = "Actions",
   triggerMode = "icon",
   triggerClassName,
@@ -48,6 +50,8 @@ export function WalletActionsMenu({
   const { dashboardAccess, sandboxProject } = useDashboardWorkspace();
   const [isBusy, startTransition] = useTransition();
   const resolvedWalletLabel = formatWalletLabel(walletLabel, walletAddress);
+  const canRunSignerCheck =
+    supportsSignerCheck && dashboardAccess.capabilities.canUseWalletSignerCheck;
 
   const runSignerCheck = () => {
     if (!sandboxProject) {
@@ -175,16 +179,15 @@ export function WalletActionsMenu({
         )}
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-52">
-        <DropdownMenuItem
-          onSelect={runSignerCheck}
-          disabled={isBusy || !dashboardAccess.capabilities.canUseWalletSignerCheck}
-        >
+        <DropdownMenuItem onSelect={runSignerCheck} disabled={isBusy || !canRunSignerCheck}>
           <ShieldCheck className="h-4 w-4" />
           {isBusy
             ? "Proving..."
-            : dashboardAccess.capabilities.canUseWalletSignerCheck
-              ? "Prove ownership"
-              : "Prove ownership (admin only)"}
+            : !supportsSignerCheck
+              ? "Prove ownership (not supported)"
+              : dashboardAccess.capabilities.canUseWalletSignerCheck
+                ? "Prove ownership"
+                : "Prove ownership (admin only)"}
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem onSelect={requestDevnetSol} disabled={isBusy}>

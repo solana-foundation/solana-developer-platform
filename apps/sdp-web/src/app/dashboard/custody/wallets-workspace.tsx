@@ -2,14 +2,13 @@
 
 import type { CustodyWalletSummary } from "@sdp/types";
 import dynamic from "next/dynamic";
-import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useEffect, useMemo } from "react";
 import { ApiPlaygroundShellSkeleton } from "@/components/api-playground-shell-skeleton";
 import { DashboardWorkspaceTabShell } from "@/components/dashboard-workspace-tab-shell";
-import { Button } from "@/components/ui/button";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { getStoredApiKeySecret } from "@/lib/playground-api-keys";
 import type { KnownCustodyProvider } from "./provider-catalog";
-import { WalletProvisionModal } from "./wallet-provision-modal";
 import { WalletsOverview } from "./wallets-overview";
 
 const WalletsPlayground = dynamic(
@@ -46,10 +45,9 @@ export function WalletsWorkspace({
   wallets,
   walletsError,
 }: WalletsWorkspaceProps) {
+  const router = useRouter();
   const { dashboardAccess, issuanceTab, selectedPlaygroundApiKeyId, setPlaygroundApiKeys } =
     useDashboardWorkspace();
-  const [isProvisionModalOpen, setIsProvisionModalOpen] = useState(false);
-  const [preferredProvider, setPreferredProvider] = useState<KnownCustodyProvider | null>(null);
   const isPlaygroundTab = issuanceTab === "playground";
 
   useEffect(() => {
@@ -65,7 +63,6 @@ export function WalletsWorkspace({
       void import("./wallets-playground");
     };
 
-    // biome-ignore lint/security/noSecrets: requestIdleCallback is a browser API, not a secret.
     if (typeof window !== "undefined" && "requestIdleCallback" in window) {
       const idleId = window.requestIdleCallback(preloadPlayground);
       return () => window.cancelIdleCallback(idleId);
@@ -93,36 +90,31 @@ export function WalletsWorkspace({
     return stored ?? "";
   }, [selectedPlaygroundApiKey, selectedPlaygroundApiKeyPrefix]);
 
-  const openProvisionModal = (provider: KnownCustodyProvider | null) => {
-    setPreferredProvider(provider);
-    setIsProvisionModalOpen(true);
+  const openWalletSetup = (provider: KnownCustodyProvider | null) => {
+    const params = new URLSearchParams();
+    if (provider) {
+      params.set("provider", provider);
+    }
+
+    const query = params.toString();
+    router.push(`/dashboard/wallets/setup${query ? `?${query}` : ""}`);
   };
 
   return (
     <div className="h-full min-h-0 w-full">
       <DashboardWorkspaceTabShell
+        disableOverviewInitialAnimation
         isPlaygroundTab={isPlaygroundTab}
         overviewClassName="space-y-6"
         overview={
-          <>
-            {wallets.length > 0 && dashboardAccess.capabilities.canManageCustody ? (
-              <div className="flex items-center justify-end">
-                <Button type="button" onClick={() => openProvisionModal(null)}>
-                  Create Wallet
-                </Button>
-              </div>
-            ) : null}
-
-            <WalletsOverview
-              connectedProviders={connectedProviders}
-              enabledProviders={enabledProviders}
-              configsError={configsError}
-              wallets={wallets}
-              walletsError={walletsError}
-              canManageCustody={dashboardAccess.capabilities.canManageCustody}
-              onCreateWallet={openProvisionModal}
-            />
-          </>
+          <WalletsOverview
+            enabledProviders={enabledProviders}
+            configsError={configsError}
+            wallets={wallets}
+            walletsError={walletsError}
+            canManageCustody={dashboardAccess.capabilities.canManageCustody}
+            onCreateWallet={openWalletSetup}
+          />
         }
         playground={
           <WalletsPlayground
@@ -141,16 +133,6 @@ export function WalletsWorkspace({
           />
         }
       />
-
-      {dashboardAccess.capabilities.canManageCustody ? (
-        <WalletProvisionModal
-          isOpen={isProvisionModalOpen}
-          onClose={() => setIsProvisionModalOpen(false)}
-          connectedProviders={connectedProviders}
-          enabledProviders={enabledProviders}
-          preferredProvider={preferredProvider}
-        />
-      ) : null}
     </div>
   );
 }

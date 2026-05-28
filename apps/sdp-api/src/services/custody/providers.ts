@@ -1,6 +1,15 @@
-/**
- * Canonical custody provider definitions and capability flags.
- */
+import {
+  CUSTODY_PROVIDER_CAPABILITIES,
+  type CustodyProvider as SharedCustodyProvider,
+} from "@sdp/types";
+
+export type {
+  CustodyProvider,
+  CustodyProviderCapabilities,
+  FullSigningCustodyProvider,
+} from "@sdp/types";
+export { FULL_SIGNING_CUSTODY_PROVIDERS } from "@sdp/types";
+export { CUSTODY_PROVIDER_CAPABILITIES };
 
 export const CUSTODY_PROVIDERS = [
   "fireblocks",
@@ -11,82 +20,16 @@ export const CUSTODY_PROVIDERS = [
   "dfns",
   "anchorage",
   "local",
-] as const;
+] as const satisfies readonly SharedCustodyProvider[];
 
-export type CustodyProvider = (typeof CUSTODY_PROVIDERS)[number];
-
-export const FULL_SIGNING_CUSTODY_PROVIDERS = [
-  "fireblocks",
-  "privy",
-  "coinbase_cdp",
-  "para",
-  "turnkey",
-  "dfns",
-] as const;
-
-export type FullSigningCustodyProvider = (typeof FULL_SIGNING_CUSTODY_PROVIDERS)[number];
-
-export interface CustodyProviderCapabilities {
-  canSign: boolean;
-  canCreateWallet: boolean;
-  canDeleteWallet: boolean;
+export function canProviderSign(provider: SharedCustodyProvider): boolean {
+  return CUSTODY_PROVIDER_CAPABILITIES[provider].supportsSigning;
 }
 
-export const CUSTODY_PROVIDER_CAPABILITIES: Record<CustodyProvider, CustodyProviderCapabilities> = {
-  fireblocks: {
-    canSign: true,
-    canCreateWallet: false,
-    canDeleteWallet: false,
-  },
-  privy: {
-    canSign: true,
-    canCreateWallet: true,
-    canDeleteWallet: false,
-  },
-  coinbase_cdp: {
-    canSign: true,
-    canCreateWallet: true,
-    canDeleteWallet: false,
-  },
-  para: {
-    canSign: true,
-    canCreateWallet: true,
-    canDeleteWallet: false,
-  },
-  turnkey: {
-    canSign: true,
-    canCreateWallet: true,
-    canDeleteWallet: false,
-  },
-  dfns: {
-    canSign: true,
-    canCreateWallet: true,
-    canDeleteWallet: false,
-  },
-  anchorage: {
-    canSign: false,
-    canCreateWallet: true,
-    canDeleteWallet: true,
-  },
-  local: {
-    canSign: true,
-    canCreateWallet: false,
-    canDeleteWallet: false,
-  },
-};
-
-export function isCustodyProvider(value: string): value is CustodyProvider {
-  return (CUSTODY_PROVIDERS as readonly string[]).includes(value);
+export function canProviderCreateWallet(provider: SharedCustodyProvider): boolean {
+  return CUSTODY_PROVIDER_CAPABILITIES[provider].supportsAdditionalWalletCreation;
 }
 
-export function canProviderSign(provider: CustodyProvider): boolean {
-  return CUSTODY_PROVIDER_CAPABILITIES[provider].canSign;
-}
-
-export function canProviderCreateWallet(provider: CustodyProvider): boolean {
-  return CUSTODY_PROVIDER_CAPABILITIES[provider].canCreateWallet;
-}
-
-export function canProviderDeleteWallet(provider: CustodyProvider): boolean {
-  return CUSTODY_PROVIDER_CAPABILITIES[provider].canDeleteWallet;
+export function canProviderDeleteWallet(provider: SharedCustodyProvider): boolean {
+  return CUSTODY_PROVIDER_CAPABILITIES[provider].supportsWalletDeletion;
 }

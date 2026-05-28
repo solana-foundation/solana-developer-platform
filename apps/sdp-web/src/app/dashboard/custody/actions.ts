@@ -210,7 +210,7 @@ async function createCustodyWalletForProvider(formData: FormData) {
   });
 }
 
-export type WalletProvisionActionResult =
+export type WalletSetupActionResult =
   | {
       status: "success";
     }
@@ -219,9 +219,9 @@ export type WalletProvisionActionResult =
       message: string;
     };
 
-export async function initializeCustodyModalAction(
+export async function initializeCustodySetupAction(
   formData: FormData
-): Promise<WalletProvisionActionResult> {
+): Promise<WalletSetupActionResult> {
   try {
     await initializeCustodyWallet(formData);
     revalidateWalletPaths();
@@ -234,9 +234,9 @@ export async function initializeCustodyModalAction(
   }
 }
 
-export async function createCustodyWalletModalAction(
+export async function createCustodySetupWalletAction(
   formData: FormData
-): Promise<WalletProvisionActionResult> {
+): Promise<WalletSetupActionResult> {
   try {
     await createCustodyWalletForProvider(formData);
     revalidateWalletPaths();

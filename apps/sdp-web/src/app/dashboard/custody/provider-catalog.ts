@@ -1,81 +1,139 @@
+import {
+  CUSTODY_PROVIDER_CAPABILITIES,
+  type CustodyProvider,
+  type CustodyProviderCapabilities,
+} from "@sdp/types";
+
 const DEFAULT_CUSTODY_CAPABILITIES = ["Issuance", "Transfers", "Compliance"] as const;
 
-export type KnownCustodyProvider =
-  | "local"
-  | "privy"
-  | "fireblocks"
-  | "coinbase_cdp"
-  | "para"
-  | "turnkey"
-  | "dfns"
-  | "anchorage";
+export const WALLET_PROVIDER_CATEGORIES = ["server", "institutional"] as const;
+export type WalletProviderCategory = (typeof WALLET_PROVIDER_CATEGORIES)[number];
+
+export const WALLET_PROVIDER_CATEGORY_DETAILS: Record<
+  WalletProviderCategory,
+  {
+    label: string;
+    description: string;
+  }
+> = {
+  server: {
+    label: "API",
+    description: "Wallet infrastructure for API-driven product, operations, and automated flows.",
+  },
+  institutional: {
+    label: "Institutional",
+    description: "Policy-based custody for treasury, settlement, and multi-party approval flows.",
+  },
+};
+
+export type KnownCustodyProvider = CustodyProvider;
 
 export interface CustodyProviderCatalogEntry {
   id: KnownCustodyProvider;
   label: string;
   description: string;
+  category: WalletProviderCategory;
   supportsAdditionalWallets: boolean;
+  supportsSigning: boolean;
   capabilities: readonly string[];
 }
 
-export const CUSTODY_PROVIDER_CATALOG: CustodyProviderCatalogEntry[] = [
-  {
+type CustodyProviderCatalogById = {
+  [Provider in KnownCustodyProvider]: CustodyProviderCatalogEntry & { id: Provider };
+};
+
+const CUSTODY_PROVIDER_CATALOG_BY_ID = {
+  local: {
     id: "local",
     label: "Local Signer",
     description: "Self-hosted Ed25519 keypair signer from CUSTODY_PRIVATE_KEY.",
-    supportsAdditionalWallets: false,
+    category: "server",
+    supportsAdditionalWallets: providerSupportsAdditionalWallets("local"),
+    supportsSigning: providerSupportsSigning("local"),
     capabilities: ["Issuance", "Transfers"],
   },
-  {
+  privy: {
     id: "privy",
     label: "Privy",
     description: "Hosted wallet infrastructure for API signing.",
-    supportsAdditionalWallets: true,
+    category: "server",
+    supportsAdditionalWallets: providerSupportsAdditionalWallets("privy"),
+    supportsSigning: providerSupportsSigning("privy"),
     capabilities: DEFAULT_CUSTODY_CAPABILITIES,
   },
-  {
+  fireblocks: {
     id: "fireblocks",
     label: "Fireblocks",
     description: "MPC custody with vault-based wallet controls.",
-    supportsAdditionalWallets: false,
+    category: "institutional",
+    supportsAdditionalWallets: providerSupportsAdditionalWallets("fireblocks"),
+    supportsSigning: providerSupportsSigning("fireblocks"),
     capabilities: DEFAULT_CUSTODY_CAPABILITIES,
   },
-  {
+  coinbase_cdp: {
     id: "coinbase_cdp",
     label: "Coinbase CDP",
     description: "Programmatic wallet provisioning through Coinbase CDP.",
-    supportsAdditionalWallets: true,
+    category: "server",
+    supportsAdditionalWallets: providerSupportsAdditionalWallets("coinbase_cdp"),
+    supportsSigning: providerSupportsSigning("coinbase_cdp"),
     capabilities: DEFAULT_CUSTODY_CAPABILITIES,
   },
-  {
+  para: {
     id: "para",
     label: "Para",
     description: "Embedded wallet custody for organization-level operations.",
-    supportsAdditionalWallets: true,
+    category: "server",
+    supportsAdditionalWallets: providerSupportsAdditionalWallets("para"),
+    supportsSigning: providerSupportsSigning("para"),
     capabilities: DEFAULT_CUSTODY_CAPABILITIES,
   },
-  {
+  turnkey: {
     id: "turnkey",
     label: "Turnkey",
     description: "Policy-based key custody for production signing workloads.",
-    supportsAdditionalWallets: true,
+    category: "server",
+    supportsAdditionalWallets: providerSupportsAdditionalWallets("turnkey"),
+    supportsSigning: providerSupportsSigning("turnkey"),
     capabilities: DEFAULT_CUSTODY_CAPABILITIES,
   },
-  {
+  dfns: {
     id: "dfns",
     label: "DFNS",
     description: "MPC wallet orchestration with secure API-driven signing.",
-    supportsAdditionalWallets: true,
+    category: "institutional",
+    supportsAdditionalWallets: providerSupportsAdditionalWallets("dfns"),
+    supportsSigning: providerSupportsSigning("dfns"),
     capabilities: DEFAULT_CUSTODY_CAPABILITIES,
   },
-  {
+  anchorage: {
     id: "anchorage",
     label: "Anchorage",
     description: "Institutional custody with wallet lifecycle management.",
-    supportsAdditionalWallets: true,
+    category: "institutional",
     capabilities: ["Transfers", "Compliance"],
+    supportsAdditionalWallets: providerSupportsAdditionalWallets("anchorage"),
+    supportsSigning: providerSupportsSigning("anchorage"),
   },
-];
+} satisfies CustodyProviderCatalogById;
+
+export const CUSTODY_PROVIDER_CATALOG: CustodyProviderCatalogEntry[] = Object.values(
+  CUSTODY_PROVIDER_CATALOG_BY_ID
+);
+
+function getSharedProviderCapabilities(
+  provider: KnownCustodyProvider
+): CustodyProviderCapabilities {
+  return CUSTODY_PROVIDER_CAPABILITIES[provider];
+}
+
+export function providerSupportsAdditionalWallets(provider: KnownCustodyProvider): boolean {
+  return getSharedProviderCapabilities(provider).supportsAdditionalWalletCreation;
+}
+
+export function providerSupportsSigning(provider: KnownCustodyProvider): boolean {
+  return getSharedProviderCapabilities(provider).supportsSigning;
+}
 
 const PROVIDER_LABELS = new Map(
   CUSTODY_PROVIDER_CATALOG.map((provider) => [provider.id, provider.label])
@@ -91,4 +149,20 @@ export function isKnownCustodyProvider(value: string): value is KnownCustodyProv
 
 export function formatCustodyProviderName(provider: string): string {
   return PROVIDER_LABELS.get(provider as KnownCustodyProvider) ?? provider;
+}
+
+export function getCustodyProviderEntry(
+  provider: KnownCustodyProvider
+): CustodyProviderCatalogEntry {
+  return CUSTODY_PROVIDER_CATALOG_BY_ID[provider];
+}
+
+export function getCustodyProviderCategory(provider: KnownCustodyProvider): WalletProviderCategory {
+  return getCustodyProviderEntry(provider).category;
+}
+
+export function getCustodyProvidersByCategory(
+  category: WalletProviderCategory
+): CustodyProviderCatalogEntry[] {
+  return CUSTODY_PROVIDER_CATALOG.filter((provider) => provider.category === category);
 }
