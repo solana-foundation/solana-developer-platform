@@ -106,6 +106,10 @@ for (const dir of targetDirs) {
 }
 
 if (unresolved.size > 0) {
+  // Remove the marker so the next restart retries injection instead of
+  // silently serving pages with raw __SDP_RT_*__ placeholders.
+  fs.closeSync(markerFd);
+  fs.unlinkSync(MARKER);
   console.error(
     `inject-public-env: no runtime value for ${[...unresolved].sort().join(", ")}; refusing to start with a broken bundle`
   );
