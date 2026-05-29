@@ -15,7 +15,10 @@ if (targetDirs.length === 0) {
 const MARKER = path.join(targetDirs[0], ".sdp-env-injected");
 let markerFd;
 try {
-  markerFd = fs.openSync(MARKER, fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_WRONLY);
+  markerFd = fs.openSync(
+    MARKER,
+    fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_WRONLY
+  );
 } catch (err) {
   if (err.code === "EEXIST") {
     console.log("inject-public-env: already applied (marker exists), skipping");
