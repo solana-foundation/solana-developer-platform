@@ -1,7 +1,7 @@
 "use client";
 
 import { useClerk, useOrganization, useOrganizationList } from "@clerk/nextjs";
-import { ChevronsUpDownIcon, PlusIcon, Settings2Icon } from "lucide-react";
+import { ChevronsUpDownIcon, LockIcon, PlusIcon, Settings2Icon } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -10,6 +10,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { cn } from "@/lib/utils";
 
@@ -115,14 +116,30 @@ export function WorkspaceSwitcher({ collapsed = false }: { collapsed?: boolean }
             ) : (
               projects.map((project) => {
                 const isActive = project.id === selectedProjectId;
+                const isProduction = project.environment === "production";
                 return (
                   <DropdownMenuItem
                     key={project.id}
+                    disabled={isProduction}
                     onSelect={() => selectProject(project.id)}
                     className="gap-2 text-xs"
                   >
                     <span className="min-w-0 flex-1 truncate">{project.name}</span>
-                    {isActive ? (
+                    {isProduction ? (
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span className="pointer-events-auto shrink-0 text-text-low">
+                              <LockIcon className="size-3.5" aria-label="Locked" />
+                            </span>
+                          </TooltipTrigger>
+                          <TooltipContent side="top" align="center">
+                            <span className="block">Only sandbox mode is supported for now.</span>
+                            <span className="block">Mainnet support coming soon.</span>
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    ) : isActive ? (
                       <span className="shrink-0 rounded-full bg-border-extra-light px-1.5 py-0.5 text-[10px] font-medium text-text-medium">
                         Current
                       </span>
