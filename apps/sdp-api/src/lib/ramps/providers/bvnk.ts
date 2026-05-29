@@ -53,31 +53,32 @@ export class BvnkRampClient implements RampProviderClient {
   readonly id = "bvnk";
 
   async _discoverRails({
+    env,
     fetchJson,
     writeDump,
   }: Parameters<RampProviderClient["_discoverRails"]>[0]) {
-    const sandboxBase = "https://api.sandbox.bvnk.com/";
+    const base = env.BVNK_RAMP_RAILS_API_BASE_URL?.trim() || "https://api.bvnk.com/";
     // biome-ignore lint/security/noSecrets: BVNK pagination query string, not a secret.
     const pageQuery = "?offset=0&max=1000";
 
     for (const request of [
       {
         path: `/api/currency/crypto${pageQuery}`,
-        dumpName: RAMP_RAIL_DUMPS.bvnk.cryptoSandboxAnon.name,
+        dumpName: RAMP_RAIL_DUMPS.bvnk.cryptoAnon.name,
       },
       {
         path: `/api/currency/fiat${pageQuery}`,
-        dumpName: RAMP_RAIL_DUMPS.bvnk.fiatSandboxAnon.name,
+        dumpName: RAMP_RAIL_DUMPS.bvnk.fiatAnon.name,
       },
       {
         path: `/api/currency/deposit${pageQuery}`,
-        dumpName: RAMP_RAIL_DUMPS.bvnk.depositSandboxAnon.name,
+        dumpName: RAMP_RAIL_DUMPS.bvnk.depositAnon.name,
       },
     ]) {
-      const url = new URL(request.path.replace(/^\//, ""), sandboxBase);
+      const url = new URL(request.path.replace(/^\//, ""), base);
       await writeDump(
         request.dumpName,
-        await fetchJson(this.id, `sandbox-anon ${request.path}`, url.toString(), {
+        await fetchJson(this.id, `anon ${request.path}`, url.toString(), {
           headers: {
             Accept: "application/json",
           },
@@ -88,9 +89,9 @@ export class BvnkRampClient implements RampProviderClient {
 
   async readRailSupport(readDump: RampDumpReader): Promise<ProviderRampSupport> {
     return extractSupport(
-      await readDump<readonly BvnkCurrencyEntry[]>(RAMP_RAIL_DUMPS.bvnk.depositSandboxAnon.file),
-      await readDump<readonly BvnkCurrencyEntry[]>(RAMP_RAIL_DUMPS.bvnk.fiatSandboxAnon.file),
-      await readDump<readonly BvnkCurrencyEntry[]>(RAMP_RAIL_DUMPS.bvnk.cryptoSandboxAnon.file)
+      await readDump<readonly BvnkCurrencyEntry[]>(RAMP_RAIL_DUMPS.bvnk.depositAnon.file),
+      await readDump<readonly BvnkCurrencyEntry[]>(RAMP_RAIL_DUMPS.bvnk.fiatAnon.file),
+      await readDump<readonly BvnkCurrencyEntry[]>(RAMP_RAIL_DUMPS.bvnk.cryptoAnon.file)
     );
   }
 }

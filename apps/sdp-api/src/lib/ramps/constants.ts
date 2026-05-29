@@ -2,22 +2,6 @@ function dumpFile<TName extends string>(name: TName): `${TName}.json` {
   return `${name}.json`;
 }
 
-export const LIGHTSPARK_EXCHANGE_RATE_SOURCES = [
-  "USD",
-  "EUR",
-  "GBP",
-  "USDC",
-  "USDT",
-  "SOL",
-  "BTC",
-] as const;
-
-export type LightsparkExchangeRateSource = (typeof LIGHTSPARK_EXCHANGE_RATE_SOURCES)[number];
-
-export function lightsparkExchangeRatesDumpName(source: LightsparkExchangeRateSource) {
-  return `lightspark/exchange-rates-${source}` as const;
-}
-
 export const RAMP_RAIL_DUMPS = {
   moonpay: {
     currencies: {
@@ -36,17 +20,17 @@ export const RAMP_RAIL_DUMPS = {
     },
   },
   bvnk: {
-    cryptoSandboxAnon: {
-      name: "bvnk/crypto__sandbox-anon",
-      file: dumpFile("bvnk/crypto__sandbox-anon"),
+    cryptoAnon: {
+      name: "bvnk/crypto__anon",
+      file: dumpFile("bvnk/crypto__anon"),
     },
-    fiatSandboxAnon: {
-      name: "bvnk/fiat__sandbox-anon",
-      file: dumpFile("bvnk/fiat__sandbox-anon"),
+    fiatAnon: {
+      name: "bvnk/fiat__anon",
+      file: dumpFile("bvnk/fiat__anon"),
     },
-    depositSandboxAnon: {
-      name: "bvnk/deposit__sandbox-anon",
-      file: dumpFile("bvnk/deposit__sandbox-anon"),
+    depositAnon: {
+      name: "bvnk/deposit__anon",
+      file: dumpFile("bvnk/deposit__anon"),
     },
   },
 } as const;

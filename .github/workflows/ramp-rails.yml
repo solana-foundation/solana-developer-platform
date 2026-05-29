@@ -3,7 +3,6 @@ name: Ramp Rails Drift
 permissions:
   contents: read
   issues: write
-  pull-requests: write
 
 on:
   pull_request_target:
@@ -12,20 +11,25 @@ jobs:
   ramp_rails_drift:
     name: Ramp Rails Drift
     runs-on: ubuntu-latest
+    if: github.event.pull_request.author_association == 'COLLABORATOR'
     steps:
       - name: Checkout trusted base
-        uses: actions/checkout@v6
+        # v6 pinned to an immutable commit because this workflow runs with PR write permissions.
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           ref: ${{ github.event.pull_request.base.sha }}
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v6
+        # v6 pinned to an immutable commit because this workflow runs with PR write permissions.
+        uses: pnpm/action-setup@ac6db6d3c1f721f886538a378a2d73e85697340a
         with:
           version: 10.16.0
 
       - name: Setup Node
-        uses: actions/setup-node@v6
+        # v6 pinned to an immutable commit because this workflow runs with PR write permissions.
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
         with:
           node-version: 22
           cache: pnpm
@@ -43,7 +47,8 @@ jobs:
           fi
 
       - name: Install Doppler CLI
-        uses: dopplerhq/cli-action@v4
+        # v4 pinned to an immutable commit because this workflow uses Doppler secrets.
+        uses: dopplerhq/cli-action@cdd4670c26c06688d7afe8ff3b76b1cac918f4da
 
       - name: Read PR generated support file
         env:
@@ -71,7 +76,8 @@ jobs:
         run: pnpm --filter @sdp/api rails:drift
 
       - name: Upsert drift PR comment
-        uses: actions/github-script@v8
+        # v8 pinned to an immutable commit because this workflow writes PR comments.
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
         env:
           HAS_CHANGES: ${{ steps.drift.outputs.has_changes }}
           COMMENT_PATH: ${{ steps.drift.outputs.comment_path }}
@@ -81,7 +87,7 @@ jobs:
             const marker = "<!-- sdp-ramp-rails-drift -->";
             const { owner, repo } = context.repo;
             const issue_number = context.payload.pull_request.number;
-            const comments = await github.rest.issues.listComments({
+            const comments = await github.paginate(github.rest.issues.listComments, {
               owner,
               repo,
               issue_number,

@@ -6,11 +6,7 @@ import {
   requireEnv,
   SOLANA_ASSET_TO_RAIL,
 } from "../common";
-import {
-  LIGHTSPARK_EXCHANGE_RATE_SOURCES,
-  lightsparkExchangeRatesDumpName,
-  RAMP_RAIL_DUMPS,
-} from "../constants";
+import { RAMP_RAIL_DUMPS } from "../constants";
 import type { ProviderRampSupport, RampDumpReader, RampProviderClient } from "../types";
 
 interface LightsparkSupportedCurrency {
@@ -70,14 +66,6 @@ export class LightsparkRampClient implements RampProviderClient {
       RAMP_RAIL_DUMPS.lightspark.config.name,
       await fetchJson(this.id, "GET /config", `${base}/config`, { headers })
     );
-
-    for (const source of LIGHTSPARK_EXCHANGE_RATE_SOURCES) {
-      const url = `${base}/exchange-rates?sourceCurrency=${source}`;
-      await writeDump(
-        lightsparkExchangeRatesDumpName(source),
-        await fetchJson(this.id, `GET /exchange-rates ${source}`, url, { headers })
-      );
-    }
   }
 
   async readRailSupport(readDump: RampDumpReader): Promise<ProviderRampSupport> {
