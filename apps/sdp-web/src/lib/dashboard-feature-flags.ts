@@ -1,3 +1,3 @@
 export const DASHBOARD_FEATURE_FLAGS = {
-  paymentsSubmenu: false,
+  paymentsV2: false,
 } as const;
