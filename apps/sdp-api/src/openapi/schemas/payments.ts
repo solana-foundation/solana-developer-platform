@@ -1,8 +1,10 @@
-import { RAMP_PROVIDERS } from "@sdp/types";
+import { OFFRAMP_CRYPTO_RAILS, ONRAMP_CRYPTO_RAILS, RAMP_PROVIDERS } from "@sdp/types";
 import {
   createTransferSchema as createTransferSchemaBase,
   executeOfframpSchema as executeOfframpSchemaBase,
   executeOnrampSchema as executeOnrampSchemaBase,
+  listOfframpCurrenciesQuerySchema as listOfframpCurrenciesQuerySchemaBase,
+  listOnrampCurrenciesQuerySchema as listOnrampCurrenciesQuerySchemaBase,
   listTransfersQuerySchema as listTransfersQuerySchemaBase,
   prepareTransferOptionsSchema as prepareTransferOptionsSchemaBase,
   prepareTransferSchema as prepareTransferSchemaBase,
@@ -614,6 +616,40 @@ export const paymentListTransfersQuerySchema = listTransfersQuerySchemaBase
   })
   .openapi({ description: "List transfers query parameters." });
 
+export const paymentOnrampCurrenciesQuerySchema = listOnrampCurrenciesQuerySchemaBase
+  .extend({
+    source: withOpenApi(listOnrampCurrenciesQuerySchemaBase.shape.source, {
+      description: "Optional fiat source currency filter.",
+      example: "USD",
+    }),
+    dest: withOpenApi(listOnrampCurrenciesQuerySchemaBase.shape.dest, {
+      description: "Optional Solana crypto rail destination filter.",
+      example: "usdc.solana",
+    }),
+    provider: withOpenApi(listOnrampCurrenciesQuerySchemaBase.shape.provider, {
+      description: "Optional ramp provider filter.",
+      example: "moonpay",
+    }),
+  })
+  .openapi({ description: "On-ramp currency support query parameters." });
+
+export const paymentOfframpCurrenciesQuerySchema = listOfframpCurrenciesQuerySchemaBase
+  .extend({
+    source: withOpenApi(listOfframpCurrenciesQuerySchemaBase.shape.source, {
+      description: "Optional Solana crypto rail source filter.",
+      example: "usdc.solana",
+    }),
+    dest: withOpenApi(listOfframpCurrenciesQuerySchemaBase.shape.dest, {
+      description: "Optional fiat destination currency filter.",
+      example: "USD",
+    }),
+    provider: withOpenApi(listOfframpCurrenciesQuerySchemaBase.shape.provider, {
+      description: "Optional ramp provider filter.",
+      example: "moonpay",
+    }),
+  })
+  .openapi({ description: "Off-ramp currency support query parameters." });
+
 const lightsparkRampPaymentInstructionSchema = z.object({
   provider: z.literal("lightspark").openapi({
     description: "Provider that produced this instruction.",
@@ -652,6 +688,82 @@ const lightsparkRampPaymentInstructionSchema = z.object({
 const rampPaymentInstructionSchema = z.discriminatedUnion("provider", [
   lightsparkRampPaymentInstructionSchema,
 ]);
+
+const onrampCurrencyPairSchema = z
+  .object({
+    source: z.string().openapi({ description: "Fiat source currency code.", example: "USD" }),
+    dest: z.enum(ONRAMP_CRYPTO_RAILS).openapi({
+      description: "Destination crypto rail.",
+      example: "usdc.solana",
+    }),
+    providers: z.array(z.enum(RAMP_PROVIDERS)).openapi({
+      description: "Providers that support this on-ramp pair.",
+      example: ["moonpay", "lightspark"],
+    }),
+  })
+  .openapi({ description: "Provider support for one fiat-to-crypto on-ramp pair." });
+
+const offrampCurrencyPairSchema = z
+  .object({
+    source: z.enum(OFFRAMP_CRYPTO_RAILS).openapi({
+      description: "Source crypto rail.",
+      example: "usdc.solana",
+    }),
+    dest: z.string().openapi({ description: "Fiat destination currency code.", example: "USD" }),
+    providers: z.array(z.enum(RAMP_PROVIDERS)).openapi({
+      description: "Providers that support this off-ramp pair.",
+      example: ["moonpay", "bvnk"],
+    }),
+  })
+  .openapi({ description: "Provider support for one crypto-to-fiat off-ramp pair." });
+
+export const onrampCurrenciesResponseSchema = z
+  .object({
+    currencies: z
+      .object({
+        sources: z.array(z.string()).openapi({
+          description: "Fiat source currencies with at least one supported on-ramp pair.",
+          example: ["USD", "EUR"],
+        }),
+        destinations: z.array(z.enum(ONRAMP_CRYPTO_RAILS)).openapi({
+          description: "Crypto rails considered for Solana on-ramp support.",
+          example: ["usdc.solana", "sol.solana"],
+        }),
+      })
+      .openapi({ description: "On-ramp currency option sets." }),
+    pairs: z.array(onrampCurrencyPairSchema).openapi({
+      description: "Supported fiat-to-crypto pairs and their providers.",
+    }),
+    supportHash: z.string().openapi({
+      description: "Deterministic hash of the generated ramp support matrix.",
+      example: "sha256:example",
+    }),
+  })
+  .openapi({ description: "On-ramp currency support response payload." });
+
+export const offrampCurrenciesResponseSchema = z
+  .object({
+    currencies: z
+      .object({
+        sources: z.array(z.enum(OFFRAMP_CRYPTO_RAILS)).openapi({
+          description: "Crypto rails with at least one supported off-ramp pair.",
+          example: ["usdc.solana", "sol.solana"],
+        }),
+        destinations: z.array(z.string()).openapi({
+          description: "Fiat destination currencies with at least one supported off-ramp pair.",
+          example: ["USD", "EUR"],
+        }),
+      })
+      .openapi({ description: "Off-ramp currency option sets." }),
+    pairs: z.array(offrampCurrencyPairSchema).openapi({
+      description: "Supported crypto-to-fiat pairs and their providers.",
+    }),
+    supportHash: z.string().openapi({
+      description: "Deterministic hash of the generated ramp support matrix.",
+      example: "sha256:example",
+    }),
+  })
+  .openapi({ description: "Off-ramp currency support response payload." });
 
 export const onrampExecutionSchema = z
   .object({

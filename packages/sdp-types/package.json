@@ -34,6 +34,21 @@
       "import": "./src/payments.ts",
       "default": "./src/payments.ts"
     },
+    "./payment-rails": {
+      "types": "./src/payment-rails.ts",
+      "import": "./src/payment-rails.ts",
+      "default": "./src/payment-rails.ts"
+    },
+    "./provider-access": {
+      "types": "./src/provider-access.ts",
+      "import": "./src/provider-access.ts",
+      "default": "./src/provider-access.ts"
+    },
+    "./generated/ramp-support": {
+      "types": "./src/generated/ramp-support.generated.ts",
+      "import": "./src/generated/ramp-support.generated.ts",
+      "default": "./src/generated/ramp-support.generated.ts"
+    },
     "./site": {
       "types": "./src/site.ts",
       "import": "./src/site.ts",

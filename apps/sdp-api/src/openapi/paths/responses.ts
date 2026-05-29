@@ -34,8 +34,10 @@ import {
   listProjectsResponseSchema,
   listSessionsResponseSchema,
   listTemplatesResponseSchema,
+  offrampCurrenciesResponseSchema,
   offrampExecutionResponseSchema,
   onboardingStatusResponseSchema,
+  onrampCurrenciesResponseSchema,
   onrampExecutionResponseSchema,
   organizationSchema,
   paginatedResponseSchema,
@@ -150,6 +152,8 @@ export const walletPolicyResponse = successResponseSchema(walletPolicyResponseSc
 export const prepareTransferResponse = successResponseSchema(prepareTransferResponseSchema);
 export const transferResponse = successResponseSchema(transferResponseSchema);
 export const transferListResponse = paginatedResponseSchema(transferSchema);
+export const onrampCurrenciesResponse = successResponseSchema(onrampCurrenciesResponseSchema);
+export const offrampCurrenciesResponse = successResponseSchema(offrampCurrenciesResponseSchema);
 export const onrampExecutionResponse = successResponseSchema(onrampExecutionResponseSchema);
 export const offrampExecutionResponse = successResponseSchema(offrampExecutionResponseSchema);
 export const sandboxTransferSimulationResponse = successResponseSchema(
