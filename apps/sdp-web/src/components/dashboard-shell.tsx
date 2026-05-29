@@ -371,9 +371,14 @@ function isItemActive(pathname: string, href: string): boolean {
     return pathname.startsWith("/dashboard/wallets") || pathname.startsWith("/dashboard/custody");
   }
   if (href === "/dashboard/payments") {
+    const isGatedPaymentsV2Route =
+      pathname.startsWith("/dashboard/payments/pay") ||
+      pathname.startsWith("/dashboard/payments/deposit");
+
     return (
       pathname.startsWith("/dashboard/payments") &&
-      !pathname.startsWith("/dashboard/payments/counterparty")
+      !pathname.startsWith("/dashboard/payments/counterparty") &&
+      (DASHBOARD_FEATURE_FLAGS.paymentsV2 || !isGatedPaymentsV2Route)
     );
   }
   return pathname === href || pathname.startsWith(`${href}/`);
