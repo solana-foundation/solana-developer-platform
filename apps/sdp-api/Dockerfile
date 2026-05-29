@@ -41,6 +41,9 @@ ENV NODE_ENV=production \
     HOSTNAME=0.0.0.0 \
     MIGRATIONS_DIR=/app/migrations
 
+# Pull security fixes not yet in the pinned base image digest.
+RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/*
+
 # UID/GID 1001 matches sdp-web so k8s securityContext is consistent.
 RUN groupadd --system --gid 1001 nodejs \
  && useradd --system --uid 1001 --gid nodejs sdp

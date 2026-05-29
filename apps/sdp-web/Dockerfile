@@ -121,6 +121,9 @@ ENV NODE_ENV=production \
     HOSTNAME=0.0.0.0 \
     NEXT_TELEMETRY_DISABLED=1
 
+# Pull security fixes not yet in the pinned base image digest.
+RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/*
+
 # Run as an unprivileged user. UID/GID 1001 matches the convention used by
 # the upstream Next.js Docker example to make k8s securityContext predictable.
 RUN groupadd --system --gid 1001 nodejs \
