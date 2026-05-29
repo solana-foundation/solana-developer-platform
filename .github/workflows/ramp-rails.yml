@@ -5,7 +5,7 @@ permissions:
   issues: write
 
 on:
-  pull_request_target:
+  pull_request:
 
 jobs:
   ramp_rails_drift:
@@ -13,11 +13,11 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event.pull_request.author_association == 'COLLABORATOR'
     steps:
-      - name: Checkout trusted base
+      - name: Checkout PR head
         # v6 pinned to an immutable commit because this workflow runs with PR write permissions.
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
-          ref: ${{ github.event.pull_request.base.sha }}
+          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -52,13 +52,10 @@ jobs:
 
       - name: Read PR generated support file
         env:
-          HEAD_REPO_URL: ${{ github.event.pull_request.head.repo.clone_url }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           CANDIDATE_PATH: ${{ github.workspace }}/apps/sdp-api/.ramp-rails/ramp-support.pr.generated.ts
         run: |
           mkdir -p "$(dirname "${CANDIDATE_PATH}")"
-          git fetch --no-tags --depth=1 "${HEAD_REPO_URL}" "${HEAD_SHA}"
-          if git show FETCH_HEAD:packages/sdp-types/src/generated/ramp-support.generated.ts > "${CANDIDATE_PATH}"; then
+          if git show HEAD:packages/sdp-types/src/generated/ramp-support.generated.ts > "${CANDIDATE_PATH}"; then
             echo "RAMP_RAILS_CANDIDATE_GENERATED_PATH=${CANDIDATE_PATH}" >> "${GITHUB_ENV}"
           else
             echo "RAMP_RAILS_CANDIDATE_GENERATED_PATH=${CANDIDATE_PATH}" >> "${GITHUB_ENV}"
@@ -73,6 +70,8 @@ jobs:
 
       - name: Build drift comment
         id: drift
+        env:
+          RAMP_RAILS_BASE_REF: ${{ github.event.pull_request.base.sha }}
         run: pnpm --filter @sdp/api rails:drift
 
       - name: Upsert drift PR comment
