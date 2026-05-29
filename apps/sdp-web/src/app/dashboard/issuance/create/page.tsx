@@ -18,7 +18,9 @@ export default async function CreateTokenPage() {
   const signerWalletsResult = await fetchPaymentsWallets(apiClient.request, { view: "summary" });
 
   const solanaNetwork = process.env.NEXT_PUBLIC_SOLANA_NETWORK ?? "devnet";
-  const isDevnet = solanaNetwork !== "mainnet-beta";
+  // Confidential transfers are devnet-only on the API (SOLANA_NETWORK === "devnet"),
+  // so keep this gate identical to avoid showing a toggle that 400s on submit.
+  const isDevnet = solanaNetwork === "devnet";
 
   return (
     <CreateTokenFlow
