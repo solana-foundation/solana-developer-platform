@@ -127,11 +127,7 @@ describe("projectContextMiddleware", () => {
   it("no longer accepts the dropped ?projectId= query fallback and 400s without the header", async () => {
     const app = buildApp((c) => c.set("session", session));
 
-    const res = await app.request(
-      `/probe?projectId=${MEMBER_PROJECT_ID}`,
-      {},
-      env
-    );
+    const res = await app.request(`/probe?projectId=${MEMBER_PROJECT_ID}`, {}, env);
 
     expect(res.status).toBe(400);
     const body = (await res.json()) as { error: { code: string; message: string } };
@@ -166,7 +162,11 @@ describe("projectContextMiddleware", () => {
   it("returns 401 when neither API key nor session is present", async () => {
     const app = buildApp(() => {});
 
-    const res = await app.request("/probe", { headers: { "x-project-id": MEMBER_PROJECT_ID } }, env);
+    const res = await app.request(
+      "/probe",
+      { headers: { "x-project-id": MEMBER_PROJECT_ID } },
+      env
+    );
 
     expect(res.status).toBe(401);
   });
