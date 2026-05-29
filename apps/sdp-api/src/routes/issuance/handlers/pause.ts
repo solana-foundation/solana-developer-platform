@@ -1,7 +1,6 @@
 import { MINT_ALREADY_PAUSED_ERROR, MINT_NOT_PAUSED_ERROR } from "@solana/mosaic-sdk";
 import type { Context } from "hono";
 import { getDb } from "@/db";
-import { getAuth } from "@/lib/auth";
 import { AppError, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { assertValidAddress } from "@/lib/solana";
@@ -11,6 +10,7 @@ import { createMosaicService } from "@/services/mosaic";
 import { createOrgSigner } from "@/services/solana";
 import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
+import { requireProjectScope } from "../helpers";
 import { pauseTokenSchema } from "../schemas";
 import { buildIdempotencyMetadata } from "./idempotency";
 
@@ -26,7 +26,7 @@ const resolvePauseAuthority = (token: TokenRecord): string | null => {
 
 export const pauseToken = async (c: AppContext) => {
   const { tokenId } = c.req.param();
-  const auth = getAuth(c);
+  const { auth, projectId, orgId } = requireProjectScope(c);
 
   const body = await c.req.json();
   const parsed = pauseTokenSchema.safeParse(body);
@@ -38,13 +38,13 @@ export const pauseToken = async (c: AppContext) => {
   }
 
   const tokenService = new TokenService(getDb(c.env));
-  const token = await tokenService.getToken(tokenId);
+  const token = await tokenService.getToken({
+    tokenId,
+    organizationId: orgId,
+    projectId,
+  });
 
-  if (!token || token.organizationId !== auth?.organizationId) {
-    throw notFound("Token");
-  }
-
-  if (token.projectId !== auth.projectId) {
+  if (!token) {
     throw notFound("Token");
   }
 
@@ -147,7 +147,7 @@ export const pauseToken = async (c: AppContext) => {
 
 export const unpauseToken = async (c: AppContext) => {
   const { tokenId } = c.req.param();
-  const auth = getAuth(c);
+  const { auth, projectId, orgId } = requireProjectScope(c);
 
   const body = await c.req.json();
   const parsed = pauseTokenSchema.safeParse(body);
@@ -159,13 +159,13 @@ export const unpauseToken = async (c: AppContext) => {
   }
 
   const tokenService = new TokenService(getDb(c.env));
-  const token = await tokenService.getToken(tokenId);
+  const token = await tokenService.getToken({
+    tokenId,
+    organizationId: orgId,
+    projectId,
+  });
 
-  if (!token || token.organizationId !== auth?.organizationId) {
-    throw notFound("Token");
-  }
-
-  if (token.projectId !== auth.projectId) {
+  if (!token) {
     throw notFound("Token");
   }
 

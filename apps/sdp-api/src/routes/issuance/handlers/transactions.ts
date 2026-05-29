@@ -20,6 +20,7 @@ import {
 import { createSigningService } from "@/services/domain/signing.service";
 import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
+import { requireProjectScope } from "../helpers";
 
 type AppContext = Context<{ Bindings: Env }>;
 
@@ -212,16 +213,16 @@ async function resolveWalletTransactionScope(
 
 export const listTokenTransactions = async (c: AppContext) => {
   const { tokenId } = c.req.param();
-  const auth = getAuth(c);
+  const { projectId, orgId } = requireProjectScope(c);
 
   const tokenService = new TokenService(getDb(c.env));
-  const token = await tokenService.getToken(tokenId);
+  const token = await tokenService.getToken({
+    tokenId,
+    organizationId: orgId,
+    projectId,
+  });
 
-  if (!token || token.organizationId !== auth?.organizationId) {
-    throw notFound("Token");
-  }
-
-  if (token.projectId !== auth.projectId) {
+  if (!token) {
     throw notFound("Token");
   }
 
@@ -238,7 +239,7 @@ export const listTokenTransactions = async (c: AppContext) => {
 
   const { transactions, total } = await tokenService.listTokenTransactions(tokenId, {
     status,
-    organizationId: auth.organizationId,
+    organizationId: orgId,
     limit: pageSize,
     offset,
   });

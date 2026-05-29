@@ -1,6 +1,5 @@
 import type { Context } from "hono";
 import { getDb } from "@/db";
-import { getAuth } from "@/lib/auth";
 import { AppError, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { assertValidAddress } from "@/lib/solana";
@@ -14,6 +13,7 @@ import {
   parsePositiveTokenAmount,
 } from "@/services/token-operation.service";
 import type { Env } from "@/types/env";
+import { requireProjectScope } from "../helpers";
 import { seizeSchema } from "../schemas";
 import { assertDestinationAllowedByControlList } from "./access-control";
 import { resolveAuthoritySigner, resolvePermanentDelegateAuthority } from "./authority-resolution";
@@ -23,7 +23,7 @@ type AppContext = Context<{ Bindings: Env }>;
 
 export const prepareSeize = async (c: AppContext) => {
   const { tokenId } = c.req.param();
-  const auth = getAuth(c);
+  const { auth, projectId, orgId } = requireProjectScope(c);
 
   const body = await c.req.json();
   const parsed = seizeSchema.safeParse(body);
@@ -35,13 +35,13 @@ export const prepareSeize = async (c: AppContext) => {
   }
 
   const tokenService = new TokenService(getDb(c.env));
-  const token = await tokenService.getToken(tokenId);
+  const token = await tokenService.getToken({
+    tokenId,
+    organizationId: orgId,
+    projectId,
+  });
 
-  if (!token || token.organizationId !== auth?.organizationId) {
-    throw notFound("Token");
-  }
-
-  if (token.projectId !== auth.projectId) {
+  if (!token) {
     throw notFound("Token");
   }
 
@@ -139,7 +139,7 @@ export const prepareSeize = async (c: AppContext) => {
 
 export const executeSeize = async (c: AppContext) => {
   const { tokenId } = c.req.param();
-  const auth = getAuth(c);
+  const { auth, projectId, orgId } = requireProjectScope(c);
 
   const body = await c.req.json();
   const parsed = seizeSchema.safeParse(body);
@@ -151,13 +151,13 @@ export const executeSeize = async (c: AppContext) => {
   }
 
   const tokenService = new TokenService(getDb(c.env));
-  const token = await tokenService.getToken(tokenId);
+  const token = await tokenService.getToken({
+    tokenId,
+    organizationId: orgId,
+    projectId,
+  });
 
-  if (!token || token.organizationId !== auth?.organizationId) {
-    throw notFound("Token");
-  }
-
-  if (token.projectId !== auth.projectId) {
+  if (!token) {
     throw notFound("Token");
   }
 

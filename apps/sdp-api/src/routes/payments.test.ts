@@ -3144,5 +3144,62 @@ describe("Payments routes", () => {
       expect(body.data.transfer.id).toBe("xfr_single_1");
       expect(body.data.transfer.status).toBe("confirmed");
     });
+
+    it("returns 404 when the transfer belongs to a different project in the same org", async () => {
+      const otherProjectId = "prj_payments_cross_project";
+      const now = new Date().toISOString();
+
+      await getDb(env)
+        .prepare(
+          `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`
+        )
+        .bind(
+          otherProjectId,
+          TEST_ORG.id,
+          "Other Payments Project",
+          "other-payments-project",
+          "sandbox",
+          "active",
+          TEST_USER.id
+        )
+        .run();
+
+      await getDb(env)
+        .prepare(
+          `INSERT INTO payment_transfers
+             (id, organization_id, project_id, wallet_id, source_address, destination_address, token, amount, memo, type, direction, status, signature, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .bind(
+          "xfr_cross_project_iso",
+          TEST_ORG.id,
+          otherProjectId,
+          TEST_WALLET_ID,
+          TEST_SOLANA_ADDRESSES.wallet1,
+          TEST_SOLANA_ADDRESSES.wallet2,
+          "SOL",
+          "1",
+          null,
+          "transfer",
+          "outbound",
+          "confirmed",
+          null,
+          now,
+          now
+        )
+        .run();
+
+      const res = await app.request(
+        "/v1/payments/transfers/xfr_cross_project_iso",
+        {
+          method: "GET",
+          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
+        },
+        env
+      );
+
+      expect(res.status).toBe(404);
+    });
   });
 });
