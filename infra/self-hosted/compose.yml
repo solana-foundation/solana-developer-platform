@@ -6,7 +6,6 @@ services:
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
-    # Internal-only; point DATABASE_URL at an external host to opt out.
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-sdp}
       POSTGRES_USER: ${POSTGRES_USER:-sdp}
@@ -30,14 +29,11 @@ services:
       timeout: 5s
       retries: 20
 
-  # One-shot migrations; the API gates on its completion below.
   sdp-migrate:
     image: ${SDP_IMAGE_REGISTRY:-ghcr.io/solana-foundation/sdp}/sdp-api:${SDP_VERSION:-latest}
     command: ["node", "migrate.js"]
     restart: "no"
     environment:
-      # Derived from POSTGRES_* for the bundled DB. Use `openssl rand -hex 32`
-      # for POSTGRES_PASSWORD so the value is always URL-safe.
       DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-sdp}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-sdp}}
     depends_on:
       postgres:
@@ -48,7 +44,6 @@ services:
     restart: unless-stopped
     ports:
       - "${SDP_API_PORT:-8787}:8787"
-    # Provider config comes from .env; environment below pins runtime selectors.
     env_file:
       - .env
     environment:
@@ -56,8 +51,6 @@ services:
       SDP_DEPLOYMENT_MODE: ${SDP_DEPLOYMENT_MODE:-self_hosted}
       ENVIRONMENT: ${ENVIRONMENT:-production}
       API_VERSION: ${SDP_VERSION:-latest}
-      # Derived from POSTGRES_* for the bundled DB. Use `openssl rand -hex 32`
-      # for POSTGRES_PASSWORD so the value is always URL-safe.
       DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-sdp}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-sdp}}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       API_KEY_PEPPER: ${API_KEY_PEPPER:?set API_KEY_PEPPER in .env (openssl rand -hex 32)}
@@ -75,7 +68,6 @@ services:
     restart: unless-stopped
     ports:
       - "${SDP_WEB_PORT:-3000}:3000"
-    # NEXT_PUBLIC_* are applied to the bundle at container start (see entrypoint).
     environment:
       NEXT_PUBLIC_SDP_API_BASE_URL: ${NEXT_PUBLIC_SDP_API_BASE_URL:-http://localhost:8787}
       NEXT_PUBLIC_SDP_DOCS_URL: ${NEXT_PUBLIC_SDP_DOCS_URL:-http://localhost:3001}
