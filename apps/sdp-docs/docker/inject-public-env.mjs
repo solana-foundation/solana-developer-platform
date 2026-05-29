@@ -7,13 +7,21 @@ if (targetDirs.length === 0) {
   process.exit(1);
 }
 
-// Skip the full tree walk on container restarts — the first run writes a
+// Skip the full tree walk on container restarts — the first run creates a
 // marker after successfully rewriting placeholders. On subsequent starts the
 // bundle already contains concrete values, so there is nothing to replace.
+// O_CREAT|O_EXCL is atomic: the open fails with EEXIST if the file is
+// already there, avoiding a TOCTOU race between check and create.
 const MARKER = path.join(targetDirs[0], ".sdp-env-injected");
-if (fs.existsSync(MARKER)) {
-  console.log("inject-public-env: already applied (marker exists), skipping");
-  process.exit(0);
+let markerFd;
+try {
+  markerFd = fs.openSync(MARKER, fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_WRONLY);
+} catch (err) {
+  if (err.code === "EEXIST") {
+    console.log("inject-public-env: already applied (marker exists), skipping");
+    process.exit(0);
+  }
+  throw err;
 }
 
 // The URL shape is a valid absolute URL, so its origin survives new URL() /
@@ -100,5 +108,6 @@ if (unresolved.size > 0) {
   );
   process.exit(1);
 }
-fs.writeFileSync(MARKER, new Date().toISOString());
+fs.writeSync(markerFd, new Date().toISOString());
+fs.closeSync(markerFd);
 console.log(`inject-public-env: rewrote ${rewritten} file(s)`);
