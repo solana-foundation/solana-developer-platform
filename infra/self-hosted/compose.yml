@@ -36,6 +36,9 @@ services:
     command: ["node", "migrate.js"]
     restart: "no"
     environment:
+      # The inline default builds a URL from POSTGRES_* for the bundled database.
+      # If POSTGRES_PASSWORD contains URI-reserved characters (@, :, /, #, %)
+      # set DATABASE_URL explicitly in .env with the password percent-encoded.
       DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-sdp}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-sdp}}
     depends_on:
       postgres:
@@ -54,6 +57,9 @@ services:
       SDP_DEPLOYMENT_MODE: ${SDP_DEPLOYMENT_MODE:-self_hosted}
       ENVIRONMENT: ${ENVIRONMENT:-production}
       API_VERSION: ${SDP_VERSION:-latest}
+      # The inline default builds a URL from POSTGRES_* for the bundled database.
+      # If POSTGRES_PASSWORD contains URI-reserved characters (@, :, /, #, %)
+      # set DATABASE_URL explicitly in .env with the password percent-encoded.
       DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-sdp}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-sdp}}
       API_KEY_PEPPER: ${API_KEY_PEPPER:?set API_KEY_PEPPER in .env (openssl rand -hex 32)}
       CUSTODY_ENCRYPTION_KEY: ${CUSTODY_ENCRYPTION_KEY:?set CUSTODY_ENCRYPTION_KEY in .env (openssl rand -hex 32)}
