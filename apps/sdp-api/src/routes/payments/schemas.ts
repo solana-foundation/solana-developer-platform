@@ -1,4 +1,9 @@
-import { type PrivateTransferRequest, RAMP_PROVIDERS } from "@sdp/types";
+import {
+  OFFRAMP_CRYPTO_RAILS,
+  ONRAMP_CRYPTO_RAILS,
+  type PrivateTransferRequest,
+  RAMP_PROVIDERS,
+} from "@sdp/types";
 import { z } from "zod";
 import { isDecimalString } from "@/lib/amount";
 import { isAddress } from "@/lib/solana";
@@ -100,10 +105,34 @@ export const privateTransferSchema: z.ZodType<PrivateTransferRequest> = z.object
 });
 
 const rampProviderSchema = z.enum(RAMP_PROVIDERS);
+const onrampCryptoRailSchema = z.enum(ONRAMP_CRYPTO_RAILS);
+const offrampCryptoRailSchema = z.enum(OFFRAMP_CRYPTO_RAILS);
 
 const rampCurrencyCodeSchema = z
   .string()
   .regex(/^[a-zA-Z0-9_]+$/, { message: "Invalid ramp currency code" });
+
+export const listOnrampCurrenciesQuerySchema = z.object({
+  source: z
+    .preprocess(
+      (value) => (typeof value === "string" ? value.trim().toUpperCase() : value),
+      z.string().regex(/^[A-Z]{3}$/, { message: "source must be a 3-letter fiat currency code" })
+    )
+    .optional(),
+  dest: onrampCryptoRailSchema.optional(),
+  provider: rampProviderSchema.optional(),
+});
+
+export const listOfframpCurrenciesQuerySchema = z.object({
+  source: offrampCryptoRailSchema.optional(),
+  dest: z
+    .preprocess(
+      (value) => (typeof value === "string" ? value.trim().toUpperCase() : value),
+      z.string().regex(/^[A-Z]{3}$/, { message: "dest must be a 3-letter fiat currency code" })
+    )
+    .optional(),
+  provider: rampProviderSchema.optional(),
+});
 
 const bvnkComplianceSchema = z.object({
   partyDetails: z
