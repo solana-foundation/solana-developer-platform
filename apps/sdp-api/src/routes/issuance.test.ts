@@ -1998,6 +1998,73 @@ describe("Issuance Routes", () => {
 
         expect(res.status).toBe(409);
       });
+
+      it("restores prior revoked state on rollback when re-adding a previously-revoked entry", async () => {
+        // Reactivated row (previously revoked → addAllowlistEntry promotes back
+        // to active in-place). If addToList then fails and on-chain membership
+        // is not confirmed, rollback must re-revoke (not hard-delete) so the
+        // operator's original revocation record survives.
+        const db = getDb(env);
+        await db
+          .prepare("UPDATE issued_tokens SET abl_list_address = ? WHERE id = ?")
+          .bind(TEST_SOLANA_ADDRESSES.wallet3, tokenId)
+          .run();
+
+        const tokenService = new TokenService(getDb(env));
+        const { entry } = await tokenService.addAllowlistEntry({
+          tokenId,
+          address: TEST_SOLANA_ADDRESSES.wallet1,
+          addedBy: TEST_PROJECT_API_KEY.id,
+          label: "Original Operator Add",
+        });
+        await tokenService.revokeAllowlistEntry(entry.id);
+
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSigner")
+          .mockResolvedValueOnce({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
+        const addToListSpy = vi
+          .spyOn(MosaicService.prototype, "addToList")
+          .mockRejectedValueOnce(new Error("RPC confirmation timeout"));
+        const isWalletOnListSpy = vi
+          .spyOn(MosaicService.prototype, "isWalletOnList")
+          .mockResolvedValueOnce(false);
+        const deleteAllowlistEntrySpy = vi.spyOn(TokenService.prototype, "deleteAllowlistEntry");
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${tokenId}/allowlist`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({
+                address: TEST_SOLANA_ADDRESSES.wallet1,
+                label: "Re-add Attempt",
+              }),
+            },
+            env
+          );
+
+          expect(res.status).toBeGreaterThanOrEqual(500);
+          expect(deleteAllowlistEntrySpy).not.toHaveBeenCalled();
+
+          const row = await db
+            .prepare(
+              "SELECT id, status FROM token_allowlists WHERE token_id = ? AND address = ?"
+            )
+            .bind(tokenId, TEST_SOLANA_ADDRESSES.wallet1)
+            .first<{ id: string; status: string }>();
+          expect(row?.id).toBe(entry.id);
+          expect(row?.status).toBe("revoked");
+        } finally {
+          createOrgSignerSpy.mockRestore();
+          addToListSpy.mockRestore();
+          isWalletOnListSpy.mockRestore();
+          deleteAllowlistEntrySpy.mockRestore();
+        }
+      });
     });
 
     describe("GET /v1/issuance/tokens/:tokenId/allowlist", () => {
@@ -3146,7 +3213,7 @@ describe("Issuance Routes", () => {
 
         // Operator previously allowlisted and then revoked this address.
         const tokenService = new TokenService(getDb(env));
-        const entry = await tokenService.addAllowlistEntry({
+        const { entry } = await tokenService.addAllowlistEntry({
           tokenId: allowlistTokenId,
           address: freshDestination,
           addedBy: TEST_PROJECT_API_KEY.id,
@@ -3203,7 +3270,7 @@ describe("Issuance Routes", () => {
         await seedAblListAddress();
 
         const tokenService = new TokenService(getDb(env));
-        const entry = await tokenService.addAllowlistEntry({
+        const { entry } = await tokenService.addAllowlistEntry({
           tokenId: allowlistTokenId,
           address: freshDestination,
           addedBy: TEST_PROJECT_API_KEY.id,
@@ -3258,7 +3325,7 @@ describe("Issuance Routes", () => {
         await seedAblListAddress();
 
         const tokenService = new TokenService(getDb(env));
-        const entry = await tokenService.addAllowlistEntry({
+        const { entry } = await tokenService.addAllowlistEntry({
           tokenId: allowlistTokenId,
           address: freshDestination,
           addedBy: TEST_PROJECT_API_KEY.id,
@@ -3438,7 +3505,7 @@ describe("Issuance Routes", () => {
         await seedAblListAddress();
 
         const tokenService = new TokenService(getDb(env));
-        const entry = await tokenService.addAllowlistEntry({
+        const { entry } = await tokenService.addAllowlistEntry({
           tokenId: allowlistTokenId,
           address: freshDestination,
           addedBy: TEST_PROJECT_API_KEY.id,

@@ -349,21 +349,6 @@ export const executeMint = async (c: AppContext) => {
       destination: parsed.data.mint.destination,
       isOnControlList,
     });
-  } else {
-    // Refuse operator-revoked destinations BEFORE createTransaction. If the
-    // revoke check ran inside the try below, the DESTINATION_REVOKED throw
-    // would mark the idempotency-keyed transaction as failed, and every
-    // retry under the same key would replay that failed row (200 with
-    // status="failed") instead of re-evaluating the revoke after the
-    // operator re-adds the address. syncDestinationToOnChainAllowlist still
-    // re-checks on its own for defense-in-depth against races.
-    const existingStatus = await tokenService.getAllowlistEntryStatusByAddress(
-      tokenId,
-      parsed.data.mint.destination
-    );
-    if (existingStatus === "revoked") {
-      throw new AppError("DESTINATION_REVOKED");
-    }
   }
 
   const signingWalletId = resolveApiKeySigningWalletId(
@@ -374,6 +359,34 @@ export const executeMint = async (c: AppContext) => {
   const mintAddress = assertValidAddress(mintAddressRaw, "mintAddress");
   const destination = assertValidAddress(parsed.data.mint.destination, "destination");
 
+  // Resolve signer + sync the destination on-chain BEFORE createTransaction.
+  // If sync (or its inner revoke check) throws inside the try block below,
+  // the idempotency-keyed tx record gets stored as "failed" and every retry
+  // under that key replays the stale failed row (200 with status="failed")
+  // instead of re-evaluating after the operator re-adds the address. By
+  // running sync first, a DESTINATION_REVOKED throw aborts before any tx
+  // record exists. On idempotent replay, sync is a cheap one-RPC no-op
+  // (`isWalletOnList` returns true) since the original call drove the
+  // wallet on-chain.
+  const signer = await createOrgSigner(
+    c.env,
+    auth.organizationId,
+    auth.projectId,
+    signingWalletId
+  );
+  const mosaic = createMosaicService(c.env, signer);
+  const addedToAllowlist = ablListAddress
+    ? await syncDestinationToOnChainAllowlist({
+        tokenService,
+        mosaic,
+        tokenId,
+        ablListAddress,
+        destinationRaw: parsed.data.mint.destination,
+        destination,
+        addedBy: auth.id,
+      })
+    : false;
+
   const idempotencyMetadata = buildIdempotencyMetadata(c.req.header("Idempotency-Key"), {
     tokenId,
     operation: "mint",
@@ -381,7 +394,8 @@ export const executeMint = async (c: AppContext) => {
     params: parsed.data,
   });
 
-  // Create transaction record first
+  // Create transaction record after sync so a sync-time error does not poison
+  // the idempotency slot.
   const { transaction: tx, replayed } = await tokenService.createTransaction({
     tokenId,
     organizationId: auth.organizationId,
@@ -406,33 +420,6 @@ export const executeMint = async (c: AppContext) => {
   }
 
   try {
-    // Get custody signer (via 3-tier resolution)
-    const signer = await createOrgSigner(
-      c.env,
-      auth.organizationId,
-      auth.projectId,
-      signingWalletId
-    );
-
-    // Execute mint on Solana using Mosaic
-    // Note: amount is decimal (e.g., 100 for 100 tokens), SDK converts to raw
-    const mosaic = createMosaicService(c.env, signer);
-
-    // For allowlist tokens with on-chain ABL, sync the destination wallet to
-    // the on-chain list before minting so the SDK's permissionless-thaw can
-    // succeed for a fresh ATA.
-    const addedToAllowlist = ablListAddress
-      ? await syncDestinationToOnChainAllowlist({
-          tokenService,
-          mosaic,
-          tokenId,
-          ablListAddress,
-          destinationRaw: parsed.data.mint.destination,
-          destination,
-          addedBy: auth.id,
-        })
-      : false;
-
     const result = await mosaic.mintTo({
       mint: mintAddress,
       destination,

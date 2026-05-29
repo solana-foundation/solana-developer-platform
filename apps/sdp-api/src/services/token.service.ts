@@ -1177,9 +1177,18 @@ export class TokenService {
   // ═══════════════════════════════════════════════════════════════════════════
 
   /**
-   * Add an address to the token allowlist
+   * Add an address to the token allowlist.
+   *
+   * Returns `{ entry, wasReactivated }`. `wasReactivated` is `true` when this
+   * call promoted a previously-revoked row back to `active` (vs. inserting a
+   * fresh row). Callers rolling back after a downstream on-chain failure need
+   * this to choose between `deleteAllowlistEntry` (fresh row → hard-delete)
+   * and `revokeAllowlistEntry` (reactivated row → restore the prior `revoked`
+   * state, preserving the operator's original revocation record).
    */
-  async addAllowlistEntry(input: AddAllowlistInput): Promise<TokenAllowlistEntry> {
+  async addAllowlistEntry(
+    input: AddAllowlistInput
+  ): Promise<{ entry: TokenAllowlistEntry; wasReactivated: boolean }> {
     const existing = await this.db
       .prepare("SELECT id, status FROM token_allowlists WHERE token_id = ? AND address = ?")
       .bind(input.tokenId, input.address)
@@ -1203,10 +1212,11 @@ export class TokenService {
       if (!entry) {
         throw new Error("ALLOWLIST_ENTRY_NOT_FOUND");
       }
-      return entry;
+      return { entry, wasReactivated: true };
     }
 
-    return this.insertNewAllowlistEntry(input);
+    const entry = await this.insertNewAllowlistEntry(input);
+    return { entry, wasReactivated: false };
   }
 
   /**

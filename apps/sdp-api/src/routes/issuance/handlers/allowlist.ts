@@ -15,14 +15,20 @@ import { addAllowlistSchema } from "../schemas";
 type AppContext = Context<{ Bindings: Env }>;
 
 /**
- * On-chain add for a freshly inserted DB row, with TOCTOU-safe rollback.
+ * On-chain add for an allowlist row that was just inserted or reactivated,
+ * with TOCTOU-safe rollback.
  *
  * If `addToList` errors, re-checks `isWalletOnList`. When membership is
  * confirmed, the DB row is kept and success bubbles up — the RPC/confirmation
  * error was transient and the on-chain write actually landed. Otherwise the
- * row is hard-deleted (not revoked, to avoid leaving a tombstone that the
- * mint auto-add guard would treat as an operator revoke) and the original
- * error is re-thrown.
+ * rollback path depends on `wasReactivated`:
+ *
+ *  - `false` (freshly inserted): hard-delete the row. Soft-revoking would
+ *    leave a tombstone that the mint auto-add guard treats as an operator
+ *    revoke and would block every subsequent mint to the address.
+ *  - `true` (reactivated from `revoked`): re-revoke to restore the operator's
+ *    prior revocation record. Hard-deleting would erase the original status
+ *    history (the same row was operator-revoked earlier for KYC/compliance).
  */
 async function syncNewAllowlistEntryOnChain(opts: {
   c: AppContext;
@@ -31,6 +37,7 @@ async function syncNewAllowlistEntryOnChain(opts: {
   signingWalletId: string | null | undefined;
   tokenService: TokenService;
   entryId: string;
+  wasReactivated: boolean;
   list: ReturnType<typeof assertValidAddress>;
   wallet: ReturnType<typeof assertValidAddress>;
 }): Promise<void> {
@@ -49,7 +56,11 @@ async function syncNewAllowlistEntryOnChain(opts: {
       return;
     }
     try {
-      await opts.tokenService.deleteAllowlistEntry(opts.entryId);
+      if (opts.wasReactivated) {
+        await opts.tokenService.revokeAllowlistEntry(opts.entryId);
+      } else {
+        await opts.tokenService.deleteAllowlistEntry(opts.entryId);
+      }
     } catch (rollbackError) {
       throw new AppError(
         "INTERNAL_ERROR",
@@ -117,7 +128,7 @@ export const addAllowlistEntry = async (c: AppContext) => {
   }
 
   try {
-    const entry = await tokenService.addAllowlistEntry({
+    const { entry, wasReactivated } = await tokenService.addAllowlistEntry({
       tokenId,
       address: parsed.data.address,
       addedBy: auth.id,
@@ -132,6 +143,7 @@ export const addAllowlistEntry = async (c: AppContext) => {
         signingWalletId: token.signingWalletId,
         tokenService,
         entryId: entry.id,
+        wasReactivated,
         list: assertValidAddress(token.ablListAddress, "ablListAddress"),
         wallet: assertValidAddress(parsed.data.address, "address"),
       });
