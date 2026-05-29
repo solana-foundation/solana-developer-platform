@@ -15,6 +15,15 @@ const withMDX = createMDX({
 const nextConfig = {
   reactStrictMode: true,
   assetPrefix: "/docs",
+  async rewrites() {
+    return [
+      // Serve /docs/:slug.md as the markdown representation of each docs page
+      {
+        source: "/docs/:slug*.md",
+        destination: "/api/docs-md/:slug*",
+      },
+    ];
+  },
 };
 
 // Gated so non-container builds skip the unused standalone tree.

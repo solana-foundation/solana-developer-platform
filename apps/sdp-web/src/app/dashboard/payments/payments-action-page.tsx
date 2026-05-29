@@ -46,6 +46,7 @@ import { ProviderRiskTable } from "./provider-risk-table";
 
 interface PaymentsActionPageProps {
   mode: "send" | "receive";
+  actionLabel?: string;
   wallets: PaymentsDashboardWallet[];
   walletsError: string | null;
   issuedTokenSymbolsByMint: Record<string, string>;
@@ -380,14 +381,19 @@ function buildRampReviewRows(input: RampReviewRowsInput): SummaryRow[] {
 
 function resolveStepSequence(
   mode: "send" | "receive",
-  branch: ActionBranch | null
+  branch: ActionBranch | null,
+  actionLabel: string
 ): StepDefinition[] {
+  const actionLabelLower = actionLabel.toLowerCase();
+  const depositActionPhrase =
+    actionLabelLower === "receive" ? "receive funds into" : `${actionLabelLower} into`;
+
   if (!branch) {
     return [
       {
         id: "branch",
         label: "Flow",
-        title: `Choose a ${mode} flow`,
+        title: `Choose a ${actionLabelLower} flow`,
         description:
           mode === "send"
             ? "Choose whether you are sending to another wallet or starting an off-ramp."
@@ -401,7 +407,7 @@ function resolveStepSequence(
       {
         id: "branch",
         label: "Flow",
-        title: "Choose a send flow",
+        title: `Choose a ${actionLabelLower} flow`,
         description: "Wallet transfer keeps the flow inside SDP wallets and Solana addresses.",
       },
       {
@@ -424,7 +430,7 @@ function resolveStepSequence(
       {
         id: "branch",
         label: "Flow",
-        title: "Choose a receive flow",
+        title: `Choose a ${actionLabelLower} flow`,
         description: "Wallet deposit shows the wallet details needed to receive funds directly.",
       },
       {
@@ -435,9 +441,9 @@ function resolveStepSequence(
       },
       {
         id: "deposit",
-        label: "Receive",
-        title: "Receive funds",
-        description: "Use this address or QR code to deposit into the selected wallet.",
+        label: actionLabel,
+        title: `${actionLabel} funds`,
+        description: `Use this address or QR code to ${depositActionPhrase} the selected wallet.`,
       },
     ];
   }
@@ -446,7 +452,7 @@ function resolveStepSequence(
     {
       id: "branch",
       label: "Flow",
-      title: `Choose a ${mode} flow`,
+      title: `Choose a ${actionLabelLower} flow`,
       description:
         branch === "onramp"
           ? "On-ramp flows move fiat into the selected wallet through a provider."
@@ -534,7 +540,7 @@ function ReviewSummaryCard({ rows }: { rows: Array<{ label: string; value: React
   );
 }
 
-function WalletAddressQrCode({ address }: { address: string }) {
+function WalletAddressQrCode({ address, actionVerb }: { address: string; actionVerb: string }) {
   const [qrCodeUrl, setQrCodeUrl] = useState("");
 
   useEffect(() => {
@@ -592,7 +598,7 @@ function WalletAddressQrCode({ address }: { address: string }) {
         </div>
         <div className="min-w-0 flex-1 space-y-3">
           <p className="text-sm text-text-low">
-            Scan this QR code or copy the address to receive funds into the selected wallet.
+            Scan this QR code or copy the address to {actionVerb} funds into the selected wallet.
           </p>
           <div className="rounded-2xl border border-border-extra-light bg-white px-4 py-3">
             <p className="break-all font-mono text-xs text-text-medium">{address}</p>
@@ -1204,6 +1210,7 @@ function RampProviderFields({
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: this component intentionally coordinates the full multi-step payments flow in one place.
 export function PaymentsActionPage({
   mode,
+  actionLabel,
   wallets,
   walletsError,
   issuedTokenSymbolsByMint,
@@ -1212,6 +1219,12 @@ export function PaymentsActionPage({
 }: PaymentsActionPageProps) {
   const { sdpEnvironment } = useDashboardWorkspace();
   const router = useRouter();
+  const actionTitle = actionLabel ?? (mode === "send" ? "Send" : "Receive");
+  const actionVerb = actionTitle.toLowerCase();
+  const transferActionDescription =
+    actionTitle === "Pay"
+      ? "Pay from an SDP wallet to a destination Solana address."
+      : `${actionTitle} funds from an SDP wallet to a destination Solana address.`;
 
   const [branch, setBranch] = useState<ActionBranch | null>(null);
   const [provider, setProvider] = useState<RampProviderId | null>(null);
@@ -1329,7 +1342,10 @@ export function PaymentsActionPage({
     }
   }, [assetOptions, selectedAsset]);
 
-  const steps = useMemo(() => resolveStepSequence(mode, branch), [branch, mode]);
+  const steps = useMemo(
+    () => resolveStepSequence(mode, branch, actionTitle),
+    [actionTitle, branch, mode]
+  );
   const safeStepIndex = Math.min(stepIndex, steps.length - 1);
   const currentStep = steps[safeStepIndex] ?? steps[0];
 
@@ -1982,7 +1998,7 @@ export function PaymentsActionPage({
           <ActionChoiceCard
             active={branch === "wallet_transfer"}
             title="Wallet transfer"
-            description="Send funds from an SDP wallet to a destination Solana address."
+            description={transferActionDescription}
             icon={<ArrowUpRight className="size-5" />}
             onClick={() => selectBranch("wallet_transfer")}
           />
@@ -2006,7 +2022,7 @@ export function PaymentsActionPage({
           <ActionChoiceCard
             active={branch === "wallet_deposit"}
             title="Wallet deposit"
-            description="Receive funds directly into one of your SDP wallets."
+            description={`${actionTitle} funds directly into one of your SDP wallets.`}
             icon={<ArrowDownLeft className="size-5" />}
             onClick={() => selectBranch("wallet_deposit")}
           />
@@ -2463,7 +2479,7 @@ export function PaymentsActionPage({
           },
         ]}
       />
-      <WalletAddressQrCode address={selectedWallet?.publicKey ?? ""} />
+      <WalletAddressQrCode address={selectedWallet?.publicKey ?? ""} actionVerb={actionVerb} />
     </div>
   );
 
@@ -2504,7 +2520,7 @@ export function PaymentsActionPage({
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-8 py-8">
         <div className="space-y-3 text-center">
           <p className="text-[44px] leading-none font-medium tracking-[-0.04em] text-text-extra-high">
-            {isSendAction ? "Send" : "Receive"}
+            {actionTitle}
           </p>
           <p className="text-base text-text-low">
             You need at least one wallet before you can start this flow.

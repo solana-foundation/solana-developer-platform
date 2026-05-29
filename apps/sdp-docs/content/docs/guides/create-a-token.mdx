@@ -59,7 +59,7 @@ A success toast confirms creation. The token is now in `pending` status, ready t
 </Tab>
 <Tab value="API">
 
-### 1. List available templates (optional)
+#### 1. List available templates (optional)
 
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
@@ -87,7 +87,7 @@ HttpRequest request = HttpRequest.newBuilder()
 </Tab>
 </Tabs>
 
-### 2. Create a token
+#### 2. Create a token
 
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
@@ -154,7 +154,7 @@ HttpRequest request = HttpRequest.newBuilder()
 
 The token is created with status `pending`. It must be [deployed](/docs/guides/deploy-a-token) before you can mint or transfer.
 
-### Custom token (no template)
+#### Custom token (no template)
 
 Omit the `template` field or set it to `"custom"` and configure extensions via `overrides.extensions`. You can also pass `"rwa"` as a template alias for `"tokenized-security"`.
 

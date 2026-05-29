@@ -590,6 +590,64 @@ describe("Payments routes", () => {
     ]);
   });
 
+  it("lists generated on-ramp currency provider support", async () => {
+    const res = await app.request(
+      "/v1/payments/ramps/onramp/currency?source=USD&dest=usdc.solana",
+      {
+        headers: {
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+      },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      data: {
+        currencies: { sources: string[]; destinations: string[] };
+        pairs: Array<{ source: string; dest: string; providers: string[] }>;
+        supportHash: string;
+      };
+    };
+
+    expect(body.data.currencies.sources).toContain("USD");
+    expect(body.data.currencies.destinations).toContain("usdc.solana");
+    expect(body.data.supportHash.length).toBeGreaterThan(0);
+    expect(body.data.pairs).toContainEqual({
+      source: "USD",
+      dest: "usdc.solana",
+      providers: expect.arrayContaining(["moonpay"]),
+    });
+  });
+
+  it("lists generated off-ramp currency provider support", async () => {
+    const res = await app.request(
+      "/v1/payments/ramps/offramp/currency?source=usdc.solana&dest=USD&provider=moonpay",
+      {
+        headers: {
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+      },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      data: {
+        currencies: { sources: string[]; destinations: string[] };
+        pairs: Array<{ source: string; dest: string; providers: string[] }>;
+      };
+    };
+
+    expect(body.data.currencies.sources).toContain("usdc.solana");
+    expect(body.data.currencies.destinations).toContain("USD");
+    expect(body.data.pairs).toContainEqual({
+      source: "usdc.solana",
+      dest: "USD",
+      providers: ["moonpay"],
+    });
+  });
+
   it("creates a signed MoonPay on-ramp session URL", async () => {
     const res = await app.request(
       "/v1/payments/ramps/onramp/execute",

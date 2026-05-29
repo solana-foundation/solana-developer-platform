@@ -32,6 +32,7 @@ type DocsPage = {
   title: string;
   description: string;
   url: string;
+  content: string;
 };
 
 type Section = {
@@ -49,8 +50,7 @@ const FEATURE_SUMMARY = [
 ];
 
 const KEY_PAGE_SLUGS = [
-  "what-is-solana-developer-platform",
-  "getting-started",
+  "introduction",
   "guides/setup-organization",
   "guides/setup-wallets",
   "guides/manage-api-keys",
@@ -81,6 +81,12 @@ function stripMarkdownFormatting(value: string): string {
 
 function normalizeLine(value: string): string {
   return value.replace(/\s+/g, " ").trim();
+}
+
+function stripMdxContent(source: string): string {
+  let content = source.replace(/^---\n[\s\S]*?\n---\n?/, "");
+  content = content.replace(/^import\s+[^\n]*\n?/gm, "");
+  return content.replace(/\n{3,}/g, "\n\n").trim();
 }
 
 function parseFrontmatter(source: string): { title: string; description: string } {
@@ -130,6 +136,7 @@ async function loadPages(): Promise<Map<string, DocsPage>> {
       title: title || slug.split("/").at(-1)?.replace(/-/g, " ") || slug,
       description,
       url: getDocsPageUrl(slug),
+      content: stripMdxContent(source),
     });
   }
 
@@ -141,43 +148,96 @@ async function loadMeta(): Promise<DocsMeta> {
   return JSON.parse(json) as DocsMeta;
 }
 
+async function loadFolderMetas(): Promise<Map<string, DocsMeta>> {
+  const result = new Map<string, DocsMeta>();
+
+  async function walk(dirPath: string): Promise<void> {
+    const entries = await fs.readdir(dirPath, { withFileTypes: true });
+    await Promise.all(
+      entries.map(async (entry) => {
+        if (!entry.isDirectory()) return;
+        const subDir = path.join(dirPath, entry.name);
+        try {
+          const json = await fs.readFile(path.join(subDir, "meta.json"), "utf8");
+          const rel = path.relative(docsContentDir, subDir).replace(/\\/g, "/");
+          result.set(rel, JSON.parse(json) as DocsMeta);
+        } catch {
+          // folder without meta.json — skip
+        }
+        await walk(subDir);
+      })
+    );
+  }
+
+  await walk(docsContentDir);
+  return result;
+}
+
 function renderLink(page: DocsPage): string {
   const description = page.description ? `: ${normalizeLine(page.description)}` : "";
   return `- [${page.title}](${page.url})${description}`;
 }
 
-function renderSection(section: Section): string {
-  const rows = section.pages.map(renderLink).join("\n");
-  return `## ${section.title}\n${rows}`;
-}
-
-function buildSections(meta: DocsMeta, pages: Map<string, DocsPage>): Section[] {
+function buildSections(
+  meta: DocsMeta,
+  pages: Map<string, DocsPage>,
+  folderMetas: Map<string, DocsMeta>
+): Section[] {
   const sections: Section[] = [];
+  const emitted = new Set<string>();
   let currentSection: Section = { title: "Docs", pages: [] };
 
-  for (const entry of meta.pages || []) {
-    if (entry.startsWith("---") && entry.endsWith("---")) {
-      if (currentSection.pages.length > 0) {
-        sections.push(currentSection);
-      }
+  const flush = () => {
+    if (currentSection.pages.length > 0) {
+      sections.push(currentSection);
+    }
+  };
+
+  const isSeparator = (entry: string): boolean => entry.startsWith("---") && entry.endsWith("---");
+
+  const visit = (entry: string, slugPrefix: string, parentLabel: string | null): void => {
+    if (isSeparator(entry)) {
+      flush();
+      const label = entry.replace(/---/g, "").trim();
       currentSection = {
-        title: entry.replace(/---/g, "").trim(),
+        title: parentLabel ? `${parentLabel} — ${label}` : label,
         pages: [],
       };
-      continue;
+      return;
     }
 
-    const page = pages.get(entry);
-    if (!page) {
-      throw new Error(`Missing docs page for meta entry "${entry}"`);
+    const fullSlug = slugPrefix ? `${slugPrefix}/${entry}` : entry;
+
+    const page = pages.get(fullSlug);
+    if (page) {
+      if (!emitted.has(fullSlug)) {
+        currentSection.pages.push(page);
+        emitted.add(fullSlug);
+      }
+      return;
     }
-    currentSection.pages.push(page);
+
+    const folderMeta = folderMetas.get(fullSlug);
+    if (!folderMeta) {
+      console.warn(`generate-ai-resources: no page or folder for entry "${fullSlug}" — skipping`);
+      return;
+    }
+
+    flush();
+    const sectionTitle = folderMeta.title || entry;
+    currentSection = { title: sectionTitle, pages: [] };
+    for (const subEntry of folderMeta.pages || []) {
+      visit(subEntry, fullSlug, sectionTitle);
+    }
+    flush();
+    currentSection = { title: "Docs", pages: [] };
+  };
+
+  for (const entry of meta.pages || []) {
+    visit(entry, "", null);
   }
 
-  if (currentSection.pages.length > 0) {
-    sections.push(currentSection);
-  }
-
+  flush();
   return sections;
 }
 
@@ -225,11 +285,23 @@ function renderLlms(keyPages: DocsPage[]): string {
   ].join("\n");
 }
 
+function renderPageFull(page: DocsPage): string {
+  const parts: string[] = [`### ${page.title}`, `Source: ${page.url}`];
+  if (page.description) parts.push(``, `> ${page.description}`);
+  if (page.content) parts.push(``, page.content);
+  return parts.join("\n");
+}
+
+function renderSectionFull(section: Section): string {
+  const pages = section.pages.map(renderPageFull).join("\n\n---\n\n");
+  return `## ${section.title}\n\n${pages}`;
+}
+
 function renderLlmsFull(sections: Section[]): string {
   return [
     "# Solana Developer Platform",
     "",
-    "> Full public docs map for Solana Developer Platform, generated from the docs navigation and public API reference.",
+    "> Full public documentation for Solana Developer Platform — all page content for AI and agent ingestion.",
     "",
     "## Canonical URLs",
     `- Docs: ${docsUrl}`,
@@ -238,11 +310,10 @@ function renderLlmsFull(sections: Section[]): string {
     `- OpenAPI: ${apiOpenApiUrl}`,
     `- AI guide: ${aiGuideUrl}`,
     "",
-    sections.map(renderSection).join("\n\n"),
+    sections.map(renderSectionFull).join("\n\n---\n\n"),
     "",
     "## Notes",
-    "- Generated from docs navigation and public API reference pages.",
-    "- Hidden or internal-only APIs are intentionally excluded.",
+    "- Generated from docs source. Hidden or internal-only APIs are intentionally excluded.",
     "",
   ].join("\n");
 }
@@ -257,8 +328,12 @@ async function writeFileIfChanged(filePath: string, content: string): Promise<vo
 }
 
 async function run(): Promise<void> {
-  const [meta, pages] = await Promise.all([loadMeta(), loadPages()]);
-  const sections = buildSections(meta, pages);
+  const [meta, pages, folderMetas] = await Promise.all([
+    loadMeta(),
+    loadPages(),
+    loadFolderMetas(),
+  ]);
+  const sections = buildSections(meta, pages, folderMetas);
   const keyPages = buildKeyPages(pages);
 
   await fs.mkdir(publicDir, { recursive: true });

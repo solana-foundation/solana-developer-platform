@@ -20,36 +20,39 @@ API keys authenticate every request to the SDP API. Each key is scoped to an env
 | `api_developer` | Read/write access, excludes custody actions |
 | `api_readonly` | Read-only access to all resources |
 
+## Create a key
+
 <Tabs items={["Dashboard", "API"]}>
 <Tab value="Dashboard">
 
-### Create a key
+Navigate to **API keys** in the sidebar. You'll start with an empty list.
 
-1. Navigate to **API keys** in the sidebar.
-2. Click **Create API key** in the top right.
-3. **Step 1 — Define key details:**
-   - **Name** — a descriptive label (e.g., "CI deploy key")
-   - **Role** — Admin, Developer, or Read only
-   - **Environment** — Sandbox or Production
-   - **Wallet scope** — All wallets or Selected wallets
-   - **Expiration (optional)** — date/time picker
-4. **Step 2 — Review and confirm:** verify the summary and click **Create key**.
-5. The full key appears in a modal titled **API key generated**. Click **Copy** and save it — it will not be shown again.
+![API keys page with no keys yet](/images/getting-started/api-keys-empty.png)
 
-### Rotate a key
+Click **New API key** in the top right. Fill in the key details:
 
-In the API keys table, find the active key. Enter a **grace period** (0–168 hours, default 24) in the inline input and click **Rotate**. During the grace period both the old and new key are valid.
+- **Name** — a descriptive label (e.g., "CI deploy key")
+- **Role** — Admin, Developer, or Read only
+- **Environment** — Sandbox or Production
+- **Wallet access** — All wallets or Selected wallets
+- **Expiration (optional)** — date/time picker
 
-The new key value appears once in the generated key modal. Save it immediately.
+![Create API key modal](/images/getting-started/api-key-create.png)
 
-### Revoke a key
+Click **Continue**. Review the summary and click **Create key**.
 
-Click the **Delete** button next to any key in the table. Revoked keys stop working immediately and cannot be restored.
+![Review API key modal](/images/getting-started/api-key-review.png)
+
+The full key appears once in the **API key generated** modal. Click **Copy** and save it — it will not be shown again.
+
+![API key generated modal showing the full key](/images/getting-started/api-key-generated.png)
+
+After dismissing, the key appears in the table with its prefix, role, environment, and status.
+
+![API keys list with one active key](/images/getting-started/api-keys-list.png)
 
 </Tab>
 <Tab value="API">
-
-### Create a key
 
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
@@ -109,7 +112,22 @@ The response includes the full `key` value — **save it, it is only returned on
 
 Optional fields: `allowedIps` (CIDR ranges), `permissions` (fine-grained), `signingWalletId`, `walletBindings`.
 
-### Rotate a key
+</Tab>
+</Tabs>
+
+## Rotate a key
+
+<Tabs items={["Dashboard", "API"]}>
+<Tab value="Dashboard">
+
+In the API keys table, open the **Actions** dropdown next to the key and click **Rotate key (24h grace)**. The dashboard always uses a 24-hour grace period — use the API if you need a custom value (0–168h).
+
+![Actions dropdown showing Rotate key and Delete key options](/images/getting-started/api-key-rotate.png)
+
+During the grace period both the old and new key are valid. The new key value appears once in the generated key modal — save it immediately.
+
+</Tab>
+<Tab value="API">
 
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
@@ -152,7 +170,18 @@ HttpRequest request = HttpRequest.newBuilder()
 
 The old key remains valid for the grace period (0–168 hours).
 
-### Revoke a key
+</Tab>
+</Tabs>
+
+## Revoke a key
+
+<Tabs items={["Dashboard", "API"]}>
+<Tab value="Dashboard">
+
+Open the **Actions** dropdown next to the key and click **Delete key**. The key stops working immediately and cannot be restored.
+
+</Tab>
+<Tab value="API">
 
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">

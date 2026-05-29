@@ -112,6 +112,25 @@ async function loadDocPages(): Promise<Map<string, string>> {
   return pages;
 }
 
+async function loadSectionDirs(): Promise<Set<string>> {
+  const dirs = new Set<string>();
+
+  async function walk(dirPath: string): Promise<void> {
+    const entries = await fs.readdir(dirPath, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isDirectory()) {
+        continue;
+      }
+      const fullPath = path.join(dirPath, entry.name);
+      dirs.add(path.relative(docsContentDir, fullPath).replace(/\\/g, "/"));
+      await walk(fullPath);
+    }
+  }
+
+  await walk(docsContentDir);
+  return dirs;
+}
+
 async function loadPublicAssetPaths(): Promise<Set<string>> {
   const files = await listFiles(docsPublicDir).catch(() => []);
   const paths = new Set<string>();
@@ -232,27 +251,38 @@ async function collectLinks(pages: Map<string, string>): Promise<LinkReference[]
   return references;
 }
 
-async function run(): Promise<void> {
-  const [meta, config, pages, publicAssetPaths] = await Promise.all([
-    loadDocsMeta(),
-    loadConfig(),
-    loadDocPages(),
-    loadPublicAssetPaths(),
-  ]);
-  const allowedInternalPaths = createAllowedInternalPaths(pages.keys());
-  for (const assetPath of publicAssetPaths) {
-    allowedInternalPaths.add(normalizePathname(assetPath));
-  }
+function findMissingNavEntries(
+  meta: DocsMeta,
+  pages: Map<string, string>,
+  sectionDirs: Set<string>
+): string[] {
   const findings: string[] = [];
 
   for (const entry of meta.pages ?? []) {
     if (isDividerEntry(entry)) {
       continue;
     }
-    if (!pages.has(entry)) {
+    if (!pages.has(entry) && !sectionDirs.has(entry)) {
       findings.push(`Missing docs page for navigation entry "${entry}" in ${docsMetaPath}`);
     }
   }
+
+  return findings;
+}
+
+async function run(): Promise<void> {
+  const [meta, config, pages, sectionDirs, publicAssetPaths] = await Promise.all([
+    loadDocsMeta(),
+    loadConfig(),
+    loadDocPages(),
+    loadSectionDirs(),
+    loadPublicAssetPaths(),
+  ]);
+  const allowedInternalPaths = createAllowedInternalPaths(pages.keys());
+  for (const assetPath of publicAssetPaths) {
+    allowedInternalPaths.add(normalizePathname(assetPath));
+  }
+  const findings: string[] = [...findMissingNavEntries(meta, pages, sectionDirs)];
 
   const links = await collectLinks(pages);
   const externalUrls = new Map<string, LinkReference[]>();

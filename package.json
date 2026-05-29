@@ -1,6 +1,6 @@
 {
   "name": "solana-developer-platform",
-  "version": "0.22.0",
+  "version": "0.23.0",
   "private": true,
   "packageManager": "pnpm@10.16.0",
   "engines": {
@@ -25,6 +25,7 @@
     "dev": "scripts/doppler/run-with-config.sh turbo run dev:local",
     "dev:web": "scripts/doppler/run-with-config.sh turbo run dev --filter=sdp-web",
     "dev:docs": "scripts/doppler/run-with-config.sh turbo run dev --filter=sdp-docs",
+    "dev:docs:bare": "turbo run dev --filter=sdp-docs",
     "dev:api": "scripts/doppler/run-with-config.sh turbo run dev --filter=@sdp/api",
     "dev:api:local": "scripts/doppler/run-with-config.sh turbo run dev:local --filter=@sdp/api",
     "build": "turbo run build",

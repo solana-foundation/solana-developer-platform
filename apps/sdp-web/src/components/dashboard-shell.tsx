@@ -70,11 +70,11 @@ const navSections: NavSection[] = [
         label: "Payments",
         href: "/dashboard/payments",
         icon: ArrowLeftRightIcon,
-        children: DASHBOARD_FEATURE_FLAGS.paymentsSubmenu
+        children: DASHBOARD_FEATURE_FLAGS.paymentsV2
           ? [
               { label: "Counterparty", href: "/dashboard/payments/counterparty" },
-              { label: "Pay", href: "/dashboard/pay", disabled: true },
-              { label: "Deposit", href: "/dashboard/deposit", disabled: true },
+              { label: "Pay", href: "/dashboard/payments/pay" },
+              { label: "Deposit", href: "/dashboard/payments/deposit" },
             ]
           : [],
       },
@@ -323,7 +323,13 @@ function getDashboardPageConfig(pathname: string): DashboardPageConfig {
     };
   }
   if (pathname.startsWith("/dashboard/payments/")) {
-    const actionTitle = pathname.endsWith("/receive") ? "Receive" : "Send";
+    const actionTitle = pathname.startsWith("/dashboard/payments/deposit")
+      ? "Deposit"
+      : pathname.startsWith("/dashboard/payments/pay")
+        ? "Pay"
+        : pathname.endsWith("/receive")
+          ? "Receive"
+          : "Send";
 
     return {
       title: "",
@@ -365,9 +371,14 @@ function isItemActive(pathname: string, href: string): boolean {
     return pathname.startsWith("/dashboard/wallets") || pathname.startsWith("/dashboard/custody");
   }
   if (href === "/dashboard/payments") {
+    const isGatedPaymentsV2Route =
+      pathname.startsWith("/dashboard/payments/pay") ||
+      pathname.startsWith("/dashboard/payments/deposit");
+
     return (
       pathname.startsWith("/dashboard/payments") &&
-      !pathname.startsWith("/dashboard/payments/counterparty")
+      !pathname.startsWith("/dashboard/payments/counterparty") &&
+      (DASHBOARD_FEATURE_FLAGS.paymentsV2 || !isGatedPaymentsV2Route)
     );
   }
   return pathname === href || pathname.startsWith(`${href}/`);
