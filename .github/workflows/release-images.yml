@@ -40,10 +40,34 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Push the version tag only; :latest is added after the scan passes so a
-      # vulnerable image is never reachable at :latest.
-      - name: Build and push (version tag)
-        id: build
+      # Build for the runner platform only and load into the local daemon so
+      # Trivy can scan BEFORE anything is pushed to a registry.
+      - name: Build (local, for scan)
+        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
+        with:
+          context: .
+          file: apps/${{ matrix.service }}/Dockerfile
+          load: true
+          provenance: false
+          sbom: false
+          build-args: |
+            GIT_SHA=${{ github.sha }}
+          tags: |
+            ${{ env.GHCR_IMAGE }}:scan
+          cache-from: type=gha,scope=${{ matrix.service }}
+
+      - name: Scan image (Trivy)
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        with:
+          image-ref: ${{ env.GHCR_IMAGE }}:scan
+          severity: CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
+
+      # Scan passed — rebuild multi-arch and push. The amd64 layers are cached
+      # from the local build above, so only arm64 is built from scratch.
+      - name: Build and push (multi-arch)
+        id: push
         uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
         with:
           context: .
@@ -56,30 +80,16 @@ jobs:
             GIT_SHA=${{ github.sha }}
           tags: |
             ${{ env.GHCR_IMAGE }}:${{ env.VERSION }}
+            ${{ env.GHCR_IMAGE }}:latest
           cache-from: type=gha,scope=${{ matrix.service }}
           cache-to: type=gha,scope=${{ matrix.service }},mode=max
-
-      - name: Scan image (Trivy)
-        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
-        with:
-          image-ref: ${{ env.GHCR_IMAGE }}@${{ steps.build.outputs.digest }}
-          severity: CRITICAL
-          exit-code: "1"
-          ignore-unfixed: true
-
-      # Only runs if Trivy passed — promotes the scanned digest to :latest.
-      - name: Tag as latest
-        run: |
-          docker buildx imagetools create \
-            --tag "${GHCR_IMAGE}:latest" \
-            "${GHCR_IMAGE}@${{ steps.build.outputs.digest }}"
 
       - name: Install Cosign
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
 
       - name: Sign image (keyless OIDC)
         env:
-          DIGEST: ${{ steps.build.outputs.digest }}
+          DIGEST: ${{ steps.push.outputs.digest }}
         run: |
           set -euo pipefail
           cosign sign --yes "${GHCR_IMAGE}@${DIGEST}"
