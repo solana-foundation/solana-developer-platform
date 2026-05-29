@@ -10,12 +10,27 @@
   --sdp-surface-radius: var(--radius-xl, 12px);
   --sdp-color-info-bg: rgba(33, 99, 182, 0.12);
   --sdp-color-info-text: #2163b6;
+  --sdp-select-popover-max-height: 220px;
+}
+
+/* The Base UI Select popup is portaled, so the design system exposes no prop to
+   cap its height — it defaults to the full available viewport height. Tighten
+   it to a compact, scrollable max. Scoped to the listbox popup so other Base UI
+   popovers are unaffected; the [role][data-side] selector outranks the DS
+   max-h utility without !important, and min() keeps it within viewport space. */
+[role="listbox"][data-side] {
+  max-height: min(var(--sdp-select-popover-max-height), var(--available-height));
 }
 
 html,
 body {
   color-scheme: light;
   background-color: var(--sdp-shell-bg);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: gray transparent;
 }
 
 vercel-live-feedback {

@@ -169,12 +169,15 @@ export function riskToneClassName(result: ComplianceProviderResult): string {
 }
 
 export async function fetchWallets(
-  options: { signal?: AbortSignal } = {}
+  options: { signal?: AbortSignal; includeBalances?: boolean } = {}
 ): Promise<WalletRecord[]> {
   const query = new URLSearchParams({
     view: "summary",
-  }).toString();
-  const response = await fetch(`/api/dashboard/wallets?${query}`, {
+  });
+  if (options.includeBalances) {
+    query.set("includeBalances", "true");
+  }
+  const response = await fetch(`/api/dashboard/wallets?${query.toString()}`, {
     method: "GET",
     cache: "no-store",
     signal: options.signal,

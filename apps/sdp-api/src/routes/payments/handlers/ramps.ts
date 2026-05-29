@@ -4,7 +4,12 @@ import type {
   PaymentRampExecutionStatus,
   SdpEnvironment,
 } from "@sdp/types";
-import { OFFRAMP_SUPPORT, ONRAMP_SUPPORT, RAMP_SUPPORT_HASH } from "@sdp/types";
+import {
+  OFFRAMP_SUPPORT,
+  ONRAMP_SUPPORT,
+  RAMP_SUPPORT_HASH,
+  type RampFiatCurrency,
+} from "@sdp/types/generated/ramp-support";
 import { getDb } from "@/db";
 import { parseDecimalAmount } from "@/lib/amount";
 import { AppError, providerNotConfigured } from "@/lib/errors";
@@ -69,7 +74,7 @@ type ExecuteOnrampInput = {
   provider: RampProviderId;
   destinationWallet: string;
   cryptoToken: string;
-  fiatCurrency?: "USD";
+  fiatCurrency?: RampFiatCurrency;
   fiatAmount: string;
   kycReference?: string;
   redirectUrl?: string;
@@ -80,7 +85,7 @@ type ExecuteOfframpInput = {
   provider: RampProviderId;
   sourceWallet: string;
   cryptoToken: string;
-  fiatCurrency?: "USD";
+  fiatCurrency?: RampFiatCurrency;
   cryptoAmount: string;
   kycReference?: string;
   redirectUrl?: string;
@@ -344,6 +349,10 @@ function toPositiveNumberAmount(value: string, fieldName: string): number {
     throw new AppError("BAD_REQUEST", `${fieldName} must be a positive amount`);
   }
   return amount;
+}
+
+function resolveFiatCurrency(input: { fiatCurrency?: RampFiatCurrency }): RampFiatCurrency {
+  return input.fiatCurrency ?? "USD";
 }
 
 const BVNK_NETWORK_ALIASES: Record<string, string> = {
@@ -891,6 +900,7 @@ const bvnkRampProvider: RampProviderExecutor = {
       ["payments:write"]
     );
     const { currency, network } = normalizeBvnkCurrencyAndNetwork(input.cryptoToken);
+    const fiatCurrency = resolveFiatCurrency(input);
     const amount = toPositiveNumberAmount(input.fiatAmount, "fiatAmount");
     const externalReference = `sdp_onramp_${crypto.randomUUID()}`;
     const complianceDetails = buildBvnkComplianceDetails(c, input.bvnkCompliance);
@@ -900,7 +910,7 @@ const bvnkRampProvider: RampProviderExecutor = {
       body: {
         walletId: config.walletId,
         amount,
-        currency: "USD",
+        currency: fiatCurrency,
         type: "IN",
         reference: externalReference,
         customerId,
@@ -948,6 +958,7 @@ const bvnkRampProvider: RampProviderExecutor = {
       ["payments:write"]
     );
     const { currency, network } = normalizeBvnkCurrencyAndNetwork(input.cryptoToken);
+    const fiatCurrency = resolveFiatCurrency(input);
     const paidRequiredAmount = toPositiveNumberAmount(input.cryptoAmount, "cryptoAmount");
     const externalReference = `sdp_offramp_${crypto.randomUUID()}`;
     const complianceDetails = buildBvnkComplianceDetails(c, input.bvnkCompliance, {
@@ -958,7 +969,7 @@ const bvnkRampProvider: RampProviderExecutor = {
       method: "POST",
       body: {
         walletId: config.walletId,
-        walletCurrency: "USD",
+        walletCurrency: fiatCurrency,
         paidCurrency: currency,
         paidRequiredAmount,
         reference: externalReference,
@@ -1022,10 +1033,11 @@ const moonPayRampProvider: RampProviderExecutor = {
       );
     }
     const moonPay = getMoonPayConfig(c);
+    const fiatCurrency = resolveFiatCurrency(input);
 
     const redirectUrl = await buildSignedMoonPayWidgetUrl(moonPay.onrampUrl, moonPay.secretKey, {
       apiKey: moonPay.apiKey,
-      baseCurrencyCode: "usd",
+      baseCurrencyCode: fiatCurrency.toLowerCase(),
       baseCurrencyAmount: input.fiatAmount,
       currencyCode: normalizeMoonPayCurrencyCode(input.cryptoToken),
       walletAddress: destinationWalletAddress,
@@ -1052,12 +1064,13 @@ const moonPayRampProvider: RampProviderExecutor = {
     );
     const moonPay = getMoonPayConfig(c);
     const externalTransactionId = `sdp_offramp_${crypto.randomUUID()}`;
+    const fiatCurrency = resolveFiatCurrency(input);
 
     const redirectUrl = await buildSignedMoonPayWidgetUrl(moonPay.offrampUrl, moonPay.secretKey, {
       apiKey: moonPay.apiKey,
       baseCurrencyCode: normalizeMoonPayCurrencyCode(input.cryptoToken),
       baseCurrencyAmount: input.cryptoAmount,
-      quoteCurrencyCode: "usd",
+      quoteCurrencyCode: fiatCurrency.toLowerCase(),
       refundWalletAddress: sourceWalletAddress,
       redirectURL: input.redirectUrl,
       externalCustomerId: input.kycReference,
@@ -1085,6 +1098,7 @@ const lightsparkRampProvider: RampProviderExecutor = {
     }
 
     const cryptoCurrency = normalizeLightsparkCurrencyCode(input.cryptoToken);
+    const fiatCurrency = resolveFiatCurrency(input);
     const fiatAmountMinorUnits = toLightsparkMinorUnitsInteger(
       parseDecimalAmount(input.fiatAmount, 2),
       "fiatAmount"
@@ -1110,7 +1124,7 @@ const lightsparkRampProvider: RampProviderExecutor = {
         source: {
           sourceType: "REALTIME_FUNDING",
           customerId,
-          currency: "USD",
+          currency: fiatCurrency,
         },
         destination: {
           destinationType: "ACCOUNT",
@@ -1140,6 +1154,7 @@ const lightsparkRampProvider: RampProviderExecutor = {
       "kycReference"
     );
     const cryptoCurrency = normalizeLightsparkCurrencyCode(input.cryptoToken);
+    const fiatCurrency = resolveFiatCurrency(input);
     const cryptoAmountMinorUnits = toLightsparkMinorUnitsInteger(
       parseDecimalAmount(input.cryptoAmount, getLightsparkCurrencyDecimals(cryptoCurrency)),
       "cryptoAmount"
@@ -1157,7 +1172,7 @@ const lightsparkRampProvider: RampProviderExecutor = {
         destination: {
           destinationType: "ACCOUNT",
           accountId: destinationAccountId,
-          currency: "USD",
+          currency: fiatCurrency,
         },
         lockedCurrencySide: "SENDING",
         lockedCurrencyAmount: cryptoAmountMinorUnits,

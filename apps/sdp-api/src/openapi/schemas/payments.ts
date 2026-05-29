@@ -486,12 +486,12 @@ export const executeOnrampRequestSchema = executeOnrampSchemaBase
       example: "USDC",
     }),
     fiatCurrency: withOpenApi(executeOnrampSchemaBase.shape.fiatCurrency, {
-      description: "Fiat currency for on-ramp. USD only.",
+      description: "Fiat currency for on-ramp.",
       example: "USD",
     }),
     fiatAmount: withOpenApi(executeOnrampSchemaBase.shape.fiatAmount, {
       description:
-        "Fiat amount in USD to purchase crypto with. MoonPay on-ramp requires at least 20 USD.",
+        "Fiat amount to purchase crypto with. MoonPay on-ramp requires at least 20 units of the selected fiat currency.",
       example: "100.00",
     }),
     kycReference: withOpenApi(executeOnrampSchemaBase.shape.kycReference, {
@@ -537,7 +537,7 @@ export const executeOfframpRequestSchema = executeOfframpSchemaBase
       example: "USDC",
     }),
     fiatCurrency: withOpenApi(executeOfframpSchemaBase.shape.fiatCurrency, {
-      description: "Fiat payout currency. USD only.",
+      description: "Fiat payout currency.",
       example: "USD",
     }),
     cryptoAmount: withOpenApi(executeOfframpSchemaBase.shape.cryptoAmount, {
