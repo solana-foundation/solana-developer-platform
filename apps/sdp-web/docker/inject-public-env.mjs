@@ -73,43 +73,54 @@ function* walkFiles(dir) {
   }
 }
 
+function removeMarker() {
+  try {
+    fs.closeSync(markerFd);
+  } catch {}
+  try {
+    fs.unlinkSync(MARKER);
+  } catch {}
+}
+
 let rewritten = 0;
-for (const dir of targetDirs) {
-  for (const file of walkFiles(dir)) {
-    let buffer;
-    try {
-      buffer = fs.readFileSync(file);
-    } catch {
-      continue;
-    }
-    if (buffer.includes(0)) {
-      continue;
-    }
-    const content = buffer.toString("utf8");
-    if (!content.includes("__sdp_rt__") && !content.includes("__SDP_RT_")) {
-      continue;
-    }
-    const next = content
-      .replace(URL_PLACEHOLDER, (match, name) => {
-        const value = resolve(name.toUpperCase());
-        return value === null ? match : value.replace(/\/+$/, "");
-      })
-      .replace(BARE_PLACEHOLDER, (match, name) => {
-        const value = resolve(name);
-        return value === null ? match : value;
-      });
-    if (next !== content) {
-      fs.writeFileSync(file, next);
-      rewritten += 1;
+try {
+  for (const dir of targetDirs) {
+    for (const file of walkFiles(dir)) {
+      let buffer;
+      try {
+        buffer = fs.readFileSync(file);
+      } catch {
+        continue;
+      }
+      if (buffer.includes(0)) {
+        continue;
+      }
+      const content = buffer.toString("utf8");
+      if (!content.includes("__sdp_rt__") && !content.includes("__SDP_RT_")) {
+        continue;
+      }
+      const next = content
+        .replace(URL_PLACEHOLDER, (match, name) => {
+          const value = resolve(name.toUpperCase());
+          return value === null ? match : value.replace(/\/+$/, "");
+        })
+        .replace(BARE_PLACEHOLDER, (match, name) => {
+          const value = resolve(name);
+          return value === null ? match : value;
+        });
+      if (next !== content) {
+        fs.writeFileSync(file, next);
+        rewritten += 1;
+      }
     }
   }
+} catch (err) {
+  removeMarker();
+  throw err;
 }
 
 if (unresolved.size > 0) {
-  // Remove the marker so the next restart retries injection instead of
-  // silently serving pages with raw __SDP_RT_*__ placeholders.
-  fs.closeSync(markerFd);
-  fs.unlinkSync(MARKER);
+  removeMarker();
   console.error(
     `inject-public-env: no runtime value for ${[...unresolved].sort().join(", ")}; refusing to start with a broken bundle`
   );
