@@ -6,17 +6,17 @@ permissions:
   pull-requests: write
 
 on:
-  pull_request:
+  pull_request_target:
 
 jobs:
   ramp_rails_drift:
     name: Ramp Rails Drift
     runs-on: ubuntu-latest
-    if: github.event.pull_request.head.repo.full_name == github.repository
     steps:
-      - name: Checkout
+      - name: Checkout trusted base
         uses: actions/checkout@v6
         with:
+          ref: ${{ github.event.pull_request.base.sha }}
           fetch-depth: 0
 
       - name: Setup pnpm
@@ -44,6 +44,21 @@ jobs:
 
       - name: Install Doppler CLI
         uses: dopplerhq/cli-action@v4
+
+      - name: Read PR generated support file
+        env:
+          HEAD_REPO_URL: ${{ github.event.pull_request.head.repo.clone_url }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          CANDIDATE_PATH: ${{ github.workspace }}/apps/sdp-api/.ramp-rails/ramp-support.pr.generated.ts
+        run: |
+          mkdir -p "$(dirname "${CANDIDATE_PATH}")"
+          git fetch --no-tags --depth=1 "${HEAD_REPO_URL}" "${HEAD_SHA}"
+          if git show FETCH_HEAD:packages/sdp-types/src/generated/ramp-support.generated.ts > "${CANDIDATE_PATH}"; then
+            echo "RAMP_RAILS_CANDIDATE_GENERATED_PATH=${CANDIDATE_PATH}" >> "${GITHUB_ENV}"
+          else
+            echo "RAMP_RAILS_CANDIDATE_GENERATED_PATH=${CANDIDATE_PATH}" >> "${GITHUB_ENV}"
+            echo "" > "${CANDIDATE_PATH}"
+          fi
 
       - name: Refresh ramp rails
         env:
