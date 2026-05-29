@@ -1,0 +1,21 @@
+{
+  "title": "Payments",
+  "pages": [
+    "index",
+    "concepts",
+    "---Send Payments---",
+    "send-basic-payment",
+    "send-payment-with-memo",
+    "send-payouts",
+    "---Accept Payments---",
+    "accept-overview",
+    "accept-verification",
+    "accept-indexing",
+    "---Ramps---",
+    "ramps",
+    "ramps-providers",
+    "---Wallet Operations---",
+    "wallet-policies",
+    "wallet-balances"
+  ]
+}

@@ -1,0 +1,150 @@
+---
+title: Deploy a Token
+description: Deploy a created token to the Solana blockchain.
+steps:
+  - Open the deploy action
+  - Deploy the token
+  - Confirm deployment
+---
+
+After [creating a token](/docs/tokens/create-a-token), deploy it onchain. Deployment creates the mint account on Solana and assigns authorities to your configured wallets.
+
+## Prerequisites
+
+- A token in `pending` status
+- A [wallet configured](/docs/guides/setup-wallets) as the token's main signer
+
+## How it works
+
+<HowItWorks>
+
+<Step number={1} title="Open the deploy action">
+
+Locate the token you want to deploy. Deployment is irreversible — the mint account is created onchain and authorities are locked to your configured wallets.
+
+<StepPanel>
+<Tabs items={["UI", "API"]} groupId="how-it-works">
+<Tab value="UI">
+
+In the **Issuance** list, click the token with a `Pending` badge to open its detail page.
+
+The **Deploy** button appears in the token header and in the fund management panel.
+
+![Token detail page showing Not deployed status and Deploy button](/images/tokens/token-detail-pending.png)
+
+</Tab>
+<Tab value="API">
+
+You need the `tokenId` returned when you created the token. If you don't have it, list your tokens:
+
+```bash
+curl https://api.solana.com/v1/issuance/tokens \
+  -H "Authorization: Bearer sk_test_..."
+```
+
+Note the `id` field (e.g., `tok_abc123`) — required for all deploy and post-deploy calls.
+
+</Tab>
+</Tabs>
+</StepPanel>
+
+</Step>
+
+<Step number={2} title="Deploy the token">
+
+Use **execute mode** when SDP controls the signing wallet, or **prepare mode** when you need to sign externally.
+
+<StepPanel>
+<Tabs items={["UI", "API"]} groupId="how-it-works">
+<Tab value="UI">
+
+Click **Deploy**. A modal shows the signer wallet that will authorize the transaction. Review the wallet ID and public key, then click **Deploy now**.
+
+![Deploy token modal showing the signer wallet details](/images/tokens/token-deploy-modal.png)
+
+A confirmation prompt asks you to confirm the on-chain submission. Click **Deploy now** to proceed.
+
+![Deploy token confirmation dialog](/images/tokens/token-deploy-confirm.png)
+
+SDP submits the transaction to Solana and polls for confirmation. The page updates automatically when deployment completes.
+
+</Tab>
+<Tab value="API">
+
+**Execute mode** — SDP signs and submits:
+
+```bash
+curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/deploy \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Idempotency-Key: deploy-acme-001"
+```
+
+```typescript
+const res = await fetch(
+  "https://api.solana.com/v1/issuance/tokens/tok_abc123/deploy",
+  {
+    method: "POST",
+    headers: {
+      Authorization: "Bearer sk_test_...",
+      "Idempotency-Key": "deploy-acme-001",
+    },
+  }
+);
+const { data } = await res.json();
+// data.token.mintAddress — the onchain mint address
+```
+
+**Prepare mode** — returns an unsigned transaction:
+
+```bash
+curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/deploy/prepare \
+  -H "Authorization: Bearer sk_test_..."
+```
+
+Sign `data.transaction.serialized` with your private key and submit to Solana. See [Prepare vs Execute](/docs/tokens/prepare-vs-execute).
+
+Always pass an `Idempotency-Key` — retrying with the same key after a network error prevents double-deployment.
+
+</Tab>
+</Tabs>
+</StepPanel>
+
+</Step>
+
+<Step number={3} title="Confirm deployment">
+
+Once the transaction is confirmed, the token is active and ready for minting and transfers.
+
+<StepPanel>
+<Tabs items={["UI", "API"]} groupId="how-it-works">
+<Tab value="UI">
+
+The token status badge changes from `Not deployed` to the onchain mint address. The detail page shows Mint and Burn actions in the Operations tab, and a confirmed deploy transaction in the Transactions table.
+
+![Deployed token detail page with mint address, Operations tab, and confirmed deploy transaction](/images/tokens/token-deployed.png)
+
+</Tab>
+<Tab value="API">
+
+The deploy response includes the confirmed state:
+
+```typescript
+// data.token.status      — "active"
+// data.token.mintAddress — e.g., "AcMeXYZ..."
+```
+
+Fetch the token at any time to verify:
+
+```bash
+curl https://api.solana.com/v1/issuance/tokens/tok_abc123 \
+  -H "Authorization: Bearer sk_test_..."
+```
+
+</Tab>
+</Tabs>
+</StepPanel>
+
+</Step>
+
+</HowItWorks>
+

@@ -1,7 +1,9 @@
+import { findNeighbour } from "fumadocs-core/page-tree";
 import { Tab, Tabs } from "fumadocs-ui/components/tabs";
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import type { ComponentType } from "react";
+import { HOME_TOC } from "@/components/docs-shell/home";
 import { DocsBody, DocsDescription, DocsPage, DocsTitle } from "@/components/docs-shell/page";
 import { getDocsPagePath } from "@/lib/site";
 import { source } from "@/lib/source";
@@ -15,10 +17,12 @@ const mdxComponents = getMDXComponents({
 type DocsData = {
   title: string;
   description?: string;
+  hideTitle?: boolean;
   body?: ComponentType<{ components?: Record<string, unknown> }>;
   content?: ComponentType<{ components?: Record<string, unknown> }>;
   toc?: Parameters<typeof DocsPage>[0]["toc"];
   full?: Parameters<typeof DocsPage>[0]["full"];
+  steps?: string[];
 };
 
 type DocsPageProps = {
@@ -53,7 +57,7 @@ export default async function Page({ params }: DocsPageProps) {
   const { slug } = await params;
 
   if (!slug || slug.length === 0) {
-    redirect("/docs/what-is-solana-developer-platform");
+    redirect("/docs/home");
   }
 
   const resolvedPage = resolvePage(slug);
@@ -69,11 +73,36 @@ export default async function Page({ params }: DocsPageProps) {
     notFound();
   }
 
+  const neighbours = findNeighbour(source.pageTree, resolvedPage.page.url);
+  const prev = neighbours.previous
+    ? { name: String(neighbours.previous.name), url: neighbours.previous.url }
+    : undefined;
+  const next = neighbours.next
+    ? { name: String(neighbours.next.name), url: neighbours.next.url }
+    : undefined;
+
+  const isHome = resolvedPage.pageSlug.join("/") === "home";
+  const baseToc = isHome ? HOME_TOC : (data.toc ?? []);
+  const steps = data.steps ?? [];
+  let toc = baseToc;
+  if (steps.length > 0) {
+    const stepItems = steps.map((title, i) => ({ title, url: `#step-${i + 1}`, depth: 3 }));
+    const howItWorksIdx = baseToc.findIndex((item) => item.url === "#how-it-works");
+    toc =
+      howItWorksIdx >= 0
+        ? [
+            ...baseToc.slice(0, howItWorksIdx + 1),
+            ...stepItems,
+            ...baseToc.slice(howItWorksIdx + 1),
+          ]
+        : [...baseToc, ...stepItems];
+  }
+
   return (
-    <DocsPage toc={data.toc} full={data.full}>
-      <DocsTitle>{data.title}</DocsTitle>
-      <DocsDescription>{data.description}</DocsDescription>
-      <DocsBody>
+    <DocsPage toc={toc} full={data.full}>
+      {!data.hideTitle && <DocsTitle>{data.title}</DocsTitle>}
+      {!data.hideTitle && <DocsDescription>{data.description}</DocsDescription>}
+      <DocsBody prev={prev} next={next} bare={data.hideTitle}>
         <MDX components={mdxComponents} />
       </DocsBody>
     </DocsPage>
@@ -94,11 +123,15 @@ export async function generateMetadata({ params }: DocsPageProps): Promise<Metad
 
   const data = resolvedPage.page.data as DocsData;
 
+  const pagePath = getDocsPagePath(Array.isArray(slug) ? slug.join("/") : "");
   return {
     title: data.title,
     description: data.description,
     alternates: {
-      canonical: getDocsPagePath(Array.isArray(slug) ? slug.join("/") : ""),
+      canonical: pagePath,
+      types: {
+        "text/markdown": `${pagePath}.md`,
+      },
     },
   };
 }
