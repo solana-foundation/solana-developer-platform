@@ -23,7 +23,7 @@
     "lint": "biome check src/",
     "lint:fix": "biome check --write src/",
     "openapi:generate": "tsx scripts/generate-openapi.ts",
-    "rails:discover": "doppler run --config ${DOPPLER_CONFIG:-dev_personal} -- tsx scripts/discover-ramp-rails.ts",
+    "rails:discover": "doppler run --config ${DOPPLER_CONFIG:-dev} -- tsx scripts/discover-ramp-rails.ts",
     "rails:generate": "tsx scripts/discover-ramp-rails.ts emit",
     "rails:drift": "tsx scripts/check-ramp-rails-drift.ts",
     "test": "pnpm test:workers && pnpm test:node",
