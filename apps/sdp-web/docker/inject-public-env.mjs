@@ -18,7 +18,11 @@ function escapeValue(value) {
   return value
     .replace(/\\/g, "\\\\")
     .replace(/"/g, '\\"')
-    .replace(/[\r\n]+/g, "");
+    .replace(/'/g, "\\'")
+    .replace(/`/g, "\\`")
+    .replace(/\$/g, "\\$")
+    .replace(/[\r\n]+/g, "")
+    .replace(/<\/(script)/gi, "<\\/$1");
 }
 
 function resolve(varName) {
