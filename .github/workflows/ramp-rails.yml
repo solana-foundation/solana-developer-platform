@@ -1,0 +1,102 @@
+name: Ramp Rails Drift
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+on:
+  pull_request:
+
+jobs:
+  ramp_rails_drift:
+    name: Ramp Rails Drift
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10.16.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate Doppler bootstrap secret
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
+        run: |
+          if [ -z "${DOPPLER_TOKEN}" ]; then
+            echo "DOPPLER_TOKEN_CI must be configured for ramp rails drift checks." >&2
+            exit 1
+          fi
+
+      - name: Install Doppler CLI
+        uses: dopplerhq/cli-action@v4
+
+      - name: Refresh ramp rails
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
+          DOPPLER_CONFIG: dev_ci
+        run: pnpm --filter @sdp/api rails:discover --emit --strict
+
+      - name: Build drift comment
+        id: drift
+        run: pnpm --filter @sdp/api rails:drift
+
+      - name: Upsert drift PR comment
+        uses: actions/github-script@v8
+        env:
+          HAS_CHANGES: ${{ steps.drift.outputs.has_changes }}
+          COMMENT_PATH: ${{ steps.drift.outputs.comment_path }}
+        with:
+          script: |
+            const fs = require("node:fs/promises");
+            const marker = "<!-- sdp-ramp-rails-drift -->";
+            const { owner, repo } = context.repo;
+            const issue_number = context.payload.pull_request.number;
+            const comments = await github.rest.issues.listComments({
+              owner,
+              repo,
+              issue_number,
+              per_page: 100,
+            });
+            const existing = comments.data.find(
+              (comment) => comment.user?.type === "Bot" && comment.body?.includes(marker)
+            );
+
+            if (process.env.HAS_CHANGES === "true") {
+              const body = await fs.readFile(process.env.COMMENT_PATH, "utf8");
+              if (existing) {
+                await github.rest.issues.updateComment({
+                  owner,
+                  repo,
+                  comment_id: existing.id,
+                  body,
+                });
+              } else {
+                await github.rest.issues.createComment({
+                  owner,
+                  repo,
+                  issue_number,
+                  body,
+                });
+              }
+            } else if (existing) {
+              await github.rest.issues.deleteComment({
+                owner,
+                repo,
+                comment_id: existing.id,
+              });
+            }
