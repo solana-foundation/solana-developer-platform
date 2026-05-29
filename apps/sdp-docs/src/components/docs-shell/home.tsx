@@ -86,7 +86,7 @@ const quickstart = [
   {
     title: "Set up your account",
     desc: "Create your org, provision a custody wallet, and generate scoped API keys.",
-    href: "/docs/getting-started",
+    href: "/docs/guides/setup-organization",
   },
   {
     title: "Issue your first token",
@@ -116,7 +116,7 @@ export function DocsHome() {
           with built-in compliance controls.
         </p>
         <div className="launch-home-actions">
-          <Link href="/docs/getting-started" className="launch-home-cta-primary">
+          <Link href="/docs/guides/setup-organization" className="launch-home-cta-primary">
             Dashboard setup <ArrowRight size={14} aria-hidden="true" />
           </Link>
           <Link href="/docs/reference/api" className="launch-home-cta-secondary">

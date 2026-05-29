@@ -36,11 +36,34 @@ function isAcceptable(parts: AcceptEntry[]): boolean {
   );
 }
 
+function mergeVary(res: NextResponse, value: string): void {
+  const existing = res.headers.get("Vary");
+  if (!existing) {
+    res.headers.set("Vary", value);
+    return;
+  }
+  const tokens = new Set(
+    existing
+      .split(",")
+      .map((token) => token.trim())
+      .filter(Boolean)
+      .map((token) => token.toLowerCase())
+  );
+  if (tokens.has(value.toLowerCase()) || tokens.has("*")) return;
+  res.headers.set("Vary", `${existing}, ${value}`);
+}
+
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
   // Only handle docs content pages — skip assets, API routes, explicit extensions
   if (!pathname.startsWith("/docs/") || pathname.match(/\.[a-z]{2,5}$/i)) {
+    return NextResponse.next();
+  }
+
+  // Bypass for Next.js RSC / prefetch requests — they negotiate via `text/x-component`
+  // and would otherwise fall through to the 406 branch below.
+  if (req.headers.get("rsc") || req.headers.get("next-router-prefetch")) {
     return NextResponse.next();
   }
 
@@ -63,7 +86,7 @@ export function middleware(req: NextRequest) {
 
   // HTML response: add Vary and Link alternate headers
   const res = NextResponse.next();
-  res.headers.set("Vary", "Accept");
+  mergeVary(res, "Accept");
   res.headers.set("Link", `<${pathname}.md>; rel="alternate"; type="text/markdown"`);
   return res;
 }

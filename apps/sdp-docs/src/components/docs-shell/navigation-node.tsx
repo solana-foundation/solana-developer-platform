@@ -4,7 +4,7 @@ import type { Node as PageTreeNode } from "fumadocs-core/page-tree";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
 
 function getNodeKey(node: PageTreeNode) {
@@ -29,8 +29,12 @@ type NavigationNodeProps = {
 
 export function NavigationNode({ node, depth = 0 }: NavigationNodeProps) {
   const pathname = usePathname();
-  const initiallyOpen = useMemo(() => nodeContainsPath(node, pathname), [node, pathname]);
-  const [isOpen, setIsOpen] = useState(initiallyOpen);
+  const containsPath = useMemo(() => nodeContainsPath(node, pathname), [node, pathname]);
+  const [isOpen, setIsOpen] = useState(containsPath);
+
+  useEffect(() => {
+    if (containsPath) setIsOpen(true);
+  }, [containsPath]);
 
   if (node.type === "separator") {
     return node.name ? (

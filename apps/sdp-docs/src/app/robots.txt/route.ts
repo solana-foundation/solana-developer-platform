@@ -3,6 +3,7 @@ import { docsOrigin } from "@/lib/site";
 export const runtime = "nodejs";
 
 export function GET() {
+  const host = new URL(docsOrigin).host;
   const body = [
     "User-agent: *",
     "Allow: /",
@@ -10,7 +11,7 @@ export function GET() {
     "Content-Signal: search=yes, ai-input=yes, ai-train=yes",
     "",
     `Sitemap: ${docsOrigin}/sitemap.xml`,
-    `Host: ${docsOrigin}`,
+    `Host: ${host}`,
     "",
   ].join("\n");
 

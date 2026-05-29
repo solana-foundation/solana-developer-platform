@@ -123,9 +123,7 @@ import { DocsPage, DocsTitle, DocsDescription, DocsBody } from "@/components/doc
 
 ### Navigation node icons (`navigation-node.tsx`)
 
-Icons are assigned by keyword matching on page name. To add a new icon mapping, edit `getPageIcon()` in `src/components/docs-shell/navigation-node.tsx`.
-
-Current mappings: wallet → WalletCards, key/api key → KeyRound, payment/transfer → CreditCard, compliance/freeze → ShieldCheck, project/organization → Landmark, issuance/token/mint → CircleDot, health → HeartPulse, provider/setup → FileKey, getting/start → Rocket, reference → BookOpen, fallback → Activity.
+The current sidebar does not render per-page icons. Page and folder links are text-only; only the folder expand/collapse chevron uses an icon (`ChevronDown` / `ChevronRight` from Lucide). If you want to reintroduce keyword-based icon mapping, add it to `NavigationNode` in `src/components/docs-shell/navigation-node.tsx`.
 
 ---
 
