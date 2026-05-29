@@ -2051,9 +2051,7 @@ describe("Issuance Routes", () => {
           expect(deleteAllowlistEntrySpy).not.toHaveBeenCalled();
 
           const row = await db
-            .prepare(
-              "SELECT id, status FROM token_allowlists WHERE token_id = ? AND address = ?"
-            )
+            .prepare("SELECT id, status FROM token_allowlists WHERE token_id = ? AND address = ?")
             .bind(tokenId, TEST_SOLANA_ADDRESSES.wallet1)
             .first<{ id: string; status: string }>();
           expect(row?.id).toBe(entry.id);

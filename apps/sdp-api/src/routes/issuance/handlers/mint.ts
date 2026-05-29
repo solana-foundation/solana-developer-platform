@@ -368,12 +368,7 @@ export const executeMint = async (c: AppContext) => {
   // record exists. On idempotent replay, sync is a cheap one-RPC no-op
   // (`isWalletOnList` returns true) since the original call drove the
   // wallet on-chain.
-  const signer = await createOrgSigner(
-    c.env,
-    auth.organizationId,
-    auth.projectId,
-    signingWalletId
-  );
+  const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId, signingWalletId);
   const mosaic = createMosaicService(c.env, signer);
   const addedToAllowlist = ablListAddress
     ? await syncDestinationToOnChainAllowlist({
