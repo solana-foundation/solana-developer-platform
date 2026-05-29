@@ -91,6 +91,9 @@ services:
       NEXT_PUBLIC_SDP_WEB_URL: ${NEXT_PUBLIC_SDP_WEB_URL:-http://localhost:3000}
       NEXT_PUBLIC_SDP_DOCS_URL: ${NEXT_PUBLIC_SDP_DOCS_URL:-http://localhost:3001}
       NEXT_PUBLIC_SDP_API_URL: ${NEXT_PUBLIC_SDP_API_URL:-http://localhost:8787}
+    depends_on:
+      sdp-api:
+        condition: service_healthy
 
 volumes:
   sdp-postgres-data:

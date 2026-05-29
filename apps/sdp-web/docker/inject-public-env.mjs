@@ -7,6 +7,15 @@ if (targetDirs.length === 0) {
   process.exit(1);
 }
 
+// Skip the full tree walk on container restarts — the first run writes a
+// marker after successfully rewriting placeholders. On subsequent starts the
+// bundle already contains concrete values, so there is nothing to replace.
+const MARKER = path.join(targetDirs[0], ".sdp-env-injected");
+if (fs.existsSync(MARKER)) {
+  console.log("inject-public-env: already applied (marker exists), skipping");
+  process.exit(0);
+}
+
 // The URL shape is a valid absolute URL, so its origin survives new URL() /
 // `.origin` / path composition at build time and stays swappable at runtime.
 const URL_PLACEHOLDER = /https?:\/\/__sdp_rt__([a-z0-9_]+)__\.invalid/g;
@@ -91,4 +100,5 @@ if (unresolved.size > 0) {
   );
   process.exit(1);
 }
+fs.writeFileSync(MARKER, new Date().toISOString());
 console.log(`inject-public-env: rewrote ${rewritten} file(s)`);
