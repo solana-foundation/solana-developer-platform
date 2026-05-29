@@ -105,8 +105,9 @@ export function DashboardWorkspaceProvider({
     () => projects.find((project) => project.slug === "default-production") ?? null,
     [projects]
   );
+
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(
-    initialSelectedProjectId ?? sandboxProject?.id ?? null
+    sandboxProject?.id ?? null
   );
   const sdpEnvironment: SdpEnvironment =
     selectedProjectId && selectedProjectId === productionProject?.id ? "production" : "sandbox";

@@ -37,7 +37,11 @@ describe("wallet-scoped route coverage inventory", () => {
 
   it("tracks every wallet-scoped payments route", () => {
     const allRoutes = extractRoutes(paymentsRoutes);
-    const nonWalletScopedRoutes = new Set(["POST /ramps/sandbox/simulate"]);
+    const nonWalletScopedRoutes = new Set([
+      "GET /ramps/offramp/currency",
+      "GET /ramps/onramp/currency",
+      "POST /ramps/sandbox/simulate",
+    ]);
 
     expect(allRoutes.filter((route) => !nonWalletScopedRoutes.has(route))).toEqual([
       "GET /transfers",

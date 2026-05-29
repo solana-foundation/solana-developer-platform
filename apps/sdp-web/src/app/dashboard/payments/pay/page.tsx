@@ -8,7 +8,7 @@ import type { OnboardingStatusResponse } from "../../onboarding-status";
 import { PaymentsActionPage } from "../payments-action-page";
 import { fetchPaymentsIssuedTokenSymbols } from "../payments-page.data";
 
-export default async function PaymentsSendPage() {
+export default async function PaymentsPayPage() {
   const { userId, orgId } = await auth();
   if (!userId) {
     redirect(await getAuthEntryPath());
@@ -16,8 +16,8 @@ export default async function PaymentsSendPage() {
   if (!orgId) {
     redirect("/dashboard");
   }
-  if (DASHBOARD_FEATURE_FLAGS.paymentsV2) {
-    redirect("/dashboard/payments/pay");
+  if (!DASHBOARD_FEATURE_FLAGS.paymentsV2) {
+    redirect("/dashboard/payments/send");
   }
 
   const apiClient = await createSdpApiClient();
@@ -43,6 +43,7 @@ export default async function PaymentsSendPage() {
   return (
     <PaymentsActionPage
       mode="send"
+      actionLabel="Pay"
       wallets={[]}
       walletsError={null}
       issuedTokenSymbolsByMint={issuedTokenSymbolsByMint}

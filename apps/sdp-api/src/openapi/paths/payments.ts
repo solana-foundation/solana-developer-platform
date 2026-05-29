@@ -6,6 +6,8 @@ import {
   executeOfframpRequestSchema,
   executeOnrampRequestSchema,
   paymentListTransfersQuerySchema,
+  paymentOfframpCurrenciesQuerySchema,
+  paymentOnrampCurrenciesQuerySchema,
   paymentTransferIdParamsSchema,
   paymentWalletIdParamsSchema,
   prepareTransferRequestSchema,
@@ -14,7 +16,9 @@ import {
 } from "../schemas";
 import { errorResponses, jsonContent } from "./helpers";
 import {
+  offrampCurrenciesResponse,
   offrampExecutionResponse,
+  onrampCurrenciesResponse,
   onrampExecutionResponse,
   prepareTransferResponse,
   sandboxTransferSimulationResponse,
@@ -185,6 +189,48 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         content: jsonContent(transferResponse),
       },
       ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/payments/ramps/onramp/currency",
+    tags: ["Payments"],
+    summary: "List on-ramp currency support",
+    operationId: "listPaymentOnrampCurrencies",
+    description:
+      "Lists generated fiat-to-crypto on-ramp pairs and the providers that support each pair. Supports optional source, destination rail, and provider filters.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      query: paymentOnrampCurrenciesQuerySchema,
+    },
+    responses: {
+      200: {
+        description: "On-ramp currency support",
+        content: jsonContent(onrampCurrenciesResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/payments/ramps/offramp/currency",
+    tags: ["Payments"],
+    summary: "List off-ramp currency support",
+    operationId: "listPaymentOfframpCurrencies",
+    description:
+      "Lists generated crypto-to-fiat off-ramp pairs and the providers that support each pair. Supports optional source rail, destination fiat, and provider filters.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      query: paymentOfframpCurrenciesQuerySchema,
+    },
+    responses: {
+      200: {
+        description: "Off-ramp currency support",
+        content: jsonContent(offrampCurrenciesResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 500]),
     },
   });
 

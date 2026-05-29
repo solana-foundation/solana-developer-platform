@@ -9,6 +9,8 @@ import {
   getTransfer,
   getWalletBalances,
   getWalletPolicy,
+  listOfframpCurrencies,
+  listOnrampCurrencies,
   listTransfers,
   prepareTransfer,
   simulateSandboxTransfer,
@@ -43,6 +45,8 @@ payments.post(
 payments.post("/transfers", requirePermissions("payments:write", "wallets:read"), createTransfer);
 payments.get("/transfers", requirePermissions("payments:read"), listTransfers);
 payments.get("/transfers/:transferId", requirePermissions("payments:read"), getTransfer);
+payments.get("/ramps/onramp/currency", requirePermissions("payments:read"), listOnrampCurrencies);
+payments.get("/ramps/offramp/currency", requirePermissions("payments:read"), listOfframpCurrencies);
 payments.post(
   "/ramps/onramp/execute",
   requirePermissions("payments:write", "wallets:read"),

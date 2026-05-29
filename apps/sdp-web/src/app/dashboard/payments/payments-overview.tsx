@@ -16,6 +16,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { DASHBOARD_FEATURE_FLAGS } from "@/lib/dashboard-feature-flags";
 import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
 import {
   formatCurrencyAmount,
@@ -193,28 +194,30 @@ export function PaymentsOverview({
 
   return (
     <div className="grid min-w-0 gap-6 overflow-x-hidden">
-      <SectionEntry>
-        <div className="flex min-w-0 flex-wrap items-center gap-3">
-          <Button
-            type="button"
-            className="rounded-full px-5 whitespace-nowrap"
-            disabled={!hasWallets}
-            iconLeft={<ArrowUpRight className="size-4" />}
-            onClick={() => router.push("/dashboard/payments/send")}
-          >
-            Send
-          </Button>
-          <Button
-            type="button"
-            className="rounded-full px-5 whitespace-nowrap"
-            disabled={!hasWallets}
-            iconLeft={<ArrowDownLeft className="size-4" />}
-            onClick={() => router.push("/dashboard/payments/receive")}
-          >
-            Receive
-          </Button>
-        </div>
-      </SectionEntry>
+      {DASHBOARD_FEATURE_FLAGS.paymentsV2 ? null : (
+        <SectionEntry>
+          <div className="flex min-w-0 flex-wrap items-center gap-3">
+            <Button
+              type="button"
+              className="rounded-full px-5 whitespace-nowrap"
+              disabled={!hasWallets}
+              iconLeft={<ArrowUpRight className="size-4" />}
+              onClick={() => router.push("/dashboard/payments/send")}
+            >
+              Send
+            </Button>
+            <Button
+              type="button"
+              className="rounded-full px-5 whitespace-nowrap"
+              disabled={!hasWallets}
+              iconLeft={<ArrowDownLeft className="size-4" />}
+              onClick={() => router.push("/dashboard/payments/receive")}
+            >
+              Receive
+            </Button>
+          </div>
+        </SectionEntry>
+      )}
 
       <SectionEntry delay={0.04}>
         <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(20rem,1fr)]">
