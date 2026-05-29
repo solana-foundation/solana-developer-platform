@@ -77,7 +77,7 @@
             "description": "Creates a new API key. The full key is returned once.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Primary Key\",\n  \"description\": \"Used by backend service.\",\n  \"role\": \"api_developer\",\n  \"permissions\": [\n    \"tokens:read\",\n    \"tokens:write\"\n  ],\n  \"environment\": \"sandbox\",\n  \"walletScope\": \"selected\",\n  \"allowedIps\": [\n    \"203.0.113.0/24\"\n  ],\n  \"expiresAt\": \"2025-12-31T00:00:00.000Z\",\n  \"signingWalletId\": \"privy_wallet_123\",\n  \"signingWalletIds\": [\n    \"privy_wallet_123\",\n    \"dfns_wallet_456\"\n  ],\n  \"walletBindings\": [\n    {\n      \"walletId\": \"\",\n      \"permissions\": [\n        \"tokens:read\"\n      ]\n    }\n  ],\n  \"provisionWallet\": false,\n  \"walletLabel\": \"Mint authority wallet\",\n  \"walletPurpose\": \"mint_authority\"\n}",
+              "raw": "{\n  \"name\": \"Primary Key\",\n  \"description\": \"Used by backend service.\",\n  \"role\": \"api_developer\",\n  \"permissions\": [\n    \"tokens:read\",\n    \"tokens:write\"\n  ],\n  \"walletScope\": \"selected\",\n  \"allowedIps\": [\n    \"203.0.113.0/24\"\n  ],\n  \"expiresAt\": \"2025-12-31T00:00:00.000Z\",\n  \"signingWalletId\": \"privy_wallet_123\",\n  \"signingWalletIds\": [\n    \"privy_wallet_123\",\n    \"dfns_wallet_456\"\n  ],\n  \"walletBindings\": [\n    {\n      \"walletId\": \"\",\n      \"permissions\": [\n        \"tokens:read\"\n      ]\n    }\n  ],\n  \"provisionWallet\": false,\n  \"walletLabel\": \"Mint authority wallet\",\n  \"walletPurpose\": \"mint_authority\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -187,7 +187,7 @@
             "description": "Initializes wallet signing for the organization or project by creating an active signing configuration.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"provider\": \"local\",\n  \"projectId\": \"\",\n  \"walletLabel\": \"\"\n}",
+              "raw": "{\n  \"provider\": \"local\",\n  \"walletLabel\": \"\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -211,7 +211,7 @@
             "description": "Ensures the target provider is active and sets it as the default signing provider for the requested scope. Existing on-chain authorities are not rotated.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"provider\": \"local\",\n  \"projectId\": \"\",\n  \"walletLabel\": \"\"\n}",
+              "raw": "{\n  \"provider\": \"local\",\n  \"walletLabel\": \"\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -244,7 +244,7 @@
             "description": "Provisions a new wallet for the resolved default signing provider configuration, or for an explicitly targeted provider.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"projectId\": \"prj_example\",\n  \"provider\": \"privy\",\n  \"label\": \"Mint authority wallet\",\n  \"purpose\": \"mint_authority\",\n  \"setDefault\": true\n}",
+              "raw": "{\n  \"provider\": \"privy\",\n  \"label\": \"Mint authority wallet\",\n  \"purpose\": \"mint_authority\",\n  \"setDefault\": true\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -268,7 +268,7 @@
             "description": "Deletes a wallet from the resolved default signing provider configuration, or from an explicitly targeted provider when that provider supports wallet deletion.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"projectId\": \"prj_example\",\n  \"provider\": \"anchorage\",\n  \"walletId\": \"anchorage_wallet_123\"\n}",
+              "raw": "{\n  \"provider\": \"anchorage\",\n  \"walletId\": \"anchorage_wallet_123\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -292,7 +292,7 @@
             "description": "Sets the default wallet for the resolved default provider config, or for an explicitly targeted provider.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"projectId\": \"prj_example\",\n  \"provider\": \"privy\",\n  \"walletId\": \"privy_wallet_123\"\n}",
+              "raw": "{\n  \"provider\": \"privy\",\n  \"walletId\": \"privy_wallet_123\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -465,7 +465,7 @@
             "description": "Updates project attributes.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Payments Updated\",\n  \"description\": \"Updated project description.\",\n  \"environment\": \"production\",\n  \"settings\": {\n    \"rpcProvider\": \"custom\",\n    \"rpcEndpoint\": \"https://rpc.example.com\"\n  }\n}",
+              "raw": "{\n  \"name\": \"Payments Updated\",\n  \"description\": \"Updated project description.\",\n  \"settings\": {\n    \"rpcProvider\": \"custom\",\n    \"rpcEndpoint\": \"https://rpc.example.com\"\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -573,7 +573,7 @@
             "description": "Creates an API key scoped to the project. The full key is returned once.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Primary Key\",\n  \"description\": \"Used by backend service.\",\n  \"role\": \"api_developer\",\n  \"permissions\": [\n    \"tokens:read\",\n    \"tokens:write\"\n  ],\n  \"environment\": \"sandbox\",\n  \"walletScope\": \"selected\",\n  \"allowedIps\": [\n    \"203.0.113.0/24\"\n  ],\n  \"expiresAt\": \"2025-12-31T00:00:00.000Z\",\n  \"signingWalletId\": \"privy_wallet_123\",\n  \"signingWalletIds\": [\n    \"privy_wallet_123\",\n    \"dfns_wallet_456\"\n  ],\n  \"walletBindings\": [\n    {\n      \"walletId\": \"\",\n      \"permissions\": [\n        \"tokens:read\"\n      ]\n    }\n  ],\n  \"provisionWallet\": false,\n  \"walletLabel\": \"Mint authority wallet\",\n  \"walletPurpose\": \"mint_authority\"\n}",
+              "raw": "{\n  \"name\": \"Primary Key\",\n  \"description\": \"Used by backend service.\",\n  \"role\": \"api_developer\",\n  \"permissions\": [\n    \"tokens:read\",\n    \"tokens:write\"\n  ],\n  \"walletScope\": \"selected\",\n  \"allowedIps\": [\n    \"203.0.113.0/24\"\n  ],\n  \"expiresAt\": \"2025-12-31T00:00:00.000Z\",\n  \"signingWalletId\": \"privy_wallet_123\",\n  \"signingWalletIds\": [\n    \"privy_wallet_123\",\n    \"dfns_wallet_456\"\n  ],\n  \"walletBindings\": [\n    {\n      \"walletId\": \"\",\n      \"permissions\": [\n        \"tokens:read\"\n      ]\n    }\n  ],\n  \"provisionWallet\": false,\n  \"walletLabel\": \"Mint authority wallet\",\n  \"walletPurpose\": \"mint_authority\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1214,6 +1214,24 @@
             "header": [],
             "url": "{{baseUrl}}/v1/payments/transfers/{{transferId}}",
             "description": "Retrieves details for a specific transfer."
+          }
+        },
+        {
+          "name": "List on-ramp currency support",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/payments/ramps/onramp/currency",
+            "description": "Lists generated fiat-to-crypto on-ramp pairs and the providers that support each pair. Supports optional source, destination rail, and provider filters."
+          }
+        },
+        {
+          "name": "List off-ramp currency support",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/payments/ramps/offramp/currency",
+            "description": "Lists generated crypto-to-fiat off-ramp pairs and the providers that support each pair. Supports optional source rail, destination fiat, and provider filters."
           }
         },
         {

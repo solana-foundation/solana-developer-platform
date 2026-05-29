@@ -3640,7 +3640,9 @@ Source: https://platform.solana.com/docs/reference/api/payments
 
 | Method | Endpoint | Summary |
 | --- | --- | --- |
+| `GET` | `/v1/payments/ramps/offramp/currency` | List off-ramp currency support |
 | `POST` | `/v1/payments/ramps/offramp/execute` | Execute off-ramp |
+| `GET` | `/v1/payments/ramps/onramp/currency` | List on-ramp currency support |
 | `POST` | `/v1/payments/ramps/onramp/execute` | Execute on-ramp |
 | `POST` | `/v1/payments/ramps/sandbox/simulate` | Simulate sandbox transfer |
 | `GET` | `/v1/payments/transfers` | List transfers |
