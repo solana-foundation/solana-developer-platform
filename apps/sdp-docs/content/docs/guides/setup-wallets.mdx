@@ -24,45 +24,38 @@ Wallets are Solana keypairs managed by a custody provider. SDP uses them to sign
 
 Open the sidebar and click **Wallets**. If you haven't linked your organization yet, complete the [organization setup](/docs/guides/setup-organization) first.
 
-### 2. Start wallet setup
+### 2. Choose a custody provider
 
-Click **Get started** on the wallet setup card. This opens the provider setup flow.
+The Wallets page shows all supported providers, each with a **New wallet** button. Pick the provider that fits your setup.
 
-### 3. Configure your provider
+![Wallets page showing custody provider cards](/images/getting-started/wallet-providers.png)
 
-Fill in the setup form:
+### 3. Create the wallet
 
-- **Provider** — choose from the supported custody providers shown in the setup grid
-- **Wallet label** — a descriptive name for the first wallet
-- **Fireblocks credentials** — required only when the selected provider is Fireblocks
+Click **New wallet** on your chosen provider. In the modal, enter a label for the wallet and click **Create wallet**.
 
-Click **Connect provider & create wallet** to initialize signing and provision the first wallet.
+<img src="/images/getting-started/wallet-create-modal.png" alt="New wallet modal" width="696" style={{ display: "block", maxWidth: "100%" }} />
 
 ### 4. View your wallet
 
-After provisioning, the Wallets page shows your active provider configuration and wallet cards:
+After provisioning, the wallet card appears on the Wallets page with its address, wallet ID, and balance.
 
-- **Provider** — the active custody provider
-- **Address** — the wallet public key
-- **Wallet ID** — the custody wallet identifier used by SDP
-- **Balance** — the latest cached balance for the wallet
+![Wallets page after wallet creation](/images/getting-started/wallet-created.png)
 
-A note at the bottom reads: "Changing providers affects new actions only. Existing onchain authorities are not automatically rotated."
+To create additional wallets, click **Create Wallet** in the top right and repeat the process.
 
-### 5. Create additional wallets (optional)
+### 5. Provider capabilities
 
-Click **New wallet** in the top right. The modal has:
+Each provider supports a different set of operations shown as capability chips:
 
-- **Provider** — preselected when only one active provider can create wallets, otherwise selectable
-- **Capabilities** — provider feature chips for issuance, transfers, or compliance
-- **Wallet label** — descriptive name, for example "Signing wallet"
-
-Some providers can be connected but do not yet support provisioning additional wallets from the dashboard.
+- **Issuance** — can deploy and mint tokens
+- **Transfers** — can sign payment transactions
+- **Compliance** — can sign freeze/unfreeze instructions
 
 </Tab>
 <Tab value="API">
 
-### 1. Initialize the signing provider
+#### 1. Initialize the signing provider
 
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
@@ -109,7 +102,7 @@ HttpRequest request = HttpRequest.newBuilder()
 </Tab>
 </Tabs>
 
-### 2. Create additional wallets
+#### 2. Create additional wallets
 
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
@@ -159,7 +152,7 @@ HttpRequest request = HttpRequest.newBuilder()
 
 The `purpose` field is optional metadata in the API. The current dashboard create-wallet flow does not expose wallet-purpose selection.
 
-### 3. List wallets
+#### 3. List wallets
 
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
@@ -190,7 +183,7 @@ HttpRequest request = HttpRequest.newBuilder()
 
 Use the returned `walletId` when setting a default wallet or binding wallet-scoped API keys.
 
-### 4. Set a default wallet
+#### 4. Set a default wallet
 
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">

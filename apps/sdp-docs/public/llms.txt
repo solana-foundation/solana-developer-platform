@@ -18,8 +18,7 @@
 - Compliance screening
 
 ## Start here
-- [What is Solana Developer Platform?](https://platform.solana.com/docs/what-is-solana-developer-platform): A dashboard and API for issuing, transferring, and managing Solana tokens with built-in compliance controls.
-- [Getting Started](https://platform.solana.com/docs/getting-started): Get up and running with SDP through the dashboard.
+- [Introduction](https://platform.solana.com/docs/introduction): What SDP is, what it provides, and how it works.
 - [Set Up Your Organization](https://platform.solana.com/docs/guides/setup-organization): Create and configure your SDP organization through the dashboard.
 - [Set Up Wallets](https://platform.solana.com/docs/guides/setup-wallets): Initialize a custody provider and create wallets for signing transactions.
 - [Manage API Keys](https://platform.solana.com/docs/guides/manage-api-keys): Create, rotate, and revoke API keys with role-based access and environment scoping.

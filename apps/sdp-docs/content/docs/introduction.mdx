@@ -1,9 +1,9 @@
 ---
-title: What is Solana Developer Platform?
-description: A dashboard and API for issuing, transferring, and managing Solana tokens with built-in compliance controls.
+title: Introduction
+description: What SDP is, what it provides, and how it works.
 ---
 
-Solana Developer Platform (SDP) is a dashboard and REST API for issuing, transferring, and managing tokens on Solana. It handles wallet custody, onchain transaction construction, and compliance operations so your team can integrate Solana into existing systems without managing keys or setting up a Solana environment.
+Solana Developer Platform (SDP) is a dashboard and REST API for real-world asset (RWA) issuance, payments, and markets on Solana. It handles wallet custody, onchain transaction construction, and compliance operations so your team can bring regulated assets onchain without managing keys or setting up Solana infrastructure.
 
 ## What you get
 
@@ -31,14 +31,6 @@ SDP exposes two interfaces that connect to the same backend:
 - **Dashboard** — browser-based UI for setup, token management, and compliance operations. Sign in with email, Google, or GitHub.
 - **REST API** — programmatic access for backend integrations. Authenticate with an API key in the `Authorization` header.
 
-The typical integration path:
-
-1. Create an organization and generate API keys
-2. Provision a signing wallet
-3. Create and deploy tokens (from templates or custom configuration)
-4. Integrate minting, transfers, and compliance operations into your product
-5. Manage supply, allowlists, and frozen accounts as your product operates
-
 ## Environments
 
 | Environment | API key prefix | Solana network | Purpose                                     |
@@ -47,8 +39,3 @@ The typical integration path:
 | Production  | `sk_live_`     | mainnet-beta   | Live operations with real assets            |
 
 Both environments expose identical APIs. Develop and test against sandbox, then switch to production by swapping your API key.
-
-## Next steps
-
-- [Getting Started](/docs/getting-started) — create an organization, provision a wallet, and issue your first token
-- [Guides](/docs/guides/setup-organization) — step-by-step walkthroughs for each workflow

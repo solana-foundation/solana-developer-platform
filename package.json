@@ -24,6 +24,7 @@
     "dev": "scripts/doppler/run-with-config.sh turbo run dev:local",
     "dev:web": "scripts/doppler/run-with-config.sh turbo run dev --filter=sdp-web",
     "dev:docs": "scripts/doppler/run-with-config.sh turbo run dev --filter=sdp-docs",
+    "dev:docs:bare": "turbo run dev --filter=sdp-docs",
     "dev:api": "scripts/doppler/run-with-config.sh turbo run dev --filter=@sdp/api",
     "dev:api:local": "scripts/doppler/run-with-config.sh turbo run dev:local --filter=@sdp/api",
     "build": "turbo run build",

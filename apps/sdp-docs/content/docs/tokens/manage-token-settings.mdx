@@ -1,0 +1,151 @@
+---
+title: Manage Token Settings
+description: Update token authorities and operational settings after deployment.
+steps:
+  - View current settings
+  - Rotate an authority
+  - Revoke an authority
+---
+
+After a token is deployed, you can rotate its authorities and adjust operational settings. Authority management is separate from compliance actions — for freeze, pause, and seize flows see [Freeze and Compliance](/docs/tokens/freeze-and-compliance).
+
+## Prerequisites
+
+- A deployed token with status `active`
+- `tokens:admin` permission on the API key
+
+## How it works
+
+<HowItWorks>
+
+<Step number={1} title="View current settings">
+
+Review the token's current authorities and configuration before making changes.
+
+<StepPanel>
+<Tabs items={["UI", "API"]} groupId="how-it-works">
+<Tab value="UI">
+
+Open the token detail page. The **Overview** tab shows the token address, mint authority, current supply, and core metadata.
+
+![Token detail Overview tab showing token address, mint authority, supply, template, and decimals](/images/tokens/token-settings-overview.png)
+
+The **Permissions** tab lists every authority and which wallet currently holds it.
+
+![Permissions tab showing Mint Authority, Freeze Authority, Metadata Authority, and Permanent Delegate Authority with Edit buttons](/images/tokens/token-settings-permissions.png)
+
+The **Extensions** tab shows the template and each operational flag — allowlist status, mintable, freezable, and default account state.
+
+![Extensions tab showing template, allowlist, mintable, freezable, and default account state settings](/images/tokens/token-settings-extensions.png)
+
+</Tab>
+<Tab value="API">
+
+Fetch the current token state:
+
+```bash
+curl https://api.solana.com/v1/issuance/tokens/tok_abc123 \
+  -H "Authorization: Bearer sk_test_..."
+```
+
+```typescript
+const { data } = await res.json();
+// data.token.authorities — { mintAuthority, freezeAuthority, permanentDelegate }
+// data.token.extensions  — active extensions on the token
+// data.token.status      — "active" | "paused"
+```
+
+</Tab>
+</Tabs>
+</StepPanel>
+
+</Step>
+
+<Step number={2} title="Rotate an authority">
+
+Transfer a token authority to a different wallet. Use this to move signing responsibilities or to hand off control to an external key holder.
+
+<StepPanel>
+<Tabs items={["UI", "API"]} groupId="how-it-works">
+<Tab value="UI">
+
+On the token detail page, go to **Permissions**. Click **Edit** next to the authority you want to change. Select another controlled wallet or choose **Use custom address**, then click **Save authority**.
+
+![Mint Authority modal showing current authority wallet, new authority dropdown with controlled wallets, and Save authority button](/images/tokens/token-authority-edit.png)
+
+> Once an authority is rotated to an external wallet, SDP can no longer sign on its behalf. Use execute flows with the external wallet or prepare flows for signing outside SDP.
+
+</Tab>
+<Tab value="API">
+
+**Execute mode** — SDP signs the authority rotation:
+
+```bash
+curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/authority \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: rotate-001" \
+  -d '{
+    "authority": {
+      "type": "mintAuthority",
+      "newAuthority": "9aBCd...4eEf"
+    }
+  }'
+```
+
+**Prepare mode** — returns unsigned transaction for external signing:
+
+```bash
+curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/authority/prepare \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "authority": {
+      "type": "mintAuthority",
+      "newAuthority": "9aBCd...4eEf"
+    }
+  }'
+```
+
+`type` can be `mintAuthority`, `freezeAuthority`, or `permanentDelegate`.
+
+</Tab>
+</Tabs>
+</StepPanel>
+
+</Step>
+
+<Step number={3} title="Revoke an authority">
+
+Permanently remove an authority from the token. This action is irreversible — the token will no longer be mintable, freezable, or delegatable depending on which authority is revoked.
+
+<StepPanel>
+<Tabs items={["UI", "API"]} groupId="how-it-works">
+<Tab value="UI">
+
+In **Settings → Authorities**, click **Revoke** next to the authority and confirm. A warning dialog explains the consequences before you proceed.
+
+</Tab>
+<Tab value="API">
+
+Set `newAuthority` to `null` to revoke:
+
+```typescript
+body: JSON.stringify({
+  authority: {
+    type: "mintAuthority",
+    newAuthority: null,
+  },
+}),
+```
+
+After revoking the mint authority, no new tokens can ever be minted. Revocation is permanent and cannot be undone.
+
+</Tab>
+</Tabs>
+</StepPanel>
+
+</Step>
+
+</HowItWorks>
+
