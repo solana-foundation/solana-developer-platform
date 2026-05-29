@@ -12,6 +12,7 @@ const execFileAsync = promisify(execFile);
 
 const GENERATED_RELATIVE_PATH = "packages/sdp-types/src/generated/ramp-support.generated.ts";
 const GENERATED_PATH = path.resolve(process.cwd(), "../../", GENERATED_RELATIVE_PATH);
+const MAX_LISTED_CHANGES = 20;
 
 interface GeneratedOnrampRow {
   source: FiatCurrencyCode;
@@ -122,6 +123,17 @@ async function readBaseGeneratedSource(): Promise<string> {
   }
 }
 
+function summarizeList(title: string, values: readonly string[]): void {
+  if (values.length === 0) return;
+  console.log(`  ${title}:`);
+  for (const value of values.slice(0, MAX_LISTED_CHANGES)) {
+    console.log(`    - ${value}`);
+  }
+  if (values.length > MAX_LISTED_CHANGES) {
+    console.log(`    - ...and ${values.length - MAX_LISTED_CHANGES} more`);
+  }
+}
+
 async function main(): Promise<void> {
   const generatedDir = path.dirname(GENERATED_PATH);
   const baseTempPath = path.join(generatedDir, `.ramp-support.base-${process.pid}.generated.ts`);
@@ -159,6 +171,15 @@ async function main(): Promise<void> {
 
     if (diffs.length > 0) {
       console.log(`Ramp rails drift detected for ${diffs.length} provider(s).`);
+      for (const diff of diffs) {
+        console.log(
+          `\n[${diff.provider}] onramp ${diff.base.onramp.length} -> ${diff.current.onramp.length} (+${diff.addedOnramp.length}/-${diff.removedOnramp.length}), offramp ${diff.base.offramp.length} -> ${diff.current.offramp.length} (+${diff.addedOfframp.length}/-${diff.removedOfframp.length})`
+        );
+        summarizeList("Added on-ramp rails", diff.addedOnramp);
+        summarizeList("Removed on-ramp rails", diff.removedOnramp);
+        summarizeList("Added off-ramp rails", diff.addedOfframp);
+        summarizeList("Removed off-ramp rails", diff.removedOfframp);
+      }
     } else {
       console.log("No ramp rails drift detected.");
     }

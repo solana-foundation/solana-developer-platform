@@ -4,15 +4,7 @@ import type {
   PaymentRampExecutionStatus,
   SdpEnvironment,
 } from "@sdp/types";
-import {
-  OFFRAMP_CRYPTO_RAILS,
-  OFFRAMP_DESTINATION_CURRENCIES,
-  OFFRAMP_SUPPORT,
-  ONRAMP_CRYPTO_RAILS,
-  ONRAMP_SOURCE_CURRENCIES,
-  ONRAMP_SUPPORT,
-  RAMP_SUPPORT_HASH,
-} from "@sdp/types";
+import { OFFRAMP_SUPPORT, ONRAMP_SUPPORT, RAMP_SUPPORT_HASH } from "@sdp/types";
 import { getDb } from "@/db";
 import { parseDecimalAmount } from "@/lib/amount";
 import { AppError, providerNotConfigured } from "@/lib/errors";
@@ -42,6 +34,18 @@ type RampExecutionResult = PaymentRampExecution;
 
 type RampProviderId = "moonpay" | "lightspark" | "bvnk";
 
+type OnrampCurrencyPair = {
+  source: (typeof ONRAMP_SUPPORT)[number]["source"];
+  dest: (typeof ONRAMP_SUPPORT)[number]["dest"];
+  providers: RampProviderId[];
+};
+
+type OfframpCurrencyPair = {
+  source: (typeof OFFRAMP_SUPPORT)[number]["source"];
+  dest: (typeof OFFRAMP_SUPPORT)[number]["dest"];
+  providers: RampProviderId[];
+};
+
 function filterProviders(
   providers: readonly RampProviderId[],
   provider?: RampProviderId
@@ -51,6 +55,10 @@ function filterProviders(
   }
 
   return [...providers];
+}
+
+function uniqueSorted<T extends string>(values: readonly T[]): T[] {
+  return [...new Set(values)].sort();
 }
 
 type BvnkComplianceInput = {
@@ -1265,7 +1273,7 @@ export async function listOnrampCurrencies(c: AppContext) {
   }
 
   const { source, dest, provider } = parsed.data;
-  const pairs = ONRAMP_SUPPORT.flatMap((row) => {
+  const pairs: OnrampCurrencyPair[] = ONRAMP_SUPPORT.flatMap((row) => {
     if (source && row.source !== source) return [];
     if (dest && row.dest !== dest) return [];
     const providers = filterProviders(row.providers, provider);
@@ -1275,8 +1283,8 @@ export async function listOnrampCurrencies(c: AppContext) {
 
   return success(c, {
     currencies: {
-      sources: ONRAMP_SOURCE_CURRENCIES,
-      destinations: ONRAMP_CRYPTO_RAILS,
+      sources: uniqueSorted(pairs.map((row) => row.source)),
+      destinations: uniqueSorted(pairs.map((row) => row.dest)),
     },
     pairs,
     supportHash: RAMP_SUPPORT_HASH,
@@ -1293,7 +1301,7 @@ export async function listOfframpCurrencies(c: AppContext) {
   }
 
   const { source, dest, provider } = parsed.data;
-  const pairs = OFFRAMP_SUPPORT.flatMap((row) => {
+  const pairs: OfframpCurrencyPair[] = OFFRAMP_SUPPORT.flatMap((row) => {
     if (source && row.source !== source) return [];
     if (dest && row.dest !== dest) return [];
     const providers = filterProviders(row.providers, provider);
@@ -1303,8 +1311,8 @@ export async function listOfframpCurrencies(c: AppContext) {
 
   return success(c, {
     currencies: {
-      sources: OFFRAMP_CRYPTO_RAILS,
-      destinations: OFFRAMP_DESTINATION_CURRENCIES,
+      sources: uniqueSorted(pairs.map((row) => row.source)),
+      destinations: uniqueSorted(pairs.map((row) => row.dest)),
     },
     pairs,
     supportHash: RAMP_SUPPORT_HASH,
