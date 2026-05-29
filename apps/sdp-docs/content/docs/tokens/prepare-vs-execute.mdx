@@ -1,0 +1,109 @@
+---
+title: Prepare vs Execute
+description: Understand SDP's two signing modes for onchain transactions.
+---
+
+Every SDP endpoint that produces a Solana transaction supports two signing modes. The mode you choose determines who signs and submits the transaction.
+
+## Execute mode (default)
+
+Call a mutation endpoint without the `/prepare` suffix and SDP handles everything:
+
+1. Builds the transaction
+2. Signs it using your configured custody provider
+3. Submits it to Solana
+4. Returns the confirmed result with a transaction signature
+
+```typescript
+const res = await fetch(
+  "https://api.solana.com/v1/issuance/tokens/tok_abc123/mint",
+  {
+    method: "POST",
+    headers: {
+      Authorization: "Bearer sk_test_...",
+      "Content-Type": "application/json",
+      "Idempotency-Key": "mint-001",
+    },
+    body: JSON.stringify({
+      mint: { destination: "7xKXz...9fGh", amount: "1000000" },
+    }),
+  }
+);
+const { data } = await res.json();
+// data.transaction.signature — confirmed onchain
+```
+
+**When to use execute mode:**
+
+- You trust SDP's custody provider with signing
+- You want the simplest integration — one API call, confirmed result
+- Backend-to-backend workflows that don't require user signatures
+
+## Prepare mode
+
+Add `/prepare` to a mutation endpoint and SDP builds the transaction but returns it unsigned:
+
+```typescript
+const res = await fetch(
+  "https://api.solana.com/v1/issuance/tokens/tok_abc123/mint/prepare",
+  {
+    method: "POST",
+    headers: {
+      Authorization: "Bearer sk_test_...",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      mint: { destination: "7xKXz...9fGh", amount: "1000000" },
+      options: { simulate: true },
+    }),
+  }
+);
+const { data } = await res.json();
+// data.preparedTransaction.serialized — base64 transaction to sign
+// data.simulation — { success, unitsConsumed, logs }
+```
+
+**When to use prepare mode:**
+
+- You manage your own keys (hardware wallet, multisig, HSM)
+- You need user approval before signing (wallet pop-up flow)
+- You want to simulate the transaction before committing
+- Regulatory requirements mandate specific signing infrastructure
+
+## Signing a prepared transaction
+
+After receiving the serialized transaction:
+
+1. **Decode** the base64 string into a transaction object
+2. **Sign** with the required private key(s)
+3. **Submit** to Solana via `sendRawTransaction`
+4. **Confirm** the transaction using `confirmTransaction`
+
+Submit before `lastValidBlockHeight` expires. If the blockhash expires, call `/prepare` again for a fresh transaction.
+
+## Simulation
+
+Prepare endpoints accept `options.simulate: true` to dry-run the transaction before signing. The simulation returns:
+
+- `success` — whether the transaction would succeed
+- `unitsConsumed` — compute units used
+- `logs` — program execution logs
+- `error` — error details if simulation fails
+
+## Endpoints that support both modes
+
+| Resource | Execute | Prepare |
+| --- | --- | --- |
+| Deploy token | `POST .../deploy` | `POST .../deploy/prepare` |
+| Mint | `POST .../mint` | `POST .../mint/prepare` |
+| Burn | `POST .../burn` | `POST .../burn/prepare` |
+| Force-burn | `POST .../force-burn` | `POST .../force-burn/prepare` |
+| Seize | `POST .../seize` | `POST .../seize/prepare` |
+| Update authority | `POST .../authority` | `POST .../authority/prepare` |
+| Transfer | `POST /v1/payments/transfers` | `POST /v1/payments/transfers/prepare` |
+
+Issuance paths are prefixed with `https://api.solana.com/v1/issuance/tokens/{tokenId}`.
+
+## Idempotency
+
+Both modes support the `Idempotency-Key` header. For execute mode, the key prevents duplicate submissions. For prepare mode, the key ensures you get the same prepared transaction on retry.

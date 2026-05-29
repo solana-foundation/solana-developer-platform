@@ -1,15 +1,4 @@
 {
-  "title": "Guides",
-  "pages": [
-    "setup-organization",
-    "setup-wallets",
-    "manage-api-keys",
-    "tokenize-an-asset",
-    "create-a-token",
-    "deploy-a-token",
-    "mint-and-burn",
-    "manage-allowlists",
-    "freeze-and-compliance",
-    "prepare-vs-execute"
-  ]
+  "title": "Getting Started",
+  "pages": ["setup-organization", "setup-wallets", "manage-api-keys"]
 }

@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.23.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.22.0...v0.23.0) (2026-05-29)
+
+### Features
+
+* enable pay/deposit routes behind FF ([#371](https://github.com/solana-foundation/solana-developer-platform/pull/371)) ([0255378](https://github.com/solana-foundation/solana-developer-platform/commit/02553789528098241c4ae14f603b516db6e8711d))
+* ramps provider support currency unified support ([#370](https://github.com/solana-foundation/solana-developer-platform/pull/370)) ([7184d0f](https://github.com/solana-foundation/solana-developer-platform/commit/7184d0fe92ce36baffb7f62e9895db5d28bf24ed))
+
+### Bug Fixes
+
+* ensure users cannot enter production mode ([#368](https://github.com/solana-foundation/solana-developer-platform/pull/368)) ([19347ac](https://github.com/solana-foundation/solana-developer-platform/commit/19347acd4e311520783a86e1b2dfdbac0feb7d5a))
+
+### Documentation
+
+* Redesign/docs platform solana com ([#313](https://github.com/solana-foundation/solana-developer-platform/pull/313)) ([d9e0c91](https://github.com/solana-foundation/solana-developer-platform/commit/d9e0c9127e84ed0de14bd677ad24db2c8df06e81))
+
 ## [0.22.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.21.0...v0.22.0) (2026-05-28)
 
 ### Features
