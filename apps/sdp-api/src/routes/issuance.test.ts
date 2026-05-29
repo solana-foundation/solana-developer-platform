@@ -1875,6 +1875,12 @@ describe("Issuance Routes", () => {
         const addToListSpy = vi
           .spyOn(MosaicService.prototype, "addToList")
           .mockRejectedValueOnce(new Error("on-chain add failed"));
+        // After addToList fails the handler re-checks on-chain membership; if
+        // it returns true, we'd keep the DB row and succeed — for this test we
+        // want the rollback path, so return false.
+        const isWalletOnListSpy = vi
+          .spyOn(MosaicService.prototype, "isWalletOnList")
+          .mockResolvedValueOnce(false);
         const deleteAllowlistEntrySpy = vi
           .spyOn(TokenService.prototype, "deleteAllowlistEntry")
           .mockRejectedValueOnce(new Error("rollback failed"));
@@ -1904,6 +1910,59 @@ describe("Issuance Routes", () => {
         } finally {
           createOrgSignerSpy.mockRestore();
           addToListSpy.mockRestore();
+          isWalletOnListSpy.mockRestore();
+          deleteAllowlistEntrySpy.mockRestore();
+        }
+      });
+
+      it("keeps the DB row and reports success when addToList errors but on-chain membership is confirmed", async () => {
+        const db = getDb(env);
+        await db
+          .prepare("UPDATE issued_tokens SET abl_list_address = ? WHERE id = ?")
+          .bind(TEST_SOLANA_ADDRESSES.wallet3, tokenId)
+          .run();
+
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSigner")
+          .mockResolvedValueOnce({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
+        const addToListSpy = vi
+          .spyOn(MosaicService.prototype, "addToList")
+          .mockRejectedValueOnce(new Error("RPC confirmation timeout"));
+        const isWalletOnListSpy = vi
+          .spyOn(MosaicService.prototype, "isWalletOnList")
+          .mockResolvedValueOnce(true);
+        const deleteAllowlistEntrySpy = vi.spyOn(TokenService.prototype, "deleteAllowlistEntry");
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${tokenId}/allowlist`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({
+                address: TEST_SOLANA_ADDRESSES.wallet1,
+                label: "Confirmed Despite RPC Error",
+              }),
+            },
+            env
+          );
+
+          expect(res.status).toBe(201);
+          expect(isWalletOnListSpy).toHaveBeenCalledTimes(1);
+          expect(deleteAllowlistEntrySpy).not.toHaveBeenCalled();
+
+          const entry = await db
+            .prepare("SELECT id, status FROM token_allowlists WHERE token_id = ? AND address = ?")
+            .bind(tokenId, TEST_SOLANA_ADDRESSES.wallet1)
+            .first<{ id: string; status: string }>();
+          expect(entry?.status).toBe("active");
+        } finally {
+          createOrgSignerSpy.mockRestore();
+          addToListSpy.mockRestore();
+          isWalletOnListSpy.mockRestore();
           deleteAllowlistEntrySpy.mockRestore();
         }
       });

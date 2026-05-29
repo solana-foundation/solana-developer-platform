@@ -14,6 +14,57 @@ import { addAllowlistSchema } from "../schemas";
 
 type AppContext = Context<{ Bindings: Env }>;
 
+/**
+ * On-chain add for a freshly inserted DB row, with TOCTOU-safe rollback.
+ *
+ * If `addToList` errors, re-checks `isWalletOnList`. When membership is
+ * confirmed, the DB row is kept and success bubbles up — the RPC/confirmation
+ * error was transient and the on-chain write actually landed. Otherwise the
+ * row is hard-deleted (not revoked, to avoid leaving a tombstone that the
+ * mint auto-add guard would treat as an operator revoke) and the original
+ * error is re-thrown.
+ */
+async function syncNewAllowlistEntryOnChain(opts: {
+  c: AppContext;
+  organizationId: string;
+  projectId: string;
+  signingWalletId: string | null | undefined;
+  tokenService: TokenService;
+  entryId: string;
+  list: ReturnType<typeof assertValidAddress>;
+  wallet: ReturnType<typeof assertValidAddress>;
+}): Promise<void> {
+  const signer = await createOrgSigner(
+    opts.c.env,
+    opts.organizationId,
+    opts.projectId,
+    opts.signingWalletId ?? undefined
+  );
+  const mosaic = createMosaicService(opts.c.env, signer);
+
+  try {
+    await mosaic.addToList({ list: opts.list, wallet: opts.wallet });
+  } catch (error) {
+    if (await mosaic.isWalletOnList(opts.list, opts.wallet)) {
+      return;
+    }
+    try {
+      await opts.tokenService.deleteAllowlistEntry(opts.entryId);
+    } catch (rollbackError) {
+      throw new AppError(
+        "INTERNAL_ERROR",
+        "Failed to roll back control-list entry after sync error",
+        {
+          originalError: error instanceof Error ? error.message : "Unknown add error",
+          restoreError:
+            rollbackError instanceof Error ? rollbackError.message : "Unknown rollback error",
+        }
+      );
+    }
+    throw error;
+  }
+}
+
 export const listAllowlist = async (c: AppContext) => {
   const { tokenId } = c.req.param();
   const auth = getAuth(c);
@@ -73,40 +124,17 @@ export const addAllowlistEntry = async (c: AppContext) => {
       label: parsed.data.label,
     });
 
-    try {
-      if (token.ablListAddress) {
-        const signer = await createOrgSigner(
-          c.env,
-          auth.organizationId,
-          auth.projectId,
-          token.signingWalletId ?? undefined
-        );
-        const mosaic = createMosaicService(c.env, signer);
-        await mosaic.addToList({
-          list: assertValidAddress(token.ablListAddress, "ablListAddress"),
-          wallet: assertValidAddress(parsed.data.address, "address"),
-        });
-      }
-    } catch (error) {
-      try {
-        // Hard-delete (not revoke) so a transient on-chain failure doesn't leave
-        // behind a `revoked` row — that would trip the operator-revoked guard
-        // in `syncDestinationToOnChainAllowlist` and permanently block mint
-        // auto-add for this address.
-        await tokenService.deleteAllowlistEntry(entry.id);
-      } catch (rollbackError) {
-        throw new AppError(
-          "INTERNAL_ERROR",
-          "Failed to roll back control-list entry after sync error",
-          {
-            originalError: error instanceof Error ? error.message : "Unknown add error",
-            restoreError:
-              rollbackError instanceof Error ? rollbackError.message : "Unknown rollback error",
-          }
-        );
-      }
-
-      throw error;
+    if (token.ablListAddress) {
+      await syncNewAllowlistEntryOnChain({
+        c,
+        organizationId: auth.organizationId,
+        projectId: auth.projectId,
+        signingWalletId: token.signingWalletId,
+        tokenService,
+        entryId: entry.id,
+        list: assertValidAddress(token.ablListAddress, "ablListAddress"),
+        wallet: assertValidAddress(parsed.data.address, "address"),
+      });
     }
 
     // Audit log
