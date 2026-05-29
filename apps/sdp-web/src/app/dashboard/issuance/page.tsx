@@ -3,7 +3,6 @@ import { redirect } from "next/navigation";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createSdpApiClient, type SdpApiClient } from "@/lib/sdp-api";
-import { fetchPaymentsWallets } from "../payments/payments-page.data";
 import { fetchActiveApiKeys, resolvePlaygroundApiBaseUrl } from "../playground-api-data";
 import { IssuanceWorkspace } from "./issuance-workspace";
 
@@ -179,13 +178,10 @@ export default async function IssuancePage({ searchParams }: IssuancePageProps) 
     const apiClient = await trace.step("create_sdp_api_client", () =>
       createSdpApiClient(trace.childContext("dashboard.issuance.api"))
     );
-    const [templatesResult, tokensResult, apiKeysResult, signerWalletsResult] = await Promise.all([
+    const [templatesResult, tokensResult, apiKeysResult] = await Promise.all([
       trace.step("fetch_templates", () => fetchTemplates(apiClient.request)),
       trace.step("fetch_tokens", () => fetchTokens(apiClient.request)),
       trace.step("fetch_active_api_keys", () => fetchActiveApiKeys(apiClient.request)),
-      trace.step("fetch_signer_wallets", () =>
-        fetchPaymentsWallets(apiClient.request, { view: "summary" })
-      ),
     ]);
 
     const tokens = tokensResult.data ?? [];
@@ -200,23 +196,20 @@ export default async function IssuancePage({ searchParams }: IssuancePageProps) 
       tokenCount: tokens.length,
       templateCount: templatesResult.data?.length ?? 0,
       apiKeyCount: apiKeys.length,
-      signerWalletCount: signerWalletsResult.data?.length ?? 0,
     });
+
+    const solanaNetwork = process.env.NEXT_PUBLIC_SOLANA_NETWORK ?? "devnet";
+    const isDevnet = solanaNetwork !== "mainnet-beta";
 
     return (
       <IssuanceWorkspace
         tokens={tokens}
         templates={templatesResult.data ?? []}
         apiKeys={apiKeys}
-        signerWallets={signerWalletsResult.data ?? []}
         apiBaseUrl={apiBaseUrl}
         templatesError={templatesError}
         tokensNotice={resolveTokenListNotice(tokensResult)}
-        signerWalletsError={
-          signerWalletsResult.ok
-            ? null
-            : `Wallet API ${signerWalletsResult.status ?? "unavailable"}: ${signerWalletsResult.error ?? "Unknown error"}`
-        }
+        isDevnet={isDevnet}
       />
     );
   } catch (error) {

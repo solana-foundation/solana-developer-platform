@@ -19,6 +19,7 @@ export interface IssuancePlaygroundTemplateView {
 interface BuildIssuancePlaygroundConfigOptions {
   templates: IssuancePlaygroundTemplateView[];
   tokens: IssuancePlaygroundTokenView[];
+  isDevnet?: boolean;
 }
 
 const priorityFeeOptions: ApiPlaygroundFieldOption[] = [
@@ -114,6 +115,7 @@ function buildPriorityFields(): ApiPlaygroundFieldConfig[] {
 export function buildIssuancePlaygroundEndpointConfigs({
   templates,
   tokens,
+  isDevnet = false,
 }: BuildIssuancePlaygroundConfigOptions): ApiPlaygroundEndpointConfig[] {
   const tokenOptions = buildTokenOptions(tokens);
   const templateOptions = buildTemplateOptions(templates);
@@ -227,6 +229,16 @@ export function buildIssuancePlaygroundEndpointConfigs({
           placeholder: "https://example.com/metadata/acme-usd.json",
           defaultValue: "https://example.com/metadata/acme-usd.json",
         },
+        ...(isDevnet
+          ? [
+              {
+                key: "overrides.extensions.confidentialTransfers.authority",
+                label: "overrides.extensions.confidentialTransfers.authority",
+                placeholder: "Authority address (leave blank to use mint authority)",
+                required: false,
+              } satisfies ApiPlaygroundFieldConfig,
+            ]
+          : []),
       ],
       expectedResponse: {
         data: {

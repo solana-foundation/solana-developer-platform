@@ -1,4 +1,4 @@
-import { BadgeDollarSign, CircleHelp, ShieldCheck } from "lucide-react";
+import { BadgeDollarSign, ShieldCheck, SlidersHorizontal } from "lucide-react";
 import {
   type AccessControlMode,
   getDefaultAccessControlMode as getDefaultModeForTemplate,
@@ -21,7 +21,7 @@ export const templateCards: Array<
     name: "Stablecoin",
     description: "Create a regulatory-compliant stablecoin with transfer restrictions.",
     icon: BadgeDollarSign,
-    iconClassName: "bg-[#dee6ff] text-[#375dff]",
+    iconClassName: "bg-border-light text-text-extra-high",
     enabled: true,
     template: "stablecoin",
   },
@@ -30,7 +30,7 @@ export const templateCards: Array<
     name: "Tokenized Security",
     description: "Create a compliant security token with scaled UI amounts and core controls.",
     icon: ShieldCheck,
-    iconClassName: "bg-[#d8f7e4] text-[#0f9b58]",
+    iconClassName: "bg-border-light text-text-extra-high",
     enabled: true,
     template: "tokenized-security",
   },
@@ -38,8 +38,8 @@ export const templateCards: Array<
     id: "custom",
     name: "Custom Token",
     description: "Build your own token with full control over extensions and parameters.",
-    icon: CircleHelp,
-    iconClassName: "bg-[#ebe5ff] text-[#6436ff]",
+    icon: SlidersHorizontal,
+    iconClassName: "bg-border-light text-text-extra-high",
     enabled: true,
     template: "custom",
   },

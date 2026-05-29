@@ -56,6 +56,14 @@ const transferHookConfigSchema = z.object({
  * - true/false: enable/disable
  * - config object: enable with specific configuration
  */
+/**
+ * Confidential transfers extension configuration.
+ * Only available on devnet.
+ */
+const confidentialTransfersConfigSchema = z.object({
+  authority: z.string().min(32).max(44).optional(),
+});
+
 const extensionOverridesSchema = z
   .object({
     transferFee: z.union([z.literal(false), transferFeeConfigSchema]).optional(),
@@ -66,6 +74,9 @@ const extensionOverridesSchema = z
     defaultAccountState: z.enum(["initialized", "frozen"]).optional(),
     scaledUiAmount: z.union([z.literal(false), scaledUiAmountConfigSchema]).optional(),
     transferHook: z.union([z.literal(false), transferHookConfigSchema]).optional(),
+    confidentialTransfers: z
+      .union([z.literal(false), confidentialTransfersConfigSchema])
+      .optional(),
   })
   .strict();
 

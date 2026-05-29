@@ -16,6 +16,7 @@ interface IssuancePlaygroundProps {
   templates: IssuancePlaygroundTemplateView[];
   templatesError: string | null;
   tokens: IssuancePlaygroundTokenView[];
+  isDevnet?: boolean;
 }
 
 export function IssuancePlayground({
@@ -25,10 +26,11 @@ export function IssuancePlayground({
   templates,
   templatesError,
   tokens,
+  isDevnet,
 }: IssuancePlaygroundProps) {
   const endpoints = useMemo(
-    () => buildIssuancePlaygroundEndpointConfigs({ templates, tokens }),
-    [templates, tokens]
+    () => buildIssuancePlaygroundEndpointConfigs({ templates, tokens, isDevnet }),
+    [templates, tokens, isDevnet]
   );
 
   return (

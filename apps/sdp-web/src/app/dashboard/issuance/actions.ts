@@ -60,6 +60,10 @@ export async function createIssuanceTokenAction(
   const requiresAllowlist = parseBoolean(formData.get("requiresAllowlist"), false);
   const isMintable = parseBoolean(formData.get("isMintable"), true);
   const isFreezable = parseBoolean(formData.get("isFreezable"), true);
+  const enableConfidentialTransfers = parseBoolean(
+    formData.get("enableConfidentialTransfers"),
+    false
+  );
 
   if (!name) {
     return {
@@ -128,6 +132,11 @@ export async function createIssuanceTokenAction(
     requiresAllowlist: boolean;
     isMintable: boolean;
     isFreezable: boolean;
+    overrides?: {
+      extensions?: {
+        confidentialTransfers?: { authority?: string };
+      };
+    };
   } = {
     name,
     symbol,
@@ -162,6 +171,14 @@ export async function createIssuanceTokenAction(
 
   if (maxSupplyRaw) {
     payload.maxSupply = maxSupplyRaw;
+  }
+
+  if (enableConfidentialTransfers) {
+    payload.overrides = {
+      extensions: {
+        confidentialTransfers: {},
+      },
+    };
   }
 
   try {

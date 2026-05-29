@@ -73,6 +73,13 @@ export const createToken = async (c: AppContext) => {
     });
   }
 
+  if (resolved.extensions?.confidentialTransfers && c.env.SOLANA_NETWORK !== "devnet") {
+    throw new AppError(
+      "BAD_REQUEST",
+      "The confidentialTransfers extension is only available on devnet"
+    );
+  }
+
   const tokenService = new TokenService(getDb(c.env));
   const signingWalletId = resolveApiKeySigningWalletId(auth, parsed.data.signingWalletId, [
     "tokens:write",

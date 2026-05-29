@@ -2095,49 +2095,45 @@ export function PaymentsActionPage({
   const renderAssetAndAmount = (amountLabel: string) => (
     <div className="space-y-1">
       <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_160px]">
-        <div className="space-y-2">
-          <Label htmlFor={`${mode}-amount`}>{amountLabel}</Label>
-          <Input
-            id={`${mode}-amount`}
-            type="number"
-            inputMode="decimal"
-            min="0.000001"
-            step="any"
-            value={amount}
-            onChange={(event) => {
-              setAmount(event.currentTarget.value);
-              if (event.currentTarget.value.trim().length > 0) {
-                setAmountTouched(true);
-              }
+        <Input
+          id={`${mode}-amount`}
+          label={amountLabel}
+          type="number"
+          inputMode="decimal"
+          min="0.000001"
+          step="any"
+          value={amount}
+          onChange={(event) => {
+            setAmount(event.currentTarget.value);
+            if (event.currentTarget.value.trim().length > 0) {
+              setAmountTouched(true);
+            }
+            resetExecution();
+          }}
+          onBlur={() => setAmountTouched(true)}
+          placeholder="1.00"
+          className="h-12 rounded-2xl border-border-light bg-white px-4 shadow-none"
+        />
+        <Select
+          className="w-full"
+          disabled={walletsLoading || assetOptions.length === 0}
+          label="Asset"
+          onValueChange={(value) => {
+            if (value) {
+              setSelectedAsset(value);
               resetExecution();
-            }}
-            onBlur={() => setAmountTouched(true)}
-            placeholder="1.00"
-            className="h-12 rounded-2xl border-border-light bg-white px-4 shadow-none"
-          />
-        </div>
-        <div className="space-y-2">
-          <Select
-            className="w-full"
-            disabled={walletsLoading || assetOptions.length === 0}
-            label="Asset"
-            onValueChange={(value) => {
-              if (value) {
-                setSelectedAsset(value);
-                resetExecution();
-              }
-            }}
-            placeholder="Select asset"
-            size="xl"
-            value={selectedAsset || null}
-          >
-            {assetOptions.map((asset) => (
-              <SelectItem key={asset} value={asset}>
-                {asset}
-              </SelectItem>
-            ))}
-          </Select>
-        </div>
+            }
+          }}
+          placeholder="Select asset"
+          size="lg"
+          value={selectedAsset || null}
+        >
+          {assetOptions.map((asset) => (
+            <SelectItem key={asset} value={asset}>
+              {asset}
+            </SelectItem>
+          ))}
+        </Select>
       </div>
       <p
         className={[
@@ -2242,37 +2238,33 @@ export function PaymentsActionPage({
         },
       })}
       <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_160px]">
-        <div className="space-y-2">
-          <Label htmlFor={`${mode}-reference`}>Reference label</Label>
-          <Input
-            id={`${mode}-reference`}
-            value={reference}
-            onChange={(event) => setReference(event.currentTarget.value)}
-            placeholder="Treasury top-up"
-            className="h-12 rounded-2xl border-border-light bg-white px-4 shadow-none"
-          />
-        </div>
-        <div className="space-y-2">
-          <Select
-            className="w-full"
-            disabled={assetOptions.length === 0}
-            label="Asset"
-            onValueChange={(value) => {
-              if (value) {
-                setSelectedAsset(value);
-              }
-            }}
-            placeholder="Select asset"
-            size="xl"
-            value={selectedAsset || null}
-          >
-            {assetOptions.map((asset) => (
-              <SelectItem key={asset} value={asset}>
-                {asset}
-              </SelectItem>
-            ))}
-          </Select>
-        </div>
+        <Input
+          id={`${mode}-reference`}
+          label="Reference label"
+          value={reference}
+          onChange={(event) => setReference(event.currentTarget.value)}
+          placeholder="Treasury top-up"
+          className="h-12 rounded-2xl border-border-light bg-white px-4 shadow-none"
+        />
+        <Select
+          className="w-full"
+          disabled={assetOptions.length === 0}
+          label="Asset"
+          onValueChange={(value) => {
+            if (value) {
+              setSelectedAsset(value);
+            }
+          }}
+          placeholder="Select asset"
+          size="lg"
+          value={selectedAsset || null}
+        >
+          {assetOptions.map((asset) => (
+            <SelectItem key={asset} value={asset}>
+              {asset}
+            </SelectItem>
+          ))}
+        </Select>
       </div>
     </div>
   );

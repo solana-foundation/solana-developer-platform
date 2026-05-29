@@ -69,7 +69,8 @@ export type TokenExtensionName =
   | "nonTransferable"
   | "defaultAccountState"
   | "scaledUiAmount"
-  | "transferHook";
+  | "transferHook"
+  | "confidentialTransfers";
 
 /**
  * Extension info for template definitions
@@ -191,6 +192,14 @@ export interface TokenExtensionsConfig {
     /** Transfer hook program id */
     programId: string;
     /** Authority that can update the hook program */
+    authority?: string;
+  };
+  /**
+   * Confidential transfers configuration (Token-2022 ConfidentialTransferMint extension).
+   * Only available on devnet.
+   */
+  confidentialTransfers?: {
+    /** Authority that can configure confidential transfer settings */
     authority?: string;
   };
 }
@@ -374,6 +383,16 @@ export interface ExtensionOverrides {
     | false
     | {
         programId: string;
+        authority?: string;
+      };
+  /**
+   * Enable/configure confidential transfers (ConfidentialTransferMint extension).
+   * Only available on devnet.
+   */
+  confidentialTransfers?:
+    | false
+    | {
+        /** Authority that can configure confidential transfer settings */
         authority?: string;
       };
 }

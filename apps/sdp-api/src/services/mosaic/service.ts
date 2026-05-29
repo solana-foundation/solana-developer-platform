@@ -326,6 +326,7 @@ export class MosaicService {
         const transferFee = extensions.transferFee;
         const interestBearing = extensions.interestBearing;
         const defaultAccountState = extensions.defaultAccountState;
+        const confidentialTransfers = extensions.confidentialTransfers;
         const transferFeeMaximum = transferFee
           ? parseDecimalAmount(transferFee.maxFee, options.decimals)
           : undefined;
@@ -368,6 +369,8 @@ export class MosaicService {
             enableTransferHook: !!transferHook,
             transferHookAuthority: transferHook?.authority as Address | undefined,
             transferHookProgramId: transferHook?.programId as Address | undefined,
+            enableConfidentialBalances: !!confidentialTransfers,
+            confidentialBalancesAuthority: confidentialTransfers?.authority as Address | undefined,
             freezeAuthority,
           }
         );

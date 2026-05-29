@@ -16,14 +16,20 @@ const CUSTOM_AVAILABLE_EXTENSIONS: TokenExtensionName[] = [
   "defaultAccountState",
   "scaledUiAmount",
   "transferHook",
+  "confidentialTransfers",
 ];
 
-const STABLECOIN_OVERRIDE_EXTENSIONS: TokenExtensionName[] = ["permanentDelegate", "pausable"];
+const STABLECOIN_OVERRIDE_EXTENSIONS: TokenExtensionName[] = [
+  "permanentDelegate",
+  "pausable",
+  "confidentialTransfers",
+];
 const ARCADE_OVERRIDE_EXTENSIONS: TokenExtensionName[] = ["permanentDelegate", "pausable"];
 const TOKENIZED_SECURITY_OVERRIDE_EXTENSIONS: TokenExtensionName[] = [
   "permanentDelegate",
   "pausable",
   "scaledUiAmount",
+  "confidentialTransfers",
 ];
 
 type CanonicalTemplate = Exclude<TokenTemplate, "rwa">;
