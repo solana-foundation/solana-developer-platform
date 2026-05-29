@@ -90,8 +90,9 @@ jobs:
           exit-code: "1"
           ignore-unfixed: true
 
-      # Both scans passed — multi-arch build and push. Layers for both
-      # platforms are cached from the local builds above.
+      # Both scans passed — multi-arch build and push. The GHA layer cache
+      # may reuse work from earlier builds but is not guaranteed to hit the
+      # local --load builds above (different driver).
       - name: Build and push (multi-arch)
         id: push
         uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0

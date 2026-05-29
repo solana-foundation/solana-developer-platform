@@ -121,7 +121,8 @@ ENV NODE_ENV=production \
     HOSTNAME=0.0.0.0 \
     NEXT_TELEMETRY_DISABLED=1
 
-# Pull security fixes not yet in the pinned base image digest.
+# Apply OS-level security patches not yet in the pinned base image.
+# This layer is cached — rebuild with --no-cache to pick up new fixes.
 RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/*
 
 # Run as an unprivileged user. UID/GID 1001 matches the convention used by
