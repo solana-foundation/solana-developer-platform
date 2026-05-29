@@ -9,7 +9,8 @@ if (targetDirs.length === 0) {
 
 // The URL shape is a valid absolute URL, so its origin survives new URL() /
 // `.origin` / path composition at build time and stays swappable at runtime.
-const URL_PLACEHOLDER = /https?:\/\/__sdp_rt__([a-z0-9_]+)__\.invalid/g;
+// The scheme is optional because some contexts (e.g. robots.txt Host:) strip it.
+const URL_PLACEHOLDER = /(?:https?:\/\/)?__sdp_rt__([a-z0-9_]+)__\.invalid/g;
 const BARE_PLACEHOLDER = /__SDP_RT_([A-Z0-9_]+)__/g;
 
 const unresolved = new Set();
