@@ -20,7 +20,6 @@ function escapeValue(value) {
     .replace(/"/g, '\\"')
     .replace(/'/g, "\\'")
     .replace(/`/g, "\\`")
-    .replace(/\$/g, "\\$")
     .replace(/[\r\n]+/g, "")
     .replace(/<\/(script)/gi, "<\\/$1");
 }

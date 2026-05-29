@@ -40,7 +40,9 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push
+      # Push the version tag only; :latest is added after the scan passes so a
+      # vulnerable image is never reachable at :latest.
+      - name: Build and push (version tag)
         id: build
         uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
         with:
@@ -54,7 +56,6 @@ jobs:
             GIT_SHA=${{ github.sha }}
           tags: |
             ${{ env.GHCR_IMAGE }}:${{ env.VERSION }}
-            ${{ env.GHCR_IMAGE }}:latest
           cache-from: type=gha,scope=${{ matrix.service }}
           cache-to: type=gha,scope=${{ matrix.service }},mode=max
 
@@ -65,6 +66,13 @@ jobs:
           severity: CRITICAL
           exit-code: "1"
           ignore-unfixed: true
+
+      # Only runs if Trivy passed — promotes the scanned digest to :latest.
+      - name: Tag as latest
+        run: |
+          docker buildx imagetools create \
+            --tag "${GHCR_IMAGE}:latest" \
+            "${GHCR_IMAGE}@${{ steps.build.outputs.digest }}"
 
       - name: Install Cosign
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
