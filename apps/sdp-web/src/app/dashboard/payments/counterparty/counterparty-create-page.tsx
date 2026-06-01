@@ -43,8 +43,6 @@ export function CounterpartyCreatePage() {
     <div className="mx-auto flex h-[40rem] max-w-xl flex-col py-4">
       <StepIndicator steps={steps} step={step} />
 
-      {/* Fixed-height scroll region keeps the dialog the same size on every step
-          while the footer stays pinned to the bottom. */}
       <div className="relative mt-6 min-h-0 flex-1 overflow-hidden">
         <AnimatePresence mode="wait" custom={direction}>
           <motion.div

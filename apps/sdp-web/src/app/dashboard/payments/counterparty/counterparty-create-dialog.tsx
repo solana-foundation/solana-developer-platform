@@ -19,8 +19,6 @@ export function CounterpartyCreateDialog({
   return (
     <Modal isOpen={open} onClose={onClose} ariaLabel="Add counterparty" size="lg">
       <div className="px-6 pt-12 pb-6">
-        {/* A fresh provider mounts each time the modal opens, so the multi-step
-            form always starts clean. */}
         <CounterpartyCreateProvider onCreated={onCreated}>
           <CounterpartyCreatePage />
         </CounterpartyCreateProvider>

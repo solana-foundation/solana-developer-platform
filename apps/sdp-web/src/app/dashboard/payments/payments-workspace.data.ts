@@ -515,10 +515,6 @@ export interface CounterpartiesResult {
   error?: string;
 }
 
-/**
- * Fetches every counterparty by walking through all pages, so large
- * organizations are not silently truncated to the first page.
- */
 export async function fetchAllCounterparties(): Promise<CounterpartiesResult> {
   const counterparties: Counterparty[] = [];
 

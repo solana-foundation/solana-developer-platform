@@ -52,8 +52,6 @@ const STEPS = [
   { label: "Step 4", title: "Coming soon" },
 ] as const;
 
-// Each step gates on its own slice of depositSelectionSchema; `null` steps
-// (placeholders) have nothing to validate yet.
 const STEP_SCHEMAS = [counterpartySelectionSchema, depositAmountSchema, null, null] as const;
 
 export function PaymentsActionPage({

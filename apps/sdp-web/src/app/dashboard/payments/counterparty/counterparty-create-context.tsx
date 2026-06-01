@@ -48,10 +48,6 @@ const CounterpartyCreateContext = createContext<CounterpartyCreateContextValue |
 
 interface CounterpartyCreateProviderProps {
   children: ReactNode;
-  /**
-   * When provided, called with the created counterparty instead of navigating
-   * to the counterparty list — used when the flow runs inside a modal.
-   */
   onCreated?: (counterparty: Counterparty) => void;
 }
 
@@ -131,9 +127,11 @@ export function CounterpartyCreateProvider({
 
       toast.success("Counterparty created", { position: "bottom-right" });
 
-      const created = result.data?.data?.counterparty;
-      if (onCreated && created) {
-        onCreated(created);
+      if (onCreated) {
+        const created = result.data?.data?.counterparty;
+        if (created) {
+          onCreated(created);
+        }
         return;
       }
 
