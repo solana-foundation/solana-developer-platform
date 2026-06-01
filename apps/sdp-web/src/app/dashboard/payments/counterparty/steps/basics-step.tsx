@@ -1,14 +1,12 @@
 "use client";
 
-import { ArrowRightIcon } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { EntityTypeToggle } from "../components/entity-type-toggle";
 import { useCounterpartyCreate } from "../counterparty-create-context";
 
 export function BasicsStep() {
-  const { basics, goNext } = useCounterpartyCreate();
+  const { basics } = useCounterpartyCreate();
   const { values, setField, errors } = basics;
 
   return (
@@ -56,12 +54,6 @@ export function BasicsStep() {
         {errors.externalId && (
           <p className="mt-1 text-xs text-status-error-text">{errors.externalId}</p>
         )}
-      </div>
-
-      <div className="flex items-center justify-end pt-2">
-        <Button type="button" onClick={goNext} iconRight={<ArrowRightIcon />}>
-          Next
-        </Button>
       </div>
     </div>
   );

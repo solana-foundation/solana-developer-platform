@@ -1,6 +1,6 @@
 "use client";
 
-import type { Counterparty, PaymentsDashboardWallet } from "@sdp/types";
+import type { PaymentsDashboardWallet } from "@sdp/types";
 import type { RampFiatCurrency } from "@sdp/types/generated/ramp-support";
 import { type CryptoRailId, getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
 import type { RampProviderId } from "@sdp/types/provider-access";
@@ -13,7 +13,6 @@ import {
   type RampProviderOption,
   type SelectedRampPair,
 } from "@/lib/ramps";
-import { CounterpartySelector } from "./counterparty-selector";
 import { CurrencyPairSelector } from "./currency-pair-selector";
 import { ProviderCard } from "./provider-card";
 import { RampSelectionProvider } from "./ramp-selection-context";
@@ -34,9 +33,6 @@ interface RampPairProviderSelectorProps {
   onWalletChange: (walletId: string) => void;
   onPairChange: (pair: SelectedRampPair) => void;
   onProviderSelect: (provider: RampProviderId) => void;
-  counterpartiesResult: { ok: boolean; data: Counterparty[]; error?: string };
-  selectedCounterparty: string | null;
-  onCounterpartyChange: (counterpartyId: string) => void;
 }
 
 function pairKey(pair: SelectedRampPair): string {
@@ -59,9 +55,6 @@ export function RampPairProviderSelector({
   onWalletChange,
   onPairChange,
   onProviderSelect,
-  counterpartiesResult,
-  selectedCounterparty,
-  onCounterpartyChange,
 }: RampPairProviderSelectorProps) {
   const selectedPairSupport = useMemo(
     () => findRampPair(pairs, selectedPair),
@@ -175,11 +168,6 @@ export function RampPairProviderSelector({
       <RampSelectionProvider value={selectionContextValue}>
         <div className="flex flex-col gap-2">
           <CurrencyPairSelector />
-          <CounterpartySelector
-            counterpartiesResult={counterpartiesResult}
-            value={selectedCounterparty}
-            onChange={onCounterpartyChange}
-          />
         </div>
       </RampSelectionProvider>
 

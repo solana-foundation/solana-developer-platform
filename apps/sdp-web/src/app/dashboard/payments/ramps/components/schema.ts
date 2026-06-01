@@ -16,6 +16,16 @@ export const depositSelectionSchema = z.object({
   counterpartyId: z.string().min(1, "Select a counterparty."),
 });
 
+/** Step 0: choose the counterparty this deposit is for. */
+export const counterpartySelectionSchema = depositSelectionSchema.pick({ counterpartyId: true });
+
+/** Step 1: choose the destination wallet, amount, and provider. */
+export const depositAmountSchema = depositSelectionSchema.pick({
+  walletId: true,
+  amount: true,
+  provider: true,
+});
+
 export const INITIAL_ONRAMP_FIELDS = {
   walletId: "",
   amount: "",

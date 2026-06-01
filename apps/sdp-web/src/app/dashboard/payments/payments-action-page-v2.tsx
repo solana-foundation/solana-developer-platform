@@ -1,11 +1,7 @@
 "use client";
 
-import type {
-  ComplianceProviderId,
-  Counterparty,
-  PaymentsDashboardWallet,
-  RampProviderId,
-} from "@sdp/types";
+import type { ComplianceProviderId, PaymentsDashboardWallet, RampProviderId } from "@sdp/types";
+import { PlusIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -20,9 +16,20 @@ import {
 } from "@/lib/ramps";
 import { useZodForm } from "@/lib/use-zod-form";
 import { cn } from "@/lib/utils";
-import { fetchAllCounterparties, fetchWallets } from "./payments-workspace.data";
+import { CounterpartyCreateDialog } from "./counterparty/counterparty-create-dialog";
+import {
+  type CounterpartiesResult,
+  fetchAllCounterparties,
+  fetchWallets,
+} from "./payments-workspace.data";
+import { CounterpartySelector } from "./ramps/components/counterparty-selector";
 import { RampPairProviderSelector } from "./ramps/components/ramp-pair-provider-selector";
-import { depositSelectionSchema, INITIAL_ONRAMP_FIELDS } from "./ramps/components/schema";
+import {
+  counterpartySelectionSchema,
+  depositAmountSchema,
+  depositSelectionSchema,
+  INITIAL_ONRAMP_FIELDS,
+} from "./ramps/components/schema";
 
 interface PaymentsActionPageProps {
   mode: "send" | "receive";
@@ -32,17 +39,22 @@ interface PaymentsActionPageProps {
   issuedTokenSymbolsByMint: Record<string, string>;
   enabledComplianceProviders: ComplianceProviderId[];
   enabledRampProviders: RampProviderId[];
-  counterpartiesResult: { ok: boolean; data: Counterparty[]; error?: string };
+  counterpartiesResult: CounterpartiesResult;
 }
 
 const PAYMENTS_ACTION_WALLETS_KEY = "payments-action-wallets";
 const PAYMENTS_ACTION_COUNTERPARTIES_KEY = "payments-action-counterparties";
 
 const STEPS = [
+  { label: "Counterparty", title: "Who is this deposit for?" },
   { label: "Deposit", title: "How much would you like to deposit?" },
-  { label: "Step 2", title: "Coming soon" },
   { label: "Step 3", title: "Coming soon" },
+  { label: "Step 4", title: "Coming soon" },
 ] as const;
+
+// Each step gates on its own slice of depositSelectionSchema; `null` steps
+// (placeholders) have nothing to validate yet.
+const STEP_SCHEMAS = [counterpartySelectionSchema, depositAmountSchema, null, null] as const;
 
 export function PaymentsActionPage({
   wallets,
@@ -76,7 +88,7 @@ export function PaymentsActionPage({
       ? walletsError
       : null;
 
-  const { data: liveCounterpartiesResult } = useSWR(
+  const { data: liveCounterpartiesResult, mutate: mutateCounterparties } = useSWR(
     PAYMENTS_ACTION_COUNTERPARTIES_KEY,
     fetchAllCounterparties,
     {
@@ -85,22 +97,24 @@ export function PaymentsActionPage({
       revalidateIfStale: false,
     }
   );
+  const [counterpartyDialogOpen, setCounterpartyDialogOpen] = useState(false);
 
   const selectedWallet = useMemo(
     () => liveWallets.find((wallet) => wallet.walletId === onrampFields.walletId) ?? null,
     [liveWallets, onrampFields.walletId]
   );
 
+  const stepSchema = STEP_SCHEMAS[stepIndex];
   const canProceed = useMemo(
-    () => depositSelectionSchema.safeParse(onrampFields).success,
-    [onrampFields]
+    () => (stepSchema ? stepSchema.safeParse(onrampFields).success : true),
+    [stepSchema, onrampFields]
   );
 
   const isLastStep = stepIndex === STEPS.length - 1;
   const currentStep = STEPS[stepIndex];
 
   const handlePrimary = () => {
-    if (stepIndex === 0 && !form.validate().ok) {
+    if (!canProceed) {
       return;
     }
     if (isLastStep) {
@@ -142,7 +156,7 @@ export function PaymentsActionPage({
               Step {stepIndex + 1} of {STEPS.length}
             </span>
           </div>
-          <p className="text-[28px] leading-tight font-medium text-text-extra-high">
+          <p className="text-2xl font-medium leading-tight text-text-extra-high">
             {currentStep.title}
           </p>
         </div>
@@ -154,6 +168,31 @@ export function PaymentsActionPage({
         ) : null}
 
         {stepIndex === 0 ? (
+          <div className="space-y-3">
+            <button
+              type="button"
+              onClick={() => setCounterpartyDialogOpen(true)}
+              className="flex w-full items-center gap-3 rounded-2xl border border-dashed border-border-light px-4 py-3.5 text-left transition-colors hover:border-border-medium hover:bg-border-extra-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/50 dark:focus-visible:ring-white/50"
+            >
+              <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-border-extra-light text-text-extra-high">
+                <PlusIcon className="size-4" />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-medium text-text-extra-high">
+                  Add counterparty
+                </span>
+                <span className="block text-sm text-text-low">
+                  Create a new buyer to deposit for if they aren&apos;t in the list yet.
+                </span>
+              </span>
+            </button>
+            <CounterpartySelector
+              counterpartiesResult={liveCounterpartiesResult}
+              value={onrampFields.counterpartyId || null}
+              onChange={(id) => setField("counterpartyId", id)}
+            />
+          </div>
+        ) : stepIndex === 1 ? (
           enabledRampProviders.length === 0 ? (
             <div className="rounded-2xl border border-border-light bg-border-extra-light px-5 py-5 text-sm text-text-low">
               No on-ramp providers are enabled for this organization.
@@ -181,9 +220,6 @@ export function PaymentsActionPage({
                 }
               }}
               onProviderSelect={(nextProvider) => setField("provider", nextProvider)}
-              counterpartiesResult={liveCounterpartiesResult ?? counterpartiesResult}
-              selectedCounterparty={onrampFields.counterpartyId || null}
-              onCounterpartyChange={(id) => setField("counterpartyId", id)}
             />
           )
         ) : (
@@ -206,12 +242,26 @@ export function PaymentsActionPage({
         <Button
           type="button"
           className="h-14 rounded-full text-base"
-          disabled={stepIndex === 0 && (!canProceed || walletsLoading)}
+          disabled={!canProceed || (stepIndex === 1 && walletsLoading)}
           onClick={handlePrimary}
         >
           {isLastStep ? "Done" : "Next"}
         </Button>
       </div>
+
+      <CounterpartyCreateDialog
+        open={counterpartyDialogOpen}
+        onClose={() => setCounterpartyDialogOpen(false)}
+        onCreated={(created) => {
+          setField("counterpartyId", created.id);
+          void mutateCounterparties(
+            (prev) =>
+              prev ? { ...prev, data: [created, ...prev.data] } : { ok: true, data: [created] },
+            { revalidate: true }
+          );
+          setCounterpartyDialogOpen(false);
+        }}
+      />
     </div>
   );
 }

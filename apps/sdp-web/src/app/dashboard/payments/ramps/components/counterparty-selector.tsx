@@ -1,22 +1,20 @@
 "use client";
 
-import type { Counterparty } from "@sdp/types";
-import { PlusIcon, UsersIcon } from "lucide-react";
+import { UsersIcon } from "lucide-react";
 import { useMemo } from "react";
 import { Combobox } from "@/components/ui/combobox";
+import type { CounterpartiesResult } from "../../payments-workspace.data";
 
 interface CounterpartySelectorProps {
-  counterpartiesResult: { ok: boolean; data: Counterparty[]; error?: string };
+  counterpartiesResult: CounterpartiesResult;
   value: string | null;
   onChange: (counterpartyId: string) => void;
-  onCreateNew?: () => void;
 }
 
 export function CounterpartySelector({
   counterpartiesResult,
   value,
   onChange,
-  onCreateNew,
 }: CounterpartySelectorProps) {
   const options = useMemo(
     () =>
@@ -39,23 +37,6 @@ export function CounterpartySelector({
         counterpartiesResult.ok
           ? undefined
           : (counterpartiesResult.error ?? "Failed to load counterparties.")
-      }
-      footer={
-        onCreateNew
-          ? (close) => (
-              <button
-                type="button"
-                className="flex w-full items-center gap-2 px-4 py-3 text-left text-sm font-medium text-text-extra-high transition-colors hover:bg-[var(--select-item-highlight-bg)]"
-                onClick={() => {
-                  close();
-                  onCreateNew();
-                }}
-              >
-                <PlusIcon className="size-4 shrink-0" />
-                Add new counterparty
-              </button>
-            )
-          : undefined
       }
     />
   );
