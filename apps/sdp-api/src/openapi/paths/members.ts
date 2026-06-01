@@ -62,6 +62,7 @@ export function registerMemberPaths(registry: OpenAPIRegistry) {
     summary: "Accept invitation",
     operationId: "acceptInvitation",
     description: "Accepts an invitation token and activates membership.",
+    security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
       body: {
