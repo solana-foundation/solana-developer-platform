@@ -8,6 +8,7 @@
     "build": "pnpm generate:api && pnpm generate:ai && pnpm generate:source && next build",
     "start": "next start --port 3001",
     "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test \"src/**/*.test.ts\"",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "generate:api": "pnpm -C ../sdp-api run openapi:generate && node scripts/generate-api-docs.mjs && node scripts/generate-postman-collection.mjs && pnpm exec biome check --write content/docs/meta.json content/docs/reference/api/meta.json",
