@@ -88,6 +88,7 @@ export const FIELDS: EnvField[] = [
     section: "database",
     kind: "url",
     label: "External database URL",
+    required: true,
     help: "External Postgres connection string, e.g. postgresql://…@host:5432/dbname",
     pattern: /^postgres(ql)?:\/\//,
     visibleWhen: isProvider("DATABASE_MODE", "external"),
@@ -204,12 +205,13 @@ export const FIELDS: EnvField[] = [
     ],
   },
   {
-    key: "FEE_PAYER_PRIVATE_KEY",
+    key: "CUSTODY_PRIVATE_KEY",
     section: "signing",
     kind: "password",
-    label: "Fee payer private key",
+    label: "Signing key (base58)",
     required: true,
     visibleWhen: isProvider("SIGNING_PROVIDER", "local"),
+    help: "Base58 private key the local signer uses. Generate one and fund it on your network.",
   },
   {
     key: "FIREBLOCKS_API_KEY",
@@ -311,6 +313,14 @@ export const FIELDS: EnvField[] = [
       { value: "native", label: "native" },
       { value: "kora", label: "kora" },
     ],
+  },
+  {
+    key: "FEE_PAYER_PRIVATE_KEY",
+    section: "fee",
+    kind: "password",
+    label: "Fee payer key (base58)",
+    visibleWhen: isProvider("FEE_PAYMENT_PROVIDER", "native"),
+    help: "Optional. Defaults to the local signing key when blank; required only if you use a managed signing provider with native fees.",
   },
   {
     key: "KORA_RPC_URL",

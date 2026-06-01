@@ -125,6 +125,9 @@ async function collectInteractively(): Promise<Values> {
 
   try {
     for (const field of FIELDS) {
+      // Derived fields are computed from other answers and emitted by generate;
+      // never prompt for them.
+      if (field.derive) continue;
       if (!isFieldVisible(field, values)) continue;
 
       if (field.section !== currentSection) {

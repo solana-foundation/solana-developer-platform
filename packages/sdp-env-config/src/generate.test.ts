@@ -33,7 +33,12 @@ test("UI-only selector keys are never emitted", () => {
 test("invisible conditional fields are skipped", () => {
   const env = generateEnv({ ...defaultValues(), SIGNING_PROVIDER: "local" });
   assert.doesNotMatch(env, /^FIREBLOCKS_API_KEY=/m); // fireblocks not selected
-  assert.match(env, /^FEE_PAYER_PRIVATE_KEY=/m); // local selected → visible
+  assert.match(env, /^CUSTODY_PRIVATE_KEY=/m); // local selected → visible
+});
+
+test("a value with surrounding whitespace is emitted trimmed", () => {
+  const env = generateEnv({ ...defaultValues(), CLERK_SECRET_KEY: "  sk_test_x  " });
+  assert.match(env, /^CLERK_SECRET_KEY=sk_test_x$/m);
 });
 
 test("a value containing a newline cannot inject extra .env lines", () => {

@@ -23,6 +23,15 @@ export function validateValues(values: Values): Errors {
     }
     if (value !== "" && f.pattern && !f.pattern.test(value)) {
       errors[f.key] = `${f.label} has an invalid format`;
+      continue;
+    }
+    // A select must hold one of its declared options; this catches a bad value
+    // injected through the environment in the non-interactive path.
+    if (value !== "" && f.kind === "select" && f.options) {
+      const allowed = f.options.map((o) => o.value);
+      if (!allowed.includes(value)) {
+        errors[f.key] = `${f.label} must be one of: ${allowed.join(", ")}`;
+      }
     }
   }
   return errors;

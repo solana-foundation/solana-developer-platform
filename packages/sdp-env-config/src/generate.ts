@@ -30,9 +30,10 @@ export function generateEnv(values: Values): string {
     lines.push(`# ${section.comment}`);
     for (const f of fields) {
       const raw = f.derive ? f.derive(values) : (values[f.key] ?? f.defaultValue ?? "");
-      // Strip CR/LF/NUL so a value can never inject additional .env lines, even
+      // Trim and strip CR/LF/NUL so the emitted value matches what validation
+      // checked (which trims) and can never inject additional .env lines, even
       // when fed by an unvalidated caller.
-      const value = raw.replace(/[\r\n\0]/g, "");
+      const value = raw.trim().replace(/[\r\n\0]/g, "");
       lines.push(`${f.key}=${value}`);
     }
     lines.push("");

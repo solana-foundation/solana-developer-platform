@@ -1,4 +1,4 @@
-import { generateEnv } from "@sdp/env-config";
+import { FIELDS, generateEnv } from "@sdp/env-config";
 import { describe, expect, it } from "vitest";
 import { collectFromEnv } from "../scripts/configure";
 
@@ -31,7 +31,7 @@ describe("collectFromEnv", () => {
         CLERK_SECRET_KEY: "sk_test",
         NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test",
         CLERK_ISSUER: "https://x.clerk.accounts.dev",
-        FEE_PAYER_PRIVATE_KEY: "k",
+        CUSTODY_PRIVATE_KEY: "k",
       })
     );
 
@@ -40,10 +40,20 @@ describe("collectFromEnv", () => {
       "CLERK_SECRET_KEY",
       "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY",
       "CLERK_ISSUER",
-      "FEE_PAYER_PRIVATE_KEY",
+      "CUSTODY_PRIVATE_KEY",
       "API_KEY_PEPPER",
     ]) {
       expect(env).toContain(`${key}=`);
     }
+  });
+
+  it("emits derived fields without taking them from input", () => {
+    // The interactive loop skips any field with a derive (they are computed),
+    // yet generate still emits them from the values they depend on.
+    const network = FIELDS.find((f) => f.key === "NEXT_PUBLIC_SOLANA_NETWORK");
+    expect(network?.derive).toBeTypeOf("function");
+
+    const env = generateEnv(collectFromEnv({ SOLANA_NETWORK: "mainnet-beta" }));
+    expect(env).toContain("NEXT_PUBLIC_SOLANA_NETWORK=mainnet-beta");
   });
 });

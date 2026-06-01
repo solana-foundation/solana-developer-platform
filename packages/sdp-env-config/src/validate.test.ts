@@ -19,13 +19,23 @@ test("valid value has no error", () => {
 });
 
 test("invisible required field is not validated", () => {
-  // FEE_PAYER_PRIVATE_KEY is required but hidden unless SIGNING_PROVIDER=local
+  // CUSTODY_PRIVATE_KEY is required but hidden unless SIGNING_PROVIDER=local
   const errors = validateValues({
     ...defaultValues(),
     SIGNING_PROVIDER: "fireblocks",
-    FEE_PAYER_PRIVATE_KEY: "",
+    CUSTODY_PRIVATE_KEY: "",
   });
-  assert.equal(errors.FEE_PAYER_PRIVATE_KEY, undefined);
+  assert.equal(errors.CUSTODY_PRIVATE_KEY, undefined);
+});
+
+test("a select value outside its options reports an error", () => {
+  const errors = validateValues({ ...defaultValues(), SOLANA_NETWORK: "testnet" });
+  assert.match(errors.SOLANA_NETWORK ?? "", /must be one of: devnet, mainnet-beta/);
+});
+
+test("a valid select value has no error", () => {
+  const errors = validateValues({ ...defaultValues(), SOLANA_NETWORK: "mainnet-beta" });
+  assert.equal(errors.SOLANA_NETWORK, undefined);
 });
 
 test("a value with a newline is rejected as multi-line", () => {
