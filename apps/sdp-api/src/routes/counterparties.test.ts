@@ -250,7 +250,7 @@ describe("Counterparties Routes", () => {
           `INSERT INTO counterparties (
              id, organization_id, project_id, external_id, entity_type,
              display_name, email, identity, provider_data, status, created_by
-           ) VALUES (?, ?, ?, ?, 'individual', 'Other Project Alice', 'other@example.com', '{}'::jsonb, '{}'::jsonb, 'active', ?)`
+           ) VALUES (?, ?, ?, ?, 'individual', 'Other Project Alice', 'other@example.com', '{}', '{}', 'active', ?)`
         )
         .bind(otherCounterpartyId, TEST_ORG.id, otherProjectId, "ext_cross_project", TEST_USER.id)
         .run();
