@@ -1,13 +1,8 @@
 import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
-import { z } from "zod";
 
-import { errorResponseSchema, projectScopeHeaderSchema, rpcRelayRequestSchema } from "../schemas";
-import { errorResponses, jsonContent } from "./helpers";
+import { errorResponseSchema, rpcRelayRequestSchema } from "../schemas";
+import { errorResponses, jsonContent, projectScopeHeaders } from "./helpers";
 import { rpcProvidersResponse, rpcRelayResponse } from "./responses";
-
-const rpcHeadersSchema = z.object({
-  "x-project-id": projectScopeHeaderSchema.optional(),
-});
 
 export function registerRpcPaths(registry: OpenAPIRegistry) {
   registry.registerPath({
@@ -20,7 +15,7 @@ export function registerRpcPaths(registry: OpenAPIRegistry) {
       "Lists managed RPC providers, aggregated telemetry, and the currently selected provider for the caller/project context.",
     security: [{ apiKeyAuth: [] }],
     request: {
-      headers: rpcHeadersSchema,
+      headers: projectScopeHeaders,
     },
     responses: {
       200: {
@@ -41,7 +36,7 @@ export function registerRpcPaths(registry: OpenAPIRegistry) {
       "Proxies a JSON-RPC request to the resolved provider and records telemetry. Provider selection is controlled via organization/project settings.",
     security: [{ apiKeyAuth: [] }],
     request: {
-      headers: rpcHeadersSchema,
+      headers: projectScopeHeaders,
       body: {
         required: true,
         content: jsonContent(rpcRelayRequestSchema),

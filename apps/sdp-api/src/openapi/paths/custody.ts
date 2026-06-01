@@ -9,7 +9,6 @@ import {
   initializeSigningRequestSchema,
   initializeSigningResponseSchema,
   orgCustodyProviderSchema,
-  projectScopeHeaderSchema,
   setDefaultWalletRequestSchema,
   setDefaultWalletResponseSchema,
   signerCheckRequestSchema,
@@ -17,7 +16,7 @@ import {
   updateCustodyWalletRequestSchema,
   walletIdParamSchema,
 } from "../schemas";
-import { errorResponses, jsonContent } from "./helpers";
+import { errorResponses, jsonContent, projectScopeHeaders } from "./helpers";
 import {
   custodyConfigResponse,
   custodyConfigsResponse,
@@ -29,10 +28,6 @@ import {
   custodyWalletResponse,
   custodyWalletsResponse,
 } from "./responses";
-
-const projectScopeHeaders = z.object({
-  "x-project-id": projectScopeHeaderSchema.optional(),
-});
 
 export function registerCustodyPaths(registry: OpenAPIRegistry) {
   registry.registerPath({

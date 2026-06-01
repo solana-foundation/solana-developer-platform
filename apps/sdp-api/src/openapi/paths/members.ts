@@ -7,7 +7,7 @@ import {
   inviteMemberRequestSchema,
   memberIdParamSchema,
 } from "../schemas";
-import { errorResponses, jsonContent } from "./helpers";
+import { errorResponses, jsonContent, projectScopeHeaders } from "./helpers";
 import { actionSuccessResponse, inviteMemberResponse, listMembersResponse } from "./responses";
 
 export function registerMemberPaths(registry: OpenAPIRegistry) {
@@ -19,6 +19,9 @@ export function registerMemberPaths(registry: OpenAPIRegistry) {
     operationId: "listMembers",
     description: "Lists members of the authenticated organization.",
     security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+    },
     responses: {
       200: {
         description: "Members list",
@@ -37,6 +40,7 @@ export function registerMemberPaths(registry: OpenAPIRegistry) {
     description: "Creates an invitation for a new organization member.",
     security: [{ apiKeyAuth: [] }],
     request: {
+      headers: projectScopeHeaders,
       body: {
         required: true,
         content: jsonContent(inviteMemberRequestSchema),
@@ -59,6 +63,7 @@ export function registerMemberPaths(registry: OpenAPIRegistry) {
     operationId: "acceptInvitation",
     description: "Accepts an invitation token and activates membership.",
     request: {
+      headers: projectScopeHeaders,
       body: {
         required: true,
         content: jsonContent(acceptInvitationRequestSchema),
@@ -82,6 +87,7 @@ export function registerMemberPaths(registry: OpenAPIRegistry) {
     description: "Removes a member from the organization.",
     security: [{ apiKeyAuth: [] }],
     request: {
+      headers: projectScopeHeaders,
       params: z.object({
         memberId: memberIdParamSchema,
       }),
