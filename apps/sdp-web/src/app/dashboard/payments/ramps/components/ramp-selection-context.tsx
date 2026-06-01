@@ -20,6 +20,8 @@ interface RampSelectionContextValue {
   onWalletChange: (walletId: string) => void;
   onFiatCurrencyChange: (fiatCurrency: RampFiatCurrency) => void;
   onAssetRailChange: (assetRail: CryptoRailId) => void;
+  selectedCounterparty: string | null;
+  onCounterpartyChange: (counterpartyId: string) => void;
 }
 
 const RampSelectionContext = createContext<RampSelectionContextValue | null>(null);

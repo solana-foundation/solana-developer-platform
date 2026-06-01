@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
-import { z } from "zod";
 import { Button } from "@/components/ui/button";
 import {
   DEFAULT_RAMP_PAIR,
@@ -17,6 +16,7 @@ import {
 import { useZodForm } from "@/lib/use-zod-form";
 import { cn } from "@/lib/utils";
 import { fetchWallets } from "./payments-workspace.data";
+import { depositSelectionSchema, INITIAL_ONRAMP_FIELDS } from "./ramps/components/schema";
 import { RampPairProviderSelector } from "./ramps/components/ramp-pair-provider-selector";
 
 interface PaymentsActionPageProps {
@@ -37,11 +37,6 @@ const STEPS = [
   { label: "Step 3", title: "Coming soon" },
 ] as const;
 
-const depositSelectionSchema = z.object({
-  walletId: z.string().min(1, "Select a destination wallet."),
-  amount: z.string().refine((value) => Number(value) > 0, "Enter an amount greater than zero."),
-  provider: z.string().min(1, "Choose a provider."),
-});
 
 export function PaymentsActionPage({
   wallets,
@@ -52,8 +47,8 @@ export function PaymentsActionPage({
 
   const [stepIndex, setStepIndex] = useState(0);
   const [selectedRampPair, setSelectedRampPair] = useState<SelectedRampPair>(DEFAULT_RAMP_PAIR);
-  const form = useZodForm(depositSelectionSchema, { walletId: "", amount: "", provider: "" });
-  const { values, setField } = form;
+  const form = useZodForm(depositSelectionSchema, INITIAL_ONRAMP_FIELDS);
+  const { values: onrampFields, setField } = form;
 
   const { data: swrWallets, error: walletsFetchError } = useSWR<PaymentsDashboardWallet[]>(
     PAYMENTS_ACTION_WALLETS_KEY,
@@ -75,11 +70,11 @@ export function PaymentsActionPage({
       : null;
 
   const selectedWallet = useMemo(
-    () => liveWallets.find((wallet) => wallet.walletId === values.walletId) ?? null,
-    [liveWallets, values.walletId]
+    () => liveWallets.find((wallet) => wallet.walletId === onrampFields.walletId) ?? null,
+    [liveWallets, onrampFields.walletId]
   );
 
-  const canProceed = useMemo(() => depositSelectionSchema.safeParse(values).success, [values]);
+  const canProceed = useMemo(() => depositSelectionSchema.safeParse(onrampFields).success, [onrampFields]);
 
   const isLastStep = stepIndex === STEPS.length - 1;
   const currentStep = STEPS[stepIndex];
@@ -153,22 +148,21 @@ export function PaymentsActionPage({
               walletsLoading={walletsLoading}
               selectedWallet={selectedWallet}
               selectedPair={selectedRampPair}
-              selectedProvider={values.provider ? (values.provider as RampProviderId) : null}
-              amount={values.amount}
+              selectedProvider={onrampFields.provider}
+              amount={onrampFields.amount}
               onAmountChange={(value) => setField("amount", value)}
               onAmountBlur={() => {}}
               onWalletChange={(walletId) => setField("walletId", walletId)}
               onPairChange={(nextPair) => {
                 setSelectedRampPair(nextPair);
                 const support = findRampPair(ONRAMP_PAIRS, nextPair);
-                if (
-                  values.provider &&
-                  !support?.providers.includes(values.provider as RampProviderId)
-                ) {
-                  setField("provider", "");
+                if (onrampFields.provider && !support?.providers.includes(onrampFields.provider)) {
+                  setField("provider", null);
                 }
               }}
               onProviderSelect={(nextProvider) => setField("provider", nextProvider)}
+              selectedCounterparty={onrampFields.counterpartyId || null}
+              onCounterpartyChange={(id) => setField("counterpartyId", id)}
             />
           )
         ) : (

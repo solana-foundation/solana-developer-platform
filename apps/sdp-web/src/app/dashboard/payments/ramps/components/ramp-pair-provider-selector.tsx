@@ -1,6 +1,6 @@
 "use client";
 
-import type { PaymentsDashboardWallet } from "@sdp/types";
+import type { Counterparty, PaymentsDashboardWallet } from "@sdp/types";
 import type { RampFiatCurrency } from "@sdp/types/generated/ramp-support";
 import { type CryptoRailId, getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
 import type { RampProviderId } from "@sdp/types/provider-access";
@@ -13,6 +13,7 @@ import {
   type RampProviderOption,
   type SelectedRampPair,
 } from "@/lib/ramps";
+import { CounterpartySelector } from "./counterparty-selector";
 import { CurrencyPairSelector } from "./currency-pair-selector";
 import { ProviderCard } from "./provider-card";
 import { RampSelectionProvider } from "./ramp-selection-context";
@@ -33,6 +34,9 @@ interface RampPairProviderSelectorProps {
   onWalletChange: (walletId: string) => void;
   onPairChange: (pair: SelectedRampPair) => void;
   onProviderSelect: (provider: RampProviderId) => void;
+  counterparties: Counterparty[];
+  selectedCounterparty: string | null;
+  onCounterpartyChange: (counterpartyId: string) => void;
 }
 
 function pairKey(pair: SelectedRampPair): string {
@@ -55,6 +59,9 @@ export function RampPairProviderSelector({
   onWalletChange,
   onPairChange,
   onProviderSelect,
+  counterparties,
+  selectedCounterparty,
+  onCounterpartyChange,
 }: RampPairProviderSelectorProps) {
   const selectedPairSupport = useMemo(
     () => findRampPair(pairs, selectedPair),
@@ -145,6 +152,8 @@ export function RampPairProviderSelector({
       onWalletChange,
       onFiatCurrencyChange: selectFiatCurrency,
       onAssetRailChange: selectAssetRail,
+      selectedCounterparty,
+      onCounterpartyChange,
     }),
     [
       amount,
@@ -153,9 +162,11 @@ export function RampPairProviderSelector({
       fiatCurrencies,
       onAmountBlur,
       onAmountChange,
+      onCounterpartyChange,
       onWalletChange,
       selectAssetRail,
       selectFiatCurrency,
+      selectedCounterparty,
       selectedPair,
       selectedWallet,
       wallets,
@@ -166,7 +177,10 @@ export function RampPairProviderSelector({
   return (
     <div className="space-y-7">
       <RampSelectionProvider value={selectionContextValue}>
-        <CurrencyPairSelector />
+        <div className="flex flex-col gap-2">
+          <CurrencyPairSelector />
+          <CounterpartySelector counterparties={counterparties} value={selectedCounterparty} onChange={onCounterpartyChange} />
+        </div>
       </RampSelectionProvider>
 
       <div className="space-y-2.5">
