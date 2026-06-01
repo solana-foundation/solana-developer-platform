@@ -4,6 +4,7 @@ import {
   type PrivateTransferRequest,
   RAMP_PROVIDERS,
 } from "@sdp/types";
+import { RAMP_FIAT_CURRENCIES } from "@sdp/types/generated/ramp-support";
 import { z } from "zod";
 import { isDecimalString } from "@/lib/amount";
 import { isAddress } from "@/lib/solana";
@@ -111,26 +112,20 @@ const offrampCryptoRailSchema = z.enum(OFFRAMP_CRYPTO_RAILS);
 const rampCurrencyCodeSchema = z
   .string()
   .regex(/^[a-zA-Z0-9_]+$/, { message: "Invalid ramp currency code" });
+const rampFiatCurrencySchema = z.preprocess(
+  (value) => (typeof value === "string" ? value.trim().toUpperCase() : value),
+  z.enum(RAMP_FIAT_CURRENCIES)
+);
 
 export const listOnrampCurrenciesQuerySchema = z.object({
-  source: z
-    .preprocess(
-      (value) => (typeof value === "string" ? value.trim().toUpperCase() : value),
-      z.string().regex(/^[A-Z]{3}$/, { message: "source must be a 3-letter fiat currency code" })
-    )
-    .optional(),
+  source: rampFiatCurrencySchema.optional(),
   dest: onrampCryptoRailSchema.optional(),
   provider: rampProviderSchema.optional(),
 });
 
 export const listOfframpCurrenciesQuerySchema = z.object({
   source: offrampCryptoRailSchema.optional(),
-  dest: z
-    .preprocess(
-      (value) => (typeof value === "string" ? value.trim().toUpperCase() : value),
-      z.string().regex(/^[A-Z]{3}$/, { message: "dest must be a 3-letter fiat currency code" })
-    )
-    .optional(),
+  dest: rampFiatCurrencySchema.optional(),
   provider: rampProviderSchema.optional(),
 });
 
@@ -188,7 +183,7 @@ export const executeOnrampSchema = z.object({
   provider: rampProviderSchema,
   destinationWallet: z.string().min(1),
   cryptoToken: rampCurrencyCodeSchema,
-  fiatCurrency: z.literal("USD").optional(),
+  fiatCurrency: rampFiatCurrencySchema.optional(),
   fiatAmount: paymentAmountSchema,
   kycReference: z.string().max(128).optional(),
   redirectUrl: z.string().url().optional(),
@@ -199,7 +194,7 @@ export const executeOfframpSchema = z.object({
   provider: rampProviderSchema,
   sourceWallet: z.string().min(1),
   cryptoToken: rampCurrencyCodeSchema,
-  fiatCurrency: z.literal("USD").optional(),
+  fiatCurrency: rampFiatCurrencySchema.optional(),
   cryptoAmount: paymentAmountSchema,
   kycReference: z.string().max(128).optional(),
   redirectUrl: z.string().url().optional(),
