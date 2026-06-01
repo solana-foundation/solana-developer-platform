@@ -299,7 +299,7 @@ jobs:
         run: node scripts/check-env-configurator-drift.mjs
 
       - name: Configurator unit tests
-        run: pnpm --filter sdp-docs test
+        run: pnpm --filter @sdp/env-config test
 
       - name: Build docs
         run: pnpm --filter sdp-docs build

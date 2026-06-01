@@ -1,12 +1,18 @@
 "use client";
 
+import {
+  autoSecretKeys,
+  defaultValues,
+  FIELDS,
+  generateEnv,
+  isFieldVisible,
+  randomHex32,
+  SECTIONS,
+  type Values,
+  validateValues,
+} from "@sdp/env-config";
 import { useEffect, useMemo, useState } from "react";
 import { FieldRow, SectionBlock } from "./FieldRenderer";
-import { FIELDS, isFieldVisible, SECTIONS } from "./fields";
-import { defaultValues, generateEnv } from "./generate";
-import { autoSecretKeys, randomHex32 } from "./secrets";
-import type { Values } from "./types";
-import { validateValues } from "./validate";
 
 const SOURCE_URL =
   "https://github.com/solana-foundation/solana-developer-platform/tree/main/apps/sdp-docs/src/components/EnvConfigurator";

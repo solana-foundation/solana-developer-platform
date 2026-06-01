@@ -7,7 +7,7 @@ import { FIELDS } from "./fields";
 import { defaultValues, generateEnv } from "./generate";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const envExamplePath = path.resolve(here, "../../../../../infra/self-hosted/.env.example");
+const envExamplePath = path.resolve(here, "../../../infra/self-hosted/.env.example");
 
 function baseKeysFromExample(): string[] {
   const text = fs.readFileSync(envExamplePath, "utf8");

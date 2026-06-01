@@ -6,7 +6,7 @@ import { API_LOCAL_ENV_KEYS } from "./secret-keys.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const ENV_EXAMPLE = path.join(repoRoot, "infra/self-hosted/.env.example");
-const FIELDS_FILE = path.join(repoRoot, "apps/sdp-docs/src/components/EnvConfigurator/fields.ts");
+const FIELDS_FILE = path.join(repoRoot, "packages/sdp-env-config/src/fields.ts");
 
 // UI-only selectors that are not real env vars (see fields.ts UI_ONLY_KEYS).
 const IGNORE = new Set(["DATABASE_MODE", "CACHE_MODE"]);
