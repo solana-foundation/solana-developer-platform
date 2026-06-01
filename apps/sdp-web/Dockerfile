@@ -51,13 +51,14 @@ COPY apps/sdp-web ./apps/sdp-web
 COPY packages/sdp-types ./packages/sdp-types
 
 # Public env (each var is also exposed via ENV so Next picks it up at build).
+# __SDP_RT_*__ defaults are placeholders swapped at container start by docker/entrypoint.sh.
 ARG NEXT_PUBLIC_API_BASE_URL
-ARG NEXT_PUBLIC_SDP_API_BASE_URL
-ARG NEXT_PUBLIC_SDP_DOCS_URL
-ARG NEXT_PUBLIC_SOLANA_NETWORK
+ARG NEXT_PUBLIC_SDP_API_BASE_URL=__SDP_RT_NEXT_PUBLIC_SDP_API_BASE_URL__
+ARG NEXT_PUBLIC_SDP_DOCS_URL=__SDP_RT_NEXT_PUBLIC_SDP_DOCS_URL__
+ARG NEXT_PUBLIC_SOLANA_NETWORK=__SDP_RT_NEXT_PUBLIC_SOLANA_NETWORK__
 ARG NEXT_PUBLIC_SENTRY_DSN
 ARG NEXT_PUBLIC_ENABLE_NETWORK_DEBUG
-ARG NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
+ARG NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=__SDP_RT_NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY__
 ARG NEXT_PUBLIC_CLERK_JWT_TEMPLATE
 ARG NEXT_PUBLIC_CLERK_SIGN_IN_URL
 ARG NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL
@@ -120,6 +121,10 @@ ENV NODE_ENV=production \
     HOSTNAME=0.0.0.0 \
     NEXT_TELEMETRY_DISABLED=1
 
+# Apply OS-level security patches not yet in the pinned base image.
+# This layer is cached — rebuild with --no-cache to pick up new fixes.
+RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/*
+
 # Run as an unprivileged user. UID/GID 1001 matches the convention used by
 # the upstream Next.js Docker example to make k8s securityContext predictable.
 RUN groupadd --system --gid 1001 nodejs \
@@ -131,6 +136,10 @@ RUN groupadd --system --gid 1001 nodejs \
 COPY --from=builder --chown=nextjs:nodejs /repo/apps/sdp-web/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /repo/apps/sdp-web/.next/static ./apps/sdp-web/.next/static
 COPY --from=builder --chown=nextjs:nodejs /repo/apps/sdp-web/public ./apps/sdp-web/public
+
+ENV SDP_INJECT_DIRS=/app/apps/sdp-web/.next
+COPY --chmod=0755 apps/sdp-web/docker/entrypoint.sh /app/entrypoint.sh
+COPY apps/sdp-web/docker/inject-public-env.mjs /app/inject-public-env.mjs
 
 # Provenance metadata for image registries / `docker image inspect`. Pass
 # GIT_SHA at build time (e.g. --build-arg GIT_SHA=$(git rev-parse HEAD)) so
@@ -156,4 +165,5 @@ EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
     CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/').then(r=>process.exit(r.status<500?0:1)).catch(()=>process.exit(1))"
 
+ENTRYPOINT ["/app/entrypoint.sh"]
 CMD ["node", "apps/sdp-web/server.js"]
