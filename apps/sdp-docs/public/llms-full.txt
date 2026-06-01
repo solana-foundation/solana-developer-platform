@@ -3329,6 +3329,21 @@ Use the [Payments API reference](/docs/reference/api/payments), [Wallets API ref
 
 ---
 
+## Self-Hosting
+
+### Configurator
+Source: https://platform.solana.com/docs/self-hosting/configurator
+
+> Generate a complete .env for a self-hosted Solana Developer Platform, entirely in your browser.
+
+Fill in the fields below and download a ready-to-use `.env`. Everything runs in
+your browser — nothing is sent anywhere. Drop the file next to `compose.yml`, then
+run `docker compose up -d`.
+
+<EnvConfigurator />
+
+---
+
 ## Reference
 
 ### Reference
@@ -3640,7 +3655,9 @@ Source: https://platform.solana.com/docs/reference/api/payments
 
 | Method | Endpoint | Summary |
 | --- | --- | --- |
+| `GET` | `/v1/payments/ramps/offramp/currency` | List off-ramp currency support |
 | `POST` | `/v1/payments/ramps/offramp/execute` | Execute off-ramp |
+| `GET` | `/v1/payments/ramps/onramp/currency` | List on-ramp currency support |
 | `POST` | `/v1/payments/ramps/onramp/execute` | Execute on-ramp |
 | `POST` | `/v1/payments/ramps/sandbox/simulate` | Simulate sandbox transfer |
 | `GET` | `/v1/payments/transfers` | List transfers |
