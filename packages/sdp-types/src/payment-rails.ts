@@ -15,6 +15,18 @@ export const OFFRAMP_CRYPTO_RAILS = SOLANA_CRYPTO_RAILS;
 
 export type CryptoRailId = (typeof SOLANA_CRYPTO_RAILS)[number];
 
+export const CRYPTO_RAIL_ASSET_LABELS = {
+  "sol.solana": "SOL",
+  "usdc.solana": "USDC",
+  "usdt.solana": "USDT",
+  "usdg.solana": "USDG",
+  "pyusd.solana": "PYUSD",
+} as const satisfies Record<CryptoRailId, string>;
+
+export function getCryptoRailAssetLabel(assetRail: CryptoRailId): string {
+  return CRYPTO_RAIL_ASSET_LABELS[assetRail];
+}
+
 export interface OnrampPairSupport<FiatCurrency extends string = FiatCurrencyCode> {
   source: FiatCurrency;
   dest: CryptoRailId;
