@@ -48,11 +48,34 @@ services:
     ports:
       - "${SDP_API_PORT:-8787}:8787"
     environment:
+      # Core
       ENVIRONMENT: ${ENVIRONMENT:-development}
       API_VERSION: ${API_VERSION:-local-compose}
       SDP_RUNTIME: node
+      SDP_DEPLOYMENT_MODE: ${SDP_DEPLOYMENT_MODE:-self_hosted}
       DATABASE_URL: postgresql://sdp:sdp@postgres:5432/sdp
       REDIS_URL: redis://redis:6379
+
+      # Clerk authentication
+      CLERK_ISSUER: ${CLERK_ISSUER:-}
+      CLERK_SECRET_KEY: ${CLERK_SECRET_KEY:-}
+      CLERK_WEBHOOK_SECRET: ${CLERK_WEBHOOK_SECRET:-}
+
+      # App secrets
+      API_KEY_PEPPER: ${API_KEY_PEPPER:-}
+      CUSTODY_ENCRYPTION_KEY: ${CUSTODY_ENCRYPTION_KEY:-}
+
+      # Solana
+      SOLANA_NETWORK: ${SOLANA_NETWORK:-devnet}
+      SOLANA_RPC_URL: ${SOLANA_RPC_URL:-https://api.devnet.solana.com}
+
+      # Signing
+      SIGNING_PROVIDER: ${SIGNING_PROVIDER:-local}
+      FEE_PAYER_PRIVATE_KEY: ${FEE_PAYER_PRIVATE_KEY:-}
+      FEE_PAYMENT_PROVIDER: ${FEE_PAYMENT_PROVIDER:-native}
+
+      # Observability (optional)
+      SENTRY_DSN: ${SENTRY_DSN:-}
     depends_on:
       postgres:
         condition: service_healthy
@@ -76,6 +99,7 @@ services:
     environment:
       SDP_API_BASE_URL: http://sdp-api:8787
       CLERK_SECRET_KEY: ${CLERK_SECRET_KEY}
+      CLERK_JWT_TEMPLATE: ${CLERK_JWT_TEMPLATE:-sdp-api}
     depends_on:
       sdp-api:
         condition: service_healthy

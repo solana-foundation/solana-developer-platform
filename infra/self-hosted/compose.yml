@@ -1,0 +1,98 @@
+# Self-hosted Solana Developer Platform: pulls prebuilt images instead of building
+# from source. Copy .env.example to .env, fill it in, then `docker compose up -d`.
+name: sdp
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-sdp}
+      POSTGRES_USER: ${POSTGRES_USER:-sdp}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - sdp-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-sdp} -d ${POSTGRES_DB:-sdp}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - sdp-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  sdp-migrate:
+    image: ${SDP_IMAGE_REGISTRY:-ghcr.io/solana-foundation/sdp}/sdp-api:${SDP_VERSION:-latest}
+    command: ["node", "migrate.js"]
+    restart: "no"
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-sdp}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-sdp}}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  sdp-api:
+    image: ${SDP_IMAGE_REGISTRY:-ghcr.io/solana-foundation/sdp}/sdp-api:${SDP_VERSION:-latest}
+    restart: unless-stopped
+    ports:
+      - "${SDP_API_PORT:-8787}:8787"
+    env_file:
+      - .env
+    environment:
+      SDP_RUNTIME: node
+      SDP_DEPLOYMENT_MODE: ${SDP_DEPLOYMENT_MODE:-self_hosted}
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      API_VERSION: ${SDP_VERSION:-latest}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-sdp}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-sdp}}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      API_KEY_PEPPER: ${API_KEY_PEPPER:?set API_KEY_PEPPER in .env (openssl rand -hex 32)}
+      CUSTODY_ENCRYPTION_KEY: ${CUSTODY_ENCRYPTION_KEY:?set CUSTODY_ENCRYPTION_KEY in .env (openssl rand -hex 32)}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      sdp-migrate:
+        condition: service_completed_successfully
+
+  sdp-web:
+    image: ${SDP_IMAGE_REGISTRY:-ghcr.io/solana-foundation/sdp}/sdp-web:${SDP_VERSION:-latest}
+    restart: unless-stopped
+    ports:
+      - "${SDP_WEB_PORT:-3000}:3000"
+    environment:
+      NEXT_PUBLIC_SDP_API_BASE_URL: ${NEXT_PUBLIC_SDP_API_BASE_URL:-http://localhost:8787}
+      NEXT_PUBLIC_SDP_DOCS_URL: ${NEXT_PUBLIC_SDP_DOCS_URL:-http://localhost:3001}
+      NEXT_PUBLIC_SOLANA_NETWORK: ${NEXT_PUBLIC_SOLANA_NETWORK:-devnet}
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:?set NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY in .env}
+      SDP_API_BASE_URL: ${SDP_API_BASE_URL:-http://sdp-api:8787}
+      CLERK_SECRET_KEY: ${CLERK_SECRET_KEY:?set CLERK_SECRET_KEY in .env}
+      CLERK_JWT_TEMPLATE: ${CLERK_JWT_TEMPLATE:-sdp-api}
+    depends_on:
+      sdp-api:
+        condition: service_healthy
+
+  sdp-docs:
+    image: ${SDP_IMAGE_REGISTRY:-ghcr.io/solana-foundation/sdp}/sdp-docs:${SDP_VERSION:-latest}
+    restart: unless-stopped
+    ports:
+      - "${SDP_DOCS_PORT:-3001}:3001"
+    environment:
+      NEXT_PUBLIC_SDP_WEB_URL: ${NEXT_PUBLIC_SDP_WEB_URL:-http://localhost:3000}
+      NEXT_PUBLIC_SDP_DOCS_URL: ${NEXT_PUBLIC_SDP_DOCS_URL:-http://localhost:3001}
+      NEXT_PUBLIC_SDP_API_URL: ${NEXT_PUBLIC_SDP_API_URL:-http://localhost:8787}
+    depends_on:
+      sdp-api:
+        condition: service_healthy
+
+volumes:
+  sdp-postgres-data:
+  sdp-redis-data:
