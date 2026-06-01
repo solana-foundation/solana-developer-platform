@@ -7,7 +7,7 @@ export function randomHex32(): string {
   return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-/** Keys whose field kind is "secret" (auto-generated on mount). */
+/** Keys whose field kind is "secret". */
 export function autoSecretKeys(): Set<string> {
   return new Set(FIELDS.filter((f) => f.kind === "secret").map((f) => f.key));
 }
