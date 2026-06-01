@@ -532,17 +532,29 @@ The pro rata calculation runs in treasury operations. SDP mints the calculated a
 
 ### 3. Verify the audit trail
 
-Pull the transactions history to confirm both records landed with their memos.
+Pull the transactions history to confirm both records landed with their memos. The endpoint is paginated; a complete audit-trail fetch iterates until `meta.hasMore` is `false`.
 
 ```javascript
-const { data } = await sdp.get(
-  `/v1/issuance/tokens/${tokenId}/transactions`
-);
-console.log(`Records: ${data.length}`);
-data.forEach(tx => console.log(`  ${tx.type.padEnd(8)} ${tx.params.amount ?? "-"}  ${tx.params.memo ?? ""}`));
+async function fetchAllTransactions(tokenId) {
+  const all = [];
+  let page = 1;
+  while (true) {
+    const { data, meta } = await sdp.get(
+      `/v1/issuance/tokens/${tokenId}/transactions?page=${page}&pageSize=100`
+    );
+    all.push(...data);
+    if (!meta.hasMore) break;
+    page += 1;
+  }
+  return all;
+}
+
+const transactions = await fetchAllTransactions(tokenId);
+console.log(`Records: ${transactions.length}`);
+transactions.forEach(tx => console.log(`  ${tx.type.padEnd(8)} ${tx.params.amount ?? "-"}  ${tx.params.memo ?? ""}`));
 ```
 
-The response is `{ data: [...], meta: { total, page, pageSize, hasMore, requestId } }`. `data` is an array of every state-changing transaction this token has produced: `mint`, `burn`, `freeze`, `seize`, `force-burn`, `unfreeze`. Each record carries its memo verbatim, the on-chain signature, the destination address, the amount, and the `createdAt` timestamp. This is the artifact your compliance officer reads.
+Each response page is shaped `{ data: [...], meta: { total, page, pageSize, hasMore, requestId } }`. The accumulated list contains every state-changing transaction this token has produced: `mint`, `burn`, `freeze`, `seize`, `force-burn`, `unfreeze`. Each record carries its memo verbatim, the on-chain signature, the destination address, the amount, and the `createdAt` timestamp. This is the artifact your compliance officer reads.
 
 Section 7 walks the compliance demo that exercises the failure surface: subscription mints succeed, the holder gets flagged by your screening provider, you freeze the holder's ATA, and the next mint attempt returns an opaque 500 that prepare-as-diagnostic resolves.
 
