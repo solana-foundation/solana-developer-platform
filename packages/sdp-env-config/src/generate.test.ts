@@ -31,9 +31,24 @@ test("UI-only selector keys are never emitted", () => {
 });
 
 test("invisible conditional fields are skipped", () => {
-  const env = generateEnv({ ...defaultValues(), SIGNING_PROVIDER: "local" });
+  const env = generateEnv({
+    ...defaultValues(),
+    SIGNING_PROVIDER: "local",
+    CUSTODY_PRIVATE_KEY: "k",
+  });
   assert.doesNotMatch(env, /^FIREBLOCKS_API_KEY=/m); // fireblocks not selected
-  assert.match(env, /^CUSTODY_PRIVATE_KEY=/m); // local selected → visible
+  assert.match(env, /^CUSTODY_PRIVATE_KEY=k$/m); // local selected → visible + filled
+});
+
+test("empty optional fields are omitted so runtime fallbacks apply", () => {
+  // local + native default: FEE_PAYER_PRIVATE_KEY is optional and blank here, so it
+  // must NOT be emitted (an empty value would defeat the native adapter's fallback).
+  const env = generateEnv({
+    ...defaultValues(),
+    SIGNING_PROVIDER: "local",
+    CUSTODY_PRIVATE_KEY: "k",
+  });
+  assert.doesNotMatch(env, /^FEE_PAYER_PRIVATE_KEY=/m);
 });
 
 test("a value with surrounding whitespace is emitted trimmed", () => {

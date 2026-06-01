@@ -25,18 +25,24 @@ export function generateEnv(values: Values): string {
         !UI_ONLY_KEYS.has(f.key) &&
         (f.derive ? true : isFieldVisible(f, values))
     );
-    if (fields.length === 0) continue;
 
-    lines.push(`# ${section.comment}`);
+    const sectionLines: string[] = [];
     for (const f of fields) {
       const raw = f.derive ? f.derive(values) : (values[f.key] ?? f.defaultValue ?? "");
       // Trim and strip CR/LF/NUL so the emitted value matches what validation
       // checked (which trims) and can never inject additional .env lines, even
       // when fed by an unvalidated caller.
       const value = raw.trim().replace(/[\r\n\0]/g, "");
-      lines.push(`${f.key}=${value}`);
+      // Omit empty optional fields entirely: an empty assignment (KEY=) defeats
+      // the runtime's `env.KEY ?? default` fallbacks (?? only triggers on
+      // undefined), so leaving the key out lets those defaults apply. Required
+      // fields are non-empty after validation and so are always emitted.
+      if (value === "") continue;
+      sectionLines.push(`${f.key}=${value}`);
     }
-    lines.push("");
+
+    if (sectionLines.length === 0) continue;
+    lines.push(`# ${section.comment}`, ...sectionLines, "");
   }
 
   return `${lines.join("\n").trimEnd()}\n`;
