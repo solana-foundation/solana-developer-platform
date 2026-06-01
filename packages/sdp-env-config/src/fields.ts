@@ -195,6 +195,9 @@ export const FIELDS: EnvField[] = [
     kind: "select",
     label: "Signing provider",
     defaultValue: "local",
+    // Curated set this configurator supports: managed backends whose full env
+    // surface the form collects. Other adapters the API ships (e.g. dfns,
+    // anchorage) are intentionally not offered here.
     options: [
       { value: "local", label: "local" },
       { value: "fireblocks", label: "Fireblocks" },
@@ -230,6 +233,14 @@ export const FIELDS: EnvField[] = [
     visibleWhen: isProvider("SIGNING_PROVIDER", "fireblocks"),
   },
   {
+    key: "FIREBLOCKS_VAULT_ID",
+    section: "signing",
+    kind: "text",
+    label: "Fireblocks vault ID",
+    required: true,
+    visibleWhen: isProvider("SIGNING_PROVIDER", "fireblocks"),
+  },
+  {
     key: "PRIVY_APP_ID",
     section: "signing",
     kind: "text",
@@ -242,6 +253,14 @@ export const FIELDS: EnvField[] = [
     section: "signing",
     kind: "password",
     label: "Privy app secret",
+    required: true,
+    visibleWhen: isProvider("SIGNING_PROVIDER", "privy"),
+  },
+  {
+    key: "PRIVY_WALLET_ID",
+    section: "signing",
+    kind: "text",
+    label: "Privy wallet ID",
     required: true,
     visibleWhen: isProvider("SIGNING_PROVIDER", "privy"),
   },
@@ -270,10 +289,26 @@ export const FIELDS: EnvField[] = [
     visibleWhen: isProvider("SIGNING_PROVIDER", "coinbase_cdp"),
   },
   {
+    key: "COINBASE_CDP_WALLET_ID",
+    section: "signing",
+    kind: "text",
+    label: "Coinbase CDP wallet ID",
+    required: true,
+    visibleWhen: isProvider("SIGNING_PROVIDER", "coinbase_cdp"),
+  },
+  {
     key: "PARA_API_KEY",
     section: "signing",
     kind: "password",
     label: "Para API key",
+    required: true,
+    visibleWhen: isProvider("SIGNING_PROVIDER", "para"),
+  },
+  {
+    key: "PARA_WALLET_ID",
+    section: "signing",
+    kind: "text",
+    label: "Para wallet ID",
     required: true,
     visibleWhen: isProvider("SIGNING_PROVIDER", "para"),
   },
@@ -301,6 +336,22 @@ export const FIELDS: EnvField[] = [
     required: true,
     visibleWhen: isProvider("SIGNING_PROVIDER", "turnkey"),
   },
+  {
+    key: "TURNKEY_PRIVATE_KEY_ID",
+    section: "signing",
+    kind: "text",
+    label: "Turnkey private key ID",
+    required: true,
+    visibleWhen: isProvider("SIGNING_PROVIDER", "turnkey"),
+  },
+  {
+    key: "TURNKEY_PUBLIC_KEY",
+    section: "signing",
+    kind: "text",
+    label: "Turnkey public key",
+    required: true,
+    visibleWhen: isProvider("SIGNING_PROVIDER", "turnkey"),
+  },
 
   // Fee
   {
@@ -319,8 +370,9 @@ export const FIELDS: EnvField[] = [
     section: "fee",
     kind: "password",
     label: "Fee payer key (base58)",
-    visibleWhen: isProvider("FEE_PAYMENT_PROVIDER", "native"),
-    help: "Optional. Defaults to the local signing key when blank; required only if you use a managed signing provider with native fees.",
+    required: true,
+    visibleWhen: (v) => v.FEE_PAYMENT_PROVIDER === "native" && v.SIGNING_PROVIDER !== "local",
+    help: "Base58 keypair that pays transaction fees. Required because a managed signing provider is selected; with local signing the signing key is used instead.",
   },
   {
     key: "KORA_RPC_URL",
