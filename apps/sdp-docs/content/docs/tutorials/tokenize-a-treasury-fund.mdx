@@ -69,6 +69,16 @@ Wire two HTTP clients (Developer + Admin) against `https://sdp-api-production.so
 ```javascript
 const BASE = "https://sdp-api-production.solana.workers.dev";
 
+class SdpError extends Error {
+  constructor({ code, message, status, response }) {
+    super(`${code}: ${message}`);
+    this.name = "SdpError";
+    this.code = code;
+    this.status = status;
+    this.response = response;
+  }
+}
+
 class SdpClient {
   constructor(apiKey, baseUrl = BASE) {
     this.apiKey = apiKey;
@@ -85,7 +95,14 @@ class SdpClient {
       body: body ? JSON.stringify(body) : undefined,
     });
     const payload = await res.json();
-    if (!res.ok) throw new Error(`${payload.error.code}: ${payload.error.message}`);
+    if (!res.ok) {
+      throw new SdpError({
+        code: payload?.error?.code ?? `HTTP_${res.status}`,
+        message: payload?.error?.message ?? res.statusText,
+        status: res.status,
+        response: payload,
+      });
+    }
     return payload;
   }
 
@@ -153,7 +170,9 @@ const token = data.token;
 console.log(token.id, token.status);
 ```
 
-The `overrides.extensions.<name>` nesting matters. A top-level `extensions` block returns HTTP 201 with the config silently dropped, and the multiplier never reaches the deployed mint.
+<Callout type="warn">
+**Watch the body shape.** Extension configs on token create go under `overrides.extensions.<X>`, not at the top level. The top-level form is silently dropped at create time. If a deployed token's `extensions` field is missing what you sent, that is the first place to check.
+</Callout>
 
 The response echoes the auto-set defaults so a design-time compliance review can confirm them:
 
@@ -191,7 +210,7 @@ Every state-mutating execute endpoint in SDP supports an `Idempotency-Key` HTTP 
 | Different key, same body | New request (may produce a second on-chain transaction) |
 | Same key, different body | New request (fingerprint mismatch, not a replay) |
 
-The header is how you make network-level retries safe for irreversible operations like deploy, mint, burn, seize, and force-burn. Extend the `SdpClient` from Section 2:
+The header is how you make network-level retries safe for irreversible operations like deploy, mint, burn, seize, and force-burn. Extend the `SdpClient` from Section 2 (keep the `SdpError` class declared there; only the `SdpClient` body changes):
 
 ```javascript
 import { randomUUID } from "node:crypto";
@@ -214,7 +233,14 @@ class SdpClient {
       body: body ? JSON.stringify(body) : undefined,
     });
     const payload = await res.json();
-    if (!res.ok) throw new Error(`${payload.error.code}: ${payload.error.message}`);
+    if (!res.ok) {
+      throw new SdpError({
+        code: payload?.error?.code ?? `HTTP_${res.status}`,
+        message: payload?.error?.message ?? res.statusText,
+        status: res.status,
+        response: payload,
+      });
+    }
     return payload;
   }
 
@@ -224,6 +250,8 @@ class SdpClient {
 
 const idempotencyKey = (op) => `${op}-${randomUUID()}`;
 ```
+
+Generate the key into a `const` once per operation, before the call. If a retry re-invokes the helper, you get a fresh UUID, which the API treats as a new request rather than a replay. The call sites in Section 4.3 onward follow this pattern.
 
 ### 2. Prepare the deploy as a diagnostic
 
@@ -266,10 +294,11 @@ A clean simulation:
 With prepare clean, the execute call is the actual on-chain transaction. Pass an `Idempotency-Key` so that if the network drops the response and you retry, you replay the original deploy result rather than producing a second on-chain transaction.
 
 ```javascript
+const deployKey = idempotencyKey("deploy");
 const deployed = await sdp.post(
   `/v1/issuance/tokens/${tokenId}/deploy`,
   {},
-  { idempotencyKey: idempotencyKey("deploy") }
+  { idempotencyKey: deployKey }
 );
 
 const { token } = deployed.data;
@@ -289,6 +318,11 @@ The response carries the four on-chain authorities and the live mint:
       "freezeAuthority": "ASy986...",
       "metadataAuthority": "ASy986...",
       "ablListAddress": null,
+      "extensions": {
+        "defaultAccountState": "frozen",
+        "scaledUiAmount": { "multiplier": 1 },
+        "permanentDelegate": "ASy986..."
+      },
       "deployedAt": "2026-05-25T11:27:25.209Z"
     }
   }
@@ -306,7 +340,7 @@ The deploy response should match this shape:
 | `mintAuthority` | custody wallet |
 | `freezeAuthority` | custody wallet |
 | `metadataAuthority` | custody wallet |
-| `permanentDelegate` | custody wallet |
+| `extensions.permanentDelegate` | custody wallet |
 | `ablListAddress` | `null` on devnet, populated on mainnet |
 
 ![Deployed PTFND token on the SDP dashboard's issuance page, with status active and the mint address surfaced.](/tokenize-a-treasury-fund/02-deployed-token-dashboard.png)
@@ -352,10 +386,6 @@ await client.post(`/v1/issuance/tokens/${tokenId}/allowlist`, {
 **Re-add** when a previously revoked investor returns to good standing. The original entry id is reused with the original `createdAt` intact.
 
 Compliance frameworks expect cap-table revocation, not destructive deletion. Use that framing in the compliance review.
-
-<Callout type="warn">
-**Watch the body shape.** Extension configs on token create go under `overrides.extensions.<X>`, not at the top level. The top-level form is silently dropped at create time. If a deployed token's `extensions` field is missing what you sent, that is the first place to check.
-</Callout>
 
 ### Screen addresses before allowlisting
 
@@ -431,6 +461,7 @@ You have an allowlisted holder with a zero balance. Two operations move them thr
 When the holder's fiat lands in your custody bank, treasury operations computes the token quantity at the published NAV and mints to the holder's allowlisted address. SDP derives the holder's Associated Token Account (ATA) from the holder address and the mint, and deposits the new supply there. The `memo` field is optional in the API (max 256 chars) but it is the audit-trail anchor; always include one tied to your internal subscription identifier.
 
 ```javascript
+const subscriptionKey = idempotencyKey("mint-subscription");
 const subscription = await sdp.post(
   `/v1/issuance/tokens/${tokenId}/mint`,
   {
@@ -440,7 +471,7 @@ const subscription = await sdp.post(
       memo: "Subscription #001 - institutional holder initial purchase",
     },
   },
-  { idempotencyKey: idempotencyKey("mint-subscription") }
+  { idempotencyKey: subscriptionKey }
 );
 
 const { transaction, tokenAccount } = subscription.data;
@@ -479,6 +510,7 @@ For a holder with a 1000 PTFND subscription and a published rate of 4.5% APY:
 ```javascript
 const monthlyYield = (1000 * 0.045 / 12).toFixed(2); // "3.75"
 
+const dividendKey = idempotencyKey("mint-dividend");
 const dividend = await sdp.post(
   `/v1/issuance/tokens/${tokenId}/mint`,
   {
@@ -488,7 +520,7 @@ const dividend = await sdp.post(
       memo: "Dividend distribution - July 2026 - holder #001 - 4.5% APY accrual",
     },
   },
-  { idempotencyKey: idempotencyKey("mint-dividend") }
+  { idempotencyKey: dividendKey }
 );
 ```
 
@@ -558,6 +590,7 @@ The same `frz_*` id is reused if you refreeze later; SDP tracks one record per h
 Try to deliver the next monthly dividend. With the ATA frozen, the mint should not land. Use the same `sdp.post` shape from Section 6.
 
 ```javascript
+const blockedMintKey = idempotencyKey("mint-blocked");
 try {
   await sdp.post(
     `/v1/issuance/tokens/${tokenId}/mint`,
@@ -568,7 +601,7 @@ try {
         memo: "Dividend distribution - August 2026 - holder #001",
       },
     },
-    { idempotencyKey: idempotencyKey("mint-blocked") }
+    { idempotencyKey: blockedMintKey }
   );
 } catch (err) {
   console.error(err.status, err.code, err.message);
@@ -632,6 +665,7 @@ const unfrozen = await sdpAdmin.post(
 
 console.log(unfrozen.data.frozenAccount.unfrozenAt);
 
+const resumeKey = idempotencyKey("mint-dividend-aug");
 const resumed = await sdp.post(
   `/v1/issuance/tokens/${tokenId}/mint`,
   {
@@ -641,7 +675,7 @@ const resumed = await sdp.post(
       memo: "Dividend distribution - August 2026 - holder #001",
     },
   },
-  { idempotencyKey: idempotencyKey("mint-dividend-aug") }
+  { idempotencyKey: resumeKey }
 );
 
 console.log(resumed.data.transaction.status);
