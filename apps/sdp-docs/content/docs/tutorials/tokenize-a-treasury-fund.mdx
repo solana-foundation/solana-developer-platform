@@ -144,9 +144,9 @@ The template auto-sets two compliance defaults you do not pass in the body:
 | `requiresAllowlist: true` | Rejects every mint and transfer whose destination is not on your allowlist |
 | `defaultAccountState: "frozen"` | Configures every new holder ATA to open frozen at the SPL level |
 
-Together they encode Section 3(c)(7) qualified-purchaser admission into the token's mainnet specification, not an application-layer policy a compliance officer has to discover from your code. On devnet, Mosaic deactivates the on-chain frozen-default mechanism so the reader can exercise the SDP allowlist pre-flight without on-chain friction; the pre-flight still returns HTTP 403 `NOT_ON_TOKEN_ALLOWLIST` for non-allowlisted destinations, and Sections 5 and 7 exercise that layer.
+Together they encode Section 3(c)(7) qualified-purchaser admission into the token's mainnet specification, not an application-layer policy a compliance officer has to discover from your code. On devnet, Mosaic deactivates the on-chain frozen-default mechanism so the reader can exercise the SDP allowlist pre-flight without on-chain friction; the pre-flight still returns HTTP 403 `NOT_ON_TOKEN_ALLOWLIST` for non-allowlisted destinations, and Section 5 elaborates the pre-flight gate.
 
-SDP does not expose Token-2022 transfer hooks. The permanent-delegate + frozen-by-default pair covers the enforcement surface a hook would have given you. Unauthorized destinations are rejected at mint and transfer time, and tokens already in flight remain reachable by the delegate for compliance seizure.
+SDP does not expose Token-2022 transfer hooks. The permanent-delegate + frozen-by-default pair covers the enforcement surface a hook would have given you. Holders must be on the allowlist before they can hold or receive tokens; Sections 5 and 8 walk the operator-approve pattern that enforces this. Tokens already in flight remain reachable by the delegate for compliance seizure.
 
 Here is the create call:
 
@@ -366,7 +366,7 @@ SDP enforces compliance in two layers.
 
 **On-chain enforcement** runs on `mainnet-beta`. The on-chain ABL list activates alongside Token-2022's default-frozen account state. On mainnet, `POST /mint` auto-adds fresh destinations to the on-chain ABL list (and DB mirror) and only rejects destinations that have been explicitly revoked (HTTP 403 `DESTINATION_REVOKED`). The gate for who can hold the token shifts from the API to the issuer's operational discipline: call `POST /allowlist` before `POST /mint` for every holder, and revoke holders explicitly when they exit. Treat `POST /mint` to an unverified destination as a compliance error, not a typed-error case the API will catch. On devnet, the token deploys with `ablListAddress: null` and ATAs open `initialized`.
 
-### Manage the allowlist
+### 1. Manage the allowlist
 
 The allowlist is your KYC'd cap table for this token. Your transfer agent feeds approved wallet addresses into it; you maintain the list on-chain.
 
@@ -387,7 +387,7 @@ await sdp.post(`/v1/issuance/tokens/${tokenId}/allowlist`, {
 
 Compliance frameworks expect cap-table revocation, not destructive deletion. Use that framing in the compliance review.
 
-### Screen addresses before allowlisting
+### 2. Screen addresses before allowlisting
 
 Your transfer agent runs the primary KYC pipeline. Your pre-allowlist screening is defense in depth, catching addresses the transfer agent's process might miss.
 
@@ -403,7 +403,7 @@ SDP screens against four providers in parallel: Range, Elliptic, TRM, and Chaina
 
 As of 2026-05-22, Chainalysis credentials are broken in production sandbox and the provider returns `status: "error"`. Range and Elliptic are the operational providers in this tutorial.
 
-### Handle compliance events
+### 3. Handle compliance events
 
 **Freeze** is the surgical lever. It halts on-chain operations against a single investor's token account. Use it for sanctioned holders, court-ordered holds, or short-term incident response.
 
@@ -419,15 +419,15 @@ SDP derives the holder's associated token account and freezes it on-chain. Refre
 While frozen, no on-chain operation against the account succeeds. The holder cannot transfer. Your own mint flow, including the monthly dividend distribution from Section 6, fails. The error surface is inconsistent across endpoints.
 
 - `POST /mint` returns `INTERNAL_ERROR`, an opaque code that does not tell you the destination is frozen.
-- `POST /mint/prepare` against the same body surfaces the underlying Token-2022 failure in its simulation output, the same diagnostic surface Section 4 used for unfunded-fee-payer deploys.
+- `POST /mint/prepare` against the same body surfaces the underlying Token-2022 failure in its simulation output, the same diagnostic surface Section 4 established for opaque deploy failures.
 
 **Prepare-as-diagnostic is a standing pattern.** When any execute endpoint returns an opaque error, call its prepare variant with the same body and read the simulation fields for the on-chain truth.
 
 **Pause** is different from freeze. It halts every transfer on the token, not just one holder's account. Use it for incident response, regulator coordination, or scheduled maintenance.
 
-**Seize** and **force-burn** are the escalation tier. They force-transfer or force-burn tokens through the permanent delegate authority, used only under court order. Section 7 walks the worked example.
+**Seize** and **force-burn** are the escalation tier. They force-transfer or force-burn tokens through the permanent delegate authority, used only under court order. Both follow the Admin client pattern; the production runbook documents the worked example.
 
-### Configure authority and name the seam
+### 4. Configure authority and name the seam
 
 Map the four on-chain authority roles to your org chart at deploy.
 
@@ -499,7 +499,7 @@ The response carries the transaction record and the ATA address:
 }
 ```
 
-Capture `tokenAccount` (the ATA) into your records. Section 7's compliance demo addresses the ATA directly when it freezes the holder.
+Capture `tokenAccount` (the ATA) into your records. It's the on-chain account Section 7's compliance demo freezes, derived by SDP from the holder's wallet address.
 
 The mint endpoint assumes the holder is already on the allowlist from Section 5. On mainnet, an unverified destination would be auto-added to the allowlist by the mint call itself, silently undoing the qualified-purchaser gate the fund's compliance perimeter depends on. Always call `POST /allowlist` ahead of `POST /mint` and gate the workflow so the order can't be inverted.
 
@@ -556,7 +556,7 @@ transactions.forEach(tx => console.log(`  ${tx.type.padEnd(8)} ${tx.params.amoun
 
 Each response page is shaped `{ data: [...], meta: { total, page, pageSize, hasMore, requestId } }`. The accumulated list contains every state-changing transaction this token has produced: `mint`, `burn`, `freeze`, `seize`, `force-burn`, `unfreeze`. Each record carries its memo verbatim, the on-chain signature, the destination address, the amount, and the `createdAt` timestamp. This is the artifact your compliance officer reads.
 
-Section 7 walks the compliance demo that exercises the failure surface: subscription mints succeed, the holder gets flagged by your screening provider, you freeze the holder's ATA, and the next mint attempt returns an opaque 500 that prepare-as-diagnostic resolves.
+Section 7 walks the compliance demo that exercises the failure surface: subscription mints succeed, the holder gets flagged by your screening provider, you freeze the holder's account, and the next mint attempt returns an opaque 500 that prepare-as-diagnostic resolves.
 
 ## 7. Test a subscription and a compliance action
 
