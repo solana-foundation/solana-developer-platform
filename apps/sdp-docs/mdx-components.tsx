@@ -3,6 +3,7 @@ import defaultMdxComponents from "fumadocs-ui/mdx";
 import type React from "react";
 import { DocsHome } from "@/components/docs-shell/home";
 import { HowItWorks, Step, StepPanel } from "@/components/docs-shell/how-it-works";
+import { EnvConfigurator } from "@/components/EnvConfigurator";
 import { cn } from "@/lib/utils";
 
 type MDXComponents = Record<string, unknown>;
@@ -96,6 +97,7 @@ function createMDXComponents(components?: MDXComponents): MDXComponents {
     HowItWorks,
     Step,
     StepPanel,
+    EnvConfigurator,
     ...components,
   };
 }
