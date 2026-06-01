@@ -1,10 +1,15 @@
 import { TextInput, type TextInputProps } from "@solana/design-system/text-input";
 
-type InputProps = Omit<TextInputProps, "size">;
+type InputProps = TextInputProps;
 
-function Input({ className, ...props }: InputProps) {
+function Input({ className, size = "lg", ...props }: InputProps) {
   return (
-    <TextInput className={stripWrapperPadding(className)} data-slot="input" size="lg" {...props} />
+    <TextInput
+      className={stripWrapperPadding(className)}
+      data-slot="input"
+      size={size}
+      {...props}
+    />
   );
 }
 
