@@ -24,6 +24,23 @@ const nextConfig = {
       },
     ];
   },
+  async headers() {
+    return [
+      {
+        // The configurator builds a .env entirely in the browser. Restricting
+        // connections to same-origin blocks any cross-origin exfiltration of the
+        // values typed here, while still allowing the docs framework's own
+        // same-origin navigation. The form makes no requests of its own.
+        source: "/docs/self-hosting/configurator",
+        headers: [
+          {
+            key: "Content-Security-Policy",
+            value: "connect-src 'self'; form-action 'none'",
+          },
+        ],
+      },
+    ];
+  },
 };
 
 // Gated so non-container builds skip the unused standalone tree.
