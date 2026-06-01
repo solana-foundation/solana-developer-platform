@@ -11,6 +11,7 @@
  * A non-interactive mode reads answers straight from the process environment,
  * which is convenient for scripted/CI provisioning.
  */
+import { writeFileSync } from "node:fs";
 import path from "node:path";
 import * as readline from "node:readline/promises";
 import { Writable } from "node:stream";
@@ -239,8 +240,17 @@ function isNonInteractive(argv: string[]): boolean {
   );
 }
 
+/** Path passed via `--out <path>`, or undefined to write to stdout. */
+export function getOutPath(argv: string[]): string | undefined {
+  const i = argv.indexOf("--out");
+  return i >= 0 ? argv[i + 1] : undefined;
+}
+
 async function main(): Promise<void> {
-  const values = isNonInteractive(process.argv.slice(2))
+  const argv = process.argv.slice(2);
+  const outPath = getOutPath(argv);
+
+  const values = isNonInteractive(argv)
     ? collectFromEnv(process.env)
     : await collectInteractively();
 
@@ -252,8 +262,16 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  process.stdout.write(generateEnv(values));
-  note("\n.env written to stdout.");
+  const env = generateEnv(values);
+  // With --out the CLI writes the file itself, so interactive prompts (stderr)
+  // and the result never share a stream — unlike `… > .env`, which a TTY merges.
+  if (outPath) {
+    writeFileSync(outPath, env);
+    note(`\n.env written to ${outPath}`);
+  } else {
+    process.stdout.write(env);
+    note("\n.env written to stdout.");
+  }
 }
 
 const invokedPath = process.argv[1];

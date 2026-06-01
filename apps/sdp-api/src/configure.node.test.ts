@@ -1,8 +1,17 @@
 import { FIELDS, generateEnv } from "@sdp/env-config";
 import { describe, expect, it } from "vitest";
-import { collectFromEnv } from "../scripts/configure";
+import { collectFromEnv, getOutPath } from "../scripts/configure";
 
 const HEX_64 = /^[0-9a-f]{64}$/;
+
+describe("getOutPath", () => {
+  it("returns the path after --out", () => {
+    expect(getOutPath(["--out", ".env"])).toBe(".env");
+  });
+  it("returns undefined when --out is absent", () => {
+    expect(getOutPath(["--non-interactive"])).toBeUndefined();
+  });
+});
 
 describe("collectFromEnv", () => {
   it("applies environment overrides", () => {
