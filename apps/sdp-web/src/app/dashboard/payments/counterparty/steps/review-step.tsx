@@ -1,15 +1,12 @@
 "use client";
 
-import { ArrowLeftIcon, Loader2Icon } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { ReviewRow } from "../components/review-row";
 import { SectionDivider } from "../components/section-divider";
 import { useCounterpartyCreate } from "../counterparty-create-context";
 import { addressSchema, basicsSchema, identitySchema } from "../counterparty-create-schemas";
 
 export function ReviewStep() {
-  const { basics, identity, address, steps, submit, submitting, submitError, goBack } =
-    useCounterpartyCreate();
+  const { basics, identity, address, steps, submitError } = useCounterpartyCreate();
 
   const basicsParsed = basicsSchema.safeParse(basics.values);
   const identityParsed = identitySchema.safeParse(identity.values);
@@ -79,26 +76,6 @@ export function ReviewStep() {
       </div>
 
       {submitError ? <p className="text-sm text-status-error-text">{submitError}</p> : null}
-
-      <div className="flex items-center justify-between pt-2">
-        <Button
-          type="button"
-          variant="outline"
-          onClick={goBack}
-          disabled={submitting}
-          iconLeft={<ArrowLeftIcon />}
-        >
-          Back
-        </Button>
-        <Button
-          type="button"
-          onClick={submit}
-          disabled={submitting}
-          iconLeft={submitting ? <Loader2Icon className="animate-spin" /> : undefined}
-        >
-          {submitting ? "Creating" : "Create"}
-        </Button>
-      </div>
     </div>
   );
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import type { CreateCounterpartyRequest } from "@sdp/types";
+import type { Counterparty, CounterpartyResponse, CreateCounterpartyRequest } from "@sdp/types";
 import { useRouter } from "next/navigation";
 import type { ReactNode } from "react";
 import { createContext, useContext, useMemo, useState } from "react";
@@ -46,7 +46,15 @@ interface CounterpartyCreateContextValue {
 
 const CounterpartyCreateContext = createContext<CounterpartyCreateContextValue | null>(null);
 
-export function CounterpartyCreateProvider({ children }: { children: ReactNode }) {
+interface CounterpartyCreateProviderProps {
+  children: ReactNode;
+  onCreated?: (counterparty: Counterparty) => void;
+}
+
+export function CounterpartyCreateProvider({
+  children,
+  onCreated,
+}: CounterpartyCreateProviderProps) {
   const router = useRouter();
 
   const basics = useZodForm(basicsSchema, defaultBasics);
@@ -107,7 +115,10 @@ export function CounterpartyCreateProvider({ children }: { children: ReactNode }
         identity: identityPayload,
       };
 
-      const result = await dashboardFetch("/api/dashboard/counterparty", { method: "POST", body });
+      const result = await dashboardFetch<{ data: CounterpartyResponse }>(
+        "/api/dashboard/counterparty",
+        { method: "POST", body }
+      );
 
       if (!result.ok) {
         setSubmitError(result.error);
@@ -115,6 +126,15 @@ export function CounterpartyCreateProvider({ children }: { children: ReactNode }
       }
 
       toast.success("Counterparty created", { position: "bottom-right" });
+
+      if (onCreated) {
+        const created = result.data?.data?.counterparty;
+        if (created) {
+          onCreated(created);
+        }
+        return;
+      }
+
       router.refresh();
       router.push("/dashboard/payments/counterparty");
     } catch (err) {

@@ -1,13 +1,11 @@
 "use client";
 
-import { ArrowLeftIcon, ArrowRightIcon } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useCounterpartyCreate } from "../counterparty-create-context";
 
 export function IdentityStep() {
-  const { identity, goNext, goBack } = useCounterpartyCreate();
+  const { identity } = useCounterpartyCreate();
   const { values, setField, errors } = identity;
 
   return (
@@ -63,15 +61,6 @@ export function IdentityStep() {
           />
           {errors.phone && <p className="mt-1 text-xs text-status-error-text">{errors.phone}</p>}
         </div>
-      </div>
-
-      <div className="flex items-center justify-between pt-2">
-        <Button type="button" variant="outline" onClick={goBack} iconLeft={<ArrowLeftIcon />}>
-          Back
-        </Button>
-        <Button type="button" onClick={goNext} iconRight={<ArrowRightIcon />}>
-          Next
-        </Button>
       </div>
     </div>
   );
