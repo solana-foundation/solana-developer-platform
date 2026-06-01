@@ -5,8 +5,8 @@ import { DASHBOARD_FEATURE_FLAGS } from "@/lib/dashboard-feature-flags";
 import { fetchProviderAvailability } from "@/lib/provider-availability";
 import { createSdpApiClient } from "@/lib/sdp-api";
 import type { OnboardingStatusResponse } from "../../onboarding-status";
-import { PaymentsActionPage } from "../payments-action-page-v2";
 import { fetchCounterparties } from "../counterparty/counterparty-page.data";
+import { PaymentsActionPage } from "../payments-action-page-v2";
 import { fetchPaymentsIssuedTokenSymbols } from "../payments-page.data";
 
 export default async function PaymentsDepositPage() {

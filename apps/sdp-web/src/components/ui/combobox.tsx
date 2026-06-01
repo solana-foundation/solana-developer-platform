@@ -1,9 +1,9 @@
 "use client";
 
 import { CheckIcon, ChevronDownIcon, SearchIcon } from "lucide-react";
-import { useId, useMemo, useState } from "react";
-import type { ReactNode } from "react";
 import { Popover } from "radix-ui";
+import type { ReactNode } from "react";
+import { useId, useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
 import { Input } from "./input";
 import { Label } from "./label";
@@ -173,9 +173,7 @@ export function Combobox({
               )}
             </div>
 
-            {footer ? (
-              <div className="border-t border-border-light">{footer(close)}</div>
-            ) : null}
+            {footer ? <div className="border-t border-border-light">{footer(close)}</div> : null}
           </Popover.Content>
         </Popover.Portal>
       </Popover.Root>

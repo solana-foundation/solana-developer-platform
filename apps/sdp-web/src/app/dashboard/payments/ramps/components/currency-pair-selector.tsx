@@ -53,10 +53,7 @@ export function CurrencyPairSelector() {
     <div className="flex flex-col gap-4">
       <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_160px]">
         <div className="flex flex-col gap-2">
-          <Label
-            className="text-sm font-medium text-text-low"
-            htmlFor={`${direction}-ramp-amount`}
-          >
+          <Label className="text-sm font-medium text-text-low" htmlFor={`${direction}-ramp-amount`}>
             Amount
           </Label>
           <Input
@@ -92,7 +89,9 @@ export function CurrencyPairSelector() {
           value={selectedWallet?.walletId ?? null}
           onChange={onWalletChange}
           options={walletOptions}
-          placeholder={direction === "onramp" ? "Select a destination wallet" : "Select a source wallet"}
+          placeholder={
+            direction === "onramp" ? "Select a destination wallet" : "Select a source wallet"
+          }
           searchPlaceholder="Search wallets"
           icon={<WalletIcon className="size-5 shrink-0 text-text-low" />}
           isLoading={walletsLoading}

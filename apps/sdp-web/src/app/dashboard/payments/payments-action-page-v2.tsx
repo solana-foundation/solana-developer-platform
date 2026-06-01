@@ -1,6 +1,11 @@
 "use client";
 
-import type { Counterparty, ComplianceProviderId, PaymentsDashboardWallet, RampProviderId } from "@sdp/types";
+import type {
+  ComplianceProviderId,
+  Counterparty,
+  PaymentsDashboardWallet,
+  RampProviderId,
+} from "@sdp/types";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -16,8 +21,8 @@ import {
 import { useZodForm } from "@/lib/use-zod-form";
 import { cn } from "@/lib/utils";
 import { fetchWallets } from "./payments-workspace.data";
-import { depositSelectionSchema, INITIAL_ONRAMP_FIELDS } from "./ramps/components/schema";
 import { RampPairProviderSelector } from "./ramps/components/ramp-pair-provider-selector";
+import { depositSelectionSchema, INITIAL_ONRAMP_FIELDS } from "./ramps/components/schema";
 
 interface PaymentsActionPageProps {
   mode: "send" | "receive";
@@ -37,7 +42,6 @@ const STEPS = [
   { label: "Step 2", title: "Coming soon" },
   { label: "Step 3", title: "Coming soon" },
 ] as const;
-
 
 export function PaymentsActionPage({
   wallets,
@@ -76,7 +80,10 @@ export function PaymentsActionPage({
     [liveWallets, onrampFields.walletId]
   );
 
-  const canProceed = useMemo(() => depositSelectionSchema.safeParse(onrampFields).success, [onrampFields]);
+  const canProceed = useMemo(
+    () => depositSelectionSchema.safeParse(onrampFields).success,
+    [onrampFields]
+  );
 
   const isLastStep = stepIndex === STEPS.length - 1;
   const currentStep = STEPS[stepIndex];

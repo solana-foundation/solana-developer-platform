@@ -179,7 +179,11 @@ export function RampPairProviderSelector({
       <RampSelectionProvider value={selectionContextValue}>
         <div className="flex flex-col gap-2">
           <CurrencyPairSelector />
-          <CounterpartySelector counterparties={counterparties} value={selectedCounterparty} onChange={onCounterpartyChange} />
+          <CounterpartySelector
+            counterparties={counterparties}
+            value={selectedCounterparty}
+            onChange={onCounterpartyChange}
+          />
         </div>
       </RampSelectionProvider>
 
