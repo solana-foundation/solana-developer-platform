@@ -362,16 +362,16 @@ The `tokenized-security` template gives you four operational levers:
 
 SDP enforces compliance in two layers.
 
-**Off-chain pre-flight** runs on every state-mutating call, on every network. Mint to a non-allowlisted address and SDP rejects with `NOT_ON_TOKEN_ALLOWLIST` before signing any transaction.
+**Off-chain pre-flight** runs in front of every state-mutating call. The destination-allowlist gate within the pre-flight rejects non-allowlisted addresses on devnet (and on any legacy token deployed without an on-chain ABL): minting returns HTTP 403 `NOT_ON_TOKEN_ALLOWLIST` before SDP signs anything.
 
-**On-chain enforcement** runs on `mainnet-beta` only. The on-chain ABL list activates alongside Token-2022's default-frozen account state, catching anything that bypasses SDP. On devnet, the token deploys with `ablListAddress: null` and ATAs open `initialized`.
+**On-chain enforcement** runs on `mainnet-beta`. The on-chain ABL list activates alongside Token-2022's default-frozen account state. On mainnet, `POST /mint` auto-adds fresh destinations to the on-chain ABL list (and DB mirror) and only rejects destinations that have been explicitly revoked (HTTP 403 `DESTINATION_REVOKED`). The gate for who can hold the token shifts from the API to the issuer's operational discipline: call `POST /allowlist` before `POST /mint` for every holder, and revoke holders explicitly when they exit. Treat `POST /mint` to an unverified destination as a compliance error, not a typed-error case the API will catch. On devnet, the token deploys with `ablListAddress: null` and ATAs open `initialized`.
 
 ### Manage the allowlist
 
 The allowlist is your KYC'd cap table for this token. Your transfer agent feeds approved wallet addresses into it; you maintain the list on-chain.
 
 ```js
-await client.post(`/v1/issuance/tokens/${tokenId}/allowlist`, {
+await sdp.post(`/v1/issuance/tokens/${tokenId}/allowlist`, {
   address: holderAddress,
   label: "Institutional Holder A",
 });
@@ -392,7 +392,7 @@ Compliance frameworks expect cap-table revocation, not destructive deletion. Use
 Your transfer agent runs the primary KYC pipeline. Your pre-allowlist screening is defense in depth, catching addresses the transfer agent's process might miss.
 
 ```js
-await client.post("/v1/compliance/address-screenings", {
+await sdp.post("/v1/compliance/address-screenings", {
   address: holderAddress,
   network: "solana",
   intent: "transfer_destination",
@@ -408,7 +408,7 @@ As of 2026-05-22, Chainalysis credentials are broken in production sandbox and t
 **Freeze** is the surgical lever. It halts on-chain operations against a single investor's token account. Use it for sanctioned holders, court-ordered holds, or short-term incident response.
 
 ```js
-await adminClient.post(`/v1/issuance/tokens/${tokenId}/freeze`, {
+await sdpAdmin.post(`/v1/issuance/tokens/${tokenId}/freeze`, {
   accountAddress: holderAddress,
   reason: "Court order 2026-CIV-1284 - account hold pending review",
 });
@@ -443,7 +443,7 @@ The `pausable` extension's authority lives outside this enum and routes to your 
 Update an authority with `POST /v1/issuance/tokens/{tokenId}/authority`. If a key is compromised, revoke the role permanently:
 
 ```js
-await adminClient.post(`/v1/issuance/tokens/${tokenId}/authority`, {
+await sdpAdmin.post(`/v1/issuance/tokens/${tokenId}/authority`, {
   authority: { role: "mint", newAuthority: null },
 });
 ```
@@ -500,6 +500,8 @@ The response carries the transaction record and the ATA address:
 ```
 
 Capture `tokenAccount` (the ATA) into your records. Section 7's compliance demo addresses the ATA directly when it freezes the holder.
+
+The mint endpoint assumes the holder is already on the allowlist from Section 5. On mainnet, an unverified destination would be auto-added to the allowlist by the mint call itself, silently undoing the qualified-purchaser gate the fund's compliance perimeter depends on. Always call `POST /allowlist` ahead of `POST /mint` and gate the workflow so the order can't be inverted.
 
 ### 2. Distribute the monthly dividend
 
@@ -705,12 +707,12 @@ The SDP API surface is identical between sandbox and production. What changes is
 |---|---|---|
 | `defaultAccountState` on the deployed mint | `initialized` (Mosaic deactivated) | `frozen` (template-default activated) |
 | `ablListAddress` on the deployed token | `null` | populated (on-chain allowlist active) |
-| Non-allowlisted mint enforcement | Off-chain pre-flight only (HTTP 403) | Off-chain pre-flight plus on-chain ABL rejection |
+| Non-allowlisted mint enforcement | Off-chain pre-flight rejects with HTTP 403 `NOT_ON_TOKEN_ALLOWLIST` | `POST /mint` auto-adds fresh destinations to the allowlist; only revoked destinations rejected with HTTP 403 `DESTINATION_REVOKED`. Issuer's runbook must call `POST /allowlist` before `POST /mint` to keep the operator-approve gate. |
 | API key prefix | `sk_test_` | `sk_live_` |
 | Custody binding | Sandbox provisioning | Production custody binding |
 | First mint consequence | Sandbox state mutation | Real fiat reserve event |
 
-Mainnet enforcement is stronger than what you rehearsed in sandbox. Section 5's hybrid-enforcement framing was deliberate: sandbox proves the off-chain pre-flight, and mainnet adds the on-chain layer that catches anything the API surface might miss.
+Mainnet behaves differently from the sandbox you rehearsed against. The off-chain pre-flight gate that catches non-allowlisted destinations on devnet is bypassed for mint on mainnet; the on-chain auto-add described above takes its place. Your `POST /allowlist`-before-`POST /mint` workflow becomes the operative gate, and the pre-mint checklist below enforces it.
 
 ### 3. Run the pre-mint readiness checklist
 
