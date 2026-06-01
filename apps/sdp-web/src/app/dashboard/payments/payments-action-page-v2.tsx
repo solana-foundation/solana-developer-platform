@@ -20,7 +20,7 @@ import {
 } from "@/lib/ramps";
 import { useZodForm } from "@/lib/use-zod-form";
 import { cn } from "@/lib/utils";
-import { fetchWallets } from "./payments-workspace.data";
+import { fetchAllCounterparties, fetchWallets } from "./payments-workspace.data";
 import { RampPairProviderSelector } from "./ramps/components/ramp-pair-provider-selector";
 import { depositSelectionSchema, INITIAL_ONRAMP_FIELDS } from "./ramps/components/schema";
 
@@ -36,6 +36,7 @@ interface PaymentsActionPageProps {
 }
 
 const PAYMENTS_ACTION_WALLETS_KEY = "payments-action-wallets";
+const PAYMENTS_ACTION_COUNTERPARTIES_KEY = "payments-action-counterparties";
 
 const STEPS = [
   { label: "Deposit", title: "How much would you like to deposit?" },
@@ -74,6 +75,16 @@ export function PaymentsActionPage({
     : swrWallets === undefined
       ? walletsError
       : null;
+
+  const { data: liveCounterpartiesResult } = useSWR(
+    PAYMENTS_ACTION_COUNTERPARTIES_KEY,
+    fetchAllCounterparties,
+    {
+      fallbackData: counterpartiesResult,
+      revalidateOnFocus: false,
+      revalidateIfStale: false,
+    }
+  );
 
   const selectedWallet = useMemo(
     () => liveWallets.find((wallet) => wallet.walletId === onrampFields.walletId) ?? null,
@@ -170,7 +181,7 @@ export function PaymentsActionPage({
                 }
               }}
               onProviderSelect={(nextProvider) => setField("provider", nextProvider)}
-              counterpartiesResult={counterpartiesResult}
+              counterpartiesResult={liveCounterpartiesResult ?? counterpartiesResult}
               selectedCounterparty={onrampFields.counterpartyId || null}
               onCounterpartyChange={(id) => setField("counterpartyId", id)}
             />

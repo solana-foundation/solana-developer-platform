@@ -3,10 +3,12 @@ import { z } from "zod";
 
 export const depositSelectionSchema = z.object({
   walletId: z.string().min(1, "Select a destination wallet."),
-  amount: z.coerce
-    .number<string>()
-    .min(1, "Enter an amount of at least 1.")
-    .multipleOf(0.01, "Only up to two decimal places allowed."),
+  amount: z
+    .string()
+    .trim()
+    .refine((value) => /^\d+(\.\d{1,2})?$/.test(value), "Only up to two decimal places allowed.")
+    .transform(Number)
+    .refine((value) => value >= 1, "Enter an amount of at least 1."),
   provider: z
     .enum(RAMP_PROVIDERS)
     .nullable()
