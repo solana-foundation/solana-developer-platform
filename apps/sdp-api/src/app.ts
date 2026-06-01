@@ -279,13 +279,21 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
       );
     }
 
-    // Log unexpected errors
+    // Log unexpected errors. Include `context` and `cause` so SolanaError-style
+    // failures (e.g. simulation errors with on-chain logs) surface enough detail
+    // to diagnose from CI without a local repro.
+    const solanaErr = err as Error & {
+      context?: Record<string, unknown>;
+      cause?: unknown;
+    };
     console.error("Unexpected error:", {
       requestId,
       traceId,
       source: requestSource,
       error: err.message,
       stack: err.stack,
+      context: solanaErr.context,
+      cause: solanaErr.cause,
     });
     // SENTRY_DSN gate is the runtime-wiring decision: app-level error handling
     // shouldn't pay the cost of building a scope when no observability backend

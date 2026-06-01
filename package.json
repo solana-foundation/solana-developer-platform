@@ -14,7 +14,8 @@
       }
     },
     "overrides": {
-      "@token-acl/abl-sdk": "npm:@solana/token-acl-gate-sdk@0.2.0"
+      "@token-acl/abl-sdk": "npm:@solana/token-acl-gate-sdk@0.2.0",
+      "fast-uri": "^3.1.2"
     },
     "patchedDependencies": {
       "@solana/mosaic-sdk@0.1.1": "patches/@solana__mosaic-sdk@0.1.1.patch"

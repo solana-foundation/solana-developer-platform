@@ -59,6 +59,7 @@
     "@solana/kora": "0.2.1",
     "@solana/mosaic-sdk": "catalog:",
     "@solana/signers": "catalog:",
+    "@solana/token-acl-gate-sdk": "0.2.0",
     "hono": "^4.12.19",
     "ioredis": "^5.4.1",
     "jose": "^6.2.3",
