@@ -20,6 +20,11 @@ describe("collectFromEnv", () => {
     expect(collectFromEnv({ API_KEY_PEPPER: "fixed" }).API_KEY_PEPPER).toBe("fixed");
   });
 
+  it("emits a provided DATABASE_URL by switching to external mode", () => {
+    const env = generateEnv(collectFromEnv({ DATABASE_URL: "postgresql://u@h:5432/d" }));
+    expect(env).toContain("DATABASE_URL=postgresql://u@h:5432/d");
+  });
+
   it("generates a non-empty .env containing the required keys", () => {
     const env = generateEnv(
       collectFromEnv({

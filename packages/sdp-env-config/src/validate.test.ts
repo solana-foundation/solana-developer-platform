@@ -19,11 +19,19 @@ test("valid value has no error", () => {
 });
 
 test("invisible required field is not validated", () => {
-  // POSTGRES_PASSWORD is required but hidden when DATABASE_MODE=external
+  // FEE_PAYER_PRIVATE_KEY is required but hidden unless SIGNING_PROVIDER=local
   const errors = validateValues({
     ...defaultValues(),
-    DATABASE_MODE: "external",
-    POSTGRES_PASSWORD: "",
+    SIGNING_PROVIDER: "fireblocks",
+    FEE_PAYER_PRIVATE_KEY: "",
   });
-  assert.equal(errors.POSTGRES_PASSWORD, undefined);
+  assert.equal(errors.FEE_PAYER_PRIVATE_KEY, undefined);
+});
+
+test("a value with a newline is rejected as multi-line", () => {
+  const errors = validateValues({
+    ...defaultValues(),
+    CLERK_SECRET_KEY: "sk_live_abc\nINJECTED=evil",
+  });
+  assert.match(errors.CLERK_SECRET_KEY ?? "", /single line/);
 });

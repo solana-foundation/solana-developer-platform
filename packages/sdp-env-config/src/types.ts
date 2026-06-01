@@ -34,6 +34,8 @@ export interface EnvField {
   pattern?: RegExp;
   /** Visibility predicate over current values; absent ⇒ always visible. */
   visibleWhen?: (v: Values) => boolean;
+  /** Computed from other values; hidden from the form, always emitted. */
+  derive?: (values: Values) => string;
 }
 
 export interface SectionMeta {

@@ -40,6 +40,11 @@ export function collectFromEnv(env: Record<string, string | undefined>): Values 
     const provided = env[field.key];
     if (provided !== undefined) values[field.key] = provided;
   }
+  // An explicitly provided DATABASE_URL means an external database; switch modes
+  // so generate emits DATABASE_URL instead of the bundled-Postgres defaults.
+  if (typeof env.DATABASE_URL === "string" && env.DATABASE_URL !== "") {
+    values.DATABASE_MODE = "external";
+  }
   for (const key of autoSecretKeys()) {
     if (!values[key]) values[key] = randomHex32();
   }
@@ -65,9 +70,11 @@ async function promptSelect(field: EnvField, current: string, ask: Asker): Promi
   const answer = (await ask("> ")).trim();
   if (answer === "") return current;
 
-  const byIndex = Number.parseInt(answer, 10);
-  if (Number.isInteger(byIndex) && byIndex >= 1 && byIndex <= options.length) {
-    return options[byIndex - 1].value;
+  if (/^\d+$/.test(answer)) {
+    const byIndex = Number.parseInt(answer, 10);
+    if (byIndex >= 1 && byIndex <= options.length) {
+      return options[byIndex - 1].value;
+    }
   }
 
   const byValue = options.find((opt) => opt.value === answer);

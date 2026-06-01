@@ -20,13 +20,19 @@ export function generateEnv(values: Values): string {
 
   for (const section of SECTIONS) {
     const fields = FIELDS.filter(
-      (f) => f.section === section.id && !UI_ONLY_KEYS.has(f.key) && isFieldVisible(f, values)
+      (f) =>
+        f.section === section.id &&
+        !UI_ONLY_KEYS.has(f.key) &&
+        (f.derive ? true : isFieldVisible(f, values))
     );
     if (fields.length === 0) continue;
 
     lines.push(`# ${section.comment}`);
     for (const f of fields) {
-      const value = values[f.key] ?? f.defaultValue ?? "";
+      const raw = f.derive ? f.derive(values) : (values[f.key] ?? f.defaultValue ?? "");
+      // Strip CR/LF/NUL so a value can never inject additional .env lines, even
+      // when fed by an unvalidated caller.
+      const value = raw.replace(/[\r\n\0]/g, "");
       lines.push(`${f.key}=${value}`);
     }
     lines.push("");

@@ -36,6 +36,21 @@ test("invisible conditional fields are skipped", () => {
   assert.match(env, /^FEE_PAYER_PRIVATE_KEY=/m); // local selected → visible
 });
 
+test("a value containing a newline cannot inject extra .env lines", () => {
+  const env = generateEnv({
+    ...defaultValues(),
+    CLERK_SECRET_KEY: "sk_test\nINJECTED=evil",
+  });
+  // The CR/LF is stripped, so the key emits a single line and nothing injected.
+  assert.match(env, /^CLERK_SECRET_KEY=sk_testINJECTED=evil$/m);
+  assert.doesNotMatch(env, /^INJECTED=/m);
+});
+
+test("NEXT_PUBLIC_SOLANA_NETWORK is derived from SOLANA_NETWORK", () => {
+  const env = generateEnv({ ...defaultValues(), SOLANA_NETWORK: "mainnet-beta" });
+  assert.match(env, /^NEXT_PUBLIC_SOLANA_NETWORK=mainnet-beta$/m);
+});
+
 test("generated .env covers every base key in infra/self-hosted/.env.example", () => {
   const env = generateEnv(defaultValues());
   const emitted = new Set(

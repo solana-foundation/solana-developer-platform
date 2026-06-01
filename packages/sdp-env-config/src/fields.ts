@@ -342,7 +342,6 @@ export const FIELDS: EnvField[] = [
     kind: "secret",
     label: "Postgres password",
     required: true,
-    visibleWhen: isProvider("DATABASE_MODE", "bundled"),
   },
 
   // Advanced (defaulted, collapsed)
@@ -414,7 +413,7 @@ export const FIELDS: EnvField[] = [
     section: "advanced",
     kind: "text",
     label: "Public Solana network",
-    defaultValue: "devnet",
+    derive: (v) => v.SOLANA_NETWORK ?? "devnet",
   },
   {
     key: "SENTRY_DSN",

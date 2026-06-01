@@ -31,11 +31,14 @@ const nextConfig = {
         // connections to same-origin blocks any cross-origin exfiltration of the
         // values typed here, while still allowing the docs framework's own
         // same-origin navigation. The form makes no requests of its own.
+        // base-uri 'none' blocks base-tag injection that could repoint relative
+        // URLs, and frame-ancestors 'none' blocks framing/clickjacking.
         source: "/docs/self-hosting/configurator",
         headers: [
           {
             key: "Content-Security-Policy",
-            value: "connect-src 'self'; form-action 'none'",
+            value:
+              "connect-src 'self'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'",
           },
         ],
       },

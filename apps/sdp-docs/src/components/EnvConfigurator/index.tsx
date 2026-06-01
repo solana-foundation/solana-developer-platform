@@ -313,7 +313,7 @@ export function EnvConfigurator() {
         <div className="sdp-cfg-form">
           {SECTIONS.map((section) => {
             const fields = FIELDS.filter(
-              (f) => f.section === section.id && isFieldVisible(f, values)
+              (f) => f.section === section.id && !f.derive && isFieldVisible(f, values)
             );
             return (
               <SectionBlock
