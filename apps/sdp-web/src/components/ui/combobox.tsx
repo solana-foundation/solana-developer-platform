@@ -79,7 +79,7 @@ export function Combobox({
         <Popover.Trigger asChild>
           <button
             type="button"
-            aria-haspopup="listbox"
+            aria-haspopup="dialog"
             aria-expanded={open}
             aria-labelledby={labelId}
             disabled={disabled}
