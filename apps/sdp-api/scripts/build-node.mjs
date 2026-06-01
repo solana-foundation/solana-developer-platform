@@ -12,12 +12,18 @@ const banner =
   "const __dirname=__path.dirname(__filename);";
 
 await esbuild.build({
-  entryPoints: ["src/server.ts"],
+  // migrate.js lets the prebuilt image apply migrations without the source tree.
+  entryPoints: {
+    server: "src/server.ts",
+    migrate: "scripts/migrate-postgres.mjs",
+    // configure.js generates a self-hosted .env in the terminal from the prebuilt image.
+    configure: "scripts/configure.ts",
+  },
   bundle: true,
   platform: "node",
   target: "node22",
   format: "esm",
-  outfile: "dist/server.js",
+  outdir: "dist",
   external: ["pg-native", "@sentry/profiling-node"],
   banner: { js: banner },
 });

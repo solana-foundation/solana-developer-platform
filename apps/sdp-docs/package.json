@@ -17,6 +17,7 @@
     "watch:source": "node scripts/watch-source.mjs"
   },
   "dependencies": {
+    "@sdp/env-config": "workspace:*",
     "@sdp/types": "workspace:*",
     "fumadocs-core": "^16.8.11",
     "fumadocs-mdx": "^15.0.6",

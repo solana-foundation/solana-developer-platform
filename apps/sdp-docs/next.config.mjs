@@ -24,6 +24,28 @@ const nextConfig = {
       },
     ];
   },
+  async headers() {
+    return [
+      {
+        // The configurator builds a .env entirely in the browser. Restricting
+        // connections to same-origin blocks cross-origin exfiltration of the values
+        // typed here, while still allowing the docs framework's own same-origin
+        // navigation. img-src 'self' data: and object-src 'none' close the
+        // image/object side-channel (e.g. new Image().src = '…?'+secret), which
+        // connect-src does not cover. base-uri 'none' blocks base-tag injection and
+        // frame-ancestors 'none' blocks framing/clickjacking. The form itself makes
+        // no requests.
+        source: "/docs/self-hosting/configurator",
+        headers: [
+          {
+            key: "Content-Security-Policy",
+            value:
+              "connect-src 'self'; img-src 'self' data:; object-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'",
+          },
+        ],
+      },
+    ];
+  },
 };
 
 // Gated so non-container builds skip the unused standalone tree.

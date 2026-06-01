@@ -39,6 +39,7 @@ apps/sdp-api/.dev.vars.*
 apps/sdp-web
 packages/*
 !packages/sdp-types
+!packages/sdp-env-config
 docs
 infra
 scripts

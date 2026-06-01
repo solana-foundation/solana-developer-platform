@@ -18,6 +18,7 @@ WORKDIR /repo
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json tsconfig.json ./
 COPY apps/sdp-api/package.json ./apps/sdp-api/
 COPY packages/sdp-types/package.json ./packages/sdp-types/
+COPY packages/sdp-env-config/package.json ./packages/sdp-env-config/
 COPY patches ./patches
 
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
@@ -29,6 +30,7 @@ WORKDIR /repo
 COPY --from=deps /repo /repo
 COPY apps/sdp-api ./apps/sdp-api
 COPY packages/sdp-types ./packages/sdp-types
+COPY packages/sdp-env-config ./packages/sdp-env-config
 
 WORKDIR /repo/apps/sdp-api
 RUN node scripts/build-node.mjs
@@ -38,7 +40,12 @@ WORKDIR /app
 
 ENV NODE_ENV=production \
     PORT=8787 \
-    HOSTNAME=0.0.0.0
+    HOSTNAME=0.0.0.0 \
+    MIGRATIONS_DIR=/app/migrations
+
+# Apply OS-level security patches not yet in the pinned base image.
+# This layer is cached — rebuild with --no-cache to pick up new fixes.
+RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/*
 
 # UID/GID 1001 matches sdp-web so k8s securityContext is consistent.
 RUN groupadd --system --gid 1001 nodejs \
@@ -46,6 +53,9 @@ RUN groupadd --system --gid 1001 nodejs \
 
 # Only the bundled artifact ships — no node_modules in the runner.
 COPY --from=builder --chown=sdp:nodejs /repo/apps/sdp-api/dist /app
+
+# Read at runtime by `node migrate.js` (MIGRATIONS_DIR); shipped as files, not bundled.
+COPY --from=builder --chown=sdp:nodejs /repo/apps/sdp-api/src/db/migrations/postgres /app/migrations
 
 # Pass --build-arg GIT_SHA=$(git rev-parse HEAD) to stamp the image.
 ARG GIT_SHA=""
