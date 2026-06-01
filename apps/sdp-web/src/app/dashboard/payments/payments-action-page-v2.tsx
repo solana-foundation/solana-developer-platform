@@ -1,6 +1,6 @@
 "use client";
 
-import type { ComplianceProviderId, PaymentsDashboardWallet, RampProviderId } from "@sdp/types";
+import type { Counterparty, ComplianceProviderId, PaymentsDashboardWallet, RampProviderId } from "@sdp/types";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -27,6 +27,7 @@ interface PaymentsActionPageProps {
   issuedTokenSymbolsByMint: Record<string, string>;
   enabledComplianceProviders: ComplianceProviderId[];
   enabledRampProviders: RampProviderId[];
+  counterparties: Counterparty[];
 }
 
 const PAYMENTS_ACTION_WALLETS_KEY = "payments-action-wallets";
@@ -42,6 +43,7 @@ export function PaymentsActionPage({
   wallets,
   walletsError,
   enabledRampProviders,
+  counterparties,
 }: PaymentsActionPageProps) {
   const router = useRouter();
 
@@ -161,6 +163,7 @@ export function PaymentsActionPage({
                 }
               }}
               onProviderSelect={(nextProvider) => setField("provider", nextProvider)}
+              counterparties={counterparties}
               selectedCounterparty={onrampFields.counterpartyId || null}
               onCounterpartyChange={(id) => setField("counterpartyId", id)}
             />
