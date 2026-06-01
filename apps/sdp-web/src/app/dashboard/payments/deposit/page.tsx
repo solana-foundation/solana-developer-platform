@@ -51,7 +51,7 @@ export default async function PaymentsDepositPage() {
       issuedTokenSymbolsByMint={issuedTokenSymbolsByMint}
       enabledComplianceProviders={providerAccess?.enabledComplianceProviders ?? []}
       enabledRampProviders={providerAccess?.enabledRampProviders ?? []}
-      counterparties={counterpartiesResult.data}
+      counterpartiesResult={counterpartiesResult}
     />
   );
 }

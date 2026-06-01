@@ -34,7 +34,7 @@ interface RampPairProviderSelectorProps {
   onWalletChange: (walletId: string) => void;
   onPairChange: (pair: SelectedRampPair) => void;
   onProviderSelect: (provider: RampProviderId) => void;
-  counterparties: Counterparty[];
+  counterpartiesResult: { ok: boolean; data: Counterparty[]; error?: string };
   selectedCounterparty: string | null;
   onCounterpartyChange: (counterpartyId: string) => void;
 }
@@ -59,7 +59,7 @@ export function RampPairProviderSelector({
   onWalletChange,
   onPairChange,
   onProviderSelect,
-  counterparties,
+  counterpartiesResult,
   selectedCounterparty,
   onCounterpartyChange,
 }: RampPairProviderSelectorProps) {
@@ -176,7 +176,7 @@ export function RampPairProviderSelector({
         <div className="flex flex-col gap-2">
           <CurrencyPairSelector />
           <CounterpartySelector
-            counterparties={counterparties}
+            counterpartiesResult={counterpartiesResult}
             value={selectedCounterparty}
             onChange={onCounterpartyChange}
           />

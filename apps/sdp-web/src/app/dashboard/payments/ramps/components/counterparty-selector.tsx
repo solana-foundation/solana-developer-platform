@@ -6,24 +6,24 @@ import { useMemo } from "react";
 import { Combobox } from "@/components/ui/combobox";
 
 interface CounterpartySelectorProps {
-  counterparties: Counterparty[];
+  counterpartiesResult: { ok: boolean; data: Counterparty[]; error?: string };
   value: string | null;
   onChange: (counterpartyId: string) => void;
   onCreateNew?: () => void;
 }
 
 export function CounterpartySelector({
-  counterparties,
+  counterpartiesResult,
   value,
   onChange,
   onCreateNew,
 }: CounterpartySelectorProps) {
   const options = useMemo(
     () =>
-      counterparties
+      counterpartiesResult.data
         .filter((cp) => cp.status === "active")
         .map((cp) => ({ value: cp.id, label: cp.displayName, description: cp.email })),
-    [counterparties]
+    [counterpartiesResult.data]
   );
 
   return (
@@ -35,6 +35,11 @@ export function CounterpartySelector({
       placeholder="Select a counterparty"
       searchPlaceholder="Search counterparties"
       icon={<UsersIcon className="size-5 shrink-0 text-text-low" />}
+      error={
+        counterpartiesResult.ok
+          ? undefined
+          : (counterpartiesResult.error ?? "Failed to load counterparties.")
+      }
       footer={
         onCreateNew
           ? (close) => (
