@@ -139,7 +139,7 @@ export const addAllowlistEntry = async (c: AppContext) => {
       await syncNewAllowlistEntryOnChain({
         c,
         organizationId: auth.organizationId,
-        projectId: auth.projectId,
+        projectId,
         signingWalletId: token.signingWalletId,
         tokenService,
         entryId: entry.id,

@@ -64,7 +64,7 @@ jobs:
       - name: Detect changed packages
         id: changed
         run: |
-          CHANGED_PACKAGES=$(git diff --name-only origin/main...HEAD | awk -F/ '/^(apps|packages)\\// {print $1 "/" $2}' | sort -u | tr '\n' ' ' | xargs)
+          CHANGED_PACKAGES=$(git diff --name-only origin/main...HEAD | awk -F/ '/^(apps|packages)\// {print $1 "/" $2}' | sort -u | tr '\n' ' ' | xargs)
           echo "packages=${CHANGED_PACKAGES}" >> "$GITHUB_OUTPUT"
 
       - name: Typecheck
