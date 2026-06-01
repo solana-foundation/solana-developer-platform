@@ -1,7 +1,9 @@
 "use client";
 
 import type {
+  Counterparty,
   CustodyWalletAggregate,
+  ListCounterpartiesResponse,
   PaymentRampExecution,
   PaymentsWalletAggregateEnvelope,
   PaymentTransferEnvelope as TransferEnvelope,
@@ -502,4 +504,49 @@ export async function runComplianceCheck(
     checkedAt: result.checkedAt,
     providers: result.providers,
   };
+}
+
+const COUNTERPARTY_PAGE_SIZE = 100;
+const MAX_COUNTERPARTY_PAGES = 50;
+
+export interface CounterpartiesResult {
+  ok: boolean;
+  data: Counterparty[];
+  error?: string;
+}
+
+export async function fetchAllCounterparties(): Promise<CounterpartiesResult> {
+  const counterparties: Counterparty[] = [];
+
+  try {
+    for (let page = 1; page <= MAX_COUNTERPARTY_PAGES; page += 1) {
+      const query = new URLSearchParams({
+        page: String(page),
+        pageSize: String(COUNTERPARTY_PAGE_SIZE),
+      });
+      const response = await fetch(`/api/dashboard/counterparty?${query.toString()}`, {
+        headers: { Accept: "application/json" },
+      });
+      if (!response.ok) {
+        return { ok: false, data: [], error: await response.text() };
+      }
+
+      const json = (await response.json()) as { data?: ListCounterpartiesResponse };
+      const list = json.data;
+      counterparties.push(...(list?.counterparties ?? []));
+
+      const total = list?.total ?? counterparties.length;
+      if (counterparties.length >= total || (list?.counterparties.length ?? 0) === 0) {
+        break;
+      }
+    }
+
+    return { ok: true, data: counterparties };
+  } catch (error) {
+    return {
+      ok: false,
+      data: [],
+      error: error instanceof Error ? error.message : "Unable to load counterparties",
+    };
+  }
 }

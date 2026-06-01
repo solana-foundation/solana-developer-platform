@@ -166,7 +166,9 @@ export function RampPairProviderSelector({
   return (
     <div className="space-y-7">
       <RampSelectionProvider value={selectionContextValue}>
-        <CurrencyPairSelector />
+        <div className="flex flex-col gap-2">
+          <CurrencyPairSelector />
+        </div>
       </RampSelectionProvider>
 
       <div className="space-y-2.5">
