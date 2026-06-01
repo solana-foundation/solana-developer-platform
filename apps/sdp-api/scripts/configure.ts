@@ -13,6 +13,7 @@
  */
 import path from "node:path";
 import * as readline from "node:readline/promises";
+import { Writable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import {
   autoSecretKeys,
@@ -58,6 +59,23 @@ function note(message: string): void {
 
 type Asker = (query: string) => Promise<string>;
 
+/**
+ * Ask for a value without echoing the typed characters to the terminal.
+ *
+ * The prompt itself is written to stderr, then keystrokes are muted so secrets
+ * never land in scrollback. The mute is always lifted afterwards, including on
+ * the required/pattern re-ask path.
+ */
+type MaskedAsker = (query: string) => Promise<string>;
+
+/** Raised when the operator aborts a prompt (EOF / Ctrl-D). */
+class PromptAbortError extends Error {
+  constructor() {
+    super("Aborted.");
+    this.name = "PromptAbortError";
+  }
+}
+
 /** Resolve a select answer (1-based index or option value) to a stored value. */
 async function promptSelect(field: EnvField, current: string, ask: Asker): Promise<string> {
   const options = field.options ?? [];
@@ -67,31 +85,42 @@ async function promptSelect(field: EnvField, current: string, ask: Asker): Promi
     note(`  ${i + 1}) ${opt.label}${marker}`);
   });
 
-  const answer = (await ask("> ")).trim();
-  if (answer === "") return current;
+  for (;;) {
+    const answer = (await ask("> ")).trim();
+    if (answer === "") return current;
 
-  if (/^\d+$/.test(answer)) {
-    const byIndex = Number.parseInt(answer, 10);
-    if (byIndex >= 1 && byIndex <= options.length) {
-      return options[byIndex - 1].value;
+    if (/^\d+$/.test(answer)) {
+      const byIndex = Number.parseInt(answer, 10);
+      if (byIndex >= 1 && byIndex <= options.length) {
+        return options[byIndex - 1].value;
+      }
+    } else {
+      const byValue = options.find((opt) => opt.value === answer);
+      if (byValue) return byValue.value;
     }
+
+    note(
+      `Unknown option: ${answer} — enter a number 1-${options.length}, an option value, or blank.`
+    );
   }
-
-  const byValue = options.find((opt) => opt.value === answer);
-  if (byValue) return byValue.value;
-
-  note(`Unknown option: ${answer} — keeping ${current || "(empty)"}`);
-  return current;
 }
 
 /** Prompt a text/url/password field, re-asking on pattern or required violations. */
-async function promptText(field: EnvField, current: string, ask: Asker): Promise<string> {
+async function promptText(
+  field: EnvField,
+  current: string,
+  ask: Asker,
+  askMasked: MaskedAsker
+): Promise<string> {
   const label = `${field.label}${field.required ? " *" : ""}`;
   if (field.help) note(field.help);
-  const suffix = current ? ` [${current}]` : "";
+  // Never echo a current secret back into the prompt suffix.
+  const suffix = current && field.kind !== "password" ? ` [${current}]` : "";
+  // Secrets are masked; everything else keeps normal echo.
+  const prompt = field.kind === "password" ? askMasked : ask;
 
   for (;;) {
-    const answer = (await ask(`${label}${suffix}: `)).trim();
+    const answer = (await prompt(`${label}${suffix}: `)).trim();
     const value = answer === "" ? current : answer;
 
     if (answer !== "" && field.pattern && !field.pattern.test(answer)) {
@@ -107,19 +136,75 @@ async function promptText(field: EnvField, current: string, ask: Asker): Promise
 }
 
 /** Prompt a single visible field and return its resolved value. */
-async function promptField(field: EnvField, current: string, ask: Asker): Promise<string> {
+async function promptField(
+  field: EnvField,
+  current: string,
+  ask: Asker,
+  askMasked: MaskedAsker
+): Promise<string> {
   if (field.kind === "secret") {
     note(`${field.label}: generated`);
     return randomHex32();
   }
   if (field.kind === "select") return promptSelect(field, current, ask);
-  return promptText(field, current, ask);
+  return promptText(field, current, ask, askMasked);
 }
 
 /** Run the interactive prompt loop, returning the collected values. */
 async function collectInteractively(): Promise<Values> {
-  const rl = readline.createInterface({ input: process.stdin, output: process.stderr });
-  const ask: Asker = (query) => rl.question(query);
+  // While muted, readline's per-keystroke echo is dropped so typed secrets
+  // never reach the terminal. We give readline a thin proxy over stderr that
+  // honors the flag; the prompt text is written straight to stderr beforehand.
+  let muted = false;
+  const stderr = process.stderr;
+  const output = new Writable({
+    write(chunk, encoding, callback) {
+      if (muted) {
+        callback();
+        return;
+      }
+      stderr.write(chunk, encoding, callback);
+    },
+  });
+  // Mirror the underlying TTY traits so readline's line editing sizes correctly.
+  const ttyOutput = output as Writable & {
+    isTTY?: boolean;
+    columns?: number;
+    rows?: number;
+  };
+  ttyOutput.isTTY = stderr.isTTY;
+  ttyOutput.columns = stderr.columns;
+  ttyOutput.rows = stderr.rows;
+
+  // `terminal: true` echoes per keystroke (stderr is a TTY under `docker run
+  // -it`), which is what the mute above suppresses for masked prompts.
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output,
+    terminal: true,
+  });
+
+  // readline rejects question() when the stream ends (EOF / Ctrl-D); surface
+  // that as a clean abort the caller can report without a stack trace.
+  const ask: Asker = async (query) => {
+    try {
+      return await rl.question(query);
+    } catch {
+      throw new PromptAbortError();
+    }
+  };
+  const askMasked: MaskedAsker = async (query) => {
+    // Show the prompt, then mute keystroke echo for the typed secret.
+    stderr.write(query);
+    muted = true;
+    try {
+      return await ask("");
+    } finally {
+      muted = false;
+      stderr.write("\n");
+    }
+  };
+
   const values = defaultValues();
   let currentSection: string | undefined;
 
@@ -136,7 +221,7 @@ async function collectInteractively(): Promise<Values> {
         if (meta) note(`\n# ${meta.title}`);
       }
 
-      values[field.key] = await promptField(field, values[field.key] ?? "", ask);
+      values[field.key] = await promptField(field, values[field.key] ?? "", ask, askMasked);
     }
   } finally {
     rl.close();
@@ -174,7 +259,13 @@ async function main(): Promise<void> {
 const invokedPath = process.argv[1];
 if (invokedPath && path.resolve(invokedPath) === fileURLToPath(import.meta.url)) {
   main().catch((err) => {
-    note(String(err instanceof Error ? (err.stack ?? err.message) : err));
+    // A prompt abort (EOF / Ctrl-D) is an expected exit, not a crash: report it
+    // without a stack trace. Anything else is a real error.
+    if (err instanceof PromptAbortError) {
+      note("Aborted.");
+    } else {
+      note(String(err instanceof Error ? (err.stack ?? err.message) : err));
+    }
     process.exit(1);
   });
 }
