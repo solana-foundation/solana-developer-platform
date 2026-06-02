@@ -160,8 +160,8 @@ importers:
         specifier: 12.0.0
         version: 12.0.0
       '@testcontainers/redis':
-        specifier: 11.14.0
-        version: 11.14.0
+        specifier: 12.0.0
+        version: 12.0.0
       '@types/pg':
         specifier: ^8.15.6
         version: 8.20.0
@@ -4015,8 +4015,8 @@ packages:
   '@testcontainers/postgresql@12.0.0':
     resolution: {integrity: sha512-mqGQHwmY+xLKFvFd3XQYaa0vDJRaJAOUfFWYbgjd4wb6hOlrK7xhszaXB7KuGCGTIJf5jvtoEB8/56oVB5s55w==}
 
-  '@testcontainers/redis@11.14.0':
-    resolution: {integrity: sha512-WX005slz2JMQPw2avbSjf5awVjpmFhOs5xCxeGSYLcV5ia4W1edv/P6MdOw4dZnvDQDuN5LfqNoV/ut3XGb2pA==}
+  '@testcontainers/redis@12.0.0':
+    resolution: {integrity: sha512-VRQ+saEGKyd2CgbsSG/xi74kPUO1hnEYqUdxlMMeT1gcYpSya5n78w7S0B7yuEyRIQcfQaiHiQrTPASNG+Dz5A==}
 
   '@token-acl/sdk@0.2.7':
     resolution: {integrity: sha512-vNl4Ed9Y7Uw1jdyT+Nyb900E5/CTdwsechJ8a70PRyc5icDoIdVeOH3yqzx3iV6Y6r1QoHCwZgL48YsrzVi2sA==}
@@ -4929,10 +4929,6 @@ packages:
 
   docker-modem@5.0.7:
     resolution: {integrity: sha512-XJgGhoR/CLpqshm4d3L7rzH6t8NgDFUIIpztYlLHIApeJjMZKYJMz2zxPsYxnejq5h3ELYSw/RBsi3t5h7gNTA==}
-    engines: {node: '>= 8.0'}
-
-  dockerode@4.0.12:
-    resolution: {integrity: sha512-/bCZd6KlGcjZO8Buqmi/vXuqEGVEZ0PNjx/biBNqJD3MhK9DmdiAuKxqfNhflgDESDIiBz3qF+0e55+CpnrUcw==}
     engines: {node: '>= 8.0'}
 
   dockerode@5.0.0:
@@ -7140,9 +7136,6 @@ packages:
     engines: {node: '>=10'}
     hasBin: true
 
-  testcontainers@11.14.0:
-    resolution: {integrity: sha512-r9pniwv/iwzyHaI7gwAvAm4Y+IvjJg3vBWdjrUCaDMc2AXIr4jKbq7jJO18Mw2ybs73pZy1Aj7p/4RVBGMRWjg==}
-
   testcontainers@12.0.0:
     resolution: {integrity: sha512-/PdRvFvuHPwX126HR7RO0cEgLD3Nr8sWZyWSv54ei92TT79BubUkOCU5uwTc8ufTsTGQf0v6nyvZJVVVyR9Uqw==}
 
@@ -7337,11 +7330,6 @@ packages:
 
   util-deprecate@1.0.2:
     resolution: {integrity: sha512-EPD5q1uXyFxJpCrLnCc1nHnq3gOa6DZBocAIiI2TaSCA7VCJ1UJDMagCzIkXNsUYfD1daK//LTEQ8xiIbrHtcw==}
-
-  uuid@10.0.0:
-    resolution: {integrity: sha512-8XkAphELsDnEGrDxUOHB3RGvXz6TeuYSGEZBOjtTtPm2lwhGBjLgOzLHB63IUWfBpNucQjND6d3AOudO+H3RWQ==}
-    deprecated: uuid@10 and below is no longer supported.  For ESM codebases, update to uuid@latest.  For CommonJS codebases, use uuid@11 (but be aware this version will likely be deprecated in 2028).
-    hasBin: true
 
   vfile-location@5.0.3:
     resolution: {integrity: sha512-5yXvWDEgqeiYiBe1lbxYF7UMAIm/IcopxMHrMQDq3nvKcjPKIhZklUKL+AE7J7uApI4kwe2snsK+eI6UTj9EHg==}
@@ -11138,9 +11126,9 @@ snapshots:
       - react-native-b4a
       - supports-color
 
-  '@testcontainers/redis@11.14.0':
+  '@testcontainers/redis@12.0.0':
     dependencies:
-      testcontainers: 11.14.0
+      testcontainers: 12.0.0
     transitivePeerDependencies:
       - bare-abort-controller
       - bare-buffer
@@ -12110,18 +12098,6 @@ snapshots:
       readable-stream: 3.6.2
       split-ca: 1.0.1
       ssh2: 1.17.0
-    transitivePeerDependencies:
-      - supports-color
-
-  dockerode@4.0.12:
-    dependencies:
-      '@balena/dockerignore': 1.0.2
-      '@grpc/grpc-js': 1.14.4
-      '@grpc/proto-loader': 0.7.15
-      docker-modem: 5.0.7
-      protobufjs: 7.6.1
-      tar-fs: 2.1.4
-      uuid: 10.0.0
     transitivePeerDependencies:
       - supports-color
 
@@ -15079,29 +15055,6 @@ snapshots:
       commander: 2.20.3
       source-map-support: 0.5.21
 
-  testcontainers@11.14.0:
-    dependencies:
-      '@balena/dockerignore': 1.0.2
-      '@types/dockerode': 4.0.1
-      archiver: 7.0.1
-      async-lock: 1.4.1
-      byline: 5.0.0
-      debug: 4.4.3
-      docker-compose: 1.4.2
-      dockerode: 4.0.12
-      get-port: 7.2.0
-      proper-lockfile: 4.1.2
-      properties-reader: 3.0.1
-      ssh-remote-port-forward: 1.0.4
-      tar-fs: 3.1.2
-      tmp: 0.2.5
-      undici: 7.26.0
-    transitivePeerDependencies:
-      - bare-abort-controller
-      - bare-buffer
-      - react-native-b4a
-      - supports-color
-
   testcontainers@12.0.0:
     dependencies:
       '@balena/dockerignore': 1.0.2
@@ -15359,8 +15312,6 @@ snapshots:
       react: 19.2.6
 
   util-deprecate@1.0.2: {}
-
-  uuid@10.0.0: {}
 
   vfile-location@5.0.3:
     dependencies:

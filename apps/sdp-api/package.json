@@ -76,7 +76,7 @@
     "@cloudflare/vitest-pool-workers": "^0.16.6",
     "@cloudflare/workers-types": "^4.20260519.1",
     "@testcontainers/postgresql": "12.0.0",
-    "@testcontainers/redis": "11.14.0",
+    "@testcontainers/redis": "12.0.0",
     "@types/pg": "^8.15.6",
     "@types/react": "^19.2.10",
     "@vitest/coverage-istanbul": "4.1.6",
