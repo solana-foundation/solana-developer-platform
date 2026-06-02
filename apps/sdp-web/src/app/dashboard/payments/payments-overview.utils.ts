@@ -4,6 +4,7 @@ import type {
   PaymentTransferSummary as TransferRecord,
   PaymentsDashboardWallet as WalletRecord,
 } from "@sdp/types";
+import { CRYPTO_ASSET_DECIMALS, type CryptoAssetSymbol } from "@sdp/types/payment-rails";
 
 // biome-ignore lint/security/noSecrets: Devnet USDC mint address constant, not a secret.
 const DEVNET_USDC_MINT = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
@@ -118,15 +119,6 @@ export function formatTimestamp(value?: string): string {
   }).format(date);
 }
 
-export function getCurrencyDecimals(currency: string): number {
-  const normalized = currency.trim().toUpperCase();
-  if (normalized === "USD") return 2;
-  if (normalized === "USDC" || normalized === "USDT") return 6;
-  if (normalized === "SOL") return 9;
-  if (normalized === "BTC") return 8;
-  return 2;
-}
-
 export function formatMinorCurrencyAmount(
   amount: number | undefined,
   currency: string
@@ -135,7 +127,7 @@ export function formatMinorCurrencyAmount(
     return null;
   }
 
-  const decimals = getCurrencyDecimals(currency);
+  const decimals = CRYPTO_ASSET_DECIMALS[currency as CryptoAssetSymbol] ?? 2;
   const value = amount / 10 ** decimals;
   return `${value.toLocaleString(undefined, {
     minimumFractionDigits: 0,
