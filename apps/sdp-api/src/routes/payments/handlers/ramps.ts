@@ -1271,15 +1271,18 @@ async function executeRampWithProvider(
 
 const lightsparkClient = new LightsparkRampClient();
 
+function readLightsparkData(
+  providerData: CounterpartyRow["provider_data"]
+): Record<string, unknown> {
+  const lightspark = providerData.lightspark;
+  return lightspark && typeof lightspark === "object"
+    ? (lightspark as Record<string, unknown>)
+    : {};
+}
+
 function readLightsparkCustomerId(providerData: CounterpartyRow["provider_data"]): string | null {
-  const lightspark = (providerData as { lightspark?: unknown }).lightspark;
-  if (lightspark && typeof lightspark === "object") {
-    const customerId = (lightspark as { customerId?: unknown }).customerId;
-    if (typeof customerId === "string" && customerId.length > 0) {
-      return customerId;
-    }
-  }
-  return null;
+  const customerId = readLightsparkData(providerData).customerId;
+  return typeof customerId === "string" && customerId.length > 0 ? customerId : null;
 }
 
 /**
@@ -1304,11 +1307,7 @@ async function ensureLightsparkCustomer(
     email: counterparty.email,
   });
 
-  const existingLightspark =
-    counterparty.provider_data.lightspark &&
-    typeof counterparty.provider_data.lightspark === "object"
-      ? (counterparty.provider_data.lightspark as Record<string, unknown>)
-      : {};
+  const existingLightspark = readLightsparkData(counterparty.provider_data);
 
   await repo.updateCounterparty({
     counterpartyId: counterparty.id,
