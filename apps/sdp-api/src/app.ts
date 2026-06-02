@@ -42,8 +42,14 @@ import { isSentryEnabled, type Observability } from "@/runtime/observability";
 import { SigningError } from "@/services/ports";
 import type { Env } from "@/types/env";
 
+export interface SdpPlugin {
+  name: string;
+  register(app: Hono<{ Bindings: Env }>): void;
+}
+
 export interface AppDeps {
   observability: Observability;
+  plugins?: SdpPlugin[];
 }
 
 // Routes that need no KV bindings. Shared by kvStoreMiddleware (skip the
@@ -216,6 +222,10 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   v1.route("/onboarding", onboarding);
   v1.route("/payments", payments);
   v1.route("/compliance", compliance);
+
+  for (const plugin of deps.plugins ?? []) {
+    plugin.register(v1);
+  }
 
   app.route("/v1", v1);
 

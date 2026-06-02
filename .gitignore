@@ -55,3 +55,4 @@ apps/sdp-web/test-results/
 # Misc
 *.tsbuildinfo
 .vercel
+private/
