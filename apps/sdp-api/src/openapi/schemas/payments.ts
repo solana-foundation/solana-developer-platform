@@ -1,5 +1,6 @@
 import { OFFRAMP_CRYPTO_RAILS, ONRAMP_CRYPTO_RAILS, RAMP_PROVIDERS } from "@sdp/types";
 import {
+  createOnrampQuoteSchema as createOnrampQuoteSchemaBase,
   createTransferSchema as createTransferSchemaBase,
   executeOfframpSchema as executeOfframpSchemaBase,
   executeOnrampSchema as executeOnrampSchemaBase,
@@ -520,6 +521,53 @@ export const executeOnrampRequestSchema = executeOnrampSchemaBase
     },
   });
 
+export const createOnrampQuoteRequestSchema = createOnrampQuoteSchemaBase
+  .extend({
+    provider: withOpenApi(createOnrampQuoteSchemaBase.shape.provider, {
+      description:
+        "Ramp provider identifier. MoonPay returns a hosted widget URL; Lightspark returns manual funding instructions.",
+      example: "moonpay",
+    }),
+    counterpartyId: withOpenApi(createOnrampQuoteSchemaBase.shape.counterpartyId, {
+      description:
+        "SDP counterparty ID. Provider-native customer records may be resolved or created from this counterparty.",
+      example: "counterparty_example",
+    }),
+    destinationWallet: withOpenApi(createOnrampQuoteSchemaBase.shape.destinationWallet, {
+      description: "Destination wallet ID or Solana address for purchased crypto.",
+      example: "wal_example",
+    }),
+    cryptoToken: withOpenApi(createOnrampQuoteSchemaBase.shape.cryptoToken, {
+      description: "Crypto token symbol or provider currency code.",
+      example: "USDC",
+    }),
+    fiatCurrency: withOpenApi(createOnrampQuoteSchemaBase.shape.fiatCurrency, {
+      description: "Fiat currency for on-ramp.",
+      example: "USD",
+    }),
+    fiatAmount: withOpenApi(createOnrampQuoteSchemaBase.shape.fiatAmount, {
+      description: "Fiat amount to on-ramp.",
+      example: "100.00",
+    }),
+    redirectUrl: withOpenApi(createOnrampQuoteSchemaBase.shape.redirectUrl, {
+      description: "Optional return URL after hosted provider flow completes.",
+      example: "https://example.com/onramp/complete",
+    }),
+  })
+  .openapi({
+    description:
+      "Create an on-ramp quote. The response uses `deliveryMode` to indicate whether the client should display manual instructions or open a hosted provider flow.",
+    example: {
+      provider: "moonpay",
+      counterpartyId: "counterparty_example",
+      destinationWallet: "wal_example",
+      cryptoToken: "USDC",
+      fiatCurrency: "USD",
+      fiatAmount: "100.00",
+      redirectUrl: "https://example.com/onramp/complete",
+    },
+  });
+
 export const executeOfframpRequestSchema = executeOfframpSchemaBase
   .extend({
     provider: withOpenApi(executeOfframpSchemaBase.shape.provider, {
@@ -689,6 +737,50 @@ const rampPaymentInstructionSchema = z.discriminatedUnion("provider", [
   lightsparkRampPaymentInstructionSchema,
 ]);
 
+const onrampQuoteSchema = z
+  .object({
+    id: z.string().openapi({ description: "Quote identifier.", example: "ramp_quote_example" }),
+    provider: z.enum(["moonpay", "lightspark"]).openapi({
+      description: "Provider that created the quote.",
+      example: "moonpay",
+    }),
+    status: z
+      .enum(["pending", "processing", "completed", "failed"])
+      .openapi({ description: "Quote status.", example: "pending" }),
+    deliveryMode: z.enum(["manual_instructions", "hosted"]).openapi({
+      description:
+        "`hosted` means open `hostedUrl`; `manual_instructions` means display `paymentInstructions`.",
+      example: "hosted",
+    }),
+    hostedUrl: z
+      .string()
+      .url()
+      .optional()
+      .openapi({ description: "Provider-hosted URL for hosted quote delivery." }),
+    exchangeRate: z
+      .number()
+      .optional()
+      .openapi({ description: "Units of destination crypto per unit of source fiat." }),
+    totalSendingAmount: z.number().optional().openapi({
+      description: "Total sending amount in fiat smallest units, including provider fees.",
+    }),
+    totalReceivingAmount: z
+      .number()
+      .optional()
+      .openapi({ description: "Final crypto amount received in smallest units." }),
+    feesIncluded: z
+      .number()
+      .optional()
+      .openapi({ description: "Fees included in the sending amount, in fiat smallest units." }),
+    expiresAt: isoDateTimeSchema
+      .optional()
+      .openapi({ description: "Timestamp when the quote expires." }),
+    paymentInstructions: z.array(rampPaymentInstructionSchema).optional().openapi({
+      description: "Manual funding instructions for instruction-based quote delivery.",
+    }),
+  })
+  .openapi({ description: "On-ramp quote details." });
+
 const onrampCurrencyPairSchema = z
   .object({
     source: z.string().openapi({ description: "Fiat source currency code.", example: "USD" }),
@@ -836,6 +928,12 @@ export const onrampExecutionResponseSchema = z
     ramp: onrampExecutionSchema.openapi({ description: "On-ramp execution details." }),
   })
   .openapi({ description: "On-ramp execution response payload." });
+
+export const onrampQuoteResponseSchema = z
+  .object({
+    quote: onrampQuoteSchema.openapi({ description: "On-ramp quote details." }),
+  })
+  .openapi({ description: "On-ramp quote response payload." });
 
 export const offrampExecutionResponseSchema = z
   .object({

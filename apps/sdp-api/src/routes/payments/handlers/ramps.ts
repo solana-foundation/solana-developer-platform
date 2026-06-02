@@ -2,6 +2,7 @@ import type {
   LightsparkPaymentRampInstruction,
   PaymentRampExecution,
   PaymentRampExecutionStatus,
+  PaymentRampQuote,
   SdpEnvironment,
 } from "@sdp/types";
 import {
@@ -11,14 +12,24 @@ import {
   type RampFiatCurrency,
 } from "@sdp/types/generated/ramp-support";
 import { getDb } from "@/db";
+import type {
+  CounterpartiesRepository,
+  CounterpartyRow,
+} from "@/db/repositories/counterparty.repository";
 import { parseDecimalAmount } from "@/lib/amount";
+import { requireProjectId } from "@/lib/auth";
 import { AppError, providerNotConfigured } from "@/lib/errors";
+import { basicAuthHeader } from "@/lib/ramps/common";
+import { providerFetchJson } from "@/lib/ramps/fetch";
+import { LightsparkRampClient } from "@/lib/ramps/providers/lightspark";
 import { success } from "@/lib/response";
 import { isAddress } from "@/lib/solana";
+import { getCounterpartiesRepository } from "@/routes/counterparties/context";
 import { assertProviderAvailable } from "@/services/provider-availability.service";
 import type { AppContext } from "../context";
 import { assertWalletPolicyAllowsTransfer } from "../policy";
 import {
+  createOnrampQuoteSchema,
   executeOfframpSchema,
   executeOnrampSchema,
   listOfframpCurrenciesQuerySchema,
@@ -331,10 +342,6 @@ function getBvnkConfig(c: AppContext): BvnkConfig {
   };
 }
 
-function encodeBasicAuth(value: string): string {
-  return Buffer.from(value, "utf8").toString("base64");
-}
-
 function safeParseJson(value: string): unknown | null {
   try {
     return JSON.parse(value) as unknown;
@@ -597,39 +604,15 @@ async function lightsparkRequest(
     body?: unknown;
   }
 ): Promise<unknown> {
-  const apiBaseUrl = config.apiBaseUrl.endsWith("/") ? config.apiBaseUrl : `${config.apiBaseUrl}/`;
-  const url = new URL(path, apiBaseUrl);
-  const auth = encodeBasicAuth(`${config.tokenId}:${config.clientSecret}`);
+  const base = config.apiBaseUrl.endsWith("/") ? config.apiBaseUrl : `${config.apiBaseUrl}/`;
+  const url = new URL(path, base);
 
-  const response = await fetch(url.toString(), {
-    method: init.method,
+  return providerFetchJson("lightspark", url.toString(), {
+    ...init,
     headers: {
-      Authorization: `Basic ${auth}`,
-      "Content-Type": "application/json",
+      Authorization: basicAuthHeader(config.tokenId, config.clientSecret),
     },
-    body: init.body === undefined ? undefined : JSON.stringify(init.body),
   });
-
-  const raw = await response.text();
-  const parsed = safeParseJson(raw);
-
-  if (!response.ok) {
-    const parsedMessage =
-      parsed && typeof parsed === "object"
-        ? ((parsed as { message?: unknown; error?: unknown; reason?: unknown }).message ??
-          (parsed as { message?: unknown; error?: unknown; reason?: unknown }).error ??
-          (parsed as { message?: unknown; error?: unknown; reason?: unknown }).reason)
-        : undefined;
-
-    const message =
-      typeof parsedMessage === "string" && parsedMessage.length > 0
-        ? parsedMessage
-        : `Lightspark request failed with status ${response.status}`;
-
-    throw new AppError("BAD_REQUEST", message);
-  }
-
-  return parsed ?? {};
 }
 
 function normalizeLightsparkCurrencyCode(value: string): string {
@@ -1258,6 +1241,172 @@ async function executeRampWithProvider(
   }
 
   return await provider.executeOfframp(c, scope, input);
+}
+
+const lightsparkClient = new LightsparkRampClient();
+
+function readLightsparkData(
+  providerData: CounterpartyRow["provider_data"]
+): Record<string, unknown> {
+  const lightspark = providerData.lightspark;
+  return lightspark && typeof lightspark === "object"
+    ? (lightspark as Record<string, unknown>)
+    : {};
+}
+
+function readLightsparkCustomerId(providerData: CounterpartyRow["provider_data"]): string | null {
+  const customerId = readLightsparkData(providerData).customerId;
+  return typeof customerId === "string" && customerId.length > 0 ? customerId : null;
+}
+
+/**
+ * Returns the Grid customer id for a counterparty, lazily creating the native
+ * Lightspark customer (and persisting it into provider_data) on first use.
+ */
+async function ensureLightsparkCustomer(
+  repo: CounterpartiesRepository,
+  config: LightsparkConfig,
+  counterparty: CounterpartyRow,
+  projectId: string
+): Promise<string> {
+  const existing = readLightsparkCustomerId(counterparty.provider_data);
+  if (existing) {
+    return existing;
+  }
+
+  const customer = await lightsparkClient.getOrCreateCustomer(config, {
+    platformCustomerId: counterparty.id,
+    customerType: counterparty.entity_type === "business" ? "BUSINESS" : "INDIVIDUAL",
+    fullName: counterparty.display_name,
+    email: counterparty.email,
+  });
+
+  const existingLightspark = readLightsparkData(counterparty.provider_data);
+
+  await repo.updateCounterparty({
+    counterpartyId: counterparty.id,
+    organizationId: counterparty.organization_id,
+    projectId,
+    providerData: {
+      ...counterparty.provider_data,
+      lightspark: { ...existingLightspark, customerId: customer.id },
+    },
+  });
+
+  return customer.id;
+}
+
+export async function createOnrampQuote(c: AppContext) {
+  const body = await c.req.json();
+  const parsed = createOnrampQuoteSchema.safeParse(body);
+
+  if (!parsed.success) {
+    throw new AppError("BAD_REQUEST", "Invalid request body", {
+      errors: parsed.error.flatten().fieldErrors,
+    });
+  }
+
+  const input = parsed.data;
+  const scope = await resolveScope(c);
+  await resolveRampProvider(c, input.provider, scope.auth.organizationId);
+
+  const projectId = requireProjectId(c);
+  const repo = getCounterpartiesRepository(c);
+  const counterparty = await repo.getCounterpartyById({
+    counterpartyId: input.counterpartyId,
+    organizationId: scope.auth.organizationId,
+    projectId,
+  });
+  if (!counterparty) {
+    throw new AppError("NOT_FOUND", "Counterparty not found");
+  }
+
+  if (input.provider === "moonpay") {
+    const destinationWalletAddress = resolveWalletAddress(
+      scope.wallets,
+      input.destinationWallet,
+      "destinationWallet",
+      scope.auth,
+      ["payments:write"]
+    );
+    const amount = toPositiveNumberAmount(input.fiatAmount, "fiatAmount");
+    if (amount < MOONPAY_ONRAMP_MIN_USD) {
+      throw new AppError(
+        "BAD_REQUEST",
+        `MoonPay on-ramp requires fiatAmount to be at least ${MOONPAY_ONRAMP_MIN_USD} USD`
+      );
+    }
+
+    const moonPay = getMoonPayConfig(c);
+    const fiatCurrency = resolveFiatCurrency(input);
+    const quoteId = `ramp_quote_${crypto.randomUUID()}`;
+    const hostedUrl = await buildSignedMoonPayWidgetUrl(moonPay.onrampUrl, moonPay.secretKey, {
+      apiKey: moonPay.apiKey,
+      baseCurrencyCode: fiatCurrency.toLowerCase(),
+      baseCurrencyAmount: input.fiatAmount,
+      currencyCode: normalizeMoonPayCurrencyCode(input.cryptoToken),
+      walletAddress: destinationWalletAddress,
+      redirectURL: input.redirectUrl,
+      externalCustomerId: counterparty.external_id ?? counterparty.id,
+      externalTransactionId: quoteId,
+    });
+
+    const result: PaymentRampQuote = {
+      provider: "moonpay",
+      id: quoteId,
+      status: "pending",
+      deliveryMode: "hosted",
+      hostedUrl,
+    };
+
+    return success(c, { quote: result });
+  }
+
+  const config = getLightsparkConfig(c);
+  const customerId = await ensureLightsparkCustomer(repo, config, counterparty, projectId);
+
+  const cryptoCurrency = normalizeLightsparkCurrencyCode(input.cryptoToken);
+  const fiatCurrency = resolveFiatCurrency(input);
+  const fiatAmountMinorUnits = toLightsparkMinorUnitsInteger(
+    parseDecimalAmount(input.fiatAmount, 2),
+    "fiatAmount"
+  );
+  const destinationWalletAddress = resolveWalletAddress(
+    scope.wallets,
+    input.destinationWallet,
+    "destinationWallet",
+    scope.auth,
+    ["payments:write"]
+  );
+  const destinationAccountId = await resolveLightsparkOnrampDestinationAccountId(
+    config,
+    customerId,
+    destinationWalletAddress,
+    cryptoCurrency
+  );
+
+  const quote = await lightsparkClient.createOnrampQuote(config, {
+    customerId,
+    destinationAccountId,
+    fiatCurrency,
+    cryptoCurrency,
+    fiatAmountMinorUnits,
+  });
+
+  const result: PaymentRampQuote = {
+    provider: "lightspark",
+    id: quote.id,
+    status: mapLightsparkQuoteStatus(quote.status),
+    deliveryMode: "manual_instructions",
+    exchangeRate: quote.exchangeRate,
+    totalSendingAmount: quote.totalSendingAmount,
+    totalReceivingAmount: quote.totalReceivingAmount,
+    feesIncluded: quote.feesIncluded,
+    expiresAt: quote.expiresAt,
+    paymentInstructions: quote.paymentInstructions,
+  };
+
+  return success(c, { quote: result });
 }
 
 export async function executeOnramp(c: AppContext) {

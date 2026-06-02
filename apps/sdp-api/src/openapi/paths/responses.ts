@@ -39,6 +39,7 @@ import {
   onboardingStatusResponseSchema,
   onrampCurrenciesResponseSchema,
   onrampExecutionResponseSchema,
+  onrampQuoteResponseSchema,
   organizationSchema,
   paginatedResponseSchema,
   prepareBurnResponseSchema,
@@ -155,6 +156,7 @@ export const transferListResponse = paginatedResponseSchema(transferSchema);
 export const onrampCurrenciesResponse = successResponseSchema(onrampCurrenciesResponseSchema);
 export const offrampCurrenciesResponse = successResponseSchema(offrampCurrenciesResponseSchema);
 export const onrampExecutionResponse = successResponseSchema(onrampExecutionResponseSchema);
+export const onrampQuoteResponse = successResponseSchema(onrampQuoteResponseSchema);
 export const offrampExecutionResponse = successResponseSchema(offrampExecutionResponseSchema);
 export const sandboxTransferSimulationResponse = successResponseSchema(
   sandboxTransferSimulationResponseSchema
