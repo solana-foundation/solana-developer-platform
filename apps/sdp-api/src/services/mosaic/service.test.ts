@@ -216,17 +216,30 @@ describe("MosaicService.createToken — Kora sponsorship", () => {
   });
 
   describe("list address derivation", () => {
-    it("derives the ABL list PDA from the custody signer for sRFC-37 deploys", async () => {
+    it("derives the ABL list PDA from the mint authority, not the service signer", async () => {
       vi.spyOn(
         MosaicService.prototype as unknown as SubmitProto,
         "signAndSubmitWithMintKeypair"
       ).mockResolvedValue({ signature: "sig", slot: 1n });
       const listSpy = vi.spyOn(MosaicSdk, "getListConfigPda").mockResolvedValue(FAKE_LIST_ADDRESS);
 
-      const result = await service.createToken(srfc37Options());
+      // Mint authority distinct from the service signer: the patched mosaic-sdk
+      // seeds the list-config PDA from the mint authority, so the derivation must
+      // follow it — deriving from `this.signer` would produce the wrong address.
+      const mintAuthority = (await Kit.generateKeyPairSigner()).address;
+      expect(mintAuthority).not.toBe(signer.address);
+
+      const result = await service.createToken(
+        stablecoinOptions({
+          mintAuthority,
+          freezeAuthority: signer.address,
+          feePayer: signer.address,
+          enableTokenAcl: true,
+        })
+      );
 
       expect(result.listAddress).toBe(FAKE_LIST_ADDRESS);
-      expect(listSpy).toHaveBeenCalledWith({ authority: signer.address, mint: result.mint });
+      expect(listSpy).toHaveBeenCalledWith({ authority: mintAuthority, mint: result.mint });
     });
 
     it("does not derive a list address for non-sRFC-37 deploys", async () => {
