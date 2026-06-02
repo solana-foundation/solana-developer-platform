@@ -24,12 +24,14 @@ scenario() { # scenario <name> <docker-run-flags...> -- <in-container-bash>
     -e SDP_RELEASE_BASE_URL="file:///release" -e INSTALL_VERSION="." \
     -e SDP_INSTALL_DIR="/root/sdp" \
     "${flags[@]}" "$IMG" bash -c "
-      set -u
-      apt-get update -qq >/dev/null 2>&1; apt-get install -y -qq curl >/dev/null 2>&1
+      set -eu
+      apt-get update -qq >/dev/null 2>&1
+      apt-get install -y -qq curl >/dev/null 2>&1
       mkdir -p /release
       cp /src/infra/self-hosted/compose.yml /src/infra/self-hosted/.env.example \
          /src/infra/self-hosted/install.sh /release/
       ( cd /release && sha256sum install.sh compose.yml .env.example > SHA256SUMS )
+      set +e
       $1
     "
 }

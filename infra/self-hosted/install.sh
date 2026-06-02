@@ -11,6 +11,12 @@
 #   curl -fsSL "$R/$V/SHA256SUMS" -o SHA256SUMS
 #   sha256sum --ignore-missing -c SHA256SUMS && INSTALL_VERSION="$V" bash install.sh
 #
+# For out-of-band authenticity, verify the keyless cosign signature of SHA256SUMS:
+#   curl -fsSL "$R/$V/SHA256SUMS.cosign.bundle" -o SHA256SUMS.cosign.bundle
+#   cosign verify-blob --bundle SHA256SUMS.cosign.bundle \
+#     --certificate-identity-regexp '^https://github\.com/solana-foundation/solana-developer-platform/\.github/workflows/release-checksums\.yml@refs/tags/' \
+#     --certificate-oidc-issuer https://token.actions.githubusercontent.com SHA256SUMS
+#
 # Overridable: SDP_INSTALL_DIR, INSTALL_VERSION, SDP_RELEASE_BASE_URL,
 #              SDP_IMAGE_REGISTRY, SDP_CONFIGURATOR_URL.
 set -euo pipefail
@@ -65,6 +71,18 @@ fetch() {
   curl -fsSL "$RELEASE_BASE_URL/$VERSION/$1" -o "$2"
 }
 
+# sha256sum is Linux-native; macOS ships shasum instead.
+_sha256sum() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$@"
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$@"
+  else
+    err "Neither sha256sum nor shasum is available. Install coreutils and retry."
+    exit 1
+  fi
+}
+
 # verify <asset-name> against its line in the downloaded SHA256SUMS, fail closed.
 verify() {
   local line
@@ -73,7 +91,7 @@ verify() {
     err "No checksum recorded for $1 in SHA256SUMS. Refusing to continue."
     exit 1
   fi
-  if ! (cd "$INSTALL_DIR" && printf '%s\n' "$line" | sha256sum -c -) >/dev/null 2>&1; then
+  if ! (cd "$INSTALL_DIR" && printf '%s\n' "$line" | _sha256sum -c -) >/dev/null 2>&1; then
     err "Checksum verification failed for $1. Refusing to continue."
     exit 1
   fi
@@ -100,8 +118,13 @@ main() {
 
   mkdir -p "$INSTALL_DIR"
   fetch SHA256SUMS "$INSTALL_DIR/SHA256SUMS"
+  local had_compose=0
+  if [ -f "$INSTALL_DIR/compose.yml" ]; then had_compose=1; fi
   fetch compose.yml "$INSTALL_DIR/compose.yml"
   verify compose.yml
+  if [ "$had_compose" -eq 1 ]; then
+    printf '\nReplaced the existing compose.yml with the %s release.\n' "$VERSION"
+  fi
   if [ ! -f "$INSTALL_DIR/.env.example" ]; then
     fetch .env.example "$INSTALL_DIR/.env.example"
     verify .env.example
