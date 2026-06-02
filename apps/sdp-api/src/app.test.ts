@@ -66,6 +66,15 @@ describe("createApp plugin registration", () => {
 
     expect(res.status).toBe(404);
   });
+
+  it("throws when two plugins share the same name", () => {
+    const { obs } = makeObservability();
+    const make = (name: string): SdpPlugin => ({ name, register: () => {} });
+
+    expect(() =>
+      createApp({ observability: obs, plugins: [make("dup"), make("dup")] })
+    ).toThrow(/dup/);
+  });
 });
 
 describe("createApp onError SENTRY_DSN guard", () => {

@@ -1,6 +1,6 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "@/types/env";
-import { registerFallbackKeys, withProcessEnvFallback } from "./runtime-env";
+import { withProcessEnvFallback } from "./runtime-env";
 
 const emptyBindings = () => ({}) as Env;
 
@@ -30,10 +30,20 @@ describe("withProcessEnvFallback", () => {
     expect(merged.PLUGIN_UNREGISTERED_SECRET).toBeUndefined();
   });
 
-  it("picks up a key after registerFallbackKeys adds it", () => {
+  it("picks up a key after registerFallbackKeys adds it", async () => {
+    vi.resetModules();
+    const isolated = await import("./runtime-env");
     setProcessEnv("PLUGIN_DECLARED_SECRET", "abc123");
-    registerFallbackKeys("PLUGIN_DECLARED_SECRET");
-    const merged = withProcessEnvFallback(emptyBindings()) as unknown as Record<string, unknown>;
+    isolated.registerFallbackKeys("PLUGIN_DECLARED_SECRET");
+    const merged = isolated.withProcessEnvFallback(
+      emptyBindings()
+    ) as unknown as Record<string, unknown>;
     expect(merged.PLUGIN_DECLARED_SECRET).toBe("abc123");
+  });
+
+  it("does not leave a registered key in the shared whitelist after the test", () => {
+    setProcessEnv("PLUGIN_DECLARED_SECRET", "should-not-leak");
+    const merged = withProcessEnvFallback(emptyBindings()) as unknown as Record<string, unknown>;
+    expect(merged.PLUGIN_DECLARED_SECRET).toBeUndefined();
   });
 });

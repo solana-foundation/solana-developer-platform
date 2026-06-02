@@ -223,7 +223,12 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   v1.route("/payments", payments);
   v1.route("/compliance", compliance);
 
+  const registeredPluginNames = new Set<string>();
   for (const plugin of deps.plugins ?? []) {
+    if (registeredPluginNames.has(plugin.name)) {
+      throw new Error(`Duplicate plugin name: ${plugin.name}`);
+    }
+    registeredPluginNames.add(plugin.name);
     plugin.register(v1);
   }
 
