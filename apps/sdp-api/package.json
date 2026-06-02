@@ -75,7 +75,7 @@
     "@asteasolutions/zod-to-openapi": "8.5.0",
     "@cloudflare/vitest-pool-workers": "^0.16.6",
     "@cloudflare/workers-types": "^4.20260519.1",
-    "@testcontainers/postgresql": "11.14.0",
+    "@testcontainers/postgresql": "12.0.0",
     "@testcontainers/redis": "11.14.0",
     "@types/pg": "^8.15.6",
     "@types/react": "^19.2.10",

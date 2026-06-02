@@ -157,8 +157,8 @@ importers:
         specifier: ^4.20260519.1
         version: 4.20260519.1
       '@testcontainers/postgresql':
-        specifier: 11.14.0
-        version: 11.14.0
+        specifier: 12.0.0
+        version: 12.0.0
       '@testcontainers/redis':
         specifier: 11.14.0
         version: 11.14.0
@@ -4012,8 +4012,8 @@ packages:
   '@tanstack/query-core@5.100.11':
     resolution: {integrity: sha512-lmE0994apShXPj8CUxgx4ch5yUJhE9k/+tVwihBvPOyerACWdBocfFg24t8+0RhtlTd7tEgchDkhlCxNssvDxw==}
 
-  '@testcontainers/postgresql@11.14.0':
-    resolution: {integrity: sha512-wYbJn8GRTj8qfqzfVubxioYWlHJU/ImIjuzPwyy9C5Qfo6g3GLduPZAj+BifvqTZjgT3gd4gFVLCPhBji7dc1w==}
+  '@testcontainers/postgresql@12.0.0':
+    resolution: {integrity: sha512-mqGQHwmY+xLKFvFd3XQYaa0vDJRaJAOUfFWYbgjd4wb6hOlrK7xhszaXB7KuGCGTIJf5jvtoEB8/56oVB5s55w==}
 
   '@testcontainers/redis@11.14.0':
     resolution: {integrity: sha512-WX005slz2JMQPw2avbSjf5awVjpmFhOs5xCxeGSYLcV5ia4W1edv/P6MdOw4dZnvDQDuN5LfqNoV/ut3XGb2pA==}
@@ -11129,9 +11129,9 @@ snapshots:
 
   '@tanstack/query-core@5.100.11': {}
 
-  '@testcontainers/postgresql@11.14.0':
+  '@testcontainers/postgresql@12.0.0':
     dependencies:
-      testcontainers: 11.14.0
+      testcontainers: 12.0.0
     transitivePeerDependencies:
       - bare-abort-controller
       - bare-buffer
