@@ -81,6 +81,7 @@ if scenario "headless" -- "
     && [ -f /root/sdp/.env.example ] \
     && [ -f /root/sdp/SHA256SUMS ] \
     && echo \"\$out\" | grep -q 'node configure.js --out /out/.env' \
+    && echo \"\$out\" | grep -qi 'cosign not found' \
     && ! echo \"\$out\" | grep -qi 'opening the configurator'
 "; then check "places + verifies compose.yml, prints CLI handoff" 0
 else check "places + verifies compose.yml, prints CLI handoff" 1; fi
@@ -94,9 +95,34 @@ if scenario "tampered" -- "
     && echo \"\$out\" | grep -qi 'checksum verification failed' \
     && ! echo \"\$out\" | grep -q 'node configure.js'
 "; then check "aborts on a compose.yml checksum mismatch before handoff" 0
-else check "aborts on a compose.yml checksum mismatch" 1; fi
+else check "aborts on a compose.yml checksum mismatch before handoff" 1; fi
 
-# 5. Desktop -> auto-open invoked with the configurator URL (stub records its arg).
+# 5. cosign present but signature invalid -> abort before fetching artifacts.
+if scenario "signature-invalid" -- "
+  $DOCKER_OK
+  printf '#!/bin/sh\nexit 1\n' > /usr/local/bin/cosign; chmod +x /usr/local/bin/cosign
+  : > /release/SHA256SUMS.cosign.bundle
+  out=\$(bash /src/infra/self-hosted/install.sh 2>&1); rc=\$?
+  [ \$rc -ne 0 ] \
+    && echo \"\$out\" | grep -qi 'signature verification failed' \
+    && [ ! -f /root/sdp/compose.yml ]
+"; then check "aborts when the SHA256SUMS signature is invalid" 0
+else check "aborts when the SHA256SUMS signature is invalid" 1; fi
+
+# 6. cosign present and signature valid -> proceeds, passing the identity + issuer.
+if scenario "signature-valid" -- "
+  $DOCKER_OK
+  printf '#!/bin/sh\necho \"\$@\" > /tmp/cosign-args\nexit 0\n' > /usr/local/bin/cosign; chmod +x /usr/local/bin/cosign
+  : > /release/SHA256SUMS.cosign.bundle
+  out=\$(bash /src/infra/self-hosted/install.sh 2>&1); rc=\$?
+  [ \$rc -eq 0 ] \
+    && echo \"\$out\" | grep -q 'node configure.js --out /out/.env' \
+    && grep -qF 'token.actions.githubusercontent.com' /tmp/cosign-args \
+    && grep -qF 'release-checksums' /tmp/cosign-args
+"; then check "proceeds when the SHA256SUMS signature is valid" 0
+else check "proceeds when the SHA256SUMS signature is valid" 1; fi
+
+# 7. Desktop -> auto-open invoked with the configurator URL (stub records its arg).
 if scenario "desktop" -e DISPLAY=:0 -- "
   $DOCKER_OK
   printf '#!/bin/sh\necho \"\$1\" > /tmp/opened\n' > /usr/local/bin/xdg-open; chmod +x /usr/local/bin/xdg-open
@@ -105,7 +131,7 @@ if scenario "desktop" -e DISPLAY=:0 -- "
 "; then check "auto-opens the configurator URL on a GUI host" 0
 else check "auto-opens the configurator URL on a GUI host" 1; fi
 
-# 6. Idempotency -> an existing .env.example is preserved (and not re-verified) across runs.
+# 8. Idempotency -> an existing .env.example is preserved (and not re-verified) across runs.
 if scenario "idempotent" -- "
   $DOCKER_OK
   mkdir -p /root/sdp

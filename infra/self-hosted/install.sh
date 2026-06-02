@@ -14,7 +14,7 @@
 # For out-of-band authenticity, verify the keyless cosign signature of SHA256SUMS:
 #   curl -fsSL "$R/$V/SHA256SUMS.cosign.bundle" -o SHA256SUMS.cosign.bundle
 #   cosign verify-blob --bundle SHA256SUMS.cosign.bundle \
-#     --certificate-identity-regexp '^https://github\.com/solana-foundation/solana-developer-platform/\.github/workflows/release-checksums\.yml@refs/tags/' \
+#     --certificate-identity-regexp '^https://github\.com/solana-foundation/solana-developer-platform/\.github/workflows/release-checksums\.yml@refs/tags/v[0-9][^/]*$' \
 #     --certificate-oidc-issuer https://token.actions.githubusercontent.com SHA256SUMS
 #
 # Overridable: SDP_INSTALL_DIR, INSTALL_VERSION, SDP_RELEASE_BASE_URL,
@@ -83,6 +83,30 @@ _sha256sum() {
   fi
 }
 
+# verify_signature: when cosign is available, verify the keyless signature of
+# SHA256SUMS and fail closed on a bad signature. Skip (with a notice) when cosign
+# or the bundle is unavailable — checksum verification of the artifacts still applies.
+verify_signature() {
+  if ! command -v cosign >/dev/null 2>&1; then
+    printf '\nNote: cosign not found; skipping signature check (checksums still verified).\n' >&2
+    return
+  fi
+  if ! fetch SHA256SUMS.cosign.bundle "$INSTALL_DIR/SHA256SUMS.cosign.bundle" 2>/dev/null; then
+    printf '\nNote: no signature bundle for %s; skipping signature check.\n' "$VERSION" >&2
+    return
+  fi
+  local output
+  if ! output="$(cosign verify-blob \
+      --bundle "$INSTALL_DIR/SHA256SUMS.cosign.bundle" \
+      --certificate-identity-regexp '^https://github\.com/solana-foundation/solana-developer-platform/\.github/workflows/release-checksums\.yml@refs/tags/v[0-9][^/]*$' \
+      --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+      "$INSTALL_DIR/SHA256SUMS" 2>&1)"; then
+    err "Signature verification failed for SHA256SUMS. Refusing to continue."
+    err "$output"
+    exit 1
+  fi
+}
+
 # verify <asset-name> against its line in the downloaded SHA256SUMS, fail closed.
 verify() {
   local line
@@ -118,6 +142,7 @@ main() {
 
   mkdir -p "$INSTALL_DIR"
   fetch SHA256SUMS "$INSTALL_DIR/SHA256SUMS"
+  verify_signature
   local had_compose=0
   if [ -f "$INSTALL_DIR/compose.yml" ]; then had_compose=1; fi
   fetch compose.yml "$INSTALL_DIR/compose.yml"
