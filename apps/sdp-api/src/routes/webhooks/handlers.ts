@@ -658,13 +658,10 @@ export const handleClerkWebhook = async (c: AppContext) => {
     case "user.deleted":
       await deleteUser(c, data);
       break;
-    // biome-ignore lint/security/noSecrets: Webhook event type literal, not a secret.
     case "organizationMembership.created":
-    // biome-ignore lint/security/noSecrets: Webhook event type literal, not a secret.
     case "organizationMembership.updated":
       await upsertMembership(c, data);
       break;
-    // biome-ignore lint/security/noSecrets: Webhook event type literal, not a secret.
     case "organizationMembership.deleted":
       await deleteMembership(c, data);
       break;
