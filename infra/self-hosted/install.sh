@@ -2,10 +2,14 @@
 #
 # Bootstrap a self-hosted Solana Developer Platform.
 #
-# Verify before running:
-#   curl -fsSL "<url>/install.sh" -o install.sh \
-#     && sha256sum -c install.sh.sha256 \
-#     && bash install.sh
+# This script is open source — read it before piping it to a shell.
+# Replace v0.24.0 below with the release tag you are installing.
+# To verify the install script and config against the release checksums:
+#   V=v0.24.0
+#   R=https://github.com/solana-foundation/solana-developer-platform/releases/download
+#   curl -fsSL "$R/$V/install.sh" -o install.sh
+#   curl -fsSL "$R/$V/SHA256SUMS" -o SHA256SUMS
+#   sha256sum --ignore-missing -c SHA256SUMS && bash install.sh
 #
 # Overridable: SDP_INSTALL_DIR, INSTALL_VERSION, SDP_INSTALL_BASE_URL,
 #              SDP_IMAGE_REGISTRY, SDP_CONFIGURATOR_URL.
