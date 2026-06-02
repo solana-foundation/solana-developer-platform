@@ -115,6 +115,7 @@ let originalBvnkWalletId: string | undefined;
 let originalBvnkApiBaseUrl: string | undefined;
 let originalMagicBlockApiBaseUrl: string | undefined;
 let originalMagicBlockAuthToken: string | undefined;
+let originalRecurringPaymentsEnabled: string | undefined;
 
 function assertMoonPaySignature(url: URL): void {
   const signature = url.searchParams.get("signature");
@@ -434,6 +435,7 @@ describe("Payments routes", () => {
     originalBvnkApiBaseUrl = env.BVNK_API_BASE_URL;
     originalMagicBlockApiBaseUrl = env.MAGICBLOCK_PRIVATE_PAYMENTS_API_BASE_URL;
     originalMagicBlockAuthToken = env.MAGICBLOCK_PRIVATE_PAYMENTS_AUTH_TOKEN;
+    originalRecurringPaymentsEnabled = env.PAYMENTS_RECURRING_ENABLED;
 
     env.MOONPAY_SANDBOX_API_KEY = TEST_MOONPAY_API_KEY;
     env.MOONPAY_SANDBOX_SECRET_KEY = TEST_MOONPAY_SECRET_KEY;
@@ -454,6 +456,7 @@ describe("Payments routes", () => {
     env.BVNK_API_BASE_URL = TEST_BVNK_API_BASE_URL;
     env.MAGICBLOCK_PRIVATE_PAYMENTS_API_BASE_URL = undefined;
     env.MAGICBLOCK_PRIVATE_PAYMENTS_AUTH_TOKEN = undefined;
+    env.PAYMENTS_RECURRING_ENABLED = undefined;
 
     await seedTestDatabase(env);
     await seedAuthAndWallet();
@@ -479,9 +482,212 @@ describe("Payments routes", () => {
     env.BVNK_API_BASE_URL = originalBvnkApiBaseUrl;
     env.MAGICBLOCK_PRIVATE_PAYMENTS_API_BASE_URL = originalMagicBlockApiBaseUrl;
     env.MAGICBLOCK_PRIVATE_PAYMENTS_AUTH_TOKEN = originalMagicBlockAuthToken;
+    env.PAYMENTS_RECURRING_ENABLED = originalRecurringPaymentsEnabled;
 
     await clearTestDatabase(env);
     await clearKVNamespaces(env);
+  });
+
+  it("gates recurring subscription endpoints behind PAYMENTS_RECURRING_ENABLED", async () => {
+    const res = await app.request(
+      "/v1/payments/subscription-plans",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          ownerWalletId: TEST_WALLET_ID,
+          token: DEVNET_USDC_MINT,
+          amount: "10.00",
+          periodHours: 24,
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { error: { message: string } };
+    expect(body.error.message).toContain("Recurring payments are not enabled");
+  });
+
+  it("creates recurring subscription backend records tied to a counterparty", async () => {
+    env.PAYMENTS_RECURRING_ENABLED = "true";
+    const counterpartyId = await seedCounterparty();
+
+    const planRes = await app.request(
+      "/v1/payments/subscription-plans",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          ownerWalletId: TEST_WALLET_ID,
+          token: DEVNET_USDC_MINT,
+          amount: "25.00",
+          periodHours: 720,
+          destinationAddress: TEST_SOLANA_ADDRESSES.wallet3,
+          metadataUri: "https://sdp.dev/plan.json",
+          status: "active",
+        }),
+      },
+      env
+    );
+
+    expect(planRes.status).toBe(201);
+    const planBody = (await planRes.json()) as {
+      data: {
+        subscriptionPlan: {
+          id: string;
+          ownerWalletId: string;
+          ownerAddress: string;
+          amount: string;
+          periodHours: number;
+          programPlanId: string;
+          planPda: string | null;
+          status: string;
+        };
+      };
+    };
+    expect(planBody.data.subscriptionPlan).toMatchObject({
+      ownerWalletId: TEST_WALLET_ID,
+      ownerAddress: TEST_SOLANA_ADDRESSES.wallet1,
+      amount: "25.00",
+      periodHours: 720,
+      status: "active",
+    });
+    expect(planBody.data.subscriptionPlan.programPlanId).toMatch(/^\d+$/);
+
+    createRpcMock.mockReturnValueOnce({
+      getTokenSupply: () => ({
+        send: async () => ({ value: { decimals: 6 } }),
+      }),
+    } as unknown as ReturnType<typeof solanaRpc.createRpc>);
+    const preparePlanRes = await app.request(
+      `/v1/payments/subscription-plans/${planBody.data.subscriptionPlan.id}/prepare-create`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+      },
+      env
+    );
+
+    expect(preparePlanRes.status).toBe(200);
+    const preparePlanBody = (await preparePlanRes.json()) as {
+      data: {
+        planPda: string;
+        subscriptionPlan: { planPda: string | null };
+        preparedTransaction: {
+          serialized: string;
+          blockhash: string;
+          lastValidBlockHeight: string;
+          requiredSigners: string[];
+        };
+      };
+    };
+    expect(preparePlanBody.data.planPda).toBeTruthy();
+    expect(preparePlanBody.data.subscriptionPlan.planPda).toBe(preparePlanBody.data.planPda);
+    expect(preparePlanBody.data.preparedTransaction.serialized).toBeTruthy();
+    expect(preparePlanBody.data.preparedTransaction.blockhash).toBe(
+      "EkSnNWid2cvwEVnVx9aBqawnmiCNiDgp3gUdkDPTKN1N"
+    );
+    expect(preparePlanBody.data.preparedTransaction.lastValidBlockHeight).toBe("1000");
+    expect(preparePlanBody.data.preparedTransaction.requiredSigners).toContain(
+      TEST_SOLANA_ADDRESSES.wallet1
+    );
+    expect(preparePlanBody.data.preparedTransaction.requiredSigners).toContain(
+      "7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"
+    );
+
+    const subscriptionRes = await app.request(
+      "/v1/payments/subscriptions",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          planId: planBody.data.subscriptionPlan.id,
+          counterpartyId,
+          subscriberAddress: TEST_SOLANA_ADDRESSES.wallet2,
+          status: "active",
+        }),
+      },
+      env
+    );
+
+    expect(subscriptionRes.status).toBe(201);
+    const subscriptionBody = (await subscriptionRes.json()) as {
+      data: {
+        subscription: {
+          id: string;
+          planId: string;
+          counterpartyId: string;
+          subscriberAddress: string;
+          status: string;
+          nextCollectionDueAt: string | null;
+        };
+      };
+    };
+    expect(subscriptionBody.data.subscription).toMatchObject({
+      planId: planBody.data.subscriptionPlan.id,
+      counterpartyId,
+      subscriberAddress: TEST_SOLANA_ADDRESSES.wallet2,
+      status: "active",
+    });
+    expect(subscriptionBody.data.subscription.nextCollectionDueAt).toBeTruthy();
+
+    const attemptRes = await app.request(
+      `/v1/payments/subscriptions/${subscriptionBody.data.subscription.id}/collection-attempts`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          metadata: { source: "unit-test" },
+        }),
+      },
+      env
+    );
+
+    expect(attemptRes.status).toBe(201);
+    const attemptBody = (await attemptRes.json()) as {
+      data: {
+        collectionAttempt: {
+          subscriptionId: string;
+          amount: string;
+          token: string;
+          status: string;
+          metadata: Record<string, unknown>;
+        };
+      };
+    };
+    expect(attemptBody.data.collectionAttempt).toMatchObject({
+      subscriptionId: subscriptionBody.data.subscription.id,
+      amount: "25.00",
+      token: DEVNET_USDC_MINT,
+      status: "pending",
+      metadata: { source: "unit-test" },
+    });
+
+    const counts = await getDb(env)
+      .prepare(
+        `SELECT
+           (SELECT COUNT(*)::int FROM payment_subscription_plans) AS plans,
+           (SELECT COUNT(*)::int FROM payment_subscriptions) AS subscriptions,
+           (SELECT COUNT(*)::int FROM payment_subscription_collection_attempts) AS attempts`
+      )
+      .first<{ plans: number; subscriptions: number; attempts: number }>();
+
+    expect(counts).toEqual({ plans: 1, subscriptions: 1, attempts: 1 });
   });
 
   it("falls back to a zero SOL balance when RPC balance lookups fail", async () => {

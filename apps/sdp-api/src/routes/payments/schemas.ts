@@ -76,6 +76,157 @@ const paymentAmountSchema = z
     message: "Amount must be greater than zero",
   });
 
+const recurringTimestampSchema = z.string().datetime({ offset: true });
+const u64StringSchema = z
+  .string()
+  .regex(/^\d+$/, { message: "Value must be an unsigned integer string" })
+  .refine((value) => {
+    try {
+      return BigInt(value) <= 18_446_744_073_709_551_615n;
+    } catch {
+      return false;
+    }
+  }, "Value must fit in an unsigned 64-bit integer");
+
+export const subscriptionPlanIdParamsSchema = z.object({
+  planId: z.string().min(1),
+});
+
+export const subscriptionIdParamsSchema = z.object({
+  subscriptionId: z.string().min(1),
+});
+
+export const paymentSubscriptionPlanStatusSchema = z.enum(["draft", "active", "archived"]);
+
+export const paymentSubscriptionStatusSchema = z.enum([
+  "pending_authorization",
+  "active",
+  "paused",
+  "canceling",
+  "canceled",
+  "expired",
+]);
+
+export const paymentSubscriptionCollectionAttemptStatusSchema = z.enum([
+  "pending",
+  "processing",
+  "confirmed",
+  "failed",
+  "skipped",
+]);
+
+export const createSubscriptionPlanSchema = z.object({
+  ownerWalletId: z.string().min(1),
+  token: paymentTokenSchema,
+  amount: paymentAmountSchema,
+  periodHours: z
+    .number()
+    .int()
+    .positive()
+    .max(24 * 365),
+  programPlanId: u64StringSchema.optional(),
+  planPda: solanaAddressSchema("planPda").optional(),
+  destinationAddress: solanaAddressSchema("destinationAddress").optional(),
+  pullerWalletId: z.string().min(1).optional(),
+  metadataUri: z.string().url().max(128).optional(),
+  status: paymentSubscriptionPlanStatusSchema.default("draft"),
+});
+
+export const updateSubscriptionPlanSchema = z
+  .object({
+    planPda: solanaAddressSchema("planPda").nullable().optional(),
+    destinationAddress: solanaAddressSchema("destinationAddress").nullable().optional(),
+    pullerWalletId: z.string().min(1).nullable().optional(),
+    metadataUri: z.string().url().max(128).nullable().optional(),
+    status: paymentSubscriptionPlanStatusSchema.optional(),
+  })
+  .refine((value) => Object.keys(value).length > 0, {
+    message: "At least one field must be provided",
+  });
+
+export const prepareSubscriptionPlanCreateSchema = z.object({
+  destinations: z.array(solanaAddressSchema("destinations entry")).max(4).optional(),
+  pullers: z.array(solanaAddressSchema("pullers entry")).max(4).optional(),
+  endTs: u64StringSchema.optional(),
+  metadataUri: z.string().url().max(128).optional(),
+});
+
+export const listSubscriptionPlansQuerySchema = z.object({
+  status: paymentSubscriptionPlanStatusSchema.optional(),
+  page: z.coerce.number().int().positive().default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(20),
+});
+
+export const createSubscriptionSchema = z.object({
+  planId: z.string().min(1),
+  counterpartyId: z.string().min(1),
+  subscriberAddress: solanaAddressSchema("subscriberAddress"),
+  subscriberTokenAccount: solanaAddressSchema("subscriberTokenAccount").optional(),
+  subscriptionPda: solanaAddressSchema("subscriptionPda").optional(),
+  subscriptionAuthorityAddress: solanaAddressSchema("subscriptionAuthorityAddress").optional(),
+  authorizationSignature: z.string().min(1).max(128).optional(),
+  status: paymentSubscriptionStatusSchema.default("pending_authorization"),
+  currentPeriodStartAt: recurringTimestampSchema.optional(),
+  nextCollectionDueAt: recurringTimestampSchema.optional(),
+});
+
+export const updateSubscriptionSchema = z
+  .object({
+    subscriberTokenAccount: solanaAddressSchema("subscriberTokenAccount").nullable().optional(),
+    subscriptionPda: solanaAddressSchema("subscriptionPda").nullable().optional(),
+    subscriptionAuthorityAddress: solanaAddressSchema("subscriptionAuthorityAddress")
+      .nullable()
+      .optional(),
+    authorizationSignature: z.string().min(1).max(128).nullable().optional(),
+    status: paymentSubscriptionStatusSchema.optional(),
+    currentPeriodStartAt: recurringTimestampSchema.nullable().optional(),
+    nextCollectionDueAt: recurringTimestampSchema.nullable().optional(),
+    cancelAt: recurringTimestampSchema.nullable().optional(),
+    canceledAt: recurringTimestampSchema.nullable().optional(),
+  })
+  .refine((value) => Object.keys(value).length > 0, {
+    message: "At least one field must be provided",
+  });
+
+export const prepareSubscriptionAuthorizationSchema = z.object({
+  subscriberTokenAccount: solanaAddressSchema("subscriberTokenAccount"),
+  expectedPlanCreatedAt: u64StringSchema,
+});
+
+export const prepareSubscriptionLifecycleSchema = z.object({});
+
+export const listSubscriptionsQuerySchema = z.object({
+  planId: z.string().min(1).optional(),
+  counterpartyId: z.string().min(1).optional(),
+  status: paymentSubscriptionStatusSchema.optional(),
+  dueBefore: recurringTimestampSchema.optional(),
+  page: z.coerce.number().int().positive().default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(20),
+});
+
+export const createSubscriptionCollectionAttemptSchema = z.object({
+  amount: paymentAmountSchema.optional(),
+  token: paymentTokenSchema.optional(),
+  dueAt: recurringTimestampSchema.optional(),
+  attemptedAt: recurringTimestampSchema.optional(),
+  status: paymentSubscriptionCollectionAttemptStatusSchema.default("pending"),
+  transferId: z.string().min(1).optional(),
+  signature: z.string().min(1).max(128).optional(),
+  error: z.string().min(1).max(2048).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
+});
+
+export const prepareSubscriptionCollectionSchema = z.object({
+  amount: paymentAmountSchema.optional(),
+  receiverTokenAccount: solanaAddressSchema("receiverTokenAccount"),
+});
+
+export const listSubscriptionCollectionAttemptsQuerySchema = z.object({
+  status: paymentSubscriptionCollectionAttemptStatusSchema.optional(),
+  page: z.coerce.number().int().positive().default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(20),
+});
+
 const magicBlockPrivateTransferOptionsSchema = z
   .object({
     validator: z.string().min(32).max(44).optional(),

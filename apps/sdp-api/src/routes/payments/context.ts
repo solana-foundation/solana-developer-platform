@@ -1,6 +1,6 @@
 import type { Address } from "@solana/kit";
 import type { Context } from "hono";
-import { createPaymentsRepository } from "@/db/repositories";
+import { createPaymentSubscriptionsRepository, createPaymentsRepository } from "@/db/repositories";
 import * as feePaymentAdapters from "@/services/adapters/fee-payment";
 import type { Env } from "@/types/env";
 
@@ -8,6 +8,10 @@ export type AppContext = Context<{ Bindings: Env }>;
 
 export function getPaymentsRepository(c: AppContext) {
   return createPaymentsRepository(c.env);
+}
+
+export function getPaymentSubscriptionsRepository(c: AppContext) {
+  return createPaymentSubscriptionsRepository(c.env);
 }
 
 export function getFeePayment(c: AppContext) {

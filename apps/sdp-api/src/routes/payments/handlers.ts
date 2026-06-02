@@ -8,4 +8,21 @@ export {
   listOnrampCurrencies,
   simulateSandboxTransfer,
 } from "./handlers/ramps";
+export {
+  createSubscription,
+  createSubscriptionCollectionAttempt,
+  createSubscriptionPlan,
+  getSubscription,
+  getSubscriptionPlan,
+  listSubscriptionCollectionAttempts,
+  listSubscriptionPlans,
+  listSubscriptions,
+  prepareCancelSubscription,
+  prepareCreateSubscriptionPlan,
+  prepareResumeSubscription,
+  prepareSubscriptionAuthorization,
+  prepareSubscriptionCollection,
+  updateSubscription,
+  updateSubscriptionPlan,
+} from "./handlers/subscriptions";
 export { createTransfer, getTransfer, listTransfers, prepareTransfer } from "./handlers/transfers";

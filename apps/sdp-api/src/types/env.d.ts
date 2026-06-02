@@ -170,6 +170,9 @@ export interface Env {
   MAGICBLOCK_PRIVATE_PAYMENTS_API_BASE_URL?: string;
   MAGICBLOCK_PRIVATE_PAYMENTS_AUTH_TOKEN?: string;
 
+  // Recurring payments backend feature flag
+  PAYMENTS_RECURRING_ENABLED?: string;
+
   // Compliance providers
   RANGE_API_KEY?: string;
   RANGE_API_BASE_URL?: string;

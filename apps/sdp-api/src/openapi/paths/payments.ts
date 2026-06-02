@@ -2,17 +2,31 @@ import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
 
 import {
   createOnrampQuoteRequestSchema,
+  createSubscriptionCollectionAttemptRequestSchema,
+  createSubscriptionPlanRequestSchema,
+  createSubscriptionRequestSchema,
   createTransferRequestSchema,
   errorResponseSchema,
   executeOfframpRequestSchema,
   executeOnrampRequestSchema,
+  paymentListSubscriptionCollectionAttemptsQuerySchema,
+  paymentListSubscriptionPlansQuerySchema,
+  paymentListSubscriptionsQuerySchema,
   paymentListTransfersQuerySchema,
   paymentOfframpCurrenciesQuerySchema,
   paymentOnrampCurrenciesQuerySchema,
+  paymentSubscriptionIdParamsSchema,
+  paymentSubscriptionPlanIdParamsSchema,
   paymentTransferIdParamsSchema,
   paymentWalletIdParamsSchema,
+  prepareSubscriptionAuthorizationRequestSchema,
+  prepareSubscriptionCollectionRequestSchema,
+  prepareSubscriptionLifecycleRequestSchema,
+  prepareSubscriptionPlanCreateRequestSchema,
   prepareTransferRequestSchema,
   simulateSandboxTransferRequestSchema,
+  updateSubscriptionPlanRequestSchema,
+  updateSubscriptionRequestSchema,
   updateWalletPolicyRequestSchema,
 } from "../schemas";
 import { errorResponses, jsonContent, projectScopeHeaders } from "./helpers";
@@ -22,6 +36,16 @@ import {
   onrampCurrenciesResponse,
   onrampExecutionResponse,
   onrampQuoteResponse,
+  paymentSubscriptionCollectionAttemptListResponse,
+  paymentSubscriptionCollectionAttemptResponse,
+  paymentSubscriptionListResponse,
+  paymentSubscriptionPlanListResponse,
+  paymentSubscriptionPlanResponse,
+  paymentSubscriptionResponse,
+  preparePaymentSubscriptionAuthorizationResponse,
+  preparePaymentSubscriptionCollectionResponse,
+  preparePaymentSubscriptionLifecycleResponse,
+  preparePaymentSubscriptionPlanResponse,
   prepareTransferResponse,
   sandboxTransferSimulationResponse,
   transferListResponse,
@@ -198,6 +222,372 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         content: jsonContent(transferResponse),
       },
       ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
+    },
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Recurring Subscriptions (feature-flagged)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/payments/subscription-plans",
+    tags: ["Payments"],
+    summary: "Create subscription plan",
+    operationId: "createPaymentSubscriptionPlan",
+    description:
+      "Creates a feature-flagged recurring-payment subscription plan record. This stores SDP backend state and Solana subscriptions program identifiers; it does not by itself create the on-chain plan.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      body: {
+        required: true,
+        content: jsonContent(createSubscriptionPlanRequestSchema),
+      },
+    },
+    responses: {
+      201: {
+        description: "Subscription plan created",
+        content: jsonContent(paymentSubscriptionPlanResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/payments/subscription-plans",
+    tags: ["Payments"],
+    summary: "List subscription plans",
+    operationId: "listPaymentSubscriptionPlans",
+    description: "Lists feature-flagged recurring-payment subscription plans.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      query: paymentListSubscriptionPlansQuerySchema,
+    },
+    responses: {
+      200: {
+        description: "Subscription plan list",
+        content: jsonContent(paymentSubscriptionPlanListResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/payments/subscription-plans/{planId}/prepare-create",
+    tags: ["Payments"],
+    summary: "Prepare subscription plan creation",
+    operationId: "preparePaymentSubscriptionPlanCreate",
+    description:
+      "Prepares an unsigned Solana subscriptions program create-plan transaction from an SDP subscription plan. This derives and stores the plan PDA but does not submit the transaction.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: paymentSubscriptionPlanIdParamsSchema,
+      body: {
+        required: false,
+        content: jsonContent(prepareSubscriptionPlanCreateRequestSchema),
+      },
+    },
+    responses: {
+      200: {
+        description: "Subscription plan creation prepared",
+        content: jsonContent(preparePaymentSubscriptionPlanResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/payments/subscription-plans/{planId}",
+    tags: ["Payments"],
+    summary: "Get subscription plan",
+    operationId: "getPaymentSubscriptionPlan",
+    description: "Retrieves a recurring-payment subscription plan record.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: paymentSubscriptionPlanIdParamsSchema,
+    },
+    responses: {
+      200: {
+        description: "Subscription plan",
+        content: jsonContent(paymentSubscriptionPlanResponse),
+      },
+      ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "patch",
+    path: "/v1/payments/subscription-plans/{planId}",
+    tags: ["Payments"],
+    summary: "Update subscription plan",
+    operationId: "updatePaymentSubscriptionPlan",
+    description: "Updates mutable subscription plan fields and on-chain identifiers.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: paymentSubscriptionPlanIdParamsSchema,
+      body: {
+        required: true,
+        content: jsonContent(updateSubscriptionPlanRequestSchema),
+      },
+    },
+    responses: {
+      200: {
+        description: "Subscription plan updated",
+        content: jsonContent(paymentSubscriptionPlanResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/payments/subscriptions",
+    tags: ["Payments"],
+    summary: "Create subscription",
+    operationId: "createPaymentSubscription",
+    description:
+      "Creates a feature-flagged recurring-payment subscription record tied to a counterparty. The customer must still sign the Solana subscription authorization transaction.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      body: {
+        required: true,
+        content: jsonContent(createSubscriptionRequestSchema),
+      },
+    },
+    responses: {
+      201: {
+        description: "Subscription created",
+        content: jsonContent(paymentSubscriptionResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/payments/subscriptions",
+    tags: ["Payments"],
+    summary: "List subscriptions",
+    operationId: "listPaymentSubscriptions",
+    description: "Lists recurring-payment subscriptions.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      query: paymentListSubscriptionsQuerySchema,
+    },
+    responses: {
+      200: {
+        description: "Subscription list",
+        content: jsonContent(paymentSubscriptionListResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/payments/subscriptions/{subscriptionId}/prepare-authorization",
+    tags: ["Payments"],
+    summary: "Prepare subscription authorization",
+    operationId: "preparePaymentSubscriptionAuthorization",
+    description:
+      "Prepares the subscriber-signed Solana transaction that initializes the subscription authority and subscribes to the plan. The transaction must still be signed and submitted by the client.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: paymentSubscriptionIdParamsSchema,
+      body: {
+        required: true,
+        content: jsonContent(prepareSubscriptionAuthorizationRequestSchema),
+      },
+    },
+    responses: {
+      200: {
+        description: "Subscription authorization prepared",
+        content: jsonContent(preparePaymentSubscriptionAuthorizationResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/payments/subscriptions/{subscriptionId}/prepare-cancel",
+    tags: ["Payments"],
+    summary: "Prepare subscription cancellation",
+    operationId: "preparePaymentSubscriptionCancel",
+    description:
+      "Prepares the subscriber-signed Solana transaction that cancels a subscription. The transaction must still be signed and submitted by the client.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: paymentSubscriptionIdParamsSchema,
+      body: {
+        required: false,
+        content: jsonContent(prepareSubscriptionLifecycleRequestSchema),
+      },
+    },
+    responses: {
+      200: {
+        description: "Subscription cancellation prepared",
+        content: jsonContent(preparePaymentSubscriptionLifecycleResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/payments/subscriptions/{subscriptionId}/prepare-resume",
+    tags: ["Payments"],
+    summary: "Prepare subscription resume",
+    operationId: "preparePaymentSubscriptionResume",
+    description:
+      "Prepares the subscriber-signed Solana transaction that resumes a canceled subscription before revocation. The transaction must still be signed and submitted by the client.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: paymentSubscriptionIdParamsSchema,
+      body: {
+        required: false,
+        content: jsonContent(prepareSubscriptionLifecycleRequestSchema),
+      },
+    },
+    responses: {
+      200: {
+        description: "Subscription resume prepared",
+        content: jsonContent(preparePaymentSubscriptionLifecycleResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/payments/subscriptions/{subscriptionId}/prepare-collection",
+    tags: ["Payments"],
+    summary: "Prepare subscription collection",
+    operationId: "preparePaymentSubscriptionCollection",
+    description:
+      "Prepares the collector-signed Solana subscriptions transfer transaction for an active subscription. The transaction must still be signed and submitted by the collector/fee-payer flow.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: paymentSubscriptionIdParamsSchema,
+      body: {
+        required: true,
+        content: jsonContent(prepareSubscriptionCollectionRequestSchema),
+      },
+    },
+    responses: {
+      200: {
+        description: "Subscription collection prepared",
+        content: jsonContent(preparePaymentSubscriptionCollectionResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/payments/subscriptions/{subscriptionId}",
+    tags: ["Payments"],
+    summary: "Get subscription",
+    operationId: "getPaymentSubscription",
+    description: "Retrieves a recurring-payment subscription record.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: paymentSubscriptionIdParamsSchema,
+    },
+    responses: {
+      200: {
+        description: "Subscription",
+        content: jsonContent(paymentSubscriptionResponse),
+      },
+      ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "patch",
+    path: "/v1/payments/subscriptions/{subscriptionId}",
+    tags: ["Payments"],
+    summary: "Update subscription",
+    operationId: "updatePaymentSubscription",
+    description: "Updates mutable subscription status and on-chain identifiers.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: paymentSubscriptionIdParamsSchema,
+      body: {
+        required: true,
+        content: jsonContent(updateSubscriptionRequestSchema),
+      },
+    },
+    responses: {
+      200: {
+        description: "Subscription updated",
+        content: jsonContent(paymentSubscriptionResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/payments/subscriptions/{subscriptionId}/collection-attempts",
+    tags: ["Payments"],
+    summary: "Create subscription collection attempt",
+    operationId: "createPaymentSubscriptionCollectionAttempt",
+    description:
+      "Creates a collection-attempt record for a due recurring-payment subscription. Actual Solana settlement is owned by the collection worker/transaction submitter.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: paymentSubscriptionIdParamsSchema,
+      body: {
+        required: true,
+        content: jsonContent(createSubscriptionCollectionAttemptRequestSchema),
+      },
+    },
+    responses: {
+      201: {
+        description: "Collection attempt created",
+        content: jsonContent(paymentSubscriptionCollectionAttemptResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/payments/subscriptions/{subscriptionId}/collection-attempts",
+    tags: ["Payments"],
+    summary: "List subscription collection attempts",
+    operationId: "listPaymentSubscriptionCollectionAttempts",
+    description: "Lists collection attempts for a recurring-payment subscription.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: paymentSubscriptionIdParamsSchema,
+      query: paymentListSubscriptionCollectionAttemptsQuerySchema,
+    },
+    responses: {
+      200: {
+        description: "Collection attempt list",
+        content: jsonContent(paymentSubscriptionCollectionAttemptListResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
     },
   });
 

@@ -1,19 +1,36 @@
 import { OFFRAMP_CRYPTO_RAILS, ONRAMP_CRYPTO_RAILS, RAMP_PROVIDERS } from "@sdp/types";
 import {
   createOnrampQuoteSchema as createOnrampQuoteSchemaBase,
+  createSubscriptionCollectionAttemptSchema as createSubscriptionCollectionAttemptSchemaBase,
+  createSubscriptionPlanSchema as createSubscriptionPlanSchemaBase,
+  createSubscriptionSchema as createSubscriptionSchemaBase,
   createTransferSchema as createTransferSchemaBase,
   executeOfframpSchema as executeOfframpSchemaBase,
   executeOnrampSchema as executeOnrampSchemaBase,
   listOfframpCurrenciesQuerySchema as listOfframpCurrenciesQuerySchemaBase,
   listOnrampCurrenciesQuerySchema as listOnrampCurrenciesQuerySchemaBase,
+  listSubscriptionCollectionAttemptsQuerySchema as listSubscriptionCollectionAttemptsQuerySchemaBase,
+  listSubscriptionPlansQuerySchema as listSubscriptionPlansQuerySchemaBase,
+  listSubscriptionsQuerySchema as listSubscriptionsQuerySchemaBase,
   listTransfersQuerySchema as listTransfersQuerySchemaBase,
+  paymentSubscriptionCollectionAttemptStatusSchema as paymentSubscriptionCollectionAttemptStatusSchemaBase,
+  paymentSubscriptionPlanStatusSchema as paymentSubscriptionPlanStatusSchemaBase,
+  paymentSubscriptionStatusSchema as paymentSubscriptionStatusSchemaBase,
+  prepareSubscriptionAuthorizationSchema as prepareSubscriptionAuthorizationSchemaBase,
+  prepareSubscriptionCollectionSchema as prepareSubscriptionCollectionSchemaBase,
+  prepareSubscriptionLifecycleSchema as prepareSubscriptionLifecycleSchemaBase,
+  prepareSubscriptionPlanCreateSchema as prepareSubscriptionPlanCreateSchemaBase,
   prepareTransferOptionsSchema as prepareTransferOptionsSchemaBase,
   prepareTransferSchema as prepareTransferSchemaBase,
   priorityFeeSchema as priorityFeeSchemaBase,
   simulateSandboxTransferSchema as simulateSandboxTransferSchemaBase,
+  subscriptionIdParamsSchema as subscriptionIdParamsSchemaBase,
+  subscriptionPlanIdParamsSchema as subscriptionPlanIdParamsSchemaBase,
   transferDirectionSchema as transferDirectionSchemaBase,
   transferIdParamsSchema as transferIdParamsSchemaBase,
   transferStatusSchema as transferStatusSchemaBase,
+  updateSubscriptionPlanSchema as updateSubscriptionPlanSchemaBase,
+  updateSubscriptionSchema as updateSubscriptionSchemaBase,
   updateWalletPolicySchema as updateWalletPolicySchemaBase,
   walletIdParamsSchema as walletIdParamsSchemaBase,
 } from "../../routes/payments/schemas";
@@ -469,6 +486,440 @@ export const prepareTransferResponseSchema = z
       .openapi({ description: "Optional transaction simulation result." }),
   })
   .openapi({ description: "Prepare transfer response payload." });
+
+export const paymentSubscriptionPlanStatusSchema = withOpenApi(
+  paymentSubscriptionPlanStatusSchemaBase,
+  {
+    description: "Subscription plan status.",
+    example: "active",
+  }
+);
+
+export const paymentSubscriptionStatusSchema = withOpenApi(paymentSubscriptionStatusSchemaBase, {
+  description: "Subscription status.",
+  example: "active",
+});
+
+export const paymentSubscriptionCollectionAttemptStatusSchema = withOpenApi(
+  paymentSubscriptionCollectionAttemptStatusSchemaBase,
+  {
+    description: "Collection attempt status.",
+    example: "pending",
+  }
+);
+
+export const paymentSubscriptionPlanIdParamsSchema = subscriptionPlanIdParamsSchemaBase
+  .extend({
+    planId: withOpenApi(subscriptionPlanIdParamsSchemaBase.shape.planId, {
+      description: "SDP subscription plan record ID.",
+      example: "psp_example",
+    }),
+  })
+  .openapi({ description: "Subscription plan path parameters." });
+
+export const paymentSubscriptionIdParamsSchema = subscriptionIdParamsSchemaBase
+  .extend({
+    subscriptionId: withOpenApi(subscriptionIdParamsSchemaBase.shape.subscriptionId, {
+      description: "SDP subscription record ID.",
+      example: "psub_example",
+    }),
+  })
+  .openapi({ description: "Subscription path parameters." });
+
+export const createSubscriptionPlanRequestSchema = createSubscriptionPlanSchemaBase
+  .extend({
+    ownerWalletId: withOpenApi(createSubscriptionPlanSchemaBase.shape.ownerWalletId, {
+      description: "Custody wallet that owns the Solana subscription plan.",
+      example: "wal_merchant",
+    }),
+    token: withOpenApi(createSubscriptionPlanSchemaBase.shape.token, {
+      description:
+        "Token mint address. Native SOL is not expected for program-backed subscriptions.",
+      example: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+    }),
+    amount: withOpenApi(createSubscriptionPlanSchemaBase.shape.amount, {
+      description: "Recurring charge amount in UI units.",
+      example: "25.00",
+    }),
+    periodHours: withOpenApi(createSubscriptionPlanSchemaBase.shape.periodHours, {
+      description: "Billing period length in hours.",
+      example: 720,
+    }),
+    programPlanId: withOpenApi(createSubscriptionPlanSchemaBase.shape.programPlanId, {
+      description:
+        "Unsigned 64-bit decimal program plan identifier used in the Solana subscriptions PDA seed. Defaults to a generated nonzero value.",
+      example: "17014118346046923173",
+    }),
+    planPda: withOpenApi(createSubscriptionPlanSchemaBase.shape.planPda, {
+      description: "On-chain plan PDA once created.",
+      example: "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
+    }),
+    destinationAddress: withOpenApi(createSubscriptionPlanSchemaBase.shape.destinationAddress, {
+      description: "Optional destination owner address allowed by the on-chain plan.",
+      example: "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
+    }),
+    pullerWalletId: withOpenApi(createSubscriptionPlanSchemaBase.shape.pullerWalletId, {
+      description: "Optional SDP custody wallet allowed to pull subscription payments.",
+      example: "wal_collector",
+    }),
+    metadataUri: withOpenApi(createSubscriptionPlanSchemaBase.shape.metadataUri, {
+      description: "Optional plan metadata URI.",
+      example: "https://example.com/subscriptions/monthly-usdc.json",
+    }),
+    status: paymentSubscriptionPlanStatusSchema.optional(),
+  })
+  .openapi({
+    description:
+      "Creates an SDP subscription plan record. Prepare the on-chain Solana subscriptions program transaction separately with the plan prepare endpoint.",
+  });
+
+export const updateSubscriptionPlanRequestSchema = updateSubscriptionPlanSchemaBase
+  .safeExtend({
+    planPda: withOpenApi(updateSubscriptionPlanSchemaBase.shape.planPda, {
+      description: "On-chain plan PDA, or null to clear it.",
+      example: "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
+    }),
+    destinationAddress: withOpenApi(updateSubscriptionPlanSchemaBase.shape.destinationAddress, {
+      description: "Destination owner address, or null to clear it.",
+    }),
+    pullerWalletId: withOpenApi(updateSubscriptionPlanSchemaBase.shape.pullerWalletId, {
+      description: "Collection wallet ID, or null to clear it.",
+      example: "wal_collector",
+    }),
+    metadataUri: withOpenApi(updateSubscriptionPlanSchemaBase.shape.metadataUri, {
+      description: "Plan metadata URI, or null to clear it.",
+    }),
+    status: paymentSubscriptionPlanStatusSchema.optional(),
+  })
+  .openapi({ description: "Updates mutable SDP subscription plan fields." });
+
+export const paymentListSubscriptionPlansQuerySchema = listSubscriptionPlansQuerySchemaBase
+  .extend({
+    status: paymentSubscriptionPlanStatusSchema.optional(),
+  })
+  .openapi({ description: "Subscription plan list filters." });
+
+export const paymentSubscriptionPlanSchema = z
+  .object({
+    id: z.string().openapi({ description: "SDP subscription plan ID.", example: "psp_example" }),
+    organizationId: orgIdParamSchema,
+    projectId: projectIdParamSchema,
+    ownerWalletId: walletIdParamSchema,
+    ownerAddress: solanaAddressSchema,
+    token: z.string().openapi({ description: "Token mint or normalized token identifier." }),
+    amount: tokenAmountSchema,
+    periodHours: z.number().int().positive().openapi({ example: 720 }),
+    programPlanId: z.string().openapi({
+      description: "Unsigned 64-bit decimal program plan identifier used in PDA derivation.",
+      example: "17014118346046923173",
+    }),
+    planPda: solanaAddressSchema.nullable().openapi({ description: "On-chain plan PDA." }),
+    destinationAddress: solanaAddressSchema
+      .nullable()
+      .openapi({ description: "Allowed destination owner address." }),
+    pullerWalletId: walletIdParamSchema.nullable().openapi({ description: "Collector wallet ID." }),
+    pullerAddress: solanaAddressSchema
+      .nullable()
+      .openapi({ description: "Collector wallet address." }),
+    metadataUri: z.string().nullable().openapi({ description: "Optional plan metadata URI." }),
+    status: paymentSubscriptionPlanStatusSchema,
+    createdBy: z.string().nullable().openapi({ description: "Creator user ID or API key ID." }),
+    createdAt: isoDateTimeSchema,
+    updatedAt: isoDateTimeSchema,
+  })
+  .openapi({ description: "Recurring payment subscription plan record." });
+
+export const paymentSubscriptionPlanResponseSchema = z
+  .object({
+    subscriptionPlan: paymentSubscriptionPlanSchema,
+  })
+  .openapi({ description: "Subscription plan response payload." });
+
+export const preparedSubscriptionTransactionSchema = preparedTransactionSchema
+  .extend({
+    requiredSigners: z.array(solanaAddressSchema).openapi({
+      description:
+        "Addresses that must sign the prepared transaction. This includes the sponsored fee payer when the transaction uses one.",
+    }),
+  })
+  .openapi({
+    description: "Unsigned Solana subscriptions transaction payload for client-side signing.",
+  });
+
+export const prepareSubscriptionPlanCreateRequestSchema = prepareSubscriptionPlanCreateSchemaBase
+  .extend({
+    destinations: withOpenApi(prepareSubscriptionPlanCreateSchemaBase.shape.destinations, {
+      description:
+        "Allowed destination addresses for the on-chain plan. Defaults to the stored plan destination.",
+    }),
+    pullers: withOpenApi(prepareSubscriptionPlanCreateSchemaBase.shape.pullers, {
+      description:
+        "Allowed puller addresses for the on-chain plan. Defaults to the stored puller or owner address.",
+    }),
+    endTs: withOpenApi(prepareSubscriptionPlanCreateSchemaBase.shape.endTs, {
+      description: "Optional unsigned 64-bit Unix timestamp when the on-chain plan ends.",
+      example: "1770000000",
+    }),
+    metadataUri: withOpenApi(prepareSubscriptionPlanCreateSchemaBase.shape.metadataUri, {
+      description: "Optional metadata URI to embed in the on-chain plan.",
+      example: "https://example.com/subscriptions/monthly-usdc.json",
+    }),
+  })
+  .openapi({
+    description:
+      "Optional overrides used when preparing the Solana subscriptions create-plan transaction.",
+  });
+
+export const preparePaymentSubscriptionPlanResponseSchema = z
+  .object({
+    subscriptionPlan: paymentSubscriptionPlanSchema,
+    planPda: solanaAddressSchema.openapi({
+      description: "Derived Solana subscriptions plan PDA.",
+    }),
+    preparedTransaction: preparedSubscriptionTransactionSchema,
+  })
+  .openapi({ description: "Prepared Solana subscriptions create-plan response payload." });
+
+export const paymentSubscriptionPlanListResponseSchema = z
+  .object({
+    subscriptionPlans: z.array(paymentSubscriptionPlanSchema),
+    total: z.number().int(),
+    page: z.number().int(),
+    pageSize: z.number().int(),
+  })
+  .openapi({ description: "Subscription plan list response payload." });
+
+export const createSubscriptionRequestSchema = createSubscriptionSchemaBase
+  .extend({
+    planId: withOpenApi(createSubscriptionSchemaBase.shape.planId, {
+      description: "SDP subscription plan ID.",
+      example: "psp_example",
+    }),
+    counterpartyId: withOpenApi(createSubscriptionSchemaBase.shape.counterpartyId, {
+      description: "Counterparty being billed for the recurring payment.",
+      example: "counterparty_example",
+    }),
+    subscriberAddress: withOpenApi(createSubscriptionSchemaBase.shape.subscriberAddress, {
+      description: "Customer wallet address that authorizes the subscription.",
+      example: "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
+    }),
+    subscriberTokenAccount: withOpenApi(createSubscriptionSchemaBase.shape.subscriberTokenAccount, {
+      description: "Optional subscriber token account address.",
+    }),
+    subscriptionPda: withOpenApi(createSubscriptionSchemaBase.shape.subscriptionPda, {
+      description: "On-chain subscription PDA once created.",
+    }),
+    subscriptionAuthorityAddress: withOpenApi(
+      createSubscriptionSchemaBase.shape.subscriptionAuthorityAddress,
+      {
+        description: "Subscription authority PDA/address once initialized.",
+      }
+    ),
+    authorizationSignature: withOpenApi(createSubscriptionSchemaBase.shape.authorizationSignature, {
+      description: "Signature for the customer authorization transaction.",
+      example: "sig_example",
+    }),
+    status: paymentSubscriptionStatusSchema.optional(),
+  })
+  .openapi({
+    description:
+      "Creates an SDP subscription record tied to a counterparty. The customer must still sign the Solana subscription authorization flow.",
+  });
+
+export const updateSubscriptionRequestSchema = updateSubscriptionSchemaBase
+  .safeExtend({
+    status: paymentSubscriptionStatusSchema.optional(),
+  })
+  .openapi({ description: "Updates mutable subscription state and on-chain identifiers." });
+
+export const paymentListSubscriptionsQuerySchema = listSubscriptionsQuerySchemaBase
+  .extend({
+    status: paymentSubscriptionStatusSchema.optional(),
+  })
+  .openapi({ description: "Subscription list filters." });
+
+export const paymentSubscriptionSchema = z
+  .object({
+    id: z.string().openapi({ description: "SDP subscription ID.", example: "psub_example" }),
+    organizationId: orgIdParamSchema,
+    projectId: projectIdParamSchema,
+    planId: z.string().openapi({ description: "SDP subscription plan ID." }),
+    counterpartyId: z.string().openapi({ description: "Counterparty ID." }),
+    subscriberAddress: solanaAddressSchema,
+    subscriberTokenAccount: solanaAddressSchema
+      .nullable()
+      .openapi({ description: "Subscriber token account address." }),
+    subscriptionPda: solanaAddressSchema
+      .nullable()
+      .openapi({ description: "On-chain subscription PDA." }),
+    subscriptionAuthorityAddress: solanaAddressSchema
+      .nullable()
+      .openapi({ description: "On-chain subscription authority address." }),
+    authorizationSignature: z
+      .string()
+      .nullable()
+      .openapi({ description: "Customer authorization transaction signature." }),
+    status: paymentSubscriptionStatusSchema,
+    currentPeriodStartAt: isoDateTimeSchema.nullable(),
+    nextCollectionDueAt: isoDateTimeSchema.nullable(),
+    cancelAt: isoDateTimeSchema.nullable(),
+    canceledAt: isoDateTimeSchema.nullable(),
+    createdBy: z.string().nullable(),
+    createdAt: isoDateTimeSchema,
+    updatedAt: isoDateTimeSchema,
+  })
+  .openapi({ description: "Recurring payment subscription record." });
+
+export const paymentSubscriptionResponseSchema = z
+  .object({
+    subscription: paymentSubscriptionSchema,
+  })
+  .openapi({ description: "Subscription response payload." });
+
+export const prepareSubscriptionAuthorizationRequestSchema =
+  prepareSubscriptionAuthorizationSchemaBase
+    .extend({
+      subscriberTokenAccount: withOpenApi(
+        prepareSubscriptionAuthorizationSchemaBase.shape.subscriberTokenAccount,
+        {
+          description:
+            "Subscriber token account that authorizes the subscription authority delegation.",
+          example: "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
+        }
+      ),
+      expectedPlanCreatedAt: withOpenApi(
+        prepareSubscriptionAuthorizationSchemaBase.shape.expectedPlanCreatedAt,
+        {
+          description:
+            "Unsigned 64-bit created-at timestamp from the on-chain plan terms that the subscriber consents to.",
+          example: "0",
+        }
+      ),
+    })
+    .openapi({
+      description:
+        "Inputs for preparing the subscriber-signed Solana subscription authorization transaction.",
+    });
+
+export const prepareSubscriptionLifecycleRequestSchema =
+  prepareSubscriptionLifecycleSchemaBase.openapi({
+    description:
+      "Empty request body for preparing subscriber-signed subscription lifecycle transactions.",
+  });
+
+export const preparePaymentSubscriptionAuthorizationResponseSchema = z
+  .object({
+    subscription: paymentSubscriptionSchema,
+    subscriptionPda: solanaAddressSchema.openapi({
+      description: "Derived subscription delegation PDA.",
+    }),
+    subscriptionAuthorityAddress: solanaAddressSchema.openapi({
+      description: "Derived subscription authority PDA.",
+    }),
+    preparedTransaction: preparedSubscriptionTransactionSchema,
+  })
+  .openapi({ description: "Prepared subscription authorization response payload." });
+
+export const preparePaymentSubscriptionLifecycleResponseSchema = z
+  .object({
+    subscription: paymentSubscriptionSchema,
+    preparedTransaction: preparedSubscriptionTransactionSchema,
+  })
+  .openapi({ description: "Prepared subscription lifecycle response payload." });
+
+export const paymentSubscriptionListResponseSchema = z
+  .object({
+    subscriptions: z.array(paymentSubscriptionSchema),
+    total: z.number().int(),
+    page: z.number().int(),
+    pageSize: z.number().int(),
+  })
+  .openapi({ description: "Subscription list response payload." });
+
+export const createSubscriptionCollectionAttemptRequestSchema =
+  createSubscriptionCollectionAttemptSchemaBase
+    .extend({
+      status: paymentSubscriptionCollectionAttemptStatusSchema.optional(),
+    })
+    .openapi({
+      description:
+        "Creates a collection-attempt record for a due subscription. This endpoint records backend state; the collection worker/Solana transaction submitter owns actual settlement.",
+    });
+
+export const paymentListSubscriptionCollectionAttemptsQuerySchema =
+  listSubscriptionCollectionAttemptsQuerySchemaBase
+    .extend({
+      status: paymentSubscriptionCollectionAttemptStatusSchema.optional(),
+    })
+    .openapi({ description: "Collection attempt list filters." });
+
+export const paymentSubscriptionCollectionAttemptSchema = z
+  .object({
+    id: z.string().openapi({ description: "Collection attempt ID.", example: "psca_example" }),
+    organizationId: orgIdParamSchema,
+    projectId: projectIdParamSchema,
+    subscriptionId: z.string().openapi({ description: "Subscription ID." }),
+    transferId: transferIdParamSchema
+      .nullable()
+      .openapi({ description: "Payment transfer record ID when linked." }),
+    token: z.string().openapi({ description: "Token mint or normalized token identifier." }),
+    amount: tokenAmountSchema,
+    dueAt: isoDateTimeSchema,
+    attemptedAt: isoDateTimeSchema.nullable(),
+    status: paymentSubscriptionCollectionAttemptStatusSchema,
+    signature: z.string().nullable().openapi({ description: "Solana transaction signature." }),
+    error: z.string().nullable().openapi({ description: "Collection error, if any." }),
+    metadata: z.record(z.string(), z.unknown()).openapi({
+      description: "Provider/job metadata for the attempt.",
+    }),
+    createdAt: isoDateTimeSchema,
+    updatedAt: isoDateTimeSchema,
+  })
+  .openapi({ description: "Recurring payment collection attempt record." });
+
+export const paymentSubscriptionCollectionAttemptResponseSchema = z
+  .object({
+    collectionAttempt: paymentSubscriptionCollectionAttemptSchema,
+  })
+  .openapi({ description: "Collection attempt response payload." });
+
+export const prepareSubscriptionCollectionRequestSchema = prepareSubscriptionCollectionSchemaBase
+  .extend({
+    amount: withOpenApi(prepareSubscriptionCollectionSchemaBase.shape.amount, {
+      description:
+        "Optional override amount in UI units. Defaults to the subscription plan amount.",
+      example: "25.00",
+    }),
+    receiverTokenAccount: withOpenApi(
+      prepareSubscriptionCollectionSchemaBase.shape.receiverTokenAccount,
+      {
+        description:
+          "Receiver token account for the pulled subscription payment. It must be allowed by the on-chain plan.",
+        example: "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
+      }
+    ),
+  })
+  .openapi({
+    description:
+      "Inputs for preparing the collector-signed Solana subscriptions transfer transaction.",
+  });
+
+export const preparePaymentSubscriptionCollectionResponseSchema = z
+  .object({
+    subscription: paymentSubscriptionSchema,
+    preparedTransaction: preparedSubscriptionTransactionSchema,
+    collectionAttempt: paymentSubscriptionCollectionAttemptSchema.optional(),
+  })
+  .openapi({ description: "Prepared subscription collection response payload." });
+
+export const paymentSubscriptionCollectionAttemptListResponseSchema = z
+  .object({
+    collectionAttempts: z.array(paymentSubscriptionCollectionAttemptSchema),
+    total: z.number().int(),
+    page: z.number().int(),
+    pageSize: z.number().int(),
+  })
+  .openapi({ description: "Collection attempt list response payload." });
 
 export const executeOnrampRequestSchema = executeOnrampSchemaBase
   .extend({
