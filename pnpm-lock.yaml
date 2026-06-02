@@ -34,7 +34,7 @@ overrides:
 
 patchedDependencies:
   '@solana/mosaic-sdk@0.1.1':
-    hash: 6cb24c33f8ecfce58f37225685a03363c57f58d9a04b2aecc20d09d2bb5d8618
+    hash: 713795eed594ee59e04c290ad96c093fa8b6b0f835b2dfedc64679892461423d
     path: patches/@solana__mosaic-sdk@0.1.1.patch
 
 importers:
@@ -112,7 +112,7 @@ importers:
         version: 0.2.1(@solana-program/compute-budget@0.14.0(@solana/kit@6.8.0(typescript@6.0.3)))(@solana-program/token@0.12.0(@solana/kit@6.8.0(typescript@6.0.3)))(@solana/kit-plugin-instruction-plan@0.6.0(@solana/kit@6.8.0(typescript@6.0.3)))(@solana/kit-plugin-payer@0.6.0(@solana/kit@6.8.0(typescript@6.0.3)))(@solana/kit-plugin-rpc@0.6.0(@solana/kit@6.8.0(typescript@6.0.3)))(@solana/kit@6.8.0(typescript@6.0.3))
       '@solana/mosaic-sdk':
         specifier: 'catalog:'
-        version: 0.1.1(patch_hash=6cb24c33f8ecfce58f37225685a03363c57f58d9a04b2aecc20d09d2bb5d8618)(typescript@6.0.3)
+        version: 0.1.1(patch_hash=713795eed594ee59e04c290ad96c093fa8b6b0f835b2dfedc64679892461423d)(typescript@6.0.3)
       '@solana/signers':
         specifier: 'catalog:'
         version: 6.8.0(typescript@6.0.3)
@@ -10432,7 +10432,7 @@ snapshots:
       '@solana/kit-plugin-payer': 0.6.0(@solana/kit@6.8.0(typescript@6.0.3))
       '@solana/kit-plugin-rpc': 0.6.0(@solana/kit@6.8.0(typescript@6.0.3))
 
-  '@solana/mosaic-sdk@0.1.1(patch_hash=6cb24c33f8ecfce58f37225685a03363c57f58d9a04b2aecc20d09d2bb5d8618)(typescript@6.0.3)':
+  '@solana/mosaic-sdk@0.1.1(patch_hash=713795eed594ee59e04c290ad96c093fa8b6b0f835b2dfedc64679892461423d)(typescript@6.0.3)':
     dependencies:
       '@solana-program/memo': 0.10.0(@solana/kit@5.5.1(typescript@6.0.3))
       '@solana-program/system': 0.10.0(@solana/kit@5.5.1(typescript@6.0.3))

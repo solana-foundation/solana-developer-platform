@@ -16,7 +16,10 @@ here instead.
 Hunks
 -----
 This list is exhaustive — keep it in sync with the .patch file. The patch
-currently touches 11 files, grouped below.
+currently touches 13 files, grouped below. (stablecoin and tokenized-security
+each receive two independent changes — see the defaultAccountState and
+fee-payer/authority sections — so the numbered hunks below exceed the file
+count.)
 
 Payer plumbing (Kora-style fee sponsorship):
 
@@ -64,3 +67,24 @@ Allowlist defaultAccountState:
     Initialized and the permissionless-thaw step has nothing to thaw.
 
 11. dist/templates/tokenized-security.js — same defaultAccountState fix.
+
+Fee-payer / authority decoupling for sRFC-37 deploys (Kora fee sponsorship):
+The unpatched sRFC-37 template branch uses `feePayerSigner` as the on-chain
+authority for the Token-ACL/ABL setup AND silently emits no setup at all unless
+`feePayer === mintAuthority`. That makes it impossible for a sponsored fee payer
+(e.g. Kora) to deploy a control-list token: pass a distinct fee payer and you
+get a bare mint with no list/config and no error. These hunks relax the guard to
+`if (!useSrfc37)` and split the two roles — the on-chain authority stays the mint
+authority (custody) so the derived list/config PDAs match and later
+custody-signed mutations (addToList, thaw) succeed, while account creation is
+funded from the fee payer via `payer`. setGatingProgram / enablePermissionlessThaw
+create no accounts, so they take only the authority. Applies to ALL FOUR
+templates: for stablecoin (#10) and tokenized-security (#11) it is a second hunk
+in the same file; arcade-token and custom-token are in the patch solely for this
+change. See the upstream issue draft (mosaic-sdk) tracking a proper fix.
+
+12. dist/templates/arcade-token.js — relax the `mintAuthority === feePayer`
+    guard to `!useSrfc37`; set the Token-ACL/ABL setup authority to the mint
+    authority signer and fund account creation from the fee payer (`payer`).
+
+13. dist/templates/custom-token.js — same fee-payer/authority decoupling.

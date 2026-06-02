@@ -169,13 +169,11 @@ export class MosaicService {
       enableSrfc37
     );
 
-    // sRFC-37 setup must be in the same tx as mint creation, and mosaic-sdk
-    // only emits those instructions when mintAuthority === feePayer. Custody is
-    // the mint authority, so for sRFC-37 deploys we skip Kora and have custody
-    // pay directly. Plain (non-sRFC-37) deploys still use Kora when configured.
-    const result = await this.signAndSubmitWithMintKeypair(fullTx, mintKeypair, {
-      bypassFeePayment: enableSrfc37,
-    });
+    // Both plain and sRFC-37 deploys go through Kora when configured. The
+    // patched mosaic-sdk templates emit the on-chain Token-ACL/ABL setup with a
+    // payer (Kora) distinct from the authority (custody), so we no longer bypass
+    // fee payment to keep mintAuthority === feePayer.
+    const result = await this.signAndSubmitWithMintKeypair(fullTx, mintKeypair);
 
     let listAddress: Address | undefined;
     if (enableSrfc37) {
@@ -220,12 +218,11 @@ export class MosaicService {
     aclMode: "allowlist" | "blocklist",
     enableSrfc37: boolean
   ): Promise<FullTransaction> {
-    // Resolve fee payer - use Kora if available, otherwise from options.
-    // sRFC-37 is the exception: the mosaic-sdk template only emits the on-chain
-    // ABL/TACL setup instructions when mintAuthority === feePayer, so we must
-    // pay with custody for that path or the list silently never gets created.
-    const feePayer =
-      this.feePayment && !enableSrfc37 ? await this.feePayment.getFeePayer() : options.feePayer;
+    // Resolve fee payer - use Kora if available, otherwise from options. This
+    // applies to sRFC-37 deploys too: the patched mosaic-sdk templates fund the
+    // on-chain ABL/TACL setup from the fee payer (Kora) while keeping the mint
+    // authority (custody) as the on-chain authority, so the two can differ.
+    const feePayer = this.feePayment ? await this.feePayment.getFeePayer() : options.feePayer;
     const mintAuthority =
       typeof options.mintAuthority === "string" && options.mintAuthority === this.signer.address
         ? this.signer
