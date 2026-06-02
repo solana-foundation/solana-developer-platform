@@ -1,7 +1,14 @@
 import { parseFiatCurrency } from "@sdp/types/payment-rails";
+import { AppError } from "@/lib/errors";
 import { createProviderRampSupport, isSolanaCryptoAsset, SOLANA_ASSET_TO_RAIL } from "../common";
 import { RAMP_RAIL_DUMPS } from "../constants";
-import type { ProviderRampSupport, RampDumpReader, RampProviderClient } from "../types";
+import type {
+  ProviderRampSupport,
+  RampDumpReader,
+  RampProviderClient,
+  RampWebhookValidationContext,
+  RampWebhookValidationResult,
+} from "../types";
 
 interface BvnkCurrencyEntry {
   code?: string;
@@ -93,5 +100,13 @@ export class BvnkRampClient implements RampProviderClient {
       await readDump<readonly BvnkCurrencyEntry[]>(RAMP_RAIL_DUMPS.bvnk.fiatAnon.file),
       await readDump<readonly BvnkCurrencyEntry[]>(RAMP_RAIL_DUMPS.bvnk.cryptoAnon.file)
     );
+  }
+
+  async validateWebhook(
+    _context: RampWebhookValidationContext
+  ): Promise<RampWebhookValidationResult> {
+    throw new AppError("PROVIDER_NOT_CONFIGURED", "BVNK webhook validation is not implemented", {
+      provider: this.id,
+    });
   }
 }

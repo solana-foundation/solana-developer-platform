@@ -1,3 +1,4 @@
+import type { SdpEnvironment } from "@sdp/types";
 import type { CryptoRailId, FiatCurrencyCode } from "@sdp/types/payment-rails";
 import type { RampProviderId } from "@sdp/types/provider-access";
 
@@ -36,8 +37,22 @@ export interface RampDiscoveryContext {
   writeDump: RampDumpWriter;
 }
 
+export interface RampWebhookValidationContext {
+  env: Record<string, string | undefined>;
+  environment: SdpEnvironment;
+  headers: Headers;
+  rawBody: string;
+  requestUrl?: string;
+}
+
+export interface RampWebhookValidationResult {
+  provider: RampProviderId;
+  payload: unknown;
+}
+
 export interface RampProviderClient {
   id: RampProviderId;
   _discoverRails(context: RampDiscoveryContext): Promise<void>;
   readRailSupport(readDump: RampDumpReader): Promise<ProviderRampSupport>;
+  validateWebhook(context: RampWebhookValidationContext): Promise<RampWebhookValidationResult>;
 }

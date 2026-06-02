@@ -195,7 +195,7 @@ function ManualInstructionsQuote({
   const [activeTab, setActiveTab] = useState<"instructions" | "summary">("instructions");
 
   return (
-    <div className="h-[480px] space-y-6 overflow-y-auto">
+    <div className="max-h-[70vh] space-y-6 overflow-y-auto">
       <div className="flex items-start gap-3">
         <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-border-extra-light text-text-extra-high">
           <LandmarkIcon className="size-5" />

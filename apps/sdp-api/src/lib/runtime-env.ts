@@ -110,6 +110,14 @@ const PROCESS_ENV_FALLBACK_KEYS = [
   "DISABLE_CRON",
 ] as const satisfies readonly (keyof Env)[];
 
+const fallbackKeys = new Set<string>(PROCESS_ENV_FALLBACK_KEYS);
+
+export function registerFallbackKeys(...keys: string[]): void {
+  for (const key of keys) {
+    fallbackKeys.add(key);
+  }
+}
+
 export type SdpDeploymentMode = "managed" | "self_hosted";
 
 const VALID_DEPLOYMENT_MODES: ReadonlySet<string> = new Set<SdpDeploymentMode>([
@@ -180,9 +188,10 @@ export function withProcessEnvFallback(bindings: Env): Env {
   }
 
   let merged: Env | null = null;
+  const source = bindings as unknown as Record<string, unknown>;
 
-  for (const key of PROCESS_ENV_FALLBACK_KEYS) {
-    if (bindings[key] !== undefined) {
+  for (const key of fallbackKeys) {
+    if (source[key] !== undefined) {
       continue;
     }
 
