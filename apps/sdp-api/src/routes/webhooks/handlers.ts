@@ -64,8 +64,8 @@ function readString(value: unknown): string | null {
 }
 
 function parseRampWebhookProvider(value: string | undefined): WebhookRampProvider {
-  if (value === "bvnk" || value === "lightspark" || value === "moonpay") {
-    return value;
+  if (value !== undefined && Object.hasOwn(RAMP_PROVIDER_CLIENTS, value)) {
+    return value as WebhookRampProvider;
   }
 
   throw badRequest("Unsupported ramp webhook provider");
