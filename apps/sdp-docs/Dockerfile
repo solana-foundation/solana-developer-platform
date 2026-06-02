@@ -18,6 +18,7 @@ COPY pnpm-lock.yaml pnpm-workspace.yaml package.json tsconfig.json ./
 COPY apps/sdp-docs/package.json ./apps/sdp-docs/
 COPY apps/sdp-api/package.json ./apps/sdp-api/
 COPY packages/sdp-types/package.json ./packages/sdp-types/
+COPY packages/sdp-env-config/package.json ./packages/sdp-env-config/
 COPY patches ./patches
 
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
@@ -30,6 +31,7 @@ COPY --from=deps /repo /repo
 COPY apps/sdp-docs ./apps/sdp-docs
 COPY apps/sdp-api ./apps/sdp-api
 COPY packages/sdp-types ./packages/sdp-types
+COPY packages/sdp-env-config ./packages/sdp-env-config
 
 # These are parsed as URLs at build time, so the placeholder defaults are valid
 # URLs whose origin docker/entrypoint.sh swaps for runtime env at container start.

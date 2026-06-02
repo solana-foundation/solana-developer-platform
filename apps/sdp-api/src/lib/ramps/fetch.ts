@@ -1,0 +1,66 @@
+import type { RampProviderId } from "@sdp/types/provider-access";
+import { AppError, type ErrorCode } from "@/lib/errors";
+
+export interface ProviderRequestInit<TBody> {
+  method: "GET" | "POST";
+  headers?: HeadersInit;
+  body?: TBody;
+}
+
+export function classifyProviderStatus(status: number): ErrorCode {
+  if (status === 409) return "CONFLICT";
+  if (status === 429) return "RATE_LIMITED";
+  if (status >= 500) return "PROVIDER_UNAVAILABLE";
+  return "BAD_REQUEST";
+}
+
+export function extractProviderErrorMessage(payload: unknown, fallback: string): string {
+  if (!payload || typeof payload !== "object") return fallback;
+  const record = payload as { error?: { message?: unknown }; message?: unknown; reason?: unknown };
+  const message = record.error?.message ?? record.message ?? record.reason;
+  return typeof message === "string" && message.trim() ? message : fallback;
+}
+
+export async function providerFetchJson<TResponse, TBody = never>(
+  provider: RampProviderId,
+  url: string,
+  init: ProviderRequestInit<TBody>
+): Promise<TResponse> {
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: init.method,
+      headers: { "Content-Type": "application/json", ...init.headers },
+      body: init.body === undefined ? undefined : JSON.stringify(init.body),
+    });
+  } catch {
+    throw new AppError("PROVIDER_UNAVAILABLE", `Failed to reach the ${provider} API`, { provider });
+  }
+
+  const raw = await response.text();
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    parsed = undefined;
+  }
+
+  if (!response.ok) {
+    throw new AppError(
+      classifyProviderStatus(response.status),
+      extractProviderErrorMessage(
+        parsed,
+        `${provider} request failed with status ${response.status}`
+      ),
+      { provider, providerStatus: response.status }
+    );
+  }
+
+  if (parsed === undefined) {
+    throw new AppError("PROVIDER_UNAVAILABLE", `${provider} returned an unparseable response`, {
+      provider,
+    });
+  }
+
+  return parsed as TResponse;
+}

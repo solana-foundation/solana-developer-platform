@@ -326,6 +326,44 @@ async function seedWalletPolicy(params: {
   ]);
 }
 
+async function seedCounterparty(params?: {
+  id?: string;
+  externalId?: string | null;
+}): Promise<string> {
+  const id = params?.id ?? `counterparty_${crypto.randomUUID()}`;
+  await getDb(env)
+    .prepare(
+      `INSERT INTO counterparties (
+         id,
+         organization_id,
+         project_id,
+         external_id,
+         entity_type,
+         display_name,
+         email,
+         identity,
+         provider_data,
+         status,
+         created_by
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)`
+    )
+    .bind(
+      id,
+      TEST_ORG.id,
+      TEST_PROJECT.id,
+      params?.externalId ?? null,
+      "individual",
+      "MoonPay Test Counterparty",
+      "moonpay-counterparty@example.com",
+      {},
+      {},
+      TEST_USER.id
+    )
+    .run();
+
+  return id;
+}
+
 describe("Payments routes", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
@@ -689,6 +727,61 @@ describe("Payments routes", () => {
     expect(redirect.searchParams.get("redirectURL")).toBe("https://example.com/onramp-done");
     expect(redirect.searchParams.get(MOONPAY_PARAM_EXTERNAL_CUSTOMER_ID)).toBe("kyc_ref_123");
     assertMoonPaySignature(redirect);
+  });
+
+  it("creates a hosted MoonPay on-ramp quote URL", async () => {
+    const counterpartyId = await seedCounterparty({ externalId: "moonpay_user_123" });
+
+    const res = await app.request(
+      "/v1/payments/ramps/onramp/quote",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          provider: "moonpay",
+          counterpartyId,
+          destinationWallet: TEST_WALLET_ID,
+          cryptoToken: "USDC",
+          fiatCurrency: "USD",
+          fiatAmount: "120.50",
+          redirectUrl: "https://example.com/onramp-done",
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      data: {
+        quote: {
+          id: string;
+          provider: string;
+          status: string;
+          deliveryMode: string;
+          hostedUrl: string;
+        };
+      };
+    };
+
+    expect(body.data.quote.id.startsWith("ramp_quote_")).toBe(true);
+    expect(body.data.quote.provider).toBe("moonpay");
+    expect(body.data.quote.status).toBe("pending");
+    expect(body.data.quote.deliveryMode).toBe("hosted");
+
+    const hostedUrl = new URL(body.data.quote.hostedUrl);
+    expect(hostedUrl.origin).toBe(TEST_MOONPAY_ONRAMP_URL);
+    expect(hostedUrl.searchParams.get("apiKey")).toBe(TEST_MOONPAY_API_KEY);
+    expect(hostedUrl.searchParams.get("baseCurrencyCode")).toBe("usd");
+    expect(hostedUrl.searchParams.get(MOONPAY_PARAM_BASE_CURRENCY_AMOUNT)).toBe("120.50");
+    expect(hostedUrl.searchParams.get("currencyCode")).toBe("usdc_sol");
+    expect(hostedUrl.searchParams.get("walletAddress")).toBe(TEST_SOLANA_ADDRESSES.wallet1);
+    expect(hostedUrl.searchParams.get("redirectURL")).toBe("https://example.com/onramp-done");
+    expect(hostedUrl.searchParams.get(MOONPAY_PARAM_EXTERNAL_CUSTOMER_ID)).toBe("moonpay_user_123");
+    expect(hostedUrl.searchParams.get("externalTransactionId")).toBe(body.data.quote.id);
+    assertMoonPaySignature(hostedUrl);
   });
 
   it("creates a signed MoonPay off-ramp session URL", async () => {

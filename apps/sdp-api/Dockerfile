@@ -18,6 +18,7 @@ WORKDIR /repo
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json tsconfig.json ./
 COPY apps/sdp-api/package.json ./apps/sdp-api/
 COPY packages/sdp-types/package.json ./packages/sdp-types/
+COPY packages/sdp-env-config/package.json ./packages/sdp-env-config/
 COPY patches ./patches
 
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
@@ -29,6 +30,7 @@ WORKDIR /repo
 COPY --from=deps /repo /repo
 COPY apps/sdp-api ./apps/sdp-api
 COPY packages/sdp-types ./packages/sdp-types
+COPY packages/sdp-env-config ./packages/sdp-env-config
 
 WORKDIR /repo/apps/sdp-api
 RUN node scripts/build-node.mjs

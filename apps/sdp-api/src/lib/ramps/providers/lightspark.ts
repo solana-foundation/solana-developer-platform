@@ -1,4 +1,6 @@
+import type { LightsparkPaymentRampInstruction } from "@sdp/types";
 import { parseFiatCurrency } from "@sdp/types/payment-rails";
+import { AppError } from "@/lib/errors";
 import {
   basicAuthHeader,
   createProviderRampSupport,
@@ -7,7 +9,101 @@ import {
   SOLANA_ASSET_TO_RAIL,
 } from "../common";
 import { RAMP_RAIL_DUMPS } from "../constants";
+import { type ProviderRequestInit, providerFetchJson } from "../fetch";
 import type { ProviderRampSupport, RampDumpReader, RampProviderClient } from "../types";
+
+/** Connection details for live Grid API calls. */
+export interface LightsparkConfig {
+  tokenId: string;
+  clientSecret: string;
+  apiBaseUrl: string;
+}
+
+export type LightsparkCustomerType = "INDIVIDUAL" | "BUSINESS";
+
+export interface CreateLightsparkCustomerInput {
+  platformCustomerId: string;
+  customerType: LightsparkCustomerType;
+  fullName: string;
+  email?: string;
+}
+
+export interface LightsparkCustomer {
+  id: string;
+}
+
+interface GridCreateCustomerBody {
+  platformCustomerId: string;
+  customerType: LightsparkCustomerType;
+  fullName: string;
+  email?: string;
+}
+
+interface GridCustomerResponse {
+  id: string;
+}
+
+interface GridCustomerListResponse {
+  data: GridCustomerResponse[];
+}
+
+interface GridCreateQuoteBody {
+  source: {
+    sourceType: "REALTIME_FUNDING";
+    customerId: string;
+    currency: string;
+  };
+  destination: {
+    destinationType: "ACCOUNT";
+    accountId: string;
+    currency: string;
+  };
+  lockedCurrencySide: "SENDING" | "RECEIVING";
+  lockedCurrencyAmount: number;
+  description: string;
+}
+
+interface GridPaymentInstruction {
+  accountOrWalletInfo: LightsparkPaymentRampInstruction["accountOrWalletInfo"];
+  instructionsNotes?: string;
+  isPlatformAccount?: boolean;
+}
+
+interface GridQuoteResponse {
+  id: string;
+  status: string;
+  paymentInstructions?: GridPaymentInstruction[];
+  exchangeRate: number;
+  totalSendingAmount: number;
+  totalReceivingAmount: number;
+  feesIncluded: number;
+  expiresAt: string;
+}
+
+export interface CreateLightsparkOnrampQuoteInput {
+  /** Grid customer that will fund the quote in real time. */
+  customerId: string;
+  /** Grid external account id the crypto will be delivered to (e.g. ExternalAccount:...). */
+  destinationAccountId: string;
+  /** Source fiat currency code (e.g. USD). */
+  fiatCurrency: string;
+  /** Destination crypto currency code (e.g. USDC). */
+  cryptoCurrency: string;
+  /** Locked sending amount in the fiat currency's smallest unit (cents). */
+  fiatAmountMinorUnits: number;
+  description?: string;
+}
+
+export interface LightsparkQuote {
+  id: string;
+  status?: string;
+  paymentInstructions?: LightsparkPaymentRampInstruction[];
+  exchangeRate?: number;
+  totalSendingAmount?: number;
+  totalReceivingAmount?: number;
+  feesIncluded?: number;
+  expiresAt?: string;
+}
 
 interface LightsparkSupportedCurrency {
   currencyCode?: string;
@@ -73,4 +169,123 @@ export class LightsparkRampClient implements RampProviderClient {
       await readDump<LightsparkConfigDump>(RAMP_RAIL_DUMPS.lightspark.config.file)
     );
   }
+
+  private async request<TResponse, TBody = never>(
+    config: LightsparkConfig,
+    path: string,
+    init: ProviderRequestInit<TBody>
+  ): Promise<TResponse> {
+    const base = config.apiBaseUrl.endsWith("/") ? config.apiBaseUrl : `${config.apiBaseUrl}/`;
+    const url = new URL(path, base);
+
+    return providerFetchJson<TResponse, TBody>(this.id, url.toString(), {
+      ...init,
+      headers: {
+        Authorization: basicAuthHeader(config.tokenId, config.clientSecret),
+        ...init.headers,
+      },
+    });
+  }
+
+  /** Creates a native Grid customer for a counterparty (KYC'd buyer). */
+  async createCustomer(
+    config: LightsparkConfig,
+    input: CreateLightsparkCustomerInput
+  ): Promise<LightsparkCustomer> {
+    const response = await this.request<GridCustomerResponse, GridCreateCustomerBody>(
+      config,
+      "customers",
+      {
+        method: "POST",
+        body: {
+          platformCustomerId: input.platformCustomerId,
+          customerType: input.customerType,
+          fullName: input.fullName,
+          ...(input.email ? { email: input.email } : {}),
+        },
+      }
+    );
+
+    return { id: response.id };
+  }
+
+  /** Looks up an existing Grid customer by the platform-side id we assigned. */
+  async findCustomerByPlatformId(
+    config: LightsparkConfig,
+    platformCustomerId: string
+  ): Promise<LightsparkCustomer | null> {
+    const query = new URLSearchParams({ platformCustomerId, limit: "1" });
+    const response = await this.request<GridCustomerListResponse>(
+      config,
+      `customers?${query.toString()}`,
+      { method: "GET" }
+    );
+    const [existing] = response.data;
+    return existing ? { id: existing.id } : null;
+  }
+
+  /**
+   * Idempotent customer creation keyed on platformCustomerId. Grid rejects a
+   * duplicate platformCustomerId with 409; we recover by returning the customer
+   * that already exists, so concurrent callers converge instead of orphaning one.
+   */
+  async getOrCreateCustomer(
+    config: LightsparkConfig,
+    input: CreateLightsparkCustomerInput
+  ): Promise<LightsparkCustomer> {
+    try {
+      return await this.createCustomer(config, input);
+    } catch (error) {
+      if (error instanceof AppError && error.code === "CONFLICT") {
+        const existing = await this.findCustomerByPlatformId(config, input.platformCustomerId);
+        if (existing) {
+          return existing;
+        }
+      }
+      throw error;
+    }
+  }
+
+  /** Creates a just-in-time (real-time funded) onramp quote and locks the FX rate. */
+  async createOnrampQuote(
+    config: LightsparkConfig,
+    input: CreateLightsparkOnrampQuoteInput
+  ): Promise<LightsparkQuote> {
+    const response = await this.request<GridQuoteResponse, GridCreateQuoteBody>(config, "quotes", {
+      method: "POST",
+      body: {
+        source: {
+          sourceType: "REALTIME_FUNDING",
+          customerId: input.customerId,
+          currency: input.fiatCurrency,
+        },
+        destination: {
+          destinationType: "ACCOUNT",
+          accountId: input.destinationAccountId,
+          currency: input.cryptoCurrency,
+        },
+        lockedCurrencySide: "SENDING",
+        lockedCurrencyAmount: input.fiatAmountMinorUnits,
+        description: input.description ?? "SDP onramp",
+      },
+    });
+
+    return parseLightsparkQuote(response);
+  }
+}
+
+function parseLightsparkQuote(raw: GridQuoteResponse): LightsparkQuote {
+  return {
+    id: raw.id,
+    status: raw.status,
+    paymentInstructions: raw.paymentInstructions?.map((instruction) => ({
+      provider: "lightspark" as const,
+      ...instruction,
+    })),
+    exchangeRate: raw.exchangeRate,
+    totalSendingAmount: raw.totalSendingAmount,
+    totalReceivingAmount: raw.totalReceivingAmount,
+    feesIncluded: raw.feesIncluded,
+    expiresAt: raw.expiresAt,
+  };
 }

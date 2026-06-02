@@ -33,6 +33,7 @@
     "build:docs": "turbo run build --filter=sdp-docs",
     "build:api": "turbo run build --filter=@sdp/api",
     "check:env-contract": "node scripts/check-env-contract.mjs",
+    "check:env-configurator-drift": "node scripts/check-env-configurator-drift.mjs",
     "typecheck": "turbo run typecheck",
     "typecheck:all": "turbo run typecheck",
     "lint": "biome check .",

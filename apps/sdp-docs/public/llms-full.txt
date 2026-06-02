@@ -3329,6 +3329,21 @@ Use the [Payments API reference](/docs/reference/api/payments), [Wallets API ref
 
 ---
 
+## Self-Hosting
+
+### Configurator
+Source: https://platform.solana.com/docs/self-hosting/configurator
+
+> Generate a complete .env for a self-hosted Solana Developer Platform, entirely in your browser.
+
+Fill in the fields below and download a ready-to-use `.env`. Everything runs in
+your browser — nothing is sent anywhere. Drop the file next to `compose.yml`, then
+run `docker compose up -d`.
+
+<EnvConfigurator />
+
+---
+
 ## Reference
 
 ### Reference
