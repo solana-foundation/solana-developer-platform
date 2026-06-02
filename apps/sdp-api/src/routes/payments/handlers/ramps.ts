@@ -19,6 +19,8 @@ import type {
 import { parseDecimalAmount } from "@/lib/amount";
 import { requireProjectId } from "@/lib/auth";
 import { AppError, providerNotConfigured } from "@/lib/errors";
+import { basicAuthHeader } from "@/lib/ramps/common";
+import { providerFetchJson } from "@/lib/ramps/fetch";
 import { LightsparkRampClient } from "@/lib/ramps/providers/lightspark";
 import { success } from "@/lib/response";
 import { isAddress } from "@/lib/solana";
@@ -340,10 +342,6 @@ function getBvnkConfig(c: AppContext): BvnkConfig {
   };
 }
 
-function encodeBasicAuth(value: string): string {
-  return Buffer.from(value, "utf8").toString("base64");
-}
-
 function safeParseJson(value: string): unknown | null {
   try {
     return JSON.parse(value) as unknown;
@@ -606,39 +604,15 @@ async function lightsparkRequest(
     body?: unknown;
   }
 ): Promise<unknown> {
-  const apiBaseUrl = config.apiBaseUrl.endsWith("/") ? config.apiBaseUrl : `${config.apiBaseUrl}/`;
-  const url = new URL(path, apiBaseUrl);
-  const auth = encodeBasicAuth(`${config.tokenId}:${config.clientSecret}`);
+  const base = config.apiBaseUrl.endsWith("/") ? config.apiBaseUrl : `${config.apiBaseUrl}/`;
+  const url = new URL(path, base);
 
-  const response = await fetch(url.toString(), {
-    method: init.method,
+  return providerFetchJson("lightspark", url.toString(), {
+    ...init,
     headers: {
-      Authorization: `Basic ${auth}`,
-      "Content-Type": "application/json",
+      Authorization: basicAuthHeader(config.tokenId, config.clientSecret),
     },
-    body: init.body === undefined ? undefined : JSON.stringify(init.body),
   });
-
-  const raw = await response.text();
-  const parsed = safeParseJson(raw);
-
-  if (!response.ok) {
-    const parsedMessage =
-      parsed && typeof parsed === "object"
-        ? ((parsed as { message?: unknown; error?: unknown; reason?: unknown }).message ??
-          (parsed as { message?: unknown; error?: unknown; reason?: unknown }).error ??
-          (parsed as { message?: unknown; error?: unknown; reason?: unknown }).reason)
-        : undefined;
-
-    const message =
-      typeof parsedMessage === "string" && parsedMessage.length > 0
-        ? parsedMessage
-        : `Lightspark request failed with status ${response.status}`;
-
-    throw new AppError("BAD_REQUEST", message);
-  }
-
-  return parsed ?? {};
 }
 
 function normalizeLightsparkCurrencyCode(value: string): string {
@@ -1300,7 +1274,7 @@ async function ensureLightsparkCustomer(
     return existing;
   }
 
-  const customer = await lightsparkClient.createCustomer(config, {
+  const customer = await lightsparkClient.getOrCreateCustomer(config, {
     platformCustomerId: counterparty.id,
     customerType: counterparty.entity_type === "business" ? "BUSINESS" : "INDIVIDUAL",
     fullName: counterparty.display_name,

@@ -1,5 +1,6 @@
 import type { LightsparkPaymentRampInstruction } from "@sdp/types";
 import { parseFiatCurrency } from "@sdp/types/payment-rails";
+import { AppError } from "@/lib/errors";
 import {
   basicAuthHeader,
   createProviderRampSupport,
@@ -40,6 +41,10 @@ interface GridCreateCustomerBody {
 
 interface GridCustomerResponse {
   id: string;
+}
+
+interface GridCustomerListResponse {
+  data: GridCustomerResponse[];
 }
 
 interface GridCreateQuoteBody {
@@ -202,6 +207,43 @@ export class LightsparkRampClient implements RampProviderClient {
     );
 
     return { id: response.id };
+  }
+
+  /** Looks up an existing Grid customer by the platform-side id we assigned. */
+  async findCustomerByPlatformId(
+    config: LightsparkConfig,
+    platformCustomerId: string
+  ): Promise<LightsparkCustomer | null> {
+    const query = new URLSearchParams({ platformCustomerId, limit: "1" });
+    const response = await this.request<GridCustomerListResponse>(
+      config,
+      `customers?${query.toString()}`,
+      { method: "GET" }
+    );
+    const [existing] = response.data;
+    return existing ? { id: existing.id } : null;
+  }
+
+  /**
+   * Idempotent customer creation keyed on platformCustomerId. Grid rejects a
+   * duplicate platformCustomerId with 409; we recover by returning the customer
+   * that already exists, so concurrent callers converge instead of orphaning one.
+   */
+  async getOrCreateCustomer(
+    config: LightsparkConfig,
+    input: CreateLightsparkCustomerInput
+  ): Promise<LightsparkCustomer> {
+    try {
+      return await this.createCustomer(config, input);
+    } catch (error) {
+      if (error instanceof AppError && error.code === "CONFLICT") {
+        const existing = await this.findCustomerByPlatformId(config, input.platformCustomerId);
+        if (existing) {
+          return existing;
+        }
+      }
+      throw error;
+    }
   }
 
   /** Creates a just-in-time (real-time funded) onramp quote and locks the FX rate. */

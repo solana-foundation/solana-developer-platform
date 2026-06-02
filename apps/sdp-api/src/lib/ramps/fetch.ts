@@ -8,6 +8,7 @@ export interface ProviderRequestInit<TBody> {
 }
 
 export function classifyProviderStatus(status: number): ErrorCode {
+  if (status === 409) return "CONFLICT";
   if (status === 429) return "RATE_LIMITED";
   if (status >= 500) return "PROVIDER_UNAVAILABLE";
   return "BAD_REQUEST";
