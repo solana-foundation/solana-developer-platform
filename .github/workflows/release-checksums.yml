@@ -23,7 +23,7 @@ jobs:
           sha256sum install.sh compose.yml .env.example > SHA256SUMS
           cat SHA256SUMS
 
-      - name: Publish checksums and install script to the release
+      - name: Publish checksums and install artifacts to the release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.event.release.tag_name }}
@@ -32,4 +32,6 @@ jobs:
           gh release upload "$TAG" \
             infra/self-hosted/SHA256SUMS \
             infra/self-hosted/install.sh \
+            infra/self-hosted/compose.yml \
+            infra/self-hosted/.env.example \
             --clobber

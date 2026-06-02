@@ -3,28 +3,47 @@
 # Bootstrap a self-hosted Solana Developer Platform.
 #
 # This script is open source — read it before piping it to a shell.
-# Replace v0.24.0 below with the release tag you are installing.
+# It installs the latest release by default; set INSTALL_VERSION to pin a tag.
 # To verify the install script and config against the release checksums:
-#   V=v0.24.0
+#   V=v0.24.0   # the release tag you want
 #   R=https://github.com/solana-foundation/solana-developer-platform/releases/download
 #   curl -fsSL "$R/$V/install.sh" -o install.sh
 #   curl -fsSL "$R/$V/SHA256SUMS" -o SHA256SUMS
-#   sha256sum --ignore-missing -c SHA256SUMS && bash install.sh
+#   sha256sum --ignore-missing -c SHA256SUMS && INSTALL_VERSION="$V" bash install.sh
 #
-# Overridable: SDP_INSTALL_DIR, INSTALL_VERSION, SDP_INSTALL_BASE_URL,
+# Overridable: SDP_INSTALL_DIR, INSTALL_VERSION, SDP_RELEASE_BASE_URL,
 #              SDP_IMAGE_REGISTRY, SDP_CONFIGURATOR_URL.
 set -euo pipefail
 
-# Bumped by the release process to the tag that publishes the image + compose.yml.
+# Fallback used only when the latest release tag cannot be resolved.
 DEFAULT_VERSION="v0.24.0"
 
-VERSION="${INSTALL_VERSION:-$DEFAULT_VERSION}"
-BASE_URL="${SDP_INSTALL_BASE_URL:-https://raw.githubusercontent.com/solana-foundation/solana-developer-platform}"
+RELEASE_BASE_URL="${SDP_RELEASE_BASE_URL:-https://github.com/solana-foundation/solana-developer-platform/releases/download}"
 INSTALL_DIR="${SDP_INSTALL_DIR:-$HOME/sdp}"
 IMAGE_REGISTRY="${SDP_IMAGE_REGISTRY:-ghcr.io/solana-foundation/sdp}"
 CONFIGURATOR_URL="${SDP_CONFIGURATOR_URL:-https://sdp.solana.org/docs/self-hosting/configurator}"
+VERSION=""
 
 err() { printf '%s\n' "$*" >&2; }
+
+# Pinned tag from INSTALL_VERSION, otherwise the tag the "latest" release
+# redirects to, otherwise DEFAULT_VERSION.
+resolve_version() {
+  if [ -n "${INSTALL_VERSION:-}" ]; then
+    printf '%s' "$INSTALL_VERSION"
+    return
+  fi
+  local url
+  url="$(curl -fsSLI -o /dev/null -w '%{url_effective}' \
+    "https://github.com/solana-foundation/solana-developer-platform/releases/latest" 2>/dev/null || true)"
+  case "$url" in
+    */releases/tag/*) printf '%s' "${url##*/}" ;;
+    *)
+      err "Warning: could not resolve the latest release; using $DEFAULT_VERSION."
+      printf '%s' "$DEFAULT_VERSION"
+      ;;
+  esac
+}
 
 require_docker() {
   if ! command -v docker >/dev/null 2>&1; then
@@ -41,9 +60,23 @@ require_docker() {
   fi
 }
 
-# fetch <relative-path-under-infra/self-hosted> <destination>
+# fetch <release-asset-name> <destination>
 fetch() {
-  curl -fsSL "$BASE_URL/$VERSION/infra/self-hosted/$1" -o "$2"
+  curl -fsSL "$RELEASE_BASE_URL/$VERSION/$1" -o "$2"
+}
+
+# verify <asset-name> against its line in the downloaded SHA256SUMS, fail closed.
+verify() {
+  local line
+  line="$(awk -v f="$1" '$2 == f { print; exit }' "$INSTALL_DIR/SHA256SUMS")"
+  if [ -z "$line" ]; then
+    err "No checksum recorded for $1 in SHA256SUMS. Refusing to continue."
+    exit 1
+  fi
+  if ! (cd "$INSTALL_DIR" && printf '%s\n' "$line" | sha256sum -c -) >/dev/null 2>&1; then
+    err "Checksum verification failed for $1. Refusing to continue."
+    exit 1
+  fi
 }
 
 # Echo a command that opens a URL in a browser, or nothing on a headless host.
@@ -63,12 +96,18 @@ cli_command() {
 
 main() {
   require_docker
+  VERSION="$(resolve_version)"
 
   mkdir -p "$INSTALL_DIR"
+  fetch SHA256SUMS "$INSTALL_DIR/SHA256SUMS"
   fetch compose.yml "$INSTALL_DIR/compose.yml"
-  [ -f "$INSTALL_DIR/.env.example" ] || fetch .env.example "$INSTALL_DIR/.env.example"
+  verify compose.yml
+  if [ ! -f "$INSTALL_DIR/.env.example" ]; then
+    fetch .env.example "$INSTALL_DIR/.env.example"
+    verify .env.example
+  fi
 
-  printf '\nInstalled compose.yml to %s\n' "$INSTALL_DIR"
+  printf '\nInstalled and verified compose.yml in %s\n' "$INSTALL_DIR"
   printf '\nNext: generate your .env\n'
 
   local opener; opener="$(detect_opener)"
