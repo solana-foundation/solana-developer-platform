@@ -22,12 +22,10 @@ export function projectContextMiddleware() {
       throw unauthorized("Authentication is required");
     }
 
-    const requested = c.req.header(PROJECT_HEADER) ?? c.req.query("projectId") ?? null;
+    const requested = c.req.header(PROJECT_HEADER) ?? null;
 
     if (!requested) {
-      throw badRequest(
-        `Project scope is required. Provide a ${PROJECT_HEADER} header or projectId query parameter.`
-      );
+      throw badRequest(`Project scope is required. Provide a ${PROJECT_HEADER} header.`);
     }
 
     const projectId = await assertProjectMembership(c, orgId, userId, requested);

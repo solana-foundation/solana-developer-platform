@@ -27,6 +27,17 @@ export function getCryptoRailAssetLabel(assetRail: CryptoRailId): string {
   return CRYPTO_RAIL_ASSET_LABELS[assetRail];
 }
 
+export type CryptoAssetSymbol = (typeof CRYPTO_RAIL_ASSET_LABELS)[CryptoRailId];
+
+/** On-chain decimals per crypto asset symbol; fiat falls back to 2 minor units. */
+export const CRYPTO_ASSET_DECIMALS = {
+  SOL: 9,
+  USDC: 6,
+  USDT: 6,
+  USDG: 6,
+  PYUSD: 6,
+} as const satisfies Record<CryptoAssetSymbol, number>;
+
 export interface OnrampPairSupport<FiatCurrency extends string = FiatCurrencyCode> {
   source: FiatCurrency;
   dest: CryptoRailId;

@@ -1239,6 +1239,32 @@ describe("Issuance Routes", () => {
 
       expect(res.status).toBe(404);
     });
+
+    it("returns 404 when the token belongs to a different project in the same org", async () => {
+      const otherProjectId = "prj_cross_project_isolation";
+      await seedProject({
+        id: otherProjectId,
+        organizationId: TEST_ORG.id,
+        name: "Other Project",
+        slug: "cross-project-isolation",
+      });
+      const otherProjectToken = await seedIssuedToken({
+        id: "tok_other_project_iso",
+        projectId: otherProjectId,
+        mintAddress: null,
+        status: "pending",
+      });
+
+      const res = await app.request(
+        `/v1/issuance/tokens/${otherProjectToken.id}`,
+        {
+          headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
+        },
+        env
+      );
+
+      expect(res.status).toBe(404);
+    });
   });
 
   describe("PATCH /v1/issuance/tokens/:tokenId", () => {

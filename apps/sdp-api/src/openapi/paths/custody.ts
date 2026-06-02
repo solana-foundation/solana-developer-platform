@@ -9,7 +9,6 @@ import {
   initializeSigningRequestSchema,
   initializeSigningResponseSchema,
   orgCustodyProviderSchema,
-  projectIdParamSchema,
   setDefaultWalletRequestSchema,
   setDefaultWalletResponseSchema,
   signerCheckRequestSchema,
@@ -17,7 +16,7 @@ import {
   updateCustodyWalletRequestSchema,
   walletIdParamSchema,
 } from "../schemas";
-import { errorResponses, jsonContent } from "./helpers";
+import { errorResponses, jsonContent, projectScopeHeaders } from "./helpers";
 import {
   custodyConfigResponse,
   custodyConfigsResponse,
@@ -161,9 +160,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
       "Returns the resolved default wallet signing configuration for the organization or project. Resolution is DB-backed only (no environment fallback).",
     security: [{ apiKeyAuth: [] }],
     request: {
-      query: z.object({
-        projectId: projectIdParamSchema.optional(),
-      }),
+      headers: projectScopeHeaders,
     },
     responses: {
       200: {
@@ -184,9 +181,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
       "Returns active wallet signing configurations for the requested scope plus the resolved default configuration ID.",
     security: [{ apiKeyAuth: [] }],
     request: {
-      query: z.object({
-        projectId: projectIdParamSchema.optional(),
-      }),
+      headers: projectScopeHeaders,
     },
     responses: {
       200: {
@@ -207,8 +202,8 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
       "Lists wallets across all active providers for the requested scope. Use provider to filter to a specific provider.",
     security: [{ apiKeyAuth: [] }],
     request: {
+      headers: projectScopeHeaders,
       query: z.object({
-        projectId: projectIdParamSchema.optional(),
         provider: orgCustodyProviderSchema.optional(),
         includeAllProviders: z.boolean().optional(),
         includeBalances: z.boolean().optional(),
@@ -234,8 +229,8 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
       "Aggregates tracked wallet balances for the requested scope. Defaults to aggregating across all active providers for the organization scope.",
     security: [{ apiKeyAuth: [] }],
     request: {
+      headers: projectScopeHeaders,
       query: z.object({
-        projectId: projectIdParamSchema.optional(),
         provider: orgCustodyProviderSchema.optional(),
         includeAllProviders: z.boolean().optional(),
       }),
@@ -259,9 +254,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
       "Returns provider capability metadata, including active/default status for the requested scope.",
     security: [{ apiKeyAuth: [] }],
     request: {
-      query: z.object({
-        projectId: projectIdParamSchema.optional(),
-      }),
+      headers: projectScopeHeaders,
     },
     responses: {
       200: {
@@ -282,8 +275,8 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
       "Returns the resolved wallet public key for transaction construction. Resolution is DB-backed only (no environment fallback).",
     security: [{ apiKeyAuth: [] }],
     request: {
+      headers: projectScopeHeaders,
       query: z.object({
-        projectId: projectIdParamSchema.optional(),
         walletId: walletIdParamSchema.optional(),
       }),
     },
@@ -333,9 +326,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
       params: z.object({
         walletId: walletIdParamSchema,
       }),
-      query: z.object({
-        projectId: projectIdParamSchema.optional(),
-      }),
+      headers: projectScopeHeaders,
     },
     responses: {
       200: {
@@ -358,9 +349,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
       params: z.object({
         walletId: walletIdParamSchema,
       }),
-      query: z.object({
-        projectId: projectIdParamSchema.optional(),
-      }),
+      headers: projectScopeHeaders,
       body: {
         required: true,
         content: jsonContent(updateCustodyWalletRequestSchema),

@@ -2,7 +2,6 @@ import type { FrozenAccountResponse } from "@sdp/types";
 import { resolveTokenAccount } from "@solana/mosaic-sdk";
 import type { Context } from "hono";
 import { getDb } from "@/db";
-import { getAuth } from "@/lib/auth";
 import { AppError, notFound } from "@/lib/errors";
 import { created, paginated, success } from "@/lib/response";
 import { type Address, assertValidAddress } from "@/lib/solana";
@@ -11,6 +10,7 @@ import { createMosaicService } from "@/services/mosaic";
 import { createRpcForSdk } from "@/services/solana/rpc";
 import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
+import { requireProjectScope } from "../helpers";
 import { freezeSchema, unfreezeSchema } from "../schemas";
 import { getTokenAccessControlMode, type TokenAccessControlMode } from "./access-control";
 import { resolveAuthoritySigner, resolveCurrentAuthorityForRole } from "./authority-resolution";
@@ -127,7 +127,7 @@ async function resolveFreezeTarget(
 
 export const freezeAccount = async (c: AppContext) => {
   const { tokenId } = c.req.param();
-  const auth = getAuth(c);
+  const { auth, projectId, orgId } = requireProjectScope(c);
 
   const body = await c.req.json();
   const parsed = freezeSchema.safeParse(body);
@@ -139,13 +139,13 @@ export const freezeAccount = async (c: AppContext) => {
   }
 
   const tokenService = new TokenService(getDb(c.env));
-  const token = await tokenService.getToken(tokenId);
+  const token = await tokenService.getToken({
+    tokenId,
+    organizationId: orgId,
+    projectId,
+  });
 
-  if (!token || token.organizationId !== auth?.organizationId) {
-    throw notFound("Token");
-  }
-
-  if (token.projectId !== auth.projectId) {
+  if (!token) {
     throw notFound("Token");
   }
 
@@ -303,16 +303,16 @@ export const freezeAccount = async (c: AppContext) => {
 
 export const listFrozenAccounts = async (c: AppContext) => {
   const { tokenId } = c.req.param();
-  const auth = getAuth(c);
+  const { projectId, orgId } = requireProjectScope(c);
 
   const tokenService = new TokenService(getDb(c.env));
-  const token = await tokenService.getToken(tokenId);
+  const token = await tokenService.getToken({
+    tokenId,
+    organizationId: orgId,
+    projectId,
+  });
 
-  if (!token || token.organizationId !== auth?.organizationId) {
-    throw notFound("Token");
-  }
-
-  if (token.projectId !== auth.projectId) {
+  if (!token) {
     throw notFound("Token");
   }
 
@@ -330,7 +330,7 @@ export const listFrozenAccounts = async (c: AppContext) => {
 
 export const unfreezeAccount = async (c: AppContext) => {
   const { tokenId } = c.req.param();
-  const auth = getAuth(c);
+  const { auth, projectId, orgId } = requireProjectScope(c);
 
   const body = await c.req.json();
   const parsed = unfreezeSchema.safeParse(body);
@@ -342,13 +342,13 @@ export const unfreezeAccount = async (c: AppContext) => {
   }
 
   const tokenService = new TokenService(getDb(c.env));
-  const token = await tokenService.getToken(tokenId);
+  const token = await tokenService.getToken({
+    tokenId,
+    organizationId: orgId,
+    projectId,
+  });
 
-  if (!token || token.organizationId !== auth?.organizationId) {
-    throw notFound("Token");
-  }
-
-  if (token.projectId !== auth.projectId) {
+  if (!token) {
     throw notFound("Token");
   }
 

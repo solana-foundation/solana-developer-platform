@@ -8,7 +8,7 @@ import {
   rotateApiKeyRequestSchema,
   updateApiKeyRequestSchema,
 } from "../schemas";
-import { errorResponses, jsonContent } from "./helpers";
+import { errorResponses, jsonContent, projectScopeHeaders } from "./helpers";
 import {
   actionSuccessResponse,
   apiKeyCreateResponse,
@@ -27,6 +27,9 @@ export function registerApiKeyPaths(registry: OpenAPIRegistry) {
     operationId: "listApiKeys",
     description: "Lists API keys for the authenticated organization.",
     security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+    },
     responses: {
       200: {
         description: "API keys",
@@ -45,6 +48,7 @@ export function registerApiKeyPaths(registry: OpenAPIRegistry) {
     description: "Creates a new API key. The full key is returned once.",
     security: [{ apiKeyAuth: [] }],
     request: {
+      headers: projectScopeHeaders,
       body: {
         required: true,
         content: jsonContent(createApiKeyRequestSchema),
@@ -68,6 +72,7 @@ export function registerApiKeyPaths(registry: OpenAPIRegistry) {
     description: "Gets API key details by id.",
     security: [{ apiKeyAuth: [] }],
     request: {
+      headers: projectScopeHeaders,
       params: z.object({
         keyId: apiKeyIdParamSchema,
       }),
@@ -90,6 +95,7 @@ export function registerApiKeyPaths(registry: OpenAPIRegistry) {
     description: "Updates API key attributes. Use null to clear optional fields.",
     security: [{ apiKeyAuth: [] }],
     request: {
+      headers: projectScopeHeaders,
       params: z.object({
         keyId: apiKeyIdParamSchema,
       }),
@@ -116,6 +122,7 @@ export function registerApiKeyPaths(registry: OpenAPIRegistry) {
     description: "Rotates an API key and returns the new key plus the old key grace period.",
     security: [{ apiKeyAuth: [] }],
     request: {
+      headers: projectScopeHeaders,
       params: z.object({
         keyId: apiKeyIdParamSchema,
       }),
@@ -142,6 +149,7 @@ export function registerApiKeyPaths(registry: OpenAPIRegistry) {
     description: "Deactivates (soft deletes) an API key and invalidates it immediately.",
     security: [{ apiKeyAuth: [] }],
     request: {
+      headers: projectScopeHeaders,
       params: z.object({
         keyId: apiKeyIdParamSchema,
       }),

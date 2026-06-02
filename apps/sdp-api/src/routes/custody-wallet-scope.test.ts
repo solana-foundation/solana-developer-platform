@@ -452,4 +452,77 @@ describe("Custody wallet scope routes", () => {
 
     expect(res.status).toBe(404);
   });
+
+  it("excludes custody configs from a different project in the same org", async () => {
+    const otherProjectId = "prj_custody_config_cross_project";
+    const otherConfigId = "cust_cfg_scope_other_project";
+
+    await getDb(env).batch([
+      getDb(env)
+        .prepare(
+          `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`
+        )
+        .bind(
+          otherProjectId,
+          TEST_ORG.id,
+          "Other Config Project",
+          "other-config-project",
+          "sandbox",
+          "active",
+          TEST_USER.id
+        ),
+      getDb(env)
+        .prepare(
+          `INSERT INTO custody_configs
+             (id, organization_id, project_id, provider, config_encrypted, encryption_version, default_wallet_id, status)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .bind(
+          otherConfigId,
+          TEST_ORG.id,
+          otherProjectId,
+          "turnkey",
+          "test-config",
+          "sdp-custody-encryption-v1",
+          "turnkey_wallet_other",
+          "active"
+        ),
+      getDb(env)
+        .prepare(
+          `INSERT INTO custody_wallets
+             (id, custody_config_id, wallet_id, public_key, label, purpose, status)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`
+        )
+        .bind(
+          "cwlt_scope_other_project",
+          otherConfigId,
+          "turnkey_wallet_other",
+          "turnkey_pubkey_other",
+          "Other",
+          "root",
+          "active"
+        ),
+    ]);
+
+    const res = await app.request(
+      "/v1/wallets/configs",
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+      },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      data: { configs: Array<{ id: string }> };
+    };
+    const configIds = body.data.configs.map((config) => config.id);
+    expect(configIds).toContain(PRIVY_CONFIG_ID);
+    expect(configIds).toContain(PARA_CONFIG_ID);
+    expect(configIds).not.toContain(otherConfigId);
+  });
 });

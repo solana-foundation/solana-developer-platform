@@ -4,6 +4,7 @@ import type {
   PaymentTransferSummary as TransferRecord,
   PaymentsDashboardWallet as WalletRecord,
 } from "@sdp/types";
+import { CRYPTO_ASSET_DECIMALS, type CryptoAssetSymbol } from "@sdp/types/payment-rails";
 
 // biome-ignore lint/security/noSecrets: Devnet USDC mint address constant, not a secret.
 const DEVNET_USDC_MINT = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
@@ -116,6 +117,63 @@ export function formatTimestamp(value?: string): string {
     hour: "numeric",
     minute: "2-digit",
   }).format(date);
+}
+
+export function formatMinorCurrencyAmount(
+  amount: number | undefined,
+  currency: string
+): string | null {
+  if (amount === undefined || !Number.isFinite(amount)) {
+    return null;
+  }
+
+  const decimals = CRYPTO_ASSET_DECIMALS[currency as CryptoAssetSymbol] ?? 2;
+  const value = amount / 10 ** decimals;
+  return `${value.toLocaleString(undefined, {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: decimals,
+  })} ${currency.toUpperCase()}`;
+}
+
+export function formatRampQuoteExpiry(expiresAt: string | undefined): string | null {
+  if (!expiresAt) {
+    return null;
+  }
+
+  const date = new Date(expiresAt);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+
+  return date.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+export function formatRampQuoteTimeRemaining(
+  expiresAt: string | undefined,
+  nowMs = Date.now()
+): string | null {
+  if (!expiresAt) {
+    return null;
+  }
+
+  const expiresAtMs = new Date(expiresAt).getTime();
+  if (Number.isNaN(expiresAtMs)) {
+    return null;
+  }
+
+  const remainingSeconds = Math.max(0, Math.ceil((expiresAtMs - nowMs) / 1000));
+  if (remainingSeconds === 0) {
+    return "Expired";
+  }
+
+  const minutes = Math.floor(remainingSeconds / 60);
+  const seconds = remainingSeconds % 60;
+  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
 }
 
 export function formatDirection(direction?: string): string {

@@ -140,6 +140,8 @@ export interface LightsparkPaymentRampInstruction {
 
 export type PaymentRampInstruction = LightsparkPaymentRampInstruction;
 
+export type PaymentRampQuoteDeliveryMode = "manual_instructions" | "hosted";
+
 interface BasePaymentRampExecution {
   id: string;
   status: PaymentRampExecutionStatus;
@@ -155,4 +157,33 @@ export type PaymentRampExecution =
   | (BasePaymentRampExecution & {
       provider: Exclude<RampProviderId, "lightspark">;
       paymentInstructions?: never;
+    });
+
+interface BasePaymentRampQuote {
+  id: string;
+  provider: RampProviderId;
+  status: PaymentRampExecutionStatus;
+  deliveryMode: PaymentRampQuoteDeliveryMode;
+}
+
+export type PaymentRampQuote =
+  | (BasePaymentRampQuote & {
+      provider: "lightspark";
+      deliveryMode: "manual_instructions";
+      /** Units of destination crypto per unit of source fiat. */
+      exchangeRate?: number;
+      /** Total sending amount in the fiat currency's smallest unit, including provider fees. */
+      totalSendingAmount?: number;
+      /** Final crypto amount received in its smallest unit. */
+      totalReceivingAmount?: number;
+      /** Fees included in the sending amount, denominated in the fiat currency's smallest unit. */
+      feesIncluded?: number;
+      /** ISO timestamp after which the locked rate is no longer valid. */
+      expiresAt?: string;
+      paymentInstructions?: LightsparkPaymentRampInstruction[];
+    })
+  | (BasePaymentRampQuote & {
+      provider: "moonpay";
+      deliveryMode: "hosted";
+      hostedUrl: string;
     });

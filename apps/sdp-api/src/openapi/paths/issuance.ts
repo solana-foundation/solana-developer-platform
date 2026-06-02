@@ -10,7 +10,6 @@ import {
   errorResponseSchema,
   forceBurnRequestSchema,
   freezeAccountRequestSchema,
-  idempotencyKeyHeaderSchema,
   mintRequestSchema,
   pageQuerySchema,
   pageSizeQuerySchema,
@@ -25,7 +24,12 @@ import {
   updateTokenRequestSchema,
   walletIdParamSchema,
 } from "../schemas";
-import { errorResponses, jsonContent } from "./helpers";
+import {
+  errorResponses,
+  jsonContent,
+  projectScopeHeaders,
+  projectScopeWithIdempotencyHeaders,
+} from "./helpers";
 import {
   executeBurnResponse,
   executeForceBurnResponse,
@@ -70,6 +74,9 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     description:
       "Returns all available token templates with their default configuration and supported extensions.",
     security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+    },
     responses: {
       200: {
         description: "Template list",
@@ -89,6 +96,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
       "Returns details for a specific token template including default decimals, required extensions, and available overrides.",
     security: [{ apiKeyAuth: [] }],
     request: {
+      headers: projectScopeHeaders,
       params: z.object({
         templateId: templateIdParamSchema,
       }),
@@ -115,6 +123,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     description: "Creates a token record that can later be deployed to Solana.",
     security: [{ apiKeyAuth: [] }],
     request: {
+      headers: projectScopeHeaders,
       body: {
         required: true,
         content: jsonContent(createTokenRequestSchema),
@@ -138,6 +147,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     description: "Lists tokens for the current project or organization.",
     security: [{ apiKeyAuth: [] }],
     request: {
+      headers: projectScopeHeaders,
       query: z.object({
         status: tokenStatusQuerySchema.optional(),
         page: pageQuerySchema.optional(),
@@ -163,6 +173,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
       "Lists issuance transactions across tokens for the current organization or project. Selected-wallet API keys are scoped to their token-readable wallet bindings when walletId is omitted. Use repeated type query parameters, for example type=burn&type=force_burn, to request multiple transaction types.",
     security: [{ apiKeyAuth: [] }],
     request: {
+      headers: projectScopeHeaders,
       query: z.object({
         walletId: walletIdParamSchema.optional().openapi({
           description:
@@ -199,6 +210,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     description: "Gets token details.",
     security: [{ apiKeyAuth: [] }],
     request: {
+      headers: projectScopeHeaders,
       params: z.object({
         tokenId: tokenIdParamSchema,
       }),
@@ -221,6 +233,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     description: "Fetches the current on-chain supply and refreshes the cached totalSupply value.",
     security: [{ apiKeyAuth: [] }],
     request: {
+      headers: projectScopeHeaders,
       params: z.object({
         tokenId: tokenIdParamSchema,
       }),
@@ -243,6 +256,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     description: "Lists token transactions for an issued token.",
     security: [{ apiKeyAuth: [] }],
     request: {
+      headers: projectScopeHeaders,
       params: z.object({
         tokenId: tokenIdParamSchema,
       }),
@@ -271,6 +285,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
       "Updates stored token fields. For deployed tokens, metadata fields are also written on-chain through the current metadata authority.",
     security: [{ apiKeyAuth: [] }],
     request: {
+      headers: projectScopeHeaders,
       params: z.object({
         tokenId: tokenIdParamSchema,
       }),
@@ -300,9 +315,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
       params: z.object({
         tokenId: tokenIdParamSchema,
       }),
-      headers: z.object({
-        "Idempotency-Key": idempotencyKeyHeaderSchema.optional(),
-      }),
+      headers: projectScopeWithIdempotencyHeaders,
     },
     responses: {
       200: {
@@ -322,6 +335,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     description: "Builds an unsigned deploy transaction for client-side signing.",
     security: [{ apiKeyAuth: [] }],
     request: {
+      headers: projectScopeHeaders,
       params: z.object({
         tokenId: tokenIdParamSchema,
       }),
@@ -344,6 +358,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     description: "Builds an unsigned mint transaction for client-side signing.",
     security: [{ apiKeyAuth: [] }],
     request: {
+      headers: projectScopeHeaders,
       params: z.object({
         tokenId: tokenIdParamSchema,
       }),
@@ -373,9 +388,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
       params: z.object({
         tokenId: tokenIdParamSchema,
       }),
-      headers: z.object({
-        "Idempotency-Key": idempotencyKeyHeaderSchema.optional(),
-      }),
+      headers: projectScopeWithIdempotencyHeaders,
       body: {
         required: true,
         content: jsonContent(mintRequestSchema),
@@ -399,6 +412,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     description: "Builds an unsigned burn transaction for client-side signing.",
     security: [{ apiKeyAuth: [] }],
     request: {
+      headers: projectScopeHeaders,
       params: z.object({
         tokenId: tokenIdParamSchema,
       }),
@@ -428,9 +442,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
       params: z.object({
         tokenId: tokenIdParamSchema,
       }),
-      headers: z.object({
-        "Idempotency-Key": idempotencyKeyHeaderSchema.optional(),
-      }),
+      headers: projectScopeWithIdempotencyHeaders,
       body: {
         required: true,
         content: jsonContent(burnRequestSchema),
@@ -454,6 +466,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     description: "Builds an unsigned force transfer transaction for client-side signing.",
     security: [{ apiKeyAuth: [] }],
     request: {
+      headers: projectScopeHeaders,
       params: z.object({
         tokenId: tokenIdParamSchema,
       }),
@@ -483,9 +496,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
       params: z.object({
         tokenId: tokenIdParamSchema,
       }),
-      headers: z.object({
-        "Idempotency-Key": idempotencyKeyHeaderSchema.optional(),
-      }),
+      headers: projectScopeWithIdempotencyHeaders,
       body: {
         required: true,
         content: jsonContent(seizeRequestSchema),
@@ -509,6 +520,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     description: "Builds an unsigned force burn transaction for client-side signing.",
     security: [{ apiKeyAuth: [] }],
     request: {
+      headers: projectScopeHeaders,
       params: z.object({
         tokenId: tokenIdParamSchema,
       }),
@@ -538,9 +550,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
       params: z.object({
         tokenId: tokenIdParamSchema,
       }),
-      headers: z.object({
-        "Idempotency-Key": idempotencyKeyHeaderSchema.optional(),
-      }),
+      headers: projectScopeWithIdempotencyHeaders,
       body: {
         required: true,
         content: jsonContent(forceBurnRequestSchema),
@@ -564,6 +574,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     description: "Builds an unsigned authority update transaction for client-side signing.",
     security: [{ apiKeyAuth: [] }],
     request: {
+      headers: projectScopeHeaders,
       params: z.object({
         tokenId: tokenIdParamSchema,
       }),
@@ -593,9 +604,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
       params: z.object({
         tokenId: tokenIdParamSchema,
       }),
-      headers: z.object({
-        "Idempotency-Key": idempotencyKeyHeaderSchema.optional(),
-      }),
+      headers: projectScopeWithIdempotencyHeaders,
       body: {
         required: true,
         content: jsonContent(updateAuthorityRequestSchema),
@@ -622,9 +631,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
       params: z.object({
         tokenId: tokenIdParamSchema,
       }),
-      headers: z.object({
-        "Idempotency-Key": idempotencyKeyHeaderSchema.optional(),
-      }),
+      headers: projectScopeWithIdempotencyHeaders,
       body: {
         required: true,
         content: jsonContent(pauseTokenRequestSchema),
@@ -651,9 +658,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
       params: z.object({
         tokenId: tokenIdParamSchema,
       }),
-      headers: z.object({
-        "Idempotency-Key": idempotencyKeyHeaderSchema.optional(),
-      }),
+      headers: projectScopeWithIdempotencyHeaders,
       body: {
         required: true,
         content: jsonContent(pauseTokenRequestSchema),
@@ -680,9 +685,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
       params: z.object({
         tokenId: tokenIdParamSchema,
       }),
-      headers: z.object({
-        "Idempotency-Key": idempotencyKeyHeaderSchema.optional(),
-      }),
+      headers: projectScopeWithIdempotencyHeaders,
       body: {
         required: true,
         content: jsonContent(freezeAccountRequestSchema),
@@ -709,9 +712,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
       params: z.object({
         tokenId: tokenIdParamSchema,
       }),
-      headers: z.object({
-        "Idempotency-Key": idempotencyKeyHeaderSchema.optional(),
-      }),
+      headers: projectScopeWithIdempotencyHeaders,
       body: {
         required: true,
         content: jsonContent(unfreezeAccountRequestSchema),
@@ -735,6 +736,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     description: "Lists frozen accounts for a token.",
     security: [{ apiKeyAuth: [] }],
     request: {
+      headers: projectScopeHeaders,
       params: z.object({
         tokenId: tokenIdParamSchema,
       }),
@@ -761,6 +763,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     description: "Lists allowlist entries for a token.",
     security: [{ apiKeyAuth: [] }],
     request: {
+      headers: projectScopeHeaders,
       params: z.object({
         tokenId: tokenIdParamSchema,
       }),
@@ -787,6 +790,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     description: "Adds an allowlist entry for a token.",
     security: [{ apiKeyAuth: [] }],
     request: {
+      headers: projectScopeHeaders,
       params: z.object({
         tokenId: tokenIdParamSchema,
       }),
@@ -813,6 +817,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     description: "Removes an allowlist entry from a token.",
     security: [{ apiKeyAuth: [] }],
     request: {
+      headers: projectScopeHeaders,
       params: z.object({
         tokenId: tokenIdParamSchema,
         entryId: allowlistEntryIdParamSchema,

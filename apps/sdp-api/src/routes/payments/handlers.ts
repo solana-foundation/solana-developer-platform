@@ -1,5 +1,6 @@
 export { getWalletBalances, getWalletPolicy, updateWalletPolicy } from "./handlers/balances";
 export {
+  createOnrampQuote,
   executeOfframp,
   executeOnramp,
   listOfframpCurrencies,

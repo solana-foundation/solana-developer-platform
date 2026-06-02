@@ -190,6 +190,16 @@ export const executeOnrampSchema = z.object({
   bvnkCompliance: bvnkComplianceSchema.optional(),
 });
 
+export const createOnrampQuoteSchema = z.object({
+  provider: z.enum(["lightspark", "moonpay"]),
+  counterpartyId: z.string().min(1),
+  destinationWallet: z.string().min(1),
+  cryptoToken: rampCurrencyCodeSchema,
+  fiatCurrency: rampFiatCurrencySchema.optional(),
+  fiatAmount: paymentAmountSchema,
+  redirectUrl: z.string().url().optional(),
+});
+
 export const executeOfframpSchema = z.object({
   provider: rampProviderSchema,
   sourceWallet: z.string().min(1),

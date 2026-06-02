@@ -1,6 +1,7 @@
 import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
 
 import {
+  createOnrampQuoteRequestSchema,
   createTransferRequestSchema,
   errorResponseSchema,
   executeOfframpRequestSchema,
@@ -14,12 +15,13 @@ import {
   simulateSandboxTransferRequestSchema,
   updateWalletPolicyRequestSchema,
 } from "../schemas";
-import { errorResponses, jsonContent } from "./helpers";
+import { errorResponses, jsonContent, projectScopeHeaders } from "./helpers";
 import {
   offrampCurrenciesResponse,
   offrampExecutionResponse,
   onrampCurrenciesResponse,
   onrampExecutionResponse,
+  onrampQuoteResponse,
   prepareTransferResponse,
   sandboxTransferSimulationResponse,
   transferListResponse,
@@ -43,6 +45,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
       "Retrieves balances for a custody wallet. Wallet lifecycle and provisioning are managed through /v1/wallets.",
     security: [{ apiKeyAuth: [] }],
     request: {
+      headers: projectScopeHeaders,
       params: paymentWalletIdParamsSchema,
     },
     responses: {
@@ -64,6 +67,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
       "Retrieves payment policy rules for a custody wallet. Policies are payment controls layered on top of custody-managed wallets.",
     security: [{ apiKeyAuth: [] }],
     request: {
+      headers: projectScopeHeaders,
       params: paymentWalletIdParamsSchema,
     },
     responses: {
@@ -85,6 +89,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
       "Updates payment policy rules for a custody wallet. Wallet provisioning and default selection remain in /v1/wallets.",
     security: [{ apiKeyAuth: [] }],
     request: {
+      headers: projectScopeHeaders,
       params: paymentWalletIdParamsSchema,
       body: {
         required: true,
@@ -114,6 +119,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
       "Builds an unsigned transfer transaction for a custody wallet. The source walletId must reference a wallet from /v1/wallets. Private-transfer requests are provider-built here and returned for client review and signing.",
     security: [{ apiKeyAuth: [] }],
     request: {
+      headers: projectScopeHeaders,
       body: {
         required: true,
         content: jsonContent(prepareTransferRequestSchema),
@@ -138,6 +144,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
       "Executes a transfer using server-side custody signing. The source walletId must reference a wallet from /v1/wallets. Private-transfer requests are provider-built, signed by SDP-controlled wallets when required, and submitted on the configured Solana cluster.",
     security: [{ apiKeyAuth: [] }],
     request: {
+      headers: projectScopeHeaders,
       body: {
         required: true,
         content: jsonContent(createTransferRequestSchema),
@@ -161,6 +168,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     description: "Lists payment transfers for the authenticated organization or project scope.",
     security: [{ apiKeyAuth: [] }],
     request: {
+      headers: projectScopeHeaders,
       query: paymentListTransfersQuerySchema,
     },
     responses: {
@@ -181,6 +189,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     description: "Retrieves details for a specific transfer.",
     security: [{ apiKeyAuth: [] }],
     request: {
+      headers: projectScopeHeaders,
       params: paymentTransferIdParamsSchema,
     },
     responses: {
@@ -202,6 +211,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
       "Lists generated fiat-to-crypto on-ramp pairs and the providers that support each pair. Supports optional source, destination rail, and provider filters.",
     security: [{ apiKeyAuth: [] }],
     request: {
+      headers: projectScopeHeaders,
       query: paymentOnrampCurrenciesQuerySchema,
     },
     responses: {
@@ -223,6 +233,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
       "Lists generated crypto-to-fiat off-ramp pairs and the providers that support each pair. Supports optional source rail, destination fiat, and provider filters.",
     security: [{ apiKeyAuth: [] }],
     request: {
+      headers: projectScopeHeaders,
       query: paymentOfframpCurrenciesQuerySchema,
     },
     responses: {
@@ -236,6 +247,30 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "post",
+    path: "/v1/payments/ramps/onramp/quote",
+    tags: ["Payments"],
+    summary: "Create on-ramp quote",
+    operationId: "createPaymentOnrampQuote",
+    description:
+      "Creates a provider-specific on-ramp quote. Hosted providers return a hosted URL; instruction-based providers return manual funding instructions.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      body: {
+        required: true,
+        content: jsonContent(createOnrampQuoteRequestSchema),
+      },
+    },
+    responses: {
+      200: {
+        description: "On-ramp quote created",
+        content: jsonContent(onrampQuoteResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
     path: "/v1/payments/ramps/onramp/execute",
     tags: ["Payments"],
     summary: "Execute on-ramp",
@@ -243,6 +278,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     description: "Creates a fiat-to-crypto on-ramp session through the selected provider.",
     security: [{ apiKeyAuth: [] }],
     request: {
+      headers: projectScopeHeaders,
       body: {
         required: true,
         content: jsonContent(executeOnrampRequestSchema),
@@ -266,6 +302,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     description: "Creates a crypto-to-fiat off-ramp session through the selected provider.",
     security: [{ apiKeyAuth: [] }],
     request: {
+      headers: projectScopeHeaders,
       body: {
         required: true,
         content: jsonContent(executeOfframpRequestSchema),
@@ -289,6 +326,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     description: "Sandbox-only helper that simulates provider-specific transfer completion flows.",
     security: [{ apiKeyAuth: [] }],
     request: {
+      headers: projectScopeHeaders,
       body: {
         required: true,
         content: jsonContent(simulateSandboxTransferRequestSchema),

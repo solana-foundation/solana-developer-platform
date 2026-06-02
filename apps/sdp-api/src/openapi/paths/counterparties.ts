@@ -8,7 +8,7 @@ import {
   listCounterpartiesQuerySchema,
   updateCounterpartyRequestSchema,
 } from "../schemas";
-import { errorResponses, jsonContent } from "./helpers";
+import { errorResponses, jsonContent, projectScopeHeaders } from "./helpers";
 import { counterpartyResponse, listCounterpartiesResponse } from "./responses";
 
 export function registerCounterpartyPaths(registry: OpenAPIRegistry) {
@@ -21,6 +21,7 @@ export function registerCounterpartyPaths(registry: OpenAPIRegistry) {
     description: "Lists counterparties for the authenticated organization.",
     security: [{ apiKeyAuth: [] }],
     request: {
+      headers: projectScopeHeaders,
       query: listCounterpartiesQuerySchema,
     },
     responses: {
@@ -42,6 +43,7 @@ export function registerCounterpartyPaths(registry: OpenAPIRegistry) {
       "Creates a counterparty. If externalId is provided, it must be unique within the organization.",
     security: [{ apiKeyAuth: [] }],
     request: {
+      headers: projectScopeHeaders,
       body: {
         required: true,
         content: jsonContent(createCounterpartyRequestSchema),
@@ -65,6 +67,7 @@ export function registerCounterpartyPaths(registry: OpenAPIRegistry) {
     description: "Gets counterparty details by id.",
     security: [{ apiKeyAuth: [] }],
     request: {
+      headers: projectScopeHeaders,
       params: z.object({
         counterpartyId: counterpartyIdParamSchema,
       }),
@@ -88,6 +91,7 @@ export function registerCounterpartyPaths(registry: OpenAPIRegistry) {
       "Updates counterparty attributes. At least one field must be provided. Use null on externalId to clear it.",
     security: [{ apiKeyAuth: [] }],
     request: {
+      headers: projectScopeHeaders,
       params: z.object({
         counterpartyId: counterpartyIdParamSchema,
       }),
@@ -114,6 +118,7 @@ export function registerCounterpartyPaths(registry: OpenAPIRegistry) {
     description: "Archives a counterparty. Archived counterparties are hidden from default lists.",
     security: [{ apiKeyAuth: [] }],
     request: {
+      headers: projectScopeHeaders,
       params: z.object({
         counterpartyId: counterpartyIdParamSchema,
       }),
