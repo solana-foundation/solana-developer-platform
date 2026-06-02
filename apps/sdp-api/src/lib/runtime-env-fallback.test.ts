@@ -35,9 +35,10 @@ describe("withProcessEnvFallback", () => {
     const isolated = await import("./runtime-env");
     setProcessEnv("PLUGIN_DECLARED_SECRET", "abc123");
     isolated.registerFallbackKeys("PLUGIN_DECLARED_SECRET");
-    const merged = isolated.withProcessEnvFallback(
-      emptyBindings()
-    ) as unknown as Record<string, unknown>;
+    const merged = isolated.withProcessEnvFallback(emptyBindings()) as unknown as Record<
+      string,
+      unknown
+    >;
     expect(merged.PLUGIN_DECLARED_SECRET).toBe("abc123");
   });
 

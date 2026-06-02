@@ -71,9 +71,9 @@ describe("createApp plugin registration", () => {
     const { obs } = makeObservability();
     const make = (name: string): SdpPlugin => ({ name, register: () => {} });
 
-    expect(() =>
-      createApp({ observability: obs, plugins: [make("dup"), make("dup")] })
-    ).toThrow(/dup/);
+    expect(() => createApp({ observability: obs, plugins: [make("dup"), make("dup")] })).toThrow(
+      /dup/
+    );
   });
 });
 
