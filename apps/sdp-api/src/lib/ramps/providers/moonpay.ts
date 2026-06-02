@@ -1,4 +1,5 @@
 import { type CryptoRailId, parseFiatCurrency } from "@sdp/types/payment-rails";
+import { AppError } from "@/lib/errors";
 import { createProviderRampSupport, requireEnv } from "../common";
 import { RAMP_RAIL_DUMPS } from "../constants";
 import type {
@@ -6,6 +7,8 @@ import type {
   ProviderRampSupport,
   RampDumpReader,
   RampProviderClient,
+  RampWebhookValidationContext,
+  RampWebhookValidationResult,
 } from "../types";
 
 const MOONPAY_CRYPTO_CODES = ["sol", "usdc_sol", "usdt_sol", "usdg_sol", "pyusd_sol"] as const;
@@ -103,5 +106,13 @@ export class MoonpayRampClient implements RampProviderClient {
     return extractSupport(
       await readDump<readonly MoonpayCurrencyEntry[]>(RAMP_RAIL_DUMPS.moonpay.currencies.file)
     );
+  }
+
+  async validateWebhook(
+    _context: RampWebhookValidationContext
+  ): Promise<RampWebhookValidationResult> {
+    throw new AppError("PROVIDER_NOT_CONFIGURED", "MoonPay webhook validation is not implemented", {
+      provider: this.id,
+    });
   }
 }
