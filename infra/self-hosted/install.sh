@@ -128,6 +128,9 @@ main() {
   if [ ! -f "$INSTALL_DIR/.env.example" ]; then
     fetch .env.example "$INSTALL_DIR/.env.example"
     verify .env.example
+  else
+    printf '\nKept your existing .env.example. Review the %s template for new variables:\n  %s/%s/.env.example\n' \
+      "$VERSION" "$RELEASE_BASE_URL" "$VERSION"
   fi
 
   printf '\nInstalled and verified compose.yml in %s\n' "$INSTALL_DIR"

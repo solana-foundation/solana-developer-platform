@@ -96,14 +96,14 @@ if scenario "tampered" -- "
 "; then check "aborts on a compose.yml checksum mismatch before handoff" 0
 else check "aborts on a compose.yml checksum mismatch" 1; fi
 
-# 5. Desktop -> auto-open attempted (stub xdg-open records a marker).
+# 5. Desktop -> auto-open invoked with the configurator URL (stub records its arg).
 if scenario "desktop" -e DISPLAY=:0 -- "
   $DOCKER_OK
-  printf '#!/bin/sh\ntouch /tmp/opened\n' > /usr/local/bin/xdg-open; chmod +x /usr/local/bin/xdg-open
+  printf '#!/bin/sh\necho \"\$1\" > /tmp/opened\n' > /usr/local/bin/xdg-open; chmod +x /usr/local/bin/xdg-open
   bash /src/infra/self-hosted/install.sh >/dev/null 2>&1
-  [ -f /tmp/opened ]
-"; then check "auto-opens the configurator page on a GUI host" 0
-else check "auto-opens the configurator page on a GUI host" 1; fi
+  grep -q 'self-hosting/configurator' /tmp/opened
+"; then check "auto-opens the configurator URL on a GUI host" 0
+else check "auto-opens the configurator URL on a GUI host" 1; fi
 
 # 6. Idempotency -> an existing .env.example is preserved (and not re-verified) across runs.
 if scenario "idempotent" -- "
