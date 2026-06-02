@@ -39,7 +39,7 @@
     "start:node": "node dist/server.js"
   },
   "dependencies": {
-    "@hono/node-server": "^2.0.3",
+    "@hono/node-server": "^2.0.4",
     "@react-email/components": "1.0.12",
     "@react-email/render": "2.0.8",
     "@sdp/env-config": "workspace:*",
@@ -61,31 +61,31 @@
     "@solana/mosaic-sdk": "catalog:",
     "@solana/signers": "catalog:",
     "@solana/token-acl-gate-sdk": "0.2.0",
-    "hono": "^4.12.19",
+    "hono": "^4.12.23",
     "ioredis": "^5.4.1",
     "jose": "^6.2.3",
     "nanoid": "^5.1.11",
     "node-cron": "^4.2.1",
     "pg": "^8.21.0",
     "react": "19.2.6",
-    "svix": "1.93.0",
+    "svix": "1.94.0",
     "zod": "^4.4.1"
   },
   "devDependencies": {
     "@asteasolutions/zod-to-openapi": "8.5.0",
-    "@cloudflare/vitest-pool-workers": "^0.16.6",
-    "@cloudflare/workers-types": "^4.20260519.1",
+    "@cloudflare/vitest-pool-workers": "^0.16.9",
+    "@cloudflare/workers-types": "^4.20260526.1",
     "@testcontainers/postgresql": "12.0.0",
     "@testcontainers/redis": "12.0.0",
     "@types/pg": "^8.15.6",
-    "@types/react": "^19.2.10",
-    "@vitest/coverage-istanbul": "4.1.6",
+    "@types/react": "^19.2.15",
+    "@vitest/coverage-istanbul": "4.1.7",
     "esbuild": "0.28.0",
     "openapi3-ts": "4.5.0",
     "testcontainers": "12.0.0",
-    "tsx": "4.22.2",
+    "tsx": "4.22.3",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.6",
-    "wrangler": "^4.92.0"
+    "vitest": "^4.1.7",
+    "wrangler": "^4.94.0"
   }
 }
