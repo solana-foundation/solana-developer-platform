@@ -155,7 +155,7 @@ index 59f70715fe2407b209c0b66d36a473b7ef72bfa5..a2afe70f90fdba1b7396144389905e63
          lists: [listConfig],
      });
 diff --git a/dist/templates/custom-token.js b/dist/templates/custom-token.js
-index 648d02021a528777ecd50b9a6a883d09d1133963..e8aa5233b63ee231ddbcd7da1c1dafa012d86eaa 100644
+index 648d02021a528777ecd50b9a6a883d09d1133963..a5302cb06170d69063dad11023c7a3424f1033bc 100644
 --- a/dist/templates/custom-token.js
 +++ b/dist/templates/custom-token.js
 @@ -28,6 +28,7 @@ import { getSetExtraMetasInstructions } from '../abl/set-extra-metas';
@@ -166,11 +166,13 @@ index 648d02021a528777ecd50b9a6a883d09d1133963..e8aa5233b63ee231ddbcd7da1c1dafa0
      const mintAuthorityAddress = typeof mintAuthority === 'string' ? mintAuthority : mintAuthority.address;
      const useSrfc37 = options?.enableSrfc37 ?? false;
      const aclMode = options?.aclMode ?? 'blocklist';
-@@ -166,35 +167,38 @@ export const createCustomTokenInitTransaction = async (rpc, name, symbol, decima
+@@ -165,36 +166,39 @@ export const createCustomTokenInitTransaction = async (rpc, name, symbol, decima
+         mint: mintSigner,
          feePayer: feePayerSigner,
      });
-     // If SRFC-37 is not enabled or mint authority is not the fee payer, return simple transaction
+-    // If SRFC-37 is not enabled or mint authority is not the fee payer, return simple transaction
 -    if (mintAuthorityAddress !== feePayerSigner.address || !useSrfc37) {
++    // If SRFC-37 is not enabled, return a simple transaction (skip Token ACL/ABL setup)
 +    if (!useSrfc37) {
          const { value: latestBlockhash } = await rpc.getLatestBlockhash().send();
          return pipe(createTransactionMessage({ version: 0 }), m => setTransactionMessageFeePayer(typeof feePayer === 'string' ? feePayer : feePayer.address, m), m => setTransactionMessageLifetimeUsingBlockhash(latestBlockhash, m), m => appendTransactionMessageInstructions(instructions, m));
