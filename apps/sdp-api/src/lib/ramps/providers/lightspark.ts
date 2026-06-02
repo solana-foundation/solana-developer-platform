@@ -1,3 +1,4 @@
+import { createVerify } from "node:crypto";
 import type { LightsparkPaymentRampInstruction } from "@sdp/types";
 import { parseFiatCurrency } from "@sdp/types/payment-rails";
 import { AppError } from "@/lib/errors";
@@ -10,7 +11,13 @@ import {
 } from "../common";
 import { RAMP_RAIL_DUMPS } from "../constants";
 import { type ProviderRequestInit, providerFetchJson } from "../fetch";
-import type { ProviderRampSupport, RampDumpReader, RampProviderClient } from "../types";
+import type {
+  ProviderRampSupport,
+  RampDumpReader,
+  RampProviderClient,
+  RampWebhookValidationContext,
+  RampWebhookValidationResult,
+} from "../types";
 
 /** Connection details for live Grid API calls. */
 export interface LightsparkConfig {
@@ -168,6 +175,67 @@ export class LightsparkRampClient implements RampProviderClient {
     return extractSupport(
       await readDump<LightsparkConfigDump>(RAMP_RAIL_DUMPS.lightspark.config.file)
     );
+  }
+
+  /**
+   * Verifies a Grid webhook via the `X-Grid-Signature` header: an ECDSA P-256 /
+   * SHA-256 signature over the raw request body, checked against the Grid
+   * webhook public key (PEM/SPKI). The header is JSON `{"v":1,"s":"<base64>"}`.
+   */
+  async validateWebhook({
+    env,
+    environment,
+    headers,
+    rawBody,
+  }: RampWebhookValidationContext): Promise<RampWebhookValidationResult> {
+    const publicKey = requireEnv(
+      env,
+      environment === "sandbox"
+        ? "LIGHTSPARK_GRID_SANDBOX_WEBHOOK_PUBLIC_KEY"
+        : "LIGHTSPARK_GRID_WEBHOOK_PUBLIC_KEY"
+    );
+
+    const signatureHeader = headers.get("x-grid-signature")?.trim();
+    if (!signatureHeader) {
+      throw new AppError("UNAUTHORIZED", "Lightspark webhook is missing x-grid-signature", {
+        provider: this.id,
+      });
+    }
+
+    // Grid sends `{"v":1,"s":"<base64 DER ECDSA>"}`; fall back to bare base64.
+    let signatureB64 = signatureHeader;
+    try {
+      const parsed = JSON.parse(signatureHeader) as { s?: unknown };
+      if (parsed && typeof parsed.s === "string") {
+        signatureB64 = parsed.s;
+      }
+    } catch {
+      // Not JSON — treat the header value as bare base64.
+    }
+
+    const verified = createVerify("SHA256")
+      .update(rawBody)
+      .verify(
+        // Doppler may store the PEM with literal "\n"; normalize to real newlines.
+        { key: publicKey.replace(/\\n/g, "\n"), format: "pem", type: "spki" },
+        Buffer.from(signatureB64, "base64")
+      );
+    if (!verified) {
+      throw new AppError("UNAUTHORIZED", "Invalid Lightspark webhook signature", {
+        provider: this.id,
+      });
+    }
+
+    let payload: unknown;
+    try {
+      payload = JSON.parse(rawBody);
+    } catch {
+      throw new AppError("BAD_REQUEST", "Lightspark webhook body must be valid JSON", {
+        provider: this.id,
+      });
+    }
+
+    return { provider: this.id, payload };
   }
 
   private async request<TResponse, TBody = never>(
