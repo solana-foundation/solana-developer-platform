@@ -1,6 +1,7 @@
 import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
 
 import {
+  createOnrampQuoteRequestSchema,
   createTransferRequestSchema,
   errorResponseSchema,
   executeOfframpRequestSchema,
@@ -20,6 +21,7 @@ import {
   offrampExecutionResponse,
   onrampCurrenciesResponse,
   onrampExecutionResponse,
+  onrampQuoteResponse,
   prepareTransferResponse,
   sandboxTransferSimulationResponse,
   transferListResponse,
@@ -231,6 +233,30 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         content: jsonContent(offrampCurrenciesResponse),
       },
       ...errorResponses(errorResponseSchema, [400, 401, 403, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/payments/ramps/onramp/quote",
+    tags: ["Payments"],
+    summary: "Create on-ramp quote",
+    operationId: "createPaymentOnrampQuote",
+    description:
+      "Creates a provider-specific on-ramp quote. Hosted providers return a hosted URL; instruction-based providers return manual funding instructions.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      body: {
+        required: true,
+        content: jsonContent(createOnrampQuoteRequestSchema),
+      },
+    },
+    responses: {
+      200: {
+        description: "On-ramp quote created",
+        content: jsonContent(onrampQuoteResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
     },
   });
 
