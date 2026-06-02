@@ -24,8 +24,25 @@ import { env } from "@/test/helpers/env";
 // is irrelevant; we only care which arguments the service hands it.
 const FAKE_FULL_TX = { __sentinel: "full-tx" } as const;
 const FAKE_LIST_ADDRESS = "List1111111111111111111111111111111111111" as Address;
+// Structurally-valid placeholder addresses for helper defaults, so callers that
+// don't override these still get a well-formed CreateTokenOptions.
+const PLACEHOLDER_MINT_AUTHORITY = "Mint1111111111111111111111111111111111111" as Address;
+const PLACEHOLDER_FEE_PAYER = "Fee11111111111111111111111111111111111111" as Address;
 
 type CreateStablecoinReturn = Awaited<ReturnType<typeof MosaicSdk.createStablecoinInitTransaction>>;
+
+/**
+ * Named view over the positional createStablecoinInitTransaction arguments, so
+ * assertions read by name rather than by brittle index. If the SDK signature
+ * shifts, the named field reads the wrong slot and the assertion fails loudly.
+ * Signature: (rpc, name, symbol, decimals, uri, mintAuthority, mint, feePayer,
+ *   aclMode, metadataAuth, pausableAuth, confidentialAuth, delegateAuth,
+ *   enableSrfc37, freezeAuthority)
+ */
+function stablecoinBuilderCall(call: readonly unknown[]) {
+  const [, , , , , mintAuthority, , feePayer, , , , , , enableSrfc37, freezeAuthority] = call;
+  return { mintAuthority, feePayer, enableSrfc37, freezeAuthority };
+}
 
 /**
  * The private submit method exposed for spying. Tests that only assert routing
@@ -59,10 +76,12 @@ function stablecoinOptions(overrides: Partial<CreateTokenOptions> = {}): CreateT
     template: "stablecoin",
     metadata: { name: "Test USD", symbol: "TUSD", uri: "https://example.com/t.json" },
     decimals: 6,
-    // string equal to the custody signer address → resolves to the signer
-    mintAuthority: undefined as unknown as Address,
-    freezeAuthority: undefined as unknown as Address,
-    feePayer: undefined as unknown as Address,
+    mintAuthority: PLACEHOLDER_MINT_AUTHORITY,
+    // null by default so the helper doesn't accidentally enable sRFC-37
+    // (enableSrfc37 = requested && freezeAuthority !== null); tests that need it
+    // pass a non-null freezeAuthority explicitly.
+    freezeAuthority: null,
+    feePayer: PLACEHOLDER_FEE_PAYER,
     enableTokenAcl: true,
     ...overrides,
   };
@@ -118,10 +137,8 @@ describe("MosaicService.createToken — Kora sponsorship", () => {
       await service.createToken(srfc37Options());
 
       expect(fee.getFeePayer).toHaveBeenCalledTimes(1);
-      // createStablecoinInitTransaction signature: (rpc, name, symbol, decimals,
-      // uri, mintAuthority, mint, feePayer, ...) → feePayer is positional arg 7.
-      const feePayerArg = builderSpy.mock.calls[0][7];
-      expect(feePayerArg).toBe(koraAddress);
+      const { feePayer } = stablecoinBuilderCall(builderSpy.mock.calls[0]);
+      expect(feePayer).toBe(koraAddress);
       expect(submitSpy).toHaveBeenCalledTimes(1);
     });
 
@@ -142,7 +159,7 @@ describe("MosaicService.createToken — Kora sponsorship", () => {
       );
 
       expect(fee.getFeePayer).toHaveBeenCalledTimes(1);
-      expect(builderSpy.mock.calls[0][7]).toBe(koraAddress);
+      expect(stablecoinBuilderCall(builderSpy.mock.calls[0]).feePayer).toBe(koraAddress);
     });
 
     it("falls back to options.feePayer when no fee sponsor is configured", async () => {
@@ -166,7 +183,20 @@ describe("MosaicService.createToken — Kora sponsorship", () => {
       );
 
       expect(fee.getFeePayer).not.toHaveBeenCalled();
-      expect(builderSpy.mock.calls[0][7]).toBe(ownFeePayer);
+      expect(stablecoinBuilderCall(builderSpy.mock.calls[0]).feePayer).toBe(ownFeePayer);
+    });
+
+    it("prepareCreateToken respects options.feePayer even when Kora is configured", async () => {
+      // A prepared transaction is submitted by the client, who cannot sign as
+      // Kora — so the fee payer must stay options.feePayer, not the sponsor.
+      vi.spyOn(Kit, "compileTransaction").mockReturnValue({ __sentinel: "compiled" } as never);
+      vi.spyOn(Kit, "getBase64EncodedWireTransaction").mockReturnValue("base64-tx" as never);
+
+      const result = await service.prepareCreateToken(srfc37Options());
+
+      expect(fee.getFeePayer).not.toHaveBeenCalled();
+      expect(stablecoinBuilderCall(builderSpy.mock.calls[0]).feePayer).toBe(signer.address);
+      expect(result.serializedTx).toBe("base64-tx");
     });
   });
 
@@ -281,8 +311,7 @@ describe("MosaicService.createToken — Kora sponsorship", () => {
       // enableSrfc37 = false → no list, and the builder receives enableSrfc37=false.
       expect(result.listAddress).toBeUndefined();
       expect(listSpy).not.toHaveBeenCalled();
-      // createStablecoinInitTransaction enableSrfc37 is positional arg 13.
-      expect(builderSpy.mock.calls[0][13]).toBe(false);
+      expect(stablecoinBuilderCall(builderSpy.mock.calls[0]).enableSrfc37).toBe(false);
       expect(submitSpy).toHaveBeenCalledTimes(1);
     });
   });

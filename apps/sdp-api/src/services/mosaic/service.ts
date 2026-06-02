@@ -222,7 +222,10 @@ export class MosaicService {
       options,
       mintKeypair,
       aclMode,
-      enableSrfc37
+      enableSrfc37,
+      // Client-signed: the caller submits this transaction themselves, so it
+      // must use options.feePayer — they cannot produce a Kora signature.
+      true
     );
 
     return this.toMosaicTransaction(fullTx, mint);
@@ -233,13 +236,19 @@ export class MosaicService {
     options: CreateTokenOptions,
     mintKeypair: TransactionSigner,
     aclMode: "allowlist" | "blocklist",
-    enableSrfc37: boolean
+    enableSrfc37: boolean,
+    forClientSigning = false
   ): Promise<FullTransaction> {
     // Resolve fee payer - use Kora if available, otherwise from options. This
     // applies to sRFC-37 deploys too: the patched mosaic-sdk templates fund the
     // on-chain ABL/TACL setup from the fee payer (Kora) while keeping the mint
     // authority (custody) as the on-chain authority, so the two can differ.
-    const feePayer = this.feePayment ? await this.feePayment.getFeePayer() : options.feePayer;
+    //
+    // The Kora substitution only holds when the service submits the transaction
+    // itself (createToken). For client-signed transactions (prepareCreateToken)
+    // the caller cannot sign as Kora, so we must respect options.feePayer.
+    const feePayer =
+      this.feePayment && !forClientSigning ? await this.feePayment.getFeePayer() : options.feePayer;
     const mintAuthority =
       typeof options.mintAuthority === "string" && options.mintAuthority === this.signer.address
         ? this.signer
