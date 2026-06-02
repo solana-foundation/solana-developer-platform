@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.24.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.23.0...v0.24.0) (2026-06-02)
+
+### Features
+
+* HOO-600 support plugins in createApp and extensible env fallback keys ([#389](https://github.com/solana-foundation/solana-developer-platform/pull/389)) ([468349e](https://github.com/solana-foundation/solana-developer-platform/commit/468349e2661ef012bbed5efa6b66da87e505cacf))
+* add in webhook processing ([#388](https://github.com/solana-foundation/solana-developer-platform/pull/388)) ([b6f480e](https://github.com/solana-foundation/solana-developer-platform/commit/b6f480ec606eccf5c63dffeaed63cfd251b6ba39))
+* configure onramp base ([#385](https://github.com/solana-foundation/solana-developer-platform/pull/385)) ([1e61b6c](https://github.com/solana-foundation/solana-developer-platform/commit/1e61b6c446109c883c432cfbb182c5c4ba134431))
+* HOO-521 self-hosted .env configurator (docs page + CLI) ([#379](https://github.com/solana-foundation/solana-developer-platform/pull/379)) ([e66e1ff](https://github.com/solana-foundation/solana-developer-platform/commit/e66e1ff2543e7fc5727661446c9ed5b48b259cbc))
+* add in counterparty dropdown selection ([#378](https://github.com/solana-foundation/solana-developer-platform/pull/378)) ([e1247e4](https://github.com/solana-foundation/solana-developer-platform/commit/e1247e4a8df8109d1eaa2ea809785b81a62033ad))
+* HOO-524 CD pipeline + self-hosted runtime-configurable images ([#373](https://github.com/solana-foundation/solana-developer-platform/pull/373)) ([cb1e6ac](https://github.com/solana-foundation/solana-developer-platform/commit/cb1e6acaab42edb7d8ef791158fd53b449a9b8b0))
+* payments onramp v2 provider discovery ([#374](https://github.com/solana-foundation/solana-developer-platform/pull/374)) ([4c50b71](https://github.com/solana-foundation/solana-developer-platform/commit/4c50b71e9bd98b206aedbfa29232a87bbcc2dfe6))
+
+### Bug Fixes
+
+* batch Cloudflare Worker secret uploads ([#391](https://github.com/solana-foundation/solana-developer-platform/pull/391)) ([21f17bc](https://github.com/solana-foundation/solana-developer-platform/commit/21f17bc3ae5d9654060006a0e91ee5016a8b9262))
+* HOO-585 enforce project boundary in token reads and project scope ([#375](https://github.com/solana-foundation/solana-developer-platform/pull/375)) ([d2da9f3](https://github.com/solana-foundation/solana-developer-platform/commit/d2da9f3cde773134e512626a1fef5578bd2e3c21))
+* **sdp-api:** HOO-461 Auto-add mint destinations to on-chain allowlist ([#317](https://github.com/solana-foundation/solana-developer-platform/pull/317)) ([29bfd4a](https://github.com/solana-foundation/solana-developer-platform/commit/29bfd4a4b2cb0e1fa5652607c4b647d759fdba99))
+
+### Maintenance
+
+* **deps:** bump the minor-patch group across 1 directory with 21 updates ([#381](https://github.com/solana-foundation/solana-developer-platform/pull/381)) ([0a75c68](https://github.com/solana-foundation/solana-developer-platform/commit/0a75c684ba42e2ad2188d5beb93ab5853de33399))
+* **deps-dev:** bump @testcontainers/redis from 11.14.0 to 12.0.0 ([#384](https://github.com/solana-foundation/solana-developer-platform/pull/384)) ([2a60fde](https://github.com/solana-foundation/solana-developer-platform/commit/2a60fdec50b34c769cf736bb48038cf6e2959ae3))
+* **deps-dev:** bump @testcontainers/postgresql from 11.14.0 to 12.0.0 ([#383](https://github.com/solana-foundation/solana-developer-platform/pull/383)) ([c95f8e0](https://github.com/solana-foundation/solana-developer-platform/commit/c95f8e07882d281e330734d0a57172d4c7ffbab6))
+* **deps-dev:** bump testcontainers from 11.14.0 to 12.0.0 ([#382](https://github.com/solana-foundation/solana-developer-platform/pull/382)) ([ef06e18](https://github.com/solana-foundation/solana-developer-platform/commit/ef06e181e2a0fa39107e0dfdaedec5e7610b244e))
+* **deps:** bump @solana-program/system in the solana group ([#380](https://github.com/solana-foundation/solana-developer-platform/pull/380)) ([85679aa](https://github.com/solana-foundation/solana-developer-platform/commit/85679aa30fbc23728be4fa410ab3be16664fed7e))
+
 ## [0.23.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.22.0...v0.23.0) (2026-05-29)
 
 ### Features
