@@ -601,7 +601,7 @@ export const handleRampProviderWebhook = async (c: AppContext, environment: SdpE
   const rawBody = await c.req.raw.text();
 
   const result = await RAMP_PROVIDER_CLIENTS[provider].validateWebhook({
-    env: c.env,
+    env: c.env as unknown as Record<string, string | undefined>,
     environment,
     headers: c.req.raw.headers,
     rawBody,
