@@ -126,7 +126,8 @@ async function initializeCustodyWallet(formData: FormData) {
     | "para"
     | "turnkey"
     | "dfns"
-    | "anchorage";
+    | "anchorage"
+    | "utila";
   const walletLabel = getOptionalString(formData, "walletLabel");
   const network = getOptionalString(formData, "network");
   const walletAddress = getOptionalString(formData, "walletAddress");
@@ -201,6 +202,7 @@ async function createCustodyWalletForProvider(formData: FormData) {
     | "turnkey"
     | "dfns"
     | "anchorage"
+    | "utila"
     | undefined;
   const label = getOptionalString(formData, "label");
 

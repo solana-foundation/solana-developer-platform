@@ -1,5 +1,9 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { provisionCoinbaseCdpAccount, provisionParaWallet } from "@/services/custody/provisioning";
+import {
+  provisionCoinbaseCdpAccount,
+  provisionParaWallet,
+  provisionUtilaWallet,
+} from "@/services/custody/provisioning";
 import type { Env } from "@/types/env";
 
 const CREATED_ADDRESS = "11111111111111111111111111111111";
@@ -9,12 +13,14 @@ let keyMaterial: {
   privateKeyPem: string;
   privateKeyPkcs8Base64: string;
 };
+let utilaPrivateKeyPem: string;
+
+beforeAll(async () => {
+  keyMaterial = await createEs256KeyMaterial();
+  utilaPrivateKeyPem = await createRsaPrivateKeyPem();
+});
 
 describe("coinbase account provisioning", () => {
-  beforeAll(async () => {
-    keyMaterial = await createEs256KeyMaterial();
-  });
-
   afterEach(() => {
     vi.restoreAllMocks();
   });
@@ -188,6 +194,52 @@ describe("coinbase account provisioning", () => {
     ).rejects.toThrowError(/could not be resolved by name/i);
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("utila wallet provisioning", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("normalizes resource-style vault IDs before creating wallets", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
+        const url = toUrlString(input);
+
+        if (url.endsWith("/v2/vaults/vault_123/wallets") && init?.method === "POST") {
+          const body = JSON.parse(String(init.body ?? "{}")) as {
+            displayName?: string;
+            networks?: string[];
+          };
+          expect(body.displayName).toBe("Root Wallet");
+          expect(body.networks).toEqual(["networks/solana-devnet"]);
+
+          return jsonResponse(
+            {
+              wallet: {
+                name: "vaults/vault_123/wallets/wallet_abc",
+                solanaDetails: {
+                  address: CREATED_ADDRESS,
+                },
+              },
+            },
+            200
+          );
+        }
+
+        throw new Error(`Unexpected fetch call: ${init?.method ?? "GET"} ${url}`);
+      });
+
+    const result = await provisionUtilaWallet(createUtilaEnv(), {
+      displayName: "Root Wallet",
+    });
+
+    expect(result.walletId).toBe("wallet_abc");
+    expect(result.address).toBe(CREATED_ADDRESS);
+    expect(result.vaultId).toBe("vault_123");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -386,6 +438,18 @@ function createParaEnv(overrides: Partial<Env> = {}): Env {
   } as Env;
 }
 
+function createUtilaEnv(overrides: Partial<Env> = {}): Env {
+  return {
+    ENVIRONMENT: "development",
+    SOLANA_NETWORK: "devnet",
+    UTILA_SERVICE_ACCOUNT_EMAIL: "service-account@example.com",
+    UTILA_SERVICE_ACCOUNT_PRIVATE_KEY: utilaPrivateKeyPem,
+    UTILA_VAULT_ID: "vaults/vault_123",
+    UTILA_API_BASE_URL: "https://api.utila.io",
+    ...overrides,
+  } as Env;
+}
+
 function toUrlString(input: string | URL | Request): string {
   if (typeof input === "string") {
     return input;
@@ -430,4 +494,26 @@ async function createEs256KeyMaterial(): Promise<{
     privateKeyPem,
     privateKeyPkcs8Base64,
   };
+}
+
+async function createRsaPrivateKeyPem(): Promise<string> {
+  const keyPair = (await crypto.subtle.generateKey(
+    {
+      name: "RSASSA-PKCS1-v1_5",
+      modulusLength: 2048,
+      publicExponent: new Uint8Array([1, 0, 1]),
+      hash: "SHA-256",
+    },
+    true,
+    ["sign", "verify"]
+  )) as CryptoKeyPair;
+  const pkcs8Buffer = (await crypto.subtle.exportKey("pkcs8", keyPair.privateKey)) as ArrayBuffer;
+  const pkcs8 = new Uint8Array(pkcs8Buffer);
+  return encodePem("PRIVATE KEY", pkcs8);
+}
+
+function encodePem(label: string, bytes: Uint8Array): string {
+  const base64 = Buffer.from(bytes).toString("base64");
+  const lines = base64.match(/.{1,64}/g)?.join("\n") ?? base64;
+  return `-----BEGIN ${label}-----\n${lines}\n-----END ${label}-----`;
 }

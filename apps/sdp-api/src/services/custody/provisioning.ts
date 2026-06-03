@@ -48,6 +48,7 @@ const DEFAULT_PARA_API_BASE_URL = "https://api.getpara.com";
 const DEFAULT_TURNKEY_API_BASE_URL = "https://api.turnkey.com";
 const DEFAULT_COINBASE_CDP_NETWORK = "solana-devnet";
 const DEFAULT_FIREBLOCKS_ASSET_ID = "SOL";
+const DEFAULT_UTILA_NETWORK = "networks/solana-devnet";
 
 interface FireblocksVaultAccountResponse {
   id: string;
@@ -157,6 +158,23 @@ export interface ProvisionParaResult {
   address: string;
   userIdentifier: string;
   userIdentifierType: "CUSTOM_ID";
+}
+
+export interface ProvisionUtilaOptions {
+  serviceAccountEmail?: string;
+  serviceAccountPrivateKeyPem?: string;
+  vaultId?: string;
+  network?: "networks/solana-mainnet" | "networks/solana-devnet";
+  apiBaseUrl?: string;
+  /** Display name for the new sub-wallet inside the vault. */
+  displayName?: string;
+}
+
+export interface ProvisionUtilaResult {
+  walletId: string;
+  address: string;
+  vaultId: string;
+  network: "networks/solana-mainnet" | "networks/solana-devnet";
 }
 
 export async function provisionFireblocksVaultAccount(
@@ -534,6 +552,119 @@ export async function provisionTurnkeyPrivateKey(
   return { privateKeyId, address };
 }
 
+export async function provisionUtilaWallet(
+  env: Env,
+  options: ProvisionUtilaOptions
+): Promise<ProvisionUtilaResult> {
+  const serviceAccountEmail = options.serviceAccountEmail ?? env.UTILA_SERVICE_ACCOUNT_EMAIL;
+  const serviceAccountPrivateKeyPem =
+    options.serviceAccountPrivateKeyPem ?? env.UTILA_SERVICE_ACCOUNT_PRIVATE_KEY;
+  const configuredVaultId = options.vaultId ?? env.UTILA_VAULT_ID;
+  const network = resolveUtilaNetwork(env, options.network);
+
+  if (!serviceAccountEmail || !serviceAccountPrivateKeyPem || !configuredVaultId) {
+    throw new SigningError(
+      "Utila environment variables not configured: UTILA_SERVICE_ACCOUNT_EMAIL, UTILA_SERVICE_ACCOUNT_PRIVATE_KEY, UTILA_VAULT_ID",
+      "PROVIDER_NOT_CONFIGURED"
+    );
+  }
+
+  const vaultId = normalizeUtilaVaultId(configuredVaultId);
+  if (!vaultId) {
+    throw new SigningError(
+      "Utila vault ID is empty after normalization",
+      "PROVIDER_NOT_CONFIGURED"
+    );
+  }
+
+  // Create a new Solana sub-wallet inside the configured vault. Passing `networks`
+  // makes Utila derive the Solana address as part of wallet creation.
+  const apiBaseUrl = normalizeUtilaApiBaseUrl(options.apiBaseUrl ?? env.UTILA_API_BASE_URL);
+  const token = await mintUtilaAccessToken(serviceAccountEmail, serviceAccountPrivateKeyPem);
+
+  const response = await fetch(`${apiBaseUrl}/v2/vaults/${encodeURIComponent(vaultId)}/wallets`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+    body: JSON.stringify({
+      displayName: options.displayName ?? "SDP Wallet",
+      networks: [network],
+    }),
+  });
+
+  if (!response.ok) {
+    const detail = await safeReadUtilaError(response);
+    throw new SigningError(
+      `Utila CreateWallet failed (${response.status}): ${detail}`,
+      "NETWORK_ERROR"
+    );
+  }
+
+  const body = (await response.json()) as UtilaCreateWalletResponse;
+  const walletId = extractUtilaWalletId(body.wallet?.name);
+  const address = body.wallet?.solanaDetails?.address;
+
+  if (!walletId || !address) {
+    throw new SigningError(
+      "Utila CreateWallet response missing wallet id or Solana address",
+      "NETWORK_ERROR"
+    );
+  }
+
+  return { walletId, address, vaultId, network };
+}
+
+interface UtilaCreateWalletResponse {
+  wallet?: {
+    name?: string;
+    solanaDetails?: { address?: string };
+  };
+}
+
+const UTILA_API_AUDIENCE = "https://api.utila.io/";
+const DEFAULT_UTILA_API_BASE_URL = "https://api.utila.io";
+
+/** Mint a short-lived Utila service-account JWT for the REST API. */
+async function mintUtilaAccessToken(
+  serviceAccountEmail: string,
+  serviceAccountPrivateKeyPem: string
+): Promise<string> {
+  const privateKey = await importPKCS8(normalizePem(serviceAccountPrivateKeyPem), "RS256");
+  return new SignJWT({})
+    .setProtectedHeader({ alg: "RS256" })
+    .setSubject(serviceAccountEmail)
+    .setAudience(UTILA_API_AUDIENCE)
+    .setExpirationTime("5m")
+    .sign(privateKey);
+}
+
+function normalizeUtilaApiBaseUrl(value?: string): string {
+  return (value ?? DEFAULT_UTILA_API_BASE_URL).replace(/\/+$/, "");
+}
+
+function normalizeUtilaVaultId(value: string): string {
+  const trimmed = value.trim();
+  const marker = "/vaults/";
+  const markerIndex = trimmed.lastIndexOf(marker);
+  const resourceId = markerIndex === -1 ? trimmed : trimmed.slice(markerIndex + marker.length);
+  return resourceId.startsWith("vaults/") ? resourceId.slice("vaults/".length) : resourceId;
+}
+
+/** Extract the short wallet id from a `vaults/{vault}/wallets/{wallet}` resource name. */
+function extractUtilaWalletId(name?: string): string | undefined {
+  if (!name) return undefined;
+  const marker = "/wallets/";
+  const index = name.lastIndexOf(marker);
+  return index === -1 ? name : name.slice(index + marker.length);
+}
+
+async function safeReadUtilaError(response: Response): Promise<string> {
+  try {
+    return (await response.text()).slice(0, 300);
+  } catch {
+    return response.statusText;
+  }
+}
+
 interface FireblocksRequestParams {
   apiBaseUrl: string;
   apiKey: string;
@@ -759,4 +890,17 @@ function findSolanaAddress(
 
 function denormalizeTurnkeyPrivateKeyId(privateKeyId: string): string {
   return privateKeyId.startsWith("turnkey_") ? privateKeyId.slice("turnkey_".length) : privateKeyId;
+}
+
+function resolveUtilaNetwork(
+  env: Env,
+  configured?: "networks/solana-mainnet" | "networks/solana-devnet"
+): "networks/solana-mainnet" | "networks/solana-devnet" {
+  if (configured) {
+    return configured;
+  }
+  if (env.UTILA_NETWORK) {
+    return env.UTILA_NETWORK;
+  }
+  return env.SOLANA_NETWORK === "mainnet-beta" ? "networks/solana-mainnet" : DEFAULT_UTILA_NETWORK;
 }

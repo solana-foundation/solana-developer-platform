@@ -17,8 +17,8 @@
   "dependencies": {
     "@sdp/types": "workspace:*",
     "@solana-program/system": "catalog:",
-    "@solana/keychain-cdp": "1.2.0",
-    "@solana/keychain-para": "1.2.0",
+    "@solana/keychain-cdp": "1.3.0",
+    "@solana/keychain-para": "1.3.0",
     "@solana/kit": "catalog:"
   },
   "devDependencies": {

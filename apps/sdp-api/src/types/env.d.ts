@@ -96,7 +96,8 @@ export interface Env {
   | "para"
   | "turnkey"
   | "dfns"
-  | "anchorage";
+  | "anchorage"
+  | "utila";
   FEE_PAYER_PRIVATE_KEY?: string;
 
   // Fireblocks configuration (@solana/keychain-fireblocks)
@@ -147,6 +148,17 @@ export interface Env {
   // Anchorage wallet lifecycle configuration
   ANCHORAGE_API_KEY?: string;
   ANCHORAGE_API_BASE_URL?: string;
+
+  // Utila Server Wallet configuration (Solana)
+  UTILA_SERVICE_ACCOUNT_EMAIL?: string;
+  UTILA_SERVICE_ACCOUNT_PRIVATE_KEY?: string;
+  UTILA_VAULT_ID?: string;
+  UTILA_WALLET_ID?: string;
+  UTILA_NETWORK?: "networks/solana-devnet" | "networks/solana-mainnet";
+  UTILA_API_BASE_URL?: string;
+  UTILA_POLL_INTERVAL_MS?: string;
+  UTILA_MAX_POLL_ATTEMPTS?: string;
+  UTILA_DESIGNATED_SIGNERS?: string;
 
   // Kora (gasless) configuration
   FEE_PAYMENT_PROVIDER?: "kora" | "native";

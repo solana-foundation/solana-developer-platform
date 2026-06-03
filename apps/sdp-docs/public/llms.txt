@@ -3,7 +3,7 @@
 > Public documentation and API discovery resources for Solana Developer Platform.
 
 ## Canonical URLs
-- Docs: https://platform.solana.com/docs
+- Docs: https://platform.solana.com
 - API: https://api.solana.com
 - Interactive API docs: https://api.solana.com/docs
 - OpenAPI: https://api.solana.com/openapi.json

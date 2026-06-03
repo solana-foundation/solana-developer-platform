@@ -7,6 +7,7 @@ export const CUSTODY_PROVIDERS = [
   "turnkey",
   "dfns",
   "anchorage",
+  "utila",
 ] as const;
 
 export type CustodyProvider = (typeof CUSTODY_PROVIDERS)[number];
@@ -18,6 +19,7 @@ export const FULL_SIGNING_CUSTODY_PROVIDERS = [
   "para",
   "turnkey",
   "dfns",
+  "utila",
 ] as const;
 export type FullSigningCustodyProvider = (typeof FULL_SIGNING_CUSTODY_PROVIDERS)[number];
 
@@ -67,6 +69,11 @@ export const CUSTODY_PROVIDER_CAPABILITIES: Record<CustodyProvider, CustodyProvi
     supportsSigning: false,
     supportsAdditionalWalletCreation: true,
     supportsWalletDeletion: true,
+  },
+  utila: {
+    supportsSigning: true,
+    supportsAdditionalWalletCreation: true,
+    supportsWalletDeletion: false,
   },
 };
 
@@ -129,6 +136,10 @@ export interface AnchorageCustodyOptions {
   network?: SolanaCustodyNetwork;
 }
 
+export interface UtilaCustodyOptions {
+  provider: "utila";
+}
+
 export interface InitializeLocalSigningRequest {
   provider: "local";
   projectId?: string;
@@ -170,6 +181,11 @@ export interface InitializeAnchorageSigningRequest extends AnchorageCustodyOptio
   walletLabel?: string;
 }
 
+export interface InitializeUtilaSigningRequest extends UtilaCustodyOptions {
+  projectId?: string;
+  walletLabel?: string;
+}
+
 export type InitializeSigningRequest =
   | InitializeLocalSigningRequest
   | InitializeFireblocksSigningRequest
@@ -178,7 +194,8 @@ export type InitializeSigningRequest =
   | InitializeParaSigningRequest
   | InitializeTurnkeySigningRequest
   | InitializeDfnsSigningRequest
-  | InitializeAnchorageSigningRequest;
+  | InitializeAnchorageSigningRequest
+  | InitializeUtilaSigningRequest;
 
 export interface SwitchFireblocksSigningRequest extends FireblocksCustodyOptions {
   projectId?: string;
@@ -192,7 +209,8 @@ export type SwitchSigningRequest =
   | InitializeParaSigningRequest
   | InitializeTurnkeySigningRequest
   | InitializeDfnsSigningRequest
-  | InitializeAnchorageSigningRequest;
+  | InitializeAnchorageSigningRequest
+  | InitializeUtilaSigningRequest;
 
 export interface CreateWalletRequest {
   projectId?: string;

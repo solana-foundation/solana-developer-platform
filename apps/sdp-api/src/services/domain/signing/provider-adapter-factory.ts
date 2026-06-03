@@ -8,6 +8,7 @@ import {
   KeychainParaAdapter,
   KeychainPrivyAdapter,
   KeychainTurnkeyAdapter,
+  KeychainUtilaAdapter,
   type SigningConfigRecord,
 } from "@/services/adapters";
 import { createDfnsApiClient, normalizeDfnsWalletId } from "@/services/dfns/client";
@@ -65,7 +66,6 @@ class LifecycleOnlyAdapter implements SigningPort {
 
 const providerAdapterFactories = {
   local: async ({ env, orgId, parsed }) => {
-    // biome-ignore lint/security/noSecrets: Config field name check, not a secret value.
     if (!("encryptedPrivateKey" in parsed) || !parsed.encryptedPrivateKey) {
       throw new SigningError(
         "Local custody config missing encrypted private key",
@@ -78,7 +78,6 @@ const providerAdapterFactories = {
     return KeychainMemoryAdapter.fromBase58(privateKeyBase58);
   },
   fireblocks: async ({ env, orgId, parsed }) => {
-    // biome-ignore lint/security/noSecrets: Config field name check, not a secret value.
     if (!("apiSecretEncrypted" in parsed) || !parsed.apiSecretEncrypted) {
       throw new SigningError(
         "Fireblocks config missing encrypted API secret",
@@ -247,6 +246,36 @@ const providerAdapterFactories = {
     });
   },
   anchorage: async () => new LifecycleOnlyAdapter("anchorage"),
+  utila: async ({ env, record, parsed }) => {
+    const serviceAccountEmail = env.UTILA_SERVICE_ACCOUNT_EMAIL;
+    const serviceAccountPrivateKeyPem = env.UTILA_SERVICE_ACCOUNT_PRIVATE_KEY;
+    const vaultId = parsed.vaultId ?? env.UTILA_VAULT_ID;
+
+    if (!serviceAccountEmail || !serviceAccountPrivateKeyPem || !vaultId) {
+      throw new SigningError(
+        "Utila configuration is missing service account credentials or vault ID",
+        "PROVIDER_NOT_CONFIGURED"
+      );
+    }
+
+    return new KeychainUtilaAdapter({
+      serviceAccountEmail,
+      serviceAccountPrivateKeyPem,
+      vaultId,
+      network: resolveUtilaNetwork(env, parsed.network),
+      apiBaseUrl: parsed.apiBaseUrl ?? env.UTILA_API_BASE_URL,
+      pollIntervalMs: parseOptionalPositiveInteger(
+        env.UTILA_POLL_INTERVAL_MS,
+        "UTILA_POLL_INTERVAL_MS"
+      ),
+      maxPollAttempts: parseOptionalPositiveInteger(
+        env.UTILA_MAX_POLL_ATTEMPTS,
+        "UTILA_MAX_POLL_ATTEMPTS"
+      ),
+      designatedSigners: parseCsvList(env.UTILA_DESIGNATED_SIGNERS),
+      defaultWalletId: record.defaultWalletId ?? undefined,
+    });
+  },
 } satisfies {
   [K in ProviderConfigRecord["provider"]]: AdapterFactory<
     Extract<ProviderConfigRecord, { provider: K }>
@@ -261,4 +290,39 @@ export async function createAdapterFromEncryptedConfig(
   const parsed = await parseConfigRecord(env, orgId, record);
   const factory = providerAdapterFactories[parsed.provider] as AdapterFactory;
   return factory({ env, orgId, record, parsed });
+}
+
+function resolveUtilaNetwork(
+  env: Env,
+  configured?: "networks/solana-mainnet" | "networks/solana-devnet"
+): "networks/solana-mainnet" | "networks/solana-devnet" {
+  if (configured) {
+    return configured;
+  }
+  if (env.UTILA_NETWORK) {
+    return env.UTILA_NETWORK;
+  }
+  return env.SOLANA_NETWORK === "mainnet-beta"
+    ? "networks/solana-mainnet"
+    : "networks/solana-devnet";
+}
+
+function parseOptionalPositiveInteger(
+  value: string | undefined,
+  envVarName: string
+): number | undefined {
+  if (!value) return undefined;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new SigningError(`${envVarName} must be a positive integer`, "INVALID_REQUEST");
+  }
+  return parsed;
+}
+
+function parseCsvList(value: string | undefined): string[] | undefined {
+  const items = value
+    ?.split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  return items && items.length > 0 ? items : undefined;
 }
