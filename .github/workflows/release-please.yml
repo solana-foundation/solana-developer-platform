@@ -29,6 +29,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
+          RELEASE_GIT_SIGNING_KEY: ${{ secrets.RELEASE_GIT_SIGNING_KEY }}
+          RELEASE_GIT_USER_EMAIL: ${{ vars.RELEASE_GIT_USER_EMAIL }}
+          RELEASE_GIT_USER_NAME: ${{ vars.RELEASE_GIT_USER_NAME }}
         run: node .github/scripts/release-flow.mjs prepare
 
   publish-release:
@@ -50,4 +53,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
+          RELEASE_GIT_SIGNING_KEY: ${{ secrets.RELEASE_GIT_SIGNING_KEY }}
+          RELEASE_GIT_USER_EMAIL: ${{ vars.RELEASE_GIT_USER_EMAIL }}
+          RELEASE_GIT_USER_NAME: ${{ vars.RELEASE_GIT_USER_NAME }}
         run: node .github/scripts/release-flow.mjs publish

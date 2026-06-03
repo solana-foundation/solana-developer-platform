@@ -1,19 +1,27 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 const mode = process.argv[2];
 const dryRun = process.argv.includes("--dry-run");
+const skipRemote = process.argv.includes("--skip-remote");
 
 const repo = process.env.GITHUB_REPOSITORY ?? detectRepositoryFromGit();
 const token = process.env.GITHUB_TOKEN;
+const releaseGitUserName = process.env.RELEASE_GIT_USER_NAME?.trim() ?? "";
+const releaseGitUserEmail = process.env.RELEASE_GIT_USER_EMAIL?.trim() ?? "";
+const releaseGitSigningKey = process.env.RELEASE_GIT_SIGNING_KEY ?? "";
+const releaseGitSigningKeyPath = process.env.RELEASE_GIT_SIGNING_KEY_PATH?.trim() ?? "";
 
 if (!mode || !["prepare", "publish"].includes(mode)) {
-  console.error("Usage: node .github/scripts/release-flow.mjs <prepare|publish> [--dry-run]");
+  console.error(
+    "Usage: node .github/scripts/release-flow.mjs <prepare|publish> [--dry-run] [--skip-remote]"
+  );
   process.exit(1);
 }
 
-if (!dryRun && (!repo || !token)) {
+if (!dryRun && !skipRemote && (!repo || !token)) {
   console.error("GITHUB_REPOSITORY and GITHUB_TOKEN are required");
   process.exit(1);
 }
@@ -45,6 +53,65 @@ function git(args, options = {}) {
   }
 
   return output.trim();
+}
+
+function releaseGitSigningKeyDestination() {
+  if (releaseGitSigningKeyPath) {
+    return releaseGitSigningKeyPath;
+  }
+
+  if (!releaseGitSigningKey.trim()) {
+    return null;
+  }
+
+  return path.join(process.env.RUNNER_TEMP || os.tmpdir(), "sdp-release-signing-key");
+}
+
+function ensureReleaseGitSigningKey() {
+  const signingKeyPath = releaseGitSigningKeyDestination();
+  if (!signingKeyPath) {
+    throw new Error(
+      "Release signing requires RELEASE_GIT_SIGNING_KEY or RELEASE_GIT_SIGNING_KEY_PATH"
+    );
+  }
+
+  if (releaseGitSigningKey.trim()) {
+    const normalizedKey = releaseGitSigningKey.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+    fs.mkdirSync(path.dirname(signingKeyPath), { recursive: true });
+    fs.writeFileSync(
+      signingKeyPath,
+      normalizedKey.endsWith("\n") ? normalizedKey : `${normalizedKey}\n`,
+      { mode: 0o600 }
+    );
+  }
+
+  if (!fs.existsSync(signingKeyPath)) {
+    throw new Error(`Release signing key path does not exist: ${signingKeyPath}`);
+  }
+
+  fs.chmodSync(signingKeyPath, 0o600);
+  return signingKeyPath;
+}
+
+function configureReleaseGitSigning() {
+  if (!releaseGitUserName || !releaseGitUserEmail) {
+    throw new Error("Release signing requires RELEASE_GIT_USER_NAME and RELEASE_GIT_USER_EMAIL");
+  }
+
+  const signingKeyPath = ensureReleaseGitSigningKey();
+  git(["config", "user.name", releaseGitUserName], { capture: false });
+  git(["config", "user.email", releaseGitUserEmail], { capture: false });
+  git(["config", "gpg.format", "ssh"], { capture: false });
+  git(["config", "user.signingkey", signingKeyPath], { capture: false });
+  git(["config", "commit.gpgsign", "true"], { capture: false });
+  git(["config", "tag.gpgSign", "true"], { capture: false });
+}
+
+function assertGitObjectHasSshSignature(revision, label) {
+  const object = git(["cat-file", "-p", revision]);
+  if (!object.includes("-----BEGIN SSH SIGNATURE-----")) {
+    throw new Error(`${label} was not signed with the configured SSH signing key`);
+  }
 }
 
 function detectRepositoryFromGit() {
@@ -352,6 +419,7 @@ async function prepareRelease() {
   }
 
   ensureCleanTree();
+  configureReleaseGitSigning();
 
   git(["checkout", "-B", releaseBranch], { capture: false });
 
@@ -374,30 +442,31 @@ async function prepareRelease() {
     return;
   }
 
-  git(["config", "user.name", "github-actions[bot]"], { capture: false });
-  // biome-ignore lint/security/noSecrets: Public GitHub Actions bot noreply address, not a secret.
-  git(["config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com"], {
-    capture: false,
-  });
   git(["add", "package.json", "CHANGELOG.md", ".github/.release-please-manifest.json"], {
     capture: false,
   });
-  git(["commit", "-m", `chore(main): release ${nextVersion}`], { capture: false });
-  git(
-    [
-      "push",
-      `https://x-access-token:${token}@github.com/${repo}.git`,
-      `HEAD:${releaseBranch}`,
-      "--force",
-    ],
-    { capture: false }
-  );
+  git(["commit", "-S", "-m", `chore(main): release ${nextVersion}`], { capture: false });
+  assertGitObjectHasSshSignature("HEAD", "Release commit");
 
-  const prNumber = await upsertReleasePullRequest(
-    nextVersion,
-    releasePrBody(nextVersion, sectionMarkdown)
-  );
-  console.log(`Release PR ready: #${prNumber}`);
+  if (skipRemote) {
+    console.log("Skipping release branch push and PR upsert (--skip-remote)");
+  } else {
+    git(
+      [
+        "push",
+        `https://x-access-token:${token}@github.com/${repo}.git`,
+        `HEAD:${releaseBranch}`,
+        "--force-with-lease",
+      ],
+      { capture: false }
+    );
+
+    const prNumber = await upsertReleasePullRequest(
+      nextVersion,
+      releasePrBody(nextVersion, sectionMarkdown)
+    );
+    console.log(`Release PR ready: #${prNumber}`);
+  }
 }
 
 async function publishRelease() {
@@ -423,12 +492,15 @@ async function publishRelease() {
     return;
   }
 
-  git(["config", "user.name", "github-actions[bot]"], { capture: false });
-  // biome-ignore lint/security/noSecrets: Public GitHub Actions bot noreply address, not a secret.
-  git(["config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com"], {
-    capture: false,
-  });
-  git(["tag", "-a", tagName, "-m", tagName], { capture: false });
+  configureReleaseGitSigning();
+  git(["tag", "-s", tagName, "-m", tagName], { capture: false });
+  assertGitObjectHasSshSignature(tagName, `Release tag ${tagName}`);
+
+  if (skipRemote) {
+    console.log("Skipping release tag push and GitHub release publish (--skip-remote)");
+    return;
+  }
+
   git(["push", `https://x-access-token:${token}@github.com/${repo}.git`, tagName], {
     capture: false,
   });
