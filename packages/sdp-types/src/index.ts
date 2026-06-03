@@ -7,6 +7,7 @@ export * from "./counterparties";
 export * from "./custody";
 export * from "./generated/ramp-support.generated";
 export * from "./organizations";
+export * from "./pagination";
 export * from "./payment-rails";
 export * from "./payments";
 export * from "./permissions";

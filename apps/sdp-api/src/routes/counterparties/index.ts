@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import type { Env } from "@/types/env";
+import counterpartyAccounts from "../counterparty-accounts";
 import {
   archiveCounterparty,
   createCounterparty,
@@ -28,5 +29,7 @@ counterparties.delete(
   requirePermissions("counterparties:write"),
   archiveCounterparty
 );
+
+counterparties.route("/:counterpartyId/accounts", counterpartyAccounts);
 
 export default counterparties;

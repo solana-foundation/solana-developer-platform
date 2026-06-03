@@ -6,6 +6,7 @@ import { StepFooter } from "./components/step-footer";
 import { StepIndicator } from "./components/step-indicator";
 import { useCounterpartyCreate } from "./counterparty-create-context";
 import type { StepId } from "./counterparty-create-schemas";
+import { CryptoAccountsPhase } from "./crypto-accounts-phase";
 
 const stepMeta: Record<StepId, { label: string; title: string; description: string }> = {
   basics: {
@@ -37,10 +38,14 @@ const variants = {
 };
 
 export function CounterpartyCreatePage() {
-  const { step, steps, currentStepId, direction } = useCounterpartyCreate();
+  const { step, steps, currentStepId, direction, createdCounterparty } = useCounterpartyCreate();
+
+  if (createdCounterparty) {
+    return <CryptoAccountsPhase />;
+  }
 
   return (
-    <div className="mx-auto flex h-[40rem] max-w-xl flex-col py-4">
+    <div className="mx-auto flex h-[70vh] max-w-xl flex-col py-4">
       <StepIndicator steps={steps} step={step} />
 
       <div className="relative mt-6 min-h-0 flex-1 overflow-hidden">

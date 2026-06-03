@@ -221,6 +221,36 @@ function DashboardTopBar({
   );
 }
 
+function getCounterpartyRoutePageConfig(pathname: string): DashboardPageConfig | null {
+  if (pathname === "/dashboard/payments/counterparty/create") {
+    return {
+      title: "",
+      hideTitle: true,
+      showHeaderNavRow: true,
+      centeredTitle: "New Counterparty",
+      topBarLeadingContent: (
+        <HeaderBackAction
+          href="/dashboard/payments/counterparty"
+          label="Back to Counterparty"
+          compactOnMobile
+        />
+      ),
+      contentWidthClass: "max-w-xl",
+    };
+  }
+  if (pathname.startsWith("/dashboard/payments/counterparty/")) {
+    return {
+      title: "Manage Counterparty",
+      contentWidthClass: "max-w-none",
+      backAction: {
+        href: "/dashboard/payments/counterparty",
+        label: "Back to Counterparty",
+      },
+    };
+  }
+  return null;
+}
+
 function getDashboardPageConfig(pathname: string): DashboardPageConfig {
   if (pathname === "/dashboard") {
     return {
@@ -299,21 +329,9 @@ function getDashboardPageConfig(pathname: string): DashboardPageConfig {
       contentWidthClass: "max-w-none",
     };
   }
-  if (pathname.startsWith("/dashboard/payments/counterparty/")) {
-    return {
-      title: "",
-      hideTitle: true,
-      showHeaderNavRow: true,
-      centeredTitle: "New Counterparty",
-      topBarLeadingContent: (
-        <HeaderBackAction
-          href="/dashboard/payments/counterparty"
-          label="Back to Counterparty"
-          compactOnMobile
-        />
-      ),
-      contentWidthClass: "max-w-xl",
-    };
+  const counterpartyRouteConfig = getCounterpartyRoutePageConfig(pathname);
+  if (counterpartyRouteConfig) {
+    return counterpartyRouteConfig;
   }
   if (pathname === "/dashboard/payments") {
     return {
@@ -608,6 +626,8 @@ export function DashboardShell({ children }: { children: ReactNode }) {
     pathname === "/dashboard/wallets" ||
     pathname === "/dashboard/custody" ||
     pathname === "/dashboard/payments/counterparty" ||
+    (pathname.startsWith("/dashboard/payments/counterparty/") &&
+      pathname !== "/dashboard/payments/counterparty/create") ||
     isWalletDetailRoute;
   const shouldLockViewportScroll = shouldUseWorkspaceViewport;
   const shouldLockShellViewport = shouldLockViewportScroll || isMobileSidebarOpen;

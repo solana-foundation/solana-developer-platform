@@ -156,6 +156,11 @@ function resolveRiskTone(result: ComplianceProviderResult): RiskTone {
   return "neutral";
 }
 
+/** Providers that flagged the address as high risk (red tone). */
+export function getHighRiskProviders(snapshot: ComplianceSnapshot): ComplianceProviderResult[] {
+  return snapshot.providers.filter((result) => resolveRiskTone(result) === "red");
+}
+
 export function riskToneClassName(result: ComplianceProviderResult): string {
   const tone = resolveRiskTone(result);
   if (tone === "green") {

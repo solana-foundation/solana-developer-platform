@@ -42,6 +42,11 @@ interface CounterpartyCreateContextValue {
   submit: () => Promise<void>;
   submitting: boolean;
   submitError: string | null;
+
+  // After a successful create we move to an optional "attach accounts" phase
+  // for the freshly created counterparty.
+  createdCounterparty: Counterparty | null;
+  finish: () => void;
 }
 
 const CounterpartyCreateContext = createContext<CounterpartyCreateContextValue | null>(null);
@@ -65,6 +70,7 @@ export function CounterpartyCreateProvider({
   const [direction, setDirection] = useState<1 | -1>(1);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [createdCounterparty, setCreatedCounterparty] = useState<Counterparty | null>(null);
 
   const steps = useMemo(() => getSteps(basics.values.entityType), [basics.values.entityType]);
   const currentStepId = steps[step] ?? "basics";
@@ -125,23 +131,29 @@ export function CounterpartyCreateProvider({
         return;
       }
 
-      toast.success("Counterparty created", { position: "bottom-right" });
-
-      if (onCreated) {
-        const created = result.data?.data?.counterparty;
-        if (created) {
-          onCreated(created);
-        }
+      const created = result.data?.data?.counterparty ?? null;
+      if (!created) {
+        setSubmitError("Counterparty was created but could not be loaded.");
         return;
       }
 
-      router.refresh();
-      router.push("/dashboard/payments/counterparty");
+      toast.success("Counterparty created", { position: "bottom-right" });
+      setCreatedCounterparty(created);
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : "Something went wrong");
     } finally {
       setSubmitting(false);
     }
+  }
+
+  function finish() {
+    if (onCreated && createdCounterparty) {
+      onCreated(createdCounterparty);
+      return;
+    }
+
+    router.refresh();
+    router.push("/dashboard/payments/counterparty");
   }
 
   return (
@@ -159,6 +171,8 @@ export function CounterpartyCreateProvider({
         submit,
         submitting,
         submitError,
+        createdCounterparty,
+        finish,
       }}
     >
       {children}
