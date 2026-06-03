@@ -142,5 +142,18 @@ if scenario "idempotent" -- "
 "; then check "does not clobber an existing .env.example" 0
 else check "does not clobber an existing .env.example" 1; fi
 
+# 9. Failed upgrade -> a previously-working compose.yml survives a corrupt re-download.
+if scenario "preserve-on-failed-upgrade" -- "
+  $DOCKER_OK
+  mkdir -p /root/sdp
+  printf 'sentinel: keep-me\n' > /root/sdp/compose.yml
+  echo 'tampered: true' >> /release/compose.yml
+  out=\$(bash /src/infra/self-hosted/install.sh 2>&1); rc=\$?
+  [ \$rc -ne 0 ] \
+    && echo \"\$out\" | grep -qi 'checksum verification failed' \
+    && grep -qx 'sentinel: keep-me' /root/sdp/compose.yml
+"; then check "preserves the existing compose.yml when the new download fails verification" 0
+else check "preserves the existing compose.yml when the new download fails verification" 1; fi
+
 echo "----"; echo "PASS=$pass FAIL=$fail"
 [ "$fail" -eq 0 ]

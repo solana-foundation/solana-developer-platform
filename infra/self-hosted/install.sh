@@ -107,15 +107,19 @@ verify_signature() {
   fi
 }
 
-# verify <asset-name> against its line in the downloaded SHA256SUMS, fail closed.
+# verify <asset-name> [file-path]: check file-path (default $INSTALL_DIR/<asset-name>)
+# against the checksum recorded for <asset-name> in the downloaded SHA256SUMS. The
+# split lets us verify a download under a temp path before swapping it into place.
+# Fail closed.
 verify() {
-  local line
-  line="$(awk -v f="$1" '$2 == f { print; exit }' "$INSTALL_DIR/SHA256SUMS")"
-  if [ -z "$line" ]; then
+  local file="${2:-$INSTALL_DIR/$1}" want have
+  want="$(awk -v f="$1" '$2 == f { print $1; exit }' "$INSTALL_DIR/SHA256SUMS")"
+  if [ -z "$want" ]; then
     err "No checksum recorded for $1 in SHA256SUMS. Refusing to continue."
     exit 1
   fi
-  if ! (cd "$INSTALL_DIR" && printf '%s\n' "$line" | _sha256sum -c -) >/dev/null 2>&1; then
+  have="$(_sha256sum "$file" | awk '{print $1}')"
+  if [ "$have" != "$want" ]; then
     err "Checksum verification failed for $1. Refusing to continue."
     exit 1
   fi
@@ -145,8 +149,12 @@ main() {
   verify_signature
   local had_compose=0
   if [ -f "$INSTALL_DIR/compose.yml" ]; then had_compose=1; fi
-  fetch compose.yml "$INSTALL_DIR/compose.yml"
-  verify compose.yml
+  local compose_tmp="$INSTALL_DIR/compose.yml.tmp.$$"
+  trap 'rm -f "$compose_tmp"' EXIT
+  fetch compose.yml "$compose_tmp"
+  verify compose.yml "$compose_tmp"
+  mv -f "$compose_tmp" "$INSTALL_DIR/compose.yml"
+  trap - EXIT
   if [ "$had_compose" -eq 1 ]; then
     printf '\nReplaced the existing compose.yml with the %s release.\n' "$VERSION"
   fi
