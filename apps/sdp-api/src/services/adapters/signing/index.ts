@@ -37,8 +37,8 @@ import {
   KeychainTurnkeyAdapter,
   type KeychainTurnkeyConfig,
   KeychainUtilaAdapter,
-  type KeychainUtilaConfig,
 } from "./keychain";
+import { buildKeychainUtilaConfig } from "./keychain/utila-config";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Types
@@ -371,34 +371,13 @@ async function createDfnsAdapterFromEnv(env: Env): Promise<KeychainDfnsAdapter> 
 }
 
 function createUtilaAdapterFromEnv(env: Env): KeychainUtilaAdapter {
-  const serviceAccountEmail = env.UTILA_SERVICE_ACCOUNT_EMAIL;
-  const serviceAccountPrivateKeyPem = env.UTILA_SERVICE_ACCOUNT_PRIVATE_KEY;
-  const vaultId = env.UTILA_VAULT_ID;
-
-  if (!serviceAccountEmail || !serviceAccountPrivateKeyPem || !vaultId) {
-    throw new SigningError(
-      "Utila environment variables not configured: UTILA_SERVICE_ACCOUNT_EMAIL, UTILA_SERVICE_ACCOUNT_PRIVATE_KEY, UTILA_VAULT_ID",
-      "PROVIDER_NOT_CONFIGURED"
-    );
-  }
-
-  return new KeychainUtilaAdapter({
-    serviceAccountEmail,
-    serviceAccountPrivateKeyPem,
-    vaultId,
-    network: resolveUtilaNetwork(env),
-    apiBaseUrl: env.UTILA_API_BASE_URL,
-    pollIntervalMs: parseOptionalPositiveInteger(
-      env.UTILA_POLL_INTERVAL_MS,
-      "UTILA_POLL_INTERVAL_MS"
-    ),
-    maxPollAttempts: parseOptionalPositiveInteger(
-      env.UTILA_MAX_POLL_ATTEMPTS,
-      "UTILA_MAX_POLL_ATTEMPTS"
-    ),
-    designatedSigners: parseCsvList(env.UTILA_DESIGNATED_SIGNERS),
-    defaultWalletId: env.UTILA_WALLET_ID ? normalizeUtilaWalletId(env.UTILA_WALLET_ID) : undefined,
-  });
+  return new KeychainUtilaAdapter(
+    buildKeychainUtilaConfig(env, {
+      defaultWalletIdFromEnv: true,
+      missingMessage:
+        "Utila environment variables not configured: UTILA_SERVICE_ACCOUNT_EMAIL, UTILA_SERVICE_ACCOUNT_PRIVATE_KEY, UTILA_VAULT_ID",
+    })
+  );
 }
 
 function createFireblocksAdapterFromRecord(record: SigningConfigRecord): KeychainFireblocksAdapter {
@@ -651,36 +630,15 @@ function createUtilaAdapterFromRecord(record: SigningConfigRecord, env: Env): Ke
     throw new SigningError("Custody configuration provider mismatch", "PROVIDER_NOT_CONFIGURED");
   }
 
-  const serviceAccountEmail = env.UTILA_SERVICE_ACCOUNT_EMAIL;
-  const serviceAccountPrivateKeyPem = env.UTILA_SERVICE_ACCOUNT_PRIVATE_KEY;
-  const vaultId = parsed.vaultId ?? env.UTILA_VAULT_ID;
-
-  if (!serviceAccountEmail || !serviceAccountPrivateKeyPem || !vaultId) {
-    throw new SigningError(
-      "Utila config missing service account credentials or vault ID",
-      "PROVIDER_NOT_CONFIGURED"
-    );
-  }
-
-  const config: KeychainUtilaConfig = {
-    serviceAccountEmail,
-    serviceAccountPrivateKeyPem,
-    vaultId,
-    network: resolveUtilaNetwork(env, parsed.network),
-    apiBaseUrl: parsed.apiBaseUrl ?? env.UTILA_API_BASE_URL,
-    pollIntervalMs: parseOptionalPositiveInteger(
-      env.UTILA_POLL_INTERVAL_MS,
-      "UTILA_POLL_INTERVAL_MS"
-    ),
-    maxPollAttempts: parseOptionalPositiveInteger(
-      env.UTILA_MAX_POLL_ATTEMPTS,
-      "UTILA_MAX_POLL_ATTEMPTS"
-    ),
-    designatedSigners: parseCsvList(env.UTILA_DESIGNATED_SIGNERS),
-    defaultWalletId: record.defaultWalletId ?? undefined,
-  };
-
-  return new KeychainUtilaAdapter(config);
+  return new KeychainUtilaAdapter(
+    buildKeychainUtilaConfig(env, {
+      apiBaseUrl: parsed.apiBaseUrl,
+      defaultWalletId: record.defaultWalletId,
+      missingMessage: "Utila config missing service account credentials or vault ID",
+      network: parsed.network,
+      vaultId: parsed.vaultId,
+    })
+  );
 }
 
 function parseOptionalRequestDelayMs(
@@ -704,52 +662,6 @@ function normalizeTurnkeyWalletId(privateKeyId: string): string {
 
 function normalizeParaWalletId(walletId: string): string {
   return walletId.startsWith("para_") ? walletId : `para_${walletId}`;
-}
-
-function normalizeUtilaWalletId(walletId: string): string {
-  const trimmed = trimUtilaWalletResource(walletId.trim());
-  return trimmed.startsWith("utila_") ? trimmed : `utila_${trimmed}`;
-}
-
-function trimUtilaWalletResource(value: string): string {
-  const marker = "/wallets/";
-  const markerIndex = value.lastIndexOf(marker);
-  return markerIndex === -1 ? value : value.slice(markerIndex + marker.length);
-}
-
-function resolveUtilaNetwork(
-  env: Env,
-  configured?: "networks/solana-mainnet" | "networks/solana-devnet"
-): "networks/solana-mainnet" | "networks/solana-devnet" {
-  if (configured) {
-    return configured;
-  }
-  if (env.UTILA_NETWORK) {
-    return env.UTILA_NETWORK;
-  }
-  return env.SOLANA_NETWORK === "mainnet-beta"
-    ? "networks/solana-mainnet"
-    : "networks/solana-devnet";
-}
-
-function parseOptionalPositiveInteger(
-  value: string | undefined,
-  envVarName: string
-): number | undefined {
-  if (!value) return undefined;
-  const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed <= 0) {
-    throw new SigningError(`${envVarName} must be a positive integer`, "INVALID_REQUEST");
-  }
-  return parsed;
-}
-
-function parseCsvList(value: string | undefined): string[] | undefined {
-  const items = value
-    ?.split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
-  return items && items.length > 0 ? items : undefined;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

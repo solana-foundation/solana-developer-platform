@@ -15,6 +15,7 @@ import {
   type TransactionWithinSizeLimit,
   type TransactionWithLifetime,
 } from "@solana/transactions";
+import { denormalizeUtilaWalletId } from "@/services/domain/signing/provider-wallet-ids";
 import type { SignRequest, SignResult } from "@/services/ports";
 import { SigningError } from "@/services/ports";
 import { BaseKeychainAdapter } from "./base-keychain.adapter";
@@ -25,14 +26,16 @@ type UtilaTransaction = Transaction & TransactionWithinSizeLimit & TransactionWi
 export class KeychainUtilaAdapter extends BaseKeychainAdapter {
   readonly providerId = "utila";
 
-  protected signer!: SolanaSigner;
-
   private readonly config: KeychainUtilaConfig;
   private readonly signerByWalletId = new Map<string, Promise<SolanaSigner>>();
 
   constructor(config: KeychainUtilaConfig) {
     super();
     this.config = config;
+  }
+
+  protected get signer(): SolanaSigner {
+    throw new SigningError("Utila signer must be resolved with a wallet ID", "INVALID_REQUEST");
   }
 
   /**
@@ -132,11 +135,4 @@ function toSignatureMap(signatureDict: SignatureDictionary | undefined): Map<Add
     signatures.set(addr as Address, sig as Uint8Array);
   }
   return signatures;
-}
-
-function denormalizeUtilaWalletId(walletId: string): string {
-  const unprefixed = walletId.startsWith("utila_") ? walletId.slice("utila_".length) : walletId;
-  const marker = "/wallets/";
-  const markerIndex = unprefixed.lastIndexOf(marker);
-  return markerIndex === -1 ? unprefixed : unprefixed.slice(markerIndex + marker.length);
 }
