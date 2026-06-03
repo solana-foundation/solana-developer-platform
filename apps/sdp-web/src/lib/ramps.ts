@@ -1,4 +1,8 @@
-import { ONRAMP_SUPPORT, type RampFiatCurrency } from "@sdp/types/generated/ramp-support";
+import {
+  OFFRAMP_SUPPORT,
+  ONRAMP_SUPPORT,
+  type RampFiatCurrency,
+} from "@sdp/types/generated/ramp-support";
 import type { CryptoRailId } from "@sdp/types/payment-rails";
 import type { RampProviderId } from "@sdp/types/provider-access";
 
@@ -38,6 +42,14 @@ export const ONRAMP_PAIRS: RampPair[] = ONRAMP_SUPPORT.map(({ source, dest, prov
   providers,
 }));
 
+// Offramp support is keyed crypto -> fiat (source is the asset rail, dest is the fiat
+// currency), the reverse of onramp. Normalize into the same RampPair shape.
+export const OFFRAMP_PAIRS: RampPair[] = OFFRAMP_SUPPORT.map(({ source, dest, providers }) => ({
+  fiatCurrency: dest,
+  assetRail: source,
+  providers,
+}));
+
 export const DEFAULT_RAMP_PAIR: SelectedRampPair = {
   fiatCurrency: "USD",
   assetRail: "usdc.solana",
@@ -53,6 +65,18 @@ export function findRampPair(
         pair.fiatCurrency === selectedPair.fiatCurrency && pair.assetRail === selectedPair.assetRail
     ) ?? null
   );
+}
+
+export function rampPairKey(pair: SelectedRampPair): string {
+  return `${pair.fiatCurrency}:${pair.assetRail}`;
+}
+
+export function toRampCryptoToken(assetRail: SelectedRampPair["assetRail"]): string {
+  return assetRail.split(".")[0]?.toUpperCase() ?? assetRail.toUpperCase();
+}
+
+export function getRampProviderLabel(provider: RampProviderId): string {
+  return RAMP_PROVIDER_OPTIONS.find((option) => option.id === provider)?.title ?? provider;
 }
 
 export function resolveDefaultRampPair(
