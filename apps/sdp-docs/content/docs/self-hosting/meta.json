@@ -1,4 +1,4 @@
 {
   "title": "Self-Hosting",
-  "pages": ["configurator"]
+  "pages": ["configurator", "external-co-signers"]
 }

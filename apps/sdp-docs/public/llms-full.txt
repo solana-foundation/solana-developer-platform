@@ -3344,6 +3344,59 @@ run `docker compose up -d`.
 
 ---
 
+### External Co-Signers
+Source: https://platform.solana.com/docs/self-hosting/external-co-signers
+
+> Host provider-specific signing automation outside the default self-hosted SDP stack.
+
+Some signing providers need an operator-managed co-signer or automation process
+in addition to the SDP API. Run those processes outside the default self-hosted
+SDP stack.
+
+`infra/self-hosted/compose.yml` is intentionally unchanged by default. It starts
+the SDP API, web app, docs app, database, cache, and migrations. Provider
+co-signers are separate operational services because they usually have their own
+secret handling, identity, ingress, and availability requirements.
+
+## Production pattern
+
+Use a managed container service such as Google Cloud Run, or the equivalent in
+your cloud, for provider-specific co-signer runtimes.
+
+- Use the provider- or operator-supplied co-signer image and runtime.
+- Store co-signer secrets in a cloud secret manager, not in the SDP compose file.
+- Run the co-signer with a dedicated service account that can read only the
+  secrets it needs.
+- Configure ingress and invoker IAM for the provider flow. Prefer private or
+  authenticated ingress when the provider does not require a public callback.
+- Set `minScale` to `1` when callback latency or provider availability matters;
+  use scale-to-zero only when cold starts are acceptable.
+- Keep development, staging, and production co-signers separated by provider
+  account, cloud project, service account, and secrets.
+- Alert on failed signing attempts, container restarts, authentication failures,
+  and stale or expired key material.
+
+## Utila readiness
+
+Utila is the motivating future provider for this pattern. When Utila signer
+support lands, the co-signer should be hosted as an external operator service,
+for example on Cloud Run, while SDP keeps its API, web, docs, database, and cache
+inside the normal self-hosted stack.
+
+This page does not make Utila a live SDP signing provider. Do not set
+`SIGNING_PROVIDER=utila` until the Utila signer integration explicitly adds that
+provider option and the required runtime configuration.
+
+Operator scaffolding for a Utila Cloud Run deployment lives in
+`infra/utila/cloud-run/`.
+
+That scaffold is intended to host the co-signer endpoint before Utila becomes a
+default self-hosted service. Operators can deploy their own co-signer image,
+protect the endpoint with Cloud Run IAM or runtime-level request verification,
+and pass the resulting service URL and token into a custom SDP Utila integration.
+
+---
+
 ## Reference
 
 ### Reference
@@ -3659,6 +3712,7 @@ Source: https://platform.solana.com/docs/reference/api/payments
 | `POST` | `/v1/payments/ramps/offramp/execute` | Execute off-ramp |
 | `GET` | `/v1/payments/ramps/onramp/currency` | List on-ramp currency support |
 | `POST` | `/v1/payments/ramps/onramp/execute` | Execute on-ramp |
+| `POST` | `/v1/payments/ramps/onramp/quote` | Create on-ramp quote |
 | `POST` | `/v1/payments/ramps/sandbox/simulate` | Simulate sandbox transfer |
 | `GET` | `/v1/payments/transfers` | List transfers |
 | `POST` | `/v1/payments/transfers` | Execute transfer (custody) |

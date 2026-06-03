@@ -1,0 +1,46 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: __COSIGNER_SERVICE_NAME__
+  labels:
+    app: utila-cosigner
+    env: __COSIGNER_ENVIRONMENT__
+  annotations:
+    # Set to "all" only when the provider requires a public callback and the
+    # co-signer runtime verifies every request.
+    run.googleapis.com/ingress: __COSIGNER_INGRESS__
+spec:
+  template:
+    metadata:
+      annotations:
+        # Use "1" for production when callback latency or signing availability
+        # matters. Scale to zero is usually only appropriate for development.
+        autoscaling.knative.dev/minScale: "__COSIGNER_MIN_SCALE__"
+        autoscaling.knative.dev/maxScale: "__COSIGNER_MAX_SCALE__"
+    spec:
+      serviceAccountName: __COSIGNER_SERVICE_ACCOUNT_EMAIL__
+      containers:
+        - image: __COSIGNER_IMAGE__
+          ports:
+            - name: http1
+              containerPort: __COSIGNER_CONTAINER_PORT__
+          env:
+            # Replace these placeholder names with the variables required by
+            # the Utila- or operator-supplied co-signer runtime.
+            - name: COSIGNER_CONFIG
+              valueFrom:
+                secretKeyRef:
+                  name: __COSIGNER_CONFIG_SECRET__
+                  key: __COSIGNER_CONFIG_SECRET_VERSION__
+            - name: COSIGNER_PRIVATE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: __COSIGNER_PRIVATE_KEY_SECRET__
+                  # Pin private key material to a reviewed Secret Manager
+                  # version. Deploy a new revision to rotate.
+                  key: "__COSIGNER_PRIVATE_KEY_SECRET_VERSION__"
+            - name: COSIGNER_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: __COSIGNER_AUTH_TOKEN_SECRET__
+                  key: "__COSIGNER_AUTH_TOKEN_SECRET_VERSION__"
