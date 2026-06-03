@@ -155,5 +155,17 @@ if scenario "preserve-on-failed-upgrade" -- "
 "; then check "preserves the existing compose.yml when the new download fails verification" 0
 else check "preserves the existing compose.yml when the new download fails verification" 1; fi
 
+# 10. A .env.example that fails verification leaves no file behind, so a re-run retries
+#     instead of treating the corrupt download as a kept existing file.
+if scenario "no-corrupt-env-example" -- "
+  $DOCKER_OK
+  echo 'TAMPERED=true' >> /release/.env.example
+  out=\$(bash /src/infra/self-hosted/install.sh 2>&1); rc=\$?
+  [ \$rc -ne 0 ] \
+    && echo \"\$out\" | grep -qi 'checksum verification failed' \
+    && [ ! -f /root/sdp/.env.example ]
+"; then check "leaves no .env.example behind when its download fails verification" 0
+else check "leaves no .env.example behind when its download fails verification" 1; fi
+
 echo "----"; echo "PASS=$pass FAIL=$fail"
 [ "$fail" -eq 0 ]

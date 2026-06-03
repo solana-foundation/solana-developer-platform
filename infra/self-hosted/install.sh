@@ -125,6 +125,19 @@ verify() {
   fi
 }
 
+# fetch_verified <asset-name> <dest>: download to a temp path, verify its checksum,
+# and swap it into <dest> only after verification passes. A corrupt or interrupted
+# download therefore never overwrites an existing good file nor leaves a partial one
+# behind; the temp is cleaned up on any exit.
+fetch_verified() {
+  local tmp="$2.tmp.$$"
+  trap 'rm -f "$tmp"' EXIT
+  fetch "$1" "$tmp"
+  verify "$1" "$tmp"
+  mv -f "$tmp" "$2"
+  trap - EXIT
+}
+
 # Echo a command that opens a URL in a browser, or nothing on a headless host.
 detect_opener() {
   if command -v open >/dev/null 2>&1; then echo open; return; fi
@@ -149,18 +162,12 @@ main() {
   verify_signature
   local had_compose=0
   if [ -f "$INSTALL_DIR/compose.yml" ]; then had_compose=1; fi
-  local compose_tmp="$INSTALL_DIR/compose.yml.tmp.$$"
-  trap 'rm -f "$compose_tmp"' EXIT
-  fetch compose.yml "$compose_tmp"
-  verify compose.yml "$compose_tmp"
-  mv -f "$compose_tmp" "$INSTALL_DIR/compose.yml"
-  trap - EXIT
+  fetch_verified compose.yml "$INSTALL_DIR/compose.yml"
   if [ "$had_compose" -eq 1 ]; then
     printf '\nReplaced the existing compose.yml with the %s release.\n' "$VERSION"
   fi
   if [ ! -f "$INSTALL_DIR/.env.example" ]; then
-    fetch .env.example "$INSTALL_DIR/.env.example"
-    verify .env.example
+    fetch_verified .env.example "$INSTALL_DIR/.env.example"
   else
     printf '\nKept your existing .env.example. Review the %s template for new variables:\n  %s/%s/.env.example\n' \
       "$VERSION" "$RELEASE_BASE_URL" "$VERSION"
