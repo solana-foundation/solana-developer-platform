@@ -49,6 +49,7 @@ describe("wallet-scoped route coverage inventory", () => {
       "GET /wallets/:walletId/balances",
       "GET /wallets/:walletId/policies",
       "POST /ramps/offramp/execute",
+      "POST /ramps/offramp/quote",
       "POST /ramps/onramp/execute",
       "POST /ramps/onramp/quote",
       "POST /transfers",
