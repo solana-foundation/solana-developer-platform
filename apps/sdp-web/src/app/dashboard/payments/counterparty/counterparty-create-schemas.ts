@@ -50,6 +50,19 @@ export const addressSchema = z.object({
   subdivisionCode: optionalUppercase(16),
 });
 
+// Only Solana is accepted for now; the list is the seam for adding networks later.
+export const CRYPTO_ACCOUNT_NETWORKS = ["solana"] as const;
+export type CryptoAccountNetwork = (typeof CRYPTO_ACCOUNT_NETWORKS)[number];
+
+export const cryptoAccountSchema = z.object({
+  label: optionalString(256),
+  network: z.enum(CRYPTO_ACCOUNT_NETWORKS),
+  address: z.string().trim().min(1, "Required").max(256),
+});
+
+export type CryptoAccountData = z.input<typeof cryptoAccountSchema>;
+export type CryptoAccountClean = z.output<typeof cryptoAccountSchema>;
+
 export type StepId = "basics" | "identity" | "address" | "review";
 
 export type BasicsData = z.input<typeof basicsSchema>;
