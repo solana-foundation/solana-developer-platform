@@ -63,7 +63,9 @@ export function CryptoAccountForm({ counterpartyId, onAdded }: CryptoAccountForm
     setSubmitting(false);
 
     if (!result.ok) {
+      setConfirm(null);
       setError(result.error);
+      toast.error(result.error, { position: "bottom-right" });
       return;
     }
 
@@ -75,9 +77,6 @@ export function CryptoAccountForm({ counterpartyId, onAdded }: CryptoAccountForm
     setConfirm(null);
   }
 
-  // Always screen the address first. Require confirmation both when a high-risk
-  // flag comes back AND when screening can't be completed (e.g. no enterprise
-  // compliance provider) — the user must acknowledge before adding.
   async function handleAdd() {
     if (!trimmedAddress) return;
     setError(null);

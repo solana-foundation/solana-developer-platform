@@ -6,7 +6,7 @@ export const counterpartyAccountKindSchema = z.enum(COUNTERPARTY_ACCOUNT_KINDS);
 
 const jsonObjectSchema = z.record(z.string(), z.unknown());
 
-const cryptoWalletDetailsSchema = z
+export const cryptoWalletDetailsSchema = z
   .object({
     network: z.string().min(1).max(64),
     address: z.string().min(1).max(256),

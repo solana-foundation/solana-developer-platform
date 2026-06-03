@@ -25,6 +25,7 @@ import {
   counterpartyAccountListParamsSchema,
   counterpartyAccountParamsSchema,
   createCounterpartyAccountSchema,
+  cryptoWalletDetailsSchema,
   listCounterpartyAccountsQuerySchema,
   updateCounterpartyAccountSchema,
 } from "./schemas";
@@ -190,7 +191,29 @@ export const updateCounterpartyAccount = async (c: AppContext) => {
     throw badRequest("Invalid request body", { errors: z.treeifyError(parsed.error) });
   }
 
-  const updated = await getCounterpartyAccountsRepository(c).updateCounterpartyAccount({
+  const repo = getCounterpartyAccountsRepository(c);
+
+  if (parsed.data.details !== undefined) {
+    const existing = await repo.getCounterpartyAccountById({
+      counterpartyAccountId: params.data.counterpartyAccountId,
+      counterpartyId: params.data.counterpartyId,
+      organizationId: auth.organizationId,
+      projectId,
+    });
+    if (!existing) {
+      throw notFound("Counterparty account");
+    }
+    if (existing.account_kind === "crypto_wallet") {
+      const result = cryptoWalletDetailsSchema.safeParse(parsed.data.details);
+      if (!result.success) {
+        throw badRequest("Invalid crypto_wallet details", {
+          errors: z.treeifyError(result.error),
+        });
+      }
+    }
+  }
+
+  const updated = await repo.updateCounterpartyAccount({
     counterpartyAccountId: params.data.counterpartyAccountId,
     counterpartyId: params.data.counterpartyId,
     organizationId: auth.organizationId,

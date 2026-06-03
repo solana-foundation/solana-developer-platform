@@ -34,20 +34,17 @@ export function useCounterpartyDirectory(
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // The current page already holds server data on first render (page 1 / a fresh
-  // SSR payload), so skip the fetch that would otherwise fire for it.
-  const skipNextFetch = useRef(true);
+  const loadedPageRef = useRef(1);
 
   useEffect(() => {
     setCounterparties(initialCounterparties);
     setTotal(initialTotal);
     setPage(1);
-    skipNextFetch.current = true;
+    loadedPageRef.current = 1;
   }, [initialCounterparties, initialTotal]);
 
   useEffect(() => {
-    if (skipNextFetch.current) {
-      skipNextFetch.current = false;
+    if (page === loadedPageRef.current) {
       return;
     }
 
@@ -62,6 +59,7 @@ export function useCounterpartyDirectory(
       if (result.ok) {
         setCounterparties(result.data.data.counterparties);
         setTotal(result.data.data.total);
+        loadedPageRef.current = page;
       } else {
         setError(result.error);
       }
