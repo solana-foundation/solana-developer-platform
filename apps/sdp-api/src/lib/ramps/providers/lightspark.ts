@@ -98,8 +98,7 @@ function toLightsparkMinorUnitsInteger(value: bigint, fieldName: string): number
   return Number(value);
 }
 
-function mapLightsparkQuoteStatus(status: string | undefined): PaymentRampExecution["status"] {
-  if (!status) return "pending";
+function mapLightsparkQuoteStatus(status: string): PaymentRampExecution["status"] {
   const normalized = status.trim().toUpperCase();
   if (normalized === "COMPLETED") return "completed";
   if (normalized === "PROCESSING") return "processing";
@@ -195,8 +194,7 @@ interface GridPaymentInstruction {
 
 interface GridQuoteResponse {
   id: string;
-  status?: string;
-  quoteStatus?: string;
+  quoteStatus: string;
   paymentInstructions?: GridPaymentInstruction[];
   exchangeRate: number;
   totalSendingAmount: number;
@@ -229,8 +227,7 @@ export interface CreateLightsparkOnrampQuoteInput {
 
 export interface LightsparkQuote {
   id: string;
-  status?: string;
-  quoteStatus?: string;
+  quoteStatus: string;
   paymentInstructions?: LightsparkPaymentRampInstruction[];
   exchangeRate?: number;
   totalSendingAmount?: number;
@@ -587,7 +584,7 @@ export class LightsparkRampClient implements RampProvider {
     return {
       provider: "lightspark",
       id: quote.id,
-      status: mapLightsparkQuoteStatus(quote.status),
+      status: mapLightsparkQuoteStatus(quote.quoteStatus),
       deliveryMode: "manual_instructions",
       exchangeRate: quote.exchangeRate,
       totalSendingAmount: quote.totalSendingAmount,
@@ -644,7 +641,7 @@ export class LightsparkRampClient implements RampProvider {
     return {
       id: rampId("ramp"),
       provider: "lightspark",
-      status: mapLightsparkQuoteStatus(quote.quoteStatus ?? quote.status),
+      status: mapLightsparkQuoteStatus(quote.quoteStatus),
       paymentInstructions: quote.paymentInstructions,
       reference: quote.id,
     };
@@ -697,7 +694,7 @@ export class LightsparkRampClient implements RampProvider {
     return {
       id: rampId("ramp"),
       provider: "lightspark",
-      status: mapLightsparkQuoteStatus(executedQuote.quoteStatus ?? executedQuote.status),
+      status: mapLightsparkQuoteStatus(executedQuote.quoteStatus),
       paymentInstructions: executedQuote.paymentInstructions,
       reference: quote.id,
     };
@@ -714,7 +711,6 @@ export class LightsparkRampClient implements RampProvider {
 function parseLightsparkQuote(raw: GridQuoteResponse): LightsparkQuote {
   return {
     id: raw.id,
-    status: raw.status,
     quoteStatus: raw.quoteStatus,
     paymentInstructions: raw.paymentInstructions?.map((instruction) => ({
       provider: "lightspark" as const,
