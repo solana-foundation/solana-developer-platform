@@ -147,7 +147,7 @@ async function executeRampWithProvider(
       scope.auth,
       ["payments:write"]
     );
-    return RAMP_PROVIDER_CLIENTS[input.provider].executeOnramp(ctx, {
+    return await RAMP_PROVIDER_CLIENTS[input.provider].executeOnramp(ctx, {
       destinationWalletAddress,
       cryptoToken: input.cryptoToken,
       fiatCurrency: input.fiatCurrency,
@@ -181,7 +181,7 @@ async function executeRampWithProvider(
           "payments:write",
         ]);
 
-  return RAMP_PROVIDER_CLIENTS[input.provider].executeOfframp(ctx, {
+  return await RAMP_PROVIDER_CLIENTS[input.provider].executeOfframp(ctx, {
     sourceWalletAddress,
     cryptoToken: input.cryptoToken,
     fiatCurrency: input.fiatCurrency,
