@@ -13,6 +13,7 @@ interface RampSelectionContextValue {
   wallets: readonly PaymentsDashboardWallet[];
   walletsLoading: boolean;
   selectedWallet: PaymentsDashboardWallet | null;
+  showWallet: boolean;
   selectedPair: SelectedRampPair;
   amount: string;
   onAmountChange: (amount: string) => void;

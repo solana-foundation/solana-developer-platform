@@ -29,6 +29,7 @@ import { assertProviderAvailable } from "@/services/provider-availability.servic
 import type { AppContext } from "../context";
 import { assertWalletPolicyAllowsTransfer } from "../policy";
 import {
+  createOfframpQuoteSchema,
   createOnrampQuoteSchema,
   executeOfframpSchema,
   executeOnrampSchema,
@@ -1407,6 +1408,72 @@ export async function createOnrampQuote(c: AppContext) {
   };
 
   return success(c, { quote: result });
+}
+
+export async function createOfframpQuote(c: AppContext) {
+  const body = await c.req.json();
+  const parsed = createOfframpQuoteSchema.safeParse(body);
+
+  if (!parsed.success) {
+    throw new AppError("BAD_REQUEST", "Invalid request body", {
+      errors: parsed.error.flatten().fieldErrors,
+    });
+  }
+
+  const input = parsed.data;
+  const scope = await resolveScope(c);
+  await resolveRampProvider(c, input.provider, scope.auth.organizationId);
+
+  const projectId = requireProjectId(c);
+  const repo = getCounterpartiesRepository(c);
+  const counterparty = await repo.getCounterpartyById({
+    counterpartyId: input.counterpartyId,
+    organizationId: scope.auth.organizationId,
+    projectId,
+  });
+  if (!counterparty) {
+    throw new AppError("NOT_FOUND", "Counterparty not found");
+  }
+
+  if (input.provider === "moonpay") {
+    const sourceWalletAddress = resolveWalletAddress(
+      scope.wallets,
+      input.sourceWallet,
+      "sourceWallet",
+      scope.auth,
+      ["payments:write"]
+    );
+    const moonPay = getMoonPayConfig(c);
+    const fiatCurrency = resolveFiatCurrency(input);
+    const quoteId = `ramp_quote_${crypto.randomUUID()}`;
+    const hostedUrl = await buildSignedMoonPayWidgetUrl(moonPay.offrampUrl, moonPay.secretKey, {
+      apiKey: moonPay.apiKey,
+      baseCurrencyCode: normalizeMoonPayCurrencyCode(input.cryptoToken),
+      baseCurrencyAmount: input.cryptoAmount,
+      quoteCurrencyCode: fiatCurrency.toLowerCase(),
+      refundWalletAddress: sourceWalletAddress,
+      redirectURL: input.redirectUrl,
+      externalCustomerId: counterparty.external_id ?? counterparty.id,
+      externalTransactionId: quoteId,
+    });
+
+    const result: PaymentRampQuote = {
+      provider: "moonpay",
+      id: quoteId,
+      status: "pending",
+      deliveryMode: "hosted",
+      hostedUrl,
+    };
+
+    return success(c, { quote: result });
+  }
+
+  // Lightspark off-ramp is account-funded and requires a destination fiat payout
+  // account created from bank details. That collection step is not wired yet.
+  throw new AppError(
+    "BAD_REQUEST",
+    "Lightspark off-ramp quotes require payout bank details, which aren't collected yet."
+  );
 }
 
 export async function executeOnramp(c: AppContext) {

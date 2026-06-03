@@ -3,6 +3,7 @@ import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import type { Env } from "@/types/env";
 import {
+  createOfframpQuote,
   createOnrampQuote,
   createTransfer,
   executeOfframp,
@@ -57,6 +58,11 @@ payments.post(
   "/ramps/onramp/execute",
   requirePermissions("payments:write", "wallets:read"),
   executeOnramp
+);
+payments.post(
+  "/ramps/offramp/quote",
+  requirePermissions("payments:write", "wallets:read"),
+  createOfframpQuote
 );
 payments.post(
   "/ramps/offramp/execute",

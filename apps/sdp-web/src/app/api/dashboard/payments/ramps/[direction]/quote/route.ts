@@ -13,7 +13,7 @@ async function readParams(context: RouteContext) {
 export async function POST(request: Request, context: RouteContext) {
   try {
     const direction = await readParams(context);
-    if (direction !== "onramp") {
+    if (direction !== "onramp" && direction !== "offramp") {
       return NextResponse.json(
         {
           error: {

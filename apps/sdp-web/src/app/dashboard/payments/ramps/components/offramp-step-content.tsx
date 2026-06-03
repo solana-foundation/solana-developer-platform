@@ -1,31 +1,46 @@
 "use client";
 
-import { PlusIcon } from "lucide-react";
-import { ONRAMP_PAIRS, RAMP_PROVIDER_OPTIONS, toRampCryptoToken } from "@/lib/ramps";
-import type { OnrampWizard } from "../hooks/use-onramp-wizard";
+import { PlusIcon, WalletIcon } from "lucide-react";
+import { useMemo } from "react";
+import {
+  formatCurrencyAmount,
+  resolveTotalBalance,
+} from "@/app/dashboard/payments/payments-overview.utils";
+import { Combobox } from "@/components/ui/combobox";
+import { OFFRAMP_PAIRS, RAMP_PROVIDER_OPTIONS } from "@/lib/ramps";
+import type { OfframpWizard } from "../hooks/use-offramp-wizard";
 import { CounterpartySelector } from "./counterparty-selector";
-import { ManualInstructionsQuote } from "./manual-instructions-quote";
 import { RampPairProviderSelector } from "./ramp-pair-provider-selector";
 import { RampStepPlaceholder } from "./ramp-step-placeholder";
 
-export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
+export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
   const {
     currentStepId,
     enabledRampProviders,
     liveCounterpartiesResult,
-    fields,
-    setField,
-    setCounterpartyDialogOpen,
     liveWallets,
     walletsLoading,
     selectedWallet,
     selectedRampPair,
+    fields,
     quote,
-    quoteSimulationLoading,
-    quoteSimulationSucceeded,
-    simulateCurrentQuote,
+    setField,
+    setCounterpartyDialogOpen,
     handlePairChange,
   } = wizard;
+
+  const walletOptions = useMemo(
+    () =>
+      liveWallets.map((wallet) => {
+        const total = wallet.balances ? resolveTotalBalance(wallet.balances) : null;
+        return {
+          value: wallet.walletId,
+          label: wallet.label ?? wallet.walletId,
+          description: total !== null ? formatCurrencyAmount(total) : undefined,
+        };
+      }),
+    [liveWallets]
+  );
 
   if (currentStepId === "COUNTERPARTY") {
     return (
@@ -41,7 +56,7 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
           <span className="min-w-0 flex-1">
             <span className="block text-sm font-medium text-text-extra-high">Add counterparty</span>
             <span className="block text-sm text-text-low">
-              Create a new buyer to deposit for if they aren&apos;t in the list yet.
+              Create a new payee to pay out to if they aren&apos;t in the list yet.
             </span>
           </span>
         </button>
@@ -50,28 +65,39 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
           value={fields.counterpartyId || null}
           onChange={(id) => setField("counterpartyId", id)}
         />
+        <Combobox
+          label="Source wallet"
+          value={fields.walletId || null}
+          onChange={(walletId) => setField("walletId", walletId)}
+          options={walletOptions}
+          placeholder="Select a source wallet"
+          searchPlaceholder="Search wallets"
+          icon={<WalletIcon className="size-5 shrink-0 text-text-low" />}
+          isLoading={walletsLoading}
+        />
       </div>
     );
   }
 
-  if (currentStepId === "DEPOSIT") {
+  if (currentStepId === "WITHDRAW") {
     if (enabledRampProviders.length === 0) {
       return (
         <div className="rounded-2xl border border-border-light bg-border-extra-light px-5 py-5 text-sm text-text-low">
-          No on-ramp providers are enabled for this organization.
+          No off-ramp providers are enabled for this organization.
         </div>
       );
     }
 
     return (
       <RampPairProviderSelector
-        direction="onramp"
-        pairs={ONRAMP_PAIRS}
+        direction="offramp"
+        pairs={OFFRAMP_PAIRS}
         enabledRampProviders={enabledRampProviders}
         providerOptions={RAMP_PROVIDER_OPTIONS}
         wallets={liveWallets}
         walletsLoading={walletsLoading}
         selectedWallet={selectedWallet}
+        showWallet={false}
         selectedPair={selectedRampPair}
         selectedProvider={fields.provider}
         amount={fields.amount}
@@ -84,37 +110,16 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
     );
   }
 
-  if (currentStepId === "PROVIDER" && quote?.deliveryMode === "hosted") {
+  if (currentStepId === "COMPLETE" && quote?.deliveryMode === "hosted") {
     return (
       <div className="overflow-hidden rounded-2xl">
         <iframe
-          title={`${quote.provider} on-ramp`}
+          title={`${quote.provider} off-ramp`}
           src={quote.hostedUrl}
           className="h-[480px] w-full border-0"
           allow="accelerometer; autoplay; camera; encrypted-media; fullscreen; geolocation; gyroscope; payment"
         />
       </div>
-    );
-  }
-
-  if (currentStepId === "PROVIDER" && quote?.deliveryMode === "manual_instructions") {
-    return (
-      <ManualInstructionsQuote
-        amount={fields.amount.trim()}
-        quote={quote}
-        fiatCurrency={selectedRampPair.fiatCurrency}
-        cryptoToken={toRampCryptoToken(selectedRampPair.assetRail)}
-        instructions={quote.paymentInstructions ?? []}
-        simulateQuote={
-          quote.provider === "lightspark"
-            ? {
-                loading: quoteSimulationLoading,
-                succeeded: quoteSimulationSucceeded,
-                onClick: () => void simulateCurrentQuote(),
-              }
-            : undefined
-        }
-      />
     );
   }
 
