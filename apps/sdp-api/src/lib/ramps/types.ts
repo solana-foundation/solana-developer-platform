@@ -1,6 +1,10 @@
-import type { SdpEnvironment } from "@sdp/types";
+import type { PaymentRampExecution, PaymentRampQuote, SdpEnvironment } from "@sdp/types";
+import type { RampFiatCurrency } from "@sdp/types/generated/ramp-support";
 import type { CryptoRailId, FiatCurrencyCode } from "@sdp/types/payment-rails";
 import type { RampProviderId } from "@sdp/types/provider-access";
+import type { BvnkComplianceInput } from "./providers/bvnk";
+
+export type { BvnkComplianceInput } from "./providers/bvnk";
 
 export interface ProviderRampSupport {
   onrampFiats: ReadonlySet<FiatCurrencyCode>;
@@ -50,9 +54,85 @@ export interface RampWebhookValidationResult {
   payload: unknown;
 }
 
+/**
+ * Runtime context for quote/execute calls. Providers read their own credentials
+ * from `env` keyed by `mode`; the route handler resolves `mode` (it depends on
+ * AppContext) and passes plain values so the provider stays AppContext-free.
+ */
+export interface RampRuntimeContext {
+  env: Record<string, string | undefined>;
+  mode: SdpEnvironment;
+}
+
+export interface RampOnrampQuoteInput {
+  cryptoToken: string;
+  fiatCurrency?: RampFiatCurrency;
+  fiatAmount: string;
+  destinationWalletAddress: string;
+  /** Handler-resolved id for the provider's external customer reference (MoonPay). */
+  externalCustomerId: string;
+  /** Handler-resolved Grid customer id (Lightspark); resolved via DB + getOrCreateCustomer. */
+  customerId?: string;
+  redirectUrl?: string;
+}
+
+export interface RampOfframpQuoteInput {
+  cryptoToken: string;
+  fiatCurrency?: RampFiatCurrency;
+  cryptoAmount: string;
+  sourceWalletAddress: string;
+  externalCustomerId: string;
+  customerId?: string;
+  redirectUrl?: string;
+}
+
+export interface RampExecuteOnrampInput {
+  destinationWalletAddress: string;
+  cryptoToken: string;
+  fiatCurrency?: RampFiatCurrency;
+  fiatAmount: string;
+  kycReference?: string;
+  redirectUrl?: string;
+  bvnkCompliance?: BvnkComplianceInput;
+}
+
+export interface RampExecuteOfframpInput {
+  sourceWalletAddress: string;
+  cryptoToken: string;
+  fiatCurrency?: RampFiatCurrency;
+  cryptoAmount: string;
+  kycReference?: string;
+  redirectUrl?: string;
+  bvnkCompliance?: BvnkComplianceInput;
+}
+
 export interface RampProviderClient {
   id: RampProviderId;
   _discoverRails(context: RampDiscoveryContext): Promise<void>;
   readRailSupport(readDump: RampDumpReader): Promise<ProviderRampSupport>;
   validateWebhook(context: RampWebhookValidationContext): Promise<RampWebhookValidationResult>;
+}
+
+/**
+ * Full provider contract: rail discovery + webhook validation (codegen/webhooks)
+ * plus the runtime quote/execute flow. All HTTP lives behind this; the route
+ * handler owns DB interaction and passes pre-resolved inputs.
+ */
+export interface RampProvider extends RampProviderClient {
+  createOnrampQuote(
+    ctx: RampRuntimeContext,
+    input: RampOnrampQuoteInput
+  ): Promise<PaymentRampQuote>;
+  createOfframpQuote(
+    ctx: RampRuntimeContext,
+    input: RampOfframpQuoteInput
+  ): Promise<PaymentRampQuote>;
+  executeOnramp(
+    ctx: RampRuntimeContext,
+    input: RampExecuteOnrampInput
+  ): Promise<PaymentRampExecution>;
+  executeOfframp(
+    ctx: RampRuntimeContext,
+    input: RampExecuteOfframpInput
+  ): Promise<PaymentRampExecution>;
 }

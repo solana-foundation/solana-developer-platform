@@ -1,5 +1,7 @@
 import { RAMP_PROVIDERS, type RampProviderId } from "@sdp/types/provider-access";
-import { assertRampProviderRegistryComplete, RAMP_PROVIDER_CLIENTS } from "./registry";
+import { BvnkRampClient } from "./providers/bvnk";
+import { LightsparkRampClient } from "./providers/lightspark";
+import { MoonpayRampClient } from "./providers/moonpay";
 import type {
   ProviderRampSupport,
   RampDiscoveryContext,
@@ -10,7 +12,6 @@ import type {
 export { BvnkRampClient } from "./providers/bvnk";
 export { LightsparkRampClient } from "./providers/lightspark";
 export { MoonpayRampClient } from "./providers/moonpay";
-export { RAMP_PROVIDER_CLIENTS } from "./registry";
 export type {
   ProviderRampSupport,
   RampDiscoveryContext,
@@ -20,6 +21,20 @@ export type {
   RampFetchJson,
   RampProviderClient,
 } from "./types";
+
+export const RAMP_PROVIDER_CLIENTS = {
+  moonpay: new MoonpayRampClient(),
+  lightspark: new LightsparkRampClient(),
+  bvnk: new BvnkRampClient(),
+} as const satisfies Record<RampProviderId, RampProviderClient>;
+
+function assertRampProviderRegistryComplete(providers: Record<RampProviderId, RampProviderClient>) {
+  for (const provider of RAMP_PROVIDERS) {
+    if (!providers[provider]) {
+      throw new Error(`Missing ramp provider client: ${provider}`);
+    }
+  }
+}
 
 export class RampClient {
   constructor(

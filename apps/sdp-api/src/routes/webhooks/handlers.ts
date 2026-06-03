@@ -4,7 +4,7 @@ import { Webhook } from "svix";
 import { getDb } from "@/db";
 import { mapClerkRoleToOrgRole } from "@/lib/clerk-role";
 import { AppError, badRequest } from "@/lib/errors";
-import { RAMP_PROVIDER_CLIENTS } from "@/lib/ramps/registry";
+import { RAMP_PROVIDER_CLIENTS } from "@/lib/ramps";
 import { success } from "@/lib/response";
 import { isSelfHostedDeployment } from "@/lib/runtime-env";
 import {
