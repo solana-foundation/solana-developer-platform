@@ -277,30 +277,39 @@ export async function createOnrampQuote(c: AppContext) {
     ["payments:write"]
   );
 
-  if (input.provider === "moonpay") {
-    const quote = await RAMP_PROVIDER_CLIENTS.moonpay.createOnrampQuote(rampRuntime(c), {
-      cryptoToken: input.cryptoToken,
-      fiatCurrency: input.fiatCurrency,
-      fiatAmount: input.fiatAmount,
-      destinationWalletAddress,
-      externalCustomerId: counterparty.external_id ?? counterparty.id,
-      redirectUrl: input.redirectUrl,
-    });
-    return success(c, { quote });
+  switch (input.provider) {
+    case "moonpay": {
+      const quote = await RAMP_PROVIDER_CLIENTS.moonpay.createOnrampQuote(rampRuntime(c), {
+        cryptoToken: input.cryptoToken,
+        fiatCurrency: input.fiatCurrency,
+        fiatAmount: input.fiatAmount,
+        destinationWalletAddress,
+        externalCustomerId: counterparty.external_id ?? counterparty.id,
+        redirectUrl: input.redirectUrl,
+      });
+      return success(c, { quote });
+    }
+    case "lightspark": {
+      const customerId = await ensureLightsparkCustomer(c, repo, counterparty, projectId);
+      const quote = await RAMP_PROVIDER_CLIENTS.lightspark.createOnrampQuote(rampRuntime(c), {
+        cryptoToken: input.cryptoToken,
+        fiatCurrency: input.fiatCurrency,
+        fiatAmount: input.fiatAmount,
+        destinationWalletAddress,
+        externalCustomerId: counterparty.external_id ?? counterparty.id,
+        customerId,
+        redirectUrl: input.redirectUrl,
+      });
+      return success(c, { quote });
+    }
+    default: {
+      const exhaustive: never = input.provider;
+      throw new AppError(
+        "INTERNAL_ERROR",
+        `On-ramp quotes are not implemented for provider: ${String(exhaustive)}`
+      );
+    }
   }
-
-  const customerId = await ensureLightsparkCustomer(c, repo, counterparty, projectId);
-  const quote = await RAMP_PROVIDER_CLIENTS.lightspark.createOnrampQuote(rampRuntime(c), {
-    cryptoToken: input.cryptoToken,
-    fiatCurrency: input.fiatCurrency,
-    fiatAmount: input.fiatAmount,
-    destinationWalletAddress,
-    externalCustomerId: counterparty.external_id ?? counterparty.id,
-    customerId,
-    redirectUrl: input.redirectUrl,
-  });
-
-  return success(c, { quote });
 }
 
 export async function createOfframpQuote(c: AppContext) {

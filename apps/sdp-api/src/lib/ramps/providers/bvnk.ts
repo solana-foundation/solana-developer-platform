@@ -258,10 +258,31 @@ async function bvnkRequest(
       typeof parsedMessage === "string" && parsedMessage.length > 0
         ? parsedMessage
         : `BVNK request failed with status ${response.status}`;
-    throw new AppError("BAD_REQUEST", message);
+    throw mapBvnkErrorStatus(response.status, message);
   }
 
   return parsed ?? {};
+}
+
+/**
+ * Normalizes a BVNK non-2xx status into an AppError. Auth failures point at our
+ * Hawk credential configuration, rate limits surface as-is, and any 5xx is a
+ * BVNK-side failure operators should investigate rather than a bad request body.
+ */
+function mapBvnkErrorStatus(status: number, message: string): AppError {
+  if (status === 401 || status === 403) {
+    return new AppError(
+      "PROVIDER_NOT_CONFIGURED",
+      `BVNK rejected the request credentials (status ${status}). Check the BVNK Hawk auth configuration.`
+    );
+  }
+  if (status === 429) {
+    return new AppError("RATE_LIMITED", message);
+  }
+  if (status >= 500) {
+    return new AppError("INTERNAL_ERROR", `BVNK request failed with status ${status}.`);
+  }
+  return new AppError("BAD_REQUEST", message);
 }
 
 interface BvnkEstimateResponse {
