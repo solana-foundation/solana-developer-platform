@@ -63,6 +63,12 @@ export function TokenActionPrimaryForms({
   onMint,
   onBurn,
 }: TokenActionPrimaryFormsProps) {
+  // Mirrors the non-pending half of each submit button's `disabled` condition so the
+  // note adjacent to the button explains why the action is unavailable (e.g. the
+  // destination is denylisted) without the user having to scan the form fields.
+  const mintDisabledReason = signerUnavailableReason ?? mintValidationReason;
+  const burnDisabledReason = signerUnavailableReason ?? burnValidationReason;
+
   return (
     <>
       {activeAction === "update-metadata" ? (
@@ -195,20 +201,30 @@ export function TokenActionPrimaryForms({
                 }))
               }
             />
-            <div
-              className={[
-                "flex flex-wrap gap-2",
-                submitAlignment === "end" ? "justify-end" : "",
-              ].join(" ")}
-            >
-              <Button
-                type="submit"
-                disabled={
-                  isPending || Boolean(signerUnavailableReason) || Boolean(mintValidationReason)
+            <div className="space-y-2">
+              <TokenValidationMessage
+                message={
+                  !isPending && mintDisabledReason
+                    ? `Mint unavailable — ${mintDisabledReason}`
+                    : null
                 }
+                reserveSpace={false}
+              />
+              <div
+                className={[
+                  "flex flex-wrap gap-2",
+                  submitAlignment === "end" ? "justify-end" : "",
+                ].join(" ")}
               >
-                Mint tokens
-              </Button>
+                <Button
+                  type="submit"
+                  disabled={
+                    isPending || Boolean(signerUnavailableReason) || Boolean(mintValidationReason)
+                  }
+                >
+                  Mint tokens
+                </Button>
+              </div>
             </div>
           </form>
         </TokenActionCard>
@@ -271,20 +287,30 @@ export function TokenActionPrimaryForms({
                 }))
               }
             />
-            <div
-              className={[
-                "flex flex-wrap gap-2",
-                submitAlignment === "end" ? "justify-end" : "",
-              ].join(" ")}
-            >
-              <Button
-                type="submit"
-                disabled={
-                  isPending || Boolean(signerUnavailableReason) || Boolean(burnValidationReason)
+            <div className="space-y-2">
+              <TokenValidationMessage
+                message={
+                  !isPending && burnDisabledReason
+                    ? `Burn unavailable — ${burnDisabledReason}`
+                    : null
                 }
+                reserveSpace={false}
+              />
+              <div
+                className={[
+                  "flex flex-wrap gap-2",
+                  submitAlignment === "end" ? "justify-end" : "",
+                ].join(" ")}
               >
-                Burn tokens
-              </Button>
+                <Button
+                  type="submit"
+                  disabled={
+                    isPending || Boolean(signerUnavailableReason) || Boolean(burnValidationReason)
+                  }
+                >
+                  Burn tokens
+                </Button>
+              </div>
             </div>
           </form>
         </TokenActionCard>
