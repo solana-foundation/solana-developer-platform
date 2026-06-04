@@ -251,14 +251,30 @@ export function createPostgresPaymentRecurringPaymentsRepository(
                      WHERE a.recurring_payment_id = rp.id
                        AND a.due_at = rp.next_collection_due_at
                        AND a.status IN ('pending', 'processing', 'confirmed')
+                       AND NOT (
+                         a.status IN ('processing', 'confirmed')
+                         AND a.transfer_id IS NOT NULL
+                         AND a.signature IS NOT NULL
+                       )
                   )
-              AND NOT EXISTS (
-                    SELECT 1
-                      FROM payment_subscription_collection_attempts retry
-                     WHERE retry.recurring_payment_id = rp.id
-                       AND retry.due_at = rp.next_collection_due_at
-                       AND retry.status = 'failed'
-                       AND retry.updated_at > ?
+              AND (
+                    EXISTS (
+                      SELECT 1
+                        FROM payment_subscription_collection_attempts submitted
+                       WHERE submitted.recurring_payment_id = rp.id
+                         AND submitted.due_at = rp.next_collection_due_at
+                         AND submitted.status IN ('processing', 'confirmed')
+                         AND submitted.transfer_id IS NOT NULL
+                         AND submitted.signature IS NOT NULL
+                    )
+                    OR NOT EXISTS (
+                      SELECT 1
+                        FROM payment_subscription_collection_attempts retry
+                       WHERE retry.recurring_payment_id = rp.id
+                         AND retry.due_at = rp.next_collection_due_at
+                         AND retry.status = 'failed'
+                         AND retry.updated_at > ?
+                    )
                   )
             ORDER BY rp.next_collection_due_at ASC
             LIMIT ?`

@@ -884,6 +884,83 @@ describe("Payments routes", () => {
     ]);
 
     mockRecurringCollectionAccounts();
+    const originalCreatePostgresRecurringPaymentsRepository =
+      repositories.createPostgresPaymentRecurringPaymentsRepository;
+    let failFinalRecurringPaymentUpdate = true;
+    const recurringRepoSpy = vi
+      .spyOn(repositories, "createPostgresPaymentRecurringPaymentsRepository")
+      .mockImplementation((db) => {
+        const repo = originalCreatePostgresRecurringPaymentsRepository(db);
+
+        return {
+          ...repo,
+          updateRecurringPayment: vi.fn(async (input) => {
+            if (
+              failFinalRecurringPaymentUpdate &&
+              input.recurringPaymentId === recurringPaymentId &&
+              input.nextCollectionDueAt !== undefined
+            ) {
+              failFinalRecurringPaymentUpdate = false;
+              throw new Error("simulated recurring payment finalization failure");
+            }
+
+            return repo.updateRecurringPayment(input);
+          }),
+        };
+      });
+    try {
+      const failedFinalizeRes = await app.request(
+        `/v1/payments/recurring-payments/${recurringPaymentId}/collect`,
+        {
+          method: "POST",
+          headers: jsonHeaders,
+          body: "{}",
+        },
+        env
+      );
+      expect(failedFinalizeRes.status).toBe(500);
+    } finally {
+      recurringRepoSpy.mockRestore();
+    }
+
+    const processingAttemptsRes = await app.request(
+      `/v1/payments/recurring-payments/${recurringPaymentId}/collection-attempts?status=processing`,
+      {
+        method: "GET",
+        headers: authHeaders,
+      },
+      env
+    );
+    expect(processingAttemptsRes.status).toBe(200);
+    const processingAttemptsBody = (await processingAttemptsRes.json()) as {
+      data: {
+        collectionAttempts: Array<{
+          recurringPaymentId: string | null;
+          status: string;
+          transferId: string | null;
+          signature: string | null;
+        }>;
+      };
+    };
+    expect(processingAttemptsBody.data.collectionAttempts).toEqual([
+      expect.objectContaining({
+        recurringPaymentId,
+        status: "processing",
+        transferId: expect.any(String),
+        signature: expect.any(String),
+      }),
+    ]);
+
+    const dueAfterFinalizeFailure = await repositories
+      .createPaymentRecurringPaymentsRepository(env)
+      .listDueRecurringPayments({
+        now: new Date().toISOString(),
+        retryAfter: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
+        limit: 10,
+      });
+    expect(dueAfterFinalizeFailure.map((payment) => payment.id)).toContain(recurringPaymentId);
+    const confirmCallsAfterSubmittedCollection = confirmTransactionMock.mock.calls.length;
+
     const collectRes = await app.request(
       `/v1/payments/recurring-payments/${recurringPaymentId}/collect`,
       {
@@ -909,6 +986,7 @@ describe("Payments routes", () => {
       status: "confirmed",
       signature: expect.any(String),
     });
+    expect(confirmTransactionMock.mock.calls.length).toBe(confirmCallsAfterSubmittedCollection);
     expect(new Date(collectBody.data.recurringPayment.nextCollectionDueAt ?? "").getTime()).toBe(
       new Date(firstCollectionAt).getTime() + 24 * 60 * 60 * 1000
     );
