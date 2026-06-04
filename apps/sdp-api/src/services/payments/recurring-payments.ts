@@ -1,7 +1,10 @@
+import { getDb } from "@/db";
 import {
   createPaymentRecurringPaymentsRepository,
   createPaymentSubscriptionsRepository,
   createPaymentsRepository,
+  createPostgresPaymentRecurringPaymentsRepository,
+  createPostgresPaymentSubscriptionsRepository,
 } from "@/db/repositories";
 import type {
   PaymentRecurringPaymentRow,
@@ -666,11 +669,8 @@ export async function executeRecurringPaymentLifecycle(input: {
   if (!recurringPayment) {
     throw new AppError("NOT_FOUND", "Recurring payment not found");
   }
-  if (
-    !recurringPayment.subscription_id ||
-    !recurringPayment.plan_pda ||
-    !recurringPayment.subscription_pda
-  ) {
+  const subscriptionId = recurringPayment.subscription_id;
+  if (!subscriptionId || !recurringPayment.plan_pda || !recurringPayment.subscription_pda) {
     throw new AppError("BAD_REQUEST", "Recurring payment has not been activated");
   }
   if (input.operation === "cancel" && recurringPayment.status !== "active") {
@@ -701,25 +701,31 @@ export async function executeRecurringPaymentLifecycle(input: {
   });
 
   const now = new Date().toISOString();
-  const updated = await recurringRepo.updateRecurringPayment({
-    recurringPaymentId: recurringPayment.id,
-    organizationId: input.organizationId,
-    projectId: input.projectId,
-    status: input.operation === "cancel" ? "canceled" : "active",
-    updatedAt: now,
-  });
-  await createPaymentSubscriptionsRepository(input.env).updateSubscription({
-    subscriptionId: recurringPayment.subscription_id,
-    organizationId: input.organizationId,
-    projectId: input.projectId,
-    status: input.operation === "cancel" ? "canceled" : "active",
-    canceledAt: input.operation === "cancel" ? now : null,
-    updatedAt: now,
-  });
+  const status = input.operation === "cancel" ? "canceled" : "active";
 
-  if (!updated) {
-    throw new AppError("INTERNAL_ERROR", "Failed to update recurring payment");
-  }
+  return getDb(input.env).transaction(async (tx) => {
+    const txRecurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
+    const txSubscriptionsRepo = createPostgresPaymentSubscriptionsRepository(tx);
+    const updated = await txRecurringRepo.updateRecurringPayment({
+      recurringPaymentId: recurringPayment.id,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      status,
+      updatedAt: now,
+    });
+    const updatedSubscription = await txSubscriptionsRepo.updateSubscription({
+      subscriptionId,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      status,
+      canceledAt: input.operation === "cancel" ? now : null,
+      updatedAt: now,
+    });
 
-  return updated;
+    if (!updated || !updatedSubscription) {
+      throw new AppError("INTERNAL_ERROR", "Failed to update recurring payment lifecycle state");
+    }
+
+    return updated;
+  });
 }

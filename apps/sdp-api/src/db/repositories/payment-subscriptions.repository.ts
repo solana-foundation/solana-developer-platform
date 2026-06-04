@@ -176,7 +176,7 @@ export interface CreatePaymentSubscriptionCollectionAttemptInput {
 export interface ListPaymentSubscriptionCollectionAttemptsInput {
   organizationId: string;
   projectId: string;
-  subscriptionId: string;
+  subscriptionId?: string;
   recurringPaymentId?: string;
   status?: PaymentSubscriptionCollectionAttemptStatus;
   limit: number;

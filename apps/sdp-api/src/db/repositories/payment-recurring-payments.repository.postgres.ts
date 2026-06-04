@@ -1,4 +1,4 @@
-import type { AppDb } from "@/db";
+import type { DatabaseExecutor } from "@/db";
 import type {
   CreatePaymentRecurringPaymentInput,
   ListDuePaymentRecurringPaymentsInput,
@@ -47,7 +47,7 @@ function mapRecurringPaymentRow(row: Record<string, unknown>): PaymentRecurringP
 }
 
 async function getRecurringPaymentByIdInternal(
-  db: AppDb,
+  db: DatabaseExecutor,
   recurringPaymentId: string
 ): Promise<PaymentRecurringPaymentRow | null> {
   const row = await db
@@ -59,7 +59,7 @@ async function getRecurringPaymentByIdInternal(
 }
 
 export function createPostgresPaymentRecurringPaymentsRepository(
-  db: AppDb
+  db: DatabaseExecutor
 ): PaymentRecurringPaymentsRepository {
   return {
     async createRecurringPayment(input: CreatePaymentRecurringPaymentInput) {

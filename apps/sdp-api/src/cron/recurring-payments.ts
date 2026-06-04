@@ -4,7 +4,7 @@ import { collectDueRecurringPayments } from "@/services/jobs/collect-recurring-p
 import type { Env } from "@/types/env";
 
 export const RECURRING_PAYMENTS_COLLECTION_MONITOR = "sdp-api-recurring-payment-collection";
-export const RECURRING_PAYMENTS_COLLECTION_CRON = "* * * * *";
+export const RECURRING_PAYMENTS_COLLECTION_CRON = "*/5 * * * *";
 
 export interface RecurringPaymentsCollectionDeps {
   env: Env;

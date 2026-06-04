@@ -279,7 +279,6 @@ export const collectRecurringPayment = async (c: AppContext) => {
 
   const scope = await resolveScope(c);
   const sourceWallet = resolveWallet(scope.wallets, recurringPayment.source_wallet_id);
-  assertApiKeyWalletAccess(scope.auth, sourceWallet.walletId, ["payments:write"]);
 
   const result = await collectRecurringPaymentRecord({
     env: c.env,
@@ -370,7 +369,7 @@ export const listRecurringPaymentCollectionAttempts = async (c: AppContext) => {
   const { rows, total } = await getPaymentSubscriptionsRepository(c).listCollectionAttempts({
     organizationId: auth.organizationId,
     projectId,
-    subscriptionId: recurringPayment.subscription_id ?? "",
+    subscriptionId: recurringPayment.subscription_id ?? undefined,
     recurringPaymentId: recurringPayment.id,
     status,
     limit: pageSize,
