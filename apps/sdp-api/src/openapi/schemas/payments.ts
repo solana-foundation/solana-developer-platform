@@ -795,6 +795,14 @@ export const prepareSubscriptionAuthorizationRequestSchema =
           example: "0",
         }
       ),
+      expectedSubscriptionAuthorityInitId: withOpenApi(
+        prepareSubscriptionAuthorizationSchemaBase.shape.expectedSubscriptionAuthorityInitId,
+        {
+          description:
+            "Signed 64-bit init id from the on-chain subscription authority that the subscriber consents to.",
+          example: "0",
+        }
+      ),
     })
     .openapi({
       description:

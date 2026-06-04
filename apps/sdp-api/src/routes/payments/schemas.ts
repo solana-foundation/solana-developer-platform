@@ -87,6 +87,17 @@ const u64StringSchema = z
       return false;
     }
   }, "Value must fit in an unsigned 64-bit integer");
+const i64StringSchema = z
+  .string()
+  .regex(/^-?\d+$/, { message: "Value must be a signed integer string" })
+  .refine((value) => {
+    try {
+      const parsed = BigInt(value);
+      return parsed >= -9_223_372_036_854_775_808n && parsed <= 9_223_372_036_854_775_807n;
+    } catch {
+      return false;
+    }
+  }, "Value must fit in a signed 64-bit integer");
 
 export const subscriptionPlanIdParamsSchema = z.object({
   planId: z.string().min(1),
@@ -191,6 +202,7 @@ export const updateSubscriptionSchema = z
 export const prepareSubscriptionAuthorizationSchema = z.object({
   subscriberTokenAccount: solanaAddressSchema("subscriberTokenAccount"),
   expectedPlanCreatedAt: u64StringSchema,
+  expectedSubscriptionAuthorityInitId: i64StringSchema,
 });
 
 export const prepareSubscriptionLifecycleSchema = z.object({});

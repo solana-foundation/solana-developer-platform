@@ -828,6 +828,7 @@ describe("Payments routes", () => {
         method: "POST",
         headers: jsonHeaders,
         body: JSON.stringify({
+          expectedSubscriptionAuthorityInitId: "0",
           subscriberTokenAccount,
           expectedPlanCreatedAt: "1700000000",
         }),
