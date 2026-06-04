@@ -486,14 +486,23 @@ export async function executeRampFlow(
   return body.data.ramp;
 }
 
-type SandboxTransferSimulationInput = {
-  provider: "lightspark";
-  payload: {
-    quoteId: string;
-    currencyCode?: "USD";
-    currencyAmount?: number;
-  };
-};
+type SandboxTransferSimulationInput =
+  | {
+      provider: "lightspark";
+      payload: {
+        quoteId: string;
+        currencyCode?: "USD";
+        currencyAmount?: number;
+      };
+    }
+  | {
+      provider: "bvnk";
+      payload: {
+        counterpartyId: string;
+        amount: number;
+        fiatCurrency?: string;
+      };
+    };
 
 export async function simulateSandboxTransfer(input: SandboxTransferSimulationInput) {
   const response = await fetch("/api/dashboard/payments/ramps/sandbox/simulate", {

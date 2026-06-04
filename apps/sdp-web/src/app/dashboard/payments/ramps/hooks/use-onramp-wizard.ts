@@ -58,7 +58,8 @@ export function useOnrampWizard(props: UseRampWizardProps) {
   });
 
   const simulateCurrentQuote = async () => {
-    if (wizard.quote?.provider !== "lightspark") {
+    const quote = wizard.quote;
+    if (quote?.provider !== "lightspark" && quote?.provider !== "bvnk") {
       return;
     }
 
@@ -66,10 +67,21 @@ export function useOnrampWizard(props: UseRampWizardProps) {
     const toastId = toast.loading("Simulating quote funding.", { position: "bottom-right" });
 
     try {
-      await simulateSandboxTransfer({
-        provider: "lightspark",
-        payload: { quoteId: wizard.quote.id, currencyCode: "USD" },
-      });
+      if (quote.provider === "lightspark") {
+        await simulateSandboxTransfer({
+          provider: "lightspark",
+          payload: { quoteId: quote.id, currencyCode: "USD" },
+        });
+      } else {
+        await simulateSandboxTransfer({
+          provider: "bvnk",
+          payload: {
+            counterpartyId: wizard.fields.counterpartyId,
+            amount: Number(wizard.fields.amount.trim()),
+            fiatCurrency: wizard.selectedRampPair.fiatCurrency,
+          },
+        });
+      }
       setQuoteSimulationSucceeded(true);
       toast.success("Quote funding simulated.", { id: toastId, position: "bottom-right" });
     } catch (error) {

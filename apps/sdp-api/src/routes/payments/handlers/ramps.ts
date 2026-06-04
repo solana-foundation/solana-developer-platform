@@ -817,6 +817,7 @@ export async function simulateSandboxTransfer(c: AppContext) {
         walletId: entry.walletId,
         amount: parsed.data.payload.amount,
         currency: parsed.data.payload.fiatCurrency ?? "USD",
+        originatorName: counterparty.display_name,
         remittanceInformation: entry.bankAccount?.paymentReference,
       });
       break;

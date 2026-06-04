@@ -85,7 +85,7 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
         cryptoToken={toRampCryptoToken(selectedRampPair.assetRail)}
         instructions={quote.provider === "bvnk" ? quote.paymentInstructions : []}
         simulateQuote={
-          quote.provider === "lightspark"
+          quote.provider === "lightspark" || quote.provider === "bvnk"
             ? {
                 loading: quoteSimulationLoading,
                 succeeded: quoteSimulationSucceeded,

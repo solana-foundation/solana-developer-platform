@@ -199,15 +199,42 @@ export function createPostgresCounterpartiesRepository(db: AppDb): Counterpartie
       return row ? mapCounterpartyRow(row) : null;
     },
 
-    async setCounterpartyProviderDataByBvnkCustomerReference(params) {
+    async patchBvnkCustomerByReference(params) {
       await db
         .prepare(
           `UPDATE counterparties
-             SET provider_data = ?, updated_at = sdp_iso_now()
+             SET provider_data = jsonb_set(
+                   provider_data,
+                   '{bvnk,customer}',
+                   coalesce(provider_data->'bvnk'->'customer', '{}'::jsonb) || ?::jsonb,
+                   true),
+                 updated_at = sdp_iso_now()
            WHERE provider_data->'bvnk'->'customer'->>'customerReference' = ?
              AND status = 'active'`
         )
-        .bind(params.providerData, params.customerReference)
+        .bind(JSON.stringify(params.customer), params.customerReference)
+        .run();
+    },
+
+    async patchBvnkWalletByReference(params) {
+      await db
+        .prepare(
+          `UPDATE counterparties
+             SET provider_data = jsonb_set(
+                   provider_data,
+                   array['bvnk', 'wallets', ?::text],
+                   coalesce(provider_data->'bvnk'->'wallets'->?, '{}'::jsonb) || ?::jsonb,
+                   true),
+                 updated_at = sdp_iso_now()
+           WHERE provider_data->'bvnk'->'customer'->>'customerReference' = ?
+             AND status = 'active'`
+        )
+        .bind(
+          params.walletKey,
+          params.walletKey,
+          JSON.stringify(params.wallet),
+          params.customerReference
+        )
         .run();
     },
 

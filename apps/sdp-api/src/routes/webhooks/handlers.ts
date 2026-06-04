@@ -10,8 +10,6 @@ import {
   findBvnkWalletEntryKey,
   isBvnkCustomerVerified,
   readBvnkCustomer,
-  readBvnkData,
-  readBvnkWallets,
 } from "@/lib/ramps/providers/bvnk";
 import { success } from "@/lib/response";
 import { isSelfHostedDeployment } from "@/lib/runtime-env";
@@ -628,13 +626,15 @@ async function processBvnkCustomerWebhook(
   }
 
   const providerData = counterparty.provider_data;
-  let nextBvnk: Record<string, unknown> | null = null;
 
   if (event.kind === "customer") {
-    const customer = { ...readBvnkCustomer(providerData) };
+    const current = readBvnkCustomer(providerData);
+    const customer: Record<string, unknown> = {};
     if (event.customerStatus) customer.status = event.customerStatus.toUpperCase();
     if (event.verificationUrl) customer.verificationUrl = event.verificationUrl;
-    if (!customer.verificationUrl && !isBvnkCustomerVerified(customer.status)) {
+    const nextStatus = (customer.status as string | undefined) ?? current.status;
+    const nextUrl = (customer.verificationUrl as string | undefined) ?? current.verificationUrl;
+    if (!nextUrl && !isBvnkCustomerVerified(nextStatus)) {
       const latest = await RAMP_PROVIDER_CLIENTS.bvnk.getBvnkCustomer(
         { env: c.env as unknown as Record<string, string | undefined>, mode: environment },
         { reference: event.customerReference }
@@ -643,32 +643,34 @@ async function processBvnkCustomerWebhook(
       customer.verificationStatus = latest.verificationStatus;
       if (latest.verificationUrl) customer.verificationUrl = latest.verificationUrl;
     }
-    nextBvnk = { ...readBvnkData(providerData), customer };
-  } else if (
+    if (Object.keys(customer).length === 0) {
+      return;
+    }
+    await repo.patchBvnkCustomerByReference({
+      customerReference: event.customerReference,
+      customer,
+    });
+    return;
+  }
+
+  if (
     event.kind === "wallet" &&
     event.walletId &&
     (event.walletStatus || event.bankAccount?.accountNumber)
   ) {
     const key = findBvnkWalletEntryKey(providerData, event.walletId);
-    if (key) {
-      const wallets = { ...readBvnkWallets(providerData) };
-      wallets[key] = {
-        ...wallets[key],
-        ...(event.walletStatus ? { walletStatus: event.walletStatus } : {}),
-        ...(event.bankAccount?.accountNumber ? { bankAccount: event.bankAccount } : {}),
-      };
-      nextBvnk = { ...readBvnkData(providerData), wallets };
+    if (!key) {
+      return;
     }
+    const wallet: Record<string, unknown> = {};
+    if (event.walletStatus) wallet.walletStatus = event.walletStatus;
+    if (event.bankAccount?.accountNumber) wallet.bankAccount = event.bankAccount;
+    await repo.patchBvnkWalletByReference({
+      customerReference: event.customerReference,
+      walletKey: key,
+      wallet,
+    });
   }
-
-  if (!nextBvnk) {
-    return;
-  }
-
-  await repo.setCounterpartyProviderDataByBvnkCustomerReference({
-    customerReference: event.customerReference,
-    providerData: { ...providerData, bvnk: nextBvnk },
-  });
 }
 
 export const handleRampProviderWebhook = async (c: AppContext, environment: SdpEnvironment) => {

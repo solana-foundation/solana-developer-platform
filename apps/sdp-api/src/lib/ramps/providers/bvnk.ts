@@ -31,6 +31,23 @@ import type {
 const BVNK_PRODUCTION_API_URL = "https://api.bvnk.com";
 const BVNK_SANDBOX_API_URL = "https://api.sandbox.bvnk.com";
 
+// SANDBOX ONLY: synthetic originator (fiat sender) bank accounts for pay-in
+// simulations. The real buyer's funding bank is never stored; BVNK just needs
+// a format-valid account to accept the simulated deposit. Never used in prod.
+const SANDBOX_ORIGINATOR_BANK_ACCOUNTS: Record<string, Record<string, string>> = {
+  // biome-ignore lint/security/noSecrets: synthetic sandbox account, not a credential
+  USD: { accountNumber: "000123456789", accountNumberFormat: "ABA", bankCode: "021000021" },
+};
+const SANDBOX_ORIGINATOR_BANK_ACCOUNT_FALLBACK = {
+  // biome-ignore lint/security/noSecrets: synthetic sandbox account, not a credential
+  accountNumber: "GB29NWBK60161331926819",
+  accountNumberFormat: "IBAN",
+};
+
+function sandboxOriginatorBankAccount(currency: string): Record<string, string> {
+  return SANDBOX_ORIGINATOR_BANK_ACCOUNTS[currency] ?? SANDBOX_ORIGINATOR_BANK_ACCOUNT_FALLBACK;
+}
+
 export interface BvnkRuleEntityAddress {
   addressLine1: string;
   addressLine2?: string;
@@ -895,19 +912,27 @@ export class BvnkRampClient implements RampProvider {
 
   async simulatePayin(
     { env, mode }: RampRuntimeContext,
-    input: { walletId: string; amount: number; currency: string; remittanceInformation?: string }
+    input: {
+      walletId: string;
+      amount: number;
+      currency: string;
+      originatorName: string;
+      remittanceInformation?: string;
+    }
   ): Promise<unknown> {
     const config = readBvnkConfig(env, mode);
+    const remittanceInformation =
+      input.remittanceInformation ?? `SDP ${crypto.randomUUID().replace(/-/g, "").slice(0, 20)}`;
     return bvnkRequest(config, "/payment/v2/payins/simulation", {
       method: "POST",
       body: {
         walletId: input.walletId,
         amount: input.amount,
         currency: input.currency,
-        remittanceInformation: input.remittanceInformation ?? rampId("sdp_payin"),
+        remittanceInformation,
         originator: {
-          name: "SDP Sandbox Sender",
-          bankAccount: { accountNumber: "000000000000" },
+          name: input.originatorName,
+          bankAccount: sandboxOriginatorBankAccount(input.currency),
         },
       },
     });

@@ -176,6 +176,43 @@ function ManualQuoteSummary({
 type LightsparkInstructionType = Extract<PaymentRampInstruction, { provider: "lightspark" }>;
 type BvnkInstructionType = Extract<PaymentRampInstruction, { provider: "bvnk" }>;
 
+type SimulateQuote = { loading: boolean; succeeded: boolean; onClick: () => void };
+
+function SimulateButton({
+  simulateQuote,
+  idleLabel,
+  doneLabel,
+}: {
+  simulateQuote: SimulateQuote;
+  idleLabel: string;
+  doneLabel: string;
+}) {
+  return (
+    <Button
+      type="button"
+      variant="secondary"
+      size="xs"
+      iconLeft={simulateQuote.succeeded ? <CheckCircle2Icon /> : <DollarSignIcon />}
+      onClick={simulateQuote.onClick}
+      disabled={simulateQuote.loading || simulateQuote.succeeded}
+    >
+      {simulateQuote.succeeded ? doneLabel : simulateQuote.loading ? "Simulating..." : idleLabel}
+    </Button>
+  );
+}
+
+function InstructionBadges({ children }: { children: ReactNode }) {
+  return <div className="flex flex-wrap items-center gap-2">{children}</div>;
+}
+
+function InstructionBadge({ children }: { children: ReactNode }) {
+  return (
+    <span className="rounded-full bg-border-extra-light px-3 py-1 text-xs font-medium text-text-medium">
+      {children}
+    </span>
+  );
+}
+
 function LightsparkInstruction({
   instruction,
   showSimulate,
@@ -183,37 +220,22 @@ function LightsparkInstruction({
 }: {
   instruction: LightsparkInstructionType;
   showSimulate: boolean;
-  simulateQuote?: { loading: boolean; succeeded: boolean; onClick: () => void };
+  simulateQuote?: SimulateQuote;
 }) {
   const info = instruction.accountOrWalletInfo;
   return (
     <div className="space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="rounded-full bg-border-extra-light px-3 py-1 text-xs font-medium text-text-medium">
-            {info.accountType.replaceAll("_", " ")}
-          </span>
-          {info.assetType ? (
-            <span className="rounded-full bg-border-extra-light px-3 py-1 text-xs font-medium text-text-medium">
-              {info.assetType}
-            </span>
-          ) : null}
-        </div>
+        <InstructionBadges>
+          <InstructionBadge>{info.accountType.replaceAll("_", " ")}</InstructionBadge>
+          {info.assetType ? <InstructionBadge>{info.assetType}</InstructionBadge> : null}
+        </InstructionBadges>
         {showSimulate && simulateQuote ? (
-          <Button
-            type="button"
-            variant="secondary"
-            size="xs"
-            iconLeft={simulateQuote.succeeded ? <CheckCircle2Icon /> : <DollarSignIcon />}
-            onClick={simulateQuote.onClick}
-            disabled={simulateQuote.loading || simulateQuote.succeeded}
-          >
-            {simulateQuote.succeeded
-              ? "Quote Simulated"
-              : simulateQuote.loading
-                ? "Simulating..."
-                : "Simulate Quote"}
-          </Button>
+          <SimulateButton
+            simulateQuote={simulateQuote}
+            idleLabel="Simulate Quote"
+            doneLabel="Quote Simulated"
+          />
         ) : null}
       </div>
       <div className="grid gap-3 lg:grid-cols-2">
@@ -241,22 +263,31 @@ function LightsparkInstruction({
   );
 }
 
-// BVNK-specific funding view: virtual-account onboarding states (verification /
-// in-review / ready) that don't apply to other providers' instructions.
-function BvnkInstruction({ instruction }: { instruction: BvnkInstructionType }) {
+function BvnkInstruction({
+  instruction,
+  simulateQuote,
+}: {
+  instruction: BvnkInstructionType;
+  simulateQuote?: SimulateQuote;
+}) {
   const isReady = instruction.onboardingStatus === "ready";
   const needsVerification = instruction.onboardingStatus === "verification_required";
   const bank = instruction.bankAccount;
 
   return (
-    <div className="space-y-5">
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="rounded-full bg-border-extra-light px-3 py-1 text-xs font-medium text-text-medium">
-          {instruction.fiatCurrency} virtual account
-        </span>
-        <span className="rounded-full bg-border-extra-light px-3 py-1 text-xs font-medium text-text-medium">
-          {instruction.network}
-        </span>
+    <div className="space-y-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <InstructionBadges>
+          <InstructionBadge>{instruction.fiatCurrency} virtual account</InstructionBadge>
+          <InstructionBadge>{instruction.network}</InstructionBadge>
+        </InstructionBadges>
+        {isReady && simulateQuote ? (
+          <SimulateButton
+            simulateQuote={simulateQuote}
+            idleLabel="Simulate Deposit"
+            doneLabel="Deposit Simulated"
+          />
+        ) : null}
       </div>
 
       {needsVerification ? (
@@ -298,13 +329,7 @@ function BvnkInstruction({ instruction }: { instruction: BvnkInstructionType }) 
       ) : null}
 
       {isReady ? (
-        <div className="space-y-3">
-          <div className="flex items-center gap-3">
-            <p className="shrink-0 text-xs font-medium uppercase tracking-[0.08em] text-text-low">
-              Bank transfer details
-            </p>
-            <div className="h-px flex-1 bg-border-light" />
-          </div>
+        <>
           <div className="grid gap-3 lg:grid-cols-2">
             <PaymentInstructionField label="Bank name" value={bank?.bankName} />
             <PaymentInstructionField label="Account number" value={bank?.accountNumber} />
@@ -317,7 +342,7 @@ function BvnkInstruction({ instruction }: { instruction: BvnkInstructionType }) 
               <p className="mt-1 text-sm text-text-extra-high">{instruction.instructionsNotes}</p>
             </div>
           ) : null}
-        </div>
+        </>
       ) : null}
     </div>
   );
@@ -385,6 +410,7 @@ export function ManualInstructionsQuote({
               <BvnkInstruction
                 key={instruction.ruleId ?? instruction.beneficiaryAddress}
                 instruction={instruction}
+                simulateQuote={simulateQuote}
               />
             ) : (
               <LightsparkInstruction
