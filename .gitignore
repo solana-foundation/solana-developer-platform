@@ -16,8 +16,6 @@ apps/sdp-api/.wrangler.*.generated.toml
 .dev.vars
 .cloudflare.*.env
 
-docs/_devlog/*
-
 # IDE
 .idea/
 .vscode/
