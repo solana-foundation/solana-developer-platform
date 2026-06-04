@@ -183,18 +183,42 @@ function OnrampRail({
     onExit,
   });
 
+  const verificationUrl =
+    wizard.currentStepId === "PROVIDER" &&
+    wizard.bvnkInstruction?.onboardingStatus === "verification_required"
+      ? wizard.bvnkInstruction.verificationUrl
+      : undefined;
+
+  const verificationPending =
+    wizard.currentStepId === "PROVIDER" && wizard.bvnkInstruction?.onboardingStatus === "verifying";
+
   return (
     <RampWizardShell
       steps={[...preSteps, ...ONRAMP_STEPS]}
       stepIndex={preSteps.length + wizard.stepIndex}
       primaryDisabled={
         wizard.hostedQuoteLoading ||
+        verificationPending ||
         !wizard.canProceed ||
         (wizard.currentStepId === "DEPOSIT" && wizard.walletsLoading)
       }
-      primaryLabel={wizard.hostedQuoteLoading ? "Opening..." : wizard.isLastStep ? "Done" : "Next"}
+      primaryLabel={
+        wizard.hostedQuoteLoading
+          ? "Opening..."
+          : verificationPending
+            ? "Verification pending"
+            : verificationUrl
+              ? "Complete Verification"
+              : wizard.isLastStep
+                ? "Done"
+                : "Next"
+      }
       walletsError={wizard.liveWalletsError}
-      onPrimary={() => void wizard.handlePrimary()}
+      onPrimary={
+        verificationUrl
+          ? () => window.open(verificationUrl, "_blank", "noopener")
+          : () => void wizard.handlePrimary()
+      }
       onSecondary={wizard.handleSecondary}
       counterpartyDialogOpen={false}
       setCounterpartyDialogOpen={() => {}}

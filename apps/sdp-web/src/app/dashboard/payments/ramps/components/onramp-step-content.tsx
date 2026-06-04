@@ -16,6 +16,7 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
     walletsLoading,
     selectedWallet,
     selectedRampPair,
+    bvnkInstruction,
     quote,
     quoteSimulationLoading,
     quoteSimulationSucceeded,
@@ -53,6 +54,15 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
     );
   }
 
+  if (currentStepId === "PROVIDER" && bvnkInstruction?.onboardingStatus === "verifying") {
+    return (
+      <div className="rounded-2xl border border-border-light bg-border-extra-light px-5 py-5 text-sm text-text-low">
+        We're reviewing your details. This usually takes a few minutes — you can come back to
+        complete your deposit once verification is approved.
+      </div>
+    );
+  }
+
   if (currentStepId === "PROVIDER" && quote?.deliveryMode === "hosted") {
     return (
       <div className="overflow-hidden rounded-2xl">
@@ -73,7 +83,7 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
         quote={quote}
         fiatCurrency={selectedRampPair.fiatCurrency}
         cryptoToken={toRampCryptoToken(selectedRampPair.assetRail)}
-        instructions={quote.paymentInstructions ?? []}
+        instructions={quote.provider === "bvnk" ? quote.paymentInstructions : []}
         simulateQuote={
           quote.provider === "lightspark"
             ? {
