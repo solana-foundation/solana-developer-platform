@@ -801,8 +801,9 @@ export const prepareSubscriptionAuthorizationRequestSchema =
         "Inputs for preparing the subscriber-signed Solana subscription authorization transaction.",
     });
 
-export const prepareSubscriptionLifecycleRequestSchema =
-  prepareSubscriptionLifecycleSchemaBase.openapi({
+export const prepareSubscriptionLifecycleRequestSchema = prepareSubscriptionLifecycleSchemaBase
+  .extend({})
+  .openapi({
     description:
       "Empty request body for preparing subscriber-signed subscription lifecycle transactions.",
   });
