@@ -256,7 +256,9 @@ const simulateLightsparkSandboxTransferPayloadSchema = z.object({
 const simulateBvnkSandboxPayinPayloadSchema = z.object({
   counterpartyId: z.string().min(1),
   amount: z.number().positive(),
-  fiatCurrency: z.string().trim().toUpperCase().length(3).optional(),
+  fiatCurrency: z.string().trim().toUpperCase().length(3),
+  cryptoToken: z.string().min(1),
+  destinationWallet: z.string().min(1),
 });
 
 export const simulateSandboxTransferSchema = z.discriminatedUnion("provider", [

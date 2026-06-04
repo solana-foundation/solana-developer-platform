@@ -401,7 +401,7 @@ async function ensureBvnkOnramp(
       ...customer,
       status: latest.status,
       verificationStatus: latest.verificationStatus,
-      verificationUrl: latest.verificationUrl,
+      verificationUrl: latest.verificationUrl ?? customer.verificationUrl,
     };
     await persist();
   }
@@ -795,29 +795,43 @@ export async function simulateSandboxTransfer(c: AppContext) {
       );
       break;
     case "bvnk": {
+      const payload = parsed.data.payload;
       const scope = await resolveScope(c);
       const projectId = requireProjectId(c);
       const counterparty = await getCounterpartiesRepository(c).getCounterpartyById({
-        counterpartyId: parsed.data.payload.counterpartyId,
+        counterpartyId: payload.counterpartyId,
         organizationId: scope.auth.organizationId,
         projectId,
       });
       if (!counterparty) {
         throw new AppError("NOT_FOUND", "Counterparty not found");
       }
-      const entry = Object.values(readBvnkWallets(counterparty.provider_data)).find(
-        (w) => w.walletId
+      const destinationWalletAddress = resolveWalletAddress(
+        scope.wallets,
+        payload.destinationWallet,
+        "destinationWallet",
+        scope.auth,
+        ["payments:write"]
       );
-      if (!entry?.walletId) {
+      const { currency, network } = normalizeBvnkCurrencyAndNetwork(payload.cryptoToken);
+      const key = bvnkOnrampKey(payload.fiatCurrency, currency, network, destinationWalletAddress);
+      const entry = readBvnkOnrampEntry(counterparty.provider_data, key);
+      if (!entry.walletId) {
         throw new AppError(
           "BAD_REQUEST",
-          "BVNK funding wallet is not provisioned yet for this counterparty."
+          "BVNK funding wallet is not provisioned yet for this destination."
+        );
+      }
+      if (!isBvnkWalletActive(entry.walletStatus)) {
+        throw new AppError(
+          "BAD_REQUEST",
+          "BVNK funding wallet is not active for this destination."
         );
       }
       transaction = await RAMP_PROVIDER_CLIENTS.bvnk.simulatePayin(rampRuntime(c), {
         walletId: entry.walletId,
-        amount: parsed.data.payload.amount,
-        currency: parsed.data.payload.fiatCurrency ?? "USD",
+        amount: payload.amount,
+        currency: payload.fiatCurrency,
         originatorName: counterparty.display_name,
         remittanceInformation: entry.bankAccount?.paymentReference,
       });

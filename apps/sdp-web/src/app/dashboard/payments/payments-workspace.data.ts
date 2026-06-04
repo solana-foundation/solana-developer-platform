@@ -500,7 +500,9 @@ type SandboxTransferSimulationInput =
       payload: {
         counterpartyId: string;
         amount: number;
-        fiatCurrency?: string;
+        fiatCurrency: string;
+        cryptoToken: string;
+        destinationWallet: string;
       };
     };
 

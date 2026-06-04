@@ -686,7 +686,14 @@ export const handleRampProviderWebhook = async (c: AppContext, environment: SdpE
   });
 
   if (result.provider === "bvnk") {
-    await processBvnkCustomerWebhook(c, environment, result.payload);
+    try {
+      await processBvnkCustomerWebhook(c, environment, result.payload);
+    } catch (error) {
+      console.error(
+        `[bvnk webhook] failed to process event: ${error instanceof Error ? error.message : String(error)}`,
+        JSON.stringify(result.payload)
+      );
+    }
   }
 
   return success(c, {

@@ -4,7 +4,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
 import { simulateSandboxTransfer } from "@/app/dashboard/payments/payments-workspace.data";
-import { ONRAMP_PAIRS } from "@/lib/ramps";
+import { ONRAMP_PAIRS, toRampCryptoToken } from "@/lib/ramps";
 import { depositAmountSchema, depositSelectionSchema } from "../schema";
 import { type RampWizardStep, type UseRampWizardProps, useRampWizard } from "./use-ramp-wizard";
 
@@ -78,6 +78,8 @@ export function useOnrampWizard(props: UseRampWizardProps) {
             counterpartyId: wizard.fields.counterpartyId,
             amount: Number(wizard.fields.amount.trim()),
             fiatCurrency: wizard.selectedRampPair.fiatCurrency,
+            cryptoToken: toRampCryptoToken(wizard.selectedRampPair.assetRail),
+            destinationWallet: wizard.fields.walletId,
           },
         });
       }
