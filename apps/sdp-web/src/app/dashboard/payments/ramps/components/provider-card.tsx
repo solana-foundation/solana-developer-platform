@@ -26,8 +26,10 @@ export function ProviderCard({ option, active, onSelect }: ProviderCardProps) {
         scale: { duration: 0.15 },
       }}
       className={cn(
-        "flex w-full items-center gap-3 rounded-xl border bg-border-extra-light px-4 py-3 text-left transition-colors",
-        active ? "border-border-medium" : "border-transparent hover:bg-border-light"
+        "flex w-full items-center gap-3 rounded-xl bg-border-extra-light px-4 py-3 text-left outline outline-2 -outline-offset-2 transition-colors",
+        active
+          ? "outline-border-medium ring-2 ring-text-low ring-offset-2 ring-offset-white"
+          : "outline-transparent hover:bg-border-light"
       )}
     >
       <Image

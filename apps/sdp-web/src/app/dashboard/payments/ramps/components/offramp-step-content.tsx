@@ -1,6 +1,6 @@
 "use client";
 
-import { PlusIcon, WalletIcon } from "lucide-react";
+import { WalletIcon } from "lucide-react";
 import { useMemo } from "react";
 import {
   formatCurrencyAmount,
@@ -9,7 +9,6 @@ import {
 import { Combobox } from "@/components/ui/combobox";
 import { OFFRAMP_PAIRS, RAMP_PROVIDER_OPTIONS } from "@/lib/ramps";
 import type { OfframpWizard } from "../hooks/use-offramp-wizard";
-import { CounterpartySelector } from "./counterparty-selector";
 import { RampPairProviderSelector } from "./ramp-pair-provider-selector";
 import { RampStepPlaceholder } from "./ramp-step-placeholder";
 
@@ -17,7 +16,6 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
   const {
     currentStepId,
     enabledRampProviders,
-    liveCounterpartiesResult,
     liveWallets,
     walletsLoading,
     selectedWallet,
@@ -25,7 +23,6 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
     fields,
     quote,
     setField,
-    setCounterpartyDialogOpen,
     handlePairChange,
   } = wizard;
 
@@ -42,40 +39,18 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
     [liveWallets]
   );
 
-  if (currentStepId === "COUNTERPARTY") {
+  if (currentStepId === "WALLET") {
     return (
-      <div className="space-y-3">
-        <button
-          type="button"
-          onClick={() => setCounterpartyDialogOpen(true)}
-          className="flex w-full items-center gap-3 rounded-2xl border border-dashed border-border-light px-4 py-3.5 text-left transition-colors hover:border-border-medium hover:bg-border-extra-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/50 dark:focus-visible:ring-white/50"
-        >
-          <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-border-extra-light text-text-extra-high">
-            <PlusIcon className="size-4" />
-          </span>
-          <span className="min-w-0 flex-1">
-            <span className="block text-sm font-medium text-text-extra-high">Add counterparty</span>
-            <span className="block text-sm text-text-low">
-              Create a new payee to pay out to if they aren&apos;t in the list yet.
-            </span>
-          </span>
-        </button>
-        <CounterpartySelector
-          counterpartiesResult={liveCounterpartiesResult}
-          value={fields.counterpartyId || null}
-          onChange={(id) => setField("counterpartyId", id)}
-        />
-        <Combobox
-          label="Source wallet"
-          value={fields.walletId || null}
-          onChange={(walletId) => setField("walletId", walletId)}
-          options={walletOptions}
-          placeholder="Select a source wallet"
-          searchPlaceholder="Search wallets"
-          icon={<WalletIcon className="size-5 shrink-0 text-text-low" />}
-          isLoading={walletsLoading}
-        />
-      </div>
+      <Combobox
+        label="Source wallet"
+        value={fields.walletId || null}
+        onChange={(walletId) => setField("walletId", walletId)}
+        options={walletOptions}
+        placeholder="Select a source wallet"
+        searchPlaceholder="Search wallets"
+        icon={<WalletIcon className="size-5 shrink-0 text-text-low" />}
+        isLoading={walletsLoading}
+      />
     );
   }
 

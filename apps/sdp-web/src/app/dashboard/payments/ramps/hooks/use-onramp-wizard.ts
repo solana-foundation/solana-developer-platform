@@ -4,15 +4,10 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { simulateSandboxTransfer } from "@/app/dashboard/payments/payments-workspace.data";
 import { ONRAMP_PAIRS } from "@/lib/ramps";
-import {
-  counterpartySelectionSchema,
-  depositAmountSchema,
-  depositSelectionSchema,
-} from "../schema";
+import { depositAmountSchema, depositSelectionSchema } from "../schema";
 import { type RampWizardStep, type UseRampWizardProps, useRampWizard } from "./use-ramp-wizard";
 
 export const ONRAMP_STEPS = [
-  { id: "COUNTERPARTY", label: "Counterparty", title: "Who is this deposit for?" },
   { id: "DEPOSIT", label: "Deposit", title: "How much would you like to deposit?" },
   { id: "PROVIDER", label: "Provider", title: "Complete your deposit" },
   { id: "DONE", label: "Step 4", title: "Coming soon" },
@@ -27,7 +22,7 @@ export function useOnrampWizard(props: UseRampWizardProps) {
   const wizard = useRampWizard(props, {
     pairs: ONRAMP_PAIRS,
     steps: ONRAMP_STEPS,
-    stepSchemas: { COUNTERPARTY: counterpartySelectionSchema, DEPOSIT: depositAmountSchema },
+    stepSchemas: { DEPOSIT: depositAmountSchema },
     quoteStepId: "DEPOSIT",
     selectionSchema: depositSelectionSchema,
     quoteEndpoint: "/api/dashboard/payments/ramps/onramp/quote",

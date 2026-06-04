@@ -79,7 +79,7 @@ export function RampWizardShell({
               Step {stepIndex + 1} of {steps.length}
             </span>
           </div>
-          <p className="text-2xl font-medium leading-tight text-text-extra-high">
+          <p className="text-3xl font-medium leading-tight tracking-tight text-text-extra-high">
             {steps[stepIndex]?.title}
           </p>
         </div>

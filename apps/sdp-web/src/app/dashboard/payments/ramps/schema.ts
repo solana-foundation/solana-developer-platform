@@ -46,16 +46,12 @@ export const withdrawSelectionSchema = makeRampSelectionSchema(
 );
 
 // Per-step gating schemas.
-export const counterpartySelectionSchema = depositSelectionSchema.pick({ counterpartyId: true });
 export const depositAmountSchema = depositSelectionSchema.pick({
   walletId: true,
   amount: true,
   provider: true,
 });
-export const payoutCounterpartySchema = withdrawSelectionSchema.pick({
-  counterpartyId: true,
-  walletId: true,
-});
+export const sourceWalletSchema = withdrawSelectionSchema.pick({ walletId: true });
 export const withdrawAmountSchema = withdrawSelectionSchema.pick({
   amount: true,
   provider: true,

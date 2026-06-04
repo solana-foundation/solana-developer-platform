@@ -1,11 +1,11 @@
 "use client";
 
 import { OFFRAMP_PAIRS } from "@/lib/ramps";
-import { payoutCounterpartySchema, withdrawAmountSchema, withdrawSelectionSchema } from "../schema";
+import { sourceWalletSchema, withdrawAmountSchema, withdrawSelectionSchema } from "../schema";
 import { type RampWizardStep, type UseRampWizardProps, useRampWizard } from "./use-ramp-wizard";
 
 export const OFFRAMP_STEPS = [
-  { id: "COUNTERPARTY", label: "Counterparty", title: "Who are you paying out to?" },
+  { id: "WALLET", label: "Wallet", title: "Which wallet are you withdrawing from?" },
   { id: "WITHDRAW", label: "Withdraw", title: "How much would you like to withdraw?" },
   { id: "COMPLETE", label: "Complete", title: "Complete your payout" },
 ] as const satisfies readonly RampWizardStep[];
@@ -16,7 +16,7 @@ export function useOfframpWizard(props: UseRampWizardProps) {
   return useRampWizard(props, {
     pairs: OFFRAMP_PAIRS,
     steps: OFFRAMP_STEPS,
-    stepSchemas: { COUNTERPARTY: payoutCounterpartySchema, WITHDRAW: withdrawAmountSchema },
+    stepSchemas: { WALLET: sourceWalletSchema, WITHDRAW: withdrawAmountSchema },
     quoteStepId: "WITHDRAW",
     selectionSchema: withdrawSelectionSchema,
     quoteEndpoint: "/api/dashboard/payments/ramps/offramp/quote",

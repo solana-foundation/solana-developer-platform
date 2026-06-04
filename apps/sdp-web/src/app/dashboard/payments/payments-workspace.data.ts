@@ -2,8 +2,10 @@
 
 import type {
   Counterparty,
+  CounterpartyAccount,
   CustodyWalletAggregate,
   ListCounterpartiesResponse,
+  ListCounterpartyAccountsResponse,
   PaymentRampExecution,
   PaymentsWalletAggregateEnvelope,
   PaymentTransferEnvelope as TransferEnvelope,
@@ -442,6 +444,22 @@ export async function createTransfer(input: {
   }
 
   return body.data.transfer;
+}
+
+export async function fetchCounterpartyAccounts(
+  counterpartyId: string
+): Promise<CounterpartyAccount[]> {
+  const response = await fetch(
+    `/api/dashboard/counterparty/${encodeURIComponent(counterpartyId)}/accounts?pageSize=100`
+  );
+  const body = (await response.json().catch(() => ({}))) as {
+    data?: ListCounterpartyAccountsResponse;
+    error?: { message?: string };
+  };
+  if (!response.ok) {
+    throw new Error(getApiError(body, `Failed to load accounts (${response.status}).`));
+  }
+  return body.data?.accounts ?? [];
 }
 
 export async function executeRampFlow(

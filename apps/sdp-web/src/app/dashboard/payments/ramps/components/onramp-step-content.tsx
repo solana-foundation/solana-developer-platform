@@ -1,9 +1,7 @@
 "use client";
 
-import { PlusIcon } from "lucide-react";
 import { ONRAMP_PAIRS, RAMP_PROVIDER_OPTIONS, toRampCryptoToken } from "@/lib/ramps";
 import type { OnrampWizard } from "../hooks/use-onramp-wizard";
-import { CounterpartySelector } from "./counterparty-selector";
 import { ManualInstructionsQuote } from "./manual-instructions-quote";
 import { RampPairProviderSelector } from "./ramp-pair-provider-selector";
 import { RampStepPlaceholder } from "./ramp-step-placeholder";
@@ -12,10 +10,8 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
   const {
     currentStepId,
     enabledRampProviders,
-    liveCounterpartiesResult,
     fields,
     setField,
-    setCounterpartyDialogOpen,
     liveWallets,
     walletsLoading,
     selectedWallet,
@@ -26,33 +22,6 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
     simulateCurrentQuote,
     handlePairChange,
   } = wizard;
-
-  if (currentStepId === "COUNTERPARTY") {
-    return (
-      <div className="space-y-3">
-        <button
-          type="button"
-          onClick={() => setCounterpartyDialogOpen(true)}
-          className="flex w-full items-center gap-3 rounded-2xl border border-dashed border-border-light px-4 py-3.5 text-left transition-colors hover:border-border-medium hover:bg-border-extra-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/50 dark:focus-visible:ring-white/50"
-        >
-          <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-border-extra-light text-text-extra-high">
-            <PlusIcon className="size-4" />
-          </span>
-          <span className="min-w-0 flex-1">
-            <span className="block text-sm font-medium text-text-extra-high">Add counterparty</span>
-            <span className="block text-sm text-text-low">
-              Create a new buyer to deposit for if they aren&apos;t in the list yet.
-            </span>
-          </span>
-        </button>
-        <CounterpartySelector
-          counterpartiesResult={liveCounterpartiesResult}
-          value={fields.counterpartyId || null}
-          onChange={(id) => setField("counterpartyId", id)}
-        />
-      </div>
-    );
-  }
 
   if (currentStepId === "DEPOSIT") {
     if (enabledRampProviders.length === 0) {

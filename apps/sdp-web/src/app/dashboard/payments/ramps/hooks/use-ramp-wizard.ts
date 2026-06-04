@@ -86,10 +86,21 @@ export interface UseRampWizardProps {
   walletsError: string | null;
   enabledRampProviders: RampProviderId[];
   counterpartiesResult: CounterpartiesResult;
+  /** Counterparty chosen upstream; seeds the form and is no longer picked in-wizard. */
+  initialCounterpartyId?: string;
+  /** Invoked when the user goes back from the first step. */
+  onExit?: () => void;
 }
 
 export function useRampWizard<TId extends string>(
-  { wallets, walletsError, enabledRampProviders, counterpartiesResult }: UseRampWizardProps,
+  {
+    wallets,
+    walletsError,
+    enabledRampProviders,
+    counterpartiesResult,
+    initialCounterpartyId = "",
+    onExit,
+  }: UseRampWizardProps,
   config: RampWizardConfig<TId>
 ) {
   const router = useRouter();
@@ -103,7 +114,7 @@ export function useRampWizard<TId extends string>(
     walletId: "",
     amount: "",
     provider: null,
-    counterpartyId: "",
+    counterpartyId: initialCounterpartyId,
   });
 
   const { data: swrWallets, error: walletsFetchError } = useSWR<PaymentsDashboardWallet[]>(
@@ -203,6 +214,10 @@ export function useRampWizard<TId extends string>(
 
   const handleSecondary = () => {
     if (stepIndex === 0) {
+      if (onExit) {
+        onExit();
+        return;
+      }
       router.push("/dashboard/payments");
       return;
     }
