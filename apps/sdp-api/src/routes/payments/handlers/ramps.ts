@@ -444,7 +444,11 @@ async function ensureBvnkOnramp(
         bankAccount: wallet.bankAccount ?? entry.bankAccount,
       };
       await persist();
-    } catch {}
+    } catch (error) {
+      console.warn(
+        `[bvnk onramp] wallet ${entry.walletId} status refresh failed; relying on webhook: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
   }
 
   if (!entry.ruleId && entry.walletId && isBvnkWalletActive(entry.walletStatus)) {
@@ -477,8 +481,11 @@ async function resolveBvnkOnramp(
   projectId: string,
   input: { cryptoToken: string; fiatCurrency?: string; destinationWalletAddress: string }
 ) {
+  if (!input.fiatCurrency) {
+    throw new AppError("BAD_REQUEST", "fiatCurrency is required for BVNK on-ramp.");
+  }
   const { currency, network } = normalizeBvnkCurrencyAndNetwork(input.cryptoToken);
-  const fiatCurrency = input.fiatCurrency ?? "USD";
+  const fiatCurrency = input.fiatCurrency;
   const resolution = await ensureBvnkOnramp(c, repo, counterparty, projectId, {
     currency,
     network,
@@ -491,7 +498,10 @@ async function resolveBvnkOnramp(
     fiatCurrency,
   });
   const reference = resolution.entry.ruleId ?? resolution.customer.customerReference;
-  return { instruction, id: reference ?? counterparty.id, reference };
+  if (!reference) {
+    throw new AppError("INTERNAL_ERROR", "BVNK on-ramp resolution is missing a reference.");
+  }
+  return { instruction, id: reference, reference };
 }
 
 async function createBvnkOnrampQuote(

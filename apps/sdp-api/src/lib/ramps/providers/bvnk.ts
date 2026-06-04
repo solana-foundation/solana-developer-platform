@@ -955,9 +955,12 @@ export class BvnkRampClient implements RampProvider {
     { env, mode }: RampRuntimeContext,
     input: RampOfframpQuoteInput
   ): Promise<PaymentRampQuote> {
+    if (!input.fiatCurrency) {
+      throw new AppError("BAD_REQUEST", "fiatCurrency is required for BVNK off-ramp.");
+    }
     const config = readBvnkConfig(env, mode);
     const { currency, network } = normalizeBvnkCurrencyAndNetwork(input.cryptoToken);
-    const fiatCurrency = input.fiatCurrency ?? "USD";
+    const fiatCurrency = input.fiatCurrency;
     const paidRequiredAmount = toPositiveAmount(input.cryptoAmount, "cryptoAmount");
     const reference = rampId("sdp_offramp");
     const complianceDetails = buildBvnkComplianceDetails(input.bvnkCompliance, {
@@ -1027,9 +1030,12 @@ export class BvnkRampClient implements RampProvider {
       );
     }
 
+    if (!input.fiatCurrency) {
+      throw new AppError("BAD_REQUEST", "fiatCurrency is required for BVNK off-ramp.");
+    }
     const config = readBvnkConfig(env, mode);
     const { currency, network } = normalizeBvnkCurrencyAndNetwork(input.cryptoToken);
-    const fiatCurrency = input.fiatCurrency ?? "USD";
+    const fiatCurrency = input.fiatCurrency;
     const paidRequiredAmount = toPositiveAmount(input.cryptoAmount, "cryptoAmount");
     const externalReference = rampId("sdp_offramp");
     const complianceDetails = buildBvnkComplianceDetails(input.bvnkCompliance, {
