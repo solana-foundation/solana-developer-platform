@@ -63,6 +63,7 @@ export function OnchainSendStepContent({
     counterpartyId,
     fields,
     setField,
+    selectWallet,
     addAccountOpen,
     setAddAccountOpen,
     handleAccountAdded,
@@ -126,7 +127,7 @@ export function OnchainSendStepContent({
         <Combobox
           label="Source wallet"
           value={fields.walletId || null}
-          onChange={(id) => setField("walletId", id)}
+          onChange={selectWallet}
           options={walletOptions}
           placeholder="Select a source wallet"
           searchPlaceholder="Search wallets"

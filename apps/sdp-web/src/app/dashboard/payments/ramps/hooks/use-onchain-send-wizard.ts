@@ -37,6 +37,16 @@ function resolveAccountAddress(account: CounterpartyAccount | null): string {
   return typeof address === "string" ? address : "";
 }
 
+function resolveWalletAssets(wallet: PaymentsDashboardWallet | null): string[] {
+  const assetSet = new Set<string>(["USDC"]);
+  for (const balance of wallet?.balances ?? []) {
+    if (!isSolBalance(balance) && balance.token) {
+      assetSet.add(balance.token);
+    }
+  }
+  return [...assetSet];
+}
+
 export interface UseOnchainSendWizardProps {
   wallets: PaymentsDashboardWallet[];
   walletsError: string | null;
@@ -112,15 +122,16 @@ export function useOnchainSendWizard({
   );
   const destinationAddress = resolveAccountAddress(selectedAccount);
 
-  const assetOptions = useMemo(() => {
-    const assetSet = new Set<string>(["USDC"]);
-    for (const balance of selectedWallet?.balances ?? []) {
-      if (!isSolBalance(balance) && balance.token) {
-        assetSet.add(balance.token);
-      }
+  const assetOptions = useMemo(() => resolveWalletAssets(selectedWallet), [selectedWallet]);
+
+  const selectWallet = (walletId: string) => {
+    setField("walletId", walletId);
+    const nextWallet = liveWallets.find((wallet) => wallet.walletId === walletId) ?? null;
+    const nextAssets = resolveWalletAssets(nextWallet);
+    if (!nextAssets.includes(fields.asset)) {
+      setField("asset", nextAssets[0] ?? "");
     }
-    return [...assetSet];
-  }, [selectedWallet]);
+  };
 
   const selectedAssetBalance = useMemo(
     () => selectedWallet?.balances?.find((balance) => balance.token === fields.asset) ?? null,
@@ -233,6 +244,7 @@ export function useOnchainSendWizard({
     exceedsBalance,
     fields,
     setField,
+    selectWallet,
     addAccountOpen,
     setAddAccountOpen,
     handleAccountAdded,
