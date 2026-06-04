@@ -743,10 +743,12 @@ const bvnkRampPaymentInstructionSchema = z.object({
     description: "Provider that produced this instruction.",
     example: "bvnk",
   }),
-  onboardingStatus: z.enum(["verification_required", "verifying", "ready"]).openapi({
-    description: "Where the buyer is in BVNK onboarding; 'ready' means the funding rule is live.",
-    example: "ready",
-  }),
+  onboardingStatus: z
+    .enum(["verification_required", "verifying", "provisioning", "ready"])
+    .openapi({
+      description: "Where the buyer is in BVNK onboarding; 'ready' means the funding rule is live.",
+      example: "ready",
+    }),
   verificationUrl: z.string().optional().openapi({
     description: "Identity-verification (KYC) URL the buyer must complete before funding.",
   }),

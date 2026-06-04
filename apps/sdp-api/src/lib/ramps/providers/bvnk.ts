@@ -21,9 +21,7 @@ import type {
   ProviderRampSupport,
   RampDumpReader,
   RampExecuteOfframpInput,
-  RampExecuteOnrampInput,
   RampOfframpQuoteInput,
-  RampOnrampQuoteInput,
   RampProvider,
   RampRuntimeContext,
   RampWebhookValidationContext,
@@ -63,8 +61,6 @@ export interface BvnkRuleEntity {
 
 export interface BvnkComplianceInput {
   partyDetails?: Record<string, unknown>[];
-  /** Structured beneficiary entity used by the fiat→crypto on-ramp rule flow. */
-  ruleEntity?: BvnkRuleEntity;
 }
 
 interface BvnkConfig {
@@ -183,31 +179,6 @@ function mapBvnkPaymentStatus(status: string | undefined): PaymentRampExecution[
     return "failed";
   }
   return "pending";
-}
-
-function mapBvnkRuleStatus(status: string | undefined): PaymentRampExecution["status"] {
-  if (!status) return "pending";
-  const normalized = status.trim().toUpperCase();
-  if (
-    normalized.includes("FAIL") ||
-    normalized.includes("REJECT") ||
-    normalized.includes("ERROR")
-  ) {
-    return "failed";
-  }
-  // A freshly created rule is a standing instruction awaiting fiat funding.
-  return "pending";
-}
-
-function requireBvnkRuleEntity(input?: BvnkComplianceInput): BvnkRuleEntity {
-  const entity = input?.ruleEntity;
-  if (!entity) {
-    throw new AppError(
-      "BAD_REQUEST",
-      "BVNK on-ramp requires counterparty identity (bvnkCompliance.ruleEntity)."
-    );
-  }
-  return entity;
 }
 
 function buildBvnkComplianceDetails(
@@ -471,6 +442,7 @@ export interface BvnkBankAccount {
 
 export interface BvnkFiatWallet {
   id: string;
+  status?: string;
   bankAccount?: BvnkBankAccount;
 }
 
@@ -641,8 +613,7 @@ function parseBvnkFiatWallet(payload: unknown): BvnkFiatWallet {
   if (!id) {
     throw new AppError("BAD_REQUEST", "BVNK wallet response is missing an id");
   }
-  // v2 wallets return fiat funding details under paymentInstruments[]; they are
-  // provisioned async, so a freshly created wallet may have an empty list.
+  const status = readString(data.status);
   const instruments = Array.isArray(data.paymentInstruments) ? data.paymentInstruments : [];
   for (const entry of instruments) {
     const inst = asRecord(entry);
@@ -650,6 +621,7 @@ function parseBvnkFiatWallet(payload: unknown): BvnkFiatWallet {
     const bank = asRecord(inst.bankDetails);
     return {
       id,
+      status,
       bankAccount: {
         accountNumber: readString(inst.accountNumber),
         code: readString(bank.bic),
@@ -658,7 +630,7 @@ function parseBvnkFiatWallet(payload: unknown): BvnkFiatWallet {
       },
     };
   }
-  return { id };
+  return { id, status };
 }
 
 export class BvnkRampClient implements RampProvider {
@@ -932,7 +904,7 @@ export class BvnkRampClient implements RampProvider {
         walletId: input.walletId,
         amount: input.amount,
         currency: input.currency,
-        remittanceInformation: input.remittanceInformation ?? bvnkReference(),
+        remittanceInformation: input.remittanceInformation ?? rampId("sdp_payin"),
         originator: {
           name: "SDP Sandbox Sender",
           bankAccount: { accountNumber: "000000000000" },
@@ -941,51 +913,17 @@ export class BvnkRampClient implements RampProvider {
     });
   }
 
-  async createOnrampQuote(
-    { env, mode }: RampRuntimeContext,
-    input: RampOnrampQuoteInput
-  ): Promise<PaymentRampQuote> {
-    const config = readBvnkConfig(env, mode);
-    const { currency, network } = normalizeBvnkCurrencyAndNetwork(input.cryptoToken);
-    const fiatCurrency = input.fiatCurrency ?? "USD";
-    const reference = rampId("sdp_onramp");
-    const entity = requireBvnkRuleEntity(input.bvnkCompliance);
-
-    const response = await bvnkRequest(config, "/payment/v1/rules", {
-      method: "POST",
-      body: {
-        reference,
-        trigger: "payment:payin:fiat",
-        walletId: config.walletId,
-        beneficiary: {
-          currency,
-          entity,
-          cryptoAddress: { network, address: input.destinationWalletAddress },
-        },
-      },
-    });
-
-    const rule = parseBvnkRuleResponse(response);
-    const ruleId = rule.id ?? reference;
-    return {
-      provider: "bvnk",
-      id: ruleId,
-      status: mapBvnkRuleStatus(rule.status),
-      deliveryMode: "manual_instructions",
-      paymentInstructions: [
-        {
-          provider: "bvnk",
-          onboardingStatus: "ready",
-          ruleId,
-          ruleStatus: rule.status ?? "UNKNOWN",
-          fundingWalletId: rule.originator?.walletId ?? config.walletId,
-          fiatCurrency: rule.originator?.currency ?? fiatCurrency,
-          beneficiaryAddress: input.destinationWalletAddress,
-          network,
-          instructionsNotes: `Fund your ${fiatCurrency} BVNK virtual account to receive ${currency} on ${network}.`,
-        },
-      ],
-    };
+  /**
+   * BVNK on-ramp is stateful (per-counterparty KYC customer + virtual wallet +
+   * rule) and is orchestrated in the payments handler via `ensureBvnkOnramp`,
+   * which owns the DB-cached state. The stateless provider contract can't model
+   * it, so these interface methods are unreachable for BVNK.
+   */
+  async createOnrampQuote(): Promise<PaymentRampQuote> {
+    throw new AppError(
+      "INTERNAL_ERROR",
+      "BVNK on-ramp is orchestrated by the payments handler, not the provider quote method."
+    );
   }
 
   async createOfframpQuote(
@@ -1045,51 +983,11 @@ export class BvnkRampClient implements RampProvider {
     };
   }
 
-  async executeOnramp(
-    { env, mode }: RampRuntimeContext,
-    input: RampExecuteOnrampInput
-  ): Promise<PaymentRampExecution> {
-    const config = readBvnkConfig(env, mode);
-    const { currency, network } = normalizeBvnkCurrencyAndNetwork(input.cryptoToken);
-    const fiatCurrency = input.fiatCurrency ?? "USD";
-    const externalReference = rampId("sdp_onramp");
-    const entity = requireBvnkRuleEntity(input.bvnkCompliance);
-
-    const response = await bvnkRequest(config, "/payment/v1/rules", {
-      method: "POST",
-      body: {
-        reference: externalReference,
-        trigger: "payment:payin:fiat",
-        walletId: config.walletId,
-        beneficiary: {
-          currency,
-          entity,
-          cryptoAddress: { network, address: input.destinationWalletAddress },
-        },
-      },
-    });
-
-    const rule = parseBvnkRuleResponse(response);
-    const ruleId = rule.id ?? externalReference;
-    return {
-      id: rampId("ramp"),
-      provider: "bvnk",
-      status: mapBvnkRuleStatus(rule.status),
-      reference: rule.reference ?? ruleId,
-      paymentInstructions: [
-        {
-          provider: "bvnk",
-          onboardingStatus: "ready",
-          ruleId,
-          ruleStatus: rule.status ?? "UNKNOWN",
-          fundingWalletId: rule.originator?.walletId ?? config.walletId,
-          fiatCurrency: rule.originator?.currency ?? fiatCurrency,
-          beneficiaryAddress: input.destinationWalletAddress,
-          network,
-          instructionsNotes: `Fund your ${fiatCurrency} BVNK virtual account to receive ${currency} on ${network}.`,
-        },
-      ],
-    };
+  async executeOnramp(): Promise<PaymentRampExecution> {
+    throw new AppError(
+      "INTERNAL_ERROR",
+      "BVNK on-ramp is orchestrated by the payments handler, not the provider execute method."
+    );
   }
 
   async executeOfframp(
@@ -1172,9 +1070,14 @@ export interface BvnkCustomerData {
 /** Per funding-spec (fiat+token+destination) virtual wallet + rule. */
 export interface BvnkOnrampEntry {
   walletId?: string;
+  walletStatus?: string;
   ruleId?: string;
   ruleStatus?: string;
   bankAccount?: BvnkBankFundingDetails;
+}
+
+export function isBvnkWalletActive(status: string | undefined): boolean {
+  return status?.toUpperCase() === "ACTIVE";
 }
 
 export interface BvnkOnrampResolution {
@@ -1227,10 +1130,6 @@ export function findBvnkWalletEntryKey(
     if (entry && typeof entry === "object" && entry.walletId === walletId) return key;
   }
   return undefined;
-}
-
-export function bvnkReference(): string {
-  return `sdp_${crypto.randomUUID().replace(/-/g, "").slice(0, 24)}`;
 }
 
 /**
@@ -1289,7 +1188,6 @@ export function buildBvnkPartyDetails(
         ...(identity.address?.countryCode ? { countryCode: identity.address.countryCode } : {}),
       },
     ],
-    ruleEntity: buildBvnkRuleEntity(counterparty),
   };
 }
 
@@ -1353,8 +1251,8 @@ export function buildBvnkOnrampInstruction(
       ? `Fund your ${params.fiatCurrency} BVNK virtual account to receive crypto on ${params.network}.`
       : onboardingStatus === "verification_required"
         ? "Complete identity verification to activate your funding account."
-        : customer.verificationStatus === "completed"
-          ? "Identity verification is complete and awaiting BVNK approval; funding details will appear once approved."
+        : onboardingStatus === "provisioning"
+          ? "Setting up your funding account; bank details will appear in a moment."
           : "Identity verification is in review; funding details will appear once approved.";
   return {
     provider: "bvnk",

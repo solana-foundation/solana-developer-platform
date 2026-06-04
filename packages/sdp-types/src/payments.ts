@@ -138,7 +138,7 @@ export interface LightsparkPaymentRampInstruction {
   isPlatformAccount?: boolean;
 }
 
-export type BvnkOnboardingStatus = "verification_required" | "verifying" | "ready";
+export type BvnkOnboardingStatus = "verification_required" | "verifying" | "provisioning" | "ready";
 
 export interface BvnkBankFundingDetails {
   accountNumber?: string;

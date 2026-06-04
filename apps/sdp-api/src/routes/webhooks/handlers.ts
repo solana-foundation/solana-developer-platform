@@ -644,11 +644,19 @@ async function processBvnkCustomerWebhook(
       if (latest.verificationUrl) customer.verificationUrl = latest.verificationUrl;
     }
     nextBvnk = { ...readBvnkData(providerData), customer };
-  } else if (event.kind === "wallet" && event.walletId && event.bankAccount?.accountNumber) {
+  } else if (
+    event.kind === "wallet" &&
+    event.walletId &&
+    (event.walletStatus || event.bankAccount?.accountNumber)
+  ) {
     const key = findBvnkWalletEntryKey(providerData, event.walletId);
     if (key) {
       const wallets = { ...readBvnkWallets(providerData) };
-      wallets[key] = { ...wallets[key], bankAccount: event.bankAccount };
+      wallets[key] = {
+        ...wallets[key],
+        ...(event.walletStatus ? { walletStatus: event.walletStatus } : {}),
+        ...(event.bankAccount?.accountNumber ? { bankAccount: event.bankAccount } : {}),
+      };
       nextBvnk = { ...readBvnkData(providerData), wallets };
     }
   }
