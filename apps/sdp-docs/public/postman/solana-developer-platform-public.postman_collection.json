@@ -1354,7 +1354,7 @@
             "description": "Prepares the subscriber-signed Solana transaction that initializes the subscription authority and subscribes to the plan. The transaction must still be signed and submitted by the client.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"subscriberTokenAccount\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\",\n  \"expectedPlanCreatedAt\": \"0\"\n}",
+              "raw": "{\n  \"subscriberTokenAccount\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\",\n  \"expectedPlanCreatedAt\": \"0\",\n  \"expectedSubscriptionAuthorityInitId\": \"0\"\n}",
               "options": {
                 "raw": {
                   "language": "json"

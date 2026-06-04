@@ -76,6 +76,8 @@ import { resolveMintDecimals, resolveMintTokenProgram, SOL_MINT } from "../token
 import { resolveScope, resolveWallet } from "../wallets";
 
 const U64_MAX = 18_446_744_073_709_551_615n;
+const I64_MIN = -9_223_372_036_854_775_808n;
+const I64_MAX = 9_223_372_036_854_775_807n;
 
 function mapPlan(row: PaymentSubscriptionPlanRow): PaymentSubscriptionPlan {
   return {
@@ -186,6 +188,18 @@ function parseU64String(value: string, fieldName: string): bigint {
     return parsed;
   } catch {
     throw new AppError("BAD_REQUEST", `${fieldName} must fit in an unsigned 64-bit integer`);
+  }
+}
+
+function parseI64String(value: string, fieldName: string): bigint {
+  try {
+    const parsed = BigInt(value);
+    if (parsed < I64_MIN || parsed > I64_MAX) {
+      throw new Error("out of range");
+    }
+    return parsed;
+  } catch {
+    throw new AppError("BAD_REQUEST", `${fieldName} must fit in a signed 64-bit integer`);
   }
 }
 
@@ -701,6 +715,11 @@ export const prepareSubscriptionAuthorization = async (c: AppContext) => {
     parsed.data.expectedPlanCreatedAt,
     "expectedPlanCreatedAt"
   );
+  const expectedSubscriptionAuthorityInitId = parseI64String(
+    parsed.data.expectedSubscriptionAuthorityInitId,
+    // biome-ignore lint/security/noSecrets: Field name used for validation errors, not a secret.
+    "expectedSubscriptionAuthorityInitId"
+  );
   const [subscriptionAuthorityAddress] = await findSubscriptionAuthorityPda({
     tokenMint: mint,
     user: subscriber,
@@ -720,6 +739,7 @@ export const prepareSubscriptionAuthorization = async (c: AppContext) => {
     expectedAmount: amountBaseUnits,
     expectedCreatedAt,
     expectedPeriodHours: BigInt(plan.period_hours),
+    expectedSubscriptionAuthorityInitId,
     merchant: owner,
     payer,
     planId,
