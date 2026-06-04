@@ -67,6 +67,10 @@ export function isSolBalance(balance: Pick<CustodyWalletTokenBalance, "token" | 
   return balance.token.trim().toUpperCase() === "SOL" || balance.mint.trim() === SOL_MINT;
 }
 
+export function shortenAddress(address: string): string {
+  return address.length > 12 ? `${address.slice(0, 6)}…${address.slice(-4)}` : address;
+}
+
 export function formatDisplayAmount(value?: string, token?: string): string {
   if (!value) {
     return token ? `- ${token}` : "-";

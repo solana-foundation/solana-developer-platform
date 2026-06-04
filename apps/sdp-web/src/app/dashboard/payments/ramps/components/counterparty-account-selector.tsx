@@ -3,6 +3,7 @@
 import type { CounterpartyAccount } from "@sdp/types";
 import { WalletIcon } from "lucide-react";
 import { useMemo } from "react";
+import { shortenAddress } from "@/app/dashboard/payments/payments-overview.utils";
 import { Combobox } from "@/components/ui/combobox";
 
 interface CounterpartyAccountSelectorProps {
@@ -11,10 +12,6 @@ interface CounterpartyAccountSelectorProps {
   onChange: (accountId: string) => void;
   isLoading?: boolean;
   disabled?: boolean;
-}
-
-function shortenAddress(address: string): string {
-  return address.length > 12 ? `${address.slice(0, 6)}…${address.slice(-4)}` : address;
 }
 
 export function CounterpartyAccountSelector({

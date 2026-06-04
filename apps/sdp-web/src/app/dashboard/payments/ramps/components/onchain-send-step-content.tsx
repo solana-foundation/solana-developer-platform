@@ -13,6 +13,7 @@ import { AddExternalAccountDialog } from "@/app/dashboard/payments/counterparty/
 import {
   formatCurrencyAmount,
   resolveTotalBalance,
+  shortenAddress,
 } from "@/app/dashboard/payments/payments-overview.utils";
 import { getDevnetExplorerUrl } from "@/app/dashboard/payments/payments-workspace.data";
 import { Button } from "@/components/ui/button";
@@ -36,10 +37,6 @@ function DetailRow({ icon, label, value }: { icon: ReactNode; label: string; val
       </div>
     </div>
   );
-}
-
-function shortenAddress(address: string): string {
-  return address.length > 12 ? `${address.slice(0, 6)}…${address.slice(-4)}` : address;
 }
 
 export function OnchainSendStepContent({
