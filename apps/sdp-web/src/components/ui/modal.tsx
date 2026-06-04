@@ -6,6 +6,7 @@ import { createPortal } from "react-dom";
 import { useEscapeKey } from "@/lib/use-escape-key";
 import { cn } from "@/lib/utils";
 import { ModalCloseButton } from "./modal-close-button";
+import { PortalContainerProvider } from "./portal-container";
 
 type ModalSize = "sm" | "md" | "lg" | "xl";
 
@@ -40,6 +41,7 @@ export function Modal({
   size = "md",
 }: ModalProps) {
   const [mounted, setMounted] = useState(false);
+  const [dialogNode, setDialogNode] = useState<HTMLElement | null>(null);
   const canClose = Boolean(onClose) && !closeDisabled;
 
   useEffect(() => {
@@ -71,6 +73,7 @@ export function Modal({
 
       <div className="pointer-events-none relative flex min-h-full items-center justify-center px-4 py-8">
         <div
+          ref={setDialogNode}
           role="dialog"
           aria-modal="true"
           aria-label={ariaLabel}
@@ -83,7 +86,7 @@ export function Modal({
           {showCloseButton && onClose ? (
             <ModalCloseButton onClick={onClose} disabled={!canClose} label={closeLabel} />
           ) : null}
-          {children}
+          <PortalContainerProvider container={dialogNode}>{children}</PortalContainerProvider>
         </div>
       </div>
     </div>,

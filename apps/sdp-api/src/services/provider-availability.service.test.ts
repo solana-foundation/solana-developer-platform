@@ -46,7 +46,6 @@ const providerEnvKeys = [
   "MOONPAY_SECRET_KEY",
   "LIGHTSPARK_GRID_CLIENT_ID",
   "LIGHTSPARK_GRID_CLIENT_SECRET",
-  "BVNK_API_TOKEN",
   "BVNK_HAWK_AUTH_ID",
   "BVNK_HAWK_SECRET_KEY",
   "BVNK_WALLET_ID",
@@ -215,7 +214,6 @@ describe("provider-availability.service", () => {
     env.BVNK_WALLET_ID = "bvnk_wallet";
     env.BVNK_HAWK_AUTH_ID = "bvnk_hawk_auth_id";
     env.BVNK_HAWK_SECRET_KEY = undefined;
-    env.BVNK_API_TOKEN = undefined;
 
     const availability = await getProviderAvailability(env, getDb(env), TEST_ORG_ID);
 

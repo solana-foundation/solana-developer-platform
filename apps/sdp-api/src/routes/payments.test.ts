@@ -329,6 +329,7 @@ async function seedWalletPolicy(params: {
 async function seedCounterparty(params?: {
   id?: string;
   externalId?: string | null;
+  identity?: Record<string, unknown>;
 }): Promise<string> {
   const id = params?.id ?? `counterparty_${crypto.randomUUID()}`;
   await getDb(env)
@@ -355,7 +356,7 @@ async function seedCounterparty(params?: {
       "individual",
       "MoonPay Test Counterparty",
       "moonpay-counterparty@example.com",
-      {},
+      params?.identity ?? {},
       {},
       TEST_USER.id
     )
@@ -1375,21 +1376,94 @@ describe("Payments routes", () => {
     fetchSpy.mockRestore();
   });
 
-  it("creates a BVNK on-ramp payment through the execute endpoint", async () => {
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          uuid: "bvnk_onramp_uuid_123",
-          status: "PENDING",
-          redirectUrl: "https://checkout.bvnk.test/pay/abc123",
-          reference: "bvnk_reference_onramp",
-        }),
-        {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        }
-      )
-    );
+  it("onboards a BVNK customer and provisions the on-ramp rule through execute", async () => {
+    const counterpartyId = await seedCounterparty({
+      externalId: "bvnk_user_123",
+      identity: {
+        firstName: "Zach",
+        lastName: "Khong",
+        dateOfBirth: "1990-01-01",
+        address: {
+          line1: "Ave Street",
+          city: "NYC",
+          postalCode: "10001",
+          countryCode: "US",
+          subdivisionCode: "NY",
+        },
+        compliance: {
+          taxIdentification: { number: "123-45-6789", residenceCountryCode: "US" },
+          nationality: "US",
+          birthCountryCode: "US",
+          cdd: {
+            employmentStatus: "SALARIED",
+            sourceOfFunds: "SALARY",
+            pepStatus: "NOT_PEP",
+            intendedUseOfAccount: "TRANSFERS_OWN_WALLET",
+            expectedMonthlyVolume: { amount: "1000", currency: "USD" },
+            estimatedYearlyIncome: "INCOME_0_TO_50K",
+            employmentIndustrySector: "INFORMATION",
+          },
+        },
+      },
+    });
+
+    const jsonResponse = (payload: unknown, status = 200) =>
+      new Response(JSON.stringify(payload), {
+        status,
+        headers: { "Content-Type": "application/json" },
+      });
+
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const url = String(input);
+      const method = (init?.method ?? "GET").toUpperCase();
+      if (url.endsWith("/platform/v1/customers/agreement/sessions") && method === "POST") {
+        return Promise.resolve(jsonResponse({ reference: "agr_1", agreements: [] }, 201));
+      }
+      if (url.includes("/platform/v1/customers/agreement/sessions/") && method === "PUT") {
+        return Promise.resolve(new Response(null, { status: 204 }));
+      }
+      if (url.endsWith("/platform/v1/customers") && method === "POST") {
+        return Promise.resolve(jsonResponse({ reference: "cust_1", status: "VERIFIED" }, 201));
+      }
+      if (url.includes("/ledger/v2/wallets/profiles") && method === "GET") {
+        return Promise.resolve(
+          jsonResponse({
+            content: [{ id: "fiat:usd:test", currencies: ["USD"], methods: ["ACH", "SWIFT"] }],
+          })
+        );
+      }
+      if (url.endsWith("/ledger/v2/wallets") && method === "POST") {
+        return Promise.resolve(
+          jsonResponse(
+            {
+              id: "wallet_1",
+              name: "SDP onramp",
+              status: "ACTIVE",
+              paymentInstruments: [
+                {
+                  type: "FIAT",
+                  accountNumber: "000123456789",
+                  remittanceInformationPrefix: "REF-1",
+                  bankDetails: { name: "BVNK Bank", bic: "BVNKUS33" },
+                },
+              ],
+            },
+            201
+          )
+        );
+      }
+      if (url.endsWith("/payment/v1/rules") && method === "POST") {
+        return Promise.resolve(
+          jsonResponse({
+            id: "rule_bvnk_123",
+            reference: "bvnk_reference_onramp",
+            status: "ACTIVE",
+            originator: { currency: "USD", walletId: "wallet_1" },
+          })
+        );
+      }
+      return Promise.resolve(jsonResponse({}, 404));
+    });
 
     const res = await app.request(
       "/v1/payments/ramps/onramp/execute",
@@ -1401,11 +1475,11 @@ describe("Payments routes", () => {
         },
         body: JSON.stringify({
           provider: "bvnk",
+          counterpartyId,
           destinationWallet: TEST_WALLET_ID,
           cryptoToken: "USDC",
           fiatCurrency: "USD",
           fiatAmount: "120.50",
-          kycReference: "customer_123",
         }),
       },
       env
@@ -1418,45 +1492,62 @@ describe("Payments routes", () => {
           id: string;
           provider: string;
           status: string;
-          redirectUrl: string;
           reference: string;
+          paymentInstructions: {
+            provider: string;
+            onboardingStatus: string;
+            ruleId: string;
+            fundingWalletId: string;
+            fiatCurrency: string;
+            beneficiaryAddress: string;
+            network: string;
+            bankAccount?: { accountNumber?: string; bankName?: string };
+          }[];
         };
       };
     };
 
-    expect(body.data.ramp.id.startsWith("ramp_")).toBe(true);
     expect(body.data.ramp.provider).toBe("bvnk");
     expect(body.data.ramp.status).toBe("pending");
-    expect(body.data.ramp.redirectUrl).toBe("https://checkout.bvnk.test/pay/abc123");
-    expect(body.data.ramp.reference).toBe("bvnk_onramp_uuid_123");
+    const instruction = body.data.ramp.paymentInstructions[0];
+    expect(instruction?.provider).toBe("bvnk");
+    expect(instruction?.onboardingStatus).toBe("ready");
+    expect(instruction?.ruleId).toBe("rule_bvnk_123");
+    expect(instruction?.fundingWalletId).toBe("wallet_1");
+    expect(instruction?.fiatCurrency).toBe("USD");
+    expect(instruction?.beneficiaryAddress).toBe(TEST_SOLANA_ADDRESSES.wallet1);
+    expect(instruction?.network).toBe("SOLANA");
+    expect(instruction?.bankAccount?.accountNumber).toBe("000123456789");
+    expect(instruction?.bankAccount?.bankName).toBe("BVNK Bank");
 
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
-    const requestUrl = String(fetchSpy.mock.calls[0]?.[0]);
-    const requestInit = fetchSpy.mock.calls[0]?.[1];
-    expect(requestUrl).toBe(`${TEST_BVNK_API_BASE_URL}/api/v1/pay/summary`);
+    const calledUrls = fetchSpy.mock.calls.map((call) => String(call[0]));
+    expect(calledUrls).toContain(`${TEST_BVNK_API_BASE_URL}/payment/v1/rules`);
+    expect(calledUrls).toContain(`${TEST_BVNK_API_BASE_URL}/ledger/v2/wallets`);
 
-    const headers = requestInit?.headers as Record<string, string>;
-    expect(headers.Authorization).toMatch(/^Hawk /);
-
-    const payload = JSON.parse(String(requestInit?.body)) as {
+    const ruleCall = fetchSpy.mock.calls.find((call) =>
+      String(call[0]).endsWith("/payment/v1/rules")
+    );
+    const ruleInit = ruleCall?.[1];
+    expect((ruleInit?.headers as Record<string, string>).Authorization).toMatch(/^Hawk /);
+    const payload = JSON.parse(String(ruleInit?.body)) as {
+      trigger: string;
       walletId: string;
-      amount: number;
-      currency: string;
-      type: string;
-      customerId: string;
-      payOutDetails: { code: string; currency: string; address: string; network: string };
-      complianceDetails: { partyDetails: unknown[] };
+      beneficiary: {
+        currency: string;
+        entity: { type: string; customerIdentifier: string; address: { countryCode: string } };
+        cryptoAddress: { network: string; address: string };
+      };
     };
-    expect(payload.walletId).toBe(TEST_BVNK_WALLET_ID);
-    expect(payload.amount).toBe(120.5);
-    expect(payload.currency).toBe("USD");
-    expect(payload.type).toBe("IN");
-    expect(payload.customerId).toBe("customer_123");
-    expect(payload.payOutDetails.code).toBe("crypto");
-    expect(payload.payOutDetails.currency).toBe("USDC");
-    expect(payload.payOutDetails.address).toBe(TEST_SOLANA_ADDRESSES.wallet1);
-    expect(payload.payOutDetails.network).toBe("SOLANA");
-    expect(Array.isArray(payload.complianceDetails.partyDetails)).toBe(true);
+    expect(payload.trigger).toBe("payment:payin:fiat");
+    expect(payload.walletId).toBe("wallet_1");
+    expect(payload.beneficiary.currency).toBe("USDC");
+    expect(payload.beneficiary.entity.customerIdentifier).toBe("cust_1");
+    expect(payload.beneficiary.cryptoAddress.address).toBe(TEST_SOLANA_ADDRESSES.wallet1);
+
+    const walletCall = fetchSpy.mock.calls.find((call) =>
+      String(call[0]).endsWith("/ledger/v2/wallets")
+    );
+    expect((walletCall?.[1]?.headers as Record<string, string>)["Idempotency-Key"]).toBeTruthy();
     fetchSpy.mockRestore();
   });
 
@@ -1550,26 +1641,24 @@ describe("Payments routes", () => {
       paidCurrency: string;
       paidRequiredAmount: number;
       network: string;
-      complianceDetails: { requesterIpAddress?: string; partyDetails: Record<string, unknown>[] };
+      complianceDetails: { partyDetails: Record<string, unknown>[] };
     };
     expect(estimatePayload.walletId).toBe(TEST_BVNK_WALLET_ID);
     expect(estimatePayload.walletCurrency).toBe("USD");
     expect(estimatePayload.paidCurrency).toBe("USDC");
     expect(estimatePayload.paidRequiredAmount).toBe(75.25);
     expect(estimatePayload.network).toBe("SOLANA");
-    expect(estimatePayload.complianceDetails.requesterIpAddress).toBeUndefined();
     expect(estimatePayload.complianceDetails.partyDetails).toHaveLength(1);
 
     const acceptPayload = JSON.parse(String(fetchSpy.mock.calls[1]?.[1]?.body)) as {
       customerId: string;
       payOutDetails: { currency: string; address: string; network: string };
-      complianceDetails: { requesterIpAddress?: string; partyDetails: Record<string, unknown>[] };
+      complianceDetails: { partyDetails: Record<string, unknown>[] };
     };
     expect(acceptPayload.customerId).toBe("customer_456");
     expect(acceptPayload.payOutDetails.currency).toBe("USDC");
     expect(acceptPayload.payOutDetails.address).toBe(TEST_SOLANA_ADDRESSES.wallet1);
     expect(acceptPayload.payOutDetails.network).toBe("SOLANA");
-    expect(acceptPayload.complianceDetails.requesterIpAddress).toBeUndefined();
     expect(acceptPayload.complianceDetails.partyDetails).toHaveLength(1);
     fetchSpy.mockRestore();
   });

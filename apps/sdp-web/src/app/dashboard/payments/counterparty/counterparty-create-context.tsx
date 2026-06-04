@@ -1,6 +1,11 @@
 "use client";
 
-import type { Counterparty, CounterpartyResponse, CreateCounterpartyRequest } from "@sdp/types";
+import type {
+  Counterparty,
+  CounterpartyCompliance,
+  CounterpartyResponse,
+  CreateCounterpartyRequest,
+} from "@sdp/types";
 import { useRouter } from "next/navigation";
 import type { ReactNode } from "react";
 import { createContext, useContext, useMemo, useState } from "react";
@@ -10,8 +15,10 @@ import { useZodForm, type ZodFormApi } from "@/lib/use-zod-form";
 import {
   defaultAddress,
   defaultBasics,
+  defaultCompliance,
   defaultIdentity,
   getSteps,
+  requiresCompliance,
 } from "./counterparty-create-defaults";
 import {
   type AddressClean,
@@ -20,6 +27,9 @@ import {
   type BasicsClean,
   type BasicsData,
   basicsSchema,
+  type ComplianceClean,
+  type ComplianceData,
+  complianceSchema,
   type IdentityClean,
   type IdentityData,
   identitySchema,
@@ -30,6 +40,7 @@ interface CounterpartyCreateContextValue {
   basics: ZodFormApi<BasicsData, BasicsClean>;
   identity: ZodFormApi<IdentityData, IdentityClean>;
   address: ZodFormApi<AddressData, AddressClean>;
+  compliance: ZodFormApi<ComplianceData, ComplianceClean>;
 
   step: number;
   steps: StepId[];
@@ -65,6 +76,7 @@ export function CounterpartyCreateProvider({
   const basics = useZodForm(basicsSchema, defaultBasics);
   const identity = useZodForm(identitySchema, defaultIdentity);
   const address = useZodForm(addressSchema, defaultAddress);
+  const compliance = useZodForm(complianceSchema, defaultCompliance);
 
   const [step, setStep] = useState(0);
   const [direction, setDirection] = useState<1 | -1>(1);
@@ -72,7 +84,10 @@ export function CounterpartyCreateProvider({
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [createdCounterparty, setCreatedCounterparty] = useState<Counterparty | null>(null);
 
-  const steps = useMemo(() => getSteps(basics.values.entityType), [basics.values.entityType]);
+  const steps = useMemo(
+    () => getSteps(basics.values.entityType, address.values.countryCode),
+    [basics.values.entityType, address.values.countryCode]
+  );
   const currentStepId = steps[step] ?? "basics";
 
   function goNext() {
@@ -83,7 +98,9 @@ export function CounterpartyCreateProvider({
           ? identity
           : currentStepId === "address"
             ? address
-            : null;
+            : currentStepId === "compliance"
+              ? compliance
+              : null;
     if (form && !form.validate().ok) return;
 
     setDirection(1);
@@ -108,9 +125,41 @@ export function CounterpartyCreateProvider({
         throw new Error("Invalid form state");
       }
 
+      const needsCompliance = requiresCompliance(
+        basicsResult.data.entityType,
+        addressResult.data.countryCode
+      );
+
+      let compliancePayload: CounterpartyCompliance | undefined;
+      if (needsCompliance) {
+        const complianceResult = compliance.validate();
+        if (!complianceResult.ok) {
+          throw new Error("Invalid form state");
+        }
+        const c = complianceResult.data;
+        compliancePayload = {
+          taxIdentification: { number: c.taxIdNumber, residenceCountryCode: "US" },
+          nationality: c.nationality,
+          birthCountryCode: c.birthCountryCode,
+          cdd: {
+            employmentStatus: c.employmentStatus,
+            sourceOfFunds: c.sourceOfFunds,
+            pepStatus: c.pepStatus,
+            intendedUseOfAccount: c.intendedUseOfAccount,
+            expectedMonthlyVolume: { amount: c.expectedMonthlyVolume, currency: "USD" },
+            estimatedYearlyIncome: c.estimatedYearlyIncome,
+            employmentIndustrySector: c.employmentIndustrySector,
+          },
+        };
+      }
+
       const identityPayload =
         basicsResult.data.entityType === "individual"
-          ? { ...identityResult.data, address: addressResult.data }
+          ? {
+              ...identityResult.data,
+              address: addressResult.data,
+              ...(compliancePayload ? { compliance: compliancePayload } : {}),
+            }
           : { address: addressResult.data };
 
       const body: CreateCounterpartyRequest = {
@@ -162,6 +211,7 @@ export function CounterpartyCreateProvider({
         basics,
         identity,
         address,
+        compliance,
         step,
         steps,
         currentStepId,

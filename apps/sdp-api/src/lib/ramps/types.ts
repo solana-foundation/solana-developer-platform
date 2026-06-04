@@ -4,7 +4,7 @@ import type { CryptoRailId, FiatCurrencyCode } from "@sdp/types/payment-rails";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import type { BvnkComplianceInput } from "./providers/bvnk";
 
-export type { BvnkComplianceInput } from "./providers/bvnk";
+export type { BvnkComplianceInput, BvnkRuleEntity } from "./providers/bvnk";
 
 export interface ProviderRampSupport {
   onrampFiats: ReadonlySet<FiatCurrencyCode>;
@@ -74,6 +74,7 @@ export interface RampOnrampQuoteInput {
   /** Handler-resolved Grid customer id (Lightspark); resolved via DB + getOrCreateCustomer. */
   customerId?: string;
   redirectUrl?: string;
+  bvnkCompliance?: BvnkComplianceInput;
 }
 
 export interface RampOfframpQuoteInput {
@@ -84,6 +85,7 @@ export interface RampOfframpQuoteInput {
   externalCustomerId: string;
   customerId?: string;
   redirectUrl?: string;
+  bvnkCompliance?: BvnkComplianceInput;
 }
 
 export interface RampExecuteOnrampInput {

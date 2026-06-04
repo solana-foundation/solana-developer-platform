@@ -1,4 +1,14 @@
 import {
+  COUNTERPARTY_EMPLOYMENT_STATUSES,
+  COUNTERPARTY_ENTITY_TYPES,
+  COUNTERPARTY_ID_TYPES,
+  COUNTERPARTY_INDUSTRY_SECTORS,
+  COUNTERPARTY_INTENDED_USE,
+  COUNTERPARTY_PEP_STATUSES,
+  COUNTERPARTY_SOURCE_OF_FUNDS,
+  COUNTERPARTY_YEARLY_INCOME,
+} from "@sdp/types";
+import {
   counterpartyAddressSchema as counterpartyAddressSchemaBase,
   counterpartyEntityTypeSchema as counterpartyEntityTypeSchemaBase,
   counterpartyGovernmentIdSchema as counterpartyGovernmentIdSchemaBase,
@@ -137,6 +147,10 @@ export const counterpartyIdentitySchema = withOpenApi(
       }
     ),
     governmentId: counterpartyGovernmentIdSchema.optional(),
+    compliance: withOpenApi(counterpartyIdentitySchemaBase.shape.compliance, {
+      description:
+        "KYC/CDD data collected for fiat on-ramp providers (required for US individuals).",
+    }),
   }),
   {
     description:
@@ -207,6 +221,40 @@ export const listCounterpartiesResponseSchema = withOpenApi(
     }),
   }),
   { description: "Paginated list of counterparties." }
+);
+
+const countrySchema = withOpenApi(
+  z.object({
+    code: withOpenApi(z.string(), { description: "ISO 3166-1 alpha-2 code.", example: "US" }),
+    name: withOpenApi(z.string(), {
+      description: "English display name.",
+      example: "United States",
+    }),
+  }),
+  { description: "Country option." }
+);
+
+export const counterpartyFieldOptionsResponseSchema = withOpenApi(
+  z.object({
+    fields: z.object({
+      entityTypes: z.array(z.enum(COUNTERPARTY_ENTITY_TYPES)),
+      governmentIdTypes: z.array(z.enum(COUNTERPARTY_ID_TYPES)),
+      compliance: z.object({
+        employmentStatuses: z.array(z.enum(COUNTERPARTY_EMPLOYMENT_STATUSES)),
+        sourceOfFunds: z.array(z.enum(COUNTERPARTY_SOURCE_OF_FUNDS)),
+        pepStatuses: z.array(z.enum(COUNTERPARTY_PEP_STATUSES)),
+        intendedUseOfAccount: z.array(z.enum(COUNTERPARTY_INTENDED_USE)),
+        estimatedYearlyIncome: z.array(z.enum(COUNTERPARTY_YEARLY_INCOME)),
+        employmentIndustrySectors: z.array(z.enum(COUNTERPARTY_INDUSTRY_SECTORS)),
+      }),
+      countries: z.array(countrySchema),
+      usStates: z.array(countrySchema),
+    }),
+  }),
+  {
+    description:
+      "Field option sets for building a counterparty form: closed enums plus the country list.",
+  }
 );
 
 export const listCounterpartiesQuerySchema = listCounterpartiesQuerySchemaBase.extend({

@@ -477,6 +477,11 @@ export const executeOnrampRequestSchema = executeOnrampSchemaBase
         "Ramp provider identifier. Explicit provider selection is required because each provider has different flow requirements.",
       example: "moonpay",
     }),
+    counterpartyId: withOpenApi(executeOnrampSchemaBase.shape.counterpartyId, {
+      description:
+        "Counterparty identifier. Required for Lightspark to resolve the Grid customer that funds the quote.",
+      example: "cp_example",
+    }),
     destinationWallet: withOpenApi(executeOnrampSchemaBase.shape.destinationWallet, {
       description: "Destination wallet ID or Solana address for purchased crypto.",
       example: "wal_example",
@@ -733,14 +738,57 @@ const lightsparkRampPaymentInstructionSchema = z.object({
     .openapi({ description: "Whether the payment instruction belongs to a platform account." }),
 });
 
+const bvnkRampPaymentInstructionSchema = z.object({
+  provider: z.literal("bvnk").openapi({
+    description: "Provider that produced this instruction.",
+    example: "bvnk",
+  }),
+  onboardingStatus: z.enum(["verification_required", "verifying", "ready"]).openapi({
+    description: "Where the buyer is in BVNK onboarding; 'ready' means the funding rule is live.",
+    example: "ready",
+  }),
+  verificationUrl: z.string().optional().openapi({
+    description: "Identity-verification (KYC) URL the buyer must complete before funding.",
+  }),
+  ruleId: z.string().optional().openapi({ description: "BVNK on-ramp payment rule id." }),
+  ruleStatus: z.string().optional().openapi({ description: "Current status of the payment rule." }),
+  fundingWalletId: z.string().optional().openapi({
+    description: "BVNK fiat wallet the buyer funds; BVNK auto-converts arriving fiat to crypto.",
+  }),
+  fiatCurrency: z
+    .string()
+    .openapi({ description: "Fiat currency to fund the rule with.", example: "USD" }),
+  beneficiaryAddress: z
+    .string()
+    .openapi({ description: "Destination crypto address the converted funds are sent to." }),
+  network: z
+    .string()
+    .openapi({ description: "Destination blockchain network.", example: "SOLANA" }),
+  bankAccount: z
+    .object({
+      accountNumber: z.string().optional(),
+      code: z.string().optional(),
+      accountNumberFormat: z.string().optional(),
+      paymentReference: z.string().optional(),
+      bankName: z.string().optional(),
+    })
+    .optional()
+    .openapi({ description: "Bank funding details for the buyer's BVNK virtual account." }),
+  instructionsNotes: z
+    .string()
+    .optional()
+    .openapi({ description: "Additional human-readable funding instructions." }),
+});
+
 const rampPaymentInstructionSchema = z.discriminatedUnion("provider", [
   lightsparkRampPaymentInstructionSchema,
+  bvnkRampPaymentInstructionSchema,
 ]);
 
 const onrampQuoteSchema = z
   .object({
     id: z.string().openapi({ description: "Quote identifier.", example: "ramp_quote_example" }),
-    provider: z.enum(["moonpay", "lightspark"]).openapi({
+    provider: z.enum(RAMP_PROVIDERS).openapi({
       description: "Provider that created the quote.",
       example: "moonpay",
     }),
@@ -757,6 +805,9 @@ const onrampQuoteSchema = z
       .url()
       .optional()
       .openapi({ description: "Provider-hosted URL for hosted quote delivery." }),
+    paymentInstructions: z.array(rampPaymentInstructionSchema).optional().openapi({
+      description: "Funding instructions for `manual_instructions` delivery (e.g. BVNK on-ramp).",
+    }),
     exchangeRate: z
       .number()
       .optional()
@@ -775,9 +826,6 @@ const onrampQuoteSchema = z
     expiresAt: isoDateTimeSchema
       .optional()
       .openapi({ description: "Timestamp when the quote expires." }),
-    paymentInstructions: z.array(rampPaymentInstructionSchema).optional().openapi({
-      description: "Manual funding instructions for instruction-based quote delivery.",
-    }),
   })
   .openapi({ description: "On-ramp quote details." });
 

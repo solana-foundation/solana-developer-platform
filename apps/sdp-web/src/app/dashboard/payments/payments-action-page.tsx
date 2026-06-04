@@ -688,6 +688,9 @@ function PaymentInstructionsCard({
         </p>
       </div>
       {instructions.map((instruction, index) => {
+        if (instruction.provider !== "lightspark") {
+          return null;
+        }
         const info = instruction.accountOrWalletInfo;
         return (
           <div

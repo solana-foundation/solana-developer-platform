@@ -1,3 +1,3 @@
 export const DASHBOARD_FEATURE_FLAGS = {
-  paymentsV2: false,
+  paymentsV2: true,
 } as const;

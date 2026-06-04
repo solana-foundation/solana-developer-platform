@@ -10,6 +10,8 @@ import {
   CopyIcon,
   DollarSignIcon,
   LandmarkIcon,
+  Loader2,
+  ShieldCheckIcon,
   WalletIcon,
 } from "lucide-react";
 import type { ReactNode } from "react";
@@ -120,6 +122,11 @@ function ManualQuoteSummary({
   fiatCurrency: string;
   cryptoToken: string;
 }) {
+  // Locked pricing fields are only returned by quote-priced providers (Lightspark).
+  // BVNK on-ramp uses a standing payment rule with no per-quote pricing.
+  if (quote.provider !== "lightspark") {
+    return null;
+  }
   const finalAmount = formatMinorCurrencyAmount(quote.totalReceivingAmount, cryptoToken);
   const sendingAmount = formatMinorCurrencyAmount(quote.totalSendingAmount, fiatCurrency);
   const feesIncluded = formatMinorCurrencyAmount(quote.feesIncluded, fiatCurrency);
@@ -166,6 +173,156 @@ function ManualQuoteSummary({
   );
 }
 
+type LightsparkInstructionType = Extract<PaymentRampInstruction, { provider: "lightspark" }>;
+type BvnkInstructionType = Extract<PaymentRampInstruction, { provider: "bvnk" }>;
+
+function LightsparkInstruction({
+  instruction,
+  showSimulate,
+  simulateQuote,
+}: {
+  instruction: LightsparkInstructionType;
+  showSimulate: boolean;
+  simulateQuote?: { loading: boolean; succeeded: boolean; onClick: () => void };
+}) {
+  const info = instruction.accountOrWalletInfo;
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="rounded-full bg-border-extra-light px-3 py-1 text-xs font-medium text-text-medium">
+            {info.accountType.replaceAll("_", " ")}
+          </span>
+          {info.assetType ? (
+            <span className="rounded-full bg-border-extra-light px-3 py-1 text-xs font-medium text-text-medium">
+              {info.assetType}
+            </span>
+          ) : null}
+        </div>
+        {showSimulate && simulateQuote ? (
+          <Button
+            type="button"
+            variant="secondary"
+            size="xs"
+            iconLeft={simulateQuote.succeeded ? <CheckCircle2Icon /> : <DollarSignIcon />}
+            onClick={simulateQuote.onClick}
+            disabled={simulateQuote.loading || simulateQuote.succeeded}
+          >
+            {simulateQuote.succeeded
+              ? "Quote Simulated"
+              : simulateQuote.loading
+                ? "Simulating..."
+                : "Simulate Quote"}
+          </Button>
+        ) : null}
+      </div>
+      <div className="grid gap-3 lg:grid-cols-2">
+        <PaymentInstructionField label="Bank name" value={info.bankName} />
+        <PaymentInstructionField label="Routing number" value={info.routingNumber} />
+        <PaymentInstructionField label="Account number" value={info.accountNumber} />
+        <PaymentInstructionField label="Wallet address" value={info.address} />
+      </div>
+      <PaymentInstructionField label="Reference" value={info.reference} />
+      {info.paymentRails?.length ? (
+        <div className="rounded-xl bg-border-extra-light px-4 py-3">
+          <p className="text-xs font-medium uppercase tracking-[0.08em] text-text-low">
+            Supported rails
+          </p>
+          <p className="mt-1 text-sm text-text-extra-high">{info.paymentRails.join(", ")}</p>
+        </div>
+      ) : null}
+      {instruction.instructionsNotes ? (
+        <div className="rounded-xl bg-border-extra-light px-4 py-3">
+          <p className="text-xs font-medium uppercase tracking-[0.08em] text-text-low">Notes</p>
+          <p className="mt-1 text-sm text-text-extra-high">{instruction.instructionsNotes}</p>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+// BVNK-specific funding view: virtual-account onboarding states (verification /
+// in-review / ready) that don't apply to other providers' instructions.
+function BvnkInstruction({ instruction }: { instruction: BvnkInstructionType }) {
+  const isReady = instruction.onboardingStatus === "ready";
+  const needsVerification = instruction.onboardingStatus === "verification_required";
+  const bank = instruction.bankAccount;
+
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="rounded-full bg-border-extra-light px-3 py-1 text-xs font-medium text-text-medium">
+          {instruction.fiatCurrency} virtual account
+        </span>
+        <span className="rounded-full bg-border-extra-light px-3 py-1 text-xs font-medium text-text-medium">
+          {instruction.network}
+        </span>
+      </div>
+
+      {needsVerification ? (
+        <div className="flex items-start gap-3">
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-border-extra-light text-text-extra-high">
+            <ShieldCheckIcon className="size-5" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium text-text-extra-high">
+              Identity verification required
+            </p>
+            <p className="mt-1 text-sm leading-relaxed text-text-low">
+              {instruction.instructionsNotes ??
+                "Complete identity verification to activate your funding account."}{" "}
+              BVNK requires you to verify the counterparty through Sumsub. No information entered
+              via the sandbox will be verified.
+            </p>
+          </div>
+        </div>
+      ) : null}
+
+      {!isReady && !needsVerification ? (
+        <div className="flex items-start gap-3">
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-border-extra-light text-text-medium">
+            <Clock3 className="size-5" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium text-text-extra-high">Verification in review</p>
+            <p className="mt-1 text-sm leading-relaxed text-text-low">
+              {instruction.instructionsNotes ??
+                "Identity verification is in review; funding details will appear once approved."}
+            </p>
+            <p className="mt-3 flex items-center gap-2 text-xs font-medium text-text-medium">
+              <Loader2 className="size-3.5 animate-spin" />
+              Checking verification status
+            </p>
+          </div>
+        </div>
+      ) : null}
+
+      {isReady ? (
+        <div className="space-y-3">
+          <div className="flex items-center gap-3">
+            <p className="shrink-0 text-xs font-medium uppercase tracking-[0.08em] text-text-low">
+              Bank transfer details
+            </p>
+            <div className="h-px flex-1 bg-border-light" />
+          </div>
+          <div className="grid gap-3 lg:grid-cols-2">
+            <PaymentInstructionField label="Bank name" value={bank?.bankName} />
+            <PaymentInstructionField label="Account number" value={bank?.accountNumber} />
+            <PaymentInstructionField label="Bank code" value={bank?.code} />
+            <PaymentInstructionField label="Payment reference" value={bank?.paymentReference} />
+          </div>
+          {instruction.instructionsNotes ? (
+            <div className="rounded-xl bg-border-extra-light px-4 py-3">
+              <p className="text-xs font-medium uppercase tracking-[0.08em] text-text-low">Notes</p>
+              <p className="mt-1 text-sm text-text-extra-high">{instruction.instructionsNotes}</p>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function ManualInstructionsQuote({
   amount,
   quote,
@@ -188,7 +345,7 @@ export function ManualInstructionsQuote({
   const [activeTab, setActiveTab] = useState<"instructions" | "summary">("instructions");
 
   return (
-    <div className="max-h-[70vh] space-y-6 overflow-y-auto">
+    <div className="flex flex-col">
       <div className="flex items-start gap-3">
         <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-border-extra-light text-text-extra-high">
           <LandmarkIcon className="size-5" />
@@ -203,6 +360,7 @@ export function ManualInstructionsQuote({
       </div>
 
       <Tabs
+        className="mt-6"
         value={activeTab}
         onValueChange={(value) => {
           if (value === "instructions" || value === "summary") {
@@ -212,81 +370,39 @@ export function ManualInstructionsQuote({
       >
         <TabList>
           <Tab value="instructions">
-            <QuoteExpiryTabLabel expiresAt={quote.expiresAt} />
+            <QuoteExpiryTabLabel
+              expiresAt={quote.provider === "lightspark" ? quote.expiresAt : undefined}
+            />
           </Tab>
           <Tab value="summary">Quote Summary</Tab>
         </TabList>
       </Tabs>
 
-      {activeTab === "instructions" ? (
-        instructions.map((instruction, index) => {
-          const info = instruction.accountOrWalletInfo;
-          return (
-            <div
-              key={`${info.reference ?? info.accountNumber ?? info.address ?? index}`}
-              className="space-y-4"
-            >
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="rounded-full bg-border-extra-light px-3 py-1 text-xs font-medium text-text-medium">
-                    {info.accountType.replaceAll("_", " ")}
-                  </span>
-                  {info.assetType ? (
-                    <span className="rounded-full bg-border-extra-light px-3 py-1 text-xs font-medium text-text-medium">
-                      {info.assetType}
-                    </span>
-                  ) : null}
-                </div>
-                {index === 0 && simulateQuote ? (
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="xs"
-                    iconLeft={simulateQuote.succeeded ? <CheckCircle2Icon /> : <DollarSignIcon />}
-                    onClick={simulateQuote.onClick}
-                    disabled={simulateQuote.loading || simulateQuote.succeeded}
-                  >
-                    {simulateQuote.succeeded
-                      ? "Quote Simulated"
-                      : simulateQuote.loading
-                        ? "Simulating..."
-                        : "Simulate Quote"}
-                  </Button>
-                ) : null}
-              </div>
-              <div className="grid gap-3 lg:grid-cols-2">
-                <PaymentInstructionField label="Bank name" value={info.bankName} />
-                <PaymentInstructionField label="Routing number" value={info.routingNumber} />
-                <PaymentInstructionField label="Account number" value={info.accountNumber} />
-                <PaymentInstructionField label="Wallet address" value={info.address} />
-              </div>
-              <PaymentInstructionField label="Reference" value={info.reference} />
-              {info.paymentRails?.length ? (
-                <div className="rounded-xl bg-border-extra-light px-4 py-3">
-                  <p className="text-xs font-medium uppercase tracking-[0.08em] text-text-low">
-                    Supported rails
-                  </p>
-                  <p className="mt-1 text-sm text-text-extra-high">
-                    {info.paymentRails.join(", ")}
-                  </p>
-                </div>
-              ) : null}
-              {instruction.instructionsNotes ? (
-                <div className="rounded-xl bg-border-extra-light px-4 py-3">
-                  <p className="text-xs font-medium uppercase tracking-[0.08em] text-text-low">
-                    Notes
-                  </p>
-                  <p className="mt-1 text-sm text-text-extra-high">
-                    {instruction.instructionsNotes}
-                  </p>
-                </div>
-              ) : null}
-            </div>
-          );
-        })
-      ) : (
-        <ManualQuoteSummary quote={quote} fiatCurrency={fiatCurrency} cryptoToken={cryptoToken} />
-      )}
+      <div className="mt-6">
+        {activeTab === "instructions" ? (
+          instructions.map((instruction, index) =>
+            instruction.provider === "bvnk" ? (
+              <BvnkInstruction
+                key={instruction.ruleId ?? instruction.beneficiaryAddress}
+                instruction={instruction}
+              />
+            ) : (
+              <LightsparkInstruction
+                key={
+                  instruction.accountOrWalletInfo.reference ??
+                  instruction.accountOrWalletInfo.address ??
+                  "lightspark"
+                }
+                instruction={instruction}
+                showSimulate={index === 0}
+                simulateQuote={simulateQuote}
+              />
+            )
+          )
+        ) : (
+          <ManualQuoteSummary quote={quote} fiatCurrency={fiatCurrency} cryptoToken={cryptoToken} />
+        )}
+      </div>
     </div>
   );
 }

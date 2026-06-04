@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { toast } from "sonner";
+import useSWR from "swr";
 import { simulateSandboxTransfer } from "@/app/dashboard/payments/payments-workspace.data";
 import { ONRAMP_PAIRS } from "@/lib/ramps";
 import { depositAmountSchema, depositSelectionSchema } from "../schema";
@@ -41,6 +42,21 @@ export function useOnrampWizard(props: UseRampWizardProps) {
     },
   });
 
+  const bvnkInstruction =
+    wizard.quote?.provider === "bvnk" && wizard.quote.deliveryMode === "manual_instructions"
+      ? wizard.quote.paymentInstructions[0]
+      : undefined;
+
+  const isAwaitingBvnk =
+    bvnkInstruction !== undefined &&
+    (bvnkInstruction.onboardingStatus !== "ready" || !bvnkInstruction.bankAccount?.accountNumber);
+
+  useSWR(isAwaitingBvnk ? "bvnk-onramp-verification-poll" : null, () => wizard.refreshQuote(), {
+    refreshInterval: 4000,
+    revalidateOnFocus: false,
+    dedupingInterval: 0,
+  });
+
   const simulateCurrentQuote = async () => {
     if (wizard.quote?.provider !== "lightspark") {
       return;
@@ -69,6 +85,7 @@ export function useOnrampWizard(props: UseRampWizardProps) {
 
   return {
     ...wizard,
+    bvnkInstruction,
     quoteSimulationLoading,
     quoteSimulationSucceeded,
     simulateCurrentQuote,

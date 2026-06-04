@@ -9,9 +9,34 @@ import {
   updateCounterpartyRequestSchema,
 } from "../schemas";
 import { errorResponses, jsonContent, projectScopeHeaders } from "./helpers";
-import { counterpartyResponse, listCounterpartiesResponse } from "./responses";
+import {
+  counterpartyFieldOptionsResponse,
+  counterpartyResponse,
+  listCounterpartiesResponse,
+} from "./responses";
 
 export function registerCounterpartyPaths(registry: OpenAPIRegistry) {
+  registry.registerPath({
+    method: "get",
+    path: "/v1/counterparties/metadata",
+    tags: ["Counterparties"],
+    summary: "Get counterparty field options",
+    operationId: "getCounterpartyFieldOptions",
+    description:
+      "Returns the enum option sets and country list needed to build a counterparty form.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+    },
+    responses: {
+      200: {
+        description: "Counterparty field options",
+        content: jsonContent(counterpartyFieldOptionsResponse),
+      },
+      ...errorResponses(errorResponseSchema, [401, 403, 500]),
+    },
+  });
+
   registry.registerPath({
     method: "get",
     path: "/v1/counterparties",

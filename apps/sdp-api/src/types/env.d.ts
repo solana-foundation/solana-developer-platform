@@ -200,14 +200,15 @@ export interface Env {
   LIGHTSPARK_GRID_SANDBOX_WEBHOOK_PUBLIC_KEY?: string;
 
   // BVNK ramps configuration
-  BVNK_API_TOKEN?: string;
   BVNK_HAWK_AUTH_ID?: string;
   BVNK_HAWK_SECRET_KEY?: string;
   BVNK_WALLET_ID?: string;
+  BVNK_WEBHOOK_SECRET?: string;
   BVNK_API_BASE_URL?: string;
   BVNK_SANDBOX_HAWK_AUTH_ID?: string;
   BVNK_SANDBOX_HAWK_SECRET_KEY?: string;
   BVNK_SANDBOX_WALLET_ID?: string;
+  BVNK_SANDBOX_WEBHOOK_SECRET?: string;
 }
 
 // Extend Hono's context with our bindings

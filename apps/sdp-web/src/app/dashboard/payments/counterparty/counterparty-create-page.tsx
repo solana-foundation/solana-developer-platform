@@ -24,6 +24,11 @@ const stepMeta: Record<StepId, { label: string; title: string; description: stri
     title: "Location",
     description: "Helps us verify who they are and where they're based.",
   },
+  compliance: {
+    label: "Compliance",
+    title: "Tax & compliance",
+    description: "US residents need additional KYC details to fund on-ramps.",
+  },
   review: {
     label: "Review",
     title: "Review & create",
@@ -45,7 +50,7 @@ export function CounterpartyCreatePage() {
   }
 
   return (
-    <div className="mx-auto flex h-[70vh] max-w-xl flex-col py-4">
+    <div className="mx-auto flex h-[80vh] max-w-xl flex-col py-4">
       <StepIndicator steps={steps} step={step} />
 
       <div className="relative mt-6 min-h-0 flex-1 overflow-hidden">
@@ -58,7 +63,7 @@ export function CounterpartyCreatePage() {
             animate="animate"
             exit="exit"
             transition={{ duration: 0.18, ease: "easeOut" }}
-            className="absolute inset-0 space-y-6 overflow-y-auto pr-1"
+            className="absolute inset-0 space-y-6 overflow-y-auto px-1 py-1"
           >
             <div className="space-y-1">
               <h2 className="text-2xl font-medium tracking-tight text-text-extra-high">

@@ -145,13 +145,11 @@ CLERK_WEBHOOK_SECRET=whsec_...
 # LIGHTSPARK_GRID_API_BASE_URL=https://api.lightspark.com/grid/2025-10-13
 
 # BVNK ramps (API-based)
-# Set one auth method:
-# 1) Bearer token auth
-# BVNK_API_TOKEN=YOUR_BVNK_BEARER_TOKEN
-# 2) Hawk auth
+# Hawk auth
 # BVNK_HAWK_AUTH_ID=YOUR_BVNK_HAWK_AUTH_ID
 # BVNK_HAWK_SECRET_KEY=YOUR_BVNK_HAWK_SECRET_KEY
 # BVNK_WALLET_ID=YOUR_BVNK_WALLET_ID
+# BVNK_WEBHOOK_SECRET=YOUR_BVNK_WEBHOOK_SIGNING_SECRET
 # BVNK_API_BASE_URL=https://api.sandbox.bvnk.com
 # Note: BVNK on-ramp can require additional provider-side enablement/compliance setup
 # beyond API credentials (for example pay-in permissions on your merchant account).

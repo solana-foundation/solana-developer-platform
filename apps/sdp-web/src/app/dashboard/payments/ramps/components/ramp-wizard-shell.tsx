@@ -56,8 +56,8 @@ export function RampWizardShell({
   footer,
 }: RampWizardShellProps) {
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-8 py-6">
-      <div className="mx-auto w-full max-w-3xl space-y-6">
+    <div className="mx-auto flex h-[80vh] w-full max-w-5xl flex-col py-6">
+      <div className="mx-auto w-full max-w-3xl flex-1 space-y-6 overflow-y-auto px-1.5">
         <div className="space-y-4">
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-1.5">
@@ -79,9 +79,12 @@ export function RampWizardShell({
               Step {stepIndex + 1} of {steps.length}
             </span>
           </div>
-          <p className="text-3xl font-medium leading-tight tracking-tight text-text-extra-high">
-            {steps[stepIndex]?.title}
-          </p>
+          <div className="flex items-center justify-between gap-4">
+            <p className="text-3xl font-medium leading-tight tracking-tight text-text-extra-high">
+              {steps[stepIndex]?.title}
+            </p>
+            {footer}
+          </div>
         </div>
 
         {walletsError ? (
@@ -91,11 +94,9 @@ export function RampWizardShell({
         ) : null}
 
         {children}
-
-        {footer}
       </div>
 
-      <div className="sticky bottom-0 z-10 mx-auto mt-auto flex w-full max-w-3xl flex-col gap-3 pt-4 pb-1 sm:flex-row sm:justify-between">
+      <div className="mx-auto flex w-full max-w-3xl flex-col gap-3 pt-4 pb-1 sm:flex-row sm:justify-between">
         <Button
           type="button"
           variant="secondary"

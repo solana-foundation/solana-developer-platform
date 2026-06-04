@@ -4,6 +4,7 @@
 
 export * from "./api-keys";
 export * from "./counterparties";
+export * from "./countries";
 export * from "./custody";
 export * from "./generated/ramp-support.generated";
 export * from "./organizations";

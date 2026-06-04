@@ -197,6 +197,24 @@ export function useRampWizard<TId extends string>(
     }
   };
 
+  const refreshQuote = async () => {
+    if (!config.selectionSchema.safeParse(fields).success || !fields.provider) {
+      return;
+    }
+    try {
+      const created = await createRampQuote(
+        config.quoteEndpoint,
+        config.buildQuotePayload({
+          fields,
+          provider: fields.provider,
+          selectedRampPair,
+          cryptoToken: toRampCryptoToken(selectedRampPair.assetRail),
+        })
+      );
+      setQuote(created);
+    } catch {}
+  };
+
   const handlePrimary = async () => {
     if (!canProceed) {
       return;
@@ -256,6 +274,7 @@ export function useRampWizard<TId extends string>(
     fields,
     setField,
     quote,
+    refreshQuote,
     hostedQuoteLoading,
     counterpartyDialogOpen,
     setCounterpartyDialogOpen,

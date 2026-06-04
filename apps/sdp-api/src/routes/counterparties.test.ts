@@ -121,6 +121,30 @@ describe("Counterparties Routes", () => {
       env
     );
 
+  describe("GET /v1/counterparties/metadata", () => {
+    it("returns field options (enums + countries)", async () => {
+      const res = await app.request(
+        "/v1/counterparties/metadata",
+        { headers: { Authorization: authHeader } },
+        env
+      );
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: {
+          fields: {
+            entityTypes: string[];
+            compliance: { employmentStatuses: string[]; employmentIndustrySectors: string[] };
+            countries: { code: string; name: string }[];
+          };
+        };
+      };
+      expect(body.data.fields.entityTypes).toContain("individual");
+      expect(body.data.fields.compliance.employmentStatuses).toContain("SALARIED");
+      expect(body.data.fields.compliance.employmentIndustrySectors.length).toBeGreaterThan(40);
+      expect(body.data.fields.countries.some((c) => c.code === "US")).toBe(true);
+    });
+  });
+
   describe("POST /v1/counterparties", () => {
     it("creates a counterparty", async () => {
       const res = await createCounterparty({ externalId: "ext_001" });

@@ -1,8 +1,21 @@
 import type { RepositoryDbClient } from "./base";
 
 export type PaymentTransferDirection = "inbound" | "outbound";
-export type PaymentTransferType = "transfer" | "transfer_confidential";
-export type PaymentTransferStatus = "pending" | "processing" | "confirmed" | "finalized" | "failed";
+export type PaymentTransferType = "transfer" | "transfer_confidential" | "onramp" | "offramp";
+export const WALLET_TRANSFER_TYPES: readonly PaymentTransferType[] = [
+  "transfer",
+  "transfer_confidential",
+];
+export type PaymentTransferStatus =
+  | "pending"
+  | "processing"
+  | "confirmed"
+  | "finalized"
+  | "failed"
+  | "awaiting_payment"
+  | "settling"
+  | "completed"
+  | "expired";
 export type PaymentWalletPolicyType = string;
 
 export interface PaymentWalletPolicyRow {

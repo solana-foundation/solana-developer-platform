@@ -1,7 +1,9 @@
+import { createHmac } from "node:crypto";
 import { Webhook } from "svix";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
+import { RAMP_PROVIDER_CLIENTS } from "@/lib/ramps";
 import { env } from "@/test/helpers/env";
 import { clearTestDatabase, seedTestDatabase } from "@/test/mocks/db";
 
@@ -517,5 +519,170 @@ describe("Clerk webhooks", () => {
       member_status: "removed",
       api_key_status: "revoked",
     });
+  });
+});
+
+describe("BVNK ramp webhook", () => {
+  const BVNK_WEBHOOK_SECRET = "bvnk_webhook_secret_test";
+  const ORG_ID = "org_bvnk_webhook";
+  const PROJECT_ID = "prj_bvnk_webhook";
+  const COUNTERPARTY_ID = "counterparty_bvnk_webhook";
+  const CUSTOMER_REFERENCE = "cust_webhook_1";
+  const USER_ID = "usr_bvnk_webhook";
+  const WALLET_ID = "a:1:wallet:1";
+
+  async function seedVerifiableCounterparty() {
+    await getDb(env)
+      .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
+      .bind(ORG_ID, "BVNK Webhook Org", "bvnk-webhook-org", "enterprise", "active")
+      .run();
+    await getDb(env)
+      .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
+      .bind(USER_ID, "webhook-user@example.com", 1, "active")
+      .run();
+    await getDb(env)
+      .prepare(
+        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(PROJECT_ID, ORG_ID, "Test", "bvnk-webhook-proj", "sandbox", "active", USER_ID)
+      .run();
+    await getDb(env)
+      .prepare(
+        `INSERT INTO counterparties (
+           id, organization_id, project_id, external_id, entity_type, display_name, email,
+           identity, provider_data, status, created_by
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)`
+      )
+      .bind(
+        COUNTERPARTY_ID,
+        ORG_ID,
+        PROJECT_ID,
+        null,
+        "individual",
+        "Webhook Buyer",
+        "buyer@example.com",
+        {},
+        {
+          bvnk: {
+            customer: { customerReference: CUSTOMER_REFERENCE, status: "PENDING" },
+            wallets: { "USD:USDC_SOLANA:dest": { walletId: WALLET_ID } },
+          },
+        },
+        null
+      )
+      .run();
+  }
+
+  function sendBvnkWebhook(payload: unknown, signature?: string) {
+    const body = JSON.stringify(payload);
+    const sig =
+      signature ?? createHmac("sha256", BVNK_WEBHOOK_SECRET).update(body).digest("base64");
+    return app.request(
+      "/webhooks/payments/ramps/sandbox/bvnk",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Signature": sig },
+        body,
+      },
+      env
+    );
+  }
+
+  beforeEach(async () => {
+    await seedTestDatabase(env);
+    env.BVNK_SANDBOX_WEBHOOK_SECRET = BVNK_WEBHOOK_SECRET;
+    await seedVerifiableCounterparty();
+  });
+
+  afterEach(async () => {
+    env.BVNK_SANDBOX_WEBHOOK_SECRET = undefined;
+    await clearTestDatabase(env);
+  });
+
+  async function readBvnk() {
+    const row = await getDb(env)
+      .prepare("SELECT provider_data FROM counterparties WHERE id = ?")
+      .bind(COUNTERPARTY_ID)
+      .first<{
+        provider_data: {
+          bvnk?: {
+            customer?: { status?: string; verificationUrl?: string };
+            wallets?: Record<
+              string,
+              { walletId?: string; bankAccount?: { accountNumber?: string; bankName?: string } }
+            >;
+          };
+        };
+      }>();
+    return row?.provider_data.bvnk;
+  }
+
+  it("flips the cached customer status to VERIFIED on a customers:status-change webhook", async () => {
+    const res = await sendBvnkWebhook({
+      event: "bvnk:customers:status-change",
+      data: { customerId: CUSTOMER_REFERENCE, status: "VERIFIED", customerType: "INDIVIDUAL" },
+    });
+
+    expect(res.status).toBe(200);
+    expect((await readBvnk())?.customer?.status).toBe("VERIFIED");
+  });
+
+  it("fetches and caches the verification URL when a status-change reports an unverified status", async () => {
+    const getCustomer = vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "getBvnkCustomer").mockResolvedValue({
+      reference: CUSTOMER_REFERENCE,
+      status: "INFO_REQUIRED",
+      verificationUrl: "https://in.sumsub.com/websdk/p/sbx_test",
+    });
+
+    const res = await sendBvnkWebhook({
+      event: "bvnk:customers:status-change",
+      data: {
+        customerId: CUSTOMER_REFERENCE,
+        status: "ACTIONS_REQUIRED",
+        customerType: "INDIVIDUAL",
+      },
+    });
+
+    expect(res.status).toBe(200);
+    expect(getCustomer).toHaveBeenCalledWith(expect.anything(), {
+      reference: CUSTOMER_REFERENCE,
+    });
+    const customer = (await readBvnk())?.customer;
+    expect(customer?.status).toBe("INFO_REQUIRED");
+    expect(customer?.verificationUrl).toBe("https://in.sumsub.com/websdk/p/sbx_test");
+
+    getCustomer.mockRestore();
+  });
+
+  it("caches bank details on the matching wallet entry on a wallet status-change webhook", async () => {
+    const res = await sendBvnkWebhook({
+      event: "ledger:v2:wallet:status-change",
+      data: {
+        id: WALLET_ID,
+        status: "ACTIVE",
+        customer: { id: CUSTOMER_REFERENCE, name: "Zach Khong" },
+        paymentInstruments: [
+          {
+            type: "FIAT",
+            accountNumber: "900473221558",
+            bankDetails: { bic: "LEADUS49XXX", name: "LEAD BANK" },
+          },
+        ],
+      },
+    });
+
+    expect(res.status).toBe(200);
+    const entry = (await readBvnk())?.wallets?.["USD:USDC_SOLANA:dest"];
+    expect(entry?.bankAccount?.accountNumber).toBe("900473221558");
+    expect(entry?.bankAccount?.bankName).toBe("LEAD BANK");
+  });
+
+  it("rejects a webhook with an invalid signature", async () => {
+    const res = await sendBvnkWebhook(
+      { event: "customer.updated", data: { reference: CUSTOMER_REFERENCE, status: "VERIFIED" } },
+      "not-a-valid-signature"
+    );
+    expect(res.status).toBe(401);
   });
 });

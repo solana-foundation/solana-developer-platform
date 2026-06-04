@@ -186,6 +186,31 @@ export function createPostgresCounterpartiesRepository(db: AppDb): Counterpartie
       return row ? mapCounterpartyRow(row) : null;
     },
 
+    async findCounterpartyByBvnkCustomerReference(customerReference: string) {
+      const row = await db
+        .prepare(
+          `SELECT * FROM counterparties
+             WHERE provider_data->'bvnk'->'customer'->>'customerReference' = ?
+               AND status = 'active'
+             LIMIT 1`
+        )
+        .bind(customerReference)
+        .first<Record<string, unknown>>();
+      return row ? mapCounterpartyRow(row) : null;
+    },
+
+    async setCounterpartyProviderDataByBvnkCustomerReference(params) {
+      await db
+        .prepare(
+          `UPDATE counterparties
+             SET provider_data = ?, updated_at = sdp_iso_now()
+           WHERE provider_data->'bvnk'->'customer'->>'customerReference' = ?
+             AND status = 'active'`
+        )
+        .bind(params.providerData, params.customerReference)
+        .run();
+    },
+
     async listCounterparties(params: ListCounterpartiesInput): Promise<ListCounterpartiesResult> {
       const [rowsResult, countRow] = await Promise.all([
         db

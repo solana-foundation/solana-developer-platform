@@ -2,9 +2,17 @@ import type { SdpEnvironment } from "@sdp/types";
 import type { Context } from "hono";
 import { Webhook } from "svix";
 import { getDb } from "@/db";
+import { createCounterpartiesRepository } from "@/db/repositories";
 import { mapClerkRoleToOrgRole } from "@/lib/clerk-role";
 import { AppError, badRequest } from "@/lib/errors";
 import { RAMP_PROVIDER_CLIENTS } from "@/lib/ramps";
+import {
+  findBvnkWalletEntryKey,
+  isBvnkCustomerVerified,
+  readBvnkCustomer,
+  readBvnkData,
+  readBvnkWallets,
+} from "@/lib/ramps/providers/bvnk";
 import { success } from "@/lib/response";
 import { isSelfHostedDeployment } from "@/lib/runtime-env";
 import {
@@ -596,6 +604,65 @@ function requiredHeader(c: AppContext, name: string) {
   return value;
 }
 
+async function processBvnkCustomerWebhook(
+  c: AppContext,
+  environment: SdpEnvironment,
+  payload: unknown
+): Promise<void> {
+  const event = RAMP_PROVIDER_CLIENTS.bvnk.parseBvnkWebhookEvent(payload);
+  if (event.kind === "ignore") {
+    console.log(`[bvnk webhook] unmapped event "${event.event}": ${JSON.stringify(payload)}`);
+    return;
+  }
+  if (!event.customerReference) {
+    console.log(
+      `[bvnk webhook] "${event.event}" has no customer reference: ${JSON.stringify(payload)}`
+    );
+    return;
+  }
+
+  const repo = createCounterpartiesRepository(c.env);
+  const counterparty = await repo.findCounterpartyByBvnkCustomerReference(event.customerReference);
+  if (!counterparty) {
+    return;
+  }
+
+  const providerData = counterparty.provider_data;
+  let nextBvnk: Record<string, unknown> | null = null;
+
+  if (event.kind === "customer") {
+    const customer = { ...readBvnkCustomer(providerData) };
+    if (event.customerStatus) customer.status = event.customerStatus.toUpperCase();
+    if (event.verificationUrl) customer.verificationUrl = event.verificationUrl;
+    if (!customer.verificationUrl && !isBvnkCustomerVerified(customer.status)) {
+      const latest = await RAMP_PROVIDER_CLIENTS.bvnk.getBvnkCustomer(
+        { env: c.env as unknown as Record<string, string | undefined>, mode: environment },
+        { reference: event.customerReference }
+      );
+      customer.status = latest.status.toUpperCase();
+      customer.verificationStatus = latest.verificationStatus;
+      if (latest.verificationUrl) customer.verificationUrl = latest.verificationUrl;
+    }
+    nextBvnk = { ...readBvnkData(providerData), customer };
+  } else if (event.kind === "wallet" && event.walletId && event.bankAccount?.accountNumber) {
+    const key = findBvnkWalletEntryKey(providerData, event.walletId);
+    if (key) {
+      const wallets = { ...readBvnkWallets(providerData) };
+      wallets[key] = { ...wallets[key], bankAccount: event.bankAccount };
+      nextBvnk = { ...readBvnkData(providerData), wallets };
+    }
+  }
+
+  if (!nextBvnk) {
+    return;
+  }
+
+  await repo.setCounterpartyProviderDataByBvnkCustomerReference({
+    customerReference: event.customerReference,
+    providerData: { ...providerData, bvnk: nextBvnk },
+  });
+}
+
 export const handleRampProviderWebhook = async (c: AppContext, environment: SdpEnvironment) => {
   const provider = parseRampWebhookProvider(c.req.param("provider"));
   const rawBody = await c.req.raw.text();
@@ -607,6 +674,10 @@ export const handleRampProviderWebhook = async (c: AppContext, environment: SdpE
     rawBody,
     requestUrl: c.req.url,
   });
+
+  if (result.provider === "bvnk") {
+    await processBvnkCustomerWebhook(c, environment, result.payload);
+  }
 
   return success(c, {
     received: true,
