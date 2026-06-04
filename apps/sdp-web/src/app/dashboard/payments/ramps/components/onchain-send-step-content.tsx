@@ -61,16 +61,8 @@ export function OnchainSendStepContent({
     availableAmount,
     exceedsBalance,
     counterpartyId,
-    accountId,
-    setAccountId,
-    walletId,
-    setWalletId,
-    asset,
-    setAsset,
-    amount,
-    setAmount,
-    memo,
-    setMemo,
+    fields,
+    setField,
     addAccountOpen,
     setAddAccountOpen,
     handleAccountAdded,
@@ -95,8 +87,8 @@ export function OnchainSendStepContent({
       <div className="space-y-3">
         <CounterpartyAccountSelector
           accounts={cryptoAccounts}
-          value={accountId || null}
-          onChange={setAccountId}
+          value={fields.accountId || null}
+          onChange={(id) => setField("accountId", id)}
           isLoading={accountsLoading}
         />
         <button
@@ -133,8 +125,8 @@ export function OnchainSendStepContent({
       <div className="space-y-4">
         <Combobox
           label="Source wallet"
-          value={walletId || null}
-          onChange={setWalletId}
+          value={fields.walletId || null}
+          onChange={(id) => setField("walletId", id)}
           options={walletOptions}
           placeholder="Select a source wallet"
           searchPlaceholder="Search wallets"
@@ -143,8 +135,8 @@ export function OnchainSendStepContent({
         />
         <Combobox
           label="Asset"
-          value={asset || null}
-          onChange={setAsset}
+          value={fields.asset || null}
+          onChange={(value) => setField("asset", value)}
           options={assetOptions.map((value) => ({ value, label: value }))}
           placeholder="Select an asset"
           searchable={false}
@@ -159,8 +151,8 @@ export function OnchainSendStepContent({
             inputMode="decimal"
             min="0"
             step="any"
-            value={amount}
-            onChange={(event) => setAmount(event.currentTarget.value)}
+            value={fields.amount}
+            onChange={(event) => setField("amount", event.currentTarget.value)}
             placeholder="1.0"
             size="xl"
             className="shadow-none ring-0 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none [&>span:first-child]:border-0 [&>span:first-child]:bg-border-extra-light"
@@ -172,8 +164,8 @@ export function OnchainSendStepContent({
               }
             >
               {exceedsBalance
-                ? `Amount exceeds the available ${asset} balance (${availableAmount}).`
-                : `Available: ${availableAmount} ${asset}`}
+                ? `Amount exceeds the available ${fields.asset} balance (${availableAmount}).`
+                : `Available: ${availableAmount} ${fields.asset}`}
             </p>
           ) : null}
         </div>
@@ -183,8 +175,8 @@ export function OnchainSendStepContent({
           </Label>
           <Input
             id="onchain-send-memo"
-            value={memo}
-            onChange={(event) => setMemo(event.currentTarget.value)}
+            value={fields.memo}
+            onChange={(event) => setField("memo", event.currentTarget.value)}
             placeholder="Add a note for this transfer"
             size="xl"
             className="shadow-none ring-0 [&>span:first-child]:border-0 [&>span:first-child]:bg-border-extra-light"
@@ -211,11 +203,11 @@ export function OnchainSendStepContent({
         label="Source wallet"
         value={selectedWallet?.label ?? selectedWallet?.walletId ?? "—"}
       />
-      {memo.trim() ? (
+      {fields.memo.trim() ? (
         <DetailRow
           icon={<StickyNoteIcon className="size-3.5" />}
           label="Memo"
-          value={memo.trim()}
+          value={fields.memo.trim()}
         />
       ) : null}
     </div>
@@ -224,7 +216,7 @@ export function OnchainSendStepContent({
   const amountHero = (
     <div className="flex flex-col items-center gap-0.5 border-b border-border-light pb-4">
       <p className="text-3xl font-semibold tracking-tight text-text-extra-high">
-        {amount || "0"} {asset}
+        {fields.amount || "0"} {fields.asset}
       </p>
       <p className="text-sm text-text-low">to {counterpartyName || "counterparty"}</p>
     </div>

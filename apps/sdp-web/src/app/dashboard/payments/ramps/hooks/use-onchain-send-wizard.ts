@@ -15,6 +15,8 @@ import {
   fetchCounterpartyAccounts,
   fetchWallets,
 } from "@/app/dashboard/payments/payments-workspace.data";
+import { useZodForm } from "@/lib/use-zod-form";
+import { onchainDestinationSchema, onchainDetailsSchema, onchainSendSchema } from "../schema";
 import type { RampWizardStep } from "./use-ramp-wizard";
 
 export const ONCHAIN_SEND_STEPS = [
@@ -50,11 +52,13 @@ export function useOnchainSendWizard({
 }: UseOnchainSendWizardProps) {
   const router = useRouter();
   const [stepIndex, setStepIndex] = useState(0);
-  const [accountId, setAccountId] = useState("");
-  const [walletId, setWalletId] = useState("");
-  const [asset, setAsset] = useState("USDC");
-  const [amount, setAmount] = useState("");
-  const [memo, setMemo] = useState("");
+  const { values: fields, setField } = useZodForm(onchainSendSchema, {
+    accountId: "",
+    walletId: "",
+    asset: "USDC",
+    amount: "",
+    memo: "",
+  });
   const [addAccountOpen, setAddAccountOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [transferResult, setTransferResult] = useState<PaymentTransferSummary | null>(null);
@@ -99,12 +103,12 @@ export function useOnchainSendWizard({
   );
 
   const selectedWallet = useMemo(
-    () => liveWallets.find((wallet) => wallet.walletId === walletId) ?? null,
-    [liveWallets, walletId]
+    () => liveWallets.find((wallet) => wallet.walletId === fields.walletId) ?? null,
+    [liveWallets, fields.walletId]
   );
   const selectedAccount = useMemo(
-    () => cryptoAccounts.find((account) => account.id === accountId) ?? null,
-    [cryptoAccounts, accountId]
+    () => cryptoAccounts.find((account) => account.id === fields.accountId) ?? null,
+    [cryptoAccounts, fields.accountId]
   );
   const destinationAddress = resolveAccountAddress(selectedAccount);
 
@@ -112,59 +116,37 @@ export function useOnchainSendWizard({
     const assetSet = new Set<string>(["USDC"]);
     for (const balance of selectedWallet?.balances ?? []) {
       if (!isSolBalance(balance) && balance.token) {
-        assetSet.add(balance.token.trim().toUpperCase());
+        assetSet.add(balance.token);
       }
     }
     return [...assetSet];
   }, [selectedWallet]);
 
   const selectedAssetBalance = useMemo(
-    () =>
-      selectedWallet?.balances?.find(
-        (balance) => balance.token.trim().toUpperCase() === asset.trim().toUpperCase()
-      ) ?? null,
-    [selectedWallet, asset]
+    () => selectedWallet?.balances?.find((balance) => balance.token === fields.asset) ?? null,
+    [selectedWallet, fields.asset]
   );
 
-  const numericAmount = Number.parseFloat(amount);
   const availableAmount = selectedAssetBalance ? Number(selectedAssetBalance.uiAmount) : null;
+  const numericAmount = Number(fields.amount);
   const exceedsBalance =
-    amount.trim().length > 0 &&
-    Number.isFinite(numericAmount) &&
-    availableAmount !== null &&
-    numericAmount > availableAmount;
+    fields.amount.length > 0 && availableAmount !== null && numericAmount > availableAmount;
 
   const currentStepId = ONCHAIN_SEND_STEPS[stepIndex].id;
   const isLastStep = stepIndex === ONCHAIN_SEND_STEPS.length - 1;
 
   const canProceed = useMemo(() => {
     if (currentStepId === "DESTINATION") {
-      return !!accountId && !!destinationAddress;
+      return onchainDestinationSchema.safeParse(fields).success && !!destinationAddress;
     }
     if (currentStepId === "DETAILS") {
-      return (
-        !!walletId &&
-        !!asset &&
-        amount.trim().length > 0 &&
-        Number.isFinite(numericAmount) &&
-        numericAmount > 0 &&
-        !exceedsBalance
-      );
+      return onchainDetailsSchema.safeParse(fields).success && !exceedsBalance;
     }
     return true;
-  }, [
-    currentStepId,
-    accountId,
-    destinationAddress,
-    walletId,
-    asset,
-    amount,
-    numericAmount,
-    exceedsBalance,
-  ]);
+  }, [currentStepId, fields, destinationAddress, exceedsBalance]);
 
   const handleAccountAdded = (account: CounterpartyAccount) => {
-    setAccountId(account.id);
+    setField("accountId", account.id);
     void mutateAccounts(
       (prev) => [account, ...(prev ?? []).filter((existing) => existing.id !== account.id)],
       { revalidate: true }
@@ -173,21 +155,18 @@ export function useOnchainSendWizard({
   };
 
   const submitTransfer = async () => {
-    if (!walletId || !destinationAddress) {
+    if (!fields.walletId || !destinationAddress) {
       return;
     }
     setSubmitting(true);
     const toastId = toast.loading("Submitting transfer.", { position: "bottom-right" });
     try {
       const transfer = await createTransfer({
-        source: walletId,
+        source: fields.walletId,
         destination: destinationAddress,
-        token:
-          selectedAssetBalance?.mint?.trim() ||
-          (asset.trim().toUpperCase() === "SOL" ? "SOL" : asset.trim()) ||
-          "SOL",
-        amount: amount.trim(),
-        ...(memo.trim() ? { memo: memo.trim() } : {}),
+        token: selectedAssetBalance?.mint ?? (fields.asset === "SOL" ? "SOL" : fields.asset),
+        amount: fields.amount,
+        ...(fields.memo.trim() ? { memo: fields.memo.trim() } : {}),
       });
       setTransferResult(transfer);
       toast.success("Transfer submitted.", {
@@ -252,16 +231,8 @@ export function useOnchainSendWizard({
     selectedAssetBalance,
     availableAmount,
     exceedsBalance,
-    accountId,
-    setAccountId,
-    walletId,
-    setWalletId,
-    asset,
-    setAsset,
-    amount,
-    setAmount,
-    memo,
-    setMemo,
+    fields,
+    setField,
     addAccountOpen,
     setAddAccountOpen,
     handleAccountAdded,
