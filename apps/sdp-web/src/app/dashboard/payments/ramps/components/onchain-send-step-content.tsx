@@ -1,6 +1,13 @@
 "use client";
 
-import { CheckCircle2Icon, ExternalLink, PlusIcon, WalletIcon } from "lucide-react";
+import {
+  CheckCircle2Icon,
+  ExternalLink,
+  PlusIcon,
+  StickyNoteIcon,
+  UserRoundIcon,
+  WalletIcon,
+} from "lucide-react";
 import { type ReactNode, useMemo } from "react";
 import { AddExternalAccountDialog } from "@/app/dashboard/payments/counterparty/add-external-account-dialog";
 import {
@@ -15,11 +22,18 @@ import { Label } from "@/components/ui/label";
 import type { OnchainSendWizard } from "../hooks/use-onchain-send-wizard";
 import { CounterpartyAccountSelector } from "./counterparty-account-selector";
 
-function SummaryRow({ label, value }: { label: string; value: ReactNode }) {
+function DetailRow({ icon, label, value }: { icon: ReactNode; label: string; value: ReactNode }) {
   return (
     <div className="flex items-center justify-between gap-4 py-3 first:pt-0 last:pb-0">
-      <p className="text-sm text-text-low">{label}</p>
-      <div className="text-right text-sm font-medium text-text-extra-high">{value}</div>
+      <span className="flex items-center gap-2.5 text-sm text-text-low">
+        <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-white text-text-medium">
+          {icon}
+        </span>
+        {label}
+      </span>
+      <div className="min-w-0 truncate text-right text-sm font-medium text-text-extra-high">
+        {value}
+      </div>
     </div>
   );
 }
@@ -180,60 +194,83 @@ export function OnchainSendStepContent({
     );
   }
 
+  const detailRows = (
+    <div className="divide-y divide-border-light">
+      <DetailRow
+        icon={<UserRoundIcon className="size-3.5" />}
+        label="To"
+        value={counterpartyName || "—"}
+      />
+      <DetailRow
+        icon={<WalletIcon className="size-3.5" />}
+        label="Destination"
+        value={<span className="font-mono text-xs">{shortenAddress(destinationAddress)}</span>}
+      />
+      <DetailRow
+        icon={<WalletIcon className="size-3.5" />}
+        label="Source wallet"
+        value={selectedWallet?.label ?? selectedWallet?.walletId ?? "—"}
+      />
+      {memo.trim() ? (
+        <DetailRow
+          icon={<StickyNoteIcon className="size-3.5" />}
+          label="Memo"
+          value={memo.trim()}
+        />
+      ) : null}
+    </div>
+  );
+
+  const amountHero = (
+    <div className="flex flex-col items-center gap-0.5 border-b border-border-light pb-4">
+      <p className="text-3xl font-semibold tracking-tight text-text-extra-high">
+        {amount || "0"} {asset}
+      </p>
+      <p className="text-sm text-text-low">to {counterpartyName || "counterparty"}</p>
+    </div>
+  );
+
   if (transferResult) {
     return (
-      <div className="space-y-6">
-        <div className="rounded-2xl border border-status-success-border bg-status-success-bg p-5">
-          <p className="flex items-center gap-2 text-[20px] font-medium text-status-success-text">
-            <CheckCircle2Icon className="size-5" /> Transfer submitted
+      <div className="flex flex-col items-center gap-6">
+        <div className="flex size-16 items-center justify-center rounded-full bg-status-success-bg text-status-success-text">
+          <CheckCircle2Icon className="size-8" />
+        </div>
+        <div className="space-y-1 text-center">
+          <p className="text-2xl font-medium tracking-tight text-text-extra-high">
+            Transfer submitted
           </p>
-          <p className="mt-2 text-sm text-status-success-text">
+          <p className="text-sm text-text-low">
             {transferResult.signature
-              ? "Transaction sent successfully."
+              ? "Your transfer was sent successfully."
               : `Status: ${transferResult.status}`}
           </p>
         </div>
+        <section className="w-full space-y-4 rounded-2xl bg-border-extra-light p-5">
+          {amountHero}
+          {detailRows}
+        </section>
         {transferResult.signature ? (
-          <div className="rounded-2xl border border-border-light bg-border-extra-light p-5">
-            <p className="text-sm font-medium text-text-extra-high">Signature</p>
-            <p className="mt-3 break-all font-mono text-xs text-text-medium">
-              {transferResult.signature}
-            </p>
-            <div className="mt-4 flex justify-end">
-              <Button
-                type="button"
-                variant="secondary"
-                iconLeft={<ExternalLink />}
-                onClick={() =>
-                  window.open(getDevnetExplorerUrl(transferResult.signature ?? ""), "_blank")
-                }
-              >
-                View on explorer
-              </Button>
-            </div>
-          </div>
+          <Button
+            type="button"
+            variant="secondary"
+            className="w-full"
+            iconLeft={<ExternalLink />}
+            onClick={() =>
+              window.open(getDevnetExplorerUrl(transferResult.signature ?? ""), "_blank")
+            }
+          >
+            View on explorer
+          </Button>
         ) : null}
       </div>
     );
   }
 
   return (
-    <section className="rounded-2xl border border-border-light bg-border-extra-light p-5">
-      <div className="divide-y divide-border-extra-light">
-        <SummaryRow label="Flow" value="Onchain transfer" />
-        <SummaryRow label="To" value={counterpartyName || "—"} />
-        <SummaryRow
-          label="Destination"
-          value={<span className="font-mono text-xs">{shortenAddress(destinationAddress)}</span>}
-        />
-        <SummaryRow
-          label="Source wallet"
-          value={selectedWallet?.label ?? selectedWallet?.walletId ?? "—"}
-        />
-        <SummaryRow label="Asset" value={asset || "—"} />
-        <SummaryRow label="Amount" value={amount || "—"} />
-        {memo.trim() ? <SummaryRow label="Memo" value={memo.trim()} /> : null}
-      </div>
+    <section className="space-y-4 rounded-2xl bg-border-extra-light p-5">
+      {amountHero}
+      {detailRows}
     </section>
   );
 }

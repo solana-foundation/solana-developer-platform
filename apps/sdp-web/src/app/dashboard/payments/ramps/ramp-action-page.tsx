@@ -8,10 +8,12 @@ import type {
 } from "@sdp/types";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
-import useSWR from "swr";
+import useSWR, { preload } from "swr";
 import {
   type CounterpartiesResult,
   fetchAllCounterparties,
+  fetchCounterpartyAccounts,
+  fetchWallets,
 } from "@/app/dashboard/payments/payments-workspace.data";
 import { CounterpartyPicker } from "./components/counterparty-picker";
 import { OfframpStepContent } from "./components/offramp-step-content";
@@ -39,6 +41,7 @@ interface PaymentsActionPageProps {
 type WizardStep = { label: string; title: string };
 
 const PAYMENTS_ACTION_COUNTERPARTIES_KEY = "payments-action-counterparties";
+const PAYMENTS_ACTION_WALLETS_KEY = "payments-action-wallets";
 
 // ---- Rail children (mounted once the counterparty + method are known) ----
 
@@ -231,8 +234,15 @@ export function PaymentsActionPage(props: PaymentsActionPageProps) {
   );
   const liveCounterparties = counterpartiesResult ?? props.counterpartiesResult;
 
-  // Fiat is gated on org ramp-provider access; onchain is always offerable
-  // (a missing Solana address can be added inline).
+  const selectCounterparty = (id: string) => {
+    setCounterpartyId(id);
+    if (!id) {
+      return;
+    }
+    void preload(PAYMENTS_ACTION_WALLETS_KEY, () => fetchWallets({ includeBalances: true }));
+    void preload(["counterparty-accounts", id], () => fetchCounterpartyAccounts(id));
+  };
+
   const fiatEnabled = enabledRampProviders.length > 0;
   const availableMethods: PaymentMethod[] = fiatEnabled ? ["onchain", "ramp"] : ["onchain"];
   const showMethodStep = availableMethods.length > 1;
@@ -254,7 +264,7 @@ export function PaymentsActionPage(props: PaymentsActionPageProps) {
     liveCounterparties.data.find((cp) => cp.id === counterpartyId)?.displayName ?? "";
 
   const handleCounterpartyCreated = (created: Counterparty) => {
-    setCounterpartyId(created.id);
+    selectCounterparty(created.id);
     void mutateCounterparties(
       (prev) => (prev ? { ...prev, data: [created, ...prev.data] } : { ok: true, data: [created] }),
       { revalidate: true }
@@ -331,7 +341,7 @@ export function PaymentsActionPage(props: PaymentsActionPageProps) {
           mode={mode}
           counterpartiesResult={liveCounterparties}
           value={counterpartyId || null}
-          onChange={setCounterpartyId}
+          onChange={selectCounterparty}
           onAddClick={() => setCounterpartyDialogOpen(true)}
         />
       ) : (

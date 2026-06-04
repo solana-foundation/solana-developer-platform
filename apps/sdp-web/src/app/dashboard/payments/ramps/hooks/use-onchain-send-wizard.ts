@@ -165,7 +165,10 @@ export function useOnchainSendWizard({
 
   const handleAccountAdded = (account: CounterpartyAccount) => {
     setAccountId(account.id);
-    void mutateAccounts();
+    void mutateAccounts(
+      (prev) => [account, ...(prev ?? []).filter((existing) => existing.id !== account.id)],
+      { revalidate: true }
+    );
     setAddAccountOpen(false);
   };
 
@@ -221,6 +224,9 @@ export function useOnchainSendWizard({
   };
 
   const handleSecondary = () => {
+    if (submitting || transferResult) {
+      return;
+    }
     if (stepIndex === 0) {
       onExit();
       return;
