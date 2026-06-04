@@ -1107,8 +1107,10 @@ export interface BvnkOnrampEntry {
   bankAccount?: BvnkBankFundingDetails;
 }
 
+const BVNK_WALLET_ACTIVE_STATUSES = new Set(["ACTIVE", "COMPLETED"]);
+
 export function isBvnkWalletActive(status: string | undefined): boolean {
-  return status?.toUpperCase() === "ACTIVE";
+  return status !== undefined && BVNK_WALLET_ACTIVE_STATUSES.has(status.toUpperCase());
 }
 
 export interface BvnkOnrampResolution {
