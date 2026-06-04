@@ -11,7 +11,6 @@ import { type RampWizardStep, type UseRampWizardProps, useRampWizard } from "./u
 export const ONRAMP_STEPS = [
   { id: "DEPOSIT", label: "Deposit", title: "How much would you like to deposit?" },
   { id: "PROVIDER", label: "Provider", title: "Complete your deposit" },
-  { id: "DONE", label: "Step 4", title: "Coming soon" },
 ] as const satisfies readonly RampWizardStep[];
 
 export type OnrampStepId = (typeof ONRAMP_STEPS)[number]["id"];

@@ -9,7 +9,7 @@ import type {
 import { parseFiatCurrency } from "@sdp/types/payment-rails";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
 import { AppError, providerNotConfigured } from "@/lib/errors";
-import { hmacSha256Base64, verifyHmacSha256Base64 } from "@/lib/hash";
+import { hashString, hmacSha256Base64, verifyHmacSha256Base64 } from "@/lib/hash";
 import {
   createProviderRampSupport,
   isSolanaCryptoAsset,
@@ -1164,6 +1164,13 @@ export function findBvnkWalletEntryKey(
  */
 export function bvnkCustomerExternalReference(counterpartyId: string): string {
   return `sdp_${counterpartyId.replace(/[^a-zA-Z0-9]/g, "").slice(-32)}`;
+}
+
+export async function bvnkRuleReference(
+  counterpartyId: string,
+  onrampKey: string
+): Promise<string> {
+  return (await hashString(`bvnk-rule:${counterpartyId}:${onrampKey}`)).slice(0, 36);
 }
 
 export function buildBvnkRuleEntity(counterparty: CounterpartyRow): BvnkRuleEntity {

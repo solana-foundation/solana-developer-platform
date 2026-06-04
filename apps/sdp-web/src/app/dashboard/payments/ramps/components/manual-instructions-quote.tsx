@@ -25,6 +25,7 @@ import {
 import { Button } from "@/components/ui/button";
 
 type ManualQuote = Extract<PaymentRampQuote, { deliveryMode: "manual_instructions" }>;
+type LightsparkQuote = Extract<ManualQuote, { provider: "lightspark" }>;
 
 async function copyPaymentInstruction(label: string, value: string) {
   try {
@@ -118,15 +119,10 @@ function ManualQuoteSummary({
   fiatCurrency,
   cryptoToken,
 }: {
-  quote: ManualQuote;
+  quote: LightsparkQuote;
   fiatCurrency: string;
   cryptoToken: string;
 }) {
-  // Locked pricing fields are only returned by quote-priced providers (Lightspark).
-  // BVNK on-ramp uses a standing payment rule with no per-quote pricing.
-  if (quote.provider !== "lightspark") {
-    return null;
-  }
   const finalAmount = formatMinorCurrencyAmount(quote.totalReceivingAmount, cryptoToken);
   const sendingAmount = formatMinorCurrencyAmount(quote.totalSendingAmount, fiatCurrency);
   const feesIncluded = formatMinorCurrencyAmount(quote.feesIncluded, fiatCurrency);
@@ -272,6 +268,7 @@ function BvnkInstruction({
 }) {
   const isReady = instruction.onboardingStatus === "ready";
   const needsVerification = instruction.onboardingStatus === "verification_required";
+  const isProvisioning = instruction.onboardingStatus === "provisioning";
   const bank = instruction.bankAccount;
 
   return (
@@ -315,14 +312,20 @@ function BvnkInstruction({
             <Clock3 className="size-5" />
           </span>
           <div className="min-w-0 flex-1">
-            <p className="text-sm font-medium text-text-extra-high">Verification in review</p>
+            <p className="text-sm font-medium text-text-extra-high">
+              {isProvisioning
+                ? "BVNK is provisioning your virtual bank account"
+                : "Verification in review"}
+            </p>
             <p className="mt-1 text-sm leading-relaxed text-text-low">
               {instruction.instructionsNotes ??
-                "Identity verification is in review; funding details will appear once approved."}
+                (isProvisioning
+                  ? "Setting up your funding account; bank details will appear in a moment."
+                  : "Identity verification is in review; funding details will appear once approved.")}
             </p>
             <p className="mt-3 flex items-center gap-2 text-xs font-medium text-text-medium">
               <Loader2 className="size-3.5 animate-spin" />
-              Checking verification status
+              {isProvisioning ? "Provisioning funding account" : "Checking verification status"}
             </p>
           </div>
         </div>
@@ -369,6 +372,27 @@ export function ManualInstructionsQuote({
 }) {
   const [activeTab, setActiveTab] = useState<"instructions" | "summary">("instructions");
 
+  const instructionList = instructions.map((instruction, index) =>
+    instruction.provider === "bvnk" ? (
+      <BvnkInstruction
+        key={instruction.ruleId ?? instruction.beneficiaryAddress}
+        instruction={instruction}
+        simulateQuote={simulateQuote}
+      />
+    ) : (
+      <LightsparkInstruction
+        key={
+          instruction.accountOrWalletInfo.reference ??
+          instruction.accountOrWalletInfo.address ??
+          "lightspark"
+        }
+        instruction={instruction}
+        showSimulate={index === 0}
+        simulateQuote={simulateQuote}
+      />
+    )
+  );
+
   return (
     <div className="flex flex-col">
       <div className="flex items-start gap-3">
@@ -384,51 +408,40 @@ export function ManualInstructionsQuote({
         </div>
       </div>
 
-      <Tabs
-        className="mt-6"
-        value={activeTab}
-        onValueChange={(value) => {
-          if (value === "instructions" || value === "summary") {
-            setActiveTab(value);
-          }
-        }}
-      >
-        <TabList>
-          <Tab value="instructions">
-            <QuoteExpiryTabLabel
-              expiresAt={quote.provider === "lightspark" ? quote.expiresAt : undefined}
-            />
-          </Tab>
-          <Tab value="summary">Quote Summary</Tab>
-        </TabList>
-      </Tabs>
+      {quote.provider === "lightspark" ? (
+        <>
+          <Tabs
+            className="mt-6"
+            value={activeTab}
+            onValueChange={(value) => {
+              if (value === "instructions" || value === "summary") {
+                setActiveTab(value);
+              }
+            }}
+          >
+            <TabList>
+              <Tab value="instructions">
+                <QuoteExpiryTabLabel expiresAt={quote.expiresAt} />
+              </Tab>
+              <Tab value="summary">Quote Summary</Tab>
+            </TabList>
+          </Tabs>
 
-      <div className="mt-6">
-        {activeTab === "instructions" ? (
-          instructions.map((instruction, index) =>
-            instruction.provider === "bvnk" ? (
-              <BvnkInstruction
-                key={instruction.ruleId ?? instruction.beneficiaryAddress}
-                instruction={instruction}
-                simulateQuote={simulateQuote}
-              />
+          <div className="mt-6">
+            {activeTab === "instructions" ? (
+              instructionList
             ) : (
-              <LightsparkInstruction
-                key={
-                  instruction.accountOrWalletInfo.reference ??
-                  instruction.accountOrWalletInfo.address ??
-                  "lightspark"
-                }
-                instruction={instruction}
-                showSimulate={index === 0}
-                simulateQuote={simulateQuote}
+              <ManualQuoteSummary
+                quote={quote}
+                fiatCurrency={fiatCurrency}
+                cryptoToken={cryptoToken}
               />
-            )
-          )
-        ) : (
-          <ManualQuoteSummary quote={quote} fiatCurrency={fiatCurrency} cryptoToken={cryptoToken} />
-        )}
-      </div>
+            )}
+          </div>
+        </>
+      ) : (
+        <div className="mt-6">{instructionList}</div>
+      )}
     </div>
   );
 }

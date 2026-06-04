@@ -24,6 +24,7 @@ import {
   buildBvnkRuleEntity,
   bvnkCustomerExternalReference,
   bvnkOnrampKey,
+  bvnkRuleReference,
   isBvnkCustomerVerified,
   isBvnkWalletActive,
   normalizeBvnkCurrencyAndNetwork,
@@ -448,7 +449,7 @@ async function ensureBvnkOnramp(
 
   if (!entry.ruleId && entry.walletId && isBvnkWalletActive(entry.walletStatus)) {
     const rule = await client.createOnrampRule(ctx, {
-      reference: counterparty.id,
+      reference: await bvnkRuleReference(counterparty.id, key),
       walletId: entry.walletId,
       currency: params.currency,
       network: params.network,

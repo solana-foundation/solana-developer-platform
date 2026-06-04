@@ -210,14 +210,16 @@ function OnrampRail({
             : verificationUrl
               ? "Complete Verification"
               : wizard.isLastStep
-                ? "Done"
+                ? "Finish Transaction"
                 : "Next"
       }
       walletsError={wizard.liveWalletsError}
       onPrimary={
         verificationUrl
           ? () => window.open(verificationUrl, "_blank", "noopener")
-          : () => void wizard.handlePrimary()
+          : wizard.isLastStep
+            ? wizard.finish
+            : () => void wizard.handlePrimary()
       }
       onSecondary={wizard.handleSecondary}
       counterpartyDialogOpen={false}

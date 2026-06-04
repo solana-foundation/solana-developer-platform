@@ -242,6 +242,14 @@ export function useRampWizard<TId extends string>(
     setStepIndex((current) => Math.max(0, current - 1));
   };
 
+  const finish = () => {
+    if (onExit) {
+      onExit();
+      return;
+    }
+    router.push("/dashboard/payments");
+  };
+
   const handlePairChange = (nextPair: SelectedRampPair) => {
     setSelectedRampPair(nextPair);
     const support = findRampPair(config.pairs, nextPair);
@@ -280,6 +288,7 @@ export function useRampWizard<TId extends string>(
     setCounterpartyDialogOpen,
     handlePrimary,
     handleSecondary,
+    finish,
     handlePairChange,
     handleCounterpartyCreated,
   };

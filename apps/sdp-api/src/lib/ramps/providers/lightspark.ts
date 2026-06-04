@@ -587,6 +587,7 @@ export class LightsparkRampClient implements RampProvider {
       id: quote.id,
       status: mapLightsparkQuoteStatus(quote.quoteStatus),
       deliveryMode: "manual_instructions",
+      paymentInstructions: quote.paymentInstructions,
       exchangeRate: quote.exchangeRate,
       totalSendingAmount: quote.totalSendingAmount,
       totalReceivingAmount: quote.totalReceivingAmount,

@@ -198,6 +198,8 @@ export type PaymentRampQuote =
   | (BasePaymentRampQuote & {
       provider: "lightspark";
       deliveryMode: "manual_instructions";
+      /** Bank/wallet funding instructions to send the fiat to. */
+      paymentInstructions?: LightsparkPaymentRampInstruction[];
       /** Units of destination crypto per unit of source fiat. */
       exchangeRate?: number;
       /** Total sending amount in the fiat currency's smallest unit, including provider fees. */
