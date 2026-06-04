@@ -1,6 +1,6 @@
 "use client";
 
-import { CheckCircle2Icon, CoinsIcon, ExternalLink, PlusIcon, WalletIcon } from "lucide-react";
+import { CheckCircle2Icon, ExternalLink, PlusIcon, WalletIcon } from "lucide-react";
 import { type ReactNode, useMemo } from "react";
 import { AddExternalAccountDialog } from "@/app/dashboard/payments/counterparty/add-external-account-dialog";
 import {
@@ -133,18 +133,23 @@ export function OnchainSendStepContent({
           onChange={setAsset}
           options={assetOptions.map((value) => ({ value, label: value }))}
           placeholder="Select an asset"
-          searchPlaceholder="Search assets"
-          icon={<CoinsIcon className="size-5 shrink-0 text-text-low" />}
+          searchable={false}
         />
-        <div className="space-y-2">
-          <Label htmlFor="onchain-send-amount">Amount</Label>
+        <div className="flex flex-col gap-2">
+          <Label className="text-sm font-medium text-text-low" htmlFor="onchain-send-amount">
+            Amount
+          </Label>
           <Input
             id="onchain-send-amount"
+            type="number"
+            inputMode="decimal"
+            min="0"
+            step="any"
             value={amount}
             onChange={(event) => setAmount(event.currentTarget.value)}
-            inputMode="decimal"
-            placeholder="0.00"
-            className="h-12 rounded-2xl border-border-light bg-white px-4 shadow-none"
+            placeholder="1.0"
+            size="xl"
+            className="shadow-none ring-0 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none [&>span:first-child]:border-0 [&>span:first-child]:bg-border-extra-light"
           />
           {availableAmount !== null ? (
             <p
@@ -158,14 +163,17 @@ export function OnchainSendStepContent({
             </p>
           ) : null}
         </div>
-        <div className="space-y-2">
-          <Label htmlFor="onchain-send-memo">Memo (optional)</Label>
+        <div className="flex flex-col gap-2">
+          <Label className="text-sm font-medium text-text-low" htmlFor="onchain-send-memo">
+            Memo (optional)
+          </Label>
           <Input
             id="onchain-send-memo"
             value={memo}
             onChange={(event) => setMemo(event.currentTarget.value)}
             placeholder="Add a note for this transfer"
-            className="h-12 rounded-2xl border-border-light bg-white px-4 shadow-none"
+            size="xl"
+            className="shadow-none ring-0 [&>span:first-child]:border-0 [&>span:first-child]:bg-border-extra-light"
           />
         </div>
       </div>
