@@ -151,10 +151,15 @@ export function useOnchainSendWizard({
       return onchainDestinationSchema.safeParse(fields).success && !!destinationAddress;
     }
     if (currentStepId === "DETAILS") {
-      return onchainDetailsSchema.safeParse(fields).success && !exceedsBalance;
+      const schemaOk = onchainDetailsSchema.safeParse(fields).success;
+      // When a wallet is selected, require a matching balance entry so that
+      // submitTransfer always has a mint address rather than falling back to
+      // the raw asset string (e.g. "USDC"), which the API would reject.
+      const hasMint = !fields.walletId || selectedAssetBalance !== null;
+      return schemaOk && !exceedsBalance && hasMint;
     }
     return true;
-  }, [currentStepId, fields, destinationAddress, exceedsBalance]);
+  }, [currentStepId, fields, destinationAddress, exceedsBalance, selectedAssetBalance]);
 
   const handleAccountAdded = (account: CounterpartyAccount) => {
     setField("accountId", account.id);
