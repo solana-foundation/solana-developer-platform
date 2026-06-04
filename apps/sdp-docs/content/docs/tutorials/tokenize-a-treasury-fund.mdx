@@ -401,7 +401,7 @@ await sdp.post("/v1/compliance/address-screenings", {
 
 SDP screens against four providers in parallel: Range, Elliptic, TRM, and Chainalysis. Treat any provider returning `status: "error"` as a defense-in-depth gap, not a clean pass.
 
-As of 2026-05-22, Chainalysis credentials are broken in production sandbox and the provider returns `status: "error"`. Range and Elliptic are the operational providers in this tutorial.
+As of 2026-05-22, Chainalysis credentials are broken in production sandbox and the provider returns `status: "error"`. Range, Elliptic, and TRM are the operational providers.
 
 ### 3. Handle compliance events
 
@@ -734,7 +734,7 @@ The first mainnet mint should not happen until each of these is true.
 - [ ] **Allowlist seeded.** Holder wallet is on the production allowlist, sourced from the transfer agent's verified qualified-purchaser list. No sandbox test addresses present.
 - [ ] **Real memo.** The mint memo references the actual subscription identifier from the transfer agent's records, not a tutorial placeholder.
 - [ ] **Admin key separated.** The Admin key sits with compliance operations, not the developer team. The runbook names who can issue a freeze, under what circumstances, with what `reason`-field discipline.
-- [ ] **Screening fresh.** The address screening providers (Range, Elliptic) returned a clean result on the holder address within the freshness window your compliance policy defines.
+- [ ] **Screening fresh.** The address screening providers (Range, Elliptic, TRM) returned a clean result on the holder address within the freshness window your compliance policy defines.
 - [ ] **Reporting cadence wired.** Whatever cadence your compliance officer specifies (driven by 33/40 Act and Reg D 506(c) obligations, not GENIUS Act stablecoin rules) is in your treasury operations runbook.
 
 When the checklist is green, run the subscription mint against the production base. The transaction record carries the same shape as sandbox; the difference is that the on-chain supply now corresponds to a real fund unit.
