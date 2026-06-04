@@ -209,6 +209,7 @@ export function TokenActionPrimaryForms({
                     : null
                 }
                 reserveSpace={false}
+                announce={false}
               />
               <div
                 className={[
@@ -216,12 +217,7 @@ export function TokenActionPrimaryForms({
                   submitAlignment === "end" ? "justify-end" : "",
                 ].join(" ")}
               >
-                <Button
-                  type="submit"
-                  disabled={
-                    isPending || Boolean(signerUnavailableReason) || Boolean(mintValidationReason)
-                  }
-                >
+                <Button type="submit" disabled={isPending || Boolean(mintDisabledReason)}>
                   Mint tokens
                 </Button>
               </div>
@@ -295,6 +291,7 @@ export function TokenActionPrimaryForms({
                     : null
                 }
                 reserveSpace={false}
+                announce={false}
               />
               <div
                 className={[
@@ -302,12 +299,7 @@ export function TokenActionPrimaryForms({
                   submitAlignment === "end" ? "justify-end" : "",
                 ].join(" ")}
               >
-                <Button
-                  type="submit"
-                  disabled={
-                    isPending || Boolean(signerUnavailableReason) || Boolean(burnValidationReason)
-                  }
-                >
+                <Button type="submit" disabled={isPending || Boolean(burnDisabledReason)}>
                   Burn tokens
                 </Button>
               </div>
