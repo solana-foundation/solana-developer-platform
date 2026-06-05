@@ -814,7 +814,15 @@ export class BvnkRampClient implements RampProvider {
     if (!(await verifyHmacSha256Base64(rawBody, signature, secret))) {
       throw new AppError("UNAUTHORIZED", "Invalid BVNK webhook signature", { provider: this.id });
     }
-    return { provider: this.id, payload: safeParseJson(rawBody) ?? {} };
+    let payload: unknown;
+    try {
+      payload = JSON.parse(rawBody);
+    } catch {
+      throw new AppError("BAD_REQUEST", "BVNK webhook body must be valid JSON", {
+        provider: this.id,
+      });
+    }
+    return { provider: this.id, payload };
   }
 
   /**

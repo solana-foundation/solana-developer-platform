@@ -206,7 +206,6 @@ async function syncProcessingTransfersOnChain(
       }
       // "processed" confirmation is too weak to record as confirmed — skip.
     } catch (err) {
-      // biome-ignore lint/security/noSecrets: Log message string, not a secret.
       console.error("trackPendingTransfers: failed to update transfer", {
         transferId: transfer.id,
         error: err instanceof Error ? err.message : String(err),

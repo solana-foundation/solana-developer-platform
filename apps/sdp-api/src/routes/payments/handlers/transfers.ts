@@ -1972,6 +1972,7 @@ export async function listTransfers(c: AppContext) {
         walletId: resolvedWalletId,
         walletIds: resolvedWalletId ? undefined : (allowedWalletIds ?? undefined),
         sourceAddress: resolvedWalletId ? undefined : walletAddress,
+        counterpartyId,
         statuses: nonChainStatuses,
         types: transferTypes,
         token,
@@ -2015,6 +2016,7 @@ export async function listTransfers(c: AppContext) {
     // 5. Apply remaining filters and sort
     const filtered = merged
       .filter((row) => {
+        if (counterpartyId && row.counterparty_id !== counterpartyId) return false;
         if (status && row.status !== status) return false;
         if (token && row.token !== token) return false;
         if (direction && row.direction !== direction) return false;

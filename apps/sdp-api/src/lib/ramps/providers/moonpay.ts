@@ -1,3 +1,4 @@
+import { timingSafeEqual } from "node:crypto";
 import type {
   PaymentRampEstimate,
   PaymentRampExecution,
@@ -10,6 +11,7 @@ import {
   parseFiatCurrency,
 } from "@sdp/types/payment-rails";
 import { AppError, providerNotConfigured } from "@/lib/errors";
+import { hashString } from "@/lib/hash";
 import { providerFetchJson } from "../fetch";
 import { createProviderRampSupport, RAMP_RAIL_DUMPS, rampId, requireEnv } from "../shared";
 import type {
@@ -24,6 +26,7 @@ import type {
   RampOnrampQuoteInput,
   RampProvider,
   RampRuntimeContext,
+  RampSettlementEvent,
   RampWebhookValidationContext,
   RampWebhookValidationResult,
 } from "../types";
@@ -107,6 +110,51 @@ function normalizeMoonpayCurrencyCode(value: string): string {
     return `${normalized.slice(0, -"_SOLANA".length)}_SOL`.toLowerCase();
   }
   return normalized.toLowerCase();
+}
+
+function readMoonpayWebhookKey(
+  env: Record<string, string | undefined>,
+  environment: SdpEnvironment
+): string {
+  const webhookKey = (
+    environment === "sandbox" ? env.MOONPAY_SANDBOX_WEBHOOK_KEY : env.MOONPAY_WEBHOOK_KEY
+  )?.trim();
+  if (!webhookKey) {
+    throw providerNotConfigured(
+      environment === "sandbox"
+        ? "MoonPay sandbox webhook key is not configured (MOONPAY_SANDBOX_WEBHOOK_KEY)."
+        : "MoonPay webhook key is not configured (MOONPAY_WEBHOOK_KEY)."
+    );
+  }
+  return webhookKey;
+}
+
+function parseMoonpaySignatureV2Header(
+  header: string
+): { timestamp: string; signature: string } | null {
+  let timestamp: string | null = null;
+  let signature: string | null = null;
+
+  for (const part of header.split(",")) {
+    const separatorIndex = part.indexOf("=");
+    if (separatorIndex === -1) {
+      continue;
+    }
+    const prefix = part.slice(0, separatorIndex).trim();
+    const value = part.slice(separatorIndex + 1).trim();
+    if (prefix === "t") {
+      timestamp = value;
+    }
+    if (prefix === "s") {
+      signature = value;
+    }
+  }
+
+  if (!timestamp || !signature) {
+    return null;
+  }
+
+  return { timestamp, signature };
 }
 
 async function moonpaySignature(unsignedQuery: string, secretKey: string): Promise<string> {
@@ -206,6 +254,25 @@ function extractSupport(currencies: readonly MoonpayCurrencyEntry[]): ProviderRa
   return support;
 }
 
+const MOONPAY_TRANSACTION_STATUS = {
+  waitingPayment: "awaiting_payment",
+  pending: "settling",
+  waitingAuthorization: "settling",
+  completed: "settled",
+  failed: "failed",
+} as const satisfies Record<string, RampSettlementEvent["kind"]>;
+type MoonpayTransactionStatus = keyof typeof MOONPAY_TRANSACTION_STATUS;
+
+interface MoonpayTransactionWebhook {
+  type: "transaction_created" | "transaction_updated" | "transaction_failed";
+  data: {
+    id: string;
+    status: MoonpayTransactionStatus;
+    externalTransactionId: string | null;
+    failureReason: string | null;
+  };
+}
+
 export class MoonpayRampClient implements RampProvider {
   readonly id = "moonpay";
 
@@ -237,12 +304,77 @@ export class MoonpayRampClient implements RampProvider {
     );
   }
 
-  async validateWebhook(
-    _context: RampWebhookValidationContext
-  ): Promise<RampWebhookValidationResult> {
-    throw new AppError("PROVIDER_NOT_CONFIGURED", "MoonPay webhook validation is not implemented", {
-      provider: this.id,
-    });
+  async validateWebhook({
+    env,
+    environment,
+    headers,
+    rawBody,
+  }: RampWebhookValidationContext): Promise<RampWebhookValidationResult> {
+    const webhookKey = readMoonpayWebhookKey(env, environment);
+    const signatureHeader = headers.get("moonpay-signature-v2")?.trim();
+    if (!signatureHeader) {
+      throw new AppError("UNAUTHORIZED", "MoonPay webhook is missing Moonpay-Signature-V2 header", {
+        provider: this.id,
+      });
+    }
+
+    const parsed = parseMoonpaySignatureV2Header(signatureHeader);
+    if (!parsed) {
+      throw new AppError("UNAUTHORIZED", "MoonPay webhook signature header is malformed", {
+        provider: this.id,
+      });
+    }
+
+    if (!/^[0-9a-f]+$/i.test(parsed.signature) || parsed.signature.length % 2 !== 0) {
+      throw new AppError("UNAUTHORIZED", "Invalid MoonPay webhook signature", {
+        provider: this.id,
+      });
+    }
+
+    const expectedSignature = await hashString(`${parsed.timestamp}.${rawBody}`, webhookKey);
+    const expected = Buffer.from(expectedSignature, "hex");
+    const received = Buffer.from(parsed.signature, "hex");
+    if (expected.length !== received.length || !timingSafeEqual(expected, received)) {
+      throw new AppError("UNAUTHORIZED", "Invalid MoonPay webhook signature", {
+        provider: this.id,
+      });
+    }
+
+    let payload: unknown;
+    try {
+      payload = JSON.parse(rawBody);
+    } catch {
+      throw new AppError("BAD_REQUEST", "MoonPay webhook body must be valid JSON", {
+        provider: this.id,
+      });
+    }
+
+    return { provider: this.id, payload };
+  }
+
+  parseSettlementEvent(payload: unknown): RampSettlementEvent {
+    const { type, data } = payload as MoonpayTransactionWebhook;
+    if (
+      type !== "transaction_created" &&
+      type !== "transaction_updated" &&
+      type !== "transaction_failed"
+    ) {
+      return { provider: this.id, kind: "ignore", reason: `unsupported_event:${type}` };
+    }
+
+    const reference = data.externalTransactionId;
+    if (!reference) {
+      return { provider: this.id, kind: "ignore", reason: "missing_external_transaction_id" };
+    }
+
+    const kind = MOONPAY_TRANSACTION_STATUS[data.status];
+    if (!kind) {
+      return { provider: this.id, kind: "ignore", reason: `unsupported_status:${data.status}` };
+    }
+    if (kind === "failed") {
+      return { provider: this.id, kind, reference, error: data.failureReason ?? undefined };
+    }
+    return { provider: this.id, kind, reference };
   }
 
   async estimateOnramp(

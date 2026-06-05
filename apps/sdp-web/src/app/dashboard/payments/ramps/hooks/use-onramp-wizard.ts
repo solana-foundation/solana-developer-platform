@@ -19,7 +19,7 @@ export const ONRAMP_STEPS = [
 
 export type OnrampStepId = (typeof ONRAMP_STEPS)[number]["id"];
 
-function isTerminalOnrampTransferStatus(status: string) {
+export function isTerminalOnrampTransferStatus(status: string) {
   return status === "completed" || status === "failed" || status === "expired";
 }
 

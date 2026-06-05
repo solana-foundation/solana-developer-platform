@@ -9,6 +9,7 @@ import {
 import { Combobox } from "@/components/ui/combobox";
 import { OFFRAMP_PAIRS, RAMP_PROVIDER_OPTIONS } from "@/lib/ramps";
 import type { OfframpWizard } from "../hooks/use-offramp-wizard";
+import { HostedRampFrame } from "./hosted-ramp-frame";
 import { RampPairProviderSelector } from "./ramp-pair-provider-selector";
 import { RampStepPlaceholder } from "./ramp-step-placeholder";
 
@@ -86,16 +87,7 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
   }
 
   if (currentStepId === "COMPLETE" && quote?.deliveryMode === "hosted") {
-    return (
-      <div className="overflow-hidden rounded-2xl">
-        <iframe
-          title={`${quote.provider} off-ramp`}
-          src={quote.hostedUrl}
-          className="h-[480px] w-full border-0"
-          allow="accelerometer; autoplay; camera; encrypted-media; fullscreen; geolocation; gyroscope; payment"
-        />
-      </div>
-    );
+    return <HostedRampFrame title={`${quote.provider} off-ramp`} src={quote.hostedUrl} />;
   }
 
   return <RampStepPlaceholder />;

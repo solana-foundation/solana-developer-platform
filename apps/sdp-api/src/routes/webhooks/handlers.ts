@@ -17,6 +17,7 @@ import { syncProviderAccessFromClerk } from "@/services/provider-availability.se
 import type { Env } from "@/types/env";
 import { handleBvnkRampWebhook } from "./ramps/bvnk";
 import { handleLightsparkRampWebhook } from "./ramps/lightspark";
+import { handleMoonpayRampWebhook } from "./ramps/moonpay";
 
 type AppContext = Context<{ Bindings: Env }>;
 
@@ -610,11 +611,21 @@ export const handleRampProviderWebhook = async (c: AppContext, environment: SdpE
     requestUrl: c.req.url,
   });
 
-  if (result.provider === "bvnk") {
-    await handleBvnkRampWebhook(c, environment, result.payload);
-  }
-  if (result.provider === "lightspark") {
-    await handleLightsparkRampWebhook(c, result.payload);
+  switch (result.provider) {
+    case "bvnk":
+      await handleBvnkRampWebhook(c, environment, result.payload);
+      break;
+    case "lightspark":
+      await handleLightsparkRampWebhook(c, result.payload);
+      break;
+    case "moonpay":
+      await handleMoonpayRampWebhook(c, result.payload);
+      break;
+    default:
+      throw new AppError(
+        "BAD_REQUEST",
+        `Unsupported ramp webhook provider: ${result.provider satisfies never}`
+      );
   }
 
   return success(c, {

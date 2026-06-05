@@ -39,6 +39,7 @@ interface RampWizardShellProps {
   onCounterpartyCreated: (created: Counterparty) => void;
   children: ReactNode;
   footer?: ReactNode;
+  footerActions?: ReactNode;
   hidePrimary?: boolean;
 }
 
@@ -55,6 +56,7 @@ export function RampWizardShell({
   onCounterpartyCreated,
   children,
   footer,
+  footerActions,
   hidePrimary,
 }: RampWizardShellProps) {
   return (
@@ -107,16 +109,19 @@ export function RampWizardShell({
         >
           {stepIndex === 0 ? "Cancel" : "Previous"}
         </Button>
-        {hidePrimary ? null : (
-          <Button
-            type="button"
-            className="h-14 rounded-full text-base"
-            disabled={primaryDisabled}
-            onClick={onPrimary}
-          >
-            {primaryLabel}
-          </Button>
-        )}
+        <div className="flex flex-col gap-3 sm:flex-row">
+          {footerActions}
+          {hidePrimary ? null : (
+            <Button
+              type="button"
+              className="h-14 rounded-full text-base"
+              disabled={primaryDisabled}
+              onClick={onPrimary}
+            >
+              {primaryLabel}
+            </Button>
+          )}
+        </div>
       </div>
 
       <CounterpartyCreateDialog

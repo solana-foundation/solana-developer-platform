@@ -192,6 +192,8 @@ export interface Env {
   MOONPAY_OFFRAMP_URL?: string;
   MOONPAY_SANDBOX_API_KEY?: string;
   MOONPAY_SANDBOX_SECRET_KEY?: string;
+  MOONPAY_WEBHOOK_KEY?: string;
+  MOONPAY_SANDBOX_WEBHOOK_KEY?: string;
 
   // Lightspark Grid ramps configuration
   LIGHTSPARK_GRID_CLIENT_ID?: string;

@@ -1,14 +1,13 @@
 "use client";
 
 import { CheckCircle2Icon, Loader2Icon, XCircleIcon } from "lucide-react";
-import Link from "next/link";
 import {
   formatMinorCurrencyAmount,
   formatTimestamp,
 } from "@/app/dashboard/payments/payments-overview.utils";
-import { Button } from "@/components/ui/button";
 import { ONRAMP_PAIRS, RAMP_PROVIDER_OPTIONS, toRampCryptoToken } from "@/lib/ramps";
 import type { OnrampWizard } from "../hooks/use-onramp-wizard";
+import { HostedRampFrame } from "./hosted-ramp-frame";
 import { ManualInstructionsQuote } from "./manual-instructions-quote";
 import { RampPairProviderSelector } from "./ramp-pair-provider-selector";
 import { RampStepPlaceholder } from "./ramp-step-placeholder";
@@ -61,13 +60,7 @@ function getOnrampTransferStatusCopy(status: string) {
   }
 }
 
-function OnrampTransferStatusPanel({
-  transfer,
-  counterpartyId,
-}: {
-  transfer: OnrampWizard["transferStatus"];
-  counterpartyId: string;
-}) {
+function OnrampTransferStatusPanel({ transfer }: { transfer: OnrampWizard["transferStatus"] }) {
   const copy = transfer
     ? getOnrampTransferStatusCopy(transfer.status)
     : {
@@ -83,28 +76,15 @@ function OnrampTransferStatusPanel({
     ) : (
       <Loader2Icon className="size-5 animate-spin text-text-medium" />
     );
-  const showCounterpartyLink = transfer && transfer.status !== "awaiting_payment";
-
   return (
     <div className="flex items-start gap-3">
       <span className="mt-0.5 shrink-0">{icon}</span>
       <div className="min-w-0 flex-1">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <p className="text-sm font-medium text-text-extra-high">{copy.title}</p>
-            <p className="mt-1 text-sm leading-relaxed text-text-low">
-              {copy.description}
-              {copy.state === "loading" ? " Checking transfer status…" : null}
-            </p>
-          </div>
-          {showCounterpartyLink ? (
-            <Button asChild type="button" variant="secondary" size="xs">
-              <Link href={`/dashboard/payments/counterparty/${counterpartyId}`}>
-                Go to transaction
-              </Link>
-            </Button>
-          ) : null}
-        </div>
+        <p className="text-sm font-medium text-text-extra-high">{copy.title}</p>
+        <p className="mt-1 text-sm leading-relaxed text-text-low">
+          {copy.description}
+          {copy.state === "loading" ? " Checking transfer status…" : null}
+        </p>
       </div>
     </div>
   );
@@ -122,11 +102,9 @@ function TransferDetailRow({ label, value }: { label: string; value: string }) {
 function OnrampCompleteScreen({
   quote,
   transfer,
-  counterpartyId,
 }: {
   quote: NonNullable<OnrampWizard["quote"]>;
   transfer: NonNullable<OnrampWizard["transferStatus"]>;
-  counterpartyId: string;
 }) {
   const finalizedDetails: { label: string; value: string }[] = [
     { label: "Transfer ID", value: transfer.id },
@@ -174,22 +152,17 @@ function OnrampCompleteScreen({
 
   return (
     <div className="rounded-3xl border border-status-success-border bg-status-success-bg p-6 text-status-success-text">
-      <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
-        <div className="flex items-start gap-4">
-          <span className="flex size-12 shrink-0 items-center justify-center rounded-2xl bg-white">
-            <CheckCircle2Icon className="size-6" />
-          </span>
-          <div>
-            <p className="text-2xl font-medium tracking-tight">Transaction complete!</p>
-            <p className="mt-2 max-w-2xl text-sm leading-relaxed">
-              The onramp transfer has settled. You can review this transfer from the counterparty
-              record.
-            </p>
-          </div>
+      <div className="flex items-start gap-4">
+        <span className="flex size-12 shrink-0 items-center justify-center rounded-2xl bg-white">
+          <CheckCircle2Icon className="size-6" />
+        </span>
+        <div>
+          <p className="text-2xl font-medium tracking-tight">Transaction complete!</p>
+          <p className="mt-2 max-w-2xl text-sm leading-relaxed">
+            The onramp transfer has settled. You can review this transfer from the counterparty
+            record.
+          </p>
         </div>
-        <Button asChild type="button" variant="secondary" size="sm">
-          <Link href={`/dashboard/payments/counterparty/${counterpartyId}`}>Go to transaction</Link>
-        </Button>
       </div>
 
       <div className="mt-6 grid gap-3 sm:grid-cols-2">
@@ -261,32 +234,16 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
 
   if (currentStepId === "PROVIDER" && quote) {
     if (transferStatus && transferStatus.status === "completed") {
-      return (
-        <OnrampCompleteScreen
-          quote={quote}
-          transfer={transferStatus}
-          counterpartyId={fields.counterpartyId}
-        />
-      );
+      return <OnrampCompleteScreen quote={quote} transfer={transferStatus} />;
     }
   }
 
   if (currentStepId === "PROVIDER" && quote?.deliveryMode === "hosted") {
     return (
       <div className="space-y-6">
-        <div className="overflow-hidden rounded-2xl">
-          <iframe
-            title={`${quote.provider} on-ramp`}
-            src={quote.hostedUrl}
-            className="h-[480px] w-full border-0"
-            allow="accelerometer; autoplay; camera; encrypted-media; fullscreen; geolocation; gyroscope; payment"
-          />
-        </div>
+        <HostedRampFrame title={`${quote.provider} on-ramp`} src={quote.hostedUrl} />
         <div className="border-t border-border-light pt-5">
-          <OnrampTransferStatusPanel
-            transfer={transferStatus}
-            counterpartyId={fields.counterpartyId}
-          />
+          <OnrampTransferStatusPanel transfer={transferStatus} />
         </div>
       </div>
     );
@@ -320,10 +277,7 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
           }
         />
         <div className="border-t border-border-light pt-5">
-          <OnrampTransferStatusPanel
-            transfer={transferStatus}
-            counterpartyId={fields.counterpartyId}
-          />
+          <OnrampTransferStatusPanel transfer={transferStatus} />
         </div>
       </div>
     );
