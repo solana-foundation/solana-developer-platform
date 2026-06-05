@@ -32,11 +32,12 @@ export const createCounterpartyAccountSchema = z
     if (value.accountKind === "crypto_wallet") {
       const result = cryptoWalletDetailsSchema.safeParse(value.details);
       if (!result.success) {
-        ctx.addIssue({
-          code: "custom",
-          path: ["details"],
-          message: "crypto_wallet accounts require details.network and details.address",
-        });
+        for (const issue of result.error.issues) {
+          ctx.addIssue({
+            ...issue,
+            path: ["details", ...issue.path],
+          });
+        }
       }
     }
   });

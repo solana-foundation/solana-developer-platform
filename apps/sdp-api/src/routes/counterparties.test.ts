@@ -336,6 +336,22 @@ describe("Counterparties Routes", () => {
       const updated = (await updateRes.json()).data.account;
       expect(updated.label).toBe("Updated wallet");
 
+      const invalidPatchRes = await app.request(
+        `/v1/counterparties/${cp.id}/accounts/${account.id}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json", Authorization: authHeader },
+          body: JSON.stringify({
+            details: {
+              network: "solana",
+              address: "not-a-solana-address",
+            },
+          }),
+        },
+        env
+      );
+      expect(invalidPatchRes.status).toBe(400);
+
       const getRes = await app.request(
         `/v1/counterparties/${cp.id}/accounts/${account.id}`,
         { headers: { Authorization: authHeader } },
