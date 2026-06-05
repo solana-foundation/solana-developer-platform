@@ -16,7 +16,10 @@ import type { BackgroundRunner } from "@/runtime/background";
 import type { Observability } from "@/runtime/observability";
 import type { Env } from "@/types/env";
 import { PENDING_TRANSFERS_CRON, runPendingTransfersReconciliation } from "./pending-transfers";
-import { runRecurringPaymentsCollection } from "./recurring-payments";
+import {
+  RECURRING_PAYMENTS_COLLECTION_CRON,
+  runRecurringPaymentsCollection,
+} from "./recurring-payments";
 
 export interface CronDeps {
   env: Env;
@@ -61,7 +64,7 @@ export function startCron(deps: CronDeps): CronHandle | null {
   // work gets registered after the awaitAll() snapshot is taken.
   let stopping = false;
 
-  const task: ScheduledTask = schedule(PENDING_TRANSFERS_CRON, () => {
+  const pendingTransfersTask: ScheduledTask = schedule(PENDING_TRANSFERS_CRON, () => {
     if (stopping) {
       return;
     }
@@ -70,6 +73,12 @@ export function startCron(deps: CronDeps): CronHandle | null {
       bg: deps.bg,
       observability: deps.observability,
     });
+  });
+
+  const recurringPaymentsTask: ScheduledTask = schedule(RECURRING_PAYMENTS_COLLECTION_CRON, () => {
+    if (stopping) {
+      return;
+    }
     runRecurringPaymentsCollection({
       env: deps.env,
       bg: deps.bg,
@@ -78,9 +87,12 @@ export function startCron(deps: CronDeps): CronHandle | null {
   });
 
   return {
-    stop() {
+    async stop() {
       stopping = true;
-      return task.stop();
+      await Promise.all([
+        Promise.resolve(pendingTransfersTask.stop()),
+        Promise.resolve(recurringPaymentsTask.stop()),
+      ]);
     },
   };
 }

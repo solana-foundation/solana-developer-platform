@@ -653,6 +653,7 @@ async function createFailedCollectionAttemptForRetry(input: {
       dueAt: input.dueAt,
       error: recordError instanceof Error ? recordError.message : String(recordError),
     });
+    throw recordError;
   }
 }
 
