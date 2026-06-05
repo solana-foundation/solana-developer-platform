@@ -366,7 +366,9 @@ export interface PaymentRampEstimateFees {
   currency: RampFiatCurrency | CryptoAssetSymbol;
   total: string;
   network?: string;
+  networkCurrency?: RampFiatCurrency | CryptoAssetSymbol;
   provider?: string;
+  providerCurrency?: RampFiatCurrency | CryptoAssetSymbol;
 }
 
 export interface PaymentRampEstimate {
@@ -417,6 +419,13 @@ export interface PaymentRampEstimateEnvelope {
 
 export type PaymentRampQuoteDeliveryMode = "manual_instructions" | "hosted";
 
+export interface PaymentRampQuoteCurrency {
+  code: string;
+  decimals: number;
+  name?: string;
+  symbol?: string;
+}
+
 interface BasePaymentRampExecution {
   id: string;
   status: PaymentRampExecutionStatus;
@@ -455,10 +464,13 @@ export type PaymentRampQuote =
       exchangeRate?: number;
       /** Total sending amount in the fiat currency's smallest unit, including provider fees. */
       totalSendingAmount?: number;
+      sendingCurrency: PaymentRampQuoteCurrency;
       /** Final crypto amount received in its smallest unit. */
       totalReceivingAmount?: number;
+      receivingCurrency: PaymentRampQuoteCurrency;
       /** Fees included in the sending amount, denominated in the fiat currency's smallest unit. */
       feesIncluded?: number;
+      feeCurrency: PaymentRampQuoteCurrency;
       /** ISO timestamp after which the locked rate is no longer valid. */
       expiresAt?: string;
     })

@@ -1247,6 +1247,17 @@ const rampPaymentInstructionSchema = z.discriminatedUnion("provider", [
   bvnkRampPaymentInstructionSchema,
 ]);
 
+const rampQuoteCurrencySchema = z.object({
+  code: z.string().openapi({ description: "Provider currency code.", example: "USDC" }),
+  decimals: z
+    .number()
+    .int()
+    .min(0)
+    .openapi({ description: "Provider decimal places for minor-unit amounts.", example: 2 }),
+  name: z.string().optional().openapi({ description: "Provider currency display name." }),
+  symbol: z.string().optional().openapi({ description: "Provider currency symbol." }),
+});
+
 const onrampQuoteSchema = z
   .object({
     id: z.string().openapi({ description: "Quote identifier.", example: "ramp_quote_example" }),
@@ -1277,14 +1288,23 @@ const onrampQuoteSchema = z
     totalSendingAmount: z.number().optional().openapi({
       description: "Total sending amount in fiat smallest units, including provider fees.",
     }),
+    sendingCurrency: rampQuoteCurrencySchema.optional().openapi({
+      description: "Currency metadata for `totalSendingAmount`.",
+    }),
     totalReceivingAmount: z
       .number()
       .optional()
       .openapi({ description: "Final crypto amount received in smallest units." }),
+    receivingCurrency: rampQuoteCurrencySchema.optional().openapi({
+      description: "Currency metadata for `totalReceivingAmount`.",
+    }),
     feesIncluded: z
       .number()
       .optional()
       .openapi({ description: "Fees included in the sending amount, in fiat smallest units." }),
+    feeCurrency: rampQuoteCurrencySchema.optional().openapi({
+      description: "Currency metadata for `feesIncluded`.",
+    }),
     expiresAt: isoDateTimeSchema
       .optional()
       .openapi({ description: "Timestamp when the quote expires." }),

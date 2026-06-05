@@ -3,12 +3,16 @@ import type {
   BvnkOnboardingStatus,
   BvnkPaymentRampInstruction,
   PaymentRampEstimate,
+  PaymentRampEstimateFees,
   PaymentRampExecution,
   PaymentRampQuote,
   SdpEnvironment,
 } from "@sdp/types";
+import { RAMP_FIAT_CURRENCIES } from "@sdp/types/generated/ramp-support";
 import { getCryptoRailAssetLabel, parseFiatCurrency } from "@sdp/types/payment-rails";
+import { z } from "zod";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
+import { formatDecimalAmount, isDecimalString, parseDecimalAmount } from "@/lib/amount";
 import { AppError, providerNotConfigured } from "@/lib/errors";
 import { hashString, hmacSha256Base64, verifyHmacSha256Base64 } from "@/lib/hash";
 import {
@@ -33,6 +37,7 @@ import type {
 
 const BVNK_PRODUCTION_API_URL = "https://api.bvnk.com";
 const BVNK_SANDBOX_API_URL = "https://api.sandbox.bvnk.com";
+const bvnkEstimateFiatCurrencySchema = z.enum(RAMP_FIAT_CURRENCIES);
 
 // SANDBOX ONLY: synthetic originator (fiat sender) bank accounts for pay-in
 // simulations. The real buyer's funding bank is never stored; BVNK just needs
@@ -361,8 +366,11 @@ interface BvnkPayoutEstimateResponse {
   walletRequiredAmount: number;
   paidCurrency: string;
   paidRequiredAmount: number;
+  feeCurrency: string;
   feePredictedAmount: number;
+  networkFeeCurrency: string;
   networkFeePredictedAmount: number;
+  totalWalletAmount: number;
   exchangeRate: number;
 }
 
@@ -400,6 +408,71 @@ function toPositiveAmount(value: string, fieldName: string): number {
     throw new AppError("BAD_REQUEST", `${fieldName} must be a positive amount`);
   }
   return amount;
+}
+
+function parseBvnkEstimateFeeCurrency(value: string): PaymentRampEstimateFees["currency"] {
+  const normalized = value.trim().toUpperCase();
+  const fiat = bvnkEstimateFiatCurrencySchema.safeParse(normalized);
+  if (fiat.success) {
+    return fiat.data;
+  }
+  if (isSolanaCryptoAsset(normalized)) {
+    return normalized;
+  }
+  throw new AppError("PROVIDER_UNAVAILABLE", `Unsupported BVNK estimate fee currency: ${value}`);
+}
+
+function countDecimalPlaces(value: string): number {
+  if (!isDecimalString(value)) {
+    throw new AppError("PROVIDER_UNAVAILABLE", "BVNK returned an invalid decimal estimate amount");
+  }
+  const decimalIndex = value.indexOf(".");
+  if (decimalIndex === -1) {
+    return 0;
+  }
+  return value.length - decimalIndex - 1;
+}
+
+function subtractBvnkEstimateFees(estimate: BvnkPayoutEstimateResponse): string {
+  const walletRequiredAmount = String(estimate.walletRequiredAmount);
+  const feePredictedAmount = String(estimate.feePredictedAmount);
+  const networkFeePredictedAmount = String(estimate.networkFeePredictedAmount);
+  const decimals = Math.max(
+    countDecimalPlaces(walletRequiredAmount),
+    countDecimalPlaces(feePredictedAmount),
+    countDecimalPlaces(networkFeePredictedAmount)
+  );
+  const netAmount =
+    parseDecimalAmount(walletRequiredAmount, decimals) -
+    parseDecimalAmount(feePredictedAmount, decimals) -
+    parseDecimalAmount(networkFeePredictedAmount, decimals);
+  if (netAmount < 0n) {
+    throw new AppError(
+      "PROVIDER_UNAVAILABLE",
+      "BVNK returned estimate fees above the gross amount"
+    );
+  }
+  return formatDecimalAmount(netAmount, decimals);
+}
+
+function formatBvnkEstimateFeeTotal(estimate: BvnkPayoutEstimateResponse): string {
+  const feePredictedAmount = String(estimate.feePredictedAmount);
+  const networkFeePredictedAmount = String(estimate.networkFeePredictedAmount);
+  const decimals = Math.max(
+    countDecimalPlaces(feePredictedAmount),
+    countDecimalPlaces(networkFeePredictedAmount)
+  );
+  const totalFee =
+    parseDecimalAmount(feePredictedAmount, decimals) +
+    parseDecimalAmount(networkFeePredictedAmount, decimals);
+  return formatDecimalAmount(totalFee, decimals);
+}
+
+function formatBvnkNetExchangeRate(netFiatAmount: string, paidRequiredAmount: number): string {
+  if (paidRequiredAmount <= 0) {
+    throw new AppError("PROVIDER_UNAVAILABLE", "BVNK returned a non-positive paid amount");
+  }
+  return String(Number(netFiatAmount) / paidRequiredAmount);
 }
 
 interface BvnkCurrencyEntry {
@@ -995,19 +1068,48 @@ export class BvnkRampClient implements RampProvider {
         },
       })
     );
+    if (
+      estimate.feePredictedAmount > 0 &&
+      estimate.networkFeePredictedAmount > 0 &&
+      estimate.feeCurrency !== estimate.networkFeeCurrency
+    ) {
+      throw new AppError(
+        "PROVIDER_UNAVAILABLE",
+        "BVNK returned fees in multiple currencies for this estimate"
+      );
+    }
+    const feeCurrency = parseBvnkEstimateFeeCurrency(estimate.feeCurrency);
+    const networkFeeCurrency = parseBvnkEstimateFeeCurrency(estimate.networkFeeCurrency);
+    if (estimate.feePredictedAmount > 0 && feeCurrency !== input.fiatCurrency) {
+      throw new AppError(
+        "PROVIDER_UNAVAILABLE",
+        "BVNK returned provider fees outside the fiat output currency"
+      );
+    }
+    if (estimate.networkFeePredictedAmount > 0 && networkFeeCurrency !== input.fiatCurrency) {
+      throw new AppError(
+        "PROVIDER_UNAVAILABLE",
+        "BVNK returned network fees outside the fiat output currency"
+      );
+    }
+    const totalFeeCurrency = estimate.feePredictedAmount > 0 ? feeCurrency : networkFeeCurrency;
+    const netFiatAmount = subtractBvnkEstimateFees(estimate);
+    const totalFee = formatBvnkEstimateFeeTotal(estimate);
     return {
       provider: this.id,
       direction: "offramp",
       fiatCurrency: input.fiatCurrency,
       assetRail: input.assetRail,
-      fiatAmount: String(estimate.walletRequiredAmount),
+      fiatAmount: netFiatAmount,
       cryptoAmount: String(estimate.paidRequiredAmount),
-      exchangeRate: String(estimate.exchangeRate),
+      exchangeRate: formatBvnkNetExchangeRate(netFiatAmount, estimate.paidRequiredAmount),
       fees: {
-        currency: input.fiatCurrency,
-        total: String(estimate.feePredictedAmount + estimate.networkFeePredictedAmount),
+        currency: totalFeeCurrency,
+        total: totalFee,
         provider: String(estimate.feePredictedAmount),
+        providerCurrency: feeCurrency,
         network: String(estimate.networkFeePredictedAmount),
+        networkCurrency: networkFeeCurrency,
       },
     };
   }

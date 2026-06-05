@@ -4,9 +4,15 @@ import type {
   PaymentRampEstimate,
   PaymentRampExecution,
   PaymentRampQuote,
+  PaymentRampQuoteCurrency,
   SdpEnvironment,
 } from "@sdp/types";
-import { getCryptoRailAssetLabel, parseFiatCurrency } from "@sdp/types/payment-rails";
+import {
+  CRYPTO_ASSET_DECIMALS,
+  type CryptoAssetSymbol,
+  getCryptoRailAssetLabel,
+  parseFiatCurrency,
+} from "@sdp/types/payment-rails";
 import { formatDecimalAmount, parseDecimalAmount } from "@/lib/amount";
 import { AppError, providerNotConfigured } from "@/lib/errors";
 import { isAddress } from "@/lib/solana";
@@ -36,7 +42,7 @@ import type {
 } from "../types";
 
 const LIGHTSPARK_DEFAULT_GRID_API_URL = "https://api.lightspark.com/grid/2025-10-13";
-const GRID_EXCHANGE_RATE_AMOUNT_DECIMALS = 2;
+const GRID_EXCHANGE_RATE_DEFAULT_REQUEST_SENDING_AMOUNT = 10_000n;
 
 function readLightsparkConfig(
   env: Record<string, string | undefined>,
@@ -70,14 +76,17 @@ function normalizeLightsparkCurrencyCode(value: string): string {
   return normalized;
 }
 
+function isCryptoAssetSymbol(value: string): value is CryptoAssetSymbol {
+  return value in CRYPTO_ASSET_DECIMALS;
+}
+
 function getLightsparkCurrencyDecimals(currencyCode: string): number {
   const normalized = currencyCode.trim().toUpperCase();
   if (normalized === "BTC") return 8;
-  if (normalized === "SOL") return 9;
-  if (normalized === "USDC") return 6;
+  if (isCryptoAssetSymbol(normalized)) return CRYPTO_ASSET_DECIMALS[normalized];
   throw new AppError(
     "BAD_REQUEST",
-    `Unsupported lightspark cryptoToken: ${currencyCode}. Supported values: BTC, SOL, USDC`
+    `Unsupported lightspark cryptoToken: ${currencyCode}. Supported values: BTC, ${Object.keys(CRYPTO_ASSET_DECIMALS).join(", ")}`
   );
 }
 
@@ -197,13 +206,22 @@ interface GridPaymentInstruction {
   isPlatformAccount?: boolean;
 }
 
+interface GridCurrency {
+  code: string;
+  decimals: number;
+  name?: string;
+  symbol?: string;
+}
+
 interface GridQuoteResponse {
   id: string;
   quoteStatus?: string;
   paymentInstructions?: GridPaymentInstruction[];
   exchangeRate: number;
   totalSendingAmount: number;
+  sendingCurrency: GridCurrency;
   totalReceivingAmount: number;
+  receivingCurrency: GridCurrency;
   feesIncluded: number;
   expiresAt: string;
 }
@@ -216,14 +234,9 @@ interface GridOfframpQuoteBody {
   description: string;
 }
 
-interface GridExchangeRateCurrency {
-  code: string;
-  decimals: number;
-}
-
 interface GridExchangeRate {
-  sourceCurrency: GridExchangeRateCurrency;
-  destinationCurrency: GridExchangeRateCurrency;
+  sourceCurrency: GridCurrency;
+  destinationCurrency: GridCurrency;
   sendingAmount: number;
   receivingAmount: number;
   exchangeRate: number;
@@ -236,6 +249,20 @@ interface GridExchangeRatesResponse {
   data: GridExchangeRate[];
 }
 
+function gridExchangeRatesPath(params: {
+  sourceCurrency: string;
+  destinationCurrency: string;
+  sendingAmount?: number;
+}): string {
+  const query = new URLSearchParams();
+  query.set("sourceCurrency", params.sourceCurrency);
+  query.set("destinationCurrency", params.destinationCurrency);
+  if (params.sendingAmount !== undefined) {
+    query.set("sendingAmount", String(params.sendingAmount));
+  }
+  return `exchange-rates?${query}`;
+}
+
 function parseGridExchangeRate(response: GridExchangeRatesResponse): GridExchangeRate {
   const entry = response.data[0];
   if (!entry) {
@@ -245,6 +272,41 @@ function parseGridExchangeRate(response: GridExchangeRatesResponse): GridExchang
     );
   }
   return entry;
+}
+
+function deriveGridExchangeRateRequestDecimals(rate: GridExchangeRate): number {
+  const defaultSourceAmount = BigInt(rate.sendingAmount);
+  if (defaultSourceAmount <= 0n) {
+    throw new AppError("PROVIDER_UNAVAILABLE", "Lightspark returned an invalid default amount");
+  }
+  if (defaultSourceAmount % GRID_EXCHANGE_RATE_DEFAULT_REQUEST_SENDING_AMOUNT !== 0n) {
+    throw new AppError(
+      "PROVIDER_UNAVAILABLE",
+      "Lightspark returned an unsupported exchange-rate amount scale"
+    );
+  }
+
+  let scale = defaultSourceAmount / GRID_EXCHANGE_RATE_DEFAULT_REQUEST_SENDING_AMOUNT;
+  let sourceDecimalsPerRequestDecimal = 0;
+  while (scale > 1n && scale % 10n === 0n) {
+    scale /= 10n;
+    sourceDecimalsPerRequestDecimal += 1;
+  }
+  if (scale !== 1n) {
+    throw new AppError(
+      "PROVIDER_UNAVAILABLE",
+      "Lightspark returned an unsupported exchange-rate amount scale"
+    );
+  }
+
+  const requestDecimals = rate.sourceCurrency.decimals - sourceDecimalsPerRequestDecimal;
+  if (requestDecimals < 0) {
+    throw new AppError(
+      "PROVIDER_UNAVAILABLE",
+      "Lightspark returned an invalid exchange-rate amount scale"
+    );
+  }
+  return requestDecimals;
 }
 
 export interface CreateLightsparkOnrampQuoteInput {
@@ -267,8 +329,11 @@ export interface LightsparkQuote {
   paymentInstructions?: LightsparkPaymentRampInstruction[];
   exchangeRate?: number;
   totalSendingAmount?: number;
+  sendingCurrency: PaymentRampQuoteCurrency;
   totalReceivingAmount?: number;
+  receivingCurrency: PaymentRampQuoteCurrency;
   feesIncluded?: number;
+  feeCurrency: PaymentRampQuoteCurrency;
   expiresAt?: string;
 }
 
@@ -607,16 +672,29 @@ export class LightsparkRampClient implements RampProvider {
     const cryptoCurrency = normalizeLightsparkCurrencyCode(
       getCryptoRailAssetLabel(input.assetRail)
     );
-    const cryptoDecimals = getLightsparkCurrencyDecimals(cryptoCurrency);
-    const cryptoMinorUnits = parseDecimalAmount(input.cryptoAmount, cryptoDecimals);
+    const corridor = parseGridExchangeRate(
+      await this.request<GridExchangeRatesResponse>(
+        config,
+        gridExchangeRatesPath({
+          sourceCurrency: cryptoCurrency,
+          destinationCurrency: input.fiatCurrency,
+        }),
+        { method: "GET" }
+      )
+    );
+    const requestDecimals = deriveGridExchangeRateRequestDecimals(corridor);
     const sendingAmount = toLightsparkMinorUnitsInteger(
-      cryptoMinorUnits / 10n ** BigInt(cryptoDecimals - GRID_EXCHANGE_RATE_AMOUNT_DECIMALS),
+      parseDecimalAmount(input.cryptoAmount, requestDecimals),
       "cryptoAmount"
     );
     const rate = parseGridExchangeRate(
       await this.request<GridExchangeRatesResponse>(
         config,
-        `exchange-rates?sourceCurrency=${encodeURIComponent(cryptoCurrency)}&destinationCurrency=${encodeURIComponent(input.fiatCurrency)}&sendingAmount=${sendingAmount}`,
+        gridExchangeRatesPath({
+          sourceCurrency: cryptoCurrency,
+          destinationCurrency: input.fiatCurrency,
+          sendingAmount,
+        }),
         { method: "GET" }
       )
     );
@@ -675,8 +753,11 @@ export class LightsparkRampClient implements RampProvider {
       paymentInstructions: quote.paymentInstructions,
       exchangeRate: quote.exchangeRate,
       totalSendingAmount: quote.totalSendingAmount,
+      sendingCurrency: quote.sendingCurrency,
       totalReceivingAmount: quote.totalReceivingAmount,
+      receivingCurrency: quote.receivingCurrency,
       feesIncluded: quote.feesIncluded,
+      feeCurrency: quote.feeCurrency,
       expiresAt: quote.expiresAt,
     };
   }
@@ -804,8 +885,11 @@ function parseLightsparkQuote(raw: GridQuoteResponse): LightsparkQuote {
     })),
     exchangeRate: raw.exchangeRate,
     totalSendingAmount: raw.totalSendingAmount,
+    sendingCurrency: raw.sendingCurrency,
     totalReceivingAmount: raw.totalReceivingAmount,
+    receivingCurrency: raw.receivingCurrency,
     feesIncluded: raw.feesIncluded,
+    feeCurrency: raw.sendingCurrency,
     expiresAt: raw.expiresAt,
   };
 }

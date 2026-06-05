@@ -123,9 +123,21 @@ function ManualQuoteSummary({
   fiatCurrency: string;
   cryptoToken: string;
 }) {
-  const finalAmount = formatMinorCurrencyAmount(quote.totalReceivingAmount, cryptoToken);
-  const sendingAmount = formatMinorCurrencyAmount(quote.totalSendingAmount, fiatCurrency);
-  const feesIncluded = formatMinorCurrencyAmount(quote.feesIncluded, fiatCurrency);
+  const finalAmount = formatMinorCurrencyAmount(
+    quote.totalReceivingAmount,
+    quote.receivingCurrency.code,
+    quote.receivingCurrency.decimals
+  );
+  const sendingAmount = formatMinorCurrencyAmount(
+    quote.totalSendingAmount,
+    quote.sendingCurrency.code,
+    quote.sendingCurrency.decimals
+  );
+  const feesIncluded = formatMinorCurrencyAmount(
+    quote.feesIncluded,
+    quote.feeCurrency.code,
+    quote.feeCurrency.decimals
+  );
   const exchangeRate =
     quote.exchangeRate !== undefined
       ? `1 ${fiatCurrency.toUpperCase()} = ${quote.exchangeRate} ${cryptoToken.toUpperCase()}`
