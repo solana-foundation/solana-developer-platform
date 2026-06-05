@@ -16,7 +16,6 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { DASHBOARD_FEATURE_FLAGS } from "@/lib/dashboard-feature-flags";
 import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
 import {
   formatCurrencyAmount,
@@ -39,6 +38,7 @@ import {
 interface PaymentsOverviewProps {
   aggregate: CustodyWalletAggregate | null;
   aggregateError: string | null;
+  paymentsV2: boolean;
   issuedTokenSymbolsByMint: Record<string, string>;
   transfers: TransferRecord[];
   transfersError: string | null;
@@ -119,6 +119,7 @@ function TruncatedTableText({
 export function PaymentsOverview({
   aggregate,
   aggregateError,
+  paymentsV2,
   issuedTokenSymbolsByMint,
   transfers,
   transfersError,
@@ -194,7 +195,7 @@ export function PaymentsOverview({
 
   return (
     <div className="grid min-w-0 gap-6 overflow-x-hidden">
-      {DASHBOARD_FEATURE_FLAGS.paymentsV2 ? null : (
+      {paymentsV2 ? null : (
         <SectionEntry>
           <div className="flex min-w-0 flex-wrap items-center gap-3">
             <Button

@@ -32,7 +32,7 @@ import { SentryUserContext } from "@/components/sentry-user-context";
 import { Badge } from "@/components/ui/badge";
 import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
-import { DASHBOARD_FEATURE_FLAGS } from "@/lib/dashboard-feature-flags";
+import type { DashboardFeatureFlags } from "@/lib/dashboard-feature-flags";
 import { cn } from "@/lib/utils";
 
 type SubNavItem = {
@@ -54,34 +54,36 @@ type NavSection = {
   items: NavItem[];
 };
 
-const navSections: NavSection[] = [
-  {
-    title: "Create",
-    items: [
-      { label: "Home", href: "/dashboard", icon: LayoutDashboardIcon },
-      { label: "Wallets", href: "/dashboard/wallets", icon: WalletIcon },
-    ],
-  },
-  {
-    title: "Manage",
-    items: [
-      { label: "Issuance", href: "/dashboard/issuance", icon: CoinsIcon },
-      {
-        label: "Payments",
-        href: "/dashboard/payments",
-        icon: ArrowLeftRightIcon,
-        children: DASHBOARD_FEATURE_FLAGS.paymentsV2
-          ? [
-              { label: "Counterparty", href: "/dashboard/payments/counterparty" },
-              { label: "Pay", href: "/dashboard/payments/pay" },
-              { label: "Deposit", href: "/dashboard/payments/deposit" },
-            ]
-          : [],
-      },
-      { label: "API keys", href: "/dashboard/api-keys", icon: KeyRoundIcon },
-    ],
-  },
-];
+function getNavSections(featureFlags: DashboardFeatureFlags): NavSection[] {
+  return [
+    {
+      title: "Create",
+      items: [
+        { label: "Home", href: "/dashboard", icon: LayoutDashboardIcon },
+        { label: "Wallets", href: "/dashboard/wallets", icon: WalletIcon },
+      ],
+    },
+    {
+      title: "Manage",
+      items: [
+        { label: "Issuance", href: "/dashboard/issuance", icon: CoinsIcon },
+        {
+          label: "Payments",
+          href: "/dashboard/payments",
+          icon: ArrowLeftRightIcon,
+          children: featureFlags.paymentsV2
+            ? [
+                { label: "Counterparty", href: "/dashboard/payments/counterparty" },
+                { label: "Pay", href: "/dashboard/payments/pay" },
+                { label: "Deposit", href: "/dashboard/payments/deposit" },
+              ]
+            : [],
+        },
+        { label: "API keys", href: "/dashboard/api-keys", icon: KeyRoundIcon },
+      ],
+    },
+  ];
+}
 
 const docsHref =
   process.env.NEXT_PUBLIC_SDP_DOCS_URL ||
@@ -381,7 +383,11 @@ function resolvePageLoadingComponent(pathname: string): React.ComponentType {
   return DashboardLoading;
 }
 
-function isItemActive(pathname: string, href: string): boolean {
+function isItemActive(
+  pathname: string,
+  href: string,
+  featureFlags: DashboardFeatureFlags
+): boolean {
   if (href === "/dashboard") {
     return pathname === "/dashboard";
   }
@@ -396,7 +402,7 @@ function isItemActive(pathname: string, href: string): boolean {
     return (
       pathname.startsWith("/dashboard/payments") &&
       !pathname.startsWith("/dashboard/payments/counterparty") &&
-      (DASHBOARD_FEATURE_FLAGS.paymentsV2 || !isGatedPaymentsV2Route)
+      (featureFlags.paymentsV2 || !isGatedPaymentsV2Route)
     );
   }
   return pathname === href || pathname.startsWith(`${href}/`);
@@ -411,6 +417,7 @@ function SidebarGroup({
   title,
   items,
   pathname,
+  featureFlags,
   onNavigate,
   isCollapsed,
   showTopSeparator,
@@ -418,6 +425,7 @@ function SidebarGroup({
   title: string;
   items: NavItem[];
   pathname: string;
+  featureFlags: DashboardFeatureFlags;
   onNavigate?: () => void;
   isCollapsed: boolean;
   showTopSeparator: boolean;
@@ -441,7 +449,7 @@ function SidebarGroup({
       <div className="space-y-0.5">
         {items.map((item) => {
           const Icon = item.icon;
-          const active = isItemActive(pathname, item.href);
+          const active = isItemActive(pathname, item.href, featureFlags);
 
           return (
             <div key={item.label}>
@@ -462,7 +470,7 @@ function SidebarGroup({
               {!isCollapsed && item.children && item.children.length > 0 && (
                 <div className="ml-5 mt-2">
                   {item.children.map((child, i, siblings) => {
-                    const childActive = isItemActive(pathname, child.href);
+                    const childActive = isItemActive(pathname, child.href, featureFlags);
                     const isFirst = i === 0;
                     const isLast = i === siblings.length - 1;
                     return (
@@ -507,14 +515,18 @@ function SidebarGroup({
 
 function DashboardSidebarContent({
   bottomNavItems,
+  navSections,
   pathname,
+  featureFlags,
   onNavigate,
   onClose,
   isCollapsed,
   variant,
 }: {
   bottomNavItems: NavItem[];
+  navSections: NavSection[];
   pathname: string;
+  featureFlags: DashboardFeatureFlags;
   onNavigate?: () => void;
   onClose: () => void;
   isCollapsed: boolean;
@@ -547,6 +559,7 @@ function DashboardSidebarContent({
             title={section.title}
             items={section.items}
             pathname={pathname}
+            featureFlags={featureFlags}
             onNavigate={onNavigate}
             isCollapsed={isCollapsed}
             showTopSeparator={idx > 0}
@@ -585,7 +598,7 @@ function DashboardSidebarContent({
 export function DashboardShell({ children }: { children: ReactNode }) {
   const { isLoaded, isSignedIn, orgId } = useAuth();
   const pathname = usePathname();
-  const { dashboardAccess, isSidebarOpen, setSidebarOpen, isProjectSwitching } =
+  const { dashboardAccess, featureFlags, isSidebarOpen, setSidebarOpen, isProjectSwitching } =
     useDashboardWorkspace();
   const PageLoadingComponent = resolvePageLoadingComponent(pathname);
   const [isMobileSidebarOpen, setMobileSidebarOpen] = useState(false);
@@ -593,6 +606,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
   const sidebarExpandedWidth = 296;
   const sidebarCollapsedWidth = 64;
   const pageConfig = getDashboardPageConfig(pathname);
+  const navSections = getNavSections(featureFlags);
   const bottomNavItems: NavItem[] = [
     { label: "API Docs", href: docsHref, icon: LibraryIcon, external: true },
     ...(dashboardAccess.capabilities.canManageOrgSettings
@@ -712,7 +726,9 @@ export function DashboardShell({ children }: { children: ReactNode }) {
         >
           <DashboardSidebarContent
             bottomNavItems={bottomNavItems}
+            navSections={navSections}
             pathname={pathname}
+            featureFlags={featureFlags}
             onNavigate={undefined}
             onClose={() => setSidebarOpen(false)}
             isCollapsed={!isSidebarOpen}
@@ -739,7 +755,9 @@ export function DashboardShell({ children }: { children: ReactNode }) {
             <div className="relative z-10 flex h-full w-72 max-w-[85vw] flex-col justify-between border-r border-border-light bg-[var(--sdp-shell-bg)] shadow-lg">
               <DashboardSidebarContent
                 bottomNavItems={bottomNavItems}
+                navSections={navSections}
                 pathname={pathname}
+                featureFlags={featureFlags}
                 onNavigate={() => setMobileSidebarOpen(false)}
                 onClose={() => setMobileSidebarOpen(false)}
                 isCollapsed={false}
