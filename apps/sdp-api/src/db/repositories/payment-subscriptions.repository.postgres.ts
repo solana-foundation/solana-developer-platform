@@ -579,6 +579,7 @@ export function createPostgresPaymentSubscriptionsRepository(
                   SELECT id
                     FROM payment_subscription_collection_attempts
                    WHERE status = 'processing'
+                     AND recurring_payment_id IS NOT NULL
                      AND transfer_id IS NULL
                      AND signature IS NULL
                      AND updated_at <= ?

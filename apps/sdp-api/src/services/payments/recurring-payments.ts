@@ -96,6 +96,10 @@ function isFreshActivationClaim(updatedAt: string): boolean {
   return Date.now() - new Date(updatedAt).getTime() < ACTIVATION_CLAIM_TTL_MS;
 }
 
+function toErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 function isActiveCollectionAttempt(attempt: PaymentSubscriptionCollectionAttemptRow): boolean {
   return ACTIVE_COLLECTION_ATTEMPT_STATUSES.has(attempt.status);
 }
@@ -1251,22 +1255,41 @@ export async function collectRecurringPayment(input: {
       recurringPayment,
       subscriptionId,
       dueAt,
-      error: error instanceof Error ? error.message : String(error),
+      error: toErrorMessage(error),
       initiatedByKeyId: input.initiatedByKeyId ?? null,
     });
 
     throw error;
   }
-  const planPda = assertValidAddress(recurringPayment.plan_pda, "planPda");
-  const subscriptionPda = assertValidAddress(recurringPayment.subscription_pda, "subscriptionPda");
-  const sourceSigner = await getSourceSigner({
-    env: input.env,
-    organizationId: input.organizationId,
-    projectId: input.projectId,
-    sourceWalletId: recurringPayment.source_wallet_id,
-    expectedAddress: sourceAddress,
-  });
-  const runtime = await resolveRecurringSubscriptionRuntime(input.env, recurringPayment);
+  let planPda: ReturnType<typeof assertValidAddress>;
+  let subscriptionPda: ReturnType<typeof assertValidAddress>;
+  let sourceSigner: Awaited<ReturnType<typeof getSourceSigner>>;
+  let runtime: Awaited<ReturnType<typeof resolveRecurringSubscriptionRuntime>>;
+  try {
+    planPda = assertValidAddress(recurringPayment.plan_pda, "planPda");
+    subscriptionPda = assertValidAddress(recurringPayment.subscription_pda, "subscriptionPda");
+    sourceSigner = await getSourceSigner({
+      env: input.env,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      sourceWalletId: recurringPayment.source_wallet_id,
+      expectedAddress: sourceAddress,
+    });
+    runtime = await resolveRecurringSubscriptionRuntime(input.env, recurringPayment);
+  } catch (error) {
+    await createFailedCollectionAttemptForRetry({
+      env: input.env,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      recurringPayment,
+      subscriptionId,
+      dueAt,
+      error: toErrorMessage(error),
+      initiatedByKeyId: input.initiatedByKeyId ?? null,
+    });
+
+    throw error;
+  }
 
   try {
     attempt = await createProcessingCollectionAttempt({

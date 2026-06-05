@@ -1080,6 +1080,18 @@ describe("Payments routes", () => {
       createPostgresPaymentsRepositorySpy.mockRestore();
     }
 
+    createOrgSignerMock.mockRejectedValueOnce(new Error("simulated signer resolution failure"));
+    const failedSignerCollectRes = await app.request(
+      `/v1/payments/recurring-payments/${recurringPaymentId}/collect`,
+      {
+        method: "POST",
+        headers: jsonHeaders,
+        body: "{}",
+      },
+      env
+    );
+    expect(failedSignerCollectRes.status).toBe(500);
+
     const failedAttemptsRes = await app.request(
       `/v1/payments/recurring-payments/${recurringPaymentId}/collection-attempts?status=failed`,
       {
@@ -1112,6 +1124,12 @@ describe("Payments routes", () => {
           status: "failed",
           transferId: null,
           error: "Failed to create payment transfer record",
+        }),
+        expect.objectContaining({
+          recurringPaymentId,
+          status: "failed",
+          transferId: null,
+          error: "simulated signer resolution failure",
         }),
       ])
     );
