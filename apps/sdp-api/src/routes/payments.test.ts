@@ -835,6 +835,23 @@ describe("Payments routes", () => {
     });
     expect(planBody.data.subscriptionPlan.programPlanId).toMatch(/^\d+$/);
 
+    const duplicatePlanRes = await app.request(
+      "/v1/payments/subscription-plans",
+      {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({
+          ownerWalletId: TEST_WALLET_ID,
+          token: DEVNET_USDC_MINT,
+          amount: "25.00",
+          periodHours: 720,
+          programPlanId: planBody.data.subscriptionPlan.programPlanId,
+        }),
+      },
+      env
+    );
+    expect(duplicatePlanRes.status).toBe(409);
+
     const draftPlansRes = await app.request(
       "/v1/payments/subscription-plans?status=draft",
       {
@@ -1252,6 +1269,21 @@ describe("Payments routes", () => {
       signature: "sig_collection_attempt_test",
       metadata: { source: "api-lifecycle-test" },
     });
+
+    const duplicateAttemptRes = await app.request(
+      `/v1/payments/subscriptions/${subscriptionId}/collection-attempts`,
+      {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({
+          dueAt: nextCollectionDueAt,
+          signature: "sig_collection_attempt_test",
+          status: "processing",
+        }),
+      },
+      env
+    );
+    expect(duplicateAttemptRes.status).toBe(409);
 
     const attemptsRes = await app.request(
       `/v1/payments/subscriptions/${subscriptionId}/collection-attempts?status=processing`,

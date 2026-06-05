@@ -438,7 +438,7 @@ export const createSubscriptionPlan = async (c: AppContext) => {
   });
 
   if (!plan) {
-    throw new AppError("INTERNAL_ERROR", "Failed to create subscription plan");
+    throw new AppError("CONFLICT", "Subscription plan already exists");
   }
 
   const response: PaymentSubscriptionPlanResponse = { subscriptionPlan: mapPlan(plan) };
@@ -1075,7 +1075,7 @@ export const createSubscriptionCollectionAttempt = async (c: AppContext) => {
   });
 
   if (!attempt) {
-    throw new AppError("INTERNAL_ERROR", "Failed to create collection attempt");
+    throw new AppError("CONFLICT", "Collection attempt already exists");
   }
 
   const response: PaymentSubscriptionCollectionAttemptResponse = {
