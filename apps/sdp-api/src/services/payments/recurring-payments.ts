@@ -232,42 +232,6 @@ function toErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-async function createRecurringLifecycleAttempt(input: {
-  env: Env;
-  organizationId: string;
-  projectId: string;
-  recurringPaymentId: string;
-  operation: RecurringLifecycleOperation;
-}): Promise<string> {
-  const now = new Date().toISOString();
-  const attemptId = `prlo_${crypto.randomUUID()}`;
-  await getDb(input.env)
-    .prepare(
-      `INSERT INTO payment_recurring_operation_attempts (
-         id,
-         organization_id,
-         project_id,
-         recurring_payment_id,
-         operation,
-         status,
-         created_at,
-         updated_at
-       ) VALUES (?, ?, ?, ?, ?, 'processing', ?, ?)`
-    )
-    .bind(
-      attemptId,
-      input.organizationId,
-      input.projectId,
-      input.recurringPaymentId,
-      input.operation,
-      now,
-      now
-    )
-    .run();
-
-  return attemptId;
-}
-
 async function markRecurringLifecycleAttemptSubmitted(input: {
   env: Env;
   attemptId: string;
@@ -686,6 +650,7 @@ async function claimLifecycleRecords(input: {
   alreadyFinalized: boolean;
   recurringPayment: PaymentRecurringPaymentRow;
   subscription: PaymentSubscriptionRow;
+  lifecycleAttemptId: string | null;
 }> {
   return getDb(input.env).transaction(async (tx) => {
     const txRecurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
@@ -745,7 +710,7 @@ async function claimLifecycleRecords(input: {
         operation: input.operation,
       })
     ) {
-      return { alreadyFinalized: true, recurringPayment, subscription };
+      return { alreadyFinalized: true, recurringPayment, subscription, lifecycleAttemptId: null };
     }
     assertRecurringPaymentCanClaimLifecycle({
       recurringPayment,
@@ -771,8 +736,45 @@ async function claimLifecycleRecords(input: {
       );
     }
 
+    const createLifecycleAttempt = async (
+      payment: PaymentRecurringPaymentRow,
+      claimedSubscription: PaymentSubscriptionRow
+    ) => {
+      const lifecycleAttemptId = `prlo_${crypto.randomUUID()}`;
+      await tx
+        .prepare(
+          `INSERT INTO payment_recurring_operation_attempts (
+             id,
+             organization_id,
+             project_id,
+             recurring_payment_id,
+             operation,
+             status,
+             created_at,
+             updated_at
+           ) VALUES (?, ?, ?, ?, ?, 'processing', ?, ?)`
+        )
+        .bind(
+          lifecycleAttemptId,
+          input.organizationId,
+          input.projectId,
+          payment.id,
+          input.operation,
+          now,
+          now
+        )
+        .run();
+
+      return {
+        alreadyFinalized: false,
+        recurringPayment: payment,
+        subscription: claimedSubscription,
+        lifecycleAttemptId,
+      };
+    };
+
     if (input.operation !== "cancel" || subscription.status === "canceling") {
-      return { alreadyFinalized: false, recurringPayment: claimedPayment, subscription };
+      return createLifecycleAttempt(claimedPayment, subscription);
     }
 
     const claimedSubscription = await txSubscriptionsRepo.updateSubscription({
@@ -792,9 +794,7 @@ async function claimLifecycleRecords(input: {
     }
 
     return {
-      alreadyFinalized: false,
-      recurringPayment: claimedPayment,
-      subscription: claimedSubscription,
+      ...(await createLifecycleAttempt(claimedPayment, claimedSubscription)),
     };
   });
 }
@@ -1467,11 +1467,21 @@ async function createFailedCollectionAttemptForRetry(input: {
       updatedAt: now,
     });
   } catch (recordError) {
-    console.warn("Failed to record recurring collection retry backoff attempt", {
+    console.error("Failed to record recurring collection retry backoff attempt", {
       recurringPaymentId: input.recurringPayment.id,
       dueAt: input.dueAt,
       error: recordError instanceof Error ? recordError.message : String(recordError),
     });
+    throw new AppError(
+      "INTERNAL_ERROR",
+      "Failed to record recurring collection retry backoff attempt",
+      {
+        recurringPaymentId: input.recurringPayment.id,
+        dueAt: input.dueAt,
+        originalError: input.error,
+        recordError: toErrorMessage(recordError),
+      }
+    );
   }
 }
 
@@ -2320,20 +2330,37 @@ export async function executeRecurringPaymentLifecycle(input: {
     "subscriptionPda"
   );
   const sourceAddress = assertValidAddress(claim.recurringPayment.source_address, "sourceAddress");
-  const sourceSigner = await getSourceSigner({
-    env: input.env,
-    organizationId: input.organizationId,
-    projectId: input.projectId,
-    sourceWalletId: claim.recurringPayment.source_wallet_id,
-    expectedAddress: sourceAddress,
-  });
-  const lifecycleAttemptId = await createRecurringLifecycleAttempt({
-    env: input.env,
-    organizationId: input.organizationId,
-    projectId: input.projectId,
-    recurringPaymentId: claim.recurringPayment.id,
-    operation: input.operation,
-  });
+  if (!claim.lifecycleAttemptId) {
+    throw new AppError("INTERNAL_ERROR", "Recurring lifecycle attempt was not created");
+  }
+  const lifecycleAttemptId = claim.lifecycleAttemptId;
+
+  let sourceSigner: Awaited<ReturnType<typeof getSourceSigner>>;
+  try {
+    sourceSigner = await getSourceSigner({
+      env: input.env,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      sourceWalletId: claim.recurringPayment.source_wallet_id,
+      expectedAddress: sourceAddress,
+    });
+  } catch (error) {
+    try {
+      await markRecurringLifecycleAttemptFailed({
+        env: input.env,
+        attemptId: lifecycleAttemptId,
+        error: toErrorMessage(error),
+      });
+    } catch (markerError) {
+      console.warn("Failed to mark recurring lifecycle attempt failed after signer error", {
+        recurringPaymentId: claim.recurringPayment.id,
+        attemptId: lifecycleAttemptId,
+        operation: input.operation,
+        error: toErrorMessage(markerError),
+      });
+    }
+    throw error;
+  }
 
   let executed: ExecutedSubscriptionTransaction | null;
   try {
