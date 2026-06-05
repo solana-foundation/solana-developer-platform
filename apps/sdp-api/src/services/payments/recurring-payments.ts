@@ -409,8 +409,7 @@ async function markRecurringCollectionSubmitted(input: {
     attempt: updatedAttempt,
     transfer: updatedTransfer,
     hasRecoveryMarker:
-      (transferResult.status === "fulfilled" && Boolean(transferResult.value.signature)) ||
-      (attemptResult.status === "fulfilled" && Boolean(attemptResult.value?.signature)),
+      attemptResult.status === "fulfilled" && Boolean(attemptResult.value?.signature),
   };
 }
 

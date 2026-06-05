@@ -914,7 +914,10 @@ describe("Payments routes", () => {
     mockRecurringCollectionAccounts();
     const originalCreatePostgresRecurringPaymentsRepository =
       repositories.createPostgresPaymentRecurringPaymentsRepository;
+    const originalCreatePaymentSubscriptionsRepository =
+      repositories.createPaymentSubscriptionsRepository;
     let failFinalRecurringPaymentUpdate = true;
+    let failAttemptRecoveryMarker = true;
     const recurringRepoSpy = vi
       .spyOn(repositories, "createPostgresPaymentRecurringPaymentsRepository")
       .mockImplementation((db) => {
@@ -936,6 +939,27 @@ describe("Payments routes", () => {
           }),
         };
       });
+    const subscriptionsRepoSpy = vi
+      .spyOn(repositories, "createPaymentSubscriptionsRepository")
+      .mockImplementation((repoEnv) => {
+        const repo = originalCreatePaymentSubscriptionsRepository(repoEnv);
+
+        return {
+          ...repo,
+          updateCollectionAttempt: vi.fn(async (input) => {
+            if (
+              failAttemptRecoveryMarker &&
+              input.status === "processing" &&
+              input.signature !== undefined
+            ) {
+              failAttemptRecoveryMarker = false;
+              throw new Error("simulated collection attempt recovery marker failure");
+            }
+
+            return repo.updateCollectionAttempt(input);
+          }),
+        };
+      });
     try {
       const failedFinalizeRes = await app.request(
         `/v1/payments/recurring-payments/${recurringPaymentId}/collect`,
@@ -949,7 +973,9 @@ describe("Payments routes", () => {
       expect(failedFinalizeRes.status).toBe(500);
     } finally {
       recurringRepoSpy.mockRestore();
+      subscriptionsRepoSpy.mockRestore();
     }
+    expect(failAttemptRecoveryMarker).toBe(false);
 
     const processingAttemptsRes = await app.request(
       `/v1/payments/recurring-payments/${recurringPaymentId}/collection-attempts?status=processing`,
