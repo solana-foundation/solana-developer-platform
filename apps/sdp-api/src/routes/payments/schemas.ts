@@ -216,7 +216,6 @@ export const listSubscriptionPlansQuerySchema = z.object({
 const createSubscriptionStatusSchema = z
   .enum(["pending_authorization", "active"])
   .default("pending_authorization");
-const updateSubscriptionStatusSchema = z.enum(["pending_authorization", "active", "paused"]);
 
 export const createSubscriptionSchema = z.object({
   planId: z.string().min(1),
@@ -239,9 +238,9 @@ export const updateSubscriptionSchema = z
       .nullable()
       .optional(),
     authorizationSignature: z.string().min(1).max(128).nullable().optional(),
-    status: updateSubscriptionStatusSchema.optional(),
+    status: paymentSubscriptionStatusSchema.optional(),
     currentPeriodStartAt: recurringTimestampSchema.nullable().optional(),
-    nextCollectionDueAt: nextCollectionDueAtTimestampSchema.nullable().optional(),
+    nextCollectionDueAt: recurringTimestampSchema.nullable().optional(),
     cancelAt: recurringTimestampSchema.nullable().optional(),
     canceledAt: recurringTimestampSchema.nullable().optional(),
   })

@@ -2213,6 +2213,24 @@ describe("Payments routes", () => {
     ]);
     expect(attemptsBody.data.total).toBe(1);
 
+    const pastSubscriptionDueAt = new Date(Date.now() - 60_000).toISOString();
+    const pastDueUpdateRes = await app.request(
+      `/v1/payments/subscriptions/${subscriptionId}`,
+      {
+        method: "PATCH",
+        headers: jsonHeaders,
+        body: JSON.stringify({
+          nextCollectionDueAt: pastSubscriptionDueAt,
+        }),
+      },
+      env
+    );
+    expect(pastDueUpdateRes.status).toBe(200);
+    const pastDueUpdateBody = (await pastDueUpdateRes.json()) as {
+      data: { subscription: { nextCollectionDueAt: string | null } };
+    };
+    expect(pastDueUpdateBody.data.subscription.nextCollectionDueAt).toBe(pastSubscriptionDueAt);
+
     const cancelSubscriptionRes = await app.request(
       `/v1/payments/subscriptions/${subscriptionId}`,
       {
@@ -2224,7 +2242,11 @@ describe("Payments routes", () => {
       },
       env
     );
-    expect(cancelSubscriptionRes.status).toBe(400);
+    expect(cancelSubscriptionRes.status).toBe(200);
+    const cancelSubscriptionBody = (await cancelSubscriptionRes.json()) as {
+      data: { subscription: { status: string } };
+    };
+    expect(cancelSubscriptionBody.data.subscription.status).toBe("canceled");
 
     const backdatedCanceledAtRes = await app.request(
       `/v1/payments/subscriptions/${subscriptionId}`,
