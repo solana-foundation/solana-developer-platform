@@ -1862,6 +1862,42 @@ describe("Payments routes", () => {
       }),
     ]);
     expect(attemptsBody.data.total).toBe(1);
+
+    const canceledAt = "2026-02-03T00:00:00.000Z";
+    const cancelSubscriptionRes = await app.request(
+      `/v1/payments/subscriptions/${subscriptionId}`,
+      {
+        method: "PATCH",
+        headers: jsonHeaders,
+        body: JSON.stringify({
+          canceledAt,
+          status: "canceled",
+        }),
+      },
+      env
+    );
+
+    expect(cancelSubscriptionRes.status).toBe(200);
+    const cancelSubscriptionBody = (await cancelSubscriptionRes.json()) as {
+      data: { subscription: { canceledAt: string | null; status: string } };
+    };
+    expect(cancelSubscriptionBody.data.subscription).toMatchObject({
+      canceledAt,
+      status: "canceled",
+    });
+
+    const clearCanceledAtRes = await app.request(
+      `/v1/payments/subscriptions/${subscriptionId}`,
+      {
+        method: "PATCH",
+        headers: jsonHeaders,
+        body: JSON.stringify({
+          canceledAt: null,
+        }),
+      },
+      env
+    );
+    expect(clearCanceledAtRes.status).toBe(400);
   });
 
   it("falls back to a zero SOL balance when RPC balance lookups fail", async () => {

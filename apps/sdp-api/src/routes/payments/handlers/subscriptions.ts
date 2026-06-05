@@ -986,6 +986,9 @@ export const updateSubscription = async (c: AppContext) => {
     throw new AppError("NOT_FOUND", "Subscription not found");
   }
   await assertSubscriptionWalletAccess(c, subscription, ["payments:write"]);
+  if (parsed.data.canceledAt === null && subscription.canceled_at !== null) {
+    throw new AppError("BAD_REQUEST", "Subscription cancellation timestamp cannot be cleared");
+  }
   assertSubscriptionCanBeActive({
     status: parsed.data.status ?? subscription.status,
     subscriberTokenAccount:
