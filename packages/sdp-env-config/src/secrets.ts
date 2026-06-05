@@ -1,4 +1,5 @@
 import { FIELDS } from "./fields";
+import type { Values } from "./types";
 
 /** 32 random bytes as lowercase hex — equivalent to `openssl rand -hex 32`. */
 export function randomHex32(): string {
@@ -8,7 +9,15 @@ export function randomHex32(): string {
   return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-/** Keys whose field kind is "secret". */
-export function autoSecretKeys(): Set<string> {
-  return new Set(FIELDS.filter((f) => f.kind === "secret").map((f) => f.key));
+/**
+ * Keys to auto-generate as secrets. Always includes `kind: "secret"` fields;
+ * when `values` are supplied, also includes fields whose `secretWhen(values)`
+ * holds (e.g. an auto-mode Postgres password).
+ */
+export function autoSecretKeys(values?: Values): Set<string> {
+  return new Set(
+    FIELDS.filter(
+      (f) => f.kind === "secret" || (values ? (f.secretWhen?.(values) ?? false) : false)
+    ).map((f) => f.key)
+  );
 }
