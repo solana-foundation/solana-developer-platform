@@ -1430,7 +1430,7 @@ describe("Payments routes", () => {
         projectId: TEST_PROJECT.id,
       });
     expect(resumedSubscription?.next_collection_due_at).toBe(resumedDueAt);
-    expect(resumedSubscription?.canceled_at).toBe(canceledAt);
+    expect(resumedSubscription?.canceled_at).toBeNull();
 
     const pausedUpdatedAt = new Date().toISOString();
     await repositories.createPaymentRecurringPaymentsRepository(env).updateRecurringPayment({
