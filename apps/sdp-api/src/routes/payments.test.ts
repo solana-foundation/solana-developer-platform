@@ -1142,7 +1142,6 @@ describe("Payments routes", () => {
       ])
     );
 
-    mockRecurringCollectionAccounts();
     const originalCreatePaymentSubscriptionsRepositoryForClaimFailure =
       repositories.createPaymentSubscriptionsRepository;
     let failProcessingAttemptClaim = true;

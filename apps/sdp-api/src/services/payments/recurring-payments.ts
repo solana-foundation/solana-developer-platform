@@ -81,6 +81,7 @@ function advanceCollectionDueAtAfter(input: {
 }
 
 const ACTIVATION_CLAIM_TTL_MS = 10 * 60 * 1000;
+const LIFECYCLE_CLAIM_TTL_MS = 10 * 60 * 1000;
 const ACTIVE_COLLECTION_ATTEMPT_STATUSES = new Set(["pending", "processing", "confirmed"]);
 const DEFAULT_COLLECTION_RETRY_AFTER_MINUTES = 30;
 
@@ -95,6 +96,10 @@ function getCollectionRetryAfter(env: Env, now = new Date()): string {
 
 function isFreshActivationClaim(updatedAt: string): boolean {
   return Date.now() - new Date(updatedAt).getTime() < ACTIVATION_CLAIM_TTL_MS;
+}
+
+function isFreshLifecycleClaim(updatedAt: string): boolean {
+  return Date.now() - new Date(updatedAt).getTime() < LIFECYCLE_CLAIM_TTL_MS;
 }
 
 type RecurringLifecycleOperation = "cancel" | "resume";
@@ -175,7 +180,10 @@ function assertRecurringPaymentCanClaimLifecycle(input: {
   }
 
   if (isLifecycleClaimStatus(recurringPayment.status)) {
-    if (recurringPayment.status !== claimStatus) {
+    if (
+      recurringPayment.status !== claimStatus &&
+      isFreshLifecycleClaim(recurringPayment.updated_at)
+    ) {
       throw new AppError("CONFLICT", "Recurring payment lifecycle update is already in progress");
     }
     return;
