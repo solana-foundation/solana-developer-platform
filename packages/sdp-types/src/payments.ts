@@ -57,6 +57,12 @@ export interface PaymentTransferSummary {
   token?: string;
   amount?: string;
   memo?: string;
+  provider?: RampProviderId;
+  counterpartyId?: string;
+  providerReference?: string;
+  deliveryMode?: PaymentRampQuoteDeliveryMode;
+  fiatCurrency?: string;
+  fiatAmount?: string;
   createdAt?: string;
   updatedAt?: string;
 }
