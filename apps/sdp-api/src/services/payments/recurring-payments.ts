@@ -127,21 +127,6 @@ function isLifecycleClaimStatus(
   return status === "canceling" || status === "resuming";
 }
 
-function isCancelLifecycleCollectionRace(input: {
-  recurringPaymentStatus: string;
-  recurringPaymentDueAt: string | null;
-  subscriptionStatus: string;
-  subscriptionDueAt: string | null;
-  dueAt: string;
-}): boolean {
-  return (
-    input.recurringPaymentDueAt === input.dueAt &&
-    input.subscriptionDueAt === input.dueAt &&
-    (input.recurringPaymentStatus === "canceling" || input.recurringPaymentStatus === "canceled") &&
-    (input.subscriptionStatus === "canceling" || input.subscriptionStatus === "canceled")
-  );
-}
-
 function isRecurringPaymentLifecycleFinalized(input: {
   recurringPayment: PaymentRecurringPaymentRow;
   subscription: PaymentSubscriptionRow;
@@ -1346,37 +1331,31 @@ async function finalizeRecurringCollection(input: {
       lockedSubscription.next_collection_due_at !== input.dueAt;
 
     if (collectionStateChanged) {
-      if (
-        isCancelLifecycleCollectionRace({
-          recurringPaymentStatus: lockedRecurringPayment.status,
-          recurringPaymentDueAt: lockedRecurringPayment.next_collection_due_at,
-          subscriptionStatus: lockedSubscription.status,
-          subscriptionDueAt: lockedSubscription.next_collection_due_at,
-          dueAt: input.dueAt,
-        })
-      ) {
-        const { updatedAttempt, updatedTransfer } = await confirmCollectionRecords();
-        const currentRecurringPayment = await txRecurringRepo.getRecurringPaymentById({
-          recurringPaymentId: input.recurringPayment.id,
-          organizationId: input.organizationId,
-          projectId: input.projectId,
-        });
+      const { updatedAttempt, updatedTransfer } = await confirmCollectionRecords();
+      const currentRecurringPayment = await txRecurringRepo.getRecurringPaymentById({
+        recurringPaymentId: input.recurringPayment.id,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+      });
 
-        if (!currentRecurringPayment) {
-          throw new AppError("NOT_FOUND", "Recurring payment collection state not found");
-        }
-
-        return {
-          recurringPayment: currentRecurringPayment,
-          collectionAttempt: updatedAttempt,
-          transfer: updatedTransfer,
-        };
+      if (!currentRecurringPayment) {
+        throw new AppError("NOT_FOUND", "Recurring payment collection state not found");
       }
 
-      throw new AppError(
-        "CONFLICT",
-        "Recurring payment collection state changed before finalization started"
-      );
+      console.warn("Recurring collection confirmed after lifecycle state changed", {
+        recurringPaymentId: input.recurringPayment.id,
+        attemptId: input.attempt.id,
+        transferId: input.transfer.id,
+        dueAt: input.dueAt,
+        recurringPaymentStatus: lockedRecurringPayment.status,
+        subscriptionStatus: lockedSubscription.status,
+      });
+
+      return {
+        recurringPayment: currentRecurringPayment,
+        collectionAttempt: updatedAttempt,
+        transfer: updatedTransfer,
+      };
     }
 
     const { updatedAttempt, updatedTransfer } = await confirmCollectionRecords();
