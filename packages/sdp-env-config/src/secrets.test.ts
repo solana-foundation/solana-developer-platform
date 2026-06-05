@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { defaultValues } from "./generate";
 import { autoSecretKeys, randomHex32 } from "./secrets";
 
 test("randomHex32 returns 64 lowercase hex chars", () => {
@@ -11,10 +12,25 @@ test("successive calls differ", () => {
   assert.notEqual(randomHex32(), randomHex32());
 });
 
-test("autoSecretKeys lists the secret-kind field keys", () => {
-  assert.deepEqual([...autoSecretKeys()].sort(), [
-    "API_KEY_PEPPER",
-    "CUSTODY_ENCRYPTION_KEY",
-    "POSTGRES_PASSWORD",
-  ]);
+test("autoSecretKeys without values lists only secret-kind fields", () => {
+  assert.deepEqual([...autoSecretKeys()].sort(), ["API_KEY_PEPPER", "CUSTODY_ENCRYPTION_KEY"]);
+});
+
+test("autoSecretKeys with default values includes the auto-mode Postgres password", () => {
+  const keys = autoSecretKeys(defaultValues());
+  assert.ok(keys.has("POSTGRES_PASSWORD"));
+  assert.ok(keys.has("API_KEY_PEPPER"));
+});
+
+test("autoSecretKeys excludes the Postgres password in manual mode", () => {
+  const keys = autoSecretKeys({ ...defaultValues(), POSTGRES_PASSWORD_MODE: "manual" });
+  assert.ok(!keys.has("POSTGRES_PASSWORD"));
+});
+
+test("autoSecretKeys excludes invisible fields", () => {
+  // An external database hides POSTGRES_PASSWORD, so no secret should be
+  // generated for it even though auto-mode is still selected.
+  const keys = autoSecretKeys({ ...defaultValues(), DATABASE_MODE: "external" });
+  assert.ok(!keys.has("POSTGRES_PASSWORD"));
+  assert.ok(keys.has("API_KEY_PEPPER"));
 });

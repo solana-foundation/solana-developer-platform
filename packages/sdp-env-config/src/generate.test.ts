@@ -28,6 +28,13 @@ test("UI-only selector keys are never emitted", () => {
   const env = generateEnv(defaultValues());
   assert.doesNotMatch(env, /^DATABASE_MODE=/m);
   assert.doesNotMatch(env, /^CACHE_MODE=/m);
+  assert.doesNotMatch(env, /^SIGNING_PROVIDERS=/m);
+  assert.doesNotMatch(env, /^POSTGRES_PASSWORD_MODE=/m);
+});
+
+test("deployment mode is emitted as the self_hosted constant", () => {
+  const env = generateEnv(defaultValues());
+  assert.match(env, /^SDP_DEPLOYMENT_MODE=self_hosted$/m);
 });
 
 test("invisible conditional fields are skipped", () => {
