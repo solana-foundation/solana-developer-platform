@@ -57,6 +57,7 @@ import {
 import * as solanaRpc from "@/services/solana/rpc";
 import {
   type AppContext,
+  getPaymentRecurringPaymentsRepository,
   getPaymentSubscriptionsRepository,
   getSponsoredFeePayer,
 } from "../context";
@@ -991,6 +992,21 @@ export const updateSubscription = async (c: AppContext) => {
       "BAD_REQUEST",
       "Subscription cancellation timestamp is managed by SDP lifecycle execution"
     );
+  }
+  if (parsed.data.status !== undefined && parsed.data.status !== "active") {
+    const activeRecurringPayment = await getPaymentRecurringPaymentsRepository(
+      c
+    ).getActiveRecurringPaymentBySubscriptionId({
+      subscriptionId: subscription.id,
+      organizationId: auth.organizationId,
+      projectId,
+    });
+    if (activeRecurringPayment) {
+      throw new AppError(
+        "BAD_REQUEST",
+        "Managed recurring payment subscriptions cannot be deactivated through subscription updates; use the recurring payment lifecycle endpoints"
+      );
+    }
   }
   const now = new Date().toISOString();
   assertSubscriptionCanBeActive({

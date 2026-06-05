@@ -199,6 +199,23 @@ export function createPostgresPaymentRecurringPaymentsRepository(
       return row ? mapRecurringPaymentRow(row) : null;
     },
 
+    async getActiveRecurringPaymentBySubscriptionId(params) {
+      const row = await db
+        .prepare(
+          `SELECT *
+             FROM payment_recurring_payments
+            WHERE subscription_id = ?
+              AND organization_id = ?
+              AND project_id = ?
+              AND status = 'active'
+            LIMIT 1`
+        )
+        .bind(params.subscriptionId, params.organizationId, params.projectId)
+        .first<Record<string, unknown>>();
+
+      return row ? mapRecurringPaymentRow(row) : null;
+    },
+
     async listRecurringPayments(params: ListPaymentRecurringPaymentsInput) {
       const clauses = ["organization_id = ?", "project_id = ?"];
       const values: unknown[] = [params.organizationId, params.projectId];

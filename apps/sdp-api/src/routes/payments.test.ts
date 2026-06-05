@@ -891,6 +891,24 @@ describe("Payments routes", () => {
     expect(recurringPlanPda).toBeTruthy();
     expect(recurringSubscriptionPda).toBeTruthy();
 
+    const managedSubscriptionPauseRes = await app.request(
+      `/v1/payments/subscriptions/${recurringSubscriptionId}`,
+      {
+        method: "PATCH",
+        headers: jsonHeaders,
+        body: JSON.stringify({ status: "paused" }),
+      },
+      env
+    );
+    expect(managedSubscriptionPauseRes.status).toBe(400);
+    const managedSubscriptionPauseBody = (await managedSubscriptionPauseRes.json()) as {
+      error: { message: string };
+    };
+    expect(managedSubscriptionPauseBody.error.message).toContain(
+      "recurring payment lifecycle endpoints"
+    );
+    await clearRateLimits();
+
     const staleUnsignedAttemptUpdatedAt = new Date(Date.now() - 60 * 60 * 1000).toISOString();
     await repositories.createPaymentSubscriptionsRepository(env).createCollectionAttempt({
       id: "psca_stale_unsigned_retry",
