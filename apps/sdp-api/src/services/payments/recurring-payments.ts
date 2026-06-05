@@ -1783,9 +1783,6 @@ export async function collectRecurringPayment(input: {
   if (!recurringPayment) {
     throw new AppError("NOT_FOUND", "Recurring payment not found");
   }
-  if (recurringPayment.status !== "active") {
-    throw new AppError("BAD_REQUEST", "Recurring payment must be active before collection");
-  }
   if (
     !recurringPayment.subscription_id ||
     !recurringPayment.plan_pda ||
@@ -1800,9 +1797,6 @@ export async function collectRecurringPayment(input: {
   const subscriptionId = recurringPayment.subscription_id;
   const dueAt = recurringPayment.next_collection_due_at;
   const retryAfter = getCollectionRetryAfter(input.env);
-  if (input.enforceDue !== false && new Date(dueAt).getTime() > Date.now()) {
-    throw new AppError("BAD_REQUEST", "Recurring payment is not due for collection");
-  }
 
   let attempt = await subscriptionsRepo.getCollectionAttemptByRecurringDue({
     organizationId: input.organizationId,
@@ -1823,6 +1817,12 @@ export async function collectRecurringPayment(input: {
   });
   if (recoveredExisting) {
     return recoveredExisting;
+  }
+  if (recurringPayment.status !== "active") {
+    throw new AppError("BAD_REQUEST", "Recurring payment must be active before collection");
+  }
+  if (input.enforceDue !== false && new Date(dueAt).getTime() > Date.now()) {
+    throw new AppError("BAD_REQUEST", "Recurring payment is not due for collection");
   }
 
   const sourceAddress = assertValidAddress(recurringPayment.source_address, "sourceAddress");

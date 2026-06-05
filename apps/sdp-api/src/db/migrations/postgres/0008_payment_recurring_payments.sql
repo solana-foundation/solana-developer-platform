@@ -45,6 +45,9 @@ CREATE TABLE IF NOT EXISTS payment_recurring_payments (
 CREATE INDEX IF NOT EXISTS idx_payment_recurring_payments_project_status_due
     ON payment_recurring_payments(organization_id, project_id, status, next_collection_due_at);
 
+CREATE INDEX IF NOT EXISTS idx_payment_recurring_payments_status_due
+    ON payment_recurring_payments(status, next_collection_due_at);
+
 CREATE INDEX IF NOT EXISTS idx_payment_recurring_payments_counterparty_created
     ON payment_recurring_payments(counterparty_id, created_at DESC);
 
