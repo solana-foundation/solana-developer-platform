@@ -298,7 +298,8 @@ export function createPostgresPaymentSubscriptionsRepository(
              created_by,
              created_at,
              updated_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT (organization_id, project_id, plan_id, counterparty_id) DO NOTHING`
         )
         .bind(
           input.id,
@@ -476,7 +477,7 @@ export function createPostgresPaymentSubscriptionsRepository(
           input.status,
           input.signature,
           input.error,
-          input.metadata,
+          JSON.stringify(input.metadata),
           input.createdAt,
           input.updatedAt
         )

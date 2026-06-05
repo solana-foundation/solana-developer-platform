@@ -361,6 +361,9 @@ async function requireActiveCounterparty(c: AppContext, counterpartyId: string):
   if (!counterparty) {
     throw new AppError("NOT_FOUND", "Counterparty not found");
   }
+  if (counterparty.status !== "active") {
+    throw new AppError("BAD_REQUEST", "Counterparty must be active before creating a subscription");
+  }
 }
 
 async function resolvePullerWalletAddress(
@@ -582,8 +585,22 @@ export const updateSubscriptionPlan = async (c: AppContext) => {
     throw badRequest("Invalid request body", { errors: z.treeifyError(parsed.error) });
   }
 
-  const puller = await resolvePullerWalletAddress(c, parsed.data.pullerWalletId);
   const repo = getPaymentSubscriptionsRepository(c);
+  const existingPlan = await repo.getPlanById({
+    planId: params.data.planId,
+    organizationId: auth.organizationId,
+    projectId,
+  });
+
+  if (!existingPlan) {
+    throw new AppError("NOT_FOUND", "Subscription plan not found");
+  }
+
+  const scope = await resolveScope(c);
+  const ownerWallet = resolveWallet(scope.wallets, existingPlan.owner_wallet_id);
+  assertApiKeyWalletAccess(scope.auth, ownerWallet.walletId, ["payments:write"]);
+
+  const puller = await resolvePullerWalletAddress(c, parsed.data.pullerWalletId);
   const updated = await repo.updatePlan({
     planId: params.data.planId,
     organizationId: auth.organizationId,
@@ -672,7 +689,7 @@ export const createSubscription = async (c: AppContext) => {
   });
 
   if (!subscription) {
-    throw new AppError("INTERNAL_ERROR", "Failed to create subscription");
+    throw new AppError("CONFLICT", "Counterparty already has a subscription for this plan");
   }
 
   const response: PaymentSubscriptionResponse = { subscription: mapSubscription(subscription) };

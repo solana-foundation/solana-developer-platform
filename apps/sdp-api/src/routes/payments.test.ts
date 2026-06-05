@@ -547,6 +547,125 @@ describe("Payments routes", () => {
     expect(body.error.message).toContain("Recurring payments are not enabled");
   });
 
+  it("requires owner wallet access when updating subscription plans", async () => {
+    env.PAYMENTS_RECURRING_ENABLED = "true";
+    const headers = {
+      Authorization: `Bearer ${TEST_API_KEY.raw}`,
+      "Content-Type": "application/json",
+    };
+
+    const planRes = await app.request(
+      "/v1/payments/subscription-plans",
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          ownerWalletId: TEST_WALLET_ID,
+          token: DEVNET_USDC_MINT,
+          amount: "25.00",
+          periodHours: 720,
+        }),
+      },
+      env
+    );
+    expect(planRes.status).toBe(201);
+    const planBody = (await planRes.json()) as { data: { subscriptionPlan: { id: string } } };
+
+    await seedCachedKey({
+      walletBindings: [{ walletId: "wal_other_wallet", permissions: ["payments:write"] }],
+    });
+
+    const updateRes = await app.request(
+      `/v1/payments/subscription-plans/${planBody.data.subscriptionPlan.id}`,
+      {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({ status: "archived" }),
+      },
+      env
+    );
+
+    expect(updateRes.status).toBe(403);
+    const updateBody = (await updateRes.json()) as { error: { code: string; message: string } };
+    expect(updateBody.error.code).toBe("FORBIDDEN");
+    expect(updateBody.error.message).toContain("requested wallet");
+  });
+
+  it("rejects archived counterparties when creating subscriptions", async () => {
+    env.PAYMENTS_RECURRING_ENABLED = "true";
+    const headers = {
+      Authorization: `Bearer ${TEST_API_KEY.raw}`,
+      "Content-Type": "application/json",
+    };
+
+    const counterpartyRes = await app.request(
+      "/v1/counterparties",
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          externalId: "subscription_archived_counterparty",
+          entityType: "individual",
+          displayName: "Archived Subscription Counterparty",
+          email: "subscription-archived-counterparty@example.com",
+        }),
+      },
+      env
+    );
+    expect(counterpartyRes.status).toBe(201);
+    const counterpartyBody = (await counterpartyRes.json()) as {
+      data: { counterparty: { id: string } };
+    };
+
+    const planRes = await app.request(
+      "/v1/payments/subscription-plans",
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          ownerWalletId: TEST_WALLET_ID,
+          token: DEVNET_USDC_MINT,
+          amount: "25.00",
+          periodHours: 720,
+        }),
+      },
+      env
+    );
+    expect(planRes.status).toBe(201);
+    const planBody = (await planRes.json()) as { data: { subscriptionPlan: { id: string } } };
+
+    const archiveRes = await app.request(
+      `/v1/counterparties/${counterpartyBody.data.counterparty.id}`,
+      {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
+      },
+      env
+    );
+    expect(archiveRes.status).toBe(204);
+
+    const subscriptionRes = await app.request(
+      "/v1/payments/subscriptions",
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          planId: planBody.data.subscriptionPlan.id,
+          counterpartyId: counterpartyBody.data.counterparty.id,
+          subscriberAddress: TEST_SOLANA_ADDRESSES.wallet2,
+        }),
+      },
+      env
+    );
+
+    expect(subscriptionRes.status).toBe(400);
+    const subscriptionBody = (await subscriptionRes.json()) as {
+      error: { code: string; message: string };
+    };
+    expect(subscriptionBody.error.code).toBe("BAD_REQUEST");
+    expect(subscriptionBody.error.message).toContain("Counterparty must be active");
+  });
+
   it("exercises the recurring subscription lifecycle through SDP API routes", async () => {
     env.PAYMENTS_RECURRING_ENABLED = "true";
     const authHeaders = {
