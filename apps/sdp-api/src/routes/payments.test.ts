@@ -1359,6 +1359,43 @@ describe("Payments routes", () => {
       });
     expect(resumedSubscription?.next_collection_due_at).toBe(resumedDueAt);
     expect(resumedSubscription?.canceled_at).toBe(canceledAt);
+
+    const pausedUpdatedAt = new Date().toISOString();
+    await repositories.createPaymentRecurringPaymentsRepository(env).updateRecurringPayment({
+      recurringPaymentId,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      status: "paused",
+      updatedAt: pausedUpdatedAt,
+    });
+    await repositories.createPaymentSubscriptionsRepository(env).updateSubscription({
+      subscriptionId: recurringSubscriptionId,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      status: "paused",
+      updatedAt: pausedUpdatedAt,
+    });
+    await clearRateLimits();
+
+    mockRecurringLifecycleSubscriptionState({
+      planPda: recurringPlanPda,
+      subscriptionPda: recurringSubscriptionPda,
+      expiresAtTs: 0n,
+    });
+    const pausedCancelRes = await app.request(
+      `/v1/payments/recurring-payments/${recurringPaymentId}/cancel`,
+      {
+        method: "POST",
+        headers: jsonHeaders,
+        body: "{}",
+      },
+      env
+    );
+    expect(pausedCancelRes.status).toBe(200);
+    const pausedCancelBody = (await pausedCancelRes.json()) as {
+      data: { recurringPayment: { status: string } };
+    };
+    expect(pausedCancelBody.data.recurringPayment.status).toBe("canceled");
   });
 
   it("exercises the recurring subscription lifecycle through SDP API routes", async () => {

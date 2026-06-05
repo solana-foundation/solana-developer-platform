@@ -77,10 +77,12 @@ const paymentAmountSchema = z
   });
 
 const recurringTimestampSchema = z.string().datetime({ offset: true });
-const futureRecurringTimestampSchema = recurringTimestampSchema.refine(
-  (value) => new Date(value).getTime() > Date.now(),
-  { message: "firstCollectionAt must be in the future" }
-);
+const futureRecurringTimestampSchema = (fieldName: string) =>
+  recurringTimestampSchema.refine((value) => new Date(value).getTime() > Date.now(), {
+    message: `${fieldName} must be in the future`,
+  });
+const firstCollectionAtTimestampSchema = futureRecurringTimestampSchema("firstCollectionAt");
+const nextCollectionDueAtTimestampSchema = futureRecurringTimestampSchema("nextCollectionDueAt");
 const u64StringSchema = z
   .string()
   .regex(/^\d+$/, { message: "Value must be an unsigned integer string" })
@@ -154,7 +156,7 @@ export const createRecurringPaymentSchema = z.object({
     .int()
     .positive()
     .max(24 * 365),
-  firstCollectionAt: futureRecurringTimestampSchema.optional(),
+  firstCollectionAt: firstCollectionAtTimestampSchema.optional(),
   metadataUri: z.string().url().max(128).optional(),
 });
 
@@ -226,7 +228,7 @@ export const createSubscriptionSchema = z.object({
   authorizationSignature: z.string().min(1).max(128).optional(),
   status: createSubscriptionStatusSchema,
   currentPeriodStartAt: recurringTimestampSchema.optional(),
-  nextCollectionDueAt: futureRecurringTimestampSchema.optional(),
+  nextCollectionDueAt: nextCollectionDueAtTimestampSchema.optional(),
 });
 
 export const updateSubscriptionSchema = z
@@ -239,7 +241,7 @@ export const updateSubscriptionSchema = z
     authorizationSignature: z.string().min(1).max(128).nullable().optional(),
     status: updateSubscriptionStatusSchema.optional(),
     currentPeriodStartAt: recurringTimestampSchema.nullable().optional(),
-    nextCollectionDueAt: futureRecurringTimestampSchema.nullable().optional(),
+    nextCollectionDueAt: nextCollectionDueAtTimestampSchema.nullable().optional(),
     cancelAt: recurringTimestampSchema.nullable().optional(),
     canceledAt: recurringTimestampSchema.nullable().optional(),
   })
@@ -264,15 +266,13 @@ export const listSubscriptionsQuerySchema = z.object({
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
 });
 
-export const createSubscriptionCollectionAttemptSchema = z
-  .object({
-    amount: paymentAmountSchema.optional(),
-    token: paymentTokenSchema.optional(),
-    dueAt: recurringTimestampSchema.optional(),
-    status: z.literal("pending").default("pending"),
-    metadata: z.record(z.string(), z.unknown()).optional(),
-  })
-  .strict();
+export const createSubscriptionCollectionAttemptSchema = z.object({
+  amount: paymentAmountSchema.optional(),
+  token: paymentTokenSchema.optional(),
+  dueAt: recurringTimestampSchema.optional(),
+  status: z.literal("pending").default("pending"),
+  metadata: z.record(z.string(), z.unknown()).optional(),
+});
 
 export const prepareSubscriptionCollectionSchema = z.object({
   amount: paymentAmountSchema.optional(),

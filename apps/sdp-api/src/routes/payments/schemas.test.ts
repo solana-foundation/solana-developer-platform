@@ -1,9 +1,11 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
 import type { z } from "zod";
 import {
+  createSubscriptionCollectionAttemptSchema,
   createTransferSchema,
   PAYMENT_TOKEN_VALIDATION_MESSAGE,
   prepareTransferSchema,
+  updateSubscriptionSchema,
   updateWalletPolicySchema,
 } from "./schemas";
 
@@ -182,6 +184,36 @@ describe("wallet policy destinationAllowlist schema", () => {
     if (!result.success) {
       const messages = result.error.issues.map((issue) => issue.message);
       expect(messages).toContain("destinationAllowlist entry must be a base58 Solana address");
+    }
+  });
+});
+
+describe("payment subscription schemas", () => {
+  it("uses the nextCollectionDueAt field name in future timestamp errors", () => {
+    const result = updateSubscriptionSchema.safeParse({
+      nextCollectionDueAt: new Date(Date.now() - 60_000).toISOString(),
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.map((issue) => issue.message)).toContain(
+        "nextCollectionDueAt must be in the future"
+      );
+    }
+  });
+
+  it("ignores legacy execution fields on collection attempt creation", () => {
+    const result = createSubscriptionCollectionAttemptSchema.safeParse({
+      amount: "10.50",
+      attemptedAt: new Date().toISOString(),
+      transferId: "ptr_legacy",
+      signature: "legacy_signature",
+      error: "legacy error",
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data).toEqual({ amount: "10.50", status: "pending" });
     }
   });
 });

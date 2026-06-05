@@ -1432,8 +1432,12 @@ export async function executeRecurringPaymentLifecycle(input: {
   if (!subscriptionId || !recurringPayment.plan_pda || !recurringPayment.subscription_pda) {
     throw new AppError("BAD_REQUEST", "Recurring payment has not been activated");
   }
-  if (input.operation === "cancel" && recurringPayment.status !== "active") {
-    throw new AppError("BAD_REQUEST", "Only active recurring payments can be canceled");
+  if (
+    input.operation === "cancel" &&
+    recurringPayment.status !== "active" &&
+    recurringPayment.status !== "paused"
+  ) {
+    throw new AppError("BAD_REQUEST", "Only active or paused recurring payments can be canceled");
   }
   if (
     input.operation === "resume" &&
