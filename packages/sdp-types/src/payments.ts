@@ -65,6 +65,10 @@ export interface PreparedPaymentTransaction {
   lastValidBlockHeight?: string;
 }
 
+export interface PreparedPaymentSubscriptionTransaction extends PreparedPaymentTransaction {
+  requiredSigners: string[];
+}
+
 export interface MagicBlockPreparedPrivateTransfer {
   provider: "magicblock";
   magicBlock: {
@@ -118,6 +122,196 @@ export interface PaymentTransferPrepareEnvelope {
   error?: {
     message?: string;
   };
+}
+
+export type PaymentSubscriptionPlanStatus = "draft" | "active" | "archived";
+export type PaymentSubscriptionStatus =
+  | "pending_authorization"
+  | "active"
+  | "paused"
+  | "canceling"
+  | "canceled"
+  | "expired";
+export type PaymentSubscriptionCollectionAttemptStatus =
+  | "pending"
+  | "processing"
+  | "confirmed"
+  | "failed"
+  | "skipped";
+
+export interface PaymentSubscriptionPlan {
+  id: string;
+  organizationId: string;
+  projectId: string;
+  ownerWalletId: string;
+  ownerAddress: string;
+  token: string;
+  amount: string;
+  periodHours: number;
+  programPlanId: string;
+  planPda: string | null;
+  destinationAddress: string | null;
+  pullerWalletId: string | null;
+  pullerAddress: string | null;
+  metadataUri: string | null;
+  status: PaymentSubscriptionPlanStatus;
+  createdBy: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PaymentSubscription {
+  id: string;
+  organizationId: string;
+  projectId: string;
+  planId: string;
+  counterpartyId: string;
+  subscriberAddress: string;
+  subscriberTokenAccount: string | null;
+  subscriptionPda: string | null;
+  subscriptionAuthorityAddress: string | null;
+  authorizationSignature: string | null;
+  status: PaymentSubscriptionStatus;
+  currentPeriodStartAt: string | null;
+  nextCollectionDueAt: string | null;
+  cancelAt: string | null;
+  canceledAt: string | null;
+  createdBy: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PaymentSubscriptionCollectionAttempt {
+  id: string;
+  organizationId: string;
+  projectId: string;
+  subscriptionId: string;
+  transferId: string | null;
+  token: string;
+  amount: string;
+  dueAt: string;
+  attemptedAt: string | null;
+  status: PaymentSubscriptionCollectionAttemptStatus;
+  signature: string | null;
+  error: string | null;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreatePaymentSubscriptionPlanRequest {
+  ownerWalletId: string;
+  token: string;
+  amount: string;
+  periodHours: number;
+  programPlanId?: string;
+  planPda?: string;
+  destinationAddress?: string;
+  pullerWalletId?: string;
+  metadataUri?: string;
+  status?: PaymentSubscriptionPlanStatus;
+}
+
+export interface UpdatePaymentSubscriptionPlanRequest {
+  planPda?: string | null;
+  destinationAddress?: string | null;
+  pullerWalletId?: string | null;
+  metadataUri?: string | null;
+  status?: PaymentSubscriptionPlanStatus;
+}
+
+export interface CreatePaymentSubscriptionRequest {
+  planId: string;
+  counterpartyId: string;
+  subscriberAddress: string;
+  subscriberTokenAccount?: string;
+  subscriptionPda?: string;
+  subscriptionAuthorityAddress?: string;
+  authorizationSignature?: string;
+  status?: PaymentSubscriptionStatus;
+  currentPeriodStartAt?: string;
+  nextCollectionDueAt?: string;
+}
+
+export interface UpdatePaymentSubscriptionRequest {
+  subscriberTokenAccount?: string | null;
+  subscriptionPda?: string | null;
+  subscriptionAuthorityAddress?: string | null;
+  authorizationSignature?: string | null;
+  status?: PaymentSubscriptionStatus;
+  currentPeriodStartAt?: string | null;
+  nextCollectionDueAt?: string | null;
+  cancelAt?: string | null;
+  canceledAt?: string | null;
+}
+
+export interface CreatePaymentSubscriptionCollectionAttemptRequest {
+  amount?: string;
+  token?: string;
+  dueAt?: string;
+  attemptedAt?: string;
+  status?: PaymentSubscriptionCollectionAttemptStatus;
+  transferId?: string;
+  signature?: string;
+  error?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface PaymentSubscriptionPlanResponse {
+  subscriptionPlan: PaymentSubscriptionPlan;
+}
+
+export interface PreparePaymentSubscriptionPlanResponse {
+  subscriptionPlan: PaymentSubscriptionPlan;
+  preparedTransaction: PreparedPaymentSubscriptionTransaction;
+  planPda: string;
+}
+
+export interface ListPaymentSubscriptionPlansResponse {
+  subscriptionPlans: PaymentSubscriptionPlan[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface PaymentSubscriptionResponse {
+  subscription: PaymentSubscription;
+}
+
+export interface PreparePaymentSubscriptionAuthorizationResponse {
+  subscription: PaymentSubscription;
+  preparedTransaction: PreparedPaymentSubscriptionTransaction;
+  subscriptionPda: string;
+  subscriptionAuthorityAddress: string;
+}
+
+export interface PreparePaymentSubscriptionLifecycleResponse {
+  subscription: PaymentSubscription;
+  preparedTransaction: PreparedPaymentSubscriptionTransaction;
+}
+
+export interface ListPaymentSubscriptionsResponse {
+  subscriptions: PaymentSubscription[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface PaymentSubscriptionCollectionAttemptResponse {
+  collectionAttempt: PaymentSubscriptionCollectionAttempt;
+}
+
+export interface PreparePaymentSubscriptionCollectionResponse {
+  subscription: PaymentSubscription;
+  preparedTransaction: PreparedPaymentSubscriptionTransaction;
+  collectionAttempt?: PaymentSubscriptionCollectionAttempt;
+}
+
+export interface ListPaymentSubscriptionCollectionAttemptsResponse {
+  collectionAttempts: PaymentSubscriptionCollectionAttempt[];
+  total: number;
+  page: number;
+  pageSize: number;
 }
 
 export type PaymentRampExecutionStatus = "pending" | "processing" | "completed" | "failed";

@@ -7,6 +7,7 @@ import {
   allowlistEntrySchema,
   apiKeyDetailSchema,
   apiKeyResponseSchema,
+  counterpartyAccountResponseSchema,
   counterpartyFieldOptionsResponseSchema,
   counterpartyResponseSchema,
   currentUserResponseSchema,
@@ -29,6 +30,7 @@ import {
   inviteMemberResponseSchema,
   listApiKeysResponseSchema,
   listCounterpartiesResponseSchema,
+  listCounterpartyAccountsResponseSchema,
   listMembersResponseSchema,
   listProjectApiKeysResponseSchema,
   listProjectMembersResponseSchema,
@@ -43,10 +45,20 @@ import {
   onrampQuoteResponseSchema,
   organizationSchema,
   paginatedResponseSchema,
+  paymentSubscriptionCollectionAttemptListResponseSchema,
+  paymentSubscriptionCollectionAttemptResponseSchema,
+  paymentSubscriptionListResponseSchema,
+  paymentSubscriptionPlanListResponseSchema,
+  paymentSubscriptionPlanResponseSchema,
+  paymentSubscriptionResponseSchema,
   prepareBurnResponseSchema,
   prepareDeployResponseSchema,
   prepareForceBurnResponseSchema,
   prepareMintResponseSchema,
+  preparePaymentSubscriptionAuthorizationResponseSchema,
+  preparePaymentSubscriptionCollectionResponseSchema,
+  preparePaymentSubscriptionLifecycleResponseSchema,
+  preparePaymentSubscriptionPlanResponseSchema,
   prepareSeizeResponseSchema,
   prepareTransferResponseSchema,
   prepareUpdateAuthorityResponseSchema,
@@ -90,6 +102,10 @@ export const counterpartyFieldOptionsResponse = successResponseSchema(
   counterpartyFieldOptionsResponseSchema
 );
 export const listCounterpartiesResponse = successResponseSchema(listCounterpartiesResponseSchema);
+export const counterpartyAccountResponse = successResponseSchema(counterpartyAccountResponseSchema);
+export const listCounterpartyAccountsResponse = successResponseSchema(
+  listCounterpartyAccountsResponseSchema
+);
 
 export const projectResponse = successResponseSchema(projectResponseSchema);
 export const listProjectsResponse = successResponseSchema(listProjectsResponseSchema);
@@ -157,6 +173,34 @@ export const walletPolicyResponse = successResponseSchema(walletPolicyResponseSc
 export const prepareTransferResponse = successResponseSchema(prepareTransferResponseSchema);
 export const transferResponse = successResponseSchema(transferResponseSchema);
 export const transferListResponse = paginatedResponseSchema(transferSchema);
+export const paymentSubscriptionPlanResponse = successResponseSchema(
+  paymentSubscriptionPlanResponseSchema
+);
+export const preparePaymentSubscriptionPlanResponse = successResponseSchema(
+  preparePaymentSubscriptionPlanResponseSchema
+);
+export const paymentSubscriptionPlanListResponse = successResponseSchema(
+  paymentSubscriptionPlanListResponseSchema
+);
+export const paymentSubscriptionResponse = successResponseSchema(paymentSubscriptionResponseSchema);
+export const preparePaymentSubscriptionAuthorizationResponse = successResponseSchema(
+  preparePaymentSubscriptionAuthorizationResponseSchema
+);
+export const preparePaymentSubscriptionLifecycleResponse = successResponseSchema(
+  preparePaymentSubscriptionLifecycleResponseSchema
+);
+export const paymentSubscriptionListResponse = successResponseSchema(
+  paymentSubscriptionListResponseSchema
+);
+export const paymentSubscriptionCollectionAttemptResponse = successResponseSchema(
+  paymentSubscriptionCollectionAttemptResponseSchema
+);
+export const preparePaymentSubscriptionCollectionResponse = successResponseSchema(
+  preparePaymentSubscriptionCollectionResponseSchema
+);
+export const paymentSubscriptionCollectionAttemptListResponse = successResponseSchema(
+  paymentSubscriptionCollectionAttemptListResponseSchema
+);
 export const onrampCurrenciesResponse = successResponseSchema(onrampCurrenciesResponseSchema);
 export const offrampCurrenciesResponse = successResponseSchema(offrampCurrenciesResponseSchema);
 export const onrampExecutionResponse = successResponseSchema(onrampExecutionResponseSchema);

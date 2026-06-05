@@ -81,6 +81,7 @@ minimumReleaseAgeExclude:
   - '@solana/rpc-types'
   - '@solana/signers'
   - '@solana/subscribable'
+  - '@solana/subscriptions'
   - '@solana/sysvars'
   - '@solana/token-acl-gate-sdk'
   - '@solana/transaction-confirmation'

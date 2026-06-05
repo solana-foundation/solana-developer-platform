@@ -8,14 +8,11 @@ const jsonObjectSchema = z.record(z.string(), z.unknown());
 
 export const cryptoWalletDetailsSchema = z
   .object({
-    network: z.string().min(1).max(64),
+    network: z.literal("solana"),
     address: z.string().min(1).max(256),
   })
   .superRefine((value, ctx) => {
-    if (
-      value.network === "solana" &&
-      !(value.address.length >= 32 && value.address.length <= 44 && isAddress(value.address))
-    ) {
+    if (!(value.address.length >= 32 && value.address.length <= 44 && isAddress(value.address))) {
       ctx.addIssue({
         code: "custom",
         path: ["address"],
@@ -35,11 +32,12 @@ export const createCounterpartyAccountSchema = z
     if (value.accountKind === "crypto_wallet") {
       const result = cryptoWalletDetailsSchema.safeParse(value.details);
       if (!result.success) {
-        ctx.addIssue({
-          code: "custom",
-          path: ["details"],
-          message: "crypto_wallet accounts require details.network and details.address",
-        });
+        for (const issue of result.error.issues) {
+          ctx.addIssue({
+            ...issue,
+            path: ["details", ...issue.path],
+          });
+        }
       }
     }
   });

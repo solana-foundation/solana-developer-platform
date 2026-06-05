@@ -222,6 +222,7 @@ export const updateCounterpartyAccount = async (c: AppContext) => {
   });
 
   if (!updated) {
+    await assertCounterpartyExists(c, params.data.counterpartyId, auth.organizationId, projectId);
     throw notFound("Counterparty account");
   }
 
@@ -257,6 +258,7 @@ export const archiveCounterpartyAccount = async (c: AppContext) => {
   });
 
   if (!archived) {
+    await assertCounterpartyExists(c, params.data.counterpartyId, auth.organizationId, projectId);
     throw notFound("Counterparty account");
   }
 

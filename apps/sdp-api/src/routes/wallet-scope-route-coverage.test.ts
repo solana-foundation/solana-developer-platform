@@ -38,9 +38,24 @@ describe("wallet-scoped route coverage inventory", () => {
   it("tracks every wallet-scoped payments route", () => {
     const allRoutes = extractRoutes(paymentsRoutes);
     const nonWalletScopedRoutes = new Set([
+      "ALL /subscription-plans",
+      "ALL /subscription-plans/*",
+      "ALL /subscriptions",
+      "ALL /subscriptions/*",
       "GET /ramps/offramp/currency",
       "GET /ramps/onramp/currency",
+      "GET /subscription-plans",
+      "GET /subscription-plans/:planId",
+      "GET /subscriptions",
+      "GET /subscriptions/:subscriptionId",
+      "GET /subscriptions/:subscriptionId/collection-attempts",
+      "PATCH /subscriptions/:subscriptionId",
       "POST /ramps/sandbox/simulate",
+      "POST /subscriptions",
+      "POST /subscriptions/:subscriptionId/collection-attempts",
+      "POST /subscriptions/:subscriptionId/prepare-authorization",
+      "POST /subscriptions/:subscriptionId/prepare-cancel",
+      "POST /subscriptions/:subscriptionId/prepare-resume",
     ]);
 
     expect(allRoutes.filter((route) => !nonWalletScopedRoutes.has(route))).toEqual([
@@ -48,10 +63,14 @@ describe("wallet-scoped route coverage inventory", () => {
       "GET /transfers/:transferId",
       "GET /wallets/:walletId/balances",
       "GET /wallets/:walletId/policies",
+      "PATCH /subscription-plans/:planId",
       "POST /ramps/offramp/execute",
       "POST /ramps/offramp/quote",
       "POST /ramps/onramp/execute",
       "POST /ramps/onramp/quote",
+      "POST /subscription-plans",
+      "POST /subscription-plans/:planId/prepare-create",
+      "POST /subscriptions/:subscriptionId/prepare-collection",
       "POST /transfers",
       "POST /transfers/prepare",
       "PUT /wallets/:walletId/policies",

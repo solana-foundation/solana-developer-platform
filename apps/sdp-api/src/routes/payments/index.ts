@@ -1,28 +1,58 @@
-import { Hono } from "hono";
+import type { Next } from "hono";
+import { type Context, Hono } from "hono";
+import { AppError } from "@/lib/errors";
+import { isRecurringPaymentsEnabled } from "@/lib/feature-flags";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import type { Env } from "@/types/env";
 import {
   createOfframpQuote,
   createOnrampQuote,
+  createSubscription,
+  createSubscriptionCollectionAttempt,
+  createSubscriptionPlan,
   createTransfer,
   executeOfframp,
   executeOnramp,
+  getSubscription,
+  getSubscriptionPlan,
   getTransfer,
   getWalletBalances,
   getWalletPolicy,
   listOfframpCurrencies,
   listOnrampCurrencies,
+  listSubscriptionCollectionAttempts,
+  listSubscriptionPlans,
+  listSubscriptions,
   listTransfers,
+  prepareCancelSubscription,
+  prepareCreateSubscriptionPlan,
+  prepareResumeSubscription,
+  prepareSubscriptionAuthorization,
+  prepareSubscriptionCollection,
   prepareTransfer,
   simulateSandboxTransfer,
+  updateSubscription,
+  updateSubscriptionPlan,
   updateWalletPolicy,
 } from "./handlers";
 
 const payments = new Hono<{ Bindings: Env }>();
 
+async function requireRecurringPaymentsFeature(c: Context<{ Bindings: Env }>, next: Next) {
+  if (!isRecurringPaymentsEnabled(c.env)) {
+    throw new AppError("FORBIDDEN", "Recurring payments are not enabled for this environment");
+  }
+
+  await next();
+}
+
 payments.use("*", unifiedAuthMiddleware({ allowClerk: true, allowSession: true }));
 payments.use("*", projectContextMiddleware());
+payments.use("/subscription-plans", requireRecurringPaymentsFeature);
+payments.use("/subscription-plans/*", requireRecurringPaymentsFeature);
+payments.use("/subscriptions", requireRecurringPaymentsFeature);
+payments.use("/subscriptions/*", requireRecurringPaymentsFeature);
 
 payments.get(
   "/wallets/:walletId/balances",
@@ -43,6 +73,73 @@ payments.post(
   "/transfers/prepare",
   requirePermissions("payments:write", "wallets:read"),
   prepareTransfer
+);
+payments.post(
+  "/subscription-plans",
+  requirePermissions("payments:write", "wallets:read"),
+  createSubscriptionPlan
+);
+payments.get("/subscription-plans", requirePermissions("payments:read"), listSubscriptionPlans);
+payments.post(
+  "/subscription-plans/:planId/prepare-create",
+  requirePermissions("payments:write", "wallets:read"),
+  prepareCreateSubscriptionPlan
+);
+payments.get(
+  "/subscription-plans/:planId",
+  requirePermissions("payments:read"),
+  getSubscriptionPlan
+);
+payments.patch(
+  "/subscription-plans/:planId",
+  requirePermissions("payments:write", "wallets:read"),
+  updateSubscriptionPlan
+);
+payments.post(
+  "/subscriptions",
+  requirePermissions("payments:write", "counterparties:read"),
+  createSubscription
+);
+payments.get("/subscriptions", requirePermissions("payments:read"), listSubscriptions);
+payments.post(
+  "/subscriptions/:subscriptionId/prepare-authorization",
+  requirePermissions("payments:write", "counterparties:read"),
+  prepareSubscriptionAuthorization
+);
+payments.post(
+  "/subscriptions/:subscriptionId/prepare-cancel",
+  requirePermissions("payments:write"),
+  prepareCancelSubscription
+);
+payments.post(
+  "/subscriptions/:subscriptionId/prepare-resume",
+  requirePermissions("payments:write"),
+  prepareResumeSubscription
+);
+payments.post(
+  "/subscriptions/:subscriptionId/prepare-collection",
+  requirePermissions("payments:write", "wallets:read"),
+  prepareSubscriptionCollection
+);
+payments.get(
+  "/subscriptions/:subscriptionId",
+  requirePermissions("payments:read"),
+  getSubscription
+);
+payments.patch(
+  "/subscriptions/:subscriptionId",
+  requirePermissions("payments:write"),
+  updateSubscription
+);
+payments.post(
+  "/subscriptions/:subscriptionId/collection-attempts",
+  requirePermissions("payments:write"),
+  createSubscriptionCollectionAttempt
+);
+payments.get(
+  "/subscriptions/:subscriptionId/collection-attempts",
+  requirePermissions("payments:read"),
+  listSubscriptionCollectionAttempts
 );
 payments.post("/transfers", requirePermissions("payments:write", "wallets:read"), createTransfer);
 payments.get("/transfers", requirePermissions("payments:read"), listTransfers);

@@ -27,6 +27,7 @@ Every Kora instance used by SDP must allow the sRFC-37 and MagicBlock private tr
 - `GATEzzqxhJnsWF6vHRsgtixxSB8PaQdcqGEVTEHWiULz` — ABL / GATE
 - `SPLxh1LVZzEkX99H6rqYizhytLWPZVV296zyYDPagv2` — MagicBlock private transfer program
 - `DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh` — MagicBlock delegation program
+- `De1egAFMkMWZSN5rYXRj9CAdheBamobVNubTsi9avR44` — Subscriptions (recurring payments) program
 
 This applies to the active devnet Kora surfaces:
 

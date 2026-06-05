@@ -288,6 +288,110 @@ describe("Counterparties Routes", () => {
     });
   });
 
+  describe("counterparty accounts", () => {
+    it("creates, lists, updates, gets, and archives a crypto wallet account", async () => {
+      const created = await createCounterparty({ externalId: "account_parent_1" });
+      const cp = (await created.json()).data.counterparty;
+
+      const createAccountRes = await app.request(
+        `/v1/counterparties/${cp.id}/accounts`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: authHeader },
+          body: JSON.stringify({
+            accountKind: "crypto_wallet",
+            label: "Primary wallet",
+            details: {
+              network: "solana",
+              address: "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ",
+            },
+          }),
+        },
+        env
+      );
+      expect(createAccountRes.status).toBe(201);
+      const account = (await createAccountRes.json()).data.account;
+      expect(account.accountKind).toBe("crypto_wallet");
+      expect(account.details.network).toBe("solana");
+
+      const listRes = await app.request(
+        `/v1/counterparties/${cp.id}/accounts?accountKind=crypto_wallet`,
+        { headers: { Authorization: authHeader } },
+        env
+      );
+      expect(listRes.status).toBe(200);
+      const listBody = await listRes.json();
+      expect(listBody.data.total).toBe(1);
+
+      const updateRes = await app.request(
+        `/v1/counterparties/${cp.id}/accounts/${account.id}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json", Authorization: authHeader },
+          body: JSON.stringify({ label: "Updated wallet" }),
+        },
+        env
+      );
+      expect(updateRes.status).toBe(200);
+      const updated = (await updateRes.json()).data.account;
+      expect(updated.label).toBe("Updated wallet");
+
+      const invalidPatchRes = await app.request(
+        `/v1/counterparties/${cp.id}/accounts/${account.id}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json", Authorization: authHeader },
+          body: JSON.stringify({
+            details: {
+              network: "solana",
+              address: "not-a-solana-address",
+            },
+          }),
+        },
+        env
+      );
+      expect(invalidPatchRes.status).toBe(400);
+
+      const getRes = await app.request(
+        `/v1/counterparties/${cp.id}/accounts/${account.id}`,
+        { headers: { Authorization: authHeader } },
+        env
+      );
+      expect(getRes.status).toBe(200);
+
+      const deleteRes = await app.request(
+        `/v1/counterparties/${cp.id}/accounts/${account.id}`,
+        { method: "DELETE", headers: { Authorization: authHeader } },
+        env
+      );
+      expect(deleteRes.status).toBe(204);
+    });
+
+    it("rejects crypto wallet accounts without a Solana wallet address", async () => {
+      const created = await createCounterparty({ externalId: "account_parent_invalid" });
+      const cp = (await created.json()).data.counterparty;
+
+      const res = await app.request(
+        `/v1/counterparties/${cp.id}/accounts`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: authHeader },
+          body: JSON.stringify({
+            accountKind: "crypto_wallet",
+            details: {
+              network: "ethereum",
+              address: "not-a-solana-address",
+            },
+          }),
+        },
+        env
+      );
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error.code).toBe("BAD_REQUEST");
+    });
+  });
+
   describe("PATCH /v1/counterparties/:counterpartyId", () => {
     it("updates displayName", async () => {
       const created = await createCounterparty({ externalId: "patch_1", displayName: "Old" });
