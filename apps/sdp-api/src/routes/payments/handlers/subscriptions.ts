@@ -986,16 +986,13 @@ export const updateSubscription = async (c: AppContext) => {
     throw new AppError("NOT_FOUND", "Subscription not found");
   }
   await assertSubscriptionWalletAccess(c, subscription, ["payments:write"]);
-  if (
-    parsed.data.canceledAt !== undefined &&
-    subscription.canceled_at !== null &&
-    parsed.data.canceledAt !== subscription.canceled_at
-  ) {
+  if (parsed.data.canceledAt !== undefined) {
     throw new AppError(
       "BAD_REQUEST",
-      "Subscription cancellation timestamp cannot be changed once set"
+      "Subscription cancellation timestamp is managed by SDP lifecycle execution"
     );
   }
+  const now = new Date().toISOString();
   assertSubscriptionCanBeActive({
     status: parsed.data.status ?? subscription.status,
     subscriberTokenAccount:
@@ -1036,8 +1033,7 @@ export const updateSubscription = async (c: AppContext) => {
     currentPeriodStartAt: parsed.data.currentPeriodStartAt,
     nextCollectionDueAt: parsed.data.nextCollectionDueAt,
     cancelAt: parsed.data.cancelAt,
-    canceledAt: parsed.data.canceledAt,
-    updatedAt: new Date().toISOString(),
+    updatedAt: now,
   });
 
   if (!updated) {
@@ -1189,18 +1185,6 @@ export const createSubscriptionCollectionAttempt = async (c: AppContext) => {
       "Subscription collection attempts created through this endpoint must start pending"
     );
   }
-  if (
-    parsed.data.transferId ||
-    parsed.data.signature ||
-    parsed.data.attemptedAt ||
-    parsed.data.error
-  ) {
-    throw new AppError(
-      "BAD_REQUEST",
-      "Subscription collection attempt execution fields are managed by the settlement worker"
-    );
-  }
-
   const repo = getPaymentSubscriptionsRepository(c);
   const subscription = await repo.getSubscriptionById({
     subscriptionId: params.data.subscriptionId,
@@ -1226,14 +1210,14 @@ export const createSubscriptionCollectionAttempt = async (c: AppContext) => {
     organizationId: auth.organizationId,
     projectId,
     subscriptionId: subscription.id,
-    transferId: parsed.data.transferId ?? null,
+    transferId: null,
     token: parsed.data.token ?? plan.token,
     amount: parsed.data.amount ?? plan.amount,
     dueAt: parsed.data.dueAt ?? subscription.next_collection_due_at ?? now,
-    attemptedAt: parsed.data.attemptedAt ?? null,
+    attemptedAt: null,
     status: parsed.data.status,
-    signature: parsed.data.signature ?? null,
-    error: parsed.data.error ?? null,
+    signature: null,
+    error: null,
     metadata: parsed.data.metadata ?? {},
     createdAt: now,
     updatedAt: now,

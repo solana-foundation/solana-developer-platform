@@ -722,7 +722,11 @@ export const createSubscriptionPlanRequestSchema = createSubscriptionPlanSchemaB
       description: "Optional plan metadata URI.",
       example: "https://example.com/subscriptions/monthly-usdc.json",
     }),
-    status: paymentSubscriptionPlanStatusSchema.optional(),
+    status: withOpenApi(createSubscriptionPlanSchemaBase.shape.status, {
+      description:
+        "Initial plan status. Plan records created through this endpoint start as draft.",
+      example: "draft",
+    }),
   })
   .openapi({
     description:
@@ -888,7 +892,7 @@ export const createSubscriptionRequestSchema = createSubscriptionSchemaBase
 
 export const updateSubscriptionRequestSchema = updateSubscriptionSchemaBase
   .safeExtend({
-    status: paymentSubscriptionStatusSchema.optional(),
+    status: updateSubscriptionSchemaBase.shape.status,
   })
   .openapi({ description: "Updates mutable subscription state and on-chain identifiers." });
 
@@ -1006,20 +1010,10 @@ export const paymentSubscriptionListResponseSchema = z
   .openapi({ description: "Subscription list response payload." });
 
 export const createSubscriptionCollectionAttemptRequestSchema =
-  createSubscriptionCollectionAttemptSchemaBase
-    .omit({
-      attemptedAt: true,
-      transferId: true,
-      signature: true,
-      error: true,
-    })
-    .extend({
-      status: z.literal("pending").optional(),
-    })
-    .openapi({
-      description:
-        "Creates a pending collection-attempt record for a due subscription. Execution fields are managed by the collection worker/Solana transaction submitter.",
-    });
+  createSubscriptionCollectionAttemptSchemaBase.openapi({
+    description:
+      "Creates a pending collection-attempt record for a due subscription. Execution fields are managed by the collection worker/Solana transaction submitter.",
+  });
 
 export const paymentListSubscriptionCollectionAttemptsQuerySchema =
   listSubscriptionCollectionAttemptsQuerySchemaBase

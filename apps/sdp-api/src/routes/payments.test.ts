@@ -1329,6 +1329,24 @@ describe("Payments routes", () => {
     const counterpartyId = counterpartyBody.data.counterparty.id;
     expect(counterpartyBody.data.counterparty.status).toBe("active");
 
+    const activePlanCreateRes = await app.request(
+      "/v1/payments/subscription-plans",
+      {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({
+          ownerWalletId: TEST_WALLET_ID,
+          token: DEVNET_USDC_MINT,
+          amount: "25.00",
+          periodHours: 720,
+          status: "active",
+        }),
+      },
+      env
+    );
+    expect(activePlanCreateRes.status).toBe(400);
+    await clearRateLimits();
+
     const planRes = await app.request(
       "/v1/payments/subscription-plans",
       {
@@ -1909,28 +1927,31 @@ describe("Payments routes", () => {
     ]);
     expect(attemptsBody.data.total).toBe(1);
 
-    const canceledAt = "2026-02-03T00:00:00.000Z";
     const cancelSubscriptionRes = await app.request(
       `/v1/payments/subscriptions/${subscriptionId}`,
       {
         method: "PATCH",
         headers: jsonHeaders,
         body: JSON.stringify({
-          canceledAt,
           status: "canceled",
         }),
       },
       env
     );
+    expect(cancelSubscriptionRes.status).toBe(400);
 
-    expect(cancelSubscriptionRes.status).toBe(200);
-    const cancelSubscriptionBody = (await cancelSubscriptionRes.json()) as {
-      data: { subscription: { canceledAt: string | null; status: string } };
-    };
-    expect(cancelSubscriptionBody.data.subscription).toMatchObject({
-      canceledAt,
-      status: "canceled",
-    });
+    const backdatedCanceledAtRes = await app.request(
+      `/v1/payments/subscriptions/${subscriptionId}`,
+      {
+        method: "PATCH",
+        headers: jsonHeaders,
+        body: JSON.stringify({
+          canceledAt: "2026-02-03T00:00:00.000Z",
+        }),
+      },
+      env
+    );
+    expect(backdatedCanceledAtRes.status).toBe(400);
 
     const clearCanceledAtRes = await app.request(
       `/v1/payments/subscriptions/${subscriptionId}`,
@@ -1944,19 +1965,6 @@ describe("Payments routes", () => {
       env
     );
     expect(clearCanceledAtRes.status).toBe(400);
-
-    const replaceCanceledAtRes = await app.request(
-      `/v1/payments/subscriptions/${subscriptionId}`,
-      {
-        method: "PATCH",
-        headers: jsonHeaders,
-        body: JSON.stringify({
-          canceledAt: "2026-02-04T00:00:00.000Z",
-        }),
-      },
-      env
-    );
-    expect(replaceCanceledAtRes.status).toBe(400);
   });
 
   it("falls back to a zero SOL balance when RPC balance lookups fail", async () => {
