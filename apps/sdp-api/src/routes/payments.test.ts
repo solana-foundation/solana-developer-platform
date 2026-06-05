@@ -658,12 +658,12 @@ describe("Payments routes", () => {
       env
     );
 
-    expect(subscriptionRes.status).toBe(400);
+    expect(subscriptionRes.status).toBe(404);
     const subscriptionBody = (await subscriptionRes.json()) as {
       error: { code: string; message: string };
     };
-    expect(subscriptionBody.error.code).toBe("BAD_REQUEST");
-    expect(subscriptionBody.error.message).toContain("Counterparty must be active");
+    expect(subscriptionBody.error.code).toBe("NOT_FOUND");
+    expect(subscriptionBody.error.message).toContain("Counterparty not found");
   });
 
   it("exercises the recurring subscription lifecycle through SDP API routes", async () => {
