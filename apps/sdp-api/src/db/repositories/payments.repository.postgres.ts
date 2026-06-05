@@ -21,14 +21,21 @@ function mapTransferRow(row: Record<string, unknown>): PaymentTransferRow {
     organization_id: row.organization_id as string,
     project_id: (row.project_id as string | null | undefined) ?? null,
     wallet_id: row.wallet_id as string,
-    source_address: row.source_address as string,
-    destination_address: row.destination_address as string,
+    counterparty_id: row.counterparty_id as string | null,
+    source_address: row.source_address as string | null,
+    destination_address: row.destination_address as string | null,
     token: row.token as string,
-    amount: row.amount as string,
+    amount: row.amount as string | null,
     memo: (row.memo as string | null | undefined) ?? null,
     type: row.type as PaymentTransferRow["type"],
     direction: row.direction as PaymentTransferRow["direction"],
     status: row.status as PaymentTransferRow["status"],
+    provider: row.provider as PaymentTransferRow["provider"],
+    provider_reference: row.provider_reference as string | null,
+    delivery_mode: row.delivery_mode as PaymentTransferRow["delivery_mode"],
+    fiat_currency: row.fiat_currency as string | null,
+    fiat_amount: row.fiat_amount as string | null,
+    provider_data: row.provider_data as Record<string, unknown>,
     signature: (row.signature as string | null | undefined) ?? null,
     serialized_tx: (row.serialized_tx as string | null | undefined) ?? null,
     slot: (row.slot as number | null | undefined) ?? null,
@@ -119,6 +126,7 @@ export function createPostgresPaymentsRepository(db: AppDb): PaymentsRepository 
              organization_id,
              project_id,
              wallet_id,
+             counterparty_id,
              source_address,
              destination_address,
              token,
@@ -127,17 +135,24 @@ export function createPostgresPaymentsRepository(db: AppDb): PaymentsRepository 
              type,
              direction,
              status,
+             provider,
+             provider_reference,
+             delivery_mode,
+             fiat_currency,
+             fiat_amount,
+             provider_data,
              serialized_tx,
              initiated_by_key_id,
              created_at,
              updated_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?)`
         )
         .bind(
           input.id,
           input.organizationId,
           input.projectId,
           input.walletId,
+          input.counterpartyId,
           input.sourceAddress,
           input.destinationAddress,
           input.token,
@@ -146,6 +161,12 @@ export function createPostgresPaymentsRepository(db: AppDb): PaymentsRepository 
           input.type,
           input.direction,
           input.status,
+          input.provider,
+          input.providerReference,
+          input.deliveryMode,
+          input.fiatCurrency,
+          input.fiatAmount,
+          JSON.stringify(input.providerData),
           input.serializedTx,
           input.initiatedByKeyId,
           input.createdAt,
@@ -223,6 +244,27 @@ export function createPostgresPaymentsRepository(db: AppDb): PaymentsRepository 
       return row ? mapTransferRow(row) : null;
     },
 
+    async getTransferByProviderReference(params) {
+      const scope = params.organizationId
+        ? buildTransferScopeWhere({
+            organizationId: params.organizationId,
+            projectId: params.projectId,
+            extraClauses: ["provider = ?", "provider_reference = ?"],
+            extraValues: [params.provider, params.providerReference],
+          })
+        : {
+            where: "provider = ? AND provider_reference = ?",
+            values: [params.provider, params.providerReference],
+          };
+
+      const row = await db
+        .prepare(`SELECT * FROM payment_transfers WHERE ${scope.where}`)
+        .bind(...scope.values)
+        .first<Record<string, unknown>>();
+
+      return row ? mapTransferRow(row) : null;
+    },
+
     async listTransfersBySignatures(params) {
       if (params.signatures.length === 0) {
         return [];
@@ -259,6 +301,10 @@ export function createPostgresPaymentsRepository(db: AppDb): PaymentsRepository 
         clauses.push(`wallet_id IN (${buildInClause(params.walletIds.length)})`);
         values.push(...params.walletIds);
       }
+      if (params.counterpartyId) {
+        clauses.push("counterparty_id = ?");
+        values.push(params.counterpartyId);
+      }
       if (params.sourceAddress) {
         clauses.push("source_address = ?");
         values.push(params.sourceAddress);
@@ -274,6 +320,10 @@ export function createPostgresPaymentsRepository(db: AppDb): PaymentsRepository 
       if (params.statuses?.length) {
         clauses.push(`status IN (${buildInClause(params.statuses.length)})`);
         values.push(...params.statuses);
+      }
+      if (params.types?.length) {
+        clauses.push(`type IN (${buildInClause(params.types.length)})`);
+        values.push(...params.types);
       }
       if (params.createdAtFrom) {
         clauses.push("created_at >= ?");
@@ -347,6 +397,7 @@ export function createPostgresPaymentsRepository(db: AppDb): PaymentsRepository 
 
     async listTransfersByStatus({
       statuses,
+      types,
       hasSignature,
       createdBefore,
       updatedBefore,
@@ -360,6 +411,10 @@ export function createPostgresPaymentsRepository(db: AppDb): PaymentsRepository 
       const clauses = [`status IN (${buildInClause(statuses.length)})`];
       const values: unknown[] = [...statuses];
 
+      if (types?.length) {
+        clauses.push(`type IN (${buildInClause(types.length)})`);
+        values.push(...types);
+      }
       if (hasSignature === true) {
         clauses.push("signature IS NOT NULL");
       } else if (hasSignature === false) {

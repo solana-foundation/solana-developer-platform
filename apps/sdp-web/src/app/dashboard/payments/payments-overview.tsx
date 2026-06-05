@@ -152,7 +152,7 @@ export function PaymentsOverview({
     mutate: mutateTransfers,
   } = usePersistedDashboardSWR<TransferRecord[]>(
     [PAYMENTS_OVERVIEW_TRANSFERS_KEY, refreshSeed],
-    () => fetchTransfers(),
+    () => fetchTransfers({ pageSize: 20 }),
     {
       fallbackData: transfersError ? undefined : transfers,
       revalidateOnFocus: true,

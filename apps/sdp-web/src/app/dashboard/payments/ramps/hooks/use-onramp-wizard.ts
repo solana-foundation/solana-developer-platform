@@ -1,9 +1,13 @@
 "use client";
 
+import type { PaymentTransferSummary } from "@sdp/types";
 import { useState } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
-import { simulateSandboxTransfer } from "@/app/dashboard/payments/payments-workspace.data";
+import {
+  fetchTransferByProviderReference,
+  simulateSandboxTransfer,
+} from "@/app/dashboard/payments/payments-workspace.data";
 import { ONRAMP_PAIRS, toRampCryptoToken } from "@/lib/ramps";
 import { depositAmountSchema, depositSelectionSchema } from "../schema";
 import { type RampWizardStep, type UseRampWizardProps, useRampWizard } from "./use-ramp-wizard";
@@ -14,6 +18,10 @@ export const ONRAMP_STEPS = [
 ] as const satisfies readonly RampWizardStep[];
 
 export type OnrampStepId = (typeof ONRAMP_STEPS)[number]["id"];
+
+function isTerminalOnrampTransferStatus(status: string) {
+  return status === "completed" || status === "failed" || status === "expired";
+}
 
 export function useOnrampWizard(props: UseRampWizardProps) {
   const [quoteSimulationLoading, setQuoteSimulationLoading] = useState(false);
@@ -55,6 +63,21 @@ export function useOnrampWizard(props: UseRampWizardProps) {
     revalidateOnFocus: false,
     dedupingInterval: 0,
   });
+
+  const transferStatusKey = wizard.quote
+    ? (["onramp-transfer-status", wizard.quote.provider, wizard.quote.id] as const)
+    : null;
+  const { data: transferStatus, isValidating: transferStatusLoading } = useSWR(
+    transferStatusKey,
+    ([, provider, providerReference]): Promise<PaymentTransferSummary | null> =>
+      fetchTransferByProviderReference({ provider, providerReference }),
+    {
+      refreshInterval: (transfer) =>
+        transfer && isTerminalOnrampTransferStatus(transfer.status) ? 0 : 3000,
+      revalidateOnFocus: true,
+      dedupingInterval: 0,
+    }
+  );
 
   const simulateCurrentQuote = async () => {
     const quote = wizard.quote;
@@ -99,6 +122,8 @@ export function useOnrampWizard(props: UseRampWizardProps) {
   return {
     ...wizard,
     bvnkInstruction,
+    transferStatus,
+    transferStatusLoading,
     quoteSimulationLoading,
     quoteSimulationSucceeded,
     simulateCurrentQuote,

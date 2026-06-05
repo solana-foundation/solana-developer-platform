@@ -13,6 +13,7 @@ import type {
   RampDirection,
   RampFiatCurrency,
   RampProviderEstimateResult,
+  RampProviderId,
   PaymentTransferEnvelope as TransferEnvelope,
   PaymentTransferSummary as TransferRecord,
   PaymentWalletPolicy as WalletPolicy,
@@ -243,20 +244,7 @@ export async function fetchWalletPolicy(walletId: string): Promise<WalletPolicy>
 }
 
 interface TransferListEnvelope {
-  data?: Array<{
-    id?: string;
-    type?: string;
-    direction?: string;
-    status?: string;
-    signature?: string | null;
-    source?: string;
-    destination?: string;
-    token?: string;
-    amount?: string;
-    memo?: string;
-    createdAt?: string;
-    updatedAt?: string;
-  }>;
+  data?: TransferRecord[];
   error?: {
     message?: string;
   };
@@ -328,40 +316,68 @@ function resolveWalletBalancesSnapshot(
   return null;
 }
 
-export async function fetchTransfers(
-  options: { walletId?: string; signal?: AbortSignal } = {}
-): Promise<TransferRecord[]> {
+export async function fetchTransfers(options: {
+  pageSize: number;
+  walletId?: string;
+  category?: "wallet" | "ramp";
+  signal?: AbortSignal;
+}): Promise<TransferRecord[]> {
   const transfersQuery = new URLSearchParams({
     page: "1",
-    pageSize: "20",
+    pageSize: String(options.pageSize),
     ...(options.walletId ? { wallet: options.walletId } : {}),
+    ...(options.category ? { category: options.category } : {}),
   }).toString();
   const response = await fetch(`/api/dashboard/payments/transfers?${transfersQuery}`, {
     method: "GET",
     cache: "no-store",
     signal: options.signal,
   });
-  const body = (await response.json().catch(() => ({}))) as TransferListEnvelope;
+  const body = (await response.json()) as TransferListEnvelope;
   if (!response.ok) {
     throw new Error(getApiError(body, `Transfer list request failed (${response.status}).`));
   }
 
-  return (body.data ?? [])
-    .filter((transfer): transfer is NonNullable<typeof transfer> => Boolean(transfer?.id))
-    .map((transfer) => ({
-      id: transfer.id ?? "",
-      ...(transfer.type ? { type: transfer.type } : {}),
-      ...(transfer.direction ? { direction: transfer.direction } : {}),
-      status: transfer.status ?? "pending",
-      signature: transfer.signature ?? null,
-      ...(transfer.source ? { source: transfer.source } : {}),
-      ...(transfer.destination ? { destination: transfer.destination } : {}),
-      ...(transfer.token ? { token: transfer.token } : {}),
-      ...(transfer.amount ? { amount: transfer.amount } : {}),
-      ...(transfer.memo ? { memo: transfer.memo } : {}),
-      ...(transfer.createdAt ? { createdAt: transfer.createdAt } : {}),
-      ...(transfer.updatedAt ? { updatedAt: transfer.updatedAt } : {}),
-    }));
+  if (!body.data) {
+    throw new Error("Transfer list response is missing transfer data.");
+  }
+
+  return body.data;
+}
+
+export async function fetchTransferByProviderReference(input: {
+  provider: RampProviderId;
+  providerReference: string;
+  signal?: AbortSignal;
+}): Promise<TransferRecord | null> {
+  const transfersQuery = new URLSearchParams({
+    page: "1",
+    pageSize: "1",
+    category: "ramp",
+    provider: input.provider,
+    providerReference: input.providerReference,
+  }).toString();
+  const response = await fetch(`/api/dashboard/payments/transfers?${transfersQuery}`, {
+    method: "GET",
+    cache: "no-store",
+    signal: input.signal,
+  });
+  const body = (await response.json()) as TransferListEnvelope;
+  if (!response.ok) {
+    throw new Error(getApiError(body, `Transfer lookup failed (${response.status}).`));
+  }
+
+  if (!body.data) {
+    throw new Error("Transfer lookup response is missing transfer data.");
+  }
+  if (body.data.length > 1) {
+    throw new Error("Transfer lookup returned multiple transfers.");
+  }
+  if (body.data.length === 0) {
+    return null;
+  }
+
+  return body.data[0];
 }
 
 export async function fetchRampEstimates(input: {

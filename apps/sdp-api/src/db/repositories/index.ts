@@ -53,6 +53,11 @@ export type {
   UpdatePaymentTransferInput,
   UpsertPaymentWalletPolicyInput,
 } from "./payments.repository";
+export {
+  isRampTransferType,
+  RAMP_TRANSFER_TYPES,
+  WALLET_TRANSFER_TYPES,
+} from "./payments.repository";
 export { createPostgresPaymentsRepository } from "./payments.repository.postgres";
 export {
   createCounterpartiesRepository,

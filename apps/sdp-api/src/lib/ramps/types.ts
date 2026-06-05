@@ -59,6 +59,19 @@ export interface RampWebhookValidationResult {
   payload: unknown;
 }
 
+interface BaseRampSettlementEvent {
+  provider: RampProviderId;
+  reference: string;
+}
+
+export type RampSettlementEvent =
+  | (BaseRampSettlementEvent & { kind: "awaiting_payment" })
+  | (BaseRampSettlementEvent & { kind: "settling" })
+  | (BaseRampSettlementEvent & { kind: "settled" })
+  | (BaseRampSettlementEvent & { kind: "failed"; error?: string })
+  | (BaseRampSettlementEvent & { kind: "expired"; error?: string })
+  | { provider: RampProviderId; kind: "ignore"; reason: string };
+
 /**
  * Runtime context for quote/execute calls. Providers read their own credentials
  * from `env` keyed by `mode`; the route handler resolves `mode` (it depends on

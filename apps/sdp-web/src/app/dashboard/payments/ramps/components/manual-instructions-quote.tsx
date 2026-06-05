@@ -282,6 +282,7 @@ function BvnkInstruction({
   const needsVerification = instruction.onboardingStatus === "verification_required";
   const isProvisioning = instruction.onboardingStatus === "provisioning";
   const bank = instruction.bankAccount;
+  const verificationUrl = instruction.verificationUrl;
 
   return (
     <div className="space-y-4">
@@ -305,15 +306,33 @@ function BvnkInstruction({
             <ShieldCheckIcon className="size-5" />
           </span>
           <div className="min-w-0 flex-1">
-            <p className="text-sm font-medium text-text-extra-high">
-              Identity verification required
-            </p>
-            <p className="mt-1 text-sm leading-relaxed text-text-low">
-              {instruction.instructionsNotes ??
-                "Complete identity verification to activate your funding account."}{" "}
-              BVNK requires you to verify the counterparty through Sumsub. No information entered
-              via the sandbox will be verified.
-            </p>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <p className="text-sm font-medium text-text-extra-high">
+                  Identity verification required
+                </p>
+                <p className="mt-1 text-sm leading-relaxed text-text-low">
+                  Complete identity verification to activate your funding account. BVNK requires you
+                  to verify the counterparty through Sumsub. No information entered via the sandbox
+                  will be verified.
+                </p>
+                {instruction.instructionsNotes ? (
+                  <p className="mt-2 text-sm leading-relaxed text-text-low">
+                    {instruction.instructionsNotes}
+                  </p>
+                ) : null}
+              </div>
+              {verificationUrl ? (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="xs"
+                  onClick={() => window.open(verificationUrl, "_blank", "noopener")}
+                >
+                  Complete verification
+                </Button>
+              ) : null}
+            </div>
           </div>
         </div>
       ) : null}

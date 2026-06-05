@@ -1,4 +1,4 @@
-import { createHmac } from "node:crypto";
+import { createHmac, createSign, generateKeyPairSync } from "node:crypto";
 import { Webhook } from "svix";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
@@ -684,5 +684,279 @@ describe("BVNK ramp webhook", () => {
       "not-a-valid-signature"
     );
     expect(res.status).toBe(401);
+  });
+});
+
+describe("Lightspark ramp webhook", () => {
+  const ORG_ID = "org_lightspark_webhook";
+  const PROJECT_ID = "prj_lightspark_webhook";
+  const USER_ID = "usr_lightspark_webhook";
+  const TRANSFER_ID = "pt_lightspark_webhook";
+  const QUOTE_ID = "Quote:019e979c-f660-5246-0000-c0588496b9ce";
+  const { privateKey, publicKey } = generateKeyPairSync("ec", { namedCurve: "P-256" });
+
+  type LightsparkOnrampWebhookBase = {
+    id: string;
+    timestamp: string;
+  };
+
+  type LightsparkOnrampPaymentDataBase = {
+    id: string;
+    type: "OUTGOING";
+    destination: {
+      destinationType: "ACCOUNT";
+      accountId: string;
+    };
+    customerId: string;
+    platformCustomerId: string;
+    createdAt: string;
+    updatedAt: string;
+    description: string;
+    source: {
+      sourceType: "REALTIME_FUNDING";
+      currency: string;
+      customerId: string;
+    };
+    sentAmount: {
+      amount: number;
+      currency: {
+        code: string;
+        name: string;
+        symbol: string;
+        decimals: number;
+      };
+    };
+    receivedAmount: {
+      amount: number;
+      currency: {
+        code: string;
+        name: string;
+        symbol: string;
+        decimals: number;
+      };
+    };
+    exchangeRate: number;
+    fees: number;
+    quoteId: string;
+    paymentInstructions: readonly {
+      accountOrWalletInfo: {
+        accountType: "USD_ACCOUNT";
+        accountNumber: string;
+        routingNumber: string;
+        paymentRails: readonly string[];
+        reference: string;
+      };
+    }[];
+  };
+
+  type LightsparkOnrampWebhookPayload =
+    | (LightsparkOnrampWebhookBase & {
+        type: "OUTGOING_PAYMENT.PENDING";
+        data: LightsparkOnrampPaymentDataBase & { status: "PENDING" };
+      })
+    | (LightsparkOnrampWebhookBase & {
+        type: "OUTGOING_PAYMENT.PROCESSING";
+        data: LightsparkOnrampPaymentDataBase & { status: "PROCESSING" };
+      })
+    | (LightsparkOnrampWebhookBase & {
+        type: "OUTGOING_PAYMENT.COMPLETED";
+        data: LightsparkOnrampPaymentDataBase & { status: "COMPLETED"; settledAt: string };
+      });
+
+  const LIGHTSPARK_ONRAMP_PAYMENT_DATA = {
+    id: "Transaction:019e979c-f671-b78f-0000-2154aedf309b",
+    type: "OUTGOING",
+    destination: {
+      destinationType: "ACCOUNT",
+      accountId: "ExternalAccount:019e92fe-cc69-6abf-0000-973b67b36284",
+    },
+    customerId: "Customer:019e92fe-c8b0-938e-0000-35ae407d1719",
+    platformCustomerId: "counterparty_8eac0e73-775a-419c-a2c0-6310ee4d1a78",
+    createdAt: "2026-06-05T11:48:26.865811Z",
+    description: "SDP onramp",
+    source: {
+      sourceType: "REALTIME_FUNDING",
+      currency: "USD",
+      customerId: "Customer:019e92fe-c8b0-938e-0000-35ae407d1719",
+    },
+    sentAmount: {
+      amount: 2500,
+      currency: {
+        code: "USD",
+        name: "US Dollar",
+        symbol: "$",
+        decimals: 2,
+      },
+    },
+    receivedAmount: {
+      amount: 25000000,
+      currency: {
+        code: "USDC",
+        name: "USD Coin",
+        symbol: "usdc",
+        decimals: 6,
+      },
+    },
+    exchangeRate: 0.0001,
+    fees: 0,
+    quoteId: QUOTE_ID,
+    paymentInstructions: [
+      {
+        accountOrWalletInfo: {
+          accountType: "USD_ACCOUNT",
+          accountNumber: "1111222233331111",
+          routingNumber: "021000021",
+          paymentRails: ["ACH", "WIRE", "RTP", "FEDNOW"],
+          reference: "f2c49316-e3f0-4b56-9eb8-0add69210092",
+        },
+      },
+    ],
+  } as const satisfies Omit<LightsparkOnrampPaymentDataBase, "updatedAt">;
+
+  async function seedLightsparkTransfer() {
+    await getDb(env)
+      .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
+      .bind(ORG_ID, "Lightspark Webhook Org", "lightspark-webhook-org", "enterprise", "active")
+      .run();
+    await getDb(env)
+      .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
+      .bind(USER_ID, "lightspark-webhook-user@example.com", 1, "active")
+      .run();
+    await getDb(env)
+      .prepare(
+        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(PROJECT_ID, ORG_ID, "Test", "lightspark-webhook-proj", "sandbox", "active", USER_ID)
+      .run();
+    await getDb(env)
+      .prepare(
+        `INSERT INTO payment_transfers (
+           id, organization_id, project_id, wallet_id, source_address, destination_address,
+           token, amount, memo, type, direction, status, provider, provider_reference,
+           delivery_mode, fiat_currency, fiat_amount, provider_data, signature, serialized_tx,
+           initiated_by_key_id, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(
+        TRANSFER_ID,
+        ORG_ID,
+        PROJECT_ID,
+        "wallet_lightspark_webhook",
+        null,
+        "DestinationSolanaWallet111111111111111111111111",
+        "BTC",
+        null,
+        null,
+        "onramp",
+        "inbound",
+        "awaiting_payment",
+        "lightspark",
+        QUOTE_ID,
+        "manual_instructions",
+        "USD",
+        "100.00",
+        {},
+        null,
+        null,
+        null,
+        "2026-06-05T00:00:00.000Z",
+        "2026-06-05T00:00:00.000Z"
+      )
+      .run();
+  }
+
+  function sendLightsparkWebhook(payload: LightsparkOnrampWebhookPayload) {
+    const body = JSON.stringify(payload);
+    const signature = createSign("SHA256").update(body).sign(privateKey).toString("base64");
+    return app.request(
+      "/webhooks/payments/ramps/sandbox/lightspark",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Grid-Signature": JSON.stringify({ v: 1, s: signature }),
+        },
+        body,
+      },
+      env
+    );
+  }
+
+  beforeEach(async () => {
+    await seedTestDatabase(env);
+    env.LIGHTSPARK_GRID_SANDBOX_WEBHOOK_PUBLIC_KEY = publicKey
+      .export({ type: "spki", format: "pem" })
+      .toString();
+    await seedLightsparkTransfer();
+  });
+
+  afterEach(async () => {
+    env.LIGHTSPARK_GRID_SANDBOX_WEBHOOK_PUBLIC_KEY = undefined;
+    await clearTestDatabase(env);
+  });
+
+  it("marks a lightspark onramp transfer awaiting payment from the quote-time PENDING webhook", async () => {
+    const res = await sendLightsparkWebhook({
+      id: "Webhook:019e979c-f68e-52c1-0000-3acafedca6e8",
+      type: "OUTGOING_PAYMENT.PENDING",
+      timestamp: "2026-06-05T11:48:26.894404Z",
+      data: {
+        ...LIGHTSPARK_ONRAMP_PAYMENT_DATA,
+        status: "PENDING",
+        updatedAt: "2026-06-05T11:48:26.865811Z",
+      },
+    });
+
+    expect(res.status).toBe(200);
+
+    const transfer = await getDb(env)
+      .prepare("SELECT status FROM payment_transfers WHERE id = ?")
+      .bind(TRANSFER_ID)
+      .first<{ status: string }>();
+    expect(transfer).toEqual({ status: "awaiting_payment" });
+  });
+
+  it("marks a lightspark onramp transfer settling from an OUTGOING_PAYMENT.PROCESSING webhook", async () => {
+    const res = await sendLightsparkWebhook({
+      id: "Webhook:019e979f-89d8-52c1-0000-2b4e2eaa4a8e",
+      type: "OUTGOING_PAYMENT.PROCESSING",
+      timestamp: "2026-06-05T11:51:15.672154Z",
+      data: {
+        ...LIGHTSPARK_ONRAMP_PAYMENT_DATA,
+        status: "PROCESSING",
+        updatedAt: "2026-06-05T11:51:15.639479Z",
+      },
+    });
+
+    expect(res.status).toBe(200);
+
+    const transfer = await getDb(env)
+      .prepare("SELECT status FROM payment_transfers WHERE id = ?")
+      .bind(TRANSFER_ID)
+      .first<{ status: string }>();
+    expect(transfer).toEqual({ status: "settling" });
+  });
+
+  it("marks a lightspark onramp transfer completed from an OUTGOING_PAYMENT.COMPLETED webhook", async () => {
+    const res = await sendLightsparkWebhook({
+      id: "Webhook:019e979f-8bf4-52c1-0000-eca039904606",
+      type: "OUTGOING_PAYMENT.COMPLETED",
+      timestamp: "2026-06-05T11:51:16.212053Z",
+      data: {
+        ...LIGHTSPARK_ONRAMP_PAYMENT_DATA,
+        status: "COMPLETED",
+        updatedAt: "2026-06-05T11:51:16.174911Z",
+        settledAt: "2026-06-05T11:51:16.175534Z",
+      },
+    });
+
+    expect(res.status).toBe(200);
+
+    const transfer = await getDb(env)
+      .prepare("SELECT status FROM payment_transfers WHERE id = ?")
+      .bind(TRANSFER_ID)
+      .first<{ status: string }>();
+    expect(transfer).toEqual({ status: "completed" });
   });
 });

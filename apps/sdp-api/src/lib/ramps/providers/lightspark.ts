@@ -37,6 +37,7 @@ import type {
   RampOnrampQuoteInput,
   RampProvider,
   RampRuntimeContext,
+  RampSettlementEvent,
   RampWebhookValidationContext,
   RampWebhookValidationResult,
 } from "../types";
@@ -118,6 +119,102 @@ function mapLightsparkQuoteStatus(status: string | undefined): PaymentRampExecut
   if (normalized === "PROCESSING") return "processing";
   if (normalized === "FAILED" || normalized === "EXPIRED") return "failed";
   return "pending";
+}
+
+const LIGHTSPARK_OUTGOING_PAYMENT_WEBHOOK_TYPES = {
+  "OUTGOING_PAYMENT.PENDING": "awaiting_payment",
+  "OUTGOING_PAYMENT.PROCESSING": "settling",
+  "OUTGOING_PAYMENT.COMPLETED": "settled",
+  "OUTGOING_PAYMENT.FAILED": "failed",
+  "OUTGOING_PAYMENT.EXPIRED": "expired",
+  "OUTGOING_PAYMENT.REFUND_FAILED": "failed",
+} as const satisfies Record<string, RampSettlementEvent["kind"]>;
+
+type LightsparkOutgoingPaymentWebhookType = keyof typeof LIGHTSPARK_OUTGOING_PAYMENT_WEBHOOK_TYPES;
+
+interface LightsparkOutgoingPaymentData {
+  id: string;
+  status: string;
+  quoteId: string;
+  failureReason?: string;
+}
+
+interface LightsparkOutgoingPaymentWebhook {
+  type: LightsparkOutgoingPaymentWebhookType;
+  data: LightsparkOutgoingPaymentData;
+}
+
+function isGridRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object";
+}
+
+function readRequiredGridString(
+  record: Record<string, unknown>,
+  field: string,
+  payloadName: string
+): string {
+  const value = record[field];
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new AppError("BAD_REQUEST", `${payloadName} is missing ${field}`);
+  }
+  return value.trim();
+}
+
+function readOptionalGridString(
+  record: Record<string, unknown>,
+  field: string
+): string | undefined {
+  const value = record[field];
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  if (trimmed.length === 0) {
+    return undefined;
+  }
+  return trimmed;
+}
+
+function readRequiredGridObject(
+  record: Record<string, unknown>,
+  field: string,
+  payloadName: string
+): Record<string, unknown> {
+  const value = record[field];
+  if (!isGridRecord(value)) {
+    throw new AppError("BAD_REQUEST", `${payloadName} is missing ${field}`);
+  }
+  return value;
+}
+
+function isLightsparkOutgoingPaymentWebhookType(
+  value: string
+): value is LightsparkOutgoingPaymentWebhookType {
+  return Object.hasOwn(LIGHTSPARK_OUTGOING_PAYMENT_WEBHOOK_TYPES, value);
+}
+
+function parseLightsparkOutgoingPaymentWebhook(
+  payload: unknown
+): LightsparkOutgoingPaymentWebhook | null {
+  if (!isGridRecord(payload)) {
+    throw new AppError("BAD_REQUEST", "Lightspark webhook body must be an object");
+  }
+
+  const type = readRequiredGridString(payload, "type", "Lightspark webhook");
+  if (!isLightsparkOutgoingPaymentWebhookType(type)) {
+    return null;
+  }
+
+  const data = readRequiredGridObject(payload, "data", "Lightspark webhook");
+  return {
+    type,
+    data: {
+      id: readRequiredGridString(data, "id", "Lightspark outgoing payment webhook data"),
+      status: readRequiredGridString(data, "status", "Lightspark outgoing payment webhook data"),
+      quoteId: readRequiredGridString(data, "quoteId", "Lightspark outgoing payment webhook data"),
+      failureReason: readOptionalGridString(data, "failureReason"),
+    },
+  };
 }
 
 interface LightsparkExternalAccount {
@@ -461,6 +558,24 @@ export class LightsparkRampClient implements RampProvider {
     }
 
     return { provider: this.id, payload };
+  }
+
+  parseSettlementEvent(payload: unknown): RampSettlementEvent {
+    const webhook = parseLightsparkOutgoingPaymentWebhook(payload);
+    if (!webhook) {
+      return { provider: this.id, kind: "ignore", reason: "unsupported_event" };
+    }
+
+    const reference = webhook.data.quoteId;
+    if (!reference) {
+      return { provider: this.id, kind: "ignore", reason: "missing_quote_id" };
+    }
+
+    const kind = LIGHTSPARK_OUTGOING_PAYMENT_WEBHOOK_TYPES[webhook.type];
+    if (kind === "failed" || kind === "expired") {
+      return { provider: this.id, kind, reference, error: webhook.data.failureReason };
+    }
+    return { provider: this.id, kind, reference };
   }
 
   private async request<TResponse, TBody = never>(

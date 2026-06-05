@@ -209,9 +209,7 @@ function OnrampRail({
             ? "Verification pending"
             : verificationUrl
               ? "Complete Verification"
-              : wizard.isLastStep
-                ? "Finish Transaction"
-                : "Next"
+              : "Next"
       }
       walletsError={wizard.liveWalletsError}
       onPrimary={
@@ -230,6 +228,7 @@ function OnrampRail({
           <PoweredByRampProvider provider={wizard.quote.provider} />
         ) : null
       }
+      hidePrimary={wizard.currentStepId === "PROVIDER"}
     >
       <OnrampStepContent wizard={wizard} />
     </RampWizardShell>
