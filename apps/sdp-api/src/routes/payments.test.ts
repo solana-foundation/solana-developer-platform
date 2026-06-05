@@ -666,6 +666,96 @@ describe("Payments routes", () => {
     expect(subscriptionBody.error.message).toContain("Counterparty not found");
   });
 
+  it("requires plan wallet access when mutating subscriptions and collection attempts", async () => {
+    env.PAYMENTS_RECURRING_ENABLED = "true";
+    const headers = {
+      Authorization: `Bearer ${TEST_API_KEY.raw}`,
+      "Content-Type": "application/json",
+    };
+
+    const counterpartyRes = await app.request(
+      "/v1/counterparties",
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          externalId: "subscription_wallet_scope_counterparty",
+          entityType: "individual",
+          displayName: "Wallet Scope Subscription Counterparty",
+          email: "subscription-wallet-scope-counterparty@example.com",
+        }),
+      },
+      env
+    );
+    expect(counterpartyRes.status).toBe(201);
+    const counterpartyBody = (await counterpartyRes.json()) as {
+      data: { counterparty: { id: string } };
+    };
+
+    const planRes = await app.request(
+      "/v1/payments/subscription-plans",
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          ownerWalletId: TEST_WALLET_ID,
+          token: DEVNET_USDC_MINT,
+          amount: "25.00",
+          periodHours: 720,
+          status: "active",
+        }),
+      },
+      env
+    );
+    expect(planRes.status).toBe(201);
+    const planBody = (await planRes.json()) as { data: { subscriptionPlan: { id: string } } };
+
+    const subscriptionRes = await app.request(
+      "/v1/payments/subscriptions",
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          planId: planBody.data.subscriptionPlan.id,
+          counterpartyId: counterpartyBody.data.counterparty.id,
+          subscriberAddress: TEST_SOLANA_ADDRESSES.wallet2,
+          status: "active",
+        }),
+      },
+      env
+    );
+    expect(subscriptionRes.status).toBe(201);
+    const subscriptionBody = (await subscriptionRes.json()) as {
+      data: { subscription: { id: string } };
+    };
+
+    await seedCachedKey({
+      walletBindings: [{ walletId: "wal_other_wallet", permissions: ["payments:write"] }],
+    });
+
+    const updateSubscriptionRes = await app.request(
+      `/v1/payments/subscriptions/${subscriptionBody.data.subscription.id}`,
+      {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({ status: "paused" }),
+      },
+      env
+    );
+    expect(updateSubscriptionRes.status).toBe(403);
+
+    const attemptRes = await app.request(
+      `/v1/payments/subscriptions/${subscriptionBody.data.subscription.id}/collection-attempts`,
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ status: "processing" }),
+      },
+      env
+    );
+    expect(attemptRes.status).toBe(403);
+  });
+
   it("exercises the recurring subscription lifecycle through SDP API routes", async () => {
     env.PAYMENTS_RECURRING_ENABLED = "true";
     const authHeaders = {
