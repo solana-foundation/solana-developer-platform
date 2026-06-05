@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.26.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.25.0...v0.26.0) (2026-06-05)
+
+### Features
+
+* transaction reconciliation and transaction history ([#413](https://github.com/solana-foundation/solana-developer-platform/pull/413)) ([9bc06d0](https://github.com/solana-foundation/solana-developer-platform/commit/9bc06d0e937f4a6d9d3816242116877b1511546f))
+* add Payments v2 dashboard cookie toggle ([#412](https://github.com/solana-foundation/solana-developer-platform/pull/412)) ([71a86f1](https://github.com/solana-foundation/solana-developer-platform/commit/71a86f1e73a4a09e5542ddbc281a232620067710))
+* add in estimates for on/offramp ([#411](https://github.com/solana-foundation/solana-developer-platform/pull/411)) ([9ec2610](https://github.com/solana-foundation/solana-developer-platform/commit/9ec2610b0bb199616a4a975941b8533c38ef4c8c))
+* add Solana subscription primitives ([#406](https://github.com/solana-foundation/solana-developer-platform/pull/406)) ([cbd77f1](https://github.com/solana-foundation/solana-developer-platform/commit/cbd77f17c1c359af36a24dc87110a654ebd8bcf6))
+* add counterparty crypto-wallet accounts ([#405](https://github.com/solana-foundation/solana-developer-platform/pull/405)) ([acfd833](https://github.com/solana-foundation/solana-developer-platform/commit/acfd83308edb8e868f5d8acc48c983367fd63e07))
+* **onramp:** BVNK fiat→crypto on-ramp with KYC onboarding + verification webhooks ([#404](https://github.com/solana-foundation/solana-developer-platform/pull/404)) ([627eaa5](https://github.com/solana-foundation/solana-developer-platform/commit/627eaa57fa64e6ab365aee3e083eaf56f39fbdf5))
+* onchain transfers in payments v2 deposit/pay flows ([#401](https://github.com/solana-foundation/solana-developer-platform/pull/401)) ([00f21c2](https://github.com/solana-foundation/solana-developer-platform/commit/00f21c2c09461549459a2a347bb733f9793eaa4a))
+
 ## [0.25.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.24.0...v0.25.0) (2026-06-03)
 
 ### Features
