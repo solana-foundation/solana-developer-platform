@@ -58,6 +58,35 @@ CREATE INDEX IF NOT EXISTS idx_payment_recurring_payments_subscription
     ON payment_recurring_payments(subscription_id)
     WHERE subscription_id IS NOT NULL;
 
+CREATE TABLE IF NOT EXISTS payment_recurring_operation_attempts (
+    id TEXT PRIMARY KEY,
+    organization_id TEXT NOT NULL,
+    project_id TEXT NOT NULL,
+    recurring_payment_id TEXT NOT NULL,
+    operation TEXT NOT NULL,
+    status TEXT NOT NULL,
+    signature TEXT,
+    slot INTEGER,
+    block_time TEXT,
+    error TEXT,
+    created_at TEXT NOT NULL DEFAULT sdp_iso_now(),
+    updated_at TEXT NOT NULL DEFAULT sdp_iso_now(),
+    FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
+    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+    FOREIGN KEY (recurring_payment_id) REFERENCES payment_recurring_payments(id) ON DELETE CASCADE,
+    CONSTRAINT payment_recurring_operation_attempts_operation_check
+        CHECK (operation IN ('cancel', 'resume')),
+    CONSTRAINT payment_recurring_operation_attempts_status_check
+        CHECK (status IN ('processing', 'submitted', 'confirmed', 'failed'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_payment_recurring_operation_attempts_recurring
+    ON payment_recurring_operation_attempts(recurring_payment_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_payment_recurring_operation_attempts_submitted
+    ON payment_recurring_operation_attempts(status, updated_at)
+    WHERE status IN ('processing', 'submitted');
+
 ALTER TABLE payment_subscription_collection_attempts
     ADD COLUMN IF NOT EXISTS recurring_payment_id TEXT;
 
