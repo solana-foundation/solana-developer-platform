@@ -27,11 +27,8 @@ import { PoweredByRampProvider, RampWizardShell } from "./components/ramp-wizard
 import { OFFRAMP_STEPS, useOfframpWizard } from "./hooks/use-offramp-wizard";
 import { ONCHAIN_RECEIVE_STEPS, useOnchainReceiveWizard } from "./hooks/use-onchain-receive-wizard";
 import { ONCHAIN_SEND_STEPS, useOnchainSendWizard } from "./hooks/use-onchain-send-wizard";
-import {
-  isTerminalOnrampTransferStatus,
-  ONRAMP_STEPS,
-  useOnrampWizard,
-} from "./hooks/use-onramp-wizard";
+import { ONRAMP_STEPS, useOnrampWizard } from "./hooks/use-onramp-wizard";
+import { isTerminalRampTransferStatus } from "./hooks/use-ramp-wizard";
 
 interface PaymentsActionPageProps {
   mode: "send" | "receive";
@@ -115,6 +112,10 @@ function OfframpRail({
     onExit,
   });
 
+  const transferTerminal = wizard.transferStatus
+    ? isTerminalRampTransferStatus(wizard.transferStatus.status)
+    : false;
+
   return (
     <RampWizardShell
       steps={[...preSteps, ...OFFRAMP_STEPS]}
@@ -136,6 +137,16 @@ function OfframpRail({
           <PoweredByRampProvider provider={wizard.quote.provider} />
         ) : null
       }
+      footerActions={
+        transferTerminal ? (
+          <Button asChild type="button" variant="secondary" className="h-14 rounded-full text-base">
+            <Link href={`/dashboard/payments/counterparty/${wizard.fields.counterpartyId}`}>
+              Go to transaction
+            </Link>
+          </Button>
+        ) : null
+      }
+      hidePrimary={wizard.currentStepId === "COMPLETE"}
     >
       <OfframpStepContent wizard={wizard} />
     </RampWizardShell>
@@ -199,7 +210,7 @@ function OnrampRail({
     wizard.currentStepId === "PROVIDER" && wizard.bvnkInstruction?.onboardingStatus === "verifying";
 
   const transferTerminal = wizard.transferStatus
-    ? isTerminalOnrampTransferStatus(wizard.transferStatus.status)
+    ? isTerminalRampTransferStatus(wizard.transferStatus.status)
     : false;
 
   return (

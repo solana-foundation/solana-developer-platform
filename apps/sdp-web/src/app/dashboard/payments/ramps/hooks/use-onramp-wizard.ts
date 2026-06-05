@@ -10,7 +10,12 @@ import {
 } from "@/app/dashboard/payments/payments-workspace.data";
 import { ONRAMP_PAIRS, toRampCryptoToken } from "@/lib/ramps";
 import { depositAmountSchema, depositSelectionSchema } from "../schema";
-import { type RampWizardStep, type UseRampWizardProps, useRampWizard } from "./use-ramp-wizard";
+import {
+  isTerminalRampTransferStatus,
+  type RampWizardStep,
+  type UseRampWizardProps,
+  useRampWizard,
+} from "./use-ramp-wizard";
 
 export const ONRAMP_STEPS = [
   { id: "DEPOSIT", label: "Deposit", title: "How much would you like to deposit?" },
@@ -18,10 +23,6 @@ export const ONRAMP_STEPS = [
 ] as const satisfies readonly RampWizardStep[];
 
 export type OnrampStepId = (typeof ONRAMP_STEPS)[number]["id"];
-
-export function isTerminalOnrampTransferStatus(status: string) {
-  return status === "completed" || status === "failed" || status === "expired";
-}
 
 export function useOnrampWizard(props: UseRampWizardProps) {
   const [quoteSimulationLoading, setQuoteSimulationLoading] = useState(false);
@@ -73,7 +74,7 @@ export function useOnrampWizard(props: UseRampWizardProps) {
       fetchTransferByProviderReference({ provider, providerReference }),
     {
       refreshInterval: (transfer) =>
-        transfer && isTerminalOnrampTransferStatus(transfer.status) ? 0 : 3000,
+        transfer && isTerminalRampTransferStatus(transfer.status) ? 0 : 3000,
       revalidateOnFocus: true,
       dedupingInterval: 0,
     }
