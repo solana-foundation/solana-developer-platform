@@ -252,6 +252,11 @@ export function createPostgresPaymentRecurringPaymentsRepository(
                        AND a.due_at = rp.next_collection_due_at
                        AND a.status IN ('pending', 'processing', 'confirmed')
                        AND NOT (
+                         a.status = 'processing'
+                         AND a.signature IS NULL
+                         AND a.updated_at <= ?
+                       )
+                       AND NOT (
                          a.status IN ('processing', 'confirmed')
                          AND a.transfer_id IS NOT NULL
                          AND a.signature IS NOT NULL
@@ -279,7 +284,7 @@ export function createPostgresPaymentRecurringPaymentsRepository(
             ORDER BY rp.next_collection_due_at ASC
             LIMIT ?`
         )
-        .bind(params.now, params.retryAfter, params.limit)
+        .bind(params.now, params.retryAfter, params.retryAfter, params.limit)
         .all<Record<string, unknown>>();
 
       return rows.results.map(mapRecurringPaymentRow);

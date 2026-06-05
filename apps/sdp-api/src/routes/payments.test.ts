@@ -865,6 +865,34 @@ describe("Payments routes", () => {
     expect(recurringPlanPda).toBeTruthy();
     expect(recurringSubscriptionPda).toBeTruthy();
 
+    const staleUnsignedAttemptUpdatedAt = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    await repositories.createPaymentSubscriptionsRepository(env).createCollectionAttempt({
+      id: "psca_stale_unsigned_retry",
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      subscriptionId: recurringSubscriptionId,
+      recurringPaymentId,
+      transferId: null,
+      token: DEVNET_USDC_MINT,
+      amount: "0.50",
+      dueAt: firstCollectionAt,
+      attemptedAt: staleUnsignedAttemptUpdatedAt,
+      status: "processing",
+      signature: null,
+      error: null,
+      metadata: { source: "recurring_payments" },
+      createdAt: staleUnsignedAttemptUpdatedAt,
+      updatedAt: staleUnsignedAttemptUpdatedAt,
+    });
+    const dueWithStaleUnsignedAttempt = await repositories
+      .createPaymentRecurringPaymentsRepository(env)
+      .listDueRecurringPayments({
+        now: new Date().toISOString(),
+        retryAfter: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
+        limit: 10,
+      });
+    expect(dueWithStaleUnsignedAttempt.map((payment) => payment.id)).toContain(recurringPaymentId);
+
     const originalCreatePaymentsRepository = repositories.createPaymentsRepository;
     const createPaymentsRepositorySpy = vi
       .spyOn(repositories, "createPaymentsRepository")
@@ -902,16 +930,26 @@ describe("Payments routes", () => {
           recurringPaymentId: string | null;
           status: string;
           transferId: string | null;
+          error: string | null;
         }>;
       };
     };
-    expect(failedAttemptsBody.data.collectionAttempts).toEqual([
-      expect.objectContaining({
-        recurringPaymentId,
-        status: "failed",
-        transferId: null,
-      }),
-    ]);
+    expect(failedAttemptsBody.data.collectionAttempts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          recurringPaymentId,
+          status: "failed",
+          transferId: null,
+          error: expect.stringContaining("expired before transfer submission"),
+        }),
+        expect.objectContaining({
+          recurringPaymentId,
+          status: "failed",
+          transferId: null,
+          error: "Failed to create payment transfer record",
+        }),
+      ])
+    );
 
     mockRecurringCollectionAccounts();
     const originalCreatePostgresRecurringPaymentsRepository =
