@@ -86,6 +86,10 @@ export const counterpartyIdParamsSchema = z.object({
   counterpartyId: counterpartyIdSchema,
 });
 
+export const counterpartyAccountIdParamsSchema = counterpartyIdParamsSchema.extend({
+  accountId: z.string().min(1),
+});
+
 export const createCounterpartySchema = z.object({
   externalId: z.string().min(1).max(256).optional(),
   entityType: counterpartyEntityTypeSchema,

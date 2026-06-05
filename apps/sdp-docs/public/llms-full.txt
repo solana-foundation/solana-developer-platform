@@ -3,7 +3,7 @@
 > Full public documentation for Solana Developer Platform — all page content for AI and agent ingestion.
 
 ## Canonical URLs
-- Docs: https://platform.solana.com
+- Docs: https://platform.solana.com/docs
 - API: https://api.solana.com
 - Interactive API docs: https://api.solana.com/docs
 - OpenAPI: https://api.solana.com/openapi.json

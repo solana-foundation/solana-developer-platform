@@ -8,14 +8,11 @@ const jsonObjectSchema = z.record(z.string(), z.unknown());
 
 export const cryptoWalletDetailsSchema = z
   .object({
-    network: z.string().min(1).max(64),
+    network: z.literal("solana"),
     address: z.string().min(1).max(256),
   })
   .superRefine((value, ctx) => {
-    if (
-      value.network === "solana" &&
-      !(value.address.length >= 32 && value.address.length <= 44 && isAddress(value.address))
-    ) {
+    if (!(value.address.length >= 32 && value.address.length <= 44 && isAddress(value.address))) {
       ctx.addIssue({
         code: "custom",
         path: ["address"],

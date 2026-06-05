@@ -7,6 +7,7 @@ import {
   allowlistEntrySchema,
   apiKeyDetailSchema,
   apiKeyResponseSchema,
+  counterpartyAccountResponseSchema,
   counterpartyFieldOptionsResponseSchema,
   counterpartyResponseSchema,
   currentUserResponseSchema,
@@ -29,6 +30,7 @@ import {
   inviteMemberResponseSchema,
   listApiKeysResponseSchema,
   listCounterpartiesResponseSchema,
+  listCounterpartyAccountsResponseSchema,
   listMembersResponseSchema,
   listProjectApiKeysResponseSchema,
   listProjectMembersResponseSchema,
@@ -90,6 +92,10 @@ export const counterpartyFieldOptionsResponse = successResponseSchema(
   counterpartyFieldOptionsResponseSchema
 );
 export const listCounterpartiesResponse = successResponseSchema(listCounterpartiesResponseSchema);
+export const counterpartyAccountResponse = successResponseSchema(counterpartyAccountResponseSchema);
+export const listCounterpartyAccountsResponse = successResponseSchema(
+  listCounterpartyAccountsResponseSchema
+);
 
 export const projectResponse = successResponseSchema(projectResponseSchema);
 export const listProjectsResponse = successResponseSchema(listProjectsResponseSchema);
