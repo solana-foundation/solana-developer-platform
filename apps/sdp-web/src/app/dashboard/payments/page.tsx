@@ -1,6 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { getAuthEntryPath } from "@/lib/auth-entry";
+import { getDashboardFeatureFlags } from "@/lib/dashboard-feature-flags.server";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createSdpApiClient } from "@/lib/sdp-api";
 import { fetchActiveApiKeys, resolvePlaygroundApiBaseUrl } from "../playground-api-data";
@@ -36,6 +37,7 @@ export default async function PaymentsPage({ searchParams }: PaymentsPageProps) 
         ? "playground"
         : "overview";
     const apiBaseUrl = resolvePlaygroundApiBaseUrl();
+    const featureFlags = await getDashboardFeatureFlags();
     const apiClient = await trace.step("create_sdp_api_client", () =>
       createSdpApiClient(trace.childContext("dashboard.payments.api"))
     );
@@ -95,6 +97,7 @@ export default async function PaymentsPage({ searchParams }: PaymentsPageProps) 
         <PaymentsWorkspace
           apiBaseUrl={apiBaseUrl}
           apiKeys={apiKeys}
+          paymentsV2={featureFlags.paymentsV2}
           wallets={wallets}
           walletsError={walletsError}
           aggregate={aggregate}

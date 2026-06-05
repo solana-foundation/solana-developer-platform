@@ -3,7 +3,6 @@ import type { ListProjectsResponse, Project } from "@sdp/types";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import type { ReactNode } from "react";
-import { DashboardFeatureFlagsConsoleBridge } from "@/components/dashboard-feature-flags-console-bridge";
 import { DashboardShell } from "@/components/dashboard-shell";
 import { DashboardWorkspaceProvider } from "@/contexts/dashboard-workspace-context";
 import { NetworkDebugProvider } from "@/contexts/network-debug-context";
@@ -50,13 +49,11 @@ export default async function DashboardLayout({ children }: { children: ReactNod
       key={getDashboardCacheScopeKey(dashboardCacheScope)}
       dashboardAccess={dashboardAccess}
       serverDashboardCacheScope={dashboardCacheScope}
-      featureFlags={featureFlags}
       projects={projects}
       initialSelectedProjectId={initialSelectedProjectId}
     >
       <NetworkDebugProvider>
-        <DashboardFeatureFlagsConsoleBridge featureFlags={featureFlags} />
-        <DashboardShell>{children}</DashboardShell>
+        <DashboardShell featureFlags={featureFlags}>{children}</DashboardShell>
       </NetworkDebugProvider>
     </DashboardWorkspaceProvider>
   );

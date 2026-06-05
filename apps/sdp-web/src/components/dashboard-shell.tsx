@@ -32,7 +32,11 @@ import { SentryUserContext } from "@/components/sentry-user-context";
 import { Badge } from "@/components/ui/badge";
 import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
-import type { DashboardFeatureFlags } from "@/lib/dashboard-feature-flags";
+import {
+  DASHBOARD_PAYMENTS_V2_OVERRIDE_COOKIE_NAME,
+  DASHBOARD_PAYMENTS_V2_OVERRIDE_COOKIE_VALUES,
+  type DashboardFeatureFlags,
+} from "@/lib/dashboard-feature-flags";
 import { cn } from "@/lib/utils";
 
 type SubNavItem = {
@@ -53,6 +57,34 @@ type NavSection = {
   title: string;
   items: NavItem[];
 };
+
+type DashboardFeatureFlagsConsole = {
+  getPaymentsV2: () => boolean;
+  setPaymentsV2: (enabled: boolean) => void;
+};
+
+declare global {
+  interface Window {
+    sdpDashboardFeatureFlags: DashboardFeatureFlagsConsole;
+  }
+}
+
+const PAYMENTS_V2_OVERRIDE_COOKIE_MAX_AGE_SECONDS = 31_536_000;
+
+function getPaymentsV2OverrideCookieAttributes(maxAgeSeconds: number): string {
+  const secureAttribute = process.env.NODE_ENV === "production" ? "; Secure" : "";
+  return `; Path=/; Max-Age=${maxAgeSeconds}; SameSite=Lax${secureAttribute}`;
+}
+
+function writePaymentsV2Override(enabled: boolean): void {
+  const value = enabled
+    ? DASHBOARD_PAYMENTS_V2_OVERRIDE_COOKIE_VALUES.enabled
+    : DASHBOARD_PAYMENTS_V2_OVERRIDE_COOKIE_VALUES.disabled;
+  document.cookie = `${DASHBOARD_PAYMENTS_V2_OVERRIDE_COOKIE_NAME}=${value}${getPaymentsV2OverrideCookieAttributes(
+    PAYMENTS_V2_OVERRIDE_COOKIE_MAX_AGE_SECONDS
+  )}`;
+  window.location.reload();
+}
 
 function getNavSections(featureFlags: DashboardFeatureFlags): NavSection[] {
   return [
@@ -595,10 +627,16 @@ function DashboardSidebarContent({
 }
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: this shell intentionally coordinates route-specific dashboard layout behavior in one place.
-export function DashboardShell({ children }: { children: ReactNode }) {
+export function DashboardShell({
+  children,
+  featureFlags,
+}: {
+  children: ReactNode;
+  featureFlags: DashboardFeatureFlags;
+}) {
   const { isLoaded, isSignedIn, orgId } = useAuth();
   const pathname = usePathname();
-  const { dashboardAccess, featureFlags, isSidebarOpen, setSidebarOpen, isProjectSwitching } =
+  const { dashboardAccess, isSidebarOpen, setSidebarOpen, isProjectSwitching } =
     useDashboardWorkspace();
   const PageLoadingComponent = resolvePageLoadingComponent(pathname);
   const [isMobileSidebarOpen, setMobileSidebarOpen] = useState(false);
@@ -645,6 +683,13 @@ export function DashboardShell({ children }: { children: ReactNode }) {
     isWalletDetailRoute;
   const shouldLockViewportScroll = shouldUseWorkspaceViewport;
   const shouldLockShellViewport = shouldLockViewportScroll || isMobileSidebarOpen;
+
+  useEffect(() => {
+    window.sdpDashboardFeatureFlags = {
+      getPaymentsV2: () => featureFlags.paymentsV2,
+      setPaymentsV2: writePaymentsV2Override,
+    };
+  }, [featureFlags.paymentsV2]);
 
   useEffect(() => {
     if (previousPathnameRef.current !== pathname) {
