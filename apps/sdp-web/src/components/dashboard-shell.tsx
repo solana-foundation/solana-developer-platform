@@ -627,16 +627,10 @@ function DashboardSidebarContent({
 }
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: this shell intentionally coordinates route-specific dashboard layout behavior in one place.
-export function DashboardShell({
-  children,
-  featureFlags,
-}: {
-  children: ReactNode;
-  featureFlags: DashboardFeatureFlags;
-}) {
+export function DashboardShell({ children }: { children: ReactNode }) {
   const { isLoaded, isSignedIn, orgId } = useAuth();
   const pathname = usePathname();
-  const { dashboardAccess, isSidebarOpen, setSidebarOpen, isProjectSwitching } =
+  const { dashboardAccess, featureFlags, isSidebarOpen, setSidebarOpen, isProjectSwitching } =
     useDashboardWorkspace();
   const PageLoadingComponent = resolvePageLoadingComponent(pathname);
   const [isMobileSidebarOpen, setMobileSidebarOpen] = useState(false);

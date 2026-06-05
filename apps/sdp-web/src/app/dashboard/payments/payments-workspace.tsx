@@ -31,7 +31,6 @@ interface PaymentsApiKeyOption {
 interface PaymentsWorkspaceProps {
   apiBaseUrl: string | null;
   apiKeys: PaymentsApiKeyOption[];
-  paymentsV2: boolean;
   wallets: PaymentsDashboardWallet[];
   walletsError: string | null;
   aggregate: CustodyWalletAggregate | null;
@@ -44,7 +43,6 @@ interface PaymentsWorkspaceProps {
 export function PaymentsWorkspace({
   apiBaseUrl,
   apiKeys,
-  paymentsV2,
   wallets,
   walletsError,
   aggregate,
@@ -53,7 +51,8 @@ export function PaymentsWorkspace({
   transfers,
   transfersError,
 }: PaymentsWorkspaceProps) {
-  const { issuanceTab, selectedPlaygroundApiKeyId, setPlaygroundApiKeys } = useDashboardWorkspace();
+  const { featureFlags, issuanceTab, selectedPlaygroundApiKeyId, setPlaygroundApiKeys } =
+    useDashboardWorkspace();
   const isPlaygroundTab = issuanceTab === "playground";
 
   useEffect(() => {
@@ -104,7 +103,7 @@ export function PaymentsWorkspace({
         <PaymentsOverview
           aggregate={aggregate}
           aggregateError={aggregateError}
-          paymentsV2={paymentsV2}
+          paymentsV2={featureFlags.paymentsV2}
           issuedTokenSymbolsByMint={issuedTokenSymbolsByMint}
           transfers={transfers}
           transfersError={transfersError}

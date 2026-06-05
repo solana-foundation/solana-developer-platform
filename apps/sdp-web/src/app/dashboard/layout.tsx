@@ -49,11 +49,12 @@ export default async function DashboardLayout({ children }: { children: ReactNod
       key={getDashboardCacheScopeKey(dashboardCacheScope)}
       dashboardAccess={dashboardAccess}
       serverDashboardCacheScope={dashboardCacheScope}
+      featureFlags={featureFlags}
       projects={projects}
       initialSelectedProjectId={initialSelectedProjectId}
     >
       <NetworkDebugProvider>
-        <DashboardShell featureFlags={featureFlags}>{children}</DashboardShell>
+        <DashboardShell>{children}</DashboardShell>
       </NetworkDebugProvider>
     </DashboardWorkspaceProvider>
   );
