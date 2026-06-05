@@ -2189,6 +2189,9 @@ describe("Payments routes", () => {
     const compatibilitySubscriptionId = activeWithPastDueBody.data.subscription.id;
     expect(activeWithPastDueBody.data.subscription.nextCollectionDueAt).toBe(pastNextCollectionAt);
 
+    const terminalCounterpartyId = await seedCounterparty({
+      id: "cp_subscription_terminal_create_compat",
+    });
     const terminalCreateRes = await app.request(
       "/v1/payments/subscriptions",
       {
@@ -2196,7 +2199,7 @@ describe("Payments routes", () => {
         headers: jsonHeaders,
         body: JSON.stringify({
           planId,
-          counterpartyId,
+          counterpartyId: terminalCounterpartyId,
           subscriberAddress: TEST_SOLANA_ADDRESSES.wallet2,
           status: "canceled",
         }),
