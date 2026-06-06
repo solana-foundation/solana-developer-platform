@@ -837,6 +837,51 @@ async function persistActivationAuthorizationRecoveryMarker(input: {
   });
 }
 
+async function claimSubmittedLifecycleAttemptOrExpireStale(input: {
+  executor: DatabaseExecutor;
+  organizationId: string;
+  projectId: string;
+  recurringPayment: PaymentRecurringPaymentRow;
+  operation: RecurringLifecycleOperation;
+  updatedAt: string;
+}): Promise<string | null> {
+  const submittedLifecycleAttempt = await input.executor
+    .prepare(
+      `SELECT id
+         FROM payment_recurring_operation_attempts
+        WHERE organization_id = ?
+          AND project_id = ?
+          AND recurring_payment_id = ?
+          AND operation = ?
+          AND status = 'submitted'
+        ORDER BY updated_at DESC
+        LIMIT 1`
+    )
+    .bind(input.organizationId, input.projectId, input.recurringPayment.id, input.operation)
+    .first<{ id: string }>();
+
+  if (!submittedLifecycleAttempt) {
+    return null;
+  }
+  if (isFreshLifecycleClaim(input.recurringPayment.updated_at)) {
+    return submittedLifecycleAttempt.id;
+  }
+
+  await input.executor
+    .prepare(
+      `UPDATE payment_recurring_operation_attempts
+          SET status = 'failed',
+              error = COALESCE(error, 'Stale submitted recurring lifecycle attempt expired before confirmation'),
+              updated_at = ?
+        WHERE id = ?
+          AND status = 'submitted'`
+    )
+    .bind(input.updatedAt, submittedLifecycleAttempt.id)
+    .run();
+
+  return null;
+}
+
 async function claimLifecycleRecords(input: {
   env: Env;
   organizationId: string;
@@ -925,27 +970,21 @@ async function claimLifecycleRecords(input: {
 
     const now = new Date().toISOString();
     if (recurringPayment.status === claimStatus) {
-      const submittedLifecycleAttempt = await tx
-        .prepare(
-          `SELECT id
-	             FROM payment_recurring_operation_attempts
-	            WHERE organization_id = ?
-	              AND project_id = ?
-	              AND recurring_payment_id = ?
-	              AND operation = ?
-	              AND status = 'submitted'
-	            ORDER BY updated_at DESC
-	            LIMIT 1`
-        )
-        .bind(input.organizationId, input.projectId, recurringPayment.id, input.operation)
-        .first<{ id: string }>();
+      const submittedLifecycleAttemptId = await claimSubmittedLifecycleAttemptOrExpireStale({
+        executor: tx,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        recurringPayment,
+        operation: input.operation,
+        updatedAt: now,
+      });
 
-      if (submittedLifecycleAttempt) {
+      if (submittedLifecycleAttemptId) {
         return {
           alreadyFinalized: false,
           recurringPayment,
           subscription,
-          lifecycleAttemptId: submittedLifecycleAttempt.id,
+          lifecycleAttemptId: submittedLifecycleAttemptId,
           lifecycleAttemptSubmitted: true,
         };
       }
