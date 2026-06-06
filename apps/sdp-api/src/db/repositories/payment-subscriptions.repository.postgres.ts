@@ -666,10 +666,7 @@ export function createPostgresPaymentSubscriptionsRepository(
     },
 
     async updateCollectionAttempt(input: UpdatePaymentSubscriptionCollectionAttemptInput) {
-      const existing = await getAttemptByIdInternal(db, input.attemptId);
-      if (!existing) return null;
-
-      await db
+      const updated = await db
         .prepare(
           `UPDATE payment_subscription_collection_attempts
               SET transfer_id = CASE WHEN ?::boolean THEN ? ELSE transfer_id END,
@@ -696,6 +693,10 @@ export function createPostgresPaymentSubscriptionsRepository(
           input.attemptId
         )
         .run();
+
+      if (updated === 0) {
+        return null;
+      }
 
       return getAttemptByIdInternal(db, input.attemptId);
     },

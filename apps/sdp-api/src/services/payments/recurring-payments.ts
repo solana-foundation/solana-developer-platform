@@ -2067,6 +2067,22 @@ async function createProcessingCollectionAttempt(input: {
         "Recurring payment collection state changed before the attempt was claimed"
       );
     }
+    const existingActiveAttempt = await tx.queryOne<{ id: string }>(
+      `SELECT id
+         FROM payment_subscription_collection_attempts
+        WHERE organization_id = ?
+          AND project_id = ?
+          AND recurring_payment_id = ?
+          AND due_at = ?
+          AND status IN ('pending', 'processing', 'confirmed')
+        ORDER BY updated_at DESC
+        LIMIT 1
+        FOR UPDATE`,
+      [input.organizationId, input.projectId, input.recurringPayment.id, input.dueAt]
+    );
+    if (existingActiveAttempt) {
+      throw new AppError("CONFLICT", "Collection attempt already exists for this due time");
+    }
 
     const attempt = await txSubscriptionsRepo.createCollectionAttempt({
       id: `psca_${crypto.randomUUID()}`,
@@ -2088,7 +2104,7 @@ async function createProcessingCollectionAttempt(input: {
     });
 
     if (!attempt) {
-      throw new AppError("INTERNAL_ERROR", "Failed to create collection attempt");
+      throw new AppError("CONFLICT", "Collection attempt already exists for this due time");
     }
 
     return attempt;
