@@ -286,7 +286,7 @@ async function expireStaleUnsignedProcessingAttemptsWithExecutor(
             FROM stale_collect_claims stale
            WHERE op.recurring_payment_id = stale.recurring_payment_id
              AND op.operation = 'collect'
-             AND op.status = 'processing'
+             AND op.status IN ('processing', 'submitted')
            RETURNING op.id
         )
       SELECT (SELECT COUNT(*)::int FROM updated_linked_attempts) AS expired_linked_attempts,
