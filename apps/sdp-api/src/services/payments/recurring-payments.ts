@@ -1483,18 +1483,9 @@ async function createFailedCollectionAttemptForRetry(input: {
     console.error("Failed to record recurring collection retry backoff attempt", {
       recurringPaymentId: input.recurringPayment.id,
       dueAt: input.dueAt,
+      originalError: input.error,
       error: recordError instanceof Error ? recordError.message : String(recordError),
     });
-    throw new AppError(
-      "INTERNAL_ERROR",
-      "Failed to record recurring collection retry backoff attempt",
-      {
-        recurringPaymentId: input.recurringPayment.id,
-        dueAt: input.dueAt,
-        originalError: input.error,
-        recordError: toErrorMessage(recordError),
-      }
-    );
   }
 }
 
