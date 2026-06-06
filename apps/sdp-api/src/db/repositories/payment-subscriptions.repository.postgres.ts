@@ -567,8 +567,34 @@ export function createPostgresPaymentSubscriptionsRepository(
       return getAttemptByIdInternal(db, input.attemptId);
     },
 
-    expireStaleUnsignedProcessingAttempts(params) {
-      return db
+    async expireStaleUnsignedProcessingAttempts(params) {
+      const expiredLinkedTransfers = await db
+        .prepare(
+          `UPDATE payment_transfers
+              SET status = 'failed',
+                  error = COALESCE(error, 'Stale recurring collection transfer expired after failed attempt'),
+                  updated_at = ?
+            WHERE id IN (
+                  SELECT t.id
+                    FROM payment_subscription_collection_attempts a
+                    JOIN payment_transfers t
+                      ON t.id = a.transfer_id
+                     AND t.organization_id = a.organization_id
+                     AND t.project_id = a.project_id
+                   WHERE a.status = 'failed'
+                     AND a.recurring_payment_id IS NOT NULL
+                     AND a.transfer_id IS NOT NULL
+                     AND a.signature IS NULL
+                     AND a.updated_at <= ?
+                     AND t.status = 'processing'
+                     AND t.signature IS NULL
+                   ORDER BY a.updated_at ASC
+                   LIMIT ?
+            )`
+        )
+        .bind(params.updatedAt, params.olderThan, params.limit)
+        .run();
+      const expiredAttempts = await db
         .prepare(
           `UPDATE payment_subscription_collection_attempts
               SET status = 'failed',
@@ -589,6 +615,8 @@ export function createPostgresPaymentSubscriptionsRepository(
         )
         .bind(params.updatedAt, params.updatedAt, params.olderThan, params.limit)
         .run();
+
+      return expiredLinkedTransfers + expiredAttempts;
     },
 
     async listSubmittedRecurringCollectionAttempts(params) {

@@ -1438,6 +1438,71 @@ describe("Payments routes", () => {
       error: "simulated collection submission failure",
     });
 
+    const staleFailedAttemptUpdatedAt = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    const staleFailedAttemptTransferId = "ptr_stale_failed_attempt_transfer";
+    await repositories.createPaymentsRepository(env).createTransfer({
+      id: staleFailedAttemptTransferId,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      walletId: TEST_WALLET_ID,
+      counterpartyId,
+      sourceAddress: TEST_SOLANA_ADDRESSES.wallet1,
+      destinationAddress: TEST_SOLANA_ADDRESSES.wallet2,
+      token: DEVNET_USDC_MINT,
+      amount: "0.50",
+      memo: null,
+      type: "transfer",
+      direction: "outbound",
+      status: "processing",
+      provider: null,
+      providerReference: null,
+      deliveryMode: null,
+      fiatCurrency: null,
+      fiatAmount: null,
+      providerData: { source: "recurring_payments" },
+      serializedTx: null,
+      initiatedByKeyId: TEST_API_KEY.id,
+      createdAt: staleFailedAttemptUpdatedAt,
+      updatedAt: staleFailedAttemptUpdatedAt,
+    });
+    await repositories.createPaymentSubscriptionsRepository(env).createCollectionAttempt({
+      id: "psca_stale_failed_attempt_transfer",
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      subscriptionId: recurringSubscriptionId,
+      recurringPaymentId,
+      transferId: staleFailedAttemptTransferId,
+      token: DEVNET_USDC_MINT,
+      amount: "0.50",
+      dueAt: firstCollectionAt,
+      attemptedAt: staleFailedAttemptUpdatedAt,
+      status: "failed",
+      signature: null,
+      error: "simulated cleanup marker without transfer cleanup",
+      metadata: { source: "recurring_payments" },
+      createdAt: staleFailedAttemptUpdatedAt,
+      updatedAt: staleFailedAttemptUpdatedAt,
+    });
+    const expiredStaleFailedAttemptRecords = await repositories
+      .createPaymentSubscriptionsRepository(env)
+      .expireStaleUnsignedProcessingAttempts({
+        olderThan: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
+        updatedAt: new Date().toISOString(),
+        limit: 10,
+      });
+    expect(expiredStaleFailedAttemptRecords).toBeGreaterThanOrEqual(1);
+    const staleFailedAttemptTransferAfter = await repositories
+      .createPaymentsRepository(env)
+      .getTransferById({
+        transferId: staleFailedAttemptTransferId,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+      });
+    expect(staleFailedAttemptTransferAfter).toMatchObject({
+      status: "failed",
+      error: expect.stringContaining("failed attempt"),
+    });
+
     const staleLinkedAttemptUpdatedAt = new Date(Date.now() - 60 * 60 * 1000).toISOString();
     const staleLinkedTransferId = "ptr_stale_linked_cancel_race";
     const staleLinkedTransfer = await repositories.createPaymentsRepository(env).createTransfer({

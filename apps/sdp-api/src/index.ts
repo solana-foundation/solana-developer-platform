@@ -10,6 +10,10 @@
 import { createApp } from "@/app";
 import { runPendingTransfersReconciliation } from "@/cron/pending-transfers";
 import { runRecurringPaymentsCollection } from "@/cron/recurring-payments";
+import {
+  isRecurringPaymentCollectionEnabled,
+  isRecurringPaymentsEnabled,
+} from "@/lib/feature-flags";
 import { withProcessEnvFallback } from "@/lib/runtime-env";
 import { WorkersBackgroundRunner } from "@/runtime/background-cf";
 import { getSentryOptions, isSentryEnabled } from "@/runtime/observability";
@@ -33,11 +37,13 @@ const worker = {
       bg: new WorkersBackgroundRunner(ctx),
       observability: isSentryEnabled(runtimeEnv) ? cloudflareObservability : undefined,
     });
-    runRecurringPaymentsCollection({
-      env: runtimeEnv,
-      bg: new WorkersBackgroundRunner(ctx),
-      observability: isSentryEnabled(runtimeEnv) ? cloudflareObservability : undefined,
-    });
+    if (isRecurringPaymentsEnabled(runtimeEnv) && isRecurringPaymentCollectionEnabled(runtimeEnv)) {
+      runRecurringPaymentsCollection({
+        env: runtimeEnv,
+        bg: new WorkersBackgroundRunner(ctx),
+        observability: isSentryEnabled(runtimeEnv) ? cloudflareObservability : undefined,
+      });
+    }
   },
   request(
     input: RequestInfo | URL,

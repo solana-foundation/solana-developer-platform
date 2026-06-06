@@ -1189,6 +1189,9 @@ async function finalizeRecurringPaymentLifecycleAfterChain(input: {
     if (isRecurringPaymentLifecycleFinalized({ ...current, operation: input.operation })) {
       return current.recurringPayment;
     }
+    if (error instanceof AppError && error.code === "CONFLICT") {
+      throw error;
+    }
     if (
       !isRecurringPaymentLifecycleClaimStillFinalizable({
         ...current,
