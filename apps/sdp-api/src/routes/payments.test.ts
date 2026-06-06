@@ -1543,6 +1543,76 @@ describe("Payments routes", () => {
       error: expect.stringContaining("failed attempt"),
     });
 
+    const transferSignatureOnlyDueAt = new Date(Date.now() - 90 * 60 * 1000).toISOString();
+    const transferSignatureOnlyTransferId = "ptr_transfer_signature_only_recovery";
+    await repositories.createPaymentsRepository(env).createTransfer({
+      id: transferSignatureOnlyTransferId,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      walletId: TEST_WALLET_ID,
+      counterpartyId,
+      sourceAddress: TEST_SOLANA_ADDRESSES.wallet1,
+      destinationAddress: TEST_SOLANA_ADDRESSES.wallet2,
+      token: DEVNET_USDC_MINT,
+      amount: "0.50",
+      memo: null,
+      type: "transfer",
+      direction: "outbound",
+      status: "processing",
+      provider: null,
+      providerReference: null,
+      deliveryMode: null,
+      fiatCurrency: null,
+      fiatAmount: null,
+      providerData: { source: "recurring_payments" },
+      serializedTx: null,
+      initiatedByKeyId: TEST_API_KEY.id,
+      createdAt: transferSignatureOnlyDueAt,
+      updatedAt: transferSignatureOnlyDueAt,
+    });
+    await repositories.createPaymentsRepository(env).updateTransfer({
+      transferId: transferSignatureOnlyTransferId,
+      signature: `6${MOCK_SIGNATURE_TAIL}`,
+      updatedAt: new Date().toISOString(),
+    });
+    await repositories.createPaymentSubscriptionsRepository(env).createCollectionAttempt({
+      id: "psca_transfer_signature_only_recovery",
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      subscriptionId: recurringSubscriptionId,
+      recurringPaymentId,
+      transferId: transferSignatureOnlyTransferId,
+      token: DEVNET_USDC_MINT,
+      amount: "0.50",
+      dueAt: transferSignatureOnlyDueAt,
+      attemptedAt: transferSignatureOnlyDueAt,
+      status: "processing",
+      signature: null,
+      error: null,
+      metadata: { source: "recurring_payments" },
+      createdAt: transferSignatureOnlyDueAt,
+      updatedAt: transferSignatureOnlyDueAt,
+    });
+    const submittedRecoveries = await repositories
+      .createPaymentSubscriptionsRepository(env)
+      .listSubmittedRecurringCollectionAttempts({ limit: 10 });
+    expect(submittedRecoveries.map((attempt) => attempt.id)).toContain(
+      "psca_transfer_signature_only_recovery"
+    );
+    await repositories.createPaymentSubscriptionsRepository(env).updateCollectionAttempt({
+      attemptId: "psca_transfer_signature_only_recovery",
+      status: "failed",
+      error: "cleared transfer-signature-only recovery fixture",
+      attemptedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    await repositories.createPaymentsRepository(env).updateTransfer({
+      transferId: transferSignatureOnlyTransferId,
+      status: "failed",
+      error: "cleared transfer-signature-only recovery fixture",
+      updatedAt: new Date().toISOString(),
+    });
+
     const staleLinkedAttemptUpdatedAt = new Date(Date.now() - 60 * 60 * 1000).toISOString();
     const staleLinkedTransferId = "ptr_stale_linked_cancel_race";
     const staleLinkedTransfer = await repositories.createPaymentsRepository(env).createTransfer({

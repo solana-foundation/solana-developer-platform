@@ -631,7 +631,7 @@ export function createPostgresPaymentSubscriptionsRepository(
             WHERE a.recurring_payment_id IS NOT NULL
               AND a.status IN ('processing', 'confirmed')
               AND a.transfer_id IS NOT NULL
-              AND a.signature IS NOT NULL
+              AND (a.signature IS NOT NULL OR t.signature IS NOT NULL)
               AND (a.status <> 'confirmed' OR t.status NOT IN ('confirmed', 'finalized'))
             ORDER BY a.updated_at ASC
             LIMIT ?`
