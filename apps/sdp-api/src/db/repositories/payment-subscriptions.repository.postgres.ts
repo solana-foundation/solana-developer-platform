@@ -568,6 +568,58 @@ export function createPostgresPaymentSubscriptionsRepository(
     },
 
     async expireStaleUnsignedProcessingAttempts(params) {
+      const staleLinkedProcessingAttempts = await db
+        .prepare(
+          `SELECT a.id AS attempt_id,
+                  a.transfer_id AS transfer_id
+             FROM payment_subscription_collection_attempts a
+             JOIN payment_transfers t
+               ON t.id = a.transfer_id
+              AND t.organization_id = a.organization_id
+              AND t.project_id = a.project_id
+            WHERE a.status = 'processing'
+              AND a.recurring_payment_id IS NOT NULL
+              AND a.transfer_id IS NOT NULL
+              AND a.signature IS NULL
+              AND a.updated_at <= ?
+              AND t.status = 'processing'
+              AND t.signature IS NULL
+            ORDER BY a.updated_at ASC
+            LIMIT ?`
+        )
+        .bind(params.olderThan, params.limit)
+        .all<{ attempt_id: string; transfer_id: string }>();
+      const staleLinkedAttemptIds = staleLinkedProcessingAttempts.results.map(
+        (row) => row.attempt_id
+      );
+      const staleLinkedTransferIds = staleLinkedProcessingAttempts.results.map(
+        (row) => row.transfer_id
+      );
+      if (staleLinkedAttemptIds.length > 0) {
+        const attemptPlaceholders = staleLinkedAttemptIds.map(() => "?").join(", ");
+        const transferPlaceholders = staleLinkedTransferIds.map(() => "?").join(", ");
+        await db
+          .prepare(
+            `UPDATE payment_transfers
+                SET status = 'failed',
+                    error = COALESCE(error, 'Stale recurring collection transfer expired before submission'),
+                    updated_at = ?
+              WHERE id IN (${transferPlaceholders})`
+          )
+          .bind(params.updatedAt, ...staleLinkedTransferIds)
+          .run();
+        await db
+          .prepare(
+            `UPDATE payment_subscription_collection_attempts
+                SET status = 'failed',
+                    error = COALESCE(error, 'Stale recurring collection attempt expired before submission'),
+                    attempted_at = COALESCE(attempted_at, ?),
+                    updated_at = ?
+              WHERE id IN (${attemptPlaceholders})`
+          )
+          .bind(params.updatedAt, params.updatedAt, ...staleLinkedAttemptIds)
+          .run();
+      }
       const expiredLinkedTransfers = await db
         .prepare(
           `UPDATE payment_transfers
@@ -616,7 +668,7 @@ export function createPostgresPaymentSubscriptionsRepository(
         .bind(params.updatedAt, params.updatedAt, params.olderThan, params.limit)
         .run();
 
-      return expiredLinkedTransfers + expiredAttempts;
+      return staleLinkedAttemptIds.length + expiredLinkedTransfers + expiredAttempts;
     },
 
     async listSubmittedRecurringCollectionAttempts(params) {

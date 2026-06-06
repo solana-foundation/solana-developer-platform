@@ -1594,6 +1594,80 @@ describe("Payments routes", () => {
       error: expect.stringContaining("failed attempt"),
     });
 
+    const staleUnsignedLinkedAttemptDueAt = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+    const staleUnsignedLinkedTransferId = "ptr_stale_unsigned_linked_transfer";
+    await repositories.createPaymentsRepository(env).createTransfer({
+      id: staleUnsignedLinkedTransferId,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      walletId: TEST_WALLET_ID,
+      counterpartyId,
+      sourceAddress: TEST_SOLANA_ADDRESSES.wallet1,
+      destinationAddress: TEST_SOLANA_ADDRESSES.wallet2,
+      token: DEVNET_USDC_MINT,
+      amount: "0.50",
+      memo: null,
+      type: "transfer",
+      direction: "outbound",
+      status: "processing",
+      provider: null,
+      providerReference: null,
+      deliveryMode: null,
+      fiatCurrency: null,
+      fiatAmount: null,
+      providerData: { source: "recurring_payments" },
+      serializedTx: null,
+      initiatedByKeyId: TEST_API_KEY.id,
+      createdAt: staleUnsignedLinkedAttemptDueAt,
+      updatedAt: staleUnsignedLinkedAttemptDueAt,
+    });
+    await repositories.createPaymentSubscriptionsRepository(env).createCollectionAttempt({
+      id: "psca_stale_unsigned_linked_transfer",
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      subscriptionId: recurringSubscriptionId,
+      recurringPaymentId,
+      transferId: staleUnsignedLinkedTransferId,
+      token: DEVNET_USDC_MINT,
+      amount: "0.50",
+      dueAt: staleUnsignedLinkedAttemptDueAt,
+      attemptedAt: staleUnsignedLinkedAttemptDueAt,
+      status: "processing",
+      signature: null,
+      error: null,
+      metadata: { source: "recurring_payments" },
+      createdAt: staleUnsignedLinkedAttemptDueAt,
+      updatedAt: staleUnsignedLinkedAttemptDueAt,
+    });
+    const expiredUnsignedLinkedRecords = await repositories
+      .createPaymentSubscriptionsRepository(env)
+      .expireStaleUnsignedProcessingAttempts({
+        olderThan: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
+        updatedAt: new Date().toISOString(),
+        limit: 10,
+      });
+    expect(expiredUnsignedLinkedRecords).toBeGreaterThanOrEqual(1);
+    const staleUnsignedLinkedTransferAfter = await repositories
+      .createPaymentsRepository(env)
+      .getTransferById({
+        transferId: staleUnsignedLinkedTransferId,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+      });
+    expect(staleUnsignedLinkedTransferAfter).toMatchObject({
+      status: "failed",
+      error: expect.stringContaining("expired before submission"),
+    });
+    const staleUnsignedLinkedAttemptAfter = await repositories
+      .createPaymentSubscriptionsRepository(env)
+      .getCollectionAttemptByRecurringDue({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        recurringPaymentId,
+        dueAt: staleUnsignedLinkedAttemptDueAt,
+      });
+    expect(staleUnsignedLinkedAttemptAfter).toBeNull();
+
     const transferSignatureOnlyDueAt = new Date(Date.now() - 90 * 60 * 1000).toISOString();
     const transferSignatureOnlyTransferId = "ptr_transfer_signature_only_recovery";
     await repositories.createPaymentsRepository(env).createTransfer({
