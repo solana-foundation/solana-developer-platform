@@ -1640,6 +1640,73 @@ async function recoverSubmittedRecurringCollection(input: {
   });
 }
 
+async function pauseRecurringPaymentAfterRetryBackoffFailure(input: {
+  env: Env;
+  organizationId: string;
+  projectId: string;
+  recurringPayment: PaymentRecurringPaymentRow;
+  subscriptionId: string;
+  dueAt: string;
+}): Promise<boolean> {
+  try {
+    return await getDb(input.env).transaction(async (tx) => {
+      const txRecurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
+      const txSubscriptionsRepo = createPostgresPaymentSubscriptionsRepository(tx);
+      const now = new Date().toISOString();
+      const recurringPayment = await txRecurringRepo.getRecurringPaymentById({
+        recurringPaymentId: input.recurringPayment.id,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+      });
+      const subscription = await txSubscriptionsRepo.getSubscriptionById({
+        subscriptionId: input.subscriptionId,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+      });
+
+      if (!recurringPayment || !subscription) {
+        throw new AppError("NOT_FOUND", "Recurring payment collection state not found");
+      }
+      if (
+        recurringPayment.status !== "active" ||
+        recurringPayment.next_collection_due_at !== input.dueAt ||
+        subscription.status !== "active" ||
+        subscription.next_collection_due_at !== input.dueAt
+      ) {
+        return false;
+      }
+
+      const pausedRecurringPayment = await txRecurringRepo.updateRecurringPayment({
+        recurringPaymentId: input.recurringPayment.id,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        expectedStatus: "active",
+        expectedNextCollectionDueAt: input.dueAt,
+        status: "paused",
+        updatedAt: now,
+      });
+      const pausedSubscription = await txSubscriptionsRepo.updateSubscription({
+        subscriptionId: input.subscriptionId,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        expectedStatus: "active",
+        expectedNextCollectionDueAt: input.dueAt,
+        status: "paused",
+        updatedAt: now,
+      });
+
+      return Boolean(pausedRecurringPayment && pausedSubscription);
+    });
+  } catch (error) {
+    console.warn("Failed to pause recurring payment after retry backoff marker failure", {
+      recurringPaymentId: input.recurringPayment.id,
+      dueAt: input.dueAt,
+      error: toErrorMessage(error),
+    });
+    return false;
+  }
+}
+
 async function createFailedCollectionAttemptForRetry(input: {
   env: Env;
   organizationId: string;
@@ -1686,6 +1753,7 @@ async function createFailedCollectionAttemptForRetry(input: {
     try {
       await recordAttempt();
     } catch (retryError) {
+      const pausedForReconciliation = await pauseRecurringPaymentAfterRetryBackoffFailure(input);
       throw new AppError(
         "INTERNAL_ERROR",
         "Recurring collection failed and retry backoff could not be recorded",
@@ -1695,6 +1763,7 @@ async function createFailedCollectionAttemptForRetry(input: {
           originalError: input.error,
           recordError: toErrorMessage(recordError),
           retryError: toErrorMessage(retryError),
+          pausedForReconciliation,
         }
       );
     }

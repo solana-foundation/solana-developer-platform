@@ -1174,7 +1174,11 @@ describe("Payments routes", () => {
       );
       expect(failedMarkerRes.status).toBe(500);
       const failedMarkerBody = (await failedMarkerRes.json()) as {
-        error: { code: string; message: string; details?: { originalError?: string } };
+        error: {
+          code: string;
+          message: string;
+          details?: { originalError?: string; pausedForReconciliation?: boolean };
+        };
       };
       expect(failedMarkerBody.error.code).toBe("INTERNAL_ERROR");
       expect(failedMarkerBody.error.message).toBe(
@@ -1183,6 +1187,7 @@ describe("Payments routes", () => {
       expect(failedMarkerBody.error.details?.originalError).toBe(
         "Transfer amount exceeds wallet policy maxTransferAmount"
       );
+      expect(failedMarkerBody.error.details?.pausedForReconciliation).toBe(true);
     } finally {
       failedAttemptMarkerSpy.mockRestore();
       await getDb(env)
@@ -1191,6 +1196,41 @@ describe("Payments routes", () => {
         .run();
     }
     expect(failedAttemptMarkerWriteFailures).toBe(2);
+    const pausedAfterFailedMarker = await repositories
+      .createPaymentRecurringPaymentsRepository(env)
+      .getRecurringPaymentById({
+        recurringPaymentId,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+      });
+    const pausedSubscriptionAfterFailedMarker = await repositories
+      .createPaymentSubscriptionsRepository(env)
+      .getSubscriptionById({
+        subscriptionId: recurringSubscriptionId,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+      });
+    expect(pausedAfterFailedMarker?.status).toBe("paused");
+    expect(pausedSubscriptionAfterFailedMarker?.status).toBe("paused");
+
+    const restoredAfterFailedMarkerAt = new Date().toISOString();
+    await repositories.createPaymentRecurringPaymentsRepository(env).updateRecurringPayment({
+      recurringPaymentId,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      status: "active",
+      nextCollectionDueAt: firstCollectionAt,
+      updatedAt: restoredAfterFailedMarkerAt,
+    });
+    await repositories.createPaymentSubscriptionsRepository(env).updateSubscription({
+      subscriptionId: recurringSubscriptionId,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      status: "active",
+      nextCollectionDueAt: firstCollectionAt,
+      updatedAt: restoredAfterFailedMarkerAt,
+    });
+    await clearRateLimits();
 
     const failedAttemptsRes = await app.request(
       `/v1/payments/recurring-payments/${recurringPaymentId}/collection-attempts?status=failed`,
