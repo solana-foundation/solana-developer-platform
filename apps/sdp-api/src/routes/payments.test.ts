@@ -1707,6 +1707,88 @@ describe("Payments routes", () => {
       new Date(firstCollectionAt).getTime() + 24 * 60 * 60 * 1000
     );
 
+    const signedRaceDueAt = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
+    const signedRacePeriodStartAt = new Date(
+      new Date(signedRaceDueAt).getTime() - 24 * 60 * 60 * 1000
+    ).toISOString();
+    await repositories.createPaymentRecurringPaymentsRepository(env).updateRecurringPayment({
+      recurringPaymentId,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      status: "active",
+      nextCollectionDueAt: signedRaceDueAt,
+      updatedAt: signedRaceDueAt,
+    });
+    await repositories.createPaymentSubscriptionsRepository(env).updateSubscription({
+      subscriptionId: recurringSubscriptionId,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      status: "active",
+      currentPeriodStartAt: signedRacePeriodStartAt,
+      nextCollectionDueAt: signedRaceDueAt,
+      updatedAt: signedRaceDueAt,
+    });
+    mockRecurringCollectionAccounts();
+    const signedRaceUpdatedAt = new Date().toISOString();
+    const signedRaceFeePaymentAdapter = {
+      providerId: "mock",
+      getFeePayer: vi.fn().mockResolvedValue("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
+      signAsFeePayer: vi.fn(),
+      signAndSend: vi.fn(async () => {
+        await repositories.createPaymentRecurringPaymentsRepository(env).updateRecurringPayment({
+          recurringPaymentId,
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT.id,
+          status: "canceling",
+          updatedAt: signedRaceUpdatedAt,
+        });
+        await repositories.createPaymentSubscriptionsRepository(env).updateSubscription({
+          subscriptionId: recurringSubscriptionId,
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT.id,
+          status: "canceling",
+          updatedAt: signedRaceUpdatedAt,
+        });
+
+        return `5${MOCK_SIGNATURE_TAIL}` as Signature;
+      }),
+    } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>;
+    createFeePaymentAdapterMock
+      .mockReturnValueOnce(signedRaceFeePaymentAdapter)
+      .mockReturnValueOnce(signedRaceFeePaymentAdapter);
+    await clearRateLimits();
+
+    const signedRaceCollectRes = await app.request(
+      `/v1/payments/recurring-payments/${recurringPaymentId}/collect`,
+      {
+        method: "POST",
+        headers: jsonHeaders,
+        body: "{}",
+      },
+      env
+    );
+    expect(signedRaceCollectRes.status).toBe(200);
+    const signedRaceCollectBody = (await signedRaceCollectRes.json()) as {
+      data: {
+        recurringPayment: { status: string; nextCollectionDueAt: string | null };
+        collectionAttempt: { status: string; recurringPaymentId: string | null };
+        transfer: { status: string; signature: string | null };
+      };
+    };
+    expect(signedRaceCollectBody.data.recurringPayment).toMatchObject({
+      status: "canceling",
+      nextCollectionDueAt: signedRaceDueAt,
+    });
+    expect(signedRaceCollectBody.data.collectionAttempt).toMatchObject({
+      status: "confirmed",
+      recurringPaymentId,
+    });
+    expect(signedRaceCollectBody.data.transfer).toMatchObject({
+      status: "confirmed",
+      signature: `5${MOCK_SIGNATURE_TAIL}`,
+    });
+    expect(signedRaceFeePaymentAdapter.signAndSend).toHaveBeenCalledTimes(1);
+
     const overdueCollectionAt = new Date(Date.now() - 72 * 60 * 60 * 1000).toISOString();
     const overduePeriodStartAt = new Date(
       new Date(overdueCollectionAt).getTime() - 24 * 60 * 60 * 1000
@@ -1715,6 +1797,7 @@ describe("Payments routes", () => {
       recurringPaymentId,
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT.id,
+      status: "active",
       nextCollectionDueAt: overdueCollectionAt,
       updatedAt: overdueCollectionAt,
     });
@@ -1722,6 +1805,7 @@ describe("Payments routes", () => {
       subscriptionId: recurringSubscriptionId,
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT.id,
+      status: "active",
       currentPeriodStartAt: overduePeriodStartAt,
       nextCollectionDueAt: overdueCollectionAt,
       updatedAt: overdueCollectionAt,
