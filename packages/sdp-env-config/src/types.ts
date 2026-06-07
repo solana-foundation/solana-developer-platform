@@ -47,6 +47,12 @@ export interface EnvField {
   secretWhen?: (v: Values) => boolean;
   /** Computed from other values; hidden from the form, always emitted. */
   derive?: (values: Values) => string;
+  /**
+   * Emit this field even when `visibleWhen` hides it, for a setting the runtime
+   * needs regardless of the choice that hides it from the form. Unlike `derive`,
+   * the value still comes from input or an auto-generated secret.
+   */
+  alwaysEmit?: boolean;
 }
 
 export interface SectionMeta {

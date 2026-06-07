@@ -47,6 +47,20 @@ test("invisible conditional fields are skipped", () => {
   assert.match(env, /^CUSTODY_PRIVATE_KEY=k$/m); // local selected → visible + filled
 });
 
+test("POSTGRES_PASSWORD is emitted even when the database is external", () => {
+  // The bundled Postgres container always starts and requires the password, so
+  // it is emitted (hidden from the form) alongside the external DATABASE_URL.
+  const env = generateEnv({
+    ...defaultValues(),
+    DATABASE_MODE: "external",
+    DATABASE_URL: "postgresql://u:p@db:5432/app",
+    POSTGRES_PASSWORD: "generated-pw",
+  });
+  assert.match(env, /^POSTGRES_PASSWORD=generated-pw$/m);
+  assert.match(env, /^DATABASE_URL=postgresql:\/\/u:p@db:5432\/app$/m);
+  assert.doesNotMatch(env, /^DATABASE_MODE=/m);
+});
+
 test("empty optional fields are omitted so runtime fallbacks apply", () => {
   // local + native default: FEE_PAYER_PRIVATE_KEY is optional and blank here, so it
   // must NOT be emitted (an empty value would defeat the native adapter's fallback).

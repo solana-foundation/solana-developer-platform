@@ -27,10 +27,22 @@ test("autoSecretKeys excludes the Postgres password in manual mode", () => {
   assert.ok(!keys.has("POSTGRES_PASSWORD"));
 });
 
-test("autoSecretKeys excludes invisible fields", () => {
-  // An external database hides POSTGRES_PASSWORD, so no secret should be
-  // generated for it even though auto-mode is still selected.
+test("autoSecretKeys still generates POSTGRES_PASSWORD with an external database", () => {
+  // An external database hides POSTGRES_PASSWORD from the form, but the bundled
+  // Postgres container still starts and requires it, so it is always emitted —
+  // and therefore still needs an auto-generated secret.
   const keys = autoSecretKeys({ ...defaultValues(), DATABASE_MODE: "external" });
-  assert.ok(!keys.has("POSTGRES_PASSWORD"));
+  assert.ok(keys.has("POSTGRES_PASSWORD"));
   assert.ok(keys.has("API_KEY_PEPPER"));
+});
+
+test("autoSecretKeys generates POSTGRES_PASSWORD for external DB even in manual mode", () => {
+  // Manual mode only applies to the bundled database. With an external database
+  // the field is hidden and unreachable, so the password must still be generated.
+  const keys = autoSecretKeys({
+    ...defaultValues(),
+    DATABASE_MODE: "external",
+    POSTGRES_PASSWORD_MODE: "manual",
+  });
+  assert.ok(keys.has("POSTGRES_PASSWORD"));
 });

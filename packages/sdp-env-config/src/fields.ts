@@ -125,7 +125,14 @@ export const FIELDS: EnvField[] = [
     label: "Password",
     required: true,
     visibleWhen: isProvider("DATABASE_MODE", "bundled"),
-    secretWhen: (v) => v.POSTGRES_PASSWORD_MODE !== "manual",
+    // Auto-generate unless the operator chose manual entry for the bundled DB.
+    // With an external database the field is hidden and manual mode unreachable,
+    // so always auto-generate — compose still needs a value and the form offers
+    // no way to type one.
+    secretWhen: (v) => v.DATABASE_MODE !== "bundled" || v.POSTGRES_PASSWORD_MODE !== "manual",
+    // The bundled Postgres container always starts and requires this, even with
+    // an external database, so emit an auto-generated value while hiding the field.
+    alwaysEmit: true,
   },
   {
     key: "DATABASE_URL",

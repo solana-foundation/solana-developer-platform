@@ -1,0 +1,52 @@
+---
+title: Self-Hosting
+description: Run the Solana Developer Platform on your own infrastructure with Docker Compose.
+---
+
+Self-hosting runs the full Solana Developer Platform — API, web dashboard, docs,
+database, and cache — on infrastructure you control, from prebuilt container
+images. You bring your own authentication, Solana RPC, and signing provider; SDP
+stays the same product you'd use as a managed service.
+
+This section covers installing the stack, generating its configuration, and
+keeping it running.
+
+## What you run
+
+`infra/self-hosted/compose.yml` starts six services:
+
+| Service | Image | Purpose |
+|---|---|---|
+| `sdp-api` | `sdp-api` | The core API (default port `8787`). |
+| `sdp-web` | `sdp-web` | The dashboard web app (default port `3000`). |
+| `sdp-docs` | `sdp-docs` | This documentation site (default port `3001`). |
+| `sdp-migrate` | `sdp-api` | Runs database migrations once on startup, then exits. |
+| `postgres` | `postgres:16-alpine` | Bundled database (or point at an external one). |
+| `redis` | `redis:7-alpine` | Bundled cache (or point at an external one). |
+
+## Start here
+
+- **[Quickstart](/docs/self-hosting/quickstart)** — install the stack and bring it
+  up for the first time.
+- **[Configurator](/docs/self-hosting/configurator)** — generate a complete `.env`
+  in your browser or terminal.
+- **[Environment reference](/docs/self-hosting/env-reference)** — what every
+  configuration variable does and which ones are required.
+
+## Operate
+
+- **[Upgrade & backup](/docs/self-hosting/upgrade-and-backup)** — move to a new
+  release and protect your data.
+- **[Troubleshooting](/docs/self-hosting/troubleshooting)** — common startup and
+  configuration failures.
+- **[External co-signers](/docs/self-hosting/external-co-signers)** — host
+  provider-specific signing automation alongside the stack.
+
+## Requirements
+
+- A 64-bit Linux or macOS host with **Docker Engine** and **Docker Compose v2**.
+- Outbound network access to pull images and reach your Solana RPC and
+  authentication providers.
+- A [Clerk](https://clerk.com) application for authentication and a Solana RPC
+  endpoint. See the [environment reference](/docs/self-hosting/env-reference) for
+  the full list.

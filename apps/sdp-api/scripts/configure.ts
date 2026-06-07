@@ -324,6 +324,12 @@ async function collectInteractively(): Promise<Values> {
     rl.close();
   }
 
+  // Fill any auto-secret the prompt loop skipped, including an always-emitted
+  // field hidden by the current answers (e.g. POSTGRES_PASSWORD with an external
+  // database), which compose still requires.
+  for (const key of autoSecretKeys(values)) {
+    if (!values[key]) values[key] = randomHex32();
+  }
   return values;
 }
 

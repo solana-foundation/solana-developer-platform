@@ -23,7 +23,7 @@ export function generateEnv(values: Values): string {
       (f) =>
         f.section === section.id &&
         !UI_ONLY_KEYS.has(f.key) &&
-        (f.derive ? true : isFieldVisible(f, values))
+        (f.derive || f.alwaysEmit ? true : isFieldVisible(f, values))
     );
 
     const sectionLines: string[] = [];

@@ -60,6 +60,24 @@ describe("collectFromEnv", () => {
     expect(env).toContain("DATABASE_URL=postgresql://u@h:5432/d");
   });
 
+  it("still emits POSTGRES_PASSWORD with an external database", () => {
+    // External mode hides the field, but compose's bundled Postgres still needs it.
+    const env = generateEnv(collectFromEnv({ DATABASE_URL: "postgresql://u@h:5432/d" }));
+    expect(env).toMatch(/^POSTGRES_PASSWORD=[0-9a-f]{64}$/m);
+  });
+
+  it("emits POSTGRES_PASSWORD for an external DB even when manual mode is set", () => {
+    // Manual mode is a bundled-DB choice; it must not suppress the password the
+    // bundled container still requires under an external database.
+    const env = generateEnv(
+      collectFromEnv({
+        DATABASE_URL: "postgresql://u@h:5432/d",
+        POSTGRES_PASSWORD_MODE: "manual",
+      })
+    );
+    expect(env).toMatch(/^POSTGRES_PASSWORD=[0-9a-f]{64}$/m);
+  });
+
   it("generates a non-empty .env containing the required keys", () => {
     const env = generateEnv(
       collectFromEnv({

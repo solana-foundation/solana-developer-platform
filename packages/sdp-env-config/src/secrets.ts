@@ -14,12 +14,14 @@ export function randomHex32(): string {
  * when `values` are supplied, also includes fields whose `secretWhen(values)`
  * holds (e.g. an auto-mode Postgres password) and, conversely, drops any field
  * that is currently invisible — an invisible field is never emitted, so
- * generating a secret for it would only be discarded.
+ * generating a secret for it would only be discarded. The exception is an
+ * `alwaysEmit` field, which is emitted even when hidden and so still needs its
+ * secret generated.
  */
 export function autoSecretKeys(values?: Values): Set<string> {
   return new Set(
     FIELDS.filter((f) => {
-      if (values && !isFieldVisible(f, values)) return false;
+      if (values && !isFieldVisible(f, values) && !f.alwaysEmit) return false;
       return f.kind === "secret" || (values ? (f.secretWhen?.(values) ?? false) : false);
     }).map((f) => f.key)
   );

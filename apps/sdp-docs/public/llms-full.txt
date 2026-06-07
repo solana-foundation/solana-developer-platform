@@ -3331,6 +3331,145 @@ Use the [Payments API reference](/docs/reference/api/payments), [Wallets API ref
 
 ## Self-Hosting
 
+### Self-Hosting
+Source: https://platform.solana.com/docs/self-hosting
+
+> Run the Solana Developer Platform on your own infrastructure with Docker Compose.
+
+Self-hosting runs the full Solana Developer Platform — API, web dashboard, docs,
+database, and cache — on infrastructure you control, from prebuilt container
+images. You bring your own authentication, Solana RPC, and signing provider; SDP
+stays the same product you'd use as a managed service.
+
+This section covers installing the stack, generating its configuration, and
+keeping it running.
+
+## What you run
+
+`infra/self-hosted/compose.yml` starts six services:
+
+| Service | Image | Purpose |
+|---|---|---|
+| `sdp-api` | `sdp-api` | The core API (default port `8787`). |
+| `sdp-web` | `sdp-web` | The dashboard web app (default port `3000`). |
+| `sdp-docs` | `sdp-docs` | This documentation site (default port `3001`). |
+| `sdp-migrate` | `sdp-api` | Runs database migrations once on startup, then exits. |
+| `postgres` | `postgres:16-alpine` | Bundled database (or point at an external one). |
+| `redis` | `redis:7-alpine` | Bundled cache (or point at an external one). |
+
+## Start here
+
+- **[Quickstart](/docs/self-hosting/quickstart)** — install the stack and bring it
+  up for the first time.
+- **[Configurator](/docs/self-hosting/configurator)** — generate a complete `.env`
+  in your browser or terminal.
+- **[Environment reference](/docs/self-hosting/env-reference)** — what every
+  configuration variable does and which ones are required.
+
+## Operate
+
+- **[Upgrade & backup](/docs/self-hosting/upgrade-and-backup)** — move to a new
+  release and protect your data.
+- **[Troubleshooting](/docs/self-hosting/troubleshooting)** — common startup and
+  configuration failures.
+- **[External co-signers](/docs/self-hosting/external-co-signers)** — host
+  provider-specific signing automation alongside the stack.
+
+## Requirements
+
+- A 64-bit Linux or macOS host with **Docker Engine** and **Docker Compose v2**.
+- Outbound network access to pull images and reach your Solana RPC and
+  authentication providers.
+- A [Clerk](https://clerk.com) application for authentication and a Solana RPC
+  endpoint. See the [environment reference](/docs/self-hosting/env-reference) for
+  the full list.
+
+---
+
+### Quickstart
+Source: https://platform.solana.com/docs/self-hosting/quickstart
+
+> Install the self-hosted stack, generate a .env, and bring it up with Docker Compose.
+
+This guide takes you from an empty host to a running Solana Developer Platform.
+It assumes **Docker Engine** and **Docker Compose v2** are installed and the
+Docker daemon is running.
+
+## 1. Install
+
+The install script downloads `compose.yml` and `.env.example` for the latest
+release into `~/sdp` and verifies them against the release checksums.
+
+```bash
+curl -fsSL https://github.com/solana-foundation/solana-developer-platform/releases/latest/download/install.sh | bash
+```
+
+The script is open source — you can read it before running it, and verify the
+checksums and signature out of band. The commented header of `install.sh`
+documents the full verified-install flow and the environment variables you can
+override (`SDP_INSTALL_DIR`, `INSTALL_VERSION`, and others).
+
+Prefer to do it by hand? Download `compose.yml` and `.env.example` from the
+[latest release](https://github.com/solana-foundation/solana-developer-platform/releases/latest)
+into a working directory instead.
+
+## 2. Generate your `.env`
+
+The stack reads its configuration from a `.env` file next to `compose.yml`. The
+[configurator](/docs/self-hosting/configurator) fills it in for you, generates
+the app secrets, and validates your answers.
+
+- **In your browser** — open the [configurator](/docs/self-hosting/configurator),
+  answer the prompts, and download the `.env` into `~/sdp`.
+- **In your terminal** — run the configurator from the API image:
+
+  ```bash
+  docker run --rm -it -v "$HOME/sdp:/out" \
+    ghcr.io/solana-foundation/sdp/sdp-api:latest \
+    node configure.js --out /out/.env
+  ```
+
+  Use the same release tag you installed in place of `latest` so the configurator
+  matches your `compose.yml`.
+
+See the [environment reference](/docs/self-hosting/env-reference) for what each
+variable means and which are required.
+
+## 3. Bring up the stack
+
+```bash
+cd ~/sdp
+docker compose up -d
+```
+
+On startup, `sdp-migrate` runs the database migrations once, then the API, web,
+and docs services start. The first run pulls the images, so it may take a few
+minutes.
+
+## 4. Verify
+
+```bash
+docker compose ps
+docker compose logs -f sdp-api
+```
+
+When the services report healthy, the dashboard is at `http://localhost:3000`,
+the API at `http://localhost:8787`, and these docs at `http://localhost:3001`.
+The API exposes a [health endpoint](/docs/reference/api/health) you can poll from
+a load balancer or uptime check.
+
+If a service fails to start or a required variable is missing, see
+[Troubleshooting](/docs/self-hosting/troubleshooting).
+
+## Next steps
+
+- [Upgrade & backup](/docs/self-hosting/upgrade-and-backup) — keep the stack
+  current and protect your data.
+- [Environment reference](/docs/self-hosting/env-reference) — tune ports, RPC,
+  signing, and authentication.
+
+---
+
 ### Configurator
 Source: https://platform.solana.com/docs/self-hosting/configurator
 
@@ -3341,6 +3480,288 @@ your browser — nothing is sent anywhere. Drop the file next to `compose.yml`, 
 run `docker compose up -d`.
 
 <EnvConfigurator />
+
+---
+
+### Environment Reference
+Source: https://platform.solana.com/docs/self-hosting/env-reference
+
+> The configuration variables a self-hosted Solana Developer Platform reads from .env.
+
+The self-hosted stack reads its configuration from a single `.env` file next to
+`compose.yml`. The [configurator](/docs/self-hosting/configurator) is the
+authoritative source of the field list, defaults, and validation — it always
+matches the release you installed. This page explains how the configuration is
+organized and the variables you are most likely to set by hand.
+
+The configurator groups variables into sections:
+
+| Section | What it covers |
+|---|---|
+| Basic | Core runtime — environment, deployment mode, sender email. |
+| Database | Bundled Postgres or an external database. |
+| Cache | Bundled Redis or an external cache. |
+| Solana RPC | Network and RPC endpoint. |
+| Authentication (Clerk) | Required Clerk keys and JWT settings. |
+| Signing provider | Which signer(s) to enable and their credentials. |
+| Fee payment | How transaction fees are paid. |
+| Secrets | App secrets, generated locally. |
+| Advanced | Image source, ports, and internal service URLs. |
+
+## Required variables
+
+These must be set or the stack will refuse to start:
+
+| Variable | Description |
+|---|---|
+| `POSTGRES_PASSWORD` | Password for the bundled Postgres. Always required — the bundled `postgres` service starts even when the API points at an external `DATABASE_URL`. |
+| `API_KEY_PEPPER` | Server-side pepper for API key hashing. Generate with `openssl rand -hex 32`. |
+| `CUSTODY_ENCRYPTION_KEY` | Encryption key for custody material at rest. Generate with `openssl rand -hex 32`. |
+| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Clerk publishable key for the web app. |
+| `CLERK_SECRET_KEY` | Clerk secret key for the API. |
+| `CLERK_ISSUER` | Clerk issuer URL used to validate tokens. |
+| `SOLANA_RPC_URL` | Solana RPC endpoint the API calls. |
+| `SIGNING_PROVIDER` | The default signing provider. Each non-local provider adds its own required credentials. |
+
+The configurator generates `API_KEY_PEPPER` and `CUSTODY_ENCRYPTION_KEY` for you
+and can auto-generate `POSTGRES_PASSWORD`.
+
+## Database
+
+In the configurator, `DATABASE_MODE` chooses between the bundled Postgres and an
+external database. It is a generation-time selector and is not written to `.env`.
+
+For the bundled database, set `POSTGRES_DB`, `POSTGRES_USER`, and
+`POSTGRES_PASSWORD`; the API and migration services build their connection string
+from them. To use an external database, set `DATABASE_URL` to your own
+`postgresql://…` string and the API and migrations connect there instead. Note
+that `compose.yml` always starts the bundled `postgres` container — with an
+external `DATABASE_URL` it simply goes unused, and `POSTGRES_PASSWORD` is still
+required for it to start.
+
+The configurator hides `POSTGRES_PASSWORD` once you select an external database
+but still emits an auto-generated value for it, since the bundled `postgres`
+container needs one to start even when nothing connects to it.
+
+## Cache
+
+Like `DATABASE_MODE`, `CACHE_MODE` is a configurator-only selector and is not
+written to `.env`. To use an external cache, set `REDIS_URL` to your own
+`redis://…` endpoint; the bundled `redis` container still starts but goes unused.
+
+## Signing providers
+
+`SIGNING_PROVIDER` is the default signer written to `.env`. Supported values are
+`local`, `fireblocks`, `privy`, `coinbase_cdp`, `para`, `turnkey`, and `utila`.
+The configurator also tracks a `SIGNING_PROVIDERS` selection to decide which
+fields to show, but that key is configurator-only and is not written to `.env`.
+Each non-local provider requires its own credentials — for example Fireblocks
+needs an API key, secret, and vault ID — and the configurator only prompts for
+the providers you enable.
+
+For provider-managed co-signer runtimes that live outside the default stack, see
+[External co-signers](/docs/self-hosting/external-co-signers).
+
+## Advanced
+
+| Variable | Default | Description |
+|---|---|---|
+| `SDP_IMAGE_REGISTRY` | `ghcr.io/solana-foundation/sdp` | Registry the service images are pulled from. |
+| `SDP_VERSION` | `latest` | Image tag for every SDP service. Pin this to a release tag in production. |
+| `SDP_API_PORT` | `8787` | Host port for the API. |
+| `SDP_WEB_PORT` | `3000` | Host port for the dashboard. |
+| `SDP_DOCS_PORT` | `3001` | Host port for these docs. |
+
+`SDP_API_BASE_URL` defaults to the in-network service name `http://sdp-api:8787`
+for server-to-server calls. The browser-facing `NEXT_PUBLIC_*` URLs default to
+`localhost` (for example `http://localhost:8787` and `http://localhost:3000`) and
+need changing when you put the services behind your own domains or ingress.
+
+---
+
+### Upgrade & Backup
+Source: https://platform.solana.com/docs/self-hosting/upgrade-and-backup
+
+> Move a self-hosted Solana Developer Platform to a new release and protect its data.
+
+This page covers upgrading to a new release and backing up the data that matters
+on a self-hosted stack.
+
+## Upgrade
+
+A release ships new container images plus an updated `compose.yml`. To upgrade:
+
+1. **Refresh the install files.** Re-run the install script. It replaces
+   `compose.yml` with the new release's version (verified against the release
+   checksums) and leaves any existing `.env` and `.env.example` in place, printing
+   a link to the new release's `.env.example` so you can check for new variables.
+
+   ```bash
+   curl -fsSL https://github.com/solana-foundation/solana-developer-platform/releases/latest/download/install.sh | bash
+   ```
+
+2. **Pin the version.** Set `SDP_VERSION` in `.env` to the release tag you are
+   upgrading to (rather than `latest`) so every service runs the same, known
+   build.
+
+3. **Pull and restart.**
+
+   ```bash
+   cd ~/sdp
+   docker compose pull
+   docker compose up -d
+   ```
+
+   `sdp-migrate` runs any new database migrations once before the API starts.
+
+4. **Verify** the services are healthy, as in the
+   [Quickstart](/docs/self-hosting/quickstart#4-verify).
+
+To upgrade to a specific release instead of the latest, set `INSTALL_VERSION`
+when running the script and the matching `SDP_VERSION` in `.env`.
+
+### Roll back
+
+Set `SDP_VERSION` back to the previous tag and run `docker compose up -d`. Note
+that migrations are not automatically reversed; if a release applied a migration,
+restore from a backup taken before the upgrade rather than relying on a
+version downgrade alone.
+
+## Backup
+
+Two things hold your state:
+
+- **The Postgres database** — all platform data. With the bundled database it
+  lives in the `sdp-postgres-data` Docker volume; with an external `DATABASE_URL`,
+  back it up with your database provider's tooling instead.
+- **Your `.env`** — secrets and configuration. Store it somewhere safe (a secret
+  manager); it cannot be regenerated identically.
+
+Redis is a cache and does not need backing up.
+
+### Back up the database
+
+Take a logical dump with `pg_dump` from the running container. Running it through
+`sh -c` lets `pg_dump` read `POSTGRES_USER` and `POSTGRES_DB` from inside the
+container, so custom values are honored:
+
+```bash
+cd ~/sdp
+docker compose exec -T postgres \
+  sh -c 'pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB"' > sdp-backup.sql
+```
+
+Keep these dumps off-host and on a schedule that matches your recovery needs.
+
+### Restore the database
+
+A plain `pg_dump` includes the full schema and the migration history, so restore
+into an **empty** database and let the stack start on top of it. Do not restore
+over an already-migrated database, or the dump's schema collides with the one
+`sdp-migrate` created on the previous `up`.
+
+```bash
+cd ~/sdp
+docker compose down                       # stop every service
+docker volume rm sdp_sdp-postgres-data    # discard the current database (destructive)
+docker compose up -d postgres             # start a fresh, empty Postgres
+until docker compose exec -T postgres \
+  sh -c 'pg_isready -U "$POSTGRES_USER"' >/dev/null 2>&1; do sleep 1; done
+docker compose exec -T postgres \
+  sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < sdp-backup.sql
+docker compose up -d                      # start the rest
+```
+
+On that final `up`, `sdp-migrate` skips every migration already recorded in the
+restored dump. Restoring a dump taken at the same release leaves it with nothing
+to do; restoring an older dump before an upgrade lets it apply only the newer
+migrations.
+
+Restore the matching `.env` alongside it so secrets such as
+`CUSTODY_ENCRYPTION_KEY` line up with the data they protect. For an external
+`DATABASE_URL`, restore through your database provider rather than the bundled
+`postgres` service.
+
+---
+
+### Troubleshooting
+Source: https://platform.solana.com/docs/self-hosting/troubleshooting
+
+> Diagnose common startup and configuration failures on a self-hosted stack.
+
+Most self-hosting problems surface at startup. Start by looking at the service
+state and logs:
+
+```bash
+cd ~/sdp
+docker compose ps
+docker compose logs -f sdp-api
+```
+
+## Docker is not ready
+
+The install script checks for Docker up front. If you see that Docker is not
+installed, that Compose v2 is unavailable, or that the daemon is unreachable,
+install or start Docker and retry — see the
+[Docker Engine](https://docs.docker.com/engine/install/) and
+[Compose](https://docs.docker.com/compose/install/) docs.
+
+## A required variable is missing
+
+`compose.yml` fails fast when a required variable is unset, with a message such
+as `set POSTGRES_PASSWORD in .env`. Make sure a `.env` exists next to
+`compose.yml` and fills in every required variable. The
+[configurator](/docs/self-hosting/configurator) produces a complete file; the
+[environment reference](/docs/self-hosting/env-reference) lists what is required.
+
+## Images won't pull
+
+If `docker compose pull` reports access denied or a missing manifest:
+
+- Confirm `SDP_IMAGE_REGISTRY` and `SDP_VERSION` point at a registry and tag you
+  can reach.
+- Pull a single image directly to see the underlying error, e.g.
+  `docker pull ghcr.io/solana-foundation/sdp/sdp-api:latest`.
+- If the registry is private, run `docker login` for it first.
+
+## Port already in use
+
+The API, web, and docs default to ports `8787`, `3000`, and `3001`. If another
+process holds one of them, the service won't bind. Override the host port in
+`.env` with `SDP_API_PORT`, `SDP_WEB_PORT`, or `SDP_DOCS_PORT` and run
+`docker compose up -d` again.
+
+## Migrations failed
+
+`sdp-migrate` runs once before the API starts; if it fails, the API stays down.
+Inspect it with:
+
+```bash
+docker compose logs sdp-migrate
+```
+
+A failure here is usually a database connection problem — check `POSTGRES_*` (or
+`DATABASE_URL`) and that the `postgres` service is healthy in `docker compose ps`.
+
+## Database connection refused
+
+The API and migration services wait for Postgres to report healthy before
+starting. If they still can't connect, verify the credentials in `.env`, and for
+an external database (`DATABASE_URL` set) that it is reachable from inside the
+Docker network.
+
+## Authentication errors in the dashboard
+
+Sign-in problems point at the Clerk configuration. Re-check
+`NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`, and `CLERK_ISSUER`
+against your Clerk application, and confirm the keys match the environment
+(development vs production) you intend to run.
+
+## Still stuck?
+
+Capture the failing service's logs and your (secret-redacted) `.env` settings,
+then open an issue on the
+[project repository](https://github.com/solana-foundation/solana-developer-platform).
 
 ---
 

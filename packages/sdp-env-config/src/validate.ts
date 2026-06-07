@@ -55,7 +55,9 @@ export function validateValues(values: Values): Errors {
   for (const f of FIELDS) {
     // Derived fields are computed, not user input — nothing to validate.
     if (f.derive) continue;
-    if (!isFieldVisible(f, values)) continue;
+    // Skip hidden fields, except `alwaysEmit` ones: those are emitted even when
+    // hidden, so a required-but-empty value must still be caught.
+    if (!isFieldVisible(f, values) && !f.alwaysEmit) continue;
     const error = validateField(f, values);
     if (error) errors[f.key] = error;
   }

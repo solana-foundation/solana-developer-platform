@@ -139,6 +139,18 @@ test("manual Postgres password is required when empty", () => {
   assert.ok(errors.POSTGRES_PASSWORD);
 });
 
+test("an always-emitted password is validated even when hidden by external DB", () => {
+  // POSTGRES_PASSWORD is hidden under an external database but still emitted and
+  // required, so an empty value must be caught rather than silently omitted.
+  const errors = validateValues({
+    ...defaultValues(),
+    DATABASE_MODE: "external",
+    DATABASE_URL: "postgresql://u@h:5432/d",
+    POSTGRES_PASSWORD: "",
+  });
+  assert.ok(errors.POSTGRES_PASSWORD);
+});
+
 test("a value with a newline is rejected as multi-line", () => {
   const errors = validateValues({
     ...defaultValues(),

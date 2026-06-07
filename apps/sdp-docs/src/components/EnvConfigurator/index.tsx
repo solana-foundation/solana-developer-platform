@@ -274,6 +274,12 @@ export function EnvConfigurator() {
       if (key === "POSTGRES_PASSWORD_MODE") {
         next.POSTGRES_PASSWORD = value === "manual" ? "" : randomHex32();
       }
+      // An external database hides the bundled-Postgres password fields, but
+      // compose still requires POSTGRES_PASSWORD. Ensure one exists so the .env
+      // stays bootable even if manual mode had cleared it before the switch.
+      if (key === "DATABASE_MODE" && value !== "bundled" && !next.POSTGRES_PASSWORD) {
+        next.POSTGRES_PASSWORD = randomHex32();
+      }
       // Keep the default provider valid: if it drops out of the selected set,
       // fall back to the first selected provider.
       if (key === "SIGNING_PROVIDERS") {

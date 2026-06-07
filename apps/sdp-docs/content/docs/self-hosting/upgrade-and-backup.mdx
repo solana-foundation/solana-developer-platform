@@ -1,0 +1,102 @@
+---
+title: Upgrade & Backup
+description: Move a self-hosted Solana Developer Platform to a new release and protect its data.
+---
+
+This page covers upgrading to a new release and backing up the data that matters
+on a self-hosted stack.
+
+## Upgrade
+
+A release ships new container images plus an updated `compose.yml`. To upgrade:
+
+1. **Refresh the install files.** Re-run the install script. It replaces
+   `compose.yml` with the new release's version (verified against the release
+   checksums) and leaves any existing `.env` and `.env.example` in place, printing
+   a link to the new release's `.env.example` so you can check for new variables.
+
+   ```bash
+   curl -fsSL https://github.com/solana-foundation/solana-developer-platform/releases/latest/download/install.sh | bash
+   ```
+
+2. **Pin the version.** Set `SDP_VERSION` in `.env` to the release tag you are
+   upgrading to (rather than `latest`) so every service runs the same, known
+   build.
+
+3. **Pull and restart.**
+
+   ```bash
+   cd ~/sdp
+   docker compose pull
+   docker compose up -d
+   ```
+
+   `sdp-migrate` runs any new database migrations once before the API starts.
+
+4. **Verify** the services are healthy, as in the
+   [Quickstart](/docs/self-hosting/quickstart#4-verify).
+
+To upgrade to a specific release instead of the latest, set `INSTALL_VERSION`
+when running the script and the matching `SDP_VERSION` in `.env`.
+
+### Roll back
+
+Set `SDP_VERSION` back to the previous tag and run `docker compose up -d`. Note
+that migrations are not automatically reversed; if a release applied a migration,
+restore from a backup taken before the upgrade rather than relying on a
+version downgrade alone.
+
+## Backup
+
+Two things hold your state:
+
+- **The Postgres database** — all platform data. With the bundled database it
+  lives in the `sdp-postgres-data` Docker volume; with an external `DATABASE_URL`,
+  back it up with your database provider's tooling instead.
+- **Your `.env`** — secrets and configuration. Store it somewhere safe (a secret
+  manager); it cannot be regenerated identically.
+
+Redis is a cache and does not need backing up.
+
+### Back up the database
+
+Take a logical dump with `pg_dump` from the running container. Running it through
+`sh -c` lets `pg_dump` read `POSTGRES_USER` and `POSTGRES_DB` from inside the
+container, so custom values are honored:
+
+```bash
+cd ~/sdp
+docker compose exec -T postgres \
+  sh -c 'pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB"' > sdp-backup.sql
+```
+
+Keep these dumps off-host and on a schedule that matches your recovery needs.
+
+### Restore the database
+
+A plain `pg_dump` includes the full schema and the migration history, so restore
+into an **empty** database and let the stack start on top of it. Do not restore
+over an already-migrated database, or the dump's schema collides with the one
+`sdp-migrate` created on the previous `up`.
+
+```bash
+cd ~/sdp
+docker compose down                       # stop every service
+docker volume rm sdp_sdp-postgres-data    # discard the current database (destructive)
+docker compose up -d postgres             # start a fresh, empty Postgres
+until docker compose exec -T postgres \
+  sh -c 'pg_isready -U "$POSTGRES_USER"' >/dev/null 2>&1; do sleep 1; done
+docker compose exec -T postgres \
+  sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < sdp-backup.sql
+docker compose up -d                      # start the rest
+```
+
+On that final `up`, `sdp-migrate` skips every migration already recorded in the
+restored dump. Restoring a dump taken at the same release leaves it with nothing
+to do; restoring an older dump before an upgrade lets it apply only the newer
+migrations.
+
+Restore the matching `.env` alongside it so secrets such as
+`CUSTODY_ENCRYPTION_KEY` line up with the data they protect. For an external
+`DATABASE_URL`, restore through your database provider rather than the bundled
+`postgres` service.
