@@ -3714,6 +3714,9 @@ Source: https://platform.solana.com/docs/reference/api/payments
 | `POST` | `/v1/payments/ramps/onramp/execute` | Execute on-ramp |
 | `POST` | `/v1/payments/ramps/onramp/quote` | Create on-ramp quote |
 | `POST` | `/v1/payments/ramps/sandbox/simulate` | Simulate sandbox transfer |
+| `GET` | `/v1/payments/recurring-payments` | List recurring payments |
+| `POST` | `/v1/payments/recurring-payments` | Create recurring payment |
+| `GET` | `/v1/payments/recurring-payments/{id}` | Get recurring payment |
 | `GET` | `/v1/payments/subscription-plans` | List subscription plans |
 | `POST` | `/v1/payments/subscription-plans` | Create subscription plan |
 | `GET` | `/v1/payments/subscription-plans/{planId}` | Get subscription plan |

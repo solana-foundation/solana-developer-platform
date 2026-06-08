@@ -15,6 +15,7 @@ const POSTGRES_TEST_TABLES = [
   "signing_requests",
   "custody_configs",
   "payment_subscription_collection_attempts",
+  "payment_recurring_payments",
   "payment_subscriptions",
   "payment_subscription_plans",
   "payment_transfers",
