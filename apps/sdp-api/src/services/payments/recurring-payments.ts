@@ -131,6 +131,43 @@ async function confirmSubscriptionSignature(env: Env, signature: Signature): Pro
   }
 }
 
+async function clearRecurringPaymentFailedSignature(input: {
+  recurringRepo: ReturnType<typeof createPaymentRecurringPaymentsRepository>;
+  recurringPaymentId: string;
+  organizationId: string;
+  projectId: string;
+  field: "planCreationSignature" | "authorizationSignature";
+}): Promise<void> {
+  await input.recurringRepo.updateRecurringPaymentActivation({
+    recurringPaymentId: input.recurringPaymentId,
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    ...(input.field === "planCreationSignature"
+      ? { planCreationSignature: null }
+      : { authorizationSignature: null }),
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+async function confirmPersistedSubscriptionSignature(input: {
+  env: Env;
+  recurringRepo: ReturnType<typeof createPaymentRecurringPaymentsRepository>;
+  recurringPaymentId: string;
+  organizationId: string;
+  projectId: string;
+  signature: Signature;
+  field: "planCreationSignature" | "authorizationSignature";
+}): Promise<void> {
+  try {
+    await confirmSubscriptionSignature(input.env, input.signature);
+  } catch (error) {
+    if (error instanceof AppError && error.code === "TRANSACTION_FAILED") {
+      await clearRecurringPaymentFailedSignature(input);
+    }
+    throw error;
+  }
+}
+
 export async function createRecurringPayment(input: {
   env: Env;
   organizationId: string;
@@ -417,7 +454,15 @@ export async function activateRecurringPayment(input: {
         planCreationSignature,
         updatedAt: new Date().toISOString(),
       });
-      await confirmSubscriptionSignature(input.env, submittedPlanCreationSignature);
+      await confirmPersistedSubscriptionSignature({
+        env: input.env,
+        recurringRepo,
+        recurringPaymentId: claimed.id,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        signature: submittedPlanCreationSignature,
+        field: "planCreationSignature",
+      });
     }
 
     const onChainPlan = await subscriptionsProgram.fetchPlan(rpc, planPda, {
@@ -568,7 +613,15 @@ export async function activateRecurringPayment(input: {
         authorizationSignature,
         updatedAt: new Date().toISOString(),
       });
-      await confirmSubscriptionSignature(input.env, submittedAuthorizationSignature);
+      await confirmPersistedSubscriptionSignature({
+        env: input.env,
+        recurringRepo,
+        recurringPaymentId: claimed.id,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        signature: submittedAuthorizationSignature,
+        field: "authorizationSignature",
+      });
     }
 
     const onChainSubscription = await subscriptionsProgram.fetchMaybeSubscriptionDelegation(

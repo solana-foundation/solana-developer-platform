@@ -369,7 +369,7 @@ export function createPostgresPaymentRecurringPaymentsRepository(
              created_at,
              updated_at
            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-           ON CONFLICT DO NOTHING`
+           ON CONFLICT (recurring_payment_id) WHERE status = 'processing' DO NOTHING`
         )
         .bind(
           input.id,
