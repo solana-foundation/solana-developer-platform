@@ -96,6 +96,7 @@ const ENTERPRISE_PROVIDER_DEFAULTS: OrganizationProviderEntitlements = {
     "turnkey",
     "dfns",
     "anchorage",
+    "utila",
   ]),
   rpc: createBooleanRecord(ORGANIZATION_RPC_PROVIDERS, [
     "default",

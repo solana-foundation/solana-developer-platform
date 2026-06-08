@@ -14,6 +14,7 @@ import {
   rampPairKey,
   type SelectedRampPair,
 } from "@/lib/ramps";
+import { useRampEstimate } from "../hooks/use-ramp-estimate";
 import { CurrencyPairSelector } from "./currency-pair-selector";
 import { ProviderCard } from "./provider-card";
 import { RampSelectionProvider } from "./ramp-selection-context";
@@ -71,6 +72,12 @@ export function RampPairProviderSelector({
       ),
     [providerOptions, enabledProviderSet, supportedProviderSet]
   );
+  const { estimatesByProvider, loading: estimatesLoading } = useRampEstimate({
+    direction,
+    selectedPair,
+    amount,
+    enabled: availableProviders.length > 0,
+  });
   const pairByKey = useMemo(() => {
     const nextPairs = new Map<string, SelectedRampPair>();
     for (const pair of pairs) {
@@ -179,7 +186,7 @@ export function RampPairProviderSelector({
         </div>
 
         {/* Fixed height keeps the sticky footer from shifting as providers animate in/out. */}
-        <div className="h-48 overflow-y-auto">
+        <div className="-mx-1.5 h-48 overflow-y-auto px-1.5 py-1">
           <motion.div layout className="space-y-2">
             <AnimatePresence mode="popLayout" initial={false}>
               {availableProviders.map((option) => (
@@ -187,6 +194,8 @@ export function RampPairProviderSelector({
                   key={option.id}
                   option={option}
                   active={selectedProvider === option.id}
+                  estimate={estimatesByProvider.get(option.id)}
+                  estimateLoading={estimatesLoading}
                   onSelect={() => onProviderSelect(option.id)}
                 />
               ))}

@@ -42,7 +42,8 @@ export type ErrorCode =
   | "SIGNING_FAILED"
   | "SIGNING_PENDING"
   | "PROVIDER_NOT_CONFIGURED"
-  | "PROVIDER_UNAVAILABLE";
+  | "PROVIDER_UNAVAILABLE"
+  | "ESTIMATE_NOT_AVAILABLE";
 
 export interface ApiError {
   code: ErrorCode;
@@ -95,6 +96,7 @@ const ERROR_STATUS_CODES: Record<ErrorCode, number> = {
   SIGNING_PENDING: 202,
   PROVIDER_NOT_CONFIGURED: 503,
   PROVIDER_UNAVAILABLE: 503,
+  ESTIMATE_NOT_AVAILABLE: 503,
 };
 
 const DEFAULT_ERROR_MESSAGES: Record<ErrorCode, string> = {
@@ -139,6 +141,8 @@ const DEFAULT_ERROR_MESSAGES: Record<ErrorCode, string> = {
   SIGNING_PENDING: "Signing request pending approval",
   PROVIDER_NOT_CONFIGURED: "Payment provider is not configured for this environment",
   PROVIDER_UNAVAILABLE: "Payment provider is temporarily unavailable",
+  ESTIMATE_NOT_AVAILABLE:
+    "An indicative estimate is not available; the rate is known at quote time",
 };
 
 export class AppError extends Error {

@@ -40,6 +40,7 @@ import {
   type PrivyProviderConfig,
   parseConfigRecord,
   type TurnkeyProviderConfig,
+  type UtilaProviderConfig,
 } from "@/services/domain/signing/provider-config";
 import {
   normalizeAnchorageWalletId,
@@ -47,6 +48,7 @@ import {
   normalizeParaWalletId,
   normalizePrivyWalletId,
   normalizeTurnkeyWalletId,
+  normalizeUtilaWalletId,
 } from "@/services/domain/signing/provider-wallet-ids";
 import {
   createProviderWallet,
@@ -223,6 +225,17 @@ export interface InitAnchorageSigningOptions {
 }
 
 /**
+ * Options for initializing org signing with Utila provider.
+ *
+ * Utila is platform-managed: SDP creates a new Solana sub-wallet inside the
+ * configured vault, like the other hosted providers.
+ */
+export interface InitUtilaSigningOptions {
+  /** Optional label for the first wallet created in the vault. */
+  walletLabel?: string;
+}
+
+/**
  * Result of initializing org signing.
  */
 export interface InitSigningResult {
@@ -231,7 +244,7 @@ export interface InitSigningResult {
   walletId: string;
 }
 
-type ReusableSigningProvider = "privy" | "coinbase_cdp" | "para" | "turnkey";
+type ReusableSigningProvider = "privy" | "coinbase_cdp" | "para" | "turnkey" | "utila";
 
 export type ProviderReuseState = Record<ReusableSigningProvider, boolean>;
 
@@ -461,11 +474,12 @@ export class SigningService {
     orgId: string,
     projectId: string | undefined
   ): Promise<ProviderReuseState> {
-    const [privy, coinbaseCdp, para, turnkey] = await Promise.all([
+    const [privy, coinbaseCdp, para, turnkey, utila] = await Promise.all([
       this.findExistingProviderWallet(orgId, projectId, "privy"),
       this.findExistingProviderWallet(orgId, projectId, "coinbase_cdp"),
       this.findExistingProviderWallet(orgId, projectId, "para"),
       this.findExistingProviderWallet(orgId, projectId, "turnkey"),
+      this.findExistingProviderWallet(orgId, projectId, "utila"),
     ]);
 
     return {
@@ -473,6 +487,7 @@ export class SigningService {
       coinbase_cdp: Boolean(coinbaseCdp),
       para: Boolean(para),
       turnkey: Boolean(turnkey),
+      utila: Boolean(utila),
     };
   }
 
@@ -1144,6 +1159,91 @@ export class SigningService {
   }
 
   /**
+   * Initialize signing for an organization with Utila provider.
+   *
+   * Utila is platform-managed: SDP creates a new Solana sub-wallet inside the
+   * configured vault and stores it like the other hosted providers.
+   */
+  async initializeUtilaSigning(
+    orgId: string,
+    projectId: string | undefined,
+    options: InitUtilaSigningOptions
+  ): Promise<InitSigningResult> {
+    const existing = await this.configStore.findActiveByProvider(orgId, projectId, "utila");
+    if (existing) {
+      throw new SigningError(
+        `Signing already initialized for org ${orgId}${projectId ? ` project ${projectId}` : ""}`,
+        "ALREADY_INITIALIZED"
+      );
+    }
+
+    if (
+      !this.env.UTILA_SERVICE_ACCOUNT_EMAIL ||
+      !this.env.UTILA_SERVICE_ACCOUNT_PRIVATE_KEY ||
+      !this.env.UTILA_VAULT_ID
+    ) {
+      throw new SigningError(
+        "Utila environment variables not configured: UTILA_SERVICE_ACCOUNT_EMAIL, UTILA_SERVICE_ACCOUNT_PRIVATE_KEY, UTILA_VAULT_ID",
+        "PROVIDER_NOT_CONFIGURED"
+      );
+    }
+
+    const reusable = await this.findReusableProviderWallet(orgId, projectId, "utila");
+    if (reusable) {
+      const configJson: UtilaProviderConfig = {
+        provider: "utila",
+        vaultId: this.env.UTILA_VAULT_ID,
+        network: this.env.UTILA_NETWORK,
+        apiBaseUrl: this.env.UTILA_API_BASE_URL,
+      };
+
+      await this.updateConfigJson(reusable.configId, configJson);
+      await this.ensureScopeDefaultConfigForExistingRecord(orgId, projectId, reusable.configId);
+      this.providerCache.delete(reusable.configId);
+
+      return {
+        configId: reusable.configId,
+        publicKey: reusable.wallet.publicKey as Address,
+        walletId: reusable.wallet.walletId,
+      };
+    }
+
+    const provisioned = await custodyProvisioning.provisionUtilaWallet(this.env, {
+      displayName: options.walletLabel,
+    });
+
+    const walletId = normalizeUtilaWalletId(provisioned.walletId);
+    const publicKey = provisioned.address as Address;
+    const configJson: UtilaProviderConfig = {
+      provider: "utila",
+      vaultId: provisioned.vaultId,
+      network: provisioned.network,
+    };
+
+    const configId = await this.configStore.upsert(orgId, projectId, {
+      provider: "utila",
+      defaultWalletId: walletId,
+    });
+    await this.ensureScopeDefaultConfig(orgId, projectId, configId, "utila");
+    await this.updateConfigJson(configId, configJson);
+
+    await this.configStore.createWallet(configId, {
+      walletId,
+      publicKey,
+      label: options.walletLabel ?? "Utila Wallet",
+      purpose: "root",
+    });
+
+    this.providerCache.delete(configId);
+
+    return {
+      configId,
+      publicKey,
+      walletId,
+    };
+  }
+
+  /**
    * Get the wallets for an organization's custody config.
    */
   async getWallets(orgId: string, projectId?: string): Promise<CustodyWallet[]> {
@@ -1380,6 +1480,7 @@ export class SigningService {
       | TurnkeyProviderConfig
       | DfnsProviderConfig
       | AnchorageProviderConfig
+      | UtilaProviderConfig
   ): Promise<void> {
     // This would normally be a direct DB update, but we'll use the upsert pattern
     // The config JSON is stored in the `config_encrypted` column of custody_configs

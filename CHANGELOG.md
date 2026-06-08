@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.26.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.25.0...v0.26.0) (2026-06-05)
+
+### Features
+
+* transaction reconciliation and transaction history ([#413](https://github.com/solana-foundation/solana-developer-platform/pull/413)) ([9bc06d0](https://github.com/solana-foundation/solana-developer-platform/commit/9bc06d0e937f4a6d9d3816242116877b1511546f))
+* add Payments v2 dashboard cookie toggle ([#412](https://github.com/solana-foundation/solana-developer-platform/pull/412)) ([71a86f1](https://github.com/solana-foundation/solana-developer-platform/commit/71a86f1e73a4a09e5542ddbc281a232620067710))
+* add in estimates for on/offramp ([#411](https://github.com/solana-foundation/solana-developer-platform/pull/411)) ([9ec2610](https://github.com/solana-foundation/solana-developer-platform/commit/9ec2610b0bb199616a4a975941b8533c38ef4c8c))
+* add Solana subscription primitives ([#406](https://github.com/solana-foundation/solana-developer-platform/pull/406)) ([cbd77f1](https://github.com/solana-foundation/solana-developer-platform/commit/cbd77f17c1c359af36a24dc87110a654ebd8bcf6))
+* add counterparty crypto-wallet accounts ([#405](https://github.com/solana-foundation/solana-developer-platform/pull/405)) ([acfd833](https://github.com/solana-foundation/solana-developer-platform/commit/acfd83308edb8e868f5d8acc48c983367fd63e07))
+* **onramp:** BVNK fiat→crypto on-ramp with KYC onboarding + verification webhooks ([#404](https://github.com/solana-foundation/solana-developer-platform/pull/404)) ([627eaa5](https://github.com/solana-foundation/solana-developer-platform/commit/627eaa57fa64e6ab365aee3e083eaf56f39fbdf5))
+* onchain transfers in payments v2 deposit/pay flows ([#401](https://github.com/solana-foundation/solana-developer-platform/pull/401)) ([00f21c2](https://github.com/solana-foundation/solana-developer-platform/commit/00f21c2c09461549459a2a347bb733f9793eaa4a))
+
+## [0.25.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.24.0...v0.25.0) (2026-06-03)
+
+### Features
+
+* HOO-519 bootstrap install script for self-hosted deployments ([#394](https://github.com/solana-foundation/solana-developer-platform/pull/394)) ([57febae](https://github.com/solana-foundation/solana-developer-platform/commit/57febae5dc7e63c2185403f300425747bfdc44a8))
+* add Utila custody signer ([#386](https://github.com/solana-foundation/solana-developer-platform/pull/386)) ([bef8bf8](https://github.com/solana-foundation/solana-developer-platform/commit/bef8bf8633ae1a213f2d2480c51ac103e66b7fe9))
+* **counterparty:** payment accounts CRUD + manage page ([#399](https://github.com/solana-foundation/solana-developer-platform/pull/399)) ([adf948d](https://github.com/solana-foundation/solana-developer-platform/commit/adf948d8e9282def8851f621a334be5670eb9cc2))
+* cleanup payments for sdp-api ([#397](https://github.com/solana-foundation/solana-developer-platform/pull/397)) ([a085037](https://github.com/solana-foundation/solana-developer-platform/commit/a08503712e8dd32c2888d3305bd345a0ec846779))
+* **sdp-api:** Kora sponsor sRFC-37 token deployment ([#387](https://github.com/solana-foundation/solana-developer-platform/pull/387)) ([e63c2bb](https://github.com/solana-foundation/solana-developer-platform/commit/e63c2bbb482fd9183bedc928f19df90efcbede77))
+
+### Documentation
+
+* add self-hosted co-signer hosting guidance ([#390](https://github.com/solana-foundation/solana-developer-platform/pull/390)) ([6b613da](https://github.com/solana-foundation/solana-developer-platform/commit/6b613da4b0397141f97ff9348d47079d6377b7a6))
+
+### Maintenance
+
+* rearrange ramps file structure and also just scaffold moonpay … ([#396](https://github.com/solana-foundation/solana-developer-platform/pull/396)) ([35b6423](https://github.com/solana-foundation/solana-developer-platform/commit/35b64235fc36135e4100fa8219c40014a7291b51))
+
 ## [0.24.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.23.0...v0.24.0) (2026-06-02)
 
 ### Features

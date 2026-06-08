@@ -1217,6 +1217,291 @@
           }
         },
         {
+          "name": "List subscription plans",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/payments/subscription-plans",
+            "description": "Lists feature-flagged recurring-payment subscription plans."
+          }
+        },
+        {
+          "name": "Create subscription plan",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/payments/subscription-plans",
+            "description": "Creates a feature-flagged recurring-payment subscription plan record. This stores SDP backend state and Solana subscriptions program identifiers; it does not by itself create the on-chain plan.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ownerWalletId\": \"wal_merchant\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"25.00\",\n  \"periodHours\": 720,\n  \"programPlanId\": \"17014118346046923173\",\n  \"planPda\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\",\n  \"destinationAddress\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\",\n  \"pullerWalletId\": \"wal_collector\",\n  \"metadataUri\": \"https://example.com/subscriptions/monthly-usdc.json\",\n  \"status\": \"active\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Prepare subscription plan creation",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/payments/subscription-plans/{{planId}}/prepare-create",
+            "description": "Prepares an unsigned Solana subscriptions program create-plan transaction from an SDP subscription plan. This derives and stores the plan PDA but does not submit the transaction.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"destinations\": [\n    \"\"\n  ],\n  \"pullers\": [\n    \"\"\n  ],\n  \"endTs\": \"1770000000\",\n  \"metadataUri\": \"https://example.com/subscriptions/monthly-usdc.json\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Get subscription plan",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/payments/subscription-plans/{{planId}}",
+            "description": "Retrieves a recurring-payment subscription plan record."
+          }
+        },
+        {
+          "name": "Update subscription plan",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/payments/subscription-plans/{{planId}}",
+            "description": "Updates mutable subscription plan fields and on-chain identifiers.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"planPda\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\",\n  \"destinationAddress\": \"\",\n  \"pullerWalletId\": \"wal_collector\",\n  \"metadataUri\": \"https://example.com\",\n  \"status\": \"active\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "List subscriptions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/payments/subscriptions",
+            "description": "Lists recurring-payment subscriptions."
+          }
+        },
+        {
+          "name": "Create subscription",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/payments/subscriptions",
+            "description": "Creates a feature-flagged recurring-payment subscription record tied to a counterparty. The customer must still sign the Solana subscription authorization transaction.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"planId\": \"psp_example\",\n  \"counterpartyId\": \"counterparty_example\",\n  \"subscriberAddress\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\",\n  \"subscriberTokenAccount\": \"\",\n  \"subscriptionPda\": \"\",\n  \"subscriptionAuthorityAddress\": \"\",\n  \"authorizationSignature\": \"sig_example\",\n  \"status\": \"active\",\n  \"currentPeriodStartAt\": \"2026-01-01T00:00:00.000Z\",\n  \"nextCollectionDueAt\": \"2026-01-01T00:00:00.000Z\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Prepare subscription authorization",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/payments/subscriptions/{{subscriptionId}}/prepare-authorization",
+            "description": "Prepares the subscriber-signed Solana transaction that initializes the subscription authority and subscribes to the plan. The transaction must still be signed and submitted by the client.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"subscriberTokenAccount\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\",\n  \"expectedPlanCreatedAt\": \"0\",\n  \"expectedSubscriptionAuthorityInitId\": \"0\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Prepare subscription cancellation",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/payments/subscriptions/{{subscriptionId}}/prepare-cancel",
+            "description": "Prepares the subscriber-signed Solana transaction that cancels a subscription. The transaction must still be signed and submitted by the client.",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Prepare subscription resume",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/payments/subscriptions/{{subscriptionId}}/prepare-resume",
+            "description": "Prepares the subscriber-signed Solana transaction that resumes a canceled subscription before revocation. The transaction must still be signed and submitted by the client.",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Prepare subscription collection",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/payments/subscriptions/{{subscriptionId}}/prepare-collection",
+            "description": "Prepares the collector-signed Solana subscriptions transfer transaction for an active subscription. The transaction must still be signed and submitted by the collector/fee-payer flow.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": \"25.00\",\n  \"receiverTokenAccount\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Get subscription",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/payments/subscriptions/{{subscriptionId}}",
+            "description": "Retrieves a recurring-payment subscription record."
+          }
+        },
+        {
+          "name": "Update subscription",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/payments/subscriptions/{{subscriptionId}}",
+            "description": "Updates mutable subscription status and on-chain identifiers.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"subscriberTokenAccount\": \"\",\n  \"subscriptionPda\": \"\",\n  \"subscriptionAuthorityAddress\": \"\",\n  \"authorizationSignature\": \"\",\n  \"status\": \"active\",\n  \"currentPeriodStartAt\": \"2026-01-01T00:00:00.000Z\",\n  \"nextCollectionDueAt\": \"2026-01-01T00:00:00.000Z\",\n  \"cancelAt\": \"2026-01-01T00:00:00.000Z\",\n  \"canceledAt\": \"2026-01-01T00:00:00.000Z\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "List subscription collection attempts",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/payments/subscriptions/{{subscriptionId}}/collection-attempts",
+            "description": "Lists collection attempts for a recurring-payment subscription."
+          }
+        },
+        {
+          "name": "Create subscription collection attempt",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/payments/subscriptions/{{subscriptionId}}/collection-attempts",
+            "description": "Creates a collection-attempt record for a due recurring-payment subscription. Actual Solana settlement is owned by the collection worker/transaction submitter.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": \"\",\n  \"token\": \"\",\n  \"dueAt\": \"2026-01-01T00:00:00.000Z\",\n  \"attemptedAt\": \"2026-01-01T00:00:00.000Z\",\n  \"status\": \"pending\",\n  \"transferId\": \"\",\n  \"signature\": \"\",\n  \"error\": \"\",\n  \"metadata\": {}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
           "name": "List on-ramp currency support",
           "request": {
             "method": "GET",

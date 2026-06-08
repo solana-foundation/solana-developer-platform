@@ -3714,6 +3714,21 @@ Source: https://platform.solana.com/docs/reference/api/payments
 | `POST` | `/v1/payments/ramps/onramp/execute` | Execute on-ramp |
 | `POST` | `/v1/payments/ramps/onramp/quote` | Create on-ramp quote |
 | `POST` | `/v1/payments/ramps/sandbox/simulate` | Simulate sandbox transfer |
+| `GET` | `/v1/payments/subscription-plans` | List subscription plans |
+| `POST` | `/v1/payments/subscription-plans` | Create subscription plan |
+| `GET` | `/v1/payments/subscription-plans/{planId}` | Get subscription plan |
+| `PATCH` | `/v1/payments/subscription-plans/{planId}` | Update subscription plan |
+| `POST` | `/v1/payments/subscription-plans/{planId}/prepare-create` | Prepare subscription plan creation |
+| `GET` | `/v1/payments/subscriptions` | List subscriptions |
+| `POST` | `/v1/payments/subscriptions` | Create subscription |
+| `GET` | `/v1/payments/subscriptions/{subscriptionId}` | Get subscription |
+| `PATCH` | `/v1/payments/subscriptions/{subscriptionId}` | Update subscription |
+| `GET` | `/v1/payments/subscriptions/{subscriptionId}/collection-attempts` | List subscription collection attempts |
+| `POST` | `/v1/payments/subscriptions/{subscriptionId}/collection-attempts` | Create subscription collection attempt |
+| `POST` | `/v1/payments/subscriptions/{subscriptionId}/prepare-authorization` | Prepare subscription authorization |
+| `POST` | `/v1/payments/subscriptions/{subscriptionId}/prepare-cancel` | Prepare subscription cancellation |
+| `POST` | `/v1/payments/subscriptions/{subscriptionId}/prepare-collection` | Prepare subscription collection |
+| `POST` | `/v1/payments/subscriptions/{subscriptionId}/prepare-resume` | Prepare subscription resume |
 | `GET` | `/v1/payments/transfers` | List transfers |
 | `POST` | `/v1/payments/transfers` | Execute transfer (custody) |
 | `GET` | `/v1/payments/transfers/{transferId}` | Get transfer |

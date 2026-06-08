@@ -1,6 +1,6 @@
 "use client";
 
-import { PlusIcon, WalletIcon } from "lucide-react";
+import { CheckCircle2Icon, Loader2Icon, WalletIcon, XCircleIcon } from "lucide-react";
 import { useMemo } from "react";
 import {
   formatCurrencyAmount,
@@ -9,23 +9,100 @@ import {
 import { Combobox } from "@/components/ui/combobox";
 import { OFFRAMP_PAIRS, RAMP_PROVIDER_OPTIONS } from "@/lib/ramps";
 import type { OfframpWizard } from "../hooks/use-offramp-wizard";
-import { CounterpartySelector } from "./counterparty-selector";
+import { HostedRampFrame } from "./hosted-ramp-frame";
 import { RampPairProviderSelector } from "./ramp-pair-provider-selector";
 import { RampStepPlaceholder } from "./ramp-step-placeholder";
+
+function getOfframpTransferStatusCopy(status: string) {
+  switch (status) {
+    case "pending":
+    case "awaiting_payment":
+      return {
+        title: "Waiting to send",
+        description:
+          "Complete the payout in the widget above. We will update this outgoing transfer automatically once the provider receives your crypto.",
+        state: "loading" as const,
+      };
+    case "processing":
+    case "settling":
+      return {
+        title: "Sending payout",
+        description:
+          "The provider received your crypto and is settling the outgoing payout to the recipient.",
+        state: "loading" as const,
+      };
+    case "completed":
+      return {
+        title: "Payout sent",
+        description:
+          "The outgoing payout has settled. You can review this transfer from the counterparty record.",
+        state: "success" as const,
+      };
+    case "failed":
+      return {
+        title: "Payout failed",
+        description:
+          "The provider reported that this outgoing payout failed. Review the counterparty record for the latest transfer status.",
+        state: "error" as const,
+      };
+    case "expired":
+      return {
+        title: "Quote expired",
+        description:
+          "This quote expired before the payout completed. Create a new quote to continue the withdrawal.",
+        state: "error" as const,
+      };
+    default:
+      return {
+        title: "Transfer status updated",
+        description: `Current provider status: ${status}.`,
+        state: "loading" as const,
+      };
+  }
+}
+
+function OfframpTransferStatusPanel({ transfer }: { transfer: OfframpWizard["transferStatus"] }) {
+  const copy = transfer
+    ? getOfframpTransferStatusCopy(transfer.status)
+    : {
+        title: "Preparing transfer status",
+        description: "We are waiting for the transfer record tied to this quote.",
+        state: "loading" as const,
+      };
+  const icon =
+    copy.state === "success" ? (
+      <CheckCircle2Icon className="size-5 text-status-success-text" />
+    ) : copy.state === "error" ? (
+      <XCircleIcon className="size-5 text-status-error-text" />
+    ) : (
+      <Loader2Icon className="size-5 animate-spin text-text-medium" />
+    );
+  return (
+    <div className="flex items-start gap-3">
+      <span className="mt-0.5 shrink-0">{icon}</span>
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-medium text-text-extra-high">{copy.title}</p>
+        <p className="mt-1 text-sm leading-relaxed text-text-low">
+          {copy.description}
+          {copy.state === "loading" ? " Checking transfer status…" : null}
+        </p>
+      </div>
+    </div>
+  );
+}
 
 export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
   const {
     currentStepId,
     enabledRampProviders,
-    liveCounterpartiesResult,
     liveWallets,
     walletsLoading,
     selectedWallet,
     selectedRampPair,
     fields,
     quote,
+    transferStatus,
     setField,
-    setCounterpartyDialogOpen,
     handlePairChange,
   } = wizard;
 
@@ -42,40 +119,18 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
     [liveWallets]
   );
 
-  if (currentStepId === "COUNTERPARTY") {
+  if (currentStepId === "WALLET") {
     return (
-      <div className="space-y-3">
-        <button
-          type="button"
-          onClick={() => setCounterpartyDialogOpen(true)}
-          className="flex w-full items-center gap-3 rounded-2xl border border-dashed border-border-light px-4 py-3.5 text-left transition-colors hover:border-border-medium hover:bg-border-extra-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/50 dark:focus-visible:ring-white/50"
-        >
-          <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-border-extra-light text-text-extra-high">
-            <PlusIcon className="size-4" />
-          </span>
-          <span className="min-w-0 flex-1">
-            <span className="block text-sm font-medium text-text-extra-high">Add counterparty</span>
-            <span className="block text-sm text-text-low">
-              Create a new payee to pay out to if they aren&apos;t in the list yet.
-            </span>
-          </span>
-        </button>
-        <CounterpartySelector
-          counterpartiesResult={liveCounterpartiesResult}
-          value={fields.counterpartyId || null}
-          onChange={(id) => setField("counterpartyId", id)}
-        />
-        <Combobox
-          label="Source wallet"
-          value={fields.walletId || null}
-          onChange={(walletId) => setField("walletId", walletId)}
-          options={walletOptions}
-          placeholder="Select a source wallet"
-          searchPlaceholder="Search wallets"
-          icon={<WalletIcon className="size-5 shrink-0 text-text-low" />}
-          isLoading={walletsLoading}
-        />
-      </div>
+      <Combobox
+        label="Source wallet"
+        value={fields.walletId || null}
+        onChange={(walletId) => setField("walletId", walletId)}
+        options={walletOptions}
+        placeholder="Select a source wallet"
+        searchPlaceholder="Search wallets"
+        icon={<WalletIcon className="size-5 shrink-0 text-text-low" />}
+        isLoading={walletsLoading}
+      />
     );
   }
 
@@ -112,13 +167,11 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
 
   if (currentStepId === "COMPLETE" && quote?.deliveryMode === "hosted") {
     return (
-      <div className="overflow-hidden rounded-2xl">
-        <iframe
-          title={`${quote.provider} off-ramp`}
-          src={quote.hostedUrl}
-          className="h-[480px] w-full border-0"
-          allow="accelerometer; autoplay; camera; encrypted-media; fullscreen; geolocation; gyroscope; payment"
-        />
+      <div className="space-y-6">
+        <HostedRampFrame title={`${quote.provider} off-ramp`} src={quote.hostedUrl} />
+        <div className="border-t border-border-light pt-5">
+          <OfframpTransferStatusPanel transfer={transferStatus} />
+        </div>
       </div>
     );
   }

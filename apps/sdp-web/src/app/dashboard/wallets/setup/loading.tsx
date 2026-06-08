@@ -6,7 +6,13 @@ export default function WalletSetupLoading() {
           <div className="h-9 w-56 animate-pulse rounded-md bg-border-light" />
         </div>
 
-        {["provider-privy", "provider-coinbase", "provider-para", "provider-turnkey"].map((id) => (
+        {[
+          "provider-privy",
+          "provider-coinbase",
+          "provider-para",
+          "provider-turnkey",
+          "provider-utila",
+        ].map((id) => (
           <div
             key={id}
             className="w-full rounded-2xl border border-border-light bg-white px-5 py-5"

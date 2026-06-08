@@ -2,11 +2,28 @@
 
 import { CheckIcon, ChevronDownIcon, SearchIcon } from "lucide-react";
 import { Popover } from "radix-ui";
-import type { ReactNode } from "react";
-import { useId, useMemo, useState } from "react";
+import { cloneElement, isValidElement, type ReactNode, useId, useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
 import { Input } from "./input";
 import { Label } from "./label";
+import { usePortalContainer } from "./portal-container";
+
+const DEFAULT_ICON_CLASS = "size-5 shrink-0 text-text-low";
+
+export type ComboboxSize = "md" | "lg" | "xl";
+
+const SIZE_CLASSES = {
+  md: "h-[var(--input-height-md)] rounded-[var(--input-radius-md)] px-[var(--input-padding-x-md)]",
+  lg: "h-[var(--input-height-lg)] rounded-[var(--input-radius-lg)] px-[var(--input-padding-x-lg)]",
+  xl: "h-[var(--input-height-xl)] rounded-[var(--input-radius-xl)] px-[var(--input-padding-x-xl)]",
+} as const satisfies Record<ComboboxSize, string>;
+
+function withIconClass(node: ReactNode): ReactNode {
+  if (!isValidElement<{ className?: string }>(node)) {
+    return node;
+  }
+  return cloneElement(node, { className: cn(DEFAULT_ICON_CLASS, node.props.className) });
+}
 
 export interface ComboboxOption {
   value: string;
@@ -23,6 +40,7 @@ interface ComboboxProps {
   searchable?: boolean;
   searchPlaceholder?: string;
   icon?: ReactNode;
+  size?: ComboboxSize;
   isLoading?: boolean;
   disabled?: boolean;
   error?: string;
@@ -38,12 +56,14 @@ export function Combobox({
   searchable = true,
   searchPlaceholder = "Search…",
   icon,
+  size = "xl",
   isLoading,
   disabled,
   error,
   footer,
 }: ComboboxProps) {
   const labelId = useId();
+  const portalContainer = usePortalContainer();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
 
@@ -72,9 +92,7 @@ export function Combobox({
 
   return (
     <div className="flex flex-col gap-2">
-      <Label className="text-sm font-medium text-text-low" id={labelId}>
-        {label}
-      </Label>
+      <Label id={labelId}>{label}</Label>
       <Popover.Root open={open} onOpenChange={handleOpenChange}>
         <Popover.Trigger asChild>
           <button
@@ -83,9 +101,12 @@ export function Combobox({
             aria-expanded={open}
             aria-labelledby={labelId}
             disabled={disabled}
-            className="flex h-12 w-full items-center gap-2 rounded-xl bg-border-extra-light px-3.5 text-base transition-colors hover:bg-border-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/50 disabled:cursor-not-allowed disabled:opacity-50 dark:focus-visible:ring-white/50"
+            className={cn(
+              "flex w-full items-center gap-2 border border-border-light bg-transparent text-base transition-colors hover:border-border-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/50 disabled:cursor-not-allowed disabled:opacity-50 dark:focus-visible:ring-white/50",
+              SIZE_CLASSES[size]
+            )}
           >
-            {icon}
+            {withIconClass(icon)}
             <span className="min-w-0 flex-1 text-left">
               {selected ? (
                 <span className="flex min-w-0 items-center gap-2">
@@ -107,12 +128,12 @@ export function Combobox({
           </button>
         </Popover.Trigger>
 
-        <Popover.Portal>
+        <Popover.Portal container={portalContainer ?? undefined}>
           <Popover.Content
             sideOffset={8}
             align="start"
             style={{ width: "var(--radix-popover-trigger-width)" }}
-            className="z-20 overflow-hidden rounded-[var(--select-popup-radius)] bg-[var(--select-popup-bg)] shadow-[var(--select-popup-shadow)]"
+            className="z-50 overflow-hidden rounded-[var(--select-popup-radius)] bg-[var(--select-popup-bg)] shadow-[var(--select-popup-shadow)]"
           >
             {searchable ? (
               <div className="border-b border-border-light p-2">

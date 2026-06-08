@@ -115,6 +115,15 @@ const CUSTODY_PROVIDER_CATALOG_BY_ID = {
     supportsAdditionalWallets: providerSupportsAdditionalWallets("anchorage"),
     supportsSigning: providerSupportsSigning("anchorage"),
   },
+  utila: {
+    id: "utila",
+    label: "Utila",
+    description: "Vault-backed Solana wallet signing through Utila service accounts.",
+    category: "institutional",
+    supportsAdditionalWallets: providerSupportsAdditionalWallets("utila"),
+    supportsSigning: providerSupportsSigning("utila"),
+    capabilities: DEFAULT_CUSTODY_CAPABILITIES,
+  },
 } satisfies CustodyProviderCatalogById;
 
 export const CUSTODY_PROVIDER_CATALOG: CustodyProviderCatalogEntry[] = Object.values(

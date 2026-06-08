@@ -8,8 +8,10 @@ import {
   KeychainParaAdapter,
   KeychainPrivyAdapter,
   KeychainTurnkeyAdapter,
+  KeychainUtilaAdapter,
   type SigningConfigRecord,
 } from "@/services/adapters";
+import { buildKeychainUtilaConfig } from "@/services/adapters/signing/keychain/utila-config";
 import { createDfnsApiClient, normalizeDfnsWalletId } from "@/services/dfns/client";
 import { createEncryptionService } from "@/services/encryption.service";
 import {
@@ -65,7 +67,6 @@ class LifecycleOnlyAdapter implements SigningPort {
 
 const providerAdapterFactories = {
   local: async ({ env, orgId, parsed }) => {
-    // biome-ignore lint/security/noSecrets: Config field name check, not a secret value.
     if (!("encryptedPrivateKey" in parsed) || !parsed.encryptedPrivateKey) {
       throw new SigningError(
         "Local custody config missing encrypted private key",
@@ -78,7 +79,6 @@ const providerAdapterFactories = {
     return KeychainMemoryAdapter.fromBase58(privateKeyBase58);
   },
   fireblocks: async ({ env, orgId, parsed }) => {
-    // biome-ignore lint/security/noSecrets: Config field name check, not a secret value.
     if (!("apiSecretEncrypted" in parsed) || !parsed.apiSecretEncrypted) {
       throw new SigningError(
         "Fireblocks config missing encrypted API secret",
@@ -247,6 +247,16 @@ const providerAdapterFactories = {
     });
   },
   anchorage: async () => new LifecycleOnlyAdapter("anchorage"),
+  utila: async ({ env, record, parsed }) => {
+    return new KeychainUtilaAdapter(
+      buildKeychainUtilaConfig(env, {
+        apiBaseUrl: parsed.apiBaseUrl,
+        defaultWalletId: record.defaultWalletId,
+        network: parsed.network,
+        vaultId: parsed.vaultId,
+      })
+    );
+  },
 } satisfies {
   [K in ProviderConfigRecord["provider"]]: AdapterFactory<
     Extract<ProviderConfigRecord, { provider: K }>

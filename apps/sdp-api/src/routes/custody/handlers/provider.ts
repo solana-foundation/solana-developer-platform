@@ -221,7 +221,9 @@ export const getSwitchProviderOptions = async (c: AppContext) => {
                 ? reuseState.para
                 : provider === "turnkey"
                   ? reuseState.turnkey
-                  : false;
+                  : provider === "utila"
+                    ? reuseState.utila
+                    : false;
 
         const needsWalletLabel =
           provider === "fireblocks" ? false : provider === "local" ? true : !hasReusableWallet;
@@ -331,6 +333,10 @@ async function initializeProviderConnection(
         walletId: request.walletId,
         walletLabel: request.walletLabel,
         network: request.network,
+      });
+    case "utila":
+      return signingService.initializeUtilaSigning(organizationId, projectId, {
+        walletLabel: request.walletLabel,
       });
     default:
       throw new AppError("BAD_REQUEST", "Unsupported provider");

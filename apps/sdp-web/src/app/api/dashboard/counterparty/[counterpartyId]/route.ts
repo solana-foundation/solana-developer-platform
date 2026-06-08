@@ -100,7 +100,7 @@ export async function DELETE(request: Request, context: RouteContext) {
 
     logRouteResult(trace, response.status);
 
-    return new NextResponse(body, {
+    return new NextResponse(response.status === 204 ? null : body, {
       status: response.status,
       headers: {
         "Content-Type": response.headers.get("Content-Type") ?? "application/json",

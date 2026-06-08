@@ -1,11 +1,19 @@
 "use client";
 
+import type { PaymentTransferSummary } from "@sdp/types";
+import useSWR from "swr";
+import { fetchTransferByProviderReference } from "@/app/dashboard/payments/payments-workspace.data";
 import { OFFRAMP_PAIRS } from "@/lib/ramps";
-import { payoutCounterpartySchema, withdrawAmountSchema, withdrawSelectionSchema } from "../schema";
-import { type RampWizardStep, type UseRampWizardProps, useRampWizard } from "./use-ramp-wizard";
+import { sourceWalletSchema, withdrawAmountSchema, withdrawSelectionSchema } from "../schema";
+import {
+  isTerminalRampTransferStatus,
+  type RampWizardStep,
+  type UseRampWizardProps,
+  useRampWizard,
+} from "./use-ramp-wizard";
 
 export const OFFRAMP_STEPS = [
-  { id: "COUNTERPARTY", label: "Counterparty", title: "Who are you paying out to?" },
+  { id: "WALLET", label: "Wallet", title: "Which wallet are you withdrawing from?" },
   { id: "WITHDRAW", label: "Withdraw", title: "How much would you like to withdraw?" },
   { id: "COMPLETE", label: "Complete", title: "Complete your payout" },
 ] as const satisfies readonly RampWizardStep[];
@@ -13,10 +21,10 @@ export const OFFRAMP_STEPS = [
 export type OfframpStepId = (typeof OFFRAMP_STEPS)[number]["id"];
 
 export function useOfframpWizard(props: UseRampWizardProps) {
-  return useRampWizard(props, {
+  const wizard = useRampWizard(props, {
     pairs: OFFRAMP_PAIRS,
     steps: OFFRAMP_STEPS,
-    stepSchemas: { COUNTERPARTY: payoutCounterpartySchema, WITHDRAW: withdrawAmountSchema },
+    stepSchemas: { WALLET: sourceWalletSchema, WITHDRAW: withdrawAmountSchema },
     quoteStepId: "WITHDRAW",
     selectionSchema: withdrawSelectionSchema,
     quoteEndpoint: "/api/dashboard/payments/ramps/offramp/quote",
@@ -30,6 +38,27 @@ export function useOfframpWizard(props: UseRampWizardProps) {
       redirectUrl: `${window.location.origin}/dashboard/payments`,
     }),
   });
+
+  const transferStatusKey = wizard.quote
+    ? (["offramp-transfer-status", wizard.quote.provider, wizard.quote.id] as const)
+    : null;
+  const { data: transferStatus, isValidating: transferStatusLoading } = useSWR(
+    transferStatusKey,
+    ([, provider, providerReference]): Promise<PaymentTransferSummary | null> =>
+      fetchTransferByProviderReference({ provider, providerReference }),
+    {
+      refreshInterval: (transfer) =>
+        transfer && isTerminalRampTransferStatus(transfer.status) ? 0 : 3000,
+      revalidateOnFocus: true,
+      dedupingInterval: 0,
+    }
+  );
+
+  return {
+    ...wizard,
+    transferStatus,
+    transferStatusLoading,
+  };
 }
 
 export type OfframpWizard = ReturnType<typeof useOfframpWizard>;

@@ -20,6 +20,7 @@ export type {
   RampDumpWriter,
   RampFetchJson,
   RampProviderClient,
+  RampSettlementEvent,
 } from "./types";
 
 export const RAMP_PROVIDER_CLIENTS = {

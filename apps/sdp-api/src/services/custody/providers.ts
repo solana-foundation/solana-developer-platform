@@ -19,6 +19,7 @@ export const CUSTODY_PROVIDERS = [
   "turnkey",
   "dfns",
   "anchorage",
+  "utila",
   "local",
 ] as const satisfies readonly SharedCustodyProvider[];
 

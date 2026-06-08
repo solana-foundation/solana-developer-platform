@@ -46,16 +46,12 @@ export const withdrawSelectionSchema = makeRampSelectionSchema(
 );
 
 // Per-step gating schemas.
-export const counterpartySelectionSchema = depositSelectionSchema.pick({ counterpartyId: true });
 export const depositAmountSchema = depositSelectionSchema.pick({
   walletId: true,
   amount: true,
   provider: true,
 });
-export const payoutCounterpartySchema = withdrawSelectionSchema.pick({
-  counterpartyId: true,
-  walletId: true,
-});
+export const sourceWalletSchema = withdrawSelectionSchema.pick({ walletId: true });
 export const withdrawAmountSchema = withdrawSelectionSchema.pick({
   amount: true,
   provider: true,
@@ -74,3 +70,34 @@ export const rampSelectionSchema = z.object({
 });
 
 export type RampFields = z.input<typeof rampSelectionSchema>;
+
+const onchainAmount = z
+  .string()
+  .trim()
+  .refine((value) => /^\d+(\.\d{1,9})?$/.test(value), "Enter a valid amount.")
+  .transform(Number)
+  .refine((value) => value > 0, "Enter an amount greater than 0.");
+
+export const onchainSendSelectionSchema = z.object({
+  accountId: z.string().min(1, "Select a destination account."),
+  walletId: z.string().min(1, "Select a source wallet."),
+  asset: z.string().min(1, "Select an asset."),
+  amount: onchainAmount,
+});
+
+export const onchainDestinationSchema = onchainSendSelectionSchema.pick({ accountId: true });
+export const onchainDetailsSchema = onchainSendSelectionSchema.pick({
+  walletId: true,
+  asset: true,
+  amount: true,
+});
+
+export const onchainSendSchema = z.object({
+  accountId: z.string(),
+  walletId: z.string(),
+  asset: z.string(),
+  amount: z.string(),
+  memo: z.string(),
+});
+
+export type OnchainSendFields = z.input<typeof onchainSendSchema>;

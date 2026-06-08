@@ -29,6 +29,7 @@ export default async function CounterpartyPage() {
       ok: true,
       counterpartiesOk: counterpartiesResult.ok,
       counterpartiesCount: counterpartiesResult.data.length,
+      counterpartiesTotal: counterpartiesResult.total,
       apiKeysOk: apiKeysResult.ok,
       apiKeysCount: apiKeysResult.data?.length ?? 0,
     });
@@ -37,6 +38,7 @@ export default async function CounterpartyPage() {
       <div className="flex h-full min-h-0 w-full flex-col">
         <CounterpartyWorkspace
           initialCounterparties={counterpartiesResult.data}
+          initialTotal={counterpartiesResult.total}
           apiKeys={apiKeysResult.data ?? []}
           apiBaseUrl={apiBaseUrl}
         />
