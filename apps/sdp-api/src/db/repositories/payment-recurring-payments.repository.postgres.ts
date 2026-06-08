@@ -116,15 +116,29 @@ export function createPostgresPaymentRecurringPaymentsRepository(
     },
 
     async getRecurringPaymentById(params) {
+      if (params.sourceWalletIds?.length === 0) {
+        return null;
+      }
+
+      const clauses = ["id = ?", "organization_id = ?", "project_id = ?"];
+      const values: unknown[] = [
+        params.recurringPaymentId,
+        params.organizationId,
+        params.projectId,
+      ];
+
+      if (params.sourceWalletIds?.length) {
+        clauses.push(`source_wallet_id IN (${buildInClause(params.sourceWalletIds.length)})`);
+        values.push(...params.sourceWalletIds);
+      }
+
       const row = await db
         .prepare(
           `SELECT *
              FROM payment_recurring_payments
-            WHERE id = ?
-              AND organization_id = ?
-              AND project_id = ?`
+            WHERE ${clauses.join(" AND ")}`
         )
-        .bind(params.recurringPaymentId, params.organizationId, params.projectId)
+        .bind(...values)
         .first<Record<string, unknown>>();
 
       return row ? mapRecurringPaymentRow(row) : null;

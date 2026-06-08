@@ -5,7 +5,7 @@ import type {
 } from "@sdp/types";
 import { z } from "zod";
 import type { PaymentRecurringPaymentRow } from "@/db/repositories/payment-recurring-payments.repository";
-import { type ApiKeyContext, getAuth, requireProjectId } from "@/lib/auth";
+import { getAuth, requireProjectId } from "@/lib/auth";
 import { resolveCreatorUserId } from "@/lib/creator";
 import { AppError, badRequest, badRequestParams, badRequestQuery } from "@/lib/errors";
 import { created, success } from "@/lib/response";
@@ -52,19 +52,6 @@ function mapRecurringPayment(row: PaymentRecurringPaymentRow): PaymentRecurringP
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
-}
-
-function assertRecurringPaymentWalletAccess(
-  auth: ApiKeyContext,
-  recurringPayment: PaymentRecurringPaymentRow,
-  permissions: Parameters<typeof assertApiKeyWalletAccess>[2]
-) {
-  const allowedWalletIds = getAllowedApiKeyWalletIdsForPermissions(auth, permissions);
-  if (allowedWalletIds && !allowedWalletIds.includes(recurringPayment.source_wallet_id)) {
-    throw new AppError("NOT_FOUND", "Recurring payment not found");
-  }
-
-  assertApiKeyWalletAccess(auth, recurringPayment.source_wallet_id, permissions);
 }
 
 export const createRecurringPayment = async (c: AppContext) => {
@@ -151,16 +138,18 @@ export const getRecurringPayment = async (c: AppContext) => {
     throw badRequestParams();
   }
 
+  const allowedWalletIds = getAllowedApiKeyWalletIdsForPermissions(auth, ["payments:read"]);
   const recurringPayment = await getPaymentRecurringPaymentsRepository(c).getRecurringPaymentById({
     recurringPaymentId: params.data.id,
     organizationId: auth.organizationId,
     projectId,
+    sourceWalletIds: allowedWalletIds ?? undefined,
   });
 
   if (!recurringPayment) {
     throw new AppError("NOT_FOUND", "Recurring payment not found");
   }
-  assertRecurringPaymentWalletAccess(auth, recurringPayment, ["payments:read"]);
+  assertApiKeyWalletAccess(auth, recurringPayment.source_wallet_id, ["payments:read"]);
 
   const response: PaymentRecurringPaymentResponse = {
     recurringPayment: mapRecurringPayment(recurringPayment),
