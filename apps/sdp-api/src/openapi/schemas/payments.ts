@@ -1,6 +1,7 @@
 import { OFFRAMP_CRYPTO_RAILS, ONRAMP_CRYPTO_RAILS, RAMP_PROVIDERS } from "@sdp/types";
 import {
   createOnrampQuoteSchema as createOnrampQuoteSchemaBase,
+  createRecurringPaymentSchema as createRecurringPaymentSchemaBase,
   createSubscriptionCollectionAttemptSchema as createSubscriptionCollectionAttemptSchemaBase,
   createSubscriptionPlanSchema as createSubscriptionPlanSchemaBase,
   createSubscriptionSchema as createSubscriptionSchemaBase,
@@ -9,10 +10,12 @@ import {
   executeOnrampSchema as executeOnrampSchemaBase,
   listOfframpCurrenciesQuerySchema as listOfframpCurrenciesQuerySchemaBase,
   listOnrampCurrenciesQuerySchema as listOnrampCurrenciesQuerySchemaBase,
+  listRecurringPaymentsQuerySchema as listRecurringPaymentsQuerySchemaBase,
   listSubscriptionCollectionAttemptsQuerySchema as listSubscriptionCollectionAttemptsQuerySchemaBase,
   listSubscriptionPlansQuerySchema as listSubscriptionPlansQuerySchemaBase,
   listSubscriptionsQuerySchema as listSubscriptionsQuerySchemaBase,
   listTransfersQuerySchema as listTransfersQuerySchemaBase,
+  paymentRecurringPaymentStatusSchema as paymentRecurringPaymentStatusSchemaBase,
   paymentSubscriptionCollectionAttemptStatusSchema as paymentSubscriptionCollectionAttemptStatusSchemaBase,
   paymentSubscriptionPlanStatusSchema as paymentSubscriptionPlanStatusSchemaBase,
   paymentSubscriptionStatusSchema as paymentSubscriptionStatusSchemaBase,
@@ -23,6 +26,7 @@ import {
   prepareTransferOptionsSchema as prepareTransferOptionsSchemaBase,
   prepareTransferSchema as prepareTransferSchemaBase,
   priorityFeeSchema as priorityFeeSchemaBase,
+  recurringPaymentIdParamsSchema as recurringPaymentIdParamsSchemaBase,
   simulateSandboxTransferSchema as simulateSandboxTransferSchemaBase,
   subscriptionIdParamsSchema as subscriptionIdParamsSchemaBase,
   subscriptionPlanIdParamsSchema as subscriptionPlanIdParamsSchemaBase,
@@ -533,6 +537,23 @@ export const paymentSubscriptionCollectionAttemptStatusSchema = withOpenApi(
   }
 );
 
+export const paymentRecurringPaymentStatusSchema = withOpenApi(
+  paymentRecurringPaymentStatusSchemaBase,
+  {
+    description: "Recurring payment status.",
+    example: "active",
+  }
+);
+
+export const paymentRecurringPaymentIdParamsSchema = recurringPaymentIdParamsSchemaBase
+  .extend({
+    id: withOpenApi(recurringPaymentIdParamsSchemaBase.shape.id, {
+      description: "SDP recurring payment record ID.",
+      example: "prp_example",
+    }),
+  })
+  .openapi({ description: "Recurring payment path parameters." });
+
 export const paymentSubscriptionPlanIdParamsSchema = subscriptionPlanIdParamsSchemaBase
   .extend({
     planId: withOpenApi(subscriptionPlanIdParamsSchemaBase.shape.planId, {
@@ -550,6 +571,134 @@ export const paymentSubscriptionIdParamsSchema = subscriptionIdParamsSchemaBase
     }),
   })
   .openapi({ description: "Subscription path parameters." });
+
+export const createRecurringPaymentRequestSchema = createRecurringPaymentSchemaBase
+  .extend({
+    sourceWalletId: withOpenApi(createRecurringPaymentSchemaBase.shape.sourceWalletId, {
+      description: "SDP custody wallet that will fund the recurring payment.",
+      example: "wal_source",
+    }),
+    counterpartyId: withOpenApi(createRecurringPaymentSchemaBase.shape.counterpartyId, {
+      description: "Counterparty receiving the recurring payment.",
+      example: "cp_example",
+    }),
+    counterpartyAccountId: withOpenApi(
+      createRecurringPaymentSchemaBase.shape.counterpartyAccountId,
+      {
+        description: "Counterparty crypto_wallet account. It must contain Solana wallet details.",
+        example: "cpa_example",
+      }
+    ),
+    token: withOpenApi(createRecurringPaymentSchemaBase.shape.token, {
+      description:
+        "SPL token mint address. Native SOL is not supported for program-backed recurring payments.",
+      example: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+    }),
+    amount: withOpenApi(createRecurringPaymentSchemaBase.shape.amount, {
+      description: "Recurring payment amount in UI units.",
+      example: "25.00",
+    }),
+    periodHours: withOpenApi(createRecurringPaymentSchemaBase.shape.periodHours, {
+      description: "Billing period length in hours.",
+      example: 720,
+    }),
+    firstCollectionAt: withOpenApi(createRecurringPaymentSchemaBase.shape.firstCollectionAt, {
+      description: "Optional first collection timestamp. Defaults to activation time when omitted.",
+      example: "2099-01-01T00:00:00.000Z",
+    }),
+    metadataUri: withOpenApi(createRecurringPaymentSchemaBase.shape.metadataUri, {
+      description: "Optional plan metadata URI.",
+      example: "https://example.com/subscriptions/monthly-usdc.json",
+    }),
+  })
+  .openapi({
+    description:
+      "Creates an SDP-custody outbound recurring payment intent. Activation and collection are added by follow-up endpoints.",
+  });
+
+export const paymentListRecurringPaymentsQuerySchema = listRecurringPaymentsQuerySchemaBase
+  .extend({
+    counterpartyId: withOpenApi(listRecurringPaymentsQuerySchemaBase.shape.counterpartyId, {
+      description: "Filter recurring payments by counterparty.",
+      example: "cp_example",
+    }),
+    status: paymentRecurringPaymentStatusSchema.optional(),
+  })
+  .openapi({ description: "Recurring payment list filters." });
+
+export const paymentRecurringPaymentSchema = z
+  .object({
+    id: z.string().openapi({ description: "SDP recurring payment ID.", example: "prp_example" }),
+    organizationId: orgIdParamSchema,
+    projectId: projectIdParamSchema,
+    sourceWalletId: walletIdParamSchema.openapi({
+      description: "SDP custody wallet that funds the recurring payment.",
+    }),
+    sourceAddress: solanaAddressSchema.openapi({
+      description: "Source wallet address.",
+    }),
+    counterpartyId: z.string().openapi({ description: "Counterparty ID.", example: "cp_example" }),
+    counterpartyAccountId: z
+      .string()
+      .openapi({ description: "Counterparty account ID.", example: "cpa_example" }),
+    destinationAddress: solanaAddressSchema.openapi({
+      description: "Counterparty wallet owner address.",
+    }),
+    destinationTokenAccount: solanaAddressSchema
+      .nullable()
+      .openapi({ description: "Derived counterparty token account used for collection." }),
+    token: z.string().openapi({ description: "SPL token mint address." }),
+    amount: tokenAmountSchema,
+    periodHours: z.number().int().positive().openapi({ example: 720 }),
+    firstCollectionAt: isoDateTimeSchema
+      .nullable()
+      .openapi({ description: "Requested first collection timestamp." }),
+    nextCollectionDueAt: isoDateTimeSchema
+      .nullable()
+      .openapi({ description: "Next due collection timestamp." }),
+    planId: z.string().nullable().openapi({ description: "Linked SDP subscription plan ID." }),
+    subscriptionId: z.string().nullable().openapi({ description: "Linked SDP subscription ID." }),
+    planPda: solanaAddressSchema.nullable().openapi({ description: "On-chain plan PDA." }),
+    planCreatedAt: z
+      .string()
+      .nullable()
+      .openapi({ description: "On-chain plan createdAt value as an unsigned integer string." }),
+    planCreationSignature: z
+      .string()
+      .nullable()
+      .openapi({ description: "Solana signature for plan creation." }),
+    subscriptionPda: solanaAddressSchema
+      .nullable()
+      .openapi({ description: "On-chain subscription PDA." }),
+    subscriptionAuthorityAddress: solanaAddressSchema
+      .nullable()
+      .openapi({ description: "On-chain subscription authority address." }),
+    authorizationSignature: z
+      .string()
+      .nullable()
+      .openapi({ description: "Solana signature for subscription authorization." }),
+    status: paymentRecurringPaymentStatusSchema,
+    metadataUri: z.string().nullable().openapi({ description: "Optional plan metadata URI." }),
+    createdBy: z.string().nullable().openapi({ description: "Creator user ID or API key ID." }),
+    createdAt: isoDateTimeSchema,
+    updatedAt: isoDateTimeSchema,
+  })
+  .openapi({ description: "SDP-custody outbound recurring payment record." });
+
+export const paymentRecurringPaymentResponseSchema = z
+  .object({
+    recurringPayment: paymentRecurringPaymentSchema,
+  })
+  .openapi({ description: "Recurring payment response payload." });
+
+export const paymentRecurringPaymentListResponseSchema = z
+  .object({
+    recurringPayments: z.array(paymentRecurringPaymentSchema),
+    total: z.number().int(),
+    page: z.number().int(),
+    pageSize: z.number().int(),
+  })
+  .openapi({ description: "Recurring payment list response payload." });
 
 export const createSubscriptionPlanRequestSchema = createSubscriptionPlanSchemaBase
   .extend({

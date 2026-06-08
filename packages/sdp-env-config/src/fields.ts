@@ -561,6 +561,13 @@ export const FIELDS: EnvField[] = [
     derive: (v) => v.SOLANA_NETWORK ?? "devnet",
   },
   {
+    key: "PAYMENTS_RECURRING_ENABLED",
+    section: "advanced",
+    kind: "text",
+    label: "Recurring payments enabled",
+    defaultValue: "false",
+  },
+  {
     key: "SENTRY_DSN",
     section: "advanced",
     kind: "url",

@@ -11,6 +11,11 @@ export {
   simulateSandboxTransfer,
 } from "./handlers/ramps";
 export {
+  createRecurringPayment,
+  getRecurringPayment,
+  listRecurringPayments,
+} from "./handlers/recurring-payments";
+export {
   createSubscription,
   createSubscriptionCollectionAttempt,
   createSubscriptionPlan,

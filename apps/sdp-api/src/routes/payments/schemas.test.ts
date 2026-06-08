@@ -1,6 +1,7 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
 import type { z } from "zod";
 import {
+  createRecurringPaymentSchema,
   createTransferSchema,
   PAYMENT_TOKEN_VALIDATION_MESSAGE,
   prepareTransferSchema,
@@ -15,6 +16,7 @@ const tokenSchema = createTransferSchema.shape.token;
 const destinationSchema = createTransferSchema.shape.destination;
 const referenceAddressSchema = prepareTransferSchema.shape.referenceAddress;
 const destinationAllowlistSchema = updateWalletPolicySchema.shape.destinationAllowlist;
+const recurringPaymentTokenSchema = createRecurringPaymentSchema.shape.token;
 
 describe("payments schema inferred types", () => {
   it("destination, referenceAddress, and allowlist entries infer as string", () => {
@@ -134,6 +136,40 @@ describe("payments destination schema", () => {
       }
     });
   }
+});
+
+describe("recurring payment schema", () => {
+  it("accepts a custody source wallet and counterparty crypto wallet account target", () => {
+    const result = createRecurringPaymentSchema.safeParse({
+      sourceWalletId: "wal_source",
+      counterpartyId: "cp_test",
+      counterpartyAccountId: "cpa_test",
+      token: USDC_MINT,
+      amount: "25.00",
+      periodHours: 24,
+      firstCollectionAt: new Date(Date.now() + 60_000).toISOString(),
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects a past firstCollectionAt timestamp", () => {
+    const result = createRecurringPaymentSchema.safeParse({
+      sourceWalletId: "wal_source",
+      counterpartyId: "cp_test",
+      counterpartyAccountId: "cpa_test",
+      token: USDC_MINT,
+      amount: "25.00",
+      periodHours: 24,
+      firstCollectionAt: new Date(Date.now() - 60_000).toISOString(),
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it("still parses native SOL at the request schema layer for service-level rejection", () => {
+    expect(recurringPaymentTokenSchema.parse("SOL")).toBe("SOL");
+  });
 });
 
 describe("payments referenceAddress schema", () => {

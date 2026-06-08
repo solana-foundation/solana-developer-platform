@@ -22,6 +22,14 @@ export type {
 } from "./counterparty-account.repository";
 export { createPostgresCounterpartyAccountsRepository } from "./counterparty-account.repository.postgres";
 export type {
+  CreatePaymentRecurringPaymentInput,
+  ListPaymentRecurringPaymentsInput,
+  ListPaymentRecurringPaymentsResult,
+  PaymentRecurringPaymentRow,
+  PaymentRecurringPaymentsRepository,
+} from "./payment-recurring-payments.repository";
+export { createPostgresPaymentRecurringPaymentsRepository } from "./payment-recurring-payments.repository.postgres";
+export type {
   CreatePaymentSubscriptionCollectionAttemptInput,
   CreatePaymentSubscriptionInput,
   CreatePaymentSubscriptionPlanInput,
@@ -62,6 +70,7 @@ export { createPostgresPaymentsRepository } from "./payments.repository.postgres
 export {
   createCounterpartiesRepository,
   createCounterpartyAccountsRepository,
+  createPaymentRecurringPaymentsRepository,
   createPaymentSubscriptionsRepository,
   createPaymentsRepository,
   createTokenRepository,

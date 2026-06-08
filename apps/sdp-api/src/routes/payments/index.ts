@@ -8,6 +8,7 @@ import type { Env } from "@/types/env";
 import {
   createOfframpQuote,
   createOnrampQuote,
+  createRecurringPayment,
   createSubscription,
   createSubscriptionCollectionAttempt,
   createSubscriptionPlan,
@@ -16,6 +17,7 @@ import {
   estimateOnramp,
   executeOfframp,
   executeOnramp,
+  getRecurringPayment,
   getSubscription,
   getSubscriptionPlan,
   getTransfer,
@@ -23,6 +25,7 @@ import {
   getWalletPolicy,
   listOfframpCurrencies,
   listOnrampCurrencies,
+  listRecurringPayments,
   listSubscriptionCollectionAttempts,
   listSubscriptionPlans,
   listSubscriptions,
@@ -55,6 +58,8 @@ payments.use("/subscription-plans", requireRecurringPaymentsFeature);
 payments.use("/subscription-plans/*", requireRecurringPaymentsFeature);
 payments.use("/subscriptions", requireRecurringPaymentsFeature);
 payments.use("/subscriptions/*", requireRecurringPaymentsFeature);
+payments.use("/recurring-payments", requireRecurringPaymentsFeature);
+payments.use("/recurring-payments/*", requireRecurringPaymentsFeature);
 
 payments.get(
   "/wallets/:walletId/balances",
@@ -81,6 +86,13 @@ payments.post(
   requirePermissions("payments:write", "wallets:read"),
   createSubscriptionPlan
 );
+payments.post(
+  "/recurring-payments",
+  requirePermissions("payments:write", "wallets:read", "counterparties:read"),
+  createRecurringPayment
+);
+payments.get("/recurring-payments", requirePermissions("payments:read"), listRecurringPayments);
+payments.get("/recurring-payments/:id", requirePermissions("payments:read"), getRecurringPayment);
 payments.get("/subscription-plans", requirePermissions("payments:read"), listSubscriptionPlans);
 payments.post(
   "/subscription-plans/:planId/prepare-create",
