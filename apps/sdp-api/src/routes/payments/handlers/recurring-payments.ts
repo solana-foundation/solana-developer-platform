@@ -59,6 +59,11 @@ function assertRecurringPaymentWalletAccess(
   recurringPayment: PaymentRecurringPaymentRow,
   permissions: Parameters<typeof assertApiKeyWalletAccess>[2]
 ) {
+  const allowedWalletIds = getAllowedApiKeyWalletIdsForPermissions(auth, permissions);
+  if (allowedWalletIds && !allowedWalletIds.includes(recurringPayment.source_wallet_id)) {
+    throw new AppError("NOT_FOUND", "Recurring payment not found");
+  }
+
   assertApiKeyWalletAccess(auth, recurringPayment.source_wallet_id, permissions);
 }
 

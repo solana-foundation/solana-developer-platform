@@ -396,8 +396,8 @@ async function seedCryptoWalletCounterpartyAccount(params: {
       params.counterpartyId,
       "crypto_wallet",
       "Recurring payment wallet",
-      { network: "solana", address: params.address },
-      {},
+      JSON.stringify({ network: "solana", address: params.address }),
+      JSON.stringify({}),
       "active",
       now,
       now
