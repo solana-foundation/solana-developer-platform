@@ -312,9 +312,7 @@ function BvnkInstruction({
                   Identity verification required
                 </p>
                 <p className="mt-1 text-sm leading-relaxed text-text-low">
-                  Complete identity verification to activate your funding account. BVNK requires you
-                  to verify the counterparty through Sumsub. No information entered via the sandbox
-                  will be verified.
+                  {instruction.instructionsNotes}
                 </p>
               </div>
               {verificationUrl ? (
@@ -345,10 +343,7 @@ function BvnkInstruction({
                 : "Verification in review"}
             </p>
             <p className="mt-1 text-sm leading-relaxed text-text-low">
-              {instruction.instructionsNotes ??
-                (isProvisioning
-                  ? "Setting up your funding account; bank details will appear in a moment."
-                  : "Identity verification is in review; funding details will appear once approved.")}
+              {instruction.instructionsNotes}
             </p>
             <p className="mt-3 flex items-center gap-2 text-xs font-medium text-text-medium">
               <Loader2 className="size-3.5 animate-spin" />
@@ -366,12 +361,10 @@ function BvnkInstruction({
             <PaymentInstructionField label="Bank code" value={bank?.code} />
             <PaymentInstructionField label="Payment reference" value={bank?.paymentReference} />
           </div>
-          {instruction.instructionsNotes ? (
-            <div className="rounded-xl bg-border-extra-light px-4 py-3">
-              <p className="text-xs font-medium uppercase tracking-[0.08em] text-text-low">Notes</p>
-              <p className="mt-1 text-sm text-text-extra-high">{instruction.instructionsNotes}</p>
-            </div>
-          ) : null}
+          <div className="rounded-xl bg-border-extra-light px-4 py-3">
+            <p className="text-xs font-medium uppercase tracking-[0.08em] text-text-low">Notes</p>
+            <p className="mt-1 text-sm text-text-extra-high">{instruction.instructionsNotes}</p>
+          </div>
         </>
       ) : null}
     </div>

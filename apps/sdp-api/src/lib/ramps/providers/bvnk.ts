@@ -1468,7 +1468,7 @@ export function buildBvnkOnrampInstruction(
     onboardingStatus === "ready"
       ? `Fund your ${params.fiatCurrency} BVNK virtual account to receive crypto on ${params.network}.`
       : onboardingStatus === "verification_required"
-        ? "Complete identity verification to activate your funding account."
+        ? "Complete identity verification to activate your funding account. BVNK requires you to verify the counterparty through Sumsub. No information entered via the sandbox will be verified."
         : onboardingStatus === "provisioning"
           ? "Setting up your funding account; bank details will appear in a moment."
           : "Identity verification is in review; funding details will appear once approved.";
