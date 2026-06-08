@@ -118,6 +118,9 @@ export interface PaymentRecurringPaymentsRepository {
   listDueRecurringPayments(
     params: ListDuePaymentRecurringPaymentsInput
   ): Promise<PaymentRecurringPaymentRow[]>;
+  listStaleActivationClaims(
+    params: ListStalePaymentRecurringLifecycleClaimsInput
+  ): Promise<PaymentRecurringPaymentRow[]>;
   listStaleLifecycleClaims(
     params: ListStalePaymentRecurringLifecycleClaimsInput
   ): Promise<PaymentRecurringPaymentRow[]>;

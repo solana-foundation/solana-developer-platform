@@ -8,6 +8,7 @@ import {
   isRecurringPaymentsEnabled,
 } from "@/lib/feature-flags";
 import {
+  activateRecurringPayment,
   collectRecurringPayment as collectRecurringPaymentRecord,
   executeRecurringPaymentLifecycle,
 } from "@/services/payments/recurring-payments";
@@ -25,6 +26,8 @@ interface RecurringPaymentCollectionJobResult {
   collected: number;
   failed: number;
   expirationFailures: number;
+  activationRecovered: number;
+  activationFailures: number;
   lifecycleRecovered: number;
   lifecycleFailures: number;
   submittedCollectionRecovered: number;
@@ -38,6 +41,8 @@ function emptyResult(): RecurringPaymentCollectionJobResult {
     collected: 0,
     failed: 0,
     expirationFailures: 0,
+    activationRecovered: 0,
+    activationFailures: 0,
     lifecycleRecovered: 0,
     lifecycleFailures: 0,
     submittedCollectionRecovered: 0,
@@ -93,6 +98,87 @@ async function expireStaleUnsignedAttempts(input: {
     });
     return 1;
   }
+}
+
+async function deferFailedActivationRecovery(input: {
+  recurringPaymentsRepo: RecurringPaymentsRepository;
+  recurringPayment: Awaited<
+    ReturnType<RecurringPaymentsRepository["listStaleActivationClaims"]>
+  >[number];
+  updatedAt: string;
+  error: unknown;
+}) {
+  try {
+    await input.recurringPaymentsRepo.updateRecurringPayment({
+      recurringPaymentId: input.recurringPayment.id,
+      organizationId: input.recurringPayment.organization_id,
+      projectId: input.recurringPayment.project_id,
+      expectedStatus: "activating",
+      updatedAt: input.updatedAt,
+    });
+  } catch (updateError) {
+    console.warn("Failed to defer stale recurring payment activation recovery", {
+      recurringPaymentId: input.recurringPayment.id,
+      activationError: input.error instanceof Error ? input.error.message : String(input.error),
+      updateError: updateError instanceof Error ? updateError.message : String(updateError),
+    });
+  }
+}
+
+async function recoverStaleActivationClaims(input: {
+  env: Env;
+  recurringPaymentsRepo: RecurringPaymentsRepository;
+  retryAfter: string;
+  updatedAt: string;
+  batchSize: number;
+}): Promise<{ scanned: number; recovered: number; failures: number }> {
+  if (input.batchSize <= 0) {
+    return { scanned: 0, recovered: 0, failures: 0 };
+  }
+
+  let staleActivationClaims: Awaited<
+    ReturnType<RecurringPaymentsRepository["listStaleActivationClaims"]>
+  > = [];
+  try {
+    staleActivationClaims = await input.recurringPaymentsRepo.listStaleActivationClaims({
+      olderThan: input.retryAfter,
+      limit: input.batchSize,
+    });
+  } catch (error) {
+    console.warn("Failed to list stale recurring payment activation claims", {
+      retryAfter: input.retryAfter,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return { scanned: 0, recovered: 0, failures: 1 };
+  }
+
+  let recovered = 0;
+  let failures = 0;
+  for (const recurringPayment of staleActivationClaims) {
+    try {
+      await activateRecurringPayment({
+        env: input.env,
+        organizationId: recurringPayment.organization_id,
+        projectId: recurringPayment.project_id,
+        recurringPaymentId: recurringPayment.id,
+      });
+      recovered += 1;
+    } catch (error) {
+      failures += 1;
+      await deferFailedActivationRecovery({
+        recurringPaymentsRepo: input.recurringPaymentsRepo,
+        recurringPayment,
+        updatedAt: input.updatedAt,
+        error,
+      });
+      console.warn("Recurring payment activation recovery failed", {
+        recurringPaymentId: recurringPayment.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  return { scanned: staleActivationClaims.length, recovered, failures };
 }
 
 async function recoverStaleLifecycleClaims(input: {
@@ -278,6 +364,14 @@ export async function collectDueRecurringPayments(
     updatedAt: nowIso,
     batchSize,
   });
+  const activationRecovery = await recoverStaleActivationClaims({
+    env,
+    recurringPaymentsRepo,
+    retryAfter,
+    updatedAt: nowIso,
+    batchSize: remainingCollectionBudget,
+  });
+  remainingCollectionBudget = Math.max(remainingCollectionBudget - activationRecovery.scanned, 0);
   const lifecycleRecovery = await recoverStaleLifecycleClaims({
     env,
     recurringPaymentsRepo,
@@ -307,10 +401,13 @@ export async function collectDueRecurringPayments(
     collected: dueCollection.collected,
     failed:
       expirationFailures +
+      activationRecovery.failures +
       lifecycleRecovery.failures +
       submittedCollectionRecovery.failures +
       dueCollection.failures,
     expirationFailures,
+    activationRecovered: activationRecovery.recovered,
+    activationFailures: activationRecovery.failures,
     lifecycleRecovered: lifecycleRecovery.recovered,
     lifecycleFailures: lifecycleRecovery.failures,
     submittedCollectionRecovered: submittedCollectionRecovery.recovered,

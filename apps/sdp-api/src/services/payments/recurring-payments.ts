@@ -321,6 +321,35 @@ async function markRecurringLifecycleAttemptFinalized(input: { env: Env; attempt
     .run();
 }
 
+async function markActiveRecurringLifecycleAttemptsFinalized(input: {
+  executor: DatabaseExecutor;
+  organizationId: string;
+  projectId: string;
+  recurringPaymentId: string;
+  operation: RecurringLifecycleOperation;
+  updatedAt: string;
+}) {
+  await input.executor
+    .prepare(
+      `UPDATE payment_recurring_operation_attempts
+          SET status = 'confirmed',
+              updated_at = ?
+        WHERE organization_id = ?
+          AND project_id = ?
+          AND recurring_payment_id = ?
+          AND operation = ?
+          AND status IN ('processing', 'submitted')`
+    )
+    .bind(
+      input.updatedAt,
+      input.organizationId,
+      input.projectId,
+      input.recurringPaymentId,
+      input.operation
+    )
+    .run();
+}
+
 async function markRecurringLifecycleAttemptFailed(input: {
   env: Env;
   attemptId: string;
@@ -837,6 +866,28 @@ async function persistActivationAuthorizationRecoveryMarker(input: {
   });
 }
 
+async function deferStaleActivationClaim(input: {
+  env: Env;
+  organizationId: string;
+  projectId: string;
+  recurringPayment: PaymentRecurringPaymentRow;
+}) {
+  if (
+    input.recurringPayment.status !== "activating" ||
+    isFreshActivationClaim(input.recurringPayment.updated_at)
+  ) {
+    return;
+  }
+
+  await createPaymentRecurringPaymentsRepository(input.env).updateRecurringPayment({
+    recurringPaymentId: input.recurringPayment.id,
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    expectedStatus: "activating",
+    updatedAt: new Date().toISOString(),
+  });
+}
+
 async function claimSubmittedLifecycleAttemptOrExpireStale(input: {
   executor: DatabaseExecutor;
   organizationId: string;
@@ -953,6 +1004,14 @@ async function claimLifecycleRecords(input: {
         operation: input.operation,
       })
     ) {
+      await markActiveRecurringLifecycleAttemptsFinalized({
+        executor: tx,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        recurringPaymentId: recurringPayment.id,
+        operation: input.operation,
+        updatedAt: new Date().toISOString(),
+      });
       return {
         alreadyFinalized: true,
         recurringPayment,
@@ -1131,6 +1190,7 @@ async function finalizeRecurringPaymentLifecycle(input: {
   recurringPayment: PaymentRecurringPaymentRow;
   subscription: PaymentSubscriptionRow;
   operation: RecurringLifecycleOperation;
+  lifecycleAttemptId: string;
 }): Promise<PaymentRecurringPaymentRow> {
   const now = new Date().toISOString();
   const claimStatus = getLifecycleClaimStatus(input.operation);
@@ -1195,6 +1255,14 @@ async function finalizeRecurringPaymentLifecycle(input: {
         operation: input.operation,
       })
     ) {
+      await markActiveRecurringLifecycleAttemptsFinalized({
+        executor: tx,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        recurringPaymentId: input.recurringPayment.id,
+        operation: input.operation,
+        updatedAt: now,
+      });
       return lockedRecurringPayment;
     }
     if (
@@ -1258,6 +1326,34 @@ async function finalizeRecurringPaymentLifecycle(input: {
         "Recurring payment lifecycle state changed before the update completed"
       );
     }
+    const confirmedAttemptChanges = await tx
+      .prepare(
+        `UPDATE payment_recurring_operation_attempts
+            SET status = 'confirmed',
+                updated_at = ?
+          WHERE id = ?
+            AND organization_id = ?
+            AND project_id = ?
+            AND recurring_payment_id = ?
+            AND operation = ?
+            AND status IN ('processing', 'submitted', 'confirmed')`
+      )
+      .bind(
+        now,
+        input.lifecycleAttemptId,
+        input.organizationId,
+        input.projectId,
+        input.recurringPayment.id,
+        input.operation
+      )
+      .run();
+
+    if (confirmedAttemptChanges === 0) {
+      throw new AppError(
+        "CONFLICT",
+        "Recurring payment lifecycle attempt changed before finalization completed"
+      );
+    }
 
     return updated;
   });
@@ -1303,6 +1399,7 @@ async function reconcileCanceledRecurringPaymentFromChain(input: {
   planPda: ReturnType<typeof assertValidAddress>;
   subscriptionPda: ReturnType<typeof assertValidAddress>;
   knownCanceledOnChain?: boolean;
+  finalizeLifecycleOperation?: boolean;
 }): Promise<PaymentRecurringPaymentRow | null> {
   let canceledOnChain = input.knownCanceledOnChain === true;
   if (!canceledOnChain) {
@@ -1367,6 +1464,16 @@ async function reconcileCanceledRecurringPaymentFromChain(input: {
       currentRecurringPayment.status === "canceled" &&
       currentSubscription.status === "canceled"
     ) {
+      if (input.finalizeLifecycleOperation) {
+        await markActiveRecurringLifecycleAttemptsFinalized({
+          executor: tx,
+          organizationId: input.organizationId,
+          projectId: input.projectId,
+          recurringPaymentId: input.recurringPayment.id,
+          operation: "cancel",
+          updatedAt: now,
+        });
+      }
       return currentRecurringPayment;
     }
     if (
@@ -1404,6 +1511,16 @@ async function reconcileCanceledRecurringPaymentFromChain(input: {
         "Recurring payment lifecycle state changed before canceled-state reconciliation completed"
       );
     }
+    if (input.finalizeLifecycleOperation) {
+      await markActiveRecurringLifecycleAttemptsFinalized({
+        executor: tx,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        recurringPaymentId: input.recurringPayment.id,
+        operation: "cancel",
+        updatedAt: now,
+      });
+    }
 
     return updatedRecurringPayment;
   });
@@ -1415,6 +1532,7 @@ async function reconcileActiveRecurringPaymentFromChain(input: {
   projectId: string;
   recurringPayment: PaymentRecurringPaymentRow;
   subscriptionId: string;
+  finalizeLifecycleOperation?: boolean;
 }): Promise<PaymentRecurringPaymentRow | null> {
   const now = new Date().toISOString();
   return getDb(input.env).transaction(async (tx) => {
@@ -1464,6 +1582,16 @@ async function reconcileActiveRecurringPaymentFromChain(input: {
         operation: "resume",
       })
     ) {
+      if (input.finalizeLifecycleOperation) {
+        await markActiveRecurringLifecycleAttemptsFinalized({
+          executor: tx,
+          organizationId: input.organizationId,
+          projectId: input.projectId,
+          recurringPaymentId: input.recurringPayment.id,
+          operation: "resume",
+          updatedAt: now,
+        });
+      }
       return currentRecurringPayment;
     }
     if (
@@ -1510,6 +1638,16 @@ async function reconcileActiveRecurringPaymentFromChain(input: {
         "CONFLICT",
         "Recurring payment lifecycle state changed before active-state reconciliation completed"
       );
+    }
+    if (input.finalizeLifecycleOperation) {
+      await markActiveRecurringLifecycleAttemptsFinalized({
+        executor: tx,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        recurringPaymentId: input.recurringPayment.id,
+        operation: "resume",
+        updatedAt: now,
+      });
     }
 
     return updatedRecurringPayment;
@@ -1572,6 +1710,7 @@ async function finalizeRecurringPaymentLifecycleAfterChain(input: {
   recurringPayment: PaymentRecurringPaymentRow;
   subscription: PaymentSubscriptionRow;
   operation: RecurringLifecycleOperation;
+  lifecycleAttemptId: string;
   sourceAddress: ReturnType<typeof assertValidAddress>;
   planPda: ReturnType<typeof assertValidAddress>;
   subscriptionPda: ReturnType<typeof assertValidAddress>;
@@ -1601,6 +1740,7 @@ async function finalizeRecurringPaymentLifecycleAfterChain(input: {
         planPda: input.planPda,
         subscriptionPda: input.subscriptionPda,
         knownCanceledOnChain: true,
+        finalizeLifecycleOperation: true,
       });
     }
 
@@ -1610,6 +1750,7 @@ async function finalizeRecurringPaymentLifecycleAfterChain(input: {
       projectId: input.projectId,
       recurringPayment: input.recurringPayment,
       subscriptionId: input.subscription.id,
+      finalizeLifecycleOperation: true,
     });
   };
 
@@ -3111,22 +3252,35 @@ export async function activateRecurringPayment(input: {
   }
 
   const sourceAddress = assertValidAddress(recurringPayment.source_address, "sourceAddress");
-  const sourceSigner = await getSourceSigner({
-    env: input.env,
-    organizationId: input.organizationId,
-    projectId: input.projectId,
-    sourceWalletId: recurringPayment.source_wallet_id,
-    expectedAddress: sourceAddress,
-  });
-  const runtime = await resolveRecurringSubscriptionRuntime(input.env, recurringPayment);
-  const destinationAddress = assertValidAddress(
-    recurringPayment.destination_address,
-    "destinationAddress"
-  );
-  const destinationTokenAccount = await deriveAssociatedTokenAccount({
-    owner: destinationAddress,
-    runtime,
-  });
+  let sourceSigner: Awaited<ReturnType<typeof getSourceSigner>>;
+  let runtime: Awaited<ReturnType<typeof resolveRecurringSubscriptionRuntime>>;
+  let destinationTokenAccount: Awaited<ReturnType<typeof deriveAssociatedTokenAccount>>;
+  try {
+    sourceSigner = await getSourceSigner({
+      env: input.env,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      sourceWalletId: recurringPayment.source_wallet_id,
+      expectedAddress: sourceAddress,
+    });
+    runtime = await resolveRecurringSubscriptionRuntime(input.env, recurringPayment);
+    const destinationAddress = assertValidAddress(
+      recurringPayment.destination_address,
+      "destinationAddress"
+    );
+    destinationTokenAccount = await deriveAssociatedTokenAccount({
+      owner: destinationAddress,
+      runtime,
+    });
+  } catch (error) {
+    await deferStaleActivationClaim({
+      env: input.env,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      recurringPayment,
+    });
+    throw error;
+  }
 
   const activation = await claimActivationRecords({
     env: input.env,
@@ -3697,6 +3851,7 @@ async function reconcileCanceledLifecycleBeforeSubmission(input: {
     sourceAddress: input.sourceAddress,
     planPda: input.planPda,
     subscriptionPda: input.subscriptionPda,
+    finalizeLifecycleOperation: true,
   });
   if (reconciledCanceledPayment?.status !== "canceled") {
     return null;
@@ -3921,23 +4076,11 @@ export async function executeRecurringPaymentLifecycle(input: {
     recurringPayment: claim.recurringPayment,
     subscription: claim.subscription,
     operation: input.operation,
+    lifecycleAttemptId,
     sourceAddress,
     planPda,
     subscriptionPda,
   });
-  try {
-    await markRecurringLifecycleAttemptFinalized({
-      env: input.env,
-      attemptId: lifecycleAttemptId,
-    });
-  } catch (error) {
-    console.warn("Failed to mark recurring lifecycle attempt confirmed", {
-      recurringPaymentId: claim.recurringPayment.id,
-      attemptId: lifecycleAttemptId,
-      operation: input.operation,
-      error: toErrorMessage(error),
-    });
-  }
 
   return recurringPayment;
 }

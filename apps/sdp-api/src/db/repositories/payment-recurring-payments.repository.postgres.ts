@@ -318,6 +318,22 @@ export function createPostgresPaymentRecurringPaymentsRepository(
       return rows.results.map(mapRecurringPaymentRow);
     },
 
+    async listStaleActivationClaims(params) {
+      const rows = await db
+        .prepare(
+          `SELECT *
+             FROM payment_recurring_payments
+            WHERE status = 'activating'
+              AND updated_at <= ?
+            ORDER BY updated_at ASC
+            LIMIT ?`
+        )
+        .bind(params.olderThan, params.limit)
+        .all<Record<string, unknown>>();
+
+      return rows.results.map(mapRecurringPaymentRow);
+    },
+
     async listStaleLifecycleClaims(params) {
       const rows = await db
         .prepare(
