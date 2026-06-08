@@ -52,6 +52,7 @@ export interface PaymentSubscriptionCollectionAttemptRow {
   organization_id: string;
   project_id: string;
   subscription_id: string;
+  recurring_payment_id: string | null;
   transfer_id: string | null;
   token: string;
   amount: string;
@@ -102,6 +103,7 @@ export interface UpdatePaymentSubscriptionPlanInput {
 export interface ListPaymentSubscriptionPlansInput {
   organizationId: string;
   projectId: string;
+  planWalletIds?: string[];
   status?: PaymentSubscriptionPlanStatus;
   limit: number;
   offset: number;
@@ -130,6 +132,8 @@ export interface UpdatePaymentSubscriptionInput {
   subscriptionId: string;
   organizationId: string;
   projectId: string;
+  expectedStatus?: PaymentSubscriptionStatus;
+  expectedNextCollectionDueAt?: string | null;
   subscriberTokenAccount?: string | null;
   subscriptionPda?: string | null;
   subscriptionAuthorityAddress?: string | null;
@@ -145,6 +149,7 @@ export interface UpdatePaymentSubscriptionInput {
 export interface ListPaymentSubscriptionsInput {
   organizationId: string;
   projectId: string;
+  planWalletIds?: string[];
   planId?: string;
   counterpartyId?: string;
   status?: PaymentSubscriptionStatus;
@@ -158,6 +163,7 @@ export interface CreatePaymentSubscriptionCollectionAttemptInput {
   organizationId: string;
   projectId: string;
   subscriptionId: string;
+  recurringPaymentId?: string | null;
   transferId: string | null;
   token: string;
   amount: string;
@@ -174,10 +180,22 @@ export interface CreatePaymentSubscriptionCollectionAttemptInput {
 export interface ListPaymentSubscriptionCollectionAttemptsInput {
   organizationId: string;
   projectId: string;
-  subscriptionId: string;
+  subscriptionId?: string;
+  recurringPaymentId?: string;
   status?: PaymentSubscriptionCollectionAttemptStatus;
   limit: number;
   offset: number;
+}
+
+export interface UpdatePaymentSubscriptionCollectionAttemptInput {
+  attemptId: string;
+  transferId?: string | null;
+  attemptedAt?: string | null;
+  status?: PaymentSubscriptionCollectionAttemptStatus;
+  signature?: string | null;
+  error?: string | null;
+  metadata?: Record<string, unknown>;
+  updatedAt: string;
 }
 
 export interface ListPaymentSubscriptionPlansResult {
@@ -219,6 +237,23 @@ export interface PaymentSubscriptionsRepository {
   createCollectionAttempt(
     input: CreatePaymentSubscriptionCollectionAttemptInput
   ): Promise<PaymentSubscriptionCollectionAttemptRow | null>;
+  updateCollectionAttempt(
+    input: UpdatePaymentSubscriptionCollectionAttemptInput
+  ): Promise<PaymentSubscriptionCollectionAttemptRow | null>;
+  expireStaleUnsignedProcessingAttempts(params: {
+    olderThan: string;
+    updatedAt: string;
+    limit: number;
+  }): Promise<number>;
+  listSubmittedRecurringCollectionAttempts(params: {
+    limit: number;
+  }): Promise<PaymentSubscriptionCollectionAttemptRow[]>;
+  getCollectionAttemptByRecurringDue(params: {
+    organizationId: string;
+    projectId: string;
+    recurringPaymentId: string;
+    dueAt: string;
+  }): Promise<PaymentSubscriptionCollectionAttemptRow | null>;
   listCollectionAttempts(
     params: ListPaymentSubscriptionCollectionAttemptsInput
   ): Promise<ListPaymentSubscriptionCollectionAttemptsResult>;

@@ -22,6 +22,7 @@ import {
   executeForceBurnResponseSchema,
   executeMintResponseSchema,
   executePauseResponseSchema,
+  executePaymentRecurringPaymentResponseSchema,
   executeSeizeResponseSchema,
   executeUnpauseResponseSchema,
   executeUpdateAuthorityResponseSchema,
@@ -45,6 +46,8 @@ import {
   onrampQuoteResponseSchema,
   organizationSchema,
   paginatedResponseSchema,
+  paymentRecurringPaymentListResponseSchema,
+  paymentRecurringPaymentResponseSchema,
   paymentSubscriptionCollectionAttemptListResponseSchema,
   paymentSubscriptionCollectionAttemptResponseSchema,
   paymentSubscriptionListResponseSchema,
@@ -173,6 +176,15 @@ export const walletPolicyResponse = successResponseSchema(walletPolicyResponseSc
 export const prepareTransferResponse = successResponseSchema(prepareTransferResponseSchema);
 export const transferResponse = successResponseSchema(transferResponseSchema);
 export const transferListResponse = paginatedResponseSchema(transferSchema);
+export const paymentRecurringPaymentResponse = successResponseSchema(
+  paymentRecurringPaymentResponseSchema
+);
+export const paymentRecurringPaymentListResponse = successResponseSchema(
+  paymentRecurringPaymentListResponseSchema
+);
+export const executePaymentRecurringPaymentResponse = successResponseSchema(
+  executePaymentRecurringPaymentResponseSchema
+);
 export const paymentSubscriptionPlanResponse = successResponseSchema(
   paymentSubscriptionPlanResponseSchema
 );

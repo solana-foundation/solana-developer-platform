@@ -11,11 +11,15 @@ import { getBase58Codec } from "@solana/codecs";
 import {
   type Address,
   createKeyPairSignerFromBytes,
+  getTransactionDecoder,
+  getTransactionEncoder,
   type KeyPairSigner,
   type Signature,
 } from "@solana/kit";
+import { partiallySignTransactionWithSigners } from "@solana/signers";
 import type { FeePaymentPort } from "@/services/ports";
 import { FeePaymentError } from "@/services/ports";
+import { createRpc, sendTransaction } from "@/services/solana/rpc";
 import type { Env } from "@/types/env";
 
 const base58 = getBase58Codec();
@@ -56,27 +60,40 @@ export class NativeAdapter implements FeePaymentPort {
    * Sign a transaction as fee payer.
    * Note: This only adds the fee payer signature, does not send.
    */
-  async signAsFeePayer(_transaction: Uint8Array): Promise<Uint8Array> {
-    // The native adapter cannot easily sign an already-serialized transaction
-    // because the signature needs to be inserted at the correct position.
-    // This is a limitation - use KoraAdapter for proper gasless transactions.
-    throw new FeePaymentError(
-      "NativeAdapter.signAsFeePayer not supported - use KoraAdapter for gasless transactions",
-      "SIGNING_FAILED"
-    );
+  async signAsFeePayer(transaction: Uint8Array): Promise<Uint8Array> {
+    try {
+      const signer = await this.getSigner();
+      const decoded = getTransactionDecoder().decode(transaction);
+      const signed = await partiallySignTransactionWithSigners([signer], decoded);
+
+      return new Uint8Array(getTransactionEncoder().encode(signed));
+    } catch (error) {
+      throw new FeePaymentError(
+        "Failed to sign transaction as native fee payer",
+        "SIGNING_FAILED",
+        error as Error
+      );
+    }
   }
 
   /**
    * Sign and send a transaction.
-   * Note: This adapter cannot implement this without RPC access.
    */
-  async signAndSend(_transaction: Uint8Array): Promise<Signature> {
-    // The native adapter would need RPC access to send transactions.
-    // This breaks the port abstraction, so we don't support it here.
-    throw new FeePaymentError(
-      "NativeAdapter.signAndSend not supported - use KoraAdapter for gasless transactions",
-      "SUBMISSION_FAILED"
-    );
+  async signAndSend(transaction: Uint8Array): Promise<Signature> {
+    try {
+      const signedTransaction = await this.signAsFeePayer(transaction);
+      return await sendTransaction(createRpc(this.env), signedTransaction);
+    } catch (error) {
+      if (error instanceof FeePaymentError) {
+        throw error;
+      }
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      throw new FeePaymentError(
+        `Failed to submit transaction with native fee payer: ${errorMessage}`,
+        "SUBMISSION_FAILED",
+        error instanceof Error ? error : undefined
+      );
+    }
   }
 
   // ═══════════════════════════════════════════════════════════════════════════

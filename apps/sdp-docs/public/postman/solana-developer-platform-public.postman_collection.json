@@ -1217,6 +1217,153 @@
           }
         },
         {
+          "name": "List recurring payments",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/payments/recurring-payments",
+            "description": "Lists SDP-custody outbound recurring payments for the authenticated organization or project scope."
+          }
+        },
+        {
+          "name": "Create recurring payment",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/payments/recurring-payments",
+            "description": "Creates an SDP-custody outbound recurring payment intent from a custody wallet to a counterparty crypto-wallet account. This stores backend state only; call activate to create the on-chain plan and subscription authorization.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sourceWalletId\": \"wal_source\",\n  \"counterpartyId\": \"cp_example\",\n  \"counterpartyAccountId\": \"cpa_example\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"25.00\",\n  \"periodHours\": 720,\n  \"firstCollectionAt\": \"2025-01-01T00:00:00.000Z\",\n  \"metadataUri\": \"https://example.com/subscriptions/monthly-usdc.json\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Get recurring payment",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/payments/recurring-payments/{{id}}",
+            "description": "Retrieves an SDP-custody outbound recurring payment record."
+          }
+        },
+        {
+          "name": "Activate recurring payment",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/payments/recurring-payments/{{id}}/activate",
+            "description": "Server-executes creation of the Solana subscriptions plan and subscription authorization using the SDP custody source wallet. Repeated activation is idempotent once active.",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Collect recurring payment",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/payments/recurring-payments/{{id}}/collect",
+            "description": "Manually collects a due active recurring payment. SDP creates the destination token account idempotently, executes the subscription transfer, records a payment transfer, and advances the next due time.",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Cancel recurring payment",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/payments/recurring-payments/{{id}}/cancel",
+            "description": "Server-executes cancellation for an active recurring payment using the SDP custody source wallet.",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Resume recurring payment",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/payments/recurring-payments/{{id}}/resume",
+            "description": "Server-executes resume for a canceled or paused recurring payment using the SDP custody source wallet.",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "List recurring payment collection attempts",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/payments/recurring-payments/{{id}}/collection-attempts",
+            "description": "Lists collection attempts for an SDP-custody outbound recurring payment."
+          }
+        },
+        {
           "name": "List subscription plans",
           "request": {
             "method": "GET",
@@ -1240,7 +1387,7 @@
             "description": "Creates a feature-flagged recurring-payment subscription plan record. This stores SDP backend state and Solana subscriptions program identifiers; it does not by itself create the on-chain plan.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"ownerWalletId\": \"wal_merchant\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"25.00\",\n  \"periodHours\": 720,\n  \"programPlanId\": \"17014118346046923173\",\n  \"planPda\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\",\n  \"destinationAddress\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\",\n  \"pullerWalletId\": \"wal_collector\",\n  \"metadataUri\": \"https://example.com/subscriptions/monthly-usdc.json\",\n  \"status\": \"active\"\n}",
+              "raw": "{\n  \"ownerWalletId\": \"wal_merchant\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"25.00\",\n  \"periodHours\": 720,\n  \"programPlanId\": \"17014118346046923173\",\n  \"planPda\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\",\n  \"destinationAddress\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\",\n  \"pullerWalletId\": \"wal_collector\",\n  \"metadataUri\": \"https://example.com/subscriptions/monthly-usdc.json\",\n  \"status\": \"draft\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1330,7 +1477,7 @@
             "description": "Creates a feature-flagged recurring-payment subscription record tied to a counterparty. The customer must still sign the Solana subscription authorization transaction.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"planId\": \"psp_example\",\n  \"counterpartyId\": \"counterparty_example\",\n  \"subscriberAddress\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\",\n  \"subscriberTokenAccount\": \"\",\n  \"subscriptionPda\": \"\",\n  \"subscriptionAuthorityAddress\": \"\",\n  \"authorizationSignature\": \"sig_example\",\n  \"status\": \"active\",\n  \"currentPeriodStartAt\": \"2026-01-01T00:00:00.000Z\",\n  \"nextCollectionDueAt\": \"2026-01-01T00:00:00.000Z\"\n}",
+              "raw": "{\n  \"planId\": \"psp_example\",\n  \"counterpartyId\": \"counterparty_example\",\n  \"subscriberAddress\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\",\n  \"subscriberTokenAccount\": \"\",\n  \"subscriptionPda\": \"\",\n  \"subscriptionAuthorityAddress\": \"\",\n  \"authorizationSignature\": \"sig_example\",\n  \"status\": \"pending_authorization\",\n  \"currentPeriodStartAt\": \"2026-01-01T00:00:00.000Z\",\n  \"nextCollectionDueAt\": \"2026-01-01T00:00:00.000Z\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1459,7 +1606,7 @@
             "description": "Updates mutable subscription status and on-chain identifiers.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"subscriberTokenAccount\": \"\",\n  \"subscriptionPda\": \"\",\n  \"subscriptionAuthorityAddress\": \"\",\n  \"authorizationSignature\": \"\",\n  \"status\": \"active\",\n  \"currentPeriodStartAt\": \"2026-01-01T00:00:00.000Z\",\n  \"nextCollectionDueAt\": \"2026-01-01T00:00:00.000Z\",\n  \"cancelAt\": \"2026-01-01T00:00:00.000Z\",\n  \"canceledAt\": \"2026-01-01T00:00:00.000Z\"\n}",
+              "raw": "{\n  \"subscriberTokenAccount\": \"\",\n  \"subscriptionPda\": \"\",\n  \"subscriptionAuthorityAddress\": \"\",\n  \"authorizationSignature\": \"\",\n  \"status\": \"pending_authorization\",\n  \"currentPeriodStartAt\": \"2026-01-01T00:00:00.000Z\",\n  \"nextCollectionDueAt\": \"2026-01-01T00:00:00.000Z\",\n  \"cancelAt\": \"2026-01-01T00:00:00.000Z\",\n  \"canceledAt\": \"2026-01-01T00:00:00.000Z\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1489,10 +1636,10 @@
               }
             ],
             "url": "{{baseUrl}}/v1/payments/subscriptions/{{subscriptionId}}/collection-attempts",
-            "description": "Creates a collection-attempt record for a due recurring-payment subscription. Actual Solana settlement is owned by the collection worker/transaction submitter.",
+            "description": "Creates a pending collection-attempt record for a due recurring-payment subscription. Actual Solana settlement and execution fields are owned by the collection worker/transaction submitter.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"amount\": \"\",\n  \"token\": \"\",\n  \"dueAt\": \"2026-01-01T00:00:00.000Z\",\n  \"attemptedAt\": \"2026-01-01T00:00:00.000Z\",\n  \"status\": \"pending\",\n  \"transferId\": \"\",\n  \"signature\": \"\",\n  \"error\": \"\",\n  \"metadata\": {}\n}",
+              "raw": "{\n  \"amount\": \"\",\n  \"token\": \"\",\n  \"dueAt\": \"2026-01-01T00:00:00.000Z\",\n  \"status\": \"pending\",\n  \"metadata\": {}\n}",
               "options": {
                 "raw": {
                   "language": "json"

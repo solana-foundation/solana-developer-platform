@@ -1,6 +1,9 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
 import type { z } from "zod";
 import {
+  createSubscriptionCollectionAttemptSchema,
+  createSubscriptionPlanSchema,
+  createSubscriptionSchema,
   createTransferSchema,
   PAYMENT_TOKEN_VALIDATION_MESSAGE,
   prepareTransferSchema,
@@ -182,6 +185,73 @@ describe("wallet policy destinationAllowlist schema", () => {
     if (!result.success) {
       const messages = result.error.issues.map((issue) => issue.message);
       expect(messages).toContain("destinationAllowlist entry must be a base58 Solana address");
+    }
+  });
+});
+
+describe("payment subscription schemas", () => {
+  it("keeps low-level subscription plan creation compatible with active status", () => {
+    const result = createSubscriptionPlanSchema.safeParse({
+      ownerWalletId: "wal_test",
+      token: USDC_MINT,
+      amount: "10.00",
+      periodHours: 24,
+      status: "active",
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it("keeps low-level subscription creation compatible with past due timestamps", () => {
+    const result = createSubscriptionSchema.safeParse({
+      planId: "psp_test",
+      counterpartyId: "cp_test",
+      subscriberAddress: VALID_DESTINATION,
+      nextCollectionDueAt: new Date(Date.now() - 60_000).toISOString(),
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it("parses explicit low-level subscription create statuses for compatibility", () => {
+    for (const status of ["paused", "canceled", "expired"] as const) {
+      const result = createSubscriptionSchema.safeParse({
+        planId: "psp_test",
+        counterpartyId: "cp_test",
+        subscriberAddress: VALID_DESTINATION,
+        status,
+      });
+
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.status).toBe(status);
+      }
+    }
+  });
+
+  it("ignores legacy execution fields on collection attempt creation", () => {
+    const result = createSubscriptionCollectionAttemptSchema.safeParse({
+      amount: "10.50",
+      attemptedAt: new Date().toISOString(),
+      transferId: "ptr_legacy",
+      signature: "legacy_signature",
+      error: "legacy error",
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data).toEqual({ amount: "10.50", status: "pending" });
+    }
+  });
+
+  it("parses explicit non-pending collection attempt statuses for handler compatibility", () => {
+    const result = createSubscriptionCollectionAttemptSchema.safeParse({
+      status: "processing",
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.status).toBe("processing");
     }
   });
 });

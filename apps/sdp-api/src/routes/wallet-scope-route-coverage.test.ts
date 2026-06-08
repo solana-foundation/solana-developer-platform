@@ -38,6 +38,8 @@ describe("wallet-scoped route coverage inventory", () => {
   it("tracks every wallet-scoped payments route", () => {
     const allRoutes = extractRoutes(paymentsRoutes);
     const nonWalletScopedRoutes = new Set([
+      "ALL /recurring-payments",
+      "ALL /recurring-payments/*",
       "ALL /subscription-plans",
       "ALL /subscription-plans/*",
       "ALL /subscriptions",
@@ -61,6 +63,9 @@ describe("wallet-scoped route coverage inventory", () => {
     ]);
 
     expect(allRoutes.filter((route) => !nonWalletScopedRoutes.has(route))).toEqual([
+      "GET /recurring-payments",
+      "GET /recurring-payments/:id",
+      "GET /recurring-payments/:id/collection-attempts",
       "GET /transfers",
       "GET /transfers/:transferId",
       "GET /wallets/:walletId/balances",
@@ -70,6 +75,11 @@ describe("wallet-scoped route coverage inventory", () => {
       "POST /ramps/offramp/quote",
       "POST /ramps/onramp/execute",
       "POST /ramps/onramp/quote",
+      "POST /recurring-payments",
+      "POST /recurring-payments/:id/activate",
+      "POST /recurring-payments/:id/cancel",
+      "POST /recurring-payments/:id/collect",
+      "POST /recurring-payments/:id/resume",
       "POST /subscription-plans",
       "POST /subscription-plans/:planId/prepare-create",
       "POST /subscriptions/:subscriptionId/prepare-collection",

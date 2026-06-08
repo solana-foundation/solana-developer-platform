@@ -43,6 +43,7 @@ export type ResourceType =
   | "member"
   | "project"
   | "project_member"
+  | "counterparty_account"
   | "session"
   | "token"
   | "token_transaction"
