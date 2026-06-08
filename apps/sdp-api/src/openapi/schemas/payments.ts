@@ -604,7 +604,7 @@ export const createRecurringPaymentRequestSchema = createRecurringPaymentSchemaB
     }),
     firstCollectionAt: withOpenApi(createRecurringPaymentSchemaBase.shape.firstCollectionAt, {
       description: "Optional first collection timestamp. Defaults to activation time when omitted.",
-      example: "2025-01-01T00:00:00.000Z",
+      example: "2099-01-01T00:00:00.000Z",
     }),
     metadataUri: withOpenApi(createRecurringPaymentSchemaBase.shape.metadataUri, {
       description: "Optional plan metadata URI.",
