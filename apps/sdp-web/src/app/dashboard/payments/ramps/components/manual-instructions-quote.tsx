@@ -307,7 +307,7 @@ function BvnkInstruction({
           </span>
           <div className="min-w-0 flex-1">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-              <div>
+              <div className="min-w-0">
                 <p className="text-sm font-medium text-text-extra-high">
                   Identity verification required
                 </p>
@@ -316,17 +316,13 @@ function BvnkInstruction({
                   to verify the counterparty through Sumsub. No information entered via the sandbox
                   will be verified.
                 </p>
-                {instruction.instructionsNotes ? (
-                  <p className="mt-2 text-sm leading-relaxed text-text-low">
-                    {instruction.instructionsNotes}
-                  </p>
-                ) : null}
               </div>
               {verificationUrl ? (
                 <Button
                   type="button"
                   variant="secondary"
                   size="xs"
+                  className="shrink-0"
                   onClick={() => window.open(verificationUrl, "_blank", "noopener")}
                 >
                   Complete verification
