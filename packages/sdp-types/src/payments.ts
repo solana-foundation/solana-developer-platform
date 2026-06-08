@@ -147,6 +147,16 @@ export type PaymentSubscriptionCollectionAttemptStatus =
   | "failed"
   | "skipped";
 
+export type PaymentRecurringPaymentStatus =
+  | "pending_activation"
+  | "activating"
+  | "active"
+  | "canceling"
+  | "resuming"
+  | "paused"
+  | "canceled"
+  | "expired";
+
 export interface PaymentSubscriptionPlan {
   id: string;
   organizationId: string;
@@ -207,6 +217,36 @@ export interface PaymentSubscriptionCollectionAttempt {
   updatedAt: string;
 }
 
+export interface PaymentRecurringPayment {
+  id: string;
+  organizationId: string;
+  projectId: string;
+  sourceWalletId: string;
+  sourceAddress: string;
+  counterpartyId: string;
+  counterpartyAccountId: string;
+  destinationAddress: string;
+  destinationTokenAccount: string | null;
+  token: string;
+  amount: string;
+  periodHours: number;
+  firstCollectionAt: string | null;
+  nextCollectionDueAt: string | null;
+  planId: string | null;
+  subscriptionId: string | null;
+  planPda: string | null;
+  planCreatedAt: string | null;
+  planCreationSignature: string | null;
+  subscriptionPda: string | null;
+  subscriptionAuthorityAddress: string | null;
+  authorizationSignature: string | null;
+  status: PaymentRecurringPaymentStatus;
+  metadataUri: string | null;
+  createdBy: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface CreatePaymentSubscriptionPlanRequest {
   ownerWalletId: string;
   token: string;
@@ -263,6 +303,28 @@ export interface CreatePaymentSubscriptionCollectionAttemptRequest {
   signature?: string;
   error?: string;
   metadata?: Record<string, unknown>;
+}
+
+export interface CreatePaymentRecurringPaymentRequest {
+  sourceWalletId: string;
+  counterpartyId: string;
+  counterpartyAccountId: string;
+  token: string;
+  amount: string;
+  periodHours: number;
+  firstCollectionAt?: string;
+  metadataUri?: string;
+}
+
+export interface PaymentRecurringPaymentResponse {
+  recurringPayment: PaymentRecurringPayment;
+}
+
+export interface ListPaymentRecurringPaymentsResponse {
+  recurringPayments: PaymentRecurringPayment[];
+  total: number;
+  page: number;
+  pageSize: number;
 }
 
 export interface PaymentSubscriptionPlanResponse {

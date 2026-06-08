@@ -77,6 +77,11 @@ const paymentAmountSchema = z
   });
 
 const recurringTimestampSchema = z.string().datetime({ offset: true });
+const futureRecurringTimestampSchema = (fieldName: string) =>
+  recurringTimestampSchema.refine((value) => new Date(value).getTime() > Date.now(), {
+    message: `${fieldName} must be in the future`,
+  });
+const firstCollectionAtTimestampSchema = futureRecurringTimestampSchema("firstCollectionAt");
 const u64StringSchema = z
   .string()
   .regex(/^\d+$/, { message: "Value must be an unsigned integer string" })
@@ -107,6 +112,10 @@ export const subscriptionIdParamsSchema = z.object({
   subscriptionId: z.string().min(1),
 });
 
+export const recurringPaymentIdParamsSchema = z.object({
+  id: z.string().min(1),
+});
+
 export const paymentSubscriptionPlanStatusSchema = z.enum(["draft", "active", "archived"]);
 
 export const paymentSubscriptionStatusSchema = z.enum([
@@ -125,6 +134,39 @@ export const paymentSubscriptionCollectionAttemptStatusSchema = z.enum([
   "failed",
   "skipped",
 ]);
+
+export const paymentRecurringPaymentStatusSchema = z.enum([
+  "pending_activation",
+  "activating",
+  "active",
+  "canceling",
+  "resuming",
+  "paused",
+  "canceled",
+  "expired",
+]);
+
+export const createRecurringPaymentSchema = z.object({
+  sourceWalletId: z.string().min(1),
+  counterpartyId: z.string().min(1),
+  counterpartyAccountId: z.string().min(1),
+  token: paymentTokenSchema,
+  amount: paymentAmountSchema,
+  periodHours: z
+    .number()
+    .int()
+    .positive()
+    .max(24 * 365),
+  firstCollectionAt: firstCollectionAtTimestampSchema.optional(),
+  metadataUri: z.string().url().max(128).optional(),
+});
+
+export const listRecurringPaymentsQuerySchema = z.object({
+  counterpartyId: z.string().min(1).optional(),
+  status: paymentRecurringPaymentStatusSchema.optional(),
+  page: z.coerce.number().int().positive().default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(20),
+});
 
 export const createSubscriptionPlanSchema = z.object({
   ownerWalletId: z.string().min(1),
