@@ -54,6 +54,9 @@ CREATE INDEX IF NOT EXISTS idx_payment_recurring_payments_status_updated
 CREATE INDEX IF NOT EXISTS idx_payment_recurring_payments_counterparty_created
     ON payment_recurring_payments(counterparty_id, created_at DESC);
 
+CREATE INDEX IF NOT EXISTS idx_payment_recurring_payments_project_source_wallet_created
+    ON payment_recurring_payments(organization_id, project_id, source_wallet_id, created_at DESC);
+
 CREATE INDEX IF NOT EXISTS idx_payment_recurring_payments_subscription
     ON payment_recurring_payments(subscription_id)
     WHERE subscription_id IS NOT NULL;
