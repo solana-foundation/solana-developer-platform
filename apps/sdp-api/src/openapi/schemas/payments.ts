@@ -1430,7 +1430,6 @@ const bvnkRampPaymentInstructionSchema = z.object({
     .openapi({ description: "Bank funding details for the buyer's BVNK virtual account." }),
   instructionsNotes: z
     .string()
-    .optional()
     .openapi({ description: "Additional human-readable funding instructions." }),
 });
 
