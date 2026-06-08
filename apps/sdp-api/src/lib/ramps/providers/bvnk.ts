@@ -2,12 +2,17 @@ import type {
   BvnkBankFundingDetails,
   BvnkOnboardingStatus,
   BvnkPaymentRampInstruction,
+  PaymentRampEstimate,
+  PaymentRampEstimateFees,
   PaymentRampExecution,
   PaymentRampQuote,
   SdpEnvironment,
 } from "@sdp/types";
-import { parseFiatCurrency } from "@sdp/types/payment-rails";
+import { RAMP_FIAT_CURRENCIES } from "@sdp/types/generated/ramp-support";
+import { getCryptoRailAssetLabel, parseFiatCurrency } from "@sdp/types/payment-rails";
+import { z } from "zod";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
+import { formatDecimalAmount, isDecimalString, parseDecimalAmount } from "@/lib/amount";
 import { AppError, providerNotConfigured } from "@/lib/errors";
 import { hashString, hmacSha256Base64, verifyHmacSha256Base64 } from "@/lib/hash";
 import {
@@ -20,6 +25,8 @@ import {
 import type {
   ProviderRampSupport,
   RampDumpReader,
+  RampEstimateOfframpInput,
+  RampEstimateOnrampInput,
   RampExecuteOfframpInput,
   RampOfframpQuoteInput,
   RampProvider,
@@ -30,6 +37,7 @@ import type {
 
 const BVNK_PRODUCTION_API_URL = "https://api.bvnk.com";
 const BVNK_SANDBOX_API_URL = "https://api.sandbox.bvnk.com";
+const bvnkEstimateFiatCurrencySchema = z.enum(RAMP_FIAT_CURRENCIES);
 
 // SANDBOX ONLY: synthetic originator (fiat sender) bank accounts for pay-in
 // simulations. The real buyer's funding bank is never stored; BVNK just needs
@@ -353,6 +361,26 @@ function parseBvnkEstimateResponse(payload: unknown): BvnkEstimateResponse {
   return payload as BvnkEstimateResponse;
 }
 
+interface BvnkPayoutEstimateResponse {
+  walletCurrency: string;
+  walletRequiredAmount: number;
+  paidCurrency: string;
+  paidRequiredAmount: number;
+  feeCurrency: string;
+  feePredictedAmount: number;
+  networkFeeCurrency: string;
+  networkFeePredictedAmount: number;
+  totalWalletAmount: number;
+  exchangeRate: number;
+}
+
+function parseBvnkPayoutEstimateResponse(payload: unknown): BvnkPayoutEstimateResponse {
+  if (typeof payload !== "object" || payload === null) {
+    throw new AppError("BAD_REQUEST", "BVNK estimate response payload is invalid");
+  }
+  return payload as BvnkPayoutEstimateResponse;
+}
+
 function parseBvnkPaymentSummary(payload: unknown): BvnkPaymentSummary {
   if (typeof payload !== "object" || payload === null) {
     throw new AppError("BAD_REQUEST", "BVNK payment response payload is invalid");
@@ -380,6 +408,71 @@ function toPositiveAmount(value: string, fieldName: string): number {
     throw new AppError("BAD_REQUEST", `${fieldName} must be a positive amount`);
   }
   return amount;
+}
+
+function parseBvnkEstimateFeeCurrency(value: string): PaymentRampEstimateFees["currency"] {
+  const normalized = value.trim().toUpperCase();
+  const fiat = bvnkEstimateFiatCurrencySchema.safeParse(normalized);
+  if (fiat.success) {
+    return fiat.data;
+  }
+  if (isSolanaCryptoAsset(normalized)) {
+    return normalized;
+  }
+  throw new AppError("PROVIDER_UNAVAILABLE", `Unsupported BVNK estimate fee currency: ${value}`);
+}
+
+function countDecimalPlaces(value: string): number {
+  if (!isDecimalString(value)) {
+    throw new AppError("PROVIDER_UNAVAILABLE", "BVNK returned an invalid decimal estimate amount");
+  }
+  const decimalIndex = value.indexOf(".");
+  if (decimalIndex === -1) {
+    return 0;
+  }
+  return value.length - decimalIndex - 1;
+}
+
+function subtractBvnkEstimateFees(estimate: BvnkPayoutEstimateResponse): string {
+  const walletRequiredAmount = String(estimate.walletRequiredAmount);
+  const feePredictedAmount = String(estimate.feePredictedAmount);
+  const networkFeePredictedAmount = String(estimate.networkFeePredictedAmount);
+  const decimals = Math.max(
+    countDecimalPlaces(walletRequiredAmount),
+    countDecimalPlaces(feePredictedAmount),
+    countDecimalPlaces(networkFeePredictedAmount)
+  );
+  const netAmount =
+    parseDecimalAmount(walletRequiredAmount, decimals) -
+    parseDecimalAmount(feePredictedAmount, decimals) -
+    parseDecimalAmount(networkFeePredictedAmount, decimals);
+  if (netAmount < 0n) {
+    throw new AppError(
+      "PROVIDER_UNAVAILABLE",
+      "BVNK returned estimate fees above the gross amount"
+    );
+  }
+  return formatDecimalAmount(netAmount, decimals);
+}
+
+function formatBvnkEstimateFeeTotal(estimate: BvnkPayoutEstimateResponse): string {
+  const feePredictedAmount = String(estimate.feePredictedAmount);
+  const networkFeePredictedAmount = String(estimate.networkFeePredictedAmount);
+  const decimals = Math.max(
+    countDecimalPlaces(feePredictedAmount),
+    countDecimalPlaces(networkFeePredictedAmount)
+  );
+  const totalFee =
+    parseDecimalAmount(feePredictedAmount, decimals) +
+    parseDecimalAmount(networkFeePredictedAmount, decimals);
+  return formatDecimalAmount(totalFee, decimals);
+}
+
+function formatBvnkNetExchangeRate(netFiatAmount: string, paidRequiredAmount: number): string {
+  if (paidRequiredAmount <= 0) {
+    throw new AppError("PROVIDER_UNAVAILABLE", "BVNK returned a non-positive paid amount");
+  }
+  return String(Number(netFiatAmount) / paidRequiredAmount);
 }
 
 interface BvnkCurrencyEntry {
@@ -658,7 +751,7 @@ export class BvnkRampClient implements RampProvider {
     fetchJson,
     writeDump,
   }: Parameters<RampProvider["_discoverRails"]>[0]) {
-    const base = env.BVNK_RAMP_RAILS_API_BASE_URL?.trim() || "https://api.bvnk.com/";
+    const base = env.BVNK_RAMP_RAILS_API_BASE_URL?.trim() || "https://api.sandbox.bvnk.com/";
     // biome-ignore lint/security/noSecrets: BVNK pagination query string, not a secret.
     const pageQuery = "?offset=0&max=1000";
 
@@ -721,7 +814,15 @@ export class BvnkRampClient implements RampProvider {
     if (!(await verifyHmacSha256Base64(rawBody, signature, secret))) {
       throw new AppError("UNAUTHORIZED", "Invalid BVNK webhook signature", { provider: this.id });
     }
-    return { provider: this.id, payload: safeParseJson(rawBody) ?? {} };
+    let payload: unknown;
+    try {
+      payload = JSON.parse(rawBody);
+    } catch {
+      throw new AppError("BAD_REQUEST", "BVNK webhook body must be valid JSON", {
+        provider: this.id,
+      });
+    }
+    return { provider: this.id, payload };
   }
 
   /**
@@ -944,6 +1045,83 @@ export class BvnkRampClient implements RampProvider {
    * which owns the DB-cached state. The stateless provider contract can't model
    * it, so these interface methods are unreachable for BVNK.
    */
+  async estimateOnramp(
+    _ctx: RampRuntimeContext,
+    _input: RampEstimateOnrampInput
+  ): Promise<PaymentRampEstimate> {
+    throw new AppError("ESTIMATE_NOT_AVAILABLE", "BVNK on-ramp rate is only known at quote time.", {
+      provider: this.id,
+    });
+  }
+
+  async estimateOfframp(
+    { env, mode }: RampRuntimeContext,
+    input: RampEstimateOfframpInput
+  ): Promise<PaymentRampEstimate> {
+    const config = readBvnkConfig(env, mode);
+    const { currency, network } = normalizeBvnkCurrencyAndNetwork(
+      getCryptoRailAssetLabel(input.assetRail)
+    );
+    const paidRequiredAmount = toPositiveAmount(input.cryptoAmount, "cryptoAmount");
+    const estimate = parseBvnkPayoutEstimateResponse(
+      await bvnkRequest(config, "/api/v1/pay/estimate", {
+        method: "POST",
+        body: {
+          walletId: config.walletId,
+          walletCurrency: input.fiatCurrency,
+          paidCurrency: currency,
+          paidRequiredAmount,
+          reference: rampId("sdp_offramp_est"),
+          network,
+        },
+      })
+    );
+    if (
+      estimate.feePredictedAmount > 0 &&
+      estimate.networkFeePredictedAmount > 0 &&
+      estimate.feeCurrency !== estimate.networkFeeCurrency
+    ) {
+      throw new AppError(
+        "PROVIDER_UNAVAILABLE",
+        "BVNK returned fees in multiple currencies for this estimate"
+      );
+    }
+    const feeCurrency = parseBvnkEstimateFeeCurrency(estimate.feeCurrency);
+    const networkFeeCurrency = parseBvnkEstimateFeeCurrency(estimate.networkFeeCurrency);
+    if (estimate.feePredictedAmount > 0 && feeCurrency !== input.fiatCurrency) {
+      throw new AppError(
+        "PROVIDER_UNAVAILABLE",
+        "BVNK returned provider fees outside the fiat output currency"
+      );
+    }
+    if (estimate.networkFeePredictedAmount > 0 && networkFeeCurrency !== input.fiatCurrency) {
+      throw new AppError(
+        "PROVIDER_UNAVAILABLE",
+        "BVNK returned network fees outside the fiat output currency"
+      );
+    }
+    const totalFeeCurrency = estimate.feePredictedAmount > 0 ? feeCurrency : networkFeeCurrency;
+    const netFiatAmount = subtractBvnkEstimateFees(estimate);
+    const totalFee = formatBvnkEstimateFeeTotal(estimate);
+    return {
+      provider: this.id,
+      direction: "offramp",
+      fiatCurrency: input.fiatCurrency,
+      assetRail: input.assetRail,
+      fiatAmount: netFiatAmount,
+      cryptoAmount: String(estimate.paidRequiredAmount),
+      exchangeRate: formatBvnkNetExchangeRate(netFiatAmount, estimate.paidRequiredAmount),
+      fees: {
+        currency: totalFeeCurrency,
+        total: totalFee,
+        provider: String(estimate.feePredictedAmount),
+        providerCurrency: feeCurrency,
+        network: String(estimate.networkFeePredictedAmount),
+        networkCurrency: networkFeeCurrency,
+      },
+    };
+  }
+
   async createOnrampQuote(): Promise<PaymentRampQuote> {
     throw new AppError(
       "INTERNAL_ERROR",

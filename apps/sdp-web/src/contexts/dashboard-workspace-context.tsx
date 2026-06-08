@@ -18,6 +18,7 @@ import { SWRConfig } from "swr";
 import { Button } from "@/components/ui/button";
 import type { DashboardAccess } from "@/lib/dashboard-access";
 import { type DashboardCacheScope, getDashboardCacheScopeKey } from "@/lib/dashboard-cache-scope";
+import type { DashboardFeatureFlags } from "@/lib/dashboard-feature-flags";
 import { DASHBOARD_SWR_CONFIG } from "@/lib/dashboard-swr-config";
 import { useDashboardUrlState } from "@/lib/dashboard-url-state";
 import { reconcileProjectCookieAction, selectProjectAction } from "@/lib/project-cookie-action";
@@ -36,6 +37,7 @@ export interface DashboardPlaygroundApiKeyOption {
 type DashboardWorkspaceContextValue = {
   dashboardAccess: DashboardAccess;
   dashboardCacheScope: DashboardCacheScope;
+  featureFlags: DashboardFeatureFlags;
   projects: Project[];
   sandboxProject: Project | null;
   productionProject: Project | null;
@@ -79,6 +81,7 @@ type DashboardWorkspaceProviderProps = {
   children: ReactNode;
   dashboardAccess: DashboardAccess;
   serverDashboardCacheScope: DashboardCacheScope;
+  featureFlags: DashboardFeatureFlags;
   projects: Project[];
   initialSelectedProjectId: string | null;
   initialSidebarOpen?: boolean;
@@ -88,6 +91,7 @@ export function DashboardWorkspaceProvider({
   children,
   dashboardAccess,
   serverDashboardCacheScope,
+  featureFlags,
   projects,
   initialSelectedProjectId,
   initialSidebarOpen = true,
@@ -257,6 +261,7 @@ export function DashboardWorkspaceProvider({
     () => ({
       dashboardAccess,
       dashboardCacheScope: liveDashboardCacheScope,
+      featureFlags,
       projects,
       sandboxProject,
       productionProject,
@@ -279,6 +284,7 @@ export function DashboardWorkspaceProvider({
     [
       dashboardAccess,
       liveDashboardCacheScope,
+      featureFlags,
       projects,
       sandboxProject,
       productionProject,

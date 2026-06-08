@@ -2,15 +2,9 @@ import type { SdpEnvironment } from "@sdp/types";
 import type { Context } from "hono";
 import { Webhook } from "svix";
 import { getDb } from "@/db";
-import { createCounterpartiesRepository } from "@/db/repositories";
 import { mapClerkRoleToOrgRole } from "@/lib/clerk-role";
 import { AppError, badRequest } from "@/lib/errors";
 import { RAMP_PROVIDER_CLIENTS } from "@/lib/ramps";
-import {
-  findBvnkWalletEntryKey,
-  isBvnkCustomerVerified,
-  readBvnkCustomer,
-} from "@/lib/ramps/providers/bvnk";
 import { success } from "@/lib/response";
 import { isSelfHostedDeployment } from "@/lib/runtime-env";
 import {
@@ -21,6 +15,9 @@ import { type ClerkUser, ClerkUsersService } from "@/services/clerk-users.servic
 import { ProjectService } from "@/services/project.service";
 import { syncProviderAccessFromClerk } from "@/services/provider-availability.service";
 import type { Env } from "@/types/env";
+import { handleBvnkRampWebhook } from "./ramps/bvnk";
+import { handleLightsparkRampWebhook } from "./ramps/lightspark";
+import { handleMoonpayRampWebhook } from "./ramps/moonpay";
 
 type AppContext = Context<{ Bindings: Env }>;
 
@@ -602,77 +599,6 @@ function requiredHeader(c: AppContext, name: string) {
   return value;
 }
 
-async function processBvnkCustomerWebhook(
-  c: AppContext,
-  environment: SdpEnvironment,
-  payload: unknown
-): Promise<void> {
-  const event = RAMP_PROVIDER_CLIENTS.bvnk.parseBvnkWebhookEvent(payload);
-  if (event.kind === "ignore") {
-    console.log(`[bvnk webhook] unmapped event "${event.event}": ${JSON.stringify(payload)}`);
-    return;
-  }
-  if (!event.customerReference) {
-    console.log(
-      `[bvnk webhook] "${event.event}" has no customer reference: ${JSON.stringify(payload)}`
-    );
-    return;
-  }
-
-  const repo = createCounterpartiesRepository(c.env);
-  const counterparty = await repo.findCounterpartyByBvnkCustomerReference(event.customerReference);
-  if (!counterparty) {
-    return;
-  }
-
-  const providerData = counterparty.provider_data;
-
-  if (event.kind === "customer") {
-    const current = readBvnkCustomer(providerData);
-    const customer: Record<string, unknown> = {};
-    if (event.customerStatus) customer.status = event.customerStatus.toUpperCase();
-    if (event.verificationUrl) customer.verificationUrl = event.verificationUrl;
-    const nextStatus = (customer.status as string | undefined) ?? current.status;
-    const nextUrl = (customer.verificationUrl as string | undefined) ?? current.verificationUrl;
-    if (!nextUrl && !isBvnkCustomerVerified(nextStatus)) {
-      const latest = await RAMP_PROVIDER_CLIENTS.bvnk.getBvnkCustomer(
-        { env: c.env as unknown as Record<string, string | undefined>, mode: environment },
-        { reference: event.customerReference }
-      );
-      customer.status = latest.status.toUpperCase();
-      customer.verificationStatus = latest.verificationStatus;
-      if (latest.verificationUrl) customer.verificationUrl = latest.verificationUrl;
-    }
-    if (Object.keys(customer).length === 0) {
-      return;
-    }
-    await repo.patchBvnkCustomerByReference({
-      customerReference: event.customerReference,
-      customer,
-    });
-    return;
-  }
-
-  if (
-    event.kind === "wallet" &&
-    event.walletId &&
-    (event.walletStatus || event.bankAccount?.accountNumber)
-  ) {
-    const key = findBvnkWalletEntryKey(providerData, event.walletId);
-    if (!key) {
-      return;
-    }
-    const wallet: Record<string, unknown> = {};
-    if (event.walletStatus) wallet.walletStatus = event.walletStatus;
-    if (event.bankAccount?.accountNumber) wallet.bankAccount = event.bankAccount;
-    await repo.patchBvnkWalletByReference({
-      customerReference: event.customerReference,
-      walletKey: key,
-      wallet,
-    });
-  }
-}
-
 export const handleRampProviderWebhook = async (c: AppContext, environment: SdpEnvironment) => {
   const provider = parseRampWebhookProvider(c.req.param("provider"));
   const rawBody = await c.req.raw.text();
@@ -685,15 +611,21 @@ export const handleRampProviderWebhook = async (c: AppContext, environment: SdpE
     requestUrl: c.req.url,
   });
 
-  if (result.provider === "bvnk") {
-    try {
-      await processBvnkCustomerWebhook(c, environment, result.payload);
-    } catch (error) {
-      console.error(
-        `[bvnk webhook] failed to process event: ${error instanceof Error ? error.message : String(error)}`,
-        JSON.stringify(result.payload)
+  switch (result.provider) {
+    case "bvnk":
+      await handleBvnkRampWebhook(c, environment, result.payload);
+      break;
+    case "lightspark":
+      await handleLightsparkRampWebhook(c, result.payload);
+      break;
+    case "moonpay":
+      await handleMoonpayRampWebhook(c, result.payload);
+      break;
+    default:
+      throw new AppError(
+        "BAD_REQUEST",
+        `Unsupported ramp webhook provider: ${result.provider satisfies never}`
       );
-    }
   }
 
   return success(c, {

@@ -6,6 +6,7 @@ import type {
   PaymentsDashboardWallet,
   RampProviderId,
 } from "@sdp/types";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import useSWR, { preload } from "swr";
@@ -15,6 +16,7 @@ import {
   fetchCounterpartyAccounts,
   fetchWallets,
 } from "@/app/dashboard/payments/payments-workspace.data";
+import { Button } from "@/components/ui/button";
 import { CounterpartyPicker } from "./components/counterparty-picker";
 import { OfframpStepContent } from "./components/offramp-step-content";
 import { OnchainReceiveStepContent } from "./components/onchain-receive-step-content";
@@ -26,6 +28,7 @@ import { OFFRAMP_STEPS, useOfframpWizard } from "./hooks/use-offramp-wizard";
 import { ONCHAIN_RECEIVE_STEPS, useOnchainReceiveWizard } from "./hooks/use-onchain-receive-wizard";
 import { ONCHAIN_SEND_STEPS, useOnchainSendWizard } from "./hooks/use-onchain-send-wizard";
 import { ONRAMP_STEPS, useOnrampWizard } from "./hooks/use-onramp-wizard";
+import { isTerminalRampTransferStatus } from "./hooks/use-ramp-wizard";
 
 interface PaymentsActionPageProps {
   mode: "send" | "receive";
@@ -109,6 +112,10 @@ function OfframpRail({
     onExit,
   });
 
+  const transferTerminal = wizard.transferStatus
+    ? isTerminalRampTransferStatus(wizard.transferStatus.status)
+    : false;
+
   return (
     <RampWizardShell
       steps={[...preSteps, ...OFFRAMP_STEPS]}
@@ -118,7 +125,7 @@ function OfframpRail({
         !wizard.canProceed ||
         (wizard.currentStepId === "WALLET" && wizard.walletsLoading)
       }
-      primaryLabel={wizard.hostedQuoteLoading ? "Opening..." : wizard.isLastStep ? "Done" : "Next"}
+      primaryLabel={wizard.hostedQuoteLoading ? "Processing" : wizard.isLastStep ? "Done" : "Next"}
       walletsError={wizard.liveWalletsError}
       onPrimary={() => void wizard.handlePrimary()}
       onSecondary={wizard.handleSecondary}
@@ -130,6 +137,16 @@ function OfframpRail({
           <PoweredByRampProvider provider={wizard.quote.provider} />
         ) : null
       }
+      footerActions={
+        transferTerminal ? (
+          <Button asChild type="button" variant="secondary" className="h-14 rounded-full text-base">
+            <Link href={`/dashboard/payments/counterparty/${wizard.fields.counterpartyId}`}>
+              Go to transaction
+            </Link>
+          </Button>
+        ) : null
+      }
+      hidePrimary={wizard.currentStepId === "COMPLETE"}
     >
       <OfframpStepContent wizard={wizard} />
     </RampWizardShell>
@@ -192,6 +209,10 @@ function OnrampRail({
   const verificationPending =
     wizard.currentStepId === "PROVIDER" && wizard.bvnkInstruction?.onboardingStatus === "verifying";
 
+  const transferTerminal = wizard.transferStatus
+    ? isTerminalRampTransferStatus(wizard.transferStatus.status)
+    : false;
+
   return (
     <RampWizardShell
       steps={[...preSteps, ...ONRAMP_STEPS]}
@@ -204,14 +225,12 @@ function OnrampRail({
       }
       primaryLabel={
         wizard.hostedQuoteLoading
-          ? "Opening..."
+          ? "Processing"
           : verificationPending
             ? "Verification pending"
             : verificationUrl
               ? "Complete Verification"
-              : wizard.isLastStep
-                ? "Finish Transaction"
-                : "Next"
+              : "Next"
       }
       walletsError={wizard.liveWalletsError}
       onPrimary={
@@ -230,6 +249,16 @@ function OnrampRail({
           <PoweredByRampProvider provider={wizard.quote.provider} />
         ) : null
       }
+      footerActions={
+        transferTerminal ? (
+          <Button asChild type="button" variant="secondary" className="h-14 rounded-full text-base">
+            <Link href={`/dashboard/payments/counterparty/${wizard.fields.counterpartyId}`}>
+              Go to transaction
+            </Link>
+          </Button>
+        ) : null
+      }
+      hidePrimary={wizard.currentStepId === "PROVIDER"}
     >
       <OnrampStepContent wizard={wizard} />
     </RampWizardShell>

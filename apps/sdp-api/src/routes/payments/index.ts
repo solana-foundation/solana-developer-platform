@@ -12,6 +12,8 @@ import {
   createSubscriptionCollectionAttempt,
   createSubscriptionPlan,
   createTransfer,
+  estimateOfframp,
+  estimateOnramp,
   executeOfframp,
   executeOnramp,
   getSubscription,
@@ -146,6 +148,8 @@ payments.get("/transfers", requirePermissions("payments:read"), listTransfers);
 payments.get("/transfers/:transferId", requirePermissions("payments:read"), getTransfer);
 payments.get("/ramps/onramp/currency", requirePermissions("payments:read"), listOnrampCurrencies);
 payments.get("/ramps/offramp/currency", requirePermissions("payments:read"), listOfframpCurrencies);
+payments.post("/ramps/onramp/estimate", requirePermissions("payments:read"), estimateOnramp);
+payments.post("/ramps/offramp/estimate", requirePermissions("payments:read"), estimateOfframp);
 payments.post(
   "/ramps/onramp/quote",
   requirePermissions("payments:write", "wallets:read"),

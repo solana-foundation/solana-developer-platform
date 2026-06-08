@@ -13,9 +13,15 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const search = url.searchParams.toString();
     const hasWalletFilter = url.searchParams.has("wallet") || url.searchParams.has("walletAddress");
+    const hasProviderReferenceFilter =
+      url.searchParams.has("provider") || url.searchParams.has("providerReference");
+    const hasCategoryFilter = url.searchParams.has("category");
+    const hasCounterpartyFilter = url.searchParams.has("counterpartyId");
+    const hasDirectTransferFilter =
+      hasWalletFilter || hasCategoryFilter || hasProviderReferenceFilter || hasCounterpartyFilter;
     const pageSize = Number.parseInt(url.searchParams.get("pageSize") ?? "20", 10);
 
-    if (!hasWalletFilter) {
+    if (!hasDirectTransferFilter) {
       const result = await fetchDashboardPaymentTransfers(
         apiClient.request,
         Number.isFinite(pageSize) && pageSize > 0 ? pageSize : 20

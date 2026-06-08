@@ -1,4 +1,6 @@
 import type { CustodyWalletAggregate, CustodyWalletTokenBalance } from "./custody";
+import type { RampFiatCurrency } from "./generated/ramp-support.generated";
+import type { CryptoAssetSymbol, CryptoRailId } from "./payment-rails";
 import type { PrivateTransferRequest } from "./private-transfers";
 import type { RampProviderId } from "./provider-access";
 
@@ -55,6 +57,12 @@ export interface PaymentTransferSummary {
   token?: string;
   amount?: string;
   memo?: string;
+  provider?: RampProviderId;
+  counterpartyId?: string;
+  providerReference?: string;
+  deliveryMode?: PaymentRampQuoteDeliveryMode;
+  fiatCurrency?: string;
+  fiatAmount?: string;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -358,7 +366,71 @@ export interface BvnkPaymentRampInstruction {
 
 export type PaymentRampInstruction = LightsparkPaymentRampInstruction | BvnkPaymentRampInstruction;
 
+export type RampDirection = "onramp" | "offramp";
+
+export interface PaymentRampEstimateFees {
+  currency: RampFiatCurrency | CryptoAssetSymbol;
+  total: string;
+  network?: string;
+  networkCurrency?: RampFiatCurrency | CryptoAssetSymbol;
+  provider?: string;
+  providerCurrency?: RampFiatCurrency | CryptoAssetSymbol;
+}
+
+export interface PaymentRampEstimate {
+  provider: RampProviderId;
+  direction: RampDirection;
+  fiatCurrency: RampFiatCurrency;
+  assetRail: CryptoRailId;
+  fiatAmount: string;
+  cryptoAmount: string;
+  exchangeRate: string;
+  fees: PaymentRampEstimateFees;
+  minFiatAmount?: string;
+  maxFiatAmount?: string;
+  expiresAt?: string;
+}
+
+export interface RampProviderEstimateSuccess {
+  provider: RampProviderId;
+  status: "ok";
+  estimate: PaymentRampEstimate;
+}
+
+/** The provider supports this pair, but the rate is only known at quote time. */
+export interface RampProviderEstimateUnsupported {
+  provider: RampProviderId;
+  status: "unsupported";
+}
+
+export interface RampProviderEstimateError {
+  provider: RampProviderId;
+  status: "error";
+  error: string;
+}
+
+export type RampProviderEstimateResult =
+  | RampProviderEstimateSuccess
+  | RampProviderEstimateUnsupported
+  | RampProviderEstimateError;
+
+export interface PaymentRampEstimateEnvelope {
+  data?: {
+    estimates?: RampProviderEstimateResult[];
+  };
+  error?: {
+    message?: string;
+  };
+}
+
 export type PaymentRampQuoteDeliveryMode = "manual_instructions" | "hosted";
+
+export interface PaymentRampQuoteCurrency {
+  code: string;
+  decimals: number;
+  name?: string;
+  symbol?: string;
+}
 
 interface BasePaymentRampExecution {
   id: string;
@@ -398,10 +470,13 @@ export type PaymentRampQuote =
       exchangeRate?: number;
       /** Total sending amount in the fiat currency's smallest unit, including provider fees. */
       totalSendingAmount?: number;
+      sendingCurrency: PaymentRampQuoteCurrency;
       /** Final crypto amount received in its smallest unit. */
       totalReceivingAmount?: number;
+      receivingCurrency: PaymentRampQuoteCurrency;
       /** Fees included in the sending amount, denominated in the fiat currency's smallest unit. */
       feesIncluded?: number;
+      feeCurrency: PaymentRampQuoteCurrency;
       /** ISO timestamp after which the locked rate is no longer valid. */
       expiresAt?: string;
     })

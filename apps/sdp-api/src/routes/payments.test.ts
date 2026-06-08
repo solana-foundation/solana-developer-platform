@@ -1481,13 +1481,13 @@ describe("Payments routes", () => {
     expect(body.data.pairs).toContainEqual({
       source: "USD",
       dest: "usdc.solana",
-      providers: expect.arrayContaining(["moonpay"]),
+      providers: expect.arrayContaining(["lightspark", "bvnk"]),
     });
   });
 
   it("lists generated off-ramp currency provider support", async () => {
     const res = await app.request(
-      "/v1/payments/ramps/offramp/currency?source=usdc.solana&dest=USD&provider=moonpay",
+      "/v1/payments/ramps/offramp/currency?source=usdc.solana&dest=USD&provider=bvnk",
       {
         headers: {
           Authorization: `Bearer ${TEST_API_KEY.raw}`,
@@ -1509,7 +1509,7 @@ describe("Payments routes", () => {
     expect(body.data.pairs).toContainEqual({
       source: "usdc.solana",
       dest: "USD",
-      providers: ["moonpay"],
+      providers: ["bvnk"],
     });
   });
 

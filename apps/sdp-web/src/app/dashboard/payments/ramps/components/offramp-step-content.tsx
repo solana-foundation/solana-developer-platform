@@ -1,6 +1,6 @@
 "use client";
 
-import { WalletIcon } from "lucide-react";
+import { CheckCircle2Icon, Loader2Icon, WalletIcon, XCircleIcon } from "lucide-react";
 import { useMemo } from "react";
 import {
   formatCurrencyAmount,
@@ -9,8 +9,87 @@ import {
 import { Combobox } from "@/components/ui/combobox";
 import { OFFRAMP_PAIRS, RAMP_PROVIDER_OPTIONS } from "@/lib/ramps";
 import type { OfframpWizard } from "../hooks/use-offramp-wizard";
+import { HostedRampFrame } from "./hosted-ramp-frame";
 import { RampPairProviderSelector } from "./ramp-pair-provider-selector";
 import { RampStepPlaceholder } from "./ramp-step-placeholder";
+
+function getOfframpTransferStatusCopy(status: string) {
+  switch (status) {
+    case "pending":
+    case "awaiting_payment":
+      return {
+        title: "Waiting to send",
+        description:
+          "Complete the payout in the widget above. We will update this outgoing transfer automatically once the provider receives your crypto.",
+        state: "loading" as const,
+      };
+    case "processing":
+    case "settling":
+      return {
+        title: "Sending payout",
+        description:
+          "The provider received your crypto and is settling the outgoing payout to the recipient.",
+        state: "loading" as const,
+      };
+    case "completed":
+      return {
+        title: "Payout sent",
+        description:
+          "The outgoing payout has settled. You can review this transfer from the counterparty record.",
+        state: "success" as const,
+      };
+    case "failed":
+      return {
+        title: "Payout failed",
+        description:
+          "The provider reported that this outgoing payout failed. Review the counterparty record for the latest transfer status.",
+        state: "error" as const,
+      };
+    case "expired":
+      return {
+        title: "Quote expired",
+        description:
+          "This quote expired before the payout completed. Create a new quote to continue the withdrawal.",
+        state: "error" as const,
+      };
+    default:
+      return {
+        title: "Transfer status updated",
+        description: `Current provider status: ${status}.`,
+        state: "loading" as const,
+      };
+  }
+}
+
+function OfframpTransferStatusPanel({ transfer }: { transfer: OfframpWizard["transferStatus"] }) {
+  const copy = transfer
+    ? getOfframpTransferStatusCopy(transfer.status)
+    : {
+        title: "Preparing transfer status",
+        description: "We are waiting for the transfer record tied to this quote.",
+        state: "loading" as const,
+      };
+  const icon =
+    copy.state === "success" ? (
+      <CheckCircle2Icon className="size-5 text-status-success-text" />
+    ) : copy.state === "error" ? (
+      <XCircleIcon className="size-5 text-status-error-text" />
+    ) : (
+      <Loader2Icon className="size-5 animate-spin text-text-medium" />
+    );
+  return (
+    <div className="flex items-start gap-3">
+      <span className="mt-0.5 shrink-0">{icon}</span>
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-medium text-text-extra-high">{copy.title}</p>
+        <p className="mt-1 text-sm leading-relaxed text-text-low">
+          {copy.description}
+          {copy.state === "loading" ? " Checking transfer status…" : null}
+        </p>
+      </div>
+    </div>
+  );
+}
 
 export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
   const {
@@ -22,6 +101,7 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
     selectedRampPair,
     fields,
     quote,
+    transferStatus,
     setField,
     handlePairChange,
   } = wizard;
@@ -87,13 +167,11 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
 
   if (currentStepId === "COMPLETE" && quote?.deliveryMode === "hosted") {
     return (
-      <div className="overflow-hidden rounded-2xl">
-        <iframe
-          title={`${quote.provider} off-ramp`}
-          src={quote.hostedUrl}
-          className="h-[480px] w-full border-0"
-          allow="accelerometer; autoplay; camera; encrypted-media; fullscreen; geolocation; gyroscope; payment"
-        />
+      <div className="space-y-6">
+        <HostedRampFrame title={`${quote.provider} off-ramp`} src={quote.hostedUrl} />
+        <div className="border-t border-border-light pt-5">
+          <OfframpTransferStatusPanel transfer={transferStatus} />
+        </div>
       </div>
     );
   }

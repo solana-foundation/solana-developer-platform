@@ -340,6 +340,10 @@ export const transferStatusSchema = z.enum([
   "confirmed",
   "finalized",
   "failed",
+  "awaiting_payment",
+  "settling",
+  "completed",
+  "expired",
 ]);
 
 export const listTransfersQuerySchema = z.object({
@@ -348,6 +352,10 @@ export const listTransfersQuerySchema = z.object({
   token: z.string().optional(),
   direction: transferDirectionSchema.optional(),
   status: transferStatusSchema.optional(),
+  category: z.enum(["wallet", "ramp"]).optional(),
+  counterpartyId: z.string().min(1).optional(),
+  provider: rampProviderSchema.optional(),
+  providerReference: z.string().min(1).optional(),
   from: z.string().datetime({ offset: true }).optional(),
   to: z.string().datetime({ offset: true }).optional(),
   page: z.coerce.number().int().positive().default(1),
@@ -376,6 +384,18 @@ export const executeOnrampSchema = z.object({
   kycReference: z.string().max(128).optional(),
   redirectUrl: z.string().url().optional(),
   bvnkCompliance: bvnkComplianceSchema.optional(),
+});
+
+export const estimateOnrampSchema = z.object({
+  assetRail: onrampCryptoRailSchema,
+  fiatCurrency: rampFiatCurrencySchema,
+  fiatAmount: paymentAmountSchema,
+});
+
+export const estimateOfframpSchema = z.object({
+  assetRail: offrampCryptoRailSchema,
+  fiatCurrency: rampFiatCurrencySchema,
+  cryptoAmount: paymentAmountSchema,
 });
 
 export const createOnrampQuoteSchema = z.object({

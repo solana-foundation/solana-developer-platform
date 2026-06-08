@@ -1,5 +1,8 @@
 "use client";
 
+import type { PaymentRampEstimateFees, RampProviderEstimateResult } from "@sdp/types";
+import { getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
+import { Loader2Icon } from "lucide-react";
 import { motion } from "motion/react";
 import Image from "next/image";
 import { RAMP_PROVIDER_LOGOS, type RampProviderOption } from "@/lib/ramps";
@@ -8,10 +11,107 @@ import { cn } from "@/lib/utils";
 interface ProviderCardProps {
   option: RampProviderOption;
   active: boolean;
+  estimate?: RampProviderEstimateResult;
+  estimateLoading?: boolean;
   onSelect: () => void;
 }
 
-export function ProviderCard({ option, active, onSelect }: ProviderCardProps) {
+function formatEstimateDecimal(value: string): string {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return value;
+  }
+
+  return new Intl.NumberFormat("en-US", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 6,
+  }).format(parsed);
+}
+
+function buildFeeLabel(fees: PaymentRampEstimateFees): string | null {
+  const networkFee = fees.network;
+  const providerFee = fees.provider;
+  const network = networkFee !== undefined ? Number(networkFee) : undefined;
+  const provider = providerFee !== undefined ? Number(providerFee) : undefined;
+  const providerCurrency = fees.providerCurrency;
+  const networkCurrency = fees.networkCurrency;
+
+  if (
+    providerFee !== undefined &&
+    provider !== undefined &&
+    provider > 0 &&
+    networkFee !== undefined &&
+    network !== undefined &&
+    network > 0 &&
+    providerCurrency &&
+    networkCurrency &&
+    providerCurrency !== networkCurrency
+  ) {
+    return `Fees ${formatEstimateDecimal(providerFee)} ${providerCurrency} + ${formatEstimateDecimal(networkFee)} ${networkCurrency}`;
+  }
+
+  const total = Number(fees.total);
+  if (total <= 0) {
+    return null;
+  }
+
+  return `Fee ${formatEstimateDecimal(fees.total)} ${fees.currency}`;
+}
+
+function ProviderCardEstimate({
+  estimate,
+  estimateLoading,
+}: {
+  estimate?: RampProviderEstimateResult;
+  estimateLoading?: boolean;
+}) {
+  if (estimateLoading) {
+    return <Loader2Icon className="size-4 shrink-0 animate-spin text-text-low" />;
+  }
+
+  if (estimate?.status === "ok") {
+    const { direction, fiatCurrency, assetRail, fiatAmount, cryptoAmount, fees } =
+      estimate.estimate;
+    const isFiatOut = direction === "offramp";
+    const amount = formatEstimateDecimal(isFiatOut ? fiatAmount : cryptoAmount);
+    const unit = isFiatOut ? fiatCurrency : getCryptoRailAssetLabel(assetRail);
+    const feeLabel = buildFeeLabel(fees);
+
+    return (
+      <div className="shrink-0 text-right leading-none">
+        <p className="mb-1 text-[10px] font-medium uppercase tracking-[0.1em] text-text-low">
+          Est. received
+        </p>
+        <div className="flex items-center justify-end gap-2 whitespace-nowrap">
+          <span className="text-sm leading-none font-semibold text-text-extra-high">{`≈ ${amount} ${unit}`}</span>
+          {feeLabel ? (
+            <span className="rounded-full bg-border-extra-light px-2 py-0.5 text-xs leading-none font-medium text-text-low">
+              {feeLabel}
+            </span>
+          ) : null}
+        </div>
+      </div>
+    );
+  }
+
+  if (estimate?.status === "unsupported") {
+    return <p className="shrink-0 text-sm text-text-low">Rate known at quote</p>;
+  }
+
+  if (estimate?.status === "error") {
+    return <p className="shrink-0 text-sm text-text-low">Unavailable</p>;
+  }
+
+  return null;
+}
+
+export function ProviderCard({
+  option,
+  active,
+  estimate,
+  estimateLoading,
+  onSelect,
+}: ProviderCardProps) {
   return (
     <motion.button
       type="button"
@@ -48,6 +148,8 @@ export function ProviderCard({ option, active, onSelect }: ProviderCardProps) {
       >
         {option.title}
       </p>
+
+      <ProviderCardEstimate estimate={estimate} estimateLoading={estimateLoading} />
     </motion.button>
   );
 }

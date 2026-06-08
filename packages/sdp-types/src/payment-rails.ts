@@ -23,11 +23,11 @@ export const CRYPTO_RAIL_ASSET_LABELS = {
   "pyusd.solana": "PYUSD",
 } as const satisfies Record<CryptoRailId, string>;
 
-export function getCryptoRailAssetLabel(assetRail: CryptoRailId): string {
+export type CryptoAssetSymbol = (typeof CRYPTO_RAIL_ASSET_LABELS)[CryptoRailId];
+
+export function getCryptoRailAssetLabel(assetRail: CryptoRailId): CryptoAssetSymbol {
   return CRYPTO_RAIL_ASSET_LABELS[assetRail];
 }
-
-export type CryptoAssetSymbol = (typeof CRYPTO_RAIL_ASSET_LABELS)[CryptoRailId];
 
 /** On-chain decimals per crypto asset symbol; fiat falls back to 2 minor units. */
 export const CRYPTO_ASSET_DECIMALS = {

@@ -337,7 +337,7 @@ export const prepareTransferRequestSchema = prepareTransferSchemaBase
   });
 
 export const transferTypeSchema = z
-  .enum(["transfer", "transfer_confidential"])
+  .enum(["transfer", "transfer_confidential", "onramp", "offramp"])
   .openapi({ description: "Transfer type.", example: "transfer" });
 
 export const transferDirectionSchema = withOpenApi(transferDirectionSchemaBase, {
@@ -428,6 +428,31 @@ export const transferSchema = z
       .openapi({ description: "Optional memo for the transfer." }),
     token: z.string().optional().openapi({ description: "Token symbol or mint address." }),
     amount: tokenAmountSchema.optional(),
+    provider: z.enum(RAMP_PROVIDERS).optional().openapi({
+      description: "Ramp provider for on-ramp and off-ramp transfer records.",
+      example: "moonpay",
+    }),
+    counterpartyId: z.string().optional().openapi({
+      description: "Counterparty tied to a ramp transfer record.",
+      example: "counterparty_example",
+    }),
+    providerReference: z.string().optional().openapi({
+      description: "Provider quote or transaction reference used for ramp correlation.",
+      example: "ramp_quote_example",
+    }),
+    deliveryMode: z.enum(["hosted", "manual_instructions"]).optional().openapi({
+      description:
+        "Ramp delivery mode. Hosted flows require the customer to complete a provider-hosted UI; manual instructions require the customer to fund displayed instructions.",
+      example: "hosted",
+    }),
+    fiatCurrency: z.string().optional().openapi({
+      description: "Fiat currency for the ramp leg.",
+      example: "USD",
+    }),
+    fiatAmount: tokenAmountSchema.optional().openapi({
+      description: "Fiat amount for the ramp leg when known.",
+      example: "100.00",
+    }),
     risk: transferRiskSchema
       .optional()
       .openapi({ description: "Optional risk evaluation for the transfer." }),
@@ -1110,6 +1135,24 @@ export const paymentListTransfersQuerySchema = listTransfersQuerySchemaBase
       description: "Filter by transfer status.",
       example: "confirmed",
     }),
+    category: withOpenApi(listTransfersQuerySchemaBase.shape.category, {
+      description: "Filter by wallet transfers or ramp transfers.",
+      example: "ramp",
+    }),
+    counterpartyId: withOpenApi(listTransfersQuerySchemaBase.shape.counterpartyId, {
+      description: "Filter transfers tied to a specific counterparty.",
+      example: "counterparty_example",
+    }),
+    provider: withOpenApi(listTransfersQuerySchemaBase.shape.provider, {
+      description:
+        "Filter ramp transfers by provider. Use with providerReference to look up a quote-backed transfer exactly.",
+      example: "lightspark",
+    }),
+    providerReference: withOpenApi(listTransfersQuerySchemaBase.shape.providerReference, {
+      description:
+        "Provider quote or transaction reference. Must be supplied with provider for exact ramp transfer lookup.",
+      example: "Quote:019e979c-f660-5246-0000-c0588496b9ce",
+    }),
     from: withOpenApi(listTransfersQuerySchemaBase.shape.from, {
       description: "Filter from timestamp.",
       example: "2025-01-01T00:00:00.000Z",
@@ -1247,6 +1290,17 @@ const rampPaymentInstructionSchema = z.discriminatedUnion("provider", [
   bvnkRampPaymentInstructionSchema,
 ]);
 
+const rampQuoteCurrencySchema = z.object({
+  code: z.string().openapi({ description: "Provider currency code.", example: "USDC" }),
+  decimals: z
+    .number()
+    .int()
+    .min(0)
+    .openapi({ description: "Provider decimal places for minor-unit amounts.", example: 2 }),
+  name: z.string().optional().openapi({ description: "Provider currency display name." }),
+  symbol: z.string().optional().openapi({ description: "Provider currency symbol." }),
+});
+
 const onrampQuoteSchema = z
   .object({
     id: z.string().openapi({ description: "Quote identifier.", example: "ramp_quote_example" }),
@@ -1277,14 +1331,23 @@ const onrampQuoteSchema = z
     totalSendingAmount: z.number().optional().openapi({
       description: "Total sending amount in fiat smallest units, including provider fees.",
     }),
+    sendingCurrency: rampQuoteCurrencySchema.optional().openapi({
+      description: "Currency metadata for `totalSendingAmount`.",
+    }),
     totalReceivingAmount: z
       .number()
       .optional()
       .openapi({ description: "Final crypto amount received in smallest units." }),
+    receivingCurrency: rampQuoteCurrencySchema.optional().openapi({
+      description: "Currency metadata for `totalReceivingAmount`.",
+    }),
     feesIncluded: z
       .number()
       .optional()
       .openapi({ description: "Fees included in the sending amount, in fiat smallest units." }),
+    feeCurrency: rampQuoteCurrencySchema.optional().openapi({
+      description: "Currency metadata for `feesIncluded`.",
+    }),
     expiresAt: isoDateTimeSchema
       .optional()
       .openapi({ description: "Timestamp when the quote expires." }),

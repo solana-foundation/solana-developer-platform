@@ -29,7 +29,11 @@ export default async function CounterpartyDetailRoute({
         fetchCounterpartyDetail(apiClient.request, counterpartyId)
       );
 
-      trace.log({ ok: detail.counterparty !== null, accounts: detail.accounts.length });
+      trace.log({
+        ok: detail.counterparty !== null,
+        accounts: detail.accounts.length,
+        transfers: detail.transfers.length,
+      });
 
       if (!detail.counterparty) {
         notFound();
@@ -40,6 +44,7 @@ export default async function CounterpartyDetailRoute({
           <CounterpartyDetailWorkspace
             counterparty={detail.counterparty}
             initialAccounts={detail.accounts}
+            initialTransfers={detail.transfers}
           />
         </div>
       );

@@ -1,12 +1,19 @@
 import { createVerify } from "node:crypto";
 import type {
   LightsparkPaymentRampInstruction,
+  PaymentRampEstimate,
   PaymentRampExecution,
   PaymentRampQuote,
+  PaymentRampQuoteCurrency,
   SdpEnvironment,
 } from "@sdp/types";
-import { parseFiatCurrency } from "@sdp/types/payment-rails";
-import { parseDecimalAmount } from "@/lib/amount";
+import {
+  CRYPTO_ASSET_DECIMALS,
+  type CryptoAssetSymbol,
+  getCryptoRailAssetLabel,
+  parseFiatCurrency,
+} from "@sdp/types/payment-rails";
+import { formatDecimalAmount, parseDecimalAmount } from "@/lib/amount";
 import { AppError, providerNotConfigured } from "@/lib/errors";
 import { isAddress } from "@/lib/solana";
 import { type ProviderRequestInit, providerFetchJson } from "../fetch";
@@ -22,17 +29,21 @@ import {
 import type {
   ProviderRampSupport,
   RampDumpReader,
+  RampEstimateOfframpInput,
+  RampEstimateOnrampInput,
   RampExecuteOfframpInput,
   RampExecuteOnrampInput,
   RampOfframpQuoteInput,
   RampOnrampQuoteInput,
   RampProvider,
   RampRuntimeContext,
+  RampSettlementEvent,
   RampWebhookValidationContext,
   RampWebhookValidationResult,
 } from "../types";
 
 const LIGHTSPARK_DEFAULT_GRID_API_URL = "https://api.lightspark.com/grid/2025-10-13";
+const GRID_EXCHANGE_RATE_DEFAULT_REQUEST_SENDING_AMOUNT = 10_000n;
 
 function readLightsparkConfig(
   env: Record<string, string | undefined>,
@@ -66,14 +77,17 @@ function normalizeLightsparkCurrencyCode(value: string): string {
   return normalized;
 }
 
+function isCryptoAssetSymbol(value: string): value is CryptoAssetSymbol {
+  return value in CRYPTO_ASSET_DECIMALS;
+}
+
 function getLightsparkCurrencyDecimals(currencyCode: string): number {
   const normalized = currencyCode.trim().toUpperCase();
   if (normalized === "BTC") return 8;
-  if (normalized === "SOL") return 9;
-  if (normalized === "USDC") return 6;
+  if (isCryptoAssetSymbol(normalized)) return CRYPTO_ASSET_DECIMALS[normalized];
   throw new AppError(
     "BAD_REQUEST",
-    `Unsupported lightspark cryptoToken: ${currencyCode}. Supported values: BTC, SOL, USDC`
+    `Unsupported lightspark cryptoToken: ${currencyCode}. Supported values: BTC, ${Object.keys(CRYPTO_ASSET_DECIMALS).join(", ")}`
   );
 }
 
@@ -105,6 +119,102 @@ function mapLightsparkQuoteStatus(status: string | undefined): PaymentRampExecut
   if (normalized === "PROCESSING") return "processing";
   if (normalized === "FAILED" || normalized === "EXPIRED") return "failed";
   return "pending";
+}
+
+const LIGHTSPARK_OUTGOING_PAYMENT_WEBHOOK_TYPES = {
+  "OUTGOING_PAYMENT.PENDING": "awaiting_payment",
+  "OUTGOING_PAYMENT.PROCESSING": "settling",
+  "OUTGOING_PAYMENT.COMPLETED": "settled",
+  "OUTGOING_PAYMENT.FAILED": "failed",
+  "OUTGOING_PAYMENT.EXPIRED": "expired",
+  "OUTGOING_PAYMENT.REFUND_FAILED": "failed",
+} as const satisfies Record<string, RampSettlementEvent["kind"]>;
+
+type LightsparkOutgoingPaymentWebhookType = keyof typeof LIGHTSPARK_OUTGOING_PAYMENT_WEBHOOK_TYPES;
+
+interface LightsparkOutgoingPaymentData {
+  id: string;
+  status: string;
+  quoteId: string;
+  failureReason?: string;
+}
+
+interface LightsparkOutgoingPaymentWebhook {
+  type: LightsparkOutgoingPaymentWebhookType;
+  data: LightsparkOutgoingPaymentData;
+}
+
+function isGridRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object";
+}
+
+function readRequiredGridString(
+  record: Record<string, unknown>,
+  field: string,
+  payloadName: string
+): string {
+  const value = record[field];
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new AppError("BAD_REQUEST", `${payloadName} is missing ${field}`);
+  }
+  return value.trim();
+}
+
+function readOptionalGridString(
+  record: Record<string, unknown>,
+  field: string
+): string | undefined {
+  const value = record[field];
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  if (trimmed.length === 0) {
+    return undefined;
+  }
+  return trimmed;
+}
+
+function readRequiredGridObject(
+  record: Record<string, unknown>,
+  field: string,
+  payloadName: string
+): Record<string, unknown> {
+  const value = record[field];
+  if (!isGridRecord(value)) {
+    throw new AppError("BAD_REQUEST", `${payloadName} is missing ${field}`);
+  }
+  return value;
+}
+
+function isLightsparkOutgoingPaymentWebhookType(
+  value: string
+): value is LightsparkOutgoingPaymentWebhookType {
+  return Object.hasOwn(LIGHTSPARK_OUTGOING_PAYMENT_WEBHOOK_TYPES, value);
+}
+
+function parseLightsparkOutgoingPaymentWebhook(
+  payload: unknown
+): LightsparkOutgoingPaymentWebhook | null {
+  if (!isGridRecord(payload)) {
+    throw new AppError("BAD_REQUEST", "Lightspark webhook body must be an object");
+  }
+
+  const type = readRequiredGridString(payload, "type", "Lightspark webhook");
+  if (!isLightsparkOutgoingPaymentWebhookType(type)) {
+    return null;
+  }
+
+  const data = readRequiredGridObject(payload, "data", "Lightspark webhook");
+  return {
+    type,
+    data: {
+      id: readRequiredGridString(data, "id", "Lightspark outgoing payment webhook data"),
+      status: readRequiredGridString(data, "status", "Lightspark outgoing payment webhook data"),
+      quoteId: readRequiredGridString(data, "quoteId", "Lightspark outgoing payment webhook data"),
+      failureReason: readOptionalGridString(data, "failureReason"),
+    },
+  };
 }
 
 interface LightsparkExternalAccount {
@@ -193,13 +303,22 @@ interface GridPaymentInstruction {
   isPlatformAccount?: boolean;
 }
 
+interface GridCurrency {
+  code: string;
+  decimals: number;
+  name?: string;
+  symbol?: string;
+}
+
 interface GridQuoteResponse {
   id: string;
   quoteStatus?: string;
   paymentInstructions?: GridPaymentInstruction[];
   exchangeRate: number;
   totalSendingAmount: number;
+  sendingCurrency: GridCurrency;
   totalReceivingAmount: number;
+  receivingCurrency: GridCurrency;
   feesIncluded: number;
   expiresAt: string;
 }
@@ -210,6 +329,81 @@ interface GridOfframpQuoteBody {
   lockedCurrencySide: "SENDING" | "RECEIVING";
   lockedCurrencyAmount: number;
   description: string;
+}
+
+interface GridExchangeRate {
+  sourceCurrency: GridCurrency;
+  destinationCurrency: GridCurrency;
+  sendingAmount: number;
+  receivingAmount: number;
+  exchangeRate: number;
+  fees: { fixed: number };
+  minSendingAmount: number;
+  maxSendingAmount: number;
+}
+
+interface GridExchangeRatesResponse {
+  data: GridExchangeRate[];
+}
+
+function gridExchangeRatesPath(params: {
+  sourceCurrency: string;
+  destinationCurrency: string;
+  sendingAmount?: number;
+}): string {
+  const query = new URLSearchParams();
+  query.set("sourceCurrency", params.sourceCurrency);
+  query.set("destinationCurrency", params.destinationCurrency);
+  if (params.sendingAmount !== undefined) {
+    query.set("sendingAmount", String(params.sendingAmount));
+  }
+  return `exchange-rates?${query}`;
+}
+
+function parseGridExchangeRate(response: GridExchangeRatesResponse): GridExchangeRate {
+  const entry = response.data[0];
+  if (!entry) {
+    throw new AppError(
+      "PROVIDER_UNAVAILABLE",
+      "Lightspark returned no exchange rate for this pair"
+    );
+  }
+  return entry;
+}
+
+function deriveGridExchangeRateRequestDecimals(rate: GridExchangeRate): number {
+  const defaultSourceAmount = BigInt(rate.sendingAmount);
+  if (defaultSourceAmount <= 0n) {
+    throw new AppError("PROVIDER_UNAVAILABLE", "Lightspark returned an invalid default amount");
+  }
+  if (defaultSourceAmount % GRID_EXCHANGE_RATE_DEFAULT_REQUEST_SENDING_AMOUNT !== 0n) {
+    throw new AppError(
+      "PROVIDER_UNAVAILABLE",
+      "Lightspark returned an unsupported exchange-rate amount scale"
+    );
+  }
+
+  let scale = defaultSourceAmount / GRID_EXCHANGE_RATE_DEFAULT_REQUEST_SENDING_AMOUNT;
+  let sourceDecimalsPerRequestDecimal = 0;
+  while (scale > 1n && scale % 10n === 0n) {
+    scale /= 10n;
+    sourceDecimalsPerRequestDecimal += 1;
+  }
+  if (scale !== 1n) {
+    throw new AppError(
+      "PROVIDER_UNAVAILABLE",
+      "Lightspark returned an unsupported exchange-rate amount scale"
+    );
+  }
+
+  const requestDecimals = rate.sourceCurrency.decimals - sourceDecimalsPerRequestDecimal;
+  if (requestDecimals < 0) {
+    throw new AppError(
+      "PROVIDER_UNAVAILABLE",
+      "Lightspark returned an invalid exchange-rate amount scale"
+    );
+  }
+  return requestDecimals;
 }
 
 export interface CreateLightsparkOnrampQuoteInput {
@@ -232,8 +426,11 @@ export interface LightsparkQuote {
   paymentInstructions?: LightsparkPaymentRampInstruction[];
   exchangeRate?: number;
   totalSendingAmount?: number;
+  sendingCurrency: PaymentRampQuoteCurrency;
   totalReceivingAmount?: number;
+  receivingCurrency: PaymentRampQuoteCurrency;
   feesIncluded?: number;
+  feeCurrency: PaymentRampQuoteCurrency;
   expiresAt?: string;
 }
 
@@ -361,6 +558,24 @@ export class LightsparkRampClient implements RampProvider {
     }
 
     return { provider: this.id, payload };
+  }
+
+  parseSettlementEvent(payload: unknown): RampSettlementEvent {
+    const webhook = parseLightsparkOutgoingPaymentWebhook(payload);
+    if (!webhook) {
+      return { provider: this.id, kind: "ignore", reason: "unsupported_event" };
+    }
+
+    const reference = webhook.data.quoteId;
+    if (!reference) {
+      return { provider: this.id, kind: "ignore", reason: "missing_quote_id" };
+    }
+
+    const kind = LIGHTSPARK_OUTGOING_PAYMENT_WEBHOOK_TYPES[webhook.type];
+    if (kind === "failed" || kind === "expired") {
+      return { provider: this.id, kind, reference, error: webhook.data.failureReason };
+    }
+    return { provider: this.id, kind, reference };
   }
 
   private async request<TResponse, TBody = never>(
@@ -553,6 +768,69 @@ export class LightsparkRampClient implements RampProvider {
     return created.id;
   }
 
+  async estimateOnramp(
+    _ctx: RampRuntimeContext,
+    _input: RampEstimateOnrampInput
+  ): Promise<PaymentRampEstimate> {
+    throw new AppError(
+      "ESTIMATE_NOT_AVAILABLE",
+      "Lightspark on-ramp rate is only known at quote time.",
+      { provider: this.id }
+    );
+  }
+
+  async estimateOfframp(
+    { env, mode }: RampRuntimeContext,
+    input: RampEstimateOfframpInput
+  ): Promise<PaymentRampEstimate> {
+    const config = readLightsparkConfig(env, mode);
+    const cryptoCurrency = normalizeLightsparkCurrencyCode(
+      getCryptoRailAssetLabel(input.assetRail)
+    );
+    const corridor = parseGridExchangeRate(
+      await this.request<GridExchangeRatesResponse>(
+        config,
+        gridExchangeRatesPath({
+          sourceCurrency: cryptoCurrency,
+          destinationCurrency: input.fiatCurrency,
+        }),
+        { method: "GET" }
+      )
+    );
+    const requestDecimals = deriveGridExchangeRateRequestDecimals(corridor);
+    const sendingAmount = toLightsparkMinorUnitsInteger(
+      parseDecimalAmount(input.cryptoAmount, requestDecimals),
+      "cryptoAmount"
+    );
+    const rate = parseGridExchangeRate(
+      await this.request<GridExchangeRatesResponse>(
+        config,
+        gridExchangeRatesPath({
+          sourceCurrency: cryptoCurrency,
+          destinationCurrency: input.fiatCurrency,
+          sendingAmount,
+        }),
+        { method: "GET" }
+      )
+    );
+
+    const netFiatMinorUnits = rate.receivingAmount > 0 ? BigInt(rate.receivingAmount) : 0n;
+    const fiatAmount = formatDecimalAmount(netFiatMinorUnits, rate.destinationCurrency.decimals);
+    return {
+      provider: this.id,
+      direction: "offramp",
+      fiatCurrency: input.fiatCurrency,
+      assetRail: input.assetRail,
+      fiatAmount,
+      cryptoAmount: input.cryptoAmount,
+      exchangeRate: String(Number(fiatAmount) / Number(input.cryptoAmount)),
+      fees: {
+        currency: getCryptoRailAssetLabel(input.assetRail),
+        total: formatDecimalAmount(BigInt(rate.fees.fixed), rate.sourceCurrency.decimals),
+      },
+    };
+  }
+
   async createOnrampQuote(
     { env, mode }: RampRuntimeContext,
     input: RampOnrampQuoteInput
@@ -590,8 +868,11 @@ export class LightsparkRampClient implements RampProvider {
       paymentInstructions: quote.paymentInstructions,
       exchangeRate: quote.exchangeRate,
       totalSendingAmount: quote.totalSendingAmount,
+      sendingCurrency: quote.sendingCurrency,
       totalReceivingAmount: quote.totalReceivingAmount,
+      receivingCurrency: quote.receivingCurrency,
       feesIncluded: quote.feesIncluded,
+      feeCurrency: quote.feeCurrency,
       expiresAt: quote.expiresAt,
     };
   }
@@ -719,8 +1000,11 @@ function parseLightsparkQuote(raw: GridQuoteResponse): LightsparkQuote {
     })),
     exchangeRate: raw.exchangeRate,
     totalSendingAmount: raw.totalSendingAmount,
+    sendingCurrency: raw.sendingCurrency,
     totalReceivingAmount: raw.totalReceivingAmount,
+    receivingCurrency: raw.receivingCurrency,
     feesIncluded: raw.feesIncluded,
+    feeCurrency: raw.sendingCurrency,
     expiresAt: raw.expiresAt,
   };
 }

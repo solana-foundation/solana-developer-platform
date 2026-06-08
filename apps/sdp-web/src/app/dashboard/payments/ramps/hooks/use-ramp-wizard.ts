@@ -30,6 +30,10 @@ import { type RampFields, rampSelectionSchema } from "../schema";
 const PAYMENTS_ACTION_WALLETS_KEY = "payments-action-wallets";
 const PAYMENTS_ACTION_COUNTERPARTIES_KEY = "payments-action-counterparties";
 
+export function isTerminalRampTransferStatus(status: string) {
+  return status === "completed" || status === "failed" || status === "expired";
+}
+
 export type RampWizardStep<TId extends string = string> = {
   id: TId;
   label: string;
