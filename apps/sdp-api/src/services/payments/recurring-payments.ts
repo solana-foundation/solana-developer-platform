@@ -168,6 +168,84 @@ async function confirmPersistedSubscriptionSignature(input: {
   }
 }
 
+async function fetchPreservedPlanOrClearSignature(input: {
+  rpc: ReturnType<typeof solanaRpc.createRpc>;
+  recurringRepo: ReturnType<typeof createPaymentRecurringPaymentsRepository>;
+  recurringPaymentId: string;
+  organizationId: string;
+  projectId: string;
+  planPda: Address;
+  planCreationSignature: string | null;
+}): Promise<Awaited<ReturnType<typeof subscriptionsProgram.fetchMaybePlan>> | null> {
+  if (!input.planCreationSignature) {
+    return null;
+  }
+
+  const onChainPlan = await subscriptionsProgram.fetchMaybePlan(input.rpc, input.planPda, {
+    commitment: "confirmed",
+  });
+  if (onChainPlan.exists) {
+    return onChainPlan;
+  }
+
+  await clearRecurringPaymentFailedSignature({
+    recurringRepo: input.recurringRepo,
+    recurringPaymentId: input.recurringPaymentId,
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    field: "planCreationSignature",
+  });
+  return null;
+}
+
+async function fetchPreservedSubscriptionOrClearSignature(input: {
+  rpc: ReturnType<typeof solanaRpc.createRpc>;
+  recurringRepo: ReturnType<typeof createPaymentRecurringPaymentsRepository>;
+  recurringPaymentId: string;
+  organizationId: string;
+  projectId: string;
+  subscriptionPda: Address;
+  authorizationSignature: string | null;
+}): Promise<Awaited<
+  ReturnType<typeof subscriptionsProgram.fetchMaybeSubscriptionDelegation>
+> | null> {
+  if (!input.authorizationSignature) {
+    return null;
+  }
+
+  const onChainSubscription = await subscriptionsProgram.fetchMaybeSubscriptionDelegation(
+    input.rpc,
+    input.subscriptionPda,
+    { commitment: "confirmed" }
+  );
+  if (onChainSubscription.exists) {
+    return onChainSubscription;
+  }
+
+  await clearRecurringPaymentFailedSignature({
+    recurringRepo: input.recurringRepo,
+    recurringPaymentId: input.recurringPaymentId,
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    field: "authorizationSignature",
+  });
+  return null;
+}
+
+async function clearActivationSignatureIfPresent(input: {
+  recurringRepo: ReturnType<typeof createPaymentRecurringPaymentsRepository>;
+  recurringPaymentId: string;
+  organizationId: string;
+  projectId: string;
+  signature: string | null;
+  field: "planCreationSignature" | "authorizationSignature";
+}): Promise<void> {
+  if (!input.signature) {
+    return;
+  }
+  await clearRecurringPaymentFailedSignature(input);
+}
+
 export async function createRecurringPayment(input: {
   env: Env;
   organizationId: string;
@@ -415,6 +493,17 @@ export async function activateRecurringPayment(input: {
     });
 
     let planCreationSignature = claimed.plan_creation_signature;
+    let onChainPlan = await fetchPreservedPlanOrClearSignature({
+      rpc,
+      recurringRepo,
+      recurringPaymentId: claimed.id,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      planPda,
+      planCreationSignature,
+    });
+    planCreationSignature = onChainPlan ? planCreationSignature : null;
+
     if (!planCreationSignature) {
       const createPlanInstruction = await subscriptionsProgram.getCreatePlanOverlayInstructionAsync(
         {
@@ -465,9 +554,20 @@ export async function activateRecurringPayment(input: {
       });
     }
 
-    const onChainPlan = await subscriptionsProgram.fetchPlan(rpc, planPda, {
+    onChainPlan ??= await subscriptionsProgram.fetchMaybePlan(rpc, planPda, {
       commitment: "confirmed",
     });
+    if (!onChainPlan.exists) {
+      await clearActivationSignatureIfPresent({
+        recurringRepo,
+        recurringPaymentId: claimed.id,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        signature: planCreationSignature,
+        field: "planCreationSignature",
+      });
+      throw new AppError("TRANSACTION_FAILED", "Subscription plan was not found on-chain");
+    }
     const planCreatedAt = onChainPlan.data.data.terms.createdAt.toString();
 
     await subscriptionsRepo.updatePlan({
@@ -558,6 +658,19 @@ export async function activateRecurringPayment(input: {
     });
 
     let authorizationSignature = claimed.authorization_signature;
+    let onChainSubscription: Awaited<
+      ReturnType<typeof subscriptionsProgram.fetchMaybeSubscriptionDelegation>
+    > | null = await fetchPreservedSubscriptionOrClearSignature({
+      rpc,
+      recurringRepo,
+      recurringPaymentId: claimed.id,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      subscriptionPda,
+      authorizationSignature,
+    });
+    authorizationSignature = onChainSubscription ? authorizationSignature : null;
+
     if (!authorizationSignature) {
       const subscriptionAuthority = await subscriptionsProgram.fetchMaybeSubscriptionAuthority(
         rpc,
@@ -624,12 +737,20 @@ export async function activateRecurringPayment(input: {
       });
     }
 
-    const onChainSubscription = await subscriptionsProgram.fetchMaybeSubscriptionDelegation(
+    onChainSubscription ??= await subscriptionsProgram.fetchMaybeSubscriptionDelegation(
       rpc,
       subscriptionPda,
       { commitment: "confirmed" }
     );
     if (!onChainSubscription.exists) {
+      await clearActivationSignatureIfPresent({
+        recurringRepo,
+        recurringPaymentId: claimed.id,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        signature: authorizationSignature,
+        field: "authorizationSignature",
+      });
       throw new AppError("TRANSACTION_FAILED", "Subscription authorization was not found on-chain");
     }
 
