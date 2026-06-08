@@ -1461,14 +1461,23 @@ export function buildBvnkIndividualPayload(counterparty: CounterpartyRow): Recor
 
 export function buildBvnkOnrampInstruction(
   resolution: BvnkOnrampResolution,
-  params: { network: string; destinationWalletAddress: string; fiatCurrency: string }
+  params: {
+    network: string;
+    destinationWalletAddress: string;
+    fiatCurrency: string;
+    mode: SdpEnvironment;
+  }
 ): BvnkPaymentRampInstruction {
   const { customer, entry, onboardingStatus } = resolution;
+  const verificationNote =
+    params.mode === "sandbox"
+      ? "Complete identity verification to activate your funding account. BVNK requires you to verify the counterparty through Sumsub. No information entered via the sandbox will be verified."
+      : "Complete identity verification to activate your funding account. BVNK requires you to verify the counterparty through Sumsub.";
   const notes =
     onboardingStatus === "ready"
       ? `Fund your ${params.fiatCurrency} BVNK virtual account to receive crypto on ${params.network}.`
       : onboardingStatus === "verification_required"
-        ? "Complete identity verification to activate your funding account. BVNK requires you to verify the counterparty through Sumsub. No information entered via the sandbox will be verified."
+        ? verificationNote
         : onboardingStatus === "provisioning"
           ? "Setting up your funding account; bank details will appear in a moment."
           : "Identity verification is in review; funding details will appear once approved.";
