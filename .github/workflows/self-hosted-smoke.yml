@@ -51,7 +51,18 @@ jobs:
           SDP_INSTALL_DIR: ${{ env.INSTALL_DIR }}
         run: |
           set -euo pipefail
-          curl -fsSL "https://github.com/${{ github.repository }}/releases/download/${{ steps.release.outputs.tag }}/install.sh" | bash
+          base="https://github.com/${{ github.repository }}/releases/download/${{ steps.release.outputs.tag }}"
+          tmp="$(mktemp -d)"
+          for asset in SHA256SUMS SHA256SUMS.cosign.bundle install.sh; do
+            curl -fsSL "$base/$asset" -o "$tmp/$asset"
+          done
+          cosign verify-blob \
+            --bundle "$tmp/SHA256SUMS.cosign.bundle" \
+            --certificate-identity-regexp '^https://github\.com/${{ github.repository }}/\.github/workflows/release-checksums\.yml@refs/tags/v[0-9][^/]*$' \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            "$tmp/SHA256SUMS"
+          ( cd "$tmp" && sha256sum --ignore-missing -c SHA256SUMS )
+          bash "$tmp/install.sh"
 
       - name: Generate .env
         env:
@@ -146,6 +157,7 @@ jobs:
             | awk '{print $NF}')"
 
           echo "::add-mask::$api_key"
+          echo "::add-mask::$key_hash"
           echo "SMOKE_API_KEY=$api_key" >>"$GITHUB_ENV"
 
           # NULL permissions grants the wildcard scope, covering custody:admin below.
