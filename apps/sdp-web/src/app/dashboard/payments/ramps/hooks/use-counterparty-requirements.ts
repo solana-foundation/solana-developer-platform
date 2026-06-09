@@ -47,8 +47,10 @@ export interface CounterpartyRequirementsState {
   needsCollection: boolean;
   /** Every required field has a non-empty value. */
   isComplete: boolean;
-  /** A requirements lookup is in flight (provider chosen, answer not yet known). */
-  isLoading: boolean;
+  /** The requirements answer has loaded — the dynamic-step decision for this provider is known. */
+  isResolved: boolean;
+  /** Surfaced message when the requirements lookup failed, so callers don't swallow it. */
+  error: string | null;
 }
 
 /**
@@ -65,6 +67,16 @@ export function useCounterpartyRequirements(
     setCollectedData((prev) => ({ ...prev, [key]: value }));
   };
 
+  // Reset collected answers when the counterparty/provider changes by comparing the
+  // previous value during render (React's no-effect way to reset state on a change),
+  // so stale KYC never leaks into a different provider's payload.
+  const subjectKey = params === null ? "" : `${params.counterpartyId}:${params.provider}`;
+  const [trackedSubject, setTrackedSubject] = useState(subjectKey);
+  if (subjectKey !== trackedSubject) {
+    setTrackedSubject(subjectKey);
+    setCollectedData({});
+  }
+
   const key =
     params?.provider && params.counterpartyId
       ? ([
@@ -74,7 +86,7 @@ export function useCounterpartyRequirements(
           params.direction,
         ] as const)
       : null;
-  const { data, isLoading } = useSWR(
+  const { data, error } = useSWR(
     key,
     ([, counterpartyId, provider, direction]) =>
       fetchCounterpartyRequirements(counterpartyId, provider, direction),
@@ -104,6 +116,7 @@ export function useCounterpartyRequirements(
     setField,
     needsCollection: data?.status === "collect",
     isComplete,
-    isLoading,
+    isResolved: data !== undefined,
+    error: error instanceof Error ? error.message : null,
   };
 }

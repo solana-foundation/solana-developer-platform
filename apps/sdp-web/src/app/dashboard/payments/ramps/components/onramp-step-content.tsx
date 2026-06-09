@@ -195,6 +195,7 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
     requirementFields,
     collectedData,
     setCollectedField,
+    requirementsError,
   } = wizard;
 
   if (currentStepId === "DEPOSIT") {
@@ -207,23 +208,30 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
     }
 
     return (
-      <RampPairProviderSelector
-        direction="onramp"
-        pairs={ONRAMP_PAIRS}
-        enabledRampProviders={enabledRampProviders}
-        providerOptions={RAMP_PROVIDER_OPTIONS}
-        wallets={liveWallets}
-        walletsLoading={walletsLoading}
-        selectedWallet={selectedWallet}
-        selectedPair={selectedRampPair}
-        selectedProvider={fields.provider}
-        amount={fields.amount}
-        onAmountChange={(value) => setField("amount", value)}
-        onAmountBlur={() => {}}
-        onWalletChange={(walletId) => setField("walletId", walletId)}
-        onPairChange={handlePairChange}
-        onProviderSelect={(nextProvider) => setField("provider", nextProvider)}
-      />
+      <div className="space-y-4">
+        <RampPairProviderSelector
+          direction="onramp"
+          pairs={ONRAMP_PAIRS}
+          enabledRampProviders={enabledRampProviders}
+          providerOptions={RAMP_PROVIDER_OPTIONS}
+          wallets={liveWallets}
+          walletsLoading={walletsLoading}
+          selectedWallet={selectedWallet}
+          selectedPair={selectedRampPair}
+          selectedProvider={fields.provider}
+          amount={fields.amount}
+          onAmountChange={(value) => setField("amount", value)}
+          onAmountBlur={() => {}}
+          onWalletChange={(walletId) => setField("walletId", walletId)}
+          onPairChange={handlePairChange}
+          onProviderSelect={(nextProvider) => setField("provider", nextProvider)}
+        />
+        {requirementsError ? (
+          <div className="rounded-2xl border border-status-error-border bg-status-error-bg px-4 py-3 text-sm text-status-error-text">
+            {requirementsError}
+          </div>
+        ) : null}
+      </div>
     );
   }
 
