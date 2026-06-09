@@ -184,8 +184,8 @@ jobs:
             -H "Authorization: Bearer $SMOKE_API_KEY" \
             -H 'content-type: application/json' \
             -d '{"provider":"local"}')"
-          echo "initialize -> $code"; cat /tmp/init.json
-          case "$code" in 2??) ;; *) exit 1 ;; esac
+          echo "initialize -> $code"
+          case "$code" in 2??) ;; *) cat /tmp/init.json; exit 1 ;; esac
 
       - name: Create a wallet
         run: |
@@ -195,8 +195,8 @@ jobs:
             -H "Authorization: Bearer $SMOKE_API_KEY" \
             -H 'content-type: application/json' \
             -d '{"provider":"local"}')"
-          echo "create wallet -> $code"; cat /tmp/wallet.json
-          case "$code" in 2??) ;; *) exit 1 ;; esac
+          echo "create wallet -> $code"
+          case "$code" in 2??) ;; *) cat /tmp/wallet.json; exit 1 ;; esac
           jq -e '.data.wallet.publicKey | type == "string" and length > 0' /tmp/wallet.json >/dev/null
 
       - name: Dump logs on failure
