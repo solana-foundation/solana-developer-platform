@@ -54,8 +54,11 @@ export interface AppDeps {
 
 // Routes that need no KV bindings. Shared by kvStoreMiddleware (skip the
 // throw-on-missing-binding) and skipRateLimitPaths (skip rate-limit's
-// c.var.kv deref). Both middlewares use exact-or-segment-prefix matching,
-// so listing `/` here only skips the root redirect, not the whole API.
+// c.var.kv deref). Both middlewares match via matchesFreePath (exact,
+// segment-prefix, or leading-`*` suffix glob), so listing `/` here only skips
+// the root redirect, not the whole API. The `*/metadata.json` glob frees the
+// public token-metadata route without freeing the sibling authed token routes
+// a coarse `/v1/issuance/tokens/` prefix would also match.
 const KV_FREE_PATHS = [
   "/",
   "/health",
@@ -64,6 +67,7 @@ const KV_FREE_PATHS = [
   "/docs",
   "/llms.txt",
   "/webhooks",
+  "*/metadata.json",
 ];
 
 function mapSigningError(err: SigningError): {

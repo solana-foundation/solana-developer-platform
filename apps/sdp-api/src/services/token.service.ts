@@ -79,6 +79,18 @@ export interface CreateTransactionResult {
   replayed: boolean;
 }
 
+/**
+ * Public-facing token metadata fields served by the unauthenticated
+ * `GET /v1/issuance/tokens/:id/metadata.json` route. Deliberately a narrow
+ * subset of `Token` — never authority/mint/internal columns.
+ */
+export interface PublicTokenMetadata {
+  name: string;
+  symbol: string;
+  description: string | null;
+  imageUrl: string | null;
+}
+
 export interface AddAllowlistInput {
   tokenId: string;
   address: string;
@@ -409,6 +421,37 @@ export class TokenService {
 
     const extensionState = await this.getTokenExtensionState(tokenId);
     return this.mapRowToToken(row, extensionState);
+  }
+
+  /**
+   * Fetch the public-facing metadata for a token by id alone.
+   *
+   * Unscoped by org/project on purpose: this backs the public
+   * `GET /v1/issuance/tokens/:id/metadata.json` route that wallets and
+   * explorers fetch without credentials. Returns only the fields rendered in
+   * the served JSON.
+   */
+  async getPublicTokenMetadata(tokenId: string): Promise<PublicTokenMetadata | null> {
+    const row = await this.db
+      .prepare("SELECT name, symbol, description, image_url FROM issued_tokens WHERE id = ?")
+      .bind(tokenId)
+      .first<{
+        name: string;
+        symbol: string;
+        description: string | null;
+        image_url: string | null;
+      }>();
+
+    if (!row) {
+      return null;
+    }
+
+    return {
+      name: row.name,
+      symbol: row.symbol,
+      description: row.description,
+      imageUrl: row.image_url,
+    };
   }
 
   /**

@@ -16,6 +16,7 @@ import { deployTokenSchema } from "../schemas";
 import { getMosaicAclMode, shouldEnableOnChainAcl } from "./access-control";
 import { getInitialPermanentDelegateAuthority } from "./authority-resolution";
 import { buildIdempotencyMetadata } from "./idempotency";
+import { canonicalMetadataUrl } from "./metadata";
 
 type AppContext = Context<{ Bindings: Env }>;
 
@@ -116,7 +117,10 @@ export const deployToken = async (c: AppContext) => {
       metadata: {
         name: token.name,
         symbol: token.symbol,
-        uri: token.uri ?? "",
+        // Fall back to the SDP-hosted metadata JSON when the issuer didn't
+        // supply their own URI (HOO-466). Origin is request-derived so each
+        // environment points the on-chain MetadataPointer at itself.
+        uri: token.uri?.trim() || canonicalMetadataUrl(new URL(c.req.url).origin, token.id),
       },
       decimals: token.decimals,
       mintAuthority: signer,
@@ -242,7 +246,8 @@ export const prepareDeploy = async (c: AppContext) => {
     metadata: {
       name: token.name,
       symbol: token.symbol,
-      uri: token.uri ?? "",
+      // See deployToken above: SDP-hosted metadata fallback (HOO-466).
+      uri: token.uri?.trim() || canonicalMetadataUrl(new URL(c.req.url).origin, token.id),
     },
     decimals: token.decimals,
     mintAuthority: signer,

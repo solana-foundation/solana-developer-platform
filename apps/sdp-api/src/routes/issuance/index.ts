@@ -12,6 +12,7 @@ import { executeBurn, prepareBurn } from "./handlers/burn";
 import { deployToken, prepareDeploy } from "./handlers/deploy";
 import { executeForceBurn, prepareForceBurn } from "./handlers/force-burn";
 import { freezeAccount, listFrozenAccounts, unfreezeAccount } from "./handlers/freeze";
+import { serveTokenMetadata } from "./handlers/metadata";
 import { executeMint, prepareMint } from "./handlers/mint";
 import { pauseToken, unpauseToken } from "./handlers/pause";
 import { executeSeize, prepareSeize } from "./handlers/seize";
@@ -21,6 +22,12 @@ import { createToken, getToken, listTokens, updateToken } from "./handlers/token
 import { listTokenTransactions, listTransactions } from "./handlers/transactions";
 
 const issuance = new Hono<{ Bindings: Env }>();
+
+// Public: SDP-hosted token metadata JSON. Registered BEFORE the auth middleware
+// below so wallets and explorers can fetch it without credentials (Hono applies
+// `use(...)` only to routes registered after it). App-wide KV/rate-limit bypass
+// for this path is wired via KV_FREE_PATHS in app.ts.
+issuance.get("/tokens/:tokenId/metadata.json", serveTokenMetadata);
 
 // All routes require authentication
 issuance.use("*", unifiedAuthMiddleware({ allowClerk: true, allowSession: true }));

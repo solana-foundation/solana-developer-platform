@@ -68,6 +68,7 @@ describe("wallet-scoped route coverage inventory", () => {
       "GET /tokens/:tokenId",
       "GET /tokens/:tokenId/allowlist",
       "GET /tokens/:tokenId/frozen",
+      "GET /tokens/:tokenId/metadata.json",
       "GET /tokens/:tokenId/transactions",
       "PATCH /tokens/:tokenId",
       "POST /tokens",

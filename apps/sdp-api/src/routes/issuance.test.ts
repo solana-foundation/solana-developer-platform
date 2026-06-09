@@ -13,6 +13,7 @@ import * as AuthorityResolution from "@/routes/issuance/handlers/authority-resol
 import { createKVStoreSet } from "@/runtime/factory";
 import { MosaicService } from "@/services/mosaic";
 import * as SolanaServices from "@/services/solana";
+import * as SolanaRpc from "@/services/solana/rpc";
 import { TokenService } from "@/services/token.service";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import {
@@ -4191,6 +4192,235 @@ describe("Issuance Routes", () => {
       expect(body.data.token.decimals).toBe(9); // Custom template default
       expect(body.data.token.requiresAllowlist).toBe(true);
       expect(body.data.token.extensions?.defaultAccountState).toBe("frozen");
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // SDP-hosted Metadata (HOO-466)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  describe("SDP-hosted token metadata", () => {
+    // app.request with a bare path builds requests against http://localhost, so
+    // the request-derived origin the deploy handlers compute is deterministic.
+    const expectedMetadataUrl = (tokenId: string) =>
+      `http://localhost/v1/issuance/tokens/${tokenId}/metadata.json`;
+
+    const mockDeployResult = {
+      mint: TEST_SOLANA_ADDRESSES.mint,
+      signature: "5testSigHOO466Deploy",
+      slot: 100n,
+      listAddress: undefined,
+    };
+
+    describe("POST /v1/issuance/tokens/:tokenId/deploy", () => {
+      it("falls back to the SDP-hosted metadata URL when the token has no uri", async () => {
+        const token = await seedIssuedToken({
+          id: "tok_deploy_uri_default",
+          mintAddress: null,
+          status: "pending",
+          uri: null,
+          requiresAllowlist: false,
+        });
+
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSigner")
+          .mockResolvedValueOnce({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
+        const createTokenSpy = vi
+          .spyOn(MosaicService.prototype, "createToken")
+          .mockResolvedValueOnce(mockDeployResult as never);
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${token.id}/deploy`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({}),
+            },
+            env
+          );
+
+          expect(res.status).toBe(200);
+          expect(createTokenSpy).toHaveBeenCalledWith(
+            expect.objectContaining({
+              metadata: expect.objectContaining({ uri: expectedMetadataUrl(token.id) }),
+            })
+          );
+        } finally {
+          createOrgSignerSpy.mockRestore();
+          createTokenSpy.mockRestore();
+        }
+      });
+
+      it("passes through an issuer-supplied uri unchanged", async () => {
+        const customUri = "https://issuer.example/custom-metadata.json";
+        const token = await seedIssuedToken({
+          id: "tok_deploy_uri_custom",
+          mintAddress: null,
+          status: "pending",
+          uri: customUri,
+          requiresAllowlist: false,
+        });
+
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSigner")
+          .mockResolvedValueOnce({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
+        const createTokenSpy = vi
+          .spyOn(MosaicService.prototype, "createToken")
+          .mockResolvedValueOnce(mockDeployResult as never);
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${token.id}/deploy`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({}),
+            },
+            env
+          );
+
+          expect(res.status).toBe(200);
+          expect(createTokenSpy).toHaveBeenCalledWith(
+            expect.objectContaining({
+              metadata: expect.objectContaining({ uri: customUri }),
+            })
+          );
+        } finally {
+          createOrgSignerSpy.mockRestore();
+          createTokenSpy.mockRestore();
+        }
+      });
+    });
+
+    describe("POST /v1/issuance/tokens/:tokenId/deploy/prepare", () => {
+      it("falls back to the SDP-hosted metadata URL when the token has no uri", async () => {
+        if (!(env as { SOLANA_RPC_URL?: string }).SOLANA_RPC_URL) {
+          (env as { SOLANA_RPC_URL?: string }).SOLANA_RPC_URL = "https://rpc.invalid.test";
+        }
+
+        const token = await seedIssuedToken({
+          id: "tok_prepare_uri_default",
+          mintAddress: null,
+          status: "pending",
+          uri: null,
+          requiresAllowlist: false,
+        });
+
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSigner")
+          .mockResolvedValueOnce({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
+        const prepareCreateTokenSpy = vi
+          .spyOn(MosaicService.prototype, "prepareCreateToken")
+          .mockResolvedValueOnce({
+            serializedTx: "ZmFrZS1zZXJpYWxpemVkLXR4",
+            blockhash: "11111111111111111111111111111111",
+            lastValidBlockHeight: 0n,
+            mint: TEST_SOLANA_ADDRESSES.mint,
+            listAddress: undefined,
+          } as never);
+        const simulateTransactionSpy = vi
+          .spyOn(SolanaRpc, "simulateTransaction")
+          .mockResolvedValueOnce({
+            success: true,
+            logs: [],
+            unitsConsumed: 0n,
+            error: null,
+          });
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${token.id}/deploy/prepare`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({}),
+            },
+            env
+          );
+
+          expect(res.status).toBe(200);
+          expect(prepareCreateTokenSpy).toHaveBeenCalledWith(
+            expect.objectContaining({
+              metadata: expect.objectContaining({ uri: expectedMetadataUrl(token.id) }),
+            })
+          );
+        } finally {
+          createOrgSignerSpy.mockRestore();
+          prepareCreateTokenSpy.mockRestore();
+          simulateTransactionSpy.mockRestore();
+        }
+      });
+    });
+
+    describe("GET /v1/issuance/tokens/:tokenId/metadata.json", () => {
+      it("serves public metadata JSON without authentication", async () => {
+        const token = await seedIssuedToken({
+          id: "tok_metadata_public",
+          name: "Public Metadata Token",
+          symbol: "PMT",
+          description: "Served by SDP",
+          imageUrl: "https://issuer.example/logo.png",
+        });
+
+        const res = await app.request(
+          `/v1/issuance/tokens/${token.id}/metadata.json`,
+          { method: "GET" },
+          env
+        );
+
+        expect(res.status).toBe(200);
+        expect(res.headers.get("Access-Control-Allow-Origin")).toBe("*");
+        expect(res.headers.get("Cache-Control")).toBe("public, max-age=300");
+
+        const body = await res.json();
+        expect(body).toEqual({
+          name: "Public Metadata Token",
+          symbol: "PMT",
+          description: "Served by SDP",
+          image: "https://issuer.example/logo.png",
+        });
+      });
+
+      it("omits description and image when absent", async () => {
+        const token = await seedIssuedToken({
+          id: "tok_metadata_minimal",
+          name: "Minimal Token",
+          symbol: "MIN",
+          description: null,
+          imageUrl: null,
+        });
+
+        const res = await app.request(
+          `/v1/issuance/tokens/${token.id}/metadata.json`,
+          { method: "GET" },
+          env
+        );
+
+        expect(res.status).toBe(200);
+        const body = await res.json();
+        expect(body).toEqual({ name: "Minimal Token", symbol: "MIN" });
+      });
+
+      it("returns 404 for an unknown token id", async () => {
+        const res = await app.request(
+          "/v1/issuance/tokens/tok_does_not_exist/metadata.json",
+          { method: "GET" },
+          env
+        );
+
+        expect(res.status).toBe(404);
+        expect(res.headers.get("Access-Control-Allow-Origin")).toBe("*");
+      });
     });
   });
 });
