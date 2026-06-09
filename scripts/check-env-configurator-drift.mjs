@@ -9,7 +9,12 @@ const ENV_EXAMPLE = path.join(repoRoot, "infra/self-hosted/.env.example");
 const FIELDS_FILE = path.join(repoRoot, "packages/sdp-env-config/src/fields.ts");
 
 // UI-only selectors that are not real env vars (see fields.ts UI_ONLY_KEYS).
-const IGNORE = new Set(["DATABASE_MODE", "CACHE_MODE"]);
+const IGNORE = new Set([
+  "DATABASE_MODE",
+  "CACHE_MODE",
+  "SIGNING_PROVIDERS",
+  "POSTGRES_PASSWORD_MODE",
+]);
 
 /** Keys declared in .env.example, including commented optionals (`# KEY=`). */
 function readExampleKeys() {

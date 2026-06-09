@@ -1,4 +1,12 @@
 {
   "title": "Self-Hosting",
-  "pages": ["configurator", "external-co-signers"]
+  "pages": [
+    "index",
+    "quickstart",
+    "configurator",
+    "env-reference",
+    "upgrade-and-backup",
+    "troubleshooting",
+    "external-co-signers"
+  ]
 }

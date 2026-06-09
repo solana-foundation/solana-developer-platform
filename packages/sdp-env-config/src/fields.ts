@@ -1,4 +1,4 @@
-import type { EnvField, SectionMeta, Values } from "./types";
+import type { EnvField, SectionMeta, SelectOption, Values } from "./types";
 
 export const SECTIONS: SectionMeta[] = [
   { id: "basic", title: "Basic", comment: "Core runtime" },
@@ -23,6 +23,30 @@ export const SECTIONS: SectionMeta[] = [
 
 const isProvider = (key: string, value: string) => (v: Values) => v[key] === value;
 
+/** Split a comma-separated list value (e.g. SIGNING_PROVIDERS) into trimmed entries. */
+export const parseList = (value: string | undefined): string[] =>
+  value
+    ? value
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
+    : [];
+
+/** Predicate: the comma-separated list at `key` includes `value`. */
+const listIncludes = (key: string, value: string) => (v: Values) =>
+  parseList(v[key]).includes(value);
+
+/** Curated provider set the configurator collects full env for. */
+const SIGNING_PROVIDER_OPTIONS: SelectOption[] = [
+  { value: "local", label: "local" },
+  { value: "fireblocks", label: "Fireblocks" },
+  { value: "privy", label: "Privy" },
+  { value: "coinbase_cdp", label: "Coinbase CDP" },
+  { value: "para", label: "Para" },
+  { value: "turnkey", label: "Turnkey" },
+  { value: "utila", label: "Utila" },
+];
+
 export const FIELDS: EnvField[] = [
   // Basic
   {
@@ -35,17 +59,15 @@ export const FIELDS: EnvField[] = [
       { value: "production", label: "production" },
       { value: "development", label: "development" },
     ],
+    help: "App runtime mode: production hardens logging and error handling; development is for local testing.",
   },
   {
+    // Always self-hosted for this configurator; emitted as a constant, not shown.
     key: "SDP_DEPLOYMENT_MODE",
     section: "basic",
-    kind: "select",
+    kind: "text",
     label: "Deployment mode",
-    defaultValue: "self_hosted",
-    options: [
-      { value: "self_hosted", label: "self_hosted" },
-      { value: "managed", label: "managed" },
-    ],
+    derive: () => "self_hosted",
   },
   {
     key: "EMAIL_FROM",
@@ -82,6 +104,35 @@ export const FIELDS: EnvField[] = [
     label: "Postgres user",
     defaultValue: "sdp",
     visibleWhen: isProvider("DATABASE_MODE", "bundled"),
+  },
+  {
+    key: "POSTGRES_PASSWORD_MODE",
+    section: "database",
+    kind: "select",
+    label: "Postgres password",
+    defaultValue: "auto",
+    visibleWhen: isProvider("DATABASE_MODE", "bundled"),
+    options: [
+      { value: "auto", label: "Auto-generate" },
+      { value: "manual", label: "Set manually" },
+    ],
+    help: "Auto-generate a strong password, or set your own.",
+  },
+  {
+    key: "POSTGRES_PASSWORD",
+    section: "database",
+    kind: "password",
+    label: "Password",
+    required: true,
+    visibleWhen: isProvider("DATABASE_MODE", "bundled"),
+    // Auto-generate unless the operator chose manual entry for the bundled DB.
+    // With an external database the field is hidden and manual mode unreachable,
+    // so always auto-generate — compose still needs a value and the form offers
+    // no way to type one.
+    secretWhen: (v) => v.DATABASE_MODE !== "bundled" || v.POSTGRES_PASSWORD_MODE !== "manual",
+    // The bundled Postgres container always starts and requires this, even with
+    // an external database, so emit an auto-generated value while hiding the field.
+    alwaysEmit: true,
   },
   {
     key: "DATABASE_URL",
@@ -190,23 +241,27 @@ export const FIELDS: EnvField[] = [
 
   // Signing
   {
+    key: "SIGNING_PROVIDERS",
+    section: "signing",
+    kind: "multiselect",
+    label: "Signing providers",
+    defaultValue: "local",
+    required: true,
+    options: SIGNING_PROVIDER_OPTIONS,
+    help: "Providers to prepare credentials for in this .env. The runtime default is chosen below; orgs/projects can later activate any configured provider from the dashboard.",
+  },
+  {
     key: "SIGNING_PROVIDER",
     section: "signing",
     kind: "select",
-    label: "Signing provider",
+    label: "Default signing provider",
     defaultValue: "local",
-    // Curated set this configurator supports: managed backends whose full env
-    // surface the form collects. Other adapters the API ships (e.g. dfns,
-    // anchorage) are intentionally not offered here.
-    options: [
-      { value: "local", label: "local" },
-      { value: "fireblocks", label: "Fireblocks" },
-      { value: "privy", label: "Privy" },
-      { value: "coinbase_cdp", label: "Coinbase CDP" },
-      { value: "para", label: "Para" },
-      { value: "turnkey", label: "Turnkey" },
-      { value: "utila", label: "Utila" },
-    ],
+    required: true,
+    optionsWhen: (v) =>
+      parseList(v.SIGNING_PROVIDERS).map(
+        (p) => SIGNING_PROVIDER_OPTIONS.find((o) => o.value === p) ?? { value: p, label: p }
+      ),
+    help: "Global fallback provider, used when an org/project has no custody config of its own.",
   },
   {
     key: "CUSTODY_PRIVATE_KEY",
@@ -214,7 +269,7 @@ export const FIELDS: EnvField[] = [
     kind: "password",
     label: "Signing key (base58)",
     required: true,
-    visibleWhen: isProvider("SIGNING_PROVIDER", "local"),
+    visibleWhen: listIncludes("SIGNING_PROVIDERS", "local"),
     help: "Base58 private key the local signer uses. Generate one and fund it on your network.",
   },
   {
@@ -223,7 +278,7 @@ export const FIELDS: EnvField[] = [
     kind: "password",
     label: "Fireblocks API key",
     required: true,
-    visibleWhen: isProvider("SIGNING_PROVIDER", "fireblocks"),
+    visibleWhen: listIncludes("SIGNING_PROVIDERS", "fireblocks"),
   },
   {
     key: "FIREBLOCKS_API_SECRET",
@@ -231,7 +286,7 @@ export const FIELDS: EnvField[] = [
     kind: "password",
     label: "Fireblocks API secret",
     required: true,
-    visibleWhen: isProvider("SIGNING_PROVIDER", "fireblocks"),
+    visibleWhen: listIncludes("SIGNING_PROVIDERS", "fireblocks"),
   },
   {
     key: "FIREBLOCKS_VAULT_ID",
@@ -239,7 +294,7 @@ export const FIELDS: EnvField[] = [
     kind: "text",
     label: "Fireblocks vault ID",
     required: true,
-    visibleWhen: isProvider("SIGNING_PROVIDER", "fireblocks"),
+    visibleWhen: listIncludes("SIGNING_PROVIDERS", "fireblocks"),
   },
   {
     key: "PRIVY_APP_ID",
@@ -247,7 +302,7 @@ export const FIELDS: EnvField[] = [
     kind: "text",
     label: "Privy app ID",
     required: true,
-    visibleWhen: isProvider("SIGNING_PROVIDER", "privy"),
+    visibleWhen: listIncludes("SIGNING_PROVIDERS", "privy"),
   },
   {
     key: "PRIVY_APP_SECRET",
@@ -255,7 +310,7 @@ export const FIELDS: EnvField[] = [
     kind: "password",
     label: "Privy app secret",
     required: true,
-    visibleWhen: isProvider("SIGNING_PROVIDER", "privy"),
+    visibleWhen: listIncludes("SIGNING_PROVIDERS", "privy"),
   },
   {
     key: "PRIVY_WALLET_ID",
@@ -263,7 +318,7 @@ export const FIELDS: EnvField[] = [
     kind: "text",
     label: "Privy wallet ID",
     required: true,
-    visibleWhen: isProvider("SIGNING_PROVIDER", "privy"),
+    visibleWhen: listIncludes("SIGNING_PROVIDERS", "privy"),
   },
   {
     key: "COINBASE_CDP_API_KEY_ID",
@@ -271,7 +326,7 @@ export const FIELDS: EnvField[] = [
     kind: "text",
     label: "Coinbase CDP API key ID",
     required: true,
-    visibleWhen: isProvider("SIGNING_PROVIDER", "coinbase_cdp"),
+    visibleWhen: listIncludes("SIGNING_PROVIDERS", "coinbase_cdp"),
   },
   {
     key: "COINBASE_CDP_API_KEY_SECRET",
@@ -279,7 +334,7 @@ export const FIELDS: EnvField[] = [
     kind: "password",
     label: "Coinbase CDP API key secret",
     required: true,
-    visibleWhen: isProvider("SIGNING_PROVIDER", "coinbase_cdp"),
+    visibleWhen: listIncludes("SIGNING_PROVIDERS", "coinbase_cdp"),
   },
   {
     key: "COINBASE_CDP_WALLET_SECRET",
@@ -287,7 +342,7 @@ export const FIELDS: EnvField[] = [
     kind: "password",
     label: "Coinbase CDP wallet secret",
     required: true,
-    visibleWhen: isProvider("SIGNING_PROVIDER", "coinbase_cdp"),
+    visibleWhen: listIncludes("SIGNING_PROVIDERS", "coinbase_cdp"),
   },
   {
     key: "COINBASE_CDP_WALLET_ID",
@@ -295,7 +350,7 @@ export const FIELDS: EnvField[] = [
     kind: "text",
     label: "Coinbase CDP wallet ID",
     required: true,
-    visibleWhen: isProvider("SIGNING_PROVIDER", "coinbase_cdp"),
+    visibleWhen: listIncludes("SIGNING_PROVIDERS", "coinbase_cdp"),
   },
   {
     key: "PARA_API_KEY",
@@ -303,7 +358,7 @@ export const FIELDS: EnvField[] = [
     kind: "password",
     label: "Para API key",
     required: true,
-    visibleWhen: isProvider("SIGNING_PROVIDER", "para"),
+    visibleWhen: listIncludes("SIGNING_PROVIDERS", "para"),
   },
   {
     key: "PARA_WALLET_ID",
@@ -311,7 +366,7 @@ export const FIELDS: EnvField[] = [
     kind: "text",
     label: "Para wallet ID",
     required: true,
-    visibleWhen: isProvider("SIGNING_PROVIDER", "para"),
+    visibleWhen: listIncludes("SIGNING_PROVIDERS", "para"),
   },
   {
     key: "TURNKEY_API_PUBLIC_KEY",
@@ -319,7 +374,7 @@ export const FIELDS: EnvField[] = [
     kind: "text",
     label: "Turnkey API public key",
     required: true,
-    visibleWhen: isProvider("SIGNING_PROVIDER", "turnkey"),
+    visibleWhen: listIncludes("SIGNING_PROVIDERS", "turnkey"),
   },
   {
     key: "TURNKEY_API_PRIVATE_KEY",
@@ -327,7 +382,7 @@ export const FIELDS: EnvField[] = [
     kind: "password",
     label: "Turnkey API private key",
     required: true,
-    visibleWhen: isProvider("SIGNING_PROVIDER", "turnkey"),
+    visibleWhen: listIncludes("SIGNING_PROVIDERS", "turnkey"),
   },
   {
     key: "TURNKEY_ORGANIZATION_ID",
@@ -335,7 +390,7 @@ export const FIELDS: EnvField[] = [
     kind: "text",
     label: "Turnkey organization ID",
     required: true,
-    visibleWhen: isProvider("SIGNING_PROVIDER", "turnkey"),
+    visibleWhen: listIncludes("SIGNING_PROVIDERS", "turnkey"),
   },
   {
     key: "TURNKEY_PRIVATE_KEY_ID",
@@ -343,7 +398,7 @@ export const FIELDS: EnvField[] = [
     kind: "text",
     label: "Turnkey private key ID",
     required: true,
-    visibleWhen: isProvider("SIGNING_PROVIDER", "turnkey"),
+    visibleWhen: listIncludes("SIGNING_PROVIDERS", "turnkey"),
   },
   {
     key: "TURNKEY_PUBLIC_KEY",
@@ -351,7 +406,7 @@ export const FIELDS: EnvField[] = [
     kind: "text",
     label: "Turnkey public key",
     required: true,
-    visibleWhen: isProvider("SIGNING_PROVIDER", "turnkey"),
+    visibleWhen: listIncludes("SIGNING_PROVIDERS", "turnkey"),
   },
   {
     key: "UTILA_SERVICE_ACCOUNT_EMAIL",
@@ -359,7 +414,7 @@ export const FIELDS: EnvField[] = [
     kind: "text",
     label: "Utila service account email",
     required: true,
-    visibleWhen: isProvider("SIGNING_PROVIDER", "utila"),
+    visibleWhen: listIncludes("SIGNING_PROVIDERS", "utila"),
     pattern: /^[^@\s]+@vault\.[^@\s]+\.utilaserviceaccount\.io$/,
   },
   {
@@ -368,7 +423,7 @@ export const FIELDS: EnvField[] = [
     kind: "password",
     label: "Utila service account private key",
     required: true,
-    visibleWhen: isProvider("SIGNING_PROVIDER", "utila"),
+    visibleWhen: listIncludes("SIGNING_PROVIDERS", "utila"),
     help: "PKCS#8 private key PEM for the Utila service account. Use escaped newlines when storing in .env.",
   },
   {
@@ -377,7 +432,7 @@ export const FIELDS: EnvField[] = [
     kind: "text",
     label: "Utila vault ID",
     required: true,
-    visibleWhen: isProvider("SIGNING_PROVIDER", "utila"),
+    visibleWhen: listIncludes("SIGNING_PROVIDERS", "utila"),
   },
   {
     key: "UTILA_WALLET_ID",
@@ -385,7 +440,7 @@ export const FIELDS: EnvField[] = [
     kind: "text",
     label: "Utila wallet ID",
     required: true,
-    visibleWhen: isProvider("SIGNING_PROVIDER", "utila"),
+    visibleWhen: listIncludes("SIGNING_PROVIDERS", "utila"),
   },
   {
     key: "UTILA_NETWORK",
@@ -394,7 +449,7 @@ export const FIELDS: EnvField[] = [
     label: "Utila network",
     defaultValue: "networks/solana-devnet",
     required: true,
-    visibleWhen: isProvider("SIGNING_PROVIDER", "utila"),
+    visibleWhen: listIncludes("SIGNING_PROVIDERS", "utila"),
     options: [
       { value: "networks/solana-devnet", label: "Solana devnet" },
       { value: "networks/solana-mainnet", label: "Solana mainnet" },
@@ -406,7 +461,7 @@ export const FIELDS: EnvField[] = [
     kind: "url",
     label: "Utila API base URL",
     defaultValue: "https://api.utila.io",
-    visibleWhen: isProvider("SIGNING_PROVIDER", "utila"),
+    visibleWhen: listIncludes("SIGNING_PROVIDERS", "utila"),
     pattern: /^https:\/\//,
   },
   {
@@ -415,7 +470,7 @@ export const FIELDS: EnvField[] = [
     kind: "text",
     label: "Utila poll interval (ms)",
     defaultValue: "1000",
-    visibleWhen: isProvider("SIGNING_PROVIDER", "utila"),
+    visibleWhen: listIncludes("SIGNING_PROVIDERS", "utila"),
     pattern: /^[1-9]\d*$/,
   },
   {
@@ -424,7 +479,7 @@ export const FIELDS: EnvField[] = [
     kind: "text",
     label: "Utila max poll attempts",
     defaultValue: "60",
-    visibleWhen: isProvider("SIGNING_PROVIDER", "utila"),
+    visibleWhen: listIncludes("SIGNING_PROVIDERS", "utila"),
     pattern: /^[1-9]\d*$/,
   },
   {
@@ -432,7 +487,7 @@ export const FIELDS: EnvField[] = [
     section: "signing",
     kind: "text",
     label: "Utila designated signers",
-    visibleWhen: isProvider("SIGNING_PROVIDER", "utila"),
+    visibleWhen: listIncludes("SIGNING_PROVIDERS", "utila"),
     help: "Comma-separated Utila user resources. Leave empty to default to users/$UTILA_SERVICE_ACCOUNT_EMAIL.",
   },
 
@@ -479,13 +534,6 @@ export const FIELDS: EnvField[] = [
     section: "secrets",
     kind: "secret",
     label: "Custody encryption key",
-    required: true,
-  },
-  {
-    key: "POSTGRES_PASSWORD",
-    section: "secrets",
-    kind: "secret",
-    label: "Postgres password",
     required: true,
   },
 
@@ -577,7 +625,12 @@ export const FIELDS: EnvField[] = [
 ];
 
 /** Keys that hold compose-only UI state and must NOT be emitted into the .env. */
-export const UI_ONLY_KEYS = new Set(["DATABASE_MODE", "CACHE_MODE"]);
+export const UI_ONLY_KEYS = new Set([
+  "DATABASE_MODE",
+  "CACHE_MODE",
+  "SIGNING_PROVIDERS",
+  "POSTGRES_PASSWORD_MODE",
+]);
 
 /** A field is visible unless its visibleWhen predicate returns false. */
 export function isFieldVisible(field: EnvField, values: Values): boolean {

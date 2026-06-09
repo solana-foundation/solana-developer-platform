@@ -423,7 +423,7 @@ export interface BvnkPaymentRampInstruction {
   beneficiaryAddress: string;
   network: string;
   bankAccount?: BvnkBankFundingDetails;
-  instructionsNotes?: string;
+  instructionsNotes: string;
 }
 
 export type PaymentRampInstruction = LightsparkPaymentRampInstruction | BvnkPaymentRampInstruction;

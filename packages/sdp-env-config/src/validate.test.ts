@@ -19,11 +19,15 @@ test("valid value has no error", () => {
 });
 
 test("invisible required field is not validated", () => {
-  // CUSTODY_PRIVATE_KEY is required but hidden unless SIGNING_PROVIDER=local
+  // CUSTODY_PRIVATE_KEY is required but hidden unless "local" is in SIGNING_PROVIDERS.
   const errors = validateValues({
     ...defaultValues(),
+    SIGNING_PROVIDERS: "fireblocks",
     SIGNING_PROVIDER: "fireblocks",
     CUSTODY_PRIVATE_KEY: "",
+    FIREBLOCKS_API_KEY: "k",
+    FIREBLOCKS_API_SECRET: "s",
+    FIREBLOCKS_VAULT_ID: "0",
   });
   assert.equal(errors.CUSTODY_PRIVATE_KEY, undefined);
 });
@@ -41,6 +45,7 @@ test("a valid select value has no error", () => {
 test("managed signing with native fees requires a fee payer key", () => {
   const errors = validateValues({
     ...defaultValues(),
+    SIGNING_PROVIDERS: "fireblocks",
     SIGNING_PROVIDER: "fireblocks",
     FEE_PAYMENT_PROVIDER: "native",
     FEE_PAYER_PRIVATE_KEY: "",
@@ -51,7 +56,9 @@ test("managed signing with native fees requires a fee payer key", () => {
 test("local signing with native fees does not require a fee payer key", () => {
   const errors = validateValues({
     ...defaultValues(),
+    SIGNING_PROVIDERS: "local",
     SIGNING_PROVIDER: "local",
+    CUSTODY_PRIVATE_KEY: "k",
     FEE_PAYMENT_PROVIDER: "native",
     FEE_PAYER_PRIVATE_KEY: "",
   });
@@ -61,6 +68,7 @@ test("local signing with native fees does not require a fee payer key", () => {
 test("utila signing requires Utila credentials", () => {
   const errors = validateValues({
     ...defaultValues(),
+    SIGNING_PROVIDERS: "utila",
     SIGNING_PROVIDER: "utila",
     FEE_PAYMENT_PROVIDER: "kora",
     UTILA_SERVICE_ACCOUNT_EMAIL: "",
@@ -78,6 +86,7 @@ test("utila signing requires Utila credentials", () => {
 test("valid utila signing config has no Utila field errors", () => {
   const errors = validateValues({
     ...defaultValues(),
+    SIGNING_PROVIDERS: "utila",
     SIGNING_PROVIDER: "utila",
     FEE_PAYMENT_PROVIDER: "kora",
     UTILA_SERVICE_ACCOUNT_EMAIL: "service@vault.example.utilaserviceaccount.io",
@@ -105,6 +114,41 @@ test("valid utila signing config has no Utila field errors", () => {
   ]) {
     assert.equal(errors[key], undefined, `${key}: ${errors[key]}`);
   }
+});
+
+test("an unknown provider in SIGNING_PROVIDERS reports an error", () => {
+  const errors = validateValues({ ...defaultValues(), SIGNING_PROVIDERS: "local,bogus" });
+  assert.match(errors.SIGNING_PROVIDERS ?? "", /must be one of/);
+});
+
+test("a default provider outside the selected set reports an error", () => {
+  const errors = validateValues({
+    ...defaultValues(),
+    SIGNING_PROVIDERS: "local",
+    SIGNING_PROVIDER: "fireblocks",
+  });
+  assert.match(errors.SIGNING_PROVIDER ?? "", /must be one of: local/);
+});
+
+test("manual Postgres password is required when empty", () => {
+  const errors = validateValues({
+    ...defaultValues(),
+    POSTGRES_PASSWORD_MODE: "manual",
+    POSTGRES_PASSWORD: "",
+  });
+  assert.ok(errors.POSTGRES_PASSWORD);
+});
+
+test("an always-emitted password is validated even when hidden by external DB", () => {
+  // POSTGRES_PASSWORD is hidden under an external database but still emitted and
+  // required, so an empty value must be caught rather than silently omitted.
+  const errors = validateValues({
+    ...defaultValues(),
+    DATABASE_MODE: "external",
+    DATABASE_URL: "postgresql://u@h:5432/d",
+    POSTGRES_PASSWORD: "",
+  });
+  assert.ok(errors.POSTGRES_PASSWORD);
 });
 
 test("a value with a newline is rejected as multi-line", () => {

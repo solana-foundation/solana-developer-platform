@@ -41,6 +41,8 @@ const API_ENV_IGNORE = new Set([
   "SDP_CACHE",
   "SDP_RATE_LIMITS",
   "SDP_SESSIONS",
+  // Configurator-only input key (UI-only in @sdp/env-config); not an sdp-api runtime binding.
+  "SIGNING_PROVIDERS",
   "TRITON_API_KEY",
 ]);
 
