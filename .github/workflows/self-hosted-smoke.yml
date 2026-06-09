@@ -201,10 +201,12 @@ jobs:
 
       - name: Dump logs on failure
         if: failure()
-        working-directory: ${{ env.INSTALL_DIR }}
-        run: docker compose logs --no-color --timestamps || true
+        run: |
+          cd "$INSTALL_DIR" 2>/dev/null || exit 0
+          docker compose logs --no-color --timestamps || true
 
       - name: Tear down
         if: always()
-        working-directory: ${{ env.INSTALL_DIR }}
-        run: docker compose down -v || true
+        run: |
+          cd "$INSTALL_DIR" 2>/dev/null || exit 0
+          docker compose down -v || true
