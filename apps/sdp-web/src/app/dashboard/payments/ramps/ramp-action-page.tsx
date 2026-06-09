@@ -27,7 +27,7 @@ import { PoweredByRampProvider, RampWizardShell } from "./components/ramp-wizard
 import { OFFRAMP_STEPS, useOfframpWizard } from "./hooks/use-offramp-wizard";
 import { ONCHAIN_RECEIVE_STEPS, useOnchainReceiveWizard } from "./hooks/use-onchain-receive-wizard";
 import { ONCHAIN_SEND_STEPS, useOnchainSendWizard } from "./hooks/use-onchain-send-wizard";
-import { ONRAMP_STEPS, useOnrampWizard } from "./hooks/use-onramp-wizard";
+import { useOnrampWizard } from "./hooks/use-onramp-wizard";
 import { isTerminalRampTransferStatus } from "./hooks/use-ramp-wizard";
 
 interface PaymentsActionPageProps {
@@ -215,7 +215,7 @@ function OnrampRail({
 
   return (
     <RampWizardShell
-      steps={[...preSteps, ...ONRAMP_STEPS]}
+      steps={[...preSteps, ...wizard.steps]}
       stepIndex={preSteps.length + wizard.stepIndex}
       primaryDisabled={
         wizard.hostedQuoteLoading ||

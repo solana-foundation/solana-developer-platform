@@ -11,6 +11,7 @@ import { HostedRampFrame } from "./hosted-ramp-frame";
 import { ManualInstructionsQuote } from "./manual-instructions-quote";
 import { RampPairProviderSelector } from "./ramp-pair-provider-selector";
 import { RampStepPlaceholder } from "./ramp-step-placeholder";
+import { RequirementsFields } from "./requirements-fields";
 
 function getOnrampTransferStatusCopy(status: string) {
   switch (status) {
@@ -191,6 +192,9 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
     quoteSimulationSucceeded,
     simulateCurrentQuote,
     handlePairChange,
+    requirementFields,
+    collectedData,
+    setCollectedField,
   } = wizard;
 
   if (currentStepId === "DEPOSIT") {
@@ -219,6 +223,16 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
         onWalletChange={(walletId) => setField("walletId", walletId)}
         onPairChange={handlePairChange}
         onProviderSelect={(nextProvider) => setField("provider", nextProvider)}
+      />
+    );
+  }
+
+  if (currentStepId === "REQUIREMENTS") {
+    return (
+      <RequirementsFields
+        fields={requirementFields}
+        values={collectedData}
+        onChange={setCollectedField}
       />
     );
   }
