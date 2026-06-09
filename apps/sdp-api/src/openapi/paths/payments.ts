@@ -2,6 +2,7 @@ import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
 
 import {
   createOnrampQuoteRequestSchema,
+  createRecurringPaymentRequestSchema,
   createSubscriptionCollectionAttemptRequestSchema,
   createSubscriptionPlanRequestSchema,
   createSubscriptionRequestSchema,
@@ -9,12 +10,14 @@ import {
   errorResponseSchema,
   executeOfframpRequestSchema,
   executeOnrampRequestSchema,
+  paymentListRecurringPaymentsQuerySchema,
   paymentListSubscriptionCollectionAttemptsQuerySchema,
   paymentListSubscriptionPlansQuerySchema,
   paymentListSubscriptionsQuerySchema,
   paymentListTransfersQuerySchema,
   paymentOfframpCurrenciesQuerySchema,
   paymentOnrampCurrenciesQuerySchema,
+  paymentRecurringPaymentIdParamsSchema,
   paymentSubscriptionIdParamsSchema,
   paymentSubscriptionPlanIdParamsSchema,
   paymentTransferIdParamsSchema,
@@ -36,6 +39,8 @@ import {
   onrampCurrenciesResponse,
   onrampExecutionResponse,
   onrampQuoteResponse,
+  paymentRecurringPaymentListResponse,
+  paymentRecurringPaymentResponse,
   paymentSubscriptionCollectionAttemptListResponse,
   paymentSubscriptionCollectionAttemptResponse,
   paymentSubscriptionListResponse,
@@ -220,6 +225,78 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
       200: {
         description: "Transfer details",
         content: jsonContent(transferResponse),
+      },
+      ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
+    },
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Recurring Payments (feature-flagged)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/payments/recurring-payments",
+    tags: ["Payments"],
+    summary: "Create recurring payment",
+    operationId: "createPaymentRecurringPayment",
+    description:
+      "Creates an SDP-custody outbound recurring payment intent from a custody wallet to a counterparty crypto-wallet account. This stores backend state only; activation and collection are added by follow-up endpoints.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      body: {
+        required: true,
+        content: jsonContent(createRecurringPaymentRequestSchema),
+      },
+    },
+    responses: {
+      201: {
+        description: "Recurring payment created",
+        content: jsonContent(paymentRecurringPaymentResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/payments/recurring-payments",
+    tags: ["Payments"],
+    summary: "List recurring payments",
+    operationId: "listPaymentRecurringPayments",
+    description:
+      "Lists SDP-custody outbound recurring payments for the authenticated organization or project scope.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      query: paymentListRecurringPaymentsQuerySchema,
+    },
+    responses: {
+      200: {
+        description: "Recurring payment list",
+        content: jsonContent(paymentRecurringPaymentListResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/payments/recurring-payments/{id}",
+    tags: ["Payments"],
+    summary: "Get recurring payment",
+    operationId: "getPaymentRecurringPayment",
+    description: "Retrieves an SDP-custody outbound recurring payment record.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: paymentRecurringPaymentIdParamsSchema,
+    },
+    responses: {
+      200: {
+        description: "Recurring payment",
+        content: jsonContent(paymentRecurringPaymentResponse),
       },
       ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
     },

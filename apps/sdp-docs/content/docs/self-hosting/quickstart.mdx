@@ -1,0 +1,81 @@
+---
+title: Quickstart
+description: Install the self-hosted stack, generate a .env, and bring it up with Docker Compose.
+---
+
+This guide takes you from an empty host to a running Solana Developer Platform.
+It assumes **Docker Engine** and **Docker Compose v2** are installed and the
+Docker daemon is running.
+
+## 1. Install
+
+The install script downloads `compose.yml` and `.env.example` for the latest
+release into `~/sdp` and verifies them against the release checksums.
+
+```bash
+curl -fsSL https://github.com/solana-foundation/solana-developer-platform/releases/latest/download/install.sh | bash
+```
+
+The script is open source — you can read it before running it, and verify the
+checksums and signature out of band. The commented header of `install.sh`
+documents the full verified-install flow and the environment variables you can
+override (`SDP_INSTALL_DIR`, `INSTALL_VERSION`, and others).
+
+Prefer to do it by hand? Download `compose.yml` and `.env.example` from the
+[latest release](https://github.com/solana-foundation/solana-developer-platform/releases/latest)
+into a working directory instead.
+
+## 2. Generate your `.env`
+
+The stack reads its configuration from a `.env` file next to `compose.yml`. The
+[configurator](/docs/self-hosting/configurator) fills it in for you, generates
+the app secrets, and validates your answers.
+
+- **In your browser** — open the [configurator](/docs/self-hosting/configurator),
+  answer the prompts, and download the `.env` into `~/sdp`.
+- **In your terminal** — run the configurator from the API image:
+
+  ```bash
+  docker run --rm -it -v "$HOME/sdp:/out" \
+    ghcr.io/solana-foundation/sdp/sdp-api:latest \
+    node configure.js --out /out/.env
+  ```
+
+  Use the same release tag you installed in place of `latest` so the configurator
+  matches your `compose.yml`.
+
+See the [environment reference](/docs/self-hosting/env-reference) for what each
+variable means and which are required.
+
+## 3. Bring up the stack
+
+```bash
+cd ~/sdp
+docker compose up -d
+```
+
+On startup, `sdp-migrate` runs the database migrations once, then the API, web,
+and docs services start. The first run pulls the images, so it may take a few
+minutes.
+
+## 4. Verify
+
+```bash
+docker compose ps
+docker compose logs -f sdp-api
+```
+
+When the services report healthy, the dashboard is at `http://localhost:3000`,
+the API at `http://localhost:8787`, and these docs at `http://localhost:3001`.
+The API exposes a [health endpoint](/docs/reference/api/health) you can poll from
+a load balancer or uptime check.
+
+If a service fails to start or a required variable is missing, see
+[Troubleshooting](/docs/self-hosting/troubleshooting).
+
+## Next steps
+
+- [Upgrade & backup](/docs/self-hosting/upgrade-and-backup) — keep the stack
+  current and protect your data.
+- [Environment reference](/docs/self-hosting/env-reference) — tune ports, RPC,
+  signing, and authentication.

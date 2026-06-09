@@ -366,6 +366,47 @@ async function seedCounterparty(params?: {
   return id;
 }
 
+async function seedCryptoWalletCounterpartyAccount(params: {
+  counterpartyId: string;
+  address: string;
+}): Promise<string> {
+  const id = `counterparty_account_${crypto.randomUUID()}`;
+  const now = new Date().toISOString();
+
+  await getDb(env)
+    .prepare(
+      `INSERT INTO counterparty_accounts (
+         id,
+         organization_id,
+         project_id,
+         counterparty_id,
+         account_kind,
+         label,
+         details,
+         provider_account_data,
+         status,
+         created_at,
+         updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .bind(
+      id,
+      TEST_ORG.id,
+      TEST_PROJECT.id,
+      params.counterpartyId,
+      "crypto_wallet",
+      "Recurring payment wallet",
+      JSON.stringify({ network: "solana", address: params.address }),
+      JSON.stringify({}),
+      "active",
+      now,
+      now
+    )
+    .run();
+
+  return id;
+}
+
 function mockTokenSupplyDecimalsOnce(decimals = 6): void {
   createRpcMock.mockReturnValueOnce({
     getTokenSupply: () => ({
@@ -545,6 +586,84 @@ describe("Payments routes", () => {
     expect(res.status).toBe(403);
     const body = (await res.json()) as { error: { message: string } };
     expect(body.error.message).toContain("Recurring payments are not enabled");
+  });
+
+  it("creates, lists, and gets recurring payment records through SDP API routes", async () => {
+    env.PAYMENTS_RECURRING_ENABLED = "true";
+    const headers = {
+      Authorization: `Bearer ${TEST_API_KEY.raw}`,
+      "Content-Type": "application/json",
+    };
+    const counterpartyId = await seedCounterparty({ externalId: "recurring_records_counterparty" });
+    const counterpartyAccountId = await seedCryptoWalletCounterpartyAccount({
+      counterpartyId,
+      address: TEST_SOLANA_ADDRESSES.wallet2,
+    });
+
+    const createRes = await app.request(
+      "/v1/payments/recurring-payments",
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          sourceWalletId: TEST_WALLET_ID,
+          counterpartyId,
+          counterpartyAccountId,
+          token: DEVNET_USDC_MINT,
+          amount: "25.00",
+          periodHours: 24,
+        }),
+      },
+      env
+    );
+
+    expect(createRes.status).toBe(201);
+    const createBody = (await createRes.json()) as {
+      data: {
+        recurringPayment: {
+          id: string;
+          sourceWalletId: string;
+          counterpartyId: string;
+          counterpartyAccountId: string;
+          destinationAddress: string;
+          token: string;
+          amount: string;
+          status: string;
+        };
+      };
+    };
+    expect(createBody.data.recurringPayment.id).toMatch(/^prp_/);
+    expect(createBody.data.recurringPayment.sourceWalletId).toBe(TEST_WALLET_ID);
+    expect(createBody.data.recurringPayment.counterpartyId).toBe(counterpartyId);
+    expect(createBody.data.recurringPayment.counterpartyAccountId).toBe(counterpartyAccountId);
+    expect(createBody.data.recurringPayment.destinationAddress).toBe(TEST_SOLANA_ADDRESSES.wallet2);
+    expect(createBody.data.recurringPayment.token).toBe(DEVNET_USDC_MINT);
+    expect(createBody.data.recurringPayment.amount).toBe("25.00");
+    expect(createBody.data.recurringPayment.status).toBe("pending_activation");
+
+    const listRes = await app.request(
+      "/v1/payments/recurring-payments?status=pending_activation",
+      { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+      env
+    );
+    expect(listRes.status).toBe(200);
+    const listBody = (await listRes.json()) as {
+      data: { recurringPayments: Array<{ id: string }>; total: number };
+    };
+    expect(listBody.data.total).toBe(1);
+    expect(listBody.data.recurringPayments[0]?.id).toBe(createBody.data.recurringPayment.id);
+
+    const getRes = await app.request(
+      `/v1/payments/recurring-payments/${createBody.data.recurringPayment.id}`,
+      { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+      env
+    );
+    expect(getRes.status).toBe(200);
+    const getBody = (await getRes.json()) as {
+      data: { recurringPayment: { id: string; status: string } };
+    };
+    expect(getBody.data.recurringPayment.id).toBe(createBody.data.recurringPayment.id);
+    expect(getBody.data.recurringPayment.status).toBe("pending_activation");
   });
 
   it("requires owner wallet access when updating subscription plans", async () => {

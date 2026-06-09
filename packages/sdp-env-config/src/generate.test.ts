@@ -28,6 +28,13 @@ test("UI-only selector keys are never emitted", () => {
   const env = generateEnv(defaultValues());
   assert.doesNotMatch(env, /^DATABASE_MODE=/m);
   assert.doesNotMatch(env, /^CACHE_MODE=/m);
+  assert.doesNotMatch(env, /^SIGNING_PROVIDERS=/m);
+  assert.doesNotMatch(env, /^POSTGRES_PASSWORD_MODE=/m);
+});
+
+test("deployment mode is emitted as the self_hosted constant", () => {
+  const env = generateEnv(defaultValues());
+  assert.match(env, /^SDP_DEPLOYMENT_MODE=self_hosted$/m);
 });
 
 test("invisible conditional fields are skipped", () => {
@@ -38,6 +45,20 @@ test("invisible conditional fields are skipped", () => {
   });
   assert.doesNotMatch(env, /^FIREBLOCKS_API_KEY=/m); // fireblocks not selected
   assert.match(env, /^CUSTODY_PRIVATE_KEY=k$/m); // local selected → visible + filled
+});
+
+test("POSTGRES_PASSWORD is emitted even when the database is external", () => {
+  // The bundled Postgres container always starts and requires the password, so
+  // it is emitted (hidden from the form) alongside the external DATABASE_URL.
+  const env = generateEnv({
+    ...defaultValues(),
+    DATABASE_MODE: "external",
+    DATABASE_URL: "postgresql://u:p@db:5432/app",
+    POSTGRES_PASSWORD: "generated-pw",
+  });
+  assert.match(env, /^POSTGRES_PASSWORD=generated-pw$/m);
+  assert.match(env, /^DATABASE_URL=postgresql:\/\/u:p@db:5432\/app$/m);
+  assert.doesNotMatch(env, /^DATABASE_MODE=/m);
 });
 
 test("empty optional fields are omitted so runtime fallbacks apply", () => {

@@ -610,6 +610,7 @@ async function resolveBvnkOnramp(
     network,
     destinationWalletAddress: input.destinationWalletAddress,
     fiatCurrency,
+    mode: resolveSdpEnvironment(c),
   });
   const reference = resolution.entry.ruleId ?? resolution.customer.customerReference;
   if (!reference) {
