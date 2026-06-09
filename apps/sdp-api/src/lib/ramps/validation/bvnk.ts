@@ -121,6 +121,7 @@ const BVNK_ONRAMP_BASE_FIELDS: BvnkOnrampField[] = [
       key: "cdd.expectedMonthlyVolume.amount",
       label: "Expected monthly volume",
       required: true,
+      pattern: "^\\d+(\\.\\d{1,2})?$",
       placeholder: "1000",
     }),
     read: (id) => id.compliance?.cdd?.expectedMonthlyVolume.amount,

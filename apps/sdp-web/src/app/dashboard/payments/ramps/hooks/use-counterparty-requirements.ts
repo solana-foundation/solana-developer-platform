@@ -86,11 +86,14 @@ export function useCounterpartyRequirements(
           params.direction,
         ] as const)
       : null;
+  // Requirements are deterministic for a (counterparty, provider) for the wizard's
+  // lifetime — never revalidate, so `needsCollection` (and thus the wizard's step
+  // list) can't flip out from under the user mid-flow.
   const { data, error } = useSWR(
     key,
     ([, counterpartyId, provider, direction]) =>
       fetchCounterpartyRequirements(counterpartyId, provider, direction),
-    { revalidateOnFocus: false }
+    { revalidateOnFocus: false, revalidateOnReconnect: false, revalidateIfStale: false }
   );
 
   const fields = useMemo<RequirementField[]>(
