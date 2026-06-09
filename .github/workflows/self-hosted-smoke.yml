@@ -61,7 +61,7 @@ jobs:
             --certificate-identity-regexp '^https://github\.com/${{ github.repository }}/\.github/workflows/release-checksums\.yml@refs/tags/v[0-9][^/]*$' \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \
             "$tmp/SHA256SUMS"
-          ( cd "$tmp" && sha256sum --ignore-missing -c SHA256SUMS )
+          ( cd "$tmp" && grep -E ' [*]?install\.sh$' SHA256SUMS | sha256sum -c - )
           bash "$tmp/install.sh"
 
       - name: Generate .env
