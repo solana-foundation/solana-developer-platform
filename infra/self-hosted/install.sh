@@ -131,7 +131,7 @@ verify() {
 # behind; the temp is cleaned up on any exit.
 fetch_verified() {
   local tmp="$2.tmp.$$"
-  trap 'rm -f "${tmp:-}"' EXIT
+  trap '[ -z "${tmp:-}" ] || rm -f "$tmp"' EXIT
   fetch "$1" "$tmp"
   verify "$1" "$tmp"
   mv -f "$tmp" "$2"

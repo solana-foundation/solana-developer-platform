@@ -167,5 +167,17 @@ if scenario "no-corrupt-env-example" -- "
 "; then check "leaves no .env.example behind when its download fails verification" 0
 else check "leaves no .env.example behind when its download fails verification" 1; fi
 
+# 11. A missing template asset (fetch failure) aborts cleanly, without the cleanup
+#     trap surfacing an unbound-variable error in place of the real cause.
+if scenario "missing-env-template" -- "
+  $DOCKER_OK
+  rm -f /release/default.env.example
+  out=\$(bash /src/infra/self-hosted/install.sh 2>&1); rc=\$?
+  [ \$rc -ne 0 ] \
+    && ! echo \"\$out\" | grep -qi 'unbound variable' \
+    && [ ! -f /root/sdp/.env.example ]
+"; then check "aborts cleanly without unbound-variable when the template asset is missing" 0
+else check "aborts cleanly without unbound-variable when the template asset is missing" 1; fi
+
 echo "----"; echo "PASS=$pass FAIL=$fail"
 [ "$fail" -eq 0 ]
