@@ -1,5 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
 import type {
+  Counterparty,
   PaymentRampEstimate,
   PaymentRampExecution,
   PaymentRampQuote,
@@ -10,9 +11,11 @@ import {
   getCryptoRailAssetLabel,
   parseFiatCurrency,
 } from "@sdp/types/payment-rails";
+import type { CounterpartyRequirements, RampDirection } from "@sdp/types/ramp-requirements";
 import { AppError, providerNotConfigured } from "@/lib/errors";
 import { hashString } from "@/lib/hash";
 import { providerFetchJson } from "../fetch";
+import { readyCounterparty } from "../requirements";
 import { createProviderRampSupport, RAMP_RAIL_DUMPS, rampId, requireEnv } from "../shared";
 import type {
   MutableProviderRampSupport,
@@ -275,6 +278,13 @@ interface MoonpayTransactionWebhook {
 
 export class MoonpayRampClient implements RampProvider {
   readonly id = "moonpay";
+
+  validateCounterparty(
+    _counterparty: Counterparty,
+    options: { direction: RampDirection }
+  ): CounterpartyRequirements {
+    return readyCounterparty(this.id, options.direction);
+  }
 
   async _discoverRails({
     env,

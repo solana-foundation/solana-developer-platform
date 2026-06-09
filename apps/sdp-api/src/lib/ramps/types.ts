@@ -1,4 +1,5 @@
 import type {
+  Counterparty,
   PaymentRampEstimate,
   PaymentRampExecution,
   PaymentRampQuote,
@@ -7,6 +8,7 @@ import type {
 import type { RampFiatCurrency } from "@sdp/types/generated/ramp-support";
 import type { CryptoRailId, FiatCurrencyCode } from "@sdp/types/payment-rails";
 import type { RampProviderId } from "@sdp/types/provider-access";
+import type { CounterpartyRequirements, RampDirection } from "@sdp/types/ramp-requirements";
 import type { BvnkComplianceInput } from "./providers/bvnk";
 
 export type { BvnkComplianceInput, BvnkRuleEntity } from "./providers/bvnk";
@@ -175,4 +177,14 @@ export interface RampProvider extends RampProviderClient {
     ctx: RampRuntimeContext,
     input: RampExecuteOfframpInput
   ): Promise<PaymentRampExecution>;
+  /**
+   * Reports what counterparty data this provider still needs before the given
+   * direction can proceed. Pure/sync: static rules over the counterparty's
+   * stored identity; no network. The endpoint surfaces this and the on/off-ramp
+   * flow collects any `collect` fields just-in-time.
+   */
+  validateCounterparty(
+    counterparty: Counterparty,
+    options: { direction: RampDirection }
+  ): CounterpartyRequirements;
 }

@@ -1,5 +1,6 @@
 import { createVerify } from "node:crypto";
 import type {
+  Counterparty,
   LightsparkPaymentRampInstruction,
   PaymentRampEstimate,
   PaymentRampExecution,
@@ -13,10 +14,12 @@ import {
   getCryptoRailAssetLabel,
   parseFiatCurrency,
 } from "@sdp/types/payment-rails";
+import type { CounterpartyRequirements, RampDirection } from "@sdp/types/ramp-requirements";
 import { formatDecimalAmount, parseDecimalAmount } from "@/lib/amount";
 import { AppError, providerNotConfigured } from "@/lib/errors";
 import { isAddress } from "@/lib/solana";
 import { type ProviderRequestInit, providerFetchJson } from "../fetch";
+import { readyCounterparty } from "../requirements";
 import {
   basicAuthHeader,
   createProviderRampSupport,
@@ -473,6 +476,13 @@ function extractSupport(config: LightsparkConfigDump): ProviderRampSupport {
 
 export class LightsparkRampClient implements RampProvider {
   readonly id = "lightspark";
+
+  validateCounterparty(
+    _counterparty: Counterparty,
+    options: { direction: RampDirection }
+  ): CounterpartyRequirements {
+    return readyCounterparty(this.id, options.direction);
+  }
 
   async _discoverRails({
     env,
