@@ -1,0 +1,212 @@
+# Nightly end-to-end smoke test of the self-hosted release: install.sh fetches and
+# verifies the latest published bundle, then the API is driven from health through
+# wallet creation against the released GHCR images.
+name: Self-Hosted Smoke
+
+on:
+  schedule:
+    - cron: "0 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: self-hosted-smoke
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    name: Install, boot, create wallet
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      INSTALL_DIR: ${{ github.workspace }}/sdp-smoke
+    steps:
+      # install.sh fails closed on a bad signature only when cosign is present.
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Log in to GHCR
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve latest release tag
+        id: release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="$(gh release view --repo "${{ github.repository }}" --json tagName --jq .tagName)"
+          echo "tag=$tag" >>"$GITHUB_OUTPUT"
+          echo "Testing release $tag"
+
+      - name: Run install script
+        env:
+          INSTALL_VERSION: ${{ steps.release.outputs.tag }}
+          SDP_INSTALL_DIR: ${{ env.INSTALL_DIR }}
+        run: |
+          set -euo pipefail
+          base="https://github.com/${{ github.repository }}/releases/download/${{ steps.release.outputs.tag }}"
+          tmp="$(mktemp -d)"
+          for asset in SHA256SUMS SHA256SUMS.cosign.bundle install.sh; do
+            curl -fsSL "$base/$asset" -o "$tmp/$asset"
+          done
+          cosign verify-blob \
+            --bundle "$tmp/SHA256SUMS.cosign.bundle" \
+            --certificate-identity-regexp '^https://github\.com/${{ github.repository }}/\.github/workflows/release-checksums\.yml@refs/tags/v[0-9][^/]*$' \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            "$tmp/SHA256SUMS"
+          ( cd "$tmp" && grep -E ' [*]?install\.sh$' SHA256SUMS | sha256sum -c - )
+          bash "$tmp/install.sh"
+
+      - name: Generate .env
+        env:
+          SDP_VERSION: ${{ steps.release.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          pepper="$(openssl rand -hex 32)"
+          custody_key="$(openssl rand -hex 32)"
+          postgres_password="$(openssl rand -hex 16)"
+
+          # local custody needs a base58-encoded 64-byte Solana keypair.
+          custody_private_key="$(node - <<'NODE'
+          const crypto = require("crypto");
+          const jwk = crypto.generateKeyPairSync("ed25519").privateKey.export({ format: "jwk" });
+          const secret = Buffer.concat([
+            Buffer.from(jwk.d, "base64url"),
+            Buffer.from(jwk.x, "base64url"),
+          ]);
+          const ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+          const digits = [0];
+          for (const byte of secret) {
+            let carry = byte;
+            for (let i = 0; i < digits.length; i++) {
+              carry += digits[i] << 8;
+              digits[i] = carry % 58;
+              carry = (carry / 58) | 0;
+            }
+            while (carry) {
+              digits.push(carry % 58);
+              carry = (carry / 58) | 0;
+            }
+          }
+          let out = "";
+          for (let i = 0; i < secret.length && secret[i] === 0; i++) out += "1";
+          for (let i = digits.length - 1; i >= 0; i--) out += ALPHABET[digits[i]];
+          process.stdout.write(out);
+          NODE
+          )"
+
+          echo "::add-mask::$pepper"
+          echo "::add-mask::$custody_key"
+          echo "::add-mask::$postgres_password"
+          echo "::add-mask::$custody_private_key"
+
+          umask 077
+          # Compose interpolates the whole file, so sdp-web's required Clerk vars
+          # need a value even though only the api stack is started.
+          cat >"$INSTALL_DIR/.env" <<EOF
+          SDP_VERSION=$SDP_VERSION
+          POSTGRES_PASSWORD=$postgres_password
+          API_KEY_PEPPER=$pepper
+          CUSTODY_ENCRYPTION_KEY=$custody_key
+          CUSTODY_PRIVATE_KEY=$custody_private_key
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=unused
+          CLERK_SECRET_KEY=unused
+          EOF
+
+          echo "API_KEY_PEPPER=$pepper" >>"$GITHUB_ENV"
+
+      - name: Start the stack
+        working-directory: ${{ env.INSTALL_DIR }}
+        run: |
+          set -euo pipefail
+          docker compose pull sdp-api
+          # Pulls in postgres, redis and migrate via depends_on; web/docs stay down.
+          docker compose up -d sdp-api
+
+      - name: Wait for /health
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 60); do
+            if [ "$(curl -fsS -o /dev/null -w '%{http_code}' http://localhost:8787/health || true)" = "200" ]; then
+              echo "healthy after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "sdp-api did not become healthy within 60s"
+          exit 1
+
+      - name: Seed an API key
+        working-directory: ${{ env.INSTALL_DIR }}
+        run: |
+          set -euo pipefail
+
+          api_key="sk_test_$(openssl rand -hex 24)"
+          key_prefix="${api_key:0:11}"
+          # Must match the runtime: HMAC-SHA256(message=key, key=pepper), hex.
+          key_hash="$(printf '%s' "$api_key" \
+            | openssl dgst -sha256 -hmac "$API_KEY_PEPPER" -hex \
+            | awk '{print $NF}')"
+
+          echo "::add-mask::$api_key"
+          echo "::add-mask::$key_hash"
+          echo "SMOKE_API_KEY=$api_key" >>"$GITHUB_ENV"
+
+          # NULL permissions grants the wildcard scope, covering custody:admin below.
+          docker compose exec -T postgres \
+            psql -v ON_ERROR_STOP=1 -U sdp -d sdp \
+              -v key_hash="$key_hash" -v key_prefix="$key_prefix" <<'SQL'
+          INSERT INTO users (id, email, email_verified, name, status)
+            VALUES ('usr_smoke', 'smoke@localhost', 1, 'Smoke Test', 'active');
+          INSERT INTO organizations (id, name, slug, tier, status)
+            VALUES ('org_smoke', 'Smoke Test', 'smoke-test', 'enterprise', 'active');
+          INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
+            VALUES ('proj_smoke', 'org_smoke', 'Smoke Test', 'smoke-test', 'sandbox', 'active', 'usr_smoke');
+          INSERT INTO api_keys
+            (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, environment, status)
+            VALUES ('key_smoke', 'org_smoke', 'proj_smoke', 'usr_smoke', 'Smoke Key',
+                    :'key_prefix', :'key_hash', 'api_admin', 'sandbox', 'active');
+          SQL
+
+      - name: Initialize local custody
+        run: |
+          set -euo pipefail
+          code="$(curl -sS -o /tmp/init.json -w '%{http_code}' \
+            -X POST http://localhost:8787/v1/wallets/initialize \
+            -H "Authorization: Bearer $SMOKE_API_KEY" \
+            -H 'content-type: application/json' \
+            -d '{"provider":"local"}')"
+          echo "initialize -> $code"
+          case "$code" in 2??) ;; *) cat /tmp/init.json; exit 1 ;; esac
+
+      - name: Create a wallet
+        run: |
+          set -euo pipefail
+          code="$(curl -sS -o /tmp/wallet.json -w '%{http_code}' \
+            -X POST http://localhost:8787/v1/wallets/ \
+            -H "Authorization: Bearer $SMOKE_API_KEY" \
+            -H 'content-type: application/json' \
+            -d '{"provider":"local"}')"
+          echo "create wallet -> $code"
+          case "$code" in 2??) ;; *) cat /tmp/wallet.json; exit 1 ;; esac
+          jq -e '.data.wallet.publicKey | type == "string" and length > 0' /tmp/wallet.json >/dev/null
+
+      - name: Dump logs on failure
+        if: failure()
+        run: |
+          cd "$INSTALL_DIR" 2>/dev/null || exit 0
+          docker compose logs --no-color --timestamps || true
+
+      - name: Tear down
+        if: always()
+        run: |
+          cd "$INSTALL_DIR" 2>/dev/null || exit 0
+          docker compose down -v || true
