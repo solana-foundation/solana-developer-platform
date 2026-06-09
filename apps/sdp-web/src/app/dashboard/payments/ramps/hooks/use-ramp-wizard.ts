@@ -205,15 +205,16 @@ export function useRampWizard<TId extends string>(
     if (isRequirementsStep) {
       return requirements.isComplete;
     }
-    // Don't allow leaving the provider-selection step until the requirements
-    // answer has resolved — otherwise a fast Next (or a fetch that errored, not
-    // just one in flight) could fire the quote before the collected fields exist,
-    // or insert the requirements step under the user on retry.
+    // Block leaving the provider-selection step until the requirements answer has
+    // resolved AND isn't a blocker (fetch error, or an `unsupported` provider for
+    // this counterparty) — otherwise the quote could fire before collected fields
+    // exist / for an unsupported counterparty, or the step could appear under the
+    // user on retry.
     if (
       requirementsConfig &&
       currentStepId === requirementsConfig.insertAfter &&
       fields.provider !== null &&
-      !requirements.isResolved
+      (!requirements.isResolved || requirements.blockReason !== null)
     ) {
       return false;
     }
@@ -222,6 +223,7 @@ export function useRampWizard<TId extends string>(
     isRequirementsStep,
     requirements.isComplete,
     requirements.isResolved,
+    requirements.blockReason,
     requirementsConfig,
     currentStepId,
     fields,
@@ -349,7 +351,7 @@ export function useRampWizard<TId extends string>(
     collectedData: requirements.collectedData,
     setCollectedField: requirements.setField,
     requirementFields: requirements.fields,
-    requirementsError: requirements.error,
+    requirementsBlocker: requirements.blockReason,
     liveWallets,
     walletsLoading,
     liveWalletsError,

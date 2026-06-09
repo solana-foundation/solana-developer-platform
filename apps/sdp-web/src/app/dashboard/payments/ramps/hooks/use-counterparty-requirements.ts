@@ -49,8 +49,8 @@ export interface CounterpartyRequirementsState {
   isComplete: boolean;
   /** The requirements answer has loaded — the dynamic-step decision for this provider is known. */
   isResolved: boolean;
-  /** Surfaced message when the requirements lookup failed, so callers don't swallow it. */
-  error: string | null;
+  /** Why the user can't proceed past provider selection: a fetch error OR an `unsupported` reason. null when fine. */
+  blockReason: string | null;
 }
 
 /**
@@ -113,6 +113,15 @@ export function useCounterpartyRequirements(
     [fields, collectedData]
   );
 
+  // Every status the provider can return is handled: "collect" → needsCollection,
+  // "ready" → proceed, "unsupported" → block with its reason, plus fetch errors.
+  let blockReason: string | null = null;
+  if (error instanceof Error) {
+    blockReason = error.message;
+  } else if (data?.status === "unsupported") {
+    blockReason = data.reason;
+  }
+
   return {
     fields,
     collectedData,
@@ -120,6 +129,6 @@ export function useCounterpartyRequirements(
     needsCollection: data?.status === "collect",
     isComplete,
     isResolved: data !== undefined,
-    error: error instanceof Error ? error.message : null,
+    blockReason,
   };
 }

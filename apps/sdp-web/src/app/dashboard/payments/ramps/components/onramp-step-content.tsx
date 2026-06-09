@@ -195,7 +195,7 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
     requirementFields,
     collectedData,
     setCollectedField,
-    requirementsError,
+    requirementsBlocker,
   } = wizard;
 
   if (currentStepId === "DEPOSIT") {
@@ -226,9 +226,9 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
           onPairChange={handlePairChange}
           onProviderSelect={(nextProvider) => setField("provider", nextProvider)}
         />
-        {requirementsError ? (
+        {requirementsBlocker ? (
           <div className="rounded-2xl border border-status-error-border bg-status-error-bg px-4 py-3 text-sm text-status-error-text">
-            {requirementsError}
+            {requirementsBlocker}
           </div>
         ) : null}
       </div>
