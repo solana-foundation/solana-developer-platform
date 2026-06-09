@@ -1,37 +1,72 @@
 "use client";
 
-import type { EnvField } from "@sdp/env-config";
+import { type EnvField, parseList, type Values } from "@sdp/env-config";
 
 export interface FieldRowProps {
   field: EnvField;
   value: string;
+  values: Values;
   error?: string;
   onChange: (key: string, value: string) => void;
   onRegenerate: (key: string) => void;
 }
 
-export function FieldRow({ field, value, error, onChange, onRegenerate }: FieldRowProps) {
+export function FieldRow({ field, value, values, error, onChange, onRegenerate }: FieldRowProps) {
   const id = `sdp-cfg-${field.key}`;
   const errorId = error ? `${id}-error` : undefined;
   const helpId = field.help ? `${id}-help` : undefined;
   const describedBy = [helpId, errorId].filter(Boolean).join(" ") || undefined;
 
-  const isSecret = field.kind === "secret";
+  // A field is auto-managed when `secretWhen` resolves true: the value is
+  // generated for the operator (e.g. POSTGRES_PASSWORD in auto-mode), so the
+  // input is display-only and is changed via Regenerate, not typing.
+  const isAutoManaged = field.secretWhen?.(values) ?? false;
+  const isSecret = field.kind === "secret" || isAutoManaged;
   const inputType = field.kind === "password" || field.kind === "secret" ? "password" : "text";
+  const options = field.optionsWhen ? field.optionsWhen(values) : (field.options ?? []);
+  const selected = field.kind === "multiselect" ? parseList(value) : [];
 
   return (
     <div className="sdp-cfg-field">
-      <label className="sdp-cfg-label" htmlFor={id}>
-        {field.label}
-        {field.required ? (
-          <span aria-hidden="true" className="sdp-cfg-required">
-            {" *"}
-          </span>
-        ) : null}
-      </label>
+      {field.kind !== "multiselect" ? (
+        <label className="sdp-cfg-label" htmlFor={id}>
+          {field.label}
+          {field.required ? (
+            <span aria-hidden="true" className="sdp-cfg-required">
+              {" *"}
+            </span>
+          ) : null}
+        </label>
+      ) : null}
 
       <div className="sdp-cfg-control">
-        {field.kind === "select" ? (
+        {field.kind === "multiselect" ? (
+          <fieldset aria-describedby={describedBy} className="sdp-cfg-checks">
+            <legend className="sdp-cfg-label">
+              {field.label}
+              {field.required ? (
+                <span aria-hidden="true" className="sdp-cfg-required">
+                  {" *"}
+                </span>
+              ) : null}
+            </legend>
+            {options.map((opt) => (
+              <label className="sdp-cfg-check" key={opt.value}>
+                <input
+                  checked={selected.includes(opt.value)}
+                  onChange={(e) => {
+                    const next = e.target.checked
+                      ? [...selected, opt.value]
+                      : selected.filter((s) => s !== opt.value);
+                    onChange(field.key, next.join(","));
+                  }}
+                  type="checkbox"
+                />
+                {opt.label}
+              </label>
+            ))}
+          </fieldset>
+        ) : field.kind === "select" ? (
           <select
             aria-describedby={describedBy}
             aria-invalid={error ? true : undefined}
@@ -40,7 +75,7 @@ export function FieldRow({ field, value, error, onChange, onRegenerate }: FieldR
             onChange={(e) => onChange(field.key, e.target.value)}
             value={value}
           >
-            {field.options?.map((opt) => (
+            {options.map((opt) => (
               <option key={opt.value} value={opt.value}>
                 {opt.label}
               </option>
@@ -54,6 +89,7 @@ export function FieldRow({ field, value, error, onChange, onRegenerate }: FieldR
             id={id}
             onChange={(e) => onChange(field.key, e.target.value)}
             placeholder={field.defaultValue}
+            readOnly={isAutoManaged}
             type={inputType}
             value={value}
           />
@@ -114,6 +150,7 @@ export function SectionBlock({
       onChange={onChange}
       onRegenerate={onRegenerate}
       value={values[field.key] ?? ""}
+      values={values}
     />
   ));
 

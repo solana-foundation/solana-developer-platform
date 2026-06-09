@@ -30,6 +30,10 @@ import { type RampFields, rampSelectionSchema } from "../schema";
 const PAYMENTS_ACTION_WALLETS_KEY = "payments-action-wallets";
 const PAYMENTS_ACTION_COUNTERPARTIES_KEY = "payments-action-counterparties";
 
+export function isTerminalRampTransferStatus(status: string) {
+  return status === "completed" || status === "failed" || status === "expired";
+}
+
 export type RampWizardStep<TId extends string = string> = {
   id: TId;
   label: string;
@@ -86,10 +90,21 @@ export interface UseRampWizardProps {
   walletsError: string | null;
   enabledRampProviders: RampProviderId[];
   counterpartiesResult: CounterpartiesResult;
+  /** Counterparty chosen upstream; seeds the form and is no longer picked in-wizard. */
+  initialCounterpartyId?: string;
+  /** Invoked when the user goes back from the first step. */
+  onExit?: () => void;
 }
 
 export function useRampWizard<TId extends string>(
-  { wallets, walletsError, enabledRampProviders, counterpartiesResult }: UseRampWizardProps,
+  {
+    wallets,
+    walletsError,
+    enabledRampProviders,
+    counterpartiesResult,
+    initialCounterpartyId = "",
+    onExit,
+  }: UseRampWizardProps,
   config: RampWizardConfig<TId>
 ) {
   const router = useRouter();
@@ -103,7 +118,7 @@ export function useRampWizard<TId extends string>(
     walletId: "",
     amount: "",
     provider: null,
-    counterpartyId: "",
+    counterpartyId: initialCounterpartyId,
   });
 
   const { data: swrWallets, error: walletsFetchError } = useSWR<PaymentsDashboardWallet[]>(
@@ -186,6 +201,24 @@ export function useRampWizard<TId extends string>(
     }
   };
 
+  const refreshQuote = async () => {
+    if (!config.selectionSchema.safeParse(fields).success || !fields.provider) {
+      return;
+    }
+    try {
+      const created = await createRampQuote(
+        config.quoteEndpoint,
+        config.buildQuotePayload({
+          fields,
+          provider: fields.provider,
+          selectedRampPair,
+          cryptoToken: toRampCryptoToken(selectedRampPair.assetRail),
+        })
+      );
+      setQuote(created);
+    } catch {}
+  };
+
   const handlePrimary = async () => {
     if (!canProceed) {
       return;
@@ -203,10 +236,22 @@ export function useRampWizard<TId extends string>(
 
   const handleSecondary = () => {
     if (stepIndex === 0) {
+      if (onExit) {
+        onExit();
+        return;
+      }
       router.push("/dashboard/payments");
       return;
     }
     setStepIndex((current) => Math.max(0, current - 1));
+  };
+
+  const finish = () => {
+    if (onExit) {
+      onExit();
+      return;
+    }
+    router.push("/dashboard/payments");
   };
 
   const handlePairChange = (nextPair: SelectedRampPair) => {
@@ -241,11 +286,13 @@ export function useRampWizard<TId extends string>(
     fields,
     setField,
     quote,
+    refreshQuote,
     hostedQuoteLoading,
     counterpartyDialogOpen,
     setCounterpartyDialogOpen,
     handlePrimary,
     handleSecondary,
+    finish,
     handlePairChange,
     handleCounterpartyCreated,
   };

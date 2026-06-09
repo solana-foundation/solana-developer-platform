@@ -1,4 +1,19 @@
-import type { Counterparty, CounterpartyResponse, ListCounterpartiesResponse } from "@sdp/types";
+import {
+  COUNTERPARTY_EMPLOYMENT_STATUSES,
+  COUNTERPARTY_ENTITY_TYPES,
+  COUNTERPARTY_ID_TYPES,
+  COUNTERPARTY_INDUSTRY_SECTORS,
+  COUNTERPARTY_INTENDED_USE,
+  COUNTERPARTY_PEP_STATUSES,
+  COUNTERPARTY_SOURCE_OF_FUNDS,
+  COUNTERPARTY_YEARLY_INCOME,
+  COUNTRIES,
+  type Counterparty,
+  type CounterpartyFieldOptionsResponse,
+  type CounterpartyResponse,
+  type ListCounterpartiesResponse,
+  US_STATES,
+} from "@sdp/types";
 import { z } from "zod";
 import { getDb } from "@/db";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
@@ -38,6 +53,26 @@ function mapToCounterparty(row: CounterpartyRow): Counterparty {
     updatedAt: row.updated_at,
   };
 }
+
+export const getCounterpartyFieldOptions = async (c: AppContext) => {
+  const response: CounterpartyFieldOptionsResponse = {
+    fields: {
+      entityTypes: COUNTERPARTY_ENTITY_TYPES,
+      governmentIdTypes: COUNTERPARTY_ID_TYPES,
+      compliance: {
+        employmentStatuses: COUNTERPARTY_EMPLOYMENT_STATUSES,
+        sourceOfFunds: COUNTERPARTY_SOURCE_OF_FUNDS,
+        pepStatuses: COUNTERPARTY_PEP_STATUSES,
+        intendedUseOfAccount: COUNTERPARTY_INTENDED_USE,
+        estimatedYearlyIncome: COUNTERPARTY_YEARLY_INCOME,
+        employmentIndustrySectors: COUNTERPARTY_INDUSTRY_SECTORS,
+      },
+      countries: COUNTRIES,
+      usStates: US_STATES,
+    },
+  };
+  return success(c, response);
+};
 
 export const listCounterparties = async (c: AppContext) => {
   const auth = getAuth(c);

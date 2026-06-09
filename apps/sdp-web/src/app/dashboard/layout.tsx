@@ -9,6 +9,7 @@ import { NetworkDebugProvider } from "@/contexts/network-debug-context";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { type DashboardCacheScope, getDashboardCacheScopeKey } from "@/lib/dashboard-cache-scope";
+import { getDashboardFeatureFlags } from "@/lib/dashboard-feature-flags.server";
 import { PROJECT_COOKIE_NAME } from "@/lib/project-cookie";
 import { sdpApiFetch } from "@/lib/sdp-api";
 
@@ -35,6 +36,7 @@ export default async function DashboardLayout({ children }: { children: ReactNod
   } satisfies DashboardCacheScope;
 
   const projects = await loadProjects();
+  const featureFlags = await getDashboardFeatureFlags();
   const cookieStore = await cookies();
   const cookieProjectId = cookieStore.get(PROJECT_COOKIE_NAME)?.value ?? null;
   const initialSelectedProjectId =
@@ -47,6 +49,7 @@ export default async function DashboardLayout({ children }: { children: ReactNod
       key={getDashboardCacheScopeKey(dashboardCacheScope)}
       dashboardAccess={dashboardAccess}
       serverDashboardCacheScope={dashboardCacheScope}
+      featureFlags={featureFlags}
       projects={projects}
       initialSelectedProjectId={initialSelectedProjectId}
     >

@@ -125,7 +125,7 @@ export function createPostgresCounterpartyAccountsRepository(
     },
 
     async archiveCounterpartyAccount(input: ArchiveCounterpartyAccountInput) {
-      const result = await db
+      const row = await db
         .prepare(
           `UPDATE counterparty_accounts
              SET status = 'archived',
@@ -134,7 +134,8 @@ export function createPostgresCounterpartyAccountsRepository(
              AND id = ?
              AND organization_id = ?
              AND project_id = ?
-             AND status = 'active'`
+             AND status = 'active'
+           RETURNING *`
         )
         .bind(
           input.counterpartyId,
@@ -142,17 +143,9 @@ export function createPostgresCounterpartyAccountsRepository(
           input.organizationId,
           input.projectId
         )
-        .run();
+        .first<Record<string, unknown>>();
 
-      if (result === 0) {
-        return null;
-      }
-
-      return getCounterpartyAccountByIdInternal(db, {
-        counterpartyAccountId: input.counterpartyAccountId,
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-      });
+      return row ? mapCounterpartyAccountRow(row) : null;
     },
 
     async getCounterpartyAccountById(params) {

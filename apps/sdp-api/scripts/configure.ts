@@ -23,8 +23,10 @@ import {
   FIELDS,
   generateEnv,
   isFieldVisible,
+  parseList,
   randomHex32,
   SECTIONS,
+  type SelectOption,
   type Values,
   validateValues,
 } from "@sdp/env-config";
@@ -47,7 +49,18 @@ export function collectFromEnv(env: Record<string, string | undefined>): Values 
   if (typeof env.DATABASE_URL === "string" && env.DATABASE_URL !== "") {
     values.DATABASE_MODE = "external";
   }
-  for (const key of autoSecretKeys()) {
+  // Keep SIGNING_PROVIDERS and the default SIGNING_PROVIDER consistent for the
+  // non-interactive path: derive the list from a bare provider, or pick the
+  // first listed provider as the default when only the list was given.
+  if (env.SIGNING_PROVIDERS === undefined) {
+    values.SIGNING_PROVIDERS = values.SIGNING_PROVIDER || "local";
+  } else if (env.SIGNING_PROVIDER === undefined) {
+    const list = parseList(values.SIGNING_PROVIDERS);
+    if (list.length > 0) {
+      values.SIGNING_PROVIDER = list[0];
+    }
+  }
+  for (const key of autoSecretKeys(values)) {
     if (!values[key]) values[key] = randomHex32();
   }
   return values;
@@ -78,17 +91,27 @@ class PromptAbortError extends Error {
 }
 
 /** Resolve a select answer (1-based index or option value) to a stored value. */
-async function promptSelect(field: EnvField, current: string, ask: Asker): Promise<string> {
-  const options = field.options ?? [];
+async function promptSelect(
+  field: EnvField,
+  current: string,
+  ask: Asker,
+  values: Values
+): Promise<string> {
+  const options = (field.optionsWhen ? field.optionsWhen(values) : field.options) ?? [];
+  // If the carried default is no longer a valid option, fall back to the first.
+  const safeCurrent = options.some((o) => o.value === current)
+    ? current
+    : (options[0]?.value ?? current);
   note(field.label);
+  if (field.help) note(field.help);
   options.forEach((opt, i) => {
-    const marker = opt.value === current ? " (default)" : "";
+    const marker = opt.value === safeCurrent ? " (default)" : "";
     note(`  ${i + 1}) ${opt.label}${marker}`);
   });
 
   for (;;) {
     const answer = (await ask("> ")).trim();
-    if (answer === "") return current;
+    if (answer === "") return safeCurrent;
 
     if (/^\d+$/.test(answer)) {
       const byIndex = Number.parseInt(answer, 10);
@@ -103,6 +126,77 @@ async function promptSelect(field: EnvField, current: string, ask: Asker): Promi
     note(
       `Unknown option: ${answer} — enter a number 1-${options.length}, an option value, or blank.`
     );
+  }
+}
+
+/**
+ * Resolve raw multiselect tokens (1-based indices or option values) to option
+ * values, preserving order and dropping duplicates. Returns the first
+ * unrecognized token as an error rather than silently dropping it.
+ */
+export function resolveMultiSelectTokens(
+  tokens: string[],
+  options: SelectOption[]
+): { values: string[] } | { error: string } {
+  const resolved: string[] = [];
+  for (const tok of tokens) {
+    if (/^\d+$/.test(tok)) {
+      const idx = Number.parseInt(tok, 10);
+      if (idx >= 1 && idx <= options.length) {
+        resolved.push(options[idx - 1].value);
+        continue;
+      }
+    } else if (options.some((o) => o.value === tok)) {
+      resolved.push(tok);
+      continue;
+    }
+    return { error: tok };
+  }
+  return { values: [...new Set(resolved)] };
+}
+
+/** Resolve a multiselect answer (comma-separated indices or values) to a stored list. */
+async function promptMultiSelect(
+  field: EnvField,
+  current: string,
+  ask: Asker,
+  values: Values
+): Promise<string> {
+  const options = (field.optionsWhen ? field.optionsWhen(values) : field.options) ?? [];
+  const currentList = parseList(current);
+  note(`${field.label}${field.required ? " *" : ""}`);
+  if (field.help) note(field.help);
+  options.forEach((opt, i) => {
+    const marker = currentList.includes(opt.value) ? " (selected)" : "";
+    note(`  ${i + 1}) ${opt.label}${marker}`);
+  });
+  note("Enter comma-separated numbers or values (blank keeps current).");
+
+  for (;;) {
+    const answer = (await ask("> ")).trim();
+    if (answer === "") {
+      if (field.required && currentList.length === 0) {
+        note(`${field.label} is required.`);
+        continue;
+      }
+      return currentList.join(",");
+    }
+
+    const tokens = answer
+      .split(",")
+      .map((t) => t.trim())
+      .filter(Boolean);
+    const result = resolveMultiSelectTokens(tokens, options);
+    if ("error" in result) {
+      note(`Unknown option: ${result.error} — enter numbers 1-${options.length} or option values.`);
+      continue;
+    }
+    const unique = result.values;
+    if (field.required && unique.length === 0) {
+      note(`${field.label} is required.`);
+      continue;
+    }
+    return unique.join(",");
   }
 }
 
@@ -141,13 +235,15 @@ async function promptField(
   field: EnvField,
   current: string,
   ask: Asker,
-  askMasked: MaskedAsker
+  askMasked: MaskedAsker,
+  values: Values
 ): Promise<string> {
-  if (field.kind === "secret") {
+  if (field.kind === "secret" || (field.secretWhen?.(values) ?? false)) {
     note(`${field.label}: generated`);
     return randomHex32();
   }
-  if (field.kind === "select") return promptSelect(field, current, ask);
+  if (field.kind === "multiselect") return promptMultiSelect(field, current, ask, values);
+  if (field.kind === "select") return promptSelect(field, current, ask, values);
   return promptText(field, current, ask, askMasked);
 }
 
@@ -222,12 +318,18 @@ async function collectInteractively(): Promise<Values> {
         if (meta) note(`\n# ${meta.title}`);
       }
 
-      values[field.key] = await promptField(field, values[field.key] ?? "", ask, askMasked);
+      values[field.key] = await promptField(field, values[field.key] ?? "", ask, askMasked, values);
     }
   } finally {
     rl.close();
   }
 
+  // Fill any auto-secret the prompt loop skipped, including an always-emitted
+  // field hidden by the current answers (e.g. POSTGRES_PASSWORD with an external
+  // database), which compose still requires.
+  for (const key of autoSecretKeys(values)) {
+    if (!values[key]) values[key] = randomHex32();
+  }
   return values;
 }
 

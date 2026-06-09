@@ -6,6 +6,7 @@ import {
   FIELDS,
   generateEnv,
   isFieldVisible,
+  parseList,
   randomHex32,
   SECTIONS,
   type Values,
@@ -13,9 +14,6 @@ import {
 } from "@sdp/env-config";
 import { useEffect, useMemo, useState } from "react";
 import { FieldRow, SectionBlock } from "./FieldRenderer";
-
-const SOURCE_URL =
-  "https://github.com/solana-foundation/solana-developer-platform/tree/main/apps/sdp-docs/src/components/EnvConfigurator";
 
 /**
  * Seed defaults only. Secrets are filled on the client after mount (see useEffect)
@@ -44,29 +42,6 @@ const STYLES = `
 }
 .sdp-cfg * {
   box-sizing: border-box;
-}
-.sdp-cfg-banner {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 14px;
-  padding: 12px 16px;
-  margin-bottom: 20px;
-  border: 1px solid var(--cfg-border);
-  border-radius: 10px;
-  background: var(--cfg-surface);
-  font-size: 13px;
-  color: var(--cfg-text);
-}
-.sdp-cfg-banner strong {
-  color: var(--cfg-ink);
-}
-.sdp-cfg-banner a {
-  color: var(--cfg-ink);
-  font-weight: 650;
-  text-decoration: underline;
-  text-underline-offset: 3px;
-  white-space: nowrap;
 }
 .sdp-cfg-layout {
   display: grid;
@@ -131,6 +106,30 @@ const STYLES = `
   display: flex;
   gap: 8px;
   align-items: stretch;
+}
+.sdp-cfg-checks {
+  flex: 1 1 auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+.sdp-cfg-checks legend {
+  padding: 0;
+  margin-bottom: 6px;
+}
+.sdp-cfg-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  color: var(--cfg-ink);
+}
+.sdp-cfg-check input {
+  accent-color: var(--cfg-accent);
 }
 .sdp-cfg-input {
   flex: 1 1 auto;
@@ -252,7 +251,7 @@ export function EnvConfigurator() {
   useEffect(() => {
     setValues((prev) => {
       const next = { ...prev };
-      for (const key of autoSecretKeys()) {
+      for (const key of autoSecretKeys(prev)) {
         next[key] = randomHex32();
       }
       return next;
@@ -268,7 +267,29 @@ export function EnvConfigurator() {
   useEffect(() => setCopied(false), [env]);
 
   function setValue(key: string, value: string) {
-    setValues((prev) => ({ ...prev, [key]: value }));
+    setValues((prev) => {
+      const next = { ...prev, [key]: value };
+      // Switching the Postgres password mode resets the value: manual clears it
+      // for typed entry; auto fills a fresh generated secret.
+      if (key === "POSTGRES_PASSWORD_MODE") {
+        next.POSTGRES_PASSWORD = value === "manual" ? "" : randomHex32();
+      }
+      // An external database hides the bundled-Postgres password fields, but
+      // compose still requires POSTGRES_PASSWORD. Ensure one exists so the .env
+      // stays bootable even if manual mode had cleared it before the switch.
+      if (key === "DATABASE_MODE" && value !== "bundled" && !next.POSTGRES_PASSWORD) {
+        next.POSTGRES_PASSWORD = randomHex32();
+      }
+      // Keep the default provider valid: if it drops out of the selected set,
+      // fall back to the first selected provider.
+      if (key === "SIGNING_PROVIDERS") {
+        const selected = parseList(value);
+        if (!selected.includes(next.SIGNING_PROVIDER)) {
+          next.SIGNING_PROVIDER = selected[0] ?? "";
+        }
+      }
+      return next;
+    });
   }
 
   function regenerate(key: string) {
@@ -298,16 +319,6 @@ export function EnvConfigurator() {
     <div className="sdp-cfg">
       {/* biome-ignore lint/security/noDangerouslySetInnerHtml: static, component-scoped stylesheet with no user input */}
       <style dangerouslySetInnerHTML={{ __html: STYLES }} />
-
-      <div className="sdp-cfg-banner">
-        <span>
-          <strong>Zero outbound.</strong> Don't trust us? Disconnect your network — this form still
-          generates the .env locally.
-        </span>
-        <a href={SOURCE_URL} rel="noreferrer" target="_blank">
-          View source
-        </a>
-      </div>
 
       <div className="sdp-cfg-layout">
         <div className="sdp-cfg-form">

@@ -87,5 +87,17 @@ export interface CounterpartiesRepository {
     organizationId: string;
     projectId: string;
   }): Promise<CounterpartyRow | null>;
+  findCounterpartyByBvnkCustomerReference(
+    customerReference: string
+  ): Promise<CounterpartyRow | null>;
+  patchBvnkCustomerByReference(params: {
+    customerReference: string;
+    customer: Record<string, unknown>;
+  }): Promise<void>;
+  patchBvnkWalletByReference(params: {
+    customerReference: string;
+    walletKey: string;
+    wallet: Record<string, unknown>;
+  }): Promise<void>;
   listCounterparties(params: ListCounterpartiesInput): Promise<ListCounterpartiesResult>;
 }

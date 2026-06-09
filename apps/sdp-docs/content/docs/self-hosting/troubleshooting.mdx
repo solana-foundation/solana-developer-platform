@@ -1,0 +1,78 @@
+---
+title: Troubleshooting
+description: Diagnose common startup and configuration failures on a self-hosted stack.
+---
+
+Most self-hosting problems surface at startup. Start by looking at the service
+state and logs:
+
+```bash
+cd ~/sdp
+docker compose ps
+docker compose logs -f sdp-api
+```
+
+## Docker is not ready
+
+The install script checks for Docker up front. If you see that Docker is not
+installed, that Compose v2 is unavailable, or that the daemon is unreachable,
+install or start Docker and retry — see the
+[Docker Engine](https://docs.docker.com/engine/install/) and
+[Compose](https://docs.docker.com/compose/install/) docs.
+
+## A required variable is missing
+
+`compose.yml` fails fast when a required variable is unset, with a message such
+as `set POSTGRES_PASSWORD in .env`. Make sure a `.env` exists next to
+`compose.yml` and fills in every required variable. The
+[configurator](/docs/self-hosting/configurator) produces a complete file; the
+[environment reference](/docs/self-hosting/env-reference) lists what is required.
+
+## Images won't pull
+
+If `docker compose pull` reports access denied or a missing manifest:
+
+- Confirm `SDP_IMAGE_REGISTRY` and `SDP_VERSION` point at a registry and tag you
+  can reach.
+- Pull a single image directly to see the underlying error, e.g.
+  `docker pull ghcr.io/solana-foundation/sdp/sdp-api:latest`.
+- If the registry is private, run `docker login` for it first.
+
+## Port already in use
+
+The API, web, and docs default to ports `8787`, `3000`, and `3001`. If another
+process holds one of them, the service won't bind. Override the host port in
+`.env` with `SDP_API_PORT`, `SDP_WEB_PORT`, or `SDP_DOCS_PORT` and run
+`docker compose up -d` again.
+
+## Migrations failed
+
+`sdp-migrate` runs once before the API starts; if it fails, the API stays down.
+Inspect it with:
+
+```bash
+docker compose logs sdp-migrate
+```
+
+A failure here is usually a database connection problem — check `POSTGRES_*` (or
+`DATABASE_URL`) and that the `postgres` service is healthy in `docker compose ps`.
+
+## Database connection refused
+
+The API and migration services wait for Postgres to report healthy before
+starting. If they still can't connect, verify the credentials in `.env`, and for
+an external database (`DATABASE_URL` set) that it is reachable from inside the
+Docker network.
+
+## Authentication errors in the dashboard
+
+Sign-in problems point at the Clerk configuration. Re-check
+`NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`, and `CLERK_ISSUER`
+against your Clerk application, and confirm the keys match the environment
+(development vs production) you intend to run.
+
+## Still stuck?
+
+Capture the failing service's logs and your (secret-redacted) `.env` settings,
+then open an issue on the
+[project repository](https://github.com/solana-foundation/solana-developer-platform).

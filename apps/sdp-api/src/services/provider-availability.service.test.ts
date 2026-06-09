@@ -28,6 +28,9 @@ const providerEnvKeys = [
   "DFNS_CREDENTIAL_ID",
   "DFNS_PRIVATE_KEY",
   "ANCHORAGE_API_KEY",
+  "UTILA_SERVICE_ACCOUNT_EMAIL",
+  "UTILA_SERVICE_ACCOUNT_PRIVATE_KEY",
+  "UTILA_VAULT_ID",
   "SOLANA_RPC_URL",
   "SOLANA_RPC_ALCHEMY_URL",
   "SOLANA_RPC_HELIUS_URL",
@@ -43,7 +46,6 @@ const providerEnvKeys = [
   "MOONPAY_SECRET_KEY",
   "LIGHTSPARK_GRID_CLIENT_ID",
   "LIGHTSPARK_GRID_CLIENT_SECRET",
-  "BVNK_API_TOKEN",
   "BVNK_HAWK_AUTH_ID",
   "BVNK_HAWK_SECRET_KEY",
   "BVNK_WALLET_ID",
@@ -212,7 +214,6 @@ describe("provider-availability.service", () => {
     env.BVNK_WALLET_ID = "bvnk_wallet";
     env.BVNK_HAWK_AUTH_ID = "bvnk_hawk_auth_id";
     env.BVNK_HAWK_SECRET_KEY = undefined;
-    env.BVNK_API_TOKEN = undefined;
 
     const availability = await getProviderAvailability(env, getDb(env), TEST_ORG_ID);
 

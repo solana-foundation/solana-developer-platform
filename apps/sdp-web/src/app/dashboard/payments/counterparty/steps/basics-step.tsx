@@ -1,5 +1,6 @@
 "use client";
 
+import { HashIcon, IdCardIcon, MailIcon } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { EntityTypeToggle } from "../components/entity-type-toggle";
@@ -19,7 +20,9 @@ export function BasicsStep() {
       <div className="space-y-2">
         <Label htmlFor="displayName">Display name</Label>
         <Input
+          size="xl"
           id="displayName"
+          iconLeft={<IdCardIcon />}
           placeholder={values.entityType === "individual" ? "Jane Smith" : "Acme Corp"}
           value={values.displayName}
           onChange={(e) => setField("displayName", e.target.value)}
@@ -32,8 +35,10 @@ export function BasicsStep() {
       <div className="space-y-2">
         <Label htmlFor="email">Email</Label>
         <Input
+          size="xl"
           id="email"
           type="email"
+          iconLeft={<MailIcon />}
           placeholder="contact@example.com"
           value={values.email}
           onChange={(e) => setField("email", e.target.value)}
@@ -46,7 +51,9 @@ export function BasicsStep() {
           External ID <span className="font-normal text-text-extra-low">(optional)</span>
         </Label>
         <Input
+          size="xl"
           id="externalId"
+          iconLeft={<HashIcon />}
           placeholder="your-internal-id"
           value={values.externalId}
           onChange={(e) => setField("externalId", e.target.value)}

@@ -1,10 +1,18 @@
-import { COUNTERPARTY_ENTITY_TYPES, COUNTERPARTY_ID_TYPES } from "@sdp/types";
+import {
+  COUNTERPARTY_EMPLOYMENT_STATUSES,
+  COUNTERPARTY_ENTITY_TYPES,
+  COUNTERPARTY_ID_TYPES,
+  COUNTERPARTY_INDUSTRY_SECTORS,
+  COUNTERPARTY_INTENDED_USE,
+  COUNTERPARTY_PEP_STATUSES,
+  COUNTERPARTY_SOURCE_OF_FUNDS,
+  COUNTERPARTY_YEARLY_INCOME,
+  COUNTRY_CODES,
+} from "@sdp/types";
 import { z } from "zod";
 
-// TODO: strict country / subdivision validation deferred — see follow-up ticket
-// under PRO-1217. Until then, accept any string and let downstream providers
-// reject invalid codes.
-const countryCodeSchema = z.string().min(2).max(8);
+const countryCodeSchema = z.enum(COUNTRY_CODES);
+const currencyCodeSchema = z.string().trim().toUpperCase().length(3);
 const subdivisionCodeSchema = z.string().min(1).max(16);
 
 export const counterpartyAddressSchema = z.object({
@@ -27,6 +35,33 @@ export const counterpartyGovernmentIdSchema = z.object({
   expiryDate: z.iso.date().optional(),
 });
 
+export const counterpartyMonetaryAmountSchema = z.object({
+  amount: z.string().min(1).max(32),
+  currency: currencyCodeSchema,
+});
+
+export const counterpartyComplianceCddSchema = z.object({
+  employmentStatus: z.enum(COUNTERPARTY_EMPLOYMENT_STATUSES),
+  sourceOfFunds: z.enum(COUNTERPARTY_SOURCE_OF_FUNDS),
+  pepStatus: z.enum(COUNTERPARTY_PEP_STATUSES),
+  intendedUseOfAccount: z.enum(COUNTERPARTY_INTENDED_USE),
+  expectedMonthlyVolume: counterpartyMonetaryAmountSchema,
+  estimatedYearlyIncome: z.enum(COUNTERPARTY_YEARLY_INCOME),
+  employmentIndustrySector: z.enum(COUNTERPARTY_INDUSTRY_SECTORS),
+});
+
+export const counterpartyTaxIdentificationSchema = z.object({
+  number: z.string().min(1).max(64),
+  residenceCountryCode: countryCodeSchema,
+});
+
+export const counterpartyComplianceSchema = z.object({
+  taxIdentification: counterpartyTaxIdentificationSchema.optional(),
+  nationality: countryCodeSchema.optional(),
+  birthCountryCode: countryCodeSchema.optional(),
+  cdd: counterpartyComplianceCddSchema.optional(),
+});
+
 export const counterpartyIdentitySchema = z.looseObject({
   firstName: z.string().min(1).max(256).optional(),
   middleName: z.string().max(256).optional(),
@@ -38,6 +73,7 @@ export const counterpartyIdentitySchema = z.looseObject({
   birthCountryCode: countryCodeSchema.optional(),
   citizenshipCountryCode: countryCodeSchema.optional(),
   governmentId: counterpartyGovernmentIdSchema.optional(),
+  compliance: counterpartyComplianceSchema.optional(),
 });
 
 export const counterpartyEntityTypeSchema = z.enum(COUNTERPARTY_ENTITY_TYPES);

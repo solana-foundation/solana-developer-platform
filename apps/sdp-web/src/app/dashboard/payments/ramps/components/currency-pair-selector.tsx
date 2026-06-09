@@ -85,7 +85,7 @@ export function CurrencyPairSelector() {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_160px]">
+      <div className="grid items-end gap-4 sm:grid-cols-[minmax(0,1fr)_160px]">
         <div className="flex flex-col gap-2">
           <Label className="text-sm font-medium text-text-low" htmlFor={`${direction}-ramp-amount`}>
             Amount
@@ -101,7 +101,7 @@ export function CurrencyPairSelector() {
             onBlur={onAmountBlur}
             placeholder={isOfframp ? "1.0" : "20.00"}
             size="xl"
-            className="shadow-none ring-0 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none [&>span:first-child]:border-0 [&>span:first-child]:bg-border-extra-light"
+            className="h-[var(--input-height-xl)] shadow-none ring-0 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none [&>span:first-child]:h-[var(--input-height-xl)] [&>span:first-child]:border-0 [&>span:first-child]:bg-border-extra-light"
           />
         </div>
         {isOfframp ? assetCombobox : fiatCombobox}

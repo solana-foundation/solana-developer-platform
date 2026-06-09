@@ -22,6 +22,33 @@ export type {
 } from "./counterparty-account.repository";
 export { createPostgresCounterpartyAccountsRepository } from "./counterparty-account.repository.postgres";
 export type {
+  CreatePaymentRecurringPaymentInput,
+  ListPaymentRecurringPaymentsInput,
+  ListPaymentRecurringPaymentsResult,
+  PaymentRecurringPaymentRow,
+  PaymentRecurringPaymentsRepository,
+} from "./payment-recurring-payments.repository";
+export { createPostgresPaymentRecurringPaymentsRepository } from "./payment-recurring-payments.repository.postgres";
+export type {
+  CreatePaymentSubscriptionCollectionAttemptInput,
+  CreatePaymentSubscriptionInput,
+  CreatePaymentSubscriptionPlanInput,
+  ListPaymentSubscriptionCollectionAttemptsInput,
+  ListPaymentSubscriptionCollectionAttemptsResult,
+  ListPaymentSubscriptionPlansInput,
+  ListPaymentSubscriptionPlansResult,
+  ListPaymentSubscriptionsInput,
+  ListPaymentSubscriptionsResult,
+  PaymentSubscriptionCollectionAttemptRow,
+  PaymentSubscriptionPlanRow,
+  PaymentSubscriptionRow,
+  PaymentSubscriptionsRepository,
+  PaymentSubscriptionsRepositoryContext,
+  UpdatePaymentSubscriptionInput,
+  UpdatePaymentSubscriptionPlanInput,
+} from "./payment-subscriptions.repository";
+export { createPostgresPaymentSubscriptionsRepository } from "./payment-subscriptions.repository.postgres";
+export type {
   CreatePaymentTransferInput,
   PaymentsRepository,
   PaymentsRepositoryContext,
@@ -34,10 +61,17 @@ export type {
   UpdatePaymentTransferInput,
   UpsertPaymentWalletPolicyInput,
 } from "./payments.repository";
+export {
+  isRampTransferType,
+  RAMP_TRANSFER_TYPES,
+  WALLET_TRANSFER_TYPES,
+} from "./payments.repository";
 export { createPostgresPaymentsRepository } from "./payments.repository.postgres";
 export {
   createCounterpartiesRepository,
   createCounterpartyAccountsRepository,
+  createPaymentRecurringPaymentsRepository,
+  createPaymentSubscriptionsRepository,
   createPaymentsRepository,
   createTokenRepository,
 } from "./repository-factory";

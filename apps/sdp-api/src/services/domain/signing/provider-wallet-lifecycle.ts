@@ -7,6 +7,7 @@ import {
   provisionParaWallet,
   provisionPrivyWallet,
   provisionTurnkeyPrivateKey,
+  provisionUtilaWallet,
 } from "@/services/custody/provisioning";
 import {
   createDfnsApiClient,
@@ -25,6 +26,7 @@ import {
   normalizeParaWalletId,
   normalizePrivyWalletId,
   normalizeTurnkeyWalletId,
+  normalizeUtilaWalletId,
 } from "./provider-wallet-ids";
 
 export type ProvisionedProviderWallet = {
@@ -197,6 +199,24 @@ const providerWalletLifecycleRegistry = {
         apiBaseUrl: parsed.apiBaseUrl,
         walletId: denormalizeAnchorageWalletId(walletId),
       });
+    },
+  },
+  utila: {
+    create: async ({ env, params, parsed }) => {
+      // Create a new Solana sub-wallet inside the configured Utila vault.
+      const provisioned = await withProvisioningError("Utila", () =>
+        provisionUtilaWallet(env, {
+          vaultId: parsed.vaultId,
+          network: parsed.network,
+          apiBaseUrl: parsed.apiBaseUrl,
+          displayName: params.label,
+        })
+      );
+
+      return {
+        walletId: normalizeUtilaWalletId(provisioned.walletId),
+        publicKey: provisioned.address,
+      };
     },
   },
 } satisfies {

@@ -1,21 +1,37 @@
-import type { PaymentRampExecution, PaymentRampQuote, SdpEnvironment } from "@sdp/types";
-import { type CryptoRailId, parseFiatCurrency } from "@sdp/types/payment-rails";
+import { timingSafeEqual } from "node:crypto";
+import type {
+  PaymentRampEstimate,
+  PaymentRampExecution,
+  PaymentRampQuote,
+  SdpEnvironment,
+} from "@sdp/types";
+import {
+  type CryptoRailId,
+  getCryptoRailAssetLabel,
+  parseFiatCurrency,
+} from "@sdp/types/payment-rails";
 import { AppError, providerNotConfigured } from "@/lib/errors";
+import { hashString } from "@/lib/hash";
+import { providerFetchJson } from "../fetch";
 import { createProviderRampSupport, RAMP_RAIL_DUMPS, rampId, requireEnv } from "../shared";
 import type {
   MutableProviderRampSupport,
   ProviderRampSupport,
   RampDumpReader,
+  RampEstimateOfframpInput,
+  RampEstimateOnrampInput,
   RampExecuteOfframpInput,
   RampExecuteOnrampInput,
   RampOfframpQuoteInput,
   RampOnrampQuoteInput,
   RampProvider,
   RampRuntimeContext,
+  RampSettlementEvent,
   RampWebhookValidationContext,
   RampWebhookValidationResult,
 } from "../types";
 
+const MOONPAY_API_BASE_URL = "https://api.moonpay.com";
 const MOONPAY_ONRAMP_URL = "https://buy.moonpay.com";
 const MOONPAY_OFFRAMP_URL = "https://sell.moonpay.com";
 const MOONPAY_SANDBOX_ONRAMP_URL = "https://buy-sandbox.moonpay.com";
@@ -27,6 +43,23 @@ interface MoonpayConfig {
   secretKey: string;
   onrampUrl: string;
   offrampUrl: string;
+}
+
+interface MoonpayBuyQuoteResponse {
+  baseCurrencyAmount: number;
+  quoteCurrencyAmount: number;
+  quoteCurrencyPrice: number;
+  feeAmount: number;
+  networkFeeAmount: number;
+  extraFeeAmount: number;
+}
+
+interface MoonpaySellQuoteResponse {
+  baseCurrencyAmount: number;
+  quoteCurrencyAmount: number;
+  baseCurrencyPrice: number;
+  feeAmount: number;
+  extraFeeAmount: number;
 }
 
 function readMoonpayConfig(
@@ -79,6 +112,51 @@ function normalizeMoonpayCurrencyCode(value: string): string {
   return normalized.toLowerCase();
 }
 
+function readMoonpayWebhookKey(
+  env: Record<string, string | undefined>,
+  environment: SdpEnvironment
+): string {
+  const webhookKey = (
+    environment === "sandbox" ? env.MOONPAY_SANDBOX_WEBHOOK_KEY : env.MOONPAY_WEBHOOK_KEY
+  )?.trim();
+  if (!webhookKey) {
+    throw providerNotConfigured(
+      environment === "sandbox"
+        ? "MoonPay sandbox webhook key is not configured (MOONPAY_SANDBOX_WEBHOOK_KEY)."
+        : "MoonPay webhook key is not configured (MOONPAY_WEBHOOK_KEY)."
+    );
+  }
+  return webhookKey;
+}
+
+function parseMoonpaySignatureV2Header(
+  header: string
+): { timestamp: string; signature: string } | null {
+  let timestamp: string | null = null;
+  let signature: string | null = null;
+
+  for (const part of header.split(",")) {
+    const separatorIndex = part.indexOf("=");
+    if (separatorIndex === -1) {
+      continue;
+    }
+    const prefix = part.slice(0, separatorIndex).trim();
+    const value = part.slice(separatorIndex + 1).trim();
+    if (prefix === "t") {
+      timestamp = value;
+    }
+    if (prefix === "s") {
+      signature = value;
+    }
+  }
+
+  if (!timestamp || !signature) {
+    return null;
+  }
+
+  return { timestamp, signature };
+}
+
 async function moonpaySignature(unsignedQuery: string, secretKey: string): Promise<string> {
   const encoder = new TextEncoder();
   const key = await crypto.subtle.importKey(
@@ -128,6 +206,7 @@ interface MoonpayCurrencyEntry {
   code?: string;
   isSuspended?: boolean;
   isSellSupported?: boolean;
+  supportsTestMode?: boolean;
   minBuyAmount?: number | null;
   minSellAmount?: number | null;
   metadata?: { networkCode?: string };
@@ -153,6 +232,7 @@ function addCryptoSupport(
 ) {
   if (!entry.code) return;
   if (entry.isSuspended === true) return;
+  if (entry.supportsTestMode !== true) return;
   if (entry.metadata?.networkCode !== "solana") return;
   if (!isMoonpayCryptoCode(entry.code)) return;
 
@@ -172,6 +252,25 @@ function extractSupport(currencies: readonly MoonpayCurrencyEntry[]): ProviderRa
   }
 
   return support;
+}
+
+const MOONPAY_TRANSACTION_STATUS = {
+  waitingPayment: "awaiting_payment",
+  pending: "settling",
+  waitingAuthorization: "settling",
+  completed: "settled",
+  failed: "failed",
+} as const satisfies Record<string, RampSettlementEvent["kind"]>;
+type MoonpayTransactionStatus = keyof typeof MOONPAY_TRANSACTION_STATUS;
+
+interface MoonpayTransactionWebhook {
+  type: "transaction_created" | "transaction_updated" | "transaction_failed";
+  data: {
+    id: string;
+    status: MoonpayTransactionStatus;
+    externalTransactionId: string | null;
+    failureReason: string | null;
+  };
 }
 
 export class MoonpayRampClient implements RampProvider {
@@ -205,12 +304,136 @@ export class MoonpayRampClient implements RampProvider {
     );
   }
 
-  async validateWebhook(
-    _context: RampWebhookValidationContext
-  ): Promise<RampWebhookValidationResult> {
-    throw new AppError("PROVIDER_NOT_CONFIGURED", "MoonPay webhook validation is not implemented", {
-      provider: this.id,
+  async validateWebhook({
+    env,
+    environment,
+    headers,
+    rawBody,
+  }: RampWebhookValidationContext): Promise<RampWebhookValidationResult> {
+    const webhookKey = readMoonpayWebhookKey(env, environment);
+    const signatureHeader = headers.get("moonpay-signature-v2")?.trim();
+    if (!signatureHeader) {
+      throw new AppError("UNAUTHORIZED", "MoonPay webhook is missing Moonpay-Signature-V2 header", {
+        provider: this.id,
+      });
+    }
+
+    const parsed = parseMoonpaySignatureV2Header(signatureHeader);
+    if (!parsed) {
+      throw new AppError("UNAUTHORIZED", "MoonPay webhook signature header is malformed", {
+        provider: this.id,
+      });
+    }
+
+    if (!/^[0-9a-f]+$/i.test(parsed.signature) || parsed.signature.length % 2 !== 0) {
+      throw new AppError("UNAUTHORIZED", "Invalid MoonPay webhook signature", {
+        provider: this.id,
+      });
+    }
+
+    const expectedSignature = await hashString(`${parsed.timestamp}.${rawBody}`, webhookKey);
+    const expected = Buffer.from(expectedSignature, "hex");
+    const received = Buffer.from(parsed.signature, "hex");
+    if (expected.length !== received.length || !timingSafeEqual(expected, received)) {
+      throw new AppError("UNAUTHORIZED", "Invalid MoonPay webhook signature", {
+        provider: this.id,
+      });
+    }
+
+    let payload: unknown;
+    try {
+      payload = JSON.parse(rawBody);
+    } catch {
+      throw new AppError("BAD_REQUEST", "MoonPay webhook body must be valid JSON", {
+        provider: this.id,
+      });
+    }
+
+    return { provider: this.id, payload };
+  }
+
+  parseSettlementEvent(payload: unknown): RampSettlementEvent {
+    const { type, data } = payload as MoonpayTransactionWebhook;
+    if (
+      type !== "transaction_created" &&
+      type !== "transaction_updated" &&
+      type !== "transaction_failed"
+    ) {
+      return { provider: this.id, kind: "ignore", reason: `unsupported_event:${type}` };
+    }
+
+    const reference = data.externalTransactionId;
+    if (!reference) {
+      return { provider: this.id, kind: "ignore", reason: "missing_external_transaction_id" };
+    }
+
+    const kind = MOONPAY_TRANSACTION_STATUS[data.status];
+    if (!kind) {
+      return { provider: this.id, kind: "ignore", reason: `unsupported_status:${data.status}` };
+    }
+    if (kind === "failed") {
+      return { provider: this.id, kind, reference, error: data.failureReason ?? undefined };
+    }
+    return { provider: this.id, kind, reference };
+  }
+
+  async estimateOnramp(
+    { env, mode }: RampRuntimeContext,
+    input: RampEstimateOnrampInput
+  ): Promise<PaymentRampEstimate> {
+    const config = readMoonpayConfig(env, mode);
+    const currencyCode = normalizeMoonpayCurrencyCode(getCryptoRailAssetLabel(input.assetRail));
+    const url = new URL(`${MOONPAY_API_BASE_URL}/v3/currencies/${currencyCode}/buy_quote`);
+    url.searchParams.set("apiKey", config.apiKey);
+    url.searchParams.set("baseCurrencyCode", input.fiatCurrency.toLowerCase());
+    url.searchParams.set("baseCurrencyAmount", input.fiatAmount);
+    const quote = await providerFetchJson<MoonpayBuyQuoteResponse>(this.id, url.toString(), {
+      method: "GET",
     });
+    return {
+      provider: this.id,
+      direction: "onramp",
+      fiatCurrency: input.fiatCurrency,
+      assetRail: input.assetRail,
+      fiatAmount: String(quote.baseCurrencyAmount),
+      cryptoAmount: String(quote.quoteCurrencyAmount),
+      exchangeRate: String(quote.quoteCurrencyPrice),
+      fees: {
+        currency: input.fiatCurrency,
+        total: String(quote.feeAmount + quote.networkFeeAmount + quote.extraFeeAmount),
+        network: String(quote.networkFeeAmount),
+        provider: String(quote.feeAmount),
+      },
+    };
+  }
+
+  async estimateOfframp(
+    { env, mode }: RampRuntimeContext,
+    input: RampEstimateOfframpInput
+  ): Promise<PaymentRampEstimate> {
+    const config = readMoonpayConfig(env, mode);
+    const currencyCode = normalizeMoonpayCurrencyCode(getCryptoRailAssetLabel(input.assetRail));
+    const url = new URL(`${MOONPAY_API_BASE_URL}/v3/currencies/${currencyCode}/sell_quote`);
+    url.searchParams.set("apiKey", config.apiKey);
+    url.searchParams.set("quoteCurrencyCode", input.fiatCurrency.toLowerCase());
+    url.searchParams.set("baseCurrencyAmount", input.cryptoAmount);
+    const quote = await providerFetchJson<MoonpaySellQuoteResponse>(this.id, url.toString(), {
+      method: "GET",
+    });
+    return {
+      provider: this.id,
+      direction: "offramp",
+      fiatCurrency: input.fiatCurrency,
+      assetRail: input.assetRail,
+      fiatAmount: String(quote.quoteCurrencyAmount),
+      cryptoAmount: String(quote.baseCurrencyAmount),
+      exchangeRate: String(quote.baseCurrencyPrice),
+      fees: {
+        currency: input.fiatCurrency,
+        total: String(quote.feeAmount + quote.extraFeeAmount),
+        provider: String(quote.feeAmount),
+      },
+    };
   }
 
   async createOnrampQuote(
