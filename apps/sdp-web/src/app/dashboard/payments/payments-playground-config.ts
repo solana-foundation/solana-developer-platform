@@ -296,6 +296,12 @@ export function buildPaymentsPlaygroundEndpointConfigs({
           defaultValue: "moonpay",
           required: true,
         },
+        {
+          key: "counterpartyId",
+          label: "counterpartyId",
+          placeholder: "Counterparty ID (e.g. cpty_abc123)",
+          required: true,
+        },
         destinationWalletField,
         {
           key: "cryptoToken",
@@ -318,11 +324,6 @@ export function buildPaymentsPlaygroundEndpointConfigs({
           placeholder: "250.00",
           defaultValue: "250.00",
           required: true,
-        },
-        {
-          key: "kycReference",
-          label: "kycReference",
-          placeholder: "Optional KYC reference",
         },
         {
           key: "redirectUrl",
@@ -354,6 +355,12 @@ export function buildPaymentsPlaygroundEndpointConfigs({
           defaultValue: "moonpay",
           required: true,
         },
+        {
+          key: "counterpartyId",
+          label: "counterpartyId",
+          placeholder: "Counterparty ID (e.g. cpty_abc123)",
+          required: true,
+        },
         sourceWalletField,
         {
           key: "cryptoToken",
@@ -376,11 +383,6 @@ export function buildPaymentsPlaygroundEndpointConfigs({
           placeholder: "250.00",
           defaultValue: "250.00",
           required: true,
-        },
-        {
-          key: "kycReference",
-          label: "kycReference",
-          placeholder: "Optional KYC reference",
         },
         {
           key: "redirectUrl",
