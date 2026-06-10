@@ -221,7 +221,7 @@ async function executeOnrampWithProvider(
 
   switch (input.provider) {
     case "moonpay":
-      return RAMP_PROVIDER_CLIENTS.moonpay.executeOnramp(ctx, {
+      return await RAMP_PROVIDER_CLIENTS.moonpay.executeOnramp(ctx, {
         destinationWalletAddress,
         cryptoToken: input.cryptoToken,
         fiatCurrency: input.fiatCurrency,
@@ -230,7 +230,7 @@ async function executeOnrampWithProvider(
       });
     case "lightspark": {
       const providerCustomer = await ensureLightsparkCustomer(c, { counterparty, projectId });
-      return RAMP_PROVIDER_CLIENTS.lightspark.executeOnramp(ctx, {
+      return await RAMP_PROVIDER_CLIENTS.lightspark.executeOnramp(ctx, {
         destinationWalletAddress,
         cryptoToken: input.cryptoToken,
         fiatCurrency: input.fiatCurrency,
@@ -250,7 +250,7 @@ async function executeOnrampWithProvider(
         destinationWalletAddress,
         fiatCurrency: input.fiatCurrency,
       });
-      return RAMP_PROVIDER_CLIENTS.bvnk.executeOnramp(ctx, {
+      return await RAMP_PROVIDER_CLIENTS.bvnk.executeOnramp(ctx, {
         destinationWalletAddress,
         cryptoToken: input.cryptoToken,
         fiatCurrency: input.fiatCurrency,
@@ -305,7 +305,7 @@ async function executeOfframpWithProvider(
 
   switch (input.provider) {
     case "moonpay":
-      return RAMP_PROVIDER_CLIENTS.moonpay.executeOfframp(ctx, {
+      return await RAMP_PROVIDER_CLIENTS.moonpay.executeOfframp(ctx, {
         sourceWalletAddress,
         cryptoToken: input.cryptoToken,
         fiatCurrency: input.fiatCurrency,
@@ -314,7 +314,7 @@ async function executeOfframpWithProvider(
       });
     case "lightspark": {
       const providerCustomer = await ensureLightsparkCustomer(c, { counterparty, projectId });
-      return RAMP_PROVIDER_CLIENTS.lightspark.executeOfframp(ctx, {
+      return await RAMP_PROVIDER_CLIENTS.lightspark.executeOfframp(ctx, {
         sourceWalletAddress,
         cryptoToken: input.cryptoToken,
         fiatCurrency: input.fiatCurrency,
@@ -327,7 +327,7 @@ async function executeOfframpWithProvider(
       const providerCustomer = await ensureBvnkCustomer(c, counterparty, projectId, {
         fiatCurrency: input.fiatCurrency,
       });
-      return RAMP_PROVIDER_CLIENTS.bvnk.executeOfframp(ctx, {
+      return await RAMP_PROVIDER_CLIENTS.bvnk.executeOfframp(ctx, {
         sourceWalletAddress,
         cryptoToken: input.cryptoToken,
         fiatCurrency: input.fiatCurrency,
