@@ -239,11 +239,9 @@ Three API calls take a design from object literal to a deployed regulated stable
 
 ### 1. Extend the client for Idempotency-Key
 
-Every state-mutating execute endpoint in SDP (deploy, mint, burn, seize, force-burn, authority) supports an `Idempotency-Key` HTTP header. A retry with the same key replays the original response. A retry with a different key is a new request. The header is how you make network-level retries safe under partial failure. Extend the `SdpClient` from Section 2:
+Every state-mutating execute endpoint in SDP (deploy, mint, burn, seize, force-burn, authority) supports an `Idempotency-Key` HTTP header. A retry with the same key replays the original response. A retry with a different key is a new request. The header is how you make network-level retries safe under partial failure. Replace the `SdpClient` definition from Section 2 with this version:
 
 ```javascript
-import { randomUUID } from "node:crypto";
-
 class SdpClient {
   constructor(apiKey, baseUrl = BASE) {
     this.apiKey = apiKey;
@@ -271,7 +269,9 @@ class SdpClient {
   post(path, body, opts) { return this.request("POST", path, body, opts); }
 }
 
-const idempotencyKey = (op) => `${op}-${randomUUID()}`;
+const sdp = new SdpClient(process.env.SDP_API_KEY);
+const sdpAdmin = new SdpClient(process.env.SDP_ADMIN_API_KEY);
+const idempotencyKey = (op) => `${op}-${crypto.randomUUID()}`;
 ```
 
 Generate one key per logical operation, not per retry. Reuse the same key across retries of the same call.
