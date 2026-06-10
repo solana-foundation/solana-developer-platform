@@ -1,4 +1,4 @@
-import { COUNTERPARTY_ENTITY_TYPES } from "@sdp/types";
+import { COUNTERPARTY_ENTITY_TYPES, COUNTRY_CODES } from "@sdp/types";
 import { z } from "zod";
 
 // Empty string -> undefined, with bounds applied when present.
@@ -41,14 +41,38 @@ export const identitySchema = z.object({
   phone: optionalString(64),
 });
 
-export const addressSchema = z.object({
-  line1: z.string().trim().min(1, "Required").max(512),
-  line2: optionalString(512, 0),
-  city: z.string().trim().min(1, "Required").max(256),
-  postalCode: optionalString(32, 0),
-  countryCode: z.string().trim().toUpperCase().min(2, "Use a 2-letter code (e.g. US)").max(8),
-  subdivisionCode: optionalUppercase(16),
+export const addressSchema = z
+  .object({
+    line1: z.string().trim().min(1, "Required").max(512),
+    line2: optionalString(512, 0),
+    city: z.string().trim().min(1, "Required").max(256),
+    postalCode: optionalString(32, 0),
+    countryCode: enumField(COUNTRY_CODES, "Select a country"),
+    subdivisionCode: optionalUppercase(16),
+  })
+  .refine((v) => v.countryCode !== "US" || (v.subdivisionCode ?? "").length === 2, {
+    message: "Select a state",
+    path: ["subdivisionCode"],
+  });
+
+function enumField<const T extends readonly string[]>(values: T, message = "Required") {
+  return z
+    .string()
+    .refine((v): v is T[number] => (values as readonly string[]).includes(v), message);
+}
+
+// Only Solana is accepted for now; the list is the seam for adding networks later.
+export const CRYPTO_ACCOUNT_NETWORKS = ["solana"] as const;
+export type CryptoAccountNetwork = (typeof CRYPTO_ACCOUNT_NETWORKS)[number];
+
+export const cryptoAccountSchema = z.object({
+  label: optionalString(256),
+  network: z.enum(CRYPTO_ACCOUNT_NETWORKS),
+  address: z.string().trim().min(1, "Required").max(256),
 });
+
+export type CryptoAccountData = z.input<typeof cryptoAccountSchema>;
+export type CryptoAccountClean = z.output<typeof cryptoAccountSchema>;
 
 export type StepId = "basics" | "identity" | "address" | "review";
 

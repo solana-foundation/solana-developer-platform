@@ -66,6 +66,10 @@ export function isSolBalance(balance: Pick<CustodyWalletTokenBalance, "token" | 
   return balance.token.trim().toUpperCase() === "SOL" || balance.mint.trim() === SOL_MINT;
 }
 
+export function shortenAddress(address: string): string {
+  return address.length > 12 ? `${address.slice(0, 6)}…${address.slice(-4)}` : address;
+}
+
 export function formatDisplayAmount(value?: string, token?: string): string {
   if (!value) {
     return token ? `- ${token}` : "-";
@@ -116,6 +120,63 @@ export function formatTimestamp(value?: string): string {
     hour: "numeric",
     minute: "2-digit",
   }).format(date);
+}
+
+export function formatMinorCurrencyAmount(
+  amount: number | undefined,
+  currency: string,
+  decimals: number
+): string | null {
+  if (amount === undefined || !Number.isFinite(amount)) {
+    return null;
+  }
+
+  const value = amount / 10 ** decimals;
+  return `${value.toLocaleString(undefined, {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: decimals,
+  })} ${currency.toUpperCase()}`;
+}
+
+export function formatRampQuoteExpiry(expiresAt: string | undefined): string | null {
+  if (!expiresAt) {
+    return null;
+  }
+
+  const date = new Date(expiresAt);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+
+  return date.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+export function formatRampQuoteTimeRemaining(
+  expiresAt: string | undefined,
+  nowMs = Date.now()
+): string | null {
+  if (!expiresAt) {
+    return null;
+  }
+
+  const expiresAtMs = new Date(expiresAt).getTime();
+  if (Number.isNaN(expiresAtMs)) {
+    return null;
+  }
+
+  const remainingSeconds = Math.max(0, Math.ceil((expiresAtMs - nowMs) / 1000));
+  if (remainingSeconds === 0) {
+    return "Expired";
+  }
+
+  const minutes = Math.floor(remainingSeconds / 60);
+  const seconds = remainingSeconds % 60;
+  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
 }
 
 export function formatDirection(direction?: string): string {

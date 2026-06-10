@@ -1,5 +1,79 @@
 # Changelog
 
+## [0.27.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.26.0...v0.27.0) (2026-06-09)
+
+### Features
+
+* **self-hosted:** publish env template as default.env.example ([#425](https://github.com/solana-foundation/solana-developer-platform/pull/425)) ([21d9ccb](https://github.com/solana-foundation/solana-developer-platform/commit/21d9ccb9b35dc76f0b4252650a4172e4a608cb98))
+* **sdp-web:** HOO-491 Surface why mint/burn is disabled in token modal ([#403](https://github.com/solana-foundation/solana-developer-platform/pull/403)) ([8107db8](https://github.com/solana-foundation/solana-developer-platform/commit/8107db8065fe425102a40070540bcd67b4dd8198))
+* HOO-520 self-hosting docs section + .env configurator optimization ([#410](https://github.com/solana-foundation/solana-developer-platform/pull/410)) ([272265f](https://github.com/solana-foundation/solana-developer-platform/commit/272265f173cd1cf5bf2e2b5ca864d58c4897b4b2))
+* **payments:** add recurring payment records API [PRO-1294] ([#415](https://github.com/solana-foundation/solana-developer-platform/pull/415)) ([8310f95](https://github.com/solana-foundation/solana-developer-platform/commit/8310f9539cd347db7b2e5520120886f53bdfea7d))
+
+### Bug Fixes
+
+* ensure bvnk ui instruction comes from backend only ([#418](https://github.com/solana-foundation/solana-developer-platform/pull/418)) ([4422f3b](https://github.com/solana-foundation/solana-developer-platform/commit/4422f3bdf340ff7b58349b0ec5866df81e797f8c))
+
+### Maintenance
+
+* **self-hosted:** HOO-522 nightly smoke test on clean Ubuntu ([#422](https://github.com/solana-foundation/solana-developer-platform/pull/422)) ([2c095b1](https://github.com/solana-foundation/solana-developer-platform/commit/2c095b13b0b680272969c6af6cf04e7bbde70e88))
+* **deps:** bump the actions group with 6 updates ([#395](https://github.com/solana-foundation/solana-developer-platform/pull/395)) ([b944ba3](https://github.com/solana-foundation/solana-developer-platform/commit/b944ba3923ea0c1d2e347d66e5d1b1b2475b4abf))
+
+## [0.26.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.25.0...v0.26.0) (2026-06-05)
+
+### Features
+
+* transaction reconciliation and transaction history ([#413](https://github.com/solana-foundation/solana-developer-platform/pull/413)) ([9bc06d0](https://github.com/solana-foundation/solana-developer-platform/commit/9bc06d0e937f4a6d9d3816242116877b1511546f))
+* add Payments v2 dashboard cookie toggle ([#412](https://github.com/solana-foundation/solana-developer-platform/pull/412)) ([71a86f1](https://github.com/solana-foundation/solana-developer-platform/commit/71a86f1e73a4a09e5542ddbc281a232620067710))
+* add in estimates for on/offramp ([#411](https://github.com/solana-foundation/solana-developer-platform/pull/411)) ([9ec2610](https://github.com/solana-foundation/solana-developer-platform/commit/9ec2610b0bb199616a4a975941b8533c38ef4c8c))
+* add Solana subscription primitives ([#406](https://github.com/solana-foundation/solana-developer-platform/pull/406)) ([cbd77f1](https://github.com/solana-foundation/solana-developer-platform/commit/cbd77f17c1c359af36a24dc87110a654ebd8bcf6))
+* add counterparty crypto-wallet accounts ([#405](https://github.com/solana-foundation/solana-developer-platform/pull/405)) ([acfd833](https://github.com/solana-foundation/solana-developer-platform/commit/acfd83308edb8e868f5d8acc48c983367fd63e07))
+* **onramp:** BVNK fiat→crypto on-ramp with KYC onboarding + verification webhooks ([#404](https://github.com/solana-foundation/solana-developer-platform/pull/404)) ([627eaa5](https://github.com/solana-foundation/solana-developer-platform/commit/627eaa57fa64e6ab365aee3e083eaf56f39fbdf5))
+* onchain transfers in payments v2 deposit/pay flows ([#401](https://github.com/solana-foundation/solana-developer-platform/pull/401)) ([00f21c2](https://github.com/solana-foundation/solana-developer-platform/commit/00f21c2c09461549459a2a347bb733f9793eaa4a))
+
+## [0.25.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.24.0...v0.25.0) (2026-06-03)
+
+### Features
+
+* HOO-519 bootstrap install script for self-hosted deployments ([#394](https://github.com/solana-foundation/solana-developer-platform/pull/394)) ([57febae](https://github.com/solana-foundation/solana-developer-platform/commit/57febae5dc7e63c2185403f300425747bfdc44a8))
+* add Utila custody signer ([#386](https://github.com/solana-foundation/solana-developer-platform/pull/386)) ([bef8bf8](https://github.com/solana-foundation/solana-developer-platform/commit/bef8bf8633ae1a213f2d2480c51ac103e66b7fe9))
+* **counterparty:** payment accounts CRUD + manage page ([#399](https://github.com/solana-foundation/solana-developer-platform/pull/399)) ([adf948d](https://github.com/solana-foundation/solana-developer-platform/commit/adf948d8e9282def8851f621a334be5670eb9cc2))
+* cleanup payments for sdp-api ([#397](https://github.com/solana-foundation/solana-developer-platform/pull/397)) ([a085037](https://github.com/solana-foundation/solana-developer-platform/commit/a08503712e8dd32c2888d3305bd345a0ec846779))
+* **sdp-api:** Kora sponsor sRFC-37 token deployment ([#387](https://github.com/solana-foundation/solana-developer-platform/pull/387)) ([e63c2bb](https://github.com/solana-foundation/solana-developer-platform/commit/e63c2bbb482fd9183bedc928f19df90efcbede77))
+
+### Documentation
+
+* add self-hosted co-signer hosting guidance ([#390](https://github.com/solana-foundation/solana-developer-platform/pull/390)) ([6b613da](https://github.com/solana-foundation/solana-developer-platform/commit/6b613da4b0397141f97ff9348d47079d6377b7a6))
+
+### Maintenance
+
+* rearrange ramps file structure and also just scaffold moonpay … ([#396](https://github.com/solana-foundation/solana-developer-platform/pull/396)) ([35b6423](https://github.com/solana-foundation/solana-developer-platform/commit/35b64235fc36135e4100fa8219c40014a7291b51))
+
+## [0.24.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.23.0...v0.24.0) (2026-06-02)
+
+### Features
+
+* HOO-600 support plugins in createApp and extensible env fallback keys ([#389](https://github.com/solana-foundation/solana-developer-platform/pull/389)) ([468349e](https://github.com/solana-foundation/solana-developer-platform/commit/468349e2661ef012bbed5efa6b66da87e505cacf))
+* add in webhook processing ([#388](https://github.com/solana-foundation/solana-developer-platform/pull/388)) ([b6f480e](https://github.com/solana-foundation/solana-developer-platform/commit/b6f480ec606eccf5c63dffeaed63cfd251b6ba39))
+* configure onramp base ([#385](https://github.com/solana-foundation/solana-developer-platform/pull/385)) ([1e61b6c](https://github.com/solana-foundation/solana-developer-platform/commit/1e61b6c446109c883c432cfbb182c5c4ba134431))
+* HOO-521 self-hosted .env configurator (docs page + CLI) ([#379](https://github.com/solana-foundation/solana-developer-platform/pull/379)) ([e66e1ff](https://github.com/solana-foundation/solana-developer-platform/commit/e66e1ff2543e7fc5727661446c9ed5b48b259cbc))
+* add in counterparty dropdown selection ([#378](https://github.com/solana-foundation/solana-developer-platform/pull/378)) ([e1247e4](https://github.com/solana-foundation/solana-developer-platform/commit/e1247e4a8df8109d1eaa2ea809785b81a62033ad))
+* HOO-524 CD pipeline + self-hosted runtime-configurable images ([#373](https://github.com/solana-foundation/solana-developer-platform/pull/373)) ([cb1e6ac](https://github.com/solana-foundation/solana-developer-platform/commit/cb1e6acaab42edb7d8ef791158fd53b449a9b8b0))
+* payments onramp v2 provider discovery ([#374](https://github.com/solana-foundation/solana-developer-platform/pull/374)) ([4c50b71](https://github.com/solana-foundation/solana-developer-platform/commit/4c50b71e9bd98b206aedbfa29232a87bbcc2dfe6))
+
+### Bug Fixes
+
+* batch Cloudflare Worker secret uploads ([#391](https://github.com/solana-foundation/solana-developer-platform/pull/391)) ([21f17bc](https://github.com/solana-foundation/solana-developer-platform/commit/21f17bc3ae5d9654060006a0e91ee5016a8b9262))
+* HOO-585 enforce project boundary in token reads and project scope ([#375](https://github.com/solana-foundation/solana-developer-platform/pull/375)) ([d2da9f3](https://github.com/solana-foundation/solana-developer-platform/commit/d2da9f3cde773134e512626a1fef5578bd2e3c21))
+* **sdp-api:** HOO-461 Auto-add mint destinations to on-chain allowlist ([#317](https://github.com/solana-foundation/solana-developer-platform/pull/317)) ([29bfd4a](https://github.com/solana-foundation/solana-developer-platform/commit/29bfd4a4b2cb0e1fa5652607c4b647d759fdba99))
+
+### Maintenance
+
+* **deps:** bump the minor-patch group across 1 directory with 21 updates ([#381](https://github.com/solana-foundation/solana-developer-platform/pull/381)) ([0a75c68](https://github.com/solana-foundation/solana-developer-platform/commit/0a75c684ba42e2ad2188d5beb93ab5853de33399))
+* **deps-dev:** bump @testcontainers/redis from 11.14.0 to 12.0.0 ([#384](https://github.com/solana-foundation/solana-developer-platform/pull/384)) ([2a60fde](https://github.com/solana-foundation/solana-developer-platform/commit/2a60fdec50b34c769cf736bb48038cf6e2959ae3))
+* **deps-dev:** bump @testcontainers/postgresql from 11.14.0 to 12.0.0 ([#383](https://github.com/solana-foundation/solana-developer-platform/pull/383)) ([c95f8e0](https://github.com/solana-foundation/solana-developer-platform/commit/c95f8e07882d281e330734d0a57172d4c7ffbab6))
+* **deps-dev:** bump testcontainers from 11.14.0 to 12.0.0 ([#382](https://github.com/solana-foundation/solana-developer-platform/pull/382)) ([ef06e18](https://github.com/solana-foundation/solana-developer-platform/commit/ef06e181e2a0fa39107e0dfdaedec5e7610b244e))
+* **deps:** bump @solana-program/system in the solana group ([#380](https://github.com/solana-foundation/solana-developer-platform/pull/380)) ([85679aa](https://github.com/solana-foundation/solana-developer-platform/commit/85679aa30fbc23728be4fa410ab3be16664fed7e))
+
 ## [0.23.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.22.0...v0.23.0) (2026-05-29)
 
 ### Features

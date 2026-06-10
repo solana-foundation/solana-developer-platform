@@ -85,6 +85,13 @@ export const initializeAnchorageSchema = z.object({
   network: z.enum(["solana", "solana-devnet"]).optional(),
 });
 
+// Utila is platform-managed (single configured vault); connecting only needs an
+// optional label for the first wallet, like the other hosted providers.
+export const initializeUtilaSchema = z.object({
+  provider: z.literal("utila"),
+  walletLabel: z.string().max(100).optional(),
+});
+
 export const initializeSigningSchema = z.discriminatedUnion("provider", [
   initializeLocalSchema,
   initializeFireblocksSchema,
@@ -94,6 +101,7 @@ export const initializeSigningSchema = z.discriminatedUnion("provider", [
   initializeTurnkeySchema,
   initializeDfnsSchema,
   initializeAnchorageSchema,
+  initializeUtilaSchema,
 ]);
 
 export type InitializeSigningRequest = z.infer<typeof initializeSigningSchema>;
@@ -132,6 +140,7 @@ export const switchSigningSchema = z.discriminatedUnion("provider", [
   initializeTurnkeySchema,
   initializeDfnsSchema,
   initializeAnchorageSchema,
+  initializeUtilaSchema,
 ]);
 
 export type SwitchSigningRequest = z.infer<typeof switchSigningSchema>;

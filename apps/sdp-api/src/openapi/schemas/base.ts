@@ -31,6 +31,17 @@ export const idempotencyKeyHeaderSchema = z.string().min(1).openapi({
   example: "idempotency_example_12345",
 });
 
+export const projectScopeHeaderSchema = z
+  .string()
+  .min(1)
+  .openapi({
+    param: { name: "x-project-id", in: "header" },
+    description:
+      "Selects the active project for this request. Required for session/dashboard callers. " +
+      "Ignored when authenticating with an API key, whose scope is fixed to the key's project.",
+    example: "prj_example",
+  });
+
 export const requestIdSchema = z.string().min(1).openapi({
   description: "Request identifier for tracing.",
   example: "req_example",

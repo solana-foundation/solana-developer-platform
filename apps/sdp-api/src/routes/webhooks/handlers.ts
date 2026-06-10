@@ -1,8 +1,10 @@
+import type { SdpEnvironment } from "@sdp/types";
 import type { Context } from "hono";
 import { Webhook } from "svix";
 import { getDb } from "@/db";
 import { mapClerkRoleToOrgRole } from "@/lib/clerk-role";
 import { AppError, badRequest } from "@/lib/errors";
+import { RAMP_PROVIDER_CLIENTS } from "@/lib/ramps";
 import { success } from "@/lib/response";
 import { isSelfHostedDeployment } from "@/lib/runtime-env";
 import {
@@ -13,6 +15,9 @@ import { type ClerkUser, ClerkUsersService } from "@/services/clerk-users.servic
 import { ProjectService } from "@/services/project.service";
 import { syncProviderAccessFromClerk } from "@/services/provider-availability.service";
 import type { Env } from "@/types/env";
+import { handleBvnkRampWebhook } from "./ramps/bvnk";
+import { handleLightsparkRampWebhook } from "./ramps/lightspark";
+import { handleMoonpayRampWebhook } from "./ramps/moonpay";
 
 type AppContext = Context<{ Bindings: Env }>;
 
@@ -20,6 +25,8 @@ type ClerkWebhookEvent = {
   type: string;
   data: Record<string, unknown>;
 };
+
+type WebhookRampProvider = keyof typeof RAMP_PROVIDER_CLIENTS;
 
 type ClerkOrgData = {
   id: string | null;
@@ -57,6 +64,14 @@ function readString(value: unknown): string | null {
   }
   const trimmed = value.trim();
   return trimmed.length ? trimmed : null;
+}
+
+function parseRampWebhookProvider(value: string | undefined): WebhookRampProvider {
+  if (value !== undefined && Object.hasOwn(RAMP_PROVIDER_CLIENTS, value)) {
+    return value as WebhookRampProvider;
+  }
+
+  throw badRequest("Unsupported ramp webhook provider");
 }
 
 function slugify(input: string): string {
@@ -584,6 +599,42 @@ function requiredHeader(c: AppContext, name: string) {
   return value;
 }
 
+export const handleRampProviderWebhook = async (c: AppContext, environment: SdpEnvironment) => {
+  const provider = parseRampWebhookProvider(c.req.param("provider"));
+  const rawBody = await c.req.raw.text();
+
+  const result = await RAMP_PROVIDER_CLIENTS[provider].validateWebhook({
+    env: c.env as unknown as Record<string, string | undefined>,
+    environment,
+    headers: c.req.raw.headers,
+    rawBody,
+    requestUrl: c.req.url,
+  });
+
+  switch (result.provider) {
+    case "bvnk":
+      await handleBvnkRampWebhook(c, environment, result.payload);
+      break;
+    case "lightspark":
+      await handleLightsparkRampWebhook(c, result.payload);
+      break;
+    case "moonpay":
+      await handleMoonpayRampWebhook(c, result.payload);
+      break;
+    default:
+      throw new AppError(
+        "BAD_REQUEST",
+        `Unsupported ramp webhook provider: ${result.provider satisfies never}`
+      );
+  }
+
+  return success(c, {
+    received: true,
+    provider: result.provider,
+    environment,
+  });
+};
+
 export const handleClerkWebhook = async (c: AppContext) => {
   const secret = c.env.CLERK_WEBHOOK_SECRET;
   if (!secret) {
@@ -627,13 +678,10 @@ export const handleClerkWebhook = async (c: AppContext) => {
     case "user.deleted":
       await deleteUser(c, data);
       break;
-    // biome-ignore lint/security/noSecrets: Webhook event type literal, not a secret.
     case "organizationMembership.created":
-    // biome-ignore lint/security/noSecrets: Webhook event type literal, not a secret.
     case "organizationMembership.updated":
       await upsertMembership(c, data);
       break;
-    // biome-ignore lint/security/noSecrets: Webhook event type literal, not a secret.
     case "organizationMembership.deleted":
       await deleteMembership(c, data);
       break;

@@ -41,6 +41,7 @@ pnpm-debug.log*
 # Kora keypairs and secrets (never commit)
 infra/kora/.keypair.json
 infra/kora/.env
+infra/self-hosted/default.env.example
 
 # Local secrets (API keys, private keys)
 .secrets/
@@ -55,3 +56,4 @@ apps/sdp-web/test-results/
 # Misc
 *.tsbuildinfo
 .vercel
+private/

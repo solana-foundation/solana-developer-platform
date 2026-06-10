@@ -357,9 +357,39 @@ export class TokenService {
   }
 
   /**
-   * Get a token by ID
+   * Get a token scoped to the caller's organization + project. Returns null if
+   * the token belongs to a different org or project — this is the entry-point
+   * validation that closes cross-project reads. Handlers must use this method;
+   * service-internal callers can use `_getTokenById` when they already trust
+   * the id (typically because a scoped lookup succeeded earlier in the flow).
    */
-  async getToken(tokenId: string): Promise<Token | null> {
+  async getToken(params: {
+    tokenId: string;
+    organizationId: string;
+    projectId: string;
+  }): Promise<Token | null> {
+    const row = await this.db
+      .prepare(
+        `SELECT id, project_id, organization_id, mint_address, mint_authority, metadata_authority, freeze_authority,
+                signing_wallet_id,
+                abl_list_address, name, symbol, decimals, description, uri, image_url, template,
+                total_supply_cached, total_supply_updated_at, max_supply, is_mintable,
+                freeze_authority_enabled, allowlist_enabled, status, deployed_at, created_by,
+                created_at, updated_at
+         FROM issued_tokens WHERE id = ? AND organization_id = ? AND project_id = ?`
+      )
+      .bind(params.tokenId, params.organizationId, params.projectId)
+      .first<TokenRow>();
+
+    if (!row) {
+      return null;
+    }
+
+    const extensionState = await this.getTokenExtensionState(params.tokenId);
+    return this.mapRowToToken(row, extensionState);
+  }
+
+  private async _getTokenById(tokenId: string): Promise<Token | null> {
     const row = await this.db
       .prepare(
         `SELECT id, project_id, organization_id, mint_address, mint_authority, metadata_authority, freeze_authority,
@@ -464,7 +494,7 @@ export class TokenService {
    * Update a token
    */
   async updateToken(tokenId: string, input: UpdateTokenInput): Promise<Token> {
-    const existing = await this.getToken(tokenId);
+    const existing = await this._getTokenById(tokenId);
     if (!existing) {
       throw new Error("TOKEN_NOT_FOUND");
     }
@@ -511,7 +541,7 @@ export class TokenService {
       .bind(...values)
       .run();
 
-    const updated = await this.getToken(tokenId);
+    const updated = await this._getTokenById(tokenId);
     if (!updated) {
       throw new Error("TOKEN_NOT_FOUND");
     }
@@ -533,7 +563,7 @@ export class TokenService {
       permanentDelegate?: string | null;
     }
   ): Promise<Token> {
-    const existing = await this.getToken(tokenId);
+    const existing = await this._getTokenById(tokenId);
     if (!existing) {
       throw new Error("TOKEN_NOT_FOUND");
     }
@@ -588,7 +618,7 @@ export class TokenService {
       await this.setTokenExtension(tokenId, "permanentDelegate", updates.permanentDelegate, now);
     }
 
-    const updated = await this.getToken(tokenId);
+    const updated = await this._getTokenById(tokenId);
     if (!updated) {
       throw new Error("TOKEN_NOT_FOUND");
     }
@@ -633,7 +663,7 @@ export class TokenService {
       )
       .run();
 
-    const updated = await this.getToken(tokenId);
+    const updated = await this._getTokenById(tokenId);
     if (!updated) {
       throw new Error("TOKEN_NOT_FOUND");
     }
@@ -645,7 +675,7 @@ export class TokenService {
    * Update token supply after mint/burn
    */
   async updateSupply(tokenId: string, delta: string, operation: "mint" | "burn"): Promise<void> {
-    const token = await this.getToken(tokenId);
+    const token = await this._getTokenById(tokenId);
     if (!token) {
       throw new Error("TOKEN_NOT_FOUND");
     }
@@ -696,7 +726,7 @@ export class TokenService {
       .bind(supplyBaseUnits, now, now, tokenId)
       .run();
 
-    const updated = await this.getToken(tokenId);
+    const updated = await this._getTokenById(tokenId);
     if (!updated) {
       throw new Error("TOKEN_NOT_FOUND");
     }

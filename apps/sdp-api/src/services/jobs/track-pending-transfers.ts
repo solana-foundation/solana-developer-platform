@@ -18,8 +18,11 @@
  */
 
 import type { Signature } from "@solana/kit";
-import type { PaymentsRepository } from "@/db/repositories";
-import { createPaymentsRepository } from "@/db/repositories";
+import {
+  createPaymentsRepository,
+  type PaymentsRepository,
+  WALLET_TRANSFER_TYPES,
+} from "@/db/repositories";
 import type { SignatureStatusInfo } from "@/services/solana/rpc";
 import * as solanaRpc from "@/services/solana/rpc";
 import type { Env } from "@/types/env";
@@ -54,6 +57,7 @@ async function expireStalePendingTransfers(
 
   const stalePending = await repo.listTransfersByStatus({
     statuses: ["pending"],
+    types: WALLET_TRANSFER_TYPES,
     hasSignature: false,
     createdBefore: cutoff,
     limit: MAX_SIGNATURES_PER_BATCH,
@@ -91,6 +95,7 @@ async function recoverStuckProcessingTransfers(
 
   const stuckProcessing = await repo.listTransfersByStatus({
     statuses: ["processing"],
+    types: WALLET_TRANSFER_TYPES,
     hasSignature: false,
     updatedBefore: cutoff,
     limit: MAX_SIGNATURES_PER_BATCH,
@@ -125,6 +130,7 @@ async function syncProcessingTransfersOnChain(
 ): Promise<void> {
   const processingWithSig = await repo.listTransfersByStatus({
     statuses: ["processing"],
+    types: WALLET_TRANSFER_TYPES,
     hasSignature: true,
     limit: MAX_SIGNATURES_PER_BATCH,
   });
@@ -200,7 +206,6 @@ async function syncProcessingTransfersOnChain(
       }
       // "processed" confirmation is too weak to record as confirmed — skip.
     } catch (err) {
-      // biome-ignore lint/security/noSecrets: Log message string, not a secret.
       console.error("trackPendingTransfers: failed to update transfer", {
         transferId: transfer.id,
         error: err instanceof Error ? err.message : String(err),

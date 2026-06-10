@@ -92,6 +92,16 @@ import { safeStringify } from "./utils";
 
 type MosaicSdkRpc = Parameters<typeof resolveTokenAccount>[0];
 
+/**
+ * Resolve the mint authority's address from create options, which accepts
+ * either a raw address (prepare/client-signing mode) or a TransactionSigner.
+ */
+function resolveMintAuthorityAddress(options: CreateTokenOptions): Address {
+  return typeof options.mintAuthority === "string"
+    ? (options.mintAuthority as Address)
+    : (options.mintAuthority.address as Address);
+}
+
 export class MosaicService {
   private env: Env;
   private signer: TransactionSigner;
@@ -169,17 +179,22 @@ export class MosaicService {
       enableSrfc37
     );
 
-    // sRFC-37 setup must be in the same tx as mint creation, and mosaic-sdk
-    // only emits those instructions when mintAuthority === feePayer. Custody is
-    // the mint authority, so for sRFC-37 deploys we skip Kora and have custody
-    // pay directly. Plain (non-sRFC-37) deploys still use Kora when configured.
-    const result = await this.signAndSubmitWithMintKeypair(fullTx, mintKeypair, {
-      bypassFeePayment: enableSrfc37,
-    });
+    // Both plain and sRFC-37 deploys go through Kora when configured. The
+    // patched mosaic-sdk templates emit the on-chain Token-ACL/ABL setup with a
+    // payer (Kora) distinct from the authority (custody), so we no longer bypass
+    // fee payment to keep mintAuthority === feePayer.
+    const result = await this.signAndSubmitWithMintKeypair(fullTx, mintKeypair);
 
     let listAddress: Address | undefined;
     if (enableSrfc37) {
-      listAddress = await getListConfigPda({ authority: this.signer.address, mint });
+      // The patched mosaic-sdk seeds the ABL list-config PDA from the mint
+      // authority (custody), not the fee payer. Derive the list address from
+      // that same authority so it matches on-chain — `this.signer` is equal to
+      // it in production, but the SDK contract is the mint authority.
+      listAddress = await getListConfigPda({
+        authority: resolveMintAuthorityAddress(options),
+        mint,
+      });
     }
 
     return {
@@ -207,7 +222,10 @@ export class MosaicService {
       options,
       mintKeypair,
       aclMode,
-      enableSrfc37
+      enableSrfc37,
+      // Client-signed: the caller submits this transaction themselves, so it
+      // must use options.feePayer — they cannot produce a Kora signature.
+      true
     );
 
     return this.toMosaicTransaction(fullTx, mint);
@@ -218,22 +236,24 @@ export class MosaicService {
     options: CreateTokenOptions,
     mintKeypair: TransactionSigner,
     aclMode: "allowlist" | "blocklist",
-    enableSrfc37: boolean
+    enableSrfc37: boolean,
+    forClientSigning = false
   ): Promise<FullTransaction> {
-    // Resolve fee payer - use Kora if available, otherwise from options.
-    // sRFC-37 is the exception: the mosaic-sdk template only emits the on-chain
-    // ABL/TACL setup instructions when mintAuthority === feePayer, so we must
-    // pay with custody for that path or the list silently never gets created.
+    // Resolve fee payer - use Kora if available, otherwise from options. This
+    // applies to sRFC-37 deploys too: the patched mosaic-sdk templates fund the
+    // on-chain ABL/TACL setup from the fee payer (Kora) while keeping the mint
+    // authority (custody) as the on-chain authority, so the two can differ.
+    //
+    // The Kora substitution only holds when the service submits the transaction
+    // itself (createToken). For client-signed transactions (prepareCreateToken)
+    // the caller cannot sign as Kora, so we must respect options.feePayer.
     const feePayer =
-      this.feePayment && !enableSrfc37 ? await this.feePayment.getFeePayer() : options.feePayer;
+      this.feePayment && !forClientSigning ? await this.feePayment.getFeePayer() : options.feePayer;
     const mintAuthority =
       typeof options.mintAuthority === "string" && options.mintAuthority === this.signer.address
         ? this.signer
         : options.mintAuthority;
-    const mintAuthorityAddress =
-      typeof options.mintAuthority === "string"
-        ? (options.mintAuthority as Address)
-        : (options.mintAuthority.address as Address);
+    const mintAuthorityAddress = resolveMintAuthorityAddress(options);
 
     const freezeAuthority = options.freezeAuthority ?? undefined;
     const permanentDelegateAuthority =
@@ -1011,11 +1031,8 @@ export class MosaicService {
     };
   }
 
-  private async signAndSubmit(
-    fullTx: FullTransaction,
-    options: { bypassFeePayment?: boolean } = {}
-  ): Promise<MosaicTransactionResult> {
-    if (this.feePayment && !options.bypassFeePayment) {
+  private async signAndSubmit(fullTx: FullTransaction): Promise<MosaicTransactionResult> {
+    if (this.feePayment) {
       // Two-signer flow: custody signs locally, Kora adds fee payer + submits
       const partiallySignedTx = await partiallySignTransactionMessageWithSigners(fullTx);
       const txEncoder = getTransactionEncoder();
@@ -1059,30 +1076,12 @@ export class MosaicService {
 
   private async signAndSubmitWithMintKeypair(
     fullTx: FullTransaction,
-    _mintKeypair: TransactionSigner,
-    options: { bypassFeePayment?: boolean } = {}
+    _mintKeypair: TransactionSigner
   ): Promise<MosaicTransactionResult> {
-    if (this.feePayment && !options.bypassFeePayment) {
-      // Two-signer flow: transaction has signers attached, Kora adds fee payer
-      const partiallySignedTx = await partiallySignTransactionMessageWithSigners(fullTx);
-      const txEncoder = getTransactionEncoder();
-      const txBytes = new Uint8Array(txEncoder.encode(partiallySignedTx));
-
-      const signature = await this.feePayment.signAndSend(txBytes);
-      const confirmation = await confirmTransaction(this.rpc, signature);
-
-      if (confirmation.err) {
-        throw new Error(`Transaction failed: ${safeStringify(confirmation.err)}`);
-      }
-
-      return {
-        signature,
-        slot: confirmation.slot,
-      };
-    }
-
-    // Direct signing flow - signers are already attached to the transaction
-    return this.signAndSubmit(fullTx, options);
+    // The mint keypair is already attached as a signer on `fullTx`, so the
+    // shared submit path covers both flows: it signs with all attached signers
+    // (Kora two-signer path) or signs and sends directly when no sponsor is set.
+    return this.signAndSubmit(fullTx);
   }
 
   private async resolveFeePayer(

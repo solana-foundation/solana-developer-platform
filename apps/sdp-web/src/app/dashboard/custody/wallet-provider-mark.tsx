@@ -50,6 +50,11 @@ const PROVIDER_LOGOS: Partial<
     backgroundClassName: "bg-[#111111]",
     paddingClassName: "p-2.5",
   },
+  utila: {
+    src: "/provider-logos/utila.svg",
+    backgroundClassName: "bg-white",
+    paddingClassName: "p-2",
+  },
 };
 
 interface WalletProviderMarkProps {

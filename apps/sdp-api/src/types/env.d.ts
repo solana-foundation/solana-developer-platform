@@ -96,7 +96,8 @@ export interface Env {
   | "para"
   | "turnkey"
   | "dfns"
-  | "anchorage";
+  | "anchorage"
+  | "utila";
   FEE_PAYER_PRIVATE_KEY?: string;
 
   // Fireblocks configuration (@solana/keychain-fireblocks)
@@ -148,6 +149,17 @@ export interface Env {
   ANCHORAGE_API_KEY?: string;
   ANCHORAGE_API_BASE_URL?: string;
 
+  // Utila Server Wallet configuration (Solana)
+  UTILA_SERVICE_ACCOUNT_EMAIL?: string;
+  UTILA_SERVICE_ACCOUNT_PRIVATE_KEY?: string;
+  UTILA_VAULT_ID?: string;
+  UTILA_WALLET_ID?: string;
+  UTILA_NETWORK?: "networks/solana-devnet" | "networks/solana-mainnet";
+  UTILA_API_BASE_URL?: string;
+  UTILA_POLL_INTERVAL_MS?: string;
+  UTILA_MAX_POLL_ATTEMPTS?: string;
+  UTILA_DESIGNATED_SIGNERS?: string;
+
   // Kora (gasless) configuration
   FEE_PAYMENT_PROVIDER?: "kora" | "native";
   KORA_RPC_URL?: string;
@@ -157,6 +169,9 @@ export interface Env {
   // MagicBlock private payments configuration
   MAGICBLOCK_PRIVATE_PAYMENTS_API_BASE_URL?: string;
   MAGICBLOCK_PRIVATE_PAYMENTS_AUTH_TOKEN?: string;
+
+  // Recurring payments backend feature flag
+  PAYMENTS_RECURRING_ENABLED?: string;
 
   // Compliance providers
   RANGE_API_KEY?: string;
@@ -177,23 +192,28 @@ export interface Env {
   MOONPAY_OFFRAMP_URL?: string;
   MOONPAY_SANDBOX_API_KEY?: string;
   MOONPAY_SANDBOX_SECRET_KEY?: string;
+  MOONPAY_WEBHOOK_KEY?: string;
+  MOONPAY_SANDBOX_WEBHOOK_KEY?: string;
 
   // Lightspark Grid ramps configuration
   LIGHTSPARK_GRID_CLIENT_ID?: string;
   LIGHTSPARK_GRID_CLIENT_SECRET?: string;
   LIGHTSPARK_GRID_API_BASE_URL?: string;
+  LIGHTSPARK_GRID_WEBHOOK_PUBLIC_KEY?: string;
   LIGHTSPARK_GRID_SANDBOX_CLIENT_ID?: string;
   LIGHTSPARK_GRID_SANDBOX_CLIENT_SECRET?: string;
+  LIGHTSPARK_GRID_SANDBOX_WEBHOOK_PUBLIC_KEY?: string;
 
   // BVNK ramps configuration
-  BVNK_API_TOKEN?: string;
   BVNK_HAWK_AUTH_ID?: string;
   BVNK_HAWK_SECRET_KEY?: string;
   BVNK_WALLET_ID?: string;
+  BVNK_WEBHOOK_SECRET?: string;
   BVNK_API_BASE_URL?: string;
   BVNK_SANDBOX_HAWK_AUTH_ID?: string;
   BVNK_SANDBOX_HAWK_SECRET_KEY?: string;
   BVNK_SANDBOX_WALLET_ID?: string;
+  BVNK_SANDBOX_WEBHOOK_SECRET?: string;
 }
 
 // Extend Hono's context with our bindings

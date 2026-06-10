@@ -41,6 +41,7 @@ allowed_programs = [
     "GATEzzqxhJnsWF6vHRsgtixxSB8PaQdcqGEVTEHWiULz",  # ABL / GATE Program
     "SPLxh1LVZzEkX99H6rqYizhytLWPZVV296zyYDPagv2",   # MagicBlock private transfer program
     "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh",   # MagicBlock delegation program
+    "De1egAFMkMWZSN5rYXRj9CAdheBamobVNubTsi9avR44",   # Subscriptions (recurring payments) program
     "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr",   # Memo Program
     "AddressLookupTab1e1111111111111111111111111",   # Address Lookup Table
     "ComputeBudget111111111111111111111111111111",   # Compute Budget

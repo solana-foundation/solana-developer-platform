@@ -76,6 +76,211 @@ const paymentAmountSchema = z
     message: "Amount must be greater than zero",
   });
 
+const recurringTimestampSchema = z.string().datetime({ offset: true });
+const futureRecurringTimestampSchema = (fieldName: string) =>
+  recurringTimestampSchema.refine((value) => new Date(value).getTime() > Date.now(), {
+    message: `${fieldName} must be in the future`,
+  });
+const firstCollectionAtTimestampSchema = futureRecurringTimestampSchema("firstCollectionAt");
+const u64StringSchema = z
+  .string()
+  .regex(/^\d+$/, { message: "Value must be an unsigned integer string" })
+  .refine((value) => {
+    try {
+      return BigInt(value) <= 18_446_744_073_709_551_615n;
+    } catch {
+      return false;
+    }
+  }, "Value must fit in an unsigned 64-bit integer");
+const i64StringSchema = z
+  .string()
+  .regex(/^-?\d+$/, { message: "Value must be a signed integer string" })
+  .refine((value) => {
+    try {
+      const parsed = BigInt(value);
+      return parsed >= -9_223_372_036_854_775_808n && parsed <= 9_223_372_036_854_775_807n;
+    } catch {
+      return false;
+    }
+  }, "Value must fit in a signed 64-bit integer");
+
+export const subscriptionPlanIdParamsSchema = z.object({
+  planId: z.string().min(1),
+});
+
+export const subscriptionIdParamsSchema = z.object({
+  subscriptionId: z.string().min(1),
+});
+
+export const recurringPaymentIdParamsSchema = z.object({
+  id: z.string().min(1),
+});
+
+export const paymentSubscriptionPlanStatusSchema = z.enum(["draft", "active", "archived"]);
+
+export const paymentSubscriptionStatusSchema = z.enum([
+  "pending_authorization",
+  "active",
+  "paused",
+  "canceling",
+  "canceled",
+  "expired",
+]);
+
+export const paymentSubscriptionCollectionAttemptStatusSchema = z.enum([
+  "pending",
+  "processing",
+  "confirmed",
+  "failed",
+  "skipped",
+]);
+
+export const paymentRecurringPaymentStatusSchema = z.enum([
+  "pending_activation",
+  "activating",
+  "active",
+  "canceling",
+  "resuming",
+  "paused",
+  "canceled",
+  "expired",
+]);
+
+export const createRecurringPaymentSchema = z.object({
+  sourceWalletId: z.string().min(1),
+  counterpartyId: z.string().min(1),
+  counterpartyAccountId: z.string().min(1),
+  token: paymentTokenSchema,
+  amount: paymentAmountSchema,
+  periodHours: z
+    .number()
+    .int()
+    .positive()
+    .max(24 * 365),
+  firstCollectionAt: firstCollectionAtTimestampSchema.optional(),
+  metadataUri: z.string().url().max(128).optional(),
+});
+
+export const listRecurringPaymentsQuerySchema = z.object({
+  counterpartyId: z.string().min(1).optional(),
+  status: paymentRecurringPaymentStatusSchema.optional(),
+  page: z.coerce.number().int().positive().default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(20),
+});
+
+export const createSubscriptionPlanSchema = z.object({
+  ownerWalletId: z.string().min(1),
+  token: paymentTokenSchema,
+  amount: paymentAmountSchema,
+  periodHours: z
+    .number()
+    .int()
+    .positive()
+    .max(24 * 365),
+  programPlanId: u64StringSchema.optional(),
+  planPda: solanaAddressSchema("planPda").optional(),
+  destinationAddress: solanaAddressSchema("destinationAddress").optional(),
+  pullerWalletId: z.string().min(1).optional(),
+  metadataUri: z.string().url().max(128).optional(),
+  status: paymentSubscriptionPlanStatusSchema.default("draft"),
+});
+
+export const updateSubscriptionPlanSchema = z
+  .object({
+    planPda: solanaAddressSchema("planPda").nullable().optional(),
+    destinationAddress: solanaAddressSchema("destinationAddress").nullable().optional(),
+    pullerWalletId: z.string().min(1).nullable().optional(),
+    metadataUri: z.string().url().max(128).nullable().optional(),
+    status: paymentSubscriptionPlanStatusSchema.optional(),
+  })
+  .refine((value) => Object.keys(value).length > 0, {
+    message: "At least one field must be provided",
+  });
+
+export const prepareSubscriptionPlanCreateSchema = z.object({
+  destinations: z.array(solanaAddressSchema("destinations entry")).max(4).optional(),
+  pullers: z.array(solanaAddressSchema("pullers entry")).max(4).optional(),
+  endTs: u64StringSchema.optional(),
+  metadataUri: z.string().url().max(128).optional(),
+});
+
+export const listSubscriptionPlansQuerySchema = z.object({
+  status: paymentSubscriptionPlanStatusSchema.optional(),
+  page: z.coerce.number().int().positive().default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(20),
+});
+
+export const createSubscriptionSchema = z.object({
+  planId: z.string().min(1),
+  counterpartyId: z.string().min(1),
+  subscriberAddress: solanaAddressSchema("subscriberAddress"),
+  subscriberTokenAccount: solanaAddressSchema("subscriberTokenAccount").optional(),
+  subscriptionPda: solanaAddressSchema("subscriptionPda").optional(),
+  subscriptionAuthorityAddress: solanaAddressSchema("subscriptionAuthorityAddress").optional(),
+  authorizationSignature: z.string().min(1).max(128).optional(),
+  status: paymentSubscriptionStatusSchema.default("pending_authorization"),
+  currentPeriodStartAt: recurringTimestampSchema.optional(),
+  nextCollectionDueAt: recurringTimestampSchema.optional(),
+});
+
+export const updateSubscriptionSchema = z
+  .object({
+    subscriberTokenAccount: solanaAddressSchema("subscriberTokenAccount").nullable().optional(),
+    subscriptionPda: solanaAddressSchema("subscriptionPda").nullable().optional(),
+    subscriptionAuthorityAddress: solanaAddressSchema("subscriptionAuthorityAddress")
+      .nullable()
+      .optional(),
+    authorizationSignature: z.string().min(1).max(128).nullable().optional(),
+    status: paymentSubscriptionStatusSchema.optional(),
+    currentPeriodStartAt: recurringTimestampSchema.nullable().optional(),
+    nextCollectionDueAt: recurringTimestampSchema.nullable().optional(),
+    cancelAt: recurringTimestampSchema.nullable().optional(),
+    canceledAt: recurringTimestampSchema.nullable().optional(),
+  })
+  .refine((value) => Object.keys(value).length > 0, {
+    message: "At least one field must be provided",
+  });
+
+export const prepareSubscriptionAuthorizationSchema = z.object({
+  subscriberTokenAccount: solanaAddressSchema("subscriberTokenAccount"),
+  expectedPlanCreatedAt: u64StringSchema,
+  expectedSubscriptionAuthorityInitId: i64StringSchema,
+});
+
+export const prepareSubscriptionLifecycleSchema = z.object({});
+
+export const listSubscriptionsQuerySchema = z.object({
+  planId: z.string().min(1).optional(),
+  counterpartyId: z.string().min(1).optional(),
+  status: paymentSubscriptionStatusSchema.optional(),
+  dueBefore: recurringTimestampSchema.optional(),
+  page: z.coerce.number().int().positive().default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(20),
+});
+
+export const createSubscriptionCollectionAttemptSchema = z.object({
+  amount: paymentAmountSchema.optional(),
+  token: paymentTokenSchema.optional(),
+  dueAt: recurringTimestampSchema.optional(),
+  attemptedAt: recurringTimestampSchema.optional(),
+  status: paymentSubscriptionCollectionAttemptStatusSchema.default("pending"),
+  transferId: z.string().min(1).optional(),
+  signature: z.string().min(1).max(128).optional(),
+  error: z.string().min(1).max(2048).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
+});
+
+export const prepareSubscriptionCollectionSchema = z.object({
+  amount: paymentAmountSchema.optional(),
+  receiverTokenAccount: solanaAddressSchema("receiverTokenAccount"),
+});
+
+export const listSubscriptionCollectionAttemptsQuerySchema = z.object({
+  status: paymentSubscriptionCollectionAttemptStatusSchema.optional(),
+  page: z.coerce.number().int().positive().default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(20),
+});
+
 const magicBlockPrivateTransferOptionsSchema = z
   .object({
     validator: z.string().min(32).max(44).optional(),
@@ -129,10 +334,34 @@ export const listOfframpCurrenciesQuerySchema = z.object({
   provider: rampProviderSchema.optional(),
 });
 
+const bvnkRuleEntitySchema = z.object({
+  type: z.enum(["INDIVIDUAL", "COMPANY"]),
+  customerIdentifier: z.string().min(1),
+  relationshipType: z.enum(["SELF_OWNED", "THIRD_PARTY"]),
+  firstName: z.string().optional(),
+  lastName: z.string().optional(),
+  dateOfBirth: z.string().optional(),
+  legalName: z.string().optional(),
+  registrationNumber: z.string().optional(),
+  address: z
+    .object({
+      addressLine1: z.string(),
+      addressLine2: z.string().optional(),
+      postalCode: z.string().optional(),
+      city: z.string(),
+      countryCode: z.string(),
+      country: z.string(),
+      stateCode: z.string().optional(),
+    })
+    .optional(),
+});
+
 const bvnkComplianceSchema = z.object({
   partyDetails: z
     .array(z.record(z.string(), z.unknown()))
-    .min(1, { message: "partyDetails must include at least one entry" }),
+    .min(1, { message: "partyDetails must include at least one entry" })
+    .optional(),
+  ruleEntity: bvnkRuleEntitySchema.optional(),
 });
 
 export const createTransferSchema = z.object({
@@ -153,6 +382,10 @@ export const transferStatusSchema = z.enum([
   "confirmed",
   "finalized",
   "failed",
+  "awaiting_payment",
+  "settling",
+  "completed",
+  "expired",
 ]);
 
 export const listTransfersQuerySchema = z.object({
@@ -161,6 +394,10 @@ export const listTransfersQuerySchema = z.object({
   token: z.string().optional(),
   direction: transferDirectionSchema.optional(),
   status: transferStatusSchema.optional(),
+  category: z.enum(["wallet", "ramp"]).optional(),
+  counterpartyId: z.string().min(1).optional(),
+  provider: rampProviderSchema.optional(),
+  providerReference: z.string().min(1).optional(),
   from: z.string().datetime({ offset: true }).optional(),
   to: z.string().datetime({ offset: true }).optional(),
   page: z.coerce.number().int().positive().default(1),
@@ -181,6 +418,7 @@ export const prepareTransferSchema = createTransferSchema.extend({
 
 export const executeOnrampSchema = z.object({
   provider: rampProviderSchema,
+  counterpartyId: z.string().min(1).optional(),
   destinationWallet: z.string().min(1),
   cryptoToken: rampCurrencyCodeSchema,
   fiatCurrency: rampFiatCurrencySchema.optional(),
@@ -190,8 +428,42 @@ export const executeOnrampSchema = z.object({
   bvnkCompliance: bvnkComplianceSchema.optional(),
 });
 
+export const estimateOnrampSchema = z.object({
+  assetRail: onrampCryptoRailSchema,
+  fiatCurrency: rampFiatCurrencySchema,
+  fiatAmount: paymentAmountSchema,
+});
+
+export const estimateOfframpSchema = z.object({
+  assetRail: offrampCryptoRailSchema,
+  fiatCurrency: rampFiatCurrencySchema,
+  cryptoAmount: paymentAmountSchema,
+});
+
+export const createOnrampQuoteSchema = z.object({
+  provider: rampProviderSchema,
+  counterpartyId: z.string().min(1),
+  destinationWallet: z.string().min(1),
+  cryptoToken: rampCurrencyCodeSchema,
+  fiatCurrency: rampFiatCurrencySchema.optional(),
+  fiatAmount: paymentAmountSchema,
+  redirectUrl: z.string().url().optional(),
+  collectedData: z.record(z.string(), z.string()).optional(),
+});
+
+export const createOfframpQuoteSchema = z.object({
+  provider: rampProviderSchema,
+  counterpartyId: z.string().min(1),
+  sourceWallet: z.string().min(1),
+  cryptoToken: rampCurrencyCodeSchema,
+  fiatCurrency: rampFiatCurrencySchema.optional(),
+  cryptoAmount: paymentAmountSchema,
+  redirectUrl: z.string().url().optional(),
+});
+
 export const executeOfframpSchema = z.object({
   provider: rampProviderSchema,
+  counterpartyId: z.string().min(1).optional(),
   sourceWallet: z.string().min(1),
   cryptoToken: rampCurrencyCodeSchema,
   fiatCurrency: rampFiatCurrencySchema.optional(),
@@ -207,9 +479,21 @@ const simulateLightsparkSandboxTransferPayloadSchema = z.object({
   currencyAmount: z.number().int().positive().optional(),
 });
 
+const simulateBvnkSandboxPayinPayloadSchema = z.object({
+  counterpartyId: z.string().min(1),
+  amount: z.number().positive(),
+  fiatCurrency: z.string().trim().toUpperCase().length(3),
+  cryptoToken: z.string().min(1),
+  destinationWallet: z.string().min(1),
+});
+
 export const simulateSandboxTransferSchema = z.discriminatedUnion("provider", [
   z.object({
     provider: z.literal("lightspark"),
     payload: simulateLightsparkSandboxTransferPayloadSchema,
+  }),
+  z.object({
+    provider: z.literal("bvnk"),
+    payload: simulateBvnkSandboxPayinPayloadSchema,
   }),
 ]);

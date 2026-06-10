@@ -1,13 +1,13 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { getAuthEntryPath } from "@/lib/auth-entry";
-import { DASHBOARD_FEATURE_FLAGS } from "@/lib/dashboard-feature-flags";
+import { getDashboardFeatureFlags } from "@/lib/dashboard-feature-flags.server";
 import { fetchProviderAvailability } from "@/lib/provider-availability";
 import { createSdpApiClient } from "@/lib/sdp-api";
 import type { OnboardingStatusResponse } from "../../onboarding-status";
 import { fetchCounterparties } from "../counterparty/counterparty-page.data";
-import { PaymentsActionPage } from "../payments-action-page-v2";
 import { fetchPaymentsIssuedTokenSymbols } from "../payments-page.data";
+import { PaymentsActionPage } from "../ramps/ramp-action-page";
 
 export default async function PaymentsDepositPage() {
   const { userId, orgId } = await auth();
@@ -17,7 +17,8 @@ export default async function PaymentsDepositPage() {
   if (!orgId) {
     redirect("/dashboard");
   }
-  if (!DASHBOARD_FEATURE_FLAGS.paymentsV2) {
+  const featureFlags = await getDashboardFeatureFlags();
+  if (!featureFlags.paymentsV2) {
     redirect("/dashboard/payments/receive");
   }
 

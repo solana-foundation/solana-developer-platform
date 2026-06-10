@@ -29,6 +29,7 @@ export {
   KeychainParaAdapter,
   KeychainPrivyAdapter,
   KeychainTurnkeyAdapter,
+  KeychainUtilaAdapter,
   type SigningConfigRecord,
   type SigningProviderType,
 } from "./signing";

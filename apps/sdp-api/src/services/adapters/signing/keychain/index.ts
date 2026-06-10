@@ -12,6 +12,7 @@
  * - Para: Hosted wallets via Para REST API (@solana/keychain-para)
  * - Turnkey: Hosted wallets via Turnkey API (@solana/keychain-turnkey)
  * - DFNS: Hosted wallets via DFNS API
+ * - Utila: Vault wallet signing via Utila API (@solana/keychain-utila)
  */
 
 // Adapters
@@ -23,6 +24,7 @@ export { KeychainMemoryAdapter } from "./keychain-memory.adapter";
 export { KeychainParaAdapter } from "./keychain-para.adapter";
 export { KeychainPrivyAdapter } from "./keychain-privy.adapter";
 export { KeychainTurnkeyAdapter } from "./keychain-turnkey.adapter";
+export { KeychainUtilaAdapter } from "./keychain-utila.adapter";
 // Types
 export type {
   KeychainCoinbaseConfig,
@@ -31,4 +33,5 @@ export type {
   KeychainParaConfig,
   KeychainPrivyConfig,
   KeychainTurnkeyConfig,
+  KeychainUtilaConfig,
 } from "./types";

@@ -1,7 +1,6 @@
 import type { TokenResponse } from "@sdp/types";
 import type { Context } from "hono";
 import { getDb } from "@/db";
-import { getAuth } from "@/lib/auth";
 import { AppError, notFound } from "@/lib/errors";
 import { created, paginated, success } from "@/lib/response";
 import { assertValidAddress } from "@/lib/solana";
@@ -48,7 +47,7 @@ function getOnChainMetadataPatch(input: {
 }
 
 export const createToken = async (c: AppContext) => {
-  const { auth, projectId, orgId } = await requireProjectScope(c);
+  const { auth, projectId, orgId } = requireProjectScope(c);
 
   const body = await c.req.json();
   const parsed = createTokenSchema.safeParse(body);
@@ -119,7 +118,7 @@ export const createToken = async (c: AppContext) => {
 };
 
 export const listTokens = async (c: AppContext) => {
-  const { projectId } = await requireProjectScope(c);
+  const { projectId } = requireProjectScope(c);
 
   const status = c.req.query("status") as "pending" | "active" | "paused" | "revoked" | undefined;
   const page = Number.parseInt(c.req.query("page") ?? "1", 10);
@@ -138,17 +137,16 @@ export const listTokens = async (c: AppContext) => {
 
 export const getToken = async (c: AppContext) => {
   const { tokenId } = c.req.param();
-  const auth = getAuth(c);
+  const { projectId, orgId } = requireProjectScope(c);
 
   const tokenService = new TokenService(getDb(c.env));
-  const token = await tokenService.getToken(tokenId);
+  const token = await tokenService.getToken({
+    tokenId,
+    organizationId: orgId,
+    projectId,
+  });
 
-  if (!token || token.organizationId !== auth?.organizationId) {
-    throw notFound("Token");
-  }
-
-  // If using project-scoped key, verify token belongs to that project
-  if (token.projectId !== auth.projectId) {
+  if (!token) {
     throw notFound("Token");
   }
 
@@ -158,7 +156,7 @@ export const getToken = async (c: AppContext) => {
 
 export const updateToken = async (c: AppContext) => {
   const { tokenId } = c.req.param();
-  const auth = getAuth(c);
+  const { auth, projectId, orgId } = requireProjectScope(c);
 
   const body = await c.req.json();
   const parsed = updateTokenSchema.safeParse(body);
@@ -171,13 +169,12 @@ export const updateToken = async (c: AppContext) => {
 
   const tokenService = new TokenService(getDb(c.env));
 
-  // Verify ownership
-  const existing = await tokenService.getToken(tokenId);
-  if (!existing || existing.organizationId !== auth?.organizationId) {
-    throw notFound("Token");
-  }
-
-  if (existing.projectId !== auth.projectId) {
+  const existing = await tokenService.getToken({
+    tokenId,
+    organizationId: orgId,
+    projectId,
+  });
+  if (!existing) {
     throw notFound("Token");
   }
 

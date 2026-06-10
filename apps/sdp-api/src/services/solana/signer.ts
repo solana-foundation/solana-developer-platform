@@ -9,6 +9,7 @@
  * - coinbase_cdp: Uses Coinbase CDP hosted wallets via @solana/keychain-cdp
  * - para: Uses Para hosted wallets via @solana/keychain-para
  * - turnkey: Uses Turnkey hosted wallets via @solana/keychain-turnkey
+ * - utila: Uses Utila vault wallets via @solana/keychain-utila
  *
  * Resolution order for createOrgSigner:
  * 1. Project-specific config (if projectId provided)
@@ -65,6 +66,7 @@ export async function createSignerFromBase58(privateKeyBase58: string): Promise<
  * - "turnkey": Uses Turnkey via KeychainTurnkeyAdapter
  * - "dfns": Uses DFNS via KeychainDfnsAdapter
  * - "anchorage": Not supported for signing (wallet lifecycle only)
+ * - "utila": Uses Utila via KeychainUtilaAdapter
  *
  * The returned signer is compatible with @solana/kit signing utilities:
  * - signTransactionMessageWithSigners()

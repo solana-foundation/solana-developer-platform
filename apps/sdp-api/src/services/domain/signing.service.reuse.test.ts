@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SigningConfigRecord } from "@/services/adapters";
-import { provisionCoinbaseCdpAccount, provisionPrivyWallet } from "@/services/custody/provisioning";
+import {
+  provisionCoinbaseCdpAccount,
+  provisionPrivyWallet,
+  provisionUtilaWallet,
+} from "@/services/custody/provisioning";
 import { type SigningRequestStore, SigningService } from "@/services/domain/signing.service";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
@@ -8,10 +12,12 @@ import type { Env } from "@/types/env";
 vi.mock("@/services/custody/provisioning", () => ({
   provisionCoinbaseCdpAccount: vi.fn(),
   provisionPrivyWallet: vi.fn(),
+  provisionUtilaWallet: vi.fn(),
 }));
 
 const mockedProvisionPrivyWallet = vi.mocked(provisionPrivyWallet);
 const mockedProvisionCoinbaseCdpAccount = vi.mocked(provisionCoinbaseCdpAccount);
+const mockedProvisionUtilaWallet = vi.mocked(provisionUtilaWallet);
 
 describe("signing.service provider reuse", () => {
   afterEach(() => {
@@ -86,6 +92,41 @@ describe("signing.service provider reuse", () => {
     expect(configStore.createWallet).not.toHaveBeenCalled();
     expect(configStore.upsert).toHaveBeenCalledWith(orgId, undefined, {
       provider: "coinbase_cdp",
+      defaultWalletId: wallet.walletId,
+    });
+    expect(configStore.setDefaultConfig).toHaveBeenCalledWith(orgId, undefined, configId);
+  });
+
+  it("reuses the existing Utila root wallet when switching back to Utila", async () => {
+    const orgId = "org_reuse_utila";
+    const configId = "cust_utila_reuse";
+    const wallet = createCustodyWallet(configId, "utila_wallet_1", "utila_wallet_pubkey");
+    const configRecord = createConfigRecord({
+      id: configId,
+      orgId,
+      provider: "utila",
+      defaultWalletId: wallet.walletId,
+    });
+
+    const { service, configStore } = createService({
+      configRecord,
+      wallets: [wallet],
+      envOverrides: {
+        UTILA_SERVICE_ACCOUNT_EMAIL: "utila-service-account@example.com",
+        UTILA_SERVICE_ACCOUNT_PRIVATE_KEY: "utila-private-key",
+        UTILA_VAULT_ID: "vaults/utila_vault_1",
+      },
+    });
+
+    const result = await service.initializeUtilaSigning(orgId, undefined, {});
+
+    expect(result.walletId).toBe(wallet.walletId);
+    expect(result.publicKey).toBe(wallet.publicKey);
+    expect(result.configId).toBe(configId);
+    expect(mockedProvisionUtilaWallet).not.toHaveBeenCalled();
+    expect(configStore.createWallet).not.toHaveBeenCalled();
+    expect(configStore.upsert).toHaveBeenCalledWith(orgId, undefined, {
+      provider: "utila",
       defaultWalletId: wallet.walletId,
     });
     expect(configStore.setDefaultConfig).toHaveBeenCalledWith(orgId, undefined, configId);

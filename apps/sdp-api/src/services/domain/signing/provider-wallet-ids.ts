@@ -29,3 +29,20 @@ export function normalizeAnchorageWalletId(walletId: string): string {
 export function denormalizeAnchorageWalletId(walletId: string): string {
   return walletId.startsWith("anchorage_") ? walletId.slice("anchorage_".length) : walletId;
 }
+
+export function normalizeUtilaWalletId(walletId: string): string {
+  const trimmed = trimUtilaWalletResource(walletId.trim());
+  return trimmed.startsWith("utila_") ? trimmed : `utila_${trimmed}`;
+}
+
+export function denormalizeUtilaWalletId(walletId: string): string {
+  return trimUtilaWalletResource(
+    walletId.startsWith("utila_") ? walletId.slice("utila_".length) : walletId
+  );
+}
+
+function trimUtilaWalletResource(value: string): string {
+  const marker = "/wallets/";
+  const markerIndex = value.lastIndexOf(marker);
+  return markerIndex === -1 ? value : value.slice(markerIndex + marker.length);
+}

@@ -1,7 +1,6 @@
 import { AuthorityType } from "@solana-program/token-2022";
 import type { Context } from "hono";
 import { getDb } from "@/db";
-import { getAuth } from "@/lib/auth";
 import { AppError, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { assertValidAddress } from "@/lib/solana";
@@ -10,6 +9,7 @@ import { createMosaicService, type MosaicService } from "@/services/mosaic";
 import { createRpc, simulateTransaction } from "@/services/solana/rpc";
 import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
+import { requireProjectScope } from "../helpers";
 import { updateAuthoritySchema } from "../schemas";
 import {
   type AuthorityRole,
@@ -44,7 +44,7 @@ const mapAuthorityRole = (role: AuthorityRole): MosaicAuthorityRole => {
 
 export const prepareUpdateAuthority = async (c: AppContext) => {
   const { tokenId } = c.req.param();
-  const auth = getAuth(c);
+  const { auth, projectId, orgId } = requireProjectScope(c);
 
   const body = await c.req.json();
   const parsed = updateAuthoritySchema.safeParse(body);
@@ -56,13 +56,13 @@ export const prepareUpdateAuthority = async (c: AppContext) => {
   }
 
   const tokenService = new TokenService(getDb(c.env));
-  const token = await tokenService.getToken(tokenId);
+  const token = await tokenService.getToken({
+    tokenId,
+    organizationId: orgId,
+    projectId,
+  });
 
-  if (!token || token.organizationId !== auth?.organizationId) {
-    throw notFound("Token");
-  }
-
-  if (token.projectId !== auth.projectId) {
+  if (!token) {
     throw notFound("Token");
   }
 
@@ -153,7 +153,7 @@ export const prepareUpdateAuthority = async (c: AppContext) => {
 
 export const executeUpdateAuthority = async (c: AppContext) => {
   const { tokenId } = c.req.param();
-  const auth = getAuth(c);
+  const { auth, projectId, orgId } = requireProjectScope(c);
 
   const body = await c.req.json();
   const parsed = updateAuthoritySchema.safeParse(body);
@@ -165,13 +165,13 @@ export const executeUpdateAuthority = async (c: AppContext) => {
   }
 
   const tokenService = new TokenService(getDb(c.env));
-  const token = await tokenService.getToken(tokenId);
+  const token = await tokenService.getToken({
+    tokenId,
+    organizationId: orgId,
+    projectId,
+  });
 
-  if (!token || token.organizationId !== auth?.organizationId) {
-    throw notFound("Token");
-  }
-
-  if (token.projectId !== auth.projectId) {
+  if (!token) {
     throw notFound("Token");
   }
 

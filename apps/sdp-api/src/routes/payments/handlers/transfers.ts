@@ -27,11 +27,14 @@ import {
   getTransferCheckedInstruction,
 } from "@solana-program/token-2022";
 import { getDb } from "@/db";
-import type {
-  PaymentTransferDirection as TransferDirection,
-  PaymentTransferRow as TransferRow,
-  PaymentTransferStatus as TransferStatus,
-  PaymentTransferType as TransferType,
+import {
+  isRampTransferType,
+  RAMP_TRANSFER_TYPES,
+  type PaymentTransferDirection as TransferDirection,
+  type PaymentTransferRow as TransferRow,
+  type PaymentTransferStatus as TransferStatus,
+  type PaymentTransferType as TransferType,
+  WALLET_TRANSFER_TYPES,
 } from "@/db/repositories/payments.repository";
 import { formatDecimalAmount, MAX_SAFE_BASE_UNITS, parseDecimalAmount } from "@/lib/amount";
 import { getAuth } from "@/lib/auth";
@@ -227,6 +230,7 @@ async function createTransferRecord(
     organizationId: input.organizationId,
     projectId: input.projectId,
     walletId: input.walletId,
+    counterpartyId: null,
     sourceAddress: input.sourceAddress,
     destinationAddress: input.destinationAddress,
     token: input.token,
@@ -235,6 +239,12 @@ async function createTransferRecord(
     type: input.type ?? "transfer",
     direction: input.direction ?? "outbound",
     status: input.status ?? "pending",
+    provider: null,
+    providerReference: null,
+    deliveryMode: null,
+    fiatCurrency: null,
+    fiatAmount: null,
+    providerData: {},
     serializedTx: input.serializedTx ?? null,
     initiatedByKeyId: input.initiatedByKeyId ?? null,
     createdAt: now,
@@ -1394,6 +1404,7 @@ function buildObservedTransferRows(
         organization_id: context.organizationId,
         project_id: context.projectId,
         wallet_id: walletId,
+        counterparty_id: null,
         source_address: sourceAddress,
         destination_address: destinationAddress,
         token: "SOL",
@@ -1402,6 +1413,12 @@ function buildObservedTransferRows(
         type: "transfer",
         direction,
         status,
+        provider: null,
+        provider_reference: null,
+        delivery_mode: null,
+        fiat_currency: null,
+        fiat_amount: null,
+        provider_data: {},
         signature,
         serialized_tx: null,
         slot: parsedTransaction.slot ?? null,
@@ -1464,6 +1481,7 @@ function buildObservedTransferRows(
         organization_id: context.organizationId,
         project_id: context.projectId,
         wallet_id: destinationWalletId,
+        counterparty_id: null,
         source_address: readInstructionInfoString(info, "mintAuthority") ?? mint,
         destination_address: destinationOwner ?? destinationTokenAccount,
         token: resolveObservedTokenSymbol(mint, context.tokenSymbolsByMint),
@@ -1472,6 +1490,12 @@ function buildObservedTransferRows(
         type: "transfer",
         direction: "inbound",
         status,
+        provider: null,
+        provider_reference: null,
+        delivery_mode: null,
+        fiat_currency: null,
+        fiat_amount: null,
+        provider_data: {},
         signature,
         serialized_tx: null,
         slot: parsedTransaction.slot ?? null,
@@ -1543,6 +1567,7 @@ function buildObservedTransferRows(
       organization_id: context.organizationId,
       project_id: context.projectId,
       wallet_id: walletId,
+      counterparty_id: null,
       source_address: sourceOwner ?? sourceTokenAccount,
       destination_address: destinationOwner ?? destinationTokenAccount,
       token: resolveObservedTokenSymbol(mint, context.tokenSymbolsByMint),
@@ -1551,6 +1576,12 @@ function buildObservedTransferRows(
       type: "transfer",
       direction,
       status,
+      provider: null,
+      provider_reference: null,
+      delivery_mode: null,
+      fiat_currency: null,
+      fiat_amount: null,
+      provider_data: {},
       signature,
       serialized_tx: null,
       slot: parsedTransaction.slot ?? null,
@@ -1764,11 +1795,55 @@ export async function listTransfers(c: AppContext) {
     token,
     direction,
     status,
+    category,
+    counterpartyId,
+    provider,
+    providerReference,
     from,
     to,
   } = query.data;
   const repo = getPaymentsRepository(c);
   const offset = (page - 1) * pageSize;
+  const transferTypes =
+    category === "wallet"
+      ? WALLET_TRANSFER_TYPES
+      : category === "ramp"
+        ? RAMP_TRANSFER_TYPES
+        : undefined;
+  const transferTypeSet = transferTypes ? new Set<TransferType>(transferTypes) : undefined;
+  const hasProvider = provider !== undefined;
+  const hasProviderReference = providerReference !== undefined;
+
+  if (hasProvider !== hasProviderReference) {
+    throw new AppError(
+      "BAD_REQUEST",
+      "provider and providerReference are both required for provider reference lookup"
+    );
+  }
+
+  if (hasProvider && hasProviderReference) {
+    const row = await repo.getTransferByProviderReference({
+      provider,
+      providerReference,
+      organizationId: auth.organizationId,
+      projectId: auth.projectId,
+    });
+
+    if (!row) {
+      return paginated(c, [], { total: 0, page, pageSize });
+    }
+    if (allowedWalletIds && !allowedWalletIds.includes(row.wallet_id)) {
+      throw new AppError("FORBIDDEN", "API key is not authorized for the requested wallet");
+    }
+    if (category === "wallet" && isRampTransferType(row.type)) {
+      return paginated(c, [], { total: 0, page, pageSize });
+    }
+    if (category === "ramp" && !isRampTransferType(row.type)) {
+      return paginated(c, [], { total: 0, page, pageSize });
+    }
+
+    return paginated(c, [mapTransferRow(row)], { total: 1, page, pageSize });
+  }
 
   let transferRows: TransferRow[];
   let total: number;
@@ -1879,7 +1954,15 @@ export async function listTransfers(c: AppContext) {
     // 3. Fetch pending/processing/failed from DB (not yet on-chain).
     //    Skip if the caller's status filter already excludes these — e.g. status=confirmed
     //    or status=finalized would never match any of these records.
-    const nonChainStatuses: TransferStatus[] = ["pending", "processing", "failed"];
+    const nonChainStatuses: TransferStatus[] = [
+      "pending",
+      "processing",
+      "failed",
+      "awaiting_payment",
+      "settling",
+      "completed",
+      "expired",
+    ];
     const needsNonChainRecords = !status || nonChainStatuses.includes(status);
     const pendingRows: TransferRow[] = [];
     if (needsNonChainRecords) {
@@ -1889,7 +1972,9 @@ export async function listTransfers(c: AppContext) {
         walletId: resolvedWalletId,
         walletIds: resolvedWalletId ? undefined : (allowedWalletIds ?? undefined),
         sourceAddress: resolvedWalletId ? undefined : walletAddress,
+        counterpartyId,
         statuses: nonChainStatuses,
+        types: transferTypes,
         token,
         direction,
         createdAtFrom: from,
@@ -1931,9 +2016,11 @@ export async function listTransfers(c: AppContext) {
     // 5. Apply remaining filters and sort
     const filtered = merged
       .filter((row) => {
+        if (counterpartyId && row.counterparty_id !== counterpartyId) return false;
         if (status && row.status !== status) return false;
         if (token && row.token !== token) return false;
         if (direction && row.direction !== direction) return false;
+        if (transferTypeSet && !transferTypeSet.has(row.type)) return false;
         return true;
       })
       .sort((a, b) => b.created_at.localeCompare(a.created_at));
@@ -1946,9 +2033,11 @@ export async function listTransfers(c: AppContext) {
       organizationId: auth.organizationId,
       projectId: auth.projectId,
       walletIds: allowedWalletIds ?? undefined,
+      counterpartyId,
       token,
       direction,
       statuses: status ? [status] : undefined,
+      types: transferTypes,
       createdAtFrom: from,
       createdAtTo: to,
       limit: pageSize,

@@ -1,12 +1,13 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { getAuthEntryPath } from "@/lib/auth-entry";
-import { DASHBOARD_FEATURE_FLAGS } from "@/lib/dashboard-feature-flags";
+import { getDashboardFeatureFlags } from "@/lib/dashboard-feature-flags.server";
 import { fetchProviderAvailability } from "@/lib/provider-availability";
 import { createSdpApiClient } from "@/lib/sdp-api";
 import type { OnboardingStatusResponse } from "../../onboarding-status";
-import { PaymentsActionPage } from "../payments-action-page";
+import { fetchCounterparties } from "../counterparty/counterparty-page.data";
 import { fetchPaymentsIssuedTokenSymbols } from "../payments-page.data";
+import { PaymentsActionPage } from "../ramps/ramp-action-page";
 
 export default async function PaymentsPayPage() {
   const { userId, orgId } = await auth();
@@ -16,12 +17,13 @@ export default async function PaymentsPayPage() {
   if (!orgId) {
     redirect("/dashboard");
   }
-  if (!DASHBOARD_FEATURE_FLAGS.paymentsV2) {
+  const featureFlags = await getDashboardFeatureFlags();
+  if (!featureFlags.paymentsV2) {
     redirect("/dashboard/payments/send");
   }
 
   const apiClient = await createSdpApiClient();
-  const [issuedTokenSymbolsResult, onboardingStatus] = await Promise.all([
+  const [issuedTokenSymbolsResult, onboardingStatus, counterpartiesResult] = await Promise.all([
     fetchPaymentsIssuedTokenSymbols(apiClient.request),
     apiClient.fetch<OnboardingStatusResponse>("/v1/onboarding/status").catch(
       () =>
@@ -30,6 +32,7 @@ export default async function PaymentsPayPage() {
           organization: null,
         }) satisfies OnboardingStatusResponse
     ),
+    fetchCounterparties(apiClient.request),
   ]);
   const issuedTokenSymbolsByMint = Object.fromEntries(
     (issuedTokenSymbolsResult.data ?? []).map((token) => [token.mintAddress, token.symbol])
@@ -49,6 +52,7 @@ export default async function PaymentsPayPage() {
       issuedTokenSymbolsByMint={issuedTokenSymbolsByMint}
       enabledComplianceProviders={providerAccess?.enabledComplianceProviders ?? []}
       enabledRampProviders={providerAccess?.enabledRampProviders ?? []}
+      counterpartiesResult={counterpartiesResult}
     />
   );
 }

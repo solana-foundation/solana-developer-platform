@@ -1,7 +1,8 @@
 diff --git a/dist/abl/list.js b/dist/abl/list.js
+index da29473e7a5de8c3a1dfc545009061c383ecf6f1..1987e4f65429ff22cd9ec4fc579a85a84eb6535f 100644
 --- a/dist/abl/list.js
 +++ b/dist/abl/list.js
-@@ -16,6 +16,7 @@
+@@ -16,6 +16,7 @@ export const getCreateListInstructions = async (input) => {
      const listConfigPda = await findListConfigPda({ authority: input.authority.address, seed: input.mint }, { programAddress: ABL_PROGRAM_ID });
      const createListInstruction = getCreateListInstruction({
          authority: input.authority,
@@ -10,9 +11,10 @@ diff --git a/dist/abl/list.js b/dist/abl/list.js
          mode: input.mode || Mode.Allow,
          seed: input.mint,
 diff --git a/dist/abl/set-extra-metas.js b/dist/abl/set-extra-metas.js
+index afcc26a083012adac3bec7d23019fb6bd6fdb16a..10b40e138f19d2a7066ea654f68decbd5d930616 100644
 --- a/dist/abl/set-extra-metas.js
 +++ b/dist/abl/set-extra-metas.js
-@@ -21,6 +21,7 @@
+@@ -21,6 +21,7 @@ export const getSetExtraMetasInstructions = async (input) => {
      const extraMetasThaw = await findThawExtraMetasAccountPda({ mint: input.mint }, { programAddress: ABL_PROGRAM_ID });
      const createListInstruction = getSetupExtraMetasInstruction({
          authority: input.authority,
@@ -21,9 +23,10 @@ diff --git a/dist/abl/set-extra-metas.js b/dist/abl/set-extra-metas.js
          tokenAclMintConfig: mintConfigPda[0],
          extraMetas: extraMetasThaw[0],
 diff --git a/dist/abl/wallet.js b/dist/abl/wallet.js
+index 69309f50eb78941e665f30dae90d85209d842cce..edc5eac00f030490cfb7bf7ed8e706224aa7b0f6 100644
 --- a/dist/abl/wallet.js
 +++ b/dist/abl/wallet.js
-@@ -15,13 +15,14 @@
+@@ -15,9 +15,10 @@ import { findWalletEntryPda, getAddWalletInstruction, getRemoveWalletInstruction
   * @returns Promise containing the instructions for adding the wallet to the list
   */
  export const getAddWalletInstructions = async (input) => {
@@ -35,12 +38,7 @@ diff --git a/dist/abl/wallet.js b/dist/abl/wallet.js
          listConfig: input.list,
          wallet: input.wallet,
          walletEntry: abWallet[0],
-     }, { programAddress: ABL_PROGRAM_ID });
-     return [addWalletToListInstruction];
- };
- /**
-@@ -58,8 +59,8 @@
-  * @param input.wallet - The wallet address to remove from the list
+@@ -58,7 +59,7 @@ export const getAddWalletTransaction = async (input) => {
   * @returns Promise containing the instructions for removing the wallet from the list
   */
  export const getRemoveWalletInstructions = async (input) => {
@@ -50,9 +48,10 @@ diff --git a/dist/abl/wallet.js b/dist/abl/wallet.js
          authority: input.authority,
          listConfig: input.list,
 diff --git a/dist/inspection/inspect-token.js b/dist/inspection/inspect-token.js
+index d895f897a7d3105ddf6d5d17b57f28bda6351d36..a39dc6f9bf80527b1ea105e25f02ae6abda524e8 100644
 --- a/dist/inspection/inspect-token.js
 +++ b/dist/inspection/inspect-token.js
-@@ -191,7 +191,14 @@
+@@ -191,7 +191,14 @@ export async function inspectToken(rpc, mintAddress, commitment = 'confirmed') {
                      });
              }
          }
@@ -69,9 +68,10 @@ diff --git a/dist/inspection/inspect-token.js b/dist/inspection/inspect-token.js
      const detectedPatterns = detectTokenPatterns(extensions);
      return {
 diff --git a/dist/management/force-burn.js b/dist/management/force-burn.js
+index a2bd052e50a672da25fc82d3d3e53cfe5b58325d..36698c917954d63a10597b15ddb9c9b32b7a836c 100644
 --- a/dist/management/force-burn.js
 +++ b/dist/management/force-burn.js
-@@ -18,8 +18,8 @@
+@@ -18,8 +18,8 @@ export const createForceBurnTransaction = async (rpc, mint, fromAccount, decimal
      const feePayerSigner = typeof feePayer === 'string' ? createNoopSigner(feePayer) : feePayer;
      const permanentDelegateSigner = typeof permanentDelegate === 'string' ? createNoopSigner(permanentDelegate) : permanentDelegate;
      // Get mint info to determine decimals
@@ -83,9 +83,10 @@ diff --git a/dist/management/force-burn.js b/dist/management/force-burn.js
      const rawAmount = decimalAmountToRaw(decimalAmount, decimals);
      // Resolve source token account
 diff --git a/dist/management/force-transfer.js b/dist/management/force-transfer.js
+index e4254d1c6137b9d9c85a808630abb89490491906..8aa374630e7a2ac2a1eb57c738abe7ea8abdbf78 100644
 --- a/dist/management/force-transfer.js
 +++ b/dist/management/force-transfer.js
-@@ -19,8 +19,8 @@
+@@ -19,8 +19,8 @@ export const createForceTransferTransaction = async (rpc, mint, fromAccount, toA
      const feePayerSigner = typeof feePayer === 'string' ? createNoopSigner(feePayer) : feePayer;
      const permanentDelegateSigner = typeof permanentDelegate === 'string' ? createNoopSigner(permanentDelegate) : permanentDelegate;
      // Get mint info to determine decimals
@@ -96,10 +97,135 @@ diff --git a/dist/management/force-transfer.js b/dist/management/force-transfer.
      // Convert decimal amount to raw amount
      const rawAmount = decimalAmountToRaw(decimalAmount, decimals);
      // Resolve source and destination token accounts
+diff --git a/dist/templates/arcade-token.js b/dist/templates/arcade-token.js
+index 59f70715fe2407b209c0b66d36a473b7ef72bfa5..a2afe70f90fdba1b7396144389905e63a3e52cb8 100644
+--- a/dist/templates/arcade-token.js
++++ b/dist/templates/arcade-token.js
+@@ -32,6 +32,7 @@ import { Mode } from '@token-acl/abl-sdk';
+ export const createArcadeTokenInitTransaction = async (rpc, name, symbol, decimals, uri, mintAuthority, mint, feePayer, metadataAuthority, pausableAuthority, permanentDelegateAuthority, enableSrfc37, freezeAuthority) => {
+     const mintSigner = typeof mint === 'string' ? createNoopSigner(mint) : mint;
+     const feePayerSigner = typeof feePayer === 'string' ? createNoopSigner(feePayer) : feePayer;
++    const mintAuthoritySigner = typeof mintAuthority === 'string' ? createNoopSigner(mintAuthority) : mintAuthority;
+     const useSrfc37 = enableSrfc37 ?? false;
+     const mintAuthorityAddress = typeof mintAuthority === 'string' ? mintAuthority : mintAuthority.address;
+     const instructions = await new Token()
+@@ -58,35 +59,38 @@ export const createArcadeTokenInitTransaction = async (rpc, name, symbol, decima
+         feePayer: feePayerSigner,
+     });
+     // 2. create mintConfig (Token ACL) - only if SRFC-37 is enabled
+-    if (mintAuthorityAddress !== feePayerSigner.address || !useSrfc37) {
++    if (!useSrfc37) {
+         // Get latest blockhash for transaction
+         const { value: latestBlockhash } = await rpc.getLatestBlockhash().send();
+         return pipe(createTransactionMessage({ version: 0 }), m => setTransactionMessageFeePayer(typeof feePayer === 'string' ? feePayer : feePayer.address, m), m => setTransactionMessageLifetimeUsingBlockhash(latestBlockhash, m), m => appendTransactionMessageInstructions(instructions, m));
+     }
+     const { instructions: createConfigInstructions } = await getCreateConfigInstructions({
+-        authority: feePayerSigner,
++        authority: mintAuthoritySigner,
++        payer: feePayerSigner,
+         mint: mintSigner.address,
+         gatingProgram: ABL_PROGRAM_ID,
+     });
+     const setGatingProgramInstructions = await getSetGatingProgramInstructions({
+-        authority: feePayerSigner,
++        authority: mintAuthoritySigner,
+         mint: mintSigner.address,
+         gatingProgram: ABL_PROGRAM_ID,
+     });
+     // 3. enable permissionless thaw (Token ACL))
+     const enablePermissionlessThawInstructions = await getEnablePermissionlessThawInstructions({
+-        authority: feePayerSigner,
++        authority: mintAuthoritySigner,
+         mint: mintSigner.address,
+     });
+     // 4. create list (abl)
+     const { instructions: createListInstructions, listConfig } = await getCreateListInstructions({
+-        authority: feePayerSigner,
++        authority: mintAuthoritySigner,
++        payer: feePayerSigner,
+         mint: mintSigner.address,
+         mode: Mode.Allow,
+     });
+     // 5. set extra metas (abl): this is how we can change the list associated with a given mint
+     const setExtraMetasInstructions = await getSetExtraMetasInstructions({
+-        authority: feePayerSigner,
++        authority: mintAuthoritySigner,
++        payer: feePayerSigner,
+         mint: mintSigner.address,
+         lists: [listConfig],
+     });
+diff --git a/dist/templates/custom-token.js b/dist/templates/custom-token.js
+index 648d02021a528777ecd50b9a6a883d09d1133963..a5302cb06170d69063dad11023c7a3424f1033bc 100644
+--- a/dist/templates/custom-token.js
++++ b/dist/templates/custom-token.js
+@@ -28,6 +28,7 @@ import { getSetExtraMetasInstructions } from '../abl/set-extra-metas';
+ export const createCustomTokenInitTransaction = async (rpc, name, symbol, decimals, uri, mintAuthority, mint, feePayer, options) => {
+     const mintSigner = typeof mint === 'string' ? createNoopSigner(mint) : mint;
+     const feePayerSigner = typeof feePayer === 'string' ? createNoopSigner(feePayer) : feePayer;
++    const mintAuthoritySigner = typeof mintAuthority === 'string' ? createNoopSigner(mintAuthority) : mintAuthority;
+     const mintAuthorityAddress = typeof mintAuthority === 'string' ? mintAuthority : mintAuthority.address;
+     const useSrfc37 = options?.enableSrfc37 ?? false;
+     const aclMode = options?.aclMode ?? 'blocklist';
+@@ -165,36 +166,39 @@ export const createCustomTokenInitTransaction = async (rpc, name, symbol, decima
+         mint: mintSigner,
+         feePayer: feePayerSigner,
+     });
+-    // If SRFC-37 is not enabled or mint authority is not the fee payer, return simple transaction
+-    if (mintAuthorityAddress !== feePayerSigner.address || !useSrfc37) {
++    // If SRFC-37 is not enabled, return a simple transaction (skip Token ACL/ABL setup)
++    if (!useSrfc37) {
+         const { value: latestBlockhash } = await rpc.getLatestBlockhash().send();
+         return pipe(createTransactionMessage({ version: 0 }), m => setTransactionMessageFeePayer(typeof feePayer === 'string' ? feePayer : feePayer.address, m), m => setTransactionMessageLifetimeUsingBlockhash(latestBlockhash, m), m => appendTransactionMessageInstructions(instructions, m));
+     }
+     // SRFC-37 setup: Create Token ACL configuration
+     const { instructions: createConfigInstructions } = await getCreateConfigInstructions({
+-        authority: feePayerSigner,
++        authority: mintAuthoritySigner,
++        payer: feePayerSigner,
+         mint: mintSigner.address,
+         gatingProgram: ABL_PROGRAM_ID,
+     });
+     const setGatingProgramInstructions = await getSetGatingProgramInstructions({
+-        authority: feePayerSigner,
++        authority: mintAuthoritySigner,
+         mint: mintSigner.address,
+         gatingProgram: ABL_PROGRAM_ID,
+     });
+     // Enable permissionless thaw
+     const enablePermissionlessThawInstructions = await getEnablePermissionlessThawInstructions({
+-        authority: feePayerSigner,
++        authority: mintAuthoritySigner,
+         mint: mintSigner.address,
+     });
+     // Create list (allowlist or blocklist)
+     const { instructions: createListInstructions, listConfig } = await getCreateListInstructions({
+-        authority: feePayerSigner,
++        authority: mintAuthoritySigner,
++        payer: feePayerSigner,
+         mint: mintSigner.address,
+         mode: aclMode === 'allowlist' ? Mode.Allow : Mode.Block,
+     });
+     // Set extra metas
+     const setExtraMetasInstructions = await getSetExtraMetasInstructions({
+-        authority: feePayerSigner,
++        authority: mintAuthoritySigner,
++        payer: feePayerSigner,
+         mint: mintSigner.address,
+         lists: [listConfig],
+     });
 diff --git a/dist/templates/stablecoin.js b/dist/templates/stablecoin.js
+index 75f4df1d01f2f941b0c86f27bcf3cc561af8307e..9c7f398d379f7e8b37b8e66dc8d38dd6692db802 100644
 --- a/dist/templates/stablecoin.js
 +++ b/dist/templates/stablecoin.js
-@@ -48,7 +48,7 @@
+@@ -31,6 +31,7 @@ import { getSetExtraMetasInstructions } from '../abl/set-extra-metas';
+ export const createStablecoinInitTransaction = async (rpc, name, symbol, decimals, uri, mintAuthority, mint, feePayer, aclMode, metadataAuthority, pausableAuthority, confidentialBalancesAuthority, permanentDelegateAuthority, enableSrfc37, freezeAuthority) => {
+     const mintSigner = typeof mint === 'string' ? createNoopSigner(mint) : mint;
+     const feePayerSigner = typeof feePayer === 'string' ? createNoopSigner(feePayer) : feePayer;
++    const mintAuthoritySigner = typeof mintAuthority === 'string' ? createNoopSigner(mintAuthority) : mintAuthority;
+     aclMode = aclMode || 'blocklist';
+     const useSrfc37 = enableSrfc37 ?? false;
+     // 1. create token
+@@ -48,7 +49,7 @@ export const createStablecoinInitTransaction = async (rpc, name, symbol, decimal
          additionalMetadata: new Map(),
      })
          .withPausable(pausableAuthority || mintAuthorityAddress)
@@ -108,10 +234,64 @@ diff --git a/dist/templates/stablecoin.js b/dist/templates/stablecoin.js
          .withConfidentialBalances(confidentialBalancesAuthority || mintAuthorityAddress)
          .withPermanentDelegate(permanentDelegateAuthority || mintAuthorityAddress)
          .buildInstructions({
+@@ -60,35 +61,38 @@ export const createStablecoinInitTransaction = async (rpc, name, symbol, decimal
+         feePayer: feePayerSigner,
+     });
+     // 2. create mintConfig (Token ACL) - only if SRFC-37 is enabled
+-    if (mintAuthorityAddress !== feePayerSigner.address || !useSrfc37) {
++    if (!useSrfc37) {
+         // Get latest blockhash for transaction
+         const { value: latestBlockhash } = await rpc.getLatestBlockhash().send();
+         return pipe(createTransactionMessage({ version: 0 }), m => setTransactionMessageFeePayer(typeof feePayer === 'string' ? feePayer : feePayer.address, m), m => setTransactionMessageLifetimeUsingBlockhash(latestBlockhash, m), m => appendTransactionMessageInstructions(instructions, m));
+     }
+     const { instructions: createConfigInstructions } = await getCreateConfigInstructions({
+-        authority: feePayerSigner,
++        authority: mintAuthoritySigner,
++        payer: feePayerSigner,
+         mint: mintSigner.address,
+         gatingProgram: ABL_PROGRAM_ID,
+     });
+     const setGatingProgramInstructions = await getSetGatingProgramInstructions({
+-        authority: feePayerSigner,
++        authority: mintAuthoritySigner,
+         mint: mintSigner.address,
+         gatingProgram: ABL_PROGRAM_ID,
+     });
+     // 3. enable permissionless thaw (Token ACL)
+     const enablePermissionlessThawInstructions = await getEnablePermissionlessThawInstructions({
+-        authority: feePayerSigner,
++        authority: mintAuthoritySigner,
+         mint: mintSigner.address,
+     });
+     // 4. create list (abl)
+     const { instructions: createListInstructions, listConfig } = await getCreateListInstructions({
+-        authority: feePayerSigner,
++        authority: mintAuthoritySigner,
++        payer: feePayerSigner,
+         mint: mintSigner.address,
+         mode: aclMode === 'allowlist' ? Mode.Allow : Mode.Block,
+     });
+     // 5. set extra metas (abl): this is how we can change the list associated with a given mint
+     const setExtraMetasInstructions = await getSetExtraMetasInstructions({
+-        authority: feePayerSigner,
++        authority: mintAuthoritySigner,
++        payer: feePayerSigner,
+         mint: mintSigner.address,
+         lists: [listConfig],
+     });
 diff --git a/dist/templates/tokenized-security.js b/dist/templates/tokenized-security.js
+index fc5d20f649cc63ae635cc33d6ad0fac69949a544..b67411ee68e5e4058faa16aa75b12edc42b503e3 100644
 --- a/dist/templates/tokenized-security.js
 +++ b/dist/templates/tokenized-security.js
-@@ -34,7 +34,7 @@
+@@ -15,6 +15,7 @@ import { getSetExtraMetasInstructions } from '../abl/set-extra-metas';
+ export const createTokenizedSecurityInitTransaction = async (rpc, name, symbol, decimals, uri, mintAuthority, mint, feePayer, freezeAuthority, options) => {
+     const mintSigner = typeof mint === 'string' ? createNoopSigner(mint) : mint;
+     const feePayerSigner = typeof feePayer === 'string' ? createNoopSigner(feePayer) : feePayer;
++    const mintAuthoritySigner = typeof mintAuthority === 'string' ? createNoopSigner(mintAuthority) : mintAuthority;
+     const mintAuthorityAddress = typeof mintAuthority === 'string' ? mintAuthority : mintAuthority.address;
+     const aclMode = options?.aclMode ?? 'blocklist';
+     const useSrfc37 = options?.enableSrfc37 ?? false;
+@@ -34,7 +35,7 @@ export const createTokenizedSecurityInitTransaction = async (rpc, name, symbol,
          additionalMetadata: new Map(),
      })
          .withPausable(pausableAuthority)
@@ -120,10 +300,52 @@ diff --git a/dist/templates/tokenized-security.js b/dist/templates/tokenized-sec
          .withConfidentialBalances(confidentialBalancesAuthority)
          .withPermanentDelegate(permanentDelegateAuthority);
      // Add Scaled UI Amount extension
+@@ -47,31 +48,34 @@ export const createTokenizedSecurityInitTransaction = async (rpc, name, symbol,
+         mint: mintSigner,
+         feePayer: feePayerSigner,
+     });
+-    if (mintAuthorityAddress !== feePayerSigner.address || !useSrfc37) {
++    if (!useSrfc37) {
+         const { value: latestBlockhash } = await rpc.getLatestBlockhash().send();
+         return pipe(createTransactionMessage({ version: 0 }), m => setTransactionMessageFeePayer(typeof feePayer === 'string' ? feePayer : feePayer.address, m), m => setTransactionMessageLifetimeUsingBlockhash(latestBlockhash, m), m => appendTransactionMessageInstructions(instructions, m));
+     }
+     const { instructions: createConfigInstructions } = await getCreateConfigInstructions({
+-        authority: feePayerSigner,
++        authority: mintAuthoritySigner,
++        payer: feePayerSigner,
+         mint: mintSigner.address,
+         gatingProgram: ABL_PROGRAM_ID,
+     });
+     const setGatingProgramInstructions = await getSetGatingProgramInstructions({
+-        authority: feePayerSigner,
++        authority: mintAuthoritySigner,
+         mint: mintSigner.address,
+         gatingProgram: ABL_PROGRAM_ID,
+     });
+     const enablePermissionlessThawInstructions = await getEnablePermissionlessThawInstructions({
+-        authority: feePayerSigner,
++        authority: mintAuthoritySigner,
+         mint: mintSigner.address,
+     });
+     const { instructions: createListInstructions, listConfig } = await getCreateListInstructions({
+-        authority: feePayerSigner,
++        authority: mintAuthoritySigner,
++        payer: feePayerSigner,
+         mint: mintSigner.address,
+         mode: aclMode === 'allowlist' ? Mode.Allow : Mode.Block,
+     });
+     const setExtraMetasInstructions = await getSetExtraMetasInstructions({
+-        authority: feePayerSigner,
++        authority: mintAuthoritySigner,
++        payer: feePayerSigner,
+         mint: mintSigner.address,
+         lists: [listConfig],
+     });
 diff --git a/dist/token-acl/freeze.js b/dist/token-acl/freeze.js
+index db7c1e8ed5d9cdd19263ae4dc2fd4a0f6ac3d081..c0fdf44b17a61f50eca8cec89d35f2b17c4c8a0c 100644
 --- a/dist/token-acl/freeze.js
 +++ b/dist/token-acl/freeze.js
-@@ -34,9 +34,10 @@
+@@ -34,9 +34,10 @@ export const getFreezeInstructions = async (input) => {
          state: tokenInfo.state,
      };
      // Get mint details to determine if this token uses Token ACL
@@ -138,9 +360,10 @@ diff --git a/dist/token-acl/freeze.js b/dist/token-acl/freeze.js
          const mintConfigPda = await findMintConfigPda({ mint: token.mint }, { programAddress: TOKEN_ACL_PROGRAM_ID });
          const freezeInstruction = getFreezeInstruction({
 diff --git a/dist/token-acl/thaw.js b/dist/token-acl/thaw.js
+index ad6ad0cb71c4ffb4a6dee97cb36f516ba5a1178d..e0b2649fd061544202acf301ff43ddb9cfa7f783 100644
 --- a/dist/token-acl/thaw.js
 +++ b/dist/token-acl/thaw.js
-@@ -34,9 +34,10 @@
+@@ -34,9 +34,10 @@ export const getThawInstructions = async (input) => {
          state: tokenInfo.state,
      };
      // Get mint details to determine if this token uses Token ACL
@@ -155,9 +378,10 @@ diff --git a/dist/token-acl/thaw.js b/dist/token-acl/thaw.js
          const mintConfigPda = await findMintConfigPda({ mint: token.mint }, { programAddress: TOKEN_ACL_PROGRAM_ID });
          const thawInstruction = getThawInstruction({
 diff --git a/dist/transfer/index.js b/dist/transfer/index.js
+index 8992e0d8c3ef3c277830464cbd9d82dd14e35dad..0989ef2ec4c88e844283a731e7ce3df1536868d9 100644
 --- a/dist/transfer/index.js
 +++ b/dist/transfer/index.js
-@@ -33,8 +33,8 @@
+@@ -33,8 +33,8 @@ export const createTransferInstructions = async (input) => {
          throw new Error('Amount must be a positive number');
      }
      // Get mint info to determine decimals

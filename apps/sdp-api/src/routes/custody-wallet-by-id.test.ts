@@ -259,6 +259,73 @@ describe("Custody wallet by ID route", () => {
     expect(res.status).toBe(404);
   });
 
+  it("returns 404 when the wallet belongs to a config in a different project in the same org", async () => {
+    const otherProjectId = "prj_custody_wallet_cross_project";
+    const otherConfigId = "cust_cfg_wallet_by_id_other_project";
+    const otherWalletId = "privy_wallet_other_project";
+
+    await getDb(env).batch([
+      getDb(env)
+        .prepare(
+          `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`
+        )
+        .bind(
+          otherProjectId,
+          TEST_ORG.id,
+          "Other Project",
+          "other-custody-wallet-project",
+          "sandbox",
+          "active",
+          TEST_USER.id
+        ),
+      getDb(env)
+        .prepare(
+          `INSERT INTO custody_configs
+             (id, organization_id, project_id, provider, config_encrypted, encryption_version, default_wallet_id, status)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .bind(
+          otherConfigId,
+          TEST_ORG.id,
+          otherProjectId,
+          "privy",
+          "test-config",
+          "sdp-custody-encryption-v1",
+          otherWalletId,
+          "active"
+        ),
+      getDb(env)
+        .prepare(
+          `INSERT INTO custody_wallets
+             (id, custody_config_id, wallet_id, public_key, label, purpose, status)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`
+        )
+        .bind(
+          "cwlt_wallet_by_id_other_project",
+          otherConfigId,
+          otherWalletId,
+          TEST_SOLANA_ADDRESSES.wallet3,
+          "Other Project Wallet",
+          "root",
+          "active"
+        ),
+    ]);
+
+    const res = await app.request(
+      `/v1/wallets/${otherWalletId}`,
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+      },
+      env
+    );
+
+    expect(res.status).toBe(404);
+  });
+
   it("returns 404 for API keys bound to a different wallet to avoid wallet enumeration", async () => {
     await seedCachedKey({
       walletBindings: [

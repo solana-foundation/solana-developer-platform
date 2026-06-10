@@ -25,7 +25,8 @@ export const defaultAddress: AddressData = {
 };
 
 export function getSteps(entityType: CounterpartyEntityType): StepId[] {
-  return entityType === "individual"
-    ? ["basics", "identity", "address", "review"]
-    : ["basics", "address", "review"];
+  if (entityType !== "individual") {
+    return ["basics", "address", "review"];
+  }
+  return ["basics", "identity", "address", "review"];
 }

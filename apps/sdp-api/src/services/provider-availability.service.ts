@@ -96,6 +96,15 @@ const PROVIDER_AVAILABILITY_DEFINITIONS = {
       label: "Anchorage",
       isConfigured: (env) => hasEnv(env, "ANCHORAGE_API_KEY"),
     },
+    utila: {
+      label: "Utila",
+      isConfigured: (env) =>
+        hasAllEnv(env, [
+          "UTILA_SERVICE_ACCOUNT_EMAIL",
+          "UTILA_SERVICE_ACCOUNT_PRIVATE_KEY",
+          "UTILA_VAULT_ID",
+        ]),
+    },
   },
   rpc: {
     default: {

@@ -11,8 +11,10 @@ import {
   type RampDirection,
   type RampPair,
   type RampProviderOption,
+  rampPairKey,
   type SelectedRampPair,
 } from "@/lib/ramps";
+import { useRampEstimate } from "../hooks/use-ramp-estimate";
 import { CurrencyPairSelector } from "./currency-pair-selector";
 import { ProviderCard } from "./provider-card";
 import { RampSelectionProvider } from "./ramp-selection-context";
@@ -25,6 +27,7 @@ interface RampPairProviderSelectorProps {
   wallets: readonly PaymentsDashboardWallet[];
   walletsLoading: boolean;
   selectedWallet: PaymentsDashboardWallet | null;
+  showWallet?: boolean;
   selectedPair: SelectedRampPair;
   selectedProvider: RampProviderId | null;
   amount: string;
@@ -35,10 +38,6 @@ interface RampPairProviderSelectorProps {
   onProviderSelect: (provider: RampProviderId) => void;
 }
 
-function pairKey(pair: SelectedRampPair): string {
-  return `${pair.fiatCurrency}:${pair.assetRail}`;
-}
-
 export function RampPairProviderSelector({
   direction,
   pairs,
@@ -47,6 +46,7 @@ export function RampPairProviderSelector({
   wallets,
   walletsLoading,
   selectedWallet,
+  showWallet = true,
   selectedPair,
   selectedProvider,
   amount,
@@ -72,10 +72,16 @@ export function RampPairProviderSelector({
       ),
     [providerOptions, enabledProviderSet, supportedProviderSet]
   );
+  const { estimatesByProvider, loading: estimatesLoading } = useRampEstimate({
+    direction,
+    selectedPair,
+    amount,
+    enabled: availableProviders.length > 0,
+  });
   const pairByKey = useMemo(() => {
     const nextPairs = new Map<string, SelectedRampPair>();
     for (const pair of pairs) {
-      nextPairs.set(pairKey(pair), {
+      nextPairs.set(rampPairKey(pair), {
         fiatCurrency: pair.fiatCurrency,
         assetRail: pair.assetRail,
       });
@@ -104,7 +110,7 @@ export function RampPairProviderSelector({
   const selectFiatCurrency = useCallback(
     (fiatCurrency: RampFiatCurrency) => {
       const currentAssetPair = pairByKey.get(
-        pairKey({ fiatCurrency, assetRail: selectedPair.assetRail })
+        rampPairKey({ fiatCurrency, assetRail: selectedPair.assetRail })
       );
       if (currentAssetPair) {
         onPairChange(currentAssetPair);
@@ -122,7 +128,7 @@ export function RampPairProviderSelector({
   const selectAssetRail = useCallback(
     (assetRail: CryptoRailId) => {
       const nextPair = pairByKey.get(
-        pairKey({ fiatCurrency: selectedPair.fiatCurrency, assetRail })
+        rampPairKey({ fiatCurrency: selectedPair.fiatCurrency, assetRail })
       );
       if (nextPair) {
         onPairChange(nextPair);
@@ -138,6 +144,7 @@ export function RampPairProviderSelector({
       wallets,
       walletsLoading,
       selectedWallet,
+      showWallet,
       selectedPair,
       amount,
       onAmountChange,
@@ -158,6 +165,7 @@ export function RampPairProviderSelector({
       selectFiatCurrency,
       selectedPair,
       selectedWallet,
+      showWallet,
       wallets,
       walletsLoading,
     ]
@@ -178,7 +186,7 @@ export function RampPairProviderSelector({
         </div>
 
         {/* Fixed height keeps the sticky footer from shifting as providers animate in/out. */}
-        <div className="h-48 overflow-y-auto">
+        <div className="-mx-1.5 h-48 overflow-y-auto px-1.5 py-1">
           <motion.div layout className="space-y-2">
             <AnimatePresence mode="popLayout" initial={false}>
               {availableProviders.map((option) => (
@@ -186,6 +194,8 @@ export function RampPairProviderSelector({
                   key={option.id}
                   option={option}
                   active={selectedProvider === option.id}
+                  estimate={estimatesByProvider.get(option.id)}
+                  estimateLoading={estimatesLoading}
                   onSelect={() => onProviderSelect(option.id)}
                 />
               ))}
