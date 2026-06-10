@@ -3624,6 +3624,7 @@ const deployed = await sdp.post(
   {},
   { idempotencyKey: idempotencyKey("deploy") }
 );
+const mintAddress = deployed.data.token.mintAddress;
 ```
 
 A successful response carries the deployed token record with `status: "active"` and the on-chain `mintAddress` populated:

@@ -4,6 +4,8 @@ description: Build a GENIUS-compliant digital dollar on Solana with institutiona
 ---
 
 import { Steps, Step } from "fumadocs-ui/components/steps";
+import { Callout } from "fumadocs-ui/components/callout";
+import { Card, Cards } from "fumadocs-ui/components/card";
 
 This tutorial walks you through issuing a regulated stablecoin on Solana. The product you ship at the end is one that a Federal Reserve examiner could read and a bank's compliance committee could sign against. Issuing one is not the same as deploying a token. It requires institutional custody, integrated compliance, and operational reversibility from day one. The [GENIUS Act](https://www.gibsondunn.com/the-genius-act-a-new-era-of-stablecoin-regulation/) treats those capabilities as preconditions, not features.
 
@@ -316,6 +318,7 @@ const deployed = await sdp.post(
   {},
   { idempotencyKey: idempotencyKey("deploy") }
 );
+const mintAddress = deployed.data.token.mintAddress;
 ```
 
 A successful response carries the deployed token record with `status: "active"` and the on-chain `mintAddress` populated:
