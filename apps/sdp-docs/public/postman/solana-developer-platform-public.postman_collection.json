@@ -1237,7 +1237,7 @@
               }
             ],
             "url": "{{baseUrl}}/v1/payments/recurring-payments",
-            "description": "Creates an SDP-custody outbound recurring payment intent from a custody wallet to a counterparty crypto-wallet account. This stores backend state only; activation and collection are added by follow-up endpoints.",
+            "description": "Creates an SDP-custody outbound recurring payment intent from a custody wallet to a counterparty crypto-wallet account. This stores backend state only; activation creates the on-chain authorization in a follow-up request.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"sourceWalletId\": \"wal_source\",\n  \"counterpartyId\": \"cp_example\",\n  \"counterpartyAccountId\": \"cpa_example\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"25.00\",\n  \"periodHours\": 720,\n  \"firstCollectionAt\": \"2099-01-01T00:00:00.000Z\",\n  \"metadataUri\": \"https://example.com/subscriptions/monthly-usdc.json\"\n}",
@@ -1247,6 +1247,15 @@
                 }
               }
             }
+          }
+        },
+        {
+          "name": "Activate recurring payment",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/v1/payments/recurring-payments/{{id}}/activate",
+            "description": "Activates a pending SDP-custody outbound recurring payment by creating the Solana subscriptions plan and subscription authorization with the source custody wallet. The operation is idempotent once active and does not collect funds."
           }
         },
         {

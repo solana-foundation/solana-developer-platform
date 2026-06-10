@@ -6,6 +6,7 @@ import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import type { Env } from "@/types/env";
 import {
+  activateRecurringPayment,
   createOfframpQuote,
   createOnrampQuote,
   createRecurringPayment,
@@ -92,6 +93,11 @@ payments.post(
   createRecurringPayment
 );
 payments.get("/recurring-payments", requirePermissions("payments:read"), listRecurringPayments);
+payments.post(
+  "/recurring-payments/:id/activate",
+  requirePermissions("payments:write", "wallets:read"),
+  activateRecurringPayment
+);
 payments.get("/recurring-payments/:id", requirePermissions("payments:read"), getRecurringPayment);
 payments.get("/subscription-plans", requirePermissions("payments:read"), listSubscriptionPlans);
 payments.post(

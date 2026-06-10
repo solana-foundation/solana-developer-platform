@@ -241,7 +241,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Create recurring payment",
     operationId: "createPaymentRecurringPayment",
     description:
-      "Creates an SDP-custody outbound recurring payment intent from a custody wallet to a counterparty crypto-wallet account. This stores backend state only; activation and collection are added by follow-up endpoints.",
+      "Creates an SDP-custody outbound recurring payment intent from a custody wallet to a counterparty crypto-wallet account. This stores backend state only; activation creates the on-chain authorization in a follow-up request.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -256,6 +256,28 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         content: jsonContent(paymentRecurringPaymentResponse),
       },
       ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/payments/recurring-payments/{id}/activate",
+    tags: ["Payments"],
+    summary: "Activate recurring payment",
+    operationId: "activatePaymentRecurringPayment",
+    description:
+      "Activates a pending SDP-custody outbound recurring payment by creating the Solana subscriptions plan and subscription authorization with the source custody wallet. The operation is idempotent once active and does not collect funds.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: paymentRecurringPaymentIdParamsSchema,
+    },
+    responses: {
+      200: {
+        description: "Recurring payment activated",
+        content: jsonContent(paymentRecurringPaymentResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
     },
   });
 
