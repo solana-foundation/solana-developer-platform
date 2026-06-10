@@ -3581,7 +3581,7 @@ const sdpAdmin = new SdpClient(process.env.SDP_ADMIN_API_KEY);
 const idempotencyKey = (op) => `${op}-${crypto.randomUUID()}`;
 ```
 
-Generate one key per logical operation, not per retry. Reuse the same key across retries of the same call.
+Generate one key per logical operation, not per retry. Create the key once before the first attempt, store it in a variable, and reuse that same value for every retry of the same call.
 
 ### 2. Create the token record
 
@@ -3620,10 +3620,11 @@ Save the `tok_*` ID; the deploy call uses it.
 The deploy call submits a Token-2022 mint creation transaction to Solana via the custody signer, and updates the token record with the resulting on-chain addresses:
 
 ```javascript
+const deployKey = idempotencyKey("deploy");
 const deployed = await sdp.post(
   `/v1/issuance/tokens/${tokenId}/deploy`,
   {},
-  { idempotencyKey: idempotencyKey("deploy") }
+  { idempotencyKey: deployKey }
 );
 const mintAddress = deployed.data.token.mintAddress;
 ```
@@ -3740,13 +3741,14 @@ On the sandbox response this tutorial cites, Range and Elliptic return numeric s
 Freezing halts one holder's account without touching any other holder. The freeze is on-chain, enforced by the Token-2022 program. SDP signs the freeze instruction with the freeze authority that was set at deploy; the on-chain program does the enforcement.
 
 ```javascript
+const holderFreezeKey = idempotencyKey("freeze");
 await sdpAdmin.post(
   `/v1/issuance/tokens/${tokenId}/freeze`,
   {
     accountAddress: holderAddress,
     reason: "Court order #2026-IL-0142",
   },
-  { idempotencyKey: idempotencyKey("freeze") }
+  { idempotencyKey: holderFreezeKey }
 );
 ```
 
@@ -3761,6 +3763,7 @@ Section 7 demonstrates the resulting error: an HTTP 502 `SOLANA_RPC_ERROR` from 
 Seize moves tokens out of a holder's account without their signature, via the **permanent delegate** authority set at deploy. The permanent delegate is a Token-2022 extension that grants a named authority the right to transfer or burn any holder's tokens regardless of holder signature. This is the technological capability the GENIUS Act requires you to have ready for lawful orders. The institutional use case is a court-ordered transfer or a sanctions matter where you must recover specific tokens to a controlled wallet.
 
 ```javascript
+const seizeKey = idempotencyKey("seize");
 await sdpAdmin.post(
   `/v1/issuance/tokens/${tokenId}/seize`,
   {
@@ -3771,7 +3774,7 @@ await sdpAdmin.post(
       memo: "OFAC matter 2026-04-018",
     },
   },
-  { idempotencyKey: idempotencyKey("seize") }
+  { idempotencyKey: seizeKey }
 );
 ```
 
@@ -3782,6 +3785,7 @@ The memo persists on the transaction record. It's the audit attribution your com
 Force-burn destroys tokens at a holder's account. Same authority as seize, different effect. Reach for it only when the tokens cannot be recovered to a controlled wallet, for example a self-custodied address whose key you cannot obtain.
 
 ```javascript
+const forceBurnKey = idempotencyKey("force-burn");
 await sdpAdmin.post(
   `/v1/issuance/tokens/${tokenId}/force-burn`,
   {
@@ -3791,7 +3795,7 @@ await sdpAdmin.post(
       memo: "regulator-ordered burn 2026-04-021",
     },
   },
-  { idempotencyKey: idempotencyKey("force-burn") }
+  { idempotencyKey: forceBurnKey }
 );
 ```
 
@@ -3813,6 +3817,7 @@ Minting is how new supply enters circulation. For a regulated stablecoin, every 
 Minting requires the `tokens:write` permission, so the Developer key (`sdp`) is the right credential:
 
 ```javascript
+const mintKey = idempotencyKey("mint");
 const minted = await sdp.post(
   `/v1/issuance/tokens/${tokenId}/mint`,
   {
@@ -3822,7 +3827,7 @@ const minted = await sdp.post(
       memo: "Reserve mint Q2-2026, reference: ANB-RESV-2026-04-091",
     },
   },
-  { idempotencyKey: idempotencyKey("mint") }
+  { idempotencyKey: mintKey }
 );
 ```
 
@@ -3951,13 +3956,14 @@ A successful response includes the on-chain signature once the transaction confi
 To demonstrate the on-chain block, freeze the destination's TPUSD account using the Admin key. Freeze requires `tokens:admin`, which the Developer key does not carry:
 
 ```javascript
+const transferFreezeKey = idempotencyKey("freeze");
 await sdpAdmin.post(
   `/v1/issuance/tokens/${tokenId}/freeze`,
   {
     accountAddress: destinationAddress,
     reason: "Compliance hold pending OFAC review 2026-04-019",
   },
-  { idempotencyKey: idempotencyKey("freeze") }
+  { idempotencyKey: transferFreezeKey }
 );
 ```
 
