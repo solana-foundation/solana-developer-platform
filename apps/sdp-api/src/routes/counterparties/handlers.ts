@@ -27,11 +27,13 @@ import {
   internalError,
   notFound,
 } from "@/lib/errors";
+import { RAMP_PROVIDER_CLIENTS } from "@/lib/ramps";
 import { created, noContent, success } from "@/lib/response";
 import { AuditService } from "@/services/audit.service";
 import { type AppContext, getCounterpartiesRepository } from "./context";
 import {
   counterpartyIdParamsSchema,
+  counterpartyRequirementsQuerySchema,
   createCounterpartySchema,
   listCounterpartiesQuerySchema,
   updateCounterpartySchema,
@@ -126,6 +128,39 @@ export const getCounterparty = async (c: AppContext) => {
 
   const response: CounterpartyResponse = { counterparty: mapToCounterparty(counterparty) };
   return success(c, response);
+};
+
+export const getCounterpartyRequirements = async (c: AppContext) => {
+  const auth = getAuth(c);
+  const projectId = requireProjectId(c);
+  const params = counterpartyIdParamsSchema.safeParse(c.req.param());
+
+  if (!params.success) {
+    throw badRequestParams();
+  }
+
+  const query = counterpartyRequirementsQuerySchema.safeParse(c.req.query());
+
+  if (!query.success) {
+    throw badRequestQuery({ errors: z.treeifyError(query.error) });
+  }
+
+  const repo = getCounterpartiesRepository(c);
+  const counterparty = await repo.getCounterpartyById({
+    counterpartyId: params.data.counterpartyId,
+    organizationId: auth.organizationId,
+    projectId,
+  });
+
+  if (!counterparty) {
+    throw notFound("Counterparty");
+  }
+
+  const requirements = RAMP_PROVIDER_CLIENTS[query.data.provider].validateCounterparty(
+    mapToCounterparty(counterparty),
+    { direction: query.data.direction, providerData: counterparty.provider_data }
+  );
+  return success(c, requirements);
 };
 
 export const createCounterparty = async (c: AppContext) => {

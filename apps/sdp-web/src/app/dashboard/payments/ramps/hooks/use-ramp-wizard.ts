@@ -6,6 +6,7 @@ import type {
   PaymentsDashboardWallet,
   RampProviderId,
 } from "@sdp/types";
+import type { CollectedFieldData, RampDirection } from "@sdp/types/ramp-requirements";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -26,6 +27,7 @@ import {
 } from "@/lib/ramps";
 import { useZodForm } from "@/lib/use-zod-form";
 import { type RampFields, rampSelectionSchema } from "../schema";
+import { useCounterpartyRequirements } from "./use-counterparty-requirements";
 
 const PAYMENTS_ACTION_WALLETS_KEY = "payments-action-wallets";
 const PAYMENTS_ACTION_COUNTERPARTIES_KEY = "payments-action-counterparties";
@@ -45,6 +47,7 @@ export interface RampQuotePayloadArgs {
   provider: RampProviderId;
   selectedRampPair: SelectedRampPair;
   cryptoToken: string;
+  collectedData: CollectedFieldData;
 }
 
 export interface RampWizardConfig<TId extends string = string> {
@@ -57,6 +60,16 @@ export interface RampWizardConfig<TId extends string = string> {
   selectionSchema: z.ZodTypeAny;
   quoteEndpoint: string;
   buildQuotePayload: (args: RampQuotePayloadArgs) => Record<string, unknown>;
+  /**
+   * Optional provider-driven step, inserted after `insertAfter` only when the
+   * chosen provider reports `status: "collect"` for the counterparty. The quote
+   * then fires at this step (carrying `collectedData`) instead of `quoteStepId`.
+   */
+  requirements?: {
+    step: RampWizardStep<TId>;
+    insertAfter: TId;
+    direction: RampDirection;
+  };
   onQuoteCreated?: (quote: PaymentRampQuote) => void;
 }
 
@@ -121,6 +134,17 @@ export function useRampWizard<TId extends string>(
     counterpartyId: initialCounterpartyId,
   });
 
+  const requirementsConfig = config.requirements;
+  const requirements = useCounterpartyRequirements(
+    requirementsConfig
+      ? {
+          counterpartyId: fields.counterpartyId,
+          provider: fields.provider,
+          direction: requirementsConfig.direction,
+        }
+      : null
+  );
+
   const { data: swrWallets, error: walletsFetchError } = useSWR<PaymentsDashboardWallet[]>(
     PAYMENTS_ACTION_WALLETS_KEY,
     () => fetchWallets({ includeBalances: true }),
@@ -155,14 +179,58 @@ export function useRampWizard<TId extends string>(
     [liveWallets, fields.walletId]
   );
 
-  const currentStepId = config.steps[stepIndex].id;
-  const stepSchema = config.stepSchemas[currentStepId];
-  const canProceed = useMemo(
-    () => (stepSchema ? stepSchema.safeParse(fields).success : true),
-    [stepSchema, fields]
-  );
+  const steps = useMemo<readonly RampWizardStep<TId>[]>(() => {
+    if (!requirementsConfig || !requirements.needsCollection) {
+      return config.steps;
+    }
+    const insertIndex = config.steps.findIndex(
+      (step) => step.id === requirementsConfig.insertAfter
+    );
+    return [
+      ...config.steps.slice(0, insertIndex + 1),
+      requirementsConfig.step,
+      ...config.steps.slice(insertIndex + 1),
+    ];
+  }, [config.steps, requirementsConfig, requirements.needsCollection]);
 
-  const isLastStep = stepIndex === config.steps.length - 1;
+  const currentStepId = steps[stepIndex].id;
+  const isRequirementsStep =
+    requirementsConfig !== undefined && currentStepId === requirementsConfig.step.id;
+  const quoteStepId: TId =
+    requirementsConfig && requirements.needsCollection
+      ? requirementsConfig.step.id
+      : config.quoteStepId;
+  const stepSchema = config.stepSchemas[currentStepId];
+  const canProceed = useMemo(() => {
+    if (isRequirementsStep) {
+      return requirements.isComplete;
+    }
+    // Block leaving the provider-selection step until the requirements answer has
+    // resolved AND isn't a blocker (fetch error, or an `unsupported` provider for
+    // this counterparty) — otherwise the quote could fire before collected fields
+    // exist / for an unsupported counterparty, or the step could appear under the
+    // user on retry.
+    if (
+      requirementsConfig &&
+      currentStepId === requirementsConfig.insertAfter &&
+      fields.provider !== null &&
+      (!requirements.isResolved || requirements.blockReason !== null)
+    ) {
+      return false;
+    }
+    return stepSchema ? stepSchema.safeParse(fields).success : true;
+  }, [
+    isRequirementsStep,
+    requirements.isComplete,
+    requirements.isResolved,
+    requirements.blockReason,
+    requirementsConfig,
+    currentStepId,
+    fields,
+    stepSchema,
+  ]);
+
+  const isLastStep = stepIndex === steps.length - 1;
 
   const createQuoteAndAdvance = async () => {
     if (!config.selectionSchema.safeParse(fields).success || !fields.provider) {
@@ -180,6 +248,7 @@ export function useRampWizard<TId extends string>(
           provider: fields.provider,
           selectedRampPair,
           cryptoToken: toRampCryptoToken(selectedRampPair.assetRail),
+          collectedData: requirements.collectedData,
         })
       );
 
@@ -213,6 +282,7 @@ export function useRampWizard<TId extends string>(
           provider: fields.provider,
           selectedRampPair,
           cryptoToken: toRampCryptoToken(selectedRampPair.assetRail),
+          collectedData: requirements.collectedData,
         })
       );
       setQuote(created);
@@ -223,7 +293,7 @@ export function useRampWizard<TId extends string>(
     if (!canProceed) {
       return;
     }
-    if (currentStepId === config.quoteStepId) {
+    if (currentStepId === quoteStepId) {
       await createQuoteAndAdvance();
       return;
     }
@@ -274,9 +344,14 @@ export function useRampWizard<TId extends string>(
   return {
     enabledRampProviders,
     stepIndex,
+    steps,
     currentStepId,
     isLastStep,
     canProceed,
+    collectedData: requirements.collectedData,
+    setCollectedField: requirements.setField,
+    requirementFields: requirements.fields,
+    requirementsBlocker: requirements.blockReason,
     liveWallets,
     walletsLoading,
     liveWalletsError,

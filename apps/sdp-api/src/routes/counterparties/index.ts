@@ -8,6 +8,7 @@ import {
   createCounterparty,
   getCounterparty,
   getCounterpartyFieldOptions,
+  getCounterpartyRequirements,
   listCounterparties,
   updateCounterparty,
 } from "./handlers";
@@ -25,6 +26,11 @@ counterparties.get(
 counterparties.get("/", requirePermissions("counterparties:read"), listCounterparties);
 counterparties.post("/", requirePermissions("counterparties:write"), createCounterparty);
 counterparties.get("/:counterpartyId", requirePermissions("counterparties:read"), getCounterparty);
+counterparties.get(
+  "/:counterpartyId/requirements",
+  requirePermissions("counterparties:read"),
+  getCounterpartyRequirements
+);
 counterparties.patch(
   "/:counterpartyId",
   requirePermissions("counterparties:write"),
