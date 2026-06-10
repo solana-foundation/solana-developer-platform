@@ -1,7 +1,8 @@
 import { MINT_ALREADY_PAUSED_ERROR, MINT_NOT_PAUSED_ERROR } from "@solana/mosaic-sdk";
 import type { Context } from "hono";
+import { z } from "zod";
 import { getDb } from "@/db";
-import { AppError, notFound } from "@/lib/errors";
+import { AppError, badRequest, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { assertValidAddress } from "@/lib/solana";
 import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
@@ -32,8 +33,8 @@ export const pauseToken = async (c: AppContext) => {
   const parsed = pauseTokenSchema.safeParse(body);
 
   if (!parsed.success) {
-    throw new AppError("BAD_REQUEST", "Invalid request body", {
-      errors: parsed.error.flatten().fieldErrors,
+    throw badRequest("Invalid request body", {
+      errors: z.flattenError(parsed.error).fieldErrors,
     });
   }
 
@@ -58,7 +59,7 @@ export const pauseToken = async (c: AppContext) => {
 
   const pauseAuthorityRaw = resolvePauseAuthority(token);
   if (!pauseAuthorityRaw) {
-    throw new AppError("BAD_REQUEST", "Pause authority is not configured for this token");
+    throw badRequest("Pause authority is not configured for this token");
   }
 
   const signingWalletId = resolveApiKeySigningWalletId(auth, token.signingWalletId, [
@@ -98,7 +99,7 @@ export const pauseToken = async (c: AppContext) => {
       signingWalletId
     );
     if (pauseAuthorityRaw !== signer.address) {
-      throw new AppError("BAD_REQUEST", "Pause authority is not controlled by custody");
+      throw badRequest("Pause authority is not controlled by custody");
     }
 
     const mosaic = createMosaicService(c.env, signer);
@@ -135,7 +136,7 @@ export const pauseToken = async (c: AppContext) => {
         status: "failed",
         error: error.message,
       });
-      throw new AppError("BAD_REQUEST", "Token is already paused");
+      throw badRequest("Token is already paused");
     }
     await tokenService.updateTransaction(tx.id, {
       status: "failed",
@@ -153,8 +154,8 @@ export const unpauseToken = async (c: AppContext) => {
   const parsed = pauseTokenSchema.safeParse(body);
 
   if (!parsed.success) {
-    throw new AppError("BAD_REQUEST", "Invalid request body", {
-      errors: parsed.error.flatten().fieldErrors,
+    throw badRequest("Invalid request body", {
+      errors: z.flattenError(parsed.error).fieldErrors,
     });
   }
 
@@ -170,7 +171,7 @@ export const unpauseToken = async (c: AppContext) => {
   }
 
   if (token.status !== "paused") {
-    throw new AppError("BAD_REQUEST", "Token is not paused");
+    throw badRequest("Token is not paused");
   }
 
   if (!token.mintAddress) {
@@ -179,7 +180,7 @@ export const unpauseToken = async (c: AppContext) => {
 
   const pauseAuthorityRaw = resolvePauseAuthority(token);
   if (!pauseAuthorityRaw) {
-    throw new AppError("BAD_REQUEST", "Pause authority is not configured for this token");
+    throw badRequest("Pause authority is not configured for this token");
   }
 
   const signingWalletId = resolveApiKeySigningWalletId(auth, token.signingWalletId, [
@@ -219,7 +220,7 @@ export const unpauseToken = async (c: AppContext) => {
       signingWalletId
     );
     if (pauseAuthorityRaw !== signer.address) {
-      throw new AppError("BAD_REQUEST", "Pause authority is not controlled by custody");
+      throw badRequest("Pause authority is not controlled by custody");
     }
 
     const mosaic = createMosaicService(c.env, signer);
@@ -256,7 +257,7 @@ export const unpauseToken = async (c: AppContext) => {
         status: "failed",
         error: error.message,
       });
-      throw new AppError("BAD_REQUEST", "Token is not paused");
+      throw badRequest("Token is not paused");
     }
     await tokenService.updateTransaction(tx.id, {
       status: "failed",

@@ -1,8 +1,9 @@
 import type { FrozenAccountResponse } from "@sdp/types";
 import { resolveTokenAccount } from "@solana/mosaic-sdk";
 import type { Context } from "hono";
+import { z } from "zod";
 import { getDb } from "@/db";
-import { AppError, notFound } from "@/lib/errors";
+import { AppError, badRequest, notFound } from "@/lib/errors";
 import { created, paginated, success } from "@/lib/response";
 import { type Address, assertValidAddress } from "@/lib/solana";
 import { AuditService } from "@/services/audit.service";
@@ -133,8 +134,8 @@ export const freezeAccount = async (c: AppContext) => {
   const parsed = freezeSchema.safeParse(body);
 
   if (!parsed.success) {
-    throw new AppError("BAD_REQUEST", "Invalid request body", {
-      errors: parsed.error.flatten().fieldErrors,
+    throw badRequest("Invalid request body", {
+      errors: z.flattenError(parsed.error).fieldErrors,
     });
   }
 
@@ -150,7 +151,7 @@ export const freezeAccount = async (c: AppContext) => {
   }
 
   if (!token.isFreezable) {
-    throw new AppError("BAD_REQUEST", "Token does not support freeze operations");
+    throw badRequest("Token does not support freeze operations");
   }
 
   if (!token.mintAddress) {
@@ -167,7 +168,7 @@ export const freezeAccount = async (c: AppContext) => {
   );
 
   if (!currentAuthorityRaw) {
-    throw new AppError("BAD_REQUEST", "Current freeze authority is not available for this token");
+    throw badRequest("Current freeze authority is not available for this token");
   }
 
   const { signer } = await resolveAuthoritySigner({
@@ -210,7 +211,7 @@ export const freezeAccount = async (c: AppContext) => {
 
   if (replayed) {
     if (tx.status === "failed") {
-      throw new AppError("BAD_REQUEST", tx.error ?? "Previous freeze request failed");
+      throw badRequest(tx.error ?? "Previous freeze request failed");
     }
 
     const latestRecord = await tokenService.getFrozenAccount(tokenId, tokenAccount, true);
@@ -336,8 +337,8 @@ export const unfreezeAccount = async (c: AppContext) => {
   const parsed = unfreezeSchema.safeParse(body);
 
   if (!parsed.success) {
-    throw new AppError("BAD_REQUEST", "Invalid request body", {
-      errors: parsed.error.flatten().fieldErrors,
+    throw badRequest("Invalid request body", {
+      errors: z.flattenError(parsed.error).fieldErrors,
     });
   }
 
@@ -366,7 +367,7 @@ export const unfreezeAccount = async (c: AppContext) => {
   );
 
   if (!currentAuthorityRaw) {
-    throw new AppError("BAD_REQUEST", "Current freeze authority is not available for this token");
+    throw badRequest("Current freeze authority is not available for this token");
   }
 
   const requestedAddress = assertValidAddress(parsed.data.accountAddress, "accountAddress");
@@ -414,7 +415,7 @@ export const unfreezeAccount = async (c: AppContext) => {
 
   if (replayed) {
     if (tx.status === "failed") {
-      throw new AppError("BAD_REQUEST", tx.error ?? "Previous unfreeze request failed");
+      throw badRequest(tx.error ?? "Previous unfreeze request failed");
     }
 
     const latestRecord = await tokenService.getFrozenAccount(tokenId, tokenAccount, true);

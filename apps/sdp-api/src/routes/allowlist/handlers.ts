@@ -1,6 +1,7 @@
 import type { Context } from "hono";
+import { z } from "zod";
 import { getDb } from "@/db";
-import { AppError, notFound } from "@/lib/errors";
+import { AppError, badRequest, notFound } from "@/lib/errors";
 import { created, noContent, success } from "@/lib/response";
 import { createAllowlistService } from "@/services/allowlist.service";
 import { AuditService } from "@/services/audit.service";
@@ -25,8 +26,8 @@ export const addEntry = async (c: AppContext) => {
   const parsed = addEntrySchema.safeParse(body);
 
   if (!parsed.success) {
-    throw new AppError("BAD_REQUEST", "Invalid request body", {
-      errors: parsed.error.flatten().fieldErrors,
+    throw badRequest("Invalid request body", {
+      errors: z.flattenError(parsed.error).fieldErrors,
     });
   }
 

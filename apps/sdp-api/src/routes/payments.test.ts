@@ -331,6 +331,7 @@ async function seedCounterparty(params?: {
   id?: string;
   externalId?: string | null;
   identity?: Record<string, unknown>;
+  providerData?: Record<string, unknown>;
 }): Promise<string> {
   const id = params?.id ?? `counterparty_${crypto.randomUUID()}`;
   await getDb(env)
@@ -358,7 +359,7 @@ async function seedCounterparty(params?: {
       "MoonPay Test Counterparty",
       "moonpay-counterparty@example.com",
       params?.identity ?? {},
-      {},
+      params?.providerData ?? {},
       TEST_USER.id
     )
     .run();
@@ -1633,6 +1634,8 @@ describe("Payments routes", () => {
   });
 
   it("creates a signed MoonPay on-ramp session URL", async () => {
+    const counterpartyId = await seedCounterparty();
+
     const res = await app.request(
       "/v1/payments/ramps/onramp/execute",
       {
@@ -1644,11 +1647,11 @@ describe("Payments routes", () => {
         },
         body: JSON.stringify({
           provider: "moonpay",
+          counterpartyId,
           destinationWallet: TEST_WALLET_ID,
           cryptoToken: "USDC",
           fiatCurrency: "USD",
           fiatAmount: "120.50",
-          kycReference: "kyc_ref_123",
           redirectUrl: "https://example.com/onramp-done",
         }),
       },
@@ -1671,7 +1674,7 @@ describe("Payments routes", () => {
     expect(redirect.searchParams.get("currencyCode")).toBe("usdc_sol");
     expect(redirect.searchParams.get("walletAddress")).toBe(TEST_SOLANA_ADDRESSES.wallet1);
     expect(redirect.searchParams.get("redirectURL")).toBe("https://example.com/onramp-done");
-    expect(redirect.searchParams.get(MOONPAY_PARAM_EXTERNAL_CUSTOMER_ID)).toBe("kyc_ref_123");
+    expect(redirect.searchParams.get(MOONPAY_PARAM_EXTERNAL_CUSTOMER_ID)).toBeNull();
     assertMoonPaySignature(redirect);
   });
 
@@ -1731,6 +1734,8 @@ describe("Payments routes", () => {
   });
 
   it("creates a signed MoonPay off-ramp session URL", async () => {
+    const counterpartyId = await seedCounterparty();
+
     const res = await app.request(
       "/v1/payments/ramps/offramp/execute",
       {
@@ -1741,11 +1746,11 @@ describe("Payments routes", () => {
         },
         body: JSON.stringify({
           provider: "moonpay",
+          counterpartyId,
           sourceWallet: TEST_WALLET_ID,
           cryptoToken: "USDC",
           fiatCurrency: "USD",
           cryptoAmount: "75.25",
-          kycReference: "kyc_ref_456",
           redirectUrl: "https://example.com/offramp-done",
         }),
       },
@@ -1771,11 +1776,12 @@ describe("Payments routes", () => {
       TEST_SOLANA_ADDRESSES.wallet1
     );
     expect(redirect.searchParams.get("redirectURL")).toBe("https://example.com/offramp-done");
-    expect(redirect.searchParams.get(MOONPAY_PARAM_EXTERNAL_CUSTOMER_ID)).toBe("kyc_ref_456");
+    expect(redirect.searchParams.get(MOONPAY_PARAM_EXTERNAL_CUSTOMER_ID)).toBeNull();
     assertMoonPaySignature(redirect);
   });
 
   it("blocks MoonPay off-ramp when the wallet policy maxTransferAmount is exceeded", async () => {
+    const counterpartyId = await seedCounterparty();
     await seedWalletPolicy({
       destinationAllowlist: [],
       maxTransferAmount: "50.00",
@@ -1791,6 +1797,7 @@ describe("Payments routes", () => {
         },
         body: JSON.stringify({
           provider: "moonpay",
+          counterpartyId,
           sourceWallet: TEST_WALLET_ID,
           cryptoToken: "USDC",
           fiatCurrency: "USD",
@@ -1806,6 +1813,7 @@ describe("Payments routes", () => {
   });
 
   it("does not apply outbound wallet policy checks to MoonPay on-ramp", async () => {
+    const counterpartyId = await seedCounterparty();
     await seedWalletPolicy({
       destinationAllowlist: [],
       maxTransferAmount: "10.00",
@@ -1821,6 +1829,7 @@ describe("Payments routes", () => {
         },
         body: JSON.stringify({
           provider: "moonpay",
+          counterpartyId,
           destinationWallet: TEST_WALLET_ID,
           cryptoToken: "USDC",
           fiatCurrency: "USD",
@@ -1834,6 +1843,7 @@ describe("Payments routes", () => {
   });
 
   it("checks wallet bindings when a custody wallet public key is used for MoonPay off-ramp", async () => {
+    const counterpartyId = await seedCounterparty();
     await seedCachedKey({
       walletBindings: [{ walletId: "wal_other_wallet", permissions: ["payments:write"] }],
     });
@@ -1848,6 +1858,7 @@ describe("Payments routes", () => {
         },
         body: JSON.stringify({
           provider: "moonpay",
+          counterpartyId,
           sourceWallet: TEST_SOLANA_ADDRESSES.wallet1,
           cryptoToken: "USDC",
           fiatCurrency: "USD",
@@ -1861,6 +1872,8 @@ describe("Payments routes", () => {
   });
 
   it("returns bad request when MoonPay on-ramp amount is below the minimum", async () => {
+    const counterpartyId = await seedCounterparty();
+
     const res = await app.request(
       "/v1/payments/ramps/onramp/execute",
       {
@@ -1871,6 +1884,7 @@ describe("Payments routes", () => {
         },
         body: JSON.stringify({
           provider: "moonpay",
+          counterpartyId,
           destinationWallet: TEST_WALLET_ID,
           cryptoToken: "USDC",
           fiatCurrency: "USD",
@@ -1887,6 +1901,9 @@ describe("Payments routes", () => {
   });
 
   it("creates a Lightspark on-ramp quote through the execute endpoint", async () => {
+    const counterpartyId = await seedCounterparty({
+      providerData: { lightspark: { customerId: "Customer:cus_123" } },
+    });
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(
@@ -1943,11 +1960,11 @@ describe("Payments routes", () => {
         },
         body: JSON.stringify({
           provider: "lightspark",
+          counterpartyId,
           destinationWallet: TEST_WALLET_ID,
           cryptoToken: "USDC",
           fiatCurrency: "USD",
           fiatAmount: "12.34",
-          kycReference: "Customer:cus_123",
         }),
       },
       env
@@ -2001,6 +2018,9 @@ describe("Payments routes", () => {
   });
 
   it("reuses an existing Lightspark external account for Solana wallet on-ramp destinations", async () => {
+    const counterpartyId = await seedCounterparty({
+      providerData: { lightspark: { customerId: "Customer:cus_123" } },
+    });
     const destinationSolanaWallet = TEST_SOLANA_ADDRESSES.wallet2;
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
@@ -2047,11 +2067,11 @@ describe("Payments routes", () => {
         },
         body: JSON.stringify({
           provider: "lightspark",
+          counterpartyId,
           destinationWallet: destinationSolanaWallet,
           cryptoToken: "USDC",
           fiatCurrency: "USD",
           fiatAmount: "5.00",
-          kycReference: "Customer:cus_123",
         }),
       },
       env
@@ -2079,6 +2099,9 @@ describe("Payments routes", () => {
   });
 
   it("resolves SDP wallet ids for Lightspark on-ramp destinations", async () => {
+    const counterpartyId = await seedCounterparty({
+      providerData: { lightspark: { customerId: "Customer:cus_123" } },
+    });
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(
@@ -2124,11 +2147,11 @@ describe("Payments routes", () => {
         },
         body: JSON.stringify({
           provider: "lightspark",
+          counterpartyId,
           destinationWallet: TEST_WALLET_ID,
           cryptoToken: "USDC",
           fiatCurrency: "USD",
           fiatAmount: "5.00",
-          kycReference: "Customer:cus_123",
         }),
       },
       env
@@ -2150,6 +2173,9 @@ describe("Payments routes", () => {
   });
 
   it("creates a Lightspark external account when Solana wallet destination is not found", async () => {
+    const counterpartyId = await seedCounterparty({
+      providerData: { lightspark: { customerId: "Customer:cus_123" } },
+    });
     const destinationSolanaWallet = TEST_SOLANA_ADDRESSES.wallet3;
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
@@ -2203,11 +2229,11 @@ describe("Payments routes", () => {
         },
         body: JSON.stringify({
           provider: "lightspark",
+          counterpartyId,
           destinationWallet: destinationSolanaWallet,
           cryptoToken: "USDC",
           fiatCurrency: "USD",
           fiatAmount: "5.00",
-          kycReference: "Customer:cus_123",
         }),
       },
       env
@@ -2241,6 +2267,9 @@ describe("Payments routes", () => {
   });
 
   it("creates and executes a Lightspark off-ramp quote through the execute endpoint", async () => {
+    const counterpartyId = await seedCounterparty({
+      providerData: { lightspark: { customerId: "ExternalAccount:acc_destination_456" } },
+    });
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(
@@ -2278,11 +2307,11 @@ describe("Payments routes", () => {
         },
         body: JSON.stringify({
           provider: "lightspark",
+          counterpartyId,
           sourceWallet: "InternalAccount:acc_source_123",
           cryptoToken: "BTC",
           fiatCurrency: "USD",
           cryptoAmount: "0.015",
-          kycReference: "ExternalAccount:acc_destination_456",
         }),
       },
       env
@@ -2497,6 +2526,12 @@ describe("Payments routes", () => {
   });
 
   it("creates and accepts a BVNK off-ramp estimate through the execute endpoint", async () => {
+    const counterpartyId = await seedCounterparty({
+      identity: { address: { countryCode: "US" } },
+      providerData: {
+        bvnk: { customer: { customerReference: "customer_456", status: "VERIFIED" } },
+      },
+    });
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(
@@ -2534,11 +2569,11 @@ describe("Payments routes", () => {
         },
         body: JSON.stringify({
           provider: "bvnk",
+          counterpartyId,
           sourceWallet: TEST_WALLET_ID,
           cryptoToken: "USDC",
           fiatCurrency: "USD",
           cryptoAmount: "75.25",
-          kycReference: "customer_456",
           bvnkCompliance: {
             partyDetails: [
               {
@@ -2609,6 +2644,13 @@ describe("Payments routes", () => {
   });
 
   it("returns bad request when BVNK off-ramp is missing compliance party details", async () => {
+    const counterpartyId = await seedCounterparty({
+      identity: { address: { countryCode: "US" } },
+      providerData: {
+        bvnk: { customer: { customerReference: "customer_456", status: "VERIFIED" } },
+      },
+    });
+
     const res = await app.request(
       "/v1/payments/ramps/offramp/execute",
       {
@@ -2620,11 +2662,11 @@ describe("Payments routes", () => {
         },
         body: JSON.stringify({
           provider: "bvnk",
+          counterpartyId,
           sourceWallet: TEST_WALLET_ID,
           cryptoToken: "USDC",
           fiatCurrency: "USD",
           cryptoAmount: "75.25",
-          kycReference: "customer_456",
         }),
       },
       env
@@ -2647,6 +2689,7 @@ describe("Payments routes", () => {
         },
         body: JSON.stringify({
           provider: "unsupported_provider",
+          counterpartyId: "cp_test",
           destinationWallet: TEST_WALLET_ID,
           cryptoToken: "USDC",
           fiatCurrency: "USD",
@@ -2673,6 +2716,7 @@ describe("Payments routes", () => {
         },
         body: JSON.stringify({
           provider: "moonpay",
+          counterpartyId: "cp_test",
           destinationWallet: TEST_WALLET_ID,
           cryptoToken: "USDC",
           fiatCurrency: "USD",
@@ -2704,6 +2748,7 @@ describe("Payments routes", () => {
         },
         body: JSON.stringify({
           provider: "moonpay",
+          counterpartyId: "cp_test",
           destinationWallet: TEST_WALLET_ID,
           cryptoToken: "USDC",
           fiatCurrency: "USD",
@@ -2732,11 +2777,11 @@ describe("Payments routes", () => {
         },
         body: JSON.stringify({
           provider: "lightspark",
+          counterpartyId: "cp_test",
           destinationWallet: "ExternalAccount:acc_destination_123",
           cryptoToken: "BTC",
           fiatCurrency: "USD",
           fiatAmount: "10",
-          kycReference: "Customer:cus_123",
         }),
       },
       env
@@ -2762,11 +2807,11 @@ describe("Payments routes", () => {
         },
         body: JSON.stringify({
           provider: "bvnk",
+          counterpartyId: "cp_test",
           destinationWallet: TEST_WALLET_ID,
           cryptoToken: "USDC",
           fiatCurrency: "USD",
           fiatAmount: "10",
-          kycReference: "customer_123",
         }),
       },
       env

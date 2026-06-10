@@ -1,7 +1,8 @@
 import type { Context } from "hono";
+import { z } from "zod";
 import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
-import { AppError } from "@/lib/errors";
+import { AppError, badRequest, badRequestQuery } from "@/lib/errors";
 import { success } from "@/lib/response";
 import {
   listRpcProviders,
@@ -114,8 +115,8 @@ export const getRpcProviders = async (c: AppContext) => {
   const queryParse = rpcProjectQuerySchema.safeParse(c.req.query());
 
   if (!queryParse.success) {
-    throw new AppError("BAD_REQUEST", "Invalid query parameters", {
-      errors: queryParse.error.flatten().fieldErrors,
+    throw badRequestQuery({
+      errors: z.flattenError(queryParse.error).fieldErrors,
     });
   }
 
@@ -136,8 +137,8 @@ export const relayRpcRequest = async (c: AppContext) => {
   const queryParse = rpcProjectQuerySchema.safeParse(c.req.query());
 
   if (!queryParse.success) {
-    throw new AppError("BAD_REQUEST", "Invalid query parameters", {
-      errors: queryParse.error.flatten().fieldErrors,
+    throw badRequestQuery({
+      errors: z.flattenError(queryParse.error).fieldErrors,
     });
   }
 
@@ -145,13 +146,13 @@ export const relayRpcRequest = async (c: AppContext) => {
   try {
     requestBody = await c.req.json();
   } catch {
-    throw new AppError("BAD_REQUEST", "Invalid JSON body");
+    throw badRequest("Invalid JSON body");
   }
 
   const payloadParse = rpcRelayPayloadSchema.safeParse(requestBody);
   if (!payloadParse.success) {
-    throw new AppError("BAD_REQUEST", "Invalid JSON-RPC payload", {
-      errors: payloadParse.error.flatten().fieldErrors,
+    throw badRequest("Invalid JSON-RPC payload", {
+      errors: z.flattenError(payloadParse.error).fieldErrors,
     });
   }
 
@@ -248,8 +249,8 @@ export const testRpcConnection = async (c: AppContext) => {
   const queryParse = rpcProjectQuerySchema.safeParse(c.req.query());
 
   if (!queryParse.success) {
-    throw new AppError("BAD_REQUEST", "Invalid query parameters", {
-      errors: queryParse.error.flatten().fieldErrors,
+    throw badRequestQuery({
+      errors: z.flattenError(queryParse.error).fieldErrors,
     });
   }
 

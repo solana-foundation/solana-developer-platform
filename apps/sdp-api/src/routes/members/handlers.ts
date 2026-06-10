@@ -1,7 +1,8 @@
 import { normalizeOrganizationRole, type OrganizationRole } from "@sdp/types";
 import type { Context } from "hono";
+import { z } from "zod";
 import { getDb } from "@/db";
-import { AppError, notFound } from "@/lib/errors";
+import { AppError, badRequest, notFound } from "@/lib/errors";
 import { hashString } from "@/lib/hash";
 import { created, noContent, success } from "@/lib/response";
 import { AuditService } from "@/services/audit.service";
@@ -138,8 +139,8 @@ export const inviteMember = async (c: AppContext) => {
   const parsed = inviteSchema.safeParse(body);
 
   if (!parsed.success) {
-    throw new AppError("BAD_REQUEST", "Invalid request body", {
-      errors: parsed.error.flatten().fieldErrors,
+    throw badRequest("Invalid request body", {
+      errors: z.flattenError(parsed.error).fieldErrors,
     });
   }
 
@@ -181,7 +182,7 @@ export const inviteMember = async (c: AppContext) => {
 
   const clerkOrgId = await getClerkOrgId(getDb(c.env), organizationId);
   if (!clerkOrgId) {
-    throw new AppError("BAD_REQUEST", "Organization is not linked to Clerk");
+    throw badRequest("Organization is not linked to Clerk");
   }
 
   const inviterKey =
@@ -266,8 +267,8 @@ export const acceptInvitation = async (c: AppContext) => {
   const parsed = acceptSchema.safeParse(body);
 
   if (!parsed.success) {
-    throw new AppError("BAD_REQUEST", "Invalid request body", {
-      errors: parsed.error.flatten().fieldErrors,
+    throw badRequest("Invalid request body", {
+      errors: z.flattenError(parsed.error).fieldErrors,
     });
   }
 

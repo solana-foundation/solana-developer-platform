@@ -1,7 +1,8 @@
 import { AuthorityType } from "@solana-program/token-2022";
 import type { Context } from "hono";
+import { z } from "zod";
 import { getDb } from "@/db";
-import { AppError, notFound } from "@/lib/errors";
+import { AppError, badRequest, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { assertValidAddress } from "@/lib/solana";
 import { AuditService } from "@/services/audit.service";
@@ -50,8 +51,8 @@ export const prepareUpdateAuthority = async (c: AppContext) => {
   const parsed = updateAuthoritySchema.safeParse(body);
 
   if (!parsed.success) {
-    throw new AppError("BAD_REQUEST", "Invalid request body", {
-      errors: parsed.error.flatten().fieldErrors,
+    throw badRequest("Invalid request body", {
+      errors: z.flattenError(parsed.error).fieldErrors,
     });
   }
 
@@ -80,7 +81,7 @@ export const prepareUpdateAuthority = async (c: AppContext) => {
   );
 
   if (!currentAuthorityRaw) {
-    throw new AppError("BAD_REQUEST", "Current authority is not available for this token");
+    throw badRequest("Current authority is not available for this token");
   }
 
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
@@ -159,8 +160,8 @@ export const executeUpdateAuthority = async (c: AppContext) => {
   const parsed = updateAuthoritySchema.safeParse(body);
 
   if (!parsed.success) {
-    throw new AppError("BAD_REQUEST", "Invalid request body", {
-      errors: parsed.error.flatten().fieldErrors,
+    throw badRequest("Invalid request body", {
+      errors: z.flattenError(parsed.error).fieldErrors,
     });
   }
 
@@ -189,7 +190,7 @@ export const executeUpdateAuthority = async (c: AppContext) => {
   );
 
   if (!currentAuthorityRaw) {
-    throw new AppError("BAD_REQUEST", "Current authority is not available for this token");
+    throw badRequest("Current authority is not available for this token");
   }
 
   const { signer } = await resolveAuthoritySigner({

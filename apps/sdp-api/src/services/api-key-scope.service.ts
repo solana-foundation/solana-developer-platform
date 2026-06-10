@@ -1,6 +1,6 @@
 import type { ApiKeyWalletBinding, ApiKeyWalletScope, Permission } from "@sdp/types";
 import type { ApiKeyContext } from "@/lib/auth";
-import { AppError } from "@/lib/errors";
+import { AppError, badRequest } from "@/lib/errors";
 import { normalizeApiKeyWalletPermissions } from "@/services/api-key-wallets.service";
 
 type WalletBindingInput = {
@@ -28,7 +28,7 @@ type WalletScopeInput = WalletBindingPatchInput & {
 function trimWalletId(walletId: string): string {
   const normalized = walletId.trim();
   if (!normalized) {
-    throw new AppError("BAD_REQUEST", "Wallet IDs must be non-empty strings");
+    throw badRequest("Wallet IDs must be non-empty strings");
   }
   return normalized;
 }
@@ -171,7 +171,7 @@ export function resolveCreateWalletScope(input: WalletScopeInput): {
 } {
   const walletScope = input.walletScope;
   if (!walletScope) {
-    throw new AppError("BAD_REQUEST", "walletScope is required");
+    throw badRequest("walletScope is required");
   }
 
   const walletBindingPatch = parseWalletBindingPatch(input);
@@ -259,7 +259,7 @@ export function resolveUpdateWalletScope(input: WalletScopeInput): {
   }
 
   if (input.provisionWallet) {
-    throw new AppError("BAD_REQUEST", "provisionWallet is only supported during API key creation");
+    throw badRequest("provisionWallet is only supported during API key creation");
   }
 
   if (!walletBindingPatch.touched || walletBindingPatch.bindings.length === 0) {
@@ -312,7 +312,7 @@ export async function assertWalletBindingsInScope(
 
   const missingWalletIds = walletIds.filter((walletId) => !walletScope.has(walletId));
   if (missingWalletIds.length > 0) {
-    throw new AppError("BAD_REQUEST", `Unknown signing wallet IDs: ${missingWalletIds.join(", ")}`);
+    throw badRequest(`Unknown signing wallet IDs: ${missingWalletIds.join(", ")}`);
   }
 
   for (const walletId of walletIds) {

@@ -1,5 +1,6 @@
+import { z } from "zod";
 import { getDb } from "@/db";
-import { AppError } from "@/lib/errors";
+import { AppError, badRequest } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import { clearWalletCaches } from "@/routes/custody/handlers/wallets";
 import { AuditService } from "@/services/audit.service";
@@ -41,8 +42,8 @@ export const initializeSigning = async (c: AppContext) => {
   const parsed = initializeSigningSchema.safeParse(body);
 
   if (!parsed.success) {
-    throw new AppError("BAD_REQUEST", "Invalid request body", {
-      errors: parsed.error.flatten().fieldErrors,
+    throw badRequest("Invalid request body", {
+      errors: z.flattenError(parsed.error).fieldErrors,
     });
   }
 
@@ -94,8 +95,8 @@ export const switchSigning = async (c: AppContext) => {
   const parsed = switchSigningSchema.safeParse(body);
 
   if (!parsed.success) {
-    throw new AppError("BAD_REQUEST", "Invalid request body", {
-      errors: parsed.error.flatten().fieldErrors,
+    throw badRequest("Invalid request body", {
+      errors: z.flattenError(parsed.error).fieldErrors,
     });
   }
 
@@ -258,7 +259,7 @@ async function initializeProviderConnection(
       });
     case "fireblocks": {
       if (!env.FIREBLOCKS_API_KEY || !env.FIREBLOCKS_API_SECRET) {
-        throw new AppError("BAD_REQUEST", "Fireblocks backend credentials are not configured");
+        throw badRequest("Fireblocks backend credentials are not configured");
       }
 
       const resolvedApiKey = env.FIREBLOCKS_API_KEY;
@@ -339,7 +340,7 @@ async function initializeProviderConnection(
         walletLabel: request.walletLabel,
       });
     default:
-      throw new AppError("BAD_REQUEST", "Unsupported provider");
+      throw badRequest("Unsupported provider");
   }
 }
 
@@ -483,7 +484,7 @@ function handleSigningInitializationError(error: unknown): never {
     if (error.code === "ALREADY_INITIALIZED") {
       throw new AppError("CONFLICT", error.message);
     }
-    throw new AppError("BAD_REQUEST", error.message);
+    throw badRequest(error.message);
   }
 
   throw error;

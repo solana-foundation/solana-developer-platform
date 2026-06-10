@@ -71,7 +71,7 @@ jobs:
           set -euo pipefail
 
           pepper="$(openssl rand -hex 32)"
-          custody_key="$(openssl rand -hex 32)"
+          custody_key="$(openssl rand -base64 32)"
           postgres_password="$(openssl rand -hex 16)"
 
           # local custody needs a base58-encoded 64-byte Solana keypair.
@@ -171,33 +171,22 @@ jobs:
           INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
             VALUES ('proj_smoke', 'org_smoke', 'Smoke Test', 'smoke-test', 'sandbox', 'active', 'usr_smoke');
           INSERT INTO api_keys
-            (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, environment, status)
+            (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, status)
             VALUES ('key_smoke', 'org_smoke', 'proj_smoke', 'usr_smoke', 'Smoke Key',
-                    :'key_prefix', :'key_hash', 'api_admin', 'sandbox', 'active');
+                    :'key_prefix', :'key_hash', 'api_admin', 'active');
           SQL
-
-      - name: Initialize local custody
-        run: |
-          set -euo pipefail
-          code="$(curl -sS -o /tmp/init.json -w '%{http_code}' \
-            -X POST http://localhost:8787/v1/wallets/initialize \
-            -H "Authorization: Bearer $SMOKE_API_KEY" \
-            -H 'content-type: application/json' \
-            -d '{"provider":"local"}')"
-          echo "initialize -> $code"
-          case "$code" in 2??) ;; *) cat /tmp/init.json; exit 1 ;; esac
 
       - name: Create a wallet
         run: |
           set -euo pipefail
           code="$(curl -sS -o /tmp/wallet.json -w '%{http_code}' \
-            -X POST http://localhost:8787/v1/wallets/ \
+            -X POST http://localhost:8787/v1/wallets/initialize \
             -H "Authorization: Bearer $SMOKE_API_KEY" \
             -H 'content-type: application/json' \
             -d '{"provider":"local"}')"
           echo "create wallet -> $code"
           case "$code" in 2??) ;; *) cat /tmp/wallet.json; exit 1 ;; esac
-          jq -e '.data.wallet.publicKey | type == "string" and length > 0' /tmp/wallet.json >/dev/null
+          jq -e '.data.publicKey | type == "string" and length > 0' /tmp/wallet.json >/dev/null
 
       - name: Dump logs on failure
         if: failure()

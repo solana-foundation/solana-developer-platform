@@ -45,6 +45,8 @@ export interface EnvField {
    * normal required input. Lets one field switch between generated and manual entry.
    */
   secretWhen?: (v: Values) => boolean;
+  /** Encoding for an auto-generated secret; defaults to "hex". */
+  secretEncoding?: "hex" | "base64";
   /** Computed from other values; hidden from the form, always emitted. */
   derive?: (values: Values) => string;
   /**

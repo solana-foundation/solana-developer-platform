@@ -8,7 +8,7 @@
 import type { ApiKeyWalletBinding, Permission } from "@sdp/types";
 import type { Context } from "hono";
 import type { Env } from "@/types/env";
-import { AppError } from "./errors";
+import { AppError, badRequest } from "./errors";
 
 export type AuthType = "api_key" | "clerk" | "session";
 
@@ -130,7 +130,7 @@ export function getAuth(c: Context<{ Bindings: Env }>): ApiKeyContext {
 export function requireProjectId(c: Context<{ Bindings: Env }>): string {
   const projectId = c.get("projectId");
   if (!projectId) {
-    throw new AppError("BAD_REQUEST", "Project scope is required");
+    throw badRequest("Project scope is required");
   }
   return projectId;
 }

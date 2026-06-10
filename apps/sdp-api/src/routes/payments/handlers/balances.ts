@@ -1,6 +1,7 @@
 import type { Address } from "@solana/kit";
+import { z } from "zod";
 import { formatDecimalAmount } from "@/lib/amount";
-import { AppError } from "@/lib/errors";
+import { AppError, badRequest } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { attachUsdValuesToBalances } from "@/services/helius-das.service";
 import * as solanaRpc from "@/services/solana/rpc";
@@ -83,8 +84,8 @@ export async function updateWalletPolicy(c: AppContext) {
   const parsed = updateWalletPolicySchema.safeParse(body);
 
   if (!parsed.success) {
-    throw new AppError("BAD_REQUEST", "Invalid request body", {
-      errors: parsed.error.flatten().fieldErrors,
+    throw badRequest("Invalid request body", {
+      errors: z.flattenError(parsed.error).fieldErrors,
     });
   }
 

@@ -1,8 +1,9 @@
 import type { ListProjectMembersResponse, ProjectMemberResponse, ProjectRole } from "@sdp/types";
 import type { Context } from "hono";
+import { z } from "zod";
 import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
-import { AppError, notFound } from "@/lib/errors";
+import { badRequest, notFound } from "@/lib/errors";
 import { created, noContent, success } from "@/lib/response";
 import { AuditService } from "@/services/audit.service";
 import { ProjectService, ProjectServiceError } from "@/services/project.service";
@@ -37,8 +38,8 @@ export const addProjectMember = async (c: AppContext) => {
   const parsed = addMemberSchema.safeParse(body);
 
   if (!parsed.success) {
-    throw new AppError("BAD_REQUEST", "Invalid request body", {
-      errors: parsed.error.flatten().fieldErrors,
+    throw badRequest("Invalid request body", {
+      errors: z.flattenError(parsed.error).fieldErrors,
     });
   }
 
@@ -59,7 +60,7 @@ export const addProjectMember = async (c: AppContext) => {
     .first();
 
   if (!orgMember) {
-    throw new AppError("BAD_REQUEST", "User is not a member of this organization");
+    throw badRequest("User is not a member of this organization");
   }
 
   try {
@@ -93,7 +94,7 @@ export const addProjectMember = async (c: AppContext) => {
     return created(c, response);
   } catch (error) {
     if (error instanceof ProjectServiceError && error.code === "ALREADY_MEMBER") {
-      throw new AppError("BAD_REQUEST", "User is already a member of this project");
+      throw badRequest("User is already a member of this project");
     }
     throw error;
   }
@@ -107,8 +108,8 @@ export const updateProjectMember = async (c: AppContext) => {
   const parsed = updateMemberSchema.safeParse(body);
 
   if (!parsed.success) {
-    throw new AppError("BAD_REQUEST", "Invalid request body", {
-      errors: parsed.error.flatten().fieldErrors,
+    throw badRequest("Invalid request body", {
+      errors: z.flattenError(parsed.error).fieldErrors,
     });
   }
 

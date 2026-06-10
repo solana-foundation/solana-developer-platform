@@ -2,7 +2,6 @@ import type {
   Counterparty,
   CounterpartyProviderData,
   PaymentRampEstimate,
-  PaymentRampExecution,
   PaymentRampQuote,
   SdpEnvironment,
 } from "@sdp/types";
@@ -12,7 +11,13 @@ import type { RampProviderId } from "@sdp/types/provider-access";
 import type { CounterpartyRequirements, RampDirection } from "@sdp/types/ramp-requirements";
 import type { BvnkComplianceInput } from "./providers/bvnk";
 
-export type { BvnkComplianceInput, BvnkRuleEntity } from "./providers/bvnk";
+export type {
+  BvnkComplianceInput,
+  BvnkCustomerResolution,
+  BvnkPaymentRuleResolution,
+  BvnkRuleEntity,
+} from "./providers/bvnk";
+export type { LightsparkCustomerResolution } from "./providers/lightspark";
 
 export interface ProviderRampSupport {
   onrampFiats: ReadonlySet<FiatCurrencyCode>;
@@ -121,26 +126,6 @@ export interface RampOfframpQuoteInput {
   bvnkCompliance?: BvnkComplianceInput;
 }
 
-export interface RampExecuteOnrampInput {
-  destinationWalletAddress: string;
-  cryptoToken: string;
-  fiatCurrency?: RampFiatCurrency;
-  fiatAmount: string;
-  kycReference?: string;
-  redirectUrl?: string;
-  bvnkCompliance?: BvnkComplianceInput;
-}
-
-export interface RampExecuteOfframpInput {
-  sourceWalletAddress: string;
-  cryptoToken: string;
-  fiatCurrency?: RampFiatCurrency;
-  cryptoAmount: string;
-  kycReference?: string;
-  redirectUrl?: string;
-  bvnkCompliance?: BvnkComplianceInput;
-}
-
 export interface ValidateCounterpartyOptions {
   direction: RampDirection;
   providerData: CounterpartyProviderData;
@@ -167,7 +152,7 @@ export interface RampProvider extends RampProviderClient {
     ctx: RampRuntimeContext,
     input: RampEstimateOfframpInput
   ): Promise<PaymentRampEstimate>;
-  createOnrampQuote(
+  createOnrampQuote?(
     ctx: RampRuntimeContext,
     input: RampOnrampQuoteInput
   ): Promise<PaymentRampQuote>;
@@ -175,14 +160,6 @@ export interface RampProvider extends RampProviderClient {
     ctx: RampRuntimeContext,
     input: RampOfframpQuoteInput
   ): Promise<PaymentRampQuote>;
-  executeOnramp(
-    ctx: RampRuntimeContext,
-    input: RampExecuteOnrampInput
-  ): Promise<PaymentRampExecution>;
-  executeOfframp(
-    ctx: RampRuntimeContext,
-    input: RampExecuteOfframpInput
-  ): Promise<PaymentRampExecution>;
   validateCounterparty(
     counterparty: Counterparty,
     options: ValidateCounterpartyOptions

@@ -44,11 +44,11 @@ describe("collectFromEnv", () => {
     expect(collectFromEnv({ CLERK_SECRET_KEY: "sk_x" }).CLERK_SECRET_KEY).toBe("sk_x");
   });
 
-  it("auto-fills missing secrets with 32-byte hex", () => {
+  it("auto-fills missing secrets in each field's encoding", () => {
     const values = collectFromEnv({});
     expect(values.API_KEY_PEPPER).toMatch(HEX_64);
-    expect(values.CUSTODY_ENCRYPTION_KEY).toMatch(HEX_64);
     expect(values.POSTGRES_PASSWORD).toMatch(HEX_64);
+    expect(Buffer.from(values.CUSTODY_ENCRYPTION_KEY, "base64")).toHaveLength(32);
   });
 
   it("preserves a provided secret instead of regenerating it", () => {

@@ -1,6 +1,7 @@
 import type { Context } from "hono";
+import { z } from "zod";
 import { getDb } from "@/db";
-import { AppError, notFound } from "@/lib/errors";
+import { badRequest, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { assertValidAddress } from "@/lib/solana";
 import { AuditService } from "@/services/audit.service";
@@ -28,8 +29,8 @@ export const prepareForceBurn = async (c: AppContext) => {
   const parsed = forceBurnSchema.safeParse(body);
 
   if (!parsed.success) {
-    throw new AppError("BAD_REQUEST", "Invalid request body", {
-      errors: parsed.error.flatten().fieldErrors,
+    throw badRequest("Invalid request body", {
+      errors: z.flattenError(parsed.error).fieldErrors,
     });
   }
 
@@ -53,7 +54,7 @@ export const prepareForceBurn = async (c: AppContext) => {
     parsed.data.forceBurn.delegateAuthority ??
     (await resolvePermanentDelegateAuthority(c.env, tokenService, token));
   if (!permanentDelegateRaw) {
-    throw new AppError("BAD_REQUEST", "Permanent delegate is not configured for this token");
+    throw badRequest("Permanent delegate is not configured for this token");
   }
 
   const { signer } = await resolveAuthoritySigner({
@@ -130,8 +131,8 @@ export const executeForceBurn = async (c: AppContext) => {
   const parsed = forceBurnSchema.safeParse(body);
 
   if (!parsed.success) {
-    throw new AppError("BAD_REQUEST", "Invalid request body", {
-      errors: parsed.error.flatten().fieldErrors,
+    throw badRequest("Invalid request body", {
+      errors: z.flattenError(parsed.error).fieldErrors,
     });
   }
 
@@ -155,7 +156,7 @@ export const executeForceBurn = async (c: AppContext) => {
     parsed.data.forceBurn.delegateAuthority ??
     (await resolvePermanentDelegateAuthority(c.env, tokenService, token));
   if (!permanentDelegateRaw) {
-    throw new AppError("BAD_REQUEST", "Permanent delegate is not configured for this token");
+    throw badRequest("Permanent delegate is not configured for this token");
   }
 
   const { signer } = await resolveAuthoritySigner({

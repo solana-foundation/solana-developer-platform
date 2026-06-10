@@ -7,9 +7,10 @@ import {
   type OrganizationTier,
 } from "@sdp/types";
 import type { Context } from "hono";
+import { z } from "zod";
 import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
-import { AppError, notFound } from "@/lib/errors";
+import { AppError, badRequest, notFound } from "@/lib/errors";
 import { noContent, success } from "@/lib/response";
 import { AuditService } from "@/services/audit.service";
 import {
@@ -115,8 +116,8 @@ export const updateOrganization = async (c: AppContext) => {
   const parsed = updateOrgSchema.safeParse(body);
 
   if (!parsed.success) {
-    throw new AppError("BAD_REQUEST", "Invalid request body", {
-      errors: parsed.error.flatten().fieldErrors,
+    throw badRequest("Invalid request body", {
+      errors: z.flattenError(parsed.error).fieldErrors,
     });
   }
 
@@ -160,7 +161,7 @@ export const updateOrganization = async (c: AppContext) => {
   }
 
   if (updates.length === 0) {
-    throw new AppError("BAD_REQUEST", "No valid updates provided");
+    throw badRequest("No valid updates provided");
   }
 
   updates.push("updated_at = datetime('now')");

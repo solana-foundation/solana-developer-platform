@@ -4,10 +4,11 @@ import type {
   CustodyWalletTokenBalance,
 } from "@sdp/types";
 import type { Address } from "@solana/kit";
+import { z } from "zod";
 import { getDb } from "@/db";
 import { formatDecimalAmount } from "@/lib/amount";
 import { getAuth } from "@/lib/auth";
-import { AppError } from "@/lib/errors";
+import { AppError, badRequest } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import * as tokenAccounts from "@/routes/payments/token-accounts";
 import {
@@ -356,7 +357,7 @@ function resolveWalletFilters(
       : undefined;
 
   if (providerQuery && !provider) {
-    throw new AppError("BAD_REQUEST", "Invalid provider query parameter");
+    throw badRequest("Invalid provider query parameter");
   }
 
   return {
@@ -453,8 +454,8 @@ export const createWallet = async (c: AppContext) => {
   const parsed = createWalletSchema.safeParse(body);
 
   if (!parsed.success) {
-    throw new AppError("BAD_REQUEST", "Invalid request body", {
-      errors: parsed.error.flatten().fieldErrors,
+    throw badRequest("Invalid request body", {
+      errors: z.flattenError(parsed.error).fieldErrors,
     });
   }
 
@@ -488,7 +489,7 @@ export const createWallet = async (c: AppContext) => {
       if (error.code === "NOT_FOUND") {
         throw new AppError("NOT_FOUND", error.message);
       }
-      throw new AppError("BAD_REQUEST", error.message);
+      throw badRequest(error.message);
     }
     throw error;
   }
@@ -501,8 +502,8 @@ export const deleteWallet = async (c: AppContext) => {
   const parsed = deleteWalletSchema.safeParse(body);
 
   if (!parsed.success) {
-    throw new AppError("BAD_REQUEST", "Invalid request body", {
-      errors: parsed.error.flatten().fieldErrors,
+    throw badRequest("Invalid request body", {
+      errors: z.flattenError(parsed.error).fieldErrors,
     });
   }
 
@@ -541,7 +542,7 @@ export const deleteWallet = async (c: AppContext) => {
       if (error.code === "NOT_FOUND" || error.code === "WALLET_NOT_FOUND") {
         throw new AppError("NOT_FOUND", error.message);
       }
-      throw new AppError("BAD_REQUEST", error.message);
+      throw badRequest(error.message);
     }
     throw error;
   }
@@ -554,8 +555,8 @@ export const setDefaultWallet = async (c: AppContext) => {
   const parsed = setDefaultWalletSchema.safeParse(body);
 
   if (!parsed.success) {
-    throw new AppError("BAD_REQUEST", "Invalid request body", {
-      errors: parsed.error.flatten().fieldErrors,
+    throw badRequest("Invalid request body", {
+      errors: z.flattenError(parsed.error).fieldErrors,
     });
   }
 
@@ -592,7 +593,7 @@ export const setDefaultWallet = async (c: AppContext) => {
     .first<{ id: string }>();
 
   if (!wallet) {
-    throw new AppError("BAD_REQUEST", "Unknown walletId for this wallet signing configuration");
+    throw badRequest("Unknown walletId for this wallet signing configuration");
   }
 
   await getDb(c.env)
@@ -629,15 +630,15 @@ export const updateWallet = async (c: AppContext) => {
   const walletId = c.req.param("walletId")?.trim();
 
   if (!walletId) {
-    throw new AppError("BAD_REQUEST", "Invalid wallet ID");
+    throw badRequest("Invalid wallet ID");
   }
 
   const body = await c.req.json();
   const parsed = updateWalletSchema.safeParse(body);
 
   if (!parsed.success) {
-    throw new AppError("BAD_REQUEST", "Invalid request body", {
-      errors: parsed.error.flatten().fieldErrors,
+    throw badRequest("Invalid request body", {
+      errors: z.flattenError(parsed.error).fieldErrors,
     });
   }
 
@@ -808,7 +809,7 @@ export const getWalletById = async (c: AppContext) => {
   const walletId = c.req.param("walletId")?.trim();
 
   if (!walletId) {
-    throw new AppError("BAD_REQUEST", "Invalid wallet ID");
+    throw badRequest("Invalid wallet ID");
   }
 
   const signingService = signingServiceModule.createSigningService(c.env);

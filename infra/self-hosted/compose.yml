@@ -54,7 +54,7 @@ services:
       DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-sdp}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-sdp}}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       API_KEY_PEPPER: ${API_KEY_PEPPER:?set API_KEY_PEPPER in .env (openssl rand -hex 32)}
-      CUSTODY_ENCRYPTION_KEY: ${CUSTODY_ENCRYPTION_KEY:?set CUSTODY_ENCRYPTION_KEY in .env (openssl rand -hex 32)}
+      CUSTODY_ENCRYPTION_KEY: ${CUSTODY_ENCRYPTION_KEY:?set CUSTODY_ENCRYPTION_KEY in .env (openssl rand -base64 32)}
     depends_on:
       postgres:
         condition: service_healthy

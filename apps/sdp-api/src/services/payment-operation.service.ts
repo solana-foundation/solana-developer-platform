@@ -2,7 +2,7 @@ import type { Permission } from "@sdp/types";
 import type { Address } from "@solana/kit";
 import { isDecimalString } from "@/lib/amount";
 import type { ApiKeyContext } from "@/lib/auth";
-import { AppError } from "@/lib/errors";
+import { AppError, badRequest } from "@/lib/errors";
 import { assertValidAddress } from "@/lib/solana";
 import { assertApiKeyWalletAccess } from "@/services/api-key-scope.service";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
@@ -34,7 +34,7 @@ export function assertPaymentProjectScope(
   }
 
   if (bodyProjectId !== authProjectId) {
-    throw new AppError("BAD_REQUEST", "projectId does not match the authenticated API key scope");
+    throw badRequest("projectId does not match the authenticated API key scope");
   }
 }
 
@@ -42,7 +42,7 @@ export function assertPositivePaymentAmount(amount: string): string {
   const normalized = amount.trim();
 
   if (!isDecimalString(normalized)) {
-    throw new AppError("BAD_REQUEST", "Invalid amount format");
+    throw badRequest("Invalid amount format");
   }
 
   // isDecimalString guarantees only digits and "." are present, so any non-zero digit
@@ -53,7 +53,7 @@ export function assertPositivePaymentAmount(amount: string): string {
     }
   }
 
-  throw new AppError("BAD_REQUEST", "Transfer amount must be greater than zero");
+  throw badRequest("Transfer amount must be greater than zero");
 }
 
 export function isNativePaymentToken(token: string): boolean {

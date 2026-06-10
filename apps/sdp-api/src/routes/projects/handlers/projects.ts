@@ -1,8 +1,9 @@
 import type { ListProjectsResponse, ProjectResponse, UpdateProjectRequest } from "@sdp/types";
 import type { Context } from "hono";
+import { z } from "zod";
 import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
-import { AppError, forbidden, notFound } from "@/lib/errors";
+import { AppError, badRequest, forbidden, notFound } from "@/lib/errors";
 import { created, noContent, success } from "@/lib/response";
 import { AuditService } from "@/services/audit.service";
 import { ProjectService, ProjectServiceError } from "@/services/project.service";
@@ -19,8 +20,8 @@ export const createProject = async (c: AppContext) => {
   const parsed = createProjectSchema.safeParse(body);
 
   if (!parsed.success) {
-    throw new AppError("BAD_REQUEST", "Invalid request body", {
-      errors: parsed.error.flatten().fieldErrors,
+    throw badRequest("Invalid request body", {
+      errors: z.flattenError(parsed.error).fieldErrors,
     });
   }
 
@@ -87,7 +88,7 @@ export const createProject = async (c: AppContext) => {
     return created(c, response);
   } catch (error) {
     if (error instanceof ProjectServiceError && error.code === "DUPLICATE_SLUG") {
-      throw new AppError("BAD_REQUEST", "A project with this slug already exists");
+      throw badRequest("A project with this slug already exists");
     }
     throw error;
   }
@@ -127,8 +128,8 @@ export const updateProject = async (c: AppContext) => {
   const parsed = updateProjectSchema.safeParse(body);
 
   if (!parsed.success) {
-    throw new AppError("BAD_REQUEST", "Invalid request body", {
-      errors: parsed.error.flatten().fieldErrors,
+    throw badRequest("Invalid request body", {
+      errors: z.flattenError(parsed.error).fieldErrors,
     });
   }
 

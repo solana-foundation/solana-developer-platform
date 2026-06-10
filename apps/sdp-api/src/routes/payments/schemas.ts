@@ -418,12 +418,11 @@ export const prepareTransferSchema = createTransferSchema.extend({
 
 export const executeOnrampSchema = z.object({
   provider: rampProviderSchema,
-  counterpartyId: z.string().min(1).optional(),
+  counterpartyId: z.string().min(1),
   destinationWallet: z.string().min(1),
   cryptoToken: rampCurrencyCodeSchema,
   fiatCurrency: rampFiatCurrencySchema.optional(),
   fiatAmount: paymentAmountSchema,
-  kycReference: z.string().max(128).optional(),
   redirectUrl: z.string().url().optional(),
   bvnkCompliance: bvnkComplianceSchema.optional(),
 });
@@ -463,12 +462,11 @@ export const createOfframpQuoteSchema = z.object({
 
 export const executeOfframpSchema = z.object({
   provider: rampProviderSchema,
-  counterpartyId: z.string().min(1).optional(),
+  counterpartyId: z.string().min(1),
   sourceWallet: z.string().min(1),
   cryptoToken: rampCurrencyCodeSchema,
   fiatCurrency: rampFiatCurrencySchema.optional(),
   cryptoAmount: paymentAmountSchema,
-  kycReference: z.string().max(128).optional(),
   redirectUrl: z.string().url().optional(),
   bvnkCompliance: bvnkComplianceSchema.optional(),
 });
