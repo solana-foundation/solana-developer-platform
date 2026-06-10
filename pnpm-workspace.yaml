@@ -4,7 +4,7 @@ packages:
 
 catalog:
   # Trial upgrade to satisfy upstream Solana keychain v1 peer requirements.
-  '@solana-program/system': ^0.12.0
+  '@solana-program/system': ^0.12.2
   '@solana-program/token-2022': ^0.9.0
   '@solana/addresses': ^6.5.0
   '@solana/codecs': ^6.5.0

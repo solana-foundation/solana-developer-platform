@@ -1,13 +1,5 @@
 import type { CounterpartyEntityType } from "@sdp/types";
-import type {
-  AddressData,
-  BasicsData,
-  ComplianceData,
-  IdentityData,
-  StepId,
-} from "./counterparty-create-schemas";
-
-export const KYC_REQUIRED_COUNTRY_CODE = "US";
+import type { AddressData, BasicsData, IdentityData, StepId } from "./counterparty-create-schemas";
 
 export const defaultBasics: BasicsData = {
   entityType: "individual",
@@ -32,33 +24,9 @@ export const defaultAddress: AddressData = {
   subdivisionCode: "",
 };
 
-export const defaultCompliance: ComplianceData = {
-  taxIdNumber: "",
-  nationality: "",
-  birthCountryCode: "",
-  employmentStatus: "",
-  sourceOfFunds: "",
-  pepStatus: "",
-  intendedUseOfAccount: "",
-  estimatedYearlyIncome: "",
-  employmentIndustrySector: "",
-  expectedMonthlyVolume: "",
-};
-
-export function requiresCompliance(
-  entityType: CounterpartyEntityType,
-  countryCode: string
-): boolean {
-  return (
-    entityType === "individual" && countryCode.trim().toUpperCase() === KYC_REQUIRED_COUNTRY_CODE
-  );
-}
-
-export function getSteps(entityType: CounterpartyEntityType, countryCode: string): StepId[] {
+export function getSteps(entityType: CounterpartyEntityType): StepId[] {
   if (entityType !== "individual") {
     return ["basics", "address", "review"];
   }
-  return requiresCompliance(entityType, countryCode)
-    ? ["basics", "identity", "address", "compliance", "review"]
-    : ["basics", "identity", "address", "review"];
+  return ["basics", "identity", "address", "review"];
 }

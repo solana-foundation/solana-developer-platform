@@ -8,6 +8,7 @@ import {
   COUNTERPARTY_SOURCE_OF_FUNDS,
   COUNTERPARTY_YEARLY_INCOME,
   COUNTRY_CODES,
+  RAMP_PROVIDERS,
 } from "@sdp/types";
 import { z } from "zod";
 
@@ -84,6 +85,11 @@ export const counterpartyIdSchema = z.string().min(1);
 
 export const counterpartyIdParamsSchema = z.object({
   counterpartyId: counterpartyIdSchema,
+});
+
+export const counterpartyRequirementsQuerySchema = z.object({
+  provider: z.enum(RAMP_PROVIDERS),
+  direction: z.enum(["onramp", "offramp"]),
 });
 
 export const createCounterpartySchema = z.object({

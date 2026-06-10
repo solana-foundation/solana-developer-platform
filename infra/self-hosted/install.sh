@@ -131,7 +131,7 @@ verify() {
 # behind; the temp is cleaned up on any exit.
 fetch_verified() {
   local tmp="$2.tmp.$$"
-  trap 'rm -f "$tmp"' EXIT
+  trap '[ -z "${tmp:-}" ] || rm -f "$tmp"' EXIT
   fetch "$1" "$tmp"
   verify "$1" "$tmp"
   mv -f "$tmp" "$2"
@@ -167,9 +167,9 @@ main() {
     printf '\nReplaced the existing compose.yml with the %s release.\n' "$VERSION"
   fi
   if [ ! -f "$INSTALL_DIR/.env.example" ]; then
-    fetch_verified .env.example "$INSTALL_DIR/.env.example"
+    fetch_verified default.env.example "$INSTALL_DIR/.env.example"
   else
-    printf '\nKept your existing .env.example. Review the %s template for new variables:\n  %s/%s/.env.example\n' \
+    printf '\nKept your existing .env.example. Review the %s template for new variables:\n  %s/%s/default.env.example\n' \
       "$VERSION" "$RELEASE_BASE_URL" "$VERSION"
   fi
 

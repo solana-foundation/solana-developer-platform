@@ -2,6 +2,9 @@
  * API Error Types and Handlers
  */
 
+import type { RampProviderId } from "@sdp/types/provider-access";
+import type { CounterpartyRequirements, RampDirection } from "@sdp/types/ramp-requirements";
+
 export type ErrorCode =
   | "BAD_REQUEST"
   | "UNAUTHORIZED"
@@ -211,4 +214,12 @@ export function providerNotConfigured(message?: string): AppError {
 
 export function providerUnavailable(message?: string, details?: Record<string, unknown>): AppError {
   return new AppError("PROVIDER_UNAVAILABLE", message, details);
+}
+
+export function unsupportedCounterparty(
+  provider: RampProviderId,
+  direction: RampDirection,
+  reason: string
+): CounterpartyRequirements {
+  return { provider, direction, status: "unsupported", reason };
 }

@@ -1,13 +1,4 @@
-import {
-  COUNTERPARTY_EMPLOYMENT_STATUSES,
-  COUNTERPARTY_ENTITY_TYPES,
-  COUNTERPARTY_INDUSTRY_SECTORS,
-  COUNTERPARTY_INTENDED_USE,
-  COUNTERPARTY_PEP_STATUSES,
-  COUNTERPARTY_SOURCE_OF_FUNDS,
-  COUNTERPARTY_YEARLY_INCOME,
-  COUNTRY_CODES,
-} from "@sdp/types";
+import { COUNTERPARTY_ENTITY_TYPES, COUNTRY_CODES } from "@sdp/types";
 import { z } from "zod";
 
 // Empty string -> undefined, with bounds applied when present.
@@ -70,19 +61,6 @@ function enumField<const T extends readonly string[]>(values: T, message = "Requ
     .refine((v): v is T[number] => (values as readonly string[]).includes(v), message);
 }
 
-export const complianceSchema = z.object({
-  taxIdNumber: z.string().trim().min(1, "Required").max(64),
-  nationality: enumField(COUNTRY_CODES, "Select a country"),
-  birthCountryCode: enumField(COUNTRY_CODES, "Select a country"),
-  employmentStatus: enumField(COUNTERPARTY_EMPLOYMENT_STATUSES),
-  sourceOfFunds: enumField(COUNTERPARTY_SOURCE_OF_FUNDS),
-  pepStatus: enumField(COUNTERPARTY_PEP_STATUSES),
-  intendedUseOfAccount: enumField(COUNTERPARTY_INTENDED_USE),
-  estimatedYearlyIncome: enumField(COUNTERPARTY_YEARLY_INCOME),
-  employmentIndustrySector: enumField(COUNTERPARTY_INDUSTRY_SECTORS),
-  expectedMonthlyVolume: z.string().trim().min(1, "Required").max(32),
-});
-
 // Only Solana is accepted for now; the list is the seam for adding networks later.
 export const CRYPTO_ACCOUNT_NETWORKS = ["solana"] as const;
 export type CryptoAccountNetwork = (typeof CRYPTO_ACCOUNT_NETWORKS)[number];
@@ -96,14 +74,12 @@ export const cryptoAccountSchema = z.object({
 export type CryptoAccountData = z.input<typeof cryptoAccountSchema>;
 export type CryptoAccountClean = z.output<typeof cryptoAccountSchema>;
 
-export type StepId = "basics" | "identity" | "address" | "compliance" | "review";
+export type StepId = "basics" | "identity" | "address" | "review";
 
 export type BasicsData = z.input<typeof basicsSchema>;
 export type IdentityData = z.input<typeof identitySchema>;
 export type AddressData = z.input<typeof addressSchema>;
-export type ComplianceData = z.input<typeof complianceSchema>;
 
 export type BasicsClean = z.output<typeof basicsSchema>;
 export type IdentityClean = z.output<typeof identitySchema>;
 export type AddressClean = z.output<typeof addressSchema>;
-export type ComplianceClean = z.output<typeof complianceSchema>;
