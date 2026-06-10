@@ -1,4 +1,4 @@
-import type { BvnkPaymentRampInstruction, PaymentRampQuote, SdpEnvironment } from "@sdp/types";
+import type { BvnkPaymentRampInstruction, PaymentRampQuote } from "@sdp/types";
 import type { CollectedFieldData } from "@sdp/types/ramp-requirements";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
 import { badRequest, internalError } from "@/lib/errors";
@@ -21,10 +21,9 @@ import {
   readBvnkOnrampEntry,
   readBvnkWallets,
 } from "@/lib/ramps/providers/bvnk";
-import type { RampRuntimeContext } from "@/lib/ramps/types";
 import { buildBvnkIndividualPayload } from "@/lib/ramps/validation/bvnk";
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
-import type { AppContext } from "../../context";
+import { type AppContext, rampRuntime, resolveSdpEnvironment } from "../../context";
 
 type BvnkOnrampQuote = PaymentRampQuote & {
   provider: "bvnk";
@@ -35,18 +34,6 @@ type BvnkOnrampQuote = PaymentRampQuote & {
 export interface BvnkOnrampQuoteResult {
   quote: BvnkOnrampQuote;
   persist: boolean;
-}
-
-function resolveSdpEnvironment(c: AppContext): SdpEnvironment {
-  const apiKey = c.get("apiKey");
-  return apiKey ? apiKey.environment : "sandbox";
-}
-
-function rampRuntime(c: AppContext): RampRuntimeContext {
-  return {
-    env: c.env as unknown as Record<string, string | undefined>,
-    mode: resolveSdpEnvironment(c),
-  };
 }
 
 function requesterIpAddress(c: AppContext): string {

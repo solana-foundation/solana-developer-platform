@@ -3,7 +3,6 @@ import type {
   PaymentRampExecution,
   PaymentRampQuote,
   RampProviderEstimateResult,
-  SdpEnvironment,
 } from "@sdp/types";
 import {
   OFFRAMP_SUPPORT,
@@ -30,7 +29,12 @@ import type { LightsparkCustomerResolution, RampRuntimeContext } from "@/lib/ram
 import { success } from "@/lib/response";
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
 import { assertProviderAvailable } from "@/services/provider-availability.service";
-import { type AppContext, getPaymentsRepository } from "../context";
+import {
+  type AppContext,
+  getPaymentsRepository,
+  rampRuntime,
+  resolveSdpEnvironment,
+} from "../context";
 import { assertWalletPolicyAllowsTransfer } from "../policy";
 import {
   createOfframpQuoteSchema,
@@ -74,26 +78,6 @@ function filterProviders(
 
 function uniqueSorted<T extends string>(values: readonly T[]): T[] {
   return [...new Set(values)].sort();
-}
-
-/**
- * Resolves the product environment for provider credentials.
- * API-key callers are scoped by the key. Dashboard/session callers default to
- * sandbox while that is the only supported dashboard mode.
- */
-function resolveSdpEnvironment(c: AppContext): SdpEnvironment {
-  const apiKey = c.get("apiKey");
-  if (apiKey) {
-    return apiKey.environment;
-  }
-  return "sandbox";
-}
-
-function rampRuntime(c: AppContext): RampRuntimeContext {
-  return {
-    env: c.env as unknown as Record<string, string | undefined>,
-    mode: resolveSdpEnvironment(c),
-  };
 }
 
 /** Enriches BVNK compliance with the requester IP from request headers. */
