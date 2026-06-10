@@ -8,7 +8,6 @@ import {
   generateSecret,
   isFieldVisible,
   parseList,
-  randomHex32,
   SECTIONS,
   type Values,
   validateValues,
@@ -273,13 +272,13 @@ export function EnvConfigurator() {
       // Switching the Postgres password mode resets the value: manual clears it
       // for typed entry; auto fills a fresh generated secret.
       if (key === "POSTGRES_PASSWORD_MODE") {
-        next.POSTGRES_PASSWORD = value === "manual" ? "" : randomHex32();
+        next.POSTGRES_PASSWORD = value === "manual" ? "" : generateSecret("POSTGRES_PASSWORD");
       }
       // An external database hides the bundled-Postgres password fields, but
       // compose still requires POSTGRES_PASSWORD. Ensure one exists so the .env
       // stays bootable even if manual mode had cleared it before the switch.
       if (key === "DATABASE_MODE" && value !== "bundled" && !next.POSTGRES_PASSWORD) {
-        next.POSTGRES_PASSWORD = randomHex32();
+        next.POSTGRES_PASSWORD = generateSecret("POSTGRES_PASSWORD");
       }
       // Keep the default provider valid: if it drops out of the selected set,
       // fall back to the first selected provider.
