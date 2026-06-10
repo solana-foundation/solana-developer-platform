@@ -3898,6 +3898,18 @@ Transfers run on the `/v1/payments/transfers` endpoint family, separate from the
 const { data } = await sdp.get("/v1/wallets");
 const sourceWalletId = data.wallets[0].walletId;
 
+const screening = await sdpAdmin.post("/v1/compliance/address-screenings", {
+  address: destinationAddress,
+  network: "solana",
+  intent: "transfer_destination",
+});
+
+for (const provider of screening.data.screening.providers) {
+  if (provider.status === "error" || provider.riskScore > THRESHOLD) {
+    throw new TransferBlocked(provider);
+  }
+}
+
 const transfer = await sdp.post("/v1/payments/transfers", {
   source: sourceWalletId,
   destination: destinationAddress,
