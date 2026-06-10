@@ -21,7 +21,8 @@ jobs:
         working-directory: infra/self-hosted
         run: |
           set -euo pipefail
-          sha256sum install.sh compose.yml .env.example > SHA256SUMS
+          cp .env.example default.env.example
+          sha256sum install.sh compose.yml default.env.example > SHA256SUMS
           cat SHA256SUMS
 
       - name: Install Cosign
@@ -42,5 +43,5 @@ jobs:
             infra/self-hosted/SHA256SUMS.cosign.bundle \
             infra/self-hosted/install.sh \
             infra/self-hosted/compose.yml \
-            infra/self-hosted/.env.example \
+            infra/self-hosted/default.env.example \
             --clobber
