@@ -1,18 +1,19 @@
 import { timingSafeEqual } from "node:crypto";
 import type {
   Counterparty,
+  MoonpayPaymentRampExecution,
   PaymentRampEstimate,
-  PaymentRampExecution,
   PaymentRampQuote,
   SdpEnvironment,
 } from "@sdp/types";
+import type { RampFiatCurrency } from "@sdp/types/generated/ramp-support";
 import {
   type CryptoRailId,
   getCryptoRailAssetLabel,
   parseFiatCurrency,
 } from "@sdp/types/payment-rails";
 import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
-import { AppError, providerNotConfigured } from "@/lib/errors";
+import { AppError, badRequest, providerNotConfigured } from "@/lib/errors";
 import { hashString } from "@/lib/hash";
 import { providerFetchJson } from "../fetch";
 import { readyCounterparty } from "../requirements";
@@ -23,8 +24,6 @@ import type {
   RampDumpReader,
   RampEstimateOfframpInput,
   RampEstimateOnrampInput,
-  RampExecuteOfframpInput,
-  RampExecuteOnrampInput,
   RampOfframpQuoteInput,
   RampOnrampQuoteInput,
   RampProvider,
@@ -277,6 +276,22 @@ interface MoonpayTransactionWebhook {
   };
 }
 
+export interface MoonpayExecuteOnrampInput {
+  destinationWalletAddress: string;
+  cryptoToken: string;
+  fiatCurrency?: RampFiatCurrency;
+  fiatAmount: string;
+  redirectUrl?: string;
+}
+
+export interface MoonpayExecuteOfframpInput {
+  sourceWalletAddress: string;
+  cryptoToken: string;
+  fiatCurrency?: RampFiatCurrency;
+  cryptoAmount: string;
+  redirectUrl?: string;
+}
+
 export class MoonpayRampClient implements RampProvider {
   readonly id = "moonpay";
 
@@ -355,7 +370,7 @@ export class MoonpayRampClient implements RampProvider {
     try {
       payload = JSON.parse(rawBody);
     } catch {
-      throw new AppError("BAD_REQUEST", "MoonPay webhook body must be valid JSON", {
+      throw badRequest("MoonPay webhook body must be valid JSON", {
         provider: this.id,
       });
     }
@@ -509,8 +524,8 @@ export class MoonpayRampClient implements RampProvider {
 
   async executeOnramp(
     { env, mode }: RampRuntimeContext,
-    input: RampExecuteOnrampInput
-  ): Promise<PaymentRampExecution> {
+    input: MoonpayExecuteOnrampInput
+  ): Promise<MoonpayPaymentRampExecution> {
     const amount = Number.parseFloat(input.fiatAmount);
     if (!Number.isFinite(amount) || amount < MOONPAY_ONRAMP_MIN_USD) {
       throw new AppError(
@@ -527,7 +542,6 @@ export class MoonpayRampClient implements RampProvider {
       currencyCode: normalizeMoonpayCurrencyCode(input.cryptoToken),
       walletAddress: input.destinationWalletAddress,
       redirectURL: input.redirectUrl,
-      externalCustomerId: input.kycReference,
       externalTransactionId: rampId("sdp_onramp"),
     });
 
@@ -536,8 +550,8 @@ export class MoonpayRampClient implements RampProvider {
 
   async executeOfframp(
     { env, mode }: RampRuntimeContext,
-    input: RampExecuteOfframpInput
-  ): Promise<PaymentRampExecution> {
+    input: MoonpayExecuteOfframpInput
+  ): Promise<MoonpayPaymentRampExecution> {
     const config = readMoonpayConfig(env, mode);
     const externalTransactionId = rampId("sdp_offramp");
     const redirectUrl = await buildSignedMoonpayWidgetUrl(config.offrampUrl, config.secretKey, {
@@ -547,7 +561,6 @@ export class MoonpayRampClient implements RampProvider {
       quoteCurrencyCode: (input.fiatCurrency ?? "USD").toLowerCase(),
       refundWalletAddress: input.sourceWalletAddress,
       redirectURL: input.redirectUrl,
-      externalCustomerId: input.kycReference,
       externalTransactionId,
     });
 

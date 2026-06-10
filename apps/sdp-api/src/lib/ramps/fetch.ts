@@ -2,9 +2,15 @@ import type { RampProviderId } from "@sdp/types/provider-access";
 import { AppError, type ErrorCode } from "@/lib/errors";
 
 export interface ProviderRequestInit<TBody> {
-  method: "GET" | "POST";
+  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   headers?: HeadersInit;
   body?: TBody;
+}
+
+export interface ProviderResponse {
+  response: Response;
+  raw: string;
+  parsed: unknown;
 }
 
 export function classifyProviderStatus(status: number): ErrorCode {
@@ -21,16 +27,16 @@ export function extractProviderErrorMessage(payload: unknown, fallback: string):
   return typeof message === "string" && message.trim() ? message : fallback;
 }
 
-export async function providerFetchJson<TResponse, TBody = never>(
+export async function providerFetch<TBody = never>(
   provider: RampProviderId,
   url: string,
   init: ProviderRequestInit<TBody>
-): Promise<TResponse> {
+): Promise<ProviderResponse> {
   let response: Response;
   try {
     response = await fetch(url, {
       method: init.method,
-      headers: { "Content-Type": "application/json", ...init.headers },
+      headers: { "Content-Type": "application/json", Accept: "application/json", ...init.headers },
       body: init.body === undefined ? undefined : JSON.stringify(init.body),
     });
   } catch {
@@ -44,6 +50,16 @@ export async function providerFetchJson<TResponse, TBody = never>(
   } catch {
     parsed = undefined;
   }
+
+  return { response, raw, parsed };
+}
+
+export async function providerFetchJson<TResponse, TBody = never>(
+  provider: RampProviderId,
+  url: string,
+  init: ProviderRequestInit<TBody>
+): Promise<TResponse> {
+  const { response, parsed } = await providerFetch(provider, url, init);
 
   if (!response.ok) {
     throw new AppError(

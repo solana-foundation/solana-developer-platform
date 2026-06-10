@@ -1134,9 +1134,6 @@ export const executeOnrampRequestSchema = executeOnrampSchemaBase
         "Fiat amount to purchase crypto with. MoonPay on-ramp requires at least 20 units of the selected fiat currency.",
       example: "100.00",
     }),
-    kycReference: withOpenApi(executeOnrampSchemaBase.shape.kycReference, {
-      description: "Optional KYC reference identifier.",
-    }),
     redirectUrl: withOpenApi(executeOnrampSchemaBase.shape.redirectUrl, {
       description: "Optional redirect URL after provider flow completes.",
     }),
@@ -1151,11 +1148,11 @@ export const executeOnrampRequestSchema = executeOnrampSchemaBase
       'Execute on-ramp request payload. Note: BVNK on-ramp requires additional provider-side account enablement and compliance setup beyond API credentials. The default example is shaped for `provider: "moonpay"`; switch `provider` to `bvnk` to attach `bvnkCompliance.partyDetails`.',
     example: {
       provider: "moonpay",
+      counterpartyId: "cp_example",
       destinationWallet: "wal_example",
       cryptoToken: "USDC",
       fiatCurrency: "USD",
       fiatAmount: "100.00",
-      kycReference: "",
       redirectUrl: "https://example.com",
     },
   });
@@ -1231,9 +1228,6 @@ export const executeOfframpRequestSchema = executeOfframpSchemaBase
       description: "Crypto amount to sell for fiat.",
       example: "50.00",
     }),
-    kycReference: withOpenApi(executeOfframpSchemaBase.shape.kycReference, {
-      description: "Optional KYC reference identifier.",
-    }),
     redirectUrl: withOpenApi(executeOfframpSchemaBase.shape.redirectUrl, {
       description: "Optional redirect URL after provider flow completes.",
     }),
@@ -1248,11 +1242,11 @@ export const executeOfframpRequestSchema = executeOfframpSchemaBase
       'Execute off-ramp request payload. The default example is shaped for `provider: "moonpay"`; switch `provider` to `bvnk` to attach `bvnkCompliance.partyDetails`.',
     example: {
       provider: "moonpay",
+      counterpartyId: "cp_example",
       sourceWallet: "wal_example",
       cryptoToken: "USDC",
       fiatCurrency: "USD",
       cryptoAmount: "50.00",
-      kycReference: "",
       redirectUrl: "https://example.com",
     },
   });

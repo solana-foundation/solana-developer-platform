@@ -1,6 +1,7 @@
 import { createVerify } from "node:crypto";
 import type {
   Counterparty,
+  LightsparkPaymentRampExecution,
   LightsparkPaymentRampInstruction,
   PaymentRampEstimate,
   PaymentRampExecution,
@@ -8,6 +9,7 @@ import type {
   PaymentRampQuoteCurrency,
   SdpEnvironment,
 } from "@sdp/types";
+import type { RampFiatCurrency } from "@sdp/types/generated/ramp-support";
 import {
   CRYPTO_ASSET_DECIMALS,
   type CryptoAssetSymbol,
@@ -16,7 +18,7 @@ import {
 } from "@sdp/types/payment-rails";
 import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 import { formatDecimalAmount, parseDecimalAmount } from "@/lib/amount";
-import { AppError, providerNotConfigured } from "@/lib/errors";
+import { AppError, badRequest, providerNotConfigured } from "@/lib/errors";
 import { isAddress } from "@/lib/solana";
 import { type ProviderRequestInit, providerFetchJson } from "../fetch";
 import { readyCounterparty } from "../requirements";
@@ -34,8 +36,6 @@ import type {
   RampDumpReader,
   RampEstimateOfframpInput,
   RampEstimateOnrampInput,
-  RampExecuteOfframpInput,
-  RampExecuteOnrampInput,
   RampOfframpQuoteInput,
   RampOnrampQuoteInput,
   RampProvider,
@@ -76,7 +76,7 @@ function readLightsparkConfig(
 function normalizeLightsparkCurrencyCode(value: string): string {
   const normalized = value.trim().toUpperCase();
   if (!/^[A-Z0-9_]+$/.test(normalized)) {
-    throw new AppError("BAD_REQUEST", "cryptoToken must be a valid Lightspark currency code");
+    throw badRequest("cryptoToken must be a valid Lightspark currency code");
   }
   return normalized;
 }
@@ -98,7 +98,7 @@ function getLightsparkCurrencyDecimals(currencyCode: string): number {
 function assertLightsparkAccountId(value: string, fieldName: string): string {
   const normalized = value.trim();
   if (normalized.length === 0) {
-    throw new AppError("BAD_REQUEST", `${fieldName} is required for lightspark`);
+    throw badRequest(`${fieldName} is required for lightspark`);
   }
   if (!normalized.includes(":")) {
     throw new AppError(
@@ -111,7 +111,7 @@ function assertLightsparkAccountId(value: string, fieldName: string): string {
 
 function toLightsparkMinorUnitsInteger(value: bigint, fieldName: string): number {
   if (value > BigInt(Number.MAX_SAFE_INTEGER)) {
-    throw new AppError("BAD_REQUEST", `${fieldName} is too large for Lightspark quote minor units`);
+    throw badRequest(`${fieldName} is too large for Lightspark quote minor units`);
   }
   return Number(value);
 }
@@ -159,7 +159,7 @@ function readRequiredGridString(
 ): string {
   const value = record[field];
   if (typeof value !== "string" || value.trim().length === 0) {
-    throw new AppError("BAD_REQUEST", `${payloadName} is missing ${field}`);
+    throw badRequest(`${payloadName} is missing ${field}`);
   }
   return value.trim();
 }
@@ -186,7 +186,7 @@ function readRequiredGridObject(
 ): Record<string, unknown> {
   const value = record[field];
   if (!isGridRecord(value)) {
-    throw new AppError("BAD_REQUEST", `${payloadName} is missing ${field}`);
+    throw badRequest(`${payloadName} is missing ${field}`);
   }
   return value;
 }
@@ -201,7 +201,7 @@ function parseLightsparkOutgoingPaymentWebhook(
   payload: unknown
 ): LightsparkOutgoingPaymentWebhook | null {
   if (!isGridRecord(payload)) {
-    throw new AppError("BAD_REQUEST", "Lightspark webhook body must be an object");
+    throw badRequest("Lightspark webhook body must be an object");
   }
 
   const type = readRequiredGridString(payload, "type", "Lightspark webhook");
@@ -268,6 +268,26 @@ export interface CreateLightsparkCustomerInput {
 
 export interface LightsparkCustomer {
   id: string;
+}
+
+export interface LightsparkCustomerResolution {
+  customerId: string;
+}
+
+export interface LightsparkExecuteOnrampInput {
+  destinationWalletAddress: string;
+  cryptoToken: string;
+  fiatCurrency?: RampFiatCurrency;
+  fiatAmount: string;
+  providerCustomer: LightsparkCustomerResolution;
+}
+
+export interface LightsparkExecuteOfframpInput {
+  sourceWalletAddress: string;
+  cryptoToken: string;
+  fiatCurrency?: RampFiatCurrency;
+  cryptoAmount: string;
+  providerCustomer: LightsparkCustomerResolution;
 }
 
 interface GridCreateCustomerBody {
@@ -563,7 +583,7 @@ export class LightsparkRampClient implements RampProvider {
     try {
       payload = JSON.parse(rawBody);
     } catch {
-      throw new AppError("BAD_REQUEST", "Lightspark webhook body must be valid JSON", {
+      throw badRequest("Lightspark webhook body must be valid JSON", {
         provider: this.id,
       });
     }
@@ -737,7 +757,7 @@ export class LightsparkRampClient implements RampProvider {
   ): Promise<string> {
     const normalized = destinationWallet.trim();
     if (normalized.length === 0) {
-      throw new AppError("BAD_REQUEST", "destinationWallet is required for lightspark");
+      throw badRequest("destinationWallet is required for lightspark");
     }
     if (normalized.includes(":")) {
       return assertLightsparkAccountId(normalized, "destinationWallet");
@@ -774,7 +794,7 @@ export class LightsparkRampClient implements RampProvider {
     );
     const created = parseLightsparkExternalAccount(createResponse);
     if (!created.id) {
-      throw new AppError("BAD_REQUEST", "Lightspark external account response is missing id");
+      throw badRequest("Lightspark external account response is missing id");
     }
     return created.id;
   }
@@ -847,7 +867,7 @@ export class LightsparkRampClient implements RampProvider {
     input: RampOnrampQuoteInput
   ): Promise<PaymentRampQuote> {
     if (!input.customerId) {
-      throw new AppError("BAD_REQUEST", "Lightspark on-ramp requires a resolved customerId");
+      throw badRequest("Lightspark on-ramp requires a resolved customerId");
     }
     const config = readLightsparkConfig(env, mode);
     const cryptoCurrency = normalizeLightsparkCurrencyCode(input.cryptoToken);
@@ -900,15 +920,9 @@ export class LightsparkRampClient implements RampProvider {
 
   async executeOnramp(
     { env, mode }: RampRuntimeContext,
-    input: RampExecuteOnrampInput
-  ): Promise<PaymentRampExecution> {
-    const customerId = input.kycReference?.trim();
-    if (!customerId) {
-      throw new AppError(
-        "BAD_REQUEST",
-        "kycReference is required for lightspark onramp and must contain a Lightspark customer id"
-      );
-    }
+    input: LightsparkExecuteOnrampInput
+  ): Promise<LightsparkPaymentRampExecution> {
+    const customerId = input.providerCustomer.customerId;
     const config = readLightsparkConfig(env, mode);
     const cryptoCurrency = normalizeLightsparkCurrencyCode(input.cryptoToken);
     const fiatCurrency = input.fiatCurrency ?? "USD";
@@ -942,12 +956,12 @@ export class LightsparkRampClient implements RampProvider {
 
   async executeOfframp(
     { env, mode }: RampRuntimeContext,
-    input: RampExecuteOfframpInput
-  ): Promise<PaymentRampExecution> {
+    input: LightsparkExecuteOfframpInput
+  ): Promise<LightsparkPaymentRampExecution> {
     const sourceAccountId = assertLightsparkAccountId(input.sourceWalletAddress, "sourceWallet");
     const destinationAccountId = assertLightsparkAccountId(
-      input.kycReference ?? "",
-      "kycReference"
+      input.providerCustomer.customerId,
+      "providerCustomer.customerId"
     );
     const cryptoCurrency = normalizeLightsparkCurrencyCode(input.cryptoToken);
     const fiatCurrency = input.fiatCurrency ?? "USD";
