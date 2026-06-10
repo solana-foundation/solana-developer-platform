@@ -295,7 +295,7 @@ async function buildBvnkHawkAuthorizationHeader(
  * credential problem — and must not be reported as a Hawk misconfiguration.
  */
 function isEdgeBlockBody(parsed: unknown, raw: string): boolean {
-  if (parsed !== null) return false;
+  if (parsed !== undefined) return false;
   return /cloudfront|request could not be satisfied|request blocked/i.test(raw);
 }
 
