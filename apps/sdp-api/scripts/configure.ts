@@ -22,9 +22,9 @@ import {
   type EnvField,
   FIELDS,
   generateEnv,
+  generateSecret,
   isFieldVisible,
   parseList,
-  randomHex32,
   SECTIONS,
   type SelectOption,
   type Values,
@@ -61,7 +61,7 @@ export function collectFromEnv(env: Record<string, string | undefined>): Values 
     }
   }
   for (const key of autoSecretKeys(values)) {
-    if (!values[key]) values[key] = randomHex32();
+    if (!values[key]) values[key] = generateSecret(key);
   }
   return values;
 }
@@ -240,7 +240,7 @@ async function promptField(
 ): Promise<string> {
   if (field.kind === "secret" || (field.secretWhen?.(values) ?? false)) {
     note(`${field.label}: generated`);
-    return randomHex32();
+    return generateSecret(field.key);
   }
   if (field.kind === "multiselect") return promptMultiSelect(field, current, ask, values);
   if (field.kind === "select") return promptSelect(field, current, ask, values);
@@ -328,7 +328,7 @@ async function collectInteractively(): Promise<Values> {
   // field hidden by the current answers (e.g. POSTGRES_PASSWORD with an external
   // database), which compose still requires.
   for (const key of autoSecretKeys(values)) {
-    if (!values[key]) values[key] = randomHex32();
+    if (!values[key]) values[key] = generateSecret(key);
   }
   return values;
 }

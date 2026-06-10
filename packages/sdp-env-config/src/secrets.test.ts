@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { defaultValues } from "./generate";
-import { autoSecretKeys, randomHex32 } from "./secrets";
+import { autoSecretKeys, generateSecret, randomBase64_32, randomHex32 } from "./secrets";
 
 test("randomHex32 returns 64 lowercase hex chars", () => {
   const s = randomHex32();
@@ -10,6 +10,16 @@ test("randomHex32 returns 64 lowercase hex chars", () => {
 
 test("successive calls differ", () => {
   assert.notEqual(randomHex32(), randomHex32());
+});
+
+test("randomBase64_32 decodes to 32 bytes and varies", () => {
+  assert.equal(Buffer.from(randomBase64_32(), "base64").length, 32);
+  assert.notEqual(randomBase64_32(), randomBase64_32());
+});
+
+test("generateSecret honors a field's secretEncoding", () => {
+  assert.equal(Buffer.from(generateSecret("CUSTODY_ENCRYPTION_KEY"), "base64").length, 32);
+  assert.match(generateSecret("API_KEY_PEPPER"), /^[0-9a-f]{64}$/);
 });
 
 test("autoSecretKeys without values lists only secret-kind fields", () => {

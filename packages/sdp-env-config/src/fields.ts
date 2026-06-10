@@ -11,7 +11,7 @@ export const SECTIONS: SectionMeta[] = [
   {
     id: "secrets",
     title: "Secrets",
-    comment: "App secrets — generated locally (openssl rand -hex 32 equivalent)",
+    comment: "App secrets — generated locally",
   },
   {
     id: "advanced",
@@ -533,6 +533,7 @@ export const FIELDS: EnvField[] = [
     key: "CUSTODY_ENCRYPTION_KEY",
     section: "secrets",
     kind: "secret",
+    secretEncoding: "base64",
     label: "Custody encryption key",
     required: true,
   },

@@ -31,7 +31,7 @@ These must be set or the stack will refuse to start:
 |---|---|
 | `POSTGRES_PASSWORD` | Password for the bundled Postgres. Always required — the bundled `postgres` service starts even when the API points at an external `DATABASE_URL`. |
 | `API_KEY_PEPPER` | Server-side pepper for API key hashing. Generate with `openssl rand -hex 32`. |
-| `CUSTODY_ENCRYPTION_KEY` | Encryption key for custody material at rest. Generate with `openssl rand -hex 32`. |
+| `CUSTODY_ENCRYPTION_KEY` | Encryption key for custody material at rest. Generate with `openssl rand -base64 32`. |
 | `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Clerk publishable key for the web app. |
 | `CLERK_SECRET_KEY` | Clerk secret key for the API. |
 | `CLERK_ISSUER` | Clerk issuer URL used to validate tokens. |

@@ -5,6 +5,7 @@ import {
   defaultValues,
   FIELDS,
   generateEnv,
+  generateSecret,
   isFieldVisible,
   parseList,
   randomHex32,
@@ -252,7 +253,7 @@ export function EnvConfigurator() {
     setValues((prev) => {
       const next = { ...prev };
       for (const key of autoSecretKeys(prev)) {
-        next[key] = randomHex32();
+        next[key] = generateSecret(key);
       }
       return next;
     });
@@ -293,7 +294,7 @@ export function EnvConfigurator() {
   }
 
   function regenerate(key: string) {
-    setValues((prev) => ({ ...prev, [key]: randomHex32() }));
+    setValues((prev) => ({ ...prev, [key]: generateSecret(key) }));
   }
 
   function downloadEnv() {

@@ -9,6 +9,19 @@ export function randomHex32(): string {
   return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+/** 32 random bytes as base64 — equivalent to `openssl rand -base64 32`. */
+export function randomBase64_32(): string {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  return btoa(String.fromCharCode(...bytes));
+}
+
+/** Generate a secret for `key` in the encoding the runtime expects. */
+export function generateSecret(key: string): string {
+  const field = FIELDS.find((f) => f.key === key);
+  return field?.secretEncoding === "base64" ? randomBase64_32() : randomHex32();
+}
+
 /**
  * Keys to auto-generate as secrets. Always includes `kind: "secret"` fields;
  * when `values` are supplied, also includes fields whose `secretWhen(values)`
