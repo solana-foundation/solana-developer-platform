@@ -24,9 +24,7 @@ export interface DeployPrepareApiResponse
 
 export interface DeployPrepareMetadataApiResponse
   extends ApiResponse<{
-    transaction:
-      | { serialized: string; blockhash: string; lastValidBlockHeight?: string }
-      | null;
+    transaction: { serialized: string; blockhash: string; lastValidBlockHeight?: string } | null;
     uri: string;
     simulation?: { success: boolean; logs: string[]; unitsConsumed?: number };
   }> {}
