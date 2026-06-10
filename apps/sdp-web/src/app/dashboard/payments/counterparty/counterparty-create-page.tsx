@@ -24,11 +24,6 @@ const stepMeta: Record<StepId, { label: string; title: string; description: stri
     title: "Location",
     description: "Helps us verify who they are and where they're based.",
   },
-  compliance: {
-    label: "Compliance",
-    title: "Tax & compliance",
-    description: "US residents need additional KYC details to fund on-ramps.",
-  },
   review: {
     label: "Review",
     title: "Review & create",

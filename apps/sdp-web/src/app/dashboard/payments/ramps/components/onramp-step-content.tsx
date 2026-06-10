@@ -11,6 +11,7 @@ import { HostedRampFrame } from "./hosted-ramp-frame";
 import { ManualInstructionsQuote } from "./manual-instructions-quote";
 import { RampPairProviderSelector } from "./ramp-pair-provider-selector";
 import { RampStepPlaceholder } from "./ramp-step-placeholder";
+import { RequirementsFields } from "./requirements-fields";
 
 function getOnrampTransferStatusCopy(status: string) {
   switch (status) {
@@ -191,6 +192,10 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
     quoteSimulationSucceeded,
     simulateCurrentQuote,
     handlePairChange,
+    requirementFields,
+    collectedData,
+    setCollectedField,
+    requirementsBlocker,
   } = wizard;
 
   if (currentStepId === "DEPOSIT") {
@@ -203,22 +208,39 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
     }
 
     return (
-      <RampPairProviderSelector
-        direction="onramp"
-        pairs={ONRAMP_PAIRS}
-        enabledRampProviders={enabledRampProviders}
-        providerOptions={RAMP_PROVIDER_OPTIONS}
-        wallets={liveWallets}
-        walletsLoading={walletsLoading}
-        selectedWallet={selectedWallet}
-        selectedPair={selectedRampPair}
-        selectedProvider={fields.provider}
-        amount={fields.amount}
-        onAmountChange={(value) => setField("amount", value)}
-        onAmountBlur={() => {}}
-        onWalletChange={(walletId) => setField("walletId", walletId)}
-        onPairChange={handlePairChange}
-        onProviderSelect={(nextProvider) => setField("provider", nextProvider)}
+      <div className="space-y-4">
+        <RampPairProviderSelector
+          direction="onramp"
+          pairs={ONRAMP_PAIRS}
+          enabledRampProviders={enabledRampProviders}
+          providerOptions={RAMP_PROVIDER_OPTIONS}
+          wallets={liveWallets}
+          walletsLoading={walletsLoading}
+          selectedWallet={selectedWallet}
+          selectedPair={selectedRampPair}
+          selectedProvider={fields.provider}
+          amount={fields.amount}
+          onAmountChange={(value) => setField("amount", value)}
+          onAmountBlur={() => {}}
+          onWalletChange={(walletId) => setField("walletId", walletId)}
+          onPairChange={handlePairChange}
+          onProviderSelect={(nextProvider) => setField("provider", nextProvider)}
+        />
+        {requirementsBlocker ? (
+          <div className="rounded-2xl border border-status-error-border bg-status-error-bg px-4 py-3 text-sm text-status-error-text">
+            {requirementsBlocker}
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
+  if (currentStepId === "REQUIREMENTS") {
+    return (
+      <RequirementsFields
+        fields={requirementFields}
+        values={collectedData}
+        onChange={setCollectedField}
       />
     );
   }

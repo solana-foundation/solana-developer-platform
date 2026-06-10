@@ -50,7 +50,6 @@ Clerk's default session token does not include `org_id`. Without a custom JWT te
 
    ```json
    {
-     "sub": "{{user.id}}",
      "org_id": "{{org.id}}",
      "org_role": "{{org.role}}",
      "org_slug": "{{org.slug}}",
