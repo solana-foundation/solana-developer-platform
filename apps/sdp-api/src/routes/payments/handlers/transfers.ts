@@ -1,4 +1,4 @@
-import type { Permission } from "@sdp/types";
+import type { Permission, PrivateTransferRequest } from "@sdp/types";
 import type { Address } from "@solana/kit";
 import {
   addSignersToTransactionMessage,
@@ -7,12 +7,19 @@ import {
   createNoopSigner,
   createTransactionMessage,
   getBase64EncodedWireTransaction,
+  getCompiledTransactionMessageDecoder,
+  getCompiledTransactionMessageEncoder,
+  getTransactionDecoder,
   getTransactionEncoder,
   pipe,
   setTransactionMessageFeePayer,
   setTransactionMessageLifetimeUsingBlockhash,
 } from "@solana/kit";
-import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
+import {
+  assertIsTransactionPartialSigner,
+  partiallySignTransactionMessageWithSigners,
+  partiallySignTransactionWithSigners,
+} from "@solana/signers";
 import { getTransferSolInstruction } from "@solana-program/system";
 import {
   findAssociatedTokenPda,
@@ -20,13 +27,16 @@ import {
   getTransferCheckedInstruction,
 } from "@solana-program/token-2022";
 import { getDb } from "@/db";
-import type {
-  PaymentTransferDirection as TransferDirection,
-  PaymentTransferRow as TransferRow,
-  PaymentTransferStatus as TransferStatus,
-  PaymentTransferType as TransferType,
+import {
+  isRampTransferType,
+  RAMP_TRANSFER_TYPES,
+  type PaymentTransferDirection as TransferDirection,
+  type PaymentTransferRow as TransferRow,
+  type PaymentTransferStatus as TransferStatus,
+  type PaymentTransferType as TransferType,
+  WALLET_TRANSFER_TYPES,
 } from "@/db/repositories/payments.repository";
-import { formatDecimalAmount, parseDecimalAmount } from "@/lib/amount";
+import { formatDecimalAmount, MAX_SAFE_BASE_UNITS, parseDecimalAmount } from "@/lib/amount";
 import { getAuth } from "@/lib/auth";
 import { AppError } from "@/lib/errors";
 import { paginated, success } from "@/lib/response";
@@ -37,8 +47,14 @@ import {
 } from "@/services/api-key-scope.service";
 import {
   assertPaymentProjectScope,
+  type OutboundPaymentOperation,
   resolveOutboundPaymentOperation,
 } from "@/services/payment-operation.service";
+import {
+  type MagicBlockPrivateTransferOptions as MagicBlockProviderTransferOptions,
+  type MagicBlockUnsignedTransaction,
+  prepareMagicBlockPrivateTransfer,
+} from "@/services/private-transfers";
 import { withHeliusApiKey } from "@/services/rpc-relay.service";
 import * as solanaServices from "@/services/solana";
 import * as solanaRpc from "@/services/solana/rpc";
@@ -60,7 +76,11 @@ import {
   walletIdParamsSchema,
 } from "../schemas";
 import * as tokenAccounts from "../token-accounts";
-import { resolveMintTokenProgram, resolveSourceTokenAccount } from "../token-accounts";
+import {
+  resolveMintDecimals,
+  resolveMintTokenProgram,
+  resolveSourceTokenAccount,
+} from "../token-accounts";
 import { resolveScope, resolveWallet } from "../wallets";
 
 // biome-ignore lint/security/noSecrets: Devnet USDC mint address constant, not a secret.
@@ -134,6 +154,23 @@ interface ObservedTransferContext {
 
 type SignatureHistoryEntry = Awaited<ReturnType<typeof solanaRpc.getSignaturesForAddress>>[number];
 
+type PreparedTransferPayload = {
+  serializedTx: string;
+  blockhash: string;
+  lastValidBlockHeight: string;
+};
+
+type PreparedPrivateTransferMetadata = {
+  provider: "magicblock";
+  magicBlock: {
+    kind: MagicBlockUnsignedTransaction["kind"];
+    version: MagicBlockUnsignedTransaction["version"];
+    instructionCount: number;
+    requiredSigners: string[];
+    validator?: string;
+  };
+};
+
 function resolveWalletIdForTokenAccount(
   context: ObservedTransferContext,
   tokenAccountAddress: string,
@@ -193,6 +230,7 @@ async function createTransferRecord(
     organizationId: input.organizationId,
     projectId: input.projectId,
     walletId: input.walletId,
+    counterpartyId: null,
     sourceAddress: input.sourceAddress,
     destinationAddress: input.destinationAddress,
     token: input.token,
@@ -201,6 +239,12 @@ async function createTransferRecord(
     type: input.type ?? "transfer",
     direction: input.direction ?? "outbound",
     status: input.status ?? "pending",
+    provider: null,
+    providerReference: null,
+    deliveryMode: null,
+    fiatCurrency: null,
+    fiatAmount: null,
+    providerData: {},
     serializedTx: input.serializedTx ?? null,
     initiatedByKeyId: input.initiatedByKeyId ?? null,
     createdAt: now,
@@ -254,7 +298,7 @@ async function prepareSolTransfer(
   sourceAddress: Address,
   destinationAddress: Address,
   amount: string
-): Promise<{ serializedTx: string; blockhash: string; lastValidBlockHeight: string }> {
+): Promise<PreparedTransferPayload> {
   const lamports = parseDecimalAmount(amount, 9);
   if (lamports <= 0n) {
     throw new AppError("BAD_REQUEST", "Transfer amount must be greater than zero");
@@ -354,7 +398,7 @@ async function prepareSplTransfer(
   destinationAddress: Address,
   mintAddress: Address,
   amount: string
-): Promise<{ serializedTx: string; blockhash: string; lastValidBlockHeight: string }> {
+): Promise<PreparedTransferPayload> {
   const rpc = solanaRpc.createRpc(c.env);
   const tokenProgram = await resolveMintTokenProgram(rpc, mintAddress);
   const sourceTokenAccount = await resolveSourceTokenAccount(
@@ -414,6 +458,345 @@ async function prepareSplTransfer(
     serializedTx: getBase64EncodedWireTransaction(compiled),
     blockhash: blockhash as string,
     lastValidBlockHeight: lastValidBlockHeight.toString(),
+  };
+}
+
+type MagicBlockProductOptions = Extract<
+  PrivateTransferRequest,
+  { provider: "magicblock" }
+>["magicBlock"];
+
+function buildMagicBlockProviderTransferOptions(
+  options: MagicBlockProductOptions,
+  context?: { koraSponsoredExecution?: boolean }
+): MagicBlockProviderTransferOptions {
+  const gasless = context?.koraSponsoredExecution ? true : options.gasless;
+
+  return {
+    ...(options.validator ? { validator: options.validator } : {}),
+    ...(options.initIfMissing !== undefined ? { initIfMissing: options.initIfMissing } : {}),
+    ...(options.initAtasIfMissing !== undefined
+      ? { initAtasIfMissing: options.initAtasIfMissing }
+      : {}),
+    ...(options.initVaultIfMissing !== undefined
+      ? { initVaultIfMissing: options.initVaultIfMissing }
+      : {}),
+    ...(options.minDelayMs !== undefined ? { minDelayMs: options.minDelayMs } : {}),
+    ...(options.maxDelayMs !== undefined ? { maxDelayMs: options.maxDelayMs } : {}),
+    ...(options.clientRefId !== undefined ? { clientRefId: options.clientRefId } : {}),
+    ...(options.split !== undefined ? { split: options.split } : {}),
+    ...(gasless !== undefined ? { gasless } : {}),
+    ...(options.legacy !== undefined ? { legacy: options.legacy } : {}),
+  };
+}
+
+function mapMagicBlockPreparedTransfer(unsignedTransaction: MagicBlockUnsignedTransaction): {
+  prepared: PreparedTransferPayload;
+  metadata: PreparedPrivateTransferMetadata;
+} {
+  return {
+    prepared: {
+      serializedTx: unsignedTransaction.transactionBase64,
+      blockhash: unsignedTransaction.recentBlockhash,
+      lastValidBlockHeight: unsignedTransaction.lastValidBlockHeight.toString(),
+    },
+    metadata: {
+      provider: "magicblock",
+      magicBlock: {
+        kind: unsignedTransaction.kind,
+        version: unsignedTransaction.version,
+        instructionCount: unsignedTransaction.instructionCount,
+        requiredSigners: unsignedTransaction.requiredSigners,
+        ...(unsignedTransaction.validator ? { validator: unsignedTransaction.validator } : {}),
+      },
+    },
+  };
+}
+
+async function prepareMagicBlockPrivateTransferForOperation(params: {
+  c: AppContext;
+  operation: OutboundPaymentOperation;
+  privateTransfer: PrivateTransferRequest;
+  memo?: string;
+  koraSponsoredExecution?: boolean;
+}): Promise<{
+  prepared: PreparedTransferPayload;
+  metadata: PreparedPrivateTransferMetadata;
+}> {
+  const { c, operation, privateTransfer, memo } = params;
+
+  if (operation.token === "SOL") {
+    throw new AppError(
+      "BAD_REQUEST",
+      "MagicBlock private transfers support SPL tokens only. Provide a token mint address."
+    );
+  }
+
+  const mintAddress = assertValidAddress(operation.token, "token");
+  const rpc = solanaRpc.createRpc(c.env);
+  await resolveMintTokenProgram(rpc, mintAddress);
+  const decimals = await resolveMintDecimals(rpc, mintAddress);
+  const amountBaseUnits = parseDecimalAmount(operation.amount, decimals);
+
+  if (amountBaseUnits <= 0n) {
+    throw new AppError("BAD_REQUEST", "Transfer amount must be greater than zero");
+  }
+
+  if (amountBaseUnits > MAX_SAFE_BASE_UNITS) {
+    throw new AppError(
+      "BAD_REQUEST",
+      "MagicBlock transfer amount is too large to send as a JSON integer."
+    );
+  }
+
+  const magicBlockPrepared = await prepareMagicBlockPrivateTransfer(c.env, {
+    from: operation.sourceAddress,
+    to: operation.destinationAddress,
+    mint: mintAddress,
+    amount: Number(amountBaseUnits),
+    memo,
+    options: buildMagicBlockProviderTransferOptions(privateTransfer.magicBlock, {
+      koraSponsoredExecution: params.koraSponsoredExecution,
+    }),
+  });
+
+  return mapMagicBlockPreparedTransfer(magicBlockPrepared);
+}
+
+function assertMagicBlockKoraSponsoredExecutionOptions(options: MagicBlockProductOptions): void {
+  if (options.gasless === false) {
+    throw new AppError(
+      "BAD_REQUEST",
+      "MagicBlock private transfer execution is sponsored by Kora and requires gasless transactions. Remove gasless or set it to true."
+    );
+  }
+}
+
+function decodeMagicBlockPreparedTransaction(serializedTx: string) {
+  const txBytes = Buffer.from(serializedTx, "base64");
+  const transaction = getTransactionDecoder().decode(txBytes);
+  const compiledMessage = getCompiledTransactionMessageDecoder().decode(transaction.messageBytes);
+
+  if (!("instructions" in compiledMessage) || !("staticAccounts" in compiledMessage)) {
+    throw new AppError(
+      "PROVIDER_UNAVAILABLE",
+      "MagicBlock transaction version is not supported for Kora fee sponsorship."
+    );
+  }
+
+  const existingFeePayer = compiledMessage.staticAccounts[0];
+
+  if (!existingFeePayer) {
+    throw new AppError("PROVIDER_UNAVAILABLE", "MagicBlock transaction has no fee payer.");
+  }
+
+  return { transaction, compiledMessage, existingFeePayer };
+}
+
+type DecodedMagicBlockPreparedTransaction = ReturnType<typeof decodeMagicBlockPreparedTransaction>;
+
+function addSponsoredFeePayerToPreparedTransaction(
+  decoded: DecodedMagicBlockPreparedTransaction,
+  feePayer: Address,
+  requiredSigners: string[],
+  options?: { replaceExistingFeePayer?: boolean }
+) {
+  const { transaction, compiledMessage, existingFeePayer } = decoded;
+
+  if (existingFeePayer === feePayer) {
+    return transaction;
+  }
+
+  if (compiledMessage.staticAccounts.includes(feePayer)) {
+    throw new AppError(
+      "PROVIDER_UNAVAILABLE",
+      "MagicBlock transaction already includes the Kora fee payer in a non-fee-payer position."
+    );
+  }
+
+  if (options?.replaceExistingFeePayer) {
+    const { [existingFeePayer]: _existingFeePayerSignature, ...remainingSignatures } =
+      transaction.signatures;
+    const sponsoredMessage = {
+      ...compiledMessage,
+      staticAccounts: [feePayer, ...compiledMessage.staticAccounts.slice(1)],
+    };
+
+    const messageBytes = getCompiledTransactionMessageEncoder().encode(
+      sponsoredMessage
+    ) as typeof transaction.messageBytes;
+    const signatures = {
+      [feePayer]: null,
+      ...remainingSignatures,
+    } as typeof transaction.signatures;
+
+    return {
+      messageBytes,
+      signatures: {
+        ...signatures,
+      },
+    };
+  }
+
+  const signerCount = compiledMessage.header.numSignerAccounts;
+  const existingFeePayerMustSign = requiredSigners.includes(existingFeePayer);
+
+  if (existingFeePayerMustSign) {
+    const remapAccountIndex = (accountIndex: number) => accountIndex + 1;
+    const sponsoredMessage = {
+      ...compiledMessage,
+      header: {
+        ...compiledMessage.header,
+        numSignerAccounts: signerCount + 1,
+      },
+      staticAccounts: [feePayer, ...compiledMessage.staticAccounts],
+      instructions: compiledMessage.instructions.map((instruction) => ({
+        ...instruction,
+        programAddressIndex: remapAccountIndex(instruction.programAddressIndex),
+        accountIndices: instruction.accountIndices?.map(remapAccountIndex) ?? [],
+      })),
+    };
+
+    const messageBytes = getCompiledTransactionMessageEncoder().encode(
+      sponsoredMessage
+    ) as typeof transaction.messageBytes;
+    const signatures = {
+      [feePayer]: null,
+      ...transaction.signatures,
+    } as typeof transaction.signatures;
+
+    return {
+      messageBytes,
+      signatures: {
+        ...signatures,
+      },
+    };
+  }
+
+  const remapAccountIndex = (accountIndex: number) => {
+    if (accountIndex === 0) {
+      return signerCount;
+    }
+
+    if (accountIndex < signerCount) {
+      return accountIndex;
+    }
+
+    return accountIndex + 1;
+  };
+  const { [existingFeePayer]: _existingFeePayerSignature, ...remainingSignatures } =
+    transaction.signatures;
+  const sponsoredMessage = {
+    ...compiledMessage,
+    staticAccounts: [
+      feePayer,
+      ...compiledMessage.staticAccounts.slice(1, signerCount),
+      existingFeePayer,
+      ...compiledMessage.staticAccounts.slice(signerCount),
+    ],
+    instructions: compiledMessage.instructions.map((instruction) => ({
+      ...instruction,
+      programAddressIndex: remapAccountIndex(instruction.programAddressIndex),
+      accountIndices: instruction.accountIndices?.map(remapAccountIndex) ?? [],
+    })),
+  };
+
+  const messageBytes = getCompiledTransactionMessageEncoder().encode(
+    sponsoredMessage
+  ) as typeof transaction.messageBytes;
+  const signatures = {
+    [feePayer]: null,
+    ...remainingSignatures,
+  } as typeof transaction.signatures;
+
+  return {
+    messageBytes,
+    signatures: {
+      ...signatures,
+    },
+  };
+}
+
+async function executePreparedPrivateTransfer(
+  c: AppContext,
+  wallets: CustodyWallet[],
+  serializedTx: string,
+  metadata: PreparedPrivateTransferMetadata
+): Promise<{ signature: string; slot: number | null; blockTime: string | null }> {
+  const auth = getAuth(c);
+  const walletsByAddress = new Map(wallets.map((wallet) => [wallet.publicKey, wallet]));
+  const signerWallets = new Map<string, CustodyWallet>();
+  const requiredSigners = [...new Set(metadata.magicBlock.requiredSigners)];
+  const decodedTransaction = decodeMagicBlockPreparedTransaction(serializedTx);
+  const existingFeePayer = decodedTransaction.existingFeePayer;
+  const shouldReplaceProviderFeePayer =
+    requiredSigners.includes(existingFeePayer) && !walletsByAddress.has(existingFeePayer);
+  const custodyRequiredSigners = shouldReplaceProviderFeePayer
+    ? requiredSigners.filter((signer) => signer !== existingFeePayer)
+    : requiredSigners;
+
+  for (const requiredSigner of custodyRequiredSigners) {
+    const wallet = walletsByAddress.get(requiredSigner);
+    if (wallet) {
+      signerWallets.set(wallet.publicKey, wallet);
+    }
+  }
+
+  const missingSignerCount = custodyRequiredSigners.length - signerWallets.size;
+  if (missingSignerCount > 0) {
+    throw new AppError(
+      "BAD_REQUEST",
+      "MagicBlock private transfer requires signer(s) that are not controlled by SDP. Use the prepare endpoint for client-side or external signing."
+    );
+  }
+
+  const signers = await Promise.all(
+    [...signerWallets.values()].map(async (wallet) => {
+      const signer = await solanaServices.createOrgSigner(
+        c.env,
+        auth.organizationId,
+        auth.projectId ?? undefined,
+        wallet.walletId
+      );
+
+      if (signer.address !== wallet.publicKey) {
+        throw new AppError("BAD_REQUEST", "Resolved signing wallet does not match required signer");
+      }
+      assertIsTransactionPartialSigner(signer);
+      return signer;
+    })
+  );
+
+  const feePayment = getFeePayment(c);
+  const feePayer = await feePayment.getFeePayer();
+  const transaction = addSponsoredFeePayerToPreparedTransaction(
+    decodedTransaction,
+    feePayer,
+    custodyRequiredSigners,
+    { replaceExistingFeePayer: shouldReplaceProviderFeePayer }
+  );
+  const signedTransaction =
+    signers.length > 0
+      ? await partiallySignTransactionWithSigners(signers, transaction)
+      : transaction;
+  const encodedSignedTransaction = new Uint8Array(
+    getTransactionEncoder().encode(signedTransaction)
+  );
+
+  const signature = await feePayment.signAndSend(encodedSignedTransaction);
+  const rpc = solanaRpc.createRpc(c.env);
+  const confirmation = await solanaRpc.confirmTransaction(rpc, signature, {
+    commitment: "confirmed",
+  });
+
+  if (confirmation.err) {
+    throw new AppError("TRANSACTION_FAILED", "MagicBlock private transfer failed on-chain");
+  }
+
+  return {
+    signature,
+    slot: Number(confirmation.slot),
+    blockTime: null,
   };
 }
 
@@ -521,6 +904,13 @@ export async function prepareTransfer(c: AppContext) {
     });
   }
 
+  if (parsed.data.privateTransfer && parsed.data.options?.simulate) {
+    throw new AppError(
+      "BAD_REQUEST",
+      "Simulation is not supported for provider-built private transfers yet."
+    );
+  }
+
   const scope = await resolveScope(c);
   assertPaymentProjectScope(parsed.data.projectId, scope.auth.projectId);
   const operation = resolveOutboundPaymentOperation({
@@ -547,9 +937,22 @@ export async function prepareTransfer(c: AppContext) {
     amount: operation.amount,
   });
 
-  let prepared: { serializedTx: string; blockhash: string; lastValidBlockHeight: string };
+  let prepared: PreparedTransferPayload;
+  let privateTransferMetadata: PreparedPrivateTransferMetadata | undefined;
+  let transferType: TransferType = "transfer";
+  const privateTransfer = parsed.data.privateTransfer as PrivateTransferRequest | undefined;
 
-  if (operation.token === "SOL") {
+  if (privateTransfer) {
+    const mapped = await prepareMagicBlockPrivateTransferForOperation({
+      c,
+      operation,
+      privateTransfer,
+      memo: parsed.data.memo,
+    });
+    prepared = mapped.prepared;
+    privateTransferMetadata = mapped.metadata;
+    transferType = "transfer_confidential";
+  } else if (operation.token === "SOL") {
     prepared = await prepareSolTransfer(
       c,
       operation.sourceAddress,
@@ -576,6 +979,7 @@ export async function prepareTransfer(c: AppContext) {
     token: operation.token,
     amount: operation.amount,
     memo: parsed.data.memo,
+    type: transferType,
     status: "pending",
     serializedTx: prepared.serializedTx,
     initiatedByKeyId: scope.auth.id,
@@ -603,6 +1007,7 @@ export async function prepareTransfer(c: AppContext) {
       blockhash: prepared.blockhash,
       lastValidBlockHeight: prepared.lastValidBlockHeight,
     },
+    ...(privateTransferMetadata ? { privateTransfer: privateTransferMetadata } : {}),
     ...(simulation ? { simulation } : {}),
   });
 }
@@ -999,6 +1404,7 @@ function buildObservedTransferRows(
         organization_id: context.organizationId,
         project_id: context.projectId,
         wallet_id: walletId,
+        counterparty_id: null,
         source_address: sourceAddress,
         destination_address: destinationAddress,
         token: "SOL",
@@ -1007,6 +1413,12 @@ function buildObservedTransferRows(
         type: "transfer",
         direction,
         status,
+        provider: null,
+        provider_reference: null,
+        delivery_mode: null,
+        fiat_currency: null,
+        fiat_amount: null,
+        provider_data: {},
         signature,
         serialized_tx: null,
         slot: parsedTransaction.slot ?? null,
@@ -1069,6 +1481,7 @@ function buildObservedTransferRows(
         organization_id: context.organizationId,
         project_id: context.projectId,
         wallet_id: destinationWalletId,
+        counterparty_id: null,
         source_address: readInstructionInfoString(info, "mintAuthority") ?? mint,
         destination_address: destinationOwner ?? destinationTokenAccount,
         token: resolveObservedTokenSymbol(mint, context.tokenSymbolsByMint),
@@ -1077,6 +1490,12 @@ function buildObservedTransferRows(
         type: "transfer",
         direction: "inbound",
         status,
+        provider: null,
+        provider_reference: null,
+        delivery_mode: null,
+        fiat_currency: null,
+        fiat_amount: null,
+        provider_data: {},
         signature,
         serialized_tx: null,
         slot: parsedTransaction.slot ?? null,
@@ -1148,6 +1567,7 @@ function buildObservedTransferRows(
       organization_id: context.organizationId,
       project_id: context.projectId,
       wallet_id: walletId,
+      counterparty_id: null,
       source_address: sourceOwner ?? sourceTokenAccount,
       destination_address: destinationOwner ?? destinationTokenAccount,
       token: resolveObservedTokenSymbol(mint, context.tokenSymbolsByMint),
@@ -1156,6 +1576,12 @@ function buildObservedTransferRows(
       type: "transfer",
       direction,
       status,
+      provider: null,
+      provider_reference: null,
+      delivery_mode: null,
+      fiat_currency: null,
+      fiat_amount: null,
+      provider_data: {},
       signature,
       serialized_tx: null,
       slot: parsedTransaction.slot ?? null,
@@ -1225,6 +1651,69 @@ export async function createTransfer(c: AppContext) {
     token: operation.token,
     amount: operation.amount,
   });
+
+  const privateTransfer = parsed.data.privateTransfer as PrivateTransferRequest | undefined;
+  if (privateTransfer) {
+    assertMagicBlockKoraSponsoredExecutionOptions(privateTransfer.magicBlock);
+    const mapped = await prepareMagicBlockPrivateTransferForOperation({
+      c,
+      operation,
+      privateTransfer,
+      memo: parsed.data.memo,
+      // MagicBlock's gasless response separates the source signer from the provider sponsor.
+      // SDP swaps that sponsor slot for Kora before signing and submission.
+      koraSponsoredExecution: true,
+    });
+    const transferType: TransferType = "transfer_confidential";
+    const transfer = await createTransferRecord(c, {
+      organizationId: scope.auth.organizationId,
+      projectId: scope.auth.projectId,
+      walletId: operation.sourceWallet.walletId,
+      sourceAddress: operation.sourceWallet.publicKey,
+      destinationAddress: parsed.data.destination,
+      token: operation.token,
+      amount: operation.amount,
+      memo: parsed.data.memo,
+      type: transferType,
+      status: "processing",
+      serializedTx: mapped.prepared.serializedTx,
+      initiatedByKeyId: scope.auth.id,
+    });
+
+    try {
+      const result = await executePreparedPrivateTransfer(
+        c,
+        scope.wallets,
+        mapped.prepared.serializedTx,
+        mapped.metadata
+      );
+      const updated = await updateTransferRecord(c, transfer.id, {
+        status: "confirmed",
+        signature: result.signature,
+        slot: result.slot,
+        blockTime: result.blockTime,
+        error: null,
+      });
+
+      return success(c, {
+        transfer: mapTransferRow(updated),
+        privateTransfer: mapped.metadata,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown transfer error";
+      await updateTransferRecord(c, transfer.id, {
+        status: "failed",
+        error: message,
+        blockTime: null,
+      });
+
+      if (error instanceof AppError) {
+        throw error;
+      }
+
+      throw new AppError("SOLANA_RPC_ERROR", message);
+    }
+  }
 
   const transfer = await createTransferRecord(c, {
     organizationId: scope.auth.organizationId,
@@ -1306,11 +1795,55 @@ export async function listTransfers(c: AppContext) {
     token,
     direction,
     status,
+    category,
+    counterpartyId,
+    provider,
+    providerReference,
     from,
     to,
   } = query.data;
   const repo = getPaymentsRepository(c);
   const offset = (page - 1) * pageSize;
+  const transferTypes =
+    category === "wallet"
+      ? WALLET_TRANSFER_TYPES
+      : category === "ramp"
+        ? RAMP_TRANSFER_TYPES
+        : undefined;
+  const transferTypeSet = transferTypes ? new Set<TransferType>(transferTypes) : undefined;
+  const hasProvider = provider !== undefined;
+  const hasProviderReference = providerReference !== undefined;
+
+  if (hasProvider !== hasProviderReference) {
+    throw new AppError(
+      "BAD_REQUEST",
+      "provider and providerReference are both required for provider reference lookup"
+    );
+  }
+
+  if (hasProvider && hasProviderReference) {
+    const row = await repo.getTransferByProviderReference({
+      provider,
+      providerReference,
+      organizationId: auth.organizationId,
+      projectId: auth.projectId,
+    });
+
+    if (!row) {
+      return paginated(c, [], { total: 0, page, pageSize });
+    }
+    if (allowedWalletIds && !allowedWalletIds.includes(row.wallet_id)) {
+      throw new AppError("FORBIDDEN", "API key is not authorized for the requested wallet");
+    }
+    if (category === "wallet" && isRampTransferType(row.type)) {
+      return paginated(c, [], { total: 0, page, pageSize });
+    }
+    if (category === "ramp" && !isRampTransferType(row.type)) {
+      return paginated(c, [], { total: 0, page, pageSize });
+    }
+
+    return paginated(c, [mapTransferRow(row)], { total: 1, page, pageSize });
+  }
 
   let transferRows: TransferRow[];
   let total: number;
@@ -1421,7 +1954,15 @@ export async function listTransfers(c: AppContext) {
     // 3. Fetch pending/processing/failed from DB (not yet on-chain).
     //    Skip if the caller's status filter already excludes these — e.g. status=confirmed
     //    or status=finalized would never match any of these records.
-    const nonChainStatuses: TransferStatus[] = ["pending", "processing", "failed"];
+    const nonChainStatuses: TransferStatus[] = [
+      "pending",
+      "processing",
+      "failed",
+      "awaiting_payment",
+      "settling",
+      "completed",
+      "expired",
+    ];
     const needsNonChainRecords = !status || nonChainStatuses.includes(status);
     const pendingRows: TransferRow[] = [];
     if (needsNonChainRecords) {
@@ -1431,7 +1972,9 @@ export async function listTransfers(c: AppContext) {
         walletId: resolvedWalletId,
         walletIds: resolvedWalletId ? undefined : (allowedWalletIds ?? undefined),
         sourceAddress: resolvedWalletId ? undefined : walletAddress,
+        counterpartyId,
         statuses: nonChainStatuses,
+        types: transferTypes,
         token,
         direction,
         createdAtFrom: from,
@@ -1473,9 +2016,11 @@ export async function listTransfers(c: AppContext) {
     // 5. Apply remaining filters and sort
     const filtered = merged
       .filter((row) => {
+        if (counterpartyId && row.counterparty_id !== counterpartyId) return false;
         if (status && row.status !== status) return false;
         if (token && row.token !== token) return false;
         if (direction && row.direction !== direction) return false;
+        if (transferTypeSet && !transferTypeSet.has(row.type)) return false;
         return true;
       })
       .sort((a, b) => b.created_at.localeCompare(a.created_at));
@@ -1488,9 +2033,11 @@ export async function listTransfers(c: AppContext) {
       organizationId: auth.organizationId,
       projectId: auth.projectId,
       walletIds: allowedWalletIds ?? undefined,
+      counterpartyId,
       token,
       direction,
       statuses: status ? [status] : undefined,
+      types: transferTypes,
       createdAtFrom: from,
       createdAtTo: to,
       limit: pageSize,

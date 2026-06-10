@@ -2,6 +2,9 @@
  * API Error Types and Handlers
  */
 
+import type { RampProviderId } from "@sdp/types/provider-access";
+import type { CounterpartyRequirements, RampDirection } from "@sdp/types/ramp-requirements";
+
 export type ErrorCode =
   | "BAD_REQUEST"
   | "UNAUTHORIZED"
@@ -27,6 +30,7 @@ export type ErrorCode =
   | "TOKEN_PAUSED"
   | "INVALID_TOKEN_AMOUNT"
   | "NOT_ON_TOKEN_ALLOWLIST"
+  | "DESTINATION_REVOKED"
   | "ON_TOKEN_BLOCKLIST"
   | "TOKEN_ACCOUNT_NOT_FOUND"
   | "INVALID_BURN_SOURCE"
@@ -40,7 +44,9 @@ export type ErrorCode =
   | "TRANSACTION_FAILED"
   | "SIGNING_FAILED"
   | "SIGNING_PENDING"
-  | "PROVIDER_NOT_CONFIGURED";
+  | "PROVIDER_NOT_CONFIGURED"
+  | "PROVIDER_UNAVAILABLE"
+  | "ESTIMATE_NOT_AVAILABLE";
 
 export interface ApiError {
   code: ErrorCode;
@@ -77,6 +83,7 @@ const ERROR_STATUS_CODES: Record<ErrorCode, number> = {
   TOKEN_PAUSED: 400,
   INVALID_TOKEN_AMOUNT: 400,
   NOT_ON_TOKEN_ALLOWLIST: 403,
+  DESTINATION_REVOKED: 403,
   ON_TOKEN_BLOCKLIST: 403,
   TOKEN_ACCOUNT_NOT_FOUND: 400,
   INVALID_BURN_SOURCE: 400,
@@ -91,6 +98,8 @@ const ERROR_STATUS_CODES: Record<ErrorCode, number> = {
   SIGNING_FAILED: 400,
   SIGNING_PENDING: 202,
   PROVIDER_NOT_CONFIGURED: 503,
+  PROVIDER_UNAVAILABLE: 503,
+  ESTIMATE_NOT_AVAILABLE: 503,
 };
 
 const DEFAULT_ERROR_MESSAGES: Record<ErrorCode, string> = {
@@ -118,6 +127,8 @@ const DEFAULT_ERROR_MESSAGES: Record<ErrorCode, string> = {
   TOKEN_PAUSED: "Token operations are paused",
   INVALID_TOKEN_AMOUNT: "Token amount is invalid",
   NOT_ON_TOKEN_ALLOWLIST: "Address is not on the token allowlist",
+  DESTINATION_REVOKED:
+    "Destination address was revoked from the allowlist; re-add it explicitly before minting",
   ON_TOKEN_BLOCKLIST: "Address is on the token denylist",
   TOKEN_ACCOUNT_NOT_FOUND: "Token account not found for this mint",
   INVALID_BURN_SOURCE: "Burn source is not valid for this signer",
@@ -132,6 +143,9 @@ const DEFAULT_ERROR_MESSAGES: Record<ErrorCode, string> = {
   SIGNING_FAILED: "Transaction signing failed",
   SIGNING_PENDING: "Signing request pending approval",
   PROVIDER_NOT_CONFIGURED: "Payment provider is not configured for this environment",
+  PROVIDER_UNAVAILABLE: "Payment provider is temporarily unavailable",
+  ESTIMATE_NOT_AVAILABLE:
+    "An indicative estimate is not available; the rate is known at quote time",
 };
 
 export class AppError extends Error {
@@ -196,4 +210,16 @@ export function internalError(message?: string): AppError {
 
 export function providerNotConfigured(message?: string): AppError {
   return new AppError("PROVIDER_NOT_CONFIGURED", message);
+}
+
+export function providerUnavailable(message?: string, details?: Record<string, unknown>): AppError {
+  return new AppError("PROVIDER_UNAVAILABLE", message, details);
+}
+
+export function unsupportedCounterparty(
+  provider: RampProviderId,
+  direction: RampDirection,
+  reason: string
+): CounterpartyRequirements {
+  return { provider, direction, status: "unsupported", reason };
 }

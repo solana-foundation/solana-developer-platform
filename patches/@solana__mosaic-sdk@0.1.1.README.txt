@@ -1,0 +1,90 @@
+Local patches against @solana/mosaic-sdk@0.1.1.
+
+Upstream tracking
+-----------------
+No GitHub issue or PR has been filed yet for the walletAddress → wallet drift
+fixed below. Before bumping the upstream version, verify each hunk against the
+new release and either drop fixed hunks or re-anchor them. If the rename has
+been fixed upstream, the dist/abl/wallet.js hunk can be dropped entirely; the
+remaining hunks (payer plumbing, owner-based Token-ACL detection, and the
+allowlist defaultAccountState fix) are independent of it.
+
+Patch file format note: pnpm hashes the .patch contents, so commentary cannot
+live inside the .patch itself without forcing a lockfile rewrite. Keep notes
+here instead.
+
+Hunks
+-----
+This list is exhaustive — keep it in sync with the .patch file. The patch
+currently touches 13 files, grouped below. (stablecoin and tokenized-security
+each receive two independent changes — see the defaultAccountState and
+fee-payer/authority sections — so the numbered hunks below exceed the file
+count.)
+
+Payer plumbing (Kora-style fee sponsorship):
+
+1. dist/abl/list.js — thread `payer ?? authority` so callers can supply a
+   distinct fee payer. Independent of the walletAddress rename.
+
+2. dist/abl/set-extra-metas.js — same payer plumbing for setup-extra-metas.
+
+walletAddress → wallet rename:
+
+3. dist/abl/wallet.js — fix `findWalletEntryPda({ walletAddress, ... })` →
+   `{ wallet, ... }` to match the underlying @solana/token-acl-gate-sdk@0.2.0
+   `seeds.wallet` field. Without this, `addToList` / `removeFromList` throw
+   "Cannot read properties of undefined (reading 'length')" on every call.
+   Same rename applied to `getRemoveWalletInstructions`.
+
+Owner-based Token-ACL detection: sRFC-37 transfers a mint's freeze authority
+to a mintConfig PDA *owned by* the Token ACL program, so the literal-program-ID
+check (`freezeAuthority === TOKEN_ACL_PROGRAM_ID`) never matched. These hunks
+detect Token ACL via the freeze-authority account owner / a `usesTokenAcl`
+flag instead, so freeze/thaw/burn/transfer enable the sRFC-37 path correctly.
+
+4. dist/inspection/inspect-token.js — fetch the freeze-authority account and
+   set `enableSrfc37` from its owner (`account.owner === TOKEN_ACL_PROGRAM_ID`)
+   so the inspector reports correct authority state for sRFC-37 tokens. This is
+   the source of the `usesTokenAcl` signal consumed by the hunks below.
+
+5. dist/token-acl/freeze.js — detect Token ACL via `usesTokenAcl` (account
+   owner) rather than the literal freeze-authority program ID.
+
+6. dist/token-acl/thaw.js — same owner-based detection for thaw.
+
+7. dist/management/force-burn.js — consume `usesTokenAcl` from getMintDetails
+   when computing `enableSrfc37` (replaces the freeze-authority program-ID check).
+
+8. dist/management/force-transfer.js — same `usesTokenAcl` gating for force-transfer.
+
+9. dist/transfer/index.js — same `usesTokenAcl` gating for transfer.
+
+Allowlist defaultAccountState:
+
+10. dist/templates/stablecoin.js — set `defaultAccountState` Frozen for sRFC-37
+    allowlist tokens (`aclMode === 'blocklist' || !useSrfc37` keeps it unfrozen
+    for blocklist/non-sRFC-37 tokens). Without this, allowlist ATAs start
+    Initialized and the permissionless-thaw step has nothing to thaw.
+
+11. dist/templates/tokenized-security.js — same defaultAccountState fix.
+
+Fee-payer / authority decoupling for sRFC-37 deploys (Kora fee sponsorship):
+The unpatched sRFC-37 template branch uses `feePayerSigner` as the on-chain
+authority for the Token-ACL/ABL setup AND silently emits no setup at all unless
+`feePayer === mintAuthority`. That makes it impossible for a sponsored fee payer
+(e.g. Kora) to deploy a control-list token: pass a distinct fee payer and you
+get a bare mint with no list/config and no error. These hunks relax the guard to
+`if (!useSrfc37)` and split the two roles — the on-chain authority stays the mint
+authority (custody) so the derived list/config PDAs match and later
+custody-signed mutations (addToList, thaw) succeed, while account creation is
+funded from the fee payer via `payer`. setGatingProgram / enablePermissionlessThaw
+create no accounts, so they take only the authority. Applies to ALL FOUR
+templates: for stablecoin (#10) and tokenized-security (#11) it is a second hunk
+in the same file; arcade-token and custom-token are in the patch solely for this
+change. See the upstream issue draft (mosaic-sdk) tracking a proper fix.
+
+12. dist/templates/arcade-token.js — relax the `mintAuthority === feePayer`
+    guard to `!useSrfc37`; set the Token-ACL/ABL setup authority to the mint
+    authority signer and fund account creation from the fee payer (`payer`).
+
+13. dist/templates/custom-token.js — same fee-payer/authority decoupling.

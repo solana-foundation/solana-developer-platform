@@ -181,10 +181,6 @@ export const updateProjectRequestSchema = updateProjectSchemaBase
       description: "Updated description. Use null to clear.",
       example: "Updated project description.",
     }),
-    environment: withOpenApi(updateProjectSchemaBase.shape.environment, {
-      description: "Updated project environment.",
-      example: "production",
-    }),
     settings: withOpenApi(updateProjectSchemaBase.shape.settings, {
       description: "Updated project settings. Use null to clear.",
       example: {

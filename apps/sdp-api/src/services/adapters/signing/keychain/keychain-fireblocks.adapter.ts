@@ -13,6 +13,7 @@
 import type { SolanaSigner } from "@solana/keychain-core";
 import { FireblocksSigner } from "@solana/keychain-fireblocks";
 import type { Address } from "@solana/kit";
+import type { SignRequest, SignResult } from "@/services/ports";
 import { BaseKeychainAdapter } from "./base-keychain.adapter";
 import type { KeychainFireblocksConfig } from "./types";
 
@@ -28,29 +29,13 @@ type FireblocksSignerDebugHooks = {
 export class KeychainFireblocksAdapter extends BaseKeychainAdapter {
   readonly providerId = "fireblocks";
 
-  protected signer: SolanaSigner;
-  private fireblocksSigner: FireblocksSigner;
-  private initialized = false;
+  protected signer!: SolanaSigner;
+  private readonly config: KeychainFireblocksConfig;
+  private readonly signerByVaultAccountId = new Map<string, Promise<FireblocksSigner>>();
 
   constructor(config: KeychainFireblocksConfig) {
     super();
-
-    this.fireblocksSigner = new FireblocksSigner({
-      apiKey: config.apiKey,
-      privateKeyPem: config.apiSecretPem,
-      vaultAccountId: config.vaultAccountId,
-      assetId: config.assetId ?? "SOL",
-      apiBaseUrl: config.apiBaseUrl,
-      pollIntervalMs: config.pollIntervalMs,
-      maxPollAttempts: config.maxPollAttempts,
-      requestDelayMs: config.requestDelayMs,
-      // Always use RAW signing - we handle broadcast separately via Kora
-      useProgramCall: false,
-    });
-    this.attachDebugLogging();
-
-    // Cast to SolanaSigner interface
-    this.signer = this.fireblocksSigner as unknown as SolanaSigner;
+    this.config = config;
   }
 
   /**
@@ -59,23 +44,18 @@ export class KeychainFireblocksAdapter extends BaseKeychainAdapter {
    * making it compatible with signTransactionMessageWithSigners and other kit utilities.
    */
   async getTransactionSigner(
-    _walletId?: string,
+    walletId?: string,
     _walletPublicKey?: Address
   ): Promise<FireblocksSigner> {
-    await this.ensureInitialized();
-    return this.fireblocksSigner;
+    return this.getFireblocksSigner(walletId);
   }
 
   /**
    * Initialize the Fireblocks signer.
    * Must be called before any signing operations to fetch the public key.
    */
-  async init(): Promise<void> {
-    if (this.initialized) {
-      return;
-    }
-    await this.fireblocksSigner.init();
-    this.initialized = true;
+  async init(walletId?: string): Promise<void> {
+    await this.getFireblocksSigner(walletId);
   }
 
   /**
@@ -92,28 +72,66 @@ export class KeychainFireblocksAdapter extends BaseKeychainAdapter {
   /**
    * Get the public key, ensuring initialization first.
    */
-  async getPublicKey(_walletId?: string): Promise<Address> {
-    await this.ensureInitialized();
-    return this.signer.address as Address;
+  async getPublicKey(walletId?: string): Promise<Address> {
+    const signer = await this.getFireblocksSigner(walletId);
+    return signer.address as Address;
   }
 
   /**
-   * Ensure the signer is initialized before operations.
+   * SigningPort does not specify a wallet ID; for Fireblocks, sign with the
+   * configured default vault.
    */
-  private async ensureInitialized(): Promise<void> {
-    if (!this.initialized) {
-      await this.init();
-    }
+  async sign(request: SignRequest): Promise<SignResult> {
+    const signer = await this.getFireblocksSigner();
+    this.signer = signer as unknown as SolanaSigner;
+    return super.sign(request);
   }
 
-  private attachDebugLogging(): void {
-    const signer = this.fireblocksSigner as unknown as FireblocksSignerDebugHooks;
+  private getFireblocksSigner(walletId?: string): Promise<FireblocksSigner> {
+    const vaultAccountId = walletId
+      ? denormalizeFireblocksWalletId(walletId)
+      : this.config.vaultAccountId;
+    const existing = this.signerByVaultAccountId.get(vaultAccountId);
+    if (existing) {
+      return existing;
+    }
+
+    const created = this.createInitializedSigner(vaultAccountId).catch((error: unknown) => {
+      if (this.signerByVaultAccountId.get(vaultAccountId) === created) {
+        this.signerByVaultAccountId.delete(vaultAccountId);
+      }
+      throw error;
+    });
+    this.signerByVaultAccountId.set(vaultAccountId, created);
+    return created;
+  }
+
+  private async createInitializedSigner(vaultAccountId: string): Promise<FireblocksSigner> {
+    const signer = new FireblocksSigner({
+      apiKey: this.config.apiKey,
+      privateKeyPem: this.config.apiSecretPem,
+      vaultAccountId,
+      assetId: this.config.assetId ?? "SOL",
+      apiBaseUrl: this.config.apiBaseUrl,
+      pollIntervalMs: this.config.pollIntervalMs,
+      maxPollAttempts: this.config.maxPollAttempts,
+      requestDelayMs: this.config.requestDelayMs,
+      // Always use RAW signing - we handle broadcast separately via Kora
+      useProgramCall: false,
+    });
+    this.attachDebugLogging(signer);
+    await signer.init();
+    return signer;
+  }
+
+  private attachDebugLogging(fireblocksSigner: FireblocksSigner): void {
+    const signer = fireblocksSigner as unknown as FireblocksSignerDebugHooks;
 
     if (signer.__sdpDebugPatched__ || typeof signer.request !== "function") {
       return;
     }
 
-    const originalRequest = signer.request.bind(this.fireblocksSigner) as <T>(
+    const originalRequest = signer.request.bind(fireblocksSigner) as <T>(
       method: string,
       uri: string,
       body?: unknown
@@ -156,4 +174,8 @@ export class KeychainFireblocksAdapter extends BaseKeychainAdapter {
 
     signer.__sdpDebugPatched__ = true;
   }
+}
+
+function denormalizeFireblocksWalletId(walletId: string): string {
+  return walletId.startsWith("fb_") ? walletId.slice("fb_".length) : walletId;
 }

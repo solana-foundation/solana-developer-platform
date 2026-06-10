@@ -66,6 +66,13 @@ export interface AnchorageProviderConfig {
   network?: "solana" | "solana-devnet";
 }
 
+export interface UtilaProviderConfig {
+  provider: "utila";
+  apiBaseUrl?: string;
+  vaultId?: string;
+  network?: "networks/solana-mainnet" | "networks/solana-devnet";
+}
+
 export type ProviderConfigRecord =
   | LocalProviderConfig
   | FireblocksProviderConfig
@@ -74,7 +81,8 @@ export type ProviderConfigRecord =
   | ParaProviderConfig
   | TurnkeyProviderConfig
   | DfnsProviderConfig
-  | AnchorageProviderConfig;
+  | AnchorageProviderConfig
+  | UtilaProviderConfig;
 
 export async function parseConfigRecord(
   env: Env,

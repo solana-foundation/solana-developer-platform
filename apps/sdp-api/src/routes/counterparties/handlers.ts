@@ -1,8 +1,23 @@
-import type { Counterparty, CounterpartyResponse, ListCounterpartiesResponse } from "@sdp/types";
+import {
+  COUNTERPARTY_EMPLOYMENT_STATUSES,
+  COUNTERPARTY_ENTITY_TYPES,
+  COUNTERPARTY_ID_TYPES,
+  COUNTERPARTY_INDUSTRY_SECTORS,
+  COUNTERPARTY_INTENDED_USE,
+  COUNTERPARTY_PEP_STATUSES,
+  COUNTERPARTY_SOURCE_OF_FUNDS,
+  COUNTERPARTY_YEARLY_INCOME,
+  COUNTRIES,
+  type Counterparty,
+  type CounterpartyFieldOptionsResponse,
+  type CounterpartyResponse,
+  type ListCounterpartiesResponse,
+  US_STATES,
+} from "@sdp/types";
 import { z } from "zod";
 import { getDb } from "@/db";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
-import { getAuth } from "@/lib/auth";
+import { getAuth, requireProjectId } from "@/lib/auth";
 import { resolveCreatorUserId } from "@/lib/creator";
 import {
   badRequest,
@@ -12,11 +27,13 @@ import {
   internalError,
   notFound,
 } from "@/lib/errors";
+import { RAMP_PROVIDER_CLIENTS } from "@/lib/ramps";
 import { created, noContent, success } from "@/lib/response";
 import { AuditService } from "@/services/audit.service";
 import { type AppContext, getCounterpartiesRepository } from "./context";
 import {
   counterpartyIdParamsSchema,
+  counterpartyRequirementsQuerySchema,
   createCounterpartySchema,
   listCounterpartiesQuerySchema,
   updateCounterpartySchema,
@@ -39,8 +56,29 @@ function mapToCounterparty(row: CounterpartyRow): Counterparty {
   };
 }
 
+export const getCounterpartyFieldOptions = async (c: AppContext) => {
+  const response: CounterpartyFieldOptionsResponse = {
+    fields: {
+      entityTypes: COUNTERPARTY_ENTITY_TYPES,
+      governmentIdTypes: COUNTERPARTY_ID_TYPES,
+      compliance: {
+        employmentStatuses: COUNTERPARTY_EMPLOYMENT_STATUSES,
+        sourceOfFunds: COUNTERPARTY_SOURCE_OF_FUNDS,
+        pepStatuses: COUNTERPARTY_PEP_STATUSES,
+        intendedUseOfAccount: COUNTERPARTY_INTENDED_USE,
+        estimatedYearlyIncome: COUNTERPARTY_YEARLY_INCOME,
+        employmentIndustrySectors: COUNTERPARTY_INDUSTRY_SECTORS,
+      },
+      countries: COUNTRIES,
+      usStates: US_STATES,
+    },
+  };
+  return success(c, response);
+};
+
 export const listCounterparties = async (c: AppContext) => {
   const auth = getAuth(c);
+  const projectId = requireProjectId(c);
   const parsed = listCounterpartiesQuerySchema.safeParse(c.req.query());
 
   if (!parsed.success) {
@@ -52,6 +90,7 @@ export const listCounterparties = async (c: AppContext) => {
   const repo = getCounterpartiesRepository(c);
   const { rows, total } = await repo.listCounterparties({
     organizationId: auth.organizationId,
+    projectId,
     includeArchived,
     limit: pageSize,
     offset: (page - 1) * pageSize,
@@ -69,6 +108,7 @@ export const listCounterparties = async (c: AppContext) => {
 
 export const getCounterparty = async (c: AppContext) => {
   const auth = getAuth(c);
+  const projectId = requireProjectId(c);
   const params = counterpartyIdParamsSchema.safeParse(c.req.param());
 
   if (!params.success) {
@@ -79,6 +119,7 @@ export const getCounterparty = async (c: AppContext) => {
   const counterparty = await repo.getCounterpartyById({
     counterpartyId: params.data.counterpartyId,
     organizationId: auth.organizationId,
+    projectId,
   });
 
   if (!counterparty) {
@@ -89,8 +130,42 @@ export const getCounterparty = async (c: AppContext) => {
   return success(c, response);
 };
 
+export const getCounterpartyRequirements = async (c: AppContext) => {
+  const auth = getAuth(c);
+  const projectId = requireProjectId(c);
+  const params = counterpartyIdParamsSchema.safeParse(c.req.param());
+
+  if (!params.success) {
+    throw badRequestParams();
+  }
+
+  const query = counterpartyRequirementsQuerySchema.safeParse(c.req.query());
+
+  if (!query.success) {
+    throw badRequestQuery({ errors: z.treeifyError(query.error) });
+  }
+
+  const repo = getCounterpartiesRepository(c);
+  const counterparty = await repo.getCounterpartyById({
+    counterpartyId: params.data.counterpartyId,
+    organizationId: auth.organizationId,
+    projectId,
+  });
+
+  if (!counterparty) {
+    throw notFound("Counterparty");
+  }
+
+  const requirements = RAMP_PROVIDER_CLIENTS[query.data.provider].validateCounterparty(
+    mapToCounterparty(counterparty),
+    { direction: query.data.direction, providerData: counterparty.provider_data }
+  );
+  return success(c, requirements);
+};
+
 export const createCounterparty = async (c: AppContext) => {
   const auth = getAuth(c);
+  const projectId = requireProjectId(c);
   const body = await c.req.json();
   const parsed = createCounterpartySchema.safeParse(body);
 
@@ -104,6 +179,7 @@ export const createCounterparty = async (c: AppContext) => {
     const existing = await repo.getCounterpartyByExternalId({
       externalId: parsed.data.externalId,
       organizationId: auth.organizationId,
+      projectId,
     });
     if (existing) {
       throw conflict("A counterparty with this external ID already exists");
@@ -114,7 +190,7 @@ export const createCounterparty = async (c: AppContext) => {
 
   const counterparty = await repo.createCounterparty({
     organizationId: auth.organizationId,
-    projectId: auth.projectId,
+    projectId,
     externalId: parsed.data.externalId ?? null,
     entityType: parsed.data.entityType,
     displayName: parsed.data.displayName,
@@ -147,6 +223,7 @@ export const createCounterparty = async (c: AppContext) => {
 
 export const updateCounterparty = async (c: AppContext) => {
   const auth = getAuth(c);
+  const projectId = requireProjectId(c);
   const params = counterpartyIdParamsSchema.safeParse(c.req.param());
 
   if (!params.success) {
@@ -167,6 +244,7 @@ export const updateCounterparty = async (c: AppContext) => {
     const existing = await repo.getCounterpartyByExternalId({
       externalId: parsed.data.externalId,
       organizationId: auth.organizationId,
+      projectId,
     });
     if (existing && existing.id !== counterpartyId) {
       throw conflict("A counterparty with this external ID already exists");
@@ -176,6 +254,7 @@ export const updateCounterparty = async (c: AppContext) => {
   const updated = await repo.updateCounterparty({
     counterpartyId,
     organizationId: auth.organizationId,
+    projectId,
     ...parsed.data,
   });
 
@@ -200,6 +279,7 @@ export const updateCounterparty = async (c: AppContext) => {
 
 export const archiveCounterparty = async (c: AppContext) => {
   const auth = getAuth(c);
+  const projectId = requireProjectId(c);
   const params = counterpartyIdParamsSchema.safeParse(c.req.param());
 
   if (!params.success) {
@@ -212,6 +292,7 @@ export const archiveCounterparty = async (c: AppContext) => {
   const archived = await repo.archiveCounterparty({
     counterpartyId,
     organizationId: auth.organizationId,
+    projectId,
   });
 
   if (!archived) {

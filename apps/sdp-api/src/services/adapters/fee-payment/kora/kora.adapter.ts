@@ -109,9 +109,14 @@ export class KoraAdapter implements FeePaymentPort {
     const maxRetries = 2;
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
-        const { signed_transaction } = await this.client.signAndSendTransaction({
-          transaction: base64Tx,
-        });
+        const { signature: submittedSignature, signed_transaction } =
+          await this.client.signAndSendTransaction({
+            transaction: base64Tx,
+          });
+
+        if (submittedSignature) {
+          return submittedSignature as Signature;
+        }
 
         // Decode the signed transaction using @solana/kit's decoder
         const signedTxBytes = decodeBase64(signed_transaction);

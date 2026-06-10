@@ -31,7 +31,7 @@ import {
   setTransactionMessageLifetimeUsingBlockhash,
 } from "@solana/kit";
 import { getTransferSolInstruction } from "@solana-program/system";
-import { env } from "./env";
+import { env } from "#env-impl";
 
 const PRIVY_CONFIGURED = !!env.PRIVY_APP_ID && !!env.PRIVY_APP_SECRET;
 const SOLANA_CONFIGURED = !!env.SOLANA_RPC_URL && PRIVY_CONFIGURED;
@@ -40,9 +40,13 @@ const RUN_INTEGRATION_TESTS = env.RUN_INTEGRATION_TESTS === "true";
 
 let cachedKeyHash: string | null = null;
 let cachedCustodyAddress: string | null = null;
-// 0.01 SOL — enough to cover sRFC-37 deploy paths where custody pays directly
-// (~0.0043 SOL for mint + listConfig + walletEntry rent), with margin for follow-up ops.
-const PRIVY_INTEGRATION_AIRDROP_LAMPORTS = 10_000_000;
+// 0.05 SOL — enough headroom for sRFC-37 deploy paths where custody pays
+// directly. A single tokenized-security deploy needs ~0.0095 SOL (mint +
+// mintConfig + listConfig + extraMetas PDA rent, plus keeping custody itself
+// rent-exempt). Earlier 0.01-SOL budget was a razor-thin fit for the
+// stablecoin shape; the ScaledUiAmount extension on tokenized-security
+// pushed the mint rent ~0.0004 SOL higher and tipped tests over.
+const PRIVY_INTEGRATION_AIRDROP_LAMPORTS = 50_000_000;
 const KORA_MAX_TRANSFER_LAMPORTS = 10_000_000n;
 
 type SolanaRpcResponse<T> =
@@ -158,8 +162,8 @@ export async function resetIntegrationState(
   await db
     .prepare(
       `INSERT OR REPLACE INTO api_keys
-       (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, environment, status)
-       VALUES (?, ?, ?, ?, 'Project Test Key', ?, ?, 'api_admin', '["*"]', 'sandbox', 'active')`
+       (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
+       VALUES (?, ?, ?, ?, 'Project Test Key', ?, ?, 'api_admin', '["*"]', 'active')`
     )
     .bind(
       TEST_PROJECT_API_KEY.id,

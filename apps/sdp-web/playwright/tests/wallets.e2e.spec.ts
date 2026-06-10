@@ -6,6 +6,8 @@ import {
   bootstrapLocalWalletFixtures,
   ensureLinkedOrg,
   getBootstrapApiBaseUrl,
+  resolvePlaywrightProjectId,
+  seedProjectCookie,
 } from "../support/local-dashboard-bootstrap";
 
 interface TokenResponse {
@@ -170,10 +172,20 @@ function getActivityRow(
 
 test.describe
   .serial("dashboard wallets e2e", () => {
+    let walletsProjectId = "";
+
     test.beforeAll(async ({ browser }) => {
       const session = await getPlaywrightAdminSession(browser);
       await ensureLinkedOrg(session.identity);
+      walletsProjectId = await resolvePlaywrightProjectId(
+        getBootstrapApiBaseUrl(),
+        session.bearerToken
+      );
       await session.page.close();
+    });
+
+    test.beforeEach(async ({ page }) => {
+      await seedProjectCookie(page, walletsProjectId);
     });
 
     test("user can initialize Privy and run signer check from the wallet detail page", async ({
@@ -183,18 +195,21 @@ test.describe
 
       await expect(page.getByText("Create your first wallet", { exact: true })).toBeVisible();
 
-      const privyCard = page.locator("article").filter({
-        has: page.getByRole("heading", { name: "Privy" }),
-      });
-      await privyCard.getByRole("button", { name: "New wallet" }).click();
+      const privyProviderCard = page.locator("article").filter({ hasText: "Privy" }).first();
+      await expect(privyProviderCard).toBeVisible();
+      await privyProviderCard.getByRole("button", { name: "New wallet" }).click();
 
-      await page.getByLabel("Primary wallet label").fill("Treasury");
+      await expect(page.getByText("Wallet details", { exact: true })).toBeVisible();
+      await page.getByLabel("Wallet label").fill("Treasury");
       await page.getByRole("button", { name: "Create wallet" }).click();
 
       const walletCard = page.locator("article").filter({
         has: page.getByText("Treasury"),
       });
       await expect(walletCard).toBeVisible({ timeout: 120_000 });
+      await expect(walletCard.getByText("Privy", { exact: true })).toBeVisible();
+
+      await expect(walletCard).toBeVisible();
 
       await walletCard.getByRole("link", { name: "Manage" }).click();
       await expect(page).toHaveURL(/\/dashboard\/wallets\/.+/);
@@ -202,7 +217,9 @@ test.describe
       await page.getByRole("button", { name: "Actions" }).click();
       await page.getByRole("menuitem", { name: "Prove ownership" }).click();
 
-      await expect(page.getByText("Signer check sent.")).toBeVisible({ timeout: 120_000 });
+      await expect(page.getByText("Signer check sent.")).toBeVisible({
+        timeout: 120_000,
+      });
       await expect(page.getByRole("link", { name: "View on Solana Explorer" })).toBeVisible();
     });
 
@@ -222,8 +239,13 @@ test.describe
         fundSourceAmountSol: 0.05,
         tier: "enterprise",
       });
-      const api = createLocalApiClient(getBootstrapApiBaseUrl(), session.bearerToken);
+      const projectId = await resolvePlaywrightProjectId(
+        getBootstrapApiBaseUrl(),
+        session.bearerToken
+      );
+      const api = createLocalApiClient(getBootstrapApiBaseUrl(), session.bearerToken, projectId);
       await session.page.close();
+      await seedProjectCookie(page, projectId);
 
       const wallet = fixtures.wallets[0];
       if (!wallet) {
@@ -297,7 +319,11 @@ test.describe
 
       const expectedActivityRows = [
         { operationLabel: "Burn", token: deployedToken.symbol, amount: "2" },
-        { operationLabel: "Force Burn", token: deployedToken.symbol, amount: "1" },
+        {
+          operationLabel: "Force Burn",
+          token: deployedToken.symbol,
+          amount: "1",
+        },
       ];
       const activityRows = expectedActivityRows.map((expectedRow) => ({
         expectedRow,
@@ -344,7 +370,12 @@ test.describe
         walletCount: 1,
         tier: "enterprise",
       });
+      const projectId = await resolvePlaywrightProjectId(
+        getBootstrapApiBaseUrl(),
+        session.bearerToken
+      );
       await session.page.close();
+      await seedProjectCookie(page, projectId);
 
       const wallet = fixtures.wallets[0];
       if (!wallet) {

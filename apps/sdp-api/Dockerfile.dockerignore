@@ -18,6 +18,7 @@ apps/sdp-web
 apps/sdp-docs
 packages/*
 !packages/sdp-types
+!packages/sdp-env-config
 docs
 infra
 scripts

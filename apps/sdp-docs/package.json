@@ -7,6 +7,7 @@
     "dev:local": "node scripts/dev.mjs",
     "build": "pnpm generate:api && pnpm generate:ai && pnpm generate:source && next build",
     "start": "next start --port 3001",
+    "pretypecheck": "pnpm generate:source",
     "typecheck": "tsc --noEmit",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
@@ -17,23 +18,24 @@
     "watch:source": "node scripts/watch-source.mjs"
   },
   "dependencies": {
+    "@sdp/env-config": "workspace:*",
     "@sdp/types": "workspace:*",
-    "fumadocs-core": "^16.8.5",
-    "fumadocs-mdx": "^14.3.2",
-    "fumadocs-ui": "^16.8.5",
-    "lucide-react": "1.14.0",
+    "fumadocs-core": "^16.9.1",
+    "fumadocs-mdx": "^15.0.8",
+    "fumadocs-ui": "^16.9.1",
+    "lucide-react": "1.16.0",
     "next": "16.2.6",
-    "react": "19.2.5",
-    "react-dom": "19.2.5"
+    "react": "19.2.6",
+    "react-dom": "19.2.6"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
     "@types/mdx": "^2.0.13",
-    "@types/node": "^25.6.0",
+    "@types/node": "^25.9.1",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "tailwindcss": "^4",
-    "tsx": "4.21.0",
+    "tsx": "4.22.3",
     "typescript": "^6.0.3"
   }
 }

@@ -3,11 +3,16 @@
 interface TokenValidationMessageProps {
   message: string | null;
   reserveSpace?: boolean;
+  // When false, the message is shown without an aria-live region. Use this for notes
+  // that restate an error already announced elsewhere (e.g. a field's own validation
+  // message) so screen readers don't announce the same text twice.
+  announce?: boolean;
 }
 
 export function TokenValidationMessage({
   message,
   reserveSpace = true,
+  announce = true,
 }: TokenValidationMessageProps) {
   if (!reserveSpace && !message) {
     return null;
@@ -15,7 +20,7 @@ export function TokenValidationMessage({
 
   return (
     <p
-      aria-live={message ? "polite" : undefined}
+      aria-live={announce && message ? "polite" : undefined}
       className={[
         reserveSpace ? "min-h-5" : "",
         "text-sm leading-5",

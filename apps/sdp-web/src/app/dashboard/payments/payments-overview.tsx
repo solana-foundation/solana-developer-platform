@@ -38,6 +38,7 @@ import {
 interface PaymentsOverviewProps {
   aggregate: CustodyWalletAggregate | null;
   aggregateError: string | null;
+  paymentsV2: boolean;
   issuedTokenSymbolsByMint: Record<string, string>;
   transfers: TransferRecord[];
   transfersError: string | null;
@@ -118,6 +119,7 @@ function TruncatedTableText({
 export function PaymentsOverview({
   aggregate,
   aggregateError,
+  paymentsV2,
   issuedTokenSymbolsByMint,
   transfers,
   transfersError,
@@ -150,7 +152,7 @@ export function PaymentsOverview({
     mutate: mutateTransfers,
   } = usePersistedDashboardSWR<TransferRecord[]>(
     [PAYMENTS_OVERVIEW_TRANSFERS_KEY, refreshSeed],
-    () => fetchTransfers(),
+    () => fetchTransfers({ pageSize: 20 }),
     {
       fallbackData: transfersError ? undefined : transfers,
       revalidateOnFocus: true,
@@ -193,28 +195,30 @@ export function PaymentsOverview({
 
   return (
     <div className="grid min-w-0 gap-6 overflow-x-hidden">
-      <SectionEntry>
-        <div className="flex min-w-0 flex-wrap items-center gap-3">
-          <Button
-            type="button"
-            className="rounded-full px-5 whitespace-nowrap"
-            disabled={!hasWallets}
-            iconLeft={<ArrowUpRight className="size-4" />}
-            onClick={() => router.push("/dashboard/payments/send")}
-          >
-            Send
-          </Button>
-          <Button
-            type="button"
-            className="rounded-full px-5 whitespace-nowrap"
-            disabled={!hasWallets}
-            iconLeft={<ArrowDownLeft className="size-4" />}
-            onClick={() => router.push("/dashboard/payments/receive")}
-          >
-            Receive
-          </Button>
-        </div>
-      </SectionEntry>
+      {paymentsV2 ? null : (
+        <SectionEntry>
+          <div className="flex min-w-0 flex-wrap items-center gap-3">
+            <Button
+              type="button"
+              className="rounded-full px-5 whitespace-nowrap"
+              disabled={!hasWallets}
+              iconLeft={<ArrowUpRight className="size-4" />}
+              onClick={() => router.push("/dashboard/payments/send")}
+            >
+              Send
+            </Button>
+            <Button
+              type="button"
+              className="rounded-full px-5 whitespace-nowrap"
+              disabled={!hasWallets}
+              iconLeft={<ArrowDownLeft className="size-4" />}
+              onClick={() => router.push("/dashboard/payments/receive")}
+            >
+              Receive
+            </Button>
+          </div>
+        </SectionEntry>
+      )}
 
       <SectionEntry delay={0.04}>
         <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(20rem,1fr)]">

@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v6.0.2
         with:
           fetch-depth: 0
 
@@ -43,7 +43,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v6.0.2
         with:
           fetch-depth: 0
 
@@ -64,7 +64,7 @@ jobs:
       - name: Detect changed packages
         id: changed
         run: |
-          CHANGED_PACKAGES=$(git diff --name-only origin/main...HEAD | awk -F/ '/^(apps|packages)\\// {print $1 "/" $2}' | sort -u | tr '\n' ' ' | xargs)
+          CHANGED_PACKAGES=$(git diff --name-only origin/main...HEAD | awk -F/ '/^(apps|packages)\// {print $1 "/" $2}' | sort -u | tr '\n' ' ' | xargs)
           echo "packages=${CHANGED_PACKAGES}" >> "$GITHUB_OUTPUT"
 
       - name: Typecheck
@@ -81,7 +81,6 @@ jobs:
     runs-on: ubuntu-latest
     env:
       DATABASE_URL: postgresql://sdp:sdp@127.0.0.1:5432/sdp
-      REDIS_URL: redis://127.0.0.1:6379
     services:
       postgres:
         image: postgres:16-alpine
@@ -96,18 +95,9 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 20
-      redis:
-        image: redis:7-alpine
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 20
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v6.0.2
         with:
           fetch-depth: 0
 
@@ -143,18 +133,15 @@ jobs:
           DOPPLER_CONFIG: dev_ci
         run: pnpm test
 
-      - name: Node-runtime tests (Redis-backed KVStore)
-        env:
-          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
-          DOPPLER_CONFIG: dev_ci
-        run: pnpm --filter @sdp/api test:node
+      - name: Scripts tests
+        run: pnpm test:scripts
 
   build_api:
     name: Build API
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v6.0.2
         with:
           fetch-depth: 0
 
@@ -178,15 +165,16 @@ jobs:
   docker_build_api:
     name: Docker Build API
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v6.0.2
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
 
       - name: Build sdp-api image (no push)
-        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
         with:
           context: .
           file: apps/sdp-api/Dockerfile
@@ -203,15 +191,16 @@ jobs:
   docker_build_docs:
     name: Docker Build Docs
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v6.0.2
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
 
       - name: Build sdp-docs image (no push)
-        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
         with:
           context: .
           file: apps/sdp-docs/Dockerfile
@@ -225,6 +214,34 @@ jobs:
           cache-from: type=gha,scope=sdp-docs
           cache-to: type=gha,scope=sdp-docs,mode=max
 
+  docker_build_web:
+    name: Docker Build Web
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+
+      - name: Build sdp-web image (no push)
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        with:
+          context: .
+          file: apps/sdp-web/Dockerfile
+          push: false
+          load: false
+          provenance: false
+          sbom: false
+          tags: sdp-web:ci-${{ github.sha }}
+          build-args: |
+            GIT_SHA=${{ github.sha }}
+            NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_c21va2UubG9jYWwuY2xlcmsuZGV2JA
+            NEXT_PUBLIC_SDP_API_BASE_URL=http://localhost:8787
+          cache-from: type=gha,scope=sdp-web
+          cache-to: type=gha,scope=sdp-web,mode=max
+
   docker_compose_smoke:
     name: Docker Compose Smoke
     runs-on: ubuntu-latest
@@ -234,10 +251,10 @@ jobs:
       CLERK_SECRET_KEY: sk_test_dummy_smoke_for_ci_only
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v6.0.2
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
 
       - name: Build compose stack
         run: docker compose build
@@ -260,7 +277,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v6.0.2
         with:
           fetch-depth: 0
 
@@ -278,6 +295,12 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
+      - name: Env configurator drift check
+        run: node scripts/check-env-configurator-drift.mjs
+
+      - name: Configurator unit tests
+        run: pnpm --filter @sdp/env-config test
+
       - name: Build docs
         run: pnpm --filter sdp-docs build
 
@@ -286,7 +309,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v6.0.2
         with:
           fetch-depth: 0
 
@@ -357,7 +380,7 @@ jobs:
           --health-retries 20
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v6.0.2
         with:
           fetch-depth: 0
 
@@ -467,7 +490,7 @@ jobs:
           --health-retries 20
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v6.0.2
         with:
           fetch-depth: 0
 

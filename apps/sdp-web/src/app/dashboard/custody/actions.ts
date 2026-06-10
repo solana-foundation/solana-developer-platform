@@ -126,7 +126,8 @@ async function initializeCustodyWallet(formData: FormData) {
     | "para"
     | "turnkey"
     | "dfns"
-    | "anchorage";
+    | "anchorage"
+    | "utila";
   const walletLabel = getOptionalString(formData, "walletLabel");
   const network = getOptionalString(formData, "network");
   const walletAddress = getOptionalString(formData, "walletAddress");
@@ -201,6 +202,7 @@ async function createCustodyWalletForProvider(formData: FormData) {
     | "turnkey"
     | "dfns"
     | "anchorage"
+    | "utila"
     | undefined;
   const label = getOptionalString(formData, "label");
 
@@ -210,7 +212,7 @@ async function createCustodyWalletForProvider(formData: FormData) {
   });
 }
 
-export type WalletProvisionActionResult =
+export type WalletSetupActionResult =
   | {
       status: "success";
     }
@@ -219,9 +221,9 @@ export type WalletProvisionActionResult =
       message: string;
     };
 
-export async function initializeCustodyModalAction(
+export async function initializeCustodySetupAction(
   formData: FormData
-): Promise<WalletProvisionActionResult> {
+): Promise<WalletSetupActionResult> {
   try {
     await initializeCustodyWallet(formData);
     revalidateWalletPaths();
@@ -234,9 +236,9 @@ export async function initializeCustodyModalAction(
   }
 }
 
-export async function createCustodyWalletModalAction(
+export async function createCustodySetupWalletAction(
   formData: FormData
-): Promise<WalletProvisionActionResult> {
+): Promise<WalletSetupActionResult> {
   try {
     await createCustodyWalletForProvider(formData);
     revalidateWalletPaths();
@@ -372,7 +374,6 @@ export async function checkWalletSignerMemoAction(
       body: JSON.stringify({
         name: keyName,
         role: "api_developer",
-        environment: "sandbox",
         walletScope: "selected",
         signingWalletId: resolvedWalletId,
         signingWalletIds: [resolvedWalletId],

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createApp } from "@/app";
+import { createApp, type SdpPlugin } from "@/app";
 import type { MonitorOptions, Observability, ObservabilityScope } from "@/runtime/observability";
 import { env as baseEnv } from "@/test/helpers/env";
 import type { Env } from "@/types/env";
@@ -39,6 +39,43 @@ function buildApp(observability: Observability) {
   });
   return app;
 }
+
+describe("createApp plugin registration", () => {
+  it("registers plugin routes under /v1", async () => {
+    const { obs } = makeObservability();
+    const plugin: SdpPlugin = {
+      name: "test-plugin",
+      register(v1) {
+        v1.get("/test-plugin", (c) => c.json({ ok: true }));
+      },
+    };
+    const app = createApp({ observability: obs, plugins: [plugin] });
+
+    const res = await app.request("/v1/test-plugin", {}, baseEnv);
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean };
+    expect(body.ok).toBe(true);
+  });
+
+  it("returns 404 for an unregistered route when no plugins are passed", async () => {
+    const { obs } = makeObservability();
+    const app = createApp({ observability: obs });
+
+    const res = await app.request("/v1/test-plugin", {}, baseEnv);
+
+    expect(res.status).toBe(404);
+  });
+
+  it("throws when two plugins share the same name", () => {
+    const { obs } = makeObservability();
+    const make = (name: string): SdpPlugin => ({ name, register: () => {} });
+
+    expect(() => createApp({ observability: obs, plugins: [make("dup"), make("dup")] })).toThrow(
+      /dup/
+    );
+  });
+});
 
 describe("createApp onError SENTRY_DSN guard", () => {
   beforeEach(() => {

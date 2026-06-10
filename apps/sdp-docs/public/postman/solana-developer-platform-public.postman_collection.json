@@ -77,7 +77,7 @@
             "description": "Creates a new API key. The full key is returned once.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Primary Key\",\n  \"description\": \"Used by backend service.\",\n  \"role\": \"api_developer\",\n  \"permissions\": [\n    \"tokens:read\",\n    \"tokens:write\"\n  ],\n  \"environment\": \"sandbox\",\n  \"walletScope\": \"selected\",\n  \"allowedIps\": [\n    \"203.0.113.0/24\"\n  ],\n  \"expiresAt\": \"2025-12-31T00:00:00.000Z\",\n  \"signingWalletId\": \"privy_wallet_123\",\n  \"signingWalletIds\": [\n    \"privy_wallet_123\",\n    \"dfns_wallet_456\"\n  ],\n  \"walletBindings\": [\n    {\n      \"walletId\": \"\",\n      \"permissions\": [\n        \"tokens:read\"\n      ]\n    }\n  ],\n  \"provisionWallet\": false,\n  \"walletLabel\": \"Mint authority wallet\",\n  \"walletPurpose\": \"mint_authority\"\n}",
+              "raw": "{\n  \"name\": \"Primary Key\",\n  \"description\": \"Used by backend service.\",\n  \"role\": \"api_developer\",\n  \"permissions\": [\n    \"tokens:read\",\n    \"tokens:write\"\n  ],\n  \"walletScope\": \"selected\",\n  \"allowedIps\": [\n    \"203.0.113.0/24\"\n  ],\n  \"expiresAt\": \"2025-12-31T00:00:00.000Z\",\n  \"signingWalletId\": \"privy_wallet_123\",\n  \"signingWalletIds\": [\n    \"privy_wallet_123\",\n    \"dfns_wallet_456\"\n  ],\n  \"walletBindings\": [\n    {\n      \"walletId\": \"\",\n      \"permissions\": [\n        \"tokens:read\"\n      ]\n    }\n  ],\n  \"provisionWallet\": false,\n  \"walletLabel\": \"Mint authority wallet\",\n  \"walletPurpose\": \"mint_authority\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -187,7 +187,7 @@
             "description": "Initializes wallet signing for the organization or project by creating an active signing configuration.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"provider\": \"local\",\n  \"projectId\": \"\",\n  \"walletLabel\": \"\"\n}",
+              "raw": "{\n  \"provider\": \"local\",\n  \"walletLabel\": \"\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -211,7 +211,7 @@
             "description": "Ensures the target provider is active and sets it as the default signing provider for the requested scope. Existing on-chain authorities are not rotated.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"provider\": \"local\",\n  \"projectId\": \"\",\n  \"walletLabel\": \"\"\n}",
+              "raw": "{\n  \"provider\": \"local\",\n  \"walletLabel\": \"\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -226,7 +226,7 @@
             "method": "GET",
             "header": [],
             "url": "{{baseUrl}}/v1/wallets",
-            "description": "Lists wallets for the resolved default signing provider by default. Use provider/includeAllProviders to query across active providers."
+            "description": "Lists wallets across all active providers for the requested scope. Use provider to filter to a specific provider."
           }
         },
         {
@@ -244,7 +244,7 @@
             "description": "Provisions a new wallet for the resolved default signing provider configuration, or for an explicitly targeted provider.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"projectId\": \"prj_example\",\n  \"provider\": \"privy\",\n  \"label\": \"Mint authority wallet\",\n  \"purpose\": \"mint_authority\",\n  \"setDefault\": true\n}",
+              "raw": "{\n  \"provider\": \"privy\",\n  \"label\": \"Mint authority wallet\",\n  \"purpose\": \"mint_authority\",\n  \"setDefault\": true\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -268,7 +268,7 @@
             "description": "Deletes a wallet from the resolved default signing provider configuration, or from an explicitly targeted provider when that provider supports wallet deletion.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"projectId\": \"prj_example\",\n  \"provider\": \"anchorage\",\n  \"walletId\": \"anchorage_wallet_123\"\n}",
+              "raw": "{\n  \"provider\": \"anchorage\",\n  \"walletId\": \"anchorage_wallet_123\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -292,7 +292,7 @@
             "description": "Sets the default wallet for the resolved default provider config, or for an explicitly targeted provider.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"projectId\": \"prj_example\",\n  \"provider\": \"privy\",\n  \"walletId\": \"privy_wallet_123\"\n}",
+              "raw": "{\n  \"provider\": \"privy\",\n  \"walletId\": \"privy_wallet_123\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -465,7 +465,7 @@
             "description": "Updates project attributes.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Payments Updated\",\n  \"description\": \"Updated project description.\",\n  \"environment\": \"production\",\n  \"settings\": {\n    \"rpcProvider\": \"custom\",\n    \"rpcEndpoint\": \"https://rpc.example.com\"\n  }\n}",
+              "raw": "{\n  \"name\": \"Payments Updated\",\n  \"description\": \"Updated project description.\",\n  \"settings\": {\n    \"rpcProvider\": \"custom\",\n    \"rpcEndpoint\": \"https://rpc.example.com\"\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -573,7 +573,7 @@
             "description": "Creates an API key scoped to the project. The full key is returned once.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Primary Key\",\n  \"description\": \"Used by backend service.\",\n  \"role\": \"api_developer\",\n  \"permissions\": [\n    \"tokens:read\",\n    \"tokens:write\"\n  ],\n  \"environment\": \"sandbox\",\n  \"walletScope\": \"selected\",\n  \"allowedIps\": [\n    \"203.0.113.0/24\"\n  ],\n  \"expiresAt\": \"2025-12-31T00:00:00.000Z\",\n  \"signingWalletId\": \"privy_wallet_123\",\n  \"signingWalletIds\": [\n    \"privy_wallet_123\",\n    \"dfns_wallet_456\"\n  ],\n  \"walletBindings\": [\n    {\n      \"walletId\": \"\",\n      \"permissions\": [\n        \"tokens:read\"\n      ]\n    }\n  ],\n  \"provisionWallet\": false,\n  \"walletLabel\": \"Mint authority wallet\",\n  \"walletPurpose\": \"mint_authority\"\n}",
+              "raw": "{\n  \"name\": \"Primary Key\",\n  \"description\": \"Used by backend service.\",\n  \"role\": \"api_developer\",\n  \"permissions\": [\n    \"tokens:read\",\n    \"tokens:write\"\n  ],\n  \"walletScope\": \"selected\",\n  \"allowedIps\": [\n    \"203.0.113.0/24\"\n  ],\n  \"expiresAt\": \"2025-12-31T00:00:00.000Z\",\n  \"signingWalletId\": \"privy_wallet_123\",\n  \"signingWalletIds\": [\n    \"privy_wallet_123\",\n    \"dfns_wallet_456\"\n  ],\n  \"walletBindings\": [\n    {\n      \"walletId\": \"\",\n      \"permissions\": [\n        \"tokens:read\"\n      ]\n    }\n  ],\n  \"provisionWallet\": false,\n  \"walletLabel\": \"Mint authority wallet\",\n  \"walletPurpose\": \"mint_authority\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1141,7 +1141,7 @@
             "description": "Updates payment policy rules for a custody wallet. Wallet provisioning and default selection remain in /v1/wallets.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"destinationAllowlist\": [\n    \"\"\n  ],\n  \"maxTransferAmount\": \"100.00\",\n  \"maxDailyAmount\": \"1000.00\"\n}",
+              "raw": "{\n  \"destinationAllowlist\": [\n    \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\"\n  ],\n  \"maxTransferAmount\": \"100.00\",\n  \"maxDailyAmount\": \"1000.00\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1162,10 +1162,10 @@
               }
             ],
             "url": "{{baseUrl}}/v1/payments/transfers/prepare",
-            "description": "Builds an unsigned transfer transaction for a custody wallet. The source walletId must reference a wallet from /v1/wallets.",
+            "description": "Builds an unsigned transfer transaction for a custody wallet. The source walletId must reference a wallet from /v1/wallets. Private-transfer requests are provider-built here and returned for client review and signing.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"projectId\": \"prj_example\",\n  \"source\": \"wal_example\",\n  \"destination\": \"So11111111111111111111111111111111111111112\",\n  \"token\": \"USDC\",\n  \"amount\": \"100.00\",\n  \"memo\": \"\",\n  \"referenceAddress\": \"So11111111111111111111111111111111111111112\",\n  \"options\": {\n    \"priorityFee\": \"auto\",\n    \"simulate\": true\n  }\n}",
+              "raw": "{\n  \"projectId\": \"prj_example\",\n  \"source\": \"wal_example\",\n  \"destination\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"100.00\",\n  \"memo\": \"\",\n  \"privateTransfer\": {\n    \"provider\": \"magicblock\",\n    \"magicBlock\": {\n      \"initIfMissing\": true,\n      \"initAtasIfMissing\": true,\n      \"maxDelayMs\": \"1000\"\n    }\n  },\n  \"referenceAddress\": \"RefY2HwGmCKvJsXJzhRkc7m9D4N6pQ5tT3aB8fE1uV2W\",\n  \"options\": {\n    \"priorityFee\": \"auto\"\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1195,10 +1195,10 @@
               }
             ],
             "url": "{{baseUrl}}/v1/payments/transfers",
-            "description": "Executes a transfer using server-side custody signing. The source walletId must reference a wallet from /v1/wallets.",
+            "description": "Executes a transfer using server-side custody signing. The source walletId must reference a wallet from /v1/wallets. Private-transfer requests are provider-built, signed by SDP-controlled wallets when required, and submitted on the configured Solana cluster.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"projectId\": \"prj_example\",\n  \"source\": \"wal_example\",\n  \"destination\": \"So11111111111111111111111111111111111111112\",\n  \"token\": \"USDC\",\n  \"amount\": \"100.00\",\n  \"memo\": \"\"\n}",
+              "raw": "{\n  \"projectId\": \"prj_example\",\n  \"source\": \"wal_example\",\n  \"destination\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"100.00\",\n  \"memo\": \"\",\n  \"privateTransfer\": {\n    \"provider\": \"magicblock\",\n    \"magicBlock\": {\n      \"initIfMissing\": true,\n      \"initAtasIfMissing\": true,\n      \"maxDelayMs\": \"1000\"\n    }\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1217,6 +1217,375 @@
           }
         },
         {
+          "name": "List recurring payments",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/payments/recurring-payments",
+            "description": "Lists SDP-custody outbound recurring payments for the authenticated organization or project scope."
+          }
+        },
+        {
+          "name": "Create recurring payment",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/payments/recurring-payments",
+            "description": "Creates an SDP-custody outbound recurring payment intent from a custody wallet to a counterparty crypto-wallet account. This stores backend state only; activation and collection are added by follow-up endpoints.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sourceWalletId\": \"wal_source\",\n  \"counterpartyId\": \"cp_example\",\n  \"counterpartyAccountId\": \"cpa_example\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"25.00\",\n  \"periodHours\": 720,\n  \"firstCollectionAt\": \"2099-01-01T00:00:00.000Z\",\n  \"metadataUri\": \"https://example.com/subscriptions/monthly-usdc.json\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Get recurring payment",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/payments/recurring-payments/{{id}}",
+            "description": "Retrieves an SDP-custody outbound recurring payment record."
+          }
+        },
+        {
+          "name": "List subscription plans",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/payments/subscription-plans",
+            "description": "Lists feature-flagged recurring-payment subscription plans."
+          }
+        },
+        {
+          "name": "Create subscription plan",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/payments/subscription-plans",
+            "description": "Creates a feature-flagged recurring-payment subscription plan record. This stores SDP backend state and Solana subscriptions program identifiers; it does not by itself create the on-chain plan.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ownerWalletId\": \"wal_merchant\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"25.00\",\n  \"periodHours\": 720,\n  \"programPlanId\": \"17014118346046923173\",\n  \"planPda\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\",\n  \"destinationAddress\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\",\n  \"pullerWalletId\": \"wal_collector\",\n  \"metadataUri\": \"https://example.com/subscriptions/monthly-usdc.json\",\n  \"status\": \"active\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Prepare subscription plan creation",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/payments/subscription-plans/{{planId}}/prepare-create",
+            "description": "Prepares an unsigned Solana subscriptions program create-plan transaction from an SDP subscription plan. This derives and stores the plan PDA but does not submit the transaction.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"destinations\": [\n    \"\"\n  ],\n  \"pullers\": [\n    \"\"\n  ],\n  \"endTs\": \"1770000000\",\n  \"metadataUri\": \"https://example.com/subscriptions/monthly-usdc.json\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Get subscription plan",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/payments/subscription-plans/{{planId}}",
+            "description": "Retrieves a recurring-payment subscription plan record."
+          }
+        },
+        {
+          "name": "Update subscription plan",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/payments/subscription-plans/{{planId}}",
+            "description": "Updates mutable subscription plan fields and on-chain identifiers.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"planPda\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\",\n  \"destinationAddress\": \"\",\n  \"pullerWalletId\": \"wal_collector\",\n  \"metadataUri\": \"https://example.com\",\n  \"status\": \"active\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "List subscriptions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/payments/subscriptions",
+            "description": "Lists recurring-payment subscriptions."
+          }
+        },
+        {
+          "name": "Create subscription",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/payments/subscriptions",
+            "description": "Creates a feature-flagged recurring-payment subscription record tied to a counterparty. The customer must still sign the Solana subscription authorization transaction.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"planId\": \"psp_example\",\n  \"counterpartyId\": \"counterparty_example\",\n  \"subscriberAddress\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\",\n  \"subscriberTokenAccount\": \"\",\n  \"subscriptionPda\": \"\",\n  \"subscriptionAuthorityAddress\": \"\",\n  \"authorizationSignature\": \"sig_example\",\n  \"status\": \"active\",\n  \"currentPeriodStartAt\": \"2026-01-01T00:00:00.000Z\",\n  \"nextCollectionDueAt\": \"2026-01-01T00:00:00.000Z\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Prepare subscription authorization",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/payments/subscriptions/{{subscriptionId}}/prepare-authorization",
+            "description": "Prepares the subscriber-signed Solana transaction that initializes the subscription authority and subscribes to the plan. The transaction must still be signed and submitted by the client.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"subscriberTokenAccount\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\",\n  \"expectedPlanCreatedAt\": \"0\",\n  \"expectedSubscriptionAuthorityInitId\": \"0\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Prepare subscription cancellation",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/payments/subscriptions/{{subscriptionId}}/prepare-cancel",
+            "description": "Prepares the subscriber-signed Solana transaction that cancels a subscription. The transaction must still be signed and submitted by the client.",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Prepare subscription resume",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/payments/subscriptions/{{subscriptionId}}/prepare-resume",
+            "description": "Prepares the subscriber-signed Solana transaction that resumes a canceled subscription before revocation. The transaction must still be signed and submitted by the client.",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Prepare subscription collection",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/payments/subscriptions/{{subscriptionId}}/prepare-collection",
+            "description": "Prepares the collector-signed Solana subscriptions transfer transaction for an active subscription. The transaction must still be signed and submitted by the collector/fee-payer flow.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": \"25.00\",\n  \"receiverTokenAccount\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Get subscription",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/payments/subscriptions/{{subscriptionId}}",
+            "description": "Retrieves a recurring-payment subscription record."
+          }
+        },
+        {
+          "name": "Update subscription",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/payments/subscriptions/{{subscriptionId}}",
+            "description": "Updates mutable subscription status and on-chain identifiers.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"subscriberTokenAccount\": \"\",\n  \"subscriptionPda\": \"\",\n  \"subscriptionAuthorityAddress\": \"\",\n  \"authorizationSignature\": \"\",\n  \"status\": \"active\",\n  \"currentPeriodStartAt\": \"2026-01-01T00:00:00.000Z\",\n  \"nextCollectionDueAt\": \"2026-01-01T00:00:00.000Z\",\n  \"cancelAt\": \"2026-01-01T00:00:00.000Z\",\n  \"canceledAt\": \"2026-01-01T00:00:00.000Z\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "List subscription collection attempts",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/payments/subscriptions/{{subscriptionId}}/collection-attempts",
+            "description": "Lists collection attempts for a recurring-payment subscription."
+          }
+        },
+        {
+          "name": "Create subscription collection attempt",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/payments/subscriptions/{{subscriptionId}}/collection-attempts",
+            "description": "Creates a collection-attempt record for a due recurring-payment subscription. Actual Solana settlement is owned by the collection worker/transaction submitter.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": \"\",\n  \"token\": \"\",\n  \"dueAt\": \"2026-01-01T00:00:00.000Z\",\n  \"attemptedAt\": \"2026-01-01T00:00:00.000Z\",\n  \"status\": \"pending\",\n  \"transferId\": \"\",\n  \"signature\": \"\",\n  \"error\": \"\",\n  \"metadata\": {}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "List on-ramp currency support",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/payments/ramps/onramp/currency",
+            "description": "Lists generated fiat-to-crypto on-ramp pairs and the providers that support each pair. Supports optional source, destination rail, and provider filters."
+          }
+        },
+        {
+          "name": "List off-ramp currency support",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/payments/ramps/offramp/currency",
+            "description": "Lists generated crypto-to-fiat off-ramp pairs and the providers that support each pair. Supports optional source rail, destination fiat, and provider filters."
+          }
+        },
+        {
+          "name": "Create on-ramp quote",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/payments/ramps/onramp/quote",
+            "description": "Creates a provider-specific on-ramp quote. Hosted providers return a hosted URL; instruction-based providers return manual funding instructions.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"provider\": \"moonpay\",\n  \"counterpartyId\": \"counterparty_example\",\n  \"destinationWallet\": \"wal_example\",\n  \"cryptoToken\": \"USDC\",\n  \"fiatCurrency\": \"USD\",\n  \"fiatAmount\": \"100.00\",\n  \"redirectUrl\": \"https://example.com/onramp/complete\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
           "name": "Execute on-ramp",
           "request": {
             "method": "POST",
@@ -1231,7 +1600,7 @@
             "description": "Creates a fiat-to-crypto on-ramp session through the selected provider.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"provider\": \"moonpay\",\n  \"destinationWallet\": \"wal_example\",\n  \"cryptoToken\": \"USDC\",\n  \"fiatCurrency\": \"USD\",\n  \"fiatAmount\": \"100.00\",\n  \"kycReference\": \"\",\n  \"redirectUrl\": \"https://example.com\",\n  \"bvnkCompliance\": {\n    \"partyDetails\": [\n      {\n        \"type\": \"individual\"\n      }\n    ]\n  }\n}",
+              "raw": "{\n  \"provider\": \"moonpay\",\n  \"destinationWallet\": \"wal_example\",\n  \"cryptoToken\": \"USDC\",\n  \"fiatCurrency\": \"USD\",\n  \"fiatAmount\": \"100.00\",\n  \"kycReference\": \"\",\n  \"redirectUrl\": \"https://example.com\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1255,7 +1624,31 @@
             "description": "Creates a crypto-to-fiat off-ramp session through the selected provider.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"provider\": \"moonpay\",\n  \"sourceWallet\": \"wal_example\",\n  \"cryptoToken\": \"USDC\",\n  \"fiatCurrency\": \"USD\",\n  \"cryptoAmount\": \"50.00\",\n  \"kycReference\": \"\",\n  \"redirectUrl\": \"https://example.com\",\n  \"bvnkCompliance\": {\n    \"partyDetails\": [\n      {\n        \"type\": \"individual\"\n      }\n    ]\n  }\n}",
+              "raw": "{\n  \"provider\": \"moonpay\",\n  \"sourceWallet\": \"wal_example\",\n  \"cryptoToken\": \"USDC\",\n  \"fiatCurrency\": \"USD\",\n  \"cryptoAmount\": \"50.00\",\n  \"kycReference\": \"\",\n  \"redirectUrl\": \"https://example.com\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Simulate sandbox transfer",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/payments/ramps/sandbox/simulate",
+            "description": "Sandbox-only helper that simulates provider-specific transfer completion flows.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"provider\": \"lightspark\",\n  \"payload\": {\n    \"quoteId\": \"\",\n    \"currencyCode\": \"USD\",\n    \"currencyAmount\": 0\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"

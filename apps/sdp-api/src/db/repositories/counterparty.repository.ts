@@ -1,4 +1,9 @@
-import type { CounterpartyEntityType, CounterpartyIdentity, CounterpartyStatus } from "@sdp/types";
+import type {
+  CounterpartyEntityType,
+  CounterpartyIdentity,
+  CounterpartyProviderData,
+  CounterpartyStatus,
+} from "@sdp/types";
 import type { RepositoryDbClient } from "./base";
 
 export function generateCounterpartyId(): string {
@@ -14,6 +19,7 @@ export interface CounterpartyRow {
   display_name: string;
   email: string;
   identity: CounterpartyIdentity;
+  provider_data: CounterpartyProviderData;
   status: CounterpartyStatus;
   created_by: string | null;
   created_at: string;
@@ -22,32 +28,37 @@ export interface CounterpartyRow {
 
 export interface CreateCounterpartyInput {
   organizationId: string;
-  projectId: string | null;
+  projectId: string;
   externalId: string | null;
   entityType: CounterpartyEntityType;
   displayName: string;
   email: string;
   identity: CounterpartyIdentity;
+  providerData?: CounterpartyProviderData;
   createdBy: string | null;
 }
 
 export interface UpdateCounterpartyInput {
   counterpartyId: string;
   organizationId: string;
+  projectId: string;
   externalId?: string | null;
   entityType?: CounterpartyEntityType;
   displayName?: string;
   email?: string;
   identity?: CounterpartyIdentity;
+  providerData?: CounterpartyProviderData;
 }
 
 export interface ArchiveCounterpartyInput {
   counterpartyId: string;
   organizationId: string;
+  projectId: string;
 }
 
 export interface ListCounterpartiesInput {
   organizationId: string;
+  projectId: string;
   includeArchived?: boolean;
   limit: number;
   offset: number;
@@ -69,10 +80,24 @@ export interface CounterpartiesRepository {
   getCounterpartyById(params: {
     counterpartyId: string;
     organizationId: string;
+    projectId: string;
   }): Promise<CounterpartyRow | null>;
   getCounterpartyByExternalId(params: {
     externalId: string;
     organizationId: string;
+    projectId: string;
   }): Promise<CounterpartyRow | null>;
+  findCounterpartyByBvnkCustomerReference(
+    customerReference: string
+  ): Promise<CounterpartyRow | null>;
+  patchBvnkCustomerByReference(params: {
+    customerReference: string;
+    customer: Record<string, unknown>;
+  }): Promise<void>;
+  patchBvnkWalletByReference(params: {
+    customerReference: string;
+    walletKey: string;
+    wallet: Record<string, unknown>;
+  }): Promise<void>;
   listCounterparties(params: ListCounterpartiesInput): Promise<ListCounterpartiesResult>;
 }

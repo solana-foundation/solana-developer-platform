@@ -3,7 +3,9 @@ import { fileURLToPath } from "node:url";
 import { runPostgresMigrations } from "./lib/run-postgres-migrations.mjs";
 
 const appDir = path.dirname(fileURLToPath(new URL("../package.json", import.meta.url)));
-const migrationsDir = path.join(appDir, "src/db/migrations/postgres");
+// MIGRATIONS_DIR points the bundled image at SQL shipped outside the source tree.
+const migrationsDir =
+  process.env.MIGRATIONS_DIR?.trim() || path.join(appDir, "src/db/migrations/postgres");
 const databaseUrl = process.env.DATABASE_URL?.trim();
 
 if (!databaseUrl) {

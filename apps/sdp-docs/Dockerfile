@@ -18,6 +18,7 @@ COPY pnpm-lock.yaml pnpm-workspace.yaml package.json tsconfig.json ./
 COPY apps/sdp-docs/package.json ./apps/sdp-docs/
 COPY apps/sdp-api/package.json ./apps/sdp-api/
 COPY packages/sdp-types/package.json ./packages/sdp-types/
+COPY packages/sdp-env-config/package.json ./packages/sdp-env-config/
 COPY patches ./patches
 
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
@@ -30,11 +31,13 @@ COPY --from=deps /repo /repo
 COPY apps/sdp-docs ./apps/sdp-docs
 COPY apps/sdp-api ./apps/sdp-api
 COPY packages/sdp-types ./packages/sdp-types
+COPY packages/sdp-env-config ./packages/sdp-env-config
 
-# Baked into the client bundle; defaults live in @sdp/types.
-ARG NEXT_PUBLIC_SDP_WEB_URL
-ARG NEXT_PUBLIC_SDP_DOCS_URL
-ARG NEXT_PUBLIC_SDP_API_URL
+# These are parsed as URLs at build time, so the placeholder defaults are valid
+# URLs whose origin docker/entrypoint.sh swaps for runtime env at container start.
+ARG NEXT_PUBLIC_SDP_WEB_URL=https://__sdp_rt__next_public_sdp_web_url__.invalid
+ARG NEXT_PUBLIC_SDP_DOCS_URL=https://__sdp_rt__next_public_sdp_docs_url__.invalid
+ARG NEXT_PUBLIC_SDP_API_URL=https://__sdp_rt__next_public_sdp_api_url__.invalid
 ENV NEXT_PUBLIC_SDP_WEB_URL=$NEXT_PUBLIC_SDP_WEB_URL \
     NEXT_PUBLIC_SDP_DOCS_URL=$NEXT_PUBLIC_SDP_DOCS_URL \
     NEXT_PUBLIC_SDP_API_URL=$NEXT_PUBLIC_SDP_API_URL \
@@ -50,6 +53,10 @@ ENV NODE_ENV=production \
     HOSTNAME=0.0.0.0 \
     NEXT_TELEMETRY_DISABLED=1
 
+# Apply OS-level security patches not yet in the pinned base image.
+# This layer is cached — rebuild with --no-cache to pick up new fixes.
+RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/*
+
 RUN groupadd --system --gid 1001 nodejs \
  && useradd --system --uid 1001 --gid nodejs nextjs
 
@@ -57,6 +64,11 @@ RUN groupadd --system --gid 1001 nodejs \
 COPY --from=builder --chown=nextjs:nodejs /repo/apps/sdp-docs/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /repo/apps/sdp-docs/.next/static ./apps/sdp-docs/.next/static
 COPY --from=builder --chown=nextjs:nodejs /repo/apps/sdp-docs/public ./apps/sdp-docs/public
+
+# public/ also holds generated files (llms.txt) that embed these URLs.
+ENV SDP_INJECT_DIRS="/app/apps/sdp-docs/.next /app/apps/sdp-docs/public"
+COPY --chmod=0755 apps/sdp-docs/docker/entrypoint.sh /app/entrypoint.sh
+COPY apps/sdp-docs/docker/inject-public-env.mjs /app/inject-public-env.mjs
 
 ARG GIT_SHA=""
 ARG IMAGE_SOURCE="https://github.com/solana-foundation/solana-developer-platform"
@@ -74,4 +86,5 @@ EXPOSE 3001
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
     CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3001)+'/').then(r=>process.exit(r.status<500?0:1)).catch(()=>process.exit(1))"
 
+ENTRYPOINT ["/app/entrypoint.sh"]
 CMD ["node", "apps/sdp-docs/server.js"]

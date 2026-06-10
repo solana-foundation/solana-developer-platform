@@ -79,10 +79,22 @@ const PROCESS_ENV_FALLBACK_KEYS = [
   "DFNS_WALLET_ID",
   "ANCHORAGE_API_KEY",
   "ANCHORAGE_API_BASE_URL",
+  "UTILA_SERVICE_ACCOUNT_EMAIL",
+  "UTILA_SERVICE_ACCOUNT_PRIVATE_KEY",
+  "UTILA_VAULT_ID",
+  "UTILA_WALLET_ID",
+  "UTILA_NETWORK",
+  "UTILA_API_BASE_URL",
+  "UTILA_POLL_INTERVAL_MS",
+  "UTILA_MAX_POLL_ATTEMPTS",
+  "UTILA_DESIGNATED_SIGNERS",
   "FEE_PAYMENT_PROVIDER",
   "KORA_RPC_URL",
   "KORA_API_KEY",
   "KORA_TIMEOUT_MS",
+  "MAGICBLOCK_PRIVATE_PAYMENTS_API_BASE_URL",
+  "MAGICBLOCK_PRIVATE_PAYMENTS_AUTH_TOKEN",
+  "PAYMENTS_RECURRING_ENABLED",
   "MOONPAY_API_KEY",
   "MOONPAY_SECRET_KEY",
   "MOONPAY_ONRAMP_URL",
@@ -100,13 +112,25 @@ const PROCESS_ENV_FALLBACK_KEYS = [
   "LIGHTSPARK_GRID_CLIENT_ID",
   "LIGHTSPARK_GRID_CLIENT_SECRET",
   "LIGHTSPARK_GRID_API_BASE_URL",
-  "BVNK_API_TOKEN",
   "BVNK_HAWK_AUTH_ID",
   "BVNK_HAWK_SECRET_KEY",
   "BVNK_WALLET_ID",
+  "BVNK_WEBHOOK_SECRET",
   "BVNK_API_BASE_URL",
+  "BVNK_SANDBOX_HAWK_AUTH_ID",
+  "BVNK_SANDBOX_HAWK_SECRET_KEY",
+  "BVNK_SANDBOX_WALLET_ID",
+  "BVNK_SANDBOX_WEBHOOK_SECRET",
   "DISABLE_CRON",
 ] as const satisfies readonly (keyof Env)[];
+
+const fallbackKeys = new Set<string>(PROCESS_ENV_FALLBACK_KEYS);
+
+export function registerFallbackKeys(...keys: string[]): void {
+  for (const key of keys) {
+    fallbackKeys.add(key);
+  }
+}
 
 export type SdpDeploymentMode = "managed" | "self_hosted";
 
@@ -178,9 +202,10 @@ export function withProcessEnvFallback(bindings: Env): Env {
   }
 
   let merged: Env | null = null;
+  const source = bindings as unknown as Record<string, unknown>;
 
-  for (const key of PROCESS_ENV_FALLBACK_KEYS) {
-    if (bindings[key] !== undefined) {
+  for (const key of fallbackKeys) {
+    if (source[key] !== undefined) {
       continue;
     }
 

@@ -24,7 +24,7 @@ const KV_TTL_SECONDS = 3600; // 1 hour cache
 interface ApiKeyContext {
   id: string;
   organizationId: string;
-  projectId: string | null;
+  projectId: string;
   role: ApiKeyRole;
   permissions: Permission[];
   environment: ApiKeyEnvironment;
@@ -93,16 +93,18 @@ async function getFromDatabaseAndCache(
 ): Promise<CachedApiKey | null> {
   const result = await db
     .prepare(
-      `SELECT id, organization_id, project_id, role, permissions, environment,
-              rate_limit_tier, allowed_ips, signing_wallet_id, status, expires_at
-       FROM api_keys
-       WHERE key_hash = ?`
+      `SELECT ak.id, ak.organization_id, ak.project_id, ak.role, ak.permissions,
+              p.environment,
+              ak.rate_limit_tier, ak.allowed_ips, ak.signing_wallet_id, ak.status, ak.expires_at
+       FROM api_keys ak
+       JOIN projects p ON p.id = ak.project_id
+       WHERE ak.key_hash = ?`
     )
     .bind(keyHash)
     .first<{
       id: string;
       organization_id: string;
-      project_id: string | null;
+      project_id: string;
       role: ApiKeyRole;
       permissions: string | null;
       environment: string;

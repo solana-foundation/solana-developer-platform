@@ -12,12 +12,46 @@ type ClerkOrganizationRecord = {
   private_metadata?: unknown;
 };
 
+const CLERK_TRANSIENT_RETRY_DELAYS_MS = [1_000, 2_000, 5_000, 10_000, 20_000];
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object") {
     return null;
   }
 
   return value as Record<string, unknown>;
+}
+
+function isRetryableClerkError(error: unknown): boolean {
+  const record = asRecord(error);
+  const status = record?.status ?? record?.statusCode;
+  const message = error instanceof Error ? error.message : String(error);
+
+  return (typeof status === "number" && status >= 500) || message.includes("Internal Server Error");
+}
+
+async function wait(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function withTransientClerkRetry<T>(operation: () => Promise<T>): Promise<T> {
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt <= CLERK_TRANSIENT_RETRY_DELAYS_MS.length; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error;
+
+      if (!isRetryableClerkError(error) || attempt === CLERK_TRANSIENT_RETRY_DELAYS_MS.length) {
+        throw error;
+      }
+
+      await wait(CLERK_TRANSIENT_RETRY_DELAYS_MS[attempt]);
+    }
+  }
+
+  throw lastError;
 }
 
 async function requestClerk<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -46,10 +80,12 @@ async function resolveOrganizationId(
     return env.clerkOrgId;
   }
 
-  const organizations = await client.organizations.getOrganizationList({
-    query: env.clerkOrgName,
-    limit: 10,
-  });
+  const organizations = await withTransientClerkRetry(() =>
+    client.organizations.getOrganizationList({
+      query: env.clerkOrgName,
+      limit: 10,
+    })
+  );
 
   const organization = organizations.data.find(
     (entry) => entry.name === env.clerkOrgName || entry.slug === env.clerkOrgName
@@ -66,7 +102,7 @@ async function resolveUserEmail(
   client: ReturnType<typeof createClerkClient>,
   userId: string
 ): Promise<string | null> {
-  const user = await client.users.getUser(userId);
+  const user = await withTransientClerkRetry(() => client.users.getUser(userId));
   const primaryEmail =
     user.emailAddresses.find((entry) => entry.id === user.primaryEmailAddressId)?.emailAddress ??
     user.emailAddresses[0]?.emailAddress;
@@ -78,11 +114,13 @@ async function resolveExistingAdminIdentity(
   client: ReturnType<typeof createClerkClient>,
   organizationId: string
 ): Promise<ClerkTestIdentity> {
-  const memberships = await client.organizations.getOrganizationMembershipList({
-    organizationId,
-    role: ["org:admin"],
-    limit: 10,
-  });
+  const memberships = await withTransientClerkRetry(() =>
+    client.organizations.getOrganizationMembershipList({
+      organizationId,
+      role: ["org:admin"],
+      limit: 10,
+    })
+  );
 
   for (const membership of memberships.data) {
     const userId = membership.publicUserData?.userId;
@@ -110,43 +148,53 @@ export async function ensureClerkAdminUser(): Promise<ClerkTestIdentity> {
   const client = createClerkClient({ secretKey: env.clerkSecretKey });
   const organizationId = await resolveOrganizationId(client, env);
 
-  const users = await client.users.getUserList({
-    emailAddress: [env.clerkTestEmail],
-    limit: 1,
-  });
+  const users = await withTransientClerkRetry(() =>
+    client.users.getUserList({
+      emailAddress: [env.clerkTestEmail],
+      limit: 1,
+    })
+  );
 
   const existingUser = users.data[0];
   const user =
     existingUser ??
-    (await client.users.createUser({
-      emailAddress: [env.clerkTestEmail],
-      firstName: "SDP",
-      lastName: "E2E Admin",
-      skipLegalChecks: true,
-      skipPasswordRequirement: true,
-    }));
+    (await withTransientClerkRetry(() =>
+      client.users.createUser({
+        emailAddress: [env.clerkTestEmail],
+        firstName: "SDP",
+        lastName: "E2E Admin",
+        skipLegalChecks: true,
+        skipPasswordRequirement: true,
+      })
+    ));
 
-  const memberships = await client.organizations.getOrganizationMembershipList({
-    organizationId,
-    userId: [user.id],
-    limit: 1,
-  });
+  const memberships = await withTransientClerkRetry(() =>
+    client.organizations.getOrganizationMembershipList({
+      organizationId,
+      userId: [user.id],
+      limit: 1,
+    })
+  );
 
   const membership = memberships.data[0];
 
   try {
     if (!membership) {
-      await client.organizations.createOrganizationMembership({
-        organizationId,
-        userId: user.id,
-        role: "org:admin",
-      });
+      await withTransientClerkRetry(() =>
+        client.organizations.createOrganizationMembership({
+          organizationId,
+          userId: user.id,
+          role: "org:admin",
+        })
+      );
     } else if (membership.role !== "org:admin") {
-      await client.organizations.updateOrganizationMembership({
-        organizationId,
-        userId: user.id,
-        role: "org:admin",
-      });
+      await withTransientClerkRetry(() =>
+        client.organizations.updateOrganizationMembership({
+          organizationId,
+          userId: user.id,
+          role: "org:admin",
+        })
+      );
     }
   } catch {
     return resolveExistingAdminIdentity(client, organizationId);

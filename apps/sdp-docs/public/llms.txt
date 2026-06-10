@@ -18,8 +18,7 @@
 - Compliance screening
 
 ## Start here
-- [What is Solana Developer Platform?](https://platform.solana.com/docs/what-is-solana-developer-platform): A dashboard and API for issuing, transferring, and managing Solana tokens with built-in compliance controls.
-- [Getting Started](https://platform.solana.com/docs/getting-started): Get up and running with SDP through the dashboard.
+- [Introduction](https://platform.solana.com/docs/introduction): What SDP is, what it provides, and how it works.
 - [Set Up Your Organization](https://platform.solana.com/docs/guides/setup-organization): Create and configure your SDP organization through the dashboard.
 - [Set Up Wallets](https://platform.solana.com/docs/guides/setup-wallets): Initialize a custody provider and create wallets for signing transactions.
 - [Manage API Keys](https://platform.solana.com/docs/guides/manage-api-keys): Create, rotate, and revoke API keys with role-based access and environment scoping.
@@ -27,7 +26,8 @@
 - [Create a Token](https://platform.solana.com/docs/guides/create-a-token): Define a new token using templates or custom configuration.
 - [Deploy a Token](https://platform.solana.com/docs/guides/deploy-a-token): Deploy a created token to the Solana blockchain.
 - [Mint and Burn Tokens](https://platform.solana.com/docs/guides/mint-and-burn): Increase or decrease token supply by minting and burning.
-- [Transfer Tokens](https://platform.solana.com/docs/guides/transfer-tokens): Send tokens between accounts using SDP's payment orchestration.
+- [Payments](https://platform.solana.com/docs/payments): Build payments on Solana with SDP — concepts, send, accept, ramps, and wallet operations.
+- [Basic payment](https://platform.solana.com/docs/payments/send-basic-payment): Send a single token transfer with SDP, using either Execute or Prepare mode.
 - [Issuance Token Types](https://platform.solana.com/docs/reference/issuance-token-types): Supported issuance templates and default controls.
 - [End-to-end Payment Flow](https://platform.solana.com/docs/tutorials/end-to-end-payment-flow): A high-level payment flow from quote to settlement.
 - [Infrastructure Provider Onboarding](https://platform.solana.com/docs/reference/provider-onboarding): Add an infrastructure provider integration to SDP through the self-service contribution process.

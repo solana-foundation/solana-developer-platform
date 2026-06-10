@@ -1,9 +1,19 @@
 "use client";
 
 import type {
+  Counterparty,
+  CounterpartyAccount,
+  CryptoRailId,
   CustodyWalletAggregate,
+  ListCounterpartiesResponse,
+  ListCounterpartyAccountsResponse,
+  PaymentRampEstimateEnvelope,
   PaymentRampExecution,
   PaymentsWalletAggregateEnvelope,
+  RampDirection,
+  RampFiatCurrency,
+  RampProviderEstimateResult,
+  RampProviderId,
   PaymentTransferEnvelope as TransferEnvelope,
   PaymentTransferSummary as TransferRecord,
   PaymentWalletPolicy as WalletPolicy,
@@ -154,6 +164,11 @@ function resolveRiskTone(result: ComplianceProviderResult): RiskTone {
   return "neutral";
 }
 
+/** Providers that flagged the address as high risk (red tone). */
+export function getHighRiskProviders(snapshot: ComplianceSnapshot): ComplianceProviderResult[] {
+  return snapshot.providers.filter((result) => resolveRiskTone(result) === "red");
+}
+
 export function riskToneClassName(result: ComplianceProviderResult): string {
   const tone = resolveRiskTone(result);
   if (tone === "green") {
@@ -169,12 +184,15 @@ export function riskToneClassName(result: ComplianceProviderResult): string {
 }
 
 export async function fetchWallets(
-  options: { signal?: AbortSignal } = {}
+  options: { signal?: AbortSignal; includeBalances?: boolean } = {}
 ): Promise<WalletRecord[]> {
   const query = new URLSearchParams({
     view: "summary",
-  }).toString();
-  const response = await fetch(`/api/dashboard/wallets?${query}`, {
+  });
+  if (options.includeBalances) {
+    query.set("includeBalances", "true");
+  }
+  const response = await fetch(`/api/dashboard/wallets?${query.toString()}`, {
     method: "GET",
     cache: "no-store",
     signal: options.signal,
@@ -226,20 +244,7 @@ export async function fetchWalletPolicy(walletId: string): Promise<WalletPolicy>
 }
 
 interface TransferListEnvelope {
-  data?: Array<{
-    id?: string;
-    type?: string;
-    direction?: string;
-    status?: string;
-    signature?: string | null;
-    source?: string;
-    destination?: string;
-    token?: string;
-    amount?: string;
-    memo?: string;
-    createdAt?: string;
-    updatedAt?: string;
-  }>;
+  data?: TransferRecord[];
   error?: {
     message?: string;
   };
@@ -311,40 +316,100 @@ function resolveWalletBalancesSnapshot(
   return null;
 }
 
-export async function fetchTransfers(
-  options: { walletId?: string; signal?: AbortSignal } = {}
-): Promise<TransferRecord[]> {
+export async function fetchTransfers(options: {
+  pageSize: number;
+  walletId?: string;
+  category?: "wallet" | "ramp";
+  signal?: AbortSignal;
+}): Promise<TransferRecord[]> {
   const transfersQuery = new URLSearchParams({
     page: "1",
-    pageSize: "20",
+    pageSize: String(options.pageSize),
     ...(options.walletId ? { wallet: options.walletId } : {}),
+    ...(options.category ? { category: options.category } : {}),
   }).toString();
   const response = await fetch(`/api/dashboard/payments/transfers?${transfersQuery}`, {
     method: "GET",
     cache: "no-store",
     signal: options.signal,
   });
-  const body = (await response.json().catch(() => ({}))) as TransferListEnvelope;
+  const body = (await response.json()) as TransferListEnvelope;
   if (!response.ok) {
     throw new Error(getApiError(body, `Transfer list request failed (${response.status}).`));
   }
 
-  return (body.data ?? [])
-    .filter((transfer): transfer is NonNullable<typeof transfer> => Boolean(transfer?.id))
-    .map((transfer) => ({
-      id: transfer.id ?? "",
-      ...(transfer.type ? { type: transfer.type } : {}),
-      ...(transfer.direction ? { direction: transfer.direction } : {}),
-      status: transfer.status ?? "pending",
-      signature: transfer.signature ?? null,
-      ...(transfer.source ? { source: transfer.source } : {}),
-      ...(transfer.destination ? { destination: transfer.destination } : {}),
-      ...(transfer.token ? { token: transfer.token } : {}),
-      ...(transfer.amount ? { amount: transfer.amount } : {}),
-      ...(transfer.memo ? { memo: transfer.memo } : {}),
-      ...(transfer.createdAt ? { createdAt: transfer.createdAt } : {}),
-      ...(transfer.updatedAt ? { updatedAt: transfer.updatedAt } : {}),
-    }));
+  if (!body.data) {
+    throw new Error("Transfer list response is missing transfer data.");
+  }
+
+  return body.data;
+}
+
+export async function fetchTransferByProviderReference(input: {
+  provider: RampProviderId;
+  providerReference: string;
+  signal?: AbortSignal;
+}): Promise<TransferRecord | null> {
+  const transfersQuery = new URLSearchParams({
+    page: "1",
+    pageSize: "1",
+    category: "ramp",
+    provider: input.provider,
+    providerReference: input.providerReference,
+  }).toString();
+  const response = await fetch(`/api/dashboard/payments/transfers?${transfersQuery}`, {
+    method: "GET",
+    cache: "no-store",
+    signal: input.signal,
+  });
+  const body = (await response.json()) as TransferListEnvelope;
+  if (!response.ok) {
+    throw new Error(getApiError(body, `Transfer lookup failed (${response.status}).`));
+  }
+
+  if (!body.data) {
+    throw new Error("Transfer lookup response is missing transfer data.");
+  }
+  if (body.data.length > 1) {
+    throw new Error("Transfer lookup returned multiple transfers.");
+  }
+  if (body.data.length === 0) {
+    return null;
+  }
+
+  return body.data[0];
+}
+
+export async function fetchRampEstimates(input: {
+  direction: RampDirection;
+  assetRail: CryptoRailId;
+  fiatCurrency: RampFiatCurrency;
+  amount: string;
+  signal?: AbortSignal;
+}): Promise<RampProviderEstimateResult[]> {
+  const amountField = input.direction === "onramp" ? "fiatAmount" : "cryptoAmount";
+  const response = await fetch(`/api/dashboard/payments/ramps/${input.direction}/estimate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    cache: "no-store",
+    signal: input.signal,
+    body: JSON.stringify({
+      assetRail: input.assetRail,
+      fiatCurrency: input.fiatCurrency,
+      [amountField]: input.amount,
+    }),
+  });
+  const body = (await response.json().catch(() => ({}))) as PaymentRampEstimateEnvelope;
+  if (!response.ok) {
+    throw new Error(getApiError(body, `Ramp estimate request failed (${response.status}).`));
+  }
+
+  const estimates = body.data?.estimates;
+  if (!estimates) {
+    throw new Error("Ramp estimate response is missing estimates.");
+  }
+
+  return estimates;
 }
 
 export async function fetchWalletBalances(
@@ -434,6 +499,22 @@ export async function createTransfer(input: {
   return body.data.transfer;
 }
 
+export async function fetchCounterpartyAccounts(
+  counterpartyId: string
+): Promise<CounterpartyAccount[]> {
+  const response = await fetch(
+    `/api/dashboard/counterparty/${encodeURIComponent(counterpartyId)}/accounts?pageSize=100`
+  );
+  const body = (await response.json().catch(() => ({}))) as {
+    data?: ListCounterpartyAccountsResponse;
+    error?: { message?: string };
+  };
+  if (!response.ok) {
+    throw new Error(getApiError(body, `Failed to load accounts (${response.status}).`));
+  }
+  return body.data?.accounts ?? [];
+}
+
 export async function executeRampFlow(
   direction: "onramp" | "offramp",
   payload: Record<string, unknown>
@@ -458,14 +539,25 @@ export async function executeRampFlow(
   return body.data.ramp;
 }
 
-type SandboxTransferSimulationInput = {
-  provider: "lightspark";
-  payload: {
-    quoteId: string;
-    currencyCode?: "USD";
-    currencyAmount?: number;
-  };
-};
+type SandboxTransferSimulationInput =
+  | {
+      provider: "lightspark";
+      payload: {
+        quoteId: string;
+        currencyCode?: "USD";
+        currencyAmount?: number;
+      };
+    }
+  | {
+      provider: "bvnk";
+      payload: {
+        counterpartyId: string;
+        amount: number;
+        fiatCurrency: string;
+        cryptoToken: string;
+        destinationWallet: string;
+      };
+    };
 
 export async function simulateSandboxTransfer(input: SandboxTransferSimulationInput) {
   const response = await fetch("/api/dashboard/payments/ramps/sandbox/simulate", {
@@ -499,4 +591,49 @@ export async function runComplianceCheck(
     checkedAt: result.checkedAt,
     providers: result.providers,
   };
+}
+
+const COUNTERPARTY_PAGE_SIZE = 100;
+const MAX_COUNTERPARTY_PAGES = 50;
+
+export interface CounterpartiesResult {
+  ok: boolean;
+  data: Counterparty[];
+  error?: string;
+}
+
+export async function fetchAllCounterparties(): Promise<CounterpartiesResult> {
+  const counterparties: Counterparty[] = [];
+
+  try {
+    for (let page = 1; page <= MAX_COUNTERPARTY_PAGES; page += 1) {
+      const query = new URLSearchParams({
+        page: String(page),
+        pageSize: String(COUNTERPARTY_PAGE_SIZE),
+      });
+      const response = await fetch(`/api/dashboard/counterparty?${query.toString()}`, {
+        headers: { Accept: "application/json" },
+      });
+      if (!response.ok) {
+        return { ok: false, data: [], error: await response.text() };
+      }
+
+      const json = (await response.json()) as { data?: ListCounterpartiesResponse };
+      const list = json.data;
+      counterparties.push(...(list?.counterparties ?? []));
+
+      const total = list?.total ?? counterparties.length;
+      if (counterparties.length >= total || (list?.counterparties.length ?? 0) === 0) {
+        break;
+      }
+    }
+
+    return { ok: true, data: counterparties };
+  } catch (error) {
+    return {
+      ok: false,
+      data: [],
+      error: error instanceof Error ? error.message : "Unable to load counterparties",
+    };
+  }
 }

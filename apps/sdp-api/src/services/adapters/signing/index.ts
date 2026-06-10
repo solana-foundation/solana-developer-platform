@@ -13,6 +13,7 @@
  * - "para": Para hosted wallets (KeychainParaAdapter)
  * - "turnkey": Turnkey hosted wallets (KeychainTurnkeyAdapter)
  * - "dfns": DFNS hosted wallets (KeychainDfnsAdapter)
+ * - "utila": Utila vault wallets (KeychainUtilaAdapter)
  */
 
 import type { CustodyProvider } from "@/services/custody/providers";
@@ -35,7 +36,9 @@ import {
   type KeychainPrivyConfig,
   KeychainTurnkeyAdapter,
   type KeychainTurnkeyConfig,
+  KeychainUtilaAdapter,
 } from "./keychain";
+import { buildKeychainUtilaConfig } from "./keychain/utila-config";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Types
@@ -85,6 +88,8 @@ export async function createSigningAdapterFromEnv(env: Env): Promise<SigningPort
       return createTurnkeyAdapterFromEnv(env);
     case "dfns":
       return createDfnsAdapterFromEnv(env);
+    case "utila":
+      return createUtilaAdapterFromEnv(env);
     case "local":
       return createMemoryAdapterFromEnv(env);
     case "anchorage":
@@ -136,6 +141,8 @@ export async function createSigningAdapterFromConfig(
       return createTurnkeyAdapterFromRecord(record, env);
     case "dfns":
       return createDfnsAdapterFromRecord(record, env);
+    case "utila":
+      return createUtilaAdapterFromRecord(record, env);
     case "local":
       return createMemoryAdapterFromEnv(env);
     case "anchorage":
@@ -219,6 +226,13 @@ interface DfnsConfigJson {
   provider?: string;
   apiBaseUrl?: string;
   walletId?: string;
+}
+
+interface UtilaConfigJson {
+  provider?: string;
+  apiBaseUrl?: string;
+  vaultId?: string;
+  network?: "networks/solana-mainnet" | "networks/solana-devnet";
 }
 
 function createFireblocksAdapterFromEnv(env: Env): KeychainFireblocksAdapter {
@@ -354,6 +368,16 @@ async function createDfnsAdapterFromEnv(env: Env): Promise<KeychainDfnsAdapter> 
   };
 
   return new KeychainDfnsAdapter(config);
+}
+
+function createUtilaAdapterFromEnv(env: Env): KeychainUtilaAdapter {
+  return new KeychainUtilaAdapter(
+    buildKeychainUtilaConfig(env, {
+      defaultWalletIdFromEnv: true,
+      missingMessage:
+        "Utila environment variables not configured: UTILA_SERVICE_ACCOUNT_EMAIL, UTILA_SERVICE_ACCOUNT_PRIVATE_KEY, UTILA_VAULT_ID",
+    })
+  );
 }
 
 function createFireblocksAdapterFromRecord(record: SigningConfigRecord): KeychainFireblocksAdapter {
@@ -594,6 +618,29 @@ async function createDfnsAdapterFromRecord(
   return new KeychainDfnsAdapter(config);
 }
 
+function createUtilaAdapterFromRecord(record: SigningConfigRecord, env: Env): KeychainUtilaAdapter {
+  let parsed: UtilaConfigJson;
+  try {
+    parsed = JSON.parse(record.config) as UtilaConfigJson;
+  } catch {
+    throw new SigningError("Invalid Utila configuration JSON", "PROVIDER_NOT_CONFIGURED");
+  }
+
+  if (parsed.provider && parsed.provider !== "utila") {
+    throw new SigningError("Custody configuration provider mismatch", "PROVIDER_NOT_CONFIGURED");
+  }
+
+  return new KeychainUtilaAdapter(
+    buildKeychainUtilaConfig(env, {
+      apiBaseUrl: parsed.apiBaseUrl,
+      defaultWalletId: record.defaultWalletId,
+      missingMessage: "Utila config missing service account credentials or vault ID",
+      network: parsed.network,
+      vaultId: parsed.vaultId,
+    })
+  );
+}
+
 function parseOptionalRequestDelayMs(
   value?: string,
   options?: { envVarName?: string }
@@ -636,4 +683,6 @@ export {
   type KeychainPrivyConfig,
   KeychainTurnkeyAdapter,
   type KeychainTurnkeyConfig,
+  KeychainUtilaAdapter,
+  type KeychainUtilaConfig,
 } from "./keychain";

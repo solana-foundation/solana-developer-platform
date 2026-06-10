@@ -1,8 +1,8 @@
 "use client";
 
 import { useAuth } from "@clerk/nextjs";
-import type { SdpEnvironment } from "@sdp/types";
-import { useRouter } from "next/navigation";
+import type { Project, SdpEnvironment } from "@sdp/types";
+import { usePathname, useRouter } from "next/navigation";
 import {
   createContext,
   type ReactNode,
@@ -10,16 +10,21 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
+  useTransition,
 } from "react";
 import { SWRConfig } from "swr";
 import { Button } from "@/components/ui/button";
 import type { DashboardAccess } from "@/lib/dashboard-access";
 import { type DashboardCacheScope, getDashboardCacheScopeKey } from "@/lib/dashboard-cache-scope";
+import type { DashboardFeatureFlags } from "@/lib/dashboard-feature-flags";
 import { DASHBOARD_SWR_CONFIG } from "@/lib/dashboard-swr-config";
 import { useDashboardUrlState } from "@/lib/dashboard-url-state";
+import { reconcileProjectCookieAction, selectProjectAction } from "@/lib/project-cookie-action";
 
 export type IssuanceWorkspaceTab = "tokens" | "playground";
+export type CounterpartyWorkspaceTab = "overview" | "playground";
 
 export interface DashboardPlaygroundApiKeyOption {
   id: string;
@@ -32,17 +37,23 @@ export interface DashboardPlaygroundApiKeyOption {
 type DashboardWorkspaceContextValue = {
   dashboardAccess: DashboardAccess;
   dashboardCacheScope: DashboardCacheScope;
+  featureFlags: DashboardFeatureFlags;
+  projects: Project[];
+  sandboxProject: Project | null;
+  productionProject: Project | null;
+  selectedProjectId: string | null;
   sdpEnvironment: SdpEnvironment;
   isSidebarOpen: boolean;
-  selectedProject: string;
   issuanceTab: IssuanceWorkspaceTab;
+  counterpartyTab: CounterpartyWorkspaceTab;
   playgroundApiKeys: DashboardPlaygroundApiKeyOption[];
   selectedPlaygroundApiKeyId: string | null;
-  setSdpEnvironment: (value: SdpEnvironment) => void;
+  isProjectSwitching: boolean;
+  selectProject: (projectId: string | null) => void;
   setPlaygroundApiKeys: (keys: DashboardPlaygroundApiKeyOption[]) => void;
   setSelectedPlaygroundApiKeyId: (id: string | null) => void;
-  setSelectedProject: (project: string) => void;
   setIssuanceTab: (tab: IssuanceWorkspaceTab) => void;
+  setCounterpartyTab: (tab: CounterpartyWorkspaceTab) => void;
   setSidebarOpen: (open: boolean) => void;
   toggleSidebar: () => void;
 };
@@ -66,16 +77,13 @@ function DashboardScopeRefreshFallback() {
   );
 }
 
-const DASHBOARD_SCOPED_SWR_CONFIG = {
-  ...DASHBOARD_SWR_CONFIG,
-  provider: () => new Map(),
-};
-
 type DashboardWorkspaceProviderProps = {
   children: ReactNode;
   dashboardAccess: DashboardAccess;
   serverDashboardCacheScope: DashboardCacheScope;
-  defaultProject?: string;
+  featureFlags: DashboardFeatureFlags;
+  projects: Project[];
+  initialSelectedProjectId: string | null;
   initialSidebarOpen?: boolean;
 };
 
@@ -83,26 +91,38 @@ export function DashboardWorkspaceProvider({
   children,
   dashboardAccess,
   serverDashboardCacheScope,
-  defaultProject = "Default Project",
+  featureFlags,
+  projects,
+  initialSelectedProjectId,
   initialSidebarOpen = true,
 }: DashboardWorkspaceProviderProps) {
   const auth = useAuth();
   const router = useRouter();
+  const pathname = usePathname();
   const { replaceSearchParams, searchParams } = useDashboardUrlState();
   const [isSidebarOpen, setSidebarOpenState] = useState(initialSidebarOpen);
-  const [sdpEnvironment, setSdpEnvironment] = useState<SdpEnvironment>("sandbox");
-  const [selectedProject, setSelectedProject] = useState(defaultProject);
+  const sandboxProject = useMemo(
+    () => projects.find((project) => project.slug === "default-sandbox") ?? null,
+    [projects]
+  );
+  const productionProject = useMemo(
+    () => projects.find((project) => project.slug === "default-production") ?? null,
+    [projects]
+  );
+
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(
+    sandboxProject?.id ?? null
+  );
+  const sdpEnvironment: SdpEnvironment =
+    selectedProjectId && selectedProjectId === productionProject?.id ? "production" : "sandbox";
   const [playgroundApiKeys, setPlaygroundApiKeysState] = useState<
     DashboardPlaygroundApiKeyOption[]
   >([]);
   const [selectedPlaygroundApiKeyId, setSelectedPlaygroundApiKeyId] = useState<string | null>(null);
   const liveDashboardCacheScope = useMemo<DashboardCacheScope>(
     () =>
-      auth.isLoaded
-        ? {
-            orgId: auth.orgId ?? null,
-            userId: auth.userId ?? null,
-          }
+      auth.isLoaded && auth.orgId && auth.userId
+        ? { orgId: auth.orgId, userId: auth.userId }
         : serverDashboardCacheScope,
     [auth.isLoaded, auth.orgId, auth.userId, serverDashboardCacheScope]
   );
@@ -117,20 +137,85 @@ export function DashboardWorkspaceProvider({
   const dashboardScopeIsFresh = liveDashboardCacheScopeKey === serverDashboardCacheScopeKey;
   const shouldRenderScopeRefreshFallback = auth.isLoaded && !dashboardScopeIsFresh;
   const swrScopeKey = getDashboardCacheScopeKey(liveDashboardCacheScope, {
-    environment: sdpEnvironment,
+    projectId: selectedProjectId,
   });
+
+  const [isProjectSwitching, startProjectSwitchTransition] = useTransition();
+
+  const isProjectSwitchingRef = useRef(false);
+  isProjectSwitchingRef.current = isProjectSwitching;
+
+  const pathnameRef = useRef(pathname);
+  pathnameRef.current = pathname;
+
+  const scopedSwrConfig = useMemo(
+    () => ({
+      ...DASHBOARD_SWR_CONFIG,
+      provider: () => new Map(),
+      isPaused: () => isProjectSwitchingRef.current,
+    }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    []
+  );
+
+  const selectProject = useCallback(
+    (projectId: string | null) => {
+      startProjectSwitchTransition(async () => {
+        await selectProjectAction(projectId);
+        setSelectedProjectId(projectId);
+        router.replace(pathnameRef.current);
+      });
+    },
+    [router]
+  );
+
+  // Persist the in-memory selection to the cookie when:
+  //   - the current selection isn't backed by a known project (stale state), or
+  //   - the server reported no cookie value at mount (first visit / cleared cookie)
+  // Server Components can't write cookies in Next 16, so the layout passes
+  // initialSelectedProjectId=null when the cookie is missing/stale; we persist
+  // it here via the existing selectProjectAction.
+  useEffect(() => {
+    const selectionIsValid =
+      selectedProjectId !== null && projects.some((project) => project.id === selectedProjectId);
+    if (selectionIsValid && initialSelectedProjectId === selectedProjectId) return;
+
+    const target = selectionIsValid ? selectedProjectId : (sandboxProject?.id ?? null);
+    if (target !== selectedProjectId) {
+      selectProject(target);
+    } else if (target !== null) {
+      void selectProjectAction(target);
+    }
+  }, [selectedProjectId, projects, sandboxProject, selectProject, initialSelectedProjectId]);
 
   useEffect(() => {
     if (!auth.isLoaded || liveDashboardCacheScopeKey === serverDashboardCacheScopeKey) {
       return;
     }
 
-    router.refresh();
-  }, [auth.isLoaded, liveDashboardCacheScopeKey, router, serverDashboardCacheScopeKey]);
+    startProjectSwitchTransition(async () => {
+      const ok = await reconcileProjectCookieAction();
+      if (!ok) router.refresh();
+    });
+  }, [auth.isLoaded, liveDashboardCacheScopeKey, serverDashboardCacheScopeKey, router]);
+
+  const previousPathnameRef = useRef(pathname);
+  useEffect(() => {
+    if (previousPathnameRef.current === pathname) return;
+    previousPathnameRef.current = pathname;
+    if (searchParams.has("tab")) {
+      replaceSearchParams({ tab: null });
+    }
+  }, [pathname, searchParams, replaceSearchParams]);
 
   const issuanceTab: IssuanceWorkspaceTab = useMemo(() => {
     const tab = searchParams.get("tab");
     return tab === "playground" ? "playground" : "tokens";
+  }, [searchParams]);
+
+  const counterpartyTab: CounterpartyWorkspaceTab = useMemo(() => {
+    const tab = searchParams.get("tab");
+    return tab === "playground" ? "playground" : "overview";
   }, [searchParams]);
 
   const setSidebarOpen = useCallback((open: boolean) => {
@@ -163,35 +248,58 @@ export function DashboardWorkspaceProvider({
     [replaceSearchParams]
   );
 
+  const setCounterpartyTab = useCallback(
+    (tab: CounterpartyWorkspaceTab) => {
+      replaceSearchParams({
+        tab: tab === "playground" ? "playground" : "overview",
+      });
+    },
+    [replaceSearchParams]
+  );
+
   const value = useMemo<DashboardWorkspaceContextValue>(
     () => ({
       dashboardAccess,
       dashboardCacheScope: liveDashboardCacheScope,
+      featureFlags,
+      projects,
+      sandboxProject,
+      productionProject,
+      selectedProjectId,
       sdpEnvironment,
       isSidebarOpen,
-      selectedProject,
+      isProjectSwitching,
       issuanceTab,
+      counterpartyTab,
       playgroundApiKeys,
       selectedPlaygroundApiKeyId,
-      setSdpEnvironment,
+      selectProject,
       setPlaygroundApiKeys,
       setSelectedPlaygroundApiKeyId,
-      setSelectedProject,
       setIssuanceTab,
+      setCounterpartyTab,
       setSidebarOpen,
       toggleSidebar,
     }),
     [
       dashboardAccess,
       liveDashboardCacheScope,
+      featureFlags,
+      projects,
+      sandboxProject,
+      productionProject,
+      selectedProjectId,
       sdpEnvironment,
       isSidebarOpen,
+      isProjectSwitching,
       playgroundApiKeys,
       issuanceTab,
+      counterpartyTab,
       selectedPlaygroundApiKeyId,
-      selectedProject,
+      selectProject,
       setPlaygroundApiKeys,
       setIssuanceTab,
+      setCounterpartyTab,
       setSidebarOpen,
       toggleSidebar,
     ]
@@ -199,7 +307,7 @@ export function DashboardWorkspaceProvider({
 
   return (
     <DashboardWorkspaceContext.Provider value={value}>
-      <SWRConfig key={swrScopeKey} value={DASHBOARD_SCOPED_SWR_CONFIG}>
+      <SWRConfig key={swrScopeKey} value={scopedSwrConfig}>
         {shouldRenderScopeRefreshFallback ? <DashboardScopeRefreshFallback /> : children}
       </SWRConfig>
     </DashboardWorkspaceContext.Provider>

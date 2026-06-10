@@ -7,7 +7,7 @@ import type { CustodyConfigResponse, CustodyConfigsResponse } from "../schemas";
 
 export const getConfig = async (c: AppContext) => {
   const actor = resolveActor(c);
-  const projectId = c.req.query("projectId");
+  const projectId = c.get("projectId");
 
   const signingService = createSigningService(c.env);
   const config = await signingService.getConfiguration(actor.organizationId, projectId);
@@ -39,7 +39,7 @@ export const getConfig = async (c: AppContext) => {
 
 export const getConfigs = async (c: AppContext) => {
   const actor = resolveActor(c);
-  const projectId = c.req.query("projectId") ?? undefined;
+  const projectId = c.get("projectId");
   const signingService = createSigningService(c.env);
   const { configs, defaultConfigId } = await signingService.getConfigurations(
     actor.organizationId,

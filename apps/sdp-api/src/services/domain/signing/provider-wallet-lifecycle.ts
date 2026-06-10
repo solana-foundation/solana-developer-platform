@@ -1,16 +1,20 @@
+import { KeychainFireblocksAdapter } from "@/services/adapters";
 import {
   deleteAnchorageWallet,
   provisionAnchorageWallet,
   provisionCoinbaseCdpAccount,
+  provisionFireblocksVaultAccount,
   provisionParaWallet,
   provisionPrivyWallet,
   provisionTurnkeyPrivateKey,
+  provisionUtilaWallet,
 } from "@/services/custody/provisioning";
 import {
   createDfnsApiClient,
   normalizeDfnsWalletId,
   resolveDfnsNetwork,
 } from "@/services/dfns/client";
+import { createEncryptionService } from "@/services/encryption.service";
 import { SigningError } from "@/services/ports";
 import type { Env } from "@/types/env";
 import type { ProviderConfigRecord } from "./provider-config";
@@ -18,9 +22,11 @@ import {
   denormalizeAnchorageWalletId,
   normalizeAnchorageWalletId,
   normalizeCoinbaseCdpWalletId,
+  normalizeFireblocksWalletId,
   normalizeParaWalletId,
   normalizePrivyWalletId,
   normalizeTurnkeyWalletId,
+  normalizeUtilaWalletId,
 } from "./provider-wallet-ids";
 
 export type ProvisionedProviderWallet = {
@@ -51,7 +57,41 @@ type WalletLifecycleHandler<TParsed extends ProviderConfigRecord = ProviderConfi
 
 const providerWalletLifecycleRegistry = {
   local: {},
-  fireblocks: {},
+  fireblocks: {
+    create: async ({ env, orgId, parsed }) => {
+      if (!parsed.apiKey || !parsed.apiSecretEncrypted) {
+        throw new SigningError(
+          "Fireblocks configuration is missing API credentials",
+          "PROVIDER_NOT_CONFIGURED"
+        );
+      }
+
+      const encryption = createEncryptionService(env.CUSTODY_ENCRYPTION_KEY);
+      const apiSecretPem = await encryption.decryptPrivateKey(orgId, parsed.apiSecretEncrypted);
+      const provisioned = await withProvisioningError("Fireblocks", () =>
+        provisionFireblocksVaultAccount(env, {
+          orgId,
+          orgSlug: orgId,
+          apiKey: parsed.apiKey,
+          apiSecretPem,
+          assetId: parsed.assetId,
+          apiBaseUrl: parsed.apiBaseUrl,
+        })
+      );
+      const adapter = new KeychainFireblocksAdapter({
+        apiKey: parsed.apiKey,
+        apiSecretPem,
+        vaultAccountId: provisioned.vaultAccountId,
+        assetId: provisioned.assetId,
+        apiBaseUrl: provisioned.apiBaseUrl,
+      });
+
+      return {
+        walletId: normalizeFireblocksWalletId(provisioned.vaultAccountId),
+        publicKey: await adapter.getPublicKey(),
+      };
+    },
+  },
   privy: {
     create: async ({ env, parsed }) => {
       const apiBaseUrl = parsed.apiBaseUrl ?? env.PRIVY_API_BASE_URL;
@@ -159,6 +199,24 @@ const providerWalletLifecycleRegistry = {
         apiBaseUrl: parsed.apiBaseUrl,
         walletId: denormalizeAnchorageWalletId(walletId),
       });
+    },
+  },
+  utila: {
+    create: async ({ env, params, parsed }) => {
+      // Create a new Solana sub-wallet inside the configured Utila vault.
+      const provisioned = await withProvisioningError("Utila", () =>
+        provisionUtilaWallet(env, {
+          vaultId: parsed.vaultId,
+          network: parsed.network,
+          apiBaseUrl: parsed.apiBaseUrl,
+          displayName: params.label,
+        })
+      );
+
+      return {
+        walletId: normalizeUtilaWalletId(provisioned.walletId),
+        publicKey: provisioned.address,
+      };
     },
   },
 } satisfies {

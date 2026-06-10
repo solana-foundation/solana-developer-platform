@@ -1,21 +1,56 @@
 import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
 
 import {
+  createOnrampQuoteRequestSchema,
+  createRecurringPaymentRequestSchema,
+  createSubscriptionCollectionAttemptRequestSchema,
+  createSubscriptionPlanRequestSchema,
+  createSubscriptionRequestSchema,
   createTransferRequestSchema,
   errorResponseSchema,
   executeOfframpRequestSchema,
   executeOnrampRequestSchema,
+  paymentListRecurringPaymentsQuerySchema,
+  paymentListSubscriptionCollectionAttemptsQuerySchema,
+  paymentListSubscriptionPlansQuerySchema,
+  paymentListSubscriptionsQuerySchema,
   paymentListTransfersQuerySchema,
+  paymentOfframpCurrenciesQuerySchema,
+  paymentOnrampCurrenciesQuerySchema,
+  paymentRecurringPaymentIdParamsSchema,
+  paymentSubscriptionIdParamsSchema,
+  paymentSubscriptionPlanIdParamsSchema,
   paymentTransferIdParamsSchema,
   paymentWalletIdParamsSchema,
+  prepareSubscriptionAuthorizationRequestSchema,
+  prepareSubscriptionCollectionRequestSchema,
+  prepareSubscriptionLifecycleRequestSchema,
+  prepareSubscriptionPlanCreateRequestSchema,
   prepareTransferRequestSchema,
   simulateSandboxTransferRequestSchema,
+  updateSubscriptionPlanRequestSchema,
+  updateSubscriptionRequestSchema,
   updateWalletPolicyRequestSchema,
 } from "../schemas";
-import { errorResponses, jsonContent } from "./helpers";
+import { errorResponses, jsonContent, projectScopeHeaders } from "./helpers";
 import {
+  offrampCurrenciesResponse,
   offrampExecutionResponse,
+  onrampCurrenciesResponse,
   onrampExecutionResponse,
+  onrampQuoteResponse,
+  paymentRecurringPaymentListResponse,
+  paymentRecurringPaymentResponse,
+  paymentSubscriptionCollectionAttemptListResponse,
+  paymentSubscriptionCollectionAttemptResponse,
+  paymentSubscriptionListResponse,
+  paymentSubscriptionPlanListResponse,
+  paymentSubscriptionPlanResponse,
+  paymentSubscriptionResponse,
+  preparePaymentSubscriptionAuthorizationResponse,
+  preparePaymentSubscriptionCollectionResponse,
+  preparePaymentSubscriptionLifecycleResponse,
+  preparePaymentSubscriptionPlanResponse,
   prepareTransferResponse,
   sandboxTransferSimulationResponse,
   transferListResponse,
@@ -39,6 +74,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
       "Retrieves balances for a custody wallet. Wallet lifecycle and provisioning are managed through /v1/wallets.",
     security: [{ apiKeyAuth: [] }],
     request: {
+      headers: projectScopeHeaders,
       params: paymentWalletIdParamsSchema,
     },
     responses: {
@@ -60,6 +96,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
       "Retrieves payment policy rules for a custody wallet. Policies are payment controls layered on top of custody-managed wallets.",
     security: [{ apiKeyAuth: [] }],
     request: {
+      headers: projectScopeHeaders,
       params: paymentWalletIdParamsSchema,
     },
     responses: {
@@ -81,6 +118,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
       "Updates payment policy rules for a custody wallet. Wallet provisioning and default selection remain in /v1/wallets.",
     security: [{ apiKeyAuth: [] }],
     request: {
+      headers: projectScopeHeaders,
       params: paymentWalletIdParamsSchema,
       body: {
         required: true,
@@ -107,9 +145,10 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Prepare transfer (unsigned)",
     operationId: "preparePaymentTransfer",
     description:
-      "Builds an unsigned transfer transaction for a custody wallet. The source walletId must reference a wallet from /v1/wallets.",
+      "Builds an unsigned transfer transaction for a custody wallet. The source walletId must reference a wallet from /v1/wallets. Private-transfer requests are provider-built here and returned for client review and signing.",
     security: [{ apiKeyAuth: [] }],
     request: {
+      headers: projectScopeHeaders,
       body: {
         required: true,
         content: jsonContent(prepareTransferRequestSchema),
@@ -131,9 +170,10 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Execute transfer (custody)",
     operationId: "createPaymentTransfer",
     description:
-      "Executes a transfer using server-side custody signing. The source walletId must reference a wallet from /v1/wallets.",
+      "Executes a transfer using server-side custody signing. The source walletId must reference a wallet from /v1/wallets. Private-transfer requests are provider-built, signed by SDP-controlled wallets when required, and submitted on the configured Solana cluster.",
     security: [{ apiKeyAuth: [] }],
     request: {
+      headers: projectScopeHeaders,
       body: {
         required: true,
         content: jsonContent(createTransferRequestSchema),
@@ -157,6 +197,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     description: "Lists payment transfers for the authenticated organization or project scope.",
     security: [{ apiKeyAuth: [] }],
     request: {
+      headers: projectScopeHeaders,
       query: paymentListTransfersQuerySchema,
     },
     responses: {
@@ -177,6 +218,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     description: "Retrieves details for a specific transfer.",
     security: [{ apiKeyAuth: [] }],
     request: {
+      headers: projectScopeHeaders,
       params: paymentTransferIdParamsSchema,
     },
     responses: {
@@ -185,6 +227,512 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         content: jsonContent(transferResponse),
       },
       ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
+    },
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Recurring Payments (feature-flagged)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/payments/recurring-payments",
+    tags: ["Payments"],
+    summary: "Create recurring payment",
+    operationId: "createPaymentRecurringPayment",
+    description:
+      "Creates an SDP-custody outbound recurring payment intent from a custody wallet to a counterparty crypto-wallet account. This stores backend state only; activation and collection are added by follow-up endpoints.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      body: {
+        required: true,
+        content: jsonContent(createRecurringPaymentRequestSchema),
+      },
+    },
+    responses: {
+      201: {
+        description: "Recurring payment created",
+        content: jsonContent(paymentRecurringPaymentResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/payments/recurring-payments",
+    tags: ["Payments"],
+    summary: "List recurring payments",
+    operationId: "listPaymentRecurringPayments",
+    description:
+      "Lists SDP-custody outbound recurring payments for the authenticated organization or project scope.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      query: paymentListRecurringPaymentsQuerySchema,
+    },
+    responses: {
+      200: {
+        description: "Recurring payment list",
+        content: jsonContent(paymentRecurringPaymentListResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/payments/recurring-payments/{id}",
+    tags: ["Payments"],
+    summary: "Get recurring payment",
+    operationId: "getPaymentRecurringPayment",
+    description: "Retrieves an SDP-custody outbound recurring payment record.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: paymentRecurringPaymentIdParamsSchema,
+    },
+    responses: {
+      200: {
+        description: "Recurring payment",
+        content: jsonContent(paymentRecurringPaymentResponse),
+      },
+      ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
+    },
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Recurring Subscriptions (feature-flagged)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/payments/subscription-plans",
+    tags: ["Payments"],
+    summary: "Create subscription plan",
+    operationId: "createPaymentSubscriptionPlan",
+    description:
+      "Creates a feature-flagged recurring-payment subscription plan record. This stores SDP backend state and Solana subscriptions program identifiers; it does not by itself create the on-chain plan.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      body: {
+        required: true,
+        content: jsonContent(createSubscriptionPlanRequestSchema),
+      },
+    },
+    responses: {
+      201: {
+        description: "Subscription plan created",
+        content: jsonContent(paymentSubscriptionPlanResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/payments/subscription-plans",
+    tags: ["Payments"],
+    summary: "List subscription plans",
+    operationId: "listPaymentSubscriptionPlans",
+    description: "Lists feature-flagged recurring-payment subscription plans.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      query: paymentListSubscriptionPlansQuerySchema,
+    },
+    responses: {
+      200: {
+        description: "Subscription plan list",
+        content: jsonContent(paymentSubscriptionPlanListResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/payments/subscription-plans/{planId}/prepare-create",
+    tags: ["Payments"],
+    summary: "Prepare subscription plan creation",
+    operationId: "preparePaymentSubscriptionPlanCreate",
+    description:
+      "Prepares an unsigned Solana subscriptions program create-plan transaction from an SDP subscription plan. This derives and stores the plan PDA but does not submit the transaction.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: paymentSubscriptionPlanIdParamsSchema,
+      body: {
+        required: false,
+        content: jsonContent(prepareSubscriptionPlanCreateRequestSchema),
+      },
+    },
+    responses: {
+      200: {
+        description: "Subscription plan creation prepared",
+        content: jsonContent(preparePaymentSubscriptionPlanResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/payments/subscription-plans/{planId}",
+    tags: ["Payments"],
+    summary: "Get subscription plan",
+    operationId: "getPaymentSubscriptionPlan",
+    description: "Retrieves a recurring-payment subscription plan record.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: paymentSubscriptionPlanIdParamsSchema,
+    },
+    responses: {
+      200: {
+        description: "Subscription plan",
+        content: jsonContent(paymentSubscriptionPlanResponse),
+      },
+      ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "patch",
+    path: "/v1/payments/subscription-plans/{planId}",
+    tags: ["Payments"],
+    summary: "Update subscription plan",
+    operationId: "updatePaymentSubscriptionPlan",
+    description: "Updates mutable subscription plan fields and on-chain identifiers.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: paymentSubscriptionPlanIdParamsSchema,
+      body: {
+        required: true,
+        content: jsonContent(updateSubscriptionPlanRequestSchema),
+      },
+    },
+    responses: {
+      200: {
+        description: "Subscription plan updated",
+        content: jsonContent(paymentSubscriptionPlanResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/payments/subscriptions",
+    tags: ["Payments"],
+    summary: "Create subscription",
+    operationId: "createPaymentSubscription",
+    description:
+      "Creates a feature-flagged recurring-payment subscription record tied to a counterparty. The customer must still sign the Solana subscription authorization transaction.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      body: {
+        required: true,
+        content: jsonContent(createSubscriptionRequestSchema),
+      },
+    },
+    responses: {
+      201: {
+        description: "Subscription created",
+        content: jsonContent(paymentSubscriptionResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/payments/subscriptions",
+    tags: ["Payments"],
+    summary: "List subscriptions",
+    operationId: "listPaymentSubscriptions",
+    description: "Lists recurring-payment subscriptions.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      query: paymentListSubscriptionsQuerySchema,
+    },
+    responses: {
+      200: {
+        description: "Subscription list",
+        content: jsonContent(paymentSubscriptionListResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/payments/subscriptions/{subscriptionId}/prepare-authorization",
+    tags: ["Payments"],
+    summary: "Prepare subscription authorization",
+    operationId: "preparePaymentSubscriptionAuthorization",
+    description:
+      "Prepares the subscriber-signed Solana transaction that initializes the subscription authority and subscribes to the plan. The transaction must still be signed and submitted by the client.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: paymentSubscriptionIdParamsSchema,
+      body: {
+        required: true,
+        content: jsonContent(prepareSubscriptionAuthorizationRequestSchema),
+      },
+    },
+    responses: {
+      200: {
+        description: "Subscription authorization prepared",
+        content: jsonContent(preparePaymentSubscriptionAuthorizationResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/payments/subscriptions/{subscriptionId}/prepare-cancel",
+    tags: ["Payments"],
+    summary: "Prepare subscription cancellation",
+    operationId: "preparePaymentSubscriptionCancel",
+    description:
+      "Prepares the subscriber-signed Solana transaction that cancels a subscription. The transaction must still be signed and submitted by the client.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: paymentSubscriptionIdParamsSchema,
+      body: {
+        required: false,
+        content: jsonContent(prepareSubscriptionLifecycleRequestSchema),
+      },
+    },
+    responses: {
+      200: {
+        description: "Subscription cancellation prepared",
+        content: jsonContent(preparePaymentSubscriptionLifecycleResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/payments/subscriptions/{subscriptionId}/prepare-resume",
+    tags: ["Payments"],
+    summary: "Prepare subscription resume",
+    operationId: "preparePaymentSubscriptionResume",
+    description:
+      "Prepares the subscriber-signed Solana transaction that resumes a canceled subscription before revocation. The transaction must still be signed and submitted by the client.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: paymentSubscriptionIdParamsSchema,
+      body: {
+        required: false,
+        content: jsonContent(prepareSubscriptionLifecycleRequestSchema),
+      },
+    },
+    responses: {
+      200: {
+        description: "Subscription resume prepared",
+        content: jsonContent(preparePaymentSubscriptionLifecycleResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/payments/subscriptions/{subscriptionId}/prepare-collection",
+    tags: ["Payments"],
+    summary: "Prepare subscription collection",
+    operationId: "preparePaymentSubscriptionCollection",
+    description:
+      "Prepares the collector-signed Solana subscriptions transfer transaction for an active subscription. The transaction must still be signed and submitted by the collector/fee-payer flow.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: paymentSubscriptionIdParamsSchema,
+      body: {
+        required: true,
+        content: jsonContent(prepareSubscriptionCollectionRequestSchema),
+      },
+    },
+    responses: {
+      200: {
+        description: "Subscription collection prepared",
+        content: jsonContent(preparePaymentSubscriptionCollectionResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/payments/subscriptions/{subscriptionId}",
+    tags: ["Payments"],
+    summary: "Get subscription",
+    operationId: "getPaymentSubscription",
+    description: "Retrieves a recurring-payment subscription record.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: paymentSubscriptionIdParamsSchema,
+    },
+    responses: {
+      200: {
+        description: "Subscription",
+        content: jsonContent(paymentSubscriptionResponse),
+      },
+      ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "patch",
+    path: "/v1/payments/subscriptions/{subscriptionId}",
+    tags: ["Payments"],
+    summary: "Update subscription",
+    operationId: "updatePaymentSubscription",
+    description: "Updates mutable subscription status and on-chain identifiers.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: paymentSubscriptionIdParamsSchema,
+      body: {
+        required: true,
+        content: jsonContent(updateSubscriptionRequestSchema),
+      },
+    },
+    responses: {
+      200: {
+        description: "Subscription updated",
+        content: jsonContent(paymentSubscriptionResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/payments/subscriptions/{subscriptionId}/collection-attempts",
+    tags: ["Payments"],
+    summary: "Create subscription collection attempt",
+    operationId: "createPaymentSubscriptionCollectionAttempt",
+    description:
+      "Creates a collection-attempt record for a due recurring-payment subscription. Actual Solana settlement is owned by the collection worker/transaction submitter.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: paymentSubscriptionIdParamsSchema,
+      body: {
+        required: true,
+        content: jsonContent(createSubscriptionCollectionAttemptRequestSchema),
+      },
+    },
+    responses: {
+      201: {
+        description: "Collection attempt created",
+        content: jsonContent(paymentSubscriptionCollectionAttemptResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/payments/subscriptions/{subscriptionId}/collection-attempts",
+    tags: ["Payments"],
+    summary: "List subscription collection attempts",
+    operationId: "listPaymentSubscriptionCollectionAttempts",
+    description: "Lists collection attempts for a recurring-payment subscription.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: paymentSubscriptionIdParamsSchema,
+      query: paymentListSubscriptionCollectionAttemptsQuerySchema,
+    },
+    responses: {
+      200: {
+        description: "Collection attempt list",
+        content: jsonContent(paymentSubscriptionCollectionAttemptListResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/payments/ramps/onramp/currency",
+    tags: ["Payments"],
+    summary: "List on-ramp currency support",
+    operationId: "listPaymentOnrampCurrencies",
+    description:
+      "Lists generated fiat-to-crypto on-ramp pairs and the providers that support each pair. Supports optional source, destination rail, and provider filters.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      query: paymentOnrampCurrenciesQuerySchema,
+    },
+    responses: {
+      200: {
+        description: "On-ramp currency support",
+        content: jsonContent(onrampCurrenciesResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/payments/ramps/offramp/currency",
+    tags: ["Payments"],
+    summary: "List off-ramp currency support",
+    operationId: "listPaymentOfframpCurrencies",
+    description:
+      "Lists generated crypto-to-fiat off-ramp pairs and the providers that support each pair. Supports optional source rail, destination fiat, and provider filters.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      query: paymentOfframpCurrenciesQuerySchema,
+    },
+    responses: {
+      200: {
+        description: "Off-ramp currency support",
+        content: jsonContent(offrampCurrenciesResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/payments/ramps/onramp/quote",
+    tags: ["Payments"],
+    summary: "Create on-ramp quote",
+    operationId: "createPaymentOnrampQuote",
+    description:
+      "Creates a provider-specific on-ramp quote. Hosted providers return a hosted URL; instruction-based providers return manual funding instructions.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      body: {
+        required: true,
+        content: jsonContent(createOnrampQuoteRequestSchema),
+      },
+    },
+    responses: {
+      200: {
+        description: "On-ramp quote created",
+        content: jsonContent(onrampQuoteResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
     },
   });
 
@@ -197,6 +745,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     description: "Creates a fiat-to-crypto on-ramp session through the selected provider.",
     security: [{ apiKeyAuth: [] }],
     request: {
+      headers: projectScopeHeaders,
       body: {
         required: true,
         content: jsonContent(executeOnrampRequestSchema),
@@ -220,6 +769,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     description: "Creates a crypto-to-fiat off-ramp session through the selected provider.",
     security: [{ apiKeyAuth: [] }],
     request: {
+      headers: projectScopeHeaders,
       body: {
         required: true,
         content: jsonContent(executeOfframpRequestSchema),
@@ -243,6 +793,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     description: "Sandbox-only helper that simulates provider-specific transfer completion flows.",
     security: [{ apiKeyAuth: [] }],
     request: {
+      headers: projectScopeHeaders,
       body: {
         required: true,
         content: jsonContent(simulateSandboxTransferRequestSchema),

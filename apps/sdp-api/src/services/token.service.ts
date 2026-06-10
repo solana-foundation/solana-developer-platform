@@ -243,6 +243,19 @@ interface WalletTransactionScope {
   tokenAccounts?: readonly TokenAccountMatch[];
 }
 
+// Postgres SQLSTATE for unique_violation. Used to translate races on
+// `UNIQUE(...)` constraints into our domain error codes.
+const POSTGRES_UNIQUE_VIOLATION = "23505";
+
+function isPostgresUniqueViolation(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: unknown }).code === POSTGRES_UNIQUE_VIOLATION
+  );
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Token Service
 // ═══════════════════════════════════════════════════════════════════════════
@@ -344,9 +357,39 @@ export class TokenService {
   }
 
   /**
-   * Get a token by ID
+   * Get a token scoped to the caller's organization + project. Returns null if
+   * the token belongs to a different org or project — this is the entry-point
+   * validation that closes cross-project reads. Handlers must use this method;
+   * service-internal callers can use `_getTokenById` when they already trust
+   * the id (typically because a scoped lookup succeeded earlier in the flow).
    */
-  async getToken(tokenId: string): Promise<Token | null> {
+  async getToken(params: {
+    tokenId: string;
+    organizationId: string;
+    projectId: string;
+  }): Promise<Token | null> {
+    const row = await this.db
+      .prepare(
+        `SELECT id, project_id, organization_id, mint_address, mint_authority, metadata_authority, freeze_authority,
+                signing_wallet_id,
+                abl_list_address, name, symbol, decimals, description, uri, image_url, template,
+                total_supply_cached, total_supply_updated_at, max_supply, is_mintable,
+                freeze_authority_enabled, allowlist_enabled, status, deployed_at, created_by,
+                created_at, updated_at
+         FROM issued_tokens WHERE id = ? AND organization_id = ? AND project_id = ?`
+      )
+      .bind(params.tokenId, params.organizationId, params.projectId)
+      .first<TokenRow>();
+
+    if (!row) {
+      return null;
+    }
+
+    const extensionState = await this.getTokenExtensionState(params.tokenId);
+    return this.mapRowToToken(row, extensionState);
+  }
+
+  private async _getTokenById(tokenId: string): Promise<Token | null> {
     const row = await this.db
       .prepare(
         `SELECT id, project_id, organization_id, mint_address, mint_authority, metadata_authority, freeze_authority,
@@ -451,7 +494,7 @@ export class TokenService {
    * Update a token
    */
   async updateToken(tokenId: string, input: UpdateTokenInput): Promise<Token> {
-    const existing = await this.getToken(tokenId);
+    const existing = await this._getTokenById(tokenId);
     if (!existing) {
       throw new Error("TOKEN_NOT_FOUND");
     }
@@ -498,7 +541,7 @@ export class TokenService {
       .bind(...values)
       .run();
 
-    const updated = await this.getToken(tokenId);
+    const updated = await this._getTokenById(tokenId);
     if (!updated) {
       throw new Error("TOKEN_NOT_FOUND");
     }
@@ -520,7 +563,7 @@ export class TokenService {
       permanentDelegate?: string | null;
     }
   ): Promise<Token> {
-    const existing = await this.getToken(tokenId);
+    const existing = await this._getTokenById(tokenId);
     if (!existing) {
       throw new Error("TOKEN_NOT_FOUND");
     }
@@ -575,7 +618,7 @@ export class TokenService {
       await this.setTokenExtension(tokenId, "permanentDelegate", updates.permanentDelegate, now);
     }
 
-    const updated = await this.getToken(tokenId);
+    const updated = await this._getTokenById(tokenId);
     if (!updated) {
       throw new Error("TOKEN_NOT_FOUND");
     }
@@ -620,7 +663,7 @@ export class TokenService {
       )
       .run();
 
-    const updated = await this.getToken(tokenId);
+    const updated = await this._getTokenById(tokenId);
     if (!updated) {
       throw new Error("TOKEN_NOT_FOUND");
     }
@@ -632,7 +675,7 @@ export class TokenService {
    * Update token supply after mint/burn
    */
   async updateSupply(tokenId: string, delta: string, operation: "mint" | "burn"): Promise<void> {
-    const token = await this.getToken(tokenId);
+    const token = await this._getTokenById(tokenId);
     if (!token) {
       throw new Error("TOKEN_NOT_FOUND");
     }
@@ -683,7 +726,7 @@ export class TokenService {
       .bind(supplyBaseUnits, now, now, tokenId)
       .run();
 
-    const updated = await this.getToken(tokenId);
+    const updated = await this._getTokenById(tokenId);
     if (!updated) {
       throw new Error("TOKEN_NOT_FOUND");
     }
@@ -1164,10 +1207,18 @@ export class TokenService {
   // ═══════════════════════════════════════════════════════════════════════════
 
   /**
-   * Add an address to the token allowlist
+   * Add an address to the token allowlist.
+   *
+   * Returns `{ entry, wasReactivated }`. `wasReactivated` is `true` when this
+   * call promoted a previously-revoked row back to `active` (vs. inserting a
+   * fresh row). Callers rolling back after a downstream on-chain failure need
+   * this to choose between `deleteAllowlistEntry` (fresh row → hard-delete)
+   * and `revokeAllowlistEntry` (reactivated row → restore the prior `revoked`
+   * state, preserving the operator's original revocation record).
    */
-  async addAllowlistEntry(input: AddAllowlistInput): Promise<TokenAllowlistEntry> {
-    // Check for existing entry
+  async addAllowlistEntry(
+    input: AddAllowlistInput
+  ): Promise<{ entry: TokenAllowlistEntry; wasReactivated: boolean }> {
     const existing = await this.db
       .prepare("SELECT id, status FROM token_allowlists WHERE token_id = ? AND address = ?")
       .bind(input.tokenId, input.address)
@@ -1177,7 +1228,7 @@ export class TokenService {
       if (existing.status === "active") {
         throw new Error("ADDRESS_ALREADY_ALLOWLISTED");
       }
-      // Reactivate revoked entry
+      // Reactivate revoked entry — operator-initiated re-add.
       await this.db
         .prepare(
           "UPDATE token_allowlists SET status = 'active', revoked_at = NULL, label = ?, added_by = ? WHERE id = ?"
@@ -1191,9 +1242,43 @@ export class TokenService {
       if (!entry) {
         throw new Error("ALLOWLIST_ENTRY_NOT_FOUND");
       }
-      return entry;
+      return { entry, wasReactivated: true };
     }
 
+    const entry = await this.insertNewAllowlistEntry(input);
+    return { entry, wasReactivated: false };
+  }
+
+  /**
+   * Insert a fresh allowlist entry, refusing to touch existing rows.
+   *
+   * Unlike `addAllowlistEntry`, this never reactivates a `revoked` row.
+   * Used by the mint auto-add sync, where reactivation would silently undo an
+   * operator's KYC/compliance revocation if it landed between the top-level
+   * status check and the insert (race window in `syncDestinationToOnChainAllowlist`).
+   *
+   * - Existing `active` row → throws `Error("ADDRESS_ALREADY_ALLOWLISTED")`
+   *   (same as `addAllowlistEntry`, so caller race-handling stays uniform).
+   * - Existing `revoked` row → throws `AppError("DESTINATION_REVOKED")`,
+   *   so the mint short-circuits to 403 instead of silently un-revoking.
+   */
+  async addAllowlistEntryStrict(input: AddAllowlistInput): Promise<TokenAllowlistEntry> {
+    const existing = await this.db
+      .prepare("SELECT id, status FROM token_allowlists WHERE token_id = ? AND address = ?")
+      .bind(input.tokenId, input.address)
+      .first<{ id: string; status: string }>();
+
+    if (existing) {
+      if (existing.status === "revoked") {
+        throw new AppError("DESTINATION_REVOKED");
+      }
+      throw new Error("ADDRESS_ALREADY_ALLOWLISTED");
+    }
+
+    return this.insertNewAllowlistEntry(input);
+  }
+
+  private async insertNewAllowlistEntry(input: AddAllowlistInput): Promise<TokenAllowlistEntry> {
     const id = `tal_${crypto.randomUUID()}`;
     const now = new Date().toISOString();
 
@@ -1208,24 +1293,36 @@ export class TokenService {
       revokedAt: null,
     };
 
-    await this.db
-      .prepare(
-        `INSERT INTO token_allowlists (
-          id, token_id, address, label,
-          status, added_by, created_at, revoked_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        entry.id,
-        entry.tokenId,
-        entry.address,
-        entry.label,
-        entry.status,
-        entry.addedBy,
-        entry.createdAt,
-        entry.revokedAt
-      )
-      .run();
+    try {
+      await this.db
+        .prepare(
+          `INSERT INTO token_allowlists (
+            id, token_id, address, label,
+            status, added_by, created_at, revoked_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .bind(
+          entry.id,
+          entry.tokenId,
+          entry.address,
+          entry.label,
+          entry.status,
+          entry.addedBy,
+          entry.createdAt,
+          entry.revokedAt
+        )
+        .run();
+    } catch (error) {
+      // SELECT-then-INSERT is non-atomic on `UNIQUE(token_id, address)`: a
+      // parallel caller can win the INSERT between our caller's SELECT and
+      // this one. Map the Postgres unique-violation (SQLSTATE 23505) to the
+      // same idempotent signal callers already handle for the "row was there
+      // when we looked" case, instead of bubbling a raw DB error.
+      if (isPostgresUniqueViolation(error)) {
+        throw new Error("ADDRESS_ALREADY_ALLOWLISTED");
+      }
+      throw error;
+    }
 
     await this.insertAllowlistStatus(entry.id, entry.status, entry.createdAt);
 
@@ -1299,6 +1396,26 @@ export class TokenService {
   }
 
   /**
+   * Look up an allowlist entry's status by address, regardless of state.
+   * Returns `null` when no entry has ever existed (vs `"revoked"` when an
+   * operator has explicitly removed the address).
+   *
+   * Used by the mint sync to distinguish a fresh address (auto-add) from one
+   * the operator has revoked (must be re-added explicitly).
+   */
+  async getAllowlistEntryStatusByAddress(
+    tokenId: string,
+    address: string
+  ): Promise<"active" | "revoked" | null> {
+    const row = await this.db
+      .prepare("SELECT status FROM token_allowlists WHERE token_id = ? AND address = ?")
+      .bind(tokenId, address)
+      .first<{ status: "active" | "revoked" }>();
+
+    return row?.status ?? null;
+  }
+
+  /**
    * Revoke an allowlist entry
    */
   async revokeAllowlistEntry(entryId: string): Promise<void> {
@@ -1309,6 +1426,20 @@ export class TokenService {
       .run();
 
     await this.insertAllowlistStatus(entryId, "revoked", now);
+  }
+
+  /**
+   * Hard-delete an allowlist entry.
+   *
+   * For system-driven rollback of an entry this request just created — e.g. a
+   * mint sync that inserted the DB row, then failed to write the on-chain ABL.
+   * Distinct from `revokeAllowlistEntry`: the row is removed entirely so a
+   * subsequent retry doesn't trip the revoked-entry guard with a status the
+   * operator never set. The FK on `token_allowlist_statuses.allowlist_id` is
+   * `ON DELETE CASCADE`, so status history rows are removed by the database.
+   */
+  async deleteAllowlistEntry(entryId: string): Promise<void> {
+    await this.db.prepare("DELETE FROM token_allowlists WHERE id = ?").bind(entryId).run();
   }
 
   // ═══════════════════════════════════════════════════════════════════════════

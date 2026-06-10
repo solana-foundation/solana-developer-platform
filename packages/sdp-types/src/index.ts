@@ -4,8 +4,12 @@
 
 export * from "./api-keys";
 export * from "./counterparties";
+export * from "./countries";
 export * from "./custody";
+export * from "./generated/ramp-support.generated";
 export * from "./organizations";
+export * from "./pagination";
+export * from "./payment-rails";
 export * from "./payments";
 export * from "./permissions";
 export * from "./private-transfers";

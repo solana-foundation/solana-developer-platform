@@ -39,6 +39,10 @@ describe("Counterparties Routes", () => {
       .run()
       .catch(() => {});
     await db
+      .prepare("DELETE FROM api_keys")
+      .run()
+      .catch(() => {});
+    await db
       .prepare("DELETE FROM project_members")
       .run()
       .catch(() => {});
@@ -80,13 +84,23 @@ describe("Counterparties Routes", () => {
     await db
       .prepare(
         `INSERT OR REPLACE INTO api_keys
-         (id, organization_id, created_by, name, key_prefix, key_hash, role, permissions, environment, status)
-         VALUES (?, ?, ?, 'Test Key', ?, ?, 'api_admin', '["*"]', 'sandbox', 'active')`
+         (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
+         VALUES (?, ?, ?, ?, 'Test Key', ?, ?, 'api_admin', '["*"]', 'active')`
       )
-      .bind(TEST_API_KEY.id, TEST_ORG.id, TEST_USER.id, TEST_API_KEY.prefix, apiKeyHash)
+      .bind(
+        TEST_API_KEY.id,
+        TEST_ORG.id,
+        TEST_PROJECT_ID,
+        TEST_USER.id,
+        TEST_API_KEY.prefix,
+        apiKeyHash
+      )
       .run();
 
-    await kv.apiKeys.put(`key:${apiKeyHash}`, JSON.stringify(TEST_CACHED_API_KEY));
+    await kv.apiKeys.put(
+      `key:${apiKeyHash}`,
+      JSON.stringify({ ...TEST_CACHED_API_KEY, projectId: TEST_PROJECT_ID })
+    );
   });
 
   const authHeader = `Bearer ${TEST_API_KEY.raw}`;
@@ -106,6 +120,30 @@ describe("Counterparties Routes", () => {
       },
       env
     );
+
+  describe("GET /v1/counterparties/metadata", () => {
+    it("returns field options (enums + countries)", async () => {
+      const res = await app.request(
+        "/v1/counterparties/metadata",
+        { headers: { Authorization: authHeader } },
+        env
+      );
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: {
+          fields: {
+            entityTypes: string[];
+            compliance: { employmentStatuses: string[]; employmentIndustrySectors: string[] };
+            countries: { code: string; name: string }[];
+          };
+        };
+      };
+      expect(body.data.fields.entityTypes).toContain("individual");
+      expect(body.data.fields.compliance.employmentStatuses).toContain("SALARIED");
+      expect(body.data.fields.compliance.employmentIndustrySectors.length).toBeGreaterThan(40);
+      expect(body.data.fields.countries.some((c) => c.code === "US")).toBe(true);
+    });
+  });
 
   describe("POST /v1/counterparties", () => {
     it("creates a counterparty", async () => {
@@ -216,6 +254,141 @@ describe("Counterparties Routes", () => {
         env
       );
       expect(res.status).toBe(404);
+    });
+
+    it("returns 404 when the counterparty belongs to a different project in the same org", async () => {
+      const db = getDb(env);
+      const otherProjectId = "prj_counterparties_cross_project";
+      const otherCounterpartyId = "counterparty_cross_project_iso";
+
+      await db
+        .prepare(
+          `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
+           VALUES (?, ?, 'Other Project', 'other-project', 'sandbox', 'active', ?)`
+        )
+        .bind(otherProjectId, TEST_ORG.id, TEST_USER.id)
+        .run();
+
+      await db
+        .prepare(
+          `INSERT INTO counterparties (
+             id, organization_id, project_id, external_id, entity_type,
+             display_name, email, identity, provider_data, status, created_by
+           ) VALUES (?, ?, ?, ?, 'individual', 'Other Project Alice', 'other@example.com', '{}', '{}', 'active', ?)`
+        )
+        .bind(otherCounterpartyId, TEST_ORG.id, otherProjectId, "ext_cross_project", TEST_USER.id)
+        .run();
+
+      const res = await app.request(
+        `/v1/counterparties/${otherCounterpartyId}`,
+        { headers: { Authorization: authHeader } },
+        env
+      );
+      expect(res.status).toBe(404);
+    });
+  });
+
+  describe("counterparty accounts", () => {
+    it("creates, lists, updates, gets, and archives a crypto wallet account", async () => {
+      const created = await createCounterparty({ externalId: "account_parent_1" });
+      const cp = (await created.json()).data.counterparty;
+
+      const createAccountRes = await app.request(
+        `/v1/counterparties/${cp.id}/accounts`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: authHeader },
+          body: JSON.stringify({
+            accountKind: "crypto_wallet",
+            label: "Primary wallet",
+            details: {
+              network: "solana",
+              address: "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ",
+            },
+          }),
+        },
+        env
+      );
+      expect(createAccountRes.status).toBe(201);
+      const account = (await createAccountRes.json()).data.account;
+      expect(account.accountKind).toBe("crypto_wallet");
+      expect(account.details.network).toBe("solana");
+
+      const listRes = await app.request(
+        `/v1/counterparties/${cp.id}/accounts?accountKind=crypto_wallet`,
+        { headers: { Authorization: authHeader } },
+        env
+      );
+      expect(listRes.status).toBe(200);
+      const listBody = await listRes.json();
+      expect(listBody.data.total).toBe(1);
+
+      const updateRes = await app.request(
+        `/v1/counterparties/${cp.id}/accounts/${account.id}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json", Authorization: authHeader },
+          body: JSON.stringify({ label: "Updated wallet" }),
+        },
+        env
+      );
+      expect(updateRes.status).toBe(200);
+      const updated = (await updateRes.json()).data.account;
+      expect(updated.label).toBe("Updated wallet");
+
+      const invalidPatchRes = await app.request(
+        `/v1/counterparties/${cp.id}/accounts/${account.id}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json", Authorization: authHeader },
+          body: JSON.stringify({
+            details: {
+              network: "solana",
+              address: "not-a-solana-address",
+            },
+          }),
+        },
+        env
+      );
+      expect(invalidPatchRes.status).toBe(400);
+
+      const getRes = await app.request(
+        `/v1/counterparties/${cp.id}/accounts/${account.id}`,
+        { headers: { Authorization: authHeader } },
+        env
+      );
+      expect(getRes.status).toBe(200);
+
+      const deleteRes = await app.request(
+        `/v1/counterparties/${cp.id}/accounts/${account.id}`,
+        { method: "DELETE", headers: { Authorization: authHeader } },
+        env
+      );
+      expect(deleteRes.status).toBe(204);
+    });
+
+    it("rejects crypto wallet accounts without a Solana wallet address", async () => {
+      const created = await createCounterparty({ externalId: "account_parent_invalid" });
+      const cp = (await created.json()).data.counterparty;
+
+      const res = await app.request(
+        `/v1/counterparties/${cp.id}/accounts`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: authHeader },
+          body: JSON.stringify({
+            accountKind: "crypto_wallet",
+            details: {
+              network: "ethereum",
+              address: "not-a-solana-address",
+            },
+          }),
+        },
+        env
+      );
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error.code).toBe("BAD_REQUEST");
     });
   });
 

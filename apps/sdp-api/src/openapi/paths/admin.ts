@@ -8,7 +8,7 @@ import {
   allowlistTypeQuerySchema,
   errorResponseSchema,
 } from "../schemas";
-import { errorResponses, jsonContent } from "./helpers";
+import { errorResponses, jsonContent, projectScopeHeaders } from "./helpers";
 import { allowlistEntriesResponse, allowlistEntryResponse } from "./responses";
 
 export function registerAdminPaths(registry: OpenAPIRegistry) {
@@ -21,6 +21,7 @@ export function registerAdminPaths(registry: OpenAPIRegistry) {
     description: "Lists allowlist entries for onboarding.",
     security: [{ adminKey: [] }],
     request: {
+      headers: projectScopeHeaders,
       query: z.object({
         type: allowlistTypeQuerySchema.optional(),
         status: allowlistStatusQuerySchema.optional(),
@@ -44,6 +45,7 @@ export function registerAdminPaths(registry: OpenAPIRegistry) {
     description: "Adds an allowlist entry for onboarding.",
     security: [{ adminKey: [] }],
     request: {
+      headers: projectScopeHeaders,
       body: {
         required: true,
         content: jsonContent(addAdminAllowlistEntryRequestSchema),
@@ -67,6 +69,7 @@ export function registerAdminPaths(registry: OpenAPIRegistry) {
     description: "Removes (disables) an allowlist entry.",
     security: [{ adminKey: [] }],
     request: {
+      headers: projectScopeHeaders,
       params: z.object({
         id: allowlistEntryIdParamSchema,
       }),

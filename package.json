@@ -1,6 +1,6 @@
 {
   "name": "solana-developer-platform",
-  "version": "0.20.0",
+  "version": "0.27.0",
   "private": true,
   "packageManager": "pnpm@10.16.0",
   "engines": {
@@ -14,7 +14,8 @@
       }
     },
     "overrides": {
-      "@token-acl/abl-sdk": "npm:@solana/token-acl-gate-sdk@0.2.0"
+      "@token-acl/abl-sdk": "npm:@solana/token-acl-gate-sdk@0.2.0",
+      "fast-uri": "^3.1.2"
     },
     "patchedDependencies": {
       "@solana/mosaic-sdk@0.1.1": "patches/@solana__mosaic-sdk@0.1.1.patch"
@@ -24,6 +25,7 @@
     "dev": "scripts/doppler/run-with-config.sh turbo run dev:local",
     "dev:web": "scripts/doppler/run-with-config.sh turbo run dev --filter=sdp-web",
     "dev:docs": "scripts/doppler/run-with-config.sh turbo run dev --filter=sdp-docs",
+    "dev:docs:bare": "turbo run dev --filter=sdp-docs",
     "dev:api": "scripts/doppler/run-with-config.sh turbo run dev --filter=@sdp/api",
     "dev:api:local": "scripts/doppler/run-with-config.sh turbo run dev:local --filter=@sdp/api",
     "build": "turbo run build",
@@ -31,6 +33,7 @@
     "build:docs": "turbo run build --filter=sdp-docs",
     "build:api": "turbo run build --filter=@sdp/api",
     "check:env-contract": "node scripts/check-env-contract.mjs",
+    "check:env-configurator-drift": "node scripts/check-env-configurator-drift.mjs",
     "typecheck": "turbo run typecheck",
     "typecheck:all": "turbo run typecheck",
     "lint": "biome check .",
@@ -40,7 +43,9 @@
     "format:check": "biome format .",
     "test": "scripts/doppler/run-with-config.sh node scripts/run-workspace-tests.mjs unit",
     "test:integration": "scripts/doppler/run-with-config.sh node scripts/run-workspace-tests.mjs integration",
+    "test:scripts": "node --test scripts/*.test.mjs",
     "secrets:print:cloudflare": "node scripts/project-secrets.mjs cloudflare",
+    "secrets:print:docker": "node scripts/project-secrets.mjs docker",
     "check": "biome check --write . && turbo run typecheck",
     "db:postgres:up": "docker compose -f infra/postgres/docker-compose.yml up -d",
     "db:postgres:down": "docker compose -f infra/postgres/docker-compose.yml down",
@@ -53,8 +58,8 @@
     "kora:devnet:test": "pnpm --filter @sdp/api-integration test -- src/tests/kora.test.ts"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.4.13",
-    "turbo": "^2.9.7",
+    "@biomejs/biome": "^2.4.15",
+    "turbo": "^2.9.14",
     "typescript": "^6.0.3"
   },
   "overrides": {

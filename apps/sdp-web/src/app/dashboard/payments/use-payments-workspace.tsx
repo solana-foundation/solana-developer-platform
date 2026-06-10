@@ -100,7 +100,7 @@ export function usePaymentsWorkspace(): PaymentsWorkspaceState {
     TransferRecord[]
   >(
     PAYMENTS_WORKSPACE_TRANSFERS_KEY,
-    () => fetchTransfers(),
+    () => fetchTransfers({ pageSize: 20 }),
     {
       revalidateOnFocus: true,
       refreshInterval: 10_000,

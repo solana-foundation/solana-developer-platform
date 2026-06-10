@@ -9,6 +9,7 @@ interface DashboardWorkspaceTabShellProps {
   isPlaygroundTab: boolean;
   overview: ReactNode;
   playground: ReactNode;
+  disableOverviewInitialAnimation?: boolean;
   overviewClassName?: string;
   overviewKey?: string;
   playgroundClassName?: string;
@@ -21,6 +22,7 @@ export function DashboardWorkspaceTabShell({
   isPlaygroundTab,
   overview,
   playground,
+  disableOverviewInitialAnimation = false,
   overviewClassName,
   overviewKey = "overview-tab",
   playgroundClassName,
@@ -43,7 +45,7 @@ export function DashboardWorkspaceTabShell({
         ) : (
           <motion.div
             key={overviewKey}
-            initial={{ opacity: 0, y: 10 }}
+            initial={disableOverviewInitialAnimation ? false : { opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -8 }}
             transition={tabTransition}

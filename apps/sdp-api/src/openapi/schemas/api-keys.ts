@@ -90,9 +90,9 @@ export const apiKeyDetailSchema = z
       }),
     environment: apiKeyEnvironmentSchema,
     status: apiKeyStatusSchema,
-    projectId: projectIdParamSchema
-      .nullable()
-      .openapi({ description: "Associated project identifier, if scoped." }),
+    projectId: projectIdParamSchema.openapi({
+      description: "Associated project identifier.",
+    }),
     allowedIps: z
       .array(z.string())
       .nullable()
@@ -224,10 +224,6 @@ export const createApiKeyRequestSchema = apiKeyCreateSchemaBase
     role: withOpenApi(apiKeyCreateSchemaBase.shape.role, {
       description: "Role assigned to this API key.",
       example: "api_developer",
-    }),
-    environment: withOpenApi(apiKeyCreateSchemaBase.shape.environment, {
-      description: "Target environment for the key.",
-      example: "sandbox",
     }),
     walletScope: withOpenApi(apiKeyCreateSchemaBase.shape.walletScope, {
       description:

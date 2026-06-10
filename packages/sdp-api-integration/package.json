@@ -3,6 +3,13 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "imports": {
+    "#env-impl": {
+      "workerd": "./src/helpers/env.workers.ts",
+      "worker": "./src/helpers/env.workers.ts",
+      "default": "./src/helpers/env.node.ts"
+    }
+  },
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest"
@@ -10,14 +17,14 @@
   "dependencies": {
     "@sdp/types": "workspace:*",
     "@solana-program/system": "catalog:",
-    "@solana/keychain-cdp": "1.2.0",
-    "@solana/keychain-para": "1.2.0",
+    "@solana/keychain-cdp": "1.3.0",
+    "@solana/keychain-para": "1.3.0",
     "@solana/kit": "catalog:"
   },
   "devDependencies": {
-    "@cloudflare/vitest-pool-workers": "^0.15.1",
-    "@cloudflare/workers-types": "^4.20260430.1",
+    "@cloudflare/vitest-pool-workers": "^0.16.9",
+    "@cloudflare/workers-types": "^4.20260526.1",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.5"
+    "vitest": "^4.1.7"
   }
 }
