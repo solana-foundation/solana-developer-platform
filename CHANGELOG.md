@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.28.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.27.0...v0.28.0) (2026-06-10)
+
+### Features
+
+* **ramps:** provider-driven counterparty requirements + JIT KYC passthrough [PRO-1305] ([#423](https://github.com/solana-foundation/solana-developer-platform/pull/423)) ([7fe605d](https://github.com/solana-foundation/solana-developer-platform/commit/7fe605d9f6f671d783517eef7c0d09b2ebe87dc8))
+
+### Bug Fixes
+
+* remove reserved claim "sub" from clerk jwt template ([#421](https://github.com/solana-foundation/solana-developer-platform/pull/421)) ([00ff2f1](https://github.com/solana-foundation/solana-developer-platform/commit/00ff2f1ee3d9ee45edb69cb74b750f70c3fc1391))
+
+### Documentation
+
+* **sdp-docs:** add Issue a Regulated Stablecoin tutorial ([#319](https://github.com/solana-foundation/solana-developer-platform/pull/319)) ([93d260a](https://github.com/solana-foundation/solana-developer-platform/commit/93d260a68b8b37c78e5dcaa96e8dd67bd935901d))
+* **sdp-docs:** add Tokenize a Treasury Fund tutorial ([e682783](https://github.com/solana-foundation/solana-developer-platform/commit/e68278357d5454b7d70a3082ec2a5858df4982ae))
+
+### Maintenance
+
+* **deps:** bump the actions group across 1 directory with 3 updates ([#426](https://github.com/solana-foundation/solana-developer-platform/pull/426)) ([85c2535](https://github.com/solana-foundation/solana-developer-platform/commit/85c2535bec671949287b72d35c70d87b8ade5717))
+* **deps:** bump the minor-patch group with 22 updates ([#417](https://github.com/solana-foundation/solana-developer-platform/pull/417)) ([5b9c96c](https://github.com/solana-foundation/solana-developer-platform/commit/5b9c96ce395581df0607088753ab5588c280bef3))
+* **deps:** bump @solana-program/system ([#416](https://github.com/solana-foundation/solana-developer-platform/pull/416)) ([65dc1e5](https://github.com/solana-foundation/solana-developer-platform/commit/65dc1e568a696b24db81dcd8f382049975b09e4f))
+
 ## [0.27.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.26.0...v0.27.0) (2026-06-09)
 
 ### Features
