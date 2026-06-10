@@ -1,7 +1,8 @@
 import type { Context } from "hono";
+import { z } from "zod";
 import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
-import { AppError } from "@/lib/errors";
+import { AppError, badRequest } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { isSelfHostedDeployment } from "@/lib/runtime-env";
 import { assertValidAddress } from "@/lib/solana";
@@ -17,8 +18,8 @@ export async function screenAddress(c: AppContext) {
   const parsed = screenAddressSchema.safeParse(body);
 
   if (!parsed.success) {
-    throw new AppError("BAD_REQUEST", "Invalid request body", {
-      errors: parsed.error.flatten().fieldErrors,
+    throw badRequest("Invalid request body", {
+      errors: z.flattenError(parsed.error).fieldErrors,
     });
   }
 
@@ -29,7 +30,7 @@ export async function screenAddress(c: AppContext) {
     try {
       assertValidAddress(address, "address");
     } catch {
-      throw new AppError("BAD_REQUEST", "Invalid Solana address");
+      throw badRequest("Invalid Solana address");
     }
   }
 

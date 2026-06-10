@@ -3,7 +3,7 @@ import {
   createPaymentsRepository,
 } from "@/db/repositories";
 import type { PaymentRecurringPaymentRow } from "@/db/repositories/payment-recurring-payments.repository";
-import { AppError } from "@/lib/errors";
+import { AppError, badRequest } from "@/lib/errors";
 import { assertValidAddress } from "@/lib/solana";
 import { normalizePaymentToken, SOL_MINT } from "@/services/payment-operation.service";
 import { assertWalletPolicyAllowsTransferWithRepository } from "@/services/payments/wallet-policy";
@@ -14,7 +14,7 @@ import { resolveSolanaCounterpartyAccount } from "./counterparty-account-resolut
 function assertRecurringPaymentTokenMint(token: string): string {
   const normalized = normalizePaymentToken(token);
   if (normalized === "SOL" || normalized === SOL_MINT) {
-    throw new AppError("BAD_REQUEST", "Recurring payments require an SPL token mint");
+    throw badRequest("Recurring payments require an SPL token mint");
   }
 
   return assertValidAddress(normalized, "token");

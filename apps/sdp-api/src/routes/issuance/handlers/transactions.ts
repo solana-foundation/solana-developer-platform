@@ -10,7 +10,7 @@ import { findAssociatedTokenPda, TOKEN_2022_PROGRAM_ADDRESS } from "@solana-prog
 import type { Context } from "hono";
 import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
-import { AppError, notFound } from "@/lib/errors";
+import { badRequest, notFound } from "@/lib/errors";
 import { paginated } from "@/lib/response";
 import { type Address, assertValidAddress } from "@/lib/solana";
 import {
@@ -36,7 +36,7 @@ function parsePositiveInteger(value: string | undefined, fallback: number, name:
 
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed < 1) {
-    throw new AppError("BAD_REQUEST", `Invalid ${name} query parameter`);
+    throw badRequest(`Invalid ${name} query parameter`);
   }
 
   return parsed;
@@ -50,14 +50,14 @@ function parseTransactionTypes(c: AppContext): TokenTransactionType[] | undefine
 
   const normalized = values.map((value) => value.trim()).filter(Boolean);
   if (normalized.length !== values.length) {
-    throw new AppError("BAD_REQUEST", "Invalid type query parameter");
+    throw badRequest("Invalid type query parameter");
   }
 
   const invalid = normalized.filter(
     (value): value is string => !TOKEN_TRANSACTION_TYPES.includes(value as TokenTransactionType)
   );
   if (invalid.length > 0) {
-    throw new AppError("BAD_REQUEST", "Invalid type query parameter", {
+    throw badRequest("Invalid type query parameter", {
       invalidTypes: invalid,
       allowedTypes: TOKEN_TRANSACTION_TYPES,
     });
@@ -72,7 +72,7 @@ function parseTransactionStatus(value: string | undefined): TokenTransactionStat
   }
 
   if (!TOKEN_TRANSACTION_STATUSES.includes(value as TokenTransactionStatus)) {
-    throw new AppError("BAD_REQUEST", "Invalid status query parameter", {
+    throw badRequest("Invalid status query parameter", {
       allowedStatuses: TOKEN_TRANSACTION_STATUSES,
     });
   }
@@ -262,7 +262,7 @@ export const listTransactions = async (c: AppContext) => {
   const walletIdRaw = c.req.query("walletId");
   const walletId = walletIdRaw?.trim();
   if (walletIdRaw !== undefined && !walletId) {
-    throw new AppError("BAD_REQUEST", "Invalid walletId query parameter");
+    throw badRequest("Invalid walletId query parameter");
   }
 
   const walletScope = await resolveWalletTransactionScope(c, tokenService, walletId);

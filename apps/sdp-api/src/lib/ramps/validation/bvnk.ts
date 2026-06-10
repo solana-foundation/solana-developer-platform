@@ -16,7 +16,7 @@ import type {
 } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
-import { AppError, unsupportedCounterparty } from "@/lib/errors";
+import { AppError, badRequest, unsupportedCounterparty } from "@/lib/errors";
 import { readBvnkCustomer } from "../providers/bvnk";
 import {
   buildRequirementSchema,
@@ -245,7 +245,7 @@ export function buildBvnkIndividualPayload(
     }
     const collected = supplied[key];
     if (typeof collected !== "string") {
-      throw new AppError("BAD_REQUEST", `Missing required field "${key}" for BVNK on-ramp.`);
+      throw badRequest(`Missing required field "${key}" for BVNK on-ramp.`);
     }
     return collected;
   };

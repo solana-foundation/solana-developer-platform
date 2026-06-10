@@ -26,6 +26,7 @@ import {
   getCreateAssociatedTokenIdempotentInstruction,
   getTransferCheckedInstruction,
 } from "@solana-program/token-2022";
+import { z } from "zod";
 import { getDb } from "@/db";
 import {
   isRampTransferType,
@@ -38,7 +39,7 @@ import {
 } from "@/db/repositories/payments.repository";
 import { formatDecimalAmount, MAX_SAFE_BASE_UNITS, parseDecimalAmount } from "@/lib/amount";
 import { getAuth } from "@/lib/auth";
-import { AppError } from "@/lib/errors";
+import { AppError, badRequest, badRequestQuery } from "@/lib/errors";
 import { paginated, success } from "@/lib/response";
 import { assertValidAddress, getSolanaConfig } from "@/lib/solana";
 import {
@@ -190,7 +191,7 @@ export async function resolveWalletFromParams(
 ) {
   const params = walletIdParamsSchema.safeParse(c.req.param());
   if (!params.success) {
-    throw new AppError("BAD_REQUEST", "Invalid wallet ID");
+    throw badRequest("Invalid wallet ID");
   }
 
   const scope = await resolveScope(c);
@@ -301,7 +302,7 @@ async function prepareSolTransfer(
 ): Promise<PreparedTransferPayload> {
   const lamports = parseDecimalAmount(amount, 9);
   if (lamports <= 0n) {
-    throw new AppError("BAD_REQUEST", "Transfer amount must be greater than zero");
+    throw badRequest("Transfer amount must be greater than zero");
   }
 
   const rpc = solanaRpc.createRpc(c.env);
@@ -338,7 +339,7 @@ async function executeSolTransfer(
 ): Promise<{ signature: string; slot: number | null; blockTime: string | null }> {
   const lamports = parseDecimalAmount(amount, 9);
   if (lamports <= 0n) {
-    throw new AppError("BAD_REQUEST", "Transfer amount must be greater than zero");
+    throw badRequest("Transfer amount must be greater than zero");
   }
 
   const auth = getAuth(c);
@@ -350,7 +351,7 @@ async function executeSolTransfer(
   );
 
   if (signer.address !== sourceWallet.publicKey) {
-    throw new AppError("BAD_REQUEST", "Resolved signing wallet does not match source wallet");
+    throw badRequest("Resolved signing wallet does not match source wallet");
   }
 
   const rpc = solanaRpc.createRpc(c.env);
@@ -410,7 +411,7 @@ async function prepareSplTransfer(
   const transferAmount = parseDecimalAmount(amount, sourceTokenAccount.decimals);
 
   if (transferAmount <= 0n) {
-    throw new AppError("BAD_REQUEST", "Transfer amount must be greater than zero");
+    throw badRequest("Transfer amount must be greater than zero");
   }
 
   const [destinationTokenAccount] = await findAssociatedTokenPda({
@@ -539,7 +540,7 @@ async function prepareMagicBlockPrivateTransferForOperation(params: {
   const amountBaseUnits = parseDecimalAmount(operation.amount, decimals);
 
   if (amountBaseUnits <= 0n) {
-    throw new AppError("BAD_REQUEST", "Transfer amount must be greater than zero");
+    throw badRequest("Transfer amount must be greater than zero");
   }
 
   if (amountBaseUnits > MAX_SAFE_BASE_UNITS) {
@@ -760,7 +761,7 @@ async function executePreparedPrivateTransfer(
       );
 
       if (signer.address !== wallet.publicKey) {
-        throw new AppError("BAD_REQUEST", "Resolved signing wallet does not match required signer");
+        throw badRequest("Resolved signing wallet does not match required signer");
       }
       assertIsTransactionPartialSigner(signer);
       return signer;
@@ -816,7 +817,7 @@ async function executeSplTransfer(
   );
 
   if (signer.address !== sourceWallet.publicKey) {
-    throw new AppError("BAD_REQUEST", "Resolved signing wallet does not match source wallet");
+    throw badRequest("Resolved signing wallet does not match source wallet");
   }
 
   const rpc = solanaRpc.createRpc(c.env);
@@ -830,7 +831,7 @@ async function executeSplTransfer(
   const transferAmount = parseDecimalAmount(amount, sourceTokenAccount.decimals);
 
   if (transferAmount <= 0n) {
-    throw new AppError("BAD_REQUEST", "Transfer amount must be greater than zero");
+    throw badRequest("Transfer amount must be greater than zero");
   }
 
   const [destinationTokenAccount] = await findAssociatedTokenPda({
@@ -899,8 +900,8 @@ export async function prepareTransfer(c: AppContext) {
   const parsed = prepareTransferSchema.safeParse(body);
 
   if (!parsed.success) {
-    throw new AppError("BAD_REQUEST", "Invalid request body", {
-      errors: parsed.error.flatten().fieldErrors,
+    throw badRequest("Invalid request body", {
+      errors: z.flattenError(parsed.error).fieldErrors,
     });
   }
 
@@ -1626,8 +1627,8 @@ export async function createTransfer(c: AppContext) {
   const parsed = createTransferSchema.safeParse(body);
 
   if (!parsed.success) {
-    throw new AppError("BAD_REQUEST", "Invalid request body", {
-      errors: parsed.error.flatten().fieldErrors,
+    throw badRequest("Invalid request body", {
+      errors: z.flattenError(parsed.error).fieldErrors,
     });
   }
 
@@ -1784,7 +1785,7 @@ export async function createTransfer(c: AppContext) {
 export async function listTransfers(c: AppContext) {
   const auth = getAuth(c);
   const query = listTransfersQuerySchema.safeParse(c.req.query());
-  if (!query.success) throw new AppError("BAD_REQUEST", "Invalid query parameters");
+  if (!query.success) throw badRequestQuery();
   const allowedWalletIds = getAllowedApiKeyWalletIds(auth);
 
   const {
@@ -2057,7 +2058,7 @@ export async function getTransfer(c: AppContext) {
   const params = transferIdParamsSchema.safeParse(c.req.param());
   const repo = getPaymentsRepository(c);
 
-  if (!params.success) throw new AppError("BAD_REQUEST", "Transfer ID is required");
+  if (!params.success) throw badRequest("Transfer ID is required");
 
   const row = await repo.getTransferById({
     transferId: params.data.transferId,

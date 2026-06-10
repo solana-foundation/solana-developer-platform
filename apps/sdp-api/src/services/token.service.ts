@@ -19,7 +19,7 @@ import type {
   TokenTransactionType,
 } from "@sdp/types";
 import { formatDecimalAmount, parseDecimalAmount } from "@/lib/amount";
-import { AppError } from "@/lib/errors";
+import { AppError, badRequest } from "@/lib/errors";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Input Types
@@ -743,7 +743,7 @@ export class TokenService {
    */
   async createTransaction(input: CreateTokenTransactionInput): Promise<CreateTransactionResult> {
     if (input.idempotencyKey && !input.idempotencyFingerprint) {
-      throw new AppError("BAD_REQUEST", "Missing idempotency fingerprint for idempotency key");
+      throw badRequest("Missing idempotency fingerprint for idempotency key");
     }
 
     if (input.idempotencyKey) {

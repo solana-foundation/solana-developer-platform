@@ -6,9 +6,10 @@ import type {
   RotateApiKeyResponse,
 } from "@sdp/types";
 import type { Context } from "hono";
+import { z } from "zod";
 import { getDb } from "@/db";
 import { requireProjectId } from "@/lib/auth";
-import { AppError, notFound } from "@/lib/errors";
+import { AppError, badRequest, notFound } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import { ApiKeyService } from "@/services/api-key.service";
 import {
@@ -100,8 +101,8 @@ export const createApiKey = async (c: AppContext) => {
   const parsed = apiKeyCreateSchema.safeParse(body);
 
   if (!parsed.success) {
-    throw new AppError("BAD_REQUEST", "Invalid request body", {
-      errors: parsed.error.flatten().fieldErrors,
+    throw badRequest("Invalid request body", {
+      errors: z.flattenError(parsed.error).fieldErrors,
     });
   }
 
@@ -159,7 +160,7 @@ export const createApiKey = async (c: AppContext) => {
         if (error.code === "NOT_FOUND") {
           throw new AppError("CONFLICT", error.message);
         }
-        throw new AppError("BAD_REQUEST", error.message);
+        throw badRequest(error.message);
       }
       throw error;
     }
@@ -308,8 +309,8 @@ export const updateApiKey = async (c: AppContext) => {
   const parsed = apiKeyUpdateSchema.safeParse(body);
 
   if (!parsed.success) {
-    throw new AppError("BAD_REQUEST", "Invalid request body", {
-      errors: parsed.error.flatten().fieldErrors,
+    throw badRequest("Invalid request body", {
+      errors: z.flattenError(parsed.error).fieldErrors,
     });
   }
 
@@ -379,7 +380,7 @@ export const updateApiKey = async (c: AppContext) => {
   }
 
   if (updates.length === 0) {
-    throw new AppError("BAD_REQUEST", "No fields to update");
+    throw badRequest("No fields to update");
   }
 
   values.push(keyId);
@@ -420,15 +421,15 @@ export const rotateApiKey = async (c: AppContext) => {
 
   // Prevent rotating the key being used
   if (actor.apiKeyId && keyId === actor.apiKeyId) {
-    throw new AppError("BAD_REQUEST", "Cannot rotate the API key being used for this request");
+    throw badRequest("Cannot rotate the API key being used for this request");
   }
 
   const body = await c.req.json().catch(() => ({}));
   const parsed = apiKeyRotateSchema.safeParse(body);
 
   if (!parsed.success) {
-    throw new AppError("BAD_REQUEST", "Invalid request body", {
-      errors: parsed.error.flatten().fieldErrors,
+    throw badRequest("Invalid request body", {
+      errors: z.flattenError(parsed.error).fieldErrors,
     });
   }
 
@@ -474,7 +475,7 @@ export const revokeApiKey = async (c: AppContext) => {
 
   // Prevent revoking your own key
   if (actor.apiKeyId && keyId === actor.apiKeyId) {
-    throw new AppError("BAD_REQUEST", "Cannot revoke the API key being used for this request");
+    throw badRequest("Cannot revoke the API key being used for this request");
   }
 
   const body = await c.req.json().catch(() => ({}));
@@ -504,11 +505,11 @@ export const revokeApiKey = async (c: AppContext) => {
   }
 
   if (!confirmation) {
-    throw new AppError("BAD_REQUEST", "Confirmation is required to deactivate an API key");
+    throw badRequest("Confirmation is required to deactivate an API key");
   }
 
   if (confirmation !== existing.name) {
-    throw new AppError("BAD_REQUEST", "Confirmation did not match the key name");
+    throw badRequest("Confirmation did not match the key name");
   }
 
   const apiKeyService = new ApiKeyService(getDb(c.env));

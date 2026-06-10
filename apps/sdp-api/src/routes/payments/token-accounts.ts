@@ -1,6 +1,6 @@
 import type { Address } from "@solana/kit";
 import { formatDecimalAmount } from "@/lib/amount";
-import { AppError } from "@/lib/errors";
+import { badRequest } from "@/lib/errors";
 import { assertValidAddress } from "@/lib/solana";
 import { SOL_MINT } from "@/services/payment-operation.service";
 import { type createRpc, getAccountInfo } from "@/services/solana/rpc";
@@ -84,7 +84,7 @@ export async function resolveMintDecimals(
   const decimals = response.value?.decimals;
 
   if (typeof decimals !== "number" || !Number.isInteger(decimals) || decimals < 0) {
-    throw new AppError("BAD_REQUEST", "Token mint decimals could not be resolved");
+    throw badRequest("Token mint decimals could not be resolved");
   }
 
   return decimals;
@@ -212,7 +212,7 @@ function assertSupportedTokenProgram(program: string): Address {
   if (program === SPL_TOKEN_PROGRAM_ID || program === SPL_TOKEN_2022_PROGRAM_ID) {
     return program as Address;
   }
-  throw new AppError("BAD_REQUEST", "Unsupported token program for mint");
+  throw badRequest("Unsupported token program for mint");
 }
 
 export async function resolveMintTokenProgram(
@@ -221,7 +221,7 @@ export async function resolveMintTokenProgram(
 ): Promise<Address> {
   const mintAccountInfo = await getAccountInfo(rpc, mint);
   if (!mintAccountInfo) {
-    throw new AppError("BAD_REQUEST", "Token mint account does not exist");
+    throw badRequest("Token mint account does not exist");
   }
   return assertSupportedTokenProgram(mintAccountInfo.owner);
 }
@@ -256,7 +256,7 @@ export async function resolveSourceTokenAccount(
   }
 
   if (!selected) {
-    throw new AppError("BAD_REQUEST", "Source wallet has no token account for this mint");
+    throw badRequest("Source wallet has no token account for this mint");
   }
 
   return {

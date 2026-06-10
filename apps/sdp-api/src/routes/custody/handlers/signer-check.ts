@@ -10,9 +10,10 @@ import {
   setTransactionMessageLifetimeUsingBlockhash,
 } from "@solana/kit";
 import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
+import { z } from "zod";
 import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
-import { AppError } from "@/lib/errors";
+import { AppError, badRequest } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { createFeePaymentAdapter } from "@/services/adapters/fee-payment";
 import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
@@ -46,8 +47,8 @@ export const signerCheck = async (c: AppContext) => {
   const parsed = signerCheckSchema.safeParse(body);
 
   if (!parsed.success) {
-    throw new AppError("BAD_REQUEST", "Invalid request body", {
-      errors: parsed.error.flatten().fieldErrors,
+    throw badRequest("Invalid request body", {
+      errors: z.flattenError(parsed.error).fieldErrors,
     });
   }
 
@@ -57,7 +58,7 @@ export const signerCheck = async (c: AppContext) => {
   ]);
 
   if (!resolvedWalletId) {
-    throw new AppError("BAD_REQUEST", "API key is not bound to a signing wallet");
+    throw badRequest("API key is not bound to a signing wallet");
   }
 
   try {
@@ -149,7 +150,7 @@ export const signerCheck = async (c: AppContext) => {
     }
 
     if (error instanceof SigningError) {
-      throw new AppError("BAD_REQUEST", error.message);
+      throw badRequest(error.message);
     }
 
     if (error instanceof Error) {

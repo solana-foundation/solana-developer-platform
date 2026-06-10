@@ -397,7 +397,7 @@ async function resolveUserEmail(env: Env, userId: string, fallbackEmail?: string
   const email = primaryEmailFromClerkUser(user);
 
   if (!email) {
-    throw new AppError("BAD_REQUEST", "Clerk user missing email");
+    throw badRequest("Clerk user missing email");
   }
 
   return email;

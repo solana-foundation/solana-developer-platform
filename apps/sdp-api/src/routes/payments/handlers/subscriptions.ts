@@ -187,7 +187,7 @@ function parseU64String(value: string, fieldName: string): bigint {
     }
     return parsed;
   } catch {
-    throw new AppError("BAD_REQUEST", `${fieldName} must fit in an unsigned 64-bit integer`);
+    throw badRequest(`${fieldName} must fit in an unsigned 64-bit integer`);
   }
 }
 
@@ -199,13 +199,13 @@ function parseI64String(value: string, fieldName: string): bigint {
     }
     return parsed;
   } catch {
-    throw new AppError("BAD_REQUEST", `${fieldName} must fit in a signed 64-bit integer`);
+    throw badRequest(`${fieldName} must fit in a signed 64-bit integer`);
   }
 }
 
 function assertSubscriptionTokenMint(token: string): Address {
   if (token === "SOL" || token === SOL_MINT) {
-    throw new AppError("BAD_REQUEST", "Subscription plans require an SPL token mint");
+    throw badRequest("Subscription plans require an SPL token mint");
   }
 
   return assertValidAddress(token, "token");
@@ -252,7 +252,7 @@ async function resolvePlanRuntime(
   const amountBaseUnits = parseDecimalAmount(amount, decimals);
 
   if (amountBaseUnits <= 0n) {
-    throw new AppError("BAD_REQUEST", "Subscription amount must be greater than zero");
+    throw badRequest("Subscription amount must be greater than zero");
   }
 
   return { amountBaseUnits, mint, tokenProgram };
@@ -362,7 +362,7 @@ async function requireActiveCounterparty(c: AppContext, counterpartyId: string):
     throw new AppError("NOT_FOUND", "Counterparty not found");
   }
   if (counterparty.status !== "active") {
-    throw new AppError("BAD_REQUEST", "Counterparty must be active before creating a subscription");
+    throw badRequest("Counterparty must be active before creating a subscription");
   }
 }
 
@@ -525,7 +525,7 @@ export const prepareCreateSubscriptionPlan = async (c: AppContext) => {
     throw new AppError("NOT_FOUND", "Subscription plan not found");
   }
   if (plan.status === "archived") {
-    throw new AppError("BAD_REQUEST", "Cannot prepare an archived subscription plan");
+    throw badRequest("Cannot prepare an archived subscription plan");
   }
 
   const scope = await resolveScope(c);
@@ -652,7 +652,7 @@ export const createSubscription = async (c: AppContext) => {
     throw new AppError("NOT_FOUND", "Subscription plan not found");
   }
   if (plan.status === "archived") {
-    throw new AppError("BAD_REQUEST", "Cannot create a subscription for an archived plan");
+    throw badRequest("Cannot create a subscription for an archived plan");
   }
 
   await requireActiveCounterparty(c, parsed.data.counterpartyId);
@@ -721,7 +721,7 @@ export const prepareSubscriptionAuthorization = async (c: AppContext) => {
 
   const { plan, subscription } = await getSubscriptionWithPlan(c, params.data.subscriptionId);
   if (plan.status !== "active") {
-    throw new AppError("BAD_REQUEST", "Subscription plan must be active before authorization");
+    throw badRequest("Subscription plan must be active before authorization");
   }
   if (subscription.status !== "pending_authorization") {
     throw new AppError(
@@ -963,10 +963,10 @@ export const prepareSubscriptionCollection = async (c: AppContext) => {
 
   const { plan, subscription } = await getSubscriptionWithPlan(c, params.data.subscriptionId);
   if (subscription.status !== "active") {
-    throw new AppError("BAD_REQUEST", "Subscription must be active before collection");
+    throw badRequest("Subscription must be active before collection");
   }
   if (plan.status !== "active") {
-    throw new AppError("BAD_REQUEST", "Subscription plan must be active before collection");
+    throw badRequest("Subscription plan must be active before collection");
   }
 
   const callerWallet = await resolvePlanWriteWallet(
@@ -1038,7 +1038,7 @@ export const createSubscriptionCollectionAttempt = async (c: AppContext) => {
     throw new AppError("NOT_FOUND", "Subscription not found");
   }
   if (subscription.status !== "active") {
-    throw new AppError("BAD_REQUEST", "Subscription must be active before collection");
+    throw badRequest("Subscription must be active before collection");
   }
 
   const plan = await repo.getPlanById({
@@ -1050,7 +1050,7 @@ export const createSubscriptionCollectionAttempt = async (c: AppContext) => {
     throw new AppError("NOT_FOUND", "Subscription plan not found");
   }
   if (plan.status !== "active") {
-    throw new AppError("BAD_REQUEST", "Subscription plan must be active before collection");
+    throw badRequest("Subscription plan must be active before collection");
   }
 
   await resolvePlanWriteWallet(c, plan, plan.puller_wallet_id ?? plan.owner_wallet_id);

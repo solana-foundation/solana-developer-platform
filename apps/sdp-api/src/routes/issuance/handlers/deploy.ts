@@ -1,8 +1,9 @@
 import type { TokenResponse } from "@sdp/types";
 import type { Address } from "@solana/kit";
 import type { Context } from "hono";
+import { z } from "zod";
 import { getDb } from "@/db";
-import { AppError, notFound } from "@/lib/errors";
+import { AppError, badRequest, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
 import { AuditService } from "@/services/audit.service";
@@ -26,8 +27,8 @@ export const deployToken = async (c: AppContext) => {
   const parsed = deployTokenSchema.safeParse(body);
 
   if (!parsed.success) {
-    throw new AppError("BAD_REQUEST", "Invalid request body", {
-      errors: parsed.error.flatten().fieldErrors,
+    throw badRequest("Invalid request body", {
+      errors: z.flattenError(parsed.error).fieldErrors,
     });
   }
 
@@ -51,7 +52,7 @@ export const deployToken = async (c: AppContext) => {
   }
 
   if (token.mintAddress) {
-    throw new AppError("BAD_REQUEST", "Token already has a mint address");
+    throw badRequest("Token already has a mint address");
   }
 
   const idempotencyMetadata = buildIdempotencyMetadata(c.req.header("Idempotency-Key"), {
@@ -194,8 +195,8 @@ export const prepareDeploy = async (c: AppContext) => {
   const parsed = deployTokenSchema.safeParse(body);
 
   if (!parsed.success) {
-    throw new AppError("BAD_REQUEST", "Invalid request body", {
-      errors: parsed.error.flatten().fieldErrors,
+    throw badRequest("Invalid request body", {
+      errors: z.flattenError(parsed.error).fieldErrors,
     });
   }
 
@@ -218,7 +219,7 @@ export const prepareDeploy = async (c: AppContext) => {
   }
 
   if (token.mintAddress) {
-    throw new AppError("BAD_REQUEST", "Token already has a mint address");
+    throw badRequest("Token already has a mint address");
   }
 
   const signingWalletId = resolveApiKeySigningWalletId(

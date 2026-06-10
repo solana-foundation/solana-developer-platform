@@ -1,7 +1,8 @@
 import type { TokenResponse } from "@sdp/types";
 import type { Context } from "hono";
+import { z } from "zod";
 import { getDb } from "@/db";
-import { AppError, notFound } from "@/lib/errors";
+import { badRequest, notFound } from "@/lib/errors";
 import { created, paginated, success } from "@/lib/response";
 import { assertValidAddress } from "@/lib/solana";
 import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
@@ -53,8 +54,8 @@ export const createToken = async (c: AppContext) => {
   const parsed = createTokenSchema.safeParse(body);
 
   if (!parsed.success) {
-    throw new AppError("BAD_REQUEST", "Invalid request body", {
-      errors: parsed.error.flatten().fieldErrors,
+    throw badRequest("Invalid request body", {
+      errors: z.flattenError(parsed.error).fieldErrors,
     });
   }
 
@@ -67,7 +68,7 @@ export const createToken = async (c: AppContext) => {
   );
 
   if (resolved.errors.length > 0) {
-    throw new AppError("BAD_REQUEST", "Invalid template overrides", {
+    throw badRequest("Invalid template overrides", {
       errors: resolved.errors,
     });
   }
@@ -162,8 +163,8 @@ export const updateToken = async (c: AppContext) => {
   const parsed = updateTokenSchema.safeParse(body);
 
   if (!parsed.success) {
-    throw new AppError("BAD_REQUEST", "Invalid request body", {
-      errors: parsed.error.flatten().fieldErrors,
+    throw badRequest("Invalid request body", {
+      errors: z.flattenError(parsed.error).fieldErrors,
     });
   }
 
@@ -197,7 +198,7 @@ export const updateToken = async (c: AppContext) => {
       );
 
       if (!currentAuthorityRaw) {
-        throw new AppError("BAD_REQUEST", "Metadata authority is not available for this token");
+        throw badRequest("Metadata authority is not available for this token");
       }
 
       const { signer } = await resolveAuthoritySigner({

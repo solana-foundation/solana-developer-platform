@@ -1,10 +1,10 @@
 import { isDecimalString } from "@/lib/amount";
-import { AppError } from "@/lib/errors";
+import { badRequest } from "@/lib/errors";
 
 function parseDecimalParts(value: string): { whole: string; fraction: string } {
   const normalized = value.trim();
   if (!isDecimalString(normalized)) {
-    throw new AppError("BAD_REQUEST", "Invalid amount format");
+    throw badRequest("Invalid amount format");
   }
 
   const [wholeRaw = "", fractionRaw = ""] = normalized.split(".");

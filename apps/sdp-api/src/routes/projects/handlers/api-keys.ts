@@ -1,8 +1,9 @@
 import type { ApiKeyRole, CreateApiKeyResponse } from "@sdp/types";
 import type { Context } from "hono";
+import { z } from "zod";
 import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
-import { AppError, notFound } from "@/lib/errors";
+import { AppError, badRequest, notFound } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import { apiKeyCreateSchema } from "@/routes/api-keys/schemas";
 import { ApiKeyService } from "@/services/api-key.service";
@@ -84,8 +85,8 @@ export const createProjectApiKey = async (c: AppContext) => {
   const parsed = apiKeyCreateSchema.safeParse(body);
 
   if (!parsed.success) {
-    throw new AppError("BAD_REQUEST", "Invalid request body", {
-      errors: parsed.error.flatten().fieldErrors,
+    throw badRequest("Invalid request body", {
+      errors: z.flattenError(parsed.error).fieldErrors,
     });
   }
 
@@ -143,7 +144,7 @@ export const createProjectApiKey = async (c: AppContext) => {
         if (error.code === "NOT_FOUND") {
           throw new AppError("CONFLICT", error.message);
         }
-        throw new AppError("BAD_REQUEST", error.message);
+        throw badRequest(error.message);
       }
       throw error;
     }
