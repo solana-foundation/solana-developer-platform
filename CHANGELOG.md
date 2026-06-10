@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.27.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.26.0...v0.27.0) (2026-06-09)
+
+### Features
+
+* **self-hosted:** publish env template as default.env.example ([#425](https://github.com/solana-foundation/solana-developer-platform/pull/425)) ([21d9ccb](https://github.com/solana-foundation/solana-developer-platform/commit/21d9ccb9b35dc76f0b4252650a4172e4a608cb98))
+* **sdp-web:** HOO-491 Surface why mint/burn is disabled in token modal ([#403](https://github.com/solana-foundation/solana-developer-platform/pull/403)) ([8107db8](https://github.com/solana-foundation/solana-developer-platform/commit/8107db8065fe425102a40070540bcd67b4dd8198))
+* HOO-520 self-hosting docs section + .env configurator optimization ([#410](https://github.com/solana-foundation/solana-developer-platform/pull/410)) ([272265f](https://github.com/solana-foundation/solana-developer-platform/commit/272265f173cd1cf5bf2e2b5ca864d58c4897b4b2))
+* **payments:** add recurring payment records API [PRO-1294] ([#415](https://github.com/solana-foundation/solana-developer-platform/pull/415)) ([8310f95](https://github.com/solana-foundation/solana-developer-platform/commit/8310f9539cd347db7b2e5520120886f53bdfea7d))
+
+### Bug Fixes
+
+* ensure bvnk ui instruction comes from backend only ([#418](https://github.com/solana-foundation/solana-developer-platform/pull/418)) ([4422f3b](https://github.com/solana-foundation/solana-developer-platform/commit/4422f3bdf340ff7b58349b0ec5866df81e797f8c))
+
+### Maintenance
+
+* **self-hosted:** HOO-522 nightly smoke test on clean Ubuntu ([#422](https://github.com/solana-foundation/solana-developer-platform/pull/422)) ([2c095b1](https://github.com/solana-foundation/solana-developer-platform/commit/2c095b13b0b680272969c6af6cf04e7bbde70e88))
+* **deps:** bump the actions group with 6 updates ([#395](https://github.com/solana-foundation/solana-developer-platform/pull/395)) ([b944ba3](https://github.com/solana-foundation/solana-developer-platform/commit/b944ba3923ea0c1d2e347d66e5d1b1b2475b4abf))
+
 ## [0.26.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.25.0...v0.26.0) (2026-06-05)
 
 ### Features

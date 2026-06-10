@@ -22,20 +22,31 @@ export const ONRAMP_STEPS = [
   { id: "PROVIDER", label: "Provider", title: "Complete your deposit" },
 ] as const satisfies readonly RampWizardStep[];
 
-export type OnrampStepId = (typeof ONRAMP_STEPS)[number]["id"];
+const ONRAMP_REQUIREMENTS_STEP = {
+  id: "REQUIREMENTS",
+  label: "Details",
+  title: "A few details to continue",
+} as const satisfies RampWizardStep;
+
+export type OnrampStepId = (typeof ONRAMP_STEPS)[number]["id"] | typeof ONRAMP_REQUIREMENTS_STEP.id;
 
 export function useOnrampWizard(props: UseRampWizardProps) {
   const [quoteSimulationLoading, setQuoteSimulationLoading] = useState(false);
   const [quoteSimulationSucceeded, setQuoteSimulationSucceeded] = useState(false);
 
-  const wizard = useRampWizard(props, {
+  const wizard = useRampWizard<OnrampStepId>(props, {
     pairs: ONRAMP_PAIRS,
     steps: ONRAMP_STEPS,
     stepSchemas: { DEPOSIT: depositAmountSchema },
     quoteStepId: "DEPOSIT",
+    requirements: {
+      step: ONRAMP_REQUIREMENTS_STEP,
+      insertAfter: "DEPOSIT",
+      direction: "onramp",
+    },
     selectionSchema: depositSelectionSchema,
     quoteEndpoint: "/api/dashboard/payments/ramps/onramp/quote",
-    buildQuotePayload: ({ fields, provider, selectedRampPair, cryptoToken }) => ({
+    buildQuotePayload: ({ fields, provider, selectedRampPair, cryptoToken, collectedData }) => ({
       provider,
       counterpartyId: fields.counterpartyId,
       destinationWallet: fields.walletId,
@@ -43,6 +54,7 @@ export function useOnrampWizard(props: UseRampWizardProps) {
       fiatCurrency: selectedRampPair.fiatCurrency,
       fiatAmount: fields.amount.trim(),
       redirectUrl: `${window.location.origin}/dashboard/payments`,
+      collectedData,
     }),
     onQuoteCreated: () => {
       setQuoteSimulationLoading(false);

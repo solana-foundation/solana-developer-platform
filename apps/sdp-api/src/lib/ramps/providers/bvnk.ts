@@ -2,6 +2,7 @@ import type {
   BvnkBankFundingDetails,
   BvnkOnboardingStatus,
   BvnkPaymentRampInstruction,
+  Counterparty,
   PaymentRampEstimate,
   PaymentRampEstimateFees,
   PaymentRampExecution,
@@ -10,6 +11,7 @@ import type {
 } from "@sdp/types";
 import { RAMP_FIAT_CURRENCIES } from "@sdp/types/generated/ramp-support";
 import { getCryptoRailAssetLabel, parseFiatCurrency } from "@sdp/types/payment-rails";
+import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
 import { formatDecimalAmount, isDecimalString, parseDecimalAmount } from "@/lib/amount";
@@ -33,7 +35,9 @@ import type {
   RampRuntimeContext,
   RampWebhookValidationContext,
   RampWebhookValidationResult,
+  ValidateCounterpartyOptions,
 } from "../types";
+import { bvnkCounterpartyRequirements } from "../validation/bvnk";
 
 const BVNK_PRODUCTION_API_URL = "https://api.bvnk.com";
 const BVNK_SANDBOX_API_URL = "https://api.sandbox.bvnk.com";
@@ -746,6 +750,13 @@ function parseBvnkFiatWallet(payload: unknown): BvnkFiatWallet {
 export class BvnkRampClient implements RampProvider {
   readonly id = "bvnk";
 
+  validateCounterparty(
+    counterparty: Counterparty,
+    options: ValidateCounterpartyOptions
+  ): CounterpartyRequirements {
+    return bvnkCounterpartyRequirements(counterparty, options);
+  }
+
   async _discoverRails({
     env,
     fetchJson,
@@ -1406,56 +1417,6 @@ export function buildBvnkPartyDetails(
         ...(identity.address?.countryCode ? { countryCode: identity.address.countryCode } : {}),
       },
     ],
-  };
-}
-
-export function buildBvnkIndividualPayload(counterparty: CounterpartyRow): Record<string, unknown> {
-  const identity = counterparty.identity;
-  const compliance = identity.compliance;
-  const address = identity.address;
-  if (!compliance?.taxIdentification || !compliance.cdd) {
-    throw new AppError(
-      "BAD_REQUEST",
-      "Counterparty is missing the KYC/CDD details required for BVNK on-ramp."
-    );
-  }
-  const cdd = compliance.cdd;
-  return {
-    description: "SDP onramp",
-    firstName: identity.firstName,
-    lastName: identity.lastName,
-    ...(identity.dateOfBirth ? { dateOfBirth: identity.dateOfBirth } : {}),
-    emailAddress: counterparty.email,
-    nationality: compliance.nationality ?? identity.citizenshipCountryCode,
-    birthCountryCode: compliance.birthCountryCode ?? identity.birthCountryCode,
-    taxIdentification: {
-      number: compliance.taxIdentification.number,
-      taxResidenceCountryCode: compliance.taxIdentification.residenceCountryCode,
-    },
-    ...(address
-      ? {
-          address: {
-            addressLine1: address.line1,
-            ...(address.line2 ? { addressLine2: address.line2 } : {}),
-            city: address.city,
-            ...(address.postalCode ? { postalCode: address.postalCode } : {}),
-            countryCode: address.countryCode,
-            ...(address.subdivisionCode ? { stateCode: address.subdivisionCode } : {}),
-          },
-        }
-      : {}),
-    cdd: {
-      employmentStatus: cdd.employmentStatus,
-      sourceOfFunds: cdd.sourceOfFunds,
-      pepStatus: cdd.pepStatus,
-      intendedUseOfAccount: cdd.intendedUseOfAccount,
-      expectedMonthlyVolume: {
-        amount: cdd.expectedMonthlyVolume.amount,
-        currency: cdd.expectedMonthlyVolume.currency,
-      },
-      estimatedYearlyIncome: cdd.estimatedYearlyIncome,
-      employmentIndustrySector: cdd.employmentIndustrySector,
-    },
   };
 }
 

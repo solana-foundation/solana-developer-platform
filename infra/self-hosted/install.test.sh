@@ -28,9 +28,9 @@ scenario() { # scenario <name> <docker-run-flags...> -- <in-container-bash>
       apt-get update -qq >/dev/null 2>&1
       apt-get install -y -qq curl >/dev/null 2>&1
       mkdir -p /release
-      cp /src/infra/self-hosted/compose.yml /src/infra/self-hosted/.env.example \
-         /src/infra/self-hosted/install.sh /release/
-      ( cd /release && sha256sum install.sh compose.yml .env.example > SHA256SUMS )
+      cp /src/infra/self-hosted/compose.yml /src/infra/self-hosted/install.sh /release/
+      cp /src/infra/self-hosted/.env.example /release/default.env.example
+      ( cd /release && sha256sum install.sh compose.yml default.env.example > SHA256SUMS )
       set +e
       $1
     "
@@ -159,13 +159,25 @@ else check "preserves the existing compose.yml when the new download fails verif
 #     instead of treating the corrupt download as a kept existing file.
 if scenario "no-corrupt-env-example" -- "
   $DOCKER_OK
-  echo 'TAMPERED=true' >> /release/.env.example
+  echo 'TAMPERED=true' >> /release/default.env.example
   out=\$(bash /src/infra/self-hosted/install.sh 2>&1); rc=\$?
   [ \$rc -ne 0 ] \
     && echo \"\$out\" | grep -qi 'checksum verification failed' \
     && [ ! -f /root/sdp/.env.example ]
 "; then check "leaves no .env.example behind when its download fails verification" 0
 else check "leaves no .env.example behind when its download fails verification" 1; fi
+
+# 11. A missing template asset (fetch failure) aborts cleanly, without the cleanup
+#     trap surfacing an unbound-variable error in place of the real cause.
+if scenario "missing-env-template" -- "
+  $DOCKER_OK
+  rm -f /release/default.env.example
+  out=\$(bash /src/infra/self-hosted/install.sh 2>&1); rc=\$?
+  [ \$rc -ne 0 ] \
+    && ! echo \"\$out\" | grep -qi 'unbound variable' \
+    && [ ! -f /root/sdp/.env.example ]
+"; then check "aborts cleanly without unbound-variable when the template asset is missing" 0
+else check "aborts cleanly without unbound-variable when the template asset is missing" 1; fi
 
 echo "----"; echo "PASS=$pass FAIL=$fail"
 [ "$fail" -eq 0 ]

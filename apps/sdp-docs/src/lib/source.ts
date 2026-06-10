@@ -1,8 +1,8 @@
-import { loader, type SourceConfig, type VirtualFile } from "fumadocs-core/source";
+import { loader, type VirtualFile } from "fumadocs-core/source";
 import { docs } from "../../.source/server";
 
 type FumadocsSource = {
-  files: VirtualFile<SourceConfig>[] | (() => VirtualFile<SourceConfig>[]);
+  files: VirtualFile[] | (() => VirtualFile[]);
 } & Record<string, unknown>;
 
 const mdxSource = (

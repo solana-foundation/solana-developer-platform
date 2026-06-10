@@ -1,18 +1,12 @@
 "use client";
 
-import { humanizeEnumLabel } from "@/lib/utils";
 import { ReviewRow } from "../components/review-row";
 import { SectionDivider } from "../components/section-divider";
 import { useCounterpartyCreate } from "../counterparty-create-context";
-import {
-  addressSchema,
-  basicsSchema,
-  complianceSchema,
-  identitySchema,
-} from "../counterparty-create-schemas";
+import { addressSchema, basicsSchema, identitySchema } from "../counterparty-create-schemas";
 
 export function ReviewStep() {
-  const { basics, identity, address, compliance, steps, submitError } = useCounterpartyCreate();
+  const { basics, identity, address, steps, submitError } = useCounterpartyCreate();
 
   const basicsParsed = basicsSchema.safeParse(basics.values);
   const identityParsed = identitySchema.safeParse(identity.values);
@@ -25,11 +19,6 @@ export function ReviewStep() {
   const basicsValues = basicsParsed.data;
   const identityValues = identityParsed.data;
   const addressValues = addressParsed.data;
-
-  const hasComplianceStep = steps.includes("compliance");
-  const complianceParsed = complianceSchema.safeParse(compliance.values);
-  const complianceValues =
-    hasComplianceStep && complianceParsed.success ? complianceParsed.data : null;
 
   const hasIdentityStep = steps.includes("identity");
   const hasAnyIdentity = !!(
@@ -85,42 +74,6 @@ export function ReviewStep() {
           <ReviewRow label="State / Province" value={addressValues.subdivisionCode} />
         ) : null}
       </div>
-
-      {complianceValues ? (
-        <>
-          <SectionDivider label="Tax & compliance" />
-          <div className="space-y-1">
-            <ReviewRow label="Tax ID" value={complianceValues.taxIdNumber} />
-            <ReviewRow label="Nationality" value={complianceValues.nationality} />
-            <ReviewRow label="Country of birth" value={complianceValues.birthCountryCode} />
-            <ReviewRow
-              label="Employment status"
-              value={humanizeEnumLabel(complianceValues.employmentStatus)}
-            />
-            <ReviewRow
-              label="Source of funds"
-              value={humanizeEnumLabel(complianceValues.sourceOfFunds)}
-            />
-            <ReviewRow label="PEP status" value={humanizeEnumLabel(complianceValues.pepStatus)} />
-            <ReviewRow
-              label="Intended use"
-              value={humanizeEnumLabel(complianceValues.intendedUseOfAccount)}
-            />
-            <ReviewRow
-              label="Yearly income"
-              value={humanizeEnumLabel(complianceValues.estimatedYearlyIncome)}
-            />
-            <ReviewRow
-              label="Industry sector"
-              value={humanizeEnumLabel(complianceValues.employmentIndustrySector)}
-            />
-            <ReviewRow
-              label="Monthly volume (USD)"
-              value={complianceValues.expectedMonthlyVolume}
-            />
-          </div>
-        </>
-      ) : null}
 
       {submitError ? <p className="text-sm text-status-error-text">{submitError}</p> : null}
     </div>

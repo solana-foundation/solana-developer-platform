@@ -44,6 +44,11 @@
       "import": "./src/provider-access.ts",
       "default": "./src/provider-access.ts"
     },
+    "./ramp-requirements": {
+      "types": "./src/ramp-requirements.ts",
+      "import": "./src/ramp-requirements.ts",
+      "default": "./src/ramp-requirements.ts"
+    },
     "./generated/ramp-support": {
       "types": "./src/generated/ramp-support.generated.ts",
       "import": "./src/generated/ramp-support.generated.ts",

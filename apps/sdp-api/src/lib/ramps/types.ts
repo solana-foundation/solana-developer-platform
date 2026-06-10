@@ -1,4 +1,6 @@
 import type {
+  Counterparty,
+  CounterpartyProviderData,
   PaymentRampEstimate,
   PaymentRampExecution,
   PaymentRampQuote,
@@ -7,6 +9,7 @@ import type {
 import type { RampFiatCurrency } from "@sdp/types/generated/ramp-support";
 import type { CryptoRailId, FiatCurrencyCode } from "@sdp/types/payment-rails";
 import type { RampProviderId } from "@sdp/types/provider-access";
+import type { CounterpartyRequirements, RampDirection } from "@sdp/types/ramp-requirements";
 import type { BvnkComplianceInput } from "./providers/bvnk";
 
 export type { BvnkComplianceInput, BvnkRuleEntity } from "./providers/bvnk";
@@ -138,6 +141,11 @@ export interface RampExecuteOfframpInput {
   bvnkCompliance?: BvnkComplianceInput;
 }
 
+export interface ValidateCounterpartyOptions {
+  direction: RampDirection;
+  providerData: CounterpartyProviderData;
+}
+
 export interface RampProviderClient {
   id: RampProviderId;
   _discoverRails(context: RampDiscoveryContext): Promise<void>;
@@ -175,4 +183,8 @@ export interface RampProvider extends RampProviderClient {
     ctx: RampRuntimeContext,
     input: RampExecuteOfframpInput
   ): Promise<PaymentRampExecution>;
+  validateCounterparty(
+    counterparty: Counterparty,
+    options: ValidateCounterpartyOptions
+  ): CounterpartyRequirements;
 }
