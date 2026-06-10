@@ -4360,6 +4360,182 @@ describe("Issuance Routes", () => {
           simulateTransactionSpy.mockRestore();
         }
       });
+
+      it("re-prepares with an empty uri and signals a follow-up when the create tx overflows", async () => {
+        if (!(env as { SOLANA_RPC_URL?: string }).SOLANA_RPC_URL) {
+          (env as { SOLANA_RPC_URL?: string }).SOLANA_RPC_URL = "https://rpc.invalid.test";
+        }
+
+        const token = await seedIssuedToken({
+          id: "tok_prepare_uri_overflow",
+          mintAddress: null,
+          status: "pending",
+          uri: null,
+          requiresAllowlist: false,
+        });
+
+        // base64 of 1644 chars decodes to 1233 raw bytes — one over the limit.
+        const oversizedTx = "A".repeat(1644);
+        const slimTx = "ZmFrZS1zZXJpYWxpemVkLXR4";
+
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSigner")
+          .mockResolvedValueOnce({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
+        const prepareCreateTokenSpy = vi
+          .spyOn(MosaicService.prototype, "prepareCreateToken")
+          .mockResolvedValueOnce({
+            serializedTx: oversizedTx,
+            blockhash: "11111111111111111111111111111111",
+            lastValidBlockHeight: 0n,
+            mint: TEST_SOLANA_ADDRESSES.mint,
+            listAddress: undefined,
+          } as never)
+          .mockResolvedValueOnce({
+            serializedTx: slimTx,
+            blockhash: "11111111111111111111111111111111",
+            lastValidBlockHeight: 0n,
+            mint: TEST_SOLANA_ADDRESSES.mint,
+            listAddress: undefined,
+          } as never);
+        const simulateTransactionSpy = vi
+          .spyOn(SolanaRpc, "simulateTransaction")
+          .mockResolvedValueOnce({ success: true, logs: [], unitsConsumed: 0n, error: null });
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${token.id}/deploy/prepare`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({}),
+            },
+            env
+          );
+
+          expect(res.status).toBe(200);
+          const payload = (await res.json()) as {
+            data: {
+              transaction: { serialized: string };
+              metadataUriFollowUp?: { required: boolean; uri: string };
+            };
+          };
+
+          // First attempt carries the hosted uri; the overflow retry uses "".
+          expect(prepareCreateTokenSpy).toHaveBeenNthCalledWith(
+            1,
+            expect.objectContaining({
+              metadata: expect.objectContaining({ uri: expectedMetadataUrl(token.id) }),
+            })
+          );
+          expect(prepareCreateTokenSpy).toHaveBeenNthCalledWith(
+            2,
+            expect.objectContaining({ metadata: expect.objectContaining({ uri: "" }) })
+          );
+
+          // Response returns the slim create tx + a follow-up descriptor.
+          expect(payload.data.transaction.serialized).toBe(slimTx);
+          expect(payload.data.metadataUriFollowUp).toEqual({
+            required: true,
+            uri: expectedMetadataUrl(token.id),
+          });
+        } finally {
+          createOrgSignerSpy.mockRestore();
+          prepareCreateTokenSpy.mockRestore();
+          simulateTransactionSpy.mockRestore();
+        }
+      });
+    });
+
+    describe("POST /v1/issuance/tokens/:tokenId/deploy/prepare-metadata", () => {
+      it("prepares the metadata-uri follow-up tx for a deployed token", async () => {
+        if (!(env as { SOLANA_RPC_URL?: string }).SOLANA_RPC_URL) {
+          (env as { SOLANA_RPC_URL?: string }).SOLANA_RPC_URL = "https://rpc.invalid.test";
+        }
+
+        const token = await seedIssuedToken({
+          id: "tok_prepare_metadata_followup",
+          mintAddress: TEST_SOLANA_ADDRESSES.mint,
+          status: "active",
+          uri: null,
+          requiresAllowlist: false,
+        });
+
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSigner")
+          .mockResolvedValueOnce({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
+        const prepareUpdateMetadataSpy = vi
+          .spyOn(MosaicService.prototype, "prepareUpdateMetadata")
+          .mockResolvedValueOnce({
+            serializedTx: "ZmFrZS1tZXRhZGF0YS10eA",
+            blockhash: "11111111111111111111111111111111",
+            lastValidBlockHeight: 0n,
+            requiredSigners: [],
+          } as never);
+        const simulateTransactionSpy = vi
+          .spyOn(SolanaRpc, "simulateTransaction")
+          .mockResolvedValueOnce({ success: true, logs: [], unitsConsumed: 0n, error: null });
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${token.id}/deploy/prepare-metadata`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({}),
+            },
+            env
+          );
+
+          expect(res.status).toBe(200);
+          const payload = (await res.json()) as {
+            data: { transaction: { serialized: string } | null; uri: string };
+          };
+
+          expect(prepareUpdateMetadataSpy).toHaveBeenCalledWith(
+            expect.objectContaining({
+              mint: TEST_SOLANA_ADDRESSES.mint,
+              uri: expectedMetadataUrl(token.id),
+            })
+          );
+          expect(payload.data.transaction?.serialized).toBe("ZmFrZS1tZXRhZGF0YS10eA");
+          expect(payload.data.uri).toBe(expectedMetadataUrl(token.id));
+        } finally {
+          createOrgSignerSpy.mockRestore();
+          prepareUpdateMetadataSpy.mockRestore();
+          simulateTransactionSpy.mockRestore();
+        }
+      });
+
+      it("returns 400 for a token that has not been deployed", async () => {
+        const token = await seedIssuedToken({
+          id: "tok_prepare_metadata_undeployed",
+          mintAddress: null,
+          status: "pending",
+          uri: null,
+          requiresAllowlist: false,
+        });
+
+        const res = await app.request(
+          `/v1/issuance/tokens/${token.id}/deploy/prepare-metadata`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+            },
+            body: JSON.stringify({}),
+          },
+          env
+        );
+
+        expect(res.status).toBe(400);
+      });
     });
 
     describe("GET /v1/issuance/tokens/:tokenId/metadata.json", () => {
