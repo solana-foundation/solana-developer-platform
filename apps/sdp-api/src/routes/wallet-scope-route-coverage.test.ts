@@ -110,6 +110,7 @@ describe("wallet-scoped route coverage inventory", () => {
       "POST /tokens/:tokenId/burn/prepare",
       "POST /tokens/:tokenId/deploy",
       "POST /tokens/:tokenId/deploy/prepare",
+      "POST /tokens/:tokenId/deploy/prepare-metadata",
       "POST /tokens/:tokenId/force-burn",
       "POST /tokens/:tokenId/force-burn/prepare",
       "POST /tokens/:tokenId/freeze",

@@ -6,7 +6,7 @@ import { AppError, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
 import { AuditService } from "@/services/audit.service";
-import { createMosaicService, PACKET_DATA_SIZE } from "@/services/mosaic";
+import { createMosaicService, MintMetadataUpdateError, PACKET_DATA_SIZE } from "@/services/mosaic";
 import { createOrgSigner } from "@/services/solana";
 import { createRpc, simulateTransaction } from "@/services/solana/rpc";
 import { TokenService } from "@/services/token.service";
@@ -16,7 +16,7 @@ import { deployTokenSchema } from "../schemas";
 import { getMosaicAclMode, shouldEnableOnChainAcl } from "./access-control";
 import { getInitialPermanentDelegateAuthority } from "./authority-resolution";
 import { buildIdempotencyMetadata } from "./idempotency";
-import { canonicalMetadataUrl } from "./metadata";
+import { canonicalMetadataUrl, resolveMetadataOrigin } from "./metadata";
 
 type AppContext = Context<{ Bindings: Env }>;
 
@@ -99,6 +99,10 @@ export const deployToken = async (c: AppContext) => {
   const enableAbl = shouldEnableOnChainAcl(token);
   const aclMode = getMosaicAclMode(token);
 
+  // Hoisted so the catch block can persist the mint authority if createToken
+  // fails after the mint is already live on-chain (see MintMetadataUpdateError).
+  let custodyAddress: Address | undefined;
+
   try {
     // Get custody signer (resolves via 3-tier: project → org → env fallback)
     const signer = await createOrgSigner(
@@ -107,7 +111,7 @@ export const deployToken = async (c: AppContext) => {
       auth.projectId,
       signingWalletId
     );
-    const custodyAddress = signer.address;
+    custodyAddress = signer.address;
 
     // Create Mosaic service for template-based token deployment
     const mosaic = createMosaicService(c.env, signer);
@@ -118,9 +122,12 @@ export const deployToken = async (c: AppContext) => {
         name: token.name,
         symbol: token.symbol,
         // Fall back to the SDP-hosted metadata JSON when the issuer didn't
-        // supply their own URI (HOO-466). Origin is request-derived so each
-        // environment points the on-chain MetadataPointer at itself.
-        uri: token.uri?.trim() || canonicalMetadataUrl(new URL(c.req.url).origin, token.id),
+        // supply their own URI (HOO-466). Origin resolves to PUBLIC_API_ORIGIN
+        // when set, else the request origin, so the on-chain MetadataPointer
+        // points each environment at itself.
+        uri:
+          token.uri?.trim() ||
+          canonicalMetadataUrl(resolveMetadataOrigin(c.env, c.req.url), token.id),
       },
       decimals: token.decimals,
       mintAuthority: signer,
@@ -183,6 +190,43 @@ export const deployToken = async (c: AppContext) => {
     const response: TokenResponse = { token: updatedToken };
     return success(c, response);
   } catch (error) {
+    // The mint was created on-chain but the metadata-URI follow-up failed. The
+    // create is irreversible, so record the mint (marking the token active)
+    // before surfacing the error — otherwise a retry generates a new keypair
+    // and mints a second, orphaned token. The hosted-URI pointer is left unset;
+    // it can be fixed later via a metadata update.
+    if (error instanceof MintMetadataUpdateError && custodyAddress && error.result.mint) {
+      const freezeAuthority = token.isFreezable ? custodyAddress : null;
+      await tokenService.setTokenDeployed(
+        tokenId,
+        error.result.mint,
+        custodyAddress,
+        freezeAuthority,
+        error.result.listAddress as string | undefined
+      );
+      await tokenService.updateTransaction(tx.id, {
+        status: "confirmed",
+        signature: error.result.signature,
+        slot: Number(error.result.slot),
+        params: {
+          operation: "deploy",
+          mintAddress: error.result.mint,
+          mintAuthority: custodyAddress,
+          freezeAuthority,
+          ablListAddress: error.result.listAddress,
+          aclMode,
+          metadataUriFailed: true,
+        },
+      });
+
+      throw new AppError(
+        "TRANSACTION_FAILED",
+        "Token mint was created on-chain, but setting its metadata URI failed. " +
+          "The mint is recorded — do not redeploy; set the metadata URI via a follow-up update.",
+        { mintAddress: error.result.mint }
+      );
+    }
+
     await tokenService.updateTransaction(tx.id, {
       status: "failed",
       error: error instanceof Error ? error.message : "Unknown error",
@@ -243,7 +287,7 @@ export const prepareDeploy = async (c: AppContext) => {
 
   // See deployToken above: SDP-hosted metadata fallback (HOO-466).
   const resolvedUri =
-    token.uri?.trim() || canonicalMetadataUrl(new URL(c.req.url).origin, token.id);
+    token.uri?.trim() || canonicalMetadataUrl(resolveMetadataOrigin(c.env, c.req.url), token.id);
 
   const buildMetadata = (uri: string) => ({ name: token.name, symbol: token.symbol, uri });
   const prepareOptions = {
@@ -360,7 +404,7 @@ export const prepareDeployMetadata = async (c: AppContext) => {
   // Resolve the same uri prepareDeploy used so the on-chain pointer ends up at
   // the SDP-hosted (or issuer-supplied) URL.
   const resolvedUri =
-    token.uri?.trim() || canonicalMetadataUrl(new URL(c.req.url).origin, token.id);
+    token.uri?.trim() || canonicalMetadataUrl(resolveMetadataOrigin(c.env, c.req.url), token.id);
 
   const prepared = await mosaic.prepareUpdateMetadata({
     mint: token.mintAddress as Address,

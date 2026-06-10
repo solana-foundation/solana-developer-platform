@@ -225,6 +225,41 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
   });
 
   registry.registerPath({
+    method: "get",
+    path: "/v1/issuance/tokens/{tokenId}/metadata.json",
+    tags: ["Issuance"],
+    summary: "Get public token metadata JSON",
+    operationId: "getTokenMetadataJson",
+    description:
+      "Public, unauthenticated endpoint serving the SDP-hosted Token-2022 / " +
+      "Metaplex fungible-compatible metadata JSON for a deployed token. This is " +
+      "the URL burned into the on-chain MetadataPointer when the issuer doesn't " +
+      "supply their own URI. Only deployed (on-chain) tokens are served; pending " +
+      "drafts return 404.",
+    request: {
+      params: z.object({
+        tokenId: tokenIdParamSchema,
+      }),
+    },
+    responses: {
+      200: {
+        description: "Token metadata JSON",
+        content: jsonContent(
+          z
+            .object({
+              name: z.string(),
+              symbol: z.string(),
+              description: z.string().optional(),
+              image: z.string().optional(),
+            })
+            .openapi("TokenMetadataJson")
+        ),
+      },
+      ...errorResponses(errorResponseSchema, [404]),
+    },
+  });
+
+  registry.registerPath({
     method: "post",
     path: "/v1/issuance/tokens/{tokenId}/supply/refresh",
     tags: ["Issuance"],

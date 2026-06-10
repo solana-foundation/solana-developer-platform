@@ -77,6 +77,7 @@ import {
   DEFAULT_ACL_MODE,
   type ExecuteTransferOptions,
   type FreezeThawOptions,
+  MintMetadataUpdateError,
   type MintToOptions,
   type MosaicTransaction,
   type MosaicTransactionResult,
@@ -187,6 +188,20 @@ export class MosaicService {
       enableSrfc37
     );
 
+    // The patched mosaic-sdk seeds the ABL list-config PDA from the mint
+    // authority (custody), not the fee payer. Derive the list address from that
+    // same authority so it matches on-chain — `this.signer` is equal to it in
+    // production, but the SDK contract is the mint authority. Derived up front
+    // (from authority + mint, not the tx) so the overflow path can attach it to
+    // a failed-update error alongside the live mint.
+    let listAddress: Address | undefined;
+    if (enableSrfc37) {
+      listAddress = await getListConfigPda({
+        authority: resolveMintAuthorityAddress(options),
+        mint,
+      });
+    }
+
     // Both plain and sRFC-37 deploys go through Kora when configured. The
     // patched mosaic-sdk templates emit the on-chain Token-ACL/ABL setup with a
     // payer (Kora) distinct from the authority (custody), so we no longer bypass
@@ -207,28 +222,23 @@ export class MosaicService {
       );
       result = await this.signAndSubmitWithMintKeypair(slimTx, mintKeypair);
 
-      // In custodial deploy `this.signer` is the mint's metadata update
-      // authority, so it can set the uri. resolveFeePayerSigner swaps in Kora.
-      await this.updateMetadata({
-        mint,
-        uri: requestedUri,
-        updateAuthority: this.signer,
-        feePayer: this.signer,
-      });
+      // The mint is now live on-chain. In custodial deploy `this.signer` is the
+      // mint's metadata update authority, so it can set the uri
+      // (resolveFeePayerSigner swaps in Kora). If that follow-up fails, surface
+      // the created mint so the caller can persist it — otherwise a retry mints
+      // a second, orphaned token.
+      try {
+        await this.updateMetadata({
+          mint,
+          uri: requestedUri,
+          updateAuthority: this.signer,
+          feePayer: this.signer,
+        });
+      } catch (cause) {
+        throw new MintMetadataUpdateError({ ...result, mint, listAddress }, { cause });
+      }
     } else {
       result = await this.signAndSubmitWithMintKeypair(fullTx, mintKeypair);
-    }
-
-    let listAddress: Address | undefined;
-    if (enableSrfc37) {
-      // The patched mosaic-sdk seeds the ABL list-config PDA from the mint
-      // authority (custody), not the fee payer. Derive the list address from
-      // that same authority so it matches on-chain — `this.signer` is equal to
-      // it in production, but the SDK contract is the mint authority.
-      listAddress = await getListConfigPda({
-        authority: resolveMintAuthorityAddress(options),
-        mint,
-      });
     }
 
     return {

@@ -16,6 +16,18 @@ export const canonicalMetadataUrl = (origin: string, tokenId: string): string =>
   `${origin}/v1/issuance/tokens/${tokenId}/metadata.json`;
 
 /**
+ * Origin to embed in the on-chain metadata URL.
+ *
+ * Prefers `env.PUBLIC_API_ORIGIN` so a deployment fronted by a proxy that
+ * rewrites Host/scheme can pin the public origin — the URL is burned into the
+ * on-chain MetadataPointer at deploy time, so an internal/unreachable origin
+ * would be a permanent mistake. Falls back to the request origin, which is the
+ * public-facing origin on Cloudflare Workers.
+ */
+export const resolveMetadataOrigin = (env: Env, requestUrl: string): string =>
+  env.PUBLIC_API_ORIGIN?.trim() || new URL(requestUrl).origin;
+
+/**
  * Public, unauthenticated handler serving a Token-2022 / Metaplex
  * fungible-compatible metadata JSON for a token, assembled from its DB row.
  *
@@ -34,6 +46,10 @@ export const serveTokenMetadata = async (c: AppContext) => {
   c.header("Access-Control-Allow-Origin", "*");
 
   if (!metadata) {
+    // Short negative-cache TTL so the CDN/browser absorbs repeated probes for
+    // non-existent (or not-yet-deployed) ids — this route is rate-limit-exempt,
+    // so without it every enumeration attempt hits D1 at the origin.
+    c.header("Cache-Control", "public, max-age=60");
     return c.json({ error: { code: "NOT_FOUND", message: "Token not found" } }, 404);
   }
 

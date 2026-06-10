@@ -4,18 +4,34 @@
  * An entry matches a request path when it is:
  *  - exact (`spec === path`),
  *  - a segment prefix (`spec` matches `spec/...` but NOT `spec<other>`), or
- *  - a suffix glob: an entry beginning with `*` matches any path ending in the
- *    remainder. Used for the public token-metadata route (`*​/metadata.json`),
- *    which must skip KV + rate-limit without freeing the sibling authed
- *    `/v1/issuance/tokens/:id/...` routes a coarse prefix would also match.
+ *  - a single-segment wildcard: a `*` matches exactly one path segment (no
+ *    slash). Used to scope the public token-metadata route precisely as
+ *    `/v1/issuance/tokens/* /metadata.json`, so it skips KV + rate-limit
+ *    without freeing the sibling authed `/v1/issuance/tokens/:id/...` routes a
+ *    coarse prefix would match, nor a hypothetical future
+ *    `/admin/.../metadata.json` a bare suffix glob would silently free.
  *
  * Used by both kvStoreMiddleware and skipRateLimitPaths so the two lists can
  * never diverge on matching semantics.
  */
 export function matchesFreePath(path: string, specs: readonly string[]): boolean {
   return specs.some((spec) =>
-    spec.startsWith("*")
-      ? path.endsWith(spec.slice(1))
-      : path === spec || path.startsWith(`${spec}/`)
+    spec.includes("*") ? matchesWildcard(path, spec) : path === spec || path.startsWith(`${spec}/`)
   );
+}
+
+/**
+ * Match a path against a spec containing `*` segments, where each `*` stands
+ * for exactly one path segment (it never spans a `/`). Anchored at both ends.
+ */
+function matchesWildcard(path: string, spec: string): boolean {
+  const pattern = spec
+    .split("/")
+    .map((segment) => (segment === "*" ? "[^/]+" : escapeRegExp(segment)))
+    .join("/");
+  return new RegExp(`^${pattern}$`).test(path);
+}
+
+function escapeRegExp(literal: string): string {
+  return literal.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

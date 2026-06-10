@@ -430,10 +430,17 @@ export class TokenService {
    * `GET /v1/issuance/tokens/:id/metadata.json` route that wallets and
    * explorers fetch without credentials. Returns only the fields rendered in
    * the served JSON.
+   *
+   * Restricted to deployed tokens (`mint_address IS NOT NULL`) so a pending
+   * draft's name/symbol/description/image can't be retrieved publicly by
+   * guessing its id — only on-chain tokens, whose metadata is already public,
+   * are served.
    */
   async getPublicTokenMetadata(tokenId: string): Promise<PublicTokenMetadata | null> {
     const row = await this.db
-      .prepare("SELECT name, symbol, description, image_url FROM issued_tokens WHERE id = ?")
+      .prepare(
+        "SELECT name, symbol, description, image_url FROM issued_tokens WHERE id = ? AND mint_address IS NOT NULL"
+      )
       .bind(tokenId)
       .first<{
         name: string;

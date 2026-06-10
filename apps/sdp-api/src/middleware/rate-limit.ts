@@ -224,8 +224,8 @@ export function rateLimitMiddleware() {
 /**
  * Skip rate limiting for specific paths (e.g., health check).
  *
- * Matching (see matchesFreePath) is exact, segment-prefix, or a leading-`*`
- * suffix glob. Bare `startsWith` would mis-skip the whole API when `/` is
+ * Matching (see matchesFreePath) is exact, segment-prefix, or a single-segment
+ * `*` wildcard. Bare `startsWith` would mis-skip the whole API when `/` is
  * listed, since every pathname starts with `/`.
  */
 export function skipRateLimitPaths(...paths: string[]) {
