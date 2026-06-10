@@ -501,19 +501,25 @@ interface BasePaymentRampExecution {
   reference?: string;
 }
 
+export type LightsparkPaymentRampExecution = BasePaymentRampExecution & {
+  provider: "lightspark";
+  paymentInstructions?: LightsparkPaymentRampInstruction[];
+};
+
+export type BvnkPaymentRampExecution = BasePaymentRampExecution & {
+  provider: "bvnk";
+  paymentInstructions?: BvnkPaymentRampInstruction[];
+};
+
+export type MoonpayPaymentRampExecution = BasePaymentRampExecution & {
+  provider: "moonpay";
+  paymentInstructions?: never;
+};
+
 export type PaymentRampExecution =
-  | (BasePaymentRampExecution & {
-      provider: "lightspark";
-      paymentInstructions?: LightsparkPaymentRampInstruction[];
-    })
-  | (BasePaymentRampExecution & {
-      provider: "bvnk";
-      paymentInstructions?: BvnkPaymentRampInstruction[];
-    })
-  | (BasePaymentRampExecution & {
-      provider: Exclude<RampProviderId, "lightspark" | "bvnk">;
-      paymentInstructions?: never;
-    });
+  | LightsparkPaymentRampExecution
+  | BvnkPaymentRampExecution
+  | MoonpayPaymentRampExecution;
 
 interface BasePaymentRampQuote {
   id: string;
