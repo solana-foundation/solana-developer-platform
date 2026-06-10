@@ -12,12 +12,12 @@ import {
 import type {
   CollectedFieldData,
   CounterpartyRequirements,
-  RampDirection,
   RequirementField,
 } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
-import { AppError } from "@/lib/errors";
+import { AppError, unsupportedCounterparty } from "@/lib/errors";
+import { readBvnkCustomer } from "../providers/bvnk";
 import {
   buildRequirementSchema,
   enumOptions,
@@ -25,13 +25,8 @@ import {
   selectField,
   textField,
 } from "../requirements";
+import type { ValidateCounterpartyOptions } from "../types";
 
-/**
- * One BVNK on-ramp customer-create field: the descriptor to collect it when
- * missing, plus how to read its already-stored value off the counterparty. The
- * single source of truth for both `validateCounterparty` (which fields are
- * unsatisfied) and the quote-time payload merge.
- */
 interface BvnkOnrampField {
   descriptor: RequirementField;
   read: (identity: CounterpartyIdentity) => string | undefined;
@@ -40,8 +35,6 @@ interface BvnkOnrampField {
 const COUNTRY_OPTIONS = COUNTRIES.map((country) => ({ value: country.code, label: country.name }));
 const US_STATE_OPTIONS = US_STATES.map((state) => ({ value: state.code, label: state.name }));
 
-// Built once at module load — option arrays (250+ countries) and descriptors are
-// static; only which fields apply (US-only set) depends on the counterparty.
 const BVNK_ONRAMP_BASE_FIELDS: BvnkOnrampField[] = [
   {
     descriptor: textField({
@@ -166,38 +159,57 @@ export function bvnkOnrampFields(identity: CounterpartyIdentity): BvnkOnrampFiel
 
 export function bvnkCounterpartyRequirements(
   counterparty: Counterparty,
-  direction: RampDirection
+  { direction, providerData }: ValidateCounterpartyOptions
 ): CounterpartyRequirements {
   if (direction === "offramp") {
     return readyCounterparty("bvnk", direction);
   }
   if (counterparty.entityType === "business") {
-    return {
-      provider: "bvnk",
+    return unsupportedCounterparty(
+      "bvnk",
       direction,
-      status: "unsupported",
-      reason: "BVNK on-ramp supports individual counterparties only.",
-    };
+      "BVNK on-ramp supports individual counterparties only."
+    );
   }
 
   const identity = counterparty.identity;
+
+  if (!identity.address?.countryCode) {
+    return unsupportedCounterparty(
+      "bvnk",
+      direction,
+      "Counterparty is missing a stored address country, required for BVNK on-ramp."
+    );
+  }
+
+  if (readBvnkCustomer(providerData).customerReference) {
+    return readyCounterparty("bvnk", direction);
+  }
+
+  const missingIdentity = [
+    identity.firstName ? null : "first name",
+    identity.lastName ? null : "last name",
+    identity.dateOfBirth ? null : "date of birth",
+    identity.address.line1 ? null : "address line 1",
+    identity.address.city ? null : "address city",
+  ].filter((entry): entry is string => entry !== null);
+  if (missingIdentity.length > 0) {
+    return unsupportedCounterparty(
+      "bvnk",
+      direction,
+      `Counterparty is missing details required for BVNK on-ramp: ${missingIdentity.join(", ")}.`
+    );
+  }
+
   const missing = bvnkOnrampFields(identity)
     .filter((field) => field.read(identity) === undefined)
     .map((field) => field.descriptor);
-
   if (missing.length === 0) {
     return readyCounterparty("bvnk", direction);
   }
   return { provider: "bvnk", direction, status: "collect", fields: missing };
 }
 
-/**
- * Builds the BVNK customer-create `individual` payload by merging stored
- * identity with the just-in-time `collectedData` passthrough. Fields already
- * present on the counterparty are read from there; the rest must be supplied in
- * `collectedData` (validated against the recomputed requirement schema). The
- * passthrough is never persisted.
- */
 export function buildBvnkIndividualPayload(
   counterparty: CounterpartyRow,
   collectedData: CollectedFieldData | undefined,

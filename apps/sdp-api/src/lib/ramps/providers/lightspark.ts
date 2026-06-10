@@ -14,7 +14,7 @@ import {
   getCryptoRailAssetLabel,
   parseFiatCurrency,
 } from "@sdp/types/payment-rails";
-import type { CounterpartyRequirements, RampDirection } from "@sdp/types/ramp-requirements";
+import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 import { formatDecimalAmount, parseDecimalAmount } from "@/lib/amount";
 import { AppError, providerNotConfigured } from "@/lib/errors";
 import { isAddress } from "@/lib/solana";
@@ -43,6 +43,7 @@ import type {
   RampSettlementEvent,
   RampWebhookValidationContext,
   RampWebhookValidationResult,
+  ValidateCounterpartyOptions,
 } from "../types";
 
 const LIGHTSPARK_DEFAULT_GRID_API_URL = "https://api.lightspark.com/grid/2025-10-13";
@@ -479,7 +480,7 @@ export class LightsparkRampClient implements RampProvider {
 
   validateCounterparty(
     _counterparty: Counterparty,
-    options: { direction: RampDirection }
+    options: ValidateCounterpartyOptions
   ): CounterpartyRequirements {
     return readyCounterparty(this.id, options.direction);
   }

@@ -11,7 +11,7 @@ import type {
 } from "@sdp/types";
 import { RAMP_FIAT_CURRENCIES } from "@sdp/types/generated/ramp-support";
 import { getCryptoRailAssetLabel, parseFiatCurrency } from "@sdp/types/payment-rails";
-import type { CounterpartyRequirements, RampDirection } from "@sdp/types/ramp-requirements";
+import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
 import { formatDecimalAmount, isDecimalString, parseDecimalAmount } from "@/lib/amount";
@@ -35,6 +35,7 @@ import type {
   RampRuntimeContext,
   RampWebhookValidationContext,
   RampWebhookValidationResult,
+  ValidateCounterpartyOptions,
 } from "../types";
 import { bvnkCounterpartyRequirements } from "../validation/bvnk";
 
@@ -751,9 +752,9 @@ export class BvnkRampClient implements RampProvider {
 
   validateCounterparty(
     counterparty: Counterparty,
-    options: { direction: RampDirection }
+    options: ValidateCounterpartyOptions
   ): CounterpartyRequirements {
-    return bvnkCounterpartyRequirements(counterparty, options.direction);
+    return bvnkCounterpartyRequirements(counterparty, options);
   }
 
   async _discoverRails({

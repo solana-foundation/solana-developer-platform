@@ -158,7 +158,7 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
 
   const requirements = RAMP_PROVIDER_CLIENTS[query.data.provider].validateCounterparty(
     mapToCounterparty(counterparty),
-    { direction: query.data.direction }
+    { direction: query.data.direction, providerData: counterparty.provider_data }
   );
   return success(c, requirements);
 };

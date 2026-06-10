@@ -11,7 +11,7 @@ import {
   getCryptoRailAssetLabel,
   parseFiatCurrency,
 } from "@sdp/types/payment-rails";
-import type { CounterpartyRequirements, RampDirection } from "@sdp/types/ramp-requirements";
+import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 import { AppError, providerNotConfigured } from "@/lib/errors";
 import { hashString } from "@/lib/hash";
 import { providerFetchJson } from "../fetch";
@@ -32,6 +32,7 @@ import type {
   RampSettlementEvent,
   RampWebhookValidationContext,
   RampWebhookValidationResult,
+  ValidateCounterpartyOptions,
 } from "../types";
 
 const MOONPAY_API_BASE_URL = "https://api.moonpay.com";
@@ -281,7 +282,7 @@ export class MoonpayRampClient implements RampProvider {
 
   validateCounterparty(
     _counterparty: Counterparty,
-    options: { direction: RampDirection }
+    options: ValidateCounterpartyOptions
   ): CounterpartyRequirements {
     return readyCounterparty(this.id, options.direction);
   }

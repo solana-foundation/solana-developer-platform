@@ -1,5 +1,6 @@
 import type {
   Counterparty,
+  CounterpartyProviderData,
   PaymentRampEstimate,
   PaymentRampExecution,
   PaymentRampQuote,
@@ -140,6 +141,11 @@ export interface RampExecuteOfframpInput {
   bvnkCompliance?: BvnkComplianceInput;
 }
 
+export interface ValidateCounterpartyOptions {
+  direction: RampDirection;
+  providerData: CounterpartyProviderData;
+}
+
 export interface RampProviderClient {
   id: RampProviderId;
   _discoverRails(context: RampDiscoveryContext): Promise<void>;
@@ -177,14 +183,8 @@ export interface RampProvider extends RampProviderClient {
     ctx: RampRuntimeContext,
     input: RampExecuteOfframpInput
   ): Promise<PaymentRampExecution>;
-  /**
-   * Reports what counterparty data this provider still needs before the given
-   * direction can proceed. Pure/sync: static rules over the counterparty's
-   * stored identity; no network. The endpoint surfaces this and the on/off-ramp
-   * flow collects any `collect` fields just-in-time.
-   */
   validateCounterparty(
     counterparty: Counterparty,
-    options: { direction: RampDirection }
+    options: ValidateCounterpartyOptions
   ): CounterpartyRequirements;
 }
