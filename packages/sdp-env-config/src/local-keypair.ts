@@ -27,8 +27,14 @@ function base64UrlToBytes(value: string): Uint8Array {
 function encodeBase58(bytes: Uint8Array): string {
   if (bytes.length === 0) return "";
 
-  const digits = [0];
+  let leadingZeroes = 0;
   for (const byte of bytes) {
+    if (byte !== 0) break;
+    leadingZeroes += 1;
+  }
+
+  const digits: number[] = [];
+  for (const byte of bytes.subarray(leadingZeroes)) {
     let carry = byte;
     for (let i = 0; i < digits.length; i += 1) {
       const value = digits[i] * 256 + carry;
@@ -39,12 +45,6 @@ function encodeBase58(bytes: Uint8Array): string {
       digits.push(carry % 58);
       carry = Math.floor(carry / 58);
     }
-  }
-
-  let leadingZeroes = 0;
-  for (const byte of bytes) {
-    if (byte !== 0) break;
-    leadingZeroes += 1;
   }
 
   return `${BASE58_ALPHABET[0].repeat(leadingZeroes)}${digits
