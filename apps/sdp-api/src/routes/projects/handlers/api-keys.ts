@@ -8,7 +8,6 @@ import { created, success } from "@/lib/response";
 import { apiKeyCreateSchema } from "@/routes/api-keys/schemas";
 import { ApiKeyService } from "@/services/api-key.service";
 import {
-  assertGrantableApiKeyPermissions,
   assertWalletBindingsInScope,
   resolveCreateWalletScope,
 } from "@/services/api-key-scope.service";
@@ -108,8 +107,6 @@ export const createProjectApiKey = async (c: AppContext) => {
     walletLabel,
     walletPurpose,
   } = parsed.data;
-
-  assertGrantableApiKeyPermissions(auth.permissions, role, permissions);
 
   const walletSelection = resolveCreateWalletScope({
     walletScope,

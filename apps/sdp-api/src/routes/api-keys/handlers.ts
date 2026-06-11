@@ -13,7 +13,6 @@ import { AppError, badRequest, notFound } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import { ApiKeyService } from "@/services/api-key.service";
 import {
-  assertGrantableApiKeyPermissions,
   assertWalletBindingsInScope,
   resolveCreateWalletScope,
   resolveUpdateWalletScope,
@@ -124,8 +123,6 @@ export const createApiKey = async (c: AppContext) => {
   } = parsed.data;
 
   const projectId = requireProjectId(c);
-
-  assertGrantableApiKeyPermissions(actor.permissions, role, permissions);
 
   const walletSelection = resolveCreateWalletScope({
     walletScope,
@@ -330,36 +327,6 @@ export const updateApiKey = async (c: AppContext) => {
     walletBindings: parsed.data.walletBindings,
   });
 
-  const updates: string[] = [];
-  const values: (string | null)[] = [];
-
-  if (parsed.data.name !== undefined) {
-    updates.push("name = ?");
-    values.push(parsed.data.name);
-  }
-
-  if (parsed.data.description !== undefined) {
-    updates.push("description = ?");
-    values.push(parsed.data.description);
-  }
-
-  if (parsed.data.allowedIps !== undefined) {
-    updates.push("allowed_ips = ?");
-    values.push(parsed.data.allowedIps ? JSON.stringify(parsed.data.allowedIps) : null);
-  }
-
-  if (parsed.data.expiresAt !== undefined) {
-    updates.push("expires_at = ?");
-    values.push(parsed.data.expiresAt);
-  }
-
-  if (parsed.data.permissions !== undefined) {
-    assertGrantableApiKeyPermissions(actor.permissions, existing.role, parsed.data.permissions);
-
-    updates.push("permissions = ?");
-    values.push(parsed.data.permissions ? JSON.stringify(parsed.data.permissions) : null);
-  }
-
   if (walletSelection.touched) {
     await assertWalletBindingsInScope(
       getDb(c.env),
@@ -367,19 +334,24 @@ export const updateApiKey = async (c: AppContext) => {
       existing.project_id,
       walletSelection.bindings
     );
-    updates.push("signing_wallet_id = ?");
-    values.push(walletSelection.defaultSigningWalletId);
   }
 
-  if (updates.length === 0) {
-    throw badRequest("No fields to update");
-  }
-
-  values.push(keyId);
-  await getDb(c.env)
-    .prepare(`UPDATE api_keys SET ${updates.join(", ")} WHERE id = ?`)
-    .bind(...values)
-    .run();
+  const apiKeyService = new ApiKeyService(getDb(c.env));
+  await apiKeyService.updateApiKey({
+    keyId,
+    organizationId: actor.organizationId,
+    projectId,
+    actorPermissions: actor.permissions,
+    currentRole: existing.role,
+    name: parsed.data.name,
+    description: parsed.data.description,
+    allowedIps: parsed.data.allowedIps,
+    expiresAt: parsed.data.expiresAt,
+    permissions: parsed.data.permissions,
+    signingWallet: walletSelection.touched
+      ? { walletId: walletSelection.defaultSigningWalletId }
+      : undefined,
+  });
 
   if (walletSelection.touched) {
     await replaceApiKeyWalletBindings(getDb(c.env), keyId, walletSelection.bindings);
