@@ -30,7 +30,7 @@ import {
 } from "./base";
 
 export const ISSUANCE_TOKEN_AMOUNT_DESCRIPTION =
-  "Token amount in UI units (decimal string). Human-readable value such as \"1\" or \"1.5\". SDP converts to on-chain base units using the token's decimals field.";
+  'Token amount in UI units (decimal string). Human-readable value such as "1" or "1.5". SDP converts to on-chain base units using the token\'s decimals field.';
 
 export const issuanceTokenAmountSchema = z.string().openapi({
   description: ISSUANCE_TOKEN_AMOUNT_DESCRIPTION,
