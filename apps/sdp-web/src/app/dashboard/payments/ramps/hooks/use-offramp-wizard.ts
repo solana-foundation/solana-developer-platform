@@ -1,9 +1,14 @@
 "use client";
 
 import type { PaymentTransferSummary } from "@sdp/types";
+import { useMemo, useState } from "react";
+import { toast } from "sonner";
 import useSWR from "swr";
-import { fetchTransferByProviderReference } from "@/app/dashboard/payments/payments-workspace.data";
-import { OFFRAMP_PAIRS } from "@/lib/ramps";
+import {
+  createTransfer,
+  fetchTransferByProviderReference,
+} from "@/app/dashboard/payments/payments-workspace.data";
+import { OFFRAMP_PAIRS, toRampCryptoToken } from "@/lib/ramps";
 import { sourceWalletSchema, withdrawAmountSchema, withdrawSelectionSchema } from "../schema";
 import {
   isTerminalRampTransferStatus,
@@ -18,17 +23,33 @@ export const OFFRAMP_STEPS = [
   { id: "COMPLETE", label: "Complete", title: "Complete your payout" },
 ] as const satisfies readonly RampWizardStep[];
 
-export type OfframpStepId = (typeof OFFRAMP_STEPS)[number]["id"];
+const OFFRAMP_REQUIREMENTS_STEP = {
+  id: "REQUIREMENTS",
+  label: "Payout details",
+  title: "Where should we send the payout?",
+} as const satisfies RampWizardStep;
+
+export type OfframpStepId =
+  | (typeof OFFRAMP_STEPS)[number]["id"]
+  | typeof OFFRAMP_REQUIREMENTS_STEP.id;
 
 export function useOfframpWizard(props: UseRampWizardProps) {
-  const wizard = useRampWizard(props, {
+  const [onchainSendLoading, setOnchainSendLoading] = useState(false);
+  const [onchainSendResult, setOnchainSendResult] = useState<PaymentTransferSummary | null>(null);
+
+  const wizard = useRampWizard<OfframpStepId>(props, {
     pairs: OFFRAMP_PAIRS,
     steps: OFFRAMP_STEPS,
     stepSchemas: { WALLET: sourceWalletSchema, WITHDRAW: withdrawAmountSchema },
     quoteStepId: "WITHDRAW",
+    requirements: {
+      step: OFFRAMP_REQUIREMENTS_STEP,
+      insertAfter: "WITHDRAW",
+      direction: "offramp",
+    },
     selectionSchema: withdrawSelectionSchema,
     quoteEndpoint: "/api/dashboard/payments/ramps/offramp/quote",
-    buildQuotePayload: ({ fields, provider, selectedRampPair, cryptoToken }) => ({
+    buildQuotePayload: ({ fields, provider, selectedRampPair, cryptoToken, collectedData }) => ({
       provider,
       counterpartyId: fields.counterpartyId,
       sourceWallet: fields.walletId,
@@ -36,8 +57,76 @@ export function useOfframpWizard(props: UseRampWizardProps) {
       fiatCurrency: selectedRampPair.fiatCurrency,
       cryptoAmount: fields.amount.trim(),
       redirectUrl: `${window.location.origin}/dashboard/payments`,
+      collectedData,
     }),
+    onQuoteCreated: () => {
+      setOnchainSendLoading(false);
+      setOnchainSendResult(null);
+    },
   });
+
+  // The Solana deposit address Grid generated for this realtime-funded quote.
+  const depositAddress = useMemo(() => {
+    const quote = wizard.quote;
+    if (quote?.provider !== "lightspark" || quote.deliveryMode !== "manual_instructions") {
+      return null;
+    }
+    const instruction = quote.paymentInstructions?.find(
+      (entry) =>
+        entry.accountOrWalletInfo.accountType.toUpperCase() === "SOLANA_WALLET" &&
+        entry.accountOrWalletInfo.address
+    );
+    return instruction?.accountOrWalletInfo.address ?? null;
+  }, [wizard.quote]);
+
+  const offrampCryptoToken = toRampCryptoToken(wizard.selectedRampPair.assetRail);
+  // The transfers API requires the mint address, not the token symbol.
+  const sourceTokenMint = useMemo(() => {
+    const balance = wizard.selectedWallet?.balances?.find(
+      (entry) => entry.token === offrampCryptoToken
+    );
+    return balance?.mint ?? null;
+  }, [wizard.selectedWallet, offrampCryptoToken]);
+
+  const canSendOnchain =
+    depositAddress !== null && sourceTokenMint !== null && wizard.fields.walletId.length > 0;
+
+  const sendCryptoToDeposit = async () => {
+    if (!depositAddress || !sourceTokenMint || !wizard.fields.walletId) {
+      return;
+    }
+    if (onchainSendLoading || onchainSendResult) {
+      return;
+    }
+
+    setOnchainSendLoading(true);
+    const toastId = toast.loading("Submitting on-chain transfer.", { position: "bottom-right" });
+
+    try {
+      const transfer = await createTransfer({
+        source: wizard.fields.walletId,
+        destination: depositAddress,
+        token: sourceTokenMint,
+        amount: wizard.fields.amount.trim(),
+      });
+      setOnchainSendResult(transfer);
+      toast.success("Transfer submitted.", {
+        id: toastId,
+        description: transfer.signature
+          ? "Transaction sent successfully."
+          : `Status: ${transfer.status}`,
+        position: "bottom-right",
+      });
+    } catch (error) {
+      toast.error("Transfer failed.", {
+        id: toastId,
+        description: error instanceof Error ? error.message : "Transfer failed.",
+        position: "bottom-right",
+      });
+    } finally {
+      setOnchainSendLoading(false);
+    }
+  };
 
   const transferStatusKey = wizard.quote
     ? (["offramp-transfer-status", wizard.quote.provider, wizard.quote.id] as const)
@@ -58,6 +147,10 @@ export function useOfframpWizard(props: UseRampWizardProps) {
     ...wizard,
     transferStatus,
     transferStatusLoading,
+    canSendOnchain,
+    onchainSendLoading,
+    onchainSendResult,
+    sendCryptoToDeposit,
   };
 }
 

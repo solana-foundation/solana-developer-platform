@@ -23,6 +23,7 @@ import {
   formatRampQuoteTimeRemaining,
 } from "@/app/dashboard/payments/payments-overview.utils";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 type ManualQuote = Extract<PaymentRampQuote, { deliveryMode: "manual_instructions" }>;
 type LightsparkQuote = Extract<ManualQuote, { provider: "lightspark" }>;
@@ -36,13 +37,21 @@ async function copyPaymentInstruction(label: string, value: string) {
   }
 }
 
-function PaymentInstructionField({ label, value }: { label: string; value?: string }) {
+function PaymentInstructionField({
+  label,
+  value,
+  className,
+}: {
+  label: string;
+  value?: string;
+  className?: string;
+}) {
   if (!value) {
     return null;
   }
 
   return (
-    <div className="rounded-xl bg-border-extra-light px-4 py-3">
+    <div className={cn("rounded-xl bg-border-extra-light px-4 py-3", className)}>
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
           <p className="text-xs font-medium uppercase tracking-[0.08em] text-text-low">{label}</p>
@@ -184,27 +193,28 @@ function ManualQuoteSummary({
 type LightsparkInstructionType = Extract<PaymentRampInstruction, { provider: "lightspark" }>;
 type BvnkInstructionType = Extract<PaymentRampInstruction, { provider: "bvnk" }>;
 
-type SimulateQuote = { loading: boolean; succeeded: boolean; onClick: () => void };
-
-function SimulateButton({
-  simulateQuote,
-  idleLabel,
-  doneLabel,
-}: {
-  simulateQuote: SimulateQuote;
+export interface InstructionAction {
+  loading: boolean;
+  succeeded: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+  icon: ReactNode;
   idleLabel: string;
+  busyLabel: string;
   doneLabel: string;
-}) {
+}
+
+function InstructionActionButton({ action }: { action: InstructionAction }) {
   return (
     <Button
       type="button"
       variant="secondary"
       size="xs"
-      iconLeft={simulateQuote.succeeded ? <CheckCircle2Icon /> : <DollarSignIcon />}
-      onClick={simulateQuote.onClick}
-      disabled={simulateQuote.loading || simulateQuote.succeeded}
+      iconLeft={action.succeeded ? <CheckCircle2Icon /> : action.icon}
+      onClick={action.onClick}
+      disabled={action.disabled || action.loading || action.succeeded}
     >
-      {simulateQuote.succeeded ? doneLabel : simulateQuote.loading ? "Simulating..." : idleLabel}
+      {action.succeeded ? action.doneLabel : action.loading ? action.busyLabel : action.idleLabel}
     </Button>
   );
 }
@@ -223,12 +233,12 @@ function InstructionBadge({ children }: { children: ReactNode }) {
 
 function LightsparkInstruction({
   instruction,
-  showSimulate,
-  simulateQuote,
+  showAction,
+  action,
 }: {
   instruction: LightsparkInstructionType;
-  showSimulate: boolean;
-  simulateQuote?: SimulateQuote;
+  showAction: boolean;
+  action?: InstructionAction;
 }) {
   const info = instruction.accountOrWalletInfo;
   return (
@@ -238,19 +248,17 @@ function LightsparkInstruction({
           <InstructionBadge>{info.accountType.replaceAll("_", " ")}</InstructionBadge>
           {info.assetType ? <InstructionBadge>{info.assetType}</InstructionBadge> : null}
         </InstructionBadges>
-        {showSimulate && simulateQuote ? (
-          <SimulateButton
-            simulateQuote={simulateQuote}
-            idleLabel="Simulate Quote"
-            doneLabel="Quote Simulated"
-          />
-        ) : null}
+        {showAction && action ? <InstructionActionButton action={action} /> : null}
       </div>
       <div className="grid gap-3 lg:grid-cols-2">
         <PaymentInstructionField label="Bank name" value={info.bankName} />
         <PaymentInstructionField label="Routing number" value={info.routingNumber} />
         <PaymentInstructionField label="Account number" value={info.accountNumber} />
-        <PaymentInstructionField label="Wallet address" value={info.address} />
+        <PaymentInstructionField
+          label="Wallet address"
+          value={info.address}
+          className="lg:col-span-2"
+        />
       </div>
       <PaymentInstructionField label="Reference" value={info.reference} />
       {info.paymentRails?.length ? (
@@ -273,10 +281,10 @@ function LightsparkInstruction({
 
 function BvnkInstruction({
   instruction,
-  simulateQuote,
+  action,
 }: {
   instruction: BvnkInstructionType;
-  simulateQuote?: SimulateQuote;
+  action?: InstructionAction;
 }) {
   const isReady = instruction.onboardingStatus === "ready";
   const needsVerification = instruction.onboardingStatus === "verification_required";
@@ -291,13 +299,7 @@ function BvnkInstruction({
           <InstructionBadge>{instruction.fiatCurrency} virtual account</InstructionBadge>
           <InstructionBadge>{instruction.network}</InstructionBadge>
         </InstructionBadges>
-        {isReady && simulateQuote ? (
-          <SimulateButton
-            simulateQuote={simulateQuote}
-            idleLabel="Simulate Deposit"
-            doneLabel="Deposit Simulated"
-          />
-        ) : null}
+        {isReady && action ? <InstructionActionButton action={action} /> : null}
       </div>
 
       {needsVerification ? (
@@ -377,18 +379,18 @@ export function ManualInstructionsQuote({
   fiatCurrency,
   cryptoToken,
   instructions,
-  simulateQuote,
+  action,
+  description,
 }: {
   amount: string;
   quote: ManualQuote;
   fiatCurrency: string;
   cryptoToken: string;
   instructions: PaymentRampInstruction[];
-  simulateQuote?: {
-    loading: boolean;
-    succeeded: boolean;
-    onClick: () => void;
-  };
+  /** Button rendered in the instruction header (e.g. simulate for onramp, send for offramp). */
+  action?: InstructionAction;
+  /** Overrides the default fiat-deposit copy (e.g. for crypto-funded off-ramp quotes). */
+  description?: string;
 }) {
   const [activeTab, setActiveTab] = useState<"instructions" | "summary">("instructions");
 
@@ -397,7 +399,7 @@ export function ManualInstructionsQuote({
       <BvnkInstruction
         key={instruction.ruleId ?? instruction.beneficiaryAddress}
         instruction={instruction}
-        simulateQuote={simulateQuote}
+        action={action}
       />
     ) : (
       <LightsparkInstruction
@@ -407,8 +409,8 @@ export function ManualInstructionsQuote({
           "lightspark"
         }
         instruction={instruction}
-        showSimulate={index === 0}
-        simulateQuote={simulateQuote}
+        showAction={index === 0}
+        action={action}
       />
     )
   );
@@ -422,8 +424,8 @@ export function ManualInstructionsQuote({
         <div>
           <p className="text-sm font-medium text-text-extra-high">Manual Funding Instructions</p>
           <p className="mt-2 text-sm text-text-low">
-            Send {amount ? `$${amount}` : "the quoted amount"} using one of the supported rails.
-            Include the reference exactly so the provider can match the deposit to this quote.
+            {description ??
+              `Send ${amount ? `$${amount}` : "the quoted amount"} using one of the supported rails. Include the reference exactly so the provider can match the deposit to this quote.`}
           </p>
         </div>
       </div>

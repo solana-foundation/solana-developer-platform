@@ -141,6 +141,11 @@ export function useRampWizard<TId extends string>(
           counterpartyId: fields.counterpartyId,
           provider: fields.provider,
           direction: requirementsConfig.direction,
+          // Off-ramp requirements are payout-currency specific (e.g. lightspark bank
+          // fields); on-ramp requirements are not, so the key stays currency-free there.
+          ...(requirementsConfig.direction === "offramp"
+            ? { fiatCurrency: selectedRampPair.fiatCurrency }
+            : {}),
         }
       : null
   );

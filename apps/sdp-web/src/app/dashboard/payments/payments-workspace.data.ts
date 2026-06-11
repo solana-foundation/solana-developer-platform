@@ -544,7 +544,7 @@ type SandboxTransferSimulationInput =
       provider: "lightspark";
       payload: {
         quoteId: string;
-        currencyCode?: "USD";
+        currencyCode?: "USD" | "USDC";
         currencyAmount?: number;
       };
     }

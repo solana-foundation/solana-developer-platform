@@ -132,9 +132,10 @@ function OfframpRail({
       counterpartyDialogOpen={false}
       setCounterpartyDialogOpen={() => {}}
       onCounterpartyCreated={() => {}}
-      footer={
-        wizard.currentStepId === "COMPLETE" && wizard.quote ? (
-          <PoweredByRampProvider provider={wizard.quote.provider} />
+      header={
+        wizard.fields.provider &&
+        (wizard.currentStepId === "REQUIREMENTS" || wizard.currentStepId === "COMPLETE") ? (
+          <PoweredByRampProvider provider={wizard.fields.provider} />
         ) : null
       }
       footerActions={
@@ -244,9 +245,10 @@ function OnrampRail({
       counterpartyDialogOpen={false}
       setCounterpartyDialogOpen={() => {}}
       onCounterpartyCreated={() => {}}
-      footer={
-        wizard.currentStepId === "PROVIDER" && wizard.quote ? (
-          <PoweredByRampProvider provider={wizard.quote.provider} />
+      header={
+        wizard.fields.provider &&
+        (wizard.currentStepId === "REQUIREMENTS" || wizard.currentStepId === "PROVIDER") ? (
+          <PoweredByRampProvider provider={wizard.fields.provider} />
         ) : null
       }
       footerActions={
