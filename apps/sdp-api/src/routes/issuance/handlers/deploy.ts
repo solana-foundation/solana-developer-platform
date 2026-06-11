@@ -7,7 +7,12 @@ import { AppError, badRequest, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
 import { AuditService } from "@/services/audit.service";
-import { createMosaicService, MintMetadataUpdateError, PACKET_DATA_SIZE } from "@/services/mosaic";
+import {
+  createMosaicService,
+  deriveAblListAddress,
+  MintMetadataUpdateError,
+  PACKET_DATA_SIZE,
+} from "@/services/mosaic";
 import { createOrgSigner } from "@/services/solana";
 import {
   accountExists,
@@ -441,7 +446,6 @@ export const confirmDeploy = async (c: AppContext) => {
   }
 
   const mint = parsed.data.mint as Address;
-  const listAddress = parsed.data.listAddress as Address | undefined;
 
   // Verify the deploy actually landed before recording it: any tokens:write
   // caller could otherwise pin an arbitrary mint to this token and poison the
@@ -465,7 +469,20 @@ export const confirmDeploy = async (c: AppContext) => {
   // that it actually initialized THIS mint, linking the signature to the mint.
   const confirmedTx = await getTransaction(rpc, signature);
 
-  if (!confirmedTx || !transactionInitializesMint(confirmedTx, mint)) {
+  // `getSignatureStatuses` and `getTransaction` are indexed independently on the
+  // RPC, so a client that confirms via the former and immediately calls here can
+  // outrun the latter: the tx is valid but not yet queryable and `getTransaction`
+  // returns null. Surface that as a retryable error rather than the "wrong tx"
+  // 400 below — which would tell the caller their deploy was bad and give them no
+  // reason to retry, permanently rejecting a legitimate deploy.
+  if (!confirmedTx) {
+    throw new AppError(
+      "SOLANA_RPC_ERROR",
+      "Deploy transaction is confirmed but not yet indexed by the RPC; retry shortly"
+    );
+  }
+
+  if (!transactionInitializesMint(confirmedTx, mint)) {
     throw badRequest("Deploy transaction did not create this mint");
   }
 
@@ -481,6 +498,17 @@ export const confirmDeploy = async (c: AppContext) => {
   const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId, signingWalletId);
   const custodyAddress = signer.address;
   const freezeAuthority = token.isFreezable ? custodyAddress : null;
+
+  // Re-derive the ABL list address server-side instead of trusting the request
+  // body's `listAddress`: for allowlist/blocklist tokens a wrong value would
+  // silently break every later allowlist op with no recovery short of a DB
+  // patch. The list-config PDA is deterministic from (mint authority, mint) and
+  // is only seeded on-chain when ACL is enabled and the mint is freezable —
+  // mirror the `enableSrfc37` condition the create path uses (mosaic/service.ts).
+  const listAddress =
+    shouldEnableOnChainAcl(token) && freezeAuthority !== null
+      ? await deriveAblListAddress(custodyAddress, mint)
+      : undefined;
 
   const deployedToken = await tokenService.setTokenDeployed(
     tokenId,

@@ -111,6 +111,19 @@ function resolveMintAuthorityAddress(options: CreateTokenOptions): Address {
     : (options.mintAuthority.address as Address);
 }
 
+/**
+ * Derive the deterministic ABL list-config PDA for a token's on-chain allowlist.
+ *
+ * The patched mosaic-sdk seeds this PDA from the mint authority (custody), not
+ * the fee payer, so any caller recording a deploy must derive it from that same
+ * authority + mint to match on-chain — never trust a client-supplied value.
+ * Centralized here so the create path and the non-custodial confirm path can't
+ * diverge on how the address is computed.
+ */
+export async function deriveAblListAddress(authority: Address, mint: Address): Promise<Address> {
+  return getListConfigPda({ authority, mint });
+}
+
 export class MosaicService {
   private env: Env;
   private signer: TransactionSigner;
@@ -196,10 +209,7 @@ export class MosaicService {
     // a failed-update error alongside the live mint.
     let listAddress: Address | undefined;
     if (enableSrfc37) {
-      listAddress = await getListConfigPda({
-        authority: resolveMintAuthorityAddress(options),
-        mint,
-      });
+      listAddress = await deriveAblListAddress(resolveMintAuthorityAddress(options), mint);
     }
 
     // Both plain and sRFC-37 deploys go through Kora when configured. The

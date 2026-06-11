@@ -11,6 +11,7 @@ import { hashString } from "@/lib/hash";
 import type { Address } from "@/lib/solana";
 import * as AuthorityResolution from "@/routes/issuance/handlers/authority-resolution";
 import { createKVStoreSet } from "@/runtime/factory";
+import * as Mosaic from "@/services/mosaic";
 import { MosaicService } from "@/services/mosaic";
 import * as SolanaServices from "@/services/solana";
 import * as SolanaRpc from "@/services/solana/rpc";
@@ -4710,6 +4711,154 @@ describe("Issuance Routes", () => {
           getSignatureStatusesSpy.mockRestore();
           accountExistsSpy.mockRestore();
           getTransactionSpy.mockRestore();
+        }
+      });
+
+      it("returns a retryable error (not the wrong-tx 400) when the tx is not yet indexed", async () => {
+        ensureRpcUrl();
+
+        const token = await seedIssuedToken({
+          id: "tok_deploy_confirm_not_indexed",
+          mintAddress: null,
+          status: "pending",
+          uri: null,
+          requiresAllowlist: false,
+        });
+
+        // Confirmed via getSignatureStatuses and the mint exists, but
+        // getTransaction hasn't indexed the tx yet (the two RPC methods index
+        // independently). This is a transient race, not a bad deploy — the
+        // client must get a retryable signal, not the "wrong tx" 400.
+        const getSignatureStatusesSpy = vi
+          .spyOn(SolanaRpc, "getSignatureStatuses")
+          .mockResolvedValueOnce([
+            { slot: 100n, confirmations: 10n, confirmationStatus: "confirmed", err: null },
+          ]);
+        const accountExistsSpy = vi.spyOn(SolanaRpc, "accountExists").mockResolvedValueOnce(true);
+        const getTransactionSpy = vi.spyOn(SolanaRpc, "getTransaction").mockResolvedValueOnce(null);
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${token.id}/deploy/confirm`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({
+                signature: "5notYetIndexedSig",
+                mint: TEST_SOLANA_ADDRESSES.mint,
+              }),
+            },
+            env
+          );
+
+          // 5xx (retryable), distinct from the 400 the spoofed/wrong-tx case returns.
+          expect(res.status).toBe(502);
+          const payload = (await res.json()) as { error: { message: string } };
+          expect(payload.error.message).not.toMatch(/did not create this mint/);
+
+          // Token stays pending so a retry can still record it.
+          const stillPending = await app.request(
+            `/v1/issuance/tokens/${token.id}`,
+            {
+              method: "GET",
+              headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
+            },
+            env
+          );
+          const tokenPayload = (await stillPending.json()) as {
+            data: { token: { mintAddress: string | null; status: string } };
+          };
+          expect(tokenPayload.data.token.mintAddress).toBeNull();
+          expect(tokenPayload.data.token.status).toBe("pending");
+        } finally {
+          getSignatureStatusesSpy.mockRestore();
+          accountExistsSpy.mockRestore();
+          getTransactionSpy.mockRestore();
+        }
+      });
+
+      it("records the server-derived ABL list address, ignoring the client-supplied one", async () => {
+        ensureRpcUrl();
+
+        const token = await seedIssuedToken({
+          id: "tok_deploy_confirm_abl",
+          mintAddress: null,
+          status: "pending",
+          uri: null,
+          isFreezable: true,
+          requiresAllowlist: true,
+          ablListAddress: null,
+        });
+
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSigner")
+          .mockResolvedValue({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
+        const getSignatureStatusesSpy = vi
+          .spyOn(SolanaRpc, "getSignatureStatuses")
+          .mockResolvedValueOnce([
+            { slot: 100n, confirmations: 10n, confirmationStatus: "confirmed", err: null },
+          ]);
+        const accountExistsSpy = vi.spyOn(SolanaRpc, "accountExists").mockResolvedValueOnce(true);
+        const getTransactionSpy = vi.spyOn(SolanaRpc, "getTransaction").mockResolvedValueOnce({
+          slot: 100n,
+          err: null,
+          instructions: [
+            {
+              programId: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+              parsedType: "initializeMint2",
+              info: { mint: TEST_SOLANA_ADDRESSES.mint },
+            },
+          ],
+        });
+        // The list-config PDA is derived server-side from (custody authority,
+        // mint). wallet3 is the legitimate derived value; the client tries to
+        // inject wallet1, which must be ignored.
+        const deriveAblListAddressSpy = vi
+          .spyOn(Mosaic, "deriveAblListAddress")
+          .mockResolvedValue(TEST_SOLANA_ADDRESSES.wallet3 as Address);
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${token.id}/deploy/confirm`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({
+                signature: "5ablConfirmSig",
+                mint: TEST_SOLANA_ADDRESSES.mint,
+                listAddress: TEST_SOLANA_ADDRESSES.wallet1, // bogus — must be ignored
+              }),
+            },
+            env
+          );
+
+          expect(res.status).toBe(200);
+
+          // Derived from the server-resolved custody authority + mint, never the body.
+          expect(deriveAblListAddressSpy).toHaveBeenCalledWith(
+            TEST_SOLANA_ADDRESSES.wallet2,
+            TEST_SOLANA_ADDRESSES.mint
+          );
+
+          const stored = await new TokenService(getDb(env)).getToken({
+            tokenId: token.id,
+            organizationId: TEST_PROJECT.organizationId,
+            projectId: TEST_PROJECT.id,
+          });
+          expect(stored?.ablListAddress).toBe(TEST_SOLANA_ADDRESSES.wallet3);
+          expect(stored?.ablListAddress).not.toBe(TEST_SOLANA_ADDRESSES.wallet1);
+        } finally {
+          createOrgSignerSpy.mockRestore();
+          getSignatureStatusesSpy.mockRestore();
+          accountExistsSpy.mockRestore();
+          getTransactionSpy.mockRestore();
+          deriveAblListAddressSpy.mockRestore();
         }
       });
 
