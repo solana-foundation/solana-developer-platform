@@ -24,7 +24,7 @@ curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/mint \
   -d '{
     "mint": {
       "destination": "7xKXz...9fGh",
-      "amount": "1000000"
+      "amount": "1000"
     }
   }'
 ```
@@ -41,7 +41,7 @@ const response = await fetch(
       "Idempotency-Key": "mint-001",
     },
     body: JSON.stringify({
-      mint: { destination: "7xKXz...9fGh", amount: "1000000" },
+      mint: { destination: "7xKXz...9fGh", amount: "1000" },
     }),
   }
 );
@@ -59,13 +59,15 @@ HttpRequest request = HttpRequest.newBuilder()
         {
           "mint": {
             "destination": "7xKXz...9fGh",
-            "amount": "1000000"
+            "amount": "1000"
           }
         }"""))
     .build();
 ```
 </Tab>
 </Tabs>
+
+Issuance `amount` fields use **UI units** (decimal strings such as `"1000"` for one thousand tokens). SDP converts using the token's `decimals` before building the on-chain transaction.
 
 **When to use execute mode:**
 
@@ -86,7 +88,7 @@ curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/mint/prepare \
   -d '{
     "mint": {
       "destination": "7xKXz...9fGh",
-      "amount": "1000000"
+      "amount": "1000"
     },
     "options": { "simulate": true }
   }'
@@ -103,7 +105,7 @@ const response = await fetch(
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      mint: { destination: "7xKXz...9fGh", amount: "1000000" },
+      mint: { destination: "7xKXz...9fGh", amount: "1000" },
       options: { simulate: true },
     }),
   }
@@ -123,7 +125,7 @@ HttpRequest request = HttpRequest.newBuilder()
         {
           "mint": {
             "destination": "7xKXz...9fGh",
-            "amount": "1000000"
+            "amount": "1000"
           },
           "options": { "simulate": true }
         }"""))

@@ -23,6 +23,9 @@ import type {
 } from "./token-management-workspace.types";
 
 export const SOLANA_ADDRESS_PATTERN = "[1-9A-HJ-NP-Za-km-z]{32,44}";
+
+export const TOKEN_AMOUNT_FIELD_DESCRIPTION =
+  "Token units (e.g. 1 or 1.5). SDP converts using this token's decimals — not raw on-chain base units.";
 export const NON_WHITESPACE_PATTERN = ".*\\S.*";
 
 export interface ControlListCopy {
