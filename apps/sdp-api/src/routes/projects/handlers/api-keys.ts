@@ -8,6 +8,7 @@ import { created, success } from "@/lib/response";
 import { apiKeyCreateSchema } from "@/routes/api-keys/schemas";
 import { ApiKeyService } from "@/services/api-key.service";
 import {
+  assertGrantableApiKeyPermissions,
   assertWalletBindingsInScope,
   resolveCreateWalletScope,
 } from "@/services/api-key-scope.service";
@@ -108,12 +109,7 @@ export const createProjectApiKey = async (c: AppContext) => {
     walletPurpose,
   } = parsed.data;
 
-  const hasOrgAdminAccess =
-    auth.permissions.includes("*") || auth.permissions.includes("org:admin");
-
-  if (permissions && !hasOrgAdminAccess) {
-    throw new AppError("INSUFFICIENT_PERMISSIONS", "Custom permission sets require admin access");
-  }
+  assertGrantableApiKeyPermissions(auth.permissions, role, permissions);
 
   const walletSelection = resolveCreateWalletScope({
     walletScope,
@@ -163,6 +159,7 @@ export const createProjectApiKey = async (c: AppContext) => {
     projectId,
     createdByKeyId: auth.apiKeyId ?? undefined,
     createdByUserId: auth.userId ?? undefined,
+    actorPermissions: auth.permissions,
     name,
     description,
     role,

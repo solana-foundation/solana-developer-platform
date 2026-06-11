@@ -1,4 +1,12 @@
-import type { ApiKeyWalletBinding, ApiKeyWalletScope, Permission } from "@sdp/types";
+import {
+  type ApiKeyRole,
+  type ApiKeyWalletBinding,
+  type ApiKeyWalletScope,
+  getPermissionsForApiKeyRole,
+  hasAllPermissions,
+  hasAnyPermission,
+  type Permission,
+} from "@sdp/types";
 import type { ApiKeyContext } from "@/lib/auth";
 import { AppError, badRequest } from "@/lib/errors";
 import { normalizeApiKeyWalletPermissions } from "@/services/api-key-wallets.service";
@@ -323,6 +331,26 @@ export async function assertWalletBindingsInScope(
         "Project API keys cannot bind to wallets from other projects"
       );
     }
+  }
+}
+
+export function assertGrantableApiKeyPermissions(
+  actorPermissions: Permission[],
+  resolvedRole: ApiKeyRole,
+  requestedPermissions: Permission[] | null | undefined
+): void {
+  if (hasAnyPermission(actorPermissions, ["org:admin"])) {
+    return;
+  }
+
+  const effectivePermissions =
+    requestedPermissions == null ? getPermissionsForApiKeyRole(resolvedRole) : requestedPermissions;
+
+  if (!hasAllPermissions(actorPermissions, effectivePermissions)) {
+    throw new AppError(
+      "INSUFFICIENT_PERMISSIONS",
+      "Cannot grant an API key more permissions than you hold"
+    );
   }
 }
 

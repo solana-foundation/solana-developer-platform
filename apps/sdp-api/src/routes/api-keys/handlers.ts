@@ -13,6 +13,7 @@ import { AppError, badRequest, notFound } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import { ApiKeyService } from "@/services/api-key.service";
 import {
+  assertGrantableApiKeyPermissions,
   assertWalletBindingsInScope,
   resolveCreateWalletScope,
   resolveUpdateWalletScope,
@@ -124,12 +125,7 @@ export const createApiKey = async (c: AppContext) => {
 
   const projectId = requireProjectId(c);
 
-  const hasOrgAdminAccess =
-    actor.permissions.includes("*") || actor.permissions.includes("org:admin");
-
-  if (permissions && !hasOrgAdminAccess) {
-    throw new AppError("INSUFFICIENT_PERMISSIONS", "Custom permission sets require admin access");
-  }
+  assertGrantableApiKeyPermissions(actor.permissions, role, permissions);
 
   const walletSelection = resolveCreateWalletScope({
     walletScope,
@@ -216,6 +212,7 @@ export const createApiKey = async (c: AppContext) => {
     projectId,
     createdByUserId: createdBy,
     createdByKeyId: actor.apiKeyId ?? undefined,
+    actorPermissions: actor.permissions,
     name,
     description,
     role,
@@ -317,10 +314,10 @@ export const updateApiKey = async (c: AppContext) => {
   // Verify key belongs to this organization and the current project scope
   const existing = await getDb(c.env)
     .prepare(
-      "SELECT id, key_hash, project_id FROM api_keys WHERE id = ? AND organization_id = ? AND project_id = ?"
+      "SELECT id, key_hash, project_id, role FROM api_keys WHERE id = ? AND organization_id = ? AND project_id = ?"
     )
     .bind(keyId, actor.organizationId, projectId)
-    .first<{ id: string; key_hash: string; project_id: string }>();
+    .first<{ id: string; key_hash: string; project_id: string; role: ApiKeyRole }>();
 
   if (!existing) {
     throw notFound("API key");
@@ -357,12 +354,7 @@ export const updateApiKey = async (c: AppContext) => {
   }
 
   if (parsed.data.permissions !== undefined) {
-    const hasOrgAdminAccess =
-      actor.permissions.includes("*") || actor.permissions.includes("org:admin");
-
-    if (parsed.data.permissions && !hasOrgAdminAccess) {
-      throw new AppError("INSUFFICIENT_PERMISSIONS", "Custom permission sets require admin access");
-    }
+    assertGrantableApiKeyPermissions(actor.permissions, existing.role, parsed.data.permissions);
 
     updates.push("permissions = ?");
     values.push(parsed.data.permissions ? JSON.stringify(parsed.data.permissions) : null);

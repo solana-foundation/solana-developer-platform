@@ -8,6 +8,7 @@ import type { ApiKeyEnvironment, ApiKeyRole, ApiKeyStatus, Permission } from "@s
 import { AppError } from "@/lib/errors";
 import { hashString } from "@/lib/hash";
 import { createApiKeyMaterial, parseJsonArray } from "./api-key.utils";
+import { assertGrantableApiKeyPermissions } from "./api-key-scope.service";
 
 export interface ApiKeyListItem {
   id: string;
@@ -36,6 +37,7 @@ export interface CreateApiKeyInput {
   projectId: string;
   createdByKeyId?: string;
   createdByUserId?: string;
+  actorPermissions: Permission[];
   name: string;
   description?: string | null;
   role: ApiKeyRole;
@@ -150,6 +152,8 @@ export class ApiKeyService {
   }
 
   async createApiKey(input: CreateApiKeyInput): Promise<CreateApiKeyResult> {
+    assertGrantableApiKeyPermissions(input.actorPermissions, input.role, input.permissions);
+
     const project = await this.db
       .prepare(`SELECT environment FROM projects WHERE id = ? AND organization_id = ?`)
       .bind(input.projectId, input.organizationId)
