@@ -261,4 +261,19 @@ describe("LightsparkRampClient", () => {
     );
     expect(account).toEqual({ id: "ExternalAccount:acc_payout_123", status: "ACTIVE" });
   });
+
+  it("deletes external accounts and accepts the empty 204 body", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+
+    await new LightsparkRampClient().deleteExternalAccount(LIGHTSPARK_CONTEXT, {
+      accountId: "ExternalAccount:acc_payout_123",
+    });
+
+    expect(String(fetchSpy.mock.calls[0]?.[0])).toBe(
+      `${LIGHTSPARK_GRID_API_BASE_URL}/customers/external-accounts/ExternalAccount%3Aacc_payout_123`
+    );
+    expect(fetchSpy.mock.calls[0]?.[1]?.method).toBe("DELETE");
+  });
 });

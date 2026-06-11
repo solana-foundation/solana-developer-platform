@@ -1,7 +1,7 @@
 "use client";
 
 import type { PaymentTransferSummary } from "@sdp/types";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
 import {
@@ -36,6 +36,7 @@ export type OfframpStepId =
 export function useOfframpWizard(props: UseRampWizardProps) {
   const [onchainSendLoading, setOnchainSendLoading] = useState(false);
   const [onchainSendResult, setOnchainSendResult] = useState<PaymentTransferSummary | null>(null);
+  const [quoteExpired, setQuoteExpired] = useState(false);
 
   const wizard = useRampWizard<OfframpStepId>(props, {
     pairs: OFFRAMP_PAIRS,
@@ -62,8 +63,30 @@ export function useOfframpWizard(props: UseRampWizardProps) {
     onQuoteCreated: () => {
       setOnchainSendLoading(false);
       setOnchainSendResult(null);
+      setQuoteExpired(false);
     },
   });
+
+  const quoteExpiresAt =
+    wizard.quote?.provider === "lightspark" && wizard.quote.deliveryMode === "manual_instructions"
+      ? wizard.quote.expiresAt
+      : undefined;
+
+  useEffect(() => {
+    if (!quoteExpiresAt) {
+      return;
+    }
+    const remainingMs = Date.parse(quoteExpiresAt) - Date.now();
+    if (!Number.isFinite(remainingMs)) {
+      return;
+    }
+    if (remainingMs <= 0) {
+      setQuoteExpired(true);
+      return;
+    }
+    const timeoutId = window.setTimeout(() => setQuoteExpired(true), remainingMs);
+    return () => window.clearTimeout(timeoutId);
+  }, [quoteExpiresAt]);
 
   // The Solana deposit address Grid generated for this realtime-funded quote.
   const depositAddress = useMemo(() => {
@@ -96,6 +119,15 @@ export function useOfframpWizard(props: UseRampWizardProps) {
       return;
     }
     if (onchainSendLoading || onchainSendResult) {
+      return;
+    }
+    // Re-check the timestamp at call time — the armed timeout only covers renders.
+    if (quoteExpiresAt && Date.parse(quoteExpiresAt) <= Date.now()) {
+      setQuoteExpired(true);
+      toast.error("Quote expired.", {
+        description: "Create a new quote to continue the withdrawal.",
+        position: "bottom-right",
+      });
       return;
     }
 
@@ -151,6 +183,7 @@ export function useOfframpWizard(props: UseRampWizardProps) {
     onchainSendLoading,
     onchainSendResult,
     sendCryptoToDeposit,
+    quoteExpired,
   };
 }
 

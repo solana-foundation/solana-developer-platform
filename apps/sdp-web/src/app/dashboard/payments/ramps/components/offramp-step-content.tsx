@@ -115,6 +115,7 @@ function OfframpManualQuoteStep({
     onchainSendLoading,
     onchainSendResult,
     sendCryptoToDeposit,
+    quoteExpired,
   } = wizard;
 
   if (!quote.paymentInstructions) {
@@ -141,10 +142,10 @@ function OfframpManualQuoteStep({
             ? {
                 loading: onchainSendLoading,
                 succeeded: onchainSendResult !== null,
-                disabled: !canSendOnchain,
+                disabled: !canSendOnchain || quoteExpired,
                 onClick: () => void sendCryptoToDeposit(),
                 icon: <SendIcon />,
-                idleLabel: sendLabel,
+                idleLabel: quoteExpired ? "Quote expired" : sendLabel,
                 busyLabel: "Sending...",
                 doneLabel: "Transfer submitted",
               }
