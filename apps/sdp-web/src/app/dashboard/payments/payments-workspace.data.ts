@@ -321,6 +321,7 @@ export async function fetchTransfers(options: {
   walletId?: string;
   category?: "wallet" | "ramp";
   counterpartyId?: string;
+  statuses?: readonly string[];
   signal?: AbortSignal;
 }): Promise<TransferRecord[]> {
   const transfersQuery = new URLSearchParams({
@@ -329,6 +330,7 @@ export async function fetchTransfers(options: {
     ...(options.walletId ? { wallet: options.walletId } : {}),
     ...(options.category ? { category: options.category } : {}),
     ...(options.counterpartyId ? { counterpartyId: options.counterpartyId } : {}),
+    ...(options.statuses ? { status: options.statuses.join(",") } : {}),
   }).toString();
   const response = await fetch(`/api/dashboard/payments/transfers?${transfersQuery}`, {
     method: "GET",

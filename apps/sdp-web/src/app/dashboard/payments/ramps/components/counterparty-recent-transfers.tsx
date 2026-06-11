@@ -9,7 +9,6 @@ import { formatRelativeTime, toTitleCase } from "../../../activity-format-utils"
 import { formatDisplayAmount } from "../../payments-overview.utils";
 import { fetchTransfers } from "../../payments-workspace.data";
 
-const RECENT_TRANSFERS_FETCH_PAGE_SIZE = 20;
 const RECENT_TRANSFERS_MAX_ROWS = 5;
 const SUCCESSFUL_TRANSFER_STATUSES: readonly string[] = ["completed", "confirmed", "finalized"];
 
@@ -22,7 +21,12 @@ const SKELETON_ROWS = [
 export function CounterpartyRecentTransfers({ counterpartyId }: { counterpartyId: string }) {
   const { data, error } = useSWR(
     ["counterparty-recent-transfers", counterpartyId],
-    () => fetchTransfers({ pageSize: RECENT_TRANSFERS_FETCH_PAGE_SIZE, counterpartyId }),
+    () =>
+      fetchTransfers({
+        pageSize: RECENT_TRANSFERS_MAX_ROWS,
+        counterpartyId,
+        statuses: SUCCESSFUL_TRANSFER_STATUSES,
+      }),
     { revalidateOnFocus: false, revalidateIfStale: false, keepPreviousData: false }
   );
 
@@ -55,11 +59,7 @@ export function CounterpartyRecentTransfers({ counterpartyId }: { counterpartyId
     );
   }
 
-  const successfulTransfers = data
-    .filter((transfer) => SUCCESSFUL_TRANSFER_STATUSES.includes(transfer.status))
-    .slice(0, RECENT_TRANSFERS_MAX_ROWS);
-
-  if (successfulTransfers.length === 0) {
+  if (data.length === 0) {
     return (
       <section className="space-y-3">
         <h2 className="text-2xl font-medium text-text-extra-high">Recent Transfers</h2>
@@ -72,7 +72,7 @@ export function CounterpartyRecentTransfers({ counterpartyId }: { counterpartyId
     <section className="space-y-3">
       <h2 className="text-2xl font-medium text-text-extra-high">Recent Transfers</h2>
       <div>
-        {successfulTransfers.map((transfer) => {
+        {data.map((transfer) => {
           const cryptoLabel =
             transfer.amount && transfer.token
               ? formatDisplayAmount(transfer.amount, transfer.token)
