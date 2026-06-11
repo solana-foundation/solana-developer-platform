@@ -13,6 +13,8 @@ import {
   accountExists,
   createRpc,
   getSignatureStatuses,
+  getTransaction,
+  type ParsedTransaction,
   simulateTransaction,
 } from "@/services/solana/rpc";
 import { TokenService } from "@/services/token.service";
@@ -360,6 +362,26 @@ export const prepareDeploy = async (c: AppContext) => {
   });
 };
 
+// `initializeMint`/`initializeMint2` are the SPL Token / Token-2022 instructions
+// that bring a mint account into existence; a tx that creates a mint always
+// carries one targeting that mint. jsonParsed decodes both legacy `spl-token`
+// and `spl-token-2022` programs under the same instruction `type`.
+const MINT_INIT_INSTRUCTION_TYPES = new Set(["initializeMint", "initializeMint2"]);
+
+/**
+ * Whether `tx` contains an instruction that initializes `mint` — i.e. the
+ * transaction actually created this mint, rather than merely referencing or
+ * coexisting with it. Used by `confirmDeploy` to bind a confirmed signature to
+ * the mint a caller claims it produced.
+ */
+const transactionInitializesMint = (tx: ParsedTransaction, mint: Address): boolean =>
+  tx.instructions.some(
+    (ix) =>
+      ix.parsedType !== null &&
+      MINT_INIT_INSTRUCTION_TYPES.has(ix.parsedType) &&
+      ix.info?.mint === mint
+  );
+
 /**
  * Record a confirmed non-custodial deploy.
  *
@@ -367,8 +389,9 @@ export const prepareDeploy = async (c: AppContext) => {
  * persists nothing. After the client signs and submits that tx and sees it
  * confirm, it calls THIS endpoint with the create-tx signature and the `mint`
  * (plus optional `listAddress`) it received from `prepareDeploy`. The server
- * verifies the tx landed and the mint account exists on-chain, then records the
- * mint and flips the token to `active`.
+ * verifies the tx landed, that it actually initialized the supplied mint, and
+ * that the mint account exists on-chain, then records the mint and flips the
+ * token to `active`.
  *
  * This is the step that records `mintAddress` for the non-custodial path — both
  * the single-tx case and the overflow case. It is also what unblocks the
@@ -424,8 +447,9 @@ export const confirmDeploy = async (c: AppContext) => {
   // caller could otherwise pin an arbitrary mint to this token and poison the
   // public metadata.json. The create tx must be confirmed (no error, past the
   // `processed`-only stage) and the mint account must now exist on-chain.
+  const signature = parsed.data.signature as Signature;
   const rpc = createRpc(c.env);
-  const [status] = await getSignatureStatuses(rpc, [parsed.data.signature as Signature]);
+  const [status] = await getSignatureStatuses(rpc, [signature]);
 
   if (!status || status.err !== null || status.confirmationStatus === "processed") {
     throw badRequest("Deploy transaction is not confirmed on-chain");
@@ -433,6 +457,16 @@ export const confirmDeploy = async (c: AppContext) => {
 
   if (!(await accountExists(rpc, mint))) {
     throw badRequest("Mint account does not exist on-chain");
+  }
+
+  // Confirmed + exists is not enough: the two checks above are independent, so a
+  // caller could pair a confirmed signature from an unrelated tx (e.g. a SOL
+  // transfer) with any pre-existing mint and pass both. Fetch the tx and require
+  // that it actually initialized THIS mint, linking the signature to the mint.
+  const confirmedTx = await getTransaction(rpc, signature);
+
+  if (!confirmedTx || !transactionInitializesMint(confirmedTx, mint)) {
+    throw badRequest("Deploy transaction did not create this mint");
   }
 
   const signingWalletId = resolveApiKeySigningWalletId(

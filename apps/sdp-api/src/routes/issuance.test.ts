@@ -4565,6 +4565,17 @@ describe("Issuance Routes", () => {
             { slot: 100n, confirmations: 10n, confirmationStatus: "confirmed", err: null },
           ]);
         const accountExistsSpy = vi.spyOn(SolanaRpc, "accountExists").mockResolvedValueOnce(true);
+        const getTransactionSpy = vi.spyOn(SolanaRpc, "getTransaction").mockResolvedValueOnce({
+          slot: 100n,
+          err: null,
+          instructions: [
+            {
+              programId: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+              parsedType: "initializeMint2",
+              info: { mint: TEST_SOLANA_ADDRESSES.mint },
+            },
+          ],
+        });
 
         try {
           const res = await app.request(
@@ -4627,6 +4638,78 @@ describe("Issuance Routes", () => {
           createOrgSignerSpy.mockRestore();
           getSignatureStatusesSpy.mockRestore();
           accountExistsSpy.mockRestore();
+          getTransactionSpy.mockRestore();
+        }
+      });
+
+      it("returns 400 when the confirmed tx did not create the supplied mint", async () => {
+        ensureRpcUrl();
+
+        const token = await seedIssuedToken({
+          id: "tok_deploy_confirm_unrelated_tx",
+          mintAddress: null,
+          status: "pending",
+          uri: null,
+          requiresAllowlist: false,
+        });
+
+        // Confirmed signature + an existing mint account, but the tx is unrelated
+        // (no initializeMint for this mint) — the spoofing case the guard closes.
+        const getSignatureStatusesSpy = vi
+          .spyOn(SolanaRpc, "getSignatureStatuses")
+          .mockResolvedValueOnce([
+            { slot: 100n, confirmations: 10n, confirmationStatus: "confirmed", err: null },
+          ]);
+        const accountExistsSpy = vi.spyOn(SolanaRpc, "accountExists").mockResolvedValueOnce(true);
+        const getTransactionSpy = vi.spyOn(SolanaRpc, "getTransaction").mockResolvedValueOnce({
+          slot: 100n,
+          err: null,
+          instructions: [
+            {
+              programId: "11111111111111111111111111111111",
+              parsedType: "transfer",
+              info: { destination: TEST_SOLANA_ADDRESSES.wallet2 },
+            },
+          ],
+        });
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${token.id}/deploy/confirm`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({
+                signature: "5unrelatedConfirmedSig",
+                mint: TEST_SOLANA_ADDRESSES.mint,
+              }),
+            },
+            env
+          );
+
+          expect(res.status).toBe(400);
+
+          // The token stays pending — nothing recorded from a spoofed signature.
+          const stillPending = await app.request(
+            `/v1/issuance/tokens/${token.id}`,
+            {
+              method: "GET",
+              headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
+            },
+            env
+          );
+          const payload = (await stillPending.json()) as {
+            data: { token: { mintAddress: string | null; status: string } };
+          };
+          expect(payload.data.token.mintAddress).toBeNull();
+          expect(payload.data.token.status).toBe("pending");
+        } finally {
+          getSignatureStatusesSpy.mockRestore();
+          accountExistsSpy.mockRestore();
+          getTransactionSpy.mockRestore();
         }
       });
 
