@@ -75,7 +75,11 @@ interface BaseRampSettlementEvent {
 export type RampSettlementEvent =
   | (BaseRampSettlementEvent & { kind: "awaiting_payment" })
   | (BaseRampSettlementEvent & { kind: "settling" })
-  | (BaseRampSettlementEvent & { kind: "settled" })
+  | (BaseRampSettlementEvent & {
+      kind: "settled";
+      /** Amount the receiving side settled for, in display units — fiat for off-ramp, crypto for on-ramp. */
+      receivedAmount?: string;
+    })
   | (BaseRampSettlementEvent & { kind: "failed"; error?: string })
   | (BaseRampSettlementEvent & { kind: "expired"; error?: string })
   | { provider: RampProviderId; kind: "ignore"; reason: string };

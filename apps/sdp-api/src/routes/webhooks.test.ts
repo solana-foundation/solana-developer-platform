@@ -959,4 +959,113 @@ describe("Lightspark ramp webhook", () => {
       .first<{ status: string }>();
     expect(transfer).toEqual({ status: "completed" });
   });
+
+  const OFFRAMP_TRANSFER_ID = "pt_lightspark_offramp_webhook";
+  const OFFRAMP_QUOTE_ID = "Quote:019eb56d-f06c-5246-0000-c18574f65f2a";
+
+  async function seedLightsparkOfframpTransfer() {
+    await getDb(env)
+      .prepare(
+        `INSERT INTO payment_transfers (
+           id, organization_id, project_id, wallet_id, source_address, destination_address,
+           token, amount, memo, type, direction, status, provider, provider_reference,
+           delivery_mode, fiat_currency, fiat_amount, provider_data, signature, serialized_tx,
+           initiated_by_key_id, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(
+        OFFRAMP_TRANSFER_ID,
+        ORG_ID,
+        PROJECT_ID,
+        "wallet_lightspark_webhook",
+        "SourceSolanaWallet1111111111111111111111111111",
+        null,
+        "USDC",
+        "10",
+        null,
+        "offramp",
+        "outbound",
+        "awaiting_payment",
+        "lightspark",
+        OFFRAMP_QUOTE_ID,
+        "manual_instructions",
+        "USD",
+        null,
+        {},
+        null,
+        null,
+        null,
+        "2026-06-11T00:00:00.000Z",
+        "2026-06-11T00:00:00.000Z"
+      )
+      .run();
+  }
+
+  function offrampCompletedWebhook(): LightsparkOnrampWebhookPayload {
+    return {
+      id: "Webhook:019eb56e-ea4e-52c1-0000-36fa5542e7e6",
+      type: "OUTGOING_PAYMENT.COMPLETED",
+      timestamp: "2026-06-11T06:46:45.582432Z",
+      data: {
+        ...LIGHTSPARK_ONRAMP_PAYMENT_DATA,
+        quoteId: OFFRAMP_QUOTE_ID,
+        description: "SDP offramp",
+        source: {
+          sourceType: "REALTIME_FUNDING",
+          currency: "USDC",
+          customerId: "Customer:019eb1a0-8aa2-938e-0000-36f4d5ac29d2",
+        },
+        sentAmount: {
+          amount: 10000000,
+          currency: { code: "USDC", name: "USD Coin", symbol: "usdc", decimals: 6 },
+        },
+        receivedAmount: {
+          amount: 999,
+          currency: { code: "USD", name: "US Dollar", symbol: "$", decimals: 2 },
+        },
+        status: "COMPLETED",
+        updatedAt: "2026-06-11T06:46:45.550956Z",
+        settledAt: "2026-06-11T06:46:45.552374Z",
+      },
+    };
+  }
+
+  it("persists the settled fiat amount on a lightspark offramp COMPLETED webhook", async () => {
+    await seedLightsparkOfframpTransfer();
+
+    const res = await sendLightsparkWebhook(offrampCompletedWebhook());
+    expect(res.status).toBe(200);
+
+    const transfer = await getDb(env)
+      .prepare("SELECT status, fiat_amount FROM payment_transfers WHERE id = ?")
+      .bind(OFFRAMP_TRANSFER_ID)
+      .first<{ status: string; fiat_amount: string }>();
+    expect(transfer).toEqual({ status: "completed", fiat_amount: "9.99" });
+  });
+
+  it("does not regress a settled transfer when a stale webhook is redelivered", async () => {
+    await seedLightsparkOfframpTransfer();
+
+    const completed = await sendLightsparkWebhook(offrampCompletedWebhook());
+    expect(completed.status).toBe(200);
+
+    const stale = await sendLightsparkWebhook({
+      id: "Webhook:019eb56d-f08b-52c1-0000-90f1e68dc8f8",
+      type: "OUTGOING_PAYMENT.PENDING",
+      timestamp: "2026-06-11T06:45:41.643544Z",
+      data: {
+        ...LIGHTSPARK_ONRAMP_PAYMENT_DATA,
+        quoteId: OFFRAMP_QUOTE_ID,
+        status: "PENDING",
+        updatedAt: "2026-06-11T06:45:41.629605Z",
+      },
+    });
+    expect(stale.status).toBe(200);
+
+    const transfer = await getDb(env)
+      .prepare("SELECT status, fiat_amount FROM payment_transfers WHERE id = ?")
+      .bind(OFFRAMP_TRANSFER_ID)
+      .first<{ status: string; fiat_amount: string }>();
+    expect(transfer).toEqual({ status: "completed", fiat_amount: "9.99" });
+  });
 });

@@ -143,6 +143,27 @@ interface LightsparkOutgoingPaymentData {
   status: string;
   quoteId: string;
   failureReason?: string;
+  receivedAmount?: { amount: number; decimals: number };
+}
+
+function readOptionalGridAmount(
+  record: Record<string, unknown>,
+  field: string
+): { amount: number; decimals: number } | undefined {
+  const value = record[field];
+  if (!isGridRecord(value)) {
+    return undefined;
+  }
+  const amount = value.amount;
+  const currency = value.currency;
+  if (!Number.isInteger(amount) || typeof amount !== "number" || !isGridRecord(currency)) {
+    return undefined;
+  }
+  const decimals = currency.decimals;
+  if (!Number.isInteger(decimals) || typeof decimals !== "number") {
+    return undefined;
+  }
+  return { amount, decimals };
 }
 
 interface LightsparkOutgoingPaymentWebhook {
@@ -219,6 +240,7 @@ function parseLightsparkOutgoingPaymentWebhook(
       status: readRequiredGridString(data, "status", "Lightspark outgoing payment webhook data"),
       quoteId: readRequiredGridString(data, "quoteId", "Lightspark outgoing payment webhook data"),
       failureReason: readOptionalGridString(data, "failureReason"),
+      receivedAmount: readOptionalGridAmount(data, "receivedAmount"),
     },
   };
 }
@@ -728,6 +750,17 @@ export class LightsparkRampClient implements RampProvider {
     const kind = LIGHTSPARK_OUTGOING_PAYMENT_WEBHOOK_TYPES[webhook.type];
     if (kind === "failed" || kind === "expired") {
       return { provider: this.id, kind, reference, error: webhook.data.failureReason };
+    }
+    if (kind === "settled" && webhook.data.receivedAmount) {
+      return {
+        provider: this.id,
+        kind,
+        reference,
+        receivedAmount: formatDecimalAmount(
+          BigInt(webhook.data.receivedAmount.amount),
+          webhook.data.receivedAmount.decimals
+        ),
+      };
     }
     return { provider: this.id, kind, reference };
   }

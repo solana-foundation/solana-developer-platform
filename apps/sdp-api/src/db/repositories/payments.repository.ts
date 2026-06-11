@@ -102,6 +102,7 @@ export interface UpdatePaymentTransferInput {
   slot?: number | null;
   blockTime?: string | null;
   fee?: number | null;
+  fiatAmount?: string | null;
   error?: string | null;
   updatedAt: string;
 }
