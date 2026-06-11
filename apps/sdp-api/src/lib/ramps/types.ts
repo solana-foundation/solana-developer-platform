@@ -122,6 +122,8 @@ export interface RampOfframpQuoteInput {
   sourceWalletAddress: string;
   externalCustomerId: string;
   customerId?: string;
+  /** Handler-resolved Grid external payout account id (Lightspark). */
+  payoutAccountId?: string;
   redirectUrl?: string;
   bvnkCompliance?: BvnkComplianceInput;
 }
@@ -129,6 +131,7 @@ export interface RampOfframpQuoteInput {
 export interface ValidateCounterpartyOptions {
   direction: RampDirection;
   providerData: CounterpartyProviderData;
+  fiatCurrency?: RampFiatCurrency;
 }
 
 export interface RampProviderClient {

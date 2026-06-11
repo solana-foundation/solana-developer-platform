@@ -1,6 +1,7 @@
 import { createVerify } from "node:crypto";
 import type {
   Counterparty,
+  CounterpartyProviderData,
   LightsparkPaymentRampExecution,
   LightsparkPaymentRampInstruction,
   PaymentRampEstimate,
@@ -21,7 +22,6 @@ import { formatDecimalAmount, parseDecimalAmount } from "@/lib/amount";
 import { AppError, badRequest, providerNotConfigured } from "@/lib/errors";
 import { isAddress } from "@/lib/solana";
 import { type ProviderRequestInit, providerFetchJson } from "../fetch";
-import { readyCounterparty } from "../requirements";
 import {
   basicAuthHeader,
   createProviderRampSupport,
@@ -45,6 +45,7 @@ import type {
   RampWebhookValidationResult,
   ValidateCounterpartyOptions,
 } from "../types";
+import { lightsparkCounterpartyRequirements } from "../validation/lightspark";
 
 const LIGHTSPARK_DEFAULT_GRID_API_URL = "https://api.lightspark.com/grid/2025-10-13";
 const GRID_EXCHANGE_RATE_DEFAULT_REQUEST_SENDING_AMOUNT = 10_000n;
@@ -226,6 +227,23 @@ interface LightsparkExternalAccount {
   accountInfo?: { accountType?: string; address?: string };
 }
 
+export interface LightsparkExternalAccountResolution {
+  id: string;
+  status: string;
+}
+
+function parseLightsparkExternalAccountResolution(
+  payload: unknown
+): LightsparkExternalAccountResolution {
+  if (!isGridRecord(payload)) {
+    throw badRequest("Lightspark external account response must be an object");
+  }
+  return {
+    id: readRequiredGridString(payload, "id", "Lightspark external account"),
+    status: readRequiredGridString(payload, "status", "Lightspark external account"),
+  };
+}
+
 function parseLightsparkExternalAccount(payload: unknown): LightsparkExternalAccount {
   if (typeof payload !== "object" || payload === null) {
     return {};
@@ -255,6 +273,53 @@ export interface LightsparkConfig {
   tokenId: string;
   clientSecret: string;
   apiBaseUrl: string;
+}
+
+export interface LightsparkPayoutAccount {
+  accountId: string;
+  status: string;
+}
+
+export function isLightsparkExternalAccountActive(status: string): boolean {
+  return status.trim().toUpperCase() === "ACTIVE";
+}
+
+export function readLightsparkData(
+  providerData: CounterpartyProviderData
+): Record<string, unknown> {
+  const lightspark = providerData.lightspark;
+  return lightspark && typeof lightspark === "object"
+    ? (lightspark as Record<string, unknown>)
+    : {};
+}
+
+export function readLightsparkCustomerId(providerData: CounterpartyProviderData): string | null {
+  const customerId = readLightsparkData(providerData).customerId;
+  return typeof customerId === "string" && customerId.length > 0 ? customerId : null;
+}
+
+export function readLightsparkPayoutAccounts(
+  providerData: CounterpartyProviderData
+): Record<string, unknown> {
+  const payoutAccounts = readLightsparkData(providerData).payoutAccounts;
+  return payoutAccounts && typeof payoutAccounts === "object"
+    ? (payoutAccounts as Record<string, unknown>)
+    : {};
+}
+
+export function readLightsparkPayoutAccount(
+  providerData: CounterpartyProviderData,
+  fiatCurrency: string
+): LightsparkPayoutAccount | null {
+  const entry = readLightsparkPayoutAccounts(providerData)[fiatCurrency];
+  if (!entry || typeof entry !== "object") {
+    return null;
+  }
+  const { accountId, status } = entry as { accountId?: unknown; status?: unknown };
+  if (typeof accountId !== "string" || accountId.length === 0 || typeof status !== "string") {
+    return null;
+  }
+  return { accountId, status };
 }
 
 export type LightsparkCustomerType = "INDIVIDUAL" | "BUSINESS";
@@ -310,6 +375,8 @@ interface GridCreateQuoteBody {
     sourceType: "REALTIME_FUNDING";
     customerId: string;
     currency: string;
+    /** Required by Grid when `currency` is a stablecoin — which deposit network to generate. */
+    cryptoNetwork?: "SOLANA";
   };
   destination: {
     destinationType: "ACCOUNT";
@@ -499,10 +566,10 @@ export class LightsparkRampClient implements RampProvider {
   readonly id = "lightspark";
 
   validateCounterparty(
-    _counterparty: Counterparty,
+    counterparty: Counterparty,
     options: ValidateCounterpartyOptions
   ): CounterpartyRequirements {
-    return readyCounterparty(this.id, options.direction);
+    return lightsparkCounterpartyRequirements(counterparty, options);
   }
 
   async _discoverRails({
@@ -891,6 +958,10 @@ export class LightsparkRampClient implements RampProvider {
       fiatAmountMinorUnits,
     });
 
+    return this.toRampQuote(quote);
+  }
+
+  private toRampQuote(quote: LightsparkQuote): PaymentRampQuote {
     return {
       provider: "lightspark",
       id: quote.id,
@@ -908,14 +979,91 @@ export class LightsparkRampClient implements RampProvider {
     };
   }
 
-  async createOfframpQuote(
-    _ctx: RampRuntimeContext,
-    _input: RampOfframpQuoteInput
-  ): Promise<PaymentRampQuote> {
-    throw new AppError(
-      "BAD_REQUEST",
-      "Lightspark off-ramp quotes require payout bank details, which aren't collected yet."
+  /** Creates a fiat external payout account for a Grid customer. */
+  async createFiatExternalAccount(
+    { env, mode }: RampRuntimeContext,
+    input: { customerId: string; currency: string; accountInfo: Record<string, unknown> }
+  ): Promise<LightsparkExternalAccountResolution> {
+    const config = readLightsparkConfig(env, mode);
+    const response = await this.request<unknown, Record<string, unknown>>(
+      config,
+      "customers/external-accounts",
+      {
+        method: "POST",
+        body: {
+          customerId: input.customerId,
+          currency: input.currency,
+          accountInfo: input.accountInfo,
+        },
+      }
     );
+    return parseLightsparkExternalAccountResolution(response);
+  }
+
+  async getExternalAccount(
+    { env, mode }: RampRuntimeContext,
+    input: { accountId: string }
+  ): Promise<LightsparkExternalAccountResolution> {
+    const config = readLightsparkConfig(env, mode);
+    const response = await this.request<unknown>(
+      config,
+      `customers/external-accounts/${encodeURIComponent(input.accountId)}`,
+      { method: "GET" }
+    );
+    return parseLightsparkExternalAccountResolution(response);
+  }
+
+  /**
+   * Creates a just-in-time (real-time funded) off-ramp quote: the customer
+   * funds it by sending crypto to the returned payment instructions, and Grid
+   * auto-executes into the fiat payout account at the locked rate.
+   */
+  async createOfframpQuote(
+    { env, mode }: RampRuntimeContext,
+    input: RampOfframpQuoteInput
+  ): Promise<PaymentRampQuote> {
+    if (!input.customerId) {
+      throw badRequest("Lightspark off-ramp requires a resolved customerId");
+    }
+    if (!input.payoutAccountId) {
+      throw badRequest("Lightspark off-ramp requires a resolved payoutAccountId");
+    }
+    if (!input.fiatCurrency) {
+      throw badRequest("fiatCurrency is required for Lightspark off-ramp.");
+    }
+    const config = readLightsparkConfig(env, mode);
+    const cryptoCurrency = normalizeLightsparkCurrencyCode(input.cryptoToken);
+    if (!isSolanaCryptoAsset(cryptoCurrency)) {
+      throw badRequest(
+        `Lightspark off-ramp from an SDP wallet supports Solana assets only; got ${cryptoCurrency}.`
+      );
+    }
+    const cryptoAmountMinorUnits = toLightsparkMinorUnitsInteger(
+      parseDecimalAmount(input.cryptoAmount, getLightsparkCurrencyDecimals(cryptoCurrency)),
+      "cryptoAmount"
+    );
+
+    const response = await this.request<GridQuoteResponse, GridCreateQuoteBody>(config, "quotes", {
+      method: "POST",
+      body: {
+        source: {
+          sourceType: "REALTIME_FUNDING",
+          customerId: input.customerId,
+          currency: cryptoCurrency,
+          cryptoNetwork: "SOLANA",
+        },
+        destination: {
+          destinationType: "ACCOUNT",
+          accountId: input.payoutAccountId,
+          currency: input.fiatCurrency,
+        },
+        lockedCurrencySide: "SENDING",
+        lockedCurrencyAmount: cryptoAmountMinorUnits,
+        description: "SDP offramp",
+      },
+    });
+
+    return this.toRampQuote(parseLightsparkQuote(response));
   }
 
   async executeOnramp(
