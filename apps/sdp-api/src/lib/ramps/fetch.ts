@@ -54,11 +54,13 @@ export async function providerFetch<TBody = never>(
   return { response, raw, parsed };
 }
 
-function assertProviderResponseOk(
+export async function providerFetchJson<TResponse, TBody = never>(
   provider: RampProviderId,
-  response: Response,
-  parsed: unknown
-): void {
+  url: string,
+  init: ProviderRequestInit<TBody>
+): Promise<TResponse> {
+  const { response, parsed } = await providerFetch(provider, url, init);
+
   if (!response.ok) {
     throw new AppError(
       classifyProviderStatus(response.status),
@@ -69,16 +71,6 @@ function assertProviderResponseOk(
       { provider, providerStatus: response.status }
     );
   }
-}
-
-export async function providerFetchJson<TResponse, TBody = never>(
-  provider: RampProviderId,
-  url: string,
-  init: ProviderRequestInit<TBody>
-): Promise<TResponse> {
-  const { response, parsed } = await providerFetch(provider, url, init);
-
-  assertProviderResponseOk(provider, response, parsed);
 
   if (parsed === undefined) {
     throw new AppError("PROVIDER_UNAVAILABLE", `${provider} returned an unparseable response`, {
@@ -87,14 +79,4 @@ export async function providerFetchJson<TResponse, TBody = never>(
   }
 
   return parsed as TResponse;
-}
-
-/** For endpoints that succeed with no body (e.g. 204 deletes), which providerFetchJson rejects. */
-export async function providerFetchNoContent<TBody = never>(
-  provider: RampProviderId,
-  url: string,
-  init: ProviderRequestInit<TBody>
-): Promise<void> {
-  const { response, parsed } = await providerFetch(provider, url, init);
-  assertProviderResponseOk(provider, response, parsed);
 }

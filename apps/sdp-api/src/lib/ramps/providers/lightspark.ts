@@ -21,7 +21,7 @@ import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 import { formatDecimalAmount, parseDecimalAmount } from "@/lib/amount";
 import { AppError, badRequest, providerNotConfigured } from "@/lib/errors";
 import { isAddress } from "@/lib/solana";
-import { type ProviderRequestInit, providerFetchJson, providerFetchNoContent } from "../fetch";
+import { type ProviderRequestInit, providerFetchJson } from "../fetch";
 import {
   basicAuthHeader,
   createProviderRampSupport,
@@ -676,17 +676,15 @@ export class LightsparkRampClient implements RampProvider {
     return { provider: this.id, kind, reference };
   }
 
-  private requestUrl(config: LightsparkConfig, path: string): string {
-    const base = config.apiBaseUrl.endsWith("/") ? config.apiBaseUrl : `${config.apiBaseUrl}/`;
-    return new URL(path, base).toString();
-  }
-
   private async request<TResponse, TBody = never>(
     config: LightsparkConfig,
     path: string,
     init: ProviderRequestInit<TBody>
   ): Promise<TResponse> {
-    return providerFetchJson<TResponse, TBody>(this.id, this.requestUrl(config, path), {
+    const base = config.apiBaseUrl.endsWith("/") ? config.apiBaseUrl : `${config.apiBaseUrl}/`;
+    const url = new URL(path, base);
+
+    return providerFetchJson<TResponse, TBody>(this.id, url.toString(), {
       ...init,
       headers: {
         Authorization: basicAuthHeader(config.tokenId, config.clientSecret),
@@ -1013,22 +1011,6 @@ export class LightsparkRampClient implements RampProvider {
       { method: "GET" }
     );
     return parseLightsparkExternalAccountResolution(response);
-  }
-
-  /** Deletes a payout account that lost a concurrent-creation race, so it is not orphaned at Grid. */
-  async deleteExternalAccount(
-    { env, mode }: RampRuntimeContext,
-    input: { accountId: string }
-  ): Promise<void> {
-    const config = readLightsparkConfig(env, mode);
-    await providerFetchNoContent(
-      this.id,
-      this.requestUrl(config, `customers/external-accounts/${encodeURIComponent(input.accountId)}`),
-      {
-        method: "DELETE",
-        headers: { Authorization: basicAuthHeader(config.tokenId, config.clientSecret) },
-      }
-    );
   }
 
   /**

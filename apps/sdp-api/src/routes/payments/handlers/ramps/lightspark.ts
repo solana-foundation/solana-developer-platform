@@ -104,9 +104,10 @@ async function persistLightsparkPayoutAccount(
  * Resolves the Grid external payout account for (counterparty, fiatCurrency).
  * Creates it from collected bank details on first use, persisting only the
  * resulting account id + status into provider_data — raw bank details are
- * passed through to Grid and never stored. Concurrent first-time quotes are
- * converged first-writer-wins: a loser deletes its duplicate account at Grid
- * and adopts the persisted one.
+ * passed through to Grid and never stored. Grid customers can hold several
+ * external accounts, so the stored entry is a reuse cache: concurrent
+ * first-time quotes each quote against the account they created (last write
+ * wins the cache) rather than risking a quote against someone else's details.
  */
 export async function ensureLightsparkPayoutAccount(
   c: AppContext,
@@ -133,28 +134,22 @@ export async function ensureLightsparkPayoutAccount(
         accountInfo,
       });
 
+      const account: LightsparkPayoutAccount = { accountId: created.id, status: created.status };
       const latestRow = await freshCounterpartyRow(c, input.counterparty, input.projectId);
-      const concurrent = readLightsparkPayoutAccount(latestRow.provider_data, input.fiatCurrency);
-      if (concurrent) {
-        await client.deleteExternalAccount(rampRuntime(c), { accountId: created.id });
-        stored = concurrent;
-      } else {
-        const account: LightsparkPayoutAccount = { accountId: created.id, status: created.status };
-        await persistLightsparkPayoutAccount(
-          c,
-          latestRow,
-          input.projectId,
-          input.customer.customerId,
-          input.fiatCurrency,
-          account
+      await persistLightsparkPayoutAccount(
+        c,
+        latestRow,
+        input.projectId,
+        input.customer.customerId,
+        input.fiatCurrency,
+        account
+      );
+      if (!isLightsparkExternalAccountActive(created.status)) {
+        throw badRequest(
+          `Lightspark payout account was created but is not active yet (status: ${created.status}). Retry once it is verified.`
         );
-        if (!isLightsparkExternalAccountActive(created.status)) {
-          throw badRequest(
-            `Lightspark payout account was created but is not active yet (status: ${created.status}). Retry once it is verified.`
-          );
-        }
-        return account;
       }
+      return account;
     }
   }
 
