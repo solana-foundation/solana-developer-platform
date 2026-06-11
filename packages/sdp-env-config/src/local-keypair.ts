@@ -54,22 +54,13 @@ function encodeBase58(bytes: Uint8Array): string {
 }
 
 export async function generateLocalSignerKeypair(): Promise<LocalSignerKeypair> {
-  const generated = await globalThis.crypto.subtle.generateKey({ name: "Ed25519" }, true, [
-    "sign",
-    "verify",
-  ]);
+  const generated = await crypto.subtle.generateKey({ name: "Ed25519" }, true, ["sign", "verify"]);
   if (!("privateKey" in generated) || !("publicKey" in generated)) {
     throw new Error("Ed25519 generation did not return a keypair.");
   }
   const keypair = generated as { privateKey: CryptoKey; publicKey: CryptoKey };
-  const privateJwk = (await globalThis.crypto.subtle.exportKey(
-    "jwk",
-    keypair.privateKey
-  )) as Ed25519Jwk;
-  const publicJwk = (await globalThis.crypto.subtle.exportKey(
-    "jwk",
-    keypair.publicKey
-  )) as Ed25519Jwk;
+  const privateJwk = (await crypto.subtle.exportKey("jwk", keypair.privateKey)) as Ed25519Jwk;
+  const publicJwk = (await crypto.subtle.exportKey("jwk", keypair.publicKey)) as Ed25519Jwk;
 
   if (privateJwk.crv !== "Ed25519" || publicJwk.crv !== "Ed25519" || !privateJwk.d) {
     throw new Error("Generated keypair is not an extractable Ed25519 keypair.");
