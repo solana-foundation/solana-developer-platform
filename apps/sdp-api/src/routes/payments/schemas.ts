@@ -458,6 +458,7 @@ export const createOfframpQuoteSchema = z.object({
   fiatCurrency: rampFiatCurrencySchema.optional(),
   cryptoAmount: paymentAmountSchema,
   redirectUrl: z.string().url().optional(),
+  collectedData: z.record(z.string(), z.string()).optional(),
 });
 
 export const executeOfframpSchema = z.object({
@@ -473,7 +474,7 @@ export const executeOfframpSchema = z.object({
 
 const simulateLightsparkSandboxTransferPayloadSchema = z.object({
   quoteId: z.string().min(1),
-  currencyCode: z.literal("USD").default("USD"),
+  currencyCode: z.enum(["USD", "USDC"]).default("USD"),
   currencyAmount: z.number().int().positive().optional(),
 });
 

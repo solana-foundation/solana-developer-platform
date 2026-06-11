@@ -158,7 +158,11 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
 
   const requirements = RAMP_PROVIDER_CLIENTS[query.data.provider].validateCounterparty(
     mapToCounterparty(counterparty),
-    { direction: query.data.direction, providerData: counterparty.provider_data }
+    {
+      direction: query.data.direction,
+      providerData: counterparty.provider_data,
+      ...("fiatCurrency" in query.data ? { fiatCurrency: query.data.fiatCurrency } : {}),
+    }
   );
   return success(c, requirements);
 };
