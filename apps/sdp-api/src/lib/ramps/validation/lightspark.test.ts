@@ -108,7 +108,11 @@ describe("lightsparkCounterpartyRequirements", () => {
         lightspark: {
           customerId: "Customer:cus_123",
           payoutAccounts: {
-            USD: { accountId: "ExternalAccount:acc_payout_123", status: "ACTIVE" },
+            "USD:ab12cd34ef56ab12": {
+              accountId: "ExternalAccount:acc_payout_123",
+              status: "ACTIVE",
+              createdAt: "2026-06-11T00:00:00.000Z",
+            },
           },
         },
       },

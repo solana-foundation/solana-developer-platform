@@ -9,7 +9,7 @@ import type {
 import { z } from "zod";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
 import { AppError, badRequest, unsupportedCounterparty } from "@/lib/errors";
-import { readLightsparkPayoutAccount } from "../providers/lightspark";
+import { latestLightsparkPayoutAccount } from "../providers/lightspark";
 import { buildRequirementSchema, readyCounterparty, selectField, textField } from "../requirements";
 import type { ValidateCounterpartyOptions } from "../types";
 
@@ -393,7 +393,7 @@ export function lightsparkCounterpartyRequirements(
       `Lightspark off-ramp does not support payouts in ${fiatCurrency}.`
     );
   }
-  if (readLightsparkPayoutAccount(providerData, fiatCurrency)) {
+  if (latestLightsparkPayoutAccount(providerData, fiatCurrency)) {
     return readyCounterparty("lightspark", direction);
   }
   return {

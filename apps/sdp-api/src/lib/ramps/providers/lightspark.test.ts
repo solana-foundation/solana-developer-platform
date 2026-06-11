@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { LightsparkRampClient } from "./lightspark";
+import { LightsparkRampClient, lightsparkPayoutAccountKey } from "./lightspark";
 
 const LIGHTSPARK_GRID_API_BASE_URL = "https://api.lightspark.com/grid/2025-10-13";
 const LIGHTSPARK_CONTEXT = {
@@ -260,5 +260,27 @@ describe("LightsparkRampClient", () => {
       `${LIGHTSPARK_GRID_API_BASE_URL}/customers/external-accounts`
     );
     expect(account).toEqual({ id: "ExternalAccount:acc_payout_123", status: "ACTIVE" });
+  });
+
+  it("derives content-addressed payout account keys", async () => {
+    const key = await lightsparkPayoutAccountKey("USD", {
+      paymentRails: "ACH",
+      routingNumber: "021000021",
+      accountNumber: "12345678901",
+    });
+    const reordered = await lightsparkPayoutAccountKey("USD", {
+      accountNumber: " 12345678901 ",
+      routingNumber: "021000021",
+      paymentRails: "ACH",
+    });
+    const differentDetails = await lightsparkPayoutAccountKey("USD", {
+      paymentRails: "ACH",
+      routingNumber: "021000021",
+      accountNumber: "99999999999",
+    });
+
+    expect(key.startsWith("USD:")).toBe(true);
+    expect(reordered).toBe(key);
+    expect(differentDetails).not.toBe(key);
   });
 });

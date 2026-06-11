@@ -7,9 +7,12 @@ import { RAMP_PROVIDER_CLIENTS } from "@/lib/ramps";
 import {
   isLightsparkExternalAccountActive,
   type LightsparkPayoutAccount,
+  type LightsparkPayoutAccountEntry,
+  latestLightsparkPayoutAccount,
+  lightsparkPayoutAccountKey,
   readLightsparkCustomerId,
   readLightsparkData,
-  readLightsparkPayoutAccount,
+  readLightsparkPayoutAccountByKey,
   readLightsparkPayoutAccounts,
 } from "@/lib/ramps/providers/lightspark";
 import type { LightsparkCustomerResolution } from "@/lib/ramps/types";
@@ -88,60 +91,117 @@ async function persistLightsparkPayoutAccount(
   row: CounterpartyRow,
   projectId: string,
   customerId: string,
-  fiatCurrency: RampFiatCurrency,
-  account: LightsparkPayoutAccount
+  entry: LightsparkPayoutAccountEntry
 ): Promise<void> {
   await persistLightsparkData(c, row, projectId, {
     customerId,
     payoutAccounts: {
       ...readLightsparkPayoutAccounts(row.provider_data),
-      [fiatCurrency]: account,
+      [entry.key]: { accountId: entry.accountId, status: entry.status, createdAt: entry.createdAt },
     },
   });
 }
 
+interface PayoutAccountContext {
+  counterparty: CounterpartyRow;
+  projectId: string;
+  customer: LightsparkCustomerResolution;
+  fiatCurrency: RampFiatCurrency;
+}
+
+async function refreshPayoutAccount(
+  c: AppContext,
+  input: PayoutAccountContext,
+  entry: LightsparkPayoutAccountEntry
+): Promise<LightsparkPayoutAccount> {
+  if (isLightsparkExternalAccountActive(entry.status)) {
+    return entry;
+  }
+
+  const latest = await RAMP_PROVIDER_CLIENTS.lightspark.getExternalAccount(rampRuntime(c), {
+    accountId: entry.accountId,
+  });
+  const refreshed: LightsparkPayoutAccountEntry = { ...entry, status: latest.status };
+  if (latest.status !== entry.status) {
+    const row = await freshCounterpartyRow(c, input.counterparty, input.projectId);
+    await persistLightsparkPayoutAccount(
+      c,
+      row,
+      input.projectId,
+      input.customer.customerId,
+      refreshed
+    );
+  }
+  if (!isLightsparkExternalAccountActive(latest.status)) {
+    throw badRequest(
+      `Lightspark payout account is not active yet (status: ${latest.status}). Retry once it is verified.`
+    );
+  }
+  return refreshed;
+}
+
 /**
- * Resolves the Grid external payout account for (counterparty, fiatCurrency).
- * Creates it from collected bank details on first use, persisting only the
- * resulting account id + status into provider_data — raw bank details are
- * passed through to Grid and never stored. Grid customers can hold several
- * external accounts, so the stored entry is a reuse cache: concurrent
- * first-time quotes each quote against the account they created (last write
- * wins the cache) rather than risking a quote against someone else's details.
+ * Resolves the Grid external payout account for the quote. Entries are cached
+ * in provider_data keyed by `${fiat}:${hash(collectedData)}`, so re-submitting
+ * the same bank details reuses the same Grid account while different details
+ * create (and keep) a distinct one — Grid customers can hold several external
+ * accounts. Raw bank details pass through to Grid and are never stored. A
+ * quote without collected details uses the most recently created account for
+ * the currency.
  */
 export async function ensureLightsparkPayoutAccount(
   c: AppContext,
-  input: {
-    counterparty: CounterpartyRow;
-    projectId: string;
-    customer: LightsparkCustomerResolution;
-    fiatCurrency: RampFiatCurrency;
-    collectedData?: CollectedFieldData;
-  }
+  input: PayoutAccountContext & { collectedData?: CollectedFieldData }
 ): Promise<LightsparkPayoutAccount> {
-  const client = RAMP_PROVIDER_CLIENTS.lightspark;
+  // The wizard always sends collectedData; an empty object means nothing was collected.
+  const collected =
+    input.collectedData !== undefined && Object.keys(input.collectedData).length > 0
+      ? input.collectedData
+      : undefined;
 
-  let stored = readLightsparkPayoutAccount(input.counterparty.provider_data, input.fiatCurrency);
-  if (!stored) {
+  if (!collected) {
+    let entry = latestLightsparkPayoutAccount(input.counterparty.provider_data, input.fiatCurrency);
+    if (!entry) {
+      const row = await freshCounterpartyRow(c, input.counterparty, input.projectId);
+      entry = latestLightsparkPayoutAccount(row.provider_data, input.fiatCurrency);
+    }
+    if (!entry) {
+      throw badRequest(
+        "collectedData with payout bank details is required for Lightspark off-ramp."
+      );
+    }
+    return refreshPayoutAccount(c, input, entry);
+  }
+
+  const key = await lightsparkPayoutAccountKey(input.fiatCurrency, collected);
+  let entry = readLightsparkPayoutAccountByKey(input.counterparty.provider_data, key);
+  if (!entry) {
     const row = await freshCounterpartyRow(c, input.counterparty, input.projectId);
-    stored = readLightsparkPayoutAccount(row.provider_data, input.fiatCurrency);
+    entry = readLightsparkPayoutAccountByKey(row.provider_data, key);
 
-    if (!stored) {
-      const accountInfo = buildLightsparkAccountInfo(row, input.fiatCurrency, input.collectedData);
-      const created = await client.createFiatExternalAccount(rampRuntime(c), {
-        customerId: input.customer.customerId,
-        currency: input.fiatCurrency,
-        accountInfo,
-      });
+    if (!entry) {
+      const accountInfo = buildLightsparkAccountInfo(row, input.fiatCurrency, collected);
+      const created = await RAMP_PROVIDER_CLIENTS.lightspark.createFiatExternalAccount(
+        rampRuntime(c),
+        {
+          customerId: input.customer.customerId,
+          currency: input.fiatCurrency,
+          accountInfo,
+        }
+      );
 
-      const account: LightsparkPayoutAccount = { accountId: created.id, status: created.status };
+      const account: LightsparkPayoutAccountEntry = {
+        key,
+        accountId: created.id,
+        status: created.status,
+        createdAt: new Date().toISOString(),
+      };
       const latestRow = await freshCounterpartyRow(c, input.counterparty, input.projectId);
       await persistLightsparkPayoutAccount(
         c,
         latestRow,
         input.projectId,
         input.customer.customerId,
-        input.fiatCurrency,
         account
       );
       if (!isLightsparkExternalAccountActive(created.status)) {
@@ -153,29 +213,7 @@ export async function ensureLightsparkPayoutAccount(
     }
   }
 
-  if (isLightsparkExternalAccountActive(stored.status)) {
-    return stored;
-  }
-
-  const latest = await client.getExternalAccount(rampRuntime(c), { accountId: stored.accountId });
-  const refreshed: LightsparkPayoutAccount = { accountId: latest.id, status: latest.status };
-  if (latest.status !== stored.status) {
-    const row = await freshCounterpartyRow(c, input.counterparty, input.projectId);
-    await persistLightsparkPayoutAccount(
-      c,
-      row,
-      input.projectId,
-      input.customer.customerId,
-      input.fiatCurrency,
-      refreshed
-    );
-  }
-  if (!isLightsparkExternalAccountActive(latest.status)) {
-    throw badRequest(
-      `Lightspark payout account is not active yet (status: ${latest.status}). Retry once it is verified.`
-    );
-  }
-  return refreshed;
+  return refreshPayoutAccount(c, input, entry);
 }
 
 export async function lightsparkOfframpQuote(
