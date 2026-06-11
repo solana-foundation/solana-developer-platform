@@ -21,7 +21,8 @@ export function FieldRow({ field, value, values, error, onChange, onRegenerate }
   // generated for the operator (e.g. POSTGRES_PASSWORD in auto-mode), so the
   // input is display-only and is changed via Regenerate, not typing.
   const isAutoManaged = field.secretWhen?.(values) ?? false;
-  const isSecret = field.kind === "secret" || isAutoManaged;
+  const canRegenerateLocalSigner = field.key === "CUSTODY_PRIVATE_KEY";
+  const isSecret = field.kind === "secret" || isAutoManaged || canRegenerateLocalSigner;
   const inputType = field.kind === "password" || field.kind === "secret" ? "password" : "text";
   const options = field.optionsWhen ? field.optionsWhen(values) : (field.options ?? []);
   const selected = field.kind === "multiselect" ? parseList(value) : [];
