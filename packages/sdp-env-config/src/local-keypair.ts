@@ -32,6 +32,7 @@ function encodeBase58(bytes: Uint8Array): string {
     if (byte !== 0) break;
     leadingZeroes += 1;
   }
+  if (leadingZeroes === bytes.length) return BASE58_ALPHABET[0].repeat(leadingZeroes);
 
   const digits: number[] = [];
   for (const byte of bytes.subarray(leadingZeroes)) {
