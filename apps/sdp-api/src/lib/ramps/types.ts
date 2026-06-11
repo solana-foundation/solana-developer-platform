@@ -75,7 +75,11 @@ interface BaseRampSettlementEvent {
 export type RampSettlementEvent =
   | (BaseRampSettlementEvent & { kind: "awaiting_payment" })
   | (BaseRampSettlementEvent & { kind: "settling" })
-  | (BaseRampSettlementEvent & { kind: "settled" })
+  | (BaseRampSettlementEvent & {
+      kind: "settled";
+      /** Amount the receiving side settled for, in display units — fiat for off-ramp, crypto for on-ramp. */
+      receivedAmount?: string;
+    })
   | (BaseRampSettlementEvent & { kind: "failed"; error?: string })
   | (BaseRampSettlementEvent & { kind: "expired"; error?: string })
   | { provider: RampProviderId; kind: "ignore"; reason: string };
@@ -122,6 +126,8 @@ export interface RampOfframpQuoteInput {
   sourceWalletAddress: string;
   externalCustomerId: string;
   customerId?: string;
+  /** Handler-resolved Grid external payout account id (Lightspark). */
+  payoutAccountId?: string;
   redirectUrl?: string;
   bvnkCompliance?: BvnkComplianceInput;
 }
@@ -129,6 +135,7 @@ export interface RampOfframpQuoteInput {
 export interface ValidateCounterpartyOptions {
   direction: RampDirection;
   providerData: CounterpartyProviderData;
+  fiatCurrency?: RampFiatCurrency;
 }
 
 export interface RampProviderClient {

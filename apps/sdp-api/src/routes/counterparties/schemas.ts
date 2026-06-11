@@ -8,9 +8,9 @@ import {
   COUNTERPARTY_SOURCE_OF_FUNDS,
   COUNTERPARTY_YEARLY_INCOME,
   COUNTRY_CODES,
-  RAMP_PROVIDERS,
 } from "@sdp/types";
 import { z } from "zod";
+import { LIGHTSPARK_PAYOUT_CURRENCIES } from "@/lib/ramps/validation/lightspark";
 
 const countryCodeSchema = z.enum(COUNTRY_CODES);
 const currencyCodeSchema = z.string().trim().toUpperCase().length(3);
@@ -87,10 +87,25 @@ export const counterpartyIdParamsSchema = z.object({
   counterpartyId: counterpartyIdSchema,
 });
 
-export const counterpartyRequirementsQuerySchema = z.object({
-  provider: z.enum(RAMP_PROVIDERS),
-  direction: z.enum(["onramp", "offramp"]),
-});
+const rampDirectionSchema = z.enum(["onramp", "offramp"]);
+
+const lightsparkPayoutCurrencySchema = z.preprocess(
+  (value) => (typeof value === "string" ? value.trim().toUpperCase() : value),
+  z.enum(LIGHTSPARK_PAYOUT_CURRENCIES)
+);
+
+export const counterpartyRequirementsQuerySchema = z.discriminatedUnion("provider", [
+  z.object({ provider: z.literal("moonpay"), direction: rampDirectionSchema }),
+  z.object({ provider: z.literal("bvnk"), direction: rampDirectionSchema }),
+  z.discriminatedUnion("direction", [
+    z.object({ provider: z.literal("lightspark"), direction: z.literal("onramp") }),
+    z.object({
+      provider: z.literal("lightspark"),
+      direction: z.literal("offramp"),
+      fiatCurrency: lightsparkPayoutCurrencySchema,
+    }),
+  ]),
+]);
 
 export const createCounterpartySchema = z.object({
   externalId: z.string().min(1).max(256).optional(),

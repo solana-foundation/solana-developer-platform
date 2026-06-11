@@ -1,6 +1,7 @@
 import { createVerify } from "node:crypto";
 import type {
   Counterparty,
+  CounterpartyProviderData,
   LightsparkPaymentRampExecution,
   LightsparkPaymentRampInstruction,
   PaymentRampEstimate,
@@ -16,12 +17,12 @@ import {
   getCryptoRailAssetLabel,
   parseFiatCurrency,
 } from "@sdp/types/payment-rails";
-import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
+import type { CollectedFieldData, CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 import { formatDecimalAmount, parseDecimalAmount } from "@/lib/amount";
 import { AppError, badRequest, providerNotConfigured } from "@/lib/errors";
+import { hashString } from "@/lib/hash";
 import { isAddress } from "@/lib/solana";
 import { type ProviderRequestInit, providerFetchJson } from "../fetch";
-import { readyCounterparty } from "../requirements";
 import {
   basicAuthHeader,
   createProviderRampSupport,
@@ -45,6 +46,7 @@ import type {
   RampWebhookValidationResult,
   ValidateCounterpartyOptions,
 } from "../types";
+import { lightsparkCounterpartyRequirements } from "../validation/lightspark";
 
 const LIGHTSPARK_DEFAULT_GRID_API_URL = "https://api.lightspark.com/grid/2025-10-13";
 const GRID_EXCHANGE_RATE_DEFAULT_REQUEST_SENDING_AMOUNT = 10_000n;
@@ -141,6 +143,27 @@ interface LightsparkOutgoingPaymentData {
   status: string;
   quoteId: string;
   failureReason?: string;
+  receivedAmount?: { amount: number; decimals: number };
+}
+
+function readOptionalGridAmount(
+  record: Record<string, unknown>,
+  field: string
+): { amount: number; decimals: number } | undefined {
+  const value = record[field];
+  if (!isGridRecord(value)) {
+    return undefined;
+  }
+  const amount = value.amount;
+  const currency = value.currency;
+  if (!Number.isInteger(amount) || typeof amount !== "number" || !isGridRecord(currency)) {
+    return undefined;
+  }
+  const decimals = currency.decimals;
+  if (!Number.isInteger(decimals) || typeof decimals !== "number") {
+    return undefined;
+  }
+  return { amount, decimals };
 }
 
 interface LightsparkOutgoingPaymentWebhook {
@@ -217,13 +240,33 @@ function parseLightsparkOutgoingPaymentWebhook(
       status: readRequiredGridString(data, "status", "Lightspark outgoing payment webhook data"),
       quoteId: readRequiredGridString(data, "quoteId", "Lightspark outgoing payment webhook data"),
       failureReason: readOptionalGridString(data, "failureReason"),
+      receivedAmount: readOptionalGridAmount(data, "receivedAmount"),
     },
   };
 }
 
 interface LightsparkExternalAccount {
   id?: string;
+  status?: string;
+  platformAccountId?: string;
   accountInfo?: { accountType?: string; address?: string };
+}
+
+export interface LightsparkExternalAccountResolution {
+  id: string;
+  status: string;
+}
+
+function parseLightsparkExternalAccountResolution(
+  payload: unknown
+): LightsparkExternalAccountResolution {
+  if (!isGridRecord(payload)) {
+    throw badRequest("Lightspark external account response must be an object");
+  }
+  return {
+    id: readRequiredGridString(payload, "id", "Lightspark external account"),
+    status: readRequiredGridString(payload, "status", "Lightspark external account"),
+  };
 }
 
 function parseLightsparkExternalAccount(payload: unknown): LightsparkExternalAccount {
@@ -232,10 +275,15 @@ function parseLightsparkExternalAccount(payload: unknown): LightsparkExternalAcc
   }
   const raw = payload as {
     id?: unknown;
+    status?: unknown;
+    platformAccountId?: unknown;
     accountInfo?: { accountType?: unknown; address?: unknown };
   };
   return {
     id: typeof raw.id === "string" ? raw.id : undefined,
+    status: typeof raw.status === "string" ? raw.status : undefined,
+    platformAccountId:
+      typeof raw.platformAccountId === "string" ? raw.platformAccountId : undefined,
     accountInfo:
       raw.accountInfo && typeof raw.accountInfo === "object"
         ? {
@@ -255,6 +303,101 @@ export interface LightsparkConfig {
   tokenId: string;
   clientSecret: string;
   apiBaseUrl: string;
+}
+
+export interface LightsparkPayoutAccount {
+  accountId: string;
+  status: string;
+}
+
+export interface LightsparkPayoutAccountEntry extends LightsparkPayoutAccount {
+  /** `${fiatCurrency}:${hash(accountInfo)}` — content-addressed so distinct bank details map to distinct Grid accounts. */
+  key: string;
+  createdAt: string;
+}
+
+export function isLightsparkExternalAccountActive(status: string): boolean {
+  return status.trim().toUpperCase() === "ACTIVE";
+}
+
+/** Cache key for a payout account: same collected details always map to the same key, distinct details never collide. */
+export async function lightsparkPayoutAccountKey(
+  fiatCurrency: string,
+  collectedData: CollectedFieldData
+): Promise<string> {
+  const fields = Object.entries(collectedData)
+    .map(([key, value]) => `${key}=${value.trim()}`)
+    .sort()
+    .join("&");
+  return `${fiatCurrency}:${(await hashString(fields)).slice(0, 16)}`;
+}
+
+export function readLightsparkData(
+  providerData: CounterpartyProviderData
+): Record<string, unknown> {
+  const lightspark = providerData.lightspark;
+  return lightspark && typeof lightspark === "object"
+    ? (lightspark as Record<string, unknown>)
+    : {};
+}
+
+export function readLightsparkCustomerId(providerData: CounterpartyProviderData): string | null {
+  const customerId = readLightsparkData(providerData).customerId;
+  return typeof customerId === "string" && customerId.length > 0 ? customerId : null;
+}
+
+export function readLightsparkPayoutAccounts(
+  providerData: CounterpartyProviderData
+): Record<string, unknown> {
+  const payoutAccounts = readLightsparkData(providerData).payoutAccounts;
+  return payoutAccounts && typeof payoutAccounts === "object"
+    ? (payoutAccounts as Record<string, unknown>)
+    : {};
+}
+
+function parseLightsparkPayoutAccountEntry(
+  key: string,
+  value: unknown
+): LightsparkPayoutAccountEntry {
+  const { accountId, status, createdAt } = value as {
+    accountId?: unknown;
+    status?: unknown;
+    createdAt?: unknown;
+  };
+  if (
+    typeof accountId !== "string" ||
+    accountId.length === 0 ||
+    typeof status !== "string" ||
+    typeof createdAt !== "string"
+  ) {
+    throw new AppError(
+      "INTERNAL_ERROR",
+      `Malformed lightspark payout account entry "${key}" in provider_data`
+    );
+  }
+  return { key, accountId, status, createdAt };
+}
+
+export function readLightsparkPayoutAccountByKey(
+  providerData: CounterpartyProviderData,
+  key: string
+): LightsparkPayoutAccountEntry | null {
+  const value = readLightsparkPayoutAccounts(providerData)[key];
+  if (value === undefined) {
+    return null;
+  }
+  return parseLightsparkPayoutAccountEntry(key, value);
+}
+
+export function latestLightsparkPayoutAccount(
+  providerData: CounterpartyProviderData,
+  fiatCurrency: string
+): LightsparkPayoutAccountEntry | null {
+  const entries = Object.entries(readLightsparkPayoutAccounts(providerData))
+    .filter(([key]) => key.startsWith(`${fiatCurrency}:`))
+    .map(([key, value]) => parseLightsparkPayoutAccountEntry(key, value))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  return entries[0] ?? null;
 }
 
 export type LightsparkCustomerType = "INDIVIDUAL" | "BUSINESS";
@@ -310,6 +453,8 @@ interface GridCreateQuoteBody {
     sourceType: "REALTIME_FUNDING";
     customerId: string;
     currency: string;
+    /** Required by Grid when `currency` is a stablecoin — which deposit network to generate. */
+    cryptoNetwork?: "SOLANA";
   };
   destination: {
     destinationType: "ACCOUNT";
@@ -499,10 +644,10 @@ export class LightsparkRampClient implements RampProvider {
   readonly id = "lightspark";
 
   validateCounterparty(
-    _counterparty: Counterparty,
+    counterparty: Counterparty,
     options: ValidateCounterpartyOptions
   ): CounterpartyRequirements {
-    return readyCounterparty(this.id, options.direction);
+    return lightsparkCounterpartyRequirements(counterparty, options);
   }
 
   async _discoverRails({
@@ -605,6 +750,17 @@ export class LightsparkRampClient implements RampProvider {
     const kind = LIGHTSPARK_OUTGOING_PAYMENT_WEBHOOK_TYPES[webhook.type];
     if (kind === "failed" || kind === "expired") {
       return { provider: this.id, kind, reference, error: webhook.data.failureReason };
+    }
+    if (kind === "settled" && webhook.data.receivedAmount) {
+      return {
+        provider: this.id,
+        kind,
+        reference,
+        receivedAmount: formatDecimalAmount(
+          BigInt(webhook.data.receivedAmount.amount),
+          webhook.data.receivedAmount.decimals
+        ),
+      };
     }
     return { provider: this.id, kind, reference };
   }
@@ -891,6 +1047,10 @@ export class LightsparkRampClient implements RampProvider {
       fiatAmountMinorUnits,
     });
 
+    return this.toRampQuote(quote);
+  }
+
+  private toRampQuote(quote: LightsparkQuote): PaymentRampQuote {
     return {
       provider: "lightspark",
       id: quote.id,
@@ -908,14 +1068,131 @@ export class LightsparkRampClient implements RampProvider {
     };
   }
 
-  async createOfframpQuote(
-    _ctx: RampRuntimeContext,
-    _input: RampOfframpQuoteInput
-  ): Promise<PaymentRampQuote> {
-    throw new AppError(
-      "BAD_REQUEST",
-      "Lightspark off-ramp quotes require payout bank details, which aren't collected yet."
+  /** Creates a fiat external payout account for a Grid customer. */
+  async createFiatExternalAccount(
+    { env, mode }: RampRuntimeContext,
+    input: {
+      customerId: string;
+      currency: string;
+      platformAccountId: string;
+      accountInfo: Record<string, unknown>;
+    }
+  ): Promise<LightsparkExternalAccountResolution> {
+    const config = readLightsparkConfig(env, mode);
+    const response = await this.request<unknown, Record<string, unknown>>(
+      config,
+      "customers/external-accounts",
+      {
+        method: "POST",
+        body: {
+          customerId: input.customerId,
+          currency: input.currency,
+          platformAccountId: input.platformAccountId,
+          accountInfo: input.accountInfo,
+        },
+      }
     );
+    return parseLightsparkExternalAccountResolution(response);
+  }
+
+  /**
+   * Idempotent payout-account creation keyed on platformAccountId. Grid rejects
+   * a duplicate with 409 ("External account already exists"); we recover by
+   * returning the account that already carries our id, so concurrent callers
+   * converge instead of orphaning one.
+   */
+  async getOrCreateFiatExternalAccount(
+    ctx: RampRuntimeContext,
+    input: {
+      customerId: string;
+      currency: string;
+      platformAccountId: string;
+      accountInfo: Record<string, unknown>;
+    }
+  ): Promise<LightsparkExternalAccountResolution> {
+    try {
+      return await this.createFiatExternalAccount(ctx, input);
+    } catch (error) {
+      if (error instanceof AppError && error.code === "CONFLICT") {
+        const config = readLightsparkConfig(ctx.env, ctx.mode);
+        const existing = await this.findCustomerExternalAccount(
+          config,
+          input.customerId,
+          input.currency,
+          (account) => account.platformAccountId === input.platformAccountId
+        );
+        if (existing?.id && existing.status) {
+          return { id: existing.id, status: existing.status };
+        }
+      }
+      throw error;
+    }
+  }
+
+  async getExternalAccount(
+    { env, mode }: RampRuntimeContext,
+    input: { accountId: string }
+  ): Promise<LightsparkExternalAccountResolution> {
+    const config = readLightsparkConfig(env, mode);
+    const response = await this.request<unknown>(
+      config,
+      `customers/external-accounts/${encodeURIComponent(input.accountId)}`,
+      { method: "GET" }
+    );
+    return parseLightsparkExternalAccountResolution(response);
+  }
+
+  /**
+   * Creates a just-in-time (real-time funded) off-ramp quote: the customer
+   * funds it by sending crypto to the returned payment instructions, and Grid
+   * auto-executes into the fiat payout account at the locked rate.
+   */
+  async createOfframpQuote(
+    { env, mode }: RampRuntimeContext,
+    input: RampOfframpQuoteInput
+  ): Promise<PaymentRampQuote> {
+    if (!input.customerId) {
+      throw badRequest("Lightspark off-ramp requires a resolved customerId");
+    }
+    if (!input.payoutAccountId) {
+      throw badRequest("Lightspark off-ramp requires a resolved payoutAccountId");
+    }
+    if (!input.fiatCurrency) {
+      throw badRequest("fiatCurrency is required for Lightspark off-ramp.");
+    }
+    const config = readLightsparkConfig(env, mode);
+    const cryptoCurrency = normalizeLightsparkCurrencyCode(input.cryptoToken);
+    if (!isSolanaCryptoAsset(cryptoCurrency)) {
+      throw badRequest(
+        `Lightspark off-ramp from an SDP wallet supports Solana assets only; got ${cryptoCurrency}.`
+      );
+    }
+    const cryptoAmountMinorUnits = toLightsparkMinorUnitsInteger(
+      parseDecimalAmount(input.cryptoAmount, getLightsparkCurrencyDecimals(cryptoCurrency)),
+      "cryptoAmount"
+    );
+
+    const response = await this.request<GridQuoteResponse, GridCreateQuoteBody>(config, "quotes", {
+      method: "POST",
+      body: {
+        source: {
+          sourceType: "REALTIME_FUNDING",
+          customerId: input.customerId,
+          currency: cryptoCurrency,
+          cryptoNetwork: "SOLANA",
+        },
+        destination: {
+          destinationType: "ACCOUNT",
+          accountId: input.payoutAccountId,
+          currency: input.fiatCurrency,
+        },
+        lockedCurrencySide: "SENDING",
+        lockedCurrencyAmount: cryptoAmountMinorUnits,
+        description: "SDP offramp",
+      },
+    });
+
+    return this.toRampQuote(parseLightsparkQuote(response));
   }
 
   async executeOnramp(

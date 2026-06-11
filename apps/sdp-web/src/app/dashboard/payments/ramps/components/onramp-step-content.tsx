@@ -1,6 +1,6 @@
 "use client";
 
-import { CheckCircle2Icon, Loader2Icon, XCircleIcon } from "lucide-react";
+import { CheckCircle2Icon, DollarSignIcon, Loader2Icon, XCircleIcon } from "lucide-react";
 import {
   formatMinorCurrencyAmount,
   formatTimestamp,
@@ -288,12 +288,16 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
           fiatCurrency={selectedRampPair.fiatCurrency}
           cryptoToken={toRampCryptoToken(selectedRampPair.assetRail)}
           instructions={quote.paymentInstructions}
-          simulateQuote={
+          action={
             quote.provider === "lightspark" || quote.provider === "bvnk"
               ? {
                   loading: quoteSimulationLoading,
                   succeeded: quoteSimulationSucceeded,
                   onClick: () => void simulateCurrentQuote(),
+                  icon: <DollarSignIcon />,
+                  idleLabel: quote.provider === "bvnk" ? "Simulate Deposit" : "Simulate Quote",
+                  busyLabel: "Simulating...",
+                  doneLabel: quote.provider === "bvnk" ? "Deposit Simulated" : "Quote Simulated",
                 }
               : undefined
           }

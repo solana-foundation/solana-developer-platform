@@ -1,17 +1,17 @@
 "use client";
 
-import { CheckCircle2Icon, Loader2Icon, WalletIcon, XCircleIcon } from "lucide-react";
-import { useMemo } from "react";
-import {
-  formatCurrencyAmount,
-  resolveTotalBalance,
-} from "@/app/dashboard/payments/payments-overview.utils";
+import { CheckCircle2Icon, SendIcon, WalletIcon, XCircleIcon } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import { Combobox } from "@/components/ui/combobox";
-import { OFFRAMP_PAIRS, RAMP_PROVIDER_OPTIONS } from "@/lib/ramps";
+import { OFFRAMP_PAIRS, RAMP_PROVIDER_OPTIONS, toRampCryptoToken } from "@/lib/ramps";
 import type { OfframpWizard } from "../hooks/use-offramp-wizard";
+import { walletComboboxOptions } from "../wallet-options";
 import { HostedRampFrame } from "./hosted-ramp-frame";
+import { ManualInstructionsQuote } from "./manual-instructions-quote";
 import { RampPairProviderSelector } from "./ramp-pair-provider-selector";
 import { RampStepPlaceholder } from "./ramp-step-placeholder";
+import { RequirementsFields } from "./requirements-fields";
+import { WalletAssetBreakdown } from "./wallet-asset-breakdown";
 
 function getOfframpTransferStatusCopy(status: string) {
   switch (status) {
@@ -20,7 +20,7 @@ function getOfframpTransferStatusCopy(status: string) {
       return {
         title: "Waiting to send",
         description:
-          "Complete the payout in the widget above. We will update this outgoing transfer automatically once the provider receives your crypto.",
+          "Complete the payout using the instructions above. We will update this outgoing transfer automatically once the provider receives your crypto.",
         state: "loading" as const,
       };
     case "processing":
@@ -61,6 +61,17 @@ function getOfframpTransferStatusCopy(status: string) {
   }
 }
 
+function AnimatedDots() {
+  const [count, setCount] = useState(1);
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => setCount((current) => (current % 3) + 1), 500);
+    return () => window.clearInterval(intervalId);
+  }, []);
+
+  return <span aria-hidden>{".".repeat(count)}</span>;
+}
+
 function OfframpTransferStatusPanel({ transfer }: { transfer: OfframpWizard["transferStatus"] }) {
   const copy = transfer
     ? getOfframpTransferStatusCopy(transfer.status)
@@ -74,18 +85,75 @@ function OfframpTransferStatusPanel({ transfer }: { transfer: OfframpWizard["tra
       <CheckCircle2Icon className="size-5 text-status-success-text" />
     ) : copy.state === "error" ? (
       <XCircleIcon className="size-5 text-status-error-text" />
-    ) : (
-      <Loader2Icon className="size-5 animate-spin text-text-medium" />
-    );
+    ) : null;
   return (
     <div className="flex items-start gap-3">
-      <span className="mt-0.5 shrink-0">{icon}</span>
+      {icon ? <span className="mt-0.5 shrink-0">{icon}</span> : null}
       <div className="min-w-0 flex-1">
-        <p className="text-sm font-medium text-text-extra-high">{copy.title}</p>
-        <p className="mt-1 text-sm leading-relaxed text-text-low">
-          {copy.description}
-          {copy.state === "loading" ? " Checking transfer status…" : null}
+        <p className="text-sm font-medium text-text-extra-high">
+          {copy.title}
+          {copy.state === "loading" ? <AnimatedDots /> : null}
         </p>
+        <p className="mt-1 text-sm leading-relaxed text-text-low">{copy.description}</p>
+      </div>
+    </div>
+  );
+}
+
+function OfframpManualQuoteStep({
+  wizard,
+  quote,
+}: {
+  wizard: OfframpWizard;
+  quote: Extract<NonNullable<OfframpWizard["quote"]>, { deliveryMode: "manual_instructions" }>;
+}) {
+  const {
+    selectedRampPair,
+    fields,
+    transferStatus,
+    canSendOnchain,
+    onchainSendLoading,
+    onchainSendResult,
+    sendCryptoToDeposit,
+    quoteExpired,
+  } = wizard;
+
+  if (!quote.paymentInstructions) {
+    return (
+      <div className="rounded-2xl border border-status-error-border bg-status-error-bg px-5 py-5 text-sm text-status-error-text">
+        Ramp quote is missing payment instructions.
+      </div>
+    );
+  }
+
+  const cryptoToken = toRampCryptoToken(selectedRampPair.assetRail);
+  const sendLabel = `Send ${fields.amount.trim()} ${cryptoToken.toUpperCase()}`;
+  return (
+    <div className="space-y-6">
+      <ManualInstructionsQuote
+        amount={fields.amount.trim()}
+        quote={quote}
+        fiatCurrency={selectedRampPair.fiatCurrency}
+        cryptoToken={cryptoToken}
+        instructions={quote.paymentInstructions}
+        description={`Send ${fields.amount.trim()} ${cryptoToken.toUpperCase()} to the deposit address below before the quote expires. The provider converts it at the locked rate and pays out to the saved bank account automatically.`}
+        action={
+          quote.provider === "lightspark"
+            ? {
+                loading: onchainSendLoading,
+                succeeded: onchainSendResult !== null,
+                disabled: !canSendOnchain || quoteExpired,
+                onClick: () => void sendCryptoToDeposit(),
+                icon: <SendIcon />,
+                idleLabel: quoteExpired ? "Quote expired" : sendLabel,
+                busyLabel: "Sending...",
+                doneLabel: "Transfer submitted",
+              }
+            : undefined
+        }
+      />
+      <div className="border-t border-border-light pt-5">
+        <OfframpTransferStatusPanel transfer={transferStatus} />
       </div>
     </div>
   );
@@ -104,33 +172,29 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
     transferStatus,
     setField,
     handlePairChange,
+    requirementFields,
+    collectedData,
+    setCollectedField,
+    requirementsBlocker,
   } = wizard;
 
-  const walletOptions = useMemo(
-    () =>
-      liveWallets.map((wallet) => {
-        const total = wallet.balances ? resolveTotalBalance(wallet.balances) : null;
-        return {
-          value: wallet.walletId,
-          label: wallet.label ?? wallet.walletId,
-          description: total !== null ? formatCurrencyAmount(total) : undefined,
-        };
-      }),
-    [liveWallets]
-  );
+  const walletOptions = useMemo(() => walletComboboxOptions(liveWallets), [liveWallets]);
 
   if (currentStepId === "WALLET") {
     return (
-      <Combobox
-        label="Source wallet"
-        value={fields.walletId || null}
-        onChange={(walletId) => setField("walletId", walletId)}
-        options={walletOptions}
-        placeholder="Select a source wallet"
-        searchPlaceholder="Search wallets"
-        icon={<WalletIcon className="size-5 shrink-0 text-text-low" />}
-        isLoading={walletsLoading}
-      />
+      <div className="space-y-4">
+        <Combobox
+          label="Source wallet"
+          value={fields.walletId || null}
+          onChange={(walletId) => setField("walletId", walletId)}
+          options={walletOptions}
+          placeholder="Select a source wallet"
+          searchPlaceholder="Search wallets"
+          icon={<WalletIcon className="size-5 shrink-0 text-text-low" />}
+          isLoading={walletsLoading}
+        />
+        {selectedWallet ? <WalletAssetBreakdown wallet={selectedWallet} /> : null}
+      </div>
     );
   }
 
@@ -144,23 +208,40 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
     }
 
     return (
-      <RampPairProviderSelector
-        direction="offramp"
-        pairs={OFFRAMP_PAIRS}
-        enabledRampProviders={enabledRampProviders}
-        providerOptions={RAMP_PROVIDER_OPTIONS}
-        wallets={liveWallets}
-        walletsLoading={walletsLoading}
-        selectedWallet={selectedWallet}
-        showWallet={false}
-        selectedPair={selectedRampPair}
-        selectedProvider={fields.provider}
-        amount={fields.amount}
-        onAmountChange={(value) => setField("amount", value)}
-        onAmountBlur={() => {}}
-        onWalletChange={(walletId) => setField("walletId", walletId)}
-        onPairChange={handlePairChange}
-        onProviderSelect={(nextProvider) => setField("provider", nextProvider)}
+      <div className="space-y-4">
+        <RampPairProviderSelector
+          direction="offramp"
+          pairs={OFFRAMP_PAIRS}
+          enabledRampProviders={enabledRampProviders}
+          providerOptions={RAMP_PROVIDER_OPTIONS}
+          wallets={liveWallets}
+          walletsLoading={walletsLoading}
+          selectedWallet={selectedWallet}
+          showWallet={false}
+          selectedPair={selectedRampPair}
+          selectedProvider={fields.provider}
+          amount={fields.amount}
+          onAmountChange={(value) => setField("amount", value)}
+          onAmountBlur={() => {}}
+          onWalletChange={(walletId) => setField("walletId", walletId)}
+          onPairChange={handlePairChange}
+          onProviderSelect={(nextProvider) => setField("provider", nextProvider)}
+        />
+        {requirementsBlocker ? (
+          <div className="rounded-2xl border border-status-error-border bg-status-error-bg px-4 py-3 text-sm text-status-error-text">
+            {requirementsBlocker}
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
+  if (currentStepId === "REQUIREMENTS") {
+    return (
+      <RequirementsFields
+        fields={requirementFields}
+        values={collectedData}
+        onChange={setCollectedField}
       />
     );
   }
@@ -174,6 +255,10 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
         </div>
       </div>
     );
+  }
+
+  if (currentStepId === "COMPLETE" && quote?.deliveryMode === "manual_instructions") {
+    return <OfframpManualQuoteStep wizard={wizard} quote={quote} />;
   }
 
   return <RampStepPlaceholder />;
