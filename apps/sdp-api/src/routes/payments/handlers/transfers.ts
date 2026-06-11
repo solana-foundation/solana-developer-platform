@@ -1795,7 +1795,7 @@ export async function listTransfers(c: AppContext) {
     walletAddress,
     token,
     direction,
-    status,
+    status: statuses,
     category,
     counterpartyId,
     provider,
@@ -1964,7 +1964,8 @@ export async function listTransfers(c: AppContext) {
       "completed",
       "expired",
     ];
-    const needsNonChainRecords = !status || nonChainStatuses.includes(status);
+    const needsNonChainRecords =
+      !statuses || statuses.some((value) => nonChainStatuses.includes(value));
     const pendingRows: TransferRow[] = [];
     if (needsNonChainRecords) {
       const pendingResult = await repo.listTransfers({
@@ -2018,7 +2019,7 @@ export async function listTransfers(c: AppContext) {
     const filtered = merged
       .filter((row) => {
         if (counterpartyId && row.counterparty_id !== counterpartyId) return false;
-        if (status && row.status !== status) return false;
+        if (statuses && !statuses.includes(row.status)) return false;
         if (token && row.token !== token) return false;
         if (direction && row.direction !== direction) return false;
         if (transferTypeSet && !transferTypeSet.has(row.type)) return false;
@@ -2037,7 +2038,7 @@ export async function listTransfers(c: AppContext) {
       counterpartyId,
       token,
       direction,
-      statuses: status ? [status] : undefined,
+      statuses,
       types: transferTypes,
       createdAtFrom: from,
       createdAtTo: to,

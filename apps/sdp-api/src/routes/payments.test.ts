@@ -4279,6 +4279,32 @@ describe("Payments routes", () => {
       expect(body.data[0]?.status).toBe("confirmed");
     });
 
+    it("filters by multiple statuses when status query param is comma-separated", async () => {
+      await seedTransfer({ id: "xfr_multi_completed", status: "completed" });
+      await seedTransfer({ id: "xfr_multi_confirmed", status: "confirmed" });
+      await seedTransfer({ id: "xfr_multi_pending", status: "pending" });
+
+      const res = await app.request(
+        "/v1/payments/transfers?status=completed,confirmed,finalized",
+        {
+          method: "GET",
+          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
+        },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: Array<{ id: string; status: string }>;
+        meta: { total: number };
+      };
+      expect(body.data).toHaveLength(2);
+      expect(body.data.map((transfer) => transfer.status).sort()).toEqual([
+        "completed",
+        "confirmed",
+      ]);
+    });
+
     it("returns bad request for invalid transfer status query param", async () => {
       const res = await app.request(
         "/v1/payments/transfers?status=settled",
