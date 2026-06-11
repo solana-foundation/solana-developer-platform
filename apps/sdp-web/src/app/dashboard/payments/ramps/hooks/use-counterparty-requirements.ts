@@ -1,6 +1,7 @@
 "use client";
 
 import type { RampProviderId } from "@sdp/types";
+import type { RampFiatCurrency } from "@sdp/types/generated/ramp-support";
 import type {
   CollectedFieldData,
   CounterpartyRequirements,
@@ -14,9 +15,13 @@ import { getApiError } from "@/app/dashboard/payments/payments-workspace.data";
 async function fetchCounterpartyRequirements(
   counterpartyId: string,
   provider: RampProviderId,
-  direction: RampDirection
+  direction: RampDirection,
+  fiatCurrency: RampFiatCurrency | undefined
 ): Promise<CounterpartyRequirements> {
   const params = new URLSearchParams({ provider, direction });
+  if (fiatCurrency !== undefined) {
+    params.set("fiatCurrency", fiatCurrency);
+  }
   const response = await fetch(
     `/api/dashboard/counterparty/${encodeURIComponent(counterpartyId)}/requirements?${params.toString()}`
   );
@@ -36,6 +41,8 @@ export interface CounterpartyRequirementsParams {
   counterpartyId: string;
   provider: RampProviderId | null;
   direction: RampDirection;
+  /** Payout currency — required by lightspark offramp requirements; ignored by other providers. */
+  fiatCurrency?: RampFiatCurrency;
 }
 
 export interface CounterpartyRequirementsState {
@@ -67,10 +74,11 @@ export function useCounterpartyRequirements(
     setCollectedData((prev) => ({ ...prev, [key]: value }));
   };
 
-  // Reset collected answers when the counterparty/provider changes by comparing the
-  // previous value during render (React's no-effect way to reset state on a change),
-  // so stale KYC never leaks into a different provider's payload.
-  const subjectKey = params === null ? "" : `${params.counterpartyId}:${params.provider}`;
+  // Reset collected answers when the counterparty/provider/currency changes by comparing
+  // the previous value during render (React's no-effect way to reset state on a change),
+  // so stale KYC or bank details never leak into a different provider's payload.
+  const subjectKey =
+    params === null ? "" : `${params.counterpartyId}:${params.provider}:${params.fiatCurrency}`;
   const [trackedSubject, setTrackedSubject] = useState(subjectKey);
   if (subjectKey !== trackedSubject) {
     setTrackedSubject(subjectKey);
@@ -84,15 +92,16 @@ export function useCounterpartyRequirements(
           params.counterpartyId,
           params.provider,
           params.direction,
+          params.fiatCurrency,
         ] as const)
       : null;
-  // Requirements are deterministic for a (counterparty, provider) for the wizard's
-  // lifetime — never revalidate, so `needsCollection` (and thus the wizard's step
-  // list) can't flip out from under the user mid-flow.
+  // Requirements are deterministic for a (counterparty, provider, currency) for the
+  // wizard's lifetime — never revalidate, so `needsCollection` (and thus the wizard's
+  // step list) can't flip out from under the user mid-flow.
   const { data, error } = useSWR(
     key,
-    ([, counterpartyId, provider, direction]) =>
-      fetchCounterpartyRequirements(counterpartyId, provider, direction),
+    ([, counterpartyId, provider, direction, fiatCurrency]) =>
+      fetchCounterpartyRequirements(counterpartyId, provider, direction, fiatCurrency),
     { revalidateOnFocus: false, revalidateOnReconnect: false, revalidateIfStale: false }
   );
 

@@ -31,6 +31,8 @@ interface RampWizardShellProps {
   stepIndex: number;
   primaryDisabled: boolean;
   primaryLabel: string;
+  /** Overrides the default Cancel/Previous secondary label. */
+  secondaryLabel?: string;
   walletsError: string | null;
   onPrimary: () => void;
   onSecondary: () => void;
@@ -38,7 +40,8 @@ interface RampWizardShellProps {
   setCounterpartyDialogOpen: (open: boolean) => void;
   onCounterpartyCreated: (created: Counterparty) => void;
   children: ReactNode;
-  footer?: ReactNode;
+  /** Rendered top-right, next to the step title (e.g. the "Powered by" badge). */
+  header?: ReactNode;
   footerActions?: ReactNode;
   hidePrimary?: boolean;
 }
@@ -48,6 +51,7 @@ export function RampWizardShell({
   stepIndex,
   primaryDisabled,
   primaryLabel,
+  secondaryLabel,
   walletsError,
   onPrimary,
   onSecondary,
@@ -55,7 +59,7 @@ export function RampWizardShell({
   setCounterpartyDialogOpen,
   onCounterpartyCreated,
   children,
-  footer,
+  header,
   footerActions,
   hidePrimary,
 }: RampWizardShellProps) {
@@ -87,7 +91,7 @@ export function RampWizardShell({
             <p className="text-3xl font-medium leading-tight tracking-tight text-text-extra-high">
               {steps[stepIndex]?.title}
             </p>
-            {footer}
+            {header}
           </div>
         </div>
 
@@ -107,7 +111,7 @@ export function RampWizardShell({
           className="h-14 rounded-full text-base"
           onClick={onSecondary}
         >
-          {stepIndex === 0 ? "Cancel" : "Previous"}
+          {secondaryLabel ?? (stepIndex === 0 ? "Cancel" : "Previous")}
         </Button>
         <div className="flex flex-col gap-3 sm:flex-row">
           {footerActions}

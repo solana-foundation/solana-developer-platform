@@ -14,6 +14,16 @@ const RAMP_SETTLEMENT_STATUS = {
   expired: "expired",
 } as const satisfies Record<Exclude<RampSettlementEvent["kind"], "ignore">, PaymentTransferStatus>;
 
+const TERMINAL_RAMP_TRANSFER_STATUSES = [
+  "completed",
+  "failed",
+  "expired",
+] as const satisfies readonly PaymentTransferStatus[];
+
+function isTerminalRampTransferStatus(status: PaymentTransferStatus): boolean {
+  return (TERMINAL_RAMP_TRANSFER_STATUSES as readonly PaymentTransferStatus[]).includes(status);
+}
+
 export async function applyRampSettlementEvent(c: AppContext, event: RampSettlementEvent) {
   if (event.kind === "ignore") {
     return;
@@ -30,12 +40,22 @@ export async function applyRampSettlementEvent(c: AppContext, event: RampSettlem
   if (!isRampTransferType(transfer.type)) {
     return;
   }
+  // Out-of-order or redelivered events must not regress a settled transfer
+  // (e.g. a retried PENDING arriving after COMPLETED).
+  if (isTerminalRampTransferStatus(transfer.status)) {
+    return;
+  }
 
   const update: UpdatePaymentTransferInput = {
     transferId: transfer.id,
     status: RAMP_SETTLEMENT_STATUS[event.kind],
     updatedAt: new Date().toISOString(),
   };
+  // For off-ramp the received side is the fiat payout; for on-ramp it is the
+  // crypto leg, which the transfer row already records as its amount.
+  if (event.kind === "settled" && event.receivedAmount && transfer.type === "offramp") {
+    update.fiatAmount = event.receivedAmount;
+  }
   if (event.kind === "failed" && event.error) {
     update.error = event.error;
   }

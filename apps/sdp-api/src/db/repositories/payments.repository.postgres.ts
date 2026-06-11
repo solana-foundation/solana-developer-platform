@@ -192,6 +192,7 @@ export function createPostgresPaymentsRepository(db: AppDb): PaymentsRepository 
                slot = ?,
                block_time = ?,
                fee = ?,
+               fiat_amount = ?,
                error = ?,
                updated_at = ?
            WHERE id = ?`
@@ -203,6 +204,7 @@ export function createPostgresPaymentsRepository(db: AppDb): PaymentsRepository 
           input.slot ?? existing.slot,
           input.blockTime ?? existing.block_time,
           input.fee ?? existing.fee,
+          input.fiatAmount ?? existing.fiat_amount,
           input.error ?? existing.error,
           input.updatedAt,
           input.transferId

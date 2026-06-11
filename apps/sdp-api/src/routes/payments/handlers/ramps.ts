@@ -25,7 +25,7 @@ import {
   normalizeBvnkCurrencyAndNetwork,
   readBvnkOnrampEntry,
 } from "@/lib/ramps/providers/bvnk";
-import type { LightsparkCustomerResolution, RampRuntimeContext } from "@/lib/ramps/types";
+import type { RampRuntimeContext } from "@/lib/ramps/types";
 import { success } from "@/lib/response";
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
 import { assertProviderAvailable } from "@/services/provider-availability.service";
@@ -49,6 +49,7 @@ import {
 } from "../schemas";
 import { type ResolvedScope, resolveScope, resolveWalletAddress } from "../wallets";
 import { bvnkOnrampQuote, ensureBvnkCustomer, ensureBvnkPaymentRule } from "./ramps/bvnk";
+import { ensureLightsparkCustomer, lightsparkOfframpQuote } from "./ramps/lightspark";
 
 type OnrampCurrencyPair = {
   source: (typeof ONRAMP_SUPPORT)[number]["source"];
@@ -132,15 +133,8 @@ function requireRampTransferWallet(
   return wallet;
 }
 
-function rampQuoteTransferStatus(
-  direction: RampQuoteDirection,
-  quote: PaymentRampQuote
-): PaymentTransferStatus {
-  if (
-    direction === "onramp" &&
-    quote.deliveryMode === "manual_instructions" &&
-    quote.status === "pending"
-  ) {
+function rampQuoteTransferStatus(quote: PaymentRampQuote): PaymentTransferStatus {
+  if (quote.deliveryMode === "manual_instructions" && quote.status === "pending") {
     return "awaiting_payment";
   }
   return quote.status;
@@ -177,7 +171,7 @@ async function persistRampQuoteTransfer(
     memo: null,
     type: input.direction,
     direction: isOnramp ? "inbound" : "outbound",
-    status: rampQuoteTransferStatus(input.direction, input.quote),
+    status: rampQuoteTransferStatus(input.quote),
     provider: input.quote.provider,
     providerReference: input.quote.id,
     deliveryMode: input.quote.deliveryMode,
@@ -341,57 +335,6 @@ async function executeOfframpWithProvider(
       throw internalError(`Unhandled ramp provider: ${_exhaustive}`);
     }
   }
-}
-
-function readLightsparkData(
-  providerData: CounterpartyRow["provider_data"]
-): Record<string, unknown> {
-  const lightspark = providerData.lightspark;
-  return lightspark && typeof lightspark === "object"
-    ? (lightspark as Record<string, unknown>)
-    : {};
-}
-
-function readLightsparkCustomerId(providerData: CounterpartyRow["provider_data"]): string | null {
-  const customerId = readLightsparkData(providerData).customerId;
-  return typeof customerId === "string" && customerId.length > 0 ? customerId : null;
-}
-
-/**
- * Returns the Grid customer id for a counterparty, lazily creating the native
- * Lightspark customer (via the provider) and persisting it into provider_data
- * on first use.
- */
-async function ensureLightsparkCustomer(
-  c: AppContext,
-  { counterparty, projectId }: { counterparty: CounterpartyRow; projectId: string }
-): Promise<LightsparkCustomerResolution> {
-  const repo = getCounterpartiesRepository(c);
-  const existing = readLightsparkCustomerId(counterparty.provider_data);
-  if (existing) {
-    return { customerId: existing };
-  }
-
-  const customer = await RAMP_PROVIDER_CLIENTS.lightspark.getOrCreateCustomer(rampRuntime(c), {
-    platformCustomerId: counterparty.id,
-    customerType: counterparty.entity_type === "business" ? "BUSINESS" : "INDIVIDUAL",
-    fullName: counterparty.display_name,
-    email: counterparty.email,
-  });
-
-  const existingLightspark = readLightsparkData(counterparty.provider_data);
-
-  await repo.updateCounterparty({
-    counterpartyId: counterparty.id,
-    organizationId: counterparty.organization_id,
-    projectId,
-    providerData: {
-      ...counterparty.provider_data,
-      lightspark: { ...existingLightspark, customerId: customer.id },
-    },
-  });
-
-  return { customerId: customer.id };
 }
 
 async function estimateAcrossProviders(
@@ -608,15 +551,6 @@ export async function createOfframpQuote(c: AppContext) {
     throw new AppError("NOT_FOUND", "Counterparty not found");
   }
 
-  if (input.provider === "lightspark") {
-    // Lightspark off-ramp is account-funded and requires a destination fiat payout
-    // account created from bank details. That collection step is not wired yet.
-    throw new AppError(
-      "BAD_REQUEST",
-      "Lightspark off-ramp quotes require payout bank details, which aren't collected yet."
-    );
-  }
-
   const sourceWalletAddress = resolveWalletAddress(
     scope.wallets,
     input.sourceWallet,
@@ -641,6 +575,18 @@ export async function createOfframpQuote(c: AppContext) {
         sourceWalletAddress,
         externalCustomerId: counterparty.external_id ?? counterparty.id,
         redirectUrl: input.redirectUrl,
+      });
+      break;
+    }
+    case "lightspark": {
+      quote = await lightsparkOfframpQuote(c, {
+        counterparty,
+        projectId,
+        cryptoToken: input.cryptoToken,
+        fiatCurrency: input.fiatCurrency,
+        cryptoAmount: input.cryptoAmount,
+        sourceWalletAddress,
+        collectedData: input.collectedData,
       });
       break;
     }

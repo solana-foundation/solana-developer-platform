@@ -10,17 +10,14 @@ import {
 } from "lucide-react";
 import { type ReactNode, useMemo } from "react";
 import { AddExternalAccountDialog } from "@/app/dashboard/payments/counterparty/add-external-account-dialog";
-import {
-  formatCurrencyAmount,
-  resolveTotalBalance,
-  shortenAddress,
-} from "@/app/dashboard/payments/payments-overview.utils";
+import { shortenAddress } from "@/app/dashboard/payments/payments-overview.utils";
 import { getDevnetExplorerUrl } from "@/app/dashboard/payments/payments-workspace.data";
 import { Button } from "@/components/ui/button";
 import { Combobox } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { OnchainSendWizard } from "../hooks/use-onchain-send-wizard";
+import { walletComboboxOptions } from "../wallet-options";
 import { CounterpartyAccountSelector } from "./counterparty-account-selector";
 
 function DetailRow({ icon, label, value }: { icon: ReactNode; label: string; value: ReactNode }) {
@@ -67,18 +64,7 @@ export function OnchainSendStepContent({
     transferResult,
   } = wizard;
 
-  const walletOptions = useMemo(
-    () =>
-      liveWallets.map((wallet) => {
-        const total = wallet.balances ? resolveTotalBalance(wallet.balances) : null;
-        return {
-          value: wallet.walletId,
-          label: wallet.label ?? wallet.walletId,
-          description: total !== null ? formatCurrencyAmount(total) : undefined,
-        };
-      }),
-    [liveWallets]
-  );
+  const walletOptions = useMemo(() => walletComboboxOptions(liveWallets), [liveWallets]);
 
   if (currentStepId === "DESTINATION") {
     return (
