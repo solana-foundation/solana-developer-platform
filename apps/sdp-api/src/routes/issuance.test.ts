@@ -4538,6 +4538,165 @@ describe("Issuance Routes", () => {
       });
     });
 
+    describe("POST /v1/issuance/tokens/:tokenId/deploy/confirm", () => {
+      const ensureRpcUrl = () => {
+        if (!(env as { SOLANA_RPC_URL?: string }).SOLANA_RPC_URL) {
+          (env as { SOLANA_RPC_URL?: string }).SOLANA_RPC_URL = "https://rpc.invalid.test";
+        }
+      };
+
+      it("records the mint, marks the token active, and unblocks prepare-metadata", async () => {
+        ensureRpcUrl();
+
+        const token = await seedIssuedToken({
+          id: "tok_deploy_confirm",
+          mintAddress: null,
+          status: "pending",
+          uri: null,
+          requiresAllowlist: false,
+        });
+
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSigner")
+          .mockResolvedValue({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
+        const getSignatureStatusesSpy = vi
+          .spyOn(SolanaRpc, "getSignatureStatuses")
+          .mockResolvedValueOnce([
+            { slot: 100n, confirmations: 10n, confirmationStatus: "confirmed", err: null },
+          ]);
+        const accountExistsSpy = vi.spyOn(SolanaRpc, "accountExists").mockResolvedValueOnce(true);
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${token.id}/deploy/confirm`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({
+                signature: "5testSigHOO466Confirm",
+                mint: TEST_SOLANA_ADDRESSES.mint,
+              }),
+            },
+            env
+          );
+
+          expect(res.status).toBe(200);
+          const payload = (await res.json()) as {
+            data: { token: { mintAddress: string | null; status: string } };
+          };
+          expect(payload.data.token.mintAddress).toBe(TEST_SOLANA_ADDRESSES.mint);
+          expect(payload.data.token.status).toBe("active");
+
+          // The recorded mint unblocks the metadata follow-up, which previously
+          // 400'd for every non-custodial caller (mintAddress was never set).
+          const prepareUpdateMetadataSpy = vi
+            .spyOn(MosaicService.prototype, "prepareUpdateMetadata")
+            .mockResolvedValueOnce({
+              serializedTx: "ZmFrZS1tZXRhZGF0YS10eA",
+              blockhash: "11111111111111111111111111111111",
+              lastValidBlockHeight: 0n,
+              requiredSigners: [],
+            } as never);
+          const simulateTransactionSpy = vi
+            .spyOn(SolanaRpc, "simulateTransaction")
+            .mockResolvedValueOnce({ success: true, logs: [], unitsConsumed: 0n, error: null });
+
+          try {
+            const followUp = await app.request(
+              `/v1/issuance/tokens/${token.id}/deploy/prepare-metadata`,
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+                },
+                body: JSON.stringify({}),
+              },
+              env
+            );
+
+            expect(followUp.status).toBe(200);
+          } finally {
+            prepareUpdateMetadataSpy.mockRestore();
+            simulateTransactionSpy.mockRestore();
+          }
+        } finally {
+          createOrgSignerSpy.mockRestore();
+          getSignatureStatusesSpy.mockRestore();
+          accountExistsSpy.mockRestore();
+        }
+      });
+
+      it("returns 400 when the create tx is not confirmed on-chain", async () => {
+        ensureRpcUrl();
+
+        const token = await seedIssuedToken({
+          id: "tok_deploy_confirm_unconfirmed",
+          mintAddress: null,
+          status: "pending",
+          uri: null,
+          requiresAllowlist: false,
+        });
+
+        const getSignatureStatusesSpy = vi
+          .spyOn(SolanaRpc, "getSignatureStatuses")
+          .mockResolvedValueOnce([null]);
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${token.id}/deploy/confirm`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({
+                signature: "5unconfirmedSig",
+                mint: TEST_SOLANA_ADDRESSES.mint,
+              }),
+            },
+            env
+          );
+
+          expect(res.status).toBe(400);
+        } finally {
+          getSignatureStatusesSpy.mockRestore();
+        }
+      });
+
+      it("returns 400 when the token already has a mint address", async () => {
+        const token = await seedIssuedToken({
+          id: "tok_deploy_confirm_already",
+          mintAddress: TEST_SOLANA_ADDRESSES.mint,
+          status: "active",
+          uri: null,
+          requiresAllowlist: false,
+        });
+
+        const res = await app.request(
+          `/v1/issuance/tokens/${token.id}/deploy/confirm`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+            },
+            body: JSON.stringify({
+              signature: "5testSig",
+              mint: TEST_SOLANA_ADDRESSES.mint,
+            }),
+          },
+          env
+        );
+
+        expect(res.status).toBe(400);
+      });
+    });
+
     describe("GET /v1/issuance/tokens/:tokenId/metadata.json", () => {
       it("serves public metadata JSON without authentication", async () => {
         const token = await seedIssuedToken({

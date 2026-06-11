@@ -21,11 +21,23 @@ export const canonicalMetadataUrl = (origin: string, tokenId: string): string =>
  * Prefers `env.PUBLIC_API_ORIGIN` so a deployment fronted by a proxy that
  * rewrites Host/scheme can pin the public origin — the URL is burned into the
  * on-chain MetadataPointer at deploy time, so an internal/unreachable origin
- * would be a permanent mistake. Falls back to the request origin, which is the
- * public-facing origin on Cloudflare Workers.
+ * would be a permanent mistake. The configured value is normalized through
+ * `URL.origin` so a stray trailing slash or path can't leak into the minted
+ * URI. Falls back to the request origin (the public-facing origin on Cloudflare
+ * Workers) when the env var is unset or malformed.
  */
-export const resolveMetadataOrigin = (env: Env, requestUrl: string): string =>
-  env.PUBLIC_API_ORIGIN?.trim() || new URL(requestUrl).origin;
+export const resolveMetadataOrigin = (env: Env, requestUrl: string): string => {
+  const configured = env.PUBLIC_API_ORIGIN?.trim();
+  if (configured) {
+    try {
+      return new URL(configured).origin;
+    } catch {
+      // Misconfigured env value — fall back to the request origin rather than
+      // burning a malformed URL into the on-chain MetadataPointer.
+    }
+  }
+  return new URL(requestUrl).origin;
+};
 
 /**
  * Public, unauthenticated handler serving a Token-2022 / Metaplex

@@ -1,5 +1,5 @@
 import type { TokenResponse } from "@sdp/types";
-import type { Address } from "@solana/kit";
+import type { Address, Signature } from "@solana/kit";
 import type { Context } from "hono";
 import { z } from "zod";
 import { getDb } from "@/db";
@@ -9,11 +9,16 @@ import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
 import { AuditService } from "@/services/audit.service";
 import { createMosaicService, MintMetadataUpdateError, PACKET_DATA_SIZE } from "@/services/mosaic";
 import { createOrgSigner } from "@/services/solana";
-import { createRpc, simulateTransaction } from "@/services/solana/rpc";
+import {
+  accountExists,
+  createRpc,
+  getSignatureStatuses,
+  simulateTransaction,
+} from "@/services/solana/rpc";
 import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
 import { requireProjectScope } from "../helpers";
-import { deployTokenSchema } from "../schemas";
+import { confirmDeploySchema, deployTokenSchema } from "../schemas";
 import { getMosaicAclMode, shouldEnableOnChainAcl } from "./access-control";
 import { getInitialPermanentDelegateAuthority } from "./authority-resolution";
 import { buildIdempotencyMetadata } from "./idempotency";
@@ -356,15 +361,170 @@ export const prepareDeploy = async (c: AppContext) => {
 };
 
 /**
+ * Record a confirmed non-custodial deploy.
+ *
+ * `prepareDeploy` is stateless — it hands the client an unsigned create tx but
+ * persists nothing. After the client signs and submits that tx and sees it
+ * confirm, it calls THIS endpoint with the create-tx signature and the `mint`
+ * (plus optional `listAddress`) it received from `prepareDeploy`. The server
+ * verifies the tx landed and the mint account exists on-chain, then records the
+ * mint and flips the token to `active`.
+ *
+ * This is the step that records `mintAddress` for the non-custodial path — both
+ * the single-tx case and the overflow case. It is also what unblocks the
+ * `deploy/prepare-metadata` follow-up, whose `mintAddress` guard would otherwise
+ * reject every non-custodial caller.
+ *
+ * Authority fields are recomputed from the signing wallet (never trusted from
+ * the request) so a caller can't record a mint under authorities it doesn't
+ * control.
+ */
+export const confirmDeploy = async (c: AppContext) => {
+  const { tokenId } = c.req.param();
+  const { auth, projectId, orgId } = requireProjectScope(c);
+  const body = await c.req.json().catch(() => ({}));
+  const parsed = confirmDeploySchema.safeParse(body);
+
+  if (!parsed.success) {
+    throw badRequest("Invalid request body", {
+      errors: z.flattenError(parsed.error).fieldErrors,
+    });
+  }
+
+  const tokenService = new TokenService(getDb(c.env));
+  const token = await tokenService.getToken({
+    tokenId,
+    organizationId: orgId,
+    projectId,
+  });
+
+  if (!token) {
+    throw notFound("Token");
+  }
+
+  // Mirror the deploy guards. A token that already has a mint has been
+  // deployed; re-confirming would overwrite its recorded mint, so reject. This
+  // also makes the endpoint safe to retry — the second call 400s instead of
+  // double-recording.
+  if (token.status !== "pending") {
+    throw new AppError(
+      "BAD_REQUEST",
+      "Token has already been deployed or is not in pending status"
+    );
+  }
+
+  if (token.mintAddress) {
+    throw badRequest("Token already has a mint address");
+  }
+
+  const mint = parsed.data.mint as Address;
+  const listAddress = parsed.data.listAddress as Address | undefined;
+
+  // Verify the deploy actually landed before recording it: any tokens:write
+  // caller could otherwise pin an arbitrary mint to this token and poison the
+  // public metadata.json. The create tx must be confirmed (no error, past the
+  // `processed`-only stage) and the mint account must now exist on-chain.
+  const rpc = createRpc(c.env);
+  const [status] = await getSignatureStatuses(rpc, [parsed.data.signature as Signature]);
+
+  if (!status || status.err !== null || status.confirmationStatus === "processed") {
+    throw badRequest("Deploy transaction is not confirmed on-chain");
+  }
+
+  if (!(await accountExists(rpc, mint))) {
+    throw badRequest("Mint account does not exist on-chain");
+  }
+
+  const signingWalletId = resolveApiKeySigningWalletId(
+    auth,
+    parsed.data.signingWalletId ?? token.signingWalletId,
+    ["tokens:write"]
+  );
+
+  // Recompute the authorities the deploy used (custody signer === mint &
+  // metadata authority, matching prepareDeploy) rather than trusting the
+  // request, so a recorded mint can't claim authorities the caller lacks.
+  const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId, signingWalletId);
+  const custodyAddress = signer.address;
+  const freezeAuthority = token.isFreezable ? custodyAddress : null;
+
+  const deployedToken = await tokenService.setTokenDeployed(
+    tokenId,
+    mint,
+    custodyAddress,
+    freezeAuthority,
+    listAddress
+  );
+
+  const initialPermanentDelegate = getInitialPermanentDelegateAuthority(token, custodyAddress);
+  const updatedToken =
+    initialPermanentDelegate !== undefined
+      ? await tokenService.updateTokenAuthorities(tokenId, {
+          permanentDelegate: initialPermanentDelegate,
+        })
+      : deployedToken;
+
+  // prepareDeploy persists no transaction row, so record one here for history /
+  // audit parity with the custodial deploy path.
+  const { transaction: tx } = await tokenService.createTransaction({
+    tokenId,
+    organizationId: auth.organizationId,
+    type: "deploy",
+    params: {
+      operation: "deploy",
+      tokenId,
+      template: token.template,
+      name: token.name,
+      symbol: token.symbol,
+    },
+    initiatedByKeyId: auth.id,
+  });
+
+  await tokenService.updateTransaction(tx.id, {
+    status: "confirmed",
+    signature: parsed.data.signature,
+    slot: Number(status.slot),
+    params: {
+      operation: "deploy",
+      mode: "confirm",
+      mintAddress: mint,
+      mintAuthority: custodyAddress,
+      freezeAuthority,
+      ablListAddress: listAddress ?? null,
+    },
+  });
+
+  const auditService = new AuditService(getDb(c.env));
+  await auditService.log(c, {
+    action: "deploy",
+    resourceType: "token",
+    resourceId: tokenId,
+    metadata: {
+      mode: "confirm",
+      mintAddress: mint,
+      signature: parsed.data.signature,
+      slot: status.slot.toString(),
+      template: token.template,
+      ablListAddress: listAddress ?? null,
+    },
+  });
+
+  const response: TokenResponse = { token: updatedToken };
+  return success(c, response);
+};
+
+/**
  * Prepare the metadata-uri follow-up transaction for the non-custodial,
  * client-signed deploy flow (HOO-466).
  *
  * Two-tx contract: when `prepareDeploy` returns `metadataUriFollowUp.required`,
- * the client signs+sends the create tx, confirms it, then calls THIS endpoint
- * to fetch an unsigned metadata field-update tx (set with a fresh blockhash —
- * the mint's metadata account only exists once the create tx confirms), signs
- * it with its update authority, and submits it. The update authority is the
- * same signing wallet used for the create tx, so no server key is involved.
+ * the client signs+sends the create tx, confirms it, records the mint via
+ * `deploy/confirm` (without which the `mintAddress` guard below rejects the
+ * call), then calls THIS endpoint to fetch an unsigned metadata field-update tx
+ * (set with a fresh blockhash — the mint's metadata account only exists once
+ * the create tx confirms), signs it with its update authority, and submits it.
+ * The update authority is the same signing wallet used for the create tx, so no
+ * server key is involved.
  */
 export const prepareDeployMetadata = async (c: AppContext) => {
   const { tokenId } = c.req.param();

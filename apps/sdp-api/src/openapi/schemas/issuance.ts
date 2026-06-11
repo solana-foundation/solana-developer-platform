@@ -3,6 +3,7 @@ import { TOKEN_TRANSACTION_STATUSES, TOKEN_TRANSACTION_TYPES } from "@sdp/types"
 import {
   addAllowlistSchema as addTokenAllowlistSchemaBase,
   burnSchema as burnSchemaBase,
+  confirmDeploySchema as confirmDeploySchemaBase,
   createTokenSchema as createTokenSchemaBase,
   forceBurnSchema as forceBurnSchemaBase,
   freezeSchema as freezeSchemaBase,
@@ -781,6 +782,27 @@ export const mintRequestSchema = mintSchemaBase
     }),
   })
   .openapi({ description: "Mint request body." });
+
+export const confirmDeployRequestSchema = confirmDeploySchemaBase
+  .extend({
+    signature: withOpenApi(confirmDeploySchemaBase.shape.signature, {
+      description: "Signature of the confirmed create transaction the client submitted.",
+      example: "5x...signature",
+    }),
+    mint: withOpenApi(confirmDeploySchemaBase.shape.mint, {
+      description: "Mint address returned by deploy/prepare and created by the submitted tx.",
+      example: "So11111111111111111111111111111111111111112",
+    }),
+    listAddress: withOpenApi(confirmDeploySchemaBase.shape.listAddress, {
+      description: "Optional ABL list address returned by deploy/prepare.",
+      example: "So11111111111111111111111111111111111111112",
+    }),
+    signingWalletId: withOpenApi(confirmDeploySchemaBase.shape.signingWalletId, {
+      description: "Optional custody wallet ID used as the signer for this action.",
+      example: "wal_example",
+    }),
+  })
+  .openapi({ description: "Confirm non-custodial deploy request body." });
 
 export const burnRequestSchema = burnSchemaBase
   .extend({

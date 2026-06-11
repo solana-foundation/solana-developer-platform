@@ -9,7 +9,12 @@ import type { Env } from "@/types/env";
 import { addAllowlistEntry, listAllowlist, removeAllowlistEntry } from "./handlers/allowlist";
 import { executeUpdateAuthority, prepareUpdateAuthority } from "./handlers/authority";
 import { executeBurn, prepareBurn } from "./handlers/burn";
-import { deployToken, prepareDeploy, prepareDeployMetadata } from "./handlers/deploy";
+import {
+  confirmDeploy,
+  deployToken,
+  prepareDeploy,
+  prepareDeployMetadata,
+} from "./handlers/deploy";
 import { executeForceBurn, prepareForceBurn } from "./handlers/force-burn";
 import { freezeAccount, listFrozenAccounts, unfreezeAccount } from "./handlers/freeze";
 import { serveTokenMetadata } from "./handlers/metadata";
@@ -57,6 +62,10 @@ issuance.patch("/tokens/:tokenId", requirePermissions("tokens:write"), updateTok
 // Deploy
 issuance.post("/tokens/:tokenId/deploy", requirePermissions("tokens:write"), deployToken);
 issuance.post("/tokens/:tokenId/deploy/prepare", requirePermissions("tokens:write"), prepareDeploy);
+// Confirmation step for the non-custodial deploy flow: records the mint after
+// the client signs+submits the prepared create tx (prepareDeploy persists
+// nothing). Required before prepare-metadata can run.
+issuance.post("/tokens/:tokenId/deploy/confirm", requirePermissions("tokens:write"), confirmDeploy);
 // Follow-up tx for the non-custodial deploy flow: set the metadata uri when the
 // create tx had to be prepared with an empty uri to stay under the packet limit.
 issuance.post(

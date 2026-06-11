@@ -6,6 +6,7 @@ import {
   addTokenAllowlistRequestSchema,
   allowlistEntryIdParamSchema,
   burnRequestSchema,
+  confirmDeployRequestSchema,
   createTokenRequestSchema,
   errorResponseSchema,
   forceBurnRequestSchema,
@@ -379,6 +380,34 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
       200: {
         description: "Prepared deploy transaction",
         content: jsonContent(prepareDeployResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/issuance/tokens/{tokenId}/deploy/confirm",
+    tags: ["Issuance"],
+    summary: "Confirm non-custodial deploy",
+    operationId: "confirmDeploy",
+    description:
+      "Records the mint after the client signs and submits a prepared (non-custodial) deploy transaction. Verifies the transaction landed on-chain, then marks the token deployed.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: z.object({
+        tokenId: tokenIdParamSchema,
+      }),
+      body: {
+        required: true,
+        content: jsonContent(confirmDeployRequestSchema),
+      },
+    },
+    responses: {
+      200: {
+        description: "Token deployed",
+        content: jsonContent(tokenResponse),
       },
       ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
     },

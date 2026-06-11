@@ -29,6 +29,13 @@ export interface DeployPrepareMetadataApiResponse
     simulation?: { success: boolean; logs: string[]; unitsConsumed?: number };
   }> {}
 
+/**
+ * Response of POST .../deploy/confirm — the step that records the mint after a
+ * client signs and submits a prepared (non-custodial) deploy tx. Returns the
+ * now-deployed token.
+ */
+export interface DeployConfirmApiResponse extends ApiResponse<{ token: Token }> {}
+
 export interface MintPrepareApiResponse
   extends ApiResponse<{
     transaction: TransactionRecord;

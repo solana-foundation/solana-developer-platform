@@ -229,6 +229,17 @@ export const deployTokenSchema = z.object({
   signingWalletId: z.string().min(1).optional(),
 });
 
+// Records a confirmed non-custodial deploy: the client echoes back the `mint`
+// (and optional `listAddress`) it received from `deploy/prepare` plus the
+// signature of the create tx it submitted, so the server can verify the tx
+// landed and persist the mint.
+export const confirmDeploySchema = z.object({
+  signature: z.string().min(1),
+  mint: z.string().min(32).max(44),
+  listAddress: z.string().min(32).max(44).optional(),
+  signingWalletId: z.string().min(1).optional(),
+});
+
 export const pauseTokenSchema = z.object({
   options: z
     .object({
