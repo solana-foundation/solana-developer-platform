@@ -181,11 +181,12 @@ export async function ensureLightsparkPayoutAccount(
 
     if (!entry) {
       const accountInfo = buildLightsparkAccountInfo(row, input.fiatCurrency, collected);
-      const created = await RAMP_PROVIDER_CLIENTS.lightspark.createFiatExternalAccount(
+      const created = await RAMP_PROVIDER_CLIENTS.lightspark.getOrCreateFiatExternalAccount(
         rampRuntime(c),
         {
           customerId: input.customer.customerId,
           currency: input.fiatCurrency,
+          platformAccountId: `${input.counterparty.id}:${key}`,
           accountInfo,
         }
       );

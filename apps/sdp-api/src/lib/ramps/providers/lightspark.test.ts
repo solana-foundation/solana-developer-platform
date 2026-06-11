@@ -247,6 +247,7 @@ describe("LightsparkRampClient", () => {
     const account = await new LightsparkRampClient().createFiatExternalAccount(LIGHTSPARK_CONTEXT, {
       customerId: "Customer:cus_123",
       currency: "USD",
+      platformAccountId: "cp_123:USD:ab12cd34ef56ab12",
       accountInfo: {
         accountType: "USD_ACCOUNT",
         paymentRails: ["ACH"],
@@ -259,7 +260,59 @@ describe("LightsparkRampClient", () => {
     expect(String(fetchSpy.mock.calls[0]?.[0])).toBe(
       `${LIGHTSPARK_GRID_API_BASE_URL}/customers/external-accounts`
     );
+    const body = JSON.parse(String(fetchSpy.mock.calls[0]?.[1]?.body));
+    expect(body.platformAccountId).toBe("cp_123:USD:ab12cd34ef56ab12");
     expect(account).toEqual({ id: "ExternalAccount:acc_payout_123", status: "ACTIVE" });
+  });
+
+  it("converges on the existing payout account when Grid returns 409", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ message: "External account already exists" }), {
+          status: 409,
+          headers: { "Content-Type": "application/json" },
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            data: [
+              {
+                id: "ExternalAccount:acc_existing_123",
+                status: "ACTIVE",
+                platformAccountId: "cp_123:USD:ab12cd34ef56ab12",
+                accountInfo: { accountType: "USD_ACCOUNT" },
+              },
+            ],
+            hasMore: false,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
+      );
+
+    const account = await new LightsparkRampClient().getOrCreateFiatExternalAccount(
+      LIGHTSPARK_CONTEXT,
+      {
+        customerId: "Customer:cus_123",
+        currency: "USD",
+        platformAccountId: "cp_123:USD:ab12cd34ef56ab12",
+        accountInfo: {
+          accountType: "USD_ACCOUNT",
+          paymentRails: ["ACH"],
+          routingNumber: "021000021",
+          accountNumber: "12345678901",
+          beneficiary: { beneficiaryType: "INDIVIDUAL", fullName: "Ada Lovelace" },
+        },
+      }
+    );
+
+    const listUrl = new URL(String(fetchSpy.mock.calls[1]?.[0]));
+    expect(`${listUrl.origin}${listUrl.pathname}`).toBe(
+      `${LIGHTSPARK_GRID_API_BASE_URL}/customers/external-accounts`
+    );
+    expect(listUrl.searchParams.get("customerId")).toBe("Customer:cus_123");
+    expect(account).toEqual({ id: "ExternalAccount:acc_existing_123", status: "ACTIVE" });
   });
 
   it("derives content-addressed payout account keys", async () => {

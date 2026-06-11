@@ -225,6 +225,8 @@ function parseLightsparkOutgoingPaymentWebhook(
 
 interface LightsparkExternalAccount {
   id?: string;
+  status?: string;
+  platformAccountId?: string;
   accountInfo?: { accountType?: string; address?: string };
 }
 
@@ -251,10 +253,15 @@ function parseLightsparkExternalAccount(payload: unknown): LightsparkExternalAcc
   }
   const raw = payload as {
     id?: unknown;
+    status?: unknown;
+    platformAccountId?: unknown;
     accountInfo?: { accountType?: unknown; address?: unknown };
   };
   return {
     id: typeof raw.id === "string" ? raw.id : undefined,
+    status: typeof raw.status === "string" ? raw.status : undefined,
+    platformAccountId:
+      typeof raw.platformAccountId === "string" ? raw.platformAccountId : undefined,
     accountInfo:
       raw.accountInfo && typeof raw.accountInfo === "object"
         ? {
@@ -1031,7 +1038,12 @@ export class LightsparkRampClient implements RampProvider {
   /** Creates a fiat external payout account for a Grid customer. */
   async createFiatExternalAccount(
     { env, mode }: RampRuntimeContext,
-    input: { customerId: string; currency: string; accountInfo: Record<string, unknown> }
+    input: {
+      customerId: string;
+      currency: string;
+      platformAccountId: string;
+      accountInfo: Record<string, unknown>;
+    }
   ): Promise<LightsparkExternalAccountResolution> {
     const config = readLightsparkConfig(env, mode);
     const response = await this.request<unknown, Record<string, unknown>>(
@@ -1042,11 +1054,46 @@ export class LightsparkRampClient implements RampProvider {
         body: {
           customerId: input.customerId,
           currency: input.currency,
+          platformAccountId: input.platformAccountId,
           accountInfo: input.accountInfo,
         },
       }
     );
     return parseLightsparkExternalAccountResolution(response);
+  }
+
+  /**
+   * Idempotent payout-account creation keyed on platformAccountId. Grid rejects
+   * a duplicate with 409 ("External account already exists"); we recover by
+   * returning the account that already carries our id, so concurrent callers
+   * converge instead of orphaning one.
+   */
+  async getOrCreateFiatExternalAccount(
+    ctx: RampRuntimeContext,
+    input: {
+      customerId: string;
+      currency: string;
+      platformAccountId: string;
+      accountInfo: Record<string, unknown>;
+    }
+  ): Promise<LightsparkExternalAccountResolution> {
+    try {
+      return await this.createFiatExternalAccount(ctx, input);
+    } catch (error) {
+      if (error instanceof AppError && error.code === "CONFLICT") {
+        const config = readLightsparkConfig(ctx.env, ctx.mode);
+        const existing = await this.findCustomerExternalAccount(
+          config,
+          input.customerId,
+          input.currency,
+          (account) => account.platformAccountId === input.platformAccountId
+        );
+        if (existing?.id && existing.status) {
+          return { id: existing.id, status: existing.status };
+        }
+      }
+      throw error;
+    }
   }
 
   async getExternalAccount(
