@@ -309,24 +309,24 @@ export function useRampWizard<TId extends string>(
     setStepIndex((current) => current + 1);
   };
 
-  const handleSecondary = () => {
-    if (stepIndex === 0) {
-      if (onExit) {
-        onExit();
-        return;
-      }
-      router.push("/dashboard/payments");
-      return;
-    }
-    setStepIndex((current) => Math.max(0, current - 1));
-  };
-
   const finish = () => {
     if (onExit) {
       onExit();
       return;
     }
     router.push("/dashboard/payments");
+  };
+
+  // Once the quote exists the wizard is on the transaction stage — stepping back
+  // into amount/details would orphan the live quote, so back becomes an explicit exit.
+  const onTransactionStage = isLastStep && quote !== null;
+
+  const handleSecondary = () => {
+    if (stepIndex === 0 || onTransactionStage) {
+      finish();
+      return;
+    }
+    setStepIndex((current) => Math.max(0, current - 1));
   };
 
   const handlePairChange = (nextPair: SelectedRampPair) => {
@@ -352,6 +352,7 @@ export function useRampWizard<TId extends string>(
     steps,
     currentStepId,
     isLastStep,
+    onTransactionStage,
     canProceed,
     collectedData: requirements.collectedData,
     setCollectedField: requirements.setField,

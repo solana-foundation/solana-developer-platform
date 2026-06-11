@@ -31,6 +31,8 @@ interface RampWizardShellProps {
   stepIndex: number;
   primaryDisabled: boolean;
   primaryLabel: string;
+  /** Overrides the default Cancel/Previous secondary label. */
+  secondaryLabel?: string;
   walletsError: string | null;
   onPrimary: () => void;
   onSecondary: () => void;
@@ -49,6 +51,7 @@ export function RampWizardShell({
   stepIndex,
   primaryDisabled,
   primaryLabel,
+  secondaryLabel,
   walletsError,
   onPrimary,
   onSecondary,
@@ -108,7 +111,7 @@ export function RampWizardShell({
           className="h-14 rounded-full text-base"
           onClick={onSecondary}
         >
-          {stepIndex === 0 ? "Cancel" : "Previous"}
+          {secondaryLabel ?? (stepIndex === 0 ? "Cancel" : "Previous")}
         </Button>
         <div className="flex flex-col gap-3 sm:flex-row">
           {footerActions}

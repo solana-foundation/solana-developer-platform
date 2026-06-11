@@ -138,9 +138,10 @@ function OfframpRail({
           <PoweredByRampProvider provider={wizard.fields.provider} />
         ) : null
       }
+      secondaryLabel={wizard.onTransactionStage ? "Cancel" : undefined}
       footerActions={
         transferTerminal ? (
-          <Button asChild type="button" variant="secondary" className="h-14 rounded-full text-base">
+          <Button asChild type="button" variant="secondary" className="self-center rounded-full">
             <Link href={`/dashboard/payments/counterparty/${wizard.fields.counterpartyId}`}>
               Go to transaction
             </Link>
@@ -251,9 +252,10 @@ function OnrampRail({
           <PoweredByRampProvider provider={wizard.fields.provider} />
         ) : null
       }
+      secondaryLabel={wizard.onTransactionStage ? "Cancel" : undefined}
       footerActions={
         transferTerminal ? (
-          <Button asChild type="button" variant="secondary" className="h-14 rounded-full text-base">
+          <Button asChild type="button" variant="secondary" className="self-center rounded-full">
             <Link href={`/dashboard/payments/counterparty/${wizard.fields.counterpartyId}`}>
               Go to transaction
             </Link>
