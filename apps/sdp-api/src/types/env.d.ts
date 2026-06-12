@@ -185,6 +185,9 @@ export interface Env {
   CHAINALYSIS_API_KEY?: string;
   CHAINALYSIS_API_BASE_URL?: string;
 
+  // Google address completion (Places API New + Maps Static API)
+  GOOGLE_ADDRESS_COMPLETION_API_KEY?: string;
+
   // MoonPay ramps configuration
   MOONPAY_API_KEY?: string;
   MOONPAY_SECRET_KEY?: string;
