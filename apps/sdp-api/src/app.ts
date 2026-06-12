@@ -35,6 +35,7 @@ import onboarding from "@/routes/onboarding";
 import openapi from "@/routes/openapi";
 import organizations from "@/routes/organizations";
 import payments from "@/routes/payments";
+import places from "@/routes/places";
 import projects from "@/routes/projects";
 import rpc from "@/routes/rpc";
 import webhooks from "@/routes/webhooks";
@@ -221,6 +222,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   v1.route("/wallets", wallets);
   v1.route("/onboarding", onboarding);
   v1.route("/payments", payments);
+  v1.route("/places", places);
   v1.route("/compliance", compliance);
 
   const registeredPluginNames = new Set<string>();
