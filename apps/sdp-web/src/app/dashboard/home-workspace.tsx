@@ -17,6 +17,7 @@ import {
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
+import { formatRelativeTime } from "./activity-format-utils";
 import { fetchHomeActivity } from "./home-workspace.data";
 import { formatCurrencyAmount, formatDisplayAmount } from "./payments/payments-overview.utils";
 
@@ -28,29 +29,6 @@ interface HomeWorkspaceProps {
 
 const HOME_ACTIVITY_KEY = "dashboard-home-activity";
 const HOME_ACTIVITY_CACHE_TTL_MS = 60_000;
-
-function formatRelativeTime(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return "—";
-  }
-
-  const diffMs = date.getTime() - Date.now();
-  const diffMinutes = Math.round(diffMs / 60_000);
-  const formatter = new Intl.RelativeTimeFormat("en-US", { numeric: "auto" });
-
-  if (Math.abs(diffMinutes) < 60) {
-    return formatter.format(diffMinutes, "minute");
-  }
-
-  const diffHours = Math.round(diffMinutes / 60);
-  if (Math.abs(diffHours) < 24) {
-    return formatter.format(diffHours, "hour");
-  }
-
-  const diffDays = Math.round(diffHours / 24);
-  return formatter.format(diffDays, "day");
-}
 
 function TruncatedTableText({ value, className }: { value: string; className?: string }) {
   return (
