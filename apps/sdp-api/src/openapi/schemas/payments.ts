@@ -1275,8 +1275,8 @@ export const paymentListTransfersQuerySchema = listTransfersQuerySchemaBase
       example: "outbound",
     }),
     status: withOpenApi(listTransfersQuerySchemaBase.shape.status, {
-      description: "Filter by transfer status.",
-      example: "confirmed",
+      description: "Filter by transfer status. Accepts a comma-separated list of statuses.",
+      example: "completed,confirmed,finalized",
     }),
     category: withOpenApi(listTransfersQuerySchemaBase.shape.category, {
       description: "Filter by wallet transfers or ramp transfers.",

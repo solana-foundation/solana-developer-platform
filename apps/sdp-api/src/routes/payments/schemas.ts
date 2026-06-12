@@ -393,7 +393,11 @@ export const listTransfersQuerySchema = z.object({
   walletAddress: z.string().optional(),
   token: z.string().optional(),
   direction: transferDirectionSchema.optional(),
-  status: transferStatusSchema.optional(),
+  status: z
+    .string()
+    .transform((value) => value.split(","))
+    .pipe(z.array(transferStatusSchema).min(1))
+    .optional(),
   category: z.enum(["wallet", "ramp"]).optional(),
   counterpartyId: z.string().min(1).optional(),
   provider: rampProviderSchema.optional(),
