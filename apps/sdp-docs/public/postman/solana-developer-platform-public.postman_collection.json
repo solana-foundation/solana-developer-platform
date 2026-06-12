@@ -1600,7 +1600,7 @@
             "description": "Creates a fiat-to-crypto on-ramp session through the selected provider.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"provider\": \"moonpay\",\n  \"destinationWallet\": \"wal_example\",\n  \"cryptoToken\": \"USDC\",\n  \"fiatCurrency\": \"USD\",\n  \"fiatAmount\": \"100.00\",\n  \"kycReference\": \"\",\n  \"redirectUrl\": \"https://example.com\"\n}",
+              "raw": "{\n  \"provider\": \"moonpay\",\n  \"counterpartyId\": \"cp_example\",\n  \"destinationWallet\": \"wal_example\",\n  \"cryptoToken\": \"USDC\",\n  \"fiatCurrency\": \"USD\",\n  \"fiatAmount\": \"100.00\",\n  \"redirectUrl\": \"https://example.com\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1624,7 +1624,7 @@
             "description": "Creates a crypto-to-fiat off-ramp session through the selected provider.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"provider\": \"moonpay\",\n  \"sourceWallet\": \"wal_example\",\n  \"cryptoToken\": \"USDC\",\n  \"fiatCurrency\": \"USD\",\n  \"cryptoAmount\": \"50.00\",\n  \"kycReference\": \"\",\n  \"redirectUrl\": \"https://example.com\"\n}",
+              "raw": "{\n  \"provider\": \"moonpay\",\n  \"counterpartyId\": \"cp_example\",\n  \"sourceWallet\": \"wal_example\",\n  \"cryptoToken\": \"USDC\",\n  \"fiatCurrency\": \"USD\",\n  \"cryptoAmount\": \"50.00\",\n  \"redirectUrl\": \"https://example.com\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
