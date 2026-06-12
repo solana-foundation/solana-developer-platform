@@ -1,6 +1,6 @@
 "use client";
 
-import type { PlaceAddressFields, PlaceSuggestion } from "@sdp/types";
+import type { PlaceAddressFields, PlaceSuggestion, ResolvedPlace } from "@sdp/types";
 import { LoaderCircleIcon, MapPinIcon, MapPinnedIcon, SearchIcon } from "lucide-react";
 import { useRef, useState } from "react";
 import useSWR from "swr";
@@ -13,13 +13,9 @@ import {
   staticMapUrl,
 } from "@/lib/places";
 import { useDebounce } from "@/lib/use-debounce";
+import { cn } from "@/lib/utils";
 
 const MIN_QUERY_LENGTH = 3;
-
-interface SelectedPlace {
-  formattedAddress: string;
-  mapUrl: string;
-}
 
 interface AddressAutocompleteProps {
   onSelect: (fields: PlaceAddressFields) => void;
@@ -27,14 +23,23 @@ interface AddressAutocompleteProps {
 
 export function AddressAutocomplete({ onSelect }: AddressAutocompleteProps) {
   const [query, setQuery] = useState("");
+  const [pickedQuery, setPickedQuery] = useState("");
   const [focused, setFocused] = useState(false);
   const [resolving, setResolving] = useState(false);
   const [resolveError, setResolveError] = useState<string | null>(null);
-  const [selected, setSelected] = useState<SelectedPlace | null>(null);
+  const [selected, setSelected] = useState<ResolvedPlace | null>(null);
+  const [activeIndex, setActiveIndex] = useState(-1);
+  const [indexQuery, setIndexQuery] = useState("");
   const sessionTokenRef = useRef(newPlacesSessionToken());
 
   const debouncedQuery = useDebounce(query.trim(), 250);
-  const searchActive = focused && debouncedQuery.length >= MIN_QUERY_LENGTH;
+  const searchActive =
+    focused && debouncedQuery.length >= MIN_QUERY_LENGTH && debouncedQuery !== pickedQuery;
+
+  if (indexQuery !== debouncedQuery) {
+    setIndexQuery(debouncedQuery);
+    setActiveIndex(-1);
+  }
 
   const {
     data: suggestions,
@@ -54,15 +59,13 @@ export function AddressAutocomplete({ onSelect }: AddressAutocompleteProps) {
   async function pick(suggestion: PlaceSuggestion) {
     setFocused(false);
     setQuery(suggestion.mainText);
+    setPickedQuery(suggestion.mainText);
     setResolveError(null);
     setResolving(true);
     try {
       const place = await fetchPlaceDetails(suggestion.placeId, sessionTokenRef.current);
       sessionTokenRef.current = newPlacesSessionToken();
-      setSelected({
-        formattedAddress: place.formattedAddress,
-        mapUrl: staticMapUrl(place.location),
-      });
+      setSelected(place);
       onSelect(place.addressFields);
     } catch (err) {
       setResolveError(err instanceof Error ? err.message : "Failed to load place details");
@@ -86,7 +89,24 @@ export function AddressAutocomplete({ onSelect }: AddressAutocompleteProps) {
             onFocus={() => setFocused(true)}
             onBlur={() => setFocused(false)}
             onKeyDown={(e) => {
-              if (e.key === "Escape") setFocused(false);
+              if (e.key === "Escape") {
+                setFocused(false);
+                return;
+              }
+              if (!searchActive || !suggestions || suggestions.length === 0) return;
+              if (e.key === "ArrowDown") {
+                e.preventDefault();
+                setActiveIndex((i) => (i + 1) % suggestions.length);
+              } else if (e.key === "ArrowUp") {
+                e.preventDefault();
+                setActiveIndex((i) => (i <= 0 ? suggestions.length - 1 : i - 1));
+              } else if (e.key === "Enter") {
+                const active = suggestions[activeIndex];
+                if (active) {
+                  e.preventDefault();
+                  void pick(active);
+                }
+              }
             }}
           />
           {searchActive && (
@@ -101,11 +121,16 @@ export function AddressAutocomplete({ onSelect }: AddressAutocompleteProps) {
                 ) : suggestions.length === 0 ? (
                   <p className="px-3 py-6 text-center text-sm text-text-low">No matches found.</p>
                 ) : (
-                  suggestions.map((suggestion) => (
+                  suggestions.map((suggestion, index) => (
                     <button
                       key={suggestion.placeId}
                       type="button"
-                      className="flex w-full items-center gap-3 rounded-[var(--select-item-radius)] px-3 py-2.5 text-left transition-colors hover:bg-[var(--select-item-highlight-bg)]"
+                      className={cn(
+                        "flex w-full items-center gap-3 rounded-[var(--select-item-radius)] px-3 py-2.5 text-left transition-colors",
+                        index === activeIndex
+                          ? "bg-[var(--select-item-highlight-bg)]"
+                          : "hover:bg-[var(--select-item-highlight-bg)]"
+                      )}
                       onMouseDown={(e) => e.preventDefault()}
                       onClick={() => void pick(suggestion)}
                     >
@@ -136,7 +161,7 @@ export function AddressAutocomplete({ onSelect }: AddressAutocompleteProps) {
       <div className="h-28 overflow-hidden rounded-xl border border-border-light">
         {selected ? (
           <img
-            src={selected.mapUrl}
+            src={staticMapUrl(selected.location)}
             alt={selected.formattedAddress}
             className="h-full w-full object-cover"
           />

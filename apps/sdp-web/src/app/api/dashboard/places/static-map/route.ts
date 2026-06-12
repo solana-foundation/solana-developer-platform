@@ -18,7 +18,7 @@ export async function GET(request: Request) {
       status: response.status,
       headers: {
         "Content-Type": response.headers.get("Content-Type") ?? "application/json",
-        "Cache-Control": response.headers.get("Cache-Control") ?? "no-store",
+        "Cache-Control": response.ok ? "private, max-age=3600" : "no-store",
         "X-SDP-Trace-ID": trace.traceId,
         "Server-Timing": trace.serverTiming(),
       },

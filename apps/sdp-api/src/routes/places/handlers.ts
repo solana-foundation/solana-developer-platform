@@ -48,7 +48,7 @@ export async function getPlace(c: AppContext) {
   return success(c, { place });
 }
 
-const STATIC_MAP_SIZE = { width: 640, height: 176 };
+const STATIC_MAP_SIZE = { width: 576, height: 112 };
 
 export async function getStaticMap(c: AppContext) {
   const parsed = staticMapQuerySchema.safeParse(c.req.query());

@@ -1,7 +1,7 @@
 import type { PlaceSuggestion, ResolvedPlace } from "@sdp/types";
 import { z } from "zod";
-import { AppError } from "@/lib/errors";
-import { classifyProviderStatus, extractProviderErrorMessage } from "@/lib/ramps/fetch";
+import { providerUnavailable } from "@/lib/errors";
+import { extractProviderErrorMessage } from "@/lib/ramps/fetch";
 import { requireEnv } from "@/lib/ramps/shared";
 
 const PLACES_API_BASE_URL = "https://places.googleapis.com/v1";
@@ -9,32 +9,21 @@ const STATIC_MAPS_API_BASE_URL = "https://maps.googleapis.com/maps/api/staticmap
 const PLACE_DETAILS_FIELD_MASK = "id,formattedAddress,location,addressComponents";
 const API_KEY_ENV = "GOOGLE_ADDRESS_COMPLETION_API_KEY";
 
-type PlacesEnv = Record<string, string | undefined>;
-
 async function googleJson<TSchema extends z.ZodTypeAny>(
   schema: TSchema,
   url: string,
   init: RequestInit
 ): Promise<z.output<TSchema>> {
   const response = await fetch(url, init);
-
   if (!response.ok) {
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(await response.text());
-    } catch {
-      parsed = undefined;
-    }
-    throw new AppError(
-      classifyProviderStatus(response.status),
+    throw providerUnavailable(
       extractProviderErrorMessage(
-        parsed,
+        await response.json(),
         `Google Maps request failed with status ${response.status}`
       ),
       { provider: "google", providerStatus: response.status }
     );
   }
-
   return schema.parse(await response.json());
 }
 
@@ -57,7 +46,7 @@ const autocompleteResponseSchema = z.object({
 });
 
 export async function autocompletePlaces(
-  env: PlacesEnv,
+  env: Record<string, string | undefined>,
   request: { input: string; sessionToken: string }
 ): Promise<PlaceSuggestion[]> {
   const parsed = await googleJson(
@@ -106,10 +95,15 @@ function componentText(
 }
 
 // Different countries report "city" under different component types.
-const CITY_COMPONENT_TYPES = ["locality", "postal_town", "sublocality_level_1"] as const;
+const CITY_COMPONENT_TYPES = [
+  "locality",
+  "postal_town",
+  "sublocality_level_1",
+  "administrative_area_level_3",
+] as const;
 
 export async function fetchPlaceDetails(
-  env: PlacesEnv,
+  env: Record<string, string | undefined>,
   placeId: string,
   sessionToken: string
 ): Promise<ResolvedPlace> {
@@ -149,7 +143,7 @@ export async function fetchPlaceDetails(
 }
 
 export async function fetchStaticMap(
-  env: PlacesEnv,
+  env: Record<string, string | undefined>,
   input: { latitude: number; longitude: number; width: number; height: number }
 ): Promise<Response> {
   const url = new URL(STATIC_MAPS_API_BASE_URL);
@@ -160,13 +154,12 @@ export async function fetchStaticMap(
   url.searchParams.set("markers", `${input.latitude},${input.longitude}`);
   url.searchParams.set("key", requireEnv(env, API_KEY_ENV));
 
-  const response = await fetch(url.toString(), { method: "GET" });
+  const response = await fetch(url.toString());
   if (!response.ok) {
-    throw new AppError(
-      classifyProviderStatus(response.status),
-      `Google Static Maps request failed with status ${response.status}`,
-      { provider: "google", providerStatus: response.status }
-    );
+    throw providerUnavailable(`Google Static Maps request failed with status ${response.status}`, {
+      provider: "google",
+      providerStatus: response.status,
+    });
   }
   return response;
 }
