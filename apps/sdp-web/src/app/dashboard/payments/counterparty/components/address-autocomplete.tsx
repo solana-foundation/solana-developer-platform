@@ -64,12 +64,12 @@ export function AddressAutocomplete({ onSelect }: AddressAutocompleteProps) {
     setResolving(true);
     try {
       const place = await fetchPlaceDetails(suggestion.placeId, sessionTokenRef.current);
-      sessionTokenRef.current = newPlacesSessionToken();
       setSelected(place);
       onSelect(place.addressFields);
     } catch (err) {
       setResolveError(err instanceof Error ? err.message : "Failed to load place details");
     } finally {
+      sessionTokenRef.current = newPlacesSessionToken();
       setResolving(false);
     }
   }

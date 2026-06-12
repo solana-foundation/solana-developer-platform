@@ -91,16 +91,16 @@ const apiBindingVars = extractApiBindingVars();
 const missingTurboEnv = processEnvVars.filter(
   (value) => !turboGlobalEnv.has(value) && !TURBO_IGNORE.has(value)
 );
-const missingApiKeys = apiBindingVars.filter(
+const missingApiEnvVars = apiBindingVars.filter(
   (value) => !API_LOCAL_ENV_KEYS.includes(value) && !API_ENV_IGNORE.has(value)
 );
 
 const report = [
   formatSection("Turbo globalEnv coverage", missingTurboEnv),
-  formatSection("API local env key coverage", missingApiKeys),
+  formatSection("API local env key coverage", missingApiEnvVars),
 ].join("\n\n");
 
-if (missingTurboEnv.length > 0 || missingApiKeys.length > 0) {
+if (missingTurboEnv.length > 0 || missingApiEnvVars.length > 0) {
   console.error(report);
   process.exitCode = 1;
 } else {

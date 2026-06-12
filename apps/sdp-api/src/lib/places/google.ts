@@ -15,16 +15,35 @@ async function googleJson<TSchema extends z.ZodTypeAny>(
   init: RequestInit
 ): Promise<z.output<TSchema>> {
   const response = await fetch(url, init);
+  let payload: unknown;
+  try {
+    payload = await response.json();
+  } catch {
+    payload = undefined;
+  }
   if (!response.ok) {
     throw providerUnavailable(
       extractProviderErrorMessage(
-        await response.json(),
+        payload,
         `Google Maps request failed with status ${response.status}`
       ),
       { provider: "google", providerStatus: response.status }
     );
   }
-  return schema.parse(await response.json());
+  if (payload === undefined) {
+    throw providerUnavailable("Google Maps returned an unparseable response", {
+      provider: "google",
+      providerStatus: response.status,
+    });
+  }
+  const parsed = schema.safeParse(payload);
+  if (!parsed.success) {
+    throw providerUnavailable("Google Maps returned an unexpected response shape", {
+      provider: "google",
+      providerStatus: response.status,
+    });
+  }
+  return parsed.data;
 }
 
 const autocompleteResponseSchema = z.object({
