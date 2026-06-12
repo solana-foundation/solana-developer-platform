@@ -3,6 +3,7 @@
   "pages": [
     "index",
     "quickstart",
+    "first-devnet-deployment",
     "configurator",
     "env-reference",
     "upgrade-and-backup",
