@@ -257,7 +257,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
             .openapi("TokenMetadataJson")
         ),
       },
-      ...errorResponses(errorResponseSchema, [404]),
+      ...errorResponses(errorResponseSchema, [404, 500]),
     },
   });
 
@@ -359,7 +359,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
         description: "Token deployed",
         content: jsonContent(tokenResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500, 502]),
     },
   });
 
@@ -382,7 +382,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
         description: "Prepared deploy transaction",
         content: jsonContent(prepareDeployResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500, 502]),
     },
   });
 
@@ -410,7 +410,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
         description: "Token deployed",
         content: jsonContent(tokenResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500, 502]),
     },
   });
 
@@ -434,7 +434,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
         description: "Prepared metadata-URI follow-up transaction (or no-op)",
         content: jsonContent(prepareDeployMetadataResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500, 502]),
     },
   });
 

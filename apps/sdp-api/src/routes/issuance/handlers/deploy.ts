@@ -642,11 +642,13 @@ export const prepareDeployMetadata = async (c: AppContext) => {
     throw new AppError("BAD_REQUEST", "Token has not been deployed yet");
   }
 
-  const signingWalletId = resolveApiKeySigningWalletId(
-    auth,
-    parsed.data.signingWalletId ?? token.signingWalletId,
-    ["tokens:write"]
-  );
+  // Use the signing wallet pinned at deploy/prepare (never the request body),
+  // matching confirmDeploy. The follow-up tx is signed by the mint's metadata
+  // update authority; a body override would resolve a different wallet and
+  // produce a tx that can never succeed against the on-chain authority.
+  const signingWalletId = resolveApiKeySigningWalletId(auth, token.signingWalletId, [
+    "tokens:write",
+  ]);
 
   const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId, signingWalletId);
   const mosaic = createMosaicService(c.env, signer);

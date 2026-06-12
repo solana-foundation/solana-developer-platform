@@ -825,11 +825,13 @@ export const confirmDeployRequestSchema = confirmDeploySchemaBase
       example: "So11111111111111111111111111111111111111112",
     }),
     listAddress: withOpenApi(confirmDeploySchemaBase.shape.listAddress, {
-      description: "Optional ABL list address returned by deploy/prepare.",
+      description:
+        "Accepted for backward compatibility but ignored: the server re-derives the ABL list-config PDA deterministically from the mint authority and mint.",
       example: "So11111111111111111111111111111111111111112",
     }),
     signingWalletId: withOpenApi(confirmDeploySchemaBase.shape.signingWalletId, {
-      description: "Optional custody wallet ID used as the signer for this action.",
+      description:
+        "Accepted for backward compatibility but ignored: the server uses the signing wallet pinned during deploy/prepare (or resolved from the API key), so the authority can't be changed at confirm time.",
       example: "wal_example",
     }),
   })

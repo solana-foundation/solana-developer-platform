@@ -4577,6 +4577,65 @@ describe("Issuance Routes", () => {
         }
       });
 
+      it("ignores a request-body signingWalletId, using the wallet pinned at deploy/prepare", async () => {
+        if (!(env as { SOLANA_RPC_URL?: string }).SOLANA_RPC_URL) {
+          (env as { SOLANA_RPC_URL?: string }).SOLANA_RPC_URL = "https://rpc.invalid.test";
+        }
+
+        const token = await seedIssuedToken({
+          id: "tok_prepare_metadata_wallet_pin",
+          mintAddress: TEST_SOLANA_ADDRESSES.mint,
+          status: "active",
+          uri: null,
+          signingWalletId: "wallet_pinned",
+          requiresAllowlist: false,
+        });
+
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSigner")
+          .mockResolvedValueOnce({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
+        const prepareUpdateMetadataSpy = vi
+          .spyOn(MosaicService.prototype, "prepareUpdateMetadata")
+          .mockResolvedValueOnce({
+            serializedTx: "ZmFrZS1tZXRhZGF0YS10eA",
+            blockhash: "11111111111111111111111111111111",
+            lastValidBlockHeight: 0n,
+            requiredSigners: [],
+          } as never);
+        const simulateTransactionSpy = vi
+          .spyOn(SolanaRpc, "simulateTransaction")
+          .mockResolvedValueOnce({ success: true, logs: [], unitsConsumed: 0n, error: null });
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${token.id}/deploy/prepare-metadata`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({ signingWalletId: "wallet_body_ignored" }),
+            },
+            env
+          );
+
+          expect(res.status).toBe(200);
+          // The update-authority signer comes from the pinned wallet, not the body —
+          // otherwise the follow-up tx would be signed by the wrong authority.
+          expect(createOrgSignerSpy).toHaveBeenCalledWith(
+            expect.anything(),
+            expect.anything(),
+            expect.anything(),
+            "wallet_pinned"
+          );
+        } finally {
+          createOrgSignerSpy.mockRestore();
+          prepareUpdateMetadataSpy.mockRestore();
+          simulateTransactionSpy.mockRestore();
+        }
+      });
+
       it("returns 400 for a token that has not been deployed", async () => {
         const token = await seedIssuedToken({
           id: "tok_prepare_metadata_undeployed",
