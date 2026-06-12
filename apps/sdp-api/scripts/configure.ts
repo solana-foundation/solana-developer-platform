@@ -22,6 +22,7 @@ import {
   type EnvField,
   FIELDS,
   generateEnv,
+  generateLocalSignerKeypair,
   generateSecret,
   isFieldVisible,
   parseList,
@@ -241,6 +242,15 @@ async function promptField(
   if (field.kind === "secret" || (field.secretWhen?.(values) ?? false)) {
     note(`${field.label}: generated`);
     return generateSecret(field.key);
+  }
+  if (field.key === "CUSTODY_PRIVATE_KEY" && current === "") {
+    try {
+      const keypair = await generateLocalSignerKeypair();
+      note(`${field.label}: generated local devnet signer ${keypair.publicKey}`);
+      return keypair.privateKey;
+    } catch {
+      note("Unable to generate a local signer in this runtime; enter a base58 Solana keypair.");
+    }
   }
   if (field.kind === "multiselect") return promptMultiSelect(field, current, ask, values);
   if (field.kind === "select") return promptSelect(field, current, ask, values);
