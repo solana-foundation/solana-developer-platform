@@ -44,7 +44,7 @@ interface WalletTrackedBalancesResult {
 interface OwnedTokenRoute {
   id: string;
   mintAddress: string | null;
-  name: string;
+  name?: string | null;
 }
 
 async function getWalletDetail(
@@ -97,7 +97,7 @@ async function getWalletTrackedBalances(
 
 async function getOwnedTokenRoutes(
   request: SdpApiClient["request"]
-): Promise<Map<string, { id: string; name: string }>> {
+): Promise<Map<string, { id: string; name: string | null }>> {
   try {
     // biome-ignore lint/security/noSecrets: Public API path with pagination query parameters.
     const response = await request("/v1/issuance/tokens?page=1&pageSize=100");
@@ -112,12 +112,12 @@ async function getOwnedTokenRoutes(
     return new Map(
       (json.data ?? [])
         .filter(
-          (token): token is { id: string; mintAddress: string; name: string } =>
+          (token): token is { id: string; mintAddress: string; name?: string | null } =>
             typeof token.id === "string" &&
             typeof token.mintAddress === "string" &&
             token.mintAddress.trim().length > 0
         )
-        .map((token) => [token.mintAddress, { id: token.id, name: token.name }] as const)
+        .map((token) => [token.mintAddress, { id: token.id, name: token.name ?? null }] as const)
     );
   } catch {
     return new Map();
