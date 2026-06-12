@@ -5,6 +5,7 @@ import { useMemo } from "react";
 import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { AddressAutocomplete } from "../components/address-autocomplete";
 import { useCounterpartyCreate } from "../counterparty-create-context";
 import { useCounterpartyMetadata } from "../use-counterparty-metadata";
 
@@ -37,6 +38,16 @@ export function AddressStep() {
 
   return (
     <div className="space-y-6">
+      <AddressAutocomplete
+        onSelect={(fields) => {
+          setField("line1", fields.line1);
+          setField("line2", fields.line2);
+          setField("city", fields.city);
+          setField("postalCode", fields.postalCode);
+          setField("countryCode", fields.countryCode);
+          setField("subdivisionCode", fields.subdivisionCode);
+        }}
+      />
       <div className="space-y-2">
         <Label htmlFor="line1">Line 1</Label>
         <Input
