@@ -51,6 +51,7 @@ export interface UpdateTokenInput {
   uri?: string | null;
   imageUrl?: string | null;
   status?: "active" | "paused";
+  signingWalletId?: string | null;
 }
 
 export interface CreateTokenTransactionInput {
@@ -78,6 +79,30 @@ export interface CreateTransactionResult {
   transaction: TokenTransaction;
   replayed: boolean;
 }
+
+/**
+ * Public-facing token metadata fields served by the unauthenticated
+ * `GET /v1/issuance/tokens/:id/metadata.json` route. Deliberately a narrow
+ * subset of `Token` — never authority/mint/internal columns.
+ */
+export interface PublicTokenMetadata {
+  name: string;
+  symbol: string;
+  description: string | null;
+  imageUrl: string | null;
+}
+
+/**
+ * Outcome of a public metadata lookup. Distinguishes a deployed token (servable)
+ * from a known-but-undeployed one and an unknown id, so the route can cache the
+ * 404 differently: a pending id may flip to 200 within seconds of deploy and
+ * must not stick a stale 404, while an unknown id never resolves and is safe to
+ * negative-cache against enumeration.
+ */
+export type PublicTokenMetadataResult =
+  | { status: "deployed"; metadata: PublicTokenMetadata }
+  | { status: "pending" }
+  | { status: "not_found" };
 
 export interface AddAllowlistInput {
   tokenId: string;
@@ -412,6 +437,53 @@ export class TokenService {
   }
 
   /**
+   * Fetch the public-facing metadata for a token by id alone.
+   *
+   * Unscoped by org/project on purpose: this backs the public
+   * `GET /v1/issuance/tokens/:id/metadata.json` route that wallets and
+   * explorers fetch without credentials. Returns only the fields rendered in
+   * the served JSON.
+   *
+   * Only deployed tokens (`mint_address` set) are served, so a pending draft's
+   * name/symbol/description/image can't be retrieved publicly by guessing its id
+   * — only on-chain tokens, whose metadata is already public, are returned.
+   * Pending vs unknown ids are reported distinctly (`mint_address` is read but
+   * never exposed) purely so the route can pick the right 404 cache policy.
+   */
+  async getPublicTokenMetadata(tokenId: string): Promise<PublicTokenMetadataResult> {
+    const row = await this.db
+      .prepare(
+        "SELECT name, symbol, description, image_url, mint_address FROM issued_tokens WHERE id = ?"
+      )
+      .bind(tokenId)
+      .first<{
+        name: string;
+        symbol: string;
+        description: string | null;
+        image_url: string | null;
+        mint_address: string | null;
+      }>();
+
+    if (!row) {
+      return { status: "not_found" };
+    }
+
+    if (!row.mint_address) {
+      return { status: "pending" };
+    }
+
+    return {
+      status: "deployed",
+      metadata: {
+        name: row.name,
+        symbol: row.symbol,
+        description: row.description,
+        imageUrl: row.image_url,
+      },
+    };
+  }
+
+  /**
    * Get a token by mint address
    */
   async getTokenByMint(mintAddress: string): Promise<Token | null> {
@@ -526,6 +598,11 @@ export class TokenService {
     if (input.status !== undefined) {
       updates.push("status = ?");
       values.push(input.status);
+    }
+
+    if (input.signingWalletId !== undefined) {
+      updates.push("signing_wallet_id = ?");
+      values.push(input.signingWalletId);
     }
 
     if (updates.length === 0) {

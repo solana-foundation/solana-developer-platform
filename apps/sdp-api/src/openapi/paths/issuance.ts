@@ -6,6 +6,7 @@ import {
   addTokenAllowlistRequestSchema,
   allowlistEntryIdParamSchema,
   burnRequestSchema,
+  confirmDeployRequestSchema,
   createTokenRequestSchema,
   errorResponseSchema,
   forceBurnRequestSchema,
@@ -43,6 +44,7 @@ import {
   issuanceTransactionsResponse,
   listTemplatesResponse,
   prepareBurnResponse,
+  prepareDeployMetadataResponse,
   prepareDeployResponse,
   prepareForceBurnResponse,
   prepareMintResponse,
@@ -225,6 +227,41 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
   });
 
   registry.registerPath({
+    method: "get",
+    path: "/v1/issuance/tokens/{tokenId}/metadata.json",
+    tags: ["Issuance"],
+    summary: "Get public token metadata JSON",
+    operationId: "getTokenMetadataJson",
+    description:
+      "Public, unauthenticated endpoint serving the SDP-hosted Token-2022 / " +
+      "Metaplex fungible-compatible metadata JSON for a deployed token. This is " +
+      "the URL burned into the on-chain MetadataPointer when the issuer doesn't " +
+      "supply their own URI. Only deployed (on-chain) tokens are served; pending " +
+      "drafts return 404.",
+    request: {
+      params: z.object({
+        tokenId: tokenIdParamSchema,
+      }),
+    },
+    responses: {
+      200: {
+        description: "Token metadata JSON",
+        content: jsonContent(
+          z
+            .object({
+              name: z.string(),
+              symbol: z.string(),
+              description: z.string().optional(),
+              image: z.string().optional(),
+            })
+            .openapi("TokenMetadataJson")
+        ),
+      },
+      ...errorResponses(errorResponseSchema, [404, 500]),
+    },
+  });
+
+  registry.registerPath({
     method: "post",
     path: "/v1/issuance/tokens/{tokenId}/supply/refresh",
     tags: ["Issuance"],
@@ -322,7 +359,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
         description: "Token deployed",
         content: jsonContent(tokenResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500, 502]),
     },
   });
 
@@ -345,7 +382,59 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
         description: "Prepared deploy transaction",
         content: jsonContent(prepareDeployResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500, 502]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/issuance/tokens/{tokenId}/deploy/confirm",
+    tags: ["Issuance"],
+    summary: "Confirm non-custodial deploy",
+    operationId: "confirmDeploy",
+    description:
+      "Records the mint after the client signs and submits a prepared (non-custodial) deploy transaction. Verifies the transaction landed on-chain, then marks the token deployed.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: z.object({
+        tokenId: tokenIdParamSchema,
+      }),
+      body: {
+        required: true,
+        content: jsonContent(confirmDeployRequestSchema),
+      },
+    },
+    responses: {
+      200: {
+        description: "Token deployed",
+        content: jsonContent(tokenResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500, 502]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/issuance/tokens/{tokenId}/deploy/prepare-metadata",
+    tags: ["Issuance"],
+    summary: "Prepare metadata-URI follow-up transaction",
+    operationId: "prepareDeployMetadata",
+    description:
+      "Follow-up step for the non-custodial deploy flow. When prepareDeploy returns `metadataUriFollowUp.required` (the inline URI overflowed the create transaction), the client calls this after deploy/confirm to fetch an unsigned transaction that sets the metadata URI on-chain. Returns a null transaction when the on-chain URI already matches.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: z.object({
+        tokenId: tokenIdParamSchema,
+      }),
+    },
+    responses: {
+      200: {
+        description: "Prepared metadata-URI follow-up transaction (or no-op)",
+        content: jsonContent(prepareDeployMetadataResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500, 502]),
     },
   });
 

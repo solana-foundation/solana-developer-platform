@@ -39,25 +39,6 @@ export function CreateTokenIdentityStep({
 
         <div className="grid gap-4">
           <div className="grid gap-2">
-            <Label htmlFor="issuance-token-uri">
-              Metadata URI{" "}
-              <span aria-hidden className="text-[#c71f37]">
-                *
-              </span>
-              <span className="sr-only"> (required)</span>
-            </Label>
-            <Input
-              id="issuance-token-uri"
-              type="url"
-              value={draft.uri}
-              onChange={(event) => onDraftChange({ uri: event.currentTarget.value })}
-              placeholder="https://example.com/metadata.json"
-              aria-invalid={draft.uri.length > 0 && !validation.uriValid}
-              required
-            />
-          </div>
-
-          <div className="grid gap-2">
             <Label htmlFor="issuance-token-name">
               Token Name{" "}
               <span aria-hidden className="text-[#c71f37]">
@@ -123,6 +104,35 @@ export function CreateTokenIdentityStep({
               {getDecimalsHelperText(template)}
             </p>
           </div>
+        </div>
+
+        <div className="rounded-2xl border border-[rgba(28,28,29,0.08)] bg-[rgba(28,28,29,0.02)] p-4">
+          <p className="text-sm text-[rgba(28,28,29,0.62)]">
+            SDP will host the metadata JSON for this token automatically. You can override the URL
+            under Advanced if you&apos;d like to host your own.
+          </p>
+
+          <details className="mt-3 group">
+            <summary className="cursor-pointer list-none text-sm font-medium text-[#1c1c1d] [&::-webkit-details-marker]:hidden">
+              Advanced
+            </summary>
+            <div className="mt-3 grid gap-2">
+              <Label htmlFor="issuance-token-uri">Metadata URI (optional)</Label>
+              <Input
+                id="issuance-token-uri"
+                type="url"
+                value={draft.uri}
+                onChange={(event) => onDraftChange({ uri: event.currentTarget.value })}
+                placeholder="https://example.com/metadata.json"
+                aria-invalid={draft.uri.length > 0 && !validation.uriValid}
+              />
+              {draft.uri.length > 0 && !validation.uriValid ? (
+                <p className="text-sm text-[#c71f37]" role="alert">
+                  Enter a valid http or https URL, or leave blank to use SDP-hosted metadata.
+                </p>
+              ) : null}
+            </div>
+          </details>
         </div>
 
         <div className="mt-5 flex items-center justify-between gap-3">

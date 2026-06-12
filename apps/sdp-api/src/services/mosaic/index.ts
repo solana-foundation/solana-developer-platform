@@ -6,7 +6,7 @@
  * pre-configured templates and on-chain ABL integration.
  */
 
-export { MosaicService } from "./service";
+export { deriveAblListAddress, MosaicService, PACKET_DATA_SIZE } from "./service";
 export * from "./types";
 export { bigIntReplacer, safeStringify } from "./utils";
 

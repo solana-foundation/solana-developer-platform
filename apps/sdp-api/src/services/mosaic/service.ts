@@ -77,6 +77,7 @@ import {
   DEFAULT_ACL_MODE,
   type ExecuteTransferOptions,
   type FreezeThawOptions,
+  MintMetadataUpdateError,
   type MintToOptions,
   type MosaicTransaction,
   type MosaicTransactionResult,
@@ -93,6 +94,14 @@ import { safeStringify } from "./utils";
 type MosaicSdkRpc = Parameters<typeof resolveTokenAccount>[0];
 
 /**
+ * Solana's maximum raw (unencoded) transaction size. A Token-2022 create tx
+ * stores the metadata name/symbol/uri inline; the heaviest templates plus a
+ * long SDP-hosted metadata uri can push the single create tx over this limit,
+ * so we measure and, when needed, set the uri in a follow-up tx instead.
+ */
+export const PACKET_DATA_SIZE = 1232;
+
+/**
  * Resolve the mint authority's address from create options, which accepts
  * either a raw address (prepare/client-signing mode) or a TransactionSigner.
  */
@@ -100,6 +109,19 @@ function resolveMintAuthorityAddress(options: CreateTokenOptions): Address {
   return typeof options.mintAuthority === "string"
     ? (options.mintAuthority as Address)
     : (options.mintAuthority.address as Address);
+}
+
+/**
+ * Derive the deterministic ABL list-config PDA for a token's on-chain allowlist.
+ *
+ * The patched mosaic-sdk seeds this PDA from the mint authority (custody), not
+ * the fee payer, so any caller recording a deploy must derive it from that same
+ * authority + mint to match on-chain — never trust a client-supplied value.
+ * Centralized here so the create path and the non-custodial confirm path can't
+ * diverge on how the address is computed.
+ */
+export async function deriveAblListAddress(authority: Address, mint: Address): Promise<Address> {
+  return getListConfigPda({ authority, mint });
 }
 
 export class MosaicService {
@@ -179,22 +201,54 @@ export class MosaicService {
       enableSrfc37
     );
 
+    // The patched mosaic-sdk seeds the ABL list-config PDA from the mint
+    // authority (custody), not the fee payer. Derive the list address from that
+    // same authority so it matches on-chain — `this.signer` is equal to it in
+    // production, but the SDK contract is the mint authority. Derived up front
+    // (from authority + mint, not the tx) so the overflow path can attach it to
+    // a failed-update error alongside the live mint.
+    let listAddress: Address | undefined;
+    if (enableSrfc37) {
+      listAddress = await deriveAblListAddress(resolveMintAuthorityAddress(options), mint);
+    }
+
     // Both plain and sRFC-37 deploys go through Kora when configured. The
     // patched mosaic-sdk templates emit the on-chain Token-ACL/ABL setup with a
     // payer (Kora) distinct from the authority (custody), so we no longer bypass
     // fee payment to keep mintAuthority === feePayer.
-    const result = await this.signAndSubmitWithMintKeypair(fullTx, mintKeypair);
+    const requestedUri = options.metadata.uri?.trim() ?? "";
+    let result: MosaicTransactionResult;
 
-    let listAddress: Address | undefined;
-    if (enableSrfc37) {
-      // The patched mosaic-sdk seeds the ABL list-config PDA from the mint
-      // authority (custody), not the fee payer. Derive the list address from
-      // that same authority so it matches on-chain — `this.signer` is equal to
-      // it in production, but the SDK contract is the mint authority.
-      listAddress = await getListConfigPda({
-        authority: resolveMintAuthorityAddress(options),
-        mint,
-      });
+    if (requestedUri && (await this.exceedsPacketSize(fullTx))) {
+      // Heavy template + long metadata uri overflows the single create tx.
+      // Create the mint with an empty uri, then set the real uri via the
+      // existing field-update path (a tiny, Kora-sponsorable follow-up tx).
+      const slimTx = await this.buildCreateTokenTransaction(
+        mosaicTemplate,
+        { ...options, metadata: { ...options.metadata, uri: "" } },
+        mintKeypair,
+        aclMode,
+        enableSrfc37
+      );
+      result = await this.signAndSubmitWithMintKeypair(slimTx, mintKeypair);
+
+      // The mint is now live on-chain. In custodial deploy `this.signer` is the
+      // mint's metadata update authority, so it can set the uri
+      // (resolveFeePayerSigner swaps in Kora). If that follow-up fails, surface
+      // the created mint so the caller can persist it — otherwise a retry mints
+      // a second, orphaned token.
+      try {
+        await this.updateMetadata({
+          mint,
+          uri: requestedUri,
+          updateAuthority: this.signer,
+          feePayer: this.signer,
+        });
+      } catch (cause) {
+        throw new MintMetadataUpdateError({ ...result, mint, listAddress }, { cause });
+      }
+    } else {
+      result = await this.signAndSubmitWithMintKeypair(fullTx, mintKeypair);
     }
 
     return {
@@ -202,6 +256,16 @@ export class MosaicService {
       mint,
       listAddress,
     };
+  }
+
+  /**
+   * Whether a built transaction exceeds Solana's max raw transaction size once
+   * serialized. Signature slots are sized the same whether signed or not, so a
+   * partial sign is enough to measure the wire size accurately.
+   */
+  private async exceedsPacketSize(fullTx: FullTransaction): Promise<boolean> {
+    const partiallySigned = await partiallySignTransactionMessageWithSigners(fullTx);
+    return getTransactionEncoder().encode(partiallySigned).length > PACKET_DATA_SIZE;
   }
 
   /**
@@ -789,7 +853,51 @@ export class MosaicService {
   }
 
   async updateMetadata(options: UpdateMetadataOptions): Promise<MosaicTransactionResult | null> {
+    // Custodial path: custody signs, Kora sponsors the fee when configured.
     const feePayer = await this.resolveFeePayerSigner(options.feePayer);
+    const message = await this.buildUpdateMetadataMessage(options, feePayer);
+
+    if (!message) {
+      return null;
+    }
+
+    return this.signAndSubmit(message);
+  }
+
+  /**
+   * Prepare an unsigned metadata field-update transaction for client signing.
+   *
+   * Mirrors `prepareUpdateAuthority`/`prepareMintTo`: the caller (the client's
+   * wallet) is both the update authority and the fee payer, so we use
+   * `options.feePayer` directly rather than swapping in Kora. Returns null when
+   * no field actually changes.
+   *
+   * Used by the non-custodial deploy flow: when a heavy template's create tx
+   * would overflow the packet limit, the create tx is prepared with an empty
+   * uri and the client sets the real uri with this follow-up tx, fetched with a
+   * fresh blockhash after the create tx confirms.
+   */
+  async prepareUpdateMetadata(options: UpdateMetadataOptions): Promise<MosaicTransaction | null> {
+    const message = await this.buildUpdateMetadataMessage(options, options.feePayer);
+
+    if (!message) {
+      return null;
+    }
+
+    return this.toMosaicTransaction(message, options.mint);
+  }
+
+  /**
+   * Build the metadata field-update transaction message shared by the custodial
+   * `updateMetadata` and the client-signed `prepareUpdateMetadata`. Diffs the
+   * requested fields against on-chain state, reallocs rent when a value grows,
+   * and emits one `getUpdateTokenMetadataFieldInstruction` per change. Returns
+   * null when nothing changed.
+   */
+  private async buildUpdateMetadataMessage(
+    options: UpdateMetadataOptions,
+    feePayer: TransactionSigner
+  ): Promise<FullTransaction | null> {
     const encodedMint = await fetchEncodedAccount(this.rpc, options.mint, {
       commitment: "confirmed",
     });
@@ -911,14 +1019,12 @@ export class MosaicService {
     ];
 
     const { value: latestBlockhash } = await this.rpc.getLatestBlockhash().send();
-    const transactionMessage = pipe(
+    return pipe(
       createTransactionMessage({ version: 0 }),
       (tx) => setTransactionMessageFeePayerSigner(feePayer, tx),
       (tx) => setTransactionMessageLifetimeUsingBlockhash(latestBlockhash, tx),
       (tx) => appendTransactionMessageInstructions(instructions, tx)
     );
-
-    return this.signAndSubmit(transactionMessage);
   }
 
   async preparePauseToken(options: {
