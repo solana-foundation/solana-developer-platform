@@ -36,7 +36,14 @@ async function googleJson<TSchema extends z.ZodTypeAny>(
       providerStatus: response.status,
     });
   }
-  return schema.parse(payload);
+  const parsed = schema.safeParse(payload);
+  if (!parsed.success) {
+    throw providerUnavailable("Google Maps returned an unexpected response shape", {
+      provider: "google",
+      providerStatus: response.status,
+    });
+  }
+  return parsed.data;
 }
 
 const autocompleteResponseSchema = z.object({
