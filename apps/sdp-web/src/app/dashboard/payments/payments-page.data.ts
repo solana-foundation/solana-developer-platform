@@ -294,7 +294,6 @@ export async function fetchPaymentsIssuedTokenSymbols(
     const json = (await response.json()) as {
       data?: Array<{
         mintAddress?: string | null;
-        name?: string;
         symbol?: string;
       }>;
     };
@@ -305,13 +304,12 @@ export async function fetchPaymentsIssuedTokenSymbols(
           token
         ): token is {
           mintAddress: string;
-          name?: string;
           symbol?: string;
         } => typeof token?.mintAddress === "string" && token.mintAddress.length > 0
       )
       .map((token) => ({
         mintAddress: token.mintAddress,
-        symbol: token.name?.trim() || token.symbol?.trim() || token.mintAddress,
+        symbol: token.symbol?.trim() || token.mintAddress,
       }));
 
     return { ok: true, data: tokens };
