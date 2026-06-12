@@ -52,19 +52,22 @@ export const serveTokenMetadata = async (c: AppContext) => {
   const { tokenId } = c.req.param();
 
   const tokenService = new TokenService(getDb(c.env));
-  const metadata = await tokenService.getPublicTokenMetadata(tokenId);
+  const result = await tokenService.getPublicTokenMetadata(tokenId);
 
   // Public endpoint: any origin may fetch it (see handler doc above).
   c.header("Access-Control-Allow-Origin", "*");
 
-  if (!metadata) {
-    // Short negative-cache TTL so the CDN/browser absorbs repeated probes for
-    // non-existent (or not-yet-deployed) ids — this route is rate-limit-exempt,
-    // so without it every enumeration attempt hits D1 at the origin.
-    c.header("Cache-Control", "public, max-age=60");
+  if (result.status !== "deployed") {
+    // Two different 404s, two cache policies. An unknown id never resolves, so a
+    // short negative-cache TTL blunts enumeration probes (this route is
+    // rate-limit-exempt, so each one would otherwise hit D1). A pending id, by
+    // contrast, can flip to 200 within seconds of deploy — don't let a stale
+    // 404 stick to it, so skip caching entirely.
+    c.header("Cache-Control", result.status === "pending" ? "no-store" : "public, max-age=60");
     return c.json({ error: { code: "NOT_FOUND", message: "Token not found" } }, 404);
   }
 
+  const metadata = result.metadata;
   c.header("Cache-Control", "public, max-age=300");
 
   const body: {

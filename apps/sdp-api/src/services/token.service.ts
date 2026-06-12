@@ -92,6 +92,18 @@ export interface PublicTokenMetadata {
   imageUrl: string | null;
 }
 
+/**
+ * Outcome of a public metadata lookup. Distinguishes a deployed token (servable)
+ * from a known-but-undeployed one and an unknown id, so the route can cache the
+ * 404 differently: a pending id may flip to 200 within seconds of deploy and
+ * must not stick a stale 404, while an unknown id never resolves and is safe to
+ * negative-cache against enumeration.
+ */
+export type PublicTokenMetadataResult =
+  | { status: "deployed"; metadata: PublicTokenMetadata }
+  | { status: "pending" }
+  | { status: "not_found" };
+
 export interface AddAllowlistInput {
   tokenId: string;
   address: string;
@@ -432,15 +444,16 @@ export class TokenService {
    * explorers fetch without credentials. Returns only the fields rendered in
    * the served JSON.
    *
-   * Restricted to deployed tokens (`mint_address IS NOT NULL`) so a pending
-   * draft's name/symbol/description/image can't be retrieved publicly by
-   * guessing its id — only on-chain tokens, whose metadata is already public,
-   * are served.
+   * Only deployed tokens (`mint_address` set) are served, so a pending draft's
+   * name/symbol/description/image can't be retrieved publicly by guessing its id
+   * — only on-chain tokens, whose metadata is already public, are returned.
+   * Pending vs unknown ids are reported distinctly (`mint_address` is read but
+   * never exposed) purely so the route can pick the right 404 cache policy.
    */
-  async getPublicTokenMetadata(tokenId: string): Promise<PublicTokenMetadata | null> {
+  async getPublicTokenMetadata(tokenId: string): Promise<PublicTokenMetadataResult> {
     const row = await this.db
       .prepare(
-        "SELECT name, symbol, description, image_url FROM issued_tokens WHERE id = ? AND mint_address IS NOT NULL"
+        "SELECT name, symbol, description, image_url, mint_address FROM issued_tokens WHERE id = ?"
       )
       .bind(tokenId)
       .first<{
@@ -448,17 +461,25 @@ export class TokenService {
         symbol: string;
         description: string | null;
         image_url: string | null;
+        mint_address: string | null;
       }>();
 
     if (!row) {
-      return null;
+      return { status: "not_found" };
+    }
+
+    if (!row.mint_address) {
+      return { status: "pending" };
     }
 
     return {
-      name: row.name,
-      symbol: row.symbol,
-      description: row.description,
-      imageUrl: row.image_url,
+      status: "deployed",
+      metadata: {
+        name: row.name,
+        symbol: row.symbol,
+        description: row.description,
+        imageUrl: row.image_url,
+      },
     };
   }
 

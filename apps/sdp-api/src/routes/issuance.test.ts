@@ -5147,7 +5147,7 @@ describe("Issuance Routes", () => {
         expect(body).toEqual({ name: "Minimal Token", symbol: "MIN" });
       });
 
-      it("returns 404 for an unknown token id", async () => {
+      it("returns 404 with a short negative-cache for an unknown token id", async () => {
         const res = await app.request(
           "/v1/issuance/tokens/tok_does_not_exist/metadata.json",
           { method: "GET" },
@@ -5156,6 +5156,30 @@ describe("Issuance Routes", () => {
 
         expect(res.status).toBe(404);
         expect(res.headers.get("Access-Control-Allow-Origin")).toBe("*");
+        // Unknown ids never resolve — negative-cache to blunt enumeration probes.
+        expect(res.headers.get("Cache-Control")).toBe("public, max-age=60");
+      });
+
+      it("returns an uncacheable 404 for a known but not-yet-deployed token", async () => {
+        // A pending token can flip to 200 within seconds of deploy, so its 404
+        // must not be cached — otherwise the CDN/browser serves a stale 404.
+        const token = await seedIssuedToken({
+          id: "tok_metadata_pending",
+          name: "Pending Token",
+          symbol: "PEND",
+          mintAddress: null,
+          status: "pending",
+        });
+
+        const res = await app.request(
+          `/v1/issuance/tokens/${token.id}/metadata.json`,
+          { method: "GET" },
+          env
+        );
+
+        expect(res.status).toBe(404);
+        expect(res.headers.get("Access-Control-Allow-Origin")).toBe("*");
+        expect(res.headers.get("Cache-Control")).toBe("no-store");
       });
     });
   });
