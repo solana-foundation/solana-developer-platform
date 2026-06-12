@@ -3,6 +3,7 @@ import type {
   ApiPlaygroundFieldConfig,
   ApiPlaygroundFieldOption,
 } from "@/components/api-playground-shell";
+import { TOKEN_AMOUNT_FIELD_DESCRIPTION } from "./[tokenId]/token-management-workspace.utils";
 
 export interface IssuancePlaygroundTokenView {
   id: string;
@@ -47,6 +48,21 @@ const authorityRoleOptions: ApiPlaygroundFieldOption[] = [
 
 const exampleTokenAccountAddress = "1".repeat(32);
 const exampleWalletAddress = "2".repeat(32);
+
+function buildTokenAmountField(
+  key: string,
+  label: string,
+  defaultValue = "1000"
+): ApiPlaygroundFieldConfig {
+  return {
+    key,
+    label,
+    defaultValue,
+    placeholder: "e.g. 1000",
+    description: TOKEN_AMOUNT_FIELD_DESCRIPTION,
+    required: true,
+  };
+}
 
 function buildTokenOptions(tokens: IssuancePlaygroundTokenView[]): ApiPlaygroundFieldOption[] {
   return tokens.map((token) => ({
@@ -397,12 +413,7 @@ export function buildIssuancePlaygroundEndpointConfigs({
           placeholder: "Solana address (32-44 chars)",
           required: true,
         },
-        {
-          key: "mint.amount",
-          label: "mint.amount",
-          defaultValue: "1000000",
-          required: true,
-        },
+        buildTokenAmountField("mint.amount", "mint.amount"),
         {
           key: "mint.memo",
           label: "mint.memo",
@@ -434,12 +445,7 @@ export function buildIssuancePlaygroundEndpointConfigs({
           placeholder: "Token account address (32-44 chars)",
           required: true,
         },
-        {
-          key: "burn.amount",
-          label: "burn.amount",
-          defaultValue: "1000000",
-          required: true,
-        },
+        buildTokenAmountField("burn.amount", "burn.amount"),
         {
           key: "burn.memo",
           label: "burn.memo",
@@ -477,12 +483,7 @@ export function buildIssuancePlaygroundEndpointConfigs({
           placeholder: "Destination token account address",
           required: true,
         },
-        {
-          key: "seize.amount",
-          label: "seize.amount",
-          defaultValue: "1000000",
-          required: true,
-        },
+        buildTokenAmountField("seize.amount", "seize.amount", "250"),
         {
           key: "seize.delegateAuthority",
           label: "seize.delegateAuthority",
@@ -519,12 +520,7 @@ export function buildIssuancePlaygroundEndpointConfigs({
           placeholder: "Token account address",
           required: true,
         },
-        {
-          key: "forceBurn.amount",
-          label: "forceBurn.amount",
-          defaultValue: "1000000",
-          required: true,
-        },
+        buildTokenAmountField("forceBurn.amount", "forceBurn.amount", "250"),
         {
           key: "forceBurn.delegateAuthority",
           label: "forceBurn.delegateAuthority",

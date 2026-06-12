@@ -32,7 +32,7 @@ curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/mint \
   -d '{
     "mint": {
       "destination": "7xKXz...9fGh",
-      "amount": "1000000",
+      "amount": "1000",
       "memo": "Initial distribution"
     }
   }'
@@ -52,7 +52,7 @@ const response = await fetch(
     body: JSON.stringify({
       mint: {
         destination: "7xKXz...9fGh",
-        amount: "1000000",
+        amount: "1000",
         memo: "Initial distribution",
       },
     }),
@@ -72,7 +72,7 @@ HttpRequest request = HttpRequest.newBuilder()
         {
           "mint": {
             "destination": "7xKXz...9fGh",
-            "amount": "1000000",
+            "amount": "1000",
             "memo": "Initial distribution"
           }
         }"""))
@@ -81,7 +81,7 @@ HttpRequest request = HttpRequest.newBuilder()
 </Tab>
 </Tabs>
 
-The `amount` is in the smallest unit. For a token with 6 decimals, `"1000000"` equals 1.0 token.
+The `amount` field is a decimal string in **UI units** (human-readable token amounts). `"1"` mints one token; `"1.5"` mints one and a half. SDP converts to on-chain base units using the token's `decimals`.
 
 ### Prepare mode
 
@@ -96,7 +96,7 @@ curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/mint/prepare \
   -d '{
     "mint": {
       "destination": "7xKXz...9fGh",
-      "amount": "1000000"
+      "amount": "1000"
     },
     "options": { "simulate": true }
   }'
@@ -113,7 +113,7 @@ const response = await fetch(
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      mint: { destination: "7xKXz...9fGh", amount: "1000000" },
+      mint: { destination: "7xKXz...9fGh", amount: "1000" },
       options: { simulate: true },
     }),
   }
@@ -133,7 +133,7 @@ HttpRequest request = HttpRequest.newBuilder()
         {
           "mint": {
             "destination": "7xKXz...9fGh",
-            "amount": "1000000"
+            "amount": "1000"
           },
           "options": { "simulate": true }
         }"""))
@@ -162,7 +162,7 @@ curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/burn \
   -d '{
     "burn": {
       "source": "3xYZa...2aBc",
-      "amount": "500000",
+      "amount": "250",
       "memo": "Redemption"
     }
   }'
@@ -182,7 +182,7 @@ await fetch(
     body: JSON.stringify({
       burn: {
         source: "3xYZa...2aBc",
-        amount: "500000",
+        amount: "250",
         memo: "Redemption",
       },
     }),
@@ -201,7 +201,7 @@ HttpRequest request = HttpRequest.newBuilder()
         {
           "burn": {
             "source": "3xYZa...2aBc",
-            "amount": "500000",
+            "amount": "250",
             "memo": "Redemption"
           }
         }"""))
@@ -226,7 +226,7 @@ curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/force-burn \
   -d '{
     "forceBurn": {
       "source": "3xYZa...2aBc",
-      "amount": "500000",
+      "amount": "250",
       "memo": "Compliance action"
     }
   }'
@@ -246,7 +246,7 @@ await fetch(
     body: JSON.stringify({
       forceBurn: {
         source: "3xYZa...2aBc",
-        amount: "500000",
+        amount: "250",
         memo: "Compliance action",
       },
     }),
@@ -265,7 +265,7 @@ HttpRequest request = HttpRequest.newBuilder()
         {
           "forceBurn": {
             "source": "3xYZa...2aBc",
-            "amount": "500000",
+            "amount": "250",
             "memo": "Compliance action"
           }
         }"""))
