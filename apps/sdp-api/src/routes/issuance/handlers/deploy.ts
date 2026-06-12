@@ -210,27 +210,41 @@ export const deployToken = async (c: AppContext) => {
     // it can be fixed later via a metadata update.
     if (error instanceof MintMetadataUpdateError && custodyAddress && error.result.mint) {
       const freezeAuthority = token.isFreezable ? custodyAddress : null;
-      await tokenService.setTokenDeployed(
-        tokenId,
-        error.result.mint,
-        custodyAddress,
-        freezeAuthority,
-        error.result.listAddress as string | undefined
-      );
-      await tokenService.updateTransaction(tx.id, {
-        status: "confirmed",
-        signature: error.result.signature,
-        slot: Number(error.result.slot),
-        params: {
-          operation: "deploy",
-          mintAddress: error.result.mint,
-          mintAuthority: custodyAddress,
+      // The mint is live on-chain; record it so a retry doesn't generate a fresh
+      // keypair and orphan it. These writes can themselves fail (e.g. a D1
+      // timeout) — isolate them so a secondary exception can't escape and bury
+      // the mint address. We must reach the throw below either way, since that's
+      // what tells the caller the mint exists and not to redeploy; a swallowed
+      // write here just means the mint isn't recorded, which the error reports.
+      try {
+        await tokenService.setTokenDeployed(
+          tokenId,
+          error.result.mint,
+          custodyAddress,
           freezeAuthority,
-          ablListAddress: error.result.listAddress,
-          aclMode,
-          metadataUriFailed: true,
-        },
-      });
+          error.result.listAddress as string | undefined
+        );
+        await tokenService.updateTransaction(tx.id, {
+          status: "confirmed",
+          signature: error.result.signature,
+          slot: Number(error.result.slot),
+          params: {
+            operation: "deploy",
+            mintAddress: error.result.mint,
+            mintAuthority: custodyAddress,
+            freezeAuthority,
+            ablListAddress: error.result.listAddress,
+            aclMode,
+            metadataUriFailed: true,
+          },
+        });
+      } catch (persistError) {
+        console.error("Failed to persist recovered mint after metadata-URI failure", {
+          tokenId,
+          mintAddress: error.result.mint,
+          error: persistError instanceof Error ? persistError.message : String(persistError),
+        });
+      }
 
       throw new AppError(
         "TRANSACTION_FAILED",
@@ -287,6 +301,16 @@ export const prepareDeploy = async (c: AppContext) => {
     parsed.data.signingWalletId ?? token.signingWalletId,
     ["tokens:write"]
   );
+
+  // Pin the resolved signing wallet on the token so confirmDeploy derives the
+  // SAME custody address — and thus the same mint/metadata authorities and ABL
+  // list PDA. Without this, a caller that passes a custom signingWalletId here
+  // but omits it in confirmDeploy would fall back to a different wallet and
+  // silently record wrong authorities. This is the one piece of state prepare
+  // must persist; everything else it hands the client to sign.
+  if (signingWalletId !== token.signingWalletId) {
+    await tokenService.updateToken(tokenId, { signingWalletId });
+  }
 
   // Get custody signer (resolves via 3-tier: project → org → env fallback)
   const signer = await createOrgSigner(c.env, auth.organizationId, auth.projectId, signingWalletId);
@@ -390,13 +414,13 @@ const transactionInitializesMint = (tx: ParsedTransaction, mint: Address): boole
 /**
  * Record a confirmed non-custodial deploy.
  *
- * `prepareDeploy` is stateless — it hands the client an unsigned create tx but
- * persists nothing. After the client signs and submits that tx and sees it
- * confirm, it calls THIS endpoint with the create-tx signature and the `mint`
- * (plus optional `listAddress`) it received from `prepareDeploy`. The server
- * verifies the tx landed, that it actually initialized the supplied mint, and
- * that the mint account exists on-chain, then records the mint and flips the
- * token to `active`.
+ * `prepareDeploy` hands the client an unsigned create tx and persists only the
+ * resolved signing wallet (so this endpoint can re-derive the same authorities).
+ * After the client signs and submits that tx and sees it confirm, it calls THIS
+ * endpoint with the create-tx signature and the `mint` it received from
+ * `prepareDeploy`. The server verifies the tx landed, that it actually
+ * initialized the supplied mint, and that the mint account exists on-chain, then
+ * records the mint and flips the token to `active`.
  *
  * This is the step that records `mintAddress` for the non-custodial path — both
  * the single-tx case and the overflow case. It is also what unblocks the
@@ -486,11 +510,14 @@ export const confirmDeploy = async (c: AppContext) => {
     throw badRequest("Deploy transaction did not create this mint");
   }
 
-  const signingWalletId = resolveApiKeySigningWalletId(
-    auth,
-    parsed.data.signingWalletId ?? token.signingWalletId,
-    ["tokens:write"]
-  );
+  // Use the signing wallet prepareDeploy resolved and persisted, NOT the request
+  // body. A body value that diverged from prepare's would derive a different
+  // custody address and silently record the wrong mint/metadata authorities —
+  // and, for ABL tokens, the wrong list PDA. token.signingWalletId is the source
+  // of truth; resolve it again only to re-assert the key still has access.
+  const signingWalletId = resolveApiKeySigningWalletId(auth, token.signingWalletId, [
+    "tokens:write",
+  ]);
 
   // Recompute the authorities the deploy used (custody signer === mint &
   // metadata authority, matching prepareDeploy) rather than trusting the

@@ -51,6 +51,7 @@ export interface UpdateTokenInput {
   uri?: string | null;
   imageUrl?: string | null;
   status?: "active" | "paused";
+  signingWalletId?: string | null;
 }
 
 export interface CreateTokenTransactionInput {
@@ -576,6 +577,11 @@ export class TokenService {
     if (input.status !== undefined) {
       updates.push("status = ?");
       values.push(input.status);
+    }
+
+    if (input.signingWalletId !== undefined) {
+      updates.push("signing_wallet_id = ?");
+      values.push(input.signingWalletId);
     }
 
     if (updates.length === 0) {
