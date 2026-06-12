@@ -406,11 +406,42 @@ export const prepareDeployResponseSchema = z
       description: "Mint address that will be created.",
       example: "So11111111111111111111111111111111111111112",
     }),
+    listAddress: solanaAddressSchema.optional().openapi({
+      description:
+        "On-chain ABL list-config address, present only for allowlist/blocklist tokens with on-chain access control enabled.",
+      example: "So11111111111111111111111111111111111111112",
+    }),
+    metadataUriFollowUp: z
+      .object({
+        required: z.literal(true),
+        uri: z.string().url(),
+      })
+      .optional()
+      .openapi({
+        description:
+          "Present when the inline metadata URI overflowed the create transaction's packet limit. The create tx was prepared with an empty URI; after confirming the deploy, the client must call POST /deploy/prepare-metadata and submit the returned follow-up transaction to set this URI on-chain.",
+      }),
     simulation: simulationResultSchema
       .optional()
       .openapi({ description: "Optional transaction simulation results." }),
   })
   .openapi({ description: "Prepare deploy response payload." });
+
+export const prepareDeployMetadataResponseSchema = z
+  .object({
+    transaction: preparedTransactionSchema.nullable().openapi({
+      description:
+        "Prepared metadata-URI update transaction for client signing, or null when the on-chain URI already matches (nothing to sign).",
+    }),
+    uri: z.string().url().openapi({
+      description: "The metadata URI the follow-up transaction sets on-chain.",
+      example: "https://api.example.com/v1/issuance/tokens/tok_123/metadata.json",
+    }),
+    simulation: simulationResultSchema
+      .optional()
+      .openapi({ description: "Optional transaction simulation results." }),
+  })
+  .openapi({ description: "Prepare deploy-metadata follow-up response payload." });
 
 export const prepareMintResponseSchema = z
   .object({

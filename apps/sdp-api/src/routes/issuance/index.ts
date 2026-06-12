@@ -63,8 +63,9 @@ issuance.patch("/tokens/:tokenId", requirePermissions("tokens:write"), updateTok
 issuance.post("/tokens/:tokenId/deploy", requirePermissions("tokens:write"), deployToken);
 issuance.post("/tokens/:tokenId/deploy/prepare", requirePermissions("tokens:write"), prepareDeploy);
 // Confirmation step for the non-custodial deploy flow: records the mint after
-// the client signs+submits the prepared create tx (prepareDeploy persists
-// nothing). Required before prepare-metadata can run.
+// the client signs+submits the prepared create tx. Re-derives authorities from
+// the signing wallet prepareDeploy persisted on the token, so they can't diverge
+// from the prepared tx. Required before prepare-metadata can run.
 issuance.post("/tokens/:tokenId/deploy/confirm", requirePermissions("tokens:write"), confirmDeploy);
 // Follow-up tx for the non-custodial deploy flow: set the metadata uri when the
 // create tx had to be prepared with an empty uri to stay under the packet limit.

@@ -44,6 +44,7 @@ import {
   issuanceTransactionsResponse,
   listTemplatesResponse,
   prepareBurnResponse,
+  prepareDeployMetadataResponse,
   prepareDeployResponse,
   prepareForceBurnResponse,
   prepareMintResponse,
@@ -408,6 +409,30 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
       200: {
         description: "Token deployed",
         content: jsonContent(tokenResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/issuance/tokens/{tokenId}/deploy/prepare-metadata",
+    tags: ["Issuance"],
+    summary: "Prepare metadata-URI follow-up transaction",
+    operationId: "prepareDeployMetadata",
+    description:
+      "Follow-up step for the non-custodial deploy flow. When prepareDeploy returns `metadataUriFollowUp.required` (the inline URI overflowed the create transaction), the client calls this after deploy/confirm to fetch an unsigned transaction that sets the metadata URI on-chain. Returns a null transaction when the on-chain URI already matches.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: z.object({
+        tokenId: tokenIdParamSchema,
+      }),
+    },
+    responses: {
+      200: {
+        description: "Prepared metadata-URI follow-up transaction (or no-op)",
+        content: jsonContent(prepareDeployMetadataResponse),
       },
       ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
     },
