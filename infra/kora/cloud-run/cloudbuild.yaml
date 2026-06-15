@@ -5,11 +5,12 @@ steps:
       - -t
       - '${_IMAGE}'
       - --build-arg
-      - 'BASE=${_BASE}'
-      - --build-arg
       - 'KORA_CONFIG=${_KCFG}'
       - --build-arg
       - 'SIGNERS_CONFIG=${_SCFG}'
       - .
 images:
   - '${_IMAGE}'
+timeout: 2400s
+options:
+  machineType: E2_HIGHCPU_8
