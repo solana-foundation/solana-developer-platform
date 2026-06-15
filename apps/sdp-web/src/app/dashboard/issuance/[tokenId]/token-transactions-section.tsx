@@ -60,8 +60,8 @@ export function TokenTransactionsSection({
               <TableBody>
                 {transactions.slice(0, 12).map((transaction) => (
                   <TableRow key={transaction.id} data-testid={`transaction-row-${transaction.id}`}>
-                    <TableCell>{transaction.type}</TableCell>
-                    <TableCell>{transaction.status}</TableCell>
+                    <TableCell className="capitalize">{transaction.type}</TableCell>
+                    <TableCell className="capitalize">{transaction.status}</TableCell>
                     <TableCell className="max-w-[220px] truncate font-mono text-xs">
                       {transaction.signature ?? "—"}
                     </TableCell>
