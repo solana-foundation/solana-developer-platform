@@ -2,9 +2,9 @@
 
 import type { Token } from "@sdp/types";
 import { Button } from "@/components/ui/button";
+import { formatDisplayLabel } from "@/lib/utils";
 import { TokenDisabledActionTooltip } from "./token-disabled-action-tooltip";
 import { formatDate } from "./token-management-workspace.utils";
-import { formatDisplayLabel } from "@/lib/utils";
 
 interface TokenOverviewSectionProps {
   token: Token;
