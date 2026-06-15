@@ -29,6 +29,9 @@ import {
   z,
 } from "./base";
 
+export const ISSUANCE_TOKEN_AMOUNT_DESCRIPTION =
+  'Token amount in UI units (decimal string). Human-readable value such as "1" or "1.5". SDP converts to on-chain base units using the token\'s decimals field.';
+
 export const tokenExtensionsConfigSchema = z
   .object({
     transferFee: z
@@ -761,20 +764,30 @@ export const updateTokenRequestSchema = updateTokenSchemaBase
   })
   .openapi({ description: "Update token request body." });
 
+const mintOperationSchema = mintSchemaBase.shape.mint
+  .extend({
+    destination: withOpenApi(mintSchemaBase.shape.mint.shape.destination, {
+      description: "Destination wallet address to receive minted tokens.",
+      example: "So11111111111111111111111111111111111111112",
+    }),
+    amount: withOpenApi(mintSchemaBase.shape.mint.shape.amount, {
+      description: ISSUANCE_TOKEN_AMOUNT_DESCRIPTION,
+      example: "1000",
+    }),
+    memo: withOpenApi(mintSchemaBase.shape.mint.shape.memo, {
+      description: "Optional on-chain memo.",
+      example: "Payout",
+    }),
+  })
+  .openapi({ description: "Mint operation details." });
+
 export const mintRequestSchema = mintSchemaBase
   .extend({
     signingWalletId: withOpenApi(mintSchemaBase.shape.signingWalletId, {
       description: "Optional custody wallet ID to use as the signer for this action.",
       example: "wal_example",
     }),
-    mint: withOpenApi(mintSchemaBase.shape.mint, {
-      description: "Mint operation details.",
-      example: {
-        destination: "So11111111111111111111111111111111111111112",
-        amount: "1000",
-        memo: "Payout",
-      },
-    }),
+    mint: mintOperationSchema,
     options: withOpenApi(mintSchemaBase.shape.options, {
       description: "Mint execution options.",
       example: { priorityFee: "low", simulate: true },
@@ -782,20 +795,30 @@ export const mintRequestSchema = mintSchemaBase
   })
   .openapi({ description: "Mint request body." });
 
+const burnOperationSchema = burnSchemaBase.shape.burn
+  .extend({
+    source: withOpenApi(burnSchemaBase.shape.burn.shape.source, {
+      description: "Source wallet or token account to burn from.",
+      example: "So11111111111111111111111111111111111111112",
+    }),
+    amount: withOpenApi(burnSchemaBase.shape.burn.shape.amount, {
+      description: ISSUANCE_TOKEN_AMOUNT_DESCRIPTION,
+      example: "1000",
+    }),
+    memo: withOpenApi(burnSchemaBase.shape.burn.shape.memo, {
+      description: "Optional on-chain memo.",
+      example: "Correction",
+    }),
+  })
+  .openapi({ description: "Burn operation details." });
+
 export const burnRequestSchema = burnSchemaBase
   .extend({
     signingWalletId: withOpenApi(burnSchemaBase.shape.signingWalletId, {
       description: "Optional custody wallet ID to use as the signer for this action.",
       example: "wal_example",
     }),
-    burn: withOpenApi(burnSchemaBase.shape.burn, {
-      description: "Burn operation details.",
-      example: {
-        source: "So11111111111111111111111111111111111111112",
-        amount: "1000",
-        memo: "Correction",
-      },
-    }),
+    burn: burnOperationSchema,
     options: withOpenApi(burnSchemaBase.shape.options, {
       description: "Burn execution options.",
       example: { priorityFee: "low", simulate: true },
@@ -803,22 +826,38 @@ export const burnRequestSchema = burnSchemaBase
   })
   .openapi({ description: "Burn request body." });
 
+const seizeOperationSchema = seizeSchemaBase.shape.seize
+  .extend({
+    source: withOpenApi(seizeSchemaBase.shape.seize.shape.source, {
+      description: "Source wallet or token account to seize from.",
+      example: "So11111111111111111111111111111111111111112",
+    }),
+    destination: withOpenApi(seizeSchemaBase.shape.seize.shape.destination, {
+      description: "Destination wallet or token account to receive seized tokens.",
+      example: "So11111111111111111111111111111111111111112",
+    }),
+    amount: withOpenApi(seizeSchemaBase.shape.seize.shape.amount, {
+      description: ISSUANCE_TOKEN_AMOUNT_DESCRIPTION,
+      example: "250",
+    }),
+    delegateAuthority: withOpenApi(seizeSchemaBase.shape.seize.shape.delegateAuthority, {
+      description: "Optional delegate authority address for the seizure.",
+      example: "So11111111111111111111111111111111111111112",
+    }),
+    memo: withOpenApi(seizeSchemaBase.shape.seize.shape.memo, {
+      description: "Optional on-chain memo.",
+      example: "Compliance seizure",
+    }),
+  })
+  .openapi({ description: "Forced transfer details." });
+
 export const seizeRequestSchema = seizeSchemaBase
   .extend({
     signingWalletId: withOpenApi(seizeSchemaBase.shape.signingWalletId, {
       description: "Optional custody wallet ID to use as the signer for this action.",
       example: "wal_example",
     }),
-    seize: withOpenApi(seizeSchemaBase.shape.seize, {
-      description: "Forced transfer details.",
-      example: {
-        source: "So11111111111111111111111111111111111111112",
-        destination: "So11111111111111111111111111111111111111112",
-        amount: "250",
-        delegateAuthority: "So11111111111111111111111111111111111111112",
-        memo: "Compliance seizure",
-      },
-    }),
+    seize: seizeOperationSchema,
     options: withOpenApi(seizeSchemaBase.shape.options, {
       description: "Seize execution options.",
       example: { priorityFee: "low", simulate: true },
@@ -826,21 +865,34 @@ export const seizeRequestSchema = seizeSchemaBase
   })
   .openapi({ description: "Seize (force transfer) request body." });
 
+const forceBurnOperationSchema = forceBurnSchemaBase.shape.forceBurn
+  .extend({
+    source: withOpenApi(forceBurnSchemaBase.shape.forceBurn.shape.source, {
+      description: "Source wallet or token account to force-burn from.",
+      example: "So11111111111111111111111111111111111111112",
+    }),
+    amount: withOpenApi(forceBurnSchemaBase.shape.forceBurn.shape.amount, {
+      description: ISSUANCE_TOKEN_AMOUNT_DESCRIPTION,
+      example: "250",
+    }),
+    delegateAuthority: withOpenApi(forceBurnSchemaBase.shape.forceBurn.shape.delegateAuthority, {
+      description: "Optional delegate authority address for the force burn.",
+      example: "So11111111111111111111111111111111111111112",
+    }),
+    memo: withOpenApi(forceBurnSchemaBase.shape.forceBurn.shape.memo, {
+      description: "Optional on-chain memo.",
+      example: "Compliance burn",
+    }),
+  })
+  .openapi({ description: "Forced burn details." });
+
 export const forceBurnRequestSchema = forceBurnSchemaBase
   .extend({
     signingWalletId: withOpenApi(forceBurnSchemaBase.shape.signingWalletId, {
       description: "Optional custody wallet ID to use as the signer for this action.",
       example: "wal_example",
     }),
-    forceBurn: withOpenApi(forceBurnSchemaBase.shape.forceBurn, {
-      description: "Forced burn details.",
-      example: {
-        source: "So11111111111111111111111111111111111111112",
-        amount: "250",
-        delegateAuthority: "So11111111111111111111111111111111111111112",
-        memo: "Compliance burn",
-      },
-    }),
+    forceBurn: forceBurnOperationSchema,
     options: withOpenApi(forceBurnSchemaBase.shape.options, {
       description: "Force burn execution options.",
       example: { priorityFee: "low", simulate: true },

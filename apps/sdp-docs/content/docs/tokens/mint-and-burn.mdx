@@ -44,7 +44,7 @@ POST /v1/issuance/tokens/{tokenId}/burn
 POST /v1/issuance/tokens/{tokenId}/force-burn
 ```
 
-The `amount` field is always in the token's smallest unit. For a 6-decimal token, `"1000000"` = 1.0 token.
+The `amount` field is a decimal string in **UI units** (human-readable token amounts). `"1"` means one token; `"1.5"` means one and a half. SDP converts to on-chain base units using the token's `decimals`.
 
 </Tab>
 </Tabs>
@@ -91,7 +91,7 @@ curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/mint \
   -d '{
     "mint": {
       "destination": "7xKXz...9fGh",
-      "amount": "1000000",
+      "amount": "1000",
       "memo": "Initial distribution"
     }
   }'
@@ -110,7 +110,7 @@ const res = await fetch(
     body: JSON.stringify({
       mint: {
         destination: "7xKXz...9fGh",
-        amount: "1000000",
+        amount: "1000",
         memo: "Initial distribution",
       },
     }),
@@ -170,7 +170,7 @@ await fetch("https://api.solana.com/v1/issuance/tokens/tok_abc123/burn", {
     "Idempotency-Key": "burn-001",
   },
   body: JSON.stringify({
-    burn: { source: "3xYZa...2aBc", amount: "500000", memo: "Redemption" },
+    burn: { source: "3xYZa...2aBc", amount: "250", memo: "Redemption" },
   }),
 });
 ```
@@ -186,7 +186,7 @@ await fetch("https://api.solana.com/v1/issuance/tokens/tok_abc123/force-burn", {
     "Idempotency-Key": "force-burn-001",
   },
   body: JSON.stringify({
-    forceBurn: { source: "3xYZa...2aBc", amount: "500000", memo: "Compliance action" },
+    forceBurn: { source: "3xYZa...2aBc", amount: "250", memo: "Compliance action" },
   }),
 });
 ```

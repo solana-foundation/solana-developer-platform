@@ -44,6 +44,7 @@ interface WalletTrackedBalancesResult {
 interface OwnedTokenRoute {
   id: string;
   mintAddress: string | null;
+  name?: string | null;
 }
 
 async function getWalletDetail(
@@ -94,7 +95,9 @@ async function getWalletTrackedBalances(
   }
 }
 
-async function getOwnedTokenRoutes(request: SdpApiClient["request"]): Promise<Map<string, string>> {
+async function getOwnedTokenRoutes(
+  request: SdpApiClient["request"]
+): Promise<Map<string, { id: string; name: string | null }>> {
   try {
     // biome-ignore lint/security/noSecrets: Public API path with pagination query parameters.
     const response = await request("/v1/issuance/tokens?page=1&pageSize=100");
@@ -109,12 +112,12 @@ async function getOwnedTokenRoutes(request: SdpApiClient["request"]): Promise<Ma
     return new Map(
       (json.data ?? [])
         .filter(
-          (token): token is { id: string; mintAddress: string } =>
+          (token): token is { id: string; mintAddress: string; name?: string | null } =>
             typeof token.id === "string" &&
             typeof token.mintAddress === "string" &&
             token.mintAddress.trim().length > 0
         )
-        .map((token) => [token.mintAddress, token.id] as const)
+        .map((token) => [token.mintAddress, { id: token.id, name: token.name ?? null }] as const)
     );
   } catch {
     return new Map();
@@ -259,16 +262,16 @@ export default async function WalletDetailPage({
         {balances.length > 0 ? (
           <div className="overflow-hidden rounded-2xl border border-[rgba(28,28,29,0.12)] bg-white">
             {balances.map((balance) => {
-              const ownedTokenId =
+              const ownedToken =
                 balance.token === "SOL" ? null : (ownedTokensByMint.get(balance.mint) ?? null);
 
               return (
                 <WalletBalanceRow
                   key={`${balance.mint}-${balance.token}`}
-                  label={balance.token}
+                  label={ownedToken?.name ?? balance.token}
                   value={formatDisplayAmount(balance.uiAmount, balance.token)}
                   mint={balance.mint}
-                  href={ownedTokenId ? `/dashboard/issuance/${ownedTokenId}` : null}
+                  href={ownedToken ? `/dashboard/issuance/${ownedToken.id}` : null}
                 />
               );
             })}
