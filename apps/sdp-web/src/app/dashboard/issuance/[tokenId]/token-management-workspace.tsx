@@ -469,6 +469,22 @@ export function TokenManagementWorkspace({
       metadataAuthority,
     })
   );
+  const freezeSignerSelection = withWalletLoadError(
+    getSignerSelectionForAction({
+      action: "freeze",
+      token,
+      authorityWallets,
+      metadataAuthority,
+    })
+  );
+  const pauseSignerSelection = withWalletLoadError(
+    getSignerSelectionForAction({
+      action: "pause",
+      token,
+      authorityWallets,
+      metadataAuthority,
+    })
+  );
   const permissionRows = getPermissionRows(token, metadataAuthority).map((row) => {
     const displayedAuthorityAddress = getDisplayedAuthorityAddress({
       token,
@@ -520,6 +536,10 @@ export function TokenManagementWorkspace({
     seizeDisabledReason ?? seizeSignerSelection.unavailableReason;
   const effectiveForceBurnDisabledReason =
     forceBurnDisabledReason ?? forceBurnSignerSelection.unavailableReason;
+  const effectiveFreezeDisabledReason =
+    freezeDisabledReason ?? freezeSignerSelection.unavailableReason;
+  const effectivePauseDisabledReason =
+    pauseDisabledReason ?? pauseSignerSelection.unavailableReason;
   const selectedBurnSignerWallet =
     findWalletByWalletId(
       burnSignerSelection.wallets,
@@ -589,8 +609,8 @@ export function TokenManagementWorkspace({
   const complianceActionDisabledReasons: Partial<Record<AdminAction, string | null>> = {
     seize: effectiveSeizeDisabledReason ?? seizeValidationReason,
     "force-burn": effectiveForceBurnDisabledReason ?? forceBurnValidationReason,
-    freeze: freezeDisabledReason,
-    pause: pauseDisabledReason,
+    freeze: effectiveFreezeDisabledReason,
+    pause: effectivePauseDisabledReason,
   };
   const fundManagementRows = canDeployToken
     ? [
@@ -938,8 +958,8 @@ export function TokenManagementWorkspace({
   };
 
   const handlePause = (pause: boolean) => {
-    if (pauseDisabledReason) {
-      toast.error(pauseDisabledReason);
+    if (effectivePauseDisabledReason) {
+      toast.error(effectivePauseDisabledReason);
       return;
     }
 
@@ -966,8 +986,8 @@ export function TokenManagementWorkspace({
   };
 
   const handleFreeze = (unfreeze: boolean) => {
-    if (freezeDisabledReason) {
-      toast.error(freezeDisabledReason);
+    if (effectiveFreezeDisabledReason) {
+      toast.error(effectiveFreezeDisabledReason);
       return;
     }
 
@@ -1199,6 +1219,18 @@ export function TokenManagementWorkspace({
           onSignerWalletIdChange: (value: string) =>
             setForceBurnForm((previous) => ({ ...previous, signingWalletId: value })),
         };
+      case "freeze":
+        return {
+          signerWallets: freezeSignerSelection.wallets,
+          signerUnavailableReason: freezeSignerSelection.unavailableReason,
+          onSignerWalletIdChange: (_value: string) => {},
+        };
+      case "pause":
+        return {
+          signerWallets: pauseSignerSelection.wallets,
+          signerUnavailableReason: pauseSignerSelection.unavailableReason,
+          onSignerWalletIdChange: (_value: string) => {},
+        };
       default:
         return {
           signerWallets: [],
@@ -1347,12 +1379,12 @@ export function TokenManagementWorkspace({
             </p>
           </div>
           {canManageTokenAdmin ? (
-            <TokenDisabledActionTooltip reason={isPending ? null : pauseDisabledReason}>
+            <TokenDisabledActionTooltip reason={isPending ? null : effectivePauseDisabledReason}>
               <Button
                 type="button"
                 size="sm"
                 onClick={() => handlePause(false)}
-                disabled={isPending || Boolean(pauseDisabledReason)}
+                disabled={isPending || Boolean(effectivePauseDisabledReason)}
               >
                 Unpause token
               </Button>
