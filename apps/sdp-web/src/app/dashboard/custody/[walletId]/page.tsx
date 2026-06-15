@@ -18,6 +18,7 @@ import { WalletActivitySection } from "@/app/dashboard/custody/wallet-activity-s
 import { WalletAddressCopyButton } from "@/app/dashboard/custody/wallet-address-copy-button";
 import { WalletCategoryBadge } from "@/app/dashboard/custody/wallet-category-badge";
 import { formatPurpose, truncateMiddle } from "@/app/dashboard/custody/wallet-format-utils";
+import { formatDisplayLabel } from "@/app/dashboard/issuance/[tokenId]/token-management-workspace.utils";
 import { WalletProviderMark } from "@/app/dashboard/custody/wallet-provider-mark";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { getAuthEntryPath } from "@/lib/auth-entry";
@@ -219,7 +220,7 @@ export default async function WalletDetailPage({
                 trailing={<WalletAddressCopyButton address={wallet.publicKey} />}
               />
               <WalletInfoRow label="Wallet ID" value={wallet.walletId} monospace />
-              <WalletInfoRow label="Status" value={wallet.status} />
+              <WalletInfoRow label="Status" value={formatDisplayLabel(wallet.status)} />
               {provider ? (
                 <WalletInfoRow label="Provider" value={formatCustodyProviderName(provider)} />
               ) : null}
