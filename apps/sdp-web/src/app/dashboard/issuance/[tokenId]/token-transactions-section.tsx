@@ -11,7 +11,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { formatDate } from "./token-management-workspace.utils";
+import { formatDate, formatDisplayLabel } from "./token-management-workspace.utils";
 
 interface TokenTransactionsSectionProps {
   transactions: TokenTransaction[];
@@ -60,8 +60,8 @@ export function TokenTransactionsSection({
               <TableBody>
                 {transactions.slice(0, 12).map((transaction) => (
                   <TableRow key={transaction.id} data-testid={`transaction-row-${transaction.id}`}>
-                    <TableCell className="capitalize">{transaction.type}</TableCell>
-                    <TableCell className="capitalize">{transaction.status}</TableCell>
+                    <TableCell>{formatDisplayLabel(transaction.type)}</TableCell>
+                    <TableCell>{formatDisplayLabel(transaction.status)}</TableCell>
                     <TableCell className="max-w-[220px] truncate font-mono text-xs">
                       {transaction.signature ?? "—"}
                     </TableCell>

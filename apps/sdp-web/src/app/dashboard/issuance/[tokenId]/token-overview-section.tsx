@@ -3,7 +3,7 @@
 import type { Token } from "@sdp/types";
 import { Button } from "@/components/ui/button";
 import { TokenDisabledActionTooltip } from "./token-disabled-action-tooltip";
-import { formatDate } from "./token-management-workspace.utils";
+import { formatDate, formatDisplayLabel } from "./token-management-workspace.utils";
 
 interface TokenOverviewSectionProps {
   token: Token;
@@ -53,7 +53,7 @@ export function TokenOverviewSection({
         <OverviewRow label="Mint Authority" value={mintAuthorityValue ?? "None"} monospace />
         <OverviewRow label="Supply" value={token.totalSupply} />
         <OverviewRow label="Created" value={formatDate(token.createdAt)} />
-        <OverviewRow label="Template" value={token.template} capitalize />
+        <OverviewRow label="Template" value={formatDisplayLabel(token.template)} />
         <OverviewRow label="Decimals" value={String(token.decimals)} />
       </div>
     </section>
@@ -64,12 +64,10 @@ function OverviewRow({
   label,
   value,
   monospace = false,
-  capitalize = false,
 }: {
   label: string;
   value: string;
   monospace?: boolean;
-  capitalize?: boolean;
 }) {
   return (
     <div
@@ -84,7 +82,6 @@ function OverviewRow({
         className={[
           "text-right text-[15px] text-[#1c1c1d]",
           monospace ? "font-mono text-xs" : "",
-          capitalize ? "capitalize" : "",
         ].join(" ")}
       >
         {value}

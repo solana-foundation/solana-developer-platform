@@ -87,7 +87,7 @@ export function TokenSettingsSection({
                 <p className="text-[17px] font-medium text-[#1c1c1d]">{row.title}</p>
                 <p className="text-sm text-[rgba(28,28,29,0.62)]">{row.helper}</p>
               </div>
-              <span className="rounded-full border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.02)] px-3 py-1 text-sm capitalize text-[rgba(28,28,29,0.75)]">
+              <span className="rounded-full border border-[rgba(28,28,29,0.12)] bg-[rgba(28,28,29,0.02)] px-3 py-1 text-sm text-[rgba(28,28,29,0.75)]">
                 {row.value}
               </span>
             </div>

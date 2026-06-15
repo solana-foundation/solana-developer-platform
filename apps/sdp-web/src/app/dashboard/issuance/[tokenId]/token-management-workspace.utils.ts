@@ -172,6 +172,18 @@ export function createInitialAllowlistForm(): AllowlistFormState {
   };
 }
 
+const DISPLAY_LABEL_OVERRIDES: Record<string, string> = {
+  rwa: "RWA",
+};
+
+export function formatDisplayLabel(value: string): string {
+  const lower = value.toLowerCase();
+  if (DISPLAY_LABEL_OVERRIDES[lower]) return DISPLAY_LABEL_OVERRIDES[lower];
+  return value
+    .replace(/[_-]/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 export function formatDate(value: string | null | undefined): string {
   if (!value) {
     return "—";
@@ -1064,7 +1076,7 @@ export function getExtensionRows(token: Token): ExtensionRow[] {
       id: "default-account-state",
       title: "Default Account State",
       helper: "Default state for newly created token accounts.",
-      value: token.extensions.defaultAccountState,
+      value: formatDisplayLabel(token.extensions.defaultAccountState),
     });
   }
 
@@ -1118,7 +1130,7 @@ export function getExtensionRows(token: Token): ExtensionRow[] {
       id: "template",
       title: "Template",
       helper: "Base template applied to this token.",
-      value: token.template,
+      value: formatDisplayLabel(token.template),
     },
     ...(controlListCopy
       ? [
