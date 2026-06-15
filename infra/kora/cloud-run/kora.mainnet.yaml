@@ -11,14 +11,17 @@ spec:
   template:
     metadata:
       annotations:
-        autoscaling.knative.dev/minScale: "0"
+        autoscaling.knative.dev/minScale: "1"
         autoscaling.knative.dev/maxScale: "5"
     spec:
-      # Replace with your runtime service account.
-      # It should have Secret Manager access (secretAccessor) for the secrets below.
-      serviceAccountName: kora-runtime@YOUR_GCP_PROJECT_ID.iam.gserviceaccount.com
+      # Dedicated least-privilege mainnet runtime SA (the isolation boundary within the shared project).
+      # Needs: Secret Manager secretAccessor for the secrets/volumes below, AND
+      #        roles/cloudkms.signer on ONLY the mainnet KMS key (no other KMS access).
+      serviceAccountName: kora-mainnet-runtime@solana-developer-platform.iam.gserviceaccount.com
       containers:
-        - image: us-central1-docker.pkg.dev/YOUR_GCP_PROJECT_ID/kora-remote/solana-foundation/kora:latest
+        # TODO(WS7): pin by @sha256 digest, served from the SDP project's own AR repo
+        # (us-central1-docker.pkg.dev/solana-developer-platform/kora/...), not analytics-324114.
+        - image: us-central1-docker.pkg.dev/solana-developer-platform/kora/solana-foundation/kora:latest
           ports:
             - name: http1
               containerPort: 8080
@@ -30,11 +33,13 @@ spec:
                 secretKeyRef:
                   name: kora-mainnet-rpc-url
                   key: latest
-            - name: SIGNER_PRIVATE_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: kora-mainnet-signer-private-key
-                  key: latest
+            # GCP KMS signer (replaces the devnet memory key). Key path + pubkey are non-secret config,
+            # injected via Doppler. There is NO kora-mainnet-signer-private-key secret on mainnet.
+            # TODO: fill real values (key path in the SDP keyring + base58 pubkey of that key).
+            - name: KORA_GCP_KMS_KEY_NAME
+              value: "projects/solana-developer-platform/locations/LOCATION/keyRings/RING/cryptoKeys/KEY/cryptoKeyVersions/1"
+            - name: KORA_GCP_KMS_PUBLIC_KEY
+              value: "BASE58_PUBKEY_DERIVED_FROM_KMS_KEY"
           command:
             - kora
           args:

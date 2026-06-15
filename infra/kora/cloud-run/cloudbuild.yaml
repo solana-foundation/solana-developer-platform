@@ -1,0 +1,15 @@
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -t
+      - '${_IMAGE}'
+      - --build-arg
+      - 'BASE=${_BASE}'
+      - --build-arg
+      - 'KORA_CONFIG=${_KCFG}'
+      - --build-arg
+      - 'SIGNERS_CONFIG=${_SCFG}'
+      - .
+images:
+  - '${_IMAGE}'
