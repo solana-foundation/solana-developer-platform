@@ -18,7 +18,7 @@ import { WalletActivitySection } from "@/app/dashboard/custody/wallet-activity-s
 import { WalletAddressCopyButton } from "@/app/dashboard/custody/wallet-address-copy-button";
 import { WalletCategoryBadge } from "@/app/dashboard/custody/wallet-category-badge";
 import { formatPurpose, truncateMiddle } from "@/app/dashboard/custody/wallet-format-utils";
-import { formatDisplayLabel } from "@/app/dashboard/issuance/[tokenId]/token-management-workspace.utils";
+import { formatDisplayLabel } from "@/lib/utils";
 import { WalletProviderMark } from "@/app/dashboard/custody/wallet-provider-mark";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { getAuthEntryPath } from "@/lib/auth-entry";

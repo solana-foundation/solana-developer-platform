@@ -1,4 +1,5 @@
 import type { PaymentsDashboardWallet, Token, TokenAllowlistEntry } from "@sdp/types";
+import { formatDisplayLabel } from "@/lib/utils";
 import { type AccessControlMode, getTokenAccessControlMode } from "../access-control.utils";
 import type {
   ActionExecutionInput,
@@ -173,18 +174,6 @@ export function createInitialAllowlistForm(): AllowlistFormState {
     address: "",
     label: "",
   };
-}
-
-const DISPLAY_LABEL_OVERRIDES: Record<string, string> = {
-  rwa: "RWA",
-};
-
-export function formatDisplayLabel(value: string): string {
-  const lower = value.toLowerCase();
-  if (DISPLAY_LABEL_OVERRIDES[lower]) return DISPLAY_LABEL_OVERRIDES[lower];
-
-  // tokenized-security => Tokenized Security, force_burn => Force Burn, rwa => RWA
-  return value.replace(/[_-]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 export function formatDate(value: string | null | undefined): string {
