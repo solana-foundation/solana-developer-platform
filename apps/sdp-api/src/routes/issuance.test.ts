@@ -4362,6 +4362,68 @@ describe("Issuance Routes", () => {
           consoleErrorSpy.mockRestore();
         }
       });
+
+      it("stamps the permanent delegate in the recovery path after a metadata-URI overflow", async () => {
+        // A permanent-delegate token whose mint lands on-chain but whose metadata
+        // URI follow-up fails must still get its initial permanentDelegate stamped
+        // into the DB — otherwise later seize/force-transfer ops target the wrong
+        // authority. This mirrors the success path.
+        // The arcade template requires the permanentDelegate extension, so the
+        // initial delegate resolves to the custody (signing-wallet) address.
+        const token = await seedIssuedToken({
+          id: "tok_deploy_recovery_perm_delegate",
+          mintAddress: null,
+          status: "pending",
+          uri: null,
+          requiresAllowlist: false,
+          template: "arcade",
+        });
+
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSigner")
+          .mockResolvedValueOnce({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
+        const createTokenSpy = vi
+          .spyOn(MosaicService.prototype, "createToken")
+          .mockRejectedValueOnce(
+            new Mosaic.MintMetadataUpdateError({
+              mint: TEST_SOLANA_ADDRESSES.mint,
+              signature: "5recoverySig",
+              slot: 100n,
+              listAddress: undefined,
+            } as never)
+          );
+        // Recording the live mint succeeds, so the recovery path proceeds to stamp
+        // the permanent delegate.
+        const updateTokenAuthoritiesSpy = vi.spyOn(TokenService.prototype, "updateTokenAuthorities");
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${token.id}/deploy`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({}),
+            },
+            env
+          );
+
+          // Recovery always re-throws so the caller knows not to redeploy.
+          expect(res.status).toBe(400);
+          const payload = (await res.json()) as { error: { code: string } };
+          expect(payload.error.code).toBe("TRANSACTION_FAILED");
+          // The permanent delegate was persisted despite the metadata-URI failure.
+          expect(updateTokenAuthoritiesSpy).toHaveBeenCalledWith(token.id, {
+            permanentDelegate: TEST_SOLANA_ADDRESSES.wallet2,
+          });
+        } finally {
+          createOrgSignerSpy.mockRestore();
+          createTokenSpy.mockRestore();
+          updateTokenAuthoritiesSpy.mockRestore();
+        }
+      });
     });
 
     describe("POST /v1/issuance/tokens/:tokenId/deploy/prepare", () => {

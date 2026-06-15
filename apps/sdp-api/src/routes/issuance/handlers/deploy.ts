@@ -224,6 +224,16 @@ export const deployToken = async (c: AppContext) => {
           freezeAuthority,
           error.result.listAddress as string | undefined
         );
+        // Mirror the success path: stamp the initial permanent delegate into the
+        // DB for tokens with that extension. Skipping it here would leave
+        // `permanentDelegate` null, so later seize/force-transfer ops would target
+        // the wrong authority with no recovery short of a manual DB patch.
+        const initialPermanentDelegate = getInitialPermanentDelegateAuthority(token, custodyAddress);
+        if (initialPermanentDelegate !== undefined) {
+          await tokenService.updateTokenAuthorities(tokenId, {
+            permanentDelegate: initialPermanentDelegate,
+          });
+        }
         await tokenService.updateTransaction(tx.id, {
           status: "confirmed",
           signature: error.result.signature,
