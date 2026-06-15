@@ -25,13 +25,15 @@ const res = await fetch(
       "Idempotency-Key": "mint-001",
     },
     body: JSON.stringify({
-      mint: { destination: "7xKXz...9fGh", amount: "1000000" },
+      mint: { destination: "7xKXz...9fGh", amount: "1000" },
     }),
   }
 );
 const { data } = await res.json();
 // data.transaction.signature — confirmed onchain
 ```
+
+Issuance `amount` fields use **UI units** (decimal strings such as `"1000"` for one thousand tokens). SDP converts using the token's `decimals` before building the on-chain transaction.
 
 **When to use execute mode:**
 
@@ -53,7 +55,7 @@ const res = await fetch(
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      mint: { destination: "7xKXz...9fGh", amount: "1000000" },
+      mint: { destination: "7xKXz...9fGh", amount: "1000" },
       options: { simulate: true },
     }),
   }
