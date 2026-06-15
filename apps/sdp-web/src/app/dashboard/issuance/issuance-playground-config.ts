@@ -49,7 +49,11 @@ const authorityRoleOptions: ApiPlaygroundFieldOption[] = [
 const exampleTokenAccountAddress = "1".repeat(32);
 const exampleWalletAddress = "2".repeat(32);
 
-function buildTokenAmountField(key: string, label: string, defaultValue = "1000"): ApiPlaygroundFieldConfig {
+function buildTokenAmountField(
+  key: string,
+  label: string,
+  defaultValue = "1000"
+): ApiPlaygroundFieldConfig {
   return {
     key,
     label,
