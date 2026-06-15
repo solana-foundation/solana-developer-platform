@@ -51,11 +51,15 @@ export const resolveMetadataOrigin = (env: Env, requestUrl: string): string => {
 export const serveTokenMetadata = async (c: AppContext) => {
   const { tokenId } = c.req.param();
 
+  // Public endpoint: any origin may fetch it (see handler doc above). Set this
+  // up-front so it applies to every response — success, both 404s, and the
+  // error path. The header is set on the context, which the global onError
+  // handler preserves when it builds the JSON error response, so a DB failure
+  // surfaces as a readable 500 to browsers rather than an opaque CORS error.
+  c.header("Access-Control-Allow-Origin", "*");
+
   const tokenService = new TokenService(getDb(c.env));
   const result = await tokenService.getPublicTokenMetadata(tokenId);
-
-  // Public endpoint: any origin may fetch it (see handler doc above).
-  c.header("Access-Control-Allow-Origin", "*");
 
   if (result.status !== "deployed") {
     // Two different 404s, two cache policies. An unknown id never resolves, so a

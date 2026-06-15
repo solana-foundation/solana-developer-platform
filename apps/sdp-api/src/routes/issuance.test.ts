@@ -5240,6 +5240,33 @@ describe("Issuance Routes", () => {
         expect(res.headers.get("Access-Control-Allow-Origin")).toBe("*");
         expect(res.headers.get("Cache-Control")).toBe("no-store");
       });
+
+      it("keeps the CORS header on the error response when the DB read throws", async () => {
+        // The CORS header is set up-front, so even a 500 from a failed DB read
+        // stays fetchable from any origin — browsers see the real error rather
+        // than an opaque CORS failure.
+        const token = await seedIssuedToken({
+          id: "tok_metadata_db_error",
+          name: "Errored Token",
+          symbol: "ERR",
+        });
+        const spy = vi
+          .spyOn(TokenService.prototype, "getPublicTokenMetadata")
+          .mockRejectedValueOnce(new Error("db down"));
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${token.id}/metadata.json`,
+            { method: "GET" },
+            env
+          );
+
+          expect(res.status).toBe(500);
+          expect(res.headers.get("Access-Control-Allow-Origin")).toBe("*");
+        } finally {
+          spy.mockRestore();
+        }
+      });
     });
   });
 });
