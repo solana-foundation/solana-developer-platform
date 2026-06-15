@@ -100,6 +100,116 @@ async function persistRecoveredMint(params: {
   }
 }
 
+/**
+ * Record the bookkeeping for a non-custodial deploy that has already landed
+ * on-chain — by the time this runs, `setTokenDeployed` has flipped the token to
+ * `active` and recorded the mint, which is irreversible. Stamps the initial
+ * permanent delegate, writes the transaction row for audit parity with the
+ * custodial path, and logs the audit event.
+ *
+ * Isolated in its own try/catch: a secondary DB failure here must NOT surface as
+ * a 500. A retry would hit confirmDeploy's `status !== "pending"` guard and 400
+ * permanently, stranding a live token with no transaction/audit row and no
+ * recovery. Log and return the best-available token instead. Returns the token
+ * with permanent-delegate authorities applied when that write succeeded, else
+ * the already-deployed token row.
+ */
+async function recordConfirmedDeploy(params: {
+  c: AppContext;
+  tokenService: TokenService;
+  organizationId: string;
+  initiatedByKeyId: string;
+  token: NonNullable<Awaited<ReturnType<TokenService["getToken"]>>>;
+  tokenId: string;
+  mint: Address;
+  custodyAddress: Address;
+  freezeAuthority: Address | null;
+  listAddress: Address | undefined;
+  signature: string;
+  slot: number | bigint;
+  deployedToken: Awaited<ReturnType<TokenService["setTokenDeployed"]>>;
+}): Promise<Awaited<ReturnType<TokenService["setTokenDeployed"]>>> {
+  const {
+    c,
+    tokenService,
+    organizationId,
+    initiatedByKeyId,
+    token,
+    tokenId,
+    mint,
+    custodyAddress,
+    freezeAuthority,
+    listAddress,
+    signature,
+    slot,
+    deployedToken,
+  } = params;
+  try {
+    const initialPermanentDelegate = getInitialPermanentDelegateAuthority(token, custodyAddress);
+    const updatedToken =
+      initialPermanentDelegate !== undefined
+        ? await tokenService.updateTokenAuthorities(tokenId, {
+            permanentDelegate: initialPermanentDelegate,
+          })
+        : deployedToken;
+
+    // prepareDeploy persists no transaction row, so record one here for history /
+    // audit parity with the custodial deploy path.
+    const { transaction: tx } = await tokenService.createTransaction({
+      tokenId,
+      organizationId,
+      type: "deploy",
+      params: {
+        operation: "deploy",
+        tokenId,
+        template: token.template,
+        name: token.name,
+        symbol: token.symbol,
+      },
+      initiatedByKeyId,
+    });
+
+    await tokenService.updateTransaction(tx.id, {
+      status: "confirmed",
+      signature,
+      slot: Number(slot),
+      params: {
+        operation: "deploy",
+        mode: "confirm",
+        mintAddress: mint,
+        mintAuthority: custodyAddress,
+        freezeAuthority,
+        ablListAddress: listAddress ?? null,
+      },
+    });
+
+    const auditService = new AuditService(getDb(c.env));
+    await auditService.log(c, {
+      action: "deploy",
+      resourceType: "token",
+      resourceId: tokenId,
+      metadata: {
+        mode: "confirm",
+        mintAddress: mint,
+        signature,
+        slot: slot.toString(),
+        template: token.template,
+        ablListAddress: listAddress ?? null,
+      },
+    });
+
+    return updatedToken;
+  } catch (bookkeepingError) {
+    console.error("confirmDeploy: token is live on-chain but post-deploy bookkeeping failed", {
+      tokenId,
+      mintAddress: mint,
+      error:
+        bookkeepingError instanceof Error ? bookkeepingError.message : String(bookkeepingError),
+    });
+    return deployedToken;
+  }
+}
+
 export const deployToken = async (c: AppContext) => {
   const { tokenId } = c.req.param();
   const { auth, projectId, orgId } = requireProjectScope(c);
@@ -577,6 +687,9 @@ export const confirmDeploy = async (c: AppContext) => {
       ? await deriveAblListAddress(custodyAddress, mint)
       : undefined;
 
+  // setTokenDeployed flips the token to `active` and records the mint — this is
+  // the irreversible commit point. Everything after it is bookkeeping; see
+  // recordConfirmedDeploy for why a failure there must not 500.
   const deployedToken = await tokenService.setTokenDeployed(
     tokenId,
     mint,
@@ -585,57 +698,20 @@ export const confirmDeploy = async (c: AppContext) => {
     listAddress
   );
 
-  const initialPermanentDelegate = getInitialPermanentDelegateAuthority(token, custodyAddress);
-  const updatedToken =
-    initialPermanentDelegate !== undefined
-      ? await tokenService.updateTokenAuthorities(tokenId, {
-          permanentDelegate: initialPermanentDelegate,
-        })
-      : deployedToken;
-
-  // prepareDeploy persists no transaction row, so record one here for history /
-  // audit parity with the custodial deploy path.
-  const { transaction: tx } = await tokenService.createTransaction({
-    tokenId,
+  const updatedToken = await recordConfirmedDeploy({
+    c,
+    tokenService,
     organizationId: auth.organizationId,
-    type: "deploy",
-    params: {
-      operation: "deploy",
-      tokenId,
-      template: token.template,
-      name: token.name,
-      symbol: token.symbol,
-    },
     initiatedByKeyId: auth.id,
-  });
-
-  await tokenService.updateTransaction(tx.id, {
-    status: "confirmed",
+    token,
+    tokenId,
+    mint,
+    custodyAddress,
+    freezeAuthority,
+    listAddress,
     signature: parsed.data.signature,
-    slot: Number(status.slot),
-    params: {
-      operation: "deploy",
-      mode: "confirm",
-      mintAddress: mint,
-      mintAuthority: custodyAddress,
-      freezeAuthority,
-      ablListAddress: listAddress ?? null,
-    },
-  });
-
-  const auditService = new AuditService(getDb(c.env));
-  await auditService.log(c, {
-    action: "deploy",
-    resourceType: "token",
-    resourceId: tokenId,
-    metadata: {
-      mode: "confirm",
-      mintAddress: mint,
-      signature: parsed.data.signature,
-      slot: status.slot.toString(),
-      template: token.template,
-      ablListAddress: listAddress ?? null,
-    },
+    slot: status.slot,
+    deployedToken,
   });
 
   const response: TokenResponse = { token: updatedToken };

@@ -4831,6 +4831,83 @@ describe("Issuance Routes", () => {
         }
       });
 
+      it("still returns 200 with the token active when post-deploy bookkeeping fails", async () => {
+        ensureRpcUrl();
+
+        // The mint is live on-chain and setTokenDeployed has flipped the token to
+        // active; a failure writing the audit/transaction row afterward must not
+        // 500, or a retry would hit the `status !== "pending"` guard and 400
+        // permanently, stranding the token with no recovery.
+        const token = await seedIssuedToken({
+          id: "tok_deploy_confirm_bookkeeping_fail",
+          mintAddress: null,
+          status: "pending",
+          uri: null,
+          requiresAllowlist: false,
+        });
+
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSigner")
+          .mockResolvedValue({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
+        const getSignatureStatusesSpy = vi
+          .spyOn(SolanaRpc, "getSignatureStatuses")
+          .mockResolvedValueOnce([
+            { slot: 100n, confirmations: 10n, confirmationStatus: "confirmed", err: null },
+          ]);
+        const accountExistsSpy = vi.spyOn(SolanaRpc, "accountExists").mockResolvedValueOnce(true);
+        const getTransactionSpy = vi.spyOn(SolanaRpc, "getTransaction").mockResolvedValueOnce({
+          slot: 100n,
+          err: null,
+          instructions: [
+            {
+              programId: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+              parsedType: "initializeMint2",
+              info: { mint: TEST_SOLANA_ADDRESSES.mint },
+            },
+          ],
+        });
+        // The transaction-row write fails after the token is already deployed.
+        const createTransactionSpy = vi
+          .spyOn(TokenService.prototype, "createTransaction")
+          .mockRejectedValueOnce(new Error("D1_ERROR: timeout"));
+        const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${token.id}/deploy/confirm`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({
+                signature: "5testSigHOO466ConfirmBookkeeping",
+                mint: TEST_SOLANA_ADDRESSES.mint,
+              }),
+            },
+            env
+          );
+
+          // The deploy is recorded and surfaced as success despite the bookkeeping
+          // failure (which is logged, not thrown).
+          expect(res.status).toBe(200);
+          const payload = (await res.json()) as {
+            data: { token: { mintAddress: string | null; status: string } };
+          };
+          expect(payload.data.token.mintAddress).toBe(TEST_SOLANA_ADDRESSES.mint);
+          expect(payload.data.token.status).toBe("active");
+          expect(consoleErrorSpy).toHaveBeenCalled();
+        } finally {
+          createOrgSignerSpy.mockRestore();
+          getSignatureStatusesSpy.mockRestore();
+          accountExistsSpy.mockRestore();
+          getTransactionSpy.mockRestore();
+          createTransactionSpy.mockRestore();
+          consoleErrorSpy.mockRestore();
+        }
+      });
+
       it("returns 400 when the confirmed tx did not create the supplied mint", async () => {
         ensureRpcUrl();
 
