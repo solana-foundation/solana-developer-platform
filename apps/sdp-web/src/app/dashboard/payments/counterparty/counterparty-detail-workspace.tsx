@@ -493,7 +493,9 @@ function TransferDetailModal({
 
         <div className="flex items-center justify-between gap-4 rounded-2xl bg-border-extra-light p-5">
           <div className="min-w-0 space-y-0.5">
-            <p className="text-xs font-medium uppercase tracking-wide text-text-medium">You send</p>
+            <p className="text-xs font-medium uppercase tracking-wide text-text-medium">
+              {isInbound ? "You deposit" : "You send"}
+            </p>
             <p className="truncate text-xl font-semibold tracking-tight text-text-extra-high">
               {flow.send ?? "—"}
             </p>
@@ -550,7 +552,9 @@ function TransferDetailModal({
             variant="secondary"
             className="w-full"
             iconLeft={<ExternalLinkIcon className="size-4" />}
-            onClick={() => window.open(getDevnetExplorerUrl(signature), "_blank")}
+            onClick={() =>
+              window.open(getDevnetExplorerUrl(signature), "_blank", "noopener,noreferrer")
+            }
           >
             View on explorer
           </Button>

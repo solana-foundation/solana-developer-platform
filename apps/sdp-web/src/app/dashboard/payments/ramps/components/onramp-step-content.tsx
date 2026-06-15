@@ -28,21 +28,21 @@ function getOnrampTransferStatusCopy(status: string) {
       return {
         title: "Deposit received",
         description:
-          "The provider has received funds and is settling the onramp transfer to the destination wallet.",
+          "The provider has received funds and is settling the deposit to the destination wallet.",
         state: "loading" as const,
       };
     case "completed":
       return {
         title: "Transfer complete",
         description:
-          "The onramp transfer is complete. You can review the transfer from the counterparty record.",
+          "The deposit is complete. You can review the transfer from the counterparty record.",
         state: "success" as const,
       };
     case "failed":
       return {
         title: "Transfer failed",
         description:
-          "The provider reported that this onramp transfer failed. Review the counterparty record for the latest transfer status.",
+          "The provider reported that this deposit failed. Review the counterparty record for the latest transfer status.",
         state: "error" as const,
       };
     case "expired":
@@ -160,8 +160,7 @@ function OnrampCompleteScreen({
         <div>
           <p className="text-2xl font-medium tracking-tight">Transaction complete!</p>
           <p className="mt-2 max-w-2xl text-sm leading-relaxed">
-            The onramp transfer has settled. You can review this transfer from the counterparty
-            record.
+            The deposit has settled. You can review this transfer from the counterparty record.
           </p>
         </div>
       </div>
@@ -202,7 +201,7 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
     if (enabledRampProviders.length === 0) {
       return (
         <div className="rounded-2xl border border-border-light bg-border-extra-light px-5 py-5 text-sm text-text-low">
-          No on-ramp providers are enabled for this organization.
+          No deposit providers are enabled for this organization.
         </div>
       );
     }
@@ -263,7 +262,7 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
   if (currentStepId === "PROVIDER" && quote?.deliveryMode === "hosted") {
     return (
       <div className="space-y-6">
-        <HostedRampFrame title={`${quote.provider} on-ramp`} src={quote.hostedUrl} />
+        <HostedRampFrame title={`${quote.provider} deposit`} src={quote.hostedUrl} />
         <div className="border-t border-border-light pt-5">
           <OnrampTransferStatusPanel transfer={transferStatus} />
         </div>
