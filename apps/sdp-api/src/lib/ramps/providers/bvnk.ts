@@ -364,6 +364,7 @@ interface BvnkQuoteEstimateResponse {
   amountIn: number;
   amountOut: number;
   acceptanceExpiryDate: number;
+  payInMethod: { settlementCurrency: string };
   fees: { value: { service: number; processing: number } };
 }
 
@@ -437,14 +438,6 @@ function formatBvnkEstimateFeeTotal(estimate: BvnkPayoutEstimateResponse): strin
   const totalFee =
     parseDecimalAmount(feePredictedAmount, decimals) +
     parseDecimalAmount(networkFeePredictedAmount, decimals);
-  return formatDecimalAmount(totalFee, decimals);
-}
-
-function formatBvnkQuoteFeeTotal(fees: BvnkQuoteEstimateResponse["fees"]): string {
-  const service = String(fees.value.service);
-  const processing = String(fees.value.processing);
-  const decimals = Math.max(countDecimalPlaces(service), countDecimalPlaces(processing));
-  const totalFee = parseDecimalAmount(service, decimals) + parseDecimalAmount(processing, decimals);
   return formatDecimalAmount(totalFee, decimals);
 }
 
@@ -1093,8 +1086,18 @@ export class BvnkRampClient implements RampProvider {
     if (quote.amountOut <= 0) {
       throw providerUnavailable("BVNK returned a non-positive converted amount");
     }
+    const feeCurrency = parseBvnkEstimateFeeCurrency(quote.payInMethod.settlementCurrency);
+    if (feeCurrency !== input.fiatCurrency) {
+      throw providerUnavailable("BVNK returned on-ramp fees outside the fiat pay-in currency");
+    }
     const fiatAmount = String(quote.amountIn);
-    const totalFee = formatBvnkQuoteFeeTotal(quote.fees);
+    const service = String(quote.fees.value.service);
+    const processing = String(quote.fees.value.processing);
+    const feeDecimals = Math.max(countDecimalPlaces(service), countDecimalPlaces(processing));
+    const totalFee = formatDecimalAmount(
+      parseDecimalAmount(service, feeDecimals) + parseDecimalAmount(processing, feeDecimals),
+      feeDecimals
+    );
     return {
       provider: this.id,
       direction: "onramp",
