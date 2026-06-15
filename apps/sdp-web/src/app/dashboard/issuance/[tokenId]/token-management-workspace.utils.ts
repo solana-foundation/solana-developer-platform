@@ -179,9 +179,7 @@ const DISPLAY_LABEL_OVERRIDES: Record<string, string> = {
 export function formatDisplayLabel(value: string): string {
   const lower = value.toLowerCase();
   if (DISPLAY_LABEL_OVERRIDES[lower]) return DISPLAY_LABEL_OVERRIDES[lower];
-  return value
-    .replace(/[_-]/g, " ")
-    .replace(/\b\w/g, (c) => c.toUpperCase());
+  return value.replace(/[_-]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 export function formatDate(value: string | null | undefined): string {
