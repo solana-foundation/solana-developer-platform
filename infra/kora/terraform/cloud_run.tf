@@ -1,8 +1,9 @@
 resource "google_cloud_run_v2_service" "kora" {
-  name     = local.name_prefix
-  location = var.region
-  ingress  = "INGRESS_TRAFFIC_ALL"
-  labels   = local.labels
+  name                = local.name_prefix
+  location            = var.region
+  ingress             = "INGRESS_TRAFFIC_ALL"
+  labels              = local.labels
+  deletion_protection = var.deletion_protection
 
   template {
     service_account = google_service_account.runtime.email

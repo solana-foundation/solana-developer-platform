@@ -69,6 +69,12 @@ variable "allow_unauthenticated" {
   description = "allUsers run.invoker. Kora's API key/HMAC is the real gate."
 }
 
+variable "deletion_protection" {
+  type        = bool
+  default     = true
+  description = "Cloud Run deletion protection. Keep true for real envs; set false for throwaway."
+}
+
 variable "vpc_network" {
   type    = string
   default = "default"
