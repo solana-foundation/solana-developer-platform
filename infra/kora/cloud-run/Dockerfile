@@ -1,8 +1,10 @@
 # Builds Kora from main — gcp_kms signer + KORA_REDIS_URL env are not in any release yet.
 # Switch to FROM ghcr.io/solana-foundation/kora:<tag> once a release includes them.
 FROM rustlang/rust:nightly AS build
-ARG KORA_REF=main
-RUN cargo install --git https://github.com/solana-foundation/kora --branch ${KORA_REF} kora-cli
+# Pinned commit, not a moving branch — gcp_kms + KORA_REDIS_URL are unreleased. Bump deliberately;
+# switch to a released tag once one ships these (PRO-1312).
+ARG KORA_REF=50fe323a1042ce49a88b57e875e7909289882fe9
+RUN cargo install --git https://github.com/solana-foundation/kora --rev ${KORA_REF} kora-cli
 
 # trixie (glibc 2.41) matches the nightly builder's glibc; bookworm (2.36) is too old.
 FROM debian:trixie-slim

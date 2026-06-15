@@ -15,6 +15,13 @@ REGION="${REGION:-us-central1}"
 : "${KORA_GCP_KMS_KEY_NAME:?set via Doppler}"
 : "${KORA_GCP_KMS_PUBLIC_KEY:?set via Doppler}"
 
+# Never deploy mainnet without app-level auth — the Cloud Run service allows unauthenticated invoke,
+# so a missing key = an open, drainable paymaster.
+if [ "$ENV" = "mainnet" ] && [ -z "${KORA_API_KEY:-}" ]; then
+  echo "refusing to deploy mainnet without KORA_API_KEY set" >&2
+  exit 1
+fi
+
 SERVICE="kora-${ENV}"
 TAG="$(git -C "$SCRIPT_DIR" rev-parse --short HEAD 2>/dev/null || echo manual)"
 IMAGE="${REGION}-docker.pkg.dev/${PROJECT}/${SERVICE}/kora:${TAG}"

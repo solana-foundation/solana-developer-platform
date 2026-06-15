@@ -99,3 +99,8 @@ variable "github_repo" {
   type    = string
   default = "solana-foundation/solana-developer-platform"
 }
+
+variable "github_ref" {
+  type    = string
+  default = "refs/heads/main"
+}

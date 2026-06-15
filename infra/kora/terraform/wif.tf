@@ -11,8 +11,10 @@ resource "google_iam_workload_identity_pool_provider" "github" {
   attribute_mapping = {
     "google.subject"       = "assertion.sub"
     "attribute.repository" = "assertion.repository"
+    "attribute.ref"        = "assertion.ref"
   }
-  attribute_condition = "assertion.repository == \"${var.github_repo}\""
+  # Only the configured repo AND branch can mint a token — not every branch/workflow in the repo.
+  attribute_condition = "assertion.repository == \"${var.github_repo}\" && assertion.ref == \"${var.github_ref}\""
 
   oidc {
     issuer_uri = "https://token.actions.githubusercontent.com"
