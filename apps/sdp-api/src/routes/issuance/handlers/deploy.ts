@@ -33,6 +33,73 @@ import { canonicalMetadataUrl, resolveMetadataOrigin } from "./metadata";
 
 type AppContext = Context<{ Bindings: Env }>;
 
+/**
+ * Persist a mint that landed on-chain even though its metadata-URI follow-up
+ * failed (see MintMetadataUpdateError). Mirrors the deploy success path: records
+ * the mint, stamps the initial permanent delegate, and confirms the transaction
+ * row. Isolated in its own try/catch so a secondary DB failure is logged rather
+ * than escaping and burying the mint address — the caller still throws afterward
+ * so the client knows the mint exists and not to redeploy. A swallowed write
+ * here just means the mint isn't recorded, which the caller's error reports.
+ */
+async function persistRecoveredMint(params: {
+  tokenService: TokenService;
+  txId: string;
+  tokenId: string;
+  token: NonNullable<Awaited<ReturnType<TokenService["getToken"]>>>;
+  custodyAddress: Address;
+  aclMode: ReturnType<typeof getMosaicAclMode>;
+  result: MintMetadataUpdateError["result"];
+}): Promise<void> {
+  const { tokenService, txId, tokenId, token, custodyAddress, aclMode, result } = params;
+  const { mint, signature, slot, listAddress } = result;
+  // The caller only invokes this once it has confirmed the mint landed on-chain;
+  // bail defensively (and to narrow the type) if it somehow didn't.
+  if (!mint) {
+    return;
+  }
+  const freezeAuthority = token.isFreezable ? custodyAddress : null;
+  try {
+    await tokenService.setTokenDeployed(
+      tokenId,
+      mint,
+      custodyAddress,
+      freezeAuthority,
+      listAddress as string | undefined
+    );
+    // Mirror the success path: stamp the initial permanent delegate into the DB
+    // for tokens with that extension. Skipping it would leave `permanentDelegate`
+    // null, so later seize/force-transfer ops would target the wrong authority
+    // with no recovery short of a manual DB patch.
+    const initialPermanentDelegate = getInitialPermanentDelegateAuthority(token, custodyAddress);
+    if (initialPermanentDelegate !== undefined) {
+      await tokenService.updateTokenAuthorities(tokenId, {
+        permanentDelegate: initialPermanentDelegate,
+      });
+    }
+    await tokenService.updateTransaction(txId, {
+      status: "confirmed",
+      signature,
+      slot: Number(slot),
+      params: {
+        operation: "deploy",
+        mintAddress: mint,
+        mintAuthority: custodyAddress,
+        freezeAuthority,
+        ablListAddress: listAddress,
+        aclMode,
+        metadataUriFailed: true,
+      },
+    });
+  } catch (persistError) {
+    console.error("Failed to persist recovered mint after metadata-URI failure", {
+      tokenId,
+      mintAddress: mint,
+      error: persistError instanceof Error ? persistError.message : String(persistError),
+    });
+  }
+}
+
 export const deployToken = async (c: AppContext) => {
   const { tokenId } = c.req.param();
   const { auth, projectId, orgId } = requireProjectScope(c);
@@ -209,52 +276,15 @@ export const deployToken = async (c: AppContext) => {
     // and mints a second, orphaned token. The hosted-URI pointer is left unset;
     // it can be fixed later via a metadata update.
     if (error instanceof MintMetadataUpdateError && custodyAddress && error.result.mint) {
-      const freezeAuthority = token.isFreezable ? custodyAddress : null;
-      // The mint is live on-chain; record it so a retry doesn't generate a fresh
-      // keypair and orphan it. These writes can themselves fail (e.g. a D1
-      // timeout) — isolate them so a secondary exception can't escape and bury
-      // the mint address. We must reach the throw below either way, since that's
-      // what tells the caller the mint exists and not to redeploy; a swallowed
-      // write here just means the mint isn't recorded, which the error reports.
-      try {
-        await tokenService.setTokenDeployed(
-          tokenId,
-          error.result.mint,
-          custodyAddress,
-          freezeAuthority,
-          error.result.listAddress as string | undefined
-        );
-        // Mirror the success path: stamp the initial permanent delegate into the
-        // DB for tokens with that extension. Skipping it here would leave
-        // `permanentDelegate` null, so later seize/force-transfer ops would target
-        // the wrong authority with no recovery short of a manual DB patch.
-        const initialPermanentDelegate = getInitialPermanentDelegateAuthority(token, custodyAddress);
-        if (initialPermanentDelegate !== undefined) {
-          await tokenService.updateTokenAuthorities(tokenId, {
-            permanentDelegate: initialPermanentDelegate,
-          });
-        }
-        await tokenService.updateTransaction(tx.id, {
-          status: "confirmed",
-          signature: error.result.signature,
-          slot: Number(error.result.slot),
-          params: {
-            operation: "deploy",
-            mintAddress: error.result.mint,
-            mintAuthority: custodyAddress,
-            freezeAuthority,
-            ablListAddress: error.result.listAddress,
-            aclMode,
-            metadataUriFailed: true,
-          },
-        });
-      } catch (persistError) {
-        console.error("Failed to persist recovered mint after metadata-URI failure", {
-          tokenId,
-          mintAddress: error.result.mint,
-          error: persistError instanceof Error ? persistError.message : String(persistError),
-        });
-      }
+      await persistRecoveredMint({
+        tokenService,
+        txId: tx.id,
+        tokenId,
+        token,
+        custodyAddress,
+        aclMode,
+        result: error.result,
+      });
 
       throw new AppError(
         "TRANSACTION_FAILED",

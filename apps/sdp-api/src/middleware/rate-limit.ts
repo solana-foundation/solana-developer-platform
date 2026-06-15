@@ -69,7 +69,7 @@ function getClientIdentifier(c: Context<{ Bindings: Env }>): string {
 
 function extractBearerToken(c: Context<{ Bindings: Env }>): string | null {
   const authHeader = c.req.header("Authorization");
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+  if (!authHeader?.startsWith("Bearer ")) {
     return null;
   }
 

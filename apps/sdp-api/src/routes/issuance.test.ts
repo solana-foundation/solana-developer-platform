@@ -4394,7 +4394,10 @@ describe("Issuance Routes", () => {
           );
         // Recording the live mint succeeds, so the recovery path proceeds to stamp
         // the permanent delegate.
-        const updateTokenAuthoritiesSpy = vi.spyOn(TokenService.prototype, "updateTokenAuthorities");
+        const updateTokenAuthoritiesSpy = vi.spyOn(
+          TokenService.prototype,
+          "updateTokenAuthorities"
+        );
 
         try {
           const res = await app.request(
