@@ -16,7 +16,7 @@ import type {
   SeizeFormState,
   SeizeValidationErrors,
 } from "./token-management-workspace.types";
-import { NON_WHITESPACE_PATTERN, SOLANA_ADDRESS_PATTERN } from "./token-management-workspace.utils";
+import { NON_WHITESPACE_PATTERN, SOLANA_ADDRESS_PATTERN, TOKEN_AMOUNT_FIELD_DESCRIPTION } from "./token-management-workspace.utils";
 import { TokenSignerSelect } from "./token-signer-select";
 import { TokenValidationMessage } from "./token-validation-message";
 import { TokenWalletAddressField } from "./token-wallet-address-field";
@@ -153,6 +153,7 @@ export function TokenActionAdminForms({
             />
             <ActionField
               label="Amount"
+              description={TOKEN_AMOUNT_FIELD_DESCRIPTION}
               type="number"
               inputMode="decimal"
               min="0.000000001"
@@ -232,6 +233,7 @@ export function TokenActionAdminForms({
             />
             <ActionField
               label="Amount"
+              description={TOKEN_AMOUNT_FIELD_DESCRIPTION}
               type="number"
               inputMode="decimal"
               min="0.000000001"
@@ -531,6 +533,7 @@ function ActionField({
   step,
   placeholder,
   inputMode,
+  description,
   error,
 }: {
   label: string;
@@ -544,6 +547,7 @@ function ActionField({
   step?: string;
   placeholder?: string;
   inputMode?: ComponentProps<typeof Input>["inputMode"];
+  description?: string;
   error?: string | null;
 }) {
   const fieldId = useId();
@@ -556,6 +560,9 @@ function ActionField({
       >
         {label}
       </label>
+      {description ? (
+        <p className="text-[13px] leading-5 text-[rgba(28,28,29,0.62)]">{description}</p>
+      ) : null}
       <Input
         id={fieldId}
         type={type}

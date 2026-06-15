@@ -12,3 +12,7 @@ The public issuance surface currently exposes three token templates:
 | `custom` | 9 decimals default (up to 18 max), extension set is fully configurable | Use when your requirements do not match preset templates. |
 
 These defaults are sourced from the API implementation in `apps/sdp-api/src/services/issuance/templates/definitions.ts`.
+
+## Amount format
+
+Mint, burn, seize, and force-burn request bodies accept `amount` as a **decimal string in UI units** — the human-readable token value (for example `"1"` or `"1.5"`). SDP converts to on-chain base units using the token's `decimals`. This differs from wallet balance responses, which return both raw `amount` and `uiAmount`.
