@@ -44,6 +44,7 @@ export function useOnrampWizard(props: UseRampWizardProps) {
       insertAfter: "DEPOSIT",
       direction: "onramp",
     },
+    advanceRequirementsBeforeQuote: true,
     selectionSchema: depositSelectionSchema,
     quoteEndpoint: "/api/dashboard/payments/ramps/onramp/quote",
     buildQuotePayload: ({ fields, provider, selectedRampPair, cryptoToken, collectedData }) => ({
@@ -62,20 +63,15 @@ export function useOnrampWizard(props: UseRampWizardProps) {
     },
   });
 
-  const bvnkInstruction =
-    wizard.quote?.provider === "bvnk" && wizard.quote.deliveryMode === "manual_instructions"
-      ? wizard.quote.paymentInstructions[0]
-      : undefined;
-
-  const isAwaitingBvnk =
-    bvnkInstruction !== undefined &&
-    (bvnkInstruction.onboardingStatus !== "ready" || !bvnkInstruction.bankAccount?.accountNumber);
-
-  useSWR(isAwaitingBvnk ? "bvnk-onramp-verification-poll" : null, () => wizard.refreshQuote(), {
-    refreshInterval: 4000,
-    revalidateOnFocus: false,
-    dedupingInterval: 0,
-  });
+  // Onboarding is driven by POST /requirements (the wizard polls the lifecycle); once it
+  // reaches `ready`, fire the quote a single time to fetch the funding instruction (the
+  // provisioned virtual account). Retries until the quote is set, then the key goes null.
+  const onboardingReady = wizard.onboarding?.status === "ready";
+  useSWR(
+    onboardingReady && !wizard.quote ? "onramp-ready-quote" : null,
+    () => wizard.refreshQuote(),
+    { refreshInterval: 4000, revalidateOnFocus: false, dedupingInterval: 0 }
+  );
 
   const transferStatusKey = wizard.quote
     ? (["onramp-transfer-status", wizard.quote.provider, wizard.quote.id] as const)
@@ -134,7 +130,6 @@ export function useOnrampWizard(props: UseRampWizardProps) {
 
   return {
     ...wizard,
-    bvnkInstruction,
     transferStatus,
     transferStatusLoading,
     quoteSimulationLoading,

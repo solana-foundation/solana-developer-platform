@@ -1,6 +1,12 @@
 "use client";
 
-import { CheckCircle2Icon, DollarSignIcon, Loader2Icon, XCircleIcon } from "lucide-react";
+import {
+  CheckCircle2Icon,
+  DollarSignIcon,
+  Loader2Icon,
+  ShieldCheckIcon,
+  XCircleIcon,
+} from "lucide-react";
 import {
   formatMinorCurrencyAmount,
   formatTimestamp,
@@ -174,6 +180,43 @@ function OnrampCompleteScreen({
   );
 }
 
+function OnboardingPendingPanel({
+  status,
+}: {
+  status: NonNullable<OnrampWizard["onboarding"]>["status"];
+}) {
+  const needsVerification = status === "customer_verification_required";
+  let title: string;
+  let description: string;
+  switch (status) {
+    case "customer_verification_required":
+      title = "Verify your identity";
+      description =
+        "BVNK partners with Sumsub to confirm your identity before activating your funding account. Hit “Complete Verification” below to get started — this page refreshes automatically once you're approved, and your deposit instructions will appear right here.";
+      break;
+    case "customer_verifying":
+      title = "Verification in review";
+      description =
+        "Sumsub is reviewing your details — this usually takes just a few minutes. Feel free to come back later; your deposit instructions will show up here as soon as you're approved.";
+      break;
+    default:
+      title = "Setting up your funding account";
+      description =
+        "Almost there — we're provisioning your virtual account now. Your deposit instructions will appear here in a moment.";
+  }
+  return (
+    <div className="flex flex-col items-center gap-4 px-6 py-12 text-center">
+      {needsVerification ? (
+        <ShieldCheckIcon className="size-10 text-text-extra-high" />
+      ) : (
+        <Loader2Icon className="size-10 animate-spin text-text-medium" />
+      )}
+      <p className="text-lg font-medium text-text-extra-high">{title}</p>
+      <p className="max-w-md text-sm leading-relaxed text-text-low">{description}</p>
+    </div>
+  );
+}
+
 export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
   const {
     currentStepId,
@@ -184,7 +227,7 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
     walletsLoading,
     selectedWallet,
     selectedRampPair,
-    bvnkInstruction,
+    onboarding,
     quote,
     transferStatus,
     quoteSimulationLoading,
@@ -244,13 +287,8 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
     );
   }
 
-  if (currentStepId === "PROVIDER" && bvnkInstruction?.onboardingStatus === "verifying") {
-    return (
-      <div className="rounded-2xl border border-border-light bg-border-extra-light px-5 py-5 text-sm text-text-low">
-        We're reviewing your details. This usually takes a few minutes — you can come back to
-        complete your deposit once verification is approved.
-      </div>
-    );
+  if (currentStepId === "PROVIDER" && onboarding && onboarding.status !== "ready" && !quote) {
+    return <OnboardingPendingPanel status={onboarding.status} />;
   }
 
   if (currentStepId === "PROVIDER" && quote) {
