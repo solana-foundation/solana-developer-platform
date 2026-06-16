@@ -314,10 +314,10 @@ const rampProviderSchema = z.enum(RAMP_PROVIDERS);
 const onrampCryptoRailSchema = z.enum(ONRAMP_CRYPTO_RAILS);
 const offrampCryptoRailSchema = z.enum(OFFRAMP_CRYPTO_RAILS);
 
-const rampCurrencyCodeSchema = z
+export const rampCurrencyCodeSchema = z
   .string()
   .regex(/^[a-zA-Z0-9_]+$/, { message: "Invalid ramp currency code" });
-const rampFiatCurrencySchema = z.preprocess(
+export const rampFiatCurrencySchema = z.preprocess(
   (value) => (typeof value === "string" ? value.trim().toUpperCase() : value),
   z.enum(RAMP_FIAT_CURRENCIES)
 );

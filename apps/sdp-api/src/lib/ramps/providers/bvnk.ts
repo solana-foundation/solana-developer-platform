@@ -1571,3 +1571,42 @@ export function bvnkOnboardingRequirements(
     }
   }
 }
+
+/**
+ * Pure read of the BVNK on-ramp lifecycle from persisted (webhook-synced) provider_data — no
+ * provider calls or provisioning. Lets GET /requirements report the live status so the client
+ * can poll cheaply instead of re-running the write-path advance.
+ */
+export function bvnkOnrampStatusFromProviderData(
+  providerData: CounterpartyRow["provider_data"],
+  params: { cryptoToken: string; fiatCurrency: string; destinationWalletAddress: string }
+): CounterpartyRequirements {
+  const direction: RampDirection = "onramp";
+  const customer = readBvnkCustomer(providerData);
+  if (!customer.customerReference) {
+    return { provider: "bvnk", direction, status: "onboarding_not_started" };
+  }
+  if (!isBvnkCustomerVerified(customer.status)) {
+    if (customer.verificationUrl) {
+      return {
+        provider: "bvnk",
+        direction,
+        status: "customer_verification_required",
+        verificationUrl: customer.verificationUrl,
+      };
+    }
+    return { provider: "bvnk", direction, status: "customer_verifying" };
+  }
+  const { currency, network } = normalizeBvnkCurrencyAndNetwork(params.cryptoToken);
+  const key = bvnkOnrampKey(
+    params.fiatCurrency,
+    currency,
+    network,
+    params.destinationWalletAddress
+  );
+  const entry = readBvnkOnrampEntry(providerData, key);
+  if (entry.ruleId && entry.bankAccount?.accountNumber) {
+    return { provider: "bvnk", direction, status: "ready" };
+  }
+  return { provider: "bvnk", direction, status: "funding_account_provisioning" };
+}

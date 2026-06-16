@@ -28,6 +28,7 @@ import {
   notFound,
 } from "@/lib/errors";
 import { RAMP_PROVIDER_CLIENTS } from "@/lib/ramps";
+import { bvnkOnrampStatusFromProviderData } from "@/lib/ramps/providers/bvnk";
 import { created, noContent, success } from "@/lib/response";
 import {
   advanceCounterpartyRequirements,
@@ -159,6 +160,33 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
 
   if (!counterparty) {
     throw notFound("Counterparty");
+  }
+
+  // BVNK on-ramp with a full corridor (the FE status poll): report the live onboarding
+  // lifecycle from webhook-synced provider_data — a cheap pure read — gated by the static
+  // data check first. Without corridor params this falls through to the static gate below.
+  if (
+    query.data.provider === "bvnk" &&
+    query.data.direction === "onramp" &&
+    query.data.cryptoToken &&
+    query.data.destinationWallet &&
+    query.data.fiatCurrency
+  ) {
+    const gate = RAMP_PROVIDER_CLIENTS.bvnk.validateCounterparty(mapToCounterparty(counterparty), {
+      direction: "onramp",
+      providerData: counterparty.provider_data,
+    });
+    if (gate.status === "collect" || gate.status === "unsupported") {
+      return success(c, gate);
+    }
+    return success(
+      c,
+      bvnkOnrampStatusFromProviderData(counterparty.provider_data, {
+        cryptoToken: query.data.cryptoToken,
+        fiatCurrency: query.data.fiatCurrency,
+        destinationWalletAddress: query.data.destinationWallet,
+      })
+    );
   }
 
   const requirements = RAMP_PROVIDER_CLIENTS[query.data.provider].validateCounterparty(
