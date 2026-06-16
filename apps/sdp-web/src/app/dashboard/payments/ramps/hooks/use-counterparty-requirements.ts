@@ -16,11 +16,18 @@ async function fetchCounterpartyRequirements(
   counterpartyId: string,
   provider: RampProviderId,
   direction: RampDirection,
-  fiatCurrency: RampFiatCurrency | undefined
+  fiatCurrency: RampFiatCurrency | undefined,
+  corridor?: AdvanceRequirementsPayload
 ): Promise<CounterpartyRequirements> {
   const params = new URLSearchParams({ provider, direction });
   if (fiatCurrency !== undefined) {
     params.set("fiatCurrency", fiatCurrency);
+  }
+  // With a corridor, GET reports the live onboarding lifecycle (not just the static gate).
+  if (corridor) {
+    params.set("cryptoToken", corridor.cryptoToken);
+    params.set("destinationWallet", corridor.destinationWallet);
+    params.set("fiatCurrency", corridor.fiatCurrency);
   }
   const response = await fetch(
     `/api/dashboard/counterparty/${encodeURIComponent(counterpartyId)}/requirements?${params.toString()}`
@@ -178,20 +185,24 @@ export function useCounterpartyRequirements(
     }
   };
 
-  // While provider onboarding is mid-flight, re-advance on an interval so KYC approval and
-  // wallet/rule provisioning get picked up; stops once the lifecycle reaches a terminal state.
+  // While provider onboarding is mid-flight, poll the live lifecycle on an interval. This is a
+  // cheap GET (pure read of webhook-synced state) — the webhook advances KYC/wallet provisioning
+  // server-side, so we only observe here rather than re-running the write-path advance.
   useSWR(
     onboarding && lastAdvancePayload && params?.provider && isOnboardingPending(onboarding.status)
-      ? (["counterparty-requirements-advance-poll", subjectKey] as const)
+      ? (["counterparty-requirements-status-poll", subjectKey] as const)
       : null,
     async () => {
       if (!lastAdvancePayload || !params?.provider) {
         return;
       }
-      const result = await advanceCounterpartyRequirements(params.counterpartyId, params.provider, {
-        ...lastAdvancePayload,
-        collectedData,
-      });
+      const result = await fetchCounterpartyRequirements(
+        params.counterpartyId,
+        params.provider,
+        params.direction,
+        lastAdvancePayload.fiatCurrency,
+        lastAdvancePayload
+      );
       setOnboarding(result);
     },
     { refreshInterval: 4000, revalidateOnFocus: false, dedupingInterval: 0 }
