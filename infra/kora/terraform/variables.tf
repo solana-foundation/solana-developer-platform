@@ -1,6 +1,6 @@
 variable "project_id" {
   type        = string
-  description = "Sandbox project, or solana-developer-platform for devnet/mainnet."
+  description = "Target GCP project for this env."
 }
 
 variable "region" {
@@ -10,10 +10,10 @@ variable "region" {
 
 variable "env" {
   type        = string
-  description = "sandbox | devnet | mainnet. Drives kora-<env>-* names."
+  description = "devnet | mainnet. Drives kora-<env>-* names."
   validation {
-    condition     = contains(["sandbox", "devnet", "mainnet"], var.env)
-    error_message = "env must be one of: sandbox, devnet, mainnet."
+    condition     = contains(["devnet", "mainnet"], var.env)
+    error_message = "env must be one of: devnet, mainnet."
   }
 }
 

@@ -16,7 +16,7 @@ output "kms_key_version_name" {
 }
 
 output "redis_url" {
-  description = "Set as KORA_REDIS_URL in Doppler."
+  description = "host:port only. Redis has AUTH + TLS, so KORA_REDIS_URL must be rediss://:<AUTH_TOKEN>@host:port (PRO-1319)."
   value       = "redis://${google_redis_instance.kora.host}:${google_redis_instance.kora.port}"
 }
 

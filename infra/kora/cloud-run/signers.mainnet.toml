@@ -1,19 +1,7 @@
-# Kora Signer Configuration for SDP Mainnet (Cloud Run)
-#
-# Hardened signer: GCP KMS (non-exportable Ed25519). Unlike the devnet memory signer, no private-key
-# material exists in Secret Manager / Doppler / this repo — only a reference to the KMS key, and signing
-# is gated by roles/cloudkms.signer on that one key (granted to the kora-mainnet runtime SA only).
-#
-# IMPORTANT: the fee-payer's Solana address is DERIVED from the KMS public key. The key is therefore the
-# paymaster's identity. Generate it fresh in the SDP project (its own keyring), derive the base58 pubkey,
-# and fund that address. A KMS key cannot be exported or moved between projects, so it is never carried
-# over from the sandbox project — the sandbox uses a separate throwaway key.
-#
-# Env vars (injected via Doppler, NOT secrets — a key path + a public key are not sensitive):
-#   KORA_GCP_KMS_KEY_NAME  = projects/solana-developer-platform/locations/<loc>/keyRings/<ring>/cryptoKeys/<key>/cryptoKeyVersions/<n>
-#   KORA_GCP_KMS_PUBLIC_KEY = base58 Solana pubkey derived from the KMS public key
-#
-# [signer_pool] is kept (even for a single signer) so the fee-payer balance metric / low-SOL alert work.
+# Mainnet signer: GCP KMS (non-exportable Ed25519). No private key in this repo / Doppler — signing is
+# gated by roles/cloudkms.signer on the key. The fee-payer Solana address is derived from the KMS public
+# key (rotating the key changes the address). Key name + pubkey are injected via Doppler (non-secret).
+# [signer_pool] is kept (even for one signer) so the fee-payer-balance metric works.
 
 [signer_pool]
 strategy = "round_robin"

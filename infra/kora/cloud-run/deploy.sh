@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Build a config-baked Kora image and deploy it to the kora-<ENV> Cloud Run service.
 # Secrets/env come from Doppler — run this under `doppler run`, e.g.:
-#   ENV=sandbox PROJECT=trading-prod-494016 \
-#     doppler run --project kora --config sandbox -- ./deploy.sh
+#   ENV=mainnet PROJECT=trading-prod-494016 \
+#     doppler run --project kora --config mainnet -- ./deploy.sh
 # Only image + env are changed here; the rest of the service is Terraform-managed (ignore_changes).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ENV="${ENV:?ENV=sandbox|devnet|mainnet}"
+ENV="${ENV:?ENV=devnet|mainnet}"
 PROJECT="${PROJECT:?PROJECT=<gcp project id>}"
 REGION="${REGION:-us-central1}"
 
@@ -22,6 +22,12 @@ if [ "$ENV" = "mainnet" ] && [ -z "${KORA_API_KEY:-}" ]; then
   exit 1
 fi
 
+# Mainnet config has cache + usage_limit fail-closed, so a missing Redis URL rejects every request.
+if [ "$ENV" = "mainnet" ] && [ -z "${KORA_REDIS_URL:-}" ]; then
+  echo "refusing to deploy mainnet without KORA_REDIS_URL set" >&2
+  exit 1
+fi
+
 SERVICE="kora-${ENV}"
 TAG="$(git -C "$SCRIPT_DIR" rev-parse --short HEAD 2>/dev/null || echo manual)"
 IMAGE="${REGION}-docker.pkg.dev/${PROJECT}/${SERVICE}/kora:${TAG}"
@@ -29,7 +35,6 @@ IMAGE="${REGION}-docker.pkg.dev/${PROJECT}/${SERVICE}/kora:${TAG}"
 case "$ENV" in
   mainnet) KCFG=kora.mainnet.toml; SCFG=signers.mainnet.toml ;;
   devnet)  KCFG=kora.devnet.toml;  SCFG=signers.devnet.toml ;;
-  sandbox) KCFG=kora.devnet.toml;  SCFG=signers.mainnet.toml ;; # devnet RPC + KMS signer
   *) echo "unknown ENV: $ENV" >&2; exit 1 ;;
 esac
 

@@ -1,38 +1,15 @@
-# Kora Configuration for SDP Mainnet (Cloud Run)
-#
-# Hardened starting point for the mainnet paymaster. This is DRAFT/template config:
-# every block marked `TODO` needs an SDP-specific decision confirmed before rollout.
-#
-# Differences vs kora.devnet.toml (the live devnet config) — all intentional hardening:
-#   1. fee_payer_policy is DEFAULT-DENY (all false), not all-true. See the big note below.
-#   2. price_source = "Jupiter" (real oracle); "Mock" must never ship to mainnet.
-#   3. auth is expected to be ON (api key / HMAC via env) — getConfig/metrics must not be public.
-#   4. cache + usage_limit enabled (require Memorystore Redis via KORA_REDIS_URL).
-#   5. Token-2022 risky extensions blocked.
-#
-# Validate before every rollout:
-#   kora config validate-with-rpc \
-#     --config infra/kora/cloud-run/kora.mainnet.toml \
-#     --signers-config infra/kora/cloud-run/signers.mainnet.toml \
-#     --rpc-url "$MAINNET_RPC_URL"
-# It must exit 0 with no warnings about Mock price or permissive policy.
-# Rollout = upload to the kora-mainnet-config secret + bump KORA_CONFIG_VERSION (see README).
+# Kora config for SDP mainnet. TODO markers are decisions to confirm before rollout (PRO-1320).
 
 [kora]
-rate_limit = 100  # requests/sec, global per instance. Revisit with real mainnet load + per-key limits.
+rate_limit = 100
 
 [kora.auth]
-# Secrets are injected via env (KORA_API_KEY / KORA_HMAC_SECRET / KORA_RECAPTCHA_SECRET) from
-# Secret Manager — they are NOT stored in this file. At least one of api key / HMAC MUST be set on
-# mainnet so getConfig and /metrics are not served unauthenticated to the public internet.
-max_timestamp_age = 300              # HMAC: max clock skew (seconds)
-recaptcha_score_threshold = 0.5      # only used if KORA_RECAPTCHA_SECRET is set
+# api_key / hmac_secret / recaptcha_secret come from env (Doppler), not this file. One MUST be set.
+max_timestamp_age = 300
+recaptcha_score_threshold = 0.5
 protected_methods = ["signTransaction", "signAndSendTransaction", "signBundle", "signAndSendBundle"]
 
 [kora.cache]
-# Requires Memorystore Redis + VPC connector (provisioning is a mainnet dependency — WS3).
-# url is read from KORA_REDIS_URL at startup. Caching account lookups (incl. address-lookup-table
-# resolution for v0 txs) cuts a hot per-request RPC call.
 enabled = true
 default_ttl = 300
 account_ttl = 60
@@ -43,74 +20,52 @@ estimate_transaction_fee = true
 get_supported_tokens = true
 sign_transaction = true
 sign_and_send_transaction = true
-transfer_transaction = true          # TODO: disable if SDP clients don't use the server-built transfer helper
+transfer_transaction = true
 get_blockhash = true
-get_config = true                    # kept on for ops/check.sh, but MUST be behind auth (see [kora.auth])
+get_config = true
 get_payer_signer = true
 get_version = true
 
 [validation]
-max_allowed_lamports = 10000000      # 0.01 SOL cap per tx. TODO: set from real mainnet fee + rent needs.
+max_allowed_lamports = 10000000 # TODO: set from real mainnet fee + rent needs
 max_signatures = 10
-price_source = "Jupiter"             # real oracle on mainnet (NOT "Mock"). Set Jupiter API key via env if required.
+price_source = "Jupiter"
 allow_durable_transactions = false
 
 allowed_programs = [
-    "11111111111111111111111111111111",              # System Program
-    "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",   # Token Program (legacy)
-    "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",   # Token-2022 Program
-    "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",  # Associated Token Program
-    "TACLkU6CiCdkQN2MjoyDkVg2yAH9zkxiHDsiztQ52TP",   # Token-ACL (sRFC-37)
-    "GATEzzqxhJnsWF6vHRsgtixxSB8PaQdcqGEVTEHWiULz",  # ABL / GATE Program
-    "SPLxh1LVZzEkX99H6rqYizhytLWPZVV296zyYDPagv2",   # MagicBlock private transfer program
-    "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh",  # MagicBlock delegation program
-    "De1egAFMkMWZSN5rYXRj9CAdheBamobVNubTsi9avR44",  # Subscriptions (recurring payments) program
-    "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr",   # Memo Program
-    "AddressLookupTab1e1111111111111111111111111",   # Address Lookup Table
-    "ComputeBudget111111111111111111111111111111",   # Compute Budget
+    "11111111111111111111111111111111",             # System
+    "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",  # Token
+    "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",  # Token-2022
+    "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL", # Associated Token
+    "TACLkU6CiCdkQN2MjoyDkVg2yAH9zkxiHDsiztQ52TP",  # Token-ACL (sRFC-37)
+    "GATEzzqxhJnsWF6vHRsgtixxSB8PaQdcqGEVTEHWiULz", # ABL / GATE
+    "SPLxh1LVZzEkX99H6rqYizhytLWPZVV296zyYDPagv2",  # MagicBlock private transfer
+    "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh", # MagicBlock delegation
+    "De1egAFMkMWZSN5rYXRj9CAdheBamobVNubTsi9avR44", # Subscriptions
+    "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr",  # Memo
+    "AddressLookupTab1e1111111111111111111111111",  # Address Lookup Table
+    "ComputeBudget111111111111111111111111111111",  # Compute Budget
 ]
-# NOTE: program IDs are identical across clusters, but `validate-with-rpc` confirms each is actually
-# deployed + executable on mainnet. Run it before first rollout.
 
-# TODO: confirm the mainnet token set. wSOL + USDC mainnet shown; trim/extend to what SDP supports.
+# TODO: confirm mainnet token set.
 allowed_tokens = [
-    "So11111111111111111111111111111111111111112",   # Wrapped SOL
-    "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",   # USDC (mainnet)  — TODO confirm
+    "So11111111111111111111111111111111111111112", # Wrapped SOL
+    "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", # USDC
 ]
-
-# Tokens accepted as fee payment. Empty = SOL-only / fully sponsored.
-# TODO: tie to the pricing decision below. If charging fees in USDC, add the USDC mint here.
 allowed_spl_paid_tokens = []
-
 disallowed_accounts = []
 
 [validation.price]
-# TODO: PRODUCT DECISION. "free" = fully sponsored (Kora eats the fee). Switch to "margin" or "fixed"
-# if users pay fees in tokens. If kept "free", price_source above is effectively unused but must still
-# not be "Mock" to pass validation.
-type = "free"
+type = "free" # TODO: sponsored (free) vs token-fee (PRO-1320)
 
-# ---------------------------------------------------------------------------------------------------
-# FEE PAYER POLICY — DEFAULT DENY.
-#
-# The live devnet config sets every flag to `true`, which lets a crafted transaction make Kora's
-# fee-payer signer transfer/burn/close/mint its OWN assets or reassign authorities — a drainage risk
-# that is unacceptable on mainnet. For a pure gasless / fee-abstraction paymaster, the fee payer should
-# ONLY pay the lamports fee and never be referenced as an owner/authority elsewhere, so all-false is
-# both the secure default and almost always functionally correct.
-#
-# BEFORE ROLLOUT: replay representative SDP mainnet transaction shapes against this config (staging,
-# --no-traffic) and enable ONLY the specific flags that legitimately require the fee payer as an
-# authority. Likely candidates IF (and only if) Kora itself creates user accounts:
-#   - system.allow_create_account / spl_token.allow_initialize_account / token_2022.allow_initialize_account
-# Do not blanket-enable. Each `true` is a new way to drain the fee payer.
-# ---------------------------------------------------------------------------------------------------
+# Default-deny: the fee payer only pays the lamports fee. Enable a flag only if SDP flows require the
+# fee payer as an authority (PRO-1316) — each `true` is a way to drain it.
 [validation.fee_payer_policy]
 
 [validation.fee_payer_policy.system]
 allow_transfer = false
 allow_assign = false
-allow_create_account = false   # TODO: true only if Kora funds/creates accounts on users' behalf
+allow_create_account = false
 allow_allocate = false
 
 [validation.fee_payer_policy.system.nonce]
@@ -128,7 +83,7 @@ allow_revoke = false
 allow_set_authority = false
 allow_mint_to = false
 allow_initialize_mint = false
-allow_initialize_account = false   # TODO: true only if Kora initializes user ATAs as the fee payer
+allow_initialize_account = false
 allow_initialize_multisig = false
 allow_freeze_account = false
 allow_thaw_account = false
@@ -142,48 +97,38 @@ allow_revoke = false
 allow_set_authority = false
 allow_mint_to = false
 allow_initialize_mint = false
-allow_initialize_account = false   # TODO: true only if Kora initializes user ATAs as the fee payer
+allow_initialize_account = false
 allow_initialize_multisig = false
 allow_freeze_account = false
 allow_thaw_account = false
 
 [validation.token2022]
-# Reject mints whose extensions let a third party move/seize user funds. validate-with-rpc warns on
-# these; block them outright on mainnet unless a specific allowed token requires one.
 transfer_hook_policy = "deny_mutable_for_delayed_signing"
-blocked_mint_extensions = ["permanent_delegate", "transfer_hook"]  # TODO: confirm against allowed_tokens
+blocked_mint_extensions = ["permanent_delegate", "transfer_hook"]
 blocked_account_extensions = []
 
 [metrics]
-# Scraped into Grafana Cloud (WS4). Keep the endpoint behind auth / non-public ingress on mainnet.
+# /metrics is served outside the API-key auth layer (currently public) — restrict before launch (PRO-1355).
 enabled = true
 endpoint = "/metrics"
 port = 8080
 scrape_interval = 60
 
 [metrics.fee_payer_balance]
-# Emits signer_balance_lamports gauge. Works with the [signer_pool] format below (even one signer),
-# which is the basis for the fee-payer-SOL-low alert.
 enabled = true
 expiry_seconds = 30
 
 [kora.usage_limit]
-# Per-wallet abuse protection. Requires Redis (KORA_REDIS_URL). Fail-CLOSED on mainnet.
 enabled = true
 fallback_if_unavailable = false
 
-# TODO: tune to expected legitimate usage. Example: cap total sponsored txs per wallet per day.
 [[kora.usage_limit.rules]]
 type = "transaction"
 max = 1000
 window_seconds = 86400
 
-# Optional: Lighthouse fee-payer drainage protection.
-# IMPORTANT: Lighthouse only works with signTransaction / signBundle (it rewrites the message, which
-# invalidates pre-existing client signatures used by signAndSend*). SDP currently enables BOTH
-# sign_transaction and sign_and_send_transaction, so enabling Lighthouse globally would break the
-# signAndSend flow. Leave disabled until/unless clients move to the sign -> re-sign -> send pattern.
-# When enabled, also add the Lighthouse program to allowed_programs.
+# Lighthouse only works with signTransaction/signBundle (it rewrites the message, breaking signAndSend*).
+# Enable only if clients move to sign -> re-sign -> send, and add its program to allowed_programs.
 # [kora.lighthouse]
 # enabled = true
 # fail_if_transaction_size_overflow = true

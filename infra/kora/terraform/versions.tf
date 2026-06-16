@@ -9,5 +9,5 @@ terraform {
   }
 
   # Local state for review. Before real applies, switch to a GCS backend keyed per env
-  # (terraform init -backend-config) so sandbox/devnet/mainnet states don't collide.
+  # (terraform init -backend-config) so devnet/mainnet states don't collide.
 }
