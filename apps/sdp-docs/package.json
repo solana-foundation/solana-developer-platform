@@ -21,17 +21,17 @@
     "@sdp/env-config": "workspace:*",
     "@sdp/types": "workspace:*",
     "fumadocs-core": "^16.9.3",
-    "fumadocs-mdx": "^15.0.10",
+    "fumadocs-mdx": "^15.0.11",
     "fumadocs-ui": "^16.9.3",
     "lucide-react": "1.17.0",
-    "next": "16.2.6",
-    "react": "19.2.6",
-    "react-dom": "19.2.6"
+    "next": "16.2.7",
+    "react": "19.2.7",
+    "react-dom": "19.2.7"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
-    "@types/mdx": "^2.0.13",
-    "@types/node": "^25.9.1",
+    "@types/mdx": "^2.0.14",
+    "@types/node": "^25.9.2",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "tailwindcss": "^4",
