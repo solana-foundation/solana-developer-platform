@@ -3,6 +3,7 @@ import { TOKEN_TRANSACTION_STATUSES, TOKEN_TRANSACTION_TYPES } from "@sdp/types"
 import {
   addAllowlistSchema as addTokenAllowlistSchemaBase,
   burnSchema as burnSchemaBase,
+  confirmDeploySchema as confirmDeploySchemaBase,
   createTokenSchema as createTokenSchemaBase,
   forceBurnSchema as forceBurnSchemaBase,
   freezeSchema as freezeSchemaBase,
@@ -408,11 +409,42 @@ export const prepareDeployResponseSchema = z
       description: "Mint address that will be created.",
       example: "So11111111111111111111111111111111111111112",
     }),
+    listAddress: solanaAddressSchema.optional().openapi({
+      description:
+        "On-chain ABL list-config address, present only for allowlist/blocklist tokens with on-chain access control enabled.",
+      example: "So11111111111111111111111111111111111111112",
+    }),
+    metadataUriFollowUp: z
+      .object({
+        required: z.literal(true),
+        uri: z.string().url(),
+      })
+      .optional()
+      .openapi({
+        description:
+          "Present when the inline metadata URI overflowed the create transaction's packet limit. The create tx was prepared with an empty URI; after confirming the deploy, the client must call POST /deploy/prepare-metadata and submit the returned follow-up transaction to set this URI on-chain.",
+      }),
     simulation: simulationResultSchema
       .optional()
       .openapi({ description: "Optional transaction simulation results." }),
   })
   .openapi({ description: "Prepare deploy response payload." });
+
+export const prepareDeployMetadataResponseSchema = z
+  .object({
+    transaction: preparedTransactionSchema.nullable().openapi({
+      description:
+        "Prepared metadata-URI update transaction for client signing, or null when the on-chain URI already matches (nothing to sign).",
+    }),
+    uri: z.string().url().openapi({
+      description: "The metadata URI the follow-up transaction sets on-chain.",
+      example: "https://api.example.com/v1/issuance/tokens/tok_123/metadata.json",
+    }),
+    simulation: simulationResultSchema
+      .optional()
+      .openapi({ description: "Optional transaction simulation results." }),
+  })
+  .openapi({ description: "Prepare deploy-metadata follow-up response payload." });
 
 export const prepareMintResponseSchema = z
   .object({
@@ -794,6 +826,29 @@ export const mintRequestSchema = mintSchemaBase
     }),
   })
   .openapi({ description: "Mint request body." });
+
+export const confirmDeployRequestSchema = confirmDeploySchemaBase
+  .extend({
+    signature: withOpenApi(confirmDeploySchemaBase.shape.signature, {
+      description: "Signature of the confirmed create transaction the client submitted.",
+      example: "5x...signature",
+    }),
+    mint: withOpenApi(confirmDeploySchemaBase.shape.mint, {
+      description: "Mint address returned by deploy/prepare and created by the submitted tx.",
+      example: "So11111111111111111111111111111111111111112",
+    }),
+    listAddress: withOpenApi(confirmDeploySchemaBase.shape.listAddress, {
+      description:
+        "Accepted for backward compatibility but ignored: the server re-derives the ABL list-config PDA deterministically from the mint authority and mint.",
+      example: "So11111111111111111111111111111111111111112",
+    }),
+    signingWalletId: withOpenApi(confirmDeploySchemaBase.shape.signingWalletId, {
+      description:
+        "Accepted for backward compatibility but ignored: the server uses the signing wallet pinned during deploy/prepare (or resolved from the API key), so the authority can't be changed at confirm time.",
+      example: "wal_example",
+    }),
+  })
+  .openapi({ description: "Confirm non-custodial deploy request body." });
 
 const burnOperationSchema = burnSchemaBase.shape.burn
   .extend({

@@ -134,9 +134,8 @@ test.describe
         .first()
         .click();
 
-      await page
-        .getByLabel("Metadata URI")
-        .fill(`https://example.com/metadata/e2e-ui-draft-${draftSuffix}.json`);
+      // Leave the metadata URI blank: SDP hosts the metadata JSON by default,
+      // so the URI field is now optional and tucked under the Advanced section.
       await page.getByLabel("Token Name").fill(draftName);
       await page.getByLabel("Symbol").fill(draftSymbol);
       await page.getByLabel("Decimals").fill("7");

@@ -239,9 +239,8 @@ export function buildIssuancePlaygroundEndpointConfigs({
         },
         {
           key: "uri",
-          label: "uri",
+          label: "uri (optional — SDP hosts if omitted)",
           placeholder: "https://example.com/metadata/acme-usd.json",
-          defaultValue: "https://example.com/metadata/acme-usd.json",
         },
       ],
       expectedResponse: {

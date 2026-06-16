@@ -164,7 +164,6 @@ const providerWalletLifecycleRegistry = {
           body: {
             network: resolveDfnsNetwork(parsed.network),
             ...(params.label ? { name: params.label } : {}),
-            ...(parsed.signingKeyId ? { signingKey: { id: parsed.signingKeyId } } : {}),
           },
         });
       });
