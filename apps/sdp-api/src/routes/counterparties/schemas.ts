@@ -100,8 +100,6 @@ export const counterpartyRequirementsQuerySchema = z.discriminatedUnion("provide
   z.object({
     provider: z.literal("bvnk"),
     direction: rampDirectionSchema,
-    // Optional corridor params: when present (the FE poll), GET reports the live onboarding
-    // lifecycle for this corridor instead of the static data gate.
     cryptoToken: rampCurrencyCodeSchema.optional(),
     fiatCurrency: rampFiatCurrencySchema.optional(),
     destinationWallet: z.string().min(1).optional(),

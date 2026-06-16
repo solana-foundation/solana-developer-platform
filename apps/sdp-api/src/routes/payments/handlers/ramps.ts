@@ -291,9 +291,6 @@ export async function advanceCounterpartyRequirements(
         collectedData: input.collectedData,
       });
       const scope = await resolveScope(c);
-      // Onboarding only designates the on-ramp destination (funds land here); it doesn't
-      // move funds, so it requires the route's counterparties:write + wallet-allowlist
-      // access, not payments:write. The execute path enforces payments:write separately.
       const destinationWalletAddress = resolveWalletAddress(
         scope.wallets,
         input.destinationWallet,

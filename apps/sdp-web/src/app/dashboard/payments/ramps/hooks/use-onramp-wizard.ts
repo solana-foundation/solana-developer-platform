@@ -63,9 +63,6 @@ export function useOnrampWizard(props: UseRampWizardProps) {
     },
   });
 
-  // Onboarding is driven by POST /requirements (the wizard polls the lifecycle); once it
-  // reaches `ready`, fire the quote a single time to fetch the funding instruction (the
-  // provisioned virtual account). Retries until the quote is set, then the key goes null.
   const onboardingReady = wizard.onboarding?.status === "ready";
   useSWR(
     onboardingReady && !wizard.quote ? "onramp-ready-quote" : null,

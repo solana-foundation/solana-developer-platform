@@ -162,9 +162,6 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
     throw notFound("Counterparty");
   }
 
-  // BVNK on-ramp with a full corridor (the FE status poll): report the live onboarding
-  // lifecycle from webhook-synced provider_data — a cheap pure read — gated by the static
-  // data check first. Without corridor params this falls through to the static gate below.
   if (
     query.data.provider === "bvnk" &&
     query.data.direction === "onramp" &&

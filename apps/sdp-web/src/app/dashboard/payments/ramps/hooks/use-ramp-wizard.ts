@@ -313,8 +313,6 @@ export function useRampWizard<TId extends string>(
         fiatCurrency: selectedRampPair.fiatCurrency,
       });
       setHostedQuoteLoading(false);
-      // collect/unsupported mean onboarding hasn't started — stay on this step so the user
-      // can resolve it, instead of stranding them on the provider screen with no recovery.
       if (result.status === "collect" || result.status === "unsupported") {
         toast.error(
           result.status === "unsupported"

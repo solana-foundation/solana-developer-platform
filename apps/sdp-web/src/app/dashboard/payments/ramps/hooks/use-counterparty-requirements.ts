@@ -23,7 +23,6 @@ async function fetchCounterpartyRequirements(
   if (fiatCurrency !== undefined) {
     params.set("fiatCurrency", fiatCurrency);
   }
-  // With a corridor, GET reports the live onboarding lifecycle (not just the static gate).
   if (corridor) {
     params.set("cryptoToken", corridor.cryptoToken);
     params.set("destinationWallet", corridor.destinationWallet);
@@ -185,9 +184,6 @@ export function useCounterpartyRequirements(
     }
   };
 
-  // While provider onboarding is mid-flight, poll the live lifecycle on an interval. This is a
-  // cheap GET (pure read of webhook-synced state) — the webhook advances KYC/wallet provisioning
-  // server-side, so we only observe here rather than re-running the write-path advance.
   useSWR(
     onboarding && lastAdvancePayload && params?.provider && isOnboardingPending(onboarding.status)
       ? (["counterparty-requirements-status-poll", subjectKey] as const)
