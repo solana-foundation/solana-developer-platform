@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.29.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.28.0...v0.29.0) (2026-06-15)
+
+### Features
+
+* **sdp-web, sdp-docs, sdp-api:** HOO-473 - Unify amount fields across Web, Docs, and API to use decimals ([#435](https://github.com/solana-foundation/solana-developer-platform/pull/435)) ([fce66f8](https://github.com/solana-foundation/solana-developer-platform/commit/fce66f83eca743a66fe0a68371d5ce174f1819cd))
+* **sdp-web:** HOO-579 Show token names instead of addresses ([#438](https://github.com/solana-foundation/solana-developer-platform/pull/438)) ([86fc654](https://github.com/solana-foundation/solana-developer-platform/commit/86fc654901ff6db029bf4eef3b53d6a2e166e1d4))
+* add in estimation endpoint through quote + estimate for BVNK ([#446](https://github.com/solana-foundation/solana-developer-platform/pull/446)) ([655b4e1](https://github.com/solana-foundation/solana-developer-platform/commit/655b4e1e0bf9e85660b9d73dbaba4f3721e9a470))
+* **counterparty:** autocomplete addresses with Google Places ([#439](https://github.com/solana-foundation/solana-developer-platform/pull/439)) ([0e39798](https://github.com/solana-foundation/solana-developer-platform/commit/0e3979827e7cdaa27bb13e80221bf70f18fd56d7))
+* **ramps:** show recent transaction history for the selected counterparty ([#437](https://github.com/solana-foundation/solana-developer-platform/pull/437)) ([05f0c28](https://github.com/solana-foundation/solana-developer-platform/commit/05f0c2852f701050d570a0f81a6dc54e3cdaead2))
+* **ramps:** lightspark off-ramp via payout requirements and realtime-funded quotes ([#434](https://github.com/solana-foundation/solana-developer-platform/pull/434)) ([2e02ffb](https://github.com/solana-foundation/solana-developer-platform/commit/2e02ffbec8dde2cd69a7def35aead2d0c7ce58eb))
+* **self-hosted:** encode the custody key as base64 in the configurator ([#430](https://github.com/solana-foundation/solana-developer-platform/pull/430)) ([855fc2c](https://github.com/solana-foundation/solana-developer-platform/commit/855fc2c863126cccf4c6f5f910fd0eb786e1fd07))
+* **self-hosted:** cover the full wallet path in the nightly smoke ([#429](https://github.com/solana-foundation/solana-developer-platform/pull/429)) ([77b31db](https://github.com/solana-foundation/solana-developer-platform/commit/77b31dbef98b410d7389d69757c14e3e44adc5f2))
+
+### Bug Fixes
+
+* **places:** harden Google error parsing and session token rotation ([#441](https://github.com/solana-foundation/solana-developer-platform/pull/441)) ([a001faf](https://github.com/solana-foundation/solana-developer-platform/commit/a001faf923f31b5be52fc958ff97f6e3a12ce284))
+
+### Documentation
+
+* add self-hosted devnet onboarding ([#436](https://github.com/solana-foundation/solana-developer-platform/pull/436)) ([6bf27f8](https://github.com/solana-foundation/solana-developer-platform/commit/6bf27f8c51c7977a86039a8a46e2ee6b4fd13f62))
+
+### Maintenance
+
+* rename missingApiKeys to avoid CodeQL clear-text-logging false positive ([#440](https://github.com/solana-foundation/solana-developer-platform/pull/440)) ([8f1beb7](https://github.com/solana-foundation/solana-developer-platform/commit/8f1beb732c124c4b5c834390e34829b389c0930e))
+* refactor ramps to use correct utils and have cleaner code separation for requirements for api ([#432](https://github.com/solana-foundation/solana-developer-platform/pull/432)) ([ef892ab](https://github.com/solana-foundation/solana-developer-platform/commit/ef892abcedf66e359ab9e42dc048ae331a65ce4e))
+
+### Other Changes
+
+* fix dfns wallet key reuse ([#451](https://github.com/solana-foundation/solana-developer-platform/pull/451)) ([e922be2](https://github.com/solana-foundation/solana-developer-platform/commit/e922be2a5e0fbc44053bce00c0f33be407924d9f))
+
 ## [0.28.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.27.0...v0.28.0) (2026-06-10)
 
 ### Features
