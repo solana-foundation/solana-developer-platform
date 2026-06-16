@@ -363,7 +363,9 @@ export function TokenActionAdminForms({
                   type="button"
                   variant="outline"
                   onClick={() => onPause(true)}
-                  disabled={isPending || tokenStatus === "paused" || Boolean(signerUnavailableReason)}
+                  disabled={
+                    isPending || tokenStatus === "paused" || Boolean(signerUnavailableReason)
+                  }
                 >
                   Pause token
                 </Button>
@@ -374,7 +376,9 @@ export function TokenActionAdminForms({
                 <Button
                   type="button"
                   onClick={() => onPause(false)}
-                  disabled={isPending || tokenStatus === "active" || Boolean(signerUnavailableReason)}
+                  disabled={
+                    isPending || tokenStatus === "active" || Boolean(signerUnavailableReason)
+                  }
                 >
                   Unpause token
                 </Button>
