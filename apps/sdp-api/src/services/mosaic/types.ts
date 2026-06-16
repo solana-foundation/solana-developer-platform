@@ -77,6 +77,24 @@ export interface MosaicTransactionResult {
   listAddress?: Address;
 }
 
+/**
+ * Thrown by createToken's overflow path when the mint was created on-chain (the
+ * slim create tx confirmed) but the follow-up metadata-URI update failed.
+ *
+ * Carries the live mint (and its list address) so the caller can persist it
+ * before surfacing the error — otherwise a retry generates a fresh mint keypair
+ * and creates a second on-chain mint, permanently orphaning the first.
+ */
+export class MintMetadataUpdateError extends Error {
+  constructor(
+    readonly result: MosaicTransactionResult,
+    options?: { cause?: unknown }
+  ) {
+    super("Token mint created on-chain, but setting the metadata URI failed", options);
+    this.name = "MintMetadataUpdateError";
+  }
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Token Creation Options
 // ═══════════════════════════════════════════════════════════════════════════

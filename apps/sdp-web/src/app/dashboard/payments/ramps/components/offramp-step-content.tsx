@@ -202,7 +202,7 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
     if (enabledRampProviders.length === 0) {
       return (
         <div className="rounded-2xl border border-border-light bg-border-extra-light px-5 py-5 text-sm text-text-low">
-          No off-ramp providers are enabled for this organization.
+          No payout providers are enabled for this organization.
         </div>
       );
     }
@@ -249,7 +249,7 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
   if (currentStepId === "COMPLETE" && quote?.deliveryMode === "hosted") {
     return (
       <div className="space-y-6">
-        <HostedRampFrame title={`${quote.provider} off-ramp`} src={quote.hostedUrl} />
+        <HostedRampFrame title={`${quote.provider} payout`} src={quote.hostedUrl} />
         <div className="border-t border-border-light pt-5">
           <OfframpTransferStatusPanel transfer={transferStatus} />
         </div>

@@ -30,7 +30,7 @@ function buildOptions(mode: "send" | "receive"): MethodOption[] {
       },
       {
         id: "ramp",
-        title: "Off-ramp to fiat",
+        title: "Pay with fiat",
         description: "Convert crypto to fiat and pay out through a provider.",
         icon: <Banknote className="size-5" />,
       },
@@ -45,7 +45,7 @@ function buildOptions(mode: "send" | "receive"): MethodOption[] {
     },
     {
       id: "ramp",
-      title: "On-ramp from fiat",
+      title: "Deposit with fiat",
       description: "Buy crypto with fiat through a provider and deposit it into a wallet.",
       icon: <Banknote className="size-5" />,
     },

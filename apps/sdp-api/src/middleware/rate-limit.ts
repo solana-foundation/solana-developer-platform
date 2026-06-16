@@ -9,6 +9,7 @@ import type { Context, Next } from "hono";
 import { verifyClerkJwtForRequest } from "@/lib/clerk-token";
 import { AppError } from "@/lib/errors";
 import type { Env } from "@/types/env";
+import { matchesFreePath } from "./path-match";
 
 interface RateLimitConfig {
   windowMs: number;
@@ -68,7 +69,7 @@ function getClientIdentifier(c: Context<{ Bindings: Env }>): string {
 
 function extractBearerToken(c: Context<{ Bindings: Env }>): string | null {
   const authHeader = c.req.header("Authorization");
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+  if (!authHeader?.startsWith("Bearer ")) {
     return null;
   }
 
@@ -223,15 +224,15 @@ export function rateLimitMiddleware() {
 /**
  * Skip rate limiting for specific paths (e.g., health check).
  *
- * Matching is exact OR segment-prefix (`p` matches `p` and `p/...` but NOT
- * `p<anything-else>`). Bare `startsWith` would mis-skip the whole API when
- * `/` is listed, since every pathname starts with `/`.
+ * Matching (see matchesFreePath) is exact, segment-prefix, or a single-segment
+ * `*` wildcard. Bare `startsWith` would mis-skip the whole API when `/` is
+ * listed, since every pathname starts with `/`.
  */
 export function skipRateLimitPaths(...paths: string[]) {
   return async (c: Context<{ Bindings: Env }>, next: Next) => {
     const path = c.req.path;
 
-    if (paths.some((p) => path === p || path.startsWith(`${p}/`))) {
+    if (matchesFreePath(path, paths)) {
       await next();
       return;
     }

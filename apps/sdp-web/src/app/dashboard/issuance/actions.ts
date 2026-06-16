@@ -46,6 +46,28 @@ function parseErrorMessage(body: string): string {
   return body || "Unknown error";
 }
 
+/**
+ * Validate an optional metadata URI (HOO-466): empty is allowed — SDP hosts the
+ * JSON automatically. Returns an error message when a non-empty value is not a
+ * valid http(s) URL, or null when the value is acceptable.
+ */
+function validateOptionalMetadataUri(uri: string): string | null {
+  if (!uri) {
+    return null;
+  }
+
+  try {
+    const parsed = new URL(uri);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return "Metadata URI must use http or https.";
+    }
+  } catch {
+    return "Metadata URI must be a valid URL.";
+  }
+
+  return null;
+}
+
 export async function createIssuanceTokenAction(
   formData: FormData
 ): Promise<CreateIssuanceTokenResult> {
@@ -70,29 +92,11 @@ export async function createIssuanceTokenAction(
     };
   }
 
-  if (!uri) {
+  const uriError = validateOptionalMetadataUri(uri);
+  if (uriError) {
     return {
       state: "error",
-      message: "Metadata URI is required.",
-      tokenId: null,
-      tokenName: null,
-    };
-  }
-
-  try {
-    const parsedUri = new URL(uri);
-    if (parsedUri.protocol !== "http:" && parsedUri.protocol !== "https:") {
-      return {
-        state: "error",
-        message: "Metadata URI must use http or https.",
-        tokenId: null,
-        tokenName: null,
-      };
-    }
-  } catch {
-    return {
-      state: "error",
-      message: "Metadata URI must be a valid URL.",
+      message: uriError,
       tokenId: null,
       tokenName: null,
     };
@@ -120,7 +124,7 @@ export async function createIssuanceTokenAction(
     name: string;
     symbol: string;
     template: string;
-    uri: string;
+    uri?: string;
     signingWalletId?: string;
     description?: string;
     decimals?: number;
@@ -132,11 +136,14 @@ export async function createIssuanceTokenAction(
     name,
     symbol,
     template,
-    uri,
     requiresAllowlist,
     isMintable,
     isFreezable,
   };
+
+  if (uri) {
+    payload.uri = uri;
+  }
 
   if (description) {
     payload.description = description;
