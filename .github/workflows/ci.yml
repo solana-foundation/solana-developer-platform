@@ -9,6 +9,10 @@ on:
     branches:
       - main
 
+env:
+  CI_HAS_DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI != '' }}
+  CI_IS_FORK_PULL_REQUEST: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
+
 jobs:
   lint:
     name: Lint
@@ -116,6 +120,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Validate Doppler bootstrap secret
+        if: env.CI_IS_FORK_PULL_REQUEST != 'true'
         env:
           DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
         run: |
@@ -125,13 +130,21 @@ jobs:
           fi
 
       - name: Install Doppler CLI
+        if: env.CI_HAS_DOPPLER_TOKEN == 'true'
         uses: dopplerhq/cli-action@v4
 
-      - name: Unit tests
+      - name: Unit tests (Doppler)
+        if: env.CI_HAS_DOPPLER_TOKEN == 'true'
         env:
           DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
           DOPPLER_CONFIG: dev_ci
         run: pnpm test
+
+      - name: Unit tests (fork-safe)
+        if: env.CI_IS_FORK_PULL_REQUEST == 'true' && env.CI_HAS_DOPPLER_TOKEN != 'true'
+        run: |
+          echo "::notice title=Fork-safe unit tests::DOPPLER_TOKEN_CI is unavailable to forked pull requests, so unit tests are running with local defaults instead of Doppler dev_ci secrets."
+          node scripts/run-workspace-tests.mjs unit
 
       - name: Scripts tests
         run: pnpm test:scripts
@@ -399,6 +412,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Validate Doppler bootstrap secret
+        if: env.CI_IS_FORK_PULL_REQUEST != 'true'
         env:
           DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
         run: |
@@ -408,9 +422,11 @@ jobs:
           fi
 
       - name: Install Doppler CLI
+        if: env.CI_HAS_DOPPLER_TOKEN == 'true'
         uses: dopplerhq/cli-action@v4
 
       - name: Validate integration runtime secrets
+        if: env.CI_HAS_DOPPLER_TOKEN == 'true'
         env:
           DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
         run: |
@@ -427,12 +443,18 @@ jobs:
           EOF
 
       - name: Integration tests
+        if: env.CI_HAS_DOPPLER_TOKEN == 'true'
         env:
           DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
           DOPPLER_CONFIG: dev_ci
         run: |
           read -r -a test_files <<< "${INTEGRATION_TEST_FILES}"
           pnpm test:integration -- "${test_files[@]}"
+
+      - name: Skip secret-backed integration tests for fork
+        if: env.CI_IS_FORK_PULL_REQUEST == 'true' && env.CI_HAS_DOPPLER_TOKEN != 'true'
+        run: |
+          echo "::notice title=Fork-safe integration skip::Forked pull requests cannot access DOPPLER_TOKEN_CI, so Kora/Privy-backed integration tests are skipped. Run this PR from an upstream branch before merge if secret-backed coverage is required."
 
   integration_tests:
     name: Integration Tests (Devnet/Kora)
@@ -449,6 +471,10 @@ jobs:
           if [ "${INTEGRATION_SHARD_RESULT}" != "success" ]; then
             echo "One or more integration shards finished with ${INTEGRATION_SHARD_RESULT}." >&2
             exit 1
+          fi
+          if [ "${CI_IS_FORK_PULL_REQUEST}" = "true" ] && [ "${CI_HAS_DOPPLER_TOKEN}" != "true" ]; then
+            echo "::notice title=Fork-safe integration skip::Forked pull requests cannot access DOPPLER_TOKEN_CI, so the secret-backed integration matrix was intentionally skipped."
+            exit 0
           fi
           echo "All integration shards passed."
 
@@ -509,6 +535,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Validate Doppler bootstrap secret
+        if: env.CI_IS_FORK_PULL_REQUEST != 'true'
         env:
           DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
         run: |
@@ -518,9 +545,11 @@ jobs:
           fi
 
       - name: Install Doppler CLI
+        if: env.CI_HAS_DOPPLER_TOKEN == 'true'
         uses: dopplerhq/cli-action@v4
 
       - name: Validate browser e2e runtime secrets
+        if: env.CI_HAS_DOPPLER_TOKEN == 'true'
         env:
           DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
         run: |
@@ -541,6 +570,7 @@ jobs:
           EOF
 
       - name: Derive Clerk issuer for local API
+        if: env.CI_HAS_DOPPLER_TOKEN == 'true'
         env:
           DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
         run: |
@@ -563,9 +593,11 @@ jobs:
           echo "CLERK_JWKS_URL=https://${CLERK_HOST}/.well-known/jwks.json" >> "$GITHUB_ENV"
 
       - name: Install Playwright browser
+        if: env.CI_HAS_DOPPLER_TOKEN == 'true'
         run: pnpm --filter sdp-web exec playwright install --with-deps chromium
 
       - name: Build web app for Playwright
+        if: env.CI_HAS_DOPPLER_TOKEN == 'true'
         env:
           DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
           DOPPLER_CONFIG: dev_ci
@@ -575,14 +607,20 @@ jobs:
         run: scripts/doppler/run-with-config.sh node scripts/run-with-healthy-solana-rpc.mjs pnpm --filter sdp-web build
 
       - name: Run browser e2e suite
+        if: env.CI_HAS_DOPPLER_TOKEN == 'true'
         env:
           DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI }}
           DOPPLER_CONFIG: dev_ci
           SOLANA_RPC_CI_PREFERRED_PROVIDER: quicknode
         run: scripts/doppler/run-with-config.sh node scripts/run-with-healthy-solana-rpc.mjs pnpm --filter sdp-web run ${{ matrix.test_script }}
 
+      - name: Skip secret-backed browser e2e for fork
+        if: env.CI_IS_FORK_PULL_REQUEST == 'true' && env.CI_HAS_DOPPLER_TOKEN != 'true'
+        run: |
+          echo "::notice title=Fork-safe browser e2e skip::Forked pull requests cannot access DOPPLER_TOKEN_CI, so Clerk/Privy/Kora-backed browser e2e is skipped. Run this PR from an upstream branch before merge if browser e2e coverage is required."
+
       - name: Upload Playwright artifacts
-        if: always()
+        if: always() && env.CI_HAS_DOPPLER_TOKEN == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: playwright-artifacts-${{ matrix.artifact_suffix }}
