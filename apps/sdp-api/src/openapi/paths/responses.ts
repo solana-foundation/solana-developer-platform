@@ -54,6 +54,7 @@ import {
   paymentSubscriptionPlanResponseSchema,
   paymentSubscriptionResponseSchema,
   prepareBurnResponseSchema,
+  prepareDeployMetadataResponseSchema,
   prepareDeployResponseSchema,
   prepareForceBurnResponseSchema,
   prepareMintResponseSchema,
@@ -127,6 +128,9 @@ export const frozenAccountResponse = successResponseSchema(frozenAccountResponse
 export const frozenAccountListResponse = paginatedResponseSchema(frozenAccountSchema);
 
 export const prepareDeployResponse = successResponseSchema(prepareDeployResponseSchema);
+export const prepareDeployMetadataResponse = successResponseSchema(
+  prepareDeployMetadataResponseSchema
+);
 export const prepareMintResponse = successResponseSchema(prepareMintResponseSchema);
 export const executeMintResponse = successResponseSchema(executeMintResponseSchema);
 export const prepareBurnResponse = successResponseSchema(prepareBurnResponseSchema);

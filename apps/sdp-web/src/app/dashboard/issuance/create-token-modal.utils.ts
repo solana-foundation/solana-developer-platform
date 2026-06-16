@@ -184,8 +184,9 @@ export function toRequiresAllowlist(mode: AccessControlMode): boolean {
 
 export function isValidMetadataUri(value: string): boolean {
   const trimmed = value.trim();
+  // Optional (HOO-466): an empty URI is valid — SDP hosts the metadata JSON.
   if (!trimmed) {
-    return false;
+    return true;
   }
 
   try {

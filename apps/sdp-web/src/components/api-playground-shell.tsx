@@ -21,6 +21,7 @@ export interface ApiPlaygroundFieldConfig {
   key: string;
   label: string;
   placeholder?: string;
+  description?: string;
   defaultValue?: string;
   kind?: "text" | "select";
   options?: ApiPlaygroundFieldOption[];
@@ -832,6 +833,9 @@ export function ApiPlaygroundShell({
                     {activeEndpoint.pathFields.map((field) => (
                       <div key={field.key} className="space-y-2">
                         <FieldLabel htmlFor={getFieldId(field.key)}>{field.label}</FieldLabel>
+                        {field.description ? (
+                          <p className="text-[13px] leading-5 text-text-low">{field.description}</p>
+                        ) : null}
                         {field.kind === "select" ? (
                           <select
                             id={getFieldId(field.key)}
@@ -876,6 +880,9 @@ export function ApiPlaygroundShell({
                     {activeEndpoint.bodyFields.map((field) => (
                       <div key={field.key} className="space-y-2">
                         <FieldLabel htmlFor={getFieldId(field.key)}>{field.label}</FieldLabel>
+                        {field.description ? (
+                          <p className="text-[13px] leading-5 text-text-low">{field.description}</p>
+                        ) : null}
                         {field.kind === "select" ? (
                           <select
                             id={getFieldId(field.key)}

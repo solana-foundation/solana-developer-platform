@@ -35,6 +35,7 @@ import onboarding from "@/routes/onboarding";
 import openapi from "@/routes/openapi";
 import organizations from "@/routes/organizations";
 import payments from "@/routes/payments";
+import places from "@/routes/places";
 import projects from "@/routes/projects";
 import rpc from "@/routes/rpc";
 import webhooks from "@/routes/webhooks";
@@ -54,8 +55,12 @@ export interface AppDeps {
 
 // Routes that need no KV bindings. Shared by kvStoreMiddleware (skip the
 // throw-on-missing-binding) and skipRateLimitPaths (skip rate-limit's
-// c.var.kv deref). Both middlewares use exact-or-segment-prefix matching,
-// so listing `/` here only skips the root redirect, not the whole API.
+// c.var.kv deref). Both middlewares match via matchesFreePath (exact,
+// segment-prefix, or single-segment `*` wildcard), so listing `/` here only
+// skips the root redirect, not the whole API. The token-metadata entry frees
+// only the public `metadata.json` route — the `*` matches exactly the token-id
+// segment, so neither the sibling authed `/v1/issuance/tokens/:id/...` routes
+// nor any future `/.../metadata.json` elsewhere are silently freed.
 const KV_FREE_PATHS = [
   "/",
   "/health",
@@ -64,6 +69,7 @@ const KV_FREE_PATHS = [
   "/docs",
   "/llms.txt",
   "/webhooks",
+  "/v1/issuance/tokens/*/metadata.json",
 ];
 
 function mapSigningError(err: SigningError): {
@@ -221,6 +227,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   v1.route("/wallets", wallets);
   v1.route("/onboarding", onboarding);
   v1.route("/payments", payments);
+  v1.route("/places", places);
   v1.route("/compliance", compliance);
 
   const registeredPluginNames = new Set<string>();

@@ -19,50 +19,20 @@
  *   pnpm --filter @sdp/api keygen:local
  *   pnpm --filter @sdp/api keygen:local --quiet   # private key only, for piping
  */
-import { generateKeyPairSync, randomBytes } from "node:crypto";
-import { getBase58Codec } from "@solana/codecs";
-
-interface Ed25519Jwk {
-  kty: "OKP";
-  crv: "Ed25519";
-  x: string;
-  d?: string;
-}
+import { generateLocalSignerKeypair, generateSecret } from "@sdp/env-config";
 
 const quiet = process.argv.includes("--quiet");
 
-const { publicKey, privateKey } = generateKeyPairSync("ed25519");
-const pubJwk = publicKey.export({ format: "jwk" }) as Ed25519Jwk;
-const privJwk = privateKey.export({ format: "jwk" }) as Ed25519Jwk;
-
-if (!privJwk.d) {
-  throw new Error("private key JWK is missing the 'd' field");
-}
-
-const seed = Buffer.from(privJwk.d, "base64url");
-const pub = Buffer.from(pubJwk.x, "base64url");
-
-if (seed.length !== 32 || pub.length !== 32) {
-  throw new Error(`unexpected key sizes: seed=${seed.length} pub=${pub.length}`);
-}
-
-const secretKey = new Uint8Array(64);
-secretKey.set(seed, 0);
-secretKey.set(pub, 32);
-
-const codec = getBase58Codec();
-const secretBase58 = codec.decode(secretKey);
-const pubBase58 = codec.decode(new Uint8Array(pub));
-
-const encryptionKey = randomBytes(32).toString("base64");
+const keypair = await generateLocalSignerKeypair();
+const encryptionKey = generateSecret("CUSTODY_ENCRYPTION_KEY");
 
 if (quiet) {
-  process.stdout.write(secretBase58);
+  process.stdout.write(keypair.privateKey);
 } else {
-  console.log(`PUBLIC_KEY=${pubBase58}`);
-  console.log(`CUSTODY_PRIVATE_KEY=${secretBase58}`);
+  console.log(`PUBLIC_KEY=${keypair.publicKey}`);
+  console.log(`CUSTODY_PRIVATE_KEY=${keypair.privateKey}`);
   console.log(
-    `# FEE_PAYER_PRIVATE_KEY=${secretBase58}  # uncomment for local dev; use a distinct keypair in production`
+    `# FEE_PAYER_PRIVATE_KEY=${keypair.privateKey}  # uncomment for local dev; use a distinct keypair in production`
   );
   console.log(`CUSTODY_ENCRYPTION_KEY=${encryptionKey}`);
 }

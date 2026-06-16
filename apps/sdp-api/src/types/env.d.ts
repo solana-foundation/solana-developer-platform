@@ -40,6 +40,14 @@ export interface Env {
   ENVIRONMENT: "development" | "production";
   API_VERSION: string;
 
+  // Public-facing origin of this API (e.g. "https://api.example.com"). When set,
+  // it overrides the request-derived origin used to build the SDP-hosted token
+  // metadata URL that gets burned into the on-chain MetadataPointer. Set this in
+  // any environment fronted by a proxy that rewrites Host/scheme, so the URI
+  // can't capture an internal, unreachable address. Falls back to the request
+  // origin (correct on Cloudflare Workers) when unset.
+  PUBLIC_API_ORIGIN?: string;
+
   // Deployment mode. "managed" (default) uses tier-based provider entitlements
   // synced from Clerk. "self_hosted" treats every configured provider as
   // entitled regardless of org tier, so the platform runs with whatever
@@ -184,6 +192,9 @@ export interface Env {
   TRM_API_BASE_URL?: string;
   CHAINALYSIS_API_KEY?: string;
   CHAINALYSIS_API_BASE_URL?: string;
+
+  // Google address completion (Places API New + Maps Static API)
+  GOOGLE_ADDRESS_COMPLETION_API_KEY?: string;
 
   // MoonPay ramps configuration
   MOONPAY_API_KEY?: string;

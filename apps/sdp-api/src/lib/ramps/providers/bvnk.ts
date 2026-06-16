@@ -18,7 +18,13 @@ import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
 import { formatDecimalAmount, isDecimalString, parseDecimalAmount } from "@/lib/amount";
-import { AppError, badRequest, internalError, providerNotConfigured } from "@/lib/errors";
+import {
+  AppError,
+  badRequest,
+  internalError,
+  providerNotConfigured,
+  providerUnavailable,
+} from "@/lib/errors";
 import { hashString, hmacSha256Base64, verifyHmacSha256Base64 } from "@/lib/hash";
 import { type ProviderRequestInit, providerFetch } from "../fetch";
 import {
@@ -352,6 +358,14 @@ interface BvnkPayoutEstimateResponse {
   networkFeePredictedAmount: number;
   totalWalletAmount: number;
   exchangeRate: number;
+}
+
+interface BvnkQuoteEstimateResponse {
+  amountIn: number;
+  amountOut: number;
+  acceptanceExpiryDate: number;
+  payInMethod: { settlementCurrency: string };
+  fees: { value: { service: number; processing: number } };
 }
 
 interface BvnkRuleResponse {
@@ -1044,21 +1058,62 @@ export class BvnkRampClient implements RampProvider {
     });
   }
 
-  /**
-   * BVNK quotes its on-ramp rate only at quote time, so an upfront estimate is
-   * unavailable; ESTIMATE_NOT_AVAILABLE lets the cross-provider estimate sweep
-   * surface BVNK as "unsupported" for the pair. The rest of the on-ramp (KYC
-   * customer + virtual wallet + rule) is stateful and orchestrated in the
-   * payments handler via `ensureBvnkOnramp`, so BVNK omits the on-ramp
-   * quote/execute methods entirely.
-   */
   async estimateOnramp(
-    _ctx: RampRuntimeContext,
-    _input: RampEstimateOnrampInput
+    { env, mode }: RampRuntimeContext,
+    input: RampEstimateOnrampInput
   ): Promise<PaymentRampEstimate> {
-    throw new AppError("ESTIMATE_NOT_AVAILABLE", "BVNK on-ramp rate is only known at quote time.", {
+    const config = readBvnkConfig(env, mode);
+    const { currency } = normalizeBvnkCurrencyAndNetwork(getCryptoRailAssetLabel(input.assetRail));
+    const amountIn = toPositiveAmount(input.fiatAmount, "fiatAmount");
+    const quote = await this.request<BvnkQuoteEstimateResponse>(
+      config,
+      "/api/v1/quote?estimate=true",
+      {
+        method: "POST",
+        body: {
+          from: input.fiatCurrency,
+          to: currency,
+          fromWalletLsid: config.walletId,
+          toWalletLsid: config.walletId,
+          amountIn,
+          useMinimum: false,
+          useMaximum: false,
+          payInMethod: "wallet",
+          payOutMethod: "wallet",
+        },
+      }
+    );
+    if (quote.amountOut <= 0) {
+      throw providerUnavailable("BVNK returned a non-positive converted amount");
+    }
+    const feeCurrency = parseBvnkEstimateFeeCurrency(quote.payInMethod.settlementCurrency);
+    if (feeCurrency !== input.fiatCurrency) {
+      throw providerUnavailable("BVNK returned on-ramp fees outside the fiat pay-in currency");
+    }
+    const fiatAmount = String(quote.amountIn);
+    const service = String(quote.fees.value.service);
+    const processing = String(quote.fees.value.processing);
+    const feeDecimals = Math.max(countDecimalPlaces(service), countDecimalPlaces(processing));
+    const totalFee = formatDecimalAmount(
+      parseDecimalAmount(service, feeDecimals) + parseDecimalAmount(processing, feeDecimals),
+      feeDecimals
+    );
+    return {
       provider: this.id,
-    });
+      direction: "onramp",
+      fiatCurrency: input.fiatCurrency,
+      assetRail: input.assetRail,
+      fiatAmount,
+      cryptoAmount: String(quote.amountOut),
+      exchangeRate: formatBvnkNetExchangeRate(fiatAmount, quote.amountOut),
+      fees: {
+        currency: input.fiatCurrency,
+        total: totalFee,
+        provider: totalFee,
+        providerCurrency: input.fiatCurrency,
+      },
+      expiresAt: new Date(quote.acceptanceExpiryDate).toISOString(),
+    };
   }
 
   async estimateOfframp(

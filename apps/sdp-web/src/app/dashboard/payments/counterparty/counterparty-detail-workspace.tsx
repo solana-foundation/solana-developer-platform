@@ -4,16 +4,19 @@ import type {
   Counterparty,
   CounterpartyAccount,
   PaymentTransferSummary,
+  RampDirection,
   RampProviderId,
 } from "@sdp/types";
 import {
-  ArrowDownLeftIcon,
-  ArrowUpRightIcon,
+  ArrowRightIcon,
+  BanknoteArrowDownIcon,
+  BanknoteArrowUpIcon,
   CakeIcon,
   CalendarIcon,
   CheckIcon,
   ChevronDownIcon,
   CopyIcon,
+  ExternalLinkIcon,
   FlagIcon,
   GlobeIcon,
   HashIcon,
@@ -42,12 +45,14 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Modal } from "@/components/ui/modal";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { getRampProviderLabel, RAMP_PROVIDER_LOGOS } from "@/lib/ramps";
 import { useCopy } from "@/lib/use-copy";
 import { cn } from "@/lib/utils";
-import { toTitleCase } from "../../activity-format-utils";
+import { formatRelativeTime, toTitleCase } from "../../activity-format-utils";
 import { formatDisplayAmount, formatTimestamp, shortenAddress } from "../payments-overview.utils";
+import { getDevnetExplorerUrl } from "../payments-workspace.data";
 import { AddExternalAccountDialog } from "./add-external-account-dialog";
 import { DeleteCounterpartyDialog } from "./delete-counterparty-dialog";
 
@@ -92,6 +97,35 @@ function TransferStatusBadge({ status }: { status: string }) {
   );
 }
 
+const RAMP_TYPE_LABELS = {
+  onramp: "Deposit",
+  offramp: "Pay",
+} as const satisfies Record<RampDirection, string>;
+
+function resolveTransferTypeLabel(type: string | undefined): string {
+  if (type === "onramp" || type === "offramp") {
+    return RAMP_TYPE_LABELS[type];
+  }
+  return type ? toTitleCase(type) : "Transfer";
+}
+
+/** Source → destination amounts, Wise-style: what's sent vs. what's received. */
+function resolveTransferFlow(transfer: PaymentTransferSummary): {
+  send: string | null;
+  receive: string | null;
+} {
+  const isInbound = transfer.type === "onramp" || transfer.direction === "inbound";
+  const cryptoLabel =
+    transfer.amount && transfer.token ? formatDisplayAmount(transfer.amount, transfer.token) : null;
+  const fiatLabel =
+    transfer.fiatAmount && transfer.fiatCurrency
+      ? `${transfer.fiatAmount} ${transfer.fiatCurrency.toUpperCase()}`
+      : null;
+  return isInbound
+    ? { send: fiatLabel, receive: cryptoLabel }
+    : { send: cryptoLabel, receive: fiatLabel };
+}
+
 function TransferProviderCell({ provider }: { provider?: RampProviderId }) {
   if (!provider) {
     return <span className="text-sm text-text-low">—</span>;
@@ -110,25 +144,39 @@ function TransferProviderCell({ provider }: { provider?: RampProviderId }) {
   );
 }
 
-function TransferTableRow({ transfer }: { transfer: PaymentTransferSummary }) {
+function TransferTableRow({
+  transfer,
+  onSelect,
+}: {
+  transfer: PaymentTransferSummary;
+  onSelect: (transfer: PaymentTransferSummary) => void;
+}) {
   const isInbound = transfer.type === "onramp" || transfer.direction === "inbound";
   const walletAddress = isInbound ? transfer.destination : transfer.source;
-  const cryptoLabel =
-    transfer.amount && transfer.token ? formatDisplayAmount(transfer.amount, transfer.token) : null;
-  const fiatLabel =
-    transfer.fiatAmount && transfer.fiatCurrency
-      ? `${transfer.fiatAmount} ${transfer.fiatCurrency.toUpperCase()}`
-      : null;
-  const typeLabel = transfer.type ? toTitleCase(transfer.type) : "Transfer";
+  const flow = resolveTransferFlow(transfer);
 
   return (
-    <tr className="border-b border-border-light last:border-b-0">
+    // biome-ignore lint/a11y/useSemanticElements: a table row can't be a <button>; role+key handler is the accessible compromise
+    <tr
+      role="button"
+      tabIndex={0}
+      onClick={() => onSelect(transfer)}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onSelect(transfer);
+        }
+      }}
+      className="cursor-pointer border-b border-border-light transition-colors last:border-b-0 hover:bg-border-extra-light"
+    >
       <td className="whitespace-nowrap px-4 py-3">
-        <div className="flex items-center gap-3">
-          <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-border-light text-text-medium [&_svg]:size-4">
-            {isInbound ? <ArrowDownLeftIcon /> : <ArrowUpRightIcon />}
+        <div className="flex items-center gap-2.5">
+          <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-border-light text-text-medium [&_svg]:size-4">
+            {isInbound ? <BanknoteArrowDownIcon /> : <BanknoteArrowUpIcon />}
           </span>
-          <span className="text-sm font-medium text-text-extra-high">{typeLabel}</span>
+          <span className="text-sm font-medium text-text-extra-high">
+            {resolveTransferTypeLabel(transfer.type)}
+          </span>
         </div>
       </td>
       <td className="whitespace-nowrap px-4 py-3">
@@ -144,16 +192,29 @@ function TransferTableRow({ transfer }: { transfer: PaymentTransferSummary }) {
         )}
       </td>
       <td className="whitespace-nowrap px-4 py-3 text-right">
-        <span className="text-sm font-medium text-text-extra-high">{cryptoLabel ?? "—"}</span>
-      </td>
-      <td className="whitespace-nowrap px-4 py-3 text-right">
-        <span className="text-sm text-text-medium">{fiatLabel ?? "—"}</span>
+        {flow.send || flow.receive ? (
+          <span className="inline-flex items-center justify-end gap-1.5 text-sm">
+            {flow.send ? <span className="text-text-medium">{flow.send}</span> : null}
+            {flow.send && flow.receive ? (
+              <ArrowRightIcon className="size-3.5 text-text-low" />
+            ) : null}
+            {flow.receive ? (
+              <span className="font-medium text-text-extra-high">{flow.receive}</span>
+            ) : null}
+          </span>
+        ) : (
+          <span className="text-sm text-text-low">—</span>
+        )}
       </td>
       <td className="whitespace-nowrap px-4 py-3">
         <TransferStatusBadge status={transfer.status} />
       </td>
       <td className="whitespace-nowrap px-4 py-3 text-right text-xs text-text-low">
-        {formatTimestamp(transfer.createdAt)}
+        {transfer.createdAt ? (
+          <span title={formatTimestamp(transfer.createdAt)}>
+            {formatRelativeTime(transfer.createdAt)}
+          </span>
+        ) : null}
       </td>
     </tr>
   );
@@ -185,18 +246,24 @@ function FilterChip({
 }
 
 const TRANSFER_TABLE_HEADERS = [
-  { label: "Transaction", align: "left" as const, width: "24%" },
+  { label: "Type", align: "left" as const, width: "12%" },
   { label: "Provider", align: "left" as const, width: "16%" },
-  { label: "Wallet", align: "left" as const, width: "16%" },
-  { label: "Amount", align: "right" as const, width: "14%" },
-  { label: "Fiat", align: "right" as const, width: "12%" },
-  { label: "Status", align: "left" as const, width: "10%" },
-  { label: "Date", align: "right" as const, width: "8%" },
+  { label: "Wallet", align: "left" as const, width: "15%" },
+  { label: "Amount", align: "right" as const, width: "28%" },
+  { label: "Status", align: "left" as const, width: "13%" },
+  { label: "Date", align: "right" as const, width: "16%" },
 ];
 
-function CounterpartyTransactions({ transfers }: { transfers: PaymentTransferSummary[] }) {
+function CounterpartyTransactions({
+  transfers,
+  counterpartyName,
+}: {
+  transfers: PaymentTransferSummary[];
+  counterpartyName: string;
+}) {
   const [typeFilter, setTypeFilter] = useState<string | null>(null);
   const [providerFilter, setProviderFilter] = useState<RampProviderId | null>(null);
+  const [selectedTransfer, setSelectedTransfer] = useState<PaymentTransferSummary | null>(null);
 
   const availableTypes = useMemo(() => {
     const types = new Set<string>();
@@ -256,7 +323,7 @@ function CounterpartyTransactions({ transfers }: { transfers: PaymentTransferSum
                       active={typeFilter === type}
                       onClick={() => setTypeFilter(type)}
                     >
-                      {toTitleCase(type)}
+                      {resolveTransferTypeLabel(type)}
                     </FilterChip>
                   ))}
                 </>
@@ -285,7 +352,7 @@ function CounterpartyTransactions({ transfers }: { transfers: PaymentTransferSum
           ) : null}
 
           <div className="overflow-x-auto rounded-2xl border border-border-light bg-white shadow-sm">
-            <table className="w-full min-w-[720px] table-fixed border-collapse">
+            <table className="w-full min-w-[760px] table-fixed border-collapse">
               <thead>
                 <tr className="border-b border-border-light">
                   {TRANSFER_TABLE_HEADERS.map((header) => (
@@ -314,7 +381,11 @@ function CounterpartyTransactions({ transfers }: { transfers: PaymentTransferSum
                   </tr>
                 ) : (
                   filteredTransfers.map((transfer) => (
-                    <TransferTableRow key={transfer.id} transfer={transfer} />
+                    <TransferTableRow
+                      key={transfer.id}
+                      transfer={transfer}
+                      onSelect={setSelectedTransfer}
+                    />
                   ))
                 )}
               </tbody>
@@ -322,7 +393,174 @@ function CounterpartyTransactions({ transfers }: { transfers: PaymentTransferSum
           </div>
         </>
       )}
+
+      <TransferDetailModal
+        transfer={selectedTransfer}
+        counterpartyName={counterpartyName}
+        onClose={() => setSelectedTransfer(null)}
+      />
     </section>
+  );
+}
+
+function CopyButton({ value, label }: { value: string; label: string }) {
+  const { copy, copied } = useCopy(1200);
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon-xs"
+      aria-label={label}
+      onClick={() => {
+        void copy(value);
+        toast.success("Copied", { position: "bottom-right" });
+      }}
+    >
+      {copied ? <CheckIcon className="text-status-success-text" /> : <CopyIcon />}
+    </Button>
+  );
+}
+
+function DetailRow({
+  label,
+  value,
+  mono,
+  copyValue,
+}: {
+  label: string;
+  value: ReactNode;
+  mono?: boolean;
+  copyValue?: string;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-4 py-3">
+      <span className="shrink-0 text-sm text-text-low">{label}</span>
+      <div className="flex min-w-0 items-center gap-1.5">
+        <span className={cn("truncate text-sm text-text-extra-high", mono && "font-mono text-xs")}>
+          {value}
+        </span>
+        {copyValue ? <CopyButton value={copyValue} label={`Copy ${label}`} /> : null}
+      </div>
+    </div>
+  );
+}
+
+function TransferDetailModal({
+  transfer,
+  counterpartyName,
+  onClose,
+}: {
+  transfer: PaymentTransferSummary | null;
+  counterpartyName: string;
+  onClose: () => void;
+}) {
+  if (!transfer) {
+    return null;
+  }
+
+  const isInbound = transfer.type === "onramp" || transfer.direction === "inbound";
+  const walletAddress = isInbound ? transfer.destination : transfer.source;
+  const signature = transfer.signature;
+  const flow = resolveTransferFlow(transfer);
+  const counterpartyParty = transfer.fiatCurrency
+    ? `${counterpartyName} · ${transfer.fiatCurrency.toUpperCase()}`
+    : counterpartyName;
+
+  const walletRow = walletAddress ? (
+    <DetailRow
+      label={isInbound ? "To" : "From"}
+      value={shortenAddress(walletAddress)}
+      mono
+      copyValue={walletAddress}
+    />
+  ) : null;
+  const counterpartyRow = <DetailRow label={isInbound ? "From" : "To"} value={counterpartyParty} />;
+
+  return (
+    <Modal isOpen ariaLabel="Transaction details" onClose={onClose} size="lg">
+      <div className="space-y-5 p-6">
+        <div className="flex items-start justify-between gap-4 pr-8">
+          <div className="space-y-1">
+            <h2 className="text-xl font-medium tracking-tight text-text-extra-high">
+              {resolveTransferTypeLabel(transfer.type)}
+            </h2>
+            {transfer.createdAt ? (
+              <p className="text-sm text-text-medium">{formatTimestamp(transfer.createdAt)}</p>
+            ) : null}
+          </div>
+          <TransferStatusBadge status={transfer.status} />
+        </div>
+
+        <div className="flex items-center justify-between gap-4 rounded-2xl bg-border-extra-light p-5">
+          <div className="min-w-0 space-y-0.5">
+            <p className="text-xs font-medium uppercase tracking-wide text-text-medium">
+              {isInbound ? "You deposit" : "You send"}
+            </p>
+            <p className="truncate text-xl font-semibold tracking-tight text-text-extra-high">
+              {flow.send ?? "—"}
+            </p>
+          </div>
+          <ArrowRightIcon className="size-5 shrink-0 text-text-low" />
+          <div className="min-w-0 space-y-0.5 text-right">
+            <p className="text-xs font-medium uppercase tracking-wide text-text-medium">
+              Recipient gets
+            </p>
+            <p className="truncate text-xl font-semibold tracking-tight text-text-extra-high">
+              {flow.receive ?? "—"}
+            </p>
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-border-light px-4">
+          <div className="divide-y divide-border-light">
+            {isInbound ? (
+              <>
+                {walletRow}
+                {counterpartyRow}
+              </>
+            ) : (
+              <>
+                {counterpartyRow}
+                {walletRow}
+              </>
+            )}
+            {transfer.provider ? (
+              <DetailRow
+                label="Provider"
+                value={<TransferProviderCell provider={transfer.provider} />}
+              />
+            ) : null}
+            <DetailRow label="Transaction ID" value={transfer.id} mono copyValue={transfer.id} />
+            {transfer.providerReference ? (
+              <DetailRow
+                label="Provider Reference"
+                value={transfer.providerReference}
+                mono
+                copyValue={transfer.providerReference}
+              />
+            ) : null}
+            {transfer.memo ? <DetailRow label="Memo" value={transfer.memo} /> : null}
+            {transfer.updatedAt ? (
+              <DetailRow label="Last updated" value={formatTimestamp(transfer.updatedAt)} />
+            ) : null}
+          </div>
+        </div>
+
+        {signature ? (
+          <Button
+            type="button"
+            variant="secondary"
+            className="w-full"
+            iconLeft={<ExternalLinkIcon className="size-4" />}
+            onClick={() =>
+              window.open(getDevnetExplorerUrl(signature), "_blank", "noopener,noreferrer")
+            }
+          >
+            View on explorer
+          </Button>
+        ) : null}
+      </div>
+    </Modal>
   );
 }
 
@@ -485,7 +723,10 @@ export function CounterpartyDetailWorkspace({
       </div>
 
       {activeTab === "transactions" ? (
-        <CounterpartyTransactions transfers={initialTransfers} />
+        <CounterpartyTransactions
+          transfers={initialTransfers}
+          counterpartyName={counterparty.displayName}
+        />
       ) : (
         <>
           <div className="grid gap-6 lg:grid-cols-2">
