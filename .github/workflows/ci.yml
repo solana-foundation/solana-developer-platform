@@ -10,7 +10,6 @@ on:
       - main
 
 env:
-  CI_HAS_DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI != '' }}
   CI_IS_FORK_PULL_REQUEST: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
 
 jobs:
@@ -84,6 +83,7 @@ jobs:
     name: Unit Tests
     runs-on: ubuntu-latest
     env:
+      CI_HAS_DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI != '' }}
       DATABASE_URL: postgresql://sdp:sdp@127.0.0.1:5432/sdp
     services:
       postgres:
@@ -373,6 +373,7 @@ jobs:
             test_files: src/tests/payments-wallet-scope.test.ts src/tests/api-keys-flow.test.ts src/tests/api-keys-rotation.test.ts src/tests/custody-local.test.ts
             rpc_provider: alchemy
     env:
+      CI_HAS_DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI != '' }}
       DATABASE_URL: postgresql://sdp:sdp@127.0.0.1:5432/sdp
       SOLANA_NETWORK: devnet
       INTEGRATION_TEST_FILES: ${{ matrix.test_files }}
@@ -463,18 +464,24 @@ jobs:
       - integration_tests_shard
     if: always()
     timeout-minutes: 5
+    env:
+      CI_HAS_DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI != '' }}
     steps:
       - name: Check integration test results
         env:
           INTEGRATION_SHARD_RESULT: ${{ needs.integration_tests_shard.result }}
         run: |
+          if [ "${CI_IS_FORK_PULL_REQUEST}" = "true" ] && [ "${CI_HAS_DOPPLER_TOKEN}" != "true" ] && [ "${INTEGRATION_SHARD_RESULT}" = "success" ]; then
+            echo "::notice title=Fork-safe integration skip::Forked pull requests cannot access DOPPLER_TOKEN_CI, so the secret-backed integration matrix was intentionally skipped."
+            exit 0
+          fi
+          if [ "${CI_HAS_DOPPLER_TOKEN}" != "true" ]; then
+            echo "Secret-backed integration shards did not run outside a fork pull request." >&2
+            exit 1
+          fi
           if [ "${INTEGRATION_SHARD_RESULT}" != "success" ]; then
             echo "One or more integration shards finished with ${INTEGRATION_SHARD_RESULT}." >&2
             exit 1
-          fi
-          if [ "${CI_IS_FORK_PULL_REQUEST}" = "true" ] && [ "${CI_HAS_DOPPLER_TOKEN}" != "true" ]; then
-            echo "::notice title=Fork-safe integration skip::Forked pull requests cannot access DOPPLER_TOKEN_CI, so the secret-backed integration matrix was intentionally skipped."
-            exit 0
           fi
           echo "All integration shards passed."
 
@@ -493,6 +500,7 @@ jobs:
             test_script: test:e2e:issuance
             artifact_suffix: issuance
     env:
+      CI_HAS_DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_CI != '' }}
       DATABASE_URL: postgresql://sdp:sdp@127.0.0.1:5432/sdp
       SOLANA_NETWORK: devnet
       PLAYWRIGHT_API_URL: http://127.0.0.1:8787
