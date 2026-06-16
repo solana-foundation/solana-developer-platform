@@ -1022,7 +1022,7 @@ POST /v1/issuance/tokens/{tokenId}/burn
 POST /v1/issuance/tokens/{tokenId}/force-burn
 ```
 
-The `amount` field is always in the token's smallest unit. For a 6-decimal token, `"1000000"` = 1.0 token.
+The `amount` field is a decimal string in **UI units** (human-readable token amounts). `"1"` means one token; `"1.5"` means one and a half. SDP converts to on-chain base units using the token's `decimals`. This is not the raw smallest-unit integer from wallet balance responses.
 
 </Tab>
 </Tabs>
@@ -1069,7 +1069,7 @@ curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/mint \
   -d '{
     "mint": {
       "destination": "7xKXz...9fGh",
-      "amount": "1000000",
+      "amount": "1000",
       "memo": "Initial distribution"
     }
   }'
@@ -1088,7 +1088,7 @@ const res = await fetch(
     body: JSON.stringify({
       mint: {
         destination: "7xKXz...9fGh",
-        amount: "1000000",
+        amount: "1000",
         memo: "Initial distribution",
       },
     }),
@@ -1148,7 +1148,7 @@ await fetch("https://api.solana.com/v1/issuance/tokens/tok_abc123/burn", {
     "Idempotency-Key": "burn-001",
   },
   body: JSON.stringify({
-    burn: { source: "3xYZa...2aBc", amount: "500000", memo: "Redemption" },
+    burn: { source: "3xYZa...2aBc", amount: "250", memo: "Redemption" },
   }),
 });
 ```
@@ -1164,7 +1164,7 @@ await fetch("https://api.solana.com/v1/issuance/tokens/tok_abc123/force-burn", {
     "Idempotency-Key": "force-burn-001",
   },
   body: JSON.stringify({
-    forceBurn: { source: "3xYZa...2aBc", amount: "500000", memo: "Compliance action" },
+    forceBurn: { source: "3xYZa...2aBc", amount: "250", memo: "Compliance action" },
   }),
 });
 ```
@@ -1588,7 +1588,7 @@ curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/seize \
     "seize": {
       "source": "3xYZa...2aBc",
       "destination": "9aBCd...4eEf",
-      "amount": "1000000",
+      "amount": "250",
       "memo": "Court order #12345"
     }
   }'
@@ -1789,13 +1789,15 @@ const res = await fetch(
       "Idempotency-Key": "mint-001",
     },
     body: JSON.stringify({
-      mint: { destination: "7xKXz...9fGh", amount: "1000000" },
+      mint: { destination: "7xKXz...9fGh", amount: "1000" },
     }),
   }
 );
 const { data } = await res.json();
 // data.transaction.signature — confirmed onchain
 ```
+
+Issuance `amount` fields use **UI units** (decimal strings such as `"1000"` for one thousand tokens). SDP converts using the token's `decimals` before building the on-chain transaction.
 
 **When to use execute mode:**
 
@@ -1817,7 +1819,7 @@ const res = await fetch(
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      mint: { destination: "7xKXz...9fGh", amount: "1000000" },
+      mint: { destination: "7xKXz...9fGh", amount: "1000" },
       options: { simulate: true },
     }),
   }
@@ -1933,7 +1935,7 @@ You provision custody wallets up front (see [Set Up Wallets](/docs/guides/setup-
 
 Payments transfer **SPL tokens** — stablecoins, tokenized assets, or any mint your project supports. The `token` field on `POST /v1/payments/transfers` (and its `/prepare` variant) requires the on-chain **mint address** for SPL tokens; the literal string `SOL` is accepted as the native-SOL shorthand. Symbols like `USDC` are not resolved at request time. The `token` filter on `GET /v1/payments/transfers` does an **exact match** against the `Transfer.token` value as stored — API-created transfers store the mint you supplied (or `SOL`), while indexed/observed transfers run mint-to-symbol resolution and may store a resolved symbol (e.g. `USDC`). Filter using the same label you see on the response, or query without `token` and filter client-side. **Balance responses always attempt symbol resolution** and return the symbol whenever the mint is known — so a wallet holding USDC reports `USDC` rather than the mint string.
 
-**Amounts on the wire are UI-unit decimal strings** — `"100.00"` means 100 tokens, regardless of the mint's decimal count. SDP handles the smallest-unit conversion when it builds the on-chain transaction. The one exception is wallet-balance responses, which return both a raw `amount` (smallest unit) **and** a `uiAmount` (decimal string) so balance consumers can pick whichever fits.
+**Amounts on the wire are UI-unit decimal strings** — `"100.00"` means 100 tokens, regardless of the mint's decimal count. This applies to issuance operations (mint, burn, seize, force-burn) as well as payments transfers. SDP handles the smallest-unit conversion when it builds the on-chain transaction. The one exception is wallet-balance responses, which return both a raw `amount` (smallest unit) **and** a `uiAmount` (decimal string) so balance consumers can pick whichever fits.
 
 ## Signing modes
 
@@ -4811,6 +4813,10 @@ The public issuance surface currently exposes three token templates:
 | `custom` | 9 decimals default (up to 18 max), extension set is fully configurable | Use when your requirements do not match preset templates. |
 
 These defaults are sourced from the API implementation in `apps/sdp-api/src/services/issuance/templates/definitions.ts`.
+
+## Amount format
+
+Mint, burn, seize, and force-burn request bodies accept `amount` as a **decimal string in UI units** — the human-readable token value (for example `"1"` or `"1.5"`). SDP converts to on-chain base units using the token's `decimals`. This differs from wallet balance responses, which return both raw `amount` and `uiAmount`.
 
 ---
 

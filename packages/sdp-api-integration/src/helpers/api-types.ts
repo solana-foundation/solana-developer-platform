@@ -11,8 +11,30 @@ export interface DeployPrepareApiResponse
   extends ApiResponse<{
     transaction: { serialized: string; blockhash: string; lastValidBlockHeight?: string };
     mint: string;
+    listAddress?: string;
+    simulation?: { success: boolean; logs: string[]; unitsConsumed?: number };
+    /**
+     * Present when the create tx had to be prepared with an empty metadata uri
+     * to stay under the packet limit. The client must set the real uri in a
+     * follow-up tx (POST .../deploy/prepare-metadata) after the create tx
+     * confirms. Absent on the single-tx fast path.
+     */
+    metadataUriFollowUp?: { required: true; uri: string };
+  }> {}
+
+export interface DeployPrepareMetadataApiResponse
+  extends ApiResponse<{
+    transaction: { serialized: string; blockhash: string; lastValidBlockHeight?: string } | null;
+    uri: string;
     simulation?: { success: boolean; logs: string[]; unitsConsumed?: number };
   }> {}
+
+/**
+ * Response of POST .../deploy/confirm — the step that records the mint after a
+ * client signs and submits a prepared (non-custodial) deploy tx. Returns the
+ * now-deployed token.
+ */
+export interface DeployConfirmApiResponse extends ApiResponse<{ token: Token }> {}
 
 export interface MintPrepareApiResponse
   extends ApiResponse<{

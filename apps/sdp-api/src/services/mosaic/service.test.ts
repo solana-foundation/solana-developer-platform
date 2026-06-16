@@ -55,6 +55,17 @@ type SubmitProto = {
   ) => Promise<{ signature: string; slot: bigint }>;
 };
 
+/**
+ * The private packet-size guard exposed for spying. createToken now calls this
+ * before submitting (to split a long-uri create into a follow-up tx), but the
+ * SDK template builder is stubbed to a sentinel here, so the real partial-sign
+ * inside it has nothing to measure. Default it to "fits" so routing/derivation
+ * tests stay on the single-tx path; the overflow split is covered separately.
+ */
+type PacketSizeProto = {
+  exceedsPacketSize: (fullTx: unknown) => Promise<boolean>;
+};
+
 function makeFeePayment(koraAddress: Address): {
   port: FeePaymentPort;
   getFeePayer: ReturnType<typeof vi.fn>;
@@ -111,6 +122,14 @@ describe("MosaicService.createToken — Kora sponsorship", () => {
 
     // List PDA derivation is exercised separately; default to a sentinel.
     vi.spyOn(MosaicSdk, "getListConfigPda").mockResolvedValue(FAKE_LIST_ADDRESS);
+
+    // createToken probes the packet size before submitting; the stubbed builder
+    // returns a sentinel the real partial-sign can't measure, so default to
+    // "fits" and keep these tests on the single-tx path.
+    vi.spyOn(
+      MosaicService.prototype as unknown as PacketSizeProto,
+      "exceedsPacketSize"
+    ).mockResolvedValue(false);
   });
 
   afterEach(() => {

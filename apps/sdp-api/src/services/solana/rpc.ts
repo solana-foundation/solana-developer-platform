@@ -557,5 +557,84 @@ export async function getSignatureStatuses(
   );
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Transaction Lookup
+// ═══════════════════════════════════════════════════════════════════════════
+
+export interface ParsedInstruction {
+  programId: string;
+  /** Present only for instructions the RPC could decode (e.g. spl-token-2022). */
+  parsedType: string | null;
+  /** Decoded instruction fields, when available. */
+  info: Record<string, unknown> | null;
+}
+
+export interface ParsedTransaction {
+  slot: bigint;
+  err: unknown | null;
+  /** Top-level + inner instructions flattened, in no particular order. */
+  instructions: ParsedInstruction[];
+}
+
+interface RawParsedInstruction {
+  programId?: string;
+  parsed?: { type?: string; info?: Record<string, unknown> };
+}
+
+interface RawGetTransactionResponse {
+  slot: bigint;
+  meta: {
+    err: unknown | null;
+    innerInstructions?: Array<{ instructions?: RawParsedInstruction[] }> | null;
+  } | null;
+  transaction: {
+    message: { instructions?: RawParsedInstruction[] };
+  };
+}
+
+const toParsedInstruction = (ix: RawParsedInstruction): ParsedInstruction => ({
+  programId: ix.programId ?? "",
+  parsedType: ix.parsed?.type ?? null,
+  info: ix.parsed?.info ?? null,
+});
+
+/**
+ * Fetch a confirmed transaction with its instructions decoded (`jsonParsed`).
+ *
+ * Returns `null` when the signature is unknown to the RPC. Top-level and inner
+ * instructions are flattened into a single list so callers can inspect what the
+ * transaction actually did (e.g. verifying it initialized a specific mint).
+ */
+export async function getTransaction(
+  rpc: SolanaRpc,
+  signature: Signature,
+  commitment: "confirmed" | "finalized" = "confirmed"
+): Promise<ParsedTransaction | null> {
+  const response = (await withTransientRpcRetry(() =>
+    rpc
+      .getTransaction(signature, {
+        commitment,
+        encoding: "jsonParsed",
+        maxSupportedTransactionVersion: 0,
+      })
+      .send()
+  )) as RawGetTransactionResponse | null;
+
+  if (!response) {
+    return null;
+  }
+
+  const topLevel = response.transaction.message.instructions ?? [];
+  const inner = (response.meta?.innerInstructions ?? []).flatMap(
+    (group) => group.instructions ?? []
+  );
+
+  return {
+    slot: response.slot,
+    err: response.meta?.err ?? null,
+    instructions: [...topLevel, ...inner].map(toParsedInstruction),
+  };
+}
+
 // Re-export types
 export type { Blockhash, Commitment, Signature };
