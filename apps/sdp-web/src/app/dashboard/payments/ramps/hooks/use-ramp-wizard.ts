@@ -307,13 +307,24 @@ export function useRampWizard<TId extends string>(
     setHostedQuoteLoading(true);
     const toastId = toast.loading("Setting up your account.", { position: "bottom-right" });
     try {
-      await requirements.submitRequirements({
+      const result = await requirements.submitRequirements({
         cryptoToken: toRampCryptoToken(selectedRampPair.assetRail),
         destinationWallet: fields.walletId,
         fiatCurrency: selectedRampPair.fiatCurrency,
       });
-      setStepIndex((current) => current + 1);
       setHostedQuoteLoading(false);
+      // collect/unsupported mean onboarding hasn't started — stay on this step so the user
+      // can resolve it, instead of stranding them on the provider screen with no recovery.
+      if (result.status === "collect" || result.status === "unsupported") {
+        toast.error(
+          result.status === "unsupported"
+            ? result.reason
+            : "We need a few more details before continuing.",
+          { id: toastId, position: "bottom-right" }
+        );
+        return;
+      }
+      setStepIndex((current) => current + 1);
       toast.dismiss(toastId);
     } catch (error) {
       setHostedQuoteLoading(false);
