@@ -14,7 +14,7 @@ import type {
 import type { RampFiatCurrency } from "@sdp/types/generated/ramp-support";
 import { RAMP_FIAT_CURRENCIES } from "@sdp/types/generated/ramp-support";
 import { getCryptoRailAssetLabel, parseFiatCurrency } from "@sdp/types/payment-rails";
-import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
+import type { CounterpartyRequirements, RampDirection } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
 import { formatDecimalAmount, isDecimalString, parseDecimalAmount } from "@/lib/amount";
@@ -27,6 +27,7 @@ import {
 } from "@/lib/errors";
 import { hashString, hmacSha256Base64, verifyHmacSha256Base64 } from "@/lib/hash";
 import { type ProviderRequestInit, providerFetch } from "../fetch";
+import { readyCounterparty } from "../requirements";
 import {
   createProviderRampSupport,
   isSolanaCryptoAsset,
@@ -1345,12 +1346,22 @@ export interface BvnkCustomerResolution {
 }
 
 /** Per funding-spec (fiat+token+destination) virtual wallet + rule. */
+/** Corridor spec for provisioning a BVNK on-ramp wallet + rule. */
+export interface BvnkOnrampRequestSpec {
+  currency: string;
+  network: string;
+  destinationWalletAddress: string;
+  fiatCurrency: string;
+}
+
 export interface BvnkOnrampEntry {
   walletId?: string;
   walletStatus?: string;
   ruleId?: string;
   ruleStatus?: string;
   bankAccount?: BvnkBankFundingDetails;
+  /** Captured pre-verification so the customer webhook can provision the wallet/rule once KYC passes. */
+  request?: BvnkOnrampRequestSpec;
 }
 
 const BVNK_WALLET_ACTIVE_STATUSES = new Set(["ACTIVE", "COMPLETED"]);
@@ -1529,4 +1540,34 @@ export function buildBvnkOnrampInstruction(
     bankAccount: entry.bankAccount,
     instructionsNotes: notes,
   };
+}
+
+export function bvnkOnboardingRequirements(
+  resolution: BvnkPaymentRuleResolution,
+  direction: RampDirection
+): CounterpartyRequirements {
+  switch (resolution.onboardingStatus) {
+    case "ready":
+      return readyCounterparty("bvnk", direction);
+    case "verification_required": {
+      const { verificationUrl } = resolution.customer;
+      if (!verificationUrl) {
+        throw internalError('BVNK reported "verification_required" without a verificationUrl.');
+      }
+      return {
+        provider: "bvnk",
+        direction,
+        status: "customer_verification_required",
+        verificationUrl,
+      };
+    }
+    case "verifying":
+      return { provider: "bvnk", direction, status: "customer_verifying" };
+    case "provisioning":
+      return { provider: "bvnk", direction, status: "funding_account_provisioning" };
+    default: {
+      const exhaustive: never = resolution.onboardingStatus;
+      throw internalError(`Unhandled BVNK onboarding status: ${String(exhaustive)}`);
+    }
+  }
 }

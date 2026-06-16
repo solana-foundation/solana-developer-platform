@@ -454,6 +454,19 @@ export const createOnrampQuoteSchema = z.object({
   collectedData: z.record(z.string(), z.string()).optional(),
 });
 
+export const submitCounterpartyRequirementsSchema = z.discriminatedUnion("provider", [
+  z.object({ provider: z.literal("moonpay"), direction: z.literal("onramp") }),
+  z.object({
+    provider: z.literal("bvnk"),
+    direction: z.literal("onramp"),
+    cryptoToken: rampCurrencyCodeSchema,
+    destinationWallet: z.string().min(1),
+    fiatCurrency: rampFiatCurrencySchema,
+    collectedData: z.record(z.string(), z.string()).optional(),
+  }),
+  z.object({ provider: z.literal("lightspark"), direction: z.literal("onramp") }),
+]);
+
 export const createOfframpQuoteSchema = z.object({
   provider: rampProviderSchema,
   counterpartyId: z.string().min(1),
