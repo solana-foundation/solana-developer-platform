@@ -11,8 +11,10 @@ import { hashString } from "@/lib/hash";
 import type { Address } from "@/lib/solana";
 import * as AuthorityResolution from "@/routes/issuance/handlers/authority-resolution";
 import { createKVStoreSet } from "@/runtime/factory";
+import * as Mosaic from "@/services/mosaic";
 import { MosaicService } from "@/services/mosaic";
 import * as SolanaServices from "@/services/solana";
+import * as SolanaRpc from "@/services/solana/rpc";
 import { TokenService } from "@/services/token.service";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import {
@@ -4191,6 +4193,1222 @@ describe("Issuance Routes", () => {
       expect(body.data.token.decimals).toBe(9); // Custom template default
       expect(body.data.token.requiresAllowlist).toBe(true);
       expect(body.data.token.extensions?.defaultAccountState).toBe("frozen");
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // SDP-hosted Metadata (HOO-466)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  describe("SDP-hosted token metadata", () => {
+    // app.request with a bare path builds requests against http://localhost, so
+    // the request-derived origin the deploy handlers compute is deterministic.
+    const expectedMetadataUrl = (tokenId: string) =>
+      `http://localhost/v1/issuance/tokens/${tokenId}/metadata.json`;
+
+    const mockDeployResult = {
+      mint: TEST_SOLANA_ADDRESSES.mint,
+      signature: "5testSigHOO466Deploy",
+      slot: 100n,
+      listAddress: undefined,
+    };
+
+    describe("POST /v1/issuance/tokens/:tokenId/deploy", () => {
+      it("falls back to the SDP-hosted metadata URL when the token has no uri", async () => {
+        const token = await seedIssuedToken({
+          id: "tok_deploy_uri_default",
+          mintAddress: null,
+          status: "pending",
+          uri: null,
+          requiresAllowlist: false,
+        });
+
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSigner")
+          .mockResolvedValueOnce({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
+        const createTokenSpy = vi
+          .spyOn(MosaicService.prototype, "createToken")
+          .mockResolvedValueOnce(mockDeployResult as never);
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${token.id}/deploy`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({}),
+            },
+            env
+          );
+
+          expect(res.status).toBe(200);
+          expect(createTokenSpy).toHaveBeenCalledWith(
+            expect.objectContaining({
+              metadata: expect.objectContaining({ uri: expectedMetadataUrl(token.id) }),
+            })
+          );
+        } finally {
+          createOrgSignerSpy.mockRestore();
+          createTokenSpy.mockRestore();
+        }
+      });
+
+      it("passes through an issuer-supplied uri unchanged", async () => {
+        const customUri = "https://issuer.example/custom-metadata.json";
+        const token = await seedIssuedToken({
+          id: "tok_deploy_uri_custom",
+          mintAddress: null,
+          status: "pending",
+          uri: customUri,
+          requiresAllowlist: false,
+        });
+
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSigner")
+          .mockResolvedValueOnce({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
+        const createTokenSpy = vi
+          .spyOn(MosaicService.prototype, "createToken")
+          .mockResolvedValueOnce(mockDeployResult as never);
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${token.id}/deploy`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({}),
+            },
+            env
+          );
+
+          expect(res.status).toBe(200);
+          expect(createTokenSpy).toHaveBeenCalledWith(
+            expect.objectContaining({
+              metadata: expect.objectContaining({ uri: customUri }),
+            })
+          );
+        } finally {
+          createOrgSignerSpy.mockRestore();
+          createTokenSpy.mockRestore();
+        }
+      });
+
+      it("still surfaces the mint address when recording it fails after a metadata-URI overflow", async () => {
+        const token = await seedIssuedToken({
+          id: "tok_deploy_recovery_db_fail",
+          mintAddress: null,
+          status: "pending",
+          uri: null,
+          requiresAllowlist: false,
+        });
+
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSigner")
+          .mockResolvedValueOnce({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
+        // Mint is live on-chain but the follow-up metadata-URI update failed.
+        const createTokenSpy = vi
+          .spyOn(MosaicService.prototype, "createToken")
+          .mockRejectedValueOnce(
+            new Mosaic.MintMetadataUpdateError({
+              mint: TEST_SOLANA_ADDRESSES.mint,
+              signature: "5recoverySig",
+              slot: 100n,
+              listAddress: undefined,
+            } as never)
+          );
+        // Recording the live mint then fails too (e.g. a D1 timeout). The handler
+        // must still report the mint so the caller knows not to redeploy, rather
+        // than letting this second exception escape and bury it.
+        const setTokenDeployedSpy = vi
+          .spyOn(TokenService.prototype, "setTokenDeployed")
+          .mockRejectedValueOnce(new Error("D1_ERROR: timeout"));
+        const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${token.id}/deploy`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({}),
+            },
+            env
+          );
+
+          // The original metadata-URI failure is surfaced (not the swallowed D1
+          // error), carrying the live mint address in its details.
+          expect(res.status).toBe(400);
+          const payload = (await res.json()) as {
+            error: { code: string; message: string; details?: { mintAddress?: string } };
+          };
+          expect(payload.error.code).toBe("TRANSACTION_FAILED");
+          expect(payload.error.message).toMatch(/do not redeploy/);
+          expect(payload.error.details?.mintAddress).toBe(TEST_SOLANA_ADDRESSES.mint);
+          // The DB failure was logged rather than escaping the recovery block.
+          expect(consoleErrorSpy).toHaveBeenCalled();
+        } finally {
+          createOrgSignerSpy.mockRestore();
+          createTokenSpy.mockRestore();
+          setTokenDeployedSpy.mockRestore();
+          consoleErrorSpy.mockRestore();
+        }
+      });
+
+      it("stamps the permanent delegate in the recovery path after a metadata-URI overflow", async () => {
+        // A permanent-delegate token whose mint lands on-chain but whose metadata
+        // URI follow-up fails must still get its initial permanentDelegate stamped
+        // into the DB — otherwise later seize/force-transfer ops target the wrong
+        // authority. This mirrors the success path.
+        // The arcade template requires the permanentDelegate extension, so the
+        // initial delegate resolves to the custody (signing-wallet) address.
+        const token = await seedIssuedToken({
+          id: "tok_deploy_recovery_perm_delegate",
+          mintAddress: null,
+          status: "pending",
+          uri: null,
+          requiresAllowlist: false,
+          template: "arcade",
+        });
+
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSigner")
+          .mockResolvedValueOnce({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
+        const createTokenSpy = vi
+          .spyOn(MosaicService.prototype, "createToken")
+          .mockRejectedValueOnce(
+            new Mosaic.MintMetadataUpdateError({
+              mint: TEST_SOLANA_ADDRESSES.mint,
+              signature: "5recoverySig",
+              slot: 100n,
+              listAddress: undefined,
+            } as never)
+          );
+        // Recording the live mint succeeds, so the recovery path proceeds to stamp
+        // the permanent delegate.
+        const updateTokenAuthoritiesSpy = vi.spyOn(
+          TokenService.prototype,
+          "updateTokenAuthorities"
+        );
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${token.id}/deploy`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({}),
+            },
+            env
+          );
+
+          // Recovery always re-throws so the caller knows not to redeploy.
+          expect(res.status).toBe(400);
+          const payload = (await res.json()) as { error: { code: string } };
+          expect(payload.error.code).toBe("TRANSACTION_FAILED");
+          // The permanent delegate was persisted despite the metadata-URI failure.
+          expect(updateTokenAuthoritiesSpy).toHaveBeenCalledWith(token.id, {
+            permanentDelegate: TEST_SOLANA_ADDRESSES.wallet2,
+          });
+        } finally {
+          createOrgSignerSpy.mockRestore();
+          createTokenSpy.mockRestore();
+          updateTokenAuthoritiesSpy.mockRestore();
+        }
+      });
+    });
+
+    describe("POST /v1/issuance/tokens/:tokenId/deploy/prepare", () => {
+      it("falls back to the SDP-hosted metadata URL when the token has no uri", async () => {
+        if (!(env as { SOLANA_RPC_URL?: string }).SOLANA_RPC_URL) {
+          (env as { SOLANA_RPC_URL?: string }).SOLANA_RPC_URL = "https://rpc.invalid.test";
+        }
+
+        const token = await seedIssuedToken({
+          id: "tok_prepare_uri_default",
+          mintAddress: null,
+          status: "pending",
+          uri: null,
+          requiresAllowlist: false,
+        });
+
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSigner")
+          .mockResolvedValueOnce({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
+        const prepareCreateTokenSpy = vi
+          .spyOn(MosaicService.prototype, "prepareCreateToken")
+          .mockResolvedValueOnce({
+            serializedTx: "ZmFrZS1zZXJpYWxpemVkLXR4",
+            blockhash: "11111111111111111111111111111111",
+            lastValidBlockHeight: 0n,
+            mint: TEST_SOLANA_ADDRESSES.mint,
+            listAddress: undefined,
+          } as never);
+        const simulateTransactionSpy = vi
+          .spyOn(SolanaRpc, "simulateTransaction")
+          .mockResolvedValueOnce({
+            success: true,
+            logs: [],
+            unitsConsumed: 0n,
+            error: null,
+          });
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${token.id}/deploy/prepare`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({}),
+            },
+            env
+          );
+
+          expect(res.status).toBe(200);
+          expect(prepareCreateTokenSpy).toHaveBeenCalledWith(
+            expect.objectContaining({
+              metadata: expect.objectContaining({ uri: expectedMetadataUrl(token.id) }),
+            })
+          );
+        } finally {
+          createOrgSignerSpy.mockRestore();
+          prepareCreateTokenSpy.mockRestore();
+          simulateTransactionSpy.mockRestore();
+        }
+      });
+
+      it("re-prepares with an empty uri and signals a follow-up when the create tx overflows", async () => {
+        if (!(env as { SOLANA_RPC_URL?: string }).SOLANA_RPC_URL) {
+          (env as { SOLANA_RPC_URL?: string }).SOLANA_RPC_URL = "https://rpc.invalid.test";
+        }
+
+        const token = await seedIssuedToken({
+          id: "tok_prepare_uri_overflow",
+          mintAddress: null,
+          status: "pending",
+          uri: null,
+          requiresAllowlist: false,
+        });
+
+        // base64 of 1644 chars decodes to 1233 raw bytes — one over the limit.
+        const oversizedTx = "A".repeat(1644);
+        const slimTx = "ZmFrZS1zZXJpYWxpemVkLXR4";
+
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSigner")
+          .mockResolvedValueOnce({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
+        const prepareCreateTokenSpy = vi
+          .spyOn(MosaicService.prototype, "prepareCreateToken")
+          .mockResolvedValueOnce({
+            serializedTx: oversizedTx,
+            blockhash: "11111111111111111111111111111111",
+            lastValidBlockHeight: 0n,
+            mint: TEST_SOLANA_ADDRESSES.mint,
+            listAddress: undefined,
+          } as never)
+          .mockResolvedValueOnce({
+            serializedTx: slimTx,
+            blockhash: "11111111111111111111111111111111",
+            lastValidBlockHeight: 0n,
+            mint: TEST_SOLANA_ADDRESSES.mint,
+            listAddress: undefined,
+          } as never);
+        const simulateTransactionSpy = vi
+          .spyOn(SolanaRpc, "simulateTransaction")
+          .mockResolvedValueOnce({ success: true, logs: [], unitsConsumed: 0n, error: null });
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${token.id}/deploy/prepare`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({}),
+            },
+            env
+          );
+
+          expect(res.status).toBe(200);
+          const payload = (await res.json()) as {
+            data: {
+              transaction: { serialized: string };
+              metadataUriFollowUp?: { required: boolean; uri: string };
+            };
+          };
+
+          // First attempt carries the hosted uri; the overflow retry uses "".
+          expect(prepareCreateTokenSpy).toHaveBeenNthCalledWith(
+            1,
+            expect.objectContaining({
+              metadata: expect.objectContaining({ uri: expectedMetadataUrl(token.id) }),
+            })
+          );
+          expect(prepareCreateTokenSpy).toHaveBeenNthCalledWith(
+            2,
+            expect.objectContaining({ metadata: expect.objectContaining({ uri: "" }) })
+          );
+
+          // Response returns the slim create tx + a follow-up descriptor.
+          expect(payload.data.transaction.serialized).toBe(slimTx);
+          expect(payload.data.metadataUriFollowUp).toEqual({
+            required: true,
+            uri: expectedMetadataUrl(token.id),
+          });
+        } finally {
+          createOrgSignerSpy.mockRestore();
+          prepareCreateTokenSpy.mockRestore();
+          simulateTransactionSpy.mockRestore();
+        }
+      });
+    });
+
+    describe("POST /v1/issuance/tokens/:tokenId/deploy/prepare-metadata", () => {
+      it("prepares the metadata-uri follow-up tx for a deployed token", async () => {
+        if (!(env as { SOLANA_RPC_URL?: string }).SOLANA_RPC_URL) {
+          (env as { SOLANA_RPC_URL?: string }).SOLANA_RPC_URL = "https://rpc.invalid.test";
+        }
+
+        const token = await seedIssuedToken({
+          id: "tok_prepare_metadata_followup",
+          mintAddress: TEST_SOLANA_ADDRESSES.mint,
+          status: "active",
+          uri: null,
+          requiresAllowlist: false,
+        });
+
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSigner")
+          .mockResolvedValueOnce({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
+        const prepareUpdateMetadataSpy = vi
+          .spyOn(MosaicService.prototype, "prepareUpdateMetadata")
+          .mockResolvedValueOnce({
+            serializedTx: "ZmFrZS1tZXRhZGF0YS10eA",
+            blockhash: "11111111111111111111111111111111",
+            lastValidBlockHeight: 0n,
+            requiredSigners: [],
+          } as never);
+        const simulateTransactionSpy = vi
+          .spyOn(SolanaRpc, "simulateTransaction")
+          .mockResolvedValueOnce({ success: true, logs: [], unitsConsumed: 0n, error: null });
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${token.id}/deploy/prepare-metadata`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({}),
+            },
+            env
+          );
+
+          expect(res.status).toBe(200);
+          const payload = (await res.json()) as {
+            data: { transaction: { serialized: string } | null; uri: string };
+          };
+
+          expect(prepareUpdateMetadataSpy).toHaveBeenCalledWith(
+            expect.objectContaining({
+              mint: TEST_SOLANA_ADDRESSES.mint,
+              uri: expectedMetadataUrl(token.id),
+            })
+          );
+          expect(payload.data.transaction?.serialized).toBe("ZmFrZS1tZXRhZGF0YS10eA");
+          expect(payload.data.uri).toBe(expectedMetadataUrl(token.id));
+        } finally {
+          createOrgSignerSpy.mockRestore();
+          prepareUpdateMetadataSpy.mockRestore();
+          simulateTransactionSpy.mockRestore();
+        }
+      });
+
+      it("ignores a request-body signingWalletId, using the wallet pinned at deploy/prepare", async () => {
+        if (!(env as { SOLANA_RPC_URL?: string }).SOLANA_RPC_URL) {
+          (env as { SOLANA_RPC_URL?: string }).SOLANA_RPC_URL = "https://rpc.invalid.test";
+        }
+
+        const token = await seedIssuedToken({
+          id: "tok_prepare_metadata_wallet_pin",
+          mintAddress: TEST_SOLANA_ADDRESSES.mint,
+          status: "active",
+          uri: null,
+          signingWalletId: "wallet_pinned",
+          requiresAllowlist: false,
+        });
+
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSigner")
+          .mockResolvedValueOnce({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
+        const prepareUpdateMetadataSpy = vi
+          .spyOn(MosaicService.prototype, "prepareUpdateMetadata")
+          .mockResolvedValueOnce({
+            serializedTx: "ZmFrZS1tZXRhZGF0YS10eA",
+            blockhash: "11111111111111111111111111111111",
+            lastValidBlockHeight: 0n,
+            requiredSigners: [],
+          } as never);
+        const simulateTransactionSpy = vi
+          .spyOn(SolanaRpc, "simulateTransaction")
+          .mockResolvedValueOnce({ success: true, logs: [], unitsConsumed: 0n, error: null });
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${token.id}/deploy/prepare-metadata`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({ signingWalletId: "wallet_body_ignored" }),
+            },
+            env
+          );
+
+          expect(res.status).toBe(200);
+          // The update-authority signer comes from the pinned wallet, not the body —
+          // otherwise the follow-up tx would be signed by the wrong authority.
+          expect(createOrgSignerSpy).toHaveBeenCalledWith(
+            expect.anything(),
+            expect.anything(),
+            expect.anything(),
+            "wallet_pinned"
+          );
+        } finally {
+          createOrgSignerSpy.mockRestore();
+          prepareUpdateMetadataSpy.mockRestore();
+          simulateTransactionSpy.mockRestore();
+        }
+      });
+
+      it("returns 400 for a token that has not been deployed", async () => {
+        const token = await seedIssuedToken({
+          id: "tok_prepare_metadata_undeployed",
+          mintAddress: null,
+          status: "pending",
+          uri: null,
+          requiresAllowlist: false,
+        });
+
+        const res = await app.request(
+          `/v1/issuance/tokens/${token.id}/deploy/prepare-metadata`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+            },
+            body: JSON.stringify({}),
+          },
+          env
+        );
+
+        expect(res.status).toBe(400);
+      });
+    });
+
+    describe("POST /v1/issuance/tokens/:tokenId/deploy/confirm", () => {
+      const ensureRpcUrl = () => {
+        if (!(env as { SOLANA_RPC_URL?: string }).SOLANA_RPC_URL) {
+          (env as { SOLANA_RPC_URL?: string }).SOLANA_RPC_URL = "https://rpc.invalid.test";
+        }
+      };
+
+      it("records the mint, marks the token active, and unblocks prepare-metadata", async () => {
+        ensureRpcUrl();
+
+        const token = await seedIssuedToken({
+          id: "tok_deploy_confirm",
+          mintAddress: null,
+          status: "pending",
+          uri: null,
+          requiresAllowlist: false,
+        });
+
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSigner")
+          .mockResolvedValue({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
+        const getSignatureStatusesSpy = vi
+          .spyOn(SolanaRpc, "getSignatureStatuses")
+          .mockResolvedValueOnce([
+            { slot: 100n, confirmations: 10n, confirmationStatus: "confirmed", err: null },
+          ]);
+        const accountExistsSpy = vi.spyOn(SolanaRpc, "accountExists").mockResolvedValueOnce(true);
+        const getTransactionSpy = vi.spyOn(SolanaRpc, "getTransaction").mockResolvedValueOnce({
+          slot: 100n,
+          err: null,
+          instructions: [
+            {
+              programId: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+              parsedType: "initializeMint2",
+              info: { mint: TEST_SOLANA_ADDRESSES.mint },
+            },
+          ],
+        });
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${token.id}/deploy/confirm`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({
+                signature: "5testSigHOO466Confirm",
+                mint: TEST_SOLANA_ADDRESSES.mint,
+              }),
+            },
+            env
+          );
+
+          expect(res.status).toBe(200);
+          const payload = (await res.json()) as {
+            data: { token: { mintAddress: string | null; status: string } };
+          };
+          expect(payload.data.token.mintAddress).toBe(TEST_SOLANA_ADDRESSES.mint);
+          expect(payload.data.token.status).toBe("active");
+
+          // The recorded mint unblocks the metadata follow-up, which previously
+          // 400'd for every non-custodial caller (mintAddress was never set).
+          const prepareUpdateMetadataSpy = vi
+            .spyOn(MosaicService.prototype, "prepareUpdateMetadata")
+            .mockResolvedValueOnce({
+              serializedTx: "ZmFrZS1tZXRhZGF0YS10eA",
+              blockhash: "11111111111111111111111111111111",
+              lastValidBlockHeight: 0n,
+              requiredSigners: [],
+            } as never);
+          const simulateTransactionSpy = vi
+            .spyOn(SolanaRpc, "simulateTransaction")
+            .mockResolvedValueOnce({ success: true, logs: [], unitsConsumed: 0n, error: null });
+
+          try {
+            const followUp = await app.request(
+              `/v1/issuance/tokens/${token.id}/deploy/prepare-metadata`,
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+                },
+                body: JSON.stringify({}),
+              },
+              env
+            );
+
+            expect(followUp.status).toBe(200);
+          } finally {
+            prepareUpdateMetadataSpy.mockRestore();
+            simulateTransactionSpy.mockRestore();
+          }
+        } finally {
+          createOrgSignerSpy.mockRestore();
+          getSignatureStatusesSpy.mockRestore();
+          accountExistsSpy.mockRestore();
+          getTransactionSpy.mockRestore();
+        }
+      });
+
+      it("still returns 200 with the token active when post-deploy bookkeeping fails", async () => {
+        ensureRpcUrl();
+
+        // The mint is live on-chain and setTokenDeployed has flipped the token to
+        // active; a failure writing the audit/transaction row afterward must not
+        // 500, or a retry would hit the `status !== "pending"` guard and 400
+        // permanently, stranding the token with no recovery.
+        const token = await seedIssuedToken({
+          id: "tok_deploy_confirm_bookkeeping_fail",
+          mintAddress: null,
+          status: "pending",
+          uri: null,
+          requiresAllowlist: false,
+        });
+
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSigner")
+          .mockResolvedValue({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
+        const getSignatureStatusesSpy = vi
+          .spyOn(SolanaRpc, "getSignatureStatuses")
+          .mockResolvedValueOnce([
+            { slot: 100n, confirmations: 10n, confirmationStatus: "confirmed", err: null },
+          ]);
+        const accountExistsSpy = vi.spyOn(SolanaRpc, "accountExists").mockResolvedValueOnce(true);
+        const getTransactionSpy = vi.spyOn(SolanaRpc, "getTransaction").mockResolvedValueOnce({
+          slot: 100n,
+          err: null,
+          instructions: [
+            {
+              programId: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+              parsedType: "initializeMint2",
+              info: { mint: TEST_SOLANA_ADDRESSES.mint },
+            },
+          ],
+        });
+        // The transaction-row write fails after the token is already deployed.
+        const createTransactionSpy = vi
+          .spyOn(TokenService.prototype, "createTransaction")
+          .mockRejectedValueOnce(new Error("D1_ERROR: timeout"));
+        const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${token.id}/deploy/confirm`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({
+                signature: "5testSigHOO466ConfirmBookkeeping",
+                mint: TEST_SOLANA_ADDRESSES.mint,
+              }),
+            },
+            env
+          );
+
+          // The deploy is recorded and surfaced as success despite the bookkeeping
+          // failure (which is logged, not thrown).
+          expect(res.status).toBe(200);
+          const payload = (await res.json()) as {
+            data: { token: { mintAddress: string | null; status: string } };
+          };
+          expect(payload.data.token.mintAddress).toBe(TEST_SOLANA_ADDRESSES.mint);
+          expect(payload.data.token.status).toBe("active");
+          expect(consoleErrorSpy).toHaveBeenCalled();
+        } finally {
+          createOrgSignerSpy.mockRestore();
+          getSignatureStatusesSpy.mockRestore();
+          accountExistsSpy.mockRestore();
+          getTransactionSpy.mockRestore();
+          createTransactionSpy.mockRestore();
+          consoleErrorSpy.mockRestore();
+        }
+      });
+
+      it("returns 400 when the confirmed tx did not create the supplied mint", async () => {
+        ensureRpcUrl();
+
+        const token = await seedIssuedToken({
+          id: "tok_deploy_confirm_unrelated_tx",
+          mintAddress: null,
+          status: "pending",
+          uri: null,
+          requiresAllowlist: false,
+        });
+
+        // Confirmed signature + an existing mint account, but the tx is unrelated
+        // (no initializeMint for this mint) — the spoofing case the guard closes.
+        const getSignatureStatusesSpy = vi
+          .spyOn(SolanaRpc, "getSignatureStatuses")
+          .mockResolvedValueOnce([
+            { slot: 100n, confirmations: 10n, confirmationStatus: "confirmed", err: null },
+          ]);
+        const accountExistsSpy = vi.spyOn(SolanaRpc, "accountExists").mockResolvedValueOnce(true);
+        const getTransactionSpy = vi.spyOn(SolanaRpc, "getTransaction").mockResolvedValueOnce({
+          slot: 100n,
+          err: null,
+          instructions: [
+            {
+              programId: "11111111111111111111111111111111",
+              parsedType: "transfer",
+              info: { destination: TEST_SOLANA_ADDRESSES.wallet2 },
+            },
+          ],
+        });
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${token.id}/deploy/confirm`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({
+                signature: "5unrelatedConfirmedSig",
+                mint: TEST_SOLANA_ADDRESSES.mint,
+              }),
+            },
+            env
+          );
+
+          expect(res.status).toBe(400);
+
+          // The token stays pending — nothing recorded from a spoofed signature.
+          const stillPending = await app.request(
+            `/v1/issuance/tokens/${token.id}`,
+            {
+              method: "GET",
+              headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
+            },
+            env
+          );
+          const payload = (await stillPending.json()) as {
+            data: { token: { mintAddress: string | null; status: string } };
+          };
+          expect(payload.data.token.mintAddress).toBeNull();
+          expect(payload.data.token.status).toBe("pending");
+        } finally {
+          getSignatureStatusesSpy.mockRestore();
+          accountExistsSpy.mockRestore();
+          getTransactionSpy.mockRestore();
+        }
+      });
+
+      it("returns a retryable error (not the wrong-tx 400) when the tx is not yet indexed", async () => {
+        ensureRpcUrl();
+
+        const token = await seedIssuedToken({
+          id: "tok_deploy_confirm_not_indexed",
+          mintAddress: null,
+          status: "pending",
+          uri: null,
+          requiresAllowlist: false,
+        });
+
+        // Confirmed via getSignatureStatuses and the mint exists, but
+        // getTransaction hasn't indexed the tx yet (the two RPC methods index
+        // independently). This is a transient race, not a bad deploy — the
+        // client must get a retryable signal, not the "wrong tx" 400.
+        const getSignatureStatusesSpy = vi
+          .spyOn(SolanaRpc, "getSignatureStatuses")
+          .mockResolvedValueOnce([
+            { slot: 100n, confirmations: 10n, confirmationStatus: "confirmed", err: null },
+          ]);
+        const accountExistsSpy = vi.spyOn(SolanaRpc, "accountExists").mockResolvedValueOnce(true);
+        const getTransactionSpy = vi.spyOn(SolanaRpc, "getTransaction").mockResolvedValueOnce(null);
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${token.id}/deploy/confirm`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({
+                signature: "5notYetIndexedSig",
+                mint: TEST_SOLANA_ADDRESSES.mint,
+              }),
+            },
+            env
+          );
+
+          // 5xx (retryable), distinct from the 400 the spoofed/wrong-tx case returns.
+          expect(res.status).toBe(502);
+          const payload = (await res.json()) as { error: { message: string } };
+          expect(payload.error.message).not.toMatch(/did not create this mint/);
+
+          // Token stays pending so a retry can still record it.
+          const stillPending = await app.request(
+            `/v1/issuance/tokens/${token.id}`,
+            {
+              method: "GET",
+              headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
+            },
+            env
+          );
+          const tokenPayload = (await stillPending.json()) as {
+            data: { token: { mintAddress: string | null; status: string } };
+          };
+          expect(tokenPayload.data.token.mintAddress).toBeNull();
+          expect(tokenPayload.data.token.status).toBe("pending");
+        } finally {
+          getSignatureStatusesSpy.mockRestore();
+          accountExistsSpy.mockRestore();
+          getTransactionSpy.mockRestore();
+        }
+      });
+
+      it("records the server-derived ABL list address, ignoring the client-supplied one", async () => {
+        ensureRpcUrl();
+
+        const token = await seedIssuedToken({
+          id: "tok_deploy_confirm_abl",
+          mintAddress: null,
+          status: "pending",
+          uri: null,
+          isFreezable: true,
+          requiresAllowlist: true,
+          ablListAddress: null,
+        });
+
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSigner")
+          .mockResolvedValue({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
+        const getSignatureStatusesSpy = vi
+          .spyOn(SolanaRpc, "getSignatureStatuses")
+          .mockResolvedValueOnce([
+            { slot: 100n, confirmations: 10n, confirmationStatus: "confirmed", err: null },
+          ]);
+        const accountExistsSpy = vi.spyOn(SolanaRpc, "accountExists").mockResolvedValueOnce(true);
+        const getTransactionSpy = vi.spyOn(SolanaRpc, "getTransaction").mockResolvedValueOnce({
+          slot: 100n,
+          err: null,
+          instructions: [
+            {
+              programId: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+              parsedType: "initializeMint2",
+              info: { mint: TEST_SOLANA_ADDRESSES.mint },
+            },
+          ],
+        });
+        // The list-config PDA is derived server-side from (custody authority,
+        // mint). wallet3 is the legitimate derived value; the client tries to
+        // inject wallet1, which must be ignored.
+        const deriveAblListAddressSpy = vi
+          .spyOn(Mosaic, "deriveAblListAddress")
+          .mockResolvedValue(TEST_SOLANA_ADDRESSES.wallet3 as Address);
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${token.id}/deploy/confirm`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({
+                signature: "5ablConfirmSig",
+                mint: TEST_SOLANA_ADDRESSES.mint,
+                listAddress: TEST_SOLANA_ADDRESSES.wallet1, // bogus — must be ignored
+              }),
+            },
+            env
+          );
+
+          expect(res.status).toBe(200);
+
+          // Derived from the server-resolved custody authority + mint, never the body.
+          expect(deriveAblListAddressSpy).toHaveBeenCalledWith(
+            TEST_SOLANA_ADDRESSES.wallet2,
+            TEST_SOLANA_ADDRESSES.mint
+          );
+
+          const stored = await new TokenService(getDb(env)).getToken({
+            tokenId: token.id,
+            organizationId: TEST_PROJECT.organizationId,
+            projectId: TEST_PROJECT.id,
+          });
+          expect(stored?.ablListAddress).toBe(TEST_SOLANA_ADDRESSES.wallet3);
+          expect(stored?.ablListAddress).not.toBe(TEST_SOLANA_ADDRESSES.wallet1);
+        } finally {
+          createOrgSignerSpy.mockRestore();
+          getSignatureStatusesSpy.mockRestore();
+          accountExistsSpy.mockRestore();
+          getTransactionSpy.mockRestore();
+          deriveAblListAddressSpy.mockRestore();
+        }
+      });
+
+      it("pins the signing wallet from prepareDeploy so confirmDeploy can't diverge", async () => {
+        ensureRpcUrl();
+
+        const token = await seedIssuedToken({
+          id: "tok_deploy_confirm_wallet_pin",
+          mintAddress: null,
+          status: "pending",
+          uri: null,
+          signingWalletId: null,
+          requiresAllowlist: false,
+        });
+
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSigner")
+          .mockResolvedValue({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
+        const prepareCreateTokenSpy = vi
+          .spyOn(MosaicService.prototype, "prepareCreateToken")
+          .mockResolvedValueOnce({
+            serializedTx: "ZmFrZS1zZXJpYWxpemVkLXR4",
+            blockhash: "11111111111111111111111111111111",
+            lastValidBlockHeight: 0n,
+            mint: TEST_SOLANA_ADDRESSES.mint,
+            listAddress: undefined,
+          } as never);
+        const simulateTransactionSpy = vi
+          .spyOn(SolanaRpc, "simulateTransaction")
+          .mockResolvedValueOnce({ success: true, logs: [], unitsConsumed: 0n, error: null });
+        const getSignatureStatusesSpy = vi
+          .spyOn(SolanaRpc, "getSignatureStatuses")
+          .mockResolvedValueOnce([
+            { slot: 100n, confirmations: 10n, confirmationStatus: "confirmed", err: null },
+          ]);
+        const accountExistsSpy = vi.spyOn(SolanaRpc, "accountExists").mockResolvedValueOnce(true);
+        const getTransactionSpy = vi.spyOn(SolanaRpc, "getTransaction").mockResolvedValueOnce({
+          slot: 100n,
+          err: null,
+          instructions: [
+            {
+              programId: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+              parsedType: "initializeMint2",
+              info: { mint: TEST_SOLANA_ADDRESSES.mint },
+            },
+          ],
+        });
+
+        try {
+          // 1. prepareDeploy with a custom signing wallet — it must be persisted.
+          const prepareRes = await app.request(
+            `/v1/issuance/tokens/${token.id}/deploy/prepare`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({ signingWalletId: "wallet_custom_pin" }),
+            },
+            env
+          );
+          expect(prepareRes.status).toBe(200);
+
+          const afterPrepare = await new TokenService(getDb(env)).getToken({
+            tokenId: token.id,
+            organizationId: TEST_PROJECT.organizationId,
+            projectId: TEST_PROJECT.id,
+          });
+          expect(afterPrepare?.signingWalletId).toBe("wallet_custom_pin");
+
+          // 2. confirmDeploy with a DIVERGENT signingWalletId in the body — it
+          // must be ignored in favor of the wallet prepareDeploy pinned, or the
+          // custody address (and recorded authorities) would silently differ.
+          createOrgSignerSpy.mockClear();
+          const confirmRes = await app.request(
+            `/v1/issuance/tokens/${token.id}/deploy/confirm`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({
+                signature: "5walletPinSig",
+                mint: TEST_SOLANA_ADDRESSES.mint,
+                signingWalletId: "wallet_body_divergent_ignored",
+              }),
+            },
+            env
+          );
+          expect(confirmRes.status).toBe(200);
+          expect(createOrgSignerSpy).toHaveBeenCalledWith(
+            expect.anything(),
+            expect.anything(),
+            expect.anything(),
+            "wallet_custom_pin"
+          );
+        } finally {
+          createOrgSignerSpy.mockRestore();
+          prepareCreateTokenSpy.mockRestore();
+          simulateTransactionSpy.mockRestore();
+          getSignatureStatusesSpy.mockRestore();
+          accountExistsSpy.mockRestore();
+          getTransactionSpy.mockRestore();
+        }
+      });
+
+      it("returns 400 when the create tx is not confirmed on-chain", async () => {
+        ensureRpcUrl();
+
+        const token = await seedIssuedToken({
+          id: "tok_deploy_confirm_unconfirmed",
+          mintAddress: null,
+          status: "pending",
+          uri: null,
+          requiresAllowlist: false,
+        });
+
+        const getSignatureStatusesSpy = vi
+          .spyOn(SolanaRpc, "getSignatureStatuses")
+          .mockResolvedValueOnce([null]);
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${token.id}/deploy/confirm`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({
+                signature: "5unconfirmedSig",
+                mint: TEST_SOLANA_ADDRESSES.mint,
+              }),
+            },
+            env
+          );
+
+          expect(res.status).toBe(400);
+        } finally {
+          getSignatureStatusesSpy.mockRestore();
+        }
+      });
+
+      it("returns 400 when the token already has a mint address", async () => {
+        const token = await seedIssuedToken({
+          id: "tok_deploy_confirm_already",
+          mintAddress: TEST_SOLANA_ADDRESSES.mint,
+          status: "active",
+          uri: null,
+          requiresAllowlist: false,
+        });
+
+        const res = await app.request(
+          `/v1/issuance/tokens/${token.id}/deploy/confirm`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+            },
+            body: JSON.stringify({
+              signature: "5testSig",
+              mint: TEST_SOLANA_ADDRESSES.mint,
+            }),
+          },
+          env
+        );
+
+        expect(res.status).toBe(400);
+      });
+    });
+
+    describe("GET /v1/issuance/tokens/:tokenId/metadata.json", () => {
+      it("serves public metadata JSON without authentication", async () => {
+        const token = await seedIssuedToken({
+          id: "tok_metadata_public",
+          name: "Public Metadata Token",
+          symbol: "PMT",
+          description: "Served by SDP",
+          imageUrl: "https://issuer.example/logo.png",
+        });
+
+        const res = await app.request(
+          `/v1/issuance/tokens/${token.id}/metadata.json`,
+          { method: "GET" },
+          env
+        );
+
+        expect(res.status).toBe(200);
+        expect(res.headers.get("Access-Control-Allow-Origin")).toBe("*");
+        expect(res.headers.get("Cache-Control")).toBe("public, max-age=300");
+
+        const body = await res.json();
+        expect(body).toEqual({
+          name: "Public Metadata Token",
+          symbol: "PMT",
+          description: "Served by SDP",
+          image: "https://issuer.example/logo.png",
+        });
+      });
+
+      it("omits description and image when absent", async () => {
+        const token = await seedIssuedToken({
+          id: "tok_metadata_minimal",
+          name: "Minimal Token",
+          symbol: "MIN",
+          description: null,
+          imageUrl: null,
+        });
+
+        const res = await app.request(
+          `/v1/issuance/tokens/${token.id}/metadata.json`,
+          { method: "GET" },
+          env
+        );
+
+        expect(res.status).toBe(200);
+        const body = await res.json();
+        expect(body).toEqual({ name: "Minimal Token", symbol: "MIN" });
+      });
+
+      it("returns 404 with a short negative-cache for an unknown token id", async () => {
+        const res = await app.request(
+          "/v1/issuance/tokens/tok_does_not_exist/metadata.json",
+          { method: "GET" },
+          env
+        );
+
+        expect(res.status).toBe(404);
+        expect(res.headers.get("Access-Control-Allow-Origin")).toBe("*");
+        // Unknown ids never resolve — negative-cache to blunt enumeration probes.
+        expect(res.headers.get("Cache-Control")).toBe("public, max-age=60");
+      });
+
+      it("returns an uncacheable 404 for a known but not-yet-deployed token", async () => {
+        // A pending token can flip to 200 within seconds of deploy, so its 404
+        // must not be cached — otherwise the CDN/browser serves a stale 404.
+        const token = await seedIssuedToken({
+          id: "tok_metadata_pending",
+          name: "Pending Token",
+          symbol: "PEND",
+          mintAddress: null,
+          status: "pending",
+        });
+
+        const res = await app.request(
+          `/v1/issuance/tokens/${token.id}/metadata.json`,
+          { method: "GET" },
+          env
+        );
+
+        expect(res.status).toBe(404);
+        expect(res.headers.get("Access-Control-Allow-Origin")).toBe("*");
+        expect(res.headers.get("Cache-Control")).toBe("no-store");
+      });
+
+      it("keeps the CORS header on the error response when the DB read throws", async () => {
+        // The CORS header is set up-front, so even a 500 from a failed DB read
+        // stays fetchable from any origin — browsers see the real error rather
+        // than an opaque CORS failure.
+        const token = await seedIssuedToken({
+          id: "tok_metadata_db_error",
+          name: "Errored Token",
+          symbol: "ERR",
+        });
+        const spy = vi
+          .spyOn(TokenService.prototype, "getPublicTokenMetadata")
+          .mockRejectedValueOnce(new Error("db down"));
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${token.id}/metadata.json`,
+            { method: "GET" },
+            env
+          );
+
+          expect(res.status).toBe(500);
+          expect(res.headers.get("Access-Control-Allow-Origin")).toBe("*");
+        } finally {
+          spy.mockRestore();
+        }
+      });
     });
   });
 });
