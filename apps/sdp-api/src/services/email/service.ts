@@ -37,8 +37,15 @@ export class TransactionalEmailService {
       );
     }
 
-    const from = (message.from ?? this.defaultFrom).trim();
+    const hasMessageFrom = message.from !== undefined;
+    const from = hasMessageFrom ? message.from?.trim() : this.defaultFrom;
     if (!from) {
+      if (hasMessageFrom) {
+        throw new TransactionalEmailError(
+          "invalid_message",
+          "Transactional email sender cannot be blank"
+        );
+      }
       throw new TransactionalEmailError(
         "misconfigured",
         "EMAIL_FROM is required for Transactional Email"
@@ -70,7 +77,7 @@ export class TransactionalEmailService {
       }
 
       return {
-        messageId: result.data.id,
+        messageId: result.data?.id ?? null,
         acceptedAt: new Date().toISOString(),
       };
     } catch (cause) {

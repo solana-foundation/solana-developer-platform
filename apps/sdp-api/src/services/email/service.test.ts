@@ -62,6 +62,18 @@ describe("TransactionalEmailService", () => {
       code: "invalid_message",
       message: "Transactional email requires a subject",
     });
+
+    await expect(
+      service.send({
+        to: ["payer@example.com"],
+        from: "   ",
+        subject: "Payment request",
+        text: "Pay now",
+      })
+    ).rejects.toMatchObject({
+      code: "invalid_message",
+      message: "Transactional email sender cannot be blank",
+    });
   });
 
   it("maps Resend SDK errors without maintaining provider-specific status rules", async () => {
@@ -92,6 +104,26 @@ describe("TransactionalEmailService", () => {
       details: resendError,
       message: "Too many requests",
     });
+  });
+
+  it("returns a null message id when Resend succeeds without response data", async () => {
+    const send = vi.fn().mockResolvedValue({
+      data: null,
+      error: null,
+      headers: {},
+    });
+    const service = new TransactionalEmailService(
+      { send } as ResendEmails,
+      "noreply@mail.solana.org"
+    );
+
+    await expect(
+      service.send({
+        to: ["payer@example.com"],
+        subject: "Payment request",
+        text: "Pay now",
+      })
+    ).resolves.toMatchObject({ messageId: null });
   });
 
   it("fails clearly when Resend configuration is missing", () => {
