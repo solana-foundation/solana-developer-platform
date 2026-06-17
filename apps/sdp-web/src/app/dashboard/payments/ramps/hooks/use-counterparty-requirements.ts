@@ -192,6 +192,18 @@ export function useCounterpartyRequirements(
       if (!lastAdvancePayload || !params?.provider) {
         return;
       }
+      if (onboarding?.status === "funding_account_provisioning") {
+        const advanced = await advanceCounterpartyRequirements(
+          params.counterpartyId,
+          params.provider,
+          {
+            ...lastAdvancePayload,
+            collectedData,
+          }
+        );
+        setOnboarding(advanced);
+        return;
+      }
       const result = await fetchCounterpartyRequirements(
         params.counterpartyId,
         params.provider,
