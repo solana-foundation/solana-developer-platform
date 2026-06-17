@@ -199,6 +199,10 @@ function OnboardingPendingPanel({
       description =
         "Sumsub is reviewing your details — this usually takes just a few minutes. Feel free to come back later; your deposit instructions will show up here as soon as you're approved.";
       break;
+    case "ready":
+      title = "Preparing your deposit instructions";
+      description = "Your funding account is ready — fetching your deposit details now.";
+      break;
     default:
       title = "Setting up your funding account";
       description =
@@ -287,7 +291,7 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
     );
   }
 
-  if (currentStepId === "PROVIDER" && onboarding && onboarding.status !== "ready" && !quote) {
+  if (currentStepId === "PROVIDER" && onboarding && !quote) {
     return <OnboardingPendingPanel status={onboarding.status} />;
   }
 
