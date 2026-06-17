@@ -35,7 +35,12 @@
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 1 },
       "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
       "targets": [
-        { "refId": "A", "datasource": { "type": "prometheus", "uid": "grafanacloud-prom" }, "expr": "sum by (method) (rate(kora_http_requests_total{service=\"$service\"}[5m]))", "legendFormat": "{{method}}" }
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "grafanacloud-prom" },
+          "expr": "sum by (method) (rate(kora_http_requests_total{service=\"$service\"}[5m]))",
+          "legendFormat": "{{method}}"
+        }
       ]
     },
     {
@@ -44,9 +49,17 @@
       "title": "5xx rate",
       "datasource": { "type": "prometheus", "uid": "grafanacloud-prom" },
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 1 },
-      "fieldConfig": { "defaults": { "unit": "reqps", "color": { "mode": "fixed", "fixedColor": "red" } }, "overrides": [] },
+      "fieldConfig": {
+        "defaults": { "unit": "reqps", "color": { "mode": "fixed", "fixedColor": "red" } },
+        "overrides": []
+      },
       "targets": [
-        { "refId": "A", "datasource": { "type": "prometheus", "uid": "grafanacloud-prom" }, "expr": "sum (rate(kora_http_requests_total{service=\"$service\",status=~\"5..\"}[5m]))", "legendFormat": "5xx" }
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "grafanacloud-prom" },
+          "expr": "sum (rate(kora_http_requests_total{service=\"$service\",status=~\"5..\"}[5m]))",
+          "legendFormat": "5xx"
+        }
       ]
     },
     {
@@ -57,11 +70,26 @@
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 9 },
       "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
       "targets": [
-        { "refId": "A", "datasource": { "type": "prometheus", "uid": "grafanacloud-prom" }, "expr": "histogram_quantile(0.50, sum by (le) (rate(kora_http_request_duration_seconds_bucket{service=\"$service\"}[5m])))", "legendFormat": "p50" },
-        { "refId": "B", "datasource": { "type": "prometheus", "uid": "grafanacloud-prom" }, "expr": "histogram_quantile(0.95, sum by (le) (rate(kora_http_request_duration_seconds_bucket{service=\"$service\"}[5m])))", "legendFormat": "p95" }
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "grafanacloud-prom" },
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(kora_http_request_duration_seconds_bucket{service=\"$service\"}[5m])))",
+          "legendFormat": "p50"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "grafanacloud-prom" },
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(kora_http_request_duration_seconds_bucket{service=\"$service\"}[5m])))",
+          "legendFormat": "p95"
+        }
       ]
     },
-    { "id": 5, "type": "row", "title": "Fee payer", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 17 } },
+    {
+      "id": 5,
+      "type": "row",
+      "title": "Fee payer",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 17 }
+    },
     {
       "id": 6,
       "type": "stat",
@@ -72,12 +100,24 @@
         "defaults": {
           "unit": "none",
           "decimals": 4,
-          "thresholds": { "mode": "absolute", "steps": [ { "color": "red", "value": null }, { "color": "yellow", "value": 0.5 }, { "color": "green", "value": 1 } ] }
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 0.5 },
+              { "color": "green", "value": 1 }
+            ]
+          }
         },
         "overrides": []
       },
       "targets": [
-        { "refId": "A", "datasource": { "type": "prometheus", "uid": "grafanacloud-prom" }, "expr": "max(signer_balance_lamports{service=\"$service\"}) / 1e9", "legendFormat": "balance" }
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "grafanacloud-prom" },
+          "expr": "max(signer_balance_lamports{service=\"$service\"}) / 1e9",
+          "legendFormat": "balance"
+        }
       ]
     },
     { "id": 7, "type": "row", "title": "Logs", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 24 } },
@@ -89,7 +129,11 @@
       "gridPos": { "h": 10, "w": 24, "x": 0, "y": 25 },
       "options": { "showTime": true, "wrapLogMessage": true, "sortOrder": "Descending" },
       "targets": [
-        { "refId": "A", "datasource": { "type": "loki", "uid": "grafanacloud-logs" }, "expr": "{service=\"$service\"}" }
+        {
+          "refId": "A",
+          "datasource": { "type": "loki", "uid": "grafanacloud-logs" },
+          "expr": "{service=\"$service\"}"
+        }
       ]
     }
   ]

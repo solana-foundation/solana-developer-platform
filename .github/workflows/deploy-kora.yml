@@ -51,7 +51,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install Doppler CLI
-        uses: dopplerhq/cli-action@v3
+        uses: dopplerhq/cli-action@014df23b1329b615816a38eb5f473bb9000700b1 # v3
 
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v3
