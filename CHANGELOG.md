@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.30.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.29.0...v0.30.0) (2026-06-16)
+
+### Features
+
+* make transactions more descriptive ([#447](https://github.com/solana-foundation/solana-developer-platform/pull/447)) ([991e22d](https://github.com/solana-foundation/solana-developer-platform/commit/991e22d5558f692608d6f4336e9cd95c3578745c))
+* **issuance:** host token metadata.json so a URI is no longer required ([#424](https://github.com/solana-foundation/solana-developer-platform/pull/424)) ([8169748](https://github.com/solana-foundation/solana-developer-platform/commit/8169748fccc5b94e73c411e88b13c83a753cd9eb))
+
 ## [0.29.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.28.0...v0.29.0) (2026-06-15)
 
 ### Features
