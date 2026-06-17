@@ -29,7 +29,7 @@ if [ "$ENV" = "mainnet" ] && [ -z "${KORA_REDIS_URL:-}" ]; then
 fi
 
 SERVICE="kora-${ENV}"
-TAG="$(git -C "$SCRIPT_DIR" rev-parse --short HEAD 2>/dev/null || echo manual)"
+TAG="$(git -C "$SCRIPT_DIR" rev-parse --short HEAD 2>/dev/null || echo manual)$(git -C "$SCRIPT_DIR" diff --quiet 2>/dev/null || echo -dirty)"
 IMAGE="${REGION}-docker.pkg.dev/${PROJECT}/${SERVICE}/kora:${TAG}"
 
 case "$ENV" in
