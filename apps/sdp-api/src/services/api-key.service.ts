@@ -580,8 +580,7 @@ export class ApiKeyService {
 
     for (const binding of bindingRows.results) {
       const apiKeyControlProfileId = binding.api_key_control_profile_id
-        ? (profileIdMap.get(binding.api_key_control_profile_id as string) ??
-          binding.api_key_control_profile_id)
+        ? (profileIdMap.get(binding.api_key_control_profile_id as string) ?? null)
         : null;
 
       await db

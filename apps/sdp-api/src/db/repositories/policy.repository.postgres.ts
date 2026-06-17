@@ -216,18 +216,6 @@ async function getApiKeyControlProfileRevisionById(
   return row ? mapApiKeyControlProfileRevisionRow(row) : null;
 }
 
-async function getApiKeyWalletPolicyBindingById(
-  db: AppDb,
-  bindingId: string
-): Promise<ApiKeyWalletPolicyBindingRow | null> {
-  const row = await db
-    .prepare("SELECT * FROM api_key_wallet_policy_bindings WHERE id = ?")
-    .bind(bindingId)
-    .first<Record<string, unknown>>();
-
-  return row ? mapApiKeyWalletPolicyBindingRow(row) : null;
-}
-
 async function getWalletOperationByIdInternal(
   db: AppDb,
   walletOperationId: string
@@ -255,6 +243,18 @@ async function listPolicyEvaluationsForOperationInternal(
     .all<Record<string, unknown>>();
 
   return rows.results.map(mapPolicyEvaluationRow);
+}
+
+async function getPolicyEvaluationByIdInternal(
+  db: AppDb,
+  policyEvaluationId: string
+): Promise<PolicyEvaluationRow | null> {
+  const row = await db
+    .prepare("SELECT * FROM policy_evaluations WHERE id = ?")
+    .bind(policyEvaluationId)
+    .first<Record<string, unknown>>();
+
+  return row ? mapPolicyEvaluationRow(row) : null;
 }
 
 export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
@@ -532,30 +532,13 @@ export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
     },
 
     async upsertApiKeyWalletPolicyBinding(input: UpsertApiKeyWalletPolicyBindingInput) {
-      const existing =
+      const id = generateApiKeyWalletPolicyBindingId();
+      const conflictTarget =
         input.bindingScope === "all"
-          ? await db
-              .prepare(
-                `SELECT id
-                 FROM api_key_wallet_policy_bindings
-                 WHERE api_key_id = ? AND binding_scope = 'all'`
-              )
-              .bind(input.apiKeyId)
-              .first<{ id: string }>()
-          : await db
-              .prepare(
-                `SELECT id
-                 FROM api_key_wallet_policy_bindings
-                 WHERE api_key_id = ?
-                   AND binding_scope = 'selected'
-                   AND wallet_id = ?`
-              )
-              .bind(input.apiKeyId, input.walletId ?? null)
-              .first<{ id: string }>();
+          ? "(api_key_id) WHERE binding_scope = 'all'"
+          : "(api_key_id, wallet_id) WHERE binding_scope = 'selected'";
 
-      const id = existing?.id ?? generateApiKeyWalletPolicyBindingId();
-
-      await db
+      const row = await db
         .prepare(
           `INSERT INTO api_key_wallet_policy_bindings (
              id,
@@ -566,13 +549,13 @@ export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
              wallet_control_profile_id,
              api_key_control_profile_id
            ) VALUES (?, ?, ?, ?, ?, ?, ?)
-           ON CONFLICT (id)
+           ON CONFLICT ${conflictTarget}
            DO UPDATE SET
-             wallet_id = EXCLUDED.wallet_id,
              custody_wallet_id = EXCLUDED.custody_wallet_id,
              wallet_control_profile_id = EXCLUDED.wallet_control_profile_id,
              api_key_control_profile_id = EXCLUDED.api_key_control_profile_id,
-             updated_at = sdp_iso_now()`
+             updated_at = sdp_iso_now()
+           RETURNING *`
         )
         .bind(
           id,
@@ -583,9 +566,9 @@ export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
           input.walletControlProfileId ?? null,
           input.apiKeyControlProfileId ?? null
         )
-        .run();
+        .first<Record<string, unknown>>();
 
-      return getApiKeyWalletPolicyBindingById(db, id);
+      return row ? mapApiKeyWalletPolicyBindingRow(row) : null;
     },
 
     async listApiKeyWalletPolicyBindings(apiKeyId: string) {
@@ -683,8 +666,7 @@ export function createPostgresPolicyRepository(db: AppDb): PolicyRepository {
         )
         .run();
 
-      const rows = await listPolicyEvaluationsForOperationInternal(db, input.walletOperationId);
-      return rows.find((row) => row.id === id) ?? null;
+      return getPolicyEvaluationByIdInternal(db, id);
     },
 
     async listPolicyEvaluationsForOperation(walletOperationId: string) {
