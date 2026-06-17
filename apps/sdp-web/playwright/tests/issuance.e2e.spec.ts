@@ -1,4 +1,5 @@
 import { expect, type Page, test } from "@playwright/test";
+import { formatDisplayLabel } from "@/lib/utils";
 import { getPlaywrightAdminSession } from "../support/auth-session";
 import {
   clearIssuanceFixtures,
@@ -443,3 +444,22 @@ test.describe
       await expect(page.getByText("Token is paused")).toHaveCount(0);
     });
   });
+
+test.describe("formatDisplayLabel", () => {
+  test("single word", () => {
+    expect(formatDisplayLabel("active")).toBe("Active");
+  });
+
+  test("snake_case", () => {
+    expect(formatDisplayLabel("force_burn")).toBe("Force Burn");
+    expect(formatDisplayLabel("update_authority")).toBe("Update Authority");
+  });
+
+  test("kebab-case", () => {
+    expect(formatDisplayLabel("tokenized-security")).toBe("Tokenized Security");
+  });
+
+  test("RWA override", () => {
+    expect(formatDisplayLabel("rwa")).toBe("RWA");
+  });
+});
