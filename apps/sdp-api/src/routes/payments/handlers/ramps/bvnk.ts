@@ -193,11 +193,12 @@ export async function ensureBvnkPaymentRule(
     return { customer, entry, onboardingStatus: "ready" };
   }
 
+  if (!entry.request) {
+    entry = { ...entry, request: params };
+    await persistBvnkOnrampState(c, counterparty, projectId, key, customer, entry);
+  }
+
   if (!isBvnkCustomerVerified(customer.status) || !customer.customerReference) {
-    if (!entry.request) {
-      entry = { ...entry, request: params };
-      await persistBvnkOnrampState(c, counterparty, projectId, key, customer, entry);
-    }
     return {
       customer,
       entry,

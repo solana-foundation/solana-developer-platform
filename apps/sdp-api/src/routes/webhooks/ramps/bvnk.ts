@@ -10,6 +10,7 @@ import {
   type BvnkWebhookEvent,
   findBvnkWalletEntryKey,
   isBvnkCustomerVerified,
+  isBvnkWalletActive,
   readBvnkCustomer,
   readBvnkOnrampEntry,
   readBvnkWallets,
@@ -165,6 +166,21 @@ async function provisionPendingBvnkOnramps(
   }
 }
 
+function scheduleBvnkProvisioning(
+  c: AppContext,
+  repo: CounterpartiesRepository,
+  environment: SdpEnvironment,
+  customerReference: string
+): void {
+  c.executionCtx.waitUntil(
+    provisionPendingBvnkOnramps(c, repo, environment, customerReference).catch((error) =>
+      console.error(
+        `[bvnk webhook] background provisioning failed: ${error instanceof Error ? error.message : String(error)}`
+      )
+    )
+  );
+}
+
 async function processBvnkCustomerWebhook(
   c: AppContext,
   environment: SdpEnvironment,
@@ -202,21 +218,14 @@ async function processBvnkCustomerWebhook(
       event.customerReference,
       event
     );
-    const provisioning = provisionPendingBvnkOnramps(
-      c,
-      repo,
-      environment,
-      event.customerReference
-    ).catch((error) =>
-      console.error(
-        `[bvnk webhook] background provisioning failed: ${error instanceof Error ? error.message : String(error)}`
-      )
-    );
-    c.executionCtx.waitUntil(provisioning);
+    scheduleBvnkProvisioning(c, repo, environment, event.customerReference);
     return;
   }
 
-  return patchBvnkWalletFromWebhook(repo, counterparty, event.customerReference, event);
+  await patchBvnkWalletFromWebhook(repo, counterparty, event.customerReference, event);
+  if (isBvnkWalletActive(event.walletStatus)) {
+    scheduleBvnkProvisioning(c, repo, environment, event.customerReference);
+  }
 }
 
 export async function handleBvnkRampWebhook(

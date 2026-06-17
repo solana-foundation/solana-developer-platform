@@ -574,16 +574,19 @@ describe("BVNK ramp webhook", () => {
       .run();
   }
 
-  function sendBvnkWebhook(payload: unknown, signature?: string) {
+  async function sendBvnkWebhook(payload: unknown, signature?: string) {
     const body = JSON.stringify(payload);
     const sig =
       signature ?? createHmac("sha256", BVNK_WEBHOOK_SECRET).update(body).digest("base64");
+    const background: Promise<unknown>[] = [];
     const executionCtx: ExecutionContext = {
-      waitUntil() {},
+      waitUntil(promise) {
+        background.push(promise);
+      },
       passThroughOnException() {},
       props: {},
     };
-    return app.request(
+    const res = await app.request(
       "/webhooks/payments/ramps/sandbox/bvnk",
       {
         method: "POST",
@@ -593,6 +596,8 @@ describe("BVNK ramp webhook", () => {
       env,
       executionCtx
     );
+    await Promise.allSettled(background);
+    return res;
   }
 
   beforeEach(async () => {
@@ -682,6 +687,75 @@ describe("BVNK ramp webhook", () => {
     const entry = (await readBvnk())?.wallets?.["USD:USDC_SOLANA:dest"];
     expect(entry?.bankAccount?.accountNumber).toBe("900473221558");
     expect(entry?.bankAccount?.bankName).toBe("LEAD BANK");
+  });
+
+  it("creates the payment rule when a wallet activates for a verified customer", async () => {
+    await getDb(env)
+      .prepare("UPDATE counterparties SET provider_data = ? WHERE id = ?")
+      .bind(
+        {
+          bvnk: {
+            customer: {
+              customerReference: CUSTOMER_REFERENCE,
+              externalReference: "sdp_bvnkwebhook",
+              status: "VERIFIED",
+            },
+            wallets: {
+              "USD:USDC_SOLANA:dest": {
+                walletId: WALLET_ID,
+                walletStatus: "PENDING",
+                request: {
+                  fiatCurrency: "USD",
+                  currency: "USDC",
+                  network: "SOLANA",
+                  destinationWalletAddress: "dest",
+                },
+              },
+            },
+          },
+        },
+        COUNTERPARTY_ID
+      )
+      .run();
+
+    const createRule = vi
+      .spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "createOnrampRule")
+      .mockResolvedValue({ id: "rule_webhook_1", status: "ACTIVE" });
+
+    const res = await sendBvnkWebhook({
+      event: "ledger:v2:wallet:status-change",
+      data: {
+        id: WALLET_ID,
+        status: "ACTIVE",
+        customer: { id: CUSTOMER_REFERENCE, name: "Webhook Buyer" },
+        paymentInstruments: [
+          {
+            type: "FIAT",
+            accountNumber: "900473221558",
+            bankDetails: { bic: "LEADUS49XXX", name: "LEAD BANK" },
+          },
+        ],
+      },
+    });
+
+    expect(res.status).toBe(200);
+    expect(createRule).toHaveBeenCalledTimes(1);
+
+    const row = await getDb(env)
+      .prepare("SELECT provider_data FROM counterparties WHERE id = ?")
+      .bind(COUNTERPARTY_ID)
+      .first<{
+        provider_data: {
+          bvnk?: {
+            wallets?: Record<string, { ruleId?: string; bankAccount?: { accountNumber?: string } }>;
+          };
+        };
+      }>();
+    const entry = row?.provider_data.bvnk?.wallets?.["USD:USDC_SOLANA:dest"];
+    expect(entry?.ruleId).toBe("rule_webhook_1");
+    expect(entry?.bankAccount?.accountNumber).toBe("900473221558");
+
+    createRule.mockRestore();
   });
 
   it("rejects a webhook with an invalid signature", async () => {
