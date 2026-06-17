@@ -42,6 +42,6 @@
   "annotations": {
     "summary": "Kora 5xx ratio > 1%",
     "description": "Kora is returning 5xx for more than 1% of requests over the last 5 minutes. Check the Kora paymaster dashboard and Cloud Run logs.",
-    "runbook_url": "https://linear.app/solana-fndn/issue/PRO-1323"
+    "runbook_url": "https://app.notion.com/p/382d36dad52d815c8067de9817a01926"
   }
 }

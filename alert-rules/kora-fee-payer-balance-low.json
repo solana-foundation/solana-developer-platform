@@ -42,6 +42,6 @@
   "annotations": {
     "summary": "Kora fee-payer SOL balance below 0.5",
     "description": "max(signer_balance_lamports)/1e9 < 0.5 SOL. The paymaster will stop sponsoring transactions when it runs out — top up the fee-payer.",
-    "runbook_url": "https://linear.app/solana-fndn/issue/PRO-1322"
+    "runbook_url": "https://app.notion.com/p/382d36dad52d8182a6ecfcbccdcba405"
   }
 }
