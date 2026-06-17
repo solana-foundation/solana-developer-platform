@@ -176,7 +176,7 @@ test.describe
       await expect(page.getByTestId("extension-row-control-list")).toContainText("Allowlist");
       await expect(page.getByTestId("extension-row-mintable")).toContainText("Enabled");
       await expect(page.getByTestId("extension-row-freezable")).toContainText("Enabled");
-      await expect(page.getByTestId("extension-row-default-account-state")).toContainText("frozen");
+      await expect(page.getByTestId("extension-row-default-account-state")).toContainText("Frozen");
 
       await expect(page.getByTestId("extension-row-transfer-fee")).toHaveCount(0);
       await expect(page.getByTestId("extension-row-scaled-ui")).toHaveCount(0);
