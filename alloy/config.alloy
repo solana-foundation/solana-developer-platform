@@ -37,12 +37,14 @@ loki.write "grafanacloud" {
   }
 }
 
-// Cloud Run logs -> Loki. Needs a Cloud Logging sink -> Pub/Sub subscription for kora-mainnet.
+// Cloud Run logs -> Loki. Topic `kora-logs` + subscription `kora-logs-alloy` exist in
+// solana-developer-platform; ENABLE once the log sink is created (blocked on logging.sinks.create —
+// needs a logging admin) and the Alloy runtime SA has roles/pubsub.subscriber on the subscription.
 // loki.source.gcplog "kora" {
 //   pull {
-//     project_id   = "trading-prod-494016"
-//     subscription = sys.env("GCP_LOG_SUBSCRIPTION")
-//     labels       = { service = "kora-mainnet" }
+//     project_id   = "solana-developer-platform"
+//     subscription = "kora-logs-alloy"
+//     labels       = { service = "kora-sdp" }
 //   }
 //   forward_to = [loki.write.grafanacloud.receiver]
 // }
