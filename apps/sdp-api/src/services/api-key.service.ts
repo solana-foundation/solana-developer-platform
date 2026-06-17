@@ -5,9 +5,10 @@
  */
 
 import type { ApiKeyEnvironment, ApiKeyRole, ApiKeyStatus, Permission } from "@sdp/types";
-import { AppError } from "@/lib/errors";
+import { AppError, badRequest } from "@/lib/errors";
 import { hashString } from "@/lib/hash";
 import { createApiKeyMaterial, parseJsonArray } from "./api-key.utils";
+import { assertGrantableApiKeyPermissions } from "./api-key-scope.service";
 
 export interface ApiKeyListItem {
   id: string;
@@ -36,6 +37,7 @@ export interface CreateApiKeyInput {
   projectId: string;
   createdByKeyId?: string;
   createdByUserId?: string;
+  actorPermissions: Permission[];
   name: string;
   description?: string | null;
   role: ApiKeyRole;
@@ -44,6 +46,20 @@ export interface CreateApiKeyInput {
   expiresAt?: string | null;
   signingWalletId?: string | null;
   pepper?: string;
+}
+
+export interface UpdateApiKeyInput {
+  keyId: string;
+  organizationId: string;
+  projectId: string;
+  actorPermissions: Permission[];
+  currentRole: ApiKeyRole;
+  name?: string;
+  description?: string | null;
+  allowedIps?: string[] | null;
+  expiresAt?: string | null;
+  permissions?: Permission[] | null;
+  signingWallet?: { walletId: string | null };
 }
 
 export interface CreateApiKeyResult {
@@ -150,6 +166,8 @@ export class ApiKeyService {
   }
 
   async createApiKey(input: CreateApiKeyInput): Promise<CreateApiKeyResult> {
+    assertGrantableApiKeyPermissions(input.actorPermissions, input.role, input.permissions);
+
     const project = await this.db
       .prepare(`SELECT environment FROM projects WHERE id = ? AND organization_id = ?`)
       .bind(input.projectId, input.organizationId)
@@ -235,6 +253,56 @@ export class ApiKeyService {
       createdAt: new Date().toISOString(),
       keyHash,
     };
+  }
+
+  async updateApiKey(input: UpdateApiKeyInput): Promise<void> {
+    if (input.permissions !== undefined) {
+      assertGrantableApiKeyPermissions(
+        input.actorPermissions,
+        input.currentRole,
+        input.permissions
+      );
+    }
+
+    const updates: string[] = [];
+    const values: (string | null)[] = [];
+
+    if (input.name !== undefined) {
+      updates.push("name = ?");
+      values.push(input.name);
+    }
+    if (input.description !== undefined) {
+      updates.push("description = ?");
+      values.push(input.description);
+    }
+    if (input.allowedIps !== undefined) {
+      updates.push("allowed_ips = ?");
+      values.push(input.allowedIps ? JSON.stringify(input.allowedIps) : null);
+    }
+    if (input.expiresAt !== undefined) {
+      updates.push("expires_at = ?");
+      values.push(input.expiresAt);
+    }
+    if (input.permissions !== undefined) {
+      updates.push("permissions = ?");
+      values.push(input.permissions ? JSON.stringify(input.permissions) : null);
+    }
+    if (input.signingWallet) {
+      updates.push("signing_wallet_id = ?");
+      values.push(input.signingWallet.walletId);
+    }
+
+    if (updates.length === 0) {
+      throw badRequest("No fields to update");
+    }
+
+    values.push(input.keyId, input.organizationId, input.projectId);
+    await this.db
+      .prepare(
+        `UPDATE api_keys SET ${updates.join(", ")} WHERE id = ? AND organization_id = ? AND project_id = ?`
+      )
+      .bind(...values)
+      .run();
   }
 
   async rotateApiKey(
