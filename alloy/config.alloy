@@ -1,0 +1,50 @@
+// Grafana Alloy collector for Kora observability.
+// Scrapes the kora-mainnet /metrics endpoint and remote_writes to Grafana Cloud Mimir,
+// and forwards Cloud Run logs to Loki. Credentials come from Doppler (project
+// solana-developer-platform, config prd) via env — never hardcode tokens here.
+//
+// Run:   doppler run --project solana-developer-platform --config prd -- \
+//          alloy run --server.http.listen-addr=0.0.0.0:${PORT:-12345} alloy/config.alloy
+// Deploy: a small always-on Cloud Run service / VM (min 1 instance) with those env vars.
+
+// SDP service scrape targets — add more services here as they expose /metrics.
+prometheus.scrape "sdp" {
+  targets = [
+    { __address__ = "kora-mainnet-562819300243.us-central1.run.app:443", __scheme__ = "https", __metrics_path__ = "/metrics", service = "kora-mainnet" },
+    { __address__ = "kora-sdp-654412331372.us-central1.run.app:443", __scheme__ = "https", __metrics_path__ = "/metrics", service = "kora-sdp" },
+  ]
+  scrape_interval = "30s"
+  forward_to      = [prometheus.remote_write.grafanacloud.receiver]
+}
+
+prometheus.remote_write "grafanacloud" {
+  endpoint {
+    url = sys.env("GC_PROM_PUSH_URL")
+    basic_auth {
+      username = sys.env("GC_PROM_USER")
+      password = sys.env("GC_PROM_TOKEN")
+    }
+  }
+}
+
+loki.write "grafanacloud" {
+  endpoint {
+    url = sys.env("GC_LOKI_PUSH_URL")
+    basic_auth {
+      username = sys.env("GC_LOKI_USER")
+      password = sys.env("GC_LOKI_TOKEN")
+    }
+  }
+}
+
+// Cloud Run logs -> Loki. Topic `kora-logs` + subscription `kora-logs-alloy` exist in
+// solana-developer-platform; ENABLE once the log sink is created (blocked on logging.sinks.create —
+// needs a logging admin) and the Alloy runtime SA has roles/pubsub.subscriber on the subscription.
+// loki.source.gcplog "kora" {
+//   pull {
+//     project_id   = "solana-developer-platform"
+//     subscription = "kora-logs-alloy"
+//     labels       = { service = "kora-sdp" }
+//   }
+//   forward_to = [loki.write.grafanacloud.receiver]
+// }
