@@ -414,6 +414,8 @@ export function useRampWizard<TId extends string>(
     refreshQuote,
     onboarding: requirements.onboarding,
     isAdvancing: requirements.isAdvancing,
+    onboardingError: requirements.onboardingError,
+    retryOnboarding: requirements.retryOnboarding,
     hostedQuoteLoading,
     counterpartyDialogOpen,
     setCounterpartyDialogOpen,

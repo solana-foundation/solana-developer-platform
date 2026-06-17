@@ -11,6 +11,7 @@ import {
   formatMinorCurrencyAmount,
   formatTimestamp,
 } from "@/app/dashboard/payments/payments-overview.utils";
+import { Button } from "@/components/ui/button";
 import { ONRAMP_PAIRS, RAMP_PROVIDER_OPTIONS, toRampCryptoToken } from "@/lib/ramps";
 import type { OnrampWizard } from "../hooks/use-onramp-wizard";
 import { HostedRampFrame } from "./hosted-ramp-frame";
@@ -180,6 +181,19 @@ function OnrampCompleteScreen({
   );
 }
 
+function OnboardingErrorPanel({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <div className="flex flex-col items-center gap-4 px-6 py-12 text-center">
+      <XCircleIcon className="size-10 text-status-error-text" />
+      <p className="text-lg font-medium text-text-extra-high">Something went wrong</p>
+      <p className="max-w-md text-sm leading-relaxed text-text-low">{message}</p>
+      <Button type="button" variant="secondary" onClick={onRetry}>
+        Try again
+      </Button>
+    </div>
+  );
+}
+
 function OnboardingPendingPanel({
   status,
 }: {
@@ -232,6 +246,8 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
     selectedWallet,
     selectedRampPair,
     onboarding,
+    onboardingError,
+    retryOnboarding,
     quote,
     transferStatus,
     quoteSimulationLoading,
@@ -292,6 +308,9 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
   }
 
   if (currentStepId === "PROVIDER" && onboarding && !quote) {
+    if (onboardingError) {
+      return <OnboardingErrorPanel message={onboardingError} onRetry={retryOnboarding} />;
+    }
     return <OnboardingPendingPanel status={onboarding.status} />;
   }
 
