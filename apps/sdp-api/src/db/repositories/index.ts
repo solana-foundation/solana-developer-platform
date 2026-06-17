@@ -67,12 +67,34 @@ export {
   WALLET_TRANSFER_TYPES,
 } from "./payments.repository";
 export { createPostgresPaymentsRepository } from "./payments.repository.postgres";
+export type {
+  ActiveApiKeyControlProfileResult,
+  ActiveWalletControlProfileResult,
+  ApiKeyControlProfileRevisionRow,
+  ApiKeyControlProfileRow,
+  ApiKeyWalletPolicyBindingRow,
+  CreateApiKeyControlProfileInput,
+  CreateApiKeyControlProfileRevisionInput,
+  CreatePolicyEvaluationInput,
+  CreateWalletControlProfileInput,
+  CreateWalletControlProfileRevisionInput,
+  CreateWalletOperationInput,
+  PolicyEvaluationRow,
+  PolicyRepository,
+  PolicyRepositoryContext,
+  UpsertApiKeyWalletPolicyBindingInput,
+  WalletControlProfileRevisionRow,
+  WalletControlProfileRow,
+  WalletOperationRow,
+} from "./policy.repository";
+export { createPostgresPolicyRepository } from "./policy.repository.postgres";
 export {
   createCounterpartiesRepository,
   createCounterpartyAccountsRepository,
   createPaymentRecurringPaymentsRepository,
   createPaymentSubscriptionsRepository,
   createPaymentsRepository,
+  createPolicyRepository,
   createTokenRepository,
 } from "./repository-factory";
 export type {
