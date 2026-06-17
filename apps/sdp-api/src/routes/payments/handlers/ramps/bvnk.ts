@@ -206,6 +206,10 @@ export async function ensureBvnkPaymentRule(
     };
   }
 
+  if (entry.provisioningError) {
+    entry = { ...entry, provisioningError: undefined };
+  }
+
   if (!entry.walletId) {
     const walletProfile = await client.getFiatWalletProfile(ctx, {
       customerReference: customer.customerReference,

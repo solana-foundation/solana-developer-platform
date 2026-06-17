@@ -758,6 +758,61 @@ describe("BVNK ramp webhook", () => {
     createRule.mockRestore();
   });
 
+  it("clears a stale provisioningError when a retry makes forward progress", async () => {
+    await getDb(env)
+      .prepare("UPDATE counterparties SET provider_data = ? WHERE id = ?")
+      .bind(
+        {
+          bvnk: {
+            customer: {
+              customerReference: CUSTOMER_REFERENCE,
+              externalReference: "sdp_bvnkwebhook",
+              status: "VERIFIED",
+            },
+            wallets: {
+              "USD:USDC_SOLANA:dest": {
+                walletId: WALLET_ID,
+                walletStatus: "PENDING",
+                provisioningError: "BVNK rule creation failed",
+                request: {
+                  fiatCurrency: "USD",
+                  currency: "USDC",
+                  network: "SOLANA",
+                  destinationWalletAddress: "dest",
+                },
+              },
+            },
+          },
+        },
+        COUNTERPARTY_ID
+      )
+      .run();
+
+    const getWallet = vi
+      .spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "getFiatWallet")
+      .mockResolvedValue({ id: WALLET_ID, status: "PENDING" });
+
+    const res = await sendBvnkWebhook({
+      event: "bvnk:customers:status-change",
+      data: { customerId: CUSTOMER_REFERENCE, status: "VERIFIED", customerType: "INDIVIDUAL" },
+    });
+
+    expect(res.status).toBe(200);
+    const row = await getDb(env)
+      .prepare("SELECT provider_data FROM counterparties WHERE id = ?")
+      .bind(COUNTERPARTY_ID)
+      .first<{
+        provider_data: {
+          bvnk?: { wallets?: Record<string, { provisioningError?: string; ruleId?: string }> };
+        };
+      }>();
+    const entry = row?.provider_data.bvnk?.wallets?.["USD:USDC_SOLANA:dest"];
+    expect(entry?.provisioningError).toBeUndefined();
+    expect(entry?.ruleId).toBeUndefined();
+
+    getWallet.mockRestore();
+  });
+
   it("rejects a webhook with an invalid signature", async () => {
     const res = await sendBvnkWebhook(
       { event: "customer.updated", data: { reference: CUSTOMER_REFERENCE, status: "VERIFIED" } },
