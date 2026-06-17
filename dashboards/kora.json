@@ -1,14 +1,30 @@
 {
   "uid": "kora-paymaster",
   "title": "Kora paymaster",
-  "description": "Kora gasless paymaster — request rate, errors, latency, fee-payer SOL balance, and logs.",
+  "description": "Kora gasless paymaster — request rate, errors, latency, fee-payer SOL balance, and logs. Toggle service (mainnet/devnet) top-left.",
   "tags": ["kora", "sdp"],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 1,
+  "version": 2,
   "refresh": "30s",
   "time": { "from": "now-6h", "to": "now" },
-  "templating": { "list": [] },
+  "templating": {
+    "list": [
+      {
+        "name": "service",
+        "label": "service",
+        "type": "custom",
+        "query": "mainnet : kora-mainnet, devnet : kora-sdp",
+        "current": { "text": "mainnet", "value": "kora-mainnet", "selected": true },
+        "options": [
+          { "text": "mainnet", "value": "kora-mainnet", "selected": true },
+          { "text": "devnet", "value": "kora-sdp", "selected": false }
+        ],
+        "includeAll": false,
+        "multi": false
+      }
+    ]
+  },
   "panels": [
     { "id": 1, "type": "row", "title": "Traffic", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 } },
     {
@@ -19,7 +35,7 @@
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 1 },
       "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
       "targets": [
-        { "refId": "A", "datasource": { "type": "prometheus", "uid": "grafanacloud-prom" }, "expr": "sum by (method) (rate(kora_http_requests_total[5m]))", "legendFormat": "{{method}}" }
+        { "refId": "A", "datasource": { "type": "prometheus", "uid": "grafanacloud-prom" }, "expr": "sum by (method) (rate(kora_http_requests_total{service=\"$service\"}[5m]))", "legendFormat": "{{method}}" }
       ]
     },
     {
@@ -30,7 +46,7 @@
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 1 },
       "fieldConfig": { "defaults": { "unit": "reqps", "color": { "mode": "fixed", "fixedColor": "red" } }, "overrides": [] },
       "targets": [
-        { "refId": "A", "datasource": { "type": "prometheus", "uid": "grafanacloud-prom" }, "expr": "sum (rate(kora_http_requests_total{status=~\"5..\"}[5m]))", "legendFormat": "5xx" }
+        { "refId": "A", "datasource": { "type": "prometheus", "uid": "grafanacloud-prom" }, "expr": "sum (rate(kora_http_requests_total{service=\"$service\",status=~\"5..\"}[5m]))", "legendFormat": "5xx" }
       ]
     },
     {
@@ -41,8 +57,8 @@
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 9 },
       "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
       "targets": [
-        { "refId": "A", "datasource": { "type": "prometheus", "uid": "grafanacloud-prom" }, "expr": "histogram_quantile(0.50, sum by (le) (rate(kora_http_request_duration_seconds_bucket[5m])))", "legendFormat": "p50" },
-        { "refId": "B", "datasource": { "type": "prometheus", "uid": "grafanacloud-prom" }, "expr": "histogram_quantile(0.95, sum by (le) (rate(kora_http_request_duration_seconds_bucket[5m])))", "legendFormat": "p95" }
+        { "refId": "A", "datasource": { "type": "prometheus", "uid": "grafanacloud-prom" }, "expr": "histogram_quantile(0.50, sum by (le) (rate(kora_http_request_duration_seconds_bucket{service=\"$service\"}[5m])))", "legendFormat": "p50" },
+        { "refId": "B", "datasource": { "type": "prometheus", "uid": "grafanacloud-prom" }, "expr": "histogram_quantile(0.95, sum by (le) (rate(kora_http_request_duration_seconds_bucket{service=\"$service\"}[5m])))", "legendFormat": "p95" }
       ]
     },
     { "id": 5, "type": "row", "title": "Fee payer", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 17 } },
@@ -61,19 +77,19 @@
         "overrides": []
       },
       "targets": [
-        { "refId": "A", "datasource": { "type": "prometheus", "uid": "grafanacloud-prom" }, "expr": "max(signer_balance_lamports) / 1e9", "legendFormat": "balance" }
+        { "refId": "A", "datasource": { "type": "prometheus", "uid": "grafanacloud-prom" }, "expr": "max(signer_balance_lamports{service=\"$service\"}) / 1e9", "legendFormat": "balance" }
       ]
     },
     { "id": 7, "type": "row", "title": "Logs", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 24 } },
     {
       "id": 8,
       "type": "logs",
-      "title": "Recent logs (kora-mainnet)",
+      "title": "Recent logs ($service)",
       "datasource": { "type": "loki", "uid": "grafanacloud-logs" },
       "gridPos": { "h": 10, "w": 24, "x": 0, "y": 25 },
       "options": { "showTime": true, "wrapLogMessage": true, "sortOrder": "Descending" },
       "targets": [
-        { "refId": "A", "datasource": { "type": "loki", "uid": "grafanacloud-logs" }, "expr": "{service=\"kora-mainnet\"}" }
+        { "refId": "A", "datasource": { "type": "loki", "uid": "grafanacloud-logs" }, "expr": "{service=\"$service\"}" }
       ]
     }
   ]

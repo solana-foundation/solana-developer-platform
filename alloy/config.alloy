@@ -7,13 +7,12 @@
 //          alloy run --server.http.listen-addr=0.0.0.0:${PORT:-12345} alloy/config.alloy
 // Deploy: a small always-on Cloud Run service / VM (min 1 instance) with those env vars.
 
-prometheus.scrape "kora" {
-  targets = [{
-    __address__      = "kora-mainnet-562819300243.us-central1.run.app:443",
-    __scheme__       = "https",
-    __metrics_path__ = "/metrics",
-    service          = "kora-mainnet",
-  }]
+// SDP service scrape targets — add more services here as they expose /metrics.
+prometheus.scrape "sdp" {
+  targets = [
+    { __address__ = "kora-mainnet-562819300243.us-central1.run.app:443", __scheme__ = "https", __metrics_path__ = "/metrics", service = "kora-mainnet" },
+    { __address__ = "kora-sdp-654412331372.us-central1.run.app:443", __scheme__ = "https", __metrics_path__ = "/metrics", service = "kora-sdp" },
+  ]
   scrape_interval = "30s"
   forward_to      = [prometheus.remote_write.grafanacloud.receiver]
 }
