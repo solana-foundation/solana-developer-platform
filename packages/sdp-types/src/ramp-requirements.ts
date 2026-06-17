@@ -32,11 +32,16 @@ export type RequirementFieldKind = RequirementField["kind"];
 /** Slug-keyed values the client collects for `status: "collect"` fields and passes through on the quote. */
 export type CollectedFieldData = Record<string, string>;
 
-export type CounterpartyRequirements = {
-  provider: RampProviderId;
-  direction: RampDirection;
-} & (
-  | { status: "ready" }
-  | { status: "collect"; fields: RequirementField[] }
-  | { status: "unsupported"; reason: string }
+// TODO: tag RequirementField with a `group` ("kyc" | "bank") so the FE can section collect forms; deferred — today each collect is a single group.
+export type CounterpartyRequirements = { direction: RampDirection } & (
+  | { provider: RampProviderId; status: "ready" }
+  | { provider: RampProviderId; status: "collect"; fields: RequirementField[] }
+  | { provider: RampProviderId; status: "unsupported"; reason: string }
+  | { provider: "lightspark"; status: "onboarding_not_started" }
+  | { provider: "bvnk"; status: "onboarding_not_started" }
+  | { provider: "bvnk"; status: "customer_verification_required"; verificationUrl: string }
+  | { provider: "bvnk"; status: "customer_verifying" }
+  | { provider: "bvnk"; status: "customer_verification_failed" }
+  | { provider: "bvnk"; status: "funding_account_provisioning" }
+  | { provider: "bvnk"; status: "provisioning_failed" }
 );

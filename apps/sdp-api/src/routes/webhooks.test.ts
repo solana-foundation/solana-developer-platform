@@ -574,19 +574,30 @@ describe("BVNK ramp webhook", () => {
       .run();
   }
 
-  function sendBvnkWebhook(payload: unknown, signature?: string) {
+  async function sendBvnkWebhook(payload: unknown, signature?: string) {
     const body = JSON.stringify(payload);
     const sig =
       signature ?? createHmac("sha256", BVNK_WEBHOOK_SECRET).update(body).digest("base64");
-    return app.request(
+    const background: Promise<unknown>[] = [];
+    const executionCtx: ExecutionContext = {
+      waitUntil(promise) {
+        background.push(promise);
+      },
+      passThroughOnException() {},
+      props: {},
+    };
+    const res = await app.request(
       "/webhooks/payments/ramps/sandbox/bvnk",
       {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-Signature": sig },
         body,
       },
-      env
+      env,
+      executionCtx
     );
+    await Promise.allSettled(background);
+    return res;
   }
 
   beforeEach(async () => {
@@ -676,6 +687,130 @@ describe("BVNK ramp webhook", () => {
     const entry = (await readBvnk())?.wallets?.["USD:USDC_SOLANA:dest"];
     expect(entry?.bankAccount?.accountNumber).toBe("900473221558");
     expect(entry?.bankAccount?.bankName).toBe("LEAD BANK");
+  });
+
+  it("creates the payment rule when a wallet activates for a verified customer", async () => {
+    await getDb(env)
+      .prepare("UPDATE counterparties SET provider_data = ? WHERE id = ?")
+      .bind(
+        {
+          bvnk: {
+            customer: {
+              customerReference: CUSTOMER_REFERENCE,
+              externalReference: "sdp_bvnkwebhook",
+              status: "VERIFIED",
+            },
+            wallets: {
+              "USD:USDC_SOLANA:dest": {
+                walletId: WALLET_ID,
+                walletStatus: "PENDING",
+                request: {
+                  fiatCurrency: "USD",
+                  currency: "USDC",
+                  network: "SOLANA",
+                  destinationWalletAddress: "dest",
+                },
+              },
+            },
+          },
+        },
+        COUNTERPARTY_ID
+      )
+      .run();
+
+    const createRule = vi
+      .spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "createOnrampRule")
+      .mockResolvedValue({ id: "rule_webhook_1", status: "ACTIVE" });
+
+    const res = await sendBvnkWebhook({
+      event: "ledger:v2:wallet:status-change",
+      data: {
+        id: WALLET_ID,
+        status: "ACTIVE",
+        customer: { id: CUSTOMER_REFERENCE, name: "Webhook Buyer" },
+        paymentInstruments: [
+          {
+            type: "FIAT",
+            accountNumber: "900473221558",
+            bankDetails: { bic: "LEADUS49XXX", name: "LEAD BANK" },
+          },
+        ],
+      },
+    });
+
+    expect(res.status).toBe(200);
+    expect(createRule).toHaveBeenCalledTimes(1);
+
+    const row = await getDb(env)
+      .prepare("SELECT provider_data FROM counterparties WHERE id = ?")
+      .bind(COUNTERPARTY_ID)
+      .first<{
+        provider_data: {
+          bvnk?: {
+            wallets?: Record<string, { ruleId?: string; bankAccount?: { accountNumber?: string } }>;
+          };
+        };
+      }>();
+    const entry = row?.provider_data.bvnk?.wallets?.["USD:USDC_SOLANA:dest"];
+    expect(entry?.ruleId).toBe("rule_webhook_1");
+    expect(entry?.bankAccount?.accountNumber).toBe("900473221558");
+
+    createRule.mockRestore();
+  });
+
+  it("clears a stale provisioningError when a retry makes forward progress", async () => {
+    await getDb(env)
+      .prepare("UPDATE counterparties SET provider_data = ? WHERE id = ?")
+      .bind(
+        {
+          bvnk: {
+            customer: {
+              customerReference: CUSTOMER_REFERENCE,
+              externalReference: "sdp_bvnkwebhook",
+              status: "VERIFIED",
+            },
+            wallets: {
+              "USD:USDC_SOLANA:dest": {
+                walletId: WALLET_ID,
+                walletStatus: "PENDING",
+                provisioningError: "BVNK rule creation failed",
+                request: {
+                  fiatCurrency: "USD",
+                  currency: "USDC",
+                  network: "SOLANA",
+                  destinationWalletAddress: "dest",
+                },
+              },
+            },
+          },
+        },
+        COUNTERPARTY_ID
+      )
+      .run();
+
+    const getWallet = vi
+      .spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "getFiatWallet")
+      .mockResolvedValue({ id: WALLET_ID, status: "PENDING" });
+
+    const res = await sendBvnkWebhook({
+      event: "bvnk:customers:status-change",
+      data: { customerId: CUSTOMER_REFERENCE, status: "VERIFIED", customerType: "INDIVIDUAL" },
+    });
+
+    expect(res.status).toBe(200);
+    const row = await getDb(env)
+      .prepare("SELECT provider_data FROM counterparties WHERE id = ?")
+      .bind(COUNTERPARTY_ID)
+      .first<{
+        provider_data: {
+          bvnk?: { wallets?: Record<string, { provisioningError?: string; ruleId?: string }> };
+        };
+      }>();
+    const entry = row?.provider_data.bvnk?.wallets?.["USD:USDC_SOLANA:dest"];
+    expect(entry?.provisioningError).toBeUndefined();
+    expect(entry?.ruleId).toBeUndefined();
+
+    getWallet.mockRestore();
   });
 
   it("rejects a webhook with an invalid signature", async () => {

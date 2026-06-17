@@ -70,6 +70,12 @@ export interface RampWizardConfig<TId extends string = string> {
     insertAfter: TId;
     direction: RampDirection;
   };
+  /**
+   * When set, the quote step advances provider onboarding via POST /requirements
+   * (provisioning) instead of firing the quote; the caller fires the quote once
+   * the lifecycle reaches `ready`. Used by on-ramp; off-ramp leaves this unset.
+   */
+  advanceRequirementsBeforeQuote?: boolean;
   onQuoteCreated?: (quote: PaymentRampQuote) => void;
 }
 
@@ -294,12 +300,50 @@ export function useRampWizard<TId extends string>(
     } catch {}
   };
 
+  const advanceRequirementsAndProceed = async () => {
+    if (!config.selectionSchema.safeParse(fields).success || !fields.provider) {
+      return;
+    }
+    setHostedQuoteLoading(true);
+    const toastId = toast.loading("Setting up your account.", { position: "bottom-right" });
+    try {
+      const result = await requirements.submitRequirements({
+        cryptoToken: toRampCryptoToken(selectedRampPair.assetRail),
+        destinationWallet: fields.walletId,
+        fiatCurrency: selectedRampPair.fiatCurrency,
+      });
+      setHostedQuoteLoading(false);
+      if (result.status === "collect" || result.status === "unsupported") {
+        toast.error(
+          result.status === "unsupported"
+            ? result.reason
+            : "We need a few more details before continuing.",
+          { id: toastId, position: "bottom-right" }
+        );
+        return;
+      }
+      setStepIndex((current) => current + 1);
+      toast.dismiss(toastId);
+    } catch (error) {
+      setHostedQuoteLoading(false);
+      toast.error("Unable to start onboarding.", {
+        id: toastId,
+        description: error instanceof Error ? error.message : "Requirements request failed.",
+        position: "bottom-right",
+      });
+    }
+  };
+
   const handlePrimary = async () => {
     if (!canProceed) {
       return;
     }
     if (currentStepId === quoteStepId) {
-      await createQuoteAndAdvance();
+      if (config.advanceRequirementsBeforeQuote) {
+        await advanceRequirementsAndProceed();
+      } else {
+        await createQuoteAndAdvance();
+      }
       return;
     }
     if (isLastStep) {
@@ -368,6 +412,9 @@ export function useRampWizard<TId extends string>(
     setField,
     quote,
     refreshQuote,
+    onboarding: requirements.onboarding,
+    isAdvancing: requirements.isAdvancing,
+    retryOnboarding: requirements.retryOnboarding,
     hostedQuoteLoading,
     counterpartyDialogOpen,
     setCounterpartyDialogOpen,

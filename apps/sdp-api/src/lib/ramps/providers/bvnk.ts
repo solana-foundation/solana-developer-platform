@@ -14,7 +14,7 @@ import type {
 import type { RampFiatCurrency } from "@sdp/types/generated/ramp-support";
 import { RAMP_FIAT_CURRENCIES } from "@sdp/types/generated/ramp-support";
 import { getCryptoRailAssetLabel, parseFiatCurrency } from "@sdp/types/payment-rails";
-import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
+import type { CounterpartyRequirements, RampDirection } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
 import { formatDecimalAmount, isDecimalString, parseDecimalAmount } from "@/lib/amount";
@@ -26,7 +26,9 @@ import {
   providerUnavailable,
 } from "@/lib/errors";
 import { hashString, hmacSha256Base64, verifyHmacSha256Base64 } from "@/lib/hash";
+import { readString } from "@/lib/json";
 import { type ProviderRequestInit, providerFetch } from "../fetch";
+import { readyCounterparty } from "../requirements";
 import {
   createProviderRampSupport,
   isSolanaCryptoAsset,
@@ -607,10 +609,6 @@ function asRecord(value: unknown): Record<string, unknown> {
   return value !== null && typeof value === "object" ? (value as Record<string, unknown>) : {};
 }
 
-function readString(value: unknown): string | undefined {
-  return typeof value === "string" && value.length > 0 ? value : undefined;
-}
-
 function parseBvnkAgreementSession(payload: unknown): BvnkAgreementSession {
   const data = asRecord(payload);
   const reference = readString(data.reference);
@@ -646,6 +644,9 @@ function parseBvnkVerificationStatus(value: unknown): BvnkVerificationStatus | u
 }
 
 const BVNK_VERIFIED_STATUSES = new Set(["VERIFIED", "COMPLETED", "APPROVED"]);
+const BVNK_VERIFYING_STATUSES = new Set(["PENDING"]);
+const BVNK_VERIFICATION_REQUIRED_STATUSES = new Set(["ACTIONS_REQUIRED", "INFO_REQUIRED"]);
+const BVNK_VERIFICATION_FAILED_STATUSES = new Set(["REJECTED"]);
 
 /**
  * Whether a cached BVNK customer status counts as fully verified. The customer
@@ -656,16 +657,46 @@ export function isBvnkCustomerVerified(status: string | undefined): boolean {
   return status !== undefined && BVNK_VERIFIED_STATUSES.has(status.toUpperCase());
 }
 
+/**
+ * Onboarding phase for a not-yet-verified BVNK customer, decided from the KYC
+ * status the customers:status-change webhook delivers — never from the presence
+ * of a cached verificationUrl, which is written once and never cleared. PENDING
+ * means the applicant has submitted and is under review; INFO_REQUIRED (and the
+ * ACTIONS_REQUIRED synonym) mean the applicant must still act, so we surface the
+ * Sumsub URL; REJECTED is terminal-negative. Any other unverified status is
+ * unmapped and throws so it surfaces loudly instead of silently stranding the
+ * buyer mid-onboarding.
+ */
+export function bvnkUnverifiedOnboardingStatus(
+  status: string | undefined
+): Extract<BvnkOnboardingStatus, "verifying" | "verification_required" | "verification_failed"> {
+  const normalized = status?.toUpperCase();
+  if (normalized && BVNK_VERIFYING_STATUSES.has(normalized)) {
+    return "verifying";
+  }
+  if (normalized && BVNK_VERIFICATION_REQUIRED_STATUSES.has(normalized)) {
+    return "verification_required";
+  }
+  if (normalized && BVNK_VERIFICATION_FAILED_STATUSES.has(normalized)) {
+    return "verification_failed";
+  }
+  throw internalError(`Unmapped BVNK customer KYC status: ${status ?? "(missing)"}`);
+}
+
 function parseBvnkCustomerState(payload: unknown): BvnkCustomerState {
   const data = asRecord(payload);
   const reference = readString(data.reference);
   if (!reference) {
     throw badRequest("BVNK customer response is missing a reference");
   }
+  const status = readString(data.status);
+  if (!status) {
+    throw badRequest("BVNK customer response is missing a status");
+  }
   const verification = asRecord(data.verification);
   return {
     reference,
-    status: readString(data.status) ?? "PENDING",
+    status,
     verificationStatus: parseBvnkVerificationStatus(verification.status),
     verificationUrl: readString(verification.url),
   };
@@ -1345,12 +1376,21 @@ export interface BvnkCustomerResolution {
 }
 
 /** Per funding-spec (fiat+token+destination) virtual wallet + rule. */
+export interface BvnkOnrampRequestSpec {
+  currency: string;
+  network: string;
+  destinationWalletAddress: string;
+  fiatCurrency: string;
+}
+
 export interface BvnkOnrampEntry {
   walletId?: string;
   walletStatus?: string;
   ruleId?: string;
   ruleStatus?: string;
   bankAccount?: BvnkBankFundingDetails;
+  request?: BvnkOnrampRequestSpec;
+  provisioningError?: string;
 }
 
 const BVNK_WALLET_ACTIVE_STATUSES = new Set(["ACTIVE", "COMPLETED"]);
@@ -1512,6 +1552,8 @@ export function buildBvnkOnrampInstruction(
   const notesByStatus = {
     ready: `Fund your ${params.fiatCurrency} BVNK virtual account to receive crypto on ${params.network}.`,
     verification_required: verificationNote,
+    verification_failed:
+      "Identity verification was not approved, so this funding account can't be activated. Contact support if you believe this is a mistake.",
     provisioning: "Setting up your funding account; bank details will appear in a moment.",
     verifying: "Identity verification is in review; funding details will appear once approved.",
   } as const satisfies Record<BvnkOnboardingStatus, string>;
@@ -1529,4 +1571,86 @@ export function buildBvnkOnrampInstruction(
     bankAccount: entry.bankAccount,
     instructionsNotes: notes,
   };
+}
+
+export function bvnkOnboardingRequirements(
+  resolution: BvnkPaymentRuleResolution,
+  direction: RampDirection
+): CounterpartyRequirements {
+  switch (resolution.onboardingStatus) {
+    case "ready":
+      return readyCounterparty("bvnk", direction);
+    case "verification_required": {
+      const { verificationUrl } = resolution.customer;
+      if (!verificationUrl) {
+        throw internalError('BVNK reported "verification_required" without a verificationUrl.');
+      }
+      return {
+        provider: "bvnk",
+        direction,
+        status: "customer_verification_required",
+        verificationUrl,
+      };
+    }
+    case "verifying":
+      return { provider: "bvnk", direction, status: "customer_verifying" };
+    case "verification_failed":
+      return { provider: "bvnk", direction, status: "customer_verification_failed" };
+    case "provisioning":
+      return { provider: "bvnk", direction, status: "funding_account_provisioning" };
+    default: {
+      const exhaustive: never = resolution.onboardingStatus;
+      throw internalError(`Unhandled BVNK onboarding status: ${String(exhaustive)}`);
+    }
+  }
+}
+
+export function bvnkOnrampStatusFromProviderData(
+  providerData: CounterpartyRow["provider_data"],
+  params: { cryptoToken: string; fiatCurrency: string; destinationWalletAddress: string }
+): CounterpartyRequirements {
+  const direction: RampDirection = "onramp";
+  const customer = readBvnkCustomer(providerData);
+  if (!customer.customerReference) {
+    return { provider: "bvnk", direction, status: "onboarding_not_started" };
+  }
+  if (!isBvnkCustomerVerified(customer.status)) {
+    const phase = bvnkUnverifiedOnboardingStatus(customer.status);
+    switch (phase) {
+      case "verifying":
+        return { provider: "bvnk", direction, status: "customer_verifying" };
+      case "verification_failed":
+        return { provider: "bvnk", direction, status: "customer_verification_failed" };
+      case "verification_required": {
+        if (!customer.verificationUrl) {
+          throw internalError('BVNK reported "verification_required" without a verificationUrl.');
+        }
+        return {
+          provider: "bvnk",
+          direction,
+          status: "customer_verification_required",
+          verificationUrl: customer.verificationUrl,
+        };
+      }
+      default: {
+        const exhaustive: never = phase;
+        throw internalError(`Unhandled BVNK verification phase: ${String(exhaustive)}`);
+      }
+    }
+  }
+  const { currency, network } = normalizeBvnkCurrencyAndNetwork(params.cryptoToken);
+  const key = bvnkOnrampKey(
+    params.fiatCurrency,
+    currency,
+    network,
+    params.destinationWalletAddress
+  );
+  const entry = readBvnkOnrampEntry(providerData, key);
+  if (entry.ruleId && entry.bankAccount?.accountNumber) {
+    return { provider: "bvnk", direction, status: "ready" };
+  }
+  if (entry.provisioningError && !entry.ruleId) {
+    return { provider: "bvnk", direction, status: "provisioning_failed" };
+  }
+  return { provider: "bvnk", direction, status: "funding_account_provisioning" };
 }

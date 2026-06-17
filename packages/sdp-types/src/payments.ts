@@ -402,7 +402,12 @@ export interface LightsparkPaymentRampInstruction {
   isPlatformAccount?: boolean;
 }
 
-export type BvnkOnboardingStatus = "verification_required" | "verifying" | "provisioning" | "ready";
+export type BvnkOnboardingStatus =
+  | "verification_required"
+  | "verifying"
+  | "verification_failed"
+  | "provisioning"
+  | "ready";
 
 export interface BvnkBankFundingDetails {
   accountNumber?: string;

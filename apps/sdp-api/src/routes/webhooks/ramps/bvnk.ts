@@ -10,12 +10,20 @@ import {
   type BvnkWebhookEvent,
   findBvnkWalletEntryKey,
   isBvnkCustomerVerified,
+  isBvnkWalletActive,
   readBvnkCustomer,
   readBvnkOnrampEntry,
+  readBvnkWallets,
 } from "@/lib/ramps/providers/bvnk";
+import type { RampRuntimeContext } from "@/lib/ramps/types";
+import { ensureBvnkPaymentRule } from "@/routes/payments/handlers/ramps/bvnk";
 import type { Env } from "@/types/env";
 
 type AppContext = Context<{ Bindings: Env }>;
+
+function webhookRampContext(c: AppContext, environment: SdpEnvironment): RampRuntimeContext {
+  return { env: c.env as unknown as Record<string, string | undefined>, mode: environment };
+}
 
 async function completeBvnkOnrampTransfer(
   c: AppContext,
@@ -71,7 +79,7 @@ async function patchBvnkCustomerFromWebhook(
       : current.verificationUrl;
   if (!nextUrl && !isBvnkCustomerVerified(nextStatus)) {
     const latest = await RAMP_PROVIDER_CLIENTS.bvnk.getBvnkCustomer(
-      { env: c.env as unknown as Record<string, string | undefined>, mode: environment },
+      webhookRampContext(c, environment),
       { reference: customerReference }
     );
     customer.status = latest.status.toUpperCase();
@@ -113,6 +121,66 @@ async function patchBvnkWalletFromWebhook(
   await repo.patchBvnkWalletByReference({ customerReference, walletKey: key, wallet });
 }
 
+async function provisionPendingBvnkOnramps(
+  c: AppContext,
+  repo: CounterpartiesRepository,
+  environment: SdpEnvironment,
+  customerReference: string
+): Promise<void> {
+  const ctx = webhookRampContext(c, environment);
+  const counterparty = await repo.findCounterpartyByBvnkCustomerReference(customerReference);
+  if (!counterparty) {
+    return;
+  }
+  if (!isBvnkCustomerVerified(readBvnkCustomer(counterparty.provider_data).status)) {
+    return;
+  }
+  const pendingKeys = Object.entries(readBvnkWallets(counterparty.provider_data))
+    .filter(([, entry]) => entry.request && !entry.ruleId)
+    .map(([key]) => key);
+  for (const key of pendingKeys) {
+    const fresh = await repo.findCounterpartyByBvnkCustomerReference(customerReference);
+    if (!fresh) {
+      return;
+    }
+    const entry = readBvnkOnrampEntry(fresh.provider_data, key);
+    if (!entry.request || entry.ruleId || !fresh.project_id) {
+      continue;
+    }
+    try {
+      await ensureBvnkPaymentRule(
+        c,
+        ctx,
+        fresh,
+        fresh.project_id,
+        readBvnkCustomer(fresh.provider_data),
+        entry.request
+      );
+    } catch (error) {
+      await repo.patchBvnkWalletByReference({
+        customerReference,
+        walletKey: key,
+        wallet: { provisioningError: error instanceof Error ? error.message : String(error) },
+      });
+    }
+  }
+}
+
+function scheduleBvnkProvisioning(
+  c: AppContext,
+  repo: CounterpartiesRepository,
+  environment: SdpEnvironment,
+  customerReference: string
+): void {
+  c.executionCtx.waitUntil(
+    provisionPendingBvnkOnramps(c, repo, environment, customerReference).catch((error) =>
+      console.error(
+        `[bvnk webhook] background provisioning failed: ${error instanceof Error ? error.message : String(error)}`
+      )
+    )
+  );
+}
+
 async function processBvnkCustomerWebhook(
   c: AppContext,
   environment: SdpEnvironment,
@@ -142,7 +210,7 @@ async function processBvnkCustomerWebhook(
   }
 
   if (event.kind === "customer") {
-    return patchBvnkCustomerFromWebhook(
+    await patchBvnkCustomerFromWebhook(
       c,
       environment,
       repo,
@@ -150,9 +218,14 @@ async function processBvnkCustomerWebhook(
       event.customerReference,
       event
     );
+    scheduleBvnkProvisioning(c, repo, environment, event.customerReference);
+    return;
   }
 
-  return patchBvnkWalletFromWebhook(repo, counterparty, event.customerReference, event);
+  await patchBvnkWalletFromWebhook(repo, counterparty, event.customerReference, event);
+  if (isBvnkWalletActive(event.walletStatus)) {
+    scheduleBvnkProvisioning(c, repo, environment, event.customerReference);
+  }
 }
 
 export async function handleBvnkRampWebhook(

@@ -11,6 +11,7 @@ import {
 } from "@sdp/types";
 import { z } from "zod";
 import { LIGHTSPARK_PAYOUT_CURRENCIES } from "@/lib/ramps/validation/lightspark";
+import { rampCurrencyCodeSchema, rampFiatCurrencySchema } from "@/routes/payments/schemas";
 
 const countryCodeSchema = z.enum(COUNTRY_CODES);
 const currencyCodeSchema = z.string().trim().toUpperCase().length(3);
@@ -96,7 +97,13 @@ const lightsparkPayoutCurrencySchema = z.preprocess(
 
 export const counterpartyRequirementsQuerySchema = z.discriminatedUnion("provider", [
   z.object({ provider: z.literal("moonpay"), direction: rampDirectionSchema }),
-  z.object({ provider: z.literal("bvnk"), direction: rampDirectionSchema }),
+  z.object({
+    provider: z.literal("bvnk"),
+    direction: rampDirectionSchema,
+    cryptoToken: rampCurrencyCodeSchema.optional(),
+    fiatCurrency: rampFiatCurrencySchema.optional(),
+    destinationWallet: z.string().min(1).optional(),
+  }),
   z.discriminatedUnion("direction", [
     z.object({ provider: z.literal("lightspark"), direction: z.literal("onramp") }),
     z.object({

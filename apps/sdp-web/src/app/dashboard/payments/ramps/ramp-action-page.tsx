@@ -205,12 +205,14 @@ function OnrampRail({
 
   const verificationUrl =
     wizard.currentStepId === "PROVIDER" &&
-    wizard.bvnkInstruction?.onboardingStatus === "verification_required"
-      ? wizard.bvnkInstruction.verificationUrl
+    wizard.onboarding?.status === "customer_verification_required"
+      ? wizard.onboarding.verificationUrl
       : undefined;
 
   const verificationPending =
-    wizard.currentStepId === "PROVIDER" && wizard.bvnkInstruction?.onboardingStatus === "verifying";
+    wizard.currentStepId === "PROVIDER" &&
+    (wizard.onboarding?.status === "customer_verifying" ||
+      wizard.onboarding?.status === "funding_account_provisioning");
 
   const transferTerminal = wizard.transferStatus
     ? isTerminalRampTransferStatus(wizard.transferStatus.status)
@@ -263,7 +265,7 @@ function OnrampRail({
           </Button>
         ) : null
       }
-      hidePrimary={wizard.currentStepId === "PROVIDER"}
+      hidePrimary={wizard.currentStepId === "PROVIDER" && !verificationUrl}
     >
       <OnrampStepContent wizard={wizard} />
     </RampWizardShell>

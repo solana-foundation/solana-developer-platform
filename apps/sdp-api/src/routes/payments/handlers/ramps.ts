@@ -11,6 +11,7 @@ import {
   type RampFiatCurrency,
 } from "@sdp/types/generated/ramp-support";
 import type { RampProviderId } from "@sdp/types/provider-access";
+import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
 import { getDb } from "@/db";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
@@ -20,11 +21,13 @@ import { AppError, badRequest, badRequestQuery, internalError, notFound } from "
 import { RAMP_PROVIDER_CLIENTS } from "@/lib/ramps";
 import {
   buildBvnkPartyDetails,
+  bvnkOnboardingRequirements,
   bvnkOnrampKey,
   isBvnkWalletActive,
   normalizeBvnkCurrencyAndNetwork,
   readBvnkOnrampEntry,
 } from "@/lib/ramps/providers/bvnk";
+import { readyCounterparty } from "@/lib/ramps/requirements";
 import type { RampRuntimeContext } from "@/lib/ramps/types";
 import { success } from "@/lib/response";
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
@@ -46,6 +49,7 @@ import {
   listOfframpCurrenciesQuerySchema,
   listOnrampCurrenciesQuerySchema,
   simulateSandboxTransferSchema,
+  type submitCounterpartyRequirementsSchema,
 } from "../schemas";
 import { type ResolvedScope, resolveScope, resolveWalletAddress } from "../wallets";
 import { bvnkOnrampQuote, ensureBvnkCustomer, ensureBvnkPaymentRule } from "./ramps/bvnk";
@@ -67,6 +71,8 @@ type ExecuteOnrampInput = z.infer<typeof executeOnrampSchema>;
 
 type ExecuteOfframpInput = z.infer<typeof executeOfframpSchema>;
 
+type SubmitCounterpartyRequirementsInput = z.infer<typeof submitCounterpartyRequirementsSchema>;
+
 function filterProviders(
   providers: readonly RampProviderId[],
   provider?: RampProviderId
@@ -82,7 +88,7 @@ function uniqueSorted<T extends string>(values: readonly T[]): T[] {
 }
 
 /** Enriches BVNK compliance with the requester IP from request headers. */
-async function assertRampProviderAvailable(
+export async function assertRampProviderAvailable(
   c: AppContext,
   providerId: RampProviderId,
   organizationId: string
@@ -238,12 +244,19 @@ async function executeOnrampWithProvider(
       const customer = await ensureBvnkCustomer(c, counterparty, projectId, {
         fiatCurrency: input.fiatCurrency,
       });
-      const bvnkPaymentRule = await ensureBvnkPaymentRule(c, counterparty, projectId, customer, {
-        currency,
-        network,
-        destinationWalletAddress,
-        fiatCurrency: input.fiatCurrency,
-      });
+      const bvnkPaymentRule = await ensureBvnkPaymentRule(
+        c,
+        ctx,
+        counterparty,
+        projectId,
+        customer,
+        {
+          currency,
+          network,
+          destinationWalletAddress,
+          fiatCurrency: input.fiatCurrency,
+        }
+      );
       return await RAMP_PROVIDER_CLIENTS.bvnk.executeOnramp(ctx, {
         destinationWalletAddress,
         cryptoToken: input.cryptoToken,
@@ -253,6 +266,50 @@ async function executeOnrampWithProvider(
     }
     default: {
       const _exhaustive: never = input.provider;
+      throw internalError(`Unhandled ramp provider: ${_exhaustive}`);
+    }
+  }
+}
+
+export async function advanceCounterpartyRequirements(
+  c: AppContext,
+  input: SubmitCounterpartyRequirementsInput & { counterparty: CounterpartyRow; projectId: string }
+): Promise<CounterpartyRequirements> {
+  switch (input.provider) {
+    case "moonpay":
+      return readyCounterparty("moonpay", input.direction);
+    case "lightspark": {
+      await ensureLightsparkCustomer(c, {
+        counterparty: input.counterparty,
+        projectId: input.projectId,
+      });
+      return readyCounterparty("lightspark", input.direction);
+    }
+    case "bvnk": {
+      const customer = await ensureBvnkCustomer(c, input.counterparty, input.projectId, {
+        fiatCurrency: input.fiatCurrency,
+        collectedData: input.collectedData,
+      });
+      const scope = await resolveScope(c);
+      const destinationWalletAddress = resolveWalletAddress(
+        scope.wallets,
+        input.destinationWallet,
+        "destinationWallet",
+        scope.auth
+      );
+      const { currency, network } = normalizeBvnkCurrencyAndNetwork(input.cryptoToken);
+      const resolution = await ensureBvnkPaymentRule(
+        c,
+        rampRuntime(c),
+        input.counterparty,
+        input.projectId,
+        customer,
+        { currency, network, destinationWalletAddress, fiatCurrency: input.fiatCurrency }
+      );
+      return bvnkOnboardingRequirements(resolution, input.direction);
+    }
+    default: {
+      const _exhaustive: never = input;
       throw internalError(`Unhandled ramp provider: ${_exhaustive}`);
     }
   }

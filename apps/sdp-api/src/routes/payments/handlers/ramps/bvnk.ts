@@ -7,12 +7,14 @@ import { RAMP_PROVIDER_CLIENTS } from "@/lib/ramps";
 import {
   type BvnkCustomerResolution,
   type BvnkOnrampEntry,
+  type BvnkOnrampRequestSpec,
   type BvnkPaymentRuleResolution,
   buildBvnkOnrampInstruction,
   buildBvnkRuleEntity,
   bvnkCustomerExternalReference,
   bvnkOnrampKey,
   bvnkRuleReference,
+  bvnkUnverifiedOnboardingStatus,
   isBvnkCustomerVerified,
   isBvnkWalletActive,
   normalizeBvnkCurrencyAndNetwork,
@@ -21,6 +23,7 @@ import {
   readBvnkOnrampEntry,
   readBvnkWallets,
 } from "@/lib/ramps/providers/bvnk";
+import type { RampRuntimeContext } from "@/lib/ramps/types";
 import { buildBvnkIndividualPayload } from "@/lib/ramps/validation/bvnk";
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
 import { type AppContext, rampRuntime, resolveSdpEnvironment } from "../../context";
@@ -170,17 +173,12 @@ export async function ensureBvnkCustomer(
  */
 export async function ensureBvnkPaymentRule(
   c: AppContext,
+  ctx: RampRuntimeContext,
   counterparty: CounterpartyRow,
   projectId: string,
   customer: BvnkCustomerResolution,
-  params: {
-    currency: string;
-    network: string;
-    destinationWalletAddress: string;
-    fiatCurrency: string;
-  }
+  params: BvnkOnrampRequestSpec
 ): Promise<BvnkPaymentRuleResolution> {
-  const ctx = rampRuntime(c);
   const client = RAMP_PROVIDER_CLIENTS.bvnk;
   const key = bvnkOnrampKey(
     params.fiatCurrency,
@@ -195,12 +193,21 @@ export async function ensureBvnkPaymentRule(
     return { customer, entry, onboardingStatus: "ready" };
   }
 
+  if (!entry.request) {
+    entry = { ...entry, request: params };
+    await persistBvnkOnrampState(c, counterparty, projectId, key, customer, entry);
+  }
+
   if (!isBvnkCustomerVerified(customer.status) || !customer.customerReference) {
     return {
       customer,
       entry,
-      onboardingStatus: customer.verificationUrl ? "verification_required" : "verifying",
+      onboardingStatus: bvnkUnverifiedOnboardingStatus(customer.status),
     };
+  }
+
+  if (entry.provisioningError) {
+    entry = { ...entry, provisioningError: undefined };
   }
 
   if (!entry.walletId) {
@@ -283,12 +290,19 @@ async function resolveBvnkOnramp(
     fiatCurrency,
     collectedData: input.collectedData,
   });
-  const resolution = await ensureBvnkPaymentRule(c, input.counterparty, input.projectId, customer, {
-    currency,
-    network,
-    destinationWalletAddress: input.destinationWalletAddress,
-    fiatCurrency,
-  });
+  const resolution = await ensureBvnkPaymentRule(
+    c,
+    rampRuntime(c),
+    input.counterparty,
+    input.projectId,
+    customer,
+    {
+      currency,
+      network,
+      destinationWalletAddress: input.destinationWalletAddress,
+      fiatCurrency,
+    }
+  );
   const instruction = buildBvnkOnrampInstruction(resolution, {
     network,
     destinationWalletAddress: input.destinationWalletAddress,
