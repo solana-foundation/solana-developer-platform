@@ -1346,7 +1346,6 @@ export interface BvnkCustomerResolution {
 }
 
 /** Per funding-spec (fiat+token+destination) virtual wallet + rule. */
-/** Corridor spec for provisioning a BVNK on-ramp wallet + rule. */
 export interface BvnkOnrampRequestSpec {
   currency: string;
   network: string;
@@ -1360,8 +1359,8 @@ export interface BvnkOnrampEntry {
   ruleId?: string;
   ruleStatus?: string;
   bankAccount?: BvnkBankFundingDetails;
-  /** Captured pre-verification so the customer webhook can provision the wallet/rule once KYC passes. */
   request?: BvnkOnrampRequestSpec;
+  provisioningError?: string;
 }
 
 const BVNK_WALLET_ACTIVE_STATUSES = new Set(["ACTIVE", "COMPLETED"]);
@@ -1572,11 +1571,6 @@ export function bvnkOnboardingRequirements(
   }
 }
 
-/**
- * Pure read of the BVNK on-ramp lifecycle from persisted (webhook-synced) provider_data — no
- * provider calls or provisioning. Lets GET /requirements report the live status so the client
- * can poll cheaply instead of re-running the write-path advance.
- */
 export function bvnkOnrampStatusFromProviderData(
   providerData: CounterpartyRow["provider_data"],
   params: { cryptoToken: string; fiatCurrency: string; destinationWalletAddress: string }
@@ -1607,6 +1601,9 @@ export function bvnkOnrampStatusFromProviderData(
   const entry = readBvnkOnrampEntry(providerData, key);
   if (entry.ruleId && entry.bankAccount?.accountNumber) {
     return { provider: "bvnk", direction, status: "ready" };
+  }
+  if (entry.provisioningError && !entry.ruleId) {
+    return { provider: "bvnk", direction, status: "provisioning_failed" };
   }
   return { provider: "bvnk", direction, status: "funding_account_provisioning" };
 }

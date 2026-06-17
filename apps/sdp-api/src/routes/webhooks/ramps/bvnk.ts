@@ -120,12 +120,6 @@ async function patchBvnkWalletFromWebhook(
   await repo.patchBvnkWalletByReference({ customerReference, walletKey: key, wallet });
 }
 
-/**
- * Once a BVNK customer is verified, provision the wallet + payment rule for every
- * corridor whose spec was captured pre-verification (the `request` on each entry),
- * so the buyer's funding account appears without the client re-polling. Re-reads
- * per corridor so each provisioning sees the previous one's persisted state.
- */
 async function provisionPendingBvnkOnramps(
   c: AppContext,
   repo: CounterpartiesRepository,
@@ -152,14 +146,22 @@ async function provisionPendingBvnkOnramps(
     if (!entry.request || entry.ruleId || !fresh.project_id) {
       continue;
     }
-    await ensureBvnkPaymentRule(
-      c,
-      ctx,
-      fresh,
-      fresh.project_id,
-      readBvnkCustomer(fresh.provider_data),
-      entry.request
-    );
+    try {
+      await ensureBvnkPaymentRule(
+        c,
+        ctx,
+        fresh,
+        fresh.project_id,
+        readBvnkCustomer(fresh.provider_data),
+        entry.request
+      );
+    } catch (error) {
+      await repo.patchBvnkWalletByReference({
+        customerReference,
+        walletKey: key,
+        wallet: { provisioningError: error instanceof Error ? error.message : String(error) },
+      });
+    }
   }
 }
 
