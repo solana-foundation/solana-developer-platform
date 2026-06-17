@@ -172,7 +172,7 @@ test.describe
       await gotoToken(page, fixtures.tokens.allowlisted.id);
       await openTab(page, "Extensions");
 
-      await expect(page.getByTestId("extension-row-template")).toContainText("stablecoin");
+      await expect(page.getByTestId("extension-row-template")).toContainText("Stablecoin");
       await expect(page.getByTestId("extension-row-control-list")).toContainText("Allowlist");
       await expect(page.getByTestId("extension-row-mintable")).toContainText("Enabled");
       await expect(page.getByTestId("extension-row-freezable")).toContainText("Enabled");
