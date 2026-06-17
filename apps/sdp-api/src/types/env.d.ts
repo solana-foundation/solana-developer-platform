@@ -62,7 +62,6 @@ export interface Env {
   SENTRY_TRACES_SAMPLE_RATE?: string;
 
   // Email configuration
-  EMAIL_PROVIDER?: "resend" | "console";
   EMAIL_FROM?: string;
   RESEND_API_KEY?: string;
   FRONTEND_URL?: string;

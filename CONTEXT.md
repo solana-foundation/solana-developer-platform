@@ -20,6 +20,14 @@ _Avoid_: Custody wallet, token account, provider account data
 A payments product flow that repeatedly sends a fixed SPL token amount from an SDP custody source wallet to a **Counterparty Account** on a configured period. Initial records are created as pending activation; execution endpoints add the on-chain lifecycle.
 _Avoid_: Low-level subscription record, billing plan template, native SOL transfer
 
+**Payment Request**:
+A payments v2 product flow that asks a payer to complete a payment through a Solana Pay payload or a hosted payment link.
+_Avoid_: Wallet Operation Envelope, Payment Transfer, generic email
+
+**Transactional Email**:
+An SDP-owned outbound message for a product workflow.
+_Avoid_: Raw email, Clerk organization invitation, generic notification
+
 ## Relationships
 
 - An **Organization** has **Provider Availability** for each **Provider** in each **Provider Family**.
@@ -28,6 +36,8 @@ _Avoid_: Low-level subscription record, billing plan template, native SOL transf
 - A **Private Transfer** is still a **Payment Transfer**; privacy changes how the transfer is prepared and submitted, not the wallet permission model.
 - A **Counterparty** may have one or more **Counterparty Accounts**.
 - A **Recurring Payment** pays a **Counterparty Account** from an SDP custody source wallet.
+- A **Payment Request** may be delivered by email, but the email is not the **Payment Request**.
+- A **Transactional Email** may deliver a **Payment Request**, but does not own payment lifecycle or settlement matching.
 
 ## Example Dialogue
 
@@ -37,3 +47,5 @@ _Avoid_: Low-level subscription record, billing plan template, native SOL transf
 ## Flagged Ambiguities
 
 - "Available" can mean entitlement, environment configuration, runtime health, or project setup; resolved: **Provider Availability** means entitlement plus deployment configuration only.
+- "Payment request" can mean a low-level request payload or a payer-facing payments product; resolved: use **Payment Request** only for the payments v2 payer-facing flow.
+- "Email" can mean Clerk-owned organization invitation delivery or SDP-owned **Transactional Email**; resolved: only **Transactional Email** is owned by SDP.

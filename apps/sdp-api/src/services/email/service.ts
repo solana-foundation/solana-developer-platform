@@ -1,81 +1,84 @@
-/**
- * Email service
- */
-
 import type { Env } from "@/types/env";
-import { ConsoleEmailProvider } from "./providers/console";
-import { ResendEmailProvider } from "./providers/resend";
+import { ResendTransactionalEmailDelivery } from "./providers/resend";
 import type {
-  EmailMessage,
-  EmailProvider,
-  EmailProviderName,
-  EmailSendPayload,
-  SendEmailResult,
+  TransactionalEmailDelivery,
+  TransactionalEmailDeliveryPayload,
+  TransactionalEmailDeliveryResult,
+  TransactionalEmailMessage,
 } from "./types";
+import { TransactionalEmailError } from "./types";
 
-export class EmailService {
+export class TransactionalEmailService {
   constructor(
-    private provider: EmailProvider,
-    private defaultFrom?: string
+    private readonly delivery: TransactionalEmailDelivery,
+    private readonly defaultFrom: string
   ) {}
 
-  async sendEmail(message: EmailMessage): Promise<SendEmailResult> {
-    const from =
-      message.from ??
-      this.defaultFrom ??
-      (this.provider.name === "console" ? "console@localhost" : undefined);
-    if (!from) {
-      throw new Error("Email from address is required");
+  async send(message: TransactionalEmailMessage): Promise<TransactionalEmailDeliveryResult> {
+    const to = message.to.map((recipient) => recipient.trim()).filter(Boolean);
+    if (to.length === 0) {
+      throw new TransactionalEmailError(
+        "invalid_message",
+        "Transactional email requires at least one recipient"
+      );
     }
 
-    const payload: EmailSendPayload = {
-      to: message.to,
-      subject: message.subject,
-      text: message.text,
-      html: message.html,
-      replyTo: message.replyTo,
+    const html = message.html?.trim();
+    const text = message.text?.trim();
+    if (!html && !text) {
+      throw new TransactionalEmailError(
+        "invalid_message",
+        "Transactional email requires HTML or text content"
+      );
+    }
+
+    const subject = message.subject.trim();
+    if (!subject) {
+      throw new TransactionalEmailError(
+        "invalid_message",
+        "Transactional email requires a subject"
+      );
+    }
+
+    const from = (message.from ?? this.defaultFrom).trim();
+    if (!from) {
+      throw new TransactionalEmailError(
+        "misconfigured",
+        "EMAIL_FROM is required for Transactional Email"
+      );
+    }
+
+    const payload: TransactionalEmailDeliveryPayload = {
+      to,
+      subject,
+      text,
+      html,
+      replyTo: message.replyTo?.trim() || undefined,
       from,
     };
 
-    return this.provider.send(payload);
+    return this.delivery.send(payload);
   }
 }
 
-export function createEmailService(env: Env): EmailService {
-  const providerName = resolveProviderName(env);
-  const provider = createProvider(providerName, env);
-  const defaultFrom = env.EMAIL_FROM;
-
-  return new EmailService(provider, defaultFrom);
-}
-
-function resolveProviderName(env: Env): EmailProviderName {
-  if (env.EMAIL_PROVIDER) {
-    if (env.EMAIL_PROVIDER !== "resend" && env.EMAIL_PROVIDER !== "console") {
-      throw new Error(`Unsupported EMAIL_PROVIDER: ${env.EMAIL_PROVIDER}`);
-    }
-    return env.EMAIL_PROVIDER;
+export function createTransactionalEmailService(env: Env): TransactionalEmailService {
+  const apiKey = env.RESEND_API_KEY?.trim();
+  if (!apiKey) {
+    throw new TransactionalEmailError(
+      "misconfigured",
+      "RESEND_API_KEY is required for Transactional Email"
+    );
+  }
+  const defaultFrom = env.EMAIL_FROM?.trim();
+  if (!defaultFrom) {
+    throw new TransactionalEmailError(
+      "misconfigured",
+      "EMAIL_FROM is required for Transactional Email"
+    );
   }
 
-  // Prefer Resend for raw HTML sends (React Email)
-  if (env.RESEND_API_KEY) {
-    return "resend";
-  }
-
-  if (env.ENVIRONMENT === "development") {
-    return "console";
-  }
-
-  return "console";
-}
-
-function createProvider(name: EmailProviderName, env: Env): EmailProvider {
-  if (name === "resend") {
-    if (!env.RESEND_API_KEY) {
-      throw new Error("RESEND_API_KEY is required for resend provider");
-    }
-    return new ResendEmailProvider({ apiKey: env.RESEND_API_KEY });
-  }
-
-  return new ConsoleEmailProvider();
+  return new TransactionalEmailService(
+    new ResendTransactionalEmailDelivery({ apiKey }),
+    defaultFrom
+  );
 }

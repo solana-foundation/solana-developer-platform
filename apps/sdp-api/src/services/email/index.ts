@@ -1,14 +1,7 @@
-/**
- * Email service exports
- */
-
-export { ConsoleEmailProvider } from "./providers/console";
-export { ResendEmailProvider } from "./providers/resend";
-export { createEmailService, EmailService } from "./service";
-export { renderInvitationEmail } from "./templates/invitation";
+export { createTransactionalEmailService, TransactionalEmailService } from "./service";
 export type {
-  EmailMessage,
-  EmailProvider,
-  EmailProviderName,
-  SendEmailResult,
+  TransactionalEmailDeliveryResult,
+  TransactionalEmailErrorCode,
+  TransactionalEmailMessage,
 } from "./types";
+export { TransactionalEmailError } from "./types";
