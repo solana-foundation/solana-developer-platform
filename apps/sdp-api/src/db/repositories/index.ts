@@ -1,3 +1,14 @@
+export type {
+  ArchiveAssetProfileInput,
+  AssetProfileRow,
+  AssetProfilesRepository,
+  AssetProfilesRepositoryContext,
+  CreateAssetProfileInput,
+  ListAssetProfilesInput,
+  ListAssetProfilesResult,
+  UpdateAssetProfileInput,
+} from "./asset-profile.repository";
+export { createPostgresAssetProfilesRepository } from "./asset-profile.repository.postgres";
 export type { RepositoryDbClient } from "./base";
 export type {
   ArchiveCounterpartyInput,
@@ -68,6 +79,7 @@ export {
 } from "./payments.repository";
 export { createPostgresPaymentsRepository } from "./payments.repository.postgres";
 export {
+  createAssetProfilesRepository,
   createCounterpartiesRepository,
   createCounterpartyAccountsRepository,
   createPaymentRecurringPaymentsRepository,

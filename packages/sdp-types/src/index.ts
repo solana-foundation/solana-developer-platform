@@ -3,6 +3,7 @@
  */
 
 export * from "./api-keys";
+export * from "./asset-profiles";
 export * from "./counterparties";
 export * from "./countries";
 export * from "./custody";

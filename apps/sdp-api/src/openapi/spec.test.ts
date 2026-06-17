@@ -37,6 +37,7 @@ describe("OpenAPI spec", () => {
       "Payments",
       "Compliance",
       "Counterparties",
+      "Asset Profiles",
     ]);
 
     expect(doc.paths?.["/v1/auth/me"]).toBeUndefined();

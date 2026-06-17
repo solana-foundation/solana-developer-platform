@@ -22,6 +22,7 @@ import { requestIdMiddleware } from "@/middleware/request-id";
 import { requestTracingMiddleware } from "@/middleware/request-tracing";
 import allowlist from "@/routes/allowlist";
 import apiKeys from "@/routes/api-keys";
+import assetProfiles from "@/routes/asset-profiles";
 import auth from "@/routes/auth";
 import compliance from "@/routes/compliance";
 import counterparties from "@/routes/counterparties";
@@ -37,6 +38,7 @@ import organizations from "@/routes/organizations";
 import payments from "@/routes/payments";
 import places from "@/routes/places";
 import projects from "@/routes/projects";
+import publicTokenMetadata from "@/routes/public-token-metadata";
 import rpc from "@/routes/rpc";
 import webhooks from "@/routes/webhooks";
 import { isSentryEnabled, type Observability } from "@/runtime/observability";
@@ -213,12 +215,15 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   app.route("/docs", docs);
   app.route("/llms.txt", llms);
   app.route("/webhooks", webhooks);
+  // Public token metadata URI host (no auth) — serves the safe public subset.
+  app.route("/token-metadata", publicTokenMetadata);
 
   // API v1
   const v1 = new Hono<{ Bindings: Env }>();
   v1.route("/organizations", organizations);
   v1.route("/api-keys", apiKeys);
   v1.route("/counterparties", counterparties);
+  v1.route("/asset-profiles", assetProfiles);
   v1.route("/members", members);
   v1.route("/auth", auth);
   v1.route("/projects", projects);
