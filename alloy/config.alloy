@@ -1,0 +1,49 @@
+// Grafana Alloy collector for Kora observability.
+// Scrapes the kora-mainnet /metrics endpoint and remote_writes to Grafana Cloud Mimir,
+// and forwards Cloud Run logs to Loki. Credentials come from Doppler (project
+// solana-developer-platform, config prd) via env — never hardcode tokens here.
+//
+// Run:   doppler run --project solana-developer-platform --config prd -- \
+//          alloy run --server.http.listen-addr=0.0.0.0:${PORT:-12345} alloy/config.alloy
+// Deploy: a small always-on Cloud Run service / VM (min 1 instance) with those env vars.
+
+prometheus.scrape "kora" {
+  targets = [{
+    __address__      = "kora-mainnet-562819300243.us-central1.run.app:443",
+    __scheme__       = "https",
+    __metrics_path__ = "/metrics",
+    service          = "kora-mainnet",
+  }]
+  scrape_interval = "30s"
+  forward_to      = [prometheus.remote_write.grafanacloud.receiver]
+}
+
+prometheus.remote_write "grafanacloud" {
+  endpoint {
+    url = sys.env("GC_PROM_PUSH_URL")
+    basic_auth {
+      username = sys.env("GC_PROM_USER")
+      password = sys.env("GC_PROM_TOKEN")
+    }
+  }
+}
+
+loki.write "grafanacloud" {
+  endpoint {
+    url = sys.env("GC_LOKI_PUSH_URL")
+    basic_auth {
+      username = sys.env("GC_LOKI_USER")
+      password = sys.env("GC_LOKI_TOKEN")
+    }
+  }
+}
+
+// Cloud Run logs -> Loki. Needs a Cloud Logging sink -> Pub/Sub subscription for kora-mainnet.
+// loki.source.gcplog "kora" {
+//   pull {
+//     project_id   = "trading-prod-494016"
+//     subscription = sys.env("GCP_LOG_SUBSCRIPTION")
+//     labels       = { service = "kora-mainnet" }
+//   }
+//   forward_to = [loki.write.grafanacloud.receiver]
+// }
