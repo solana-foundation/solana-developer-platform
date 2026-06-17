@@ -74,7 +74,6 @@ async function advanceCounterpartyRequirements(
   return body.data;
 }
 
-/** Lifecycle states the client must keep polling — provider onboarding is still in flight. */
 function isOnboardingPending(status: CounterpartyRequirements["status"]): boolean {
   return (
     status === "customer_verification_required" ||
@@ -82,8 +81,6 @@ function isOnboardingPending(status: CounterpartyRequirements["status"]): boolea
     status === "funding_account_provisioning"
   );
 }
-
-const MAX_PROVISION_ATTEMPTS = 8;
 
 export interface CounterpartyRequirementsParams {
   counterpartyId: string;
@@ -112,9 +109,7 @@ export interface CounterpartyRequirementsState {
   submitRequirements: (payload: AdvanceRequirementsPayload) => Promise<CounterpartyRequirements>;
   /** An advance request is in flight (initial submit or a poll tick). */
   isAdvancing: boolean;
-  /** Set when provisioning has failed or stalled past the retry budget; null otherwise. */
-  onboardingError: string | null;
-  /** Clears the failure and resumes provisioning retries. */
+  /** Re-runs the advance (POST) to retry — used by the provisioning_failed "Try again" action. */
   retryOnboarding: () => void;
 }
 
@@ -143,15 +138,11 @@ export function useCounterpartyRequirements(
     null
   );
   const [isAdvancing, setIsAdvancing] = useState(false);
-  const [provisionAttempts, setProvisionAttempts] = useState(0);
-  const [onboardingError, setOnboardingError] = useState<string | null>(null);
   if (subjectKey !== trackedSubject) {
     setTrackedSubject(subjectKey);
     setCollectedData({});
     setOnboarding(null);
     setLastAdvancePayload(null);
-    setProvisionAttempts(0);
-    setOnboardingError(null);
   }
 
   const key =
@@ -195,41 +186,17 @@ export function useCounterpartyRequirements(
   };
 
   const retryOnboarding = () => {
-    setOnboardingError(null);
-    setProvisionAttempts(0);
+    if (lastAdvancePayload) {
+      void submitRequirements(lastAdvancePayload).catch(() => {});
+    }
   };
 
   useSWR(
-    onboarding &&
-      lastAdvancePayload &&
-      params?.provider &&
-      !onboardingError &&
-      isOnboardingPending(onboarding.status)
+    onboarding && lastAdvancePayload && params?.provider && isOnboardingPending(onboarding.status)
       ? (["counterparty-requirements-status-poll", subjectKey] as const)
       : null,
     async () => {
       if (!lastAdvancePayload || !params?.provider) {
-        return;
-      }
-      if (onboarding?.status === "funding_account_provisioning") {
-        if (provisionAttempts >= MAX_PROVISION_ATTEMPTS) {
-          setOnboardingError(
-            "We couldn't finish setting up your funding account. Please try again."
-          );
-          return;
-        }
-        setProvisionAttempts((n) => n + 1);
-        try {
-          const advanced = await advanceCounterpartyRequirements(
-            params.counterpartyId,
-            params.provider,
-            { ...lastAdvancePayload, collectedData }
-          );
-          if (advanced.status !== "funding_account_provisioning") {
-            setProvisionAttempts(0);
-          }
-          setOnboarding(advanced);
-        } catch {}
         return;
       }
       const result = await fetchCounterpartyRequirements(
@@ -281,7 +248,6 @@ export function useCounterpartyRequirements(
     onboarding,
     submitRequirements,
     isAdvancing,
-    onboardingError,
     retryOnboarding,
   };
 }

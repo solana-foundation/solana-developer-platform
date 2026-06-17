@@ -181,12 +181,16 @@ function OnrampCompleteScreen({
   );
 }
 
-function OnboardingErrorPanel({ message, onRetry }: { message: string; onRetry: () => void }) {
+function OnboardingErrorPanel({ onRetry }: { onRetry: () => void }) {
   return (
     <div className="flex flex-col items-center gap-4 px-6 py-12 text-center">
       <XCircleIcon className="size-10 text-status-error-text" />
-      <p className="text-lg font-medium text-text-extra-high">Something went wrong</p>
-      <p className="max-w-md text-sm leading-relaxed text-text-low">{message}</p>
+      <p className="text-lg font-medium text-text-extra-high">
+        We couldn't finish setting up your account
+      </p>
+      <p className="max-w-md text-sm leading-relaxed text-text-low">
+        Something went wrong provisioning your funding account. Please try again.
+      </p>
       <Button type="button" variant="secondary" onClick={onRetry}>
         Try again
       </Button>
@@ -246,7 +250,6 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
     selectedWallet,
     selectedRampPair,
     onboarding,
-    onboardingError,
     retryOnboarding,
     quote,
     transferStatus,
@@ -308,8 +311,8 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
   }
 
   if (currentStepId === "PROVIDER" && onboarding && !quote) {
-    if (onboardingError) {
-      return <OnboardingErrorPanel message={onboardingError} onRetry={retryOnboarding} />;
+    if (onboarding.status === "provisioning_failed") {
+      return <OnboardingErrorPanel onRetry={retryOnboarding} />;
     }
     return <OnboardingPendingPanel status={onboarding.status} />;
   }
