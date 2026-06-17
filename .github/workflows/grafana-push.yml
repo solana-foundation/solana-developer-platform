@@ -22,7 +22,7 @@ jobs:
     timeout-minutes: 5
     env:
       DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN }}
-      DOPPLER_PROJECT: sdp
+      DOPPLER_PROJECT: solana-developer-platform
       DOPPLER_CONFIG: prd
 
     steps:
@@ -35,10 +35,14 @@ jobs:
         id: secrets
         run: |
           set -euo pipefail
-          for key in GRAFANA_API_URL GRAFANA_API_TOKEN GRAFANA_FOLDER_UID PAGERDUTY_INTEGRATION_KEY SLACK_ALERT_WEBHOOK_URL; do
+          for key in GRAFANA_API_URL GRAFANA_API_TOKEN GRAFANA_FOLDER_UID; do
             value=$(doppler secrets get "$key" --plain --project "$DOPPLER_PROJECT" --config "$DOPPLER_CONFIG")
-            echo "::add-mask::$value"
-            echo "$key=$value" >> "$GITHUB_OUTPUT"
+            echo "::add-mask::$value"; echo "$key=$value" >> "$GITHUB_OUTPUT"
+          done
+          # Optional — contact points + policy are skipped if these aren't set yet.
+          for key in PAGERDUTY_INTEGRATION_KEY SLACK_ALERT_WEBHOOK_URL; do
+            value=$(doppler secrets get "$key" --plain --project "$DOPPLER_PROJECT" --config "$DOPPLER_CONFIG" 2>/dev/null || true)
+            echo "::add-mask::$value"; echo "$key=$value" >> "$GITHUB_OUTPUT"
           done
 
       - name: Push dashboards
@@ -102,6 +106,9 @@ jobs:
           SLACK_ALERT_WEBHOOK_URL: ${{ steps.secrets.outputs.SLACK_ALERT_WEBHOOK_URL }}
         run: |
           set -euo pipefail
+          if [ -z "${PAGERDUTY_INTEGRATION_KEY:-}" ] || [ -z "${SLACK_ALERT_WEBHOOK_URL:-}" ]; then
+            echo "PD/Slack secrets not set — skipping contact points + policy"; exit 0
+          fi
           shopt -s nullglob
           existing=$(curl -sS "$GRAFANA_API_URL/api/v1/provisioning/contact-points" -H "Authorization: Bearer $GRAFANA_API_TOKEN")
           for f in notification-policies/contact-points/*.json; do
@@ -122,8 +129,13 @@ jobs:
         env:
           GRAFANA_API_URL: ${{ steps.secrets.outputs.GRAFANA_API_URL }}
           GRAFANA_API_TOKEN: ${{ steps.secrets.outputs.GRAFANA_API_TOKEN }}
+          PAGERDUTY_INTEGRATION_KEY: ${{ steps.secrets.outputs.PAGERDUTY_INTEGRATION_KEY }}
+          SLACK_ALERT_WEBHOOK_URL: ${{ steps.secrets.outputs.SLACK_ALERT_WEBHOOK_URL }}
         run: |
           set -euo pipefail
+          if [ -z "${PAGERDUTY_INTEGRATION_KEY:-}" ] || [ -z "${SLACK_ALERT_WEBHOOK_URL:-}" ]; then
+            echo "PD/Slack secrets not set — skipping policy"; exit 0
+          fi
           http_code=$(curl -sS -o /tmp/resp.json -w '%{http_code}' \
             -X PUT "$GRAFANA_API_URL/api/v1/provisioning/policies" \
             -H "Authorization: Bearer $GRAFANA_API_TOKEN" \
