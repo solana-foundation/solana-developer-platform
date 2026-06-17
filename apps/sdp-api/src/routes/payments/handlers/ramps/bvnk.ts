@@ -14,6 +14,7 @@ import {
   bvnkCustomerExternalReference,
   bvnkOnrampKey,
   bvnkRuleReference,
+  bvnkUnverifiedOnboardingStatus,
   isBvnkCustomerVerified,
   isBvnkWalletActive,
   normalizeBvnkCurrencyAndNetwork,
@@ -200,7 +201,7 @@ export async function ensureBvnkPaymentRule(
     return {
       customer,
       entry,
-      onboardingStatus: customer.verificationUrl ? "verification_required" : "verifying",
+      onboardingStatus: bvnkUnverifiedOnboardingStatus(customer.status),
     };
   }
 

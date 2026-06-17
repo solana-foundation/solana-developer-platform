@@ -578,6 +578,11 @@ describe("BVNK ramp webhook", () => {
     const body = JSON.stringify(payload);
     const sig =
       signature ?? createHmac("sha256", BVNK_WEBHOOK_SECRET).update(body).digest("base64");
+    const executionCtx: ExecutionContext = {
+      waitUntil() {},
+      passThroughOnException() {},
+      props: {},
+    };
     return app.request(
       "/webhooks/payments/ramps/sandbox/bvnk",
       {
@@ -585,7 +590,8 @@ describe("BVNK ramp webhook", () => {
         headers: { "Content-Type": "application/json", "X-Signature": sig },
         body,
       },
-      env
+      env,
+      executionCtx
     );
   }
 

@@ -647,6 +647,8 @@ function parseBvnkVerificationStatus(value: unknown): BvnkVerificationStatus | u
 }
 
 const BVNK_VERIFIED_STATUSES = new Set(["VERIFIED", "COMPLETED", "APPROVED"]);
+const BVNK_VERIFYING_STATUSES = new Set(["PENDING"]);
+const BVNK_VERIFICATION_REQUIRED_STATUSES = new Set(["ACTIONS_REQUIRED", "INFO_REQUIRED"]);
 
 /**
  * Whether a cached BVNK customer status counts as fully verified. The customer
@@ -657,16 +659,42 @@ export function isBvnkCustomerVerified(status: string | undefined): boolean {
   return status !== undefined && BVNK_VERIFIED_STATUSES.has(status.toUpperCase());
 }
 
+/**
+ * Onboarding phase for a not-yet-verified BVNK customer, decided from the KYC
+ * status the customers:status-change webhook delivers — never from the presence
+ * of a cached verificationUrl, which is written once and never cleared. PENDING
+ * means the applicant has submitted and is under review; ACTIONS_REQUIRED and
+ * INFO_REQUIRED mean the applicant must still act, so we surface the Sumsub URL.
+ * Any other unverified status is unmapped and throws so it surfaces loudly
+ * instead of silently stranding the buyer mid-onboarding.
+ */
+export function bvnkUnverifiedOnboardingStatus(
+  status: string | undefined
+): Extract<BvnkOnboardingStatus, "verifying" | "verification_required"> {
+  const normalized = status?.toUpperCase();
+  if (normalized && BVNK_VERIFYING_STATUSES.has(normalized)) {
+    return "verifying";
+  }
+  if (normalized && BVNK_VERIFICATION_REQUIRED_STATUSES.has(normalized)) {
+    return "verification_required";
+  }
+  throw internalError(`Unmapped BVNK customer KYC status: ${status ?? "(missing)"}`);
+}
+
 function parseBvnkCustomerState(payload: unknown): BvnkCustomerState {
   const data = asRecord(payload);
   const reference = readString(data.reference);
   if (!reference) {
     throw badRequest("BVNK customer response is missing a reference");
   }
+  const status = readString(data.status);
+  if (!status) {
+    throw badRequest("BVNK customer response is missing a status");
+  }
   const verification = asRecord(data.verification);
   return {
     reference,
-    status: readString(data.status) ?? "PENDING",
+    status,
     verificationStatus: parseBvnkVerificationStatus(verification.status),
     verificationUrl: readString(verification.url),
   };
@@ -1581,15 +1609,18 @@ export function bvnkOnrampStatusFromProviderData(
     return { provider: "bvnk", direction, status: "onboarding_not_started" };
   }
   if (!isBvnkCustomerVerified(customer.status)) {
-    if (customer.verificationUrl) {
-      return {
-        provider: "bvnk",
-        direction,
-        status: "customer_verification_required",
-        verificationUrl: customer.verificationUrl,
-      };
+    if (bvnkUnverifiedOnboardingStatus(customer.status) === "verifying") {
+      return { provider: "bvnk", direction, status: "customer_verifying" };
     }
-    return { provider: "bvnk", direction, status: "customer_verifying" };
+    if (!customer.verificationUrl) {
+      throw internalError('BVNK reported "verification_required" without a verificationUrl.');
+    }
+    return {
+      provider: "bvnk",
+      direction,
+      status: "customer_verification_required",
+      verificationUrl: customer.verificationUrl,
+    };
   }
   const { currency, network } = normalizeBvnkCurrencyAndNetwork(params.cryptoToken);
   const key = bvnkOnrampKey(

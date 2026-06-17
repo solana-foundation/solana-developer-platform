@@ -202,7 +202,17 @@ async function processBvnkCustomerWebhook(
       event.customerReference,
       event
     );
-    await provisionPendingBvnkOnramps(c, repo, environment, event.customerReference);
+    const provisioning = provisionPendingBvnkOnramps(
+      c,
+      repo,
+      environment,
+      event.customerReference
+    ).catch((error) =>
+      console.error(
+        `[bvnk webhook] background provisioning failed: ${error instanceof Error ? error.message : String(error)}`
+      )
+    );
+    c.executionCtx.waitUntil(provisioning);
     return;
   }
 
