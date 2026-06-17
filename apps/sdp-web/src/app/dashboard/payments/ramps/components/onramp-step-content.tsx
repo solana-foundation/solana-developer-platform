@@ -198,6 +198,38 @@ function OnboardingErrorPanel({ onRetry }: { onRetry: () => void }) {
   );
 }
 
+function OnboardingVerificationFailedPanel() {
+  return (
+    <div className="flex flex-col items-center gap-4 px-6 py-12 text-center">
+      <XCircleIcon className="size-10 text-status-error-text" />
+      <p className="text-lg font-medium text-text-extra-high">
+        Identity verification was not approved
+      </p>
+      <p className="max-w-md text-sm leading-relaxed text-text-low">
+        BVNK couldn't verify your identity, so this funding account can't be activated. Contact
+        support if you believe this is a mistake.
+      </p>
+    </div>
+  );
+}
+
+function OnboardingPanel({
+  onboarding,
+  onRetry,
+}: {
+  onboarding: NonNullable<OnrampWizard["onboarding"]>;
+  onRetry: () => void;
+}) {
+  switch (onboarding.status) {
+    case "provisioning_failed":
+      return <OnboardingErrorPanel onRetry={onRetry} />;
+    case "customer_verification_failed":
+      return <OnboardingVerificationFailedPanel />;
+    default:
+      return <OnboardingPendingPanel status={onboarding.status} />;
+  }
+}
+
 function OnboardingPendingPanel({
   status,
 }: {
@@ -311,10 +343,7 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
   }
 
   if (currentStepId === "PROVIDER" && onboarding && !quote) {
-    if (onboarding.status === "provisioning_failed") {
-      return <OnboardingErrorPanel onRetry={retryOnboarding} />;
-    }
-    return <OnboardingPendingPanel status={onboarding.status} />;
+    return <OnboardingPanel onboarding={onboarding} onRetry={retryOnboarding} />;
   }
 
   if (currentStepId === "PROVIDER" && quote) {

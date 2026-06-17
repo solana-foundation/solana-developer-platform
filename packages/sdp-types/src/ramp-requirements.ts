@@ -41,6 +41,7 @@ export type CounterpartyRequirements = { direction: RampDirection } & (
   | { provider: "bvnk"; status: "onboarding_not_started" }
   | { provider: "bvnk"; status: "customer_verification_required"; verificationUrl: string }
   | { provider: "bvnk"; status: "customer_verifying" }
+  | { provider: "bvnk"; status: "customer_verification_failed" }
   | { provider: "bvnk"; status: "funding_account_provisioning" }
   | { provider: "bvnk"; status: "provisioning_failed" }
 );

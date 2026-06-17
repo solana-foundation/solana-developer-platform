@@ -1390,7 +1390,7 @@ const bvnkRampPaymentInstructionSchema = z.object({
     example: "bvnk",
   }),
   onboardingStatus: z
-    .enum(["verification_required", "verifying", "provisioning", "ready"])
+    .enum(["verification_required", "verifying", "verification_failed", "provisioning", "ready"])
     .openapi({
       description: "Where the buyer is in BVNK onboarding; 'ready' means the funding rule is live.",
       example: "ready",
