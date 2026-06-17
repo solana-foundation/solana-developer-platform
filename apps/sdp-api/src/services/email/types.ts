@@ -7,21 +7,12 @@ export interface TransactionalEmailMessage {
   replyTo?: string;
 }
 
-export type TransactionalEmailDeliveryPayload = Omit<TransactionalEmailMessage, "from"> & {
-  from: string;
-};
-
 export interface TransactionalEmailDeliveryResult {
   messageId: string | null;
   acceptedAt: string;
 }
 
-export type TransactionalEmailErrorCode =
-  | "misconfigured"
-  | "invalid_message"
-  | "rejected"
-  | "retryable"
-  | "unknown";
+export type TransactionalEmailErrorCode = "misconfigured" | "invalid_message" | "delivery_failed";
 
 export interface TransactionalEmailErrorOptions {
   status?: number;
@@ -47,8 +38,4 @@ export class TransactionalEmailError extends Error {
     this.details = options.details;
     this.cause = options.cause;
   }
-}
-
-export interface TransactionalEmailDelivery {
-  send(message: TransactionalEmailDeliveryPayload): Promise<TransactionalEmailDeliveryResult>;
 }

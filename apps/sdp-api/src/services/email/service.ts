@@ -1,16 +1,13 @@
+import { type CreateEmailOptions, type ErrorResponse, Resend } from "resend";
 import type { Env } from "@/types/env";
-import { ResendTransactionalEmailDelivery } from "./providers/resend";
-import type {
-  TransactionalEmailDelivery,
-  TransactionalEmailDeliveryPayload,
-  TransactionalEmailDeliveryResult,
-  TransactionalEmailMessage,
-} from "./types";
+import type { TransactionalEmailDeliveryResult, TransactionalEmailMessage } from "./types";
 import { TransactionalEmailError } from "./types";
+
+type ResendEmailClient = Pick<Resend["emails"], "send">;
 
 export class TransactionalEmailService {
   constructor(
-    private readonly delivery: TransactionalEmailDelivery,
+    private readonly emails: ResendEmailClient,
     private readonly defaultFrom: string
   ) {}
 
@@ -48,16 +45,42 @@ export class TransactionalEmailService {
       );
     }
 
-    const payload: TransactionalEmailDeliveryPayload = {
-      to,
-      subject,
-      text,
-      html,
-      replyTo: message.replyTo?.trim() || undefined,
-      from,
-    };
+    const replyTo = message.replyTo?.trim() || undefined;
+    const payload: CreateEmailOptions = html
+      ? {
+          from,
+          to,
+          subject,
+          html,
+          ...(text ? { text } : {}),
+          ...(replyTo ? { replyTo } : {}),
+        }
+      : {
+          from,
+          to,
+          subject,
+          text: text as string,
+          ...(replyTo ? { replyTo } : {}),
+        };
 
-    return this.delivery.send(payload);
+    try {
+      const result = await this.emails.send(payload);
+      if (result.error) {
+        throw toTransactionalEmailError(result.error);
+      }
+
+      return {
+        messageId: result.data.id,
+        acceptedAt: new Date().toISOString(),
+      };
+    } catch (cause) {
+      if (cause instanceof TransactionalEmailError) {
+        throw cause;
+      }
+      throw new TransactionalEmailError("delivery_failed", "Transactional Email delivery failed", {
+        cause,
+      });
+    }
   }
 }
 
@@ -77,8 +100,12 @@ export function createTransactionalEmailService(env: Env): TransactionalEmailSer
     );
   }
 
-  return new TransactionalEmailService(
-    new ResendTransactionalEmailDelivery({ apiKey }),
-    defaultFrom
-  );
+  return new TransactionalEmailService(new Resend(apiKey).emails, defaultFrom);
+}
+
+function toTransactionalEmailError(error: ErrorResponse): TransactionalEmailError {
+  return new TransactionalEmailError("delivery_failed", error.message, {
+    status: error.statusCode ?? undefined,
+    details: error,
+  });
 }
