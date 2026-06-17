@@ -1,3 +1,4 @@
+import { readStringFrom } from "@/lib/json";
 import { SigningError } from "@/services/ports";
 import type { Env } from "@/types/env";
 import { parseJsonResponse, readErrorResponseText } from "./provisioning.common";
@@ -155,8 +156,8 @@ function buildAnchorageHeaders(
 
 function extractAnchorageWallet(payload: unknown): ProvisionAnchorageResult {
   const record = unwrapPayload(payload);
-  const walletId = readString(record, ["walletId", "wallet_id", "id"]);
-  const address = readString(record, ["address", "publicKey", "public_key"]);
+  const walletId = readStringFrom(record, ["walletId", "wallet_id", "id"]);
+  const address = readStringFrom(record, ["address", "publicKey", "public_key"]);
 
   if (!walletId || !address) {
     throw new SigningError(
@@ -179,14 +180,4 @@ function unwrapPayload(payload: unknown): Record<string, unknown> {
   }
 
   return {};
-}
-
-function readString(record: Record<string, unknown>, keys: string[]): string | undefined {
-  for (const key of keys) {
-    const value = record[key];
-    if (typeof value === "string" && value.trim().length > 0) {
-      return value;
-    }
-  }
-  return undefined;
 }

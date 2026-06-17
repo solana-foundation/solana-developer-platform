@@ -26,6 +26,7 @@ import {
   providerUnavailable,
 } from "@/lib/errors";
 import { hashString, hmacSha256Base64, verifyHmacSha256Base64 } from "@/lib/hash";
+import { readString } from "@/lib/json";
 import { type ProviderRequestInit, providerFetch } from "../fetch";
 import { readyCounterparty } from "../requirements";
 import {
@@ -606,10 +607,6 @@ export interface CreateBvnkOnrampRuleInput {
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value !== null && typeof value === "object" ? (value as Record<string, unknown>) : {};
-}
-
-function readString(value: unknown): string | undefined {
-  return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
 function parseBvnkAgreementSession(payload: unknown): BvnkAgreementSession {
