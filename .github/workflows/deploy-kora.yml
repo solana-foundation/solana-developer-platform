@@ -1,10 +1,5 @@
-# Deploy the Kora paymaster to Cloud Run. Push to main (infra/kora paths) auto-deploys devnet;
-# mainnet is manual via workflow_dispatch (gate with GitHub Environment protection rules).
-# Per-service by path for now (kora only); add a deploy-<svc>.yml for other SDP services.
-#
-# Required per-environment (GitHub Environments: devnet, mainnet):
-#   secrets: DOPPLER_TOKEN
-#   vars:    GCP_WORKLOAD_IDENTITY_PROVIDER, GCP_SERVICE_ACCOUNT (kora-<env>-deployer), KORA_GCP_PROJECT
+# Push to main (infra/kora) -> devnet; mainnet via workflow_dispatch. Per-env GitHub Environment
+# (devnet/mainnet) provides DOPPLER_TOKEN + vars GCP_WORKLOAD_IDENTITY_PROVIDER, GCP_SERVICE_ACCOUNT, KORA_GCP_PROJECT.
 name: Deploy Kora
 
 on:

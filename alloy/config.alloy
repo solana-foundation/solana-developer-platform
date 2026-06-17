@@ -1,13 +1,6 @@
-// Grafana Alloy collector for Kora observability.
-// Scrapes the kora-mainnet /metrics endpoint and remote_writes to Grafana Cloud Mimir,
-// and forwards Cloud Run logs to Loki. Credentials come from Doppler (project
-// solana-developer-platform, config prd) via env — never hardcode tokens here.
-//
-// Run:   doppler run --project solana-developer-platform --config prd -- \
-//          alloy run --server.http.listen-addr=0.0.0.0:${PORT:-12345} alloy/config.alloy
-// Deploy: a small always-on Cloud Run service / VM (min 1 instance) with those env vars.
+// Alloy collector: scrape SDP services' /metrics -> Grafana Cloud Mimir; logs -> Loki.
+// Secrets via Doppler env (GC_PROM_*/GC_LOKI_*). Deploy as an always-on Cloud Run service.
 
-// SDP service scrape targets — add more services here as they expose /metrics.
 prometheus.scrape "sdp" {
   targets = [
     { __address__ = "kora-mainnet-562819300243.us-central1.run.app:443", __scheme__ = "https", __metrics_path__ = "/metrics", service = "kora-mainnet" },
@@ -37,9 +30,7 @@ loki.write "grafanacloud" {
   }
 }
 
-// Cloud Run logs -> Loki. Topic `kora-logs` + subscription `kora-logs-alloy` exist in
-// solana-developer-platform; ENABLE once the log sink is created (blocked on logging.sinks.create —
-// needs a logging admin) and the Alloy runtime SA has roles/pubsub.subscriber on the subscription.
+// Cloud Run logs -> Loki: enable once the log sink + pubsub.subscriber are set up (PRO-1368).
 // loki.source.gcplog "kora" {
 //   pull {
 //     project_id   = "solana-developer-platform"
