@@ -14,7 +14,7 @@ import type {
   WalletOperationPolicyEvaluation,
 } from "@sdp/types";
 import type { CreatePolicyEvaluationInput } from "@/db/repositories";
-import { isDecimalString } from "@/lib/amount";
+import { isDecimalString, parseDecimalAmount } from "@/lib/amount";
 
 type RuntimePolicyRule = PolicyRule | Record<string, unknown>;
 
@@ -314,30 +314,34 @@ function evaluateAmountRule(
     return null;
   }
 
-  if (!operation.amount || !isDecimalString(operation.amount)) {
+  if (operation.amount === null) {
+    return null;
+  }
+
+  if (!isDecimalString(operation.amount)) {
     return createRuleEvaluation(
       rule,
       "review",
-      "Operation amount is missing or invalid for amount policy evaluation."
+      "Operation amount is invalid for amount policy evaluation."
     );
   }
 
   const min = typeof raw.min === "string" ? raw.min : null;
   const max = typeof raw.max === "string" ? raw.max : null;
-  if (!min && !max) {
+  if (min === null && max === null) {
     return createRuleEvaluation(rule, "review", "Amount rule has no min or max.");
   }
-  if ((min && !isDecimalString(min)) || (max && !isDecimalString(max))) {
+  if ((min !== null && !isDecimalString(min)) || (max !== null && !isDecimalString(max))) {
     return createRuleEvaluation(rule, "review", "Amount rule has an invalid decimal bound.");
   }
-  if (min && compareDecimalAmounts(operation.amount, min) < 0) {
+  if (min !== null && compareDecimalAmounts(operation.amount, min) < 0) {
     return createRuleEvaluation(
       rule,
       "deny",
       `Operation amount ${operation.amount} is below policy minimum ${min}.`
     );
   }
-  if (max && compareDecimalAmounts(operation.amount, max) > 0) {
+  if (max !== null && compareDecimalAmounts(operation.amount, max) > 0) {
     return createRuleEvaluation(
       rule,
       "deny",
@@ -512,31 +516,17 @@ function scopeLabel(scope: PolicyRuleScope): string {
 }
 
 function compareDecimalAmounts(left: string, right: string): number {
-  const leftParts = parseDecimalParts(left);
-  const rightParts = parseDecimalParts(right);
+  const decimals = Math.max(decimalScale(left), decimalScale(right));
+  const leftAmount = parseDecimalAmount(left, decimals);
+  const rightAmount = parseDecimalAmount(right, decimals);
 
-  if (leftParts.whole.length !== rightParts.whole.length) {
-    return leftParts.whole.length < rightParts.whole.length ? -1 : 1;
-  }
-  if (leftParts.whole !== rightParts.whole) {
-    return leftParts.whole < rightParts.whole ? -1 : 1;
-  }
-
-  const scale = Math.max(leftParts.fraction.length, rightParts.fraction.length);
-  const leftFraction = leftParts.fraction.padEnd(scale, "0");
-  const rightFraction = rightParts.fraction.padEnd(scale, "0");
-  if (leftFraction === rightFraction) {
+  if (leftAmount === rightAmount) {
     return 0;
   }
-  return leftFraction < rightFraction ? -1 : 1;
+  return leftAmount < rightAmount ? -1 : 1;
 }
 
-function parseDecimalParts(value: string): { whole: string; fraction: string } {
-  const [wholeRaw = "", fractionRaw = ""] = value.trim().split(".");
-  const whole = (wholeRaw || "0").replace(/^0+(?=\d)/, "");
-  const fraction = (fractionRaw ?? "").replace(/0+$/, "");
-  return {
-    whole: whole.length > 0 ? whole : "0",
-    fraction,
-  };
+function decimalScale(value: string): number {
+  const [, fraction = ""] = value.trim().split(".");
+  return fraction.length;
 }

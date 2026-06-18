@@ -253,6 +253,44 @@ describe("evaluateWalletOperationPolicies", () => {
     expect(skipped.wallet.matchedRules).toEqual([]);
   });
 
+  it("skips amount constraints for operations that carry no amount", () => {
+    const result = evaluateWalletOperationPolicies({
+      operation: {
+        ...operation,
+        operationFamily: "program",
+        operationType: "program_call",
+        amount: null,
+      },
+      walletPolicy: walletPolicy([{ kind: "amount", max: "100" }]),
+    });
+
+    expect(result).toMatchObject({
+      decision: "allow",
+      reasonCode: "wallet_policy_match",
+      matchedRules: [],
+    });
+    expect(result.wallet.reason).toContain("default action allow applies");
+  });
+
+  it("reviews empty amount bounds instead of treating them as absent", () => {
+    const result = evaluateWalletOperationPolicies({
+      operation,
+      walletPolicy: walletPolicy([{ kind: "amount", min: "" }]),
+    });
+
+    expect(result).toMatchObject({
+      decision: "review",
+      reasonCode: "wallet_policy_match",
+    });
+    expect(result.matchedRules[0]).toEqual(
+      expect.objectContaining({
+        kind: "amount",
+        decision: "review",
+        reason: "Amount rule has an invalid decimal bound.",
+      })
+    );
+  });
+
   it("requires approval when an approval rule matches", () => {
     const result = evaluateWalletOperationPolicies({
       operation,
