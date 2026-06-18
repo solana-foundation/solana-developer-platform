@@ -38,6 +38,30 @@ function gridExchangeRateResponse(params: {
   );
 }
 
+function onrampExchangeRateResponse(
+  sendingAmount: number,
+  receivingAmount: number,
+  feeFixed: number
+): Response {
+  return new Response(
+    JSON.stringify({
+      data: [
+        {
+          sourceCurrency: { code: "USD", decimals: 2 },
+          destinationCurrency: { code: "USDC", decimals: 6 },
+          sendingAmount,
+          receivingAmount,
+          exchangeRate: 0.0001,
+          fees: { fixed: feeFixed },
+          minSendingAmount: 100,
+          maxSendingAmount: 500000,
+        },
+      ],
+    }),
+    { status: 200, headers: { "Content-Type": "application/json" } }
+  );
+}
+
 describe("LightsparkRampClient", () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -113,29 +137,10 @@ describe("LightsparkRampClient", () => {
   });
 
   it("uses fiat decimals and Grid receiving amount for USDC on-ramp estimate", async () => {
-    const onrampRate = (sendingAmount: number, receivingAmount: number, feeFixed: number) =>
-      new Response(
-        JSON.stringify({
-          data: [
-            {
-              sourceCurrency: { code: "USD", decimals: 2 },
-              destinationCurrency: { code: "USDC", decimals: 6 },
-              sendingAmount,
-              receivingAmount,
-              exchangeRate: 0.0001,
-              fees: { fixed: feeFixed },
-              minSendingAmount: 100,
-              maxSendingAmount: 500000,
-            },
-          ],
-        }),
-        { status: 200, headers: { "Content-Type": "application/json" } }
-      );
-
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(onrampRate(10000, 100000000, 0))
-      .mockResolvedValueOnce(onrampRate(15000, 75000000, 5));
+      .mockResolvedValueOnce(onrampExchangeRateResponse(10000, 100000000, 0))
+      .mockResolvedValueOnce(onrampExchangeRateResponse(15000, 75000000, 5));
 
     const estimate = await new LightsparkRampClient().estimateOnramp(LIGHTSPARK_CONTEXT, {
       assetRail: "usdc.solana",
@@ -161,6 +166,20 @@ describe("LightsparkRampClient", () => {
       exchangeRate: "2",
       fees: { currency: "USD", total: "0.05" },
     });
+  });
+
+  it("rejects a non-positive Grid receiving amount on on-ramp estimate", async () => {
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(onrampExchangeRateResponse(10000, 100000000, 0))
+      .mockResolvedValueOnce(onrampExchangeRateResponse(15000, 0, 0));
+
+    await expect(
+      new LightsparkRampClient().estimateOnramp(LIGHTSPARK_CONTEXT, {
+        assetRail: "usdc.solana",
+        fiatCurrency: "USD",
+        fiatAmount: "150",
+      })
+    ).rejects.toThrow(/non-positive/);
   });
 
   it("returns Grid currency metadata on on-ramp quotes", async () => {

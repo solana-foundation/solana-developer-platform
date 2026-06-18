@@ -19,7 +19,7 @@ import {
 } from "@sdp/types/payment-rails";
 import type { CollectedFieldData, CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 import { formatDecimalAmount, parseDecimalAmount } from "@/lib/amount";
-import { AppError, badRequest, providerNotConfigured } from "@/lib/errors";
+import { AppError, badRequest, providerNotConfigured, providerUnavailable } from "@/lib/errors";
 import { hashString } from "@/lib/hash";
 import { isAddress } from "@/lib/solana";
 import { type ProviderRequestInit, providerFetchJson } from "../fetch";
@@ -953,6 +953,9 @@ export class LightsparkRampClient implements RampProvider {
       )
     );
 
+    if (rate.receivingAmount <= 0) {
+      throw providerUnavailable("Lightspark returned a non-positive on-ramp receiving amount");
+    }
     const cryptoAmount = formatDecimalAmount(
       BigInt(rate.receivingAmount),
       rate.destinationCurrency.decimals
@@ -1006,8 +1009,13 @@ export class LightsparkRampClient implements RampProvider {
       )
     );
 
-    const netFiatMinorUnits = rate.receivingAmount > 0 ? BigInt(rate.receivingAmount) : 0n;
-    const fiatAmount = formatDecimalAmount(netFiatMinorUnits, rate.destinationCurrency.decimals);
+    if (rate.receivingAmount <= 0) {
+      throw providerUnavailable("Lightspark returned a non-positive off-ramp receiving amount");
+    }
+    const fiatAmount = formatDecimalAmount(
+      BigInt(rate.receivingAmount),
+      rate.destinationCurrency.decimals
+    );
     return {
       provider: this.id,
       direction: "offramp",
