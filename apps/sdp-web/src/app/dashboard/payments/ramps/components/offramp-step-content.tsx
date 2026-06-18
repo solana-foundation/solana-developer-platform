@@ -9,7 +9,7 @@ import { walletComboboxOptions } from "../wallet-options";
 import { HostedRampFrame } from "./hosted-ramp-frame";
 import { ManualInstructionsQuote } from "./manual-instructions-quote";
 import { RampPairProviderSelector } from "./ramp-pair-provider-selector";
-import { RampStepPlaceholder } from "./ramp-step-placeholder";
+import { RampQuoteSkeleton } from "./ramp-quote-skeleton";
 import { RequirementsFields } from "./requirements-fields";
 import { WalletAssetBreakdown } from "./wallet-asset-breakdown";
 
@@ -261,5 +261,5 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
     return <OfframpManualQuoteStep wizard={wizard} quote={quote} />;
   }
 
-  return <RampStepPlaceholder />;
+  return <RampQuoteSkeleton />;
 }

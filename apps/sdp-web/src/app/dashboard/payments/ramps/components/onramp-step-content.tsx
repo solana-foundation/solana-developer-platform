@@ -17,7 +17,7 @@ import type { OnrampWizard } from "../hooks/use-onramp-wizard";
 import { HostedRampFrame } from "./hosted-ramp-frame";
 import { ManualInstructionsQuote } from "./manual-instructions-quote";
 import { RampPairProviderSelector } from "./ramp-pair-provider-selector";
-import { RampStepPlaceholder } from "./ramp-step-placeholder";
+import { RampQuoteSkeleton } from "./ramp-quote-skeleton";
 import { RequirementsFields } from "./requirements-fields";
 
 function getOnrampTransferStatusCopy(status: string) {
@@ -401,5 +401,5 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
     );
   }
 
-  return <RampStepPlaceholder />;
+  return <RampQuoteSkeleton />;
 }

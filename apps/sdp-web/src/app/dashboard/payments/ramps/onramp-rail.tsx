@@ -98,7 +98,7 @@ export function OnrampRail({
       secondaryLabel={wizard.onTransactionStage ? "Cancel" : undefined}
       footerActions={
         transferTerminal ? (
-          <Button asChild type="button" variant="secondary" className="self-center">
+          <Button asChild type="button" className="h-14 rounded-full text-base">
             <Link href={`/dashboard/payments/counterparty/${wizard.fields.counterpartyId}`}>
               Go to transaction
             </Link>

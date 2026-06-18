@@ -4,7 +4,7 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { OfframpStepContent } from "./components/offramp-step-content";
 import { PoweredByRampProvider, RampWizardShell } from "./components/ramp-wizard-shell";
-import { OFFRAMP_STEPS, type OfframpWizard, useOfframpWizard } from "./hooks/use-offramp-wizard";
+import { type OfframpWizard, useOfframpWizard } from "./hooks/use-offramp-wizard";
 import { isTerminalRampTransferStatus } from "./hooks/use-ramp-wizard";
 import type { RailProps } from "./ramp-action-page";
 
@@ -43,7 +43,7 @@ export function OfframpRail({
 
   return (
     <RampWizardShell
-      steps={[...preSteps, ...OFFRAMP_STEPS]}
+      steps={[...preSteps, ...wizard.steps]}
       stepIndex={preSteps.length + wizard.stepIndex}
       primaryDisabled={
         wizard.hostedQuoteLoading ||
@@ -66,7 +66,7 @@ export function OfframpRail({
       secondaryLabel={wizard.onTransactionStage ? "Cancel" : undefined}
       footerActions={
         transferTerminal ? (
-          <Button asChild type="button" variant="secondary" className="self-center rounded-full">
+          <Button asChild type="button" className="h-14 rounded-full text-base">
             <Link href={`/dashboard/payments/counterparty/${wizard.fields.counterpartyId}`}>
               Go to transaction
             </Link>
