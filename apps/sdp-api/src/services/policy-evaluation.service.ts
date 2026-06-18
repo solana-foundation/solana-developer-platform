@@ -14,7 +14,7 @@ import type {
   WalletOperationPolicyEvaluation,
 } from "@sdp/types";
 import type { CreatePolicyEvaluationInput } from "@/db/repositories";
-import { isDecimalString, parseDecimalAmount } from "@/lib/amount";
+import { compareDecimalAmounts, isDecimalString } from "@/lib/amount";
 
 type RuntimePolicyRule = PolicyRule | Record<string, unknown>;
 
@@ -34,9 +34,9 @@ const DECISION_RANK: Record<PolicyDecision, number> = {
   not_evaluated: 0,
   allow: 1,
   review: 2,
-  approval_required: 3,
   provider_approval_required: 3,
-  deny: 4,
+  approval_required: 4,
+  deny: 5,
 };
 
 const RULE_ACTIONS = new Set<PolicyRuleAction>([
@@ -513,20 +513,4 @@ function matchedPolicyReasonCode(scope: PolicyRuleScope): PolicyEvaluationReason
 
 function scopeLabel(scope: PolicyRuleScope): string {
   return scope === "wallet" ? "wallet" : "API key";
-}
-
-function compareDecimalAmounts(left: string, right: string): number {
-  const decimals = Math.max(decimalScale(left), decimalScale(right));
-  const leftAmount = parseDecimalAmount(left, decimals);
-  const rightAmount = parseDecimalAmount(right, decimals);
-
-  if (leftAmount === rightAmount) {
-    return 0;
-  }
-  return leftAmount < rightAmount ? -1 : 1;
-}
-
-function decimalScale(value: string): number {
-  const [, fraction = ""] = value.trim().split(".");
-  return fraction.length;
 }

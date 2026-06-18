@@ -378,6 +378,38 @@ describe("evaluateWalletOperationPolicies", () => {
     ]);
   });
 
+  it("preserves SDP approval when it ties with provider approval", () => {
+    const result = evaluateWalletOperationPolicies({
+      operation,
+      walletPolicy: walletPolicy([
+        {
+          id: "provider-approval",
+          kind: "approval",
+          families: ["payment"],
+          action: "provider_approval_required",
+        },
+      ]),
+      apiKeyPolicy: apiKeyPolicy([
+        {
+          id: "api-key-sdp-approval",
+          kind: "approval",
+          families: ["payment"],
+          action: "approval_required",
+        },
+      ]),
+    });
+
+    expect(result).toMatchObject({
+      decision: "approval_required",
+      reasonCode: "api_key_policy_match",
+      requiresApproval: true,
+    });
+    expect(result.matchedRules).toEqual([
+      expect.objectContaining({ scope: "wallet", decision: "provider_approval_required" }),
+      expect.objectContaining({ scope: "api_key", decision: "approval_required" }),
+    ]);
+  });
+
   it("falls back to the revision default action when no rules match", () => {
     const result = evaluateWalletOperationPolicies({
       operation,

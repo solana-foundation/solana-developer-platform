@@ -171,10 +171,10 @@ function createWalletOperationRawPayload(
   if (input.actor !== undefined) {
     rawPayload.actor = input.actor;
   }
-  if (input.context) {
+  if (input.context != null) {
     rawPayload.context = input.context;
   }
-  if (input.providerExtensions) {
+  if (input.providerExtensions != null) {
     rawPayload.providerExtensions = input.providerExtensions;
   }
 

@@ -235,6 +235,31 @@ describe("PolicyRepository (postgres)", () => {
     });
   });
 
+  it("preserves an explicit null wallet operation actor through service mapping", async () => {
+    const service = new PolicyFoundationService(repo);
+
+    const operation = await service.recordWalletOperation({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      custodyWalletId: TEST_CUSTODY_WALLET.id,
+      walletId: TEST_CUSTODY_WALLET.walletId,
+      apiKeyId: TEST_API_KEY.id,
+      actor: null,
+      operationFamily: "program",
+      operationType: "program_call",
+      rawPayload: { programId: "program_1" },
+    });
+
+    expect(operation).toMatchObject({
+      apiKeyId: TEST_API_KEY.id,
+      actor: null,
+      rawPayload: {
+        programId: "program_1",
+        actor: null,
+      },
+    });
+  });
+
   it("stores policy-scoped wallet bindings separately from endpoint wallet permissions", async () => {
     const apiKeyProfile = await repo.createApiKeyControlProfile({
       organizationId: TEST_ORG.id,

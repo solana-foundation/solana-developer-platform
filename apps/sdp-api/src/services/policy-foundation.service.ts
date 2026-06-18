@@ -232,6 +232,11 @@ function mapWalletOperation(row: WalletOperationRow): WalletOperationEnvelope {
 }
 
 function getWalletOperationActor(row: WalletOperationRow): WalletOperationActor | null {
+  if (Object.hasOwn(row.raw_payload, "actor")) {
+    return isJsonObject(row.raw_payload.actor)
+      ? (row.raw_payload.actor as WalletOperationActor)
+      : null;
+  }
   if (isJsonObject(row.raw_payload.actor)) {
     return row.raw_payload.actor as WalletOperationActor;
   }
