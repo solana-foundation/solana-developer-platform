@@ -25,14 +25,14 @@ export function parsePostgresJsonOr<T>(value: unknown, fallback: T): T {
 }
 
 export function parseOptionalPostgresJson<T>(value: unknown): T | null {
-  if (!value) {
+  if (value === null || value === undefined) {
     return null;
   }
   return parsePostgresJson<T>(value);
 }
 
 export function parseOptionalPostgresJsonOr<T>(value: unknown, fallback: T): T {
-  if (!value) {
+  if (value === null || value === undefined) {
     return fallback;
   }
   return parsePostgresJsonOr(value, fallback);
