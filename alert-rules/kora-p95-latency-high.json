@@ -6,7 +6,7 @@
   "condition": "C",
   "for": "10m",
   "keep_firing_for": "15m",
-  "noDataState": "NoData",
+  "noDataState": "OK",
   "execErrState": "Error",
   "data": [
     {

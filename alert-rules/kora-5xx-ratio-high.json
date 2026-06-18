@@ -5,7 +5,7 @@
   "folderUID": "sdp",
   "condition": "C",
   "for": "5m",
-  "noDataState": "NoData",
+  "noDataState": "OK",
   "execErrState": "Error",
   "data": [
     {
