@@ -15,7 +15,7 @@
       "relativeTimeRange": { "from": 600, "to": 0 },
       "model": {
         "datasource": { "type": "prometheus", "uid": "grafanacloud-prom" },
-        "expr": "histogram_quantile(0.95, sum by (le) (rate(kora_http_request_duration_seconds_bucket[5m])))",
+        "expr": "histogram_quantile(0.95, sum by (le, service) (rate(kora_http_request_duration_seconds_bucket[5m])))",
         "instant": true,
         "refId": "A"
       }

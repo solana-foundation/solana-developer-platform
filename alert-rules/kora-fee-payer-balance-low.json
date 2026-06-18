@@ -14,7 +14,7 @@
       "relativeTimeRange": { "from": 600, "to": 0 },
       "model": {
         "datasource": { "type": "prometheus", "uid": "grafanacloud-prom" },
-        "expr": "max(signer_balance_lamports) / 1e9",
+        "expr": "signer_balance_lamports / 1e9",
         "instant": true,
         "refId": "A"
       }

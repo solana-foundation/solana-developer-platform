@@ -21,6 +21,8 @@ jobs:
   push:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    # Gate live Grafana writes behind a GitHub Environment (add required reviewers / env-scoped DOPPLER_TOKEN).
+    environment: grafana
     env:
       DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN }}
     steps:

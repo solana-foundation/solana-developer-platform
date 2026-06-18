@@ -14,7 +14,7 @@
       "relativeTimeRange": { "from": 600, "to": 0 },
       "model": {
         "datasource": { "type": "prometheus", "uid": "grafanacloud-prom" },
-        "expr": "sum(rate(kora_http_requests_total{status=~\"5..\"}[5m])) / sum(rate(kora_http_requests_total[5m]))",
+        "expr": "sum by (service) (rate(kora_http_requests_total{status=~\"5..\"}[5m])) / sum by (service) (rate(kora_http_requests_total[5m]))",
         "instant": true,
         "refId": "A"
       }
