@@ -166,21 +166,6 @@ async function provisionPendingBvnkOnramps(
   }
 }
 
-function scheduleBvnkProvisioning(
-  c: AppContext,
-  repo: CounterpartiesRepository,
-  environment: SdpEnvironment,
-  customerReference: string
-): void {
-  c.executionCtx.waitUntil(
-    provisionPendingBvnkOnramps(c, repo, environment, customerReference).catch((error) =>
-      console.error(
-        `[bvnk webhook] background provisioning failed: ${error instanceof Error ? error.message : String(error)}`
-      )
-    )
-  );
-}
-
 async function processBvnkCustomerWebhook(
   c: AppContext,
   environment: SdpEnvironment,
@@ -218,13 +203,13 @@ async function processBvnkCustomerWebhook(
       event.customerReference,
       event
     );
-    scheduleBvnkProvisioning(c, repo, environment, event.customerReference);
+    await provisionPendingBvnkOnramps(c, repo, environment, event.customerReference);
     return;
   }
 
   await patchBvnkWalletFromWebhook(repo, counterparty, event.customerReference, event);
   if (isBvnkWalletActive(event.walletStatus)) {
-    scheduleBvnkProvisioning(c, repo, environment, event.customerReference);
+    await provisionPendingBvnkOnramps(c, repo, environment, event.customerReference);
   }
 }
 
@@ -233,12 +218,5 @@ export async function handleBvnkRampWebhook(
   environment: SdpEnvironment,
   payload: unknown
 ) {
-  try {
-    await processBvnkCustomerWebhook(c, environment, payload);
-  } catch (error) {
-    console.error(
-      `[bvnk webhook] failed to process event: ${error instanceof Error ? error.message : String(error)}`,
-      JSON.stringify(payload)
-    );
-  }
+  await processBvnkCustomerWebhook(c, environment, payload);
 }
