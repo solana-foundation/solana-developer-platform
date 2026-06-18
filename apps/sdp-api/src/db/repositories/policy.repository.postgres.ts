@@ -1,5 +1,9 @@
 import type { AppDb } from "@/db";
-import { asPostgresJsonArray, asPostgresJsonObject } from "@/db/postgres-utils";
+import {
+  asPostgresJsonArray,
+  asPostgresJsonObject,
+  parseOptionalPostgresJson,
+} from "@/db/postgres-utils";
 import { badRequest } from "@/lib/errors";
 import type {
   ActivateApiKeyControlProfileRevisionInput,
@@ -144,13 +148,28 @@ function mapPolicyEvaluationRow(row: Record<string, unknown>): PolicyEvaluationR
     reason_code: row.reason_code as string,
     reason: (row.reason as string | null | undefined) ?? null,
     matched_rules: asPostgresJsonArray(row.matched_rules),
-    evaluation_context: asPostgresJsonObject(
-      row.evaluation_context
-    ) as unknown as PolicyEvaluationRow["evaluation_context"],
+    evaluation_context: mapPolicyEvaluationContext(row.evaluation_context),
     requires_approval: row.requires_approval as boolean,
     approval_request_id: (row.approval_request_id as string | null | undefined) ?? null,
     created_at: row.created_at as string,
   };
+}
+
+function mapPolicyEvaluationContext(value: unknown): PolicyEvaluationRow["evaluation_context"] {
+  const context = parseOptionalPostgresJson<Record<string, unknown>>(value);
+  if (
+    !isJsonObject(context) ||
+    !isJsonObject(context.operation) ||
+    !isJsonObject(context.walletPolicy) ||
+    !Object.hasOwn(context, "apiKeyPolicy")
+  ) {
+    return null;
+  }
+  return context as unknown as PolicyEvaluationRow["evaluation_context"];
+}
+
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function validateApiKeyWalletPolicyBindingInput(input: UpsertApiKeyWalletPolicyBindingInput): void {

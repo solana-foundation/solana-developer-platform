@@ -235,6 +235,37 @@ describe("PolicyRepository (postgres)", () => {
     });
   });
 
+  it("maps legacy policy evaluation rows without a structured context to null", async () => {
+    const operation = await repo.createWalletOperation({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      custodyWalletId: TEST_CUSTODY_WALLET.id,
+      walletId: TEST_CUSTODY_WALLET.walletId,
+      operationFamily: "transfer",
+      operationType: "legacy_transfer",
+    });
+    expect(operation).not.toBeNull();
+
+    await getDb(env)
+      .prepare(
+        `INSERT INTO policy_evaluations (
+           id,
+           wallet_operation_id,
+           decision,
+           reason_code,
+           matched_rules,
+           evaluation_context
+         ) VALUES (?, ?, ?, ?, ?::jsonb, ?::jsonb)`
+      )
+      .bind("peval_legacy_context", operation?.id, "allow", "legacy_policy_evaluation", "[]", "{}")
+      .run();
+
+    const evaluations = await repo.listPolicyEvaluationsForOperation(operation?.id ?? "");
+
+    expect(evaluations).toHaveLength(1);
+    expect(evaluations[0]?.evaluation_context).toBeNull();
+  });
+
   it("preserves an explicit null wallet operation actor through service mapping", async () => {
     const service = new PolicyFoundationService(repo);
 

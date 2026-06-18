@@ -134,7 +134,7 @@ export interface PolicyEvaluationRow {
   reason_code: string;
   reason: string | null;
   matched_rules: Record<string, unknown>[];
-  evaluation_context: PolicyEvaluationContext;
+  evaluation_context: PolicyEvaluationContext | null;
   requires_approval: boolean;
   approval_request_id: string | null;
   created_at: string;

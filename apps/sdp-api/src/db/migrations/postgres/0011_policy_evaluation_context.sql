@@ -2,4 +2,4 @@
 -- audit readers do not need to infer context from mutable surrounding records.
 
 ALTER TABLE policy_evaluations
-    ADD COLUMN IF NOT EXISTS evaluation_context JSONB NOT NULL DEFAULT '{}'::jsonb;
+    ADD COLUMN IF NOT EXISTS evaluation_context JSONB;

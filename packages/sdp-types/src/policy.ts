@@ -225,7 +225,7 @@ export interface PolicyEvaluation {
   reasonCode: PolicyEvaluationReasonCode | string;
   reason: string | null;
   matchedRules: Record<string, unknown>[];
-  evaluationContext: PolicyEvaluationContext;
+  evaluationContext: PolicyEvaluationContext | null;
   requiresApproval: boolean;
   approvalRequestId: string | null;
   createdAt: string;
