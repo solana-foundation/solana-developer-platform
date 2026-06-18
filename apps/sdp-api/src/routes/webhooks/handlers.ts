@@ -604,22 +604,34 @@ export const handleRampProviderWebhook = async (c: AppContext, environment: SdpE
     requestUrl: c.req.url,
   });
 
-  switch (result.provider) {
-    case "bvnk":
-      await handleBvnkRampWebhook(c, environment, result.payload);
-      break;
-    case "lightspark":
-      await handleLightsparkRampWebhook(c, result.payload);
-      break;
-    case "moonpay":
-      await handleMoonpayRampWebhook(c, result.payload);
-      break;
-    default:
-      throw new AppError(
-        "BAD_REQUEST",
-        `Unsupported ramp webhook provider: ${result.provider satisfies never}`
-      );
-  }
+  const dispatch = async () => {
+    switch (result.provider) {
+      case "bvnk":
+        await handleBvnkRampWebhook(c, environment, result.payload);
+        break;
+      case "lightspark":
+        await handleLightsparkRampWebhook(c, result.payload);
+        break;
+      case "moonpay":
+        await handleMoonpayRampWebhook(c, result.payload);
+        break;
+      default:
+        throw badRequest(`Unsupported ramp webhook provider: ${result.provider satisfies never}`);
+    }
+  };
+
+  // Signature is verified, so ack with 200 immediately and settle in the background: a
+  // slow DB write must not delay the 2xx the provider expects.
+  // TODO(ramps): until the reconciliation cron lands, this background pass is the only
+  // path that settles a transfer. The cron will reconcile any transaction left in a
+  // non-terminal state here (e.g. background processing that failed).
+  c.executionCtx.waitUntil(
+    dispatch().catch((error) =>
+      console.error(
+        `[ramp webhook] background processing failed (${result.provider}): ${error instanceof Error ? error.message : String(error)}`
+      )
+    )
+  );
 
   return success(c, {
     received: true,

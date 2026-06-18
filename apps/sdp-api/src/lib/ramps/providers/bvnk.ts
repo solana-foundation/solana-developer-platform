@@ -25,8 +25,9 @@ import {
   providerNotConfigured,
   providerUnavailable,
 } from "@/lib/errors";
-import { hashString, hmacSha256Base64, verifyHmacSha256Base64 } from "@/lib/hash";
+import { hashString, hmacSha256Base64 } from "@/lib/hash";
 import { readString } from "@/lib/json";
+import { verifyWebhookSignature } from "@/lib/webhook-signature";
 import { type ProviderRequestInit, providerFetch } from "../fetch";
 import { readyCounterparty } from "../requirements";
 import {
@@ -878,10 +879,7 @@ export class BvnkRampClient implements RampProvider {
         provider: this.id,
       });
     }
-    if (!(await verifyHmacSha256Base64(rawBody, signature, secret))) {
-      throw new AppError("UNAUTHORIZED", "Invalid BVNK webhook signature", { provider: this.id });
-    }
-    let payload: unknown;
+    let payload: Record<string, unknown>;
     try {
       payload = JSON.parse(rawBody);
     } catch {
@@ -889,6 +887,14 @@ export class BvnkRampClient implements RampProvider {
         provider: this.id,
       });
     }
+    const timestamp = payload.timestamp;
+    await verifyWebhookSignature({
+      provider: this.id,
+      signedPayload: rawBody,
+      signature,
+      algorithm: { type: "hmac-sha256", secret, encoding: "base64" },
+      timestampSeconds: typeof timestamp === "string" ? Date.parse(timestamp) / 1000 : Number.NaN,
+    });
     return { provider: this.id, payload };
   }
 

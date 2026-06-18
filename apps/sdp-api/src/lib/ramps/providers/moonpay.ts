@@ -1,7 +1,7 @@
-import { timingSafeEqual } from "node:crypto";
 import type {
   Counterparty,
   MoonpayPaymentRampExecution,
+  MoonpayRampSettlement,
   PaymentRampEstimate,
   PaymentRampQuote,
   SdpEnvironment,
@@ -14,7 +14,7 @@ import {
 } from "@sdp/types/payment-rails";
 import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 import { AppError, badRequest, providerNotConfigured } from "@/lib/errors";
-import { hashString } from "@/lib/hash";
+import { verifyWebhookSignature } from "@/lib/webhook-signature";
 import { providerFetchJson } from "../fetch";
 import { readyCounterparty } from "../requirements";
 import { createProviderRampSupport, RAMP_RAIL_DUMPS, rampId, requireEnv } from "../shared";
@@ -273,6 +273,63 @@ interface MoonpayTransactionWebhook {
     status: MoonpayTransactionStatus;
     externalTransactionId: string | null;
     failureReason: string | null;
+    baseCurrencyAmount?: number;
+    quoteCurrencyAmount?: number;
+    feeAmount?: number;
+    extraFeeAmount?: number;
+    networkFeeAmount?: number;
+    areFeesIncluded?: boolean;
+    usdRate?: number;
+    cryptoTransactionId?: string | null;
+    baseCurrency?: { code: string };
+    currency?: { code: string };
+  };
+}
+
+function buildMoonpaySettlement(
+  data: MoonpayTransactionWebhook["data"],
+  status: MoonpayRampSettlement["status"]
+): MoonpayRampSettlement | undefined {
+  const {
+    baseCurrency,
+    currency,
+    baseCurrencyAmount,
+    quoteCurrencyAmount,
+    feeAmount,
+    extraFeeAmount,
+    networkFeeAmount,
+    areFeesIncluded,
+    usdRate,
+    cryptoTransactionId,
+    failureReason,
+  } = data;
+  if (
+    !baseCurrency ||
+    !currency ||
+    baseCurrencyAmount === undefined ||
+    quoteCurrencyAmount === undefined ||
+    feeAmount === undefined ||
+    extraFeeAmount === undefined ||
+    networkFeeAmount === undefined ||
+    areFeesIncluded === undefined ||
+    usdRate === undefined
+  ) {
+    return undefined;
+  }
+  return {
+    provider: "moonpay",
+    status,
+    baseCurrencyCode: baseCurrency.code.toUpperCase(),
+    baseCurrencyAmount,
+    quoteCurrencyCode: currency.code.toUpperCase(),
+    quoteCurrencyAmount,
+    feeAmount,
+    extraFeeAmount,
+    networkFeeAmount,
+    areFeesIncluded,
+    usdRate,
+    ...(cryptoTransactionId ? { cryptoTransactionId } : {}),
+    ...(failureReason ? { failureReason } : {}),
   };
 }
 
@@ -351,20 +408,13 @@ export class MoonpayRampClient implements RampProvider {
       });
     }
 
-    if (!/^[0-9a-f]+$/i.test(parsed.signature) || parsed.signature.length % 2 !== 0) {
-      throw new AppError("UNAUTHORIZED", "Invalid MoonPay webhook signature", {
-        provider: this.id,
-      });
-    }
-
-    const expectedSignature = await hashString(`${parsed.timestamp}.${rawBody}`, webhookKey);
-    const expected = Buffer.from(expectedSignature, "hex");
-    const received = Buffer.from(parsed.signature, "hex");
-    if (expected.length !== received.length || !timingSafeEqual(expected, received)) {
-      throw new AppError("UNAUTHORIZED", "Invalid MoonPay webhook signature", {
-        provider: this.id,
-      });
-    }
+    await verifyWebhookSignature({
+      provider: this.id,
+      signedPayload: `${parsed.timestamp}.${rawBody}`,
+      signature: parsed.signature,
+      algorithm: { type: "hmac-sha256", secret: webhookKey, encoding: "hex" },
+      timestampSeconds: Number(parsed.timestamp),
+    });
 
     let payload: unknown;
     try {
@@ -398,7 +448,26 @@ export class MoonpayRampClient implements RampProvider {
       return { provider: this.id, kind: "ignore", reason: `unsupported_status:${data.status}` };
     }
     if (kind === "failed") {
-      return { provider: this.id, kind, reference, error: data.failureReason ?? undefined };
+      const settlement = buildMoonpaySettlement(data, "failed");
+      return {
+        provider: this.id,
+        kind,
+        reference,
+        ...(data.failureReason ? { error: data.failureReason } : {}),
+        ...(settlement ? { settlement } : {}),
+      };
+    }
+    if (kind === "settled") {
+      const settlement = buildMoonpaySettlement(data, "completed");
+      return {
+        provider: this.id,
+        kind,
+        reference,
+        ...(data.quoteCurrencyAmount !== undefined
+          ? { receivedAmount: String(data.quoteCurrencyAmount) }
+          : {}),
+        ...(settlement ? { settlement } : {}),
+      };
     }
     return { provider: this.id, kind, reference };
   }

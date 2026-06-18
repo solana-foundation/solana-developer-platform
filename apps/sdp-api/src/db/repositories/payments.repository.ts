@@ -94,7 +94,9 @@ export interface UpdatePaymentTransferInput {
   slot?: number | null;
   blockTime?: string | null;
   fee?: number | null;
+  amount?: string | null;
   fiatAmount?: string | null;
+  providerData?: Record<string, unknown>;
   error?: string | null;
   updatedAt: string;
 }
