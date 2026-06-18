@@ -49,7 +49,6 @@ import type {
 import { lightsparkCounterpartyRequirements } from "../validation/lightspark";
 
 const LIGHTSPARK_DEFAULT_GRID_API_URL = "https://api.lightspark.com/grid/2025-10-13";
-const GRID_EXCHANGE_RATE_DEFAULT_REQUEST_SENDING_AMOUNT = 10_000n;
 
 function readLightsparkConfig(
   env: Record<string, string | undefined>,
@@ -540,41 +539,6 @@ function parseGridExchangeRate(response: GridExchangeRatesResponse): GridExchang
   return entry;
 }
 
-function deriveGridExchangeRateRequestDecimals(rate: GridExchangeRate): number {
-  const defaultSourceAmount = BigInt(rate.sendingAmount);
-  if (defaultSourceAmount <= 0n) {
-    throw new AppError("PROVIDER_UNAVAILABLE", "Lightspark returned an invalid default amount");
-  }
-  if (defaultSourceAmount % GRID_EXCHANGE_RATE_DEFAULT_REQUEST_SENDING_AMOUNT !== 0n) {
-    throw new AppError(
-      "PROVIDER_UNAVAILABLE",
-      "Lightspark returned an unsupported exchange-rate amount scale"
-    );
-  }
-
-  let scale = defaultSourceAmount / GRID_EXCHANGE_RATE_DEFAULT_REQUEST_SENDING_AMOUNT;
-  let sourceDecimalsPerRequestDecimal = 0;
-  while (scale > 1n && scale % 10n === 0n) {
-    scale /= 10n;
-    sourceDecimalsPerRequestDecimal += 1;
-  }
-  if (scale !== 1n) {
-    throw new AppError(
-      "PROVIDER_UNAVAILABLE",
-      "Lightspark returned an unsupported exchange-rate amount scale"
-    );
-  }
-
-  const requestDecimals = rate.sourceCurrency.decimals - sourceDecimalsPerRequestDecimal;
-  if (requestDecimals < 0) {
-    throw new AppError(
-      "PROVIDER_UNAVAILABLE",
-      "Lightspark returned an invalid exchange-rate amount scale"
-    );
-  }
-  return requestDecimals;
-}
-
 export interface CreateLightsparkOnrampQuoteInput {
   /** Grid customer that will fund the quote in real time. */
   customerId: string;
@@ -956,14 +920,56 @@ export class LightsparkRampClient implements RampProvider {
   }
 
   async estimateOnramp(
-    _ctx: RampRuntimeContext,
-    _input: RampEstimateOnrampInput
+    { env, mode }: RampRuntimeContext,
+    input: RampEstimateOnrampInput
   ): Promise<PaymentRampEstimate> {
-    throw new AppError(
-      "ESTIMATE_NOT_AVAILABLE",
-      "Lightspark on-ramp rate is only known at quote time.",
-      { provider: this.id }
+    const config = readLightsparkConfig(env, mode);
+    const cryptoCurrency = normalizeLightsparkCurrencyCode(
+      getCryptoRailAssetLabel(input.assetRail)
     );
+    const corridor = parseGridExchangeRate(
+      await this.request<GridExchangeRatesResponse>(
+        config,
+        gridExchangeRatesPath({
+          sourceCurrency: input.fiatCurrency,
+          destinationCurrency: cryptoCurrency,
+        }),
+        { method: "GET" }
+      )
+    );
+    const sendingAmount = toLightsparkMinorUnitsInteger(
+      parseDecimalAmount(input.fiatAmount, corridor.sourceCurrency.decimals),
+      "fiatAmount"
+    );
+    const rate = parseGridExchangeRate(
+      await this.request<GridExchangeRatesResponse>(
+        config,
+        gridExchangeRatesPath({
+          sourceCurrency: input.fiatCurrency,
+          destinationCurrency: cryptoCurrency,
+          sendingAmount,
+        }),
+        { method: "GET" }
+      )
+    );
+
+    const cryptoAmount = formatDecimalAmount(
+      BigInt(rate.receivingAmount),
+      rate.destinationCurrency.decimals
+    );
+    return {
+      provider: this.id,
+      direction: "onramp",
+      fiatCurrency: input.fiatCurrency,
+      assetRail: input.assetRail,
+      fiatAmount: input.fiatAmount,
+      cryptoAmount,
+      exchangeRate: String(Number(input.fiatAmount) / Number(cryptoAmount)),
+      fees: {
+        currency: input.fiatCurrency,
+        total: formatDecimalAmount(BigInt(rate.fees.fixed), rate.sourceCurrency.decimals),
+      },
+    };
   }
 
   async estimateOfframp(
@@ -984,9 +990,8 @@ export class LightsparkRampClient implements RampProvider {
         { method: "GET" }
       )
     );
-    const requestDecimals = deriveGridExchangeRateRequestDecimals(corridor);
     const sendingAmount = toLightsparkMinorUnitsInteger(
-      parseDecimalAmount(input.cryptoAmount, requestDecimals),
+      parseDecimalAmount(input.cryptoAmount, corridor.sourceCurrency.decimals),
       "cryptoAmount"
     );
     const rate = parseGridExchangeRate(
