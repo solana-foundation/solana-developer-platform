@@ -63,6 +63,11 @@
       "types": "./src/permissions.ts",
       "import": "./src/permissions.ts",
       "default": "./src/permissions.ts"
+    },
+    "./policy": {
+      "types": "./src/policy.ts",
+      "import": "./src/policy.ts",
+      "default": "./src/policy.ts"
     }
   },
   "scripts": {

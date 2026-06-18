@@ -10,6 +10,8 @@ import type { PaymentSubscriptionsRepository } from "./payment-subscriptions.rep
 import { createPostgresPaymentSubscriptionsRepository } from "./payment-subscriptions.repository.postgres";
 import type { PaymentsRepository } from "./payments.repository";
 import { createPostgresPaymentsRepository } from "./payments.repository.postgres";
+import type { PolicyRepository } from "./policy.repository";
+import { createPostgresPolicyRepository } from "./policy.repository.postgres";
 import type { TokenRepository } from "./token.repository";
 import { createPostgresTokenRepository } from "./token.repository.postgres";
 
@@ -37,4 +39,8 @@ export function createCounterpartyAccountsRepository(env: Env): CounterpartyAcco
 
 export function createTokenRepository(env: Env): TokenRepository {
   return createPostgresTokenRepository(getDb(env));
+}
+
+export function createPolicyRepository(env: Env): PolicyRepository {
+  return createPostgresPolicyRepository(getDb(env));
 }

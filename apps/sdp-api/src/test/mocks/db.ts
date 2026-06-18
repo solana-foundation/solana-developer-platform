@@ -9,6 +9,17 @@ import { getDb } from "@/db";
 import type { Env } from "@/types/env";
 
 const POSTGRES_TEST_TABLES = [
+  "policy_provider_sync_status",
+  "policy_evaluations",
+  "approval_requests",
+  "approval_group_members",
+  "approval_groups",
+  "wallet_operations",
+  "api_key_wallet_policy_bindings",
+  "api_key_control_profile_revisions",
+  "api_key_control_profiles",
+  "wallet_control_profile_revisions",
+  "wallet_control_profiles",
   "api_key_wallet_permissions",
   "custody_scope_defaults",
   "custody_wallets",
