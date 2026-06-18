@@ -13,7 +13,6 @@ import {
   buildBvnkRuleEntity,
   bvnkCustomerExternalReference,
   bvnkOnrampKey,
-  bvnkOnrampStatusFromProviderData,
   bvnkRuleReference,
   bvnkUnverifiedOnboardingStatus,
   isBvnkCustomerVerified,
@@ -285,14 +284,12 @@ export async function bvnkOnrampQuote(
   const key = bvnkOnrampKey(fiatCurrency, currency, network, input.destinationWalletAddress);
   const entry = readBvnkOnrampEntry(providerData, key);
 
-  if (!(customer.customerReference && entry.ruleId && entry.bankAccount?.accountNumber)) {
-    throw counterpartyNotProvisioned("bvnk", "onramp", {
-      requirementStatus: bvnkOnrampStatusFromProviderData(providerData, {
-        cryptoToken: input.cryptoToken,
-        fiatCurrency,
-        destinationWalletAddress: input.destinationWalletAddress,
-      }).status,
-    });
+  if (
+    !isBvnkCustomerVerified(customer.status) ||
+    !entry.ruleId ||
+    !entry.bankAccount?.accountNumber
+  ) {
+    throw counterpartyNotProvisioned("bvnk", "onramp", { customerStatus: customer.status });
   }
 
   const instruction = buildBvnkOnrampInstruction(
