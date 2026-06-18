@@ -52,6 +52,14 @@ _Avoid_: Provider approval, manual review, multisig
 The translation between SDP policy concepts and provider-native controls when a provider can express them.
 _Avoid_: Provider availability, provider policy, custody configuration
 
+**Payment Request**:
+A payments v2 product flow that asks a payer to complete a payment through a Solana Pay payload or a hosted payment link.
+_Avoid_: Wallet Operation Envelope, Payment Transfer, generic email
+
+**Transactional Email**:
+An SDP-owned outbound message for a product workflow.
+_Avoid_: Raw email, Clerk organization invitation, generic notification
+
 ## Relationships
 
 - An **Organization** has **Provider Availability** for each **Provider** in each **Provider Family**.
@@ -66,6 +74,8 @@ _Avoid_: Provider availability, provider policy, custody configuration
 - A **Policy-Scoped Wallet Binding** connects one API key to one custody wallet.
 - A **Policy Evaluation** may create an **Approval Request**.
 - A **Provider Control Mapping** can make provider-native controls match an SDP policy revision, partially match it, or remain inapplicable.
+- A **Payment Request** may be delivered by email, but the email is not the **Payment Request**.
+- A **Transactional Email** may deliver a **Payment Request**, but does not own payment lifecycle or settlement matching.
 
 ## Example Dialogue
 
@@ -81,3 +91,5 @@ _Avoid_: Provider availability, provider policy, custody configuration
 - "Policy" can mean **Wallet Policy**, **API Key Policy**, provider-native policy, or payment policy; resolved: use the specific term instead of the generic word when discussing custody controls.
 - "Wallet" in policy discussions means an SDP custody source wallet, not a **Counterparty Account** or token account.
 - "Approval" can mean an SDP **Approval Request** or a provider-native approval flow; resolved: SDP creates the **Approval Request**, while provider-native approval is reached through **Provider Control Mapping**.
+- "Payment request" can mean a low-level request payload or a payer-facing payments product; resolved: use **Payment Request** only for the payments v2 payer-facing flow.
+- "Email" can mean Clerk-owned organization invitation delivery or SDP-owned **Transactional Email**; resolved: only **Transactional Email** is owned by SDP.

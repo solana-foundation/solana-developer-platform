@@ -2,6 +2,7 @@
 
 import type { Token } from "@sdp/types";
 import { Button } from "@/components/ui/button";
+import { formatDisplayLabel } from "@/lib/utils";
 import { TokenDisabledActionTooltip } from "./token-disabled-action-tooltip";
 import { formatDate } from "./token-management-workspace.utils";
 
@@ -53,7 +54,7 @@ export function TokenOverviewSection({
         <OverviewRow label="Mint Authority" value={mintAuthorityValue ?? "None"} monospace />
         <OverviewRow label="Supply" value={token.totalSupply} />
         <OverviewRow label="Created" value={formatDate(token.createdAt)} />
-        <OverviewRow label="Template" value={token.template} />
+        <OverviewRow label="Template" value={formatDisplayLabel(token.template)} />
         <OverviewRow label="Decimals" value={String(token.decimals)} />
       </div>
     </section>

@@ -1,4 +1,5 @@
 import { expect, type Page, test } from "@playwright/test";
+import { formatDisplayLabel } from "@/lib/utils";
 import { getPlaywrightAdminSession } from "../support/auth-session";
 import {
   clearIssuanceFixtures,
@@ -171,11 +172,11 @@ test.describe
       await gotoToken(page, fixtures.tokens.allowlisted.id);
       await openTab(page, "Extensions");
 
-      await expect(page.getByTestId("extension-row-template")).toContainText("stablecoin");
+      await expect(page.getByTestId("extension-row-template")).toContainText("Stablecoin");
       await expect(page.getByTestId("extension-row-control-list")).toContainText("Allowlist");
       await expect(page.getByTestId("extension-row-mintable")).toContainText("Enabled");
       await expect(page.getByTestId("extension-row-freezable")).toContainText("Enabled");
-      await expect(page.getByTestId("extension-row-default-account-state")).toContainText("frozen");
+      await expect(page.getByTestId("extension-row-default-account-state")).toContainText("Frozen");
 
       await expect(page.getByTestId("extension-row-transfer-fee")).toHaveCount(0);
       await expect(page.getByTestId("extension-row-scaled-ui")).toHaveCount(0);
@@ -443,3 +444,22 @@ test.describe
       await expect(page.getByText("Token is paused")).toHaveCount(0);
     });
   });
+
+test.describe("formatDisplayLabel", () => {
+  test("single word", () => {
+    expect(formatDisplayLabel("active")).toBe("Active");
+  });
+
+  test("snake_case", () => {
+    expect(formatDisplayLabel("force_burn")).toBe("Force Burn");
+    expect(formatDisplayLabel("update_authority")).toBe("Update Authority");
+  });
+
+  test("kebab-case", () => {
+    expect(formatDisplayLabel("tokenized-security")).toBe("Tokenized Security");
+  });
+
+  test("RWA override", () => {
+    expect(formatDisplayLabel("rwa")).toBe("RWA");
+  });
+});
