@@ -18,7 +18,7 @@ Webhooks are **not** under `/v1`. They land at `POST /webhooks/payments/ramps/{s
 
 ## validateWebhook
 
-`ctx: RampWebhookValidationContext` = `{ env, environment, headers, rawBody, requestUrl? }` → `Promise<{ provider, payload: unknown }>`. Read the mode-keyed verification secret/key from `env`, verify the signature over the **raw** body, then `JSON.parse`. Throw `UNAUTHORIZED` on a missing/invalid signature; throw `badRequest` on non-JSON. Use `verifyWebhookSignature` (`lib/webhook-signature.ts`) or the `hash.ts` helpers (`hmacSha256Base64`, `verifyHmacSha256Base64`).
+`ctx: RampWebhookValidationContext` = `{ env, environment, headers, rawBody, requestUrl? }` → `Promise<{ provider, payload: unknown }>`. Read the mode-keyed verification secret/key from `env`, verify the signature over the **raw** body, then `JSON.parse`. Throw `UNAUTHORIZED` on a missing/invalid signature; throw `badRequest` on non-JSON. Verify with the shared `verifyWebhookSignature` (`lib/webhook-signature.ts`) — pass it a discriminated `algorithm`: `hmac-sha256` (with `hex` or `base64` encoding) or `ecdsa-sha256` (with a PEM public key). It handles the constant-time comparison.
 
 This is one of the few places `unknown` is allowed — it's a genuine trust boundary, narrowed immediately by `parseSettlementEvent`.
 
