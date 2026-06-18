@@ -46,6 +46,23 @@ export interface PaymentWalletPolicyEnvelope {
   };
 }
 
+export type PaymentTransferStatus =
+  | "pending"
+  | "processing"
+  | "confirmed"
+  | "finalized"
+  | "failed"
+  | "awaiting_payment"
+  | "settling"
+  | "completed"
+  | "expired";
+
+export const SUCCESSFUL_PAYMENT_TRANSFER_STATUSES = [
+  "completed",
+  "confirmed",
+  "finalized",
+] as const satisfies readonly PaymentTransferStatus[];
+
 export interface PaymentTransferSummary {
   id: string;
   status: string;

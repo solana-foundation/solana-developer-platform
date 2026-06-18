@@ -52,6 +52,7 @@ export interface AdvanceRequirementsPayload {
 async function advanceCounterpartyRequirements(
   counterpartyId: string,
   provider: RampProviderId,
+  direction: RampDirection,
   payload: AdvanceRequirementsPayload & { collectedData: CollectedFieldData }
 ): Promise<CounterpartyRequirements> {
   const response = await fetch(
@@ -59,7 +60,7 @@ async function advanceCounterpartyRequirements(
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ provider, direction: "onramp", ...payload }),
+      body: JSON.stringify({ provider, direction, ...payload }),
     }
   );
   const body = (await response.json().catch(() => ({}))) as {
@@ -173,10 +174,12 @@ export function useCounterpartyRequirements(
     }
     setIsAdvancing(true);
     try {
-      const result = await advanceCounterpartyRequirements(params.counterpartyId, params.provider, {
-        ...payload,
-        collectedData,
-      });
+      const result = await advanceCounterpartyRequirements(
+        params.counterpartyId,
+        params.provider,
+        params.direction,
+        { ...payload, collectedData }
+      );
       setOnboarding(result);
       setLastAdvancePayload(payload);
       return result;

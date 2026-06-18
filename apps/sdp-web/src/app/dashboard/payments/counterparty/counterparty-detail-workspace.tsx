@@ -4,7 +4,6 @@ import type {
   Counterparty,
   CounterpartyAccount,
   PaymentTransferSummary,
-  RampDirection,
   RampProviderId,
 } from "@sdp/types";
 import {
@@ -51,7 +50,12 @@ import { getRampProviderLabel, RAMP_PROVIDER_LOGOS } from "@/lib/ramps";
 import { useCopy } from "@/lib/use-copy";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime, toTitleCase } from "../../activity-format-utils";
-import { formatDisplayAmount, formatTimestamp, shortenAddress } from "../payments-overview.utils";
+import {
+  formatTimestamp,
+  resolveTransferFlow,
+  resolveTransferTypeLabel,
+  shortenAddress,
+} from "../payments-overview.utils";
 import { getDevnetExplorerUrl } from "../payments-workspace.data";
 import { AddExternalAccountDialog } from "./add-external-account-dialog";
 import { DeleteCounterpartyDialog } from "./delete-counterparty-dialog";
@@ -95,35 +99,6 @@ function TransferStatusBadge({ status }: { status: string }) {
       {toTitleCase(status)}
     </span>
   );
-}
-
-const RAMP_TYPE_LABELS = {
-  onramp: "Deposit",
-  offramp: "Pay",
-} as const satisfies Record<RampDirection, string>;
-
-function resolveTransferTypeLabel(type: string | undefined): string {
-  if (type === "onramp" || type === "offramp") {
-    return RAMP_TYPE_LABELS[type];
-  }
-  return type ? toTitleCase(type) : "Transfer";
-}
-
-/** Source → destination amounts, Wise-style: what's sent vs. what's received. */
-function resolveTransferFlow(transfer: PaymentTransferSummary): {
-  send: string | null;
-  receive: string | null;
-} {
-  const isInbound = transfer.type === "onramp" || transfer.direction === "inbound";
-  const cryptoLabel =
-    transfer.amount && transfer.token ? formatDisplayAmount(transfer.amount, transfer.token) : null;
-  const fiatLabel =
-    transfer.fiatAmount && transfer.fiatCurrency
-      ? `${transfer.fiatAmount} ${transfer.fiatCurrency.toUpperCase()}`
-      : null;
-  return isInbound
-    ? { send: fiatLabel, receive: cryptoLabel }
-    : { send: cryptoLabel, receive: fiatLabel };
 }
 
 function TransferProviderCell({ provider }: { provider?: RampProviderId }) {

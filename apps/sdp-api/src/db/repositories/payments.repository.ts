@@ -1,3 +1,4 @@
+import type { PaymentTransferStatus } from "@sdp/types";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import type { RepositoryDbClient } from "./base";
 
@@ -16,16 +17,7 @@ export function isRampTransferType(type: PaymentTransferType): type is RampTrans
   return type === "onramp" || type === "offramp";
 }
 export type PaymentTransferDeliveryMode = "hosted" | "manual_instructions";
-export type PaymentTransferStatus =
-  | "pending"
-  | "processing"
-  | "confirmed"
-  | "finalized"
-  | "failed"
-  | "awaiting_payment"
-  | "settling"
-  | "completed"
-  | "expired";
+export type { PaymentTransferStatus };
 export type PaymentWalletPolicyType = string;
 
 export interface PaymentWalletPolicyRow {

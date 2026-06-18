@@ -72,8 +72,9 @@ export interface RampWizardConfig<TId extends string = string> {
   };
   /**
    * When set, the quote step advances provider onboarding via POST /requirements
-   * (provisioning) instead of firing the quote; the caller fires the quote once
-   * the lifecycle reaches `ready`. Used by on-ramp; off-ramp leaves this unset.
+   * (provisioning) instead of firing the quote; this hook then fires the
+   * provisioning-free quote once the lifecycle reaches `ready`. Used by on-ramp
+   * and off-ramp.
    */
   advanceRequirementsBeforeQuote?: boolean;
   onQuoteCreated?: (quote: PaymentRampQuote) => void;
@@ -299,6 +300,16 @@ export function useRampWizard<TId extends string>(
       setQuote(created);
     } catch {}
   };
+
+  useSWR(
+    config.advanceRequirementsBeforeQuote &&
+      requirements.onboarding?.status === "ready" &&
+      quote === null
+      ? ([requirementsConfig?.direction ?? "ramp", "ready-quote"] as const)
+      : null,
+    () => refreshQuote(),
+    { refreshInterval: 4000, revalidateOnFocus: false, dedupingInterval: 0 }
+  );
 
   const advanceRequirementsAndProceed = async () => {
     if (!config.selectionSchema.safeParse(fields).success || !fields.provider) {

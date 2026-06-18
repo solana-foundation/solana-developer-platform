@@ -11,7 +11,11 @@ import {
 } from "@sdp/types";
 import { z } from "zod";
 import { LIGHTSPARK_PAYOUT_CURRENCIES } from "@/lib/ramps/validation/lightspark";
-import { rampCurrencyCodeSchema, rampFiatCurrencySchema } from "@/routes/payments/schemas";
+import {
+  rampCurrencyCodeSchema,
+  rampDirectionSchema,
+  rampFiatCurrencySchema,
+} from "@/routes/payments/schemas";
 
 const countryCodeSchema = z.enum(COUNTRY_CODES);
 const currencyCodeSchema = z.string().trim().toUpperCase().length(3);
@@ -87,8 +91,6 @@ export const counterpartyIdSchema = z.string().min(1);
 export const counterpartyIdParamsSchema = z.object({
   counterpartyId: counterpartyIdSchema,
 });
-
-const rampDirectionSchema = z.enum(["onramp", "offramp"]);
 
 const lightsparkPayoutCurrencySchema = z.preprocess(
   (value) => (typeof value === "string" ? value.trim().toUpperCase() : value),
