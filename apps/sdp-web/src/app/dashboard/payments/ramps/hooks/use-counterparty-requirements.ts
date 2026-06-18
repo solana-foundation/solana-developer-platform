@@ -11,6 +11,7 @@ import type {
 import { useMemo, useState } from "react";
 import useSWR from "swr";
 import { getApiError } from "@/app/dashboard/payments/payments-workspace.data";
+import { requirementFieldError } from "../schema";
 
 async function fetchCounterpartyRequirements(
   counterpartyId: string,
@@ -220,14 +221,7 @@ export function useCounterpartyRequirements(
   );
 
   const isComplete = useMemo(
-    () =>
-      fields.every((field) => {
-        if (!field.required) {
-          return true;
-        }
-        const value = collectedData[field.key];
-        return value !== undefined && value.trim().length > 0;
-      }),
+    () => fields.every((field) => requirementFieldError(field, collectedData[field.key]) === null),
     [fields, collectedData]
   );
 

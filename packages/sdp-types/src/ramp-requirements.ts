@@ -18,6 +18,7 @@ export type RequirementField =
       minLength?: number;
       maxLength?: number;
       placeholder?: string;
+      mask?: string;
     }
   | {
       kind: "select";

@@ -37,12 +37,14 @@ const US_STATE_OPTIONS = US_STATES.map((state) => ({ value: state.code, label: s
 
 const BVNK_ONRAMP_BASE_FIELDS: BvnkOnrampField[] = [
   {
+    // TODO: US-centric SSN/ITIN mask + format; branch per-country for non-US tax IDs.
     descriptor: textField({
       key: "taxIdentification.number",
       label: "Tax identification number (SSN / ITIN)",
       required: true,
       maxLength: 64,
       placeholder: "123-45-6789",
+      mask: "###-##-####",
     }),
     read: (id) => id.compliance?.taxIdentification?.number,
   },
@@ -262,7 +264,7 @@ export function buildBvnkIndividualPayload(
     nationality: resolveField("nationality"),
     birthCountryCode: resolveField("birthCountryCode"),
     taxIdentification: {
-      number: resolveField("taxIdentification.number"),
+      number: resolveField("taxIdentification.number").replace(/\D/g, ""),
       taxResidenceCountryCode: resolveField("taxIdentification.taxResidenceCountryCode"),
     },
     ...(address
